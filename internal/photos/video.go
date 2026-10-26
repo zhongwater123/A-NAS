@@ -225,7 +225,7 @@ func (s *Service) renderVideoFrame(ctx context.Context, file *os.File, duration 
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	return renderUpright(bytes.NewReader(frame), 1, edge, quality)
+	return renderUpright(ctx, bytes.NewReader(frame), 1, edge, quality)
 }
 
 // poster is the frame a viewer shows until the video plays. It is rendered

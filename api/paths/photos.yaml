@@ -200,6 +200,7 @@
     responses:
       "200": { description: JPEG, content: { image/jpeg: { schema: { type: string, format: binary } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/photos/libraries/{libraryId}:
   patch:
     operationId: changePhotoLibrary
@@ -478,6 +479,7 @@
       "200": { description: Compatible still image, content: { image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
       "304": { description: ETag still matches after authorization }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/photos/assets/{assetId}/video/playback:
   get:
@@ -539,6 +541,7 @@
       "200": { description: The photo's view, content: { image/jpeg: { schema: { type: string, format: binary } } } }
       "304": { description: ETag still matches after authorization }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
       "415": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/photos/assets/{assetId}/metadata:

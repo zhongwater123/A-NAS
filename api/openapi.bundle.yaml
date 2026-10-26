@@ -2907,6 +2907,8 @@ paths:
                 format: binary
         '404':
           $ref: '#/components/responses/ProductError'
+        '413':
+          $ref: '#/components/responses/ProductError'
   /api/v1/photos/libraries/{libraryId}:
     patch:
       operationId: changePhotoLibrary
@@ -3602,6 +3604,8 @@ paths:
           description: ETag still matches after authorization
         '404':
           $ref: '#/components/responses/ProductError'
+        '413':
+          $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
   /api/v1/photos/assets/{assetId}/video/playback:
@@ -3732,6 +3736,8 @@ paths:
         '304':
           description: ETag still matches after authorization
         '404':
+          $ref: '#/components/responses/ProductError'
+        '413':
           $ref: '#/components/responses/ProductError'
         '415':
           $ref: '#/components/responses/ProductError'

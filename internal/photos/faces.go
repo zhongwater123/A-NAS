@@ -211,7 +211,10 @@ func (s *Service) completeScan(ctx context.Context, job claimedJob, result scan,
 	var sheet []byte
 	if len(result.found) > 0 {
 		var err error
-		if sheet, err = avatarSheet(input, result.found, result.margin); err != nil {
+		if sheet, err = avatarSheet(ctx, input, result.found, result.margin); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
 			return s.failJob(ctx, job, jobErrorUndecodable)
 		}
 	}
@@ -390,25 +393,21 @@ func (s *Service) occurrencesOf(ctx context.Context, q queryer, objectID, deriva
 }
 
 // avatarSheet crops everything found out of the upright input onto one grid.
-func avatarSheet(input *os.File, items []found, margin float64) ([]byte, error) {
+func avatarSheet(ctx context.Context, input *os.File, items []found, margin float64) ([]byte, error) {
 	if _, err := input.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
-	src, err := imaging.Decode(input)
-	if err != nil {
-		return nil, err
-	}
-	sheet := imaging.New(avatarColumns*avatarEdge, sheetRows(len(items))*avatarEdge, color.White)
-	for i, item := range items {
-		tile := imaging.Fill(imaging.Crop(src, avatarSquare(src.Bounds(), item.box, margin)), avatarEdge, avatarEdge,
-			imaging.Center, imaging.Lanczos)
-		sheet = imaging.Paste(sheet, tile, image.Pt(i%avatarColumns*avatarEdge, i/avatarColumns*avatarEdge))
-	}
 	var buffer bytes.Buffer
-	if err := imaging.Encode(&buffer, sheet, imaging.JPEG, imaging.JPEGQuality(avatarQuality)); err != nil {
-		return nil, err
-	}
-	return buffer.Bytes(), nil
+	err := withDecodedImage(ctx, input, func(src image.Image) error {
+		sheet := imaging.New(avatarColumns*avatarEdge, sheetRows(len(items))*avatarEdge, color.White)
+		for i, item := range items {
+			tile := imaging.Fill(imaging.Crop(src, avatarSquare(src.Bounds(), item.box, margin)), avatarEdge, avatarEdge,
+				imaging.Center, imaging.Lanczos)
+			sheet = imaging.Paste(sheet, tile, image.Pt(i%avatarColumns*avatarEdge, i/avatarColumns*avatarEdge))
+		}
+		return imaging.Encode(&buffer, sheet, imaging.JPEG, imaging.JPEGQuality(avatarQuality))
+	})
+	return buffer.Bytes(), err
 }
 
 // avatarSquare is the square around a box, margin times its longer side,
@@ -425,24 +424,20 @@ func avatarSquare(bounds image.Rectangle, box [4]float32, margin float64) image.
 
 // avatarTile cuts occurrence ordinal out of its object's avatar sheet of
 // derivation.
-func (s *Service) avatarTile(derivation, objectID string, ordinal int) ([]byte, error) {
+func (s *Service) avatarTile(ctx context.Context, derivation, objectID string, ordinal int) ([]byte, error) {
 	file, err := s.root.Open(derivedPath(derivation, objectID))
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = file.Close() }()
-	sheet, err := imaging.Decode(file)
-	if err != nil {
-		return nil, err
-	}
-	at := image.Pt(ordinal%avatarColumns*avatarEdge, ordinal/avatarColumns*avatarEdge)
-	if !at.In(sheet.Bounds()) {
-		return nil, fmt.Errorf("avatar %d is outside its sheet", ordinal)
-	}
 	var buffer bytes.Buffer
-	tile := imaging.Crop(sheet, image.Rectangle{Min: at, Max: at.Add(image.Pt(avatarEdge, avatarEdge))})
-	if err := imaging.Encode(&buffer, tile, imaging.JPEG, imaging.JPEGQuality(avatarQuality)); err != nil {
-		return nil, err
-	}
-	return buffer.Bytes(), nil
+	err = withDecodedImage(ctx, file, func(sheet image.Image) error {
+		at := image.Pt(ordinal%avatarColumns*avatarEdge, ordinal/avatarColumns*avatarEdge)
+		if !at.In(sheet.Bounds()) {
+			return fmt.Errorf("avatar %d is outside its sheet", ordinal)
+		}
+		tile := imaging.Crop(sheet, image.Rectangle{Min: at, Max: at.Add(image.Pt(avatarEdge, avatarEdge))})
+		return imaging.Encode(&buffer, tile, imaging.JPEG, imaging.JPEGQuality(avatarQuality))
+	})
+	return buffer.Bytes(), err
 }

@@ -141,6 +141,8 @@ ops-check:
 	grep -Fqx 'ReadWritePaths=/srv/a-nas/data' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'RuntimeDirectory=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
+	grep -Fqx 'Environment=GOMEMLIMIT=1GiB' deploy/systemd/system/anas-photos.service
+	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares' deploy/systemd/system/anas-api.service
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions' deploy/systemd/system/anas-host-agent.service

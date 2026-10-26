@@ -9,8 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/disintegration/imaging"
-
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
@@ -85,7 +83,7 @@ func (s *Service) SearchByImage(ctx context.Context, p Principal, content io.Rea
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
-	thumbnail, detectorInput, err := renderSearchImage(data)
+	thumbnail, detectorInput, err := renderSearchImage(ctx, data)
 	if err != nil {
 		return "", err
 	}
@@ -152,7 +150,7 @@ func (s *Service) ImageSearchResults(ctx context.Context, p Principal, searchID 
 // photo for local AI: the upright thumbnail its vector comes from and the
 // detector's larger upright input, from one decode. A decoder panic counts
 // as an undecodable image, as for thumbnails.
-func renderSearchImage(data []byte) (thumbnail, detectorInput []byte, err error) {
+func renderSearchImage(ctx context.Context, data []byte) (thumbnail, detectorInput []byte, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			decodepanic.Log("photo search image", recovered)
@@ -164,18 +162,21 @@ func renderSearchImage(data []byte) (thumbnail, detectorInput []byte, err error)
 	if mediaType == "" || err != nil || "image/"+format != mediaType || config.Width <= 0 || config.Height <= 0 {
 		return nil, nil, ErrUnsupportedType
 	}
-	if int64(config.Width)*int64(config.Height) > maxSearchImagePixels {
+	if int64(config.Width) > maxSearchImagePixels/int64(config.Height) {
 		return nil, nil, ErrTooLarge
 	}
 	orientation, _ := readEXIF(bytes.NewReader(data), time.UTC)
-	src, err := imaging.Decode(bytes.NewReader(data))
+	err = withDecodedImage(ctx, bytes.NewReader(data), func(src image.Image) error {
+		if thumbnail, _, _, err = uprightJPEG(src, orientation, thumbnailEdge, thumbnailQuality); err != nil {
+			return err
+		}
+		detectorInput, _, _, err = uprightJPEG(src, orientation, aiInputEdge, aiInputQuality)
+		return err
+	})
 	if err != nil {
-		return nil, nil, ErrUnsupportedType
-	}
-	if thumbnail, _, _, err = uprightJPEG(src, orientation, thumbnailEdge, thumbnailQuality); err != nil {
-		return nil, nil, err
-	}
-	if detectorInput, _, _, err = uprightJPEG(src, orientation, aiInputEdge, aiInputQuality); err != nil {
+		if !errors.Is(err, ErrTooLarge) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			err = ErrUnsupportedType
+		}
 		return nil, nil, err
 	}
 	return thumbnail, detectorInput, nil

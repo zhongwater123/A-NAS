@@ -42,8 +42,8 @@ const (
 	// DefaultMaxVideoBytes caps one video original
 	// (docs/specs/photo-video.md).
 	DefaultMaxVideoBytes = 4 << 30
-	// maxImagePixels rejects decompression bombs before anything decodes the
-	// full image.
+	// maxImagePixels bounds metadata accepted for externally decoded media.
+	// JPEG/PNG also obey the stricter local budget in imagedecode.go.
 	maxImagePixels = 1 << 28
 )
 

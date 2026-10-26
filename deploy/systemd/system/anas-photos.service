@@ -17,6 +17,9 @@ Environment=ANAS_PHOTO_SESSION_SOCKET=/run/a-nas-sessions/photos.sock
 # Its own vector index (ADR 0028), a Qdrant instance only this account
 # reaches; a drop-in setting this empty turns the index off.
 Environment=ANAS_PHOTOS_VECTOR_SOCKET=/run/a-nas-vectors/a-nas-photos.sock
+# Collect decoded rasters before reaching MemoryMax; leave headroom for
+# SQLite, mapped files and other memory outside the Go heap's soft budget.
+Environment=GOMEMLIMIT=1GiB
 # Only the Product Service, a member of the a-nas-photos group, reaches the
 # API socket.
 RuntimeDirectory=a-nas-photos
