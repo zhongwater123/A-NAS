@@ -83,7 +83,7 @@ func New() *Reader {
 				"--bytes",
 				"--tree",
 				"--exclude", "7",
-				"--output", "NAME,TYPE,SIZE,MODEL,TRAN,ROTA,RM,FSTYPE,UUID,LABEL,MOUNTPOINTS,WWN,SERIAL",
+				"--output", "NAME,TYPE,SIZE,MODEL,TRAN,ROTA,RM,RO,FSTYPE,UUID,LABEL,MOUNTPOINTS,WWN,SERIAL",
 			).Output()
 		},
 		readSMART: readSMARTCommand,
@@ -304,6 +304,12 @@ func (r *Reader) ResolveDevice(ctx context.Context, diskID string) (ResolvedDevi
 	for _, disk := range disks {
 		byID[disk.ID.String()] = disk
 	}
+	// A display-only observation, or a formerly valid disk whose identity
+	// is now duplicated, must never resolve to the first matching path.
+	disk, found := byID[diskID]
+	if !found || len(disk.ObservationIssues) != 0 {
+		return ResolvedDevice{}, errors.New("disk has no usable hardware observation")
+	}
 	for _, device := range document.BlockDevices {
 		if device.Type != "disk" {
 			continue
@@ -413,6 +419,7 @@ type blockDevice struct {
 	Transport   string        `json:"tran"`
 	Rotational  bool          `json:"rota"`
 	Removable   bool          `json:"rm"`
+	ReadOnly    bool          `json:"ro"`
 	Filesystem  string        `json:"fstype"`
 	UUID        string        `json:"uuid"`
 	Label       string        `json:"label"`
@@ -435,28 +442,50 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 
 	disks := make([]hoststate.Disk, 0, len(document.BlockDevices))
 	targets := make([]smartTarget, 0, len(document.BlockDevices))
-	seen := make(map[string]struct{})
+	identities := make(map[string]int)
+	for _, device := range document.BlockDevices {
+		if device.Type == "disk" {
+			if identity, err := stableDiskIdentity(device); err == nil {
+				identities[identity]++
+			}
+		}
+	}
 	systemDisks := 0
 	dataUUID := dataVolumeUUID(document.BlockDevices, btrfs)
-	for _, device := range document.BlockDevices {
+	for index, device := range document.BlockDevices {
 		if device.Type != "disk" {
 			continue
 		}
-		if device.Size == 0 || strings.TrimSpace(device.Model) == "" {
-			return nil, nil, fmt.Errorf("disk %q is missing model or capacity", device.Name)
+		var issues []hoststate.DiskObservationIssue
+		if device.Size == 0 {
+			issues = append(issues, hoststate.DiskMissingCapacity)
+		}
+		if strings.TrimSpace(device.Model) == "" {
+			issues = append(issues, hoststate.DiskMissingModel)
+		}
+		if device.ReadOnly {
+			issues = append(issues, hoststate.DiskReadOnly)
+		}
+		if device.Name == "" || strings.ContainsAny(device.Name, `/\\`) {
+			issues = append(issues, hoststate.DiskInvalidDeviceName)
 		}
 		identity, err := stableDiskIdentity(device)
 		if err != nil {
-			return nil, nil, fmt.Errorf("disk %q: %w", device.Name, err)
+			issues = append(issues, hoststate.DiskMissingIdentity)
+		} else if identities[identity] > 1 {
+			issues = append(issues, hoststate.DiskDuplicateIdentity)
 		}
-		id, err := derivedResourceID("disk", diskIdentityDomain, identity)
+		kind, domain, source := "disk", diskIdentityDomain, identity
+		if identity == "" || identities[identity] > 1 {
+			// Only a row key for this observation; never accepted by ResolveDevice.
+			// The separate namespace cannot collide with a persisted disk ID.
+			kind, domain = "observation", "a-nas:disk-observation:v1"
+			source = fmt.Sprintf("%s\x00%s\x00%d", identity, device.Name, index)
+		}
+		id, err := derivedResourceID(kind, domain, source)
 		if err != nil {
 			return nil, nil, fmt.Errorf("disk %q: %w", device.Name, err)
 		}
-		if _, exists := seen[id.String()]; exists {
-			return nil, nil, errors.New("duplicate stable disk identity")
-		}
-		seen[id.String()] = struct{}{}
 
 		role := hoststate.DiskRoleUnassigned
 		if containsMountpoint(device, "/") {
@@ -467,10 +496,10 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 		}
 		smartStatus := hoststate.HealthUnknown
 		var temperature *int
-		if smart != nil {
+		if smart != nil && len(issues) == 0 {
 			smartStatus, temperature = smart(identity)
 		}
-		if device.Name != "" && !strings.ContainsAny(device.Name, `/\\`) {
+		if len(issues) == 0 {
 			targets = append(targets, smartTarget{identity: identity, name: device.Name})
 		}
 		health := smartStatus
@@ -478,6 +507,7 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 			health = hoststate.HealthUnknown
 		}
 		disks = append(disks, hoststate.Disk{
+			ObservationIssues:  issues,
 			ID:                 id,
 			Model:              strings.TrimSpace(device.Model),
 			Transport:          mapTransport(device.Transport),

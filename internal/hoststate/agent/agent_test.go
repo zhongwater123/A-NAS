@@ -54,6 +54,22 @@ func TestClientReadsHostStateOverUnixSocket(t *testing.T) {
 	}
 }
 
+func TestClientPreservesUnusableDiskObservationsOverUnixSocket(t *testing.T) {
+	reader := fake.NewWithUnusableDisks()
+	want, err := reader.Read(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := agent.NewClient(serve(t, agent.NewHandler(reader, discardLogger())))
+	got, err := client.Read(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round trip = %+v, want %+v", got, want)
+	}
+}
+
 func TestClientUsesTypedVolumeAndCredentialOperationsOverUnixSocket(t *testing.T) {
 	volume := &agentVolumeExecutor{}
 	credentials := &agentCredentialProvisioner{}

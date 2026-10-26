@@ -333,13 +333,14 @@ schemas:
         $ref: "common.yaml#/schemas/StableResourceID"
       model:
         type: string
-        minLength: 1
+        description: Empty when the device does not report a model; then ineligibleReasons includes missing_model.
       transport:
         $ref: "#/schemas/Transport"
       capacityBytes:
         type: integer
         format: int64
-        minimum: 1
+        minimum: 0
+        description: Zero when capacity is unavailable or there is no medium; such devices cannot be selected for storage.
       rotational:
         type: boolean
       removable:
@@ -360,6 +361,7 @@ schemas:
         type: boolean
       ineligibleReasons:
         type: array
+        description: Includes missing_identity, duplicate_identity, missing_model, missing_capacity, read_only or invalid_device_name for unusable observations. Devices without a unique identity have display-only observation-prefixed IDs, never valid storage operation targets.
         items:
           type: string
       temperatureCelsius:

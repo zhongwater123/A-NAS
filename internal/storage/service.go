@@ -929,7 +929,9 @@ func eligibleDisk(state hoststate.State, diskID, volumeUUID string) (hoststate.D
 		if disk.ID.String() != diskID {
 			continue
 		}
-		if disk.Role != hoststate.DiskRoleUnassigned || disk.Transport == hoststate.TransportUSB || disk.Transport == hoststate.TransportUnknown || disk.Removable || disk.InUse {
+		if len(disk.ObservationIssues) != 0 || disk.CapacityBytes == 0 || strings.TrimSpace(disk.Model) == "" ||
+			strings.HasPrefix(disk.ID.String(), "observation:") || disk.Role != hoststate.DiskRoleUnassigned ||
+			disk.Transport == hoststate.TransportUSB || disk.Transport == hoststate.TransportUnknown || disk.Removable || disk.InUse {
 			return hoststate.Disk{}, ErrDiskNotEligible
 		}
 		for _, signature := range disk.Signatures {

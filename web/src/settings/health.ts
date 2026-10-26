@@ -10,8 +10,8 @@ export function describeFinding(
 ): { title: string; detail: string; icon: LucideIcon } {
   const disk = disks.find((candidate) => candidate.id === finding.diskId);
   // A model name is set off by spaces, the fallback is not.
-  const lead = disk ? `${disk.model} ` : "一块硬盘";
-  const inner = disk ? ` ${disk.model} ` : "一块硬盘";
+  const lead = disk?.model ? `${disk.model} ` : "一块硬盘";
+  const inner = disk?.model ? ` ${disk.model} ` : "一块硬盘";
   const value = finding.value ?? 0;
   switch (finding.code) {
     case "disk_failing":

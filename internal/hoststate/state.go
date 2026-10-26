@@ -68,6 +68,10 @@ type System struct {
 }
 
 type Disk struct {
+	// ObservationIssues prevent this observation from being used for storage
+	// operations. Unidentified disks have display-only observation:* IDs,
+	// never a replacement identity derived from a kernel device path.
+	ObservationIssues        []DiskObservationIssue
 	ID                       ResourceID
 	Model                    string
 	Transport                Transport
@@ -91,6 +95,27 @@ type Disk struct {
 	// Signatures are the partition tables, filesystems and storage-stack
 	// memberships found on the disk, in use or left behind by another system.
 	Signatures []Signature
+}
+
+// DiskObservationIssue is a local device problem, not a failed host read.
+type DiskObservationIssue string
+
+const (
+	DiskMissingIdentity   DiskObservationIssue = "missing_identity"
+	DiskDuplicateIdentity DiskObservationIssue = "duplicate_identity"
+	DiskMissingModel      DiskObservationIssue = "missing_model"
+	DiskMissingCapacity   DiskObservationIssue = "missing_capacity"
+	DiskReadOnly          DiskObservationIssue = "read_only"
+	DiskInvalidDeviceName DiskObservationIssue = "invalid_device_name"
+)
+
+func (issue DiskObservationIssue) Valid() bool {
+	switch issue {
+	case DiskMissingIdentity, DiskDuplicateIdentity, DiskMissingModel, DiskMissingCapacity, DiskReadOnly, DiskInvalidDeviceName:
+		return true
+	default:
+		return false
+	}
 }
 
 // Signature is one on-disk format blkid recognised, such as btrfs or
