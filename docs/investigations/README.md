@@ -49,6 +49,8 @@
 
 - [2026-10-21：每次列目录对账整个空间，大空间下列目录与影视扫描以十秒计](2026-10-21-whole-space-reconcile-scale.md)（fixed locally；待部署验收）
 
+- [2026-10-26：smbstatus 的告警混进 JSON，禁用账号与启动时的身份同步失败](2026-10-26-smbstatus-warning-fails-identity-sync.md)（fixed locally in PR #261；Experimental NAS verification pending）
+
 ## 使用方式
 
 从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`。调查期间持续区分观察事实和假设；解决后必须记录根因、修复机制和回归证据。
