@@ -63,6 +63,21 @@ let server: Transfer[];
 let calls: Array<{ path: string; method: string }>;
 let store: TransferStore;
 
+// upload is a transfer of this browser's upload as the NAS answers for it.
+const upload = (id: string, state: Transfer["state"]): Transfer => ({
+  id,
+  direction: "upload",
+  kind: "file",
+  name: "upload.bin",
+  location: { spaceId: target.spaceId, spaceKind: target.spaceKind, folders: target.folders },
+  totalBytes: 10,
+  transferredBytes: 0,
+  bytesPerSecond: 0,
+  state,
+  createdAt: "2026-10-12T08:00:00Z",
+  updatedAt: "2026-10-12T08:00:00Z",
+});
+
 beforeEach(() => {
   vi.useFakeTimers();
   tus.uploads.length = 0;
@@ -73,11 +88,8 @@ beforeEach(() => {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       calls.push({ path, method: init?.method ?? "GET" });
-      const body =
-        path === "/api/v1/transfers"
-          ? { items: server }
-          : { id: path.split("/")[4], state: path.endsWith("/cancel") ? "canceled" : "paused" };
-      return json(body);
+      if (path === "/api/v1/transfers") return json({ items: server });
+      return json(upload(path.split("/")[4], path.endsWith("/cancel") ? "canceled" : "paused"));
     }),
   );
   store = new TransferStore();

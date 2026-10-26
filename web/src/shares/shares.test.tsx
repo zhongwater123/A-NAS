@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SharesProvider, useShares } from "./SharesProvider";
 import { SharesPanel } from "./SharesPanel";
 import type { Share } from "./api";
-import { stubAPI } from "../test/api";
+import { apiError, json, stubAPI } from "../test/api";
 
 const file = {
   id: "source",
@@ -25,7 +25,6 @@ const share: Share = {
   recipients: [{ userId: "bob", readThrough: 0, senderReadThrough: 0, lastMessage: 1, saved: false, savedFiles: 0 }],
   preparedBytes: 2,
 };
-const json = (data: unknown) => new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
 // The NAS LAN entry is HTTP: getRandomValues exists, randomUUID does not.
 const getRandomValues = crypto.getRandomValues.bind(crypto);
 beforeEach(() => vi.stubGlobal("crypto", { getRandomValues }));
@@ -174,6 +173,8 @@ it("groups live replies of one conversation into a single toast", async () => {
   stubAPI(
     vi.fn(async (url) => {
       const address = new URL(String(url), "http://nas");
+      // The toast keeps its plain wording when the share cannot be read.
+      if (address.pathname === "/api/v1/shares/s1") return apiError(404, "share_not_found");
       if (!address.pathname.endsWith("/notifications")) return json({ items: [] });
       polls++;
       const after = Number(address.searchParams.get("after"));
@@ -366,7 +367,9 @@ it("suppresses only the active visible thread and not a minimized thread", async
         ? json({
             items: [{ id: ++sequence, shareId: "s1", recipientId: "bob", kind: "message", createdAt: share.createdAt }],
           })
-        : json({ items: [] }),
+        : String(url) === "/api/v1/shares/s1"
+          ? apiError(404, "share_not_found")
+          : json({ items: [] }),
     ),
   );
   function Thread() {

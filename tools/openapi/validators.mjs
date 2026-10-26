@@ -10,10 +10,14 @@ import standaloneCode from "ajv/dist/standalone/index.js";
 import yaml from "js-yaml";
 
 // The responses the desktop shell renders outside any window's error
-// boundary (sign-in, the status bar, the rail, notifications, people, the
-// wallpaper, the app shortcuts, VNAS, sharing and transfers), and those whose
+// boundary: sign-in, the status bar, the rail, notifications, people, the
+// wallpaper, the app shortcuts, VNAS, the share reminders (SharesProvider),
+// the transfer indicator and toasts (transfers/store.ts, which keeps what
+// downloads, pauses and cancels answer) and the feedback panel with its
+// threads, whose writes answer with the item it lists. Also those whose
 // clients used to check their shape by hand. A body that breaks the contract
 // fails the call instead of the desktop (docs/investigations/2026-10-07-blank-disk-plan-ui-crash.md).
+// Each needs a Go contract test, so that the server keeps to what is checked.
 const VALIDATED = [
   "getSetupStatus",
   "setupAdministrator",
@@ -29,7 +33,20 @@ const VALIDATED = [
   "getAssistantStatus",
   "listShareNotifications",
   "listMemberShares",
+  "getMemberShare",
+  "listShareMessages",
   "listTransfers",
+  "getTransfer",
+  "createDownload",
+  "pauseUpload",
+  "cancelTransfer",
+  "listFeedback",
+  "createFeedback",
+  "editFeedback",
+  "resolveFeedback",
+  "addFeedbackComment",
+  "editFeedbackComment",
+  "deleteFeedbackComment",
   "getTerminalStatus",
   "listApps",
   "getAppInstallPlan",

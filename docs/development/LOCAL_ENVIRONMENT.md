@@ -300,7 +300,7 @@ Web 客户端只经 [`api.ts`](../../web/src/api.ts) 的 `client`（openapi-fetc
 
 - `call()` 把结果展开为数据，失败时抛出带服务端错误码的 `APIError`；二进制与 multipart 请求体经 `rawBody()` 原样发送。
 - CSRF 令牌由客户端按方法添加：除 GET 与 HEAD 外的请求都带 `X-CSRF-Token`，与服务端 `withMutation` 的划分一致。带进度的上传（XHR）与 tus 也从 `csrfHeader(method)` 取同一规则，调用方不再传参。
-- 桌面外壳在窗口错误边界之外读取的响应（登录、状态栏、通知、头像、壁纸、应用快捷方式、VNAS、分享与传输等），由客户端中间件按契约校验，不符合的响应让这次调用以 `malformed_response` 失败，而不是让桌面空白（[10-07 的空白桌面](../investigations/2026-10-07-blank-disk-plan-ui-crash.md)）。外壳新读取一个接口时，把操作加进 `validators.mjs` 的列表并运行 `make api`；这些响应在 Go 侧也要有契约测试（`internal/httpapi/shell_contract_test.go`）。
+- 桌面外壳在窗口错误边界之外读取的响应（登录、状态栏、通知、头像、壁纸、应用快捷方式、VNAS、分享提醒、传输提示与问题反馈），由客户端中间件按契约校验，不符合的响应让这次调用以 `malformed_response` 失败，而不是让桌面空白（[10-07 的空白桌面](../investigations/2026-10-07-blank-disk-plan-ui-crash.md)）。校验只管形状（类型、必有字段、枚举与 `null`），格式与字符串长度留给服务端：服务端按字符数限制昵称，生成的校验只能按 UTF-16 单元计数。外壳新读取一个接口时，把操作加进 `validators.mjs` 的列表并运行 `make api`；这些响应在 Go 侧也要有契约测试，用 `openapitest.Check` 校验请求与响应（如 `internal/httpapi/shell_contract_test.go`）。
 
 Web 测试用 [`test/api.ts`](../../web/src/test/api.ts) 的 `stubAPI` 替换 `fetch`：桩函数仍以路径与 init 看到每个请求，返回真实的 `Response`。共用的测试数据在 [`test/fixtures.ts`](../../web/src/test/fixtures.ts)，以生成的类型声明；漏掉服务端总会返回的字段时无法通过类型检查，外壳的响应在运行时也会被拒绝。
 
