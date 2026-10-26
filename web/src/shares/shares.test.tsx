@@ -82,8 +82,7 @@ it("shares ordinary files with multiple members, Unicode emoji and a stable requ
 
 it("lists chosen members as tags that survive a search and can be removed", async () => {
   const sent: unknown[] = [];
-  vi.stubGlobal(
-    "fetch",
+  stubAPI(
     vi.fn(async (url, init) => {
       if (String(url).endsWith("/members"))
         return json({
