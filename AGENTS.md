@@ -16,6 +16,13 @@
 - 产品定位：读 `README.md`；早期产品背景、历史研究或 2026-10-06 的决策盘点：按需读 `PROJECT_CONTEXT.md`。
 - 本机工具或 WSL 问题：读 `docs/development/LOCAL_ENVIRONMENT.md`。
 
+## 不重复造轮子
+
+- 写基础设施代码前，先用成熟库、标准库功能或代码生成；仍决定手写时，在 PR 中写明原因。
+- 范围：解析器与编解码；接口类型与客户端（从 `api/openapi.yaml` 生成，[#220](https://github.com/zhongwater123/A-NAS/issues/220)）；数据获取；对话框、菜单、提示等界面基础组件（已依赖 `radix-ui`，[#195](https://github.com/zhongwater123/A-NAS/issues/195)）；日期与数字格式化（`Intl`）；打包与单元校验（[#189](https://github.com/zhongwater123/A-NAS/issues/189)）。
+- 仍手写的二进制解析器要有 fuzz 测试（[#223](https://github.com/zhongwater123/A-NAS/issues/223)）。
+- 评审把手写的轮子记为违反本条，而不是一般的偏差。
+
 ## 验证
 
 - `make docs-check` 和 `make check` 只使用本地源码与可丢弃构建产物，不访问实验 NAS 或生产环境；可直接运行、修复当前变更导致的失败并重跑相关检查。
