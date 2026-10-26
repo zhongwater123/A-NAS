@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setSession } from "../api";
 import type { AppJob, CatalogApp, InstallPlan } from "../appsApi";
 import { AppCenterPanel } from "./AppCenterPanel";
-import { stubAPI } from "../test/api";
+import { json, stubAPI } from "../test/api";
 import { app } from "../test/fixtures";
 
 function job(overrides: Partial<AppJob> = {}): AppJob {
@@ -56,10 +56,6 @@ const navidromePlan: InstallPlan = {
     { hostPath: "/srv/a-nas/data/spaces/shared/Media/Music", containerPath: "/music", kind: "shared", readOnly: true },
   ],
 };
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-}
 
 // serve answers the App Center API from a list the test changes as the server
 // would; every write must carry the session's CSRF token.

@@ -7,7 +7,7 @@ import { transferStore } from "../transfers/store";
 import { MediaCenter } from "./MediaCenter";
 import type { Episode, Home, MediaLibrary, ShowDetail, Title, VideoDetail } from "./mediaApi";
 import { Player } from "./Player";
-import { stubAPI } from "../test/api";
+import { json, stubAPI } from "../test/api";
 
 const art = { poster: true, backdrop: true, thumb: true, version: "1" };
 const film: Title = {
@@ -79,13 +79,6 @@ function detail(title: Title, overrides: Partial<VideoDetail> = {}): VideoDetail
     collections: [],
     ...overrides,
   };
-}
-
-function json(body: unknown, status = 200) {
-  return new Response(status === 204 ? null : JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
 }
 
 type Route = (url: string, init?: RequestInit) => Response | undefined;

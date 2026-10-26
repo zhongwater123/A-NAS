@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setSession } from "../api";
 import { PhotosPanel } from "./PhotosPanel";
 import type { PhotoAlbum, PhotoAsset, PhotoLibrary } from "./photosApi";
-import { stubAPI } from "../test/api";
+import { json, stubAPI } from "../test/api";
 
 // jsdom decodes no images: the image searched by is the file as it came.
 vi.mock("./imageSearch", async (original) => ({
@@ -52,10 +52,6 @@ function asset(id: string, overrides: Partial<PhotoAsset> = {}): PhotoAsset {
     thumbnail: "ready",
     ...overrides,
   };
-}
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
 type Route = (url: string, init?: RequestInit) => Response | Promise<Response | undefined> | undefined;

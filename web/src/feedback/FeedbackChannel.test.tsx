@@ -7,7 +7,7 @@ import { forgetPeople, rememberPerson } from "../people";
 import { FeedbackChannel } from "./FeedbackChannel";
 import type { FeedbackComment, FeedbackItem } from "./feedbackApi";
 import { describeTime } from "./time";
-import { stubAPI } from "../test/api";
+import { json, stubAPI } from "../test/api";
 
 const capture = vi.hoisted(() => ({ result: undefined as Blob | undefined }));
 vi.mock("./capture", async (original) => ({
@@ -58,13 +58,6 @@ const subtitles: FeedbackItem = {
   resolvedAt: "2026-10-12T06:00:00Z",
   comments: [reply],
 };
-
-function json(body: unknown, status = 200) {
-  return new Response(status === 204 ? null : JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
 
 type Handler = (url: string, init: RequestInit) => Response | undefined;
 

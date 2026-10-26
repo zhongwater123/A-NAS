@@ -6,7 +6,7 @@ import { setSession } from "../api";
 import type { Playlist, Track } from "./musicApi";
 import { MusicPanel } from "./MusicPanel";
 import { track } from "./testTracks";
-import { stubAPI } from "../test/api";
+import { json, stubAPI } from "../test/api";
 
 const library: Track[] = [
   track("file:a1", {
@@ -36,10 +36,6 @@ const library: Track[] = [
     durationMs: 200_000,
   }),
 ];
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-}
 
 function serve(items: Track[] = library) {
   const playlists: Playlist[] = [];
