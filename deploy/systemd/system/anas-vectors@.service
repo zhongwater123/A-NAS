@@ -1,0 +1,74 @@
+[Unit]
+Description=A-NAS vector index of %i
+Documentation=https://github.com/zhongwater123/A-NAS
+# Qdrant holding the vectors of the service whose account names the instance,
+# as an index that service rebuilds from its own Catalog at will (ADR 0028,
+# docs/architecture/vector-index.md). Only that service reaches it, through
+# anas-vectors-proxy@%i.socket; the proxy starts it, and once the proxy has
+# exited for want of connections nothing needs it and it stops. It has no
+# [Install] section: a manual start without the proxy would stop at once.
+StopWhenUnneeded=yes
+AssertPathExists=/opt/a-nas/current/vectors/config.yaml
+
+[Service]
+Type=simple
+# Each instance has a dynamic user of its own; without User= every instance
+# would share one named after the unit.
+User=a-nas-vec-%i
+DynamicUser=true
+# The index on the system disk: derived, never backed up, deleted at will.
+StateDirectory=a-nas-vectors/%i
+StateDirectoryMode=0700
+# Qdrant writes relative paths unless told otherwise; the release directory
+# is read-only, so a stray one fails instead of landing somewhere.
+WorkingDirectory=/opt/a-nas/current/vectors
+Environment=QDRANT__STORAGE__STORAGE_PATH=%S/a-nas-vectors/%i/storage
+Environment=QDRANT__STORAGE__SNAPSHOTS_PATH=%S/a-nas-vectors/%i/snapshots
+Environment=QDRANT__STORAGE__TEMP_PATH=%S/a-nas-vectors/%i/tmp
+Environment=QDRANT_INIT_FILE_PATH=%S/a-nas-vectors/%i/.qdrant-initialized
+# A single Qdrant node cannot skip a minor release, and an older one cannot
+# read a newer one's storage: a different binary starts from an empty index,
+# which its owner rebuilds.
+ExecStartPre=/opt/a-nas/current/vectors/prepare.sh %S/a-nas-vectors/%i /opt/a-nas/current/vectors/qdrant
+ExecStart=/opt/a-nas/current/vectors/qdrant --config-path /opt/a-nas/current/vectors/config.yaml --disable-telemetry
+# Started only once its gRPC port accepts, so the proxy never forwards to a
+# closed port.
+ExecStartPost=/opt/a-nas/current/vectors/wait-ready.sh 6334
+TimeoutStartSec=90s
+TimeoutStopSec=20s
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+# Only its own loopback: nothing leaves the device, and nothing but the proxy
+# in this namespace reaches the ports.
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+InaccessiblePaths=-/srv/a-nas -/var/lib/a-nas -/etc/a-nas -/run/a-nas -/run/a-nas-photos -/run/a-nas-sessions -/run/a-nas-ai
+ProtectProc=invisible
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+TasksMax=256
+# An empty instance holds about 90 MB, and the photo library's 20,000 image
+# vectors are about 60 MB; the limits leave room for index building and are
+# checked against the system test's MemoryPeak and the NAS.
+MemoryHigh=512M
+MemoryMax=768M
+# Background work beside the AI Worker: anas.slice gives way to the rest of
+# the device, and the photo service's AI gate does not count it.
+Slice=anas-vectors.slice

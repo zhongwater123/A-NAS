@@ -144,6 +144,17 @@ try {
             throw "Local AI file does not match its manifest: $($content.Path)"
         }
     }
+    # The vector index's Qdrant travels the same way (ADR 0028):
+    # scripts/fetch-qdrant.sh keeps the tarball its manifest pins.
+    $qdrantManifestPath = Join-Path $repoRoot 'deploy\qdrant\qdrant.json'
+    $qdrant = Get-Content -LiteralPath $qdrantManifestPath -Raw | ConvertFrom-Json
+    $qdrantPath = Join-Path $repoRoot "build\qdrant\$($qdrant.sha256)\$($qdrant.file)"
+    if (-not (Test-Path -LiteralPath $qdrantPath -PathType Leaf)) {
+        throw 'Missing the pinned Qdrant: run scripts/fetch-qdrant.sh in WSL first.'
+    }
+    if ((Get-FileHash -LiteralPath $qdrantPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $qdrant.sha256) {
+        throw "Qdrant does not match its manifest: $qdrantPath"
+    }
     $workerArchive = Join-Path $repoRoot 'build\ai-worker.tar'
     & git -c $gitSafeDirectory archive --format=tar -o $workerArchive HEAD ai/anas_ai
     if ($LASTEXITCODE -ne 0) { throw 'Cannot archive the AI Worker.' }
@@ -180,6 +191,7 @@ try {
         Send-StagedContent $model.Path "apps/a-nas/models/$($model.Pinned.sha256)" $model.Pinned.file $model.Pinned.sha256
     }
     Send-StagedContent $runtimePath 'apps/a-nas/ai-runtimes' $runtimeManifest.file $runtimeManifest.sha256
+    Send-StagedContent $qdrantPath "apps/a-nas/qdrant/$($qdrant.sha256)" $qdrant.file $qdrant.sha256
 
     $uploads = @(
         @{ Source = $apiBinary; Destination = "${target}:$release/anas-api.incoming" },
@@ -196,6 +208,13 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-media.socket'); Destination = "${target}:$release/anas-media-system.socket.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-media@.service'); Destination = "${target}:$release/anas-media-system@.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\system-anasmedia.slice'); Destination = "${target}:$release/anas-media-system.slice.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-vectors@.service'); Destination = "${target}:$release/anas-vectors-system@.service.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-vectors-proxy@.socket'); Destination = "${target}:$release/anas-vectors-proxy-system@.socket.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-vectors-proxy@.service'); Destination = "${target}:$release/anas-vectors-proxy-system@.service.incoming" },
+        @{ Source = $qdrantManifestPath; Destination = "${target}:$release/vectors-qdrant.json.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\qdrant\config.yaml'); Destination = "${target}:$release/vectors-config.yaml.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\qdrant\prepare.sh'); Destination = "${target}:$release/vectors-prepare.sh.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\qdrant\wait-ready.sh'); Destination = "${target}:$release/vectors-wait-ready.sh.incoming" },
         @{ Source = $workerArchive; Destination = "${target}:$release/ai-worker.tar.incoming" },
         @{ Source = $modelManifestPath; Destination = "${target}:$release/ai-model.json.incoming" },
         @{ Source = $detectorManifestPath; Destination = "${target}:$release/ai-detector.json.incoming" },
