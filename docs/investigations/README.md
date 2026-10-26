@@ -4,7 +4,7 @@
 
 ## 索引
 
-- [2026-10-26：未识别块设备阻断整次宿主机观测](2026-10-26-unidentified-device-blocks-host-state.md)（fixed locally，#183；未部署）
+- [2026-10-26：未识别块设备阻断整次宿主机观测](2026-10-26-unidentified-device-blocks-host-state.md)（fixed locally，#183）
 - [2026-10-06：本地 Kiosk 可进入通用 Chromium 界面](2026-10-06-kiosk-browser-confinement.md)（open, deferred for developer baseline）
 - [2026-10-06：Host Agent 无法创建运行时 Socket](2026-10-06-host-agent-runtime-directory.md)（resolved）
 - [2026-10-06：桌面时钟持续落后于系统时间](2026-10-06-system-clock-drift-and-network-sync.md)（resolved）

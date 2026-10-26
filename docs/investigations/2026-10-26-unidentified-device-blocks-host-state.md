@@ -1,6 +1,6 @@
 # 未识别块设备阻断整次宿主机观测
 
-状态：fixed locally（issue #183）；未部署
+状态：fixed locally（issue #183）
 更新时间：2026-10-26
 
 ## 症状与复现
