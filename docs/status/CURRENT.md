@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-23
+更新时间：2026-10-26
 
 本页只记当前事实与下一步。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，合并与部署的经过由 Git 与 PR 保存。
 
@@ -10,13 +10,10 @@
 
 ## 实验 NAS 上运行什么
 
-- 主干 `8f5b6b0b4586`（PR #206 的合并提交，2026-10-21 安装；2026-10-22 只读核对 `/opt/a-nas/current`），包含此前合并的全部 PR。
+- 主干 `80b602275b86`（PR #250 的合并提交，2026-10-26 安装，日志在 NAS 的 `/var/tmp/a-nas-deploy-80b602275b86.log`），包含此前合并的全部 PR；容器代理与 AI 助手试用包同版本。Host Agent 的记录已移入 root 专属的 `/var/lib/a-nas-host`（#249）。
 - AI 助手按[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)为全部成员开启，用云端模型，仅供开发测试。
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1（2026-10-20 在 #149 的早期构建上加入第二块盘）。
-- 已合并、尚未部署：[#225](https://github.com/zhongwater123/A-NAS/pull/225)（Go 1.27.3 与解码器 panic 防护）、[#212](https://github.com/zhongwater123/A-NAS/pull/212)（Host Agent 健壮性，#166）、[#213](https://github.com/zhongwater123/A-NAS/pull/213)（应用安装回滚，#169）、[#214](https://github.com/zhongwater123/A-NAS/pull/214)（媒体 Worker 共享准入，#168）、[#215](https://github.com/zhongwater123/A-NAS/pull/215)（按范围对账，#167）、[#226](https://github.com/zhongwater123/A-NAS/pull/226)（质量门禁带来的 Go、Web 与 AI 代码修正）、[#236](https://github.com/zhongwater123/A-NAS/pull/236)（errcheck）、[#237](https://github.com/zhongwater123/A-NAS/pull/237)（Web 通过 React hooks 规则）、[#238](https://github.com/zhongwater123/A-NAS/pull/238)（分享留言的表情面板位置）。[#227](https://github.com/zhongwater123/A-NAS/pull/227)、[#234](https://github.com/zhongwater123/A-NAS/pull/234)、[#235](https://github.com/zhongwater123/A-NAS/pull/235) 只改文档、测试与开发工具，不需要部署。这次部署要在一次维护中完成：
-  - 运行安装器，它会写入媒体 Worker 槽位的 tmpfiles 条目与 `system-anasmedia.slice`；
-  - 产品服务、Host Agent、相册服务与分享服务同版本；
-  - 容器代理连同单元一起更新，再 `daemon-reload`。
+- 已合并、尚未部署：[#245](https://github.com/zhongwater123/A-NAS/pull/245)（状态栏仪表盘的审查遗留，只改 Web），随下一次部署。
 
 ## 阻塞与外部条件
 
@@ -39,11 +36,10 @@
 ## 下一步
 
 1. 完成 v1.0.1 闭环：重建 Samba 凭据后，按[实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)完成个人空间与 Shared 的 Web/SMB 双向读写、大文件哈希、删除与恢复、快照、正常重启、SMART、容量、服务与审计证据，全部通过后才打标签。
-2. 在一次维护中部署上面列出的已合并 PR（要求见上）。
-3. 按[已部署功能的实机验收手册](../runbooks/accept-features-on-experimental-nas.md)逐模块核对：文件管理与登录、备份与存储、桌面与本机屏幕、相册、影视与音乐、传输中心、应用中心、成员分享、AI 助手。每完成一节，就从手册中删去这一节。
-4. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改；#92 之后新装的应用密码按台随机生成。
-5. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
-6. 后续能力：
+2. 按[已部署功能的实机验收手册](../runbooks/accept-features-on-experimental-nas.md)逐模块核对：Host Agent 与应用安装、文件管理与登录、备份与存储、桌面与本机屏幕、相册、影视与音乐、传输中心、应用中心、成员分享、AI 助手。每完成一节，就从手册中删去这一节。
+3. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改；#92 之后新装的应用密码按台随机生成。
+4. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
+5. 后续能力：
    - 外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘），是备份中心评审中最大的缺口；
    - 账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；
    - 硬盘用途 M2（缺盘降级挂载、更换、接回后恢复冗余）与 M3（更改冗余方式、移除硬盘）；
