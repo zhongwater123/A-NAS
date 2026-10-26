@@ -4,12 +4,9 @@
 package docker
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -20,6 +17,7 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
+	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
@@ -253,9 +251,8 @@ func usageFromStats(stats container.StatsResponse) *containers.Usage {
 }
 
 // parseLogs decodes timestamped log output. Without a TTY the engine
-// multiplexes stdout and stderr into frames of an 8-byte header (stream type,
-// three zero bytes, big-endian length) followed by the payload; parsing the
-// frames in order keeps the two streams interleaved as they were written.
+// multiplexes stdout and stderr into frames; stdcopy hands them over in order,
+// which keeps the two streams interleaved as they were written.
 func parseLogs(r io.Reader, tty bool) ([]containers.LogLine, error) {
 	var lines []containers.LogLine
 	pending := map[string]*bytes.Buffer{}
@@ -284,25 +281,11 @@ func parseLogs(r io.Reader, tty bool) ([]containers.LogLine, error) {
 		}
 		emit("stdout", data)
 	} else {
-		reader := bufio.NewReader(r)
-		header := make([]byte, 8)
-		for {
-			if _, err := io.ReadFull(reader, header); err != nil {
-				if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-					break
-				}
-				return nil, err
-			}
-			stream := "stdout"
-			if header[0] == 2 {
-				stream = "stderr"
-			}
-			payload := make([]byte, binary.BigEndian.Uint32(header[4:]))
-			if _, err := io.ReadFull(reader, payload); err != nil {
-				// The byte limit can cut the final frame; keep what was complete.
-				break
-			}
-			emit(stream, payload)
+		// The byte limit can cut the final frame; stdcopy keeps what was complete.
+		stdout := frameWriter(func(frame []byte) { emit("stdout", frame) })
+		stderr := frameWriter(func(frame []byte) { emit("stderr", frame) })
+		if _, err := stdcopy.StdCopy(stdout, stderr, r); err != nil {
+			return nil, err
 		}
 	}
 	for _, stream := range []string{"stdout", "stderr"} {
@@ -311,6 +294,13 @@ func parseLogs(r io.Reader, tty bool) ([]containers.LogLine, error) {
 		}
 	}
 	return lines, nil
+}
+
+type frameWriter func([]byte)
+
+func (w frameWriter) Write(frame []byte) (int, error) {
+	w(frame)
+	return len(frame), nil
 }
 
 func parseLogLine(stream, raw string) containers.LogLine {
