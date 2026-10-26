@@ -16,30 +16,10 @@ export function useFileListing() {
   const [error, setError] = useState("");
   const parentID = trail.at(-1)?.id ?? "";
 
-  const list = useCallback(
-    (selected: string, parent: string) =>
-      listEntries(selected, parent)
-        .then((items) => {
-          setEntries(items);
-          setError("");
-        })
-        .catch((caught: unknown) => {
-          setError(messageOf(caught));
-        })
-        .finally(() => setLoading(false)),
-    [],
-  );
-  const refresh = useCallback(
-    async (selected: string, parent: string) => {
-      if (!selected) {
-        setEntries([]);
-        return;
-      }
-      setLoading(true);
-      return list(selected, parent);
-    },
-    [list],
-  );
+  // A completed operation invalidates the open listing, even if its caller
+  // retained reload before navigating elsewhere. The effect owns the request.
+  const [revision, setRevision] = useState(0);
+  const reload = useCallback(() => setRevision((value) => value + 1), []);
   const refreshVolume = useCallback(
     () =>
       listVolumes()
@@ -63,19 +43,38 @@ export function useFileListing() {
     void loadSpaces();
     void refreshVolume();
   }, [loadSpaces, refreshVolume]);
-  // Each folder opened lists at once.
-  const [listedFor, setListedFor] = useState<{ spaceID: string; parentID: string }>();
-  if (listedFor?.spaceID !== spaceID || listedFor.parentID !== parentID) {
-    setListedFor({ spaceID, parentID });
-    if (spaceID) setLoading(true);
+  // Never show the previous folder's entries under the new breadcrumb.
+  const [listedFor, setListedFor] = useState<{ spaceID: string; parentID: string; revision: number }>();
+  if (listedFor?.spaceID !== spaceID || listedFor.parentID !== parentID || listedFor.revision !== revision) {
+    if (listedFor?.spaceID !== spaceID || listedFor.parentID !== parentID) setEntries([]);
+    setListedFor({ spaceID, parentID, revision });
+    setLoading(Boolean(spaceID));
+    setError("");
   }
   useEffect(() => {
-    if (spaceID) void list(spaceID, parentID);
-  }, [spaceID, parentID, list]);
+    if (!spaceID) return;
+    let live = true;
+    void listEntries(spaceID, parentID)
+      .then((items) => {
+        if (live) {
+          setEntries(items);
+          setError("");
+        }
+      })
+      .catch((caught: unknown) => {
+        if (live) setError(messageOf(caught));
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [spaceID, parentID, revision]);
   // Files uploaded into this space show up without a manual refresh.
   const uploadedHere = useEffectEvent((spaceId: string) => spaceId === spaceID);
   const refreshHere = useEffectEvent(() => {
-    void refresh(spaceID, parentID);
+    reload();
     void refreshVolume();
   });
   useEffect(() => {
@@ -104,8 +103,7 @@ export function useFileListing() {
     error,
     setError,
     loadSpaces,
-    // reload lists the open folder again.
-    reload: () => refresh(spaceID, parentID),
+    reload,
     refreshVolume,
   };
 }
