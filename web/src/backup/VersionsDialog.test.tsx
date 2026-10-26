@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileEntry, Space } from "../api";
 import type { SnapshotMatch } from "./backupApi";
 import { VersionsDialog } from "./VersionsDialog";
+import { stubAPI } from "../test/api";
 
 const personal: Space = {
   id: "space:personal",
@@ -65,8 +66,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("VersionsDialog", () => {
   it("puts an older version back while the current file goes to the recycle bin", async () => {
     const calls: { url: string; body?: unknown }[] = [];
-    vi.stubGlobal(
-      "fetch",
+    stubAPI(
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
@@ -119,8 +119,7 @@ describe("VersionsDialog", () => {
 
   it("copies a version beside the file under a new name", async () => {
     const calls: { url: string; body?: unknown }[] = [];
-    vi.stubGlobal(
-      "fetch",
+    stubAPI(
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });

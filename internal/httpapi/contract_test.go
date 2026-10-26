@@ -8,30 +8,17 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
-	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
-	"github.com/getkin/kin-openapi/routers"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
 
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/openapitest"
 )
 
 // Subtitles are WebVTT, which kin-openapi does not decode by itself.
 func init() { openapi3filter.RegisterBodyDecoder("text/vtt", openapi3filter.FileBodyDecoder) }
-
-// specRouter finds operations in the OpenAPI document, loaded once.
-var specRouter = sync.OnceValues(func() (routers.Router, error) {
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		return nil, err
-	}
-	return legacyrouter.NewRouter(document)
-})
 
 // checkedProduct is the product API whose every exchange is checked against
 // the specification.
@@ -49,10 +36,7 @@ func checkedProduct(t *testing.T, dependencies httpapi.ProductDependencies) http
 // operation. WebSocket upgrades pass through unchecked.
 func contractChecked(t *testing.T, next http.Handler) http.Handler {
 	t.Helper()
-	router, err := specRouter()
-	if err != nil {
-		t.Fatalf("load OpenAPI document: %v", err)
-	}
+	router := openapitest.Router(t)
 	ctx := context.Background()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {

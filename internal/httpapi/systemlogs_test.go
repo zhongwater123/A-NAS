@@ -10,9 +10,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/getkin/kin-openapi/openapi3"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
-
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
@@ -32,15 +29,7 @@ func TestSystemLogsAreForAdministratorsAndFollowTheContract(t *testing.T) {
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService,
 		SystemLogs: systemlog.NewFake(nil), Logger: logger,
 	})
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler, router: router}}
+	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler}}
 	asAdmin := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
 	session, err := accountService.ResolveSession(ctx, asAdmin.cookie.Value)
 	if err != nil {

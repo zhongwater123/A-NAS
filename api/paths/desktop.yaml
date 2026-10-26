@@ -1,0 +1,89 @@
+/api/v1/local-display:
+  get:
+    security: []
+    operationId: getLocalDisplay
+    summary: Read how the screen attached to the NAS behaves (设置 → 个性化 → 本机屏幕)
+    description: >-
+      Needs no session, because the sign-in page on the local console reads it too. The local console turns the
+      screen black once the screen saver has played sleepAfterMinutes; the sign-in page after three minutes plus
+      that. Only pages opened with ?local-console=1 act on it.
+    responses:
+      "200": { description: The current setting, content: { application/json: { schema: { $ref: "../components/desktop.yaml#/schemas/LocalDisplay" } } } }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  put:
+    operationId: updateLocalDisplay
+    description: Administrators only. The local console uses the new value from its next idle period.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/desktop.yaml#/schemas/LocalDisplay" } } } }
+    responses:
+      "200": { description: The saved setting, content: { application/json: { schema: { $ref: "../components/desktop.yaml#/schemas/LocalDisplay" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/wallpaper:
+  get:
+    operationId: getWallpaper
+    summary: Read the desktop wallpaper every account sees (设置 → 个性化 → 桌面壁纸)
+    description: Without image the desktop shows the built-in default wallpaper, drawn in style all the same.
+    responses:
+      "200": { description: The current wallpaper, content: { application/json: { schema: { $ref: "../components/desktop.yaml#/schemas/Wallpaper" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  patch:
+    operationId: updateWallpaperStyle
+    description: Administrators only. Changes how every desktop draws the wallpaper.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/desktop.yaml#/schemas/WallpaperStyleChange" } } } }
+    responses:
+      "200": { description: The updated wallpaper, content: { application/json: { schema: { $ref: "../components/desktop.yaml#/schemas/Wallpaper" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/wallpaper/image:
+  get:
+    operationId: getWallpaperImage
+    description: >-
+      The wallpaper picture as a JPEG. Pages ask for it with ?v=<version>; that URL may be cached for good. 404
+      while the default wallpaper is in use.
+    parameters:
+      - { name: v, in: query, schema: { type: string } }
+    responses:
+      "200": { description: The picture, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      "304": { description: The cached picture is current }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  put:
+    operationId: setWallpaperImage
+    description: >-
+      Administrators only. Replace the picture with the one in the body, keeping the style. The server turns it
+      upright, scales the long side down to at most 3840 pixels, fills transparency with the default wallpaper's
+      navy and stores a JPEG without the original's metadata. Pages scale the picture first.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        image/jpeg: { schema: { type: string, format: binary } }
+        image/png: { schema: { type: string, format: binary } }
+        image/gif: { schema: { type: string, format: binary } }
+        image/webp: { schema: { type: string, format: binary } }
+    responses:
+      "200": { description: The updated wallpaper, content: { application/json: { schema: { $ref: "../components/desktop.yaml#/schemas/Wallpaper" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { description: "image_too_large: more than 24 MiB or 25 million pixels", content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+      "415": { description: "unsupported_image: not a JPEG, PNG, GIF or WebP picture", content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: resetWallpaper
+    description: Administrators only. Go back to the built-in wallpaper, filled.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The default wallpaper, content: { application/json: { schema: { $ref: "../components/desktop.yaml#/schemas/Wallpaper" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }

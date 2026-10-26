@@ -25,6 +25,10 @@ type viewingRecord struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
+// maxViewingAhead is how far ahead a grant may expire: the Product Service's
+// viewing duration and an hour for clock differences.
+const maxViewingAhead = accounts.ViewingDuration + time.Hour
+
 // GrantViewing gives an administrator read-only ACL entries on every file in
 // a member's private space until the grant expires (ADR 0008). Files the
 // owner creates meanwhile inherit the entry through the default ACL.
@@ -37,13 +41,10 @@ func (e *Executor) GrantViewing(ctx context.Context, request accounts.ViewingReq
 		return errors.New("invalid viewing request")
 	}
 	now := e.now().UTC()
-	if !request.ExpiresAt.After(now) || request.ExpiresAt.After(now.Add(accounts.ViewingDuration+time.Hour)) {
+	if !request.ExpiresAt.After(now) || request.ExpiresAt.After(now.Add(maxViewingAhead)) {
 		return errors.New("viewing request has an invalid expiry")
 	}
-	e.identitiesMu.Lock()
-	identity, known := e.identities[request.AdminUsername]
-	e.identitiesMu.Unlock()
-	if !known || identity.Role != accounts.RoleAdmin || identity.UID != request.AdminUID || !identity.Enabled {
+	if !e.mayView(request.AdminUsername, request.AdminUID) {
 		return errors.New("viewing is only granted to enabled A-NAS administrators")
 	}
 	// Nothing would apply the entries once the volume returns.
@@ -171,16 +172,44 @@ func (e *Executor) privateSpaceRoot(spaceID string) (string, error) {
 	return root, nil
 }
 
+// mayView reports whether username is an enabled A-NAS administrator with
+// the UID.
+func (e *Executor) mayView(username string, uid int) bool {
+	e.identitiesMu.Lock()
+	defer e.identitiesMu.Unlock()
+	identity, known := e.identities[username]
+	return known && identity.Role == accounts.RoleAdmin && identity.UID == uid && identity.Enabled
+}
+
+// loadViewingRegistry reads the grants. One that GrantViewing would not give
+// now, because it runs too long or its administrator no longer may view,
+// loads as expired: the next expiry pass revokes it.
 func (e *Executor) loadViewingRegistry() error {
-	contents, err := os.ReadFile(e.viewingPath)
+	contents, err := e.readState(e.viewingPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(contents, &e.viewing); err != nil {
+	var records map[string]viewingRecord
+	if err := json.Unmarshal(contents, &records); err != nil {
 		return fmt.Errorf("decode viewing registry: %w", err)
+	}
+	deadline := e.now().UTC().Add(maxViewingAhead)
+	for id, record := range records {
+		if strings.TrimSpace(id) == "" || strings.TrimSpace(record.SpaceID) == "" || record.SpaceID == sharedSpaceID ||
+			!validUsername(record.Admin) || record.UID < accounts.FirstUserUID || record.UID > accounts.LastUserUID {
+			return fmt.Errorf("viewing registry: grant %q is invalid", id)
+		}
+		if !record.ExpiresAt.IsZero() && (record.ExpiresAt.After(deadline) || !e.mayView(record.Admin, record.UID)) {
+			e.logger.Warn("a viewing grant is revoked early: it is outside what may be granted", "grant", id, "admin", record.Admin)
+			record.ExpiresAt = time.Time{}
+			records[id] = record
+		}
+	}
+	if records != nil {
+		e.viewing = records
 	}
 	return nil
 }

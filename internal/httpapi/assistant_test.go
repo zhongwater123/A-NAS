@@ -15,8 +15,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/getkin/kin-openapi/openapi3"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
@@ -137,15 +135,7 @@ func TestSigningInKeepsTheMembersAssistantRunningUntilSigningOut(t *testing.T) {
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, Logger: logger,
 	})
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler, router: router}}
+	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler}}
 	asOwner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
 	owner, err := accountService.ResolveSession(ctx, asOwner.cookie.Value)
 	if err != nil {
@@ -208,15 +198,7 @@ func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *te
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, Logger: logger,
 	})
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler, router: router}}
+	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler}}
 	f.client.do(http.MethodGet, "/api/v1/assistant/status", "", nil, http.StatusUnauthorized)
 
 	asOwner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)

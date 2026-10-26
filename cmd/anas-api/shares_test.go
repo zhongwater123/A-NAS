@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/openapitest"
 	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
@@ -65,14 +65,7 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 	}
 	defer closeShares()
 	handler := httpapi.NewProduct(httpapi.ProductDependencies{Accounts: users, Files: fs, Shares: api, Logger: logger})
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatal(err)
-	}
+	router := openapitest.Router(t)
 	call := func(session accounts.Session, method, url string, body any) *httptest.ResponseRecorder {
 		var reader io.Reader
 		if body != nil {

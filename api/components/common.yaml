@@ -1,0 +1,47 @@
+parameters:
+  CSRFToken: { name: X-CSRF-Token, in: header, required: true, schema: { type: string, minLength: 1 } }
+responses:
+  ProductError:
+    description: Product operation error.
+    content:
+      application/json:
+        schema:
+          $ref: "#/schemas/ErrorResponse"
+  MethodNotAllowed:
+    description: The path exists but does not support the request method.
+    headers:
+      Allow:
+        schema:
+          type: string
+        description: Supported method for this endpoint.
+    content:
+      application/json:
+        schema:
+          $ref: "#/schemas/ErrorResponse"
+schemas:
+  DataSource:
+    type: string
+    enum: [simulated, live]
+  StableResourceID:
+    type: string
+    minLength: 1
+    pattern: "^[^/\\\\]+$"
+    description: Opaque identity that is not a device path or mount point.
+  ErrorDetail:
+    type: object
+    additionalProperties: false
+    required: [code, message]
+    properties:
+      code:
+        type: string
+        minLength: 1
+      message:
+        type: string
+        minLength: 1
+  ErrorResponse:
+    type: object
+    additionalProperties: false
+    required: [error]
+    properties:
+      error:
+        $ref: "#/schemas/ErrorDetail"

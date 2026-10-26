@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession, type Wallpaper } from "../api";
 import { PersonalizationSection } from "./PersonalizationSection";
+import { stubAPI } from "../test/api";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -39,7 +40,7 @@ function installAPI(options: { sleepAfterMinutes?: number; wallpaper?: Wallpaper
     }
     return json({ error: { code: "not_found", message: "not found" } }, 404);
   });
-  vi.stubGlobal("fetch", fetchMock);
+  stubAPI(fetchMock);
   return fetchMock;
 }
 
@@ -81,7 +82,14 @@ describe("Settings → 个性化", () => {
     setSession({
       csrfToken: "csrf-token",
       expiresAt: "2026-10-21T00:00:00Z",
-      user: { id: "user:owner", username: "owner", role: "admin", status: "active", createdAt: "2026-10-07T10:00:00Z" },
+      user: {
+        id: "user:owner",
+        username: "owner",
+        role: "admin",
+        status: "active",
+        createdAt: "2026-10-07T10:00:00Z",
+        mustChangePassword: false,
+      },
     }),
   );
   afterEach(() => {

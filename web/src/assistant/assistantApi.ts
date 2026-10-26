@@ -2,214 +2,90 @@
 // the member's own Hermes instance: turns run over the gateway WebSocket
 // (useAssistantGateway), stored conversations are listed and read over REST,
 // and confirmation cards are answered here, never by answering Hermes.
-import { APIError, request } from "../api";
+import { APIError, call, client } from "../api";
+import type { AssistantApproval, AssistantMemory } from "../api.generated";
 import type { SessionMessage } from "./hermes/types/hermes";
 
-export interface AssistantStatus {
-  available: boolean;
-}
-
-export interface AssistantSession {
-  id: string;
-  title: string;
-  preview: string;
-  startedAt: number;
-  lastActive?: number;
-  messageCount: number;
-}
-
-export interface ChangeOperation {
-  op: "write" | "copy" | "delete" | "move" | "mkdir";
-  path: string;
-  to?: string;
-  /** What a copy copies, its size in bytes, and whether it is a folder. */
-  from?: string;
-  size?: number;
-  folder?: boolean;
-  exists?: boolean;
-  before?: string;
-  after?: string;
-}
-
-/** The change as the executor prepared it when the card was made. */
-export interface AssistantChange {
-  id: string;
-  summary: string;
-  status: string;
-  error?: string;
-  operations: ChangeOperation[];
-}
-
-export type ApprovalStatus =
-  | "awaiting"
-  | "deciding"
-  | "approved"
-  | "answered"
-  | "applied"
-  | "failed"
-  | "rejected"
-  | "expired"
-  | "stopped";
-
-/** What the assistant asks: to change files, to run a command or script in its sandbox, or questions. */
-export type ApprovalKind = "change" | "command" | "question";
-
-/** A dangerous command, or a script as a whole, the assistant asks to run in its sandbox. */
-export interface CommandRequest {
-  text: string;
-  description?: string;
-  script?: boolean;
-  /** It may be allowed for the rest of the conversation. */
-  forSession?: boolean;
-}
-
-/** One question of the assistant's clarify tool. */
-export interface AssistantQuestion {
-  id: string;
-  text: string;
-  choices?: string[];
-  multiSelect?: boolean;
-}
-
+export type {
+  AssistantChange,
+  AssistantMemory,
+  AssistantSession,
+  AssistantStatus,
+  AssistantTask,
+  AssistantTaskRun,
+} from "../api.generated";
 /** Something the assistant asked the member in a running turn, waiting for or given an answer. */
-export interface Approval {
-  requestId: string;
-  kind: ApprovalKind;
-  /** The live conversation (Hermes's runtime id) it was asked in. */
-  sessionId: string;
-  storedSessionId?: string;
-  status: ApprovalStatus;
-  createdAt: number;
-  change?: AssistantChange;
-  command?: CommandRequest;
-  questions?: AssistantQuestion[];
-  answers?: Record<string, string | null>;
-}
-
-const base = "/api/v1/assistant";
-const json = (method: string, value: unknown): RequestInit => ({
-  method,
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(value),
-});
-
-export const assistantStatus = () => request<AssistantStatus>(`${base}/status`);
-export const listSessions = () =>
-  request<{ sessions: AssistantSession[] }>(`${base}/sessions`).then((body) => body.sessions);
-export const renameSession = (id: string, title: string) =>
-  request<{ id: string; title: string }>(`${base}/sessions/${encodeURIComponent(id)}`, json("PATCH", { title }), true);
-export const deleteSession = (id: string) =>
-  request<void>(`${base}/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }, true);
-export const sessionMessages = (id: string) =>
-  request<{ messages: SessionMessage[] }>(`${base}/sessions/${encodeURIComponent(id)}/messages`).then(
-    (body) => body.messages,
-  );
-export const listApprovals = () =>
-  request<{ approvals: Approval[] }>(`${base}/approvals`).then((body) => body.approvals);
-export const decideApproval = (requestId: string, confirm: boolean, forSession = false) =>
-  request<{ approval: Approval }>(
-    `${base}/approvals/${encodeURIComponent(requestId)}/${confirm ? "confirm" : "reject"}`,
-    forSession ? json("POST", { forSession: true }) : { method: "POST" },
-    true,
-  ).then((body) => body.approval);
-export const answerQuestions = (requestId: string, answers: Record<string, string | null>) =>
-  request<{ approval: Approval }>(
-    `${base}/approvals/${encodeURIComponent(requestId)}/answer`,
-    json("POST", { answers }),
-    true,
-  ).then((body) => body.approval);
-
+export type Approval = AssistantApproval;
+export type ApprovalStatus = Approval["status"];
+/** What the assistant asks: to change files, to run a command or script in its sandbox, or questions. */
+export type ApprovalKind = Approval["kind"];
+export type ChangeOperation = NonNullable<Approval["change"]>["operations"][number];
+/** A dangerous command, or a script as a whole, the assistant asks to run in its sandbox. */
+export type CommandRequest = NonNullable<Approval["command"]>;
+/** One question of the assistant's clarify tool. */
+export type AssistantQuestion = NonNullable<Approval["questions"]>[number];
 /** One entry of the assistant's memory: its notes, or what it noted about the member. */
-export interface MemoryItem {
-  id: string;
-  store: "memory" | "profile";
-  text: string;
-  updatedAt?: number;
-}
-
+export type MemoryItem = AssistantMemory["memories"][number];
 /** A skill the assistant made or used; A-NAS's own are not listed. */
-export interface LearnedSkill {
-  id: string;
-  category?: string;
-  createdBy?: string;
-  useCount: number;
-  updatedAt?: number;
-}
+export type LearnedSkill = AssistantMemory["skills"][number];
+export type MemoryCleared = Awaited<ReturnType<typeof clearMemory>>;
 
-export interface AssistantMemory {
-  memories: MemoryItem[];
-  skills: LearnedSkill[];
-}
+const session = (sessionId: string) => ({ params: { path: { sessionId } } });
+const request = (requestId: string) => ({ params: { path: { requestId } } });
+const task = (taskId: string) => ({ params: { path: { taskId } } });
 
-export interface MemoryCleared {
-  memories: number;
-  skills: number;
-  conversations: number;
-  busy: number;
-}
+export const assistantStatus = () => call(client.GET("/api/v1/assistant/status"));
+export const listSessions = async () => (await call(client.GET("/api/v1/assistant/sessions"))).sessions;
+export const renameSession = (sessionId: string, title: string) =>
+  call(client.PATCH("/api/v1/assistant/sessions/{sessionId}", { ...session(sessionId), body: { title } }));
+export const deleteSession = (sessionId: string) =>
+  call(client.DELETE("/api/v1/assistant/sessions/{sessionId}", session(sessionId)));
+// The contract passes Hermes's stored messages through; their shape is Hermes's.
+export const sessionMessages = async (sessionId: string) =>
+  (await call(client.GET("/api/v1/assistant/sessions/{sessionId}/messages", session(sessionId))))
+    .messages as unknown as SessionMessage[];
+export const listApprovals = async () => (await call(client.GET("/api/v1/assistant/approvals"))).approvals;
+export const decideApproval = async (requestId: string, confirm: boolean, forSession = false) =>
+  (
+    await call(
+      confirm
+        ? client.POST("/api/v1/assistant/approvals/{requestId}/confirm", {
+            ...request(requestId),
+            body: forSession ? { forSession: true } : undefined,
+          })
+        : client.POST("/api/v1/assistant/approvals/{requestId}/reject", request(requestId)),
+    )
+  ).approval;
+export const answerQuestions = async (requestId: string, answers: Record<string, string | null>) =>
+  (
+    await call(
+      client.POST("/api/v1/assistant/approvals/{requestId}/answer", { ...request(requestId), body: { answers } }),
+    )
+  ).approval;
 
-export const getMemory = () => request<AssistantMemory>(`${base}/memory`);
-export const memoryItem = (id: string) =>
-  request<{ id: string; kind: string; content: string }>(`${base}/memory/items/${encodeURIComponent(id)}`);
-export const forgetMemoryItem = (id: string) =>
-  request<void>(`${base}/memory/items/${encodeURIComponent(id)}`, { method: "DELETE" }, true);
+export const getMemory = () => call(client.GET("/api/v1/assistant/memory"));
+export const memoryItem = (memoryId: string) =>
+  call(client.GET("/api/v1/assistant/memory/items/{memoryId}", { params: { path: { memoryId } } }));
+export const forgetMemoryItem = (memoryId: string) =>
+  call(client.DELETE("/api/v1/assistant/memory/items/{memoryId}", { params: { path: { memoryId } } }));
 export const clearMemory = (conversations: boolean) =>
-  request<MemoryCleared>(`${base}/memory/clear`, json("POST", { conversations }), true);
+  call(client.POST("/api/v1/assistant/memory/clear", { body: { conversations } }));
 
-/**
- * One of the member's scheduled tasks: a Hermes cron job, made in a conversation.
- * It runs when due whether the window is open or not, with nobody there to confirm a change.
- */
-export interface AssistantTask {
-  id: string;
-  name: string;
-  /** What the task asks VNAS each time it runs. */
-  prompt: string;
-  schedule: {
-    kind: "cron" | "interval" | "once" | string;
-    expr?: string;
-    minutes?: number;
-    runAt?: number;
-    display: string;
-  };
-  /** scheduled, paused, completed (a one-off that ran) or error (the schedule cannot be computed). */
-  state: string;
-  running?: boolean;
-  nextRunAt?: number;
-  lastRunAt?: number;
-  /** ok, or what went wrong. */
-  lastStatus?: string;
-  lastError?: string;
-  createdAt?: number;
-  completed: number;
-  times?: number;
-}
-
-/** A run of a task; one with an id is a conversation. */
-export interface AssistantTaskRun {
-  id?: string;
-  startedAt: number;
-  endedAt?: number;
-  messageCount: number;
-}
-
-const task = (id: string) => `${base}/tasks/${encodeURIComponent(id)}`;
-export const listTasks = () => request<{ tasks: AssistantTask[] }>(`${base}/tasks`).then((body) => body.tasks);
-export const taskRuns = (id: string) =>
-  request<{ runs: AssistantTaskRun[] }>(`${task(id)}/runs`).then((body) => body.runs);
-export const pauseTask = (id: string) =>
-  request<{ task: AssistantTask }>(`${task(id)}/pause`, { method: "POST" }, true).then((body) => body.task);
-export const resumeTask = (id: string) =>
-  request<{ task: AssistantTask }>(`${task(id)}/resume`, { method: "POST" }, true).then((body) => body.task);
+export const listTasks = async () => (await call(client.GET("/api/v1/assistant/tasks"))).tasks;
+export const taskRuns = async (taskId: string) =>
+  (await call(client.GET("/api/v1/assistant/tasks/{taskId}/runs", task(taskId)))).runs;
+export const pauseTask = async (taskId: string) =>
+  (await call(client.POST("/api/v1/assistant/tasks/{taskId}/pause", task(taskId)))).task;
+export const resumeTask = async (taskId: string) =>
+  (await call(client.POST("/api/v1/assistant/tasks/{taskId}/resume", task(taskId)))).task;
 /** Runs a task now; finished is false when it goes on after the answer. */
-export const runTask = (id: string) =>
-  request<{ finished: boolean; task?: AssistantTask }>(`${task(id)}/run`, { method: "POST" }, true);
-export const deleteTask = (id: string) => request<void>(task(id), { method: "DELETE" }, true);
+export const runTask = (taskId: string) => call(client.POST("/api/v1/assistant/tasks/{taskId}/run", task(taskId)));
+export const deleteTask = (taskId: string) => call(client.DELETE("/api/v1/assistant/tasks/{taskId}", task(taskId)));
 
 /** The gateway WebSocket on this origin; the session cookie authenticates it. */
 export function gatewayUrl(): string {
   const { protocol, host } = window.location;
-  return `${protocol === "https:" ? "wss:" : "ws:"}//${host}${base}/ws`;
+  return `${protocol === "https:" ? "wss:" : "ws:"}//${host}/api/v1/assistant/ws`;
 }
 
 // failureText puts an assistant API failure in the member's words; the

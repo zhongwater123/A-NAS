@@ -19,6 +19,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/openapitest"
 )
 
 // routedProduct is a product with every API mounted, behind stand-ins that
@@ -52,15 +53,6 @@ func routedProduct(t *testing.T) (http.Handler, *http.Cookie) {
 	return product, &http.Cookie{Name: "anas_session", Value: session.Token}
 }
 
-func loadSpec(t *testing.T) *openapi3.T {
-	t.Helper()
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatalf("load OpenAPI document: %v", err)
-	}
-	return document
-}
-
 var pathParameter = regexp.MustCompile(`\{[^}]+\}`)
 
 // Every operation in the specification has a route, and the guard answers
@@ -68,7 +60,7 @@ var pathParameter = regexp.MustCompile(`\{[^}]+\}`)
 // 403 without the CSRF token for anything but a read (#192).
 func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 	product, cookie := routedProduct(t)
-	document := loadSpec(t)
+	document := openapitest.Document(t)
 	errorCode := func(recorder *httptest.ResponseRecorder) string {
 		var body struct {
 			Error struct {
@@ -118,7 +110,7 @@ func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 // that need no session are exactly the operations without security.
 func TestEveryRouteIsSpecifiedWithItsPosture(t *testing.T) {
 	product, _ := routedProduct(t)
-	document := loadSpec(t)
+	document := openapitest.Document(t)
 	specified := map[string]*openapi3.Operation{}
 	var paths []string
 	for path, item := range document.Paths.Map() {

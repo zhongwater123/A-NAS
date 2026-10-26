@@ -93,7 +93,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
   - 请求体必须声明为 `application/json`，不超过限额（默认 1 MiB，超出回 413 `request_too_large`），不含未知字段，并且只有一个 JSON 值；
   - 响应编码失败时记日志并回 500，不 panic。
 - 契约由 `internal/httpapi` 的测试保证：
-  - 遍历 `api/openapi.yaml` 的每个操作，检查路由存在、没有 Cookie 时回 401、非 GET 请求没有 CSRF 时回 403；
+  - 遍历接口契约（`make api` 打包的 `api/openapi.bundle.yaml`）的每个操作，检查路由存在、没有 Cookie 时回 401、非 GET 请求没有 CSRF 时回 403；
   - 表中每条路由都要在规格中，并且 `public` 与规格中的 `security: []` 一致；
   - 产品测试的每次请求都经同一个包装器按规格校验，规格未声明的状态码同样失败（kin-openapi 的 `IncludeResponseStatus`）。
 
@@ -138,7 +138,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/httpapi` | 产品 API 的组合：路由表与姿态检查、登录与会话、账号、存储、宿主机状态与终端，以及挂在前缀下的各接口；见上文“HTTP 接口约定” | 已实现；规格的每个操作都有路由与姿态测试，产品测试按规格校验每次响应 |
 | `internal/apiroute` / `internal/httpjson` | 路由表的条目与姿态；JSON 读写、请求体规则与错误形状 | 已实现，单元测试覆盖 |
 | `internal/accountsapi` / `internal/filesapi` / `internal/musicapi` / `internal/personalizationapi` / `internal/activityapi` / `internal/systemlogapi` / `internal/taskmanagerapi` / `internal/filepreviewapi` | 各领域的路由与错误映射：昵称与头像、文件与快照、音乐、个性化、活动记录、服务日志、任务管理器、文件预览 | 已实现，经 `internal/httpapi` 的产品测试与契约测试覆盖 |
-| `api/openapi.yaml` | 客户端产品接口契约 | OpenAPI 3.1 |
+| `api/` | 客户端产品接口契约：根文件 `openapi.yaml` 按领域引用 `paths/` 与 `components/` 中的文件；`make api` 打包为 `openapi.bundle.yaml`（Go 契约测试加载它），并生成 Web 客户端的类型与外壳响应的校验 | OpenAPI 3.1，见[接口契约](../development/LOCAL_ENVIRONMENT.md#接口契约) |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |
 | `docs/specs` | 可验收的产品行为 | 见[规格索引](../specs/README.md) |
 | `docs/investigations` | 复杂缺陷的证据和根因 | 见[调查索引](../investigations/README.md) |

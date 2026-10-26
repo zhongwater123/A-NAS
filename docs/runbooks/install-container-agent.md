@@ -172,7 +172,7 @@ stat -c '%a %U:%G %n' \
   /usr/local/lib/a-nas/anas-container-agent
 ```
 
-替换已在运行的代理时，`enable --now` 不会重启它，改用 `systemctl restart anas-container-agent.service`。先在应用中心确认没有正在进行的安装：停止代理会取消安装并用 `compose down` 回滚，应用显示“容器代理停止，安装被中断，已回滚”，需要重新安装；正在进行的卸载会照常完成（[调查](../investigations/2026-10-21-failed-app-install-shown-as-installed.md)）。
+替换已在运行的代理时，`enable --now` 不会重启它，改用 `systemctl restart anas-container-agent.service`。自 [#176](https://github.com/zhongwater123/A-NAS/issues/176) 起，代理自己从宿主机账号库读取应用账号 `app-<id>`，与产品服务之间的请求格式不变（产品服务照旧发送 UID/GID，新代理只在账号创建前用它显示计划），所以代理与产品服务可以按任意顺序更新。先在应用中心确认没有正在进行的安装：停止代理会取消安装并用 `compose down` 回滚，应用显示“容器代理停止，安装被中断，已回滚”，需要重新安装；正在进行的卸载会照常完成（[调查](../investigations/2026-10-21-failed-app-install-shown-as-installed.md)）。
 
 完成标准：运行目录为 `750 anas-container:anas-container`，socket 为 `660 anas-container:anas-container`，二进制为 `755 root:root`。应用数据根为 `/srv/a-nas/data/apps`，共享根为 `/srv/a-nas/data/spaces/shared`；只有挂载点改变时才通过 `/etc/a-nas/container-agent.env` 修改，并且两个根仍须位于同一数据卷。
 

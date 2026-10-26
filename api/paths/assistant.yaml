@@ -1,0 +1,254 @@
+/api/v1/assistant/status:
+  get:
+    operationId: getAssistantStatus
+    summary: "Whether the signed-in member has an AI assistant instance (ADR 0024)"
+    description: "Answers 503 assistant_unavailable when the assistant is not enabled on this device; the desktop then shows the app as planned."
+    responses:
+      "200": { description: Status, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantStatus" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/ws:
+  get:
+    operationId: openAssistantGateway
+    summary: "The member's own assistant over JSON-RPC, as Hermes Desktop talks to hermes serve (ADR 0024 decision 9)"
+    description: >-
+      A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The
+      product service passes only the allowed methods with their allowed parameters (session.create, session.resume,
+      session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title,
+      session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602.
+      client.capabilities, approval.pending and approval.received are answered by the product service itself:
+      requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an
+      AssistantApproval. The connection reaches the instance through the session gate (decision 10) and closes when
+      the member's session ends.
+    responses:
+      "101": { description: Switched to WebSocket }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "426": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/sessions:
+  get:
+    operationId: listAssistantSessions
+    summary: "The member's conversations with at least one message, newest activity first, from the member's own assistant instance"
+    description: "A new conversation is started over the gateway (session.create) and is stored by Hermes with its first message."
+    responses:
+      "200": { description: Conversations, content: { application/json: { schema: { type: object, additionalProperties: false, required: [sessions], properties: { sessions: { type: array, items: { $ref: "../components/assistant.yaml#/schemas/AssistantSession" } } } } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "502": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/sessions/{sessionId}:
+  parameters: [{ $ref: "../components/assistant.yaml#/parameters/AssistantSessionID" }]
+  patch:
+    operationId: renameAssistantSession
+    summary: "Rename a stored conversation; title_in_use when another conversation of the member has the title"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [title], properties: { title: { type: string, minLength: 1, maxLength: 100 } } } } } }
+    responses:
+      "200": { description: The new title, content: { application/json: { schema: { type: object, additionalProperties: false, required: [id, title], properties: { id: { type: string }, title: { type: string } } } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "502": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: deleteAssistantSession
+    summary: Delete a conversation and its transcript
+    description: "The window first stops and closes the conversation over the gateway when it is live, as Hermes Desktop does."
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Deleted }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "502": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/sessions/{sessionId}/messages:
+  parameters: [{ $ref: "../components/assistant.yaml#/parameters/AssistantSessionID" }]
+  get:
+    operationId: getAssistantMessages
+    summary: "A conversation's transcript in Hermes Agent's own message form"
+    description: "The desktop folds these rows into chat messages with Hermes Desktop's transcript model (web/src/assistant/hermes), so the rows are passed through as Hermes stores them."
+    responses:
+      "200": { description: Transcript, content: { application/json: { schema: { type: object, additionalProperties: false, required: [messages], properties: { messages: { type: array, items: { $ref: "../components/assistant.yaml#/schemas/AssistantMessage" } } } } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "502": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/memory:
+  get:
+    operationId: getAssistantMemory
+    summary: "What the member's assistant remembers and the skills it made, from Hermes's learning graph; A-NAS's own skills are left out"
+    responses:
+      "200": { description: The memory, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantMemory" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/memory/items/{memoryId}:
+  parameters: [{ $ref: "../components/assistant.yaml#/parameters/AssistantMemoryID" }]
+  get:
+    operationId: getAssistantMemoryItem
+    summary: "The whole text of one memory or skill (its SKILL.md)"
+    responses:
+      "200": { description: The text, content: { application/json: { schema: { type: object, additionalProperties: false, required: [id, kind, content], properties: { id: { type: string }, kind: { type: string, enum: [memory, skill] }, content: { type: string } } } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: deleteAssistantMemoryItem
+    summary: "Forget one memory, or move one skill into Hermes's archive; new conversations no longer carry it"
+    description: "memory_changed when the memory changed since it was read; read it again."
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Forgotten }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/memory/clear:
+  post:
+    operationId: clearAssistantMemory
+    summary: "Forget every memory and skill; with conversations, also delete every conversation, which is the only way to clear it for good"
+    description: "A conversation with a turn running is kept and counted as busy."
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: false, content: { application/json: { schema: { type: object, additionalProperties: false, properties: { conversations: { type: boolean } } } } } }
+    responses:
+      "200": { description: What was cleared, content: { application/json: { schema: { type: object, additionalProperties: false, required: [memories, skills, conversations, busy], properties: { memories: { type: integer }, skills: { type: integer }, conversations: { type: integer }, busy: { type: integer } } } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/tasks:
+  get:
+    operationId: listAssistantTasks
+    summary: "The member's scheduled tasks (Hermes cron jobs), made in a conversation with Hermes's cronjob tool"
+    description: "A task runs when due in the member's sandbox, whether the assistant runs or not, and nobody is there to confirm a change, so a change it would make is refused (ADR 0024 decision 8). These routes never make or edit a task."
+    responses:
+      "200": { description: Tasks, content: { application/json: { schema: { type: object, additionalProperties: false, required: [tasks], properties: { tasks: { type: array, items: { $ref: "../components/assistant.yaml#/schemas/AssistantTask" } } } } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "502": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/tasks/{taskId}:
+  parameters: [{ $ref: "../components/assistant.yaml#/parameters/AssistantTaskID" }]
+  delete:
+    operationId: deleteAssistantTask
+    summary: "Delete a task with its runs; a run that is still being written stays"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Deleted }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/tasks/{taskId}/runs:
+  parameters: [{ $ref: "../components/assistant.yaml#/parameters/AssistantTaskID" }]
+  get:
+    operationId: listAssistantTaskRuns
+    summary: "A task's latest runs, newest first; a run with an id is a conversation, read with the session routes"
+    responses:
+      "200": { description: Runs, content: { application/json: { schema: { type: object, additionalProperties: false, required: [runs], properties: { runs: { type: array, items: { $ref: "../components/assistant.yaml#/schemas/AssistantTaskRun" } } } } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/tasks/{taskId}/pause:
+  parameters: [{ $ref: "../components/assistant.yaml#/parameters/AssistantTaskID" }]
+  post:
+    operationId: pauseAssistantTask
+    summary: "Stop a task from running when due, until it is resumed"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The task, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantTaskEnvelope" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/tasks/{taskId}/resume:
+  parameters: [{ $ref: "../components/assistant.yaml#/parameters/AssistantTaskID" }]
+  post:
+    operationId: resumeAssistantTask
+    summary: "Let a paused task run when due again"
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The task, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantTaskEnvelope" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/tasks/{taskId}/run:
+  parameters: [{ $ref: "../components/assistant.yaml#/parameters/AssistantTaskID" }]
+  post:
+    operationId: runAssistantTask
+    summary: "Run a task now in the member's instance, as Hermes Desktop's run now; Hermes resumes a paused task it runs"
+    description: "200 when the run ended within a few seconds; otherwise 202 and the run goes on (task_running when it is already running). The run's end shows in the task and as an assistant_task notification."
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The run ended, content: { application/json: { schema: { type: object, additionalProperties: false, required: [finished, task], properties: { finished: { type: boolean, enum: [true] }, task: { $ref: "../components/assistant.yaml#/schemas/AssistantTask" } } } } } }
+      "202": { description: The run started and goes on, content: { application/json: { schema: { type: object, additionalProperties: false, required: [finished], properties: { finished: { type: boolean, enum: [false] } } } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/approvals:
+  get:
+    operationId: listAssistantApprovals
+    summary: "The member's confirmation cards: the ones awaiting an answer, and those decided in the last hour"
+    description: "Each card is one call of 提交更改 that asked for approval in a running turn; nothing outside the assistant's own directory changes until the member confirms it."
+    responses:
+      "200": { description: Cards, content: { application/json: { schema: { type: object, additionalProperties: false, required: [approvals], properties: { approvals: { type: array, items: { $ref: "../components/assistant.yaml#/schemas/AssistantApproval" } } } } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/approvals/{requestId}/confirm:
+  parameters: [{ $ref: "../components/assistant.yaml#/parameters/AssistantRequestID" }]
+  post:
+    operationId: confirmAssistantApproval
+    summary: "Confirm a card: for a change the executor records the member's one-time grant against this session, then the assistant is told yes and applies it as the member; a command runs in the sandbox"
+    description: "approval_expired when the assistant no longer waits (the time ran out or the turn was stopped); the grant is then void. A question is answered with /answer instead (invalid_answer)."
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              forSession: { type: boolean, description: "Allow a command (with forSession) for the rest of its conversation." }
+    responses:
+      "200": { description: The card, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantApprovalEnvelope" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "502": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/approvals/{requestId}/reject:
+  parameters: [{ $ref: "../components/assistant.yaml#/parameters/AssistantRequestID" }]
+  post:
+    operationId: rejectAssistantApproval
+    summary: Refuse a card; nothing changes and the assistant is told no (a question is skipped)
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The card, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantApprovalEnvelope" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "502": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant/approvals/{requestId}/answer:
+  parameters: [{ $ref: "../components/assistant.yaml#/parameters/AssistantRequestID" }]
+  post:
+    operationId: answerAssistantQuestion
+    summary: "Answer a question card: the answers go back to the assistant as the reply to its question"
+    description: "invalid_answer when the card is not a question or an answer names no question of it or is over 4,000 characters; approval_expired when the assistant no longer waits."
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [answers]
+            properties:
+              answers:
+                type: object
+                description: "Answer by question id; null leaves a question out."
+                additionalProperties: { type: [string, "null"], maxLength: 4000 }
+    responses:
+      "200": { description: The card, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantApprovalEnvelope" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }

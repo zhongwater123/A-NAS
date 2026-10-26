@@ -1,133 +1,55 @@
-import { request } from "../api";
+import { call, client } from "../api";
+import type { MusicSources, MusicStatus, MusicTrack } from "../api.generated";
 
-export type TrackFormat =
-  | "mp3"
-  | "flac"
-  | "m4a"
-  | "aac"
-  | "ogg"
-  | "opus"
-  | "wav"
-  | "ape"
-  | "wma"
-  | "wv"
-  | "aiff"
-  | "dsf"
-  | "dff";
+export type {
+  MusicFavorite as Favorite,
+  MusicLibrary,
+  MusicPlay as Play,
+  MusicPlaylist as Playlist,
+  MusicSources,
+  MusicStatus,
+  MusicTrack as Track,
+} from "../api.generated";
+export type TrackFormat = MusicTrack["format"];
+export type ScanStatus = MusicStatus["scan"];
+export type MusicSource = MusicSources["items"][number];
 
-export interface Track {
-  id: string;
-  spaceId: string;
-  // Folder path relative to the space root; "" at the root.
-  folder: string;
-  name: string;
-  sizeBytes: number;
-  format: TrackFormat;
-  codec?: string;
-  title: string;
-  artist?: string;
-  artists?: string[];
-  album?: string;
-  albumArtist?: string;
-  albumId: string;
-  genres?: string[];
-  year?: number;
-  trackNo?: number;
-  discNo?: number;
-  durationMs?: number;
-  coverId?: string;
-  lyrics?: boolean;
-  // The device decodes this track while it plays; its stream cannot seek, so
-  // the player asks for a new start instead.
-  transcode?: boolean;
-  addedAt: string;
-}
-
-export interface MusicLibrary {
-  version: number;
-  items: Track[];
-}
-
-export interface ScanStatus {
-  state: "idle" | "scanning";
-  phase?: "listing" | "reading" | "measuring";
-  done: number;
-  total: number;
-  startedAt?: string;
-  finishedAt?: string;
-  error?: "volume_unavailable" | "failed";
-}
-
-export interface MusicStatus {
-  version: number;
-  tracks: number;
-  scan: ScanStatus;
-}
-
-export interface MusicSource {
-  spaceId: string;
-  spaceKind: "private" | "shared";
-  folderId?: string;
-  path: string;
-}
-export interface MusicSources {
-  custom: boolean;
-  items: MusicSource[];
-}
-
-export interface Favorite {
-  trackId: string;
-  addedAt: string;
-}
-export interface Play {
-  trackId: string;
-  playedAt: string;
-  plays: number;
-}
-export interface Playlist {
-  id: string;
-  name: string;
-  trackIds: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-const base = "/api/v1/music";
 const id = encodeURIComponent;
-const json = (method: string, value: unknown): RequestInit => ({
-  method,
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(value),
-});
+const track = (trackId: string) => ({ params: { path: { trackId } } });
+const playlist = (playlistId: string) => ({ params: { path: { playlistId } } });
 
-export const getMusicStatus = () => request<MusicStatus>(`${base}/library`);
-export const scanMusic = () => request<MusicStatus>(`${base}/library/scan`, { method: "POST" }, true);
-export const listTracks = () => request<MusicLibrary>(`${base}/tracks`);
+export const getMusicStatus = () => call(client.GET("/api/v1/music/library"));
+export const scanMusic = () => call(client.POST("/api/v1/music/library/scan"));
+export const listTracks = () => call(client.GET("/api/v1/music/tracks"));
 export const getLyrics = async (trackId: string) =>
-  (await request<{ text: string }>(`${base}/tracks/${id(trackId)}/lyrics`)).text;
+  (await call(client.GET("/api/v1/music/tracks/{trackId}/lyrics", track(trackId)))).text;
 export const streamURL = (trackId: string, start = 0) =>
-  `${base}/tracks/${id(trackId)}/stream${start > 0 ? `?start=${start.toFixed(3)}` : ""}`;
+  `/api/v1/music/tracks/${id(trackId)}/stream${start > 0 ? `?start=${start.toFixed(3)}` : ""}`;
 export const coverURL = (coverId: string, size: "small" | "large" = "small") =>
-  `${base}/covers/${id(coverId)}?size=${size}`;
+  `/api/v1/music/covers/${id(coverId)}?size=${size}`;
 
-export const listSources = () => request<MusicSources>(`${base}/sources`);
+export const listSources = () => call(client.GET("/api/v1/music/sources"));
 export const setSources = (custom: boolean, items: Array<{ spaceId: string; folderId?: string }>) =>
-  request<MusicSources>(`${base}/sources`, json("PUT", { custom, items }), true);
+  call(client.PUT("/api/v1/music/sources", { body: { custom, items } }));
 
-export const listFavorites = async () => (await request<{ items: Favorite[] }>(`${base}/favorites`)).items;
+export const listFavorites = async () => (await call(client.GET("/api/v1/music/favorites"))).items;
 export const setFavorite = (trackId: string, favorite: boolean) =>
-  request<void>(`${base}/favorites/${id(trackId)}`, { method: favorite ? "PUT" : "DELETE" }, true);
+  call(
+    favorite
+      ? client.PUT("/api/v1/music/favorites/{trackId}", track(trackId))
+      : client.DELETE("/api/v1/music/favorites/{trackId}", track(trackId)),
+  );
 
-export const listRecent = async () => (await request<{ items: Play[] }>(`${base}/recent`)).items;
-export const clearRecent = () => request<void>(`${base}/recent`, { method: "DELETE" }, true);
-export const recordPlay = (trackId: string) => request<void>(`${base}/plays`, json("POST", { trackId }), true);
+export const listRecent = async () => (await call(client.GET("/api/v1/music/recent"))).items;
+export const clearRecent = () => call(client.DELETE("/api/v1/music/recent"));
+export const recordPlay = (trackId: string) => call(client.POST("/api/v1/music/plays", { body: { trackId } }));
 
-export const listPlaylists = async () => (await request<{ items: Playlist[] }>(`${base}/playlists`)).items;
+export const listPlaylists = async () => (await call(client.GET("/api/v1/music/playlists"))).items;
 export const createPlaylist = (name: string, trackIds: string[] = []) =>
-  request<Playlist>(`${base}/playlists`, json("POST", { name, trackIds }), true);
+  call(client.POST("/api/v1/music/playlists", { body: { name, trackIds } }));
 export const updatePlaylist = (playlistId: string, change: { name?: string; trackIds?: string[] }) =>
-  request<Playlist>(`${base}/playlists/${id(playlistId)}`, json("PATCH", change), true);
+  call(client.PATCH("/api/v1/music/playlists/{playlistId}", { ...playlist(playlistId), body: change }));
 export const addToPlaylist = (playlistId: string, trackIds: string[]) =>
-  request<Playlist>(`${base}/playlists/${id(playlistId)}/tracks`, json("POST", { trackIds }), true);
+  call(client.POST("/api/v1/music/playlists/{playlistId}/tracks", { ...playlist(playlistId), body: { trackIds } }));
 export const deletePlaylist = (playlistId: string) =>
-  request<void>(`${base}/playlists/${id(playlistId)}`, { method: "DELETE" }, true);
+  call(client.DELETE("/api/v1/music/playlists/{playlistId}", playlist(playlistId)));
