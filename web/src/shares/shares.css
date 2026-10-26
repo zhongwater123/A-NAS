@@ -1765,7 +1765,8 @@ small.tone-uncertain {
   font-weight: 500;
 }
 .sh-input-note textarea {
-  min-height: 50px;
+  height: 44px;
+  min-height: 44px;
   padding: 2px 4px 0 0;
   font-size: 13.5px;
   line-height: 1.6;
@@ -1853,13 +1854,18 @@ small.tone-uncertain {
   height: 15px;
   margin-left: -1px;
 }
+/* The picker has a fixed height whatever the category holds; its grid
+   scrolls inside it, so switching categories never moves or resizes it. */
 .sh-emoji {
   position: absolute;
   z-index: 20;
-  left: 0;
+  right: 0;
   bottom: calc(100% + 8px);
   width: 318px;
   max-width: calc(100vw - 40px);
+  height: 268px;
+  display: flex;
+  flex-direction: column;
   padding: 10px;
   border: 1px solid var(--sh-line);
   border-radius: 14px;
@@ -1871,25 +1877,30 @@ small.tone-uncertain {
 .sh-input-wrap {
   position: relative;
 }
-.sh-input-wrap-chat .sh-emoji {
-  left: auto;
-  right: 0;
-}
-/* The send dialog's picker opens below the note in the dialog's flow, so it
-   covers neither the note nor the recipients above it. */
+/* The send dialog's picker opens below the note in the dialog's flow and
+   takes its height from the recipient list, so it covers neither the note,
+   the recipients nor the dialog's buttons. */
 .sh-input-wrap-note .sh-emoji {
   position: static;
+  width: auto;
+  max-width: none;
+  height: 140px;
   margin-top: 8px;
-  box-shadow: 0 8px 24px rgba(18, 28, 42, 0.12);
+  padding: 8px 8px 4px;
+  box-shadow: none;
 }
 .sh-emoji-head {
+  flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 6px 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--sh-line);
 }
 .sh-emoji-search {
   min-width: 0;
-  flex: 1;
+  flex: 1 1 140px;
   height: 30px;
   display: flex;
   align-items: center;
@@ -1916,6 +1927,7 @@ small.tone-uncertain {
 .sh-emoji-close {
   width: 28px;
   height: 28px;
+  flex: none;
   display: grid;
   place-items: center;
   padding: 0;
@@ -1934,14 +1946,16 @@ small.tone-uncertain {
   height: 15px;
 }
 .sh-emoji nav {
+  flex: none;
   display: flex;
+  gap: 2px;
+}
+.sh-input-wrap-chat .sh-emoji nav {
+  flex-basis: 100%;
   justify-content: space-between;
-  margin: 8px 0 0;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--sh-line);
 }
 .sh-emoji nav button {
-  width: 36px;
+  width: 34px;
   height: 30px;
   padding: 0;
   border: 0;
@@ -1965,19 +1979,14 @@ small.tone-uncertain {
   filter: none;
   background: var(--sh-accent-soft);
 }
-.sh-emoji-caption {
-  margin: 7px 2px 4px;
-  color: var(--sh-faint);
-  font-size: 11.5px;
-  font-weight: 600;
-}
-/* Every category gets the same height, so switching never moves the panel. */
 .sh-emoji-grid {
-  height: 178px;
+  min-height: 0;
+  flex: 1;
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
   align-content: start;
   gap: 2px;
+  margin-top: 4px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -2329,9 +2338,11 @@ small.tone-uncertain {
   backdrop-filter: blur(4px);
   animation: sh-fade 0.16s ease-out;
 }
+/* A fixed height: opening the emoji picker takes its room from the
+   recipient list instead of growing the dialog. */
 .sh-compose {
   width: min(600px, 100%);
-  max-height: min(90dvh, 820px);
+  height: min(680px, 90dvh);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2353,22 +2364,27 @@ small.tone-uncertain {
   font-weight: 650;
   letter-spacing: -0.2px;
 }
+/* Scrolls only when the window is too short for one row of members, the
+   note and the picker together. */
 .sh-compose-body {
   min-height: 0;
   flex: 1;
-  display: grid;
-  align-content: start;
-  gap: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   overflow-y: auto;
   padding: 12px 24px 18px;
   overscroll-behavior: contain;
+}
+.sh-compose-body > * {
+  flex: none;
 }
 .sh-compose-items {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 0 14px;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border-radius: 14px;
   background: var(--sh-bg);
 }
@@ -2420,30 +2436,99 @@ small.tone-uncertain {
   padding-left: 9px;
   color: var(--sh-muted);
 }
-.sh-compose-people {
+.sh-compose-body > .sh-compose-people {
   min-width: 0;
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
   margin: 0;
   padding: 0;
   border: 0;
 }
-.sh-compose-people legend {
-  width: 100%;
+.sh-compose-people-head {
+  height: 26px;
+  flex: none;
   display: flex;
-  justify-content: space-between;
-  margin-bottom: 10px;
-  padding: 0;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
   color: var(--sh-ink);
   font-size: 13px;
   font-weight: 650;
+  white-space: nowrap;
 }
-.sh-compose-people legend span {
+.sh-compose-people-head > p {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  overflow: hidden;
+  color: var(--sh-faint);
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+.sh-compose-people-head > strong {
+  flex: none;
+  margin-left: auto;
   color: var(--sh-accent);
   font-weight: 600;
 }
+/* Many chosen members scroll sideways instead of wrapping onto new rows. */
+.sh-chosen {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: thin;
+}
+.sh-chosen li {
+  max-width: 160px;
+  height: 26px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 2px 0 4px;
+  border-radius: 7px;
+  color: var(--sh-accent);
+  background: var(--sh-accent-soft);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sh-chosen li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sh-chosen button {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.sh-chosen button:hover {
+  background: var(--sh-accent-soft-2);
+}
+.sh-chosen button svg {
+  width: 12px;
+  height: 12px;
+}
 .sh-compose-tools {
+  flex: none;
   display: flex;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .sh-compose-tools .sh-search {
   flex: 1;
@@ -2454,13 +2539,18 @@ small.tone-uncertain {
   border-color: var(--sh-accent-bright);
   background: #fff;
 }
+/* Takes the dialog's spare height and scrolls inside it, keeping at least
+   one row of members. */
 .sh-people {
-  max-height: 244px;
+  min-height: 117px;
+  flex: 1 1 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  align-content: start;
   gap: 2px;
   overflow-y: auto;
-  padding: 6px 2px;
+  overscroll-behavior: contain;
+  padding: 4px 2px;
 }
 .sh-person {
   position: relative;
@@ -2468,7 +2558,7 @@ small.tone-uncertain {
   display: grid;
   justify-items: center;
   gap: 7px;
-  padding: 10px 4px 9px;
+  padding: 8px 4px 6px;
   border-radius: 12px;
   text-align: center;
   cursor: pointer;
@@ -2616,6 +2706,24 @@ small.tone-uncertain {
   .sh-dialog-foot .sh-foot-note {
     order: -1;
     flex-basis: 100%;
+  }
+}
+
+@media (max-height: 640px) {
+  .sh-compose-body {
+    gap: 10px;
+  }
+  .sh-compose-items {
+    padding: 8px 12px;
+  }
+  .sh-input-wrap-note .sh-emoji {
+    height: 124px;
+  }
+}
+/* On a phone the picker's categories and search take two rows. */
+@media (max-width: 560px) {
+  .sh-input-wrap-note .sh-emoji {
+    height: 176px;
   }
 }
 

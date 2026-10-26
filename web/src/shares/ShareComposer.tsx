@@ -29,6 +29,7 @@ export function ShareComposer({
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
   const form = useRef<HTMLFormElement>(null);
+  const search = useRef<HTMLInputElement>(null);
   const submitting = useRef(false);
   const attempt = useRef<{ signature: string; key: string } | undefined>(undefined);
 
@@ -82,6 +83,7 @@ export function ShareComposer({
   );
   const folders = entries.filter((entry) => entry.kind === "directory").length;
   const bytes = entries.filter((entry) => entry.kind === "file").reduce((sum, entry) => sum + entry.sizeBytes, 0);
+  const chosen = recipientIds.flatMap((id) => members.filter((member) => member.id === id));
   const everyone = members.length > 0 && members.every((member) => recipientIds.includes(member.id));
   const first = entries[0];
 
@@ -155,13 +157,44 @@ export function ShareComposer({
             )}
           </section>
           <fieldset className="sh-compose-people" disabled={busy}>
-            <legend>
-              发给<span>{recipientIds.length ? `已选 ${recipientIds.length} 人` : ""}</span>
-            </legend>
+            <legend className="sh-sr">发给</legend>
+            {/* The chosen members sit between the heading and the count, in a
+                row whose height does not change when the first one is chosen,
+                so the list never moves under the pointer. */}
+            <div className="sh-compose-people-head">
+              <span aria-hidden="true">发给</span>
+              {!chosen.length ? (
+                <p>点击头像选择要分享的成员</p>
+              ) : (
+                <ul className="sh-chosen" aria-label="已选成员">
+                  {chosen.map((member, index) => (
+                    <li key={member.id}>
+                      <PersonAvatar who={member} className="sh-avatar sh-avatar-xs" />
+                      <span>{displayName(member)}</span>
+                      <button
+                        type="button"
+                        aria-label={`取消选择 ${displayName(member)}`}
+                        onClick={(event) => {
+                          // Keep focus in the row: the next tag, the previous
+                          // one, or the member search once the row is empty.
+                          const tags = event.currentTarget.closest("ul")?.querySelectorAll("button");
+                          (tags?.[index + 1] ?? tags?.[index - 1] ?? search.current)?.focus();
+                          setRecipients((ids) => ids.filter((id) => id !== member.id));
+                        }}
+                      >
+                        <X />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {recipientIds.length > 0 && <strong>已选 {recipientIds.length} 人</strong>}
+            </div>
             <div className="sh-compose-tools">
               <label className="sh-search">
                 <Search />
                 <input
+                  ref={search}
                   type="search"
                   aria-label="搜索成员"
                   placeholder="搜索昵称或账号"
