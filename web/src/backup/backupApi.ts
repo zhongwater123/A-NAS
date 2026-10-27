@@ -1,6 +1,6 @@
+import { errorText } from "../errorMessages";
 import { APIError, call, client } from "../api";
 import type { Snapshot, SnapshotEntry, SnapshotSchedule, SnapshotScheduleSettings } from "../api.generated";
-import { nameNotPortableText, nameTooLongText } from "../fileNames";
 
 export type {
   RemovedEntry,
@@ -75,31 +75,7 @@ export const searchSnapshots = (spaceId: string, query: string, signal?: AbortSi
 
 // messageOf words a failed request for people; the server's messages are for logs.
 export function messageOf(error: unknown): string {
-  if (error instanceof APIError) {
-    switch (error.code) {
-      case "forbidden":
-        return "没有权限执行这项操作";
-      case "not_found":
-        return "快照或文件已不存在，请刷新后重试";
-      case "name_conflict":
-        return "目标位置已有同名项目";
-      case "volume_unavailable":
-        return "数据卷当前不可用，请检查存储状态";
-      case "insufficient_storage":
-        return "数据卷剩余空间不足";
-      case "validation_failed":
-        return "填写的内容不符合要求";
-      case "name_too_long":
-        return nameTooLongText;
-      case "name_not_portable":
-        return nameNotPortableText;
-      case "network_error":
-        return "网络连接中断";
-    }
-    return error.status >= 500 ? "服务暂时不可用，请稍后重试" : error.message;
-  }
-  if (error instanceof DOMException && error.name === "AbortError") return "";
-  return "请求失败，请稍后重试";
+  return errorText(error, "backup");
 }
 
 export const isVolumeOffline = (error: unknown) => error instanceof APIError && error.code === "volume_unavailable";

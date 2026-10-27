@@ -1515,6 +1515,7 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
             {...grid}
             listKey={`image:${place.viewing}:${place.query.key}`}
             load={(cursor) => imageSearchPage(place.query, place.viewing, cursor)}
+            errorDomain="imageSearch"
             onPage={(_, first) => {
               if (first) setImageResult({});
             }}

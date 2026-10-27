@@ -133,25 +133,25 @@ export type FailureKind =
   | "busy"
   | "canceled"
   | "server";
-export interface ClassifiedFailure {
+export interface ClassifiedFailure extends APIError {
   kind: FailureKind;
-  code: string;
-  message: string;
 }
 
 // classifyUploadError says what an upload failure means for the queue. The
 // product API answers JSON errors; tusd's own protocol errors are text.
 export function classifyUploadError(error: Error): ClassifiedFailure {
   const detailed = error as Partial<DetailedError>;
+  const classified = (kind: FailureKind, status: number, code: string, message: string): ClassifiedFailure =>
+    Object.assign(new APIError(status, code, message), { kind });
   // The member did not allow the VNAS step that started it; a retry must not
   // outlast the step and go without asking.
   const cause = detailed.causingError;
   if (cause instanceof APIError && cause.code === "not_allowed_for_vnas")
-    return { kind: "denied", code: cause.code, message: cause.message };
-  if (!detailed.originalRequest) return { kind: "file", code: "file_unreadable", message: error.message };
+    return classified("denied", cause.status, cause.code, cause.message);
+  if (!detailed.originalRequest) return classified("file", 0, "file_unreadable", error.message);
   const response = detailed.originalResponse;
   const status = response?.getStatus() ?? 0;
-  if (!response || status === 0) return { kind: "network", code: "network_error", message: error.message };
+  if (!response || status === 0) return classified("network", 0, "network_error", error.message);
   let code = "";
   let message = "";
   try {
@@ -161,11 +161,8 @@ export function classifyUploadError(error: Error): ClassifiedFailure {
   } catch {
     message = response.getBody();
   }
-  const failure = (kind: FailureKind, fallback: string): ClassifiedFailure => ({
-    kind,
-    code: code || fallback,
-    message,
-  });
+  const failure = (kind: FailureKind, fallback: string): ClassifiedFailure =>
+    classified(kind, status, code || fallback, message);
   switch (status) {
     case 401:
       return failure("session", "authentication_required");
@@ -190,7 +187,7 @@ export function classifyUploadError(error: Error): ClassifiedFailure {
     // Refused before any byte: this file alone does not fit.
     case 507:
       return detailed.originalRequest.getMethod() === "POST"
-        ? { kind: "toolarge", code: "file_too_large", message }
+        ? classified("toolarge", status, "file_too_large", message)
         : failure("space", "insufficient_storage");
   }
   if (status >= 400 && status < 500) return failure("invalid", "validation_failed");

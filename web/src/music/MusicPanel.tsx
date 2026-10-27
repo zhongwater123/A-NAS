@@ -1,3 +1,4 @@
+import { errorText } from "../errorMessages";
 import { ArrowLeft, CircleAlert } from "lucide-react";
 import {
   KeyboardEvent,
@@ -10,7 +11,6 @@ import {
   useState,
 } from "react";
 
-import { APIError } from "../api";
 import { formatBytes } from "../bytes";
 import { useDialogs, useToasts } from "../photos/feedback";
 import { type Music, MusicContext, type Place } from "./context";
@@ -110,13 +110,8 @@ const placeKey = (place: Place) => {
   }
 };
 
-function messageOf(caught: unknown): string {
-  if (caught instanceof APIError) {
-    if (caught.code === "volume_unavailable") return "数据卷暂时不可用";
-    if (caught.code === "not_found") return "内容已不存在";
-    return caught.message;
-  }
-  return "请求失败，请稍后再试";
+function messageOf(error: unknown): string {
+  return errorText(error, "music");
 }
 
 function useStored<T>(key: string, initial: T): [T, (value: T | ((current: T) => T)) => void] {

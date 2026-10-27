@@ -1,3 +1,5 @@
+import { calendarDays, relativeUnit, calendarDate } from "../format/time";
+import { relativeTime } from "../format/time";
 import type { Episode, Title } from "./mediaApi";
 
 // timecode shows a position as 1:02:03 or 12:34.
@@ -26,28 +28,13 @@ export function remaining(position: number, duration: number): string {
 }
 
 export function ago(iso?: string, now = Date.now()): string {
-  if (!iso) return "";
-  const elapsed = Math.max(0, now - new Date(iso).getTime()) / 1000;
-  if (elapsed < 60) return "刚刚";
-  if (elapsed < 3600) return `${Math.floor(elapsed / 60)} 分钟前`;
-  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)} 小时前`;
-  if (elapsed < 86400 * 30) return `${Math.floor(elapsed / 86400)} 天前`;
-  return new Date(iso).toLocaleDateString("zh-CN");
+  return iso ? relativeTime(iso, now) : "";
 }
 
 // dayLabel groups history: 今天, 昨天, or the date.
 export function dayLabel(iso: string, now = new Date()): string {
-  const day = new Date(iso);
-  const start = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
-  const days = Math.round((start(now) - start(day)) / 86400000);
-  if (days === 0) return "今天";
-  if (days === 1) return "昨天";
-  if (days < 7) return `${days} 天前`;
-  return day.toLocaleDateString("zh-CN", {
-    month: "long",
-    day: "numeric",
-    ...(day.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
-  });
+  const days = calendarDays(iso, now);
+  return Math.abs(days) < 7 ? relativeUnit(days, "day", "auto") : calendarDate(iso, now);
 }
 
 export function episodeCode(season?: number, episode?: number): string {

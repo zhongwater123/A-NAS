@@ -1,6 +1,5 @@
+import { errorText } from "../errorMessages";
 import { FileEntry, Space, Volume } from "../api";
-import { accountErrorText } from "../accountRules";
-import { nameErrorText } from "../fileNames";
 import { fileTypeLabel, isPDFPreviewable, isPreviewableImage } from "../fileTypes";
 import { FileOrder, FileSort, isPinned } from "../useFileOrder";
 
@@ -176,8 +175,8 @@ export function withPins(order: FileOrder, folders: FileBrowserItem[]): FileOrde
   };
 }
 
-export function messageOf(error: unknown) {
-  return nameErrorText(error) ?? accountErrorText(error) ?? (error instanceof Error ? error.message : "请求失败");
+export function messageOf(error: unknown): string {
+  return errorText(error);
 }
 
 export function formatFileDate(value: string): string {

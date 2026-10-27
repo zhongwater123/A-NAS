@@ -1,3 +1,4 @@
+import { APIError } from "../api";
 import {
   Box,
   Boxes,
@@ -26,7 +27,6 @@ import {
 import { readApps } from "../appsApi";
 import {
   ContainerAction,
-  ContainerAPIError,
   ContainerSnapshot,
   ContainerSummary,
   applyContainerAction,
@@ -536,7 +536,7 @@ function projectTitle(key: string, apps: ReadonlyMap<string, AppRef>): string {
 }
 
 function actionFailure(error: unknown, action: ContainerAction): string {
-  const code = error instanceof ContainerAPIError ? error.code : "";
+  const code = error instanceof APIError ? error.code : "";
   if (code === "container_not_found") return "容器已不存在，列表即将刷新";
   if (code === "containers_unavailable" || code === "network_error")
     return `无法连接 Docker，${actionLabels[action]}未执行`;
@@ -561,7 +561,7 @@ function useContainerSnapshot() {
       })
       .catch((failure: unknown) => {
         if (failure instanceof DOMException && failure.name === "AbortError") return;
-        setError(failure instanceof ContainerAPIError ? failure.code : "request_failed");
+        setError(failure instanceof APIError ? failure.code : "request_failed");
       })
       .finally(() => {
         if (active.current === controller) setRefreshing(false);

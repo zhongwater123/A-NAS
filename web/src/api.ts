@@ -95,44 +95,45 @@ export async function passWriteGate(method: string, url: string) {
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const given = input instanceof Request ? input : undefined;
   await passWriteGate(init?.method ?? given?.method ?? "GET", given?.url ?? String(input));
-  const response = await fetch(input, init);
+  let response: Response;
+  try {
+    response = await fetch(input, init);
+  } catch (error) {
+    if (init?.signal?.aborted || given?.signal.aborted) throw error;
+    throw normalizeAPIError(error);
+  }
   if (response.status === 401) sessionEndedListener?.();
   return response;
 }
 
-export class HostStateError extends Error {
-  constructor(readonly status?: number) {
-    super(status ? `host state request failed with status ${status}` : "host state request failed");
-  }
-}
-
-// readHostState and readHostMetrics fail with a HostStateError, which the
-// status bar shows as the host state being unavailable.
-export async function readHostState(signal?: AbortSignal): Promise<HostState> {
-  return hostState(client.GET("/api/v1/host-state", { signal }));
-}
-
-export async function readHostMetrics(signal?: AbortSignal): Promise<HostMetrics> {
-  return hostState(client.GET("/api/v1/metrics", { signal }));
-}
-
-async function hostState<Data>(pending: Promise<{ data?: Data; response: Response }>): Promise<Data> {
-  const { data, response } = await pending.catch((error: unknown) => {
-    if (error instanceof DOMException && error.name === "AbortError") throw error;
-    throw new HostStateError();
-  });
-  if (!response.ok) throw new HostStateError(response.status);
-  return data as Data;
-}
+export const readHostState = (signal?: AbortSignal): Promise<HostState> =>
+  call(client.GET("/api/v1/host-state", { signal }));
+export const readHostMetrics = (signal?: AbortSignal): Promise<HostMetrics> =>
+  call(client.GET("/api/v1/metrics", { signal }));
 
 export class APIError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
-    message: string,
+    message = code,
   ) {
     super(message);
   }
+}
+
+// Cancellation remains recognizable to callers; unexpected response parsing
+// failures are distinct from transport failures and never shown verbatim.
+export function normalizeAPIError(error: unknown): APIError {
+  if (error instanceof APIError) return error;
+  if (error instanceof DOMException && error.name === "AbortError") throw error;
+  return new APIError(
+    0,
+    error instanceof TypeError
+      ? "network_error"
+      : error instanceof SyntaxError
+        ? "malformed_response"
+        : "request_failed",
+  );
 }
 
 let csrfToken = "";
@@ -190,7 +191,9 @@ client.use({
 // call waits for a client call and returns its data; a failure throws an
 // APIError with the code and message of the server's error body.
 export async function call<Data>(pending: Promise<{ data?: Data; error?: unknown; response: Response }>) {
-  const { data, error, response } = await pending;
+  const { data, error, response } = await pending.catch((error: unknown) => {
+    throw normalizeAPIError(error);
+  });
   if (!response.ok) throw failure(response.status, error);
   return data as Data;
 }
@@ -199,7 +202,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function failure(status: number, body: unknown): APIError {
+export function failure(status: number, body: unknown): APIError {
   const detail = isRecord(body) && isRecord(body.error) ? body.error : {};
   return new APIError(
     status,
@@ -217,8 +220,11 @@ export async function uploadForm<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   await passWriteGate("POST", path);
+  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    const abort = () => xhr.abort();
+    const finish = () => signal?.removeEventListener("abort", abort);
     xhr.open("POST", path);
     xhr.setRequestHeader("Accept", "application/json");
     for (const [name, value] of Object.entries(csrfHeader("POST"))) xhr.setRequestHeader(name, value);
@@ -226,26 +232,30 @@ export async function uploadForm<T>(
       if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
     };
     xhr.onload = () => {
-      if (xhr.status === 401) sessionEndedListener?.();
-      let body: { error?: { code?: string; message?: string } } | undefined;
+      finish();
+      if (xhr.status === 401) sessionEnded();
+      let data: unknown;
       try {
-        body = xhr.responseText ? JSON.parse(xhr.responseText) : undefined;
+        data = xhr.responseText ? JSON.parse(xhr.responseText) : undefined;
       } catch {
-        body = undefined;
+        if (xhr.status >= 200 && xhr.status < 300) {
+          reject(new APIError(xhr.status, "malformed_response"));
+          return;
+        }
       }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(body as T);
-      else
-        reject(
-          new APIError(
-            xhr.status,
-            body?.error?.code ?? "request_failed",
-            body?.error?.message ?? `请求失败 (${xhr.status})`,
-          ),
-        );
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data as T);
+      else reject(failure(xhr.status, data));
     };
-    xhr.onerror = () => reject(new APIError(0, "network_error", "网络连接中断"));
-    xhr.onabort = () => reject(new DOMException("upload aborted", "AbortError"));
-    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.onerror = () => {
+      finish();
+      reject(new APIError(0, "network_error"));
+    };
+    xhr.ontimeout = xhr.onerror;
+    xhr.onabort = () => {
+      finish();
+      reject(new DOMException("upload aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
     xhr.send(body);
   });
 }

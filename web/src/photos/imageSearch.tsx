@@ -87,25 +87,15 @@ function searchId(query: ImageQuery, fresh = false) {
 // Whether local AI has read the image already, so its results come at once.
 export const isEncoded = (query: ImageQuery) => encoded.has(query);
 
-const imageErrors: Record<string, string> = {
-  unsupported_media_type: "无法读取这张图片，换一张试试",
-  too_large: "图片太大，换一张小一些的试试",
-};
-
 // imageSearchPage loads a page of the photos like the image. When the photo
 // service no longer keeps the search (it restarted, or the search sat idle),
 // the image goes again and the page is asked for anew.
 export async function imageSearchPage(query: ImageQuery, viewing: string, cursor: string): Promise<PhotoPage> {
   try {
-    try {
-      return await listImageSearchResults(await searchId(query), viewing, cursor);
-    } catch (caught) {
-      if (!(caught instanceof APIError && caught.code === "search_expired")) throw caught;
-      return await listImageSearchResults(await searchId(query, true), viewing, cursor);
-    }
+    return await listImageSearchResults(await searchId(query), viewing, cursor);
   } catch (caught) {
-    if (caught instanceof APIError && imageErrors[caught.code]) throw new Error(imageErrors[caught.code]);
-    throw caught;
+    if (!(caught instanceof APIError && caught.code === "search_expired")) throw caught;
+    return await listImageSearchResults(await searchId(query, true), viewing, cursor);
   }
 }
 
