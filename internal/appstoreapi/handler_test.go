@@ -109,7 +109,7 @@ type preparation struct {
 }
 
 type recordingHost struct {
-	appstoreapi.DevelopmentHost
+	fake.Host
 	prepared []preparation
 	released []string
 }
@@ -197,7 +197,7 @@ func decode(t *testing.T, recorder *httptest.ResponseRecorder, status int, into 
 }
 
 func options() appstoreapi.Options {
-	return appstoreapi.Options{Host: appstoreapi.DevelopmentHost{}, Logger: discard()}
+	return appstoreapi.Options{Host: fake.Host{}, Logger: discard()}
 }
 
 func discard() *slog.Logger {

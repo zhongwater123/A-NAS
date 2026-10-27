@@ -18,7 +18,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/filesapi"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/media"
 )
@@ -114,11 +114,14 @@ func (h *handler) withUser(next func(http.ResponseWriter, *http.Request, account
 	}
 }
 
+// fail answers the media center's own errors, and the files' errors as the
+// file manager does (#222).
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, media.ErrNotFound), errors.Is(err, files.ErrNotFound):
+	case errors.Is(err, context.Canceled):
+	case errors.Is(err, media.ErrNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
-	case errors.Is(err, media.ErrForbidden), errors.Is(err, files.ErrForbidden):
+	case errors.Is(err, media.ErrForbidden):
 		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "you cannot do this")
 	case errors.Is(err, media.ErrInvalid):
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", strings.TrimPrefix(err.Error(), media.ErrInvalid.Error()+": "))
@@ -130,16 +133,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_worker_unavailable", "video conversion is unavailable")
 	case errors.Is(err, media.ErrUnreadable):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "media_unreadable", "the video cannot be read")
-	case errors.Is(err, files.ErrConflict):
-		httpjson.WriteError(w, http.StatusConflict, "name_conflict", "a file with this name already exists")
-	case errors.Is(err, files.ErrInvalidName):
-		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "the file name is invalid")
-	case errors.Is(err, files.ErrVolumeUnavailable):
-		httpjson.WriteError(w, http.StatusServiceUnavailable, "volume_unavailable", "the data volume is unavailable")
-	case errors.Is(err, context.Canceled):
 	default:
-		h.logger.ErrorContext(r.Context(), "media request failed", "path", r.URL.Path, "error", err)
-		httpjson.WriteError(w, http.StatusInternalServerError, "internal_error", "the request failed")
+		filesapi.WriteError(w, r, h.logger, err)
 	}
 }
 

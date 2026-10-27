@@ -289,7 +289,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	appOptions := appstoreapi.Options{Host: appstoreapi.DevelopmentHost{}, Logger: logger}
+	appOptions := appstoreapi.Options{Host: fakeappstore.Host{}, Logger: logger}
 	if live {
 		host, ok := operations.(appid.Host)
 		if !ok {

@@ -487,7 +487,7 @@ export interface paths {
         /** @description Administrators only. The plans that still need the administrator, newest first: the one running, and the newest one that stopped in needs_attention unless a plan made after it has run. The settings page shows them again after a reload. */
         get: operations["listUnfinishedStoragePlans"];
         put?: never;
-        /** @description Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts to the layout in the background. 409 volume_unavailable when the volume is not mounted and writable, volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict. */
+        /** @description Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts to the layout in the background. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict. */
         post: operations["createStoragePlan"];
         delete?: never;
         options?: never;
@@ -6868,6 +6868,7 @@ export interface operations {
             };
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
         };
     };
     confirmStoragePlan: {
@@ -10426,6 +10427,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            423: components["responses"]["ProductError"];
         };
     };
     getMediaLibrary: {
@@ -10505,6 +10507,7 @@ export interface operations {
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
         };
     };
     scanMediaLibrary: {
@@ -10648,6 +10651,8 @@ export interface operations {
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
         };
     };
     getMediaVideo: {
@@ -10705,6 +10710,8 @@ export interface operations {
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
         };
     };
     getMediaPlayback: {
@@ -10735,6 +10742,7 @@ export interface operations {
             };
             400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
         };
     };
     getMediaVideoFile: {
@@ -10767,6 +10775,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -10807,6 +10816,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            423: components["responses"]["ProductError"];
             /** @description Every conversion slot is in use (media_busy), or FFmpeg is unavailable (media_worker_unavailable) */
             503: {
                 headers: {
@@ -10841,6 +10851,7 @@ export interface operations {
             };
             404: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -11245,6 +11256,7 @@ export interface operations {
                     };
                 };
             };
+            423: components["responses"]["ProductError"];
         };
     };
     getMediaFolder: {
@@ -11272,6 +11284,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
         };
     };
     getMediaArtwork: {
@@ -11298,6 +11311,7 @@ export interface operations {
             };
             400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            423: components["responses"]["ProductError"];
         };
     };
     getMusicLibraryStatus: {

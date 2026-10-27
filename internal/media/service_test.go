@@ -861,6 +861,16 @@ func TestRenamingAVideoRenamesItsFilesAndKeepsItsProgress(t *testing.T) {
 	if _, err := env.media.RenameVideo(env.ctx, env.alice, id, "超凡蜘蛛侠2.txt"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("renaming without a video extension error = %v, want ErrInvalid", err)
 	}
+	// The file manager's rules for new names apply, also to the files
+	// renamed with it (#222).
+	for name, want := range map[string]error{"超凡蜘蛛侠2: 决战.mkv": files.ErrNameNotPortable, "a/b.mkv": files.ErrInvalidName, ".hidden.mkv": ErrInvalid} {
+		if _, err := env.media.RenameVideo(env.ctx, env.alice, id, name); !errors.Is(err, want) {
+			t.Fatalf("renaming to %q error = %v, want %v", name, err, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(env.spaceRoot(env.shared), "电影", old+".chs.srt")); err != nil {
+		t.Fatalf("a refused rename moved the subtitles: %v", err)
+	}
 	detail, err := env.media.RenameVideo(env.ctx, env.alice, id, "超凡蜘蛛侠2 (2014).mkv")
 	if err != nil || detail.File.Name != "超凡蜘蛛侠2 (2014).mkv" {
 		t.Fatalf("RenameVideo() = %+v, %v", detail.File, err)

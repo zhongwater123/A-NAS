@@ -1,14 +1,14 @@
 // Package appstoreapi exposes the App Center under /api/v1/apps. Installs and
 // uninstalls are state-changing and pass localorigin.CheckWrite; an install
-// must carry the digest of the plan the owner confirmed. Each app runs as its
-// own Linux identity, whose folders the Host Agent prepares before Docker
-// starts anything (ADR 0008).
+// must carry the digest of the plan the owner confirmed. What an install
+// does is appstore.Center's; this package maps it to the public documents
+// (documents.go), which do not change with the container agent's protocol
+// (#222).
 package appstoreapi
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -16,7 +16,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/appid"
 	"github.com/zhongwater123/A-NAS/internal/appstore"
-	"github.com/zhongwater123/A-NAS/internal/appstore/agent"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 )
@@ -31,12 +30,11 @@ const (
 )
 
 type handler struct {
-	store       appstore.Store
-	dataSource  DataSource
-	host        appid.Host
-	volumeReady func(context.Context) error
-	logger      *slog.Logger
-	mux         *apiroute.Mux
+	// center is nil when the App Center is disabled.
+	center     *appstore.Center
+	dataSource DataSource
+	logger     *slog.Logger
+	mux        *apiroute.Mux
 }
 
 type Options struct {
@@ -53,7 +51,10 @@ func New(store appstore.Store, dataSource DataSource, options Options) http.Hand
 	if options.Logger == nil {
 		options.Logger = slog.Default()
 	}
-	h := &handler{store: store, dataSource: dataSource, host: options.Host, volumeReady: options.VolumeReady, logger: options.Logger, mux: apiroute.NewMux()}
+	h := &handler{dataSource: dataSource, logger: options.Logger, mux: apiroute.NewMux()}
+	if store != nil {
+		h.center = appstore.NewCenter(store, options.Host, options.VolumeReady, options.Logger)
+	}
 	h.mux.Only(http.MethodGet, PathPrefix, h.list)
 	h.mux.Only(http.MethodGet, PathPrefix+"/{appID}/icon", withApp(h.icon))
 	h.mux.Only(http.MethodGet, PathPrefix+"/{appID}/plan", withApp(h.plan))
@@ -66,18 +67,6 @@ func New(store appstore.Store, dataSource DataSource, options Options) http.Hand
 // Endpoints are the operations the App Center API serves under PathPrefix.
 func Endpoints() []apiroute.Endpoint {
 	return New(nil, "", Options{}).(*handler).mux.Endpoints()
-}
-
-// identity asks the Host Agent for the app's Linux identity.
-func (h *handler) identity(ctx context.Context, id string) (appstore.Identity, error) {
-	if h.host == nil {
-		return appstore.Identity{}, fmt.Errorf("%w: no host for app identities", appstore.ErrUnavailable)
-	}
-	identity, err := h.host.AppIdentity(ctx, id)
-	if err != nil {
-		return appstore.Identity{}, fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
-	}
-	return identity, nil
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -104,19 +93,19 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 	if !h.enabled(w) {
 		return
 	}
-	apps, err := h.store.Apps(r.Context())
+	apps, err := h.center.Apps(r.Context())
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, http.StatusOK, appsResponse{DataSource: h.dataSource, AppsDocument: agent.AppsFromDomain(apps)})
+	httpjson.Write(w, http.StatusOK, appsResponse{DataSource: h.dataSource, Apps: appsDocument(apps)})
 }
 
 func (h *handler) icon(w http.ResponseWriter, r *http.Request) {
 	if !h.enabled(w) {
 		return
 	}
-	icon, contentType, err := h.store.Icon(r.Context(), r.PathValue("appID"))
+	icon, contentType, err := h.center.Icon(r.Context(), r.PathValue("appID"))
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -138,18 +127,12 @@ func (h *handler) plan(w http.ResponseWriter, r *http.Request) {
 	if !h.enabled(w) {
 		return
 	}
-	id := r.PathValue("appID")
-	identity, err := h.identity(r.Context(), id)
+	plan, err := h.center.Plan(r.Context(), r.PathValue("appID"))
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	plan, err := h.store.Plan(r.Context(), id, identity)
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	httpjson.Write(w, http.StatusOK, agent.PlanFromDomain(plan))
+	httpjson.Write(w, http.StatusOK, planDocument(plan))
 }
 
 // change installs or uninstalls an app, as the last path segment says.
@@ -161,7 +144,7 @@ func (h *handler) change(w http.ResponseWriter, r *http.Request) {
 	if !h.enabled(w) {
 		return
 	}
-	var request agent.InstallRequest
+	var request installRequest
 	if err := httpjson.Decode(w, r, 1024, &request); err != nil {
 		httpjson.WriteDecodeError(w, err, "invalid_request", "install requires the confirmed plan digest")
 		return
@@ -174,93 +157,64 @@ func (h *handler) change(w http.ResponseWriter, r *http.Request) {
 	var job appstore.Job
 	var err error
 	if install {
-		job, err = h.install(r.Context(), id, request.Digest)
+		job, err = h.center.Install(r.Context(), id, request.Digest)
 	} else {
-		if job, err = h.store.Uninstall(r.Context(), id); err == nil && h.host != nil {
-			// The identity and its data stay for a reinstall.
-			if releaseErr := h.host.ReleaseApp(r.Context(), id); releaseErr != nil {
-				h.logger.ErrorContext(r.Context(), "releasing app access failed", "app", id, "error", releaseErr)
-			}
-		}
-	}
-	if errors.Is(err, errVolumeUnavailable) {
-		httpjson.WriteError(w, http.StatusLocked, "volume_unavailable", "the data volume is not available")
-		return
+		job, err = h.center.Uninstall(r.Context(), id)
 	}
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
 	h.logger.InfoContext(r.Context(), "app job requested", "app", id, "action", job.Action)
-	httpjson.Write(w, http.StatusAccepted, agent.JobFromDomain(job))
-}
-
-var errVolumeUnavailable = errors.New("data volume is unavailable")
-
-// install checks the confirmed plan against the app's identity, has the Host
-// Agent prepare its folders, and only then starts Compose.
-func (h *handler) install(ctx context.Context, id, digest string) (appstore.Job, error) {
-	if h.volumeReady != nil {
-		if err := h.volumeReady(ctx); err != nil {
-			return appstore.Job{}, errVolumeUnavailable
-		}
-	}
-	identity, err := h.identity(ctx, id)
-	if err != nil {
-		return appstore.Job{}, err
-	}
-	plan, err := h.store.Plan(ctx, id, identity)
-	if err != nil {
-		return appstore.Job{}, err
-	}
-	if plan.Digest != digest {
-		return appstore.Job{}, appstore.ErrPlanChanged
-	}
-	if err := h.host.PrepareApp(ctx, id, plan.HostFolders(), plan.SharesFolders()); err != nil {
-		return appstore.Job{}, fmt.Errorf("%w: prepare app folders: %v", appstore.ErrUnavailable, err)
-	}
-	return h.store.Install(ctx, id, digest, identity)
+	httpjson.Write(w, http.StatusAccepted, jobDocument(job))
 }
 
 func (h *handler) enabled(w http.ResponseWriter) bool {
-	if h.store != nil {
+	if h.center != nil {
 		return true
 	}
 	httpjson.WriteError(w, http.StatusServiceUnavailable, "apps_disabled", "the App Center is disabled")
 	return false
 }
 
-// fail keeps conflict details (which port, which container) but hides engine internals.
+// errorCodes are the App Center's answers to the store's errors.
+var errorCodes = []struct {
+	err    error
+	status int
+	code   string
+}{
+	{appstore.ErrVolumeUnavailable, http.StatusLocked, "volume_unavailable"},
+	{appstore.ErrNotFound, http.StatusNotFound, "app_not_found"},
+	{appstore.ErrPlanChanged, http.StatusConflict, "plan_changed"},
+	{appstore.ErrBusy, http.StatusConflict, "app_busy"},
+	{appstore.ErrAlreadyInstalled, http.StatusConflict, "already_installed"},
+	{appstore.ErrNotInstalled, http.StatusConflict, "not_installed"},
+	{appstore.ErrPortInUse, http.StatusConflict, "port_in_use"},
+	{appstore.ErrNameInUse, http.StatusConflict, "name_in_use"},
+	{appstore.ErrAddressPoolMissing, http.StatusConflict, "address_pool_missing"},
+	{appstore.ErrRuntimeOutdated, http.StatusConflict, "docker_runtime_outdated"},
+	{appstore.ErrUnavailable, http.StatusServiceUnavailable, "apps_unavailable"},
+}
+
+// fail keeps conflict details (which port, which container) but hides engine
+// internals.
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
-	status, code := agent.StatusForError(err)
-	message := err.Error()
-	if status >= 500 {
+	status, code, message := http.StatusBadGateway, "app_engine_error", err.Error()
+	for _, mapping := range errorCodes {
+		if errors.Is(err, mapping.err) {
+			status, code = mapping.status, mapping.code
+			break
+		}
+	}
+	if _, ok := errors.AsType[*appstore.PolicyError](err); ok {
+		status, code, message = http.StatusUnprocessableEntity, "policy_violation", "this app's manifest does not meet the install policy"
+	}
+	switch {
+	case code == "volume_unavailable":
+		message = "the data volume is not available"
+	case status >= 500:
 		h.logger.ErrorContext(r.Context(), "app request failed", "path", r.URL.Path, "error", err)
 		message = "the container engine could not complete the request"
 	}
-	if _, ok := errors.AsType[*appstore.PolicyError](err); ok {
-		message = "this app's manifest does not meet the install policy"
-	}
 	httpjson.WriteError(w, status, code, message)
 }
-
-type appsResponse struct {
-	DataSource DataSource `json:"dataSource"`
-	agent.AppsDocument
-}
-
-// DevelopmentHost stands in for the Host Agent with the fake app store: each
-// app gets a stable identity in the app range and nothing is created.
-type DevelopmentHost struct{}
-
-func (DevelopmentHost) AppIdentity(_ context.Context, id string) (appstore.Identity, error) {
-	sum := 0
-	for _, character := range id {
-		sum = (sum*31 + int(character)) % (appid.LastUID - appid.FirstUID + 1)
-	}
-	uid := appid.FirstUID + sum
-	return appstore.Identity{Username: appid.Username(id), UID: uid, GID: uid}, nil
-}
-
-func (DevelopmentHost) PrepareApp(context.Context, string, []string, bool) error { return nil }
-func (DevelopmentHost) ReleaseApp(context.Context, string) error                 { return nil }

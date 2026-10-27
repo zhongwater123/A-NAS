@@ -24,6 +24,7 @@ import (
 	"github.com/compose-spec/compose-go/v2/loader"
 	"github.com/compose-spec/compose-go/v2/types"
 
+	"github.com/zhongwater123/A-NAS/internal/appid"
 	"github.com/zhongwater123/A-NAS/internal/appstore"
 	"github.com/zhongwater123/A-NAS/internal/appstore/engine"
 )
@@ -185,6 +186,22 @@ func (m *memoryDocker) down(name string) {
 	defer m.mu.Unlock()
 	delete(m.projects, name)
 }
+
+// Host stands in for the Host Agent with the fake app store: each app gets a
+// stable identity in the app range and nothing is created.
+type Host struct{}
+
+func (Host) AppIdentity(_ context.Context, id string) (appstore.Identity, error) {
+	sum := 0
+	for _, character := range id {
+		sum = (sum*31 + int(character)) % (appid.LastUID - appid.FirstUID + 1)
+	}
+	uid := appid.FirstUID + sum
+	return appstore.Identity{Username: appid.Username(id), UID: uid, GID: uid}, nil
+}
+
+func (Host) PrepareApp(context.Context, string, []string, bool) error { return nil }
+func (Host) ReleaseApp(context.Context, string) error                 { return nil }
 
 // runner pretends to pull and start (or stop) the project's services.
 type runner struct {

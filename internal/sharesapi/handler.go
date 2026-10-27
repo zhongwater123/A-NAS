@@ -69,11 +69,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if _, ok := UserFrom(r.Context()); !ok {
-		httpjson.WriteError(w, 401, "authentication_required", "authentication is required")
+		httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 		return
 	}
 	if h.store == nil {
-		httpjson.WriteError(w, 503, "shares_unavailable", "member shares are not available")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "shares_unavailable", "member shares are not available")
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, PathPrefix+"/jobs/") {
@@ -112,22 +112,22 @@ func (h *handler) routes() {
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, shares.ErrNotFound):
-		httpjson.WriteError(w, 404, "share_not_found", "share not found")
+		httpjson.WriteError(w, http.StatusNotFound, "share_not_found", "share not found")
 	case errors.Is(err, shares.ErrUnauthorized):
-		httpjson.WriteError(w, 401, "authentication_required", "session or account unavailable")
+		httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "session or account unavailable")
 	case errors.Is(err, shares.ErrRecipientInactive):
-		httpjson.WriteError(w, 409, "share_recipient_unavailable", "the recipient account is unavailable")
+		httpjson.WriteError(w, http.StatusConflict, "share_recipient_unavailable", "the recipient account is unavailable")
 	case errors.Is(err, shares.ErrInactive):
-		httpjson.WriteError(w, 410, "share_inactive", "share has expired or was withdrawn")
+		httpjson.WriteError(w, http.StatusGone, "share_inactive", "share has expired or was withdrawn")
 	case errors.Is(err, shares.ErrInvalid):
-		httpjson.WriteError(w, 400, "invalid_share_request", "invalid share request")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_share_request", "invalid share request")
 	case errors.Is(err, shares.ErrConflict):
-		httpjson.WriteError(w, 409, "share_request_conflict", "request key was used for different content")
+		httpjson.WriteError(w, http.StatusConflict, "share_request_conflict", "request key was used for different content")
 	case errors.Is(err, shares.ErrBusy):
-		httpjson.WriteError(w, 429, "share_busy", "too many active share operations; retry later")
+		httpjson.WriteError(w, http.StatusTooManyRequests, "share_busy", "too many active share operations; retry later")
 	default:
 		h.logger.WarnContext(r.Context(), "share operation failed", "error", err)
-		httpjson.WriteError(w, 503, "shares_unavailable", "share storage or file operation unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "shares_unavailable", "share storage or file operation unavailable")
 	}
 }
 func decode(w http.ResponseWriter, r *http.Request, value any) bool {
@@ -169,7 +169,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, 202, v)
+	httpjson.Write(w, http.StatusAccepted, v)
 }
 func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 	direction := r.URL.Query().Get("direction")
@@ -202,7 +202,7 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		end = len(items)
 	}
 	response["items"] = items[int(offset):end]
-	httpjson.Write(w, 200, response)
+	httpjson.Write(w, http.StatusOK, response)
 }
 func (h *handler) listMembers(w http.ResponseWriter, r *http.Request) {
 	if h.members == nil {
@@ -220,7 +220,7 @@ func (h *handler) listMembers(w http.ResponseWriter, r *http.Request) {
 			out = append(out, p)
 		}
 	}
-	httpjson.Write(w, 200, map[string]any{"items": out})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": out})
 }
 func (h *handler) get(w http.ResponseWriter, r *http.Request)  { h.detail(w, r, false) }
 func (h *handler) view(w http.ResponseWriter, r *http.Request) { h.detail(w, r, true) }
@@ -230,7 +230,7 @@ func (h *handler) detail(w http.ResponseWriter, r *http.Request, viewed bool) {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, 200, v)
+	httpjson.Write(w, http.StatusOK, v)
 }
 func (h *handler) messages(w http.ResponseWriter, r *http.Request) {
 	after, limit, err := paging(r)
@@ -243,7 +243,7 @@ func (h *handler) messages(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, 200, map[string]any{"items": items})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 func (h *handler) message(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -259,7 +259,7 @@ func (h *handler) message(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, 201, v)
+	httpjson.Write(w, http.StatusCreated, v)
 }
 func (h *handler) read(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -273,7 +273,7 @@ func (h *handler) read(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	w.WriteHeader(204)
+	w.WriteHeader(http.StatusNoContent)
 }
 func (h *handler) save(w http.ResponseWriter, r *http.Request) {
 	var req shares.SaveRequest
@@ -285,7 +285,7 @@ func (h *handler) save(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, 202, v)
+	httpjson.Write(w, http.StatusAccepted, v)
 }
 func (h *handler) job(w http.ResponseWriter, r *http.Request) {
 	v, err := h.store.Job(r.Context(), actor(r), r.PathValue("jobID"))
@@ -293,7 +293,7 @@ func (h *handler) job(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, 200, v)
+	httpjson.Write(w, http.StatusOK, v)
 }
 func (h *handler) jobs(w http.ResponseWriter, r *http.Request) {
 	items, err := h.store.Jobs(r.Context(), actor(r), r.PathValue("shareID"))
@@ -301,7 +301,7 @@ func (h *handler) jobs(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, 200, map[string]any{"items": items})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 func (h *handler) notifications(w http.ResponseWriter, r *http.Request) {
 	after, limit, err := paging(r)
@@ -314,14 +314,14 @@ func (h *handler) notifications(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, 200, map[string]any{"items": items})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 func (h *handler) revoke(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.Revoke(r.Context(), actor(r), r.PathValue("shareID")); err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	w.WriteHeader(204)
+	w.WriteHeader(http.StatusNoContent)
 }
 func (h *handler) content(w http.ResponseWriter, r *http.Request) {
 	reader, entry, err := h.store.OpenContent(r.Context(), actor(r), r.PathValue("shareID"), r.PathValue("entryID"))

@@ -1,9 +1,12 @@
 // Package containersapi exposes container management to the Web desktop under
 // /api/v1/containers. Reads pass through to a containers.Manager; the only
-// writes are typed lifecycle actions guarded by localorigin.CheckWrite.
+// writes are typed lifecycle actions guarded by localorigin.CheckWrite. Its
+// documents (documents.go) are its own, so the container agent's protocol
+// can change without changing them (#222).
 package containersapi
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,7 +14,6 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/containers"
-	"github.com/zhongwater123/A-NAS/internal/containers/agent"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 )
@@ -70,7 +72,7 @@ func (h *handler) snapshot(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, http.StatusOK, snapshotResponse{DataSource: h.dataSource, SnapshotDocument: agent.SnapshotFromDomain(snapshot)})
+	httpjson.Write(w, http.StatusOK, snapshotDocument(h.dataSource, snapshot))
 }
 
 func (h *handler) logs(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +93,7 @@ func (h *handler) logs(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, http.StatusOK, agent.LogsFromDomain(lines))
+	httpjson.Write(w, http.StatusOK, logsDocument(lines))
 }
 
 func (h *handler) act(w http.ResponseWriter, r *http.Request) {
@@ -133,22 +135,18 @@ func (h *handler) enabled(w http.ResponseWriter) bool {
 	return false
 }
 
-// fail maps domain errors to the shared codes without exposing engine details.
+// fail maps domain errors to their codes without exposing engine details.
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
-	status, code := agent.StatusForError(err)
-	messages := map[string]string{
-		"invalid_request":        "container ID or action is invalid",
-		"container_not_found":    "container not found",
-		"containers_unavailable": "container engine is unavailable",
-		"container_engine_error": "container engine rejected the request",
-	}
-	if status >= 500 {
+	switch {
+	case errors.Is(err, containers.ErrInvalidID), errors.Is(err, containers.ErrInvalidAction):
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "container ID or action is invalid")
+	case errors.Is(err, containers.ErrNotFound):
+		httpjson.WriteError(w, http.StatusNotFound, "container_not_found", "container not found")
+	case errors.Is(err, containers.ErrUnavailable):
 		h.logger.ErrorContext(r.Context(), "container request failed", "path", r.URL.Path, "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "containers_unavailable", "container engine is unavailable")
+	default:
+		h.logger.ErrorContext(r.Context(), "container request failed", "path", r.URL.Path, "error", err)
+		httpjson.WriteError(w, http.StatusBadGateway, "container_engine_error", "container engine rejected the request")
 	}
-	httpjson.WriteError(w, status, code, messages[code])
-}
-
-type snapshotResponse struct {
-	DataSource DataSource `json:"dataSource"`
-	agent.SnapshotDocument
 }

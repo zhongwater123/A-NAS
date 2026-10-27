@@ -79,16 +79,16 @@ func authenticate(sessions SessionResolver, logger *slog.Logger, next http.Handl
 		token := r.Header.Get(serviceproxy.SessionHeader)
 		user, err := sessions.ResolveSessionUser(r.Context(), token)
 		if errors.Is(err, accounts.ErrSessionNotFound) || err == nil && user.UserID == "" {
-			httpjson.WriteError(w, 401, "authentication_required", "authentication is required")
+			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		}
 		if err != nil {
 			logger.WarnContext(r.Context(), "share session lookup failed", "error", err)
-			httpjson.WriteError(w, 503, "shares_unavailable", "session lookup unavailable")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "shares_unavailable", "session lookup unavailable")
 			return
 		}
 		if user.MustChangePassword {
-			httpjson.WriteError(w, 403, "password_change_required", "choose a new password before continuing")
+			httpjson.WriteError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
 			return
 		}
 		ctx := accounts.WithSessionToken(r.Context(), token)

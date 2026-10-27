@@ -166,7 +166,8 @@ func WriteError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err
 	case errors.Is(err, storage.ErrPlanState):
 		httpjson.WriteError(w, http.StatusConflict, "plan_state_conflict", err.Error())
 	case errors.Is(err, storage.ErrVolumeUnavailable):
-		httpjson.WriteError(w, http.StatusConflict, "volume_unavailable", err.Error())
+		// 423, as every API answers volume_unavailable (#222).
+		httpjson.WriteError(w, http.StatusLocked, "volume_unavailable", err.Error())
 	case errors.Is(err, storage.ErrVolumeBusy):
 		httpjson.WriteError(w, http.StatusConflict, "volume_busy", err.Error())
 	case errors.Is(err, storage.ErrVolumeExists):

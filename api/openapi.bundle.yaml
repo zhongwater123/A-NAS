@@ -770,7 +770,7 @@ paths:
           $ref: '#/components/responses/ProductError'
     post:
       operationId: createStoragePlan
-      description: 'Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts to the layout in the background. 409 volume_unavailable when the volume is not mounted and writable, volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict.'
+      description: 'Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts to the layout in the background. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict.'
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -802,6 +802,8 @@ paths:
         '409':
           $ref: '#/components/responses/ProductError'
         '422':
+          $ref: '#/components/responses/ProductError'
+        '423':
           $ref: '#/components/responses/ProductError'
   /api/v1/storage/plans/{planId}/confirm:
     post:
@@ -4076,6 +4078,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/media/libraries/{libraryId}:
     parameters:
       - $ref: '#/components/parameters/MediaLibraryID'
@@ -4116,6 +4120,8 @@ paths:
         '404':
           $ref: '#/components/responses/ProductError'
         '409':
+          $ref: '#/components/responses/ProductError'
+        '423':
           $ref: '#/components/responses/ProductError'
     delete:
       operationId: deleteMediaLibrary
@@ -4280,6 +4286,10 @@ paths:
           $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/media/videos/{videoId}:
     get:
       operationId: getMediaVideo
@@ -4331,6 +4341,10 @@ paths:
           $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/media/videos/{videoId}/playback:
     get:
       operationId: getMediaPlayback
@@ -4368,6 +4382,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/media/videos/{videoId}/file:
     get:
       operationId: getMediaVideoFile
@@ -4390,6 +4406,8 @@ paths:
                 type: string
                 format: binary
         '404':
+          $ref: '#/components/responses/ProductError'
+        '423':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
@@ -4447,6 +4465,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '423':
+          $ref: '#/components/responses/ProductError'
         '503':
           description: Every conversion slot is in use (media_busy), or FFmpeg is unavailable (media_worker_unavailable)
           content:
@@ -4474,6 +4494,8 @@ paths:
         '404':
           $ref: '#/components/responses/ProductError'
         '422':
+          $ref: '#/components/responses/ProductError'
+        '423':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
@@ -4786,6 +4808,8 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/MediaFolderRoot'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/media/folders/{entryId}:
     get:
       operationId: getMediaFolder
@@ -4810,6 +4834,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/MediaFolderListing'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '423':
           $ref: '#/components/responses/ProductError'
   /api/v1/media/artwork/{titleId}/{kind}:
     get:
@@ -4837,6 +4863,8 @@ paths:
         '400':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '423':
           $ref: '#/components/responses/ProductError'
   /api/v1/music/library:
     get:
