@@ -32,14 +32,17 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 | 单元 | 作用 |
 |---|---|
-| [`anas-vectors@.service`](../../deploy/systemd/system/anas-vectors@.service) | Qdrant 本身。`DynamicUser` 加 `User=a-nas-vec-%i`，让每个实例有自己的 UID；`StateDirectory=a-nas-vectors/%i`；`PrivateNetwork`；`InaccessiblePaths` 挡住数据卷与产品状态；`Slice=anas.slice`；`StopWhenUnneeded=yes`，没有 `[Install]`，只能经套接字拉起 |
+| [`anas-vectors@.service`](../../deploy/systemd/system/anas-vectors@.service) | Qdrant 本身。`DynamicUser` 加 `User=a-nas-vec-%i`，让每个实例有自己的 UID；`StateDirectory=a-nas-vectors/%i`；`PrivateNetwork`；`InaccessiblePaths` 挡住数据卷与产品状态；`Slice=anas-vectors.slice`；`LimitNOFILE=65536`；`StopWhenUnneeded=yes`，没有 `[Install]`，只能经套接字拉起 |
+| [`anas-vectors.slice`](../../deploy/systemd/system/anas-vectors.slice) | 所有实例共用的 slice，位于 `anas.slice` 之下；`MemoryHigh=1280M`、`MemoryMax=1536M` 给全部实例一个总上限 |
 | [`anas-vectors-proxy@.socket`](../../deploy/systemd/system/anas-vectors-proxy@.socket) | `/run/a-nas-vectors/%i.sock`，`SocketUser=%i`、`SocketMode=0600`；所属服务的单元 `Wants=` 它 |
-| [`anas-vectors-proxy@.service`](../../deploy/systemd/system/anas-vectors-proxy@.service) | `systemd-socket-proxyd --exit-idle-time=10s`，`JoinsNamespaceOf=anas-vectors@%i.service`，`Requires=`/`After=` 实例，所以连接到来时先拉起实例；最后一个连接关闭 10 秒后代理退出，实例随之停止 |
+| [`anas-vectors-proxy@.service`](../../deploy/systemd/system/anas-vectors-proxy@.service) | `systemd-socket-proxyd --exit-idle-time=2s`，`JoinsNamespaceOf=anas-vectors@%i.service`，`Requires=`/`After=` 实例，所以连接到来时先拉起实例；最后一个连接关闭 2 秒后代理退出，实例随之停止。`StartLimitIntervalSec=0`：实例启动失败时套接字不进入 failed、不被删除，所属服务退避后重试即可 |
 
 - 实例名就是所属服务的账号，例如 `anas-vectors@a-nas-photos.service`。单元里只用 `%i`：`%I` 会把 `-` 还原成 `/`。
 - 动态用户的名字默认取单元前缀，所有实例会共用一个 UID，所以显式写 `User=a-nas-vec-%i`（不超过 31 个字符）。
-- 实例必须放在 `anas.slice` 里：相册的 AI 门控只看 `system.slice` 与 `user.slice` 的压力，Qdrant 建索引不会因此关掉门控。
-- `ExecStartPre` 运行 [`prepare.sh`](../../deploy/qdrant/prepare.sh)：用二进制按内容存放的路径作版本戳，与存储目录里记录的不同时清空存储。升级与回滚都由它覆盖，因为 Qdrant 单节点不能跳过 minor 版本。
+- 实例在 `anas-vectors.slice` 里，它位于 `anas.slice` 之下：相册的 AI 门控只看 `system.slice` 与 `user.slice` 的压力，Qdrant 建索引不会因此关掉门控。
+- `ExecStart` 运行 [`start.sh`](../../deploy/qdrant/start.sh)。它只解析一次当前 release，检查完存储后 `exec` 同一个 Qdrant，安装器切换 release 的瞬间也不会“检查的是旧版、运行的是新版”。以下两种情况它先清空存储，交给所属服务重建：
+  - **版本**：版本戳记录写入存储的 Qdrant 版本（`qdrant --version`）。版本相同或同一 minor 内的补丁升级，保留存储；换了 minor（单节点不能跳过 minor 版本），或比写入者更旧（降级），清空。
+  - **启动失败**：连续两次启动失败也清空，例如段损坏让 Qdrant 加载时 panic（系统测试用损坏的集合配置验证）。每次启动先计为失败，`wait-ready.sh` 等到端口可连后清掉计数。
 - `ExecStartPost` 运行 [`wait-ready.sh`](../../deploy/qdrant/wait-ready.sh)，等 gRPC 端口可以连接；在此之前单元不算启动完成，代理也就不会先于 Qdrant 转发。
 
 ### 配置
@@ -52,8 +55,16 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
   - 优化与建索引各 1 个线程，`optimizer_cpu_budget: 1`：开发机上 10 万条向量建完时，文件映射的 RSS 峰值从 2.9 GB 降到 0.8 GB，代价是建得慢（[检索功能实测](../research/qdrant-retrieval-features.md)）。
   - WAL 段 1 MB：索引靠重建而不是恢复，稳定后的 WAL 从 37–45 MB 降到 2–3 MB，看不出代价。
   - 空集合的段文件都是稀疏文件，实际占用很小。
-- 内存先设 `MemoryHigh=512M`、`MemoryMax=768M`，以系统测试打印的 `MemoryPeak`（空集合约 75 MB）与实机数字调整。
-  - 这是模板单元的限额，每个实例各一份，按相册（不建图、2 万到 10 万张）定。
+- 内存先设 `MemoryHigh=512M`、`MemoryMax=768M`，`anas-vectors.slice` 给全部实例的总上限是 1536M。
+  - 这是模板单元的限额，每个实例各一份，按相册（不建图）定。
+  - 开发机实测（2026-10-27，与单元相同的限额，不建图的集合，每批 256 条写入 768 维向量）：
+
+    | 规模 | 内存峰值 | 其中匿名 / 文件映射 | `memory.events` | 精确取前 500（中位 / p95） | 实际磁盘 |
+    |---|---|---|---|---|---|
+    | 2 万 | 428 MiB | 106 / 300 MiB | high 0、max 0、oom 0 | 14.6 / 33.7 ms | 254 MB |
+    | 10 万 | 512 MiB（到 `MemoryHigh`） | 90 / 284 MiB（之后） | high 3298、max 0、oom 0 | 53 / 115 ms | 315 MB |
+
+    2 万张的基线在限额之内。到 10 万张，内核在 `MemoryHigh` 处反复回收文件页，没有到 `MemoryMax` 也没有 OOM，但精确检索明显变慢。所以相册超过约 5 万张时，用 drop-in 调高这一实例的限额。实机数字随部署补充。
   - 建图的大集合用得更多：[#262](https://github.com/zhongwater123/A-NAS/issues/262) 在 Qdrant 1.19.2 默认配置下测得 10 万条文本常驻约 2 GB。
   - 所以文件分块接入时要单独评估它的实例，需要时用 `anas-vectors@<账号>.service.d/` 的 drop-in 调高，不改模板。
 - 磁盘按实际分配的块计：Qdrant 预分配稀疏文件，表观大小是实际的 3 倍以上，小集合可达 30 倍。
@@ -76,12 +87,13 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
   - `KeepAliveTime: -1`，空闲时不 ping；
   - `grpc.WithIdleTimeout`，空闲约一分钟后断开连接。
 
-  否则连接一直开着，代理不会空闲，实例也就永远不退出。实例因此在最后一次请求后约一分钟停止。代理只等 10 秒，所以客户端没有连接时，实例一定已经停了：影子比对记录的 `warm=false` 就是冷启动，不会混进“实例还在、只需重连”的情况。
+  否则连接一直开着，代理不会空闲，实例也就永远不退出。实例因此在最后一次请求后约一分钟停止。代理只等 2 秒，所以客户端没有连接时，实例几乎都已经停了：影子比对记录的 `warm=false` 基本就是冷启动；只有连接刚断开的两三秒里（代理退出、实例停止的过程中）到来的查询会被这样记录，实际只需重连。
 - **`Warm()` 不等待**：连接放在 `atomic.Pointer` 里，正在建立连接时 `Warm()` 也立刻返回 false，不会排在拉起实例的那次连接后面，把冷启动记成热的。
 - **不在构造时联系实例**：设 `SkipCompatibilityCheck`，所属服务启动时不会把实例拉起来。第一次使用时调用 `HealthCheck`，major.minor 与固定版本不符就拒绝工作。
 - **没事不连**：outbox 为空时，同步循环不联系实例；只有对账（启动后第一次空闲时与每天）和影子比对会联系。所以相册不变时，实例会停下来。
 - **只提供类型化的操作**：建集合与 keyword 索引、批量 upsert/delete（`wait=true`，确认写入 WAL 后才返回）、scroll、按范围过滤的查询。不接受调用方拼的过滤条件，避免出现“不认识的条件被当成满足”这类问题（#152 审查 S3）。
 - **点 ID**：键的基于名称的 UUID（`github.com/google/uuid` 的 `NewSHA1`，固定命名空间），同一个键总是同一个点。
+- **超时**：每次调用最多 2 分钟，覆盖实例冷启动（单元允许 90 秒）。卡住的实例不会一直拖住所属服务，也不会让连接一直忙、实例停不下来。
 - **被拒的写入**：索引拒收的写入（例如向量长度与集合不符，gRPC `InvalidArgument`）返回 `ErrRejected`，与连接故障区分开。
 
 ## 相册的同步
@@ -99,7 +111,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 - 名称为 `images_v1_<模型 ID 的 SHA-256 前 8 位>_<随机 8 位>`，距离为点积（向量已归一化，与 Go 侧的 `dot` 一致）。payload 是 `object`（内容 ID）与 `libraries`（含未进回收站的非视频资产的图库）。`libraries` 的 keyword 索引在写入第一个点之前建好。
 - 不建 HNSW 图（`m = 0`）：10 万张以内，索引里的精确扫描与进程内扫描一样快（前 500：16–20 ms 对 10–18 ms）。默认配置在约 2 万张时就开始建图，既占处理器与内存，前 500 的召回又只有 0.96–0.99，个别查询低到 0.6（[检索功能实测](../research/qdrant-retrieval-features.md)）。
-- 目标模型取 Catalog 中最新一条 `embedding/v1` 的模型。以下情况会新建集合、删掉其他 `images_*` 集合，再把全部向量排队：
+- 目标模型取 Catalog 中最新一条 `embedding/v1` 的模型；新集合的维度取这个模型最常见的向量长度，而不是最新一行的，免得一行损坏的向量定下错误的维度、让其余向量全部被拒。以下情况会新建集合、删掉其他 `images_*` 集合，再把全部向量排队：
   - 目标模型变了；
   - 记录的集合不存在：实例被清空，或版本变化；
   - 名称中的随机部分与 Catalog 记录的不符：例如换了数据卷。
@@ -121,6 +133,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 - 服务启动后第一次空闲时跑一次，之后每天在门控允许时跑一次。它先确认集合还在（不在就新建并把全部向量排队），再 scroll 出所有点的 ID 与 `libraries`，与 Catalog 计算出的目标比较，差异写回 outbox，并在日志中记录差异数。
 - 它覆盖 outbox 看不到的偏差：实例因换版本清空了存储、Catalog 被恢复到旧快照、Qdrant 掉电丢失已确认的写入。它也把“同步偏差”与“近似检索的召回”分开统计。
+- 它只比较点的有无与 `libraries`，不比较向量：内容对象按内容寻址，同一对象在同一模型下的向量总是相同，换模型则换集合。
 
 ### 影子比对
 
@@ -131,7 +144,8 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
   - 查询向量的模型与集合一致。
 - 请求路径只做一次非阻塞发送，channel 容量为 1，忙时丢弃这次比对；请求路径不访问 Catalog，也不等待 Qdrant。交过去的是搜索自己的结果：查询向量与范围、这次排序过的内容对象，以及它在相册服务里排序用的时间（`exact_ms`）。worker 因此不必在唯一的 Catalog 连接上重读候选。
 - worker 让索引在同一范围内精确取前 500（`exact`），再用内存中的向量给搜索交来的对象算点积、按对象去重排序，两边比较；分数与第 k 名相差 10⁻⁵ 以内的并列照片都算命中。两边都是精确结果，所以 overlap 应为 1，低于 1 就说明索引与 Catalog 不一致，而不是近似误差。
-- 日志记录 overlap@10/100/500、索引耗时（`index_ms`）、搜索自己的排序耗时（`exact_ms`），以及调用前有没有连接（`warm`；没有连接就是冷启动，见上文“让实例能空闲退出”）。不记录查询文本与名称。
+- 日志记录 overlap@10/100/500、索引耗时（`index_ms`）、精确排序耗时（`exact_ms`，worker 用内存中的向量给同一批对象算点积并排序的时间，与索引的精确检索做的是同一件事，口径一致），以及调用前有没有连接（`warm`，见上文“让实例能空闲退出”）。不记录查询文本与名称。
+- 比对失败（例如实例坏了）后，接下来一段时间不再比对，间隔逐次加倍、最长 30 分钟，免得每次搜索都去拉起一个坏掉的实例。
 - outbox 不为空（例如刚导入、回收或首次同步还在进行）时不比对，所以不是每次搜索都有一行日志。
 - 这些日志是决定是否切换读路径的依据。检索功能实测给出的切换条件是：真实图库上影子比对持续为 1，同一批查询的 p95 不高于现行扫描加套接字代理的往返。10 万张以内切换的理由只会是内存与重建边界，不会是速度。切换时还要重新评估：
   - slice：`anas.slice` 的 `CPUWeight=10` 会拉长前台查询；
@@ -153,6 +167,14 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 | 文件索引（另一个实例） | 文件分块 | 中文全文与语义融合，按文件归并 | 计划中（#208） |
 
 人脸与宠物向量不进入任何索引：聚类需要阈值内的全部邻居，留在 Catalog 中精确计算（[人物与宠物](photo-people.md)）。视频分段与文件分块用哪些检索功能（分组、多向量 MaxSim、中文 BM25 与融合、公式重排），以[检索功能实测](../research/qdrant-retrieval-features.md#特性取舍)为准。
+
+后续使用方接入的前提：**向量必须留在它自己的 Catalog 里**。索引随时可能被清空（换 minor 版本、启动连续失败、换模型、人工删除），只有向量在 Catalog 里，重建才只是重新写入；否则每次都要在处理器上重新编码，可能要几个小时。
+
+后续使用方的读路径会以索引为主，还要考虑：
+
+- **冷启动**：实例按需启动、空闲约一分钟后停止，隔一会儿的第一次搜索要等 0.2–1 秒（带全文索引 0.4–0.9 秒）。可以在成员会话活跃时保持常驻，或在打开搜索框时预热。
+- **内存账按使用方算**：每个实例用自己的 drop-in，`anas-vectors.slice` 给总上限；各单元的上限不是预留，后台建索引、AI 整理与多人对话同时发生时的总内存，在实机维护窗口里压测。
+- **换模型不中断搜索**：读路径已切到索引的使用方，用集合别名：先建好新集合、写满，再一次切换别名，回滚时切回。
 
 两份实测给后续集合的选项：
 

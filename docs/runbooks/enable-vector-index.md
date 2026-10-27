@@ -37,11 +37,11 @@
    - 命令（WSL）：`scripts/fetch-qdrant.sh`。
    - 命令（Windows）：`scripts/deploy-dev.ps1 -NasHost a-nas-dev -StageOnly -WslDistribution Ubuntu -WslUser <WSL 用户>`。
    - 预期：Qdrant 压缩包上传一次，此后的暂存输出 “The NAS already holds qdrant-x86_64-unknown-linux-musl.tar.gz.”。
-   - 完成标准：暂存 release 中有 `vectors/qdrant.json`、`vectors/config.yaml`、`vectors/prepare.sh`、`vectors/wait-ready.sh`，`vectors/qdrant.tar.gz` 链接到 `apps/a-nas/qdrant/<sha256>/`；暂存脚本已核对哈希。
+   - 完成标准：暂存 release 中有 `vectors/qdrant.json`、`vectors/config.yaml`、`vectors/start.sh`、`vectors/wait-ready.sh`，`vectors/qdrant.tar.gz` 链接到 `apps/a-nas/qdrant/<sha256>/`；暂存脚本已核对哈希。
 2. 以 root 按[实机配置手册的安装步骤](provision-v1.0.1-experimental-storage.md#安装系统服务)核对二进制哈希并运行安装器。
    - 预期：
      - 安装器把压缩包复制到自己的临时目录，核对大小与 SHA-256，只取出二进制放到 `/opt/a-nas/qdrant/<sha256>/qdrant`；
-     - 安装三个单元，启用 `anas-vectors-proxy@a-nas-photos.socket`。
+     - 安装三个单元与 `anas-vectors.slice`，启用 `anas-vectors-proxy@a-nas-photos.socket`。
    - 完成标准：安装器正常结束，状态输出中这个套接字是 `active (listening)`。
 3. 核对套接字与实例。
    - 命令：`stat -c '%a %U %G' /run/a-nas-vectors/a-nas-photos.sock`。
@@ -69,7 +69,7 @@
    - `overlap*` 应为 1，低于 1 说明索引与 Catalog 不一致，记下来查。`warm=false` 的那一行包含实例的启动时间。
    - 完成标准：把至少 20 条比对的数字整理进[当前状态](../status/CURRENT.md)或对应 issue，作为是否切换读路径的依据。
 6. 看实例空闲退出。
-   - 命令：在最后一次搜索或同步约 2 分钟后（相册服务空闲 1 分钟断开连接，代理再等 10 秒），执行 `systemctl is-active anas-vectors@a-nas-photos.service`。
+   - 命令：在最后一次搜索或同步约 2 分钟后（相册服务空闲 1 分钟断开连接，代理再等 2 秒），执行 `systemctl is-active anas-vectors@a-nas-photos.service`。
    - 预期：`inactive`。
    - 记录：执行 `systemctl show -p MemoryPeak anas-vectors@a-nas-photos.service`，把内存峰值写进[技术设计](../architecture/vector-index.md#配置)。
 
