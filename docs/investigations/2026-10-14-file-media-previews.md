@@ -1,7 +1,7 @@
 # 文件管理没有视频缩略图，HEIC 照片不能预览
 
-状态：fixed locally；Experimental NAS verification pending
-更新时间：2026-10-14
+状态：fixed，待实机验收
+更新时间：2026-10-27
 
 ## 症状与影响
 

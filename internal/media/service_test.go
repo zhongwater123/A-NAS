@@ -27,6 +27,7 @@ type testEnv struct {
 	accounts *accounts.Service
 	files    *files.Service
 	media    *Service
+	catalog  string // the media catalog's path
 	volume   string
 	admin    accounts.User
 	alice    accounts.User
@@ -101,7 +102,8 @@ func newTestEnv(t *testing.T, processor Processor) *testEnv {
 	t.Cleanup(func() { _ = catalog.Close() })
 	volume := filepath.Join(t.TempDir(), "volume")
 	fileService := files.NewLocalService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
-	store, err := OpenSQLite(filepath.Join(t.TempDir(), "media.db"))
+	mediaCatalog := filepath.Join(t.TempDir(), "media.db")
+	store, err := OpenSQLite(mediaCatalog)
 	if err != nil {
 		t.Fatalf("open media store: %v", err)
 	}
@@ -115,7 +117,7 @@ func newTestEnv(t *testing.T, processor Processor) *testEnv {
 		t.Fatalf("NewService() error = %v", err)
 	}
 	t.Cleanup(service.Close)
-	env := &testEnv{ctx: ctx, accounts: accountService, files: fileService, media: service, volume: volume, admin: admin, alice: alice, bob: bob, private: map[string]accounts.Space{}, clock: clock}
+	env := &testEnv{ctx: ctx, accounts: accountService, files: fileService, media: service, catalog: mediaCatalog, volume: volume, admin: admin, alice: alice, bob: bob, private: map[string]accounts.Space{}, clock: clock}
 	for _, user := range []accounts.User{admin, alice, bob} {
 		spaces, err := accountService.ListSpaces(ctx, user)
 		if err != nil {

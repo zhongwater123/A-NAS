@@ -1,7 +1,7 @@
 # Host Agent 在 systemd 沙箱下丢失 CAP_SETUID
 
-状态：fix in [PR #39](https://github.com/zhongwater123/A-NAS/pull/39)；Experimental NAS verification pending
-更新时间：2026-10-08
+状态：fixed（[PR #39](https://github.com/zhongwater123/A-NAS/pull/39)），待实机验收
+更新时间：2026-10-27
 
 ## 症状与影响
 

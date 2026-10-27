@@ -16,11 +16,15 @@ type Store struct {
 	db *sql.DB
 }
 
-func OpenSQLite(path string) (*Store, error) {
+func OpenSQLite(path string) (*Store, error) { return openSQLite("sqlite3", path) }
+
+// openSQLite opens the catalog through the named database/sql driver, which
+// tests replace with one that fails reads part way.
+func openSQLite(driverName, path string) (*Store, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("SQLite path is empty")
 	}
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
+	db, err := sql.Open(driverName, path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
 	if err != nil {
 		return nil, err
 	}

@@ -254,13 +254,17 @@ UNION SELECT poster_entry FROM shows UNION SELECT backdrop_entry FROM shows`)
 	if err != nil {
 		return
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var id string
 		if rows.Scan(&id) == nil && id != "" {
 			referenced[cacheName(id)] = true
 		}
 	}
-	_ = rows.Close()
+	// A read cut short would leave artwork in use looking unreferenced.
+	if errors.Join(rows.Err(), rows.Close()) != nil {
+		return
+	}
 	entries, err := os.ReadDir(filepath.Join(s.cacheDir, "artwork"))
 	if err != nil {
 		return

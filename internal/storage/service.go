@@ -875,6 +875,7 @@ func (s *Service) loadPlans(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	var plans []ExecutionPlan
 	for rows.Next() {
 		var document string
@@ -888,7 +889,6 @@ func (s *Service) loadPlans(ctx context.Context) error {
 		plans = append(plans, plan)
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return err
 	}
 	if err := rows.Close(); err != nil {

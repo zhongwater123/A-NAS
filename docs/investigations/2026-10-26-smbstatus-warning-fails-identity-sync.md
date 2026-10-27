@@ -1,7 +1,7 @@
 # smbstatus 的告警混进 JSON，禁用账号与启动时的身份同步失败
 
-状态：fixed locally（[PR #261](https://github.com/zhongwater123/A-NAS/pull/261)）；实验 NAS 待部署后复核
-更新时间：2026-10-26
+状态：fixed（[PR #261](https://github.com/zhongwater123/A-NAS/pull/261)），待实机验收
+更新时间：2026-10-27
 
 ## 症状与影响
 

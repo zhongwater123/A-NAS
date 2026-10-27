@@ -289,6 +289,9 @@ type photoServiceConfig struct {
 	AssistantSocket string `env:"ANAS_PHOTOS_ASSISTANT_SOCKET"`
 	// Without the AI component the socket is absent and photos wait for it.
 	AISocket string `env:"ANAS_AI_SOCKET" envDefault:"/run/a-nas-ai/ai.sock"`
+	// VectorSocket reaches the photo service's own vector index (ADR 0028);
+	// the unit names it, and without it the index is off.
+	VectorSocket string `env:"ANAS_PHOTOS_VECTOR_SOCKET"`
 	// QuietPeriod shortens how long the library must go unused before AI
 	// work starts, for the system test; products keep the default.
 	QuietPeriod string        `env:"ANAS_PHOTOS_AI_QUIET_PERIOD"`
@@ -299,6 +302,9 @@ type photoServiceConfig struct {
 func loadPhotoServiceConfig(environment map[string]string) (photoServiceConfig, error) {
 	c, err := envconfig.Parse[photoServiceConfig](environment)
 	if err != nil {
+		return c, err
+	}
+	if c.VectorSocket, err = envconfig.AbsolutePath("ANAS_PHOTOS_VECTOR_SOCKET", c.VectorSocket); err != nil {
 		return c, err
 	}
 	if c.QuietPeriod != "" {

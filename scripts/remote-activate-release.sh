@@ -98,6 +98,10 @@ install -m 0644 anas-ai-system.service.incoming anas-ai-system.service
 install -m 0644 anas-media-system.socket.incoming anas-media-system.socket
 install -m 0644 anas-media-system@.service.incoming anas-media-system@.service
 install -m 0644 anas-media-system.slice.incoming anas-media-system.slice
+install -m 0644 anas-vectors-system.slice.incoming anas-vectors-system.slice
+install -m 0644 anas-vectors-system@.service.incoming anas-vectors-system@.service
+install -m 0644 anas-vectors-proxy-system@.socket.incoming anas-vectors-proxy-system@.socket
+install -m 0644 anas-vectors-proxy-system@.service.incoming anas-vectors-proxy-system@.service
 # Local AI (ADR 0016): the Worker's code and the manifests of the models and
 # runtime it pins. deploy-dev.ps1 uploads the models and runtime once per
 # content; link the staged copies the root installer copies and checks. Each
@@ -123,6 +127,20 @@ runtime_file=$(manifest_field ai/runtime.json file)
 staged_runtime="$HOME/apps/a-nas/ai-runtimes/$runtime_file"
 printf '%s  %s\n' "$runtime_sha" "$staged_runtime" | sha256sum --check --quiet -
 ln -s "$staged_runtime" ai/runtime.tar.gz
+# The vector index (ADR 0028): Qdrant travels once per content like the
+# models; the release carries its manifest, settings and scripts.
+rm -rf vectors
+install -d -m 0750 vectors
+install -m 0644 vectors-qdrant.json.incoming vectors/qdrant.json
+install -m 0644 vectors-config.yaml.incoming vectors/config.yaml
+install -m 0750 vectors-start.sh.incoming vectors/start.sh
+install -m 0750 vectors-wait-ready.sh.incoming vectors/wait-ready.sh
+qdrant_sha=$(manifest_field vectors/qdrant.json sha256)
+qdrant_file=$(manifest_field vectors/qdrant.json file)
+[[ "$qdrant_sha" =~ ^[0-9a-f]{64}$ && "$qdrant_file" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "invalid Qdrant manifest" >&2; exit 2; }
+staged_qdrant="$HOME/apps/a-nas/qdrant/$qdrant_sha/$qdrant_file"
+printf '%s  %s\n' "$qdrant_sha" "$staged_qdrant" | sha256sum --check --quiet -
+ln -s "$staged_qdrant" vectors/qdrant.tar.gz
 rm -f \
   anas-system.slice.incoming \
   anas-ai-system.socket.incoming \
@@ -130,6 +148,14 @@ rm -f \
   anas-media-system.socket.incoming \
   anas-media-system@.service.incoming \
   anas-media-system.slice.incoming \
+  anas-vectors-system.slice.incoming \
+  anas-vectors-system@.service.incoming \
+  anas-vectors-proxy-system@.socket.incoming \
+  anas-vectors-proxy-system@.service.incoming \
+  vectors-qdrant.json.incoming \
+  vectors-config.yaml.incoming \
+  vectors-start.sh.incoming \
+  vectors-wait-ready.sh.incoming \
   ai-worker.tar.incoming \
   ai-model.json.incoming \
   ai-detector.json.incoming \

@@ -1,0 +1,47 @@
+# git-cliff configuration for a CHANGELOG.md draft: one line per pull request
+# merged into main, grouped by the type its title starts with. CHANGELOG.md
+# stays written for the people who use A-NAS, so the draft is material for
+# rewriting entries, not text to paste (the header of CHANGELOG.md).
+#
+# Usage, from tools/changelog after npm ci: npm run draft -- <from>..origin/main
+# (the script runs git-cliff at the repository root, where this file is
+# tools/changelog/cliff.toml).
+
+[changelog]
+header = """
+# CHANGELOG 草稿
+
+由 git-cliff 从合入 main 的 PR 生成。改写成使用者看得懂的条目后写入 CHANGELOG.md；只影响开发的 PR 一般不写入。
+
+"""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | trim }}（{{ commit.author.timestamp | date(format="%Y-%m-%d") }}）
+{%- endfor %}
+{% endfor %}
+"""
+trim = true
+
+[git]
+conventional_commits = false
+# A merge on GitHub reads "Merge pull request #N from owner/branch", followed
+# by the pull request's title. Keep the number and the title.
+commit_preprocessors = [
+  { pattern = '^Merge pull request #(\d+) from \S+\s+', replace = "#${1} " },
+]
+# The order of the groups follows the leading number in each name.
+commit_parsers = [
+  { message = '^#\d+ \S*(feat|功能)', group = "<!-- 1 -->新增" },
+  { message = '^#\d+ \S*fix', group = "<!-- 2 -->修复" },
+  { message = '^#\d+ \S*(refactor|perf)', group = "<!-- 3 -->重构与性能" },
+  { message = '^#\d+ \S*(build|ci|chore|test|style)', group = "<!-- 5 -->构建、依赖与测试（一般不写入）" },
+  { message = '^#\d+ \S*docs', group = "<!-- 6 -->文档（一般不写入）" },
+  { message = '^#\d+ ', group = "<!-- 4 -->其他（按标题判断）" },
+  # The step commits inside each pull request, and merges of main into a
+  # branch, are covered by the pull request's line.
+  { message = '.*', skip = true },
+]
+filter_commits = false
+sort_commits = "newest"

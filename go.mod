@@ -18,6 +18,7 @@ require (
 	github.com/getkin/kin-openapi v0.145.0
 	github.com/go-audio/wav v1.1.0
 	github.com/godbus/dbus/v5 v5.1.0
+	github.com/google/uuid v1.6.0
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/landlock-lsm/go-landlock v0.10.1
@@ -26,16 +27,18 @@ require (
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.1
 	github.com/prometheus/procfs v0.22.0
+	github.com/qdrant/go-client v1.20.1
 	github.com/razsteinmetz/go-ptn v1.0.0
 	github.com/tus/tusd/v2 v2.10.1
 	go.yaml.in/yaml/v4 v4.0.0-rc.4
-	golang.org/x/crypto v0.57.0
+	golang.org/x/crypto v0.58.0
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976
 	golang.org/x/image v0.47.0
 	golang.org/x/mod v0.42.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0
+	google.golang.org/grpc v1.84.0
 )
 
 require (
@@ -53,7 +56,6 @@ require (
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/icza/bitio v1.1.0 // indirect
 	github.com/jfreymuth/vorbis v1.0.2 // indirect
 	github.com/mattn/go-shellwords v1.0.12 // indirect
@@ -75,9 +77,12 @@ require (
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/telemetry v0.0.0-20261010193011-f71dc92da45e // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	golang.org/x/vuln v1.9.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 )
 

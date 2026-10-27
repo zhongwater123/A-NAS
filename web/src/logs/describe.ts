@@ -239,6 +239,19 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
       return { parts: [actor, "开始只读查看", subject, "的私有图库"], meta: viewingMeta(), tone: "warning" };
     case "photos.viewing_ended":
       return { parts: [actor, "结束了对", subject, "私有图库的只读查看"], meta: [] };
+    // A sweep left these alone (#269); detail is how many.
+    case "snapshot.unrecorded":
+      return {
+        parts: [actor, "保留了", name(`${event.detail ?? ""} 份`), "快照目录中没有记录的快照"],
+        meta: ["快照目录可能丢失过或从旧副本恢复过；这些快照仍在数据卷上，但无法在备份中心浏览"],
+        tone: "warning",
+      };
+    case "snapshot.unfound":
+      return {
+        parts: [actor, "保留了", name(`${event.detail ?? ""} 条`), "快照记录，数据卷上一份对应的快照都没有找到"],
+        meta: ["数据卷上的快照文件夹可能丢失或无法读取"],
+        tone: "warning",
+      };
   }
   if (event.action === "snapshot.schedule_updated") {
     return {

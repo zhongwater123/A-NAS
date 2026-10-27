@@ -164,8 +164,19 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 		hits = newestHits(candidates)
 		page.Semantic = true
 		page.Closest = len(hits)
-	} else if hits, err = s.queryHits(ctx, cmp.Or(rest, query), candidates, &page); err != nil {
-		return SearchPage{}, err
+	} else {
+		text := cmp.Or(rest, query)
+		queryVector, model := s.embedQuery(ctx, text)
+		// The vector index answers the same question in the background;
+		// only a first page without people compares like with like.
+		var shadow *shadowQuery
+		if after == nil && len(names) == 0 {
+			shadow = s.newShadowQuery(queryVector, model, args)
+		}
+		if hits, err = s.queryHits(ctx, text, queryVector, model, candidates, &page, shadow); err != nil {
+			return SearchPage{}, err
+		}
+		s.shadowSearch(shadow)
 	}
 	page.Assets, page.Next, err = s.hitPage(ctx, p, hits, after, request.Limit)
 	if err != nil {
@@ -185,11 +196,11 @@ GROUP BY a.id`, scope...)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
 		if err := rows.Scan(&c.id, &c.objectID, &c.libraryID, &c.name, &c.tags, &c.when, &c.video); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		candidates = append(candidates, c)
@@ -242,12 +253,13 @@ func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, af
 	return assets, next, nil
 }
 
-// queryHits ranks the candidates for a query: name or user tag matches first,
-// then every photo with a vector by similarity, at most maxSemanticResults
-// of them. It records on the page whether the query was encoded and where the
-// closest group ends.
-func (s *Service) queryHits(ctx context.Context, query string, candidates []candidate, page *SearchPage) ([]searchHit, error) {
-	queryVector, model := s.embedQuery(ctx, query)
+// queryHits ranks the candidates for a query, whose vector of model is
+// queryVector or nil: name or user tag matches first, then every photo with
+// a vector by similarity, at most maxSemanticResults of them. It records on
+// the page whether the query was encoded and where the closest group ends,
+// and on shadow, unless nil, the content objects it ranked by similarity.
+func (s *Service) queryHits(ctx context.Context, query string, queryVector []float32, model string, candidates []candidate,
+	page *SearchPage, shadow *shadowQuery) ([]searchHit, error) {
 	folded := strings.ToLower(query)
 	calibration := s.objectCalibration
 	mentions := s.matcher.Mentions(query)
@@ -275,6 +287,9 @@ func (s *Service) queryHits(ctx context.Context, query string, candidates []cand
 				score := 0.0
 				if embedded && queryVector != nil {
 					score = dot(vector, queryVector)
+					if shadow != nil {
+						shadow.objects = append(shadow.objects, c.objectID)
+					}
 				}
 				scores, wasDetected := found[c.objectID]
 				if !wasDetected {
@@ -586,12 +601,12 @@ func (s *Service) loadVectors(ctx context.Context, model string) (map[string][]f
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	vectors := make(map[string][]float32)
 	for rows.Next() {
 		var objectID string
 		var encoded []byte
 		if err := rows.Scan(&objectID, &encoded); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		vectors[objectID] = decodeVector(encoded)

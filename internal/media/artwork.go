@@ -135,16 +135,16 @@ func (s *Service) showArtwork(ctx context.Context, actor accounts.User, show sho
 	if err != nil {
 		return Image{}, err
 	}
+	defer rows.Close()
 	var episodes []*videoRow
 	for rows.Next() {
 		video, err := scanVideo(rows)
 		if err != nil {
-			_ = rows.Close()
 			return Image{}, err
 		}
 		episodes = append(episodes, video)
 	}
-	if err := rows.Close(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return Image{}, err
 	}
 	sortEpisodes(episodes)

@@ -68,6 +68,15 @@ for role in "${ai_roles[@]}"; do
     exit 2
   fi
 done
+# The vector index (ADR 0028): the Qdrant release its manifest pins by
+# content, the settings every instance shares, and the scripts its unit runs.
+for file in anas-vectors-system@.service anas-vectors-proxy-system@.socket anas-vectors-proxy-system@.service \
+  anas-vectors-system.slice vectors/qdrant.json vectors/config.yaml vectors/start.sh vectors/wait-ready.sh; do
+  if [[ ! -f "$source_release/$file" ]]; then
+    echo "missing vector index file: $source_release/$file" >&2
+    exit 2
+  fi
+done
 # Media and file previews run Debian's FFmpeg / libheif in the worker sandbox.
 for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 systemd-sysusers ffmpeg ffprobe heif-thumbnailer; do
   if ! command -v "$command" >/dev/null; then
@@ -75,6 +84,11 @@ for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpass
     exit 3
   fi
 done
+# Each vector index is reached through systemd's socket proxy.
+if [[ ! -x /usr/lib/systemd/systemd-socket-proxyd ]]; then
+  echo "missing required host command: /usr/lib/systemd/systemd-socket-proxyd" >&2
+  exit 3
+fi
 # MediaPipe links these even on the CPU (Debian packages libegl1 and libgles2).
 for library in libEGL.so.1 libGLESv2.so.2; do
   if ! ldconfig -p | grep -Fq "$library ("; then
@@ -122,6 +136,21 @@ done
 runtime_path=/opt/a-nas/ai-runtimes/$runtime_id
 if [[ ! -d "$runtime_path" && ! -f "$source_release/ai/runtime.tar.gz" ]]; then
   echo "missing AI runtime: neither $runtime_path nor $source_release/ai/runtime.tar.gz" >&2
+  exit 2
+fi
+# Qdrant, like the models, is kept once by content: the official tarball is
+# checked, and only its binary is kept, under the tarball's SHA-256.
+qdrant_sha=$(manifest_field "$source_release/vectors/qdrant.json" sha256)
+qdrant_size=$(manifest_field "$source_release/vectors/qdrant.json" sizeBytes)
+qdrant_binary=$(manifest_field "$source_release/vectors/qdrant.json" binary)
+if [[ ! "$qdrant_sha" =~ ^[0-9a-f]{64}$ || ! "$qdrant_size" =~ ^[0-9]+$ ||
+  ! "$qdrant_binary" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "invalid Qdrant manifest: $source_release/vectors/qdrant.json" >&2
+  exit 2
+fi
+qdrant_path=/opt/a-nas/qdrant/$qdrant_sha/qdrant
+if [[ ! -f "$qdrant_path" && ! -f "$source_release/vectors/qdrant.tar.gz" ]]; then
+  echo "missing Qdrant: neither $qdrant_path nor $source_release/vectors/qdrant.tar.gz" >&2
   exit 2
 fi
 # The LAN Web entry is optional: installing Caddy enables it (ADR 0012).
@@ -224,7 +253,7 @@ install -d -o root -g a-nas -m 0750 /etc/a-nas
 install -d -o root -g root -m 0755 /etc/samba
 install -d -o root -g root -m 0755 /etc/chromium /etc/chromium/policies /etc/chromium/policies/managed
 install -d -o root -g root -m 0755 /var/lib/samba /run/samba
-install -d -o root -g root -m 0755 /opt/a-nas/models /opt/a-nas/ai-runtimes
+install -d -o root -g root -m 0755 /opt/a-nas/models /opt/a-nas/ai-runtimes /opt/a-nas/qdrant
 
 # Staged content is copied before it is checked, so the staging account cannot
 # change it after the check.
@@ -259,6 +288,23 @@ if [[ ! -d "$runtime_path" ]]; then
   mv -T -- "$incoming" "$runtime_path"
   incoming=
 fi
+if [[ ! -f "$qdrant_path" ]]; then
+  incoming=$(mktemp -d /opt/a-nas/qdrant/.incoming-XXXXXX)
+  cp -- "$source_release/vectors/qdrant.tar.gz" "$incoming.tar.gz"
+  if [[ "$(stat -c %s "$incoming.tar.gz")" != "$qdrant_size" ]] ||
+    ! printf '%s  %s\n' "$qdrant_sha" "$incoming.tar.gz" | sha256sum --check --quiet - >/dev/null 2>&1; then
+    echo "the staged Qdrant does not match its manifest: $source_release/vectors/qdrant.tar.gz" >&2
+    exit 4
+  fi
+  install -d -m 0700 "$incoming/unpacked"
+  tar -C "$incoming/unpacked" --no-same-owner -xzf "$incoming.tar.gz" "$qdrant_binary"
+  rm -f -- "$incoming.tar.gz"
+  install -o root -g root -m 0755 "$incoming/unpacked/$qdrant_binary" "$incoming/qdrant"
+  rm -rf -- "$incoming/unpacked"
+  chmod 0755 "$incoming"
+  mv -T -- "$incoming" "/opt/a-nas/qdrant/$qdrant_sha"
+  incoming=
+fi
 trap - EXIT
 
 target="/opt/a-nas/releases/$release_id"
@@ -282,6 +328,10 @@ for role in "${ai_roles[@]}"; do
   ln -s -- "${model_path[$name]}" "$temporary/ai/$name.${role#*:}"
 done
 ln -s -- "$runtime_path" "$temporary/ai/runtime"
+install -d -o root -g root -m 0755 "$temporary/vectors"
+install -o root -g root -m 0644 "$source_release/vectors/qdrant.json" "$source_release/vectors/config.yaml" "$temporary/vectors/"
+install -o root -g root -m 0755 "$source_release/vectors/start.sh" "$source_release/vectors/wait-ready.sh" "$temporary/vectors/"
+ln -s -- "$qdrant_path" "$temporary/vectors/qdrant"
 mv -- "$temporary" "$target"
 trap - EXIT
 
@@ -361,6 +411,12 @@ install -d -o root -g root -m 0755 /etc/systemd/system/anas-ai.service.d
 printf '# Written by the A-NAS installer for %s cores: all but two.\n[Service]\nCPUQuota=%s%%\n' \
   "$cores" "$((cores > 2 ? (cores - 2) * 100 : 100))" > /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
 chmod 0644 /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
+# One vector index instance per owning service, reached only through its
+# proxy socket (ADR 0028).
+install -o root -g root -m 0644 "$source_release/anas-vectors-system.slice" /etc/systemd/system/anas-vectors.slice
+install -o root -g root -m 0644 "$source_release/anas-vectors-system@.service" /etc/systemd/system/anas-vectors@.service
+install -o root -g root -m 0644 "$source_release/anas-vectors-proxy-system@.socket" /etc/systemd/system/anas-vectors-proxy@.socket
+install -o root -g root -m 0644 "$source_release/anas-vectors-proxy-system@.service" /etc/systemd/system/anas-vectors-proxy@.service
 install -o root -g root -m 0644 "$source_release/anas-media-system.socket" /etc/systemd/system/anas-media.socket
 install -o root -g root -m 0644 "$source_release/anas-media-system@.service" /etc/systemd/system/anas-media@.service
 # All media workers share one memory limit (system-anasmedia.slice).
@@ -390,6 +446,11 @@ systemctl restart anas-ai.socket
 # with the previous release.
 systemctl enable anas-media.socket
 systemctl restart anas-media.socket
+# A running vector index belongs to the previous release; the photo service's
+# next connection starts this release's.
+systemctl stop 'anas-vectors-proxy@*.service' 'anas-vectors@*.service'
+systemctl enable anas-vectors-proxy@a-nas-photos.socket
+systemctl restart anas-vectors-proxy@a-nas-photos.socket
 systemctl enable anas-host-agent.service anas-photos.service anas-api.service anas-shares.service
 restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service
@@ -401,7 +462,7 @@ if [[ "$lan_entry" == true ]]; then
   systemctl reload-or-restart caddy.service
 fi
 
-systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-ai.socket anas-media.socket
+systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-ai.socket anas-media.socket anas-vectors-proxy@a-nas-photos.socket
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must
 # keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at startup
