@@ -1151,6 +1151,8 @@ else
   install -m 0755 /src/build/anas-api /opt/a-nas/releases/worker-legacy/anas-api
   echo 'legacy worker validation: old unit layout, current decoder binary'
 fi
+# Match the Product Service unit's SupplementaryGroups, not the account's
+# login groups: a-nas deliberately has no permanent photo-store membership.
 cat > /tmp/probe-worker.py <<'PY'
 import array, json, socket, struct, sys
 
@@ -1170,13 +1172,13 @@ PY
 check "incomplete rollback stage is rejected before stopping the active socket" \
   denied "$worker_installer" /tmp/nonexistent-worker-release
 check "failed rollback preflight leaves the new worker working" \
-  runuser -u a-nas -- python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
+  setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
 systemctl stop anas-api anas-photos anas-shares
 "$worker_installer" /tmp/worker-legacy
 ln -sfn /opt/a-nas/releases/worker-legacy /opt/a-nas/current
 systemctl enable --now anas-media.socket
 check "rollback restores a working worker through the legacy unit and release link" \
-  runuser -u a-nas -- python3 /tmp/probe-worker.py /run/a-nas-media/media.sock
+  setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-media/media.sock
 check "rollback removes the new worker units, socket and tmpfiles configuration" \
   test ! -e /etc/systemd/system/anas-ffmpeg.socket -a ! -e /etc/systemd/system/anas-ffmpeg@.service \
   -a ! -e /etc/systemd/system/system-anasffmpeg.slice -a ! -e /run/a-nas-ffmpeg/ffmpeg.sock \
@@ -1190,7 +1192,7 @@ if ! bash /src/scripts/install-v1.0.1-system-services.sh /tmp/worker-upgrade wor
 fi
 for _ in $(seq 1 150); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 check "upgrade restores a working worker through the new unit and release link" \
-  runuser -u a-nas -- python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
+  setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
 check "upgrade removes legacy worker units, socket and tmpfiles configuration" \
   test ! -e /etc/systemd/system/anas-media.socket -a ! -e /etc/systemd/system/anas-media@.service \
   -a ! -e /etc/systemd/system/system-anasmedia.slice -a ! -e /run/a-nas-media/media.sock \
