@@ -336,5 +336,5 @@ export function formatClock(value: string | number | Date): string {
 
 // "3 周前" for an image's age; exact dates live in the tooltip.
 export function formatAgo(value: string, now = Date.now()): string {
-  return relativeTime(value, now, { dateAfterDays: Infinity, numeric: "auto" });
+  return relativeTime(value, now, { dateAfterDays: Infinity });
 }

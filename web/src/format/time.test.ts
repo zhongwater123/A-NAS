@@ -27,6 +27,14 @@ describe("shared local time formatting", () => {
     expect(calendarLabel(new Date(2026, 0, 2), now)).toBe("明天");
     expect(formatClock(new Date(2026, 0, 1))).toBe("00:00");
   });
+  it("keeps elapsed units numeric even when calendar offsets differ", () => {
+    const at = new Date(2026, 9, 24, 23, 59);
+    const now = new Date(2026, 9, 27, 0, 5);
+    expect(calendarDays(at, now)).toBe(-3);
+    expect(relativeTime(at, now)).toBe("2 天前");
+    expect(relativeTime(at, now, { dateAfterDays: Infinity })).toBe("2 天前");
+    expect(relativeTime(new Date(2026, 9, 25, 0, 6), now)).toBe("1 天前");
+  });
   it("returns a stable placeholder for invalid dates", () => {
     expect(formatDate("invalid")).toBe("—");
     expect(calendarLabel("invalid")).toBe("—");

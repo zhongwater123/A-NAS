@@ -79,7 +79,6 @@ export function relativeTime(
   now: TimeValue = Date.now(),
   options: {
     dateAfterDays?: number;
-    numeric?: "auto" | "always";
     withTime?: boolean;
   } = {},
 ): string {
@@ -102,7 +101,8 @@ export function relativeTime(
     ["minute", minute],
   ];
   for (const [unit, size] of steps) {
-    if (Math.abs(elapsed) >= size) return relativeUnit(Math.trunc(elapsed / size), unit, options.numeric);
+    // Elapsed units are not calendar offsets: 48 hours can span three midnights.
+    if (Math.abs(elapsed) >= size) return relativeUnit(Math.trunc(elapsed / size), unit);
   }
   return "刚刚";
 }

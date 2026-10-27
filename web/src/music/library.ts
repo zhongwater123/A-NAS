@@ -321,7 +321,7 @@ export function summary(tracks: Track[]): string {
 }
 
 export function relativeTime(iso: string, now = Date.now()): string {
-  return formatRelativeTime(iso, now, { dateAfterDays: 7, numeric: "auto" });
+  return formatRelativeTime(iso, now, { dateAfterDays: 7 });
 }
 
 export const formatLabel: Record<string, string> = {
