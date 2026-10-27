@@ -1,4 +1,4 @@
-package filebroker
+package rootbroker
 
 import (
 	"bufio"
@@ -13,6 +13,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
@@ -131,7 +134,7 @@ func TestTerminalIsUnavailableWhileSessionsCannotBeRead(t *testing.T) {
 	broker := newTerminalHarness(t, "echo ready")
 	broker.setUnreadable(errors.New("database is locked"))
 	_, err := broker.client.StartShell(accountid.WithSessionToken(context.Background(), "admin-token"), 80, 24)
-	if !errors.Is(err, ErrUnavailable) || errors.Is(err, filesystem.ErrForbidden) {
+	if !errors.Is(err, wire.ErrUnavailable) || errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("StartShell() error = %v, want ErrUnavailable and not a refusal", err)
 	}
 }
@@ -207,7 +210,7 @@ func waitForLine(t *testing.T, reader *bufio.Reader, want string) {
 }
 
 type terminalHarness struct {
-	client     *Client
+	client     *filebroker.Client
 	mu         sync.Mutex
 	identities map[string]accountid.Identity
 	// unreadable, when set, is what every lookup fails with, as a session
@@ -272,8 +275,8 @@ func newTerminalHarness(t *testing.T, script string, adjust ...func(*Config)) *t
 		server.Close()
 		_ = os.Remove(socket)
 	})
-	h.client = NewClient(socket)
+	h.client = filebroker.NewClient(socket)
 	return h
 }
 
-var _ ptyshell.Spawner = (*Client)(nil)
+var _ ptyshell.Spawner = (*filebroker.Client)(nil)

@@ -1,4 +1,4 @@
-package filebroker
+package rootbroker
 
 import (
 	"bufio"
@@ -19,6 +19,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
+
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
@@ -28,7 +31,7 @@ func TestAssistantConnectionsGoOnlyToTheSessionsOwnMember(t *testing.T) {
 	if _, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "forged"), false); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("forged ConnectAssistant() error = %v, want ErrForbidden", err)
 	}
-	if _, err := h.client.ConnectAssistant(context.Background(), false); !errors.Is(err, ErrUnavailable) {
+	if _, err := h.client.ConnectAssistant(context.Background(), false); !errors.Is(err, wire.ErrUnavailable) {
 		t.Fatalf("ConnectAssistant() without a session error = %v, want ErrUnavailable", err)
 	}
 	// The administrator has no assistant here, and asking for one never
@@ -109,7 +112,7 @@ func TestStoppingTheBrokerCutsAssistantConnections(t *testing.T) {
 
 func TestAssistantIsOffWithoutSockets(t *testing.T) {
 	h := newAssistantHarness(t, func(config *Config) { config.AssistantSockets = "" })
-	if _, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "member-token"), false); !errors.Is(err, ErrUnavailable) {
+	if _, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "member-token"), false); !errors.Is(err, wire.ErrUnavailable) {
 		t.Fatalf("ConnectAssistant() error = %v, want ErrUnavailable", err)
 	}
 }
@@ -193,7 +196,7 @@ func TestAssistantWithAWrongSecretIsUnavailable(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.tokens, "alice.env"), []byte("HERMES_DASHBOARD_SESSION_TOKEN=not-hers\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "member-token"), false); !errors.Is(err, ErrUnavailable) {
+	if _, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "member-token"), false); !errors.Is(err, wire.ErrUnavailable) {
 		t.Fatalf("ConnectAssistant() error = %v, want ErrUnavailable", err)
 	}
 }
@@ -292,7 +295,7 @@ func newAssistantHarness(t *testing.T, adjust ...func(*Config)) *assistantHarnes
 		_ = listener.Close()
 		server.Close()
 	})
-	h.client = NewClient(socket)
+	h.client = filebroker.NewClient(socket)
 	return h
 }
 

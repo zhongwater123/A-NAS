@@ -16,21 +16,21 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
-	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker"
 )
 
 func TestMain(m *testing.M) {
 	// The File Broker re-executes this binary as a per-user worker; it runs
 	// as that user with an empty environment, so check for it first.
-	if len(os.Args) == 3 && os.Args[1] == filebroker.WorkerArgument {
-		if err := filebroker.RunWorker(os.Args[2]); err != nil {
+	if len(os.Args) == 3 && os.Args[1] == rootbroker.WorkerArgument {
+		if err := rootbroker.RunWorker(os.Args[2]); err != nil {
 			_, _ = os.Stderr.WriteString(err.Error() + "\n")
 			os.Exit(1)
 		}
 		os.Exit(0)
 	}
-	if len(os.Args) == 2 && os.Args[1] == filebroker.ProbeArgument {
-		if err := filebroker.RunProbe(); err != nil {
+	if len(os.Args) == 2 && os.Args[1] == rootbroker.ProbeArgument {
+		if err := rootbroker.RunProbe(); err != nil {
 			_, _ = os.Stderr.WriteString(err.Error() + "\n")
 			os.Exit(1)
 		}

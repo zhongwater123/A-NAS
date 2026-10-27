@@ -1,4 +1,4 @@
-package filebroker
+package rootbroker
 
 import (
 	"context"
@@ -15,6 +15,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -136,11 +139,11 @@ func TestBrokerRefusesUnverifiedCallers(t *testing.T) {
 		t.Fatalf("forged token error = %v, want ErrForbidden", err)
 	}
 	system := accountid.WithSessionToken(context.Background(), "system-token")
-	if err := harness.client.MkdirAll(system, space); !errors.Is(err, ErrUnavailable) {
+	if err := harness.client.MkdirAll(system, space); !errors.Is(err, wire.ErrUnavailable) {
 		t.Fatalf("out-of-range UID error = %v, want ErrUnavailable", err)
 	}
 	impostor := accountid.WithSessionToken(context.Background(), "impostor-token")
-	if err := harness.client.MkdirAll(impostor, space); !errors.Is(err, ErrUnavailable) {
+	if err := harness.client.MkdirAll(impostor, space); !errors.Is(err, wire.ErrUnavailable) {
 		t.Fatalf("unprovisioned account error = %v, want ErrUnavailable", err)
 	}
 	harness.ready.Store(false)
@@ -180,8 +183,8 @@ func TestFileOperationsAreUnavailableWhileSessionsCannotBeRead(t *testing.T) {
 		_ = listener.Close()
 		server.Close()
 	})
-	err = NewClient(socket).Mkdir(accountid.WithSessionToken(context.Background(), "alice-token"), filepath.Join(t.TempDir(), "docs"))
-	if !errors.Is(err, ErrUnavailable) || errors.Is(err, filesystem.ErrForbidden) {
+	err = filebroker.NewClient(socket).Mkdir(accountid.WithSessionToken(context.Background(), "alice-token"), filepath.Join(t.TempDir(), "docs"))
+	if !errors.Is(err, wire.ErrUnavailable) || errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("Mkdir() error = %v, want ErrUnavailable and not a refusal", err)
 	}
 }
@@ -286,7 +289,7 @@ func TestFileServiceWorksThroughTheBroker(t *testing.T) {
 type harness struct {
 	volume  string
 	server  *Server
-	client  *Client
+	client  *filebroker.Client
 	ready   atomic.Bool
 	spawned atomic.Int32
 }
@@ -338,7 +341,7 @@ func newHarness(t *testing.T, options ...string) *harness {
 		server.Close()
 	})
 	h.server = server
-	h.client = NewClient(socket)
+	h.client = filebroker.NewClient(socket)
 	return h
 }
 

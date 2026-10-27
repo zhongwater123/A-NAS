@@ -18,7 +18,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
-	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker"
 	linuxhostops "github.com/zhongwater123/A-NAS/internal/hostops/linux"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
@@ -31,22 +31,22 @@ import (
 var version = "dev"
 
 func main() {
-	if len(os.Args) == 3 && os.Args[1] == filebroker.WorkerArgument {
-		if err := filebroker.RunWorker(os.Args[2]); err != nil {
+	if len(os.Args) == 3 && os.Args[1] == rootbroker.WorkerArgument {
+		if err := rootbroker.RunWorker(os.Args[2]); err != nil {
 			fmt.Fprintln(os.Stderr, "A-NAS file worker:", err)
 			os.Exit(1)
 		}
 		return
 	}
-	if len(os.Args) >= 4 && os.Args[1] == filebroker.ShellGateArgument {
-		if err := filebroker.RunShellGate(os.Args[2:]); err != nil {
+	if len(os.Args) >= 4 && os.Args[1] == rootbroker.ShellGateArgument {
+		if err := rootbroker.RunShellGate(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "A-NAS terminal:", err)
 			os.Exit(1)
 		}
 		return
 	}
-	if len(os.Args) == 2 && os.Args[1] == filebroker.ProbeArgument {
-		if err := filebroker.RunProbe(); err != nil {
+	if len(os.Args) == 2 && os.Args[1] == rootbroker.ProbeArgument {
+		if err := rootbroker.RunProbe(); err != nil {
 			fmt.Fprintln(os.Stderr, "A-NAS file worker probe:", err)
 			os.Exit(1)
 		}
@@ -166,14 +166,14 @@ func run(logger *slog.Logger) error {
 	// File workers and terminal shells run in scopes of their own, so they
 	// share neither the Host Agent's limits nor its name in the journal.
 	// Without systemd, as in development, they stay in the Host Agent's.
-	var scopes filebroker.Placer
+	var scopes rootbroker.Placer
 	if placer, err := systemdscope.New(ctx); err != nil {
 		logger.Warn("file workers and terminals run in the Host Agent's cgroup", "error", err)
 	} else {
 		defer placer.Close()
 		scopes = placer
 	}
-	broker, err := filebroker.NewServer(filebroker.Config{
+	broker, err := rootbroker.NewServer(rootbroker.Config{
 		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
 		AssistantSockets: config.AssistantSockets,
 		AssistantTokens:  config.AssistantTokens,
@@ -258,7 +258,7 @@ func run(logger *slog.Logger) error {
 // serveAssistantChanges answers the assistants' MCP tool. The socket is open
 // to everyone but sits in /run/a-nas, which members cannot enter; the units
 // bind it into each assistant's sandbox, and the member is the caller's UID.
-func serveAssistantChanges(socketPath string, broker *filebroker.Server, logger *slog.Logger) (func(), error) {
+func serveAssistantChanges(socketPath string, broker *rootbroker.Server, logger *slog.Logger) (func(), error) {
 	_ = os.Remove(socketPath)
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {

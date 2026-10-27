@@ -1,6 +1,6 @@
 //go:build !linux
 
-package filebroker
+package rootbroker
 
 import "errors"
 

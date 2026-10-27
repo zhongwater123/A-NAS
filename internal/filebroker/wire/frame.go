@@ -8,7 +8,7 @@
 // except for the assistant's changes: their executor (internal/assistantchanges)
 // copies a staged file through such descriptors, a block at a time, into its
 // own store when the card is made and from there into place once approved.
-package filebroker
+package wire
 
 import (
 	"encoding/binary"
@@ -24,37 +24,37 @@ import (
 // maxMessage bounds one JSON message. A scan travels in pages far below it;
 // a reply that still does not fit is answered with an error instead. Test
 // workers lower it.
-var maxMessage = 64 << 20
+var MaxMessage = 64 << 20
 
 // scanPage bounds the entries in one message of a scan, so neither the
 // broker nor a worker ever holds a whole large tree in one message.
-var scanPage = 2048
+var ScanPage = 2048
 
-var errTooLarge = errors.New("file broker message is too large")
+var ErrTooLarge = errors.New("file broker message is too large")
 
 // encodeMessage encodes value, refusing a message over the limit.
-func encodeMessage(value any) ([]byte, error) {
+func EncodeMessage(value any) ([]byte, error) {
 	body, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
 	}
-	if len(body) > maxMessage {
-		return nil, errTooLarge
+	if len(body) > MaxMessage {
+		return nil, ErrTooLarge
 	}
 	return body, nil
 }
 
 // writeMessage sends a length-prefixed JSON message. A file, when given,
 // travels as SCM_RIGHTS ancillary data attached to the length prefix.
-func writeMessage(conn *net.UnixConn, value any, file *os.File) error {
-	body, err := encodeMessage(value)
+func WriteMessage(conn *net.UnixConn, value any, file *os.File) error {
+	body, err := EncodeMessage(value)
 	if err != nil {
 		return err
 	}
-	return writeEncoded(conn, body, file)
+	return WriteEncoded(conn, body, file)
 }
 
-func writeEncoded(conn *net.UnixConn, body []byte, file *os.File) error {
+func WriteEncoded(conn *net.UnixConn, body []byte, file *os.File) error {
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(len(body)))
 	var rights []byte
@@ -70,7 +70,7 @@ func writeEncoded(conn *net.UnixConn, body []byte, file *os.File) error {
 
 // readMessage reads one message and the file descriptor attached to it, if
 // any. Extra descriptors are closed.
-func readMessage(conn *net.UnixConn, value any) (*os.File, error) {
+func ReadMessage(conn *net.UnixConn, value any) (*os.File, error) {
 	header := make([]byte, 4)
 	rights := make([]byte, syscall.CmsgSpace(4*4))
 	count, rightsCount, _, _, err := conn.ReadMsgUnix(header, rights)
@@ -81,26 +81,26 @@ func readMessage(conn *net.UnixConn, value any) (*os.File, error) {
 	file, rightsErr := receivedFile(rights[:rightsCount])
 	if count < len(header) {
 		if _, err := io.ReadFull(conn, header[count:]); err != nil {
-			closeFile(file)
+			CloseFile(file)
 			return nil, err
 		}
 	}
 	if rightsErr != nil {
-		closeFile(file)
+		CloseFile(file)
 		return nil, rightsErr
 	}
 	length := binary.BigEndian.Uint32(header)
-	if length > uint32(maxMessage) {
-		closeFile(file)
-		return nil, errTooLarge
+	if length > uint32(MaxMessage) {
+		CloseFile(file)
+		return nil, ErrTooLarge
 	}
 	body := make([]byte, length)
 	if _, err := io.ReadFull(conn, body); err != nil {
-		closeFile(file)
+		CloseFile(file)
 		return nil, err
 	}
 	if err := json.Unmarshal(body, value); err != nil {
-		closeFile(file)
+		CloseFile(file)
 		return nil, fmt.Errorf("decode file broker message: %w", err)
 	}
 	return file, nil
@@ -108,19 +108,19 @@ func readMessage(conn *net.UnixConn, value any) (*os.File, error) {
 
 // readReply reads a whole reply: the pages of a scan, then its final
 // message, which alone may carry a file.
-func readReply(conn *net.UnixConn) (response, *os.File, error) {
-	var entries pages
+func ReadReply(conn *net.UnixConn) (Response, *os.File, error) {
+	var entries Pages
 	for {
-		var result response
-		file, err := readMessage(conn, &result)
+		var result Response
+		file, err := ReadMessage(conn, &result)
 		if err != nil {
-			return response{}, nil, err
+			return Response{}, nil, err
 		}
 		if !result.More {
-			return entries.complete(result), file, nil
+			return entries.Complete(result), file, nil
 		}
-		closeFile(file)
-		entries.add(result)
+		CloseFile(file)
+		entries.Add(result)
 	}
 }
 
@@ -149,7 +149,7 @@ func receivedFile(rights []byte) (*os.File, error) {
 	return os.NewFile(uintptr(descriptors[0]), "a-nas-file"), nil
 }
 
-func closeFile(file *os.File) {
+func CloseFile(file *os.File) {
 	if file != nil {
 		_ = file.Close()
 	}

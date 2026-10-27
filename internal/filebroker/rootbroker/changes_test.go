@@ -1,4 +1,4 @@
-package filebroker
+package rootbroker
 
 import (
 	"context"
@@ -16,15 +16,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/filebroker"
+
 	"github.com/zhongwater123/A-NAS/internal/accountid"
-	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 type changesHarness struct {
 	volume string
 	server *Server
-	client *Client
+	client *filebroker.Client
 }
 
 var alice = accountid.Identity{Username: "alice", UID: 20101, Role: accountid.RoleMember, Enabled: true}
@@ -81,7 +82,7 @@ func newChangesHarness(t *testing.T) *changesHarness {
 		_ = listener.Close()
 		server.Close()
 	})
-	return &changesHarness{volume: volume, server: server, client: NewClient(socket)}
+	return &changesHarness{volume: volume, server: server, client: filebroker.NewClient(socket)}
 }
 
 const editPlan = `{"summary":"计划加一项","operations":[{"op":"write","path":"/nas/个人空间/计划.md","source":"/nas/助手/待确认/计划.md"}]}`
@@ -123,7 +124,7 @@ func TestTheMembersConfirmedChangeIsAppliedByAConfinedWorker(t *testing.T) {
 	if err != nil || !strings.Contains(string(got), `"status":"applied"`) {
 		t.Fatalf("change = %s %v", got, err)
 	}
-	if _, err := h.client.DecideChange(session, change.ID, "approve"); !errors.Is(err, assistantchanges.ErrDecided) {
+	if _, err := h.client.DecideChange(session, change.ID, "approve"); !errors.Is(err, filebroker.ErrChangeDecided) {
 		t.Fatalf("deciding again: %v", err)
 	}
 }
@@ -166,10 +167,10 @@ func TestChangesNeedTheMembersSession(t *testing.T) {
 		t.Fatalf("approve with a forged session: %v", err)
 	}
 	session := accountid.WithSessionToken(context.Background(), "alice-token")
-	if _, err := h.client.PrepareChange(session, "", "", json.RawMessage(`{"operations":[{"op":"delete","path":"/nas/共享空间/通知.md"}]}`)); !errors.Is(err, assistantchanges.ErrInvalid) {
+	if _, err := h.client.PrepareChange(session, "", "", json.RawMessage(`{"operations":[{"op":"delete","path":"/nas/共享空间/通知.md"}]}`)); !errors.Is(err, filebroker.ErrChangeInvalid) {
 		t.Fatalf("prepare outside her places: %v", err)
 	}
-	if _, err := h.client.GetChange(session, "deadbeef"); !errors.Is(err, assistantchanges.ErrNotFound) {
+	if _, err := h.client.GetChange(session, "deadbeef"); !errors.Is(err, filebroker.ErrChangeNotFound) {
 		t.Fatalf("get a missing change: %v", err)
 	}
 }

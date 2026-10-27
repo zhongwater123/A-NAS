@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"time"
 
 	"github.com/creack/pty"
 
@@ -13,8 +12,6 @@ import (
 )
 
 const localShellSupported = true
-
-const hangupGracePeriod = 2 * time.Second
 
 // localSpawner starts shells as the Product Service's own user. It is only
 // used for development without a Host Agent.
@@ -52,7 +49,7 @@ func (s *localShell) Resize(cols, rows uint16) error {
 // Close hangs up the shell's process group unless the shell already exited.
 func (s *localShell) Close() error {
 	s.close.Do(func() {
-		s.group.HangUp(hangupGracePeriod)
+		s.group.HangUp(ptyshell.HangupGrace)
 		_ = s.ptmx.Close()
 	})
 	return nil

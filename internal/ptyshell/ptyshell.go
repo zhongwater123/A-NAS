@@ -3,6 +3,7 @@ package ptyshell
 import (
 	"context"
 	"io"
+	"time"
 )
 
 // Shell is an interactive shell on a PTY.
@@ -23,3 +24,6 @@ type Shell interface {
 type Spawner interface {
 	StartShell(ctx context.Context, cols, rows uint16) (Shell, error)
 }
+
+// HangupGrace is how long a hung-up shell has to exit before it is killed.
+const HangupGrace = 2 * time.Second

@@ -1,4 +1,4 @@
-package filebroker
+package rootbroker
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/filebroker"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
@@ -35,7 +37,7 @@ func TestShareEpochDrainsDisconnectedClientAndRejectsDelayedPublication(t *testi
 			t.Error(err)
 		}
 	}
-	pub, cancel := context.WithCancel(WithSharePublication(ctx, epoch, "share"))
+	pub, cancel := context.WithCancel(filebroker.WithSharePublication(ctx, epoch, "share"))
 	renamed := make(chan error, 1)
 	go func() { renamed <- h.client.Rename(pub, source, target) }()
 	// The publication was accepted and its rename is under way.
@@ -74,16 +76,16 @@ func TestShareEpochDrainsDisconnectedClientAndRejectsDelayedPublication(t *testi
 	if data, e := os.ReadFile(target); e != nil || string(data) != "complete" {
 		t.Fatalf("settled publication %q %v", data, e)
 	}
-	if e := h.client.Mkdir(WithSharePublication(ctx, epoch, "share"), filepath.Join(h.volume, "late")); !errors.Is(e, filesystem.ErrForbidden) {
+	if e := h.client.Mkdir(filebroker.WithSharePublication(ctx, epoch, "share"), filepath.Join(h.volume, "late")); !errors.Is(e, filesystem.ErrForbidden) {
 		t.Fatalf("old process published: %v", e)
 	}
 	if e := h.client.FenceShare(context.Background(), next, "share"); e != nil {
 		t.Fatal(e)
 	}
-	if e := h.client.Mkdir(WithSharePublication(ctx, next, "share"), filepath.Join(h.volume, "revoked")); !errors.Is(e, filesystem.ErrForbidden) {
+	if e := h.client.Mkdir(filebroker.WithSharePublication(ctx, next, "share"), filepath.Join(h.volume, "revoked")); !errors.Is(e, filesystem.ErrForbidden) {
 		t.Fatalf("revoked share published: %v", e)
 	}
-	if e := h.client.Mkdir(WithSharePublication(ctx, next, "unrelated"), filepath.Join(h.volume, "other")); e != nil {
+	if e := h.client.Mkdir(filebroker.WithSharePublication(ctx, next, "unrelated"), filepath.Join(h.volume, "other")); e != nil {
 		t.Fatal(e)
 	}
 }

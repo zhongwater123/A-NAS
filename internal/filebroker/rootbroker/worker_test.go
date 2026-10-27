@@ -1,4 +1,4 @@
-package filebroker
+package rootbroker
 
 import (
 	"context"
@@ -18,6 +18,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
+
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
@@ -32,7 +34,7 @@ func runTestWorker(volume string, options []string) error {
 		if !ok || err != nil {
 			return fmt.Errorf("unknown worker option %q", option)
 		}
-		maxMessage = limit
+		wire.MaxMessage = limit
 	}
 	return runWorker(volume, holdingFS{filesystem.NewRootFileSystem(volume, false)})
 }
@@ -96,13 +98,13 @@ func TestTheWorkerSendsAScanInPages(t *testing.T) {
 		served <- serveWorker(context.Background(), worker, filesystem.NewRootFileSystem(volume, false))
 	}()
 
-	if err := writeMessage(broker, request{Op: opScan, Path: volume, Paged: true}, nil); err != nil {
+	if err := wire.WriteMessage(broker, wire.Request{Op: wire.OpScan, Path: volume, Paged: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var sizes []int
 	for {
-		var page response
-		if _, err := readMessage(broker, &page); err != nil || page.Error != nil {
+		var page wire.Response
+		if _, err := wire.ReadMessage(broker, &page); err != nil || page.Error != nil {
 			t.Fatalf("page: %v %v", page.Error, err)
 		}
 		sizes = append(sizes, len(page.Entries))
@@ -110,27 +112,27 @@ func TestTheWorkerSendsAScanInPages(t *testing.T) {
 			break
 		}
 	}
-	if want := []int{scanPage, 3030 - scanPage}; !slices.Equal(sizes, want) {
+	if want := []int{wire.ScanPage, 3030 - wire.ScanPage}; !slices.Equal(sizes, want) {
 		t.Fatalf("pages of %v entries, want %v", sizes, want)
 	}
 	// A Product Service from before pages gets the scan in one message.
-	if err := writeMessage(broker, request{Op: opScan, Path: volume}, nil); err != nil {
+	if err := wire.WriteMessage(broker, wire.Request{Op: wire.OpScan, Path: volume}, nil); err != nil {
 		t.Fatal(err)
 	}
-	var whole response
-	if _, err := readMessage(broker, &whole); err != nil || whole.More || len(whole.Entries) != 3030 {
+	var whole wire.Response
+	if _, err := wire.ReadMessage(broker, &whole); err != nil || whole.More || len(whole.Entries) != 3030 {
 		t.Fatalf("unpaged scan: %d entries, more %v, %v", len(whole.Entries), whole.More, err)
 	}
 	// A cancel that arrives after its request was answered leaves the next
 	// request alone.
-	if err := writeMessage(broker, request{Op: opCancel}, nil); err != nil {
+	if err := wire.WriteMessage(broker, wire.Request{Op: wire.OpCancel}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeMessage(broker, request{Op: opScan, Path: filepath.Join(volume, "d00"), Paged: true}, nil); err != nil {
+	if err := wire.WriteMessage(broker, wire.Request{Op: wire.OpScan, Path: filepath.Join(volume, "d00"), Paged: true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	var next response
-	if _, err := readMessage(broker, &next); err != nil || next.Error != nil || len(next.Entries) != 100 {
+	var next wire.Response
+	if _, err := wire.ReadMessage(broker, &next); err != nil || next.Error != nil || len(next.Entries) != 100 {
 		t.Fatalf("scan after a late cancel: %d entries, %v %v", len(next.Entries), next.Error, err)
 	}
 	_ = broker.Close()
@@ -170,8 +172,8 @@ func TestAReplyOverTheLimitIsAnErrorAndTheWorkerServesOn(t *testing.T) {
 		t.Fatal(err)
 	}
 	// One entry here does not fit in a message on its own.
-	var refused *wireError
-	if _, err := h.client.Scan(ctx, space, filesystem.ScanSkip{}); !errors.As(err, &refused) || refused.Code != codeFailed || !strings.Contains(err.Error(), errTooLarge.Error()) {
+	var refused *wire.Error
+	if _, err := h.client.Scan(ctx, space, filesystem.ScanSkip{}); !errors.As(err, &refused) || refused.Code != wire.CodeFailed || !strings.Contains(err.Error(), wire.ErrTooLarge.Error()) {
 		t.Fatalf("Scan() of an entry over the limit error = %v", err)
 	}
 	// Under the same limit, an ordinary tree travels in smaller pages.
@@ -467,12 +469,12 @@ func TestCloseStopsBusyAndFreeWorkers(t *testing.T) {
 		}
 	}
 	for _, call := range held {
-		if err := receive(t, call.done); !errors.Is(err, ErrUnavailable) {
+		if err := receive(t, call.done); !errors.Is(err, wire.ErrUnavailable) {
 			t.Fatalf("call cut by Close error = %v, want ErrUnavailable", err)
 		}
 		call.cancel()
 	}
-	if _, err := h.client.Lstat(ctx, space); !errors.Is(err, ErrUnavailable) {
+	if _, err := h.client.Lstat(ctx, space); !errors.Is(err, wire.ErrUnavailable) {
 		t.Fatalf("Lstat() after Close error = %v, want ErrUnavailable", err)
 	}
 }

@@ -26,7 +26,6 @@ import (
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
-	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
 	"github.com/zhongwater123/A-NAS/internal/containers"
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
@@ -600,11 +599,11 @@ func (e executedChanges) Get(ctx context.Context, _, id string) (assistantapi.Ch
 
 func asChange(raw json.RawMessage, err error) (assistantapi.Change, error) {
 	switch {
-	case errors.Is(err, assistantchanges.ErrInvalid):
+	case errors.Is(err, filebroker.ErrChangeInvalid):
 		return assistantapi.Change{}, fmt.Errorf("%w: %v", assistantapi.ErrInvalidSubmission, err)
-	case errors.Is(err, assistantchanges.ErrDecided):
+	case errors.Is(err, filebroker.ErrChangeDecided):
 		return assistantapi.Change{}, assistantapi.ErrChangeDecided
-	case errors.Is(err, assistantchanges.ErrNotFound):
+	case errors.Is(err, filebroker.ErrChangeNotFound):
 		return assistantapi.Change{}, assistantapi.ErrChangeNotFound
 	case errors.Is(err, files.ErrForbidden):
 		return assistantapi.Change{}, assistantapi.ErrChangeSession

@@ -17,6 +17,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
@@ -283,12 +284,12 @@ func startFileBroker(t *testing.T, mount string, executor *Executor, identities 
 	}
 	worker := "/usr/local/bin/anas-matrix-file-worker"
 	run(t, "install", "-m", "0755", self, worker)
-	server, err := filebroker.NewServer(filebroker.Config{
+	server, err := rootbroker.NewServer(rootbroker.Config{
 		Sessions: sessionTable(identities), VolumeRoot: mount, VolumeReady: executor.DataVolumeReady,
 		Command: func(volumeRoot string) *exec.Cmd {
-			return exec.Command(worker, filebroker.WorkerArgument, volumeRoot)
+			return exec.Command(worker, rootbroker.WorkerArgument, volumeRoot)
 		},
-		ProbeCommand: func() *exec.Cmd { return exec.Command(worker, filebroker.ProbeArgument) },
+		ProbeCommand: func() *exec.Cmd { return exec.Command(worker, rootbroker.ProbeArgument) },
 	})
 	if err != nil {
 		t.Fatal(err)

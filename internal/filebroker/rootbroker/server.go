@@ -1,4 +1,11 @@
-package filebroker
+// Package rootbroker is the file broker inside the root Host Agent. It
+// verifies each caller's session itself, runs file operations in workers as
+// the caller's own Linux account, starts administrators' terminal shells, is
+// the session gate to members' assistants and executes the assistants'
+// changes (ADR 0008, ADR 0024). The Product Service reaches it through
+// internal/filebroker over internal/filebroker/wire and links none of it
+// (#221).
+package rootbroker
 
 import (
 	"context"
@@ -15,6 +22,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
 
 	"golang.org/x/sync/singleflight"
 
@@ -239,23 +248,23 @@ func (s *Server) Close() {
 func (s *Server) handle(conn *net.UnixConn) {
 	defer conn.Close()
 	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	var req request
-	extra, err := readMessage(conn, &req)
-	closeFile(extra)
+	var req wire.Request
+	extra, err := wire.ReadMessage(conn, &req)
+	wire.CloseFile(extra)
 	if err != nil {
 		return
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 	switch req.Op {
-	case opTerminal:
+	case wire.OpTerminal:
 		s.serveTerminal(conn, req)
 		return
-	case opAssistant:
+	case wire.OpAssistant:
 		s.serveAssistant(conn, req)
 		return
-	case opChangePrepare, opChangeDecide, opChangeGet:
+	case wire.OpChangePrepare, wire.OpChangeDecide, wire.OpChangeGet:
 		result := s.serveChange(req)
-		if err := writeMessage(conn, result, nil); err != nil {
+		if err := wire.WriteMessage(conn, result, nil); err != nil {
 			s.config.Logger.Warn("file broker reply failed", "op", req.Op, "error", err)
 		}
 		return
@@ -268,9 +277,9 @@ func (s *Server) handle(conn *net.UnixConn) {
 		_, _ = conn.Read(make([]byte, 1))
 		cancel()
 	}()
-	s.dispatch(ctx, req, func(result response, file *os.File) error {
-		err := writeMessage(conn, result, file)
-		closeFile(file)
+	s.dispatch(ctx, req, func(result wire.Response, file *os.File) error {
+		err := wire.WriteMessage(conn, result, file)
+		wire.CloseFile(file)
 		if err != nil && ctx.Err() == nil {
 			s.config.Logger.Warn("file broker reply failed", "op", req.Op, "error", err)
 			cancel()
@@ -281,10 +290,10 @@ func (s *Server) handle(conn *net.UnixConn) {
 
 // dispatch runs one file operation and passes its reply to reply: a scan's
 // pages as they arrive, then the final message.
-func (s *Server) dispatch(ctx context.Context, req request, reply func(response, *os.File) error) {
+func (s *Server) dispatch(ctx context.Context, req wire.Request, reply func(wire.Response, *os.File) error) {
 	// This gate lives with the worker, so a Product Service crash cannot
 	// release a publication that a restarted sharing service has fenced.
-	if req.Op == opShareReset || req.Op == opShareFence || req.Op == opShareCheck {
+	if req.Op == wire.OpShareReset || req.Op == wire.OpShareFence || req.Op == wire.OpShareCheck {
 		_ = reply(s.shareControl(req), nil)
 		return
 	}
@@ -292,36 +301,36 @@ func (s *Server) dispatch(ctx context.Context, req request, reply func(response,
 		s.shareMu.Lock()
 		defer s.shareMu.Unlock()
 		if req.ShareEpoch == "" || req.ShareEpoch != s.shareEpoch || req.ShareID == "" || s.shareFenced[req.ShareID] {
-			_ = reply(response{Error: &wireError{Code: codeForbidden}}, nil)
+			_ = reply(wire.Response{Error: &wire.Error{Code: wire.CodeForbidden}}, nil)
 			return
 		}
 	}
-	if !knownOps[req.Op] {
-		_ = reply(response{Error: &wireError{Code: codeInvalidRequest, Message: "unknown file operation"}}, nil)
+	if !wire.IsFileOp(req.Op) {
+		_ = reply(wire.Response{Error: &wire.Error{Code: wire.CodeInvalidRequest, Message: "unknown file operation"}}, nil)
 		return
 	}
 	identity, refused := s.identify(ctx, req.Token)
 	if refused != nil {
-		_ = reply(response{Error: refused}, nil)
+		_ = reply(wire.Response{Error: refused}, nil)
 		return
 	}
 	if !s.config.VolumeReady() {
-		_ = reply(response{Error: &wireError{Code: codeVolumeUnavailable}}, nil)
+		_ = reply(wire.Response{Error: &wire.Error{Code: wire.CodeVolumeUnavailable}}, nil)
 		return
 	}
 	req.Token = ""
 	w, err := s.takeWorker(ctx, workerKey{uid: identity.UID, role: identity.Role}, identity)
 	if err != nil {
 		if ctx.Err() != nil {
-			_ = reply(response{Error: encodeError(ctx.Err())}, nil)
+			_ = reply(wire.Response{Error: encodeError(ctx.Err())}, nil)
 			return
 		}
 		s.config.Logger.Error("file worker unavailable", "username", identity.Username, "error", err)
-		_ = reply(response{Error: &wireError{Code: codeUnavailable}}, nil)
+		_ = reply(wire.Response{Error: &wire.Error{Code: wire.CodeUnavailable}}, nil)
 		return
 	}
 	var relayErr error
-	result, file, err := w.call(ctx, req, func(page response) {
+	result, file, err := w.call(ctx, req, func(page wire.Response) {
 		if relayErr == nil {
 			relayErr = reply(page, nil)
 		}
@@ -329,14 +338,14 @@ func (s *Server) dispatch(ctx context.Context, req request, reply func(response,
 	if err != nil {
 		s.config.Logger.Error("file worker failed", "username", identity.Username, "op", req.Op, "error", err)
 		s.dropWorker(w)
-		_ = reply(response{Error: &wireError{Code: codeUnavailable}}, nil)
+		_ = reply(wire.Response{Error: &wire.Error{Code: wire.CodeUnavailable}}, nil)
 		return
 	}
 	// The worker is free before the reply reaches the Product Service, so
 	// the account's next call finds it.
 	s.returnWorker(w)
 	if relayErr != nil {
-		closeFile(file)
+		wire.CloseFile(file)
 		return
 	}
 	_ = reply(result, file)
@@ -346,16 +355,16 @@ func (s *Server) dispatch(ctx context.Context, req request, reply func(response,
 // expired or whose user may not act is unauthenticated. A session directory
 // that cannot be read right now, as while SQLite is busy, is unavailable
 // instead, so a passing error never reads as a signed-out user (#166).
-func (s *Server) identify(ctx context.Context, token string) (accountid.Identity, *wireError) {
+func (s *Server) identify(ctx context.Context, token string) (accountid.Identity, *wire.Error) {
 	identity, err := s.config.Sessions.ResolveSessionIdentity(ctx, token)
 	switch {
 	case errors.Is(err, accountid.ErrSessionNotFound):
-		return accountid.Identity{}, &wireError{Code: codeUnauthenticated}
+		return accountid.Identity{}, &wire.Error{Code: wire.CodeUnauthenticated}
 	case err != nil:
 		s.config.Logger.Warn("session directory unavailable", "error", err)
-		return accountid.Identity{}, &wireError{Code: codeUnavailable, Message: "sessions cannot be verified right now"}
+		return accountid.Identity{}, &wire.Error{Code: wire.CodeUnavailable, Message: "sessions cannot be verified right now"}
 	case !identity.Enabled:
-		return accountid.Identity{}, &wireError{Code: codeUnauthenticated}
+		return accountid.Identity{}, &wire.Error{Code: wire.CodeUnauthenticated}
 	}
 	return identity, nil
 }
@@ -602,9 +611,9 @@ func (s *Server) spawn(key workerKey, credential *syscall.Credential, env []stri
 // the worker is told to stop, and the rest of the reply is still read, so the
 // connection is ready for the next call. An error means the connection broke
 // and the worker must be dropped.
-func (w *worker) call(ctx context.Context, req request, page func(response)) (response, *os.File, error) {
-	if err := writeMessage(w.conn, req, nil); err != nil {
-		return response{}, nil, err
+func (w *worker) call(ctx context.Context, req wire.Request, page func(wire.Response)) (wire.Response, *os.File, error) {
+	if err := wire.WriteMessage(w.conn, req, nil); err != nil {
+		return wire.Response{}, nil, err
 	}
 	// The cancel message is written before call returns, so it can never
 	// reach the worker after its next request.
@@ -614,7 +623,7 @@ func (w *worker) call(ctx context.Context, req request, page func(response)) (re
 		defer close(watched)
 		select {
 		case <-ctx.Done():
-			_ = writeMessage(w.conn, request{Op: opCancel}, nil)
+			_ = wire.WriteMessage(w.conn, wire.Request{Op: wire.OpCancel}, nil)
 		case <-finished:
 		}
 	}()
@@ -623,15 +632,15 @@ func (w *worker) call(ctx context.Context, req request, page func(response)) (re
 		<-watched
 	}()
 	for {
-		var result response
-		file, err := readMessage(w.conn, &result)
+		var result wire.Response
+		file, err := wire.ReadMessage(w.conn, &result)
 		if err != nil {
-			return response{}, nil, err
+			return wire.Response{}, nil, err
 		}
 		if !result.More {
 			return result, file, nil
 		}
-		closeFile(file)
+		wire.CloseFile(file)
 		page(result)
 	}
 }
