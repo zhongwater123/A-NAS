@@ -249,8 +249,8 @@ type Service struct {
 	// scanned counts face and pet scans stored since people last clustered.
 	scanned int
 	// nextDetection is the next detection job with its input, rendered
-	// while the Worker detected the one before. Only the AI runner uses it.
-	nextDetection *detectionInput
+	// while the Worker detected the one before.
+	nextDetection detectionAhead
 	// embedder encodes search queries, index holds image vectors for search
 	// and AI clusters, and detected the detector's best score per class.
 	embedder   Embedder

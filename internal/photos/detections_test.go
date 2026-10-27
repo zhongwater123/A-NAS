@@ -397,6 +397,52 @@ func TestTheNextInputIsRenderedWhileTheWorkerDetects(t *testing.T) {
 	}
 }
 
+func TestRoundsAtOnceShareTheDetectionAhead(t *testing.T) {
+	service, _, root := newService(t)
+	private, _ := libraries(t, service, alice)
+	worker, gate := newDetectingEmbedder(), &switchGate{open: true}
+	const photoCount = 8
+	for i := range photoCount {
+		importPhoto(t, service, alice, private.ID, "", string(rune('a'+i))+".png", encodePNG(uint8(i+1)))
+	}
+	processAll(t, service)
+
+	// ProcessAIJob is exported, so rounds may run at once: each takes the
+	// detection rendered ahead and leaves one behind.
+	var rounds sync.WaitGroup
+	failures := make(chan error, 4)
+	for range 4 {
+		rounds.Go(func() {
+			for {
+				processed, err := service.ProcessAIJob(context.Background(), worker, gate)
+				if err != nil {
+					failures <- err
+					return
+				}
+				if !processed {
+					return
+				}
+			}
+		})
+	}
+	rounds.Wait()
+	close(failures)
+	for err := range failures {
+		t.Errorf("ProcessAIJob() at once: %v", err)
+	}
+	// A round that found every job claimed stopped early; the rest follows.
+	processAI(t, service, worker, gate)
+
+	db := catalogDB(t, root)
+	var detected, claimed int
+	if err := db.QueryRow("SELECT COUNT(*) FROM detections").Scan(&detected); err != nil || detected != photoCount {
+		t.Fatalf("detections = %d, %v; want all %d photos", detected, err, photoCount)
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM jobs WHERE state = 'running'").Scan(&claimed); err != nil || claimed != 0 {
+		t.Fatalf("%d jobs still claimed (%v); a detection rendered ahead was lost", claimed, err)
+	}
+}
+
 func TestMemoryPressureEndsTheWholeWorker(t *testing.T) {
 	service, _, _ := newService(t)
 	private, _ := libraries(t, service, alice)

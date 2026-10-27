@@ -175,6 +175,34 @@ func (p *aiProgress) get() (state, reason, model string) {
 	return p.state, p.reason, p.model
 }
 
+// detectionAhead holds the detection job claimed and rendered while the
+// Worker detected the one before, for the next round. RunAI is its usual
+// user, but ProcessAIJob is exported and rounds may run at once: each takes
+// what is held when it starts and puts back at most one when it ends.
+type detectionAhead struct {
+	mu    sync.Mutex
+	input *detectionInput
+}
+
+// take empties the slot and returns what it held, or nil.
+func (a *detectionAhead) take() *detectionInput {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	input := a.input
+	a.input = nil
+	return input
+}
+
+// put keeps input for the next round and returns the input it displaces,
+// whose jobs the caller hands back to the queue.
+func (a *detectionAhead) put(input *detectionInput) *detectionInput {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	displaced := a.input
+	a.input = input
+	return displaced
+}
+
 // RunAI processes embedding and detection jobs through embedder until ctx
 // ends, whenever gate allows. An empty or closed queue is rechecked every idle
 // interval or as soon as a thumbnail adds work; work stopped by processor or
@@ -182,10 +210,9 @@ func (p *aiProgress) get() (state, reason, model string) {
 func (s *Service) RunAI(ctx context.Context, embedder Embedder, gate Gate, idle time.Duration, logError func(error)) {
 	defer func() {
 		// A detection rendered ahead goes back to the queue.
-		if err := s.returnDetection(context.WithoutCancel(ctx), s.nextDetection); err != nil && logError != nil {
+		if err := s.returnDetection(context.WithoutCancel(ctx), s.nextDetection.take()); err != nil && logError != nil {
 			logError(err)
 		}
-		s.nextDetection = nil
 	}()
 	for {
 		processed, err := s.ProcessAIJob(ctx, embedder, gate)
@@ -234,8 +261,7 @@ func (s *Service) ProcessAIJob(ctx context.Context, embedder Embedder, gate Gate
 	animals, _ := embedder.(AnimalEmbedder)
 	// The input the last detection rendered ahead is used only if a
 	// detection comes next; otherwise its job goes back to the queue.
-	next := s.nextDetection
-	s.nextDetection = nil
+	next := s.nextDetection.take()
 	defer func() { err = errors.Join(err, s.returnDetection(context.WithoutCancel(ctx), next)) }()
 	if open, reason := gate.Open(ctx); !open {
 		s.ai.set(AIPaused, reason, "")
@@ -466,8 +492,9 @@ func (s *Service) processDetection(ctx context.Context, m models, gate Gate, inf
 	next := <-ahead
 	defer func() { _ = input.file.Close() }()
 	carryOn := func(err error) (bool, error) {
-		s.nextDetection = next
-		return true, err
+		// Another round that ran meanwhile may have left one ahead too.
+		displaced := s.nextDetection.put(next)
+		return true, errors.Join(err, s.returnDetection(context.WithoutCancel(ctx), displaced))
 	}
 	stop := func(err error) (bool, error) {
 		return false, errors.Join(err, s.returnDetection(context.WithoutCancel(ctx), next))
