@@ -2,7 +2,7 @@
 .vnas-control-ring {
   position: fixed;
   z-index: 2147483000;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   box-shadow:
     0 0 0 2px #0a0a0a,
     0 0 0 5px rgba(255, 255, 255, 0.85),

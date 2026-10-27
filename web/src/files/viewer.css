@@ -50,7 +50,7 @@
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: rgba(233, 237, 243, 0.8);
   background: transparent;
   cursor: pointer;
@@ -74,7 +74,7 @@
   margin: 0 4px;
   padding: 0 14px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: #0d1420;
   background: #f2f5f9;
   font-size: 13px;
@@ -136,7 +136,7 @@
   width: 100%;
   height: 100%;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: #fff;
 }
 .fv-loading {
@@ -217,7 +217,7 @@
   align-items: center;
   gap: 6px;
   padding: 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(10, 13, 20, 0.82);
   transform: translateX(-50%);
   font-size: 12px;

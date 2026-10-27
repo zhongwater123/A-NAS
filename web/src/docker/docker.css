@@ -1,22 +1,22 @@
 /* Docker: containers and images in the Settings and App Center visual language. */
 .dk-shell {
-  --dk-bg: #f3f5f8;
+  --dk-bg: var(--color-bg);
   --dk-side: rgba(234, 238, 244, 0.88);
-  --dk-line: rgba(20, 30, 45, 0.08);
-  --dk-line-strong: rgba(20, 30, 45, 0.15);
-  --dk-text: #1b2430;
+  --dk-line: var(--color-line);
+  --dk-line-strong: var(--color-line-strong);
+  --dk-text: var(--color-text);
   --dk-body: #39424e;
-  --dk-muted: #66717f;
-  --dk-faint: #98a1ad;
-  --dk-accent: #2f6fe4;
-  --dk-accent-soft: #e9f0fd;
+  --dk-muted: var(--color-muted);
+  --dk-faint: var(--color-faint);
+  --dk-accent: var(--color-accent);
+  --dk-accent-soft: var(--color-accent-soft);
   --dk-brand: #3152d4;
-  --dk-danger: #d23b48;
-  --dk-danger-soft: #fdeeef;
-  --dk-success: #1b9459;
-  --dk-success-soft: #e5f5ec;
-  --dk-warning: #b06a10;
-  --dk-warning-soft: #fdf3e1;
+  --dk-danger: var(--color-danger);
+  --dk-danger-soft: var(--color-danger-soft);
+  --dk-success: var(--color-success);
+  --dk-success-soft: var(--color-success-soft);
+  --dk-warning: var(--color-warning);
+  --dk-warning-soft: var(--color-warning-soft);
   --dk-mono: ui-monospace, SFMono-Regular, Consolas, "Noto Sans Mono CJK SC", monospace;
   --dk-ease: cubic-bezier(0.22, 1, 0.36, 1);
   position: relative;
@@ -255,7 +255,7 @@
 .dk-tile.lg {
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
 }
 .dk-tile.lg svg {
   width: 22px;
@@ -298,7 +298,7 @@
   display: grid;
   place-items: center;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: #fff;
   background: linear-gradient(155deg, #5ba2ff, var(--dk-brand));
   box-shadow:
@@ -389,7 +389,7 @@
 }
 .dk-page-title code {
   padding: 1px 7px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   color: var(--dk-muted);
   background: rgba(20, 30, 45, 0.06);
   font-size: 12px;
@@ -414,7 +414,7 @@
   border: 1px solid var(--dk-line);
   border-radius: 14px;
   background: #fff;
-  box-shadow: 0 1px 2px rgba(20, 30, 45, 0.04);
+  box-shadow: var(--shadow-card);
 }
 .dk-stat-label {
   display: flex;
@@ -443,7 +443,7 @@
   height: 5px;
   margin-top: 4px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #e7ebf1;
 }
 .dk-meter i {
@@ -493,7 +493,7 @@
   border: 1px solid var(--dk-line);
   border-radius: 14px;
   background: #fff;
-  box-shadow: 0 1px 2px rgba(20, 30, 45, 0.04);
+  box-shadow: var(--shadow-card);
 }
 .dk-row {
   position: relative;
@@ -610,7 +610,7 @@
   gap: 5px;
   height: 20px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--dk-muted);
   background: #eef1f5;
   font-size: 11.5px;
@@ -648,7 +648,7 @@
   align-items: center;
   gap: 3px;
   padding: 0 6px 0 7px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   color: var(--dk-accent);
   background: var(--dk-accent-soft);
   font: 600 11.5px var(--dk-mono);
@@ -675,7 +675,7 @@
   gap: 6px;
   padding: 0 13px;
   border: 1px solid var(--dk-line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--dk-text);
   background: #fff;
   font-size: 13px;
@@ -740,7 +740,7 @@
   place-items: center;
   padding: 0;
   border: 1px solid var(--dk-line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--dk-muted);
   background: #fff;
   cursor: pointer;
@@ -830,7 +830,7 @@
   border: 1px solid var(--dk-line);
   border-radius: 18px;
   background: #fff;
-  box-shadow: 0 1px 2px rgba(20, 30, 45, 0.04);
+  box-shadow: var(--shadow-card);
 }
 .dk-head::before {
   content: "";
@@ -881,7 +881,7 @@
   display: inline-flex;
   gap: 2px;
   padding: 3px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(20, 30, 45, 0.06);
 }
 .dk-tabs button {
@@ -893,7 +893,7 @@
   gap: 6px;
   padding: 0 14px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--dk-muted);
   background: transparent;
   font-size: 13px;
@@ -961,7 +961,7 @@
 .dk-fact code {
   max-width: 100%;
   padding: 1px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   color: #273041;
   background: #eef1f5;
   font-size: 12px;
@@ -1054,7 +1054,7 @@
   height: 30px;
   padding: 0 8px;
   border: 1px solid var(--dk-line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--dk-text);
   background: #fff;
   font-size: 12.5px;
@@ -1067,7 +1067,7 @@
   gap: 7px;
   padding: 0 11px 0 9px;
   border: 1px solid var(--dk-line-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--dk-muted);
   background: #fff;
   font-size: 12.5px;
@@ -1082,7 +1082,7 @@
   position: relative;
   width: 22px;
   height: 13px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #cfd5dd;
   transition: background 0.2s;
 }
@@ -1114,7 +1114,7 @@
   min-height: 0;
   overflow: auto;
   padding: 10px 0;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   color: #d8dee9;
   background: #0f1520;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
@@ -1182,7 +1182,7 @@
   border: 1px solid var(--dk-line);
   border-radius: 14px;
   background: #fff;
-  box-shadow: 0 1px 2px rgba(20, 30, 45, 0.04);
+  box-shadow: var(--shadow-card);
 }
 .dk-table-row {
   display: grid;
@@ -1296,7 +1296,7 @@
   overflow: hidden;
   padding: 0 8px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--dk-body);
   background: #eef1f5;
   font-size: 11.5px;
@@ -1328,7 +1328,7 @@
   align-items: flex-start;
   gap: 9px;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   font-size: 12.5px;
   line-height: 1.55;
 }
@@ -1404,7 +1404,7 @@
 .dk-sheet {
   width: min(400px, 100%);
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   outline: none;
   background: #fff;
   box-shadow: 0 28px 70px rgba(15, 22, 40, 0.3);

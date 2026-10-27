@@ -25,7 +25,7 @@
   flex: none;
   padding: 7px 13px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: #7c8798;
   cursor: pointer;
@@ -264,7 +264,7 @@
 .tm-availability {
   padding: 13px 15px;
   border: 1px dashed #e1e7ee;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: #8993a3;
   background: #fafbfd;
   font-size: 12px;

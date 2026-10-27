@@ -2,27 +2,27 @@
    buttons the window shares with them. */
 .tc-shell,
 .tc-toasts {
-  --tc-bg: #f3f5f8;
-  --tc-card: #fff;
+  --tc-bg: var(--color-bg);
+  --tc-card: var(--color-surface);
   --tc-side: rgba(234, 238, 244, 0.9);
-  --tc-line: rgba(20, 30, 45, 0.08);
-  --tc-line-strong: rgba(20, 30, 45, 0.15);
-  --tc-text: #1b2430;
+  --tc-line: var(--color-line);
+  --tc-line-strong: var(--color-line-strong);
+  --tc-text: var(--color-text);
   --tc-body: #39424e;
-  --tc-muted: #66717f;
-  --tc-faint: #98a1ad;
-  --tc-accent: #2f6fe4;
-  --tc-accent-soft: #e9f0fd;
+  --tc-muted: var(--color-muted);
+  --tc-faint: var(--color-faint);
+  --tc-accent: var(--color-accent);
+  --tc-accent-soft: var(--color-accent-soft);
   --tc-up: #2f6fe4;
   --tc-up-soft: #e6eefc;
   --tc-down: #16956a;
   --tc-down-soft: #e2f4ec;
-  --tc-success: #1b9459;
-  --tc-success-soft: #e5f5ec;
-  --tc-warning: #b06a10;
-  --tc-warning-soft: #fdf3e1;
-  --tc-danger: #d23b48;
-  --tc-danger-soft: #fdeeef;
+  --tc-success: var(--color-success);
+  --tc-success-soft: var(--color-success-soft);
+  --tc-warning: var(--color-warning);
+  --tc-warning-soft: var(--color-warning-soft);
+  --tc-danger: var(--color-danger);
+  --tc-danger-soft: var(--color-danger-soft);
   --tc-ease: cubic-bezier(0.22, 1, 0.36, 1);
   color: var(--tc-text);
   font-size: 13px;
@@ -35,7 +35,7 @@
   gap: 6px;
   padding: 0 12px;
   border: 1px solid var(--tc-line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--tc-body);
   background: #fff;
   font-size: 12.5px;
@@ -93,7 +93,7 @@
   gap: 11px;
   padding: 14px 34px 14px 14px;
   border: 1px solid rgba(255, 255, 255, 0.7);
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   background: rgba(250, 252, 255, 0.96);
   box-shadow: 0 18px 48px rgba(15, 22, 44, 0.28);
   backdrop-filter: blur(18px);
@@ -348,7 +348,7 @@
   grid-column: 1 / -1;
   height: 3px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(20, 30, 45, 0.08);
 }
 .status-transfers-pop .bar i {

@@ -73,7 +73,7 @@
   width: 28px;
   height: 28px;
   border: 1px solid #d2dbe5;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   display: grid;
   place-items: center;
   color: #557088;
@@ -100,7 +100,7 @@
   width: 100%;
   min-height: 38px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: #53667a;
   background: transparent;
   text-align: left;
@@ -186,7 +186,7 @@
   margin-top: auto;
   padding: 10px;
   border: 1px solid #d9e2eb;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.8);
 }
 .file-volume-card header {
@@ -217,7 +217,7 @@
   height: 5px;
   margin: 8px 0 7px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #e3e8ee;
 }
 .file-volume-track span {
@@ -291,7 +291,7 @@
   min-width: 0;
   height: 33px;
   border: 1px solid #d5dde6;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 27px 0 8px;
   color: #3d5267;
   background: #fff;
@@ -304,7 +304,7 @@
   align-items: center;
   overflow: hidden;
   border: 1px solid #d5dde6;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 7px;
   color: #526579;
   background: #fff;
@@ -321,7 +321,7 @@
   min-height: 26px;
   overflow: hidden;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   padding: 0 6px;
   color: #526579;
   background: transparent;
@@ -356,7 +356,7 @@
   gap: 7px;
   padding: 0 9px;
   border: 1px solid #d5dde6;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: #8a96a4;
   background: #fff;
 }
@@ -520,7 +520,7 @@
 .file-view-menu button {
   height: 31px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -658,7 +658,7 @@
 .file-list-header button {
   min-height: 27px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -774,7 +774,7 @@
   display: inline-flex;
   margin-left: 5px;
   padding: 1px 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: #75558f;
   background: #eee5f7;
   font-size: 7px;
@@ -814,7 +814,7 @@
   min-height: 20px;
   align-items: center;
   padding: 0 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 .file-type-cell > span.directory {
   color: #875a16;
@@ -965,7 +965,7 @@
   gap: 2px;
   padding: 6px;
   border: 1px solid #d8e0e8;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   color: #35485b;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 16px 42px rgba(24, 39, 57, 0.22);
@@ -981,7 +981,7 @@
   gap: 8px;
   padding: 4px 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: inherit;
   background: transparent;
   text-align: left;
@@ -994,7 +994,7 @@
   width: 30px;
   height: 30px;
   padding: 7px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: #fff;
   background: linear-gradient(160deg, #5cc8f5, #1a8fd0);
 }
@@ -1073,7 +1073,7 @@
   gap: 6px;
   padding: 0 9px 0 4px;
   border: 1px solid #cfe0f3;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: #2c5d93;
   background: #eef5fd;
   font-size: var(--file-font-meta);
@@ -1147,7 +1147,7 @@
   flex: none;
   margin: 14px;
   border: 1px solid rgba(77, 126, 159, 0.12);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   display: grid;
   place-items: center;
   color: #326d9e;
@@ -1305,7 +1305,7 @@
 .file-inspector-copy .file-inspector-hint {
   margin-top: 8px;
   padding: 8px 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: #66798c;
   background: #e9eff5;
   line-height: 1.5;
@@ -1319,7 +1319,7 @@
   gap: 6px;
   margin-top: 4px;
   border: 1px solid #d6dee6;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: #35485b;
   background: #fff;
   font-size: var(--file-font-body);
@@ -1373,7 +1373,7 @@
   gap: 2px;
   padding: 6px;
   border: 1px solid #d8e0e8;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: #35485b;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 16px 42px rgba(24, 39, 57, 0.22);
@@ -1438,7 +1438,7 @@
   gap: 13px;
   padding: 20px;
   border: 1px solid rgba(255, 255, 255, 0.75);
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   background: #fff;
   box-shadow: 0 22px 60px rgba(24, 37, 53, 0.24);
 }
@@ -1446,7 +1446,7 @@
 .file-rename-dialog > span {
   width: 42px;
   height: 42px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   display: grid;
   place-items: center;
   color: #b53d49;
@@ -1479,7 +1479,7 @@
   height: 33px;
   margin-top: 10px;
   border: 1px solid #bac9d9;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 9px;
   outline: none;
   color: #2f4256;
@@ -1500,7 +1500,7 @@
 .file-rename-dialog footer button {
   min-height: 32px;
   border: 1px solid #ccd6e0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 12px;
   color: #455b70;
   background: #fff;

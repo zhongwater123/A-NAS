@@ -58,6 +58,8 @@ import { StorageSection, useVolumes, type VolumesView, volumeState, volumeUsage 
 import type { StoragePlanFlow } from "./storagePlan";
 import { TerminalSection } from "./TerminalSection";
 import type { SessionStatus } from "./terminal";
+// After the sections' stylesheets, which these rules follow.
+import "./settings.css";
 
 export { type StoragePlanFlow, useStoragePlan } from "./storagePlan";
 

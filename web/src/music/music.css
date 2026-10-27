@@ -2,7 +2,7 @@
    the window dark and immersive. The accent follows the desktop icon. */
 .mu-app {
   --mu-bg: #f7f7f9;
-  --mu-surface: #ffffff;
+  --mu-surface: var(--color-surface);
   --mu-side: #eff0f4;
   --mu-ink: #15171c;
   --mu-ink-2: #4b5160;
@@ -22,7 +22,7 @@
   --ph-muted: var(--mu-muted);
   --ph-accent: var(--mu-accent);
   --ph-accent-soft: var(--mu-accent-soft);
-  --ph-danger: #d93a4a;
+  --ph-danger: var(--color-danger);
   --ph-ease: var(--mu-ease);
   position: relative;
   height: 100%;
@@ -100,7 +100,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: var(--mu-ink-2);
   background: transparent;
   transition:
@@ -119,7 +119,7 @@
 .mu-icon-button.small {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 .mu-icon-button.small svg {
   width: 15px;
@@ -131,7 +131,7 @@
 .mu-text-button {
   height: 28px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 10px;
   color: var(--mu-accent-ink);
   background: transparent;
@@ -236,7 +236,7 @@
   align-items: center;
   gap: 7px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0 6px 0 10px;
   color: var(--mu-muted);
   background: rgba(255, 255, 255, 0.75);
@@ -270,7 +270,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   color: var(--mu-muted);
   background: transparent;
 }
@@ -393,7 +393,7 @@
   height: 26px;
   flex: none;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
 }
 .mu-nav-thumb.add {
@@ -416,7 +416,7 @@
   align-items: center;
   gap: 4px;
   padding: 10px 6px 10px 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--mu-surface);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
 }
@@ -540,7 +540,7 @@
   height: 36px;
   place-items: center;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: var(--mu-ink-2);
   background: rgba(255, 255, 255, 0.75);
   box-shadow: inset 0 0 0 1px var(--mu-line);
@@ -856,7 +856,7 @@
   right: -8px;
   height: 54px;
   padding: 0 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   transition: background 0.12s;
 }
 .mu-track:hover {
@@ -889,7 +889,7 @@
   display: none;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--mu-ink);
   background: transparent;
 }
@@ -993,7 +993,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--mu-muted);
   background: transparent;
   opacity: 0;
@@ -1083,7 +1083,7 @@
   display: block;
   overflow: hidden;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 0;
   background: #e4e6eb;
   box-shadow:
@@ -1223,7 +1223,7 @@
   width: 86px;
   height: 86px;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
   transform: rotate(22deg);
 }
@@ -1331,7 +1331,7 @@
   flex: none;
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: #c27c0e;
   background: linear-gradient(140deg, #fff3d6, #ffe2a8);
 }
@@ -1457,7 +1457,7 @@
 .mu-skeleton {
   display: block;
   height: 46px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: linear-gradient(90deg, #eceef2 25%, #f6f7f9 50%, #eceef2 75%);
   background-size: 200% 100%;
   animation: mu-shimmer 1.4s ease infinite;
@@ -1488,7 +1488,7 @@
   font-size: 15px;
 }
 .mu-search-tips kbd {
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   padding: 1px 6px;
   color: var(--mu-accent-ink);
   background: var(--mu-accent-soft);
@@ -1830,7 +1830,7 @@
   width: min(340px, 82%, 44vh);
   aspect-ratio: 1;
   height: auto;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   box-shadow:
     0 30px 80px rgba(0, 0, 0, 0.45),
     0 6px 16px rgba(0, 0, 0, 0.25);
@@ -2052,7 +2052,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   background: rgba(255, 255, 255, 0.97);
   box-shadow:
     0 24px 64px rgba(20, 24, 34, 0.24),
@@ -2105,7 +2105,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0 6px;
   transition: background 0.12s;
 }
@@ -2123,7 +2123,7 @@
   width: 36px;
   height: 36px;
   flex: none;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 .mu-queue-item span {
   min-width: 0;
@@ -2207,7 +2207,7 @@
   display: grid;
   gap: 1px;
   padding: 6px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.97);
   box-shadow:
     0 14px 40px rgba(20, 24, 34, 0.2),
@@ -2221,7 +2221,7 @@
   align-items: center;
   gap: 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 10px;
   background: transparent;
   text-align: left;
@@ -2322,7 +2322,7 @@
   align-items: flex-start;
   gap: 12px;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 12px 14px;
   background: rgba(20, 24, 34, 0.04);
   text-align: left;
@@ -2363,7 +2363,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 8px 6px 8px 12px;
   background: rgba(20, 24, 34, 0.04);
 }
@@ -2394,7 +2394,7 @@
   justify-content: center;
   gap: 8px;
   border: 1.5px dashed rgba(20, 24, 34, 0.18);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: var(--mu-accent-ink);
   background: transparent;
   font-weight: 700;
@@ -2434,7 +2434,7 @@
   flex-direction: column;
   gap: 2px;
   overflow-y: auto;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 6px;
   background: rgba(20, 24, 34, 0.035);
 }

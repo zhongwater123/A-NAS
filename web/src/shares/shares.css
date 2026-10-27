@@ -25,8 +25,8 @@
   --sh-ok-soft: #e3f4ea;
   --sh-warn: #a55400;
   --sh-warn-soft: #fff1dc;
-  --sh-danger: #c8323f;
-  --sh-danger-soft: #fdecee;
+  --sh-danger: var(--color-danger);
+  --sh-danger-soft: var(--color-danger-soft);
   --sh-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   color: var(--sh-ink);
   font-size: 13px;
@@ -50,7 +50,7 @@
 }
 :is(.sh-app, .sh-layer, .sh-backdrop) ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(18, 28, 42, 0.16) padding-box;
 }
 :is(.sh-app, .sh-layer, .sh-backdrop) ::-webkit-scrollbar-thumb:hover {
@@ -144,7 +144,7 @@
 .sh-btn.small {
   height: 28px;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 12.5px;
 }
 .sh-icon-btn {
@@ -155,7 +155,7 @@
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--sh-muted);
   background: transparent;
   cursor: pointer;
@@ -369,7 +369,7 @@
 .sh-tile-sm {
   width: 20px;
   height: 20px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 .sh-tile-sm svg {
   width: 12px;
@@ -477,7 +477,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   padding: 3px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(18, 28, 42, 0.065);
 }
 .sh-segment button {
@@ -487,7 +487,7 @@
   justify-content: center;
   gap: 6px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--sh-muted);
   background: transparent;
   font-size: 13px;
@@ -682,7 +682,7 @@
 }
 .sh-skeleton i {
   display: block;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: linear-gradient(90deg, #e8eaee 0, #f1f2f5 40%, #e8eaee 80%) 0 0 / 200% 100%;
   animation: sh-shimmer 1.4s linear infinite;
 }
@@ -824,7 +824,7 @@
   align-items: center;
   gap: 5px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   color: var(--sh-muted);
   background: var(--sh-bg);
   font-size: 11.5px;
@@ -891,7 +891,7 @@
   gap: 10px;
   margin: 0 22px 12px;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   font-size: 12.5px;
 }
 .sh-banner > svg {
@@ -945,7 +945,7 @@
   gap: 9px;
   padding: 6px 12px 6px 6px;
   border: 1px solid var(--sh-line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   color: inherit;
   background: #fff;
   text-align: left;
@@ -1019,7 +1019,7 @@ small.tone-uncertain {
   gap: 10px;
   padding: 6px 12px 6px 6px;
   border: 1px solid var(--sh-line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   color: inherit;
   background: #fafbfc;
   text-align: left;
@@ -1098,7 +1098,7 @@ small.tone-uncertain {
   overflow: hidden;
   padding: 4px 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   color: var(--sh-muted);
   background: transparent;
   font-size: 13px;
@@ -1274,7 +1274,7 @@ small.tone-uncertain {
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--sh-muted);
   background: transparent;
   opacity: 0;
@@ -1344,7 +1344,7 @@ small.tone-uncertain {
   flex: none;
   margin: 0 12px 12px;
   border: 1px solid var(--sh-line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: #fafbfc;
 }
 .sh-job-main {
@@ -1430,7 +1430,7 @@ small.tone-uncertain {
   gap: 3px;
   padding: 4px 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   color: var(--sh-muted);
   background: transparent;
   font-size: 12px;
@@ -1634,7 +1634,7 @@ small.tone-uncertain {
   margin: 0;
   padding: 8px 12px;
   border: 1px solid var(--sh-line);
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   color: var(--sh-ink);
   background: #fff;
   font-size: 13.5px;
@@ -1735,7 +1735,7 @@ small.tone-uncertain {
 .sh-input-note {
   padding: 10px 8px 4px 12px;
   border: 1px solid var(--sh-line-2);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: #fff;
   transition:
     border-color 0.12s,
@@ -1778,7 +1778,7 @@ small.tone-uncertain {
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--sh-muted);
   background: transparent;
   cursor: pointer;
@@ -1901,7 +1901,7 @@ small.tone-uncertain {
   align-items: center;
   gap: 6px;
   padding: 0 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--sh-faint);
   background: var(--sh-bg);
 }
@@ -1954,7 +1954,7 @@ small.tone-uncertain {
   height: 30px;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   font-size: 17px;
   opacity: 0.55;
@@ -1991,7 +1991,7 @@ small.tone-uncertain {
   place-items: center;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   font-size: 21px;
   line-height: 1;
@@ -2032,7 +2032,7 @@ small.tone-uncertain {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   background: #fff;
   box-shadow: 0 24px 70px rgba(18, 28, 42, 0.3);
   animation: sh-pop 0.18s var(--sh-ease);
@@ -2095,7 +2095,7 @@ small.tone-uncertain {
   gap: 8px;
   padding: 0 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--sh-ink-2);
   background: transparent;
   font-size: 13px;
@@ -2152,7 +2152,7 @@ small.tone-uncertain {
   gap: 10px;
   padding: 0 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--sh-ink);
   background: transparent;
   font-size: 13px;
@@ -2195,7 +2195,7 @@ small.tone-uncertain {
   align-items: center;
   gap: 8px;
   padding: 0 6px 0 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--sh-accent-soft);
 }
 .sh-folder-new input {
@@ -2245,7 +2245,7 @@ small.tone-uncertain {
   height: 40px;
   display: grid;
   place-items: center;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   color: var(--sh-danger);
   background: var(--sh-danger-soft);
 }
@@ -2274,7 +2274,7 @@ small.tone-uncertain {
 .sh-preview .fv-stage > video {
   max-width: 100%;
   max-height: 100%;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: #000;
 }
 .sh-preview-text {
@@ -2283,7 +2283,7 @@ small.tone-uncertain {
   min-height: 0;
   overflow: auto;
   padding: 22px 26px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: #1b222c;
   background: #fff;
 }
@@ -2554,7 +2554,7 @@ small.tone-uncertain {
   justify-items: center;
   gap: 7px;
   padding: 8px 4px 6px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   text-align: center;
   cursor: pointer;
   transition: background 0.12s;
@@ -2737,7 +2737,7 @@ small.tone-uncertain {
   position: relative;
   display: flex;
   align-items: flex-start;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   color: var(--sh-ink);
   background: rgba(255, 255, 255, 0.97);
   box-shadow:
@@ -2850,7 +2850,7 @@ small.tone-uncertain {
   display: flex;
   justify-content: space-between;
   padding: 8px 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.95);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.06),

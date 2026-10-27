@@ -1,7 +1,7 @@
 /* Photos window. Light, photo-first: chrome floats over the grid. */
 .ph-app {
   --ph-bg: #f6f7f9;
-  --ph-surface: #ffffff;
+  --ph-surface: var(--color-surface);
   --ph-side: #eef0f4;
   --ph-ink: #16191f;
   --ph-ink-2: #4a5160;
@@ -10,7 +10,7 @@
   --ph-accent: #2f6fed;
   --ph-accent-ink: #1f56c7;
   --ph-accent-soft: rgba(47, 111, 237, 0.12);
-  --ph-danger: #d93a4a;
+  --ph-danger: var(--color-danger);
   --ph-tile: #e6e9ee;
   --ph-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   position: relative;
@@ -70,7 +70,7 @@
   min-width: 0;
   height: 30px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 8px;
   overflow: hidden;
   color: var(--ph-ink-2);
@@ -162,7 +162,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--ph-ink-2);
   background: transparent;
 }
@@ -257,7 +257,7 @@
   display: flex;
   gap: 9px;
   padding: 11px 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--ph-surface);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
 }
@@ -389,7 +389,7 @@
   align-items: center;
   gap: 7px;
   padding: 0 11px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: var(--ph-muted);
   background: rgba(20, 26, 38, 0.06);
   transition:
@@ -429,7 +429,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--ph-ink-2);
   background: transparent;
 }
@@ -451,7 +451,7 @@
   align-items: center;
   gap: 6px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0 13px;
   color: var(--ph-ink);
   background: rgba(20, 26, 38, 0.07);
@@ -490,7 +490,7 @@
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: #7a4a00;
   background: #fff3d6;
   font-size: 12px;
@@ -768,7 +768,7 @@
   transform: scale(0.86);
 }
 .ph-tile.selected .ph-tile-open img {
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 .ph-tile-open:focus-visible {
   outline: 3px solid var(--ph-accent);
@@ -944,7 +944,7 @@
 /* Placeholders while a month loads */
 .ph-skeleton {
   height: calc(100% - 4px);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: repeating-linear-gradient(
     180deg,
     #e8ebf0 0 calc(var(--row, 194px) - 4px),
@@ -970,7 +970,7 @@
   align-items: center;
   gap: 5px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 6px 10px;
   background: var(--ph-surface);
   font-weight: 600;
@@ -1040,7 +1040,7 @@
   position: absolute;
   right: 5px;
   width: 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: rgba(20, 26, 38, 0.3);
   cursor: grab;
   transition:
@@ -1180,7 +1180,7 @@
   align-items: center;
   gap: 10px;
   padding: 0 8px 0 18px;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   background: var(--ph-surface);
   box-shadow:
     0 2px 6px rgba(16, 24, 40, 0.06),
@@ -1214,7 +1214,7 @@
 .ph-hero-search .ph-button {
   height: 40px;
   padding: 0 18px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
 }
 .ph-hero-recent {
   display: flex;
@@ -1293,7 +1293,7 @@
 .ph-switch-list {
   display: grid;
   border: 1px solid var(--ph-line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
 }
 .ph-switch-row {
   min-height: 58px;
@@ -1328,7 +1328,7 @@
   height: 26px;
   flex: none;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 0;
   background: #cdd5de;
   transition: background 0.2s;
@@ -1405,7 +1405,7 @@
   gap: 4px;
   margin-top: 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 5px 8px;
   color: var(--ph-accent-ink);
   background: transparent;
@@ -1571,7 +1571,7 @@
   height: 24px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: #fff;
   background: rgba(15, 18, 25, 0.5);
   backdrop-filter: blur(6px);
@@ -1634,14 +1634,14 @@
   flex: none;
   gap: 2px;
   padding: 3px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(20, 26, 38, 0.06);
 }
 .ph-scope button {
   height: 28px;
   padding: 0 12px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--ph-muted);
   background: transparent;
   font: inherit;
@@ -1727,7 +1727,7 @@
   align-items: center;
   gap: 10px;
   padding: 4px 12px 4px 4px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(20, 26, 38, 0.05);
   animation: ph-fade-in 0.25s ease;
 }
@@ -1737,7 +1737,7 @@
   max-width: 72px;
   flex: none;
   display: block;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   object-fit: cover;
   background: var(--ph-tile);
   box-shadow: 0 1px 3px rgba(16, 24, 40, 0.16);
@@ -1792,7 +1792,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 0;
   color: var(--ph-ink-2);
   background: transparent;
@@ -1857,7 +1857,7 @@
   max-width: 72px;
   flex: none;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--ph-tile);
   box-shadow: 0 1px 3px rgba(16, 24, 40, 0.16);
 }
@@ -1886,7 +1886,7 @@
   height: 168px;
   max-width: 300px;
   margin: 64px 0 10px;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   box-shadow:
     0 2px 6px rgba(16, 24, 40, 0.08),
     0 14px 36px rgba(16, 24, 40, 0.16);
@@ -1931,7 +1931,7 @@
   gap: 5px;
   margin-left: 4px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 10px;
   color: var(--ph-accent-ink);
   background: rgba(255, 255, 255, 0.8);
@@ -2032,7 +2032,7 @@
   align-items: center;
   gap: 6px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0 12px;
   color: var(--ph-accent-ink);
   background: rgba(255, 255, 255, 0.75);
@@ -2187,7 +2187,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
 }
 .ph-upload-tray header button:hover {
@@ -2258,7 +2258,7 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: rgba(20, 26, 38, 0.06);
 }
 .ph-upload-tray li button svg {
@@ -2355,7 +2355,7 @@
 .ph-dialog input {
   height: 38px;
   border: 1px solid #d5dae2;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0 12px;
   outline: 0;
   color: var(--ph-ink);
@@ -2378,7 +2378,7 @@
 .ph-dialog-actions button {
   height: 36px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0 16px;
   background: rgba(20, 26, 38, 0.07);
   font-weight: 600;
@@ -2449,7 +2449,7 @@
   align-items: center;
   gap: 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0 8px;
   background: transparent;
   text-align: left;
@@ -2495,7 +2495,7 @@
 .ph-picker-new button {
   height: 38px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0 14px;
   color: #fff;
   background: var(--ph-accent);
@@ -2684,7 +2684,7 @@
   height: 44px;
   flex: none;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   padding: 0;
   opacity: 0.5;
   transition:
@@ -2763,7 +2763,7 @@
   flex: none;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: #aab1bd !important;
 }
 .ph-details-name button:hover {
@@ -2794,7 +2794,7 @@
 .ph-details-hint {
   margin: -6px 0 0;
   padding: 9px 11px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: #ffd99a;
   background: rgba(255, 190, 80, 0.1);
   font-size: 12px;
@@ -2950,7 +2950,7 @@ button.ph-face-name:hover {
   flex: 1;
   height: 30px;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0 10px;
   outline: 0;
   color: #fff;
@@ -2968,7 +2968,7 @@ button.ph-face-name:hover {
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: #fff;
   background: #2f6fed;
 }
@@ -2984,7 +2984,7 @@ button.ph-face-name:hover {
   right: 36px;
   display: grid;
   padding: 4px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: #252a33;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.08),
@@ -3048,7 +3048,7 @@ button.ph-face-name:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0 12px;
   background: rgba(255, 255, 255, 0.09) !important;
   font-weight: 600;
@@ -3308,7 +3308,7 @@ button.ph-face-name:hover {
   align-items: center;
   gap: 6px;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 0 16px;
   color: #fff;
   background: rgba(255, 255, 255, 0.14);
@@ -3347,7 +3347,7 @@ button.ph-face-name:hover {
   gap: 8px;
   margin-top: 4px;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.06);
 }
 .ph-details-live p {
@@ -3665,7 +3665,7 @@ button.ph-face-name:hover {
   justify-items: center;
   gap: 6px;
   padding: 22px 20px 18px;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   color: #eef0f4;
   background: rgba(20, 22, 28, 0.78);
   backdrop-filter: blur(18px);
@@ -3692,7 +3692,7 @@ button.ph-face-name:hover {
   align-items: center;
   gap: 6px;
   margin-top: 6px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0 14px;
   background: rgba(255, 255, 255, 0.12) !important;
   font-weight: 600;
@@ -3738,7 +3738,7 @@ button.ph-face-name:hover {
   flex: none;
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   transition: background 0.15s;
 }
 .ph-video-controls > button:hover:not(:disabled),

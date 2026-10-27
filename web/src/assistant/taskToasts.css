@@ -4,7 +4,7 @@
   --vt-ink: #0a0a0a;
   --vt-ink-2: #3f3f46;
   --vt-muted: #8b8b93;
-  --vt-danger: #d23b48;
+  --vt-danger: var(--color-danger);
   --vt-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   position: absolute;
   z-index: 78;
@@ -22,7 +22,7 @@
   display: flex;
   gap: 12px;
   padding: 14px 38px 12px 14px;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   background: rgba(255, 255, 255, 0.97);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.06),
@@ -37,7 +37,7 @@
   display: grid;
   place-items: center;
   flex: none;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: #fff;
   background: var(--vt-ink);
 }
@@ -97,7 +97,7 @@
   margin-top: 8px;
   padding: 0 8px 0 11px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: #fff;
   background: var(--vt-ink);
   font: inherit;
