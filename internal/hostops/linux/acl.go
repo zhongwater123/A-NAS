@@ -19,6 +19,14 @@ import (
 
 const sharedSpaceID = "space:shared"
 
+type directoryProtection uint8
+
+const (
+	ordinaryDirectory directoryProtection = iota
+	reservedDirectory                     // Displace a file or link, preserving directory contents.
+	managedDirectory                      // Also displace directories owned by an untrusted user.
+)
+
 // Space roots, trash directories, and their containers are owned by
 // root:root and authorized only by POSIX ACLs. Owners cannot change the ACL of
 // a space root; the access and default entries below are the whole policy.
@@ -98,8 +106,8 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 	e.materializeMu.Lock()
 	defer e.materializeMu.Unlock()
 	var repaired []string
-	apply := func(path, acl string, created, reserved bool) error {
-		changed, existed, err := e.ensureDirectoryACL(ctx, path, acl, reserved)
+	apply := func(path, acl string, created bool, protection directoryProtection) error {
+		changed, existed, err := e.ensureDirectoryACL(ctx, path, acl, protection)
 		if changed && existed && !created {
 			repaired = append(repaired, path)
 		}
@@ -117,7 +125,7 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 		}
 	}
 	for _, path := range []string{filepath.Join(e.mountPoint, "spaces"), filepath.Join(e.mountPoint, "spaces", "private")} {
-		if err := apply(path, containerACL(), false, false); err != nil {
+		if err := apply(path, containerACL(), false, ordinaryDirectory); err != nil {
 			return repaired, err
 		}
 	}
@@ -161,7 +169,7 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 				trashUsers = nil
 			}
 		}
-		if err := apply(root, spaceACL, created, false); err != nil {
+		if err := apply(root, spaceACL, created, ordinaryDirectory); err != nil {
 			return repaired, err
 		}
 		// Trash directories sit in folders their users can write, so
@@ -171,12 +179,23 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 		if principal != "" {
 			trashACL = trashRootACL(principal, viewers...)
 		}
-		if err := apply(trashRoot, trashACL, false, true); err != nil {
+		if err := apply(trashRoot, trashACL, false, reservedDirectory); err != nil {
 			return repaired, err
 		}
 		for _, username := range trashUsers {
-			if err := apply(filepath.Join(trashRoot, username), userTrashACL(username, viewers...), false, true); err != nil {
+			if err := apply(filepath.Join(trashRoot, username), userTrashACL(username, viewers...), false, reservedDirectory); err != nil {
 				return repaired, err
+			}
+		}
+		if spaceID == sharedSpaceID {
+			agentRoot := filepath.Join(root, "Agent空间")
+			if err := apply(agentRoot, sharedFolderACL(), false, managedDirectory); err != nil {
+				return repaired, err
+			}
+			for _, username := range trashUsers {
+				if err := apply(filepath.Join(agentRoot, username), sharedFolderACL("user:"+username), false, managedDirectory); err != nil {
+					return repaired, err
+				}
 			}
 		}
 	}
@@ -200,8 +219,8 @@ func (e *Executor) ensureSpaceSubvolume(ctx context.Context, root string) (bool,
 // Every command acts on the directory opened without following symbolic
 // links, never on path again: whoever can rename entries next to it cannot
 // redirect root to another file between the check and the change.
-func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string, reserved bool) (changed, existed bool, err error) {
-	directory, existed, err := e.openVolumeDirectory(path, 0o700, reserved)
+func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string, protection directoryProtection) (changed, existed bool, err error) {
+	directory, existed, err := e.openVolumeDirectory(path, 0o700, protection)
 	if err != nil {
 		return false, existed, err
 	}
@@ -247,10 +266,11 @@ func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string, res
 
 // openVolumeDirectory opens the directory at path below the data-volume mount
 // point without following symbolic links, creating it with mode when nothing
-// is there. existed reports whether anything was at path. When reserved is
-// set, a non-directory at path, such as a symbolic link planted by a user who
-// can write the parent, is renamed aside and replaced by a new directory.
-func (e *Executor) openVolumeDirectory(path string, mode uint32, reserved bool) (*os.File, bool, error) {
+// is there. existed reports whether anything was at path. Reserved names
+// displace non-directories; managed names also displace directories owned by
+// anyone other than the executor (root in the Host Agent). Contents are kept
+// alongside the reserved name, never adopted into a trusted member's folder.
+func (e *Executor) openVolumeDirectory(path string, mode uint32, protection directoryProtection) (*os.File, bool, error) {
 	relative, err := filepath.Rel(e.mountPoint, path)
 	if err != nil || relative == "." || !filepath.IsLocal(relative) {
 		return nil, false, fmt.Errorf("%s is not below the data volume", path)
@@ -278,6 +298,17 @@ func (e *Executor) openVolumeDirectory(path string, mode uint32, reserved bool) 
 	// after a few rounds rather than loop.
 	for attempt := range 3 {
 		fd, err := unix.Openat(parentFD, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if err == nil && protection == managedDirectory {
+			var stat unix.Stat_t
+			if statErr := unix.Fstat(fd, &stat); statErr != nil {
+				_ = unix.Close(fd)
+				return nil, existed, statErr
+			}
+			if stat.Uid != uint32(os.Geteuid()) {
+				_ = unix.Close(fd)
+				err = unix.ENOTDIR // Use the same displacement path for an impostor.
+			}
+		}
 		switch {
 		case err == nil:
 			return os.NewFile(uintptr(fd), path), existed, nil
@@ -286,7 +317,7 @@ func (e *Executor) openVolumeDirectory(path string, mode uint32, reserved bool) 
 			if err := unix.Mkdirat(parentFD, name, mode); err != nil && !errors.Is(err, unix.EEXIST) {
 				return nil, false, fmt.Errorf("create %s: %w", path, err)
 			}
-		case (errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR)) && reserved:
+		case (errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR)) && protection != ordinaryDirectory:
 			aside := fmt.Sprintf("%s.displaced-%d", name, time.Now().UnixNano())
 			if err := unix.Renameat2(parentFD, name, parentFD, aside, unix.RENAME_NOREPLACE); err != nil && !errors.Is(err, unix.ENOENT) {
 				return nil, true, fmt.Errorf("move aside %s: %w", path, err)

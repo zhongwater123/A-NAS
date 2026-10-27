@@ -3,9 +3,25 @@ package files
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 )
+
+// Agent空间 and its immediate children are policy directories managed by
+// the Host Agent, not member-created entries. The same name elsewhere is
+// ordinary user data. Contents below each member's directory remain editable.
+func isAgentPolicyDirectory(root, spaceID, name string) bool {
+	if spaceID != "space:shared" {
+		return false
+	}
+	relative, err := filepath.Rel(root, name)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	return len(parts) <= 2 && strings.EqualFold(parts[0], "Agent空间")
+}
 
 // Names a user gives to new or renamed items must also work over SMB on
 // Windows and macOS (docs/specs/basic-storage-and-sharing.md#名称规则).

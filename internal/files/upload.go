@@ -140,6 +140,9 @@ func (s *Service) BeginUpload(ctx context.Context, actor accounts.User, request 
 		return nil, err
 	}
 	target := filepath.Join(parentPath, request.Name)
+	if isAgentPolicyDirectory(root, space.ID, target) {
+		return nil, ErrForbidden
+	}
 	if !withinRoot(root, target) {
 		return nil, ErrInvalidName
 	}
@@ -235,6 +238,9 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 	parentPath, err := s.uploadParent(ctx, space, root, upload)
 	if err != nil {
 		return CommittedUpload{}, err
+	}
+	if isAgentPolicyDirectory(root, space.ID, filepath.Join(parentPath, upload.Name)) {
+		return CommittedUpload{}, ErrForbidden
 	}
 	done, err := s.change(ctx, space.ID)
 	if err != nil {
@@ -357,6 +363,16 @@ func (s *Service) ensureDirectory(ctx context.Context, actor accounts.User, spac
 	target := filepath.Join(parentPath, name)
 	if !withinRoot(root, target) {
 		return Entry{}, "", ErrInvalidName
+	}
+	if isAgentPolicyDirectory(root, spaceID, target) {
+		// Folder uploads may traverse an existing managed root, but may
+		// never create a replacement at a reserved name.
+		info, err := s.fs.Lstat(ctx, target)
+		if err != nil || info.Kind != KindDirectory {
+			return Entry{}, "", ErrForbidden
+		}
+		entry, err := s.registerCreated(ctx, spaceID, parentID, root, target)
+		return entry, target, err
 	}
 	created := true
 	if err := s.fs.Mkdir(ctx, target); errors.Is(err, fs.ErrExist) {

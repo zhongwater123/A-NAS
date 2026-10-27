@@ -25,6 +25,8 @@
 
 ### 文件管理、登录与账号
 
+- Agent空间（#177）：更新 Host Agent、产品服务及助手试用包后，Web 不能改名、移走或删除管理目录，但本人仍能在自己的子目录写文件、其他成员可读；Windows SMB 看不到且不能打开 Shared 中名为 `Agent空间` 的条目，普通 Shared 文件仍可协作。若升级时出现 `.displaced-*`，先保存原位置、所有者及内容清单，由管理员确认保留数据的去向，不自动接管回管理目录（[调查](../investigations/2026-10-27-agent-space-policy-directories.md)）。
+
 - 文件管理三栏缩放、左右栏收起、列表/图标切换、排序、上传入口与资源文件夹跳转；在个人空间与 Shared 上传、删除、恢复（[issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)）。
 - 回收站批量恢复，原文件夹已删除时恢复到空间根目录；双击预览 20 MB 照片与 PDF；容量单位为 1024 进制（[规格](../specs/size-units.md)）。核对后在“问题反馈”中把 Codex 的 6 条建议标为已处理。
 - 超长、Windows/macOS 不兼容与只差大小写的名称被拒绝；Windows SMB 能打开 Web 新建的文件夹。
