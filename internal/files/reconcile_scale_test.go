@@ -34,6 +34,8 @@ func (walkingSnapshots) Prune(context.Context, []string) (files.SnapshotPrune, e
 	return files.SnapshotPrune{}, nil
 }
 
+func (walkingSnapshots) Count(context.Context) (int, error) { return 0, nil }
+
 // TestReconcileAtScale measures listing a folder, a tree below a folder (as
 // the media center and music read their libraries), passes over the whole
 // space and taking a snapshot, on a space of ANAS_SCALE_ENTRIES entries

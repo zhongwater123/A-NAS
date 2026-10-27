@@ -184,14 +184,18 @@ func TestClientRefusesASnapshotListingCutShort(t *testing.T) {
 	}
 }
 
-func TestClientDeletesAndPrunesSnapshots(t *testing.T) {
+func TestClientDeletesCountsAndPrunesSnapshots(t *testing.T) {
 	snapshots := &agentSnapshotBackend{
 		deleteErr: files.ErrNotFound,
 		pruned:    files.SnapshotPrune{Present: []string{"snapshot:1"}, Removed: 3},
+		count:     4,
 	}
 	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{Snapshots: snapshots}, discardLogger())))
 	if err := client.Delete(context.Background(), "space:gone", "snapshot:1"); !errors.Is(err, files.ErrNotFound) {
 		t.Fatalf("Delete() in an unknown space error = %v, want ErrNotFound", err)
+	}
+	if count, err := client.Count(context.Background()); err != nil || count != snapshots.count {
+		t.Fatalf("Count() = %d, %v; want %d", count, err, snapshots.count)
 	}
 	pruned, err := client.Prune(context.Background(), []string{"snapshot:1", "snapshot:2"})
 	if err != nil || !reflect.DeepEqual(pruned, snapshots.pruned) || !reflect.DeepEqual(snapshots.kept, []string{"snapshot:1", "snapshot:2"}) {
@@ -203,6 +207,9 @@ func TestClientDeletesAndPrunesSnapshots(t *testing.T) {
 	snapshots.pruneErr = files.ErrVolumeUnavailable
 	if _, err := client.Prune(context.Background(), nil); !errors.Is(err, files.ErrVolumeUnavailable) {
 		t.Fatalf("Prune() without the data volume error = %v, want ErrVolumeUnavailable", err)
+	}
+	if _, err := client.Count(context.Background()); !errors.Is(err, files.ErrVolumeUnavailable) {
+		t.Fatalf("Count() without the data volume error = %v, want ErrVolumeUnavailable", err)
 	}
 }
 
@@ -295,6 +302,7 @@ type agentSnapshotBackend struct {
 	kept            []string
 	pruned          files.SnapshotPrune
 	pruneErr        error
+	count           int
 }
 
 func (b *agentSnapshotBackend) Create(_ context.Context, spaceID, snapshotID string) error {
@@ -340,6 +348,8 @@ func (b *agentSnapshotBackend) Prune(_ context.Context, keep []string) (files.Sn
 	b.kept = keep
 	return b.pruned, b.pruneErr
 }
+
+func (b *agentSnapshotBackend) Count(context.Context) (int, error) { return b.count, b.pruneErr }
 
 func TestClientReportsUnavailableReader(t *testing.T) {
 	socketPath := serve(t, agent.NewHandler(fake.NewUnavailable(), discardLogger()))

@@ -15,7 +15,8 @@ import (
 )
 
 // Prune deletes subvolumes, so it acts only on the mounted data volume; a
-// bare mount point, as before the volume is mounted, is left alone.
+// bare mount point, as before the volume is mounted, is left alone. Count
+// would count another directory's entries, so it refuses too.
 func TestPruneRefusesWithoutTheDataVolume(t *testing.T) {
 	runner := &recordingRunner{}
 	mount := filepath.Join(t.TempDir(), "data")
@@ -28,6 +29,9 @@ func TestPruneRefusesWithoutTheDataVolume(t *testing.T) {
 	}
 	if len(runner.commands) != 0 {
 		t.Fatalf("Prune() ran %v without the data volume", runner.lines())
+	}
+	if _, err := executor.Count(context.Background()); !errors.Is(err, files.ErrVolumeUnavailable) {
+		t.Fatalf("Count() error = %v, want ErrVolumeUnavailable", err)
 	}
 }
 

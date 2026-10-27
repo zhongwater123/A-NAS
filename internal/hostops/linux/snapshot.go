@@ -153,6 +153,28 @@ func (e *Executor) Prune(ctx context.Context, keep []string) (files.SnapshotPrun
 	return pruned, nil
 }
 
+// Count reports how many snapshot subvolumes the mounted data volume holds,
+// counting only entries named the way snapshotRoot names them.
+func (e *Executor) Count(context.Context) (int, error) {
+	if !e.dataVolumeReady() {
+		return 0, files.ErrVolumeUnavailable
+	}
+	items, err := os.ReadDir(e.snapshotsRoot())
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, item := range items {
+		if item.IsDir() && snapshotDirectoryName.MatchString(item.Name()) {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (e *Executor) resolveSpaceRoot(spaceID string) (string, error) {
 	if e.registryError != nil {
 		return "", e.registryError

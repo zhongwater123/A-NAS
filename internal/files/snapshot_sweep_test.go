@@ -1,6 +1,7 @@
 package files_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -79,6 +81,12 @@ func (m *memorySnapshots) Prune(_ context.Context, keep []string) (files.Snapsho
 		pruned.Removed++
 	}
 	return pruned, nil
+}
+
+func (m *memorySnapshots) Count(context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.taken), nil
 }
 
 func (m *memorySnapshots) exists(snapshotID string) bool {
@@ -220,21 +228,27 @@ func TestSweepRemovesSnapshotsAndRecordsWithoutTheirCounterpart(t *testing.T) {
 // does not record it yet.
 func TestSweepKeepsASnapshotBeingTaken(t *testing.T) {
 	f := newSnapshotFixture(t)
+	backend := newMemorySnapshots(folderOfFiles(1))
+	f.backend = backend
+	f.open()
+	// One that the catalog records, so that the sweep prunes at all.
+	recorded, err := f.files.CreateSnapshot(context.Background(), f.admin, f.private.ID, "已拍")
+	if err != nil {
+		t.Fatal(err)
+	}
 	listing, release := make(chan struct{}), make(chan struct{})
-	backend := newMemorySnapshots(func(ctx context.Context, visit func(files.SnapshotObject) error) error {
+	backend.listing = func(ctx context.Context, visit func(files.SnapshotObject) error) error {
 		close(listing)
 		<-release
 		return folderOfFiles(1)(ctx, visit)
-	})
-	f.backend = backend
-	f.open()
+	}
 	created := make(chan error, 1)
 	go func() {
 		_, err := f.files.CreateSnapshot(context.Background(), f.admin, f.private.ID, "进行中")
 		created <- err
 	}()
 	<-listing
-	taking := backend.ids()
+	taking := slices.DeleteFunc(backend.ids(), func(id string) bool { return id == recorded.ID })
 	if _, err := f.files.SweepSnapshots(context.Background()); err != nil {
 		t.Fatalf("SweepSnapshots() error = %v", err)
 	}
@@ -245,7 +259,8 @@ func TestSweepKeepsASnapshotBeingTaken(t *testing.T) {
 	if err := <-created; err != nil {
 		t.Fatalf("CreateSnapshot() error = %v", err)
 	}
-	if got := f.snapshots(f.private); len(got) != 1 || got[0].ID != taking[0] {
+	got := f.snapshots(f.private)
+	if len(got) != 2 || !slices.ContainsFunc(got, func(s files.Snapshot) bool { return s.ID == taking[0] }) {
 		t.Fatalf("snapshots = %+v", got)
 	}
 }
@@ -277,14 +292,75 @@ func TestSweepStopsWhenReadingTheCatalogFails(t *testing.T) {
 	}
 }
 
+// A catalog that records no snapshots beside a volume that holds some was
+// more likely lost or replaced than emptied (#269): the sweep deletes none
+// of them, and the scheduler says how many it spared.
+func TestSweepOfAnEmptyCatalogDeletesNoSnapshot(t *testing.T) {
+	f := newSnapshotFixture(t)
+	backend := newMemorySnapshots(folderOfFiles(1))
+	backend.taken["snapshot:a"] = true
+	backend.taken["snapshot:b"] = true
+	f.backend = backend
+	f.open()
+	sweep, err := f.files.SweepSnapshots(context.Background())
+	if err != nil || sweep.Spared != 2 || sweep.Snapshots != 0 || len(sweep.Records) != 0 {
+		t.Fatalf("SweepSnapshots() = %+v, %v; want 2 spared and nothing removed", sweep, err)
+	}
+	if backend.kept != nil {
+		t.Fatalf("the sweep pruned keeping %v", backend.kept)
+	}
+
+	var logs lockedBuffer
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		f.files.RunSnapshotSchedules(ctx, f.accounts, slog.New(slog.NewTextHandler(&logs, nil)))
+	}()
+	const spared = "the catalog records no snapshots"
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(logs.String(), spared) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-stopped
+	if line := logs.String(); !strings.Contains(line, `level=WARN msg="`+spared) || !strings.Contains(line, "count=2") {
+		t.Fatalf("scheduler logged %q, want a warning about the 2 spared snapshots", line)
+	}
+	if backend.kept != nil || !backend.exists("snapshot:a") || !backend.exists("snapshot:b") {
+		t.Fatalf("the scheduler's sweep pruned keeping %v", backend.kept)
+	}
+}
+
+// lockedBuffer collects what a background goroutine logs.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // The scheduler sweeps before it takes anything, so a restart clears what a
 // crash left behind.
 func TestSchedulerSweepsWhenItStarts(t *testing.T) {
 	f := newSnapshotFixture(t)
 	backend := newMemorySnapshots(folderOfFiles(1))
-	backend.taken["snapshot:left-by-a-crash"] = true
 	f.backend = backend
 	f.open()
+	if _, err := f.files.CreateSnapshot(context.Background(), f.admin, f.private.ID, "已拍"); err != nil {
+		t.Fatal(err)
+	}
+	backend.taken["snapshot:left-by-a-crash"] = true
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
 	go func() {

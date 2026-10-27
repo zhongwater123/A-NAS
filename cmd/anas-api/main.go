@@ -536,6 +536,9 @@ func (*developmentOperations) Delete(context.Context, string, string) error { re
 func (*developmentOperations) Prune(context.Context, []string) (files.SnapshotPrune, error) {
 	return files.SnapshotPrune{}, errors.New("development snapshot backend is not configured")
 }
+func (*developmentOperations) Count(context.Context) (int, error) {
+	return 0, errors.New("development snapshot backend is not configured")
+}
 
 // configuredContainers selects container management and the App Center
 // together, since both run through the container agent.

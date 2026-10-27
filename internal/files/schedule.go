@@ -392,6 +392,9 @@ func (s *Service) sweepSnapshots(ctx context.Context, logger *slog.Logger) time.
 	if sweep.Snapshots > 0 {
 		logger.InfoContext(ctx, "removed snapshots that the catalog did not record", "count", sweep.Snapshots)
 	}
+	if sweep.Spared > 0 {
+		logger.WarnContext(ctx, "the catalog records no snapshots, so the sweep deleted none of those on the data volume", "count", sweep.Spared)
+	}
 	for _, snapshot := range sweep.Records {
 		logger.WarnContext(ctx, "removed the record of a snapshot that is no longer on the data volume",
 			"space_id", snapshot.SpaceID, "snapshot", snapshot.ID, "name", snapshot.Name)

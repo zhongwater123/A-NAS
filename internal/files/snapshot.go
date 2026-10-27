@@ -114,6 +114,8 @@ type SnapshotBackend interface {
 	// Prune deletes every snapshot that keep does not name and reports which
 	// of keep exist.
 	Prune(ctx context.Context, keep []string) (SnapshotPrune, error)
+	// Count reports how many snapshots the data volume holds, kept or not.
+	Count(ctx context.Context) (int, error)
 }
 
 // SnapshotPrune is the outcome of a Prune: the kept snapshots that exist and
@@ -639,11 +641,15 @@ type SnapshotSweep struct {
 	Snapshots int
 	// Records names the catalog records whose snapshot was gone.
 	Records []Snapshot
+	// Spared counts the snapshots on the data volume that a sweep left alone
+	// because the catalog recorded none.
+	Spared int
 }
 
 // SweepSnapshots makes the data volume and the catalog agree: it deletes the
 // snapshots the catalog does not record and the records whose snapshot is
-// gone. It runs only while the intended data volume is mounted.
+// gone. It runs only while the intended data volume is mounted, and deletes
+// no snapshot while the catalog records none.
 func (s *Service) SweepSnapshots(ctx context.Context) (SnapshotSweep, error) {
 	if !s.allowUnverifiedVolume {
 		if s.volumeGuard == nil || s.volumeGuard.Check(ctx, s.volumeRoot, false) != nil {
@@ -669,6 +675,16 @@ func (s *Service) SweepSnapshots(ctx context.Context) (SnapshotSweep, error) {
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return SnapshotSweep{}, err
+	}
+	if len(recorded) == 0 {
+		// A catalog that records nothing beside snapshots on the volume was
+		// more likely lost or replaced than emptied, and those snapshots may
+		// be the only way back. Leave them for an administrator.
+		held, err := s.snapshots.Count(ctx)
+		if err != nil {
+			return SnapshotSweep{}, err
+		}
+		return SnapshotSweep{Spared: held}, nil
 	}
 	keep := make([]string, 0, len(recorded)+len(s.takingSnapshots))
 	for _, snapshot := range recorded {
@@ -752,6 +768,9 @@ func (unconfiguredSnapshots) Delete(context.Context, string, string) error {
 }
 func (unconfiguredSnapshots) Prune(context.Context, []string) (SnapshotPrune, error) {
 	return SnapshotPrune{}, errNoSnapshotBackend
+}
+func (unconfiguredSnapshots) Count(context.Context) (int, error) {
+	return 0, errNoSnapshotBackend
 }
 
 type directorySnapshotBackend struct {
@@ -889,6 +908,24 @@ func (b *directorySnapshotBackend) Prune(_ context.Context, keep []string) (Snap
 		pruned.Removed++
 	}
 	return pruned, nil
+}
+
+// Count leaves out the copies that a stopped Create left unfinished.
+func (b *directorySnapshotBackend) Count(context.Context) (int, error) {
+	items, err := os.ReadDir(b.base())
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, item := range items {
+		if !strings.HasSuffix(item.Name(), ".incoming") {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // WalkSnapshot calls visit for the files and folders below root in

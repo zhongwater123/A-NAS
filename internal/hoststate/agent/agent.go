@@ -258,15 +258,30 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusOK, documentFromDomain(state))
 }
 
-// handleSnapshots takes a snapshot (POST) or keeps only the named ones (PUT).
+// handleSnapshots counts the snapshots (GET), takes one (POST) or keeps only
+// the named ones (PUT).
 func (h *handler) handleSnapshots(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost && r.Method != http.MethodPut {
-		w.Header().Set("Allow", http.MethodPost+", "+http.MethodPut)
+	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodPut {
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodPost+", "+http.MethodPut)
 		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.snapshots == nil {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "snapshot operation is unavailable")
+		return
+	}
+	if r.Method == http.MethodGet {
+		count, err := h.snapshots.Count(r.Context())
+		if errors.Is(err, files.ErrVolumeUnavailable) {
+			httpjson.WriteError(w, http.StatusLocked, volumeUnavailableCode, "the data volume is offline")
+			return
+		}
+		if err != nil {
+			h.logger.ErrorContext(r.Context(), "count snapshots failed", "error", err)
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
+			return
+		}
+		httpjson.Write(w, http.StatusOK, snapshotCountDocument{Count: count})
 		return
 	}
 	if r.Method == http.MethodPut {
@@ -698,6 +713,10 @@ type snapshotKeepDocument struct {
 	Keep []string `json:"keep"`
 }
 
+type snapshotCountDocument struct {
+	Count int `json:"count"`
+}
+
 // snapshotObjectLine is one line of a snapshot object listing: an object,
 // the end of the listing, or the error that cut it short.
 type snapshotObjectLine struct {
@@ -890,6 +909,15 @@ func (c *Client) Prune(ctx context.Context, keep []string) (files.SnapshotPrune,
 		return files.SnapshotPrune{}, files.ErrVolumeUnavailable
 	}
 	return response, err
+}
+
+func (c *Client) Count(ctx context.Context) (int, error) {
+	var response snapshotCountDocument
+	err := c.doJSON(ctx, c.operationClient, http.MethodGet, "/v1/snapshots", nil, &response)
+	if errors.Is(err, accounts.ErrVolumeUnavailable) {
+		return 0, files.ErrVolumeUnavailable
+	}
+	return response.Count, err
 }
 
 func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path string, requestBody, responseBody any) error {
