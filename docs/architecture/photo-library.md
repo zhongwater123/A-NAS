@@ -57,12 +57,10 @@ anas-photos（a-nas-photos）◄──────┘
 
 Policy 在图库一级判定能否查看（`canView`）；在能查看的图库内，哪些照片资产可见由 Policy 的资产规则决定（[`policy.go`](../../internal/photos/policy.go) 的 `assetRules`）。每条规则只写一次，有两种读法：
 
-- 列表用 `listedAssets` 给出的 SQL 条件：不在回收站，并满足约束调用方的每条规则。时间线、月份计数、相册及其计数与封面、用户标签、AI 聚合、目录、人物与人物的照片都用它，AI 聚合返回前的回查也用它。
+- 列表用 `listedAssets` 给出的 SQL 条件：不在回收站，并满足约束调用方的每条规则。时间线、月份计数、相册及其计数与封面、用户标签、AI 聚合、目录、人物与人物的照片，以及搜索、找相似与以图搜图的候选都用它；排序后的结果在返回前按同一条件回查，索引命中本身不构成授权。
 - 单张照片用 `seesAsset`，在读出记录之后判定：详情、原图、视图、元数据与播放都经过它；回收站列表逐条判定。
 
 两种读法由测试对照（[`video_test.go`](../../internal/photos/video_test.go) 的 `TestAssetRulesReadTheSameInListingsAndOnOneAsset`）。目前只有一条规则：助手看不到视频（`assistantSeesNoVideos`）。新增规则时只改 `assetRules`，列表与单张照片同时生效。
-
-搜索、找相似与以图搜图的候选仍各自排除助手的视频，返回前的回查只复查回收站，尚未改用 `listedAssets`（[#193](https://github.com/zhongwater123/A-NAS/issues/193)）。
 
 HEIC、动态照片和普通视频经 `photos.Options.Media` 使用隔离 Media Worker，双原件引用、原子提交、提取视频的存储取舍以及模型输入边界统一记录在[动态照片规格](../specs/photo-motion.md)，普通视频见下面的“视频”。
 

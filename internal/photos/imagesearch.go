@@ -125,7 +125,7 @@ func (s *Service) ImageSearchResults(ctx context.Context, p Principal, searchID 
 	if !ok {
 		return Page{}, ErrImageSearchExpired
 	}
-	candidates, err := s.searchCandidates(ctx, scope)
+	candidates, err := s.searchCandidates(ctx, p, scope)
 	if err != nil {
 		return Page{}, err
 	}

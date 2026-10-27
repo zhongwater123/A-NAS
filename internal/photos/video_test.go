@@ -402,6 +402,20 @@ WHERE object_id = (SELECT object_id FROM assets WHERE id = ?)`, video.ID, photo.
 		if err != nil || !similar.Ready || len(similar.Assets) != 1 || similar.Assets[0].ID != photo.ID {
 			t.Fatalf("%+v similar to crimson = %+v, %v; want the red photo alone", p, similar, err)
 		}
+		// Search matches a video by its name only, and never for the assistant.
+		found, err := s.Search(ctx, p, photos.SearchRequest{Query: "red.mp4"})
+		if err != nil || slices.Contains(names(found.Assets), "red.mp4") == p.Assistant {
+			t.Fatalf("%+v search for the video's name = %v, %v", p, names(found.Assets), err)
+		}
+		considered, err := photos.SearchCandidates(ctx, s, p, private.ID)
+		if err != nil || len(considered) != 3-boolInt(p.Assistant) || slices.Contains(considered, video.ID) == p.Assistant {
+			t.Fatalf("%+v search candidates = %v, %v", p, considered, err)
+		}
+		// Whatever an index returns, the page shows only what p may list.
+		shown, err := photos.RecheckHits(ctx, s, p, video.ID, photo.ID)
+		if want := map[bool]int{false: 2, true: 1}[p.Assistant]; err != nil || len(shown) != want || slices.Contains(shown, video.ID) == p.Assistant {
+			t.Fatalf("%+v recheck of the video and a photo = %v, %v", p, shown, err)
+		}
 	}
 }
 

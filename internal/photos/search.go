@@ -136,12 +136,9 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 		}
 		args = []any{request.Library}
 	}
-	candidates, err := s.searchCandidates(ctx, args)
+	candidates, err := s.searchCandidates(ctx, p, args)
 	if err != nil {
 		return SearchPage{}, err
-	}
-	if p.Assistant {
-		candidates = slices.DeleteFunc(candidates, func(c candidate) bool { return c.video })
 	}
 	page := SearchPage{Assets: []Asset{}}
 	rest, names, of, err := s.peopleInQuery(ctx, query, args)
@@ -185,13 +182,13 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 	return page, nil
 }
 
-// searchCandidates lists the untrashed photos of the libraries in scope with
-// their user tags.
-func (s *Service) searchCandidates(ctx context.Context, scope []any) ([]candidate, error) {
+// searchCandidates lists the photos listed to p in the libraries of scope,
+// with their user tags.
+func (s *Service) searchCandidates(ctx context.Context, p Principal, scope []any) ([]candidate, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.object_id, a.library_id, a.name, IFNULL(group_concat(t.name, char(31)), ''),
   IFNULL(a.taken_at, a.imported_at), NOT `+notVideo("a.object_id")+`
 FROM assets a LEFT JOIN user_tags t ON t.asset_id = a.id
-WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
+WHERE `+listedAssets(p, "a")+` AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
 GROUP BY a.id`, scope...)
 	if err != nil {
 		return nil, err
@@ -209,8 +206,9 @@ GROUP BY a.id`, scope...)
 }
 
 // hitPage returns the page of ranked hits after the cursor and the cursor of
-// the next page, with duplicate hints. A photo trashed since the candidates
-// were read drops out.
+// the next page, with duplicate hints. Index hits grant nothing: a photo
+// trashed since the candidates were read, or one the asset rules hide from
+// p, drops out.
 func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, after *searchHit, limit int) ([]Asset, string, error) {
 	if after != nil {
 		start, _ := slices.BinarySearchFunc(hits, *after, compareHits)
@@ -235,7 +233,7 @@ func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, af
 		ids[i] = hit.id
 	}
 	records, err := s.queryAssets(ctx, s.db,
-		"WHERE a.trashed_at IS NULL AND a.id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")", ids...)
+		"WHERE "+listedAssets(p, "a")+" AND a.id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")", ids...)
 	if err != nil {
 		return nil, "", err
 	}

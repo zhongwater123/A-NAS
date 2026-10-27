@@ -72,7 +72,7 @@ func (s *Service) Similar(ctx context.Context, p Principal, assetID string, requ
 	if err != nil {
 		return SimilarPage{}, err
 	}
-	candidates, err := s.searchCandidates(ctx, scope)
+	candidates, err := s.searchCandidates(ctx, p, scope)
 	if err != nil {
 		return SimilarPage{}, err
 	}
