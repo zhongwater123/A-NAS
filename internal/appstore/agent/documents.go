@@ -17,6 +17,15 @@ type InstallRequest struct {
 	GID int `json:"gid,omitempty"`
 }
 
+type ReservationDocument struct {
+	Token string      `json:"token"`
+	Job   JobDocument `json:"job"`
+}
+
+type PreparationRequest struct {
+	Token string `json:"token"`
+}
+
 type AppsDocument struct {
 	Apps []AppDocument `json:"apps"`
 }

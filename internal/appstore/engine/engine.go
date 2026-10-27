@@ -120,21 +120,23 @@ type Store struct {
 	mu     sync.Mutex
 	active string
 	// cancel ends the context of the active job; stopped refuses new jobs.
-	cancel  context.CancelCauseFunc
-	stopped bool
-	jobs    map[string]*appstore.Job
-	wait    sync.WaitGroup
+	cancel       context.CancelCauseFunc
+	stopped      bool
+	jobs         map[string]*appstore.Job
+	preparations map[string]*installPreparation
+	wait         sync.WaitGroup
 }
 
 func New(entries []appstore.Entry, policy appstore.Policy, stateDir string, docker Inspector, runner Runner) *Store {
 	store := &Store{
-		entries:  make(map[string]appstore.Entry, len(entries)),
-		policy:   policy,
-		stateDir: stateDir,
-		docker:   docker,
-		runner:   runner,
-		now:      time.Now,
-		jobs:     map[string]*appstore.Job{},
+		entries:      make(map[string]appstore.Entry, len(entries)),
+		policy:       policy,
+		stateDir:     stateDir,
+		docker:       docker,
+		runner:       runner,
+		now:          time.Now,
+		jobs:         map[string]*appstore.Job{},
+		preparations: map[string]*installPreparation{},
 
 		startupWindow: defaultStartupWindow,
 		startupPoll:   defaultStartupPoll,
@@ -247,6 +249,10 @@ func (s *Store) Plan(ctx context.Context, id string, identity appstore.Identity)
 }
 
 func (s *Store) Install(ctx context.Context, id, digest string, identity appstore.Identity) (appstore.Job, error) {
+	return s.install(ctx, id, digest, identity, nil)
+}
+
+func (s *Store) install(ctx context.Context, id, digest string, identity appstore.Identity, prepare func(context.Context) error) (appstore.Job, error) {
 	plan, err := s.Plan(ctx, id, identity)
 	if err != nil {
 		return appstore.Job{}, err
@@ -256,22 +262,28 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 	if plan.Digest != digest {
 		return appstore.Job{}, appstore.ErrPlanChanged
 	}
-	containers, err := s.docker.Containers(ctx)
-	if err != nil {
-		return appstore.Job{}, fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+	var leftovers bool
+	check := func() error {
+		containers, err := s.docker.Containers(ctx)
+		if err != nil {
+			return fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+		}
+		if err := conflicts(id, plan, containers, failedInstall(s.jobs[id])); err != nil {
+			return err
+		}
+		leftovers = slices.ContainsFunc(containers, func(container ContainerInfo) bool { return container.AppID == id })
+		return nil
 	}
-	s.mu.Lock()
-	replace := failedInstall(s.jobs[id])
-	s.mu.Unlock()
-	if err := conflicts(id, plan, containers, replace); err != nil {
-		return appstore.Job{}, err
-	}
-	leftovers := slices.ContainsFunc(containers, func(container ContainerInfo) bool { return container.AppID == id })
 
 	directory := filepath.Join(s.stateDir, "apps", id)
 	composeFile := filepath.Join(directory, "docker-compose.yml")
 	compose := []string{"compose", "--progress", "plain", "-p", plan.Project, "-f", composeFile}
-	return s.start(id, appstore.JobInstall, installTimeout, func(ctx context.Context, output io.Writer) error {
+	return s.startChecked(id, appstore.JobInstall, installTimeout, check, func(ctx context.Context, output io.Writer) error {
+		if prepare != nil {
+			if err := prepare(ctx); err != nil {
+				return err
+			}
+		}
 		// What a failed install left behind goes first, so that the checks
 		// below see only this install's containers.
 		if leftovers {
@@ -528,6 +540,12 @@ func takeDown(id string) []string {
 // output, of which the job keeps the tail. The job is recorded before it
 // runs, so that a restart of the agent finds it (Recover).
 func (s *Store) start(id string, action appstore.JobAction, timeout time.Duration, run func(context.Context, io.Writer) error) (appstore.Job, error) {
+	return s.startChecked(id, action, timeout, nil, run)
+}
+
+// The conflict snapshot and admission share the job lock: another job cannot
+// complete between inspecting containers and reserving this install's slot.
+func (s *Store) startChecked(id string, action appstore.JobAction, timeout time.Duration, check func() error, run func(context.Context, io.Writer) error) (appstore.Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopped {
@@ -535,6 +553,11 @@ func (s *Store) start(id string, action appstore.JobAction, timeout time.Duratio
 	}
 	if s.active != "" {
 		return appstore.Job{}, appstore.ErrBusy
+	}
+	if check != nil {
+		if err := check(); err != nil {
+			return appstore.Job{}, err
+		}
 	}
 	job := &appstore.Job{AppID: id, Action: action, State: appstore.JobRunning, StartedAt: s.now().UTC()}
 	if err := s.saveJob(job); err != nil {

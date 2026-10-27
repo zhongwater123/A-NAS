@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -38,6 +40,30 @@ func (d DockerInspector) Containers(ctx context.Context) ([]ContainerInfo, error
 		for _, port := range item.Ports {
 			if port.PublicPort != 0 {
 				info.PublishedPorts = append(info.PublishedPorts, port.PublicPort)
+			}
+		}
+		// List omits bindings when a container is stopped or only created.
+		// Keep its configured ports reserved so two installed apps cannot
+		// silently share a URL after one of them is restarted.
+		inspected, err := d.Client.ContainerInspect(ctx, item.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			return nil, err
+		}
+		if inspected.Container.HostConfig == nil {
+			return nil, fmt.Errorf("container %s has no host configuration", item.ID)
+		}
+		for _, bindings := range inspected.Container.HostConfig.PortBindings {
+			for _, binding := range bindings {
+				if binding.HostPort == "" {
+					continue
+				}
+				port, err := strconv.ParseUint(binding.HostPort, 10, 16)
+				if err != nil {
+					return nil, fmt.Errorf("container %s has invalid host port: %w", item.ID, err)
+				}
+				if port != 0 && !slices.Contains(info.PublishedPorts, uint16(port)) {
+					info.PublishedPorts = append(info.PublishedPorts, uint16(port))
+				}
 			}
 		}
 		infos = append(infos, info)

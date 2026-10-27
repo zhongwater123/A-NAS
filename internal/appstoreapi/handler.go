@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/appid"
 	"github.com/zhongwater123/A-NAS/internal/appstore"
@@ -56,6 +57,21 @@ func New(store appstore.Store, dataSource DataSource, options Options) http.Hand
 
 // identity asks the Host Agent for the app's Linux identity.
 func (h *handler) identity(ctx context.Context, id string) (appstore.Identity, error) {
+	// Validate against the agent's catalog before reserving a permanent UID.
+	apps, err := h.store.Apps(ctx)
+	if err != nil {
+		return appstore.Identity{}, err
+	}
+	found := false
+	for _, app := range apps {
+		if app.ID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return appstore.Identity{}, appstore.ErrNotFound
+	}
 	if h.host == nil {
 		return appstore.Identity{}, fmt.Errorf("%w: no host for app identities", appstore.ErrUnavailable)
 	}
@@ -189,10 +205,26 @@ func (h *handler) install(ctx context.Context, id, digest string) (appstore.Job,
 	if plan.Digest != digest {
 		return appstore.Job{}, appstore.ErrPlanChanged
 	}
+	reservation, err := h.store.ReserveInstall(ctx, id, digest, identity)
+	if err != nil {
+		return appstore.Job{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := h.store.CancelInstall(cancelCtx, id, reservation.Token); err != nil {
+				h.logger.ErrorContext(cancelCtx, "cancelling app preparation failed", "app", id, "error", err)
+			}
+		}
+	}()
 	if err := h.host.PrepareApp(ctx, id, plan.HostFolders(), plan.SharesFolders()); err != nil {
 		return appstore.Job{}, fmt.Errorf("%w: prepare app folders: %v", appstore.ErrUnavailable, err)
 	}
-	return h.store.Install(ctx, id, digest, identity)
+	job, err := h.store.CommitInstall(ctx, id, reservation.Token, identity)
+	committed = err == nil
+	return job, err
 }
 
 func (h *handler) enabled(w http.ResponseWriter) bool {
