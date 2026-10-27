@@ -45,11 +45,15 @@ export function Subbar({
 }: Props) {
   return place.kind === "search" && place.query ? (
     <div className={`${styles.phSubbar} ${styles.phSearchBar}`}>
+      {/* Dropping an image on the search box searches by it, a pointer
+          shortcut for the camera button and for pasting an image. */}
+      {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <form
         className={`${styles.phSearch} ${styles.wide}${imageOver === "results" ? ` ${styles.imageDrop}` : ""}`}
         role="search"
         onSubmit={submitSearch}
-        {...{ ...imageDrop, onDragOver: imageDragOver("results") }}
+        {...imageDrop}
+        onDragOver={imageDragOver("results")}
       >
         <Search />
         <input

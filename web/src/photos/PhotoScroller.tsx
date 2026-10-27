@@ -312,7 +312,9 @@ export function PhotoScroller({
     if (
       event.button !== 0 ||
       !onMarquee ||
-      (event.target as HTMLElement).closest("button, a, input, .ph-tile, .ph-scrubber, [data-no-marquee]")
+      (event.target as HTMLElement).closest(
+        `button, a, input, .${styles.phTile}, .${styles.phScrubber}, [data-no-marquee]`,
+      )
     )
       return;
     if (event.clientX > event.currentTarget.getBoundingClientRect().right - 14) return; // the scrollbar

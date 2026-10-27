@@ -226,11 +226,15 @@ export function Toolbar({
             </div>
           )}
           {place.kind !== "search" && (
+            // Dropping an image on the search box searches by it, a pointer
+            // shortcut for the camera button and for pasting an image.
+            // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
             <form
               className={`${styles.phSearch}${imageOver === "toolbar" ? ` ${styles.imageDrop}` : ""}`}
               role="search"
               onSubmit={submitSearch}
-              {...{ ...imageDrop, onDragOver: imageDragOver("toolbar") }}
+              {...imageDrop}
+              onDragOver={imageDragOver("toolbar")}
             >
               <Search />
               <input
