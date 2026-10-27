@@ -327,13 +327,17 @@ python3 -m venv ~/.local/opt/ai-tools
 
 开发机 B 的 Python 3.14 没有 `ensurepip`：先从 uv 的 GitHub 发布页下载锁文件固定版本的 `uv-x86_64-unknown-linux-gnu.tar.gz`，按同页的 `.sha256` 核对后装进 `~/.local/opt/bin`，再用 `uv venv ~/.local/opt/ai-tools` 建环境，`uv pip install --python ~/.local/opt/ai-tools/bin/python --require-hashes -r ai/requirements-dev.txt` 安装。
 
-`make race-test` 以竞态检测器、每次 4 个包运行全部 Go 测试，需要 gcc；CI 另开作业运行，修改并发代码时本地也运行。测试注入的时钟与 ID 生成器也会被后台 goroutine 调用，要像 `time.Now` 一样可以并发调用：时钟用 `internal/clocktest`，不要在闭包里改写捕获的变量，否则这个作业会偶发失败。
+`make race-test` 以竞态检测器、每次 4 个包运行 `internal/webui` 以外的全部 Go 测试，需要 gcc，不需要 Node.js；CI 另开作业运行，修改并发代码时本地也运行。测试注入的时钟与 ID 生成器也会被后台 goroutine 调用，要像 `time.Now` 一样可以并发调用：时钟用 `internal/clocktest`，不要在闭包里改写捕获的变量，否则这个作业会偶发失败。
 
 Web 代码由 Biome 格式化：提交前运行 `cd web && npm run format`。2026-10-22 对全部 Web 代码的一次格式化提交列在 `.git-blame-ignore-revs`，GitHub 的 blame 跳过它，本地运行 `git config blame.ignoreRevsFile .git-blame-ignore-revs`。在它之前分出的分支先合并它的父提交，在分支上运行 `npm run format` 并提交，再合并 `main`，这样只剩真正的冲突。
 
 ## CI
 
 `.github/workflows/ci.yml` 对每个 PR 和每次合入 `main` 运行三个作业：`Project checks`（`make check`）、`Go tests with the race detector`（`make race-test`）与 `System test (Debian 13, systemd)`（`make system-test`）。`main` 的规则集按作业名要求三者通过才能合并，改作业名时同时改规则集。新的强制检查加进这三个作业，通常是 Makefile 的 `check-steps`，规则集不用改。
+
+各作业的 Go 版本取自 `.go-version`，Node.js 版本取自 `.nvmrc`；`package.json` 的 `engines` 只是允许的范围。竞态作业不装 Node.js：`make race-test` 不跑只服务前端构建产物的 `internal/webui`，它由 `make check` 覆盖。系统测试的 Debian 13 镜像按构建脚本的哈希与所在的周缓存，构建脚本改了或过了一周才重新组装。
+
+另有两个每周定时、不在规则集中的工作流：`vuln.yml` 运行 `make vuln-check`，报告此后新发布的公告；`fuzz.yml` 从代码中找出全部 `func Fuzz…`，每个目标跑 5 分钟，失败时上传触发失败的输入，把它放进该包的 `testdata/fuzz/<目标>/` 就成为回归用例。
 
 PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作业按条件跳过，GitHub 把条件跳过的作业记为通过。文档指 `docs/` 下的文件、根目录的 `*.md` 和 `.claude/skills/` 中的 `*.md`；其他目录中的 Markdown 随产品发布（助手技能、应用目录的说明），按代码处理。判定见 `scripts/ci-scope.sh`，判定失败时三个作业照常完整运行。合入 `main` 后的运行总是完整的。
 

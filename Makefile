@@ -231,9 +231,11 @@ vuln-check:
 test:
 	$(GO) test ./...
 
-# CI runs this beside `make check`; the Web UI tests need the built assets.
-race-test: web-build
-	$(GO) test -race -p $(RACE_PARALLEL) ./...
+# CI runs this beside `make check`. It leaves out internal/webui, which only
+# serves the built Web assets and runs no goroutines: `make test` covers it
+# after `make web-build`, so this run needs no Node.js.
+race-test:
+	$(GO) test -race -p $(RACE_PARALLEL) $$($(GO) list ./... | grep -v '/internal/webui$$')
 
 # Ruff as ai/requirements-dev.txt pins it: another version may judge differently.
 ai-lint:

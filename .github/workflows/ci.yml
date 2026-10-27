@@ -69,7 +69,7 @@ jobs:
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 26.9.0
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: |
             web/package-lock.json
@@ -125,13 +125,8 @@ jobs:
           go-version-file: .go-version
           cache: true
 
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 26.9.0
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
+      # No Node.js: make race-test leaves out internal/webui, the one package
+      # that needs the built Web assets.
       - name: Run the Go tests with the race detector
         run: make race-test
 
@@ -154,14 +149,45 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 26.9.0
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # Assembling the image with debootstrap took two of the job's six
+      # minutes. A cached image serves until its build script changes, or for
+      # a week, after which a rebuild takes in Debian's updates; within the
+      # week every run tests against the same packages.
+      - name: Name the cached Debian 13 systemd image
+        id: image
+        run: echo "key=system-test-image-$(date -u +%G-W%V)-${{ hashFiles('scripts/build-system-test-image.sh') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Debian 13 systemd image
+        id: image-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/anas-systemd.tar
+          key: ${{ steps.image.outputs.key }}
+
+      - name: Load the cached image
+        if: ${{ steps.image-cache.outputs.cache-hit == 'true' }}
+        run: docker load --quiet --input "$RUNNER_TEMP/anas-systemd.tar"
+
       - name: Build the Debian 13 systemd image
+        if: ${{ steps.image-cache.outputs.cache-hit != 'true' }}
         run: |
-          sudo modprobe btrfs
           scripts/build-system-test-image.sh anas-systemd:trixie debian:bookworm
+          docker save --output "$RUNNER_TEMP/anas-systemd.tar" anas-systemd:trixie
+
+      # Saved at once, so that a failing test does not discard the image.
+      - name: Cache the Debian 13 systemd image
+        if: ${{ steps.image-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/anas-systemd.tar
+          key: ${{ steps.image.outputs.key }}
+
+      - name: Load the Btrfs module for the test's data volume
+        run: sudo modprobe btrfs
 
       - name: Install the release under systemd and check every entry point
         run: make system-test
