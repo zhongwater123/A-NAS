@@ -48,6 +48,6 @@
 ## 关联
 
 - 规格：[AI 助手](../specs/ai-assistant.md)（“记忆”）
-- 研究：[记忆与自建技能](../research/hermes-agent-runtime.md#记忆与自建技能1142026-10-15开发机)
+- 研究：[记忆与自建技能](../research/hermes-agent-runtime.md#记忆与自建技能)
 - ADR：[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
 - 运行手册：不涉及
