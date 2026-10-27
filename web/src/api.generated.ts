@@ -2989,7 +2989,7 @@ export interface paths {
         };
         /**
          * Render the install plan the owner must confirm
-         * @description Administrators only. The plan lists the app's Linux identity, images, containers, published host ports and host folders, plus the rendered Compose file and its SHA-256 digest. App data lives in the app's own folder on the data volume; shared mounts resolve inside the Shared folder. Manifests that violate the install policy answer 422.
+         * @description Administrators only. The plan lists the app's Linux identity, images, containers, published host ports and host folders, plus the rendered Compose file and its SHA-256 digest. App data lives in the app's own folder on the data volume; shared mounts resolve inside the Shared folder. Manifests that violate the install policy answer 422. 409 address_pool_missing when the app creates networks while Docker has no A-NAS address pool, docker_runtime_outdated when Compose or the engine cannot mount subpaths.
          */
         get: operations["getAppInstallPlan"];
         put?: never;
@@ -11836,6 +11836,7 @@ export interface operations {
                 };
             };
             405: components["responses"]["MethodNotAllowed"];
+            502: components["responses"]["AppConflict"];
             503: components["responses"]["AppsUnavailable"];
         };
     };
@@ -11863,6 +11864,7 @@ export interface operations {
             };
             404: components["responses"]["AppNotFound"];
             405: components["responses"]["MethodNotAllowed"];
+            502: components["responses"]["AppConflict"];
             503: components["responses"]["AppsUnavailable"];
         };
     };
@@ -11939,7 +11941,9 @@ export interface operations {
             };
             404: components["responses"]["AppNotFound"];
             405: components["responses"]["MethodNotAllowed"];
+            409: components["responses"]["AppConflict"];
             422: components["responses"]["AppConflict"];
+            502: components["responses"]["AppConflict"];
             503: components["responses"]["AppsUnavailable"];
         };
     };
@@ -12034,6 +12038,7 @@ export interface operations {
                 };
             };
             405: components["responses"]["MethodNotAllowed"];
+            502: components["responses"]["ContainerEngineError"];
             503: components["responses"]["ContainersUnavailable"];
         };
     };
