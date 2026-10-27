@@ -25,9 +25,9 @@ func TestDockerInspectorReservesStoppedContainerPorts(t *testing.T) {
 					if r.URL.Query().Get("all") != "1" {
 						t.Error("must include stopped containers")
 					}
-					fmt.Fprintf(w, `[{"Id":"filedrop","Names":["/filedrop"],"State":%q,"Ports":[]}]`, state)
+					_, _ = fmt.Fprintf(w, `[{"Id":"filedrop","Names":["/filedrop"],"State":%q,"Ports":[]}]`, state)
 				case strings.HasSuffix(r.URL.Path, "/containers/filedrop/json"):
-					fmt.Fprint(w, `{"Id":"filedrop","HostConfig":{"PortBindings":{"8000/tcp":[{"HostIp":"0.0.0.0","HostPort":"8000"}]}}}`)
+					_, _ = fmt.Fprint(w, `{"Id":"filedrop","HostConfig":{"PortBindings":{"8000/tcp":[{"HostIp":"0.0.0.0","HostPort":"8000"}]}}}`)
 				default:
 					http.NotFound(w, r)
 				}
@@ -37,7 +37,7 @@ func TestDockerInspectorReservesStoppedContainerPorts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer docker.Close()
+			defer func() { _ = docker.Close() }()
 			containers, err := (engine.DockerInspector{Client: docker}).Containers(context.Background())
 			if err != nil {
 				t.Fatal(err)
