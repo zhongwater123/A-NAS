@@ -16,3 +16,11 @@ func SetPressureRecheck(d time.Duration) (restore func()) {
 	pressureRecheck = d
 	return func() { pressureRecheck = previous }
 }
+
+// ShadowRunning reports whether RunVectorShadow is taking searches.
+func (s *Service) ShadowRunning() bool { return s.shadowing.Load() }
+
+// VectorSyncBackoff is how long vector sync waits after failures in a row.
+func VectorSyncBackoff(idle time.Duration, failures int) time.Duration {
+	return vectorSyncBackoff(idle, failures)
+}

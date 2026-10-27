@@ -31,16 +31,16 @@ type SnapshotBackend interface {
 	Objects(ctx context.Context, snapshotID string, visit func(SnapshotObject) error) error
 	Open(ctx context.Context, snapshotID, key string) (io.ReadCloser, SnapshotObject, error)
 	Delete(ctx context.Context, spaceID, snapshotID string) error
-	// Prune deletes every snapshot that keep does not name and reports which
-	// of keep exist.
-	Prune(ctx context.Context, keep []string) (SnapshotPrune, error)
+	// Survey reports which of known are on the data volume and how many
+	// other snapshots it holds. It deletes nothing.
+	Survey(ctx context.Context, known []string) (SnapshotSurvey, error)
 }
 
-// SnapshotPrune is the outcome of a Prune: the kept snapshots that exist and
-// how many snapshots nobody keeps were deleted.
-type SnapshotPrune struct {
+// SnapshotSurvey is what a Survey found: the known snapshots that exist and
+// how many others the data volume holds.
+type SnapshotSurvey struct {
 	Present []string `json:"present"`
-	Removed int      `json:"removed"`
+	Unknown int      `json:"unknown"`
 }
 
 // WalkSnapshot calls visit for the files and folders below root in

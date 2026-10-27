@@ -14,6 +14,9 @@ import (
 
 // Options are a store's own choices.
 type Options struct {
+	// Driver is the database/sql driver, "sqlite3" when empty; tests name
+	// one that fails reads part way.
+	Driver string
 	// Durable makes a commit wait until it is on disk (synchronous=FULL).
 	// Otherwise WAL's NORMAL may lose the last commits on a power cut, but
 	// never consistency.
@@ -35,7 +38,11 @@ func Open(path string, options Options) (*sql.DB, error) {
 	if options.AutoVacuum {
 		query += "&_auto_vacuum=full"
 	}
-	db, err := sql.Open("sqlite3", path+query)
+	driver := options.Driver
+	if driver == "" {
+		driver = "sqlite3"
+	}
+	db, err := sql.Open(driver, path+query)
 	if err != nil {
 		return nil, err
 	}

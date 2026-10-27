@@ -119,6 +119,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleSnapshots(w, r)
 		return
 	}
+	if r.URL.Path == wire.SnapshotSurveyPath {
+		h.handleSnapshotSurvey(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/v1/snapshots/") {
 		h.handleSnapshotResource(w, r)
 		return
@@ -160,10 +164,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusOK, wire.DocumentFromDomain(state))
 }
 
-// handleSnapshots takes a snapshot (POST) or keeps only the named ones (PUT).
-func (h *handler) handleSnapshots(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost && r.Method != http.MethodPut {
-		w.Header().Set("Allow", http.MethodPost+", "+http.MethodPut)
+// handleSnapshotSurvey reports which of the named snapshots are on the data
+// volume and how many others it holds.
+func (h *handler) handleSnapshotSurvey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
 		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
@@ -171,26 +176,35 @@ func (h *handler) handleSnapshots(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "snapshot operation is unavailable")
 		return
 	}
-	if r.Method == http.MethodPut {
-		var request wire.SnapshotKeepDocument
-		if err := decodeRequest(r, &request); err != nil {
-			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
-			return
-		}
-		pruned, err := h.snapshots.Prune(r.Context(), request.Keep)
-		if errors.Is(err, filesystem.ErrVolumeUnavailable) {
-			httpjson.WriteError(w, http.StatusLocked, wire.VolumeUnavailableCode, "the data volume is offline")
-			return
-		}
-		if err != nil {
-			h.logger.ErrorContext(r.Context(), "prune snapshots failed", "error", err)
-			httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
-			return
-		}
-		if pruned.Removed > 0 {
-			h.logger.InfoContext(r.Context(), "deleted snapshots nobody keeps", "count", pruned.Removed)
-		}
-		httpjson.Write(w, http.StatusOK, pruned)
+	var request wire.SnapshotSurveyDocument
+	if err := decodeRequest(r, &request); err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	survey, err := h.snapshots.Survey(r.Context(), request.Known)
+	if errors.Is(err, filesystem.ErrVolumeUnavailable) {
+		httpjson.WriteError(w, http.StatusLocked, wire.VolumeUnavailableCode, "the data volume is offline")
+		return
+	}
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "survey snapshots failed", "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
+		return
+	}
+	httpjson.Write(w, http.StatusOK, survey)
+}
+
+// handleSnapshots takes a snapshot. It no longer deletes the snapshots that a
+// list leaves out (PUT): a Product Service from before #269 that asks gets
+// 405 and deletes nothing.
+func (h *handler) handleSnapshots(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.snapshots == nil {
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "snapshot operation is unavailable")
 		return
 	}
 	var request wire.SnapshotDocument

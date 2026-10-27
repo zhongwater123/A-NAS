@@ -15,6 +15,8 @@ linters:
     - gosec
     - ineffassign
     - modernize
+    - rowserrcheck
+    - sqlclosecheck
     - staticcheck
     - unused
 
@@ -162,8 +164,9 @@ linters:
               desc: the root broker confines its workers
     errcheck:
       exclude-functions:
-        # A query's failure shows in rows.Err after the loop; Close only
-        # releases the connection.
+        # A query's failure shows in rows.Err after the loop, which
+        # rowserrcheck requires: once Next fails, Close returns nil (#269).
+        # Close only releases the connection; sqlclosecheck has it deferred.
         - (*database/sql.Rows).Close
         # Deferred so that a failed transaction is undone: after Commit it
         # returns sql.ErrTxDone, and on a failure the caller gets that failure.

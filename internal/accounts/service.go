@@ -270,11 +270,11 @@ WHERE i.uid IS NULL ORDER BY u.created_at, u.id`)
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	var userIDs []string
 	for rows.Next() {
 		var userID string
 		if err := rows.Scan(&userID); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		userIDs = append(userIDs, userID)

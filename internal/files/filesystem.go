@@ -18,7 +18,7 @@ type (
 	EntryKind       = filesystem.EntryKind
 	SnapshotObject  = filesystem.SnapshotObject
 	SnapshotBackend = filesystem.SnapshotBackend
-	SnapshotPrune   = filesystem.SnapshotPrune
+	SnapshotSurvey  = filesystem.SnapshotSurvey
 )
 
 const (

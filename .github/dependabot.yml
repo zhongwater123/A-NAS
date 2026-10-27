@@ -6,6 +6,12 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # The client stays on the Qdrant release deploy/qdrant/qdrant.json pins
+      # (internal/vectorindex tests that they match); both move by hand, so
+      # security updates still come.
+      - dependency-name: github.com/qdrant/go-client
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       go:
         update-types: [minor, patch]

@@ -78,8 +78,11 @@ type SnapshotDocument struct {
 	SnapshotID string `json:"snapshotId"`
 }
 
-type SnapshotKeepDocument struct {
-	Keep []string `json:"keep"`
+// SnapshotSurveyPath reports which snapshots exist; it deletes nothing.
+const SnapshotSurveyPath = "/v1/snapshot-survey"
+
+type SnapshotSurveyDocument struct {
+	Known []string `json:"known"`
 }
 
 // snapshotObjectLine is one line of a snapshot object listing: an object,

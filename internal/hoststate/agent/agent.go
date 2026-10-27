@@ -279,14 +279,14 @@ func (c *Client) Delete(ctx context.Context, spaceID, snapshotID string) error {
 		"/v1/snapshots/"+url.PathEscape(snapshotID)+"?spaceId="+url.QueryEscape(spaceID), nil, nil)
 }
 
-func (c *Client) Prune(ctx context.Context, keep []string) (filesystem.SnapshotPrune, error) {
-	if keep == nil {
-		keep = []string{}
+func (c *Client) Survey(ctx context.Context, known []string) (filesystem.SnapshotSurvey, error) {
+	if known == nil {
+		known = []string{}
 	}
-	var response filesystem.SnapshotPrune
-	err := c.doJSON(ctx, c.operationClient, http.MethodPut, "/v1/snapshots", wire.SnapshotKeepDocument{Keep: keep}, &response)
+	var response filesystem.SnapshotSurvey
+	err := c.doJSON(ctx, c.operationClient, http.MethodPost, wire.SnapshotSurveyPath, wire.SnapshotSurveyDocument{Known: known}, &response)
 	if errors.Is(err, accountid.ErrVolumeUnavailable) {
-		return filesystem.SnapshotPrune{}, filesystem.ErrVolumeUnavailable
+		return filesystem.SnapshotSurvey{}, filesystem.ErrVolumeUnavailable
 	}
 	return response, err
 }

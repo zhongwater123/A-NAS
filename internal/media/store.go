@@ -16,8 +16,12 @@ type Store struct {
 	db *sql.DB
 }
 
-func OpenSQLite(path string) (*Store, error) {
-	db, err := sqlitedb.Open(path, sqlitedb.Options{})
+func OpenSQLite(path string) (*Store, error) { return openSQLite("sqlite3", path) }
+
+// openSQLite opens the catalog through the named database/sql driver, which
+// tests replace with one that fails reads part way.
+func openSQLite(driverName, path string) (*Store, error) {
+	db, err := sqlitedb.Open(path, sqlitedb.Options{Driver: driverName})
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,28 @@
+# The Qdrant retrieval trial's client (docs/research/qdrant-retrieval-features.md),
+# for the development machine only. It is pinned by hash for Debian 13's CPython 3.13
+# on x86_64 and layered over anas-ai-dev:trixie (ai/dev.Dockerfile). That image
+# keeps numpy, certifi, scikit-learn and MediaPipe, so they are not repeated here.
+# The venv lives on WSL's own disk and sees the image's packages through a .pth file:
+#   python3 -m venv /qe/venv
+#   echo /opt/anas-ai/lib/python3.13/site-packages > /qe/venv/lib/python3.13/site-packages/anas-ai.pth
+#   /qe/venv/bin/pip install --no-deps --require-hashes --only-binary=:all: -r eval/qdrant-requirements.lock
+qdrant-client==1.20.0 --hash=sha256:0ab261197a497d16f3bf8a663c22e994f485c9fd7212d3c8b07c1a9de32fc152
+grpcio==1.85.0 --hash=sha256:55cee7cfe71b29f6b377681936f9a5f35e59f5c941a4d84e2712cb309753e7a9
+protobuf==7.36.2 --hash=sha256:89f23aa53c24553a2416fd4fd1ec06f74fa42b14b546d8883128813f775bbfd2
+httpx==0.28.1 --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
+httpcore==1.0.9 --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55
+h11==0.16.0 --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
+h2==4.4.1 --hash=sha256:0e25f1462b23c9cb82d9eb02e28bc706dac2a68cb457c6a0d74d63c8a2a5d0e6
+hpack==4.2.0 --hash=sha256:858ac0b02280fa582b5080d68db0899c62a80375e0e5413a74970c5e518b6986
+hyperframe==6.1.0 --hash=sha256:b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5
+anyio==4.15.1 --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101
+idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+portalocker==4.4.1 --hash=sha256:4a184e8fb1adb37e078ca1804f1b7c0d8e73d81136790b1ad695ae8f1c8be291
+pydantic==2.14.1 --hash=sha256:9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454
+pydantic-core==2.50.1 --hash=sha256:17e722e156d0444ecaefbe640bdb60928752bf2013e2b7a11cdb099aaae19bec
+annotated-types==0.8.0 --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
+typing-extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+typing-inspection==0.4.4 --hash=sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147
+urllib3==2.8.0 --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3
+# Decodes BM25 token ids (murmur3-32, seed 0) back to the multilingual tokenizer's words.
+mmh3==5.3.1 --hash=sha256:931d9d86c66f306e91414e95509af05e5c79bfcbac78218c2ee55c9734000053

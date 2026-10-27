@@ -390,7 +390,13 @@ func (s *Service) RunSnapshotSchedules(ctx context.Context, spaces SpaceLookup, 
 func (s *Service) sweepSnapshots(ctx context.Context, logger *slog.Logger) time.Duration {
 	sweep, err := s.SweepSnapshots(ctx)
 	if sweep.Snapshots > 0 {
-		logger.InfoContext(ctx, "removed snapshots that the catalog did not record", "count", sweep.Snapshots)
+		logger.InfoContext(ctx, "removed snapshots whose taking never finished", "count", sweep.Snapshots)
+	}
+	if sweep.Unrecorded > 0 {
+		logger.InfoContext(ctx, "left snapshots on the data volume that the catalog does not know", "count", sweep.Unrecorded)
+	}
+	if sweep.Unfound > 0 {
+		logger.WarnContext(ctx, "none of the catalog's snapshots is on the data volume, so their records stay", "count", sweep.Unfound)
 	}
 	for _, snapshot := range sweep.Records {
 		logger.WarnContext(ctx, "removed the record of a snapshot that is no longer on the data volume",
