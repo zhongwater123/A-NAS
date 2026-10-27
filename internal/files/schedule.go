@@ -166,6 +166,11 @@ func (s *Service) UpdateSnapshotSchedule(ctx context.Context, actor accounts.Use
 	if err := settings.checkRetention(); err != nil {
 		return SnapshotSchedule{}, err
 	}
+	unlock, err := s.lockSnapshotRetention(ctx, spaceID)
+	if err != nil {
+		return SnapshotSchedule{}, err
+	}
+	defer unlock()
 	tiers := settings.Tiers
 	if _, err := s.store.db.ExecContext(ctx, `
 INSERT INTO snapshot_schedules(space_id, enabled, frequency, minute_of_day, weekday, keep, retention,
@@ -472,7 +477,7 @@ func (s *Service) runSchedule(ctx context.Context, spaces SpaceLookup, schedule 
 		return err
 	}
 	if err == nil {
-		if err := s.expireScheduledSnapshots(ctx, schedule); err != nil {
+		if err := s.expireScheduledSnapshots(ctx, schedule.SpaceID); err != nil {
 			logger.ErrorContext(ctx, "expiring scheduled snapshots failed", "space_id", schedule.SpaceID, "error", err)
 		}
 	}
@@ -504,8 +509,23 @@ func (s *Service) takeScheduledSnapshot(ctx context.Context, spaces SpaceLookup,
 
 // expireScheduledSnapshots deletes the scheduled snapshots of a space that
 // its retention no longer keeps. Manual snapshots are never expired.
-func (s *Service) expireScheduledSnapshots(ctx context.Context, schedule SnapshotSchedule) error {
-	snapshots, err := s.spaceSnapshots(ctx, schedule.SpaceID, SnapshotOriginScheduled)
+func (s *Service) expireScheduledSnapshots(ctx context.Context, spaceID string) error {
+	unlock, err := s.lockSnapshotRetention(ctx, spaceID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// Capture may take minutes. Use the policy that is current when cleanup
+	// begins, and keep updates/KeepSnapshot ordered through the last deletion.
+	schedules, err := s.loadSchedules(ctx, "WHERE space_id = ?", spaceID)
+	if err != nil {
+		return err
+	}
+	if len(schedules) == 0 || !schedules[0].Enabled {
+		return nil
+	}
+	schedule := schedules[0]
+	snapshots, err := s.spaceSnapshots(ctx, spaceID, SnapshotOriginScheduled)
 	if err != nil {
 		return err
 	}

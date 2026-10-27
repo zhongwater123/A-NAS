@@ -804,6 +804,17 @@ func (s *Service) KeepSnapshot(ctx context.Context, actor accounts.User, snapsho
 	if !canManageSnapshots(actor, space) {
 		return Snapshot{}, ErrForbidden
 	}
+	unlock, err := s.lockSnapshotRetention(ctx, snapshot.SpaceID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer unlock()
+	// Cleanup may have won the gate and removed this snapshot while we
+	// waited. Never report that a now-missing restore point was kept.
+	snapshot, _, err = s.authorizeSnapshot(ctx, actor, snapshotID)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	if snapshot.Origin == SnapshotOriginManual {
 		return snapshot, nil
 	}
