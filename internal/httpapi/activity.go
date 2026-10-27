@@ -11,6 +11,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
 
@@ -29,7 +30,7 @@ func (h *productHandler) photoActivity(r *http.Request, q activity.Query) ([]act
 	request.Method, request.Body, request.RequestURI = http.MethodGet, http.NoBody, ""
 	request.URL = &url.URL{Path: photosapi.ActivityPath, RawQuery: q.Values().Encode()}
 	response := &bufferedResponse{header: http.Header{}}
-	h.guard(h.photoRoute())(response, request)
+	h.guard(apiroute.Route{Posture: apiroute.Session, Handler: h.photoHandler()})(response, request)
 	if response.status != http.StatusOK {
 		return nil, fmt.Errorf("photo activity status %d", response.status)
 	}

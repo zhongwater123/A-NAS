@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/media"
@@ -34,7 +35,7 @@ func WithUser(ctx context.Context, user accounts.User) context.Context {
 type handler struct {
 	service *media.Service
 	logger  *slog.Logger
-	mux     *http.ServeMux
+	mux     *apiroute.Mux
 }
 
 // New returns the media API. A nil service answers 503 media_unavailable.
@@ -42,7 +43,7 @@ func New(service *media.Service, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &handler{service: service, logger: logger, mux: http.NewServeMux()}
+	h := &handler{service: service, logger: logger, mux: apiroute.NewMux()}
 	routes := map[string]func(http.ResponseWriter, *http.Request, accounts.User){
 		"GET /libraries":                        h.libraries,
 		"POST /libraries":                       h.createLibrary,
@@ -87,6 +88,11 @@ func New(service *media.Service, logger *slog.Logger) http.Handler {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
 	return h
+}
+
+// Endpoints are the operations the media API serves beneath PathPrefix.
+func Endpoints() []apiroute.Endpoint {
+	return New(nil, nil).(*handler).mux.Endpoints()
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

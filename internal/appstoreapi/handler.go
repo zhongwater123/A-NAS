@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/appid"
 	"github.com/zhongwater123/A-NAS/internal/appstore"
 	"github.com/zhongwater123/A-NAS/internal/appstore/agent"
@@ -35,6 +36,7 @@ type handler struct {
 	host        appid.Host
 	volumeReady func(context.Context) error
 	logger      *slog.Logger
+	mux         *apiroute.Mux
 }
 
 type Options struct {
@@ -51,7 +53,19 @@ func New(store appstore.Store, dataSource DataSource, options Options) http.Hand
 	if options.Logger == nil {
 		options.Logger = slog.Default()
 	}
-	return &handler{store: store, dataSource: dataSource, host: options.Host, volumeReady: options.VolumeReady, logger: options.Logger}
+	h := &handler{store: store, dataSource: dataSource, host: options.Host, volumeReady: options.VolumeReady, logger: options.Logger, mux: apiroute.NewMux()}
+	h.mux.Only(http.MethodGet, PathPrefix, h.list)
+	h.mux.Only(http.MethodGet, PathPrefix+"/{appID}/icon", withApp(h.icon))
+	h.mux.Only(http.MethodGet, PathPrefix+"/{appID}/plan", withApp(h.plan))
+	h.mux.Only(http.MethodPost, PathPrefix+"/{appID}/install", withApp(h.change))
+	h.mux.Only(http.MethodPost, PathPrefix+"/{appID}/uninstall", withApp(h.change))
+	h.mux.HandleFunc("/", notFound)
+	return h
+}
+
+// Endpoints are the operations the App Center API serves under PathPrefix.
+func Endpoints() []apiroute.Endpoint {
+	return New(nil, "", Options{}).(*handler).mux.Endpoints()
 }
 
 // identity asks the Host Agent for the app's Linux identity.
@@ -66,106 +80,119 @@ func (h *handler) identity(ctx context.Context, id string) (appstore.Identity, e
 	return identity, nil
 }
 
-func Matches(path string) bool {
-	return path == PathPrefix || strings.HasPrefix(path, PathPrefix+"/")
-}
-
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if r.URL.Path == PathPrefix {
-		if !allow(w, r, http.MethodGet) || !h.enabled(w) {
-			return
-		}
-		apps, err := h.store.Apps(r.Context())
-		if err != nil {
-			h.fail(w, r, err)
-			return
-		}
-		httpjson.Write(w, http.StatusOK, appsResponse{DataSource: h.dataSource, AppsDocument: agent.AppsFromDomain(apps)})
-		return
-	}
+	h.mux.ServeHTTP(w, r)
+}
 
-	id, operation, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, PathPrefix+"/"), "/")
-	if !ok || !appstore.ValidID(id) || strings.Contains(operation, "/") {
-		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
+// withApp answers not_found for a path whose app ID no catalog app can have.
+func withApp(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !appstore.ValidID(r.PathValue("appID")) {
+			notFound(w, r)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func notFound(w http.ResponseWriter, _ *http.Request) {
+	httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
+}
+
+func (h *handler) list(w http.ResponseWriter, r *http.Request) {
+	if !h.enabled(w) {
 		return
 	}
-	switch operation {
-	case "icon":
-		if !allow(w, r, http.MethodGet) || !h.enabled(w) {
-			return
-		}
-		icon, contentType, err := h.store.Icon(r.Context(), id)
-		if err != nil {
-			h.fail(w, r, err)
-			return
-		}
-		// Icons are fixed for a given catalog; SVGs must not run scripts.
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		_, _ = w.Write(icon)
-	case "plan":
-		if !allow(w, r, http.MethodGet) || !h.enabled(w) {
-			return
-		}
-		identity, err := h.identity(r.Context(), id)
-		if err != nil {
-			h.fail(w, r, err)
-			return
-		}
-		plan, err := h.store.Plan(r.Context(), id, identity)
-		if err != nil {
-			h.fail(w, r, err)
-			return
-		}
-		httpjson.Write(w, http.StatusOK, agent.PlanFromDomain(plan))
-	case "install", "uninstall":
-		if !allow(w, r, http.MethodPost) {
-			return
-		}
-		if err := localorigin.CheckWrite(r); err != nil {
-			httpjson.WriteError(w, http.StatusForbidden, "forbidden", "app changes must come from the local desktop")
-			return
-		}
-		if !h.enabled(w) {
-			return
-		}
-		var request agent.InstallRequest
-		if err := httpjson.Decode(w, r, 1024, &request); err != nil {
-			httpjson.WriteDecodeError(w, err, "invalid_request", "install requires the confirmed plan digest")
-			return
-		}
-		if operation == "install" && len(request.Digest) != 64 {
-			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "install requires the confirmed plan digest")
-			return
-		}
-		var job appstore.Job
-		var err error
-		if operation == "install" {
-			job, err = h.install(r.Context(), id, request.Digest)
-		} else {
-			if job, err = h.store.Uninstall(r.Context(), id); err == nil && h.host != nil {
-				// The identity and its data stay for a reinstall.
-				if releaseErr := h.host.ReleaseApp(r.Context(), id); releaseErr != nil {
-					h.logger.ErrorContext(r.Context(), "releasing app access failed", "app", id, "error", releaseErr)
-				}
+	apps, err := h.store.Apps(r.Context())
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, appsResponse{DataSource: h.dataSource, AppsDocument: agent.AppsFromDomain(apps)})
+}
+
+func (h *handler) icon(w http.ResponseWriter, r *http.Request) {
+	if !h.enabled(w) {
+		return
+	}
+	icon, contentType, err := h.store.Icon(r.Context(), r.PathValue("appID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeIcon(w, icon, contentType)
+}
+
+// writeIcon sends a catalog icon, which is fixed for a release; SVGs must
+// not run scripts.
+func writeIcon(w http.ResponseWriter, icon []byte, contentType string) {
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(icon)
+}
+
+func (h *handler) plan(w http.ResponseWriter, r *http.Request) {
+	if !h.enabled(w) {
+		return
+	}
+	id := r.PathValue("appID")
+	identity, err := h.identity(r.Context(), id)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	plan, err := h.store.Plan(r.Context(), id, identity)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, agent.PlanFromDomain(plan))
+}
+
+// change installs or uninstalls an app, as the last path segment says.
+func (h *handler) change(w http.ResponseWriter, r *http.Request) {
+	if err := localorigin.CheckWrite(r); err != nil {
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "app changes must come from the local desktop")
+		return
+	}
+	if !h.enabled(w) {
+		return
+	}
+	var request agent.InstallRequest
+	if err := httpjson.Decode(w, r, 1024, &request); err != nil {
+		httpjson.WriteDecodeError(w, err, "invalid_request", "install requires the confirmed plan digest")
+		return
+	}
+	id, install := r.PathValue("appID"), strings.HasSuffix(r.URL.Path, "/install")
+	if install && len(request.Digest) != 64 {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "install requires the confirmed plan digest")
+		return
+	}
+	var job appstore.Job
+	var err error
+	if install {
+		job, err = h.install(r.Context(), id, request.Digest)
+	} else {
+		if job, err = h.store.Uninstall(r.Context(), id); err == nil && h.host != nil {
+			// The identity and its data stay for a reinstall.
+			if releaseErr := h.host.ReleaseApp(r.Context(), id); releaseErr != nil {
+				h.logger.ErrorContext(r.Context(), "releasing app access failed", "app", id, "error", releaseErr)
 			}
 		}
-		if errors.Is(err, errVolumeUnavailable) {
-			httpjson.WriteError(w, http.StatusLocked, "volume_unavailable", "the data volume is not available")
-			return
-		}
-		if err != nil {
-			h.fail(w, r, err)
-			return
-		}
-		h.logger.InfoContext(r.Context(), "app job requested", "app", id, "action", job.Action)
-		httpjson.Write(w, http.StatusAccepted, agent.JobFromDomain(job))
-	default:
-		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	}
+	if errors.Is(err, errVolumeUnavailable) {
+		httpjson.WriteError(w, http.StatusLocked, "volume_unavailable", "the data volume is not available")
+		return
+	}
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.logger.InfoContext(r.Context(), "app job requested", "app", id, "action", job.Action)
+	httpjson.Write(w, http.StatusAccepted, agent.JobFromDomain(job))
 }
 
 var errVolumeUnavailable = errors.New("data volume is unavailable")
@@ -220,15 +247,6 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 type appsResponse struct {
 	DataSource DataSource `json:"dataSource"`
 	agent.AppsDocument
-}
-
-func allow(w http.ResponseWriter, r *http.Request, method string) bool {
-	if r.Method == method {
-		return true
-	}
-	w.Header().Set("Allow", method)
-	httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
-	return false
 }
 
 // DevelopmentHost stands in for the Host Agent with the fake app store: each

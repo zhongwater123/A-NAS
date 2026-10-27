@@ -17,6 +17,7 @@ import (
 	xslog "golang.org/x/exp/slog"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/transfers"
 )
@@ -46,7 +47,7 @@ type handler struct {
 	service *transfers.Service
 	uploads http.Handler
 	logger  *slog.Logger
-	mux     *http.ServeMux
+	mux     *apiroute.Mux
 }
 
 // New returns the transfer API. A nil service answers 503
@@ -55,7 +56,7 @@ func New(service *transfers.Service, logger *slog.Logger) (http.Handler, error) 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &handler{service: service, logger: logger, mux: http.NewServeMux()}
+	h := &handler{service: service, logger: logger, mux: apiroute.NewMux()}
 	if service != nil {
 		composer := tusd.NewStoreComposer()
 		store := uploadStore{service: service, logger: logger}
@@ -88,8 +89,11 @@ func New(service *transfers.Service, logger *slog.Logger) (http.Handler, error) 
 		"GET " + TransfersPath + "/{id}/content": h.content,
 		"POST " + TransfersPath + "/{id}/pause":  h.pause,
 		"POST " + TransfersPath + "/{id}/cancel": h.cancel,
-		UploadsPath:                              h.upload,
-		UploadsPath + "/":                        h.upload,
+		// tus 1.0 without its extensions for downloads and concatenation.
+		"POST " + UploadsPath:             h.upload,
+		"HEAD " + UploadsPath + "/{id}":   h.upload,
+		"PATCH " + UploadsPath + "/{id}":  h.upload,
+		"DELETE " + UploadsPath + "/{id}": h.upload,
 	}
 	for pattern, route := range routes {
 		h.mux.HandleFunc(pattern, h.withUser(route))
@@ -98,6 +102,13 @@ func New(service *transfers.Service, logger *slog.Logger) (http.Handler, error) 
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
 	return h, nil
+}
+
+// Endpoints are the operations the transfer API serves under TransfersPath
+// and UploadsPath.
+func Endpoints() []apiroute.Endpoint {
+	h, _ := New(nil, nil)
+	return h.(*handler).mux.Endpoints()
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

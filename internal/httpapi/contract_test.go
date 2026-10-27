@@ -27,13 +27,16 @@ func checkedProduct(t *testing.T, dependencies httpapi.ProductDependencies) http
 	return contractChecked(t, httpapi.NewProduct(dependencies))
 }
 
-// contractChecked validates every exchange on a specified operation against
-// the OpenAPI document: responses always, with any status the operation does
-// not declare failing, and requests when the server accepted them. The
-// guard's answers for a missing session, CSRF token, new password or
-// administrator are the same for every operation and documented by its
-// security and the CSRFToken parameter, so they are not looked up per
-// operation. WebSocket upgrades pass through unchecked.
+// contractChecked validates every exchange against the OpenAPI document: an
+// exchange on no specified operation fails, as with openapitest.Check,
+// unless the answer says there is no such operation (404 not_found or 405
+// method_not_allowed); responses always, with any status the operation does not declare failing,
+// and requests when the server accepted them. The guard's answers for a
+// missing session, CSRF token, new password or administrator are the same
+// for every operation and documented by its security and the CSRFToken
+// parameter, so they are not looked up per operation. WebSocket upgrades
+// pass through unchecked. Each checked status is recorded for the report in
+// TestMain.
 func contractChecked(t *testing.T, next http.Handler) http.Handler {
 	t.Helper()
 	router := openapitest.Router(t)
@@ -50,7 +53,12 @@ func contractChecked(t *testing.T, next http.Handler) http.Handler {
 		request := httptest.NewRequest(r.Method, "http://127.0.0.1:8080"+r.URL.RequestURI(), bytes.NewReader(body))
 		request.Header = r.Header.Clone()
 		route, params, err := router.FindRoute(request)
-		if err == nil && !guardAnswer(recorder) {
+		if err != nil {
+			if code := answerCode(recorder); !(recorder.Code == http.StatusNotFound && code == "not_found") &&
+				!(recorder.Code == http.StatusMethodNotAllowed && code == "method_not_allowed") {
+				t.Errorf("find OpenAPI operation for %s %s (answered %d %s): %v", r.Method, r.URL.Path, recorder.Code, code, err)
+			}
+		} else if !guardAnswer(recorder) {
 			input := &openapi3filter.RequestValidationInput{Request: request, PathParams: params, Route: route, Options: &openapi3filter.Options{
 				AuthenticationFunc: func(context.Context, *openapi3filter.AuthenticationInput) error { return nil },
 			}}
@@ -66,12 +74,25 @@ func contractChecked(t *testing.T, next http.Handler) http.Handler {
 			response.SetBodyBytes(recorder.Body.Bytes())
 			if err := openapi3filter.ValidateResponse(ctx, response); err != nil {
 				t.Errorf("validate response %s %s: %d %v", r.Method, r.URL.Path, recorder.Code, err)
+			} else {
+				openapitest.Record(route, recorder.Code)
 			}
 		}
 		maps.Copy(w.Header(), recorder.Header())
 		w.WriteHeader(recorder.Code)
 		_, _ = w.Write(recorder.Body.Bytes())
 	})
+}
+
+// answerCode is the code of an error answer, empty for any other.
+func answerCode(recorder *httptest.ResponseRecorder) string {
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(recorder.Body.Bytes(), &body)
+	return body.Error.Code
 }
 
 // guardAnswer reports whether the product's guard answered instead of the

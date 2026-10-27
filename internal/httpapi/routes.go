@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -13,6 +14,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
+	"github.com/zhongwater123/A-NAS/internal/containersapi"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
 	"github.com/zhongwater123/A-NAS/internal/filepreviewapi"
 	"github.com/zhongwater123/A-NAS/internal/filesapi"
@@ -93,37 +95,41 @@ func (h *productHandler) table() []apiroute.Route {
 	return append(routes, h.mounts()...)
 }
 
-// mounts are the APIs that serve every method beneath their prefix and
-// receive the signed-in user through their package's WithUser.
+// mounts are the APIs that serve every method under their prefix and
+// receive the signed-in user through their package's WithUser. Each lists
+// the operations it serves there, which the table expands (apiroute.Expand).
 func (h *productHandler) mounts() []apiroute.Route {
 	var routes []apiroute.Route
+	mount := func(prefix string, posture apiroute.Posture, handler apiroute.Handler, endpoints []apiroute.Endpoint) {
+		routes = append(routes, apiroute.Mount(prefix, posture, handler, endpoints)...)
+	}
 	if h.containers != nil {
-		routes = append(routes, apiroute.Mount("/api/v1/containers", apiroute.Admin, serve(h.containers))...)
+		mount(containersapi.PathPrefix, apiroute.Admin, serve(h.containers), containersapi.Endpoints())
 	}
 	if h.apps != nil {
-		routes = append(routes, apiroute.Mount("/api/v1/apps", apiroute.Admin, serve(h.apps))...)
+		mount(appstoreapi.PathPrefix, apiroute.Admin, serve(h.apps), appstoreapi.Endpoints())
 	}
 	if h.shortcuts != nil {
-		routes = append(routes, apiroute.Mount(appstoreapi.ShortcutsPrefix, apiroute.Session, serve(h.shortcuts))...)
+		mount(appstoreapi.ShortcutsPrefix, apiroute.Session, serve(h.shortcuts), appstoreapi.ShortcutEndpoints())
 	}
 	if h.shares != nil {
-		routes = append(routes, apiroute.Mount(sharesapi.PathPrefix, apiroute.Session, withUser(h.shares, sharesapi.WithUser))...)
+		mount(sharesapi.PathPrefix, apiroute.Session, withUser(h.shares, sharesapi.WithUser), sharesapi.Endpoints())
 	}
 	if h.photos != nil {
-		routes = append(routes, h.photoRoute())
+		mount(photosapi.PathPrefix, apiroute.Session, h.photoHandler(), photosapi.Endpoints())
 	}
 	if h.media != nil {
-		routes = append(routes, apiroute.Route{Pattern: mediaapi.PathPrefix + "/", Posture: apiroute.Session, Handler: withUser(h.media, mediaapi.WithUser)})
+		mount(mediaapi.PathPrefix, apiroute.Session, withUser(h.media, mediaapi.WithUser), mediaapi.Endpoints())
 	}
 	if h.feedback != nil {
-		routes = append(routes, apiroute.Mount(feedbackapi.PathPrefix, apiroute.Session, withUser(h.feedback, feedbackapi.WithUser))...)
+		mount(feedbackapi.PathPrefix, apiroute.Session, withUser(h.feedback, feedbackapi.WithUser), feedbackapi.Endpoints())
 	}
 	if h.assistant != nil {
-		routes = append(routes, apiroute.Route{Pattern: assistantapi.PathPrefix + "/", Posture: apiroute.Session, Handler: withUser(h.assistant, assistantapi.WithUser)})
+		mount(assistantapi.PathPrefix, apiroute.Session, withUser(h.assistant, assistantapi.WithUser), assistantapi.Endpoints())
 	}
 	if h.transfers != nil {
 		for _, prefix := range []string{transfersapi.TransfersPath, transfersapi.UploadsPath} {
-			routes = append(routes, apiroute.Mount(prefix, apiroute.Session, withUser(h.transfers, transfersapi.WithUser))...)
+			mount(prefix, apiroute.Session, withUser(h.transfers, transfersapi.WithUser), transfersapi.Endpoints())
 		}
 	}
 	return routes
@@ -149,11 +155,16 @@ func (h *productHandler) register(routes []apiroute.Route) {
 
 // checkPosture refuses a route whose posture contradicts its method: a read
 // is never a Mutation, a change never only a Session, and a mounted API is a
-// Session or Admin one, whose writes then need the CSRF token.
+// Session or Admin one, whose writes then need the CSRF token. A mounted
+// route lists the operations it serves.
 func checkPosture(route apiroute.Route) error {
 	switch {
 	case route.Method == "" && (route.Posture == apiroute.Public || route.Posture == apiroute.Mutation):
 		return fmt.Errorf("route %s is mounted for every method as %s; mount it as session or admin", route.Pattern, route.Posture)
+	case route.Method == "" && len(route.Endpoints) == 0:
+		return fmt.Errorf("route %s is mounted for every method but lists no endpoint", route.Pattern)
+	case route.Method == "" && slices.ContainsFunc(route.Endpoints, func(endpoint apiroute.Endpoint) bool { return !route.Serves(endpoint) }):
+		return fmt.Errorf("route %s lists an endpoint it does not reach", route.Pattern)
 	case route.Method != "" && apiroute.Safe(route.Method) && route.Posture == apiroute.Mutation:
 		return fmt.Errorf("route %s %s only reads but is a mutation", route.Method, route.Pattern)
 	case route.Method != "" && !apiroute.Safe(route.Method) && route.Posture == apiroute.Session:
@@ -229,23 +240,23 @@ func withUser(next http.Handler, attach func(context.Context, accounts.User) con
 	}
 }
 
-// photoRoute admits signed-in users to the photo API, which applies its own
-// Policy. An in-process photo API receives the caller as a Principal, while a
-// Proxy forwards only the session token for the photo service to confirm.
-func (h *productHandler) photoRoute() apiroute.Route {
-	handler := serve(h.photos)
-	if _, proxied := h.photos.(*photosapi.Proxy); !proxied {
-		handler = func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-			viewings, err := h.accounts.LibraryViewings(r.Context(), session.User)
-			if err != nil {
-				h.internalError(w, r, err)
-				return
-			}
-			principal := photosapi.NewPrincipal(session.User.ID, session.User.Username, session.User.Role == accounts.RoleAdmin, viewings)
-			h.photos.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), principal)))
-		}
+// photoHandler admits signed-in users to the photo API, which applies its
+// own Policy. An in-process photo API receives the caller as a Principal,
+// while a Proxy forwards only the session token for the photo service to
+// confirm.
+func (h *productHandler) photoHandler() apiroute.Handler {
+	if _, proxied := h.photos.(*photosapi.Proxy); proxied {
+		return serve(h.photos)
 	}
-	return apiroute.Route{Pattern: photosapi.PathPrefix + "/", Posture: apiroute.Session, Handler: handler}
+	return func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+		viewings, err := h.accounts.LibraryViewings(r.Context(), session.User)
+		if err != nil {
+			h.internalError(w, r, err)
+			return
+		}
+		principal := photosapi.NewPrincipal(session.User.ID, session.User.Username, session.User.Role == accounts.RoleAdmin, viewings)
+		h.photos.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), principal)))
+	}
 }
 
 func (h *productHandler) serveState(w http.ResponseWriter, r *http.Request, _ accounts.Session) {

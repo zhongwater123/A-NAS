@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/shares"
@@ -34,10 +35,15 @@ func UserFrom(ctx context.Context) (accounts.User, bool) {
 }
 
 type handler struct {
-	store        *shares.Store
-	logger       *slog.Logger
-	members      func(context.Context) ([]accounts.Profile, error)
-	mux          *http.ServeMux
+	store   *shares.Store
+	logger  *slog.Logger
+	members func(context.Context) ([]accounts.Profile, error)
+	mux     *apiroute.Mux
+	// jobMux serves the save jobs, whose paths ServeMux cannot hold beside
+	// the paths of one share: GET /jobs/messages would match both
+	// /jobs/{jobID} and /{shareID}/messages (the resource IDs never equal
+	// "jobs").
+	jobMux       *apiroute.Mux
 	media        mediaworker.Worker
 	previewSlots chan struct{}
 }
@@ -49,9 +55,15 @@ func NewWithPreview(store *shares.Store, logger *slog.Logger, members func(conte
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &handler{store: store, logger: logger, members: members, mux: http.NewServeMux(), media: media, previewSlots: make(chan struct{}, 2)}
+	h := &handler{store: store, logger: logger, members: members, mux: apiroute.NewMux(), jobMux: apiroute.NewMux(), media: media, previewSlots: make(chan struct{}, 2)}
 	h.routes()
 	return h
+}
+
+// Endpoints are the operations the share API serves under PathPrefix.
+func Endpoints() []apiroute.Endpoint {
+	h := New(nil, nil, nil).(*handler)
+	return append(h.mux.Endpoints(), h.jobMux.Endpoints()...)
 }
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -64,15 +76,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, 503, "shares_unavailable", "member shares are not available")
 		return
 	}
-	// This reserved collection otherwise intersects /{shareID}/messages in
-	// ServeMux's pattern ordering (the resource IDs never equal "jobs").
-	if id, ok := strings.CutPrefix(r.URL.Path, PathPrefix+"/jobs/"); ok {
-		if r.Method == "GET" && id != "" && !strings.Contains(id, "/") {
-			r.SetPathValue("jobID", id)
-			h.job(w, r)
-			return
-		}
-		httpjson.WriteError(w, 404, "not_found", "resource not found")
+	if strings.HasPrefix(r.URL.Path, PathPrefix+"/jobs/") {
+		h.jobMux.ServeHTTP(w, r)
 		return
 	}
 	h.mux.ServeHTTP(w, r)
@@ -97,9 +102,12 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("POST "+p+"/{shareID}/revoke", h.revoke)
 	h.mux.HandleFunc("GET "+p+"/{shareID}/entries/{entryID}/content", h.content)
 	h.mux.HandleFunc("GET "+p+"/{shareID}/entries/{entryID}/preview", h.preview)
-	h.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		httpjson.WriteError(w, 404, "not_found", "resource not found")
-	})
+	h.jobMux.HandleFunc("GET "+p+"/jobs/{jobID}", h.job)
+	notFound := func(w http.ResponseWriter, _ *http.Request) {
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
+	}
+	h.mux.HandleFunc("/", notFound)
+	h.jobMux.HandleFunc("/", notFound)
 }
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {

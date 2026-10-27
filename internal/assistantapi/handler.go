@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
@@ -78,7 +79,7 @@ func WithUser(ctx context.Context, user accounts.User) context.Context {
 type Handler struct {
 	options Options
 	logger  *slog.Logger
-	mux     *http.ServeMux
+	mux     *apiroute.Mux
 	ctx     context.Context
 	// background runs the kept instances and the watch over their tasks.
 	background sync.WaitGroup
@@ -105,7 +106,7 @@ func New(options Options) *Handler {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	h := &Handler{options: options, logger: logger, mux: http.NewServeMux(), ctx: ctx, members: map[string]*member{}, keeps: map[string]*keep{}}
+	h := &Handler{options: options, logger: logger, mux: apiroute.NewMux(), ctx: ctx, members: map[string]*member{}, keeps: map[string]*keep{}}
 	routes := map[string]func(http.ResponseWriter, *http.Request, string){
 		"GET /status":                  h.status,
 		"GET /ws":                      h.gateway,
@@ -136,6 +137,11 @@ func New(options Options) *Handler {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
 	return h
+}
+
+// Endpoints are the operations the assistant API serves beneath PathPrefix.
+func Endpoints() []apiroute.Endpoint {
+	return New(Options{}).mux.Endpoints()
 }
 
 // Wait keeps anything new from starting and returns once the background work
