@@ -292,16 +292,16 @@ func (s *Service) scanLocked(ctx context.Context, actor accounts.User, library l
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	var folders []folderRow
 	for rows.Next() {
 		var folder folderRow
 		if err := rows.Scan(&folder.entryID); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		folders = append(folders, folder)
 	}
-	if err := rows.Close(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
 	firstScan := library.ScannedAt == ""
@@ -745,16 +745,16 @@ func (s *Service) commitScan(ctx context.Context, library libraryRow, videos []s
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var entryID string
 		var video existingVideo
 		if err := rows.Scan(&video.id, &entryID, &video.size, &video.modified, &video.addedAt); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		existing[entryID] = video
 	}
-	if err := rows.Close(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
 	showIDs := map[string]string{}
@@ -762,15 +762,15 @@ func (s *Service) commitScan(ctx context.Context, library libraryRow, videos []s
 	if err != nil {
 		return err
 	}
+	defer showRows.Close()
 	for showRows.Next() {
 		var id, key string
 		if err := showRows.Scan(&id, &key); err != nil {
-			_ = showRows.Close()
 			return err
 		}
 		showIDs[key] = id
 	}
-	if err := showRows.Close(); err != nil {
+	if err := errors.Join(showRows.Err(), showRows.Close()); err != nil {
 		return err
 	}
 	now := formatTime(s.now())

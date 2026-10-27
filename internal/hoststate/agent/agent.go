@@ -217,6 +217,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleSnapshots(w, r)
 		return
 	}
+	if r.URL.Path == snapshotSurveyPath {
+		h.handleSnapshotSurvey(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/v1/snapshots/") {
 		h.handleSnapshotResource(w, r)
 		return
@@ -258,37 +262,17 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusOK, documentFromDomain(state))
 }
 
-// handleSnapshots takes a snapshot (POST) or keeps only the named ones (PUT).
+// handleSnapshots takes a snapshot. It no longer deletes the snapshots that a
+// list leaves out (PUT): a Product Service from before #269 that asks gets
+// 405 and deletes nothing.
 func (h *handler) handleSnapshots(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost && r.Method != http.MethodPut {
-		w.Header().Set("Allow", http.MethodPost+", "+http.MethodPut)
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
 		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if h.snapshots == nil {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "snapshot operation is unavailable")
-		return
-	}
-	if r.Method == http.MethodPut {
-		var request snapshotKeepDocument
-		if err := decodeRequest(r, &request); err != nil {
-			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
-			return
-		}
-		pruned, err := h.snapshots.Prune(r.Context(), request.Keep)
-		if errors.Is(err, files.ErrVolumeUnavailable) {
-			httpjson.WriteError(w, http.StatusLocked, volumeUnavailableCode, "the data volume is offline")
-			return
-		}
-		if err != nil {
-			h.logger.ErrorContext(r.Context(), "prune snapshots failed", "error", err)
-			httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
-			return
-		}
-		if pruned.Removed > 0 {
-			h.logger.InfoContext(r.Context(), "deleted snapshots nobody keeps", "count", pruned.Removed)
-		}
-		httpjson.Write(w, http.StatusOK, pruned)
 		return
 	}
 	var request snapshotDocument
@@ -694,8 +678,41 @@ type snapshotDocument struct {
 	SnapshotID string `json:"snapshotId"`
 }
 
-type snapshotKeepDocument struct {
-	Keep []string `json:"keep"`
+// snapshotSurveyPath reports which snapshots exist; it deletes nothing.
+const snapshotSurveyPath = "/v1/snapshot-survey"
+
+type snapshotSurveyDocument struct {
+	Known []string `json:"known"`
+}
+
+// handleSnapshotSurvey reports which of the named snapshots are on the data
+// volume and how many others it holds.
+func (h *handler) handleSnapshotSurvey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.snapshots == nil {
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "snapshot operation is unavailable")
+		return
+	}
+	var request snapshotSurveyDocument
+	if err := decodeRequest(r, &request); err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	survey, err := h.snapshots.Survey(r.Context(), request.Known)
+	if errors.Is(err, files.ErrVolumeUnavailable) {
+		httpjson.WriteError(w, http.StatusLocked, volumeUnavailableCode, "the data volume is offline")
+		return
+	}
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "survey snapshots failed", "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_failed", "snapshot operation failed")
+		return
+	}
+	httpjson.Write(w, http.StatusOK, survey)
 }
 
 // snapshotObjectLine is one line of a snapshot object listing: an object,
@@ -880,14 +897,14 @@ func (c *Client) Delete(ctx context.Context, spaceID, snapshotID string) error {
 		"/v1/snapshots/"+url.PathEscape(snapshotID)+"?spaceId="+url.QueryEscape(spaceID), nil, nil)
 }
 
-func (c *Client) Prune(ctx context.Context, keep []string) (files.SnapshotPrune, error) {
-	if keep == nil {
-		keep = []string{}
+func (c *Client) Survey(ctx context.Context, known []string) (files.SnapshotSurvey, error) {
+	if known == nil {
+		known = []string{}
 	}
-	var response files.SnapshotPrune
-	err := c.doJSON(ctx, c.operationClient, http.MethodPut, "/v1/snapshots", snapshotKeepDocument{Keep: keep}, &response)
+	var response files.SnapshotSurvey
+	err := c.doJSON(ctx, c.operationClient, http.MethodPost, snapshotSurveyPath, snapshotSurveyDocument{Known: known}, &response)
 	if errors.Is(err, accounts.ErrVolumeUnavailable) {
-		return files.SnapshotPrune{}, files.ErrVolumeUnavailable
+		return files.SnapshotSurvey{}, files.ErrVolumeUnavailable
 	}
 	return response, err
 }

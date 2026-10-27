@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -111,16 +112,16 @@ type SnapshotBackend interface {
 	Objects(ctx context.Context, snapshotID string, visit func(SnapshotObject) error) error
 	Open(ctx context.Context, snapshotID, key string) (io.ReadCloser, SnapshotObject, error)
 	Delete(ctx context.Context, spaceID, snapshotID string) error
-	// Prune deletes every snapshot that keep does not name and reports which
-	// of keep exist.
-	Prune(ctx context.Context, keep []string) (SnapshotPrune, error)
+	// Survey reports which of known are on the data volume and how many
+	// other snapshots it holds. It deletes nothing.
+	Survey(ctx context.Context, known []string) (SnapshotSurvey, error)
 }
 
-// SnapshotPrune is the outcome of a Prune: the kept snapshots that exist and
-// how many snapshots nobody keeps were deleted.
-type SnapshotPrune struct {
+// SnapshotSurvey is what a Survey found: the known snapshots that exist and
+// how many others the data volume holds.
+type SnapshotSurvey struct {
 	Present []string `json:"present"`
-	Removed int      `json:"removed"`
+	Unknown int      `json:"unknown"`
 }
 
 const (
@@ -177,9 +178,16 @@ func (s *Service) createSnapshot(ctx context.Context, spaceID, actorID, name str
 	snapshot := Snapshot{ID: s.randomID("snapshot"), SpaceID: spaceID, Name: name, Origin: origin, CreatedBy: actorID, CreatedAt: s.now().UTC()}
 	// Until the catalog records it, the snapshot is this call's to remove:
 	// sweeps leave it alone, and any failure, a closed tab or a stopping
-	// service included, deletes it again. What a crash leaves, the next
-	// sweep removes.
+	// service included, deletes it again. The catalog notes it as pending
+	// before the backend takes it and drops the note when it records the
+	// snapshot, so what a crash or a failed discard leaves, the next sweep
+	// knows to delete. Sweeps delete no other snapshot (#269).
 	s.holdSnapshot(snapshot.ID, true)
+	if _, err := s.store.db.ExecContext(ctx, "INSERT INTO pending_snapshots(id, space_id, created_at) VALUES(?,?,?)",
+		snapshot.ID, spaceID, formatTime(snapshot.CreatedAt)); err != nil {
+		s.holdSnapshot(snapshot.ID, false)
+		return Snapshot{}, err
+	}
 	committed := false
 	defer func() {
 		if !committed {
@@ -220,6 +228,9 @@ func (s *Service) createSnapshot(ctx context.Context, spaceID, actorID, name str
 	if _, err := tx.ExecContext(ctx, "INSERT INTO snapshots("+snapshotColumns+") VALUES(?,?,?,?,?,?,?,?)",
 		snapshot.ID, snapshot.SpaceID, snapshot.Name, snapshot.Origin, snapshot.CreatedBy, formatTime(snapshot.CreatedAt),
 		snapshot.FileCount, snapshot.SizeBytes); err != nil {
+		return Snapshot{}, err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM pending_snapshots WHERE id = ?", snapshot.ID); err != nil {
 		return Snapshot{}, err
 	}
 	insert, err := tx.PrepareContext(ctx, `
@@ -612,12 +623,16 @@ func (s *Service) deleteSnapshot(ctx context.Context, snapshot Snapshot) error {
 	return err
 }
 
-// discardSnapshot deletes a snapshot the catalog never recorded, even after
-// ctx ended. One the backend cannot delete now is left to the next sweep.
+// discardSnapshot deletes a snapshot the catalog never recorded, and then
+// its pending note, even after ctx ended. One the backend cannot delete now
+// keeps its note, so the next sweep deletes it.
 func (s *Service) discardSnapshot(ctx context.Context, spaceID, snapshotID string) {
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), snapshotDiscardTimeout)
 	defer cancel()
-	_ = s.snapshots.Delete(cleanup, spaceID, snapshotID)
+	if err := s.snapshots.Delete(cleanup, spaceID, snapshotID); err != nil && !errors.Is(err, ErrNotFound) {
+		return
+	}
+	_, _ = s.store.db.ExecContext(cleanup, "DELETE FROM pending_snapshots WHERE id = ?", snapshotID)
 }
 
 // holdSnapshot marks a snapshot as being taken, which keeps sweeps from
@@ -632,18 +647,32 @@ func (s *Service) holdSnapshot(snapshotID string, held bool) {
 	}
 }
 
-// SnapshotSweep reports what a sweep removed.
+// SnapshotSweep reports what a sweep removed and what it left alone.
 type SnapshotSweep struct {
-	// Snapshots counts snapshots on the data volume that the catalog did not
-	// record, such as those a crash left while one was being taken.
+	// Snapshots counts the snapshots whose taking never finished, as when a
+	// crash or a failed discard left one, that the sweep deleted.
 	Snapshots int
 	// Records names the catalog records whose snapshot was gone.
 	Records []Snapshot
+	// Unrecorded counts the snapshots on the data volume that the catalog
+	// neither records nor was taking: those of a catalog that was lost or
+	// restored from an older copy, or left by a version before #269. They
+	// stay.
+	Unrecorded int
+	// Unfound counts the records kept although none of the catalog's
+	// snapshots is on the data volume, which more likely means their folder
+	// is gone or unreadable than that every one was deleted.
+	Unfound int
 }
 
+// pendingSnapshot is a snapshot that the catalog noted before the backend
+// took it and has not recorded.
+type pendingSnapshot struct{ id, spaceID string }
+
 // SweepSnapshots makes the data volume and the catalog agree: it deletes the
-// snapshots the catalog does not record and the records whose snapshot is
-// gone. It runs only while the intended data volume is mounted.
+// snapshots whose taking never finished and the records whose snapshot is
+// gone. It never deletes a snapshot the catalog did not note as pending, and
+// runs only while the intended data volume is mounted.
 func (s *Service) SweepSnapshots(ctx context.Context) (SnapshotSweep, error) {
 	if !s.allowUnverifiedVolume {
 		if s.volumeGuard == nil || s.volumeGuard.Check(ctx, s.volumeRoot, false) != nil {
@@ -651,52 +680,118 @@ func (s *Service) SweepSnapshots(ctx context.Context) (SnapshotSweep, error) {
 		}
 	}
 	// Held for the whole sweep: a snapshot taken meanwhile waits to be held
-	// until the sweep is done, so it is never mistaken for one nobody keeps.
+	// until the sweep is done, so its pending note is not taken for one a
+	// crash left.
 	s.snapshotsMu.Lock()
 	defer s.snapshotsMu.Unlock()
-	rows, err := s.store.db.QueryContext(ctx, "SELECT "+snapshotColumns+" FROM snapshots ORDER BY created_at")
+	recorded, err := s.recordedSnapshots(ctx)
 	if err != nil {
 		return SnapshotSweep{}, err
 	}
-	var recorded []Snapshot
-	for rows.Next() {
-		snapshot, err := scanSnapshot(rows)
-		if err != nil {
-			_ = rows.Close()
-			return SnapshotSweep{}, err
-		}
-		recorded = append(recorded, snapshot)
-	}
-	if err := rows.Close(); err != nil {
+	pending, err := s.pendingSnapshots(ctx)
+	if err != nil {
 		return SnapshotSweep{}, err
 	}
-	keep := make([]string, 0, len(recorded)+len(s.takingSnapshots))
+	isRecorded := make(map[string]bool, len(recorded))
+	known := make([]string, 0, len(recorded)+len(s.takingSnapshots))
 	for _, snapshot := range recorded {
-		keep = append(keep, snapshot.ID)
+		isRecorded[snapshot.ID] = true
+		known = append(known, snapshot.ID)
 	}
 	for id := range s.takingSnapshots {
-		keep = append(keep, id)
+		known = append(known, id)
 	}
-	pruned, err := s.snapshots.Prune(ctx, keep)
-	if err != nil {
-		return SnapshotSweep{}, err
-	}
-	sweep := SnapshotSweep{Snapshots: pruned.Removed}
-	present := make(map[string]bool, len(pruned.Present))
-	for _, id := range pruned.Present {
-		present[id] = true
-	}
-	for _, snapshot := range recorded {
-		if present[snapshot.ID] {
+	var sweep SnapshotSweep
+	for _, snapshot := range pending {
+		if _, taking := s.takingSnapshots[snapshot.id]; taking {
 			continue
 		}
+		if !isRecorded[snapshot.id] {
+			if err := s.snapshots.Delete(ctx, snapshot.spaceID, snapshot.id); err != nil && !errors.Is(err, ErrNotFound) {
+				return sweep, err
+			}
+			sweep.Snapshots++
+		}
+		if _, err := s.store.db.ExecContext(ctx, "DELETE FROM pending_snapshots WHERE id = ?", snapshot.id); err != nil {
+			return sweep, err
+		}
+	}
+	survey, err := s.snapshots.Survey(ctx, known)
+	if err != nil {
+		return sweep, err
+	}
+	sweep.Unrecorded = survey.Unknown
+	present := make(map[string]bool, len(survey.Present))
+	for _, id := range survey.Present {
+		present[id] = true
+	}
+	var missing []Snapshot
+	for _, snapshot := range recorded {
+		if !present[snapshot.ID] {
+			missing = append(missing, snapshot)
+		}
+	}
+	if len(missing) > 0 && len(missing) == len(recorded) {
+		sweep.Unfound, missing = len(missing), nil
+	}
+	for _, snapshot := range missing {
 		if _, err := s.store.db.ExecContext(ctx, "DELETE FROM snapshots WHERE id = ?", snapshot.ID); err != nil {
 			return sweep, err
 		}
 		_ = s.audit(ctx, systemActor, "snapshot.missing", snapshot.SpaceID, snapshot.ID, snapshot.Name)
 		sweep.Records = append(sweep.Records, snapshot)
 	}
+	s.reportLeftSnapshots(ctx, sweep)
 	return sweep, nil
+}
+
+// recordedSnapshots reads every snapshot the catalog records.
+func (s *Service) recordedSnapshots(ctx context.Context) ([]Snapshot, error) {
+	rows, err := s.store.db.QueryContext(ctx, "SELECT "+snapshotColumns+" FROM snapshots ORDER BY created_at")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var recorded []Snapshot
+	for rows.Next() {
+		snapshot, err := scanSnapshot(rows)
+		if err != nil {
+			return nil, err
+		}
+		recorded = append(recorded, snapshot)
+	}
+	return recorded, rows.Err()
+}
+
+// pendingSnapshots reads the snapshots the catalog noted and not recorded.
+func (s *Service) pendingSnapshots(ctx context.Context) ([]pendingSnapshot, error) {
+	rows, err := s.store.db.QueryContext(ctx, "SELECT id, space_id FROM pending_snapshots ORDER BY created_at")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var pending []pendingSnapshot
+	for rows.Next() {
+		var snapshot pendingSnapshot
+		if err := rows.Scan(&snapshot.id, &snapshot.spaceID); err != nil {
+			return nil, err
+		}
+		pending = append(pending, snapshot)
+	}
+	return pending, rows.Err()
+}
+
+// reportLeftSnapshots tells administrators, in the activity log, of the
+// snapshots and records a sweep left alone. It writes only when a count
+// changes, so hourly sweeps do not repeat it. The caller holds snapshotsMu.
+func (s *Service) reportLeftSnapshots(ctx context.Context, sweep SnapshotSweep) {
+	if sweep.Unrecorded != s.reportedUnrecorded && sweep.Unrecorded > 0 {
+		_ = s.audit(ctx, systemActor, "snapshot.unrecorded", "", "", strconv.Itoa(sweep.Unrecorded))
+	}
+	if sweep.Unfound != s.reportedUnfound && sweep.Unfound > 0 {
+		_ = s.audit(ctx, systemActor, "snapshot.unfound", "", "", strconv.Itoa(sweep.Unfound))
+	}
+	s.reportedUnrecorded, s.reportedUnfound = sweep.Unrecorded, sweep.Unfound
 }
 
 // KeepSnapshot turns a scheduled snapshot into a manual one, so the space's
@@ -750,8 +845,8 @@ func (unconfiguredSnapshots) Open(context.Context, string, string) (io.ReadClose
 func (unconfiguredSnapshots) Delete(context.Context, string, string) error {
 	return errNoSnapshotBackend
 }
-func (unconfiguredSnapshots) Prune(context.Context, []string) (SnapshotPrune, error) {
-	return SnapshotPrune{}, errNoSnapshotBackend
+func (unconfiguredSnapshots) Survey(context.Context, []string) (SnapshotSurvey, error) {
+	return SnapshotSurvey{}, errNoSnapshotBackend
 }
 
 type directorySnapshotBackend struct {
@@ -853,42 +948,44 @@ func (b *directorySnapshotBackend) Open(_ context.Context, snapshotID, key strin
 	return reader, SnapshotObject{Key: key, Name: info.Name(), Kind: EntryKindFile, SizeBytes: info.Size()}, nil
 }
 
+// Delete also removes the copy that a stopped Create left unfinished.
 func (b *directorySnapshotBackend) Delete(_ context.Context, _ string, snapshotID string) error {
 	root := b.root(snapshotID)
 	if !withinRoot(b.base(), root) {
 		return ErrNotFound
 	}
+	if err := os.RemoveAll(root + ".incoming"); err != nil {
+		return err
+	}
 	return os.RemoveAll(root)
 }
 
-// Prune also removes the copies that a stopped Create left unfinished.
-func (b *directorySnapshotBackend) Prune(_ context.Context, keep []string) (SnapshotPrune, error) {
-	wanted := make(map[string]string, len(keep))
-	for _, id := range keep {
+// Survey counts the copy that a Create is still making with the snapshot it
+// makes, and the unfinished copy of a snapshot nobody knows as one more.
+func (b *directorySnapshotBackend) Survey(_ context.Context, known []string) (SnapshotSurvey, error) {
+	wanted := make(map[string]string, len(known))
+	for _, id := range known {
 		wanted[safeSegment(id)] = id
 	}
-	pruned := SnapshotPrune{Present: []string{}}
+	survey := SnapshotSurvey{Present: []string{}}
 	items, err := os.ReadDir(b.base())
 	if errors.Is(err, os.ErrNotExist) {
-		return pruned, nil
+		return survey, nil
 	}
 	if err != nil {
-		return SnapshotPrune{}, err
+		return SnapshotSurvey{}, err
 	}
 	for _, item := range items {
 		if id, ok := wanted[item.Name()]; ok {
-			pruned.Present = append(pruned.Present, id)
+			survey.Present = append(survey.Present, id)
 			continue
 		}
 		if _, ok := wanted[strings.TrimSuffix(item.Name(), ".incoming")]; ok {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(b.base(), item.Name())); err != nil {
-			return SnapshotPrune{}, err
-		}
-		pruned.Removed++
+		survey.Unknown++
 	}
-	return pruned, nil
+	return survey, nil
 }
 
 // WalkSnapshot calls visit for the files and folders below root in

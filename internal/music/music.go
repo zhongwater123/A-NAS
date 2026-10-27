@@ -689,20 +689,19 @@ func (s *Service) Playlists(ctx context.Context, actor accounts.User) ([]Playlis
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	items := []Playlist{}
 	for rows.Next() {
 		var item Playlist
 		var created, updated string
 		if err := rows.Scan(&item.ID, &item.Name, &created, &updated); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 		item.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
 		items = append(items, item)
 	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
 	for index := range items {
