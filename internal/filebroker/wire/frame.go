@@ -1,112 +1,45 @@
-// Package filebroker runs Web file operations as the signed-in user (ADR 0008).
-//
-// The root File Broker inside the Host Agent verifies each request's session
-// token against the session store, then forwards the operation to a worker
-// process running with that user's UID and groups. The kernel's POSIX ACLs
-// decide every access. Opened and created files travel back as file
-// descriptors over SCM_RIGHTS, so root reads and writes no file contents,
-// except for the assistant's changes: their executor (internal/assistantchanges)
-// copies a staged file through such descriptors, a block at a time, into its
-// own store when the card is made and from there into place once approved.
 package wire
 
 import (
-	"encoding/binary"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
 	"net"
 	"os"
-	"syscall"
+
+	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 )
 
-// maxMessage bounds one JSON message. A scan travels in pages far below it;
+// MaxMessage bounds one JSON message. A scan travels in pages far below it;
 // a reply that still does not fit is answered with an error instead. Test
 // workers lower it.
 var MaxMessage = 64 << 20
 
-// scanPage bounds the entries in one message of a scan, so neither the
+// ScanPage bounds the entries in one message of a scan, so neither the
 // broker nor a worker ever holds a whole large tree in one message.
 var ScanPage = 2048
 
-var ErrTooLarge = errors.New("file broker message is too large")
+// ErrTooLarge reports a message over MaxMessage.
+var ErrTooLarge = unixmsg.ErrTooLarge
 
-// encodeMessage encodes value, refusing a message over the limit.
-func EncodeMessage(value any) ([]byte, error) {
-	body, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	if len(body) > MaxMessage {
-		return nil, ErrTooLarge
-	}
-	return body, nil
-}
+// EncodeMessage encodes value, refusing a message over the limit.
+func EncodeMessage(value any) ([]byte, error) { return unixmsg.Encode(value, MaxMessage) }
 
-// writeMessage sends a length-prefixed JSON message. A file, when given,
-// travels as SCM_RIGHTS ancillary data attached to the length prefix.
+// WriteMessage sends a message (internal/unixmsg). A file, when given,
+// travels with it.
 func WriteMessage(conn *net.UnixConn, value any, file *os.File) error {
-	body, err := EncodeMessage(value)
-	if err != nil {
-		return err
-	}
-	return WriteEncoded(conn, body, file)
+	return unixmsg.Write(conn, value, file, MaxMessage)
 }
 
+// WriteEncoded sends a message that EncodeMessage returned.
 func WriteEncoded(conn *net.UnixConn, body []byte, file *os.File) error {
-	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(body)))
-	var rights []byte
-	if file != nil {
-		rights = syscall.UnixRights(int(file.Fd()))
-	}
-	if _, _, err := conn.WriteMsgUnix(header, rights, nil); err != nil {
-		return err
-	}
-	_, err := conn.Write(body)
-	return err
+	return unixmsg.WriteBody(conn, body, file)
 }
 
-// readMessage reads one message and the file descriptor attached to it, if
-// any. Extra descriptors are closed.
+// ReadMessage reads one message and the file descriptor attached to it, if
+// any.
 func ReadMessage(conn *net.UnixConn, value any) (*os.File, error) {
-	header := make([]byte, 4)
-	rights := make([]byte, syscall.CmsgSpace(4*4))
-	count, rightsCount, _, _, err := conn.ReadMsgUnix(header, rights)
-	// A connection closed under the read reports -1, not 0.
-	if count <= 0 && err != nil {
-		return nil, err
-	}
-	file, rightsErr := receivedFile(rights[:rightsCount])
-	if count < len(header) {
-		if _, err := io.ReadFull(conn, header[count:]); err != nil {
-			CloseFile(file)
-			return nil, err
-		}
-	}
-	if rightsErr != nil {
-		CloseFile(file)
-		return nil, rightsErr
-	}
-	length := binary.BigEndian.Uint32(header)
-	if length > uint32(MaxMessage) {
-		CloseFile(file)
-		return nil, ErrTooLarge
-	}
-	body := make([]byte, length)
-	if _, err := io.ReadFull(conn, body); err != nil {
-		CloseFile(file)
-		return nil, err
-	}
-	if err := json.Unmarshal(body, value); err != nil {
-		CloseFile(file)
-		return nil, fmt.Errorf("decode file broker message: %w", err)
-	}
-	return file, nil
+	return unixmsg.Read(conn, value, MaxMessage)
 }
 
-// readReply reads a whole reply: the pages of a scan, then its final
+// ReadReply reads a whole reply: the pages of a scan, then its final
 // message, which alone may carry a file.
 func ReadReply(conn *net.UnixConn) (Response, *os.File, error) {
 	var entries Pages
@@ -124,33 +57,5 @@ func ReadReply(conn *net.UnixConn) (Response, *os.File, error) {
 	}
 }
 
-func receivedFile(rights []byte) (*os.File, error) {
-	if len(rights) == 0 {
-		return nil, nil
-	}
-	messages, err := syscall.ParseSocketControlMessage(rights)
-	if err != nil {
-		return nil, err
-	}
-	var descriptors []int
-	for _, message := range messages {
-		received, err := syscall.ParseUnixRights(&message)
-		if err != nil {
-			return nil, err
-		}
-		descriptors = append(descriptors, received...)
-	}
-	if len(descriptors) == 0 {
-		return nil, nil
-	}
-	for _, extra := range descriptors[1:] {
-		_ = syscall.Close(extra)
-	}
-	return os.NewFile(uintptr(descriptors[0]), "a-nas-file"), nil
-}
-
-func CloseFile(file *os.File) {
-	if file != nil {
-		_ = file.Close()
-	}
-}
+// CloseFile closes a file of a message, if any.
+func CloseFile(file *os.File) { unixmsg.CloseFile(file) }

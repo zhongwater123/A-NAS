@@ -49,10 +49,12 @@ linters:
             - "**/internal/ptyshell/*.go"
             - "**/internal/sessiondir/*.go"
             - "**/internal/sessionlookup/*.go"
+            - "**/internal/sqlitedb/*.go"
             - "**/internal/systemdscope/*.go"
             - "**/internal/systemlog/*.go"
             - "**/internal/systemlog/journal/*.go"
             - "**/internal/taskmanager/*.go"
+            - "**/internal/unixmsg/*.go"
             - "!$test"
           allow:
             - "$gostd"
@@ -84,10 +86,12 @@ linters:
             - "github.com/zhongwater123/A-NAS/internal/ptyshell$"
             - "github.com/zhongwater123/A-NAS/internal/sessiondir$"
             - "github.com/zhongwater123/A-NAS/internal/sessionlookup$"
+            - "github.com/zhongwater123/A-NAS/internal/sqlitedb$"
             - "github.com/zhongwater123/A-NAS/internal/systemdscope$"
             - "github.com/zhongwater123/A-NAS/internal/systemlog$"
             - "github.com/zhongwater123/A-NAS/internal/systemlog/journal$"
             - "github.com/zhongwater123/A-NAS/internal/taskmanager$"
+            - "github.com/zhongwater123/A-NAS/internal/unixmsg$"
         container-agent:
           list-mode: strict
           files:

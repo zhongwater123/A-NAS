@@ -5,6 +5,13 @@
 // changes (ADR 0008, ADR 0024). The Product Service reaches it through
 // internal/filebroker over internal/filebroker/wire and links none of it
 // (#221).
+//
+// The kernel's POSIX ACLs decide every access a worker makes. Opened and
+// created files travel back as file descriptors over SCM_RIGHTS, so root
+// reads and writes no file contents, except for the assistant's changes:
+// their executor (internal/assistantchanges) copies a staged file through
+// such descriptors, a block at a time, into its own store when the card is
+// made and from there into place once approved.
 package rootbroker
 
 import (
