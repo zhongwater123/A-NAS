@@ -29,7 +29,8 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    setupFiles: ["./src/test/setup.ts"],
+    // forms.ts replaces Request before MSW (setup.ts) takes it.
+    setupFiles: ["./src/test/forms.ts", "./src/test/setup.ts"],
     css: true,
     pool: "threads",
     fileParallelism: false,
