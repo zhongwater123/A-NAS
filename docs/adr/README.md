@@ -34,7 +34,6 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0025：数据卷以 Btrfs 自带的多盘配置跨越多块硬盘](0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)（修订 0007 的单盘限制）
 - 0026：VNAS 经 NAS 上的 PAIR 节点使用家里电脑的算力（draft，[PR #196](https://github.com/zhongwater123/A-NAS/pull/196)）
 - 0027：语音处理在云端转写与整理，声纹只在本机计算和保存（draft，[PR #203](https://github.com/zhongwater123/A-NAS/pull/203)）
-- 0028：向量索引由所属服务各自的 Qdrant 实例承担，随时可从 Catalog 重建（draft，[PR #266](https://github.com/zhongwater123/A-NAS/pull/266)）
 
 - [0028：向量索引由所属服务各自的 Qdrant 实例承担，随时可从 Catalog 重建](0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)（proposed；修订 0011 的数据位置：派生的向量索引放在系统盘）
 
