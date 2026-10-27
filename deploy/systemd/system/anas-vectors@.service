@@ -26,14 +26,14 @@ Environment=QDRANT__STORAGE__STORAGE_PATH=%S/a-nas-vectors/%i/storage
 Environment=QDRANT__STORAGE__SNAPSHOTS_PATH=%S/a-nas-vectors/%i/snapshots
 Environment=QDRANT__STORAGE__TEMP_PATH=%S/a-nas-vectors/%i/tmp
 Environment=QDRANT_INIT_FILE_PATH=%S/a-nas-vectors/%i/.qdrant-initialized
-# A single Qdrant node cannot skip a minor release, and an older one cannot
-# read a newer one's storage: a different binary starts from an empty index,
-# which its owner rebuilds.
-ExecStartPre=/opt/a-nas/current/vectors/prepare.sh %S/a-nas-vectors/%i /opt/a-nas/current/vectors/qdrant
-ExecStart=/opt/a-nas/current/vectors/qdrant --config-path /opt/a-nas/current/vectors/config.yaml --disable-telemetry
+# start.sh resolves the release once and execs its Qdrant, after emptying
+# storage that Qdrant cannot use: written by another minor release or a newer
+# one, or behind two failed starts in a row (a damaged segment that makes
+# Qdrant panic while loading). The owner rebuilds the index.
+ExecStart=/opt/a-nas/current/vectors/start.sh %S/a-nas-vectors/%i /opt/a-nas/current
 # Started only once its gRPC port accepts, so the proxy never forwards to a
-# closed port.
-ExecStartPost=/opt/a-nas/current/vectors/wait-ready.sh 6334
+# closed port; that also clears the count of failed starts.
+ExecStartPost=/opt/a-nas/current/vectors/wait-ready.sh 6334 %S/a-nas-vectors/%i
 TimeoutStartSec=90s
 TimeoutStopSec=20s
 UMask=0077
@@ -64,11 +64,14 @@ SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
 TasksMax=256
-# An empty instance holds about 90 MB, and the photo library's 20,000 image
-# vectors are about 60 MB; the limits leave room for index building and are
-# checked against the system test's MemoryPeak and the NAS.
+# Qdrant keeps a descriptor per segment file; collections, segments and a
+# full-text index outgrow the default soft limit of 1024.
+LimitNOFILE=65536
+# Measured under these limits with graph-free collections: see
+# docs/architecture/vector-index.md#配置. An owner whose collections need more
+# gets a drop-in for its instance; anas-vectors.slice bounds all of them.
 MemoryHigh=512M
 MemoryMax=768M
-# Background work beside the AI Worker: anas.slice gives way to the rest of
-# the device, and the photo service's AI gate does not count it.
+# anas-vectors.slice, under anas.slice: background work that gives way to the
+# rest of the device, which the photo service's AI gate does not count.
 Slice=anas-vectors.slice

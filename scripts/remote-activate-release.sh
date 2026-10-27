@@ -97,6 +97,7 @@ install -m 0644 anas-ai-system.service.incoming anas-ai-system.service
 install -m 0644 anas-media-system.socket.incoming anas-media-system.socket
 install -m 0644 anas-media-system@.service.incoming anas-media-system@.service
 install -m 0644 anas-media-system.slice.incoming anas-media-system.slice
+install -m 0644 anas-vectors-system.slice.incoming anas-vectors-system.slice
 install -m 0644 anas-vectors-system@.service.incoming anas-vectors-system@.service
 install -m 0644 anas-vectors-proxy-system@.socket.incoming anas-vectors-proxy-system@.socket
 install -m 0644 anas-vectors-proxy-system@.service.incoming anas-vectors-proxy-system@.service
@@ -131,7 +132,7 @@ rm -rf vectors
 install -d -m 0750 vectors
 install -m 0644 vectors-qdrant.json.incoming vectors/qdrant.json
 install -m 0644 vectors-config.yaml.incoming vectors/config.yaml
-install -m 0750 vectors-prepare.sh.incoming vectors/prepare.sh
+install -m 0750 vectors-start.sh.incoming vectors/start.sh
 install -m 0750 vectors-wait-ready.sh.incoming vectors/wait-ready.sh
 qdrant_sha=$(manifest_field vectors/qdrant.json sha256)
 qdrant_file=$(manifest_field vectors/qdrant.json file)
@@ -146,12 +147,13 @@ rm -f \
   anas-media-system.socket.incoming \
   anas-media-system@.service.incoming \
   anas-media-system.slice.incoming \
+  anas-vectors-system.slice.incoming \
   anas-vectors-system@.service.incoming \
   anas-vectors-proxy-system@.socket.incoming \
   anas-vectors-proxy-system@.service.incoming \
   vectors-qdrant.json.incoming \
   vectors-config.yaml.incoming \
-  vectors-prepare.sh.incoming \
+  vectors-start.sh.incoming \
   vectors-wait-ready.sh.incoming \
   ai-worker.tar.incoming \
   ai-model.json.incoming \

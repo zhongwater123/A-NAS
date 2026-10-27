@@ -181,7 +181,11 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-vectors@.service
 	grep -Fqx 'StopWhenUnneeded=yes' deploy/systemd/system/anas-vectors@.service
 	grep -Fqx 'Slice=anas-vectors.slice' deploy/systemd/system/anas-vectors@.service
-	grep -Fq -- '--disable-telemetry' deploy/systemd/system/anas-vectors@.service
+	grep -Fq -- '--disable-telemetry' deploy/qdrant/start.sh
+	grep -Fqx 'ExecStart=/opt/a-nas/current/vectors/start.sh %S/a-nas-vectors/%i /opt/a-nas/current' deploy/systemd/system/anas-vectors@.service
+	grep -Fqx 'LimitNOFILE=65536' deploy/systemd/system/anas-vectors@.service
+	grep -Fqx 'MemoryMax=1536M' deploy/systemd/system/anas-vectors.slice
+	grep -Fqx 'StartLimitIntervalSec=0' deploy/systemd/system/anas-vectors-proxy@.service
 	! grep -q '^\[Install\]' deploy/systemd/system/anas-vectors@.service
 	grep -Fqx 'SocketUser=%i' deploy/systemd/system/anas-vectors-proxy@.socket
 	grep -Fqx 'SocketMode=0600' deploy/systemd/system/anas-vectors-proxy@.socket
@@ -193,6 +197,8 @@ ops-check:
 	grep -Fq 'systemctl enable anas-vectors-proxy@a-nas-photos.socket' scripts/install-v1.0.1-system-services.sh
 	grep -Fqx 'Environment=ANAS_PHOTOS_VECTOR_SOCKET=/run/a-nas-vectors/a-nas-photos.sock' deploy/systemd/system/anas-photos.service
 	grep -Fq 'anas-vectors-system@.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'anas-vectors-system.slice.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'vectors-start.sh.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq 'vectors-qdrant.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fqx 'ListenStream=/run/a-nas-media/media.sock' deploy/systemd/system/anas-media.socket
 	grep -Fq '"/run/a-nas-media/media.sock"' cmd/anas-api/config.go

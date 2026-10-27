@@ -63,7 +63,7 @@ done
 # The vector index (ADR 0028): the Qdrant release its manifest pins by
 # content, the settings every instance shares, and the scripts its unit runs.
 for file in anas-vectors-system@.service anas-vectors-proxy-system@.socket anas-vectors-proxy-system@.service \
-  vectors/qdrant.json vectors/config.yaml vectors/prepare.sh vectors/wait-ready.sh; do
+  anas-vectors-system.slice vectors/qdrant.json vectors/config.yaml vectors/start.sh vectors/wait-ready.sh; do
   if [[ ! -f "$source_release/$file" ]]; then
     echo "missing vector index file: $source_release/$file" >&2
     exit 2
@@ -312,7 +312,7 @@ done
 ln -s -- "$runtime_path" "$temporary/ai/runtime"
 install -d -o root -g root -m 0755 "$temporary/vectors"
 install -o root -g root -m 0644 "$source_release/vectors/qdrant.json" "$source_release/vectors/config.yaml" "$temporary/vectors/"
-install -o root -g root -m 0755 "$source_release/vectors/prepare.sh" "$source_release/vectors/wait-ready.sh" "$temporary/vectors/"
+install -o root -g root -m 0755 "$source_release/vectors/start.sh" "$source_release/vectors/wait-ready.sh" "$temporary/vectors/"
 ln -s -- "$qdrant_path" "$temporary/vectors/qdrant"
 mv -- "$temporary" "$target"
 trap - EXIT
@@ -395,6 +395,7 @@ printf '# Written by the A-NAS installer for %s cores: all but two.\n[Service]\n
 chmod 0644 /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
 # One vector index instance per owning service, reached only through its
 # proxy socket (ADR 0028).
+install -o root -g root -m 0644 "$source_release/anas-vectors-system.slice" /etc/systemd/system/anas-vectors.slice
 install -o root -g root -m 0644 "$source_release/anas-vectors-system@.service" /etc/systemd/system/anas-vectors@.service
 install -o root -g root -m 0644 "$source_release/anas-vectors-proxy-system@.socket" /etc/systemd/system/anas-vectors-proxy@.socket
 install -o root -g root -m 0644 "$source_release/anas-vectors-proxy-system@.service" /etc/systemd/system/anas-vectors-proxy@.service

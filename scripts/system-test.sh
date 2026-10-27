@@ -127,11 +127,6 @@ models_kept=$(for role in model detector face-detector face-embedder animal-embe
 # test sees a photo organised in the Worker's sandbox.
 install -d /etc/systemd/system/anas-photos.service.d
 printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/system/anas-photos.service.d/system-test.conf
-# The vector index's proxy exits after seconds instead of minutes without a
-# connection, so that the test sees the instance stop.
-install -d /etc/systemd/system/anas-vectors-proxy@.service.d
-printf '[Service]\nExecStart=\nExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=3s 127.0.0.1:6334\n' \
-  > /etc/systemd/system/anas-vectors-proxy@.service.d/system-test.conf
 
 # stage DIR: a release as scripts/deploy-dev.ps1 stages it.
 stage() {
@@ -146,12 +141,13 @@ stage() {
   install -m 0644 /src/deploy/systemd/system/anas-media.socket "$1/anas-media-system.socket"
   install -m 0644 "/src/deploy/systemd/system/anas-media@.service" "$1/anas-media-system@.service"
   install -m 0644 /src/deploy/systemd/system/system-anasmedia.slice "$1/anas-media-system.slice"
+  install -m 0644 /src/deploy/systemd/system/anas-vectors.slice "$1/anas-vectors-system.slice"
   install -m 0644 "/src/deploy/systemd/system/anas-vectors@.service" "$1/anas-vectors-system@.service"
   install -m 0644 "/src/deploy/systemd/system/anas-vectors-proxy@.socket" "$1/anas-vectors-proxy-system@.socket"
   install -m 0644 "/src/deploy/systemd/system/anas-vectors-proxy@.service" "$1/anas-vectors-proxy-system@.service"
   install -d "$1/vectors"
   install -m 0644 /src/deploy/qdrant/qdrant.json /src/deploy/qdrant/config.yaml "$1/vectors/"
-  install -m 0755 /src/deploy/qdrant/prepare.sh /src/deploy/qdrant/wait-ready.sh "$1/vectors/"
+  install -m 0755 /src/deploy/qdrant/start.sh /src/deploy/qdrant/wait-ready.sh "$1/vectors/"
   ln -s "/src/build/qdrant/$(jq -r .sha256 /src/deploy/qdrant/qdrant.json)/$(jq -r .file /src/deploy/qdrant/qdrant.json)" \
     "$1/vectors/qdrant.tar.gz"
   install -d "$1/ai/anas_ai"
@@ -843,31 +839,89 @@ check "the Product Service account cannot connect to the photo vector index" \
   denied as a-nas python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas-vectors/a-nas-photos.sock")'
 check "the release links Qdrant kept once by content" \
   test "$(readlink /opt/a-nas/current/vectors/qdrant)" = "/opt/a-nas/qdrant/$qdrant_sha/qdrant"
+check "all vector index instances share one memory limit" \
+  test "$(systemctl show -p MemoryMax --value anas-vectors.slice)" = 1610612736
 check "connecting starts the vector index and reaches its gRPC server" \
   as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock
-# Hold a connection open while looking at the running instance.
-python3 -c 'import socket, time; s = socket.socket(socket.AF_UNIX); s.connect("/run/a-nas-vectors/a-nas-photos.sock"); time.sleep(5)' &
+# hold SOCKET SECONDS: keeps a connection open while the test looks at the
+# running instance.
+hold() { python3 -c 'import socket, sys, time; s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); time.sleep(float(sys.argv[2]))' "$1" "$2"; }
+# index_rest PATH [CURL OPTION...]: a REST answer of the photo vector index,
+# from inside its network namespace.
+index_rest() {
+  nsenter -t "$(systemctl show -p MainPID --value anas-vectors@a-nas-photos.service)" -n curl -fsS "http://127.0.0.1:6333$1" "${@:2}"
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+index_holds_photos() { # the photo service's collection holds at least one point
+  local name
+  name=$(index_rest /collections | jq -r '.result.collections[].name | select(startswith("images_v1_"))')
+  [[ -n "$name" ]] && (($(index_rest "/collections/$name" | jq -r '.result.points_count') >= 1))
+}
+systemctl start anas-vectors-proxy@a-nas-shares.socket
+hold /run/a-nas-vectors/a-nas-photos.sock 8 &
 holder=$!
-sleep 2
+hold /run/a-nas-vectors/a-nas-shares.sock 8 &
+other_holder=$!
+sleep 3
 check "the vector index runs under a dynamic identity of its own" \
   test "$(systemctl show -p User --value anas-vectors@a-nas-photos.service)" = a-nas-vec-a-nas-photos
 check "the vector index's dynamic identity is not root" dynamic_identity anas-vectors@a-nas-photos.service
+check "another owner's instance runs under another identity" \
+  test "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-vectors@a-nas-photos.service)/status")" != \
+  "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-vectors@a-nas-shares.service)/status")"
+check "another owner's socket is its own" test "$(stat -c '%a %U' /run/a-nas-vectors/a-nas-shares.sock)" = "600 a-nas-shares"
+check "the photo service cannot connect to another owner's vector index" \
+  denied as a-nas-photos python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas-vectors/a-nas-shares.sock")'
 check "the proxy shares the vector index's own network namespace" same_network_namespace
 check "the vector index's namespace has only its loopback" \
   test "$(nsenter -t "$(systemctl show -p MainPID --value anas-vectors@a-nas-photos.service)" -n ip -o link | awk -F': ' '{print $2}')" = lo
+check "the photo service's collection holds the organised photo" index_holds_photos
 check "the vector index keeps its storage in its own state directory" test -d "$vectors_state/storage"
-check "the vector index runs in background work's slice" \
-  test "$(systemctl show -p Slice --value anas-vectors@a-nas-photos.service)" = anas-vectors.slice
+check "the vector index runs in its slice under background work's" \
+  test "$(systemctl show -p Slice --value anas-vectors@a-nas-photos.service):$(systemctl show -p Slice --value anas-vectors.slice)" = anas-vectors.slice:anas.slice
+check "the vector index may keep many files open" \
+  test "$(systemctl show -p LimitNOFILE --value anas-vectors@a-nas-photos.service)" = 65536
 echo "INFO the vector index's memory: $(systemctl show -p MemoryCurrent --value anas-vectors@a-nas-photos.service) bytes"
-wait "$holder"
+wait "$holder" "$other_holder"
+systemctl stop anas-vectors-proxy@a-nas-shares.socket anas-vectors-proxy@a-nas-shares.service anas-vectors@a-nas-shares.service
 check "the vector index stops once its proxy has been idle" unit_stops anas-vectors@a-nas-photos.service
 echo "INFO the vector index's memory peak: $(systemctl show -p MemoryPeak --value anas-vectors@a-nas-photos.service) bytes"
-printf '/opt/a-nas/qdrant/another/qdrant\n' > "$vectors_state/qdrant-binary"
-touch "$vectors_state/storage/written-by-another-qdrant"
-chown --reference="$vectors_state" "$vectors_state/qdrant-binary" "$vectors_state/storage/written-by-another-qdrant"
-check "a vector index written by another Qdrant starts" \
+# mark NAME: a file in the index's storage, as its dynamic user would leave it.
+mark() {
+  touch "$vectors_state/storage/$1"
+  chown --reference="$vectors_state" "$vectors_state/storage/$1"
+}
+mark kept-by-the-same-release
+check "the same Qdrant release starts" \
   as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock
-check "and starts empty" test ! -e "$vectors_state/storage/written-by-another-qdrant"
+check "and keeps its index" test -e "$vectors_state/storage/kept-by-the-same-release"
+check "the vector index stops again once idle" unit_stops anas-vectors@a-nas-photos.service
+printf '1.19.9\n' > "$vectors_state/qdrant-version"
+chown --reference="$vectors_state" "$vectors_state/qdrant-version"
+mark written-by-another-minor-release
+check "a vector index another minor release wrote starts" \
+  as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock
+check "and starts empty" test ! -e "$vectors_state/storage/written-by-another-minor-release"
+# A collection whose stored configuration is damaged makes Qdrant panic while
+# loading: the instance cannot start until its storage is emptied.
+hold /run/a-nas-vectors/a-nas-photos.sock 4 &
+holder=$!
+sleep 2
+index_rest /collections/damaged -X PUT -H 'Content-Type: application/json' -d '{"vectors":{"size":4,"distance":"Dot"}}' >/dev/null
+wait "$holder"
+check "the vector index stops before the damage" unit_stops anas-vectors@a-nas-photos.service
+printf 'damaged\n' > "$vectors_state/storage/collections/damaged/config.json"
+failed_starts=0
+until as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock; do
+  failed_starts=$((failed_starts + 1))
+  ((failed_starts < 5)) || break
+  sleep 1
+done
+echo "INFO starts that failed on the damaged index: $failed_starts"
+check "a damaged vector index fails to start at first" test "$failed_starts" -ge 1
+check "and starts empty after two failures in a row" \
+  test "$failed_starts" -le 3 -a ! -e "$vectors_state/storage/collections/damaged"
+check "failed starts leave the vector index socket listening" systemctl is-active --quiet anas-vectors-proxy@a-nas-photos.socket
 # A probe in the vector index's own unit, in place of Qdrant.
 cat > /usr/local/lib/anas-vectors-probe.py <<'PY'
 import os, socket, sys
