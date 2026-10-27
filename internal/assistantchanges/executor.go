@@ -41,6 +41,9 @@ const (
 	// the texts of the newest keepTexts that ended are kept for their cards.
 	keepChanges = 200
 	keepTexts   = 20
+	// keepRefusals is how many of Prepare's latest refusals an account keeps
+	// for Apply, each for GrantTTL.
+	keepRefusals = 16
 )
 
 // maxPending bounds the copies one account's changes hold while they can
@@ -80,17 +83,53 @@ type Executor struct {
 // other.
 type ledger struct {
 	sync.Mutex
-	// refused is the last submission Prepare refused, so that Apply can say
-	// why without looking at any file.
-	refused refusal
+	// refused are the submissions Prepare refused lately, by digest, so that
+	// Apply can say why without looking at any file.
+	refused map[string]refusal
 	// copying is the size of the copies Prepare is making.
 	copying int64
+	// applying are the changes Apply is carrying out in this process; one
+	// left applying by an earlier process can no longer be applied.
+	applying map[string]bool
 }
 
 type refusal struct {
-	digest string
-	err    error
-	at     time.Time
+	err error
+	at  time.Time
+}
+
+// refuse remembers why Prepare refused a submission, dropping what is too
+// old to be asked for and, beyond keepRefusals, the oldest.
+func (l *ledger) refuse(digest string, err error, now time.Time) {
+	if l.refused == nil {
+		l.refused = map[string]refusal{}
+	}
+	oldest := ""
+	for d, r := range l.refused {
+		if now.Sub(r.at) > GrantTTL {
+			delete(l.refused, d)
+		} else if oldest == "" || r.at.Before(l.refused[oldest].at) {
+			oldest = d
+		}
+	}
+	if len(l.refused) >= keepRefusals {
+		delete(l.refused, oldest)
+	}
+	l.refused[digest] = refusal{err: err, at: now}
+}
+
+// live reports whether a change can still be applied, so its copies are kept
+// whole.
+func (l *ledger) live(c change, now time.Time) bool {
+	switch c.Status {
+	case StatusAwaiting:
+		return now.Sub(time.Unix(c.CreatedAt, 0)) <= awaitTTL
+	case StatusApproved:
+		return now.Sub(time.Unix(c.DecidedAt, 0)) <= GrantTTL
+	case StatusApplying:
+		return l.applying[c.ID]
+	}
+	return false
 }
 
 func (e *Executor) ledger(account string) *ledger {
@@ -157,22 +196,10 @@ const (
 	keptNone  = "none"
 )
 
-// live reports whether a change can still be applied, so its copies are kept
-// whole.
-func live(c change, now time.Time) bool {
-	switch c.Status {
-	case StatusApproved:
-		return now.Sub(time.Unix(c.DecidedAt, 0)) <= GrantTTL
-	case StatusAwaiting, StatusApplying:
-		return now.Sub(time.Unix(c.CreatedAt, 0)) <= awaitTTL
-	}
-	return false
-}
-
-// staged is the size of the change's copies.
-func (c change) staged() int64 {
+// staged is the size of the staged files the steps write, which are copied.
+func staged(steps []step) int64 {
 	var size int64
-	for _, s := range c.Steps {
+	for _, s := range steps {
 		if s.Op == "write" {
 			size += s.SourceSize
 		}
@@ -201,18 +228,18 @@ func (e *Executor) Prepare(ctx context.Context, account string, member files.Fil
 	digest, l := submission.Digest(), e.ledger(account)
 	steps, err := validate(account, submission)
 	if err == nil {
-		err = e.inspect(ctx, member, steps)
+		err = e.measure(ctx, member, steps)
 	}
 	c := change{Digest: digest, Summary: submission.Summary, Steps: steps, Status: StatusAwaiting,
 		SessionID: sessionID, RequestID: requestID}
 	var reserved int64
 	if err == nil {
-		reserved, err = e.reserve(account, l, c)
+		reserved, err = e.reserve(account, l, &c)
+	}
+	if err == nil {
+		err = e.inspect(ctx, member, c.Steps)
 	}
 	var dir string
-	if err == nil {
-		c.ID, err = newID()
-	}
 	if err == nil {
 		dir, err = e.snapshotDir(account, c.ID)
 	}
@@ -225,19 +252,19 @@ func (e *Executor) Prepare(ctx context.Context, account string, member files.Fil
 	defer l.Unlock()
 	l.copying -= reserved
 	if errors.Is(err, ErrInvalid) {
-		l.refused = refusal{digest: digest, err: err, at: e.now()}
+		l.refuse(digest, err, e.now())
 	}
 	if err != nil {
 		return nil, err
 	}
-	l.refused = refusal{}
+	delete(l.refused, digest)
 	c.CreatedAt = e.now().Unix()
 	changes, err := e.load(account)
 	if err != nil {
 		return nil, err
 	}
 	changes = append(changes, c)
-	if err := e.save(account, changes); err != nil {
+	if err := e.save(l, account, changes); err != nil {
 		return nil, err
 	}
 	return e.preview(account, c)
@@ -265,9 +292,14 @@ func (e *Executor) Decide(account, id, decision string) (json.RawMessage, error)
 	if err != nil {
 		return nil, err
 	}
+	now := e.now()
 	for i := range changes {
 		if changes[i].ID != id {
 			continue
+		}
+		// A card older than Hermes waits is void, even before a save marks it so.
+		if changes[i].Status == StatusAwaiting && !l.live(changes[i], now) {
+			return nil, ErrDecided
 		}
 		allowed := false
 		for _, from := range move.from {
@@ -276,8 +308,8 @@ func (e *Executor) Decide(account, id, decision string) (json.RawMessage, error)
 		if !allowed {
 			return nil, ErrDecided
 		}
-		changes[i].Status, changes[i].DecidedAt = move.to, e.now().Unix()
-		if err := e.save(account, changes); err != nil {
+		changes[i].Status, changes[i].DecidedAt = move.to, now.Unix()
+		if err := e.save(l, account, changes); err != nil {
 			return nil, err
 		}
 		return e.preview(account, changes[i])
@@ -324,9 +356,14 @@ func (e *Executor) Apply(ctx context.Context, account string, member files.FileS
 		for i := len(changes) - 1; i >= 0; i-- {
 			c := &changes[i]
 			if c.Status == StatusApproved && c.Digest == want && now.Sub(time.Unix(c.DecidedAt, 0)) <= GrantTTL {
-				c.Status = StatusApplying
+				if l.applying == nil {
+					l.applying = map[string]bool{}
+				}
+				c.Status, l.applying[c.ID] = StatusApplying, true
 				found = c
-				err = e.save(account, changes)
+				if err = e.save(l, account, changes); err != nil {
+					delete(l.applying, c.ID)
+				}
 				break
 			}
 		}
@@ -335,7 +372,7 @@ func (e *Executor) Apply(ctx context.Context, account string, member files.FileS
 	if found != nil {
 		granted = *found
 	}
-	refused := l.refused
+	refused, wasRefused := l.refused[want]
 	l.Unlock()
 	if err != nil {
 		return "暂时无法执行更改，什么都没有改变。"
@@ -347,7 +384,7 @@ func (e *Executor) Apply(ctx context.Context, account string, member files.FileS
 		// submission without a grant: Prepare's reasons are repeated, and any
 		// other submission is checked by its paths alone.
 		err := refused.err
-		if refused.digest != want || now.Sub(refused.at) > GrantTTL {
+		if !wasRefused || now.Sub(refused.at) > GrantTTL {
 			_, err = validate(account, submission)
 		}
 		if err != nil {
@@ -366,8 +403,9 @@ func (e *Executor) Apply(ctx context.Context, account string, member files.FileS
 				}
 			}
 		}
-		_ = e.save(account, changes)
+		_ = e.save(l, account, changes)
 	}
+	delete(l.applying, granted.ID)
 	l.Unlock()
 	total := len(granted.Steps)
 	switch {
@@ -405,46 +443,50 @@ func (e *Executor) Recent(account string) string {
 	return strings.Join(lines, "\n")
 }
 
-// reserve makes room for a new change's copies. A card its session still
-// waits for is void: Hermes asks for one answer at a time in a session, so
-// the new change replaces it. The copies of changes that can still be
-// applied, with those being made, stay within maxPending.
-func (e *Executor) reserve(account string, l *ledger, next change) (int64, error) {
+// reserve makes room for a new change's copies and names it. A card its
+// session still waits for is void: Hermes asks for one answer at a time in a
+// session, so the new change replaces it. The copies of changes that can no
+// longer be applied are cut first, and those of changes that can, with those
+// being made, stay within maxPending. The name is one no kept change has.
+func (e *Executor) reserve(account string, l *ledger, next *change) (int64, error) {
 	l.Lock()
 	defer l.Unlock()
 	changes, err := e.load(account)
 	if err != nil {
 		return 0, err
 	}
-	now, held, replaced := e.now(), l.copying, false
+	now, held, taken := e.now(), l.copying, map[string]bool{}
 	for i := range changes {
 		c := &changes[i]
+		taken[c.ID] = true
 		if next.SessionID != "" && c.SessionID == next.SessionID && c.Status == StatusAwaiting {
-			c.Status, c.DecidedAt, replaced = StatusExpired, now.Unix(), true
+			c.Status, c.DecidedAt = StatusExpired, now.Unix()
 		}
-		if live(*c, now) {
-			held += c.staged()
+		if l.live(*c, now) {
+			held += staged(c.Steps)
 		}
 	}
-	if replaced {
-		if err := e.save(account, changes); err != nil {
+	if err := e.save(l, account, changes); err != nil {
+		return 0, err
+	}
+	size := staged(next.Steps)
+	if size > 0 && held+size > maxPending {
+		return 0, invalid{fmt.Sprintf("还在等待确认的更改与这一批的暂存文件合计超过 %d MiB，等用户处理完那些更改再提交", maxPending>>20)}
+	}
+	for next.ID == "" || taken[next.ID] {
+		if next.ID, err = newID(); err != nil {
 			return 0, err
 		}
 	}
-	staged := next.staged()
-	if staged > 0 && held+staged > maxPending {
-		return 0, invalid{fmt.Sprintf("还在等待确认的更改与这一批的暂存文件合计超过 %d MiB，等用户处理完那些更改再提交", maxPending>>20)}
-	}
-	l.copying += staged
-	return staged, nil
+	l.copying += size
+	return size, nil
 }
 
-// inspect looks at what the steps' paths are now, as the member, without
-// opening any of them. The staged files' sizes come first, so that a
-// submission over the limits is refused before anything else.
-func (e *Executor) inspect(ctx context.Context, member files.FileSystem, steps []step) error {
+// measure checks the sizes of the staged files the steps write, from their
+// metadata, so that a submission over the limits is refused before any file
+// is opened.
+func (e *Executor) measure(ctx context.Context, member files.FileSystem, steps []step) error {
 	var problems invalid
-	var staged int64
 	for i := range steps {
 		s := &steps[i]
 		if s.Op != "write" {
@@ -458,15 +500,21 @@ func (e *Executor) inspect(ctx context.Context, member files.FileSystem, steps [
 			problems = append(problems, fmt.Sprintf("第 %d 项：%s 超过 %d MiB", i+1, s.Source, MaxContent>>20))
 		default:
 			s.SourceSize = from.Size
-			staged += from.Size
 		}
 	}
-	if staged > MaxStaged {
+	if staged(steps) > MaxStaged {
 		problems = append(problems, fmt.Sprintf("暂存文件合计超过 %d MiB", MaxStaged>>20))
 	}
 	if len(problems) > 0 {
 		return problems
 	}
+	return nil
+}
+
+// inspect looks at what the steps' paths are now, as the member, without
+// opening any of them.
+func (e *Executor) inspect(ctx context.Context, member files.FileSystem, steps []step) error {
+	var problems invalid
 	for i := range steps {
 		if problem := e.plan(ctx, member, &steps[i]); problem != "" {
 			problems = append(problems, fmt.Sprintf("第 %d 项：%s", i+1, problem))
@@ -570,11 +618,18 @@ func copyInto(name string, from *os.File, limit int64) (string, int64, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	hash := sha256.New()
-	copied, err := io.Copy(io.MultiWriter(file, hash), io.LimitReader(from, limit))
+	sum, copied, err := copyHashed(file, from, limit)
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
+	return sum, copied, err
+}
+
+// copyHashed copies up to limit bytes from src to dst a block at a time and
+// returns the SHA-256 and length of what it copied.
+func copyHashed(dst io.Writer, src io.Reader, limit int64) (string, int64, error) {
+	hash := sha256.New()
+	copied, err := io.Copy(io.MultiWriter(dst, hash), io.LimitReader(src, limit))
 	return hex.EncodeToString(hash.Sum(nil)), copied, err
 }
 
@@ -656,12 +711,11 @@ func (e *Executor) write(ctx context.Context, member files.FileSystem, s step, k
 	if err != nil {
 		return err
 	}
-	hash := sha256.New()
-	written, err := io.Copy(io.MultiWriter(file, hash), io.LimitReader(source, s.SourceSize+1))
+	sum, written, err := copyHashed(file, source, s.SourceSize+1)
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
-	if err == nil && (written != s.SourceSize || hex.EncodeToString(hash.Sum(nil)) != s.Hash) {
+	if err == nil && (written != s.SourceSize || sum != s.Hash) {
 		err = errDamaged
 	}
 	if err == nil && s.Before.Exists {
@@ -836,6 +890,27 @@ func (e *Executor) snapshotDir(account, id string) (string, error) {
 	return dir, os.Mkdir(dir, 0o700)
 }
 
+// cut keeps only the start of each copy in a change's folder, for its card,
+// and reports whether every copy is cut.
+func cut(dir string, steps []step) bool {
+	done := true
+	for n, s := range steps {
+		if s.Op != "write" {
+			continue
+		}
+		name := filepath.Join(dir, fmt.Sprint(n))
+		info, err := os.Stat(name)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+		case err != nil:
+			done = false
+		case info.Size() > previewLimit:
+			done = os.Truncate(name, previewLimit) == nil && done
+		}
+	}
+	return done
+}
+
 func (e *Executor) load(account string) ([]change, error) {
 	data, err := os.ReadFile(filepath.Join(e.Root, account, "changes.json"))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -851,8 +926,9 @@ func (e *Executor) load(account string) ([]change, error) {
 // save writes the account's changes, dropping the oldest beyond keepChanges
 // with their copies. A card nobody answered in time is void. A change that
 // can no longer be applied keeps only the start of each copy, which its card
-// shows, and nothing once it is older than the newest keepTexts.
-func (e *Executor) save(account string, changes []change) error {
+// shows, and nothing once it ended GrantTTL ago and is older than the newest
+// keepTexts. Tidying up is best effort: what fails is tried again next time.
+func (e *Executor) save(l *ledger, account string, changes []change) error {
 	dir, err := e.accountDir(account)
 	if err != nil {
 		return err
@@ -864,31 +940,22 @@ func (e *Executor) save(account string, changes []change) error {
 	now := e.now()
 	for i := range changes {
 		c := &changes[i]
-		if live(*c, now) {
+		if l.live(*c, now) {
 			continue
 		}
 		if c.Status == StatusAwaiting {
 			c.Status, c.DecidedAt = StatusExpired, now.Unix()
 		}
+		ended := time.Unix(max(c.CreatedAt, c.DecidedAt, c.AppliedAt), 0)
 		switch {
-		case i < len(changes)-keepTexts && c.Kept != keptNone:
-			if err := os.RemoveAll(filepath.Join(dir, c.ID)); err != nil {
-				return err
+		case i < len(changes)-keepTexts && c.Kept != keptNone && now.Sub(ended) > GrantTTL:
+			if os.RemoveAll(filepath.Join(dir, c.ID)) == nil {
+				c.Kept = keptNone
 			}
-			c.Kept = keptNone
 		case c.Kept == "":
-			for n, s := range c.Steps {
-				if s.Op != "write" {
-					continue
-				}
-				name := filepath.Join(dir, c.ID, fmt.Sprint(n))
-				if info, err := os.Stat(name); err == nil && info.Size() > previewLimit {
-					if err := os.Truncate(name, previewLimit); err != nil {
-						return err
-					}
-				}
+			if cut(filepath.Join(dir, c.ID), c.Steps) {
+				c.Kept = keptStart
 			}
-			c.Kept = keptStart
 		}
 	}
 	data, err := json.Marshal(changes)

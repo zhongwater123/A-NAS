@@ -345,6 +345,184 @@ func TestCopiesAreHeldOnlyWhileAChangeCanBeApplied(t *testing.T) {
 	}
 }
 
+func TestEachRefusalIsRepeatedForItsOwnSubmission(t *testing.T) {
+	f := newFixture(t)
+	member := &watched{FileSystem: f.member}
+	f.member = member
+	missing := `{"summary":"a","operations":[{"op":"write","path":"/nas/个人空间/a.md","source":"/nas/助手/待确认/a.md"}]}`
+	absent := `{"summary":"b","operations":[{"op":"delete","path":"/nas/个人空间/没有.md"}]}`
+	for _, submission := range []string{missing, absent} {
+		if _, err := f.prepare(submission); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("prepare = %v, want ErrInvalid", err)
+		}
+	}
+	// Another conversation's card in between leaves both reasons in place.
+	if _, err := f.exec.Prepare(context.Background(), "alice", member, []byte(`{"summary":"c","operations":[{"op":"mkdir","path":"/nas/个人空间/c"}]}`), "other", "req-2"); err != nil {
+		t.Fatal(err)
+	}
+	for submission, want := range map[string]string{missing: "已写好的文件", absent: "没有.md 不存在"} {
+		member.forget()
+		if result := f.exec.Apply(context.Background(), "alice", member, []byte(submission)); !strings.Contains(result, want) {
+			t.Errorf("apply = %s, want %q", result, want)
+		}
+		if len(member.looked)+len(member.opened) > 0 {
+			t.Errorf("apply looked at %v and opened %v", member.looked, member.opened)
+		}
+	}
+}
+
+func TestAChangeLeftApplyingByAnEarlierProcessHoldsNothing(t *testing.T) {
+	defer func(limit int64) { maxPending = limit }(maxPending)
+	maxPending = 3 << 19
+	f := newFixture(t)
+	f.put("assistant/alice/files/待确认/计划.md", strings.Repeat("x", 1<<20))
+	id := f.approve(editPlan)
+	// The Host Agent stops while applying it.
+	changes, err := f.exec.load("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes[0].Status = StatusApplying
+	data, _ := json.Marshal(changes)
+	if err := os.WriteFile(filepath.Join(f.exec.Root, "alice", "changes.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restarted := &Executor{Root: f.exec.Root, Volume: f.volume, Now: f.exec.Now}
+	if _, err := restarted.Prepare(context.Background(), "alice", f.member, []byte(editPlan), "next", "req-2"); err != nil {
+		t.Fatalf("a change nobody applies any more still holds its copy: %v", err)
+	}
+	if info, err := os.Stat(filepath.Join(f.exec.Root, "alice", id, "0")); err != nil || info.Size() > previewLimit {
+		t.Fatalf("the stuck change's copy: %v %v", info, err)
+	}
+}
+
+func TestACardOlderThanHermesWaitsCannotBeApproved(t *testing.T) {
+	f := newFixture(t)
+	f.put("assistant/alice/files/待确认/计划.md", "新\n")
+	card, err := f.prepare(editPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.clock = f.clock.Add(awaitTTL + time.Second)
+	if _, err := f.exec.Decide("alice", card["id"].(string), "approve"); !errors.Is(err, ErrDecided) {
+		t.Fatalf("approving a day-old card: %v", err)
+	}
+}
+
+func TestCopiesOfChangesThatEndedAreCutBeforeNewOnesAreMade(t *testing.T) {
+	f := newFixture(t)
+	member := &watched{FileSystem: f.member}
+	f.member = member
+	f.put("assistant/alice/files/待确认/计划.md", strings.Repeat("x", 1<<20))
+	id := f.approve(editPlan)
+	// Hermes never applies it, and the grant runs out.
+	f.clock = f.clock.Add(GrantTTL + time.Second)
+	held := int64(-1)
+	member.onOpen = func(path string) {
+		if strings.HasSuffix(path, "待确认/计划.md") {
+			if info, err := os.Stat(filepath.Join(f.exec.Root, "alice", id, "0")); err == nil {
+				held = info.Size()
+			}
+		}
+	}
+	if _, err := f.exec.Prepare(context.Background(), "alice", member, []byte(editPlan), "next", "req-2"); err != nil {
+		t.Fatal(err)
+	}
+	if held < 0 || held > previewLimit {
+		t.Fatalf("the lapsed change held %d bytes while the next was copied", held)
+	}
+}
+
+func TestADecidedCardKeepsItsTextsForAWhile(t *testing.T) {
+	f := newFixture(t)
+	f.put("assistant/alice/files/待确认/计划.md", "新计划\n")
+	raw, err := f.exec.Prepare(context.Background(), "alice", f.member, []byte(editPlan), "first", "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first struct{ ID string }
+	if err := json.Unmarshal(raw, &first); err != nil {
+		t.Fatal(err)
+	}
+	for i := range keepTexts {
+		if _, err := f.exec.Prepare(context.Background(), "alice", f.member, []byte(editPlan), fmt.Sprint("later-", i), "req-2"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	card, err := f.exec.Decide("alice", first.ID, "reject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shown struct {
+		Operations []struct{ Before, After string }
+	}
+	if err := json.Unmarshal(card, &shown); err != nil || shown.Operations[0].After != "新计划\n" || shown.Operations[0].Before != "# 计划\n- 买菜\n" {
+		t.Fatalf("the rejected card lost its texts: %s", card)
+	}
+	f.clock = f.clock.Add(GrantTTL + time.Second)
+	if _, err := f.exec.Prepare(context.Background(), "alice", f.member, []byte(editPlan), "much-later", "req-3"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(f.exec.Root, "alice", first.ID)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("an old ended change keeps its texts: %v", err)
+	}
+}
+
+func TestTidyingUpThatFailsDoesNotStopTheAccount(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root removes the folder anyway")
+	}
+	f := newFixture(t)
+	f.put("assistant/alice/files/待确认/计划.md", "新\n")
+	first := f.approve(editPlan)
+	if _, err := f.exec.Decide("alice", first, "expire"); err != nil {
+		t.Fatal(err)
+	}
+	stuck := filepath.Join(f.exec.Root, "alice", first)
+	if err := os.Chmod(stuck, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(stuck, 0o700) })
+	f.clock = f.clock.Add(GrantTTL + time.Second)
+	for i := range keepTexts + 1 {
+		if _, err := f.exec.Prepare(context.Background(), "alice", f.member, []byte(editPlan), fmt.Sprint("s", i), "req-2"); err != nil {
+			t.Fatalf("prepare %d with a folder that cannot be removed: %v", i, err)
+		}
+	}
+	if err := os.Chmod(stuck, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.exec.Prepare(context.Background(), "alice", f.member, []byte(editPlan), "last", "req-3"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stuck); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the folder is not removed once it can be: %v", err)
+	}
+}
+
+func TestTheCapIsCheckedBeforeFoldersAreMeasured(t *testing.T) {
+	defer func(limit int64) { maxPending = limit }(maxPending)
+	maxPending = 3 << 19
+	f := newFixture(t)
+	member := &watched{FileSystem: f.member}
+	f.member = member
+	f.put("assistant/alice/files/待确认/计划.md", strings.Repeat("x", 1<<20))
+	f.put("spaces/shared/旅行/1.jpg", "one")
+	if _, err := f.exec.Prepare(context.Background(), "alice", member, []byte(editPlan), "first", "req-1"); err != nil {
+		t.Fatal(err)
+	}
+	member.forget()
+	both := `{"summary":"x","operations":[` +
+		`{"op":"copy","path":"/nas/个人空间/旅行","source":"/nas/共享空间/旅行"},` +
+		`{"op":"write","path":"/nas/个人空间/计划.md","source":"/nas/助手/待确认/计划.md"}]}`
+	if _, err := f.exec.Prepare(context.Background(), "alice", member, []byte(both), "second", "req-2"); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "等待确认") {
+		t.Fatalf("prepare over the cap: %v", err)
+	}
+	if len(member.measured)+len(member.opened) > 0 {
+		t.Fatalf("measured %v and opened %v before refusing", member.measured, member.opened)
+	}
+}
+
 func TestAccountsMakeChangesSideBySide(t *testing.T) {
 	f := newFixture(t)
 	var wg sync.WaitGroup
@@ -384,7 +562,9 @@ func TestAccountsMakeChangesSideBySide(t *testing.T) {
 // watched is the member's file system, noting every path looked at or opened.
 type watched struct {
 	files.FileSystem
-	looked, opened []string
+	looked, opened, measured []string
+	// onOpen, when set, runs before a file is opened.
+	onOpen func(path string)
 }
 
 func (w *watched) Lstat(ctx context.Context, path string) (files.FileInfo, error) {
@@ -394,10 +574,18 @@ func (w *watched) Lstat(ctx context.Context, path string) (files.FileInfo, error
 
 func (w *watched) Open(ctx context.Context, path string) (*os.File, error) {
 	w.opened = append(w.opened, path)
+	if w.onOpen != nil {
+		w.onOpen(path)
+	}
 	return w.FileSystem.Open(ctx, path)
 }
 
-func (w *watched) forget() { w.looked, w.opened = nil, nil }
+func (w *watched) Usage(ctx context.Context, path string) (int64, error) {
+	w.measured = append(w.measured, path)
+	return w.FileSystem.Usage(ctx, path)
+}
+
+func (w *watched) forget() { w.looked, w.opened, w.measured = nil, nil, nil }
 
 func TestASubmissionWithoutAGrantOpensNoFile(t *testing.T) {
 	f := newFixture(t)
@@ -444,6 +632,7 @@ func TestOversizedSubmissionsAreRefusedBeforeAnyFileIsOpened(t *testing.T) {
 	for name, c := range map[string]struct{ submission, want string }{
 		"too many operations": {`{"summary":"x","operations":[` + strings.Join(many, ",") + `]}`, "最多 100 项"},
 		"too long":            {`{"summary":"` + strings.Repeat("长", MaxSubmission/3+1) + `","operations":[{"op":"mkdir","path":"/nas/个人空间/x"}]}`, "64 KiB"},
+		"arguments too large": {`{"summary":"x","operations":[{"op":"mkdir","path":"/nas/个人空间/x"}],"note":"` + strings.Repeat("x", maxArguments) + `"}`, "参数超过 1024 KiB"},
 	} {
 		member.forget()
 		if _, err := f.prepare(c.submission); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), c.want) {
