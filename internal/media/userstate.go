@@ -169,17 +169,17 @@ func (s *Service) Collections(ctx context.Context, actor accounts.User) ([]Colle
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var collection Collection
 		var updated string
 		if err := rows.Scan(&collection.ID, &collection.Name, &updated); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		collection.UpdatedAt = parseTime(updated)
 		collections = append(collections, collection)
 	}
-	if err := rows.Close(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
 	for i := range collections {

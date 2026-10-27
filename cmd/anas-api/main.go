@@ -55,6 +55,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/terminal"
 	"github.com/zhongwater123/A-NAS/internal/transfers"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
+	"github.com/zhongwater123/A-NAS/internal/vectorindex"
 	"github.com/zhongwater123/A-NAS/internal/webui"
 )
 
@@ -120,6 +121,12 @@ func runPhotoService(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	lookup := sessionlookup.NewClient(config.SessionSocket)
+	var vectors photos.VectorIndex
+	if config.VectorSocket != "" {
+		client := vectorindex.New(config.VectorSocket, logger)
+		defer func() { _ = client.Close() }()
+		vectors = client
+	}
 	return photoservice.Run(ctx, photoservice.Config{
 		Root:                config.Root,
 		SocketPath:          config.Socket,
@@ -130,6 +137,7 @@ func runPhotoService(logger *slog.Logger) error {
 		AI:                  aiworker.Client{SocketPath: config.AISocket},
 		AIQuietPeriod:       config.Quiet,
 		Photos:              photos.Options{Media: config.Media.client()},
+		Vectors:             vectors,
 	})
 }
 
@@ -344,7 +352,7 @@ func run(logger *slog.Logger) error {
 	tasks.Go(func() error { transferService.Run(background); return nil })
 	if photoService != nil {
 		tasks.Go(func() error {
-			photoservice.RunBackground(background, photoService, logger, photoAI, photoservice.NewGate(photoservice.QuietPeriod, logger))
+			photoservice.RunBackground(background, photoService, logger, photoAI, photoservice.NewGate(photoservice.QuietPeriod, logger), nil)
 			return nil
 		})
 	}
@@ -533,8 +541,8 @@ func (*developmentOperations) Open(context.Context, string, string) (io.ReadClos
 	return nil, files.SnapshotObject{}, files.ErrNotFound
 }
 func (*developmentOperations) Delete(context.Context, string, string) error { return files.ErrNotFound }
-func (*developmentOperations) Prune(context.Context, []string) (files.SnapshotPrune, error) {
-	return files.SnapshotPrune{}, errors.New("development snapshot backend is not configured")
+func (*developmentOperations) Survey(context.Context, []string) (files.SnapshotSurvey, error) {
+	return files.SnapshotSurvey{}, errors.New("development snapshot backend is not configured")
 }
 
 // configuredContainers selects container management and the App Center

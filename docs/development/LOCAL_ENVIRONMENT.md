@@ -1,8 +1,8 @@
 # 本地开发环境
 
-更新时间：2026-10-23
+更新时间：2026-10-27
 
-项目有两台 Windows 开发机。[检出换行](#windows-检出换行)、[Root 集成测试](#root-集成测试)、[系统测试](#系统测试)和[实验 NAS 接入](#实验-nas-接入)适用于两台；两台的差异分列在各自的小节。
+项目有两台 Windows 开发机和一台 Mac 开发机。[检出换行](#windows-检出换行)只适用于 Windows；[Root 集成测试](#root-集成测试)、[系统测试](#系统测试)和[实验 NAS 接入](#实验-nas-接入)按两台 Windows 开发机写成；各机的差异分列在各自的小节。
 
 ## Windows 检出换行
 
@@ -69,7 +69,7 @@ wsl -d Ubuntu-24.04 -u root
 | WSL 用户 | 日常用户，属于 `docker` 组，没有免密 `sudo`；没有 `anas-dev` |
 | WSL 工作区入口 | 直接使用 `/mnt/d/A-NAS` 或对应工作树 |
 | Git | Git for Windows；仓库内已设置 `core.autocrlf=false`、`core.eol=lf` |
-| 产品工具链 | Go 1.27.1、Node.js 26.9.0、npm 11.19.1、ShellCheck 0.11.0、jq 与 Ruff（见[静态检查](#静态检查)），均以用户身份装在 `~/.local/opt`，`. ~/.anas-env` 把它们加入 `PATH`；`go.mod` 要求更新的 Go 时，`go` 命令自动下载；gcc 15.2 来自 Ubuntu 软件包（`/usr/bin/gcc`），cgo 可直接在 WSL 中编译 |
+| 产品工具链 | Go 1.27.1、Node.js 26.9.0、npm 11.19.1、ShellCheck 0.11.0、lychee 0.24.2、jq 与 Ruff（见[静态检查](#静态检查)），均以用户身份装在 `~/.local/opt`，`. ~/.anas-env` 把它们加入 `PATH`；`go.mod` 要求更新的 Go 时，`go` 命令自动下载；gcc 15.2 来自 Ubuntu 软件包（`/usr/bin/gcc`），cgo 可直接在 WSL 中编译 |
 | Docker | WSL 内 Docker Engine 29.1.3，cgroup v2；Docker Hub 不可达，`deb.debian.org` 与 `proxy.golang.org` 可达 |
 | 本地镜像 | `anas-acl-matrix:bookworm`：Debian 12，加装 gcc、acl、btrfs-progs、samba、samba-vfs-modules 与 smbclient，用于 root 集成测试，也可在 Debian 12 中复现 cgo 测试；`anas-systemd:trixie`：由 `scripts/build-system-test-image.sh` 以前者为构建器生成，用于系统测试 |
 
@@ -92,6 +92,8 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
   -e GOFLAGS="-mod=readonly -buildvcs=false" -e CGO_ENABLED=1 \
   anas-acl-matrix:bookworm /usr/local/go/bin/go test ./...
 ```
+
+向量索引的测试（`internal/vectorindex` 与相册的同步）运行 [`deploy/qdrant/qdrant.json`](../../deploy/qdrant/qdrant.json) 固定的 Qdrant 二进制。先在 WSL 中运行一次 `scripts/fetch-qdrant.sh`：它下载官方压缩包，核对大小与 SHA-256，把二进制留在 `build/qdrant/<sha256>/`。测试默认取这个位置，也可以用 `ANAS_QDRANT_BINARY` 指定。缺少二进制时这些测试跳过；设 `ANAS_QDRANT_REQUIRED=1` 时改为失败，CI 就是这样设的。ext4 副本不带 `build/`，复制后再把 `build/qdrant` 一并复制过去，或在副本中重新获取。
 
 把最后的 `go test ./...` 换成 `go vet ./...` 或 `go build -o build/ ./cmd/anas-api ./cmd/anas-host-agent` 即得到对应检查。root 集成测试使用同一镜像，去掉 `-u`，加上 `--privileged -e ANAS_ROOT_INTEGRATION=1`，运行 `go test -tags rootintegration -count=1 ./internal/hostops/linux`。
 
@@ -116,6 +118,94 @@ scripts/build-system-test-image.sh anas-systemd:trixie anas-acl-matrix:bookworm
 - 屏保视频不随 release 暂存。只有更换视频时，才用 `deploy-screensavers.ps1` 上传 NAS 还没有的文件，见[本地控制台运行手册](../runbooks/operate-local-kiosk.md#更换屏保视频)。系统安装器随 release 一起暂存，所以基于 [ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md) 之前主干的分支仍使用旧安装器，会在不带视频的升级后停播屏保；这类分支应先合入主干再部署。
 - 在 PowerShell 5.1 中运行 `deploy-dev.ps1` 不要加 `2>&1`：Windows OpenSSH 的 `close - IO is still pending` 会变成错误记录，使脚本在 `ErrorActionPreference = 'Stop'` 下中止。
 - 撤销本机访问：删除 NAS 上 `/home/guoyi/.ssh/authorized_keys` 中注释为 `claude-code@SKZ00011303->guoyi@a-nas` 的一行。
+
+## 开发机 C：macOS
+
+| 项目 | 状态 |
+|---|---|
+| 系统 | macOS 27.0.1，Apple 芯片（arm64） |
+| 检出 | `~/Desktop/A-NAS`，在 iCloud“桌面与文稿”的同步范围内，见[注意事项](#注意事项) |
+| 本机工具 | Homebrew 安装的 Go 1.27.3、ShellCheck 0.11.0、bash 5.3、Colima 0.10.3 与 Docker CLI；Node.js 26.11.1、npm 11.20.0；Ruff 0.17.1 按[静态检查](#静态检查)装在 `~/.local/opt/ruff` |
+| `~/.anas-env` | 把 Ruff 与 `/opt/homebrew/bin` 放在 `PATH` 最前面：macOS 自带的 `/bin/bash` 是 3.2，`ops-check` 需要 bash 4 以上 |
+| Linux 虚拟机 | Colima 配置 `anas`：vz、6 核、8 GiB，Ubuntu 24.04 arm64，只供 A-NAS 使用；本机的 `default` 配置留给其他项目 |
+| 虚拟机工具链 | 装在虚拟机用户的 `~/.local/opt`：Go 1.27.3、Node.js 26.9.0（与 CI 相同）、ShellCheck 0.11.0、Ruff 0.17.1；gcc 13.3 来自 apt。由虚拟机的 `~/.anas-env` 加入 `PATH` |
+| 虚拟机中的镜像 | `golang:1.27.3-trixie`、`debian:trixie`；系统测试镜像尚未构建 |
+| 模型 | `~/A-NAS-models`，目录结构与 `deploy-dev.ps1` 的默认目录相同（`embeddinggemma-2-740m`、`faces/yunet`、`faces/auraface`、`pets/dinov2-small`、`dfine-obj365`），另有 `faces/sface`；文件按 `deploy/models/*.json` 中的地址下载，并核对 SHA-256。D-FINE 只有官方权重 `dfine_m_obj365.pth`：在 arm64 上按清单导出的 ONNX 大小相同但 SHA-256 不同，Worker 与暂存都会拒绝，放在 `dfine-obj365/arm64-export`，只供本机评估；`dfine-obj365/official` 还需从已有清单所列文件的开发机复制 |
+| 网络 | Docker Hub 时通时断（`registry-1.docker.io` 有时被解析到错误地址），拉取失败时重试；`proxy.golang.org`、`vuln.go.dev`、npm、PyPI、GitHub 与 `deb.debian.org` 可达 |
+
+### 为什么用虚拟机
+
+产品的 Go 代码只面向 Linux（例如 `internal/shareservice` 带 `//go:build linux`），所以在 macOS 上 `go vet` 和 `anas-api` 的构建都会失败。本机可以运行 `api-check`、`web-*`、`fmt-check`、`docs-check`、`ops-check`、`ai-lint` 与 `ai-test`；完整门禁和 Fake 预览要在 `anas` 虚拟机中运行。与 [check-in-wsl](../../.claude/skills/check-in-wsl/SKILL.md) 一样，先把检出复制到虚拟机自己的 ext4 目录再运行，因为本机的 `node_modules` 装的是 darwin 平台的二进制，不能共用。
+
+### 配置
+
+只需创建一次虚拟机：
+
+```bash
+colima start anas --cpu 6 --memory 8 --disk 60 --vm-type vz --mount-type virtiofs
+docker context use colima    # colima start 会把 Docker 上下文切到 colima-anas；本机其他项目要用 default 时切回
+```
+
+虚拟机中的工具链：
+
+- 用 apt 安装 `build-essential`、`jq`、`rsync` 与 `python3-venv`。
+- Go 与 Node.js 从官方地址下载 linux-arm64 包，按官方公布的 SHA-256 核对。
+- ShellCheck 用 GitHub 发布的 `shellcheck-v0.11.0.linux.aarch64.tar.xz`，SHA-256 为 `12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588`。
+- Ruff 按[静态检查](#静态检查)的命令安装。
+
+镜像拉不下来时，可以从已有该镜像的虚拟机复制：`docker --context <来源> save <镜像> | docker --context colima-anas load`。
+
+### 运行检查
+
+在检出根目录运行，第一次约 20 分钟，之后只同步改动的部分：
+
+```bash
+colima ssh -p anas -- bash -s -- "$PWD" <<'EOF'
+set -euo pipefail
+. ~/.anas-env
+src=$1 dst=~/anas-check/$(basename "$1")
+mkdir -p "$dst"
+rsync -a --delete --exclude .git --exclude web/node_modules --exclude tools/openapi/node_modules --exclude build \
+  --include internal/webui/dist/.keep --exclude 'internal/webui/dist/*' "$src"/ "$dst"/
+cd "$dst"
+if make check-steps > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
+EOF
+```
+
+### Fake 预览
+
+与 [fake-preview](../../.claude/skills/fake-preview/SKILL.md) 相同，只是构建和运行都在虚拟机中。Colima 会把虚拟机里监听 `127.0.0.1` 的端口转发到本机，所以本机浏览器可以直接打开 `http://<名称>.localhost:<端口>`：
+
+```bash
+colima ssh -p anas -- bash -s -- "$PWD" <名称> <端口> <<'EOF'
+set -euo pipefail
+. ~/.anas-env
+src=$1 dst=~/anas-check/$(basename "$1") state=~/anas-preview/$2
+mkdir -p "$dst" "$state"
+rsync -a --delete --exclude .git --exclude web/node_modules --exclude tools/openapi/node_modules --exclude build \
+  --include internal/webui/dist/.keep --exclude 'internal/webui/dist/*' "$src"/ "$dst"/
+cd "$dst" && make build-binaries > "$state/build.log" 2>&1 && cp build/anas-api "$state/"
+cd "$state"
+ANAS_HOSTSTATE_MODE=fake ANAS_HTTP_ADDR=127.0.0.1:$3 ANAS_STATE_DIR=$state setsid nohup ./anas-api > api.log 2>&1 < /dev/null &
+echo $! > pid
+EOF
+```
+
+首次启用管理员时，要在虚拟机里请求回环地址：
+
+```bash
+colima ssh -p anas -- bash -s <<'EOF'
+curl -fsS -X POST -H 'Content-Type: application/json' \
+  -d '{"username":"<账号>","password":"<测试密码>"}' http://127.0.0.1:<端口>/api/v1/setup/admin
+EOF
+```
+
+停止预览：`colima ssh -p anas -- bash -c 'kill "$(cat ~/anas-preview/<名称>/pid)"'`。
+
+### 注意事项
+
+- iCloud 同步的目录中，iCloud 可能生成“空格加数字”的冲突副本（如 `index 3.html`），也会把不常用的文件移到云端、本地只留占位，rsync 读到占位文件时报 `Resource deadlock avoided`。因此上面的 rsync 跳过 `internal/webui/dist` 的构建产物（副本中会重新构建）。新的检出、模型与数据集都应放在不同步的目录。
+- 虚拟机与 Docker 镜像只供 A-NAS 使用；`colima stop anas` 释放它占用的内存。
 
 ## Root 集成测试
 
@@ -225,6 +315,16 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - 重启 Host Agent 后以上行为保持；
 - 屏保视频的独立通道（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)）：暂存只上传缺少的视频并复用旧 release 暂存过的视频；安装后的池成为当前池，release 升级保留它；共有的视频只存一份；重复安装同一个池不产生变化；切回已安装的池不需要暂存区；视频哈希不符或池 ID 与清单不符时拒绝且不留改动；从旧安装器首次升级时以硬链接导入它留下的池；
 - 本地 AI 随系统安装（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：套接字只对相册服务的组开放，搜索经套接字按需启动 Worker，Worker 以动态分配的身份运行；单元的 CPU 上限是本机逻辑核数减 2（安装器写入的 drop-in），内存先回收后上限；上传的照片在 Worker 沙箱中得到向量与检测结果（相册服务的空闲期经 drop-in 缩短为 2 秒）；放在 Worker 自己单元中的探针打不开网络套接字、列不出数据卷，而同一探针在沙箱外可以；暂存的模型或检测器与清单不符时拒绝安装且不留改动；升级不重复复制模型、检测器与运行环境，并启动新 release 的 Worker。CI 使用替身模型与检测器、只含 Debian Python 的运行环境与 Worker 的假 Provider；
+- 向量索引（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)）：
+  - 套接字只属于相册服务的账号，产品服务的账号连不上；
+  - 连接时拉起实例，实例与代理同在一个只有 `lo` 的网络命名空间，以每个实例自己的动态身份运行；
+  - 代理空闲（经 drop-in 缩短为 3 秒）后实例停止；
+  - 换了 Qdrant 二进制时存储被清空；
+  - 放在实例单元中的探针看不到网络、读不到数据卷与产品状态；
+  - 篡改的压缩包被拒绝；
+  - 相册服务建好集合、同步照片，并记下搜索的影子比对。
+
+  运行前需要 `scripts/fetch-qdrant.sh` 取得的压缩包。
 - 最后卸载数据卷，相册服务在自己的挂载命名空间中察觉并停止服务。容器的挂载默认是 private，脚本先改为与 Debian 主机一致的 shared，否则宿主机的卸载传不进服务的命名空间。
 
 ```bash
@@ -315,7 +415,19 @@ Web 测试由 [MSW](https://mswjs.io/) 应答产品 API（[`test/server.ts`](../
 | `make web-lint` | `web/` 中的 `npm run lint`：Oxlint（含 jsx-a11y）与 eslint-plugin-react-hooks（含 React Compiler 的规则），再由 Biome 检查格式与导入顺序；规则列在 `web/.oxlintrc.json`，所有文件都须通过 |
 | `make go-lint` | golangci-lint，版本由 `tools/golangci-lint/go.mod` 固定，首次运行经 `go tool` 从 `proxy.golang.org` 构建；规则与理由见 `.golangci.yml` |
 | `make ai-lint` | Ruff 检查 `ai/`；`ai/requirements-dev.lock` 按哈希固定版本，`PATH` 上的 `ruff` 版本不同即失败。Ruff 在 WSL 中不检查可执行位（EXE001/EXE002），这两条只在 CI 报出：Python 文件在 Git 中是 0644，不写 shebang |
+| `make docs-check` | [`tools/doccheck`](../../tools/doccheck/main.go) 按[文档的写入规则](../README.md#写入规则)核对状态与索引；再由 lychee 离线检查每个受 Git 跟踪的 `*.md` 中的链接：目标文件存在，指向 Markdown 的锚点对应真实的标题。lychee 的版本由 Makefile 的 `LYCHEE_VERSION` 固定（不同版本生成标题锚点的规则不同），CI 按哈希安装同一版本 |
 | `make ops-check` | 对每个受 Git 跟踪的 `*.sh` 运行 ShellCheck（`.shellcheckrc`）与 `bash -n`，由 `tools/depcheck` 确认 Dependabot 不把 0.x 的 Web 包放进分组，再核对单元与安装器的约定；ShellCheck 的版本由 Makefile 的 `SHELLCHECK_VERSION` 固定（不同版本判断不同），CI 按哈希安装同一版本 |
+
+lychee 从发布页下载，核对 SHA-256（与 CI 中的一致）后放进 `PATH`：
+
+```bash
+curl -fsSL -o /tmp/lychee.tar.gz https://github.com/lycheeverse/lychee/releases/download/lychee-v0.24.2/lychee-x86_64-unknown-linux-gnu.tar.gz
+echo "1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a  /tmp/lychee.tar.gz" | sha256sum -c -
+tar -xzf /tmp/lychee.tar.gz -C /tmp
+install /tmp/lychee-x86_64-unknown-linux-gnu/lychee ~/.local/opt/bin/lychee
+```
+
+开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。
 
 Ruff 不随 npm 或 Go 安装。有 `ensurepip` 的机器装进独立的 venv，再把其 `bin` 加入 `PATH`：
 

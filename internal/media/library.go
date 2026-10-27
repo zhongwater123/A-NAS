@@ -136,15 +136,15 @@ func (s *Service) describeLibrary(ctx context.Context, actor accounts.User, row 
 	if err != nil {
 		return Library{}, err
 	}
+	defer folders.Close()
 	for folders.Next() {
 		var folder LibraryFolder
 		if err := folders.Scan(&folder.EntryID, &folder.Name, &folder.Path, &folder.Missing); err != nil {
-			_ = folders.Close()
 			return Library{}, err
 		}
 		library.Folders = append(library.Folders, folder)
 	}
-	if err := folders.Close(); err != nil {
+	if err := errors.Join(folders.Err(), folders.Close()); err != nil {
 		return Library{}, err
 	}
 	err = s.store.db.QueryRowContext(ctx, `
@@ -261,16 +261,16 @@ WHERE l.space_id = ? AND l.id <> ?`, space.ID, exclude)
 	if err != nil {
 		return accounts.Space{}, nil, err
 	}
+	defer others.Close()
 	var taken []string
 	for others.Next() {
 		var path string
 		if err := others.Scan(&path); err != nil {
-			_ = others.Close()
 			return accounts.Space{}, nil, err
 		}
 		taken = append(taken, path)
 	}
-	if err := others.Close(); err != nil {
+	if err := errors.Join(others.Err(), others.Close()); err != nil {
 		return accounts.Space{}, nil, err
 	}
 	for i, folder := range folders {

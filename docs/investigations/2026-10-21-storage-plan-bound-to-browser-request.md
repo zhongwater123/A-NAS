@@ -1,7 +1,7 @@
 # 存储计划执行绑定浏览器请求
 
-状态：fixed locally；Experimental NAS verification pending
-更新时间：2026-10-21
+状态：fixed，待实机验收
+更新时间：2026-10-27
 
 ## 症状与影响
 

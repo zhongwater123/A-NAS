@@ -26,6 +26,9 @@ dst=~/anas-check/$(basename "$src")
 mkdir -p "$dst"
 rsync -a --delete --exclude .git --exclude web/node_modules --exclude build "$src"/ "$dst"/
 cd "$dst"
+# The vector index tests run the pinned Qdrant (docs/development/LOCAL_ENVIRONMENT.md).
+bash scripts/fetch-qdrant.sh >/dev/null
+export ANAS_QDRANT_REQUIRED=1
 if make check-steps > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
 EOF
 ```
