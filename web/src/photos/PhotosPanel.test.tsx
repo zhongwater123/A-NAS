@@ -3,9 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
-import { PhotosPanel } from "./PhotosPanel";
-import type { PhotoAlbum, PhotoAsset, PhotoLibrary } from "./api";
 import { json, stubAPI } from "../test/api";
+import type { PhotoAlbum, PhotoAsset, PhotoLibrary } from "./api";
+import { PhotosPanel } from "./PhotosPanel";
 
 // jsdom decodes no images: the image searched by is the file as it came.
 vi.mock("./imageSearch", async (original) => ({
@@ -534,8 +534,8 @@ describe("PhotosPanel viewer", () => {
         userId="user:alice"
         userName="alice"
         isAdmin={false}
-        focus={{ assetId: "photo:z", at: 1 }}
-        onFocusHandled={handled}
+        intent={{ assetId: "photo:z" }}
+        onIntentHandled={handled}
       />,
     );
     expect(await screen.findByRole("dialog", { name: "查看 photo:z.jpg" })).toBeTruthy();
@@ -558,8 +558,8 @@ describe("PhotosPanel viewer", () => {
         userId="user:alice"
         userName="alice"
         isAdmin={false}
-        focus={{ assetId: "photo:gone", at: 1 }}
-        onFocusHandled={handled}
+        intent={{ assetId: "photo:gone" }}
+        onIntentHandled={handled}
       />,
     );
     expect(await screen.findByText("照片或相册已不存在")).toBeTruthy();

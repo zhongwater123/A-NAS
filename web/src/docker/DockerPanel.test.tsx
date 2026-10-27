@@ -3,10 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
-import type { ContainerSnapshot, ContainerSummary } from "./api";
-import { DockerPanel } from "./DockerPanel";
 import { stubAPI } from "../test/api";
 import { app } from "../test/fixtures";
+import type { ContainerSnapshot, ContainerSummary } from "./api";
+import { DockerPanel } from "./DockerPanel";
 
 function container(name: string, overrides: Partial<ContainerSummary> = {}): ContainerSummary {
   return {
@@ -151,7 +151,7 @@ describe("DockerPanel", () => {
   it("opens on an app's containers when the App Center asks", async () => {
     serve();
     const handled = vi.fn();
-    render(<DockerPanel focus={{ project: "a-nas-immich", at: 1 }} onFocusHandled={handled} />);
+    render(<DockerPanel intent={{ project: "a-nas-immich" }} onIntentHandled={handled} />);
 
     expect(await screen.findByRole("heading", { name: "Immich" })).toBeTruthy();
     expect(screen.getAllByRole("article")).toHaveLength(2);

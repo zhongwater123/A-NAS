@@ -1,21 +1,19 @@
-import { formatBytes } from "../lib/bytes";
-import { relativeTime as formatRelativeTime } from "../lib/time";
 // AI 助手 window, named VNAS on the desktop (ADR 0024 decision 9). The thread is assistant-ui — the chat
 // library Hermes Desktop is built on — fed with Hermes Desktop's own transcript
 // model over its own JSON-RPC client; the conversation list, confirmation cards
 // and styling are A-NAS's.
 import {
+  type AppendMessage,
   AssistantRuntimeProvider,
   ChainOfThoughtPrimitive,
   ComposerPrimitive,
+  type ExternalStoreAdapter,
   MessagePrimitive,
+  type ThreadMessageLike,
   ThreadPrimitive,
+  type ToolCallMessagePartComponent,
   useAuiState,
   useExternalStoreRuntime,
-  type AppendMessage,
-  type ExternalStoreAdapter,
-  type ThreadMessageLike,
-  type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
 import {
   type CodeHeaderProps,
@@ -35,19 +33,22 @@ import {
   CircleHelp,
   Code,
   Copy,
+  Eye,
   FilePen,
   FileSearch,
   FileText,
   FolderPlus,
   Hand,
   History,
-  Eye,
   Image as ImageIcon,
   Info,
+  Keyboard,
   ListChecks,
   LoaderCircle,
   LockKeyhole,
   MessageSquarePlus,
+  MonitorSmartphone,
+  MousePointerClick,
   MoveRight,
   Pencil,
   Search,
@@ -60,17 +61,12 @@ import {
   Video,
   Wrench,
   X,
-  Keyboard,
-  MonitorSmartphone,
-  MousePointerClick,
 } from "lucide-react";
 import {
   type ComponentPropsWithoutRef,
-  type ErrorInfo,
+  createContext,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
-  Component,
-  createContext,
   useCallback,
   useContext,
   useEffect,
@@ -81,15 +77,18 @@ import {
   useRef,
   useState,
 } from "react";
+import { ErrorBoundary } from "react-error-boundary";
 
-import { AssistantGlyph } from "./AssistantGlyph";
+import { formatBytes } from "../lib/bytes";
 import { copyText } from "../lib/clipboard";
+import { relativeTime as formatRelativeTime } from "../lib/time";
+import { AssistantGlyph } from "./AssistantGlyph";
 import {
   type Approval,
   type AssistantQuestion,
   type AssistantSession,
-  type ChangeOperation,
   answerQuestions,
+  type ChangeOperation,
   decideApproval,
   deleteSession,
   failureText,
@@ -102,12 +101,12 @@ import { withUniqueToolCallIdsWithinMessage } from "./hermes/lib/chat-messages/t
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
 import type { SessionActiveListResult } from "./hermes/shared/gateway-contract.generated";
 import { MemoryView } from "./MemoryView";
-import { readTaskNotices, taskOfRun, useTaskNotices } from "./taskNotices";
-import { type Danger, ControlError, WebosController } from "./webosControl";
+import { linkPhotos, type NamedPhoto, photoOf, photosIn } from "./photoLinks";
 import { TasksView } from "./TasksView";
-import { type NamedPhoto, linkPhotos, photoOf, photosIn } from "./photoLinks";
+import { readTaskNotices, taskOfRun, useTaskNotices } from "./taskNotices";
 import { useAssistantGateway } from "./useAssistantGateway";
 import { useAssistantThread } from "./useAssistantThread";
+import { ControlError, type Danger, WebosController } from "./webosControl";
 import "./assistant.css";
 
 const SUGGESTIONS = [
@@ -139,23 +138,17 @@ function readRun(id: string) {
   if (task) readTaskNotices(task);
 }
 
-/** What the desktop asks the window to show: a run of a scheduled task, or the tasks. */
-export interface AssistantFocus {
-  sessionId?: string;
-  title?: string;
-  at: number;
-}
-
 export function AssistantPanel({
   username,
   onShowPhoto,
-  focus,
-  onFocusHandled,
+  intent,
+  onIntentHandled,
 }: {
   username: string;
   onShowPhoto?(assetId: string): void;
-  focus?: AssistantFocus;
-  onFocusHandled?(): void;
+  /** What the desktop asks the window to show: a run of a scheduled task, or the tasks. */
+  intent?: { sessionId?: string; title?: string };
+  onIntentHandled?(): void;
 }) {
   const gateway = useAssistantGateway();
   const [sessions, setSessions] = useState<AssistantSession[]>([]);
@@ -397,18 +390,18 @@ export function AssistantPanel({
     sendPlan(planned.text);
   }, [planned]);
   // A toast on the desktop opens a run, or the tasks.
-  const [focusBefore, setFocusBefore] = useState<typeof focus>();
-  if (focusBefore !== focus) {
-    setFocusBefore(focus);
-    if (focus?.sessionId) showRun(focus.sessionId, focus.title ?? "定时任务");
-    else if (focus) setView("tasks");
+  const [intentBefore, setIntentBefore] = useState<typeof intent>();
+  if (intentBefore !== intent) {
+    setIntentBefore(intent);
+    if (intent?.sessionId) showRun(intent.sessionId, intent.title ?? "定时任务");
+    else if (intent) setView("tasks");
   }
-  const focusHandled = useEffectEvent(() => onFocusHandled?.());
+  const intentHandled = useEffectEvent(() => onIntentHandled?.());
   useEffect(() => {
-    if (!focus) return;
-    if (focus.sessionId) readRun(focus.sessionId);
-    focusHandled();
-  }, [focus]);
+    if (!intent) return;
+    if (intent.sessionId) readRun(intent.sessionId);
+    intentHandled();
+  }, [intent]);
 
   // assistant-ui re-reads its store whenever the adapter changes, so it only
   // changes with the messages or the running state.
@@ -639,9 +632,13 @@ export function AssistantPanel({
               }}
             />
           )}
-          <ConversationBoundary
+          {/* A conversation that fails to render takes down only itself: the list,
+              the cards waiting for the member and the other conversations stay
+              usable. The next change of its messages tries again. */}
+          <ErrorBoundary
             key={activeId ?? ""}
-            messages={thread.messages}
+            resetKeys={[thread.messages]}
+            onError={(error, info) => console.error("VNAS conversation render failed", error, info.componentStack)}
             fallback={
               <div className="as-thread" hidden={view !== "chat"}>
                 <div className="as-thread-failed" role="alert">
@@ -717,7 +714,7 @@ export function AssistantPanel({
                 </ComposerPrimitive.Root>
               </ThreadPrimitive.Root>
             </ConversationRuntime>
-          </ConversationBoundary>
+          </ErrorBoundary>
         </main>
       </div>
     </PhotoOpener.Provider>
@@ -736,34 +733,6 @@ function ConversationRuntime({
 }) {
   const runtime = useExternalStoreRuntime<ChatMessage>(adapter);
   return <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
-}
-
-// A conversation that fails to render takes down only itself: the list, the
-// cards waiting for the member and the other conversations stay usable, where
-// the desktop's window boundary would replace all of VNAS and ask to reload
-// WebOS. The next change of its messages tries again.
-class ConversationBoundary extends Component<
-  { messages: unknown; fallback: ReactNode; children: ReactNode },
-  { failed: boolean }
-> {
-  state = { failed: false };
-
-  static getDerivedStateFromError() {
-    return { failed: true };
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("VNAS conversation render failed", error, info.componentStack);
-  }
-
-  componentDidUpdate(previous: { messages: unknown }) {
-    // oxlint-disable-next-line react/no-did-update-set-state -- an error boundary resets once its input changes
-    if (this.state.failed && previous.messages !== this.props.messages) this.setState({ failed: false });
-  }
-
-  render() {
-    return this.state.failed ? this.props.fallback : this.props.children;
-  }
 }
 
 // Hermes opens each run of a scheduled task with its own instructions for the

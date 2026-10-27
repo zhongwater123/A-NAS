@@ -1,4 +1,3 @@
-import { APIError } from "../api/client";
 import {
   Box,
   Boxes,
@@ -24,16 +23,17 @@ import {
   useState,
 } from "react";
 
+import { APIError } from "../api/client";
 import { readApps } from "../appcenter/api";
-import { ContainerAction, ContainerSnapshot, ContainerSummary, applyContainerAction, readContainers } from "./api";
+import { applyContainerAction, ContainerAction, ContainerSnapshot, ContainerSummary, readContainers } from "./api";
 import { ContainerDetail, DetailTab } from "./ContainerDetail";
 import { ContainerPage } from "./ContainerList";
 import { ImagePage } from "./ImageList";
 import {
   AppRef,
-  Filter,
   appFor,
   describeContainer,
+  Filter,
   filterLabels,
   groupContainers,
   groupKey,
@@ -49,12 +49,6 @@ export const containerPollInterval = 5_000;
 
 const actionLabels: Record<ContainerAction, string> = { start: "启动", stop: "停止", restart: "重启" };
 
-// The App Center asks to show one app's containers; at makes a repeated request distinct.
-export interface DockerFocus {
-  project: string;
-  at: number;
-}
-
 type View = { kind: "containers"; filter: Filter } | { kind: "project"; key: string } | { kind: "images" };
 type Selected = { id: string; tab: DetailTab };
 type Confirm = { item: ContainerSummary; action: "stop" | "restart" };
@@ -67,12 +61,13 @@ export interface ContainerActions {
 }
 
 export function DockerPanel({
-  focus,
-  onFocusHandled,
+  intent,
+  onIntentHandled,
   onOpenStore,
 }: {
-  focus?: DockerFocus;
-  onFocusHandled?: () => void;
+  // The App Center asks to show one app's containers.
+  intent?: { project: string };
+  onIntentHandled?: () => void;
   onOpenStore?: () => void;
 }) {
   const { snapshot, error, refreshing, refresh } = useContainerSnapshot();
@@ -89,20 +84,19 @@ export function DockerPanel({
   const opener = useRef<HTMLElement | null>(null);
 
   // Each request to show an app's containers opens its project.
-  const focusAt = focus?.at;
-  const [focusBefore, setFocusBefore] = useState<typeof focusAt>();
-  if (focusBefore !== focusAt) {
-    setFocusBefore(focusAt);
-    if (focus) {
-      setView({ kind: "project", key: focus.project });
+  const [intentBefore, setIntentBefore] = useState<typeof intent>();
+  if (intentBefore !== intent) {
+    setIntentBefore(intent);
+    if (intent) {
+      setView({ kind: "project", key: intent.project });
       setSelected(undefined);
       setQuery("");
     }
   }
-  const focusHandled = useEffectEvent(() => onFocusHandled?.());
+  const intentHandled = useEffectEvent(() => onIntentHandled?.());
   useEffect(() => {
-    if (focusAt !== undefined) focusHandled();
-  }, [focusAt]);
+    if (intent) intentHandled();
+  }, [intent]);
   const selectedId = selected?.id;
   useLayoutEffect(() => {
     if (main.current) main.current.scrollTop = selectedId ? 0 : listScroll.current;

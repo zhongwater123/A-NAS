@@ -1,36 +1,40 @@
 import {
   ComponentProps,
+  memo,
   MouseEvent as ReactMouseEvent,
+  ReactNode,
   PointerEvent as ReactPointerEvent,
+  useCallback,
   useEffect,
+  useMemo,
   useReducer,
   useRef,
   useState,
 } from "react";
+import { ErrorBoundary } from "react-error-boundary";
 
 import type { Session, User } from "../api.generated";
-import type { AssistantTaskNotice } from "./api";
 import { assistantStatus } from "../assistant/api";
 import { TaskToasts } from "../assistant/TaskToasts";
 import { whenText } from "../assistant/taskTime";
-import { shortcutApp, useAppShortcuts } from "./appShortcuts";
-import { DesktopGrid } from "./DesktopGrid";
-import { Dock } from "./Dock";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
 import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
 import { SettingsSection, useStoragePlan } from "../settings/SettingsPanel";
 import { SharesProvider, useShares } from "../shares/SharesProvider";
-import { StatusBar } from "./StatusBar";
-import { DesktopView, SystemRail } from "./SystemRail";
 import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
-import type { TransferLocation } from "../transfers/api";
+import { AppWindow } from "./AppWindow";
+import type { AssistantTaskNotice } from "./api";
+import { shortcutApp, useAppShortcuts } from "./appShortcuts";
+import { apps, desktopApps, OpenWindow, WindowContext, WindowID, WindowIntents, windowIDs } from "./apps";
+import { DesktopGrid } from "./DesktopGrid";
+import { Dock } from "./Dock";
+import { NotificationCenter } from "./NotificationCenter";
+import { StatusBar } from "./StatusBar";
+import { DesktopView, SystemRail } from "./SystemRail";
 import { useHostState } from "./useHostState";
 import { useWallpaper, wallpaperBackground } from "./wallpaper";
-import { apps, desktopApps, WindowContext, WindowFocus, WindowID, windowIDs } from "./apps";
-import { AppWindow } from "./AppWindow";
-import { NotificationCenter } from "./NotificationCenter";
 import { closedWindow, windowReducer } from "./windows";
 
 // SharesRail is the system rail with the count of shares that have something
@@ -39,6 +43,25 @@ function SharesRail(props: Omit<ComponentProps<typeof SystemRail>, "sharesUnread
   const { unread } = useShares();
   return <SystemRail {...props} sharesUnread={unread.received + unread.sent} />;
 }
+
+// A part of the desktop that fails disappears on its own; the windows and the
+// rest of the desktop keep working.
+function ShellPart({ name, children }: { name: string; children: ReactNode }) {
+  return (
+    <ErrorBoundary
+      fallback={null}
+      onError={(error, info) => console.error(`A-NAS ${name} failed`, error, info.componentStack)}
+    >
+      {children}
+    </ErrorBoundary>
+  );
+}
+
+// WindowContent is what an app shows in its window. Dragging, resizing and
+// stacking change only the window around it.
+const WindowContent = memo(function WindowContent({ id, context }: { id: WindowID; context: WindowContext }) {
+  return apps[id].render(context);
+});
 
 // A press on the wallpaper that moves this many pixels or more is a drag, not a click.
 const wallpaperClickSlop = 6;
@@ -67,20 +90,33 @@ export function Desktop({
       forgetPeople();
     };
   }, [session.user.id]);
-  const changeUser = (user: User) => {
-    rememberPerson(user);
-    onUserChange(user);
-  };
+  const changeUser = useCallback(
+    (user: User) => {
+      rememberPerson(user);
+      onUserChange(user);
+    },
+    [onUserChange],
+  );
   const [windows, dispatch] = useReducer(windowReducer, undefined, () =>
     windowIDs.map((id) => closedWindow(id, apps[id].bounds)),
   );
   const isOpen = (id: WindowID) => windows.some((window) => window.id === id && window.open);
-  const openWindow = (id: WindowID) => dispatch({ type: "open", id });
+  // Where other windows asked an app to go. Each request is a new object, so
+  // asking for the same place twice shows it twice.
+  const [intents, setIntents] = useState<WindowIntents>({});
+  const open = useCallback<OpenWindow>((id, intent?: object) => {
+    if (intent) setIntents((current) => ({ ...current, [id]: { ...intent } }));
+    dispatch({ type: "open", id });
+  }, []);
+  const intentHandled = useCallback(
+    (id: keyof WindowIntents) => setIntents((current) => (current[id] ? { ...current, [id]: undefined } : current)),
+    [],
+  );
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("overview");
   const storagePlan = useStoragePlan();
   const openSettings = (section?: SettingsSection) => {
     if (section) setSettingsSection(section);
-    openWindow("settings");
+    open("settings");
   };
   // Uploads of an earlier visit by the same account continue; another
   // account's are dropped.
@@ -93,49 +129,42 @@ export function Desktop({
       .then((status) => setAssistantReady(status.available))
       .catch(() => setAssistantReady(false));
   }, [session.user.id]);
-  const [focus, setFocus] = useState<WindowFocus>({});
-  const showInFiles = (location: TransferLocation) => {
-    setFocus((current) => ({ ...current, files: location }));
-    openWindow("files");
-  };
-  const showInDocker = (appID: string) => {
-    setFocus((current) => ({ ...current, docker: { project: appProject(appID), at: (current.docker?.at ?? 0) + 1 } }));
-    openWindow("docker");
-  };
-  const showPhoto = (assetId: string) => {
-    setFocus((current) => ({ ...current, photos: { assetId, at: Date.now() } }));
-    openWindow("photos");
-  };
+  const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
-  const showTaskRun = (run: AssistantTaskNotice) => {
-    setFocus((current) => ({
-      ...current,
-      assistant: {
-        sessionId: run.sessionId,
-        title: `${run.name} · ${whenText(Date.parse(run.ranAt) / 1000)}`,
-        at: Date.now(),
-      },
-    }));
-    openWindow("assistant");
-  };
+  const showTaskRun = (run: AssistantTaskNotice) =>
+    open("assistant", { sessionId: run.sessionId, title: `${run.name} · ${whenText(Date.parse(run.ranAt) / 1000)}` });
   const isAdmin = session.user.role === "admin";
-  const context: WindowContext = {
-    session,
-    isAdmin,
-    host,
-    assistantReady,
-    open: openWindow,
-    showInFiles,
-    showInDocker,
-    showPhoto,
-    focus,
-    focusHandled: (id) => setFocus((current) => (current[id] ? { ...current, [id]: undefined } : current)),
-    settingsSection,
-    setSettingsSection,
-    storagePlan,
-    changeUser,
-    logout: onLogout,
-  };
+  // The windows' content re-renders only when this changes, not when a
+  // window is dragged, resized or brought to the front.
+  const context = useMemo<WindowContext>(
+    () => ({
+      session,
+      isAdmin,
+      host,
+      assistantReady,
+      open,
+      intents,
+      intentHandled,
+      settingsSection,
+      setSettingsSection,
+      storagePlan,
+      changeUser,
+      logout: onLogout,
+    }),
+    [
+      session,
+      isAdmin,
+      host,
+      assistantReady,
+      open,
+      intents,
+      intentHandled,
+      settingsSection,
+      storagePlan,
+      changeUser,
+      onLogout,
+    ],
+  );
   const shortcuts = useAppShortcuts();
   const launcherApps = [
     ...desktopApps(context, isOpen),
@@ -182,7 +211,7 @@ export function Desktop({
   };
 
   return (
-    <SharesProvider userId={session.user.id} active={focusedID === "shares"} onOpen={() => openWindow("shares")}>
+    <SharesProvider userId={session.user.id} active={focusedID === "shares"} onOpen={() => open("shares")}>
       <main
         className="desktop-shell"
         style={wallpaperBackground(wallpaper)}
@@ -195,28 +224,36 @@ export function Desktop({
         {/* The glow belongs to the built-in wallpaper; it would wash out a chosen picture. */}
         {wallpaper && !wallpaper.image && <div className="wallpaper-glow" />}
 
-        <SharesRail
-          apps={launcherApps}
-          session={session}
-          desktopView={desktopView}
-          settingsFocused={focusedID === "settings"}
-          sharesFocused={focusedID === "shares"}
-          onOpenShares={() => openWindow("shares")}
-          onToggleDesktop={toggleDesktop}
-          onOpenSettings={openSettings}
-          onLogout={onLogout}
-        />
+        <ShellPart name="system rail">
+          <SharesRail
+            apps={launcherApps}
+            session={session}
+            desktopView={desktopView}
+            settingsFocused={focusedID === "settings"}
+            sharesFocused={focusedID === "shares"}
+            onOpenShares={() => open("shares")}
+            onToggleDesktop={toggleDesktop}
+            onOpenSettings={openSettings}
+            onLogout={onLogout}
+          />
+        </ShellPart>
 
-        <DesktopGrid apps={launcherApps} />
+        <ShellPart name="desktop icons">
+          <DesktopGrid apps={launcherApps} />
+        </ShellPart>
 
-        <StatusBar
-          host={host}
-          extra={<TransferIndicator onOpen={() => openWindow("transfers")} />}
-          onOpenTransfers={() => openWindow("transfers")}
-          onOpenTaskManager={() => openSettings("task-manager")}
-        />
+        <ShellPart name="status bar">
+          <StatusBar
+            host={host}
+            extra={<TransferIndicator onOpen={() => open("transfers")} />}
+            onOpenTransfers={() => open("transfers")}
+            onOpenTaskManager={() => openSettings("task-manager")}
+          />
+        </ShellPart>
 
-        <NotificationCenter />
+        <ShellPart name="notifications">
+          <NotificationCenter />
+        </ShellPart>
 
         <section className="window-layer" aria-label="A-NAS 桌面窗口">
           {windows.map((window) => {
@@ -224,31 +261,39 @@ export function Desktop({
             if (!window.open) return null;
             return (
               <AppWindow key={window.id} model={window} dispatch={dispatch}>
-                {apps[window.id].render(context)}
+                <WindowContent id={window.id} context={context} />
               </AppWindow>
             );
           })}
         </section>
 
-        <Dock
-          entries={windows
-            .filter((window) => window.open)
-            .sort((a, b) => a.opened - b.opened)
-            .map((window) => ({
-              id: window.id,
-              title: apps[window.id].title,
-              minimized: window.minimized,
-              icon: apps[window.id].icon,
-              tone: apps[window.id].tone,
-            }))}
-          focusedID={focusedID}
-          onOpen={(id) => dispatch({ type: "open", id: id as WindowID })}
-          onMinimize={(id) => dispatch({ type: "minimize", id: id as WindowID })}
-          onClose={(id) => dispatch({ type: "close", id: id as WindowID })}
-        />
-        <TransferToasts hidden={focusedID === "transfers"} onOpen={() => openWindow("transfers")} />
-        <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
-        <FeedbackChannel />
+        <ShellPart name="dock">
+          <Dock
+            entries={windows
+              .filter((window) => window.open)
+              .sort((a, b) => a.opened - b.opened)
+              .map((window) => ({
+                id: window.id,
+                title: apps[window.id].title,
+                minimized: window.minimized,
+                icon: apps[window.id].icon,
+                tone: apps[window.id].tone,
+              }))}
+            focusedID={focusedID}
+            onOpen={(id) => dispatch({ type: "open", id: id as WindowID })}
+            onMinimize={(id) => dispatch({ type: "minimize", id: id as WindowID })}
+            onClose={(id) => dispatch({ type: "close", id: id as WindowID })}
+          />
+        </ShellPart>
+        <ShellPart name="transfer toasts">
+          <TransferToasts hidden={focusedID === "transfers"} onOpen={() => open("transfers")} />
+        </ShellPart>
+        <ShellPart name="task toasts">
+          <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
+        </ShellPart>
+        <ShellPart name="feedback">
+          <FeedbackChannel />
+        </ShellPart>
       </main>
     </SharesProvider>
   );

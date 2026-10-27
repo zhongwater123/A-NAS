@@ -1,7 +1,7 @@
 import { FileUp, FolderUp, Upload } from "lucide-react";
 import { useRef } from "react";
 
-import { PickedFile, pickedFromInput } from "../transfers/picker";
+import { PickedFile, pickedFromInput } from "../lib/pickedFiles";
 
 // FileUploadControl is the floating upload button and its menu: files, or a
 // folder that keeps its structure.

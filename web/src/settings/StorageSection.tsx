@@ -1,11 +1,12 @@
-import { errorText } from "../api/errorMessages";
 import { Archive, ChevronLeft, CircleCheck, Database, HardDrive, Layers, TriangleAlert, X } from "lucide-react";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
+import { errorText } from "../api/errorMessages";
 import type { StoragePlan, Volume, VolumeConversion, VolumeLayout } from "../api.generated";
 import { HostState } from "../desktop/api";
+import type { HostStateView } from "../desktop/useHostState";
+import { formatBytes, formatNominalCapacity } from "../lib/bytes";
 import {
-  StorageStep,
   cancelStoragePlan,
   confirmStoragePlan,
   continueVolumeConversion,
@@ -14,9 +15,8 @@ import {
   getStoragePlan,
   listUnfinishedStoragePlans,
   listVolumes,
+  StorageStep,
 } from "./api";
-import { formatBytes, formatNominalCapacity } from "../lib/bytes";
-import type { HostStateView } from "../desktop/useHostState";
 import { HostStateBanner, HostStatePending, isStale } from "./hostState";
 import {
   conversionPercent,
@@ -25,12 +25,12 @@ import {
   layoutLabel,
   layouts,
   multiDiskLayouts,
+  type ProgressSample,
   remainingSeconds,
   usableBytes,
   usedBytes,
-  type ProgressSample,
 } from "./layouts";
-import { Banner, Callout, Group, IconTile, PageHeader, Pill, RefreshButton, messageOf, type Tone } from "./parts";
+import { Banner, Callout, Group, IconTile, messageOf, PageHeader, Pill, RefreshButton, type Tone } from "./parts";
 
 type Disk = HostState["disks"][number];
 type PlanStep = "plan" | "confirm" | "execute" | "cancel";
@@ -62,24 +62,6 @@ export function useStoragePlan(): StoragePlanFlow {
   const [phrase, setPhrase] = useState("");
   const [busy, setBusy] = useState<PlanStep>();
   const [error, setError] = useState("");
-  // reread is how a plan that stopped is shown: its own failure says why.
-  const run = async (step: PlanStep, action: () => Promise<StoragePlan>, reread?: () => Promise<StoragePlan>) => {
-    setBusy(step);
-    setError("");
-    try {
-      setPlan(await action());
-    } catch (caught) {
-      const stopped = reread && (caught as { code?: string } | undefined)?.code === "operation_needs_attention";
-      try {
-        if (stopped) setPlan(await reread());
-        else setError(storageErrorText(caught));
-      } catch {
-        setError(storageErrorText(caught));
-      }
-    } finally {
-      setBusy(undefined);
-    }
-  };
   const planID = plan?.id;
   const running = plan?.state === "running";
   useEffect(() => {
@@ -103,55 +85,77 @@ export function useStoragePlan(): StoragePlanFlow {
     setPhrase("");
     setError("");
   }, []);
-  return {
-    plan,
-    phrase,
-    busy,
-    error,
-    setPhrase,
-    resume,
-    generate: async (diskIDs, layout) => {
-      setPhrase("");
-      await run("plan", () => createStoragePlan(diskIDs, layout));
-    },
-    confirm: async () => {
-      if (plan) await run("confirm", () => confirmStoragePlan(plan.id, phrase));
-    },
-    execute: async () => {
-      if (plan)
-        await run(
-          "execute",
-          () => executeStoragePlan(plan.id),
-          () => getStoragePlan(plan.id),
-        );
-    },
-    cancel: async () => {
-      if (plan?.state !== "planned" && plan?.state !== "confirmed") {
-        setPlan(undefined);
-        setPhrase("");
-        setError("");
-        return true;
-      }
-      setBusy("cancel");
+  // Settings re-renders with a new flow only when the plan, the phrase or the
+  // progress changed, not whenever the desktop does.
+  return useMemo(() => {
+    // reread is how a plan that stopped is shown: its own failure says why.
+    const run = async (step: PlanStep, action: () => Promise<StoragePlan>, reread?: () => Promise<StoragePlan>) => {
+      setBusy(step);
       setError("");
       try {
-        await cancelStoragePlan(plan.id);
-        setPlan(undefined);
-        setPhrase("");
-        return true;
+        setPlan(await action());
       } catch (caught) {
-        setError(storageErrorText(caught));
-        return false;
+        const stopped = reread && (caught as { code?: string } | undefined)?.code === "operation_needs_attention";
+        try {
+          if (stopped) setPlan(await reread());
+          else setError(storageErrorText(caught));
+        } catch {
+          setError(storageErrorText(caught));
+        }
       } finally {
         setBusy(undefined);
       }
-    },
-    dismiss: () => {
-      setPlan(undefined);
-      setPhrase("");
-      setError("");
-    },
-  };
+    };
+    return {
+      plan,
+      phrase,
+      busy,
+      error,
+      setPhrase,
+      resume,
+      generate: async (diskIDs, layout) => {
+        setPhrase("");
+        await run("plan", () => createStoragePlan(diskIDs, layout));
+      },
+      confirm: async () => {
+        if (plan) await run("confirm", () => confirmStoragePlan(plan.id, phrase));
+      },
+      execute: async () => {
+        if (plan)
+          await run(
+            "execute",
+            () => executeStoragePlan(plan.id),
+            () => getStoragePlan(plan.id),
+          );
+      },
+      cancel: async () => {
+        if (plan?.state !== "planned" && plan?.state !== "confirmed") {
+          setPlan(undefined);
+          setPhrase("");
+          setError("");
+          return true;
+        }
+        setBusy("cancel");
+        setError("");
+        try {
+          await cancelStoragePlan(plan.id);
+          setPlan(undefined);
+          setPhrase("");
+          return true;
+        } catch (caught) {
+          setError(storageErrorText(caught));
+          return false;
+        } finally {
+          setBusy(undefined);
+        }
+      },
+      dismiss: () => {
+        setPlan(undefined);
+        setPhrase("");
+        setError("");
+      },
+    };
+  }, [plan, phrase, busy, error, resume]);
 }
 
 export interface VolumesView {

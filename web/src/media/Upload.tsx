@@ -22,16 +22,16 @@ import { CSSProperties, DragEvent, FormEvent, ReactNode, useEffect, useMemo, use
 import type { FileEntry } from "../api.generated";
 import { createDirectory, listEntries } from "../files/api";
 import { formatBytes } from "../lib/bytes";
+import type { Category, LibraryKind, MediaLibrary } from "./api";
 import { messageOf } from "./Browse";
 import { Dropdown } from "./Dropdown";
 import { kindInfo } from "./Libraries";
-import type { Category, LibraryKind, MediaLibrary } from "./api";
 import {
   acceptedTypes,
-  pickedFromDrop,
-  pickedFromList,
   type Destination,
   type FileRole,
+  pickedFromDrop,
+  pickedFromList,
   type UploadItem,
   type Uploads,
 } from "./uploads";
@@ -534,7 +534,7 @@ export function UploadDialog({
                 hidden
                 aria-label="选择要上传的文件"
                 onChange={(event) => {
-                  uploads.add(pickedFromList(event.target.files ?? []));
+                  uploads.add(pickedFromList(event.target.files));
                   event.target.value = "";
                 }}
               />
@@ -549,7 +549,7 @@ export function UploadDialog({
                 hidden
                 aria-label="选择要上传的文件夹"
                 onChange={(event) => {
-                  uploads.add(pickedFromList(event.target.files ?? []));
+                  uploads.add(pickedFromList(event.target.files));
                   event.target.value = "";
                 }}
               />

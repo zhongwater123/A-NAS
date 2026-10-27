@@ -9,6 +9,7 @@ import {
   EyeOff,
   FolderMinus,
   FolderPlus,
+  Hash,
   Hourglass,
   ImagePlus,
   Images,
@@ -20,9 +21,8 @@ import {
   ScanSearch,
   Search,
   SearchX,
-  ShieldCheck,
-  Hash,
   Shapes,
+  ShieldCheck,
   Trash2,
   UserRound,
   X,
@@ -43,23 +43,66 @@ import {
   useState,
 } from "react";
 
-import { endViewing } from "../settings/api";
 import { usePeople } from "../people/people";
+import { endViewing } from "../settings/api";
+import { useStoredState } from "../ui/useStoredState";
+import { AIHome, type AIHomeSnapshot } from "./AIHome";
 import { AlbumPicker } from "./AlbumPicker";
 import { AssetGrid } from "./AssetGrid";
-import { AIHome, type AIHomeSnapshot } from "./AIHome";
+import {
+  addPhotoTag,
+  addToAlbum,
+  attachLiveVideo,
+  copyPhoto,
+  createAlbum,
+  deleteAlbum,
+  downloadURL,
+  emptyPhotoTrash,
+  getAIStatus,
+  getPhoto,
+  hideAILabel,
+  listAlbumPhotos,
+  listAlbums,
+  listLabelPhotos,
+  listPeople,
+  listPersonPhotos,
+  listPhotoLibraries,
+  listPhotoTrash,
+  listSimilarPhotos,
+  listTagPhotos,
+  mergePeople,
+  type PhotoAIStatus,
+  type PhotoAlbum,
+  type PhotoAsset,
+  type PhotoLibrary,
+  type PhotoObjectsFound,
+  type PhotoPerson,
+  type PhotoSearchPage,
+  type PhotoSimilarPage,
+  purgePhoto,
+  removeFromAlbum,
+  removeFromPerson,
+  removePhotoTag,
+  renameAlbum,
+  renamePhoto,
+  restorePhoto,
+  searchPhotos,
+  setLibraryPeople,
+  trashPhoto,
+  updatePerson,
+} from "./api";
 import { AlbumsView, Empty } from "./Collections";
 import { useDialogs, useToasts } from "./feedback";
 import type { GridProps } from "./grid";
 import {
   type ImageDropProps,
-  imageFile,
   type ImageQuery,
   ImageReading,
   type ImageResult,
   ImageSearchButton,
-  imageSearchPage,
   ImageSource,
+  imageFile,
+  imageSearchPage,
   isEncoded,
   pickImage,
   prepareImageQuery,
@@ -86,54 +129,12 @@ import {
 } from "./model";
 import { Avatar, PeopleSettings, PersonPicker, personName } from "./People";
 import { PhotoPicker } from "./PhotoPicker";
-import { scopeText, SearchScope, searchLibraries, SourceBadge } from "./scope";
-import {
-  addPhotoTag,
-  addToAlbum,
-  attachLiveVideo,
-  copyPhoto,
-  createAlbum,
-  deleteAlbum,
-  emptyPhotoTrash,
-  getAIStatus,
-  getPhoto,
-  hideAILabel,
-  listAlbumPhotos,
-  listAlbums,
-  listLabelPhotos,
-  listPhotoLibraries,
-  listTagPhotos,
-  removePhotoTag,
-  listPeople,
-  listPersonPhotos,
-  listPhotoTrash,
-  listSimilarPhotos,
-  downloadURL,
-  mergePeople,
-  purgePhoto,
-  removeFromAlbum,
-  removeFromPerson,
-  renameAlbum,
-  renamePhoto,
-  restorePhoto,
-  searchPhotos,
-  trashPhoto,
-  setLibraryPeople,
-  updatePerson,
-  type PhotoAIStatus,
-  type PhotoAlbum,
-  type PhotoAsset,
-  type PhotoLibrary,
-  type PhotoObjectsFound,
-  type PhotoPerson,
-  type PhotoSearchPage,
-  type PhotoSimilarPage,
-} from "./api";
 import type { ScrollerHandle } from "./PhotoScroller";
 import { joinWords, ObjectsStatus, SimilarSource } from "./results";
-import { useSelection } from "./selection";
 import { Sidebar } from "./Sidebar";
 import { Slideshow } from "./Slideshow";
+import { SearchScope, SourceBadge, scopeText, searchLibraries } from "./scope";
+import { useSelection } from "./selection";
 import { Timeline } from "./Timeline";
 import { DropOverlay, type UploadSummary, type UploadTarget, UploadTray, useUploads } from "./uploads";
 import { Viewer, type ViewerActions } from "./Viewer";
@@ -143,38 +144,13 @@ interface Props {
   userId: string;
   userName: string;
   isAdmin: boolean;
-  /** A photo to show on its own, asked for by another window; onFocusHandled clears it. */
-  focus?: { assetId: string; at: number };
-  onFocusHandled?(): void;
+  /** A photo to show on its own, asked for by another window; onIntentHandled clears it. */
+  intent?: { assetId: string };
+  onIntentHandled?(): void;
 }
 
 const aiPollInterval = 15_000;
 const narrowWidth = 720;
-
-function useStored<T>(key: string, initial: T): [T, (value: T | ((current: T) => T)) => void] {
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const stored = window.localStorage.getItem(key);
-      return stored === null ? initial : (JSON.parse(stored) as T);
-    } catch {
-      return initial;
-    }
-  });
-  const set = useCallback(
-    (next: T | ((current: T) => T)) =>
-      setValue((current) => {
-        const resolved = typeof next === "function" ? (next as (current: T) => T)(current) : next;
-        try {
-          window.localStorage.setItem(key, JSON.stringify(resolved));
-        } catch {
-          /* private windows keep it for the session only */
-        }
-        return resolved;
-      }),
-    [key],
-  );
-  return [value, set];
-}
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -202,7 +178,7 @@ const placeKey = (place: Place) => {
 // PhotosPanel is the photos window: libraries and albums on the side, photos
 // filling the rest, a viewer over everything. The photo service decides
 // every permission; the panel only leaves out what it would refuse.
-export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }: Props) {
+export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled }: Props) {
   const [libraries, setLibraries] = useState<PhotoLibrary[]>();
   const [failure, setFailure] = useState("");
   const [place, setPlaceState] = useState<Place>();
@@ -217,9 +193,9 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     [libraries, people],
   );
   const caller: Caller = useMemo(() => ({ userId, isAdmin, libraries: named ?? [] }), [userId, isAdmin, named]);
-  const [rowHeight, setRowHeight] = useStored("a-nas.photos.rowHeight", defaultRowHeight);
-  const [info, setInfo] = useStored("a-nas.photos.info", true);
-  const [docked, setDocked] = useStored("a-nas.photos.sidebar", true);
+  const [rowHeight, setRowHeight] = useStoredState("a-nas.photos.rowHeight", defaultRowHeight);
+  const [info, setInfo] = useStoredState("a-nas.photos.info", true);
+  const [docked, setDocked] = useStoredState("a-nas.photos.sidebar", true);
   const [drawer, setDrawer] = useState(false);
   const [viewAssets, setViewAssets] = useState<PhotoAsset[]>([]);
   const selection = useSelection(viewAssets);
@@ -256,7 +232,7 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
   // The images searched by stay viewable while their places can come back.
   const imageURLs = useRef<string[]>([]);
   useEffect(() => () => imageURLs.current.forEach((url) => URL.revokeObjectURL(url)), []);
-  const [recent, setRecent] = useStored<string[]>("a-nas.photos.recentSearches", []);
+  const [recent, setRecent] = useStoredState<string[]>("a-nas.photos.recentSearches", []);
   const [query, setQuery] = useState("");
   const [picker, setPicker] = useState<PhotoAsset[]>();
   const [photoPicker, setPhotoPicker] = useState<PhotoAlbum>();
@@ -889,13 +865,13 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
     },
     error: reportError,
   };
-  // Runs once per focus; the callbacks it uses do not decide what to show.
+  // Runs once per intent; the callbacks it uses do not decide what to show.
   const focusFailed = useEffectEvent(reportError);
-  const focusHandled = useEffectEvent(() => onFocusHandled?.());
+  const intentHandled = useEffectEvent(() => onIntentHandled?.());
   useEffect(() => {
-    if (!focus) return;
+    if (!intent) return;
     let current = true;
-    getPhoto(focus.assetId)
+    getPhoto(intent.assetId)
       .then((asset) => {
         if (current) {
           setViewer(undefined);
@@ -905,11 +881,11 @@ export function PhotosPanel({ userId, userName, isAdmin, focus, onFocusHandled }
       .catch((reason) => {
         if (current) focusFailed(messageOf(reason));
       })
-      .finally(() => focusHandled());
+      .finally(() => intentHandled());
     return () => {
       current = false;
     };
-  }, [focus]);
+  }, [intent]);
   const focusedActions: ViewerActions = {
     ...viewerActions,
     trash: (asset) => {

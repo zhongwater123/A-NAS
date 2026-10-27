@@ -1,8 +1,9 @@
 import { CircleAlert, Maximize2, Minus, PanelLeftClose, X } from "lucide-react";
-import { Component, ErrorInfo, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { ErrorInfo, ReactNode, PointerEvent as ReactPointerEvent, useState } from "react";
+import { ErrorBoundary, type FallbackProps } from "react-error-boundary";
 
-import { WINDOW_ID } from "./windowSnapshot";
 import { apps } from "./apps";
+import { WINDOW_ID } from "./windowSnapshot";
 import { WindowAction, WindowModel } from "./windows";
 
 export function AppWindow({
@@ -14,43 +15,58 @@ export function AppWindow({
   dispatch: (action: WindowAction) => void;
   children: ReactNode;
 }) {
+  // While the pointer moves, the window keeps its place and size here and
+  // tells the desktop once released, so the desktop and the other windows do
+  // not re-render on every move.
+  const [moving, setMoving] = useState<{ x: number; y: number }>();
+  const [sizing, setSizing] = useState<{ width: number; height: number }>();
+  const follow = <Value,>(
+    update: (moveEvent: PointerEvent) => Value,
+    show: (value?: Value) => void,
+    done: (value: Value) => void,
+  ) => {
+    let latest: Value | undefined;
+    const move = (moveEvent: PointerEvent) => {
+      latest = update(moveEvent);
+      show(latest);
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      if (latest !== undefined) done(latest);
+      show(undefined);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  };
+
   const beginDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (model.maximized || (event.target as HTMLElement).closest("button")) return;
     event.preventDefault();
     dispatch({ type: "focus", id: model.id });
     const origin = { pointerX: event.clientX, pointerY: event.clientY, x: model.x, y: model.y };
-    const move = (moveEvent: PointerEvent) =>
-      dispatch({
-        type: "move",
-        id: model.id,
+    follow(
+      (moveEvent) => ({
         x: Math.max(88, origin.x + moveEvent.clientX - origin.pointerX),
         y: Math.max(12, origin.y + moveEvent.clientY - origin.pointerY),
-      });
-    const stop = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop, { once: true });
+      }),
+      setMoving,
+      ({ x, y }) => dispatch({ type: "move", id: model.id, x, y }),
+    );
   };
 
   const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (model.maximized) return;
     event.preventDefault();
     const origin = { pointerX: event.clientX, pointerY: event.clientY, width: model.width, height: model.height };
-    const move = (moveEvent: PointerEvent) =>
-      dispatch({
-        type: "resize",
-        id: model.id,
+    follow(
+      (moveEvent) => ({
         width: Math.max(520, origin.width + moveEvent.clientX - origin.pointerX),
         height: Math.max(330, origin.height + moveEvent.clientY - origin.pointerY),
-      });
-    const stop = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop, { once: true });
+      }),
+      setSizing,
+      ({ width, height }) => dispatch({ type: "resize", id: model.id, width, height }),
+    );
   };
 
   const { title, icon: Icon, lightTitle } = apps[model.id];
@@ -58,7 +74,15 @@ export function AppWindow({
   // so a maximized window ends above it and keeps its bottom controls reachable.
   const style = model.maximized
     ? { left: 88, top: 12, right: 12, bottom: 90, zIndex: model.z }
-    : { left: model.x, top: model.y, width: model.width, height: model.height, zIndex: model.z };
+    : {
+        left: model.x,
+        top: model.y,
+        width: model.width,
+        height: model.height,
+        ...(moving && { left: moving.x, top: moving.y }),
+        ...sizing,
+        zIndex: model.z,
+      };
 
   return (
     <section
@@ -97,35 +121,29 @@ export function AppWindow({
         </div>
       </div>
       <div className={`window-content window-content-${model.id}`}>
-        <PanelErrorBoundary>{children}</PanelErrorBoundary>
+        <ErrorBoundary FallbackComponent={WindowFailed} onError={logWindowError(model.id)}>
+          {children}
+        </ErrorBoundary>
       </div>
       {!model.maximized && <div className="resize-handle" aria-hidden="true" onPointerDown={beginResize} />}
     </section>
   );
 }
 
-class PanelErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
+const logWindowError = (id: string) => (error: unknown, info: ErrorInfo) =>
+  console.error(`A-NAS ${id} window failed`, error, info.componentStack);
 
-  static getDerivedStateFromError() {
-    return { failed: true };
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("A-NAS panel render failed", error, info.componentStack);
-  }
-
-  render() {
-    if (!this.state.failed) return this.props.children;
-    return (
-      <div className="center-state">
-        <CircleAlert />
-        <h2>这个页面暂时无法显示</h2>
-        <p>桌面和后台服务仍在运行，可以重新载入界面后继续。</p>
-        <button className="primary" onClick={() => window.location.reload()}>
-          重新载入界面
-        </button>
-      </div>
-    );
-  }
+// WindowFailed replaces a window whose content threw. Reopening mounts the
+// content afresh; the desktop and the other windows keep running.
+function WindowFailed({ resetErrorBoundary }: FallbackProps) {
+  return (
+    <div className="center-state">
+      <CircleAlert />
+      <h2>这个窗口暂时无法显示</h2>
+      <p>桌面和其他窗口不受影响，可以重新打开这个窗口。</p>
+      <button className="primary" onClick={resetErrorBoundary}>
+        重新打开
+      </button>
+    </div>
+  );
 }

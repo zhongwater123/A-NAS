@@ -3,13 +3,12 @@ import { lazy, ReactNode, Suspense } from "react";
 
 import type { Session, User } from "../api.generated";
 import { AppCenterPanel } from "../appcenter/AppCenterPanel";
-import type { AssistantFocus } from "../assistant/AssistantPanel";
 import { AssistantGlyph } from "../assistant/AssistantGlyph";
 import { BackupCenter } from "../backup/BackupCenter";
 import { BackupCenterGlyph } from "../backup/BackupCenterGlyph";
-import { DesktopApp } from "./DesktopGrid";
-import { DockerFocus, DockerPanel } from "../docker/DockerPanel";
 import { DockerGlyph } from "../docker/DockerGlyph";
+import { DockerPanel } from "../docker/DockerPanel";
+import { appProject } from "../docker/model";
 import { FilePanel } from "../files/FilePanel";
 import { MediaCenter } from "../media/MediaCenter";
 import { type AppGlyph, MediaCenterGlyph } from "../media/MediaCenterGlyph";
@@ -21,6 +20,7 @@ import { SettingsPanel, SettingsSection, useStoragePlan } from "../settings/Sett
 import { SharesPanel } from "../shares/SharesPanel";
 import type { TransferLocation } from "../transfers/api";
 import { TrashPanel } from "../trash/TrashPanel";
+import { DesktopApp } from "./DesktopGrid";
 import type { HostStateView } from "./useHostState";
 
 // The assistant window, with its chat libraries, loads when first opened.
@@ -33,18 +33,26 @@ const TransferCenter = lazy(() =>
   import("../transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })),
 );
 
-// Where another window asked an app to go. The app clears it once shown, so
-// asking for the same place again shows it again.
-export interface WindowFocus {
+// What another window can ask an app to show when it opens it.
+export interface WindowIntentPayloads {
   // A folder the transfer center, the trash or the backup center asks the file manager to show.
-  files?: TransferLocation;
+  files: TransferLocation;
   // A photo another window names, such as one the assistant found.
-  photos?: { assetId: string; at: number };
+  photos: { assetId: string };
   // The App Center's 在 Docker 中查看 opens Docker on that app's containers.
-  docker?: DockerFocus;
-  // A toast of a scheduled task opens its run in VNAS.
-  assistant?: AssistantFocus;
+  docker: { project: string };
+  // A toast of a scheduled task opens its run in VNAS, or the tasks.
+  assistant: { sessionId?: string; title?: string };
 }
+// The intents waiting for their windows. Every request is a new object, so a
+// window sees a request for the place it already shows; the window reports it
+// handled and the desktop forgets it.
+export type WindowIntents = { [ID in keyof WindowIntentPayloads]?: WindowIntentPayloads[ID] };
+// OpenWindow opens or raises an app's window, with what to show for apps that take an intent.
+export type OpenWindow = <ID extends WindowID>(
+  id: ID,
+  ...intent: ID extends keyof WindowIntentPayloads ? [intent?: WindowIntentPayloads[ID]] : []
+) => void;
 
 // WindowContext is what the desktop gives the apps' windows and icons.
 export interface WindowContext {
@@ -53,12 +61,9 @@ export interface WindowContext {
   host: HostStateView;
   // The assistant opens only when this device runs one for this account (ADR 0024).
   assistantReady: boolean;
-  open: (id: WindowID) => void;
-  showInFiles: (location: TransferLocation) => void;
-  showInDocker: (appID: string) => void;
-  showPhoto: (assetId: string) => void;
-  focus: WindowFocus;
-  focusHandled: (id: keyof WindowFocus) => void;
+  open: OpenWindow;
+  intents: WindowIntents;
+  intentHandled: (id: keyof WindowIntentPayloads) => void;
   // The section and any pending storage plan outlive the settings window, so
   // reopening it returns to where the user left off.
   settingsSection: SettingsSection;
@@ -115,11 +120,11 @@ const definitions = {
     tone: "files",
     bounds: { x: 230, y: 70, width: 900, height: 620 },
     launcher: { id: "files", keywords: "文件 共享 上传 shared" },
-    render: ({ session, focus, focusHandled, open }) => (
+    render: ({ session, intents, intentHandled, open }) => (
       <FilePanel
         userID={session.user.id}
-        navigation={focus.files}
-        onNavigated={() => focusHandled("files")}
+        intent={intents.files}
+        onIntentHandled={() => intentHandled("files")}
         onOpenTransfers={() => open("transfers")}
         onOpenPhotos={() => open("photos")}
         onOpenMedia={() => open("media")}
@@ -133,7 +138,7 @@ const definitions = {
     tone: "trash",
     bounds: { x: 260, y: 76, width: 920, height: 620 },
     launcher: { id: "trash", keywords: "删除 恢复" },
-    render: ({ showInFiles }) => <TrashPanel onShowInFiles={showInFiles} />,
+    render: ({ open }) => <TrashPanel onShowInFiles={(location) => open("files", location)} />,
   },
   settings: {
     title: "设置",
@@ -164,7 +169,7 @@ const definitions = {
     tone: "store",
     bounds: { x: 300, y: 60, width: 940, height: 660 },
     launcher: { id: "store", keywords: "应用 安装 商店 app", adminOnly: true },
-    render: ({ showInDocker }) => <AppCenterPanel onOpenDocker={showInDocker} />,
+    render: ({ open }) => <AppCenterPanel onOpenDocker={(appID) => open("docker", { project: appProject(appID) })} />,
   },
   media: {
     title: "影视中心",
@@ -181,9 +186,9 @@ const definitions = {
     bounds: { x: 270, y: 84, width: 900, height: 600 },
     // The id stays "download" so the icon keeps its place on desktops arranged before the rename.
     launcher: { id: "download", keywords: "传输 上传 下载 进度 续传 transfer upload download" },
-    render: ({ open, showInFiles }) => (
+    render: ({ open }) => (
       <Suspense fallback={loading}>
-        <TransferCenter onOpenFiles={() => open("files")} onOpenLocation={showInFiles} />
+        <TransferCenter onOpenFiles={() => open("files")} onOpenLocation={(location) => open("files", location)} />
       </Suspense>
     ),
   },
@@ -194,11 +199,11 @@ const definitions = {
     bounds: { x: 220, y: 52, width: 1080, height: 700 },
     // 备份中心 replaced the separate 文件快照 window and the planned 备份 entry; it keeps the backup ID so stored icon orders still place it.
     launcher: { id: "backup", keywords: "备份 快照 文件快照 恢复 找回 历史版本 定时 snapshot backup" },
-    render: ({ session, isAdmin, showInFiles, open }) => (
+    render: ({ session, isAdmin, open }) => (
       <BackupCenter
         userId={session.user.id}
         isAdmin={isAdmin}
-        onShowInFiles={showInFiles}
+        onShowInFiles={(location) => open("files", location)}
         onOpenTrash={() => open("trash")}
       />
     ),
@@ -209,10 +214,10 @@ const definitions = {
     tone: "docker",
     bounds: { x: 300, y: 70, width: 960, height: 660 },
     launcher: { id: "docker", keywords: "容器 镜像 container", adminOnly: true },
-    render: ({ focus, focusHandled, open }) => (
+    render: ({ intents, intentHandled, open }) => (
       <DockerPanel
-        focus={focus.docker}
-        onFocusHandled={() => focusHandled("docker")}
+        intent={intents.docker}
+        onIntentHandled={() => intentHandled("docker")}
         onOpenStore={() => open("store")}
       />
     ),
@@ -224,13 +229,13 @@ const definitions = {
     lightTitle: true,
     bounds: { x: 250, y: 64, width: 960, height: 660 },
     launcher: { id: "photos", keywords: "照片 图片 图库 photo" },
-    render: ({ session, isAdmin, focus, focusHandled }) => (
+    render: ({ session, isAdmin, intents, intentHandled }) => (
       <PhotosPanel
         userId={session.user.id}
         userName={displayName(session.user)}
         isAdmin={isAdmin}
-        focus={focus.photos}
-        onFocusHandled={() => focusHandled("photos")}
+        intent={intents.photos}
+        onIntentHandled={() => intentHandled("photos")}
       />
     ),
   },
@@ -253,13 +258,13 @@ const definitions = {
       keywords: "vnas 助手 智能 问答 聊天 assistant ai",
       ready: ({ assistantReady }) => assistantReady,
     },
-    render: ({ session, showPhoto, focus, focusHandled }) => (
+    render: ({ session, open, intents, intentHandled }) => (
       <Suspense fallback={null}>
         <AssistantPanel
           username={session.user.username}
-          onShowPhoto={showPhoto}
-          focus={focus.assistant}
-          onFocusHandled={() => focusHandled("assistant")}
+          onShowPhoto={(assetId) => open("photos", { assetId })}
+          intent={intents.assistant}
+          onIntentHandled={() => intentHandled("assistant")}
         />
       </Suspense>
     ),

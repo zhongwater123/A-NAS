@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { HostState, readHostState } from "./api";
 
@@ -61,5 +61,9 @@ export function useHostState(enabled = true): HostStateView {
     };
   }, [enabled, refresh]);
 
-  return { snapshot, loading, refreshing, disconnected, refresh };
+  // The desktop hands this to every window; a new object only when something changed.
+  return useMemo(
+    () => ({ snapshot, loading, refreshing, disconnected, refresh }),
+    [snapshot, loading, refreshing, disconnected, refresh],
+  );
 }

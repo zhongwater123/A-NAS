@@ -1,4 +1,3 @@
-import { errorText } from "../api/errorMessages";
 import { ArrowLeft, CircleAlert } from "lucide-react";
 import {
   KeyboardEvent,
@@ -11,20 +10,10 @@ import {
   useState,
 } from "react";
 
+import { errorText } from "../api/errorMessages";
 import { formatBytes } from "../lib/bytes";
 import { useDialogs, useToasts } from "../photos/feedback";
-import { type Music, MusicContext, type Place } from "./context";
-import {
-  buildIndex,
-  formatDuration,
-  type PinyinMatch,
-  qualityOf,
-  search,
-  type SongSort,
-  unknownAlbum,
-  unknownArtist,
-} from "./library";
-import { type MenuState, TrackMenu } from "./Menu";
+import { useStoredState } from "../ui/useStoredState";
 import {
   addToPlaylist,
   clearRecent,
@@ -40,8 +29,8 @@ import {
   type MusicLibrary,
   type MusicSources,
   type MusicStatus,
-  type Play as PlayRecord,
   type Playlist,
+  type Play as PlayRecord,
   recordPlay,
   scanMusic,
   setFavorite,
@@ -49,10 +38,22 @@ import {
   type Track,
   updatePlaylist,
 } from "./api";
+import { type Music, MusicContext, type Place } from "./context";
+import {
+  buildIndex,
+  formatDuration,
+  type PinyinMatch,
+  qualityOf,
+  type SongSort,
+  search,
+  unknownAlbum,
+  unknownArtist,
+} from "./library";
+import { type MenuState, TrackMenu } from "./Menu";
 import { NowPlaying } from "./NowPlaying";
+import { PlayerBar } from "./PlayerBar";
 import { loadPinyin } from "./pinyin";
 import { usePlayer } from "./player";
-import { PlayerBar } from "./PlayerBar";
 import { QueuePanel } from "./QueuePanel";
 import { Sidebar } from "./Sidebar";
 import { SourcesDialog } from "./SourcesDialog";
@@ -114,31 +115,6 @@ function messageOf(error: unknown): string {
   return errorText(error, "music");
 }
 
-function useStored<T>(key: string, initial: T): [T, (value: T | ((current: T) => T)) => void] {
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const stored = window.localStorage.getItem(key);
-      return stored === null ? initial : (JSON.parse(stored) as T);
-    } catch {
-      return initial;
-    }
-  });
-  const set = useCallback(
-    (next: T | ((current: T) => T)) =>
-      setValue((current) => {
-        const resolved = typeof next === "function" ? (next as (current: T) => T)(current) : next;
-        try {
-          window.localStorage.setItem(key, JSON.stringify(resolved));
-        } catch {
-          /* storage is optional */
-        }
-        return resolved;
-      }),
-    [key],
-  );
-  return [value, set];
-}
-
 // moveRows moves the entries at positions to just before target.
 export function moveRows<T>(items: T[], positions: number[], target: number): T[] {
   const moving = new Set(positions);
@@ -166,12 +142,15 @@ export function MusicPanel({ userId, onOpenFiles }: Props) {
   const [menu, setMenu] = useState<MenuState>();
   const [info, setInfo] = useState<string>();
   const [sourcesOpen, setSourcesOpen] = useState(false);
-  const [songSort, setSongSort] = useStored<{ by: SongSort; descending: boolean }>("a-nas.music.songSort", {
+  const [songSort, setSongSort] = useStoredState<{ by: SongSort; descending: boolean }>("a-nas.music.songSort", {
     by: "title",
     descending: false,
   });
-  const [albumSort, setAlbumSort] = useStored<"title" | "artist" | "year" | "added">("a-nas.music.albumSort", "title");
-  const [searches, setSearches] = useStored<string[]>(`a-nas.music.${userId}.searches`, []);
+  const [albumSort, setAlbumSort] = useStoredState<"title" | "artist" | "year" | "added">(
+    "a-nas.music.albumSort",
+    "title",
+  );
+  const [searches, setSearches] = useStoredState<string[]>(`a-nas.music.${userId}.searches`, []);
   const [pinyin, setPinyin] = useState<PinyinMatch>();
   const { prompt, confirm, dialog } = useDialogs();
   const { toast, element: toasts } = useToasts();

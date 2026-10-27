@@ -1,7 +1,7 @@
 import { CircleAlert, FolderPlus, FolderUp, ShieldCheck } from "lucide-react";
 import {
-  DragEvent as ReactDragEvent,
   FormEvent,
+  DragEvent as ReactDragEvent,
   MouseEvent as ReactMouseEvent,
   useEffect,
   useEffectEvent,
@@ -10,16 +10,15 @@ import {
 } from "react";
 
 import type { FileEntry, Space } from "../api.generated";
-import { endViewing } from "../settings/api";
-import { copyFile, createDirectory, deleteFile, moveFile } from "./api";
 import { VersionsDialog } from "../backup/VersionsDialog";
 import { nameProblem } from "../lib/fileNames";
+import { carriesFiles, PickedFile, pickedFromDrop } from "../lib/pickedFiles";
 import { displayName, usePeople } from "../people/people";
+import { endViewing } from "../settings/api";
 import { useShares } from "../shares/SharesProvider";
-import { carriesFiles, PickedFile, pickedFromDrop } from "../transfers/picker";
-import { transferStore } from "../transfers/store";
 import type { TransferLocation } from "../transfers/api";
-import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "./useFileOrder";
+import { transferStore } from "../transfers/store";
+import { copyFile, createDirectory, deleteFile, moveFile } from "./api";
 import { FileContextMenu, FileContextMenuState } from "./FileContextMenu";
 import { DeleteDialog, RenameDialog } from "./FileDialogs";
 import { FileInspector } from "./FileInspector";
@@ -48,14 +47,16 @@ import {
 } from "./model";
 import { useDragReorder } from "./useDragReorder";
 import { useFileListing } from "./useFileListing";
+import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "./useFileOrder";
 import { usePaneWidths } from "./usePaneWidths";
 import { useTextPreview } from "./useTextPreview";
 import "./files.css";
 
 interface FilePanelProps {
   userID: string;
-  navigation?: TransferLocation;
-  onNavigated: () => void;
+  // A folder another window asked for; onIntentHandled tells the desktop it is shown.
+  intent?: TransferLocation;
+  onIntentHandled: () => void;
   onOpenTransfers: () => void;
   onOpenPhotos: () => void;
   onOpenMedia: () => void;
@@ -64,8 +65,8 @@ interface FilePanelProps {
 
 export function FilePanel({
   userID,
-  navigation,
-  onNavigated,
+  intent,
+  onIntentHandled,
   onOpenTransfers,
   onOpenPhotos,
   onOpenMedia,
@@ -119,22 +120,22 @@ export function FilePanel({
   const { order, save: saveOrder, storageError, scope: orderScope } = useFileOrder(userID, spaceID, parentID);
 
   // A transfer's location opens here.
-  const [navigatedTo, setNavigatedTo] = useState<TransferLocation>();
-  if (navigatedTo !== navigation) {
-    setNavigatedTo(navigation);
-    if (navigation) {
-      setSpaceID(navigation.spaceId);
-      setTrail(navigation.folders.map((folder) => ({ id: folder.id, name: folder.name })));
+  const [intentBefore, setIntentBefore] = useState<TransferLocation>();
+  if (intentBefore !== intent) {
+    setIntentBefore(intent);
+    if (intent) {
+      setSpaceID(intent.spaceId);
+      setTrail(intent.folders.map((folder) => ({ id: folder.id, name: folder.name })));
       setQuery("");
       setSelectedItemID("");
       setSelectedItemIDs([]);
       setContextMenu(undefined);
     }
   }
-  const navigated = useEffectEvent(onNavigated);
+  const intentHandled = useEffectEvent(onIntentHandled);
   useEffect(() => {
-    if (navigation) navigated();
-  }, [navigation]);
+    if (intent) intentHandled();
+  }, [intent]);
   // Another item gets another try at its preview.
   const [previewedID, setPreviewedID] = useState(selectedItemID);
   if (previewedID !== selectedItemID) {

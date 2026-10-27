@@ -1,8 +1,8 @@
 import { DragEvent as ReactDragEvent, useRef, useState } from "react";
 
-import { carriesFiles } from "../transfers/picker";
-import { FileOrder, isPinned, reorderFiles } from "./useFileOrder";
+import { carriesFiles } from "../lib/pickedFiles";
 import { FileBrowserItem } from "./model";
+import { FileOrder, isPinned, reorderFiles } from "./useFileOrder";
 
 // useDragReorder lets items be dragged into a manual order. An item moves
 // only among its peers, pinned or not, and only within the folder it was
