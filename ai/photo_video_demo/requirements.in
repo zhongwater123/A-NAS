@@ -1,0 +1,2 @@
+# The demo server's only direct dependency; requirements.lock pins it and what it needs.
+mcp==2.3.0

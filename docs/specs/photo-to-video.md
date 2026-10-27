@@ -1,6 +1,6 @@
 # 照片剪辑成视频
 
-状态：draft（第一阶段为 MCP 演示，尚未实现；[#283](https://github.com/zhongwater123/A-NAS/issues/283)）
+状态：draft（第一阶段的 MCP 演示已在开发机实现，用法见[本地环境](../development/LOCAL_ENVIRONMENT.md#照片拼视频演示)；[#283](https://github.com/zhongwater123/A-NAS/issues/283)）
 更新时间：2026-10-27
 
 ## 目标
@@ -38,6 +38,7 @@
 ```
 
 - **与助手 MCP 工具的关系**：VNAS 已经经 A-NAS 的 MCP 工具只读访问相册，其中有 `search_photos` 与看照片画面的 `look_at_photo`（[`anas_mcp.py`](../../ai/assistant-spike/anas_mcp.py)，[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 6）。那个服务器只在助手沙箱里运行，经相册服务的助手套接字按成员 UID 认人，开发机上的 Claude Code 连不到它。演示服务器因此改经产品服务的 HTTP 接口访问相册，`search_photos` 沿用同名工具的参数与返回形状，新增的只有 `make_slideshow`。
+- **代码位置**：[`ai/photo_video_demo/`](../../ai/photo_video_demo/server.py)。除 MCP 外壳外只用标准库，测试随 `make ai-test` 运行；MCP SDK 由它自己的锁定文件固定，不进 AI Worker 的运行环境。返回形状与助手的工具一致，但两边的代码不共用：助手的服务器经 Unix 套接字、不带会话，演示经 HTTP 登录。
 - **MCP 服务器只做转接**：检索、授权与排序都留在相册服务（[`internal/photos/search.go`](../../internal/photos/search.go)），服务器不读 Catalog、向量或受管存储。
 - **身份**：服务器以一个测试账号登录产品服务（`/api/v1/session`），之后的每次调用都以这个账号的身份进行，结果按相册 Policy 过滤；会话过期（收到 401）时重新登录一次。连接地址与测试账号由环境变量提供，不写进仓库。这是演示阶段的简化：它持有的是一个完整的成员会话，而产品中的助手只有相册服务按 UID 构造的只读助手身份（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md) 决定 4、ADR 0024 决定 6），后续阶段不沿用这种做法。
 - **取画面用照片的视图**：`viewPhoto` 返回从像素重新编码的 JPEG，已按方向转正，最长边不超过 1600 像素，不带原图的元数据；视频没有视图。`previewPhoto` 对 JPEG 与 PNG 返回未转正的原图，对视频返回封面帧，不适合拼接。
@@ -94,12 +95,12 @@
 - **FFmpeg 缺失或拼接失败**：返回失败原因；未写完的输出文件删除。
 - **输出位置**：只写入配置的输出目录，文件名由服务器生成，不覆盖已有文件。
 - **隐私**：Claude Code 使用云端模型，工具返回的名称、拍摄时间、标签与相册名会发给模型服务商；照片画面只交给本机的 FFmpeg，不发给模型。演示只用可丢弃的测试照片，不连接保存真实家庭数据的设备，与 [AI 助手](ai-assistant.md)对云端模型的限制一致。
-- **Fake 预览栈**：默认没有本地 AI，搜索只按名称与用户标签匹配。要接通语义检索，另起 `python3 -m anas_ai.worker --fake --socket <路径>`，并在启动产品服务时用 `ANAS_AI_SOCKET` 指向它；Fake Provider 的向量由输入哈希得到，检索结果与查询内容无关，只能用来验证链路是否接通，检索效果要在带真实模型的环境中看。HEIC 照片的视图还需要媒体工具，见 [fake-preview 技能](../../.claude/skills/fake-preview/SKILL.md)。
+- **Fake 预览栈**：默认没有本地 AI，搜索只按名称与用户标签匹配。演示用的 [`stack.sh`](../../ai/photo_video_demo/stack.sh) 另起 `python3 -m anas_ai.worker --fake`，并用 `ANAS_AI_SOCKET` 接给产品服务；相册在无人使用 5 分钟后才计算向量，在此之前搜索仍只按名称匹配。Fake Provider 的向量由输入哈希得到，检索结果与查询内容无关，只能用来验证链路是否接通，检索效果要在带真实模型的环境中看。HEIC 照片的视图还需要媒体工具，见 [fake-preview 技能](../../.claude/skills/fake-preview/SKILL.md)。
 
 ## 待决定
 
 - 后续阶段的入口：把 `make_slideshow` 加进 A-NAS 的 MCP 工具，让 VNAS 直接使用。要决定拼接在哪里运行（助手沙箱内，或交给媒体 Worker）、成片写到哪里（助手目录可写，图库不可写），以及剪视频片段时怎样授权：助手身份目前看不到视频资产。
-- 演示代码放在仓库的什么位置（建议在 `ai/` 下，与 `anas_mcp.py` 共用相册请求与结果整理的代码，沿用 Ruff 与测试），以及它是否随后演变为产品代码。
+- 演示代码是否随后演变为产品代码。
 - 检索效果用哪个环境验收：Experimental NAS 上的测试账号，或开发机上带真实模型的本地环境。
 
 ## 验收证据
@@ -116,5 +117,5 @@
 - 规格：[相册与本地智能检索](photo-library.md)、[相册视频](photo-video.md)、[AI 助手](ai-assistant.md)
 - 研究：[CutClaw 调研](../research/video-editing-cutclaw.md)、[FilmAgent 调研](../research/video-editing-filmagent.md)
 - 接口：[相册接口契约](../../api/paths/photos.yaml)（`searchPhotos`、`getPhotoAsset`、`viewPhoto`）
-- 代码：[相册搜索](../../internal/photos/search.go)、[照片视图](../../internal/photos/view.go)、[资产可见性](../../internal/photos/assets.go)、[助手的相册 MCP 工具](../../ai/assistant-spike/anas_mcp.py)
-- 测试：待实现
+- 代码：[演示服务器](../../ai/photo_video_demo/server.py)、[工具](../../ai/photo_video_demo/tools.py)、[拼接](../../ai/photo_video_demo/render.py)、[演示栈](../../ai/photo_video_demo/stack.sh)、[相册搜索](../../internal/photos/search.go)、[照片视图](../../internal/photos/view.go)、[资产可见性](../../internal/photos/assets.go)、[助手的相册 MCP 工具](../../ai/assistant-spike/anas_mcp.py)
+- 测试：[`ai/tests/test_photo_video_demo.py`](../../ai/tests/test_photo_video_demo.py)
