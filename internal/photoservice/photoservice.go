@@ -341,8 +341,14 @@ func runVectorIndex(ctx context.Context, workers *sync.WaitGroup, service *photo
 	vectors photos.VectorIndex) {
 	workers.Go(func() {
 		service.RunVectorSync(ctx, vectors, gate, min(time.Minute, gate.quiet), func(event photos.VectorSyncEvent) {
-			logger.InfoContext(ctx, "photo vector index "+event.Kind, "collection", event.Collection,
-				"upserted", event.Upserted, "deleted", event.Deleted, "queued", event.Queued)
+			level := slog.LevelInfo
+			if event.Rejected > 0 {
+				// The index refused these vectors; reconciliation tries them
+				// again tomorrow.
+				level = slog.LevelWarn
+			}
+			logger.Log(ctx, level, "photo vector index "+event.Kind, "collection", event.Collection,
+				"upserted", event.Upserted, "deleted", event.Deleted, "rejected", event.Rejected, "queued", event.Queued)
 		}, func(err error) {
 			logger.WarnContext(ctx, "photo vector index sync failed; it retries", "error", err)
 		})

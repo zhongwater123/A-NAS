@@ -50,6 +50,10 @@ const (
 	// vectorReconcileInterval is how often the whole index is compared with
 	// the Catalog.
 	vectorReconcileInterval = 24 * time.Hour
+	// vectorSyncMaxBackoff bounds how long sync waits after failures in a
+	// row; the wait doubles from the idle interval up to it, so an index that
+	// keeps failing is not kept running by retries.
+	vectorSyncMaxBackoff = 30 * time.Minute
 )
 
 // imagesCollection is the collection of image vectors and the model whose
@@ -76,9 +80,25 @@ type VectorSyncEvent struct {
 	Collection string
 	Upserted   int
 	Deleted    int
+	// Rejected counts the objects the index refused; they leave the queue
+	// so that they do not hold up the rest, and the next reconciliation
+	// tries them again.
+	Rejected int
 	// Queued counts the objects a new collection or a reconciliation found
 	// out of line and queued again.
 	Queued int
+}
+
+// vectorSyncBackoff is how long sync waits after failures in a row.
+func vectorSyncBackoff(idle time.Duration, failures int) time.Duration {
+	wait := idle
+	for range failures - 1 {
+		if wait >= vectorSyncMaxBackoff/2 {
+			return vectorSyncMaxBackoff
+		}
+		wait *= 2
+	}
+	return min(wait, vectorSyncMaxBackoff)
 }
 
 // RunVectorSync keeps index in line with the Catalog until ctx ends, a batch
@@ -87,6 +107,13 @@ type VectorSyncEvent struct {
 func (s *Service) RunVectorSync(ctx context.Context, index VectorIndex, gate Gate, idle time.Duration,
 	report func(VectorSyncEvent), logError func(error)) {
 	var reconciled time.Time
+	failures := 0
+	failed := func(err error) {
+		failures++
+		if ctx.Err() == nil && logError != nil {
+			logError(err)
+		}
+	}
 	for {
 		wait := idle
 		if open, reason := gate.Open(ctx); !open {
@@ -97,20 +124,20 @@ func (s *Service) RunVectorSync(ctx context.Context, index VectorIndex, gate Gat
 			worked, err := s.SyncVectors(ctx, index, report)
 			switch {
 			case err != nil:
-				if ctx.Err() == nil && logError != nil {
-					logError(err)
-				}
+				failed(err)
 			case worked:
+				failures = 0
 				continue
 			case s.now().Sub(reconciled) >= vectorReconcileInterval:
 				if err := s.ReconcileVectors(ctx, index, report); err != nil {
-					if ctx.Err() == nil && logError != nil {
-						logError(err)
-					}
+					failed(err)
 				} else {
-					reconciled = s.now()
+					failures, reconciled = 0, s.now()
 					continue
 				}
+			}
+			if failures > 0 {
+				wait = vectorSyncBackoff(idle, failures)
 			}
 		}
 		select {
@@ -126,15 +153,22 @@ func (s *Service) RunVectorSync(ctx context.Context, index VectorIndex, gate Gat
 // there was anything to do. With nothing queued it leaves the index alone,
 // so that the instance can stop while the library is unchanged; a lost
 // index is then found by ReconcileVectors.
-func (s *Service) SyncVectors(ctx context.Context, index VectorIndex, report func(VectorSyncEvent)) (bool, error) {
+func (s *Service) SyncVectors(ctx context.Context, index VectorIndex, report func(VectorSyncEvent)) (worked bool, err error) {
 	var waiting bool
-	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM vector_outbox)").Scan(&waiting); err != nil || !waiting {
+	if err = s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM vector_outbox)").Scan(&waiting); err != nil || !waiting {
 		return false, err
 	}
-	collection, created, err := s.imagesCollection(ctx, index, report)
+	collection, created, err := s.imagesCollection(ctx, index, report, false)
 	if err != nil || collection.name == "" {
 		return created, err
 	}
+	// Whatever fails below is checked against the instance again next time:
+	// it may have lost the collection.
+	defer func() {
+		if err != nil {
+			s.vectorChecked.Store(nil)
+		}
+	}()
 	type queued struct {
 		object  string
 		version int64
@@ -174,10 +208,11 @@ func (s *Service) SyncVectors(ctx context.Context, index VectorIndex, report fun
 			deletes = append(deletes, object)
 		}
 	}
-	if err := index.Upsert(ctx, collection.name, upserts); err != nil {
+	rejected, err := upsertPoints(ctx, index, collection.name, upserts)
+	if err != nil {
 		return false, err
 	}
-	if err := index.Delete(ctx, collection.name, deletes); err != nil {
+	if err = index.Delete(ctx, collection.name, deletes); err != nil {
 		return false, err
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
@@ -192,9 +227,31 @@ func (s *Service) SyncVectors(ctx context.Context, index VectorIndex, report fun
 		return false, err
 	}
 	if report != nil {
-		report(VectorSyncEvent{Kind: "synced", Collection: collection.name, Upserted: len(upserts), Deleted: len(deletes)})
+		report(VectorSyncEvent{Kind: "synced", Collection: collection.name, Upserted: len(upserts) - rejected,
+			Deleted: len(deletes), Rejected: rejected})
 	}
 	return true, nil
+}
+
+// upsertPoints stores points and counts those the index refused. When it
+// refuses a batch, each point is tried alone, so that one it will never take
+// does not hold up the others.
+func upsertPoints(ctx context.Context, index VectorIndex, collection string, points []vectorindex.Point) (int, error) {
+	err := index.Upsert(ctx, collection, points)
+	if !errors.Is(err, vectorindex.ErrRejected) {
+		return 0, err
+	}
+	rejected := 0
+	for _, point := range points {
+		err := index.Upsert(ctx, collection, []vectorindex.Point{point})
+		switch {
+		case errors.Is(err, vectorindex.ErrRejected):
+			rejected++
+		case err != nil:
+			return 0, err
+		}
+	}
+	return rejected, nil
 }
 
 // vectorPoints reads what the index should hold for objects: the point of
@@ -232,16 +289,29 @@ ORDER BY e.object_id, a.library_id`, args...)
 	return points, errors.Join(rows.Err(), rows.Close())
 }
 
+// currentImagesCollection is the collection the Catalog records for image
+// vectors, empty when there is none.
+func (s *Service) currentImagesCollection(ctx context.Context) (imagesCollection, error) {
+	var current imagesCollection
+	err := s.db.QueryRowContext(ctx, "SELECT collection, model FROM vector_index_state WHERE name = ?", imagesIndex).
+		Scan(&current.name, &current.model)
+	if errors.Is(err, sql.ErrNoRows) {
+		return imagesCollection{}, nil
+	}
+	return current, err
+}
+
 // imagesCollection returns the collection that holds the current model's
 // vectors, making it, and queueing every vector for it, when the index has
 // none: on the first sync, after the instance lost its storage, when another
 // Catalog made the one there, and when the model changes. The model is that
 // of the newest vector; with none there is nothing to index.
-func (s *Service) imagesCollection(ctx context.Context, index VectorIndex, report func(VectorSyncEvent)) (imagesCollection, bool, error) {
-	var current imagesCollection
-	err := s.db.QueryRowContext(ctx, "SELECT collection, model FROM vector_index_state WHERE name = ?", imagesIndex).
-		Scan(&current.name, &current.model)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+//
+// Asking the instance whether the collection is still there takes a call, so
+// a collection seen there is trusted until a sync fails; verify asks anyway.
+func (s *Service) imagesCollection(ctx context.Context, index VectorIndex, report func(VectorSyncEvent), verify bool) (imagesCollection, bool, error) {
+	current, err := s.currentImagesCollection(ctx)
+	if err != nil {
 		return imagesCollection{}, false, err
 	}
 	var model string
@@ -249,29 +319,20 @@ func (s *Service) imagesCollection(ctx context.Context, index VectorIndex, repor
 	err = s.db.QueryRowContext(ctx, "SELECT model, length(vector) FROM embeddings WHERE derivation = ? ORDER BY created_at DESC, object_id LIMIT 1",
 		embeddingDerivation).Scan(&model, &size)
 	if errors.Is(err, sql.ErrNoRows) {
-		// No vectors, so nothing to index: an earlier collection held only
-		// photos deleted since, and what is queued needs no point.
-		if current.name != "" {
-			names, err := index.Collections(ctx)
-			if err != nil {
-				return imagesCollection{}, false, err
-			}
-			if slices.Contains(names, current.name) {
-				if err := index.DeleteCollection(ctx, current.name); err != nil {
-					return imagesCollection{}, false, err
-				}
-			}
-		}
-		return imagesCollection{}, false, s.ForgetVectorIndex(ctx)
+		return imagesCollection{}, false, s.dropImagesCollection(ctx, index, current)
 	}
 	if err != nil {
 		return imagesCollection{}, false, err
+	}
+	if checked := s.vectorChecked.Load(); !verify && checked != nil && *checked == current && current.model == model {
+		return current, false, nil
 	}
 	names, err := index.Collections(ctx)
 	if err != nil {
 		return imagesCollection{}, false, err
 	}
 	if current.name != "" && current.model == model && slices.Contains(names, current.name) {
+		s.vectorChecked.Store(&current)
 		return current, false, nil
 	}
 
@@ -310,10 +371,39 @@ ON CONFLICT(object_id) DO UPDATE SET version = version + 1`, embeddingDerivation
 	if err != nil {
 		return imagesCollection{}, false, err
 	}
+	s.vectorChecked.Store(&fresh)
 	if report != nil {
 		report(VectorSyncEvent{Kind: "created", Collection: fresh.name, Queued: int(queued)})
 	}
 	return fresh, true, nil
+}
+
+// dropImagesCollection forgets the index when the Catalog holds no vectors:
+// an earlier collection held only photos deleted since, and what is queued
+// needs no point. A vector stored meanwhile keeps its queue and the record,
+// so that the next round makes a collection for it.
+func (s *Service) dropImagesCollection(ctx context.Context, index VectorIndex, current imagesCollection) error {
+	s.vectorChecked.Store(nil)
+	if current.name != "" {
+		names, err := index.Collections(ctx)
+		if err != nil {
+			return err
+		}
+		if slices.Contains(names, current.name) {
+			if err := index.DeleteCollection(ctx, current.name); err != nil {
+				return err
+			}
+		}
+	}
+	return s.withTx(ctx, func(tx *sql.Tx) error {
+		for _, table := range []string{"vector_outbox", "vector_index_state"} {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE NOT EXISTS (SELECT 1 FROM embeddings WHERE derivation = ?)",
+				embeddingDerivation); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // ReconcileVectors compares every point of the index with what the Catalog
@@ -322,7 +412,7 @@ ON CONFLICT(object_id) DO UPDATE SET version = version + 1`, embeddingDerivation
 // brings another Qdrant, a Catalog restored from an older snapshot, or writes
 // the instance lost in a power cut.
 func (s *Service) ReconcileVectors(ctx context.Context, index VectorIndex, report func(VectorSyncEvent)) error {
-	current, created, err := s.imagesCollection(ctx, index, report)
+	current, created, err := s.imagesCollection(ctx, index, report, true)
 	if err != nil || created || current.name == "" {
 		// A new collection has everything queued already.
 		return err
@@ -388,6 +478,7 @@ ON CONFLICT(object_id) DO UPDATE SET version = version + 1`, object); err != nil
 // service runs without one: the queue would only grow, and an index turned on
 // later is built anew.
 func (s *Service) ForgetVectorIndex(ctx context.Context) error {
+	s.vectorChecked.Store(nil)
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM vector_outbox"); err != nil {
 			return err

@@ -266,9 +266,11 @@ type Service struct {
 	// searches keeps what image searches need for their later pages.
 	searches imageSearches
 	// shadow hands searches to RunVectorShadow while shadowing says it runs
-	// (vectorshadow.go).
-	shadow    chan shadowQuery
-	shadowing atomic.Bool
+	// (vectorshadow.go); vectorChecked is the image collection the sync loop
+	// last found in the index (vectorsync.go).
+	shadow        chan shadowQuery
+	shadowing     atomic.Bool
+	vectorChecked atomic.Pointer[imagesCollection]
 	// peopleCalibrations say how each kind of occurrence clusters.
 	peopleCalibrations []PeopleCalibration
 

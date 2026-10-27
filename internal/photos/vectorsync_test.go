@@ -313,6 +313,77 @@ func TestVectorIndexIsRebuiltFromTheCatalog(t *testing.T) {
 	}
 }
 
+// A vector the index refuses leaves the queue without holding up the rest;
+// failures in a row space out the next tries.
+func TestRefusedVectorsDoNotHoldUpTheRest(t *testing.T) {
+	service, embedder, index, db, _ := indexedService(t)
+	private, _ := libraries(t, service, alice)
+	a := importPhoto(t, service, alice, private.ID, "", "a.png", encodePNG(1))
+	b := importPhoto(t, service, alice, private.ID, "", "b.png", encodePNG(2))
+	processAll(t, service)
+	processAI(t, service, embedder, &fakeGate{open: true})
+	syncAll(t, service, index)
+
+	// b's vector, though of the same model, loses its last value: the
+	// collection takes vectors of four values only.
+	objectA, objectB := objectOf(t, db, a.ID), objectOf(t, db, b.ID)
+	if _, err := db.Exec("UPDATE embeddings SET vector = substr(vector, 1, 12) WHERE object_id = ?", objectB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE embeddings SET created_at = created_at WHERE object_id = ?", objectA); err != nil {
+		t.Fatal(err)
+	}
+	events := syncAll(t, service, index)
+	rejected := 0
+	for _, event := range events {
+		rejected += event.Rejected
+	}
+	if rejected != 1 {
+		t.Errorf("sync events = %+v, want b rejected once", events)
+	}
+	var queued int
+	if err := db.QueryRow("SELECT COUNT(*) FROM vector_outbox").Scan(&queued); err != nil || queued != 0 {
+		t.Errorf("queue after a refused vector = %d, %v; want empty", queued, err)
+	}
+	if got := inLibraries(t, index, private.ID); !slices.Contains(got, objectA) {
+		t.Errorf("index = %v, want a still in it", got)
+	}
+
+	for failures, want := range map[int]time.Duration{1: time.Minute, 2: 2 * time.Minute, 5: 16 * time.Minute, 6: 30 * time.Minute, 40: 30 * time.Minute} {
+		if got := photos.VectorSyncBackoff(time.Minute, failures); got != want {
+			t.Errorf("backoff after %d failures = %v, want %v", failures, got, want)
+		}
+	}
+}
+
+// When the last photo with a vector goes, so does the index.
+func TestTheIndexGoesWithTheLastVector(t *testing.T) {
+	service, embedder, index, db, _ := indexedService(t)
+	ctx := context.Background()
+	private, _ := libraries(t, service, alice)
+	a := importPhoto(t, service, alice, private.ID, "", "a.png", encodePNG(1))
+	processAll(t, service)
+	processAI(t, service, embedder, &fakeGate{open: true})
+	syncAll(t, service, index)
+	imagesCollection(t, index)
+
+	if _, err := service.Trash(ctx, alice, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Purge(ctx, alice, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(t, service, index)
+	if names, err := index.Collections(ctx); err != nil || len(names) != 0 {
+		t.Errorf("collections after the last photo went = %v, %v", names, err)
+	}
+	var queued, state int
+	if err := db.QueryRow("SELECT (SELECT COUNT(*) FROM vector_outbox), (SELECT COUNT(*) FROM vector_index_state)").Scan(&queued, &state); err != nil ||
+		queued != 0 || state != 0 {
+		t.Errorf("after the last photo went: %d queued, %d state rows, %v", queued, state, err)
+	}
+}
+
 // With nothing queued a sync round leaves the index alone, so that its
 // instance can stop while the library does not change.
 func TestAnIdleSyncLeavesTheIndexAlone(t *testing.T) {
@@ -411,23 +482,25 @@ func TestShadowComparesFirstPagesOfSearches(t *testing.T) {
 	}()
 	defer func() { cancel(); <-done }()
 
-	var comparison photos.ShadowComparison
-	var next string
-	deadline := time.After(30 * time.Second)
-	for compared := false; !compared; {
-		page, err := service.Search(context.Background(), alice, photos.SearchRequest{Query: "猫", Limit: 1})
-		if err != nil || !page.Semantic {
-			t.Fatalf("Search() = %+v, %v", page, err)
-		}
-		next = page.Next
-		select {
-		case comparison = <-comparisons:
-			compared = true
-		case <-time.After(100 * time.Millisecond):
-		case <-deadline:
-			t.Fatal("no search was compared with the index")
+	// Wait until the worker takes searches, so that exactly one is handed
+	// over: a search made before would not be compared, one too many would
+	// be compared later.
+	for deadline := time.Now().Add(10 * time.Second); !service.ShadowRunning(); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the shadow worker did not start")
 		}
 	}
+	page, err := service.Search(context.Background(), alice, photos.SearchRequest{Query: "猫", Limit: 1})
+	if err != nil || !page.Semantic {
+		t.Fatalf("Search() = %+v, %v", page, err)
+	}
+	var comparison photos.ShadowComparison
+	select {
+	case comparison = <-comparisons:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the search was not compared with the index")
+	}
+	next := page.Next
 	if comparison.Candidates != 3 || comparison.Overlap[10] != 1 || comparison.Overlap[500] != 1 {
 		t.Errorf("comparison = %+v, want the index to agree on all three photos", comparison)
 	}

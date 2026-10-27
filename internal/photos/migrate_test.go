@@ -161,6 +161,7 @@ func TestVectorIndexMigrationCanBeUndone(t *testing.T) {
 		"DROP TRIGGER assets_vector_outbox_update",
 		"DROP TABLE vector_outbox",
 		"DROP TABLE vector_index_state",
+		"DROP INDEX embeddings_by_age",
 		"PRAGMA user_version = 13",
 	} {
 		if _, err := service.db.ExecContext(ctx, statement); err != nil {
@@ -168,7 +169,7 @@ func TestVectorIndexMigrationCanBeUndone(t *testing.T) {
 		}
 	}
 	var leftovers int
-	if err := service.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE '%vector_outbox%' OR name LIKE '%vector_index%'").Scan(&leftovers); err != nil || leftovers != 0 {
+	if err := service.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE '%vector_outbox%' OR name LIKE '%vector_index%' OR name = 'embeddings_by_age'").Scan(&leftovers); err != nil || leftovers != 0 {
 		t.Fatalf("schema objects left after undoing = %d, %v", leftovers, err)
 	}
 	_ = service.Close()

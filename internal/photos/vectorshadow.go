@@ -3,8 +3,6 @@ package photos
 import (
 	"cmp"
 	"context"
-	"database/sql"
-	"errors"
 	"slices"
 	"time"
 
@@ -13,10 +11,12 @@ import (
 
 // Shadow comparison (docs/architecture/vector-index.md#影子比对): after a
 // search, the shadow worker asks the vector index the same question and
-// compares its answer with the exact scan's. Search hands the query over
-// without waiting and never touches the index itself; a busy worker drops
-// the comparison. Whether search moves to the index is decided on what these
-// comparisons show on the device.
+// compares its answer with the exact scan's. Search hands over the query, the
+// content objects it ranked and how long its own scan took, without waiting
+// and without touching the index; a busy worker drops the comparison. The
+// worker reads no candidates from the Catalog, whose one connection the next
+// requests are waiting for. Whether search moves to the index is decided on
+// what these comparisons show on the device.
 
 // shadowLimit is how many photos the index is asked for, as many as search
 // ranks by similarity.
@@ -42,37 +42,58 @@ type ShadowComparison struct {
 	// Overlap maps each cut k to the share of the index's top k that the
 	// exact scan ranks within its top k, ties at the cut included.
 	Overlap map[int]float64
-	// Index is how long the index took; Warm whether a connection to it was
-	// open before, or the call had to wait for the instance to start.
+	// Index is how long the index took. Warm says whether a connection to it
+	// was open: the instance stops seconds after the last connection closes,
+	// so a comparison that is not Warm includes the instance's start.
 	Index time.Duration
 	Warm  bool
-	// Exact is how long the exact ranking took, candidates read included.
+	// Exact is how long the search's own ranking of its candidates took in
+	// the photo service, the work the index would take over.
 	Exact time.Duration
 }
 
+// shadowQuery is a search handed to the shadow worker: its query vector and
+// model, the libraries it covered, the content objects it ranked and how
+// long that took.
 type shadowQuery struct {
-	vector []float32
-	model  string
-	scope  []string
+	vector  []float32
+	model   string
+	scope   []string
+	objects []string
+	exact   time.Duration
 }
 
-// shadowSearch hands a search to the shadow worker if one runs and is free.
-func (s *Service) shadowSearch(vector []float32, model string, scope []any) {
-	if !s.shadowing.Load() {
-		return
+// newShadowQuery prepares a search for comparison while a shadow worker runs;
+// nil means the search is not compared.
+func (s *Service) newShadowQuery(vector []float32, model string, scope []any) *shadowQuery {
+	if vector == nil || !s.shadowing.Load() {
+		return nil
 	}
 	libraries := make([]string, len(scope))
 	for i, library := range scope {
-		libraries[i], _ = library.(string)
+		id, ok := library.(string)
+		if !ok {
+			return nil
+		}
+		libraries[i] = id
+	}
+	return &shadowQuery{vector: vector, model: model, scope: libraries}
+}
+
+// shadowSearch hands a search to the shadow worker if it is free.
+func (s *Service) shadowSearch(query *shadowQuery) {
+	if query == nil {
+		return
 	}
 	select {
-	case s.shadow <- shadowQuery{vector: vector, model: model, scope: libraries}:
+	case s.shadow <- *query:
 	default:
 	}
 }
 
 // RunVectorShadow compares the searches handed to it with index until ctx
-// ends. warm reports whether a connection to the index is open.
+// ends. warm reports, without waiting, whether a connection to the index is
+// open.
 func (s *Service) RunVectorShadow(ctx context.Context, index VectorIndex, warm func() bool,
 	report func(ShadowComparison), logError func(error)) {
 	s.shadowing.Store(true)
@@ -100,17 +121,12 @@ func (s *Service) compareWithIndex(ctx context.Context, index VectorIndex, warm 
 	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM vector_outbox)").Scan(&behind); err != nil || behind {
 		return ShadowComparison{}, false, err
 	}
-	var collection imagesCollection
-	err := s.db.QueryRowContext(ctx, "SELECT collection, model FROM vector_index_state WHERE name = ?", imagesIndex).
-		Scan(&collection.name, &collection.model)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && collection.model != query.model) {
-		return ShadowComparison{}, false, nil
-	}
-	if err != nil {
+	collection, err := s.currentImagesCollection(ctx)
+	if err != nil || collection.name == "" || collection.model != query.model {
 		return ShadowComparison{}, false, err
 	}
 
-	comparison := ShadowComparison{Collection: collection.name, Overlap: make(map[int]float64, len(shadowCuts))}
+	comparison := ShadowComparison{Collection: collection.name, Exact: query.exact, Overlap: make(map[int]float64, len(shadowCuts))}
 	if warm != nil {
 		comparison.Warm = warm()
 	}
@@ -122,29 +138,20 @@ func (s *Service) compareWithIndex(ctx context.Context, index VectorIndex, warm 
 	}
 	comparison.Index = time.Since(started)
 
-	started = time.Now()
-	scope := make([]any, len(query.scope))
-	for i, library := range query.scope {
-		scope[i] = library
-	}
-	candidates, err := s.searchCandidates(ctx, scope)
-	if err != nil {
-		return ShadowComparison{}, false, err
-	}
 	type scored struct {
 		object string
 		score  float64
 	}
 	var exact []scored
 	err = s.index.read(ctx, s, collection.model, func(vectors map[string][]float32) {
-		seen := make(map[string]bool, len(candidates))
-		for _, c := range candidates {
-			vector, ok := vectors[c.objectID]
-			if !ok || c.video || seen[c.objectID] {
+		seen := make(map[string]bool, len(query.objects))
+		for _, object := range query.objects {
+			vector, ok := vectors[object]
+			if !ok || seen[object] {
 				continue
 			}
-			seen[c.objectID] = true
-			exact = append(exact, scored{c.objectID, dot(vector, query.vector)})
+			seen[object] = true
+			exact = append(exact, scored{object, dot(vector, query.vector)})
 		}
 	})
 	if err != nil {
@@ -153,7 +160,6 @@ func (s *Service) compareWithIndex(ctx context.Context, index VectorIndex, warm 
 	slices.SortFunc(exact, func(a, b scored) int {
 		return cmp.Or(cmp.Compare(b.score, a.score), cmp.Compare(a.object, b.object))
 	})
-	comparison.Exact = time.Since(started)
 	comparison.Candidates = len(exact)
 
 	scores := make(map[string]float64, len(exact))

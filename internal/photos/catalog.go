@@ -316,6 +316,9 @@ CREATE TABLE vector_outbox (
     version INTEGER NOT NULL DEFAULT 1
 );
 
+-- The sync loop finds the newest vector's model before every batch.
+CREATE INDEX embeddings_by_age ON embeddings(derivation, created_at, object_id);
+
 -- Which collection holds the index, once the sync loop has made one.
 CREATE TABLE vector_index_state (
     name TEXT PRIMARY KEY,

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/photos/objects"
@@ -167,14 +168,16 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 	} else {
 		text := cmp.Or(rest, query)
 		queryVector, model := s.embedQuery(ctx, text)
-		if hits, err = s.queryHits(ctx, text, queryVector, model, candidates, &page); err != nil {
-			return SearchPage{}, err
-		}
 		// The vector index answers the same question in the background;
 		// only a first page without people compares like with like.
-		if queryVector != nil && after == nil && len(names) == 0 {
-			s.shadowSearch(queryVector, model, args)
+		var shadow *shadowQuery
+		if after == nil && len(names) == 0 {
+			shadow = s.newShadowQuery(queryVector, model, args)
 		}
+		if hits, err = s.queryHits(ctx, text, queryVector, model, candidates, &page, shadow); err != nil {
+			return SearchPage{}, err
+		}
+		s.shadowSearch(shadow)
 	}
 	page.Assets, page.Next, err = s.hitPage(ctx, p, hits, after, request.Limit)
 	if err != nil {
@@ -254,9 +257,12 @@ func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, af
 // queryHits ranks the candidates for a query, whose vector of model is
 // queryVector or nil: name or user tag matches first, then every photo with
 // a vector by similarity, at most maxSemanticResults of them. It records on
-// the page whether the query was encoded and where the closest group ends.
+// the page whether the query was encoded and where the closest group ends,
+// and on shadow, unless nil, the content objects it ranked by similarity and
+// how long ranking took.
 func (s *Service) queryHits(ctx context.Context, query string, queryVector []float32, model string, candidates []candidate,
-	page *SearchPage) ([]searchHit, error) {
+	page *SearchPage, shadow *shadowQuery) ([]searchHit, error) {
+	started := time.Now()
 	folded := strings.ToLower(query)
 	calibration := s.objectCalibration
 	mentions := s.matcher.Mentions(query)
@@ -284,6 +290,9 @@ func (s *Service) queryHits(ctx context.Context, query string, queryVector []flo
 				score := 0.0
 				if embedded && queryVector != nil {
 					score = dot(vector, queryVector)
+					if shadow != nil {
+						shadow.objects = append(shadow.objects, c.objectID)
+					}
 				}
 				scores, wasDetected := found[c.objectID]
 				if !wasDetected {
@@ -308,6 +317,9 @@ func (s *Service) queryHits(ctx context.Context, query string, queryVector []flo
 	sortHits(named)
 	sortHits(detected)
 	sortHits(similar)
+	if shadow != nil {
+		shadow.exact = time.Since(started)
+	}
 	similar = similar[:min(len(similar), maxSemanticResults)]
 	closest := len(detected)
 	if closest == 0 && len(similar) > 0 {
