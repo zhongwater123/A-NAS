@@ -24,6 +24,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0018：音乐原地索引普通文件，经文件代理以成员身份读取](0018-index-music-in-place-through-the-file-broker.md)（proposed）
 - [0019：上传经 tus 分片到达，写入文件代理以用户身份创建的临时文件](0019-resume-uploads-over-tus-with-broker-held-files.md)（proposed）
 - [0020：系统日志经 Host Agent 的白名单 journal 查询读取](0020-read-service-logs-through-the-host-agent.md)（proposed）
+- 0021：本机屏幕默认是 Web 桌面，可切换到 KDE Plasma 桌面模式（draft，没有 PR：2026-10-13 起只在开发机的本地分支 `claude/home-third-party-app-download-e6f0e6` 上（提交 `aa6c684`），没有推送；编号保留给它）
 - [0022：应用容器只以应用身份接触共享空间](0022-reach-shared-folders-only-as-the-app-identity.md)（修订 0008 的应用容器实现，取代 0010 的运行身份段落）
 
 - [0023：成员分享的固定副本由独立服务持有](0023-isolate-member-share-copies-in-a-dedicated-service.md)（proposed）
@@ -31,11 +32,15 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0024：AI 助手以每个账号一个沙箱中的 Hermes Agent 运行](0024-run-a-sandboxed-hermes-agent-per-member.md)（proposed）
 
 - [0025：数据卷以 Btrfs 自带的多盘配置跨越多块硬盘](0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)（修订 0007 的单盘限制）
+- 0026：VNAS 经 NAS 上的 PAIR 节点使用家里电脑的算力（draft，[PR #196](https://github.com/zhongwater123/A-NAS/pull/196)）
+- 0027：语音处理在云端转写与整理，声纹只在本机计算和保存（draft，[PR #203](https://github.com/zhongwater123/A-NAS/pull/203)）
 
 - [0028：向量索引由所属服务各自的 Qdrant 实例承担，随时可从 Catalog 重建](0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)（proposed；修订 0011 的数据位置：派生的向量索引放在系统盘）
 
 ## 格式
 
 文件名使用 `NNNN-short-title.md`。正文首先用一至三句话说明背景、决定和原因；只有确有价值时再增加状态、备选项或后果。状态行紧接标题、写在正文之前，以 proposed、accepted 或 superseded 开头；`make docs-check` 读这一行与索引的标记核对，状态行写在第一个小节之前的其他位置时报错。
+
+新 ADR 取索引中最大的编号加一，占位的编号也算。ADR 写在分支上时，先以单独的文档 PR 在索引中占位：一行 `- NNNN：标题（draft，PR #N）`，不加链接；ADR 合并时把占位换成正式条目。`make docs-check` 在两篇 ADR 同号、同一编号占位两次，或编号已有 ADR 文件而占位还在时报错。
 
 决定被替代时保留原文件，在顶部标记 `superseded` 并链接新 ADR。

@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-26
+更新时间：2026-10-27
 
 本页只记当前事实与下一步。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，合并与部署的经过由 Git 与 PR 保存。
 
@@ -10,10 +10,10 @@
 
 ## 实验 NAS 上运行什么
 
-- 主干 `80b602275b86`（PR #250 的合并提交，2026-10-26 安装，日志在 NAS 的 `/var/tmp/a-nas-deploy-80b602275b86.log`），包含此前合并的全部 PR；容器代理与 AI 助手试用包同版本。Host Agent 的记录已移入 root 专属的 `/var/lib/a-nas-host`（#249）。
+- 已部署：`80b602275b86`（主干上 PR #250 的合并提交，2026-10-26 安装，日志在 NAS 的 `/var/tmp/a-nas-deploy-80b602275b86.log`），包含此前合并的全部 PR；容器代理与 AI 助手试用包同版本。Host Agent 的记录已移入 root 专属的 `/var/lib/a-nas-host`（#249）。
 - AI 助手按[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)为全部成员开启，用云端模型，仅供开发测试。
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1（2026-10-20 在 #149 的早期构建上加入第二块盘）。
-- 已合并、尚未部署：[#245](https://github.com/zhongwater123/A-NAS/pull/245)（状态栏仪表盘的审查遗留，只改 Web），随下一次部署。
+- 已合并、尚未部署的 PR 不在本页列出：`git fetch` 后运行 `bash scripts/undeployed.sh`，由 Git 列出“已部署”之后合入 main 的 PR。
 
 ## 阻塞与外部条件
 

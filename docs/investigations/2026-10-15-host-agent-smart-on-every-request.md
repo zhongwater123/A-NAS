@@ -1,7 +1,7 @@
 # Host Agent 每次请求都读 SMART，读盘超时被杀
 
-状态：fixed locally；Experimental NAS verification pending
-更新时间：2026-10-15
+状态：fixed，待实机验收
+更新时间：2026-10-27
 
 ## 症状与影响
 

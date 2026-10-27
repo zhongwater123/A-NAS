@@ -61,6 +61,18 @@ jobs:
             go.sum
             tools/golangci-lint/go.sum
 
+      # make docs-check, alone or within make check, checks the documents'
+      # links with this lychee release: the one the Makefile names, checked
+      # against its published SHA-256.
+      - name: Install lychee
+        run: |
+          version="$(sed -n 's/^LYCHEE_VERSION = //p' Makefile)"
+          curl -fsSL -o "$RUNNER_TEMP/lychee.tar.gz" "https://github.com/lycheeverse/lychee/releases/download/lychee-v$version/lychee-x86_64-unknown-linux-gnu.tar.gz"
+          echo "1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a  $RUNNER_TEMP/lychee.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP"
+          sudo install "$RUNNER_TEMP/lychee-x86_64-unknown-linux-gnu/lychee" /usr/local/bin/lychee
+          lychee --version
+
       - name: Check the documentation
         if: ${{ needs.scope.outputs.docs-only == 'true' }}
         run: make docs-check
