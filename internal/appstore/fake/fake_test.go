@@ -2,6 +2,8 @@ package fake_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,4 +81,30 @@ func TestAnAppOfSeveralServicesInstallsAndRuns(t *testing.T) {
 		return
 	}
 	t.Fatal("immich is not listed")
+}
+
+// The simulated containers publish their ports, so an install whose port
+// another app holds is refused as on a NAS: filedrop and pyload both
+// publish 8000.
+func TestAnInstallOnATakenPortIsRefused(t *testing.T) {
+	ctx := context.Background()
+	store, err := fake.New(time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	install := func(id string) error {
+		plan, err := store.Plan(ctx, id, identity(id))
+		if err != nil {
+			return err
+		}
+		_, err = store.Install(ctx, id, plan.Digest, identity(id))
+		store.Wait()
+		return err
+	}
+	if err := install("filedrop"); err != nil {
+		t.Fatal(err)
+	}
+	if err := install("pyload"); !errors.Is(err, appstore.ErrPortInUse) || !strings.Contains(err.Error(), "8000") {
+		t.Fatalf("installing pyload beside filedrop = %v, want ErrPortInUse on 8000", err)
+	}
 }
