@@ -3,6 +3,10 @@
 # A real systemd regression for #178, without needing the Hermes runtime.
 # Keep a harmless process in the installed cron sandbox, then disable its owner
 # through the Product Service and verify every activation path is closed.
+# The preceding layout test removed Bob's assistant, while leaving his
+# product account active. Restore its sandbox before starting a real task.
+check "an active member's assistant can be prepared again" \
+  env ASSISTANT_GATE=host-agent PRODUCT_USER=a-nas bash /spike/assistant-layout.sh prepare "$data" bob
 host_socket=/run/a-nas/host-agent.sock
 bob_uid=$(id -u bob)
 check "the Host Agent identifies an active scheduled-task owner" \
