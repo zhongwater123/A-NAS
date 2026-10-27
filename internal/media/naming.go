@@ -9,6 +9,7 @@ import (
 
 	ptn "github.com/razsteinmetz/go-ptn"
 
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 	"github.com/zhongwater123/A-NAS/internal/mediatype"
 )
 
@@ -157,8 +158,23 @@ func parseRelease(name string) *ptn.TorrentInfo {
 		}
 		return joined.String()
 	})
-	info, _ := ptn.Parse(protected)
+	info := parseTorrentName(protected)
 	info.Title = strings.ReplaceAll(info.Title, keptHyphen, "-")
+	return info
+}
+
+// parseTorrentName is ptn.Parse, which panics on some names, such as
+// X00X000000000000 (found by FuzzParseName): such a name is all title, so
+// that one file cannot stop a library scan (invariant 18 of
+// docs/architecture/OVERVIEW.md).
+func parseTorrentName(name string) (info *ptn.TorrentInfo) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("release name", recovered)
+			info = &ptn.TorrentInfo{Title: name}
+		}
+	}()
+	info, _ = ptn.Parse(name)
 	return info
 }
 
