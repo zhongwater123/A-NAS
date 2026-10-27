@@ -34,7 +34,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 |---|---|
 | [`anas-vectors@.service`](../../deploy/systemd/system/anas-vectors@.service) | Qdrant 本身。`DynamicUser` 加 `User=a-nas-vec-%i`，让每个实例有自己的 UID；`StateDirectory=a-nas-vectors/%i`；`PrivateNetwork`；`InaccessiblePaths` 挡住数据卷与产品状态；`Slice=anas.slice`；`StopWhenUnneeded=yes`，没有 `[Install]`，只能经套接字拉起 |
 | [`anas-vectors-proxy@.socket`](../../deploy/systemd/system/anas-vectors-proxy@.socket) | `/run/a-nas-vectors/%i.sock`，`SocketUser=%i`、`SocketMode=0600`；所属服务的单元 `Wants=` 它 |
-| [`anas-vectors-proxy@.service`](../../deploy/systemd/system/anas-vectors-proxy@.service) | `systemd-socket-proxyd --exit-idle-time`，`JoinsNamespaceOf=anas-vectors@%i.service`，`Requires=`/`After=` 实例，所以连接到来时先拉起实例 |
+| [`anas-vectors-proxy@.service`](../../deploy/systemd/system/anas-vectors-proxy@.service) | `systemd-socket-proxyd --exit-idle-time=10s`，`JoinsNamespaceOf=anas-vectors@%i.service`，`Requires=`/`After=` 实例，所以连接到来时先拉起实例；最后一个连接关闭 10 秒后代理退出，实例随之停止 |
 
 - 实例名就是所属服务的账号，例如 `anas-vectors@a-nas-photos.service`。单元里只用 `%i`：`%I` 会把 `-` 还原成 `/`。
 - 动态用户的名字默认取单元前缀，所有实例会共用一个 UID，所以显式写 `User=a-nas-vec-%i`（不超过 31 个字符）。
@@ -76,11 +76,13 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
   - `KeepAliveTime: -1`，空闲时不 ping；
   - `grpc.WithIdleTimeout`，空闲约一分钟后断开连接。
 
-  否则连接一直开着，代理不会空闲，实例也就永远不退出。
+  否则连接一直开着，代理不会空闲，实例也就永远不退出。实例因此在最后一次请求后约一分钟停止。代理只等 10 秒，所以客户端没有连接时，实例一定已经停了：影子比对记录的 `warm=false` 就是冷启动，不会混进“实例还在、只需重连”的情况。
+- **`Warm()` 不等待**：连接放在 `atomic.Pointer` 里，正在建立连接时 `Warm()` 也立刻返回 false，不会排在拉起实例的那次连接后面，把冷启动记成热的。
 - **不在构造时联系实例**：设 `SkipCompatibilityCheck`，所属服务启动时不会把实例拉起来。第一次使用时调用 `HealthCheck`，major.minor 与固定版本不符就拒绝工作。
 - **没事不连**：outbox 为空时，同步循环不联系实例；只有对账（启动后第一次空闲时与每天）和影子比对会联系。所以相册不变时，实例会停下来。
 - **只提供类型化的操作**：建集合与 keyword 索引、批量 upsert/delete（`wait=true`，确认写入 WAL 后才返回）、scroll、按范围过滤的查询。不接受调用方拼的过滤条件，避免出现“不认识的条件被当成满足”这类问题（#152 审查 S3）。
-- **点 ID**：由内容的 SHA-256 前 16 字节生成 UUID。
+- **点 ID**：键的基于名称的 UUID（`github.com/google/uuid` 的 `NewSHA1`，固定命名空间），同一个键总是同一个点。
+- **被拒的写入**：索引拒收的写入（例如向量长度与集合不符，gRPC `InvalidArgument`）返回 `ErrRejected`，与连接故障区分开。
 
 ## 相册的同步
 
@@ -90,6 +92,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - 触发器建在 `embeddings`（插入、更新、删除）与 `assets`（插入、删除，以及 `trashed_at`、`library_id`、`object_id` 的更新）上。外键级联删除同样触发子表的删除触发器，所以彻底删除与 Reconcile 清理孤儿也覆盖到了；将来新增的写路径也不需要记得排队。
 - 触发器里写入 outbox 必须用 `INSERT … ON CONFLICT(object_id) DO UPDATE SET version = version + 1`，不能用 `INSERT OR REPLACE`：计算向量时 `embeddings` 的 upsert 会让被触发的语句按 ABORT 处理冲突，`OR REPLACE` 会失效，任务随之失败。
 - `vector_index_state` 记录当前集合名。
+- `embeddings_by_age` 索引让每一批取“最新向量的模型”时不必扫描整张表。
 - migration 只有 DDL，不回填：没有集合名记录时，第一次同步会把全部向量排队。
 
 ### 集合
@@ -107,9 +110,12 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 1. 读一批 outbox 行（`object_id` 与 `version`）及其目标状态：当前模型的向量，以及所在图库，即未进回收站、非视频资产所在的图库集合。读完立即结束查询。Catalog 只有一个连接，查询开着时等待 Qdrant 冷启动，会卡住整个相册 API。
 2. 有向量、图库集合非空的对象 upsert；其他的删除点。模型与集合不符的向量也删除。
+   - 索引拒收一批时，逐个重试，只把拒收的对象跳过。被拒的对象也移出 outbox，日志以 warn 记录拒收数，下一次对账再试，这样一个永远写不进去的点不会卡住整个队列。
 3. 用一个短事务删除 `object_id` 与 `version` 都没变的 outbox 行；同步期间又有变化的行留到下一轮。
 
-连不上实例时等下一轮，不影响相册其他功能。
+- 集合确认存在一次后，后续的批次不再每批调用 `ListCollections`；同步出错时清掉这个记忆，下一批重新确认。
+- Catalog 里已经没有向量时，删除集合，并只在仍然没有向量时清空 outbox 与状态（同一事务里的条件删除）。这样与此同时写入的第一个向量不会被一起清掉。
+- 连不上实例或同步出错时不影响相册其他功能，下次重试的间隔从空闲间隔起逐次加倍，最长 30 分钟。持续失败的索引因此不会被重试一直拉着不停。
 
 ### 对账
 
@@ -123,8 +129,10 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
   - 查询中没有人物名；
   - 拿到了查询向量；
   - 查询向量的模型与集合一致。
-- 请求路径只做一次非阻塞发送，channel 容量为 1，忙时丢弃这次比对；请求路径不访问 Catalog，也不等待 Qdrant。
-- worker 让索引在同一范围内精确取前 500（`exact`），与进程内精确扫描的纯点积排序按对象去重后比较；分数与第 k 名相差 10⁻⁵ 以内的并列照片都算命中。两边都是精确结果，所以 overlap 应为 1，低于 1 就说明索引与 Catalog 不一致，而不是近似误差。日志记录 overlap@10/100/500、耗时，以及这次调用是冷启动还是已有连接；不记录查询文本与名称。
+- 请求路径只做一次非阻塞发送，channel 容量为 1，忙时丢弃这次比对；请求路径不访问 Catalog，也不等待 Qdrant。交过去的是搜索自己的结果：查询向量与范围、这次排序过的内容对象，以及它在相册服务里排序用的时间（`exact_ms`）。worker 因此不必在唯一的 Catalog 连接上重读候选。
+- worker 让索引在同一范围内精确取前 500（`exact`），再用内存中的向量给搜索交来的对象算点积、按对象去重排序，两边比较；分数与第 k 名相差 10⁻⁵ 以内的并列照片都算命中。两边都是精确结果，所以 overlap 应为 1，低于 1 就说明索引与 Catalog 不一致，而不是近似误差。
+- 日志记录 overlap@10/100/500、索引耗时（`index_ms`）、搜索自己的排序耗时（`exact_ms`），以及调用前有没有连接（`warm`；没有连接就是冷启动，见上文“让实例能空闲退出”）。不记录查询文本与名称。
+- outbox 不为空（例如刚导入、回收或首次同步还在进行）时不比对，所以不是每次搜索都有一行日志。
 - 这些日志是决定是否切换读路径的依据。检索功能实测给出的切换条件是：真实图库上影子比对持续为 1，同一批查询的 p95 不高于现行扫描加套接字代理的往返。10 万张以内切换的理由只会是内存与重建边界，不会是速度。切换时还要重新评估：
   - slice：`anas.slice` 的 `CPUWeight=10` 会拉长前台查询；
   - 按需与常驻实例的冷启动差别：开发机上从启动到第一次查询完成为 0.2–1.0 秒。

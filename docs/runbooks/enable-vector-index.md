@@ -57,10 +57,19 @@
    - 完成标准：出现 `reconciled`，且 `queued=0`。
 5. 收集影子比对。
    - 操作：用桌面相册搜索几条中文查询，例如“海边的猫”“车库里的电动车”。
-   - 预期：每条查询后，日志出现一行 `photo vector index shadow search`，带 `overlap10`、`overlap100`、`overlap500`、`index_ms`、`exact_ms`、`warm`。日志里没有查询文本。
+   - 预期：符合条件的查询之后，日志出现一行 `photo vector index shadow search`，带 `overlap10`、`overlap100`、`overlap500`、`index_ms`、`exact_ms`、`warm`。日志里没有查询文本。
+   - 只比对这样的查询：
+     - 是第一页；
+     - 查询里没有人物名；
+     - 查询向量的模型与集合一致；
+     - outbox 为空：刚导入、回收或首次同步还没完成时都不为空；
+     - 上一次比对已经结束：忙时直接丢弃。
+
+     所以不是每条查询都有日志，没有日志不说明出了问题。
+   - `overlap*` 应为 1，低于 1 说明索引与 Catalog 不一致，记下来查。`warm=false` 的那一行包含实例的启动时间。
    - 完成标准：把至少 20 条比对的数字整理进[当前状态](../status/CURRENT.md)或对应 issue，作为是否切换读路径的依据。
 6. 看实例空闲退出。
-   - 命令：在最后一次搜索或同步约 6 分钟后，执行 `systemctl is-active anas-vectors@a-nas-photos.service`。
+   - 命令：在最后一次搜索或同步约 2 分钟后（相册服务空闲 1 分钟断开连接，代理再等 10 秒），执行 `systemctl is-active anas-vectors@a-nas-photos.service`。
    - 预期：`inactive`。
    - 记录：执行 `systemctl show -p MemoryPeak anas-vectors@a-nas-photos.service`，把内存峰值写进[技术设计](../architecture/vector-index.md#配置)。
 
@@ -88,7 +97,8 @@
        'DROP TRIGGER embeddings_vector_outbox_insert; DROP TRIGGER embeddings_vector_outbox_update;
         DROP TRIGGER embeddings_vector_outbox_delete; DROP TRIGGER assets_vector_outbox_insert;
         DROP TRIGGER assets_vector_outbox_delete; DROP TRIGGER assets_vector_outbox_update;
-        DROP TABLE vector_outbox; DROP TABLE vector_index_state; PRAGMA user_version = 13;'
+        DROP TABLE vector_outbox; DROP TABLE vector_index_state; DROP INDEX embeddings_by_age;
+        PRAGMA user_version = 13;'
      ```
      这组语句与 [`TestVectorIndexMigrationCanBeUndone`](../../internal/photos/migrate_test.go) 相同，测试证明撤销后再次升级照常工作。
   3. 切回旧 release，再执行 `systemctl disable --now anas-vectors-proxy@a-nas-photos.socket`。
