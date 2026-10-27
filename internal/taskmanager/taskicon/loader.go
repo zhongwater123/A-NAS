@@ -52,16 +52,22 @@ func (l *Loader) Resolve(s *taskmanager.TaskSnapshot) {
 		return
 	}
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	now := l.now()
 	if l.cache == nil || now.Before(l.at) || now.Sub(l.at) >= cacheAge || len(l.cache) >= cacheLimit {
 		l.cache, l.at = map[string]icon{}, now
 	}
+	l.mu.Unlock()
 	read := l.ReadFile
 	if read == nil {
-		roots := openRoots()
-		defer closeRoots(roots)
-		read = func(name string) ([]byte, error) { return readInstalled(roots, name) }
+		var roots []root
+		opened := false
+		defer func() { closeRoots(roots) }()
+		read = func(name string) ([]byte, error) {
+			if !opened {
+				roots, opened = openRoots(), true
+			}
+			return readInstalled(roots, name)
+		}
 	}
 	icons := map[string]string{}
 	resolved := map[string]string{}
@@ -111,12 +117,18 @@ func (l *Loader) now() time.Time {
 // installed size or format.
 func (l *Loader) load(read func(string) ([]byte, error), files []string) icon {
 	for _, name := range files {
+		// Only the cache is locked: concurrent refreshes decode in parallel,
+		// at worst the same file twice.
+		l.mu.Lock()
 		loaded, cached := l.cache[name]
+		l.mu.Unlock()
 		if !cached {
 			if data, err := read(name); err == nil {
 				loaded.id, loaded.dataURL = Normalize(data)
 			}
+			l.mu.Lock()
 			l.cache[name] = loaded
+			l.mu.Unlock()
 		}
 		if loaded.id != "" {
 			return loaded

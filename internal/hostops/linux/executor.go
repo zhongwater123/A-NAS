@@ -188,7 +188,7 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 }
 
 func (e *Executor) SetCredential(ctx context.Context, request accountid.CredentialRequest) error {
-	if !validUsername(request.Username) || strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PrivateSpaceID) == "" || !validSambaPassword(request.Password) {
+	if !accountid.ValidUsername(request.Username) || strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PrivateSpaceID) == "" || !validSambaPassword(request.Password) {
 		return errors.New("invalid credential request")
 	}
 	identity := accountid.Identity{Username: request.Username, UID: request.UID, Role: request.Role, Enabled: request.Enabled}
@@ -278,7 +278,7 @@ func (e *Executor) RepairDataVolumePermissions(ctx context.Context) ([]string, e
 }
 
 func (e *Executor) DisableCredential(ctx context.Context, username string) error {
-	if !validUsername(username) {
+	if !accountid.ValidUsername(username) {
 		return errors.New("invalid username")
 	}
 	if _, err := e.runner.Run(ctx, "smbpasswd", []string{"-d", username}, ""); err != nil {
@@ -383,8 +383,6 @@ var (
 	deviceNamePattern   = regexp.MustCompile(`^[A-Za-z0-9._+-]+$`)
 )
 
-func validUsername(username string) bool { return accountid.ValidUsername(username) }
-
 // validSambaPassword reports whether smbpasswd -s receives password whole: it
 // reads each copy as one line of C text into a 256-byte buffer, so a newline,
 // NUL or longer password would set a different password than the Web one.
@@ -455,7 +453,7 @@ func (e *Executor) validSpace(spaceID, root string) bool {
 	if spaceID == sharedSpaceID {
 		return root == filepath.Join(e.mountPoint, "spaces", "shared")
 	}
-	return filepath.Dir(root) == filepath.Join(e.mountPoint, "spaces", "private") && validUsername(filepath.Base(root))
+	return filepath.Dir(root) == filepath.Join(e.mountPoint, "spaces", "private") && accountid.ValidUsername(filepath.Base(root))
 }
 
 func withinDirectory(root, path string) bool {

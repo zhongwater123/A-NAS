@@ -114,7 +114,8 @@ func (s Session) LocalConsole() bool { return s.ExpiresAt.Equal(localConsoleExpi
 type Options struct {
 	Now    func() time.Time
 	Random io.Reader
-	// PasswordCost defaults to DefaultPasswordCost; tests lower it.
+	// PasswordCost's fields left zero take DefaultPasswordCost's; tests
+	// lower them.
 	PasswordCost PasswordCost
 }
 
@@ -338,8 +339,14 @@ func NewService(store *Store, credentials CredentialProvisioner, options Options
 		random = rand.Reader
 	}
 	cost := options.PasswordCost
-	if cost == (PasswordCost{}) {
-		cost = DefaultPasswordCost
+	if cost.MemoryKiB == 0 {
+		cost.MemoryKiB = DefaultPasswordCost.MemoryKiB
+	}
+	if cost.Iterations == 0 {
+		cost.Iterations = DefaultPasswordCost.Iterations
+	}
+	if cost.Parallelism == 0 {
+		cost.Parallelism = DefaultPasswordCost.Parallelism
 	}
 	return &Service{store: store, credentials: credentials, now: now, random: random, passwordCost: cost}
 }

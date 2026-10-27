@@ -30,13 +30,17 @@ var (
 // Client is the Product Service's filesystem.FileSystem. Every call carries the
 // session token from the request context; the broker decides who it is.
 type Client struct {
-	wire.FileOps
+	fileOps
 	socket string
 }
 
+// fileOps gives Client the FileSystem methods of wire.FileOps under an
+// unexported field, so no caller can replace how the client calls.
+type fileOps = wire.FileOps
+
 func NewClient(socket string) *Client {
 	c := &Client{socket: socket}
-	c.FileOps = wire.FileOps{Call: c.call}
+	c.fileOps = wire.FileOps{Call: c.call}
 	return c
 }
 

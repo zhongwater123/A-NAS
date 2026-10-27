@@ -126,8 +126,13 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 	}
 	var result Image
 	if format == "heif" {
-		result.ContentType = "image/png"
-		result.Data, err = RenderHEIF(ctx, s.worker, content.Reader, content.SizeBytes, size)
+		// The opened file's size, not the catalog's: the file may have
+		// changed over SMB since the last reconcile.
+		var info os.FileInfo
+		if info, err = content.Reader.Stat(); err == nil {
+			result.ContentType = "image/png"
+			result.Data, err = RenderHEIF(ctx, s.worker, content.Reader, info.Size(), size)
+		}
 	} else {
 		result.ContentType = "image/jpeg"
 		var probe mediaworker.Probe

@@ -36,7 +36,7 @@ func (e *Executor) GrantViewing(ctx context.Context, request accountid.ViewingRe
 	if e.viewingError != nil {
 		return e.viewingError
 	}
-	if strings.TrimSpace(request.ID) == "" || !validUsername(request.AdminUsername) ||
+	if strings.TrimSpace(request.ID) == "" || !accountid.ValidUsername(request.AdminUsername) ||
 		request.AdminUID < accountid.FirstUserUID || request.AdminUID > accountid.LastUserUID {
 		return errors.New("invalid viewing request")
 	}
@@ -199,7 +199,7 @@ func (e *Executor) loadViewingRegistry() error {
 	deadline := e.now().UTC().Add(maxViewingAhead)
 	for id, record := range records {
 		if strings.TrimSpace(id) == "" || strings.TrimSpace(record.SpaceID) == "" || record.SpaceID == sharedSpaceID ||
-			!validUsername(record.Admin) || record.UID < accountid.FirstUserUID || record.UID > accountid.LastUserUID {
+			!accountid.ValidUsername(record.Admin) || record.UID < accountid.FirstUserUID || record.UID > accountid.LastUserUID {
 			return fmt.Errorf("viewing registry: grant %q is invalid", id)
 		}
 		if !record.ExpiresAt.IsZero() && (record.ExpiresAt.After(deadline) || !e.mayView(record.Admin, record.UID)) {

@@ -294,7 +294,7 @@ func TestALongOperationDoesNotHoldUpTheMembersOtherCalls(t *testing.T) {
 // another account's calls, on a worker it has or on a new one, go on (#277).
 func TestASlowPlacementHoldsUpNoOtherAccount(t *testing.T) {
 	h := newHarness(t)
-	placer := &slowPlacer{slow: "alice", delay: 3 * time.Second, entered: make(chan struct{}), release: make(chan struct{})}
+	placer := &slowPlacer{slow: "alice", entered: make(chan struct{}), release: make(chan struct{})}
 	h.server.config.Scopes = placer
 	t.Cleanup(placer.unblock)
 	bob := accountid.WithSessionToken(context.Background(), "bob-token")
@@ -316,11 +316,13 @@ func TestASlowPlacementHoldsUpNoOtherAccount(t *testing.T) {
 		t.Fatal("alice's worker was never placed")
 	}
 	// Bob's free worker serves one call; a long scan holds it, so the next
-	// call starts a second worker while alice's is still being placed. Each
-	// call has less time than the placement takes.
+	// call starts a second worker while alice's is still being placed. Her
+	// placement lasts until the test releases it, so bob's calls finish
+	// before it on a correct broker however slow the machine is, and time out
+	// on one that starts workers under its lock.
 	quickly := func(what string) {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(bob, placer.delay/2)
+		ctx, cancel := context.WithTimeout(bob, 10*time.Second)
 		defer cancel()
 		if _, err := h.client.Lstat(ctx, space); err != nil {
 			t.Fatalf("Lstat() on %s error = %v", what, err)
@@ -344,26 +346,22 @@ func TestASlowPlacementHoldsUpNoOtherAccount(t *testing.T) {
 	}
 }
 
-// slowPlacer takes delay, or until unblock, to place slow's processes.
+// slowPlacer holds the placement of slow's processes until unblock, beyond
+// the broker's own placeTimeout, as a systemd that does not answer would.
 type slowPlacer struct {
 	slow    string
-	delay   time.Duration
 	entered chan struct{}
 	release chan struct{}
 	once    sync.Once
 	enter   sync.Once
 }
 
-func (p *slowPlacer) Place(ctx context.Context, _ int, _, username string) error {
+func (p *slowPlacer) Place(_ context.Context, _ int, _, username string) error {
 	if username != p.slow {
 		return nil
 	}
 	p.enter.Do(func() { close(p.entered) })
-	select {
-	case <-p.release:
-	case <-time.After(p.delay):
-	case <-ctx.Done():
-	}
+	<-p.release
 	return nil
 }
 

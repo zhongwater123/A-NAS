@@ -142,7 +142,7 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 		var viewers []string
 		if spaceID != sharedSpaceID {
 			username := filepath.Base(root)
-			if !validUsername(username) {
+			if !accountid.ValidUsername(username) {
 				return repaired, errors.New("registered private space has an invalid owner")
 			}
 			if e.identityKnown(username) {

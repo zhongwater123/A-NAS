@@ -79,7 +79,7 @@ func (e *Executor) syncIdentity(ctx context.Context, identity accountid.Identity
 }
 
 func validIdentity(identity accountid.Identity) error {
-	if !validUsername(identity.Username) {
+	if !accountid.ValidUsername(identity.Username) {
 		return errors.New("invalid identity username")
 	}
 	if identity.UID < accountid.FirstUserUID || identity.UID > accountid.LastUserUID {
