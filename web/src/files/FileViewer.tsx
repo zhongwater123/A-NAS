@@ -1,9 +1,9 @@
 import { ChevronLeft, ChevronRight, Download, ExternalLink, ImageOff, X, ZoomIn, ZoomOut } from "lucide-react";
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 
-import { type FileEntry } from "../api";
-import { formatBytes } from "../bytes";
-import { isPDFPreviewable } from "../fileTypes";
+import type { FileEntry } from "../api.generated";
+import { formatBytes } from "../lib/bytes";
+import { isPDFPreviewable } from "../lib/fileTypes";
 import { fileVisualURL } from "./preview";
 import "./viewer.css";
 

@@ -1,8 +1,8 @@
 import { CopyPlus, Download, History, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { FileEntry, Space } from "../api";
-import { formatBytes } from "../bytes";
+import type { FileEntry, Space } from "../api.generated";
+import { formatBytes } from "../lib/bytes";
 
 import {
   listVersions,
@@ -11,7 +11,7 @@ import {
   snapshotDownloadURL,
   type SnapshotMatch,
   type SnapshotVersion,
-} from "./backupApi";
+} from "./api";
 import { formatDateTime, formatDay, restoredName, spaceLabel } from "./format";
 import { Dialog, EmptyState, EntryIcon, Notice, Spinner } from "./parts";
 import { RestoreDialog, type RestoreRequest } from "./RestoreDialog";

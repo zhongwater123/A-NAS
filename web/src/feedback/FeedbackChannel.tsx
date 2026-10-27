@@ -21,9 +21,9 @@ import {
   useState,
 } from "react";
 
-import { APIError } from "../api";
-import { nameOf, person, usePeople } from "../people";
-import { PersonAvatar } from "../PersonAvatar";
+import { APIError } from "../api/client";
+import { nameOf, person, usePeople } from "../people/people";
+import { PersonAvatar } from "../people/PersonAvatar";
 import { FEEDBACK_UI } from "./capture";
 import { FeedbackEditor, Draft, emptyDraft, releaseDraft } from "./FeedbackEditor";
 import {
@@ -35,7 +35,7 @@ import {
   feedbackImageURL,
   listFeedback,
   resolveFeedback,
-} from "./feedbackApi";
+} from "./api";
 import { FeedbackThread } from "./FeedbackThread";
 import { Lightbox } from "./Lightbox";
 import { describeTime, fullTime } from "./time";

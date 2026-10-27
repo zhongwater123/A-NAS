@@ -14,7 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 
-import { FileEntry } from "../api";
+import type { FileEntry } from "../api.generated";
 import { FileCommands } from "./FileToolbar";
 import { FileBrowserItem, isViewable, othersSpace, SelectionCommands } from "./model";
 

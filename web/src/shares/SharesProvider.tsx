@@ -10,8 +10,8 @@ import {
   type ReactNode,
 } from "react";
 import { Share2, X } from "lucide-react";
-import type { FileEntry } from "../api";
-import { usePeople } from "../people";
+import type { FileEntry } from "../api.generated";
+import { usePeople } from "../people/people";
 import { getShare, listMessages, listShareNotifications, listShares, type Share, type ShareNotification } from "./api";
 import { errorText, isUnread, shareTitle } from "./format";
 import { Avatar, nameOf } from "./parts";

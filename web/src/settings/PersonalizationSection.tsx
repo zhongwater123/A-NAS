@@ -1,17 +1,10 @@
 import { Clapperboard, ImagePlus, Monitor, Moon, RotateCcw, Scaling } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import {
-  type LocalDisplay,
-  readLocalDisplay,
-  resetWallpaper,
-  updateLocalDisplay,
-  updateWallpaperStyle,
-  type Wallpaper,
-  type WallpaperStyle,
-} from "../api";
-import { localConsoleScreenSaverIdleMs } from "../LocalConsoleScreenSaver";
-import { publishWallpaper, useWallpaper, wallpaperPicture } from "../wallpaper";
+import type { LocalDisplay, Wallpaper, WallpaperStyle } from "../api.generated";
+import { readLocalDisplay, resetWallpaper, updateLocalDisplay, updateWallpaperStyle } from "../desktop/api";
+import { localConsoleScreenSaverIdleMs } from "../desktop/LocalConsoleScreenSaver";
+import { publishWallpaper, useWallpaper, wallpaperPicture } from "../desktop/wallpaper";
 import { DesktopPreview } from "./DesktopPreview";
 import { Banner, Group, IconTile, PageHeader, messageOf } from "./parts";
 import { WallpaperDialog } from "./WallpaperDialog";

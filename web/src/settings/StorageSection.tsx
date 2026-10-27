@@ -1,14 +1,11 @@
-import { errorText } from "../errorMessages";
+import { errorText } from "../api/errorMessages";
 import { Archive, ChevronLeft, CircleCheck, Database, HardDrive, Layers, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
+import type { StoragePlan, Volume, VolumeConversion, VolumeLayout } from "../api.generated";
+import { HostState } from "../desktop/api";
 import {
-  HostState,
-  StoragePlan,
   StorageStep,
-  Volume,
-  VolumeConversion,
-  VolumeLayout,
   cancelStoragePlan,
   confirmStoragePlan,
   continueVolumeConversion,
@@ -17,9 +14,9 @@ import {
   getStoragePlan,
   listUnfinishedStoragePlans,
   listVolumes,
-} from "../api";
-import { formatBytes, formatNominalCapacity } from "../bytes";
-import type { HostStateView } from "../useHostState";
+} from "./api";
+import { formatBytes, formatNominalCapacity } from "../lib/bytes";
+import type { HostStateView } from "../desktop/useHostState";
 import { HostStateBanner, HostStatePending, isStale } from "./hostState";
 import {
   conversionPercent,

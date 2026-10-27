@@ -13,8 +13,8 @@ import {
 } from "lucide-react";
 import { ReactNode } from "react";
 
-import { formatBytes } from "../bytes";
-import { ContainerSummary } from "../containersApi";
+import { formatBytes } from "../lib/bytes";
+import { ContainerSummary } from "./api";
 import { DetailTab } from "./ContainerDetail";
 import type { ContainerActions } from "./DockerPanel";
 import {

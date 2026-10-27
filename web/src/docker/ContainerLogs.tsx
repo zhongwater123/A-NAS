@@ -1,7 +1,7 @@
 import { CircleAlert, Download, RefreshCw, Search, X } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { ContainerLogLine, ContainerSummary, readContainerLogs } from "../containersApi";
+import { ContainerLogLine, ContainerSummary, readContainerLogs } from "./api";
 import { formatClock } from "./model";
 import { IconAction } from "./parts";
 

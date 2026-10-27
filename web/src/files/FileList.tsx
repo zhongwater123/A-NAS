@@ -1,8 +1,8 @@
 import { ChevronDown, Clock3, FolderClosed, FolderPlus, Pin, Search } from "lucide-react";
 import { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useRef, useState } from "react";
 
-import { formatBytes } from "../bytes";
-import { FileOrder, FileSort, isPinned } from "../useFileOrder";
+import { formatBytes } from "../lib/bytes";
+import { FileOrder, FileSort, isPinned } from "./useFileOrder";
 import { FileArtwork } from "./FileIcon";
 import { FileBrowserItem, FileView, formatFileDate } from "./model";
 import { DragProps } from "./useDragReorder";

@@ -1,8 +1,9 @@
 import { ArrowLeft, Wallpaper as WallpaperIcon, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { uploadWallpaper, type Wallpaper, type WallpaperStyle } from "../api";
-import { wallpaperBackdrop } from "../wallpaper";
+import type { Wallpaper, WallpaperStyle } from "../api.generated";
+import { uploadWallpaper } from "../desktop/api";
+import { wallpaperBackdrop } from "../desktop/wallpaper";
 import { DesktopPreview } from "./DesktopPreview";
 import { ImageSources, loadImage } from "./ImageSources";
 import { Banner, messageOf } from "./parts";

@@ -1,9 +1,9 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import { APIError } from "../api";
-import { nameOf, person, usePeople } from "../people";
-import { PersonAvatar } from "../PersonAvatar";
+import { APIError } from "../api/client";
+import { nameOf, person, usePeople } from "../people/people";
+import { PersonAvatar } from "../people/PersonAvatar";
 import { Draft, FeedbackEditor, emptyDraft, releaseDraft } from "./FeedbackEditor";
 import {
   FeedbackComment,
@@ -15,7 +15,7 @@ import {
   describeFeedbackError,
   editComment,
   feedbackImageURL,
-} from "./feedbackApi";
+} from "./api";
 import { describeTime, fullTime } from "./time";
 
 interface ThreadProps {

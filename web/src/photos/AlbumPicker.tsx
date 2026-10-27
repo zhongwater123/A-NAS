@@ -2,7 +2,7 @@ import { FolderPlus, Images, X } from "lucide-react";
 import { FormEvent, useEffect, useEffectEvent, useState } from "react";
 
 import { assetsLabel, type Caller, canEditAlbum, libraryName, ownLibrary, sharedLibrary } from "./model";
-import { listAlbums, thumbnailURL, type PhotoAlbum, type PhotoAsset, type PhotoLibrary } from "./photosApi";
+import { listAlbums, thumbnailURL, type PhotoAlbum, type PhotoAsset, type PhotoLibrary } from "./api";
 
 interface Props {
   caller: Caller;

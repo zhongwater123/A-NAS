@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { FileEntry, Space, TrashItem } from "../api";
+import type { FileEntry, Space, TrashItem } from "../api.generated";
 import { expiryOf, groupItems, restoredName } from "./model";
 import { TrashPanel } from "./TrashPanel";
 import { stubAPI } from "../test/api";

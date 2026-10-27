@@ -1,7 +1,7 @@
 import { CalendarClock, CircleAlert, CircleCheck, Clock3, Info, SlidersHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import type { Space } from "../api";
+import type { Space } from "../api.generated";
 
 import { useBackup } from "./BackupCenter";
 import {
@@ -13,7 +13,7 @@ import {
   type RetentionTiers,
   type ScheduleSettings,
   type SnapshotSchedule,
-} from "./backupApi";
+} from "./api";
 import {
   describeRetention,
   describeSchedule,

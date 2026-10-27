@@ -2,7 +2,7 @@ import { Images, Library, Plus, Shapes, Sparkles, Trash2 } from "lucide-react";
 import { DragEvent, useEffect, useState } from "react";
 
 import { type Caller, libraryName, type Place } from "./model";
-import { listAlbums, thumbnailURL, type PhotoAIStatus, type PhotoAlbum, type PhotoLibrary } from "./photosApi";
+import { listAlbums, thumbnailURL, type PhotoAIStatus, type PhotoAlbum, type PhotoLibrary } from "./api";
 import { dragType } from "./Tile";
 
 interface Props {

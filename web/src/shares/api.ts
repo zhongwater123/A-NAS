@@ -1,4 +1,4 @@
-import { APIError, apiFetch, call, client, failure } from "../api";
+import { APIError, apiFetch, call, client, failure } from "../api/client";
 import type { CreateMemberShare, MemberShareEntry, operations, SaveMemberShare } from "../api.generated";
 
 export type ShareEntry = MemberShareEntry;

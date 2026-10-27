@@ -1,4 +1,4 @@
-import { formatDate } from "../format/time";
+import { formatDate } from "../lib/time";
 // 记忆: what the assistant carries into every new conversation — its notes, what
 // it noted about the member, and the skills it learned — from Hermes's own
 // learning graph. The member can read each in full and delete it, or clear
@@ -27,7 +27,7 @@ import {
   forgetMemoryItem,
   getMemory,
   memoryItem,
-} from "./assistantApi";
+} from "./api";
 
 export function MemoryView({ onConversationsDeleted }: { onConversationsDeleted(): void }) {
   const [memory, setMemory] = useState<AssistantMemory>();

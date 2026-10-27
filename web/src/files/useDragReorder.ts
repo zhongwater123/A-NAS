@@ -1,7 +1,7 @@
 import { DragEvent as ReactDragEvent, useRef, useState } from "react";
 
 import { carriesFiles } from "../transfers/picker";
-import { FileOrder, isPinned, reorderFiles } from "../useFileOrder";
+import { FileOrder, isPinned, reorderFiles } from "./useFileOrder";
 import { FileBrowserItem } from "./model";
 
 // useDragReorder lets items be dragged into a manual order. An item moves

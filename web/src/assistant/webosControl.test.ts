@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { domToCanvas } from "modern-screenshot";
 
-import { apiFetch } from "../api";
+import { apiFetch } from "../api/client";
 import { ControlError, type Danger, type Screenshot, WebosController } from "./webosControl";
 import { stubAPI } from "../test/api";
 

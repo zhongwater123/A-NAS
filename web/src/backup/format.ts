@@ -1,16 +1,15 @@
-import { calendarLabel, calendarMoment, relativeUnit } from "../format/time";
-import { relativeTime } from "../format/time";
-import { errorCodeText } from "../errorMessages";
-import type { Space } from "../api";
+import { calendarLabel, calendarMoment, relativeTime, relativeUnit } from "../lib/time";
+import { errorCodeText } from "../api/errorMessages";
+import type { Space } from "../api.generated";
 
-import type { Frequency, RetentionTiers, ScheduleSettings, Snapshot, SnapshotSchedule } from "./backupApi";
+import type { Frequency, RetentionTiers, ScheduleSettings, Snapshot, SnapshotSchedule } from "./api";
 
 const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 export const weekdayShort = ["日", "一", "二", "三", "四", "五", "六"];
 
 export const formatCount = (count: number) => count.toLocaleString("zh-CN");
 
-export { formatClock } from "../format/time";
+export { formatClock } from "../lib/time";
 
 // formatDay names a calendar day: 今天, 昨天, 10月10日 周六, or with the year
 // when it is not this year.

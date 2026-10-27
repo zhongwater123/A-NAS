@@ -1,7 +1,7 @@
 import { ChevronDown, FolderClosed, FolderOpen, FolderPlus, ShieldCheck, UsersRound } from "lucide-react";
 
-import { Space, Volume } from "../api";
-import { formatBytes } from "../bytes";
+import type { Space, Volume } from "../api.generated";
+import { formatBytes } from "../lib/bytes";
 import { FileIcon } from "./FileIcon";
 import { FileFolder, FileResource, othersSpace, personalFileResources, spaceLabel, volumeUsage } from "./model";
 

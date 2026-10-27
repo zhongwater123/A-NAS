@@ -1,7 +1,7 @@
 import { type DetailedError, Upload } from "tus-js-client";
 import { useSyncExternalStore } from "react";
 
-import { APIError, csrfHeader, passWriteGate, sessionEnded } from "../api";
+import { APIError, csrfHeader, passWriteGate, sessionEnded } from "../api/client";
 import { RateMeter } from "./meter";
 import {
   cancelTransfer,
@@ -16,7 +16,7 @@ import {
   type TransferLocation,
   uploadEndpoint,
   uploadURL,
-} from "./transfersApi";
+} from "./api";
 
 export type ConflictPolicy = "ask" | "rename" | "replace";
 export type ConflictChoice = "skip" | "rename" | "replace";

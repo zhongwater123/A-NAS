@@ -11,8 +11,9 @@ import {
 } from "lucide-react";
 import { DragEvent, ReactNode, useEffect, useRef, useState } from "react";
 
-import { listEntries, listSpaces, type FileEntry, type Space } from "../api";
-import { isPreviewableImage } from "../fileTypes";
+import type { FileEntry, Space } from "../api.generated";
+import { listEntries, listSpaces } from "../files/api";
+import { isPreviewableImage } from "../lib/fileTypes";
 import { fileVisualURL } from "../files/preview";
 import {
   displayURL,
@@ -21,7 +22,7 @@ import {
   previewURL,
   type PhotoAsset,
   type PhotoLibrary,
-} from "../photos/photosApi";
+} from "../photos/api";
 import { Banner, messageOf } from "./parts";
 import "./avatar.css";
 

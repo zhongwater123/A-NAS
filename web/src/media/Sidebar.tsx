@@ -1,7 +1,7 @@
 import { Film, FolderOpen, Heart, History, House, Layers, LayoutGrid, Library, Tv, Video } from "lucide-react";
 import { ReactNode } from "react";
 
-import type { Category, MediaLibrary } from "./mediaApi";
+import type { Category, MediaLibrary } from "./api";
 
 export type Section =
   | "home"

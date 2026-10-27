@@ -1,9 +1,10 @@
-import { errorText } from "../errorMessages";
+import { errorText } from "../api/errorMessages";
 import { ArrowLeft, Check, ChevronRight, Folder, FolderPlus, HardDrive, Loader2, Users, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { type FileEntry, listEntries, listSpaces, type Space } from "../api";
-import type { MusicSources } from "./musicApi";
+import type { FileEntry, Space } from "../api.generated";
+import { listEntries, listSpaces } from "../files/api";
+import type { MusicSources } from "./api";
 
 interface Chosen {
   spaceId: string;

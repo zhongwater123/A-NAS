@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Approval } from "./assistantApi";
+import type { Approval } from "./api";
 import type { SessionMessage } from "./hermes/types/hermes";
 import { stubAPI } from "../test/api";
 

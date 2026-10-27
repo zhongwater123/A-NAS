@@ -297,7 +297,7 @@ npm run dev
 
 生成工具在 [`tools/openapi`](../../tools/openapi/package.json) 中有独立的 npm 包，与 `tools/golangci-lint` 同理：openapi-typescript 依赖 TypeScript 5 的编译器 API，而 Web 客户端用 TypeScript 7。Makefile 以 `REDOCLY_TELEMETRY=off` 运行 Redocly CLI，并关闭更新检查，生成过程不联网。
 
-Web 客户端只经 [`api.ts`](../../web/src/api.ts) 的 `client`（openapi-fetch）调用产品 API，类型从 `api.generated.ts` 取，不再手写接口：
+Web 客户端只经 [`api.ts`](../../web/src/api/client.ts) 的 `client`（openapi-fetch）调用产品 API，类型从 `api.generated.ts` 取，不再手写接口：
 
 - `call()` 把结果展开为数据，失败时抛出带服务端错误码的 `APIError`；二进制与 multipart 请求体经 `rawBody()` 原样发送。
 - CSRF 令牌由客户端按方法添加：除 GET 与 HEAD 外的请求都带 `X-CSRF-Token`，与服务端 `withMutation` 的划分一致。带进度的上传（XHR）与 tus 也从 `csrfHeader(method)` 取同一规则，调用方不再传参。

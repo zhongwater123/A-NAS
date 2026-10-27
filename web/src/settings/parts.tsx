@@ -1,8 +1,8 @@
-import { errorText } from "../errorMessages";
+import { errorText } from "../api/errorMessages";
 import { CircleAlert, CircleCheck, RefreshCw, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import type { Person } from "../people";
-import { PersonAvatar } from "../PersonAvatar";
+import type { Person } from "../people/people";
+import { PersonAvatar } from "../people/PersonAvatar";
 
 // Building blocks shared by the settings sections: grouped cards in the style
 // of a system settings app.

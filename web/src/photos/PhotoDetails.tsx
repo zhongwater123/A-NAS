@@ -1,7 +1,7 @@
 import { CircleDot, Copy, Film, FolderPlus, Pencil, Plus, X } from "lucide-react";
 import { FormEvent, useState } from "react";
 
-import { formatBytes } from "../bytes";
+import { formatBytes } from "../lib/bytes";
 import {
   type Caller,
   canChange,
@@ -17,7 +17,7 @@ import {
   videoLines,
 } from "./model";
 import { PhotoFaces } from "./People";
-import { addPhotoTag, removePhotoTag, type PhotoAlbum, type PhotoAsset, type PhotoLibrary } from "./photosApi";
+import { addPhotoTag, removePhotoTag, type PhotoAlbum, type PhotoAsset, type PhotoLibrary } from "./api";
 
 export interface DetailsActions {
   rename: (asset: PhotoAsset) => Promise<PhotoAsset | undefined>;

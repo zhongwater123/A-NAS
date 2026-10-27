@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 
-import { Session, currentSession, getSetupStatus, logout, onSessionEnded, setSession } from "./api";
+import type { Session } from "./api.generated";
+import { onSessionEnded, setSession } from "./api/client";
+import { currentSession, getSetupStatus, logout } from "./auth/api";
 import { AuthMode, Authentication } from "./auth/Authentication";
 import { PasswordChange } from "./auth/PasswordChange";
 import { Desktop } from "./desktop/Desktop";
-import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
+import { isLocalConsole, LocalConsoleScreenSaver } from "./desktop/LocalConsoleScreenSaver";
 import { transferStore } from "./transfers/store";
 import "./styles.css";
 

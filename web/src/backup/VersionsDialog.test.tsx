@@ -2,8 +2,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { FileEntry, Space } from "../api";
-import type { SnapshotMatch } from "./backupApi";
+import type { FileEntry, Space } from "../api.generated";
+import type { SnapshotMatch } from "./api";
 import { VersionsDialog } from "./VersionsDialog";
 import { stubAPI } from "../test/api";
 

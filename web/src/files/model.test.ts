@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { FileEntry, Volume } from "../api";
-import { FileOrder } from "../useFileOrder";
+import type { FileEntry, Volume } from "../api.generated";
+import { FileOrder } from "./useFileOrder";
 import {
   browserItem,
   duplicateFileName,

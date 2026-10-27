@@ -2,9 +2,9 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { FileEntry, Space } from "../api";
+import type { FileEntry, Space } from "../api.generated";
 import { BackupCenter } from "./BackupCenter";
-import type { RemovedEntry, Snapshot, SnapshotEntry, SnapshotMatch, SnapshotSchedule } from "./backupApi";
+import type { RemovedEntry, Snapshot, SnapshotEntry, SnapshotMatch, SnapshotSchedule } from "./api";
 import { stubAPI } from "../test/api";
 
 const owner = "user:owner";

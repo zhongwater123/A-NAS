@@ -1,27 +1,27 @@
 import { ArrowDownUp, FolderClosed, Music2, Settings, Share2, ShoppingBag, Trash2 } from "lucide-react";
 import { lazy, ReactNode, Suspense } from "react";
 
-import { Session, User } from "../api";
+import type { Session, User } from "../api.generated";
 import { AppCenterPanel } from "../appcenter/AppCenterPanel";
 import type { AssistantFocus } from "../assistant/AssistantPanel";
-import { AssistantGlyph } from "../AssistantGlyph";
+import { AssistantGlyph } from "../assistant/AssistantGlyph";
 import { BackupCenter } from "../backup/BackupCenter";
-import { BackupCenterGlyph } from "../BackupCenterGlyph";
-import { DesktopApp } from "../DesktopGrid";
+import { BackupCenterGlyph } from "../backup/BackupCenterGlyph";
+import { DesktopApp } from "./DesktopGrid";
 import { DockerFocus, DockerPanel } from "../docker/DockerPanel";
-import { DockerGlyph } from "../DockerGlyph";
+import { DockerGlyph } from "../docker/DockerGlyph";
 import { FilePanel } from "../files/FilePanel";
 import { MediaCenter } from "../media/MediaCenter";
-import { type AppGlyph, MediaCenterGlyph } from "../MediaCenterGlyph";
+import { type AppGlyph, MediaCenterGlyph } from "../media/MediaCenterGlyph";
 import { MusicPanel } from "../music/MusicPanel";
-import { displayName } from "../people";
-import { PhotosGlyph } from "../PhotosGlyph";
+import { displayName } from "../people/people";
+import { PhotosGlyph } from "../photos/PhotosGlyph";
 import { PhotosPanel } from "../photos/PhotosPanel";
-import { SettingsPanel, SettingsSection, useStoragePlan } from "../SettingsPanel";
+import { SettingsPanel, SettingsSection, useStoragePlan } from "../settings/SettingsPanel";
 import { SharesPanel } from "../shares/SharesPanel";
-import type { TransferLocation } from "../transfers/transfersApi";
+import type { TransferLocation } from "../transfers/api";
 import { TrashPanel } from "../trash/TrashPanel";
-import type { HostStateView } from "../useHostState";
+import type { HostStateView } from "./useHostState";
 
 // The assistant window, with its chat libraries, loads when first opened.
 const AssistantPanel = lazy(() =>

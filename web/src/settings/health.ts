@@ -1,6 +1,7 @@
 import { Database, FolderLock, HardDrive, Lock, ShieldAlert, Thermometer, Unplug, type LucideIcon } from "lucide-react";
 
-import type { HealthFinding, HostState } from "../api";
+import type { HealthFinding } from "../api.generated";
+import type { HostState } from "../desktop/api";
 
 // describeFinding words one reason the system is not plainly healthy
 // (docs/specs/system-health.md): what is wrong and what the owner can do.

@@ -14,8 +14,9 @@ import {
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { listUsers, type Session, type User } from "../api";
-import { displayName, fullName } from "../people";
+import type { Session, User } from "../api.generated";
+import { listUsers } from "../settings/api";
+import { displayName, fullName } from "../people/people";
 import { Banner, messageOf } from "../settings/parts";
 import {
   SearchField,
@@ -48,7 +49,7 @@ import {
   type TimeRange,
   listActivity,
   timeRanges,
-} from "./logsApi";
+} from "./api";
 
 export interface LogsPreset {
   category: ActivityCategory;

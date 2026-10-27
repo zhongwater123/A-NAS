@@ -12,8 +12,8 @@ import {
 } from "lucide-react";
 import { ReactNode } from "react";
 
-import { formatBytes } from "../bytes";
-import { ContainerSummary } from "../containersApi";
+import { formatBytes } from "../lib/bytes";
+import { ContainerSummary } from "./api";
 import { ContainerLogs } from "./ContainerLogs";
 import type { ContainerActions } from "./DockerPanel";
 import {

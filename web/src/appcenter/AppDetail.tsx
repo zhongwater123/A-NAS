@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { CatalogApp } from "../appsApi";
+import { CatalogApp } from "./api";
 import { AppIcon, Folded, JobOutput, Logins, Progress, RichText } from "./parts";
 import { appURL, categoryOf, installFailed, leftoverText, openApp, useElapsed } from "./model";
 

@@ -2,7 +2,7 @@ import { FolderPlus, Images } from "lucide-react";
 import { ReactNode, useEffect, useEffectEvent, useState } from "react";
 
 import { messageOf } from "./model";
-import { listAlbums, thumbnailURL, type PhotoAlbum } from "./photosApi";
+import { listAlbums, thumbnailURL, type PhotoAlbum } from "./api";
 
 interface AlbumsProps {
   libraryId: string;

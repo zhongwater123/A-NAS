@@ -43,8 +43,8 @@ import {
   useState,
 } from "react";
 
-import { endViewing } from "../api";
-import { usePeople } from "../people";
+import { endViewing } from "../settings/api";
+import { usePeople } from "../people/people";
 import { AlbumPicker } from "./AlbumPicker";
 import { AssetGrid } from "./AssetGrid";
 import { AIHome, type AIHomeSnapshot } from "./AIHome";
@@ -128,7 +128,7 @@ import {
   type PhotoPerson,
   type PhotoSearchPage,
   type PhotoSimilarPage,
-} from "./photosApi";
+} from "./api";
 import type { ScrollerHandle } from "./PhotoScroller";
 import { joinWords, ObjectsStatus, SimilarSource } from "./results";
 import { useSelection } from "./selection";

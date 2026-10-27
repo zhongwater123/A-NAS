@@ -3,7 +3,7 @@ import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { Artwork, PosterCard, StillCard, useMediaActions } from "./Cards";
 import { episodeCode, heading, remaining, runtime, typeLabel } from "./format";
-import type { Home as HomeData, Title } from "./mediaApi";
+import type { Home as HomeData, Title } from "./api";
 
 // Shelf is a row that scrolls sideways with arrow buttons.
 export function Shelf({

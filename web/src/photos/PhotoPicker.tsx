@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { AssetGrid } from "./AssetGrid";
 import { Empty } from "./Collections";
 import { clampRowHeight } from "./layout";
-import { listTimeline, type PhotoAlbum, type PhotoAsset } from "./photosApi";
+import { listTimeline, type PhotoAlbum, type PhotoAsset } from "./api";
 import type { ScrollerHandle } from "./PhotoScroller";
 import { useSelection } from "./selection";
 

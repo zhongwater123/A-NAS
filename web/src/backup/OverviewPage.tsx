@@ -9,11 +9,11 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
-import type { Space } from "../api";
-import { BackupCenterGlyph } from "../BackupCenterGlyph";
+import type { Space } from "../api.generated";
+import { BackupCenterGlyph } from "./BackupCenterGlyph";
 
 import { useBackup, type SpaceData } from "./BackupCenter";
-import type { Snapshot } from "./backupApi";
+import type { Snapshot } from "./api";
 import {
   describeSchedule,
   formatCount,

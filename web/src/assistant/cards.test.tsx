@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Approval } from "./assistantApi";
+import type { Approval } from "./api";
 import { CommandCard, QuestionCard } from "./AssistantPanel";
 
 const base = { requestId: "req-3", sessionId: "0a1b2c3d", storedSessionId: "20261015_120000_abcdef", createdAt: 1 };

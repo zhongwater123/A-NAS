@@ -1,4 +1,4 @@
-import { errorCodeText } from "../errorMessages";
+import { errorCodeText } from "../api/errorMessages";
 import {
   Clock3,
   Disc3,
@@ -17,7 +17,7 @@ import {
 import { DragEvent, ReactNode, RefObject, useState } from "react";
 
 import { carriesTracks, Mosaic, type Place, readDrag, useMusic } from "./context";
-import type { MusicStatus } from "./musicApi";
+import type { MusicStatus } from "./api";
 import { playlistCovers } from "./views";
 
 interface Props {

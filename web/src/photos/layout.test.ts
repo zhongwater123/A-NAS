@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { assetAspect, flatEntries, justify, timelineEntries, tileGap } from "./layout";
 import { dayLabel } from "./model";
-import type { PhotoAsset } from "./photosApi";
+import type { PhotoAsset } from "./api";
 
 const photo = (id: string, takenAt: string, width = 4000, height = 3000): PhotoAsset => ({
   id,

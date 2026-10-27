@@ -1,4 +1,4 @@
-import { APIError } from "../api";
+import { APIError } from "../api/client";
 import {
   Box,
   Boxes,
@@ -24,14 +24,8 @@ import {
   useState,
 } from "react";
 
-import { readApps } from "../appsApi";
-import {
-  ContainerAction,
-  ContainerSnapshot,
-  ContainerSummary,
-  applyContainerAction,
-  readContainers,
-} from "../containersApi";
+import { readApps } from "../appcenter/api";
+import { ContainerAction, ContainerSnapshot, ContainerSummary, applyContainerAction, readContainers } from "./api";
 import { ContainerDetail, DetailTab } from "./ContainerDetail";
 import { ContainerPage } from "./ContainerList";
 import { ImagePage } from "./ImageList";

@@ -1,8 +1,8 @@
 import { ArchiveRestore, ChevronRight, Download, FileSearch, History, Layers, Search, X } from "lucide-react";
 import { ReactNode, useEffect, useMemo, useState } from "react";
 
-import type { Space } from "../api";
-import { formatBytes } from "../bytes";
+import type { Space } from "../api.generated";
+import { formatBytes } from "../lib/bytes";
 import { useBackup } from "./BackupCenter";
 import {
   listRemovedEntries,
@@ -12,7 +12,7 @@ import {
   type RemovedEntry,
   type SnapshotMatch,
   type SnapshotVersion,
-} from "./backupApi";
+} from "./api";
 import { formatCount, formatDateTime, formatDay, spaceLabel } from "./format";
 import { EmptyState, EntryIcon, Notice, Spinner } from "./parts";
 import { snapshotTitle } from "./SnapshotsPage";

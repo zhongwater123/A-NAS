@@ -40,14 +40,14 @@ const tus = vi.hoisted(() => {
 vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 
 const api = vi.hoisted(() => ({ sessionEnded: vi.fn() }));
-vi.mock("../api", async (original) => ({
-  ...(await original<typeof import("../api")>()),
+vi.mock("../api/client", async (original) => ({
+  ...(await original<typeof import("../api/client")>()),
   sessionEnded: api.sessionEnded,
 }));
 
-import { APIError } from "../api";
+import { APIError } from "../api/client";
 import { classifyUploadError, TransferStore, type UploadTarget } from "./store";
-import type { Transfer } from "./transfersApi";
+import type { Transfer } from "./api";
 import { json, stubAPI } from "../test/api";
 
 const target: UploadTarget = {

@@ -17,7 +17,7 @@ import { TransformComponent, TransformWrapper, type ReactZoomPanPinchContentRef 
 
 import { type Caller, canChange, dayLabel, momentOf, reducedMotion } from "./model";
 import { PhotoDetails, type DetailsActions } from "./PhotoDetails";
-import { getPhoto, displayURL, motionURL, previewURL, thumbnailURL, type PhotoAsset } from "./photosApi";
+import { getPhoto, displayURL, motionURL, previewURL, thumbnailURL, type PhotoAsset } from "./api";
 import { VideoPlayer, type VideoControls } from "./VideoPlayer";
 
 export interface ViewerActions extends DetailsActions {

@@ -15,8 +15,8 @@
 // page as it is, while vision is a feasibility trial (user decision 2026-10-21).
 import { computeAccessibleName, getRole } from "dom-accessibility-api";
 
-import { setWriteGate } from "../api";
-import { drawDesktop, onScreen } from "../desktopPicture";
+import { setWriteGate } from "../api/client";
+import { drawDesktop, onScreen } from "../desktop/desktopPicture";
 import "./webosControl.css";
 import { writeRisk } from "./webosWrites";
 

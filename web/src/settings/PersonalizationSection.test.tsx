@@ -2,7 +2,8 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setSession, type Wallpaper } from "../api";
+import type { Wallpaper } from "../api.generated";
+import { setSession } from "../api/client";
 import { PersonalizationSection } from "./PersonalizationSection";
 import { stubAPI } from "../test/api";
 

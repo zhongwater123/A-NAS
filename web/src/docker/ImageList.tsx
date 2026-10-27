@@ -1,7 +1,7 @@
 import { Layers, RefreshCw } from "lucide-react";
 
-import { formatBytes } from "../bytes";
-import { ContainerImage, ContainerSnapshot, ContainerSummary } from "../containersApi";
+import { formatBytes } from "../lib/bytes";
+import { ContainerImage, ContainerSnapshot, ContainerSummary } from "./api";
 import { DetailTab } from "./ContainerDetail";
 import { formatAgo, formatDateTime, imageUsers, matchesImageQuery, shortID, splitReference } from "./model";
 import { Empty } from "./parts";

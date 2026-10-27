@@ -14,7 +14,7 @@ import {
   renameVideoFile,
   type Collection,
   type Title,
-} from "./mediaApi";
+} from "./api";
 
 type DialogRequest =
   | {

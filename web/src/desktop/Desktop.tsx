@@ -8,25 +8,26 @@ import {
   useState,
 } from "react";
 
-import { type AssistantTaskNotice, Session, User } from "../api";
-import { assistantStatus } from "../assistant/assistantApi";
+import type { Session, User } from "../api.generated";
+import type { AssistantTaskNotice } from "./api";
+import { assistantStatus } from "../assistant/api";
 import { TaskToasts } from "../assistant/TaskToasts";
 import { whenText } from "../assistant/taskTime";
-import { shortcutApp, useAppShortcuts } from "../appShortcuts";
-import { DesktopGrid } from "../DesktopGrid";
-import { Dock } from "../Dock";
+import { shortcutApp, useAppShortcuts } from "./appShortcuts";
+import { DesktopGrid } from "./DesktopGrid";
+import { Dock } from "./Dock";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
-import { forgetPeople, loadPeople, rememberPerson } from "../people";
-import { SettingsSection, useStoragePlan } from "../SettingsPanel";
+import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
+import { SettingsSection, useStoragePlan } from "../settings/SettingsPanel";
 import { SharesProvider, useShares } from "../shares/SharesProvider";
-import { StatusBar } from "../StatusBar";
-import { DesktopView, SystemRail } from "../SystemRail";
+import { StatusBar } from "./StatusBar";
+import { DesktopView, SystemRail } from "./SystemRail";
 import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
-import type { TransferLocation } from "../transfers/transfersApi";
-import { useHostState } from "../useHostState";
-import { useWallpaper, wallpaperBackground } from "../wallpaper";
+import type { TransferLocation } from "../transfers/api";
+import { useHostState } from "./useHostState";
+import { useWallpaper, wallpaperBackground } from "./wallpaper";
 import { apps, desktopApps, WindowContext, WindowFocus, WindowID, windowIDs } from "./apps";
 import { AppWindow } from "./AppWindow";
 import { NotificationCenter } from "./NotificationCenter";

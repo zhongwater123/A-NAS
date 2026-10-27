@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { dayLabel, describeActivity, describeGroup, groupActivity, originLabel, plainText } from "./describe";
-import type { ActivityEvent } from "./logsApi";
+import type { ActivityEvent } from "./api";
 
 const owner = { id: "user:owner", username: "owner" };
 const alice = { id: "user:alice", username: "alice" };

@@ -14,7 +14,7 @@ import {
   type ShowDetail,
   type Title,
   type VideoDetail,
-} from "./mediaApi";
+} from "./api";
 
 export type PanelTab = "episodes" | "library";
 

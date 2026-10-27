@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { scheduledPrompt } from "./AssistantPanel";
-import type { AssistantTask } from "./assistantApi";
+import type { AssistantTask } from "./api";
 import { TaskToasts, plainText } from "./TaskToasts";
 import { TasksView } from "./TasksView";
 import { stubAPI } from "../test/api";

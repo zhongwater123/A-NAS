@@ -1,5 +1,5 @@
-import { calendarDays, calendarDate, relativeUnit } from "../format/time";
-import type { ActivityAccount, ActivityCategory, ActivityEvent, LogLevel } from "./logsApi";
+import { calendarDays, calendarDate, relativeUnit } from "../lib/time";
+import type { ActivityAccount, ActivityCategory, ActivityEvent, LogLevel } from "./api";
 
 // A sentence is plain text with emphasised names in it.
 export type Part = string | { name: string; muted?: boolean };

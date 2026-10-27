@@ -1,7 +1,7 @@
 import { CircleAlert } from "lucide-react";
 
-import type { HostState } from "../api";
-import type { HostStateView } from "../useHostState";
+import type { HostState } from "../desktop/api";
+import type { HostStateView } from "../desktop/useHostState";
 import { Banner } from "./parts";
 
 // How the overview and storage sections show the shared host snapshot while

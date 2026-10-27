@@ -1,7 +1,7 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { FormEvent } from "react";
 
-import { FileEntry } from "../api";
+import type { FileEntry } from "../api.generated";
 
 // DeleteDialog confirms moving items to the trash.
 export function DeleteDialog({

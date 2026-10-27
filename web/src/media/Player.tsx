@@ -48,7 +48,7 @@ import {
   type Playback,
   type Quality,
   type VideoDetail,
-} from "./mediaApi";
+} from "./api";
 import { PlayerPanel, type PanelTab } from "./PlayerPanel";
 import { canFeed, StreamFeed } from "./streamFeed";
 

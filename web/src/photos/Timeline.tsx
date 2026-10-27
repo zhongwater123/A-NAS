@@ -4,7 +4,7 @@ import { ReactNode, useCallback, useEffect, useEffectEvent, useLayoutEffect, use
 import { DayHeader, gridInset, type GridProps, scrubberInset, usePendingThumbnails, useTileRenderer } from "./grid";
 import { type Entry, type MonthState, type PendingPhoto, timelineEntries } from "./layout";
 import { countLabel, messageOf } from "./model";
-import { listTimelineMonth, listTimelineMonths, type PhotoAsset, type PhotoMonth } from "./photosApi";
+import { listTimelineMonth, listTimelineMonths, type PhotoAsset, type PhotoMonth } from "./api";
 import { PhotoScroller, useContentWidth } from "./PhotoScroller";
 import { PendingTile } from "./Tile";
 

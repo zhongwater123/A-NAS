@@ -3,14 +3,7 @@ import { useEffect, useState } from "react";
 
 import { Empty, Loading, messageOf, PageHeader, TitleGrid } from "./Browse";
 import { Menu } from "./Cards";
-import {
-  artworkURL,
-  getCollection,
-  listCollections,
-  type Collection,
-  type CollectionDetail,
-  type Title,
-} from "./mediaApi";
+import { artworkURL, getCollection, listCollections, type Collection, type CollectionDetail, type Title } from "./api";
 
 function Collage({ covers }: { covers: string[] }) {
   const slots = covers.slice(0, 4);

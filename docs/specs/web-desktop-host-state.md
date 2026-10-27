@@ -115,7 +115,7 @@
 ## 关联
 
 - ADR：[Web 桌面技术选择](../adr/0003-use-react-typescript-for-web-desktop.md)
-- 代码：[程序坞](../../web/src/Dock.tsx)、[窗口缩略图](../../web/src/windowSnapshot.ts)
+- 代码：[程序坞](../../web/src/desktop/Dock.tsx)、[窗口缩略图](../../web/src/desktop/windowSnapshot.ts)
 - ADR：[客户端 REST/OpenAPI](../adr/0002-use-rest-openapi-for-product-clients.md)
 - 运行手册：[部署开发预览](../runbooks/deploy-web-preview-to-experimental-nas.md)
 - 运行手册：[本地控制台](../runbooks/operate-local-kiosk.md)

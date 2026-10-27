@@ -10,7 +10,7 @@ import (
 
 // TestShellResponsesKeepToTheContract drives what the desktop shell reads
 // before any window opens. The Web client refuses these responses at run
-// time when they break the contract (web/src/api.ts), so each is validated
+// time when they break the contract (web/src/api/client.ts), so each is validated
 // here, with lists that hold something.
 func TestShellResponsesKeepToTheContract(t *testing.T) {
 	f := newActivityFixture(t, func(*photos.Service) http.Handler { return nil })

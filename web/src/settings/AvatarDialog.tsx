@@ -2,7 +2,8 @@ import { ArrowLeft, ImagePlus, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Cropper, { type Area } from "react-easy-crop";
 
-import { uploadAvatar, type User } from "../api";
+import type { User } from "../api.generated";
+import { uploadAvatar } from "../auth/api";
 import { ImageSources, loadImage } from "./ImageSources";
 import { Banner, messageOf } from "./parts";
 import "./avatar.css";

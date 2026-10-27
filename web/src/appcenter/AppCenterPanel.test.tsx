@@ -2,8 +2,8 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setSession } from "../api";
-import type { AppJob, CatalogApp, InstallPlan } from "../appsApi";
+import { setSession } from "../api/client";
+import type { AppJob, CatalogApp, InstallPlan } from "./api";
 import { AppCenterPanel } from "./AppCenterPanel";
 import { json, stubAPI } from "../test/api";
 import { app } from "../test/fixtures";

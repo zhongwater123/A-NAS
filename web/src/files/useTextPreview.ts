@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
-import { readFileTextPreview } from "../api";
-import { isTextPreviewable } from "../fileTypes";
+import { readFileTextPreview } from "./api";
+import { isTextPreviewable } from "../lib/fileTypes";
 import { FileBrowserItem, messageOf } from "./model";
 
 const textPreviewLimit = 1024 * 1024;

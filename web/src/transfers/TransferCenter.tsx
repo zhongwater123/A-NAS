@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
-import { formatBytes, formatRate } from "../bytes";
+import { formatBytes, formatRate } from "../lib/bytes";
 import { type ConflictChoice, type Hold, transferStore, useTransfers } from "./store";
 import {
   dayLabel,
@@ -48,7 +48,7 @@ import {
   transferItems,
   transferTotals,
 } from "./model";
-import type { TransferLocation } from "./transfersApi";
+import type { TransferLocation } from "./api";
 import "./transfers.css";
 
 type View = "current" | "uploads" | "downloads" | "history";

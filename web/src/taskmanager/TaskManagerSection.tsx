@@ -11,7 +11,7 @@ import {
   CircuitBoard,
 } from "lucide-react";
 import { useId, useState, type CSSProperties, type ReactNode } from "react";
-import { formatBytes, formatRate } from "../bytes";
+import { formatBytes, formatRate } from "../lib/bytes";
 import { Banner } from "../settings/parts";
 import { readDevice, readTasks, type Availability, type DeviceSnapshot, type Group, type Task } from "./api";
 import { useSnapshot, type SnapshotView } from "./useSnapshot";

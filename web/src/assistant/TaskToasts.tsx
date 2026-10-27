@@ -6,7 +6,7 @@
 import { CalendarClock, ChevronRight, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { AssistantTaskNotice } from "../api";
+import type { AssistantTaskNotice } from "../desktop/api";
 import { loadTaskNotices, readTaskNotice, useTaskNotices } from "./taskNotices";
 import { whenText } from "./taskTime";
 import "./taskToasts.css";

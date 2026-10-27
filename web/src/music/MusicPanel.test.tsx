@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setSession } from "../api";
-import type { Playlist, Track } from "./musicApi";
+import { setSession } from "../api/client";
+import type { Playlist, Track } from "./api";
 import { MusicPanel } from "./MusicPanel";
 import { track } from "./testTracks";
 import { json, stubAPI } from "../test/api";

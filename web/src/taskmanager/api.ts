@@ -1,4 +1,4 @@
-import { call, client } from "../api";
+import { call, client } from "../api/client";
 import type { TaskManagerDeviceResponse, TaskManagerProcessGroup, TaskManagerStatus } from "../api.generated";
 
 export type {

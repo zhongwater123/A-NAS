@@ -10,7 +10,7 @@ import {
 } from "react";
 
 import { artistLine, shuffled, unknownAlbum } from "./library";
-import { coverURL, streamURL, type Track } from "./musicApi";
+import { coverURL, streamURL, type Track } from "./api";
 
 export type Repeat = "off" | "all" | "one";
 

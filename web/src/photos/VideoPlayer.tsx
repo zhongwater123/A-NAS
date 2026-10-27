@@ -25,7 +25,7 @@ import {
   useState,
 } from "react";
 
-import { browserCapabilities } from "../media/mediaApi";
+import { browserCapabilities } from "../media/api";
 import { canFeed, StreamFeed } from "../media/streamFeed";
 import { clock, messageOf } from "./model";
 import {
@@ -35,7 +35,7 @@ import {
   videoStreamURL,
   type PhotoAsset,
   type VideoPlayback,
-} from "./photosApi";
+} from "./api";
 
 // What the viewer's keys do to the video it shows.
 export interface VideoControls {

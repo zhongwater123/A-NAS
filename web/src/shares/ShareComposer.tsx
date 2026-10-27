@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Clock3, LoaderCircle, Search, Send, X } from "lucide-react";
-import type { FileEntry, Profile } from "../api";
-import { formatBytes } from "../bytes";
-import { PersonAvatar } from "../PersonAvatar";
-import { displayName } from "../people";
+import type { FileEntry, Profile } from "../api.generated";
+import { formatBytes } from "../lib/bytes";
+import { PersonAvatar } from "../people/PersonAvatar";
+import { displayName } from "../people/people";
 import { createShare, listMembers, requestKey } from "./api";
 import { EmojiInput } from "./EmojiInput";
 import { errorText } from "./format";

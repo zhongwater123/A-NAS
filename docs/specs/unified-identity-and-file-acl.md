@@ -105,4 +105,4 @@
 - 规格：[基础存储与共享](basic-storage-and-sharing.md)、[Web 桌面终端](web-terminal.md)
 - 问题：[issue #9](https://github.com/zhongwater123/A-NAS/issues/9)、[成员账户架构审查 #98](https://github.com/zhongwater123/A-NAS/issues/98)
 - 调查：[smbstatus 的告警让禁用与身份同步失败](../investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md)
-- 代码：[账号名与密码规则](../../internal/accounts/service.go)、[`rules_test.go`](../../internal/accounts/rules_test.go)、[前端规则](../../web/src/accountRules.ts)、[Host Agent 的 SMB 密码检查](../../internal/hostops/linux/executor.go)
+- 代码：[账号名与密码规则](../../internal/accounts/service.go)、[`rules_test.go`](../../internal/accounts/rules_test.go)、[前端规则](../../web/src/auth/accountRules.ts)、[Host Agent 的 SMB 密码检查](../../internal/hostops/linux/executor.go)

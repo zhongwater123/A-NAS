@@ -1,11 +1,11 @@
 import { RotateCcw, SquareTerminal } from "lucide-react";
 import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 
-import { readTerminalEnabled, type SessionStatus } from "../terminal";
+import { readTerminalEnabled, type SessionStatus } from "./terminal";
 import { Banner, IconTile, PageHeader, Pill } from "./parts";
 import "./terminal.css";
 
-const XtermSession = lazy(() => import("../XtermSession"));
+const XtermSession = lazy(() => import("./XtermSession"));
 
 type Availability = "checking" | "enabled" | "disabled" | "unreachable";
 

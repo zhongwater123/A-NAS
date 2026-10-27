@@ -1,7 +1,7 @@
 import { CircleAlert, Maximize2, Minus, PanelLeftClose, X } from "lucide-react";
 import { Component, ErrorInfo, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 
-import { WINDOW_ID } from "../windowSnapshot";
+import { WINDOW_ID } from "./windowSnapshot";
 import { apps } from "./apps";
 import { WindowAction, WindowModel } from "./windows";
 

@@ -1,7 +1,7 @@
 import { Check, FileVideo, Heart, Languages, ListPlus, Play, RotateCcw, Star, Subtitles } from "lucide-react";
 import { MouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
-import { formatBytes } from "../bytes";
+import { formatBytes } from "../lib/bytes";
 import { Empty, Loading, messageOf } from "./Browse";
 import { Artwork, useMediaActions, type MediaActions } from "./Cards";
 import { EditableName, splitName } from "./EditableName";
@@ -15,7 +15,7 @@ import {
   type ShowDetail,
   type Title,
   type VideoDetail,
-} from "./mediaApi";
+} from "./api";
 
 const nfoNote = "片名来自 NFO 文件，改名不会改变显示的片名";
 

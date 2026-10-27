@@ -279,4 +279,4 @@
 - 规格：[相册与本地智能检索](photo-library.md)
 - 架构：[相册技术设计](../architecture/photo-library.md)、[M2 实施方案](../architecture/photo-ai.md)
 - ADR：[相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
-- 代码：[`web/src/photos`](../../web/src/photos/)、[应用图标](../../web/src/PhotosGlyph.tsx)、[`internal/photos`](../../internal/photos/photos.go)、[`internal/photosapi`](../../internal/photosapi/handler.go)
+- 代码：[`web/src/photos`](../../web/src/photos/)、[应用图标](../../web/src/photos/PhotosGlyph.tsx)、[`internal/photos`](../../internal/photos/photos.go)、[`internal/photosapi`](../../internal/photosapi/handler.go)

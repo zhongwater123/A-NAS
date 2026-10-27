@@ -1,4 +1,4 @@
-import { errorText } from "../errorMessages";
+import { errorText } from "../api/errorMessages";
 import { useEffect, useRef, useState } from "react";
 
 export interface SnapshotView<T> {

@@ -34,7 +34,7 @@ import {
   sourceFolder,
   summary,
 } from "./library";
-import { coverURL, type MusicSources, type Play as PlayRecord, type Playlist, type Track } from "./musicApi";
+import { coverURL, type MusicSources, type Play as PlayRecord, type Playlist, type Track } from "./api";
 import { TrackList, type TrackListProps } from "./TrackList";
 
 const spaceName = (kind: string) => (kind === "shared" ? "共享空间" : "个人空间");

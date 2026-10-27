@@ -1,8 +1,8 @@
 import { Box, ExternalLink } from "lucide-react";
 import { KeyboardEvent, ReactNode, useEffect, useRef, useState } from "react";
 
-import { iconURL } from "../appsApi";
-import { ContainerSummary } from "../containersApi";
+import { iconURL } from "../appcenter/api";
+import { ContainerSummary } from "./api";
 import { AppRef, Condition, WebPort } from "./model";
 
 // An App Center app's own icon, or a tile in the container's state colour.

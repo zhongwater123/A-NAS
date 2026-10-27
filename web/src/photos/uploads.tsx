@@ -15,7 +15,7 @@ import { groupPhotoUploads } from "./uploadGroups";
 import { transferStore } from "../transfers/store";
 import type { PendingPhoto } from "./layout";
 import { messageOf } from "./model";
-import { addToAlbum, uploadPhoto } from "./photosApi";
+import { addToAlbum, uploadPhoto } from "./api";
 
 export interface UploadTarget {
   libraryId: string;

@@ -1,9 +1,10 @@
-import { errorText } from "../errorMessages";
+import { errorText } from "../api/errorMessages";
 import { FormEvent, useId, useState } from "react";
 
-import { Session, login, setupAdministrator } from "../api";
-import { passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "../accountRules";
-import { isLocalConsole } from "../LocalConsoleScreenSaver";
+import type { Session } from "../api.generated";
+import { login, setupAdministrator } from "./api";
+import { passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
+import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
 
 export type AuthMode = "loading" | "setup" | "setup-elsewhere" | "login";
 

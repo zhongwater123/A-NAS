@@ -1,9 +1,9 @@
 import { CircleAlert, CircleCheck, FileText, Folder, HardDrive, Minus, Plus, UsersRound, X } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
-import type { Space } from "../api";
+import type { Space } from "../api.generated";
 
-import type { SnapshotOrigin } from "./backupApi";
+import type { SnapshotOrigin } from "./api";
 import { spaceLabel } from "./format";
 
 export function Spinner({ small }: { small?: boolean }) {

@@ -10,9 +10,9 @@ import {
   Presentation,
   type LucideIcon,
 } from "lucide-react";
-import { isPreviewableImage, isVideoFile } from "../fileTypes";
-import { displayName, person, type People } from "../people";
-import { PersonAvatar } from "../PersonAvatar";
+import { isPreviewableImage, isVideoFile } from "../lib/fileTypes";
+import { displayName, person, type People } from "../people/people";
+import { PersonAvatar } from "../people/PersonAvatar";
 
 // A kind gives an item its label and tile colour in lists, the header and
 // the send dialog.

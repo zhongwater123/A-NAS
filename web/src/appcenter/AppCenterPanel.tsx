@@ -1,8 +1,8 @@
-import { APIError } from "../api";
+import { APIError } from "../api/client";
 import { CircleAlert, Compass, PackageCheck, RotateCw, Search, ShieldCheck, ShoppingBag, X } from "lucide-react";
 import { KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { AppList, CatalogApp, readApps } from "../appsApi";
+import { AppList, CatalogApp, readApps } from "./api";
 import { AppDetail } from "./AppDetail";
 import { CategoryPage, CategoryTile, Discover, Installed, SearchResults, listedAsInstalled } from "./Browse";
 import { InstallSheet, UninstallDialog } from "./InstallSheet";

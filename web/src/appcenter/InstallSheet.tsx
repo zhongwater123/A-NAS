@@ -1,4 +1,4 @@
-import { APIError } from "../api";
+import { APIError } from "../api/client";
 import {
   ArrowUpRight,
   Boxes,
@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useEffectEvent, useState } from "react";
 
-import { AppJob, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "../appsApi";
+import { AppJob, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "./api";
 import { AppIcon, JobOutput, Layer, Logins, Progress, RichText } from "./parts";
 import {
   appURL,

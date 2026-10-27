@@ -19,12 +19,13 @@ import {
 } from "lucide-react";
 import { CSSProperties, DragEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
-import { createDirectory, listEntries, type FileEntry } from "../api";
-import { formatBytes } from "../bytes";
+import type { FileEntry } from "../api.generated";
+import { createDirectory, listEntries } from "../files/api";
+import { formatBytes } from "../lib/bytes";
 import { messageOf } from "./Browse";
 import { Dropdown } from "./Dropdown";
 import { kindInfo } from "./Libraries";
-import type { Category, LibraryKind, MediaLibrary } from "./mediaApi";
+import type { Category, LibraryKind, MediaLibrary } from "./api";
 import {
   acceptedTypes,
   pickedFromDrop,

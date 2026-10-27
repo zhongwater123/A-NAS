@@ -39,7 +39,7 @@ vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 
 import { transferStore, type UploadTarget } from "./store";
 import { TransferCenter } from "./TransferCenter";
-import type { Transfer } from "./transfersApi";
+import type { Transfer } from "./api";
 import { json, stubAPI } from "../test/api";
 
 const target: UploadTarget = {

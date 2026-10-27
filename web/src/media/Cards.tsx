@@ -14,7 +14,7 @@ import { createPortal } from "react-dom";
 
 import { useFold } from "./Dropdown";
 import { heading, hue, progressShare, subheading, timecode, typeLabel } from "./format";
-import { artworkURL, type ArtworkKind, type Title } from "./mediaApi";
+import { artworkURL, type ArtworkKind, type Title } from "./api";
 
 export interface CardAction {
   label: string;

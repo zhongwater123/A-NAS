@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { formatBytes } from "../bytes";
+import { formatBytes } from "../lib/bytes";
 import { useBackup } from "./BackupCenter";
 import {
   deleteSnapshot,
@@ -23,7 +23,7 @@ import {
   type Snapshot,
   type SnapshotChange,
   type SnapshotEntry,
-} from "./backupApi";
+} from "./api";
 import { formatClock, formatCount, formatDateTime, formatDay, restoredSnapshotName, spaceLabel } from "./format";
 import { Dialog, EmptyState, EntryIcon, Notice, OriginBadge, SpaceSwitcher, Spinner } from "./parts";
 

@@ -2,10 +2,10 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setSession } from "../api";
+import { setSession } from "../api/client";
 import { transferStore } from "../transfers/store";
 import { MediaCenter } from "./MediaCenter";
-import type { Episode, Home, MediaLibrary, ShowDetail, Title, VideoDetail } from "./mediaApi";
+import type { Episode, Home, MediaLibrary, ShowDetail, Title, VideoDetail } from "./api";
 import { Player } from "./Player";
 import { json, stubAPI } from "../test/api";
 

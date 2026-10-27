@@ -1,4 +1,4 @@
-import { errorText } from "../errorMessages";
+import { errorText } from "../api/errorMessages";
 import { ArrowLeft, CircleAlert } from "lucide-react";
 import {
   KeyboardEvent,
@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 
-import { formatBytes } from "../bytes";
+import { formatBytes } from "../lib/bytes";
 import { useDialogs, useToasts } from "../photos/feedback";
 import { type Music, MusicContext, type Place } from "./context";
 import {
@@ -48,7 +48,7 @@ import {
   setSources,
   type Track,
   updatePlaylist,
-} from "./musicApi";
+} from "./api";
 import { NowPlaying } from "./NowPlaying";
 import { loadPinyin } from "./pinyin";
 import { usePlayer } from "./player";

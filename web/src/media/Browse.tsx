@@ -1,4 +1,4 @@
-import { errorText } from "../errorMessages";
+import { errorText } from "../api/errorMessages";
 import { ArrowDownWideNarrow, Clapperboard, CloudUpload, Heart, History, Search, Trash2, X } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -13,7 +13,7 @@ import {
   type MediaLibrary,
   type SortOrder,
   type Title,
-} from "./mediaApi";
+} from "./api";
 
 export function messageOf(error: unknown): string {
   return errorText(error, "media");

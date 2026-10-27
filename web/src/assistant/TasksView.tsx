@@ -32,7 +32,7 @@ import {
   resumeTask,
   runTask,
   taskRuns,
-} from "./assistantApi";
+} from "./api";
 import { loadTaskNotices, useTaskNotices } from "./taskNotices";
 import { scheduleText, whenText } from "./taskSchedule";
 

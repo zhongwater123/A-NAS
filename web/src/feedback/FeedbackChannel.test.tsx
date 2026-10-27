@@ -2,10 +2,10 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setSession } from "../api";
-import { forgetPeople, rememberPerson } from "../people";
+import { setSession } from "../api/client";
+import { forgetPeople, rememberPerson } from "../people/people";
 import { FeedbackChannel } from "./FeedbackChannel";
-import type { FeedbackComment, FeedbackItem } from "./feedbackApi";
+import type { FeedbackComment, FeedbackItem } from "./api";
 import { describeTime } from "./time";
 import { json, stubAPI } from "../test/api";
 

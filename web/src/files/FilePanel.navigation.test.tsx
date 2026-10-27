@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import App from "../App";
-import type { FileEntry } from "../api";
+import type { FileEntry } from "../api.generated";
 import { json } from "../test/api";
 import { installAPI, resetDesktop } from "../test/desktop";
 

@@ -3,7 +3,7 @@ import { DragEvent, MouseEvent, PointerEvent, ReactNode, memo, useRef } from "re
 
 import type { Box, PendingPhoto } from "./layout";
 import { clock } from "./model";
-import { displayURL, previewURL, type PhotoAsset } from "./photosApi";
+import { displayURL, previewURL, type PhotoAsset } from "./api";
 
 export const dragType = "application/x-a-nas-photos";
 

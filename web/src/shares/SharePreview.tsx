@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
-import { formatBytes } from "../bytes";
-import { isHEIFImage, isPDFPreviewable, isPreviewableImage, isTextPreviewable, isVideoFile } from "../fileTypes";
+import { formatBytes } from "../lib/bytes";
+import { isHEIFImage, isPDFPreviewable, isPreviewableImage, isTextPreviewable, isVideoFile } from "../lib/fileTypes";
 import "../files/viewer.css";
 import { contentURL, readText, type ShareEntry } from "./api";
 import { errorText, leaf } from "./format";

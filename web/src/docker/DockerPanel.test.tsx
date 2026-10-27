@@ -2,8 +2,8 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setSession } from "../api";
-import type { ContainerSnapshot, ContainerSummary } from "../containersApi";
+import { setSession } from "../api/client";
+import type { ContainerSnapshot, ContainerSummary } from "./api";
 import { DockerPanel } from "./DockerPanel";
 import { stubAPI } from "../test/api";
 import { app } from "../test/fixtures";

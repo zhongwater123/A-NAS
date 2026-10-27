@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { formatRate } from "../bytes";
+import { formatRate } from "../lib/bytes";
 import {
   holdText,
   isActive,

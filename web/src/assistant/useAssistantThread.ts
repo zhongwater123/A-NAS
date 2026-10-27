@@ -7,7 +7,7 @@
 // service keeps the instance up until it ends.
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
-import { failureText, sessionMessages } from "./assistantApi";
+import { failureText, sessionMessages } from "./api";
 import { toChatMessages } from "./hermes/lib/chat-messages/hydration";
 import { appendAssistantTextPart, appendReasoningPart, textPart } from "./hermes/lib/chat-messages/parts";
 import { upsertToolPart } from "./hermes/lib/chat-messages/tool-parts";

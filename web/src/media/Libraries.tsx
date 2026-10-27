@@ -22,12 +22,13 @@ import {
 } from "lucide-react";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 
-import { listEntries, type FileEntry, type Space } from "../api";
-import { formatBytes } from "../bytes";
+import type { FileEntry, Space } from "../api.generated";
+import { listEntries } from "../files/api";
+import { formatBytes } from "../lib/bytes";
 import { Empty, messageOf, PageHeader } from "./Browse";
 import { Menu } from "./Cards";
 import { ago } from "./format";
-import { artworkURL, createLibrary, updateLibrary, type LibraryKind, type MediaLibrary } from "./mediaApi";
+import { artworkURL, createLibrary, updateLibrary, type LibraryKind, type MediaLibrary } from "./api";
 
 export const kindInfo: Record<LibraryKind, { label: string; icon: ReactNode; text: string }> = {
   movies: { label: "电影", icon: <Film />, text: "每个视频都是一部电影，按片名与年份识别" },

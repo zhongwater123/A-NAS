@@ -1,6 +1,6 @@
 import { Hourglass, Scan, SearchX } from "lucide-react";
 
-import { type PhotoAsset, type PhotoObjectsFound, previewURL } from "./photosApi";
+import { type PhotoAsset, type PhotoObjectsFound, previewURL } from "./api";
 
 // joinWords names a query's things the way a sentence would: 猫、狗和沙发.
 export function joinWords(words: string[]) {

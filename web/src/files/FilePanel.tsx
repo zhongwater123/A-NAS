@@ -9,15 +9,17 @@ import {
   useState,
 } from "react";
 
-import { FileEntry, Space, copyFile, createDirectory, deleteFile, endViewing, moveFile } from "../api";
+import type { FileEntry, Space } from "../api.generated";
+import { endViewing } from "../settings/api";
+import { copyFile, createDirectory, deleteFile, moveFile } from "./api";
 import { VersionsDialog } from "../backup/VersionsDialog";
-import { nameProblem } from "../fileNames";
-import { displayName, usePeople } from "../people";
+import { nameProblem } from "../lib/fileNames";
+import { displayName, usePeople } from "../people/people";
 import { useShares } from "../shares/SharesProvider";
 import { carriesFiles, PickedFile, pickedFromDrop } from "../transfers/picker";
 import { transferStore } from "../transfers/store";
-import type { TransferLocation } from "../transfers/transfersApi";
-import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "../useFileOrder";
+import type { TransferLocation } from "../transfers/api";
+import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "./useFileOrder";
 import { FileContextMenu, FileContextMenuState } from "./FileContextMenu";
 import { DeleteDialog, RenameDialog } from "./FileDialogs";
 import { FileInspector } from "./FileInspector";

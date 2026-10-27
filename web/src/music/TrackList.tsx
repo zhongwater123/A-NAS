@@ -15,7 +15,7 @@ import {
 
 import { Cover, carriesTracks, dragType, Equalizer, readDrag, useMusic } from "./context";
 import { artistLine, artistKey, artistsOf, formatDuration, lossless, qualityOf, unknownAlbum } from "./library";
-import type { Track } from "./musicApi";
+import type { Track } from "./api";
 
 export interface TrackListProps {
   tracks: Track[];

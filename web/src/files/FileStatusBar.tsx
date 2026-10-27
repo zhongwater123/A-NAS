@@ -1,6 +1,6 @@
 import { CSSProperties } from "react";
 
-import { formatBytes } from "../bytes";
+import { formatBytes } from "../lib/bytes";
 import { useTransfers } from "../transfers/store";
 import { FileBrowserItem, FileView } from "./model";
 

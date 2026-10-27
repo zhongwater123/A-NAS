@@ -3,8 +3,8 @@ import { ReactNode, useCallback, useEffect, useEffectEvent, useMemo, useRef, use
 
 import { gridInset, type GridProps, usePendingThumbnails, useTileRenderer } from "./grid";
 import { type Entry, flatEntries, type Split } from "./layout";
-import { errorText, type ErrorDomain } from "../errorMessages";
-import type { PhotoAsset, PhotoPage } from "./photosApi";
+import { errorText, type ErrorDomain } from "../api/errorMessages";
+import type { PhotoAsset, PhotoPage } from "./api";
 import { PhotoScroller, useContentWidth } from "./PhotoScroller";
 
 interface Props extends GridProps {

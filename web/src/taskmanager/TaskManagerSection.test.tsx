@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { useState } from "react";
-import { SettingsPanel, type SettingsSection, type StoragePlanFlow } from "../SettingsPanel";
-import { onSessionEnded, type Session } from "../api";
+import { SettingsPanel, type SettingsSection, type StoragePlanFlow } from "../settings/SettingsPanel";
+import type { Session } from "../api.generated";
+import { onSessionEnded } from "../api/client";
 import { json, stubAPI } from "../test/api";
 import { taskManagerDevice as device, taskManagerTasks as tasks } from "../test/fixtures";
 

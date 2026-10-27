@@ -16,7 +16,7 @@ import {
 
 import type { Box, Entry, PendingPhoto } from "./layout";
 import { fullMonthLabel } from "./model";
-import type { PhotoAsset } from "./photosApi";
+import type { PhotoAsset } from "./api";
 
 export interface ScrollerHandle {
   // beginSwipe follows a press on a tile's check across other tiles.

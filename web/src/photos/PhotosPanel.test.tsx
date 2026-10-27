@@ -2,9 +2,9 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setSession } from "../api";
+import { setSession } from "../api/client";
 import { PhotosPanel } from "./PhotosPanel";
-import type { PhotoAlbum, PhotoAsset, PhotoLibrary } from "./photosApi";
+import type { PhotoAlbum, PhotoAsset, PhotoLibrary } from "./api";
 import { json, stubAPI } from "../test/api";
 
 // jsdom decodes no images: the image searched by is the file as it came.

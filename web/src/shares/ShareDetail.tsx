@@ -14,8 +14,8 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { formatBytes } from "../bytes";
-import { usePeople } from "../people";
+import { formatBytes } from "../lib/bytes";
+import { usePeople } from "../people/people";
 import { getShare, listJobs, revokeShare, viewShare, type Job, type Share, type ShareEntry } from "./api";
 import { Conversation, useThread, type Thread } from "./Conversation";
 import {

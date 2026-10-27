@@ -10,7 +10,7 @@ import {
   type PhotoAssetPerson,
   type PhotoLibrary,
   type PhotoPerson,
-} from "./photosApi";
+} from "./api";
 
 // People and pets (docs/architecture/photo-people.md): local AI finds the same
 // face, cat or dog again across a library's photos, and members name, merge

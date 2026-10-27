@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { Notification, acknowledgeNotification, listNotifications } from "../api";
-import { fullName, usePeople, type People } from "../people";
+import type { Notification } from "../api.generated";
+import { acknowledgeNotification, listNotifications } from "./api";
+import { fullName, usePeople, type People } from "../people/people";
 
 // NotificationCenter shows what administrators did to the account since the
 // user last acknowledged it: viewing the private space or resetting the password.

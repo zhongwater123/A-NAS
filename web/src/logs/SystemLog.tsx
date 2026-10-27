@@ -1,7 +1,7 @@
 import { ChevronDown, Download, Radio, RefreshCw, ServerCog } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { APIError } from "../api";
+import { APIError } from "../api/client";
 import { Banner, Pill, messageOf } from "../settings/parts";
 import { SearchField, Select, downloadText, exportLimit, fileStamp, useDebounced, useRemembered } from "./common";
 import { formatDateTime, fullTime, levelLabels, logTime } from "./describe";
@@ -13,7 +13,7 @@ import {
   listSystemLogs,
   systemLogServices,
   timeRanges,
-} from "./logsApi";
+} from "./api";
 
 const pageSize = 200;
 const followInterval = 5000;

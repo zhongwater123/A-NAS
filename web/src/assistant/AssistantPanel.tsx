@@ -1,5 +1,5 @@
-import { formatBytes } from "../bytes";
-import { relativeTime as formatRelativeTime } from "../format/time";
+import { formatBytes } from "../lib/bytes";
+import { relativeTime as formatRelativeTime } from "../lib/time";
 // AI 助手 window, named VNAS on the desktop (ADR 0024 decision 9). The thread is assistant-ui — the chat
 // library Hermes Desktop is built on — fed with Hermes Desktop's own transcript
 // model over its own JSON-RPC client; the conversation list, confirmation cards
@@ -82,8 +82,8 @@ import {
   useState,
 } from "react";
 
-import { AssistantGlyph } from "../AssistantGlyph";
-import { copyText } from "../clipboard";
+import { AssistantGlyph } from "./AssistantGlyph";
+import { copyText } from "../lib/clipboard";
 import {
   type Approval,
   type AssistantQuestion,
@@ -96,7 +96,7 @@ import {
   listApprovals,
   listSessions,
   renameSession,
-} from "./assistantApi";
+} from "./api";
 import { chatMessageText } from "./hermes/lib/chat-messages/parts";
 import { withUniqueToolCallIdsWithinMessage } from "./hermes/lib/chat-messages/tool-parts";
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";

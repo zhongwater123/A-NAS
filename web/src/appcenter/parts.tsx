@@ -1,8 +1,8 @@
 import { Check, Copy, Eye, EyeOff, Loader, TriangleAlert } from "lucide-react";
 import { CSSProperties, KeyboardEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { AppCredential, AppJob, CatalogApp, iconURL } from "../appsApi";
-import { copyText } from "../clipboard";
+import { AppCredential, AppJob, CatalogApp, iconURL } from "./api";
+import { copyText } from "../lib/clipboard";
 import { appURL, openApp } from "./model";
 
 // The Markdown renderer is its own chunk. Once loaded it renders synchronously

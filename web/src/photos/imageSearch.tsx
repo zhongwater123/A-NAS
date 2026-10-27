@@ -1,8 +1,8 @@
 import { Camera } from "lucide-react";
 import type { ClipboardEvent, DragEvent } from "react";
 
-import { APIError } from "../api";
-import { createImageSearch, listImageSearchResults, type PhotoPage } from "./photosApi";
+import { APIError } from "../api/client";
+import { createImageSearch, listImageSearchResults, type PhotoPage } from "./api";
 
 // An image to search the library by: what the browser made of the chosen,
 // dropped or pasted file. The photo service gets this JPEG, never the file.

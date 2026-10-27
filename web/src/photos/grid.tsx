@@ -13,7 +13,7 @@ import {
 } from "react";
 
 import type { Box, Entry } from "./layout";
-import { getPhoto, type PhotoAsset } from "./photosApi";
+import { getPhoto, type PhotoAsset } from "./api";
 import type { ScrollerHandle } from "./PhotoScroller";
 import { Tile } from "./Tile";
 

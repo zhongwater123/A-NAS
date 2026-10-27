@@ -2,7 +2,7 @@ import { ChevronRight, Folder as FolderIcon, FolderOpen, FolderX, HardDrive } fr
 import { useEffect, useState } from "react";
 
 import { Empty, Loading, messageOf, PageHeader, TitleGrid } from "./Browse";
-import { artworkURL, getFolder, listFolderRoots, type FolderListing, type FolderRoot } from "./mediaApi";
+import { artworkURL, getFolder, listFolderRoots, type FolderListing, type FolderRoot } from "./api";
 
 export interface FolderPlace {
   entryId: string;

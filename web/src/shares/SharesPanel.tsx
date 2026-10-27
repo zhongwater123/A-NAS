@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Inbox, Search, Send, Share2, X } from "lucide-react";
-import { usePeople } from "../people";
+import { usePeople } from "../people/people";
 import { listShares, type Share } from "./api";
 import { errorText, isUnread, phaseLabel, phaseOf, receipt, remaining, shareTitle, topLevel, when } from "./format";
 import { Avatar, EntryTile, PeopleStack, nameOf, names } from "./parts";

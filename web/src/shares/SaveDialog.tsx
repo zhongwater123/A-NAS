@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Folder, FolderPlus, HardDrive, LoaderCircle, Users, X } from "lucide-react";
-import { createDirectory, listEntries, listSpaces, type FileEntry, type Space } from "../api";
-import { formatBytes } from "../bytes";
+import type { FileEntry, Space } from "../api.generated";
+import { createDirectory, listEntries, listSpaces } from "../files/api";
+import { formatBytes } from "../lib/bytes";
 import { requestKey, saveShare, type Job, type Share } from "./api";
 import { errorText, leaf } from "./format";
 import { EntryTile } from "./parts";

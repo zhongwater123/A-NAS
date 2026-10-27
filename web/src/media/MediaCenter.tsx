@@ -1,7 +1,8 @@
 import { ArrowLeft, CircleAlert, PanelLeft, RefreshCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { listSpaces, type Space } from "../api";
+import type { Space } from "../api.generated";
+import { listSpaces } from "../files/api";
 import { CategoryPage, FavoritesPage, HistoryPage, Loading, messageOf } from "./Browse";
 import { ActionsContext, type MediaActions } from "./Cards";
 import { CollectionPage, CollectionsPage } from "./Collections";
@@ -28,7 +29,7 @@ import {
   type Home,
   type MediaLibrary,
   type Title,
-} from "./mediaApi";
+} from "./api";
 import { Player, type PlayRequest } from "./Player";
 import { type Section, Sidebar } from "./Sidebar";
 import { DropOverlay, hasFiles, UploadDialog, UploadPill, uploadTargets } from "./Upload";

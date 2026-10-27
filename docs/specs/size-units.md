@@ -39,13 +39,13 @@
 
 ## 验收证据
 
-- `web/src/bytes.test.ts` 覆盖换算、舍入、单位进位与标称容量。
-- `web/src/files/FilePanel.test.tsx` 与 `web/src/SettingsPanel.test.tsx` 断言文件管理与设置显示同一单位。
+- `web/src/lib/bytes.test.ts` 覆盖换算、舍入、单位进位与标称容量。
+- `web/src/files/FilePanel.test.tsx` 与 `web/src/settings/SettingsPanel.test.tsx` 断言文件管理与设置显示同一单位。
 
 ## 关联
 
 - 架构：不涉及
 - ADR：不涉及
-- 代码：[`web/src/bytes.ts`](../../web/src/bytes.ts)
-- 测试：[`web/src/bytes.test.ts`](../../web/src/bytes.test.ts)、[`web/src/files/FilePanel.test.tsx`](../../web/src/files/FilePanel.test.tsx)、[`web/src/SettingsPanel.test.tsx`](../../web/src/SettingsPanel.test.tsx)
+- 代码：[`web/src/lib/bytes.ts`](../../web/src/lib/bytes.ts)
+- 测试：[`web/src/lib/bytes.test.ts`](../../web/src/lib/bytes.test.ts)、[`web/src/files/FilePanel.test.tsx`](../../web/src/files/FilePanel.test.tsx)、[`web/src/settings/SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)
 - 问题反馈：2026-10-13 Codex 试用“同一数据卷容量单位不一致”

@@ -13,7 +13,7 @@ import {
   type PhotoLabelCount,
   type PhotoPerson,
   type PhotoTagCount,
-} from "./photosApi";
+} from "./api";
 
 // AIHomeSnapshot is how AI 聚合 looked when one of its groups opened, so that
 // going back lands on the same spot instead of the top.

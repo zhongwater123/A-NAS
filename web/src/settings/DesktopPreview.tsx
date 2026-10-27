@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
-import type { WallpaperStyle } from "../api";
-import { drawWallpaper, type WallpaperPicture } from "../wallpaper";
+import type { WallpaperStyle } from "../api.generated";
+import { drawWallpaper, type WallpaperPicture } from "../desktop/wallpaper";
 import "./personalization.css";
 
 // DesktopPreview draws a small copy of this browser's desktop with picture

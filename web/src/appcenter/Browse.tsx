@@ -9,7 +9,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-import { CatalogApp } from "../appsApi";
+import { CatalogApp } from "./api";
 import { AppAction, AppIcon } from "./parts";
 import { Category, categories, categoryOf, installFailed, otherCategory, stateText, useElapsed } from "./model";
 

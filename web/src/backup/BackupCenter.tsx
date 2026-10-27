@@ -11,9 +11,10 @@ import {
   useState,
 } from "react";
 
-import { listSpaces, type FileEntry, type Space } from "../api";
-import { BackupCenterGlyph } from "../BackupCenterGlyph";
-import type { TransferLocation } from "../transfers/transfersApi";
+import type { FileEntry, Space } from "../api.generated";
+import { listSpaces } from "../files/api";
+import { BackupCenterGlyph } from "./BackupCenterGlyph";
+import type { TransferLocation } from "../transfers/api";
 
 import {
   createSnapshot,
@@ -23,7 +24,7 @@ import {
   messageOf,
   type Snapshot,
   type SnapshotSchedule,
-} from "./backupApi";
+} from "./api";
 import { ExternalPage } from "./ExternalPage";
 import { FindPage } from "./FindPage";
 import { defaultSnapshotName, spaceAudience, spaceLabel } from "./format";
