@@ -145,5 +145,5 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [Host Agent 记录的目录与迁移](../../internal/hostops/linux/state.go)、[读入校验与迁移测试](../../internal/hostops/linux/state_internal_test.go) 与 [root 集成测试 `TestRootStateLeavesTheProductServiceDirectory`](../../internal/hostops/linux/root_integration_test.go)
 - [目录对账与变更的排序](../../internal/files/ordering.go) 与[交错回归测试](../../internal/files/reconcile_race_test.go)
 - [按范围对账](../../internal/files/reconcile.go)、[范围回归测试](../../internal/files/reconcile_scope_test.go) 与[规模测量](../../internal/files/reconcile_scale_test.go)
-- [文件代理的分页、取消与工作进程池](../../internal/filebroker/server.go) 与[测试](../../internal/filebroker/worker_test.go)
+- [文件代理的分页、取消与工作进程池](../../internal/filebroker/rootbroker/server.go) 与[测试](../../internal/filebroker/rootbroker/worker_test.go)
 - [相册存储区修复](../../internal/hostops/linux/photos.go)

@@ -63,13 +63,13 @@ WSL ext4，同一台开发机先后两轮（负载 3–11，耗时受负载影�
 - A-NAS 刚建出的对象（新建文件夹、上传、文件夹上传、复制）先删掉持有其 inode 的行再登记：inode 是新的，持有它的行属于已不存在、号码被重新分配的文件（ext4 会立即复用，CI 上已删文件的待定行被上传的新文件接管）；文件与文件夹之间换了类型的行也不复用。
 - 整空间对账（后台、快照比较、“最近删除”、`Tree` 整空间、上述查找）每个空间一次只跑一个，等待者由开始于其请求之后的一次满足；后台循环跳过 4 分钟内对账过的空间。一行也没改的写入不推进代次（[ordering.go](../../internal/files/ordering.go)），浏览不再丢弃长时间的整空间对账。
 - 影视刷新跳过正在扫描或等待扫描的库（[scan.go](../../internal/media/scan.go)）；网页变更仍会要求结束后再扫一次。
-- 文件代理（[server.go](../../internal/filebroker/server.go)、[worker.go](../../internal/filebroker/worker.go)、[wire.go](../../internal/filebroker/wire.go)）：扫描按每页最多 2048 个条目分页，代理逐页转发；超过 64 MiB 的应答改为错误应答，工作进程继续服务；Product Service 关闭连接时代理向工作进程发送取消，工作进程停止当前操作并应答；每个账号最多 4 个工作进程。大文件复制每 64 MiB 检查一次取消（[rootfs_linux.go](../../internal/files/rootfs_linux.go)），`io.CopyN` 保留 `copy_file_range`。
+- 文件代理（[server.go](../../internal/filebroker/rootbroker/server.go)、[worker.go](../../internal/filebroker/rootbroker/worker.go)、[frame.go](../../internal/filebroker/wire/frame.go)）：扫描按每页最多 2048 个条目分页，代理逐页转发；超过 64 MiB 的应答改为错误应答，工作进程继续服务；Product Service 关闭连接时代理向工作进程发送取消，工作进程停止当前操作并应答；每个账号最多 4 个工作进程。大文件复制每 64 MiB 检查一次取消（[rootfs_linux.go](../../internal/filesystem/rootfs_linux.go)），`io.CopyN` 保留 `copy_file_range`。
 - 活动记录：`accounts.db`、`files.db`、`storage.db` 为排序所用的表达式与 ID 建索引（[activity.go](../../internal/activity/activity.go) 的 `IndexStatement`），按游标、类别或文字翻页都沿索引读取。
 - 测试：
   - [reconcile_scope_test.go](../../internal/files/reconcile_scope_test.go)：列目录只扫描并写该文件夹、未变化时零写入；文件夹经 SMB 改名后其下文件不经整空间对账即可打开；文件经 SMB 移动先列移出处仍保留 ID；直接打开被移走的文件夹只做一次整空间对账；先列移出处、再列移入处后整个子树跟随；同名替换的新旧文件夹各自保留；经 SMB 删除的文件立即不列出、不占名字，整空间对账后行删除；新上传的文件即使拿到已删文件的 inode 号也不接管其 ID；`Tree` 只扫描子树并只写变化的 2 行；整空间扫描期间列未变化的文件夹不丢弃它；4 个并发整空间请求只扫描 2 次，后台循环随后跳过。
   - 已有的 [reconcile_race_test.go](../../internal/files/reconcile_race_test.go) 全部通过，后台反复对账时删除与恢复的用例加入了整空间 `Tree`。
   - [影视刷新测试](../../internal/media/service_test.go)（`TestRefreshLeavesAScanInProgressAlone`）：修复前文件夹被读 2 次。
-  - [worker_test.go](../../internal/filebroker/worker_test.go)：分页、超限应答后同一进程继续服务、取消扫描与复制、长操作不挡同账号的其他调用、池满时排队或随调用方放弃、回收只停空闲进程。
+  - [worker_test.go](../../internal/filebroker/rootbroker/worker_test.go)：分页、超限应答后同一进程继续服务、取消扫描与复制、长操作不挡同账号的其他调用、池满时排队或随调用方放弃、回收只停空闲进程。
   - [index_test.go](../../internal/activity/index_test.go)：四种翻页方式的查询计划都使用 `audit_events_at` 且不排序；去掉索引则失败。
   - `go test -race` 覆盖 `internal/files`（3 轮）、`filebroker`、`assistantchanges`、`sharefiles`、`media`、`music`。
 

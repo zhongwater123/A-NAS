@@ -64,7 +64,7 @@
 ## 验收证据
 
 - 系统测试：[系统测试](../../scripts/system-test.sh)在 Debian 13 systemd 容器中用真实安装器验证新设备上终端关闭且拒绝会话、按手册开启后管理员经局域网入口获得以本人 UID 运行、起始于个人空间且不能列出成员个人空间的 Shell、退出码经关闭帧到达浏览器、本机屏幕同样可用、成员会话被拒绝、Shell 运行在自己的 scope 中、`logger -t anas-host-agent` 写入的内容不出现在 Host Agent 的日志中、Shell 不能创建命名空间、数据卷只读时终端仍可打开，以及升级保留 `ANAS_TERMINAL=enabled`。
-- 服务端：[终端测试](../../internal/terminal/terminal_test.go) 覆盖启用开关、回环对端与 Host 校验（含经局域网入口以 IP 访问）、跨源拒绝、Shell 执行与退出码、PTY 尺寸、超时后存活、并发上限和优雅关闭；[代理终端测试](../../internal/filebroker/terminal_test.go) 覆盖仅管理员、经传递的 PTY 读写与调整尺寸、断开时挂断（含忽略 `SIGHUP` 的 Shell）、会话失效后结束、会话库短暂出错不挂断而持续出错会挂断、读不出会话时暂不可用，以及 Shell 进入 scope 后才执行和 scope 建不成时照常启动；[进程组测试](../../internal/terminal/process_linux_test.go) 覆盖已退出的 Shell 不再收到信号、忽略 `SIGHUP` 时升级。
+- 服务端：[终端测试](../../internal/terminal/terminal_test.go) 覆盖启用开关、回环对端与 Host 校验（含经局域网入口以 IP 访问）、跨源拒绝、Shell 执行与退出码、PTY 尺寸、超时后存活、并发上限和优雅关闭；[代理终端测试](../../internal/filebroker/rootbroker/terminal_test.go) 覆盖仅管理员、经传递的 PTY 读写与调整尺寸、断开时挂断（含忽略 `SIGHUP` 的 Shell）、会话失效后结束、会话库短暂出错不挂断而持续出错会挂断、读不出会话时暂不可用，以及 Shell 进入 scope 后才执行和 scope 建不成时照常启动；[进程组测试](../../internal/ptyshell/process_linux_test.go) 覆盖已退出的 Shell 不再收到信号、忽略 `SIGHUP` 时升级。
 - root：[终端身份测试](../../internal/hostops/linux/root_terminal_integration_test.go) 在特权容器中验证 Shell 的 UID、组、起始目录与 PTY 属主，且读取其他成员的文件被拒绝。
 - 契约：[OpenAPI 测试](../../internal/httpapi/openapi_test.go)。
 - 前端：[桌面测试](../../web/src/App.test.tsx) 覆盖桌面上没有终端图标；[设置测试](../../web/src/SettingsPanel.test.tsx) 覆盖从设置打开、切换分区与最小化后保留同一 Shell、关闭设置后结束、退出后新建会话与未开启说明；[协议测试](../../web/src/terminal.test.ts) 覆盖地址、调整尺寸消息与退出码解析。

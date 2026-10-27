@@ -65,7 +65,7 @@
   - 对账失败只记录日志，并在 `/v1/state` 中以 `reconcileFailed` 报告。产品服务把它评估为注意项 `volume_reconcile_failed`；数据卷只读时只报 `volume_read_only`（[系统健康](../specs/system-health.md)）。
   - 失败后每 15 分钟重做完整对账，成功后恢复为只修权限。
   - 删除了无效的 `TimeoutStartSec`。
-- **会话**（[`session_identity.go`](../../internal/accounts/session_identity.go)、[`server.go`](../../internal/filebroker/server.go)）：
+- **会话**（[`session_identity.go`](../../internal/accounts/session_identity.go)、[`server.go`](../../internal/filebroker/rootbroker/server.go)）：
   - 查询出错不再关闭句柄，连接改为每分钟重开。
   - 文件代理把 `ErrSessionNotFound` 判为未登录，把其他错误判为暂不可用。
   - 终端与助手复查会话时，连续 3 次失败仍保持连接，第 4 次才挂断（默认间隔下约 2 分钟）。
