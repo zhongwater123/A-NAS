@@ -103,7 +103,7 @@ func (s *Server) serveChange(req wire.Request) wire.Response {
 	}
 	switch {
 	case errors.Is(err, assistantchanges.ErrInvalid):
-		return wire.Response{Error: &wire.Error{Code: wire.CodeChangeInvalid, Message: err.Error()}}
+		return wire.Response{Error: &wire.Error{Code: wire.CodeChangeInvalid, Message: assistantchanges.Reasons(err)}}
 	case errors.Is(err, assistantchanges.ErrDecided):
 		return wire.Response{Error: &wire.Error{Code: wire.CodeChangeDecided}}
 	case errors.Is(err, assistantchanges.ErrNotFound):

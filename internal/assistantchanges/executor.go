@@ -64,7 +64,7 @@ const (
 
 var (
 	ErrNotFound = errors.New("no such change")
-	ErrDecided  = errors.New("这项更改已经处理过了")
+	ErrDecided  = errors.New("the change was already decided")
 )
 
 // Executor keeps the account's changes and the copies their cards show in
@@ -224,7 +224,7 @@ func (e *Executor) Prepare(ctx context.Context, account string, member filesyste
 	}
 	submission, err := ParseSubmission(raw)
 	if err != nil {
-		return nil, invalid{err.Error()}
+		return nil, err
 	}
 	digest, l := submission.Digest(), e.ledger(account)
 	steps, err := validate(account, submission)
@@ -347,7 +347,7 @@ func (e *Executor) Apply(ctx context.Context, account string, member filesystem.
 	}
 	submission, err := ParseSubmission(raw)
 	if err != nil {
-		return "提交被拒绝，什么都没有改变：\n" + err.Error()
+		return "提交被拒绝，什么都没有改变：\n" + Reasons(err)
 	}
 	want, now, l := submission.Digest(), e.now(), e.ledger(account)
 	l.Lock()
@@ -389,7 +389,7 @@ func (e *Executor) Apply(ctx context.Context, account string, member filesystem.
 			_, err = validate(account, submission)
 		}
 		if err != nil {
-			return "提交被拒绝，什么都没有改变：\n" + strings.TrimPrefix(err.Error(), ErrInvalid.Error()+"：\n")
+			return "提交被拒绝，什么都没有改变：\n" + Reasons(err)
 		}
 		return "这批更改没有得到用户本人的确认，什么都没有改变。"
 	}

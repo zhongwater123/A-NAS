@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
@@ -314,7 +315,7 @@ func TestCopiesAreHeldOnlyWhileAChangeCanBeApplied(t *testing.T) {
 		return card.Status
 	}
 	superseded, rejected, expired := must("s1"), must("s2"), must("s3")
-	if _, err := prepare("s4"); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "等待确认") {
+	if _, err := prepare("s4"); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), "等待确认") {
 		t.Fatalf("a fourth copy while three wait: %v", err)
 	}
 	// A session's next submission replaces the card it waited for.
@@ -525,7 +526,7 @@ func TestTheCapIsCheckedBeforeFoldersAreMeasured(t *testing.T) {
 	both := `{"summary":"x","operations":[` +
 		`{"op":"copy","path":"/nas/个人空间/旅行","source":"/nas/共享空间/旅行"},` +
 		`{"op":"write","path":"/nas/个人空间/计划.md","source":"/nas/助手/待确认/计划.md"}]}`
-	if _, err := f.exec.Prepare(context.Background(), "alice", member, []byte(both), "second", "req-2"); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "等待确认") {
+	if _, err := f.exec.Prepare(context.Background(), "alice", member, []byte(both), "second", "req-2"); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), "等待确认") {
 		t.Fatalf("prepare over the cap: %v", err)
 	}
 	if len(member.measured)+len(member.opened) > 0 {
@@ -645,7 +646,7 @@ func TestOversizedSubmissionsAreRefusedBeforeAnyFileIsOpened(t *testing.T) {
 		"arguments too large": {`{"summary":"x","operations":[{"op":"mkdir","path":"/nas/个人空间/x"}],"note":"` + strings.Repeat("x", maxArguments) + `"}`, "参数超过 1024 KiB"},
 	} {
 		member.forget()
-		if _, err := f.prepare(c.submission); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), c.want) {
+		if _, err := f.prepare(c.submission); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), c.want) {
 			t.Errorf("%s: prepare = %v, want %q", name, err, c.want)
 		}
 		if result := f.exec.Apply(context.Background(), "alice", member, []byte(c.submission)); !strings.Contains(result, c.want) {
@@ -673,7 +674,7 @@ func TestOversizedSubmissionsAreRefusedBeforeAnyFileIsOpened(t *testing.T) {
 		"files together too large": {`{"operations":[` + strings.Join(together, ",") + `]}`, "合计超过 256 MiB"},
 	} {
 		member.forget()
-		if _, err := f.prepare(c.submission); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), c.want) {
+		if _, err := f.prepare(c.submission); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), c.want) {
 			t.Errorf("%s: prepare = %v, want %q", name, err, c.want)
 		}
 		if len(member.opened) > 0 {
@@ -728,7 +729,7 @@ func TestLinksAreNeverFollowed(t *testing.T) {
 		if !errors.Is(err, ErrInvalid) {
 			t.Fatalf("%s: prepare = %v %v, want ErrInvalid", name, card, err)
 		}
-		if strings.Contains(err.Error(), "secret") {
+		if strings.Contains(Reasons(err), "secret") {
 			t.Fatalf("%s: the refusal shows what is behind the link: %v", name, err)
 		}
 	}
@@ -857,7 +858,7 @@ func TestAFolderCopiesWholeAndNeverOverAnotherFolder(t *testing.T) {
 	if f.get("spaces/private/alice/旅行/行程/2.txt") != "two!" || f.get("spaces/private/alice/旅行/1.jpg") != "one" {
 		t.Fatal("the folder was not copied whole")
 	}
-	if _, err := f.prepare(copyTrip); err == nil || !strings.Contains(err.Error(), "不是普通文件") {
+	if _, err := f.prepare(copyTrip); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), "不是普通文件") {
 		t.Fatalf("a folder over a folder: %v", err)
 	}
 }
@@ -886,11 +887,28 @@ func TestCopiesComeOnlyFromWhatTheAssistantReads(t *testing.T) {
 		"/nas/共享空间/不存在.md":                  "不存在",
 	} {
 		submission := `{"summary":"x","operations":[{"op":"copy","path":"/nas/个人空间/x.md","source":"` + source + `"}]}`
-		if _, err := f.prepare(submission); err == nil || !strings.Contains(err.Error(), want) {
+		if _, err := f.prepare(submission); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), want) {
 			t.Errorf("copy from %s: %v, want %q", source, err, want)
 		}
 	}
 	if _, err := f.prepare(`{"summary":"x","operations":[{"op":"copy","path":"/nas/共享空间/x.md","source":"/nas/个人空间/计划.md"}]}`); err == nil {
 		t.Fatal("a copy into Shared was accepted")
+	}
+}
+
+// Why a submission is refused reaches the assistant in the tool's reply; the
+// error value itself stays plain (#222).
+func TestRefusalReasonsAreInTheReplyNotInTheError(t *testing.T) {
+	t.Parallel()
+	_, err := ParseSubmission([]byte("not json"))
+	han := func(r rune) bool { return unicode.Is(unicode.Han, r) }
+	if !errors.Is(err, ErrInvalid) || strings.ContainsFunc(err.Error(), han) || strings.ContainsFunc(ErrDecided.Error(), han) {
+		t.Fatalf("errors = %q, %q; want plain errors that match ErrInvalid", err, ErrDecided)
+	}
+	if got := Reasons(err); got != "参数不是有效的 JSON 对象" {
+		t.Fatalf("Reasons() = %q", got)
+	}
+	if got := Reasons(errors.New("other")); got != "" {
+		t.Fatalf("Reasons() of another error = %q, want none", got)
 	}
 }
