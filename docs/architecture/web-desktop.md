@@ -10,12 +10,12 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 |---|---|
 | `main.tsx`、`App.tsx` | 入口：根错误边界，登录与桌面之间的切换 |
 | `api.generated.ts`、`api.validators.generated.ts` | `make api` 由契约生成，不手改 |
-| `styles/` | 全局样式：层顺序、重置、[令牌](#令牌) |
+| `styles/` | 全局样式：`index.css` 声明层顺序并引入其余文件；`tokens.css` 是[令牌](#令牌)；`base.css` 是重置；`utilities.css` 是各窗口共用、尚未做成 `ui/` 组件的几个类 |
 | `api/` | `client.ts`：生成客户端的封装，包括请求、`APIError`、CSRF、写入闸门与带进度的上传；`errorMessages.ts`：错误码到文案的表（[规格](../specs/web-errors-and-time.md)） |
-| `desktop/` | 桌面外壳：窗口注册表 `apps.tsx`、窗口状态、`AppWindow`、程序坞、系统快捷栏、状态栏、桌面图标、通知、壁纸与屏保；外壳读取的接口在 `desktop/api.ts` |
-| 功能目录 | 每个应用窗口一个目录：`files`、`trash`、`settings`、`appcenter`、`docker`、`media`、`music`、`photos`、`backup`、`transfers`、`shares`、`assistant`；设置窗口的分区 `logs`、`taskmanager`；桌面上的 `feedback` |
+| `desktop/` | 桌面外壳：窗口注册表 `apps.tsx`、窗口状态、`AppWindow`、程序坞、系统快捷栏、状态栏、桌面图标、通知、壁纸与屏保；外壳读取的接口在 `desktop/api.ts`，样式在 `desktop.module.css`（登录页与开机画面也用它） |
+| 功能目录 | 每个应用窗口一个目录：`files`、`trash`、`settings`、`appcenter`、`docker`、`media`、`music`、`photos`、`backup`、`transfers`、`shares`、`assistant`；设置窗口的分区在 `settings/` 下（如 `settings/logs`、`settings/taskmanager`）；桌面上的 `feedback` |
 | 领域目录 | 不是窗口的领域：`auth`（登录与会话）、`people`（各账号的名字与头像）、`boot`（开机画面） |
-| `ui/` | 不认识任何功能的共享组件、钩子与样式 |
+| `ui/` | 不认识任何功能的共享组件、钩子与样式：窗口内的对话框与提示（`feedback`）、文件查看器的外框（`viewer`）、备份中心与回收站共用的工作区部件（`workspace`）、存进 localStorage 的状态（`useStoredState`）。从功能移来的部件暂时保留原来的类名前缀 |
 | `lib/` | 不依赖 React 与接口的函数：容量与时间格式化、文件名与类型、剪贴板、读取拖入的文件 |
 | `test/` | 测试基础设施：按领域的请求处理器、测试数据与渲染帮助函数 |
 | `assets/` | 静态图片 |
@@ -24,7 +24,7 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 
 - `api.ts` 写本功能的接口调用，全部经 `api/client.ts` 的 `client`，类型取自 `api.generated.ts`；
 - 窗口组件由 `desktop/apps.tsx` 懒加载；
-- 组件的样式是旁边的 `*.module.css`；
+- 样式是本目录的 `*.module.css`：一个功能可以只有一个模块，也可以按组件拆分；
 - 测试与被测代码放在一起。
 
 依赖只朝一个方向：`lib` ← `ui` ← 功能 ← `desktop` ← `App`。
@@ -47,17 +47,23 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 
 ### 方案
 
-- **组件样式：** 用 CSS Modules。样式写在组件旁的 `*.module.css` 中，类名在构建时加上哈希，一个功能的规则不会作用到另一个功能。TSX 中以 `styles.camelCase` 引用（`localsConvention: "camelCaseOnly"`）。
-- **全局样式：** 只有 `styles/` 中的重置、令牌与第三方样式。
-- **层：** 层的顺序只在 `styles/index.css` 的第一行声明一次。
-  - `ui/` 的模块写在 `@layer ui` 中；
-  - 功能的模块不进任何层，因此总是覆盖 `ui/` 与全局样式，结果与导入顺序无关；
+- **组件样式：** 用 CSS Modules（`*.module.css`）。类名在构建时加上哈希，一个功能的规则不会作用到另一个功能。
+  - 代码以 `styles.camelCase` 引用 `.kebab-case` 的类（`localsConvention: "camelCase"`）。
+  - 运行时才知道的修饰类按原名取，取不到时为空：`` styles[`tone-${tone}`] ?? "" ``。
+  - 组件接受调用方的 `className` 时原样拼上，不经自己的模块转换。
+  - 按类查找元素时，用模块里的名字拼选择器（`` `.${styles.phTile}` ``）；跨功能的钩子用 `data-` 属性，例如窗口的 `data-window-id`。
+- **全局样式：** 只有 `styles/` 中的层顺序、重置、令牌与几个通用类，以及第三方样式（xterm）。通用类是主按钮 `.primary`、加载圈 `.loader`、旋转图标 `.spinning` 与 `.sr-only`；#268 把它们做成 `ui/` 组件后删除。
+- **层：** 层的顺序只在 `styles/index.css` 中声明一次：`@layer base, ui;`。
+  - `base`：重置与页面默认值；
+  - `ui`：`ui/` 的模块与 `styles/utilities.css`；
+  - 功能的模块不进任何层，因此总是覆盖 `ui/` 与全局样式，结果与样式表的加载顺序无关；
   - 例外：带 `!important` 的声明按相反的层顺序比较，不要用它覆盖 `ui/` 的规则。
-- **不跨功能借用：** 两个功能需要同样的外观时，把部件与样式移进 `ui/`，不要导入另一个功能的样式文件。
+- **不跨功能借用：** 两个功能需要同样的外观时，把部件与样式移进 `ui/`，不要导入另一个功能的样式文件。功能要调整 `ui/` 部件时，传 `className` 或设置部件读取的 CSS 变量，不要在自己的模块里选择部件的类。
+- **检查：** 改动样式或懒加载后，在 Fake 预览栈中逐窗口核对外观（[fake-preview](../../.claude/skills/fake-preview/SKILL.md)）。
 
 ### 令牌
 
-`styles/tokens.css` 的 `:root` 定义整个桌面共用的值：
+[`styles/tokens.css`](../../web/src/styles/tokens.css) 的 `:root` 定义整个桌面共用的值：
 
 - 颜色：文字、次要文字、分隔线、表面、强调色与状态色。危险色只有一个，即 `--color-danger`。
 - 阴影、圆角、间距与字体。
@@ -65,7 +71,7 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 规则：
 
 - 样式只引用令牌；
-- 应用自己的强调色写成该应用根元素上的局部变量；
+- 应用的调色板变量写在该应用的根元素上，取值与令牌相同时直接引用令牌（如 `--set-danger: var(--color-danger)`）；
 - 新增一个值之前，先看已有令牌能否满足。
 
 ## 数据获取
