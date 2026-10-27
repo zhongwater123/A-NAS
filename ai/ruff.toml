@@ -1,5 +1,5 @@
 # Ruff for the AI Worker, its evaluations and the assistant spike: `make ai-lint`.
-# The rules are Ruff's defaults; requirements-dev.lock pins the version.
+# The rules are Ruff's defaults; requirements-dev.txt pins the version.
 target-version = "py313"
 line-length = 120
 # The spike's scripts import each other from their own folder.

@@ -87,20 +87,23 @@ jobs:
           sudo install "$RUNNER_TEMP/shellcheck-v$version/shellcheck" /usr/local/bin/shellcheck
           shellcheck --version
 
-      # The AI Worker runs on Debian 13's CPython 3.13 (ai/requirements.lock).
+      # The AI Worker runs on Debian 13's CPython 3.13 (ai/requirements.txt).
       - name: Set up Python
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
 
-      # Ruff for `make ai-lint`. NumPy, pinned by the runtime's lock, lets the
+      # Ruff for `make ai-lint`. NumPy, pinned by the runtime's lock (its
+      # entry runs to the first line without a continuation), lets the
       # clustering tests run; the real-model tests need model files and stay skipped.
       - name: Install the AI tools and test dependencies
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         run: |
-          python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r ai/requirements-dev.lock
-          grep '^numpy==' ai/requirements.lock | python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r /dev/stdin
+          python3 -m pip install --require-hashes --only-binary=:all: -r ai/requirements-dev.txt
+          sed -n '/^numpy==/,/[^\\]$/p' ai/requirements.txt |
+            python3 -m pip install --require-hashes --only-binary=:all: -r /dev/stdin
+          python3 -m pip check
 
       - name: Run checks
         if: ${{ needs.scope.outputs.docs-only != 'true' }}

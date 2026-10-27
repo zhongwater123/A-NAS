@@ -90,8 +90,10 @@ fmt-check:
 docs-check:
 	$(GO) run ./tools/doccheck
 
-# Shell scripts, units and installer conventions, and Dependabot's groups
-# (tools/depcheck keeps 0.x web packages out of them).
+# Shell scripts, units and installer conventions, Dependabot's groups
+# (tools/depcheck keeps 0.x web packages out of them), and the AI locks: every
+# pin has a hash, and the runtime's leaves out what ai/requirements.excludes
+# names, which a lock regenerated without --excludes (Dependabot's) would not.
 ops-check:
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
@@ -198,7 +200,9 @@ ops-check:
 	grep -Fqx 'const Slots = 8' internal/mediaworker/admission.go
 	grep -Fq 'for slot in 0 1 2 3 4 5 6 7; do' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'ffmpeg ffprobe heif-thumbnailer; do' scripts/install-v1.0.1-system-services.sh
-	! grep -E '^[A-Za-z0-9_.-]+==' ai/requirements.lock | grep -v -- ' --hash=sha256:[0-9a-f]\{64\}$$'
+	awk '/^[A-Za-z0-9]/ { if (pin && !hashed) bad = bad " " pin; pin = $$1; hashed = 0 } /--hash=sha256:[0-9a-f]{64}/ { hashed = 1 } \
+		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt
+	! grep -E "^($$(sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' ai/requirements.excludes | paste -sd '|'))==" ai/requirements.txt
 
 vet:
 	$(GO) vet ./...
@@ -218,11 +222,11 @@ test:
 race-test: web-build
 	$(GO) test -race -p $(RACE_PARALLEL) ./...
 
-# Ruff as ai/requirements-dev.lock pins it: another version may judge differently.
+# Ruff as ai/requirements-dev.txt pins it: another version may judge differently.
 ai-lint:
-	@want="$$(sed -n 's/^ruff==\([0-9.]*\).*/\1/p' ai/requirements-dev.lock)"; \
+	@want="$$(sed -n 's/^ruff==\([0-9.]*\).*/\1/p' ai/requirements-dev.txt)"; \
 	have="$$($(RUFF) --version 2>/dev/null | cut -d ' ' -f 2)"; \
-	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.lock pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
+	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.txt pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
 	cd ai && $(RUFF) check .
 
 # The AI Worker's tests need only the Python standard library; tests with the
