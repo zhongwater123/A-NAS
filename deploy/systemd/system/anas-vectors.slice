@@ -1,0 +1,12 @@
+[Unit]
+Description=A-NAS vector index instances
+Documentation=https://github.com/zhongwater123/A-NAS
+
+[Slice]
+# Every vector index instance runs here (anas-vectors@.service), under
+# anas.slice, so that it gives way to the device's other work and the photo
+# service's AI gate does not count it. Each instance has its own limits; this
+# bounds them together, so that a second owner's instance cannot take what
+# the rest of the device needs (docs/architecture/vector-index.md).
+MemoryHigh=1280M
+MemoryMax=1536M
