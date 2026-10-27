@@ -103,7 +103,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 |---|---|---|
 | `cmd/anas-api` | 非特权产品 API 进程入口；`config.go` 是产品、相册与分享服务进程的全部环境变量及其校验 | 持久化账号、存储、文件、回收站、手动与定时快照、可选终端与容器管理已接线 |
 | `cmd/anas-host-agent` | root Host Agent 进程入口 | 通过组限制 UDS 提供状态、类型化特权操作、File Broker 与相册会话查询 |
-| `web` / `internal/webui` | React Web 桌面、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、相册、回收站、[备份中心](../specs/backup-center.md)（快照、找回与定时快照）、[设置](../specs/settings.md)（我的账号、概览、存储、[个性化](../specs/personalization.md)、用户与权限、[日志](../specs/logs.md)、[终端](../specs/web-terminal.md)）、Docker 窗口、随机单视频循环屏保与屏保后息屏已实现 |
+| `web` / `internal/webui` | React Web 桌面（目录、样式、数据获取与测试的约定见 [Web 桌面结构与约定](web-desktop.md)）、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、相册、回收站、[备份中心](../specs/backup-center.md)（快照、找回与定时快照）、[设置](../specs/settings.md)（我的账号、概览、存储、[个性化](../specs/personalization.md)、用户与权限、[日志](../specs/logs.md)、[终端](../specs/web-terminal.md)）、Docker 窗口、随机单视频循环屏保与屏保后息屏已实现 |
 | `internal/containers` / `cmd/anas-container-agent` | 容器领域模型、Fake 与 Docker Adapter、容器代理及其 UDS 协议 | 列表、启停、日志已实现，见[容器管理规格](../specs/container-management.md) |
 | `internal/appid` | 应用中心与 Host Agent 共用的应用身份：合法的应用 ID，以及每个应用运行所用的 Linux 账号（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）；不依赖其他包，root Host Agent 因此保持精简 | 已实现 |
 | `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染（含每个服务的运行方式，[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）、Compose 执行任务与安装后核对、`/api/v1/apps`（仅管理员）与 `/api/v1/app-shortcuts`（所有已登录账号的桌面快捷方式） | 已实现，见[应用中心规格](../specs/app-center.md) |
@@ -164,6 +164,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [相册物体检测与混合检索实施方案](photo-objects.md)
 - [相册人物与宠物实施方案](photo-people.md)
 - [存储与文件架构](storage-and-files.md)
+- [Web 桌面结构与约定](web-desktop.md)
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [基础存储 ADR](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
 - [相册与本地智能检索规格](../specs/photo-library.md)
