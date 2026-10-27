@@ -161,11 +161,11 @@ WHERE a.library_id = ? AND a.trashed_at IS NULL AND a.motion_object_id IS NULL A
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	var unread []string
 	for rows.Next() {
 		var objectID, name string
 		if err := rows.Scan(&objectID, &name); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		if strings.EqualFold(strings.TrimSuffix(name, filepath.Ext(name)), stem) {
@@ -201,11 +201,11 @@ ORDER BY a.imported_at, a.id`, lib.id, liveID)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	var ids []string
 	for rows.Next() {
 		var id, uploadedBy string
 		if err := rows.Scan(&id, &uploadedBy); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		if canChange(p, lib, uploadedBy) {

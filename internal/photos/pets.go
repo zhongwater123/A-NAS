@@ -99,12 +99,12 @@ WHERE d.derivation = ? AND d.model = ? AND `+inPeopleLibrary("d.object_id")+`
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	var waiting []string
 	for rows.Next() {
 		var objectID string
 		var encoded []byte
 		if err := rows.Scan(&objectID, &encoded); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		if boxes, err := decodeBoxes(encoded); err == nil && len(s.petsIn(model, boxes)) > 0 {

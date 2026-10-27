@@ -541,8 +541,8 @@ func (*developmentOperations) Open(context.Context, string, string) (io.ReadClos
 	return nil, files.SnapshotObject{}, files.ErrNotFound
 }
 func (*developmentOperations) Delete(context.Context, string, string) error { return files.ErrNotFound }
-func (*developmentOperations) Prune(context.Context, []string) (files.SnapshotPrune, error) {
-	return files.SnapshotPrune{}, errors.New("development snapshot backend is not configured")
+func (*developmentOperations) Survey(context.Context, []string) (files.SnapshotSurvey, error) {
+	return files.SnapshotSurvey{}, errors.New("development snapshot backend is not configured")
 }
 
 // configuredContainers selects container management and the App Center

@@ -152,11 +152,15 @@ type Store struct {
 	db *sql.DB
 }
 
-func OpenSQLite(path string) (*Store, error) {
+func OpenSQLite(path string) (*Store, error) { return openSQLite("sqlite3", path) }
+
+// openSQLite opens the catalog through the named database/sql driver, which
+// tests replace with one that fails reads part way.
+func openSQLite(driverName, path string) (*Store, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("SQLite path is empty")
 	}
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
+	db, err := sql.Open(driverName, path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
 	if err != nil {
 		return nil, err
 	}
@@ -205,6 +209,11 @@ CREATE TABLE IF NOT EXISTS snapshots (
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL,
     UNIQUE(space_id, name)
+);
+CREATE TABLE IF NOT EXISTS pending_snapshots (
+    id TEXT PRIMARY KEY,
+    space_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS snapshot_entries (
     id TEXT PRIMARY KEY,
@@ -343,11 +352,14 @@ type Service struct {
 	temporariesMu sync.Mutex
 	temporaries   map[string]struct{}
 	// takingSnapshots holds the snapshots being taken. snapshotsMu also
-	// orders sweeps against them (see SweepSnapshots).
-	snapshotsMu     sync.Mutex
-	takingSnapshots map[string]struct{}
-	ordersMu        sync.Mutex
-	orders          map[string]*spaceOrder
+	// orders sweeps against them (see SweepSnapshots) and guards what the
+	// last sweep reported as left alone.
+	snapshotsMu        sync.Mutex
+	takingSnapshots    map[string]struct{}
+	reportedUnrecorded int
+	reportedUnfound    int
+	ordersMu           sync.Mutex
+	orders             map[string]*spaceOrder
 }
 
 // queryer is the catalog or a transaction on it.
@@ -693,17 +705,17 @@ FROM trash WHERE space_id = ? AND deleted_by = ? AND deleted_at <= ?`, spaceID, 
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	type expiredItem struct{ id, entryID, relative, name string }
 	var expired []expiredItem
 	for rows.Next() {
 		var item expiredItem
 		if err := rows.Scan(&item.id, &item.entryID, &item.relative, &item.name); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		expired = append(expired, item)
 	}
-	if err := rows.Close(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
 	for _, item := range expired {
