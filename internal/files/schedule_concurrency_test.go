@@ -95,7 +95,9 @@ func TestRetentionOrdersChangesAndKeepingWithoutBlockingOtherSpaces(t *testing.T
 		cancel()
 		unblock()
 		if !finished {
-			_ = <-done // cleanup already canceled the run after a failed assertion
+			if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("background snapshot cleanup: %v", err)
+			}
 		}
 	})
 	select {
