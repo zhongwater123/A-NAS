@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -220,4 +221,44 @@ func unit(values ...float32) []float32 {
 		out[i] = value / float32(math.Sqrt(float64(norm)))
 	}
 	return out
+}
+
+// A call to an instance that never answers ends at the call timeout, so a
+// hung instance cannot hold its owner or keep its connection busy.
+func TestAHungInstanceTimesOut(t *testing.T) {
+	defer vectorindex.SetCallTimeout(300 * time.Millisecond)()
+	dir, err := os.MkdirTemp("", "qd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	listener, err := net.Listen("unix", filepath.Join(dir, "hung.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	go func() {
+		var held []net.Conn
+		defer func() {
+			for _, conn := range held {
+				_ = conn.Close()
+			}
+		}()
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			held = append(held, conn)
+		}
+	}()
+	client := vectorindex.New(filepath.Join(dir, "hung.sock"), nil)
+	defer func() { _ = client.Close() }()
+	started := time.Now()
+	if _, err := client.Collections(context.Background()); err == nil {
+		t.Fatal("Collections from a hung instance succeeded")
+	}
+	if took := time.Since(started); took > 5*time.Second {
+		t.Errorf("a hung instance held the call for %s", took)
+	}
 }

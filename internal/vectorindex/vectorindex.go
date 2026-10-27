@@ -49,6 +49,16 @@ const scanPage = 1000
 // start.
 var idleTimeout = time.Minute
 
+// callTimeout bounds every call, the start of a cold instance included (its
+// unit allows 90 s), so that a hung instance cannot hold its caller, or keep
+// the connection busy and the instance running.
+var callTimeout = 2 * time.Minute
+
+// bounded is ctx with the call timeout.
+func bounded(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, callTimeout)
+}
+
 // pointNamespace is the namespace of point IDs (RFC 9562 name-based UUIDs).
 var pointNamespace = uuid.NewSHA1(uuid.NameSpaceURL, []byte("https://github.com/zhongwater123/A-NAS/vectorindex"))
 
@@ -159,6 +169,8 @@ func PointID(key string) string {
 
 // Collections lists the instance's collections.
 func (c *Client) Collections(ctx context.Context) ([]string, error) {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
 	client, err := c.connection(ctx)
 	if err != nil {
 		return nil, err
@@ -183,6 +195,8 @@ type Collection struct {
 
 // CreateCollection creates a collection.
 func (c *Client) CreateCollection(ctx context.Context, collection Collection) error {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
 	if collection.Name == "" || collection.Dimensions <= 0 || slices.Contains(collection.Keywords, keyField) {
 		return ErrInvalid
 	}
@@ -218,6 +232,8 @@ func (c *Client) CreateCollection(ctx context.Context, collection Collection) er
 
 // DeleteCollection deletes a collection and its points.
 func (c *Client) DeleteCollection(ctx context.Context, name string) error {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
 	client, err := c.connection(ctx)
 	if err != nil {
 		return err
@@ -239,6 +255,8 @@ type Point struct {
 // Upsert stores points, replacing those with the same keys, and returns once
 // the instance has written them to its log.
 func (c *Client) Upsert(ctx context.Context, collection string, points []Point) error {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
 	if len(points) == 0 {
 		return nil
 	}
@@ -275,6 +293,8 @@ func (c *Client) Upsert(ctx context.Context, collection string, points []Point) 
 
 // Delete removes the points of keys; keys without a point are ignored.
 func (c *Client) Delete(ctx context.Context, collection string, keys []string) error {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
 	if len(keys) == 0 {
 		return nil
 	}
@@ -321,6 +341,8 @@ type Hit struct {
 // Search returns the points query asks for, most similar first. A scope
 // without values finds nothing: every search is scoped by its owner.
 func (c *Client) Search(ctx context.Context, collection string, query Query) ([]Hit, error) {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
 	if query.Scope.Field == "" || query.Scope.Field == keyField || query.Limit <= 0 {
 		return nil, ErrInvalid
 	}
@@ -361,6 +383,8 @@ type Entry struct {
 // Scan calls visit for every point of the collection, in no set order, with
 // the keyword fields named. It stops at the first error visit returns.
 func (c *Client) Scan(ctx context.Context, collection string, fields []string, visit func(Entry) error) error {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
 	client, err := c.connection(ctx)
 	if err != nil {
 		return err
