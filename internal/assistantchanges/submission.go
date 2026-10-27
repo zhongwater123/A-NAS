@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"path"
-	"regexp"
 	"slices"
 	"strings"
 )
@@ -103,8 +102,6 @@ func (s Submission) Digest() string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
-
-var accountPattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
 // area is a place a change may touch: a sandbox prefix and where it is on the
 // data volume.

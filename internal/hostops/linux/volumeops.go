@@ -56,7 +56,7 @@ func (e *Executor) StartCreateVolume(_ context.Context, request datavolume.Creat
 // mounted data volume in the background.
 func (e *Executor) StartAddDisks(_ context.Context, request datavolume.AddDisksRequest) (datavolume.VolumeOperation, error) {
 	if e.resolver == nil || strings.TrimSpace(request.PlanID) == "" || !validDiskTargets(request.Disks) || request.Layout == datavolume.LayoutSingle ||
-		!request.Layout.Fits(len(request.Disks)+1) || !filesystemUUIDPattern.MatchString(request.FilesystemUUID) {
+		!request.Layout.Fits(len(request.Disks)+1) || !datavolume.ValidFilesystemUUID(request.FilesystemUUID) {
 		return datavolume.VolumeOperation{}, errors.New("invalid add-disks request")
 	}
 	return e.startOperation(volumeOperation{
@@ -279,13 +279,13 @@ func validRecordedOperation(operation *volumeOperation) error {
 	switch operation.Kind {
 	case datavolume.PlanKindCreateVolume:
 		if !operation.Layout.Fits(len(operation.Disks)) || operation.FilesystemUUID != "" ||
-			slices.ContainsFunc(operation.Formatted, func(uuid string) bool { return !filesystemUUIDPattern.MatchString(uuid) }) {
+			slices.ContainsFunc(operation.Formatted, func(uuid string) bool { return !datavolume.ValidFilesystemUUID(uuid) }) {
 			return invalid
 		}
 		steps = []datavolume.OperationStep{datavolume.StepErase, datavolume.StepFormat, datavolume.StepMount, datavolume.StepPrepare}
 	case datavolume.PlanKindAddDisks:
 		if operation.Layout == datavolume.LayoutSingle || !operation.Layout.Fits(len(operation.Disks)+1) ||
-			!filesystemUUIDPattern.MatchString(operation.FilesystemUUID) || len(operation.Formatted) != 0 {
+			!datavolume.ValidFilesystemUUID(operation.FilesystemUUID) || len(operation.Formatted) != 0 {
 			return invalid
 		}
 		steps = []datavolume.OperationStep{datavolume.StepErase, datavolume.StepAddDevices}

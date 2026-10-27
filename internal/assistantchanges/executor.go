@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
@@ -218,7 +219,7 @@ func (e *Executor) now() time.Time {
 // copies what it would write. It returns the card; ErrInvalid lists why a
 // submission cannot be applied.
 func (e *Executor) Prepare(ctx context.Context, account string, member filesystem.FileSystem, raw []byte, sessionID, requestID string) (json.RawMessage, error) {
-	if !accountPattern.MatchString(account) {
+	if !accountid.ValidAssistantAccount(account) {
 		return nil, errors.New("invalid account")
 	}
 	submission, err := ParseSubmission(raw)
@@ -282,7 +283,7 @@ func (e *Executor) Decide(account, id, decision string) (json.RawMessage, error)
 		"expire":  {[]string{StatusAwaiting, StatusApproved}, StatusExpired},
 	}
 	move, ok := moves[decision]
-	if !ok || !accountPattern.MatchString(account) {
+	if !ok || !accountid.ValidAssistantAccount(account) {
 		return nil, ErrNotFound
 	}
 	l := e.ledger(account)
@@ -319,7 +320,7 @@ func (e *Executor) Decide(account, id, decision string) (json.RawMessage, error)
 
 // Get returns a change's card as it is now.
 func (e *Executor) Get(account, id string) (json.RawMessage, error) {
-	if !accountPattern.MatchString(account) {
+	if !accountid.ValidAssistantAccount(account) {
 		return nil, ErrNotFound
 	}
 	l := e.ledger(account)
@@ -341,7 +342,7 @@ func (e *Executor) Get(account, id string) (json.RawMessage, error) {
 // with exactly these arguments, once, from the copies the member saw, and says
 // what happened in words for the assistant.
 func (e *Executor) Apply(ctx context.Context, account string, member filesystem.FileSystem, raw []byte) string {
-	if !accountPattern.MatchString(account) {
+	if !accountid.ValidAssistantAccount(account) {
 		return "这批更改没有得到用户本人的确认，什么都没有改变。"
 	}
 	submission, err := ParseSubmission(raw)
@@ -420,7 +421,7 @@ func (e *Executor) Apply(ctx context.Context, account string, member filesystem.
 
 // Recent lists the account's latest changes for the assistant.
 func (e *Executor) Recent(account string) string {
-	if !accountPattern.MatchString(account) {
+	if !accountid.ValidAssistantAccount(account) {
 		return "最近没有更改。"
 	}
 	l := e.ledger(account)

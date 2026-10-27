@@ -22,11 +22,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
@@ -44,8 +44,6 @@ const (
 	// maxTitleRunes is Hermes's own title limit (hermes_state MAX_TITLE_LENGTH).
 	maxTitleRunes = 100
 )
-
-var accountPattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
 type Options struct {
 	// Connector reaches the signed-in member's instance; nil leaves the
@@ -164,7 +162,7 @@ func (h *Handler) withAccount(next func(http.ResponseWriter, *http.Request, stri
 			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		}
-		if !accountPattern.MatchString(user.Username) {
+		if !accountid.ValidAssistantAccount(user.Username) {
 			httpjson.WriteError(w, http.StatusForbidden, "assistant_unavailable", "this account has no assistant")
 			return
 		}

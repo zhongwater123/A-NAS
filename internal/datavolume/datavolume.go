@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 )
@@ -180,3 +181,11 @@ func FingerprintDisk(disk hoststate.Disk) string {
 	digest := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d\x00%s", disk.ID.String(), disk.Model, disk.CapacityBytes, disk.Transport)))
 	return hex.EncodeToString(digest[:16])
 }
+
+// filesystemUUIDPattern is a filesystem UUID as blkid and lsblk print it.
+var filesystemUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// ValidFilesystemUUID reports a filesystem UUID in canonical form: lowercase
+// hexadecimal in groups of 8-4-4-4-12. The Host Agent reads volumes and runs
+// operations on them by this one rule (#222).
+func ValidFilesystemUUID(uuid string) bool { return filesystemUUIDPattern.MatchString(uuid) }

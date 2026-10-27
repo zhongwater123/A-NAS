@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -16,8 +15,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
 )
-
-var filesystemUUIDPattern = regexp.MustCompile(`^[0-9a-fA-F-]{16,64}$`)
 
 // volumeMarker is .a-nas-volume.json at the root of the data volume: the
 // evidence that the mounted filesystem is the data volume, and the layout
@@ -56,7 +53,7 @@ func (e *Executor) readMarker() (volumeMarker, error) {
 		return volumeMarker{}, err
 	}
 	var marker volumeMarker
-	if err := json.Unmarshal(contents, &marker); err != nil || marker.FormatVersion != 1 || !filesystemUUIDPattern.MatchString(marker.FilesystemUUID) {
+	if err := json.Unmarshal(contents, &marker); err != nil || marker.FormatVersion != 1 || !datavolume.ValidFilesystemUUID(marker.FilesystemUUID) {
 		return volumeMarker{}, errors.New("data-volume identity marker is invalid")
 	}
 	return marker, nil
@@ -117,7 +114,7 @@ func (e *Executor) createVolume(ctx context.Context, operation *volumeOperation)
 		return datavolume.Volume{}, fmt.Errorf("read Btrfs UUID: %w", err)
 	}
 	uuid := strings.TrimSpace(string(uuidBytes))
-	if !filesystemUUIDPattern.MatchString(uuid) {
+	if !datavolume.ValidFilesystemUUID(uuid) {
 		return datavolume.Volume{}, errors.New("blkid returned an invalid filesystem UUID")
 	}
 	if err := e.recordFormatted(operation, uuid); err != nil {
@@ -258,7 +255,7 @@ func (e *Executor) checkMountUnit(ctx context.Context, devices []BlockDevice) er
 			uuid = strings.TrimSpace(value)
 		}
 	}
-	if !filesystemUUIDPattern.MatchString(uuid) {
+	if !datavolume.ValidFilesystemUUID(uuid) {
 		return datavolume.ErrVolumeExists
 	}
 	if e.formattedByUnfinishedCreation(uuid) {

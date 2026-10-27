@@ -45,7 +45,7 @@ func (s *Server) memberFiles(identity accountid.Identity) (filesystem.FileSystem
 	if !s.config.VolumeReady() {
 		return nil, filesystem.ErrVolumeUnavailable
 	}
-	if !assistantAccount.MatchString(identity.Username) {
+	if !accountid.ValidAssistantAccount(identity.Username) {
 		return nil, filesystem.ErrForbidden
 	}
 	key := workerKey{uid: identity.UID, role: identity.Role, confined: true}

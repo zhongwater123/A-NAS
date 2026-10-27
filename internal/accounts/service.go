@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -986,10 +985,6 @@ func (s *Service) appendAuditTo(ctx context.Context, db sqlExecutor, actorID, ac
 	return err
 }
 
-// usernamePattern is a portable Linux account name; the Host Agent accepts the
-// same names.
-var usernamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`)
-
 // reservedUsernames are Samba's special sections and the Shared share. Share
 // names ignore case, so a member named shared would reach Shared instead of
 // their private space over SMB.
@@ -1001,7 +996,7 @@ var reservedUsernames = []string{"global", "homes", "printers", "shared"}
 // would block that account for good.
 func checkUsername(username string) error {
 	switch {
-	case !usernamePattern.MatchString(username):
+	case !accountid.ValidUsername(username):
 		return ErrInvalidUsername
 	case slices.Contains(reservedUsernames, username), username == "a-nas",
 		strings.HasPrefix(username, "a-nas-"), strings.HasPrefix(username, "app-"):

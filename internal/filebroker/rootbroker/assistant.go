@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -19,10 +18,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/assistantlogin"
 )
-
-// assistantAccount is the account name form the assistant's units accept; it
-// names the socket and token files.
-var assistantAccount = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
 // serveAssistant is the session gate in front of the members' AI assistants
 // (ADR 0024 decision 10). Only root may connect to an assistant's socket; the
@@ -43,7 +38,7 @@ func (s *Server) serveAssistant(conn *net.UnixConn, req wire.Request) {
 		_ = wire.WriteMessage(conn, wire.Response{Error: &wire.Error{Code: wire.CodeUnavailable, Message: "the assistant is not enabled"}}, nil)
 		return
 	}
-	if !assistantAccount.MatchString(identity.Username) {
+	if !accountid.ValidAssistantAccount(identity.Username) {
 		_ = wire.WriteMessage(conn, wire.Response{Error: &wire.Error{Code: wire.CodeForbidden, Message: "this account has no assistant"}}, nil)
 		return
 	}

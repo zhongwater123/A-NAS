@@ -195,7 +195,7 @@ func (e *Executor) SetCredential(ctx context.Context, request accountid.Credenti
 	if err := validIdentity(identity); err != nil {
 		return err
 	}
-	if e.smbInterface != "" && !regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`).MatchString(e.smbInterface) {
+	if e.smbInterface != "" && !smbInterfacePattern.MatchString(e.smbInterface) {
 		return errors.New("invalid Samba interface")
 	}
 	if e.identityError != nil {
@@ -378,9 +378,12 @@ const sambaShareOptions = `    inherit acls = yes
     recycle:versions = yes
 `
 
-func validUsername(username string) bool {
-	return regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`).MatchString(username)
-}
+var (
+	smbInterfacePattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`)
+	deviceNamePattern   = regexp.MustCompile(`^[A-Za-z0-9._+-]+$`)
+)
+
+func validUsername(username string) bool { return accountid.ValidUsername(username) }
 
 // validSambaPassword reports whether smbpasswd -s receives password whole: it
 // reads each copy as one line of C text into a 256-byte buffer, so a newline,
@@ -464,7 +467,7 @@ func validDevicePath(path string) bool {
 	if filepath.Dir(path) != "/dev" {
 		return false
 	}
-	return regexp.MustCompile(`^[A-Za-z0-9._+-]+$`).MatchString(filepath.Base(path))
+	return deviceNamePattern.MatchString(filepath.Base(path))
 }
 
 func writeAtomic(path string, contents []byte, mode os.FileMode) error {
