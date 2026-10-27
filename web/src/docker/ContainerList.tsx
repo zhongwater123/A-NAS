@@ -17,6 +17,7 @@ import { formatBytes } from "../lib/bytes";
 import { ContainerSummary } from "./api";
 import { DetailTab } from "./ContainerDetail";
 import type { ContainerActions } from "./DockerPanel";
+import styles from "./docker.module.css";
 import {
   AppRef,
   appFor,
@@ -63,37 +64,39 @@ export function ContainerPage({
   const sum = sumTotals(items);
   const link = app && appLink(app);
   return (
-    <div className="dk-page">
-      <header className="dk-page-head">
+    <div className={styles.dkPage}>
+      <header className={styles.dkPageHead}>
         {project !== undefined &&
           (app ? (
             <ContainerGlyph app={app} size="lg" />
           ) : (
-            <span className={`dk-tile lg ${project ? "project" : "standalone"}`}>{project ? <Boxes /> : <Box />}</span>
+            <span className={`${styles.dkTile} ${styles.lg} ${project ? styles.project : styles.standalone}`}>
+              {project ? <Boxes /> : <Box />}
+            </span>
           ))}
-        <div className="dk-page-title">
+        <div className={styles.dkPageTitle}>
           <h2>{title}</h2>
           {project && project !== title && <code title="Compose 项目">{project}</code>}
         </div>
         {link && (
-          <a className="dk-btn" href={link} target="_blank" rel="noopener noreferrer">
+          <a className={styles.dkBtn} href={link} target="_blank" rel="noopener noreferrer">
             <ExternalLink />
             打开 {app!.title}
           </a>
         )}
         <button
-          className="dk-icon-btn ghost"
+          className={`${styles.dkIconBtn} ${styles.ghost}`}
           aria-label="刷新"
           title="刷新"
           disabled={refreshing}
           onClick={() => void onRefresh()}
         >
-          <RefreshCw className={refreshing ? "dk-spin" : ""} />
+          <RefreshCw className={refreshing ? styles.dkSpin : ""} />
         </button>
       </header>
 
       {totals && items.length > 0 && (
-        <div className="dk-stats">
+        <div className={styles.dkStats}>
           <Stat icon={<Activity />} label="运行中" value={`${sum.running}`} unit={`/ ${sum.total}`} />
           <Stat icon={<Cpu />} label="CPU" value={formatPercent(sum.cpuPercent)} />
           <Stat icon={<MemoryStick />} label="内存" value={formatBytes(sum.memoryBytes)} />
@@ -114,7 +117,7 @@ export function ContainerPage({
           />
         ))
       ) : (
-        <div className="dk-list">
+        <div className={styles.dkList}>
           {items.map((item) => (
             <ContainerRow
               key={item.id}
@@ -132,8 +135,8 @@ export function ContainerPage({
 
 function Stat({ icon, label, value, unit }: { icon: ReactNode; label: string; value: string; unit?: string }) {
   return (
-    <div className="dk-stat">
-      <span className="dk-stat-label">
+    <div className={styles.dkStat}>
+      <span className={styles.dkStatLabel}>
         {icon}
         {label}
       </span>
@@ -162,15 +165,17 @@ function GroupSection({
   const running = group.containers.filter((item) => item.state === "running").length;
   const total = group.containers.length;
   return (
-    <section className="dk-group" aria-label={group.title}>
-      <header className="dk-group-head">
+    <section className={styles.dkGroup} aria-label={group.title}>
+      <header className={styles.dkGroupHead}>
         {group.app ? (
           <ContainerGlyph app={group.app} size="sm" />
         ) : (
-          <span className={`dk-tile ${group.key ? "project" : "standalone"}`}>{group.key ? <Boxes /> : <Box />}</span>
+          <span className={`${styles.dkTile} ${group.key ? styles.project : styles.standalone}`}>
+            {group.key ? <Boxes /> : <Box />}
+          </span>
         )}
         <h3>{group.title}</h3>
-        <span className="dk-group-count">
+        <span className={styles.dkGroupCount}>
           {!showRunning
             ? `${total} 个容器`
             : running === total
@@ -178,7 +183,7 @@ function GroupSection({
               : `${running}/${total} 个运行中`}
         </span>
       </header>
-      <div className="dk-list">
+      <div className={styles.dkList}>
         {group.containers.map((item) => (
           <ContainerRow
             key={item.id}
@@ -209,30 +214,30 @@ function ContainerRow({
   const failure = actions.failures[item.id];
   const running = item.state === "running";
   return (
-    <article className={`dk-row ${condition.tone}`} aria-label={`容器 ${item.name}`}>
+    <article className={`${styles.dkRow} ${styles[condition.tone] ?? ""}`} aria-label={`容器 ${item.name}`}>
       <ContainerGlyph condition={condition} />
-      <div className="dk-row-text">
-        <div className="dk-row-title">
-          <button className="dk-row-link" onClick={() => onOpen(item)}>
+      <div className={styles.dkRowText}>
+        <div className={styles.dkRowTitle}>
+          <button className={styles.dkRowLink} onClick={() => onOpen(item)}>
             {item.name}
           </button>
           <StatePill condition={condition} />
           {running && <PortLinks ports={webPorts(item, app)} item={item} />}
         </div>
-        <p className="dk-row-meta">
+        <p className={styles.dkRowMeta}>
           <span>{condition.detail}</span>
-          <span className="dk-image" title={item.image}>
+          <span className={styles.dkImage} title={item.image}>
             {item.image}
           </span>
         </p>
         {failure && (
-          <p className="dk-row-error" role="alert">
+          <p className={styles.dkRowError} role="alert">
             {failure}
           </p>
         )}
       </div>
       {item.usage ? (
-        <div className="dk-usage" aria-label="资源占用">
+        <div className={styles.dkUsage} aria-label="资源占用">
           <span>
             CPU<b>{formatPercent(item.usage.cpuPercent)}</b>
           </span>
@@ -241,9 +246,9 @@ function ContainerRow({
           </span>
         </div>
       ) : (
-        <div className="dk-usage" />
+        <div className={styles.dkUsage} />
       )}
-      <div className="dk-row-actions">
+      <div className={styles.dkRowActions}>
         {running || item.state === "paused" || item.state === "restarting" ? (
           <>
             <IconAction

@@ -15,6 +15,13 @@ export default defineConfig({
       },
     },
   ],
+  css: {
+    modules: {
+      // Code reads .ph-tile as styles.phTile; a name built at run time
+      // (`tone-${tone}`) reads the dashed form, which camelCase also exports.
+      localsConvention: "camelCase",
+    },
+  },
   build: {
     outDir: "../internal/webui/dist",
     emptyOutDir: true,

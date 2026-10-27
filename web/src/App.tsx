@@ -8,7 +8,7 @@ import { PasswordChange } from "./auth/PasswordChange";
 import { Desktop } from "./desktop/Desktop";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./desktop/LocalConsoleScreenSaver";
 import { transferStore } from "./transfers/store";
-import "./styles/tokens.css";
+import "./styles/index.css";
 import "./styles.css";
 
 export default function App() {

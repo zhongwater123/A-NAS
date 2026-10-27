@@ -28,6 +28,7 @@ import { readApps } from "../appcenter/api";
 import { applyContainerAction, ContainerAction, ContainerSnapshot, ContainerSummary, readContainers } from "./api";
 import { ContainerDetail, DetailTab } from "./ContainerDetail";
 import { ContainerPage } from "./ContainerList";
+import styles from "./docker.module.css";
 import { ImagePage } from "./ImageList";
 import {
   AppRef,
@@ -43,7 +44,6 @@ import {
   standaloneTitle,
 } from "./model";
 import { ContainerGlyph, Empty, Layer } from "./parts";
-import "./docker.css";
 
 export const containerPollInterval = 5_000;
 
@@ -137,8 +137,8 @@ export function DockerPanel({
 
   if (!snapshot && !error) {
     return (
-      <div className="dk-shell single">
-        <div className="dk-loading">
+      <div className={`${styles.dkShell} ${styles.single}`}>
+        <div className={styles.dkLoading}>
           <span className="loader" />
           <p>正在连接 Docker…</p>
         </div>
@@ -147,7 +147,7 @@ export function DockerPanel({
   }
   if (!snapshot && error === "containers_disabled") {
     return (
-      <div className="dk-shell single">
+      <div className={`${styles.dkShell} ${styles.single}`}>
         <Empty icon={<Container />} title="Docker 未启用">
           <p>安装 Docker 与 A-NAS 容器代理后即可在这里管理容器。</p>
         </Empty>
@@ -156,10 +156,10 @@ export function DockerPanel({
   }
   if (!snapshot) {
     return (
-      <div className="dk-shell single">
+      <div className={`${styles.dkShell} ${styles.single}`}>
         <Empty icon={<CircleAlert />} title="无法连接 Docker 引擎" tone="error">
           <p>请确认 Docker 与容器代理正在运行。</p>
-          <button className="dk-btn primary" onClick={() => void refresh()}>
+          <button className={`${styles.dkBtn} primary`} onClick={() => void refresh()}>
             <RotateCw />
             重新连接
           </button>
@@ -203,7 +203,7 @@ export function DockerPanel({
     page = (
       <Empty icon={<Box />} title="容器已不存在">
         <p>它可能已被删除或重新创建。</p>
-        <button className="dk-btn" onClick={() => setSelected(undefined)}>
+        <button className={styles.dkBtn} onClick={() => setSelected(undefined)}>
           返回{pageTitle}
         </button>
       </Empty>
@@ -296,9 +296,9 @@ export function DockerPanel({
   };
 
   return (
-    <div className="dk-shell">
-      <nav className="dk-nav" aria-label="Docker 导航" inert={Boolean(confirm)}>
-        <label className="dk-search">
+    <div className={styles.dkShell}>
+      <nav className={styles.dkNav} aria-label="Docker 导航" inert={Boolean(confirm)}>
+        <label className={styles.dkSearch}>
           <Search />
           <input
             value={query}
@@ -311,7 +311,7 @@ export function DockerPanel({
             aria-label="搜索容器或镜像"
           />
           {query && (
-            <button className="dk-search-clear" aria-label="清除搜索" onClick={() => setQuery("")}>
+            <button className={styles.dkSearchClear} aria-label="清除搜索" onClick={() => setQuery("")}>
               <X />
             </button>
           )}
@@ -358,7 +358,7 @@ export function DockerPanel({
           label="镜像"
           count={snapshot.images.length}
         />
-        {groups.length > 0 && <p className="dk-nav-label">分组</p>}
+        {groups.length > 0 && <p className={styles.dkNavLabel}>分组</p>}
         {groups.map((group) => {
           const running = group.containers.filter((item) => item.state === "running").length;
           const trouble = group.containers.some((item) => describeContainer(item).attention);
@@ -371,7 +371,7 @@ export function DockerPanel({
                 group.app ? (
                   <ContainerGlyph app={group.app} size="sm" />
                 ) : (
-                  <span className={`dk-tile ${group.key ? "project" : "standalone"}`}>
+                  <span className={`${styles.dkTile} ${group.key ? styles.project : styles.standalone}`}>
                     {group.key ? <Boxes /> : <Box />}
                   </span>
                 )
@@ -383,8 +383,8 @@ export function DockerPanel({
             />
           );
         })}
-        <footer className="dk-nav-foot">
-          <span className={`dk-live ${error ? "offline" : ""}`} aria-hidden="true" />
+        <footer className={styles.dkNavFoot}>
+          <span className={`${styles.dkLive} ${error ? styles.offline : ""}`} aria-hidden="true" />
           <span>
             Docker {snapshot.engine.version}
             <small>
@@ -394,9 +394,9 @@ export function DockerPanel({
           </span>
         </footer>
       </nav>
-      <main className="dk-main" ref={main} inert={Boolean(confirm)}>
+      <main className={styles.dkMain} ref={main} inert={Boolean(confirm)}>
         {error && (
-          <div className="dk-note error dk-offline" role="status">
+          <div className={`${styles.dkNote} ${styles.error} ${styles.dkOffline}`} role="status">
             <CircleAlert />
             连接中断，正在显示上次读取的容器状态
           </div>
@@ -439,15 +439,15 @@ function NavItem({
 }) {
   return (
     <button
-      className={`dk-nav-item ${active ? "active" : ""}`}
+      className={`${styles.dkNavItem} ${active ? styles.active : ""}`}
       aria-current={active ? "page" : undefined}
       title={hint}
       onClick={onClick}
     >
-      {tile ? <span className={`dk-tile ${tile}`}>{icon}</span> : icon}
+      {tile ? <span className={`${styles.dkTile} ${styles[tile] ?? ""}`}>{icon}</span> : icon}
       <span>{label}</span>
-      {alert && <i className="dk-nav-alert" role="img" aria-label="有容器需要关注" />}
-      <span className="dk-count">{count}</span>
+      {alert && <i className={styles.dkNavAlert} role="img" aria-label="有容器需要关注" />}
+      <span className={styles.dkCount}>{count}</span>
     </button>
   );
 }
@@ -473,18 +473,20 @@ function ConfirmDialog({
     : `${app ? app.title : "它提供的服务"}会短暂中断，通常几秒后恢复。`;
   return (
     <Layer label={`确认${actionLabels[action]} ${item.name}`} onDismiss={onCancel}>
-      <div className="dk-confirm">
-        <span className={`dk-confirm-art ${stop ? "danger" : ""}`}>{stop ? <CirclePause /> : <RotateCw />}</span>
+      <div className={styles.dkConfirm}>
+        <span className={`${styles.dkConfirmArt} ${stop ? styles.danger : ""}`}>
+          {stop ? <CirclePause /> : <RotateCw />}
+        </span>
         <h3>
           {actionLabels[action]} {item.name}？
         </h3>
         <p>{effect}</p>
       </div>
-      <footer className="dk-sheet-foot">
-        <button className="dk-btn" onClick={onCancel}>
+      <footer className={styles.dkSheetFoot}>
+        <button className={styles.dkBtn} onClick={onCancel}>
           取消
         </button>
-        <button className={`dk-btn ${stop ? "danger" : "primary"}`} onClick={onConfirm}>
+        <button className={`${styles.dkBtn} ${stop ? styles.danger : "primary"}`} onClick={onConfirm}>
           确认{actionLabels[action]}
         </button>
       </footer>
@@ -498,7 +500,7 @@ function emptyFor(filter: Filter, total: number, onOpenStore?: () => void): Reac
       <Empty icon={<Container />} title="还没有容器">
         <p>从应用中心安装的应用会出现在这里。</p>
         {onOpenStore && (
-          <button className="dk-btn primary" onClick={onOpenStore}>
+          <button className={`${styles.dkBtn} primary`} onClick={onOpenStore}>
             打开应用中心
           </button>
         )}

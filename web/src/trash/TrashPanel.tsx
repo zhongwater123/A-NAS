@@ -20,11 +20,12 @@ import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useS
 import { APIError } from "../api/client";
 import type { RestoredEntry, Space, TrashItem } from "../api.generated";
 import { formatClock, formatDateTime } from "../backup/format";
-import { Dialog, EmptyState, EntryIcon, Notice, Spinner, useToasts } from "../ui/workspace";
 import { listEntries, listSpaces } from "../files/api";
 import { formatBytes } from "../lib/bytes";
 import { fileTypeLabel } from "../lib/fileTypes";
 import type { TransferLocation } from "../transfers/api";
+import { Dialog, EmptyState, EntryIcon, Notice, Spinner, useToasts } from "../ui/workspace";
+import workspaceStyles from "../ui/workspace.module.css";
 import { listTrash, purgeTrash, type RestoreConflict, restoreTrash } from "./api";
 import {
   type BatchOutcome,
@@ -42,8 +43,7 @@ import {
   spaceName,
   type TrashSort,
 } from "./model";
-import "../ui/workspace.css";
-import "./trash.css";
+import styles from "./trash.module.css";
 
 // TrashPanel lists what the signed-in account deleted, grouped by the day
 // it was deleted: where each item goes back to, what it is and holds, and
@@ -237,28 +237,28 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   };
 
   return (
-    <div ref={root} className="bk-app tr-app" tabIndex={-1} onKeyDown={keyDown}>
-      <header className="tr-head">
-        <span className="tr-mark" aria-hidden="true">
+    <div ref={root} className={`${workspaceStyles.bkApp} ${styles.trApp}`} tabIndex={-1} onKeyDown={keyDown}>
+      <header className={styles.trHead}>
+        <span className={styles.trMark} aria-hidden="true">
           <Trash2 />
         </span>
-        <div className="tr-title">
+        <div className={styles.trTitle}>
           <h2>回收站</h2>
         </div>
-        <div className="tr-head-actions">
+        <div className={styles.trHeadActions}>
           <button
             type="button"
-            className="bk-icon-button"
+            className={workspaceStyles.bkIconButton}
             aria-label="刷新"
             title="刷新"
             disabled={loading || busy}
             onClick={() => void refresh()}
           >
-            <RefreshCw className={loading ? "tr-spin" : ""} />
+            <RefreshCw className={loading ? styles.trSpin : ""} />
           </button>
           <button
             type="button"
-            className="bk-secondary danger small"
+            className={`${workspaceStyles.bkSecondary} ${workspaceStyles.danger} ${workspaceStyles.small}`}
             disabled={!all.length || busy}
             onClick={() => setPurging({ items: all, everything: true })}
           >
@@ -269,7 +269,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
       </header>
 
       {all.length > 0 && (
-        <div className="tr-stats" aria-label="回收站概况">
+        <div className={styles.trStats} aria-label="回收站概况">
           <div>
             <span>项目</span>
             <strong>{all.length}</strong>
@@ -278,7 +278,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
             <span>占用空间</span>
             <strong>{formatBytes(total)}</strong>
           </div>
-          <div className={soon ? "soon" : ""}>
+          <div className={soon ? styles.soon : ""}>
             <span>7 天内清理</span>
             <strong>{soon}</strong>
           </div>
@@ -286,14 +286,14 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
       )}
 
       {error && (
-        <div className="tr-notice">
+        <div className={styles.trNotice}>
           <Notice tone="danger">{error}</Notice>
         </div>
       )}
 
       {items === undefined ? (
         !error && (
-          <div className="tr-loading">
+          <div className={styles.trLoading}>
             <Spinner />
             正在读取回收站…
           </div>
@@ -303,11 +303,11 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
           在文件管理或通过 SMB 删除的文件和文件夹会先放到这里，到期前随时可以恢复到原来的位置。
         </EmptyState>
       ) : (
-        <section className="tr-card" aria-label="回收站项目">
+        <section className={styles.trCard} aria-label="回收站项目">
           {chosen.length > 0 || busy ? (
-            <div className="tr-toolbar selecting" role="toolbar" aria-label="所选项目的操作">
+            <div className={`${styles.trToolbar} ${styles.selecting}`} role="toolbar" aria-label="所选项目的操作">
               {busy && progress ? (
-                <span className="tr-progress" role="status">
+                <span className={styles.trProgress} role="status">
                   <Spinner small />
                   {progress.label} {progress.done + 1}/{progress.total}…
                 </span>
@@ -315,7 +315,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                 <>
                   <button
                     type="button"
-                    className="bk-icon-button"
+                    className={workspaceStyles.bkIconButton}
                     aria-label="取消选择"
                     title="取消选择 (Esc)"
                     onClick={() => setSelected(new Set())}
@@ -323,17 +323,21 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                     <X />
                   </button>
                   <strong>已选 {chosen.length} 项</strong>
-                  <span className="tr-toolbar-meta">
+                  <span className={styles.trToolbarMeta}>
                     共 {formatBytes(chosen.reduce((sum, item) => sum + item.sizeBytes, 0))}
                   </span>
-                  <span className="tr-toolbar-gap" />
-                  <button type="button" className="bk-primary small" onClick={() => void restoreChosen()}>
+                  <span className={styles.trToolbarGap} />
+                  <button
+                    type="button"
+                    className={`${workspaceStyles.bkPrimary} ${workspaceStyles.small}`}
+                    onClick={() => void restoreChosen()}
+                  >
                     <RotateCcw />
                     恢复
                   </button>
                   <button
                     type="button"
-                    className="bk-secondary danger small"
+                    className={`${workspaceStyles.bkSecondary} ${workspaceStyles.danger} ${workspaceStyles.small}`}
                     onClick={() => setPurging({ items: chosen, everything: false })}
                   >
                     <Trash2 />
@@ -343,8 +347,8 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
               )}
             </div>
           ) : (
-            <div className="tr-toolbar">
-              <label className="tr-search">
+            <div className={styles.trToolbar}>
+              <label className={styles.trSearch}>
                 <Search />
                 <input
                   type="search"
@@ -355,12 +359,16 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                 />
               </label>
               {trashSpaces.length > 1 && (
-                <div className="bk-segmented" role="radiogroup" aria-label="空间">
+                <div
+                  className={`${styles.bkSegmented} ${workspaceStyles.bkSegmented}`}
+                  role="radiogroup"
+                  aria-label="空间"
+                >
                   <button
                     type="button"
                     role="radio"
                     aria-checked={!spaceFilter}
-                    className={!spaceFilter ? "active" : ""}
+                    className={!spaceFilter ? workspaceStyles.active : ""}
                     onClick={() => setSpaceFilter("")}
                   >
                     全部
@@ -371,7 +379,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                       type="button"
                       role="radio"
                       aria-checked={spaceFilter === space.id}
-                      className={spaceFilter === space.id ? "active" : ""}
+                      className={spaceFilter === space.id ? workspaceStyles.active : ""}
                       onClick={() => setSpaceFilter(space.id)}
                     >
                       {space.kind === "shared" ? <UsersRound /> : <HardDrive />}
@@ -380,13 +388,17 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                   ))}
                 </div>
               )}
-              <span className="tr-toolbar-gap" />
-              <div className="bk-segmented" role="radiogroup" aria-label="排序">
+              <span className={styles.trToolbarGap} />
+              <div
+                className={`${styles.bkSegmented} ${workspaceStyles.bkSegmented}`}
+                role="radiogroup"
+                aria-label="排序"
+              >
                 <button
                   type="button"
                   role="radio"
                   aria-checked={sort === "deleted"}
-                  className={sort === "deleted" ? "active" : ""}
+                  className={sort === "deleted" ? workspaceStyles.active : ""}
                   onClick={() => setSort("deleted")}
                 >
                   最近删除
@@ -395,7 +407,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                   type="button"
                   role="radio"
                   aria-checked={sort === "expiry"}
-                  className={sort === "expiry" ? "active" : ""}
+                  className={sort === "expiry" ? workspaceStyles.active : ""}
                   onClick={() => setSort("expiry")}
                 >
                   即将清理
@@ -405,12 +417,12 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
           )}
 
           {visible.length === 0 ? (
-            <div className="tr-no-match">
+            <div className={styles.trNoMatch}>
               <Search />
               <strong>没有匹配的项目</strong>
               <button
                 type="button"
-                className="bk-link"
+                className={workspaceStyles.bkLink}
                 onClick={() => {
                   setQuery("");
                   setSpaceFilter("");
@@ -421,7 +433,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
             </div>
           ) : (
             <>
-              <div className="tr-columns">
+              <div className={styles.trColumns}>
                 <Checkbox
                   checked={allChosen}
                   mixed={chosen.length > 0 && !allChosen}
@@ -431,14 +443,14 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                 />
                 <span>名称</span>
                 <span className="tr-col-origin">原位置</span>
-                <span className="tr-col-size">大小</span>
+                <span className={styles.trColSize}>大小</span>
                 <span className="tr-col-time">删除时间</span>
                 <span className="tr-col-expiry">剩余</span>
                 <span />
               </div>
-              <div className="tr-groups">
+              <div className={styles.trGroups}>
                 {groups.map((group) => (
-                  <section key={group.key} className="tr-group" aria-label={group.label}>
+                  <section key={group.key} className={styles.trGroup} aria-label={group.label}>
                     <h3>
                       {group.label}
                       <span>{group.items.length} 项</span>
@@ -530,7 +542,7 @@ function Checkbox({
       aria-checked={mixed ? "mixed" : checked}
       aria-label={label}
       disabled={disabled}
-      className={`tr-check${checked ? " on" : ""}${mixed ? " mixed" : ""}`}
+      className={`${styles.trCheck}${checked ? ` ${styles.on}` : ""}${mixed ? ` ${styles.mixed}` : ""}`}
       onClick={onChange}
     >
       {mixed ? <Minus strokeWidth={3} /> : <Check strokeWidth={3} />}
@@ -563,20 +575,20 @@ function TrashRow({
   const path = [spaceName(space), ...(item.originalPath ? item.originalPath.split("/") : [])].join(" / ");
   const SpaceIcon = space?.kind === "shared" ? UsersRound : HardDrive;
   return (
-    <li className={`tr-row${selected ? " selected" : ""}`}>
+    <li className={`${styles.trRow}${selected ? ` ${styles.selected}` : ""}`}>
       <Checkbox checked={selected} disabled={disabled} label={`选择 ${item.name}`} onChange={onToggle} />
-      <div className="tr-name">
+      <div className={styles.trName}>
         <EntryIcon kind={item.kind} />
         <div>
           <strong title={item.name}>{item.name}</strong>
           <small>{item.kind === "directory" ? "文件夹" : fileTypeLabel(item.name)}</small>
         </div>
       </div>
-      <div className="tr-cells">
-        <div className="tr-origin">
+      <div className={styles.trCells}>
+        <div className={styles.trOrigin}>
           {item.originalGone ? (
             <span
-              className="tr-origin-path gone"
+              className={`${styles.trOriginPath} ${styles.gone}`}
               title={`${path}\n原文件夹已不在，恢复时放回${spaceName(space)}的根目录`}
             >
               <SpaceIcon />
@@ -586,40 +598,43 @@ function TrashRow({
           ) : (
             <button
               type="button"
-              className="tr-origin-path"
+              className={styles.trOriginPath}
               title={`${path}\n点击在文件管理中打开`}
               aria-label={`在文件管理中打开 ${path}`}
               onClick={onOpenOrigin}
             >
               <SpaceIcon />
               <span>{path}</span>
-              <FolderOpen className="tr-origin-open" />
+              <FolderOpen className={styles.trOriginOpen} />
             </button>
           )}
         </div>
         {item.kind === "directory" && item.sizeBytes === 0 ? (
-          <span className="tr-size unknown" title="文件夹中没有已统计的文件">
+          <span className={`${styles.trSize} ${styles.unknown}`} title="文件夹中没有已统计的文件">
             —
           </span>
         ) : (
-          <span className="tr-size">{formatBytes(item.sizeBytes)}</span>
+          <span className={styles.trSize}>{formatBytes(item.sizeBytes)}</span>
         )}
-        <span className="tr-time" title={`删除于 ${formatDateTime(item.deletedAt)}`}>
-          <span className="tr-label">删除于 </span>
+        <span className={styles.trTime} title={`删除于 ${formatDateTime(item.deletedAt)}`}>
+          <span className={styles.trLabel}>删除于 </span>
           {timeOnly ? formatClock(item.deletedAt) : formatDateTime(item.deletedAt)}
         </span>
-        <span className={`tr-expiry ${expiry.tone}`} title={`将于 ${formatDateTime(item.purgeAt)} 永久删除`}>
+        <span
+          className={`${styles.trExpiry} ${styles[expiry.tone] ?? ""}`}
+          title={`将于 ${formatDateTime(item.purgeAt)} 永久删除`}
+        >
           <ExpiryRing left={expiry.left} tone={expiry.tone} />
           <span>
-            <span className="tr-label">剩余 </span>
+            <span className={styles.trLabel}>剩余 </span>
             {expiry.short}
           </span>
         </span>
       </div>
-      <div className="tr-actions">
+      <div className={styles.trActions}>
         <button
           type="button"
-          className="bk-restore-button"
+          className={`${styles.bkRestoreButton} ${workspaceStyles.bkRestoreButton}`}
           aria-label={`恢复 ${item.name}`}
           disabled={disabled}
           onClick={onRestore}
@@ -629,7 +644,7 @@ function TrashRow({
         </button>
         <button
           type="button"
-          className="bk-icon-button tr-purge"
+          className={`${workspaceStyles.bkIconButton} ${styles.trPurge}`}
           aria-label={`永久删除 ${item.name}`}
           title="永久删除"
           disabled={disabled}
@@ -647,7 +662,7 @@ function ExpiryRing({ left, tone }: { left: number; tone: ExpiryTone }) {
   const radius = 6.5;
   const circumference = 2 * Math.PI * radius;
   return (
-    <svg className={`tr-ring ${tone}`} viewBox="0 0 16 16" aria-hidden="true">
+    <svg className={`${styles.trRing} ${styles[tone] ?? ""}`} viewBox="0 0 16 16" aria-hidden="true">
       <circle cx="8" cy="8" r={radius} />
       <circle
         cx="8"
@@ -715,14 +730,14 @@ function RestoreDialog({
       onClose={onClose}
       footer={
         <>
-          <button type="button" className="bk-secondary" disabled={Boolean(busy)} onClick={onClose}>
+          <button type="button" className={workspaceStyles.bkSecondary} disabled={Boolean(busy)} onClick={onClose}>
             取消
           </button>
           {!taken && (
             <button
               type="submit"
               form="tr-restore-form"
-              className="bk-primary"
+              className={workspaceStyles.bkPrimary}
               disabled={Boolean(busy) || !name.trim()}
             >
               {busy ? (
@@ -739,7 +754,7 @@ function RestoreDialog({
       }
     >
       <form id="tr-restore-form" className="bk-restore" onSubmit={(event) => void restore("ask", event)}>
-        <div className="bk-restore-source">
+        <div className={workspaceStyles.bkRestoreSource}>
           <EntryIcon kind={item.kind} />
           <div>
             <strong>{item.name}</strong>
@@ -749,17 +764,19 @@ function RestoreDialog({
           </div>
         </div>
 
-        <div className="bk-field">
-          <span className="bk-field-label">恢复到</span>
-          <div className="bk-location">
+        <div className={workspaceStyles.bkField}>
+          <span className={workspaceStyles.bkFieldLabel}>恢复到</span>
+          <div className={workspaceStyles.bkLocation}>
             <MapPin />
-            <span className="bk-location-path" title={location.text}>
+            <span className={workspaceStyles.bkLocationPath} title={location.text}>
               {location.text}
             </span>
-            {!item.originalGone && <span className="bk-badge neutral">原位置</span>}
+            {!item.originalGone && (
+              <span className={`${workspaceStyles.bkBadge} ${workspaceStyles.neutral}`}>原位置</span>
+            )}
           </div>
           {item.originalGone && (
-            <small className="bk-field-hint">
+            <small className={workspaceStyles.bkFieldHint}>
               {item.originalPath ? `原文件夹“${item.originalPath}”已不在，` : "原文件夹已不在，"}将恢复到
               {spaceName(space)}的根目录。
             </small>
@@ -767,23 +784,23 @@ function RestoreDialog({
         </div>
 
         {taken ? (
-          <section className="tr-conflict" role="group" aria-label="同名项目">
-            <div className="tr-conflict-head">
+          <section className={styles.trConflict} role="group" aria-label="同名项目">
+            <div className={styles.trConflictHead}>
               <CircleAlert />
               <p>
                 <strong>这里已有“{taken}”</strong>
                 <span>选择怎么恢复；不会覆盖任何文件。</span>
               </p>
             </div>
-            <div ref={choices} className="tr-choices">
+            <div ref={choices} className={styles.trChoices}>
               <button
                 type="button"
-                className="tr-choice"
+                className={styles.trChoice}
                 disabled={Boolean(busy)}
                 onClick={() => void restore("rename")}
               >
-                <span className="tr-choice-icon">{busy === "rename" ? <Spinner small /> : <CopyPlus />}</span>
-                <span className="tr-choice-text">
+                <span className={styles.trChoiceIcon}>{busy === "rename" ? <Spinner small /> : <CopyPlus />}</span>
+                <span className={styles.trChoiceText}>
                   <strong>保留两者</strong>
                   <small>改用新名称放在旁边，如“{restoredName(taken, item.kind)}”</small>
                 </span>
@@ -791,22 +808,22 @@ function RestoreDialog({
               {file && (
                 <button
                   type="button"
-                  className="tr-choice warning"
+                  className={`${styles.trChoice} ${styles.warning} ${workspaceStyles.warning}`}
                   disabled={Boolean(busy)}
                   onClick={() => void restore("replace")}
                 >
-                  <span className="tr-choice-icon">{busy === "replace" ? <Spinner small /> : <Replace />}</span>
-                  <span className="tr-choice-text">
+                  <span className={styles.trChoiceIcon}>{busy === "replace" ? <Spinner small /> : <Replace />}</span>
+                  <span className={styles.trChoiceText}>
                     <strong>替换</strong>
                     <small>现有的“{taken}”移到回收站，之后仍可恢复</small>
                   </span>
                 </button>
               )}
             </div>
-            {!file && <p className="tr-conflict-note">文件夹不会被替换或合并。</p>}
+            {!file && <p className={styles.trConflictNote}>文件夹不会被替换或合并。</p>}
             <button
               type="button"
-              className="bk-link tr-conflict-rename"
+              className={`${workspaceStyles.bkLink} ${styles.trConflictRename}`}
               disabled={Boolean(busy)}
               onClick={() => {
                 setTaken("");
@@ -818,8 +835,8 @@ function RestoreDialog({
           </section>
         ) : (
           <>
-            <label className="bk-field">
-              <span className="bk-field-label">名称</span>
+            <label className={workspaceStyles.bkField}>
+              <span className={workspaceStyles.bkFieldLabel}>名称</span>
               <input
                 data-autofocus
                 value={name}
@@ -832,11 +849,11 @@ function RestoreDialog({
               />
             </label>
             {error && (
-              <div className="bk-inline-error" role="alert">
+              <div className={workspaceStyles.bkInlineError} role="alert">
                 <span>{error}</span>
               </div>
             )}
-            <p className="bk-fine">
+            <p className={workspaceStyles.bkFine}>
               {file ? "" : "文件夹里的全部内容会一起恢复。"}恢复不会覆盖已有的文件；那里已有同名项目时，可以选择保留两者
               {file ? "或替换" : ""}。
             </p>
@@ -870,30 +887,34 @@ function ConflictDialog({
       onClose={() => onChoose("skip")}
       footer={
         <>
-          <button type="button" className="bk-secondary" onClick={() => onChoose("skip")}>
+          <button type="button" className={workspaceStyles.bkSecondary} onClick={() => onChoose("skip")}>
             跳过
           </button>
           {files > 0 && (
-            <button type="button" className="bk-secondary tr-replace" onClick={() => onChoose("replace")}>
+            <button
+              type="button"
+              className={`${workspaceStyles.bkSecondary} ${styles.trReplace}`}
+              onClick={() => onChoose("replace")}
+            >
               <Replace />
               替换
             </button>
           )}
-          <button type="button" className="bk-primary" onClick={() => onChoose("rename")}>
+          <button type="button" className={workspaceStyles.bkPrimary} onClick={() => onChoose("rename")}>
             <CopyPlus />
             保留两者
           </button>
         </>
       }
     >
-      <p className="bk-dialog-text">
+      <p className={workspaceStyles.bkDialogText}>
         保留两者时，恢复的项目改用“名称 (恢复)”这样的新名称放在旁边。
         {files > 0
           ? `替换时，现有的同名文件移到回收站${files < items.length ? "；文件夹不会被替换，仍然保留两者" : ""}。`
           : "文件夹不会被替换或合并。"}
         跳过的项目留在回收站中。
       </p>
-      <ul className="tr-conflict-list">
+      <ul className={styles.trConflictList}>
         {shown.map((item) => (
           <li key={item.id}>
             <EntryIcon kind={item.kind} />
@@ -904,7 +925,9 @@ function ConflictDialog({
           </li>
         ))}
       </ul>
-      {items.length > shown.length && <p className="bk-fine">以及另外 {items.length - shown.length} 项</p>}
+      {items.length > shown.length && (
+        <p className={workspaceStyles.bkFine}>以及另外 {items.length - shown.length} 项</p>
+      )}
     </Dialog>
   );
 }
@@ -940,10 +963,10 @@ function PurgeDialog({
       onClose={onClose}
       footer={
         <>
-          <button type="button" className="bk-secondary" disabled={busy} onClick={onClose}>
+          <button type="button" className={workspaceStyles.bkSecondary} disabled={busy} onClick={onClose}>
             取消
           </button>
-          <button type="button" className="bk-danger" disabled={busy} onClick={onConfirm}>
+          <button type="button" className={workspaceStyles.bkDanger} disabled={busy} onClick={onConfirm}>
             {busy ? (
               <>
                 <Spinner small />
@@ -958,7 +981,7 @@ function PurgeDialog({
         </>
       }
     >
-      <p className="bk-dialog-text">
+      <p className={workspaceStyles.bkDialogText}>
         {everything
           ? `回收站中的全部 ${items.length} 个项目（共 ${size}）将被立即删除，无法再恢复。`
           : single

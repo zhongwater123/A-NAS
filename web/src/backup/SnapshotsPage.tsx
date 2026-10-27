@@ -13,6 +13,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { formatBytes } from "../lib/bytes";
+import { Dialog, EmptyState, EntryIcon, Notice, Spinner } from "../ui/workspace";
+import workspaceStyles from "../ui/workspace.module.css";
 import {
   deleteSnapshot,
   keepSnapshot,
@@ -24,8 +26,8 @@ import {
   snapshotDownloadURL,
 } from "./api";
 import { useBackup } from "./BackupCenter";
+import styles from "./backup.module.css";
 import { formatClock, formatCount, formatDateTime, formatDay, restoredSnapshotName, spaceLabel } from "./format";
-import { Dialog, EmptyState, EntryIcon, Notice, Spinner } from "../ui/workspace";
 import { OriginBadge, SpaceSwitcher } from "./parts";
 
 interface Crumb {
@@ -112,7 +114,7 @@ export function SnapshotsPage() {
 
   if (!space)
     return (
-      <div className="bk-page">
+      <div className={styles.bkPage}>
         <EmptyState icon={<Camera />} title="没有可用的空间" />
       </div>
     );
@@ -120,13 +122,13 @@ export function SnapshotsPage() {
   const manage = canManage(space);
 
   return (
-    <div ref={root} className="bk-page bk-snapshots-page">
-      <header className="bk-page-head">
+    <div ref={root} className={`${styles.bkPage} ${styles.bkSnapshotsPage}`}>
+      <header className={styles.bkPageHead}>
         <div>
           <h2>快照</h2>
           <p>选一个时间点，浏览{spaceLabel(space)}当时的样子。</p>
         </div>
-        <div className="bk-head-actions">
+        <div className={styles.bkHeadActions}>
           <SpaceSwitcher
             spaces={spaces}
             value={space.id}
@@ -135,12 +137,17 @@ export function SnapshotsPage() {
               setShowDetail(false);
             }}
           />
-          <button type="button" className="bk-icon-button" aria-label="刷新快照" onClick={() => void refresh(space.id)}>
+          <button
+            type="button"
+            className={workspaceStyles.bkIconButton}
+            aria-label="刷新快照"
+            onClick={() => void refresh(space.id)}
+          >
             <RefreshCw />
           </button>
           <button
             type="button"
-            className="bk-primary"
+            className={workspaceStyles.bkPrimary}
             disabled={!manage || spaceData?.offline}
             title={manage ? undefined : "共享空间的快照由管理员创建"}
             onClick={() => createSnapshot(space)}
@@ -156,7 +163,7 @@ export function SnapshotsPage() {
           {spaceData.offline ? "数据卷当前不可用，恢复后才能浏览快照。" : spaceData.error}
         </Notice>
       ) : !snapshots ? (
-        <div className="bk-loading inline">
+        <div className={`${styles.bkLoading} ${styles.inline}`}>
           <Spinner />
           正在读取快照…
         </div>
@@ -167,14 +174,14 @@ export function SnapshotsPage() {
           actions={
             <>
               {manage && (
-                <button type="button" className="bk-primary" onClick={() => createSnapshot(space)}>
+                <button type="button" className={workspaceStyles.bkPrimary} onClick={() => createSnapshot(space)}>
                   <Camera />
                   创建第一份快照
                 </button>
               )}
               <button
                 type="button"
-                className="bk-secondary"
+                className={workspaceStyles.bkSecondary}
                 onClick={() => navigate("schedules", { spaceId: space.id })}
               >
                 <CalendarClock />
@@ -186,12 +193,12 @@ export function SnapshotsPage() {
           快照会冻结空间此刻的全部文件。之后误删或改坏文件，可以从快照里找回。
         </EmptyState>
       ) : (
-        <div className={`bk-snapshots${twoPane ? "" : " stacked"}`}>
+        <div className={`${styles.bkSnapshots}${twoPane ? "" : ` ${styles.stacked}`}`}>
           {(twoPane || !showDetail) && (
-            <div className="bk-timeline" role="listbox" aria-label="快照列表">
+            <div className={styles.bkTimeline} role="listbox" aria-label="快照列表">
               {groups.map((group) => (
-                <div key={group.day} className="bk-timeline-group">
-                  <p className="bk-timeline-day">
+                <div key={group.day} className={styles.bkTimelineGroup}>
+                  <p className={styles.bkTimelineDay}>
                     {group.day}
                     <span>{group.items.length} 份</span>
                   </p>
@@ -203,20 +210,20 @@ export function SnapshotsPage() {
                         type="button"
                         role="option"
                         aria-selected={snapshot.id === selected?.id}
-                        className={`bk-snap${snapshot.id === selected?.id ? " active" : ""}${snapshot.origin === "manual" ? " manual" : ""}`}
+                        className={`${styles.bkSnap}${snapshot.id === selected?.id ? ` ${styles.active} ${workspaceStyles.active}` : ""}${snapshot.origin === "manual" ? ` ${workspaceStyles.manual}` : ""}`}
                         onClick={() => {
                           setSelectedId(snapshot.id);
                           setShowDetail(true);
                         }}
                       >
-                        <span className="bk-snap-time">{formatClock(snapshot.createdAt)}</span>
-                        <span className="bk-snap-main">
+                        <span className={styles.bkSnapTime}>{formatClock(snapshot.createdAt)}</span>
+                        <span className={styles.bkSnapMain}>
                           <strong>{snapshotTitle(snapshot)}</strong>
                           <small>
                             {formatCount(snapshot.fileCount)} 个文件 · {formatBytes(snapshot.sizeBytes)}
                             {change && (
                               <b
-                                className={`bk-snap-change ${change.tone}`}
+                                className={`${styles.bkSnapChange} ${styles[change.tone] ?? ""}`}
                                 title={`与前一份（${formatDateTime(before!.createdAt)}）相比`}
                               >
                                 {change.text}
@@ -349,29 +356,34 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
   };
 
   return (
-    <section className="bk-browser" aria-label={`快照 ${snapshot.name}`} data-vnas-private="快照里的文件">
-      <header className="bk-browser-head">
+    <section className={styles.bkBrowser} aria-label={`快照 ${snapshot.name}`} data-vnas-private="快照里的文件">
+      <header className={styles.bkBrowserHead}>
         {onBack && (
-          <button type="button" className="bk-icon-button" aria-label="返回快照列表" onClick={onBack}>
+          <button type="button" className={workspaceStyles.bkIconButton} aria-label="返回快照列表" onClick={onBack}>
             <ArrowLeft />
           </button>
         )}
-        <div className="bk-browser-title">
+        <div className={styles.bkBrowserTitle}>
           <h3>{snapshot.name}</h3>
           <p>
             {formatDateTime(snapshot.createdAt)} · <OriginBadge origin={snapshot.origin} /> ·{" "}
             {formatCount(snapshot.fileCount)} 个文件 · {formatBytes(snapshot.sizeBytes)}
           </p>
         </div>
-        <div className="bk-browser-actions">
-          <button type="button" className="bk-secondary small" disabled={busy} onClick={restoreHere}>
+        <div className={styles.bkBrowserActions}>
+          <button
+            type="button"
+            className={`${workspaceStyles.bkSecondary} ${styles.small} ${workspaceStyles.small}`}
+            disabled={busy}
+            onClick={restoreHere}
+          >
             <ArchiveRestore />
             {trail.length ? "恢复此文件夹" : "全部恢复"}
           </button>
           {manage && snapshot.origin === "scheduled" && (
             <button
               type="button"
-              className="bk-secondary small"
+              className={`${workspaceStyles.bkSecondary} ${styles.small} ${workspaceStyles.small}`}
               disabled={busy}
               title="转为手动快照，不会再被定时清理"
               onClick={() => void keep()}
@@ -383,7 +395,7 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
           {manage && (
             <button
               type="button"
-              className="bk-secondary small danger"
+              className={`${workspaceStyles.bkSecondary} ${styles.small} ${workspaceStyles.small} ${styles.danger} ${workspaceStyles.danger}`}
               disabled={busy}
               onClick={() => setConfirming(true)}
             >
@@ -393,8 +405,8 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
           )}
         </div>
       </header>
-      <div className="bk-browser-bar">
-        <nav className="bk-crumbs" aria-label="快照中的位置">
+      <div className={styles.bkBrowserBar}>
+        <nav className={styles.bkCrumbs} aria-label="快照中的位置">
           <button type="button" disabled={!trail.length} onClick={() => setTrail([])}>
             <FolderOpen />
             {spaceLabel(space)}
@@ -412,12 +424,16 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
             </span>
           ))}
         </nav>
-        <div className="bk-segmented small" role="radiogroup" aria-label="显示">
+        <div
+          className={`${styles.bkSegmented} ${workspaceStyles.bkSegmented} ${styles.small} ${workspaceStyles.small}`}
+          role="radiogroup"
+          aria-label="显示"
+        >
           <button
             type="button"
             role="radio"
             aria-checked={!onlyChanged}
-            className={onlyChanged ? "" : "active"}
+            className={onlyChanged ? "" : `${styles.active} ${workspaceStyles.active}`}
             onClick={() => setOnlyChanged(false)}
           >
             全部
@@ -426,52 +442,56 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
             type="button"
             role="radio"
             aria-checked={onlyChanged}
-            className={onlyChanged ? "active" : ""}
+            className={onlyChanged ? `${styles.active} ${workspaceStyles.active}` : ""}
             onClick={() => setOnlyChanged(true)}
           >
-            与现在不同{entries ? <span className="bk-count">{changed.length}</span> : null}
+            与现在不同{entries ? <span className={styles.bkCount}>{changed.length}</span> : null}
           </button>
         </div>
       </div>
       {entries && changed.length > 0 && !onlyChanged && (
-        <p className="bk-diff-summary">
+        <p className={styles.bkDiffSummary}>
           与现在的{spaceLabel(space)}相比，这里
           {removedCount > 0 && (
             <>
-              <span className="bk-diff-dot removed" />
+              <span className={`${styles.bkDiffDot} ${styles.removed}`} />
               {removedCount} 项已不在空间中
             </>
           )}
           {removedCount > 0 && modifiedCount > 0 && "，"}
           {modifiedCount > 0 && (
             <>
-              <span className="bk-diff-dot modified" />
+              <span className={`${styles.bkDiffDot} ${styles.modified}`} />
               {modifiedCount} 项有改动
             </>
           )}
-          <button type="button" className="bk-link" onClick={() => setOnlyChanged(true)}>
+          <button
+            type="button"
+            className={`${styles.bkLink} ${workspaceStyles.bkLink}`}
+            onClick={() => setOnlyChanged(true)}
+          >
             只看这些
           </button>
         </p>
       )}
-      <div className="bk-entries" role="grid" aria-label="快照中的文件">
-        <div className="bk-entries-head" role="row">
+      <div className={styles.bkEntries} role="grid" aria-label="快照中的文件">
+        <div className={styles.bkEntriesHead} role="row">
           <span role="columnheader">名称</span>
           <span role="columnheader">修改时间</span>
           <span role="columnheader">大小</span>
-          <span role="columnheader" className="bk-sr">
+          <span role="columnheader" className={styles.bkSr}>
             操作
           </span>
         </div>
         {error ? (
           <Notice tone="danger">{error}</Notice>
         ) : !shown ? (
-          <div className="bk-loading inline">
+          <div className={`${styles.bkLoading} ${styles.inline}`}>
             <Spinner small />
             正在读取…
           </div>
         ) : shown.length === 0 ? (
-          <p className="bk-entries-empty">
+          <p className={styles.bkEntriesEmpty}>
             {onlyChanged ? "这一层与现在的空间相同" : trail.length ? "这个文件夹是空的" : "这份快照里没有文件"}
           </p>
         ) : (
@@ -481,19 +501,19 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
               role="row"
               aria-selected={selected === entry.id}
               tabIndex={0}
-              className={`bk-entry${selected === entry.id ? " selected" : ""}`}
+              className={`${styles.bkEntry}${selected === entry.id ? ` ${styles.selected}` : ""}`}
               onClick={() => setSelected(entry.id)}
               onDoubleClick={() => open(entry)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") open(entry);
               }}
             >
-              <span role="gridcell" className="bk-entry-name">
-                <EntryIcon kind={entry.kind} />
+              <span role="gridcell" className={styles.bkEntryName}>
+                <EntryIcon kind={entry.kind} className={styles.bkEntryIcon} />
                 {entry.kind === "directory" ? (
                   <button
                     type="button"
-                    className="bk-entry-link"
+                    className={styles.bkEntryLink}
                     onClick={(event) => {
                       event.stopPropagation();
                       open(entry);
@@ -505,21 +525,24 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
                   <span>{entry.name}</span>
                 )}
                 {entry.change && (
-                  <span className={`bk-change ${entry.change}`} title={changeBadge[entry.change].title}>
+                  <span
+                    className={`${styles.bkChange} ${styles[entry.change] ?? ""}`}
+                    title={changeBadge[entry.change].title}
+                  >
                     {changeBadge[entry.change].label}
                   </span>
                 )}
               </span>
-              <span role="gridcell" className="bk-entry-meta">
+              <span role="gridcell" className={styles.bkEntryMeta}>
                 {entry.modifiedAt ? formatDateTime(entry.modifiedAt) : "—"}
               </span>
-              <span role="gridcell" className="bk-entry-meta">
+              <span role="gridcell" className={styles.bkEntryMeta}>
                 {entry.kind === "file" ? formatBytes(entry.sizeBytes) : "文件夹"}
               </span>
-              <span role="gridcell" className="bk-entry-actions">
+              <span role="gridcell" className={styles.bkEntryActions}>
                 {entry.kind === "file" && (
                   <a
-                    className="bk-icon-button"
+                    className={workspaceStyles.bkIconButton}
                     href={snapshotDownloadURL(snapshot.id, entry.id)}
                     download={entry.name}
                     aria-label={`下载 ${entry.name}`}
@@ -531,7 +554,7 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
                 )}
                 <button
                   type="button"
-                  className="bk-restore-button"
+                  className={workspaceStyles.bkRestoreButton}
                   aria-label={`恢复 ${entry.name}`}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -555,10 +578,15 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
           onClose={() => setConfirming(false)}
           footer={
             <>
-              <button type="button" className="bk-secondary" disabled={busy} onClick={() => setConfirming(false)}>
+              <button
+                type="button"
+                className={workspaceStyles.bkSecondary}
+                disabled={busy}
+                onClick={() => setConfirming(false)}
+              >
                 取消
               </button>
-              <button type="button" className="bk-danger" disabled={busy} onClick={() => void remove()}>
+              <button type="button" className={workspaceStyles.bkDanger} disabled={busy} onClick={() => void remove()}>
                 {busy ? (
                   <>
                     <Spinner small />
@@ -571,7 +599,7 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
             </>
           }
         >
-          <p className="bk-dialog-text">
+          <p className={workspaceStyles.bkDialogText}>
             “{snapshot.name}”会被永久删除，之后无法再从这份快照找回文件。{spaceLabel(space)}中现有的文件不受影响。
           </p>
         </Dialog>

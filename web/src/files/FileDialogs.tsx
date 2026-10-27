@@ -2,6 +2,7 @@ import { Pencil, Trash2 } from "lucide-react";
 import { FormEvent } from "react";
 
 import type { FileEntry } from "../api.generated";
+import styles from "./files.module.css";
 
 // DeleteDialog confirms moving items to the trash.
 export function DeleteDialog({
@@ -16,9 +17,14 @@ export function DeleteDialog({
   onConfirm: () => void;
 }) {
   return (
-    <div className="file-dialog-backdrop">
-      <section className="file-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="file-delete-title">
-        <span className="file-confirm-icon">
+    <div className={styles.fileDialogBackdrop}>
+      <section
+        className={styles.fileConfirmDialog}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="file-delete-title"
+      >
+        <span className={styles.fileConfirmIcon}>
           <Trash2 />
         </span>
         <div>
@@ -28,7 +34,7 @@ export function DeleteDialog({
             将移到回收站，可在 30 天内恢复。
           </p>
         </div>
-        <div className="file-confirm-actions">
+        <div className={styles.fileConfirmActions}>
           <button disabled={busy} onClick={onCancel}>
             取消
           </button>
@@ -54,8 +60,8 @@ export function RenameDialog({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
-    <div className="file-dialog-backdrop">
-      <form className="file-rename-dialog" aria-label={`重命名 ${entry.name}`} onSubmit={onSubmit}>
+    <div className={styles.fileDialogBackdrop}>
+      <form className={styles.fileRenameDialog} aria-label={`重命名 ${entry.name}`} onSubmit={onSubmit}>
         <span>
           <Pencil />
         </span>

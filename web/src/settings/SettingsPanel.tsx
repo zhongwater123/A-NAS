@@ -45,21 +45,21 @@ import { HostState } from "../desktop/api";
 import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
 import type { HostStateView } from "../desktop/useHostState";
 import { formatBytes } from "../lib/bytes";
-import { type LogsPreset, LogsSection } from "./logs/LogsSection";
 import { displayName, fullName, usePeople } from "../people/people";
-import { TaskManagerSection } from "./taskmanager/TaskManagerSection";
 import { AvatarDialog } from "./AvatarDialog";
 import { createMember, disableMember, listUsers, resetMember, startViewing, ViewingScope } from "./api";
 import { describeFinding } from "./health";
 import { HostStateBanner, HostStatePending } from "./hostState";
+import { type LogsPreset, LogsSection } from "./logs/LogsSection";
 import { PersonalizationSection } from "./PersonalizationSection";
 import { Avatar, Banner, Group, IconTile, messageOf, PageHeader, Pill, RefreshButton, type Tone } from "./parts";
 import { StorageSection, useVolumes, type VolumesView, volumeState, volumeUsage } from "./StorageSection";
+// After the sections' stylesheets, which these rules follow.
+import styles from "./settings.module.css";
 import type { StoragePlanFlow } from "./storagePlan";
 import { TerminalSection } from "./TerminalSection";
+import { TaskManagerSection } from "./taskmanager/TaskManagerSection";
 import type { SessionStatus } from "./terminal";
-// After the sections' stylesheets, which these rules follow.
-import "./settings.css";
 
 export { type StoragePlanFlow, useStoragePlan } from "./storagePlan";
 
@@ -130,10 +130,10 @@ export function SettingsPanel({
   const [terminalStatus, setTerminalStatus] = useState<SessionStatus>();
   if (current === "terminal" && !terminalOpened) setTerminalOpened(true);
   return (
-    <div className="set-shell">
-      <nav className="set-nav" aria-label="设置分区">
+    <div className={styles.setShell}>
+      <nav className={styles.setNav} aria-label="设置分区">
         <button
-          className={`set-nav-account ${current === "account" ? "active" : ""}`}
+          className={`${styles.setNavAccount} ${current === "account" ? styles.active : ""}`}
           aria-label="我的账号"
           aria-current={current === "account" ? "page" : undefined}
           onClick={() => onSectionChange("account")}
@@ -149,18 +149,18 @@ export function SettingsPanel({
           .map(({ id, label, icon, tone }) => (
             <button
               key={id}
-              className={current === id ? "active" : ""}
+              className={current === id ? styles.active : ""}
               aria-current={current === id ? "page" : undefined}
               onClick={() => onSectionChange(id)}
             >
               <IconTile tone={tone} icon={icon} />
               {label}
               {id === "terminal" && current !== "terminal" && terminalStatus?.state === "connected" && (
-                <span className="set-nav-live" title="Shell 正在运行" aria-hidden="true" />
+                <span className={styles.setNavLive} title="Shell 正在运行" aria-hidden="true" />
               )}
             </button>
           ))}
-        <p className="set-nav-label">规划中</p>
+        <p className={styles.setNavLabel}>规划中</p>
         {plannedSections.map(({ label, icon, tone }) => (
           <button key={label} aria-label={`${label}，规划中`} disabled>
             <IconTile tone={tone} icon={icon} />
@@ -168,10 +168,10 @@ export function SettingsPanel({
           </button>
         ))}
       </nav>
-      <div className={`set-main ${current === "terminal" ? "fill" : ""}`}>
+      <div className={`${styles.setMain} ${current === "terminal" ? styles.fill : ""}`} data-settings-main="">
         {current !== "terminal" && (
           <div
-            className={`set-page ${current === "task-manager" ? "task-manager-page" : current === "logs" ? "wide" : ""}`}
+            className={`${styles.setPage} ${current === "task-manager" ? styles.taskManagerPage : current === "logs" ? styles.wide : ""}`}
           >
             {current === "account" && (
               <AccountSection
@@ -310,22 +310,27 @@ function AccountSection({
   return (
     <>
       <PageHeader title="我的账号" subtitle="你的头像、昵称、密码与当前会话" />
-      <div className="set-card acct-hero">
-        <button className="acct-avatar" aria-label="更换头像" title="更换头像" onClick={() => setChoosingAvatar(true)}>
+      <div className={`${styles.setCard} ${styles.acctHero}`}>
+        <button
+          className={styles.acctAvatar}
+          aria-label="更换头像"
+          title="更换头像"
+          onClick={() => setChoosingAvatar(true)}
+        >
           <Avatar who={user} size="xl" />
-          <span className="acct-avatar-badge" aria-hidden="true">
+          <span className={styles.acctAvatarBadge} aria-hidden="true">
             <Camera />
           </span>
         </button>
-        <div className="acct-hero-text">
+        <div className={styles.acctHeroText}>
           <h3>{displayName(user)}</h3>
           <p>
             <Pill tone={user.role === "admin" ? "accent" : "neutral"}>{roleLabel(user.role)}</Pill>
             <StatusText status={user.status} />
-            {user.nickname && <span className="acct-handle">账号名 {user.username}</span>}
+            {user.nickname && <span className={styles.acctHandle}>账号名 {user.username}</span>}
           </p>
         </div>
-        <button className="set-btn" onClick={onLogout}>
+        <button className={styles.setBtn} onClick={onLogout}>
           <LogOut />
           退出登录
         </button>
@@ -350,12 +355,12 @@ function AccountSection({
           detail={user.avatarVersion ? "保存时已裁成圆形并压缩为小图" : "未设置，显示名字的第一个字"}
         >
           {user.avatarVersion && (
-            <button className="set-btn" disabled={removing} onClick={() => void dropAvatar()}>
+            <button className={styles.setBtn} disabled={removing} onClick={() => void dropAvatar()}>
               {removing ? "正在移除…" : "移除"}
             </button>
           )}
           <button
-            className="set-btn"
+            className={styles.setBtn}
             onClick={() => {
               setProfileNotice("");
               setChoosingAvatar(true);
@@ -379,7 +384,7 @@ function AccountSection({
           label="账号名"
           detail="登录、SMB 共享和设备上的 Linux 账号使用，不能修改"
         >
-          <span className="acct-username">{user.username}</span>
+          <span className={styles.acctUsername}>{user.username}</span>
         </Row>
       </Group>
       {choosingAvatar && (
@@ -394,7 +399,7 @@ function AccountSection({
       <Group title="登录与安全">
         <Row icon={<IconTile tone="key" icon={KeyRound} />} label="密码" detail="网页登录和 SMB 共享使用同一个密码">
           {!editing && (
-            <button className="set-btn" onClick={open}>
+            <button className={styles.setBtn} onClick={open}>
               修改密码…
             </button>
           )}
@@ -407,10 +412,15 @@ function AccountSection({
           />
         )}
         {editing && (
-          <form className="acct-form" aria-label="修改密码" autoComplete="off" onSubmit={(event) => void submit(event)}>
+          <form
+            className={styles.acctForm}
+            aria-label="修改密码"
+            autoComplete="off"
+            onSubmit={(event) => void submit(event)}
+          >
             <Field label="当前密码">
               <input
-                className="set-input"
+                className={styles.setInput}
                 name="currentPassword"
                 type="password"
                 required
@@ -420,7 +430,7 @@ function AccountSection({
             </Field>
             <Field label="新密码" hint={passwordRuleText}>
               <input
-                className="set-input"
+                className={styles.setInput}
                 name="newPassword"
                 type="password"
                 minLength={12}
@@ -430,7 +440,7 @@ function AccountSection({
             </Field>
             <Field label="确认新密码">
               <input
-                className="set-input"
+                className={styles.setInput}
                 name="confirmPassword"
                 type="password"
                 minLength={12}
@@ -439,18 +449,18 @@ function AccountSection({
               />
             </Field>
             {error && <Banner tone="error">{error}</Banner>}
-            <div className="acct-form-actions">
-              <button type="button" className="set-btn" onClick={cancel}>
+            <div className={styles.acctFormActions}>
+              <button type="button" className={styles.setBtn} onClick={cancel}>
                 取消
               </button>
-              <button className="set-btn primary" disabled={saving}>
+              <button className={`${styles.setBtn} primary`} disabled={saving}>
                 {saving ? "正在保存…" : "保存新密码"}
               </button>
             </div>
           </form>
         )}
         {notice && (
-          <div className="set-inline-note" role="status">
+          <div className={styles.setInlineNote} role="status">
             <CircleCheck />
             {notice}
           </div>
@@ -469,7 +479,7 @@ function AccountSection({
           label="登录记录"
           detail="这个账号在哪里登录过、是否有人输错过密码"
         >
-          <button className="set-btn" onClick={onShowSignIns}>
+          <button className={styles.setBtn} onClick={onShowSignIns}>
             查看
             <ChevronRight />
           </button>
@@ -525,16 +535,21 @@ function NicknameRow({
         detail={user.nickname || `未设置，显示账号名 ${user.username}`}
       >
         {!editing && (
-          <button className="set-btn" onClick={open}>
+          <button className={styles.setBtn} onClick={open}>
             {user.nickname ? "修改…" : "设置昵称…"}
           </button>
         )}
       </Row>
       {editing && (
-        <form className="acct-form" aria-label="修改昵称" autoComplete="off" onSubmit={(event) => void submit(event)}>
+        <form
+          className={styles.acctForm}
+          aria-label="修改昵称"
+          autoComplete="off"
+          onSubmit={(event) => void submit(event)}
+        >
           <Field label="昵称" hint={`${nicknameRuleText}。留空则显示账号名。`}>
             <input
-              className="set-input"
+              className={styles.setInput}
               name="nickname"
               value={value}
               onChange={(event) => setValue(event.target.value)}
@@ -544,10 +559,10 @@ function NicknameRow({
             />
           </Field>
           {error && <Banner tone="error">{error}</Banner>}
-          <div className="acct-form-actions">
+          <div className={styles.acctFormActions}>
             <button
               type="button"
-              className="set-btn"
+              className={styles.setBtn}
               onClick={() => {
                 setEditing(false);
                 setError("");
@@ -555,7 +570,7 @@ function NicknameRow({
             >
               取消
             </button>
-            <button className="set-btn primary" disabled={saving}>
+            <button className={`${styles.setBtn} primary`} disabled={saving}>
               {saving ? "正在保存…" : "保存昵称"}
             </button>
           </div>
@@ -603,14 +618,14 @@ function OverviewSection({
     <>
       {header}
       <HostStateBanner host={host} snapshot={snapshot} />
-      <div className="ov-hero">
+      <div className={styles.ovHero}>
         <DeviceArt />
         <div>
           <h3>{snapshot.system.hostname}</h3>
           <p>A-NAS 家庭存储</p>
-          <div className="ov-hero-pills">
+          <div className={styles.ovHeroPills}>
             <Pill tone={health.tone}>
-              <span className="set-dot" />
+              <span className={styles.setDot} />
               {health.label}
             </Pill>
             <Pill tone={snapshot.dataSource === "live" ? "success" : "warning"}>
@@ -619,8 +634,8 @@ function OverviewSection({
           </div>
         </div>
       </div>
-      <div className="ov-stats">
-        <div className="ov-stat">
+      <div className={styles.ovStats}>
+        <div className={styles.ovStat}>
           <span>
             <Clock3 />
             运行时间
@@ -628,7 +643,7 @@ function OverviewSection({
           <strong>{formatUptime(snapshot.system.uptimeSeconds)}</strong>
           <small>观测于 {formatTime(snapshot.observedAt)}</small>
         </div>
-        <div className="ov-stat">
+        <div className={styles.ovStat}>
           <span>
             <HardDrive />
             磁盘
@@ -636,11 +651,11 @@ function OverviewSection({
           <strong>{snapshot.disks.length} 块</strong>
           <small>{snapshot.disks.length ? `总容量 ${formatBytes(totalCapacity)}` : "尚未发现块设备"}</small>
         </div>
-        <button className="ov-stat" onClick={onOpenStorage} aria-label="查看存储">
+        <button className={styles.ovStat} onClick={onOpenStorage} aria-label="查看存储">
           <span>
             <Database />
             数据卷
-            <ChevronRight className="ov-stat-go" />
+            <ChevronRight className={styles.ovStatGo} />
           </span>
           {volumes.items === undefined ? (
             <>
@@ -656,7 +671,7 @@ function OverviewSection({
             <>
               <strong>已用 {usage.percent}%</strong>
               <small>可用 {formatBytes(usage.available)}</small>
-              <span className="ov-stat-bar">
+              <span className={styles.ovStatBar}>
                 <i style={{ width: `${usage.percent}%` }} />
               </span>
             </>
@@ -676,7 +691,7 @@ function OverviewSection({
           value={`${snapshot.system.operatingSystem.name} ${snapshot.system.operatingSystem.version}`}
         />
         <InfoRow label="系统架构" value={snapshot.system.architecture} />
-        <InfoRow label="设备标识" value={<span className="set-mono">{snapshot.system.id}</span>} />
+        <InfoRow label="设备标识" value={<span className={styles.setMono}>{snapshot.system.id}</span>} />
         <InfoRow label="最近观测" value={formatTime(snapshot.observedAt)} />
       </Group>
     </>
@@ -691,9 +706,9 @@ function HealthChecks({ snapshot, onOpenStorage }: { snapshot: HostState; onOpen
   if (snapshot.system.health === "unknown") {
     return (
       <Group title="健康检查">
-        <div className="set-row health-row">
+        <div className={`${styles.setRow} ${styles.healthRow}`}>
           <IconTile tone="overview" icon={ShieldCheck} size="lg" />
-          <div className="set-row-text">
+          <div className={styles.setRowText}>
             <span>
               <strong>还没有可以检查的磁盘</strong>
             </span>
@@ -706,9 +721,9 @@ function HealthChecks({ snapshot, onOpenStorage }: { snapshot: HostState; onOpen
   return (
     <Group title="健康检查" aside={findings.length ? `${findings.length} 项需要处理` : undefined}>
       {findings.length === 0 ? (
-        <div className="set-row health-row">
+        <div className={`${styles.setRow} ${styles.healthRow}`}>
           <IconTile tone="security" icon={ShieldCheck} size="lg" />
-          <div className="set-row-text">
+          <div className={styles.setRowText}>
             <span>
               <strong>未发现问题</strong>
             </span>
@@ -721,9 +736,12 @@ function HealthChecks({ snapshot, onOpenStorage }: { snapshot: HostState; onOpen
             const described = describeFinding(finding, snapshot.disks);
             const critical = finding.severity === "critical";
             return (
-              <div key={`${finding.code}:${finding.diskId ?? ""}:${index}`} className="set-row health-row">
+              <div
+                key={`${finding.code}:${finding.diskId ?? ""}:${index}`}
+                className={`${styles.setRow} ${styles.healthRow}`}
+              >
                 <IconTile tone={critical ? "danger" : "warning"} icon={described.icon} size="lg" />
-                <div className="set-row-text">
+                <div className={styles.setRowText}>
                   <span>
                     <strong>{described.title}</strong>
                     <Pill tone={critical ? "danger" : "warning"}>{critical ? "严重" : "注意"}</Pill>
@@ -733,7 +751,7 @@ function HealthChecks({ snapshot, onOpenStorage }: { snapshot: HostState; onOpen
               </div>
             );
           })}
-          <button className="set-row health-go" onClick={onOpenStorage}>
+          <button className={`${styles.setRow} ${styles.healthGo}`} onClick={onOpenStorage}>
             在存储中查看磁盘与数据卷
             <ChevronRight />
           </button>
@@ -746,7 +764,7 @@ function HealthChecks({ snapshot, onOpenStorage }: { snapshot: HostState; onOpen
 function DeviceArt() {
   const id = useId().replace(/[^\w-]/g, "");
   return (
-    <svg className="ov-art" viewBox="0 0 80 80" aria-hidden="true">
+    <svg className={styles.ovArt} viewBox="0 0 80 80" aria-hidden="true">
       <defs>
         <linearGradient id={`${id}-body`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#465468" />
@@ -820,7 +838,7 @@ function UsersSection({ currentUser, onChangeOwnPassword }: { currentUser: User;
         title="用户与权限"
         subtitle="管理家庭成员的账号"
         action={
-          <button className="set-btn primary" onClick={() => open({ kind: "create" })}>
+          <button className={`${styles.setBtn} primary`} onClick={() => open({ kind: "create" })}>
             <UserPlus />
             添加成员
           </button>
@@ -839,7 +857,7 @@ function UsersSection({ currentUser, onChangeOwnPassword }: { currentUser: User;
         footnote="管理员默认看不到成员的个人空间和私有图库。需要找回内容时可以开启只读查看：必须填写原因，会写入审计并通知对方，24 小时后自动结束。"
       >
         {users === undefined ? (
-          <div className="set-state compact">
+          <div className={`${styles.setState} ${styles.compact}`}>
             <span className="loader" />
             <p>正在读取账号…</p>
           </div>
@@ -847,22 +865,22 @@ function UsersSection({ currentUser, onChangeOwnPassword }: { currentUser: User;
           sortUsers(users, currentUser.id).map((user) => {
             const self = user.id === currentUser.id;
             return (
-              <div className="set-row" key={user.id}>
+              <div className={styles.setRow} key={user.id}>
                 <Avatar who={user} />
-                <div className="set-row-text">
+                <div className={styles.setRowText}>
                   <span>
                     <strong>{displayName(user)}</strong>
-                    {user.nickname && <span className="set-handle">{user.username}</span>}
+                    {user.nickname && <span className={styles.setHandle}>{user.username}</span>}
                     {self && <Pill tone="accent">你</Pill>}
                   </span>
                   <small>
-                    <span className={`set-dot status-${user.status}`} />
+                    <span className={`${styles.setDot} ${styles[`status-${user.status}`] ?? ""}`} />
                     {roleLabel(user.role)} · {statusLabel(user.status)}
                   </small>
                 </div>
-                <div className="set-row-end">
+                <div className={styles.setRowEnd}>
                   {self ? (
-                    <button className="set-btn" onClick={onChangeOwnPassword}>
+                    <button className={styles.setBtn} onClick={onChangeOwnPassword}>
                       修改我的密码
                     </button>
                   ) : (
@@ -1017,7 +1035,7 @@ function UserDialogView({
   };
   return (
     <Dialog title={content.title} onClose={busy ? undefined : onClose}>
-      <form className="set-dialog-form" aria-label={content.label} autoComplete="off" onSubmit={submit}>
+      <form className={styles.setDialogForm} aria-label={content.label} autoComplete="off" onSubmit={submit}>
         <header>
           <IconTile tone={content.tone} icon={content.icon} size="lg" />
           <h3>{content.title}</h3>
@@ -1027,7 +1045,7 @@ function UserDialogView({
           <>
             <Field label="账号" hint={usernameRuleText}>
               <input
-                className="set-input"
+                className={styles.setInput}
                 name="username"
                 required
                 autoFocus
@@ -1037,7 +1055,7 @@ function UserDialogView({
             </Field>
             <Field label="初始密码" hint={`${passwordRuleText}；成员可在“我的账号”中自行修改`}>
               <input
-                className="set-input"
+                className={styles.setInput}
                 name="password"
                 type="password"
                 minLength={12}
@@ -1050,7 +1068,7 @@ function UserDialogView({
         {dialog.kind === "reset" && (
           <Field label="新密码" hint={passwordRuleText}>
             <input
-              className="set-input"
+              className={styles.setInput}
               name="password"
               type="password"
               minLength={12}
@@ -1064,7 +1082,7 @@ function UserDialogView({
           <>
             <Field label="查看原因">
               <input
-                className="set-input"
+                className={styles.setInput}
                 name="reason"
                 maxLength={500}
                 required
@@ -1073,16 +1091,22 @@ function UserDialogView({
               />
             </Field>
             <Field label="你的密码" hint="为确认是你本人操作">
-              <input className="set-input" name="password" type="password" autoComplete="current-password" required />
+              <input
+                className={styles.setInput}
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+              />
             </Field>
           </>
         )}
         {error && <Banner tone="error">{error}</Banner>}
         <footer>
-          <button type="button" className="set-btn" onClick={onClose} disabled={busy}>
+          <button type="button" className={styles.setBtn} onClick={onClose} disabled={busy}>
             取消
           </button>
-          <button className={`set-btn ${content.danger ? "danger" : "primary"}`} disabled={busy}>
+          <button className={`${styles.setBtn} ${content.danger ? styles.danger : "primary"}`} disabled={busy}>
             {busy ? "正在处理…" : content.submit}
           </button>
         </footer>
@@ -1114,9 +1138,9 @@ function RowMenu({ label, items }: { label: string; items: MenuItem[] }) {
     };
   }, [open]);
   return (
-    <div className="set-menu-anchor" ref={anchor}>
+    <div className={styles.setMenuAnchor} ref={anchor}>
       <button
-        className={`set-icon-btn bordered ${open ? "open" : ""}`}
+        className={`${styles.setIconBtn} ${styles.bordered} ${open ? styles.open : ""}`}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -1125,7 +1149,7 @@ function RowMenu({ label, items }: { label: string; items: MenuItem[] }) {
         <Ellipsis />
       </button>
       {open && (
-        <div className="set-menu" role="menu" aria-label={label}>
+        <div className={styles.setMenu} role="menu" aria-label={label}>
           {items.map((item, index) =>
             item === "separator" ? (
               <hr key={index} />
@@ -1133,7 +1157,7 @@ function RowMenu({ label, items }: { label: string; items: MenuItem[] }) {
               <button
                 key={item.label}
                 role="menuitem"
-                className={item.danger ? "danger" : ""}
+                className={item.danger ? styles.danger : ""}
                 disabled={item.disabled}
                 onClick={() => {
                   setOpen(false);
@@ -1162,12 +1186,12 @@ function Dialog({ title, onClose, children }: { title: string; onClose?: () => v
   }, [onClose]);
   return (
     <div
-      className="set-dialog-layer"
+      className={styles.setDialogLayer}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose?.();
       }}
     >
-      <div className="set-dialog" role="dialog" aria-modal="true" aria-label={title}>
+      <div className={styles.setDialog} role="dialog" aria-modal="true" aria-label={title}>
         {children}
       </div>
     </div>
@@ -1188,29 +1212,29 @@ function Row({
   children?: ReactNode;
 }) {
   return (
-    <div className="set-row">
+    <div className={styles.setRow}>
       {icon}
-      <div className="set-row-text">
+      <div className={styles.setRowText}>
         <span>{label}</span>
         {detail && <small>{detail}</small>}
       </div>
-      {children && <div className="set-row-end">{children}</div>}
+      {children && <div className={styles.setRowEnd}>{children}</div>}
     </div>
   );
 }
 
 function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="set-row info">
+    <div className={`${styles.setRow} ${styles.info}`}>
       <span>{label}</span>
-      <span className="set-value">{value}</span>
+      <span className={styles.setValue}>{value}</span>
     </div>
   );
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
-    <div className="set-field">
+    <div className={styles.setField}>
       <label>
         <span>{label}</span>
         {children}
@@ -1222,8 +1246,8 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 function StatusText({ status }: { status: User["status"] }) {
   return (
-    <span className="set-status">
-      <span className={`set-dot status-${status}`} />
+    <span className={styles.setStatus}>
+      <span className={`${styles.setDot} ${styles[`status-${status}`] ?? ""}`} />
       {statusLabel(status)}
     </span>
   );

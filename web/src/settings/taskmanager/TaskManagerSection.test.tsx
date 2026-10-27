@@ -4,9 +4,9 @@ import { afterEach, expect, it, vi } from "vitest";
 
 import { onSessionEnded } from "../../api/client";
 import type { Session } from "../../api.generated";
-import { SettingsPanel, type SettingsSection, type StoragePlanFlow } from "../SettingsPanel";
 import { json, stubAPI } from "../../test/api";
 import { taskManagerDevice as device, taskManagerTasks as tasks } from "../../test/fixtures";
+import { SettingsPanel, type SettingsSection, type StoragePlanFlow } from "../SettingsPanel";
 
 vi.mock("../AvatarDialog", () => ({ AvatarDialog: () => null }));
 vi.mock("../TerminalSection", () => ({ TerminalSection: () => null }));

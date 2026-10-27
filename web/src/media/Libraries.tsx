@@ -29,6 +29,7 @@ import { artworkURL, createLibrary, type LibraryKind, type MediaLibrary, updateL
 import { Empty, messageOf, PageHeader } from "./Browse";
 import { Menu } from "./Cards";
 import { ago } from "./format";
+import styles from "./media.module.css";
 
 export const kindInfo: Record<LibraryKind, { label: string; icon: ReactNode; text: string }> = {
   movies: { label: "电影", icon: <Film />, text: "每个视频都是一部电影，按片名与年份识别" },
@@ -58,7 +59,7 @@ function scanText(library: MediaLibrary, processing: boolean): { text: string; b
 function LibraryCovers({ library }: { library: MediaLibrary }) {
   const covers = library.covers.slice(0, 4);
   return (
-    <div className={`mc-library-covers n${covers.length}`} aria-hidden="true">
+    <div className={`${styles.mcLibraryCovers} ${styles[`n${covers.length}`] ?? ""}`} aria-hidden="true">
       {covers.length ? (
         covers.map((id) => (
           <img
@@ -76,7 +77,7 @@ function LibraryCovers({ library }: { library: MediaLibrary }) {
           />
         ))
       ) : (
-        <span className="mc-library-glyph">{kindInfo[library.kind].icon}</span>
+        <span className={styles.mcLibraryGlyph}>{kindInfo[library.kind].icon}</span>
       )}
     </div>
   );
@@ -104,23 +105,23 @@ export function LibrariesPage({
   onUpload: (library?: MediaLibrary) => void;
 }) {
   return (
-    <div className="mc-page">
+    <div className={styles.mcPage}>
       <PageHeader title="媒体库" count={libraries?.length}>
         {libraries && libraries.length > 0 && (
-          <button type="button" className="mc-glass small" onClick={() => onUpload()}>
+          <button type="button" className={`${styles.mcGlass} ${styles.small}`} onClick={() => onUpload()}>
             <CloudUpload />
             上传
           </button>
         )}
         {canCreate && (
-          <button type="button" className="mc-primary small" onClick={onCreate}>
+          <button type="button" className={`${styles.mcPrimary} ${styles.small}`} onClick={onCreate}>
             <Plus />
             新建媒体库
           </button>
         )}
       </PageHeader>
       {libraries && !processing && libraries.length > 0 && (
-        <p className="mc-note">
+        <p className={styles.mcNote}>
           <AlertTriangle />
           设备上没有可用的视频处理组件，暂时只能读取文件名，并直接播放浏览器支持的格式。
         </p>
@@ -128,31 +129,33 @@ export function LibrariesPage({
       {!libraries ? null : !libraries.length ? (
         <Empty icon={<FolderPlus />} title="还没有媒体库" text="选择存放视频的文件夹，影视中心会自动整理。">
           {canCreate && (
-            <button type="button" className="mc-primary" onClick={onCreate}>
+            <button type="button" className={styles.mcPrimary} onClick={onCreate}>
               <Plus />
               新建媒体库
             </button>
           )}
         </Empty>
       ) : (
-        <div className="mc-library-grid">
+        <div className={styles.mcLibraryGrid}>
           {libraries.map((library) => {
             const status = scanText(library, processing);
             return (
-              <article key={library.id} className="mc-library">
+              <article key={library.id} className={styles.mcLibrary}>
                 <button
                   type="button"
-                  className="mc-library-open"
+                  className={styles.mcLibraryOpen}
                   onClick={() => onOpen(library)}
                   aria-label={`打开媒体库${library.name}`}
                 >
                   <LibraryCovers library={library} />
                 </button>
-                <div className="mc-library-body">
+                <div className={styles.mcLibraryBody}>
                   <header>
                     <strong>{library.name}</strong>
-                    <span className={`mc-tag ${library.kind}`}>{kindInfo[library.kind].label}</span>
-                    <span className="mc-tag space">
+                    <span className={`${styles.mcTag} ${styles[library.kind] ?? ""}`}>
+                      {kindInfo[library.kind].label}
+                    </span>
+                    <span className={`${styles.mcTag} ${styles.space}`}>
                       {library.spaceKind === "shared" ? (
                         <>
                           <Users />
@@ -168,7 +171,7 @@ export function LibrariesPage({
                     {(library.canManage || library.folders.some((folder) => !folder.missing)) && (
                       <Menu
                         label={`${library.name}的操作`}
-                        className="mc-library-menu"
+                        className={styles.mcLibraryMenu}
                         items={[
                           ...(library.folders.some((folder) => !folder.missing)
                             ? [{ label: "上传到此媒体库", icon: <CloudUpload />, run: () => onUpload(library) }]
@@ -184,20 +187,26 @@ export function LibrariesPage({
                       />
                     )}
                   </header>
-                  <p className="mc-library-counts">
+                  <p className={styles.mcLibraryCounts}>
                     {counts(library)}
                     {library.counts.sizeBytes ? <span> · {formatBytes(library.counts.sizeBytes)}</span> : null}
                   </p>
-                  <ul className="mc-library-folders">
+                  <ul className={styles.mcLibraryFolders}>
                     {library.folders.map((folder) => (
-                      <li key={folder.entryId} className={folder.missing ? "missing" : ""} title={folder.path}>
+                      <li key={folder.entryId} className={folder.missing ? styles.missing : ""} title={folder.path}>
                         {folder.missing ? <AlertTriangle /> : <Folder />}
                         <span>{folder.path || folder.name}</span>
                       </li>
                     ))}
                   </ul>
-                  <p className={`mc-library-status ${status.warn ? "warn" : ""}`}>
-                    {status.busy ? <span className="mc-spinner tiny" /> : status.warn ? <AlertTriangle /> : <Check />}
+                  <p className={`${styles.mcLibraryStatus} ${status.warn ? styles.warn : ""}`}>
+                    {status.busy ? (
+                      <span className={`${styles.mcSpinner} ${styles.tiny}`} />
+                    ) : status.warn ? (
+                      <AlertTriangle />
+                    ) : (
+                      <Check />
+                    )}
                     {status.text}
                   </p>
                 </div>
@@ -205,7 +214,7 @@ export function LibrariesPage({
             );
           })}
           {canCreate && (
-            <button type="button" className="mc-library-add" onClick={onCreate}>
+            <button type="button" className={styles.mcLibraryAdd} onClick={onCreate}>
               <span>
                 <Plus />
               </span>
@@ -243,19 +252,19 @@ function PickRow({
 }) {
   return (
     <div
-      className={`mc-picker-row ${selected ? "selected" : ""} ${current ? "current" : ""}`}
+      className={`${styles.mcPickerRow} ${selected ? styles.selected : ""} ${current ? styles.current : ""}`}
       role="option"
       aria-selected={selected}
     >
       <button
         type="button"
-        className="mc-picker-pick"
+        className={styles.mcPickerPick}
         aria-label={label}
         aria-pressed={selected}
         onClick={onPick}
         onDoubleClick={onOpen}
       >
-        <span className="mc-check" aria-hidden="true">
+        <span className={styles.mcCheck} aria-hidden="true">
           {selected && <Check />}
         </span>
         {current ? <FolderCheck /> : <FolderOpen />}
@@ -264,7 +273,7 @@ function PickRow({
       {onOpen && (
         <button
           type="button"
-          className="mc-picker-enter"
+          className={styles.mcPickerEnter}
           aria-label={`打开${name}`}
           title="查看里面的文件夹"
           onClick={onOpen}
@@ -370,13 +379,13 @@ export function LibraryDialog({
   };
   return (
     <div
-      className="mc-dialog-backdrop"
+      className={styles.mcDialogBackdrop}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget && !saving) onClose();
       }}
     >
       <form
-        className="mc-dialog wide"
+        className={`${styles.mcDialog} ${styles.wide}`}
         role="dialog"
         aria-modal="true"
         aria-label={library ? "编辑媒体库" : "新建媒体库"}
@@ -388,23 +397,23 @@ export function LibraryDialog({
           }
         }}
       >
-        <header className="mc-dialog-head">
+        <header className={styles.mcDialogHead}>
           <h3>{library ? "编辑媒体库" : "新建媒体库"}</h3>
-          <ol className="mc-steps" aria-label="步骤">
-            <li className={step === 1 ? "active" : "done"}>
+          <ol className={styles.mcSteps} aria-label="步骤">
+            <li className={step === 1 ? styles.active : styles.done}>
               <span>{step === 1 ? 1 : <Check />}</span>类型与名称
             </li>
-            <li className={step === 2 ? "active" : ""}>
+            <li className={step === 2 ? styles.active : ""}>
               <span>2</span>选择文件夹
             </li>
           </ol>
-          <button type="button" className="mc-icon-button" aria-label="关闭" onClick={onClose} disabled={saving}>
+          <button type="button" className={styles.mcIconButton} aria-label="关闭" onClick={onClose} disabled={saving}>
             <X />
           </button>
         </header>
         {step === 1 ? (
-          <div className="mc-dialog-body">
-            <label className="mc-field">
+          <div className={styles.mcDialogBody}>
+            <label className={styles.mcField}>
               <span>名称</span>
               <input
                 autoFocus
@@ -414,41 +423,41 @@ export function LibraryDialog({
                 onChange={(event) => setName(event.target.value)}
               />
             </label>
-            <div className="mc-field">
+            <div className={styles.mcField}>
               <span>内容类型</span>
-              <div className="mc-kinds" role="radiogroup" aria-label="内容类型">
+              <div className={styles.mcKinds} role="radiogroup" aria-label="内容类型">
                 {(Object.keys(kindInfo) as LibraryKind[]).map((key) => (
                   <button
                     key={key}
                     type="button"
                     role="radio"
                     aria-checked={kind === key}
-                    className={kind === key ? "active" : ""}
+                    className={kind === key ? styles.active : ""}
                     onClick={() => setKind(key)}
                   >
-                    <span className="mc-kind-icon">{kindInfo[key].icon}</span>
+                    <span className={styles.mcKindIcon}>{kindInfo[key].icon}</span>
                     <strong>{kindInfo[key].label}</strong>
                     <small>{kindInfo[key].text}</small>
                   </button>
                 ))}
               </div>
             </div>
-            <p className="mc-hint">
+            <p className={styles.mcHint}>
               <Clapperboard />按 <code>电影名 (年份)</code> 或 <code>剧名/Season 1/S01E01</code> 命名效果最好；同目录的
               NFO、poster.jpg、fanart.jpg 和字幕文件会被一并读取。
             </p>
           </div>
         ) : (
-          <div className="mc-dialog-body">
+          <div className={styles.mcDialogBody}>
             {!library && usable.length > 1 && (
-              <div className="mc-segmented" role="tablist" aria-label="空间">
+              <div className={styles.mcSegmented} role="tablist" aria-label="空间">
                 {usable.map((candidate) => (
                   <button
                     key={candidate.id}
                     type="button"
                     role="tab"
                     aria-selected={candidate.id === spaceId}
-                    className={candidate.id === spaceId ? "active" : ""}
+                    className={candidate.id === spaceId ? styles.active : ""}
                     onClick={() => switchSpace(candidate.id)}
                   >
                     {candidate.kind === "shared" ? (
@@ -466,13 +475,13 @@ export function LibraryDialog({
                 ))}
               </div>
             )}
-            <p className="mc-hint">
+            <p className={styles.mcHint}>
               {space?.kind === "shared"
                 ? "共享空间的媒体库对所有成员可见，每个人的播放进度和收藏互不影响。"
                 : "个人空间的媒体库只有你自己能看到。"}
             </p>
-            <div className="mc-picker">
-              <nav className="mc-picker-crumbs" aria-label="位置">
+            <div className={styles.mcPicker}>
+              <nav className={styles.mcPickerCrumbs} aria-label="位置">
                 <button type="button" onClick={() => setTrail([])}>
                   {space?.kind === "shared" ? "共享空间" : "我的空间"}
                 </button>
@@ -486,7 +495,7 @@ export function LibraryDialog({
                 ))}
               </nav>
               {/* A press on a folder picks it, as in a file dialog; the arrow, or a double press, goes inside. */}
-              <div className="mc-picker-list" role="listbox" aria-label="文件夹" aria-multiselectable="true">
+              <div className={styles.mcPickerList} role="listbox" aria-label="文件夹" aria-multiselectable="true">
                 {here && (
                   <PickRow
                     name={`整个“${here.name}”文件夹`}
@@ -499,9 +508,9 @@ export function LibraryDialog({
                   />
                 )}
                 {!entries ? (
-                  <span className="mc-spinner small" />
+                  <span className={`${styles.mcSpinner} ${styles.small}`} />
                 ) : !entries.length ? (
-                  <p className="mc-picker-empty">{here ? "里面没有子文件夹" : "这里没有文件夹"}</p>
+                  <p className={styles.mcPickerEmpty}>{here ? "里面没有子文件夹" : "这里没有文件夹"}</p>
                 ) : (
                   entries.map((entry) => (
                     <PickRow
@@ -516,10 +525,10 @@ export function LibraryDialog({
                 )}
               </div>
             </div>
-            <div className="mc-picked" aria-label="已选择的文件夹">
+            <div className={styles.mcPicked} aria-label="已选择的文件夹">
               {picked.length ? (
                 picked.map((folder) => (
-                  <span key={folder.id} className="mc-picked-chip" title={folder.path}>
+                  <span key={folder.id} className={styles.mcPickedChip} title={folder.path}>
                     <Folder />
                     {folder.path || folder.name}
                     <button
@@ -532,27 +541,29 @@ export function LibraryDialog({
                   </span>
                 ))
               ) : (
-                <span className="mc-picked-none">点一下文件夹即可选中，可以选多个；点右侧的 › 查看里面的文件夹</span>
+                <span className={styles.mcPickedNone}>
+                  点一下文件夹即可选中，可以选多个；点右侧的 › 查看里面的文件夹
+                </span>
               )}
             </div>
           </div>
         )}
         {error && (
-          <p className="mc-form-error" role="alert">
+          <p className={styles.mcFormError} role="alert">
             {error}
           </p>
         )}
-        <footer className="mc-dialog-actions">
+        <footer className={styles.mcDialogActions}>
           {step === 2 && (
-            <button type="button" className="mc-glass" onClick={() => setStep(1)} disabled={saving}>
+            <button type="button" className={styles.mcGlass} onClick={() => setStep(1)} disabled={saving}>
               上一步
             </button>
           )}
           <span />
-          <button type="button" className="mc-glass" onClick={onClose} disabled={saving}>
+          <button type="button" className={styles.mcGlass} onClick={onClose} disabled={saving}>
             取消
           </button>
-          <button type="submit" className="mc-primary" disabled={saving || (step === 2 && !picked.length)}>
+          <button type="submit" className={styles.mcPrimary} disabled={saving || (step === 2 && !picked.length)}>
             {step === 1 ? "下一步" : saving ? "正在保存…" : library ? "保存并重新扫描" : "创建并扫描"}
           </button>
         </footer>

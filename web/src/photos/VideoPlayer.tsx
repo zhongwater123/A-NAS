@@ -36,6 +36,7 @@ import {
   videoStreamURL,
 } from "./api";
 import { clock, messageOf } from "./model";
+import styles from "./photos.module.css";
 
 // What the viewer's keys do to the video it shows.
 export interface VideoControls {
@@ -355,10 +356,10 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
   const quiet = muted || volume === 0;
   const resting = paused && !waiting && !failure;
   return (
-    <div className={`ph-video${paused ? " paused" : ""}${started ? " started" : ""}`}>
+    <div className={`${styles.phVideo}${paused ? ` ${styles.paused}` : ""}${started ? " started" : ""}`}>
       <video
         ref={video}
-        className="ph-video-media"
+        className={styles.phVideoMedia}
         src={source || undefined}
         poster={displayURL(asset)}
         aria-label={asset.name}
@@ -398,17 +399,22 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
         }}
       />
       {resting && (
-        <button type="button" className="ph-video-play" aria-label={ended ? "重新播放" : "播放视频"} onClick={toggle}>
+        <button
+          type="button"
+          className={styles.phVideoPlay}
+          aria-label={ended ? "重新播放" : "播放视频"}
+          onClick={toggle}
+        >
           {ended ? <RotateCcw /> : <Play />}
         </button>
       )}
       {waiting && !failure && (started || source) && (
-        <div className="ph-video-wait" role="status" aria-label="正在载入视频">
-          <span className="ph-spinner" />
+        <div className={styles.phVideoWait} role="status" aria-label="正在载入视频">
+          <span className={styles.phSpinner} />
         </div>
       )}
       {failure && (
-        <div className="ph-video-failure" role="status">
+        <div className={styles.phVideoFailure} role="status">
           <TriangleAlert />
           <strong>视频暂时无法播放</strong>
           <small>{failure}</small>
@@ -421,7 +427,7 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
       {/* A focused button takes the space bar as a click; anywhere else in
           the controls it plays and pauses, as in the viewer. */}
       <div
-        className="ph-video-controls"
+        className={styles.phVideoControls}
         role="toolbar"
         aria-label="视频控制"
         onKeyDown={(event) => {
@@ -437,12 +443,12 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
         >
           {paused ? <Play /> : <Pause />}
         </button>
-        <span className="ph-video-time">
+        <span className={styles.phVideoTime}>
           <strong>{clock(shown)}</strong> / {clock(duration)}
         </span>
         <div
           ref={track}
-          className={`ph-video-scrub${scrub !== undefined ? " dragging" : ""}`}
+          className={`${styles.phVideoScrub}${scrub !== undefined ? ` ${styles.dragging}` : ""}`}
           role="slider"
           tabIndex={0}
           aria-label="播放进度"
@@ -456,29 +462,29 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
           onPointerLeave={() => setHover(undefined)}
           onKeyDown={scrubKey}
         >
-          <span className="ph-video-rail">
+          <span className={styles.phVideoRail}>
             {ranges.map(([start, end]) => (
               <span
                 key={start}
-                className="ph-video-buffered"
+                className={styles.phVideoBuffered}
                 style={{
                   left: `${(start / duration) * 100}%`,
                   width: `${(Math.max(0, end - start) / duration) * 100}%`,
                 }}
               />
             ))}
-            <span className="ph-video-played" style={{ width: `${fraction * 100}%` }} />
+            <span className={styles.phVideoPlayed} style={{ width: `${fraction * 100}%` }} />
           </span>
-          <span className="ph-video-knob" style={{ left: `${fraction * 100}%` }} />
+          <span className={styles.phVideoKnob} style={{ left: `${fraction * 100}%` }} />
           {hover && (
-            <span className="ph-video-tip" style={{ left: hover.x }}>
+            <span className={styles.phVideoTip} style={{ left: hover.x }}>
               {clock(hover.time)}
             </span>
           )}
         </div>
         {converted && (
           <span
-            className="ph-video-mode"
+            className={styles.phVideoMode}
             title={
               mode === "remux"
                 ? "浏览器不能直接打开这种格式，NAS 正在转换封装"
@@ -488,7 +494,7 @@ export const VideoPlayer = forwardRef<VideoControls, Props>(function VideoPlayer
             {mode === "remux" ? "转换播放" : "转码播放"}
           </span>
         )}
-        <span className="ph-video-volume">
+        <span className={styles.phVideoVolume}>
           <button
             type="button"
             aria-label={quiet ? "打开声音" : "静音"}

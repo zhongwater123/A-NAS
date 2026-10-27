@@ -16,6 +16,7 @@ import { Empty, Loading, messageOf } from "./Browse";
 import { Artwork, type MediaActions, useMediaActions } from "./Cards";
 import { EditableName, splitName } from "./EditableName";
 import { episodeCode, episodeName, progressShare, remaining, runtime, timecode } from "./format";
+import styles from "./media.module.css";
 
 const nfoNote = "片名来自 NFO 文件，改名不会改变显示的片名";
 
@@ -61,9 +62,9 @@ function Meta({ title, extra = [] }: { title: Title; extra?: (string | undefined
     Boolean,
   ) as string[];
   return (
-    <p className="mc-detail-meta">
+    <p className={styles.mcDetailMeta}>
       {title.rating ? (
-        <span className="mc-rating">
+        <span className={styles.mcRating}>
           <Star />
           {title.rating.toFixed(1)}
         </span>
@@ -72,7 +73,7 @@ function Meta({ title, extra = [] }: { title: Title; extra?: (string | undefined
         <span key={index}>{part}</span>
       ))}
       {title.genres?.slice(0, 4).map((genre) => (
-        <span key={genre} className="mc-genre">
+        <span key={genre} className={styles.mcGenre}>
           {genre}
         </span>
       ))}
@@ -82,9 +83,9 @@ function Meta({ title, extra = [] }: { title: Title; extra?: (string | undefined
 
 function Backdrop({ title }: { title: Title }) {
   return (
-    <div className="mc-detail-backdrop" aria-hidden="true">
+    <div className={styles.mcDetailBackdrop} aria-hidden="true">
       <Artwork title={title} kind="backdrop" fallback="thumb" label={false} eager />
-      <div className="mc-detail-shade" />
+      <div className={styles.mcDetailShade} />
     </div>
   );
 }
@@ -126,7 +127,7 @@ export function VideoPage({
   if (missing)
     return (
       <Empty icon={<FileVideo />} title="视频不存在" text="它可能已被移动或删除。">
-        <button type="button" className="mc-glass" onClick={onBack}>
+        <button type="button" className={styles.mcGlass} onClick={onBack}>
           返回
         </button>
       </Empty>
@@ -136,17 +137,17 @@ export function VideoPage({
   const resuming = Boolean(progress?.position);
   const watched = Boolean(progress?.watched);
   return (
-    <div className="mc-detail">
+    <div className={styles.mcDetail}>
       <Backdrop title={detail} />
-      <div className={`mc-detail-main ${detail.type === "other" ? "wide" : ""}`}>
+      <div className={`${styles.mcDetailMain} ${detail.type === "other" ? styles.wide : ""}`}>
         {detail.type !== "other" && (
-          <div className="mc-detail-poster">
+          <div className={styles.mcDetailPoster}>
             <Artwork title={detail} kind="poster" fallback="thumb" eager />
           </div>
         )}
-        <div className="mc-detail-info">
+        <div className={styles.mcDetailInfo}>
           {detail.originalTitle && detail.originalTitle !== detail.title && (
-            <p className="mc-detail-original">{detail.originalTitle}</p>
+            <p className={styles.mcDetailOriginal}>{detail.originalTitle}</p>
           )}
           {detail.type === "episode" ? (
             <h1>{detail.showTitle || detail.title}</h1>
@@ -173,7 +174,7 @@ export function VideoPage({
           )}
           <Meta title={detail} extra={[runtime(detail.duration)]} />
           {resuming && progress && (
-            <div className="mc-detail-progress">
+            <div className={styles.mcDetailProgress}>
               <span>
                 <span style={{ width: `${progressShare(progress) * 100}%` }} />
               </span>
@@ -182,20 +183,20 @@ export function VideoPage({
               </small>
             </div>
           )}
-          <div className="mc-detail-actions">
-            <button type="button" className="mc-primary" onClick={() => actions.play(detail)}>
+          <div className={styles.mcDetailActions}>
+            <button type="button" className={styles.mcPrimary} onClick={() => actions.play(detail)}>
               <Play />
               {resuming ? "继续播放" : "播放"}
             </button>
             {resuming && (
-              <button type="button" className="mc-glass" onClick={() => actions.play(detail, true)}>
+              <button type="button" className={styles.mcGlass} onClick={() => actions.play(detail, true)}>
                 <RotateCcw />
                 从头播放
               </button>
             )}
             <button
               type="button"
-              className={`mc-round ${detail.favorite ? "on" : ""}`}
+              className={`${styles.mcRound} ${detail.favorite ? styles.on : ""}`}
               aria-pressed={detail.favorite}
               aria-label={detail.favorite ? "取消收藏" : "收藏"}
               data-tip={detail.favorite ? "取消收藏" : "收藏"}
@@ -208,7 +209,7 @@ export function VideoPage({
             </button>
             <button
               type="button"
-              className={`mc-round ${watched ? "on" : ""}`}
+              className={`${styles.mcRound} ${watched ? styles.on : ""}`}
               aria-pressed={watched}
               aria-label={watched ? "标记为未看" : "标记为已看"}
               data-tip={watched ? "标记为未看" : "标记为已看"}
@@ -222,7 +223,7 @@ export function VideoPage({
             {detail.type !== "episode" && (
               <button
                 type="button"
-                className="mc-round"
+                className={styles.mcRound}
                 aria-label="加入合集"
                 data-tip="加入合集"
                 onClick={() => actions.addToCollection(detail)}
@@ -231,22 +232,22 @@ export function VideoPage({
               </button>
             )}
           </div>
-          {detail.plot && <p className="mc-detail-plot">{detail.plot}</p>}
+          {detail.plot && <p className={styles.mcDetailPlot}>{detail.plot}</p>}
           {(detail.collections.length > 0 || detail.collection) && (
-            <p className="mc-detail-collections">
+            <p className={styles.mcDetailCollections}>
               合集：{[detail.collection, ...detail.collections.map((item) => item.name)].filter(Boolean).join("、")}
             </p>
           )}
         </div>
       </div>
-      <section className={`mc-detail-more ${detail.type === "other" ? "wide" : ""}`} aria-label="文件信息">
-        <dl className="mc-detail-facts">
-          <div className="mc-detail-file">
+      <section className={`${styles.mcDetailMore} ${detail.type === "other" ? styles.wide : ""}`} aria-label="文件信息">
+        <dl className={styles.mcDetailFacts}>
+          <div className={styles.mcDetailFile}>
             <dt>片源</dt>
             <dd>
               <FileName
                 as="span"
-                text={<span className="mc-editable-text">{detail.file.name}</span>}
+                text={<span className={styles.mcEditableText}>{detail.file.name}</span>}
                 videoId={detail.id}
                 file={detail.file.name}
                 namedByNfo={detail.namedByNfo}
@@ -305,7 +306,7 @@ export function VideoPage({
           {detail.probeState === "failed" && (
             <div>
               <dt>状态</dt>
-              <dd className="warn">无法读取这个视频的信息，可以尝试直接播放</dd>
+              <dd className={styles.warn}>无法读取这个视频的信息，可以尝试直接播放</dd>
             </div>
           )}
         </dl>
@@ -340,8 +341,8 @@ function EpisodeRow({ show, episode, current }: { show: ShowDetail; episode: Epi
   const press = (event: MouseEvent<HTMLLIElement>) => {
     const target = event.target as HTMLElement;
     window.clearTimeout(pending.current);
-    if (target.closest("button, input, .mc-editable.editing")) return;
-    if (!target.closest(".mc-editable")) {
+    if (target.closest(`button, input, .${styles.mcEditable}.${styles.editing}`)) return;
+    if (!target.closest(`.${styles.mcEditable}`)) {
       actions.play(title);
       return;
     }
@@ -349,18 +350,18 @@ function EpisodeRow({ show, episode, current }: { show: ShowDetail; episode: Epi
   };
   const name =
     episode.title === `第 ${episode.episode} 集` ? (
-      <span className="mc-editable-text">{episode.title}</span>
+      <span className={styles.mcEditableText}>{episode.title}</span>
     ) : (
       <>
-        <span className="mc-episode-number">{episode.episode || "·"}</span>
-        <span className="mc-editable-text">{episode.title}</span>
+        <span className={styles.mcEpisodeNumber}>{episode.episode || "·"}</span>
+        <span className={styles.mcEditableText}>{episode.title}</span>
       </>
     );
   return (
-    <li className={`mc-episode ${current ? "current" : ""}`} onClick={press}>
+    <li className={`${styles.mcEpisode} ${current ? styles.current : ""}`} onClick={press}>
       <button
         type="button"
-        className="mc-episode-art"
+        className={styles.mcEpisodeArt}
         onClick={() => actions.play(title)}
         aria-label={`播放${episodeName(episode)}`}
       >
@@ -370,16 +371,16 @@ function EpisodeRow({ show, episode, current }: { show: ShowDetail; episode: Epi
           fallback="backdrop"
           label={false}
         />
-        <span className="mc-episode-play">
+        <span className={styles.mcEpisodePlay}>
           <Play />
         </span>
         {share > 0 && !watched && (
-          <span className="mc-progress">
+          <span className={styles.mcProgress}>
             <span style={{ width: `${share * 100}%` }} />
           </span>
         )}
       </button>
-      <div className="mc-episode-text">
+      <div className={styles.mcEpisodeText}>
         {episode.file ? (
           <FileName as="strong" text={name} videoId={episode.id} file={episode.file} actions={actions} />
         ) : (
@@ -401,7 +402,7 @@ function EpisodeRow({ show, episode, current }: { show: ShowDetail; episode: Epi
       </div>
       <button
         type="button"
-        className={`mc-round small ${watched ? "on" : ""}`}
+        className={`${styles.mcRound} ${styles.small} ${watched ? styles.on : ""}`}
         aria-pressed={watched}
         aria-label={watched ? "标记为未看" : "标记为已看"}
         data-tip={watched ? "标记为未看" : "标记为已看"}
@@ -460,7 +461,7 @@ export function ShowPage({
   if (missing)
     return (
       <Empty icon={<FileVideo />} title="剧集不存在" text="它可能已被移动或删除。">
-        <button type="button" className="mc-glass" onClick={onBack}>
+        <button type="button" className={styles.mcGlass} onClick={onBack}>
           返回
         </button>
       </Empty>
@@ -492,15 +493,15 @@ export function ShowPage({
       : `播放 ${episodeCode(next.season, next.episode)}`
     : "播放";
   return (
-    <div className="mc-detail">
+    <div className={styles.mcDetail}>
       <Backdrop title={detail} />
-      <div className="mc-detail-main">
-        <div className="mc-detail-poster">
+      <div className={styles.mcDetailMain}>
+        <div className={styles.mcDetailPoster}>
           <Artwork title={detail} kind="poster" fallback="thumb" eager />
         </div>
-        <div className="mc-detail-info">
+        <div className={styles.mcDetailInfo}>
           {detail.originalTitle && detail.originalTitle !== detail.title && (
-            <p className="mc-detail-original">{detail.originalTitle}</p>
+            <p className={styles.mcDetailOriginal}>{detail.originalTitle}</p>
           )}
           <EditableName
             as="h1"
@@ -519,14 +520,14 @@ export function ShowPage({
             }}
           />
           <Meta title={detail} extra={[`${detail.seasons} 季`, `${detail.episodes} 集`]} />
-          <div className="mc-detail-actions">
-            <button type="button" className="mc-primary" onClick={playNext} disabled={!next}>
+          <div className={styles.mcDetailActions}>
+            <button type="button" className={styles.mcPrimary} onClick={playNext} disabled={!next}>
               <Play />
               {nextLabel}
             </button>
             <button
               type="button"
-              className={`mc-round ${detail.favorite ? "on" : ""}`}
+              className={`${styles.mcRound} ${detail.favorite ? styles.on : ""}`}
               aria-pressed={detail.favorite}
               aria-label={detail.favorite ? "取消收藏" : "收藏"}
               data-tip={detail.favorite ? "取消收藏" : "收藏"}
@@ -539,7 +540,7 @@ export function ShowPage({
             </button>
             <button
               type="button"
-              className={`mc-round ${allWatched ? "on" : ""}`}
+              className={`${styles.mcRound} ${allWatched ? styles.on : ""}`}
               aria-pressed={allWatched}
               aria-label={allWatched ? "全部标记为未看" : "全部标记为已看"}
               data-tip={allWatched ? "全部标记为未看" : "全部标记为已看"}
@@ -549,7 +550,7 @@ export function ShowPage({
             </button>
             <button
               type="button"
-              className="mc-round"
+              className={styles.mcRound}
               aria-label="加入合集"
               data-tip="加入合集"
               onClick={() => actions.addToCollection(detail)}
@@ -557,23 +558,23 @@ export function ShowPage({
               <ListPlus />
             </button>
           </div>
-          {detail.plot && <p className="mc-detail-plot">{detail.plot}</p>}
-          <p className="mc-detail-collections">
+          {detail.plot && <p className={styles.mcDetailPlot}>{detail.plot}</p>}
+          <p className={styles.mcDetailCollections}>
             已看 {detail.watchedEpisodes ?? 0} / {detail.episodes} 集
             {detail.collections.length ? ` · 合集：${detail.collections.map((item) => item.name).join("、")}` : ""}
           </p>
         </div>
       </div>
-      <section className="mc-seasons" aria-label="剧集">
+      <section className={styles.mcSeasons} aria-label="剧集">
         {detail.seasonList.length > 1 && (
-          <div className="mc-season-tabs" role="tablist" aria-label="季">
+          <div className={styles.mcSeasonTabs} role="tablist" aria-label="季">
             {detail.seasonList.map((item) => (
               <button
                 key={item.number}
                 type="button"
                 role="tab"
                 aria-selected={item.number === season}
-                className={item.number === season ? "active" : ""}
+                className={item.number === season ? styles.active : ""}
                 onClick={() => setSeason(item.number)}
               >
                 {item.number ? `第 ${item.number} 季` : "特别篇"}
@@ -582,7 +583,7 @@ export function ShowPage({
             ))}
           </div>
         )}
-        <ol className="mc-episodes">
+        <ol className={styles.mcEpisodes}>
           {episodes.map((episode) => (
             <EpisodeRow key={episode.id} show={detail} episode={episode} current={episode.id === next?.id} />
           ))}

@@ -26,8 +26,8 @@ import {
   transferItems,
   transferTotals,
 } from "./model";
+import notices from "./notices.module.css";
 import { type Hold, transferStore, useTransfers } from "./store";
-import "./notices.css";
 
 // listOrder puts what moves first in the indicator's list.
 const listOrder: ItemStatus[] = [
@@ -64,21 +64,28 @@ export function TransferIndicator({ onOpen }: { onOpen: () => void }) {
   const label = `传输中心：${lead.direction === "upload" ? "正在上传" : "正在下载"} ${lead.name}${others ? ` 等 ${current.length} 个任务` : ""}，${attention ? "有任务需要处理" : `已完成 ${percent}%`}`;
   const Direction = lead.direction === "upload" ? ArrowUp : ArrowDown;
   return (
-    <div className="status-transfers-wrap">
+    <div className={notices.statusTransfersWrap}>
       <button
         type="button"
-        className={`status-transfers ${attention ? "attention" : ""}`}
+        className={`${notices.statusTransfers} ${attention ? notices.attention : ""}`}
         aria-label={label}
         onClick={onOpen}
       >
-        <span className="status-transfers-ring" aria-hidden="true">
+        <span className={notices.statusTransfersRing} aria-hidden="true">
           <svg viewBox="0 0 36 36">
-            <circle className="track" cx="18" cy="18" r="15" />
-            <circle className="value" cx="18" cy="18" r="15" pathLength={100} strokeDasharray={`${percent} 100`} />
+            <circle className={notices.track} cx="18" cy="18" r="15" />
+            <circle
+              className={notices.value}
+              cx="18"
+              cy="18"
+              r="15"
+              pathLength={100}
+              strokeDasharray={`${percent} 100`}
+            />
           </svg>
           <ArrowDownUp />
         </span>
-        <span className="status-transfers-copy" aria-hidden="true">
+        <span className={notices.statusTransfersCopy} aria-hidden="true">
           <strong>
             <Direction />
             {lead.name}
@@ -92,7 +99,7 @@ export function TransferIndicator({ onOpen }: { onOpen: () => void }) {
           </small>
         </span>
       </button>
-      <div className="status-transfers-pop" aria-hidden="true">
+      <div className={notices.statusTransfersPop} aria-hidden="true">
         <header>
           <strong>{current.length} 个任务</strong>
           {speed > 0 && <span>{formatRate(speed)}</span>}
@@ -101,13 +108,15 @@ export function TransferIndicator({ onOpen }: { onOpen: () => void }) {
           {current.slice(0, listed).map((item) => {
             const share = item.total ? Math.min(100, Math.round((item.transferred / item.total) * 100)) : 0;
             return (
-              <li key={item.id} className={item.status}>
-                <span className="name">
+              <li key={item.id} className={notices[item.status]}>
+                <span className={notices.name}>
                   {item.direction === "upload" ? <ArrowUp /> : <ArrowDown />}
                   {item.name}
                 </span>
-                <span className="state">{item.status === "running" ? `${share}%` : statusText[item.status]}</span>
-                <span className="bar">
+                <span className={notices.state}>
+                  {item.status === "running" ? `${share}%` : statusText[item.status]}
+                </span>
+                <span className={notices.bar}>
                   <i style={{ width: `${share}%` }} />
                 </span>
               </li>
@@ -186,20 +195,25 @@ export function TransferToasts({ hidden, onOpen }: { hidden: boolean; onOpen: ()
   if (hidden || (!conflicts.length && !hold && !finished.length)) return null;
 
   return (
-    <div className="tc-toasts" aria-live="polite">
+    <div className={notices.tcToasts} aria-live="polite">
       {conflicts.slice(0, 1).map(({ batch, names }) => (
-        <section key={batch.id} className="tc-toast warning" role="alertdialog" aria-label="同名文件">
-          <CircleAlert className="tc-toast-icon" />
-          <div className="tc-toast-copy">
+        <section
+          key={batch.id}
+          className={`${notices.tcToast} ${notices.warning}`}
+          role="alertdialog"
+          aria-label="同名文件"
+        >
+          <CircleAlert className={notices.tcToastIcon} />
+          <div className={notices.tcToastCopy}>
             <strong>{names.length} 个文件已存在</strong>
             <span>
               {batch.target.label ?? locationParts(batch.target).join(" › ")} 中已有 {names.slice(0, 2).join("、")}
               {names.length > 2 ? " 等文件" : ""}。这一批的同名文件都按你的选择处理。
             </span>
-            <div className="tc-toast-actions">
+            <div className={notices.tcToastActions}>
               <button
                 type="button"
-                className="tc-button"
+                className={notices.tcButton}
                 onClick={() => transferStore.resolveConflicts(batch.id, "skip", true)}
               >
                 <SkipForward />
@@ -207,7 +221,7 @@ export function TransferToasts({ hidden, onOpen }: { hidden: boolean; onOpen: ()
               </button>
               <button
                 type="button"
-                className="tc-button"
+                className={notices.tcButton}
                 onClick={() => transferStore.resolveConflicts(batch.id, "rename", true)}
               >
                 <CopyPlus />
@@ -215,7 +229,7 @@ export function TransferToasts({ hidden, onOpen }: { hidden: boolean; onOpen: ()
               </button>
               <button
                 type="button"
-                className="tc-button warning"
+                className={`${notices.tcButton} ${notices.warning}`}
                 onClick={() => transferStore.resolveConflicts(batch.id, "replace", true)}
               >
                 <Replace />
@@ -230,28 +244,28 @@ export function TransferToasts({ hidden, onOpen }: { hidden: boolean; onOpen: ()
           const Icon = holdIcons[hold];
           return (
             <section
-              className={`tc-toast ${hold === "space" || hold === "volume" ? "danger" : "warning"}`}
+              className={`${notices.tcToast} ${hold === "space" || hold === "volume" ? `${notices.danger}` : `${notices.warning}`}`}
               role="status"
             >
-              <Icon className="tc-toast-icon" />
-              <div className="tc-toast-copy">
+              <Icon className={notices.tcToastIcon} />
+              <div className={notices.tcToastCopy}>
                 <strong>{holdText[hold].title}</strong>
                 <span>{holdText[hold].detail}</span>
-                <div className="tc-toast-actions">
+                <div className={notices.tcToastActions}>
                   {hold !== "session" && (
-                    <button type="button" className="tc-button" onClick={() => transferStore.release(hold)}>
+                    <button type="button" className={notices.tcButton} onClick={() => transferStore.release(hold)}>
                       <RotateCcw />
                       {hold === "space" ? "继续上传" : "立即重试"}
                     </button>
                   )}
-                  <button type="button" className="tc-button" onClick={onOpen}>
+                  <button type="button" className={notices.tcButton} onClick={onOpen}>
                     查看传输
                   </button>
                 </div>
               </div>
               <button
                 type="button"
-                className="tc-toast-close"
+                className={notices.tcToastClose}
                 aria-label="关闭提示"
                 onClick={() => setDismissed([...dismissed, hold])}
               >
@@ -261,20 +275,28 @@ export function TransferToasts({ hidden, onOpen }: { hidden: boolean; onOpen: ()
           );
         })()}
       {finished.slice(0, 1).map((entry) => (
-        <section key={entry.batch} className={`tc-toast ${entry.failed ? "danger" : "success"}`} role="status">
-          {entry.failed ? <CircleAlert className="tc-toast-icon" /> : <CircleCheck className="tc-toast-icon" />}
-          <div className="tc-toast-copy">
+        <section
+          key={entry.batch}
+          className={`${notices.tcToast} ${entry.failed ? `${notices.danger}` : notices.success}`}
+          role="status"
+        >
+          {entry.failed ? (
+            <CircleAlert className={notices.tcToastIcon} />
+          ) : (
+            <CircleCheck className={notices.tcToastIcon} />
+          )}
+          <div className={notices.tcToastCopy}>
             <strong>{entry.failed ? `${entry.failed} 个文件未能上传` : `已上传 ${entry.done} 个文件`}</strong>
             <span>{entry.failed ? `另有 ${entry.done} 个已上传到 ${entry.place}。` : `保存在 ${entry.place}。`}</span>
-            <div className="tc-toast-actions">
-              <button type="button" className="tc-button" onClick={onOpen}>
+            <div className={notices.tcToastActions}>
+              <button type="button" className={notices.tcButton} onClick={onOpen}>
                 查看传输
               </button>
             </div>
           </div>
           <button
             type="button"
-            className="tc-toast-close"
+            className={notices.tcToastClose}
             aria-label="关闭提示"
             onClick={() => setFinished((current) => current.filter((item) => item.batch !== entry.batch))}
           >

@@ -35,6 +35,7 @@ import {
   sourceFolder,
   summary,
 } from "./library";
+import styles from "./music.module.css";
 import { TrackList, type TrackListProps } from "./TrackList";
 
 const spaceName = (kind: string) => (kind === "shared" ? "共享空间" : "个人空间");
@@ -43,12 +44,17 @@ function Actions({ tracks, children }: { tracks: Track[]; children?: ReactNode }
   const { player } = useMusic();
   const ids = tracks.map((track) => track.id);
   return (
-    <div className="mu-hero-actions">
-      <button type="button" className="mu-primary" disabled={!ids.length} onClick={() => player.play(ids, 0)}>
+    <div className={styles.muHeroActions}>
+      <button type="button" className={styles.muPrimary} disabled={!ids.length} onClick={() => player.play(ids, 0)}>
         <Play />
         <span>播放全部</span>
       </button>
-      <button type="button" className="mu-secondary" disabled={!ids.length} onClick={() => player.playShuffled(ids)}>
+      <button
+        type="button"
+        className={styles.muSecondary}
+        disabled={!ids.length}
+        onClick={() => player.playShuffled(ids)}
+      >
         <Shuffle />
         <span>随机播放</span>
       </button>
@@ -72,14 +78,14 @@ interface HeroProps {
 function Hero({ art, label, title, meta, tracks, actions, backdrop, tone }: HeroProps) {
   return (
     <header
-      className={`mu-hero${backdrop || tone !== undefined ? " tinted" : ""}`}
+      className={`${styles.muHero}${backdrop || tone !== undefined ? ` ${styles.tinted}` : ""}`}
       style={tone !== undefined ? { ["--mu-tone" as string]: tone } : undefined}
     >
       {backdrop && (
-        <span className="mu-hero-backdrop" style={{ backgroundImage: `url("${backdrop}")` }} aria-hidden="true" />
+        <span className={styles.muHeroBackdrop} style={{ backgroundImage: `url("${backdrop}")` }} aria-hidden="true" />
       )}
-      <span className="mu-hero-art">{art}</span>
-      <div className="mu-hero-text">
+      <span className={styles.muHeroArt}>{art}</span>
+      <div className={styles.muHeroText}>
         <small>{label}</small>
         <h1>{title}</h1>
         <p>{meta ?? summary(tracks)}</p>
@@ -91,20 +97,20 @@ function Hero({ art, label, title, meta, tracks, actions, backdrop, tone }: Hero
 
 function Heading({ title, meta, children }: { title: string; meta?: ReactNode; children?: ReactNode }) {
   return (
-    <header className="mu-heading">
+    <header className={styles.muHeading}>
       <div>
         <h1>{title}</h1>
         {meta && <p>{meta}</p>}
       </div>
-      {children && <div className="mu-heading-tools">{children}</div>}
+      {children && <div className={styles.muHeadingTools}>{children}</div>}
     </header>
   );
 }
 
 function Empty({ icon, title, children }: { icon: ReactNode; title: string; children?: ReactNode }) {
   return (
-    <div className="mu-empty">
-      <span className="mu-empty-icon">{icon}</span>
+    <div className={styles.muEmpty}>
+      <span className={styles.muEmptyIcon}>{icon}</span>
       <h2>{title}</h2>
       {children && <p>{children}</p>}
     </div>
@@ -165,9 +171,9 @@ export function SongsView({
   const { scrollRef } = useList();
   const tracks = useMemo(() => sortTracks(index.tracks, sort.by, sort.descending), [index.tracks, sort]);
   return (
-    <div className="mu-view" ref={scrollRef}>
+    <div className={styles.muView} ref={scrollRef}>
       <Heading title="音乐库" meta={`全部歌曲 · ${summary(tracks)}`}>
-        <label className="mu-sort">
+        <label className={styles.muSort}>
           <ArrowDownUp />
           <select
             aria-label="排序方式"
@@ -204,13 +210,13 @@ export function AlbumCard({ album }: { album: Album }) {
   const playing = music.player.current?.albumId === album.id;
   return (
     <article
-      className={`mu-card${playing ? " playing" : ""}`}
+      className={`${styles.muCard}${playing ? ` ${styles.playing}` : ""}`}
       onContextMenu={(event) => albumMenu(music, event, album.tracks)}
     >
-      <div className="mu-card-media">
+      <div className={styles.muCardMedia}>
         <button
           type="button"
-          className="mu-card-art"
+          className={styles.muCardArt}
           aria-label={`打开专辑 ${album.title}`}
           onClick={() => music.open({ kind: "album", id: album.id })}
         >
@@ -218,17 +224,17 @@ export function AlbumCard({ album }: { album: Album }) {
         </button>
         <button
           type="button"
-          className="mu-card-play"
+          className={styles.muCardPlay}
           aria-label={`播放专辑 ${album.title}`}
           onClick={() => music.player.play(ids, 0)}
         >
           <Play />
         </button>
       </div>
-      <button type="button" className="mu-card-title" onClick={() => music.open({ kind: "album", id: album.id })}>
+      <button type="button" className={styles.muCardTitle} onClick={() => music.open({ kind: "album", id: album.id })}>
         {album.title}
       </button>
-      <p className="mu-card-meta">
+      <p className={styles.muCardMeta}>
         {album.artist}
         {album.year ? ` · ${album.year}` : ""}
       </p>
@@ -252,9 +258,9 @@ export function AlbumsView({ sort, onSort }: { sort: AlbumSort; onSort: (sort: A
     return list;
   }, [index.albums, sort]);
   return (
-    <div className="mu-view">
+    <div className={styles.muView}>
       <Heading title="专辑" meta={`${albums.filter((album) => album.id !== "album:unknown").length} 张专辑`}>
-        <label className="mu-sort">
+        <label className={styles.muSort}>
           <ArrowDownUp />
           <select aria-label="排序方式" value={sort} onChange={(event) => onSort(event.target.value as AlbumSort)}>
             <option value="title">专辑名</option>
@@ -265,7 +271,7 @@ export function AlbumsView({ sort, onSort }: { sort: AlbumSort; onSort: (sort: A
         </label>
       </Heading>
       {albums.length ? (
-        <div className="mu-grid">
+        <div className={styles.muGrid}>
           {albums.map((album) => (
             <AlbumCard key={album.id} album={album} />
           ))}
@@ -284,7 +290,7 @@ export function AlbumView({ album }: { album?: Album }) {
   const { scrollRef } = useList();
   if (!album)
     return (
-      <div className="mu-view">
+      <div className={styles.muView}>
         <Empty icon={<Disc3 />} title="专辑不存在">
           它的歌曲可能已被移动或删除。
         </Empty>
@@ -294,7 +300,7 @@ export function AlbumView({ album }: { album?: Album }) {
   const more = artist?.albums.filter((other) => other.id !== album.id) ?? [];
   const multiDisc = new Set(album.tracks.map((track) => track.discNo ?? 1)).size > 1;
   return (
-    <div className="mu-view" ref={scrollRef}>
+    <div className={styles.muView} ref={scrollRef}>
       <Hero
         art={<Cover id={album.coverId} name={album.title} size="large" />}
         backdrop={album.coverId ? coverURL(album.coverId) : undefined}
@@ -306,7 +312,7 @@ export function AlbumView({ album }: { album?: Album }) {
             {artist ? (
               <button
                 type="button"
-                className="mu-inline-link"
+                className={styles.muInlineLink}
                 onClick={() => music.open({ kind: "artist", key: artist.key })}
               >
                 {album.artist}
@@ -321,9 +327,9 @@ export function AlbumView({ album }: { album?: Album }) {
       />
       <List tracks={album.tracks} scrollRef={scrollRef} numbering="album" showAlbum={false} />
       {more.length > 0 && (
-        <section className="mu-section">
+        <section className={styles.muSection}>
           <h2>更多来自 {album.artist}</h2>
-          <div className="mu-grid">
+          <div className={styles.muGrid}>
             {more.slice(0, 12).map((other) => (
               <AlbumCard key={other.id} album={other} />
             ))}
@@ -339,11 +345,14 @@ export function AlbumView({ album }: { album?: Album }) {
 export function ArtistCard({ artist }: { artist: Artist }) {
   const music = useMusic();
   return (
-    <article className="mu-card artist" onContextMenu={(event) => albumMenu(music, event, artist.tracks)}>
-      <div className="mu-card-media">
+    <article
+      className={`${styles.muCard} ${styles.artist}`}
+      onContextMenu={(event) => albumMenu(music, event, artist.tracks)}
+    >
+      <div className={styles.muCardMedia}>
         <button
           type="button"
-          className="mu-card-art"
+          className={styles.muCardArt}
           aria-label={`打开歌手 ${artist.name}`}
           onClick={() => music.open({ kind: "artist", key: artist.key })}
         >
@@ -351,7 +360,7 @@ export function ArtistCard({ artist }: { artist: Artist }) {
         </button>
         <button
           type="button"
-          className="mu-card-play"
+          className={styles.muCardPlay}
           aria-label={`播放 ${artist.name} 的歌曲`}
           onClick={() =>
             music.player.play(
@@ -363,10 +372,14 @@ export function ArtistCard({ artist }: { artist: Artist }) {
           <Play />
         </button>
       </div>
-      <button type="button" className="mu-card-title" onClick={() => music.open({ kind: "artist", key: artist.key })}>
+      <button
+        type="button"
+        className={styles.muCardTitle}
+        onClick={() => music.open({ kind: "artist", key: artist.key })}
+      >
         {artist.name}
       </button>
-      <p className="mu-card-meta">
+      <p className={styles.muCardMeta}>
         {artist.albums.length ? `${artist.albums.length} 张专辑 · ` : ""}
         {artist.tracks.length} 首
       </p>
@@ -377,10 +390,10 @@ export function ArtistCard({ artist }: { artist: Artist }) {
 export function ArtistsView() {
   const { index } = useMusic();
   return (
-    <div className="mu-view">
+    <div className={styles.muView}>
       <Heading title="歌手" meta={`${index.artists.length} 位歌手`} />
       {index.artists.length ? (
-        <div className="mu-grid artists">
+        <div className={`${styles.muGrid} ${styles.artists}`}>
           {index.artists.map((artist) => (
             <ArtistCard key={artist.key} artist={artist} />
           ))}
@@ -402,12 +415,12 @@ export function ArtistView({ artist, plays }: { artist?: Artist; plays: Map<stri
   );
   if (!artist)
     return (
-      <div className="mu-view">
+      <div className={styles.muView}>
         <Empty icon={<Mic2 />} title="歌手不存在" />
       </div>
     );
   return (
-    <div className="mu-view" ref={scrollRef}>
+    <div className={styles.muView} ref={scrollRef}>
       <Hero
         art={<Cover id={artist.coverId} name={artist.name} kind="artist" size="large" />}
         label="歌手"
@@ -417,16 +430,16 @@ export function ArtistView({ artist, plays }: { artist?: Artist; plays: Map<stri
         meta={`${artist.albums.length ? `${artist.albums.length} 张专辑 · ` : ""}${summary(artist.tracks)}`}
       />
       {artist.albums.length > 0 && (
-        <section className="mu-section">
+        <section className={styles.muSection}>
           <h2>专辑</h2>
-          <div className="mu-grid">
+          <div className={styles.muGrid}>
             {artist.albums.map((album) => (
               <AlbumCard key={album.id} album={album} />
             ))}
           </div>
         </section>
       )}
-      <section className="mu-section">
+      <section className={styles.muSection}>
         <h2>歌曲</h2>
       </section>
       <List tracks={tracks} scrollRef={scrollRef} />
@@ -440,10 +453,10 @@ export function GenresView() {
   const music = useMusic();
   const genres = music.index.genres;
   return (
-    <div className="mu-view">
+    <div className={styles.muView}>
       <Heading title="类型" meta={`${genres.length} 种类型`} />
       {genres.length ? (
-        <div className="mu-genres">
+        <div className={styles.muGenres}>
           {genres.map((genre) => (
             <GenreCard key={genre.key} genre={genre} />
           ))}
@@ -463,7 +476,7 @@ function GenreCard({ genre }: { genre: Genre }) {
   return (
     <button
       type="button"
-      className="mu-genre"
+      className={styles.muGenre}
       style={{ ["--mu-tone" as string]: tone }}
       onClick={() => music.open({ kind: "genre", key: genre.key })}
       onContextMenu={(event) => albumMenu(music, event, genre.tracks)}
@@ -471,7 +484,7 @@ function GenreCard({ genre }: { genre: Genre }) {
       <strong>{genre.name}</strong>
       <small>{genre.tracks.length} 首</small>
       {genre.coverIds[0] && (
-        <span className="mu-genre-art">
+        <span className={styles.muGenreArt}>
           <Cover id={genre.coverIds[0]} name={genre.name} />
         </span>
       )}
@@ -484,15 +497,15 @@ export function GenreView({ genre }: { genre?: Genre }) {
   const tracks = useMemo(() => (genre ? sortTracks(genre.tracks, "artist") : []), [genre]);
   if (!genre)
     return (
-      <div className="mu-view">
+      <div className={styles.muView}>
         <Empty icon={<Tags />} title="类型不存在" />
       </div>
     );
   return (
-    <div className="mu-view" ref={scrollRef}>
+    <div className={styles.muView} ref={scrollRef}>
       <Hero
         art={
-          <span className="mu-icon-art genre">
+          <span className={`${styles.muIconArt} ${styles.genre}`}>
             <Tags />
           </span>
         }
@@ -519,18 +532,18 @@ export function FoldersView({ folderKey, sources }: { folderKey?: string; source
   const all = useMemo(() => (folder ? folderTracks(folder) : []), [folder]);
   if (!folderKey) {
     return (
-      <div className="mu-view">
+      <div className={styles.muView}>
         <Heading title="文件夹" meta="按音乐所在的文件夹浏览" />
-        <div className="mu-folders">
+        <div className={styles.muFolders}>
           {roots.map(({ source, folder: root }) => (
             <button
               key={`${source.spaceId}:${source.path}`}
               type="button"
-              className="mu-folder"
+              className={styles.muFolder}
               disabled={!root}
               onClick={() => root && music.open({ kind: "folders", key: root.key })}
             >
-              <span className="mu-folder-icon">
+              <span className={styles.muFolderIcon}>
                 <FolderOpen />
               </span>
               <span>
@@ -547,15 +560,15 @@ export function FoldersView({ folderKey, sources }: { folderKey?: string; source
   }
   if (!folder)
     return (
-      <div className="mu-view">
+      <div className={styles.muView}>
         <Empty icon={<FolderIcon />} title="文件夹里没有音乐" />
       </div>
     );
   const kind = sources?.items.find((source) => source.spaceId === folder.spaceId)?.spaceKind ?? "private";
   const trail = folder.path ? folder.path.split("/") : [];
   return (
-    <div className="mu-view" ref={scrollRef}>
-      <nav className="mu-crumbs" aria-label="文件夹路径">
+    <div className={styles.muView} ref={scrollRef}>
+      <nav className={styles.muCrumbs} aria-label="文件夹路径">
         <button type="button" onClick={() => music.open({ kind: "folders" })}>
           文件夹
         </button>
@@ -581,16 +594,16 @@ export function FoldersView({ folderKey, sources }: { folderKey?: string; source
         <Actions tracks={all} />
       </Heading>
       {folder.folders.length > 0 && (
-        <div className="mu-folders compact">
+        <div className={`${styles.muFolders} ${styles.compact}`}>
           {folder.folders.map((child) => (
             <button
               key={child.key}
               type="button"
-              className="mu-folder"
+              className={styles.muFolder}
               onClick={() => music.open({ kind: "folders", key: child.key })}
               onContextMenu={(event) => albumMenu(music, event, folderTracks(child))}
             >
-              <span className="mu-folder-icon">
+              <span className={styles.muFolderIcon}>
                 <FolderIcon />
               </span>
               <span>
@@ -622,10 +635,10 @@ export function RecentView({ recent, onClear }: { recent: PlayRecord[]; onClear:
   );
   const tracks = rows.map((row) => row.track);
   return (
-    <div className="mu-view" ref={scrollRef}>
+    <div className={styles.muView} ref={scrollRef}>
       <Hero
         art={
-          <span className="mu-icon-art recent">
+          <span className={`${styles.muIconArt} ${styles.recent}`}>
             <Clock3 />
           </span>
         }
@@ -634,7 +647,7 @@ export function RecentView({ recent, onClear }: { recent: PlayRecord[]; onClear:
         tracks={tracks}
         actions={
           rows.length > 0 && (
-            <button type="button" className="mu-ghost" onClick={onClear}>
+            <button type="button" className={styles.muGhost} onClick={onClear}>
               <Trash2 />
               <span>清空记录</span>
             </button>
@@ -661,10 +674,10 @@ export function FavoritesView({ order }: { order: string[] }) {
   const { scrollRef } = useList();
   const tracks = useMemo(() => order.flatMap((id) => index.byId.get(id) ?? []), [order, index.byId]);
   return (
-    <div className="mu-view" ref={scrollRef}>
+    <div className={styles.muView} ref={scrollRef}>
       <Hero
         art={
-          <span className="mu-icon-art favorite">
+          <span className={`${styles.muIconArt} ${styles.favorite}`}>
             <Heart />
           </span>
         }
@@ -718,14 +731,14 @@ export function PlaylistView({
   );
   if (!playlist)
     return (
-      <div className="mu-view">
+      <div className={styles.muView}>
         <Empty icon={<ListMusic />} title="歌单不存在" />
       </div>
     );
   const tracks = rows.map((row) => row.track);
   const missing = playlist.trackIds.length - rows.length;
   return (
-    <div className="mu-view" ref={scrollRef}>
+    <div className={styles.muView} ref={scrollRef}>
       <Hero
         art={<Mosaic coverIds={playlistCovers(playlist, music.index)} name={playlist.name} />}
         label="歌单"
@@ -734,12 +747,18 @@ export function PlaylistView({
         meta={`${summary(tracks)}${missing ? ` · ${missing} 首暂不可用` : ""} · 更新于 ${relativeTime(playlist.updatedAt)}`}
         actions={
           <>
-            <button type="button" className="mu-ghost icon" aria-label="重命名歌单" title="重命名" onClick={onRename}>
+            <button
+              type="button"
+              className={`${styles.muGhost} ${styles.icon}`}
+              aria-label="重命名歌单"
+              title="重命名"
+              onClick={onRename}
+            >
               <Pencil />
             </button>
             <button
               type="button"
-              className="mu-ghost icon danger"
+              className={`${styles.muGhost} ${styles.icon} ${styles.danger}`}
               aria-label="删除歌单"
               title="删除歌单"
               onClick={onDelete}
@@ -783,7 +802,7 @@ export function PlaylistView({
 // folds the sidebar and its search box away.
 function SearchField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
-    <label className="mu-search mu-search-inline">
+    <label className={`${styles.muSearch} ${styles.muSearchInline}`}>
       <Search />
       <input
         type="search"
@@ -816,17 +835,17 @@ export function SearchView({
   const trimmed = query.trim();
   if (!trimmed) {
     return (
-      <div className="mu-view">
+      <div className={styles.muView}>
         <SearchField value={input} onChange={onInput} />
         <Heading title="搜索" meta="歌名、歌手和专辑都能搜，也支持拼音和首字母" />
-        <div className="mu-search-tips">
+        <div className={styles.muSearchTips}>
           <p>
             试试输入 <kbd>zjl</kbd> 找周杰伦，或 <kbd>qingtian</kbd> 找《晴天》。
           </p>
           {history.length > 0 && (
             <>
               <h2>最近搜索</h2>
-              <div className="mu-chips">
+              <div className={styles.muChips}>
                 {history.map((item) => (
                   <button key={item} type="button" onClick={() => onPick(item)}>
                     <Search />
@@ -842,7 +861,7 @@ export function SearchView({
   }
   const total = results.tracks.length + results.albums.length + results.artists.length;
   return (
-    <div className="mu-view" ref={scrollRef}>
+    <div className={styles.muView} ref={scrollRef}>
       <SearchField value={input} onChange={onInput} />
       <Heading
         title={`“${trimmed}”`}
@@ -858,9 +877,9 @@ export function SearchView({
         </Empty>
       )}
       {results.artists.length > 0 && (
-        <section className="mu-section">
+        <section className={styles.muSection}>
           <h2>歌手</h2>
-          <div className="mu-grid artists single-row">
+          <div className={`${styles.muGrid} ${styles.artists} single-row`}>
             {results.artists.slice(0, 6).map((artist) => (
               <ArtistCard key={artist.key} artist={artist} />
             ))}
@@ -868,9 +887,9 @@ export function SearchView({
         </section>
       )}
       {results.albums.length > 0 && (
-        <section className="mu-section">
+        <section className={styles.muSection}>
           <h2>专辑</h2>
-          <div className="mu-grid single-row">
+          <div className={`${styles.muGrid} single-row`}>
             {results.albums.slice(0, 6).map((album) => (
               <AlbumCard key={album.id} album={album} />
             ))}
@@ -879,7 +898,7 @@ export function SearchView({
       )}
       {results.tracks.length > 0 && (
         <>
-          <section className="mu-section">
+          <section className={styles.muSection}>
             <h2>歌曲</h2>
           </section>
           <List tracks={results.tracks} scrollRef={scrollRef} />
@@ -908,8 +927,8 @@ export function LibraryEmpty({
 }) {
   if (scanning) {
     return (
-      <div className="mu-view mu-welcome">
-        <span className="mu-welcome-art scanning">
+      <div className={`${styles.muView} ${styles.muWelcome}`}>
+        <span className={`${styles.muWelcomeArt} ${styles.scanning}`}>
           <Music2 />
         </span>
         <h1>正在整理你的音乐</h1>
@@ -919,14 +938,14 @@ export function LibraryEmpty({
   }
   if (volumeOffline) {
     return (
-      <div className="mu-view mu-welcome">
-        <span className="mu-welcome-art offline">
+      <div className={`${styles.muView} ${styles.muWelcome}`}>
+        <span className={`${styles.muWelcomeArt} ${styles.offline}`}>
           <Music2 />
         </span>
         <h1>数据卷暂时不可用</h1>
         <p>音乐存放在数据卷上。数据卷恢复在线后，点“重新扫描”即可继续。</p>
-        <div className="mu-hero-actions">
-          <button type="button" className="mu-primary" onClick={onRescan}>
+        <div className={styles.muHeroActions}>
+          <button type="button" className={styles.muPrimary} onClick={onRescan}>
             重新扫描
           </button>
         </div>
@@ -934,8 +953,8 @@ export function LibraryEmpty({
     );
   }
   return (
-    <div className="mu-view mu-welcome">
-      <span className="mu-welcome-art">
+    <div className={`${styles.muView} ${styles.muWelcome}`}>
+      <span className={styles.muWelcomeArt}>
         <Music2 />
       </span>
       <h1>还没有音乐</h1>
@@ -943,19 +962,19 @@ export function LibraryEmpty({
         把音乐文件放进个人空间或共享空间的任意文件夹（例如新建一个“音乐”文件夹），A-NAS
         会自动整理成专辑、歌手和类型，并读取封面与歌词。
       </p>
-      <p className="mu-welcome-formats">
+      <p className={styles.muWelcomeFormats}>
         支持 MP3 · FLAC · AAC (M4A) · OGG · Opus · WAV，以及由设备转码播放的 ALAC · APE · WMA · WavPack · AIFF · DSD
       </p>
-      <div className="mu-hero-actions">
+      <div className={styles.muHeroActions}>
         {onOpenFiles && (
-          <button type="button" className="mu-primary" onClick={onOpenFiles}>
+          <button type="button" className={styles.muPrimary} onClick={onOpenFiles}>
             打开文件管理
           </button>
         )}
-        <button type="button" className="mu-secondary" onClick={onSources}>
+        <button type="button" className={styles.muSecondary} onClick={onSources}>
           选择音乐文件夹
         </button>
-        <button type="button" className="mu-ghost" onClick={onRescan}>
+        <button type="button" className={styles.muGhost} onClick={onRescan}>
           重新扫描
         </button>
       </div>

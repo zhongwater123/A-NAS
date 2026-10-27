@@ -211,10 +211,10 @@
   border-color: transparent;
   background: var(--mc-accent-2);
 }
-.mc-round.on:has(.lucide-heart) {
+.mc-round.on:has(:global(.lucide-heart)) {
   background: #e8456b;
 }
-.mc-round.on .lucide-heart {
+.mc-round.on :global(.lucide-heart) {
   fill: currentColor;
 }
 .mc-round.small {

@@ -2,6 +2,7 @@ import { FileUp, FolderUp, Upload } from "lucide-react";
 import { useRef } from "react";
 
 import { PickedFile, pickedFromInput } from "../lib/pickedFiles";
+import styles from "./files.module.css";
 
 // FileUploadControl is the floating upload button and its menu: files, or a
 // folder that keeps its structure.
@@ -17,11 +18,11 @@ export function FileUploadControl({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   return (
-    <div className="file-upload-control">
+    <div className={styles.fileUploadControl}>
       {menuOpen && (
         <>
-          <div className="file-upload-scrim" onPointerDown={() => onMenuOpen(false)} />
-          <div className="file-upload-menu" role="menu" aria-label="上传">
+          <div className={styles.fileUploadScrim} onPointerDown={() => onMenuOpen(false)} />
+          <div className={styles.fileUploadMenu} role="menu" aria-label="上传">
             <button
               role="menuitem"
               onClick={() => {
@@ -53,7 +54,7 @@ export function FileUploadControl({
         </>
       )}
       <button
-        className="file-floating-upload"
+        className={styles.fileFloatingUpload}
         aria-label="上传到当前目录"
         title="上传到当前目录"
         aria-haspopup="menu"

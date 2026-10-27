@@ -1,8 +1,10 @@
 import { FolderPlus, Images, X } from "lucide-react";
 import { FormEvent, useEffect, useEffectEvent, useState } from "react";
 
+import feedbackStyles from "../ui/feedback.module.css";
 import { listAlbums, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, thumbnailURL } from "./api";
 import { assetsLabel, type Caller, canEditAlbum, libraryName, ownLibrary, sharedLibrary } from "./model";
+import styles from "./photos.module.css";
 
 interface Props {
   caller: Caller;
@@ -43,13 +45,13 @@ export function AlbumPicker({ caller, assets, onPick, onCreate, onClose }: Props
 
   return (
     <div
-      className="ph-dialog-backdrop"
+      className={feedbackStyles.phDialogBackdrop}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <div
-        className="ph-dialog ph-picker"
+        className={`${feedbackStyles.phDialog} ${styles.phPicker}`}
         role="dialog"
         aria-modal="true"
         aria-label="加入相册"
@@ -63,16 +65,16 @@ export function AlbumPicker({ caller, assets, onPick, onCreate, onClose }: Props
         <header>
           <h3>加入相册</h3>
           <small>{assetsLabel(assets)}</small>
-          <button type="button" className="ph-dialog-close" aria-label="关闭" onClick={onClose}>
+          <button type="button" className={feedbackStyles.phDialogClose} aria-label="关闭" onClick={onClose}>
             <X />
           </button>
         </header>
         {albums === undefined ? (
-          <div className="ph-loading">
-            <span className="ph-spinner" />
+          <div className={styles.phLoading}>
+            <span className={styles.phSpinner} />
           </div>
         ) : (
-          <div className="ph-picker-list">
+          <div className={styles.phPickerList}>
             {libraries.map((library) => {
               const editable = (albums.get(library.id) ?? []).filter((album) => canEditAlbum(caller, album));
               return (
@@ -82,15 +84,15 @@ export function AlbumPicker({ caller, assets, onPick, onCreate, onClose }: Props
                     {copies(library) && <small>照片会先复制到{libraryName(caller, library)}</small>}
                   </h4>
                   {editable.map((album) => (
-                    <button type="button" key={album.id} className="ph-picker-item" onClick={() => onPick(album)}>
-                      <span className="ph-album-thumb">
+                    <button type="button" key={album.id} className={styles.phPickerItem} onClick={() => onPick(album)}>
+                      <span className={styles.phAlbumThumb}>
                         {album.coverId ? <img src={thumbnailURL(album.coverId)} alt="" /> : <Images />}
                       </span>
                       <span>{album.name}</span>
                       <small>{album.photos} 张</small>
                     </button>
                   ))}
-                  {!editable.length && <p className="ph-muted">还没有你可以编辑的相册</p>}
+                  {!editable.length && <p className={styles.phMuted}>还没有你可以编辑的相册</p>}
                 </section>
               );
             })}
@@ -98,7 +100,7 @@ export function AlbumPicker({ caller, assets, onPick, onCreate, onClose }: Props
         )}
         {libraries[0] &&
           (creating ? (
-            <form className="ph-picker-new" onSubmit={submit}>
+            <form className={styles.phPickerNew} onSubmit={submit}>
               <input
                 autoFocus
                 aria-label="新相册名称"
@@ -112,7 +114,7 @@ export function AlbumPicker({ caller, assets, onPick, onCreate, onClose }: Props
               </button>
             </form>
           ) : (
-            <button type="button" className="ph-picker-create" onClick={() => setCreating(true)}>
+            <button type="button" className={styles.phPickerCreate} onClick={() => setCreating(true)}>
               <FolderPlus />
               新建相册
             </button>

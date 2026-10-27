@@ -2,6 +2,7 @@ import { CircleAlert, Download, RefreshCw, Search, X } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { ContainerLogLine, ContainerSummary, readContainerLogs } from "./api";
+import styles from "./docker.module.css";
 import { formatClock } from "./model";
 import { IconAction } from "./parts";
 
@@ -85,9 +86,9 @@ export function ContainerLogs({ item }: { item: ContainerSummary }) {
   };
 
   return (
-    <div className="dk-logs" role="tabpanel" aria-label="日志">
-      <div className="dk-log-bar">
-        <label className="dk-search dk-log-search">
+    <div className={styles.dkLogs} role="tabpanel" aria-label="日志">
+      <div className={styles.dkLogBar}>
+        <label className={`${styles.dkSearch} ${styles.dkLogSearch}`}>
           <Search />
           <input
             value={query}
@@ -96,13 +97,13 @@ export function ContainerLogs({ item }: { item: ContainerSummary }) {
             aria-label="筛选日志"
           />
           {query && (
-            <button className="dk-search-clear" aria-label="清除筛选" onClick={() => setQuery("")}>
+            <button className={styles.dkSearchClear} aria-label="清除筛选" onClick={() => setQuery("")}>
               <X />
             </button>
           )}
         </label>
         <select
-          className="dk-select"
+          className={styles.dkSelect}
           aria-label="读取行数"
           value={tail}
           onChange={(event) => setTail(Number(event.target.value))}
@@ -113,42 +114,46 @@ export function ContainerLogs({ item }: { item: ContainerSummary }) {
             </option>
           ))}
         </select>
-        <button className={`dk-toggle ${follow ? "on" : ""}`} aria-pressed={follow} onClick={() => setFollow(!follow)}>
+        <button
+          className={`${styles.dkToggle} ${follow ? styles.on : ""}`}
+          aria-pressed={follow}
+          onClick={() => setFollow(!follow)}
+        >
           <i aria-hidden="true" />
           自动刷新
         </button>
         <IconAction label="下载日志" icon={<Download />} disabled={visible.length === 0} onClick={download} />
         <IconAction
           label="刷新日志"
-          icon={<RefreshCw className={loading ? "dk-spin" : ""} />}
+          icon={<RefreshCw className={loading ? styles.dkSpin : ""} />}
           disabled={loading}
           onClick={() => void load()}
         />
       </div>
       {failure && (
-        <div className="dk-note error" role="alert">
+        <div className={`${styles.dkNote} ${styles.error}`} role="alert">
           <CircleAlert />
           {failure}
         </div>
       )}
-      <div className="dk-log" role="log" aria-label={`${item.name} 日志`} ref={body} onScroll={onScroll}>
-        {lines === undefined && !failure && <p className="dk-log-empty">正在读取日志…</p>}
-        {lines?.length === 0 && <p className="dk-log-empty">暂无日志输出</p>}
+      <div className={styles.dkLog} role="log" aria-label={`${item.name} 日志`} ref={body} onScroll={onScroll}>
+        {lines === undefined && !failure && <p className={styles.dkLogEmpty}>正在读取日志…</p>}
+        {lines?.length === 0 && <p className={styles.dkLogEmpty}>暂无日志输出</p>}
         {lines && lines.length > 0 && visible.length === 0 && (
-          <p className="dk-log-empty">没有包含“{query.trim()}”的行</p>
+          <p className={styles.dkLogEmpty}>没有包含“{query.trim()}”的行</p>
         )}
         {visible.map((line, index) => (
-          <div className={`dk-log-line ${line.stream}`} key={index}>
+          <div className={`${styles.dkLogLine} ${styles[line.stream] ?? ""}`} key={index}>
             <time>{line.time ? formatClock(line.time) : ""}</time>
             <span>{highlight(line.text, needle)}</span>
           </div>
         ))}
       </div>
-      <footer className="dk-log-foot">
+      <footer className={styles.dkLogFoot}>
         <span>{lines ? (needle ? `${visible.length} / ${lines.length} 行匹配` : `共 ${lines.length} 行`) : ""}</span>
         {updatedAt !== undefined && (
           <span>
-            {follow ? <i className="dk-live" aria-hidden="true" /> : null}更新于 {formatClock(updatedAt)}
+            {follow ? <i className={styles.dkLive} aria-hidden="true" /> : null}更新于 {formatClock(updatedAt)}
           </span>
         )}
       </footer>

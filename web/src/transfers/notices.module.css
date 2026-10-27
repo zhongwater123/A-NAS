@@ -56,7 +56,7 @@
   border-color: rgba(20, 30, 45, 0.25);
   background: #f7f9fc;
 }
-.tc-button.primary {
+.tc-button:global(.primary) {
   padding: 8px 14px;
   border: 0;
   border-radius: 9px;
@@ -65,7 +65,7 @@
   background: var(--tc-accent);
   box-shadow: 0 3px 10px rgba(47, 111, 228, 0.25);
 }
-.tc-button.primary:hover {
+.tc-button:global(.primary):hover {
   background: #255fcf;
 }
 .tc-button.warning {
@@ -376,4 +376,17 @@
   .tc-toast {
     animation: none;
   }
+}
+
+/* The toasts' buttons and icons; until this was here, they got these rules
+   only once the transfer center had been opened. */
+.tc-toasts button {
+  font: inherit;
+}
+.tc-toasts button:focus-visible {
+  outline: 2px solid var(--tc-accent);
+  outline-offset: 2px;
+}
+.tc-toasts svg {
+  flex: none;
 }

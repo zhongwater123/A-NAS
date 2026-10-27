@@ -18,6 +18,7 @@ import { type ReactZoomPanPinchContentRef, TransformComponent, TransformWrapper 
 import { displayURL, getPhoto, motionURL, type PhotoAsset, previewURL, thumbnailURL } from "./api";
 import { type Caller, canChange, dayLabel, momentOf, reducedMotion } from "./model";
 import { type DetailsActions, PhotoDetails } from "./PhotoDetails";
+import styles from "./photos.module.css";
 import { type VideoControls, VideoPlayer } from "./VideoPlayer";
 
 export interface ViewerActions extends DetailsActions {
@@ -62,7 +63,7 @@ function fly(root: HTMLElement, src: string, from: DOMRect, to: DOMRect, reverse
   const frame = root.getBoundingClientRect();
   const image = document.createElement("img");
   image.src = src;
-  image.className = "ph-fly";
+  image.className = styles.phFly;
   Object.assign(image.style, {
     left: `${to.left - frame.left}px`,
     top: `${to.top - frame.top}px`,
@@ -206,7 +207,7 @@ export function Viewer({
   const strip = useRef<HTMLDivElement>(null);
   useEffect(() => {
     strip.current
-      ?.querySelector(".current")
+      ?.querySelector(`.${styles.current}`)
       ?.scrollIntoView?.({ inline: "center", block: "nearest", behavior: motion ? "smooth" : "auto" });
   }, [index, motion]);
 
@@ -308,7 +309,7 @@ export function Viewer({
   return (
     <div
       ref={root}
-      className={`ph-viewer${idle && !info ? " idle" : ""}${idle ? " resting" : ""}${entering ? " entering" : ""}${closing ? " closing" : ""}${info ? " with-info" : ""}`}
+      className={`${styles.phViewer}${idle && !info ? ` ${styles.idle}` : ""}${idle ? ` ${styles.resting}` : ""}${entering ? ` ${styles.entering}` : ""}${closing ? ` ${styles.closing}` : ""}${info ? ` ${styles.withInfo}` : ""}`}
       role="dialog"
       aria-label={`查看 ${asset.name}`}
       tabIndex={-1}
@@ -316,18 +317,18 @@ export function Viewer({
       onPointerMove={wake}
       onPointerDown={wake}
     >
-      <div className="ph-viewer-main">
-        <header className="ph-viewer-bar">
+      <div className={styles.phViewerMain}>
+        <header className={styles.phViewerBar}>
           <button type="button" aria-label="关闭查看" title="关闭 (Esc)" onClick={() => void close()}>
             <ArrowLeft />
           </button>
-          <div className="ph-viewer-title">
+          <div className={styles.phViewerTitle}>
             <strong>{dayLabel(moment)}</strong>
             <small>
               {moment.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · {asset.name}
             </small>
           </div>
-          <div className="ph-viewer-tools">
+          <div className={styles.phViewerTools}>
             {asset.motion && (
               <button
                 type="button"
@@ -388,7 +389,7 @@ export function Viewer({
               aria-label={info ? "隐藏信息" : "显示信息"}
               aria-pressed={info}
               title="信息 (I)"
-              className={info ? "on" : ""}
+              className={info ? styles.on : ""}
               onClick={() => onInfo(!info)}
             >
               <Info />
@@ -396,7 +397,7 @@ export function Viewer({
           </div>
         </header>
 
-        <div ref={stage} className={`ph-viewer-stage${video ? " video" : ""}`}>
+        <div ref={stage} className={`${styles.phViewerStage}${video ? ` ${styles.video}` : ""}`}>
           {video ? (
             <VideoPlayer
               key={asset.id}
@@ -418,13 +419,13 @@ export function Viewer({
               panning={{ velocityDisabled: true }}
               onTransform={(_, state) => setZoomed(state.scale > 1.01)}
             >
-              <TransformComponent wrapperClass="ph-zoom-wrapper" contentClass="ph-zoom-content">
-                <div className="ph-viewer-image">
+              <TransformComponent wrapperClass={styles.phZoomWrapper} contentClass={styles.phZoomContent}>
+                <div className={styles.phViewerImage}>
                   {asset.thumbnail === "ready" && !originalReady && (
-                    <img className="ph-viewer-low" src={thumbnailURL(asset.id)} alt="" draggable={false} />
+                    <img className={styles.phViewerLow} src={thumbnailURL(asset.id)} alt="" draggable={false} />
                   )}
                   <img
-                    className={`ph-viewer-full${originalReady ? " ready" : ""}`}
+                    className={`${styles.phViewerFull}${originalReady ? ` ${styles.ready}` : ""}`}
                     src={displayURL(asset)}
                     alt={asset.name}
                     draggable={false}
@@ -437,7 +438,7 @@ export function Viewer({
           {livePlaying && (
             <video
               key={asset.id}
-              className="ph-motion-video"
+              className={styles.phMotionVideo}
               src={motionURL(asset.id)}
               aria-label="动态照片视频"
               autoPlay
@@ -452,28 +453,38 @@ export function Viewer({
             />
           )}
           {liveError && (
-            <p className="ph-motion-error" role="status">
+            <p className={styles.phMotionError} role="status">
               动态片段暂时无法播放，仍可查看照片或下载原件。
             </p>
           )}
           {index > 0 && (
-            <button type="button" className="ph-viewer-nav previous" aria-label="上一张" onClick={() => go(-1)}>
+            <button
+              type="button"
+              className={`${styles.phViewerNav} ${styles.previous}`}
+              aria-label="上一张"
+              onClick={() => go(-1)}
+            >
               <ChevronLeft />
             </button>
           )}
           {index < assets.length - 1 && (
-            <button type="button" className="ph-viewer-nav next" aria-label="下一张" onClick={() => go(1)}>
+            <button
+              type="button"
+              className={`${styles.phViewerNav} ${styles.next}`}
+              aria-label="下一张"
+              onClick={() => go(1)}
+            >
               <ChevronRight />
             </button>
           )}
         </div>
 
-        <div ref={strip} className="ph-filmstrip" aria-label="胶片条">
+        <div ref={strip} className={styles.phFilmstrip} aria-label="胶片条">
           {film.map((item, offset) => (
             <button
               type="button"
               key={item.id}
-              className={start + offset === index ? "current" : ""}
+              className={start + offset === index ? styles.current : ""}
               aria-label={`跳到 ${item.name}`}
               aria-current={start + offset === index}
               onClick={() => onIndex(start + offset)}
@@ -481,7 +492,7 @@ export function Viewer({
             >
               <img src={previewURL(item)} alt="" loading="lazy" draggable={false} />
               {item.video && (
-                <span className="ph-film-video" aria-hidden="true">
+                <span className={styles.phFilmVideo} aria-hidden="true">
                   <Play />
                 </span>
               )}
@@ -490,7 +501,7 @@ export function Viewer({
         </div>
       </div>
 
-      <aside className="ph-viewer-info" aria-label="照片信息" aria-hidden={!info}>
+      <aside className={styles.phViewerInfo} aria-label="照片信息" aria-hidden={!info}>
         {info && (
           <PhotoDetails
             asset={asset}

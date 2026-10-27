@@ -15,6 +15,7 @@ import {
   qualityOf,
   unknownAlbum,
 } from "./library";
+import styles from "./music.module.css";
 import { usePlaybackTime } from "./player";
 
 type LyricsState = { trackId: string; lyrics?: Lyrics; missing?: boolean; failed?: boolean };
@@ -64,19 +65,19 @@ export function NowPlaying({ onClose }: { onClose: () => void }) {
   if (!track) return null;
   const current = state?.trackId === track.id ? state : undefined;
   return (
-    <section className="mu-stage" aria-label="正在播放">
+    <section className={styles.muStage} aria-label="正在播放">
       {track.coverId && (
         <span
-          className="mu-stage-backdrop"
+          className={styles.muStageBackdrop}
           style={{ backgroundImage: `url("${coverURL(track.coverId)}")` }}
           aria-hidden="true"
         />
       )}
-      <button type="button" className="mu-stage-close" aria-label="收起正在播放" onClick={onClose}>
+      <button type="button" className={styles.muStageClose} aria-label="收起正在播放" onClick={onClose}>
         <ChevronDown />
       </button>
-      <div className="mu-stage-body">
-        <div className="mu-stage-art">
+      <div className={styles.muStageBody}>
+        <div className={styles.muStageArt}>
           <Cover id={track.coverId} name={track.album || track.title} size="large" />
           <h2>{track.title}</h2>
           <p>
@@ -95,7 +96,7 @@ export function NowPlaying({ onClose }: { onClose: () => void }) {
               </span>
             ))}
           </p>
-          <p className="mu-stage-album">
+          <p className={styles.muStageAlbum}>
             <button
               type="button"
               onClick={() => {
@@ -109,11 +110,11 @@ export function NowPlaying({ onClose }: { onClose: () => void }) {
             <em>{qualityOf(track)}</em>
           </p>
         </div>
-        <div className="mu-stage-lyrics">
+        <div className={styles.muStageLyrics}>
           {current?.lyrics?.lines.length ? (
             <LyricsView lyrics={current.lyrics} />
           ) : (
-            <div className="mu-stage-nolyrics">
+            <div className={styles.muStageNolyrics}>
               <Mic2 />
               <p>{!current ? "正在载入歌词…" : current.failed ? "歌词暂时无法读取" : "暂无歌词"}</p>
               {current && !current.failed && (
@@ -166,7 +167,7 @@ function LyricsView({ lyrics }: { lyrics: Lyrics }) {
   return (
     <div
       ref={container}
-      className={`mu-lyrics${lyrics.synced ? " synced" : ""}`}
+      className={`${styles.muLyrics}${lyrics.synced ? ` ${styles.synced}` : ""}`}
       onWheel={() => {
         manual.current = Date.now();
       }}
@@ -175,7 +176,7 @@ function LyricsView({ lyrics }: { lyrics: Lyrics }) {
       }}
     >
       {lines.map((line, at) => (
-        <p key={at} className={at === active ? "active" : at < active ? "past" : ""}>
+        <p key={at} className={at === active ? styles.active : at < active ? styles.past : ""}>
           {lyrics.synced ? (
             <button
               type="button"

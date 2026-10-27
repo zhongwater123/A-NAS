@@ -10,9 +10,12 @@ import {
 } from "lucide-react";
 
 import type { Space } from "../api.generated";
+import { Notice } from "../ui/workspace";
+import workspaceStyles from "../ui/workspace.module.css";
 import type { Snapshot } from "./api";
 import { type SpaceData, useBackup } from "./BackupCenter";
 import { BackupCenterGlyph } from "./BackupCenterGlyph";
+import styles from "./backup.module.css";
 import {
   describeSchedule,
   formatCount,
@@ -25,7 +28,6 @@ import {
   spaceAudience,
   spaceLabel,
 } from "./format";
-import { Notice } from "../ui/workspace";
 import { SpaceIcon } from "./parts";
 
 type Tone = "ok" | "attention" | "danger" | "idle";
@@ -105,21 +107,21 @@ export function OverviewPage() {
   const needsSchedule = !loading && manageable.length > 0 && !troubled.length;
 
   return (
-    <div className="bk-page">
-      <header className="bk-page-head">
+    <div className={styles.bkPage}>
+      <header className={styles.bkPageHead}>
         <div>
           <h2>概览</h2>
           <p>快照让你在误删、误改之后找回文件。</p>
         </div>
       </header>
 
-      <section className={`bk-hero ${tone}`} aria-label="保护状态" aria-busy={loading}>
+      <section className={`${styles.bkHero} ${styles[tone] ?? ""}`} aria-label="保护状态" aria-busy={loading}>
         <ProtectionRing states={loading ? [] : states} />
-        <div className="bk-hero-copy">
-          <span className={`bk-hero-kicker ${tone}`}>{loading ? "正在检查…" : kicker[tone]}</span>
+        <div className={styles.bkHeroCopy}>
+          <span className={`${styles.bkHeroKicker} ${styles[tone] ?? ""}`}>{loading ? "正在检查…" : kicker[tone]}</span>
           {loading ? (
-            <div className="bk-skeleton" aria-hidden="true">
-              <i className="wide" />
+            <div className={styles.bkSkeleton} aria-hidden="true">
+              <i className={`${styles.wide} ${workspaceStyles.wide}`} />
               <i />
             </div>
           ) : (
@@ -128,7 +130,7 @@ export function OverviewPage() {
               <p>{detail}</p>
             </>
           )}
-          <dl className="bk-hero-facts">
+          <dl className={styles.bkHeroFacts}>
             <div>
               <dt>最近一次快照</dt>
               <dd>
@@ -177,29 +179,29 @@ export function OverviewPage() {
               </dd>
             </div>
           </dl>
-          <div className="bk-hero-actions">
+          <div className={styles.bkHeroActions}>
             {needsSchedule ? (
               <>
                 <button
                   type="button"
-                  className="bk-primary"
+                  className={workspaceStyles.bkPrimary}
                   onClick={() => navigate("schedules", { spaceId: manageable[0].space.id })}
                 >
                   <CalendarClock />
                   开启定时快照
                 </button>
-                <button type="button" className="bk-secondary" onClick={() => navigate("find")}>
+                <button type="button" className={workspaceStyles.bkSecondary} onClick={() => navigate("find")}>
                   <FileSearch />
                   找回文件
                 </button>
               </>
             ) : (
               <>
-                <button type="button" className="bk-primary" onClick={() => navigate("find")}>
+                <button type="button" className={workspaceStyles.bkPrimary} onClick={() => navigate("find")}>
                   <FileSearch />
                   找回文件
                 </button>
-                <button type="button" className="bk-secondary" onClick={() => navigate("snapshots")}>
+                <button type="button" className={workspaceStyles.bkSecondary} onClick={() => navigate("snapshots")}>
                   <History />
                   按时间浏览
                 </button>
@@ -211,7 +213,7 @@ export function OverviewPage() {
 
       <Coverage protectedNow={all.length > 0} />
 
-      <div className="bk-space-grid">
+      <div className={styles.bkSpaceGrid}>
         {states.map((state) => (
           <SpaceCard key={state.space.id} state={state} />
         ))}
@@ -226,11 +228,11 @@ export function OverviewPage() {
 function Coverage({ protectedNow }: { protectedNow: boolean }) {
   const { navigate } = useBackup();
   return (
-    <section className="bk-coverage" aria-label="能防范什么">
-      <div className={`bk-coverage-item ${protectedNow ? "ok" : "off"}`}>
-        <span className="bk-coverage-icon">{protectedNow ? <CircleCheck /> : <Camera />}</span>
+    <section className={styles.bkCoverage} aria-label="能防范什么">
+      <div className={`${styles.bkCoverageItem} ${protectedNow ? styles.ok : styles.off}`}>
+        <span className={styles.bkCoverageIcon}>{protectedNow ? <CircleCheck /> : <Camera />}</span>
         <div>
-          <strong>误删、误改{protectedNow && <em className="ok">已防护</em>}</strong>
+          <strong>误删、误改{protectedNow && <em className={styles.ok}>已防护</em>}</strong>
           <p>
             {protectedNow
               ? "删掉的到“找回文件”恢复；改坏的文档，在文件管理中右键它，选“历史版本”换回。"
@@ -238,8 +240,8 @@ function Coverage({ protectedNow }: { protectedNow: boolean }) {
           </p>
         </div>
       </div>
-      <div className="bk-coverage-item risk" role="note" aria-label="快照不是备份">
-        <span className="bk-coverage-icon">
+      <div className={`${styles.bkCoverageItem} ${styles.risk}`} role="note" aria-label="快照不是备份">
+        <span className={styles.bkCoverageIcon}>
           <HardDrive />
           <ShieldAlert />
         </span>
@@ -249,7 +251,11 @@ function Coverage({ protectedNow }: { protectedNow: boolean }) {
           </strong>
           <p>快照和文件在同一块硬盘上，硬盘坏了会一起丢失。备份到另一块硬盘还在规划中。</p>
         </div>
-        <button type="button" className="bk-link" onClick={() => navigate("external")}>
+        <button
+          type="button"
+          className={`${styles.bkLink} ${workspaceStyles.bkLink}`}
+          onClick={() => navigate("external")}
+        >
           了解
           <ArrowRight />
         </button>
@@ -266,23 +272,23 @@ function ProtectionRing({ states }: { states: SpaceState[] }) {
   const gap = states.length > 1 ? 10 : 0;
   const segment = states.length ? circumference / states.length : circumference;
   return (
-    <div className="bk-ring" aria-hidden="true">
+    <div className={styles.bkRing} aria-hidden="true">
       <svg viewBox="0 0 120 120">
-        <circle cx="60" cy="60" r={radius} className="bk-ring-track" />
+        <circle cx="60" cy="60" r={radius} className={styles.bkRingTrack} />
         {states.map((state, index) => (
           <circle
             key={state.space.id}
             cx="60"
             cy="60"
             r={radius}
-            className={`bk-ring-arc ${state.tone}`}
+            className={`${styles.bkRingArc} ${styles[state.tone] ?? ""}`}
             strokeDasharray={`${Math.max(segment - gap, 1)} ${circumference}`}
             strokeDashoffset={-(index * segment) - gap / 2}
             transform="rotate(-90 60 60)"
           />
         ))}
       </svg>
-      <span className="bk-ring-mark">
+      <span className={styles.bkRingMark}>
         <BackupCenterGlyph />
       </span>
     </div>
@@ -298,14 +304,14 @@ function SpaceCard({ state }: { state: SpaceState }) {
   const oldest = snapshots?.at(-1);
   const manage = canManage(space);
   return (
-    <section className={`bk-card bk-space-card ${tone}`} aria-label={spaceLabel(space)}>
+    <section className={`${styles.bkCard} ${styles.bkSpaceCard} ${styles[tone] ?? ""}`} aria-label={spaceLabel(space)}>
       <header>
         <SpaceIcon space={space} />
-        <div className="bk-space-title">
+        <div className={styles.bkSpaceTitle}>
           <strong>{spaceLabel(space)}</strong>
           <small>{spaceAudience(space)}</small>
         </div>
-        <span className={`bk-pill ${tone}`}>
+        <span className={`${styles.bkPill} ${styles[tone] ?? ""}`}>
           {data.offline
             ? "数据卷离线"
             : !schedule
@@ -323,7 +329,7 @@ function SpaceCard({ state }: { state: SpaceState }) {
         </Notice>
       ) : (
         <>
-          <dl className="bk-space-stats">
+          <dl className={styles.bkSpaceStats}>
             <div>
               <dt>最近一次</dt>
               <dd>{latest ? formatRelative(latest.createdAt) : "—"}</dd>
@@ -344,7 +350,7 @@ function SpaceCard({ state }: { state: SpaceState }) {
         {manage && schedule && !schedule.enabled && !data.offline ? (
           <button
             type="button"
-            className="bk-primary small"
+            className={`${workspaceStyles.bkPrimary} ${styles.small} ${workspaceStyles.small}`}
             onClick={() => navigate("schedules", { spaceId: space.id })}
           >
             <CalendarClock />
@@ -353,7 +359,7 @@ function SpaceCard({ state }: { state: SpaceState }) {
         ) : null}
         <button
           type="button"
-          className="bk-secondary small"
+          className={`${workspaceStyles.bkSecondary} ${styles.small} ${workspaceStyles.small}`}
           disabled={!snapshots?.length}
           onClick={() => navigate("snapshots", { spaceId: space.id })}
         >
@@ -363,7 +369,7 @@ function SpaceCard({ state }: { state: SpaceState }) {
         {manage ? (
           <button
             type="button"
-            className="bk-secondary small"
+            className={`${workspaceStyles.bkSecondary} ${styles.small} ${workspaceStyles.small}`}
             disabled={data.offline}
             onClick={() => createSnapshot(space)}
           >
@@ -371,7 +377,7 @@ function SpaceCard({ state }: { state: SpaceState }) {
             立即创建快照
           </button>
         ) : (
-          <span className="bk-muted-line">共享空间的快照由管理员创建</span>
+          <span className={styles.bkMutedLine}>共享空间的快照由管理员创建</span>
         )}
       </footer>
     </section>
@@ -394,9 +400,9 @@ function ActivityStrip({ snapshots }: { snapshots: Snapshot[] }) {
   });
   const peak = Math.max(1, ...days.map((item) => item.count));
   return (
-    <div className="bk-strip">
+    <div className={styles.bkStrip}>
       <div
-        className="bk-strip-bars"
+        className={styles.bkStripBars}
         role="img"
         aria-label={`最近 ${stripDays} 天有 ${days.filter((item) => item.count).length} 天拍了快照`}
       >
@@ -404,12 +410,12 @@ function ActivityStrip({ snapshots }: { snapshots: Snapshot[] }) {
           <span
             key={item.day.toISOString()}
             title={`${formatDay(item.day)}：${item.count ? `${item.count} 份快照` : "没有快照"}`}
-            className={item.count ? "filled" : ""}
+            className={item.count ? styles.filled : ""}
             style={{ height: `${item.count ? 30 + (70 * item.count) / peak : 18}%` }}
           />
         ))}
       </div>
-      <div className="bk-strip-axis">
+      <div className={styles.bkStripAxis}>
         <span>{stripDays} 天前</span>
         <span>共 {formatCount(snapshots.length)} 份快照</span>
         <span>今天</span>

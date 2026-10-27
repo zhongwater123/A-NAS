@@ -18,6 +18,7 @@ import type { Session, User } from "../../api.generated";
 import { displayName, fullName } from "../../people/people";
 import { listUsers } from "../api";
 import { Banner, messageOf } from "../parts";
+import styles from "../settings.module.css";
 import {
   type ActivityCategory,
   type ActivityEvent,
@@ -238,10 +239,10 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
     { id: "system", label: "系统任务" },
   ];
   return (
-    <div className="lg-panel">
-      <div className="lg-toolbar">
-        <div className="lg-toolbar-row">
-          <div className="lg-chips" role="radiogroup" aria-label="记录类别">
+    <div className={styles.lgPanel}>
+      <div className={styles.lgToolbar}>
+        <div className={styles.lgToolbarRow}>
+          <div className={styles.lgChips} role="radiogroup" aria-label="记录类别">
             {[undefined, ...categoryOrder].map((category) => {
               const active = filters.category === category;
               const Icon = category ? categoryIcons[category] : ScrollText;
@@ -250,7 +251,7 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
                   key={category ?? "all"}
                   role="radio"
                   aria-checked={active}
-                  className={`lg-chip ${active ? "active" : ""}`}
+                  className={`${styles.lgChip} ${active ? styles.active : ""}`}
                   onClick={() => setFilters((current) => ({ ...current, category }))}
                 >
                   <Icon />
@@ -259,9 +260,9 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
               );
             })}
           </div>
-          <span className="lg-controls-gap" />
+          <span className={styles.lgControlsGap} />
           <button
-            className="set-icon-btn bordered"
+            className={`${styles.setIconBtn} ${styles.bordered}`}
             aria-label="刷新活动记录"
             disabled={state.loading}
             onClick={() => void load()}
@@ -269,7 +270,7 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
             <RefreshCw className={state.loading ? "spinning" : ""} />
           </button>
           <button
-            className="set-btn"
+            className={styles.setBtn}
             disabled={Boolean(exporting) || !state.items.length}
             onClick={() => void exportCSV()}
           >
@@ -277,7 +278,7 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
             {exporting ? `正在导出 ${exporting.count} 条…` : "导出"}
           </button>
         </div>
-        <div className="lg-controls">
+        <div className={styles.lgControls}>
           {isAdmin && (
             <Select
               label="成员"
@@ -316,28 +317,28 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
         <SkeletonList />
       ) : days.length === 0 ? (
         !state.error && (
-          <div className="set-card lg-empty">
-            <span className="lg-empty-art">
+          <div className={`${styles.setCard} ${styles.lgEmpty}`}>
+            <span className={styles.lgEmptyArt}>
               <ScrollText />
             </span>
             <h3>{filtered ? "没有符合条件的记录" : "还没有活动记录"}</h3>
             <p>{filtered ? "换一个类别、成员或时间范围试试。" : "登录、文件操作和账号变更都会记录在这里。"}</p>
             {filtered && (
-              <button className="set-btn" onClick={clear}>
+              <button className={styles.setBtn} onClick={clear}>
                 清除筛选
               </button>
             )}
           </div>
         )
       ) : (
-        <div className="lg-days">
+        <div className={styles.lgDays}>
           {days.map((day) => (
-            <section key={day.label} className="lg-day" aria-label={day.label}>
-              <h3 className="lg-day-head">
+            <section key={day.label} className={styles.lgDay} aria-label={day.label}>
+              <h3 className={styles.lgDayHead}>
                 <span>{day.label}</span>
                 <small>{day.count} 条</small>
               </h3>
-              <ol className="set-card lg-list">
+              <ol className={`${styles.setCard} ${styles.lgList}`}>
                 {day.groups.map((group) => (
                   <ActivityRow
                     key={group.key}
@@ -353,9 +354,9 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
         </div>
       )}
       {state.loaded && state.items.length > 0 && (
-        <div className="lg-foot" ref={sentinel}>
+        <div className={styles.lgFoot} ref={sentinel}>
           {state.next ? (
-            <button className="set-btn" disabled={state.loading} onClick={() => void load(state.next)}>
+            <button className={styles.setBtn} disabled={state.loading} onClick={() => void load(state.next)}>
               {state.loading ? "正在读取…" : "加载更早的记录"}
             </button>
           ) : (
@@ -364,7 +365,7 @@ export function ActivityLog({ session, preset }: { session: Session; preset?: Lo
         </div>
       )}
       {isAdmin && state.loaded && (
-        <p className="set-footnote">
+        <p className={styles.setFootnote}>
           其他成员个人空间中的文件名不会显示，相册中的操作只有本人能看到；需要找回内容时请在“用户与权限”中开启可审计的只读查看。
         </p>
       )}
@@ -389,10 +390,10 @@ function ActivityRow({
   const open = expanded.has(group.key);
   const grouped = group.events.length > 1;
   return (
-    <li className={`lg-row ${described.tone ?? ""} ${open ? "open" : ""}`}>
-      <button className="lg-row-main" aria-expanded={open} onClick={() => onToggle(group.key)}>
+    <li className={`${styles.lgRow} ${styles[described.tone ?? ""] ?? ""} ${open ? styles.open : ""}`}>
+      <button className={styles.lgRowMain} aria-expanded={open} onClick={() => onToggle(group.key)}>
         <CategoryTile category={first.category} described={described} />
-        <span className="lg-row-text">
+        <span className={styles.lgRowText}>
           <Sentence parts={described.parts} />
           <small>{[categoryInfo[first.category].label, ...described.meta].join(" · ")}</small>
         </span>
@@ -401,21 +402,21 @@ function ActivityRow({
             ? `${clockTime(last.occurredAt)}–${clockTime(first.occurredAt)}`
             : clockTime(first.occurredAt)}
         </time>
-        <ChevronDown className="lg-chevron" aria-hidden="true" />
+        <ChevronDown className={styles.lgChevron} aria-hidden="true" />
       </button>
       {open &&
         (grouped ? (
-          <ol className="lg-sub">
+          <ol className={styles.lgSub}>
             {group.events.map((event) => {
               const key = `${group.key}/${event.id}`;
               const itemOpen = expanded.has(key);
               const item = describeActivity(event, viewerId);
               return (
                 <li key={event.id}>
-                  <button className="lg-sub-main" aria-expanded={itemOpen} onClick={() => onToggle(key)}>
+                  <button className={styles.lgSubMain} aria-expanded={itemOpen} onClick={() => onToggle(key)}>
                     <time dateTime={event.occurredAt}>{clockTime(event.occurredAt, true)}</time>
                     <Sentence parts={item.parts.slice(1)} />
-                    <ChevronDown className="lg-chevron" aria-hidden="true" />
+                    <ChevronDown className={styles.lgChevron} aria-hidden="true" />
                   </button>
                   {itemOpen && <EventDetails event={event} />}
                 </li>
@@ -433,7 +434,10 @@ function CategoryTile({ category, described }: { category: ActivityEvent["catego
   const alert = described.tone === "warning" || described.tone === "danger";
   const Icon = alert ? ShieldAlert : categoryIcons[category];
   return (
-    <span className={`lg-cat ${categoryInfo[category].tone} ${described.tone ?? ""}`} aria-hidden="true">
+    <span
+      className={`${styles.lgCat} ${styles[categoryInfo[category].tone] ?? ""} ${styles[described.tone ?? ""] ?? ""}`}
+      aria-hidden="true"
+    >
       <Icon />
     </span>
   );
@@ -441,12 +445,12 @@ function CategoryTile({ category, described }: { category: ActivityEvent["catego
 
 function Sentence({ parts }: { parts: Part[] }) {
   return (
-    <span className="lg-sentence">
+    <span className={styles.lgSentence}>
       {parts.map((part, index) =>
         typeof part === "string" ? (
           <span key={index}>{part}</span>
         ) : (
-          <strong key={index} className={part.muted ? "muted" : ""}>
+          <strong key={index} className={part.muted ? styles.muted : ""}>
             {part.name}
           </strong>
         ),
@@ -476,13 +480,13 @@ function EventDetails({ event }: { event: ActivityEvent }) {
   if (event.detail && !event.redacted)
     rows.push([
       "详情",
-      <code key="detail" className="wrap">
+      <code key="detail" className={styles.wrap}>
         {event.detail}
       </code>,
     ]);
   rows.push(["记录 ID", <code key="id">{event.id}</code>]);
   return (
-    <dl className="lg-details">
+    <dl className={styles.lgDetails}>
       {rows.map(([label, value]) => (
         <div key={label}>
           <dt>{label}</dt>
@@ -495,7 +499,7 @@ function EventDetails({ event }: { event: ActivityEvent }) {
 
 function SkeletonList() {
   return (
-    <div className="set-card lg-skeleton" role="status" aria-label="正在读取记录">
+    <div className={`${styles.setCard} ${styles.lgSkeleton}`} role="status" aria-label="正在读取记录">
       {Array.from({ length: 6 }, (_, index) => (
         <div key={index}>
           <i />

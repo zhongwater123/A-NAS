@@ -14,6 +14,7 @@ import {
 import { isPreviewableImage, isVideoFile } from "../lib/fileTypes";
 import { PersonAvatar } from "../people/PersonAvatar";
 import { displayName, type People, person } from "../people/people";
+import styles from "./shares.module.css";
 
 // A kind gives an item its label and tile colour in lists, the header and
 // the send dialog.
@@ -47,7 +48,10 @@ export function kindOf(name: string, isDir: boolean): Kind {
 export function EntryTile({ name, isDir, size = "md" }: { name: string; isDir: boolean; size?: "sm" | "md" | "lg" }) {
   const { tone, Icon } = kindOf(name, isDir);
   return (
-    <span className={`sh-tile sh-tile-${size} tone-${tone}`} aria-hidden="true">
+    <span
+      className={`${styles.shTile} ${styles[`sh-tile-${size}`] ?? ""} ${styles[`tone-${tone}`] ?? ""}`}
+      aria-hidden="true"
+    >
       <Icon />
     </span>
   );
@@ -66,7 +70,10 @@ export function Avatar({
   size?: "xs" | "sm" | "md" | "lg";
 }) {
   return (
-    <PersonAvatar who={person(people, { id, username: username ?? id })} className={`sh-avatar sh-avatar-${size}`} />
+    <PersonAvatar
+      who={person(people, { id, username: username ?? id })}
+      className={`${styles.shAvatar} ${styles[`sh-avatar-${size}`] ?? ""}`}
+    />
   );
 }
 export function nameOf(people: People, id: string, username?: string): string {
@@ -77,11 +84,15 @@ export function nameOf(people: People, id: string, username?: string): string {
 export function PeopleStack({ people, ids, max = 3 }: { people: People; ids: string[]; max?: number }) {
   const shown = ids.slice(0, ids.length > max ? max - 1 : max);
   return (
-    <span className={`sh-stack count-${Math.min(ids.length, max)}`} aria-hidden="true">
+    <span className={`${styles.shStack} ${styles[`count-${Math.min(ids.length, max)}`] ?? ""}`} aria-hidden="true">
       {shown.map((id) => (
         <Avatar key={id} people={people} id={id} size="sm" />
       ))}
-      {ids.length > max && <span className="sh-avatar sh-avatar-sm sh-stack-more">+{ids.length - shown.length}</span>}
+      {ids.length > max && (
+        <span className={`${styles.shAvatar} ${styles.shAvatarSm} ${styles.shStackMore}`}>
+          +{ids.length - shown.length}
+        </span>
+      )}
     </span>
   );
 }

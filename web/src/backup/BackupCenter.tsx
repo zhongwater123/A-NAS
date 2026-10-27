@@ -14,6 +14,8 @@ import {
 import type { FileEntry, Space } from "../api.generated";
 import { listSpaces } from "../files/api";
 import type { TransferLocation } from "../transfers/api";
+import { Dialog, Spinner, type Toast, useToasts } from "../ui/workspace";
+import workspaceStyles from "../ui/workspace.module.css";
 import {
   createSnapshot,
   getSchedule,
@@ -24,16 +26,15 @@ import {
   type SnapshotSchedule,
 } from "./api";
 import { BackupCenterGlyph } from "./BackupCenterGlyph";
+import styles from "./backup.module.css";
 import { ExternalPage } from "./ExternalPage";
 import { FindPage } from "./FindPage";
 import { defaultSnapshotName, spaceAudience, spaceLabel } from "./format";
 import { OverviewPage } from "./OverviewPage";
-import { Dialog, Spinner, type Toast, useToasts } from "../ui/workspace";
 import { SpaceIcon } from "./parts";
 import { type Crumb, RestoreDialog, type RestoreRequest } from "./RestoreDialog";
 import { SchedulesPage } from "./SchedulesPage";
 import { SnapshotsPage } from "./SnapshotsPage";
-import "./backup.css";
 
 export type Page = "overview" | "snapshots" | "find" | "schedules" | "external";
 
@@ -257,12 +258,12 @@ export function BackupCenter({
 
   return (
     <BackupContext.Provider value={context}>
-      <div ref={root} className={`bk-app${narrow ? " narrow" : ""}`}>
-        {narrow && drawer && <div className="bk-scrim" onClick={() => setDrawer(false)} />}
+      <div ref={root} className={`${styles.bkApp} ${workspaceStyles.bkApp}${narrow ? ` ${styles.narrow}` : ""}`}>
+        {narrow && drawer && <div className={styles.bkScrim} onClick={() => setDrawer(false)} />}
         {sidebarOpen && (
-          <nav className="bk-sidebar" aria-label="备份中心导航">
-            <div className="bk-brand">
-              <span className="bk-brand-mark">
+          <nav className={styles.bkSidebar} aria-label="备份中心导航">
+            <div className={styles.bkBrand}>
+              <span className={styles.bkBrandMark}>
                 <BackupCenterGlyph aria-hidden="true" />
               </span>
               <div>
@@ -270,12 +271,12 @@ export function BackupCenter({
                 <small>快照 · 恢复 · 备份</small>
               </div>
             </div>
-            <div className="bk-nav">
+            <div className={styles.bkNav}>
               {navigation.map((item) => (
                 <button
                   key={item.page}
                   type="button"
-                  className={page === item.page ? "active" : ""}
+                  className={page === item.page ? `${styles.active} ${workspaceStyles.active}` : ""}
                   aria-current={page === item.page ? "page" : undefined}
                   onClick={() => navigate(item.page)}
                 >
@@ -284,22 +285,22 @@ export function BackupCenter({
                 </button>
               ))}
             </div>
-            <p className="bk-nav-heading">备份到其他位置</p>
-            <div className="bk-nav">
+            <p className={styles.bkNavHeading}>备份到其他位置</p>
+            <div className={styles.bkNav}>
               <button
                 type="button"
-                className={page === "external" ? "active" : ""}
+                className={page === "external" ? `${styles.active} ${workspaceStyles.active}` : ""}
                 aria-current={page === "external" ? "page" : undefined}
                 onClick={() => navigate("external")}
               >
                 <HardDriveUpload />
                 <span>外部备份</span>
-                <small className="bk-chip">规划中</small>
+                <small className={styles.bkChip}>规划中</small>
               </button>
             </div>
-            <div className="bk-sidebar-fill" />
+            <div className={styles.bkSidebarFill} />
             {background.length > 0 && (
-              <div className="bk-activity" role="status">
+              <div className={styles.bkActivity} role="status">
                 <Spinner small />
                 <div>
                   <strong>正在恢复 {background.length} 项</strong>
@@ -310,20 +311,25 @@ export function BackupCenter({
             <SidebarStatus spaces={spaces ?? []} data={data} />
           </nav>
         )}
-        <main className="bk-main">
+        <main className={styles.bkMain}>
           {narrow && (
-            <div className="bk-topbar">
-              <button type="button" className="bk-icon-button" aria-label="显示导航" onClick={() => setDrawer(true)}>
+            <div className={styles.bkTopbar}>
+              <button
+                type="button"
+                className={workspaceStyles.bkIconButton}
+                aria-label="显示导航"
+                onClick={() => setDrawer(true)}
+              >
                 <PanelLeft />
               </button>
-              <span className="bk-brand-mark small">
+              <span className={`${styles.bkBrandMark} ${styles.small} ${workspaceStyles.small}`}>
                 <BackupCenterGlyph aria-hidden="true" />
               </span>
               <strong>备份中心</strong>
             </div>
           )}
           {!spaces ? (
-            <div className="bk-loading">
+            <div className={styles.bkLoading}>
               {failure ? (
                 <p>{failure}</p>
               ) : (
@@ -334,7 +340,7 @@ export function BackupCenter({
               )}
             </div>
           ) : (
-            <div className="bk-page-scroll">
+            <div className={styles.bkPageScroll}>
               {page === "overview" && <OverviewPage />}
               {page === "snapshots" && <SnapshotsPage />}
               {page === "find" && <FindPage />}
@@ -406,7 +412,7 @@ function SidebarStatus({ spaces, data }: { spaces: Space[]; data: Record<string,
         ? `${scheduled}/${spaces.length} 个空间已开启定时快照`
         : "尚未开启定时快照";
   return (
-    <div className={`bk-sidebar-status ${tone}`}>
+    <div className={`${styles.bkSidebarStatus} ${styles[tone] ?? ""}`}>
       <i />
       {text}
     </div>
@@ -445,10 +451,15 @@ function CreateSnapshotDialog({
       onClose={onClose}
       footer={
         <>
-          <button type="button" className="bk-secondary" disabled={busy} onClick={onClose}>
+          <button type="button" className={workspaceStyles.bkSecondary} disabled={busy} onClick={onClose}>
             取消
           </button>
-          <button type="submit" form="bk-create-form" className="bk-primary" disabled={busy || !name.trim()}>
+          <button
+            type="submit"
+            form="bk-create-form"
+            className={workspaceStyles.bkPrimary}
+            disabled={busy || !name.trim()}
+          >
             {busy ? (
               <>
                 <Spinner small />
@@ -462,15 +473,15 @@ function CreateSnapshotDialog({
       }
     >
       <form id="bk-create-form" className="bk-create" onSubmit={(event) => void submit(event)}>
-        <div className="bk-create-space">
+        <div className={styles.bkCreateSpace}>
           <SpaceIcon space={space} />
           <div>
             <strong>{spaceLabel(space)}</strong>
             <small>{spaceAudience(space)}</small>
           </div>
         </div>
-        <label className="bk-field">
-          <span className="bk-field-label">快照名称</span>
+        <label className={workspaceStyles.bkField}>
+          <span className={workspaceStyles.bkFieldLabel}>快照名称</span>
           <input
             data-autofocus
             value={name}
@@ -481,11 +492,11 @@ function CreateSnapshotDialog({
           />
         </label>
         {error && (
-          <div className="bk-inline-error" role="alert">
+          <div className={workspaceStyles.bkInlineError} role="alert">
             <span>{error}</span>
           </div>
         )}
-        <ul className="bk-facts">
+        <ul className={styles.bkFacts}>
           <li>冻结这个空间此刻的全部文件，之后只读，可随时浏览和恢复。</li>
           <li>适合在整理、批量改名或删除文件之前拍一份，出了差错可以整份找回。</li>
           <li>创建时几乎不占空间；之后修改或删除的文件，旧内容会保留到快照被删除。</li>

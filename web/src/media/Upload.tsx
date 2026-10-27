@@ -26,6 +26,7 @@ import type { Category, LibraryKind, MediaLibrary } from "./api";
 import { messageOf } from "./Browse";
 import { Dropdown } from "./Dropdown";
 import { kindInfo } from "./Libraries";
+import styles from "./media.module.css";
 import {
   acceptedTypes,
   type Destination,
@@ -320,7 +321,7 @@ export function UploadDialog({
 
   return (
     <div
-      className="mc-dialog-backdrop"
+      className={styles.mcDialogBackdrop}
       onDragOver={(event) => {
         if (hasFiles(event)) {
           event.preventDefault();
@@ -338,7 +339,7 @@ export function UploadDialog({
       <div
         ref={dialog}
         tabIndex={-1}
-        className="mc-dialog wide mc-upload"
+        className={`${styles.mcDialog} ${styles.wide} ${styles.mcUpload}`}
         role="dialog"
         aria-modal="true"
         aria-label="上传视频"
@@ -349,26 +350,26 @@ export function UploadDialog({
           }
         }}
       >
-        <header className="mc-dialog-head">
-          <span className="mc-upload-mark">
+        <header className={styles.mcDialogHead}>
+          <span className={styles.mcUploadMark}>
             <CloudUpload />
           </span>
-          <div className="mc-upload-title">
+          <div className={styles.mcUploadTitle}>
             <h3>上传视频</h3>
             <small>保存到媒体库的文件夹，上传完成后自动出现在影视中心</small>
           </div>
-          <button type="button" className="mc-icon-button" aria-label="关闭" onClick={onClose}>
+          <button type="button" className={styles.mcIconButton} aria-label="关闭" onClick={onClose}>
             <X />
           </button>
         </header>
         {!library ? (
-          <div className="mc-dialog-body">
-            <div className="mc-state compact">
+          <div className={styles.mcDialogBody}>
+            <div className={`${styles.mcState} ${styles.compact}`}>
               <LibraryBig />
               <h2>还没有{scopeNames[scope]}</h2>
               <p>先新建一个媒体库，选好存放视频的文件夹，再把视频上传进去。</p>
               {onCreateLibrary && (
-                <button type="button" className="mc-primary" onClick={onCreateLibrary}>
+                <button type="button" className={styles.mcPrimary} onClick={onCreateLibrary}>
                   <Plus />
                   新建媒体库
                 </button>
@@ -376,20 +377,20 @@ export function UploadDialog({
             </div>
           </div>
         ) : (
-          <div className="mc-dialog-body">
-            <section className="mc-upload-target" aria-label="上传位置">
+          <div className={styles.mcDialogBody}>
+            <section className={styles.mcUploadTarget} aria-label="上传位置">
               {targets.length > 1 && (
-                <div className="mc-upload-libraries" role="radiogroup" aria-label="媒体库">
+                <div className={styles.mcUploadLibraries} role="radiogroup" aria-label="媒体库">
                   {targets.map((candidate) => (
                     <button
                       key={candidate.id}
                       type="button"
                       role="radio"
                       aria-checked={candidate.id === library.id}
-                      className={candidate.id === library.id ? "active" : ""}
+                      className={candidate.id === library.id ? styles.active : ""}
                       onClick={() => choose(candidate)}
                     >
-                      <span className="mc-kind-icon">{kindInfo[candidate.kind].icon}</span>
+                      <span className={styles.mcKindIcon}>{kindInfo[candidate.kind].icon}</span>
                       <span>
                         <strong>{candidate.name}</strong>
                         <small>
@@ -400,14 +401,14 @@ export function UploadDialog({
                   ))}
                 </div>
               )}
-              <div className="mc-upload-where">
+              <div className={styles.mcUploadWhere}>
                 <span
-                  className="mc-upload-space"
+                  className={styles.mcUploadSpace}
                   title={library.spaceKind === "shared" ? "共享空间：所有成员可见" : "个人空间：只有你能看到"}
                 >
                   {library.spaceKind === "shared" ? <Users /> : <HardDrive />}
                 </span>
-                <nav className="mc-upload-crumbs" aria-label="保存位置">
+                <nav className={styles.mcUploadCrumbs} aria-label="保存位置">
                   <strong>{library.name}</strong>
                   {roots.length > 1 ? (
                     <span>
@@ -445,25 +446,25 @@ export function UploadDialog({
                 </nav>
                 <button
                   type="button"
-                  className="mc-link"
+                  className={styles.mcLink}
                   aria-expanded={browsing}
                   onClick={() => setBrowsing(!browsing)}
                 >
                   {browsing ? "收起" : "选择子文件夹"}
-                  <ChevronDown className={browsing ? "flipped" : ""} />
+                  <ChevronDown className={browsing ? styles.flipped : ""} />
                 </button>
               </div>
               {browsing && (
-                <div className="mc-picker">
-                  <div className="mc-picker-list short" role="list" aria-label="子文件夹">
+                <div className={styles.mcPicker}>
+                  <div className={`${styles.mcPickerList} ${styles.short}`} role="list" aria-label="子文件夹">
                     {!folders ? (
-                      <span className="mc-spinner small" />
+                      <span className={`${styles.mcSpinner} ${styles.small}`} />
                     ) : (
                       folders.map((entry) => (
-                        <div key={entry.id} className="mc-picker-row" role="listitem">
+                        <div key={entry.id} className={styles.mcPickerRow} role="listitem">
                           <button
                             type="button"
-                            className="mc-picker-open"
+                            className={styles.mcPickerOpen}
                             onClick={() => setTrail([...trail, { id: entry.id, name: entry.name }])}
                           >
                             <FolderOpen />
@@ -474,16 +475,19 @@ export function UploadDialog({
                       ))
                     )}
                     {folders && !folders.length && naming === undefined && (
-                      <p className="mc-picker-empty">这里没有子文件夹，文件会直接保存在这里</p>
+                      <p className={styles.mcPickerEmpty}>这里没有子文件夹，文件会直接保存在这里</p>
                     )}
                   </div>
                   {naming === undefined ? (
-                    <button type="button" className="mc-picker-new" onClick={() => setNaming("")}>
+                    <button type="button" className={styles.mcPickerNew} onClick={() => setNaming("")}>
                       <FolderPlus />
                       新建文件夹
                     </button>
                   ) : (
-                    <form className="mc-new-collection mc-picker-naming" onSubmit={(event) => void makeFolder(event)}>
+                    <form
+                      className={`${styles.mcNewCollection} ${styles.mcPickerNaming}`}
+                      onSubmit={(event) => void makeFolder(event)}
+                    >
                       <FolderPlus />
                       <input
                         autoFocus
@@ -499,7 +503,7 @@ export function UploadDialog({
                           }
                         }}
                       />
-                      <button type="submit" className="mc-primary small" disabled={!naming.trim()}>
+                      <button type="submit" className={`${styles.mcPrimary} ${styles.small}`} disabled={!naming.trim()}>
                         新建
                       </button>
                     </form>
@@ -508,20 +512,28 @@ export function UploadDialog({
               )}
             </section>
 
-            <div className={`mc-dropzone ${over ? "over" : ""} ${items.length ? "compact" : ""}`}>
-              <span className="mc-dropzone-icon">
+            <div className={`${styles.mcDropzone} ${over ? styles.over : ""} ${items.length ? styles.compact : ""}`}>
+              <span className={styles.mcDropzoneIcon}>
                 <CloudUpload />
               </span>
-              <div className="mc-dropzone-text">
+              <div className={styles.mcDropzoneText}>
                 <strong>把视频文件或整个文件夹拖到这里</strong>
                 <small>支持视频、字幕（SRT、ASS、VTT）、NFO 和海报图片</small>
               </div>
-              <div className="mc-dropzone-actions">
-                <button type="button" className="mc-glass small" onClick={() => fileInput.current?.click()}>
+              <div className={styles.mcDropzoneActions}>
+                <button
+                  type="button"
+                  className={`${styles.mcGlass} ${styles.small}`}
+                  onClick={() => fileInput.current?.click()}
+                >
                   <Film />
                   选择文件
                 </button>
-                <button type="button" className="mc-glass small" onClick={() => folderInput.current?.click()}>
+                <button
+                  type="button"
+                  className={`${styles.mcGlass} ${styles.small}`}
+                  onClick={() => folderInput.current?.click()}
+                >
                   <FolderOpen />
                   选择文件夹
                 </button>
@@ -556,16 +568,16 @@ export function UploadDialog({
             </div>
 
             {items.length > 0 && (
-              <ul className="mc-upload-list" aria-label="上传列表">
+              <ul className={styles.mcUploadList} aria-label="上传列表">
                 {items.map((item) => (
-                  <li key={item.id} className={`mc-upload-row ${item.state}`}>
-                    <span className={`mc-upload-type ${item.role}`}>{roleIcons[item.role]}</span>
-                    <div className="mc-upload-main">
-                      <div className="mc-upload-line">
+                  <li key={item.id} className={`${styles.mcUploadRow} ${styles[item.state] ?? ""}`}>
+                    <span className={`${styles.mcUploadType} ${styles[item.role] ?? ""}`}>{roleIcons[item.role]}</span>
+                    <div className={styles.mcUploadMain}>
+                      <div className={styles.mcUploadLine}>
                         <strong title={item.folder ? `${item.folder}/${item.file.name}` : item.file.name}>
                           {item.file.name}
                         </strong>
-                        <span className="mc-upload-status">
+                        <span className={styles.mcUploadStatus}>
                           {item.state === "failed" && <CircleAlert />}
                           {statusOf(item)}
                         </span>
@@ -581,7 +593,7 @@ export function UploadDialog({
                       </small>
                       {item.state === "uploading" && (
                         <span
-                          className="mc-upload-bar"
+                          className={styles.mcUploadBar}
                           role="progressbar"
                           aria-label={`${item.file.name}上传进度`}
                           aria-valuemin={0}
@@ -595,7 +607,7 @@ export function UploadDialog({
                     {(item.state === "failed" || (item.state === "canceled" && item.to)) && (
                       <button
                         type="button"
-                        className="mc-icon-button small"
+                        className={`${styles.mcIconButton} ${styles.small}`}
                         aria-label={`重试${item.file.name}`}
                         title="重试"
                         onClick={() => uploads.retry(item.id)}
@@ -606,7 +618,7 @@ export function UploadDialog({
                     {(item.state === "waiting" || item.state === "uploading") && (
                       <button
                         type="button"
-                        className="mc-icon-button small"
+                        className={`${styles.mcIconButton} ${styles.small}`}
                         aria-label={`取消上传${item.file.name}`}
                         title="取消"
                         onClick={() => uploads.cancel(item.id)}
@@ -617,7 +629,7 @@ export function UploadDialog({
                     {(item.state === "ready" || item.state === "skipped") && (
                       <button
                         type="button"
-                        className="mc-icon-button small"
+                        className={`${styles.mcIconButton} ${styles.small}`}
                         aria-label={`移除${item.file.name}`}
                         title="移除"
                         onClick={() => uploads.remove(item.id)}
@@ -629,42 +641,47 @@ export function UploadDialog({
                 ))}
               </ul>
             )}
-            <p className="mc-hint">
+            <p className={styles.mcHint}>
               <Film />
               {(library.kind === "mixed" && mixedHints[scope]) || hints[library.kind]}
             </p>
           </div>
         )}
         {error && (
-          <p className="mc-form-error" role="alert">
+          <p className={styles.mcFormError} role="alert">
             {error}
           </p>
         )}
-        <footer className="mc-dialog-actions">
-          <span className="mc-upload-summary" aria-live="polite">
+        <footer className={styles.mcDialogActions}>
+          <span className={styles.mcUploadSummary} aria-live="polite">
             {summary}
           </span>
           {uploads.running ? (
             <>
-              <button type="button" className="mc-glass" onClick={uploads.cancelAll}>
+              <button type="button" className={styles.mcGlass} onClick={uploads.cancelAll}>
                 全部取消
               </button>
-              <button type="button" className="mc-primary" onClick={onClose}>
+              <button type="button" className={styles.mcPrimary} onClick={onClose}>
                 在后台上传
               </button>
             </>
           ) : ready.length ? (
             <>
-              <button type="button" className="mc-glass" onClick={onClose}>
+              <button type="button" className={styles.mcGlass} onClick={onClose}>
                 取消
               </button>
-              <button type="button" className="mc-primary mc-upload-start" onClick={start} disabled={!parentId}>
+              <button
+                type="button"
+                className={`${styles.mcPrimary} ${styles.mcUploadStart}`}
+                onClick={start}
+                disabled={!parentId}
+              >
                 <CloudUpload />
                 上传 {ready.length} 个文件
               </button>
             </>
           ) : (
-            <button type="button" className={progress.count ? "mc-primary" : "mc-glass"} onClick={onClose}>
+            <button type="button" className={progress.count ? styles.mcPrimary : styles.mcGlass} onClick={onClose}>
               {progress.count ? "完成" : "关闭"}
             </button>
           )}
@@ -682,14 +699,14 @@ export function UploadPill({ uploads, onOpen }: { uploads: Uploads; onOpen: () =
   return (
     <button
       type="button"
-      className={`mc-upload-pill ${uploads.running ? "" : "failed"}`}
+      className={`${styles.mcUploadPill} ${uploads.running ? "" : styles.failed}`}
       onClick={onOpen}
       aria-label={
         uploads.running ? `正在上传，已完成 ${share}%，查看上传列表` : `${progress.failed} 个文件上传失败，查看上传列表`
       }
     >
       {uploads.running ? (
-        <span className="mc-upload-ring" style={{ "--mc-share": `${share * 3.6}deg` } as CSSProperties}>
+        <span className={styles.mcUploadRing} style={{ "--mc-share": `${share * 3.6}deg` } as CSSProperties}>
           <CloudUpload />
         </span>
       ) : (
@@ -716,7 +733,7 @@ export function DropOverlay({
 }) {
   return (
     <div
-      className="mc-drop"
+      className={styles.mcDrop}
       onDragOver={(event) => event.preventDefault()}
       onDragLeave={(event) => {
         if (event.target === event.currentTarget) onLeave();
@@ -726,8 +743,8 @@ export function DropOverlay({
         onDrop(event);
       }}
     >
-      <div className="mc-drop-card">
-        <span className="mc-dropzone-icon">
+      <div className={styles.mcDropCard}>
+        <span className={styles.mcDropzoneIcon}>
           <CloudUpload />
         </span>
         <strong>松开即可上传到{label}</strong>

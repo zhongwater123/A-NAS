@@ -85,13 +85,13 @@
         "src/photos/Slideshow.tsx",
         "src/photos/VideoPlayer.tsx",
         "src/photos/Viewer.tsx",
-        "src/photos/feedback.tsx",
         "src/shares/EmojiInput.tsx",
         "src/shares/SaveDialog.tsx",
         "src/shares/ShareComposer.tsx",
         "src/shares/ShareDetail.tsx",
         "src/shares/SharePreview.tsx",
-        "src/trash/TrashPanel.tsx"
+        "src/trash/TrashPanel.tsx",
+        "src/ui/feedback.tsx"
       ],
       "rules": {
         "jsx-a11y/click-events-have-key-events": "off",

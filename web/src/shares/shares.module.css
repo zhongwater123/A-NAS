@@ -106,7 +106,7 @@
   height: 16px;
   flex: none;
 }
-.sh-btn.primary {
+.sh-btn:global(.primary) {
   padding: 8px 14px;
   border: 0;
   font-weight: 700;
@@ -117,7 +117,7 @@
     0 1px 2px rgba(140, 45, 0, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
-.sh-btn.primary:hover:not(:disabled) {
+.sh-btn:global(.primary):hover:not(:disabled) {
   background: var(--sh-accent-strong);
 }
 .sh-btn.danger {
@@ -2679,7 +2679,7 @@ small.tone-uncertain {
   .sh-compose-foot .sh-foot-note {
     flex-basis: 100%;
   }
-  .sh-compose-foot .primary {
+  .sh-compose-foot :global(.primary) {
     flex: 1;
   }
   .sh-people {

@@ -1,19 +1,25 @@
 import { HardDrive, Minus, Plus, UsersRound } from "lucide-react";
 
 import type { Space } from "../api.generated";
+import workspaceStyles from "../ui/workspace.module.css";
 import type { SnapshotOrigin } from "./api";
+import styles from "./backup.module.css";
 import { spaceLabel } from "./format";
 
 export function SpaceIcon({ space }: { space: Pick<Space, "kind"> }) {
   return (
-    <span className={`bk-space-icon ${space.kind}`} aria-hidden="true">
+    <span className={`${styles.bkSpaceIcon} ${styles[space.kind] ?? ""}`} aria-hidden="true">
       {space.kind === "shared" ? <UsersRound /> : <HardDrive />}
     </span>
   );
 }
 
 export function OriginBadge({ origin }: { origin: SnapshotOrigin }) {
-  return <span className={`bk-badge ${origin}`}>{origin === "scheduled" ? "定时" : "手动"}</span>;
+  return (
+    <span className={`${styles.bkBadge} ${workspaceStyles.bkBadge} ${styles[origin] ?? ""}`}>
+      {origin === "scheduled" ? "定时" : "手动"}
+    </span>
+  );
 }
 
 // SpaceSwitcher picks the space a page works on.
@@ -28,14 +34,14 @@ export function SpaceSwitcher({
 }) {
   if (spaces.length < 2) return null;
   return (
-    <div className="bk-segmented" role="radiogroup" aria-label="空间">
+    <div className={`${styles.bkSegmented} ${workspaceStyles.bkSegmented}`} role="radiogroup" aria-label="空间">
       {spaces.map((space) => (
         <button
           key={space.id}
           type="button"
           role="radio"
           aria-checked={space.id === value}
-          className={space.id === value ? "active" : ""}
+          className={space.id === value ? `${styles.active} ${workspaceStyles.active}` : ""}
           onClick={() => onChange(space.id)}
         >
           {space.kind === "shared" ? <UsersRound /> : <HardDrive />}
@@ -64,7 +70,7 @@ export function Switch({
       aria-checked={checked}
       aria-label={label}
       disabled={disabled}
-      className={`bk-switch${checked ? " on" : ""}`}
+      className={`${styles.bkSwitch}${checked ? ` ${styles.on}` : ""}`}
       onClick={() => onChange(!checked)}
     >
       <span />
@@ -89,7 +95,7 @@ export function Stepper({
   onChange: (value: number) => void;
 }) {
   return (
-    <div className="bk-stepper">
+    <div className={styles.bkStepper}>
       <button
         type="button"
         aria-label={`${label}减一`}

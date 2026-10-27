@@ -3,6 +3,7 @@ import { CSSProperties, KeyboardEvent, ReactNode, useEffect, useLayoutEffect, us
 
 import { copyText } from "../lib/clipboard";
 import { AppCredential, AppJob, CatalogApp, iconURL } from "./api";
+import styles from "./appcenter.module.css";
 import { appURL, openApp } from "./model";
 
 // The Markdown renderer is its own chunk. Once loaded it renders synchronously
@@ -20,7 +21,7 @@ export function preloadMarkdown(): Promise<unknown> {
 export function AppIcon({ app, size = "md" }: { app: CatalogApp; size?: "sm" | "md" | "lg" | "xl" }) {
   const [failed, setFailed] = useState(false);
   return (
-    <span className={`ac-icon ${size}`} aria-hidden="true">
+    <span className={`${styles.acIcon} ${styles[size] ?? ""}`} aria-hidden="true">
       {failed ? (
         <b>{app.title.slice(0, 1).toUpperCase()}</b>
       ) : (
@@ -34,26 +35,30 @@ export function AppIcon({ app, size = "md" }: { app: CatalogApp; size?: "sm" | "
 export function AppAction({ app, onInstall }: { app: CatalogApp; onInstall: (app: CatalogApp) => void }) {
   if (app.state === "installing" || app.state === "uninstalling") {
     return (
-      <span className="ac-get busy">
-        <Loader className="ac-spin" />
+      <span className={`${styles.acGet} ${styles.busy}`}>
+        <Loader className={styles.acSpin} />
         {app.state === "installing" ? "安装中" : "卸载中"}
       </span>
     );
   }
   if (app.state === "installed") {
     return appURL(app) ? (
-      <button className="ac-get open" aria-label={`打开 ${app.title}`} onClick={() => openApp(app)}>
+      <button
+        className={`${styles.acGet} ${styles.open}`}
+        aria-label={`打开 ${app.title}`}
+        onClick={() => openApp(app)}
+      >
         打开
       </button>
     ) : (
-      <span className="ac-get done">
+      <span className={`${styles.acGet} ${styles.done}`}>
         <Check />
         已安装
       </span>
     );
   }
   return (
-    <button className="ac-get" aria-label={`安装 ${app.title}`} onClick={() => onInstall(app)}>
+    <button className={styles.acGet} aria-label={`安装 ${app.title}`} onClick={() => onInstall(app)}>
       安装
     </button>
   );
@@ -69,7 +74,7 @@ export function RichText({ text }: { text: string }) {
   const Markdown = markdown?.default;
   if (!Markdown) {
     return (
-      <div className="ac-prose ac-prose-loading" role="status" aria-label="正在载入说明">
+      <div className={`${styles.acProse} ${styles.acProseLoading}`} role="status" aria-label="正在载入说明">
         <span />
         <span />
         <span />
@@ -77,7 +82,7 @@ export function RichText({ text }: { text: string }) {
     );
   }
   return (
-    <div className="ac-prose">
+    <div className={styles.acProse}>
       <Markdown>{text}</Markdown>
     </div>
   );
@@ -100,14 +105,14 @@ export function Folded({ children, lines = 6 }: { children: ReactNode; lines?: n
   }, [open]);
   return (
     <div
-      className={`ac-folded ${open ? "open" : ""} ${overflows ? "overflows" : ""}`}
+      className={`${styles.acFolded} ${open ? styles.open : ""} ${overflows ? styles.overflows : ""}`}
       style={{ "--ac-fold-lines": lines } as CSSProperties}
     >
-      <div ref={body} className="ac-folded-body">
+      <div ref={body} className={styles.acFoldedBody}>
         <div ref={content}>{children}</div>
       </div>
       {(overflows || open) && (
-        <button className="ac-link-button" onClick={() => setOpen(!open)}>
+        <button className={styles.acLinkButton} onClick={() => setOpen(!open)}>
           {open ? "收起" : "展开全部"}
         </button>
       )}
@@ -118,7 +123,7 @@ export function Folded({ children, lines = 6 }: { children: ReactNode; lines?: n
 export function JobOutput({ job, summary = "显示详细输出", open }: { job: AppJob; summary?: string; open?: boolean }) {
   if (job.output.length === 0) return null;
   return (
-    <details className="ac-output" open={open}>
+    <details className={styles.acOutput} open={open}>
       <summary>{summary}</summary>
       <pre>{job.output.join("\n")}</pre>
     </details>
@@ -131,12 +136,12 @@ export function JobOutput({ job, summary = "显示详细输出", open }: { job: 
 export function Logins({ credentials }: { credentials: AppCredential[] }) {
   const upstream = credentials.some((credential) => credential.upstream);
   return (
-    <div className={`ac-logins ${upstream ? "upstream" : ""}`}>
+    <div className={`${styles.acLogins} ${upstream ? "upstream" : ""}`}>
       {credentials.map((credential) => (
         <Login key={credential.label} credential={credential} />
       ))}
       {upstream ? (
-        <p className="ac-logins-warning">
+        <p className={styles.acLoginsWarning}>
           <TriangleAlert />
           这是安装清单公开的默认密码，任何人都查得到。应用安装于 A-NAS 生成独立密码之前，请在应用里改成自己的密码。
         </p>
@@ -158,7 +163,7 @@ function Login({ credential }: { credential: AppCredential }) {
     return () => window.clearTimeout(timer);
   }, [copied]);
   return (
-    <dl className="ac-login">
+    <dl className={styles.acLogin}>
       {credential.username && (
         <div>
           <dt>账号</dt>
@@ -170,11 +175,11 @@ function Login({ credential }: { credential: AppCredential }) {
       <div>
         <dt>{credential.label}</dt>
         <dd>
-          <code className={shown ? "" : "hidden"} aria-label={shown ? undefined : `${credential.label}已隐藏`}>
+          <code className={shown ? "" : styles.hidden} aria-label={shown ? undefined : `${credential.label}已隐藏`}>
             {shown ? credential.secret : "•".repeat(14)}
           </code>
           <button
-            className="ac-icon-btn"
+            className={styles.acIconBtn}
             aria-label={shown ? `隐藏${credential.label}` : `显示${credential.label}`}
             title={shown ? "隐藏" : "显示"}
             onClick={() => setShown(!shown)}
@@ -182,7 +187,7 @@ function Login({ credential }: { credential: AppCredential }) {
             {shown ? <EyeOff /> : <Eye />}
           </button>
           <button
-            className={`ac-icon-btn ${copied ? "done" : ""}`}
+            className={`${styles.acIconBtn} ${copied ? styles.done : ""}`}
             aria-label={copied ? "已复制" : `复制${credential.label}`}
             title={copied ? "已复制" : "复制"}
             onClick={() => setCopied(copyText(credential.secret))}
@@ -197,7 +202,7 @@ function Login({ credential }: { credential: AppCredential }) {
 
 export function Progress() {
   return (
-    <span className="ac-progress" aria-hidden="true">
+    <span className={styles.acProgress} aria-hidden="true">
       <i />
     </span>
   );
@@ -225,13 +230,20 @@ export function Layer({
   };
   return (
     <div
-      className="ac-layer"
+      className={styles.acLayer}
       onKeyDown={onKeyDown}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onDismiss?.();
       }}
     >
-      <div ref={sheet} className={`ac-sheet ${size}`} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
+      <div
+        ref={sheet}
+        className={`${styles.acSheet} ${styles[size] ?? ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        tabIndex={-1}
+      >
         {children}
       </div>
     </div>

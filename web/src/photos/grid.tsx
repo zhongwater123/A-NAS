@@ -15,6 +15,7 @@ import {
 import { getPhoto, type PhotoAsset } from "./api";
 import type { Box, Entry } from "./layout";
 import type { ScrollerHandle } from "./PhotoScroller";
+import styles from "./photos.module.css";
 import { Tile } from "./Tile";
 
 // GridProps is what every photo grid view gets from the panel: size,
@@ -95,13 +96,13 @@ export function DayHeader({
 }) {
   const all = entry.ids.every((id) => selected.has(id));
   return (
-    <div className={`ph-day${selected.size ? " selecting" : ""}`}>
+    <div className={`${styles.phDay}${selected.size ? ` ${styles.selecting}` : ""}`}>
       <button
         type="button"
         role="checkbox"
         aria-checked={all}
         aria-label={`选择${entry.label}的 ${entry.ids.length} 张照片`}
-        className={`ph-day-check${all ? " on" : ""}`}
+        className={`${styles.phDayCheck}${all ? ` ${styles.on}` : ""}`}
         onClick={() => onSelect(entry.ids)}
       >
         <Check strokeWidth={3} />

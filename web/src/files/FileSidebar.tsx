@@ -3,6 +3,7 @@ import { ChevronDown, FolderClosed, FolderOpen, FolderPlus, ShieldCheck, UsersRo
 import type { Space, Volume } from "../api.generated";
 import { formatBytes } from "../lib/bytes";
 import { FileIcon } from "./FileIcon";
+import styles from "./files.module.css";
 import { FileFolder, FileResource, othersSpace, personalFileResources, spaceLabel, volumeUsage } from "./model";
 
 // FileSidebar is the folder tree: each space, the open one unfolded down to
@@ -35,40 +36,40 @@ export function FileSidebar({
 }) {
   const usage = volumeUsage(volume);
   return (
-    <aside className="file-sidebar" aria-label="目录树">
-      <div className="file-sidebar-heading">
+    <aside className={styles.fileSidebar} aria-label="目录树">
+      <div className={styles.fileSidebarHeading}>
         <strong>目录</strong>
         <button aria-label="新建文件夹" disabled={!canCreate} onClick={onCreateDirectory}>
           <FolderPlus />
         </button>
       </div>
-      <p className="file-sidebar-label">空间</p>
-      <nav className="file-tree">
+      <p className={styles.fileSidebarLabel}>空间</p>
+      <nav className={styles.fileTree}>
         {spaces.map((space) => {
           const active = space.id === spaceID;
           const collapsed = collapsedSpaceIDs.includes(space.id);
           return (
-            <div className="file-tree-group" key={space.id}>
+            <div className={styles.fileTreeGroup} key={space.id}>
               <button
-                className={`file-tree-root ${active ? "active" : ""}`}
+                className={`${styles.fileTreeRoot} ${active ? styles.active : ""}`}
                 aria-expanded={active && !collapsed}
                 onClick={() => onToggleSpace(space)}
               >
-                <ChevronDown className={!active || collapsed ? "collapsed" : ""} />
-                <span className={`file-tree-icon ${space.kind}`}>
+                <ChevronDown className={!active || collapsed ? styles.collapsed : ""} />
+                <span className={`${styles.fileTreeIcon} ${styles[space.kind] ?? ""}`}>
                   {space.kind === "shared" ? <UsersRound /> : space.viewing ? <ShieldCheck /> : <FolderOpen />}
                 </span>
                 <strong>{spaceLabel(space, ownerName(space))}</strong>
                 <small>{space.kind === "shared" ? "共享" : space.name}</small>
               </button>
               {active && !collapsed && (
-                <div className="file-tree-branch" data-vnas-private={space.viewing ? othersSpace : undefined}>
+                <div className={styles.fileTreeBranch} data-vnas-private={space.viewing ? othersSpace : undefined}>
                   {space.kind === "private" &&
                     !space.viewing &&
                     personalFileResources.map((resource) => (
                       <button
                         key={resource.id}
-                        className="file-tree-child resource"
+                        className={`${styles.fileTreeChild} ${styles.resource}`}
                         disabled={resource.planned}
                         onClick={() => resource.resource && onOpenResource(resource.resource)}
                       >
@@ -80,7 +81,7 @@ export function FileSidebar({
                       </button>
                     ))}
                   <button
-                    className={`file-tree-child ${trail.length === 0 ? "current" : ""}`}
+                    className={`${styles.fileTreeChild} ${trail.length === 0 ? styles.current : ""}`}
                     onClick={() => onNavigate(0)}
                   >
                     <span>
@@ -91,7 +92,7 @@ export function FileSidebar({
                   {trail.map((item, index) => (
                     <button
                       key={item.id}
-                      className={`file-tree-child path ${index === trail.length - 1 ? "current" : ""}`}
+                      className={`${styles.fileTreeChild} ${styles.path} ${index === trail.length - 1 ? styles.current : ""}`}
                       onClick={() => onNavigate(index + 1)}
                     >
                       <span>
@@ -106,15 +107,15 @@ export function FileSidebar({
           );
         })}
       </nav>
-      <div className="file-volume-card">
+      <div className={styles.fileVolumeCard}>
         <header>
           <strong>数据卷</strong>
-          <span className={`file-volume-state ${volume?.state ?? "unavailable"}`}>
+          <span className={`${styles.fileVolumeState} ${styles[volume?.state ?? "unavailable"] ?? ""}`}>
             {volume?.state === "available" ? "在线" : "不可用"}
           </span>
         </header>
         <div
-          className={`file-volume-track ${usage.known ? "" : "unknown"}`}
+          className={`${styles.fileVolumeTrack} ${usage.known ? "" : styles.unknown}`}
           role="progressbar"
           aria-label={usage.known ? `数据卷已使用 ${usage.usedPercent}%` : "数据卷使用情况暂不可用"}
           aria-valuenow={usage.known ? usage.usedPercent : undefined}
@@ -123,7 +124,7 @@ export function FileSidebar({
         >
           <span style={{ width: `${usage.usedPercent}%` }} />
         </div>
-        <div className="file-volume-values">
+        <div className={styles.fileVolumeValues}>
           <span>已用空间</span>
           <span>总空间</span>
           <strong>{usage.known ? formatBytes(usage.usedBytes) : "—"}</strong>

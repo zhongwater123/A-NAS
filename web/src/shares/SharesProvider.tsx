@@ -17,7 +17,7 @@ import { getShare, listMessages, listShareNotifications, listShares, type Share,
 import { errorText, isUnread, shareTitle } from "./format";
 import { Avatar, nameOf } from "./parts";
 import { ShareComposer } from "./ShareComposer";
-import "./shares.css";
+import styles from "./shares.module.css";
 
 interface Focus {
   id: string;
@@ -231,14 +231,14 @@ function Provider({
         />
       )}
       {(toasts.length > 0 || pollError || summary) && (
-        <aside className="sh-toasts" aria-label="分享通知" aria-live="polite">
+        <aside className={styles.shToasts} aria-label="分享通知" aria-live="polite">
           {pollError && (
-            <div className="sh-toast sh-toast-plain" role="status">
-              <span className="sh-toast-mark">
+            <div className={`${styles.shToast} ${styles.shToastPlain}`} role="status">
+              <span className={styles.shToastMark}>
                 <Share2 />
               </span>
               <p>分享通知暂不可用：{pollError}</p>
-              <button className="sh-toast-close" aria-label="关闭通知错误" onClick={() => setPollError("")}>
+              <button className={styles.shToastClose} aria-label="关闭通知错误" onClick={() => setPollError("")}>
                 <X />
               </button>
             </div>
@@ -273,7 +273,7 @@ function Provider({
               />
             ))}
           {toasts.length > 3 && (
-            <div className="sh-toast-more">
+            <div className={styles.shToastMore}>
               <button
                 onClick={() => {
                   open("");
@@ -364,30 +364,30 @@ function NoticeToast({
   const body = message ? toast.text : toast.share && shareTitle(toast.share);
   return (
     <div
-      className="sh-toast"
+      className={styles.shToast}
       onPointerEnter={() => setPaused(true)}
       onPointerLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
       onBlur={() => setPaused(false)}
     >
-      <button className="sh-toast-open" onClick={onOpen}>
+      <button className={styles.shToastOpen} onClick={onOpen}>
         {toast.author ? (
           <Avatar people={people} id={toast.author.id} username={toast.author.username} size="md" />
         ) : (
-          <span className="sh-toast-mark">
+          <span className={styles.shToastMark}>
             <Share2 />
           </span>
         )}
-        <span className="sh-toast-copy">
+        <span className={styles.shToastCopy}>
           <strong>
             {title}
             {toast.count > 1 && <em>{message ? `${toast.count} 条` : `${toast.count} 个`}</em>}
           </strong>
-          {body && <span className="sh-toast-body">{body}</span>}
+          {body && <span className={styles.shToastBody}>{body}</span>}
           <small>点击查看</small>
         </span>
       </button>
-      <button className="sh-toast-close" aria-label="关闭分享通知" onClick={onClose}>
+      <button className={styles.shToastClose} aria-label="关闭分享通知" onClick={onClose}>
         <X />
       </button>
     </div>
@@ -406,18 +406,18 @@ function SummaryToast({ unread, onOpen, onClose }: { unread: Unread; onOpen: () 
     .filter(Boolean)
     .join("、");
   return (
-    <div className="sh-toast" onPointerEnter={() => setPaused(true)} onPointerLeave={() => setPaused(false)}>
-      <button className="sh-toast-open" onClick={onOpen}>
-        <span className="sh-toast-mark">
+    <div className={styles.shToast} onPointerEnter={() => setPaused(true)} onPointerLeave={() => setPaused(false)}>
+      <button className={styles.shToastOpen} onClick={onOpen}>
+        <span className={styles.shToastMark}>
           <Share2 />
         </span>
-        <span className="sh-toast-copy">
+        <span className={styles.shToastCopy}>
           <strong>有未读的分享</strong>
-          <span className="sh-toast-body">{parts}有新内容</span>
+          <span className={styles.shToastBody}>{parts}有新内容</span>
           <small>点击查看</small>
         </span>
       </button>
-      <button className="sh-toast-close" aria-label="关闭分享通知" onClick={onClose}>
+      <button className={styles.shToastClose} aria-label="关闭分享通知" onClick={onClose}>
         <X />
       </button>
     </div>

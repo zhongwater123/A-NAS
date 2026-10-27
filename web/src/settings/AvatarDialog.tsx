@@ -6,6 +6,7 @@ import type { User } from "../api.generated";
 import { uploadAvatar } from "../auth/api";
 import { ImageSources, loadImage } from "./ImageSources";
 import { Banner, messageOf } from "./parts";
+import styles from "./settings.module.css";
 
 // AvatarDialog lets the user pick a picture from this computer, from their
 // NAS files or from the photo library, crop it to a circle and save it. The
@@ -80,19 +81,19 @@ export function AvatarDialog({ onClose, onSaved }: { onClose: () => void; onSave
 
   return (
     <div
-      className="set-dialog-layer"
+      className={styles.setDialogLayer}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) close();
       }}
     >
-      <div className="set-dialog avd" role="dialog" aria-modal="true" aria-label="更换头像">
-        <header className="avd-head">
+      <div className={`${styles.setDialog} ${styles.avd}`} role="dialog" aria-modal="true" aria-label="更换头像">
+        <header className={styles.avdHead}>
           {picked ? (
-            <button className="set-icon-btn" aria-label="重新选择图片" onClick={repick} disabled={saving}>
+            <button className={styles.setIconBtn} aria-label="重新选择图片" onClick={repick} disabled={saving}>
               <ArrowLeft />
             </button>
           ) : (
-            <span className="set-tile accent lg">
+            <span className={`${styles.setTile} ${styles.accent} ${styles.lg}`}>
               <ImagePlus />
             </span>
           )}
@@ -104,12 +105,12 @@ export function AvatarDialog({ onClose, onSaved }: { onClose: () => void; onSave
                 : "选择一张照片，下一步裁成圆形。保存后会压缩成小图，打开页面时不会加载原图。"}
             </p>
           </div>
-          <button className="set-icon-btn" aria-label="关闭" onClick={close} disabled={saving}>
+          <button className={styles.setIconBtn} aria-label="关闭" onClick={close} disabled={saving}>
             <X />
           </button>
         </header>
         {error && (
-          <div className="avd-banner">
+          <div className={styles.avdBanner}>
             <Banner tone="error">{error}</Banner>
           </div>
         )}
@@ -142,8 +143,8 @@ function CropStage({
   const [pixels, setPixels] = useState<Area>();
   return (
     <>
-      <div className="avd-crop">
-        <div className="avd-crop-area">
+      <div className={styles.avdCrop}>
+        <div className={styles.avdCropArea}>
           <Cropper
             image={picked.url}
             crop={crop}
@@ -163,15 +164,15 @@ function CropStage({
             }}
           />
         </div>
-        <aside className="avd-side">
+        <aside className={styles.avdSide}>
           <h4>预览</h4>
-          <div className="avd-previews">
+          <div className={styles.avdPreviews}>
             {[80, 40, 28].map((size) => (
               <Preview key={size} picked={picked} area={area} size={size} />
             ))}
           </div>
-          <p className="avd-preview-note">从左到右：我的账号、系统快捷栏、问题反馈中的大小</p>
-          <label className="avd-zoom">
+          <p className={styles.avdPreviewNote}>从左到右：我的账号、系统快捷栏、问题反馈中的大小</p>
+          <label className={styles.avdZoom}>
             <ZoomOut aria-hidden="true" />
             <input
               type="range"
@@ -186,11 +187,15 @@ function CropStage({
           </label>
         </aside>
       </div>
-      <footer className="avd-foot">
-        <button className="set-btn" onClick={onCancel} disabled={saving}>
+      <footer className={styles.avdFoot}>
+        <button className={styles.setBtn} onClick={onCancel} disabled={saving}>
           取消
         </button>
-        <button className="set-btn primary" onClick={() => pixels && onSave(pixels)} disabled={saving || !pixels}>
+        <button
+          className={`${styles.setBtn} primary`}
+          onClick={() => pixels && onSave(pixels)}
+          disabled={saving || !pixels}
+        >
           {saving ? "正在保存…" : "保存头像"}
         </button>
       </footer>
@@ -201,11 +206,11 @@ function CropStage({
 // Preview draws the chosen square at one of the sizes avatars appear in.
 function Preview({ picked, area, size }: { picked: Picked; area?: Area; size: number }) {
   if (!area || area.width <= 0 || area.height <= 0)
-    return <span className="avd-preview" style={{ width: size, height: size }} />;
+    return <span className={styles.avdPreview} style={{ width: size, height: size }} />;
   const width = (size * 100) / area.width;
   const height = (size * 100) / area.height;
   return (
-    <span className="avd-preview" style={{ width: size, height: size }}>
+    <span className={styles.avdPreview} style={{ width: size, height: size }}>
       <img
         src={picked.url}
         alt=""

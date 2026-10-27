@@ -30,11 +30,11 @@ import { type FolderPlace, FoldersPage } from "./Folders";
 import { CollectionPicker, RenameDialog, useDialogs, useToasts } from "./feedback";
 import { HomePage } from "./Home";
 import { LibrariesPage, LibraryDialog } from "./Libraries";
+import styles from "./media.module.css";
 import { Player, type PlayRequest } from "./Player";
 import { type Section, Sidebar } from "./Sidebar";
 import { DropOverlay, hasFiles, UploadDialog, UploadPill, uploadTargets } from "./Upload";
 import { pickedFromDrop, useUploads } from "./uploads";
-import "./media.css";
 
 type Place =
   | { kind: "home" }
@@ -552,7 +552,7 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
     <ActionsContext.Provider value={actions}>
       <div
         ref={root}
-        className={`mc-app ${narrow ? "narrow" : ""} ${sidebarOpen ? "with-sidebar" : ""}`}
+        className={`${styles.mcApp} ${narrow ? "narrow" : ""} ${sidebarOpen ? "with-sidebar" : ""}`}
         data-user={userId}
         onDragOver={(event) => {
           if (hasFiles(event)) {
@@ -577,13 +577,13 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
         }}
       >
         {(sidebarOpen || narrow) && (
-          <div className={`mc-side ${narrow ? "drawer" : ""} ${sidebarOpen ? "open" : ""}`}>
+          <div className={`${styles.mcSide} ${narrow ? styles.drawer : ""} ${sidebarOpen ? styles.open : ""}`}>
             <Sidebar active={sectionOf(place)} libraries={libraries} processing={processing} onSelect={select} />
           </div>
         )}
-        {narrow && drawer && <div className="mc-scrim" onPointerDown={() => setDrawer(false)} />}
+        {narrow && drawer && <div className={styles.mcScrim} onPointerDown={() => setDrawer(false)} />}
         <main
-          className={`mc-main ${detail ? "detail" : ""}`}
+          className={`${styles.mcMain} ${detail ? "detail" : ""}`}
           onDragEnter={(event) => {
             if (hasFiles(event) && !uploading) {
               event.preventDefault();
@@ -591,21 +591,21 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
             }
           }}
         >
-          <div className="mc-topbar">
+          <div className={styles.mcTopbar}>
             <button
               type="button"
-              className="mc-icon-button"
+              className={styles.mcIconButton}
               aria-label={sidebarOpen ? "收起侧栏" : "展开侧栏"}
               onClick={() => (narrow ? setDrawer(!drawer) : setDocked(!docked))}
             >
               <PanelLeft />
             </button>
             {stack.length > 1 && (
-              <button type="button" className="mc-icon-button" aria-label="返回" onClick={back}>
+              <button type="button" className={styles.mcIconButton} aria-label="返回" onClick={back}>
                 <ArrowLeft />
               </button>
             )}
-            <label className="mc-search">
+            <label className={styles.mcSearch}>
               <Search />
               <input
                 value={query}
@@ -622,12 +622,12 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
                 </button>
               )}
             </label>
-            <span className="mc-topbar-gap" />
+            <span className={styles.mcTopbarGap} />
             {!uploading && <UploadPill uploads={uploads} onOpen={() => setUploading(lastUpload.current)} />}
             {place.kind === "libraries" && libraries?.some((library) => library.canManage) && (
               <button
                 type="button"
-                className="mc-icon-button"
+                className={styles.mcIconButton}
                 aria-label="全部重新扫描"
                 title="全部重新扫描"
                 onClick={() =>
@@ -641,13 +641,13 @@ export function MediaCenter({ userId, isAdmin }: { userId: string; isAdmin: bool
               </button>
             )}
           </div>
-          <div ref={content} className="mc-content">
+          <div ref={content} className={styles.mcContent}>
             {failure && !libraries ? (
-              <div className="mc-state">
+              <div className={styles.mcState}>
                 <CircleAlert />
                 <h2>影视中心暂时不可用</h2>
                 <p>{failure}</p>
-                <button type="button" className="mc-glass" onClick={() => void loadLibraries()}>
+                <button type="button" className={styles.mcGlass} onClick={() => void loadLibraries()}>
                   重试
                 </button>
               </div>

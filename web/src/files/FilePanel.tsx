@@ -28,6 +28,7 @@ import { FileStatusBar } from "./FileStatusBar";
 import { FileCommandBar, FileCommands, FileNavigationBar, FileOrderBar } from "./FileToolbar";
 import { FileUploadControl } from "./FileUploadControl";
 import { FileViewer } from "./FileViewer";
+import styles from "./files.module.css";
 import {
   browserItem,
   duplicateFileName,
@@ -50,7 +51,6 @@ import { useFileListing } from "./useFileListing";
 import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "./useFileOrder";
 import { usePaneWidths } from "./usePaneWidths";
 import { useTextPreview } from "./useTextPreview";
-import "./files.css";
 
 interface FilePanelProps {
   userID: string;
@@ -482,7 +482,7 @@ export function FilePanel({
   };
 
   return (
-    <div className="file-manager" ref={managerRef} style={panes.style}>
+    <div className={styles.fileManager} ref={managerRef} style={panes.style}>
       <FileSidebar
         spaces={spaces}
         spaceID={spaceID}
@@ -498,7 +498,7 @@ export function FilePanel({
       />
 
       <div
-        className="file-pane-resizer"
+        className={styles.filePaneResizer}
         role="separator"
         aria-label="调整目录栏宽度"
         aria-orientation="vertical"
@@ -507,7 +507,7 @@ export function FilePanel({
       />
 
       <section
-        className="file-browser"
+        className={styles.fileBrowser}
         aria-label="文件浏览器"
         data-vnas-private={viewing ? othersSpace : undefined}
         {...dragEvents}
@@ -549,7 +549,7 @@ export function FilePanel({
           searching={Boolean(normalizedQuery)}
         />
         {storageError && (
-          <div className="file-order-notice" role="status">
+          <div className={styles.fileOrderNotice} role="status">
             {storageError}
           </div>
         )}
@@ -569,14 +569,18 @@ export function FilePanel({
           </div>
         )}
         {clipboard && (
-          <div className="file-clipboard-state" role="status">
+          <div className={styles.fileClipboardState} role="status">
             {clipboard.mode === "copy" ? "已复制" : "已剪切"}
             {clipboard.entries.length === 1 ? `“${clipboard.entries[0].name}”` : ` ${clipboard.entries.length} 个项目`}
           </div>
         )}
 
         {creatingDirectory && !viewing && (
-          <form className="file-create-form" aria-label="新建文件夹" onSubmit={(event) => void makeDirectory(event)}>
+          <form
+            className={styles.fileCreateForm}
+            aria-label="新建文件夹"
+            onSubmit={(event) => void makeDirectory(event)}
+          >
             <FolderPlus />
             <input autoFocus name="name" aria-label="新文件夹名称" placeholder="输入文件夹名称" required />
             <button disabled={Boolean(activity)}>创建</button>
@@ -607,7 +611,7 @@ export function FilePanel({
           <FileUploadControl menuOpen={uploadMenuOpen} onMenuOpen={setUploadMenuOpen} onUpload={upload} />
         )}
         {dragging && (
-          <div className={`file-drop-overlay ${viewing ? "refused" : ""}`} aria-hidden="true">
+          <div className={`${styles.fileDropOverlay} ${viewing ? styles.refused : ""}`} aria-hidden="true">
             <div>
               <FolderUp />
               <strong>{viewing ? "只读查看时不能上传" : "松开即可上传"}</strong>
@@ -630,7 +634,7 @@ export function FilePanel({
       </section>
 
       <div
-        className="file-pane-resizer"
+        className={styles.filePaneResizer}
         role="separator"
         aria-label="调整详细信息栏宽度"
         aria-orientation="vertical"

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { APIError } from "../../api/client";
 import { Banner, messageOf, Pill } from "../parts";
+import styles from "../settings.module.css";
 import {
   listSystemLogs,
   type SystemLogEntry,
@@ -176,37 +177,37 @@ export function SystemLog() {
   ];
   const level = filters.level ?? "all";
   return (
-    <div className="lg-panel">
-      <div className="lg-toolbar">
-        <div className="lg-toolbar-row">
-          <div className="lg-chips" role="radiogroup" aria-label="日志级别">
+    <div className={styles.lgPanel}>
+      <div className={styles.lgToolbar}>
+        <div className={styles.lgToolbarRow}>
+          <div className={styles.lgChips} role="radiogroup" aria-label="日志级别">
             {levelOptions.map((option) => (
               <button
                 key={option.id}
                 role="radio"
                 aria-checked={level === option.id}
-                className={`lg-chip level-${option.id} ${level === option.id ? "active" : ""}`}
+                className={`${styles.lgChip} ${styles[`level-${option.id}`] ?? ""} ${level === option.id ? styles.active : ""}`}
                 onClick={() =>
                   setFilters((current) => ({ ...current, level: option.id === "all" ? undefined : option.id }))
                 }
               >
-                {option.id !== "all" && <i className="lg-chip-dot" />}
+                {option.id !== "all" && <i className={styles.lgChipDot} />}
                 {option.label}
               </button>
             ))}
           </div>
-          <span className="lg-controls-gap" />
+          <span className={styles.lgControlsGap} />
           <button
             role="switch"
             aria-checked={following}
-            className={`lg-follow ${following ? "on" : ""}`}
+            className={`${styles.lgFollow} ${following ? styles.on : ""}`}
             onClick={() => setFollowing((value) => !value)}
           >
             <Radio />
             实时
           </button>
           <button
-            className="set-icon-btn bordered"
+            className={`${styles.setIconBtn} ${styles.bordered}`}
             aria-label="刷新系统日志"
             disabled={state.loading}
             onClick={() => void load()}
@@ -214,7 +215,7 @@ export function SystemLog() {
             <RefreshCw className={state.loading ? "spinning" : ""} />
           </button>
           <button
-            className="set-btn"
+            className={styles.setBtn}
             disabled={Boolean(exporting) || !state.items.length}
             onClick={() => void exportText()}
           >
@@ -222,7 +223,7 @@ export function SystemLog() {
             {exporting ? `正在导出 ${exporting.count} 行…` : "导出"}
           </button>
         </div>
-        <div className="lg-controls">
+        <div className={styles.lgControls}>
           <Select
             label="服务"
             value={filters.service ?? ""}
@@ -244,27 +245,27 @@ export function SystemLog() {
         </Banner>
       )}
       {state.error && (
-        <div className="set-banner error lg-retry" role="alert">
+        <div className={`${styles.setBanner} ${styles.error} ${styles.lgRetry}`} role="alert">
           <span>无法读取系统日志：{state.error}</span>
-          <button className="set-btn" onClick={() => void load()}>
+          <button className={styles.setBtn} onClick={() => void load()}>
             重试
           </button>
         </div>
       )}
       {!state.loaded ? (
-        <div className="set-card lg-console-skeleton" role="status" aria-label="正在读取日志">
+        <div className={`${styles.setCard} ${styles.lgConsoleSkeleton}`} role="status" aria-label="正在读取日志">
           <span className="loader" />
         </div>
       ) : state.items.length === 0 ? (
         !state.error && (
-          <div className="set-card lg-empty">
-            <span className="lg-empty-art system">
+          <div className={`${styles.setCard} ${styles.lgEmpty}`}>
+            <span className={`${styles.lgEmptyArt} ${styles.system}`}>
               <ServerCog />
             </span>
             <h3>{filtered ? "没有符合条件的日志" : "暂时没有日志"}</h3>
             <p>{filtered ? "换一个服务、级别或时间范围试试。" : "A-NAS 服务写下的运行日志会显示在这里。"}</p>
             {filtered && (
-              <button className="set-btn" onClick={clear}>
+              <button className={styles.setBtn} onClick={clear}>
                 清除筛选
               </button>
             )}
@@ -272,13 +273,18 @@ export function SystemLog() {
         )
       ) : (
         <>
-          <div className="lg-console-head">
+          <div className={styles.lgConsoleHead}>
             <span>
-              {state.items.length} 行{following && <em className="lg-live-dot">实时跟随中</em>}
+              {state.items.length} 行{following && <em className={styles.lgLiveDot}>实时跟随中</em>}
             </span>
             {state.simulated && <Pill tone="warning">模拟数据</Pill>}
           </div>
-          <ol className="set-card lg-console" role="log" aria-label="系统日志" aria-live={following ? "polite" : "off"}>
+          <ol
+            className={`${styles.setCard} ${styles.lgConsole}`}
+            role="log"
+            aria-label="系统日志"
+            aria-live={following ? "polite" : "off"}
+          >
             {state.items.map((entry) => (
               <LogLine
                 key={entry.cursor}
@@ -292,10 +298,10 @@ export function SystemLog() {
         </>
       )}
       {state.loaded && state.items.length > 0 && (
-        <div className="lg-foot">
+        <div className={styles.lgFoot}>
           {state.scannedThrough && <span>已检查到 {formatDateTime(state.scannedThrough)}，更早的日志还没有检查。</span>}
           {state.next ? (
-            <button className="set-btn" disabled={state.loading} onClick={() => void load(state.next)}>
+            <button className={styles.setBtn} disabled={state.loading} onClick={() => void load(state.next)}>
               {state.loading ? "正在读取…" : "加载更早的日志"}
             </button>
           ) : (
@@ -328,20 +334,22 @@ function LogLine({
   const time = logTime(entry.time);
   const fields = Object.entries(entry.fields ?? {});
   return (
-    <li className={`lg-line ${entry.level} ${fresh ? "fresh" : ""} ${open ? "open" : ""}`}>
-      <button className="lg-line-main" aria-expanded={open} onClick={onToggle}>
+    <li
+      className={`${styles.lgLine} ${styles[entry.level] ?? ""} ${fresh ? styles.fresh : ""} ${open ? styles.open : ""}`}
+    >
+      <button className={styles.lgLineMain} aria-expanded={open} onClick={onToggle}>
         <time dateTime={entry.time} title={fullTime(entry.time)}>
           <span>{time.day}</span>
           {time.clock}
         </time>
-        <span className={`lg-level ${entry.level}`}>{levelLabels[entry.level]}</span>
-        <span className="lg-service" title={entry.unit}>
+        <span className={`${styles.lgLevel} ${styles[entry.level] ?? ""}`}>{levelLabels[entry.level]}</span>
+        <span className={styles.lgService} title={entry.unit}>
           {serviceLabels[entry.service] ?? entry.service}
         </span>
-        <span className="lg-message">
+        <span className={styles.lgMessage}>
           {entry.message}
           {fields.length > 0 && (
-            <span className="lg-fields">
+            <span className={styles.lgFields}>
               {fields.map(([key, value]) => (
                 <span key={key}>
                   <b>{key}</b>={value}
@@ -350,10 +358,10 @@ function LogLine({
             </span>
           )}
         </span>
-        <ChevronDown className="lg-chevron" aria-hidden="true" />
+        <ChevronDown className={styles.lgChevron} aria-hidden="true" />
       </button>
       {open && (
-        <dl className="lg-details console">
+        <dl className={`${styles.lgDetails} ${styles.console}`}>
           <div>
             <dt>时间</dt>
             <dd>{fullTime(entry.time)}</dd>
@@ -376,7 +384,7 @@ function LogLine({
           <div>
             <dt>消息</dt>
             <dd>
-              <code className="wrap">{entry.message}</code>
+              <code className={styles.wrap}>{entry.message}</code>
               {entry.truncated && <small>消息超过 16 KiB，已截断</small>}
             </dd>
           </div>
@@ -384,14 +392,14 @@ function LogLine({
             <div key={key}>
               <dt>{key}</dt>
               <dd>
-                <code className="wrap">{value}</code>
+                <code className={styles.wrap}>{value}</code>
               </dd>
             </div>
           ))}
           <div>
             <dt>日志游标</dt>
             <dd>
-              <code className="wrap">{entry.cursor}</code>
+              <code className={styles.wrap}>{entry.cursor}</code>
             </dd>
           </div>
         </dl>

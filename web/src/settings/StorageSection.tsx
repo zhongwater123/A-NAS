@@ -20,6 +20,7 @@ import {
   usedBytes,
 } from "./layouts";
 import { Banner, Callout, Group, IconTile, messageOf, PageHeader, Pill, RefreshButton, type Tone } from "./parts";
+import styles from "./settings.module.css";
 import { type StoragePlanFlow, storageErrorText } from "./storagePlan";
 
 type Disk = HostState["disks"][number];
@@ -157,14 +158,14 @@ export function StorageSection({
         />
       ) : volumes.items === undefined ? (
         !volumes.error && (
-          <div className="set-card set-state compact">
+          <div className={`${styles.setCard} ${styles.setState} ${styles.compact}`}>
             <span className="loader" />
             <p>正在读取数据卷…</p>
           </div>
         )
       ) : noVolume ? (
-        <div className="set-card set-empty">
-          <span className="set-empty-art">
+        <div className={`${styles.setCard} ${styles.setEmpty}`}>
+          <span className={styles.setEmptyArt}>
             <Database />
           </span>
           <h3>尚未创建数据卷</h3>
@@ -174,7 +175,7 @@ export function StorageSection({
               : "文件、照片和共享内容都保存在数据卷中。尚未创建数据卷，请联系管理员初始化。"}
           </p>
           {isAdmin && (
-            <button className="set-btn primary" onClick={() => setWizardOpen(true)}>
+            <button className={`${styles.setBtn} primary`} onClick={() => setWizardOpen(true)}>
               初始化数据卷…
             </button>
           )}
@@ -201,12 +202,12 @@ export function StorageSection({
         ) : (
           <>
             {host.disconnected || isStale(snapshot) ? (
-              <div className="set-card-banner">
+              <div className={styles.setCardBanner}>
                 <HostStateBanner host={host} snapshot={snapshot} />
               </div>
             ) : null}
             {disks.length === 0 ? (
-              <div className="set-state compact">
+              <div className={`${styles.setState} ${styles.compact}`}>
                 <HardDrive />
                 <h4>未检测到磁盘</h4>
                 <p>设备重新出现后会自动更新。</p>
@@ -223,7 +224,7 @@ export function StorageSection({
 
 function StoppedPlan({ plan, onOpen }: { plan: StoragePlan; onOpen: () => void }) {
   return (
-    <div className="set-card spare-card">
+    <div className={`${styles.setCard} ${styles.spareCard}`}>
       <IconTile tone="danger" icon={TriangleAlert} size="lg" />
       <div>
         <h3>上次的存储操作没有完成</h3>
@@ -232,7 +233,7 @@ function StoppedPlan({ plan, onOpen }: { plan: StoragePlan; onOpen: () => void }
           {stoppedWhere(plan.step)}。可以查看原因并重试，已经完成的步骤不会重做。
         </p>
       </div>
-      <button className="set-btn primary" onClick={onOpen}>
+      <button className={`${styles.setBtn} primary`} onClick={onOpen}>
         查看并处理
       </button>
     </div>
@@ -256,13 +257,13 @@ function SpareDisks({
       ? "数据卷在线且可写时才能加入新硬盘。"
       : "可以加入数据卷，增加容量，或者让每个文件在两块硬盘上各有一份。";
   return (
-    <div className="set-card spare-card">
+    <div className={`${styles.setCard} ${styles.spareCard}`}>
       <IconTile tone="accent" icon={HardDrive} size="lg" />
       <div>
         <h3>发现 {count} 块未使用的硬盘</h3>
         <p>{why}</p>
       </div>
-      <button className="set-btn primary" disabled={!canAdd} onClick={onOpen}>
+      <button className={`${styles.setBtn} primary`} disabled={!canAdd} onClick={onOpen}>
         设置用途…
       </button>
     </div>
@@ -291,8 +292,8 @@ function VolumeCard({
     (id) => disks.find((disk) => disk.id === id) ?? { id, model: "未检测到的硬盘", capacityBytes: 0 },
   );
   return (
-    <div className="set-card vol-card">
-      <div className="vol-head">
+    <div className={`${styles.setCard} ${styles.volCard}`}>
+      <div className={styles.volHead}>
         <IconTile tone="storage" icon={Database} size="lg" />
         <div>
           <h3>数据卷</h3>
@@ -301,19 +302,19 @@ function VolumeCard({
           </p>
         </div>
         <Pill tone={state.tone}>
-          <span className="set-dot" />
+          <span className={styles.setDot} />
           {state.label}
         </Pill>
       </div>
       {usage.known ? (
         <div>
-          <div className="vol-numbers">
+          <div className={styles.volNumbers}>
             <strong>{formatBytes(usage.used)}</strong>
             <span>已用，共 {formatBytes(usage.capacity)}</span>
             <em>{usage.percent}%</em>
           </div>
           <div
-            className={`vol-bar ${usage.percent >= 85 ? "high" : ""}`}
+            className={`${styles.volBar} ${usage.percent >= 85 ? styles.high : ""}`}
             role="meter"
             aria-label="数据卷已用空间"
             aria-valuemin={0}
@@ -322,20 +323,20 @@ function VolumeCard({
           >
             <span style={{ width: `${usage.percent}%` }} />
           </div>
-          <div className="vol-legend">
+          <div className={styles.volLegend}>
             <span>
-              <i className="used" />
+              <i className={styles.used} />
               已用 {formatBytes(usage.used)}
             </span>
             <span>
-              <i className="free" />
+              <i className={styles.free} />
               可用 {formatBytes(usage.available)}
             </span>
           </div>
         </div>
       ) : (
         // Missing usage is unknown, never "full".
-        <p className="vol-unknown">
+        <p className={styles.volUnknown}>
           {usage.capacity > 0 ? `已用空间未知 · 共 ${formatBytes(usage.capacity)}` : "容量未知"}
         </p>
       )}
@@ -349,18 +350,18 @@ function VolumeCard({
         />
       )}
       {members.length > 0 && (
-        <ul className="vol-members" aria-label="组成数据卷的硬盘">
+        <ul className={styles.volMembers} aria-label="组成数据卷的硬盘">
           {members.map((disk) => (
             <li key={disk.id}>
               <HardDrive />
               <span>{disk.model}</span>
-              <small className="set-mono">{shortID(disk.id)}</small>
+              <small className={styles.setMono}>{shortID(disk.id)}</small>
               {disk.capacityBytes > 0 && <small>{formatBytes(disk.capacityBytes)}</small>}
             </li>
           ))}
         </ul>
       )}
-      <div className="vol-meta">
+      <div className={styles.volMeta}>
         <span>文件系统 UUID</span>
         <code>{volume.filesystemUuid ?? "等待 UUID"}</code>
       </div>
@@ -406,13 +407,13 @@ function ConversionProgress({
     }
   };
   return (
-    <section className={`vol-convert ${running ? "" : "waiting"}`} aria-label="转换进度">
-      <div className="vol-convert-head">
+    <section className={`${styles.volConvert} ${running ? "" : styles.waiting}`} aria-label="转换进度">
+      <div className={styles.volConvertHead}>
         <strong>{running ? `正在转换为${target}` : `转换为${target}已暂停`}</strong>
         <em>{percent}%</em>
       </div>
       <div
-        className="vol-bar convert"
+        className={`${styles.volBar} convert`}
         role="progressbar"
         aria-label={`转换为${target}`}
         aria-valuemin={0}
@@ -425,14 +426,14 @@ function ConversionProgress({
         已转换 {formatBytes(conversion.convertedBytes)}，共 {formatBytes(conversion.totalBytes)}
         {running && left !== undefined ? ` · 预计还需${formatRemaining(left)}` : ""}
       </p>
-      <p className="vol-convert-note">
+      <p className={styles.volConvertNote}>
         {running
           ? `转换期间可以照常使用，关机或重启后会自动继续。${volume.layout === "mirror" ? "完成前坏一块硬盘仍可能丢失文件。" : ""}`
           : "系统每 15 分钟会自动继续一次；停下来的原因记录在“日志”的系统日志中。"}
       </p>
       {!running && isAdmin && (
-        <div className="vol-convert-actions">
-          <button className="set-btn" disabled={busy} onClick={() => void resume()}>
+        <div className={styles.volConvertActions}>
+          <button className={styles.setBtn} disabled={busy} onClick={() => void resume()}>
             {busy ? "正在继续…" : "继续转换"}
           </button>
         </div>
@@ -471,9 +472,9 @@ function DiskRow({ disk }: { disk: Disk }) {
   const spare = disk.role === "unassigned";
   const blocked = !disk.eligibleForDataVolume ? ineligibleText(disk) : "";
   return (
-    <div className="set-row">
+    <div className={styles.setRow}>
       <IconTile tone={disk.rotational ? "hdd" : "ssd"} icon={HardDrive} size="lg" />
-      <div className="set-row-text">
+      <div className={styles.setRowText}>
         <span>
           <strong>{disk.model || "未识别设备"}</strong>
           <Pill tone={role.tone} outline={spare}>
@@ -487,11 +488,11 @@ function DiskRow({ disk }: { disk: Disk }) {
         </span>
         <small>
           {disk.transport.toUpperCase()} · {disk.rotational ? "机械硬盘" : "固态存储"} ·{" "}
-          <span className="set-mono">{shortID(disk.id)}</span>
+          <span className={styles.setMono}>{shortID(disk.id)}</span>
         </small>
-        {blocked && <small className="wiz-reason">{blocked}</small>}
+        {blocked && <small className={styles.wizReason}>{blocked}</small>}
       </div>
-      <div className="disk-end">
+      <div className={styles.diskEnd}>
         <strong
           title={
             disk.capacityBytes > 0
@@ -501,11 +502,11 @@ function DiskRow({ disk }: { disk: Disk }) {
         >
           {disk.capacityBytes > 0 ? formatBytes(disk.capacityBytes) : "容量未知"}
           {disk.capacityBytes > 0 && (
-            <span className="disk-nominal">标称 {formatNominalCapacity(disk.capacityBytes)}</span>
+            <span className={styles.diskNominal}>标称 {formatNominalCapacity(disk.capacityBytes)}</span>
           )}
         </strong>
-        <small className={`tone-${health.tone}`}>
-          <span className="set-dot" />
+        <small className={`${styles[`tone-${health.tone}`] ?? ""}`}>
+          <span className={styles.setDot} />
           {health.label}
           {disk.temperatureCelsius === undefined ? "" : ` · ${disk.temperatureCelsius}°C`}
         </small>
@@ -620,8 +621,8 @@ function VolumeWizard({
   const generate = () => void flow.generate(selected, needsLayout ? choice : undefined);
 
   return (
-    <section className="wiz" aria-label={title}>
-      <div className="wiz-head">
+    <section className={styles.wiz} aria-label={title}>
+      <div className={styles.wizHead}>
         <IconTile
           tone={mode === "add" ? "storage" : "danger"}
           icon={mode === "add" ? Layers : TriangleAlert}
@@ -631,11 +632,11 @@ function VolumeWizard({
           <h3>{title}</h3>
           <p>{mode === "add" ? "让新硬盘加入数据卷，增加容量或让文件多一份" : "把空闲硬盘格式化为 A-NAS 数据卷"}</p>
         </div>
-        <span className="wiz-head-end">
+        <span className={styles.wizHeadEnd}>
           {plan && <Pill tone={planTone(state)}>{planStateLabel(state)}</Pill>}
           {!running && (
             <button
-              className="set-icon-btn"
+              className={styles.setIconBtn}
               aria-label={pending && !expired ? "取消计划并关闭" : `关闭${title}`}
               disabled={Boolean(busy)}
               onClick={() =>
@@ -653,21 +654,21 @@ function VolumeWizard({
           )}
         </span>
       </div>
-      <ol className="wiz-steps">
+      <ol className={styles.wizSteps}>
         {steps.map((label, index) => (
-          <li key={label} className={index < stepIndex ? "done" : index === stepIndex ? "current" : ""}>
+          <li key={label} className={index < stepIndex ? styles.done : index === stepIndex ? styles.current : ""}>
             <b>{index < stepIndex ? <CircleCheck /> : index + 1}</b>
             {label}
           </li>
         ))}
       </ol>
-      <div className="wiz-body">
+      <div className={styles.wizBody}>
         {flow.error && <Banner tone="error">{flow.error}</Banner>}
         {!plan && stage === "disks" && (
           <>
             {mode === "add" && (
-              <div className="wiz-purposes" role="radiogroup" aria-label="用途">
-                <label className="wiz-purpose selected">
+              <div className={styles.wizPurposes} role="radiogroup" aria-label="用途">
+                <label className={`${styles.wizPurpose} ${styles.selected}`}>
                   <input type="radio" name="disk-purpose" checked readOnly />
                   <IconTile tone="storage" icon={Layers} />
                   <span>
@@ -675,7 +676,7 @@ function VolumeWizard({
                     <small>增加容量，或者让每个文件在两块硬盘上各有一份。已有文件保持原样。</small>
                   </span>
                 </label>
-                <label className="wiz-purpose disabled">
+                <label className={`${styles.wizPurpose} ${styles.disabled}`}>
                   <input type="radio" name="disk-purpose" disabled />
                   <IconTile tone="overview" icon={Archive} />
                   <span>
@@ -687,19 +688,19 @@ function VolumeWizard({
                 </label>
               </div>
             )}
-            <p className="wiz-lead">
+            <p className={styles.wizLead}>
               {mode === "add"
                 ? "选择要加入的硬盘："
                 : "选择一块或多块硬盘。只能使用非系统、非 USB、没有被使用且身份稳定的 SATA 或 NVMe 硬盘；选两块及以上可以组成镜像。"}
             </p>
             {candidates.length ? (
-              <div className="set-card" role="group" aria-label="候选硬盘">
+              <div className={styles.setCard} role="group" aria-label="候选硬盘">
                 {candidates.map((disk) => {
                   const blocked = !disk.eligibleForDataVolume;
                   return (
                     <label
                       key={disk.id}
-                      className={`wiz-disk ${blocked ? "disabled" : ""} ${selected.includes(disk.id) ? "selected" : ""}`}
+                      className={`${styles.wizDisk} ${blocked ? styles.disabled : ""} ${selected.includes(disk.id) ? styles.selected : ""}`}
                     >
                       <input
                         type="checkbox"
@@ -709,7 +710,7 @@ function VolumeWizard({
                         onChange={() => toggle(disk.id)}
                       />
                       <IconTile tone={disk.rotational ? "hdd" : "ssd"} icon={HardDrive} />
-                      <span className="set-row-text">
+                      <span className={styles.setRowText}>
                         <span>
                           <strong>{disk.model || "未识别设备"}</strong>
                           {disk.filesystems.length > 0 && (
@@ -719,12 +720,14 @@ function VolumeWizard({
                           )}
                         </span>
                         <small>
-                          {disk.transport.toUpperCase()} · <span className="set-mono">{shortID(disk.id)}</span>
+                          {disk.transport.toUpperCase()} · <span className={styles.setMono}>{shortID(disk.id)}</span>
                           {disk.filesystems.length > 0 ? ` · ${disk.filesystems.join("、")}` : ""}
                         </small>
-                        {blocked && <small className="wiz-reason">{ineligibleText(disk) || "不能使用这块硬盘"}</small>}
+                        {blocked && (
+                          <small className={styles.wizReason}>{ineligibleText(disk) || "不能使用这块硬盘"}</small>
+                        )}
                       </span>
-                      <strong className="wiz-disk-size">
+                      <strong className={styles.wizDiskSize}>
                         {disk.capacityBytes > 0 ? formatBytes(disk.capacityBytes) : "容量未知"}
                       </strong>
                     </label>
@@ -732,7 +735,7 @@ function VolumeWizard({
                 })}
               </div>
             ) : (
-              <div className="set-card set-state compact">
+              <div className={`${styles.setCard} ${styles.setState} ${styles.compact}`}>
                 <HardDrive />
                 <h4>没有可用的硬盘</h4>
                 <p>请接入一块空闲的 SATA 或 NVMe 硬盘。</p>
@@ -742,18 +745,18 @@ function VolumeWizard({
         )}
         {!plan && stage === "layout" && (
           <>
-            <p className="wiz-lead">
+            <p className={styles.wizLead}>
               {mode === "add"
                 ? `加入后，数据卷由 ${members.length + chosen.length} 块硬盘组成。选择文件在这些硬盘上怎么存放：`
                 : `选择文件在这 ${chosen.length} 块硬盘上怎么存放：`}
             </p>
-            <div className="wiz-layouts" role="radiogroup" aria-label="冗余方式">
+            <div className={styles.wizLayouts} role="radiogroup" aria-label="冗余方式">
               {options.map((option) => {
                 const info = layouts[option.layout];
                 return (
                   <label
                     key={option.layout}
-                    className={`wiz-layout ${choice === option.layout ? "selected" : ""} ${option.fits ? "" : "disabled"}`}
+                    className={`${styles.wizLayout} ${choice === option.layout ? styles.selected : ""} ${option.fits ? "" : styles.disabled}`}
                   >
                     <input
                       type="radio"
@@ -764,8 +767,8 @@ function VolumeWizard({
                       onChange={() => setLayout(option.layout)}
                     />
                     <LayoutDiagram layout={option.layout} />
-                    <span className="wiz-layout-text">
-                      <span className="wiz-layout-name">
+                    <span className={styles.wizLayoutText}>
+                      <span className={styles.wizLayoutName}>
                         <strong>{info.name}</strong>
                         <Pill tone="neutral" outline>
                           {info.tag}
@@ -773,14 +776,16 @@ function VolumeWizard({
                         {option.layout === "mirror" && option.fits && <Pill tone="success">推荐</Pill>}
                       </span>
                       <small>{info.summary}</small>
-                      <small className={`wiz-layout-loss tone-${info.tone}`}>{info.loss}</small>
+                      <small className={`${styles.wizLayoutLoss} ${styles[`tone-${info.tone}`] ?? ""}`}>
+                        {info.loss}
+                      </small>
                       {!option.fits && (
-                        <small className="wiz-reason">
+                        <small className={styles.wizReason}>
                           已用 {formatBytes(usedBytes(volume) ?? 0)}，放不进加入后的 {formatBytes(option.after)}
                         </small>
                       )}
                     </span>
-                    <span className="wiz-layout-size">
+                    <span className={styles.wizLayoutSize}>
                       {option.before !== undefined && <small>{formatBytes(option.before)} →</small>}
                       <strong>{formatBytes(option.after)}</strong>
                       <small>可用</small>
@@ -789,7 +794,7 @@ function VolumeWizard({
                 );
               })}
             </div>
-            <p className="wiz-note">冗余防的是硬盘损坏，不能代替备份：误删的文件从回收站和快照中找回。</p>
+            <p className={styles.wizNote}>冗余防的是硬盘损坏，不能代替备份：误删的文件从回收站和快照中找回。</p>
           </>
         )}
         {plan && (
@@ -803,22 +808,30 @@ function VolumeWizard({
           />
         )}
       </div>
-      <div className="wiz-foot">
+      <div className={styles.wizFoot}>
         {!plan && stage === "disks" && (
           <>
-            <p className="wiz-warn">
+            <p className={styles.wizWarn}>
               <TriangleAlert />
               所选硬盘上的全部数据都会被清除
             </p>
-            <button className="set-btn" onClick={onClose}>
+            <button className={styles.setBtn} onClick={onClose}>
               取消
             </button>
             {needsLayout ? (
-              <button className="set-btn primary" disabled={!selected.length} onClick={() => setStage("layout")}>
+              <button
+                className={`${styles.setBtn} primary`}
+                disabled={!selected.length}
+                onClick={() => setStage("layout")}
+              >
                 下一步
               </button>
             ) : (
-              <button className="set-btn primary" disabled={!selected.length || Boolean(busy)} onClick={generate}>
+              <button
+                className={`${styles.setBtn} primary`}
+                disabled={!selected.length || Boolean(busy)}
+                onClick={generate}
+              >
                 {busy === "plan" ? "正在生成…" : "生成格式化计划"}
               </button>
             )}
@@ -826,23 +839,27 @@ function VolumeWizard({
         )}
         {!plan && stage === "layout" && (
           <>
-            <button className="set-btn wiz-back" onClick={() => setStage("disks")}>
+            <button className={`${styles.setBtn} ${styles.wizBack}`} onClick={() => setStage("disks")}>
               <ChevronLeft />
               上一步
             </button>
-            <button className="set-btn primary" disabled={!choice || Boolean(busy)} onClick={generate}>
+            <button className={`${styles.setBtn} primary`} disabled={!choice || Boolean(busy)} onClick={generate}>
               {busy === "plan" ? "正在生成…" : mode === "add" ? "生成计划" : "生成格式化计划"}
             </button>
           </>
         )}
         {(state === "planned" || state === "confirmed") && (
-          <button className="set-btn wiz-back" disabled={Boolean(busy)} onClick={() => void onCancel()}>
+          <button
+            className={`${styles.setBtn} ${styles.wizBack}`}
+            disabled={Boolean(busy)}
+            onClick={() => void onCancel()}
+          >
             {busy === "cancel" ? "正在取消…" : "取消计划"}
           </button>
         )}
         {state === "planned" && (
           <button
-            className="set-btn primary"
+            className={`${styles.setBtn} primary`}
             disabled={flow.phrase !== plan?.confirmationPhrase || Boolean(busy)}
             onClick={() => void flow.confirm()}
           >
@@ -850,26 +867,34 @@ function VolumeWizard({
           </button>
         )}
         {state === "confirmed" && (
-          <button className="set-btn danger" disabled={Boolean(busy)} onClick={() => void flow.execute()}>
+          <button
+            className={`${styles.setBtn} ${styles.danger}`}
+            disabled={Boolean(busy)}
+            onClick={() => void flow.execute()}
+          >
             {plan?.kind === "add_disks" ? "清除硬盘并加入数据卷" : "清除硬盘并创建数据卷"}
           </button>
         )}
         {state === "succeeded" && (
-          <button className="set-btn primary" onClick={onFinish}>
+          <button className={`${styles.setBtn} primary`} onClick={onFinish}>
             完成
           </button>
         )}
         {state === "expired" && (
-          <button className="set-btn primary" onClick={flow.dismiss}>
+          <button className={`${styles.setBtn} primary`} onClick={flow.dismiss}>
             重新开始
           </button>
         )}
         {(state === "failed" || state === "needs_attention") && (
           <>
-            <button className="set-btn wiz-back" disabled={Boolean(busy)} onClick={() => void onCancel()}>
+            <button
+              className={`${styles.setBtn} ${styles.wizBack}`}
+              disabled={Boolean(busy)}
+              onClick={() => void onCancel()}
+            >
               关闭
             </button>
-            <button className="set-btn primary" disabled={Boolean(busy)} onClick={() => void flow.execute()}>
+            <button className={`${styles.setBtn} primary`} disabled={Boolean(busy)} onClick={() => void flow.execute()}>
               重试
             </button>
           </>
@@ -904,8 +929,8 @@ function PlanReview({
   const models = disks.map((disk) => disk.model).join("、");
   return (
     <>
-      <h4 className="wiz-title">破坏性操作计划</h4>
-      <dl className="wiz-facts">
+      <h4 className={styles.wizTitle}>破坏性操作计划</h4>
+      <dl className={styles.wizFacts}>
         <dt>操作</dt>
         <dd>{adding ? "把硬盘加入数据卷" : "创建数据卷"}</dd>
         {plan.layout && (
@@ -929,9 +954,9 @@ function PlanReview({
           {pending && !expired ? `（还剩约 ${minutesLeft} 分钟）` : ""}
         </dd>
       </dl>
-      <div className="wiz-targets" aria-label="将清除的硬盘">
+      <div className={styles.wizTargets} aria-label="将清除的硬盘">
         {disks.map((disk) => (
-          <div key={disk.id} className="wiz-target">
+          <div key={disk.id} className={styles.wizTarget}>
             <HardDrive />
             <div>
               <strong>
@@ -956,19 +981,19 @@ function PlanReview({
         </Callout>
       )}
       {(plan.actions?.length ?? 0) > 0 && (
-        <ol className="wiz-actions">
+        <ol className={styles.wizActions}>
           {plan.actions!.map((action) => (
             <li key={action.kind}>{action.description}</li>
           ))}
         </ol>
       )}
       {state === "planned" && (
-        <label className="wiz-confirm">
+        <label className={styles.wizConfirm}>
           <span>
             输入确认短语 <code>{plan.confirmationPhrase}</code> 以确认这是要清除的硬盘
           </span>
           <input
-            className="set-input"
+            className={styles.setInput}
             value={flow.phrase}
             onChange={(event) => flow.setPhrase(event.target.value)}
             autoComplete="off"
@@ -984,8 +1009,8 @@ function PlanReview({
         </Callout>
       )}
       {state === "running" && (
-        <div className="wiz-running" role="status">
-          <div className="wiz-progress">
+        <div className={styles.wizRunning} role="status">
+          <div className={styles.wizProgress}>
             <span />
           </div>
           <p>{(plan.step && stepTexts[plan.step]) || (adding ? "正在把硬盘加入数据卷…" : "正在创建数据卷…")}</p>
@@ -1051,13 +1076,23 @@ function LayoutDiagram({ layout }: { layout: VolumeLayout }) {
     ],
   };
   return (
-    <svg className="wiz-diagram" viewBox="0 0 76 44" aria-hidden="true">
+    <svg className={styles.wizDiagram} viewBox="0 0 76 44" aria-hidden="true">
       {rows[layout].map((blocks, disk) => (
         <g key={disk} transform={`translate(${disk * 40} 0)`}>
-          <rect className="ld-disk" x="1" y="1" width="34" height="42" rx="6" />
+          <rect className={styles.ldDisk} x="1" y="1" width="34" height="42" rx="6" />
           {blocks.map(
             (block, row) =>
-              block && <rect key={row} className={`ld-${block}`} x="7" y={8 + row * 11} width="22" height="7" rx="2" />,
+              block && (
+                <rect
+                  key={row}
+                  className={`${styles[`ld-${block}`] ?? ""}`}
+                  x="7"
+                  y={8 + row * 11}
+                  width="22"
+                  height="7"
+                  rx="2"
+                />
+              ),
           )}
         </g>
       ))}

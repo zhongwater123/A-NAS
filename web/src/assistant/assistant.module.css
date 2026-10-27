@@ -674,7 +674,7 @@
 }
 /* The portrait is drawn on white: it fills each mark, and a hairline keeps
    the white edge off the light window. */
-.as-app .assistant-glyph {
+.as-app :global(.assistant-glyph) {
   display: block;
   width: 100%;
   height: 100%;
@@ -683,7 +683,7 @@
   outline-offset: -1px;
 }
 /* Beside a reply the portrait is mirrored, so she faces the text. */
-.as-avatar .assistant-glyph {
+.as-avatar :global(.assistant-glyph) {
   transform: scaleX(-1);
 }
 .as-answer {

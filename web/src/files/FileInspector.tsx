@@ -12,6 +12,7 @@ import {
 } from "../lib/fileTypes";
 import { filePreviewURL } from "./api";
 import { FileIcon } from "./FileIcon";
+import styles from "./files.module.css";
 import { FileBrowserItem, formatFileDate, othersSpace } from "./model";
 import { fileVisualURL } from "./preview";
 
@@ -41,10 +42,10 @@ export function FileInspector({
   onVersions: (entry: FileEntry) => void;
 }) {
   return (
-    <aside className="file-inspector" aria-label="详细信息" data-vnas-private={viewing ? othersSpace : undefined}>
+    <aside className={styles.fileInspector} aria-label="详细信息" data-vnas-private={viewing ? othersSpace : undefined}>
       <header>详细信息</header>
       {count > 1 ? (
-        <div className="file-inspector-empty">
+        <div className={styles.fileInspectorEmpty}>
           <Copy />
           <strong>已选择 {count} 个项目</strong>
           <span>可通过工具栏或右键菜单批量剪切、复制和删除</span>
@@ -52,7 +53,7 @@ export function FileInspector({
       ) : item ? (
         <>
           <div
-            className={`file-inspector-preview ${item.kind} ${item.resource ?? ""} ${isPreviewableImage(item.name) || isVideoFile(item.name) ? "image" : isPDFPreviewable(item.name) ? "pdf" : isTextPreviewable(item.name) ? "text" : isOfficeDocument(item.name) ? "office" : ""}`}
+            className={`${styles.fileInspectorPreview} ${styles[item.kind] ?? ""} ${styles[item.resource ?? ""] ?? ""} ${isPreviewableImage(item.name) || isVideoFile(item.name) ? styles.image : isPDFPreviewable(item.name) ? styles.pdf : isTextPreviewable(item.name) ? styles.text : isOfficeDocument(item.name) ? styles.office : ""}`}
           >
             <InspectorPreview
               item={item}
@@ -62,7 +63,7 @@ export function FileInspector({
               onView={onView}
             />
           </div>
-          <div className="file-inspector-copy">
+          <div className={styles.fileInspectorCopy}>
             <h3>{item.name}</h3>
             <p>{item.type}</p>
             <dl>
@@ -80,29 +81,29 @@ export function FileInspector({
               )}
             </dl>
             {item.entry?.kind === "file" && !viewing && (
-              <button className="file-inspector-action" onClick={() => onVersions(item.entry!)}>
+              <button className={styles.fileInspectorAction} onClick={() => onVersions(item.entry!)}>
                 <History />
                 历史版本
               </button>
             )}
             {item.resource === "photos" && (
-              <p className="file-inspector-hint">
+              <p className={styles.fileInspectorHint}>
                 这是相册中个人图库的图库投影。打开后交由相册处理，不暴露受管存储路径。
               </p>
             )}
             {item.resource === "movies" && (
-              <p className="file-inspector-hint">
+              <p className={styles.fileInspectorHint}>
                 打开影视中心，把个人空间或共享空间中的视频文件夹整理成媒体库。视频仍是这里的普通文件。
               </p>
             )}
             {item.resource === "music" && (
-              <p className="file-inspector-hint">音乐会自动整理个人空间和共享空间里的音乐文件，文件留在原处。</p>
+              <p className={styles.fileInspectorHint}>音乐会自动整理个人空间和共享空间里的音乐文件，文件留在原处。</p>
             )}
-            {item.planned && <p className="file-inspector-hint">该资源入口已预留，功能尚未开发。</p>}
+            {item.planned && <p className={styles.fileInspectorHint}>该资源入口已预留，功能尚未开发。</p>}
           </div>
         </>
       ) : (
-        <div className="file-inspector-empty">
+        <div className={styles.fileInspectorEmpty}>
           <FolderOpen />
           <strong>选择一个项目</strong>
           <span>详细信息会显示在这里</span>
@@ -130,7 +131,7 @@ function InspectorPreview({
     return (
       <button
         type="button"
-        className="file-inspector-zoom"
+        className={styles.fileInspectorZoom}
         title="点击预览"
         aria-label={`预览 ${item.name}`}
         onClick={() => onView(entry)}
@@ -146,13 +147,13 @@ function InspectorPreview({
     return textPreview?.content !== undefined ? (
       <pre>{textPreview.content}</pre>
     ) : textPreview?.error ? (
-      <span className="file-preview-message">{textPreview.error}</span>
+      <span className={styles.filePreviewMessage}>{textPreview.error}</span>
     ) : (
       <span className="loader" />
     );
   if (entry && isOfficeDocument(item.name))
     return (
-      <div className="file-preview-unavailable">
+      <div className={styles.filePreviewUnavailable}>
         <FileText />
         <strong>需要文档转换服务</strong>
         <span>Word 与 PowerPoint 无法由浏览器原生可靠预览。</span>

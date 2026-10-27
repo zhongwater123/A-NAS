@@ -341,7 +341,7 @@
   background: transparent;
   transition: background 0.15s;
 }
-.ph-icon-button.primary {
+.ph-icon-button:global(.primary) {
   color: white;
   background: #2679df;
 }
@@ -471,14 +471,14 @@
   width: 16px;
   height: 16px;
 }
-.ph-button.primary {
+.ph-button:global(.primary) {
   padding: 8px 14px;
   border-radius: 9px;
   color: #fff;
   background: var(--ph-accent);
   box-shadow: 0 2px 8px rgba(47, 111, 237, 0.3);
 }
-.ph-button.primary:hover {
+.ph-button:global(.primary):hover {
   background: var(--ph-accent-ink);
 }
 .ph-button.danger {
@@ -2919,7 +2919,7 @@ button.ph-face-name:hover {
 .ph-app.narrow .ph-title small {
   display: none;
 }
-.ph-app.narrow .ph-button.primary span,
+.ph-app.narrow .ph-button:global(.primary) span,
 .ph-app.narrow .ph-selection-hint,
 .ph-app.narrow .ph-selection-row > button span {
   display: none;
@@ -3149,7 +3149,7 @@ button.ph-face-name:hover {
 .ph-slideshow-end button:hover {
   background: rgba(255, 255, 255, 0.22);
 }
-.ph-slideshow-end button.primary {
+.ph-slideshow-end button:global(.primary) {
   color: #111;
   background: #fff;
 }
@@ -3462,7 +3462,7 @@ button.ph-face-name:hover {
   width: 30px;
   height: 30px;
 }
-.ph-video-play svg.lucide-play {
+.ph-video-play svg:global(.lucide-play) {
   margin-left: 4px;
   fill: currentColor;
 }
@@ -3584,8 +3584,8 @@ button.ph-face-name:hover {
   width: 19px;
   height: 19px;
 }
-.ph-video-controls > button:first-child svg.lucide-play,
-.ph-video-controls > button:first-child svg.lucide-pause {
+.ph-video-controls > button:first-child svg:global(.lucide-play),
+.ph-video-controls > button:first-child svg:global(.lucide-pause) {
   fill: currentColor;
 }
 .ph-video-time {

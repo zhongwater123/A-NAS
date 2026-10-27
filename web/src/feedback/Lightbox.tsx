@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { KeyboardEvent, useEffect, useRef } from "react";
 
 import { FEEDBACK_UI } from "./capture";
+import styles from "./feedback.module.css";
 
 // Lightbox shows one image of a set over the whole desktop.
 export function Lightbox({
@@ -34,7 +35,7 @@ export function Lightbox({
   return (
     <div
       ref={layer}
-      className="fb-lightbox"
+      className={styles.fbLightbox}
       {...{ [FEEDBACK_UI]: "" }}
       role="dialog"
       aria-modal="true"
@@ -46,18 +47,18 @@ export function Lightbox({
       }}
     >
       <img src={urls[index]} alt={`图片 ${index + 1}/${urls.length}`} />
-      <button className="fb-lightbox-close" aria-label="关闭图片" onClick={onClose}>
+      <button className={styles.fbLightboxClose} aria-label="关闭图片" onClick={onClose}>
         <X />
       </button>
       {many && (
         <>
-          <button className="fb-lightbox-step prev" aria-label="上一张" onClick={() => step(-1)}>
+          <button className={`${styles.fbLightboxStep} ${styles.prev}`} aria-label="上一张" onClick={() => step(-1)}>
             <ChevronLeft />
           </button>
-          <button className="fb-lightbox-step next" aria-label="下一张" onClick={() => step(1)}>
+          <button className={`${styles.fbLightboxStep} ${styles.next}`} aria-label="下一张" onClick={() => step(1)}>
             <ChevronRight />
           </button>
-          <span className="fb-lightbox-count">
+          <span className={styles.fbLightboxCount}>
             {index + 1} / {urls.length}
           </span>
         </>

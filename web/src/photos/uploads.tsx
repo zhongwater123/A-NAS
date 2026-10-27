@@ -15,6 +15,7 @@ import { transferStore } from "../transfers/store";
 import { addToAlbum, uploadPhoto } from "./api";
 import type { PendingPhoto } from "./layout";
 import { messageOf } from "./model";
+import styles from "./photos.module.css";
 import { groupPhotoUploads } from "./uploadGroups";
 
 export interface UploadTarget {
@@ -241,9 +242,15 @@ export function UploadTray({
       ? `${failed} ${unit}未能上传`
       : `已上传 ${done} ${unit}`;
   return (
-    <section className={`ph-upload-tray${open ? " open" : ""}`} aria-label="上传队列">
+    <section className={`${styles.phUploadTray}${open ? " open" : ""}`} aria-label="上传队列">
       <header>
-        {busy ? <ImageUp /> : failed ? <CircleAlert className="failed" /> : <CircleCheck className="done" />}
+        {busy ? (
+          <ImageUp />
+        ) : failed ? (
+          <CircleAlert className={styles.failed} />
+        ) : (
+          <CircleCheck className={styles.done} />
+        )}
         <strong>{title}</strong>
         <button type="button" aria-label={open ? "收起上传队列" : "展开上传队列"} onClick={() => setOpen(!open)}>
           {open ? <ChevronDown /> : <ChevronUp />}
@@ -254,15 +261,15 @@ export function UploadTray({
           </button>
         )}
       </header>
-      <div className="ph-upload-bar">
+      <div className={styles.phUploadBar}>
         <span style={{ width: `${Math.round(progress * 100)}%` }} />
       </div>
       {open && (
         <ul>
           {items.map((item) => (
-            <li key={item.key} className={item.state}>
+            <li key={item.key} className={styles[item.state]}>
               {item.video ? (
-                <span className="ph-upload-video">
+                <span className={styles.phUploadVideo}>
                   <Film />
                 </span>
               ) : (
@@ -302,7 +309,7 @@ export function UploadTray({
 export function DropOverlay({ target, search }: { target?: UploadTarget; search: boolean }) {
   if (search) {
     return (
-      <div className="ph-drop search">
+      <div className={`${styles.phDrop} ${styles.search}`}>
         <div>
           <ScanSearch />
           <strong>松开以图搜图</strong>
@@ -312,7 +319,7 @@ export function DropOverlay({ target, search }: { target?: UploadTarget; search:
     );
   }
   return (
-    <div className={`ph-drop${target ? "" : " refused"}`}>
+    <div className={`${styles.phDrop}${target ? "" : ` ${styles.refused}`}`}>
       <div>
         <ImageUp />
         <strong>{target ? "松开即可上传" : "这里不能上传照片"}</strong>

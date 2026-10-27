@@ -4,9 +4,11 @@ import { FormEvent, useEffect, useEffectEvent, useRef, useState } from "react";
 import { APIError } from "../api/client";
 import type { FileEntry, Space } from "../api.generated";
 import { listEntries } from "../files/api";
-import { messageOf, restoreEntry, restoreSnapshot } from "./api";
-import { formatDateTime, restoredName, spaceLabel } from "./format";
 import { Dialog, EntryIcon, Spinner } from "../ui/workspace";
+import workspaceStyles from "../ui/workspace.module.css";
+import { messageOf, restoreEntry, restoreSnapshot } from "./api";
+import styles from "./backup.module.css";
+import { formatDateTime, restoredName, spaceLabel } from "./format";
 
 export interface RestoreRequest {
   space: Space;
@@ -202,18 +204,18 @@ export function RestoreDialog({
       footer={
         <>
           {busy && slow ? (
-            <button type="button" className="bk-secondary" onClick={toBackground}>
+            <button type="button" className={workspaceStyles.bkSecondary} onClick={toBackground}>
               在后台继续
             </button>
           ) : (
-            <button type="button" className="bk-secondary" disabled={busy} onClick={onClose}>
+            <button type="button" className={workspaceStyles.bkSecondary} disabled={busy} onClick={onClose}>
               取消
             </button>
           )}
           <button
             type="submit"
             form="bk-restore-form"
-            className="bk-primary"
+            className={workspaceStyles.bkPrimary}
             disabled={!target || busy || !name.trim() || clash}
           >
             {busy ? (
@@ -230,7 +232,7 @@ export function RestoreDialog({
     >
       <form id="bk-restore-form" className="bk-restore" onSubmit={(event) => void submit(event)}>
         {request.inTrash && (
-          <div className="bk-trash-hint">
+          <div className={styles.bkTrashHint}>
             <Trash2 />
             <span>
               回收站里还有它，那里是删除前最后的样子；快照里的是 {formatDateTime(snapshot.createdAt)} 的样子。
@@ -238,7 +240,7 @@ export function RestoreDialog({
             {onOpenTrash && (
               <button
                 type="button"
-                className="bk-link"
+                className={`${styles.bkLink} ${workspaceStyles.bkLink}`}
                 onClick={() => {
                   onOpenTrash();
                   onClose();
@@ -249,7 +251,7 @@ export function RestoreDialog({
             )}
           </div>
         )}
-        <div className="bk-restore-source">
+        <div className={workspaceStyles.bkRestoreSource}>
           <EntryIcon kind={entry.kind} />
           <div>
             <strong>{request.whole ? `快照“${snapshot.name}”的全部文件` : entry.name}</strong>
@@ -265,17 +267,19 @@ export function RestoreDialog({
           </div>
         </div>
 
-        <div className="bk-field">
-          <span className="bk-field-label">恢复到</span>
-          <div className={`bk-location${picking ? " open" : ""}`}>
+        <div className={workspaceStyles.bkField}>
+          <span className={workspaceStyles.bkFieldLabel}>恢复到</span>
+          <div className={`${workspaceStyles.bkLocation}${picking ? ` ${workspaceStyles.open}` : ""}`}>
             <MapPin />
-            <span className="bk-location-path" title={location}>
+            <span className={workspaceStyles.bkLocationPath} title={location}>
               {target ? location : "正在查找原位置…"}
             </span>
-            {original && target && !request.whole && <span className="bk-badge neutral">原位置</span>}
+            {original && target && !request.whole && (
+              <span className={`${styles.bkBadge} ${workspaceStyles.bkBadge} ${workspaceStyles.neutral}`}>原位置</span>
+            )}
             <button
               type="button"
-              className="bk-link"
+              className={`${styles.bkLink} ${workspaceStyles.bkLink}`}
               disabled={!target || busy}
               onClick={() => setPicking((value) => !value)}
             >
@@ -283,7 +287,9 @@ export function RestoreDialog({
             </button>
           </div>
           {missing && !picking && (
-            <small className="bk-field-hint">原文件夹“{missing}”已不在空间中，将恢复到它还在的上一级。</small>
+            <small className={workspaceStyles.bkFieldHint}>
+              原文件夹“{missing}”已不在空间中，将恢复到它还在的上一级。
+            </small>
           )}
           {picking && target && (
             <FolderPicker
@@ -299,8 +305,8 @@ export function RestoreDialog({
           )}
         </div>
 
-        <label className="bk-field">
-          <span className="bk-field-label">{request.whole ? "新文件夹名称" : "名称"}</span>
+        <label className={workspaceStyles.bkField}>
+          <span className={workspaceStyles.bkFieldLabel}>{request.whole ? "新文件夹名称" : "名称"}</span>
           <input
             data-autofocus
             value={name}
@@ -314,7 +320,7 @@ export function RestoreDialog({
             aria-label="恢复后的名称"
           />
           {suggested && name === suggested && (
-            <small className="bk-field-note">
+            <small className={styles.bkFieldNote}>
               {original ? "原位置" : "这里"}已有“{initialName}”，所以换了个名字另存一份，不会覆盖它。
               {original &&
                 entry.kind === "file" &&
@@ -325,12 +331,12 @@ export function RestoreDialog({
         </label>
 
         {(clash || error) && (
-          <div className="bk-inline-error" role="alert">
+          <div className={workspaceStyles.bkInlineError} role="alert">
             <span>{clash ? `“${location}”中已有名为“${name.trim()}”的项目。` : error}</span>
             {(clash || conflict) && (
               <button
                 type="button"
-                className="bk-link"
+                className={`${styles.bkLink} ${workspaceStyles.bkLink}`}
                 onClick={() => {
                   setName(alternative);
                   setSuggested("");
@@ -343,7 +349,7 @@ export function RestoreDialog({
             )}
           </div>
         )}
-        <p className="bk-fine">
+        <p className={workspaceStyles.bkFine}>
           {request.whole
             ? "快照里的全部文件会复制到这个新文件夹中。"
             : entry.kind === "directory"
@@ -386,8 +392,8 @@ function FolderPicker({ space, start, onPick }: { space: Space; start: Crumb[]; 
   }, [space.id, parentId]);
 
   return (
-    <div className="bk-picker" role="group" aria-label="选择恢复位置">
-      <nav className="bk-picker-trail" aria-label="当前位置">
+    <div className={styles.bkPicker} role="group" aria-label="选择恢复位置">
+      <nav className={styles.bkPickerTrail} aria-label="当前位置">
         <button type="button" onClick={() => setTrail([])}>
           {spaceLabel(space)}
         </button>
@@ -400,43 +406,51 @@ function FolderPicker({ space, start, onPick }: { space: Space; start: Crumb[]; 
           </span>
         ))}
       </nav>
-      <div className="bk-picker-list">
+      <div className={styles.bkPickerList}>
         {trail.length > 0 && (
-          <button type="button" className="bk-picker-row up" onClick={() => setTrail(trail.slice(0, -1))}>
+          <button
+            type="button"
+            className={`${styles.bkPickerRow} ${styles.up}`}
+            onClick={() => setTrail(trail.slice(0, -1))}
+          >
             <CornerLeftUp />
             上一级
           </button>
         )}
         {error ? (
-          <p className="bk-picker-note">{error}</p>
+          <p className={styles.bkPickerNote}>{error}</p>
         ) : !folders ? (
-          <p className="bk-picker-note">
+          <p className={styles.bkPickerNote}>
             <Spinner small />
             正在读取文件夹…
           </p>
         ) : folders.length === 0 ? (
-          <p className="bk-picker-note">这里没有子文件夹</p>
+          <p className={styles.bkPickerNote}>这里没有子文件夹</p>
         ) : (
           folders.map((folder) => (
             <button
               key={folder.id}
               type="button"
-              className="bk-picker-row"
+              className={styles.bkPickerRow}
               onClick={() => setTrail([...trail, { id: folder.id, name: folder.name }])}
             >
               <Folder />
               {folder.name}
-              <ChevronRight className="trailing" />
+              <ChevronRight className={styles.trailing} />
             </button>
           ))
         )}
       </div>
-      <div className="bk-picker-foot">
+      <div className={styles.bkPickerFoot}>
         <span>
           <FolderOpen />
           {[spaceLabel(space), ...trail.map((crumb) => crumb.name)].join(" / ")}
         </span>
-        <button type="button" className="bk-primary small" onClick={() => onPick(trail)}>
+        <button
+          type="button"
+          className={`${workspaceStyles.bkPrimary} ${styles.small} ${workspaceStyles.small}`}
+          onClick={() => onPick(trail)}
+        >
           恢复到这里
         </button>
       </div>

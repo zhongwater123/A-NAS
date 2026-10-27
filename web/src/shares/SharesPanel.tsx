@@ -7,6 +7,7 @@ import { errorText, isUnread, phaseLabel, phaseOf, receipt, remaining, shareTitl
 import { Avatar, EntryTile, nameOf, names, PeopleStack } from "./parts";
 import { ShareDetail } from "./ShareDetail";
 import { useShares } from "./SharesProvider";
+import styles from "./shares.module.css";
 
 type Direction = "received" | "sent";
 // wide: list, files and a docked conversation; split: list and files, the
@@ -104,24 +105,27 @@ export function SharesPanel() {
   const needle = query.trim().toLocaleLowerCase();
   const shown = needle ? items.filter((share) => searchText(share, people, userId).includes(needle)) : items;
   return (
-    <div ref={root} className={`sh-app layout-${layout}${selected ? " has-detail" : ""}`}>
-      <aside className="sh-sidebar" aria-label="分享">
-        <div className="sh-sidebar-head">
-          <div className="sh-segment">
+    <div
+      ref={root}
+      className={`${styles.shApp} ${styles[`layout-${layout}`] ?? ""}${selected ? ` ${styles.hasDetail}` : ""}`}
+    >
+      <aside className={styles.shSidebar} aria-label="分享">
+        <div className={styles.shSidebarHead}>
+          <div className={styles.shSegment}>
             <button
               aria-label="收到的分享"
               aria-pressed={direction === "received"}
               onClick={() => switchTo("received")}
             >
               <Inbox />
-              收到{unread.received > 0 && <b className="sh-count">{unread.received}</b>}
+              收到{unread.received > 0 && <b className={styles.shCount}>{unread.received}</b>}
             </button>
             <button aria-label="我发出的分享" aria-pressed={direction === "sent"} onClick={() => switchTo("sent")}>
               <Send />
-              发出{unread.sent > 0 && <b className="sh-count">{unread.sent}</b>}
+              发出{unread.sent > 0 && <b className={styles.shCount}>{unread.sent}</b>}
             </button>
           </div>
-          <label className="sh-search">
+          <label className={styles.shSearch}>
             <Search />
             <input
               type="search"
@@ -138,11 +142,11 @@ export function SharesPanel() {
           </label>
         </div>
         {error && (
-          <p role="alert" className="sh-alert sh-sidebar-alert">
+          <p role="alert" className={`${styles.shAlert} ${styles.shSidebarAlert}`}>
             {error}
           </p>
         )}
-        <nav className="sh-rows" aria-label="分享列表" aria-busy={loading}>
+        <nav className={styles.shRows} aria-label="分享列表" aria-busy={loading}>
           {shown.map((share) => (
             <ShareRow
               key={share.id}
@@ -156,7 +160,7 @@ export function SharesPanel() {
             (loading && !items.length ? (
               <RowSkeleton />
             ) : (
-              <div className="sh-rows-empty">
+              <div className={styles.shRowsEmpty}>
                 {needle ? (
                   <>
                     <Search />
@@ -177,13 +181,13 @@ export function SharesPanel() {
               </div>
             ))}
           {next !== undefined && (
-            <button className="sh-more" disabled={loading} onClick={() => setPageCount((value) => value + 1)}>
+            <button className={styles.shMore} disabled={loading} onClick={() => setPageCount((value) => value + 1)}>
               加载更多
             </button>
           )}
         </nav>
       </aside>
-      <main className="sh-main">
+      <main className={styles.shMain}>
         {selected ? (
           <ShareDetail
             key={selected}
@@ -195,7 +199,7 @@ export function SharesPanel() {
             onDirection={(value) => switchTo(value)}
           />
         ) : (
-          <div className="sh-placeholder">
+          <div className={styles.shPlaceholder}>
             <span>
               <Share2 />
             </span>
@@ -258,33 +262,33 @@ function ShareRow({
   }
   return (
     <button
-      className={`sh-row${selected ? " selected" : ""}${unread ? " unread" : ""}${phase !== "active" ? " ended" : ""}`}
+      className={`${styles.shRow}${selected ? ` ${styles.selected}` : ""}${unread ? ` ${styles.unread}` : ""}${phase !== "active" ? ` ${styles.ended}` : ""}`}
       aria-current={selected || undefined}
       onClick={onOpen}
     >
-      <span className="sh-row-face">
+      <span className={styles.shRowFace}>
         {sent ? (
           <PeopleStack people={people} ids={ids} />
         ) : (
           <Avatar people={people} id={share.sender.id} username={share.sender.username} size="lg" />
         )}
       </span>
-      <span className="sh-row-body">
-        <span className="sh-row-top">
+      <span className={styles.shRowBody}>
+        <span className={styles.shRowTop}>
           <strong>
             {sent ? `给 ${names(people, ids, 2)}` : nameOf(people, share.sender.id, share.sender.username)}
           </strong>
           <time dateTime={share.createdAt}>{when(share.createdAt)}</time>
         </span>
-        <span className="sh-row-title">
+        <span className={styles.shRowTitle}>
           {top[0] && <EntryTile name={top[0].path} isDir={top[0].isDir} size="sm" />}
           <span>{shareTitle(share)}</span>
         </span>
-        <span className={`sh-row-status${status.tone ? ` ${status.tone}` : ""}`}>{status.text}</span>
+        <span className={`${styles.shRowStatus}${status.tone ? ` ${styles[status.tone]}` : ""}`}>{status.text}</span>
       </span>
       {unread && (
-        <span className="sh-dot">
-          <span className="sh-sr">未读</span>
+        <span className={styles.shDot}>
+          <span className={styles.shSr}>未读</span>
         </span>
       )}
     </button>
@@ -293,7 +297,7 @@ function ShareRow({
 
 function RowSkeleton() {
   return (
-    <div className="sh-skeleton" aria-label="正在读取分享">
+    <div className={styles.shSkeleton} aria-label="正在读取分享">
       {[0, 1, 2].map((index) => (
         <span key={index}>
           <i />

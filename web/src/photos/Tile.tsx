@@ -4,6 +4,7 @@ import { DragEvent, MouseEvent, memo, PointerEvent, ReactNode, useRef } from "re
 import { displayURL, type PhotoAsset, previewURL } from "./api";
 import type { Box, PendingPhoto } from "./layout";
 import { clock } from "./model";
+import styles from "./photos.module.css";
 
 export const dragType = "application/x-a-nas-photos";
 
@@ -44,7 +45,7 @@ export const Tile = memo(function Tile({
     event.dataTransfer.setData(dragType, JSON.stringify(ids));
     event.dataTransfer.effectAllowed = "copy";
     const ghost = document.createElement("div");
-    ghost.className = "ph-drag-ghost";
+    ghost.className = styles.phDragGhost;
     ghost.textContent = ids.length > 1 ? `${ids.length} 张照片` : asset.name;
     document.body.appendChild(ghost);
     event.dataTransfer.setDragImage?.(ghost, 16, 16);
@@ -52,7 +53,7 @@ export const Tile = memo(function Tile({
   };
   return (
     <div
-      className={`ph-tile${selected ? " selected" : ""}${selecting ? " selecting" : ""}${asset.video ? " video" : ""}`}
+      className={`${styles.phTile}${selected ? ` ${styles.selected}` : ""}${selecting ? ` ${styles.selecting}` : ""}${asset.video ? ` ${styles.video}` : ""}`}
       style={{ left: box.left, width: box.width, height: box.height }}
       data-asset-id={asset.id}
       draggable={Boolean(onDragIds)}
@@ -60,7 +61,7 @@ export const Tile = memo(function Tile({
     >
       <button
         type="button"
-        className="ph-tile-open"
+        className={styles.phTileOpen}
         aria-label={`查看 ${asset.name}`}
         onClick={(event) => {
           if (selecting || event.shiftKey || event.ctrlKey || event.metaKey) onToggle(asset, event);
@@ -73,18 +74,18 @@ export const Tile = memo(function Tile({
           loading="lazy"
           decoding="async"
           draggable={false}
-          onLoad={(event) => event.currentTarget.classList.add("loaded")}
+          onLoad={(event) => event.currentTarget.classList.add(styles.loaded)}
           onError={(event) => {
             // A thumbnail reported ready can still be missing until the
             // photo service renders it again; the original shows instead.
             // A video whose frame cannot be rendered shows that it is one.
             const original = displayURL(asset);
             if (event.currentTarget.getAttribute("src") !== original) event.currentTarget.src = original;
-            else if (asset.video) event.currentTarget.closest(".ph-tile")?.classList.add("no-picture");
+            else if (asset.video) event.currentTarget.closest(`.${styles.phTile}`)?.classList.add(styles.noPicture);
           }}
         />
         {asset.video && (
-          <span className="ph-tile-film" aria-hidden="true">
+          <span className={styles.phTileFilm} aria-hidden="true">
             <Film />
           </span>
         )}
@@ -94,7 +95,7 @@ export const Tile = memo(function Tile({
         role="checkbox"
         aria-checked={selected}
         aria-label={`选择 ${asset.name}`}
-        className="ph-check"
+        className={styles.phCheck}
         onPointerDown={(event) => {
           fromCheck.current = true;
           window.addEventListener(
@@ -111,14 +112,14 @@ export const Tile = memo(function Tile({
         <Check strokeWidth={3} />
       </button>
       {asset.duplicate === "duplicate" && (
-        <span className="ph-tile-badge" title="本图库中已有相同照片">
+        <span className={styles.phTileBadge} title="本图库中已有相同照片">
           <Copy />
           重复
         </span>
       )}
-      {asset.motion && <span className="ph-motion-badge">动态照片</span>}
+      {asset.motion && <span className={styles.phMotionBadge}>动态照片</span>}
       {asset.video && (
-        <span className="ph-tile-video" title={`视频 · ${clock(asset.video.duration)}`}>
+        <span className={styles.phTileVideo} title={`视频 · ${clock(asset.video.duration)}`}>
           <Play />
           {clock(asset.video.duration)}
         </span>
@@ -135,35 +136,35 @@ export function PendingTile({ box, onRetry }: { box: Box<PendingPhoto>; onRetry:
   const circumference = 2 * Math.PI * 15;
   return (
     <div
-      className={`ph-tile ph-pending ${item.state}${item.video ? " video" : ""}`}
+      className={`${styles.phTile} ${styles.phPending} ${styles[item.state] ?? ""}${item.video ? ` ${styles.video}` : ""}`}
       style={{ left: box.left, width: box.width, height: box.height }}
       title={item.error ?? item.name}
     >
       {item.video ? (
         <>
-          <span className="ph-tile-film" aria-hidden="true">
+          <span className={styles.phTileFilm} aria-hidden="true">
             <Film />
           </span>
           <video
             src={`${item.url}#t=0.1`}
             aria-label={item.name}
-            className="loaded"
+            className={styles.loaded}
             muted
             playsInline
             preload="metadata"
           />
-          <span className="ph-tile-video">
+          <span className={styles.phTileVideo}>
             <Play />
             视频
           </span>
         </>
       ) : (
-        <img src={item.url} alt={item.name} className="loaded" draggable={false} />
+        <img src={item.url} alt={item.name} className={styles.loaded} draggable={false} />
       )}
       {item.state === "failed" ? (
         <button
           type="button"
-          className="ph-pending-failed"
+          className={styles.phPendingFailed}
           aria-label={`重试上传 ${item.name}`}
           onClick={() => onRetry(item.key)}
         >
@@ -177,18 +178,18 @@ export function PendingTile({ box, onRetry }: { box: Box<PendingPhoto>; onRetry:
       ) : (
         item.state !== "done" && (
           <svg
-            className="ph-progress-ring"
+            className={styles.phProgressRing}
             viewBox="0 0 36 36"
             role="progressbar"
             aria-label={`正在上传 ${item.name}`}
             aria-valuenow={Math.round(item.progress * 100)}
           >
-            <circle cx="18" cy="18" r="15" className="track" />
+            <circle cx="18" cy="18" r="15" className={styles.track} />
             <circle
               cx="18"
               cy="18"
               r="15"
-              className="value"
+              className={styles.value}
               strokeDasharray={circumference}
               strokeDashoffset={circumference * (1 - (item.state === "waiting" ? 0 : Math.max(0.04, item.progress)))}
             />

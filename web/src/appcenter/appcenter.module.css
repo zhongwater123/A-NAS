@@ -150,7 +150,7 @@
   background: var(--ac-accent);
   box-shadow: 0 4px 12px rgba(47, 111, 228, 0.26);
 }
-.ac-nav-item .loader.small {
+.ac-nav-item :global(.loader).small {
   flex: none;
 }
 .ac-count {
@@ -782,7 +782,7 @@ button.ac-get.open:hover {
   height: 15px;
   flex: none;
 }
-.ac-btn.primary {
+.ac-btn:global(.primary) {
   padding: 8px 14px;
   border: 0;
   border-radius: 9px;
@@ -791,7 +791,7 @@ button.ac-get.open:hover {
   background: var(--ac-accent);
   box-shadow: 0 1px 2px rgba(47, 111, 228, 0.32);
 }
-.ac-btn.primary:hover:not(:disabled) {
+.ac-btn:global(.primary):hover:not(:disabled) {
   background: #2862cd;
 }
 .ac-btn.danger {

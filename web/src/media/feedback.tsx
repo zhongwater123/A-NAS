@@ -15,6 +15,7 @@ import {
 import { messageOf } from "./Browse";
 import { splitName } from "./EditableName";
 import { episodeCode, heading } from "./format";
+import styles from "./media.module.css";
 
 type DialogRequest =
   | {
@@ -77,13 +78,13 @@ function Dialog({ request, onClose }: { request: DialogRequest; onClose: (value?
   };
   return (
     <div
-      className="mc-dialog-backdrop"
+      className={styles.mcDialogBackdrop}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <form
-        className="mc-dialog"
+        className={styles.mcDialog}
         role="dialog"
         aria-modal="true"
         aria-label={request.title}
@@ -97,7 +98,7 @@ function Dialog({ request, onClose }: { request: DialogRequest; onClose: (value?
       >
         <h3>{request.title}</h3>
         {request.kind === "prompt" ? (
-          <label className="mc-field">
+          <label className={styles.mcField}>
             <span>{request.label}</span>
             <input
               ref={input}
@@ -107,17 +108,17 @@ function Dialog({ request, onClose }: { request: DialogRequest; onClose: (value?
             />
           </label>
         ) : (
-          <div className="mc-dialog-message">{request.message}</div>
+          <div className={styles.mcDialogMessage}>{request.message}</div>
         )}
-        <footer className="mc-dialog-actions">
+        <footer className={styles.mcDialogActions}>
           <span />
-          <button type="button" className="mc-glass" onClick={() => onClose()}>
+          <button type="button" className={styles.mcGlass} onClick={() => onClose()}>
             取消
           </button>
           <button
             ref={button}
             type="submit"
-            className={request.kind === "confirm" && request.danger ? "mc-danger" : "mc-primary"}
+            className={request.kind === "confirm" && request.danger ? styles.mcDanger : styles.mcPrimary}
             disabled={request.kind === "prompt" && !value.trim()}
           >
             {request.confirm}
@@ -161,15 +162,15 @@ export function useToasts() {
     [dismiss],
   );
   const element = (
-    <div className="mc-toasts" role="status" aria-live="polite">
+    <div className={styles.mcToasts} role="status" aria-live="polite">
       {toasts.map((item) => (
-        <div key={item.id} className={`mc-toast ${item.tone ?? ""}`}>
+        <div key={item.id} className={`${styles.mcToast} ${styles[item.tone ?? ""] ?? ""}`}>
           {item.tone === "error" ? <CircleAlert /> : <CircleCheck />}
           <span>{item.text}</span>
           {item.action && (
             <button
               type="button"
-              className="mc-toast-action"
+              className={styles.mcToastAction}
               onClick={() => {
                 item.action?.run();
                 dismiss(item.id);
@@ -178,7 +179,7 @@ export function useToasts() {
               {item.action.label}
             </button>
           )}
-          <button type="button" className="mc-toast-close" aria-label="关闭提示" onClick={() => dismiss(item.id)}>
+          <button type="button" className={styles.mcToastClose} aria-label="关闭提示" onClick={() => dismiss(item.id)}>
             <X />
           </button>
         </div>
@@ -234,13 +235,13 @@ export function CollectionPicker({
   };
   return (
     <div
-      className="mc-dialog-backdrop"
+      className={styles.mcDialogBackdrop}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <div
-        className="mc-dialog"
+        className={styles.mcDialog}
         role="dialog"
         aria-modal="true"
         aria-label="加入合集"
@@ -252,8 +253,8 @@ export function CollectionPicker({
         }}
       >
         <h3>加入合集</h3>
-        <p className="mc-dialog-sub">{title.type === "episode" ? title.showTitle : title.title}</p>
-        <form className="mc-new-collection" onSubmit={(event) => void create(event)}>
+        <p className={styles.mcDialogSub}>{title.type === "episode" ? title.showTitle : title.title}</p>
+        <form className={styles.mcNewCollection} onSubmit={(event) => void create(event)}>
           <Plus />
           <input
             autoFocus
@@ -263,33 +264,33 @@ export function CollectionPicker({
             onChange={(event) => setName(event.target.value)}
             aria-label="新合集名称"
           />
-          <button type="submit" className="mc-primary small" disabled={busy || !name.trim()}>
+          <button type="submit" className={`${styles.mcPrimary} ${styles.small}`} disabled={busy || !name.trim()}>
             新建并加入
           </button>
         </form>
-        <div className="mc-collection-list">
+        <div className={styles.mcCollectionList}>
           {!collections ? (
-            <span className="mc-spinner small" />
+            <span className={`${styles.mcSpinner} ${styles.small}`} />
           ) : (
             collections.map((collection) => (
               <button key={collection.id} type="button" disabled={busy} onClick={() => void add(collection)}>
                 <Layers />
                 <span>{collection.name}</span>
                 <small>{collection.count} 部</small>
-                <Check className="mc-collection-add" />
+                <Check className={styles.mcCollectionAdd} />
               </button>
             ))
           )}
-          {collections && !collections.length && <p className="mc-picker-empty">还没有合集，在上面新建一个</p>}
+          {collections && !collections.length && <p className={styles.mcPickerEmpty}>还没有合集，在上面新建一个</p>}
         </div>
         {error && (
-          <p className="mc-form-error" role="alert">
+          <p className={styles.mcFormError} role="alert">
             {error}
           </p>
         )}
-        <footer className="mc-dialog-actions">
+        <footer className={styles.mcDialogActions}>
           <span />
-          <button type="button" className="mc-glass" onClick={onClose}>
+          <button type="button" className={styles.mcGlass} onClick={onClose}>
             完成
           </button>
         </footer>
@@ -392,7 +393,7 @@ export function RenameDialog({
     : "同名的字幕、NFO 和海报会一起改名，文件管理和 SMB 中看到的也是新名字。播放进度和收藏都保留，片名会按新文件名重新识别。";
   return (
     <div
-      className="mc-dialog-backdrop"
+      className={styles.mcDialogBackdrop}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget && !saving) onClose();
       }}
@@ -400,7 +401,7 @@ export function RenameDialog({
       <form
         ref={form}
         tabIndex={-1}
-        className="mc-dialog"
+        className={styles.mcDialog}
         role="dialog"
         aria-modal="true"
         aria-label={what}
@@ -413,14 +414,14 @@ export function RenameDialog({
         }}
       >
         <h3>{what}</h3>
-        <p className="mc-dialog-sub">{label}</p>
+        <p className={styles.mcDialogSub}>{label}</p>
         {!source ? (
-          !error && <span className="mc-spinner small" />
+          !error && <span className={`${styles.mcSpinner} ${styles.small}`} />
         ) : (
           <>
-            <label className="mc-field">
+            <label className={styles.mcField}>
               <span>{show ? "名称" : "文件名"}</span>
-              <span className="mc-rename-input">
+              <span className={styles.mcRenameInput}>
                 <input
                   ref={input}
                   value={stem}
@@ -428,32 +429,32 @@ export function RenameDialog({
                   aria-label={show ? "新名称" : "新文件名"}
                   onChange={(event) => setStem(event.target.value)}
                 />
-                {extension && <span className="mc-rename-extension">{extension}</span>}
+                {extension && <span className={styles.mcRenameExtension}>{extension}</span>}
               </span>
             </label>
-            <p className="mc-hint">
+            <p className={styles.mcHint}>
               <FolderOpen />
               {source.place}
             </p>
-            <p className="mc-hint">
+            <p className={styles.mcHint}>
               <Info />
               {hint}
               {source.namedByNfo ? " 片名来自 NFO 文件，改名不会改变显示的片名。" : ""}
             </p>
           </>
         )}
-        {invalid && <p className="mc-form-error">名称不能包含 / 或 \，也不能以 . 开头。</p>}
+        {invalid && <p className={styles.mcFormError}>名称不能包含 / 或 \，也不能以 . 开头。</p>}
         {error && (
-          <p className="mc-form-error" role="alert">
+          <p className={styles.mcFormError} role="alert">
             {error}
           </p>
         )}
-        <footer className="mc-dialog-actions">
+        <footer className={styles.mcDialogActions}>
           <span />
-          <button type="button" className="mc-glass" onClick={onClose} disabled={saving}>
+          <button type="button" className={styles.mcGlass} onClick={onClose} disabled={saving}>
             取消
           </button>
-          <button type="submit" className="mc-primary" disabled={!source || !name || invalid || saving}>
+          <button type="submit" className={styles.mcPrimary} disabled={!source || !name || invalid || saving}>
             {saving ? "正在重命名…" : "重命名"}
           </button>
         </footer>

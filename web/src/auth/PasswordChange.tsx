@@ -1,6 +1,6 @@
 import { FormEvent, useId, useState } from "react";
 
-import { messageOf } from "../settings/parts";
+import { errorText } from "../api/errorMessages";
 import { passwordProblem, passwordRuleText } from "./accountRules";
 import { changePassword } from "./api";
 
@@ -29,7 +29,7 @@ export function PasswordChange({ onChanged, onLogout }: { onChanged: () => void;
       await changePassword(String(data.get("currentPassword")), next);
       onChanged();
     } catch (caught) {
-      setError(messageOf(caught));
+      setError(errorText(caught));
     } finally {
       setSubmitting(false);
     }

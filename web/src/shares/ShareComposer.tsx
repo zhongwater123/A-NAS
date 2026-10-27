@@ -9,6 +9,7 @@ import { createShare, listMembers, requestKey } from "./api";
 import { EmojiInput } from "./EmojiInput";
 import { errorText } from "./format";
 import { EntryTile } from "./parts";
+import styles from "./shares.module.css";
 
 export function ShareComposer({
   entries,
@@ -89,10 +90,10 @@ export function ShareComposer({
   const first = entries[0];
 
   return (
-    <div className="sh-backdrop">
+    <div className={styles.shBackdrop}>
       <form
         ref={form}
-        className="sh-compose"
+        className={styles.shCompose}
         role="dialog"
         aria-modal="true"
         aria-label="分享给成员"
@@ -122,14 +123,14 @@ export function ShareComposer({
           }
         }}
       >
-        <header className="sh-compose-head">
+        <header className={styles.shComposeHead}>
           <h2>分享给成员</h2>
-          <button type="button" className="sh-icon-btn" aria-label="关闭分享" disabled={busy} onClick={onClose}>
+          <button type="button" className={styles.shIconBtn} aria-label="关闭分享" disabled={busy} onClick={onClose}>
             <X />
           </button>
         </header>
-        <div className="sh-compose-body">
-          <section className="sh-compose-items" aria-label="分享内容">
+        <div className={styles.shComposeBody}>
+          <section className={styles.shComposeItems} aria-label="分享内容">
             {first && <EntryTile name={first.name} isDir={first.kind === "directory"} size="lg" />}
             <div>
               <strong title={entries.map((entry) => entry.name).join("、")}>
@@ -146,31 +147,31 @@ export function ShareComposer({
               </small>
             </div>
             {entries.length > 1 && (
-              <ul className="sh-compose-names">
+              <ul className={styles.shComposeNames}>
                 {entries.slice(0, 6).map((entry) => (
                   <li key={entry.id} title={entry.name}>
                     <EntryTile name={entry.name} isDir={entry.kind === "directory"} size="sm" />
                     <span>{entry.name}</span>
                   </li>
                 ))}
-                {entries.length > 6 && <li className="more">还有 {entries.length - 6} 项</li>}
+                {entries.length > 6 && <li className={styles.more}>还有 {entries.length - 6} 项</li>}
               </ul>
             )}
           </section>
-          <fieldset className="sh-compose-people" disabled={busy}>
-            <legend className="sh-sr">发给</legend>
+          <fieldset className={styles.shComposePeople} disabled={busy}>
+            <legend className={styles.shSr}>发给</legend>
             {/* The chosen members sit between the heading and the count, in a
                 row whose height does not change when the first one is chosen,
                 so the list never moves under the pointer. */}
-            <div className="sh-compose-people-head">
+            <div className={styles.shComposePeopleHead}>
               <span aria-hidden="true">发给</span>
               {!chosen.length ? (
                 <p>点击头像选择要分享的成员</p>
               ) : (
-                <ul className="sh-chosen" aria-label="已选成员">
+                <ul className={styles.shChosen} aria-label="已选成员">
                   {chosen.map((member, index) => (
                     <li key={member.id}>
-                      <PersonAvatar who={member} className="sh-avatar sh-avatar-xs" />
+                      <PersonAvatar who={member} className={`${styles.shAvatar} ${styles.shAvatarXs}`} />
                       <span>{displayName(member)}</span>
                       <button
                         type="button"
@@ -191,8 +192,8 @@ export function ShareComposer({
               )}
               {recipientIds.length > 0 && <strong>已选 {recipientIds.length} 人</strong>}
             </div>
-            <div className="sh-compose-tools">
-              <label className="sh-search">
+            <div className={styles.shComposeTools}>
+              <label className={styles.shSearch}>
                 <Search />
                 <input
                   ref={search}
@@ -206,25 +207,25 @@ export function ShareComposer({
               {members.length > 1 && (
                 <button
                   type="button"
-                  className="sh-btn small ghost"
+                  className={`${styles.shBtn} ${styles.small} ${styles.ghost}`}
                   onClick={() => setRecipients(everyone ? [] : members.slice(0, 100).map((member) => member.id))}
                 >
                   {everyone ? "取消全选" : "全选"}
                 </button>
               )}
             </div>
-            <div className="sh-people" aria-busy={loading}>
+            <div className={styles.shPeople} aria-busy={loading}>
               {loading ? (
-                <p className="sh-people-note">
-                  <LoaderCircle className="sh-spin" />
+                <p className={styles.shPeopleNote}>
+                  <LoaderCircle className={styles.shSpin} />
                   正在读取成员…
                 </p>
               ) : memberError ? (
-                <div className="sh-people-note">
+                <div className={styles.shPeopleNote}>
                   <p role="alert">{memberError}</p>
                   <button
                     type="button"
-                    className="sh-btn small"
+                    className={`${styles.shBtn} ${styles.small}`}
                     onClick={() => {
                       setLoading(true);
                       setMemberError("");
@@ -235,13 +236,15 @@ export function ShareComposer({
                   </button>
                 </div>
               ) : !filtered.length ? (
-                <p className="sh-people-note">{members.length ? "没有找到匹配的成员" : "这台 NAS 还没有其他成员"}</p>
+                <p className={styles.shPeopleNote}>
+                  {members.length ? "没有找到匹配的成员" : "这台 NAS 还没有其他成员"}
+                </p>
               ) : (
                 filtered.map((member) => {
                   const chosen = recipientIds.includes(member.id);
                   return (
                     <label
-                      className={`sh-person${chosen ? " chosen" : ""}`}
+                      className={`${styles.shPerson}${chosen ? ` ${styles.chosen}` : ""}`}
                       key={member.id}
                       title={member.nickname ? `${member.nickname}（${member.username}）` : member.username}
                     >
@@ -256,9 +259,9 @@ export function ShareComposer({
                           )
                         }
                       />
-                      <span className="sh-person-face">
-                        <PersonAvatar who={member} className="sh-avatar sh-avatar-xl" />
-                        <span className="sh-person-check" aria-hidden="true">
+                      <span className={styles.shPersonFace}>
+                        <PersonAvatar who={member} className={`${styles.shAvatar} ${styles.shAvatarXl}`} />
+                        <span className={styles.shPersonCheck} aria-hidden="true">
                           <Check />
                         </span>
                       </span>
@@ -272,20 +275,24 @@ export function ShareComposer({
           </fieldset>
           <EmojiInput label="留言" placeholder="说点什么…" value={message} onChange={setMessage} disabled={busy} />
           {error && (
-            <p role="alert" className="sh-alert">
+            <p role="alert" className={styles.shAlert}>
               {error}
             </p>
           )}
         </div>
-        <footer className="sh-compose-foot">
-          <span className="sh-foot-note">
+        <footer className={styles.shComposeFoot}>
+          <span className={styles.shFootNote}>
             <Clock3 />7 天内有效 · 内容固定，不随原文件变化
           </span>
-          <button type="button" className="sh-btn" disabled={busy} onClick={onClose}>
+          <button type="button" className={styles.shBtn} disabled={busy} onClick={onClose}>
             取消
           </button>
-          <button type="submit" className="sh-btn primary" disabled={busy || loading || !recipientIds.length}>
-            {busy ? <LoaderCircle className="sh-spin" /> : <Send />}
+          <button
+            type="submit"
+            className={`${styles.shBtn} primary`}
+            disabled={busy || loading || !recipientIds.length}
+          >
+            {busy ? <LoaderCircle className={styles.shSpin} /> : <Send />}
             {busy ? "正在发送…" : "发送分享"}
           </button>
         </footer>

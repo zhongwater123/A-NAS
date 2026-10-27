@@ -2154,7 +2154,7 @@
   color: #8b97a7;
   font-size: 12.5px;
 }
-.tm-loading .loader {
+.tm-loading :global(.loader) {
   width: 18px;
   height: 18px;
   border-color: rgba(255, 255, 255, 0.14);
@@ -2201,7 +2201,7 @@
   align-items: center;
   gap: 12px;
 }
-.tm-notice > .loader {
+.tm-notice > :global(.loader) {
   width: 18px;
   height: 18px;
 }
@@ -2637,7 +2637,7 @@
   height: 15px;
 }
 /* The global .primary used to come after these rules and set the padding, border and radius. */
-.set-btn.primary {
+.set-btn:global(.primary) {
   padding: 8px 14px;
   border: 0;
   border-radius: 9px;
@@ -2646,7 +2646,7 @@
   background: var(--set-accent);
   box-shadow: 0 1px 2px rgba(47, 111, 228, 0.32);
 }
-.set-btn.primary:hover:not(:disabled) {
+.set-btn:global(.primary):hover:not(:disabled) {
   background: #2862cd;
 }
 .set-btn.danger {

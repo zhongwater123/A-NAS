@@ -7,6 +7,7 @@ import { wallpaperBackdrop } from "../desktop/wallpaper";
 import { DesktopPreview } from "./DesktopPreview";
 import { ImageSources, loadImage } from "./ImageSources";
 import { Banner, messageOf } from "./parts";
+import styles from "./settings.module.css";
 
 // WallpaperDialog lets an administrator pick the picture every desktop shows,
 // from this computer, their NAS files or their photo libraries. The page
@@ -88,19 +89,24 @@ export function WallpaperDialog({
   const size = picked && fitted(picked.image.naturalWidth, picked.image.naturalHeight);
   return (
     <div
-      className="set-dialog-layer"
+      className={styles.setDialogLayer}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) close();
       }}
     >
-      <div className={`set-dialog avd ${picked ? "wpd" : ""}`} role="dialog" aria-modal="true" aria-label="更换壁纸">
-        <header className="avd-head">
+      <div
+        className={`${styles.setDialog} ${styles.avd} ${picked ? styles.wpd : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="更换壁纸"
+      >
+        <header className={styles.avdHead}>
           {picked ? (
-            <button className="set-icon-btn" aria-label="重新选择图片" onClick={repick} disabled={saving}>
+            <button className={styles.setIconBtn} aria-label="重新选择图片" onClick={repick} disabled={saving}>
               <ArrowLeft />
             </button>
           ) : (
-            <span className="set-tile personalize lg">
+            <span className={`${styles.setTile} ${styles.personalize} ${styles.lg}`}>
               <WallpaperIcon />
             </span>
           )}
@@ -112,29 +118,29 @@ export function WallpaperDialog({
                 : "选择一张图片作为所有账号的桌面壁纸。"}
             </p>
           </div>
-          <button className="set-icon-btn" aria-label="关闭" onClick={close} disabled={saving}>
+          <button className={styles.setIconBtn} aria-label="关闭" onClick={close} disabled={saving}>
             <X />
           </button>
         </header>
         {error && (
-          <div className="avd-banner">
+          <div className={styles.avdBanner}>
             <Banner tone="error">{error}</Banner>
           </div>
         )}
         {picked && size ? (
           <>
-            <div className="wpd-stage">
+            <div className={styles.wpdStage}>
               <DesktopPreview picture={{ url: picked.url, ...size }} style={style} label="新壁纸在桌面上的预览" />
               <p>
                 {picked.image.naturalWidth} × {picked.image.naturalHeight} 像素
                 {size.width < picked.image.naturalWidth ? `，保存时缩小到 ${size.width} × ${size.height}` : ""}
               </p>
             </div>
-            <footer className="avd-foot">
-              <button className="set-btn" onClick={close} disabled={saving}>
+            <footer className={styles.avdFoot}>
+              <button className={styles.setBtn} onClick={close} disabled={saving}>
                 取消
               </button>
-              <button className="set-btn primary" onClick={() => void save()} disabled={saving}>
+              <button className={`${styles.setBtn} primary`} onClick={() => void save()} disabled={saving}>
                 {saving ? "正在保存…" : "设为壁纸"}
               </button>
             </footer>

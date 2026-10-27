@@ -45,6 +45,7 @@ import {
 
 import { usePeople } from "../people/people";
 import { endViewing } from "../settings/api";
+import { useDialogs, useToasts } from "../ui/feedback";
 import { useStoredState } from "../ui/useStoredState";
 import { AIHome, type AIHomeSnapshot } from "./AIHome";
 import { AlbumPicker } from "./AlbumPicker";
@@ -92,7 +93,6 @@ import {
   updatePerson,
 } from "./api";
 import { AlbumsView, Empty } from "./Collections";
-import { useDialogs, useToasts } from "../ui/feedback";
 import type { GridProps } from "./grid";
 import {
   type ImageDropProps,
@@ -130,6 +130,7 @@ import {
 import { Avatar, PeopleSettings, PersonPicker, personName } from "./People";
 import { PhotoPicker } from "./PhotoPicker";
 import type { ScrollerHandle } from "./PhotoScroller";
+import styles from "./photos.module.css";
 import { joinWords, ObjectsStatus, SimilarSource } from "./results";
 import { Sidebar } from "./Sidebar";
 import { Slideshow } from "./Slideshow";
@@ -138,7 +139,6 @@ import { useSelection } from "./selection";
 import { Timeline } from "./Timeline";
 import { DropOverlay, type UploadSummary, type UploadTarget, UploadTray, useUploads } from "./uploads";
 import { Viewer, type ViewerActions } from "./Viewer";
-import "./photos.css";
 
 interface Props {
   userId: string;
@@ -1031,22 +1031,22 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
 
   if (!libraries || !place) {
     return (
-      <div className="ph-app ph-app-state">
+      <div className={`${styles.phApp} ${styles.phAppState}`}>
         {failure ? (
           <Empty
             icon={<CircleAlert />}
             title="相册暂时不可用"
             text={failure}
             action={
-              <button type="button" className="ph-button" onClick={() => void loadLibraries()}>
+              <button type="button" className={styles.phButton} onClick={() => void loadLibraries()}>
                 <RefreshCw />
                 重试
               </button>
             }
           />
         ) : (
-          <div className="ph-loading">
-            <span className="ph-spinner" />
+          <div className={styles.phLoading}>
+            <span className={styles.phSpinner} />
           </div>
         )}
       </div>
@@ -1142,9 +1142,9 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
   // On AI search the search box sits under the toolbar.
   const subbar: ReactNode =
     place.kind === "search" && place.query ? (
-      <div className="ph-subbar ph-search-bar">
+      <div className={`${styles.phSubbar} ${styles.phSearchBar}`}>
         <form
-          className={`ph-search wide${imageOver === "results" ? " image-drop" : ""}`}
+          className={`${styles.phSearch} ${styles.wide}${imageOver === "results" ? ` ${styles.imageDrop}` : ""}`}
           role="search"
           onSubmit={submitSearch}
           {...imageDrop}
@@ -1172,11 +1172,11 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
         {found && <ObjectsStatus objects={found} results={viewAssets.length > 0} />}
       </div>
     ) : place.kind === "similar" ? (
-      <div className="ph-subbar ph-similar-bar">
+      <div className={`${styles.phSubbar} ${styles.phSimilarBar}`}>
         <SimilarSource asset={place.asset} />
       </div>
     ) : place.kind === "image" ? (
-      <div className="ph-subbar ph-similar-bar">
+      <div className={`${styles.phSubbar} ${styles.phSimilarBar}`}>
         <ImageSource
           query={place.query}
           result={imageResult}
@@ -1185,7 +1185,10 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
           onReplace={pickSearchImage}
         />
         {ai && ai.pending > 0 && imageResult && !imageResult.error && (
-          <span className="ph-found-note pending" title="本地 AI 会在设备空闲时继续整理，结果可能还会增加">
+          <span
+            className={`${styles.phFoundNote} ${styles.pending}`}
+            title="本地 AI 会在设备空闲时继续整理，结果可能还会增加"
+          >
             <Hourglass />
             还有 {ai.pending} 张照片尚未整理完
           </span>
@@ -1206,10 +1209,10 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
         : undefined;
   // While photos are selected the toolbar turns into their actions.
   const selectionBar = selection.selected.size > 0 && (
-    <div className="ph-toolbar-row ph-selection-row" role="toolbar" aria-label="所选照片的操作">
+    <div className={`${styles.phToolbarRow} ${styles.phSelectionRow}`} role="toolbar" aria-label="所选照片的操作">
       <button
         type="button"
-        className="ph-icon-button"
+        className={styles.phIconButton}
         aria-label="取消选择"
         title="取消选择 (Esc)"
         onClick={selection.clear}
@@ -1217,10 +1220,10 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
         <X />
       </button>
       <strong>已选 {selection.selected.size} 张</strong>
-      <span className="ph-selection-hint">按住 Shift 可连选，拖动勾选圈可批量选择</span>
+      <span className={styles.phSelectionHint}>按住 Shift 可连选，拖动勾选圈可批量选择</span>
       {busy ? (
-        <span className="ph-selection-busy">
-          <span className="ph-spinner" />
+        <span className={styles.phSelectionBusy}>
+          <span className={styles.phSpinner} />
           {busy.label} {busy.done}/{busy.total}
         </span>
       ) : place.kind === "trash" ? (
@@ -1229,7 +1232,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
             <RotateCcw />
             <span>恢复</span>
           </button>
-          <button type="button" className="danger" onClick={() => void purge(chosen)}>
+          <button type="button" className={styles.danger} onClick={() => void purge(chosen)}>
             <Trash2 />
             <span>永久删除</span>
           </button>
@@ -1285,7 +1288,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
             </button>
           )}
           {allChangeable && (
-            <button type="button" className="danger" onClick={() => void trash(chosen)}>
+            <button type="button" className={styles.danger} onClick={() => void trash(chosen)}>
               <Trash2 />
               <span>删除</span>
             </button>
@@ -1305,7 +1308,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
       text="支持 JPEG、PNG、HEIC、安卓动态照片，以及 MP4、MOV 等常见视频。iPhone Live Photo 请选择未修改的照片与同名 MOV。本地 AI 在空闲时分析照片，不分析视频。"
       action={
         uploadTarget && (
-          <button type="button" className="ph-button primary" onClick={pickFiles}>
+          <button type="button" className={`${styles.phButton} primary`} onClick={pickFiles}>
             <ImagePlus />
             选择照片
           </button>
@@ -1348,7 +1351,11 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
                 text="把照片从时间线拖到侧栏的这个相册，或者点“添加照片”。"
                 action={
                   canEditAlbum(caller, place.album) && (
-                    <button type="button" className="ph-button primary" onClick={() => setPhotoPicker(place.album)}>
+                    <button
+                      type="button"
+                      className={`${styles.phButton} primary`}
+                      onClick={() => setPhotoPicker(place.album)}
+                    >
                       <ImagePlus />
                       添加照片
                     </button>
@@ -1370,7 +1377,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
             onCount={setCount}
             onError={reportError}
             badge={(asset) =>
-              asset.trash && <span className="ph-tile-days">{daysLeft(asset.trash.purgeAfter)} 天后删除</span>
+              asset.trash && <span className={styles.phTileDays}>{daysLeft(asset.trash.purgeAfter)} 天后删除</span>
             }
             empty={<Empty icon={<Trash2 />} title="回收站是空的" text="删除的照片会在这里保留 15 天，期间可以恢复。" />}
           />
@@ -1509,10 +1516,10 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
                   title="没能识别这张图片"
                   text={imageResult.error}
                   action={
-                    <div className="ph-empty-actions">
+                    <div className={styles.phEmptyActions}>
                       <button
                         type="button"
-                        className="ph-button"
+                        className={styles.phButton}
                         onClick={() => {
                           setImageResult(undefined);
                           setImageAttempt((value) => value + 1);
@@ -1521,7 +1528,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
                         <RefreshCw />
                         重试
                       </button>
-                      <button type="button" className="ph-button primary" onClick={pickSearchImage}>
+                      <button type="button" className={`${styles.phButton} primary`} onClick={pickSearchImage}>
                         <Camera />
                         换一张
                       </button>
@@ -1614,7 +1621,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
   return (
     <div
       ref={root}
-      className={`ph-app${sidebarOpen ? " nav-open" : ""}${narrow ? " narrow" : ""}${selection.selected.size ? " selecting" : ""}${dragging ? " dragging" : ""}`}
+      className={`${styles.phApp}${sidebarOpen ? " nav-open" : ""}${narrow ? ` ${styles.narrow}` : ""}${selection.selected.size ? ` ${styles.selecting}` : ""}${dragging ? ` ${styles.dragging}` : ""}`}
       tabIndex={-1}
       onKeyDown={keyDown}
       // Another member's library under a viewing grant is beyond what VNAS may
@@ -1645,15 +1652,15 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
           onDropOnLibrary={dropOnLibrary}
         />
       )}
-      {narrow && drawer && <div className="ph-scrim" onClick={() => setDrawer(false)} />}
+      {narrow && drawer && <div className={styles.phScrim} onClick={() => setDrawer(false)} />}
 
-      <main className="ph-main" aria-label={title.text}>
-        <header ref={toolbar} className={`ph-toolbar${selection.selected.size ? " selecting" : ""}`}>
+      <main className={styles.phMain} aria-label={title.text}>
+        <header ref={toolbar} className={`${styles.phToolbar}${selection.selected.size ? ` ${styles.selecting}` : ""}`}>
           {selectionBar || (
-            <div className="ph-toolbar-row">
+            <div className={styles.phToolbarRow}>
               <button
                 type="button"
-                className="ph-icon-button"
+                className={styles.phIconButton}
                 aria-label={sidebarOpen ? "收起侧栏" : "展开侧栏"}
                 aria-expanded={sidebarOpen}
                 onClick={() => (narrow ? setDrawer(!drawer) : setDocked(!docked))}
@@ -1663,7 +1670,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
               {title.back && (
                 <button
                   type="button"
-                  className="ph-icon-button"
+                  className={styles.phIconButton}
                   aria-label="返回"
                   onClick={() => setPlace(title.back!)}
                 >
@@ -1675,20 +1682,22 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
                   occurrenceId={place.person.coverId}
                   kind={place.person.kind}
                   size={34}
-                  className="ph-title-avatar"
+                  className={styles.phTitleAvatar}
                 />
               )}
-              <div className="ph-title">
+              <div className={styles.phTitle}>
                 <h2>{title.text}</h2>
                 {title.detail && <small>{title.detail}</small>}
               </div>
               {place.kind === "person" && (
-                <div className="ph-title-actions ph-person-actions">
+                <div className={`${styles.phTitleActions} ${styles.phPersonActions}`}>
                   {place.person.canChange && (
                     <>
                       <button
                         type="button"
-                        className={place.person.name ? "ph-icon-button" : "ph-button primary small"}
+                        className={
+                          place.person.name ? styles.phIconButton : `${styles.phButton} primary ${styles.small}`
+                        }
                         aria-label={place.person.name ? "改名" : "添加名字"}
                         title={place.person.name ? "改名" : "添加名字"}
                         onClick={() => void namePerson()}
@@ -1704,7 +1713,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
                       </button>
                       <button
                         type="button"
-                        className="ph-icon-button"
+                        className={styles.phIconButton}
                         aria-label="合并到另一个人"
                         title="和另一个人是同一个人？合并"
                         onClick={() => setMerging(place.person)}
@@ -1713,7 +1722,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
                       </button>
                       <button
                         type="button"
-                        className="ph-icon-button"
+                        className={styles.phIconButton}
                         aria-label={place.person.hidden ? "不再隐藏" : "隐藏"}
                         title={place.person.hidden ? "重新显示在人物与宠物中" : "不在人物与宠物中显示"}
                         onClick={() => void changePerson({ hidden: !place.person.hidden })}
@@ -1725,10 +1734,10 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
                 </div>
               )}
               {place.kind === "album" && canEditAlbum(caller, place.album) && (
-                <div className="ph-title-actions">
+                <div className={styles.phTitleActions}>
                   <button
                     type="button"
-                    className="ph-icon-button"
+                    className={styles.phIconButton}
                     aria-label="重命名相册"
                     title="重命名相册"
                     onClick={() => void renameCurrentAlbum()}
@@ -1737,7 +1746,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
                   </button>
                   <button
                     type="button"
-                    className="ph-icon-button"
+                    className={styles.phIconButton}
                     aria-label="删除相册"
                     title="删除相册"
                     onClick={() => void deleteCurrentAlbum()}
@@ -1748,7 +1757,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
               )}
               {place.kind !== "search" && (
                 <form
-                  className={`ph-search${imageOver === "toolbar" ? " image-drop" : ""}`}
+                  className={`${styles.phSearch}${imageOver === "toolbar" ? ` ${styles.imageDrop}` : ""}`}
                   role="search"
                   onSubmit={submitSearch}
                   {...imageDrop}
@@ -1768,7 +1777,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
                 </form>
               )}
               {photoGrid && (
-                <div className="ph-zoom" role="group" aria-label="照片大小">
+                <div className={styles.phZoom} role="group" aria-label="照片大小">
                   <button
                     type="button"
                     aria-label="缩小照片"
@@ -1798,13 +1807,17 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
                 </div>
               )}
               {place.kind === "album" && canEditAlbum(caller, place.album) && (
-                <button type="button" className="ph-button" onClick={() => setPhotoPicker(place.album)}>
+                <button type="button" className={styles.phButton} onClick={() => setPhotoPicker(place.album)}>
                   <FolderPlus />
                   添加照片
                 </button>
               )}
               {place.kind === "trash" && (
-                <button type="button" className="ph-button danger" onClick={() => void emptyTrash()}>
+                <button
+                  type="button"
+                  className={`${styles.phButton} ${styles.danger}`}
+                  onClick={() => void emptyTrash()}
+                >
                   <Trash2 />
                   清空
                 </button>
@@ -1812,7 +1825,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
               {uploadTarget && place.kind !== "trash" && (
                 <button
                   type="button"
-                  className="ph-button primary"
+                  className={`${styles.phButton} primary`}
                   onClick={pickFiles}
                   title={`上传到${uploadTarget.label}`}
                 >
@@ -1823,7 +1836,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
             </div>
           )}
           {viewingLibrary?.viewing && (
-            <div className="ph-viewing" role="status">
+            <div className={styles.phViewing} role="status">
               <ShieldCheck />
               <span>
                 只读查看 {libraryName(caller, viewingLibrary)}，
@@ -1927,8 +1940,8 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
       )}
       {dialogs.dialog}
       {busy && !selection.selected.size && (
-        <div className="ph-busy" role="status">
-          <span className="ph-spinner" />
+        <div className={styles.phBusy} role="status">
+          <span className={styles.phSpinner} />
           {busy.label} {busy.done}/{busy.total}
         </div>
       )}

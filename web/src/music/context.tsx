@@ -3,6 +3,7 @@ import { createContext, useContext, useState } from "react";
 
 import { coverURL, type Playlist } from "./api";
 import { hue, type LibraryIndex } from "./library";
+import styles from "./music.module.css";
 import type { Player } from "./player";
 
 // Place is what the main area shows; detail places sit on a back stack.
@@ -90,14 +91,14 @@ export function Cover({
   const shade = hue(name || kind);
   if (id && failed !== id) {
     return (
-      <span className={`mu-cover ${kind} ${className}`}>
+      <span className={`${styles.muCover} ${styles[kind] ?? ""} ${className}`}>
         <img src={coverURL(id, size)} alt="" loading="lazy" draggable={false} onError={() => setFailed(id)} />
       </span>
     );
   }
   return (
     <span
-      className={`mu-cover ${kind} fallback ${className}`}
+      className={`${styles.muCover} ${styles[kind] ?? ""} ${styles.fallback} ${className}`}
       style={{ background: `linear-gradient(140deg, hsl(${shade} 62% 72%), hsl(${(shade + 40) % 360} 58% 52%))` }}
     >
       <Icon aria-hidden="true" />
@@ -109,7 +110,7 @@ export function Cover({
 export function Mosaic({ coverIds, name }: { coverIds: string[]; name: string }) {
   if (coverIds.length < 4) return <Cover id={coverIds[0]} name={name} kind="playlist" size="large" />;
   return (
-    <span className="mu-cover mu-mosaic">
+    <span className={`${styles.muCover} ${styles.muMosaic}`}>
       {coverIds.slice(0, 4).map((id) => (
         <img key={id} src={coverURL(id)} alt="" loading="lazy" draggable={false} />
       ))}
@@ -120,7 +121,7 @@ export function Mosaic({ coverIds, name }: { coverIds: string[]; name: string })
 // Equalizer marks the track that is playing.
 export function Equalizer({ paused }: { paused: boolean }) {
   return (
-    <span className={`mu-eq${paused ? " paused" : ""}`} aria-hidden="true">
+    <span className={`${styles.muEq}${paused ? ` ${styles.paused}` : ""}`} aria-hidden="true">
       <i />
       <i />
       <i />

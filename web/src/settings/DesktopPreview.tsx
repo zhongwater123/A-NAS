@@ -2,6 +2,7 @@ import { type CSSProperties, useLayoutEffect, useRef, useState } from "react";
 
 import type { WallpaperStyle } from "../api.generated";
 import { drawWallpaper, type WallpaperPicture } from "../desktop/wallpaper";
+import styles from "./settings.module.css";
 
 // DesktopPreview draws a small copy of this browser's desktop with picture
 // laid out in style, so 居中 and 平铺 show the picture's size against the
@@ -31,7 +32,7 @@ export function DesktopPreview({
   return (
     <div
       ref={frame}
-      className="pz-preview"
+      className={styles.pzPreview}
       role="img"
       aria-label={label}
       style={
@@ -42,9 +43,9 @@ export function DesktopPreview({
         } as CSSProperties
       }
     >
-      <span className="pz-preview-rail" aria-hidden="true" />
-      <span className="pz-preview-status" aria-hidden="true" />
-      <span className="pz-preview-dock" aria-hidden="true" />
+      <span className={styles.pzPreviewRail} aria-hidden="true" />
+      <span className={styles.pzPreviewStatus} aria-hidden="true" />
+      <span className={styles.pzPreviewDock} aria-hidden="true" />
     </div>
   );
 }

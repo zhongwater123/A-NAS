@@ -3,6 +3,8 @@ import { ReactNode, useEffect, useMemo, useState } from "react";
 
 import type { Space } from "../api.generated";
 import { formatBytes } from "../lib/bytes";
+import { EmptyState, EntryIcon, Notice, Spinner } from "../ui/workspace";
+import workspaceStyles from "../ui/workspace.module.css";
 import {
   listRemovedEntries,
   messageOf,
@@ -13,8 +15,8 @@ import {
   snapshotDownloadURL,
 } from "./api";
 import { useBackup } from "./BackupCenter";
+import styles from "./backup.module.css";
 import { formatCount, formatDateTime, formatDay, spaceLabel } from "./format";
-import { EmptyState, EntryIcon, Notice, Spinner } from "../ui/workspace";
 import { snapshotTitle } from "./SnapshotsPage";
 
 const collapsedVersions = 3;
@@ -100,20 +102,24 @@ export function FindPage() {
 
   if (!spaces.length) return null;
   return (
-    <div className="bk-page bk-find-page">
-      <header className="bk-page-head">
+    <div className={`${styles.bkPage} bk-find-page`}>
+      <header className={styles.bkPageHead}>
         <div>
           <h2>找回文件</h2>
           <p>在{where}的快照里按名称查找；想不起名字，就看下面最近删除的项目。</p>
         </div>
         {spaces.length > 1 && (
-          <div className="bk-head-actions">
-            <div className="bk-segmented" role="radiogroup" aria-label="查找范围">
+          <div className={styles.bkHeadActions}>
+            <div
+              className={`${styles.bkSegmented} ${workspaceStyles.bkSegmented}`}
+              role="radiogroup"
+              aria-label="查找范围"
+            >
               <button
                 type="button"
                 role="radio"
                 aria-checked={scope === allSpaces}
-                className={scope === allSpaces ? "active" : ""}
+                className={scope === allSpaces ? `${styles.active} ${workspaceStyles.active}` : ""}
                 onClick={() => setScope(allSpaces)}
               >
                 <Layers />
@@ -125,7 +131,7 @@ export function FindPage() {
                   type="button"
                   role="radio"
                   aria-checked={scope === space.id}
-                  className={scope === space.id ? "active" : ""}
+                  className={scope === space.id ? `${styles.active} ${workspaceStyles.active}` : ""}
                   onClick={() => setScope(space.id)}
                 >
                   {spaceLabel(space)}
@@ -136,7 +142,7 @@ export function FindPage() {
         )}
       </header>
 
-      <label className="bk-search">
+      <label className={styles.bkSearch}>
         <Search />
         <input
           autoFocus
@@ -148,7 +154,7 @@ export function FindPage() {
         />
         {loading && <Spinner small />}
         {query && (
-          <button type="button" className="bk-icon-button" aria-label="清除" onClick={() => setQuery("")}>
+          <button type="button" className={workspaceStyles.bkIconButton} aria-label="清除" onClick={() => setQuery("")}>
             <X />
           </button>
         )}
@@ -173,7 +179,7 @@ export function FindPage() {
           </EmptyState>
         ) : (
           <>
-            <p className="bk-result-count">
+            <p className={styles.bkResultCount}>
               找到 {result.items.length} 项{result.truncated ? "，结果较多，只显示前一部分；请输入更完整的名称" : ""}
             </p>
             {result.unreachable.length > 0 && (
@@ -181,7 +187,7 @@ export function FindPage() {
                 {result.unreachable.map(spaceLabel).join("、")}暂时无法查找，结果中不含它的文件。
               </Notice>
             )}
-            <ul className="bk-matches" data-vnas-private="快照里找到的文件">
+            <ul className={styles.bkMatches} data-vnas-private="快照里找到的文件">
               {result.items.map(({ space, item }) => (
                 <MatchCard key={`${space.id}:${item.path}`} space={space} match={item} query={result.query} />
               ))}
@@ -189,7 +195,7 @@ export function FindPage() {
           </>
         )
       ) : (
-        <div className="bk-loading inline">
+        <div className={`${styles.bkLoading} ${styles.inline}`}>
           <Spinner />
           正在查找…
         </div>
@@ -215,21 +221,29 @@ function MatchCard({ space, match, query }: { space: Space; match: SnapshotMatch
       folders,
     });
   return (
-    <li className="bk-match">
+    <li className={styles.bkMatch}>
       <header>
         <EntryIcon kind={match.kind} />
-        <div className="bk-match-title">
+        <div className={styles.bkMatchTitle}>
           <strong>{highlight(match.name, query)}</strong>
           <small title={match.path}>{[spaceLabel(space), ...folders].join(" / ")}</small>
         </div>
-        {!match.inSpace && <span className="bk-badge danger">已不在空间中</span>}
-        {match.kind === "file" && <span className="bk-badge neutral">{match.versions.length} 个版本</span>}
+        {!match.inSpace && (
+          <span className={`${styles.bkBadge} ${workspaceStyles.bkBadge} ${styles.danger} ${workspaceStyles.danger}`}>
+            已不在空间中
+          </span>
+        )}
+        {match.kind === "file" && (
+          <span className={`${styles.bkBadge} ${workspaceStyles.bkBadge} ${workspaceStyles.neutral}`}>
+            {match.versions.length} 个版本
+          </span>
+        )}
       </header>
-      <ol className="bk-versions">
+      <ol className={styles.bkVersions}>
         {versions.map((version, index) => (
           <li key={`${version.snapshotId}:${version.entryId}`}>
-            <span className={`bk-version-dot${index === 0 ? " newest" : ""}`} aria-hidden="true" />
-            <div className="bk-version-copy">
+            <span className={`${styles.bkVersionDot}${index === 0 ? ` ${styles.newest}` : ""}`} aria-hidden="true" />
+            <div className={styles.bkVersionCopy}>
               <strong>
                 {match.kind === "directory"
                   ? "文件夹"
@@ -238,7 +252,7 @@ function MatchCard({ space, match, query }: { space: Space; match: SnapshotMatch
                     : "版本"}
                 {match.kind === "file" && <span> · {formatBytes(version.sizeBytes)}</span>}
                 {version.current ? (
-                  <em className="current">当前版本</em>
+                  <em className={styles.current}>当前版本</em>
                 ) : (
                   index === 0 && match.versions.length > 1 && <em>最新</em>
                 )}
@@ -249,10 +263,10 @@ function MatchCard({ space, match, query }: { space: Space; match: SnapshotMatch
                   : `保存在${snapshotTitle({ name: version.snapshotName, origin: version.origin }) === "定时快照" ? "定时快照" : `快照“${version.snapshotName}”`} · ${formatDateTime(version.createdAt)}`}
               </small>
             </div>
-            <div className="bk-version-actions">
+            <div className={styles.bkVersionActions}>
               {match.kind === "file" && (
                 <a
-                  className="bk-icon-button"
+                  className={workspaceStyles.bkIconButton}
                   href={snapshotDownloadURL(version.snapshotId, version.entryId)}
                   download={match.name}
                   aria-label={`下载这个版本的 ${match.name}`}
@@ -263,7 +277,11 @@ function MatchCard({ space, match, query }: { space: Space; match: SnapshotMatch
               )}
               {/* The space already holds the current version; restoring it would only duplicate it. */}
               {!version.current && (
-                <button type="button" className="bk-restore-button" onClick={() => restoreVersion(version)}>
+                <button
+                  type="button"
+                  className={workspaceStyles.bkRestoreButton}
+                  onClick={() => restoreVersion(version)}
+                >
                   <ArchiveRestore />
                   恢复
                 </button>
@@ -273,7 +291,11 @@ function MatchCard({ space, match, query }: { space: Space; match: SnapshotMatch
         ))}
       </ol>
       {match.versions.length > collapsedVersions && (
-        <button type="button" className="bk-link bk-more" onClick={() => setExpanded((value) => !value)}>
+        <button
+          type="button"
+          className={`${styles.bkLink} ${workspaceStyles.bkLink} ${styles.bkMore}`}
+          onClick={() => setExpanded((value) => !value)}
+        >
           {expanded ? "收起" : `显示全部 ${match.versions.length} 个版本`}
         </button>
       )}
@@ -311,7 +333,7 @@ function RemovedList({ spaces }: { spaces: Space[] }) {
   if (error) return <Notice tone="danger">{error}</Notice>;
   if (!result)
     return (
-      <div className="bk-loading inline">
+      <div className={`${styles.bkLoading} ${styles.inline}`}>
         <Spinner />
         正在比对快照与现在的空间…
       </div>
@@ -330,7 +352,7 @@ function RemovedList({ spaces }: { spaces: Space[] }) {
   }
   return (
     <section className="bk-removed" aria-label="最近删除或移走" data-vnas-private="快照里最近删除或移走的文件">
-      <header className="bk-section-head">
+      <header className={styles.bkSectionHead}>
         <div>
           <h3>
             <History />
@@ -345,7 +367,7 @@ function RemovedList({ spaces }: { spaces: Space[] }) {
       {result.unreachable.length > 0 && (
         <Notice tone="warning">{result.unreachable.map(spaceLabel).join("、")}暂时无法比对，下面没有它的项目。</Notice>
       )}
-      <ul className="bk-removed-list">
+      <ul className={styles.bkRemovedList}>
         {result.items.map(({ space, item }) => {
           const folders = item.path.split("/").slice(0, -1);
           const size =
@@ -359,14 +381,14 @@ function RemovedList({ spaces }: { spaces: Space[] }) {
           return (
             <li key={`${space.id}:${item.path}`}>
               <EntryIcon kind={item.kind} />
-              <div className="bk-removed-copy">
+              <div className={styles.bkRemovedCopy}>
                 <strong title={item.name}>
                   {item.name}
                   {item.inTrash &&
                     (openTrash ? (
                       <button
                         type="button"
-                        className="bk-badge neutral link"
+                        className={`${styles.bkBadge} ${workspaceStyles.bkBadge} ${workspaceStyles.neutral} ${workspaceStyles.link}`}
                         title="回收站里还有它，从回收站还原可以拿回删除前最后的样子"
                         onClick={openTrash}
                       >
@@ -374,24 +396,27 @@ function RemovedList({ spaces }: { spaces: Space[] }) {
                         <ChevronRight />
                       </button>
                     ) : (
-                      <span className="bk-badge neutral" title="回收站里还有它，从回收站还原可以拿回删除前最后的样子">
+                      <span
+                        className={`${styles.bkBadge} ${workspaceStyles.bkBadge} ${workspaceStyles.neutral}`}
+                        title="回收站里还有它，从回收站还原可以拿回删除前最后的样子"
+                      >
                         在回收站中
                       </span>
                     ))}
                 </strong>
                 <small title={item.path}>{[spaceLabel(space), ...folders].join(" / ")}</small>
-                <small className="bk-removed-meta">
+                <small className={styles.bkRemovedMeta}>
                   {size} · {seen}
                 </small>
               </div>
-              <span className="bk-removed-size">{size}</span>
-              <span className="bk-removed-when" title={between}>
+              <span className={styles.bkRemovedSize}>{size}</span>
+              <span className={styles.bkRemovedWhen} title={between}>
                 {seen}
               </span>
-              <div className="bk-version-actions">
+              <div className={styles.bkVersionActions}>
                 {item.kind === "file" && (
                   <a
-                    className="bk-icon-button"
+                    className={workspaceStyles.bkIconButton}
                     href={snapshotDownloadURL(item.snapshotId, item.entryId)}
                     download={item.name}
                     aria-label={`下载 ${item.name}`}
@@ -402,7 +427,7 @@ function RemovedList({ spaces }: { spaces: Space[] }) {
                 )}
                 <button
                   type="button"
-                  className="bk-restore-button"
+                  className={workspaceStyles.bkRestoreButton}
                   aria-label={`恢复 ${item.name}`}
                   onClick={() =>
                     restore({

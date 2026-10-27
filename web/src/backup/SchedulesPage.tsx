@@ -2,6 +2,8 @@ import { CalendarClock, CircleAlert, CircleCheck, Clock3, Info, SlidersHorizonta
 import { useEffect, useRef, useState } from "react";
 
 import type { Space } from "../api.generated";
+import { Spinner } from "../ui/workspace";
+import workspaceStyles from "../ui/workspace.module.css";
 import {
   type Frequency,
   maxKeep,
@@ -13,6 +15,7 @@ import {
   saveSchedule,
 } from "./api";
 import { useBackup } from "./BackupCenter";
+import styles from "./backup.module.css";
 import {
   describeRetention,
   describeSchedule,
@@ -29,7 +32,6 @@ import {
   tierTotal,
   weekdayShort,
 } from "./format";
-import { Spinner } from "../ui/workspace";
 import { SpaceIcon, Stepper, Switch } from "./parts";
 
 const frequencies: { value: Frequency; label: string }[] = [
@@ -127,27 +129,27 @@ function tiersAfter(tiers: RetentionTiers, from: Frequency, to: Frequency): Rete
 export function SchedulesPage() {
   const { spaces, data } = useBackup();
   return (
-    <div className="bk-page bk-schedules-page">
-      <header className="bk-page-head">
+    <div className={`${styles.bkPage} bk-schedules-page`}>
+      <header className={styles.bkPageHead}>
         <div>
           <h2>定时快照</h2>
           <p>按计划自动拍摄快照，并自动清理较早的。选一个方案即可，之后随时可以改。</p>
         </div>
       </header>
-      <div className="bk-schedule-list">
+      <div className={styles.bkScheduleList}>
         {spaces.map((space) => {
           const schedule = data[space.id]?.schedule;
           return schedule ? (
             <ScheduleCard key={space.id} space={space} schedule={schedule} />
           ) : (
-            <section key={space.id} className="bk-card bk-schedule-card loading">
+            <section key={space.id} className={`${styles.bkCard} ${styles.bkScheduleCard} ${styles.loading}`}>
               <Spinner small />
               正在读取{spaceLabel(space)}的设置…
             </section>
           );
         })}
       </div>
-      <section className="bk-card bk-about" aria-label="关于定时快照">
+      <section className={`${styles.bkCard} ${styles.bkAbout}`} aria-label="关于定时快照">
         <h4>
           <Info />
           定时快照如何工作
@@ -219,12 +221,12 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
 
   return (
     <section
-      className={`bk-card bk-schedule-card${draft.enabled ? " on" : ""}`}
+      className={`${styles.bkCard} ${styles.bkScheduleCard}${draft.enabled ? ` ${styles.on}` : ""}`}
       aria-label={`${spaceLabel(space)}的定时快照`}
     >
       <header>
         <SpaceIcon space={space} />
-        <div className="bk-space-title">
+        <div className={styles.bkSpaceTitle}>
           <strong>{spaceLabel(space)}</strong>
           <small>{spaceAudience(space)}</small>
         </div>
@@ -237,65 +239,69 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
       </header>
 
       {draft.enabled && readOnly ? (
-        <div className="bk-schedule-summary">
+        <div className={styles.bkScheduleSummary}>
           <p>
             <strong>{describeSchedule(draft)}</strong> 自动拍一份 · {describeRetention(draft)}
           </p>
           <RetentionStrip settings={draft} />
         </div>
       ) : draft.enabled ? (
-        <div className="bk-schedule-form">
-          <div className="bk-plans" role="radiogroup" aria-label="保护方案">
+        <div className={styles.bkScheduleForm}>
+          <div className={styles.bkPlans} role="radiogroup" aria-label="保护方案">
             {plans.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 role="radio"
                 aria-checked={chosen === item.id}
-                className={`bk-plan${chosen === item.id ? " active" : ""}`}
+                className={`${styles.bkPlan}${chosen === item.id ? ` ${styles.active} ${workspaceStyles.active}` : ""}`}
                 disabled={busy}
                 onClick={() => {
                   setCustom(false);
                   setDraft((current) => ({ ...current, ...item.plan }));
                 }}
               >
-                <span className="bk-plan-radio" aria-hidden="true" />
+                <span className={styles.bkPlanRadio} aria-hidden="true" />
                 <strong>
                   {item.title}
                   {item.tag && <em>{item.tag}</em>}
                 </strong>
                 <small>{item.every}</small>
-                <small className="reach">{item.reach}</small>
+                <small className={styles.reach}>{item.reach}</small>
               </button>
             ))}
             <button
               type="button"
               role="radio"
               aria-checked={!chosen}
-              className={`bk-plan${chosen ? "" : " active"}`}
+              className={`${styles.bkPlan}${chosen ? "" : ` ${styles.active} ${workspaceStyles.active}`}`}
               disabled={busy}
               onClick={() => setCustom(true)}
             >
-              <span className="bk-plan-radio" aria-hidden="true" />
+              <span className={styles.bkPlanRadio} aria-hidden="true" />
               <strong>
                 <SlidersHorizontal />
                 自定义
               </strong>
               <small>自己设定拍摄频率</small>
-              <small className="reach">和保留方式</small>
+              <small className={styles.reach}>和保留方式</small>
             </button>
           </div>
           {!chosen && (
-            <div className="bk-row">
-              <span className="bk-row-label">频率</span>
-              <div className="bk-segmented small" role="radiogroup" aria-label="频率">
+            <div className={styles.bkRow}>
+              <span className={styles.bkRowLabel}>频率</span>
+              <div
+                className={`${styles.bkSegmented} ${workspaceStyles.bkSegmented} ${styles.small} ${workspaceStyles.small}`}
+                role="radiogroup"
+                aria-label="频率"
+              >
                 {frequencies.map((item) => (
                   <button
                     key={item.value}
                     type="button"
                     role="radio"
                     aria-checked={draft.frequency === item.value}
-                    className={draft.frequency === item.value ? "active" : ""}
+                    className={draft.frequency === item.value ? `${styles.active} ${workspaceStyles.active}` : ""}
                     disabled={busy}
                     onClick={() => update({ frequency: item.value })}
                   >
@@ -306,9 +312,9 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
             </div>
           )}
           {draft.frequency === "weekly" && (
-            <div className="bk-row">
-              <span className="bk-row-label">星期</span>
-              <div className="bk-weekdays" role="radiogroup" aria-label="星期">
+            <div className={styles.bkRow}>
+              <span className={styles.bkRowLabel}>星期</span>
+              <div className={styles.bkWeekdays} role="radiogroup" aria-label="星期">
                 {weekOrder.map((day) => (
                   <button
                     key={day}
@@ -316,7 +322,7 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
                     role="radio"
                     aria-checked={draft.weekday === day}
                     aria-label={`周${weekdayShort[day]}`}
-                    className={draft.weekday === day ? "active" : ""}
+                    className={draft.weekday === day ? `${styles.active} ${workspaceStyles.active}` : ""}
                     disabled={busy}
                     onClick={() => update({ weekday: day })}
                   >
@@ -326,9 +332,9 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
               </div>
             </div>
           )}
-          <div className="bk-row">
-            <span className="bk-row-label">时间</span>
-            <div className="bk-time">
+          <div className={styles.bkRow}>
+            <span className={styles.bkRowLabel}>时间</span>
+            <div className={styles.bkTime}>
               {draft.frequency === "hourly" ? (
                 <>
                   每小时的第
@@ -360,7 +366,7 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
                       </option>
                     ))}
                   </select>
-                  <span className="bk-time-colon">:</span>
+                  <span className={styles.bkTimeColon}>:</span>
                   <select
                     aria-label="分钟"
                     value={minute}
@@ -377,19 +383,23 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
               )}
             </div>
           </div>
-          <div className="bk-row top">
-            <span className="bk-row-label">{chosen ? "可回到" : "保留"}</span>
-            <div className="bk-retention">
+          <div className={`${styles.bkRow} ${styles.top}`}>
+            <span className={styles.bkRowLabel}>{chosen ? "可回到" : "保留"}</span>
+            <div className={styles.bkRetention}>
               {!chosen && (
                 <>
-                  <div className="bk-segmented small" role="radiogroup" aria-label="保留方式">
+                  <div
+                    className={`${styles.bkSegmented} ${workspaceStyles.bkSegmented} ${styles.small} ${workspaceStyles.small}`}
+                    role="radiogroup"
+                    aria-label="保留方式"
+                  >
                     {retentions.map((item) => (
                       <button
                         key={item.value}
                         type="button"
                         role="radio"
                         aria-checked={draft.retention === item.value}
-                        className={draft.retention === item.value ? "active" : ""}
+                        className={draft.retention === item.value ? `${styles.active} ${workspaceStyles.active}` : ""}
                         disabled={busy}
                         onClick={() => update({ retention: item.value })}
                       >
@@ -398,7 +408,7 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
                     ))}
                   </div>
                   {draft.retention === "count" ? (
-                    <div className="bk-keep">
+                    <div className={styles.bkKeep}>
                       <Stepper
                         value={draft.keep}
                         min={1}
@@ -420,12 +430,12 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
                 </>
               )}
               <RetentionStrip settings={draft} />
-              <small className="bk-retention-note">{describeRetention(draft)}</small>
+              <small className={styles.bkRetentionNote}>{describeRetention(draft)}</small>
             </div>
           </div>
         </div>
       ) : (
-        <p className="bk-schedule-off">
+        <p className={styles.bkScheduleOff}>
           {readOnly
             ? "管理员尚未为共享空间开启定时快照；开启后你可以浏览和恢复其中的文件。"
             : "开启后每天自动拍一份快照，误删、改坏的文件都能找回。"}
@@ -435,10 +445,10 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
       <ScheduleStatus schedule={schedule} offline={Boolean(data[space.id]?.offline)} />
 
       {readOnly && draft.enabled && (
-        <p className="bk-readonly-note">共享空间的定时快照由管理员设置，你可以浏览和恢复其中的文件。</p>
+        <p className={styles.bkReadonlyNote}>共享空间的定时快照由管理员设置，你可以浏览和恢复其中的文件。</p>
       )}
       {dirty && !readOnly && (
-        <footer className="bk-save-bar">
+        <footer className={styles.bkSaveBar}>
           <span>
             {draft.enabled
               ? `将${describeSchedule(draft)} 自动拍一份，${describeRetention(draft)}`
@@ -446,7 +456,7 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
           </span>
           <button
             type="button"
-            className="bk-secondary small"
+            className={`${workspaceStyles.bkSecondary} ${styles.small} ${workspaceStyles.small}`}
             disabled={saving}
             onClick={() => {
               setDraft(stored);
@@ -455,7 +465,12 @@ function ScheduleCard({ space, schedule }: { space: Space; schedule: SnapshotSch
           >
             还原
           </button>
-          <button type="button" className="bk-primary small" disabled={saving} onClick={() => void save()}>
+          <button
+            type="button"
+            className={`${workspaceStyles.bkPrimary} ${styles.small} ${workspaceStyles.small}`}
+            disabled={saving}
+            onClick={() => void save()}
+          >
             {saving ? (
               <>
                 <Spinner small />
@@ -475,7 +490,7 @@ function ScheduleStatus({ schedule, offline }: { schedule: SnapshotSchedule; off
   const run = schedule.lastRun;
   if (!schedule.enabled && !run) return null;
   return (
-    <div className="bk-schedule-status">
+    <div className={styles.bkScheduleStatus}>
       {schedule.enabled && schedule.nextRunAt && (
         <span>
           <CalendarClock />
@@ -485,12 +500,12 @@ function ScheduleStatus({ schedule, offline }: { schedule: SnapshotSchedule; off
       )}
       {run &&
         (run.status === "succeeded" ? (
-          <span className="ok">
+          <span className={styles.ok}>
             <CircleCheck />
             上次：{formatDateTime(run.at)} 成功
           </span>
         ) : (
-          <span className="failed">
+          <span className={styles.failed}>
             <CircleAlert />
             上次：{formatDateTime(run.at)} 失败，{runErrorText(schedule)}
           </span>
@@ -520,10 +535,10 @@ function TierEditor({
 }) {
   const total = tierTotal(tiers);
   return (
-    <div className="bk-tiers" role="group" aria-label="智能保留">
+    <div className={styles.bkTiers} role="group" aria-label="智能保留">
       {tiersFor(frequency).map((tier) => (
-        <div key={tier} className="bk-tier">
-          <span className="bk-tier-name">{tierLabel[tier].every}一份</span>
+        <div key={tier} className={styles.bkTier}>
+          <span className={styles.bkTierName}>{tierLabel[tier].every}一份</span>
           <Stepper
             value={tiers[tier]}
             min={0}
@@ -532,7 +547,9 @@ function TierEditor({
             label={`保留最近几${tierLabel[tier].span}`}
             onChange={(value) => onChange({ ...tiers, [tier]: value })}
           />
-          <span className="bk-tier-span">{tiers[tier] ? `最近 ${tiers[tier]} ${tierLabel[tier].span}` : "不保留"}</span>
+          <span className={styles.bkTierSpan}>
+            {tiers[tier] ? `最近 ${tiers[tier]} ${tierLabel[tier].span}` : "不保留"}
+          </span>
         </div>
       ))}
     </div>
@@ -583,12 +600,12 @@ function RetentionStrip({ settings }: { settings: ScheduleSettings }) {
   };
   return (
     <div
-      className="bk-strip-retention"
+      className={styles.bkStripRetention}
       role="img"
       aria-label={`保留${settings.retention === "tiered" ? "约" : ""} ${ages.length} 份定时快照，最早约 ${describeAge(oldest)}前`}
     >
-      <div className="bk-retention-track">
-        <span className="bk-retention-reach" style={{ left: `${position(oldest)}%` }} />
+      <div className={styles.bkRetentionTrack}>
+        <span className={styles.bkRetentionReach} style={{ left: `${position(oldest)}%` }} />
         {zones.slice(0, -1).map((zone) => (
           <b key={zone.until} style={{ left: `${position(zone.until)}%` }} />
         ))}
@@ -596,14 +613,14 @@ function RetentionStrip({ settings }: { settings: ScheduleSettings }) {
           <i key={age} style={{ left: `${position(age)}%` }} />
         ))}
       </div>
-      <div className="bk-retention-axis">
-        <span className="far">{describeAge(bounds.at(-1)!)}前</span>
+      <div className={styles.bkRetentionAxis}>
+        <span className={styles.far}>{describeAge(bounds.at(-1)!)}前</span>
         {zones.slice(0, -1).map((zone) => (
           <span key={zone.until} style={{ left: `${position(zone.until)}%` }}>
             {zone.label}
           </span>
         ))}
-        <span className="now">现在</span>
+        <span className={styles.now}>现在</span>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { errorText } from "../api/errorMessages";
 import { PersonAvatar } from "../people/PersonAvatar";
 import type { Person } from "../people/people";
+import styles from "./settings.module.css";
 
 // Building blocks shared by the settings sections: grouped cards in the style
 // of a system settings app.
@@ -12,7 +13,7 @@ export type Tone = "neutral" | "accent" | "success" | "warning" | "danger";
 
 export function PageHeader({ title, subtitle, action }: { title: string; subtitle: string; action?: ReactNode }) {
   return (
-    <header className="set-header">
+    <header className={styles.setHeader}>
       <div>
         <h2>{title}</h2>
         <p>{subtitle}</p>
@@ -36,19 +37,19 @@ export function Group({
   children: ReactNode;
 }) {
   return (
-    <div className="set-group">
-      <div className="set-group-head">
+    <div className={styles.setGroup}>
+      <div className={styles.setGroupHead}>
         <h3>{title}</h3>
         {aside && <span>{aside}</span>}
       </div>
-      <div className={`set-card ${overflowVisible ? "overflow-visible" : ""}`}>{children}</div>
-      {footnote && <p className="set-footnote">{footnote}</p>}
+      <div className={`${styles.setCard} ${overflowVisible ? styles.overflowVisible : ""}`}>{children}</div>
+      {footnote && <p className={styles.setFootnote}>{footnote}</p>}
     </div>
   );
 }
 
 export function Pill({ tone = "neutral", outline, children }: { tone?: Tone; outline?: boolean; children: ReactNode }) {
-  return <span className={`set-pill ${tone} ${outline ? "outline" : ""}`}>{children}</span>;
+  return <span className={`${styles.setPill} ${styles[tone] ?? ""} ${outline ? styles.outline : ""}`}>{children}</span>;
 }
 
 export function Banner({
@@ -62,11 +63,11 @@ export function Banner({
 }) {
   const Icon = tone === "success" ? CircleCheck : CircleAlert;
   return (
-    <div className={`set-banner ${tone}`} role={tone === "error" ? "alert" : "status"}>
+    <div className={`${styles.setBanner} ${styles[tone] ?? ""}`} role={tone === "error" ? "alert" : "status"}>
       <Icon />
       <span>{children}</span>
       {onClose && (
-        <button className="set-icon-btn" aria-label="关闭提示" onClick={onClose}>
+        <button className={styles.setIconBtn} aria-label="关闭提示" onClick={onClose}>
           <X />
         </button>
       )}
@@ -85,7 +86,7 @@ export function Callout({
 }) {
   const Icon = tone === "success" ? CircleCheck : TriangleAlert;
   return (
-    <div className={`wiz-callout ${tone}`}>
+    <div className={`${styles.wizCallout} ${styles[tone] ?? ""}`}>
       <Icon />
       <div>
         <strong>{title}</strong>
@@ -97,19 +98,19 @@ export function Callout({
 
 export function IconTile({ tone, icon: Icon, size }: { tone: string; icon: LucideIcon; size?: "lg" }) {
   return (
-    <span className={`set-tile ${tone} ${size ?? ""}`}>
+    <span className={`${styles.setTile} ${styles[tone] ?? ""} ${styles[size ?? ""] ?? ""}`}>
       <Icon />
     </span>
   );
 }
 
 export function Avatar({ who, size }: { who: Person; size?: "lg" | "xl" }) {
-  return <PersonAvatar who={who} className={`set-avatar ${size ?? ""}`} />;
+  return <PersonAvatar who={who} className={`${styles.setAvatar} ${styles[size ?? ""] ?? ""}`} />;
 }
 
 export function RefreshButton({ label, busy, onClick }: { label: string; busy: boolean; onClick: () => void }) {
   return (
-    <button className="set-icon-btn bordered" aria-label={label} disabled={busy} onClick={onClick}>
+    <button className={`${styles.setIconBtn} ${styles.bordered}`} aria-label={label} disabled={busy} onClick={onClick}>
       <RefreshCw className={busy ? "spinning" : ""} />
     </button>
   );

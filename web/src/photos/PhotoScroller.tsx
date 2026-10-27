@@ -18,6 +18,7 @@ import {
 import type { PhotoAsset } from "./api";
 import type { Box, Entry, PendingPhoto } from "./layout";
 import { fullMonthLabel } from "./model";
+import styles from "./photos.module.css";
 
 export interface ScrollerHandle {
   // beginSwipe follows a press on a tile's check across other tiles.
@@ -418,11 +419,11 @@ export function PhotoScroller({
       : undefined;
 
   return (
-    <div className="ph-scroll-frame">
+    <div className={styles.phScrollFrame}>
       <div
         ref={scrollRef}
         id={scrollId}
-        className={`ph-scroll${scrubber ? " with-scrubber" : ""}`}
+        className={`${styles.phScroll}${scrubber ? ` ${styles.withScrubber}` : ""}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -435,14 +436,14 @@ export function PhotoScroller({
           }
         }}
       >
-        <div className="ph-scroll-content" style={{ height: virtualizer.getTotalSize() }}>
+        <div className={styles.phScrollContent} style={{ height: virtualizer.getTotalSize() }}>
           {items.map((item) => {
             const entry = entries[item.index];
             if (!entry) return null;
             return (
               <div
                 key={item.key}
-                className={`ph-entry ph-entry-${entry.kind}`}
+                className={`${styles.phEntry} ph-entry-${styles[entry.kind] ?? ""}`}
                 style={{ transform: `translateY(${item.start}px)`, height: entry.size, left: inset, right: insetRight }}
               >
                 {entry.kind === "row"
@@ -455,7 +456,7 @@ export function PhotoScroller({
           })}
           {marquee && (
             <div
-              className="ph-marquee"
+              className={styles.phMarquee}
               style={{ left: marquee.x + inset, top: marquee.y, width: marquee.width, height: marquee.height }}
             />
           )}
@@ -463,7 +464,7 @@ export function PhotoScroller({
         {children}
       </div>
       {labelEntry?.label && (
-        <div className="ph-floating-date" style={{ top: topInset + 10 }} aria-hidden="true">
+        <div className={styles.phFloatingDate} style={{ top: topInset + 10 }} aria-hidden="true">
           {labelEntry.label}
         </div>
       )}
@@ -565,7 +566,7 @@ function Scrubber({
   return (
     <div
       ref={rail}
-      className={`ph-scrubber${dragging ? " dragging" : ""}`}
+      className={`${styles.phScrubber}${dragging ? ` ${styles.dragging}` : ""}`}
       style={{ top: topInset + 8, height }}
       role="scrollbar"
       aria-controls={controls}
@@ -616,16 +617,16 @@ function Scrubber({
       }}
     >
       {years.map((mark) => (
-        <span key={mark.year} className="ph-scrubber-year" style={{ top: mark.y }}>
+        <span key={mark.year} className={styles.phScrubberYear} style={{ top: mark.y }}>
           {mark.year}
         </span>
       ))}
       {months.map((month) => (
-        <i key={month.month} className="ph-scrubber-tick" style={{ top: toY(month.start) + thumb / 2 }} />
+        <i key={month.month} className={styles.phScrubberTick} style={{ top: toY(month.start) + thumb / 2 }} />
       ))}
-      <span className="ph-scrubber-thumb" style={{ top: thumbTop, height: thumb }} />
+      <span className={styles.phScrubberThumb} style={{ top: thumbTop, height: thumb }} />
       {(dragging || scrolling || pointer !== undefined) && (
-        <span className="ph-scrubber-bubble" style={{ top: bubbleTop }}>
+        <span className={styles.phScrubberBubble} style={{ top: bubbleTop }}>
           {fullMonthLabel(bubbleMonth)}
         </span>
       )}

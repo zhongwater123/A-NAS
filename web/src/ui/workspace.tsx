@@ -4,15 +4,18 @@
 import { CircleAlert, CircleCheck, FileText, Folder, X } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
-import "./workspace.css";
+import workspaceStyles from "./workspace.module.css";
 
 export function Spinner({ small }: { small?: boolean }) {
-  return <span className={`bk-spinner${small ? " small" : ""}`} aria-hidden="true" />;
+  return (
+    <span className={`${workspaceStyles.bkSpinner}${small ? ` ${workspaceStyles.small}` : ""}`} aria-hidden="true" />
+  );
 }
 
-export function EntryIcon({ kind }: { kind: "file" | "directory" }) {
+// className lets a window's own stylesheet tell the icon apart.
+export function EntryIcon({ kind, className = "" }: { kind: "file" | "directory"; className?: string }) {
   return (
-    <span className={`bk-entry-icon ${kind}`} aria-hidden="true">
+    <span className={`${workspaceStyles.bkEntryIcon} ${workspaceStyles[kind] ?? ""} ${className}`} aria-hidden="true">
       {kind === "directory" ? <Folder /> : <FileText />}
     </span>
   );
@@ -30,20 +33,23 @@ export function EmptyState({
   actions?: ReactNode;
 }) {
   return (
-    <div className="bk-empty">
-      <span className="bk-empty-art" aria-hidden="true">
+    <div className={workspaceStyles.bkEmpty}>
+      <span className={workspaceStyles.bkEmptyArt} aria-hidden="true">
         {icon}
       </span>
       <strong>{title}</strong>
       {children && <p>{children}</p>}
-      {actions && <div className="bk-empty-actions">{actions}</div>}
+      {actions && <div className={workspaceStyles.bkEmptyActions}>{actions}</div>}
     </div>
   );
 }
 
 export function Notice({ tone = "warning", children }: { tone?: "warning" | "danger" | "info"; children: ReactNode }) {
   return (
-    <div className={`bk-notice ${tone}`} role={tone === "danger" ? "alert" : "status"}>
+    <div
+      className={`${workspaceStyles.bkNotice} ${workspaceStyles[tone] ?? ""}`}
+      role={tone === "danger" ? "alert" : "status"}
+    >
       <CircleAlert />
       {children}
     </div>
@@ -78,13 +84,13 @@ export function Dialog({
     // A confirmation starts on its safe choice, never on the destructive one.
     const target =
       panel.current?.querySelector<HTMLElement>("[data-autofocus], input") ??
-      panel.current?.querySelector<HTMLElement>("footer .bk-secondary");
+      panel.current?.querySelector<HTMLElement>(`footer .${workspaceStyles.bkSecondary}`);
     target?.focus();
   }, []);
   useEffect(() => {
     // Only the topmost of stacked dialogs answers Escape.
     const onKey = (event: KeyboardEvent) => {
-      const dialogs = document.querySelectorAll(".bk-dialog");
+      const dialogs = document.querySelectorAll(`.${workspaceStyles.bkDialog}`);
       if (event.key === "Escape" && !busy && dialogs[dialogs.length - 1] === panel.current) onClose();
     };
     window.addEventListener("keydown", onKey);
@@ -92,28 +98,34 @@ export function Dialog({
   }, [busy, onClose]);
   return (
     <div
-      className="bk-backdrop"
+      className={workspaceStyles.bkBackdrop}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget && !busy) onClose();
       }}
     >
       <div
         ref={panel}
-        className={`bk-dialog${wide ? " wide" : ""}`}
+        className={`${workspaceStyles.bkDialog}${wide ? ` ${workspaceStyles.wide}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={label ?? title}
       >
         <header>
-          <span className={`bk-dialog-icon ${tone}`} aria-hidden="true">
+          <span className={`${workspaceStyles.bkDialogIcon} ${workspaceStyles[tone] ?? ""}`} aria-hidden="true">
             {icon}
           </span>
           <h3>{title}</h3>
-          <button type="button" className="bk-icon-button" aria-label="关闭" disabled={busy} onClick={onClose}>
+          <button
+            type="button"
+            className={workspaceStyles.bkIconButton}
+            aria-label="关闭"
+            disabled={busy}
+            onClick={onClose}
+          >
             <X />
           </button>
         </header>
-        <div className="bk-dialog-body">{children}</div>
+        <div className={workspaceStyles.bkDialogBody}>{children}</div>
         <footer>{footer}</footer>
       </div>
     </div>
@@ -141,9 +153,13 @@ export function useToasts() {
     [dismiss],
   );
   const element = (
-    <div className="bk-toasts" aria-live="polite">
+    <div className={workspaceStyles.bkToasts} aria-live="polite">
       {toasts.map((item) => (
-        <div key={item.id} className={`bk-toast ${item.tone}`} role={item.tone === "error" ? "alert" : "status"}>
+        <div
+          key={item.id}
+          className={`${workspaceStyles.bkToast} ${workspaceStyles[item.tone] ?? ""}`}
+          role={item.tone === "error" ? "alert" : "status"}
+        >
           {item.tone === "error" ? <CircleAlert /> : <CircleCheck />}
           <span>{item.text}</span>
           {item.action && (

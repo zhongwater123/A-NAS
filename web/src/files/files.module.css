@@ -549,16 +549,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.file-activity .loader {
+.file-activity :global(.loader) {
   width: 13px;
   height: 13px;
   flex: none;
 }
-.file-browser > .status-banner {
+.file-browser > :global(.status-banner) {
   flex: none;
   margin: 7px 10px 0;
 }
-.file-browser > .status-banner span {
+.file-browser > :global(.status-banner) span {
   min-width: 0;
   flex: 1;
 }
@@ -895,7 +895,7 @@
   margin-bottom: 5px;
   color: #93a4b7;
 }
-.file-empty-state > .loader {
+.file-empty-state > :global(.loader) {
   width: 26px;
   height: 26px;
   margin-bottom: 7px;
@@ -1229,7 +1229,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.file-inspector-preview.text > .loader {
+.file-inspector-preview.text > :global(.loader) {
   margin: 64px auto;
 }
 .file-preview-message {
@@ -1506,12 +1506,12 @@
   background: #fff;
   font-size: 10px;
 }
-.file-confirm-actions .danger-button {
+.file-confirm-actions :global(.danger-button) {
   color: #fff;
   border-color: #c84250;
   background: #c84250;
 }
-.file-rename-dialog footer .primary {
+.file-rename-dialog footer :global(.primary) {
   color: #fff;
   border-color: #2876c8;
   background: #2876c8;

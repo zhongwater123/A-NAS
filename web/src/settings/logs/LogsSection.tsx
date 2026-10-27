@@ -3,6 +3,7 @@ import { useEffect } from "react";
 
 import type { Session } from "../../api.generated";
 import { PageHeader } from "../parts";
+import styles from "../settings.module.css";
 import { ActivityLog, type LogsPreset } from "./ActivityLog";
 import { useRemembered } from "./common";
 import { SystemLog } from "./SystemLog";
@@ -34,7 +35,7 @@ export function LogsSection({ session, preset }: { session: Session; preset?: Lo
         }
       />
       {isAdmin && (
-        <div className="lg-tabs" role="tablist" aria-label="日志类型">
+        <div className={styles.lgTabs} role="tablist" aria-label="日志类型">
           {(
             [
               ["activity", "活动记录", ScrollText],
@@ -47,7 +48,7 @@ export function LogsSection({ session, preset }: { session: Session; preset?: Lo
               id={`logs-tab-${id}`}
               aria-selected={current === id}
               aria-controls={`logs-panel-${id}`}
-              className={current === id ? "active" : ""}
+              className={current === id ? styles.active : ""}
               onClick={() => setTab(id)}
             >
               <Icon />

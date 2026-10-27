@@ -14,6 +14,7 @@ import { type CSSProperties, type ReactNode, useId, useState } from "react";
 
 import { formatBytes, formatRate } from "../../lib/bytes";
 import { Banner } from "../parts";
+import styles from "../settings.module.css";
 import { type Availability, type DeviceSnapshot, type Group, readDevice, readTasks, type Task } from "./api";
 import { TaskIcon } from "./TaskIcon";
 import { type SnapshotView, useSnapshot } from "./useSnapshot";
@@ -36,7 +37,7 @@ export function TaskManagerSection() {
   const [section, setSection] = useState("设备运行状态");
   return (
     <>
-      <header className="set-header">
+      <header className={styles.setHeader}>
         <h2>任务管理器</h2>
       </header>
       <Choices label="任务管理器板块" items={["设备运行状态", "服务与进程"]} value={section} onChange={setSection} />
@@ -57,7 +58,7 @@ function Choices<T extends string>({
   onChange: (next: T) => void;
 }) {
   return (
-    <nav className="tm-choices" aria-label={label}>
+    <nav className={styles.tmChoices} aria-label={label}>
       {items.map((item) => (
         <button key={item} aria-pressed={item === value} onClick={() => onChange(item)}>
           {item}
@@ -68,13 +69,13 @@ function Choices<T extends string>({
 }
 function Pending({ error, retry }: { error: string; retry: () => void }) {
   return (
-    <div className="set-card set-state" role="status">
+    <div className={`${styles.setCard} ${styles.setState}`} role="status">
       {error ? (
         <>
           <Activity />
           <h4>暂时无法读取</h4>
           <p>{error}</p>
-          <button className="set-btn primary" onClick={retry}>
+          <button className={`${styles.setBtn} primary`} onClick={retry}>
             重试
           </button>
         </>
@@ -91,7 +92,7 @@ function ReadError({ error, retry }: { error: string; retry: () => void }) {
   return error ? (
     <Banner tone="error">
       连接中断，正在显示上次成功读取的数据{" "}
-      <button className="set-btn" onClick={retry}>
+      <button className={styles.setBtn} onClick={retry}>
         重试
       </button>
     </Banner>
@@ -99,7 +100,7 @@ function ReadError({ error, retry }: { error: string; retry: () => void }) {
 }
 function AvailabilityNote({ status }: { status: Availability }) {
   return status === "available" ? null : (
-    <p className="tm-availability" role="status">
+    <p className={styles.tmAvailability} role="status">
       {availabilityText[status]}
     </p>
   );
@@ -108,7 +109,7 @@ function DevicePanel() {
   const view = useSnapshot(readDevice);
   const [tab, setTab] = useState<DeviceTab>("总览");
   return (
-    <section className="tm-panel" aria-label="设备运行状态">
+    <section className={styles.tmPanel} aria-label="设备运行状态">
       <Choices label="设备资源" items={deviceTabs} value={tab} onChange={setTab} />
       {!view.data ? (
         <Pending {...view} />
@@ -170,7 +171,7 @@ function DeviceDetails({
   if (tab === "总览")
     return (
       <>
-        <div className="tm-grid tm-overview-grid">
+        <div className={`${styles.tmGrid} tm-overview-grid`}>
           {cpu}
           {memory}
           <Metric
@@ -204,9 +205,9 @@ function DeviceDetails({
             detail={data.disks.status === "partial" ? "数据不完整" : undefined}
           />
         </div>
-        <div className="tm-hardware-strip">
+        <div className={styles.tmHardwareStrip}>
           {(["gpu", "npu"] as const).map((kind) => (
-            <div key={kind} className="tm-hardware">
+            <div key={kind} className={styles.tmHardware}>
               <CircuitBoard />
               <div>
                 <h3>{kind.toUpperCase()}</h3>
@@ -222,7 +223,7 @@ function DeviceDetails({
           ))}
         </div>
         {(data.network.status !== "available" || data.disks.status !== "available") && (
-          <div className="tm-notes">
+          <div className={styles.tmNotes}>
             {data.network.status !== "available" && (
               <div>
                 网络
@@ -253,7 +254,7 @@ function DeviceDetails({
     return (
       <>
         {memory}
-        <div className="set-card tm-facts">
+        <div className={`${styles.setCard} ${styles.tmFacts}`}>
           <Fact label="总内存" value={size(data.memory.totalBytes)} />
           <Fact label="已使用" value={size(data.memory.usedBytes)} />
           <Fact
@@ -261,7 +262,7 @@ function DeviceDetails({
             value={data.memory.totalBytes > 0 ? size(Math.max(0, data.memory.totalBytes - data.memory.usedBytes)) : "—"}
           />
         </div>
-        <p className="set-footnote">可回收缓存计入可用内存。</p>
+        <p className={styles.setFootnote}>可回收缓存计入可用内存。</p>
       </>
     );
   if (tab === "GPU" || tab === "NPU")
@@ -271,12 +272,12 @@ function DeviceDetails({
       <>
         <AvailabilityNote status={data.network.status} />
         {data.network.status === "available" && !data.network.items.length && (
-          <p className="tm-availability">未检测到网络接口</p>
+          <p className={styles.tmAvailability}>未检测到网络接口</p>
         )}
         {data.network.items.map((item) => (
-          <section className="tm-resource" key={item.id}>
+          <section className={styles.tmResource} key={item.id}>
             <ResourceTitle title={item.name} detail={item.physical ? "物理接口" : "虚拟接口"} />
-            <div className="tm-grid">
+            <div className={styles.tmGrid}>
               <Metric
                 title="接收速度"
                 value={rate(item.receiveBytesPerSecond)}
@@ -305,11 +306,13 @@ function DeviceDetails({
   return (
     <>
       <AvailabilityNote status={data.disks.status} />
-      {data.disks.status === "available" && !data.disks.items.length && <p className="tm-availability">未检测到硬盘</p>}
+      {data.disks.status === "available" && !data.disks.items.length && (
+        <p className={styles.tmAvailability}>未检测到硬盘</p>
+      )}
       {data.disks.items.map((item) => (
-        <section className="tm-resource" key={item.id}>
+        <section className={styles.tmResource} key={item.id}>
           <ResourceTitle title={item.model || "硬盘"} detail={`${size(item.capacityBytes)} · ${item.id}`} />
-          <div className="tm-grid">
+          <div className={styles.tmGrid}>
             <Metric
               title="读取速度"
               value={rate(item.readBytesPerSecond)}
@@ -334,7 +337,7 @@ function DeviceDetails({
 }
 function ResourceTitle({ title, detail }: { title: string; detail: string }) {
   return (
-    <header className="tm-resource-title">
+    <header className={styles.tmResourceTitle}>
       <h3>{title}</h3>
       <p>{detail}</p>
     </header>
@@ -365,7 +368,7 @@ function Accelerators({
     <>
       <AvailabilityNote status={group.status} />
       {group.items.map((item) => (
-        <section className="tm-resource" key={item.id}>
+        <section className={styles.tmResource} key={item.id}>
           <ResourceTitle title={item.name} detail={item.driver ? `驱动 ${item.driver}` : "未识别驱动"} />
           <Metric
             title={`${kind.toUpperCase()} 使用率`}
@@ -377,7 +380,7 @@ function Accelerators({
             max={100}
             detail={item.usagePercent === null ? acceleratorMissing(item.usageStatus) : undefined}
           />
-          <div className="set-card tm-facts">
+          <div className={`${styles.setCard} ${styles.tmFacts}`}>
             <Fact
               label={kind === "gpu" ? "已用显存" : "已用设备内存"}
               value={
@@ -450,15 +453,15 @@ function Metric({
     .map((path) => `${path} L${path.match(/([\d.]+),[\d.]+$/)?.[1]},100 L${path.match(/^M([\d.]+)/)?.[1]},100 Z`)
     .join(" ");
   return (
-    <article className={`tm-metric tm-tone-${tone}`}>
+    <article className={`${styles.tmMetric} ${styles[`tm-tone-${tone}`] ?? ""}`}>
       <header>
         <span>
           {icon}
           {title}
         </span>
-        {max && <span className="tm-chart-scale">0–100%</span>}
+        {max && <span className={styles.tmChartScale}>0–100%</span>}
       </header>
-      <div className="tm-values">
+      <div className={styles.tmValues}>
         <div>
           {valueLabel && (
             <span>
@@ -469,7 +472,7 @@ function Metric({
           <strong>{value}</strong>
         </div>
         {secondary && (
-          <div className="tm-secondary-value">
+          <div className={styles.tmSecondaryValue}>
             <span>
               <i />
               {secondary.label}
@@ -491,9 +494,9 @@ function Metric({
             <stop offset="100%" stopColor="currentColor" stopOpacity=".01" />
           </linearGradient>
         </defs>
-        <path className="tm-gridline" d="M0 6H604 M0 53H604 M0 100H604" />
+        <path className={styles.tmGridline} d="M0 6H604 M0 53H604 M0 100H604" />
         <path d={fills} fill={`url(#${gradient})`} />
-        <path className="tm-trend" d={lines.join(" ")} />
+        <path className={styles.tmTrend} d={lines.join(" ")} />
         {points.at(-1) != null && (
           <circle
             cx="600"
@@ -502,7 +505,9 @@ function Metric({
             fill="currentColor"
           />
         )}
-        {secondary && <path className="tm-trend tm-secondary-trend" d={paths(secondary.values).join(" ")} />}
+        {secondary && (
+          <path className={`${styles.tmTrend} ${styles.tmSecondaryTrend}`} d={paths(secondary.values).join(" ")} />
+        )}
       </svg>
       <footer>
         <span>
@@ -525,14 +530,14 @@ function TasksPanel() {
   const view = useSnapshot(readTasks, 1);
   const [kind, setKind] = useState("运行中的服务");
   return (
-    <section className="tm-panel" aria-label="服务与进程">
+    <section className={styles.tmPanel} aria-label="服务与进程">
       {!view.data ? (
         <Pending {...view} />
       ) : (
         <>
           <ReadError error={view.error} retry={view.retry} />
-          <div className="tm-workload-summary">
-            <div className="tm-service-count">
+          <div className={styles.tmWorkloadSummary}>
+            <div className={styles.tmServiceCount}>
               <Activity />
               <div>
                 <strong>
@@ -545,7 +550,7 @@ function TasksPanel() {
                 <span>运行中的系统服务</span>
               </div>
             </div>
-            <div className="tm-service-count">
+            <div className={styles.tmServiceCount}>
               <Layers />
               <div>
                 <strong>
@@ -599,9 +604,9 @@ function TaskTable({
   const readable = group.status === "available" || group.status === "partial";
   return (
     <>
-      <div className="tm-toolbar">
+      <div className={styles.tmToolbar}>
         {navigation}
-        <label className="tm-search">
+        <label className={styles.tmSearch}>
           <Search />
           <input
             type="search"
@@ -616,12 +621,12 @@ function TaskTable({
       <AvailabilityNote status={group.status} />
       {(readable || rows.length > 0) && (
         <div
-          className="set-card tm-table-scroll"
+          className={`${styles.setCard} ${styles.tmTableScroll}`}
           tabIndex={0}
           role="region"
           aria-label={processes ? "进程资源用量" : "服务资源用量"}
         >
-          <table className="tm-table">
+          <table className={styles.tmTable}>
             <thead>
               <tr>
                 <th scope="col">名称</th>
@@ -652,7 +657,7 @@ function TaskTable({
               {rows.map((item) => (
                 <tr key={item.id}>
                   <td title={item.name}>
-                    <span className="tm-task-name">
+                    <span className={styles.tmTaskName}>
                       <TaskIcon task={item} icons={icons} processes={processes} />
                       {item.name}
                     </span>
@@ -661,7 +666,7 @@ function TaskTable({
                     {processes ? (
                       item.pid
                     ) : (
-                      <span className={item.state === "running" ? "tm-running" : ""}>
+                      <span className={item.state === "running" ? styles.tmRunning : ""}>
                         {item.state === "running" ? "运行中" : item.state}
                       </span>
                     )}
@@ -669,7 +674,7 @@ function TaskTable({
                   {columns.map((column) => (
                     <td key={column.key}>
                       <span
-                        className={column.key === "cpuPercent" ? "tm-cpu-cell" : ""}
+                        className={column.key === "cpuPercent" ? styles.tmCpuCell : ""}
                         style={
                           column.key === "cpuPercent"
                             ? ({ "--usage": `${Math.min(100, Math.max(0, item.cpuPercent ?? 0))}%` } as CSSProperties)
@@ -685,7 +690,7 @@ function TaskTable({
             </tbody>
           </table>
           {rows.length === 0 && (
-            <p className="tm-empty">
+            <p className={styles.tmEmpty}>
               {needle
                 ? processes
                   ? "没有匹配的进程"

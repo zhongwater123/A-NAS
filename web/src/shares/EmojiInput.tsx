@@ -2,6 +2,7 @@ import { Search, Smile, X } from "lucide-react";
 import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { allEmoji, emojiGroups } from "./emoji";
+import styles from "./shares.module.css";
 
 const recentKey = "anas:shares:recent-emoji";
 function recentEmoji(): string[] {
@@ -106,7 +107,7 @@ export function EmojiInput({
   return (
     <div
       ref={root}
-      className={`sh-input-wrap sh-input-wrap-${variant}`}
+      className={`${styles.shInputWrap} ${styles[`sh-input-wrap-${variant}`] ?? ""}`}
       onKeyDown={(event) => {
         if (open && event.key === "Escape") {
           event.preventDefault();
@@ -115,9 +116,9 @@ export function EmojiInput({
         }
       }}
     >
-      <div className={`sh-input sh-input-${variant}${disabled ? " disabled" : ""}`}>
+      <div className={`${styles.shInput} ${styles[`sh-input-${variant}`] ?? ""}${disabled ? " disabled" : ""}`}>
         {variant === "note" && (
-          <span className="sh-input-label" aria-hidden="true">
+          <span className={styles.shInputLabel} aria-hidden="true">
             {label}
             <small>可选</small>
           </span>
@@ -144,11 +145,11 @@ export function EmojiInput({
             onEnter();
           }}
         />
-        <div className="sh-input-tools">
+        <div className={styles.shInputTools}>
           <button
             ref={trigger}
             type="button"
-            className="sh-emoji-trigger"
+            className={styles.shEmojiTrigger}
             aria-label="选择表情"
             title="表情"
             aria-controls={id}
@@ -165,10 +166,10 @@ export function EmojiInput({
         </div>
       </div>
       {open && (
-        <div ref={panel} id={id} className="sh-emoji" role="dialog" aria-label="表情">
+        <div ref={panel} id={id} className={styles.shEmoji} role="dialog" aria-label="表情">
           {/* Categories, search and close share one row when the panel is
               wide enough, leaving the rest of its fixed height to the grid. */}
-          <div className="sh-emoji-head">
+          <div className={styles.shEmojiHead}>
             <nav aria-label="表情分类">
               <button
                 type="button"
@@ -198,7 +199,7 @@ export function EmojiInput({
                 </button>
               ))}
             </nav>
-            <label className="sh-emoji-search">
+            <label className={styles.shEmojiSearch}>
               <Search />
               <input
                 type="search"
@@ -214,18 +215,24 @@ export function EmojiInput({
                 onChange={(event) => setQuery(event.target.value)}
               />
             </label>
-            <button type="button" className="sh-emoji-close" aria-label="关闭表情" onClick={close}>
+            <button type="button" className={styles.shEmojiClose} aria-label="关闭表情" onClick={close}>
               <X />
             </button>
           </div>
-          <div className="sh-emoji-grid" role="group" aria-label={query ? `搜索结果 · ${filtered.length}` : category}>
+          <div
+            className={styles.shEmojiGrid}
+            role="group"
+            aria-label={query ? `搜索结果 · ${filtered.length}` : category}
+          >
             {filtered.map(({ emoji, name }) => (
               <button type="button" key={emoji} aria-label={emoji} title={name} onClick={() => insert(emoji)}>
                 {emoji}
               </button>
             ))}
             {!filtered.length && (
-              <p className="sh-emoji-empty">{query ? "没有找到表情，试试其他关键词" : "使用过的表情会出现在这里"}</p>
+              <p className={styles.shEmojiEmpty}>
+                {query ? "没有找到表情，试试其他关键词" : "使用过的表情会出现在这里"}
+              </p>
             )}
           </div>
         </div>

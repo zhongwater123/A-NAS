@@ -24,6 +24,7 @@ import {
   previewURL,
 } from "../photos/api";
 import { Banner, messageOf } from "./parts";
+import styles from "./settings.module.css";
 
 // ImageSources is where the avatar and wallpaper dialogs find a picture: this
 // computer, the user's own NAS files or their photo libraries. Spaces and
@@ -56,13 +57,13 @@ export function ImageSources({
   const [source, setSource] = useState<Source>("device");
   return (
     <>
-      <div className="avd-tabs" role="tablist" aria-label="图片来源">
+      <div className={styles.avdTabs} role="tablist" aria-label="图片来源">
         {sources.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             role="tab"
             aria-selected={source === id}
-            className={source === id ? "active" : ""}
+            className={source === id ? styles.active : ""}
             onClick={() => {
               setSource(id);
               onError("");
@@ -74,7 +75,7 @@ export function ImageSources({
         ))}
       </div>
       <div
-        className="avd-body"
+        className={styles.avdBody}
         role="tabpanel"
         aria-label={sources.find((item) => item.id === source)?.label}
         aria-busy={opening}
@@ -98,7 +99,7 @@ export function ImageSources({
         {source === "files" && <FileSource onPick={(entry) => onPick(fileVisualURL(entry, "preview"))} />}
         {source === "photos" && <PhotoSource onPick={(asset) => onPick(displayURL(asset))} />}
         {opening && (
-          <div className="avd-opening" role="status">
+          <div className={styles.avdOpening} role="status">
             <span className="loader" />
             正在打开图片…
           </div>
@@ -131,7 +132,7 @@ function DeviceSource({ onPick }: { onPick: (file: File) => void }) {
   };
   return (
     <div
-      className={`avd-drop ${over ? "over" : ""}`}
+      className={`${styles.avdDrop} ${over ? styles.over : ""}`}
       onDragOver={(event) => {
         event.preventDefault();
         setOver(true);
@@ -139,12 +140,12 @@ function DeviceSource({ onPick }: { onPick: (file: File) => void }) {
       onDragLeave={() => setOver(false)}
       onDrop={drop}
     >
-      <span className="avd-drop-art" aria-hidden="true">
+      <span className={styles.avdDropArt} aria-hidden="true">
         <ImagePlus />
       </span>
       <h4>把照片拖到这里</h4>
       <p>或者从这台电脑上选择，也可以直接粘贴截图</p>
-      <button className="set-btn primary" onClick={() => input.current?.click()}>
+      <button className={`${styles.setBtn} primary`} onClick={() => input.current?.click()}>
         选择图片…
       </button>
       <input
@@ -218,10 +219,10 @@ function FileSource({ onPick }: { onPick: (entry: FileEntry) => void }) {
     .sort(byName);
   const space = spaces?.find((item) => item.id === spaceID);
   return (
-    <div className="avd-browser">
-      <div className="avd-toolbar">
+    <div className={styles.avdBrowser}>
+      <div className={styles.avdToolbar}>
         {spaces && spaces.length > 1 && (
-          <div className="avd-segment" role="group" aria-label="空间">
+          <div className={styles.avdSegment} role="group" aria-label="空间">
             {spaces.map((item) => (
               <button
                 key={item.id}
@@ -238,7 +239,7 @@ function FileSource({ onPick }: { onPick: (entry: FileEntry) => void }) {
           </div>
         )}
         {trail.length > 0 && (
-          <nav className="avd-crumbs" aria-label="位置">
+          <nav className={styles.avdCrumbs} aria-label="位置">
             <button onClick={() => setTrail([])}>{space ? spaceName(space) : "空间"}</button>
             {trail.map((entry, index) => (
               <span key={entry.id}>
@@ -263,29 +264,29 @@ function FileSource({ onPick }: { onPick: (entry: FileEntry) => void }) {
           />
         )
       ) : (
-        <div className="avd-grid" aria-label="文件夹和图片">
+        <div className={styles.avdGrid} aria-label="文件夹和图片">
           {folders.map((entry) => (
             <button
               key={entry.id}
-              className="avd-tile folder"
+              className={`${styles.avdTile} ${styles.folder}`}
               onClick={() => setTrail([...trail, entry])}
               title={entry.name}
             >
-              <span className="avd-thumb">
+              <span className={styles.avdThumb}>
                 <Folder />
               </span>
-              <span className="avd-name">{entry.name}</span>
+              <span className={styles.avdName}>{entry.name}</span>
             </button>
           ))}
           {images.map((entry) => (
             <button
               key={entry.id}
-              className="avd-tile"
+              className={styles.avdTile}
               onClick={() => onPick(entry)}
               title={entry.name}
               aria-label={`选择 ${entry.name}`}
             >
-              <span className="avd-thumb">
+              <span className={styles.avdThumb}>
                 <img
                   src={fileVisualURL(entry, "thumbnail")}
                   alt=""
@@ -296,7 +297,7 @@ function FileSource({ onPick }: { onPick: (entry: FileEntry) => void }) {
                   }}
                 />
               </span>
-              <span className="avd-name">{entry.name}</span>
+              <span className={styles.avdName}>{entry.name}</span>
             </button>
           ))}
         </div>
@@ -372,10 +373,10 @@ function PhotoSource({ onPick }: { onPick: (asset: PhotoAsset) => void }) {
     }
   };
   return (
-    <div className="avd-browser">
+    <div className={styles.avdBrowser}>
       {libraries && libraries.length > 1 && (
-        <div className="avd-toolbar">
-          <div className="avd-segment" role="group" aria-label="图库">
+        <div className={styles.avdToolbar}>
+          <div className={styles.avdSegment} role="group" aria-label="图库">
             {libraries.map((library) => (
               <button key={library.id} aria-pressed={library.id === libraryID} onClick={() => setLibraryID(library.id)}>
                 {library.kind === "shared" ? <UsersRound /> : <Images />}
@@ -392,16 +393,16 @@ function PhotoSource({ onPick }: { onPick: (asset: PhotoAsset) => void }) {
         !error && <Empty icon={Images} title="还没有照片" text="导入相册的照片会出现在这里。" />
       ) : (
         <>
-          <div className="avd-grid photos" aria-label="照片">
+          <div className={`${styles.avdGrid} ${styles.photos}`} aria-label="照片">
             {assets.map((asset) => (
               <button
                 key={asset.id}
-                className="avd-tile photo"
+                className={`${styles.avdTile} ${styles.photo}`}
                 onClick={() => onPick(asset)}
                 title={asset.name}
                 aria-label={`选择 ${asset.name}`}
               >
-                <span className="avd-thumb">
+                <span className={styles.avdThumb}>
                   <img
                     src={previewURL(asset)}
                     alt=""
@@ -416,7 +417,7 @@ function PhotoSource({ onPick }: { onPick: (asset: PhotoAsset) => void }) {
             ))}
           </div>
           {next && (
-            <button className="set-btn avd-more" onClick={() => void loadMore()} disabled={more}>
+            <button className={`${styles.setBtn} ${styles.avdMore}`} onClick={() => void loadMore()} disabled={more}>
               {more ? "正在加载…" : "加载更多照片"}
             </button>
           )}
@@ -428,7 +429,7 @@ function PhotoSource({ onPick }: { onPick: (asset: PhotoAsset) => void }) {
 
 function Loading({ text }: { text: string }) {
   return (
-    <div className="avd-state" role="status">
+    <div className={styles.avdState} role="status">
       <span className="loader" />
       <p>{text}</p>
     </div>
@@ -437,8 +438,8 @@ function Loading({ text }: { text: string }) {
 
 function Empty({ icon: Icon, title, text }: { icon: LucideIcon; title: string; text: ReactNode }) {
   return (
-    <div className="avd-state">
-      <span className="avd-state-art">
+    <div className={styles.avdState}>
+      <span className={styles.avdStateArt}>
         <Icon />
       </span>
       <h4>{title}</h4>

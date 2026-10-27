@@ -3,7 +3,8 @@
 // through the --ph-* variables its root sets.
 import { CircleAlert, CircleCheck, X } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import "./feedback.css";
+
+import feedbackStyles from "./feedback.module.css";
 
 type DialogRequest =
   | {
@@ -69,13 +70,13 @@ function Dialog({ request, onClose }: { request: DialogRequest; onClose: (value?
   };
   return (
     <div
-      className="ph-dialog-backdrop"
+      className={feedbackStyles.phDialogBackdrop}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <form
-        className="ph-dialog"
+        className={feedbackStyles.phDialog}
         role="dialog"
         aria-modal="true"
         aria-label={request.title}
@@ -99,16 +100,16 @@ function Dialog({ request, onClose }: { request: DialogRequest; onClose: (value?
             />
           </label>
         ) : (
-          <div className="ph-dialog-message">{request.message}</div>
+          <div className={feedbackStyles.phDialogMessage}>{request.message}</div>
         )}
-        <div className="ph-dialog-actions">
+        <div className={feedbackStyles.phDialogActions}>
           <button type="button" onClick={() => onClose()}>
             取消
           </button>
           <button
             ref={button}
             type="submit"
-            className={request.kind === "confirm" && request.danger ? "danger" : "primary"}
+            className={request.kind === "confirm" && request.danger ? feedbackStyles.danger : "primary"}
             disabled={request.kind === "prompt" && !value.trim()}
           >
             {request.confirm}
@@ -159,7 +160,7 @@ export function useToasts() {
     [dismiss],
   );
   const element = (
-    <div className="ph-toasts" role="status" aria-live="polite">
+    <div className={feedbackStyles.phToasts} role="status" aria-live="polite">
       {toasts.map((item) => (
         <ToastView key={item.id} toast={item} onClose={() => dismiss(item.id)} />
       ))}
@@ -171,7 +172,7 @@ export function useToasts() {
 function ToastView({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className={`ph-toast ${toast.tone ?? ""}`}>
+    <div className={`${feedbackStyles.phToast} ${feedbackStyles[toast.tone ?? ""] ?? ""}`}>
       {toast.tone === "error" ? <CircleAlert /> : <CircleCheck />}
       <span>{toast.text}</span>
       {toast.details?.length ? (
@@ -182,7 +183,7 @@ function ToastView({ toast, onClose }: { toast: Toast; onClose: () => void }) {
       {toast.action && (
         <button
           type="button"
-          className="ph-toast-action"
+          className={feedbackStyles.phToastAction}
           onClick={() => {
             toast.action?.run();
             onClose();
@@ -191,7 +192,7 @@ function ToastView({ toast, onClose }: { toast: Toast; onClose: () => void }) {
           {toast.action.label}
         </button>
       )}
-      <button type="button" className="ph-toast-close" aria-label="关闭提示" onClick={onClose}>
+      <button type="button" className={feedbackStyles.phToastClose} aria-label="关闭提示" onClick={onClose}>
         <X />
       </button>
       {expanded && (

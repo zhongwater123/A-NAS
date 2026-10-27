@@ -1645,7 +1645,7 @@
   height: 18px;
   fill: currentColor;
 }
-.mu-play svg.lucide-play {
+.mu-play svg:global(.lucide-play) {
   margin-left: 2px;
 }
 .mu-play:hover:not(:disabled) {

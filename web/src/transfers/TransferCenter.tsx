@@ -48,8 +48,9 @@ import {
   transferItems,
   transferTotals,
 } from "./model";
+import notices from "./notices.module.css";
 import { type ConflictChoice, type Hold, transferStore, useTransfers } from "./store";
-import "./transfers.css";
+import styles from "./transfers.module.css";
 
 type View = "current" | "uploads" | "downloads" | "history";
 type HistoryFilter = "all" | "upload" | "download" | "unfinished";
@@ -111,10 +112,10 @@ export function TransferCenter({
   };
 
   return (
-    <div className="tc-shell">
-      <aside className="tc-side" aria-label="传输分类">
+    <div className={`${styles.tcShell} ${notices.tcShell}`}>
+      <aside className={styles.tcSide} aria-label="传输分类">
         <Overview totals={totals} active={current.length} />
-        <nav className="tc-nav">
+        <nav className={styles.tcNav}>
           <NavItem
             icon={<ArrowDownUp />}
             tone="all"
@@ -139,7 +140,7 @@ export function TransferCenter({
             active={view === "downloads"}
             onClick={() => setView("downloads")}
           />
-          <p className="tc-nav-label">记录</p>
+          <p className={styles.tcNavLabel}>记录</p>
           <NavItem
             icon={<History />}
             tone="history"
@@ -150,33 +151,45 @@ export function TransferCenter({
             onClick={() => setView("history")}
           />
         </nav>
-        <div className="tc-side-foot">
+        <div className={styles.tcSideFoot}>
           <Info />
           <span>关闭窗口不影响传输。刷新或关闭网页会中断本机上传，之后重新选择同一文件即可从中断处继续。</span>
         </div>
       </aside>
 
-      <main className="tc-main">
-        <header className="tc-head">
+      <main className={styles.tcMain}>
+        <header className={styles.tcHead}>
           <div>
             <h2>{titles[view][0]}</h2>
             <p>{titles[view][1]}</p>
           </div>
-          <div className="tc-head-actions">
+          <div className={styles.tcHeadActions}>
             {view !== "history" && paused && (
-              <button type="button" className="tc-button" onClick={() => transferStore.resumeAll()}>
+              <button
+                type="button"
+                className={`${styles.tcButton} ${notices.tcButton}`}
+                onClick={() => transferStore.resumeAll()}
+              >
                 <Play />
                 全部继续
               </button>
             )}
             {view !== "history" && running && (
-              <button type="button" className="tc-button" onClick={() => transferStore.pauseAll()}>
+              <button
+                type="button"
+                className={`${styles.tcButton} ${notices.tcButton}`}
+                onClick={() => transferStore.pauseAll()}
+              >
                 <Pause />
                 全部暂停
               </button>
             )}
             {view === "history" && history.length > 0 && (
-              <button type="button" className="tc-button" onClick={() => void transferStore.clearFinished()}>
+              <button
+                type="button"
+                className={`${styles.tcButton} ${notices.tcButton}`}
+                onClick={() => void transferStore.clearFinished()}
+              >
                 <Trash2 />
                 清除记录
               </button>
@@ -184,7 +197,7 @@ export function TransferCenter({
           </div>
         </header>
 
-        <div className="tc-scroll">
+        <div className={styles.tcScroll}>
           {view !== "history" && snapshot.holds.map((hold) => <HoldBanner key={hold} hold={hold} />)}
           {view !== "history" && view !== "downloads" && leftBehind.length > 0 && (
             <LeftBehind
@@ -194,20 +207,20 @@ export function TransferCenter({
             />
           )}
           {notice && (
-            <div className="tc-banner info" role="status">
-              <span className="tc-banner-icon">
+            <div className={`${styles.tcBanner} ${styles.info}`} role="status">
+              <span className={styles.tcBannerIcon}>
                 <Info />
               </span>
               <div>
                 <span>{notice}</span>
               </div>
-              <button type="button" className="tc-icon-button" aria-label="关闭提示" onClick={() => setNotice("")}>
+              <button type="button" className={styles.tcIconButton} aria-label="关闭提示" onClick={() => setNotice("")}>
                 <X />
               </button>
             </div>
           )}
           {view === "history" && history.length > 0 && (
-            <div className="tc-filters" role="radiogroup" aria-label="筛选传输记录">
+            <div className={styles.tcFilters} role="radiogroup" aria-label="筛选传输记录">
               {(
                 [
                   ["all", "全部"],
@@ -221,7 +234,7 @@ export function TransferCenter({
                   type="button"
                   role="radio"
                   aria-checked={filter === value}
-                  className={filter === value ? "active" : ""}
+                  className={filter === value ? styles.active : ""}
                   onClick={() => setFilter(value)}
                 >
                   {label}
@@ -230,7 +243,7 @@ export function TransferCenter({
             </div>
           )}
           {!snapshot.loaded && !items.length ? (
-            <div className="tc-empty">
+            <div className={styles.tcEmpty}>
               <span className="loader" />
               <strong>正在读取传输…</strong>
             </div>
@@ -239,7 +252,7 @@ export function TransferCenter({
           ) : view === "history" ? (
             <HistoryList groups={groups} onOpenLocation={onOpenLocation} />
           ) : (
-            <div className="tc-list">
+            <div className={styles.tcList}>
               {groups.map((group) =>
                 group.batch && group.items.length > 1 ? (
                   <BatchCard key={group.key} group={group} onOpenLocation={onOpenLocation} />
@@ -259,9 +272,9 @@ function Overview({ totals, active }: { totals: ReturnType<typeof transferTotals
   const percent = Math.round(totals.progress * 100);
   const speed = totals.uploadSpeed + totals.downloadSpeed;
   return (
-    <section className={`tc-overview ${active ? "busy" : ""}`} aria-label="传输概况">
+    <section className={`${styles.tcOverview} ${active ? styles.busy : ""}`} aria-label="传输概况">
       <div
-        className="tc-ring"
+        className={styles.tcRing}
         role="progressbar"
         aria-label="总体进度"
         aria-valuemin={0}
@@ -269,9 +282,9 @@ function Overview({ totals, active }: { totals: ReturnType<typeof transferTotals
         aria-valuenow={active ? percent : undefined}
       >
         <svg viewBox="0 0 44 44" aria-hidden="true">
-          <circle className="track" cx="22" cy="22" r="18" />
+          <circle className={`${styles.track} ${notices.track}`} cx="22" cy="22" r="18" />
           <circle
-            className="value"
+            className={`${styles.value} ${notices.value}`}
             cx="22"
             cy="22"
             r="18"
@@ -281,13 +294,13 @@ function Overview({ totals, active }: { totals: ReturnType<typeof transferTotals
         </svg>
         <span>{active ? `${percent}%` : <CircleCheck />}</span>
       </div>
-      <div className="tc-overview-copy">
+      <div className={styles.tcOverviewCopy}>
         <strong>{active ? `${active} 个任务` : "全部完成"}</strong>
-        <span className="up">
+        <span className={styles.up}>
           <ArrowUp />
           {formatRate(totals.uploadSpeed)}
         </span>
-        <span className="down">
+        <span className={styles.down}>
           <ArrowDown />
           {formatRate(totals.downloadSpeed)}
         </span>
@@ -324,13 +337,13 @@ function NavItem({
   return (
     <button
       type="button"
-      className={`tc-nav-item ${active ? "active" : ""}`}
+      className={`${styles.tcNavItem} ${active ? styles.active : ""}`}
       aria-current={active ? "page" : undefined}
       onClick={onClick}
     >
-      <span className={`tc-tile ${tone}`}>{icon}</span>
+      <span className={`${styles.tcTile} ${styles[tone] ?? ""}`}>{icon}</span>
       <span>{label}</span>
-      {count > 0 && <span className={`tc-count ${muted ? "muted" : ""}`}>{count}</span>}
+      {count > 0 && <span className={`${styles.tcCount} ${muted ? styles.muted : ""}`}>{count}</span>}
     </button>
   );
 }
@@ -339,14 +352,21 @@ function HoldBanner({ hold }: { hold: Hold }) {
   const icon = { offline: <WifiOff />, session: <LogIn />, volume: <HardDrive />, space: <HardDrive /> }[hold];
   const text = holdText[hold];
   return (
-    <div className={`tc-banner ${hold === "space" || hold === "volume" ? "danger" : "warning"}`} role="status">
-      <span className="tc-banner-icon">{icon}</span>
+    <div
+      className={`${styles.tcBanner} ${hold === "space" || hold === "volume" ? `${styles.danger} ${notices.danger}` : `${styles.warning} ${notices.warning}`}`}
+      role="status"
+    >
+      <span className={styles.tcBannerIcon}>{icon}</span>
       <div>
         <strong>{text.title}</strong>
         <span>{text.detail}</span>
       </div>
       {hold !== "session" && (
-        <button type="button" className="tc-button" onClick={() => transferStore.release(hold)}>
+        <button
+          type="button"
+          className={`${styles.tcButton} ${notices.tcButton}`}
+          onClick={() => transferStore.release(hold)}
+        >
           <RotateCcw />
           {hold === "space" ? "继续上传" : "立即重试"}
         </button>
@@ -360,19 +380,27 @@ function HoldBanner({ hold }: { hold: Hold }) {
 function LeftBehind({ count, ids, onResult }: { count: number; ids: string[]; onResult: (message: string) => void }) {
   const input = useRef<HTMLInputElement>(null);
   return (
-    <div className="tc-banner info" role="status">
-      <span className="tc-banner-icon">
+    <div className={`${styles.tcBanner} ${styles.info}`} role="status">
+      <span className={styles.tcBannerIcon}>
         <FolderUp />
       </span>
       <div>
         <strong>{count} 个上传在上次中断</strong>
         <span>浏览器不能自动读取原来的文件。重新选择相同的文件，上传会从中断处继续，已上传的部分不必重传。</span>
       </div>
-      <button type="button" className="tc-button primary" onClick={() => input.current?.click()}>
+      <button
+        type="button"
+        className={`${styles.tcButton} ${notices.tcButton} primary`}
+        onClick={() => input.current?.click()}
+      >
         <Play />
         选择文件继续
       </button>
-      <button type="button" className="tc-button" onClick={() => transferStore.abandon(ids)}>
+      <button
+        type="button"
+        className={`${styles.tcButton} ${notices.tcButton}`}
+        onClick={() => transferStore.abandon(ids)}
+      >
         全部放弃
       </button>
       <input
@@ -430,26 +458,26 @@ function BatchCard({
   const answer = (choice: ConflictChoice) => transferStore.resolveConflicts(batch, choice, remember);
   const local = group.items.some((item) => item.local);
   return (
-    <section className={`tc-batch ${status}`} aria-label={`上传 ${count} 个文件`}>
-      <div className="tc-batch-head">
-        <span className="tc-file-tile batch">
+    <section className={`${styles.tcBatch} ${styles[status] ?? ""}`} aria-label={`上传 ${count} 个文件`}>
+      <div className={styles.tcBatchHead}>
+        <span className={`${styles.tcFileTile} ${styles.batch}`}>
           <FolderUp />
-          <i className="up">
+          <i className={styles.up}>
             <ArrowUp />
           </i>
         </span>
-        <div className="tc-batch-copy">
-          <div className="tc-title-line">
+        <div className={styles.tcBatchCopy}>
+          <div className={styles.tcTitleLine}>
             <strong>上传 {count} 个文件</strong>
             <StatusChip status={status} />
           </div>
           {group.label ? (
-            <span className="tc-location">{group.label}</span>
+            <span className={styles.tcLocation}>{group.label}</span>
           ) : (
             <Location prefix="到" location={group.location} onOpen={onOpenLocation} />
           )}
         </div>
-        <div className="tc-actions">
+        <div className={styles.tcActions}>
           {local && moving > 0 && (
             <IconButton label="暂停这一批" onClick={() => transferStore.pauseBatch(batch)}>
               <Pause />
@@ -466,21 +494,23 @@ function BatchCard({
             </IconButton>
           )}
           <IconButton label={open ? "收起文件" : "展开文件"} onClick={() => setOpen(!open)}>
-            <ChevronDown className={open ? "flipped" : ""} />
+            <ChevronDown className={open ? styles.flipped : ""} />
           </IconButton>
         </div>
       </div>
       <Progress percent={percent} status={status} />
-      <div className="tc-meta">
+      <div className={styles.tcMeta}>
         <span>
           {formatBytes(group.transferred)} / {formatBytes(group.total)}
         </span>
         <span>
           已完成 {done}
-          {failed ? <em className="danger"> · 失败 {failed}</em> : null}
+          {failed ? <em className={`${styles.danger} ${notices.danger}`}> · 失败 {failed}</em> : null}
           {count - done - failed > 0 ? ` · 剩余 ${count - done - failed}` : ""}
         </span>
-        {group.speed > 0 && <span className="tc-speed">{speedText(group.speed, group.total - group.transferred)}</span>}
+        {group.speed > 0 && (
+          <span className={styles.tcSpeed}>{speedText(group.speed, group.total - group.transferred)}</span>
+        )}
       </div>
       {conflicts.length > 0 && (
         <ConflictBar
@@ -491,19 +521,19 @@ function BatchCard({
             .join("、")}${conflicts.length > 3 ? " 等" : ""}`}
           onAnswer={answer}
         >
-          <label className="tc-remember">
+          <label className={styles.tcRemember}>
             <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
             这一批之后的同名文件也这样处理
           </label>
         </ConflictBar>
       )}
       {open && (
-        <div className="tc-batch-files">
+        <div className={styles.tcBatchFiles}>
           {sorted.slice(0, limit).map((item) => (
             <ItemRow key={item.id} item={item} compact onOpenLocation={onOpenLocation} />
           ))}
           {sorted.length > limit && (
-            <button type="button" className="tc-more" onClick={() => setLimit(limit + visibleFiles)}>
+            <button type="button" className={styles.tcMore} onClick={() => setLimit(limit + visibleFiles)}>
               再显示 {Math.min(visibleFiles, sorted.length - limit)} 个（共 {sorted.length} 个）
             </button>
           )}
@@ -529,18 +559,18 @@ function ItemRow({
       : 0;
   return (
     <article
-      className={`tc-row ${item.status} ${compact ? "compact" : ""}`}
+      className={`${styles.tcRow} ${styles[item.status] ?? ""} ${compact ? styles.compact : ""}`}
       aria-label={`${item.direction === "upload" ? "上传" : "下载"} ${item.name}`}
     >
       <FileTile item={item} />
-      <div className="tc-row-body">
-        <div className="tc-title-line">
+      <div className={styles.tcRowBody}>
+        <div className={styles.tcTitleLine}>
           <strong title={item.name}>{item.name}</strong>
           {item.status !== "running" && <StatusChip status={item.status} />}
         </div>
         {!compact &&
           (item.label ? (
-            <span className="tc-location">{item.label}</span>
+            <span className={styles.tcLocation}>{item.label}</span>
           ) : (
             <Location
               prefix={item.direction === "upload" ? "到" : "来自"}
@@ -550,7 +580,7 @@ function ItemRow({
             />
           ))}
         <Progress percent={percent} status={item.status} />
-        <div className="tc-meta">
+        <div className={styles.tcMeta}>
           <span>
             {item.status === "completed"
               ? formatBytes(item.total)
@@ -559,7 +589,7 @@ function ItemRow({
           <RowDetail item={item} />
         </div>
       </div>
-      <div className="tc-actions">
+      <div className={styles.tcActions}>
         <RowActions item={item} />
       </div>
       {item.status === "conflict" && item.local && !compact && (
@@ -585,22 +615,26 @@ function ConflictBar({
   children?: ReactNode;
 }) {
   return (
-    <div className="tc-conflict" role="group" aria-label="同名文件">
+    <div className={styles.tcConflict} role="group" aria-label="同名文件">
       <CircleAlert />
       <div>
         <strong>{title}</strong>
         <span>{detail}</span>
       </div>
-      <div className="tc-conflict-actions">
-        <button type="button" className="tc-button" onClick={() => onAnswer("skip")}>
+      <div className={styles.tcConflictActions}>
+        <button type="button" className={`${styles.tcButton} ${notices.tcButton}`} onClick={() => onAnswer("skip")}>
           <SkipForward />
           跳过
         </button>
-        <button type="button" className="tc-button" onClick={() => onAnswer("rename")}>
+        <button type="button" className={`${styles.tcButton} ${notices.tcButton}`} onClick={() => onAnswer("rename")}>
           <CopyPlus />
           保留两者
         </button>
-        <button type="button" className="tc-button warning" onClick={() => onAnswer("replace")}>
+        <button
+          type="button"
+          className={`${styles.tcButton} ${notices.tcButton} ${styles.warning} ${notices.warning}`}
+          onClick={() => onAnswer("replace")}
+        >
           <Replace />
           替换
         </button>
@@ -614,22 +648,28 @@ function RowDetail({ item }: { item: TransferItem }) {
   if (item.status === "running") {
     return (
       <>
-        <span className="tc-speed">
+        <span className={styles.tcSpeed}>
           {item.speed > 0 ? speedText(item.speed, item.total - item.transferred) : "正在连接…"}
         </span>
-        {item.restarted && <span className="warning">NAS 丢失了进度，已从头重新上传</span>}
+        {item.restarted && (
+          <span className={`${styles.warning} ${notices.warning}`}>NAS 丢失了进度，已从头重新上传</span>
+        )}
       </>
     );
   }
   if (item.failure && (item.status === "failed" || item.status === "canceled"))
-    return <span className="danger">{item.failure}</span>;
-  if (item.status === "waiting" && item.hold) return <span className="warning">{holdText[item.hold].title}</span>;
-  if (item.status === "conflict") return <span className="warning">目标位置已有同名文件</span>;
+    return <span className={`${styles.danger} ${notices.danger}`}>{item.failure}</span>;
+  if (item.status === "waiting" && item.hold)
+    return <span className={`${styles.warning} ${notices.warning}`}>{holdText[item.hold].title}</span>;
+  if (item.status === "conflict")
+    return <span className={`${styles.warning} ${notices.warning}`}>目标位置已有同名文件</span>;
   if (item.status === "interrupted" && item.direction === "upload" && !item.local)
-    return <span className="warning">在其他页面中断，可选择文件继续</span>;
-  if (item.status === "interrupted") return <span className="warning">连接中断，浏览器可继续下载</span>;
+    return <span className={`${styles.warning} ${notices.warning}`}>在其他页面中断，可选择文件继续</span>;
+  if (item.status === "interrupted")
+    return <span className={`${styles.warning} ${notices.warning}`}>连接中断，浏览器可继续下载</span>;
   if (item.status === "pending") return <span>等待浏览器开始下载</span>;
-  if (item.restarted && item.status !== "completed") return <span className="warning">NAS 丢失了进度，已从头开始</span>;
+  if (item.restarted && item.status !== "completed")
+    return <span className={`${styles.warning} ${notices.warning}`}>NAS 丢失了进度，已从头开始</span>;
   return null;
 }
 
@@ -709,11 +749,11 @@ function HistoryList({
     days.set(label, [...(days.get(label) ?? []), group]);
   }
   return (
-    <div className="tc-history">
+    <div className={styles.tcHistory}>
       {[...days].map(([day, entries]) => (
         <section key={day} aria-label={day}>
           <h3>{day}</h3>
-          <div className="tc-history-card">
+          <div className={styles.tcHistoryCard}>
             {entries.map((group) =>
               group.batch && group.items.length > 1 ? (
                 <HistoryBatch key={group.key} group={group} onOpenLocation={onOpenLocation} />
@@ -741,16 +781,16 @@ function HistoryRow({
   if (item.skipped) notes.push(`${item.skipped} 个文件无法读取，未打包`);
   if (item.failure && item.status !== "completed") notes.push(item.failure);
   return (
-    <div className={`tc-history-row ${item.status}`}>
+    <div className={`${styles.tcHistoryRow} ${styles[item.status] ?? ""}`}>
       <FileTile item={item} />
-      <div className="tc-row-body">
-        <div className="tc-title-line">
+      <div className={styles.tcRowBody}>
+        <div className={styles.tcTitleLine}>
           <strong title={item.name}>{item.name}</strong>
           {item.status !== "completed" && <StatusChip status={item.status} />}
         </div>
-        <div className="tc-history-sub">
+        <div className={styles.tcHistorySub}>
           {item.label ? (
-            <span className="tc-location">{item.label}</span>
+            <span className={styles.tcLocation}>{item.label}</span>
           ) : (
             <Location
               prefix={item.direction === "upload" ? "上传到" : "下载自"}
@@ -759,12 +799,16 @@ function HistoryRow({
               onOpen={onOpenLocation}
             />
           )}
-          {notes.length > 0 && <span className={item.status === "completed" ? "" : "danger"}>{notes.join(" · ")}</span>}
+          {notes.length > 0 && (
+            <span className={item.status === "completed" ? "" : `${styles.danger} ${notices.danger}`}>
+              {notes.join(" · ")}
+            </span>
+          )}
         </div>
       </div>
-      <span className="tc-history-size">{formatBytes(item.total)}</span>
+      <span className={styles.tcHistorySize}>{formatBytes(item.total)}</span>
       <time>{formatClock(item.finishedAt ?? item.createdAt)}</time>
-      <div className="tc-actions">
+      <div className={styles.tcActions}>
         <RowActions item={item} />
       </div>
     </div>
@@ -783,36 +827,36 @@ function HistoryBatch({
   const other = group.items.length - done;
   return (
     <div className="tc-history-batch">
-      <div className={`tc-history-row ${other ? "failed" : "completed"}`}>
-        <span className="tc-file-tile batch">
+      <div className={`${styles.tcHistoryRow} ${other ? `${styles.failed} ${notices.failed}` : styles.completed}`}>
+        <span className={`${styles.tcFileTile} ${styles.batch}`}>
           <FolderUp />
-          <i className="up">
+          <i className={styles.up}>
             <ArrowUp />
           </i>
         </span>
-        <div className="tc-row-body">
-          <div className="tc-title-line">
+        <div className={styles.tcRowBody}>
+          <div className={styles.tcTitleLine}>
             <strong>上传 {group.items.length} 个文件</strong>
             {other > 0 && <StatusChip status="failed" label={`${other} 个未完成`} />}
           </div>
-          <div className="tc-history-sub">
+          <div className={styles.tcHistorySub}>
             {group.label ? (
-              <span className="tc-location">{group.label}</span>
+              <span className={styles.tcLocation}>{group.label}</span>
             ) : (
               <Location prefix="上传到" location={group.location} onOpen={onOpenLocation} />
             )}
           </div>
         </div>
-        <span className="tc-history-size">{formatBytes(group.total)}</span>
+        <span className={styles.tcHistorySize}>{formatBytes(group.total)}</span>
         <time>{formatClock(group.finishedAt ?? group.createdAt)}</time>
-        <div className="tc-actions">
+        <div className={styles.tcActions}>
           <IconButton label={open ? "收起文件" : "展开文件"} onClick={() => setOpen(!open)}>
-            <ChevronDown className={open ? "flipped" : ""} />
+            <ChevronDown className={open ? styles.flipped : ""} />
           </IconButton>
         </div>
       </div>
       {open && (
-        <div className="tc-history-children">
+        <div className={styles.tcHistoryChildren}>
           {group.items.map((item) => (
             <HistoryRow key={item.id} item={item} onOpenLocation={onOpenLocation} />
           ))}
@@ -838,7 +882,7 @@ function Location({
   return (
     <button
       type="button"
-      className="tc-location link"
+      className={`${styles.tcLocation} ${styles.link}`}
       title={`在文件管理中打开：${parts.join(" / ")}`}
       onClick={() => onOpen(location)}
     >
@@ -866,9 +910,9 @@ function FileTile({ item }: { item: TransferItem }) {
               ? [FileText, "document"]
               : [File, "other"];
   return (
-    <span className={`tc-file-tile ${tone}`}>
+    <span className={`${styles.tcFileTile} ${styles[tone] ?? ""}`}>
       <Icon />
-      <i className={item.direction === "upload" ? "up" : "down"}>
+      <i className={item.direction === "upload" ? styles.up : styles.down}>
         {item.direction === "upload" ? <ArrowUp /> : <ArrowDown />}
       </i>
     </span>
@@ -878,7 +922,7 @@ function FileTile({ item }: { item: TransferItem }) {
 function Progress({ percent, status }: { percent: number; status: ItemStatus }) {
   return (
     <div
-      className={`tc-progress ${status}`}
+      className={`${styles.tcProgress} ${styles[status] ?? ""}`}
       role="progressbar"
       aria-valuemin={0}
       aria-valuemax={100}
@@ -890,7 +934,7 @@ function Progress({ percent, status }: { percent: number; status: ItemStatus }) 
 }
 
 function StatusChip({ status, label }: { status: ItemStatus; label?: string }) {
-  return <span className={`tc-chip ${status}`}>{label ?? statusText[status]}</span>;
+  return <span className={`${styles.tcChip} ${styles[status] ?? ""}`}>{label ?? statusText[status]}</span>;
 }
 
 function IconButton({
@@ -907,7 +951,7 @@ function IconButton({
   return (
     <button
       type="button"
-      className={`tc-icon-button ${danger ? "danger" : ""}`}
+      className={`${styles.tcIconButton} ${danger ? `${styles.danger} ${notices.danger}` : ""}`}
       aria-label={label}
       title={label}
       onClick={onClick}
@@ -920,8 +964,8 @@ function IconButton({
 function Empty({ view, onOpenFiles }: { view: View; onOpenFiles: () => void }) {
   const history = view === "history";
   return (
-    <div className="tc-empty">
-      <span className="tc-empty-art">{history ? <History /> : <ArrowDownUp />}</span>
+    <div className={styles.tcEmpty}>
+      <span className={styles.tcEmptyArt}>{history ? <History /> : <ArrowDownUp />}</span>
       <strong>
         {history
           ? "还没有传输记录"
@@ -937,7 +981,7 @@ function Empty({ view, onOpenFiles }: { view: View; onOpenFiles: () => void }) {
           : "在文件管理中上传文件或文件夹、下载文件，进度和异常都会显示在这里。"}
       </span>
       {!history && (
-        <button type="button" className="tc-button primary" onClick={onOpenFiles}>
+        <button type="button" className={`${styles.tcButton} ${notices.tcButton} primary`} onClick={onOpenFiles}>
           <FolderOpen />
           打开文件管理
         </button>

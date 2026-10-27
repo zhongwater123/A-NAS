@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useEffectEvent, useRef } from "react";
 
+import styles from "./settings.module.css";
 import { exitCodeFromReason, resizeMessage, SessionStatus, terminalSessionURL } from "./terminal";
 
 const theme = {
@@ -98,5 +99,5 @@ export default function XtermSession({
     if (active) focusRef.current?.();
   }, [active]);
 
-  return <div className="xterm-host" ref={hostRef} />;
+  return <div className={styles.xtermHost} ref={hostRef} />;
 }

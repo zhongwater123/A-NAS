@@ -79,6 +79,7 @@ import {
 } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
+import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { formatBytes } from "../lib/bytes";
 import { copyText } from "../lib/clipboard";
 import { relativeTime as formatRelativeTime } from "../lib/time";
@@ -96,6 +97,7 @@ import {
   listSessions,
   renameSession,
 } from "./api";
+import styles from "./assistant.module.css";
 import { chatMessageText } from "./hermes/lib/chat-messages/parts";
 import { withUniqueToolCallIdsWithinMessage } from "./hermes/lib/chat-messages/tool-parts";
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
@@ -107,7 +109,6 @@ import { readTaskNotices, taskOfRun, useTaskNotices } from "./taskNotices";
 import { useAssistantGateway } from "./useAssistantGateway";
 import { useAssistantThread } from "./useAssistantThread";
 import { ControlError, type Danger, WebosController } from "./webosControl";
-import "./assistant.css";
 
 const SUGGESTIONS = [
   "总结一下共享空间里有哪些文件",
@@ -266,7 +267,7 @@ export function AssistantPanel({
   const controller = useRef<WebosController>(undefined);
   useEffect(() => {
     const installed = new WebosController({
-      exclude: (element) => Boolean(element.closest(".app-window-assistant, .vt-toasts, .vnas-control-ring")),
+      exclude: (element) => Boolean(element.closest(`[${WINDOW_ID}="assistant"], [data-vnas-overlay]`)),
       confirm: (danger) => {
         const shown = cards.current.then(
           () =>
@@ -481,7 +482,7 @@ export function AssistantPanel({
     <>
       {controlAsk && <ControlCard ask={controlAsk} />}
       {here.length > 0 && (
-        <section className="as-changes" aria-label="本对话中等你确认或回答的事">
+        <section className={styles.asChanges} aria-label="本对话中等你确认或回答的事">
           {here.map((approval) =>
             approval.kind === "command" ? (
               <CommandCard
@@ -511,11 +512,11 @@ export function AssistantPanel({
 
   return (
     <PhotoOpener.Provider value={onShowPhoto}>
-      <div className="as-app">
-        <aside className="as-side">
+      <div className={styles.asApp}>
+        <aside className={styles.asSide}>
           <button
             type="button"
-            className="as-new"
+            className={styles.asNew}
             onClick={() => {
               setActiveId(undefined);
               setView("chat");
@@ -526,7 +527,7 @@ export function AssistantPanel({
           </button>
           <button
             type="button"
-            className={`as-nav${view === "memory" ? " active" : ""}`}
+            className={`${styles.asNav}${view === "memory" ? ` ${styles.active}` : ""}`}
             aria-pressed={view === "memory"}
             onClick={() => setView("memory")}
           >
@@ -535,25 +536,25 @@ export function AssistantPanel({
           </button>
           <button
             type="button"
-            className={`as-nav${view === "tasks" ? " active" : ""}`}
+            className={`${styles.asNav}${view === "tasks" ? ` ${styles.active}` : ""}`}
             aria-pressed={view === "tasks"}
             onClick={() => setView("tasks")}
           >
             <CalendarClock />
             定时任务
             {unread > 0 ? (
-              <span className="as-nav-count" title={`${unread} 个任务有新结果`}>
+              <span className={styles.asNavCount} title={`${unread} 个任务有新结果`}>
                 {unread}
               </span>
             ) : (
               <small>按时替你做事</small>
             )}
           </button>
-          <div className="as-side-label">
+          <div className={styles.asSideLabel}>
             <History />
             对话
           </div>
-          <ul className="as-sessions">
+          <ul className={styles.asSessions}>
             {sessions.map((session) => (
               <SessionRow
                 key={session.id}
@@ -570,7 +571,7 @@ export function AssistantPanel({
               />
             ))}
             {!sessions.length && (
-              <li className="as-sessions-empty">
+              <li className={styles.asSessionsEmpty}>
                 {sessionsLoaded ? (
                   "还没有对话"
                 ) : (
@@ -585,10 +586,15 @@ export function AssistantPanel({
           <TrustNote />
         </aside>
 
-        <main className="as-main">
-          <header className="as-head">
+        <main className={styles.asMain}>
+          <header className={styles.asHead}>
             {view === "chat" && runOpen && (
-              <button type="button" className="as-head-back" onClick={() => setView("tasks")} aria-label="回到定时任务">
+              <button
+                type="button"
+                className={styles.asHeadBack}
+                onClick={() => setView("tasks")}
+                aria-label="回到定时任务"
+              >
                 <ChevronLeft />
                 <CalendarClock />
               </button>
@@ -601,13 +607,13 @@ export function AssistantPanel({
                   : active?.title || (runOpen ? run?.title : activeId ? "新对话" : "开始一个对话")}
             </h2>
             {thread.running && (
-              <span className="as-working">
+              <span className={styles.asWorking}>
                 <LoaderCircle />
                 正在处理
               </span>
             )}
             {!gateway.ready && !unreachable && (
-              <span className="as-working">
+              <span className={styles.asWorking}>
                 <LoaderCircle />
                 正在连接 VNAS
               </span>
@@ -640,8 +646,8 @@ export function AssistantPanel({
             resetKeys={[thread.messages]}
             onError={(error, info) => console.error("VNAS conversation render failed", error, info.componentStack)}
             fallback={
-              <div className="as-thread" hidden={view !== "chat"}>
-                <div className="as-thread-failed" role="alert">
+              <div className={styles.asThread} hidden={view !== "chat"}>
+                <div className={styles.asThreadFailed} role="alert">
                   <CircleAlert />
                   <strong>这个对话暂时无法显示</strong>
                   <p>VNAS 仍在后台处理，等你确认的事照常显示在下方。可以打开其他对话，或开始新对话。</p>
@@ -655,12 +661,12 @@ export function AssistantPanel({
             }
           >
             <ConversationRuntime adapter={adapter}>
-              <ThreadPrimitive.Root className="as-thread" hidden={view !== "chat"}>
-                <ThreadPrimitive.Viewport className="as-viewport" autoScroll={Boolean(activeId)}>
+              <ThreadPrimitive.Root className={styles.asThread} hidden={view !== "chat"}>
+                <ThreadPrimitive.Viewport className={styles.asViewport} autoScroll={Boolean(activeId)}>
                   {!activeId && !thread.messages.length ? (
                     <Welcome username={username} onPick={(text) => void send(text)} />
                   ) : thread.loading && !thread.messages.length ? (
-                    <div className="as-loading">
+                    <div className={styles.asLoading}>
                       <LoaderCircle />
                       正在打开对话…
                     </div>
@@ -668,7 +674,7 @@ export function AssistantPanel({
                     <ThreadPrimitive.Messages components={THREAD_COMPONENTS} />
                   )}
                   {(thread.error || notice || unreachable) && (
-                    <div className="as-error" role="alert">
+                    <div className={styles.asError} role="alert">
                       <CircleAlert />
                       <span>{thread.error || notice || unreachable}</span>
                       {notice && (
@@ -679,8 +685,8 @@ export function AssistantPanel({
                     </div>
                   )}
                   {thread.liveId && reviews.get(thread.liveId) && (
-                    <div className="as-review" role="status">
-                      <div className="as-review-note">
+                    <div className={styles.asReview} role="status">
+                      <div className={styles.asReviewNote}>
                         <Brain />
                         <span>{reviews.get(thread.liveId)}</span>
                         <button type="button" onClick={() => setView("memory")}>
@@ -689,25 +695,25 @@ export function AssistantPanel({
                       </div>
                     </div>
                   )}
-                  <div className="as-viewport-spacer" />
+                  <div className={styles.asViewportSpacer} />
                 </ThreadPrimitive.Viewport>
 
                 {dock}
 
-                <ComposerPrimitive.Root className="as-composer">
+                <ComposerPrimitive.Root className={styles.asComposer}>
                   <ComposerPrimitive.Input
-                    className="as-input"
+                    className={styles.asInput}
                     placeholder="让 VNAS 帮你找文件、整理内容，或修改你的文件…"
                     rows={1}
                     autoFocus
                     submitOnEnter
                   />
                   {thread.running ? (
-                    <ComposerPrimitive.Cancel className="as-send stop" aria-label="停止">
+                    <ComposerPrimitive.Cancel className={`${styles.asSend} ${styles.stop}`} aria-label="停止">
                       <Square />
                     </ComposerPrimitive.Cancel>
                   ) : (
-                    <ComposerPrimitive.Send className="as-send" aria-label="发送">
+                    <ComposerPrimitive.Send className={styles.asSend} aria-label="发送">
                       <ArrowUp />
                     </ComposerPrimitive.Send>
                   )}
@@ -805,10 +811,14 @@ function ControlCard({ ask }: { ask: { danger: Danger; until: number; answer(all
     return () => window.clearInterval(timer);
   }, [ask.until]);
   return (
-    <section className="as-changes" aria-label="VNAS 想在桌面上执行的操作">
-      <article className="as-change as-command awaiting" role="alertdialog" aria-label={`VNAS 想${ask.danger.what}`}>
+    <section className={styles.asChanges} aria-label="VNAS 想在桌面上执行的操作">
+      <article
+        className={`${styles.asChange} ${styles.asCommand} awaiting`}
+        role="alertdialog"
+        aria-label={`VNAS 想${ask.danger.what}`}
+      >
         <header>
-          <span className="as-change-mark">
+          <span className={styles.asChangeMark}>
             <MousePointerClick />
           </span>
           <div>
@@ -819,10 +829,10 @@ function ControlCard({ ask }: { ask: { danger: Danger; until: number; answer(all
           </div>
         </header>
         <footer>
-          <button type="button" className="as-reject" onClick={() => ask.answer(false)}>
+          <button type="button" className={styles.asReject} onClick={() => ask.answer(false)}>
             不允许
           </button>
-          <button type="button" className="as-confirm" onClick={() => ask.answer(true)}>
+          <button type="button" className={styles.asConfirm} onClick={() => ask.answer(true)}>
             <Check />
             允许
           </button>
@@ -856,10 +866,10 @@ function SessionRow({
     if (draft.trim() && draft.trim() !== session.title) onRename(draft.trim());
   };
   return (
-    <li className={`as-session${active ? " active" : ""}`}>
+    <li className={`${styles.asSession}${active ? ` ${styles.active}` : ""}`}>
       {editing ? (
         <input
-          className="as-session-edit"
+          className={styles.asSessionEdit}
           value={draft}
           autoFocus
           maxLength={100}
@@ -874,15 +884,15 @@ function SessionRow({
           }}
         />
       ) : (
-        <button type="button" className="as-session-open" onClick={onOpen}>
-          <span className="as-session-line">
+        <button type="button" className={styles.asSessionOpen} onClick={onOpen}>
+          <span className={styles.asSessionLine}>
             <strong>{session.title || session.preview || "新对话"}</strong>
             {waiting > 0 ? (
-              <span className="as-session-badge" title={`${waiting} 项更改等你确认`}>
+              <span className={styles.asSessionBadge} title={`${waiting} 项更改等你确认`}>
                 {waiting}
               </span>
             ) : (
-              running && <LoaderCircle className="as-session-running" aria-label="正在回答" />
+              running && <LoaderCircle className={styles.asSessionRunning} aria-label="正在回答" />
             )}
           </span>
           <small>
@@ -892,7 +902,7 @@ function SessionRow({
         </button>
       )}
       {!editing && (
-        <span className="as-session-actions">
+        <span className={styles.asSessionActions}>
           <button
             type="button"
             aria-label="改名"
@@ -954,24 +964,24 @@ function TrustNote() {
     (document.activeElement as HTMLElement | null)?.blur();
   };
   return (
-    <div ref={root} className={`as-trust${pinned ? " open" : ""}`} onKeyDown={escape}>
+    <div ref={root} className={`${styles.asTrust}${pinned ? ` ${styles.open}` : ""}`} onKeyDown={escape}>
       <button
         type="button"
-        className="as-trust-button"
+        className={styles.asTrustButton}
         aria-describedby={id}
         aria-expanded={pinned}
         onClick={() => setPinned((open) => !open)}
       >
         <ShieldCheck />
         <span>你的私人 Agent</span>
-        <Info className="as-trust-hint" />
+        <Info className={styles.asTrustHint} />
       </button>
-      <div id={id} role="tooltip" className="as-trust-pop">
+      <div id={id} role="tooltip" className={styles.asTrustPop}>
         <strong>为什么可以放心用</strong>
         <ul>
           {TRUST.map((item) => (
             <li key={item.title}>
-              <span className="as-trust-icon">{item.icon}</span>
+              <span className={styles.asTrustIcon}>{item.icon}</span>
               <div>
                 <b>{item.title}</b>
                 <p>{item.text}</p>
@@ -986,13 +996,13 @@ function TrustNote() {
 
 function Welcome({ username, onPick }: { username: string; onPick(text: string): void }) {
   return (
-    <div className="as-welcome">
-      <span className="as-welcome-mark">
+    <div className={styles.asWelcome}>
+      <span className={styles.asWelcomeMark}>
         <AssistantGlyph />
       </span>
       <h3>你好，{username}</h3>
       <p>我是你的私人 NAS 助理，需要我做什么？</p>
-      <div className="as-suggestions">
+      <div className={styles.asSuggestions}>
         {SUGGESTIONS.map((text) => (
           <button type="button" key={text} onClick={() => onPick(text)}>
             {text}
@@ -1008,8 +1018,8 @@ function UserMessage() {
   const scheduled = useAuiState((state) => Boolean(state.message.metadata?.custom?.scheduled));
   if (scheduled) return <ScheduledStart />;
   return (
-    <MessagePrimitive.Root className="as-msg user">
-      <div className="as-bubble">
+    <MessagePrimitive.Root className={`${styles.asMsg} ${styles.user}`}>
+      <div className={styles.asBubble}>
         <MessagePrimitive.Parts />
       </div>
     </MessagePrimitive.Root>
@@ -1021,16 +1031,16 @@ function UserMessage() {
 function ScheduledStart() {
   const [open, setOpen] = useState(false);
   return (
-    <MessagePrimitive.Root className="as-msg scheduled">
-      <div className="as-scheduled">
+    <MessagePrimitive.Root className={`${styles.asMsg} ${styles.scheduled}`}>
+      <div className={styles.asScheduled}>
         <button type="button" aria-expanded={open} onClick={() => setOpen((shown) => !shown)}>
           <CalendarClock />
           <span>定时任务按计划运行</span>
           <small>{open ? "收起" : "要做的事"}</small>
-          <ChevronDown className={open ? "open" : undefined} />
+          <ChevronDown className={open ? styles.open : undefined} />
         </button>
         {open && (
-          <div className="as-scheduled-prompt">
+          <div className={styles.asScheduledPrompt}>
             <MessagePrimitive.Parts />
           </div>
         )}
@@ -1043,8 +1053,8 @@ function ScheduledStart() {
 // not complete: a quiet line, not VNAS speaking.
 function SystemNotice() {
   return (
-    <MessagePrimitive.Root className="as-msg notice">
-      <div className="as-notice">
+    <MessagePrimitive.Root className={`${styles.asMsg} ${styles.notice}`}>
+      <div className={styles.asNotice}>
         <Info />
         <div>
           <MessagePrimitive.Parts />
@@ -1056,11 +1066,11 @@ function SystemNotice() {
 
 function AssistantMessage() {
   return (
-    <MessagePrimitive.Root className="as-msg assistant">
-      <span className="as-avatar">
+    <MessagePrimitive.Root className={`${styles.asMsg} assistant`}>
+      <span className={styles.asAvatar}>
         <AssistantGlyph />
       </span>
-      <div className="as-answer">
+      <div className={styles.asAnswer}>
         <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
         <AnswerPhotos />
         <Outcome />
@@ -1076,14 +1086,14 @@ function Outcome() {
   );
   if (reason === "cancelled")
     return (
-      <p className="as-outcome stopped">
+      <p className={`${styles.asOutcome} ${styles.stopped}`}>
         <Square />
         已停止
       </p>
     );
   if (reason === "error")
     return (
-      <p className="as-outcome failed">
+      <p className={`${styles.asOutcome} ${styles.failed}`}>
         <CircleAlert />
         这次回答没有完成
       </p>
@@ -1095,7 +1105,7 @@ function Outcome() {
 // Tailwind, which A-NAS does not load, so they are off; code blocks get the
 // window's own header with a copy button instead.
 export const MarkdownText = () => (
-  <StreamdownTextPrimitive className="as-markdown" components={MARKDOWN_COMPONENTS} controls={false} />
+  <StreamdownTextPrimitive className={styles.asMarkdown} components={MARKDOWN_COMPONENTS} controls={false} />
 );
 
 // A code block's header: its language, and a copy that works on the LAN's
@@ -1111,11 +1121,11 @@ function CodeHeader({ language, code }: { [K in keyof CodeHeaderProps]?: unknown
   }, [copied]);
   const text = typeof code === "string" ? code.replace(/\n$/, "") : "";
   return (
-    <div className="as-code-head">
+    <div className={styles.asCodeHead}>
       <span>{typeof language === "string" && language ? language : "文本"}</span>
       <button
         type="button"
-        className={copied ? "copied" : undefined}
+        className={copied ? styles.copied : undefined}
         aria-label={copied ? "已复制" : "复制代码"}
         onClick={() => setCopied(copyText(text))}
       >
@@ -1139,7 +1149,13 @@ function MarkdownLink({ href, children, node: _node, ...rest }: ComponentPropsWi
       </a>
     );
   return (
-    <button type="button" className="as-photo-ref" title="在相册中打开" disabled={!open} onClick={() => open?.(photo)}>
+    <button
+      type="button"
+      className={styles.asPhotoRef}
+      title="在相册中打开"
+      disabled={!open}
+      onClick={() => open?.(photo)}
+    >
       <ImageIcon />
       {children}
     </button>
@@ -1155,7 +1171,7 @@ function MarkdownImage({ src, alt, node: _node, ...rest }: ComponentPropsWithout
   if (typeof src === "string" && onDevice(src)) return <img src={src} alt={alt} {...rest} />;
   return (
     <a
-      className="as-outside-image"
+      className={styles.asOutsideImage}
       href={typeof src === "string" ? src : undefined}
       target="_blank"
       rel="noreferrer"
@@ -1190,12 +1206,12 @@ function AnswerPhotos() {
   if (!photos.length) return null;
   const shown = photos.slice(0, ANSWER_PHOTOS);
   return (
-    <div className={`as-gallery${shown.length === 1 ? " one" : ""}`}>
+    <div className={`${styles.asGallery}${shown.length === 1 ? ` ${styles.one}` : ""}`}>
       {shown.map((photo) => (
         <AnswerPhoto key={photo.id} photo={photo} />
       ))}
       {photos.length > shown.length && (
-        <p className="as-gallery-more">另有 {photos.length - shown.length} 张，点上文的名称查看</p>
+        <p className={styles.asGalleryMore}>另有 {photos.length - shown.length} 张，点上文的名称查看</p>
       )}
     </div>
   );
@@ -1207,13 +1223,13 @@ function AnswerPhoto({ photo }: { photo: NamedPhoto }) {
   return (
     <button
       type="button"
-      className={`as-gallery-item ${state}`}
+      className={`${styles.asGalleryItem} ${styles[state] ?? ""}`}
       aria-label={`${photo.name}，在相册中打开`}
       title="在相册中打开"
       disabled={!open}
       onClick={() => open?.(photo.id)}
     >
-      <span className="as-gallery-frame">
+      <span className={styles.asGalleryFrame}>
         {state === "missing" ? (
           <ImageIcon />
         ) : (
@@ -1226,7 +1242,7 @@ function AnswerPhoto({ photo }: { photo: NamedPhoto }) {
           />
         )}
       </span>
-      <span className="as-gallery-name">{state === "missing" ? `${photo.name}（打不开）` : photo.name}</span>
+      <span className={styles.asGalleryName}>{state === "missing" ? `${photo.name}（打不开）` : photo.name}</span>
     </button>
   );
 }
@@ -1244,9 +1260,11 @@ function Steps() {
       ? describeTool(latest.toolName, (latest.args ?? {}) as Record<string, unknown>)
       : undefined;
   return (
-    <ChainOfThoughtPrimitive.Root className={`as-steps${collapsed ? "" : " open"}${running ? " running" : ""}`}>
-      <ChainOfThoughtPrimitive.AccordionTrigger className="as-steps-trigger">
-        {running ? <LoaderCircle className="spin" /> : <ListChecks />}
+    <ChainOfThoughtPrimitive.Root
+      className={`${styles.asSteps}${collapsed ? "" : ` ${styles.open}`}${running ? ` ${styles.running}` : ""}`}
+    >
+      <ChainOfThoughtPrimitive.AccordionTrigger className={styles.asStepsTrigger}>
+        {running ? <LoaderCircle className={styles.spin} /> : <ListChecks />}
         <span>{running ? "正在处理" : "处理过程"}</span>
         <small>
           {running && current
@@ -1255,10 +1273,10 @@ function Steps() {
               ? `${tools} 个动作`
               : `${count} 步`}
         </small>
-        <ChevronRight className="chevron" />
+        <ChevronRight className={styles.chevron} />
       </ChainOfThoughtPrimitive.AccordionTrigger>
       {!collapsed && (
-        <div className="as-steps-body">
+        <div className={styles.asStepsBody}>
           <ChainOfThoughtPrimitive.Parts components={STEP_PARTS} />
         </div>
       )}
@@ -1271,7 +1289,7 @@ function Steps() {
 function Thinking() {
   const running = useAuiState((state) => state.message.status?.type === "running");
   return running ? (
-    <div className="as-thinking">
+    <div className={styles.asThinking}>
       <span />
       <span />
       <span />
@@ -1282,7 +1300,7 @@ function Thinking() {
 function Reasoning({ text }: { text: string }) {
   if (!text.trim()) return null;
   return (
-    <details className="as-reasoning">
+    <details className={styles.asReasoning}>
       <summary>
         <Brain />
         思考过程
@@ -1399,12 +1417,12 @@ const ToolActivity: ToolCallMessagePartComponent = ({ toolName, args, result, st
   const failed = isError || status.type === "incomplete";
   const output = typeof result === "string" ? result : result === undefined ? "" : JSON.stringify(result, null, 2);
   return (
-    <details className={`as-tool${running ? " running" : ""}${failed ? " failed" : ""}`}>
+    <details className={`${styles.asTool}${running ? ` ${styles.running}` : ""}${failed ? ` ${styles.failed}` : ""}`}>
       <summary>
-        <span className="as-tool-icon">{icon}</span>
-        <span className="as-tool-label">{label}</span>
-        {detail && <span className="as-tool-detail">{detail}</span>}
-        <span className="as-tool-state">{running ? <LoaderCircle /> : failed ? <CircleAlert /> : <Check />}</span>
+        <span className={styles.asToolIcon}>{icon}</span>
+        <span className={styles.asToolLabel}>{label}</span>
+        {detail && <span className={styles.asToolDetail}>{detail}</span>}
+        <span className={styles.asToolState}>{running ? <LoaderCircle /> : failed ? <CircleAlert /> : <Check />}</span>
       </summary>
       {output && <pre>{output.length > 4000 ? `${output.slice(0, 4000)}…` : output}</pre>}
     </details>
@@ -1421,9 +1439,9 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
   if (!change) return null;
   const operations = change.operations ?? [];
   return (
-    <article className="as-change">
+    <article className={styles.asChange}>
       <header>
-        <span className="as-change-mark">
+        <span className={styles.asChangeMark}>
           <ShieldCheck />
         </span>
         <div>
@@ -1431,7 +1449,7 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
           <small>{operations.length} 项操作 · 确认前文件不会变化</small>
         </div>
       </header>
-      <ul className="as-change-ops">
+      <ul className={styles.asChangeOps}>
         {operations.map((operation, index) => (
           <OperationRow key={index} operation={operation} />
         ))}
@@ -1439,7 +1457,7 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
       <footer>
         <button
           type="button"
-          className="as-reject"
+          className={styles.asReject}
           disabled={busy || status !== "awaiting"}
           onClick={() => choose(false)}
         >
@@ -1447,7 +1465,7 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
         </button>
         <button
           type="button"
-          className="as-confirm"
+          className={styles.asConfirm}
           disabled={busy || status !== "awaiting"}
           onClick={() => choose(true)}
         >
@@ -1485,19 +1503,19 @@ export function CommandCard({
     ? (command?.text ?? "").replace(/^execute_code <<'PY'\n/, "").replace(/\nPY$/, "")
     : (command?.text ?? "");
   return (
-    <article className="as-change as-command">
+    <article className={`${styles.asChange} ${styles.asCommand}`}>
       <header>
-        <span className="as-change-mark">{script ? <Code /> : <SquareTerminal />}</span>
+        <span className={styles.asChangeMark}>{script ? <Code /> : <SquareTerminal />}</span>
         <div>
           <strong>{script ? "VNAS 想运行一段代码" : `VNAS 想运行一条命令${reason ? `：${reason}` : ""}`}</strong>
           <small>只影响 VNAS 自己的文件夹和对话记录；你的个人空间与共享空间不会被改动</small>
         </div>
       </header>
-      <pre className="as-command-text">{shown}</pre>
+      <pre className={styles.asCommandText}>{shown}</pre>
       <footer>
         <button
           type="button"
-          className="as-reject"
+          className={styles.asReject}
           disabled={busy || status !== "awaiting"}
           onClick={() => choose(false)}
         >
@@ -1506,7 +1524,7 @@ export function CommandCard({
         {command?.forSession && (
           <button
             type="button"
-            className="as-reject"
+            className={styles.asReject}
             disabled={busy || status !== "awaiting"}
             onClick={() => choose(true, true)}
           >
@@ -1515,7 +1533,7 @@ export function CommandCard({
         )}
         <button
           type="button"
-          className="as-confirm"
+          className={styles.asConfirm}
           disabled={busy || status !== "awaiting"}
           onClick={() => choose(true)}
         >
@@ -1574,9 +1592,9 @@ export function QuestionCard({
     void work().finally(() => setBusy(false));
   };
   return (
-    <article className="as-change as-question">
+    <article className={`${styles.asChange} ${styles.asQuestion}`}>
       <header>
-        <span className="as-change-mark">
+        <span className={styles.asChangeMark}>
           <CircleHelp />
         </span>
         <div>
@@ -1584,12 +1602,12 @@ export function QuestionCard({
           <small>{questions.length} 个问题 · 回答后 VNAS 接着做</small>
         </div>
       </header>
-      <div className="as-questions">
+      <div className={styles.asQuestions}>
         {questions.map((question) => (
-          <div key={question.id} className="as-question-item">
+          <div key={question.id} className={styles.asQuestionItem}>
             <p>{question.text}</p>
             {question.choices?.length ? (
-              <div className="as-choices" role="group" aria-label={question.text}>
+              <div className={styles.asChoices} role="group" aria-label={question.text}>
                 {question.choices.map((choice) => (
                   <button
                     key={choice}
@@ -1605,7 +1623,7 @@ export function QuestionCard({
               </div>
             ) : null}
             <input
-              className="as-answer-input"
+              className={styles.asAnswerInput}
               aria-label={`回答：${question.text}`}
               placeholder={question.choices?.length ? "或者写下你的回答" : "写下你的回答"}
               value={written[question.id] ?? ""}
@@ -1619,7 +1637,7 @@ export function QuestionCard({
       <footer>
         <button
           type="button"
-          className="as-reject"
+          className={styles.asReject}
           disabled={busy || status !== "awaiting"}
           onClick={() => run(onSkip)}
         >
@@ -1627,7 +1645,7 @@ export function QuestionCard({
         </button>
         <button
           type="button"
-          className="as-confirm"
+          className={styles.asConfirm}
           disabled={busy || status !== "awaiting" || !anything}
           onClick={() =>
             run(() => onAnswer(Object.fromEntries(questions.map((question) => [question.id, answerOf(question)]))))
@@ -1652,7 +1670,7 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
     const created = !operation.exists;
     return (
       <li>
-        <div className="as-op-title">
+        <div className={styles.asOpTitle}>
           <FilePen />
           <span>{created ? "新建" : "修改"}</span>
           <code>{target}</code>
@@ -1664,7 +1682,7 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
   if (operation.op === "copy") {
     return (
       <li>
-        <div className="as-op-title">
+        <div className={styles.asOpTitle}>
           <Copy />
           <span>{operation.exists ? "复制并替换" : "复制"}</span>
           <code>{friendlyPath(operation.from ?? "")}</code>
@@ -1677,7 +1695,7 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
             </small>
           )}
         </div>
-        {operation.exists && <p className="as-op-note">原来的文件会移到回收站</p>}
+        {operation.exists && <p className={styles.asOpNote}>原来的文件会移到回收站</p>}
       </li>
     );
   }
@@ -1685,7 +1703,7 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
   const icon = operation.op === "delete" ? <Trash2 /> : operation.op === "move" ? <MoveRight /> : <FolderPlus />;
   return (
     <li>
-      <div className="as-op-title">
+      <div className={styles.asOpTitle}>
         {icon}
         <span>{verb}</span>
         <code>{target}</code>
@@ -1703,13 +1721,13 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
 function Diff({ before, after }: { before: string; after: string }) {
   const parts = useMemo(() => diffLines(before, after), [before, after]);
   return (
-    <pre className="as-diff">
+    <pre className={styles.asDiff}>
       {parts.map((part, index) => {
         const lines = part.value.replace(/\n$/, "").split("\n");
         const kind = part.added ? "add" : part.removed ? "del" : "same";
         const shown = kind === "same" && lines.length > 6 ? [...lines.slice(0, 2), "…", ...lines.slice(-2)] : lines;
         return shown.map((line, row) => (
-          <span key={`${index}-${row}`} className={kind}>
+          <span key={`${index}-${row}`} className={styles[kind]}>
             <i aria-hidden>{kind === "add" ? "+" : kind === "del" ? "−" : ""}</i>
             {line || " "}
           </span>

@@ -14,6 +14,7 @@ import {
 
 import { IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT } from "./api";
 import { captureDesktop } from "./capture";
+import styles from "./feedback.module.css";
 
 // An image picked, pasted, dropped or captured but not yet sent; url is an
 // object URL for its preview.
@@ -202,7 +203,7 @@ export function FeedbackEditor({
 
   return (
     <form
-      className={`fb-editor ${dragging ? "dragging" : ""} ${onCancel ? "editing" : ""} ${compact ? "compact" : ""}`}
+      className={`${styles.fbEditor} ${dragging ? styles.dragging : ""} ${onCancel ? styles.editing : ""} ${compact ? styles.compact : ""}`}
       aria-label={label}
       onSubmit={submit}
       onPaste={paste}
@@ -224,7 +225,7 @@ export function FeedbackEditor({
       <textarea
         ref={textArea}
         id={textID}
-        className="fb-text"
+        className={styles.fbText}
         value={draft.text}
         placeholder={placeholder}
         rows={compact ? 2 : 3}
@@ -232,12 +233,12 @@ export function FeedbackEditor({
         onKeyDown={keyDown}
       />
       {count > 0 && (
-        <ul className="fb-tray" aria-label="附图">
+        <ul className={styles.fbTray} aria-label="附图">
           {attached.map((image, index) => (
-            <li key={image.id} className="fb-tray-item">
+            <li key={image.id} className={styles.fbTrayItem}>
               <button
                 type="button"
-                className="fb-tray-thumb"
+                className={styles.fbTrayThumb}
                 aria-label={`查看附图 ${index + 1}`}
                 onClick={() => onPreview(previews, index)}
               >
@@ -245,7 +246,7 @@ export function FeedbackEditor({
               </button>
               <button
                 type="button"
-                className="fb-tray-remove"
+                className={styles.fbTrayRemove}
                 aria-label={`移除附图 ${index + 1}`}
                 onClick={() => onDetach?.(image.id)}
               >
@@ -254,10 +255,10 @@ export function FeedbackEditor({
             </li>
           ))}
           {draft.added.map((image, index) => (
-            <li key={image.key} className="fb-tray-item fresh">
+            <li key={image.key} className={`${styles.fbTrayItem} ${styles.fresh}`}>
               <button
                 type="button"
-                className="fb-tray-thumb"
+                className={styles.fbTrayThumb}
                 aria-label={`查看${image.label}`}
                 onClick={() => onPreview(previews, attached.length + index)}
               >
@@ -265,7 +266,7 @@ export function FeedbackEditor({
               </button>
               <button
                 type="button"
-                className="fb-tray-remove"
+                className={styles.fbTrayRemove}
                 aria-label={`移除${image.label}`}
                 onClick={() => remove(image)}
               >
@@ -276,25 +277,25 @@ export function FeedbackEditor({
         </ul>
       )}
       {shown && (
-        <p className="fb-editor-error" role="alert">
+        <p className={styles.fbEditorError} role="alert">
           {shown}
         </p>
       )}
-      <div className="fb-editor-foot">
-        <div className="fb-tools">
+      <div className={styles.fbEditorFoot}>
+        <div className={styles.fbTools}>
           <button
             type="button"
-            className="fb-tool"
+            className={styles.fbTool}
             disabled={capturing || full}
             onClick={() => void capture()}
             title="截取当前桌面，不含反馈面板"
           >
-            {capturing ? <LoaderCircle className="fb-spin" /> : <Scan />}
+            {capturing ? <LoaderCircle className={styles.fbSpin} /> : <Scan />}
             <span className={compact ? "sr-only" : undefined}>{capturing ? "截取中…" : "截取界面"}</span>
           </button>
           <button
             type="button"
-            className="fb-tool"
+            className={styles.fbTool}
             disabled={full}
             onClick={() => picker.current?.click()}
             title="也可以直接粘贴或拖入图片"
@@ -303,7 +304,7 @@ export function FeedbackEditor({
             <span className={compact ? "sr-only" : undefined}>添加图片</span>
           </button>
           {count > 0 && (
-            <span className="fb-tray-count">
+            <span className={styles.fbTrayCount}>
               {count}/{maxImages}
             </span>
           )}
@@ -320,20 +321,20 @@ export function FeedbackEditor({
             }}
           />
         </div>
-        <div className="fb-submit">
+        <div className={styles.fbSubmit}>
           {onCancel && (
-            <button type="button" className="fb-ghost" onClick={onCancel}>
+            <button type="button" className={styles.fbGhost} onClick={onCancel}>
               取消
             </button>
           )}
-          <button type="submit" className="fb-primary" disabled={busy || empty || tooLong} title="Ctrl + Enter">
-            {busy && <LoaderCircle className="fb-spin" />}
+          <button type="submit" className={styles.fbPrimary} disabled={busy || empty || tooLong} title="Ctrl + Enter">
+            {busy && <LoaderCircle className={styles.fbSpin} />}
             {submitLabel}
           </button>
         </div>
       </div>
       {dragging && (
-        <div className="fb-drop-hint" aria-hidden="true">
+        <div className={styles.fbDropHint} aria-hidden="true">
           <ImagePlus />
           <span>松开以添加图片</span>
         </div>

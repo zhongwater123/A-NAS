@@ -14,6 +14,7 @@ import {
 import { type CardAction, PosterCard, StillCard } from "./Cards";
 import { Dropdown } from "./Dropdown";
 import { ago, dayLabel, episodeCode, remaining } from "./format";
+import styles from "./media.module.css";
 
 export function messageOf(error: unknown): string {
   return errorText(error, "media");
@@ -21,12 +22,12 @@ export function messageOf(error: unknown): string {
 
 export function PageHeader({ title, count, children }: { title: string; count?: number; children?: ReactNode }) {
   return (
-    <header className="mc-page-header">
+    <header className={styles.mcPageHeader}>
       <h1>
         {title}
         {count !== undefined && <small>{count}</small>}
       </h1>
-      <div className="mc-page-tools">{children}</div>
+      <div className={styles.mcPageTools}>{children}</div>
     </header>
   );
 }
@@ -43,7 +44,7 @@ export function Empty({
   children?: ReactNode;
 }) {
   return (
-    <div className="mc-state">
+    <div className={styles.mcState}>
       {icon}
       <h2>{title}</h2>
       {text && <p>{text}</p>}
@@ -54,8 +55,8 @@ export function Empty({
 
 export function Loading() {
   return (
-    <div className="mc-state" aria-busy="true">
-      <span className="mc-spinner" />
+    <div className={styles.mcState} aria-busy="true">
+      <span className={styles.mcSpinner} />
     </div>
   );
 }
@@ -70,7 +71,7 @@ export function TitleGrid({
   extra?: (title: Title) => CardAction[];
 }) {
   return (
-    <div className={`mc-grid ${still ? "still" : ""}`}>
+    <div className={`${styles.mcGrid} ${still ? styles.still : ""}`}>
       {items.map((title) =>
         still || title.type === "episode" ? (
           <StillCard key={title.id} title={title} extra={extra?.(title)} />
@@ -174,7 +175,7 @@ export function CategoryPage({
     category === "all" || category === "other" ? true : candidate.kind !== "other",
   );
   return (
-    <div className="mc-page">
+    <div className={styles.mcPage}>
       <PageHeader title={heading} count={items ? total : undefined}>
         {!fixedLibrary && choices.length > 1 && (
           <Dropdown
@@ -198,22 +199,26 @@ export function CategoryPage({
           choices={(Object.keys(sortLabels) as SortOrder[]).map((key) => ({ value: key, label: sortLabels[key] }))}
         />
         {onUpload && (
-          <button type="button" className="mc-primary small mc-upload-button" onClick={onUpload}>
+          <button
+            type="button"
+            className={`${styles.mcPrimary} ${styles.small} ${styles.mcUploadButton}`}
+            onClick={onUpload}
+          >
             <CloudUpload />
             上传
           </button>
         )}
       </PageHeader>
       {genres.length > 1 && (
-        <div className="mc-chips" role="group" aria-label="类型">
-          <button type="button" className={!genre ? "active" : ""} onClick={() => setGenre("")}>
+        <div className={styles.mcChips} role="group" aria-label="类型">
+          <button type="button" className={!genre ? styles.active : ""} onClick={() => setGenre("")}>
             全部类型
           </button>
           {genres.slice(0, 16).map((value) => (
             <button
               key={value}
               type="button"
-              className={genre === value ? "active" : ""}
+              className={genre === value ? styles.active : ""}
               onClick={() => setGenre(genre === value ? "" : value)}
             >
               {value}
@@ -237,7 +242,7 @@ export function CategoryPage({
             }
           >
             {onUpload && (
-              <button type="button" className="mc-primary mc-upload-button" onClick={onUpload}>
+              <button type="button" className={`${styles.mcPrimary} ${styles.mcUploadButton}`} onClick={onUpload}>
                 <CloudUpload />
                 上传{category === "all" || fixedLibrary ? "视频" : categoryTitles[category]}
               </button>
@@ -247,8 +252,8 @@ export function CategoryPage({
       ) : (
         <>
           <TitleGrid items={items} still={category === "other"} />
-          <div ref={sentinel} className="mc-sentinel">
-            {loadingMore && <span className="mc-spinner small" />}
+          <div ref={sentinel} className={styles.mcSentinel}>
+            {loadingMore && <span className={`${styles.mcSpinner} ${styles.small}`} />}
           </div>
         </>
       )}
@@ -285,7 +290,7 @@ export function FavoritesPage({ refreshKey, onError }: { refreshKey: number; onE
     );
   }, [refreshKey, onError]);
   return (
-    <div className="mc-page">
+    <div className={styles.mcPage}>
       <PageHeader title="我的收藏" count={items?.length} />
       {!items ? (
         <Loading />
@@ -332,10 +337,10 @@ export function HistoryPage({
     { label: "从记录中移除", icon: <X />, danger: true, run: () => onRemove(title) },
   ];
   return (
-    <div className="mc-page">
+    <div className={styles.mcPage}>
       <PageHeader title="最近播放" count={items?.length}>
         {items && items.length > 0 && (
-          <button type="button" className="mc-glass small" onClick={onClear}>
+          <button type="button" className={`${styles.mcGlass} ${styles.small}`} onClick={onClear}>
             <Trash2 />
             清空记录
           </button>
@@ -347,9 +352,9 @@ export function HistoryPage({
         <Empty icon={<History />} title="还没有播放记录" text="播放过的视频会按时间出现在这里，并记住看到哪里。" />
       ) : (
         groups.map((group) => (
-          <section key={group.label} className="mc-history-day" aria-label={group.label}>
+          <section key={group.label} className={styles.mcHistoryDay} aria-label={group.label}>
             <h2>{group.label}</h2>
-            <div className="mc-grid still">
+            <div className={`${styles.mcGrid} ${styles.still}`}>
               {group.items.map((title) => (
                 <StillCard key={title.id} title={title} extra={remove(title)} caption={historyCaption(title)} />
               ))}

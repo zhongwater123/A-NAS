@@ -1,6 +1,8 @@
 import { Search, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import styles from "../settings.module.css";
+
 // Filters outlive the settings window until the page reloads, like the
 // settings section itself.
 const remembered = new Map<string, unknown>();
@@ -46,7 +48,7 @@ export function SearchField({
   placeholder: string;
 }) {
   return (
-    <label className="lg-search">
+    <label className={styles.lgSearch}>
       <Search aria-hidden="true" />
       <input
         type="search"
@@ -57,7 +59,7 @@ export function SearchField({
         onChange={(event) => onChange(event.target.value)}
       />
       {value && (
-        <button type="button" className="lg-search-clear" aria-label="清除搜索" onClick={() => onChange("")}>
+        <button type="button" className={styles.lgSearchClear} aria-label="清除搜索" onClick={() => onChange("")}>
           <X />
         </button>
       )}
@@ -78,7 +80,7 @@ export function Select<T extends string>({
 }) {
   return (
     <select
-      className="lg-select"
+      className={styles.lgSelect}
       aria-label={label}
       value={value}
       onChange={(event) => onChange(event.target.value as T)}

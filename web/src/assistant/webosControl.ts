@@ -17,7 +17,8 @@ import { computeAccessibleName, getRole } from "dom-accessibility-api";
 
 import { setWriteGate } from "../api/client";
 import { drawDesktop, onScreen } from "../desktop/desktopPicture";
-import "./webosControl.css";
+import { WINDOW_ID } from "../desktop/windowSnapshot";
+import controlStyles from "./webosControl.module.css";
 import { writeRisk } from "./webosWrites";
 
 /** What the member is asked to allow. */
@@ -64,9 +65,11 @@ const CONTROLS =
   "button, a[href], input, select, textarea, [role=button], [role=link], [role=menuitem], [role=tab], [role=option], [role=checkbox], [role=switch], [contenteditable=true], [contenteditable='']";
 /** Windows where every step waits for the member: what runs there reaches the host. */
 const GUARDED_WINDOWS: Array<[string, string]> = [
-  [".app-window-docker", "Docker"],
-  [".app-window-store", "应用中心"],
+  [`[${WINDOW_ID}="docker"]`, "Docker"],
+  [`[${WINDOW_ID}="store"]`, "应用中心"],
 ];
+// Any app window; each names its app in this attribute.
+const APP_WINDOW = `[${WINDOW_ID}]`;
 const GUARDED_SECTIONS = ["终端"];
 /** What VNAS never reads or acts on; the value says what it is. */
 const PRIVATE = "[data-vnas-private]";
@@ -314,7 +317,7 @@ export class WebosController {
     };
     const guarded = this.guarded(element, what);
     if (guarded) {
-      const window = element.closest(".app-window");
+      const window = element.closest(APP_WINDOW);
       if (!this.grant || this.grant.window !== window || Date.now() >= this.grant.until) {
         if (!(await this.options.confirm(guarded)))
           throw new ControlError(`成员没有允许这一步（${guarded.what}），没有执行`);
@@ -337,9 +340,10 @@ export class WebosController {
 
   /** Whether every step on the element waits for the member: the terminal, Docker and 应用中心. */
   guarded(element: Element, what: string): Danger | undefined {
-    const settings = element.closest(".app-window-settings");
-    if (settings && element.closest(".set-main")) {
-      const section = settings.querySelector('.set-nav [aria-current="page"]')?.textContent?.trim() ?? "";
+    const settings = element.closest(`[${WINDOW_ID}="settings"]`);
+    if (settings && element.closest("[data-settings-main]")) {
+      const section =
+        settings.querySelector('nav[aria-label="设置分区"] [aria-current="page"]')?.textContent?.trim() ?? "";
       const risky = GUARDED_SECTIONS.find((label) => section.includes(label));
       if (risky) return { what, where: `设置 · ${risky}`, why: `“${risky}”里的操作都要你先允许` };
     }
@@ -542,7 +546,7 @@ function states(element: Element): string {
 }
 
 function windowTitle(element: Element): string {
-  return element.closest(".app-window")?.getAttribute("aria-label") ?? "桌面";
+  return element.closest(APP_WINDOW)?.getAttribute("aria-label") ?? "桌面";
 }
 
 /** Refuses an element VNAS may not read or act on. */
@@ -594,7 +598,7 @@ function scrollable(from?: Element): Element | undefined {
 
 /** The scrolling area of the topmost window that is not VNAS. */
 function topWindowScroller(options: ControllerOptions): Element | undefined {
-  const windows = Array.from(document.querySelectorAll(".app-window")).filter(
+  const windows = Array.from(document.querySelectorAll(APP_WINDOW)).filter(
     (window) => !options.exclude(window) && visible(window),
   );
   const top = windows.sort(
@@ -612,7 +616,8 @@ function flash(element: Element) {
   const rect = element.getBoundingClientRect();
   if (!rect.width && !rect.height) return;
   const ring = document.createElement("div");
-  ring.className = "vnas-control-ring";
+  ring.className = controlStyles.vnasControlRing;
+  ring.dataset.vnasOverlay = "";
   Object.assign(ring.style, {
     left: `${rect.left - 4}px`,
     top: `${rect.top - 4}px`,
