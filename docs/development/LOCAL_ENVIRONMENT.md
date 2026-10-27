@@ -151,7 +151,7 @@ docker context use colima    # colima start 会把 Docker 上下文切到 colima
 - 用 apt 安装 `build-essential`、`jq`、`rsync` 与 `python3-venv`。
 - Go 与 Node.js 从官方地址下载 linux-arm64 包，按官方公布的 SHA-256 核对。
 - ShellCheck 用 GitHub 发布的 `shellcheck-v0.11.0.linux.aarch64.tar.xz`，SHA-256 为 `12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588`。
-- Ruff 按[静态检查](#静态检查)的命令安装。
+- Ruff、pip-audit 与 uv 按[静态检查](#静态检查)的命令安装：`make check` 的 `vuln-check` 需要 pip-audit。
 
 镜像拉不下来时，可以从已有该镜像的虚拟机复制：`docker --context <来源> save <镜像> | docker --context colima-anas load`。
 
