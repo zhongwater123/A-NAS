@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/wire"
+	"github.com/zhongwater123/A-NAS/internal/taskmanager/taskicon"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
@@ -42,6 +43,8 @@ type Client struct {
 	// listingClient reads snapshot object listings, which take as long as
 	// walking a space; its limit only stops a Host Agent that hangs.
 	listingClient *http.Client
+	// icons decodes the task icons the Host Agent names.
+	icons taskicon.Loader
 }
 
 func NewClient(socketPath string) *Client {

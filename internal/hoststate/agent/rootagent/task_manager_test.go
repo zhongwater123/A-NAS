@@ -100,25 +100,50 @@ func TestTaskManagerOldObserverIsExplicitlyUnavailable(t *testing.T) {
 
 type iconTaskReader struct{ *fake.Reader }
 
+// testIconFile is an installed icon the Host Agent names; the client reads
+// it only through its loader, which the test cannot reach, so the icon is
+// dropped on the way (taskicon's tests cover decoding).
+const testIconFile = "/usr/share/icons/hicolor/scalable/apps/a-nas-test-missing.svg"
+
 func (r iconTaskReader) ReadTasks(ctx context.Context) (taskmanager.TaskSnapshot, error) {
 	s, err := r.Reader.ReadTasks(ctx)
-	id, src := taskmanager.NormalizeIcon([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M0 0h16v16z" fill="#369"/></svg>`))
-	s.Icons = map[string]string{id: src}
+	id := strings.Repeat("a", 64)
+	s.IconFiles = map[string][]string{id: {testIconFile}}
 	s.Processes.Items[0].IconID = id
 	return s, err
 }
-func TestTaskIconsSurviveIPCAndRejectRemoteImages(t *testing.T) {
+
+// The Host Agent names icon files and decodes none; the client accepts only
+// installed files, and a snapshot carrying images of its own.
+func TestTaskIconsCrossIPCAsFilesAndRejectOthers(t *testing.T) {
 	source := iconTaskReader{fake.NewHealthy()}
 	expected, _ := source.ReadTasks(context.Background())
 	client := agent.NewClient(serve(t, rootagent.NewHandler(source, discardLogger())))
 	actual, err := client.ReadTasks(context.Background())
-	id := expected.Processes.Items[0].IconID
-	if err != nil || id == "" || actual.Icons[id] != expected.Icons[id] || actual.Processes.Items[0].IconID != id {
-		t.Fatalf("icon round trip: %v", err)
+	if err != nil || actual.IconFiles != nil || actual.Processes.Items[0].IconID != "" {
+		t.Fatalf("icon files after the client = %v, %v, %q", err, actual.IconFiles, actual.Processes.Items[0].IconID)
 	}
-	expected.Icons[id] = "https://example.invalid/icon.png"
-	bad := agent.NewClient(serve(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _ = json.NewEncoder(w).Encode(expected) })))
-	if _, err := bad.ReadTasks(context.Background()); err == nil {
-		t.Fatal("remote icon accepted")
+	id := expected.Processes.Items[0].IconID
+	for name, snapshot := range map[string]func(taskmanager.TaskSnapshot) taskmanager.TaskSnapshot{
+		"outside": func(s taskmanager.TaskSnapshot) taskmanager.TaskSnapshot {
+			s.IconFiles = map[string][]string{id: {"/home/member/private.svg"}}
+			return s
+		},
+		"traversal": func(s taskmanager.TaskSnapshot) taskmanager.TaskSnapshot {
+			s.IconFiles = map[string][]string{id: {"/usr/share/../../etc/shadow"}}
+			return s
+		},
+		"image": func(s taskmanager.TaskSnapshot) taskmanager.TaskSnapshot {
+			s.IconFiles = nil
+			s.Icons = map[string]string{id: "https://example.invalid/icon.png"}
+			return s
+		},
+	} {
+		bad := agent.NewClient(serve(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(snapshot(expected))
+		})))
+		if _, err := bad.ReadTasks(context.Background()); err == nil {
+			t.Fatalf("%s icon accepted", name)
+		}
 	}
 }

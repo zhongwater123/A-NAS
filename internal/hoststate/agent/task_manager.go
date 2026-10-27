@@ -27,9 +27,11 @@ func (c *Client) ReadTasks(ctx context.Context) (taskmanager.TaskSnapshot, error
 	if err := c.getTaskManager(ctx, wire.TasksPath, &snapshot); err != nil {
 		return snapshot, err
 	}
-	if !snapshot.Valid() {
+	if !snapshot.Valid() || len(snapshot.Icons) != 0 {
 		return taskmanager.TaskSnapshot{}, errors.New("invalid host agent task observation")
 	}
+	// The Host Agent names icon files; they are decoded here, never as root.
+	c.icons.Resolve(&snapshot)
 	return snapshot, nil
 }
 
