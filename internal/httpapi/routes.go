@@ -54,12 +54,12 @@ func (h *productHandler) table() []apiroute.Route {
 		{Method: post, Pattern: "/api/v1/session/password", Posture: mutation, Handler: h.handleChangePassword},
 		{Method: get, Pattern: "/api/v1/notifications", Posture: session, Handler: h.handleNotifications},
 		{Method: post, Pattern: "/api/v1/notifications/{notificationID}/acknowledge", Posture: mutation, Handler: h.handleAcknowledgeNotification},
-		{Method: get, Pattern: "/api/v1/users", Posture: session, Handler: h.handleUsers},
-		{Method: post, Pattern: "/api/v1/users", Posture: mutation, Handler: h.handleCreateUser},
-		{Method: patch, Pattern: "/api/v1/users/{userID}/credential", Posture: mutation, Handler: h.handleResetUserCredential},
-		{Method: del, Pattern: "/api/v1/users/{userID}", Posture: mutation, Handler: h.handleDisableUser},
-		{Method: post, Pattern: "/api/v1/users/{userID}/viewing", Posture: mutation, Handler: h.handleStartViewing},
-		{Method: del, Pattern: "/api/v1/viewing/{grantID}", Posture: mutation, Handler: h.handleEndViewing},
+		{Method: get, Pattern: "/api/v1/users", Posture: admin, Handler: h.handleUsers},
+		{Method: post, Pattern: "/api/v1/users", Posture: admin, Handler: h.handleCreateUser},
+		{Method: patch, Pattern: "/api/v1/users/{userID}/credential", Posture: admin, Handler: h.handleResetUserCredential},
+		{Method: del, Pattern: "/api/v1/users/{userID}", Posture: admin, Handler: h.handleDisableUser},
+		{Method: post, Pattern: "/api/v1/users/{userID}/viewing", Posture: admin, Handler: h.handleStartViewing},
+		{Method: del, Pattern: "/api/v1/viewing/{grantID}", Posture: admin, Handler: h.handleEndViewing},
 		{Method: get, Pattern: "/api/v1/spaces", Posture: session, Handler: h.handleSpaces},
 
 		{Method: get, Pattern: "/api/v1/volumes", Posture: session, Handler: h.handleVolumes},
@@ -152,6 +152,8 @@ func (h *productHandler) register(routes []apiroute.Route) {
 // Session or Admin one, whose writes then need the CSRF token.
 func checkPosture(route apiroute.Route) error {
 	switch {
+	case route.Posture < apiroute.Public || route.Posture > apiroute.Admin:
+		return fmt.Errorf("route %s %s has invalid posture %d", route.Method, route.Pattern, route.Posture)
 	case route.Method == "" && (route.Posture == apiroute.Public || route.Posture == apiroute.Mutation):
 		return fmt.Errorf("route %s is mounted for every method as %s; mount it as session or admin", route.Pattern, route.Posture)
 	case route.Method != "" && apiroute.Safe(route.Method) && route.Posture == apiroute.Mutation:

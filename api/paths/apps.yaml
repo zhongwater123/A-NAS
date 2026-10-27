@@ -1,6 +1,7 @@
 /api/v1/apps:
   get:
     operationId: listApps
+    x-anas-posture: admin
     summary: List App Center catalog apps with their install state
     responses:
       "200":
@@ -16,6 +17,7 @@
 /api/v1/apps/{appId}/icon:
   get:
     operationId: getAppIcon
+    x-anas-posture: admin
     summary: Read an app icon from the catalog
     parameters:
       - $ref: "../components/apps.yaml#/parameters/AppId"
@@ -83,6 +85,7 @@
 /api/v1/apps/{appId}/plan:
   get:
     operationId: getAppInstallPlan
+    x-anas-posture: admin
     summary: Render the install plan the owner must confirm
     description: >-
       Administrators only. The plan lists the app's Linux identity, images, containers, published host ports and
@@ -109,6 +112,7 @@
 /api/v1/apps/{appId}/install:
   post:
     operationId: installApp
+    x-anas-posture: admin
     summary: Start installing an app from a confirmed plan
     description: >-
       Administrators only, with the session CSRF token. The plan is re-rendered for the app identity and
@@ -159,6 +163,7 @@
 /api/v1/apps/{appId}/uninstall:
   post:
     operationId: uninstallApp
+    x-anas-posture: admin
     summary: Start removing an installed app while keeping its data
     description: Administrators only, with the session CSRF token. The app identity's Shared access is withdrawn at once.
     parameters:

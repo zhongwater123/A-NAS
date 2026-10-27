@@ -120,6 +120,7 @@
 /api/v1/users/{userId}/viewing:
   post:
     operationId: startViewing
+    x-anas-posture: admin
     description: Administrative Viewing Mode. An administrator re-enters their password and a reason to read another account's private space for 24 hours; the access is audited and the owner is notified.
     parameters: [{ $ref: "../components/accounts.yaml#/parameters/UserID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/ViewingRequest" } } } }
@@ -133,6 +134,7 @@
 /api/v1/viewing/{grantId}:
   delete:
     operationId: endViewing
+    x-anas-posture: admin
     parameters: [{ name: grantId, in: path, required: true, schema: { type: string } }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     responses:
       "204": { description: Viewing ended and access revoked }
@@ -140,11 +142,13 @@
 /api/v1/users:
   get:
     operationId: listUsers
+    x-anas-posture: admin
     responses:
       "200": { description: Users, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/accounts.yaml#/schemas/User" } } } } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
   post:
     operationId: createUser
+    x-anas-posture: admin
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/CredentialInput" } } } }
     responses:
@@ -154,6 +158,7 @@
 /api/v1/users/{userId}:
   delete:
     operationId: disableUser
+    x-anas-posture: admin
     parameters: [{ $ref: "../components/accounts.yaml#/parameters/UserID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     description: Disable an account. Web sign-in ends first; when the Host Agent then fails to disable the SMB credential the answer is 503 smb_disable_pending, and disabling again retries only that step.
     responses:
@@ -164,6 +169,7 @@
 /api/v1/users/{userId}/credential:
   patch:
     operationId: resetUserCredential
+    x-anas-posture: admin
     parameters: [{ $ref: "../components/accounts.yaml#/parameters/UserID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     description: Choose a temporary password for another account; administrators change their own with changePassword.
     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [password], properties: { password: { $ref: "../components/accounts.yaml#/schemas/NewPassword" } } } } } }

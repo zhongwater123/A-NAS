@@ -6,6 +6,7 @@
 /api/v1/volumes/{volumeId}/conversion:
   post:
     operationId: continueVolumeConversion
+    x-anas-posture: admin
     description: >-
       Starts converting the data volume to its layout now, after a shutdown or an error stopped the conversion;
       the Host Agent otherwise continues it at startup and every 15 minutes. Administrators only.
@@ -17,6 +18,7 @@
 /api/v1/storage/plans:
   get:
     operationId: listUnfinishedStoragePlans
+    x-anas-posture: admin
     description: >-
       Administrators only. The plans that still need the administrator, newest first: the one running, and the
       newest one that stopped in needs_attention unless a plan made after it has run. The settings page shows them
@@ -26,6 +28,7 @@
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
   post:
     operationId: createStoragePlan
+    x-anas-posture: admin
     description: >-
       Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk,
       mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts
@@ -53,6 +56,7 @@
 /api/v1/storage/plans/{planId}/confirm:
   post:
     operationId: confirmStoragePlan
+    x-anas-posture: admin
     parameters: [{ $ref: "../components/storage.yaml#/parameters/PlanID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody: { required: true, content: { application/json: { schema: { type: object, required: [confirmationPhrase], properties: { confirmationPhrase: { type: string } } } } } }
     responses:
@@ -61,6 +65,7 @@
 /api/v1/storage/plans/{planId}/execute:
   post:
     operationId: executeStoragePlan
+    x-anas-posture: admin
     description: >-
       Starts a confirmed plan on the Host Agent, which runs it apart from this request: closing the page or
       restarting the product service does not stop it. 202 with the plan running, whose step tells how far it came;
@@ -76,6 +81,7 @@
 /api/v1/storage/plans/{planId}/cancel:
   post:
     operationId: cancelStoragePlan
+    x-anas-posture: admin
     description: >-
       Gives up a planned or confirmed plan, which has not touched any disk, so that a new plan can be made at once.
       Cancelling a cancelled plan returns it again; a running or finished plan answers 409 plan_state_conflict.
@@ -87,6 +93,7 @@
 /api/v1/operations/{operationId}:
   get:
     operationId: getOperation
+    x-anas-posture: admin
     parameters: [{ name: operationId, in: path, required: true, schema: { type: string } }]
     responses:
       "200": { description: Operation state, content: { application/json: { schema: { $ref: "../components/storage.yaml#/schemas/StoragePlan" } } } }

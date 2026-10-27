@@ -12,6 +12,7 @@
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
   put:
     operationId: updateLocalDisplay
+    x-anas-posture: admin
     description: Administrators only. The local console uses the new value from its next idle period.
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/desktop.yaml#/schemas/LocalDisplay" } } } }
@@ -33,6 +34,7 @@
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
   patch:
     operationId: updateWallpaperStyle
+    x-anas-posture: admin
     description: Administrators only. Changes how every desktop draws the wallpaper.
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/desktop.yaml#/schemas/WallpaperStyleChange" } } } }
@@ -59,6 +61,7 @@
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
   put:
     operationId: setWallpaperImage
+    x-anas-posture: admin
     description: >-
       Administrators only. Replace the picture with the one in the body, keeping the style. The server turns it
       upright, scales the long side down to at most 3840 pixels, fills transparency with the default wallpaper's
@@ -80,6 +83,7 @@
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
   delete:
     operationId: resetWallpaper
+    x-anas-posture: admin
     description: Administrators only. Go back to the built-in wallpaper, filled.
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     responses:

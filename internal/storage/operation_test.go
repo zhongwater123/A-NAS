@@ -26,7 +26,7 @@ func TestAPlanRunsOnAfterTheRequestAndIsFollowedToTheEnd(t *testing.T) {
 	plan := confirmedPlan(t, service, "disk:fake-data-01")
 
 	ctx, closePage := context.WithCancel(context.Background())
-	running, err := service.ExecutePlan(ctx, plan.ID)
+	running, err := service.ExecutePlan(ctx, storageAdministrator, plan.ID)
 	closePage()
 	if err != nil || running.State != storage.PlanStateRunning || running.Step != storage.StepErase {
 		t.Fatalf("ExecutePlan() = %+v, %v; want running in the erase step", running, err)
@@ -46,7 +46,7 @@ func TestAPlanRunsOnAfterTheRequestAndIsFollowedToTheEnd(t *testing.T) {
 	if got := service.DataVolumeFilesystemUUID(); got != "0f6e1c2a-data" {
 		t.Fatalf("data volume UUID = %q, want the new volume's", got)
 	}
-	if again, err := service.ExecutePlan(context.Background(), plan.ID); err != nil || again.State != storage.PlanStateSucceeded || len(host.started()) != 1 {
+	if again, err := service.ExecutePlan(context.Background(), storageAdministrator, plan.ID); err != nil || again.State != storage.PlanStateSucceeded || len(host.started()) != 1 {
 		t.Fatalf("executing a succeeded plan = %+v, %v, starts %v; want it unchanged", again, err, host.started())
 	}
 	if unfinished := service.UnfinishedPlans(); len(unfinished) != 0 {
@@ -63,7 +63,7 @@ func TestARestartedServiceFollowsThePlanThatRan(t *testing.T) {
 	store := openStore(t, path)
 	service := followingService(t, fake.NewHealthy(), host, store)
 	plan := confirmedPlan(t, service, "disk:fake-data-01")
-	if running, err := service.ExecutePlan(context.Background(), plan.ID); err != nil || running.State != storage.PlanStateRunning {
+	if running, err := service.ExecutePlan(context.Background(), storageAdministrator, plan.ID); err != nil || running.State != storage.PlanStateRunning {
 		t.Fatalf("ExecutePlan() = %+v, %v", running, err)
 	}
 	service.Close()
@@ -86,7 +86,7 @@ func TestAPlanTheHostAgentNeverReceivedNeedsAttention(t *testing.T) {
 	host.startErr = errors.New("host agent state is unavailable: connection refused")
 	service := followingService(t, fake.NewHealthy(), host, nil)
 	plan := confirmedPlan(t, service, "disk:fake-data-01")
-	stopped, err := service.ExecutePlan(context.Background(), plan.ID)
+	stopped, err := service.ExecutePlan(context.Background(), storageAdministrator, plan.ID)
 	if !errors.Is(err, storage.ErrOperationAttention) || stopped.State != storage.PlanStateNeedsAttention || !strings.Contains(stopped.Failure, "connection refused") {
 		t.Fatalf("ExecutePlan() = %+v, %v; want needs_attention", stopped, err)
 	}
@@ -98,7 +98,7 @@ func TestAPlanTheHostAgentNeverReceivedNeedsAttention(t *testing.T) {
 	store := openStore(t, path)
 	service = followingService(t, fake.NewHealthy(), host, store)
 	plan = confirmedPlan(t, service, "disk:fake-data-01")
-	if _, err := service.ExecutePlan(context.Background(), plan.ID); err != nil {
+	if _, err := service.ExecutePlan(context.Background(), storageAdministrator, plan.ID); err != nil {
 		t.Fatal(err)
 	}
 	service.Close()
@@ -126,7 +126,7 @@ func TestAPlanThatStoppedIsRetriedFromTheHostAgent(t *testing.T) {
 	host := newHostOperations()
 	service := followingService(t, reader, host, nil)
 	plan := confirmedPlan(t, service, "disk:fake-data-01")
-	if _, err := service.ExecutePlan(context.Background(), plan.ID); err != nil {
+	if _, err := service.ExecutePlan(context.Background(), storageAdministrator, plan.ID); err != nil {
 		t.Fatal(err)
 	}
 	host.set(plan.ID, storage.VolumeOperation{State: storage.OperationInterrupted, Step: storage.StepPrepare,
@@ -140,11 +140,11 @@ func TestAPlanThatStoppedIsRetriedFromTheHostAgent(t *testing.T) {
 	}
 	// The volume the plan made is mounted, so new plans are refused.
 	mountVolume(reader, []string{"disk:fake-data-01"}, 0, nil, nil)
-	if _, err := service.PlanVolume(context.Background(), []string{"disk:fake-data-01"}, ""); !errors.Is(err, storage.ErrVolumeExists) {
+	if _, err := service.PlanVolume(context.Background(), storageAdministrator, []string{"disk:fake-data-01"}, ""); !errors.Is(err, storage.ErrVolumeExists) {
 		t.Fatalf("plan beside the unrecorded volume error = %v, want ErrVolumeExists", err)
 	}
 
-	retried, err := service.ExecutePlan(context.Background(), plan.ID)
+	retried, err := service.ExecutePlan(context.Background(), storageAdministrator, plan.ID)
 	if err != nil || retried.State != storage.PlanStateRunning || retried.Failure != "" || !slices.Equal(host.started(), []string{plan.ID, plan.ID}) {
 		t.Fatalf("retry = %+v, %v, starts %v; want the Host Agent asked again", retried, err, host.started())
 	}
@@ -170,7 +170,7 @@ func TestAStoppedPlanIsSupersededByAPlanThatRan(t *testing.T) {
 	t.Cleanup(service.Close)
 	stop := func(plan storage.ExecutionPlan) {
 		t.Helper()
-		if _, err := service.ExecutePlan(context.Background(), plan.ID); err != nil {
+		if _, err := service.ExecutePlan(context.Background(), storageAdministrator, plan.ID); err != nil {
 			t.Fatal(err)
 		}
 		host.set(plan.ID, storage.VolumeOperation{State: storage.OperationFailed, Step: storage.StepErase, Failure: storage.ErrDiskChanged.Error()})
@@ -179,10 +179,10 @@ func TestAStoppedPlanIsSupersededByAPlanThatRan(t *testing.T) {
 	first := confirmedPlan(t, service, "disk:fake-data-01")
 	stop(first)
 	second := confirmedPlan(t, service, "disk:fake-data-02")
-	if _, err := service.ExecutePlan(context.Background(), second.ID); err != nil {
+	if _, err := service.ExecutePlan(context.Background(), storageAdministrator, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ExecutePlan(context.Background(), first.ID); !errors.Is(err, storage.ErrPlanState) {
+	if _, err := service.ExecutePlan(context.Background(), storageAdministrator, first.ID); !errors.Is(err, storage.ErrPlanState) {
 		t.Fatalf("retry while another plan runs error = %v, want ErrPlanState", err)
 	}
 	host.set(second.ID, storage.VolumeOperation{State: storage.OperationFailed, Step: storage.StepErase, Failure: storage.ErrDiskChanged.Error()})
@@ -190,7 +190,7 @@ func TestAStoppedPlanIsSupersededByAPlanThatRan(t *testing.T) {
 	if unfinished := service.UnfinishedPlans(); len(unfinished) != 1 || unfinished[0].ID != second.ID {
 		t.Fatalf("unfinished plans = %+v, want only the later one", unfinished)
 	}
-	if _, err := service.ExecutePlan(context.Background(), first.ID); !errors.Is(err, storage.ErrPlanState) {
+	if _, err := service.ExecutePlan(context.Background(), storageAdministrator, first.ID); !errors.Is(err, storage.ErrPlanState) {
 		t.Fatalf("retry of a superseded plan error = %v, want ErrPlanState", err)
 	}
 }
@@ -290,11 +290,11 @@ func openStore(t *testing.T, path string) *storage.Store {
 
 func confirmedPlan(t *testing.T, service *storage.Service, diskIDs ...string) storage.ExecutionPlan {
 	t.Helper()
-	plan, err := service.PlanVolume(context.Background(), diskIDs, "")
+	plan, err := service.PlanVolume(context.Background(), storageAdministrator, diskIDs, "")
 	if err != nil {
 		t.Fatalf("PlanVolume() error = %v", err)
 	}
-	if _, err := service.ConfirmPlan(context.Background(), plan.ID, plan.ConfirmationPhrase); err != nil {
+	if _, err := service.ConfirmPlan(context.Background(), storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
 	}
 	return plan

@@ -84,7 +84,8 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
   - GET 与 HEAD 以外的请求要有 CSRF 令牌；
   - `admin` 姿态要求管理员角色。
 
-  处理函数不再自己做这些检查。读操作不能标为 `mutation`，写操作不能只标 `session`；表不合规时，产品服务在构造时就失败。
+  处理函数不再自己做这些检查。读操作不能标为 `mutation`，写操作不能只标 `session`；姿态必须显式设置，零值与未知值均非法，表不合规时产品服务在构造时就失败。
+- 管理员专用操作在 `api/paths/` 的 OpenAPI 操作上声明 `x-anas-posture: admin`，路由表也必须标为 `admin`。契约测试逐项核对实际匹配的路由（包括前缀挂载），并用有效成员会话和 CSRF 令牌确认返回 `403 forbidden`。账号管理与存储变更在领域服务入口再次检查操作者是有效管理员；存储的规划、确认、执行、取消与转换重试在读取或改变计划、调用 Host Agent 之前拒绝其他操作者。
 - 两类接口整体挂在一个前缀下，姿态为 `session` 或 `admin`，写请求同样要 CSRF，登录用户经各自包里的 `WithUser` 传入：
   - 由另一个进程提供的接口：相册与分享，产品服务只做转发；
   - 第三方 Handler：tus 上传。
@@ -148,6 +149,8 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 
 ## 关联
 
+- [`internal/httpapi/routes_test.go`](../../internal/httpapi/routes_test.go)：管理员规格与路由对照、成员拒绝测试（[#270](https://github.com/zhongwater123/A-NAS/issues/270)）
+- [`internal/storage/authorization_test.go`](../../internal/storage/authorization_test.go)：服务层授权及被拒绝后不改变计划、不执行磁盘操作
 - [成员分享技术设计](member-sharing.md)
 - [领域语言](../../CONTEXT.md)
 - [当前状态](../status/CURRENT.md)

@@ -1,6 +1,7 @@
 /api/v1/containers:
   get:
     operationId: getContainerSnapshot
+    x-anas-posture: admin
     summary: List containers and images from the container engine
     description: >-
       Administrators only; container actions also need the session CSRF token. Running containers include CPU
@@ -20,6 +21,7 @@
 /api/v1/containers/{containerId}/actions:
   post:
     operationId: applyContainerAction
+    x-anas-posture: admin
     summary: Start, stop or restart one container
     description: >-
       Only lifecycle actions are accepted; creating, removing or reconfiguring containers is not part of this
@@ -61,6 +63,7 @@
 /api/v1/containers/{containerId}/logs:
   get:
     operationId: getContainerLogs
+    x-anas-posture: admin
     summary: Read the latest lines a container wrote to stdout and stderr
     parameters:
       - $ref: "../components/containers.yaml#/parameters/ContainerId"

@@ -26,6 +26,12 @@ import (
 // the guard never lets a request reach, and an administrator's session.
 func routedProduct(t *testing.T) (http.Handler, *http.Cookie) {
 	t.Helper()
+	product, session := routedProductSession(t, false)
+	return product, &http.Cookie{Name: "anas_session", Value: session.Token}
+}
+
+func routedProductSession(t *testing.T, member bool) (http.Handler, accounts.Session) {
+	t.Helper()
 	ctx := context.Background()
 	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
 	if err != nil {
@@ -40,6 +46,15 @@ func routedProduct(t *testing.T) (http.Handler, *http.Cookie) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if member {
+		if _, err := service.CreateMember(ctx, session.User, "member", "correct horse battery staple"); err != nil {
+			t.Fatal(err)
+		}
+		session, err = service.Authenticate(signedInDirectly(ctx), "member", "correct horse battery staple")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	unreached := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("%s %s passed the guard", r.Method, r.URL.Path)
 		w.WriteHeader(http.StatusTeapot)
@@ -50,10 +65,72 @@ func routedProduct(t *testing.T) (http.Handler, *http.Cookie) {
 		Shares: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
-	return product, &http.Cookie{Name: "anas_session", Value: session.Token}
+	return product, session
 }
 
 var pathParameter = regexp.MustCompile(`\{[^}]+\}`)
+
+// Match the actual mux-selected route, including an Admin mount. Checking
+// every operation in both directions catches either a weakened route or a
+// missing specification marker, without trusting one as the other's source.
+func TestAdministratorOperationsMatchSpecificationAndRejectMembers(t *testing.T) {
+	product, member := routedProductSession(t, true)
+	routes := map[string]apiroute.Route{}
+	for _, route := range httpapi.Routes(product) {
+		pattern := route.Pattern
+		if route.Method != "" {
+			pattern = route.Method + " " + pattern
+		}
+		routes[pattern] = route
+	}
+	checked := 0
+	for path, item := range openapitest.Document(t).Paths.Map() {
+		for method, operation := range item.Operations() {
+			t.Run(method+" "+path, func(t *testing.T) {
+				request := httptest.NewRequest(method, "http://127.0.0.1:8080"+pathParameter.ReplaceAllString(path, "x"), strings.NewReader("{}"))
+				pattern := httpapi.RoutePattern(product, request)
+				route, ok := routes[pattern]
+				if !ok {
+					t.Fatalf("no route for operation %s", operation.OperationID)
+				}
+				marker, declared := operation.Extensions["x-anas-posture"]
+				if declared && marker != "admin" {
+					t.Fatalf("invalid administrator posture: %v", marker)
+				}
+				if declared != (route.Posture == apiroute.Admin) {
+					t.Fatalf("specification admin = %v, route %s is %s", declared, pattern, route.Posture)
+				}
+				if !declared {
+					return
+				}
+				if operation.Security != nil && len(*operation.Security) == 0 {
+					t.Fatal("administrator operation declared public")
+				}
+				checked++
+				request.Header.Set("Content-Type", "application/json")
+				request.Header.Set("X-CSRF-Token", member.CSRFToken)
+				request.AddCookie(&http.Cookie{Name: "anas_session", Value: member.Token})
+				recorder := httptest.NewRecorder()
+				product.ServeHTTP(recorder, request)
+				var body struct {
+					Error struct {
+						Code string `json:"code"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				if recorder.Code != http.StatusForbidden || body.Error.Code != "forbidden" {
+					t.Fatalf("member request = %d %s, want 403 forbidden", recorder.Code, recorder.Body.String())
+				}
+			})
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no administrator operations checked")
+	}
+	t.Logf("checked %d administrator operations with a member session and valid CSRF token", checked)
+}
 
 // Every operation in the specification has a route, and the guard answers
 // for its posture before any handler runs: 401 without a session cookie, and

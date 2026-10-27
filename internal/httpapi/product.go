@@ -331,7 +331,7 @@ func (h *productHandler) handleDisableUser(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *productHandler) handleCreateStoragePlan(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
+func (h *productHandler) handleCreateStoragePlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if h.storage == nil {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
@@ -343,7 +343,7 @@ func (h *productHandler) handleCreateStoragePlan(w http.ResponseWriter, r *http.
 	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
-	plan, err := h.storage.PlanVolume(r.Context(), request.DiskIDs, request.Layout)
+	plan, err := h.storage.PlanVolume(r.Context(), session.User, request.DiskIDs, request.Layout)
 	if err != nil {
 		h.writeStorageError(w, r, err)
 		return
@@ -369,7 +369,7 @@ func (h *productHandler) handleVolumes(w http.ResponseWriter, r *http.Request, _
 
 // handleContinueConversion starts converting the data volume to its layout
 // now, after a shutdown or an error stopped the conversion.
-func (h *productHandler) handleContinueConversion(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
+func (h *productHandler) handleContinueConversion(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if h.storage == nil {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
@@ -383,14 +383,14 @@ func (h *productHandler) handleContinueConversion(w http.ResponseWriter, r *http
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "storage resource was not found")
 		return
 	}
-	if err := h.storage.ContinueConversion(r.Context()); err != nil {
+	if err := h.storage.ContinueConversion(r.Context(), session.User); err != nil {
 		h.writeStorageError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
 }
 
-func (h *productHandler) handleConfirmStoragePlan(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
+func (h *productHandler) handleConfirmStoragePlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if h.storage == nil {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
@@ -401,7 +401,7 @@ func (h *productHandler) handleConfirmStoragePlan(w http.ResponseWriter, r *http
 	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
-	plan, err := h.storage.ConfirmPlan(r.Context(), r.PathValue("planID"), request.ConfirmationPhrase)
+	plan, err := h.storage.ConfirmPlan(r.Context(), session.User, r.PathValue("planID"), request.ConfirmationPhrase)
 	if err != nil {
 		h.writeStorageError(w, r, err)
 		return
@@ -409,12 +409,12 @@ func (h *productHandler) handleConfirmStoragePlan(w http.ResponseWriter, r *http
 	httpjson.Write(w, http.StatusOK, plan)
 }
 
-func (h *productHandler) handleExecuteStoragePlan(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
+func (h *productHandler) handleExecuteStoragePlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if h.storage == nil {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
 	}
-	plan, err := h.storage.ExecutePlan(r.Context(), r.PathValue("planID"))
+	plan, err := h.storage.ExecutePlan(r.Context(), session.User, r.PathValue("planID"))
 	if err != nil {
 		h.writeStorageError(w, r, err)
 		return
@@ -438,12 +438,12 @@ func (h *productHandler) handleUnfinishedStoragePlans(w http.ResponseWriter, _ *
 	httpjson.Write(w, http.StatusOK, map[string]any{"items": h.storage.UnfinishedPlans()})
 }
 
-func (h *productHandler) handleCancelStoragePlan(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
+func (h *productHandler) handleCancelStoragePlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	if h.storage == nil {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 		return
 	}
-	plan, err := h.storage.CancelPlan(r.Context(), r.PathValue("planID"))
+	plan, err := h.storage.CancelPlan(r.Context(), session.User, r.PathValue("planID"))
 	if err != nil {
 		h.writeStorageError(w, r, err)
 		return
@@ -594,6 +594,8 @@ const timeFormat = "2006-01-02T15:04:05.999999999Z07:00"
 
 func (h *productHandler) writeStorageError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, accounts.ErrForbidden):
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "administrator permission is required")
 	case errors.Is(err, storage.ErrDiskNotFound), errors.Is(err, storage.ErrPlanNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "storage resource was not found")
 	case errors.Is(err, storage.ErrDiskNotEligible):
