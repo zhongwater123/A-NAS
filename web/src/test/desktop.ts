@@ -157,7 +157,10 @@ export async function openSettingsSection(
   section: string,
 ) {
   await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
-  const sections = within(screen.getByRole("dialog", { name: "设置" })).getByRole("navigation", { name: "设置分区" });
+  // The settings window loads its code when first opened.
+  const sections = await within(screen.getByRole("dialog", { name: "设置" })).findByRole("navigation", {
+    name: "设置分区",
+  });
   await user.click(within(sections).getByRole("button", { name: section }));
 }
 

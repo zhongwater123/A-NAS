@@ -153,7 +153,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
-    expect(screen.getByText("正在读取设备状态…")).toBeTruthy();
+    expect(await screen.findByText("正在读取设备状态…")).toBeTruthy();
     await act(async () => finishRequest?.(okResponse(healthyState)));
     expect(await screen.findByText("anas-fake")).toBeTruthy();
   });

@@ -102,7 +102,11 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 
 ## 包体积
 
-`make web-build` 在构建后用 size-limit 检查首屏要下载的 JavaScript 与 CSS，上限写在 `web/.size-limit.json` 中，超过即失败。上限只在有意增加首屏内容时上调，并在 PR 中写明原因。
+`npm run build`（`make web-build`）在构建后用 size-limit 检查首屏要下载的 JavaScript 与 CSS，即 `index.html` 引用的文件，按 Brotli 压缩后计算。上限写在 [`web/.size-limit.js`](../../web/.size-limit.js) 中，超过即构建失败。
+
+- 窗口的代码不计入：首次打开时才加载。
+- 响应校验函数是单独的块：页面一开始就并行加载它们，因为第一个请求（设置状态）就要校验。
+- 只有每次访问都需要的内容才能让上限上调，并在 PR 中写明原因。
 
 ## 关联
 

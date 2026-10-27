@@ -1429,13 +1429,120 @@ button.net-rates {
 .window-actions svg {
   width: 14px;
 }
-/* No specificity, so each app's own .window-content-<app> rule wins wherever
-   its stylesheet loads; app stylesheets load before this file. */
+/* No specificity, so each app's .window-content-<app> rule below wins. */
 :where(.window-content) {
   min-height: 0;
   flex: 1;
   overflow: auto;
   background: rgba(245, 248, 252, 0.74);
+}
+
+/* Each app's window frame and content area. They are here rather than in the
+   app's own stylesheet, which loads with the app's code: the frame shows at
+   once, while the window's code is still loading. */
+/* VNAS */
+.window-content-assistant {
+  overflow: hidden;
+  background: #fff;
+  container: assistantwindow / inline-size;
+}
+/* 备份中心 */
+.app-window-backup .window-app-icon {
+  background: linear-gradient(155deg, #3ddbc4, #0f8ea3);
+}
+.window-content-backup {
+  position: relative;
+  overflow: hidden;
+  background: #f4f6f9;
+}
+/* 文件管理 */
+.window-content-files {
+  overflow: hidden;
+  background: #f6f8fb;
+  container: filewindow / inline-size;
+}
+/* 影视中心 */
+/* The cinema has no light frame: the window edge is the picture's edge. */
+.app-window.app-window-media {
+  background: #0b0e14;
+  border-color: transparent;
+}
+.app-window-media .window-titlebar {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+  color: #e9edf4;
+  background: #0d1118;
+}
+.app-window-media .window-app-icon {
+  background: linear-gradient(155deg, #34363d, #000);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+.app-window-media .window-actions button {
+  color: #c3cad6;
+}
+.app-window-media .window-actions button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.app-window-media .window-actions .close:hover {
+  color: #fff;
+  background: #e81123;
+}
+.app-window-media .resize-handle::after {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+.window-content-media {
+  position: relative;
+  overflow: hidden;
+  background: #0b0e14;
+}
+/* 音乐 */
+.window-content-music {
+  overflow: hidden;
+  background: #f7f7f9;
+  container: musicwindow / inline-size;
+}
+/* 分享 */
+.app-window-shares .window-app-icon {
+  background: linear-gradient(155deg, #ffb25e, #f2621c);
+}
+.window-content-shares {
+  overflow: hidden;
+  background: #fff;
+}
+/* 传输中心 */
+.window-content-transfers {
+  overflow: hidden;
+  background: #f3f5f8;
+  container: transferwindow / inline-size;
+}
+/* 回收站 */
+.window-content-trash {
+  position: relative;
+  overflow: hidden;
+  background: #f4f6f9;
+  container: trashwindow / inline-size;
+}
+/* Docker */
+.window-content-docker {
+  overflow: hidden;
+  background: #f3f5f8;
+  container: dockerwindow / inline-size;
+}
+/* 应用中心 */
+.window-content-store {
+  overflow: hidden;
+  background: #f3f5f8;
+  container: storewindow / inline-size;
+}
+/* 设置 */
+.window-content-settings {
+  overflow: hidden;
+  container: settingswindow / inline-size;
+}
+/* 相册 */
+/* The page scrolls inside the window so the viewer can cover the window. */
+.window-content-photos {
+  position: relative;
+  overflow: hidden;
 }
 .product-page {
   min-height: 100%;
@@ -1662,19 +1769,6 @@ button.net-rates {
   height: 13px;
   border-width: 2px;
 }
-.window-content-docker {
-  overflow: hidden;
-  background: #f3f5f8;
-  container: dockerwindow / inline-size;
-}
-
-/* App Center: styles live in appcenter/appcenter.css. */
-.window-content-store {
-  overflow: hidden;
-  background: #f3f5f8;
-  container: storewindow / inline-size;
-}
-
 .brand-mark {
   width: 26px;
   height: 26px;
@@ -1694,10 +1788,6 @@ button.net-rates {
 }
 
 /* Settings: grouped cards in the style of a system settings app. */
-.window-content-settings {
-  overflow: hidden;
-  container: settingswindow / inline-size;
-}
 .set-shell {
   --set-bg: #f3f5f8;
   --set-card: #fff;
@@ -4134,10 +4224,4 @@ button.health-go svg {
 }
 .viewing-banner button {
   margin-left: auto;
-}
-
-/* Photos: the page scrolls inside the window so the viewer can cover the window. */
-.window-content-photos {
-  position: relative;
-  overflow: hidden;
 }

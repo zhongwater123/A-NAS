@@ -1,13 +1,4 @@
 /* 备份中心: a calm, light workspace with one teal accent for protection. */
-.app-window-backup .window-app-icon {
-  background: linear-gradient(155deg, #3ddbc4, #0f8ea3);
-}
-.window-content-backup {
-  position: relative;
-  overflow: hidden;
-  background: #f4f6f9;
-}
-
 /* .bk-layer carries the backup center's look into other windows, such as the
    file manager's 历史版本 dialog. */
 .bk-app,

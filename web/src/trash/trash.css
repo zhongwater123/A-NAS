@@ -1,13 +1,6 @@
 /* 回收站: the 备份中心's calm workspace. A header with the totals, then
    one card: filters or the selection's actions, column heads,
    and the items grouped by the day they were deleted. */
-.window-content-trash {
-  position: relative;
-  overflow: hidden;
-  background: #f4f6f9;
-  container: trashwindow / inline-size;
-}
-
 .tr-app {
   flex-direction: column;
   outline: none;

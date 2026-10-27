@@ -341,6 +341,10 @@
   background: transparent;
   transition: background 0.15s;
 }
+.ph-icon-button.primary {
+  color: white;
+  background: #2679df;
+}
 .ph-icon-button:hover:not(:disabled) {
   background: rgba(20, 26, 38, 0.07);
 }
@@ -468,6 +472,8 @@
   height: 16px;
 }
 .ph-button.primary {
+  padding: 8px 14px;
+  border-radius: 9px;
   color: #fff;
   background: var(--ph-accent);
   box-shadow: 0 2px 8px rgba(47, 111, 237, 0.3);

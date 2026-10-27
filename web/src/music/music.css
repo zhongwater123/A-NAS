@@ -1,11 +1,5 @@
 /* Music window. A light library over a bottom console; "now playing" turns
    the window dark and immersive. The accent follows the desktop icon. */
-.window-content-music {
-  overflow: hidden;
-  background: #f7f7f9;
-  container: musicwindow / inline-size;
-}
-
 .mu-app {
   --mu-bg: #f7f7f9;
   --mu-surface: #ffffff;

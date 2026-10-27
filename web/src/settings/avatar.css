@@ -53,8 +53,6 @@
   border-radius: 8px;
   color: var(--set-muted);
   background: transparent;
-  font-size: 13px;
-  font-weight: 600;
   cursor: pointer;
   transition:
     background 0.15s,
@@ -180,8 +178,6 @@
   border-radius: 7px;
   color: var(--set-muted);
   background: transparent;
-  font-size: 12.5px;
-  font-weight: 600;
   cursor: pointer;
 }
 .avd-segment button svg {
@@ -222,7 +218,6 @@
   border-radius: 6px;
   color: var(--set-accent);
   background: transparent;
-  font-weight: 600;
   white-space: nowrap;
   text-overflow: ellipsis;
   cursor: pointer;
@@ -425,7 +420,6 @@
 @container avatardialog (max-width: 560px) {
   .avd-tabs button {
     padding: 0 6px;
-    font-size: 12px;
   }
   .avd-crop {
     grid-template-columns: minmax(0, 1fr);

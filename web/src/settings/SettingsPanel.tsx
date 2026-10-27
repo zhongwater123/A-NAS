@@ -54,18 +54,12 @@ import { describeFinding } from "./health";
 import { HostStateBanner, HostStatePending } from "./hostState";
 import { PersonalizationSection } from "./PersonalizationSection";
 import { Avatar, Banner, Group, IconTile, messageOf, PageHeader, Pill, RefreshButton, type Tone } from "./parts";
-import {
-  type StoragePlanFlow,
-  StorageSection,
-  useVolumes,
-  type VolumesView,
-  volumeState,
-  volumeUsage,
-} from "./StorageSection";
+import { StorageSection, useVolumes, type VolumesView, volumeState, volumeUsage } from "./StorageSection";
+import type { StoragePlanFlow } from "./storagePlan";
 import { TerminalSection } from "./TerminalSection";
 import type { SessionStatus } from "./terminal";
 
-export { type StoragePlanFlow, useStoragePlan } from "./StorageSection";
+export { type StoragePlanFlow, useStoragePlan } from "./storagePlan";
 
 export type SettingsSection =
   | "account"

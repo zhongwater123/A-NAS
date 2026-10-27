@@ -1,14 +1,6 @@
 /* 分享: a mail-like window, warm orange for people handing each other things.
    Every rule is scoped to .sh-* so the window, its dialogs, the send dialog
    and the desktop toasts share one look. */
-.app-window-shares .window-app-icon {
-  background: linear-gradient(155deg, #ffb25e, #f2621c);
-}
-.window-content-shares {
-  overflow: hidden;
-  background: #fff;
-}
-
 .sh-app,
 .sh-layer,
 .sh-backdrop,
@@ -115,6 +107,9 @@
   flex: none;
 }
 .sh-btn.primary {
+  padding: 8px 14px;
+  border: 0;
+  font-weight: 700;
   border-color: transparent;
   color: #fff;
   background: var(--sh-accent);

@@ -57,6 +57,9 @@
   background: #f7f9fc;
 }
 .tc-button.primary {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 9px;
   border-color: transparent;
   color: #fff;
   background: var(--tc-accent);

@@ -1,37 +1,42 @@
 import { ArrowDownUp, FolderClosed, Music2, Settings, Share2, ShoppingBag, Trash2 } from "lucide-react";
-import { lazy, ReactNode, Suspense } from "react";
+import { lazy, ReactNode } from "react";
 
 import type { Session, User } from "../api.generated";
-import { AppCenterPanel } from "../appcenter/AppCenterPanel";
 import { AssistantGlyph } from "../assistant/AssistantGlyph";
-import { BackupCenter } from "../backup/BackupCenter";
 import { BackupCenterGlyph } from "../backup/BackupCenterGlyph";
 import { DockerGlyph } from "../docker/DockerGlyph";
-import { DockerPanel } from "../docker/DockerPanel";
 import { appProject } from "../docker/model";
-import { FilePanel } from "../files/FilePanel";
-import { MediaCenter } from "../media/MediaCenter";
 import { type AppGlyph, MediaCenterGlyph } from "../media/MediaCenterGlyph";
-import { MusicPanel } from "../music/MusicPanel";
 import { displayName } from "../people/people";
 import { PhotosGlyph } from "../photos/PhotosGlyph";
-import { PhotosPanel } from "../photos/PhotosPanel";
-import { SettingsPanel, SettingsSection, useStoragePlan } from "../settings/SettingsPanel";
-import { SharesPanel } from "../shares/SharesPanel";
+import type { SettingsSection } from "../settings/SettingsPanel";
+import type { StoragePlanFlow } from "../settings/storagePlan";
 import type { TransferLocation } from "../transfers/api";
-import { TrashPanel } from "../trash/TrashPanel";
 import { DesktopApp } from "./DesktopGrid";
 import type { HostStateView } from "./useHostState";
 
-// The assistant window, with its chat libraries, loads when first opened.
+// Every window loads its code and styles when it is first opened; the desktop
+// needs only the apps' icons. The desktop shows a spinner in the window until then.
+const AppCenterPanel = lazy(() =>
+  import("../appcenter/AppCenterPanel").then((module) => ({ default: module.AppCenterPanel })),
+);
 const AssistantPanel = lazy(() =>
   import("../assistant/AssistantPanel").then((module) => ({ default: module.AssistantPanel })),
 );
-// The transfer center loads when first opened; the desktop only needs its
-// status-bar pill and toasts.
+const BackupCenter = lazy(() => import("../backup/BackupCenter").then((module) => ({ default: module.BackupCenter })));
+const DockerPanel = lazy(() => import("../docker/DockerPanel").then((module) => ({ default: module.DockerPanel })));
+const FilePanel = lazy(() => import("../files/FilePanel").then((module) => ({ default: module.FilePanel })));
+const MediaCenter = lazy(() => import("../media/MediaCenter").then((module) => ({ default: module.MediaCenter })));
+const MusicPanel = lazy(() => import("../music/MusicPanel").then((module) => ({ default: module.MusicPanel })));
+const PhotosPanel = lazy(() => import("../photos/PhotosPanel").then((module) => ({ default: module.PhotosPanel })));
+const SettingsPanel = lazy(() =>
+  import("../settings/SettingsPanel").then((module) => ({ default: module.SettingsPanel })),
+);
+const SharesPanel = lazy(() => import("../shares/SharesPanel").then((module) => ({ default: module.SharesPanel })));
 const TransferCenter = lazy(() =>
   import("../transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })),
 );
+const TrashPanel = lazy(() => import("../trash/TrashPanel").then((module) => ({ default: module.TrashPanel })));
 
 // What another window can ask an app to show when it opens it.
 export interface WindowIntentPayloads {
@@ -68,7 +73,7 @@ export interface WindowContext {
   // reopening it returns to where the user left off.
   settingsSection: SettingsSection;
   setSettingsSection: (section: SettingsSection) => void;
-  storagePlan: ReturnType<typeof useStoragePlan>;
+  storagePlan: StoragePlanFlow;
   changeUser: (user: User) => void;
   logout: () => void;
 }
@@ -97,12 +102,6 @@ interface AppDefinition {
   // The window's content.
   render: (context: WindowContext) => ReactNode;
 }
-
-const loading = (
-  <div className="center-state">
-    <span className="loader" />
-  </div>
-);
 
 // The desktop's built-in apps. Their order is the initial order of the desktop
 // icons and of the windows on the page.
@@ -187,9 +186,7 @@ const definitions = {
     // The id stays "download" so the icon keeps its place on desktops arranged before the rename.
     launcher: { id: "download", keywords: "传输 上传 下载 进度 续传 transfer upload download" },
     render: ({ open }) => (
-      <Suspense fallback={loading}>
-        <TransferCenter onOpenFiles={() => open("files")} onOpenLocation={(location) => open("files", location)} />
-      </Suspense>
+      <TransferCenter onOpenFiles={() => open("files")} onOpenLocation={(location) => open("files", location)} />
     ),
   },
   backup: {
@@ -259,14 +256,12 @@ const definitions = {
       ready: ({ assistantReady }) => assistantReady,
     },
     render: ({ session, open, intents, intentHandled }) => (
-      <Suspense fallback={null}>
-        <AssistantPanel
-          username={session.user.username}
-          onShowPhoto={(assetId) => open("photos", { assetId })}
-          intent={intents.assistant}
-          onIntentHandled={() => intentHandled("assistant")}
-        />
-      </Suspense>
+      <AssistantPanel
+        username={session.user.username}
+        onShowPhoto={(assetId) => open("photos", { assetId })}
+        intent={intents.assistant}
+        onIntentHandled={() => intentHandled("assistant")}
+      />
     ),
   },
 } satisfies Record<string, AppDefinition>;

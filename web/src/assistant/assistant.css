@@ -2,12 +2,6 @@
    quiet conversation list beside a reading-width thread on a white dot grid.
    Colour is kept for outcomes only: red for failures and deletions, green
    for applied changes, and the diff's own colours. */
-.window-content-assistant {
-  overflow: hidden;
-  background: #fff;
-  container: assistantwindow / inline-size;
-}
-
 .as-app {
   --as-bg: #f4f4f5;
   --as-surface: #ffffff;

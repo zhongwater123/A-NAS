@@ -1,10 +1,4 @@
 /* 传输中心 window; notices.css holds its tokens and buttons. */
-.window-content-transfers {
-  overflow: hidden;
-  background: #f3f5f8;
-  container: transferwindow / inline-size;
-}
-
 .tc-shell {
   height: 100%;
   min-height: 0;

@@ -1,7 +1,6 @@
 import createClient from "openapi-fetch";
 
 import type { paths, Session } from "../api.generated";
-import { responseValidators } from "../api.validators.generated";
 
 let sessionEndedListener: (() => void) | undefined;
 
@@ -109,6 +108,10 @@ type ClientPaths = { [Path in keyof paths]: { [Method in keyof paths[Path]]: Wit
 // (api.generated.ts, `npm run generate`). It sends what apiFetch sends, with
 // the CSRF token on writes; call turns its result into data or an APIError.
 // The page's origin is the base because a Request needs an absolute URL.
+// The validators are a chunk of their own that the page starts loading at once,
+// beside the first requests, instead of a part of the main bundle.
+const responseValidators = import("../api.validators.generated").then((module) => module.responseValidators);
+
 export const client = createClient<ClientPaths>({
   baseUrl: window.location.origin,
   headers: { Accept: "application/json" },
@@ -124,7 +127,7 @@ client.use({
   // list (10-07) fails the call instead of blanking the desktop. The list is
   // in tools/openapi/validators.mjs.
   async onResponse({ request, response, schemaPath }) {
-    const validate = responseValidators[`${request.method} ${schemaPath} ${response.status}`];
+    const validate = (await responseValidators)[`${request.method} ${schemaPath} ${response.status}`];
     if (!validate) return undefined;
     const body: unknown = await response
       .clone()

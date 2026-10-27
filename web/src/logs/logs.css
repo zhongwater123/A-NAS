@@ -27,8 +27,6 @@
   border-radius: 8px;
   color: var(--set-muted);
   background: transparent;
-  font-size: 13px;
-  font-weight: 500;
   cursor: pointer;
   transition:
     background 0.15s,

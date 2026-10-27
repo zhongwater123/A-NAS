@@ -4,6 +4,7 @@ import {
   MouseEvent as ReactMouseEvent,
   ReactNode,
   PointerEvent as ReactPointerEvent,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -20,7 +21,8 @@ import { whenText } from "../assistant/taskTime";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
 import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
-import { SettingsSection, useStoragePlan } from "../settings/SettingsPanel";
+import type { SettingsSection } from "../settings/SettingsPanel";
+import { useStoragePlan } from "../settings/storagePlan";
 import { SharesProvider, useShares } from "../shares/SharesProvider";
 import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
@@ -60,8 +62,15 @@ function ShellPart({ name, children }: { name: string; children: ReactNode }) {
 // WindowContent is what an app shows in its window. Dragging, resizing and
 // stacking change only the window around it.
 const WindowContent = memo(function WindowContent({ id, context }: { id: WindowID; context: WindowContext }) {
-  return apps[id].render(context);
+  return <Suspense fallback={windowLoading}>{apps[id].render(context)}</Suspense>;
 });
+
+// What a window shows while its code loads, the first time it opens.
+const windowLoading = (
+  <div className="center-state">
+    <span className="loader" />
+  </div>
+);
 
 // A press on the wallpaper that moves this many pixels or more is a drag, not a click.
 const wallpaperClickSlop = 6;
