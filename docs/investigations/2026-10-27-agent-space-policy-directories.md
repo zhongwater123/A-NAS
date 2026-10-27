@@ -1,7 +1,7 @@
 # Agent空间 保留目录未受保护，链接扩大 Landlock 可写范围
 
-状态：open；修复及最小回归已实现，待完整门禁、审查、合并与实机验收。
-更新时间：2026-10-27
+状态：open；修复、回归、完整门禁和上传前审查已通过，实机验收尚未执行。
+更新时间：2026-10-28
 
 ## 症状与复现
 
@@ -29,7 +29,8 @@ SMB 采用 issue 允许的 veto 方案：Shared 中名为 `Agent空间` 的条�
 
 - 新增失败复现修复后通过；全部文件服务、文件代理、Host Agent 普通测试通过。
 - 真实 Btrfs/Samba 权限矩阵通过：管理目录归 root、本人发布/他人只读、SMB 改名拒绝、冒名内容保留在旁边、链接目标 ACL 不变、修复后账号目录重建；原有普通 Shared 跨成员删除测试仍通过。
-- 系统测试改为验证真实 Host Agent 修复，替代 spike 脚本模拟；完整门禁与系统测试仍需完成。
+- 系统测试改为验证真实 Host Agent 修复，替代 spike 脚本模拟；Debian 13/systemd 可丢弃容器测试通过，334 PASS、0 FAIL。
+- `make check-steps` 全部目标通过，`make race-test` 通过。审查发现目录上传会更换管理目录 ID，新增 `TestFolderUploadThroughAgentSpacePreservesDirectoryIDs` 验证原实现失败、修复后通过；最终提交重跑格式、文档、运维、vet、Go lint、全部 Go 测试与二进制构建通过，两项复审无剩余发现。
 - 部署后的 Windows SMB 与旧目录恢复核对见[实机验收](../runbooks/accept-features-on-experimental-nas.md#文件管理登录与账号)。
 
 ## 关联
