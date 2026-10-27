@@ -1,3 +1,4 @@
+import { relativeTime as formatRelativeTime } from "../format/time";
 import { Lrc } from "lrc-kit";
 
 import type { MusicSource, Track } from "./musicApi";
@@ -320,15 +321,7 @@ export function summary(tracks: Track[]): string {
 }
 
 export function relativeTime(iso: string, now = Date.now()): string {
-  const elapsed = Math.max(0, now - Date.parse(iso));
-  const minute = 60_000;
-  if (elapsed < minute) return "刚刚";
-  if (elapsed < 60 * minute) return `${Math.floor(elapsed / minute)} 分钟前`;
-  if (elapsed < 24 * 60 * minute) return `${Math.floor(elapsed / (60 * minute))} 小时前`;
-  const days = Math.floor(elapsed / (24 * 60 * minute));
-  if (days === 1) return "昨天";
-  if (days < 7) return `${days} 天前`;
-  return new Date(iso).toLocaleDateString("zh-CN", { month: "long", day: "numeric" });
+  return formatRelativeTime(iso, now, { dateAfterDays: 7, numeric: "auto" });
 }
 
 export const formatLabel: Record<string, string> = {

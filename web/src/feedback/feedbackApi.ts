@@ -1,3 +1,4 @@
+import { errorText } from "../errorMessages";
 import { APIError, call, client, rawBody } from "../api";
 
 export type { FeedbackComment, FeedbackImage, FeedbackItem } from "../api.generated";
@@ -75,7 +76,7 @@ function edit(version: number, text: string, keep: string[], images: Blob[]) {
 // describeFeedbackError explains a failed request in the panel's words, for
 // an item or for a comment.
 export function describeFeedbackError(error: unknown, about: "item" | "comment" = "item"): string {
-  if (!(error instanceof APIError)) return "操作失败，请稍后再试";
+  if (!(error instanceof APIError)) return errorText(error);
   const comment = about === "comment";
   switch (error.code) {
     case "feedback_empty":
@@ -96,9 +97,7 @@ export function describeFeedbackError(error: unknown, about: "item" | "comment" 
       return "其他人刚刚修改了这条反馈";
     case "not_found":
       return "这条反馈已被删除";
-    case "network_error":
-      return "网络连接中断";
     default:
-      return error.status >= 500 ? "服务暂时不可用，请稍后再试" : error.message || "操作失败，请稍后再试";
+      return errorText(error);
   }
 }

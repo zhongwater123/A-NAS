@@ -1,3 +1,4 @@
+import { calendarDate, formatClock } from "./format/time";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { ReactNode, useEffect, useId, useState } from "react";
 
@@ -184,8 +185,8 @@ function NetworkRate({
 
 function Clock() {
   const now = useNow();
-  const time = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
-  const date = `${now.getMonth() + 1}月${now.getDate()}日 周${"日一二三四五六"[now.getDay()]}`;
+  const time = formatClock(now);
+  const date = calendarDate(now, now, "short");
   return (
     <time className="status-time" dateTime={now.toISOString()}>
       <strong>{time}</strong>

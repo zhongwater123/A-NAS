@@ -1,3 +1,4 @@
+import { APIError } from "../api";
 import {
   ArrowUpRight,
   Boxes,
@@ -16,7 +17,7 @@ import {
 } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useEffectEvent, useState } from "react";
 
-import { AppJob, AppsAPIError, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "../appsApi";
+import { AppJob, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "../appsApi";
 import { AppIcon, JobOutput, Layer, Logins, Progress, RichText } from "./parts";
 import {
   appURL,
@@ -81,7 +82,7 @@ export function InstallSheet({ app, busyApp, onChanged, onClose }: SheetProps & 
       await onChanged();
     } catch (error) {
       setFailure(describeError(error));
-      if (error instanceof AppsAPIError && error.code === "plan_changed") void loadPlan();
+      if (error instanceof APIError && error.code === "plan_changed") void loadPlan();
     } finally {
       setSubmitting(false);
     }

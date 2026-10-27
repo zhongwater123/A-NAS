@@ -1,7 +1,8 @@
+import { APIError } from "../api";
 import { CircleAlert, Compass, PackageCheck, RotateCw, Search, ShieldCheck, ShoppingBag, X } from "lucide-react";
 import { KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { AppList, AppsAPIError, CatalogApp, readApps } from "../appsApi";
+import { AppList, CatalogApp, readApps } from "../appsApi";
 import { AppDetail } from "./AppDetail";
 import { CategoryPage, CategoryTile, Discover, Installed, SearchResults, listedAsInstalled } from "./Browse";
 import { InstallSheet, UninstallDialog } from "./InstallSheet";
@@ -301,7 +302,7 @@ function useAppList() {
       })
       .catch((failure: unknown) => {
         if (failure instanceof DOMException && failure.name === "AbortError") return;
-        setError(failure instanceof AppsAPIError ? failure.code : "request_failed");
+        setError(failure instanceof APIError ? failure.code : "request_failed");
       });
   }, []);
 

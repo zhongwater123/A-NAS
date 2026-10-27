@@ -28,15 +28,11 @@ export function nameProblem(name: string): string | undefined {
 }
 
 // nameErrorText words the API's name errors.
+export const nameErrors: Record<string, string> = {
+  name_too_long: nameTooLongText,
+  name_not_portable: nameNotPortableText,
+  name_conflict: "这里已有同名项目（不区分大小写）",
+};
 export function nameErrorText(error: unknown): string | undefined {
-  if (!(error instanceof APIError)) return undefined;
-  switch (error.code) {
-    case "name_too_long":
-      return nameTooLongText;
-    case "name_not_portable":
-      return nameNotPortableText;
-    case "name_conflict":
-      return "这里已有同名项目（不区分大小写）";
-  }
-  return undefined;
+  return error instanceof APIError && Object.hasOwn(nameErrors, error.code) ? nameErrors[error.code] : undefined;
 }

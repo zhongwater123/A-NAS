@@ -1,3 +1,6 @@
+import { formatDate, formatClock as clock } from "../format/time";
+import { relativeUnit } from "../format/time";
+import { relativeTime } from "../format/time";
 import { ContainerImage, ContainerSummary } from "../containersApi";
 
 export type Tone = "ok" | "warn" | "danger" | "idle";
@@ -35,7 +38,7 @@ export function describeContainer(item: ContainerSummary): Condition {
           ? "starting"
           : undefined;
   const exitCode = ended ? Number(ended[1]) : undefined;
-  const since = ended ? duration(ended[2]) : undefined;
+  const since = ended ? dockerAgo(ended[2]) : undefined;
 
   switch (item.state) {
     case "running": {
@@ -55,14 +58,14 @@ export function describeContainer(item: ContainerSummary): Condition {
       return {
         label: "重启中",
         tone: "warn",
-        detail: since === undefined ? status : `${ago(since)}退出 · 退出码 ${exitCode}`,
+        detail: since === undefined ? status : `${since}退出 · 退出码 ${exitCode}`,
         exitCode,
         attention: true,
       };
     case "exited": {
       if (since === undefined || exitCode === undefined)
         return { label: "已停止", tone: "idle", detail: status, attention: false };
-      const when = since === "" ? "刚刚停止" : `${since}前停止`;
+      const when = `${since}停止`;
       if (stopExitCodes.has(exitCode))
         return {
           label: "已停止",
@@ -107,8 +110,12 @@ function after(prefix: string, value: string): string {
   return /^\d/.test(value) ? `${prefix} ${value}` : `${prefix}${value}`;
 }
 
-function ago(since: string): string {
-  return since === "" ? "刚刚" : `${since}前`;
+function dockerAgo(text: string): string | undefined {
+  if (/^less than a second$/i.test(text)) return "刚刚";
+  const approximate = /^about an? (minute|hour)$/i.exec(text);
+  if (approximate) return `约 ${relativeUnit(-1, approximate[1].toLowerCase() as "minute" | "hour")}`;
+  const match = /^(\d+) (second|minute|hour|day|week|month|year)s?$/i.exec(text);
+  return match ? relativeUnit(-Number(match[1]), match[2].toLowerCase() as Intl.RelativeTimeFormatUnit) : undefined;
 }
 
 export type Filter = "all" | "running" | "stopped" | "attention";
@@ -313,44 +320,21 @@ export function formatPercent(value: number): string {
 }
 
 export function formatDateTime(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : new Intl.DateTimeFormat("zh-CN", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).format(date);
+  return formatDate(value, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
 }
 
 export function formatClock(value: string | number | Date): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(
-        date,
-      );
+  return Number.isNaN(new Date(value).getTime()) ? "" : clock(value, true);
 }
 
 // "3 周前" for an image's age; exact dates live in the tooltip.
 export function formatAgo(value: string, now = Date.now()): string {
-  const time = Date.parse(value);
-  if (Number.isNaN(time)) return "—";
-  const seconds = Math.round((time - now) / 1_000);
-  const steps: Array<[Intl.RelativeTimeFormatUnit, number]> = [
-    ["year", 31_536_000],
-    ["month", 2_592_000],
-    ["week", 604_800],
-    ["day", 86_400],
-    ["hour", 3_600],
-    ["minute", 60],
-  ];
-  const format = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" });
-  for (const [unit, size] of steps) {
-    if (Math.abs(seconds) >= size) return format.format(Math.trunc(seconds / size), unit);
-  }
-  return "刚刚";
+  return relativeTime(value, now, { dateAfterDays: Infinity, numeric: "auto" });
 }
