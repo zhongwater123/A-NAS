@@ -30,8 +30,8 @@ func (walkingSnapshots) Open(context.Context, string, string) (io.ReadCloser, fi
 
 func (walkingSnapshots) Delete(context.Context, string, string) error { return nil }
 
-func (walkingSnapshots) Prune(context.Context, []string) (files.SnapshotPrune, error) {
-	return files.SnapshotPrune{}, nil
+func (walkingSnapshots) Survey(context.Context, []string) (files.SnapshotSurvey, error) {
+	return files.SnapshotSurvey{}, nil
 }
 
 // TestReconcileAtScale measures listing a folder, a tree below a folder (as

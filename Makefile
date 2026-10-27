@@ -89,8 +89,19 @@ fmt-check:
 	@files="$$(gofmt -l $$(find . -name '*.go' -type f -not -path './.git/*'))"; \
 	if [ -n "$$files" ]; then echo "The following files need gofmt:"; echo "$$files"; exit 1; fi
 
+# lychee checks the links in every tracked Markdown file (in a copy without
+# .git, every *.md file) offline: that the target file exists and, for a
+# Markdown target, that the heading does. Releases resolve headings
+# differently, so docs-check runs only this one; CI installs it from the
+# release by hash.
+LYCHEE_VERSION = 0.24.2
+
 docs-check:
 	$(GO) run ./tools/doccheck
+	@have="$$(lychee --version 2>/dev/null | sed -n 's/^lychee //p')"; \
+	if [ "$$have" != "$(LYCHEE_VERSION)" ]; then echo "docs-check needs lychee $(LYCHEE_VERSION); found: $${have:-none}" >&2; exit 1; fi
+	{ git ls-files '*.md' 2>/dev/null || find . -name '*.md' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' -not -path '*/build/*' -not -path '*/dist/*'; } | \
+	lychee --offline --include-fragments --no-progress --files-from -
 
 # Shell scripts, units and installer conventions, and Dependabot's groups
 # (tools/depcheck keeps 0.x web packages out of them).
@@ -178,6 +189,30 @@ ops-check:
 	grep -Fqx 'CPUWeight=10' deploy/systemd/system/anas.slice
 	grep -Fq 'anas-system.slice.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fq '/etc/systemd/system/anas.slice' scripts/install-v1.0.1-system-services.sh
+	grep -Fqx 'User=a-nas-vec-%i' deploy/systemd/system/anas-vectors@.service
+	grep -Fqx 'DynamicUser=true' deploy/systemd/system/anas-vectors@.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-vectors@.service
+	grep -Fqx 'StopWhenUnneeded=yes' deploy/systemd/system/anas-vectors@.service
+	grep -Fqx 'Slice=anas-vectors.slice' deploy/systemd/system/anas-vectors@.service
+	grep -Fq -- '--disable-telemetry' deploy/qdrant/start.sh
+	grep -Fqx 'ExecStart=/opt/a-nas/current/vectors/start.sh %S/a-nas-vectors/%i /opt/a-nas/current' deploy/systemd/system/anas-vectors@.service
+	grep -Fqx 'LimitNOFILE=65536' deploy/systemd/system/anas-vectors@.service
+	grep -Fqx 'MemoryMax=1536M' deploy/systemd/system/anas-vectors.slice
+	grep -Fqx 'StartLimitIntervalSec=0' deploy/systemd/system/anas-vectors-proxy@.service
+	! grep -q '^\[Install\]' deploy/systemd/system/anas-vectors@.service
+	grep -Fqx 'SocketUser=%i' deploy/systemd/system/anas-vectors-proxy@.socket
+	grep -Fqx 'SocketMode=0600' deploy/systemd/system/anas-vectors-proxy@.socket
+	grep -Fqx 'JoinsNamespaceOf=anas-vectors@%i.service' deploy/systemd/system/anas-vectors-proxy@.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-vectors-proxy@.service
+	grep -Fqx 'telemetry_disabled: true' deploy/qdrant/config.yaml
+	grep -Fqx '  enable_static_content: false' deploy/qdrant/config.yaml
+	grep -Fqx '  host: 127.0.0.1' deploy/qdrant/config.yaml
+	grep -Fq 'systemctl enable anas-vectors-proxy@a-nas-photos.socket' scripts/install-v1.0.1-system-services.sh
+	grep -Fqx 'Environment=ANAS_PHOTOS_VECTOR_SOCKET=/run/a-nas-vectors/a-nas-photos.sock' deploy/systemd/system/anas-photos.service
+	grep -Fq 'anas-vectors-system@.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'anas-vectors-system.slice.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'vectors-start.sh.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'vectors-qdrant.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	grep -Fqx 'ListenStream=/run/a-nas-media/media.sock' deploy/systemd/system/anas-media.socket
 	grep -Fq '"/run/a-nas-media/media.sock"' cmd/anas-api/config.go
 	grep -Fqx 'Accept=yes' deploy/systemd/system/anas-media.socket

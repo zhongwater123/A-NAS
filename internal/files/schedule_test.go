@@ -43,6 +43,9 @@ type snapshotFixture struct {
 	volume        *switchableVolume
 	// backend replaces the development snapshot backend when set before open.
 	backend files.SnapshotBackend
+	// driver, when set before open, names the database/sql driver that the
+	// catalog is opened through.
+	driver string
 }
 
 // at is a local time on 2026-10-12, a Monday, plus whole days.
@@ -94,7 +97,11 @@ func newSnapshotFixture(t *testing.T) *snapshotFixture {
 // open opens the catalog; tests that prepare an older catalog call it later.
 func (f *snapshotFixture) open() *files.Service {
 	f.t.Helper()
-	catalog, err := files.OpenSQLite(f.catalogPath)
+	driver := f.driver
+	if driver == "" {
+		driver = "sqlite3"
+	}
+	catalog, err := files.OpenSQLiteWithDriver(driver, f.catalogPath)
 	if err != nil {
 		f.t.Fatalf("open file catalog: %v", err)
 	}

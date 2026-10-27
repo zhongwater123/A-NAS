@@ -140,11 +140,11 @@ func (s *Service) clearPeople(ctx context.Context, tx *sql.Tx, libraryID string)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	var sheets [][2]string
 	for rows.Next() {
 		var sheet [2]string
 		if err := rows.Scan(&sheet[0], &sheet[1]); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		sheets = append(sheets, sheet)

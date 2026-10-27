@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strconv"
 	"strings"
@@ -116,29 +117,29 @@ FROM shows WHERE library_id IN (`+in+`)`, ids...)
 	if err != nil {
 		return nil, err
 	}
+	defer showRows.Close()
 	for showRows.Next() {
 		var show showRow
 		var genres, added string
 		if err := showRows.Scan(&show.ID, &show.LibraryID, &show.Title, &show.Original, &show.Year, &show.Plot, &genres, &show.Rating,
 			&show.Poster, &show.Backdrop, &added); err != nil {
-			_ = showRows.Close()
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(genres), &show.Genres)
 		show.Added = parseTime(added)
 		c.shows[show.ID] = &show
 	}
-	if err := showRows.Close(); err != nil {
+	if err := errors.Join(showRows.Err(), showRows.Close()); err != nil {
 		return nil, err
 	}
 	rows, err := s.store.db.QueryContext(ctx, "SELECT "+videoColumns+" FROM videos WHERE library_id IN ("+in+")", ids...)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		video, err := scanVideo(rows)
 		if err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		c.videos[video.ID] = video
@@ -150,7 +151,7 @@ FROM shows WHERE library_id IN (`+in+`)`, ids...)
 			}
 		}
 	}
-	if err := rows.Close(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
 	for _, show := range c.shows {
@@ -160,17 +161,17 @@ FROM shows WHERE library_id IN (`+in+`)`, ids...)
 	if err != nil {
 		return nil, err
 	}
+	defer progress.Close()
 	for progress.Next() {
 		var id, played string
 		var row progressRow
 		if err := progress.Scan(&id, &row.Position, &row.Duration, &row.Watched, &played, &row.InHistory); err != nil {
-			_ = progress.Close()
 			return nil, err
 		}
 		row.PlayedAt = parseTime(played)
 		c.progress[id] = row
 	}
-	if err := progress.Close(); err != nil {
+	if err := errors.Join(progress.Err(), progress.Close()); err != nil {
 		return nil, err
 	}
 	favorites, err := s.store.db.QueryContext(ctx, "SELECT target_id, created_at FROM favorites WHERE user_id = ?", actor.ID)

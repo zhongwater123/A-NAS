@@ -76,10 +76,10 @@ func (s *Service) Reconcile(ctx context.Context) (ReconcileReport, error) {
 	if err != nil {
 		return report, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
 			return report, err
 		}
 		referenced[id] = false
@@ -130,10 +130,10 @@ func (s *Service) reconcileDerived(ctx context.Context, report *ReconcileReport)
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var objectID, derivation string
 		if err := rows.Scan(&objectID, &derivation); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		recorded[derivedPath(derivation, objectID)] = false
@@ -171,22 +171,8 @@ func (s *Service) reconcileDerived(ctx context.Context, report *ReconcileReport)
 	rescanned := 0
 	for _, derivation := range slices.Concat(knownDerivations, sheetDerivations) {
 		sheet := slices.Contains(sheetDerivations, derivation)
-		rows, err := s.db.QueryContext(ctx, "SELECT object_id FROM derived_files WHERE derivation = ?", derivation)
+		missing, err := s.missingDerived(ctx, derivation, recorded)
 		if err != nil {
-			return err
-		}
-		var missing []string
-		for rows.Next() {
-			var objectID string
-			if err := rows.Scan(&objectID); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			if !recorded[derivedPath(derivation, objectID)] {
-				missing = append(missing, objectID)
-			}
-		}
-		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 			return err
 		}
 		for _, objectID := range missing {
@@ -219,6 +205,27 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, objectID, derivation, now, now)
 		s.wakeAI()
 	}
 	return nil
+}
+
+// missingDerived lists the objects whose file of derivation the catalog
+// records and the walk did not find, as found marks them.
+func (s *Service) missingDerived(ctx context.Context, derivation string, found map[string]bool) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT object_id FROM derived_files WHERE derivation = ?", derivation)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var missing []string
+	for rows.Next() {
+		var objectID string
+		if err := rows.Scan(&objectID); err != nil {
+			return nil, err
+		}
+		if !found[derivedPath(derivation, objectID)] {
+			missing = append(missing, objectID)
+		}
+	}
+	return missing, rows.Err()
 }
 
 // isDerivedPath reports whether path is where a known derivation of a valid

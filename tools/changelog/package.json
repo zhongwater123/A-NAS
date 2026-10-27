@@ -1,0 +1,15 @@
+{
+  "name": "a-nas-changelog-tools",
+  "private": true,
+  "description": "Drafts CHANGELOG.md entries from the pull requests merged into main, with git-cliff (cliff.toml).",
+  "engines": {
+    "node": ">=26.9.0 <27",
+    "npm": ">=11.19.1 <12"
+  },
+  "scripts": {
+    "draft": "git-cliff --workdir ../.. --config tools/changelog/cliff.toml"
+  },
+  "devDependencies": {
+    "git-cliff": "2.14.2"
+  }
+}

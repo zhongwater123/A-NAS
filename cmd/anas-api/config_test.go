@@ -240,3 +240,18 @@ func TestServiceConfigsNameEveryRelativePath(t *testing.T) {
 		t.Fatalf("loadShareServiceConfig() = %+v, %v", config, err)
 	}
 }
+
+// The vector index is off unless the unit names its socket, which must be an
+// absolute path.
+func TestPhotoServiceConfigVectorSocket(t *testing.T) {
+	if config, err := loadPhotoServiceConfig(map[string]string{}); err != nil || config.VectorSocket != "" {
+		t.Fatalf("without the variable: %+v, %v; want the index off", config, err)
+	}
+	config, err := loadPhotoServiceConfig(map[string]string{"ANAS_PHOTOS_VECTOR_SOCKET": "/run/a-nas-vectors/a-nas-photos.sock"})
+	if err != nil || config.VectorSocket != "/run/a-nas-vectors/a-nas-photos.sock" {
+		t.Fatalf("loadPhotoServiceConfig() = %+v, %v", config, err)
+	}
+	if _, err := loadPhotoServiceConfig(map[string]string{"ANAS_PHOTOS_VECTOR_SOCKET": "vectors.sock"}); err == nil {
+		t.Error("a relative vector socket was accepted")
+	}
+}

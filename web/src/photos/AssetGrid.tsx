@@ -3,7 +3,7 @@ import { ReactNode, useCallback, useEffect, useEffectEvent, useMemo, useRef, use
 
 import { gridInset, type GridProps, usePendingThumbnails, useTileRenderer } from "./grid";
 import { type Entry, flatEntries, type Split } from "./layout";
-import { messageOf } from "./model";
+import { errorText, type ErrorDomain } from "../errorMessages";
 import type { PhotoAsset, PhotoPage } from "./photosApi";
 import { PhotoScroller, useContentWidth } from "./PhotoScroller";
 
@@ -14,6 +14,7 @@ interface Props extends GridProps {
   onPage?: (page: PhotoPage, first: boolean) => void;
   onCount?: (photos: number | undefined) => void;
   onError: (message: string) => void;
+  errorDomain?: ErrorDomain;
   badge?: (asset: PhotoAsset) => ReactNode;
   empty: ReactNode;
   // loading replaces the spinner shown until the first page arrives.
@@ -26,7 +27,18 @@ interface Props extends GridProps {
 // AssetGrid shows a list without dates, such as an album, search results or
 // the trash, loading the next page as its end scrolls into view.
 export function AssetGrid(props: Props) {
-  const { listKey, load, refreshKey, hidden, rowHeight, onAssets, onCount, onPage, onError } = props;
+  const {
+    listKey,
+    load,
+    refreshKey,
+    hidden,
+    rowHeight,
+    onAssets,
+    onCount,
+    onPage,
+    onError,
+    errorDomain = "photos",
+  } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const width = useContentWidth(scrollRef, gridInset);
   const [assets, setAssets] = useState<PhotoAsset[]>();
@@ -49,13 +61,13 @@ export function AssetGrid(props: Props) {
           if (current !== generation.current) return;
           setAssets((value) => value ?? []);
           setNext(undefined);
-          onError(messageOf(caught));
+          onError(errorText(caught, errorDomain));
         })
         .finally(() => {
           if (current === generation.current) busy.current = false;
         });
     },
-    [load, onPage, onError],
+    [load, onPage, onError, errorDomain],
   );
 
   const keyRef = useRef(listKey);

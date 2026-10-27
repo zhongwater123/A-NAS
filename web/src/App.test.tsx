@@ -838,7 +838,9 @@ describe("A-NAS v1.0.1 desktop", () => {
     const store = screen.getByRole("dialog", { name: "应用中心" });
     await user.click(await within(store).findByRole("button", { name: "安装 Memos" }));
     await user.click(await within(store).findByRole("button", { name: "确认安装" }));
-    expect((await within(store).findByRole("alert")).textContent).toContain("端口已被占用（5230 is used by other）");
+    const conflict = (await within(store).findByRole("alert")).textContent;
+    expect(conflict).toContain("端口已被占用（5230）");
+    expect(conflict).not.toContain("is used by");
     unmount();
 
     routeFetch({

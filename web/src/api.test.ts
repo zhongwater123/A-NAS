@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { APIError, csrfHeader, deleteFile, listSpaces, onSessionEnded, type Session, setSession } from "./api";
+import {
+  APIError,
+  csrfHeader,
+  deleteFile,
+  listSpaces,
+  onSessionEnded,
+  readHostState,
+  type Session,
+  setSession,
+  uploadForm,
+} from "./api";
+import { readApps } from "./appsApi";
+import { readContainers } from "./containersApi";
 import { apiError, json, stubAPI } from "./test/api";
 
 const session: Session = {
@@ -35,6 +47,29 @@ describe("csrfHeader", () => {
 });
 
 describe("client", () => {
+  it("normalizes network failures across domain clients without swallowing cancellation", async () => {
+    for (const request of [listSpaces, readApps, readContainers, readHostState]) {
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+      await expect(request()).rejects.toMatchObject({ status: 0, code: "network_error" });
+      const abort = new DOMException("aborted", "AbortError");
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(abort));
+      await expect(request()).rejects.toBe(abort);
+    }
+  });
+
+  it("retains status and product code for app, container and host failures", async () => {
+    stubAPI(vi.fn(async () => apiError(503, "service_busy", "private server detail")));
+    for (const request of [readApps, readContainers, readHostState]) {
+      const error = await request().catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(APIError);
+      expect(error).toMatchObject({ status: 503, code: "service_busy", message: "private server detail" });
+    }
+  });
+
+  it("classifies an unparseable successful response", async () => {
+    stubAPI(vi.fn(async () => new Response("not json", { headers: { "Content-Type": "application/json" } })));
+    await expect(listSpaces()).rejects.toMatchObject({ code: "malformed_response" });
+  });
   it("sends the CSRF token on writes, whatever the caller passed", async () => {
     setSession(session);
     const answer = stubAPI(
@@ -75,5 +110,74 @@ describe("client", () => {
     expect(failure).toBeInstanceOf(APIError);
     expect(failure).toMatchObject({ status: 401, code: "authentication_required" });
     expect(ended).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("multipart uploads", () => {
+  class Upload {
+    static last: Upload;
+    upload = { onprogress: undefined as unknown };
+    status = 200;
+    responseText = "{}";
+    onload = () => {};
+    onerror = () => {};
+    ontimeout = () => {};
+    onabort = () => {};
+    constructor() {
+      Upload.last = this;
+    }
+    open() {}
+    setRequestHeader() {}
+    send() {}
+    abort() {
+      this.onabort();
+    }
+  }
+  const begin = async (signal?: AbortSignal) => {
+    const pending = uploadForm("/api/v1/photos/import", new FormData(), vi.fn(), signal);
+    const result = pending.catch((error: unknown) => error);
+    await Promise.resolve();
+    return { result, xhr: Upload.last };
+  };
+
+  it("shares API errors and the session-ended notification", async () => {
+    vi.stubGlobal("XMLHttpRequest", Upload);
+    const ended = vi.fn();
+    const stop = onSessionEnded(ended);
+    try {
+      const { result, xhr } = await begin();
+      xhr.status = 401;
+      xhr.responseText = JSON.stringify({ error: { code: "authentication_required", message: "private" } });
+      xhr.onload();
+      expect(await result).toBeInstanceOf(APIError);
+      expect(await result).toMatchObject({ status: 401, code: "authentication_required" });
+      expect(ended).toHaveBeenCalledOnce();
+      const network = await begin();
+      network.xhr.onerror();
+      expect(await network.result).toMatchObject({ status: 0, code: "network_error" });
+      const malformed = await begin();
+      malformed.xhr.responseText = "not json";
+      malformed.xhr.onload();
+      expect(await malformed.result).toMatchObject({ status: 200, code: "malformed_response" });
+    } finally {
+      stop();
+    }
+  });
+
+  it("does not start cancelled uploads and preserves cancellation while sending", async () => {
+    const factory = vi.fn(function () {
+      return new Upload();
+    });
+    vi.stubGlobal("XMLHttpRequest", factory);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(uploadForm("/upload", new FormData(), vi.fn(), controller.signal)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(factory).not.toHaveBeenCalled();
+    const active = new AbortController();
+    const { result } = await begin(active.signal);
+    active.abort();
+    expect(await result).toMatchObject({ name: "AbortError" });
   });
 });

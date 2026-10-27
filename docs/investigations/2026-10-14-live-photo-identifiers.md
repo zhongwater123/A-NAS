@@ -1,7 +1,7 @@
 # Apple Live Photo 配对标识被 EXIF 库遗漏
 
-状态：fixed locally；实际设备原件矩阵待扩充
-更新时间：2026-10-14
+状态：resolved；配对标识只取决于文件内容，构造的 JPEG EXIF 与 HEIF Exif item 回归已覆盖，实验 NAS 上没有可补充的证据。不同设备导出的匿名样本见后续工作
+更新时间：2026-10-27
 
 ## 症状与影响
 

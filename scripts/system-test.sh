@@ -32,6 +32,8 @@ if [[ "${1:-}" != --inside ]]; then
   for binary in anas-api anas-host-agent; do
     [[ -x "$repo/build/$binary" ]] || { echo "missing build/$binary: run make build-binaries" >&2; exit 2; }
   done
+  qdrant_tarball="$repo/build/qdrant/$(jq -r .sha256 "$repo/deploy/qdrant/qdrant.json")/$(jq -r .file "$repo/deploy/qdrant/qdrant.json")"
+  [[ -f "$qdrant_tarball" ]] || { echo "missing $qdrant_tarball: run scripts/fetch-qdrant.sh" >&2; exit 2; }
   real_ai=()
   if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
     [[ -f "$repo/build/ai-runtime.json" ]] || { echo "missing build/ai-runtime.json: run scripts/build-ai-runtime.sh" >&2; exit 2; }
@@ -139,6 +141,15 @@ stage() {
   install -m 0644 /src/deploy/systemd/system/anas-media.socket "$1/anas-media-system.socket"
   install -m 0644 "/src/deploy/systemd/system/anas-media@.service" "$1/anas-media-system@.service"
   install -m 0644 /src/deploy/systemd/system/system-anasmedia.slice "$1/anas-media-system.slice"
+  install -m 0644 /src/deploy/systemd/system/anas-vectors.slice "$1/anas-vectors-system.slice"
+  install -m 0644 "/src/deploy/systemd/system/anas-vectors@.service" "$1/anas-vectors-system@.service"
+  install -m 0644 "/src/deploy/systemd/system/anas-vectors-proxy@.socket" "$1/anas-vectors-proxy-system@.socket"
+  install -m 0644 "/src/deploy/systemd/system/anas-vectors-proxy@.service" "$1/anas-vectors-proxy-system@.service"
+  install -d "$1/vectors"
+  install -m 0644 /src/deploy/qdrant/qdrant.json /src/deploy/qdrant/config.yaml "$1/vectors/"
+  install -m 0755 /src/deploy/qdrant/start.sh /src/deploy/qdrant/wait-ready.sh "$1/vectors/"
+  ln -s "/src/build/qdrant/$(jq -r .sha256 /src/deploy/qdrant/qdrant.json)/$(jq -r .file /src/deploy/qdrant/qdrant.json)" \
+    "$1/vectors/qdrant.tar.gz"
   install -d "$1/ai/anas_ai"
   install -m 0644 /src/ai/anas_ai/*.py "$1/ai/anas_ai/"
   install -m 0644 "$ai/model.json" "$ai/detector.json" "$ai/face-detector.json" "$ai/face-embedder.json" \
@@ -614,16 +625,21 @@ btrfs subvolume delete "$(subvolume_of "$gone_snapshot")" >/dev/null 2>&1 || tru
 check "a snapshot already gone from the volume can still be deleted" \
   test "$(status_of -X DELETE -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" "$api/api/v1/snapshots/$gone_snapshot")" = 204
 check "its record is gone" denied grep -qx "$gone_snapshot" <(snapshot_ids)
-# What a crash leaves: a subvolume without a record and a record without a
-# subvolume. The Product Service sweeps both when it starts.
+# What a crash leaves: a subvolume noted as pending and a record without a
+# subvolume. The Product Service sweeps both when it starts, and leaves a
+# subvolume the catalog never noted, as one of a lost catalog (#269).
 systemctl stop anas-api
-orphan="$data/.a-nas-snapshots/ffffffffffffffffffffffffffffffff"
+orphan=$(subvolume_of snapshot:crashed)
+foreign="$data/.a-nas-snapshots/ffffffffffffffffffffffffffffffff"
 btrfs subvolume snapshot -r "$alice_root" "$orphan" >/dev/null
+btrfs subvolume snapshot -r "$alice_root" "$foreign" >/dev/null
 setpriv --reuid=a-nas --regid=a-nas --init-groups python3 - "$alice_private" <<'PY'
 import sqlite3, sys
 db = sqlite3.connect("/var/lib/a-nas/files.db")
 db.execute("INSERT INTO snapshots(id, space_id, name, origin, created_by, created_at, file_count, size_bytes)"
            " VALUES(?,?,?,?,?,?,?,?)", ("snapshot:lost", sys.argv[1], "卷上已没有", "manual", "system", "2026-10-20T00:00:00Z", 0, 0))
+db.execute("INSERT INTO pending_snapshots(id, space_id, created_at) VALUES(?,?,?)",
+           ("snapshot:crashed", sys.argv[1], "2026-10-20T00:00:00Z"))
 db.commit()
 PY
 systemctl start anas-api
@@ -631,11 +647,14 @@ for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sle
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 lost_record_gone() { snapshot_ids >/tmp/snapshot-ids.txt && ! grep -qx snapshot:lost /tmp/snapshot-ids.txt; }
 for _ in $(seq 1 100); do test ! -e "$orphan" && lost_record_gone && break; sleep 0.2; done
-check "on start the Product Service deletes a snapshot nobody records" test ! -e "$orphan"
+check "on start the Product Service deletes a snapshot whose taking never finished" test ! -e "$orphan"
 check "and the record of a snapshot gone from the volume" lost_record_gone
 check "recorded snapshots survive the sweep" test -d "$(subvolume_of "$large_snapshot_id")"
-check "the sweep is in the activity log" grep -qx snapshot.missing \
-  <(curl -fsS -b /tmp/owner.jar "$api/api/v1/activity?category=file" | jq -r '.items[].action')
+check "a snapshot the catalog never noted survives too" test -d "$foreign"
+curl -fsS -b /tmp/owner.jar "$api/api/v1/activity?category=file" | jq -r '.items[].action' >/tmp/sweep-actions.txt || true
+check "the sweep is in the activity log" grep -qx snapshot.missing /tmp/sweep-actions.txt
+check "so is the snapshot it left alone" grep -qx snapshot.unrecorded /tmp/sweep-actions.txt
+btrfs subvolume delete "$foreign" >/dev/null 2>&1 || true
 # A copy that a restart cut short leaves a hidden duplicate; listing the
 # space removes it.
 as alice mkdir -p "$alice_root/.a-nas-copy-0123456789abcdef/副本"
@@ -766,6 +785,199 @@ check "a staged detector that does not match its manifest is refused" \
 check "the refused detector changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
   -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = "$models_kept"
+
+# --- The vector index (ADR 0028): one Qdrant instance per owning service,
+# reached only through its owner's socket, started on demand in a network
+# namespace of its own and stopped when idle.
+vectors_state=/var/lib/private/a-nas-vectors/a-nas-photos
+qdrant_sha=$(jq -r .sha256 /src/deploy/qdrant/qdrant.json)
+# grpc-answers.py SOCKET: an HTTP/2 server answers the client preface through it.
+cat > /usr/local/lib/grpc-answers.py <<'PY'
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.settimeout(60)
+s.connect(sys.argv[1])
+s.sendall(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" + bytes([0, 0, 0, 4, 0, 0, 0, 0, 0]))
+frame = b""
+while len(frame) < 9:
+    chunk = s.recv(9 - len(frame))
+    if not chunk:
+        sys.exit(1)
+    frame += chunk
+sys.exit(0 if frame[3] == 4 else 1)
+PY
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+unit_stops() { # UNIT: becomes inactive within 90 seconds, the owner's idle minute included
+  for _ in $(seq 1 180); do
+    systemctl is-active --quiet "$1" || return 0
+    sleep 0.5
+  done
+  return 1
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+same_network_namespace() {
+  local index proxy
+  index=$(systemctl show -p MainPID --value anas-vectors@a-nas-photos.service)
+  proxy=$(systemctl show -p MainPID --value anas-vectors-proxy@a-nas-photos.service)
+  [[ "$index" != 0 && "$proxy" != 0 && "$(readlink "/proc/$index/ns/net")" == "$(readlink "/proc/$proxy/ns/net")" &&
+    "$(readlink "/proc/$index/ns/net")" != "$(readlink /proc/1/ns/net)" ]]
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+journal_shows() { # UNIT SINCE TEXT: the unit logs TEXT within three minutes; the vector sync waits,
+  # as AI work does, while the device's other work is under pressure
+  for _ in $(seq 1 360); do
+    journal_has "$@" && return 0
+    sleep 0.5
+  done
+  return 1
+}
+check "the installer enables the photo service's vector index socket" \
+  systemctl is-enabled --quiet anas-vectors-proxy@a-nas-photos.socket
+check "the photo service builds its vector index from the Catalog" \
+  journal_shows anas-photos.service "$installed_at" "photo vector index created"
+check "and brings the organised photo into it" \
+  journal_shows anas-photos.service "$installed_at" "photo vector index synced"
+journalctl -u anas-photos.service --since "$installed_at" -o cat --no-pager | grep -F 'vector index' | tail -n 3 || true
+check "a search is compared with the vector index in the background" semantic_search 猫
+check "and the comparison is logged" \
+  journal_shows anas-photos.service "$installed_at" "photo vector index shadow search"
+check "only the photo service reaches its vector index" \
+  test "$(stat -c '%a %U %G' /run/a-nas-vectors/a-nas-photos.sock)" = "600 a-nas-photos a-nas-photos"
+check "the Product Service account cannot connect to the photo vector index" \
+  denied as a-nas python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas-vectors/a-nas-photos.sock")'
+check "the release links Qdrant kept once by content" \
+  test "$(readlink /opt/a-nas/current/vectors/qdrant)" = "/opt/a-nas/qdrant/$qdrant_sha/qdrant"
+check "all vector index instances share one memory limit" \
+  test "$(systemctl show -p MemoryMax --value anas-vectors.slice)" = 1610612736
+check "connecting starts the vector index and reaches its gRPC server" \
+  as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock
+# hold SOCKET SECONDS: keeps a connection open while the test looks at the
+# running instance.
+hold() { python3 -c 'import socket, sys, time; s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); time.sleep(float(sys.argv[2]))' "$1" "$2"; }
+# index_rest PATH [CURL OPTION...]: a REST answer of the photo vector index,
+# from inside its network namespace.
+index_rest() {
+  nsenter -t "$(systemctl show -p MainPID --value anas-vectors@a-nas-photos.service)" -n curl -fsS "http://127.0.0.1:6333$1" "${@:2}"
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+index_holds_photos() { # the photo service's collection holds at least one point
+  local name
+  name=$(index_rest /collections | jq -r '.result.collections[].name | select(startswith("images_v1_"))')
+  [[ -n "$name" ]] && (($(index_rest "/collections/$name" | jq -r '.result.points_count') >= 1))
+}
+systemctl start anas-vectors-proxy@a-nas-shares.socket
+hold /run/a-nas-vectors/a-nas-photos.sock 8 &
+holder=$!
+hold /run/a-nas-vectors/a-nas-shares.sock 8 &
+other_holder=$!
+sleep 3
+check "the vector index runs under a dynamic identity of its own" \
+  test "$(systemctl show -p User --value anas-vectors@a-nas-photos.service)" = a-nas-vec-a-nas-photos
+check "the vector index's dynamic identity is not root" dynamic_identity anas-vectors@a-nas-photos.service
+check "another owner's instance runs under another identity" \
+  test "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-vectors@a-nas-photos.service)/status")" != \
+  "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-vectors@a-nas-shares.service)/status")"
+check "another owner's socket is its own" test "$(stat -c '%a %U' /run/a-nas-vectors/a-nas-shares.sock)" = "600 a-nas-shares"
+check "the photo service cannot connect to another owner's vector index" \
+  denied as a-nas-photos python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas-vectors/a-nas-shares.sock")'
+check "the proxy shares the vector index's own network namespace" same_network_namespace
+check "the vector index's namespace has only its loopback" \
+  test "$(nsenter -t "$(systemctl show -p MainPID --value anas-vectors@a-nas-photos.service)" -n ip -o link | awk -F': ' '{print $2}')" = lo
+check "the photo service's collection holds the organised photo" index_holds_photos
+check "the vector index keeps its storage in its own state directory" test -d "$vectors_state/storage"
+check "the vector index runs in its slice under background work's" \
+  test "$(systemctl show -p Slice --value anas-vectors@a-nas-photos.service):$(systemctl show -p Slice --value anas-vectors.slice)" = anas-vectors.slice:anas.slice
+check "the vector index may keep many files open" \
+  test "$(systemctl show -p LimitNOFILE --value anas-vectors@a-nas-photos.service)" = 65536
+echo "INFO the vector index's memory: $(systemctl show -p MemoryCurrent --value anas-vectors@a-nas-photos.service) bytes"
+wait "$holder" "$other_holder"
+systemctl stop anas-vectors-proxy@a-nas-shares.socket anas-vectors-proxy@a-nas-shares.service anas-vectors@a-nas-shares.service
+check "the vector index stops once its proxy has been idle" unit_stops anas-vectors@a-nas-photos.service
+echo "INFO the vector index's memory peak: $(systemctl show -p MemoryPeak --value anas-vectors@a-nas-photos.service) bytes"
+# mark NAME: a file in the index's storage, as its dynamic user would leave it.
+mark() {
+  touch "$vectors_state/storage/$1"
+  chown --reference="$vectors_state" "$vectors_state/storage/$1"
+}
+mark kept-by-the-same-release
+check "the same Qdrant release starts" \
+  as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock
+check "and keeps its index" test -e "$vectors_state/storage/kept-by-the-same-release"
+check "the vector index stops again once idle" unit_stops anas-vectors@a-nas-photos.service
+printf '1.19.9\n' > "$vectors_state/qdrant-version"
+chown --reference="$vectors_state" "$vectors_state/qdrant-version"
+mark written-by-another-minor-release
+check "a vector index another minor release wrote starts" \
+  as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock
+check "and starts empty" test ! -e "$vectors_state/storage/written-by-another-minor-release"
+# A collection whose stored configuration is damaged makes Qdrant panic while
+# loading: the instance cannot start until its storage is emptied.
+hold /run/a-nas-vectors/a-nas-photos.sock 4 &
+holder=$!
+sleep 2
+index_rest /collections/damaged -X PUT -H 'Content-Type: application/json' -d '{"vectors":{"size":4,"distance":"Dot"}}' >/dev/null
+wait "$holder"
+check "the vector index stops before the damage" unit_stops anas-vectors@a-nas-photos.service
+printf 'damaged\n' > "$vectors_state/storage/collections/damaged/config.json"
+failed_starts=0
+until as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock; do
+  failed_starts=$((failed_starts + 1))
+  ((failed_starts < 5)) || break
+  sleep 1
+done
+echo "INFO starts that failed on the damaged index: $failed_starts"
+check "a damaged vector index fails to start at first" test "$failed_starts" -ge 1
+check "and starts empty after two failures in a row" \
+  test "$failed_starts" -le 3 -a ! -e "$vectors_state/storage/collections/damaged"
+check "failed starts leave the vector index socket listening" systemctl is-active --quiet anas-vectors-proxy@a-nas-photos.socket
+# A probe in the vector index's own unit, in place of Qdrant.
+cat > /usr/local/lib/anas-vectors-probe.py <<'PY'
+import os, socket, sys
+leaks = []
+with open("/proc/net/dev") as devices:
+    interfaces = {line.split(":")[0].strip() for line in devices.readlines()[2:]}
+if interfaces != {"lo"}:
+    leaks.append(f"sees interfaces {sorted(interfaces)}")
+try:
+    socket.create_connection(("1.1.1.1", 53), timeout=3).close()
+    leaks.append("reached the network")
+except OSError:
+    pass
+try:
+    socket.socket(socket.AF_NETLINK, socket.SOCK_DGRAM).close()
+    leaks.append("opened a netlink socket")
+except OSError:
+    pass
+for path in ("/srv/a-nas/data", "/var/lib/a-nas"):
+    try:
+        os.listdir(path)
+        leaks.append(f"listed {path}")
+    except OSError:
+        pass
+print("; ".join(leaks) or "contained")
+sys.exit(1 if leaks else 0)
+PY
+sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-vectors-probe.py|' \
+  -e 's|^Type=.*|Type=oneshot|' -e '/^ExecStartPre=/d' -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded=/d' \
+  "/etc/systemd/system/anas-vectors@.service" > "/etc/systemd/system/anas-vectors-probe@.service"
+systemctl daemon-reload
+check "the vector index probe finds the network and data volume outside the sandbox" \
+  denied python3 /usr/local/lib/anas-vectors-probe.py
+check "the vector index's sandbox has only loopback and cannot read the data volume or product state" \
+  systemctl start anas-vectors-probe@a-nas-photos.service
+journalctl -u anas-vectors-probe@a-nas-photos.service -o cat --no-pager | grep -E 'contained|sees|reached|opened|listed' | tail -n 1 || true
+qdrant_kept=$(find /opt/a-nas/qdrant -mindepth 1 -maxdepth 1 | wc -l)
+staged_tampered=/tmp/tampered-qdrant
+stage "$staged_tampered"
+rm "$staged_tampered/vectors/qdrant.tar.gz"
+head -c 1024 /dev/urandom > "$staged_tampered/vectors/qdrant.tar.gz"
+jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
+  /src/deploy/qdrant/qdrant.json > "$staged_tampered/vectors/qdrant.json"
+check "a staged Qdrant that does not match its manifest is refused" \
+  denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
+check "the refused Qdrant changes nothing" \
+  test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
+  -a "$(find /opt/a-nas/qdrant -mindepth 1 -maxdepth 1 | wc -l)" = "$qdrant_kept"
 
 # --- Media center (ADR 0017): files are read as the user through the File
 # Broker; FFmpeg runs in a per-connection worker without network, data volume

@@ -1,3 +1,4 @@
+import { calendarDays, calendarDate, relativeUnit } from "../format/time";
 import type { ActivityAccount, ActivityCategory, ActivityEvent, LogLevel } from "./logsApi";
 
 // A sentence is plain text with emphasised names in it.
@@ -238,6 +239,19 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
       return { parts: [actor, "开始只读查看", subject, "的私有图库"], meta: viewingMeta(), tone: "warning" };
     case "photos.viewing_ended":
       return { parts: [actor, "结束了对", subject, "私有图库的只读查看"], meta: [] };
+    // A sweep left these alone (#269); detail is how many.
+    case "snapshot.unrecorded":
+      return {
+        parts: [actor, "保留了", name(`${event.detail ?? ""} 份`), "快照目录中没有记录的快照"],
+        meta: ["快照目录可能丢失过或从旧副本恢复过；这些快照仍在数据卷上，但无法在备份中心浏览"],
+        tone: "warning",
+      };
+    case "snapshot.unfound":
+      return {
+        parts: [actor, "保留了", name(`${event.detail ?? ""} 条`), "快照记录，数据卷上一份对应的快照都没有找到"],
+        meta: ["数据卷上的快照文件夹可能丢失或无法读取"],
+        tone: "warning",
+      };
   }
   if (event.action === "snapshot.schedule_updated") {
     return {
@@ -320,20 +334,15 @@ export function plainText(parts: Part[]): string {
     .replace(/ (?=[，、。])/g, "");
 }
 
-const weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
-
 export function sameDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  return calendarDays(a, b) === 0;
 }
 
 // dayLabel heads a day of the activity log.
 export function dayLabel(value: Date, now = new Date()): string {
-  const date = `${value.getMonth() + 1}月${value.getDate()}日 ${weekdays[value.getDay()]}`;
-  if (sameDay(value, now)) return `今天 · ${date}`;
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (sameDay(value, yesterday)) return `昨天 · ${date}`;
-  return value.getFullYear() === now.getFullYear() ? date : `${value.getFullYear()}年${date}`;
+  const days = calendarDays(value, now);
+  const date = calendarDate(value, now, "long");
+  return days === 0 || days === -1 ? `${relativeUnit(days, "day", "auto")} · ${date}` : date;
 }
 
 const two = (value: number) => String(value).padStart(2, "0");

@@ -20,7 +20,8 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
   │                              ├── 助手套接字 ◄── 成员的 AI 助手（对端 UID 即成员，只读；ADR 0024）
-  │                              └── AI Orchestrator ──► AI Worker（systemd 套接字按需启动；只读 fd，无网络；ADR 0016）
+  │                              ├── AI Orchestrator ──► AI Worker（systemd 套接字按需启动；只读 fd，无网络；ADR 0016）
+  │                              └── 向量同步与影子比对 ──► 自己的向量索引（Qdrant，按需启动，私有网络，可从 Catalog 重建；ADR 0028）
   └── hoststate.Reader
           ├── Fake Adapter（当前本地开发与契约测试）
           └── Host Agent Client Adapter
@@ -71,6 +72,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 17. 应用容器只以应用身份接触共享空间：服务以 `app-<id>` 启动，或由入口程序从 root 降到 `app-<id>`，并通过写在自身 Compose 中的 `a-nas-users` 组访问共享空间，挂载默认只读；保留镜像用户（可能是 root）的服务只能挂载自己的应用数据。宿主机账号的组成员关系不进入容器，容器代理安装后核对用户、组、能力与只读挂载（[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）。
 18. 在服务进程内解码用户文件或宿主机图片时（音乐封面、影视海报、头像、壁纸、任务图标、相册缩略图与搜图），先读头部限制像素数，并把解码器 panic 当作无法解码处理；后台扫描和 Host Agent 不能因一张图片退出或反复出错。恢复的 panic 经 [`internal/decodepanic`](../../internal/decodepanic/decodepanic.go) 记一条错误日志，只含解码点名称、panic 值的类型（运行时错误另记其消息，它只说长度与类型）与不带源码路径的栈；解码器自己的 panic 消息可能引用正在读的内容，所以不记，文件名也不记，因为管理员能读系统日志（[日志规格](../specs/logs.md)）。同一种 panic 沿同一个栈每 10 分钟只记一条，附上其间的重复次数，反复请求同一个坏文件不会刷屏。这样解码器缺陷、有人试探缺陷与我们自己代码的缺陷不会被当成一张坏图片。新增解码点同样处理，并用 `internal/imagetest` 的测试图片与日志记录覆盖。
 19. 产品服务的配置在启动时从环境一次解析并校验（[`cmd/anas-api/config.go`](../../cmd/anas-api/config.go)，各二进制经 [`internal/envconfig`](../../internal/envconfig/envconfig.go) 读取环境）。`ANAS_HOSTSTATE_MODE` 没有默认值，开发写 `fake`，NAS 写 `agent`；`agent` 拒绝任何开发用的 Adapter：进程内 FFmpeg、Fake 容器、开发用 AI、直连助手套接字与 spike 的更改代理。监听地址只能是回环地址。文件服务必须由调用方给出文件系统：生产是文件代理，进程内的本地文件系统只能经 `files.NewLocalService` 显式选择（[#192](https://github.com/zhongwater123/A-NAS/issues/192)）。
+20. 向量索引是派生数据（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)）：每个持有向量的服务有自己的 Qdrant 实例，只有它能连；索引只由它从自己的 Catalog 经事务内的 outbox 同步与重建，随时可以清空。点上只有内容 ID 与范围键，索引命中不构成授权，结果返回前仍按 Policy 复核。人脸与宠物向量不进索引。
 
 ## HTTP 接口约定
 
@@ -129,6 +131,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/photos` | 相册 Module：数据卷上的 Catalog、内容寻址原图、Policy、虚拟目录、回收站与崩溃对账（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | JPEG/PNG 库、EXIF 元数据、缩略图持久任务与测试完成；开发模式由产品服务进程内运行，生产由相册服务进程运行 |
 | `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话或助手 UID 的查询接口；由会话得到相册 `Principal` 只有 `photoservice.Authenticate` 一处，开发模式经 `photoservice.Local` 在产品进程内使用同一实现 | 已实现，root 集成测试、相册冒烟与系统测试覆盖 |
 | `internal/music` | 音乐库：经 `files.Service` 以成员身份扫描个人空间与 Shared 的音频、读取标签/封面/时长与歌词，保存歌曲索引、封面缩略图和每名成员的收藏、播放记录、歌单与音乐文件夹（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)） | 已实现，`internal/musicapi` 提供 `/api/v1/music`，见[音乐规格](../specs/music.md) |
+| `internal/vectorindex` | 服务与自己的向量索引之间的客户端：经 Unix 套接字连接所属的 Qdrant 实例（官方 Go 客户端，只有一个连接，空闲即断开，让实例能停止），只提供类型化的建集合、写入、删除、按范围搜索与扫描；`vectorindextest` 运行固定版本的二进制（[向量索引技术设计](vector-index.md)） | 已实现，用真实二进制的单元测试与系统测试覆盖；相册服务用于同步与影子比对 |
 | `internal/aiworker` | 相册服务调用 AI Worker 的客户端：每次请求连接 systemd 按需激活的 Unix 套接字，一帧是 4 字节长度加 JSON；图片作为只读描述符随控制消息传递，从不传路径，Worker 因此不需要访问数据卷（[本地 AI 实施方案](photo-ai.md)） | 已实现，单元测试与针对 `ai/` 中 Python Worker（替身 Provider）的协议测试覆盖 |
 | `internal/photosapi` | `/api/v1/photos`：只接受上游确认的 `photos.Principal`，不自行认证；`/internal/photos/activity` 只供产品服务合并活动记录 | 已实现；部分路由在 `httpapi` 的 OpenAPI 契约测试中；生产中由产品服务转发到相册服务，相册服务不可用时返回 `photos_unavailable` |
 | `internal/media` / `internal/mediaapi` | 影视中心：媒体库、按文件名与 NFO 识别的目录、每个用户的进度、收藏与合集，以及 `/api/v1/media` | 已实现，单元测试、OpenAPI 契约测试与系统测试覆盖，见[影视中心技术设计](media-center.md) |
@@ -167,6 +170,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [相册本地 AI（M2）实施方案](photo-ai.md)
 - [相册物体检测与混合检索实施方案](photo-objects.md)
 - [相册人物与宠物实施方案](photo-people.md)
+- [向量索引技术设计](vector-index.md)与 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)
 - [存储与文件架构](storage-and-files.md)
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [基础存储 ADR](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)

@@ -8,11 +8,21 @@ import {
   formatDuration,
   formatTotal,
   parseLyrics,
+  relativeTime,
   search,
   sortTracks,
 } from "./library";
 import { moveRows } from "./MusicPanel";
 import { track } from "./testTracks";
+
+describe("music elapsed time labels", () => {
+  it("does not turn elapsed days into calendar names after crossing midnight", () => {
+    const now = new Date(2026, 9, 27, 0, 5).getTime();
+    expect(relativeTime(new Date(2026, 9, 24, 23, 59).toISOString(), now)).toBe("2 天前");
+    expect(relativeTime(new Date(2026, 9, 25, 0, 6).toISOString(), now)).toBe("1 天前");
+    expect(relativeTime(new Date(2026, 9, 29, 0, 6).toISOString(), now)).toBe("2 天后");
+  });
+});
 
 const library = [
   track("a1", {

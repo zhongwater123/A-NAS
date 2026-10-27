@@ -1,0 +1,50 @@
+[Unit]
+Description=A-NAS vector index proxy of %i
+Documentation=https://github.com/zhongwater123/A-NAS
+# Forwards the owner's connections into the instance's private network
+# namespace, where its gRPC port is the only way to reach Qdrant; starting it
+# starts the instance (docs/architecture/vector-index.md).
+Requires=anas-vectors@%i.service anas-vectors-proxy@%i.socket
+After=anas-vectors@%i.service anas-vectors-proxy@%i.socket
+JoinsNamespaceOf=anas-vectors@%i.service
+# A start that fails, as when the instance cannot start, must not put the
+# socket into the failed state and remove it: the owner backs off and tries
+# again, and the instance recovers on its own (start.sh).
+StartLimitIntervalSec=0
+
+[Service]
+# Exits two seconds after the last connection closes; the instance then
+# stops as well, and the next connection starts both again. The owner keeps
+# its connection for a minute after its last request (internal/vectorindex),
+# so the instance lives that long, and an owner without a connection meets an
+# instance that has to start, but for the moments while it stops.
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=2s 127.0.0.1:6334
+DynamicUser=true
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX AF_INET
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+InaccessiblePaths=-/srv/a-nas -/var/lib/a-nas -/etc/a-nas -/run/a-nas -/run/a-nas-photos -/run/a-nas-sessions -/run/a-nas-ai
+ProtectProc=invisible
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+TasksMax=16
+MemoryMax=64M
+Slice=anas-vectors.slice

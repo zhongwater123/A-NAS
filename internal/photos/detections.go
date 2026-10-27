@@ -162,12 +162,12 @@ func (s *Service) loadDetections(ctx context.Context, model string) (map[string]
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	scores := make(map[string][]classScore)
 	for rows.Next() {
 		var objectID string
 		var encoded []byte
 		if err := rows.Scan(&objectID, &encoded); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		boxes, err := decodeBoxes(encoded)

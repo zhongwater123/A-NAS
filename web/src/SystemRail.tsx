@@ -1,3 +1,4 @@
+import { calendarDate, formatClock } from "./format/time";
 import { Clock3, Grid2X2, Home, LogOut, Monitor, Search, Settings, Share2, UserRound } from "lucide-react";
 import { KeyboardEvent, ReactNode, RefObject, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
@@ -467,9 +468,7 @@ export function describeSession(expiresAt: string, now = new Date()): SessionDes
   const expiry = new Date(expiresAt);
   if (Number.isNaN(expiry.getTime())) return { localConsole: false, text: "浏览器会话" };
   if (expiry.getUTCFullYear() >= 9999) return { localConsole: true, text: "本机屏幕 · 退出前保持登录" };
-  const day = expiry.toDateString() === now.toDateString() ? "今天" : `${expiry.getMonth() + 1}月${expiry.getDate()}日`;
-  const time = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(
-    expiry,
-  );
+  const day = expiry.toDateString() === now.toDateString() ? "今天" : calendarDate(expiry, now);
+  const time = formatClock(expiry);
   return { localConsole: false, text: `浏览器登录 · 有效至 ${day} ${time}` };
 }
