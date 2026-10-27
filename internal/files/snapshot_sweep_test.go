@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/sqlitetest"
 )
 
 // memorySnapshots is a snapshot backend that remembers which snapshots exist
@@ -246,6 +247,33 @@ func TestSweepKeepsASnapshotBeingTaken(t *testing.T) {
 	}
 	if got := f.snapshots(f.private); len(got) != 1 || got[0].ID != taking[0] {
 		t.Fatalf("snapshots = %+v", got)
+	}
+}
+
+// A read of the catalog that fails part way, as a failing disk would, ends
+// the sweep: the snapshots it did not read are not orphans (#269).
+func TestSweepStopsWhenReadingTheCatalogFails(t *testing.T) {
+	for _, after := range []int{0, 2} {
+		t.Run(fmt.Sprintf("after %d rows", after), func(t *testing.T) {
+			f := newSnapshotFixture(t)
+			backend := newMemorySnapshots(folderOfFiles(1))
+			f.backend = backend
+			f.open()
+			for _, name := range []string{"一", "二", "三"} {
+				if _, err := f.files.CreateSnapshot(context.Background(), f.admin, f.private.ID, name); err != nil {
+					t.Fatal(err)
+				}
+			}
+			taken := backend.ids()
+			f.driver = sqlitetest.Register("FROM snapshots ORDER BY created_at", after)
+			f.open()
+			if _, err := f.files.SweepSnapshots(context.Background()); !errors.Is(err, sqlitetest.ErrCut) {
+				t.Fatalf("SweepSnapshots() error = %v, want ErrCut", err)
+			}
+			if backend.kept != nil || !slices.Equal(backend.ids(), taken) {
+				t.Fatalf("the sweep pruned keeping %v: snapshots %v, were %v", backend.kept, backend.ids(), taken)
+			}
+		})
 	}
 }
 

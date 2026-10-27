@@ -185,11 +185,11 @@ GROUP BY a.id`, scope...)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
 		if err := rows.Scan(&c.id, &c.objectID, &c.libraryID, &c.name, &c.tags, &c.when, &c.video); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		candidates = append(candidates, c)
@@ -586,12 +586,12 @@ func (s *Service) loadVectors(ctx context.Context, model string) (map[string][]f
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	vectors := make(map[string][]float32)
 	for rows.Next() {
 		var objectID string
 		var encoded []byte
 		if err := rows.Scan(&objectID, &encoded); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		vectors[objectID] = decodeVector(encoded)

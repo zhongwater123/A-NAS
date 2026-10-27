@@ -159,12 +159,12 @@ JOIN occurrences o ON o.id = po.occurrence_id WHERE po.source = 'moved'`)
 	if err != nil {
 		return false, err
 	}
+	defer rows.Close()
 	type group struct{ library, kind, model string }
 	var groups []group
 	for rows.Next() {
 		var g group
 		if err := rows.Scan(&g.library, &g.kind, &g.model); err != nil {
-			_ = rows.Close()
 			return false, err
 		}
 		groups = append(groups, g)
@@ -817,11 +817,11 @@ WHERE po.person_id = ? AND po.library_id = ? AND o.object_id = ?`, person.ID, pe
 		if err != nil {
 			return err
 		}
+		defer rows.Close()
 		var occurrences []string
 		for rows.Next() {
 			var id string
 			if err := rows.Scan(&id); err != nil {
-				_ = rows.Close()
 				return err
 			}
 			occurrences = append(occurrences, id)

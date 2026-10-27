@@ -76,10 +76,10 @@ func (s *Service) Reconcile(ctx context.Context) (ReconcileReport, error) {
 	if err != nil {
 		return report, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
 			return report, err
 		}
 		referenced[id] = false
@@ -130,10 +130,10 @@ func (s *Service) reconcileDerived(ctx context.Context, report *ReconcileReport)
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var objectID, derivation string
 		if err := rows.Scan(&objectID, &derivation); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		recorded[derivedPath(derivation, objectID)] = false
@@ -171,23 +171,15 @@ func (s *Service) reconcileDerived(ctx context.Context, report *ReconcileReport)
 	rescanned := 0
 	for _, derivation := range slices.Concat(knownDerivations, sheetDerivations) {
 		sheet := slices.Contains(sheetDerivations, derivation)
-		rows, err := s.db.QueryContext(ctx, "SELECT object_id FROM derived_files WHERE derivation = ?", derivation)
+		objectIDs, err := s.strings(ctx, "SELECT object_id FROM derived_files WHERE derivation = ?", derivation)
 		if err != nil {
 			return err
 		}
 		var missing []string
-		for rows.Next() {
-			var objectID string
-			if err := rows.Scan(&objectID); err != nil {
-				_ = rows.Close()
-				return err
-			}
+		for _, objectID := range objectIDs {
 			if !recorded[derivedPath(derivation, objectID)] {
 				missing = append(missing, objectID)
 			}
-		}
-		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return err
 		}
 		for _, objectID := range missing {
 			err := s.withTx(ctx, func(tx *sql.Tx) error {

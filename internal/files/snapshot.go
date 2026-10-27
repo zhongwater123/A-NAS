@@ -658,16 +658,16 @@ func (s *Service) SweepSnapshots(ctx context.Context) (SnapshotSweep, error) {
 	if err != nil {
 		return SnapshotSweep{}, err
 	}
+	defer rows.Close()
 	var recorded []Snapshot
 	for rows.Next() {
 		snapshot, err := scanSnapshot(rows)
 		if err != nil {
-			_ = rows.Close()
 			return SnapshotSweep{}, err
 		}
 		recorded = append(recorded, snapshot)
 	}
-	if err := rows.Close(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return SnapshotSweep{}, err
 	}
 	keep := make([]string, 0, len(recorded)+len(s.takingSnapshots))
