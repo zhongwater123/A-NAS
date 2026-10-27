@@ -219,5 +219,4 @@ func scanTransfer(row rowScanner) (Transfer, error) {
 	return t, nil
 }
 
-// formatTime has a fixed width, so stored times sort as text.
-func formatTime(value time.Time) string { return value.UTC().Format("2006-01-02T15:04:05.000000000Z") }
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }

@@ -270,7 +270,7 @@ sample_rate=excluded.sample_rate, bit_depth=excluded.bit_depth`,
 	return err
 }
 
-func formatTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }
 
 var errNoRows = sql.ErrNoRows
 

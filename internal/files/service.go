@@ -1935,4 +1935,4 @@ func safeSegment(value string) string {
 	return builder.String()
 }
 
-func formatTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }

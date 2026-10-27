@@ -1084,7 +1084,7 @@ func verifyPassword(password, encoded string) bool {
 
 func tokenHash(token string) string { return accountid.TokenHash(token) }
 
-func formatTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }
 
 func nullableString(value string) any {
 	if value == "" {

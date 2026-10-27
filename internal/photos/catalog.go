@@ -345,11 +345,10 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// timeLayout has a fixed width so that stored timestamps sort correctly as
-// text; time.RFC3339Nano trims trailing zeros and would not.
-const timeLayout = "2006-01-02T15:04:05.000000000Z"
+// timeLayout is how stored timestamps are read (sqlitedb.TimeLayout).
+const timeLayout = sqlitedb.TimeLayout
 
-func formatTime(value time.Time) string { return value.UTC().Format(timeLayout) }
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }
 
 func parseTime(value string) (time.Time, error) { return time.Parse(timeLayout, value) }
 

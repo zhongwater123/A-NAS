@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDatabasesOpenWithTheSameSettings(t *testing.T) {
@@ -37,5 +38,17 @@ func TestDatabasesOpenWithTheSameSettings(t *testing.T) {
 	}
 	if _, err := Open(" ", Options{}); err == nil {
 		t.Fatal("an empty path opened")
+	}
+}
+
+func TestStoredTimesSortAsText(t *testing.T) {
+	t.Parallel()
+	whole := time.Date(2026, 10, 27, 10, 0, 0, 0, time.UTC)
+	later := whole.Add(500 * time.Millisecond)
+	if FormatTime(whole) >= FormatTime(later) {
+		t.Fatalf("%s sorts after %s", FormatTime(whole), FormatTime(later))
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, FormatTime(later)); err != nil || !parsed.Equal(later) {
+		t.Fatalf("RFC3339Nano reads %s as %v, %v", FormatTime(later), parsed, err)
 	}
 }

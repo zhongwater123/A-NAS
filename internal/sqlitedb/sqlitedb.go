@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -55,3 +56,12 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 	return db, nil
 }
+
+// TimeLayout is how stores keep times as text: UTC at a fixed width, so that
+// they sort and compare as text. time.RFC3339Nano trims trailing zeros and
+// would not: 10:00:00Z sorts after 10:00:00.5Z. time.Parse with
+// time.RFC3339Nano reads both forms.
+const TimeLayout = "2006-01-02T15:04:05.000000000Z"
+
+// FormatTime formats value for a store.
+func FormatTime(value time.Time) string { return value.UTC().Format(TimeLayout) }

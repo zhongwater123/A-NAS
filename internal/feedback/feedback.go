@@ -453,10 +453,7 @@ func (s *Store) inTransaction(ctx context.Context, apply func(*sql.Tx) error) er
 
 func (s *Store) randomID(prefix string) string { return prefix + ":" + rand.Text() }
 
-// Times are stored at a fixed width so that they sort as text.
-func formatTime(value time.Time) string {
-	return value.UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
-}
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }
 
 func parseTime(value string) time.Time {
 	parsed, _ := time.Parse(time.RFC3339Nano, value)
