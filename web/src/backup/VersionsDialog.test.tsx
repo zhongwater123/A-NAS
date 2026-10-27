@@ -1,9 +1,11 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { FileEntry, Space } from "../api.generated";
-import { stubAPI } from "../test/api";
+import { backupHandlers, restores } from "../test/handlers/backup";
+import { filesHandlers } from "../test/handlers/files";
+import { server } from "../test/server";
 import type { SnapshotMatch } from "./api";
 import { VersionsDialog } from "./VersionsDialog";
 
@@ -57,26 +59,23 @@ const versions = (fileId: string): SnapshotMatch => ({
   ],
 });
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-}
-
-afterEach(() => vi.unstubAllGlobals());
-
 describe("VersionsDialog", () => {
   it("puts an older version back while the current file goes to the recycle bin", async () => {
-    const calls: { url: string; body?: unknown }[] = [];
-    stubAPI(
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-        const asked = /\/api\/v1\/files\/([^/]+)\/versions$/.exec(url);
-        if (asked) return json(versions(decodeURIComponent(asked[1])));
-        if (url.endsWith(`/entries/${encodeURIComponent("entry:before")}/restore`)) {
-          return json({ ...plan, id: "file:plan-restored", sizeBytes: 1024, modifiedAt: hoursAgo(0) }, 201);
-        }
-        return json({ error: { code: "not_found", message: "not found" } }, 404);
+    const asked: string[] = [];
+    const restored = restores(() => ({
+      ...plan,
+      id: "file:plan-restored",
+      sizeBytes: 1024,
+      modifiedAt: hoursAgo(0),
+    }));
+    server.use(
+      ...backupHandlers({
+        versions: (fileId) => {
+          asked.push(fileId);
+          return versions(fileId);
+        },
       }),
+      ...restored.handlers,
     );
     const onChanged = vi.fn();
     const user = userEvent.setup();
@@ -105,42 +104,36 @@ describe("VersionsDialog", () => {
 
     expect(await within(dialog).findByText(/原来的文件已移到回收站/)).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: "还原到这个版本？" })).toBeNull();
-    expect(calls.find((call) => call.url.endsWith("/restore"))?.body).toEqual({
-      parentId: "file:docs",
-      name: "计划.docx",
-      replace: true,
-    });
+    expect(restored.sent).toEqual([
+      {
+        snapshotId: "snapshot:manual",
+        entryId: "entry:before",
+        body: { parentId: "file:docs", name: "计划.docx", replace: true },
+      },
+    ]);
     expect(onChanged).toHaveBeenCalledTimes(1);
     // The list now follows the restored file, which holds the older version.
-    await waitFor(() =>
-      expect(calls.some((call) => call.url === "/api/v1/files/file%3Aplan-restored/versions")).toBe(true),
-    );
+    await waitFor(() => expect(asked).toContain("file:plan-restored"));
   });
 
   it("copies a version beside the file under a new name", async () => {
-    const calls: { url: string; body?: unknown }[] = [];
-    stubAPI(
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-        if (url.endsWith("/versions")) return json(versions(plan.id));
-        if (url === `/api/v1/spaces/${encodeURIComponent(personal.id)}/entries?parentId=`)
-          return json({
-            items: [
-              {
-                id: "file:docs",
-                spaceId: personal.id,
-                name: "文档",
-                kind: "directory",
-                sizeBytes: 0,
-                modifiedAt: hoursAgo(1),
-              },
-            ],
-          });
-        if (url.endsWith("/restore"))
-          return json({ ...plan, id: "file:copy", name: JSON.parse(String(init?.body)).name }, 201);
-        return json({ items: [] });
+    const restored = restores(({ body }) => ({ ...plan, id: "file:copy", name: body.name }));
+    server.use(
+      ...backupHandlers({ versions: () => versions(plan.id) }),
+      // The copy goes beside the file, into 文档.
+      ...filesHandlers({
+        entries: [
+          {
+            id: "file:docs",
+            spaceId: personal.id,
+            name: "文档",
+            kind: "directory",
+            sizeBytes: 0,
+            modifiedAt: hoursAgo(1),
+          },
+        ],
       }),
+      ...restored.handlers,
     );
     const onChanged = vi.fn();
     const user = userEvent.setup();
@@ -163,10 +156,9 @@ describe("VersionsDialog", () => {
     await user.click(within(restore).getByRole("button", { name: "恢复" }));
 
     expect(await screen.findByText(`已另存为“${name.value}”。`)).toBeTruthy();
-    expect(calls.find((call) => call.url.endsWith("/restore"))?.body).toEqual({
-      parentId: "file:docs",
-      name: name.value,
-    });
+    expect(restored.sent).toEqual([
+      { snapshotId: "snapshot:manual", entryId: "entry:before", body: { parentId: "file:docs", name: name.value } },
+    ]);
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -32,7 +32,8 @@ const tus = vi.hoisted(() => {
 });
 vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 
-import { json, stubAPI } from "../test/api";
+import { transfersHandlers } from "../test/handlers/transfers";
+import { server } from "../test/server";
 import { transferStore, type UploadTarget } from "./store";
 import { TransferIndicator, TransferToasts } from "./TransferNotices";
 
@@ -40,13 +41,12 @@ const target: UploadTarget = { spaceId: "space:shared", spaceKind: "shared", par
 
 beforeEach(() => {
   tus.uploads.length = 0;
-  stubAPI(vi.fn(async () => json({ items: [] })));
+  server.use(...transfersHandlers().handlers);
   transferStore.attach("user:alice");
 });
 
 afterEach(() => {
   transferStore.reset();
-  vi.unstubAllGlobals();
 });
 
 describe("transfer notices on the desktop", () => {
@@ -80,7 +80,7 @@ describe("transfer notices on the desktop", () => {
   });
 
   it("names the file being sent, how many are left, and lists the queue on hover", async () => {
-    const { container } = render(<TransferIndicator onOpen={() => undefined} />);
+    render(<TransferIndicator onOpen={() => undefined} />);
     act(() => {
       transferStore.enqueue(
         ["第 1 集.mkv", "第 2 集.mkv", "第 3 集.mkv", "第 4 集.mkv", "第 5 集.mkv"].map((name) => ({
@@ -95,8 +95,10 @@ describe("transfer notices on the desktop", () => {
     const pill = screen.getByRole("button", { name: /^传输中心：正在上传 第 1 集\.mkv 等 5 个任务/ });
     expect(pill.textContent).toContain("第 1 集.mkv");
     expect(pill.textContent).toContain("还剩 5 个");
-    const list = container.querySelector(".status-transfers-pop")!;
-    expect(Array.from(list.querySelectorAll("li .name")).map((name) => name.textContent)).toEqual([
+    // The hover list repeats what the pill says, so it is hidden from
+    // assistive technology.
+    const queue = () => within(screen.getByRole("list", { hidden: true })).getAllByRole("listitem", { hidden: true });
+    expect(queue().map((item) => within(item).getByText(/\.mkv$/).textContent)).toEqual([
       "第 1 集.mkv",
       "第 2 集.mkv",
       "第 3 集.mkv",
@@ -104,7 +106,7 @@ describe("transfer notices on the desktop", () => {
       "第 5 集.mkv",
     ]);
     // Progress repaints a moment later, not on every byte.
-    await waitFor(() => expect(list.querySelector("li .state")!.textContent).toBe("50%"));
+    await waitFor(() => expect(within(queue()[0]).getByText(/%$/).textContent).toBe("50%"));
   });
 
   it("lists every file another app queued, not only the one it sends", () => {

@@ -1,107 +1,167 @@
+// The desktop shell: sign-in and setup, the desktop and its icons, window
+// management, the dock, the system rail and launcher, and windows opening
+// each other. What a window shows is tested with that window (docs/architecture/web-desktop.md).
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { delay, HttpResponse } from "msw";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
-import type { AppListResponse as AppList, AppStatus } from "./api.generated";
-import { apiError, json } from "./test/api";
-import {
-  errorResponse,
-  healthyState,
-  installAPI,
-  metricsState,
-  okResponse,
-  resetDesktop,
-  routeFetch,
-  session,
-  sessionExpiredResponse,
-  stubDesktopFetch,
-  stubFetch,
-} from "./test/desktop";
-import { app } from "./test/fixtures";
+import type { AppShortcut, Transfer } from "./api.generated";
+import { healthyState, metricsState, session as signIn } from "./test/fixtures";
+import { appsHandlers } from "./test/handlers/apps";
+import { containerSnapshot, dockerHandlers } from "./test/handlers/docker";
+import { entry, filesHandlers, folder, ownSpace, sharedSpace, space } from "./test/handlers/files";
+import { photosHandlers } from "./test/handlers/photos";
+import { settingsHandlers, terminalHandlers } from "./test/handlers/settings";
+import { serveDesktop, session } from "./test/handlers/shell";
+import { storagePlan } from "./test/handlers/storage";
+import { taskManagerHandlers } from "./test/handlers/taskmanager";
+import { trashHandlers } from "./test/handlers/trash";
+import { accountHandlers, alice } from "./test/handlers/users";
+import { apiError, http, server } from "./test/server";
+import { transferStore } from "./transfers/store";
+
+// The trash and the transfer center count how often the desktop renders and
+// mounts them, and the trash can be made to fail, for the tests of window
+// isolation; otherwise they are the real windows.
+const panels = vi.hoisted(() => ({ trashRenders: 0, trashMounts: 0, trashFails: false, transfersMounts: 0 }));
+vi.mock("./trash/TrashPanel", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./trash/TrashPanel")>();
+  const { useEffect } = await import("react");
+  return {
+    ...actual,
+    TrashPanel(props: ComponentProps<typeof actual.TrashPanel>) {
+      panels.trashRenders++;
+      useEffect(() => {
+        panels.trashMounts++;
+      }, []);
+      if (panels.trashFails) throw new Error("the trash failed");
+      return <actual.TrashPanel {...props} />;
+    },
+  };
+});
+vi.mock("./transfers/TransferCenter", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./transfers/TransferCenter")>();
+  const { useEffect } = await import("react");
+  return {
+    ...actual,
+    TransferCenter(props: ComponentProps<typeof actual.TransferCenter>) {
+      useEffect(() => {
+        panels.transfersMounts++;
+      }, []);
+      return <actual.TransferCenter {...props} />;
+    },
+  };
+});
+
+// Uploads go through tus-js-client, whose Node build cannot read a jsdom
+// File; the tests report the uploads' progress themselves.
+const tus = vi.hoisted(() => {
+  class FakeUpload {
+    constructor(
+      readonly file: File,
+      readonly options: { onProgress: (sent: number, total: number) => void },
+    ) {
+      uploads.push(this);
+    }
+    url = null;
+    start() {}
+    abort() {
+      return Promise.resolve();
+    }
+  }
+  const uploads: FakeUpload[] = [];
+  return { FakeUpload, uploads };
+});
+vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
+
+// Settings → 终端 runs a shell through xterm.js, which needs layout jsdom lacks.
+const xterm = vi.hoisted(() => ({ mounts: 0 }));
+vi.mock("./settings/XtermSession", async () => {
+  const { useEffect, useEffectEvent } = await import("react");
+  return {
+    default: function MockXtermSession({ onStatus }: { onStatus: (status: { state: "connected" }) => void }) {
+      const mounted = useEffectEvent(() => {
+        xterm.mounts += 1;
+        onStatus({ state: "connected" });
+      });
+      useEffect(() => mounted(), []);
+      return <div data-testid="xterm-session" />;
+    },
+  };
+});
+
+// The avatar cropper needs layout jsdom lacks; this one reports a fixed square.
+vi.mock("react-easy-crop", async () => {
+  const { useEffect, useEffectEvent } = await import("react");
+  return {
+    default: function MockCropper({
+      image,
+      onCropComplete,
+    }: {
+      image: string;
+      onCropComplete: (area: unknown, pixels: unknown) => void;
+    }) {
+      const complete = useEffectEvent(onCropComplete);
+      useEffect(() => {
+        complete({ x: 10, y: 0, width: 80, height: 100 }, { x: 40, y: 0, width: 320, height: 320 });
+      }, [image]);
+      return <div data-testid="cropper" data-image={image} />;
+    },
+  };
+});
+
+// The windows the shell's tests open read their own lists; empty ones do here.
+function serveWindows() {
+  server.use(
+    ...filesHandlers({ spaces: [ownSpace] }),
+    ...trashHandlers(() => []).handlers,
+    ...taskManagerHandlers(),
+    ...settingsHandlers().handlers,
+    ...photosHandlers(),
+  );
+}
+
+// A signed-in route answers 401 once the session has ended. The contract
+// leaves 401 out of most signed-in routes, so the answer is untyped.
+const sessionExpired = () =>
+  HttpResponse.json(apiError("authentication_required", "authentication is required"), { status: 401 });
 
 beforeEach(() => {
   localStorage.clear();
+  Object.assign(panels, { trashRenders: 0, trashMounts: 0, trashFails: false, transfersMounts: 0 });
+  xterm.mounts = 0;
 });
 
-afterEach(resetDesktop);
-
-const containerSnapshot = {
-  dataSource: "simulated",
-  observedAt: "2026-10-06T00:00:00Z",
-  engine: { version: "29.1.3", apiVersion: "1.52" },
-  containers: [
-    {
-      id: "a".repeat(64),
-      name: "jellyfin",
-      image: "jellyfin/jellyfin:10.11",
-      state: "running",
-      status: "Up 3 hours",
-      createdAt: "2026-10-03T00:00:00Z",
-      project: "media",
-      ports: [{ hostIp: "0.0.0.0", hostPort: 8096, containerPort: 8096, protocol: "tcp" }],
-      usage: { cpuPercent: 12.4, memoryBytes: 641728512, memoryLimitBytes: 8589934592 },
-    },
-    {
-      id: "b".repeat(64),
-      name: "homeassistant",
-      image: "ghcr.io/home-assistant/home-assistant:stable",
-      state: "exited",
-      status: "Exited (0) 5 hours ago",
-      createdAt: "2026-09-26T00:00:00Z",
-      ports: [],
-    },
-  ],
-  images: [
-    {
-      id: "sha256:" + "c".repeat(64),
-      tags: ["jellyfin/jellyfin:10.11"],
-      sizeBytes: 1243000000,
-      createdAt: "2026-09-06T00:00:00Z",
-    },
-  ],
-};
-
-const memosPlan = {
-  appId: "memos",
-  title: "Memos",
-  version: "0.28.0",
-  project: "a-nas-memos",
-  identity: { username: "app-memos", uid: 30000, gid: 30000 },
-  images: ["neosmemo/memos:0.28.0"],
-  containers: ["memos"],
-  ports: [{ hostPort: 5230, containerPort: 5230, protocol: "tcp", purpose: "WebUI 端口" }],
-  mounts: [
-    { hostPath: "/srv/a-nas/data/apps/memos/memos", containerPath: "/var/opt/memos", kind: "appdata", readOnly: false },
-  ],
-  networks: [] as string[],
-  addressPools: [] as string[],
-  digest: "d".repeat(64),
-  compose: "name: a-nas-memos\n",
-};
-
-function appList(memos: Partial<AppStatus>): AppList {
-  return {
-    dataSource: "simulated",
-    apps: [
-      app("memos", { title: "Memos", tagline: "轻量笔记", category: "notes", webPort: 5230, ...memos }),
-      app("navidrome", { title: "Navidrome", tagline: "音乐流媒体", category: "media", webPort: 4533 }),
-    ],
-  };
-}
+afterEach(() => {
+  transferStore.reset();
+  tus.uploads.length = 0;
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("A-NAS v1.0.1 desktop", () => {
   it("sends a LAN browser to the device's own screen to set it up", async () => {
-    const fetchMock = installAPI({ setupRequired: true, setupAllowed: false });
+    // /api/v1/setup/admin is not served: a request to it fails the test.
+    serveDesktop({ setup: { setupRequired: true, setupAllowed: false } });
     render(<App />);
     expect(await screen.findByRole("heading", { name: "请在 NAS 本机启用" })).toBeTruthy();
     expect(screen.getByText(/SSH 隧道/)).toBeTruthy();
     expect(screen.queryByLabelText("账号")).toBeNull();
-    expect(fetchMock.mock.calls.some(([path]) => path === "/api/v1/setup/admin")).toBe(false);
   });
 
   it("activates the local device with only an administrator account and password", async () => {
-    const fetchMock = installAPI({ setupRequired: true });
+    const setups: unknown[] = [];
+    serveDesktop({ setup: { setupRequired: true } });
+    server.use(
+      http.post("/api/v1/setup/admin", async ({ request, response }) => {
+        setups.push(await request.json());
+        return response(201).json(session);
+      }),
+    );
     const user = userEvent.setup();
     render(<App />);
     expect(await screen.findByRole("heading", { name: "启用 A-NAS" })).toBeTruthy();
@@ -110,70 +170,57 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.type(screen.getByLabelText("密码"), "correct horse battery staple");
     await user.click(screen.getByRole("button", { name: "创建管理员并启用" }));
     expect(await screen.findByRole("region", { name: "桌面应用" })).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/setup/admin", expect.objectContaining({ method: "POST" }));
-    const setupCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/setup/admin");
-    expect(JSON.parse(String(setupCall?.[1]?.body))).toEqual({
-      username: "owner",
-      password: "correct horse battery staple",
-    });
+    expect(setups).toEqual([{ username: "owner", password: "correct horse battery staple" }]);
   });
 
   it("asks for a session that lasts until sign-out on the local console", async () => {
     window.history.replaceState(null, "", "/?local-console=1");
     try {
-      const fetchMock = installAPI({ setupRequired: true });
+      const setups: unknown[] = [];
+      serveDesktop({ setup: { setupRequired: true } });
+      server.use(
+        http.post("/api/v1/setup/admin", async ({ request, response }) => {
+          setups.push(await request.json());
+          return response(201).json(session);
+        }),
+        http.get("/api/v1/local-display", ({ response }) => response(200).json({ sleepAfterMinutes: 30 })),
+        // The screen saver's videos are static files beside the page, outside the product API.
+        http.untyped.get(`${window.location.origin}/local-console/screensavers`, () =>
+          HttpResponse.json({ videos: [] }),
+        ),
+      );
       const user = userEvent.setup();
       render(<App />);
       await user.type(await screen.findByLabelText("账号"), "owner");
       await user.type(screen.getByLabelText("密码"), "correct horse battery staple");
       await user.click(screen.getByRole("button", { name: "创建管理员并启用" }));
       expect(await screen.findByRole("region", { name: "桌面应用" })).toBeTruthy();
-      const setupCall = fetchMock.mock.calls.find(([path]) => path === "/api/v1/setup/admin");
-      expect(JSON.parse(String(setupCall?.[1]?.body))).toEqual({
-        username: "owner",
-        password: "correct horse battery staple",
-        localConsole: true,
-      });
+      expect(setups).toEqual([{ username: "owner", password: "correct horse battery staple", localConsole: true }]);
     } finally {
       window.history.replaceState(null, "", "/");
     }
   });
 
-  it("shows a loading state while the first host observation is pending", async () => {
-    let finishRequest: ((response: Response) => void) | undefined;
-    routeFetch({
-      hostState: vi.fn(
-        () =>
-          new Promise<Response>((resolve) => {
-            finishRequest = resolve;
-          }),
-      ),
-    });
-    const user = userEvent.setup();
-    render(<App />);
-    const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
-    expect(await screen.findByText("正在读取设备状态…")).toBeTruthy();
-    await act(async () => finishRequest?.(okResponse(healthyState)));
-    expect(await screen.findByText("anas-fake")).toBeTruthy();
-  });
-
   it("shows authenticated host health and keeps the clock advancing", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-10-07T10:00:00Z"));
-    installAPI();
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
     expect(await screen.findByText("anas-fake")).toBeTruthy();
-    const before = screen.getByText(/\d{2}:\d{2}/, { selector: ".status-time strong" }).textContent;
+    const statusBar = screen.getByRole("banner", { name: "设备状态" });
+    const clock = () => within(statusBar).getByText(/^\d{2}:\d{2}$/).textContent;
+    const before = clock();
     act(() => vi.advanceTimersByTime(60_000));
-    expect(screen.getByText(/\d{2}:\d{2}/, { selector: ".status-time strong" }).textContent).not.toBe(before);
+    expect(clock()).not.toBe(before);
   });
 
   it("enables photos, trash, the backup center, and one settings entry", async () => {
-    installAPI();
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
@@ -198,42 +245,9 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(await screen.findByRole("dialog", { name: "相册" })).toBeTruthy();
   });
 
-  it("keeps the last successful state when refresh loses connection", async () => {
-    routeFetch({
-      hostState: vi.fn().mockResolvedValueOnce(okResponse(healthyState)).mockResolvedValueOnce(errorResponse(503)),
-    });
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(
-      within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }),
-    );
-    expect(await screen.findByText("anas-fake")).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: "刷新设备状态" }));
-
-    expect(await screen.findByText("连接中断，正在显示上次成功读取的数据")).toBeTruthy();
-    expect(screen.getByText("anas-fake")).toBeTruthy();
-  });
-
-  it("retries after an initial 503 response", async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(errorResponse(503)).mockResolvedValueOnce(okResponse(healthyState));
-    routeFetch({ hostState: fetchMock });
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(
-      within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }),
-    );
-    expect(await screen.findByText("暂时无法读取设备状态")).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: "重新连接" }));
-    expect(await screen.findByText("anas-fake")).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
   it("opens, minimizes, and restores settings", async () => {
-    installAPI();
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
@@ -244,8 +258,26 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(screen.getByRole("dialog", { name: "设置" })).toBeTruthy();
   });
 
+  it("maximizes a window above the dock and restores it", async () => {
+    serveDesktop();
+    serveWindows();
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
+    const trash = screen.getByRole("dialog", { name: "回收站" });
+    const placed = { left: trash.style.left, top: trash.style.top, width: trash.style.width };
+    await user.click(within(trash).getByRole("button", { name: "最大化回收站" }));
+    // A maximized window ends above the dock, which floats over the desktop's bottom.
+    expect(trash.style.bottom).toBe("90px");
+    expect(trash.style.width).toBe("");
+    await user.click(within(trash).getByRole("button", { name: "还原回收站" }));
+    expect({ left: trash.style.left, top: trash.style.top, width: trash.style.width }).toEqual(placed);
+  });
+
   it("shows utilisation gauges, network rates and the clock in the status bar, and opens transfers from the rates", async () => {
-    stubFetch(healthyState);
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup();
     render(<App />);
 
@@ -264,7 +296,8 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("opens the task manager from the utilisation gauges and brings settings in front on another section", async () => {
-    stubFetch(healthyState);
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup();
     render(<App />);
 
@@ -295,7 +328,8 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("restores minimized settings on the task manager when the gauges are activated from the keyboard", async () => {
-    stubFetch(healthyState);
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup();
     render(<App />);
     const statusBar = await screen.findByRole("banner", { name: "设备状态" });
@@ -314,7 +348,9 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("closes a half-filled password form when the gauges switch settings to the task manager", async () => {
-    installAPI({ users: [session.user] });
+    serveDesktop();
+    serveWindows();
+    server.use(http.get("/api/v1/users", ({ response }) => response(200).json({ items: [session.user] })));
     const user = userEvent.setup();
     render(<App />);
     const openAccount = async () => {
@@ -323,7 +359,7 @@ describe("A-NAS v1.0.1 desktop", () => {
       return screen.getByRole("dialog", { name: "设置" });
     };
     let settings = await openAccount();
-    await user.click(within(settings).getByRole("button", { name: "修改密码…" }));
+    await user.click(await within(settings).findByRole("button", { name: "修改密码…" }));
     await user.type(within(settings).getByLabelText("当前密码"), "correct horse battery staple");
 
     const statusBar = screen.getByRole("banner", { name: "设备状态" });
@@ -336,22 +372,34 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("marks the status bar disconnected when metrics cannot be read", async () => {
-    routeFetch({
-      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
-      metrics: vi.fn().mockResolvedValue(errorResponse(503)),
-    });
+    serveDesktop();
+    server.use(
+      http.get("/api/v1/metrics", ({ response }) =>
+        response(503).json(apiError("state_unavailable", "host state is unavailable")),
+      ),
+    );
     render(<App />);
 
     const statusBar = await screen.findByRole("banner", { name: "设备状态" });
-    expect(await within(statusBar).findByText("连接中断", { selector: ".source-badge" })).toBeTruthy();
+    // The connection dot and the source badge both say so.
+    expect(await within(statusBar).findAllByText("连接中断")).not.toHaveLength(0);
+    expect(within(statusBar).queryByText("设备在线")).toBeNull();
     expect(within(statusBar).getByRole("meter", { name: "CPU 占用" }).getAttribute("aria-valuetext")).toBe("暂无数据");
   });
 
   it("returns to the login screen when the session expires instead of reporting a lost connection", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let expired = false;
-    const poll = (state: unknown) => vi.fn(async () => (expired ? sessionExpiredResponse() : okResponse(state)));
-    routeFetch({ hostState: poll(healthyState), metrics: poll(metricsState) });
+    serveDesktop();
+    server.use(
+      http.get("/api/v1/host-state", ({ response }) =>
+        expired ? response.untyped(sessionExpired()) : response(200).json(healthyState),
+      ),
+      http.get("/api/v1/metrics", ({ response }) =>
+        expired ? response.untyped(sessionExpired()) : response(200).json(metricsState),
+      ),
+      http.post("/api/v1/session", ({ response }) => response(200).json(session)),
+    );
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<App />);
     await screen.findByRole("region", { name: "桌面应用" });
@@ -373,7 +421,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("reorders desktop icons by dragging without opening the app", async () => {
-    stubFetch(healthyState);
+    serveDesktop();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     layOutGrid(desktop);
@@ -382,12 +430,13 @@ describe("A-NAS v1.0.1 desktop", () => {
     const store = within(desktop).getByRole("button", { name: "打开应用中心" }).parentElement!;
     fireEvent.pointerDown(store, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 50, clientY: 160 });
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 40, clientY: 140 });
-    const dragPreview = document.querySelector(".desktop-drag-preview");
-    expect(dragPreview).toBeTruthy();
-    expect(desktop.contains(dragPreview)).toBe(false);
+    // The icon follows the pointer as a copy outside the grid.
+    const preview = () => screen.queryAllByText("应用中心").filter((label) => !desktop.contains(label));
+    expect(preview()).toHaveLength(1);
+    expect(preview()[0].closest('[aria-hidden="true"]')).toBeTruthy();
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 40, clientY: 50 });
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 40, clientY: 50 });
-    expect(document.querySelector(".desktop-drag-preview")).toBeNull();
+    expect(preview()).toHaveLength(0);
     fireEvent.click(within(desktop).getByRole("button", { name: "打开应用中心" }));
 
     expect(desktopOrder(desktop).slice(0, 5)).toEqual(["应用中心", "文件管理", "回收站", "设置", "影视中心"]);
@@ -397,7 +446,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("restores the original order when a drag is cancelled with Escape", async () => {
-    stubFetch(healthyState);
+    serveDesktop();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     layOutGrid(desktop);
@@ -413,7 +462,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("moves a focused icon with Alt and the arrow keys and restores the saved order", async () => {
-    stubFetch(healthyState);
+    serveDesktop();
     const user = userEvent.setup();
     const { unmount } = render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
@@ -434,7 +483,8 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("switches focus between open apps from an icon-only dock", async () => {
-    stubDesktopFetch(healthyState, true);
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
@@ -456,7 +506,8 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("previews a dock app's window on hover, shows or closes it from there, and hides the preview on click", async () => {
-    stubDesktopFetch(healthyState, true);
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
@@ -494,7 +545,8 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("lists dock icons in launch order and drops closed apps immediately from the accessibility tree", async () => {
-    stubDesktopFetch(healthyState, true);
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
@@ -517,7 +569,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("keeps the system rail to working shortcuts", async () => {
-    stubDesktopFetch(healthyState, true);
+    serveDesktop();
     render(<App />);
     const rail = await screen.findByRole("complementary", { name: "系统快捷栏" });
     const buttons = within(rail).getAllByRole("button");
@@ -533,7 +585,8 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("hides the open windows from the rail and brings back only those", async () => {
-    stubDesktopFetch(healthyState, true);
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
@@ -563,11 +616,12 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("puts the windows away when the bare desktop is clicked", async () => {
-    stubDesktopFetch(healthyState, true);
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup();
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
-    const wallpaper = document.querySelector<HTMLElement>(".desktop-shell")!;
+    const wallpaper = desktop.closest("main")!;
     const rail = screen.getByRole("complementary", { name: "系统快捷栏" });
     const showDesktop = within(rail).getByRole("button", { name: "显示桌面" });
     const openWindows = () => screen.queryAllByRole("dialog").map((dialog) => dialog.getAttribute("aria-label"));
@@ -578,9 +632,8 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(screen.getByRole("dialog", { name: "设置" }));
     expect(openWindows()).toEqual(["回收站", "设置"]);
     // So does a window drag released over the wallpaper, and a press on the wallpaper that moves away.
-    const titleBar = screen.getByRole("dialog", { name: "回收站" }).querySelector<HTMLElement>(".window-titlebar")!;
     await user.pointer([
-      { keys: "[MouseLeft>]", target: titleBar, coords: { clientX: 400, clientY: 90 } },
+      { keys: "[MouseLeft>]", target: titleOf("回收站"), coords: { clientX: 400, clientY: 90 } },
       { target: wallpaper, coords: { clientX: 40, clientY: 600 } },
       { keys: "[/MouseLeft]" },
     ]);
@@ -616,7 +669,8 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("finds an app in the launcher by what it does and opens it with Enter", async () => {
-    stubDesktopFetch(healthyState, true);
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup();
     render(<App />);
     const rail = await screen.findByRole("complementary", { name: "系统快捷栏" });
@@ -651,7 +705,7 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("closes the launcher with Escape and returns focus to the rail", async () => {
-    stubDesktopFetch(healthyState, true);
+    serveDesktop();
     const user = userEvent.setup();
     render(<App />);
     const trigger = within(await screen.findByRole("complementary", { name: "系统快捷栏" })).getByRole("button", {
@@ -669,7 +723,14 @@ describe("A-NAS v1.0.1 desktop", () => {
   });
 
   it("signs out only from the account menu", async () => {
-    const fetchMock = installAPI();
+    const signOuts = vi.fn();
+    serveDesktop();
+    server.use(
+      http.delete("/api/v1/session", ({ response }) => {
+        signOuts();
+        return response(204).empty();
+      }),
+    );
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "账号（owner）" }));
@@ -679,227 +740,355 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(document.activeElement).toBe(within(account).getByRole("menuitem", { name: /^我的账号/ }));
     await user.keyboard("{ArrowDown}");
     expect(document.activeElement).toBe(within(account).getByRole("menuitem", { name: "退出登录" }));
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+    expect(signOuts).not.toHaveBeenCalled();
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("button", { name: "登录" })).toBeTruthy();
-    expect(fetchMock.mock.calls.some(([path, init]) => path === "/api/v1/session" && init?.method === "DELETE")).toBe(
-      true,
-    );
+    expect(signOuts).toHaveBeenCalledOnce();
   });
+});
 
-  it("manages containers from the Docker app", async () => {
-    const actions: Array<{ id: string; body: unknown }> = [];
-    routeFetch({
-      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
-      containers: async (url, init) => {
-        if (init?.method === "POST") {
-          actions.push({ id: url.split("/")[4], body: JSON.parse(String(init.body)) });
-          return json(undefined, 204);
-        }
-        if (url.endsWith("/logs?tail=200")) {
-          return okResponse({
-            lines: [
-              { stream: "stdout", time: "2026-10-06T00:00:01Z", text: "server ready" },
-              { stream: "stderr", text: "warning: low disk" },
-            ],
-          });
-        }
-        return okResponse(containerSnapshot);
-      },
-    });
+describe("Windows stay apart", () => {
+  it("re-renders no other window's content while one is dragged or another is focused", async () => {
+    serveDesktop();
+    serveWindows();
     const user = userEvent.setup();
     render(<App />);
-    await user.click(
-      within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开 Docker" }),
-    );
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
+    const trash = screen.getByRole("dialog", { name: "回收站" });
+    expect(await within(trash).findByText("回收站是空的")).toBeTruthy();
+    await user.click(within(desktop).getByRole("button", { name: "打开传输中心" }));
+    const transfers = screen.getByRole("dialog", { name: "传输中心" });
+    await within(transfers).findByRole("heading", { name: "正在传输" });
+    const rendered = panels.trashRenders;
 
-    const docker = screen.getByRole("dialog", { name: "Docker" });
-    const jellyfin = await within(docker).findByRole("article", { name: "容器 jellyfin" });
-    expect(within(jellyfin).getByText("运行中")).toBeTruthy();
-    expect(within(jellyfin).getByText("已运行 3 小时")).toBeTruthy();
-    expect(within(jellyfin).getByRole("link", { name: "打开 jellyfin 的端口 8096" }).getAttribute("href")).toMatch(
-      /:8096\/$/,
-    );
-    expect(within(jellyfin).getByText("12.4%")).toBeTruthy();
+    // Dragging the transfer center moves only its own window.
+    const before = transfers.style.left;
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: titleOf("传输中心"), coords: { clientX: 500, clientY: 100 } },
+      { coords: { clientX: 540, clientY: 120 } },
+      { coords: { clientX: 580, clientY: 140 } },
+      { keys: "[/MouseLeft]" },
+    ]);
+    expect(transfers.style.left).not.toBe(before);
+    // Bringing one window or the other to the front does not render either's content again.
+    await user.click(trash);
+    await user.click(transfers);
+    expect(panels.trashRenders).toBe(rendered);
+  });
 
-    await user.click(within(jellyfin).getByRole("button", { name: "停止 jellyfin" }));
-    expect(actions).toHaveLength(0);
-    await user.click(
-      within(within(docker).getByRole("dialog", { name: "确认停止 jellyfin" })).getByRole("button", {
-        name: "确认停止",
+  it("shows a failed window's error in that window alone and reopens only it", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    serveDesktop();
+    serveWindows();
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开传输中心" }));
+    const transfers = screen.getByRole("dialog", { name: "传输中心" });
+    await within(transfers).findByRole("heading", { name: "正在传输" });
+
+    panels.trashFails = true;
+    await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
+    const trash = screen.getByRole("dialog", { name: "回收站" });
+    expect(await within(trash).findByRole("heading", { name: "这个窗口暂时无法显示" })).toBeTruthy();
+    // The other window and the rest of the desktop keep working.
+    expect(within(transfers).getByRole("heading", { name: "正在传输" })).toBeTruthy();
+    await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
+    expect(await screen.findByRole("dialog", { name: "设置" })).toBeTruthy();
+
+    panels.trashFails = false;
+    const mounted = { trash: panels.trashMounts, transfers: panels.transfersMounts };
+    await user.click(within(trash).getByRole("button", { name: "重新打开" }));
+    expect(await within(trash).findByText("回收站是空的")).toBeTruthy();
+    expect(panels.trashMounts).toBe(mounted.trash + 1);
+    expect(panels.transfersMounts).toBe(mounted.transfers);
+  });
+
+  it("shows the folder another window asks for each time it asks, even the same one twice", async () => {
+    const photos = folder("Photos", { spaceId: ownSpace.id });
+    const uploaded: Transfer = {
+      id: "upload-1",
+      direction: "upload",
+      kind: "file",
+      name: "beach.jpg",
+      location: { spaceId: ownSpace.id, spaceKind: "private", folders: [{ id: photos.id, name: photos.name }] },
+      totalBytes: 12,
+      transferredBytes: 12,
+      bytesPerSecond: 0,
+      state: "completed",
+      createdAt: "2026-10-12T10:00:00Z",
+      updatedAt: "2026-10-12T10:00:00Z",
+      finishedAt: "2026-10-12T10:00:00Z",
+    };
+    let listed = false;
+    serveDesktop();
+    serveWindows();
+    server.use(
+      ...filesHandlers({
+        spaces: [ownSpace],
+        entries: [photos, entry("beach.jpg", { spaceId: ownSpace.id, parentId: photos.id })],
+      }),
+      http.get("/api/v1/transfers", async ({ response }) => {
+        // Later polls never answer, so the transfer center hands the desktop
+        // the very same location object both times.
+        if (listed) await delay("infinite");
+        listed = true;
+        return response(200).json({ items: [uploaded] });
       }),
     );
-    expect(actions).toEqual([{ id: containerSnapshot.containers[0].id, body: { action: "stop" } }]);
-
-    const stopped = within(docker).getByRole("article", { name: "容器 homeassistant" });
-    await user.click(within(stopped).getByRole("button", { name: "启动 homeassistant" }));
-    expect(actions[1]).toEqual({ id: containerSnapshot.containers[1].id, body: { action: "start" } });
-
-    await user.click(within(jellyfin).getByRole("button", { name: "查看 jellyfin 的日志" }));
-    const log = await within(docker).findByRole("log", { name: "jellyfin 日志" });
-    expect(within(log).getByText("server ready")).toBeTruthy();
-    expect(within(log).getByText("warning: low disk").parentElement?.className).toContain("stderr");
-    await user.type(within(docker).getByRole("textbox", { name: "筛选日志" }), "disk");
-    expect(within(log).queryByText("server ready")).toBeNull();
-
-    // Leaving the log view must not crash the desktop (it once did through scrollIntoView's Promise).
-    const nav = within(docker).getByRole("navigation", { name: "Docker 导航" });
-    await user.click(within(nav).getByRole("button", { name: /镜像/ }));
-    expect(within(within(docker).getByRole("table", { name: "镜像列表" })).getByText("jellyfin/jellyfin")).toBeTruthy();
-  });
-
-  it("explains when Docker management is disabled", async () => {
-    routeFetch({
-      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
-      containers: async () => apiError(503, "containers_disabled", "disabled"),
-    });
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "打开 Docker" }));
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开传输中心" }));
+    const transfers = screen.getByRole("dialog", { name: "传输中心" });
+    await user.click(within(transfers).getByRole("button", { name: /^传输记录/ }));
+    const showPhotos = () => within(transfers).findByRole("button", { name: /Photos/ });
 
-    expect(await within(screen.getByRole("dialog", { name: "Docker" })).findByText("Docker 未启用")).toBeTruthy();
+    await user.click(await showPhotos());
+    const files = await screen.findByRole("dialog", { name: "文件管理" });
+    expect(await within(files).findByText("beach.jpg")).toBeTruthy();
+
+    // Leave the folder, then ask for it again from the transfer center.
+    await user.click(within(files).getByRole("button", { name: "向上一级" }));
+    await waitFor(() => expect(within(files).queryByText("beach.jpg")).toBeNull());
+    await user.click(await showPhotos());
+    expect(await within(files).findByText("beach.jpg")).toBeTruthy();
   });
+});
 
-  it("installs an app from the App Center after confirming its plan", async () => {
-    const posts: Array<{ url: string; body: unknown }> = [];
-    let installed = false;
-    routeFetch({
-      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
-      apps: async (url, init) => {
-        if (init?.method === "POST") {
-          posts.push({ url, body: JSON.parse(String(init.body)) });
-          expect(new Headers(init.headers).get("X-CSRF-Token")).toBe(session.csrfToken);
-          installed = url.endsWith("/install");
-          return json(
-            { appId: "memos", action: "install", state: "running", startedAt: "2026-10-07T00:00:00Z", output: [] },
-            202,
-          );
-        }
-        if (url.endsWith("/plan")) return okResponse(memosPlan);
-        return okResponse(
-          appList(
-            installed
-              ? {
-                  state: "installed",
-                  running: 1,
-                  total: 1,
-                  job: {
-                    appId: "memos",
-                    action: "install",
-                    state: "succeeded",
-                    startedAt: "2026-10-07T00:00:00Z",
-                    output: ["Container memos  Started"],
-                  },
-                }
-              : {},
-          ),
-        );
-      },
-    });
+// openSettingsOn opens Settings from its desktop icon on section.
+async function openSettingsOn(user: ReturnType<typeof userEvent.setup>, section: string) {
+  const desktop = await screen.findByRole("region", { name: "桌面应用" });
+  await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
+  // The settings window loads its code when first opened.
+  const sections = await within(screen.getByRole("dialog", { name: "设置" })).findByRole("navigation", {
+    name: "设置分区",
+  });
+  await user.click(within(sections).getByRole("button", { name: section }));
+  return screen.getByRole("dialog", { name: "设置" });
+}
+
+describe("Settings on the desktop", () => {
+  it("keeps the shell while Settings is minimized and ends it when Settings closes", async () => {
+    serveDesktop();
+    server.use(...settingsHandlers().handlers, ...terminalHandlers(true).handlers);
     const user = userEvent.setup();
     render(<App />);
+    await openSettingsOn(user, "终端");
+    await screen.findByTestId("xterm-session");
+
+    await user.click(within(screen.getByRole("dialog", { name: "设置" })).getByRole("button", { name: "最小化设置" }));
+    expect(screen.queryByRole("dialog", { name: "设置" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "恢复设置" }));
+    expect(screen.getByTestId("xterm-session")).toBeTruthy();
+    expect(xterm.mounts).toBe(1);
+
+    await user.click(within(screen.getByRole("dialog", { name: "设置" })).getByRole("button", { name: "关闭设置" }));
+    expect(screen.queryByTestId("xterm-session")).toBeNull();
+    // Settings reopens on the terminal with a new shell.
     await user.click(
-      within(await screen.findByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开应用中心" }),
+      within(screen.getByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }),
+    );
+    expect(await screen.findByTestId("xterm-session")).toBeTruthy();
+    expect(xterm.mounts).toBe(2);
+  });
+
+  it("keeps a pending storage plan across sections and when settings closes", async () => {
+    serveDesktop();
+    server.use(...settingsHandlers({ plan: storagePlan("plan:pending") }).handlers);
+    const user = userEvent.setup();
+    render(<App />);
+    let settings = await openSettingsOn(user, "存储");
+    await user.click(await within(settings).findByRole("button", { name: "初始化数据卷…" }));
+    await user.click(within(settings).getByRole("button", { name: "生成格式化计划" }));
+    await user.type(await within(settings).findByLabelText(/输入确认短语/), "ERASE");
+
+    await user.click(within(settings).getByRole("button", { name: "概览" }));
+    expect(within(settings).queryByRole("heading", { name: "破坏性操作计划" })).toBeNull();
+    await user.click(within(settings).getByRole("button", { name: "关闭设置" }));
+    await user.click(
+      within(screen.getByRole("region", { name: "桌面应用" })).getByRole("button", { name: "打开设置" }),
+    );
+    settings = screen.getByRole("dialog", { name: "设置" });
+    expect((await within(settings).findByRole("button", { name: "概览" })).getAttribute("aria-current")).toBe("page");
+
+    await user.click(within(settings).getByRole("button", { name: "存储" }));
+    expect(within(settings).getByRole("heading", { name: "破坏性操作计划" })).toBeTruthy();
+    expect((within(settings).getByLabelText(/输入确认短语/) as HTMLInputElement).value).toBe("ERASE");
+  });
+
+  it("opens My account in Settings from the account menu", async () => {
+    serveDesktop();
+    server.use(...settingsHandlers().handlers);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "账号（owner）" }));
+    await user.click(screen.getByRole("menuitem", { name: /^我的账号/ }));
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect((await within(settings).findByRole("button", { name: "我的账号" })).getAttribute("aria-current")).toBe(
+      "page",
+    );
+    expect(within(settings).getByRole("button", { name: "修改密码…" })).toBeTruthy();
+  });
+
+  it("lets a member choose a nickname that the desktop shows instead of the account name", async () => {
+    serveDesktop({ session: signIn(alice) });
+    server.use(...settingsHandlers().handlers, ...accountHandlers(alice).handlers);
+    const user = userEvent.setup();
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "账号（alice）" })).toBeTruthy();
+    const settings = await openSettingsOn(user, "我的账号");
+    await user.click(within(settings).getByRole("button", { name: "设置昵称…" }));
+    const form = within(settings).getByRole("form", { name: "修改昵称" });
+    await user.type(within(form).getByLabelText("昵称"), "小爱");
+    await user.click(within(form).getByRole("button", { name: "保存昵称" }));
+    expect(await within(settings).findByText("昵称已改为“小爱”。")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "账号（小爱）" })).toBeTruthy();
+  });
+
+  it("shows the avatar chosen in Settings on the account button, and the initial once it is removed", async () => {
+    // jsdom neither decodes images nor draws on a canvas.
+    vi.stubGlobal(
+      "Image",
+      class {
+        naturalWidth = 400;
+        naturalHeight = 320;
+        decoding = "";
+        onload?: () => void;
+        set src(_: string) {
+          queueMicrotask(() => this.onload?.());
+        }
+      },
+    );
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: vi.fn(() => "blob:avatar-source"), revokeObjectURL: vi.fn() }),
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+    } as never);
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((callback) =>
+      callback(new Blob(["jpeg"], { type: "image/jpeg" })),
+    );
+    serveDesktop({ session: signIn(alice) });
+    server.use(...settingsHandlers().handlers, ...accountHandlers(alice).handlers);
+    const user = userEvent.setup();
+    render(<App />);
+    const settings = await openSettingsOn(user, "我的账号");
+    await user.click(within(settings).getByRole("button", { name: "更换头像" }));
+    const picker = within(settings).getByRole("dialog", { name: "更换头像" });
+    await user.upload(
+      within(picker).getByLabelText("从本机选择图片"),
+      new File(["png"], "me.png", { type: "image/png" }),
+    );
+    await within(picker).findByTestId("cropper");
+    await user.click(within(picker).getByRole("button", { name: "保存头像" }));
+    expect(await within(settings).findByText("头像已更新。")).toBeTruthy();
+    const account = screen.getByRole("button", { name: "账号（alice）" });
+    expect(account.querySelector("img")?.getAttribute("src")).toBe(
+      "/api/v1/users/user%3Aalice/avatar?v=0123456789abcdef",
     );
 
-    const store = screen.getByRole("dialog", { name: "应用中心" });
-    await user.click(await within(store).findByRole("button", { name: "安装 Memos" }));
-
-    const plan = await within(store).findByRole("dialog", { name: "安装计划" });
-    expect(await within(plan).findByText("neosmemo/memos:0.28.0")).toBeTruthy();
-    expect(within(plan).getByText("5230/tcp")).toBeTruthy();
-    expect(within(plan).getByText("/srv/a-nas/data/apps/memos/memos")).toBeTruthy();
-    expect(within(plan).getByText("app-memos")).toBeTruthy();
-    expect(within(plan).getByText(/只访问自己的应用数据/)).toBeTruthy();
-    expect(within(plan).getByText("使用 Docker 默认网桥，不新建网络")).toBeTruthy();
-    expect(posts).toHaveLength(0);
-
-    await user.click(within(plan).getByRole("button", { name: "确认安装" }));
-    expect(posts).toEqual([{ url: "/api/v1/apps/memos/install", body: { digest: memosPlan.digest } }]);
-    expect(await within(store).findByText("Memos 已安装")).toBeTruthy();
-    expect(within(store).getByText(/已安装 · 1\/1 个容器运行中/)).toBeTruthy();
-    expect(within(store).getByText(/Container memos\s+Started/)).toBeTruthy();
+    await user.click(within(settings).getByRole("button", { name: "移除" }));
+    expect(await within(settings).findByText("已移除头像，现在显示名字的第一个字。")).toBeTruthy();
+    expect(account.querySelector("img")).toBeNull();
+    expect(account.textContent).toContain("A");
   });
 
-  it("explains install conflicts and a disabled App Center", async () => {
-    routeFetch({
-      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
-      apps: async (url, init) => {
-        if (init?.method === "POST") {
-          return apiError(409, "port_in_use", "a published port is already in use: 5230 is used by other");
-        }
-        if (url.endsWith("/plan")) return okResponse(memosPlan);
-        return okResponse(appList({}));
-      },
+  it("names the administrator who reset the password by nickname in the account notice", async () => {
+    serveDesktop({
+      profiles: [
+        { id: "user:owner", username: "owner", nickname: "爸爸" },
+        { id: "user:alice", username: "alice", nickname: "小爱", avatarVersion: "feedface00000000" },
+      ],
+      notifications: [
+        { id: "notification:1", kind: "credential_reset", actorUsername: "owner", createdAt: "2026-10-07T10:00:00Z" },
+      ],
     });
+    const acknowledged: string[] = [];
+    server.use(
+      http.post("/api/v1/notifications/{notificationId}/acknowledge", ({ params, response }) => {
+        acknowledged.push(params.notificationId);
+        return response(204).empty();
+      }),
+    );
     const user = userEvent.setup();
-    const { unmount } = render(<App />);
-    await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
-    const store = screen.getByRole("dialog", { name: "应用中心" });
-    await user.click(await within(store).findByRole("button", { name: "安装 Memos" }));
-    await user.click(await within(store).findByRole("button", { name: "确认安装" }));
-    const conflict = (await within(store).findByRole("alert")).textContent;
-    expect(conflict).toContain("端口已被占用（5230）");
-    expect(conflict).not.toContain("is used by");
-    unmount();
-
-    routeFetch({
-      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
-      apps: async () => apiError(503, "apps_disabled", "disabled"),
-    });
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
-    expect(await screen.findByText("应用中心未启用")).toBeTruthy();
+    const notice = await screen.findByRole("alertdialog", { name: "账号通知" });
+    expect(await within(notice).findByText(/管理员 爸爸（owner） 于 .* 重置了你的密码/)).toBeTruthy();
+    await user.click(within(notice).getByRole("button", { name: "知道了" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "账号通知" })).toBeNull());
+    expect(acknowledged).toEqual(["notification:1"]);
+  });
+});
+
+describe("Windows opening each other from the file manager", () => {
+  it("opens sharing from the rail instead of the desktop and shares read-only files", async () => {
+    serveDesktop();
+    server.use(
+      ...filesHandlers({
+        spaces: [space("shared", { writable: false })],
+        entries: [
+          entry("分享计划.txt", {
+            id: "shared-file",
+            spaceId: "shared",
+            sizeBytes: 4,
+            modifiedAt: "2026-10-07T10:00:00Z",
+          }),
+        ],
+      }),
+      http.get("/api/v1/shares/members", ({ response }) => response(200).json({ items: [] })),
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    expect(within(desktop).queryByRole("button", { name: "打开分享" })).toBeNull();
+    const rail = screen.getByRole("complementary", { name: "系统快捷栏" });
+    await user.click(within(rail).getByRole("button", { name: "打开分享" }));
+    expect(await screen.findByRole("dialog", { name: "分享" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "关闭分享" }));
+    await user.click(within(desktop).getByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await user.click(await within(dialog).findByRole("row", { name: /分享计划.txt/ }));
+    expect(within(dialog).getByRole("button", { name: "分享" }).hasAttribute("disabled")).toBe(false);
+    await user.click(within(dialog).getByRole("button", { name: "分享" }));
+    expect(await screen.findByRole("dialog", { name: "分享给成员" })).toBeTruthy();
   });
 
-  it("shows the Docker networks an app creates and refuses them without an address pool", async () => {
-    let poolConfigured = true;
-    routeFetch({
-      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
-      apps: async (url) => {
-        if (url.endsWith("/plan")) {
-          return poolConfigured
-            ? okResponse({ ...memosPlan, networks: ["default"], addressPools: ["10.96.64.0/19"] })
-            : apiError(409, "address_pool_missing", "Docker has no address pool for app networks");
-        }
-        return okResponse(appList({}));
-      },
-    });
+  it("enables file management and opens the photo library from its 图库 row", async () => {
+    serveDesktop();
+    server.use(...filesHandlers({ spaces: [ownSpace] }), ...photosHandlers());
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
-    const store = screen.getByRole("dialog", { name: "应用中心" });
-    await user.click(await within(store).findByRole("button", { name: "Memos，可安装" }));
-    await user.click(within(store).getByRole("button", { name: "安装" }));
-    const plan = await within(store).findByRole("dialog", { name: "安装计划" });
-    expect(await within(plan).findByText("default")).toBeTruthy();
-    expect(within(plan).getByText(/地址只从 10\.96\.64\.0\/19 分配/)).toBeTruthy();
-
-    await user.click(within(plan).getByRole("button", { name: "取消" }));
-    poolConfigured = false;
-    await user.click(within(store).getByRole("button", { name: "安装" }));
-    expect((await within(store).findByRole("alert")).textContent).toContain("Docker 尚未配置 A-NAS 网络地址池");
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    const fileButton = within(desktop).getByRole("button", { name: "打开文件管理" });
+    expect(fileButton.hasAttribute("disabled")).toBe(false);
+    await user.click(fileButton);
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await user.dblClick(await within(dialog).findByRole("row", { name: /图库/ }));
+    expect(await screen.findByRole("dialog", { name: "相册" })).toBeTruthy();
   });
 
-  it("explains when app installation is blocked by an unavailable data volume", async () => {
-    routeFetch({
-      hostState: vi.fn().mockResolvedValue(okResponse(healthyState)),
-      apps: async (url, init) => {
-        if (init?.method === "POST") {
-          return apiError(423, "volume_unavailable", "the data volume is not available");
-        }
-        if (url.endsWith("/plan")) return okResponse(memosPlan);
-        return okResponse(appList({}));
-      },
-    });
+  it("follows the file manager's uploads in the status bar, which opens the transfer center", async () => {
+    serveDesktop();
+    server.use(
+      ...filesHandlers({ spaces: [sharedSpace], entries: [entry("old.txt", { id: "file:old", sizeBytes: 3 })] }),
+    );
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "打开应用中心" }));
-    const store = screen.getByRole("dialog", { name: "应用中心" });
-    await user.click(await within(store).findByRole("button", { name: "Memos，可安装" }));
-    await user.click(within(store).getByRole("button", { name: "安装" }));
-    await user.click(await within(store).findByRole("button", { name: "确认安装" }));
-    expect((await within(store).findByRole("alert")).textContent).toContain("数据卷当前不可用");
+    await user.click(await screen.findByRole("button", { name: "打开文件管理" }));
+    const dialog = await screen.findByRole("dialog", { name: "文件管理" });
+    await within(dialog).findByText("old.txt");
+    await user.upload(within(dialog).getByLabelText("选择要上传的文件"), [
+      new File(["hello"], "a.txt"),
+      new File(["world!"], "b.txt"),
+    ]);
+    tus.uploads[0].options.onProgress(5, 5);
+    await user.click(await screen.findByRole("button", { name: /传输中心：正在上传 .+ 等 2 个任务/ }));
+    const center = await screen.findByRole("dialog", { name: "传输中心" });
+    expect(await within(center).findByRole("heading", { name: "正在传输" })).toBeTruthy();
   });
 });
 
@@ -909,15 +1098,20 @@ function desktopOrder(desktop: HTMLElement): string[] {
     .map((button) => button.textContent!.replace("规划中", ""));
 }
 
-// jsdom has no layout; give each slot the geometry of a 3-column, 100px grid.
+// titleOf returns the title in a window's title bar, where a drag starts.
+function titleOf(title: string): HTMLElement {
+  return within(screen.getByRole("dialog", { name: title })).getAllByText(title)[0];
+}
+
+// jsdom has no layout; give each icon's slot, the element around its button,
+// the geometry of a 3-column, 100px grid.
 function layOutGrid(desktop: HTMLElement) {
-  const geometry = (slot: Element) => {
-    const index = Array.from(slot.parentElement!.children)
-      .filter((child) => child.classList.contains("desktop-slot"))
-      .indexOf(slot);
+  const slots = () => Array.from(desktop.querySelectorAll("button"), (button) => button.parentElement!);
+  const geometry = (slot: HTMLElement) => {
+    const index = slots().indexOf(slot);
     return { left: (index % 3) * 100, top: Math.floor(index / 3) * 100 };
   };
-  desktop.querySelectorAll(".desktop-slot").forEach((slot) => {
+  for (const slot of slots()) {
     Object.defineProperties(slot, {
       offsetLeft: { configurable: true, get: () => geometry(slot).left },
       offsetTop: { configurable: true, get: () => geometry(slot).top },
@@ -938,14 +1132,21 @@ function layOutGrid(desktop: HTMLElement) {
         toJSON: () => ({}),
       };
     };
-  });
+  }
 }
 
 describe("ADR 0008 account safeguards", () => {
   it("requires a member whose password was reset to choose a new one first", async () => {
-    const fetchMock = installAPI({
+    const changes: unknown[] = [];
+    serveDesktop({
       session: { ...session, user: { ...session.user, username: "alice", role: "member", mustChangePassword: true } },
     });
+    server.use(
+      http.post("/api/v1/session/password", async ({ request, response }) => {
+        changes.push(await request.json());
+        return response(204).empty();
+      }),
+    );
     const user = userEvent.setup();
     render(<App />);
     expect(await screen.findByRole("heading", { name: "设置新密码" })).toBeTruthy();
@@ -955,15 +1156,12 @@ describe("ADR 0008 account safeguards", () => {
     await user.type(screen.getByLabelText("确认新密码"), "alice chosen password");
     await user.click(screen.getByRole("button", { name: "保存新密码" }));
     expect(await screen.findByRole("region", { name: "桌面应用" })).toBeTruthy();
-    const call = fetchMock.mock.calls.find(([path]) => path === "/api/v1/session/password");
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
-      currentPassword: "temporary password 1",
-      newPassword: "alice chosen password",
-    });
+    expect(changes).toEqual([{ currentPassword: "temporary password 1", newPassword: "alice chosen password" }]);
   });
 
   it("tells the owner when an administrator viewed the private space", async () => {
-    const fetchMock = installAPI({
+    const acknowledged: string[] = [];
+    serveDesktop({
       notifications: [
         {
           id: "notification:1",
@@ -975,20 +1173,23 @@ describe("ADR 0008 account safeguards", () => {
         },
       ],
     });
+    server.use(
+      http.post("/api/v1/notifications/{notificationId}/acknowledge", ({ params, response }) => {
+        acknowledged.push(params.notificationId);
+        return response(204).empty();
+      }),
+    );
     const user = userEvent.setup();
     render(<App />);
     const notice = await screen.findByRole("alertdialog", { name: "账号通知" });
     expect(within(notice).getByText(/管理员 owner .*只读查看.*原因：找回照片/)).toBeTruthy();
     await user.click(within(notice).getByRole("button", { name: "知道了" }));
     expect(screen.queryByRole("alertdialog", { name: "账号通知" })).toBeNull();
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/notifications/notification%3A1/acknowledge",
-      expect.objectContaining({ method: "POST" }),
-    );
+    await waitFor(() => expect(acknowledged).toEqual(["notification:1"]));
   });
 
   it("tells the owner when an administrator viewed the private photo library", async () => {
-    installAPI({
+    serveDesktop({
       notifications: [
         {
           id: "notification:2",
@@ -1008,7 +1209,7 @@ describe("ADR 0008 account safeguards", () => {
 
 describe("ADR 0008 application access", () => {
   it("shows Docker and the App Center to administrators only", async () => {
-    installAPI({ session: { ...session, user: { ...session.user, username: "alice", role: "member" } } });
+    serveDesktop({ session: { ...session, user: { ...session.user, username: "alice", role: "member" } } });
     render(<App />);
     const desktop = await screen.findByRole("region", { name: "桌面应用" });
     expect(within(desktop).queryByRole("button", { name: "打开 Docker" })).toBeNull();
@@ -1017,8 +1218,16 @@ describe("ADR 0008 application access", () => {
 });
 
 describe("Installed apps on the desktop", () => {
-  const immich = { id: "immich", title: "Immich", webPort: 2283, scheme: "http", path: "/", running: 4, total: 4 };
-  const navidrome = {
+  const immich: AppShortcut = {
+    id: "immich",
+    title: "Immich",
+    webPort: 2283,
+    scheme: "http",
+    path: "/",
+    running: 4,
+    total: 4,
+  };
+  const navidrome: AppShortcut = {
     id: "navidrome",
     title: "Navidrome",
     webPort: 4533,
@@ -1029,7 +1238,7 @@ describe("Installed apps on the desktop", () => {
   };
 
   it("opens an installed app's web page from its desktop icon and from the launcher", async () => {
-    installAPI({ shortcuts: [immich, navidrome] });
+    serveDesktop({ shortcuts: [immich, navidrome] });
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     const user = userEvent.setup();
     render(<App />);
@@ -1053,7 +1262,8 @@ describe("Installed apps on the desktop", () => {
   });
 
   it("marks a stopped app and shows administrators its containers in Docker", async () => {
-    installAPI({ shortcuts: [navidrome] });
+    serveDesktop({ shortcuts: [navidrome] });
+    server.use(...appsHandlers(() => []), ...dockerHandlers(containerSnapshot()));
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     const user = userEvent.setup();
     render(<App />);
@@ -1066,7 +1276,7 @@ describe("Installed apps on the desktop", () => {
   });
 
   it("shows installed apps to members, who cannot open Docker", async () => {
-    installAPI({
+    serveDesktop({
       shortcuts: [immich, navidrome],
       session: { ...session, user: { ...session.user, username: "alice", role: "member" } },
     });

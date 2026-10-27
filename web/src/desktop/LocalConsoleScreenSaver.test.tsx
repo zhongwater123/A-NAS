@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { http, server } from "../test/server";
 import {
   defaultSleepAfterMinutes,
   isLocalConsole,
@@ -53,17 +55,19 @@ describe("local console screen saver", () => {
   });
 
   it("accepts only unique anonymous same-origin video URLs from the manifest", async () => {
+    // MSW answers through timers that fake ones would hold back.
+    vi.useRealTimers();
     const valid = `/local-console/screensavers/${"a".repeat(64)}.mp4`;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ videos: [valid, valid, "https://example.com/video.mp4", "/api/v1/users"] }),
-      }),
+    // The manifest is a static file beside the page, outside the product API.
+    server.use(
+      http.untyped.get(`${window.location.origin}/local-console/screensavers`, () =>
+        HttpResponse.json({ videos: [valid, valid, "https://example.com/video.mp4", "/api/v1/users"] }),
+      ),
     );
+    // The request MSW hands its handler no longer carries the cache mode, so watch the call itself.
+    const fetching = vi.spyOn(globalThis, "fetch");
     await expect(loadScreenSaverVideos()).resolves.toEqual([valid]);
-    expect(fetch).toHaveBeenCalledWith("/local-console/screensavers", { cache: "no-store" });
+    expect(fetching).toHaveBeenCalledWith("/local-console/screensavers", { cache: "no-store" });
   });
 
   it("loops one random video per idle activation and samples again after activity", async () => {

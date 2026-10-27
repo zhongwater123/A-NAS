@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Session } from "../../api.generated";
-import { json, stubAPI } from "../../test/api";
+import { type LogsOptions, logsHandlers } from "../../test/handlers/logs";
+import { server } from "../../test/server";
 import type { ActivityEvent, SystemLogEntry } from "./api";
 import { forgetRememberedFilters } from "./common";
 import { LogsSection } from "./LogsSection";
@@ -136,56 +137,40 @@ const systemLines = [
   logLine("s=1;i=1", 10),
 ];
 
-interface API {
-  activity?: (params: URLSearchParams) => unknown;
-  logs?: (params: URLSearchParams) => unknown;
+// serve answers both logs from options, with both accounts in the member
+// filter; it returns the queries of the reads.
+function serve(options: Omit<LogsOptions, "users"> = {}) {
+  const { handlers, sent } = logsHandlers({ users: [admin.user, member.user], ...options });
+  server.use(...handlers);
+  return sent;
 }
 
-function installAPI(api: API) {
-  const mock = vi.fn(async (input: RequestInfo | URL) => {
-    const url = new URL(String(input), "http://127.0.0.1");
-    const respond = (body: unknown, status = 200) => json(body, status);
-    if (url.pathname === "/api/v1/users") return respond({ items: [{ ...admin.user }, { ...member.user }] });
-    if (url.pathname === "/api/v1/activity")
-      return respond(api.activity?.(url.searchParams) ?? { items: [], scope: "all" });
-    if (url.pathname === "/api/v1/system-logs") {
-      const body = api.logs?.(url.searchParams) ?? { items: [], dataSource: "simulated" };
-      return body instanceof Error
-        ? respond({ error: { code: "logs_unavailable", message: body.message } }, 503)
-        : respond(body);
-    }
-    return respond({ items: [] });
-  });
-  stubAPI(mock);
-  return mock;
-}
-
-const calls = (mock: ReturnType<typeof installAPI>, path: string) =>
-  mock.mock.calls
-    .map(([input]) => new URL(String(input), "http://127.0.0.1"))
-    .filter((url) => url.pathname === path)
-    .map((url) => url.searchParams);
+// sentence matches the element that holds text whole, as a row's one-line
+// description does, not the parts it is built from.
+const sentence = (text: string) => (_: string, element: Element | null) =>
+  element?.textContent === text && !Array.from(element.children).some((child) => child.textContent === text);
 
 beforeEach(() => forgetRememberedFilters());
 afterEach(() => {
   vi.useRealTimers();
-  vi.unstubAllGlobals();
 });
 
 describe("activity log", () => {
   it("shows a day-grouped timeline with merged uploads, hidden names and details", async () => {
-    installAPI({ activity: () => ({ items: activity, scope: "all" }) });
+    serve({ activity: () => ({ items: activity, scope: "all" }) });
     const user = userEvent.setup();
     render(<LogsSection session={admin} />);
     expect(screen.getByRole("heading", { name: "日志" })).toBeTruthy();
     const todayRegion = await screen.findByRole("region", { name: /^今天/ });
     const rows = within(todayRegion).getAllByRole("listitem");
-    expect(rows.map((row) => row.querySelector(".lg-sentence")?.textContent)).toEqual([
+    const sentences = [
       "有人尝试以root登录，失败",
       "alice上传了 3 个文件",
       "alice在个人空间上传了 1 个文件",
       "alice登录了",
-    ]);
+    ];
+    expect(rows).toHaveLength(sentences.length);
+    rows.forEach((row, index) => expect(within(row).getByText(sentence(sentences[index]))).toBeTruthy());
     expect(rows[0].textContent).toContain("账号不存在 · 局域网 · 172.18.45.99");
     expect(rows[1].textContent).toContain("c.jpg、b.jpg、a.jpg");
     expect(rows[2].textContent).not.toContain(".pdf");
@@ -201,7 +186,7 @@ describe("activity log", () => {
   });
 
   it("filters by category, account and text and pages back with the cursor", async () => {
-    const fetchMock = installAPI({
+    const sent = serve({
       activity: (params) =>
         params.get("before")
           ? { items: [older], scope: "all" }
@@ -217,21 +202,21 @@ describe("activity log", () => {
 
     await user.click(screen.getByRole("button", { name: "加载更早的记录" }));
     expect(await screen.findByText("没有更早的记录了")).toBeTruthy();
-    expect(calls(fetchMock, "/api/v1/activity").at(-1)?.get("before")).toBe("cursor-1");
+    expect(sent.activity.at(-1)?.get("before")).toBe("cursor-1");
     expect(screen.getByRole("region", { name: /1月5日/ }).textContent).toContain("添加了成员");
 
     await user.click(screen.getByRole("radio", { name: "登录" }));
-    await waitFor(() => expect(calls(fetchMock, "/api/v1/activity").at(-1)?.get("category")).toBe("session"));
+    await waitFor(() => expect(sent.activity.at(-1)?.get("category")).toBe("session"));
     await user.selectOptions(screen.getByRole("combobox", { name: "成员" }), "alice");
-    await waitFor(() => expect(calls(fetchMock, "/api/v1/activity").at(-1)?.get("actor")).toBe("user:alice"));
+    await waitFor(() => expect(sent.activity.at(-1)?.get("actor")).toBe("user:alice"));
     await user.selectOptions(screen.getByRole("combobox", { name: "时间范围" }), "近 7 天");
-    await waitFor(() => expect(calls(fetchMock, "/api/v1/activity").at(-1)?.get("since")).toBeTruthy());
+    await waitFor(() => expect(sent.activity.at(-1)?.get("since")).toBeTruthy());
     await user.type(screen.getByRole("searchbox", { name: "搜索活动记录" }), "172.18");
-    await waitFor(() => expect(calls(fetchMock, "/api/v1/activity").at(-1)?.get("q")).toBe("172.18"));
+    await waitFor(() => expect(sent.activity.at(-1)?.get("q")).toBe("172.18"));
   });
 
   it("says which kinds of records could not be read and offers to clear filters when empty", async () => {
-    installAPI({
+    serve({
       activity: (params) => ({
         items: params.get("category") ? [] : activity.slice(-1),
         scope: "all",
@@ -248,7 +233,7 @@ describe("activity log", () => {
   });
 
   it("exports the filtered records as CSV that Excel opens", async () => {
-    installAPI({
+    serve({
       activity: (params) =>
         params.get("before") ? { items: [older], scope: "all" } : { items: activity, next: "cursor-1", scope: "all" },
     });
@@ -274,29 +259,29 @@ describe("activity log", () => {
   });
 
   it("shows members only their own activity, without the service logs", async () => {
-    const fetchMock = installAPI({ activity: () => ({ items: activity.slice(-1), scope: "self" }) });
+    const sent = serve({ activity: () => ({ items: activity.slice(-1), scope: "self" }) });
     render(<LogsSection session={member} />);
     expect(screen.getByRole("heading", { name: "我的活动" })).toBeTruthy();
     expect(await screen.findByText("你")).toBeTruthy();
     expect(screen.queryByRole("tablist")).toBeNull();
     expect(screen.queryByRole("combobox", { name: "成员" })).toBeNull();
     expect(screen.queryByText(/相册中的操作只有本人能看到/)).toBeNull();
-    expect(calls(fetchMock, "/api/v1/users")).toHaveLength(0);
-    expect(calls(fetchMock, "/api/v1/system-logs")).toHaveLength(0);
+    expect(sent.users).toBe(0);
+    expect(sent.systemLogs).toHaveLength(0);
   });
 
   it("opens on sign-ins when asked from My account", async () => {
-    const fetchMock = installAPI({ activity: () => ({ items: [], scope: "all" }) });
+    const sent = serve({ activity: () => ({ items: [], scope: "all" }) });
     render(<LogsSection session={admin} preset={{ category: "session", id: 1 }} />);
-    await waitFor(() => expect(calls(fetchMock, "/api/v1/activity").at(-1)?.get("category")).toBe("session"));
+    await waitFor(() => expect(sent.activity.at(-1)?.get("category")).toBe("session"));
     expect(screen.getByRole("radio", { name: "登录" }).getAttribute("aria-checked")).toBe("true");
   });
 });
 
 describe("system log", () => {
   it("lists service lines with levels and fields and filters by level and service", async () => {
-    const fetchMock = installAPI({
-      logs: (params) => ({
+    const sent = serve({
+      systemLogs: (params) => ({
         items: systemLines.filter((line) => params.get("level") !== "error" || line.level === "error"),
         next: "s=1;i=1",
         dataSource: "simulated",
@@ -307,7 +292,11 @@ describe("system log", () => {
     await user.click(screen.getByRole("tab", { name: "系统日志" }));
     const log = await screen.findByRole("log", { name: "系统日志" });
     const lines = within(log).getAllByRole("listitem");
-    expect(lines.map((line) => line.querySelector(".lg-level")?.textContent)).toEqual(["错误", "警告", "信息"]);
+    expect(lines.map((line) => within(line).getByText(/^(错误|警告|信息|调试)$/).textContent)).toEqual([
+      "错误",
+      "警告",
+      "信息",
+    ]);
     expect(lines[0].textContent).toContain("相册服务");
     expect(lines[0].textContent).toContain("error=read-only file system");
     expect(screen.getByText("模拟数据")).toBeTruthy();
@@ -320,16 +309,16 @@ describe("system log", () => {
     await waitFor(() =>
       expect(within(screen.getByRole("log", { name: "系统日志" })).getAllByRole("listitem")).toHaveLength(1),
     );
-    expect(calls(fetchMock, "/api/v1/system-logs").at(-1)?.get("level")).toBe("error");
+    expect(sent.systemLogs.at(-1)?.get("level")).toBe("error");
     await user.selectOptions(screen.getByRole("combobox", { name: "服务" }), "相册服务");
-    await waitFor(() => expect(calls(fetchMock, "/api/v1/system-logs").at(-1)?.get("service")).toBe("photos"));
+    await waitFor(() => expect(sent.systemLogs.at(-1)?.get("service")).toBe("photos"));
   });
 
   it("follows new lines while live is on", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let newer = false;
-    const fetchMock = installAPI({
-      logs: (params) =>
+    const sent = serve({
+      systemLogs: (params) =>
         params.get("after")
           ? { items: newer ? [logLine("s=1;i=4", 40, { message: "media library rescanned" })] : [], dataSource: "live" }
           : { items: systemLines, dataSource: "live" },
@@ -346,17 +335,21 @@ describe("system log", () => {
     await waitFor(() =>
       expect(within(screen.getByRole("log", { name: "系统日志" })).getAllByRole("listitem")).toHaveLength(4),
     );
-    expect(calls(fetchMock, "/api/v1/system-logs").at(-1)?.get("after")).toBe("s=1;i=3");
-    const first = within(screen.getByRole("log", { name: "系统日志" })).getAllByRole("listitem")[0];
+    expect(sent.systemLogs.at(-1)?.get("after")).toBe("s=1;i=3");
+    const [first, ...earlier] = within(screen.getByRole("log", { name: "系统日志" })).getAllByRole("listitem");
     expect(first.textContent).toContain("media library rescanned");
-    expect(first.className).toContain("fresh");
+    // A new line flashes as it arrives; the lines already shown do not. (jsdom
+    // keeps the animation shorthand as written and fills no longhands.)
+    const animation = (line: HTMLElement) => getComputedStyle(line).getPropertyValue("animation");
+    expect(animation(first)).toContain("lg-fresh");
+    for (const line of earlier) expect(animation(line)).not.toContain("lg-fresh");
     expect(screen.getByText("实时跟随中")).toBeTruthy();
   });
 
   it("reports a Host Agent that cannot be reached and retries", async () => {
     let failing = true;
-    installAPI({
-      logs: () =>
+    serve({
+      systemLogs: () =>
         failing ? new Error("system logs cannot be read right now") : { items: systemLines, dataSource: "live" },
     });
     const user = userEvent.setup();

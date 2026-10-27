@@ -1,17 +1,21 @@
+import { screen } from "@testing-library/react";
 import { domToCanvas } from "modern-screenshot";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { apiFetch } from "../api/client";
-import { stubAPI } from "../test/api";
+import { apiError, http, pathOf, server } from "../test/server";
 import { ControlError, type Danger, type Screenshot, WebosController } from "./webosControl";
 
 vi.mock("modern-screenshot", () => ({ domToCanvas: vi.fn() }));
 
-// A desktop as App.tsx renders one: windows are .app-window sections named by aria-label.
+// A desktop as App.tsx renders one: windows are sections marked with
+// data-window-id and named by aria-label. The controller finds windows by that
+// attribute and the settings' content by data-settings-main, as AppWindow and
+// SettingsPanel mark them; the tests find windows by name.
 function desktop() {
   document.body.innerHTML = `
     <nav aria-label="程序坞"><button aria-label="打开相册">相册</button></nav>
-    <section class="app-window app-window-files" role="dialog" aria-label="文件管理">
+    <section data-window-id="files" role="dialog" aria-label="文件管理">
       <h2>个人空间</h2>
       <button id="open">打开文件夹</button>
       <button id="new-folder">新建文件夹</button>
@@ -26,24 +30,24 @@ function desktop() {
       <p>3 个项目</p>
       <section id="viewing" data-vnas-private="他人的个人空间（只读查看）"><button id="theirs">日记.md</button><p>别人的文字</p></section>
     </section>
-    <section class="app-window app-window-photos" role="dialog" aria-label="相册">
+    <section data-window-id="photos" role="dialog" aria-label="相册">
       <div id="viewer" tabindex="0" aria-label="照片查看器"><img alt="海边"></div><button id="trash">移到回收站</button>
     </section>
-    <section class="app-window app-window-settings" role="dialog" aria-label="设置">
-      <nav class="set-nav" aria-label="设置分区"><button aria-current="page">终端</button><button>日志</button></nav>
-      <div class="set-main"><button id="root">以 root 打开</button></div>
+    <section data-window-id="settings" role="dialog" aria-label="设置">
+      <nav aria-label="设置分区"><button aria-current="page">终端</button><button>日志</button></nav>
+      <div data-settings-main=""><button id="root">以 root 打开</button></div>
     </section>
-    <section class="app-window app-window-docker" role="dialog" aria-label="Docker">
+    <section data-window-id="docker" role="dialog" aria-label="Docker">
       <button id="stop">停止</button><button id="logs">查看日志</button>
     </section>
-    <section class="app-window app-window-music" role="dialog" aria-label="音乐" hidden><button>隐藏的按钮</button></section>
-    <section class="app-window app-window-assistant" role="dialog" aria-label="VNAS"><button id="send">发送</button><textarea id="composer"></textarea></section>`;
+    <section data-window-id="music" role="dialog" aria-label="音乐" hidden><button>隐藏的按钮</button></section>
+    <section data-window-id="assistant" role="dialog" aria-label="VNAS"><button id="send">发送</button><textarea id="composer"></textarea></section>`;
 }
 
 function controller(answer: boolean | ((danger: Danger) => boolean) = true) {
   const asked: Danger[] = [];
   const control = new WebosController({
-    exclude: (element) => Boolean(element.closest(".app-window-assistant")),
+    exclude: (element) => Boolean(element.closest('[aria-label="VNAS"]')),
     confirm: async (danger) => {
       asked.push(danger);
       return typeof answer === "function" ? answer(danger) : answer;
@@ -74,20 +78,31 @@ function writes(id: string, method: string, path: string) {
   });
 }
 
+// The product API records the writes that reach it. Nothing they name exists
+// here, so it refuses each one; the tests look only at what arrived. A write
+// to a route the contract does not have stays unserved: it must never be sent.
+function saw(request: Request) {
+  sent.push(`${request.method} ${pathOf(request)}`);
+  return apiError("not_found");
+}
+
 beforeEach(() => {
   desktop();
   sent = [];
-  stubAPI(
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      sent.push(`${init?.method ?? "GET"} ${String(input)}`);
-      return new Response(null, { status: 204 });
-    }),
+  server.use(
+    http.post("/api/v1/spaces/{spaceId}/directories", ({ request, response }) => response(404).json(saw(request))),
+    http.patch("/api/v1/files/{fileId}", ({ request, response }) => response(404).json(saw(request))),
+    http.delete("/api/v1/files/{fileId}", ({ request, response }) => response(404).json(saw(request))),
+    http.post("/api/v1/shares", ({ request, response }) => response("default").json(saw(request), { status: 404 })),
+    http.post("/api/v1/shares/{shareId}/messages", ({ request, response }) =>
+      response("default").json(saw(request), { status: 404 }),
+    ),
+    http.post("/api/v1/containers/{containerId}/actions", ({ request, response }) => response(404).json(saw(request))),
   );
 });
 afterEach(() => {
   uninstall();
   document.body.innerHTML = "";
-  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -161,7 +176,8 @@ describe("WebosController", () => {
     });
     await control.run("browser_click", { ref: refOf(await look(control), "分享") });
     expect(asked).toEqual([{ what: "点击“分享”", where: "文件管理", why: "这一步会把内容分享给其他成员" }]);
-    expect(sent).toEqual(["POST /api/v1/shares", "POST /api/v1/shares/x/messages"]);
+    // The two writes go out together, so they may arrive in either order.
+    expect([...sent].sort()).toEqual(["POST /api/v1/shares", "POST /api/v1/shares/x/messages"]);
   });
 
   it("asks about a write of a route it does not know", async () => {
@@ -309,8 +325,8 @@ describe("the picture of the page", () => {
     ];
     expect(root).toBe(document.body);
     expect([options?.width, options?.height]).toEqual([window.innerWidth, window.innerHeight]);
-    expect(options?.filter?.(document.querySelector(".app-window-assistant")!)).toBe(false);
-    expect(options?.filter?.(document.querySelector(".app-window-files")!)).toBe(true);
+    expect(options?.filter?.(screen.getByRole("dialog", { name: "VNAS" }))).toBe(false);
+    expect(options?.filter?.(screen.getByRole("dialog", { name: "文件管理" }))).toBe(true);
   });
 
   it("labels each control with the ref VNAS clicks it by", async () => {
@@ -334,8 +350,8 @@ describe("the picture of the page", () => {
     vi.mocked(domToCanvas).mockResolvedValue(canvas as unknown as HTMLCanvasElement);
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 40, 80, 24));
     // 相册 lies over everything, with VNAS's own window above it.
-    const photos = document.querySelector(".app-window-photos")!;
-    const vnas = document.querySelector(".app-window-assistant")!;
+    const photos = screen.getByRole("dialog", { name: "相册" });
+    const vnas = screen.getByRole("dialog", { name: "VNAS" });
     document.elementsFromPoint = vi.fn(() => [vnas, photos, document.body]);
     try {
       const shot = (await control.run("browser_screenshot", { annotate: true })) as Screenshot;

@@ -100,7 +100,9 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 - 用 Vitest 与 Testing Library。
 - **请求：** 由 MSW 拦截。
   - 处理器用 openapi-msw 按契约的路径与类型编写，放在 `test/handlers/<领域>.ts`，路径或响应形状不对时类型检查失败；
-  - 未处理的请求直接让测试失败（`onUnhandledRequest: "error"`）。
+  - 共用的处理器在 [`test/server.ts`](../../web/src/test/server.ts)，各领域的在 [`test/handlers/`](../../web/src/test/handlers/)；外壳自己发出的请求由 `handlers/shell.ts` 默认回答；
+  - 未处理的请求让测试失败：MSW 3 的 `onUnhandledFrame` 只让这次请求失败，页面会接住它，所以 [`test/setup.ts`](../../web/src/test/setup.ts) 记下这些请求，在 `afterEach` 中抛出；
+  - 契约没有写的响应（例如服务端会给出而契约没列的状态码）用 `untyped`，并在注释中说明原因。
 - **渲染：**
   - 窗口的用例直接渲染该窗口组件；
   - `App.test.tsx` 只测外壳：登录、桌面、窗口管理与跨窗口跳转。

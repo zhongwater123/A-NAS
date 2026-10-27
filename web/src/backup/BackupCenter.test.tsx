@@ -1,9 +1,18 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { FileEntry, Space } from "../api.generated";
-import { stubAPI } from "../test/api";
+import {
+  type BackupOptions,
+  backupHandlers,
+  type Restore,
+  restores,
+  schedule,
+  scheduleSaves,
+} from "../test/handlers/backup";
+import { filesHandlers } from "../test/handlers/files";
+import { apiError, http, server } from "../test/server";
 import type { RemovedEntry, Snapshot, SnapshotEntry, SnapshotMatch, SnapshotSchedule } from "./api";
 import { BackupCenter } from "./BackupCenter";
 
@@ -57,21 +66,6 @@ const familyShot: Snapshot = {
   sizeBytes: 100,
 };
 
-function schedule(space: Space, overrides: Partial<SnapshotSchedule> = {}): SnapshotSchedule {
-  return {
-    spaceId: space.id,
-    enabled: false,
-    frequency: "daily",
-    time: "03:00",
-    weekday: 0,
-    keep: 14,
-    retention: "count",
-    tiers: { hourly: 0, daily: 0, weekly: 0, monthly: 0 },
-    canManage: true,
-    ...overrides,
-  };
-}
-
 const folder: SnapshotEntry = {
   id: "entry:docs",
   snapshotId: nightly.id,
@@ -98,71 +92,33 @@ const liveDocs: FileEntry = {
   modifiedAt: hoursAgo(1),
 };
 
-function json(body: unknown, status = 200) {
-  return new Response(status === 204 ? null : JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-interface Call {
-  url: string;
-  method: string;
-  body?: unknown;
-}
-type Route = (url: string, init?: RequestInit) => Response | undefined;
-
-// wait holds back the answer to a request until the promise it returns settles.
-function serve(
-  options: {
-    schedules?: Record<string, SnapshotSchedule>;
-    routes?: Route[];
-    wait?: (url: string) => Promise<void> | undefined;
-  } = {},
-) {
-  const calls: Call[] = [];
-  const schedules = options.schedules ?? {
-    [personal.id]: schedule(personal, { enabled: true, nextRunAt: new Date(Date.now() + 3_600_000).toISOString() }),
-    [shared.id]: schedule(shared),
-  };
-  stubAPI(
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const method = init?.method ?? "GET";
-      calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-      await options.wait?.(url);
-      for (const route of options.routes ?? []) {
-        const response = route(url, init);
-        if (response) return response;
-      }
-      if (url === "/api/v1/spaces") return json({ items: [personal, shared, viewed] });
-      if (url === `/api/v1/spaces/${encodeURIComponent(personal.id)}/snapshots`)
-        return json({ items: [nightly, manual] });
-      if (url === `/api/v1/spaces/${encodeURIComponent(shared.id)}/snapshots`) return json({ items: [familyShot] });
-      const scheduled = Object.values(schedules).find(
-        (item) => url === `/api/v1/spaces/${encodeURIComponent(item.spaceId)}/snapshot-schedule`,
-      );
-      if (scheduled && method === "GET") return json(scheduled);
-      if (scheduled && method === "PUT") return json({ ...scheduled, ...JSON.parse(String(init?.body)) });
-      if (url === `/api/v1/snapshots/${encodeURIComponent(nightly.id)}/entries?parentId=`)
-        return json({ items: [folder] });
-      if (
-        url === `/api/v1/snapshots/${encodeURIComponent(nightly.id)}/entries?parentId=${encodeURIComponent(folder.id)}`
-      )
-        return json({ items: [plan] });
-      if (url.startsWith(`/api/v1/snapshots/${encodeURIComponent(manual.id)}/entries`)) return json({ items: [] });
-      if (url === `/api/v1/spaces/${encodeURIComponent(personal.id)}/entries?parentId=`)
-        return json({ items: [liveDocs] });
-      if (url.includes("/entries?parentId=")) return json({ items: [] });
-      if (url.endsWith("/removed-entries") || url.includes("/snapshot-search?q="))
-        return json({ items: [], truncated: false });
-      return json({ error: { code: "not_found", message: "not found" } }, 404);
+// serve answers the backup center for the owner: the personal space with two
+// snapshots and a daily schedule, the shared one with one snapshot and none,
+// and alice's space, viewed through Administrative Viewing Mode. options
+// replace any of that; entries are what the spaces hold now.
+function serve({ entries = [liveDocs], ...options }: BackupOptions & { entries?: FileEntry[] } = {}) {
+  server.use(
+    ...filesHandlers({ spaces: [personal, shared, viewed], entries }),
+    ...backupHandlers({
+      snapshots: [nightly, manual, familyShot],
+      schedules: [
+        schedule(personal, { enabled: true, nextRunAt: new Date(Date.now() + 3_600_000).toISOString() }),
+        schedule(shared),
+      ],
+      snapshotEntries: [folder, plan],
+      ...options,
     }),
   );
-  return calls;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+// serveSchedules serves the backup center with schedules and returns the
+// settings saved to them.
+function serveSchedules(schedules: SnapshotSchedule[]) {
+  const saves = scheduleSaves(schedules);
+  serve({ schedules });
+  server.use(saves.handler);
+  return saves.sent;
+}
 
 describe("BackupCenter", () => {
   it("sums up how each of the user's own spaces is protected", async () => {
@@ -191,9 +147,14 @@ describe("BackupCenter", () => {
     const pending = new Promise<void>((resolve) => {
       release = resolve;
     });
-    serve({
-      wait: (url) => (url.endsWith(`/spaces/${encodeURIComponent(shared.id)}/snapshot-schedule`) ? pending : undefined),
-    });
+    serve();
+    server.use(
+      // Holds back the shared space's schedule; answering nothing, it then
+      // passes the request on to serve's handler.
+      http.get("/api/v1/spaces/{spaceId}/snapshot-schedule", async ({ params }) => {
+        if (params.spaceId === shared.id) await pending;
+      }),
+    );
     render(<BackupCenter userId={owner} isAdmin />);
     const hero = await screen.findByRole("region", { name: "保护状态" });
     await waitFor(() => expect(within(hero).getByText("正在检查…")).toBeTruthy());
@@ -204,30 +165,26 @@ describe("BackupCenter", () => {
   });
 
   it("restores a file to its original folder and offers another name when it is taken", async () => {
-    let attempts = 0;
-    const calls = serve({
-      routes: [
-        (url, init) => {
-          if (!url.endsWith(`/entries/${encodeURIComponent(plan.id)}/restore`)) return undefined;
-          attempts += 1;
-          const body = JSON.parse(String(init?.body));
-          return attempts === 1
-            ? json({ error: { code: "name_conflict", message: "a file with this name already exists" } }, 409)
-            : json(
-                {
-                  id: "file:restored",
-                  spaceId: personal.id,
-                  parentId: liveDocs.id,
-                  name: body.name,
-                  kind: "file",
-                  sizeBytes: 2048,
-                  modifiedAt: hoursAgo(0),
-                },
-                201,
-              );
-        },
-      ],
-    });
+    const sent: Restore[] = [];
+    serve();
+    server.use(
+      http.post("/api/v1/snapshots/{snapshotId}/entries/{entryId}/restore", async ({ params, request, response }) => {
+        const body = await request.json();
+        sent.push({ snapshotId: params.snapshotId, entryId: params.entryId, body });
+        // The original folder has a file of that name by the time of the first try.
+        if (sent.length === 1)
+          return response(409).json(apiError("name_conflict", "a file with this name already exists"));
+        return response(201).json({
+          id: "file:restored",
+          spaceId: personal.id,
+          parentId: liveDocs.id,
+          name: body.name,
+          kind: "file",
+          sizeBytes: 2048,
+          modifiedAt: hoursAgo(0),
+        });
+      }),
+    );
     const user = userEvent.setup();
     render(<BackupCenter userId={owner} isAdmin />);
     await user.click(
@@ -249,17 +206,14 @@ describe("BackupCenter", () => {
 
     expect(await screen.findByText(/已恢复“计划 \(恢复/)).toBeTruthy();
     expect(screen.queryByRole("dialog", { name: "恢复文件" })).toBeNull();
-    const restores = calls.filter((call) => call.url.endsWith("/restore"));
-    expect(restores.map((call) => call.body)).toEqual([
-      { parentId: liveDocs.id, name: "计划.docx" },
-      { parentId: liveDocs.id, name: name.value },
+    expect(sent).toEqual([
+      { snapshotId: nightly.id, entryId: plan.id, body: { parentId: liveDocs.id, name: "计划.docx" } },
+      { snapshotId: nightly.id, entryId: plan.id, body: { parentId: liveDocs.id, name: name.value } },
     ]);
   });
 
   it("saves a schedule only when asked, and keeps the shared one read-only for members", async () => {
-    const calls = serve({
-      schedules: { [personal.id]: schedule(personal), [shared.id]: schedule(shared, { canManage: false }) },
-    });
+    const saved = serveSchedules([schedule(personal), schedule(shared, { canManage: false })]);
     const user = userEvent.setup();
     render(<BackupCenter userId={owner} isAdmin={false} />);
     await user.click(
@@ -275,10 +229,10 @@ describe("BackupCenter", () => {
     await user.click(within(personalCard).getByRole("radio", { name: "每周" }));
     expect((within(personalCard).getByRole("spinbutton", { name: "保留份数" }) as HTMLInputElement).value).toBe("8");
     await user.click(within(personalCard).getByRole("radio", { name: "周五" }));
-    expect(calls.some((call) => call.method === "PUT")).toBe(false);
+    expect(saved).toEqual([]);
     await user.click(within(personalCard).getByRole("button", { name: "保存" }));
     await waitFor(() =>
-      expect(calls.filter((call) => call.method === "PUT").map((call) => call.body)).toEqual([
+      expect(saved).toEqual([
         {
           enabled: true,
           frequency: "weekly",
@@ -298,9 +252,7 @@ describe("BackupCenter", () => {
   });
 
   it("reaches far back with tiered retention, keeping fewer snapshots the older they are", async () => {
-    const calls = serve({
-      schedules: { [personal.id]: schedule(personal, { enabled: true }), [shared.id]: schedule(shared) },
-    });
+    const saved = serveSchedules([schedule(personal, { enabled: true }), schedule(shared)]);
     const user = userEvent.setup();
     render(<BackupCenter userId={owner} isAdmin />);
     await user.click(
@@ -326,7 +278,7 @@ describe("BackupCenter", () => {
     expect(within(card).getByText("越近越密，最远可回到约 12 个月前，最多 57 份")).toBeTruthy();
     await user.click(within(card).getByRole("button", { name: "保存" }));
     await waitFor(() =>
-      expect(calls.filter((call) => call.method === "PUT").map((call) => call.body)).toEqual([
+      expect(saved).toEqual([
         {
           enabled: true,
           frequency: "hourly",
@@ -341,9 +293,7 @@ describe("BackupCenter", () => {
   });
 
   it("saves a plan as its schedule and puts back what was saved", async () => {
-    const calls = serve({
-      schedules: { [personal.id]: schedule(personal, { enabled: true, time: "02:30" }), [shared.id]: schedule(shared) },
-    });
+    const saved = serveSchedules([schedule(personal, { enabled: true, time: "02:30" }), schedule(shared)]);
     const user = userEvent.setup();
     render(<BackupCenter userId={owner} isAdmin />);
     await user.click(
@@ -361,7 +311,7 @@ describe("BackupCenter", () => {
     await user.click(within(card).getByRole("radio", { name: /^频繁/ }));
     await user.click(within(card).getByRole("button", { name: "保存" }));
     await waitFor(() =>
-      expect(calls.filter((call) => call.method === "PUT").map((call) => call.body)).toEqual([
+      expect(saved).toEqual([
         {
           enabled: true,
           frequency: "hourly",
@@ -393,28 +343,16 @@ describe("BackupCenter", () => {
       sizeBytes: 12,
       modifiedAt: hoursAgo(60),
     };
-    const calls = serve({
-      routes: [
-        (url, init) => {
-          if (url === `/api/v1/snapshots/${encodeURIComponent(nightly.id)}/entries?parentId=`)
-            return json({ items: [{ ...folder, change: "inside" }, removedFile, readme] });
-          if (url === `/api/v1/snapshots/${encodeURIComponent(nightly.id)}/restore`) {
-            return json(
-              {
-                id: "file:whole",
-                spaceId: personal.id,
-                name: JSON.parse(String(init?.body)).name,
-                kind: "directory",
-                sizeBytes: 0,
-                modifiedAt: hoursAgo(0),
-              },
-              201,
-            );
-          }
-          return undefined;
-        },
-      ],
-    });
+    const restored = restores(({ body }) => ({
+      id: "file:whole",
+      spaceId: personal.id,
+      name: body.name,
+      kind: "directory",
+      sizeBytes: 0,
+      modifiedAt: hoursAgo(0),
+    }));
+    serve({ snapshotEntries: [{ ...folder, change: "inside" }, removedFile, readme, plan] });
+    server.use(...restored.handlers);
     const user = userEvent.setup();
     render(<BackupCenter userId={owner} isAdmin />);
     await user.click(
@@ -434,9 +372,7 @@ describe("BackupCenter", () => {
     expect(name.value).toMatch(/^定时快照 \d\d-\d\d \d\d\.\d\d$/);
     await user.click(within(dialog).getByRole("button", { name: "恢复" }));
     expect(await screen.findByText(`已恢复“${name.value}”到 个人空间`)).toBeTruthy();
-    expect(calls.filter((call) => call.url.endsWith("/restore")).map((call) => call.body)).toEqual([
-      { parentId: "", name: name.value },
-    ]);
+    expect(restored.sent).toEqual([{ snapshotId: nightly.id, body: { parentId: "", name: name.value } }]);
   });
 
   it("lists what is gone from every space before anything is typed", async () => {
@@ -478,30 +414,23 @@ describe("BackupCenter", () => {
       entryId: "entry:recipe",
       lastSeenAt: familyShot.createdAt,
     };
-    const calls = serve({
-      routes: [
-        (url) => {
-          if (url === `/api/v1/spaces/${encodeURIComponent(personal.id)}/removed-entries`)
-            return json({ items: [contracts, photo], truncated: false });
-          if (url === `/api/v1/spaces/${encodeURIComponent(shared.id)}/removed-entries`)
-            return json({ items: [recipe], truncated: false });
-          if (url.endsWith(`/entries/${encodeURIComponent(contracts.entryId)}/restore`)) {
-            return json(
-              {
-                id: "file:contracts",
-                spaceId: personal.id,
-                name: "合同",
-                kind: "directory",
-                sizeBytes: 0,
-                modifiedAt: hoursAgo(0),
-              },
-              201,
-            );
-          }
-          return undefined;
-        },
-      ],
-    });
+    const restored = restores(() => ({
+      id: "file:contracts",
+      spaceId: personal.id,
+      name: "合同",
+      kind: "directory",
+      sizeBytes: 0,
+      modifiedAt: hoursAgo(0),
+    }));
+    const listed: string[] = [];
+    serve({ removed: { [personal.id]: [contracts, photo], [shared.id]: [recipe] } });
+    server.use(
+      ...restored.handlers,
+      // Counts the lists asked for; answering nothing, it passes each on to serve's handler.
+      http.get("/api/v1/spaces/{spaceId}/removed-entries", ({ params }) => {
+        listed.push(params.spaceId);
+      }),
+    );
     const user = userEvent.setup();
     const openTrash = vi.fn();
     render(<BackupCenter userId={owner} isAdmin onOpenTrash={openTrash} />);
@@ -532,15 +461,11 @@ describe("BackupCenter", () => {
     await waitFor(() => expect(within(dialog).getByText("原位置")).toBeTruthy());
     await user.click(within(dialog).getByRole("button", { name: "恢复" }));
     expect(await screen.findByText("已恢复“合同”到 个人空间")).toBeTruthy();
-    expect(calls.filter((call) => call.url.endsWith("/restore")).map((call) => call.body)).toEqual([
-      { parentId: "", name: "合同" },
+    expect(restored.sent).toEqual([
+      { snapshotId: nightly.id, entryId: contracts.entryId, body: { parentId: "", name: "合同" } },
     ]);
     // The restore reloads the list.
-    await waitFor(() =>
-      expect(
-        calls.filter((call) => call.url.endsWith(`${encodeURIComponent(personal.id)}/removed-entries`)),
-      ).toHaveLength(2),
-    );
+    await waitFor(() => expect(listed.filter((spaceId) => spaceId === personal.id)).toHaveLength(2));
 
     // Narrowed to one space, the others' items leave the list.
     await user.click(screen.getByRole("radio", { name: "个人空间" }));
@@ -549,45 +474,30 @@ describe("BackupCenter", () => {
   });
 
   it("suggests a new name before restoring when the original folder already has one", async () => {
-    const calls = serve({
-      routes: [
-        (url, init) => {
-          if (
-            url ===
-            `/api/v1/spaces/${encodeURIComponent(personal.id)}/entries?parentId=${encodeURIComponent(liveDocs.id)}`
-          ) {
-            return json({
-              items: [
-                {
-                  id: "file:plan",
-                  spaceId: personal.id,
-                  parentId: liveDocs.id,
-                  name: "计划.DOCX",
-                  kind: "file",
-                  sizeBytes: 10,
-                  modifiedAt: hoursAgo(1),
-                },
-              ],
-            });
-          }
-          if (url.endsWith(`/entries/${encodeURIComponent(plan.id)}/restore`)) {
-            return json(
-              {
-                id: "file:copy",
-                spaceId: personal.id,
-                parentId: liveDocs.id,
-                name: JSON.parse(String(init?.body)).name,
-                kind: "file",
-                sizeBytes: 2048,
-                modifiedAt: hoursAgo(0),
-              },
-              201,
-            );
-          }
-          return undefined;
+    const restored = restores(({ body }) => ({
+      id: "file:copy",
+      spaceId: personal.id,
+      parentId: liveDocs.id,
+      name: body.name,
+      kind: "file",
+      sizeBytes: 2048,
+      modifiedAt: hoursAgo(0),
+    }));
+    serve({
+      entries: [
+        liveDocs,
+        {
+          id: "file:plan",
+          spaceId: personal.id,
+          parentId: liveDocs.id,
+          name: "计划.DOCX",
+          kind: "file",
+          sizeBytes: 10,
+          modifiedAt: hoursAgo(1),
         },
       ],
     });
+    server.use(...restored.handlers);
     const showInFiles = vi.fn();
     const user = userEvent.setup();
     render(<BackupCenter userId={owner} isAdmin onShowInFiles={showInFiles} />);
@@ -611,11 +521,11 @@ describe("BackupCenter", () => {
     await user.click(within(dialog).getByRole("button", { name: "恢复" }));
 
     const toast = await screen.findByText(/已恢复“计划 \(恢复/);
-    expect(calls.filter((call) => call.url.endsWith("/restore")).map((call) => call.body)).toEqual([
-      { parentId: liveDocs.id, name: name.value },
+    expect(restored.sent).toEqual([
+      { snapshotId: nightly.id, entryId: plan.id, body: { parentId: liveDocs.id, name: name.value } },
     ]);
     await user.click(
-      within(toast.closest(".bk-toast") as HTMLElement).getByRole("button", { name: "在文件管理中显示" }),
+      within(toast.closest<HTMLElement>("[role=status]")!).getByRole("button", { name: "在文件管理中显示" }),
     );
     expect(showInFiles).toHaveBeenCalledWith({
       spaceId: personal.id,
@@ -673,17 +583,7 @@ describe("BackupCenter", () => {
         },
       ],
     };
-    serve({
-      routes: [
-        (url) => {
-          if (url.startsWith(`/api/v1/spaces/${encodeURIComponent(personal.id)}/snapshot-search?q=`))
-            return json({ items: [match], truncated: false });
-          if (url.startsWith(`/api/v1/spaces/${encodeURIComponent(shared.id)}/snapshot-search?q=`))
-            return json({ items: [current], truncated: false });
-          return undefined;
-        },
-      ],
-    });
+    serve({ matches: { [personal.id]: [match], [shared.id]: [current] } });
     const user = userEvent.setup();
     render(<BackupCenter userId={owner} isAdmin />);
     await user.click(

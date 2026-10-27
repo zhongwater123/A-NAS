@@ -1,12 +1,13 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { stubAPI } from "../test/api";
+import type { AssistantMessage } from "../api.generated";
+import { assistantHandlers, assistantSession } from "../test/handlers/assistant";
+import { server } from "../test/server";
 import type { Approval } from "./api";
-import type { SessionMessage } from "./hermes/types/hermes";
 
 // The window against a stand-in for the member's Hermes: the gateway's events
-// are pushed by the test, REST answers come from a stubbed fetch.
+// are pushed by the test, REST answers come from the test server.
 type Handler = (event: { type: string; session_id?: string; payload?: unknown }) => void;
 const handlers = new Set<Handler>();
 const client = {
@@ -38,30 +39,20 @@ globalThis.ResizeObserver ??= class {
 Element.prototype.scrollTo ??= function scrollTo() {};
 
 afterEach(() => {
-  vi.unstubAllGlobals();
   handlers.clear();
 });
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-}
-
-const history: SessionMessage[] = [
-  { id: 1, role: "user", content: "打开相册", timestamp: 1_760_000_000 } as SessionMessage,
-  { id: 2, role: "assistant", content: "相册已经打开。", timestamp: 1_760_000_001 } as SessionMessage,
+const history: AssistantMessage[] = [
+  { id: 1, role: "user", content: "打开相册", timestamp: 1_760_000_000 },
+  { id: 2, role: "assistant", content: "相册已经打开。", timestamp: 1_760_000_001 },
 ];
 
 async function open(approvals: Approval[] = [], stored = history, reply = "相册已经打开。") {
-  stubAPI(
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/assistant/sessions"))
-        return json({
-          sessions: [{ id: STORED, title: "操作桌面", preview: "", startedAt: 1_760_000_000, messageCount: 2 }],
-        });
-      if (url.includes("/messages")) return json({ messages: stored });
-      if (url.endsWith("/approvals")) return json({ approvals });
-      return json({ available: true });
+  server.use(
+    ...assistantHandlers({
+      sessions: [assistantSession(STORED, { title: "操作桌面", messageCount: 2 })],
+      messages: stored,
+      approvals,
     }),
   );
   render(<AssistantPanel username="admin" />);
@@ -82,7 +73,7 @@ describe("the VNAS window", () => {
   it("opens a conversation in which Hermes closed a turn that did not complete", async () => {
     // Hermes's own boundary row after a failed turn (agent/turn_failure_copy.py),
     // which its history serves as a notice rather than the model's answer.
-    const stored = [
+    const stored: AssistantMessage[] = [
       ...history,
       { id: 3, role: "user", content: "把照片都移到共享空间", timestamp: 1_760_000_010 },
       {
@@ -108,7 +99,7 @@ describe("the VNAS window", () => {
         content:
           "This turn did not complete. Some actions may already have run; verify their effects before resending.",
       },
-    ] as SessionMessage[];
+    ];
     await open([], stored, "这一轮没有完成，其中一些操作可能已经执行；重新发送前请先确认结果。");
     expect(screen.getByText("相册已经打开。")).toBeTruthy();
     expect(screen.queryByText(/This turn did not complete/)).toBeNull();
