@@ -83,11 +83,11 @@ class WakeTests(unittest.TestCase):
                 requests = []
 
                 class Handler(BaseHTTPRequestHandler):
-                    def do_POST(self):
-                        requests.append((self.path, json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
-                        self.send_response(status)
+                    def do_POST(self, request_log=requests, response_status=status, response_name=name):
+                        request_log.append((self.path, json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
+                        self.send_response(response_status)
                         self.end_headers()
-                        self.wfile.write(json.dumps({"username": name}).encode())
+                        self.wfile.write(json.dumps({"username": response_name}).encode())
 
                     def log_message(self, *_):
                         pass
