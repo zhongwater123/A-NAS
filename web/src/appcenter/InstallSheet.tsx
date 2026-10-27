@@ -478,11 +478,11 @@ export function UninstallDialog({ app, onChanged, onClose }: SheetProps) {
         <ul>
           <li>
             <X />
-            停止并删除它的容器和 Docker 网络
+            停止并删除它的容器、Docker 网络、匿名卷和未被其他容器使用的镜像
           </li>
           <li>
             <Check />
-            保留应用数据，重新安装后可继续使用
+            保留应用数据与命名卷，重新安装后可继续使用
           </li>
           <li>
             <Check />

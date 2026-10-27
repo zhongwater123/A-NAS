@@ -89,7 +89,7 @@ x-casaos:
 		"TZ: Asia/Shanghai",
 		"name: a-nas-demo",
 		"user: 30005:30005",
-		"io.a-nas.runtime: \"1\"",
+		"io.a-nas.runtime: \"2\"",
 		"no-new-privileges:true",
 	} {
 		if !strings.Contains(compose, want) {

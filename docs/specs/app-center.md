@@ -74,7 +74,8 @@
 
 - Given：应用已安装。
 - When：在“更多操作”中选择“卸载”，并在对话框中确认。
-- Then：对话框列出将停止并删除容器和 Docker 网络、保留应用数据、立即撤销它获得过的共享空间访问。确认后后台运行 `docker compose down`，删除容器与项目网络，保留应用数据目录；详情页显示卸载进度，完成后应用回到“可安装”。取消时焦点回到“更多操作”。
+- Then：对话框列出将删除容器、Docker 网络、匿名卷与未被其他容器使用的镜像，保留应用数据和命名卷，并撤销共享空间访问。确认后后台先停止容器，再通过 Docker Engine 删除容器与匿名卷，随后由 `docker compose down` 清理网络；不使用会删除命名卷的 `down --volumes`。镜像只在没有任何运行中或已停止容器使用时删除，不强制删除；详情页显示卸载进度，完成后应用回到“可安装”。取消时焦点回到“更多操作”。
+- 清理前将镜像 ID 持久化到容器代理的 `apps/<app>/images.json`，因此容器已删除但镜像删除失败、或代理重启后仍能继续。清理失败显示“卸载未完成”和“重试卸载”，不当成安装失败；重新安装也先完成残留清理。安装回滚、中断恢复使用同一清理流程，命名卷和应用数据始终保留。
 
 ### 失败与冲突
 
@@ -120,6 +121,8 @@
 - 应用中心仅管理员可用：所有 `/api/v1/apps` 请求需要管理员产品会话，写请求还需要会话的 CSRF 令牌；成员看不到“应用中心”图标。写请求另要求 Host 为 `localhost` 或 IP 地址（[局域网 Web 访问](lan-web-access.md)）、JSON 请求体与同源 Origin；安装请求只接受 `digest` 字段，无法提交 Compose 内容。图标以沙箱化 CSP 与 `nosniff` 返回。
 
 ## 验收证据
+
+- 系统盘保护：所有服务固定使用 `json-file`、`max-size=10m`、`max-file=3`，覆盖清单自带日志配置。运行规则版本为 2，旧容器需卸载重装才能应用日志限制。[清理回归](../../internal/appstore/engine/cleanup_test.go) 覆盖容器删除后的重试、重启恢复与损坏记录保护；[真实 Docker 回归](../../internal/appstore/engine/cleanup_docker_integration_test.go) 覆盖日志轮转、安装回滚、命名卷/应用数据保留与镜像清理，运行需要本地 Docker、Compose 和带 Python 3 的 `ANAS_TEST_IMAGE`。空间下限由[存储检查测试](../../internal/appstore/engine/storage_test.go)验证，系统占用由[系统健康规格](system-health.md)定义。
 
 - 运行身份：[运行规则测试](../../internal/appstore/runtime_test.go) 渲染全部内置应用，确认挂载共享空间的服务都以应用账号（带 20000 组、无能力）或初始化后降权运行、只有审查表列出的共享空间挂载可写、审查表只引用存在的应用与服务、20000 即 `a-nas-users`；[渲染测试](../../internal/appstore/render_test.go) 覆盖保留镜像用户的服务挂载共享空间被拒绝、`PUID` 类镜像在挂载共享空间时以 20000 为 `PGID`、共享空间默认只读而 qBittorrent 可写。
 - 渲染与策略：[渲染测试](../../internal/appstore/render_test.go) 覆盖路径重写、显式 `user` 及字面量 `PUID`/`PGID` 改为应用身份、不让 Docker 创建宿主机文件夹、`/DATA` 只映射到共享空间、缺少身份时拒绝、确定性摘要与 17 类拒绝情形，以及计划列出隐式 `default` 网络、默认网桥不新建网络、清单自带子网被拒绝；[清单测试](../../internal/appstore/catalog_test.go) 另覆盖每个内置应用都有 A-NAS 分类、使用须知与链接的读取以及非 http(s) 链接被丢弃，[文字校订测试](../../internal/appstore/copy_test.go) 覆盖全部内置应用的介绍与须知不含 Zima、无限存储与 CasaOS 设置步骤以及卖点段落的删除规则，[登录信息测试](../../internal/appstore/credentials_test.go) 覆盖列表中每个应用缺少生成值时拒绝渲染、生成值写入 Compose 且清单固定值不再出现、须知不再给出清单密码、保留的值渲染出相同摘要、为旧安装记下的清单值与清单一致，[引擎测试](../../internal/appstore/engine/engine_test.go) 的 `TestInstalledAppsShowTheLoginsTheyUse` 覆盖值只生成一次并以 0600 保存、已安装应用显示保存的值、旧安装显示清单值，[分类测试](../../internal/appstore/categories_test.go) 覆盖分类表不含清单外的应用。

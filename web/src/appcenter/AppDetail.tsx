@@ -22,7 +22,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { CatalogApp } from "../appsApi";
 import { AppIcon, Folded, JobOutput, Logins, Progress, RichText } from "./parts";
-import { appURL, categoryOf, installFailed, leftoverText, openApp, useElapsed } from "./model";
+import { appURL, categoryOf, installFailed, leftoverText, openApp, uninstallFailed, useElapsed } from "./model";
 
 interface DetailProps {
   app: CatalogApp;
@@ -75,7 +75,7 @@ export function AppDetail({ app, backLabel, onBack, onInstall, onUninstall, onOp
         ))}
       </dl>
 
-      <StatusPanel app={app} onInstall={onInstall} onOpenDocker={onOpenDocker} />
+      <StatusPanel app={app} onInstall={onInstall} onUninstall={onUninstall} onOpenDocker={onOpenDocker} />
 
       {app.notes && (
         <section className="ac-notes" aria-label="使用须知">
@@ -260,10 +260,12 @@ function MoreMenu({ onUninstall, onOpenDocker }: { onUninstall: () => void; onOp
 function StatusPanel({
   app,
   onInstall,
+  onUninstall,
   onOpenDocker,
 }: {
   app: CatalogApp;
   onInstall: () => void;
+  onUninstall: () => void;
   onOpenDocker?: () => void;
 }) {
   const running = app.job?.state === "running";
@@ -296,6 +298,25 @@ function StatusPanel({
     );
   }
 
+  if (app.state === "failed" && uninstallFailed(app) && app.job) {
+    return (
+      <section className="ac-status-card error" aria-label="卸载未完成">
+        <div className="ac-status-head">
+          <CircleAlert />
+          <div>
+            <strong>卸载还未完成</strong>
+            <p>{app.job.error}</p>
+          </div>
+          <button className="ac-btn" onClick={onUninstall}>
+            <RotateCcw />
+            重试卸载
+          </button>
+        </div>
+        <p>应用数据仍保留，重试会继续清理残留资源。</p>
+        <JobOutput job={app.job} open />
+      </section>
+    );
+  }
   if (app.state === "installed") {
     const healthy = app.running === app.total;
     return (
@@ -340,7 +361,7 @@ function StatusPanel({
           <div className="ac-banner-note warning" role="note">
             <TriangleAlert />
             <span>
-              它按旧的运行规则安装，容器仍以安装时的身份与权限运行。卸载（应用数据会保留）后重新安装，即按当前规则运行：以独立账号运行，共享空间默认只读。
+              它按旧的运行规则安装，尚未应用当前的身份、权限或日志限制。卸载（应用数据会保留）后重新安装，即按当前规则运行，并限制容器日志占用。
             </span>
           </div>
         )}

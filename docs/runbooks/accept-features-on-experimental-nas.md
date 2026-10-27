@@ -75,6 +75,8 @@
 
 ### 应用中心与 Docker
 
+- 系统盘保护（#186）：更新产品服务、Host Agent 和容器代理后，在设置概览核对系统盘用量；选定可丢弃应用，备份需要保留的数据，按[容器代理手册](install-container-agent.md)验证新容器的日志轮转与卸载后的资源/数据保留。不要用真实应用或全局 prune 做破坏性压力测试，见[调查](../investigations/2026-10-27-app-system-disk-growth.md)。
+
 - 安装一个新应用，确认 [ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md) 的版本与挂载检查放行正常安装；目录新增的 11 个应用逐个实机安装。
 - 应用身份（[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）：重新安装此前以 root 运行的 Immich，确认它以应用身份运行、手机备份可上传；安装 Navidrome 与 qBittorrent，核对只读与可写共享空间（[调查](../investigations/2026-10-14-app-containers-and-the-shared-acl.md)）。
 - 安装 n8n 确认持续运行；安装 OpenList 并用应用中心显示的密码登录。
