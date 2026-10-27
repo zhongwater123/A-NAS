@@ -591,6 +591,32 @@ check "SMB delete appears in the member's Web recycle bin" \
   grep -qx alice-smb.txt <(curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" | jq -r '.items[].name')
 check "SMB-deleted bytes are in the same recycle bin" in_trash alice "$data/spaces/private/alice" /tmp/alice-smb.txt
 
+# --- Cross-space moves (#180) preserve times through the confined Worker
+# and recycle the source instead of deleting it permanently.
+move_source="$data/spaces/private/alice/move-times"
+move_target="$data/spaces/shared/move-times"
+as alice mkdir "$move_source"
+as alice cp /tmp/alice.txt "$move_source/dated.txt"
+as alice touch -m -d '2020-01-02 03:04:05.123456789 UTC' "$move_source/dated.txt" "$move_source"
+move_file_time=$(stat -c %y "$move_source/dated.txt")
+move_dir_time=$(stat -c %y "$move_source")
+move_source_id=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/spaces/$alice_private/entries" | jq -r '.items[] | select(.name == "move-times") | .id')
+move_id=$(curl -fsS -X PATCH -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
+  -H 'Content-Type: application/json' -d "$(jq -nc --arg space "$shared" '{spaceId:$space}')" \
+  "$api/api/v1/files/$move_source_id" | jq -r .id || true)
+check "cross-space move publishes a new entry" test -n "$move_id" -a "$move_id" != null -a "$move_id" != "$move_source_id"
+check "cross-space move preserves file nanosecond mtime" test "$(stat -c %y "$move_target/dated.txt" 2>/dev/null)" = "$move_file_time"
+check "cross-space move preserves directory nanosecond mtime" test "$(stat -c %y "$move_target" 2>/dev/null)" = "$move_dir_time"
+check "cross-space move inherits Shared read permissions" as owner cmp -s /tmp/alice.txt "$move_target/dated.txt"
+check "cross-space move removes the source from its old location" test ! -e "$move_source"
+move_trash_id=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" | jq -r '.items[] | select(.name == "move-times") | .id')
+check "cross-space move leaves an operator recycle item" test -n "$move_trash_id" -a "$move_trash_id" != null
+check "another user cannot restore the moved source" test "$(status_of -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" \
+  -H 'Content-Type: application/json' -d '{}' "$api/api/v1/trash/$move_trash_id/restore")" = 404
+check "the operator restores the moved source" test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
+  -H 'Content-Type: application/json' -d '{}' "$api/api/v1/trash/$move_trash_id/restore")" = 200
+check "the restored source keeps its content" cmp -s /tmp/alice.txt "$move_source/dated.txt"
+
 # --- Snapshots (#162): a space of 100,000 files, far beyond the 1 MiB the
 # Host Agent's reply used to be cut at, and the sweep that removes what a
 # failed or interrupted snapshot leaves on the volume or in the catalog.

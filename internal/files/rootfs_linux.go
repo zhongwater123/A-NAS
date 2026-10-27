@@ -464,6 +464,9 @@ func copyAt(ctx context.Context, sourceDir int, sourceName string, targetDir int
 		}
 		source := os.NewFile(uintptr(sourceFD), sourceName)
 		defer func() { _ = source.Close() }()
+		if err := unix.Fstat(sourceFD, &stat); err != nil {
+			return err
+		}
 		targetFD, err := unix.Openat(targetDir, targetName, unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		if err != nil {
 			return err
@@ -478,7 +481,9 @@ func copyAt(ctx context.Context, sourceDir int, sourceName string, targetDir int
 				return err
 			}
 		}
-		return nil
+		// Set the directory time after adding children, using its held
+		// descriptor so a concurrent rename cannot redirect the update.
+		return unix.UtimesNanoAt(targetFD, "", []unix.Timespec{{Nsec: unix.UTIME_OMIT}, stat.Mtim}, unix.AT_EMPTY_PATH)
 	default:
 		return ErrUnsupportedType
 	}
@@ -490,12 +495,19 @@ func copyAt(ctx context.Context, sourceDir int, sourceName string, targetDir int
 const copyChunk = 64 << 20
 
 func copyFileAt(ctx context.Context, sourceDir int, sourceName string, targetDir int, targetName string) error {
-	inputFD, err := unix.Openat(sourceDir, sourceName, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	inputFD, err := unix.Openat(sourceDir, sourceName, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return err
 	}
 	input := os.NewFile(uintptr(inputFD), sourceName)
 	defer func() { _ = input.Close() }()
+	var stat unix.Stat_t
+	if err := unix.Fstat(inputFD, &stat); err != nil {
+		return err
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+		return ErrUnsupportedType
+	}
 	outputFD, err := unix.Openat(targetDir, targetName, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o660)
 	if err != nil {
 		return err
@@ -511,6 +523,9 @@ func copyFileAt(ctx context.Context, sourceDir int, sourceName string, targetDir
 			err = nil
 			break
 		}
+	}
+	if err == nil {
+		err = unix.UtimesNanoAt(outputFD, "", []unix.Timespec{{Nsec: unix.UTIME_OMIT}, stat.Mtim}, unix.AT_EMPTY_PATH)
 	}
 	if err == nil {
 		err = output.Sync()

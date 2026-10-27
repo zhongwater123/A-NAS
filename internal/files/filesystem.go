@@ -28,7 +28,8 @@ type FileSystem interface {
 	// CreateTemp creates a new file in dir and returns it opened for writing
 	// together with its path.
 	CreateTemp(ctx context.Context, dir, prefix string) (*os.File, string, error)
-	// Copy copies a regular file or directory tree to a path that must not exist.
+	// Copy copies a regular file or directory tree to a path that must not
+	// exist, preserving modification times while inheriting the target ACL.
 	Copy(ctx context.Context, from, to string) error
 	// Usage returns the total size of the regular files at or below path.
 	Usage(ctx context.Context, path string) (int64, error)
