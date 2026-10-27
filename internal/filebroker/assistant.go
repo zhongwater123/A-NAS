@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/assistantlogin"
 )
 
@@ -89,7 +89,7 @@ func (s *Server) serveAssistant(conn *net.UnixConn, req request) {
 		case <-closed:
 			return
 		case <-recheck.C:
-			if !s.recheck(ctx, req.Token, &unconfirmed, func(current accounts.Identity) bool { return current.UID == identity.UID }) {
+			if !s.recheck(ctx, req.Token, &unconfirmed, func(current accountid.Identity) bool { return current.UID == identity.UID }) {
 				s.config.Logger.Info("assistant session no longer valid; cutting the connection", "username", identity.Username)
 				cut(instance)
 				_ = writeMessage(conn, response{Error: &wireError{Code: codeUnauthenticated}}, nil)
@@ -196,7 +196,7 @@ type AssistantConn struct {
 // the member signed in on the context's session. fresh asks for a new login,
 // when the instance refused the last token.
 func (c *Client) ConnectAssistant(ctx context.Context, fresh bool) (*AssistantConn, error) {
-	token := accounts.SessionToken(ctx)
+	token := accountid.SessionToken(ctx)
 	if token == "" {
 		return nil, fmt.Errorf("%w: no session for the assistant", ErrUnavailable)
 	}

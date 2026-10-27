@@ -19,13 +19,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 func TestAssistantConnectionsGoOnlyToTheSessionsOwnMember(t *testing.T) {
 	h := newAssistantHarness(t)
-	if _, err := h.client.ConnectAssistant(accounts.WithSessionToken(context.Background(), "forged"), false); !errors.Is(err, files.ErrForbidden) {
+	if _, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "forged"), false); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("forged ConnectAssistant() error = %v, want ErrForbidden", err)
 	}
 	if _, err := h.client.ConnectAssistant(context.Background(), false); !errors.Is(err, ErrUnavailable) {
@@ -33,10 +33,10 @@ func TestAssistantConnectionsGoOnlyToTheSessionsOwnMember(t *testing.T) {
 	}
 	// The administrator has no assistant here, and asking for one never
 	// reaches another member's.
-	if _, err := h.client.ConnectAssistant(accounts.WithSessionToken(context.Background(), "admin-token"), false); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "admin-token"), false); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("admin ConnectAssistant() error = %v, want ErrNotExist", err)
 	}
-	conn, err := h.client.ConnectAssistant(accounts.WithSessionToken(context.Background(), "member-token"), false)
+	conn, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "member-token"), false)
 	if err != nil {
 		t.Fatalf("ConnectAssistant() error = %v", err)
 	}
@@ -53,7 +53,7 @@ func TestAssistantConnectionsGoOnlyToTheSessionsOwnMember(t *testing.T) {
 
 func TestAssistantConnectionIsCutWhenTheSessionEnds(t *testing.T) {
 	h := newAssistantHarness(t)
-	conn, err := h.client.ConnectAssistant(accounts.WithSessionToken(context.Background(), "member-token"), false)
+	conn, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "member-token"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestAssistantConnectionIsCutWhenTheSessionEnds(t *testing.T) {
 // that cannot be read for a moment (#166).
 func TestAssistantConnectionOutlivesAPassingSessionDirectoryError(t *testing.T) {
 	h := newAssistantHarness(t)
-	conn, err := h.client.ConnectAssistant(accounts.WithSessionToken(context.Background(), "member-token"), false)
+	conn, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "member-token"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestAssistantConnectionOutlivesAPassingSessionDirectoryError(t *testing.T) 
 
 func TestStoppingTheBrokerCutsAssistantConnections(t *testing.T) {
 	h := newAssistantHarness(t)
-	conn, err := h.client.ConnectAssistant(accounts.WithSessionToken(context.Background(), "member-token"), false)
+	conn, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "member-token"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestStoppingTheBrokerCutsAssistantConnections(t *testing.T) {
 
 func TestAssistantIsOffWithoutSockets(t *testing.T) {
 	h := newAssistantHarness(t, func(config *Config) { config.AssistantSockets = "" })
-	if _, err := h.client.ConnectAssistant(accounts.WithSessionToken(context.Background(), "member-token"), false); !errors.Is(err, ErrUnavailable) {
+	if _, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "member-token"), false); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("ConnectAssistant() error = %v, want ErrUnavailable", err)
 	}
 }
@@ -135,7 +135,7 @@ func TestAssistantConnectionCarriesHTTP(t *testing.T) {
 		t.Cleanup(server.Close)
 		config.AssistantSockets = sockets
 	})
-	conn, err := h.client.ConnectAssistant(accounts.WithSessionToken(context.Background(), "member-token"), false)
+	conn, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "member-token"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestAssistantConnectionCarriesHTTP(t *testing.T) {
 
 func TestAssistantLoginIsKeptUntilTheInstanceRefusesIt(t *testing.T) {
 	h := newAssistantHarness(t)
-	ctx := accounts.WithSessionToken(context.Background(), "member-token")
+	ctx := accountid.WithSessionToken(context.Background(), "member-token")
 	for range 3 {
 		conn, err := h.client.ConnectAssistant(ctx, false)
 		if err != nil {
@@ -193,7 +193,7 @@ func TestAssistantWithAWrongSecretIsUnavailable(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.tokens, "alice.env"), []byte("HERMES_DASHBOARD_SESSION_TOKEN=not-hers\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.client.ConnectAssistant(accounts.WithSessionToken(context.Background(), "member-token"), false); !errors.Is(err, ErrUnavailable) {
+	if _, err := h.client.ConnectAssistant(accountid.WithSessionToken(context.Background(), "member-token"), false); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("ConnectAssistant() error = %v, want ErrUnavailable", err)
 	}
 }
@@ -226,9 +226,9 @@ type assistantHarness struct {
 func newAssistantHarness(t *testing.T, adjust ...func(*Config)) *assistantHarness {
 	t.Helper()
 	h := &assistantHarness{
-		terminalHarness: &terminalHarness{identities: map[string]accounts.Identity{
-			"admin-token":  {Username: "owner", UID: 20100, Role: accounts.RoleAdmin, Enabled: true},
-			"member-token": {Username: "alice", UID: 20101, Role: accounts.RoleMember, Enabled: true},
+		terminalHarness: &terminalHarness{identities: map[string]accountid.Identity{
+			"admin-token":  {Username: "owner", UID: 20100, Role: accountid.RoleAdmin, Enabled: true},
+			"member-token": {Username: "alice", UID: 20101, Role: accountid.RoleMember, Enabled: true},
 		}},
 		instanceClosed: make(chan struct{}, 1),
 	}

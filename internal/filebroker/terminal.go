@@ -17,8 +17,8 @@ import (
 
 	"github.com/creack/pty"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/terminal"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/ptyshell"
 )
 
 const opTerminal = "terminal"
@@ -40,7 +40,7 @@ func (s *Server) serveTerminal(conn *net.UnixConn, req request) {
 		_ = writeMessage(conn, response{Error: refused}, nil)
 		return
 	}
-	if identity.Role != accounts.RoleAdmin {
+	if identity.Role != accountid.RoleAdmin {
 		_ = writeMessage(conn, response{Error: &wireError{Code: codeForbidden, Message: "the terminal is for administrators"}}, nil)
 		return
 	}
@@ -51,7 +51,7 @@ func (s *Server) serveTerminal(conn *net.UnixConn, req request) {
 		return
 	}
 	s.config.Logger.Info("terminal shell started", "username", identity.Username, "pid", cmd.Process.Pid)
-	shell := terminal.WatchProcessGroup(cmd)
+	shell := ptyshell.WatchProcessGroup(cmd)
 	err = writeMessage(conn, response{}, master)
 	_ = master.Close()
 	if err != nil {
@@ -78,8 +78,8 @@ func (s *Server) serveTerminal(conn *net.UnixConn, req request) {
 			_ = writeMessage(conn, response{ExitCode: &code}, nil)
 			return
 		case <-recheck.C:
-			if !s.recheck(ctx, req.Token, &unconfirmed, func(current accounts.Identity) bool {
-				return current.Role == accounts.RoleAdmin && current.UID == identity.UID
+			if !s.recheck(ctx, req.Token, &unconfirmed, func(current accountid.Identity) bool {
+				return current.Role == accountid.RoleAdmin && current.UID == identity.UID
 			}) {
 				s.config.Logger.Info("terminal session no longer valid; hanging up", "username", identity.Username)
 				code := shell.HangUp(hangupGracePeriod)
@@ -90,7 +90,7 @@ func (s *Server) serveTerminal(conn *net.UnixConn, req request) {
 	}
 }
 
-func (s *Server) startShell(identity accounts.Identity, cols, rows uint16) (*exec.Cmd, *os.File, error) {
+func (s *Server) startShell(identity accountid.Identity, cols, rows uint16) (*exec.Cmd, *os.File, error) {
 	credential, err := s.credential(identity)
 	if err != nil {
 		return nil, nil, err
@@ -200,8 +200,8 @@ func ttyGroup() int {
 
 // StartShell asks the File Broker for a shell running as the signed-in
 // administrator. The broker connection is held until Close.
-func (c *Client) StartShell(ctx context.Context, cols, rows uint16) (terminal.Shell, error) {
-	token := accounts.SessionToken(ctx)
+func (c *Client) StartShell(ctx context.Context, cols, rows uint16) (ptyshell.Shell, error) {
+	token := accountid.SessionToken(ctx)
 	if token == "" {
 		return nil, fmt.Errorf("%w: no session for terminal", ErrUnavailable)
 	}
@@ -277,4 +277,4 @@ func (s *brokerShell) Close() error {
 	return nil
 }
 
-var _ terminal.Spawner = (*Client)(nil)
+var _ ptyshell.Spawner = (*Client)(nil)

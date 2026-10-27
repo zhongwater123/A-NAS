@@ -4,7 +4,6 @@ package accounts
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
@@ -23,6 +22,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/argon2"
 
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/activity"
 )
 
@@ -34,43 +34,19 @@ var (
 	ErrPasswordTooLong    = fmt.Errorf("%w: it must contain at most %d characters", ErrInvalidPassword, MaxPasswordLength)
 	ErrPasswordCharacters = fmt.Errorf("%w: it must not contain control characters", ErrInvalidPassword)
 	ErrInvalidCredentials = errors.New("invalid username or password")
-	ErrSessionNotFound    = errors.New("session is invalid or expired")
 	// ErrSessionElsewhere reports a valid session presented by another client
 	// than the one that signed in (issue #161).
-	ErrSessionElsewhere    = errors.New("session was signed in from another client")
-	ErrUsernameUnavailable = errors.New("username is unavailable")
-	ErrUsernameReserved    = fmt.Errorf("%w: it is reserved for A-NAS or Samba", ErrUsernameUnavailable)
-	ErrCredentialProvision = errors.New("account credential provisioning failed")
-	ErrForbidden           = errors.New("operation is forbidden")
-	ErrUserNotFound        = errors.New("user not found")
-	ErrSpaceNotFound       = errors.New("space not found")
-	// ErrIdentityConflict reports that the host already has an account,
-	// group, or UID that A-NAS did not allocate for this user.
-	ErrIdentityConflict       = errors.New("username or Linux identity conflicts with an existing host account")
+	ErrSessionElsewhere       = errors.New("session was signed in from another client")
+	ErrUsernameUnavailable    = errors.New("username is unavailable")
+	ErrUsernameReserved       = fmt.Errorf("%w: it is reserved for A-NAS or Samba", ErrUsernameUnavailable)
+	ErrCredentialProvision    = errors.New("account credential provisioning failed")
+	ErrForbidden              = errors.New("operation is forbidden")
+	ErrSpaceNotFound          = errors.New("space not found")
 	ErrIdentityRangeExhausted = errors.New("A-NAS Linux identity range is exhausted")
 	// ErrSMBDisablePending reports a disabled account whose Web sign-in has
 	// ended but whose SMB credential the Host Agent could not disable yet.
 	// Identity synchronization disables it when the Product Service starts.
 	ErrSMBDisablePending = errors.New("the account is disabled, but its SMB credential could not be disabled yet")
-)
-
-// Linux identity layout shared with the Host Agent (ADR 0008). Fixed group
-// GIDs and user UIDs are recorded on the data volume, so they must never change.
-const (
-	UsersGroup   = "a-nas-users"
-	AdminsGroup  = "a-nas-admins"
-	UsersGID     = 20000
-	AdminsGID    = 20001
-	FirstUserUID = 20100
-	LastUserUID  = 29999
-	// PhotoServiceUser owns the data volume's photos subvolume alone
-	// (ADR 0011). Its UID sits outside the account (20100–29999) and app
-	// (30000–30999) ranges and is fixed, so a reinstalled system disk owns the
-	// same photos again.
-	PhotoServiceUser = "a-nas-photos"
-	PhotoServiceUID  = 31000
-	ShareServiceUser = "a-nas-shares"
-	ShareServiceUID  = 31001
 )
 
 // Password rules for every password a user sets. MaxPasswordLength keeps the
@@ -80,22 +56,6 @@ const (
 	MinPasswordLength = 12
 	MaxPasswordLength = 64
 	maxPasswordBytes  = 254
-)
-
-type Role string
-
-const (
-	RoleAdmin  Role = "admin"
-	RoleMember Role = "member"
-)
-
-type UserStatus string
-
-const (
-	UserStatusPending  UserStatus = "pending"
-	UserStatusActive   UserStatus = "active"
-	UserStatusDisabled UserStatus = "disabled"
-	UserStatusError    UserStatus = "error"
 )
 
 type User struct {
@@ -150,37 +110,6 @@ var localConsoleExpiry = time.Date(9999, time.December, 31, 23, 59, 59, 0, time.
 
 // LocalConsole reports a session signed in on the device's own screen.
 func (s Session) LocalConsole() bool { return s.ExpiresAt.Equal(localConsoleExpiry) }
-
-type CredentialRequest struct {
-	UserID         string
-	PrivateSpaceID string
-	Username       string
-	Password       string
-	Role           Role
-	UID            int
-	// Enabled is false when an administrator resets the credential of a
-	// disabled account; the SMB credential must stay disabled.
-	Enabled bool
-}
-
-type CredentialProvisioner interface {
-	SetCredential(context.Context, CredentialRequest) error
-	DisableCredential(context.Context, string) error
-}
-
-// Identity is the Linux account the Host Agent keeps for one A-NAS user.
-type Identity struct {
-	Username string
-	UID      int
-	Role     Role
-	Enabled  bool
-}
-
-// IdentitySynchronizer converges host accounts and groups on the control plane
-// without changing any password.
-type IdentitySynchronizer interface {
-	SyncIdentities(context.Context, []Identity) error
-}
 
 type Options struct {
 	Now    func() time.Time
@@ -1162,10 +1091,7 @@ func verifyPassword(password, encoded string) bool {
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
-func tokenHash(token string) string {
-	digest := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(digest[:])
-}
+func tokenHash(token string) string { return accountid.TokenHash(token) }
 
 func formatTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
 

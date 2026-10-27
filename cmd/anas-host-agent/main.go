@@ -16,12 +16,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/filebroker"
 	linuxhostops "github.com/zhongwater123/A-NAS/internal/hostops/linux"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
+	"github.com/zhongwater123/A-NAS/internal/sessiondir"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/systemdscope"
 	"github.com/zhongwater123/A-NAS/internal/systemlog/journal"
@@ -109,10 +110,10 @@ func loadConfig(environment map[string]string) (config, error) {
 		c.AssistantChanges = ""
 	}
 	if c.PhotoSessionGroup == "" {
-		c.PhotoSessionGroup = accounts.PhotoServiceUser
+		c.PhotoSessionGroup = accountid.PhotoServiceUser
 	}
 	if c.ShareSessionGroup == "" {
-		c.ShareSessionGroup = accounts.ShareServiceUser
+		c.ShareSessionGroup = accountid.ShareServiceUser
 	}
 	return c, nil
 }
@@ -159,7 +160,7 @@ func run(logger *slog.Logger) error {
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	sessions := accounts.NewSessionDirectory(filepath.Join(config.StateDir, "control.db"))
+	sessions := sessiondir.New(filepath.Join(config.StateDir, "control.db"))
 	defer func() { _ = sessions.Close() }()
 	assistantChanges := config.AssistantChanges
 	// File workers and terminal shells run in scopes of their own, so they
@@ -283,7 +284,7 @@ func serveAssistantChanges(socketPath string, broker *filebroker.Server, logger 
 // session token (ADR 0011). Only the photo service's group can reach the
 // socket; without that group the photo service is not installed and nothing
 // is served.
-func serveSessionLookup(config config, sessions *accounts.SessionDirectory, logger *slog.Logger) (func(), error) {
+func serveSessionLookup(config config, sessions *sessiondir.Directory, logger *slog.Logger) (func(), error) {
 	group := config.PhotoSessionGroup
 	if _, err := user.LookupGroup(group); err != nil {
 		logger.Info("photo service is not installed; session lookup is off", "group", group)
@@ -476,7 +477,7 @@ func listen(socketPath, groupName string) (net.Listener, error) {
 	return listener, nil
 }
 
-func serveShareSessionLookup(config config, sessions *accounts.SessionDirectory, logger *slog.Logger) (func(), error) {
+func serveShareSessionLookup(config config, sessions *sessiondir.Directory, logger *slog.Logger) (func(), error) {
 	group := config.ShareSessionGroup
 	if _, err := user.LookupGroup(group); err != nil {
 		logger.Info("share service is not installed; lookup is off")

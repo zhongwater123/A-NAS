@@ -18,14 +18,14 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
 	"github.com/zhongwater123/A-NAS/internal/assistantlogin"
 )
 
 // SessionResolver verifies a session token and returns its Linux identity.
 type SessionResolver interface {
-	ResolveSessionIdentity(context.Context, string) (accounts.Identity, error)
+	ResolveSessionIdentity(context.Context, string) (accountid.Identity, error)
 }
 
 // Placer moves a process the broker started into a scope unit of its own
@@ -103,7 +103,7 @@ type Server struct {
 
 type workerKey struct {
 	uid  int
-	role accounts.Role
+	role accountid.Role
 	// confined workers apply the assistant's changes: Landlock lets them write
 	// only the member's own places (ADR 0024 decision 4).
 	confined bool
@@ -346,16 +346,16 @@ func (s *Server) dispatch(ctx context.Context, req request, reply func(response,
 // expired or whose user may not act is unauthenticated. A session directory
 // that cannot be read right now, as while SQLite is busy, is unavailable
 // instead, so a passing error never reads as a signed-out user (#166).
-func (s *Server) identify(ctx context.Context, token string) (accounts.Identity, *wireError) {
+func (s *Server) identify(ctx context.Context, token string) (accountid.Identity, *wireError) {
 	identity, err := s.config.Sessions.ResolveSessionIdentity(ctx, token)
 	switch {
-	case errors.Is(err, accounts.ErrSessionNotFound):
-		return accounts.Identity{}, &wireError{Code: codeUnauthenticated}
+	case errors.Is(err, accountid.ErrSessionNotFound):
+		return accountid.Identity{}, &wireError{Code: codeUnauthenticated}
 	case err != nil:
 		s.config.Logger.Warn("session directory unavailable", "error", err)
-		return accounts.Identity{}, &wireError{Code: codeUnavailable, Message: "sessions cannot be verified right now"}
+		return accountid.Identity{}, &wireError{Code: codeUnavailable, Message: "sessions cannot be verified right now"}
 	case !identity.Enabled:
-		return accounts.Identity{}, &wireError{Code: codeUnauthenticated}
+		return accountid.Identity{}, &wireError{Code: codeUnauthenticated}
 	}
 	return identity, nil
 }
@@ -371,9 +371,9 @@ const unconfirmedRechecks = 4
 // rechecks in a row, which unconfirmed counts: a passing error does not hang
 // up a working shell, and a directory that stays unreadable does not keep a
 // revoked one alive.
-func (s *Server) recheck(ctx context.Context, token string, unconfirmed *int, keep func(accounts.Identity) bool) bool {
+func (s *Server) recheck(ctx context.Context, token string, unconfirmed *int, keep func(accountid.Identity) bool) bool {
 	current, err := s.config.Sessions.ResolveSessionIdentity(ctx, token)
-	if err != nil && !errors.Is(err, accounts.ErrSessionNotFound) {
+	if err != nil && !errors.Is(err, accountid.ErrSessionNotFound) {
 		*unconfirmed++
 		s.config.Logger.Warn("session cannot be confirmed", "error", err, "rechecks", *unconfirmed)
 		return *unconfirmed < unconfirmedRechecks
@@ -385,7 +385,7 @@ func (s *Server) recheck(ctx context.Context, token string, unconfirmed *int, ke
 // takeWorker returns a free worker of key's pool, starting one while the
 // pool is below workersPerUser, or waits for one. The caller gives it back
 // with returnWorker, or with dropWorker when its connection broke.
-func (s *Server) takeWorker(ctx context.Context, key workerKey, identity accounts.Identity) (*worker, error) {
+func (s *Server) takeWorker(ctx context.Context, key workerKey, identity accountid.Identity) (*worker, error) {
 	for {
 		s.mu.Lock()
 		if s.closed {
@@ -435,7 +435,7 @@ var errClosed = errors.New("file broker is closed")
 // addWorker starts a worker for key's pool, unless the pool filled up
 // meanwhile. Calls for the same key share one start, and its failure; ctx
 // ending stops the wait, not the start, which the other calls may share.
-func (s *Server) addWorker(ctx context.Context, key workerKey, identity accounts.Identity) error {
+func (s *Server) addWorker(ctx context.Context, key workerKey, identity accountid.Identity) error {
 	started := s.starting.DoChan(fmt.Sprint(key), func() (any, error) {
 		// Only this function adds workers, and never twice at once for a key,
 		// so a pool below the limit here stays below it until the add.
@@ -505,7 +505,7 @@ func (s *Server) dropWorker(w *worker) {
 	}
 }
 
-func (s *Server) startWorker(key workerKey, identity accounts.Identity) (*worker, error) {
+func (s *Server) startWorker(key workerKey, identity accountid.Identity) (*worker, error) {
 	credential, err := s.credential(identity)
 	if err != nil {
 		return nil, err
@@ -546,17 +546,17 @@ func (s *Server) place(pid int, what, username string) {
 // credential maps an identity to the worker's UID and groups. Only accounts
 // in the A-NAS range that the Host Agent provisioned under the same UID can
 // get a worker; root and system accounts never can.
-func (s *Server) credential(identity accounts.Identity) (*syscall.Credential, error) {
-	if identity.UID < accounts.FirstUserUID || identity.UID > accounts.LastUserUID {
+func (s *Server) credential(identity accountid.Identity) (*syscall.Credential, error) {
+	if identity.UID < accountid.FirstUserUID || identity.UID > accountid.LastUserUID {
 		return nil, fmt.Errorf("UID %d is outside the A-NAS range", identity.UID)
 	}
 	uid, err := s.config.LookupUID(identity.Username)
 	if err != nil || uid != identity.UID {
 		return nil, fmt.Errorf("Linux account %s is not provisioned with UID %d", identity.Username, identity.UID)
 	}
-	groups := []uint32{accounts.UsersGID}
-	if identity.Role == accounts.RoleAdmin {
-		groups = append(groups, accounts.AdminsGID)
+	groups := []uint32{accountid.UsersGID}
+	if identity.Role == accountid.RoleAdmin {
+		groups = append(groups, accountid.AdminsGID)
 	}
 	return &syscall.Credential{Uid: uint32(identity.UID), Gid: uint32(identity.UID), Groups: groups}, nil
 }

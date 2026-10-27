@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 type changesHarness struct {
@@ -27,7 +27,7 @@ type changesHarness struct {
 	client *Client
 }
 
-var alice = accounts.Identity{Username: "alice", UID: 20101, Role: accounts.RoleMember, Enabled: true}
+var alice = accountid.Identity{Username: "alice", UID: 20101, Role: accountid.RoleMember, Enabled: true}
 
 // newChangesHarness runs the broker with the executor over a volume laid out
 // as the Host Agent does; workers run as the test user, the confined one
@@ -53,8 +53,8 @@ func newChangesHarness(t *testing.T) *changesHarness {
 		}
 	}
 	server, err := NewServer(Config{
-		Sessions: resolverFunc(func(token string) (accounts.Identity, error) {
-			return lookup(map[string]accounts.Identity{"alice-token": alice}, token)
+		Sessions: resolverFunc(func(token string) (accountid.Identity, error) {
+			return lookup(map[string]accountid.Identity{"alice-token": alice}, token)
 		}),
 		VolumeRoot: volume, VolumeReady: func() bool { return true },
 		AssistantChanges: filepath.Join(t.TempDir(), "changes"),
@@ -88,7 +88,7 @@ const editPlan = `{"summary":"计划加一项","operations":[{"op":"write","path
 
 func TestTheMembersConfirmedChangeIsAppliedByAConfinedWorker(t *testing.T) {
 	h := newChangesHarness(t)
-	session := accounts.WithSessionToken(context.Background(), "alice-token")
+	session := accountid.WithSessionToken(context.Background(), "alice-token")
 	card, err := h.client.PrepareChange(session, "0a1b2c3d", "req-1", json.RawMessage(editPlan))
 	if err != nil {
 		t.Fatal(err)
@@ -159,13 +159,13 @@ func TestTheConfinedWorkerWritesOnlyTheMembersPlaces(t *testing.T) {
 
 func TestChangesNeedTheMembersSession(t *testing.T) {
 	h := newChangesHarness(t)
-	if _, err := h.client.PrepareChange(accounts.WithSessionToken(context.Background(), "forged"), "", "", json.RawMessage(editPlan)); !errors.Is(err, files.ErrForbidden) {
+	if _, err := h.client.PrepareChange(accountid.WithSessionToken(context.Background(), "forged"), "", "", json.RawMessage(editPlan)); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("prepare with a forged session: %v", err)
 	}
-	if _, err := h.client.DecideChange(accounts.WithSessionToken(context.Background(), "forged"), "deadbeef", "approve"); !errors.Is(err, files.ErrForbidden) {
+	if _, err := h.client.DecideChange(accountid.WithSessionToken(context.Background(), "forged"), "deadbeef", "approve"); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("approve with a forged session: %v", err)
 	}
-	session := accounts.WithSessionToken(context.Background(), "alice-token")
+	session := accountid.WithSessionToken(context.Background(), "alice-token")
 	if _, err := h.client.PrepareChange(session, "", "", json.RawMessage(`{"operations":[{"op":"delete","path":"/nas/共享空间/通知.md"}]}`)); !errors.Is(err, assistantchanges.ErrInvalid) {
 		t.Fatalf("prepare outside her places: %v", err)
 	}

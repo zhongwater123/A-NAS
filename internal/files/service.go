@@ -21,28 +21,16 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/capacity"
 )
 
 var (
-	ErrForbidden         = errors.New("file space access is forbidden")
-	ErrNotFound          = errors.New("file entry not found")
-	ErrConflict          = errors.New("file entry already exists")
-	ErrInvalidName       = errors.New("invalid file name")
-	ErrUnsupportedType   = errors.New("unsupported file type")
-	ErrVolumeUnavailable = errors.New("data volume is unavailable")
-	ErrInsufficientSpace = errors.New("data volume reserve would be exhausted")
-	ErrInvalidQuery      = errors.New("search text must hold 1 to 100 characters")
-	ErrInvalidSchedule   = errors.New("invalid snapshot schedule")
-)
-
-type EntryKind string
-
-const (
-	EntryKindFile      EntryKind = "file"
-	EntryKindDirectory EntryKind = "directory"
+	ErrConflict        = errors.New("file entry already exists")
+	ErrInvalidQuery    = errors.New("search text must hold 1 to 100 characters")
+	ErrInvalidSchedule = errors.New("invalid snapshot schedule")
 )
 
 type Entry struct {

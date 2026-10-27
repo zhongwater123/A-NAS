@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 // The executor of 提交更改 (ADR 0024 decision 4). The Product Service
@@ -32,7 +32,7 @@ const (
 
 // AccountResolver names the active account behind a Linux UID.
 type AccountResolver interface {
-	ResolveAccountUID(context.Context, int) (accounts.SessionUser, error)
+	ResolveAccountUID(context.Context, int) (accountid.SessionUser, error)
 }
 
 // ConfineVariable carries the places a confined worker may write, separated by
@@ -51,12 +51,12 @@ func (s *Server) writablePlaces(username string) []string {
 }
 
 // memberFiles is the member's file system through their confined worker.
-func (s *Server) memberFiles(identity accounts.Identity) (files.FileSystem, error) {
+func (s *Server) memberFiles(identity accountid.Identity) (filesystem.FileSystem, error) {
 	if !s.config.VolumeReady() {
-		return nil, files.ErrVolumeUnavailable
+		return nil, filesystem.ErrVolumeUnavailable
 	}
 	if !assistantAccount.MatchString(identity.Username) {
-		return nil, files.ErrForbidden
+		return nil, filesystem.ErrForbidden
 	}
 	key := workerKey{uid: identity.UID, role: identity.Role, confined: true}
 	w, err := s.takeWorker(context.Background(), key, identity)
@@ -102,7 +102,7 @@ func (s *Server) serveChange(req request) response {
 	var err error
 	switch req.Op {
 	case opChangePrepare:
-		var member files.FileSystem
+		var member filesystem.FileSystem
 		if member, err = s.memberFiles(identity); err == nil {
 			card, err = s.changes.Prepare(ctx, identity.Username, member, req.Change.Arguments, req.Change.SessionID, req.Change.RequestID)
 		}
@@ -131,7 +131,7 @@ type peerKey struct{}
 // bound into every assistant's sandbox: the member is the caller's UID.
 func (s *Server) ServeAssistantChanges(listener net.Listener) error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /apply", s.withAssistant(func(w http.ResponseWriter, r *http.Request, identity accounts.Identity) {
+	mux.HandleFunc("POST /apply", s.withAssistant(func(w http.ResponseWriter, r *http.Request, identity accountid.Identity) {
 		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		if err != nil {
 			http.Error(w, "请求读取失败", http.StatusBadRequest)
@@ -145,7 +145,7 @@ func (s *Server) ServeAssistantChanges(listener net.Listener) error {
 		}
 		writeText(w, s.changes.Apply(r.Context(), identity.Username, member, body))
 	}))
-	mux.HandleFunc("GET /recent", s.withAssistant(func(w http.ResponseWriter, _ *http.Request, identity accounts.Identity) {
+	mux.HandleFunc("GET /recent", s.withAssistant(func(w http.ResponseWriter, _ *http.Request, identity accountid.Identity) {
 		writeText(w, s.changes.Recent(identity.Username))
 	}))
 	server := &http.Server{
@@ -174,16 +174,16 @@ func (s *Server) ServeAssistantChanges(listener net.Listener) error {
 
 // withAssistant finds the member behind the calling UID: an active account in
 // the A-NAS range, never root or a system account.
-func (s *Server) withAssistant(next func(http.ResponseWriter, *http.Request, accounts.Identity)) http.HandlerFunc {
+func (s *Server) withAssistant(next func(http.ResponseWriter, *http.Request, accountid.Identity)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		uid, _ := r.Context().Value(peerKey{}).(int)
-		if s.changes == nil || s.config.Accounts == nil || uid < accounts.FirstUserUID || uid > accounts.LastUserUID {
+		if s.changes == nil || s.config.Accounts == nil || uid < accountid.FirstUserUID || uid > accountid.LastUserUID {
 			http.Error(w, "not available", http.StatusForbidden)
 			return
 		}
 		user, err := s.config.Accounts.ResolveAccountUID(r.Context(), uid)
 		switch {
-		case errors.Is(err, accounts.ErrUserNotFound):
+		case errors.Is(err, accountid.ErrUserNotFound):
 			http.Error(w, "not available", http.StatusForbidden)
 			return
 		case err != nil:
@@ -191,7 +191,7 @@ func (s *Server) withAssistant(next func(http.ResponseWriter, *http.Request, acc
 			http.Error(w, "accounts cannot be verified right now", http.StatusServiceUnavailable)
 			return
 		}
-		next(w, r, accounts.Identity{Username: user.Username, Role: user.Role, UID: uid, Enabled: true})
+		next(w, r, accountid.Identity{Username: user.Username, Role: user.Role, UID: uid, Enabled: true})
 	}
 }
 

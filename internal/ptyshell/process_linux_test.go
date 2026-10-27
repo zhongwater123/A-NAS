@@ -1,4 +1,4 @@
-package terminal
+package ptyshell
 
 import (
 	"os/exec"

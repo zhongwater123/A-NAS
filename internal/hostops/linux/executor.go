@@ -19,11 +19,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/appid"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
-	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
 type BlockDevice struct {
@@ -187,11 +187,11 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	return executor
 }
 
-func (e *Executor) SetCredential(ctx context.Context, request accounts.CredentialRequest) error {
+func (e *Executor) SetCredential(ctx context.Context, request accountid.CredentialRequest) error {
 	if !validUsername(request.Username) || strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PrivateSpaceID) == "" || !validSambaPassword(request.Password) {
 		return errors.New("invalid credential request")
 	}
-	identity := accounts.Identity{Username: request.Username, UID: request.UID, Role: request.Role, Enabled: request.Enabled}
+	identity := accountid.Identity{Username: request.Username, UID: request.UID, Role: request.Role, Enabled: request.Enabled}
 	if err := validIdentity(identity); err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
     read only = no
     browseable = yes
     access based share enum = yes
-%s`, interfaces, e.mountPoint, sambaShareOptions, e.mountPoint, accounts.UsersGroup, sambaShareOptions)
+%s`, interfaces, e.mountPoint, sambaShareOptions, e.mountPoint, accountid.UsersGroup, sambaShareOptions)
 	configurationPath := filepath.Join(e.systemRoot, "etc", "samba", "smb.conf")
 	candidatePath := configurationPath + ".candidate"
 	if err := writeAtomic(candidatePath, []byte(configuration), 0o644); err != nil {
@@ -528,7 +528,7 @@ func hostCommand(ctx context.Context, name string, args []string, stdin string) 
 	return command
 }
 
-var _ storage.VolumeExecutor = (*Executor)(nil)
-var _ accounts.CredentialProvisioner = (*Executor)(nil)
-var _ accounts.ViewingProvisioner = (*Executor)(nil)
+var _ datavolume.VolumeExecutor = (*Executor)(nil)
+var _ accountid.CredentialProvisioner = (*Executor)(nil)
+var _ accountid.ViewingProvisioner = (*Executor)(nil)
 var _ appid.Host = (*Executor)(nil)

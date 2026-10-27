@@ -14,20 +14,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/files"
-	"github.com/zhongwater123/A-NAS/internal/terminal"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
+	"github.com/zhongwater123/A-NAS/internal/ptyshell"
 )
 
 func TestTerminalShellRunsThroughTheBrokerForAdministratorsOnly(t *testing.T) {
 	broker := newTerminalHarness(t, "echo ready; read line; echo got:$line")
-	if _, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "member-token"), 80, 24); !errors.Is(err, files.ErrForbidden) {
+	if _, err := broker.client.StartShell(accountid.WithSessionToken(context.Background(), "member-token"), 80, 24); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("member StartShell() error = %v, want ErrForbidden", err)
 	}
-	if _, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "forged"), 80, 24); !errors.Is(err, files.ErrForbidden) {
+	if _, err := broker.client.StartShell(accountid.WithSessionToken(context.Background(), "forged"), 80, 24); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("forged StartShell() error = %v, want ErrForbidden", err)
 	}
-	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 100, 30)
+	shell, err := broker.client.StartShell(accountid.WithSessionToken(context.Background(), "admin-token"), 100, 30)
 	if err != nil {
 		t.Fatalf("StartShell() error = %v", err)
 	}
@@ -53,7 +53,7 @@ func TestTerminalShellRunsThroughTheBrokerForAdministratorsOnly(t *testing.T) {
 
 func TestClosingATerminalHangsTheShellUp(t *testing.T) {
 	broker := newTerminalHarness(t, "trap '' HUP; echo ready; sleep 60")
-	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	shell, err := broker.client.StartShell(accountid.WithSessionToken(context.Background(), "admin-token"), 80, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestClosingATerminalHangsTheShellUp(t *testing.T) {
 
 func TestTerminalEndsWhenTheSessionStopsBeingValid(t *testing.T) {
 	broker := newTerminalHarness(t, "echo ready; sleep 60")
-	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	shell, err := broker.client.StartShell(accountid.WithSessionToken(context.Background(), "admin-token"), 80, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestTerminalEndsWhenTheSessionStopsBeingValid(t *testing.T) {
 // busy, must not hang up a working shell (#166).
 func TestTerminalOutlivesAPassingSessionDirectoryError(t *testing.T) {
 	broker := newTerminalHarness(t, "echo ready; read line; echo got:$line")
-	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	shell, err := broker.client.StartShell(accountid.WithSessionToken(context.Background(), "admin-token"), 80, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestTerminalOutlivesAPassingSessionDirectoryError(t *testing.T) {
 // may have been revoked meanwhile.
 func TestTerminalEndsWhenTheSessionDirectoryStaysUnreadable(t *testing.T) {
 	broker := newTerminalHarness(t, "echo ready; sleep 60")
-	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	shell, err := broker.client.StartShell(accountid.WithSessionToken(context.Background(), "admin-token"), 80, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,8 +130,8 @@ func TestTerminalEndsWhenTheSessionDirectoryStaysUnreadable(t *testing.T) {
 func TestTerminalIsUnavailableWhileSessionsCannotBeRead(t *testing.T) {
 	broker := newTerminalHarness(t, "echo ready")
 	broker.setUnreadable(errors.New("database is locked"))
-	_, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
-	if !errors.Is(err, ErrUnavailable) || errors.Is(err, files.ErrForbidden) {
+	_, err := broker.client.StartShell(accountid.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	if !errors.Is(err, ErrUnavailable) || errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("StartShell() error = %v, want ErrUnavailable and not a refusal", err)
 	}
 }
@@ -142,7 +142,7 @@ func TestTerminalShellStartsOnlyOnceInItsScope(t *testing.T) {
 	placer := &recordingPlacer{marker: filepath.Join(t.TempDir(), "placed")}
 	broker := newTerminalHarness(t, "if test -e "+placer.marker+"; then echo in-scope; else echo too-early; fi",
 		func(config *Config) { config.Scopes = placer })
-	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	shell, err := broker.client.StartShell(accountid.WithSessionToken(context.Background(), "admin-token"), 80, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestTerminalShellStartsOnlyOnceInItsScope(t *testing.T) {
 func TestTerminalStartsWhenItsScopeCannotBeMade(t *testing.T) {
 	placer := &recordingPlacer{marker: filepath.Join(t.TempDir(), "placed"), fail: errors.New("systemd is gone")}
 	broker := newTerminalHarness(t, "echo ready", func(config *Config) { config.Scopes = placer })
-	shell, err := broker.client.StartShell(accounts.WithSessionToken(context.Background(), "admin-token"), 80, 24)
+	shell, err := broker.client.StartShell(accountid.WithSessionToken(context.Background(), "admin-token"), 80, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,21 +209,21 @@ func waitForLine(t *testing.T, reader *bufio.Reader, want string) {
 type terminalHarness struct {
 	client     *Client
 	mu         sync.Mutex
-	identities map[string]accounts.Identity
+	identities map[string]accountid.Identity
 	// unreadable, when set, is what every lookup fails with, as a session
 	// directory that SQLite reports busy.
 	unreadable error
 }
 
-func (h *terminalHarness) ResolveSessionIdentity(_ context.Context, token string) (accounts.Identity, error) {
+func (h *terminalHarness) ResolveSessionIdentity(_ context.Context, token string) (accountid.Identity, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.unreadable != nil {
-		return accounts.Identity{}, h.unreadable
+		return accountid.Identity{}, h.unreadable
 	}
 	identity, ok := h.identities[token]
 	if !ok {
-		return accounts.Identity{}, accounts.ErrSessionNotFound
+		return accountid.Identity{}, accountid.ErrSessionNotFound
 	}
 	return identity, nil
 }
@@ -242,9 +242,9 @@ func (h *terminalHarness) revoke(token string) {
 
 func newTerminalHarness(t *testing.T, script string, adjust ...func(*Config)) *terminalHarness {
 	t.Helper()
-	h := &terminalHarness{identities: map[string]accounts.Identity{
-		"admin-token":  {Username: "owner", UID: 20100, Role: accounts.RoleAdmin, Enabled: true},
-		"member-token": {Username: "alice", UID: 20101, Role: accounts.RoleMember, Enabled: true},
+	h := &terminalHarness{identities: map[string]accountid.Identity{
+		"admin-token":  {Username: "owner", UID: 20100, Role: accountid.RoleAdmin, Enabled: true},
+		"member-token": {Username: "alice", UID: 20101, Role: accountid.RoleMember, Enabled: true},
 	}}
 	volume := t.TempDir()
 	config := Config{
@@ -276,4 +276,4 @@ func newTerminalHarness(t *testing.T, script string, adjust ...func(*Config)) *t
 	return h
 }
 
-var _ terminal.Spawner = (*Client)(nil)
+var _ ptyshell.Spawner = (*Client)(nil)

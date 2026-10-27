@@ -4,7 +4,6 @@ package storage
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -16,32 +15,22 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/capacity"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 )
 
 var (
 	ErrDiskNotFound       = errors.New("disk not found")
-	ErrDiskNotEligible    = errors.New("disk is not eligible for the data volume")
 	ErrPlanNotFound       = errors.New("execution plan not found")
 	ErrPlanExpired        = errors.New("execution plan expired")
-	ErrPlanState          = errors.New("execution plan is not in the required state")
 	ErrConfirmation       = errors.New("confirmation phrase does not match")
-	ErrDiskChanged        = errors.New("disk identity changed after planning")
-	ErrVolumeChanged      = errors.New("data volume changed after planning")
-	ErrVolumeUnavailable  = errors.New("the data volume is not mounted and writable")
 	ErrVolumeBusy         = errors.New("the data volume is converting to another layout")
 	ErrInvalidLayout      = errors.New("the layout does not fit the number of disks")
 	ErrLayoutTooSmall     = errors.New("the files on the data volume do not fit the layout")
-	ErrNoConversion       = errors.New("the data volume is not converting")
 	ErrOperationAttention = errors.New("operation needs administrator attention")
-	// ErrVolumeExists: the host shows a data volume, or a mount unit for
-	// one, that the plan did not make.
-	ErrVolumeExists = errors.New("a data volume this plan did not make is already on the host")
-	// ErrOperationNotFound: the host has no operation for the plan; it
-	// never received it.
-	ErrOperationNotFound = errors.New("the host has no operation for the plan")
 )
 
 // maxPlanDisks bounds one plan; a home NAS has a handful of bays.
@@ -59,25 +48,6 @@ const (
 	PlanStateExpired        PlanState = "expired"
 	// PlanStateCancelled: the administrator gave the plan up before it ran.
 	PlanStateCancelled PlanState = "cancelled"
-)
-
-// PlanKind is what a plan does to the data volume.
-type PlanKind string
-
-const (
-	// PlanKindCreateVolume formats the disks as a new data volume.
-	PlanKindCreateVolume PlanKind = "create_volume"
-	// PlanKindAddDisks erases the disks and adds them to the data volume.
-	PlanKindAddDisks PlanKind = "add_disks"
-)
-
-type VolumeState string
-
-const (
-	VolumeStateCreating    VolumeState = "creating"
-	VolumeStateAvailable   VolumeState = "available"
-	VolumeStateUnavailable VolumeState = "unavailable"
-	VolumeStateReadOnly    VolumeState = "read_only"
 )
 
 type Action struct {
@@ -146,94 +116,6 @@ func (p *ExecutionPlan) UnmarshalJSON(data []byte) error {
 		p.Disks = []PlannedDisk{disk}
 	}
 	return nil
-}
-
-type Volume struct {
-	ID string `json:"id"`
-	// DiskIDs are the disks holding the volume: those observed, or the
-	// planned ones while it is not mounted.
-	DiskIDs        []string    `json:"diskIds"`
-	FilesystemUUID string      `json:"filesystemUuid,omitempty"`
-	Layout         Layout      `json:"layout"`
-	CapacityBytes  uint64      `json:"capacityBytes,omitempty"`
-	AvailableBytes *uint64     `json:"availableBytes,omitempty"`
-	State          VolumeState `json:"state"`
-	// Conversion is set while data or metadata are outside the layout's
-	// Btrfs profiles, after disks were added with another layout.
-	Conversion *Conversion `json:"conversion,omitempty"`
-}
-
-// UnmarshalJSON also reads volumes stored when a volume had one disk.
-func (v *Volume) UnmarshalJSON(data []byte) error {
-	type document Volume
-	var decoded struct {
-		document
-		DiskID string `json:"diskId"`
-	}
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	*v = Volume(decoded.document)
-	if len(v.DiskIDs) == 0 && decoded.DiskID != "" {
-		v.DiskIDs = []string{decoded.DiskID}
-	}
-	if v.Layout == "" {
-		v.Layout = LayoutSingle
-	}
-	return nil
-}
-
-type ConversionState string
-
-const (
-	// ConversionRunning: Btrfs is converting the volume now.
-	ConversionRunning ConversionState = "running"
-	// ConversionWaiting: the conversion stopped, for example at shutdown;
-	// the Host Agent continues it at startup and every 15 minutes.
-	ConversionWaiting ConversionState = "waiting"
-)
-
-type Conversion struct {
-	State          ConversionState `json:"state"`
-	ConvertedBytes uint64          `json:"convertedBytes"`
-	TotalBytes     uint64          `json:"totalBytes"`
-}
-
-// DiskTarget is a disk the Host Agent erases, with the fingerprint it must
-// still have.
-type DiskTarget struct {
-	DiskID      string `json:"diskId"`
-	Fingerprint string `json:"fingerprint"`
-}
-
-type CreateVolumeRequest struct {
-	PlanID string
-	Disks  []DiskTarget
-	Layout Layout
-}
-
-// AddDisksRequest adds disks to the mounted data volume with the
-// filesystem UUID and converts it to the layout.
-type AddDisksRequest struct {
-	PlanID         string
-	FilesystemUUID string
-	Disks          []DiskTarget
-	Layout         Layout
-}
-
-// VolumeExecutor runs a plan's operation on the host. Starting reports the
-// operation without waiting for it to end; for a plan the host already has
-// an operation for, it starts nothing new: it reports one that runs or
-// succeeded, and continues one that failed or was interrupted after the
-// steps that are done.
-type VolumeExecutor interface {
-	StartCreateVolume(context.Context, CreateVolumeRequest) (VolumeOperation, error)
-	StartAddDisks(context.Context, AddDisksRequest) (VolumeOperation, error)
-	// VolumeOperation reports the plan's operation, or ErrOperationNotFound.
-	VolumeOperation(context.Context, string) (VolumeOperation, error)
-	// ContinueConversion starts converting the data volume to its layout
-	// again now, instead of at the Host Agent's next check.
-	ContinueConversion(context.Context) error
 }
 
 type Options struct {
@@ -944,11 +826,6 @@ func eligibleDisk(state hoststate.State, diskID, volumeUUID string) (hoststate.D
 	return hoststate.Disk{}, ErrDiskNotFound
 }
 
-func FingerprintDisk(disk hoststate.Disk) string {
-	digest := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d\x00%s", disk.ID.String(), disk.Model, disk.CapacityBytes, disk.Transport)))
-	return hex.EncodeToString(digest[:16])
-}
-
 // confirmationPhrase names the last characters of every disk to erase.
 func confirmationPhrase(diskIDs []string) string {
 	const visible = 7
@@ -988,4 +865,23 @@ func randomID() string {
 		panic(err)
 	}
 	return "plan:" + hex.EncodeToString(value)
+}
+
+// conversionProgress counts the data and metadata bytes already in the
+// layout's profiles against all of them. They differ while Btrfs converts
+// the volume to the layout; empty block groups of another profile do not
+// count, as Btrfs removes them by itself.
+func conversionProgress(volume *hoststate.DataVolume, layout datavolume.Layout) (converted, total uint64) {
+	dataProfile, metadataProfile := layout.Profiles()
+	count := func(usage []hoststate.ProfileUsage, target hoststate.Profile) {
+		for _, item := range usage {
+			total += item.UsedBytes
+			if item.Profile == target {
+				converted += item.UsedBytes
+			}
+		}
+	}
+	count(volume.Data, dataProfile)
+	count(volume.Metadata, metadataProfile)
+	return converted, total
 }

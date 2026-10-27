@@ -19,12 +19,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/appid"
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
-	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 )
 
@@ -126,12 +126,12 @@ func (c *Client) getWithClient(ctx context.Context, path string, into any, clien
 
 type handler struct {
 	observer    hoststate.Observer
-	volume      storage.VolumeExecutor
-	credentials accounts.CredentialProvisioner
-	identities  accounts.IdentitySynchronizer
-	viewing     accounts.ViewingProvisioner
+	volume      datavolume.VolumeExecutor
+	credentials accountid.CredentialProvisioner
+	identities  accountid.IdentitySynchronizer
+	viewing     accountid.ViewingProvisioner
 	apps        appid.Host
-	snapshots   files.SnapshotBackend
+	snapshots   filesystem.SnapshotBackend
 	systemLogs  systemlog.Reader
 	// reconcileFailed reports the last reconciliation of the data volume.
 	reconcileFailed func() bool
@@ -140,12 +140,12 @@ type handler struct {
 
 type Services struct {
 	Reader      hoststate.Observer
-	Volume      storage.VolumeExecutor
-	Credentials accounts.CredentialProvisioner
-	Identities  accounts.IdentitySynchronizer
-	Viewing     accounts.ViewingProvisioner
+	Volume      datavolume.VolumeExecutor
+	Credentials accountid.CredentialProvisioner
+	Identities  accountid.IdentitySynchronizer
+	Viewing     accountid.ViewingProvisioner
 	Apps        appid.Host
-	Snapshots   files.SnapshotBackend
+	Snapshots   filesystem.SnapshotBackend
 	// SystemLogs reads the allowlisted service logs (ADR 0020).
 	SystemLogs systemlog.Reader
 	// ReconcileFailed reports whether the Host Agent's last reconciliation of
@@ -276,7 +276,7 @@ func (h *handler) handleSnapshots(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		pruned, err := h.snapshots.Prune(r.Context(), request.Keep)
-		if errors.Is(err, files.ErrVolumeUnavailable) {
+		if errors.Is(err, filesystem.ErrVolumeUnavailable) {
 			httpjson.WriteError(w, http.StatusLocked, volumeUnavailableCode, "the data volume is offline")
 			return
 		}
@@ -318,7 +318,7 @@ func (h *handler) handleSnapshotResource(w http.ResponseWriter, r *http.Request)
 	if r.Method == http.MethodDelete && suffix == "" {
 		spaceID := r.URL.Query().Get("spaceId")
 		if err := h.snapshots.Delete(r.Context(), spaceID, snapshotID); err != nil {
-			if errors.Is(err, files.ErrNotFound) {
+			if errors.Is(err, filesystem.ErrNotFound) {
 				httpjson.WriteError(w, http.StatusNotFound, snapshotNotFoundCode, "snapshot was not found")
 				return
 			}
@@ -369,13 +369,13 @@ func (h *handler) streamSnapshotObjects(w http.ResponseWriter, r *http.Request, 
 			started = true
 		}
 	}
-	err := h.snapshots.Objects(r.Context(), snapshotID, func(object files.SnapshotObject) error {
+	err := h.snapshots.Objects(r.Context(), snapshotID, func(object filesystem.SnapshotObject) error {
 		start()
 		count++
 		return encoder.Encode(snapshotObjectLine{Object: &object})
 	})
 	if err != nil && !started {
-		if errors.Is(err, files.ErrNotFound) {
+		if errors.Is(err, filesystem.ErrNotFound) {
 			httpjson.WriteError(w, http.StatusNotFound, snapshotNotFoundCode, "snapshot was not found")
 			return
 		}
@@ -409,7 +409,7 @@ func (h *handler) handleCreateVolume(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
-	operation, err := h.volume.StartCreateVolume(r.Context(), storage.CreateVolumeRequest{
+	operation, err := h.volume.StartCreateVolume(r.Context(), datavolume.CreateVolumeRequest{
 		PlanID: document.PlanID, Disks: document.Disks, Layout: document.Layout,
 	})
 	if err != nil {
@@ -434,7 +434,7 @@ func (h *handler) handleAddDisks(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
-	operation, err := h.volume.StartAddDisks(r.Context(), storage.AddDisksRequest{
+	operation, err := h.volume.StartAddDisks(r.Context(), datavolume.AddDisksRequest{
 		PlanID: document.PlanID, FilesystemUUID: document.FilesystemUUID, Disks: document.Disks, Layout: document.Layout,
 	})
 	if err != nil {
@@ -471,9 +471,9 @@ func (h *handler) handleVolumeOperation(w http.ResponseWriter, r *http.Request) 
 
 func (h *handler) writeVolumeOperationError(w http.ResponseWriter, r *http.Request, message string, err error) {
 	switch {
-	case errors.Is(err, storage.ErrOperationNotFound):
+	case errors.Is(err, datavolume.ErrOperationNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, operationNotFoundCode, "the plan has no data-volume operation")
-	case errors.Is(err, storage.ErrPlanState):
+	case errors.Is(err, datavolume.ErrPlanState):
 		httpjson.WriteError(w, http.StatusConflict, operationConflictCode, "another data-volume operation is running, or the plan asked for another one")
 	default:
 		h.logger.ErrorContext(r.Context(), message, "error", err)
@@ -492,7 +492,7 @@ func (h *handler) handleContinueConversion(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := h.volume.ContinueConversion(r.Context()); err != nil {
-		if errors.Is(err, storage.ErrNoConversion) {
+		if errors.Is(err, datavolume.ErrNoConversion) {
 			httpjson.WriteError(w, http.StatusConflict, noConversionCode, "the data volume has nothing to convert")
 			return
 		}
@@ -518,7 +518,7 @@ func (h *handler) handleSetCredential(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
-	if err := h.credentials.SetCredential(r.Context(), accounts.CredentialRequest{
+	if err := h.credentials.SetCredential(r.Context(), accountid.CredentialRequest{
 		UserID: request.UserID, PrivateSpaceID: request.PrivateSpaceID, Username: request.Username,
 		Password: request.Password, Role: request.Role, UID: request.UID, Enabled: request.Enabled,
 	}); err != nil {
@@ -544,9 +544,9 @@ func (h *handler) handleSyncIdentities(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
 		return
 	}
-	identities := make([]accounts.Identity, len(request.Identities))
+	identities := make([]accountid.Identity, len(request.Identities))
 	for i, identity := range request.Identities {
-		identities[i] = accounts.Identity{Username: identity.Username, UID: identity.UID, Role: identity.Role, Enabled: identity.Enabled}
+		identities[i] = accountid.Identity{Username: identity.Username, UID: identity.UID, Role: identity.Role, Enabled: identity.Enabled}
 	}
 	if err := h.identities.SyncIdentities(r.Context(), identities); err != nil {
 		h.logger.ErrorContext(r.Context(), "sync identities failed", "error", err)
@@ -557,7 +557,7 @@ func (h *handler) handleSyncIdentities(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) writeAccountError(w http.ResponseWriter, err error) {
-	if errors.Is(err, accounts.ErrIdentityConflict) {
+	if errors.Is(err, accountid.ErrIdentityConflict) {
 		httpjson.WriteError(w, http.StatusConflict, identityConflictCode, "identity conflicts with an existing host account")
 		return
 	}
@@ -594,16 +594,16 @@ func (h *handler) handleDisableCredential(w http.ResponseWriter, r *http.Request
 }
 
 type createVolumeDocument struct {
-	PlanID string               `json:"planId"`
-	Disks  []storage.DiskTarget `json:"disks"`
-	Layout storage.Layout       `json:"layout"`
+	PlanID string                  `json:"planId"`
+	Disks  []datavolume.DiskTarget `json:"disks"`
+	Layout datavolume.Layout       `json:"layout"`
 }
 
 type addDisksDocument struct {
-	PlanID         string               `json:"planId"`
-	FilesystemUUID string               `json:"filesystemUuid"`
-	Disks          []storage.DiskTarget `json:"disks"`
-	Layout         storage.Layout       `json:"layout"`
+	PlanID         string                  `json:"planId"`
+	FilesystemUUID string                  `json:"filesystemUuid"`
+	Disks          []datavolume.DiskTarget `json:"disks"`
+	Layout         datavolume.Layout       `json:"layout"`
 }
 
 const (
@@ -614,20 +614,20 @@ const (
 )
 
 type credentialDocument struct {
-	UserID         string        `json:"userId"`
-	PrivateSpaceID string        `json:"privateSpaceId"`
-	Username       string        `json:"username"`
-	Password       string        `json:"password"`
-	Role           accounts.Role `json:"role"`
-	UID            int           `json:"uid"`
-	Enabled        bool          `json:"enabled"`
+	UserID         string         `json:"userId"`
+	PrivateSpaceID string         `json:"privateSpaceId"`
+	Username       string         `json:"username"`
+	Password       string         `json:"password"`
+	Role           accountid.Role `json:"role"`
+	UID            int            `json:"uid"`
+	Enabled        bool           `json:"enabled"`
 }
 
 type identityDocument struct {
-	Username string        `json:"username"`
-	UID      int           `json:"uid"`
-	Role     accounts.Role `json:"role"`
-	Enabled  bool          `json:"enabled"`
+	Username string         `json:"username"`
+	UID      int            `json:"uid"`
+	Role     accountid.Role `json:"role"`
+	Enabled  bool           `json:"enabled"`
 }
 
 type viewingDocument struct {
@@ -655,11 +655,11 @@ func (h *handler) handleViewing(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "expiry is invalid")
 			return
 		}
-		if err := h.viewing.GrantViewing(r.Context(), accounts.ViewingRequest{
+		if err := h.viewing.GrantViewing(r.Context(), accountid.ViewingRequest{
 			ID: document.ID, SpaceID: document.SpaceID, AdminUsername: document.AdminUsername,
 			AdminUID: document.AdminUID, ExpiresAt: expiresAt,
 		}); err != nil {
-			if errors.Is(err, accounts.ErrVolumeUnavailable) {
+			if errors.Is(err, accountid.ErrVolumeUnavailable) {
 				httpjson.WriteError(w, http.StatusLocked, volumeUnavailableCode, "the data volume is offline")
 				return
 			}
@@ -701,9 +701,9 @@ type snapshotKeepDocument struct {
 // snapshotObjectLine is one line of a snapshot object listing: an object,
 // the end of the listing, or the error that cut it short.
 type snapshotObjectLine struct {
-	Object *files.SnapshotObject `json:"object,omitempty"`
-	End    *snapshotObjectsEnd   `json:"end,omitempty"`
-	Error  *errorDetail          `json:"error,omitempty"`
+	Object *filesystem.SnapshotObject `json:"object,omitempty"`
+	End    *snapshotObjectsEnd        `json:"end,omitempty"`
+	Error  *errorDetail               `json:"error,omitempty"`
 }
 
 type snapshotObjectsEnd struct {
@@ -723,24 +723,24 @@ func decodeRequest(r *http.Request, target any) error {
 	return ensureEndOfJSON(decoder)
 }
 
-func (c *Client) StartCreateVolume(ctx context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
-	var response storage.VolumeOperation
+func (c *Client) StartCreateVolume(ctx context.Context, request datavolume.CreateVolumeRequest) (datavolume.VolumeOperation, error) {
+	var response datavolume.VolumeOperation
 	err := c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/storage/volumes", createVolumeDocument{
 		PlanID: request.PlanID, Disks: request.Disks, Layout: request.Layout,
 	}, &response)
 	return response, err
 }
 
-func (c *Client) StartAddDisks(ctx context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
-	var response storage.VolumeOperation
+func (c *Client) StartAddDisks(ctx context.Context, request datavolume.AddDisksRequest) (datavolume.VolumeOperation, error) {
+	var response datavolume.VolumeOperation
 	err := c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/storage/volumes/disks", addDisksDocument{
 		PlanID: request.PlanID, FilesystemUUID: request.FilesystemUUID, Disks: request.Disks, Layout: request.Layout,
 	}, &response)
 	return response, err
 }
 
-func (c *Client) VolumeOperation(ctx context.Context, planID string) (storage.VolumeOperation, error) {
-	var response storage.VolumeOperation
+func (c *Client) VolumeOperation(ctx context.Context, planID string) (datavolume.VolumeOperation, error) {
+	var response datavolume.VolumeOperation
 	err := c.doJSON(ctx, c.operationClient, http.MethodGet, volumeOperationsPath+url.PathEscape(planID), nil, &response)
 	return response, err
 }
@@ -749,14 +749,14 @@ func (c *Client) ContinueConversion(ctx context.Context) error {
 	return c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/storage/volumes/conversion", nil, nil)
 }
 
-func (c *Client) SetCredential(ctx context.Context, request accounts.CredentialRequest) error {
+func (c *Client) SetCredential(ctx context.Context, request accountid.CredentialRequest) error {
 	return c.doJSON(ctx, c.operationClient, http.MethodPut, "/v1/accounts/credential", credentialDocument{
 		UserID: request.UserID, PrivateSpaceID: request.PrivateSpaceID, Username: request.Username,
 		Password: request.Password, Role: request.Role, UID: request.UID, Enabled: request.Enabled,
 	}, nil)
 }
 
-func (c *Client) GrantViewing(ctx context.Context, request accounts.ViewingRequest) error {
+func (c *Client) GrantViewing(ctx context.Context, request accountid.ViewingRequest) error {
 	return c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/viewing-grants", viewingDocument{
 		ID: request.ID, SpaceID: request.SpaceID, AdminUsername: request.AdminUsername,
 		AdminUID: request.AdminUID, ExpiresAt: request.ExpiresAt.UTC().Format(time.RFC3339Nano),
@@ -767,7 +767,7 @@ func (c *Client) RevokeViewing(ctx context.Context, id string) error {
 	return c.doJSON(ctx, c.operationClient, http.MethodDelete, "/v1/viewing-grants/"+url.PathEscape(id), nil, nil)
 }
 
-func (c *Client) SyncIdentities(ctx context.Context, identities []accounts.Identity) error {
+func (c *Client) SyncIdentities(ctx context.Context, identities []accountid.Identity) error {
 	document := identitiesDocument{Identities: make([]identityDocument, len(identities))}
 	for i, identity := range identities {
 		document.Identities[i] = identityDocument{Username: identity.Username, UID: identity.UID, Role: identity.Role, Enabled: identity.Enabled}
@@ -785,7 +785,7 @@ func (c *Client) Create(ctx context.Context, spaceID, snapshotID string) error {
 
 // Objects reads a snapshot's listing line by line, so its size is not
 // limited, and fails unless the listing ends with the count of its objects.
-func (c *Client) Objects(ctx context.Context, snapshotID string, visit func(files.SnapshotObject) error) error {
+func (c *Client) Objects(ctx context.Context, snapshotID string, visit func(filesystem.SnapshotObject) error) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		"http://host-agent/v1/snapshots/"+url.PathEscape(snapshotID)+"/objects", nil)
 	if err != nil {
@@ -800,7 +800,7 @@ func (c *Client) Objects(ctx context.Context, snapshotID string, visit func(file
 		var failure errorDocument
 		_ = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&failure)
 		if response.StatusCode == http.StatusNotFound && failure.Error.Code == snapshotNotFoundCode {
-			return files.ErrNotFound
+			return filesystem.ErrNotFound
 		}
 		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
 	}
@@ -843,34 +843,34 @@ func (c *Client) Objects(ctx context.Context, snapshotID string, visit func(file
 	return fmt.Errorf("%w: snapshot objects ended early", ErrUnavailable)
 }
 
-func (c *Client) Open(ctx context.Context, snapshotID, key string) (io.ReadCloser, files.SnapshotObject, error) {
+func (c *Client) Open(ctx context.Context, snapshotID, key string) (io.ReadCloser, filesystem.SnapshotObject, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		"http://host-agent/v1/snapshots/"+url.PathEscape(snapshotID)+"/object?key="+url.QueryEscape(key), nil)
 	if err != nil {
-		return nil, files.SnapshotObject{}, err
+		return nil, filesystem.SnapshotObject{}, err
 	}
 	response, err := c.operationClient.Do(request)
 	if err != nil {
-		return nil, files.SnapshotObject{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, filesystem.SnapshotObject{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	if response.StatusCode != http.StatusOK {
 		defer response.Body.Close()
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-		return nil, files.SnapshotObject{}, fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
+		return nil, filesystem.SnapshotObject{}, fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
 	}
 	size, err := strconv.ParseInt(response.Header.Get("X-A-NAS-Object-Size"), 10, 64)
 	if err != nil {
 		_ = response.Body.Close()
-		return nil, files.SnapshotObject{}, errors.New("invalid snapshot object size")
+		return nil, filesystem.SnapshotObject{}, errors.New("invalid snapshot object size")
 	}
 	name, err := url.QueryUnescape(response.Header.Get("X-A-NAS-Object-Name"))
 	if err != nil {
 		_ = response.Body.Close()
-		return nil, files.SnapshotObject{}, errors.New("invalid snapshot object name")
+		return nil, filesystem.SnapshotObject{}, errors.New("invalid snapshot object name")
 	}
-	object := files.SnapshotObject{
+	object := filesystem.SnapshotObject{
 		Key: response.Header.Get("X-A-NAS-Object-Key"), Name: name,
-		Kind: files.EntryKind(response.Header.Get("X-A-NAS-Object-Kind")), SizeBytes: size,
+		Kind: filesystem.EntryKind(response.Header.Get("X-A-NAS-Object-Kind")), SizeBytes: size,
 	}
 	return response.Body, object, nil
 }
@@ -880,14 +880,14 @@ func (c *Client) Delete(ctx context.Context, spaceID, snapshotID string) error {
 		"/v1/snapshots/"+url.PathEscape(snapshotID)+"?spaceId="+url.QueryEscape(spaceID), nil, nil)
 }
 
-func (c *Client) Prune(ctx context.Context, keep []string) (files.SnapshotPrune, error) {
+func (c *Client) Prune(ctx context.Context, keep []string) (filesystem.SnapshotPrune, error) {
 	if keep == nil {
 		keep = []string{}
 	}
-	var response files.SnapshotPrune
+	var response filesystem.SnapshotPrune
 	err := c.doJSON(ctx, c.operationClient, http.MethodPut, "/v1/snapshots", snapshotKeepDocument{Keep: keep}, &response)
-	if errors.Is(err, accounts.ErrVolumeUnavailable) {
-		return files.SnapshotPrune{}, files.ErrVolumeUnavailable
+	if errors.Is(err, accountid.ErrVolumeUnavailable) {
+		return filesystem.SnapshotPrune{}, filesystem.ErrVolumeUnavailable
 	}
 	return response, err
 }
@@ -917,22 +917,22 @@ func (c *Client) doJSON(ctx context.Context, client *http.Client, method, path s
 		var failure errorDocument
 		_ = json.NewDecoder(io.LimitReader(response.Body, 4096)).Decode(&failure)
 		if response.StatusCode == http.StatusConflict && failure.Error.Code == identityConflictCode {
-			return accounts.ErrIdentityConflict
+			return accountid.ErrIdentityConflict
 		}
 		if response.StatusCode == http.StatusLocked && failure.Error.Code == volumeUnavailableCode {
-			return accounts.ErrVolumeUnavailable
+			return accountid.ErrVolumeUnavailable
 		}
 		if response.StatusCode == http.StatusConflict && failure.Error.Code == noConversionCode {
-			return storage.ErrNoConversion
+			return datavolume.ErrNoConversion
 		}
 		if response.StatusCode == http.StatusNotFound && failure.Error.Code == operationNotFoundCode {
-			return storage.ErrOperationNotFound
+			return datavolume.ErrOperationNotFound
 		}
 		if response.StatusCode == http.StatusConflict && failure.Error.Code == operationConflictCode {
-			return fmt.Errorf("%w: %s", storage.ErrPlanState, failure.Error.Message)
+			return fmt.Errorf("%w: %s", datavolume.ErrPlanState, failure.Error.Message)
 		}
 		if response.StatusCode == http.StatusNotFound && failure.Error.Code == snapshotNotFoundCode {
-			return files.ErrNotFound
+			return filesystem.ErrNotFound
 		}
 		return fmt.Errorf("%w: status %d", ErrUnavailable, response.StatusCode)
 	}
@@ -1327,8 +1327,8 @@ type errorDocument struct {
 }
 
 var _ hoststate.Observer = (*Client)(nil)
-var _ storage.VolumeExecutor = (*Client)(nil)
-var _ accounts.CredentialProvisioner = (*Client)(nil)
-var _ accounts.IdentitySynchronizer = (*Client)(nil)
-var _ accounts.ViewingProvisioner = (*Client)(nil)
-var _ files.SnapshotBackend = (*Client)(nil)
+var _ datavolume.VolumeExecutor = (*Client)(nil)
+var _ accountid.CredentialProvisioner = (*Client)(nil)
+var _ accountid.IdentitySynchronizer = (*Client)(nil)
+var _ accountid.ViewingProvisioner = (*Client)(nil)
+var _ filesystem.SnapshotBackend = (*Client)(nil)

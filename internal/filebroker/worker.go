@@ -8,7 +8,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 // WorkerArgument is the Host Agent subcommand that runs a file worker.
@@ -21,11 +21,11 @@ const workerDescriptor = 3
 // runs with the signed-in user's credentials, set by the broker before exec,
 // and refuses to run as root.
 func RunWorker(volumeRoot string) error {
-	return runWorker(volumeRoot, files.NewRootFileSystem(volumeRoot, false))
+	return runWorker(volumeRoot, filesystem.NewRootFileSystem(volumeRoot, false))
 }
 
 // runWorker is RunWorker over fsys; test workers wrap the file system.
-func runWorker(volumeRoot string, fsys files.FileSystem) error {
+func runWorker(volumeRoot string, fsys filesystem.FileSystem) error {
 	if os.Geteuid() == 0 || os.Getegid() == 0 {
 		return errors.New("refusing to run a file worker as root")
 	}
@@ -54,7 +54,7 @@ func runWorker(volumeRoot string, fsys files.FileSystem) error {
 // the next request only after the last reply's final message, so the reader
 // alongside sees nothing but cancel messages while a request runs; a cancel
 // stops the request read before it, which may already be done.
-func serveWorker(ctx context.Context, conn *net.UnixConn, fsys files.FileSystem) error {
+func serveWorker(ctx context.Context, conn *net.UnixConn, fsys filesystem.FileSystem) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	type job struct {
@@ -110,7 +110,7 @@ func serveWorker(ctx context.Context, conn *net.UnixConn, fsys files.FileSystem)
 // respond runs one request and sends its reply. Only a broken connection is
 // an error: a reply that cannot be encoded within the limit becomes an error
 // reply, so the worker stays up for the next request.
-func respond(ctx context.Context, conn *net.UnixConn, fsys files.FileSystem, req request) error {
+func respond(ctx context.Context, conn *net.UnixConn, fsys filesystem.FileSystem, req request) error {
 	result, file := execute(ctx, fsys, req)
 	defer closeFile(file)
 	if req.Op == opScan && req.Paged && result.Error == nil {
@@ -123,7 +123,7 @@ func respond(ctx context.Context, conn *net.UnixConn, fsys files.FileSystem, req
 // the message limit, as very long paths can make one, is halved until it
 // fits. The broker relays each page as it comes instead of holding the whole
 // tree. A cancel between pages ends the reply with an error.
-func sendEntries(ctx context.Context, conn *net.UnixConn, entries []files.ScanEntry) error {
+func sendEntries(ctx context.Context, conn *net.UnixConn, entries []filesystem.ScanEntry) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return sendReply(conn, response{Error: encodeError(err)}, nil)

@@ -3,17 +3,18 @@ package filebroker
 import (
 	"context"
 	"errors"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/files"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 func TestShareEpochDrainsDisconnectedClientAndRejectsDelayedPublication(t *testing.T) {
 	h := newHarness(t)
-	ctx := accounts.WithSessionToken(context.Background(), "alice-token")
+	ctx := accountid.WithSessionToken(context.Background(), "alice-token")
 	// The test worker holds the rename of a stuck-* file until it is
 	// released, whether or not the call is cancelled, as a rename does not
 	// look at its context.
@@ -64,7 +65,7 @@ func TestShareEpochDrainsDisconnectedClientAndRejectsDelayedPublication(t *testi
 	if err := h.client.CheckShareEpoch(context.Background(), next); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.client.CheckShareEpoch(context.Background(), epoch); !errors.Is(err, files.ErrForbidden) {
+	if err := h.client.CheckShareEpoch(context.Background(), epoch); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("stale health: %v", err)
 	}
 	if next == "" || next == epoch {
@@ -73,13 +74,13 @@ func TestShareEpochDrainsDisconnectedClientAndRejectsDelayedPublication(t *testi
 	if data, e := os.ReadFile(target); e != nil || string(data) != "complete" {
 		t.Fatalf("settled publication %q %v", data, e)
 	}
-	if e := h.client.Mkdir(WithSharePublication(ctx, epoch, "share"), filepath.Join(h.volume, "late")); !errors.Is(e, files.ErrForbidden) {
+	if e := h.client.Mkdir(WithSharePublication(ctx, epoch, "share"), filepath.Join(h.volume, "late")); !errors.Is(e, filesystem.ErrForbidden) {
 		t.Fatalf("old process published: %v", e)
 	}
 	if e := h.client.FenceShare(context.Background(), next, "share"); e != nil {
 		t.Fatal(e)
 	}
-	if e := h.client.Mkdir(WithSharePublication(ctx, next, "share"), filepath.Join(h.volume, "revoked")); !errors.Is(e, files.ErrForbidden) {
+	if e := h.client.Mkdir(WithSharePublication(ctx, next, "share"), filepath.Join(h.volume, "revoked")); !errors.Is(e, filesystem.ErrForbidden) {
 		t.Fatalf("revoked share published: %v", e)
 	}
 	if e := h.client.Mkdir(WithSharePublication(ctx, next, "unrelated"), filepath.Join(h.volume, "other")); e != nil {

@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 )
 
 // viewingRecord is an Administrative Viewing Mode grant the Host Agent must
@@ -27,17 +27,17 @@ type viewingRecord struct {
 
 // maxViewingAhead is how far ahead a grant may expire: the Product Service's
 // viewing duration and an hour for clock differences.
-const maxViewingAhead = accounts.ViewingDuration + time.Hour
+const maxViewingAhead = accountid.ViewingDuration + time.Hour
 
 // GrantViewing gives an administrator read-only ACL entries on every file in
 // a member's private space until the grant expires (ADR 0008). Files the
 // owner creates meanwhile inherit the entry through the default ACL.
-func (e *Executor) GrantViewing(ctx context.Context, request accounts.ViewingRequest) error {
+func (e *Executor) GrantViewing(ctx context.Context, request accountid.ViewingRequest) error {
 	if e.viewingError != nil {
 		return e.viewingError
 	}
 	if strings.TrimSpace(request.ID) == "" || !validUsername(request.AdminUsername) ||
-		request.AdminUID < accounts.FirstUserUID || request.AdminUID > accounts.LastUserUID {
+		request.AdminUID < accountid.FirstUserUID || request.AdminUID > accountid.LastUserUID {
 		return errors.New("invalid viewing request")
 	}
 	now := e.now().UTC()
@@ -49,7 +49,7 @@ func (e *Executor) GrantViewing(ctx context.Context, request accounts.ViewingReq
 	}
 	// Nothing would apply the entries once the volume returns.
 	if !e.dataVolumeReady() {
-		return accounts.ErrVolumeUnavailable
+		return accountid.ErrVolumeUnavailable
 	}
 	root, err := e.privateSpaceRoot(request.SpaceID)
 	if err != nil {
@@ -178,7 +178,7 @@ func (e *Executor) mayView(username string, uid int) bool {
 	e.identitiesMu.Lock()
 	defer e.identitiesMu.Unlock()
 	identity, known := e.identities[username]
-	return known && identity.Role == accounts.RoleAdmin && identity.UID == uid && identity.Enabled
+	return known && identity.Role == accountid.RoleAdmin && identity.UID == uid && identity.Enabled
 }
 
 // loadViewingRegistry reads the grants. One that GrantViewing would not give
@@ -199,7 +199,7 @@ func (e *Executor) loadViewingRegistry() error {
 	deadline := e.now().UTC().Add(maxViewingAhead)
 	for id, record := range records {
 		if strings.TrimSpace(id) == "" || strings.TrimSpace(record.SpaceID) == "" || record.SpaceID == sharedSpaceID ||
-			!validUsername(record.Admin) || record.UID < accounts.FirstUserUID || record.UID > accounts.LastUserUID {
+			!validUsername(record.Admin) || record.UID < accountid.FirstUserUID || record.UID > accountid.LastUserUID {
 			return fmt.Errorf("viewing registry: grant %q is invalid", id)
 		}
 		if !record.ExpiresAt.IsZero() && (record.ExpiresAt.After(deadline) || !e.mayView(record.Admin, record.UID)) {

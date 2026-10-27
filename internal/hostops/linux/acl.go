@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 )
 
 const sharedSpaceID = "space:shared"
@@ -26,7 +26,7 @@ const sharedSpaceID = "space:shared"
 func containerACL() string {
 	return strings.Join([]string{
 		"user::rwx", "group::---", "other::---",
-		"group:" + accounts.UsersGroup + ":--x", "mask::--x",
+		"group:" + accountid.UsersGroup + ":--x", "mask::--x",
 	}, ",")
 }
 
@@ -62,9 +62,9 @@ func viewerEntries(viewers []string) []string {
 // sharedFolderACL lets every A-NAS account read a shared folder and grants
 // write access to the listed users or groups (for example "group:a-nas-users").
 func sharedFolderACL(writers ...string) string {
-	entries := []string{"group:" + accounts.UsersGroup + ":r-x"}
+	entries := []string{"group:" + accountid.UsersGroup + ":r-x"}
 	for _, writer := range writers {
-		if writer == "group:"+accounts.UsersGroup {
+		if writer == "group:"+accountid.UsersGroup {
 			entries[0] = writer + ":rwx"
 			continue
 		}
@@ -136,8 +136,8 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 		if err != nil {
 			return repaired, err
 		}
-		spaceACL := sharedFolderACL("group:" + accounts.UsersGroup)
-		principal := "group:" + accounts.UsersGroup
+		spaceACL := sharedFolderACL("group:" + accountid.UsersGroup)
+		principal := "group:" + accountid.UsersGroup
 		trashUsers := e.identityUsernames()
 		var viewers []string
 		if spaceID != sharedSpaceID {
@@ -312,7 +312,7 @@ func (e *Executor) ensureTraversal(ctx context.Context, path string) error {
 	if path == "/" || path == "." {
 		return nil
 	}
-	if output, err := e.runner.Run(ctx, "setfacl", []string{"--modify", "group:" + accounts.UsersGroup + ":--x", path}, ""); err != nil {
+	if output, err := e.runner.Run(ctx, "setfacl", []string{"--modify", "group:" + accountid.UsersGroup + ":--x", path}, ""); err != nil {
 		return commandError("allow traversal to the data volume", err, output)
 	}
 	return nil

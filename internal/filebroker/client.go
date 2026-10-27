@@ -7,11 +7,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
-// Client is the Product Service's files.FileSystem. Every call carries the
+// Client is the Product Service's filesystem.FileSystem. Every call carries the
 // session token from the request context; the broker decides who it is.
 type Client struct {
 	fileOps
@@ -24,7 +24,7 @@ func NewClient(socket string) *Client {
 	return c
 }
 
-// fileOps is a files.FileSystem over one way of sending a request: to the
+// fileOps is a filesystem.FileSystem over one way of sending a request: to the
 // broker with the session (Client), or straight to a worker (the executor of
 // the assistant's changes). Either way call returns the whole reply, with a
 // scan's pages gathered.
@@ -33,9 +33,9 @@ type fileOps struct {
 }
 
 func (c *Client) call(ctx context.Context, req request) (response, *os.File, error) {
-	token := accounts.SessionToken(ctx)
+	token := accountid.SessionToken(ctx)
 	if token == "" && req.Op != opShareReset && req.Op != opShareFence && req.Op != opShareCheck {
-		return response{}, nil, fmt.Errorf("%w: no session for file operation", files.ErrForbidden)
+		return response{}, nil, fmt.Errorf("%w: no session for file operation", filesystem.ErrForbidden)
 	}
 	req.Token = token
 	if publication, ok := ctx.Value(sharePublicationKey{}).(sharePublication); ok {
@@ -73,19 +73,19 @@ func (c *fileOps) simple(ctx context.Context, req request) error {
 	return err
 }
 
-func (c *fileOps) Lstat(ctx context.Context, path string) (files.FileInfo, error) {
+func (c *fileOps) Lstat(ctx context.Context, path string) (filesystem.FileInfo, error) {
 	result, file, err := c.call(ctx, request{Op: opLstat, Path: path})
 	closeFile(file)
 	if err != nil {
-		return files.FileInfo{}, err
+		return filesystem.FileInfo{}, err
 	}
 	if result.Info == nil {
-		return files.FileInfo{}, fmt.Errorf("%w: missing file information", ErrUnavailable)
+		return filesystem.FileInfo{}, fmt.Errorf("%w: missing file information", ErrUnavailable)
 	}
 	return *result.Info, nil
 }
 
-func (c *fileOps) Scan(ctx context.Context, path string, skip files.ScanSkip) ([]files.ScanEntry, error) {
+func (c *fileOps) Scan(ctx context.Context, path string, skip filesystem.ScanSkip) ([]filesystem.ScanEntry, error) {
 	result, file, err := c.call(ctx, request{Op: opScan, Path: path, Skip: skip, Paged: true})
 	closeFile(file)
 	return result.Entries, err
@@ -148,4 +148,4 @@ func (c *fileOps) SetModTime(ctx context.Context, path string, modTime time.Time
 	return c.simple(ctx, request{Op: opSetModTime, Path: path, ModTime: modTime})
 }
 
-var _ files.FileSystem = (*Client)(nil)
+var _ filesystem.FileSystem = (*Client)(nil)

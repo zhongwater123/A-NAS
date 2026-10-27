@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
 )
 
@@ -23,7 +23,7 @@ func TestPruneRefusesWithoutTheDataVolume(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: t.TempDir(), MountPoint: mount})
-	if _, err := executor.Prune(context.Background(), nil); !errors.Is(err, files.ErrVolumeUnavailable) {
+	if _, err := executor.Prune(context.Background(), nil); !errors.Is(err, filesystem.ErrVolumeUnavailable) {
 		t.Fatalf("Prune() error = %v, want ErrVolumeUnavailable", err)
 	}
 	if len(runner.commands) != 0 {
@@ -34,13 +34,13 @@ func TestPruneRefusesWithoutTheDataVolume(t *testing.T) {
 func TestSnapshotsOfUnknownSpacesAreNotFound(t *testing.T) {
 	runner := &recordingRunner{}
 	executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: t.TempDir(), MountPoint: filepath.Join(t.TempDir(), "data")})
-	if err := executor.Create(context.Background(), "space:gone", "snapshot:1"); !errors.Is(err, files.ErrNotFound) {
+	if err := executor.Create(context.Background(), "space:gone", "snapshot:1"); !errors.Is(err, filesystem.ErrNotFound) {
 		t.Fatalf("Create() error = %v, want ErrNotFound", err)
 	}
-	if err := executor.Delete(context.Background(), "space:gone", "snapshot:1"); !errors.Is(err, files.ErrNotFound) {
+	if err := executor.Delete(context.Background(), "space:gone", "snapshot:1"); !errors.Is(err, filesystem.ErrNotFound) {
 		t.Fatalf("Delete() error = %v, want ErrNotFound", err)
 	}
-	if err := executor.Objects(context.Background(), "snapshot:1", func(files.SnapshotObject) error { return nil }); !errors.Is(err, files.ErrNotFound) {
+	if err := executor.Objects(context.Background(), "snapshot:1", func(filesystem.SnapshotObject) error { return nil }); !errors.Is(err, filesystem.ErrNotFound) {
 		t.Fatalf("Objects() error = %v, want ErrNotFound", err)
 	}
 	if len(runner.commands) != 0 {
@@ -87,14 +87,14 @@ func TestOpenReadsOnlyObjectsBeneathTheSnapshot(t *testing.T) {
 		t.Fatalf("Open(docs/a.txt) = %q, %+v, %v", contents, object, err)
 	}
 	for _, key := range []string{"linked/secret.txt", "docs/link.txt", "../../secret.txt", "docs/../../x", "/etc/passwd", "missing", "docs/a.txt/x", "a\x00b"} {
-		if reader, _, err := executor.Open(ctx, "snapshot:1", key); !errors.Is(err, files.ErrNotFound) {
+		if reader, _, err := executor.Open(ctx, "snapshot:1", key); !errors.Is(err, filesystem.ErrNotFound) {
 			if reader != nil {
 				_ = reader.Close()
 			}
 			t.Errorf("Open(%q) error = %v, want ErrNotFound", key, err)
 		}
 	}
-	if _, _, err := executor.Open(ctx, "snapshot:1", "docs"); !errors.Is(err, files.ErrUnsupportedType) {
+	if _, _, err := executor.Open(ctx, "snapshot:1", "docs"); !errors.Is(err, filesystem.ErrUnsupportedType) {
 		t.Errorf("Open(docs) error = %v, want ErrUnsupportedType", err)
 	}
 }

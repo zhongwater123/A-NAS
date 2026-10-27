@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/zhongwater123/A-NAS/internal/ptyshell"
 )
 
 const localShellSupported = true
@@ -29,11 +31,11 @@ func (s localSpawner) StartShell(_ context.Context, cols, rows uint16) (Shell, e
 	if err != nil {
 		return nil, err
 	}
-	return &localShell{group: WatchProcessGroup(cmd), ptmx: ptmx}, nil
+	return &localShell{group: ptyshell.WatchProcessGroup(cmd), ptmx: ptmx}, nil
 }
 
 type localShell struct {
-	group *ProcessGroup
+	group *ptyshell.ProcessGroup
 	ptmx  *os.File
 	close sync.Once
 }

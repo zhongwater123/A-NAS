@@ -15,8 +15,6 @@ import (
 // maxArchiveEntries bounds the selection of one archive download.
 const maxArchiveEntries = 1000
 
-var ErrInvalidSelection = errors.New("download selection is invalid")
-
 // archiveSkip leaves A-NAS bookkeeping and in-flight temporaries out of
 // archive downloads.
 var archiveSkip = ScanSkip{

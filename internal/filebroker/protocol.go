@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 // ErrUnavailable reports that the File Broker or a worker could not be reached.
@@ -44,12 +44,12 @@ type request struct {
 	ShareID    string `json:"shareId,omitempty"`
 	// Token is sent by the Product Service and removed before the request
 	// reaches a worker.
-	Token  string         `json:"token,omitempty"`
-	Op     string         `json:"op"`
-	Path   string         `json:"path,omitempty"`
-	Target string         `json:"target,omitempty"`
-	Prefix string         `json:"prefix,omitempty"`
-	Skip   files.ScanSkip `json:"skip"`
+	Token  string              `json:"token,omitempty"`
+	Op     string              `json:"op"`
+	Path   string              `json:"path,omitempty"`
+	Target string              `json:"target,omitempty"`
+	Prefix string              `json:"prefix,omitempty"`
+	Skip   filesystem.ScanSkip `json:"skip"`
 	// Paged says the caller reads a scan in pages. A Product Service from
 	// before pages gets the scan in one message, never a truncated one.
 	Paged bool `json:"paged,omitempty"`
@@ -76,12 +76,12 @@ type changeRequest struct {
 type response struct {
 	// More says another message of the same reply follows: a scan's entries
 	// travel in pages, and only the last message carries an error or a file.
-	More    bool              `json:"more,omitempty"`
-	Error   *wireError        `json:"error,omitempty"`
-	Info    *files.FileInfo   `json:"info,omitempty"`
-	Entries []files.ScanEntry `json:"entries,omitempty"`
-	Path    string            `json:"path,omitempty"`
-	Size    int64             `json:"size,omitempty"`
+	More    bool                   `json:"more,omitempty"`
+	Error   *wireError             `json:"error,omitempty"`
+	Info    *filesystem.FileInfo   `json:"info,omitempty"`
+	Entries []filesystem.ScanEntry `json:"entries,omitempty"`
+	Path    string                 `json:"path,omitempty"`
+	Size    int64                  `json:"size,omitempty"`
 	// ExitCode ends a terminal session.
 	ExitCode *int `json:"exitCode,omitempty"`
 	// Assistant comes with a connection to the member's assistant.
@@ -129,7 +129,7 @@ func (e *wireError) Error() string {
 }
 
 // Is lets callers keep using the standard sentinels: a kernel permission
-// denial is both fs.ErrPermission and files.ErrForbidden.
+// denial is both fs.ErrPermission and filesystem.ErrForbidden.
 func (e *wireError) Is(target error) bool {
 	switch e.Code {
 	case codeNotFound:
@@ -141,19 +141,19 @@ func (e *wireError) Is(target error) bool {
 	case codeExists:
 		return target == fs.ErrExist
 	case codePermission:
-		return target == fs.ErrPermission || target == files.ErrForbidden
+		return target == fs.ErrPermission || target == filesystem.ErrForbidden
 	case codeForbidden, codeUnauthenticated:
-		return target == files.ErrForbidden
+		return target == filesystem.ErrForbidden
 	case codeUnsupported:
-		return target == files.ErrUnsupportedType
+		return target == filesystem.ErrUnsupportedType
 	case codeInvalidName:
-		return target == files.ErrInvalidName
+		return target == filesystem.ErrInvalidName
 	case codeNameTooLong:
-		return target == files.ErrInvalidName || target == files.ErrNameTooLong || target == syscall.ENAMETOOLONG
+		return target == filesystem.ErrInvalidName || target == filesystem.ErrNameTooLong || target == syscall.ENAMETOOLONG
 	case codeNoSpace:
-		return target == files.ErrInsufficientSpace
+		return target == filesystem.ErrInsufficientSpace
 	case codeVolumeUnavailable:
-		return target == files.ErrVolumeUnavailable
+		return target == filesystem.ErrVolumeUnavailable
 	case codeUnavailable:
 		return target == ErrUnavailable
 	case codeCanceled:
@@ -174,13 +174,13 @@ func encodeError(err error) *wireError {
 		code = codeExists
 	case errors.Is(err, fs.ErrPermission):
 		code = codePermission
-	case errors.Is(err, files.ErrForbidden):
+	case errors.Is(err, filesystem.ErrForbidden):
 		code = codeForbidden
-	case errors.Is(err, files.ErrUnsupportedType), errors.Is(err, syscall.ELOOP), errors.Is(err, syscall.ENOTDIR):
+	case errors.Is(err, filesystem.ErrUnsupportedType), errors.Is(err, syscall.ELOOP), errors.Is(err, syscall.ENOTDIR):
 		code = codeUnsupported
-	case errors.Is(err, files.ErrNameTooLong), errors.Is(err, syscall.ENAMETOOLONG):
+	case errors.Is(err, filesystem.ErrNameTooLong), errors.Is(err, syscall.ENAMETOOLONG):
 		code = codeNameTooLong
-	case errors.Is(err, files.ErrInvalidName):
+	case errors.Is(err, filesystem.ErrInvalidName):
 		code = codeInvalidName
 	case errors.Is(err, syscall.ENOSPC), errors.Is(err, syscall.EDQUOT):
 		code = codeNoSpace
@@ -197,7 +197,7 @@ func encodeError(err error) *wireError {
 }
 
 // pages gathers the entries of a scan that arrives in several messages.
-type pages []files.ScanEntry
+type pages []filesystem.ScanEntry
 
 func (p *pages) add(page response) { *p = append(*p, page.Entries...) }
 
@@ -211,13 +211,13 @@ func (p pages) complete(final response) response {
 
 // execute runs one request against fsys. The worker calls it as the user;
 // tests call it directly.
-func execute(ctx context.Context, fsys files.FileSystem, req request) (response, *os.File) {
+func execute(ctx context.Context, fsys filesystem.FileSystem, req request) (response, *os.File) {
 	var result response
 	var file *os.File
 	var err error
 	switch req.Op {
 	case opLstat:
-		var info files.FileInfo
+		var info filesystem.FileInfo
 		if info, err = fsys.Lstat(ctx, req.Path); err == nil {
 			result.Info = &info
 		}

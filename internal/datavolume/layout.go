@@ -1,4 +1,4 @@
-package storage
+package datavolume
 
 import "github.com/zhongwater123/A-NAS/internal/hoststate"
 
@@ -72,23 +72,4 @@ func OutsideLayout(data, metadata []hoststate.ProfileUsage, layout Layout) (conv
 		return false
 	}
 	return outside(data, dataProfile), outside(metadata, metadataProfile)
-}
-
-// conversionProgress counts the data and metadata bytes already in the
-// layout's profiles against all of them. They differ while Btrfs converts
-// the volume to the layout; empty block groups of another profile do not
-// count, as Btrfs removes them by itself.
-func conversionProgress(volume *hoststate.DataVolume, layout Layout) (converted, total uint64) {
-	dataProfile, metadataProfile := layout.Profiles()
-	count := func(usage []hoststate.ProfileUsage, target hoststate.Profile) {
-		for _, item := range usage {
-			total += item.UsedBytes
-			if item.Profile == target {
-				converted += item.UsedBytes
-			}
-		}
-	}
-	count(volume.Data, dataProfile)
-	count(volume.Metadata, metadataProfile)
-	return converted, total
 }

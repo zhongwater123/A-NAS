@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
-	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
 func TestClientReadsHostStateOverUnixSocket(t *testing.T) {
@@ -79,36 +79,36 @@ func TestClientUsesTypedVolumeAndCredentialOperationsOverUnixSocket(t *testing.T
 	}, discardLogger())
 	client := agent.NewClient(serve(t, handler))
 
-	started, err := client.StartCreateVolume(context.Background(), storage.CreateVolumeRequest{
-		PlanID: "plan:1", Disks: []storage.DiskTarget{{DiskID: "disk:fake-data-01", Fingerprint: "fingerprint"}}, Layout: storage.LayoutSingle,
+	started, err := client.StartCreateVolume(context.Background(), datavolume.CreateVolumeRequest{
+		PlanID: "plan:1", Disks: []datavolume.DiskTarget{{DiskID: "disk:fake-data-01", Fingerprint: "fingerprint"}}, Layout: datavolume.LayoutSingle,
 	})
 	if err != nil {
 		t.Fatalf("StartCreateVolume() error = %v", err)
 	}
-	if started.State != storage.OperationRunning || started.Step != storage.StepFormat || volume.request.PlanID != "plan:1" || volume.request.Layout != storage.LayoutSingle {
+	if started.State != datavolume.OperationRunning || started.Step != datavolume.StepFormat || volume.request.PlanID != "plan:1" || volume.request.Layout != datavolume.LayoutSingle {
 		t.Fatalf("started operation/request = %#v / %#v", started, volume.request)
 	}
 	created, err := client.VolumeOperation(context.Background(), "plan:1")
-	if err != nil || created.State != storage.OperationSucceeded || created.Volume == nil || len(created.Volume.DiskIDs) != 1 || created.Volume.DiskIDs[0] != "disk:fake-data-01" {
+	if err != nil || created.State != datavolume.OperationSucceeded || created.Volume == nil || len(created.Volume.DiskIDs) != 1 || created.Volume.DiskIDs[0] != "disk:fake-data-01" {
 		t.Fatalf("VolumeOperation() = %#v, %v; want the created volume", created, err)
 	}
-	if _, err := client.VolumeOperation(context.Background(), "plan:unknown"); !errors.Is(err, storage.ErrOperationNotFound) {
+	if _, err := client.VolumeOperation(context.Background(), "plan:unknown"); !errors.Is(err, datavolume.ErrOperationNotFound) {
 		t.Fatalf("VolumeOperation() of an unknown plan error = %v, want ErrOperationNotFound", err)
 	}
-	if _, err := client.StartAddDisks(context.Background(), storage.AddDisksRequest{
-		PlanID: "plan:2", FilesystemUUID: "uuid", Disks: []storage.DiskTarget{{DiskID: "disk:fake-data-02", Fingerprint: "fingerprint"}}, Layout: storage.LayoutMirror,
-	}); err != nil || volume.added.FilesystemUUID != "uuid" || volume.added.Disks[0].DiskID != "disk:fake-data-02" || volume.added.Layout != storage.LayoutMirror {
+	if _, err := client.StartAddDisks(context.Background(), datavolume.AddDisksRequest{
+		PlanID: "plan:2", FilesystemUUID: "uuid", Disks: []datavolume.DiskTarget{{DiskID: "disk:fake-data-02", Fingerprint: "fingerprint"}}, Layout: datavolume.LayoutMirror,
+	}); err != nil || volume.added.FilesystemUUID != "uuid" || volume.added.Disks[0].DiskID != "disk:fake-data-02" || volume.added.Layout != datavolume.LayoutMirror {
 		t.Fatalf("StartAddDisks() error = %v, request = %#v", err, volume.added)
 	}
-	if _, err := client.StartAddDisks(context.Background(), storage.AddDisksRequest{PlanID: "plan:busy"}); !errors.Is(err, storage.ErrPlanState) {
+	if _, err := client.StartAddDisks(context.Background(), datavolume.AddDisksRequest{PlanID: "plan:busy"}); !errors.Is(err, datavolume.ErrPlanState) {
 		t.Fatalf("StartAddDisks() while another operation runs error = %v, want ErrPlanState", err)
 	}
-	if err := client.ContinueConversion(context.Background()); !errors.Is(err, storage.ErrNoConversion) {
+	if err := client.ContinueConversion(context.Background()); !errors.Is(err, datavolume.ErrNoConversion) {
 		t.Fatalf("ContinueConversion() with nothing to convert error = %v, want ErrNoConversion", err)
 	}
-	credential := accounts.CredentialRequest{
+	credential := accountid.CredentialRequest{
 		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-		Password: "alice password for testing", Role: accounts.RoleMember, UID: 20101, Enabled: true,
+		Password: "alice password for testing", Role: accountid.RoleMember, UID: 20101, Enabled: true,
 	}
 	if err := client.SetCredential(context.Background(), credential); err != nil {
 		t.Fatalf("SetCredential() error = %v", err)
@@ -126,7 +126,7 @@ func TestClientUsesTypedVolumeAndCredentialOperationsOverUnixSocket(t *testing.T
 	}
 	contents, _ := io.ReadAll(reader)
 	_ = reader.Close()
-	if string(contents) != "snapshot bytes" || object.Kind != files.EntryKindFile {
+	if string(contents) != "snapshot bytes" || object.Kind != filesystem.EntryKindFile {
 		t.Fatalf("snapshot content/object = %q / %#v", contents, object)
 	}
 	if err := client.Delete(context.Background(), "space:alice", "snapshot:1"); err != nil {
@@ -140,7 +140,7 @@ func TestClientStreamsLargeSnapshotListings(t *testing.T) {
 	snapshots := &agentSnapshotBackend{objects: 100_000}
 	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{Snapshots: snapshots}, discardLogger())))
 	received := 0
-	err := client.Objects(context.Background(), "snapshot:1", func(object files.SnapshotObject) error {
+	err := client.Objects(context.Background(), "snapshot:1", func(object filesystem.SnapshotObject) error {
 		if want := listedObject(received); object != want {
 			return fmt.Errorf("object %d = %#v, want %#v", received, object, want)
 		}
@@ -150,7 +150,7 @@ func TestClientStreamsLargeSnapshotListings(t *testing.T) {
 	if err != nil || received != 100_000 {
 		t.Fatalf("Objects() error = %v after %d objects, want all 100000", err, received)
 	}
-	if err := client.Objects(context.Background(), "snapshot:missing", func(files.SnapshotObject) error { return nil }); !errors.Is(err, files.ErrNotFound) {
+	if err := client.Objects(context.Background(), "snapshot:missing", func(filesystem.SnapshotObject) error { return nil }); !errors.Is(err, filesystem.ErrNotFound) {
 		t.Fatalf("Objects() of a missing snapshot error = %v, want ErrNotFound", err)
 	}
 }
@@ -159,7 +159,7 @@ func TestClientRefusesASnapshotListingCutShort(t *testing.T) {
 	snapshots := &agentSnapshotBackend{objects: 10_000, failAt: 5_000}
 	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{Snapshots: snapshots}, discardLogger())))
 	received := 0
-	err := client.Objects(context.Background(), "snapshot:1", func(files.SnapshotObject) error { received++; return nil })
+	err := client.Objects(context.Background(), "snapshot:1", func(filesystem.SnapshotObject) error { received++; return nil })
 	if err == nil || received != 5_000 {
 		t.Fatalf("Objects() of a failing walk error = %v after %d objects, want an error after 5000", err, received)
 	}
@@ -170,7 +170,7 @@ func TestClientRefusesASnapshotListingCutShort(t *testing.T) {
 		_, _ = io.WriteString(w, `{"object":{"key":"a","name":"a","kind":"file","sizeBytes":1}}`+"\n")
 	})))
 	received = 0
-	err = cut.Objects(context.Background(), "snapshot:1", func(files.SnapshotObject) error { received++; return nil })
+	err = cut.Objects(context.Background(), "snapshot:1", func(filesystem.SnapshotObject) error { received++; return nil })
 	if err == nil || received != 1 {
 		t.Fatalf("Objects() of a cut-off listing error = %v, want an error", err)
 	}
@@ -179,18 +179,18 @@ func TestClientRefusesASnapshotListingCutShort(t *testing.T) {
 	miscounted := agent.NewClient(serve(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, `{"object":{"key":"a","name":"a","kind":"file","sizeBytes":1}}`+"\n"+`{"end":{"count":2}}`+"\n")
 	})))
-	if err := miscounted.Objects(context.Background(), "snapshot:1", func(files.SnapshotObject) error { return nil }); err == nil {
+	if err := miscounted.Objects(context.Background(), "snapshot:1", func(filesystem.SnapshotObject) error { return nil }); err == nil {
 		t.Fatal("Objects() accepted a listing whose count disagrees with its lines")
 	}
 }
 
 func TestClientDeletesAndPrunesSnapshots(t *testing.T) {
 	snapshots := &agentSnapshotBackend{
-		deleteErr: files.ErrNotFound,
-		pruned:    files.SnapshotPrune{Present: []string{"snapshot:1"}, Removed: 3},
+		deleteErr: filesystem.ErrNotFound,
+		pruned:    filesystem.SnapshotPrune{Present: []string{"snapshot:1"}, Removed: 3},
 	}
 	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{Snapshots: snapshots}, discardLogger())))
-	if err := client.Delete(context.Background(), "space:gone", "snapshot:1"); !errors.Is(err, files.ErrNotFound) {
+	if err := client.Delete(context.Background(), "space:gone", "snapshot:1"); !errors.Is(err, filesystem.ErrNotFound) {
 		t.Fatalf("Delete() in an unknown space error = %v, want ErrNotFound", err)
 	}
 	pruned, err := client.Prune(context.Background(), []string{"snapshot:1", "snapshot:2"})
@@ -200,8 +200,8 @@ func TestClientDeletesAndPrunesSnapshots(t *testing.T) {
 	if _, err := client.Prune(context.Background(), nil); err != nil || snapshots.kept == nil || len(snapshots.kept) != 0 {
 		t.Fatalf("Prune() keeping nothing error = %v, kept %#v", err, snapshots.kept)
 	}
-	snapshots.pruneErr = files.ErrVolumeUnavailable
-	if _, err := client.Prune(context.Background(), nil); !errors.Is(err, files.ErrVolumeUnavailable) {
+	snapshots.pruneErr = filesystem.ErrVolumeUnavailable
+	if _, err := client.Prune(context.Background(), nil); !errors.Is(err, filesystem.ErrVolumeUnavailable) {
 		t.Fatalf("Prune() without the data volume error = %v, want ErrVolumeUnavailable", err)
 	}
 }
@@ -211,9 +211,9 @@ func TestClientSynchronizesIdentitiesAndReportsConflicts(t *testing.T) {
 	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{
 		Reader: fake.NewHealthy(), Credentials: credentials, Identities: credentials,
 	}, discardLogger())))
-	identities := []accounts.Identity{
-		{Username: "owner", UID: 20100, Role: accounts.RoleAdmin, Enabled: true},
-		{Username: "bob", UID: 20101, Role: accounts.RoleMember, Enabled: false},
+	identities := []accountid.Identity{
+		{Username: "owner", UID: 20100, Role: accountid.RoleAdmin, Enabled: true},
+		{Username: "bob", UID: 20101, Role: accountid.RoleMember, Enabled: false},
 	}
 	if err := client.SyncIdentities(context.Background(), identities); err != nil {
 		t.Fatalf("SyncIdentities() error = %v", err)
@@ -222,64 +222,64 @@ func TestClientSynchronizesIdentitiesAndReportsConflicts(t *testing.T) {
 		t.Fatalf("synchronized identities = %#v, want %#v", credentials.identities, identities)
 	}
 
-	credentials.failure = fmt.Errorf("%w: anas-dev", accounts.ErrIdentityConflict)
-	err := client.SetCredential(context.Background(), accounts.CredentialRequest{
+	credentials.failure = fmt.Errorf("%w: anas-dev", accountid.ErrIdentityConflict)
+	err := client.SetCredential(context.Background(), accountid.CredentialRequest{
 		UserID: "user:x", PrivateSpaceID: "space:x", Username: "anas-dev", Password: "a password for testing",
-		Role: accounts.RoleMember, UID: 20102, Enabled: true,
+		Role: accountid.RoleMember, UID: 20102, Enabled: true,
 	})
-	if !errors.Is(err, accounts.ErrIdentityConflict) {
+	if !errors.Is(err, accountid.ErrIdentityConflict) {
 		t.Fatalf("SetCredential() conflict error = %v, want ErrIdentityConflict", err)
 	}
 	credentials.failure = errors.New("useradd failed")
-	if err := client.SyncIdentities(context.Background(), identities); errors.Is(err, accounts.ErrIdentityConflict) || err == nil {
+	if err := client.SyncIdentities(context.Background(), identities); errors.Is(err, accountid.ErrIdentityConflict) || err == nil {
 		t.Fatalf("generic failure error = %v, want a non-conflict failure", err)
 	}
 }
 
 type agentVolumeExecutor struct {
-	request storage.CreateVolumeRequest
-	added   storage.AddDisksRequest
+	request datavolume.CreateVolumeRequest
+	added   datavolume.AddDisksRequest
 }
 
 // agentVolumeExecutor reports a creation running, then done when asked.
-func (e *agentVolumeExecutor) StartCreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
+func (e *agentVolumeExecutor) StartCreateVolume(_ context.Context, request datavolume.CreateVolumeRequest) (datavolume.VolumeOperation, error) {
 	e.request = request
-	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationRunning, Step: storage.StepFormat}, nil
+	return datavolume.VolumeOperation{PlanID: request.PlanID, State: datavolume.OperationRunning, Step: datavolume.StepFormat}, nil
 }
 
-func (e *agentVolumeExecutor) StartAddDisks(_ context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
+func (e *agentVolumeExecutor) StartAddDisks(_ context.Context, request datavolume.AddDisksRequest) (datavolume.VolumeOperation, error) {
 	if request.PlanID == "plan:busy" {
-		return storage.VolumeOperation{}, storage.ErrPlanState
+		return datavolume.VolumeOperation{}, datavolume.ErrPlanState
 	}
 	e.added = request
-	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationRunning, Step: storage.StepErase}, nil
+	return datavolume.VolumeOperation{PlanID: request.PlanID, State: datavolume.OperationRunning, Step: datavolume.StepErase}, nil
 }
 
-func (e *agentVolumeExecutor) VolumeOperation(_ context.Context, planID string) (storage.VolumeOperation, error) {
+func (e *agentVolumeExecutor) VolumeOperation(_ context.Context, planID string) (datavolume.VolumeOperation, error) {
 	if planID != e.request.PlanID {
-		return storage.VolumeOperation{}, storage.ErrOperationNotFound
+		return datavolume.VolumeOperation{}, datavolume.ErrOperationNotFound
 	}
-	return storage.VolumeOperation{PlanID: planID, State: storage.OperationSucceeded, Volume: &storage.Volume{
-		ID: "volume:data", DiskIDs: []string{e.request.Disks[0].DiskID}, Layout: e.request.Layout, State: storage.VolumeStateAvailable,
+	return datavolume.VolumeOperation{PlanID: planID, State: datavolume.OperationSucceeded, Volume: &datavolume.Volume{
+		ID: "volume:data", DiskIDs: []string{e.request.Disks[0].DiskID}, Layout: e.request.Layout, State: datavolume.VolumeStateAvailable,
 	}}, nil
 }
 
 func (e *agentVolumeExecutor) ContinueConversion(context.Context) error {
-	return storage.ErrNoConversion
+	return datavolume.ErrNoConversion
 }
 
 type agentCredentialProvisioner struct {
-	request    accounts.CredentialRequest
-	identities []accounts.Identity
+	request    accountid.CredentialRequest
+	identities []accountid.Identity
 	failure    error
 }
 
-func (p *agentCredentialProvisioner) SetCredential(_ context.Context, request accounts.CredentialRequest) error {
+func (p *agentCredentialProvisioner) SetCredential(_ context.Context, request accountid.CredentialRequest) error {
 	p.request = request
 	return p.failure
 }
 
-func (p *agentCredentialProvisioner) SyncIdentities(_ context.Context, identities []accounts.Identity) error {
+func (p *agentCredentialProvisioner) SyncIdentities(_ context.Context, identities []accountid.Identity) error {
 	p.identities = identities
 	return p.failure
 }
@@ -293,7 +293,7 @@ type agentSnapshotBackend struct {
 	objects, failAt int
 	deleteErr       error
 	kept            []string
-	pruned          files.SnapshotPrune
+	pruned          filesystem.SnapshotPrune
 	pruneErr        error
 }
 
@@ -302,9 +302,9 @@ func (b *agentSnapshotBackend) Create(_ context.Context, spaceID, snapshotID str
 	return nil
 }
 
-func (b *agentSnapshotBackend) Objects(_ context.Context, snapshotID string, visit func(files.SnapshotObject) error) error {
+func (b *agentSnapshotBackend) Objects(_ context.Context, snapshotID string, visit func(filesystem.SnapshotObject) error) error {
 	if snapshotID != "snapshot:1" {
-		return files.ErrNotFound
+		return filesystem.ErrNotFound
 	}
 	for index := range b.objects {
 		if b.failAt > 0 && index == b.failAt {
@@ -319,24 +319,24 @@ func (b *agentSnapshotBackend) Objects(_ context.Context, snapshotID string, vis
 
 // listedObject is the index-th object of a listing: folders of 100 files,
 // each folder before its files.
-func listedObject(index int) files.SnapshotObject {
+func listedObject(index int) filesystem.SnapshotObject {
 	folder := fmt.Sprintf("相册/2026 年 %05d", index/101)
 	if index%101 == 0 {
-		return files.SnapshotObject{Key: folder, ParentKey: "相册", Name: path.Base(folder), Kind: files.EntryKindDirectory,
+		return filesystem.SnapshotObject{Key: folder, ParentKey: "相册", Name: path.Base(folder), Kind: filesystem.EntryKindDirectory,
 			ModifiedAt: time.Date(2026, time.October, 1, 0, 0, 0, 0, time.UTC)}
 	}
 	name := fmt.Sprintf("IMG_%06d.jpg", index)
-	return files.SnapshotObject{Key: folder + "/" + name, ParentKey: folder, Name: name, Kind: files.EntryKindFile,
+	return filesystem.SnapshotObject{Key: folder + "/" + name, ParentKey: folder, Name: name, Kind: filesystem.EntryKindFile,
 		SizeBytes: int64(index) * 1000, ModifiedAt: time.Date(2026, time.October, 2, 3, 4, 5, index, time.UTC)}
 }
 
-func (*agentSnapshotBackend) Open(context.Context, string, string) (io.ReadCloser, files.SnapshotObject, error) {
-	return io.NopCloser(strings.NewReader("snapshot bytes")), files.SnapshotObject{Key: "photo.jpg", Name: "photo.jpg", Kind: files.EntryKindFile, SizeBytes: 14}, nil
+func (*agentSnapshotBackend) Open(context.Context, string, string) (io.ReadCloser, filesystem.SnapshotObject, error) {
+	return io.NopCloser(strings.NewReader("snapshot bytes")), filesystem.SnapshotObject{Key: "photo.jpg", Name: "photo.jpg", Kind: filesystem.EntryKindFile, SizeBytes: 14}, nil
 }
 
 func (b *agentSnapshotBackend) Delete(context.Context, string, string) error { return b.deleteErr }
 
-func (b *agentSnapshotBackend) Prune(_ context.Context, keep []string) (files.SnapshotPrune, error) {
+func (b *agentSnapshotBackend) Prune(_ context.Context, keep []string) (filesystem.SnapshotPrune, error) {
 	b.kept = keep
 	return b.pruned, b.pruneErr
 }

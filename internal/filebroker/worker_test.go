@@ -18,8 +18,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 // runTestWorker is the worker a harness starts. max-message=<bytes> lowers
@@ -34,14 +34,14 @@ func runTestWorker(volume string, options []string) error {
 		}
 		maxMessage = limit
 	}
-	return runWorker(volume, holdingFS{files.NewRootFileSystem(volume, false)})
+	return runWorker(volume, holdingFS{filesystem.NewRootFileSystem(volume, false)})
 }
 
 // holdingFS lets a test hold a worker's operation from another process. An
 // operation on a path named hold-* marks it .started, waits for the request
 // to be cancelled and marks it .cancelled; one on stuck-* waits for a
 // .release file whatever happens, as an operation that ignores its context.
-type holdingFS struct{ files.FileSystem }
+type holdingFS struct{ filesystem.FileSystem }
 
 func (h holdingFS) hold(ctx context.Context, path string) error {
 	name := filepath.Base(path)
@@ -66,7 +66,7 @@ func (h holdingFS) hold(ctx context.Context, path string) error {
 	return ctx.Err()
 }
 
-func (h holdingFS) Scan(ctx context.Context, path string, skip files.ScanSkip) ([]files.ScanEntry, error) {
+func (h holdingFS) Scan(ctx context.Context, path string, skip filesystem.ScanSkip) ([]filesystem.ScanEntry, error) {
 	if err := h.hold(ctx, path); err != nil {
 		return nil, err
 	}
@@ -92,7 +92,9 @@ func TestTheWorkerSendsAScanInPages(t *testing.T) {
 	makeTree(t, volume, 30, 100)
 	broker, worker := socketPair(t)
 	served := make(chan error, 1)
-	go func() { served <- serveWorker(context.Background(), worker, files.NewRootFileSystem(volume, false)) }()
+	go func() {
+		served <- serveWorker(context.Background(), worker, filesystem.NewRootFileSystem(volume, false))
+	}()
 
 	if err := writeMessage(broker, request{Op: opScan, Path: volume, Paged: true}, nil); err != nil {
 		t.Fatal(err)
@@ -141,11 +143,11 @@ func TestAScanLargerThanAPageArrivesWhole(t *testing.T) {
 	h := newHarness(t)
 	space := filepath.Join(h.volume, "spaces", "alice")
 	makeTree(t, space, 30, 100)
-	want, err := files.NewRootFileSystem(h.volume, false).Scan(context.Background(), space, files.ScanSkip{})
+	want, err := filesystem.NewRootFileSystem(h.volume, false).Scan(context.Background(), space, filesystem.ScanSkip{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := h.client.Scan(accounts.WithSessionToken(context.Background(), "alice-token"), space, files.ScanSkip{})
+	got, err := h.client.Scan(accountid.WithSessionToken(context.Background(), "alice-token"), space, filesystem.ScanSkip{})
 	if err != nil || !sameEntries(got, want) {
 		t.Fatalf("Scan() through the broker = %d entries, %v; want %d", len(got), err, len(want))
 	}
@@ -154,14 +156,14 @@ func TestAScanLargerThanAPageArrivesWhole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err = member.Scan(context.Background(), space, files.ScanSkip{}); err != nil || !sameEntries(got, want) {
+	if got, err = member.Scan(context.Background(), space, filesystem.ScanSkip{}); err != nil || !sameEntries(got, want) {
 		t.Fatalf("Scan() through a confined worker = %d entries, %v; want %d", len(got), err, len(want))
 	}
 }
 
 func TestAReplyOverTheLimitIsAnErrorAndTheWorkerServesOn(t *testing.T) {
 	h := newHarness(t, "max-message=1024")
-	ctx := accounts.WithSessionToken(context.Background(), "alice-token")
+	ctx := accountid.WithSessionToken(context.Background(), "alice-token")
 	space := filepath.Join(h.volume, "spaces", "alice")
 	deep := filepath.Join(space, strings.Repeat("a", 250), strings.Repeat("b", 250), strings.Repeat("c", 250))
 	if err := os.MkdirAll(deep, 0o770); err != nil {
@@ -169,17 +171,17 @@ func TestAReplyOverTheLimitIsAnErrorAndTheWorkerServesOn(t *testing.T) {
 	}
 	// One entry here does not fit in a message on its own.
 	var refused *wireError
-	if _, err := h.client.Scan(ctx, space, files.ScanSkip{}); !errors.As(err, &refused) || refused.Code != codeFailed || !strings.Contains(err.Error(), errTooLarge.Error()) {
+	if _, err := h.client.Scan(ctx, space, filesystem.ScanSkip{}); !errors.As(err, &refused) || refused.Code != codeFailed || !strings.Contains(err.Error(), errTooLarge.Error()) {
 		t.Fatalf("Scan() of an entry over the limit error = %v", err)
 	}
 	// Under the same limit, an ordinary tree travels in smaller pages.
 	shared := filepath.Join(h.volume, "spaces", "shared")
 	makeTree(t, shared, 3, 20)
-	want, err := files.NewRootFileSystem(h.volume, false).Scan(context.Background(), shared, files.ScanSkip{})
+	want, err := filesystem.NewRootFileSystem(h.volume, false).Scan(context.Background(), shared, filesystem.ScanSkip{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := h.client.Scan(ctx, shared, files.ScanSkip{}); err != nil || !sameEntries(got, want) {
+	if got, err := h.client.Scan(ctx, shared, filesystem.ScanSkip{}); err != nil || !sameEntries(got, want) {
 		t.Fatalf("Scan() under a small limit = %d entries, %v; want %d", len(got), err, len(want))
 	}
 	if _, err := h.client.Lstat(ctx, space); err != nil {
@@ -192,7 +194,7 @@ func TestAReplyOverTheLimitIsAnErrorAndTheWorkerServesOn(t *testing.T) {
 
 func TestACancelledCallStopsTheWorkersOperation(t *testing.T) {
 	h := newHarness(t)
-	ctx := accounts.WithSessionToken(context.Background(), "alice-token")
+	ctx := accountid.WithSessionToken(context.Background(), "alice-token")
 	space := filepath.Join(h.volume, "spaces", "alice")
 	held := filepath.Join(space, "hold-tree")
 	if err := os.MkdirAll(held, 0o770); err != nil {
@@ -202,7 +204,7 @@ func TestACancelledCallStopsTheWorkersOperation(t *testing.T) {
 		name string
 		run  func(context.Context) error
 	}{
-		{"scan", func(ctx context.Context) error { _, err := h.client.Scan(ctx, held, files.ScanSkip{}); return err }},
+		{"scan", func(ctx context.Context) error { _, err := h.client.Scan(ctx, held, filesystem.ScanSkip{}); return err }},
 		{"copy", func(ctx context.Context) error { return h.client.Copy(ctx, held, filepath.Join(space, "copy")) }},
 	} {
 		call, cancel := context.WithCancel(ctx)
@@ -235,7 +237,7 @@ func TestACancelledCallStopsTheWorkersOperation(t *testing.T) {
 
 func TestALongOperationDoesNotHoldUpTheMembersOtherCalls(t *testing.T) {
 	h := newHarness(t)
-	ctx := accounts.WithSessionToken(context.Background(), "alice-token")
+	ctx := accountid.WithSessionToken(context.Background(), "alice-token")
 	space := filepath.Join(h.volume, "spaces", "alice")
 	if err := os.MkdirAll(space, 0o770); err != nil {
 		t.Fatal(err)
@@ -245,7 +247,7 @@ func TestALongOperationDoesNotHoldUpTheMembersOtherCalls(t *testing.T) {
 	if _, err := h.client.Lstat(ctx, space); err != nil {
 		t.Fatalf("Lstat() beside a long scan error = %v", err)
 	}
-	if _, err := h.client.Scan(ctx, space, files.ScanSkip{}); err != nil {
+	if _, err := h.client.Scan(ctx, space, filesystem.ScanSkip{}); err != nil {
 		t.Fatalf("Scan() beside a long scan error = %v", err)
 	}
 	held := []heldCall{first}
@@ -292,7 +294,7 @@ func TestASlowPlacementHoldsUpNoOtherAccount(t *testing.T) {
 	placer := &slowPlacer{slow: "alice", delay: 3 * time.Second, entered: make(chan struct{}), release: make(chan struct{})}
 	h.server.config.Scopes = placer
 	t.Cleanup(placer.unblock)
-	bob := accounts.WithSessionToken(context.Background(), "bob-token")
+	bob := accountid.WithSessionToken(context.Background(), "bob-token")
 	space := filepath.Join(h.volume, "spaces", "bob")
 	if err := os.MkdirAll(space, 0o770); err != nil {
 		t.Fatal(err)
@@ -302,7 +304,7 @@ func TestASlowPlacementHoldsUpNoOtherAccount(t *testing.T) {
 	}
 	alice := make(chan error, 1)
 	go func() {
-		_, err := h.client.Lstat(accounts.WithSessionToken(context.Background(), "alice-token"), h.volume)
+		_, err := h.client.Lstat(accountid.WithSessionToken(context.Background(), "alice-token"), h.volume)
 		alice <- err
 	}()
 	select {
@@ -370,7 +372,7 @@ func TestAFailedStartReachesEveryCallWaitingOnIt(t *testing.T) {
 		var lookups atomic.Int32
 		release := make(chan struct{})
 		server, err := NewServer(Config{
-			Sessions:     resolverFunc(func(string) (accounts.Identity, error) { return accounts.Identity{}, nil }),
+			Sessions:     resolverFunc(func(string) (accountid.Identity, error) { return accountid.Identity{}, nil }),
 			VolumeRoot:   t.TempDir(),
 			VolumeReady:  func() bool { return true },
 			Command:      func(string) *exec.Cmd { return exec.Command("false") },
@@ -384,7 +386,7 @@ func TestAFailedStartReachesEveryCallWaitingOnIt(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		identity := accounts.Identity{Username: "alice", UID: 20101, Role: accounts.RoleMember, Enabled: true}
+		identity := accountid.Identity{Username: "alice", UID: 20101, Role: accountid.RoleMember, Enabled: true}
 		key := workerKey{uid: identity.UID, role: identity.Role}
 		const calls = 3
 		failures := make(chan error, calls)
@@ -409,7 +411,7 @@ func TestAFailedStartReachesEveryCallWaitingOnIt(t *testing.T) {
 
 func TestReapingStopsOnlyFreeWorkers(t *testing.T) {
 	h := newHarness(t)
-	ctx := accounts.WithSessionToken(context.Background(), "alice-token")
+	ctx := accountid.WithSessionToken(context.Background(), "alice-token")
 	space := filepath.Join(h.volume, "spaces", "alice")
 	if err := os.MkdirAll(space, 0o770); err != nil {
 		t.Fatal(err)
@@ -435,7 +437,7 @@ func TestReapingStopsOnlyFreeWorkers(t *testing.T) {
 
 func TestCloseStopsBusyAndFreeWorkers(t *testing.T) {
 	h := newHarness(t)
-	ctx := accounts.WithSessionToken(context.Background(), "alice-token")
+	ctx := accountid.WithSessionToken(context.Background(), "alice-token")
 	space := filepath.Join(h.volume, "spaces", "alice")
 	if err := os.MkdirAll(space, 0o770); err != nil {
 		t.Fatal(err)
@@ -490,7 +492,7 @@ func holdScan(t *testing.T, h *harness, ctx context.Context, path string) heldCa
 	call, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() {
-		_, err := h.client.Scan(call, path, files.ScanSkip{})
+		_, err := h.client.Scan(call, path, filesystem.ScanSkip{})
 		done <- err
 	}()
 	waitForFile(t, path+".started")
@@ -513,8 +515,8 @@ func makeTree(t *testing.T, root string, folders, count int) {
 	}
 }
 
-func sameEntries(got, want []files.ScanEntry) bool {
-	return slices.EqualFunc(got, want, func(a, b files.ScanEntry) bool {
+func sameEntries(got, want []filesystem.ScanEntry) bool {
+	return slices.EqualFunc(got, want, func(a, b filesystem.ScanEntry) bool {
 		if a.Path != b.Path || !a.Info.ModTime.Equal(b.Info.ModTime) {
 			return false
 		}

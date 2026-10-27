@@ -16,8 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 func TestMain(m *testing.M) {
@@ -47,7 +49,7 @@ func TestMain(m *testing.M) {
 
 func TestClientRunsFileOperationsThroughAWorker(t *testing.T) {
 	harness := newHarness(t)
-	ctx := accounts.WithSessionToken(context.Background(), "alice-token")
+	ctx := accountid.WithSessionToken(context.Background(), "alice-token")
 	fsys := harness.client
 	space := filepath.Join(harness.volume, "spaces", "alice")
 	if err := os.MkdirAll(space, 0o770); err != nil {
@@ -79,7 +81,7 @@ func TestClientRunsFileOperationsThroughAWorker(t *testing.T) {
 		t.Fatalf("read back %q", contents)
 	}
 	info, err := fsys.Lstat(ctx, target)
-	if err != nil || info.Kind != files.KindFile || info.Size != int64(len(contents)) || info.Inode == 0 {
+	if err != nil || info.Kind != filesystem.KindFile || info.Size != int64(len(contents)) || info.Inode == 0 {
 		t.Fatalf("Lstat() = %#v, %v", info, err)
 	}
 	saved := time.Date(2026, 9, 24, 10, 0, 0, 123456789, time.UTC)
@@ -89,10 +91,10 @@ func TestClientRunsFileOperationsThroughAWorker(t *testing.T) {
 	if info, err := fsys.Lstat(ctx, target); err != nil || !info.ModTime.Equal(saved) {
 		t.Fatalf("modification time after SetModTime() = %v, %v; want %v", info.ModTime, err, saved)
 	}
-	if err := fsys.SetModTime(ctx, filepath.Join(space, "docs"), saved); !errors.Is(err, files.ErrUnsupportedType) {
+	if err := fsys.SetModTime(ctx, filepath.Join(space, "docs"), saved); !errors.Is(err, filesystem.ErrUnsupportedType) {
 		t.Fatalf("SetModTime(folder) error = %v, want ErrUnsupportedType", err)
 	}
-	if err := fsys.SetModTime(ctx, "/etc/passwd", saved); !errors.Is(err, files.ErrForbidden) {
+	if err := fsys.SetModTime(ctx, "/etc/passwd", saved); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("SetModTime outside the volume error = %v, want ErrForbidden", err)
 	}
 	if err := fsys.Copy(ctx, filepath.Join(space, "docs"), filepath.Join(space, "copy")); err != nil {
@@ -101,7 +103,7 @@ func TestClientRunsFileOperationsThroughAWorker(t *testing.T) {
 	if size, err := fsys.Usage(ctx, space); err != nil || size != 2*int64(len(contents)) {
 		t.Fatalf("Usage() = %d, %v", size, err)
 	}
-	entries, err := fsys.Scan(ctx, space, files.ScanSkip{Names: []string{"copy"}})
+	entries, err := fsys.Scan(ctx, space, filesystem.ScanSkip{Names: []string{"copy"}})
 	if err != nil || len(entries) != 2 || entries[0].Path != "docs" || entries[1].Path != "docs/note.txt" {
 		t.Fatalf("Scan() = %#v, %v", entries, err)
 	}
@@ -111,7 +113,7 @@ func TestClientRunsFileOperationsThroughAWorker(t *testing.T) {
 	if _, err := fsys.Lstat(ctx, filepath.Join(space, "missing")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("Lstat(missing) error = %v, want fs.ErrNotExist", err)
 	}
-	if _, err := fsys.Open(ctx, "/etc/passwd"); !errors.Is(err, files.ErrForbidden) {
+	if _, err := fsys.Open(ctx, "/etc/passwd"); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("Open outside the volume error = %v, want ErrForbidden", err)
 	}
 	if err := fsys.RemoveAll(ctx, filepath.Join(space, "copy")); err != nil {
@@ -126,24 +128,24 @@ func TestBrokerRefusesUnverifiedCallers(t *testing.T) {
 	harness := newHarness(t)
 	space := filepath.Join(harness.volume, "spaces")
 
-	if err := harness.client.MkdirAll(context.Background(), space); !errors.Is(err, files.ErrForbidden) {
+	if err := harness.client.MkdirAll(context.Background(), space); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("call without a session error = %v, want ErrForbidden", err)
 	}
-	forged := accounts.WithSessionToken(context.Background(), "forged-token")
-	if err := harness.client.MkdirAll(forged, space); !errors.Is(err, files.ErrForbidden) {
+	forged := accountid.WithSessionToken(context.Background(), "forged-token")
+	if err := harness.client.MkdirAll(forged, space); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("forged token error = %v, want ErrForbidden", err)
 	}
-	system := accounts.WithSessionToken(context.Background(), "system-token")
+	system := accountid.WithSessionToken(context.Background(), "system-token")
 	if err := harness.client.MkdirAll(system, space); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("out-of-range UID error = %v, want ErrUnavailable", err)
 	}
-	impostor := accounts.WithSessionToken(context.Background(), "impostor-token")
+	impostor := accountid.WithSessionToken(context.Background(), "impostor-token")
 	if err := harness.client.MkdirAll(impostor, space); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("unprovisioned account error = %v, want ErrUnavailable", err)
 	}
 	harness.ready.Store(false)
-	alice := accounts.WithSessionToken(context.Background(), "alice-token")
-	if err := harness.client.MkdirAll(alice, space); !errors.Is(err, files.ErrVolumeUnavailable) {
+	alice := accountid.WithSessionToken(context.Background(), "alice-token")
+	if err := harness.client.MkdirAll(alice, space); !errors.Is(err, filesystem.ErrVolumeUnavailable) {
 		t.Fatalf("offline volume error = %v, want ErrVolumeUnavailable", err)
 	}
 	if got := harness.spawned.Load(); got != 0 {
@@ -158,8 +160,8 @@ func TestBrokerRefusesUnverifiedCallers(t *testing.T) {
 // caller: file operations are unavailable, not refused (#166).
 func TestFileOperationsAreUnavailableWhileSessionsCannotBeRead(t *testing.T) {
 	server, err := NewServer(Config{
-		Sessions: resolverFunc(func(string) (accounts.Identity, error) {
-			return accounts.Identity{}, errors.New("read session directory: database is locked")
+		Sessions: resolverFunc(func(string) (accountid.Identity, error) {
+			return accountid.Identity{}, errors.New("read session directory: database is locked")
 		}),
 		VolumeRoot: t.TempDir(), VolumeReady: func() bool { return true },
 		Command:         func(volumeRoot string) *exec.Cmd { return exec.Command(os.Args[0], WorkerArgument, volumeRoot) },
@@ -178,8 +180,8 @@ func TestFileOperationsAreUnavailableWhileSessionsCannotBeRead(t *testing.T) {
 		_ = listener.Close()
 		server.Close()
 	})
-	err = NewClient(socket).Mkdir(accounts.WithSessionToken(context.Background(), "alice-token"), filepath.Join(t.TempDir(), "docs"))
-	if !errors.Is(err, ErrUnavailable) || errors.Is(err, files.ErrForbidden) {
+	err = NewClient(socket).Mkdir(accountid.WithSessionToken(context.Background(), "alice-token"), filepath.Join(t.TempDir(), "docs"))
+	if !errors.Is(err, ErrUnavailable) || errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("Mkdir() error = %v, want ErrUnavailable and not a refusal", err)
 	}
 }
@@ -194,7 +196,7 @@ func TestWorkersArePlacedInScopesOfTheirOwn(t *testing.T) {
 	if err := os.MkdirAll(space, 0o770); err != nil {
 		t.Fatal(err)
 	}
-	if err := harness.client.Mkdir(accounts.WithSessionToken(context.Background(), "alice-token"), filepath.Join(space, "docs")); err != nil {
+	if err := harness.client.Mkdir(accountid.WithSessionToken(context.Background(), "alice-token"), filepath.Join(space, "docs")); err != nil {
 		t.Fatal(err)
 	}
 	if placed := placer.calls(); len(placed) != 1 || !strings.HasPrefix(placed[0], "files:alice:") {
@@ -204,7 +206,7 @@ func TestWorkersArePlacedInScopesOfTheirOwn(t *testing.T) {
 
 func TestIdleWorkersAreStoppedAndRespawned(t *testing.T) {
 	harness := newHarness(t)
-	ctx := accounts.WithSessionToken(context.Background(), "alice-token")
+	ctx := accountid.WithSessionToken(context.Background(), "alice-token")
 	if err := harness.client.MkdirAll(ctx, filepath.Join(harness.volume, "a")); err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +252,7 @@ func TestFileServiceWorksThroughTheBroker(t *testing.T) {
 	t.Cleanup(func() { _ = catalog.Close() })
 	service := files.NewService(catalog, harness.volume, accountService, harness.client, files.Options{
 		DisableCapacityReserve: true, AllowUnverifiedVolume: true})
-	userCtx := accounts.WithSessionToken(ctx, "alice-token")
+	userCtx := accountid.WithSessionToken(ctx, "alice-token")
 	// The Host Agent creates spaces; workers never create them.
 	if err := os.MkdirAll(filepath.Join(harness.volume, "spaces", "private", "alice"), 0o770); err != nil {
 		t.Fatal(err)
@@ -276,7 +278,7 @@ func TestFileServiceWorksThroughTheBroker(t *testing.T) {
 	if _, err := service.Restore(userCtx, owner, trashed.ID, "", "", files.ConflictAsk); err != nil {
 		t.Fatalf("Restore() error = %v", err)
 	}
-	if _, err := service.List(ctx, owner, private.ID, ""); !errors.Is(err, files.ErrForbidden) {
+	if _, err := service.List(ctx, owner, private.ID, ""); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Fatalf("List() without a session error = %v, want ErrForbidden", err)
 	}
 }
@@ -297,14 +299,14 @@ func newHarness(t *testing.T, options ...string) *harness {
 		t.Fatal(err)
 	}
 	h.ready.Store(true)
-	identities := map[string]accounts.Identity{
-		"alice-token":    {Username: "alice", UID: 20101, Role: accounts.RoleMember, Enabled: true},
-		"bob-token":      {Username: "bob", UID: 20103, Role: accounts.RoleMember, Enabled: true},
-		"system-token":   {Username: "daemon", UID: 1, Role: accounts.RoleMember, Enabled: true},
-		"impostor-token": {Username: "mallory", UID: 20102, Role: accounts.RoleMember, Enabled: true},
+	identities := map[string]accountid.Identity{
+		"alice-token":    {Username: "alice", UID: 20101, Role: accountid.RoleMember, Enabled: true},
+		"bob-token":      {Username: "bob", UID: 20103, Role: accountid.RoleMember, Enabled: true},
+		"system-token":   {Username: "daemon", UID: 1, Role: accountid.RoleMember, Enabled: true},
+		"impostor-token": {Username: "mallory", UID: 20102, Role: accountid.RoleMember, Enabled: true},
 	}
 	server, err := NewServer(Config{
-		Sessions:    resolverFunc(func(token string) (accounts.Identity, error) { return lookup(identities, token) }),
+		Sessions:    resolverFunc(func(token string) (accountid.Identity, error) { return lookup(identities, token) }),
 		VolumeRoot:  h.volume,
 		VolumeReady: h.ready.Load,
 		Command: func(volumeRoot string) *exec.Cmd {
@@ -340,23 +342,23 @@ func newHarness(t *testing.T, options ...string) *harness {
 	return h
 }
 
-type resolverFunc func(string) (accounts.Identity, error)
+type resolverFunc func(string) (accountid.Identity, error)
 
-func (f resolverFunc) ResolveSessionIdentity(_ context.Context, token string) (accounts.Identity, error) {
+func (f resolverFunc) ResolveSessionIdentity(_ context.Context, token string) (accountid.Identity, error) {
 	return f(token)
 }
 
-func lookup(identities map[string]accounts.Identity, token string) (accounts.Identity, error) {
+func lookup(identities map[string]accountid.Identity, token string) (accountid.Identity, error) {
 	identity, ok := identities[token]
 	if !ok {
-		return accounts.Identity{}, accounts.ErrSessionNotFound
+		return accountid.Identity{}, accountid.ErrSessionNotFound
 	}
 	return identity, nil
 }
 
 type acceptingCredentials struct{}
 
-func (acceptingCredentials) SetCredential(context.Context, accounts.CredentialRequest) error {
+func (acceptingCredentials) SetCredential(context.Context, accountid.CredentialRequest) error {
 	return nil
 }
 func (acceptingCredentials) DisableCredential(context.Context, string) error { return nil }
@@ -369,7 +371,7 @@ func TestIdentitySwitchProbeFailsWithoutTheCapabilities(t *testing.T) {
 		t.Skip("root can switch identities")
 	}
 	server, err := NewServer(Config{
-		Sessions:     resolverFunc(func(string) (accounts.Identity, error) { return accounts.Identity{}, accounts.ErrSessionNotFound }),
+		Sessions:     resolverFunc(func(string) (accountid.Identity, error) { return accountid.Identity{}, accountid.ErrSessionNotFound }),
 		VolumeRoot:   t.TempDir(),
 		VolumeReady:  func() bool { return true },
 		ProbeCommand: func() *exec.Cmd { return exec.Command(os.Args[0], ProbeArgument) },
@@ -386,7 +388,7 @@ func TestIdentitySwitchProbeFailsWithoutTheCapabilities(t *testing.T) {
 // Product Service as unavailable rather than as a generic failure.
 func TestReadOnlyVolumeIsReportedAsUnavailable(t *testing.T) {
 	err := encodeError(&fs.PathError{Op: "open", Path: "spaces/shared/a.txt", Err: syscall.EROFS})
-	if !errors.Is(err, files.ErrVolumeUnavailable) {
-		t.Fatalf("encodeError(EROFS) = %v, want files.ErrVolumeUnavailable", err)
+	if !errors.Is(err, filesystem.ErrVolumeUnavailable) {
+		t.Fatalf("encodeError(EROFS) = %v, want filesystem.ErrVolumeUnavailable", err)
 	}
 }

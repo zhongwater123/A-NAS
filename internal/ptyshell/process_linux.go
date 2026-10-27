@@ -1,4 +1,8 @@
-package terminal
+// Package ptyshell is an interactive shell on a PTY as the Web terminal
+// sees it, and the process group that runs one. The root file broker starts
+// administrators' shells with it; the Web terminal's handler stays in
+// internal/terminal (#221).
+package ptyshell
 
 import (
 	"errors"

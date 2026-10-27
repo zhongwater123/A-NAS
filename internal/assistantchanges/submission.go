@@ -15,7 +15,7 @@
 // (MaxContent, MaxStaged). Contents are copied and hashed a block at a time;
 // none is held in memory.
 //
-// Every file is read and written through a files.FileSystem acting as the
+// Every file is read and written through a filesystem.FileSystem acting as the
 // member, which never follows a link; this package only decides what to do.
 package assistantchanges
 

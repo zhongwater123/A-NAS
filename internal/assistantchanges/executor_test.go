@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 type fixture struct {
 	t      *testing.T
 	volume string
-	member files.FileSystem
+	member filesystem.FileSystem
 	exec   *Executor
 	clock  time.Time
 }
@@ -38,7 +38,7 @@ func newFixture(t *testing.T) *fixture {
 			t.Fatal(err)
 		}
 	}
-	f := &fixture{t: t, volume: volume, member: files.NewRootFileSystem(volume, false), clock: time.Unix(1_800_000_000, 0)}
+	f := &fixture{t: t, volume: volume, member: filesystem.NewRootFileSystem(volume, false), clock: time.Unix(1_800_000_000, 0)}
 	f.exec = &Executor{Root: filepath.Join(t.TempDir(), "changes"), Volume: volume, Now: func() time.Time { return f.clock }}
 	f.put("spaces/private/alice/计划.md", "# 计划\n- 买菜\n")
 	return f
@@ -561,13 +561,13 @@ func TestAccountsMakeChangesSideBySide(t *testing.T) {
 
 // watched is the member's file system, noting every path looked at or opened.
 type watched struct {
-	files.FileSystem
+	filesystem.FileSystem
 	looked, opened, measured []string
 	// onOpen, when set, runs before a file is opened.
 	onOpen func(path string)
 }
 
-func (w *watched) Lstat(ctx context.Context, path string) (files.FileInfo, error) {
+func (w *watched) Lstat(ctx context.Context, path string) (filesystem.FileInfo, error) {
 	w.looked = append(w.looked, path)
 	return w.FileSystem.Lstat(ctx, path)
 }
