@@ -67,6 +67,10 @@ var (
 	adrFileName    = regexp.MustCompile(`^\d{4}-.+\.md$`)
 	adrIndexEntry  = regexp.MustCompile(`^\s*[-*]\s+\[\d{4}[^\]]*\]\(([^)]+)\)(.*)$`)
 	adrIndexMarker = regexp.MustCompile(`^\s*[（(]\s*([A-Za-z]+)`)
+	// An ADR still on a branch holds its number in the index with a line
+	// that names it without a link, "- NNNN：title（draft，PR #N）", so that
+	// parallel branches do not take the same number (#191).
+	adrPlaceholder = regexp.MustCompile(`^\s*[-*]\s+(\d{4})[：:]`)
 	adrStatuses    = map[string]bool{"proposed": true, "accepted": true, "superseded": true}
 )
 
@@ -164,6 +168,7 @@ func validateDocumentation(root string) ([]string, int) {
 	}
 
 	problems = append(problems, validateADRIndex(adrDocuments)...)
+	problems = append(problems, validateADRNumbers(adrDocuments)...)
 	return problems, files
 }
 
@@ -273,6 +278,42 @@ func validateADRIndex(documents map[string]string) []string {
 		if indexed := indexedADRStatus(marker); indexed != status {
 			problems = append(problems, fmt.Sprintf("%s says %s but %s marks it %s", name, status, adrIndex, indexed))
 		}
+	}
+	return problems
+}
+
+// validateADRNumbers checks that no two ADRs share a number, counting the
+// numbers the index holds for ADRs still on a branch, and that a held number
+// is released once its ADR arrives. documents is as for validateADRIndex.
+func validateADRNumbers(documents map[string]string) []string {
+	var problems []string
+	files := map[string]string{}
+	for _, name := range slices.Sorted(maps.Keys(documents)) {
+		if !adrFileName.MatchString(path.Base(name)) {
+			continue
+		}
+		number := path.Base(name)[:4]
+		if other, taken := files[number]; taken {
+			problems = append(problems, fmt.Sprintf("%s and %s share the number %s", other, name, number))
+			continue
+		}
+		files[number] = name
+	}
+
+	held := map[string]bool{}
+	for line := range strings.SplitSeq(documents[adrIndex], "\n") {
+		match := adrPlaceholder.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		number := match[1]
+		switch name, arrived := files[number]; {
+		case held[number]:
+			problems = append(problems, fmt.Sprintf("%s holds %s more than once", adrIndex, number))
+		case arrived:
+			problems = append(problems, fmt.Sprintf("%s still holds %s for a branch, but %s has it: replace the placeholder with the entry", adrIndex, number, name))
+		}
+		held[number] = true
 	}
 	return problems
 }

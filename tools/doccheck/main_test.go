@@ -144,6 +144,33 @@ func TestValidateDocumentationMatchesADRStatusWithIndex(t *testing.T) {
 	})
 }
 
+func TestValidateDocumentationKeepsADRNumbersApart(t *testing.T) {
+	root := t.TempDir()
+	writeRequiredDocuments(t, root)
+	writeDocuments(t, root, map[string]string{
+		"docs/adr/0001-first.md":   "# 0001\n\n状态：accepted\n",
+		"docs/adr/0002-second.md":  "# 0002\n\n状态：accepted\n",
+		"docs/adr/0002-clash.md":   "# 0002\n\n状态：accepted\n",
+		"docs/adr/0003-arrived.md": "# 0003\n\n状态：proposed\n",
+		"docs/adr/README.md": "# ADR\n\n" +
+			"- [0001：第一](0001-first.md)\n" +
+			"- [0002：第二](0002-second.md)\n" +
+			"- [0002：撞号](0002-clash.md)\n" +
+			"- [0003：已合并](0003-arrived.md)（proposed）\n" +
+			"- 0003：已合并（draft，PR #3）\n" +
+			"- 0004：分支上（draft，PR #4）\n" +
+			"- 0005：另一个分支（draft，PR #5）\n" +
+			"- 0005：同号的分支（draft，PR #6）\n" +
+			"\n2026 年 0006 号之后再议。\n",
+	})
+
+	assertProblems(t, validateDocumentationProblems(root), []string{
+		"docs/adr/0002-clash.md and docs/adr/0002-second.md share the number 0002",
+		"docs/adr/README.md still holds 0003 for a branch, but docs/adr/0003-arrived.md has it",
+		"docs/adr/README.md holds 0005 more than once",
+	})
+}
+
 func validateDocumentationProblems(root string) []string {
 	problems, _ := validateDocumentation(root)
 	return problems
