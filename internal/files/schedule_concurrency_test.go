@@ -95,7 +95,7 @@ func TestRetentionOrdersChangesAndKeepingWithoutBlockingOtherSpaces(t *testing.T
 		cancel()
 		unblock()
 		if !finished {
-			<-done
+			_ = <-done // cleanup already canceled the run after a failed assertion
 		}
 	})
 	select {
