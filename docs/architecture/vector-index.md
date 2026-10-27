@@ -53,6 +53,10 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
   - WAL 段 1 MB：索引靠重建而不是恢复，稳定后的 WAL 从 37–45 MB 降到 2–3 MB，看不出代价。
   - 空集合的段文件都是稀疏文件，实际占用很小。
 - 内存先设 `MemoryHigh=512M`、`MemoryMax=768M`，以系统测试打印的 `MemoryPeak`（空集合约 75 MB）与实机数字调整。
+  - 这是模板单元的限额，每个实例各一份，按相册（不建图、2 万到 10 万张）定。
+  - 建图的大集合用得更多：[#262](https://github.com/zhongwater123/A-NAS/issues/262) 在 Qdrant 1.19.2 默认配置下测得 10 万条文本常驻约 2 GB。
+  - 所以文件分块接入时要单独评估它的实例，需要时用 `anas-vectors@<账号>.service.d/` 的 drop-in 调高，不改模板。
+- 磁盘按实际分配的块计：Qdrant 预分配稀疏文件，表观大小是实际的 3 倍以上，小集合可达 30 倍。
 
 ### 交付
 
@@ -142,6 +146,15 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 人脸与宠物向量不进入任何索引：聚类需要阈值内的全部邻居，留在 Catalog 中精确计算（[人物与宠物](photo-people.md)）。视频分段与文件分块用哪些检索功能（分组、多向量 MaxSim、中文 BM25 与融合、公式重排），以[检索功能实测](../research/qdrant-retrieval-features.md#特性取舍)为准。
 
+两份实测给后续集合的选项：
+
+- **建图与否**：按规模决定。
+  - 精确扫描在十万级以内与进程内扫描一样快，召回为 1。
+  - 建 HNSW 时召回靠查询宽度保住：[#262](https://github.com/zhongwater123/A-NAS/issues/262) 测得 `hnsw_ef` 128 时带过滤的召回只有 0.88–0.95，照片取前 50 要 512（0.993），50 万个未去重的视频帧要 1024（0.984）；取前 500 时要 2000 以上（检索功能实测）。
+  - 视频按视频存多向量（分数逐位等于最佳片段），还是按帧存点加 HNSW（#262：50 万帧过滤到单个视频 16 ms），取决于去重后还剩多少片段，在 [#207](https://github.com/zhongwater123/A-NAS/issues/207) 的设计中定。
+- **内存不够时**：向量与 HNSW 放磁盘、int8 量化副本常驻并重排（#262：50 万帧常驻 952 → 466 MB，查询 4 → 20 ms）。binary 量化在这些向量上召回只有 0.5–0.65，不用。
+- **写入**：先建 payload 索引再写入（#262：不建时写入慢 7 倍，带过滤的大 k 查询慢 3 倍），每批 64–256 条。
+
 ## 验证
 
 - `internal/vectorindex` 与相册同步的测试使用真实的固定版本二进制（`ANAS_QDRANT_BINARY`）；`ANAS_QDRANT_REQUIRED=1` 时缺少二进制即失败，CI 设置了它。
@@ -161,4 +174,4 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - [相册本地 AI](photo-ai.md)、[相册技术设计](photo-library.md)、[人物与宠物](photo-people.md)
 - [启用向量索引手册](../runbooks/enable-vector-index.md)
 - [Qdrant 检索特性试验](../research/qdrant-retrieval-features.md)
-- [#66](https://github.com/zhongwater123/A-NAS/issues/66)、[#152](https://github.com/zhongwater123/A-NAS/issues/152)、[#207](https://github.com/zhongwater123/A-NAS/issues/207)、[#208](https://github.com/zhongwater123/A-NAS/issues/208)
+- [#66](https://github.com/zhongwater123/A-NAS/issues/66)、[#152](https://github.com/zhongwater123/A-NAS/issues/152)、[#207](https://github.com/zhongwater123/A-NAS/issues/207)、[#208](https://github.com/zhongwater123/A-NAS/issues/208)、[#262](https://github.com/zhongwater123/A-NAS/issues/262)（嵌入式、图 + 向量方案与 Qdrant 的选型横比）
