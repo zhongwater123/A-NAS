@@ -1,9 +1,32 @@
 # Ruff for the AI Worker, its evaluations and the assistant spike: `make ai-lint`.
-# The rules are Ruff's defaults; requirements-dev.txt pins the version.
+# requirements-dev.txt pins the version.
 target-version = "py313"
 line-length = 120
 # The spike's scripts import each other from their own folder.
 src = [".", "assistant-spike"]
+
+[lint]
+# Ruff's defaults (E4, E7, E9, F), the rest of pycodestyle, import order,
+# bugbear, blind excepts, pyupgrade, comprehensions, simplifications,
+# performance, needless code, bandit's security checks and Ruff's own rules
+# (#278).
+select = ["E", "W", "F", "I", "B", "BLE", "UP", "C4", "SIM", "PERF", "PIE", "S", "RUF"]
+ignore = [
+  # Line length is a formatter's matter, and none runs on ai/: the longest
+  # lines are URLs, messages and data.
+  "E501",
+  # Chinese text is written with full-width punctuation such as ， and ：.
+  "RUF001",
+  "RUF002",
+  "RUF003",
+  # Every subprocess call: they take argument lists and never a shell, which
+  # S602 and S604 still check (as gosec's G204 in .golangci.yml).
+  "S603",
+]
+
+[lint.per-file-ignores]
+# Imports Hermes's modules once its source is on sys.path.
+"assistant-spike/toolsets-check.py" = ["E402"]
 
 [lint.isort]
 combine-as-imports = true

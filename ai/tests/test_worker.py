@@ -148,7 +148,7 @@ class WorkerTest(unittest.TestCase):
                 vectors.append((content, vector))
         # The same fake person comes back in other photos with nearly the same
         # vector, and different people are far apart.
-        similarities = [sum(x * y for x, y in zip(a, b))
+        similarities = [sum(x * y for x, y in zip(a, b, strict=True))
                         for i, (photo_a, a) in enumerate(vectors) for photo_b, b in vectors[i + 1:] if photo_a != photo_b]
         self.assertTrue(any(value > 0.99 for value in similarities))
         self.assertTrue(any(value < 0.5 for value in similarities))
@@ -175,7 +175,7 @@ class WorkerTest(unittest.TestCase):
                 vector = struct.unpack(f"<{fake.dimensions}f", base64.b64decode(encoded))
                 self.assertAlmostEqual(sum(value * value for value in vector), 1.0, places=4)
                 vectors.append(vector)
-        similarities = [sum(x * y for x, y in zip(a, b)) for i, a in enumerate(vectors) for b in vectors[i + 1:]]
+        similarities = [sum(x * y for x, y in zip(a, b, strict=True)) for i, a in enumerate(vectors) for b in vectors[i + 1:]]
         self.assertTrue(any(value > 0.99 for value in similarities))
         self.assertTrue(any(value < 0.5 for value in similarities))
         for bad in (None, [], [[0.1, 0.2, 0.5]], [[0.5, 0.2, 0.1, 0.9]], [[0, 0, 1, 1.5]], [[0, 0, True, 1]],
