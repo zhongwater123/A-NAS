@@ -1,5 +1,5 @@
-import { call, client } from "../api/client";
-import type { ActivityCategory, SystemLogEntry, SystemLogService } from "../api.generated";
+import { call, client } from "../../api/client";
+import type { ActivityCategory, SystemLogEntry, SystemLogService } from "../../api.generated";
 
 export type {
   ActivityAccount,
@@ -9,7 +9,7 @@ export type {
   SystemLogEntry,
   SystemLogPage,
   SystemLogService,
-} from "../api.generated";
+} from "../../api.generated";
 
 // The time ranges both logs offer; "all" sends no lower bound.
 export type TimeRange = "1h" | "24h" | "7d" | "30d" | "all";

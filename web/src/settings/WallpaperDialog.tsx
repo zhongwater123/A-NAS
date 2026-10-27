@@ -7,8 +7,6 @@ import { wallpaperBackdrop } from "../desktop/wallpaper";
 import { DesktopPreview } from "./DesktopPreview";
 import { ImageSources, loadImage } from "./ImageSources";
 import { Banner, messageOf } from "./parts";
-import "./avatar.css";
-import "./personalization.css";
 
 // WallpaperDialog lets an administrator pick the picture every desktop shows,
 // from this computer, their NAS files or their photo libraries. The page

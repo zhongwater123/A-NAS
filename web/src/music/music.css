@@ -24,6 +24,7 @@
   --ph-accent-soft: var(--mu-accent-soft);
   --ph-danger: var(--color-danger);
   --ph-ease: var(--mu-ease);
+  --ph-toasts-bottom: calc(var(--mu-player) + 18px);
   position: relative;
   height: 100%;
   min-height: 0;
@@ -51,9 +52,6 @@
 }
 .mu-app svg {
   flex: none;
-}
-.mu-app .ph-toasts {
-  bottom: calc(var(--mu-player) + 18px);
 }
 .mu-app .spin {
   animation: mu-spin 1s linear infinite;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
+import { errorText } from "../../api/errorMessages";
 
 export interface SnapshotView<T> {
   data?: T;

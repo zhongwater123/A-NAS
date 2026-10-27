@@ -5,7 +5,7 @@ import type { FileEntry } from "../api.generated";
 import { formatBytes } from "../lib/bytes";
 import { isPDFPreviewable } from "../lib/fileTypes";
 import { fileVisualURL } from "./preview";
-import "./viewer.css";
+import "../ui/viewer.css";
 
 // FileViewer shows the images and PDFs of the open folder over the file
 // manager, one at a time, straight from the file endpoint; nothing is saved

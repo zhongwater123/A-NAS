@@ -3,7 +3,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { formatBytes } from "../lib/bytes";
 import { isHEIFImage, isPDFPreviewable, isPreviewableImage, isTextPreviewable, isVideoFile } from "../lib/fileTypes";
-import "../files/viewer.css";
+import "../ui/viewer.css";
 import { contentURL, readText, type ShareEntry } from "./api";
 import { errorText, leaf } from "./format";
 import { EntryTile, isAudio, kindOf } from "./parts";

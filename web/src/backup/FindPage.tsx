@@ -14,7 +14,7 @@ import {
 } from "./api";
 import { useBackup } from "./BackupCenter";
 import { formatCount, formatDateTime, formatDay, spaceLabel } from "./format";
-import { EmptyState, EntryIcon, Notice, Spinner } from "./parts";
+import { EmptyState, EntryIcon, Notice, Spinner } from "../ui/workspace";
 import { snapshotTitle } from "./SnapshotsPage";
 
 const collapsedVersions = 3;

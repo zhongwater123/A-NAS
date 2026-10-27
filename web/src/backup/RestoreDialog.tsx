@@ -6,7 +6,7 @@ import type { FileEntry, Space } from "../api.generated";
 import { listEntries } from "../files/api";
 import { messageOf, restoreEntry, restoreSnapshot } from "./api";
 import { formatDateTime, restoredName, spaceLabel } from "./format";
-import { Dialog, EntryIcon, Spinner } from "./parts";
+import { Dialog, EntryIcon, Spinner } from "../ui/workspace";
 
 export interface RestoreRequest {
   space: Space;

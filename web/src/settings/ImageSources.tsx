@@ -24,7 +24,6 @@ import {
   previewURL,
 } from "../photos/api";
 import { Banner, messageOf } from "./parts";
-import "./avatar.css";
 
 // ImageSources is where the avatar and wallpaper dialogs find a picture: this
 // computer, the user's own NAS files or their photo libraries. Spaces and

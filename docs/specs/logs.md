@@ -110,7 +110,7 @@
 ## 验收证据
 
 - Go：[活动记录合并与游标](../../internal/activity/activity_test.go)、[账号与登录记录](../../internal/accounts/activity_test.go)、[文件记录的空间与隐藏](../../internal/files/activity_test.go)、[相册活动](../../internal/photosapi/handler_test.go)、[活动记录 API](../../internal/httpapi/activity_test.go)、[系统日志 API](../../internal/httpapi/systemlogs_test.go)、[服务白名单与日志行解析](../../internal/systemlog/systemlog_test.go)、[journal 读取](../../internal/systemlog/journal/journal_test.go)、[Host Agent 系统日志接口](../../internal/hoststate/agent/logs_test.go)。
-- React：[日志分区测试](../../web/src/logs/LogsSection.test.tsx)、[描述与合并](../../web/src/logs/describe.test.ts)、[导出中的公式单元格](../../web/src/logs/common.test.ts)，以及[桌面测试](../../web/src/App.test.tsx)中桌面不再有“日志”图标。
+- React：[日志分区测试](../../web/src/settings/logs/LogsSection.test.tsx)、[描述与合并](../../web/src/settings/logs/describe.test.ts)、[导出中的公式单元格](../../web/src/settings/logs/common.test.ts)，以及[桌面测试](../../web/src/App.test.tsx)中桌面不再有“日志”图标。
 - 系统测试：在 Debian 13 systemd 容器中以真实 Host Agent 单元读取产品服务日志，见[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)。
 - 本地门禁：`make check`。
 
@@ -119,5 +119,5 @@
 - 规格：[设置](settings.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[局域网 Web 访问](lan-web-access.md)
 - 架构：[系统总览](../architecture/OVERVIEW.md)
 - ADR：[0020：系统日志经 Host Agent 的白名单 journal 查询读取](../adr/0020-read-service-logs-through-the-host-agent.md)
-- 代码：[日志分区](../../web/src/logs/LogsSection.tsx)、[活动记录](../../internal/activity/activity.go)、[系统日志](../../internal/systemlog/systemlog.go)、[journal 读取](../../internal/systemlog/journal/journal.go)
+- 代码：[日志分区](../../web/src/settings/logs/LogsSection.tsx)、[活动记录](../../internal/activity/activity.go)、[系统日志](../../internal/systemlog/systemlog.go)、[journal 读取](../../internal/systemlog/journal/journal.go)
 - 测试：见“验收证据”

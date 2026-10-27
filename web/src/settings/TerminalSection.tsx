@@ -3,7 +3,6 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { Banner, IconTile, PageHeader, Pill } from "./parts";
 import { readTerminalEnabled, type SessionStatus } from "./terminal";
-import "./terminal.css";
 
 const XtermSession = lazy(() => import("./XtermSession"));
 

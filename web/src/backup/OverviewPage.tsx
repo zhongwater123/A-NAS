@@ -25,7 +25,8 @@ import {
   spaceAudience,
   spaceLabel,
 } from "./format";
-import { Notice, SpaceIcon } from "./parts";
+import { Notice } from "../ui/workspace";
+import { SpaceIcon } from "./parts";
 
 type Tone = "ok" | "attention" | "danger" | "idle";
 

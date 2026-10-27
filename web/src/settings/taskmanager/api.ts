@@ -1,5 +1,5 @@
-import { call, client } from "../api/client";
-import type { TaskManagerDeviceResponse, TaskManagerProcessGroup, TaskManagerStatus } from "../api.generated";
+import { call, client } from "../../api/client";
+import type { TaskManagerDeviceResponse, TaskManagerProcessGroup, TaskManagerStatus } from "../../api.generated";
 
 export type {
   TaskManagerAccelerator as Accelerator,
@@ -8,7 +8,7 @@ export type {
   TaskManagerNetwork as Network,
   TaskManagerTask as Task,
   TaskManagerTasksResponse as TaskSnapshot,
-} from "../api.generated";
+} from "../../api.generated";
 export type Availability = TaskManagerStatus;
 // Every group of the device and task snapshots: a status and its items.
 export type Group<T> = Omit<TaskManagerProcessGroup, "items"> & { items: T[] };

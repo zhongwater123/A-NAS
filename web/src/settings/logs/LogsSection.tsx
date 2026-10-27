@@ -1,12 +1,11 @@
 import { ScrollText, ServerCog } from "lucide-react";
 import { useEffect } from "react";
 
-import type { Session } from "../api.generated";
-import { PageHeader } from "../settings/parts";
+import type { Session } from "../../api.generated";
+import { PageHeader } from "../parts";
 import { ActivityLog, type LogsPreset } from "./ActivityLog";
 import { useRemembered } from "./common";
 import { SystemLog } from "./SystemLog";
-import "./logs.css";
 
 export type { LogsPreset } from "./ActivityLog";
 

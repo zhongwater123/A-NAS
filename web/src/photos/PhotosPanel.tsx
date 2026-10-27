@@ -92,7 +92,7 @@ import {
   updatePerson,
 } from "./api";
 import { AlbumsView, Empty } from "./Collections";
-import { useDialogs, useToasts } from "./feedback";
+import { useDialogs, useToasts } from "../ui/feedback";
 import type { GridProps } from "./grid";
 import {
   type ImageDropProps,

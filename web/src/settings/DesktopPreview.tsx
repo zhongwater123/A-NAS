@@ -2,7 +2,6 @@ import { type CSSProperties, useLayoutEffect, useRef, useState } from "react";
 
 import type { WallpaperStyle } from "../api.generated";
 import { drawWallpaper, type WallpaperPicture } from "../desktop/wallpaper";
-import "./personalization.css";
 
 // DesktopPreview draws a small copy of this browser's desktop with picture
 // laid out in style, so 居中 and 平铺 show the picture's size against the

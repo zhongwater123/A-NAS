@@ -2,8 +2,8 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Session } from "../api.generated";
-import { json, stubAPI } from "../test/api";
+import type { Session } from "../../api.generated";
+import { json, stubAPI } from "../../test/api";
 import type { ActivityEvent, SystemLogEntry } from "./api";
 import { forgetRememberedFilters } from "./common";
 import { LogsSection } from "./LogsSection";

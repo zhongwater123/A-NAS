@@ -12,7 +12,7 @@ import {
   snapshotDownloadURL,
 } from "./api";
 import { formatDateTime, formatDay, restoredName, spaceLabel } from "./format";
-import { Dialog, EmptyState, EntryIcon, Notice, Spinner } from "./parts";
+import { Dialog, EmptyState, EntryIcon, Notice, Spinner } from "../ui/workspace";
 import { RestoreDialog, type RestoreRequest } from "./RestoreDialog";
 import { snapshotTitle } from "./SnapshotsPage";
 import "./backup.css";

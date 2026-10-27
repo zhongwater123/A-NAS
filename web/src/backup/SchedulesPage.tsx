@@ -29,7 +29,8 @@ import {
   tierTotal,
   weekdayShort,
 } from "./format";
-import { SpaceIcon, Spinner, Stepper, Switch } from "./parts";
+import { Spinner } from "../ui/workspace";
+import { SpaceIcon, Stepper, Switch } from "./parts";
 
 const frequencies: { value: Frequency; label: string }[] = [
   { value: "hourly", label: "每小时" },

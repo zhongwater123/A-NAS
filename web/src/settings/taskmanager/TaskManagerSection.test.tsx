@@ -2,14 +2,14 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { onSessionEnded } from "../api/client";
-import type { Session } from "../api.generated";
-import { SettingsPanel, type SettingsSection, type StoragePlanFlow } from "../settings/SettingsPanel";
-import { json, stubAPI } from "../test/api";
-import { taskManagerDevice as device, taskManagerTasks as tasks } from "../test/fixtures";
+import { onSessionEnded } from "../../api/client";
+import type { Session } from "../../api.generated";
+import { SettingsPanel, type SettingsSection, type StoragePlanFlow } from "../SettingsPanel";
+import { json, stubAPI } from "../../test/api";
+import { taskManagerDevice as device, taskManagerTasks as tasks } from "../../test/fixtures";
 
-vi.mock("../settings/AvatarDialog", () => ({ AvatarDialog: () => null }));
-vi.mock("../settings/TerminalSection", () => ({ TerminalSection: () => null }));
+vi.mock("../AvatarDialog", () => ({ AvatarDialog: () => null }));
+vi.mock("../TerminalSection", () => ({ TerminalSection: () => null }));
 
 const session: Session = {
   csrfToken: "test",

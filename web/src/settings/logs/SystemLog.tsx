@@ -1,8 +1,8 @@
 import { ChevronDown, Download, Radio, RefreshCw, ServerCog } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { APIError } from "../api/client";
-import { Banner, messageOf, Pill } from "../settings/parts";
+import { APIError } from "../../api/client";
+import { Banner, messageOf, Pill } from "../parts";
 import {
   listSystemLogs,
   type SystemLogEntry,

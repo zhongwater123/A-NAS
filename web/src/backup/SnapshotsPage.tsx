@@ -25,7 +25,8 @@ import {
 } from "./api";
 import { useBackup } from "./BackupCenter";
 import { formatClock, formatCount, formatDateTime, formatDay, restoredSnapshotName, spaceLabel } from "./format";
-import { Dialog, EmptyState, EntryIcon, Notice, OriginBadge, SpaceSwitcher, Spinner } from "./parts";
+import { Dialog, EmptyState, EntryIcon, Notice, Spinner } from "../ui/workspace";
+import { OriginBadge, SpaceSwitcher } from "./parts";
 
 interface Crumb {
   id: string;

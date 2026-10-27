@@ -14,10 +14,10 @@ import {
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { Session, User } from "../api.generated";
-import { displayName, fullName } from "../people/people";
-import { listUsers } from "../settings/api";
-import { Banner, messageOf } from "../settings/parts";
+import type { Session, User } from "../../api.generated";
+import { displayName, fullName } from "../../people/people";
+import { listUsers } from "../api";
+import { Banner, messageOf } from "../parts";
 import {
   type ActivityCategory,
   type ActivityEvent,

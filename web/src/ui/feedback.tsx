@@ -1,5 +1,9 @@
+// Dialogs and toasts that windows open inside themselves: a confirmation, a
+// name to enter, a result with an undo. They follow the window's palette
+// through the --ph-* variables its root sets.
 import { CircleAlert, CircleCheck, X } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import "./feedback.css";
 
 type DialogRequest =
   | {

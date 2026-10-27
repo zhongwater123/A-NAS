@@ -8,7 +8,6 @@ import { publishWallpaper, useWallpaper, wallpaperPicture } from "../desktop/wal
 import { DesktopPreview } from "./DesktopPreview";
 import { Banner, Group, IconTile, messageOf, PageHeader } from "./parts";
 import { WallpaperDialog } from "./WallpaperDialog";
-import "./personalization.css";
 
 const saverDelayMinutes = localConsoleScreenSaverIdleMs / 60_000;
 

@@ -12,12 +12,11 @@ import {
 } from "lucide-react";
 import { type CSSProperties, type ReactNode, useId, useState } from "react";
 
-import { formatBytes, formatRate } from "../lib/bytes";
-import { Banner } from "../settings/parts";
+import { formatBytes, formatRate } from "../../lib/bytes";
+import { Banner } from "../parts";
 import { type Availability, type DeviceSnapshot, type Group, readDevice, readTasks, type Task } from "./api";
 import { TaskIcon } from "./TaskIcon";
 import { type SnapshotView, useSnapshot } from "./useSnapshot";
-import "./taskmanager.css";
 
 const deviceTabs = ["总览", "CPU", "GPU", "NPU", "内存", "网络", "硬盘"] as const;
 type DeviceTab = (typeof deviceTabs)[number];

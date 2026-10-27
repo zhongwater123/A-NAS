@@ -20,7 +20,7 @@ import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useS
 import { APIError } from "../api/client";
 import type { RestoredEntry, Space, TrashItem } from "../api.generated";
 import { formatClock, formatDateTime } from "../backup/format";
-import { Dialog, EmptyState, EntryIcon, Notice, Spinner, useToasts } from "../backup/parts";
+import { Dialog, EmptyState, EntryIcon, Notice, Spinner, useToasts } from "../ui/workspace";
 import { listEntries, listSpaces } from "../files/api";
 import { formatBytes } from "../lib/bytes";
 import { fileTypeLabel } from "../lib/fileTypes";
@@ -42,7 +42,7 @@ import {
   spaceName,
   type TrashSort,
 } from "./model";
-import "../backup/backup.css";
+import "../ui/workspace.css";
 import "./trash.css";
 
 // TrashPanel lists what the signed-in account deleted, grouped by the day

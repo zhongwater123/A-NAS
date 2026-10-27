@@ -12,7 +12,7 @@ import {
 
 import { errorText } from "../api/errorMessages";
 import { formatBytes } from "../lib/bytes";
-import { useDialogs, useToasts } from "../photos/feedback";
+import { useDialogs, useToasts } from "../ui/feedback";
 import { useStoredState } from "../ui/useStoredState";
 import {
   addToPlaylist,

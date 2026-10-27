@@ -1,5 +1,6 @@
-/* The file manager's viewer: a dark stage over the window, the file's name
-   and actions above it, stepping through the folder's images. */
+/* The file viewer of 文件管理, and 分享's preview of a shared file: a dark
+   stage over the window, the file's name and actions above it, stepping
+   through the folder's images. */
 .fv-layer {
   position: absolute;
   z-index: 40;
