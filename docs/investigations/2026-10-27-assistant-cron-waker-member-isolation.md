@@ -1,6 +1,6 @@
 # 助手定时任务被成员文件阻塞，停用账号仍被唤醒
 
-状态：open，本地最小回归已复现并修复，完整门禁与 systemd 验证待完成
+状态：resolved，修复已通过本地完整门禁、竞态检测与 systemd 验证
 更新时间：2026-10-27
 
 ## 症状与复现
@@ -23,6 +23,9 @@ go test ./internal/hostops/linux -run TestDisabledAccountsStopAndMaskAssistantUn
 
 ## 验证与关联
 
+- 2026-10-27，WSL Ubuntu 24.04 的独立 ext4 副本：`make check-steps` 的全部目标分阶段通过（Web 共 64 个文件、513 个测试）；`make race-test` 通过。修正后单独重跑账号错误文案测试与 `make fmt-check ops-check docs-check`，均通过。
+- 使用当前构建脚本生成的 Debian 13/systemd 镜像运行 `bash scripts/system-test.sh anas-systemd:issue178`：353 项 PASS，0 项失败。真实产品 API 停用运行中的任务所有者，确认进程结束、活动身份查询被拒绝、六个实例不能再启动，更新成员配置后仍被屏蔽。首轮新夹具遗漏前序测试删除的助手目录，补齐准备步骤后完整重跑通过。
+- [账号停用系统测试](../../ai/assistant-spike/disable-system-test.sh)
 - [唤醒器文件与账号隔离回归](../../ai/tests/test_cron_waker.py)
 - [账号停用回归](../../internal/hostops/linux/assistant_test.go)
 - [既有活动身份查询](../../internal/accounts/session_identity_test.go)
