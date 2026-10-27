@@ -41,7 +41,7 @@ func TestValidateDocumentationSkipsDependenciesAndOtherCheckouts(t *testing.T) {
 }
 
 func TestValidateDocumentationCapsCurrentSize(t *testing.T) {
-	header := "# 当前状态\n\n更新时间：2026-10-23\n\n"
+	header := "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n"
 	for size, wantProblem := range map[int]bool{currentMaxBytes: false, currentMaxBytes + 1: true} {
 		root := t.TempDir()
 		writeRequiredDocuments(t, root)
@@ -59,7 +59,7 @@ func TestValidateDocumentationKeepsMergeAndDeployStatusInCurrent(t *testing.T) {
 	root := t.TempDir()
 	writeRequiredDocuments(t, root)
 	writeDocuments(t, root, map[string]string{
-		currentDocument: "# 当前状态\n\n更新时间：2026-10-23\n\n## 已合并尚未部署\n\n- #1\n",
+		currentDocument: "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 已合并尚未部署\n\n运行 scripts/undeployed.sh。\n",
 		"docs/runbooks/accept-features-on-experimental-nas.md": "# 验收\n\n待合并的修复部署后再验收。\n",
 		"docs/specs/music.md":           "# 音乐\n\n状态：implemented（尚未合并）\n",
 		"docs/adr/0023-share-copies.md": "# 0023\n\n状态：proposed（待合并评审，尚未部署）\n",
@@ -88,6 +88,37 @@ func TestValidateDocumentationKeepsMergeAndDeployStatusInCurrent(t *testing.T) {
 		"docs/research/labels.md:2 says 未部署",
 		"docs/research/labels.md:3 says 未部署",
 	})
+}
+
+func TestValidateDocumentationNamesOneDeployedCommit(t *testing.T) {
+	header := "# 当前状态\n\n更新时间：2026-10-27\n\n"
+	tests := map[string]struct {
+		body string
+		want []string
+	}{
+		"one commit": {body: "- 已部署：`80b602275b86`（PR #250 的合并提交，2026-10-26 安装）\n- 已合并、尚未部署的 PR 由 scripts/undeployed.sh 列出。\n"},
+		"none":       {body: "- 主干 `80b602275b86`\n", want: []string{"needs exactly one line starting with - 已部署：`<commit>`, found 0"}},
+		"two": {
+			body: "- 已部署：`80b602275b86`\n- 已部署：`bb1ec71bff65`\n",
+			want: []string{"needs exactly one line starting with - 已部署：`<commit>`, found 2"},
+		},
+		"no commit": {body: "- 已部署：主干最新\n", want: []string{currentDocument + ":5: write the deployed commit as - 已部署：`<commit>`"}},
+		"hand list": {
+			body: "- 已部署：`80b602275b86`\n" +
+				"- 已合并、尚未部署：[#245](https://github.com/zhongwater123/A-NAS/pull/245)，随下一次部署。\n" +
+				"- #203 的语音处理合并后也不部署，缺密钥。\n" +
+				"- 未部署的 #141 只是评估。<!-- doccheck: not a status -->\n",
+			want: []string{currentDocument + ":6 lists undeployed pull requests by hand"},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRequiredDocuments(t, root)
+			writeDocuments(t, root, map[string]string{currentDocument: header + test.body})
+			assertProblems(t, validateDocumentationProblems(root), test.want)
+		})
+	}
 }
 
 func TestValidateDocumentationMatchesADRStatusWithIndex(t *testing.T) {
@@ -194,7 +225,7 @@ func writeRequiredDocuments(t *testing.T, root string) {
 	for _, name := range requiredDocuments {
 		documents[name] = "# Test\n"
 	}
-	documents[currentDocument] = "# Test\n\n更新时间：2026-10-06\n"
+	documents[currentDocument] = "# Test\n\n更新时间：2026-10-06\n\n- 已部署：`80b602275b86`\n"
 	writeDocuments(t, root, documents)
 }
 

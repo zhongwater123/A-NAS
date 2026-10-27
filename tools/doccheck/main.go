@@ -61,6 +61,14 @@ var (
 	statusPhraseAllowed = "<!-- doccheck: not a status -->"
 	linkDestination     = regexp.MustCompile(`\]\([^)]*\)`)
 
+	// The current state names the commit the Experimental NAS runs on one
+	// line, which the deploy rewrites. A hand-kept list of what merged since
+	// went stale with every merge (#191); scripts/undeployed.sh lists it
+	// from Git instead.
+	deployedPrefix    = "- 已部署："
+	deployedLine      = regexp.MustCompile("^- 已部署：`[0-9a-f]{7,40}`")
+	pullRequestNumber = regexp.MustCompile(`#\d+|/pull/\d+`)
+
 	// The index lists each ADR as "- [NNNN：title](file)", followed by a
 	// parenthesised marker that starts with proposed or superseded when the
 	// ADR is not accepted.
@@ -129,6 +137,9 @@ func validateDocumentation(root string) ([]string, int) {
 	if err == nil && len(current) > currentMaxBytes {
 		problems = append(problems, fmt.Sprintf("%s is %d bytes, over the %d-byte cap: keep only current facts and next steps", currentDocument, len(current), currentMaxBytes))
 	}
+	if err == nil {
+		problems = append(problems, validateDeployedState(string(current))...)
+	}
 
 	files := 0
 	adrDocuments := map[string]string{}
@@ -170,6 +181,28 @@ func validateDocumentation(root string) ([]string, int) {
 	problems = append(problems, validateADRIndex(adrDocuments)...)
 	problems = append(problems, validateADRNumbers(adrDocuments)...)
 	return problems, files
+}
+
+// validateDeployedState checks that the current state names one deployed
+// commit and lists no undeployed pull requests by hand.
+func validateDeployedState(current string) []string {
+	var problems []string
+	deployed := 0
+	for number, line := range strings.Split(current, "\n") {
+		if strings.HasPrefix(line, deployedPrefix) {
+			deployed++
+			if !deployedLine.MatchString(line) {
+				problems = append(problems, fmt.Sprintf("%s:%d: write the deployed commit as %s`<commit>`", currentDocument, number+1, deployedPrefix))
+			}
+		}
+		if strings.Contains(line, "未部署") && pullRequestNumber.MatchString(line) && !strings.Contains(line, statusPhraseAllowed) {
+			problems = append(problems, fmt.Sprintf("%s:%d lists undeployed pull requests by hand: scripts/undeployed.sh lists them from Git", currentDocument, number+1))
+		}
+	}
+	if deployed != 1 {
+		problems = append(problems, fmt.Sprintf("%s needs exactly one line starting with %s`<commit>`, found %d", currentDocument, deployedPrefix, deployed))
+	}
+	return problems
 }
 
 func findStatusPhrases(relativePath, content string) []string {
