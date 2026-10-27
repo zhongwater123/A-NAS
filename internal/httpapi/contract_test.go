@@ -54,8 +54,10 @@ func contractChecked(t *testing.T, next http.Handler) http.Handler {
 		request.Header = r.Header.Clone()
 		route, params, err := router.FindRoute(request)
 		if err != nil {
-			if code := answerCode(recorder); !(recorder.Code == http.StatusNotFound && code == "not_found") &&
-				!(recorder.Code == http.StatusMethodNotAllowed && code == "method_not_allowed") {
+			switch code := answerCode(recorder); {
+			case recorder.Code == http.StatusNotFound && code == "not_found":
+			case recorder.Code == http.StatusMethodNotAllowed && code == "method_not_allowed":
+			default:
 				t.Errorf("find OpenAPI operation for %s %s (answered %d %s): %v", r.Method, r.URL.Path, recorder.Code, code, err)
 			}
 		} else if !guardAnswer(recorder) {
