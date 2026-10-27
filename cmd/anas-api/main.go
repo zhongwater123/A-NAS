@@ -41,6 +41,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/httpidle"
 	"github.com/zhongwater123/A-NAS/internal/media"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
@@ -335,7 +336,9 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	server := &http.Server{
-		Addr: config.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second,
+		// Uploads, downloads and video streams take as long as they keep
+		// moving; a client that stops for requestIdle is let go.
+		Addr: config.HTTPAddr, Handler: httpidle.Handler(handler, requestIdle), ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
 		// Panics in handlers and TLS or protocol errors are logged as JSON
 		// like everything else.
@@ -371,6 +374,10 @@ func run(logger *slog.Logger) error {
 	_ = tasks.Wait()
 	return err
 }
+
+// requestIdle is how long a read of a request's body or a write of its
+// response may wait on the client (internal/httpidle, #192).
+const requestIdle = time.Minute
 
 // shutdownGrace is how long stopping waits for open requests. The system
 // unit's TimeoutStopSec of 20 s leaves room for the background work that is
