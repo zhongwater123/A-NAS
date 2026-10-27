@@ -282,11 +282,11 @@ func (s *Service) clusterCandidates(ctx context.Context, p Principal, scope []an
 	if err != nil {
 		return nil, nil, err
 	}
+	defer rows.Close()
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
 		if err := rows.Scan(&c.id, &c.objectID); err != nil {
-			_ = rows.Close()
 			return nil, nil, err
 		}
 		candidates = append(candidates, c)
@@ -317,12 +317,12 @@ func (s *Service) queryVectors(ctx context.Context, model string) (map[string][]
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	vectors := make(map[string][]float32)
 	for rows.Next() {
 		var text string
 		var encoded []byte
 		if err := rows.Scan(&text, &encoded); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		vectors[text] = decodeVector(encoded)

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/capacity"
@@ -263,6 +264,12 @@ type Service struct {
 	matcher           *objects.Matcher
 	// searches keeps what image searches need for their later pages.
 	searches imageSearches
+	// shadow hands searches to RunVectorShadow while shadowing says it runs
+	// (vectorshadow.go); vectorChecked is the image collection the sync loop
+	// last found in the index (vectorsync.go).
+	shadow        chan shadowQuery
+	shadowing     atomic.Bool
+	vectorChecked atomic.Pointer[imagesCollection]
 	// peopleCalibrations say how each kind of occurrence clusters.
 	peopleCalibrations []PeopleCalibration
 
@@ -314,6 +321,7 @@ func Open(root string, options Options) (*Service, error) {
 		admits: capacity.Admits, location: options.Location, embedder: options.AI,
 		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1), aiWake: make(chan struct{}, 1),
 		searches: imageSearches{encoding: make(chan struct{}, 1)},
+		shadow:   make(chan shadowQuery, 1),
 	}
 	if options.DisableCapacityReserve {
 		service.admits = func(string, int64) (bool, error) { return true, nil }

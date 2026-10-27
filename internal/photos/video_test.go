@@ -229,6 +229,9 @@ func TestVideosTakeNoPartInLocalAI(t *testing.T) {
 		}
 		queued++
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if queued == 0 {
 		t.Fatal("the photo was not queued for AI; the test proves nothing")
 	}

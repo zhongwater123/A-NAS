@@ -1,3 +1,4 @@
+import { errorText } from "../errorMessages";
 import { Archive, ChevronLeft, CircleCheck, Database, HardDrive, Layers, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
@@ -1220,18 +1221,7 @@ function stoppedWhere(step?: StorageStep): string {
 
 // storageErrorText turns the storage API's error codes into what to do.
 function storageErrorText(error: unknown): string {
-  const code = (error as { code?: string } | undefined)?.code;
-  const texts: Record<string, string> = {
-    volume_busy: "数据卷正在转换，完成后才能加入新硬盘。",
-    volume_unavailable: "数据卷不在线或只读，暂时不能加入硬盘。",
-    invalid_layout: "这个冗余方式与硬盘数量不符。",
-    layout_too_small: "数据卷上的文件放不进所选的冗余方式，请换一种方式。",
-    disk_not_eligible: "这块硬盘不能使用：它可能已被挂载、正被其他阵列使用，或不是 SATA/NVMe 硬盘。",
-    plan_state_conflict: "另一个存储计划正在执行，或这个计划已被取消、取代，请等它结束后再试。",
-    volume_exists: "设备上已经有一个没有登记的数据卷，可能来自一次没有完成的操作。请重试那次操作来接管它，不要新建。",
-    no_conversion: "数据卷已经在转换，或者没有需要转换的内容。",
-  };
-  return (code && texts[code]) || messageOf(error);
+  return errorText(error, "storage");
 }
 
 export function volumeUsage(volume: Volume) {

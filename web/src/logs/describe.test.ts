@@ -202,6 +202,12 @@ describe("activity sentences", () => {
     expect(
       sentence(event({ action: "snapshot.missing", system: true, detail: "定时快照 2026-10-12 03:00", space: shared })),
     ).toBe("系统 移除了数据卷上已不存在的快照 定时快照 2026-10-12 03:00");
+    const unrecorded = describeActivity(event({ action: "snapshot.unrecorded", system: true, detail: "3" }), owner.id);
+    expect(plainText(unrecorded.parts)).toBe("系统 保留了 3 份 快照目录中没有记录的快照");
+    expect(unrecorded.tone).toBe("warning");
+    expect(sentence(event({ action: "snapshot.unfound", system: true, detail: "2" }))).toBe(
+      "系统 保留了 2 条 快照记录，数据卷上一份对应的快照都没有找到",
+    );
     expect(sentence(event({ action: "snapshot.folder_restored", actor: alice, detail: "snapshot:1" }))).toBe(
       "alice 从快照恢复了 1 个文件夹",
     );

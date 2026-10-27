@@ -106,6 +106,7 @@ func Open(dbPath, contentDir string, options Options) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var raw []byte
 		if err = rows.Scan(&raw); err != nil {

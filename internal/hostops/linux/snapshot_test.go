@@ -14,20 +14,20 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
 )
 
-// Prune deletes subvolumes, so it acts only on the mounted data volume; a
-// bare mount point, as before the volume is mounted, is left alone.
-func TestPruneRefusesWithoutTheDataVolume(t *testing.T) {
+// Survey reads only the mounted data volume: a bare mount point, as before
+// the volume is mounted, holds another directory's entries.
+func TestSurveyRefusesWithoutTheDataVolume(t *testing.T) {
 	runner := &recordingRunner{}
 	mount := filepath.Join(t.TempDir(), "data")
 	if err := os.MkdirAll(filepath.Join(mount, ".a-nas-snapshots", "0123456789abcdef0123456789abcdef"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: t.TempDir(), MountPoint: mount})
-	if _, err := executor.Prune(context.Background(), nil); !errors.Is(err, files.ErrVolumeUnavailable) {
-		t.Fatalf("Prune() error = %v, want ErrVolumeUnavailable", err)
+	if _, err := executor.Survey(context.Background(), nil); !errors.Is(err, files.ErrVolumeUnavailable) {
+		t.Fatalf("Survey() error = %v, want ErrVolumeUnavailable", err)
 	}
 	if len(runner.commands) != 0 {
-		t.Fatalf("Prune() ran %v without the data volume", runner.lines())
+		t.Fatalf("Survey() ran %v", runner.lines())
 	}
 }
 

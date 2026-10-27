@@ -40,7 +40,7 @@ describe("describeContainer", () => {
     [{ state: "exited", status: "Exited (0) 5 hours ago" }, "已停止", "idle", "5 小时前停止"],
     [{ state: "exited", status: "Exited (143) About a minute ago" }, "已停止", "idle", "约 1 分钟前停止 · 退出码 143"],
     [{ state: "exited", status: "Exited (1) 2 days ago" }, "异常退出", "danger", "2 天前停止 · 退出码 1"],
-    [{ state: "restarting", status: "Restarting (1) 5 seconds ago" }, "重启中", "warn", "5 秒前退出 · 退出码 1"],
+    [{ state: "restarting", status: "Restarting (1) 5 seconds ago" }, "重启中", "warn", "5 秒钟前退出 · 退出码 1"],
     [{ state: "created", status: "Created" }, "未启动", "idle", "创建后还没有启动过"],
     [{ state: "dead", status: "Dead" }, "异常", "danger", "引擎没能停止或删除这个容器"],
   ] as const)("reads %o as %s", (fields, label, tone, detail) => {

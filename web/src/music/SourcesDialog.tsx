@@ -1,3 +1,4 @@
+import { errorText } from "../errorMessages";
 import { ArrowLeft, Check, ChevronRight, Folder, FolderPlus, HardDrive, Loader2, Users, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -40,7 +41,7 @@ export function SourcesDialog({ sources, onSave, onClose }: Props) {
     try {
       await onSave(custom, custom ? chosen : []);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "保存失败");
+      setError(errorText(caught, "music"));
       setSaving(false);
     }
   };

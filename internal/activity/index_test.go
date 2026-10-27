@@ -39,23 +39,32 @@ space_id TEXT NOT NULL DEFAULT '');` + IndexStatement); err != nil {
 		if !ok {
 			t.Fatalf("query(%v) matches nothing", values)
 		}
-		rows, err := db.Query("EXPLAIN QUERY PLAN "+statement, arguments...)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var plan []string
-		for rows.Next() {
-			var id, parent, unused int
-			var detail string
-			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
-				t.Fatal(err)
-			}
-			plan = append(plan, detail)
-		}
-		_ = rows.Close()
-		joined := strings.Join(plan, "; ")
+		joined := strings.Join(queryPlan(t, db, statement, arguments), "; ")
 		if !strings.Contains(joined, "audit_events_at") || strings.Contains(joined, "TEMP B-TREE") {
 			t.Fatalf("plan for %v = %q, want a walk of audit_events_at without sorting", values, joined)
 		}
 	}
+}
+
+// queryPlan returns the steps of SQLite's plan for statement.
+func queryPlan(t *testing.T, db *sql.DB, statement string, arguments []any) []string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+statement, arguments...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return plan
 }

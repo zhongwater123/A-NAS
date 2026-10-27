@@ -1,3 +1,4 @@
+import { errorCodeText } from "../errorMessages";
 import { formatRate } from "../bytes";
 import type { ExternalUpload, Hold, LocalUpload, TransferRates, TransferSnapshot, UploadPhase } from "./store";
 import type { Transfer, TransferDirection, TransferLocation } from "./transfersApi";
@@ -312,34 +313,8 @@ export function dayLabel(value: number, now = Date.now()): string {
   }).format(day);
 }
 
-const failures: Record<string, string> = {
-  network_error: "与 NAS 的连接中断",
-  file_unreadable: "无法读取本地文件，可能已被移动或删除",
-  authentication_required: "登录已过期",
-  csrf_failed: "登录状态已变化",
-  forbidden: "没有写入这个位置的权限",
-  not_found: "目标文件夹已不存在",
-  name_conflict: "目标位置已有同名文件",
-  folder_blocked: "已有同名文件，无法创建文件夹",
-  validation_failed: "文件名无效，或 NAS 不接受这个请求",
-  name_too_long: "文件名太长：最多 255 字节，约 85 个汉字",
-  name_not_portable: "文件名含 Windows 或 macOS 不能使用的字符，或是系统保留名",
-  volume_unavailable: "数据卷离线或只读",
-  insufficient_storage: "数据卷空间不足",
-  file_too_large: "文件大于数据卷可用空间",
-  too_many_uploads: "未完成的上传过多",
-  upload_lost: "NAS 上的上传进度已丢失",
-  service_restarted: "NAS 服务重启，上传需要重新开始",
-  expired: "超过一天没有继续，已自动清除",
-  not_started: "浏览器没有开始下载，可能被拦截",
-  canceled: "已在其他设备上取消",
-  interrupted: "连接中断",
-  transfer_state: "传输状态已变化",
-  internal_error: "NAS 处理失败",
-};
-
 export function failureText(code: string): string {
-  return failures[code] ?? "传输失败";
+  return errorCodeText(code, "transfers") ?? "传输失败";
 }
 
 export const statusText: Record<ItemStatus, string> = {

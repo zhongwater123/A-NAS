@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [Web 错误提示与时间格式](web-errors-and-time.md)（implemented）
 - [只读宿主机状态](read-only-host-state.md)（implemented）
 - [Debian 只读宿主机状态](read-only-linux-host-state.md)（implemented）
 - [Web 桌面宿主机状态](web-desktop-host-state.md)（implemented）

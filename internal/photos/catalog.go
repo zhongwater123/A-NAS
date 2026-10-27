@@ -301,6 +301,61 @@ CREATE TABLE videos (
     info TEXT NOT NULL
 );
 `,
+	// 14: the vector index's outbox (docs/architecture/vector-index.md). Every
+	// change to an object's image vector, or to which libraries hold it,
+	// queues the object in the same transaction; the sync loop brings the
+	// index in line and drops the row unless it changed again meanwhile.
+	// The outbox has no foreign key: when an object goes, its row must stay
+	// for the index to drop the point. A cascade from objects deletes the
+	// vector through the embeddings trigger as well. The triggers upsert
+	// rather than INSERT OR REPLACE: an upsert that fires them, as storing a
+	// vector does, makes their own conflict handling abort.
+	`
+CREATE TABLE vector_outbox (
+    object_id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+-- The sync loop finds the newest vector's model before every batch.
+CREATE INDEX embeddings_by_age ON embeddings(derivation, created_at, object_id);
+
+-- Which collection holds the index, once the sync loop has made one.
+CREATE TABLE vector_index_state (
+    name TEXT PRIMARY KEY,
+    collection TEXT NOT NULL,
+    model TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TRIGGER embeddings_vector_outbox_insert AFTER INSERT ON embeddings BEGIN
+    INSERT INTO vector_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER embeddings_vector_outbox_update AFTER UPDATE ON embeddings BEGIN
+    INSERT INTO vector_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER embeddings_vector_outbox_delete AFTER DELETE ON embeddings BEGIN
+    INSERT INTO vector_outbox(object_id) VALUES (OLD.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_vector_outbox_insert AFTER INSERT ON assets BEGIN
+    INSERT INTO vector_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_vector_outbox_delete AFTER DELETE ON assets BEGIN
+    INSERT INTO vector_outbox(object_id) VALUES (OLD.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_vector_outbox_update AFTER UPDATE OF trashed_at, library_id, object_id ON assets
+WHEN OLD.trashed_at IS NOT NEW.trashed_at OR OLD.library_id IS NOT NEW.library_id OR OLD.object_id IS NOT NEW.object_id
+BEGIN
+    INSERT INTO vector_outbox(object_id) VALUES (OLD.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+    INSERT INTO vector_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {

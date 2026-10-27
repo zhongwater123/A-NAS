@@ -1,3 +1,6 @@
+import { calendarLabel, calendarMoment, relativeUnit } from "../format/time";
+import { relativeTime } from "../format/time";
+import { errorCodeText } from "../errorMessages";
 import type { Space } from "../api";
 
 import type { Frequency, RetentionTiers, ScheduleSettings, Snapshot, SnapshotSchedule } from "./backupApi";
@@ -7,63 +10,32 @@ export const weekdayShort = ["日", "一", "二", "三", "四", "五", "六"];
 
 export const formatCount = (count: number) => count.toLocaleString("zh-CN");
 
-const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
-const dayDifference = (date: Date, now: Date) =>
-  Math.round((startOfDay(now).getTime() - startOfDay(date).getTime()) / 86_400_000);
-
-export const formatClock = (value: string | Date) =>
-  new Date(value).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+export { formatClock } from "../format/time";
 
 // formatDay names a calendar day: 今天, 昨天, 10月10日 周六, or with the year
 // when it is not this year.
 export function formatDay(value: string | Date, now = new Date()): string {
-  const date = new Date(value);
-  const days = dayDifference(date, now);
-  if (days === 0) return "今天";
-  if (days === 1) return "昨天";
-  if (days === -1) return "明天";
-  const month = `${date.getMonth() + 1}月${date.getDate()}日`;
-  return date.getFullYear() === now.getFullYear()
-    ? `${month} ${weekdays[date.getDay()]}`
-    : `${date.getFullYear()}年${month}`;
+  return calendarLabel(value, now, new Date(value).getFullYear() === now.getFullYear() ? "short" : undefined);
 }
 
 // formatShortDay names a day without its weekday, for narrow places.
 export function formatShortDay(value: string | Date, now = new Date()): string {
-  const date = new Date(value);
-  const days = dayDifference(date, now);
-  if (Math.abs(days) <= 1) return formatDay(date, now);
-  const month = `${date.getMonth() + 1}月${date.getDate()}日`;
-  return date.getFullYear() === now.getFullYear() ? month : `${date.getFullYear()}年${month}`;
+  return calendarLabel(value, now);
 }
 
 export function formatDateTime(value: string | Date, now = new Date()): string {
-  const date = new Date(value);
-  const days = dayDifference(date, now);
-  const day =
-    Math.abs(days) <= 1
-      ? formatDay(date, now)
-      : date.getFullYear() === now.getFullYear()
-        ? `${date.getMonth() + 1}月${date.getDate()}日`
-        : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
-  return `${day} ${formatClock(date)}`;
+  return calendarMoment(value, now);
 }
 
 export function formatRelative(value: string | Date, now = new Date()): string {
-  const seconds = (now.getTime() - new Date(value).getTime()) / 1000;
-  if (seconds < 60) return "刚刚";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
-  if (seconds < 86_400) return `${Math.floor(seconds / 3600)} 小时前`;
-  const days = dayDifference(new Date(value), now);
-  if (days < 30) return `${days} 天前`;
-  return formatDateTime(value, now);
+  return relativeTime(value, now, { withTime: true });
 }
 
 // formatUntil words a future time: 12 分钟后, 今天 15:00, 明天 03:00 …
 export function formatUntil(value: string | Date, now = new Date()): string {
   const seconds = (new Date(value).getTime() - now.getTime()) / 1000;
   if (seconds < 90) return "即将开始";
-  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟后`;
+  if (seconds < 3600) return relativeUnit(Math.round(seconds / 60), "minute");
   return formatDateTime(value, now);
 }
 
@@ -123,7 +95,7 @@ export const originLabel = (snapshot: Pick<Snapshot, "origin">) => (snapshot.ori
 export function runErrorText(schedule: SnapshotSchedule): string {
   switch (schedule.lastRun?.error) {
     case "volume_unavailable":
-      return "数据卷不可用";
+      return errorCodeText("volume_unavailable")!;
     case "space_unavailable":
       return "空间已不存在";
     default:

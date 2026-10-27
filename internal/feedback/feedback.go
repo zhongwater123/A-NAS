@@ -177,12 +177,12 @@ FROM items ORDER BY created_at DESC, id`)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	items := []Item{}
 	byID := map[string]int{}
 	for rows.Next() {
 		item, err := scanItem(rows)
 		if err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		byID[item.ID] = len(items)
@@ -343,10 +343,10 @@ FROM items WHERE id = ?`, id))
 	if err != nil {
 		return Item{}, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var image Image
 		if err := rows.Scan(&image.ID, &image.ContentType, &image.SizeBytes); err != nil {
-			_ = rows.Close()
 			return Item{}, err
 		}
 		item.Images = append(item.Images, image)

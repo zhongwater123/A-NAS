@@ -1,3 +1,4 @@
+import { errorCodeText } from "../errorMessages";
 import {
   Clock3,
   Disc3,
@@ -229,7 +230,7 @@ function LibraryCard({
     detail = scan!.total
       ? `${scan!.done.toLocaleString("zh-CN")} / ${scan!.total.toLocaleString("zh-CN")}`
       : `已有 ${status!.tracks.toLocaleString("zh-CN")} 首`;
-  } else if (scan?.error === "volume_unavailable") detail = "数据卷不可用，稍后重试";
+  } else if (scan?.error === "volume_unavailable") detail = errorCodeText("volume_unavailable")!;
   else if (scan?.error) detail = "上次整理没有完成";
   return (
     <div

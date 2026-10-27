@@ -360,6 +360,7 @@ describe("classifyUploadError", () => {
       originalResponse: { getStatus: () => status, getBody: () => body },
     });
   it("tells what the queue should do", () => {
+    expect(classifyUploadError(new Error("NotReadableError"))).toBeInstanceOf(APIError);
     expect(classifyUploadError(new Error("NotReadableError")).kind).toBe("file");
     expect(classifyUploadError(failure("PATCH", 409, "ERR_MISMATCHED_OFFSET: mismatched offset")).kind).toBe("server");
     expect(classifyUploadError(failure("POST", 409, JSON.stringify({ error: { code: "folder_blocked" } }))).kind).toBe(
@@ -383,7 +384,8 @@ describe("classifyUploadError", () => {
       originalResponse: null,
       causingError: new APIError(403, "not_allowed_for_vnas", "没有允许 VNAS 这一步，什么都没有改"),
     });
-    expect(classifyUploadError(refused)).toEqual({
+    expect(classifyUploadError(refused)).toMatchObject({
+      status: 403,
       kind: "denied",
       code: "not_allowed_for_vnas",
       message: "没有允许 VNAS 这一步，什么都没有改",

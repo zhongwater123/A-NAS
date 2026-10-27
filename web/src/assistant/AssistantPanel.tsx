@@ -1,3 +1,5 @@
+import { formatBytes } from "../bytes";
+import { relativeTime as formatRelativeTime } from "../format/time";
 // AI 助手 window, named VNAS on the desktop (ADR 0024 decision 9). The thread is assistant-ui — the chat
 // library Hermes Desktop is built on — fed with Hermes Desktop's own transcript
 // model over its own JSON-RPC client; the conversation list, confirmation cards
@@ -1756,16 +1758,6 @@ const STEP_PARTS = { Reasoning, tools: { Fallback: ToolActivity } };
 const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: SystemNotice };
 
 // Sizes in 1024 units, as everywhere in A-NAS (docs/specs/size-units.md).
-function formatBytes(bytes: number) {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${unit === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
-}
 
 function short(text: string) {
   const line = text.split("\n")[0];
@@ -1777,10 +1769,5 @@ function friendlyPath(path: string) {
 }
 
 function relativeTime(seconds: number) {
-  const elapsed = Date.now() / 1000 - seconds;
-  if (elapsed < 60) return "刚刚";
-  if (elapsed < 3600) return `${Math.floor(elapsed / 60)} 分钟前`;
-  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)} 小时前`;
-  const date = new Date(seconds * 1000);
-  return `${date.getMonth() + 1}月${date.getDate()}日`;
+  return formatRelativeTime(seconds * 1000, Date.now(), { dateAfterDays: 1 });
 }

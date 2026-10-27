@@ -1,3 +1,4 @@
+import { formatDate } from "../format/time";
 // 记忆: what the assistant carries into every new conversation — its notes, what
 // it noted about the member, and the skills it learned — from Hermes's own
 // learning graph. The member can read each in full and delete it, or clear
@@ -369,6 +370,5 @@ function ClearAll({ onClear }: { onClear(conversations: boolean): Promise<void> 
 }
 
 function dateText(seconds: number) {
-  const date = new Date(seconds * 1000);
-  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+  return formatDate(seconds * 1000, { year: "numeric", month: "long", day: "numeric" });
 }
