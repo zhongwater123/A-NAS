@@ -59,8 +59,9 @@ func TestValidateDocumentationKeepsMergeAndDeployStatusInCurrent(t *testing.T) {
 	root := t.TempDir()
 	writeRequiredDocuments(t, root)
 	writeDocuments(t, root, map[string]string{
-		currentDocument: "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 已合并尚未部署\n\n运行 scripts/undeployed.sh。\n",
-		"docs/runbooks/accept-features-on-experimental-nas.md": "# 验收\n\n待合并的修复部署后再验收。\n",
+		currentDocument:                 "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 已合并尚未部署\n\n运行 scripts/undeployed.sh。\n",
+		acceptanceRunbook:               "# 验收\n\n待合并的修复部署后再验收：[快照](../investigations/2026-10-21-snapshots.md)。\n",
+		investigationIndex:              "- [2026-10-21：快照](2026-10-21-snapshots.md)\n",
 		"docs/specs/music.md":           "# 音乐\n\n状态：implemented（尚未合并）\n",
 		"docs/adr/0023-share-copies.md": "# 0023\n\n状态：proposed（待合并评审，尚未部署）\n",
 		"docs/adr/README.md":            "- [0023：分享](0023-share-copies.md)（proposed）\n",
@@ -199,6 +200,45 @@ func TestValidateDocumentationKeepsADRNumbersApart(t *testing.T) {
 		"docs/adr/0002-clash.md and docs/adr/0002-second.md share the number 0002",
 		"docs/adr/README.md still holds 0003 for a branch, but docs/adr/0003-arrived.md has it",
 		"docs/adr/README.md holds 0005 more than once",
+	})
+}
+
+func TestValidateDocumentationKeepsInvestigationStatusInOnePlace(t *testing.T) {
+	root := t.TempDir()
+	writeRequiredDocuments(t, root)
+	writeDocuments(t, root, map[string]string{
+		"docs/investigations/2026-10-01-open.md":         "# 调查\n\n状态：open\n更新时间：2026-10-01\n",
+		"docs/investigations/2026-10-02-checked.md":      "# 调查\n\n状态：fixed（PR #2），待实机验收\n",
+		"docs/investigations/2026-10-03-unchecked.md":    "# 调查\n\n状态：fixed，待实机验收\n",
+		"docs/investigations/2026-10-04-resolved.md":     "# 调查\n\n状态：resolved；回归测试即证据，实机无可补充\n",
+		"docs/investigations/2026-10-05-superseded.md":   "# 调查\n\n状态：superseded by ADR 0008\n",
+		"docs/investigations/2026-10-06-pending.md":      "# 调查\n\n状态：fixed locally；Experimental NAS verification pending\n",
+		"docs/investigations/2026-10-07-fix-in-pr.md":    "# 调查\n\n状态：fix in PR #39\n",
+		"docs/investigations/2026-10-08-no-status.md":    "# 调查\n\n症状。\n",
+		"docs/investigations/2026-10-09-unlisted.md":     "# 调查\n\n状态：resolved\n",
+		"docs/investigations/2026-10-10-index-status.md": "# 调查\n\n状态：resolved\n",
+		"docs/investigations/_TEMPLATE.md":               "# <问题标题>\n\n状态：open\n",
+		"docs/investigations/README.md": "# 调查记录\n\n" +
+			"- [2026-10-01：开放](2026-10-01-open.md)\n" +
+			"- [2026-10-02：已核对](2026-10-02-checked.md)\n" +
+			"- [2026-10-03：未核对](2026-10-03-unchecked.md)\n" +
+			"- [2026-10-04：已解决](2026-10-04-resolved.md)\n" +
+			"- [2026-10-05：已替代](2026-10-05-superseded.md)\n" +
+			"- [2026-10-06：待验收](2026-10-06-pending.md)\n" +
+			"- [2026-10-07：旧写法](2026-10-07-fix-in-pr.md)\n" +
+			"- [2026-10-08：无状态](2026-10-08-no-status.md)\n" +
+			"- [2026-10-10：索引带状态](2026-10-10-index-status.md)（resolved）\n" +
+			"\n从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建。\n",
+		acceptanceRunbook: "# 验收\n\n- 核对（[调查](../investigations/2026-10-02-checked.md)）。\n" +
+			"- 核对（[调查](../investigations/2026-10-06-pending.md#后续工作)）。\n",
+	})
+
+	assertProblems(t, validateDocumentationProblems(root), []string{
+		"docs/investigations/2026-10-03-unchecked.md is fixed, but " + acceptanceRunbook + " has no check that links it",
+		"docs/investigations/2026-10-07-fix-in-pr.md: start the 状态 line under the title with open, fixed, resolved or superseded",
+		"docs/investigations/2026-10-08-no-status.md: start the 状态 line",
+		"docs/investigations/2026-10-09-unlisted.md is not listed in " + investigationIndex,
+		investigationIndex + " gives 2026-10-10-index-status.md a status",
 	})
 }
 

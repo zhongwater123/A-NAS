@@ -26,7 +26,7 @@
 3. 文档中的结论要链接到相关代码、测试、ADR、调查或运行手册。
 4. 当前状态使用现在时，只保留仍会影响下一次工作的内容。
 5. 从模板创建文档后删除所有占位符；被替代的内容标明状态并链接替代项。
-6. 合并与部署进度只写在当前状态，等待实机验收的功能写在[已部署功能的实机验收手册](runbooks/accept-features-on-experimental-nas.md)。调查记录的状态写到修复是否已在实机证实为止（如 `fixed locally；待部署验收`），证实后改为 `resolved`。其他文档写实现阶段；写下已经发生的部署或外部项目的状态时带上日期，例如“2026-10-10 部署 `6833c7637f73`”。`make docs-check` 会拒绝其他文档中表示合并或部署进度的固定说法、过大的当前状态、与 ADR 索引不一致的 ADR 状态，以及指向不存在的文件或标题的链接，规则与上限见 [`tools/doccheck`](../tools/doccheck/main.go)；某行按本义用到这些词时（例如合并两个人物），在行尾加 `<!-- doccheck: not a status -->`。
+6. 合并与部署进度只写在当前状态，等待实机验收的功能写在[已部署功能的实机验收手册](runbooks/accept-features-on-experimental-nas.md)。调查记录的状态只写在各篇的状态行：修复合并后写 `fixed`，并在验收手册中加一项链接它；实机证实后改为 `resolved`，状态词见[调查索引](investigations/README.md#状态)。其他文档写实现阶段；写下已经发生的部署或外部项目的状态时带上日期，例如“2026-10-10 部署 `6833c7637f73`”。`make docs-check` 会拒绝其他文档中表示合并或部署进度的固定说法、过大的当前状态、与 ADR 索引不一致的 ADR 状态，以及指向不存在的文件或标题的链接，规则与上限见 [`tools/doccheck`](../tools/doccheck/main.go)；某行按本义用到这些词时（例如合并两个人物），在行尾加 `<!-- doccheck: not a status -->`。
 7. 实验 NAS 运行的版本只记在当前状态的一行 ``- 已部署：`<提交>`（……）``，部署者安装后改写这一行。合并后还没部署的 PR 不手写：[`scripts/undeployed.sh`](../scripts/undeployed.sh) 按这一行从 Git 列出之后合入的 PR；`make docs-check` 要求这一行恰有一条，并拒绝当前状态中手写的这类 PR 列表。
 
 ## 完成标准

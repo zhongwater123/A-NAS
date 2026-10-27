@@ -16,6 +16,10 @@ const (
 	adrDirectory    = "docs/adr"
 	adrIndex        = "docs/adr/README.md"
 
+	investigationDirectory = "docs/investigations"
+	investigationIndex     = "docs/investigations/README.md"
+	acceptanceRunbook      = "docs/runbooks/accept-features-on-experimental-nas.md"
+
 	// Every session that continues earlier work reads CURRENT.md first
 	// (AGENTS.md). It had grown to 67 KB of merge and deploy history before
 	// #227 cut it to about 6 KB of current facts (#191). 12 KiB is twice
@@ -52,7 +56,7 @@ var (
 	// it counts only where a document labels its current state: on a 状态
 	// line, or in parentheses such as an index entry's (……，未部署).
 	labelPhrases        = []string{"未部署"}
-	statusPhraseKeepers = map[string]bool{currentDocument: true, "docs/runbooks/accept-features-on-experimental-nas.md": true}
+	statusPhraseKeepers = map[string]bool{currentDocument: true, acceptanceRunbook: true}
 	// A document's 状态 line; the group is the English status word it starts
 	// with, if any.
 	statusLine = regexp.MustCompile(`^\**(?:状态|Status)\**[：:][ \t]*([A-Za-z]*)`)
@@ -80,6 +84,15 @@ var (
 	// parallel branches do not take the same number (#191).
 	adrPlaceholder = regexp.MustCompile(`^\s*[-*]\s+(\d{4})[：:]`)
 	adrStatuses    = map[string]bool{"proposed": true, "accepted": true, "superseded": true}
+
+	// An investigation's status lives only on its own 状态 line; the index
+	// once kept a second copy that drifted from it (#191). fixed means the
+	// fix has merged and waits for the acceptance runbook's check on the
+	// Experimental NAS, so that runbook must link the investigation.
+	investigationFileName    = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-.+\.md$`)
+	investigationStatuses    = map[string]bool{"open": true, "fixed": true, "resolved": true, "superseded": true}
+	indexEntry               = regexp.MustCompile(`^\s*[-*]\s+\[[^\]]*\]\(([^)]+)\)(.*)$`)
+	investigationIndexStatus = regexp.MustCompile(`^\s*[（(]\s*(?i:open|fixed|resolved|superseded)\b`)
 )
 
 func main() {
@@ -142,7 +155,7 @@ func validateDocumentation(root string) ([]string, int) {
 	}
 
 	files := 0
-	adrDocuments := map[string]string{}
+	adrDocuments, investigations, runbook := map[string]string{}, map[string]string{}, ""
 	err = filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -169,8 +182,13 @@ func validateDocumentation(root string) ([]string, int) {
 		if !statusPhraseKeepers[relativePath] {
 			problems = append(problems, findStatusPhrases(relativePath, string(data))...)
 		}
-		if path.Dir(relativePath) == adrDirectory {
+		switch {
+		case path.Dir(relativePath) == adrDirectory:
 			adrDocuments[relativePath] = string(data)
+		case path.Dir(relativePath) == investigationDirectory:
+			investigations[relativePath] = string(data)
+		case relativePath == acceptanceRunbook:
+			runbook = string(data)
 		}
 		return nil
 	})
@@ -180,7 +198,55 @@ func validateDocumentation(root string) ([]string, int) {
 
 	problems = append(problems, validateADRIndex(adrDocuments)...)
 	problems = append(problems, validateADRNumbers(adrDocuments)...)
+	problems = append(problems, validateInvestigations(investigations, runbook)...)
 	return problems, files
+}
+
+// validateInvestigations checks that the index lists every investigation
+// without a status, that each 状态 line starts with a known status, and that
+// the acceptance runbook links every fixed one. documents maps the
+// slash-separated paths of the Markdown files in docs/investigations to their
+// contents; runbook is the acceptance runbook's.
+func validateInvestigations(documents map[string]string, runbook string) []string {
+	var problems []string
+	index, indexed := documents[investigationIndex]
+	listed := map[string]bool{}
+	for line := range strings.SplitSeq(index, "\n") {
+		match := indexEntry.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		name := path.Clean(normalizeLinkTarget(match[1]))
+		if !investigationFileName.MatchString(name) {
+			continue
+		}
+		listed[name] = true
+		if investigationIndexStatus.MatchString(match[2]) {
+			problems = append(problems, fmt.Sprintf("%s gives %s a status: keep it only on the investigation's 状态 line", investigationIndex, name))
+		}
+	}
+
+	for _, name := range slices.Sorted(maps.Keys(documents)) {
+		base := path.Base(name)
+		if !investigationFileName.MatchString(base) {
+			continue
+		}
+		if indexed && !listed[base] {
+			problems = append(problems, fmt.Sprintf("%s is not listed in %s", name, investigationIndex))
+		}
+		match, _ := headerStatus(documents[name])
+		status := ""
+		if match != nil {
+			status = strings.ToLower(match[1])
+		}
+		switch {
+		case !investigationStatuses[status]:
+			problems = append(problems, fmt.Sprintf("%s: start the 状态 line under the title with open, fixed, resolved or superseded", name))
+		case status == "fixed" && !strings.Contains(runbook, "investigations/"+base):
+			problems = append(problems, fmt.Sprintf("%s is fixed, but %s has no check that links it: add one, or mark it resolved and say why the Experimental NAS has nothing to add", name, acceptanceRunbook))
+		}
+	}
+	return problems
 }
 
 // validateDeployedState checks that the current state names one deployed
@@ -292,7 +358,7 @@ func validateADRIndex(documents map[string]string) []string {
 			problems = append(problems, fmt.Sprintf("%s is not listed in %s", name, adrIndex))
 			continue
 		}
-		match, misplaced := adrStatus(documents[name])
+		match, misplaced := headerStatus(documents[name])
 		if misplaced {
 			problems = append(problems, fmt.Sprintf("%s: move the 状态 line directly under the title so the index can be checked", name))
 			continue
@@ -351,11 +417,11 @@ func validateADRNumbers(documents map[string]string) []string {
 	return problems
 }
 
-// adrStatus matches the 状态 line against the first line under an ADR's
+// headerStatus matches the 状态 line against the first line under a document's
 // title, where it goes. misplaced reports a 状态 line further down but before
 // the first section, which would otherwise escape the index check; one inside
 // a section belongs to the body.
-func adrStatus(content string) (match []string, misplaced bool) {
+func headerStatus(content string) (match []string, misplaced bool) {
 	titled, header := false, true
 	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
