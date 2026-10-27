@@ -262,7 +262,7 @@ it("retries an uncertain send with the same key and preserves the draft", async 
       if (String(url).endsWith("/members")) return json({ items: [{ id: "bob", username: "Bob" }] });
       if (init?.method === "POST") {
         requests.push(JSON.parse(init.body));
-        if (requests.length === 1) throw new Error("连接中断");
+        if (requests.length === 1) throw new TypeError("Failed to fetch");
         return json(share);
       }
       return json({ items: [] });
@@ -590,7 +590,7 @@ it("records a visible share view even if loading saved jobs fails", async () => 
   stubAPI(
     vi.fn(async (url) => {
       const path = String(url);
-      if (path.endsWith("/jobs")) throw new Error("保存任务暂不可用");
+      if (path.endsWith("/jobs")) return apiError(503, "shares_unavailable", "jobs unavailable");
       if (path.endsWith("/view")) {
         viewed = true;
         return json(share);
@@ -606,7 +606,7 @@ it("records a visible share view even if loading saved jobs fails", async () => 
     </SharesProvider>,
   );
   await userEvent.click(await screen.findByRole("button", { name: /计划.txt/ }));
-  expect(await screen.findByText("保存任务暂不可用")).toBeTruthy();
+  expect(await screen.findByText("分享服务暂不可用，请稍后重试")).toBeTruthy();
   await waitFor(() => expect(viewed).toBe(true));
 });
 

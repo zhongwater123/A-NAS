@@ -1,3 +1,4 @@
+import { calendarDays, calendarDate, relativeUnit } from "../format/time";
 import type { ActivityAccount, ActivityCategory, ActivityEvent, LogLevel } from "./logsApi";
 
 // A sentence is plain text with emphasised names in it.
@@ -333,20 +334,15 @@ export function plainText(parts: Part[]): string {
     .replace(/ (?=[，、。])/g, "");
 }
 
-const weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
-
 export function sameDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  return calendarDays(a, b) === 0;
 }
 
 // dayLabel heads a day of the activity log.
 export function dayLabel(value: Date, now = new Date()): string {
-  const date = `${value.getMonth() + 1}月${value.getDate()}日 ${weekdays[value.getDay()]}`;
-  if (sameDay(value, now)) return `今天 · ${date}`;
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (sameDay(value, yesterday)) return `昨天 · ${date}`;
-  return value.getFullYear() === now.getFullYear() ? date : `${value.getFullYear()}年${date}`;
+  const days = calendarDays(value, now);
+  const date = calendarDate(value, now, "long");
+  return days === 0 || days === -1 ? `${relativeUnit(days, "day", "auto")} · ${date}` : date;
 }
 
 const two = (value: number) => String(value).padStart(2, "0");

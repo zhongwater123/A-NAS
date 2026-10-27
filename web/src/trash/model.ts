@@ -1,6 +1,6 @@
-import { APIError, type RestoreConflict, type RestoredEntry, type Space, type TrashItem } from "../api";
+import { errorText } from "../errorMessages";
+import { type RestoreConflict, type RestoredEntry, type Space, type TrashItem } from "../api";
 import { formatDay } from "../backup/format";
-import { nameNotPortableText, nameTooLongText } from "../fileNames";
 
 export type TrashSort = "deleted" | "expiry";
 
@@ -134,26 +134,5 @@ export function restoredText(
 }
 
 export function messageOf(error: unknown): string {
-  if (error instanceof APIError) {
-    switch (error.code) {
-      case "forbidden":
-        return "只有删除它的人可以恢复或永久删除";
-      case "not_found":
-        return "这个项目已不在回收站，请刷新后重试";
-      case "name_conflict":
-        return "目标位置已有同名项目";
-      case "volume_unavailable":
-        return "数据卷当前不可用，请检查存储状态";
-      case "validation_failed":
-        return "名称不符合要求";
-      case "name_too_long":
-        return nameTooLongText;
-      case "name_not_portable":
-        return nameNotPortableText;
-      case "network_error":
-        return "网络连接中断";
-    }
-    return error.status >= 500 ? "服务暂时不可用，请稍后重试" : error.message;
-  }
-  return "请求失败，请稍后重试";
+  return errorText(error, "trash");
 }

@@ -45,37 +45,23 @@ export function nicknameProblem(value: string): string | undefined {
 }
 
 // accountErrorText words the API's account errors.
+export const accountErrors: Record<string, string> = {
+  invalid_credentials: "账号或密码不正确",
+  invalid_username: usernameText,
+  username_unavailable: "这个账号名已被使用、留给系统，或与设备上已有的 Linux 账号重名，请换一个",
+  invalid_password: `密码需为 ${passwordRuleText}，不能包含换行等控制字符`,
+  password_unchanged: "新密码不能与当前密码相同",
+  reauthentication_failed: "密码不正确",
+  setup_complete: "设备已经启用，请刷新页面后登录",
+  setup_local_only: "只能在 NAS 本机屏幕上（或经 SSH 隧道）启用设备",
+  smb_disable_pending:
+    "账号已禁用，网页登录已失效；SMB 凭据暂未停用。可以再点一次“禁用账号”重试，产品服务重启时也会自动停用",
+  credential_provision_failed: "SMB 凭据没有设置成功，请稍后重试",
+  invalid_nickname: "昵称最多 24 个字符，不能包含换行或不可见的格式字符",
+  nickname_unavailable: "这个名字已经是其他人的账号名或昵称，请换一个",
+  unsupported_image: "这张图片无法读取。请选择 JPEG、PNG、GIF 或 WebP 图片",
+  image_too_large: "图片太大了，请选择 12 MB 以内的图片",
+};
 export function accountErrorText(error: unknown): string | undefined {
-  if (!(error instanceof APIError)) return undefined;
-  switch (error.code) {
-    case "invalid_credentials":
-      return "账号或密码不正确";
-    case "invalid_username":
-      return usernameText;
-    case "username_unavailable":
-      return "这个账号名已被使用、留给系统，或与设备上已有的 Linux 账号重名，请换一个";
-    case "invalid_password":
-      return `密码需为 ${passwordRuleText}，不能包含换行等控制字符`;
-    case "password_unchanged":
-      return "新密码不能与当前密码相同";
-    case "reauthentication_failed":
-      return "密码不正确";
-    case "setup_complete":
-      return "设备已经启用，请刷新页面后登录";
-    case "setup_local_only":
-      return "只能在 NAS 本机屏幕上（或经 SSH 隧道）启用设备";
-    case "smb_disable_pending":
-      return "账号已禁用，网页登录已失效；SMB 凭据暂未停用。可以再点一次“禁用账号”重试，产品服务重启时也会自动停用";
-    case "credential_provision_failed":
-      return "SMB 凭据没有设置成功，请稍后重试";
-    case "invalid_nickname":
-      return "昵称最多 24 个字符，不能包含换行或不可见的格式字符";
-    case "nickname_unavailable":
-      return "这个名字已经是其他人的账号名或昵称，请换一个";
-    case "unsupported_image":
-      return "这张图片无法读取。请选择 JPEG、PNG、GIF 或 WebP 图片";
-    case "image_too_large":
-      return "图片太大了，请选择 12 MB 以内的图片";
-  }
-  return undefined;
+  return error instanceof APIError && Object.hasOwn(accountErrors, error.code) ? accountErrors[error.code] : undefined;
 }

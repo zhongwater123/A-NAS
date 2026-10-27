@@ -1,6 +1,6 @@
+import { errorText } from "../errorMessages";
 import { CircleAlert, CircleCheck, RefreshCw, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { accountErrorText } from "../accountRules";
 import type { Person } from "../people";
 import { PersonAvatar } from "../PersonAvatar";
 
@@ -114,6 +114,6 @@ export function RefreshButton({ label, busy, onClick }: { label: string; busy: b
   );
 }
 
-export function messageOf(error: unknown) {
-  return accountErrorText(error) ?? (error instanceof Error ? error.message : "请求失败");
+export function messageOf(error: unknown): string {
+  return errorText(error);
 }

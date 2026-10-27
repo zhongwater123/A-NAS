@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { aheadOf, StreamFeed } from "./streamFeed";
+import { onSessionEnded } from "../api";
 
 // Each chunk of the fake stream holds five seconds of video.
 const chunkSeconds = 5;
@@ -103,6 +104,29 @@ afterEach(() => {
 });
 
 describe("StreamFeed", () => {
+  it("ends an expired session and never shows server prose on a failed stream", async () => {
+    const ended = vi.fn();
+    const stop = onSessionEnded(ended);
+    const onError = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: { code: "unknown", message: "private server detail" } }), {
+            status: 401,
+          }),
+      ),
+    );
+    const feed = new StreamFeed("/stream", "video/mp4", () => null, { onError, onFallback: vi.fn() });
+    try {
+      FakeSource.last.open();
+      await vi.waitFor(() => expect(onError).toHaveBeenCalledWith("登录已失效或账号不可用，请重新登录"));
+      expect(ended).toHaveBeenCalledOnce();
+    } finally {
+      feed.close();
+      stop();
+    }
+  });
   it("reads until enough is buffered ahead, then waits for playback", async () => {
     vi.useFakeTimers();
     const video = { currentTime: 0 } as HTMLVideoElement;

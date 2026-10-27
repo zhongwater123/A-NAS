@@ -1,3 +1,5 @@
+import { errorText } from "../errorMessages";
+import { APIError } from "../api";
 import {
   Activity,
   BookOpen,
@@ -14,7 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { AppsAPIError, CatalogApp, InstallPlan, ServiceRuntime } from "../appsApi";
+import { CatalogApp, InstallPlan, ServiceRuntime } from "../appsApi";
 
 export interface Category {
   id: string;
@@ -160,24 +162,16 @@ export function search(apps: CatalogApp[], query: string): CatalogApp[] {
 }
 
 export function describeError(error: unknown): string {
-  if (!(error instanceof AppsAPIError)) return "操作失败，请稍后重试";
-  // Conflict messages end with the port or container that is taken.
-  const taken = error.detail.split(": ").pop();
-  const messages: Record<string, string> = {
-    plan_changed: "应用清单已变化，请重新确认安装计划",
-    app_busy: "另一个应用正在安装或卸载，请稍候",
-    already_installed: "该应用已经安装",
-    not_installed: "该应用尚未安装",
-    port_in_use: `端口已被占用${taken ? `（${taken}）` : ""}`,
-    name_in_use: `容器名已被占用${taken ? `（${taken}）` : ""}`,
-    policy_violation: "该应用不符合安装安全策略",
-    address_pool_missing: "Docker 尚未配置 A-NAS 网络地址池，暂不能安装会新建网络的应用",
-    docker_runtime_outdated: "Docker 或 Docker Compose 版本过旧，无法把应用限制在它的文件夹内，请先升级",
-    volume_unavailable: "数据卷当前不可用，请检查存储状态后重试",
-    apps_unavailable: "无法连接容器代理",
-    network_error: "无法连接 A-NAS",
-  };
-  return messages[error.code] ?? "容器引擎未能完成操作";
+  const text = errorText(error, "apps");
+  if (error instanceof APIError && ["port_in_use", "name_in_use"].includes(error.code)) {
+    const detail = error.message.split(": ").slice(1).join(": ");
+    const taken =
+      error.code === "port_in_use"
+        ? /^(\d{1,5}(?:\/(?:tcp|udp))?)(?: is used by .+)?$/.exec(detail)?.[1]
+        : /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.exec(detail)?.[0];
+    if (taken) return `${text}（${taken}）`;
+  }
+  return text;
 }
 
 // Elapsed time of a running job as m:ss, ticking once a second.

@@ -1,4 +1,4 @@
-import { apiFetch, call, client } from "../api";
+import { APIError, apiFetch, call, client, failure } from "../api";
 import type { CreateMemberShare, MemberShareEntry, operations, SaveMemberShare } from "../api.generated";
 
 export type ShareEntry = MemberShareEntry;
@@ -45,7 +45,7 @@ export async function readText(id: string, entry: ShareEntry, signal: AbortSigna
     credentials: "same-origin",
     headers: { Range: "bytes=0-262143" },
   });
-  if (!response.ok) throw new Error(`无法预览文件 (${response.status})`);
+  if (!response.ok) throw failure(response.status, await response.json().catch(() => undefined));
   if (!response.body) return "";
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -68,7 +68,7 @@ export async function readText(id: string, entry: ShareEntry, signal: AbortSigna
 // but getRandomValues remains available. These IDs deduplicate requests only.
 export function requestKey(): string {
   if (typeof globalThis.crypto?.getRandomValues !== "function") {
-    throw new Error("浏览器无法生成请求标识，请更新浏览器后重试。");
+    throw new APIError(0, "request_id_unavailable");
   }
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
   bytes[6] = (bytes[6] & 0x0f) | 0x40;

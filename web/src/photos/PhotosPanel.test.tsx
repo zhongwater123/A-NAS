@@ -1272,7 +1272,8 @@ describe("PhotosPanel search and viewing", () => {
     const box = screen.getByRole("searchbox", { name: "搜索照片" });
     fireEvent.change(box, { target: { value: "猫\uD800" } });
     fireEvent.submit(box.closest("form")!);
-    expect(await screen.findByText("URI malformed")).toBeTruthy();
+    expect(await screen.findByText("请求失败，请稍后重试")).toBeTruthy();
+    expect(screen.queryByText("URI malformed")).toBeNull();
     expect(screen.getByRole("searchbox", { name: "搜索照片" })).toBeTruthy();
   });
 

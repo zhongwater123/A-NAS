@@ -1,13 +1,8 @@
+import { errorText } from "../errorMessages";
 import { FormEvent, useId, useState } from "react";
 
-import { APIError, Session, login, setupAdministrator } from "../api";
-import {
-  accountErrorText,
-  passwordProblem,
-  passwordRuleText,
-  usernameProblem,
-  usernameRuleText,
-} from "../accountRules";
+import { Session, login, setupAdministrator } from "../api";
+import { passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "../accountRules";
 import { isLocalConsole } from "../LocalConsoleScreenSaver";
 
 export type AuthMode = "loading" | "setup" | "setup-elsewhere" | "login";
@@ -71,7 +66,7 @@ export function Authentication({
           : await login(String(data.get("username")), String(data.get("password")), isLocalConsole());
       onAuthenticated(session);
     } catch (caught) {
-      setError(accountErrorText(caught) ?? (caught instanceof APIError ? caught.message : "请求失败，请稍后再试"));
+      setError(errorText(caught));
     } finally {
       setSubmitting(false);
     }
