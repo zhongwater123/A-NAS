@@ -1,7 +1,7 @@
 # git-cliff configuration for a CHANGELOG.md draft: one line per pull request
 # merged into main, grouped by the type its title starts with. CHANGELOG.md
 # stays written for the people who use A-NAS, so the draft is material for
-# rewriting entries, not text to paste (docs/releases/README.md).
+# rewriting entries, not text to paste (the header of CHANGELOG.md).
 #
 # Usage, from tools/changelog after npm ci: npm run draft -- <from>..origin/main
 # (the script runs git-cliff at the repository root, where this file is
