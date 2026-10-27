@@ -4,7 +4,10 @@
 // token against the session store, then forwards the operation to a worker
 // process running with that user's UID and groups. The kernel's POSIX ACLs
 // decide every access. Opened and created files travel back as file
-// descriptors over SCM_RIGHTS, so root never reads or writes file contents.
+// descriptors over SCM_RIGHTS, so root reads and writes no file contents,
+// except for the assistant's changes: their executor (internal/assistantchanges)
+// copies a staged file through such descriptors, a block at a time, into its
+// own store when the card is made and from there into place once approved.
 package filebroker
 
 import (

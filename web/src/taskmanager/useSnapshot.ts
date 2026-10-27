@@ -1,3 +1,4 @@
+import { errorText } from "../errorMessages";
 import { useEffect, useRef, useState } from "react";
 
 export interface SnapshotView<T> {
@@ -36,8 +37,7 @@ export function useSnapshot<T extends { observedAt: string }>(
                 : [...previous.history, data].slice(-historyLimit),
           }));
       } catch (error) {
-        if (!disposed && !current.signal.aborted)
-          setView((previous) => ({ ...previous, error: error instanceof Error ? error.message : "暂时无法读取" }));
+        if (!disposed && !current.signal.aborted) setView((previous) => ({ ...previous, error: errorText(error) }));
       } finally {
         if (controller === current) {
           controller = undefined;

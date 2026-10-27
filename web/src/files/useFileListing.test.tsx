@@ -67,7 +67,7 @@ describe("file listing request lifetime", () => {
     expect(result.current.error).toBe("");
     expect(result.current.loading).toBe(true);
     await act(async () => current.reject(new Error("current failure")));
-    expect(result.current.error).toBe("current failure");
+    expect(result.current.error).toBe("请求失败，请稍后重试");
     expect(result.current.loading).toBe(false);
   });
 

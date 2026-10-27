@@ -1,7 +1,7 @@
+import { errorText } from "../errorMessages";
 import { ArrowDownWideNarrow, Clapperboard, CloudUpload, Heart, History, Search, Trash2, X } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { APIError } from "../api";
 import { PosterCard, StillCard, type CardAction } from "./Cards";
 import { Dropdown } from "./Dropdown";
 import { ago, dayLabel, episodeCode, remaining } from "./format";
@@ -16,26 +16,7 @@ import {
 } from "./mediaApi";
 
 export function messageOf(error: unknown): string {
-  if (error instanceof APIError) {
-    switch (error.code) {
-      case "volume_unavailable":
-        return "媒体文件暂时无法读取：数据卷未就绪。";
-      case "media_unavailable":
-        return "影视中心暂时不可用。";
-      case "media_busy":
-        return "设备正在为其他人转码，请稍后再试。";
-      case "folders_overlap":
-        return "所选文件夹已属于另一个媒体库。";
-      case "name_conflict":
-        return "这个文件夹里已经有同名的文件。";
-      case "forbidden":
-        return "你没有权限执行这个操作。";
-      case "not_found":
-        return "内容不存在或已被移除。";
-    }
-    return error.message;
-  }
-  return "请求失败，请稍后再试";
+  return errorText(error, "media");
 }
 
 export function PageHeader({ title, count, children }: { title: string; count?: number; children?: ReactNode }) {

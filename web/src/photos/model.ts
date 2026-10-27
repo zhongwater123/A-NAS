@@ -1,3 +1,5 @@
+import { calendarLabel, formatDate } from "../format/time";
+import { errorText } from "../errorMessages";
 import { APIError } from "../api";
 import type { ImageQuery } from "./imageSearch";
 import type { PhotoAlbum, PhotoAsset, PhotoLabelCount, PhotoLibrary, PhotoPerson, PhotoTagCount } from "./photosApi";
@@ -92,28 +94,23 @@ export function dayKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-
 // dayLabel names a day the way people say it: today, yesterday, this year's
 // days without the year.
 export function dayLabel(date: Date, now = new Date()) {
-  const today = dayKey(now);
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (dayKey(date) === today) return "今天";
-  if (dayKey(date) === dayKey(yesterday)) return "昨天";
-  const day = `${date.getMonth() + 1}月${date.getDate()}日 ${weekdays[date.getDay()]}`;
-  return date.getFullYear() === now.getFullYear() ? day : `${date.getFullYear()}年${day}`;
+  return calendarLabel(date, now, "short");
 }
 
 export function monthLabel(month: string, now = new Date()) {
   const [year, value] = month.split("-").map(Number);
-  return year === now.getFullYear() ? `${value}月` : `${year}年${value}月`;
+  return formatDate(new Date(year, value - 1), {
+    month: "long",
+    ...(year !== now.getFullYear() ? { year: "numeric" } : {}),
+  });
 }
 
 export const fullMonthLabel = (month: string) => {
   const [year, value] = month.split("-").map(Number);
-  return `${year}年${value}月`;
+  return formatDate(new Date(year, value - 1), { year: "numeric", month: "long" });
 };
 
 export function formatDateTime(value: string) {
@@ -167,29 +164,13 @@ export function daysLeft(until: string, now = Date.now()) {
   return Math.max(0, Math.ceil((new Date(until).getTime() - now) / 86_400_000));
 }
 
-const photoErrors: Record<string, string> = {
-  unsupported_media_type: "支持 JPEG、PNG、HEIC 照片与 MP4、MOV 等常见视频",
-  too_large: "文件超过导入大小上限：照片 256 MiB，视频 4 GiB",
-  media_unavailable: "设备的媒体解码服务暂不可用，请稍后重试",
-  media_busy: "设备正在同时转换太多视频，请稍后再试",
-  insufficient_storage: "数据卷剩余空间不足",
-  forbidden: "你不能修改这张照片",
-  conflict: "名称已存在，或照片状态已经变化",
-  validation_failed: "名称无效",
-  not_found: "照片或相册已不存在",
-  photos_unavailable: "相册暂时不可用：数据卷未就绪，或此设备尚未启用相册",
-  ai_unavailable: "暂时无法识别图片，请稍后再试",
-  network_error: "网络连接中断",
-};
-
 // How to send the MOV a Live Photo still came without: Photos on a Mac
 // hands a browser only the still when dragged or chosen directly.
 export const liveVideoHint =
   "在 Mac 的“照片”App 中选中这张照片，用“文件 → 导出 → 导出未修改的原件”得到同名 MOV，上传后就会补上动态效果。";
 
-export function messageOf(error: unknown) {
-  if (error instanceof APIError) return photoErrors[error.code] ?? error.message;
-  return error instanceof Error ? error.message : "请求失败";
+export function messageOf(error: unknown): string {
+  return errorText(error, "photos");
 }
 
 export const isUnavailable = (error: unknown) => error instanceof APIError && error.code === "photos_unavailable";

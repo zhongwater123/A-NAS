@@ -1,4 +1,5 @@
-import { APIError } from "../api";
+import { formatClock, calendarDays, relativeUnit, calendarDate, calendarLabel, calendarMoment } from "../format/time";
+import { errorText as requestErrorText } from "../errorMessages";
 import type { Job, Recipient, Share, ShareEntry } from "./api";
 
 // Paths inside a share are relative to the share, "资料/计划.txt".
@@ -31,51 +32,23 @@ export const phaseLabel: Record<Phase, string> = {
   expired: "已到期",
 };
 
-const pad = (value: number) => String(value).padStart(2, "0");
-const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-const daysAgo = (date: Date, now: Date) => Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
-export const clock = (value: string) => {
-  const date = new Date(value);
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
+export const clock = formatClock;
 
 // when is the short time a list shows: 17:08, 昨天, 10月18日.
 export function when(value: string | undefined, now = new Date()): string {
   if (!value) return "";
-  const date = new Date(value),
-    days = daysAgo(date, now);
-  if (days <= 0) return clock(value);
-  if (days === 1) return "昨天";
-  if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1}月${date.getDate()}日`;
-  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+  const days = calendarDays(value, now);
+  if (days === 0) return formatClock(value);
+  if (Math.abs(days) === 1) return relativeUnit(days, "day", "auto");
+  return calendarDate(value, now);
 }
 // moment is a day and a time: 今天 17:08, 10月18日 09:30.
 export function moment(value: string | undefined, now = new Date()): string {
-  if (!value) return "";
-  const date = new Date(value),
-    days = daysAgo(date, now);
-  const day =
-    days === 0
-      ? "今天"
-      : days === 1
-        ? "昨天"
-        : days === -1
-          ? "明天"
-          : date.getFullYear() === now.getFullYear()
-            ? `${date.getMonth() + 1}月${date.getDate()}日`
-            : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
-  return `${day} ${clock(value)}`;
+  return value ? calendarMoment(value, now) : "";
 }
 // dayLabel separates a conversation by day.
 export function dayLabel(value: string, now = new Date()): string {
-  const date = new Date(value),
-    days = daysAgo(date, now);
-  if (days === 0) return "今天";
-  if (days === 1) return "昨天";
-  const week = "日一二三四五六"[date.getDay()];
-  return date.getFullYear() === now.getFullYear()
-    ? `${date.getMonth() + 1}月${date.getDate()}日 周${week}`
-    : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+  return calendarLabel(value, now, new Date(value).getFullYear() === now.getFullYear() ? "short" : undefined);
 }
 
 // remaining says how long an active share is still open; the last day is urgent.
@@ -122,21 +95,9 @@ export const jobLabel: Record<string, string> = {
 };
 export const jobDone = (job: Job) => job.completedIds?.length ?? 0;
 
-const apiMessages: Record<string, string> = {
-  share_not_found: "找不到这次分享，可能已被删除",
-  authentication_required: "登录已失效或账号不可用，请重新登录",
-  share_recipient_unavailable: "所选成员的账号当前不可用",
-  share_inactive: "分享已到期或已撤回",
-  invalid_share_request: "请求无效，请刷新后重试",
-  share_request_conflict: "请求与之前的提交不一致，请刷新后重试",
-  share_busy: "正在处理的分享任务较多，请稍后重试",
-  shares_unavailable: "分享服务暂不可用，请稍后重试",
-};
 // errorText turns a failed request into a sentence for the person using it.
 export function errorText(error: unknown): string {
-  if (error instanceof APIError) return apiMessages[error.code] ?? error.message;
-  if (error instanceof TypeError) return "网络连接中断，请检查网络后重试";
-  return error instanceof Error ? error.message : "请求失败，请重试";
+  return requestErrorText(error, "shares");
 }
 
 // The share service records why a share or a save stopped in English; the

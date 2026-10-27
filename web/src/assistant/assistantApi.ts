@@ -3,6 +3,7 @@
 // (useAssistantGateway), stored conversations are listed and read over REST,
 // and confirmation cards are answered here, never by answering Hermes.
 import { APIError, call, client } from "../api";
+import { errorText } from "../errorMessages";
 import type { AssistantApproval, AssistantMemory } from "../api.generated";
 import type { SessionMessage } from "./hermes/types/hermes";
 
@@ -114,8 +115,6 @@ export function failureText(reason: unknown): string {
       return "VNAS 已经不再等这项确认，什么都没有变";
     case "invalid_answer":
       return "回答没能交给 VNAS，请重试";
-    case "authentication_required":
-      return "登录已过期，请重新登录";
     case "memory_changed":
       return "VNAS 的记忆刚刚有变化，请再试一次";
     case "memory_not_found":
@@ -125,5 +124,5 @@ export function failureText(reason: unknown): string {
     case "task_running":
       return "这个任务正在运行，等它完成再试";
   }
-  return reason instanceof TypeError ? "网络连接中断" : "操作没有完成，请重试";
+  return errorText(reason);
 }

@@ -1,4 +1,4 @@
-import { APIError } from "../api";
+import { apiFetch, failure } from "../api";
 import { messageOf } from "./Browse";
 
 // A browser plays a converted stream progressively and reads only about two
@@ -101,29 +101,20 @@ export class StreamFeed {
     }
     let response: Response;
     try {
-      response = await fetch(this.stream, {
+      response = await apiFetch(this.stream, {
         credentials: "same-origin",
         signal: this.controller.signal,
         headers: { Accept: "video/mp4" },
       });
-    } catch {
-      if (!this.closed) this.options.onError("网络连接中断，请重试");
+    } catch (error) {
+      if (!this.closed) this.options.onError(messageOf(error));
       return;
     }
     if (!response.ok || !response.body) {
       const body = (await response.json().catch(() => undefined)) as
         | { error?: { code?: string; message?: string } }
         | undefined;
-      if (!this.closed)
-        this.options.onError(
-          messageOf(
-            new APIError(
-              response.status,
-              body?.error?.code ?? "request_failed",
-              body?.error?.message ?? "转码失败，请稍后重试",
-            ),
-          ),
-        );
+      if (!this.closed) this.options.onError(messageOf(failure(response.status, body)));
       return;
     }
     const reader = response.body.getReader();
