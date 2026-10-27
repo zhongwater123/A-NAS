@@ -13,3 +13,5 @@
 - [相册证件与票据 OCR 模型评估](photo-ocr-model-evaluation.md)（开发机完成；Qwen3.5-2B 字段抽取最好、GLM-OCR 为轻量备选，均需核对层；真实证件与回单未测）
 - [Qdrant 检索特性试验（1.20.0）](qdrant-retrieval-features.md)（完成；开发机试验，视频片段、文件块与照片各用哪些特性，照片何时可切换）
 - [视频剪辑 baseline：时间窗抽帧与 EmbeddingGemma 2](video-moment-retrieval.md)（试点完成；MediaPipe Python 不能多帧一次编码，试点建议每 2 秒 1 帧；基线成片已逐段排查；正式评估集待采集）
+- [CutClaw：音乐同步的长视频智能剪辑](video-editing-cutclaw.md)（论文与代码精读；指令驱动剪辑的抽帧与片段定位）
+- [FilmAgent：多智能体协作的虚拟影片制作](video-editing-filmagent.md)（论文与代码精读；剪辑计划的生成与审校）
