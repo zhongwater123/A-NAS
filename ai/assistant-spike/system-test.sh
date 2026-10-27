@@ -22,6 +22,7 @@ assistant_python=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
 
 # --- A second member, created as every account is: through the Product Service.
 bob_password=$(secret)
+# shellcheck disable=SC2034 # consumed by disable-system-test.sh in the same sourced shell.
 bob_user=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
   -d "{\"username\":\"bob\",\"password\":\"$bob_password\"}" "$api/api/v1/users" | jq -r .id || true)
 bob_csrf=$(login bob "$bob_password" /tmp/bob.jar || true)

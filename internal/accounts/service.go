@@ -49,9 +49,10 @@ var (
 	ErrIdentityConflict       = errors.New("username or Linux identity conflicts with an existing host account")
 	ErrIdentityRangeExhausted = errors.New("A-NAS Linux identity range is exhausted")
 	// ErrSMBDisablePending reports a disabled account whose Web sign-in has
-	// ended but whose SMB credential the Host Agent could not disable yet.
-	// Identity synchronization disables it when the Product Service starts.
-	ErrSMBDisablePending = errors.New("the account is disabled, but its SMB credential could not be disabled yet")
+	// ended but whose SMB access or assistant units could not be disabled yet.
+	// Keep the existing error code; retry and identity synchronization finish
+	// both host operations, including when only one of them failed.
+	ErrSMBDisablePending = errors.New("the account is disabled, but its host services could not all be disabled yet")
 )
 
 // Linux identity layout shared with the Host Agent (ADR 0008). Fixed group
