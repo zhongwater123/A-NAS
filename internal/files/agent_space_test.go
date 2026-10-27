@@ -93,3 +93,49 @@ func TestAgentSpacePolicyDirectoriesCannotBeMovedOrDeleted(t *testing.T) {
 		}
 	}
 }
+
+func TestFolderUploadThroughAgentSpacePreservesDirectoryIDs(t *testing.T) {
+	var volume string
+	f := newUploadFixtureOn(t, func(root string) files.FileSystem {
+		volume = root
+		return files.NewRootFileSystem(root, true)
+	})
+	if _, err := f.service.List(f.ctx, f.alice, "space:shared", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(volume, "spaces/shared/Agent空间/alice"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	roots, err := f.service.List(f.ctx, f.alice, "space:shared", "")
+	if err != nil || len(roots) != 1 {
+		t.Fatalf("roots = %+v, %v", roots, err)
+	}
+	accounts, err := f.service.List(f.ctx, f.alice, "space:shared", roots[0].ID)
+	if err != nil || len(accounts) != 1 {
+		t.Fatalf("account folders = %+v, %v", accounts, err)
+	}
+	upload, err := f.service.BeginUpload(f.ctx, f.alice, files.UploadRequest{
+		SpaceID: "space:shared", Directories: []string{"Agent空间", "alice"},
+		Name: "notice.txt", Size: 1, Conflict: files.ConflictAsk,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.service.AbortUpload(f.ctx, f.alice, upload) })
+	if _, err := f.service.WriteUpload(f.ctx, upload, 0, bytes.NewBufferString("x")); err != nil {
+		t.Fatal(err)
+	}
+	committed, err := f.service.CommitUpload(f.ctx, f.alice, upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Entry.ParentID != accounts[0].ID {
+		t.Errorf("upload parent = %s, want original %s", committed.Entry.ParentID, accounts[0].ID)
+	}
+	for _, original := range []files.Entry{roots[0], accounts[0]} {
+		entry, _, err := f.service.Lookup(f.ctx, f.alice, original.ID)
+		if err != nil || entry.ID != original.ID || entry.ParentID != original.ParentID {
+			t.Errorf("original directory %+v changed: %+v, %v", original, entry, err)
+		}
+	}
+}

@@ -364,24 +364,23 @@ func (s *Service) ensureDirectory(ctx context.Context, actor accounts.User, spac
 	if !withinRoot(root, target) {
 		return Entry{}, "", ErrInvalidName
 	}
-	if isAgentPolicyDirectory(root, spaceID, target) {
-		// Folder uploads may traverse an existing managed root, but may
-		// never create a replacement at a reserved name.
-		info, err := s.fs.Lstat(ctx, target)
-		if err != nil || info.Kind != KindDirectory {
-			return Entry{}, "", ErrForbidden
+	managed := isAgentPolicyDirectory(root, spaceID, target)
+	created := false
+	if !managed {
+		created = true
+		if err := s.fs.Mkdir(ctx, target); errors.Is(err, fs.ErrExist) {
+			// Another upload of the same folder may have just created it.
+			created = false
+		} else if err != nil {
+			return Entry{}, "", err
 		}
-		entry, err := s.registerCreated(ctx, spaceID, parentID, root, target)
-		return entry, target, err
-	}
-	created := true
-	if err := s.fs.Mkdir(ctx, target); errors.Is(err, fs.ErrExist) {
-		// Another upload of the same folder may have just created it.
-		created = false
-	} else if err != nil {
-		return Entry{}, "", err
 	}
 	info, err := s.fs.Lstat(ctx, target)
+	// Folder uploads may traverse an existing managed root, preserving its
+	// ID through registerInfo, but cannot create a replacement at that name.
+	if managed && (err != nil || info.Kind != KindDirectory) {
+		return Entry{}, "", ErrForbidden
+	}
 	if err != nil {
 		return Entry{}, "", err
 	}
