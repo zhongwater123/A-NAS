@@ -7,6 +7,7 @@ SHELLCHECK_VERSION = 0.11.0
 SHELL_SCRIPTS = $(shell git ls-files '*.sh' 2>/dev/null || find . -name '*.sh' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' | sed 's|^\./||' | sort)
 NPM ?= npm
 RUFF ?= ruff
+PIP_AUDIT ?= pip-audit
 BUILD_DIR ?= build
 VERSION ?= dev
 WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
@@ -63,6 +64,8 @@ api-check: api-install
 
 web-install: $(WEB_DEPS_STAMP)
 
+# --no-audit: the install's own audit only prints; vuln-check runs npm audit
+# so that an advisory fails the check.
 $(WEB_DEPS_STAMP): web/package.json web/package-lock.json
 	cd web && $(NPM) ci --no-audit --no-fund
 	@test -f $(WEB_DEPS_STAMP)
@@ -210,10 +213,16 @@ vet:
 go-lint:
 	$(GOLANGCI_LINT) run ./...
 
-# Fails on known vulnerabilities that the code can reach. The scanner is pinned
-# by the tool directive in go.mod; it fetches the database from vuln.go.dev.
+# Fails on known vulnerabilities in what ships: Go code the product can reach
+# (govulncheck, pinned by the tool directive in go.mod, with the database from
+# vuln.go.dev), the AI runtime's packages (pip-audit, pinned by
+# ai/requirements-dev.txt, with PyPI's advisories) and the Web UI's runtime
+# packages (npm audit, with the registry's advisories). A new advisory fails it
+# without a change; fix that first (AGENTS.md).
 vuln-check:
 	$(GO) tool govulncheck ./...
+	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r ai/requirements.txt
+	cd web && $(NPM) audit --omit=dev
 
 test:
 	$(GO) test ./...

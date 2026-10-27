@@ -26,7 +26,7 @@
 ## 验证
 
 - `make docs-check` 和 `make check` 不访问实验 NAS 或生产环境，只写可丢弃的构建产物；可直接运行、修复当前变更导致的失败并重跑相关检查。
-- `make check` 要联网：安装 Go 与 npm 依赖，`vuln-check` 还要下载 Go 的漏洞公告。所以新公告发布后，它可能在代码没变时失败。这时先升级受影响的 Go 版本或依赖，即“有新公告就先修”。
+- `make check` 要联网：安装 Go 与 npm 依赖，`vuln-check` 还要下载 Go、PyPI 与 npm 的漏洞公告。所以新公告发布后，它可能在代码没变时失败。这时先升级受影响的 Go 版本或依赖，即“有新公告就先修”。
 - 纯文档变更运行 `make docs-check`。
 - Go 代码、构建、CI 或跨模块契约变更运行 `make check`。
 - 改了 `api/` 下的接口契约：运行 `make api`（或 `cd web && npm run generate`），提交它写出的打包文档、Web 类型与响应校验；契约的分文件布局见 `docs/development/LOCAL_ENVIRONMENT.md#接口契约`。

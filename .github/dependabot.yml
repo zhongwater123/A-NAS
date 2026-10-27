@@ -60,6 +60,20 @@ updates:
       openapi:
         update-types: [minor, patch]
 
+  # The AI Worker's runtime and the development tools of ai/, which
+  # `uv pip compile` resolves from requirements.in and requirements-dev.in
+  # (scripts/build-ai-runtime.sh --lock). Dependabot's uv runs it without the
+  # script's --python-platform and --excludes: when ops-check fails on its
+  # pull request, run the script on the branch. A runtime update needs the
+  # real-model tests before it merges (docs/development/LOCAL_ENVIRONMENT.md).
+  - package-ecosystem: uv
+    directory: /ai
+    schedule:
+      interval: monthly
+    groups:
+      ai:
+        update-types: [minor, patch]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
