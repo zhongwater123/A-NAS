@@ -84,7 +84,7 @@ func authenticate(sessions SessionResolver, logger *slog.Logger, next http.Handl
 			return
 		}
 		ctx := accounts.WithSessionToken(r.Context(), token)
-		ctx = sharesapi.WithUser(ctx, accounts.User{ID: user.UserID, Username: user.Username, Role: user.Role})
+		ctx = accounts.WithUser(ctx, accounts.User{ID: user.UserID, Username: user.Username, Role: user.Role})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

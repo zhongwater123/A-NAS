@@ -6,7 +6,7 @@
 // answering Hermes itself.
 //
 // It does not authenticate: the Product Service wraps it so every request
-// carries the signed-in user (WithUser) and its session, and writes have passed
+// carries the signed-in user (accounts.WithUser) and its session, and writes have passed
 // CSRF checks. It never decides what the assistant may read or write; the
 // instance's sandbox and the executor of changes do. It reaches only the
 // caller's own instance, through the session gate (decision 10).
@@ -63,13 +63,6 @@ type Options struct {
 	// gateway connections. Wait returns once the first two stopped. Without
 	// it they last as long as the process.
 	Context context.Context
-}
-
-type userKey struct{}
-
-// WithUser attaches the signed-in user.
-func WithUser(ctx context.Context, user accounts.User) context.Context {
-	return context.WithValue(ctx, userKey{}, user)
 }
 
 // Handler is the assistant API.
@@ -157,7 +150,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) withAccount(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(userKey{}).(accounts.User)
+		user, ok := accounts.UserFrom(r.Context())
 		if !ok || user.ID == "" {
 			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return

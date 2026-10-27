@@ -5,8 +5,6 @@ package shareservice
 import (
 	"context"
 	"errors"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +12,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 )
 
 type sessions struct{}
@@ -35,7 +36,7 @@ func TestAuthenticationIgnoresProductClaimsAndPreservesVerifiedToken(t *testing.
 	calls := 0
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		user, ok := sharesapi.UserFrom(r.Context())
+		user, ok := accounts.UserFrom(r.Context())
 		if !ok || user.ID != "bob" || accounts.SessionToken(r.Context()) != "bob-session" {
 			t.Errorf("unverified user or token %+v", user)
 		}
@@ -48,7 +49,7 @@ func TestAuthenticationIgnoresProductClaimsAndPreservesVerifiedToken(t *testing.
 	}{{"forged", 401}, {"reset", 403}, {"bob-session", 204}} {
 		r := httptest.NewRequest("GET", sharesapi.PathPrefix, nil)
 		r.Header.Set(sharesapi.SessionHeader, test.token)
-		r = r.WithContext(sharesapi.WithUser(r.Context(), accounts.User{ID: "admin"}))
+		r = r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: "admin"}))
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
 		if w.Code != test.status {

@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"crypto/subtle"
 	"fmt"
 	"net/http"
@@ -94,7 +93,7 @@ func (h *productHandler) table() []apiroute.Route {
 }
 
 // mounts are the APIs that serve every method beneath their prefix and
-// receive the signed-in user through their package's WithUser.
+// receive the signed-in user through accounts.WithUser.
 func (h *productHandler) mounts() []apiroute.Route {
 	var routes []apiroute.Route
 	if h.containers != nil {
@@ -107,23 +106,23 @@ func (h *productHandler) mounts() []apiroute.Route {
 		routes = append(routes, apiroute.Mount(appstoreapi.ShortcutsPrefix, apiroute.Session, serve(h.shortcuts))...)
 	}
 	if h.shares != nil {
-		routes = append(routes, apiroute.Mount(sharesapi.PathPrefix, apiroute.Session, withUser(h.shares, sharesapi.WithUser))...)
+		routes = append(routes, apiroute.Mount(sharesapi.PathPrefix, apiroute.Session, withUser(h.shares))...)
 	}
 	if h.photos != nil {
 		routes = append(routes, h.photoRoute())
 	}
 	if h.media != nil {
-		routes = append(routes, apiroute.Route{Pattern: mediaapi.PathPrefix + "/", Posture: apiroute.Session, Handler: withUser(h.media, mediaapi.WithUser)})
+		routes = append(routes, apiroute.Route{Pattern: mediaapi.PathPrefix + "/", Posture: apiroute.Session, Handler: withUser(h.media)})
 	}
 	if h.feedback != nil {
-		routes = append(routes, apiroute.Mount(feedbackapi.PathPrefix, apiroute.Session, withUser(h.feedback, feedbackapi.WithUser))...)
+		routes = append(routes, apiroute.Mount(feedbackapi.PathPrefix, apiroute.Session, withUser(h.feedback))...)
 	}
 	if h.assistant != nil {
-		routes = append(routes, apiroute.Route{Pattern: assistantapi.PathPrefix + "/", Posture: apiroute.Session, Handler: withUser(h.assistant, assistantapi.WithUser)})
+		routes = append(routes, apiroute.Route{Pattern: assistantapi.PathPrefix + "/", Posture: apiroute.Session, Handler: withUser(h.assistant)})
 	}
 	if h.transfers != nil {
 		for _, prefix := range []string{transfersapi.TransfersPath, transfersapi.UploadsPath} {
-			routes = append(routes, apiroute.Mount(prefix, apiroute.Session, withUser(h.transfers, transfersapi.WithUser))...)
+			routes = append(routes, apiroute.Mount(prefix, apiroute.Session, withUser(h.transfers))...)
 		}
 	}
 	return routes
@@ -223,9 +222,9 @@ func serve(next http.Handler) apiroute.Handler {
 }
 
 // withUser hands an API the signed-in user through attach.
-func withUser(next http.Handler, attach func(context.Context, accounts.User) context.Context) apiroute.Handler {
+func withUser(next http.Handler) apiroute.Handler {
 	return func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-		next.ServeHTTP(w, r.WithContext(attach(r.Context(), session.User)))
+		next.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), session.User)))
 	}
 }
 
