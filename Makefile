@@ -87,8 +87,19 @@ fmt-check:
 	@files="$$(gofmt -l $$(find . -name '*.go' -type f -not -path './.git/*'))"; \
 	if [ -n "$$files" ]; then echo "The following files need gofmt:"; echo "$$files"; exit 1; fi
 
+# lychee checks the links in every tracked Markdown file (in a copy without
+# .git, every *.md file) offline: that the target file exists and, for a
+# Markdown target, that the heading does. Releases resolve headings
+# differently, so docs-check runs only this one; CI installs it from the
+# release by hash.
+LYCHEE_VERSION = 0.24.2
+
 docs-check:
 	$(GO) run ./tools/doccheck
+	@have="$$(lychee --version 2>/dev/null | sed -n 's/^lychee //p')"; \
+	if [ "$$have" != "$(LYCHEE_VERSION)" ]; then echo "docs-check needs lychee $(LYCHEE_VERSION); found: $${have:-none}" >&2; exit 1; fi
+	{ git ls-files '*.md' 2>/dev/null || find . -name '*.md' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' -not -path '*/build/*' -not -path '*/dist/*'; } | \
+	lychee --offline --include-fragments --no-progress --files-from -
 
 # Shell scripts, units and installer conventions, and Dependabot's groups
 # (tools/depcheck keeps 0.x web packages out of them).

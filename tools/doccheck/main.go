@@ -41,8 +41,7 @@ var (
 		"docs/runbooks/README.md",
 		"docs/runbooks/_TEMPLATE.md",
 	}
-	markdownLink = regexp.MustCompile(`!?\[[^]]*\]\(([^)]+)\)`)
-	updatedDate  = regexp.MustCompile(`(?m)^更新时间：\d{4}-\d{2}-\d{2}$`)
+	updatedDate = regexp.MustCompile(`(?m)^更新时间：\d{4}-\d{2}-\d{2}$`)
 
 	// Merge and deploy state goes stale as soon as a PR merges or deploys,
 	// and nobody comes back to fix it (#191). Only the current-state page
@@ -157,16 +156,6 @@ func validateDocumentation(root string) ([]string, int) {
 		}
 		if path.Dir(relativePath) == adrDirectory {
 			adrDocuments[relativePath] = string(data)
-		}
-		for _, match := range markdownLink.FindAllStringSubmatch(string(data), -1) {
-			target := normalizeLinkTarget(match[1])
-			if target == "" || isExternalLink(target) {
-				continue
-			}
-			resolved := filepath.Clean(filepath.Join(filepath.Dir(filePath), filepath.FromSlash(target)))
-			if _, statErr := os.Stat(resolved); statErr != nil {
-				problems = append(problems, fmt.Sprintf("%s links to missing %s", relativePath, target))
-			}
 		}
 		return nil
 	})
@@ -339,11 +328,4 @@ func normalizeLinkTarget(raw string) string {
 		target = before
 	}
 	return target
-}
-
-func isExternalLink(target string) bool {
-	return strings.HasPrefix(target, "#") ||
-		strings.HasPrefix(target, "/") ||
-		strings.Contains(target, "://") ||
-		strings.HasPrefix(target, "mailto:")
 }

@@ -23,34 +23,21 @@ func TestNormalizeLinkTarget(t *testing.T) {
 	}
 }
 
-func TestExternalLinks(t *testing.T) {
-	for _, target := range []string{"https://example.com", "mailto:test@example.com", "/absolute/path"} {
-		if !isExternalLink(target) {
-			t.Errorf("isExternalLink(%q) = false", target)
-		}
-	}
-	if isExternalLink("../CONTEXT.md") {
-		t.Error("relative repository link classified as external")
-	}
-}
-
-func TestValidateDocumentationCountsMarkdownAndFindsBrokenLinks(t *testing.T) {
+func TestValidateDocumentationSkipsDependenciesAndOtherCheckouts(t *testing.T) {
 	root := t.TempDir()
 	writeRequiredDocuments(t, root)
 	writeDocuments(t, root, map[string]string{
-		"docs/broken.md":                                "[missing](missing.md)\n",
-		"web/node_modules/dependency/README.md":         "[dependency link](missing.md)\n",
-		"internal/webui/dist/generated.md":              "[dependency link](missing.md)\n",
-		".claude/worktrees/other-branch/docs/broken.md": "[other checkout](missing.md) 尚未部署\n",
+		"docs/specs/music.md":                           "# 音乐\n\n状态：implemented（尚未合并）\n",
+		"web/node_modules/dependency/README.md":         "尚未部署\n",
+		"internal/webui/dist/generated.md":              "尚未部署\n",
+		".claude/worktrees/other-branch/docs/broken.md": "尚未部署\n",
 	})
 
 	problems, files := validateDocumentation(root)
 	if files != len(requiredDocuments)+1 {
 		t.Fatalf("validateDocumentation() counted %d Markdown files, want %d", files, len(requiredDocuments)+1)
 	}
-	if len(problems) != 1 || !strings.Contains(problems[0], "missing.md") {
-		t.Fatalf("validateDocumentation() problems = %v, want one missing-link problem", problems)
-	}
+	assertProblems(t, problems, []string{"docs/specs/music.md:3 says 未合并"})
 }
 
 func TestValidateDocumentationCapsCurrentSize(t *testing.T) {
