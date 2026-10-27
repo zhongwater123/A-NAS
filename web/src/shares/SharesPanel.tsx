@@ -14,7 +14,7 @@ export type Layout = "wide" | "split" | "single";
 const layoutFor = (width: number): Layout => (!width || width >= 1060 ? "wide" : width >= 700 ? "split" : "single");
 
 export function SharesPanel() {
-  const { userId, focus, revision, unread } = useShares();
+  const { userId, focus, revision, unread, windowVisible } = useShares();
   const [direction, setDirection] = useState<Direction>("received");
   const [items, setItems] = useState<Share[]>([]);
   const [selected, setSelected] = useState<string>();
@@ -57,6 +57,7 @@ export function SharesPanel() {
     }
   }
   useEffect(() => {
+    if (!windowVisible) return;
     let stopped = false,
       busy = false;
     const load = async () => {
@@ -91,7 +92,7 @@ export function SharesPanel() {
       stopped = true;
       clearInterval(timer);
     };
-  }, [direction, revision, pageCount]);
+  }, [direction, revision, pageCount, windowVisible]);
   const switchTo = (value: Direction) => {
     if (value === direction) return;
     setDirection(value);

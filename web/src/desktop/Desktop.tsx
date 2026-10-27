@@ -181,7 +181,12 @@ export function Desktop({
   };
 
   return (
-    <SharesProvider userId={session.user.id} active={focusedID === "shares"} onOpen={() => openWindow("shares")}>
+    <SharesProvider
+      userId={session.user.id}
+      active={focusedID === "shares"}
+      windowVisible={windows.some((window) => window.id === "shares" && window.open && !window.minimized)}
+      onOpen={() => openWindow("shares")}
+    >
       <main
         className="desktop-shell"
         style={wallpaperBackground(wallpaper)}

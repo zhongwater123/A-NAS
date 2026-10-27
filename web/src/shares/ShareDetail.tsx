@@ -85,6 +85,7 @@ export function ShareDetail({
   const directed = useRef(false);
   const chatToggle = useRef<HTMLButtonElement>(null);
   useEffect(() => {
+    if (!shares.windowVisible) return;
     let stopped = false,
       busy = false;
     const load = async () => {
@@ -132,7 +133,7 @@ export function ShareDetail({
       stopped = true;
       clearInterval(timer);
     };
-  }, [id, reload, shares.userId, refreshShares]);
+  }, [id, reload, shares.userId, refreshShares, shares.windowVisible]);
   // Each request to open the share with a recipient opens that conversation.
   const [askedBefore, setAskedBefore] = useState({ preferredRecipient, focus: shares.focus });
   if (askedBefore.preferredRecipient !== preferredRecipient || askedBefore.focus !== shares.focus) {
@@ -142,7 +143,7 @@ export function ShareDetail({
       setChatOpen(true);
     }
   }
-  const thread = useThread(id, recipient);
+  const thread = useThread(id, recipient, shares.windowVisible);
   const phase = share ? phaseOf(share) : undefined;
   const available = phase === "active";
   // A share that is no longer available closes its viewer and save dialog.

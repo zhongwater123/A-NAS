@@ -64,6 +64,7 @@ type Store struct {
 	stop            chan struct{}
 	closed          bool
 	interruptReason string
+	fenced          map[string]bool // Acknowledgements belong only to this bridge/store generation.
 }
 
 func Open(dbPath, contentDir string, options Options) (*Store, error) {
@@ -97,6 +98,7 @@ func Open(dbPath, contentDir string, options Options) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db, dir: contentDir, options: options, records: map[string]*record{}, running: map[string]running{}, streams: map[string]*contentReader{}, stop: make(chan struct{})}
+	s.fenced = map[string]bool{}
 	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS share_documents(id TEXT PRIMARY KEY, document BLOB NOT NULL)`); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -257,6 +259,10 @@ func hash(value any) string {
 }
 func requestKey(user, op, key string) string { return hash([]string{user, op, key}) }
 func (s *Store) authorize(ctx context.Context, u User) error {
+	return s.authorizeUsing(ctx, u, s.options.Active)
+}
+
+func (s *Store) authorizeUsing(ctx context.Context, u User, lookup activeLookup) error {
 	if s.closed {
 		return ErrInactive
 	}
@@ -271,7 +277,7 @@ func (s *Store) authorize(ctx context.Context, u User) error {
 			return err
 		}
 	}
-	active, err := s.options.Active(ctx, u.ID)
+	active, err := lookup(ctx, u.ID)
 	if err != nil {
 		return err
 	}
@@ -309,9 +315,19 @@ func recipient(r *record, id string) *Recipient {
 	return nil
 }
 func (s *Store) access(ctx context.Context, u User, id string) (*record, error) {
-	if err := s.authorize(ctx, u); err != nil {
+	lookup, err := s.activeAccounts(ctx)
+	if err != nil {
 		return nil, err
 	}
+	if err := s.authorizeUsing(ctx, u, lookup); err != nil {
+		return nil, err
+	}
+	return s.accessAuthorized(ctx, u, id, lookup)
+}
+
+// accessAuthorized shares the request's account snapshot after caller
+// authorization. Lists need not repeat the session lookup for every item.
+func (s *Store) accessAuthorized(ctx context.Context, u User, id string, lookup activeLookup) (*record, error) {
 	r := s.records[id]
 	if r == nil || (r.Share.Sender.ID != u.ID && recipient(r, u.ID) == nil) {
 		return nil, ErrNotFound
@@ -319,7 +335,10 @@ func (s *Store) access(ctx context.Context, u User, id string) (*record, error) 
 	if r.Share.Sender.ID != u.ID && (r.Share.Status == "preparing" || r.Share.Status == "failed") {
 		return nil, ErrNotFound
 	}
-	active, err := s.options.Active(ctx, r.Share.Sender.ID)
+	if r.ContentRemoved || (r.Share.Status != "published" && r.Share.Status != "preparing") {
+		return r, nil
+	}
+	active, err := lookup(ctx, r.Share.Sender.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -577,7 +596,11 @@ func (s *Store) Get(ctx context.Context, u User, id string, markViewed bool) (Sh
 func (s *Store) List(ctx context.Context, u User, direction string) ([]Share, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.authorize(ctx, u); err != nil {
+	lookup, err := s.activeAccounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeUsing(ctx, u, lookup); err != nil {
 		return nil, err
 	}
 	if direction != "sent" && direction != "received" {
@@ -586,7 +609,7 @@ func (s *Store) List(ctx context.Context, u User, direction string) ([]Share, er
 	out := []Share{}
 	for id, r := range s.records {
 		if (direction == "sent" && r.Share.Sender.ID == u.ID) || (direction == "received" && recipient(r, u.ID) != nil) {
-			r, err := s.access(ctx, u, id)
+			r, err := s.accessAuthorized(ctx, u, id, lookup)
 			if errors.Is(err, ErrNotFound) {
 				continue
 			}
@@ -639,13 +662,19 @@ func (s *Store) Revoke(ctx context.Context, u User, id string) error {
 // can be reported as complete; a lost commit response must not race a later
 // publication after this method returns. Local Backends share our mutex.
 func (s *Store) fence(ctx context.Context, shareID string) error {
+	if s.fenced[shareID] {
+		return nil
+	}
 	if backend, ok := s.options.Backend.(interface {
 		Fence(context.Context, string) error
 	}); ok {
 		bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		return backend.Fence(bounded, shareID)
+		if err := backend.Fence(bounded, shareID); err != nil {
+			return err
+		}
 	}
+	s.fenced[shareID] = true
 	return nil
 }
 func (s *Store) cleanupLocked(ctx context.Context, r *record) error {
@@ -675,12 +704,27 @@ func (s *Store) Maintain(ctx context.Context) error {
 	if s.closed {
 		return nil
 	}
+	lookup, err := s.activeAccounts(ctx)
+	if err != nil {
+		// A failed batch lookup is not permission to keep previously accepted
+		// work alive. Preserve the fail-closed behavior of per-user checks.
+		for _, stream := range s.streams {
+			stream.stop()
+		}
+		for _, run := range s.running {
+			run.cancel()
+		}
+		return err
+	}
 	var all error
 	for _, r := range s.records {
 		if r.dirty {
 			all = errors.Join(all, s.persist(r))
 		}
-		active, err := s.options.Active(ctx, r.Share.Sender.ID)
+		if r.ContentRemoved && (r.Share.Status != "revoked" || s.fenced[r.Share.ID]) {
+			continue
+		}
+		active, err := lookup(ctx, r.Share.Sender.ID)
 		if err != nil {
 			all = errors.Join(all, err)
 			continue
@@ -705,12 +749,12 @@ func (s *Store) Maintain(ctx context.Context) error {
 		all = errors.Join(all, s.cleanupLocked(ctx, r))
 	}
 	for _, stream := range s.streams {
-		if err := s.authorize(stream.ctx, stream.user); err != nil {
+		if err := s.authorizeUsing(stream.ctx, stream.user, lookup); err != nil {
 			stream.stop()
 		}
 	}
 	for _, run := range s.running {
-		if err := s.authorize(run.ctx, run.user); err != nil {
+		if err := s.authorizeUsing(run.ctx, run.user, lookup); err != nil {
 			run.cancel()
 		}
 	}

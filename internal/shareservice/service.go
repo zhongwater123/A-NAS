@@ -209,7 +209,18 @@ func openStore(ctx context.Context, config Config) (*openedStore, error) {
 		}
 		return nil
 	}
-	store, err := shares.Open(filepath.Join(config.Root, "catalog.db"), filepath.Join(config.Root, "content"), shares.Options{Backend: sharefiles.NewBackend(remote), Active: active, Authorize: authorize, CheckVolume: check, RequireClone: true})
+	activeAccounts := func(ctx context.Context) (map[string]bool, error) {
+		profiles, err := config.Sessions.ActiveProfiles(ctx)
+		if err != nil {
+			return nil, err
+		}
+		result := make(map[string]bool, len(profiles))
+		for _, profile := range profiles {
+			result[profile.ID] = true
+		}
+		return result, nil
+	}
+	store, err := shares.Open(filepath.Join(config.Root, "catalog.db"), filepath.Join(config.Root, "content"), shares.Options{Backend: sharefiles.NewBackend(remote), Active: active, ActiveAccounts: activeAccounts, Authorize: authorize, CheckVolume: check, RequireClone: true})
 	if err != nil {
 		return nil, err
 	}

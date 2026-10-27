@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useEffectEvent, useRef, useState } from "react";
 import { ArrowDown, LockKeyhole, Send, X } from "lucide-react";
 import { usePeople } from "../people";
 import { listMessages, markRead, requestKey, sendMessage, type Message, type Share } from "./api";
@@ -9,7 +9,7 @@ import { useShares } from "./SharesProvider";
 
 // useThread keeps one private conversation of a share current. It runs while
 // the conversation is collapsed too, so the header can show the newest line.
-export function useThread(shareId: string, recipientId: string) {
+export function useThread(shareId: string, recipientId: string, visible = true) {
   // Messages carry the conversation they came from, so a switch to another
   // recipient never shows, or marks read, the previous one for a render.
   const key = `${shareId}:${recipientId}`;
@@ -21,16 +21,18 @@ export function useThread(shareId: string, recipientId: string) {
     setError("");
   }
   const [revision, setRevision] = useState(0);
+  const currentMessages = useEffectEvent(() => (state.key === key ? state.messages : []));
   useEffect(() => {
-    if (!recipientId) return;
+    if (!recipientId || !visible) return;
     let stopped = false,
       loading = false;
     const poll = async () => {
       if (loading) return;
       loading = true;
       try {
+        const previous = currentMessages();
         const collected: Message[] = [];
-        let after = 0;
+        let after = previous.at(-1)?.id ?? 0;
         while (!stopped) {
           const page = (await listMessages(shareId, recipientId, after)).items ?? [];
           const fresh = page.filter((message) => message.id > after);
@@ -39,7 +41,7 @@ export function useThread(shareId: string, recipientId: string) {
           after = fresh[fresh.length - 1].id;
         }
         if (!stopped) {
-          setState({ key, messages: collected });
+          setState({ key, messages: [...previous, ...collected] });
           setError("");
         }
       } catch (error) {
@@ -54,7 +56,7 @@ export function useThread(shareId: string, recipientId: string) {
       stopped = true;
       clearInterval(timer);
     };
-  }, [key, shareId, recipientId, revision]);
+  }, [key, shareId, recipientId, revision, visible]);
   const loaded = state.key === key;
   return { messages: loaded ? state.messages : [], error, loaded, reload: () => setRevision((value) => value + 1) };
 }

@@ -4,6 +4,8 @@
 
 ## 索引
 
+- [2026-10-28：分享历史导致重复 IPC，最小化窗口仍下载完整对话](2026-10-28-share-history-polling.md)
+
 - [2026-10-06：Host Agent 无法创建运行时 Socket](2026-10-06-host-agent-runtime-directory.md)
 - [2026-10-06：本地 Kiosk 可进入通用 Chromium 界面](2026-10-06-kiosk-browser-confinement.md)
 - [2026-10-06：桌面时钟持续落后于系统时间](2026-10-06-system-clock-drift-and-network-sync.md)
