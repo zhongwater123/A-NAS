@@ -252,8 +252,20 @@ in_trash() { # USER SPACE_DIR FILE: FILE's bytes are in USER's recycle bin
 }
 status_of() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 secret() { head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20; }
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+verified() { # UNIT_FILE...: systemd-analyze verify reports nothing, not even a warning
+  local report
+  report=$(systemd-analyze verify --man=no "$@" 2>&1) && [[ -z "$report" ]] && return
+  printf '%s\n' "$report" >&2
+  return 1
+}
 api=http://127.0.0.1:8080
 data=/srv/a-nas/data
+
+# --- The units as installed, with every drop-in, read by Debian 13's systemd
+# as on the NAS (#278): each directive and value, and that each command exists.
+check "systemd accepts every installed A-NAS unit" \
+  verified /etc/systemd/system/anas*.service /etc/systemd/system/anas*.socket /etc/systemd/system/*anas*.slice
 
 # --- Every service runs under its production unit (issue #38).
 check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares smbd
