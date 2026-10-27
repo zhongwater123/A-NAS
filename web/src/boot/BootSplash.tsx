@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import styles from "../desktop/desktop.module.css";
 import { type BootIdentPlayer, startBootIdent } from "./bootIdent";
 
 export const bootIdentStorageKey = "a-nas.boot-ident.played.v1";
@@ -57,7 +58,12 @@ export function BootSplash() {
 
   if (!active) return null;
   return (
-    <div ref={shellRef} className="boot-splash" aria-hidden="true" onPointerDown={() => playerRef.current?.skip()}>
+    <div
+      ref={shellRef}
+      className={styles.bootSplash}
+      aria-hidden="true"
+      onPointerDown={() => playerRef.current?.skip()}
+    >
       <canvas ref={canvasRef} />
     </div>
   );

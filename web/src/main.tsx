@@ -4,6 +4,7 @@ import { ErrorBoundary } from "react-error-boundary";
 
 import App from "./App";
 import { BootSplash } from "./boot/BootSplash";
+import styles from "./desktop/desktop.module.css";
 
 const container = document.getElementById("root")!;
 
@@ -11,9 +12,9 @@ const container = document.getElementById("root")!;
 // has its own boundary, so this shows only when the desktop itself cannot.
 function DesktopFailed() {
   return (
-    <main className="auth-shell">
-      <section className="auth-card" role="alert">
-        <span className="brand-mark large">A</span>
+    <main className={styles.authShell}>
+      <section className={styles.authCard} role="alert">
+        <span className={`${styles.brandMark} ${styles.large}`}>A</span>
         <h1>桌面暂时无法显示</h1>
         <p>文件与后台服务不受影响，重新载入页面后继续。</p>
         <button className="primary" onClick={() => window.location.reload()}>

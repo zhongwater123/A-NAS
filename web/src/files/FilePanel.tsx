@@ -554,13 +554,13 @@ export function FilePanel({
           </div>
         )}
         {error && (
-          <div className="status-banner error">
+          <div className={`${styles.statusBanner} ${styles.error}`}>
             <CircleAlert />
             {error}
           </div>
         )}
         {viewing && (
-          <div className="status-banner viewing-banner" role="status">
+          <div className={`${styles.statusBanner} ${styles.viewingBanner}`} role="status">
             <ShieldCheck />
             <span>正在只读查看他人个人空间；访问已审计，将于 {formatFileDate(viewing.expiresAt)} 自动结束。</span>
             <button disabled={Boolean(activity)} onClick={() => void stopViewing()}>

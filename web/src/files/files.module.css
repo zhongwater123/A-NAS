@@ -1,3 +1,29 @@
+/* The banners over the file list: a failed action and administrative viewing. */
+.status-banner {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 14px;
+  padding: 10px 13px;
+  border-radius: 11px;
+  font-size: 11px;
+}
+.status-banner svg {
+  width: 16px;
+}
+.status-banner.error {
+  color: #9c2934;
+  background: #ffeaec;
+  border: 1px solid #f8c7cc;
+}
+.viewing-banner {
+  background: #fff6e5;
+  color: #6b4a00;
+}
+.viewing-banner button {
+  margin-left: auto;
+}
+
 /* File manager window. */
 .file-manager {
   --file-left-pane: 205px;
@@ -554,11 +580,11 @@
   height: 13px;
   flex: none;
 }
-.file-browser > :global(.status-banner) {
+.file-browser > .status-banner {
   flex: none;
   margin: 7px 10px 0;
 }
-.file-browser > :global(.status-banner) span {
+.file-browser > .status-banner span {
   min-width: 0;
   flex: 1;
 }
@@ -1506,7 +1532,7 @@
   background: #fff;
   font-size: 10px;
 }
-.file-confirm-actions :global(.danger-button) {
+.file-confirm-actions .danger-button {
   color: #fff;
   border-color: #c84250;
   background: #c84250;

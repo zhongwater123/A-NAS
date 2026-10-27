@@ -3,6 +3,7 @@ import { HoverCard } from "radix-ui";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { AppGlyph } from "../media/MediaCenterGlyph";
+import styles from "./desktop.module.css";
 import { snapshotWindow } from "./windowSnapshot";
 
 export interface DockEntry {
@@ -93,7 +94,7 @@ export function Dock({ entries, focusedID, onOpen, onMinimize, onClose }: DockPr
   }, [focusedID, rendered]);
 
   return (
-    <nav className={`task-shelf ${entries.length ? "visible" : ""}`} aria-label="已打开窗口">
+    <nav className={`${styles.taskShelf} ${entries.length ? styles.visible : ""}`} aria-label="已打开窗口">
       {rendered.map((entry) => {
         const state: DockState = entry.minimized ? "minimized" : entry.id === focusedID ? "focused" : "background";
         // The focused app minimizes on click, like a desktop taskbar; others come to the front.
@@ -113,7 +114,7 @@ export function Dock({ entries, focusedID, onOpen, onMinimize, onClose }: DockPr
           >
             <HoverCard.Trigger asChild>
               <button
-                className={`dock-item ${state} ${entry.leaving ? "leaving" : ""}`}
+                className={`${styles.dockItem} ${styles[state] ?? ""} ${entry.leaving ? styles.leaving : ""}`}
                 aria-label={label}
                 aria-current={state === "focused" && !entry.leaving ? "true" : undefined}
                 aria-hidden={entry.leaving || undefined}
@@ -136,22 +137,22 @@ export function Dock({ entries, focusedID, onOpen, onMinimize, onClose }: DockPr
                 }}
               >
                 <span
-                  className="dock-highlight"
+                  className={styles.dockHighlight}
                   aria-hidden="true"
                   ref={(element) => {
                     if (element) highlights.current.set(entry.id, element);
                     else highlights.current.delete(entry.id);
                   }}
                 />
-                <span className={`dock-icon icon-${entry.tone}`}>
+                <span className={`${styles.dockIcon} ${styles[`icon-${entry.tone}`] ?? ""}`}>
                   <Icon aria-hidden="true" />
                 </span>
-                <span className="dock-dot" aria-hidden="true" />
+                <span className={styles.dockDot} aria-hidden="true" />
               </button>
             </HoverCard.Trigger>
             <HoverCard.Portal>
               <HoverCard.Content
-                className="dock-preview"
+                className={styles.dockPreview}
                 role="group"
                 aria-label={`${entry.title}窗口预览`}
                 side="top"
@@ -209,21 +210,21 @@ function WindowPreview({
   const Icon = entry.icon;
   return (
     <>
-      <div className="dock-preview-head">
-        <span className={`dock-preview-icon icon-${entry.tone}`}>
+      <div className={styles.dockPreviewHead}>
+        <span className={`${styles.dockPreviewIcon} ${styles[`icon-${entry.tone}`] ?? ""}`}>
           <Icon aria-hidden="true" />
         </span>
-        <span className="dock-preview-title">{entry.title}</span>
-        {minimized && <span className="dock-preview-state">已最小化</span>}
-        <button className="dock-preview-close" aria-label={`关闭${entry.title}`} onClick={onClose}>
+        <span className={styles.dockPreviewTitle}>{entry.title}</span>
+        {minimized && <span className={styles.dockPreviewState}>已最小化</span>}
+        <button className={styles.dockPreviewClose} aria-label={`关闭${entry.title}`} onClick={onClose}>
           <X aria-hidden="true" />
         </button>
       </div>
-      <button className="dock-preview-shot" aria-label={`显示${entry.title}窗口`} onClick={onShow}>
+      <button className={styles.dockPreviewShot} aria-label={`显示${entry.title}窗口`} onClick={onShow}>
         {image ? (
           <img src={image} alt="" draggable={false} />
         ) : (
-          <span className={`dock-preview-placeholder icon-${entry.tone}`}>
+          <span className={`${styles.dockPreviewPlaceholder} ${styles[`icon-${entry.tone}`] ?? ""}`}>
             <Icon aria-hidden="true" />
           </span>
         )}

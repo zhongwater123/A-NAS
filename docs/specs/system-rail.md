@@ -67,5 +67,5 @@
 - 规格：[Web 桌面宿主机状态](web-desktop-host-state.md)、[设置](settings.md)
 - 架构：不涉及
 - ADR：[Web 桌面技术选择](../adr/0003-use-react-typescript-for-web-desktop.md)
-- 代码：[系统快捷栏](../../web/src/desktop/SystemRail.tsx)、[桌面](../../web/src/desktop/Desktop.tsx)、[样式](../../web/src/styles.css)
+- 代码：[系统快捷栏](../../web/src/desktop/SystemRail.tsx)、[桌面](../../web/src/desktop/Desktop.tsx)、[样式](../../web/src/desktop/desktop.module.css)
 - 测试：[桌面测试](../../web/src/App.test.tsx)、[快捷栏测试](../../web/src/desktop/SystemRail.test.ts)

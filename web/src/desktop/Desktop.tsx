@@ -32,6 +32,7 @@ import { shortcutApp, useAppShortcuts } from "./appShortcuts";
 import { apps, desktopApps, OpenWindow, WindowContext, WindowID, WindowIntents, windowIDs } from "./apps";
 import { DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
+import styles from "./desktop.module.css";
 import { NotificationCenter } from "./NotificationCenter";
 import { StatusBar } from "./StatusBar";
 import { DesktopView, SystemRail } from "./SystemRail";
@@ -67,7 +68,7 @@ const WindowContent = memo(function WindowContent({ id, context }: { id: WindowI
 
 // What a window shows while its code loads, the first time it opens.
 const windowLoading = (
-  <div className="center-state">
+  <div className={styles.centerState}>
     <span className="loader" />
   </div>
 );
@@ -205,10 +206,11 @@ export function Desktop({
   // windows, and the press that closes a rail popover only closes it.
   const wallpaperPress = useRef<{ x: number; y: number }>(undefined);
   const pressDesktop = (event: ReactPointerEvent<HTMLElement>) => {
-    const shell = event.currentTarget;
+    const desktop = event.currentTarget;
     const bare =
-      event.target === shell || (event.target instanceof Element && event.target.classList.contains("desktop-grid"));
-    const railPopoverOpen = shell.querySelector('.system-rail [aria-expanded="true"]') !== null;
+      event.target === desktop ||
+      (event.target instanceof Element && event.target.classList.contains(styles.desktopGrid));
+    const railPopoverOpen = desktop.querySelector(`.${styles.systemRail} [aria-expanded="true"]`) !== null;
     wallpaperPress.current =
       bare && event.button === 0 && !railPopoverOpen ? { x: event.clientX, y: event.clientY } : undefined;
   };
@@ -225,7 +227,7 @@ export function Desktop({
           system rail offers to the keyboard. */}
       {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
       <main
-        className="desktop-shell"
+        className={styles.desktopShell}
         style={wallpaperBackground(wallpaper)}
         onPointerDownCapture={pressDesktop}
         onPointerCancelCapture={() => {
@@ -234,7 +236,7 @@ export function Desktop({
         onClick={clickDesktop}
       >
         {/* The glow belongs to the built-in wallpaper; it would wash out a chosen picture. */}
-        {wallpaper && !wallpaper.image && <div className="wallpaper-glow" />}
+        {wallpaper && !wallpaper.image && <div className={styles.wallpaperGlow} />}
 
         <ShellPart name="system rail">
           <SharesRail
@@ -267,7 +269,7 @@ export function Desktop({
           <NotificationCenter />
         </ShellPart>
 
-        <section className="window-layer" aria-label="A-NAS 桌面窗口">
+        <section className={styles.windowLayer} aria-label="A-NAS 桌面窗口">
           {windows.map((window) => {
             // Minimized windows stay mounted so a running terminal session in Settings survives.
             if (!window.open) return null;

@@ -266,7 +266,7 @@ export class WebosController {
         lines.push(`${indent}- region "${clip(kept, 60)}（VNAS 不能查看）"`);
         continue;
       }
-      if (element.classList.contains("app-window")) {
+      if (element.hasAttribute(WINDOW_ID)) {
         lines.push(`${indent}- window "${clip(element.getAttribute("aria-label") ?? "", 60)}"`);
         this.walk(element, depth + 1, full, lines);
         continue;
@@ -563,7 +563,7 @@ function labelOf(element: Element): string {
 /** The app's own dialog the element is in, which says what its 确定 confirms. */
 function inDialog(element: Element): string {
   const dialog = element.closest('[role="dialog"], [role="alertdialog"]');
-  if (!dialog || dialog.classList.contains("app-window")) return "";
+  if (!dialog || dialog.hasAttribute(WINDOW_ID)) return "";
   const name = clip(computeAccessibleName(dialog), 40);
   return name ? `（“${name}”）` : "";
 }

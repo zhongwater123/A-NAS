@@ -3,6 +3,7 @@ import { ErrorInfo, ReactNode, PointerEvent as ReactPointerEvent, useState } fro
 import { ErrorBoundary, type FallbackProps } from "react-error-boundary";
 
 import { apps } from "./apps";
+import styles from "./desktop.module.css";
 import { WINDOW_ID } from "./windowSnapshot";
 import { WindowAction, WindowModel } from "./windows";
 
@@ -86,7 +87,7 @@ export function AppWindow({
 
   return (
     <section
-      className={`app-window app-window-${model.id} ${model.maximized ? "maximized" : ""}`}
+      className={`${styles.appWindow} ${styles[`app-window-${model.id}`] ?? ""} ${model.maximized ? styles.maximized : ""}`}
       hidden={model.minimized}
       style={style}
       {...{ [WINDOW_ID]: model.id }}
@@ -94,14 +95,14 @@ export function AppWindow({
       aria-label={title}
       onPointerDown={() => dispatch({ type: "focus", id: model.id })}
     >
-      <div className="window-titlebar" onPointerDown={beginDrag}>
-        <div className="window-title">
-          <span className={`window-app-icon${lightTitle ? " light" : ""}`}>
+      <div className={styles.windowTitlebar} onPointerDown={beginDrag}>
+        <div className={styles.windowTitle}>
+          <span className={`${styles.windowAppIcon}${lightTitle ? ` ${styles.light}` : ""}`}>
             <Icon size={17} />
           </span>
           {title}
         </div>
-        <div className="window-actions">
+        <div className={styles.windowActions}>
           <button aria-label={`最小化${title}`} onClick={() => dispatch({ type: "minimize", id: model.id })}>
             <Minus />
           </button>
@@ -112,7 +113,7 @@ export function AppWindow({
             {model.maximized ? <PanelLeftClose /> : <Maximize2 />}
           </button>
           <button
-            className="close"
+            className={styles.close}
             aria-label={`关闭${title}`}
             onClick={() => dispatch({ type: "close", id: model.id })}
           >
@@ -120,12 +121,12 @@ export function AppWindow({
           </button>
         </div>
       </div>
-      <div className={`window-content window-content-${model.id}`}>
+      <div className={`${styles.windowContent} ${styles[`window-content-${model.id}`] ?? ""}`}>
         <ErrorBoundary FallbackComponent={WindowFailed} onError={logWindowError(model.id)}>
           {children}
         </ErrorBoundary>
       </div>
-      {!model.maximized && <div className="resize-handle" aria-hidden="true" onPointerDown={beginResize} />}
+      {!model.maximized && <div className={styles.resizeHandle} aria-hidden="true" onPointerDown={beginResize} />}
     </section>
   );
 }
@@ -137,7 +138,7 @@ const logWindowError = (id: string) => (error: unknown, info: ErrorInfo) =>
 // content afresh; the desktop and the other windows keep running.
 function WindowFailed({ resetErrorBoundary }: FallbackProps) {
   return (
-    <div className="center-state">
+    <div className={styles.centerState}>
       <CircleAlert />
       <h2>这个窗口暂时无法显示</h2>
       <p>桌面和其他窗口不受影响，可以重新打开这个窗口。</p>

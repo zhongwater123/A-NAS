@@ -2034,8 +2034,8 @@
 }
 
 /* The console takes the full height of the content area; the page scrolls
-   only when the window is shorter than the console's minimum height.
-   styles.css loads after this file, so these selectors outrank its own. */
+   only when the window is shorter than the console's minimum height. These
+   two-class selectors outrank the shared .set-main and .set-page rules below. */
 .set-main.fill {
   display: flex;
   flex-direction: column;

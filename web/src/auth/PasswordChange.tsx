@@ -1,6 +1,7 @@
 import { FormEvent, useId, useState } from "react";
 
 import { errorText } from "../api/errorMessages";
+import styles from "../desktop/desktop.module.css";
 import { passwordProblem, passwordRuleText } from "./accountRules";
 import { changePassword } from "./api";
 
@@ -35,17 +36,17 @@ export function PasswordChange({ onChanged, onLogout }: { onChanged: () => void;
     }
   };
   return (
-    <main className="auth-shell">
-      <form className="auth-card" autoComplete="off" onSubmit={(event) => void submit(event)}>
-        <span className="brand-mark large">A</span>
-        <p className="section-label">PASSWORD RESET</p>
+    <main className={styles.authShell}>
+      <form className={styles.authCard} autoComplete="off" onSubmit={(event) => void submit(event)}>
+        <span className={`${styles.brandMark} ${styles.large}`}>A</span>
+        <p className={styles.sectionLabel}>PASSWORD RESET</p>
         <h1>设置新密码</h1>
         <p>管理员重置了你的密码。继续使用 A-NAS 和 SMB 共享前，请设置只有你知道的新密码。</p>
         <label>
           当前密码
           <input name="currentPassword" type="password" required autoComplete="current-password" />
         </label>
-        <div className="auth-field">
+        <div className={styles.authField}>
           <label>
             新密码
             <input
@@ -63,11 +64,11 @@ export function PasswordChange({ onChanged, onLogout }: { onChanged: () => void;
           确认新密码
           <input name="confirmPassword" type="password" minLength={12} required autoComplete="new-password" />
         </label>
-        {error && <p className="form-error">{error}</p>}
+        {error && <p className={styles.formError}>{error}</p>}
         <button className="primary" disabled={submitting}>
           {submitting ? "处理中…" : "保存新密码"}
         </button>
-        <button type="button" className="link-button" onClick={onLogout}>
+        <button type="button" className={styles.linkButton} onClick={onLogout}>
           退出登录
         </button>
       </form>

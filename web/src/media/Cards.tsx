@@ -79,11 +79,7 @@ export function Artwork({
   if (!chosen || failed) {
     const Icon = typeIcons[title.type] ?? Clapperboard;
     return (
-      <div
-        className={`${styles.mcArt} ${styles.mcArtEmpty} ${className}`}
-        style={style}
-        aria-hidden="true"
-      >
+      <div className={`${styles.mcArt} ${styles.mcArtEmpty} ${className}`} style={style} aria-hidden="true">
         <Icon className={styles.mcArtIcon} />
         {label && <span>{heading(title)}</span>}
       </div>

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { Notification } from "../api.generated";
 import { fullName, type People, usePeople } from "../people/people";
 import { acknowledgeNotification, listNotifications } from "./api";
+import styles from "./desktop.module.css";
 
 // NotificationCenter shows what administrators did to the account since the
 // user last acknowledged it: viewing the private space or resetting the password.
@@ -21,9 +22,9 @@ export function NotificationCenter() {
     setItems([]);
   };
   return (
-    <div className="notice-layer">
-      <section className="notice-card" role="alertdialog" aria-label="账号通知">
-        <p className="section-label">ACCOUNT NOTICE</p>
+    <div className={styles.noticeLayer}>
+      <section className={styles.noticeCard} role="alertdialog" aria-label="账号通知">
+        <p className={styles.sectionLabel}>ACCOUNT NOTICE</p>
         <h2>账号通知</h2>
         <ul>
           {items.map((item) => (

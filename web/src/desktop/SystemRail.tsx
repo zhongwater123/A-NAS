@@ -6,6 +6,7 @@ import { calendarDate, formatClock } from "../lib/time";
 import { PersonAvatar } from "../people/PersonAvatar";
 import { displayName } from "../people/people";
 import type { DesktopApp } from "./DesktopGrid";
+import styles from "./desktop.module.css";
 import { useDesktopOrder } from "./useDesktopOrder";
 
 // "windows": some app window is visible; "revealed": the rail hid them and can
@@ -57,8 +58,8 @@ export function SystemRail({
 
   return (
     <>
-      <aside className="system-rail" aria-label="系统快捷栏">
-        <div className="rail-group">
+      <aside className={styles.systemRail} aria-label="系统快捷栏">
+        <div className={styles.railGroup}>
           <RailButton
             label="显示桌面"
             tip={desktopView === "revealed" ? "恢复窗口" : "显示桌面"}
@@ -90,14 +91,14 @@ export function SystemRail({
           >
             <Share2 />
             {sharesUnread > 0 && (
-              <span className="rail-badge" aria-hidden="true">
+              <span className={styles.railBadge} aria-hidden="true">
                 {sharesUnread > 99 ? "99+" : sharesUnread}
               </span>
             )}
           </RailButton>
         </div>
-        <div className="rail-spacer" />
-        <div className="rail-group">
+        <div className={styles.railSpacer} />
+        <div className={styles.railGroup}>
           <RailButton
             label="打开设置"
             tip="设置"
@@ -111,13 +112,13 @@ export function SystemRail({
           </RailButton>
           <RailButton
             ref={accountButton}
-            className="rail-account"
+            className={styles.railAccount}
             label={`账号（${name}）`}
             tip={`${name} · ${roleLabel}`}
             popup={{ kind: "menu", id: accountID, expanded: popover === "account" }}
             onClick={() => toggle("account")}
           >
-            <PersonAvatar who={user} className="rail-face" />
+            <PersonAvatar who={user} className={styles.railFace} />
           </RailButton>
         </div>
       </aside>
@@ -125,7 +126,7 @@ export function SystemRail({
       {popover === "launcher" && (
         <DismissableLayer
           id={launcherID}
-          className="launcher"
+          className={styles.launcher}
           role="dialog"
           label="全部应用"
           trigger={launcherButton}
@@ -143,7 +144,7 @@ export function SystemRail({
       {popover === "account" && (
         <DismissableLayer
           id={accountID}
-          className="account-popover"
+          className={styles.accountPopover}
           label="账号"
           trigger={accountButton}
           onDismiss={close}
@@ -193,7 +194,7 @@ function RailButton({
   return (
     <button
       ref={ref}
-      className={`rail-button ${on ? "on" : ""} ${className}`}
+      className={`${styles.railButton} ${on ? styles.on : ""} ${className}`}
       aria-label={label}
       aria-pressed={pressed}
       aria-haspopup={popup?.kind}
@@ -202,7 +203,7 @@ function RailButton({
       onClick={onClick}
     >
       {children}
-      <span className="rail-tip" aria-hidden="true">
+      <span className={styles.railTip} aria-hidden="true">
         {tip}
       </span>
     </button>
@@ -287,7 +288,7 @@ function Launcher({ apps, onLaunch }: { apps: DesktopApp[]; onLaunch: (app: Desk
     search.current?.focus();
   }, []);
 
-  const tiles = () => Array.from(grid.current?.querySelectorAll<HTMLButtonElement>(".launcher-tile") ?? []);
+  const tiles = () => Array.from(grid.current?.querySelectorAll<HTMLButtonElement>(`.${styles.launcherTile}`) ?? []);
   const columns = () =>
     grid.current
       ? Math.max(1, getComputedStyle(grid.current).gridTemplateColumns.split(" ").filter(Boolean).length)
@@ -322,7 +323,7 @@ function Launcher({ apps, onLaunch }: { apps: DesktopApp[]; onLaunch: (app: Desk
 
   return (
     <>
-      <label className="launcher-search">
+      <label className={styles.launcherSearch}>
         <Search aria-hidden="true" />
         <input
           ref={search}
@@ -336,26 +337,26 @@ function Launcher({ apps, onLaunch }: { apps: DesktopApp[]; onLaunch: (app: Desk
           onKeyDown={searchKey}
         />
       </label>
-      <div className="launcher-body">
+      <div className={styles.launcherBody}>
         {available.length > 0 && (
           <>
-            <h2 className="launcher-heading">
+            <h2 className={styles.launcherHeading}>
               {terms.length ? "搜索结果" : "应用"}
               <small>{available.length}</small>
             </h2>
-            <div ref={grid} className="launcher-grid" onKeyDown={gridKey}>
+            <div ref={grid} className={styles.launcherGrid} onKeyDown={gridKey}>
               {available.map((app, index) => (
                 <button
                   key={app.id}
-                  className={`launcher-tile ${app.active ? "running" : ""} ${app.unavailable ? "unavailable" : ""} ${terms.length && index === 0 ? "suggested" : ""}`}
+                  className={`${styles.launcherTile} ${app.active ? styles.running : ""} ${app.unavailable ? styles.unavailable : ""} ${terms.length && index === 0 ? styles.suggested : ""}`}
                   aria-label={app.ariaLabel}
                   onClick={() => onLaunch(app)}
                 >
-                  <span className={`launcher-icon icon-${app.tone}`} aria-hidden="true">
+                  <span className={`${styles.launcherIcon} ${styles[`icon-${app.tone}`] ?? ""}`} aria-hidden="true">
                     {app.icon}
                   </span>
-                  <span className="launcher-label">{app.label}</span>
-                  {app.note && <small className="launcher-note">{app.note}</small>}
+                  <span className={styles.launcherLabel}>{app.label}</span>
+                  {app.note && <small className={styles.launcherNote}>{app.note}</small>}
                 </button>
               ))}
             </div>
@@ -363,11 +364,11 @@ function Launcher({ apps, onLaunch }: { apps: DesktopApp[]; onLaunch: (app: Desk
         )}
         {planned.length > 0 && (
           <>
-            <h2 className="launcher-heading">规划中</h2>
-            <ul className="launcher-planned" aria-label="规划中的应用">
+            <h2 className={styles.launcherHeading}>规划中</h2>
+            <ul className={styles.launcherPlanned} aria-label="规划中的应用">
               {planned.map((app) => (
                 <li key={app.id}>
-                  <span className={`launcher-icon icon-${app.tone}`} aria-hidden="true">
+                  <span className={`${styles.launcherIcon} ${styles[`icon-${app.tone}`] ?? ""}`} aria-hidden="true">
                     {app.icon}
                   </span>
                   {app.label}
@@ -377,12 +378,12 @@ function Launcher({ apps, onLaunch }: { apps: DesktopApp[]; onLaunch: (app: Desk
           </>
         )}
         {!matches.length && (
-          <p className="launcher-empty" role="status">
+          <p className={styles.launcherEmpty} role="status">
             没有名为“{query.trim()}”的应用
           </p>
         )}
       </div>
-      <footer className="launcher-footer" aria-hidden="true">
+      <footer className={styles.launcherFooter} aria-hidden="true">
         <span>
           <kbd>↑</kbd>
           <kbd>↓</kbd>
@@ -428,27 +429,27 @@ function AccountMenu({
 
   return (
     <>
-      <div className="account-card">
-        <PersonAvatar who={user} className="account-face" />
-        <div className="account-who">
+      <div className={styles.accountCard}>
+        <PersonAvatar who={user} className={styles.accountFace} />
+        <div className={styles.accountWho}>
           <strong>{displayName(user)}</strong>
-          <span className="account-meta">
-            <span className="account-role">{roleLabel}</span>
-            {user.nickname && <span className="account-username">{user.username}</span>}
+          <span className={styles.accountMeta}>
+            <span className={styles.accountRole}>{roleLabel}</span>
+            {user.nickname && <span className={styles.accountUsername}>{user.username}</span>}
           </span>
         </div>
       </div>
-      <p className="account-session">
+      <p className={styles.accountSession}>
         {session.localConsole ? <Monitor aria-hidden="true" /> : <Clock3 aria-hidden="true" />}
         {session.text}
       </p>
-      <div ref={menu} className="account-menu" role="menu" aria-label="账号操作" onKeyDown={moveFocus}>
-        <button role="menuitem" className="account-item" onClick={onAccount}>
+      <div ref={menu} className={styles.accountMenu} role="menu" aria-label="账号操作" onKeyDown={moveFocus}>
+        <button role="menuitem" className={styles.accountItem} onClick={onAccount}>
           <UserRound aria-hidden="true" />
           我的账号<small>头像、昵称与密码</small>
         </button>
-        <div className="account-separator" role="separator" />
-        <button role="menuitem" className="account-item danger" onClick={onLogout}>
+        <div className={styles.accountSeparator} role="separator" />
+        <button role="menuitem" className={`${styles.accountItem} ${styles.danger}`} onClick={onLogout}>
           <LogOut aria-hidden="true" />
           退出登录
         </button>

@@ -9,7 +9,7 @@ import { Desktop } from "./desktop/Desktop";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./desktop/LocalConsoleScreenSaver";
 import { transferStore } from "./transfers/store";
 import "./styles/index.css";
-import "./styles.css";
+import "./desktop/desktop.module.css";
 
 export default function App() {
   const [session, setSessionState] = useState<Session>();

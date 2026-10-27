@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { readLocalDisplay } from "./api";
+import styles from "./desktop.module.css";
 
 export const localConsoleScreenSaverIdleMs = 180_000;
 export const localConsoleScreenSaverManifest = "/local-console/screensavers";
@@ -187,7 +188,7 @@ export function LocalConsoleScreenSaver({
 
   if (phase === "asleep") {
     return (
-      <section className="local-console-sleep" role="dialog" aria-label="息屏">
+      <section className={styles.localConsoleSleep} role="dialog" aria-label="息屏">
         <p className="sr-only">按任意键、移动鼠标或触摸屏幕即可唤醒</p>
       </section>
     );
@@ -196,7 +197,7 @@ export function LocalConsoleScreenSaver({
   if (phase !== "saver" || !currentSrc) return null;
 
   return (
-    <section className="local-console-screensaver" role="dialog" aria-label="屏幕保护程序">
+    <section className={styles.localConsoleScreensaver} role="dialog" aria-label="屏幕保护程序">
       <video
         ref={video}
         src={currentSrc}

@@ -9,6 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import styles from "./desktop.module.css";
 import { moveItem, useDesktopOrder } from "./useDesktopOrder";
 
 export interface DesktopApp {
@@ -213,7 +214,7 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
     <>
       <section
         ref={gridRef}
-        className={`desktop-grid ${draggingID ? "reordering" : ""}`}
+        className={`${styles.desktopGrid} ${draggingID ? styles.reordering : ""}`}
         aria-label="桌面应用"
         aria-describedby="desktop-reorder-hint"
         onClickCapture={(event) => {
@@ -235,13 +236,13 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
                 if (slot) slots.current.set(id, slot);
                 else slots.current.delete(id);
               }}
-              className={`desktop-slot ${draggingID === id ? "dragging" : ""}`}
+              className={`${styles.desktopSlot} ${draggingID === id ? styles.dragging : ""}`}
               title={app.disabled ? `${app.label} · 规划中` : app.note ? `${app.label} · ${app.note}` : app.label}
               onPointerDown={(event) => beginPointer(event, id)}
               onKeyDown={(event) => moveWithKeyboard(event, id)}
             >
               <button
-                className={`desktop-shortcut ${app.active ? "running" : ""} ${app.unavailable ? "unavailable" : ""}`}
+                className={`${styles.desktopShortcut} ${app.active ? styles.running : ""} ${app.unavailable ? styles.unavailable : ""}`}
                 aria-label={app.ariaLabel}
                 aria-disabled={app.unavailable && !app.onClick ? true : undefined}
                 disabled={app.disabled}
@@ -264,11 +265,11 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
         createPortal(
           <div
             ref={previewRef}
-            className="desktop-drag-preview"
+            className={styles.desktopDragPreview}
             style={{ width: dragging.width, height: dragging.height }}
             aria-hidden="true"
           >
-            <div className={`desktop-shortcut ${draggingApp.active ? "running" : ""}`}>
+            <div className={`${styles.desktopShortcut} ${draggingApp.active ? styles.running : ""}`}>
               <ShortcutContents app={draggingApp} />
             </div>
           </div>,
@@ -281,7 +282,7 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
 function ShortcutContents({ app }: { app: DesktopApp }) {
   return (
     <>
-      <span className={`desktop-icon icon-${app.tone}`}>{app.icon}</span>
+      <span className={`${styles.desktopIcon} ${styles[`icon-${app.tone}`] ?? ""}`}>{app.icon}</span>
       <span>{app.label}</span>
       {app.disabled ? <small>规划中</small> : app.note && <small>{app.note}</small>}
     </>

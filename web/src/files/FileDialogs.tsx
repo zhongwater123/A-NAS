@@ -38,7 +38,7 @@ export function DeleteDialog({
           <button disabled={busy} onClick={onCancel}>
             取消
           </button>
-          <button className="danger-button" disabled={busy} onClick={onConfirm}>
+          <button className={styles.dangerButton} disabled={busy} onClick={onConfirm}>
             {busy ? "正在移动…" : "移到回收站"}
           </button>
         </div>

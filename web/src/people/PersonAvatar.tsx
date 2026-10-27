@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import styles from "../desktop/desktop.module.css";
 import { avatarURL } from "./api";
 import { displayName, type Person } from "./people";
 
@@ -11,7 +12,7 @@ export function PersonAvatar({ who, className }: { who: Person; className: strin
   const version = who.id && who.avatarVersion && failed !== who.avatarVersion ? who.avatarVersion : undefined;
   return (
     <span
-      className={`${className} person-avatar ${avatarTone(who.username)} ${version ? "pictured" : ""}`}
+      className={`${className} ${styles.personAvatar} ${styles[avatarTone(who.username)] ?? ""} ${version ? styles.pictured : ""}`}
       aria-hidden="true"
     >
       {version ? (
