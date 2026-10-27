@@ -114,6 +114,8 @@ func (s Session) LocalConsole() bool { return s.ExpiresAt.Equal(localConsoleExpi
 type Options struct {
 	Now    func() time.Time
 	Random io.Reader
+	// PasswordCost defaults to DefaultPasswordCost; tests lower it.
+	PasswordCost PasswordCost
 }
 
 type Store struct {
@@ -321,7 +323,9 @@ type Service struct {
 	credentials CredentialProvisioner
 	now         func() time.Time
 	random      io.Reader
-	sessions    sessionMemory
+	// passwordCost is the work spent on each password set.
+	passwordCost PasswordCost
+	sessions     sessionMemory
 }
 
 func NewService(store *Store, credentials CredentialProvisioner, options Options) *Service {
@@ -333,7 +337,11 @@ func NewService(store *Store, credentials CredentialProvisioner, options Options
 	if random == nil {
 		random = rand.Reader
 	}
-	return &Service{store: store, credentials: credentials, now: now, random: random}
+	cost := options.PasswordCost
+	if cost == (PasswordCost{}) {
+		cost = DefaultPasswordCost
+	}
+	return &Service{store: store, credentials: credentials, now: now, random: random, passwordCost: cost}
 }
 
 func (s *Service) SetupAdministrator(ctx context.Context, username, password string) (User, error) {
@@ -359,7 +367,7 @@ FROM users u JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private'`).Sc
 	if err := checkPassword(password); err != nil {
 		return User{}, err
 	}
-	passwordHash, err := hashPassword(password, s.random)
+	passwordHash, err := hashPassword(password, s.random, s.passwordCost)
 	if err != nil {
 		return User{}, err
 	}
@@ -410,7 +418,7 @@ func (s *Service) createUser(ctx context.Context, username, password string, rol
 	if err := checkPassword(password); err != nil {
 		return User{}, err
 	}
-	passwordHash, err := hashPassword(password, s.random)
+	passwordHash, err := hashPassword(password, s.random, s.passwordCost)
 	if err != nil {
 		return User{}, err
 	}
@@ -859,7 +867,7 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 	if err != nil {
 		return err
 	}
-	passwordHash, err := hashPassword(password, s.random)
+	passwordHash, err := hashPassword(password, s.random, s.passwordCost)
 	if err != nil {
 		return err
 	}
@@ -1028,58 +1036,81 @@ func (s *Service) randomToken(size int) string {
 	return hex.EncodeToString(value)
 }
 
-func hashPassword(password string, random io.Reader) (string, error) {
-	const memory = 64 * 1024
-	const iterations = 3
-	const parallelism = 2
+// PasswordCost is the work argon2id spends on a password a user sets. A
+// stored hash records its own cost, so a password set at one cost is still
+// verified after the cost changes.
+type PasswordCost struct {
+	MemoryKiB   uint32
+	Iterations  uint32
+	Parallelism uint8
+}
+
+// DefaultPasswordCost is 64 MiB, three passes and two lanes.
+var DefaultPasswordCost = PasswordCost{MemoryKiB: 64 * 1024, Iterations: 3, Parallelism: 2}
+
+func hashPassword(password string, random io.Reader, cost PasswordCost) (string, error) {
 	salt := make([]byte, 16)
 	if _, err := io.ReadFull(random, salt); err != nil {
 		return "", err
 	}
-	key := argon2.IDKey([]byte(password), salt, iterations, memory, parallelism, 32)
-	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", memory, iterations, parallelism,
+	key := argon2.IDKey([]byte(password), salt, cost.Iterations, cost.MemoryKiB, cost.Parallelism, 32)
+	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", cost.MemoryKiB, cost.Iterations, cost.Parallelism,
 		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
 }
 
 func verifyPassword(password, encoded string) bool {
-	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" || parts[2] != "v=19" {
+	hash, ok := parsePasswordHash(encoded)
+	if !ok {
 		return false
 	}
-	var memory uint64
-	var iterations uint64
-	var parallelism uint64
+	got := argon2.IDKey([]byte(password), hash.salt, hash.cost.Iterations, hash.cost.MemoryKiB, hash.cost.Parallelism, uint32(len(hash.key)))
+	return subtle.ConstantTimeCompare(got, hash.key) == 1
+}
+
+type passwordHash struct {
+	cost      PasswordCost
+	salt, key []byte
+}
+
+// parsePasswordHash reads an encoded argon2id hash as hashPassword writes it.
+func parsePasswordHash(encoded string) (passwordHash, bool) {
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 6 || parts[1] != "argon2id" || parts[2] != "v=19" {
+		return passwordHash{}, false
+	}
+	var hash passwordHash
 	for value := range strings.SplitSeq(parts[3], ",") {
 		key, raw, found := strings.Cut(value, "=")
 		if !found {
-			return false
+			return passwordHash{}, false
 		}
 		parsed, err := strconv.ParseUint(raw, 10, 32)
 		if err != nil {
-			return false
+			return passwordHash{}, false
 		}
 		switch key {
 		case "m":
-			memory = parsed
+			hash.cost.MemoryKiB = uint32(parsed)
 		case "t":
-			iterations = parsed
+			hash.cost.Iterations = uint32(parsed)
 		case "p":
-			parallelism = parsed
+			if parsed > 255 {
+				return passwordHash{}, false
+			}
+			hash.cost.Parallelism = uint8(parsed)
 		}
 	}
-	if memory == 0 || iterations == 0 || parallelism == 0 || parallelism > 255 {
-		return false
+	if hash.cost.MemoryKiB == 0 || hash.cost.Iterations == 0 || hash.cost.Parallelism == 0 {
+		return passwordHash{}, false
 	}
-	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil {
-		return false
+	var err error
+	if hash.salt, err = base64.RawStdEncoding.DecodeString(parts[4]); err != nil {
+		return passwordHash{}, false
 	}
-	want, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil || len(want) == 0 {
-		return false
+	if hash.key, err = base64.RawStdEncoding.DecodeString(parts[5]); err != nil || len(hash.key) == 0 {
+		return passwordHash{}, false
 	}
-	got := argon2.IDKey([]byte(password), salt, uint32(iterations), uint32(memory), uint8(parallelism), uint32(len(want)))
-	return subtle.ConstantTimeCompare(got, want) == 1
+	return hash, true
 }
 
 func tokenHash(token string) string { return accountid.TokenHash(token) }

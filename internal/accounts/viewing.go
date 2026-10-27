@@ -382,7 +382,7 @@ JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private' WHERE u.id = ?`, 
 	if newPassword == currentPassword {
 		return ErrPasswordUnchanged
 	}
-	passwordHash, err := hashPassword(newPassword, s.random)
+	passwordHash, err := hashPassword(newPassword, s.random, s.passwordCost)
 	if err != nil {
 		return err
 	}

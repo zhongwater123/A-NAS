@@ -36,7 +36,7 @@ func TestSignInsFailuresAndSignOutsAreRecordedWithTheirOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &viewingRecorder{}, accounts.Options{Now: ticking()})
+	service := accounts.NewService(store, &viewingRecorder{}, accounts.Options{PasswordCost: cheapPasswords, Now: ticking()})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +111,7 @@ func TestMembersOnlySeeActivityAboutThemselves(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &viewingRecorder{}, accounts.Options{Now: ticking()})
+	service := accounts.NewService(store, &viewingRecorder{}, accounts.Options{PasswordCost: cheapPasswords, Now: ticking()})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
