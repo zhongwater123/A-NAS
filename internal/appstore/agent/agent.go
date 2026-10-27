@@ -406,9 +406,9 @@ var errInvalidIdentity = errors.New("app identity is invalid")
 // first install the account does not exist yet (the Host Agent creates it
 // with the app's folders), and the plan shows the UID the Host Agent
 // reserved, which the caller passes: it must be in the app range and held by
-// no account, nor by a group other than the app's own. Install renders the
-// plan again as the account and compares digests, so only a plan shown with
-// the account's UID installs.
+// no account, nor by a group other than the app's own. ReserveInstall renders
+// and checks the plan digest; CommitInstall then requires the real account
+// to match that identity before Compose can run.
 func (h *handler) planIdentity(id, uid, gid string) (appstore.Identity, error) {
 	identity, ok, err := h.identities.App(id)
 	if err != nil {
@@ -431,8 +431,8 @@ func (h *handler) planIdentity(id, uid, gid string) (appstore.Identity, error) {
 	return reserved, nil
 }
 
-// installIdentity is the app's account, which the Host Agent creates before
-// the product service asks for the install.
+// installIdentity is the actual app account, created by the Host Agent before
+// the product service commits a reservation (or uses the legacy install).
 func (h *handler) installIdentity(id string) (appstore.Identity, error) {
 	identity, ok, err := h.identities.App(id)
 	if err != nil {

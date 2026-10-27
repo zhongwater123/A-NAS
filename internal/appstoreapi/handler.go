@@ -186,8 +186,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 var errVolumeUnavailable = errors.New("data volume is unavailable")
 
-// install checks the confirmed plan against the app's identity, has the Host
-// Agent prepare its folders, and only then starts Compose.
+// install reserves the confirmed plan, has the Host Agent prepare its folders,
+// and commits the reservation so Compose can start.
 func (h *handler) install(ctx context.Context, id, digest string) (appstore.Job, error) {
 	if h.volumeReady != nil {
 		if err := h.volumeReady(ctx); err != nil {
