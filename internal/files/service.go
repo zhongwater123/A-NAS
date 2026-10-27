@@ -210,6 +210,11 @@ CREATE TABLE IF NOT EXISTS snapshots (
     created_at TEXT NOT NULL,
     UNIQUE(space_id, name)
 );
+CREATE TABLE IF NOT EXISTS pending_snapshots (
+    id TEXT PRIMARY KEY,
+    space_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS snapshot_entries (
     id TEXT PRIMARY KEY,
     snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
@@ -347,11 +352,14 @@ type Service struct {
 	temporariesMu sync.Mutex
 	temporaries   map[string]struct{}
 	// takingSnapshots holds the snapshots being taken. snapshotsMu also
-	// orders sweeps against them (see SweepSnapshots).
-	snapshotsMu     sync.Mutex
-	takingSnapshots map[string]struct{}
-	ordersMu        sync.Mutex
-	orders          map[string]*spaceOrder
+	// orders sweeps against them (see SweepSnapshots) and guards what the
+	// last sweep reported as left alone.
+	snapshotsMu        sync.Mutex
+	takingSnapshots    map[string]struct{}
+	reportedUnrecorded int
+	reportedUnfound    int
+	ordersMu           sync.Mutex
+	orders             map[string]*spaceOrder
 }
 
 // queryer is the catalog or a transaction on it.

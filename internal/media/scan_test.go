@@ -3,6 +3,7 @@ package media
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -48,5 +49,38 @@ func TestScanStopsWhenReadingTheFoldersFails(t *testing.T) {
 				t.Fatalf("films after the failed scan = %+v, want both and the progress", movies.Items)
 			}
 		})
+	}
+}
+
+// A read of which artwork the titles use that fails part way leaves the
+// resized artwork alone: what was not read could still be in use (#269).
+func TestPruneCacheKeepsArtworkWhenReadingTheTitlesFails(t *testing.T) {
+	env := newTestEnv(t, nil)
+	artwork := filepath.Join(env.media.cacheDir, "artwork")
+	if err := os.MkdirAll(artwork, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resized := filepath.Join(artwork, "entry-unread--300-1.jpg")
+	if err := os.WriteFile(resized, []byte("jpeg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openSQLite(sqlitetest.Register("SELECT poster_entry FROM videos", 0), env.catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	cut, err := NewService(store, Options{Files: env.files, Spaces: env.accounts, CacheDir: env.media.cacheDir, Now: env.clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cut.Close)
+	cut.pruneCache(env.ctx)
+	if _, err := os.Stat(resized); err != nil {
+		t.Fatalf("artwork after a failed read: %v", err)
+	}
+	// Read in full, the titles do not use it.
+	env.media.pruneCache(env.ctx)
+	if _, err := os.Stat(resized); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unused artwork after a full read: %v", err)
 	}
 }

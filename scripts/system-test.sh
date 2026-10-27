@@ -614,16 +614,21 @@ btrfs subvolume delete "$(subvolume_of "$gone_snapshot")" >/dev/null 2>&1 || tru
 check "a snapshot already gone from the volume can still be deleted" \
   test "$(status_of -X DELETE -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" "$api/api/v1/snapshots/$gone_snapshot")" = 204
 check "its record is gone" denied grep -qx "$gone_snapshot" <(snapshot_ids)
-# What a crash leaves: a subvolume without a record and a record without a
-# subvolume. The Product Service sweeps both when it starts.
+# What a crash leaves: a subvolume noted as pending and a record without a
+# subvolume. The Product Service sweeps both when it starts, and leaves a
+# subvolume the catalog never noted, as one of a lost catalog (#269).
 systemctl stop anas-api
-orphan="$data/.a-nas-snapshots/ffffffffffffffffffffffffffffffff"
+orphan=$(subvolume_of snapshot:crashed)
+foreign="$data/.a-nas-snapshots/ffffffffffffffffffffffffffffffff"
 btrfs subvolume snapshot -r "$alice_root" "$orphan" >/dev/null
+btrfs subvolume snapshot -r "$alice_root" "$foreign" >/dev/null
 setpriv --reuid=a-nas --regid=a-nas --init-groups python3 - "$alice_private" <<'PY'
 import sqlite3, sys
 db = sqlite3.connect("/var/lib/a-nas/files.db")
 db.execute("INSERT INTO snapshots(id, space_id, name, origin, created_by, created_at, file_count, size_bytes)"
            " VALUES(?,?,?,?,?,?,?,?)", ("snapshot:lost", sys.argv[1], "卷上已没有", "manual", "system", "2026-10-20T00:00:00Z", 0, 0))
+db.execute("INSERT INTO pending_snapshots(id, space_id, created_at) VALUES(?,?,?)",
+           ("snapshot:crashed", sys.argv[1], "2026-10-20T00:00:00Z"))
 db.commit()
 PY
 systemctl start anas-api
@@ -631,11 +636,14 @@ for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sle
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 lost_record_gone() { snapshot_ids >/tmp/snapshot-ids.txt && ! grep -qx snapshot:lost /tmp/snapshot-ids.txt; }
 for _ in $(seq 1 100); do test ! -e "$orphan" && lost_record_gone && break; sleep 0.2; done
-check "on start the Product Service deletes a snapshot nobody records" test ! -e "$orphan"
+check "on start the Product Service deletes a snapshot whose taking never finished" test ! -e "$orphan"
 check "and the record of a snapshot gone from the volume" lost_record_gone
 check "recorded snapshots survive the sweep" test -d "$(subvolume_of "$large_snapshot_id")"
-check "the sweep is in the activity log" grep -qx snapshot.missing \
-  <(curl -fsS -b /tmp/owner.jar "$api/api/v1/activity?category=file" | jq -r '.items[].action')
+check "a snapshot the catalog never noted survives too" test -d "$foreign"
+curl -fsS -b /tmp/owner.jar "$api/api/v1/activity?category=file" | jq -r '.items[].action' >/tmp/sweep-actions.txt || true
+check "the sweep is in the activity log" grep -qx snapshot.missing /tmp/sweep-actions.txt
+check "so is the snapshot it left alone" grep -qx snapshot.unrecorded /tmp/sweep-actions.txt
+btrfs subvolume delete "$foreign" >/dev/null 2>&1 || true
 # A copy that a restart cut short leaves a hidden duplicate; listing the
 # space removes it.
 as alice mkdir -p "$alice_root/.a-nas-copy-0123456789abcdef/副本"

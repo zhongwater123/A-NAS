@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -184,32 +185,35 @@ func TestClientRefusesASnapshotListingCutShort(t *testing.T) {
 	}
 }
 
-func TestClientDeletesCountsAndPrunesSnapshots(t *testing.T) {
+func TestClientDeletesAndSurveysSnapshots(t *testing.T) {
 	snapshots := &agentSnapshotBackend{
 		deleteErr: files.ErrNotFound,
-		pruned:    files.SnapshotPrune{Present: []string{"snapshot:1"}, Removed: 3},
-		count:     4,
+		survey:    files.SnapshotSurvey{Present: []string{"snapshot:1"}, Unknown: 3},
 	}
-	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{Snapshots: snapshots}, discardLogger())))
+	handler := agent.NewOperationsHandler(agent.Services{Snapshots: snapshots}, discardLogger())
+	client := agent.NewClient(serve(t, handler))
 	if err := client.Delete(context.Background(), "space:gone", "snapshot:1"); !errors.Is(err, files.ErrNotFound) {
 		t.Fatalf("Delete() in an unknown space error = %v, want ErrNotFound", err)
 	}
-	if count, err := client.Count(context.Background()); err != nil || count != snapshots.count {
-		t.Fatalf("Count() = %d, %v; want %d", count, err, snapshots.count)
+	survey, err := client.Survey(context.Background(), []string{"snapshot:1", "snapshot:2"})
+	if err != nil || !reflect.DeepEqual(survey, snapshots.survey) || !reflect.DeepEqual(snapshots.known, []string{"snapshot:1", "snapshot:2"}) {
+		t.Fatalf("Survey() = %#v, %v; known %v", survey, err, snapshots.known)
 	}
-	pruned, err := client.Prune(context.Background(), []string{"snapshot:1", "snapshot:2"})
-	if err != nil || !reflect.DeepEqual(pruned, snapshots.pruned) || !reflect.DeepEqual(snapshots.kept, []string{"snapshot:1", "snapshot:2"}) {
-		t.Fatalf("Prune() = %#v, %v; kept %v", pruned, err, snapshots.kept)
+	if _, err := client.Survey(context.Background(), nil); err != nil || snapshots.known == nil || len(snapshots.known) != 0 {
+		t.Fatalf("Survey() of nothing known error = %v, known %#v", err, snapshots.known)
 	}
-	if _, err := client.Prune(context.Background(), nil); err != nil || snapshots.kept == nil || len(snapshots.kept) != 0 {
-		t.Fatalf("Prune() keeping nothing error = %v, kept %#v", err, snapshots.kept)
+	snapshots.surveyErr = files.ErrVolumeUnavailable
+	if _, err := client.Survey(context.Background(), nil); !errors.Is(err, files.ErrVolumeUnavailable) {
+		t.Fatalf("Survey() without the data volume error = %v, want ErrVolumeUnavailable", err)
 	}
-	snapshots.pruneErr = files.ErrVolumeUnavailable
-	if _, err := client.Prune(context.Background(), nil); !errors.Is(err, files.ErrVolumeUnavailable) {
-		t.Fatalf("Prune() without the data volume error = %v, want ErrVolumeUnavailable", err)
-	}
-	if _, err := client.Count(context.Background()); !errors.Is(err, files.ErrVolumeUnavailable) {
-		t.Fatalf("Count() without the data volume error = %v, want ErrVolumeUnavailable", err)
+
+	// A Product Service from before #269 asks to keep only some snapshots;
+	// nothing is deleted.
+	snapshots.known = nil
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/v1/snapshots", strings.NewReader(`{"keep":[]}`)))
+	if recorder.Code != http.StatusMethodNotAllowed || snapshots.known != nil {
+		t.Fatalf("PUT /v1/snapshots = %d, reached the backend: %v", recorder.Code, snapshots.known != nil)
 	}
 }
 
@@ -299,10 +303,9 @@ type agentSnapshotBackend struct {
 	// walk after that many.
 	objects, failAt int
 	deleteErr       error
-	kept            []string
-	pruned          files.SnapshotPrune
-	pruneErr        error
-	count           int
+	known           []string
+	survey          files.SnapshotSurvey
+	surveyErr       error
 }
 
 func (b *agentSnapshotBackend) Create(_ context.Context, spaceID, snapshotID string) error {
@@ -344,12 +347,10 @@ func (*agentSnapshotBackend) Open(context.Context, string, string) (io.ReadClose
 
 func (b *agentSnapshotBackend) Delete(context.Context, string, string) error { return b.deleteErr }
 
-func (b *agentSnapshotBackend) Prune(_ context.Context, keep []string) (files.SnapshotPrune, error) {
-	b.kept = keep
-	return b.pruned, b.pruneErr
+func (b *agentSnapshotBackend) Survey(_ context.Context, known []string) (files.SnapshotSurvey, error) {
+	b.known = known
+	return b.survey, b.surveyErr
 }
-
-func (b *agentSnapshotBackend) Count(context.Context) (int, error) { return b.count, b.pruneErr }
 
 func TestClientReportsUnavailableReader(t *testing.T) {
 	socketPath := serve(t, agent.NewHandler(fake.NewUnavailable(), discardLogger()))

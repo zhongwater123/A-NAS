@@ -112,67 +112,40 @@ func (e *Executor) Delete(ctx context.Context, spaceID, snapshotID string) error
 	return err
 }
 
-// Prune deletes the snapshot subvolumes that keep does not name, such as one
-// the Product Service was taking when it failed or stopped, and reports
-// which of keep exist. It touches only entries named the way snapshotRoot
-// names them, and only on the mounted data volume. A subvolume it cannot
-// delete is logged and left for the next prune.
-func (e *Executor) Prune(ctx context.Context, keep []string) (files.SnapshotPrune, error) {
+// Survey reports which of known have a subvolume on the mounted data volume
+// and how many other subvolumes there are named the way snapshotRoot names
+// them. It deletes nothing: the Product Service deletes the snapshots it
+// knows to be unfinished one by one (#269).
+func (e *Executor) Survey(_ context.Context, known []string) (files.SnapshotSurvey, error) {
 	if !e.dataVolumeReady() {
-		return files.SnapshotPrune{}, files.ErrVolumeUnavailable
+		return files.SnapshotSurvey{}, files.ErrVolumeUnavailable
 	}
-	wanted := make(map[string]string, len(keep))
-	for _, id := range keep {
+	return e.surveySnapshots(known)
+}
+
+func (e *Executor) surveySnapshots(known []string) (files.SnapshotSurvey, error) {
+	wanted := make(map[string]string, len(known))
+	for _, id := range known {
 		wanted[filepath.Base(e.snapshotRoot(id))] = id
 	}
-	pruned := files.SnapshotPrune{Present: []string{}}
+	survey := files.SnapshotSurvey{Present: []string{}}
 	items, err := os.ReadDir(e.snapshotsRoot())
 	if errors.Is(err, os.ErrNotExist) {
-		return pruned, nil
+		return survey, nil
 	}
 	if err != nil {
-		return files.SnapshotPrune{}, err
+		return files.SnapshotSurvey{}, err
 	}
 	for _, item := range items {
 		if id, ok := wanted[item.Name()]; ok {
-			pruned.Present = append(pruned.Present, id)
+			survey.Present = append(survey.Present, id)
 			continue
 		}
-		if !item.IsDir() || !snapshotDirectoryName.MatchString(item.Name()) {
-			continue
-		}
-		if err := ctx.Err(); err != nil {
-			return files.SnapshotPrune{}, err
-		}
-		if _, err := e.runner.Run(ctx, "btrfs", []string{"subvolume", "delete", filepath.Join(e.snapshotsRoot(), item.Name())}, ""); err != nil {
-			e.logger.WarnContext(ctx, "delete a snapshot nobody keeps failed", "subvolume", item.Name(), "error", err)
-			continue
-		}
-		pruned.Removed++
-	}
-	return pruned, nil
-}
-
-// Count reports how many snapshot subvolumes the mounted data volume holds,
-// counting only entries named the way snapshotRoot names them.
-func (e *Executor) Count(context.Context) (int, error) {
-	if !e.dataVolumeReady() {
-		return 0, files.ErrVolumeUnavailable
-	}
-	items, err := os.ReadDir(e.snapshotsRoot())
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	count := 0
-	for _, item := range items {
 		if item.IsDir() && snapshotDirectoryName.MatchString(item.Name()) {
-			count++
+			survey.Unknown++
 		}
 	}
-	return count, nil
+	return survey, nil
 }
 
 func (e *Executor) resolveSpaceRoot(spaceID string) (string, error) {

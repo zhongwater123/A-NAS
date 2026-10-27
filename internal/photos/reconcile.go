@@ -171,15 +171,9 @@ func (s *Service) reconcileDerived(ctx context.Context, report *ReconcileReport)
 	rescanned := 0
 	for _, derivation := range slices.Concat(knownDerivations, sheetDerivations) {
 		sheet := slices.Contains(sheetDerivations, derivation)
-		objectIDs, err := s.strings(ctx, "SELECT object_id FROM derived_files WHERE derivation = ?", derivation)
+		missing, err := s.missingDerived(ctx, derivation, recorded)
 		if err != nil {
 			return err
-		}
-		var missing []string
-		for _, objectID := range objectIDs {
-			if !recorded[derivedPath(derivation, objectID)] {
-				missing = append(missing, objectID)
-			}
 		}
 		for _, objectID := range missing {
 			err := s.withTx(ctx, func(tx *sql.Tx) error {
@@ -211,6 +205,27 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, objectID, derivation, now, now)
 		s.wakeAI()
 	}
 	return nil
+}
+
+// missingDerived lists the objects whose file of derivation the catalog
+// records and the walk did not find, as found marks them.
+func (s *Service) missingDerived(ctx context.Context, derivation string, found map[string]bool) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT object_id FROM derived_files WHERE derivation = ?", derivation)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var missing []string
+	for rows.Next() {
+		var objectID string
+		if err := rows.Scan(&objectID); err != nil {
+			return nil, err
+		}
+		if !found[derivedPath(derivation, objectID)] {
+			missing = append(missing, objectID)
+		}
+	}
+	return missing, rows.Err()
 }
 
 // isDerivedPath reports whether path is where a known derivation of a valid

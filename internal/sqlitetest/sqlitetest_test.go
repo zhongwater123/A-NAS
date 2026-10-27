@@ -39,8 +39,26 @@ func TestAMatchingReadEndsWithErrCut(t *testing.T) {
 		t.Fatalf("Close() = %v, want nil", err)
 	}
 
+	// A prepared statement of the same query is cut too.
+	statement, err := db.Prepare("SELECT n FROM numbers ORDER BY n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = statement.Close() }()
+	prepared, err := statement.Query()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer prepared.Close()
+	count := 0
+	for prepared.Next() {
+		count++
+	}
+	if count != 2 || !errors.Is(prepared.Err(), sqlitetest.ErrCut) {
+		t.Fatalf("prepared statement read %d rows, Err() = %v; want 2 rows and ErrCut", count, prepared.Err())
+	}
+
 	// Other queries read everything.
-	var count int
 	if err := db.QueryRow("SELECT count(*) FROM numbers").Scan(&count); err != nil || count != 4 {
 		t.Fatalf("count = %d, %v", count, err)
 	}

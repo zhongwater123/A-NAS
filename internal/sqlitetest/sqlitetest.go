@@ -22,9 +22,9 @@ var ErrCut = errors.New("sqlitetest: read cut short")
 var registered atomic.Int64
 
 // Register registers a database/sql driver that opens SQLite databases as
-// the sqlite3 driver does, except that a query whose text contains match
-// returns its first after rows and then fails with ErrCut. It returns the
-// driver's name for sql.Open.
+// the sqlite3 driver does, except that a query whose text contains match,
+// run directly or as a prepared statement, returns its first after rows and
+// then fails with ErrCut. It returns the driver's name for sql.Open.
 func Register(match string, after int) string {
 	name := fmt.Sprintf("sqlite3-cut-%d", registered.Add(1))
 	sql.Register(name, cutDriver{match: match, after: after})
@@ -57,6 +57,29 @@ func (c *cutConn) QueryContext(ctx context.Context, query string, args []driver.
 		return rows, err
 	}
 	return &cutRows{Rows: rows, left: c.cut.after}, nil
+}
+
+func (c *cutConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
+	stmt, err := c.SQLiteConn.PrepareContext(ctx, query)
+	if err != nil || !strings.Contains(query, c.cut.match) {
+		return stmt, err
+	}
+	return &cutStmt{SQLiteStmt: stmt.(*sqlite3.SQLiteStmt), after: c.cut.after}, nil
+}
+
+// cutStmt is a prepared statement, with all its methods, whose queries are
+// cut.
+type cutStmt struct {
+	*sqlite3.SQLiteStmt
+	after int
+}
+
+func (s *cutStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	rows, err := s.SQLiteStmt.QueryContext(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	return &cutRows{Rows: rows, left: s.after}, nil
 }
 
 type cutRows struct {
