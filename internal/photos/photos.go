@@ -232,25 +232,10 @@ type Service struct {
 	admits          func(path string, incoming int64) (bool, error)
 	location        *time.Location
 	sharedLibraryID string
-	// mediaWake tells RunMedia that an import queued work, and aiWake tells
-	// RunAI that a thumbnail did.
+	// mediaWake tells RunMedia that an import queued work.
 	mediaWake chan struct{}
-	aiWake    chan struct{}
-	// ai is what RunAI last observed; aiModel and aiDetector are the models
-	// whose stale vectors and detections have already been queued again,
-	// and detectorLoaded whether the Worker may still hold the detector.
-	ai             aiProgress
-	aiModelMu      sync.Mutex
-	aiModel        string
-	aiDetector     string
-	aiFaces        string
-	aiAnimals      string
-	detectorLoaded bool
-	// scanned counts face and pet scans stored since people last clustered.
-	scanned int
-	// nextDetection is the next detection job with its input, rendered
-	// while the Worker detected the one before.
-	nextDetection detectionAhead
+	// ai runs local AI and owns what its rounds share (airunner.go).
+	ai *aiRunner
 	// embedder encodes search queries, index holds image vectors for search
 	// and AI clusters, and detected the detector's best score per class.
 	embedder   Embedder
@@ -319,10 +304,11 @@ func Open(root string, options Options) (*Service, error) {
 		now:     options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes, maxVideoBytes: options.MaxVideoBytes,
 		admits: capacity.Admits, location: options.Location, embedder: options.AI,
-		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1), aiWake: make(chan struct{}, 1),
+		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1),
 		searches: imageSearches{encoding: make(chan struct{}, 1)},
 		shadow:   make(chan shadowQuery, 1),
 	}
+	service.ai = newAIRunner(service)
 	if options.DisableCapacityReserve {
 		service.admits = func(string, int64) (bool, error) { return true, nil }
 	}

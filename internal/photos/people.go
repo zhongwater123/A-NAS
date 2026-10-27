@@ -143,9 +143,7 @@ type clusterMember struct {
 // clusterPeople places every face that some library has not considered yet,
 // library by library, and reports whether it changed anything.
 func (s *Service) clusterPeople(ctx context.Context) (bool, error) {
-	s.aiModelMu.Lock()
-	s.scanned = 0
-	s.aiModelMu.Unlock()
+	s.ai.clustered()
 	rows, err := s.db.QueryContext(ctx, `
 SELECT DISTINCT a.library_id, o.kind, o.model FROM occurrences o
 JOIN assets a ON a.object_id = o.object_id

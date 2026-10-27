@@ -346,7 +346,7 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET width = excluded.width, height 
 	}); err != nil {
 		return err
 	}
-	s.wakeAI()
+	s.ai.wakeUp()
 	return nil
 }
 

@@ -299,21 +299,13 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET width = excluded.width, height 
 			return err
 		}
 	}
-	s.aiModelMu.Lock()
-	s.scanned++
-	s.aiModelMu.Unlock()
+	s.ai.countScan()
 	return nil
 }
 
 // clusterEvery is how many face or pet scans a long run stores before people
 // cluster again; otherwise they cluster once the scans are done.
 const clusterEvery = 50
-
-func (s *Service) scansSinceClustering() int {
-	s.aiModelMu.Lock()
-	defer s.aiModelMu.Unlock()
-	return s.scanned
-}
 
 func sheetRows(faces int) int { return (faces + avatarColumns - 1) / avatarColumns }
 

@@ -57,7 +57,7 @@ func (s *Service) embedLabelText(ctx context.Context, embedder Embedder, info Em
 		vector, err := embedder.EmbedQuery(ctx, text)
 		if err != nil || !validVector(vector, info.Dimensions) {
 			if errors.Is(err, ErrAIUnavailable) {
-				s.ai.set(AIUnavailable, "", "")
+				s.ai.progress.set(AIUnavailable, "", "")
 			}
 			s.labelIndex.mu.Lock()
 			s.labelIndex.retryAt = s.now().Add(aiRetryDelay)

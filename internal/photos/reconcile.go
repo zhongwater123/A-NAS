@@ -202,7 +202,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, objectID, derivation, now, now)
 		s.wakeMedia()
 	}
 	if rescanned > 0 {
-		s.wakeAI()
+		s.ai.wakeUp()
 	}
 	return nil
 }

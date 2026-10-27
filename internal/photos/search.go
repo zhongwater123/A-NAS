@@ -495,7 +495,7 @@ func (s *Service) embedQuery(ctx context.Context, query string) ([]float32, stri
 	if err != nil {
 		return nil, ""
 	}
-	s.noticeModel(info.Model)
+	s.ai.noticeModel(info.Model)
 	vector, err := s.embedder.EmbedQuery(ctx, query)
 	if err != nil || !validVector(vector, info.Dimensions) {
 		return nil, ""

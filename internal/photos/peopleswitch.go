@@ -98,7 +98,7 @@ func (s *Service) SetPeople(ctx context.Context, p Principal, libraryID string, 
 		if err := s.enqueueMissingPets(ctx, s.objectCalibration.Model); err != nil {
 			return Library{}, err
 		}
-		s.wakeAI()
+		s.ai.wakeUp()
 	}
 	public := publicLibrary(p, lib, s.now())
 	public.People, public.CanSetPeople = on, true
