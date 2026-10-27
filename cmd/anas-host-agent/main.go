@@ -20,7 +20,8 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker"
 	linuxhostops "github.com/zhongwater123/A-NAS/internal/hostops/linux"
-	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
+	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/rootagent"
+	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/wire"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
 	"github.com/zhongwater123/A-NAS/internal/sessiondir"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
@@ -97,7 +98,7 @@ func loadConfig(environment map[string]string) (config, error) {
 	if err != nil {
 		return c, err
 	}
-	if c.Socket, err = agent.SocketPath(c.Socket, c.RuntimeDir); err != nil {
+	if c.Socket, err = wire.SocketPath(c.Socket, c.RuntimeDir); err != nil {
 		return c, err
 	}
 	if c.FileBrokerSocket == "" {
@@ -153,7 +154,7 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	var reconcileFailed atomic.Bool
 	server := &http.Server{
-		Handler: agent.NewOperationsHandler(agent.Services{
+		Handler: rootagent.NewOperationsHandler(rootagent.Services{
 			Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
 			SystemLogs: journal.New(), ReconcileFailed: reconcileFailed.Load,
 		}, logger),

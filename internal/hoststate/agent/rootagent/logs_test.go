@@ -1,4 +1,4 @@
-package agent_test
+package rootagent_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
+	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/rootagent"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 )
 
@@ -29,7 +30,7 @@ func TestClientReadsSystemLogsWithTheValidatedQuery(t *testing.T) {
 			Message: "photo reconciliation failed", Fields: map[string]string{"error": "read-only file system"}, PID: 689}},
 		Next: "s=1;i=2",
 	}}
-	socket := serve(t, agent.NewOperationsHandler(agent.Services{SystemLogs: logs}, discardLogger()))
+	socket := serve(t, rootagent.NewOperationsHandler(rootagent.Services{SystemLogs: logs}, discardLogger()))
 	client := agent.NewClient(socket)
 	query := systemlog.Query{Services: []string{"photos"}, MinLevel: systemlog.LevelWarning, Text: "failed", Before: "s=1;i=9", Limit: 50, Since: at.Add(-time.Hour)}
 	page, err := client.ReadLogs(context.Background(), query)
@@ -57,7 +58,7 @@ func TestClientReadsSystemLogsWithTheValidatedQuery(t *testing.T) {
 		t.Fatalf("status for ssh = %d, want 400", response.StatusCode)
 	}
 
-	unavailable := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{}, discardLogger())))
+	unavailable := agent.NewClient(serve(t, rootagent.NewOperationsHandler(rootagent.Services{}, discardLogger())))
 	if _, err := unavailable.ReadLogs(context.Background(), systemlog.Query{Limit: 10}); !errors.Is(err, agent.ErrUnavailable) {
 		t.Fatalf("ReadLogs() without a reader error = %v", err)
 	}

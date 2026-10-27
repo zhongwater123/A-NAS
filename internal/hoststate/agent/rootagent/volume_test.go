@@ -1,4 +1,4 @@
-package agent_test
+package rootagent_test
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
+	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/rootagent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 )
 
@@ -36,7 +37,7 @@ func TestClientReadsTheDataVolumeReadOnlyStateAndErrors(t *testing.T) {
 			state.Disks[index].FilesystemErrors = &errorsCounted
 		}
 	}
-	client := agent.NewClient(serve(t, agent.NewHandler(observedState{state}, discardLogger())))
+	client := agent.NewClient(serve(t, rootagent.NewHandler(observedState{state}, discardLogger())))
 
 	got, err := client.Read(context.Background())
 	if err != nil {
@@ -59,7 +60,7 @@ func TestClientReadsAFailedReconciliation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var failed atomic.Bool
-	handler := agent.NewOperationsHandler(agent.Services{Reader: observedState{state}, ReconcileFailed: failed.Load}, discardLogger())
+	handler := rootagent.NewOperationsHandler(rootagent.Services{Reader: observedState{state}, ReconcileFailed: failed.Load}, discardLogger())
 	client := agent.NewClient(serve(t, handler))
 	if got, err := client.Read(context.Background()); err != nil || got.ReconcileFailed {
 		t.Fatalf("Read() = %v, %v; want no failed reconciliation", got.ReconcileFailed, err)
@@ -99,7 +100,7 @@ func TestClientReadsTheDataVolumeAcrossDisks(t *testing.T) {
 		Metadata:  []hoststate.ProfileUsage{{Profile: hoststate.ProfileRAID1, UsedBytes: 1}},
 		Operation: hoststate.VolumeOperationBalance,
 	}
-	client := agent.NewClient(serve(t, agent.NewHandler(observedState{state}, discardLogger())))
+	client := agent.NewClient(serve(t, rootagent.NewHandler(observedState{state}, discardLogger())))
 
 	got, err := client.Read(context.Background())
 	if err != nil {

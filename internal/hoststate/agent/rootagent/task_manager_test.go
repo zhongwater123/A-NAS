@@ -1,22 +1,24 @@
-package agent_test
+package rootagent_test
 
 import (
 	"context"
 	"encoding/json"
-	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/zhongwater123/A-NAS/internal/hoststate"
+
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
+	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/rootagent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 )
 
 func TestTaskManagerClientRoundTrip(t *testing.T) {
-	client := agent.NewClient(serve(t, agent.NewHandler(fake.NewHealthy(), discardLogger())))
+	client := agent.NewClient(serve(t, rootagent.NewHandler(fake.NewHealthy(), discardLogger())))
 	reader, ok := any(client).(taskmanager.Reader)
 	if !ok {
 		t.Fatal("Host Agent client must implement taskmanager.Reader")
@@ -33,7 +35,7 @@ func TestTaskManagerClientRoundTrip(t *testing.T) {
 
 func TestTaskManagerIPCRejectsWritesAndReportsUnavailable(t *testing.T) {
 	for _, path := range []string{"/v1/task-manager/device", "/v1/task-manager/tasks"} {
-		handler := agent.NewHandler(fake.NewUnavailable(), discardLogger())
+		handler := rootagent.NewHandler(fake.NewUnavailable(), discardLogger())
 		for _, method := range []string{http.MethodGet, http.MethodPost} {
 			r := httptest.NewRecorder()
 			handler.ServeHTTP(r, httptest.NewRequest(method, path, nil))
@@ -86,7 +88,7 @@ func TestTaskManagerClientRejectsInvalidAndSensitivePayloads(t *testing.T) {
 func TestTaskManagerOldObserverIsExplicitlyUnavailable(t *testing.T) {
 	// Older/custom adapters may implement state and metrics only.
 	observer := struct{ hoststate.Observer }{fake.NewHealthy()}
-	handler := agent.NewHandler(observer, discardLogger())
+	handler := rootagent.NewHandler(observer, discardLogger())
 	for _, path := range []string{"/v1/task-manager/device", "/v1/task-manager/tasks"} {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
@@ -108,7 +110,7 @@ func (r iconTaskReader) ReadTasks(ctx context.Context) (taskmanager.TaskSnapshot
 func TestTaskIconsSurviveIPCAndRejectRemoteImages(t *testing.T) {
 	source := iconTaskReader{fake.NewHealthy()}
 	expected, _ := source.ReadTasks(context.Background())
-	client := agent.NewClient(serve(t, agent.NewHandler(source, discardLogger())))
+	client := agent.NewClient(serve(t, rootagent.NewHandler(source, discardLogger())))
 	actual, err := client.ReadTasks(context.Background())
 	id := expected.Processes.Items[0].IconID
 	if err != nil || id == "" || actual.Icons[id] != expected.Icons[id] || actual.Processes.Items[0].IconID != id {

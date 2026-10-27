@@ -1,4 +1,4 @@
-package agent_test
+package rootagent_test
 
 import (
 	"context"
@@ -20,11 +20,12 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
+	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/rootagent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 )
 
 func TestClientReadsHostStateOverUnixSocket(t *testing.T) {
-	socketPath := serve(t, agent.NewHandler(fake.NewHealthy(), discardLogger()))
+	socketPath := serve(t, rootagent.NewHandler(fake.NewHealthy(), discardLogger()))
 	client := agent.NewClient(socketPath)
 
 	state, err := client.Read(context.Background())
@@ -60,7 +61,7 @@ func TestClientPreservesUnusableDiskObservationsOverUnixSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := agent.NewClient(serve(t, agent.NewHandler(reader, discardLogger())))
+	client := agent.NewClient(serve(t, rootagent.NewHandler(reader, discardLogger())))
 	got, err := client.Read(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +75,7 @@ func TestClientUsesTypedVolumeAndCredentialOperationsOverUnixSocket(t *testing.T
 	volume := &agentVolumeExecutor{}
 	credentials := &agentCredentialProvisioner{}
 	snapshots := &agentSnapshotBackend{}
-	handler := agent.NewOperationsHandler(agent.Services{
+	handler := rootagent.NewOperationsHandler(rootagent.Services{
 		Reader: fake.NewHealthy(), Volume: volume, Credentials: credentials, Snapshots: snapshots,
 	}, discardLogger())
 	client := agent.NewClient(serve(t, handler))
@@ -138,7 +139,7 @@ func TestClientUsesTypedVolumeAndCredentialOperationsOverUnixSocket(t *testing.T
 // carry (issue #162: 1 MiB, about 6,000 entries) arrives whole and in order.
 func TestClientStreamsLargeSnapshotListings(t *testing.T) {
 	snapshots := &agentSnapshotBackend{objects: 100_000}
-	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{Snapshots: snapshots}, discardLogger())))
+	client := agent.NewClient(serve(t, rootagent.NewOperationsHandler(rootagent.Services{Snapshots: snapshots}, discardLogger())))
 	received := 0
 	err := client.Objects(context.Background(), "snapshot:1", func(object filesystem.SnapshotObject) error {
 		if want := listedObject(received); object != want {
@@ -157,7 +158,7 @@ func TestClientStreamsLargeSnapshotListings(t *testing.T) {
 
 func TestClientRefusesASnapshotListingCutShort(t *testing.T) {
 	snapshots := &agentSnapshotBackend{objects: 10_000, failAt: 5_000}
-	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{Snapshots: snapshots}, discardLogger())))
+	client := agent.NewClient(serve(t, rootagent.NewOperationsHandler(rootagent.Services{Snapshots: snapshots}, discardLogger())))
 	received := 0
 	err := client.Objects(context.Background(), "snapshot:1", func(filesystem.SnapshotObject) error { received++; return nil })
 	if err == nil || received != 5_000 {
@@ -189,7 +190,7 @@ func TestClientDeletesAndPrunesSnapshots(t *testing.T) {
 		deleteErr: filesystem.ErrNotFound,
 		pruned:    filesystem.SnapshotPrune{Present: []string{"snapshot:1"}, Removed: 3},
 	}
-	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{Snapshots: snapshots}, discardLogger())))
+	client := agent.NewClient(serve(t, rootagent.NewOperationsHandler(rootagent.Services{Snapshots: snapshots}, discardLogger())))
 	if err := client.Delete(context.Background(), "space:gone", "snapshot:1"); !errors.Is(err, filesystem.ErrNotFound) {
 		t.Fatalf("Delete() in an unknown space error = %v, want ErrNotFound", err)
 	}
@@ -208,7 +209,7 @@ func TestClientDeletesAndPrunesSnapshots(t *testing.T) {
 
 func TestClientSynchronizesIdentitiesAndReportsConflicts(t *testing.T) {
 	credentials := &agentCredentialProvisioner{}
-	client := agent.NewClient(serve(t, agent.NewOperationsHandler(agent.Services{
+	client := agent.NewClient(serve(t, rootagent.NewOperationsHandler(rootagent.Services{
 		Reader: fake.NewHealthy(), Credentials: credentials, Identities: credentials,
 	}, discardLogger())))
 	identities := []accountid.Identity{
@@ -342,7 +343,7 @@ func (b *agentSnapshotBackend) Prune(_ context.Context, keep []string) (filesyst
 }
 
 func TestClientReportsUnavailableReader(t *testing.T) {
-	socketPath := serve(t, agent.NewHandler(fake.NewUnavailable(), discardLogger()))
+	socketPath := serve(t, rootagent.NewHandler(fake.NewUnavailable(), discardLogger()))
 	client := agent.NewClient(socketPath)
 
 	if _, err := client.Read(context.Background()); err == nil {
@@ -417,7 +418,7 @@ func discardLogger() *slog.Logger {
 }
 
 func TestClientReadsMetricsOverUnixSocket(t *testing.T) {
-	client := agent.NewClient(serve(t, agent.NewHandler(fake.NewHealthy(), discardLogger())))
+	client := agent.NewClient(serve(t, rootagent.NewHandler(fake.NewHealthy(), discardLogger())))
 
 	metrics, err := client.ReadMetrics(context.Background())
 	if err != nil {
@@ -441,7 +442,7 @@ func TestClientRejectsInconsistentMetrics(t *testing.T) {
 }
 
 func TestClientReportsUnavailableMetrics(t *testing.T) {
-	client := agent.NewClient(serve(t, agent.NewHandler(fake.NewUnavailable(), discardLogger())))
+	client := agent.NewClient(serve(t, rootagent.NewHandler(fake.NewUnavailable(), discardLogger())))
 
 	if _, err := client.ReadMetrics(context.Background()); err == nil {
 		t.Fatal("ReadMetrics() error = nil, want unavailable error")
