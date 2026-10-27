@@ -1,11 +1,11 @@
 # Qdrant 检索特性试验（1.20.0）
 
-> 状态：完成（开发机试验，2026-10-26）；结论供 ADR 0028、视频片段与文件块索引的设计取用  
+> 状态：完成（开发机试验，2026-10-26）；结论供 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)、视频片段与文件块索引的设计取用  
 > 更新日期：2026-10-26  
 > 适用范围：Qdrant 1.20.0 官方 musl 二进制（`qdrant-x86_64-unknown-linux-musl.tar.gz`，sha256 `b03a64616a1f41ddab78b480a318466541765f19835318113b1821cbea8df52c`），qdrant-client 1.20.0（gRPC）；照片与文本向量为 `embeddinggemma-2-740m@e7a8a2204b91+mediapipe-1.1.0+tok70+l2`（768 维，L2 归一化，Dot 距离）  
 > 关联：[issue #66](https://github.com/zhongwater123/A-NAS/issues/66)、[相册物体检测与混合检索可行性](photo-ai-object-detection.md)、[M2 实施方案](../architecture/photo-ai.md)
 
-A-NAS 把 Qdrant 作为可重建的派生向量索引：SQLite 仍是事实源，每个拥有向量的服务（先是相册，之后是文件索引）各自按需启动一个 Qdrant 实例，经 Unix 套接字代理访问，数据放在系统 NVMe 上。这一步相册只把向量镜像进 Qdrant 并做影子比对；推翻 #66 "不引入独立向量数据库"的决定由 ADR 0028 记录。本文用开发机上的真实向量逐项试用 Qdrant 1.20.0 的检索特性，回答三件事：视频片段与文件块索引该用哪些特性；照片搜索什么时候可以切到 Qdrant；人脸聚类要的"阈值以上的全部邻居"能否交给 Qdrant。
+A-NAS 把 Qdrant 作为可重建的派生向量索引：SQLite 仍是事实源，每个拥有向量的服务（先是相册，之后是文件索引）各自按需启动一个 Qdrant 实例，经 Unix 套接字代理访问，数据放在系统 NVMe 上。这一步相册只把向量镜像进 Qdrant 并做影子比对；推翻 #66 "不引入独立向量数据库"的决定由 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md) 记录。本文用开发机上的真实向量逐项试用 Qdrant 1.20.0 的检索特性，回答三件事：视频片段与文件块索引该用哪些特性；照片搜索什么时候可以切到 Qdrant；人脸聚类要的"阈值以上的全部邻居"能否交给 Qdrant。
 
 ## 结论
 
@@ -326,7 +326,7 @@ Qdrant 的取法：对每个点按 id 查询，`score_threshold` 0.48，每页 2
 
 - 代码：[`ai/eval/qdrant_common.py`](../../ai/eval/qdrant_common.py) 及同目录的 `qdrant_*.py`、[`ai/eval/qdrant-requirements.lock`](../../ai/eval/qdrant-requirements.lock)、[`ai/eval/hybrid_search.py`](../../ai/eval/hybrid_search.py)
 - 产品：[`internal/photos/search.go`](../../internal/photos/search.go)、[`internal/photos/people.go`](../../internal/photos/people.go)、[`objects/v1.calibration.json`](../../internal/photos/objects/v1.calibration.json)
-- 设计：[M2 实施方案](../architecture/photo-ai.md)、[相册规格](../specs/photo-library.md)；推翻 #66 的决定见 ADR 0028
+- 设计：[M2 实施方案](../architecture/photo-ai.md)、[相册规格](../specs/photo-library.md)；推翻 #66 的决定见 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)，实现见[向量索引技术设计](../architecture/vector-index.md)
 - 研究：[相册物体检测与混合检索可行性](photo-ai-object-detection.md)、[标签校准报告](photo-ai-label-calibration.md)
 - Issue：[#66 向量存储选型](https://github.com/zhongwater123/A-NAS/issues/66)、[#152 文本向量与 Qdrant](https://github.com/zhongwater123/A-NAS/issues/152)、[#207 视频帧级检索](https://github.com/zhongwater123/A-NAS/issues/207)、[#208 VNAS 找文件](https://github.com/zhongwater123/A-NAS/issues/208)
 - 报告：开发机 `D:\A-NAS-datasets\runs\qdrant\`：`facts-20261026-101825.json`、`filtered-20261026-093241.json`、`video-20261026-101827.json` 与 `video-20261026-112321.json`、`chunks-20261026-113356.json`、`formula-20261026-102059.json`、`recommend-20261026-102311.json`、`faces-20261026-102316.json`

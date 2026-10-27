@@ -49,7 +49,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - 只监听 `127.0.0.1`，gRPC 6334。REST 6333 关不掉，但只在实例的命名空间里，代理不转发它。
 - 关闭：遥测（命令行再加 `--disable-telemetry`，以防配置没有读到）、Web 面板（它不经鉴权）、CORS、从 URL 恢复快照。
 - 资源：
-  - 优化与建索引各 1 个线程，`optimizer_cpu_budget: 1`：开发机上 10 万条向量建完时，文件映射的 RSS 峰值从 2.9 GB 降到 0.8 GB，代价是建得慢（检索功能实测）。
+  - 优化与建索引各 1 个线程，`optimizer_cpu_budget: 1`：开发机上 10 万条向量建完时，文件映射的 RSS 峰值从 2.9 GB 降到 0.8 GB，代价是建得慢（[检索功能实测](../research/qdrant-retrieval-features.md)）。
   - WAL 段 1 MB：索引靠重建而不是恢复，稳定后的 WAL 从 37–45 MB 降到 2–3 MB，看不出代价。
   - 空集合的段文件都是稀疏文件，实际占用很小。
 - 内存先设 `MemoryHigh=512M`、`MemoryMax=768M`，以系统测试打印的 `MemoryPeak`（空集合约 75 MB）与实机数字调整。
@@ -91,7 +91,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 ### 集合
 
 - 名称为 `images_v1_<模型 ID 的 SHA-256 前 8 位>_<随机 8 位>`，距离为点积（向量已归一化，与 Go 侧的 `dot` 一致）。payload 是 `object`（内容 ID）与 `libraries`（含未进回收站的非视频资产的图库）。`libraries` 的 keyword 索引在写入第一个点之前建好。
-- 不建 HNSW 图（`m = 0`）：10 万张以内，索引里的精确扫描与进程内扫描一样快（前 500：16–20 ms 对 10–18 ms）。默认配置在约 2 万张时就开始建图，既占处理器与内存，前 500 的召回又只有 0.96–0.99，个别查询低到 0.6（检索功能实测）。
+- 不建 HNSW 图（`m = 0`）：10 万张以内，索引里的精确扫描与进程内扫描一样快（前 500：16–20 ms 对 10–18 ms）。默认配置在约 2 万张时就开始建图，既占处理器与内存，前 500 的召回又只有 0.96–0.99，个别查询低到 0.6（[检索功能实测](../research/qdrant-retrieval-features.md)）。
 - 目标模型取 Catalog 中最新一条 `embedding/v1` 的模型。以下情况会新建集合、删掉其他 `images_*` 集合，再把全部向量排队：
   - 目标模型变了；
   - 记录的集合不存在：实例被清空，或版本变化；
@@ -140,7 +140,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 | 相册（`a-nas-photos`） | 视频分段 | 每个视频多个分段向量，按最佳片段打分 | 计划中（#207） |
 | 文件索引（另一个实例） | 文件分块 | 中文全文与语义融合，按文件归并 | 计划中（#208） |
 
-人脸与宠物向量不进入任何索引：聚类需要阈值内的全部邻居，留在 Catalog 中精确计算（[人物与宠物](photo-people.md)）。视频分段与文件分块用哪些检索功能（分组、多向量 MaxSim、中文 BM25 与融合、公式重排），以 `docs/research/` 中的检索功能实测为准。
+人脸与宠物向量不进入任何索引：聚类需要阈值内的全部邻居，留在 Catalog 中精确计算（[人物与宠物](photo-people.md)）。视频分段与文件分块用哪些检索功能（分组、多向量 MaxSim、中文 BM25 与融合、公式重排），以[检索功能实测](../research/qdrant-retrieval-features.md#特性取舍)为准。
 
 ## 验证
 
@@ -160,4 +160,5 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)、[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)、[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - [相册本地 AI](photo-ai.md)、[相册技术设计](photo-library.md)、[人物与宠物](photo-people.md)
 - [启用向量索引手册](../runbooks/enable-vector-index.md)
+- [Qdrant 检索特性试验](../research/qdrant-retrieval-features.md)
 - [#66](https://github.com/zhongwater123/A-NAS/issues/66)、[#152](https://github.com/zhongwater123/A-NAS/issues/152)、[#207](https://github.com/zhongwater123/A-NAS/issues/207)、[#208](https://github.com/zhongwater123/A-NAS/issues/208)

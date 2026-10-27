@@ -37,7 +37,7 @@
 
 ## 关联
 
-- [向量索引技术设计](../architecture/vector-index.md)
+- [向量索引技术设计](../architecture/vector-index.md)、[Qdrant 检索特性试验](../research/qdrant-retrieval-features.md)
 - [相册本地 AI](../architecture/photo-ai.md)、[相册技术设计](../architecture/photo-library.md#搜索设计)、[相册规格](../specs/photo-library.md)
 - [#66](https://github.com/zhongwater123/A-NAS/issues/66)（向量存储评估与实测）、[#152](https://github.com/zhongwater123/A-NAS/issues/152)（文本向量与 Qdrant 研究分支的审查）
 - [Qdrant 清单](../../deploy/qdrant/qdrant.json)、[实例配置](../../deploy/qdrant/config.yaml)
