@@ -19,6 +19,7 @@ import (
 )
 
 type fakeDocker struct {
+	storageErr error
 	mu         sync.Mutex
 	containers []engine.ContainerInfo
 	pools      []netip.Prefix
@@ -29,6 +30,27 @@ type fakeDocker struct {
 	states []engine.ContainerState
 	// apiVersion defaults to an engine that supports volume subpaths.
 	apiVersion string
+}
+
+func (f *fakeDocker) CheckStorage(context.Context) error { return f.storageErr }
+
+func TestInstallRechecksSystemSpaceBeforeRunningCompose(t *testing.T) {
+	docker, runner := &fakeDocker{}, &fakeRunner{}
+	store, _ := newStore(t, docker, runner)
+	plan, err := store.Plan(context.Background(), "memos", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	docker.storageErr = appstore.ErrSystemSpace
+	if _, err := store.Plan(context.Background(), "memos", identity); !errors.Is(err, appstore.ErrSystemSpace) {
+		t.Fatalf("plan error = %v", err)
+	}
+	if _, err := store.Install(context.Background(), "memos", plan.Digest, identity); !errors.Is(err, appstore.ErrSystemSpace) {
+		t.Fatalf("install error = %v", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("Compose ran with insufficient storage: %v", runner.calls)
+	}
 }
 
 func (f *fakeDocker) Containers(context.Context) ([]engine.ContainerInfo, error) {

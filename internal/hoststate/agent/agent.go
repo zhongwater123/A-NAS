@@ -1054,6 +1054,19 @@ type systemDocument struct {
 	Architecture    string                  `json:"architecture"`
 	UptimeSeconds   uint64                  `json:"uptimeSeconds"`
 	Health          hoststate.Health        `json:"health"`
+	Storage         *storageUsageDocument   `json:"storage,omitempty"`
+}
+
+type storageUsageDocument struct {
+	TotalBytes     uint64 `json:"totalBytes"`
+	AvailableBytes uint64 `json:"availableBytes"`
+}
+
+func storageFromDomain(usage *hoststate.StorageUsage) *storageUsageDocument {
+	if usage == nil {
+		return nil
+	}
+	return &storageUsageDocument{TotalBytes: usage.TotalBytes, AvailableBytes: usage.AvailableBytes}
 }
 
 type operatingSystemDocument struct {
@@ -1131,6 +1144,7 @@ func documentFromDomain(state hoststate.State) stateDocument {
 			Architecture:  state.System.Architecture,
 			UptimeSeconds: state.System.UptimeSeconds,
 			Health:        state.System.Health,
+			Storage:       storageFromDomain(state.System.Storage),
 		},
 		Disks:           disks,
 		DataVolume:      dataVolume,
@@ -1147,6 +1161,13 @@ func usageDocuments(usage []hoststate.ProfileUsage) []profileUsageDocument {
 }
 
 func (document stateDocument) toDomain() (hoststate.State, error) {
+	var storage *hoststate.StorageUsage
+	if usage := document.System.Storage; usage != nil {
+		if usage.TotalBytes == 0 || usage.AvailableBytes > usage.TotalBytes {
+			return hoststate.State{}, errors.New("invalid system storage usage")
+		}
+		storage = &hoststate.StorageUsage{TotalBytes: usage.TotalBytes, AvailableBytes: usage.AvailableBytes}
+	}
 	observedAt, err := time.Parse(time.RFC3339, document.ObservedAt)
 	if err != nil {
 		return hoststate.State{}, errors.New("invalid observed time")
@@ -1247,6 +1268,7 @@ func (document stateDocument) toDomain() (hoststate.State, error) {
 			Architecture:  document.System.Architecture,
 			UptimeSeconds: document.System.UptimeSeconds,
 			Health:        document.System.Health,
+			Storage:       storage,
 		},
 		Disks:           disks,
 		DataVolume:      dataVolume,

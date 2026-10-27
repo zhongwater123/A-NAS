@@ -453,6 +453,29 @@ describe("Settings", () => {
     expect(within(settings).queryByRole("button", { name: "在存储中查看磁盘与数据卷" })).toBeNull();
   });
 
+  it.each([true, false])("shows system storage separately, observed=%s", async (observed) => {
+    installAPI({
+      hostState: {
+        ...healthyState,
+        system: {
+          ...healthyState.system,
+          storage: observed ? { totalBytes: 100 * 1024 ** 3, availableBytes: 25 * 1024 ** 3 } : undefined,
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "概览");
+    const settings = screen.getByRole("dialog", { name: "设置" });
+    expect(within(settings).getByText("系统盘空间")).toBeTruthy();
+    if (observed) {
+      expect(within(settings).getByText("75%")).toBeTruthy();
+      expect(within(settings).queryByText("暂时无法读取")).toBeNull();
+    } else {
+      expect(within(settings).getByText("暂时无法读取")).toBeTruthy();
+    }
+  });
+
   it("reports unknown data volume usage instead of a full volume", async () => {
     installAPI({
       volumes: [

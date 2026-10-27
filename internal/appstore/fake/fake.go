@@ -46,6 +46,9 @@ type memoryDocker struct {
 	containers []engine.ContainerInfo
 }
 
+// CheckStorage keeps simulated installs independent of the developer's disk.
+func (m *memoryDocker) CheckStorage(context.Context) error { return nil }
+
 func (m *memoryDocker) Containers(context.Context) ([]engine.ContainerInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

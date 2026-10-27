@@ -21,6 +21,32 @@ func (observedState) ReadMetrics(ctx context.Context) (hoststate.Metrics, error)
 	return fake.NewHealthy().ReadMetrics(ctx)
 }
 
+func TestClientReadsSystemStorageAndRejectsInvalidUsage(t *testing.T) {
+	for _, usage := range []*hoststate.StorageUsage{
+		nil,
+		{TotalBytes: 100 << 30, AvailableBytes: 25 << 30},
+		{TotalBytes: 100 << 30},
+		{TotalBytes: 0},
+		{TotalBytes: 10, AvailableBytes: 11},
+	} {
+		state, err := fake.NewHealthy().Read(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		state.System.Storage = usage
+		client := agent.NewClient(serve(t, agent.NewHandler(observedState{state}, discardLogger())))
+		got, err := client.Read(context.Background())
+		invalid := usage != nil && (usage.TotalBytes == 0 || usage.AvailableBytes > usage.TotalBytes)
+		if invalid {
+			if err == nil {
+				t.Fatalf("invalid usage %+v was accepted", usage)
+			}
+		} else if err != nil || !reflect.DeepEqual(got.System.Storage, usage) {
+			t.Fatalf("usage = %+v, %v; want %+v", got.System.Storage, err, usage)
+		}
+	}
+}
+
 func TestClientReadsTheDataVolumeReadOnlyStateAndErrors(t *testing.T) {
 	state, err := fake.NewHealthy().Read(context.Background())
 	if err != nil {

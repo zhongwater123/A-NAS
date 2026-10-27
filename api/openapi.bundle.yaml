@@ -6634,7 +6634,7 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     AppConflict:
-      description: 'The operation cannot run now: plan_changed, app_busy, already_installed, not_installed, port_in_use, name_in_use, address_pool_missing (the app creates Docker networks but Docker has no A-NAS address pool), docker_runtime_outdated (Docker Compose before 2.30 or an engine API before 1.45 would mount whole volumes), policy_violation or app_engine_error.'
+      description: 'The operation cannot run now: plan_changed, app_busy, already_installed, not_installed, port_in_use, name_in_use, system_storage_full (system state or Docker storage is below the installation reserve), address_pool_missing (the app creates Docker networks but Docker has no A-NAS address pool), docker_runtime_outdated (Docker Compose before 2.30 or an engine API before 1.45 would mount whole volumes), policy_violation or app_engine_error.'
       content:
         application/json:
           schema:
@@ -7094,6 +7094,8 @@ components:
           $ref: '#/components/schemas/Health'
         healthFindings:
           $ref: '#/components/schemas/HealthFindings'
+        storage:
+          $ref: '#/components/schemas/SystemStorage'
         productVersion:
           type: string
           minLength: 1
@@ -7130,6 +7132,8 @@ components:
           $ref: '#/components/schemas/Health'
         healthFindings:
           $ref: '#/components/schemas/HealthFindings'
+        storage:
+          $ref: '#/components/schemas/SystemStorage'
     HealthFindings:
       type: array
       description: Why the system is not plainly healthy, most severe first; empty when healthy. The system's health is the severity of the first finding (docs/specs/system-health.md).
@@ -11459,3 +11463,19 @@ components:
               after:
                 type: string
                 description: Text the write leaves; absent when it is not text.
+    SystemStorage:
+      type: object
+      description: Observed capacity and available space on the filesystem at /var/lib, where system state is stored; absent when unavailable.
+      additionalProperties: false
+      required:
+        - totalBytes
+        - availableBytes
+      properties:
+        totalBytes:
+          type: integer
+          format: int64
+          minimum: 1
+        availableBytes:
+          type: integer
+          format: int64
+          minimum: 0

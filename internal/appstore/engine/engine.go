@@ -77,6 +77,9 @@ type RuntimeInfo struct {
 }
 
 type Inspector interface {
+	// CheckStorage refuses installs when the system state or Docker storage
+	// filesystem is below the installation reserve, or cannot be observed.
+	CheckStorage(ctx context.Context) error
 	Containers(ctx context.Context) ([]ContainerInfo, error)
 	// AddressPools are the daemon's default-address-pools; empty when Docker
 	// uses its built-in pools.
@@ -217,6 +220,9 @@ func (s *Store) Plan(ctx context.Context, id string, identity appstore.Identity)
 	entry, ok := s.entries[id]
 	if !ok {
 		return appstore.Plan{}, appstore.ErrNotFound
+	}
+	if err := s.docker.CheckStorage(ctx); err != nil {
+		return appstore.Plan{}, err
 	}
 	secrets, err := s.appSecrets(id)
 	if err != nil {
