@@ -6,10 +6,12 @@
 log_level: INFO
 
 storage:
-  # A collection's write-ahead log is allocated a segment at a time: the
-  # default 32 MB per collection is most of a small index's disk.
+  # A collection's write-ahead log is allocated a segment at a time. The
+  # index is rebuilt rather than recovered, so the log need only cover writes
+  # not yet in segments: 1 MB kept it at 2-3 MB against 37-45 MB with the
+  # default 32 (docs/research/qdrant-retrieval-features.md).
   wal:
-    wal_capacity_mb: 8
+    wal_capacity_mb: 1
   performance:
     # Searches may use the free cores; index building takes one, so that it
     # never competes with the desktop or file sharing for more.

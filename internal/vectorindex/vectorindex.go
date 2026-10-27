@@ -150,29 +150,44 @@ func (c *Client) Collections(ctx context.Context) ([]string, error) {
 	return client.ListCollections(ctx)
 }
 
-// CreateCollection creates a collection of normalised vectors of the given
-// size, compared by dot product, with a keyword index on each of fields. The
-// indexes exist before the first point, so that filtered search builds its
-// links for them.
-func (c *Client) CreateCollection(ctx context.Context, name string, dimensions int, fields ...string) error {
-	if dimensions <= 0 || slices.Contains(fields, keyField) {
+// Collection describes a collection to create.
+type Collection struct {
+	Name string
+	// Dimensions is the size of its vectors, which are normalised and
+	// compared by dot product.
+	Dimensions int
+	// Keywords are the keyword fields searches are scoped by. Their indexes
+	// exist before the first point, so that a graph links points by them.
+	Keywords []string
+	// Graph builds an HNSW graph for approximate search. Without one every
+	// search scans exactly and nothing is built; up to about 100,000 vectors
+	// that is as fast (docs/research/qdrant-retrieval-features.md).
+	Graph bool
+}
+
+// CreateCollection creates a collection.
+func (c *Client) CreateCollection(ctx context.Context, collection Collection) error {
+	if collection.Name == "" || collection.Dimensions <= 0 || slices.Contains(collection.Keywords, keyField) {
 		return ErrInvalid
 	}
 	client, err := c.connection(ctx)
 	if err != nil {
 		return err
 	}
-	if err := client.CreateCollection(ctx, &qdrant.CreateCollection{
-		CollectionName: name,
-		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
-			Size:     uint64(dimensions),
-			Distance: qdrant.Distance_Dot,
-		}),
-	}); err != nil {
-		return fmt.Errorf("create vector collection %s: %w", name, err)
+	params := &qdrant.VectorParams{Size: uint64(collection.Dimensions), Distance: qdrant.Distance_Dot}
+	if !collection.Graph {
+		none := uint64(0)
+		params.HnswConfig = &qdrant.HnswConfigDiff{M: &none, PayloadM: &none}
 	}
+	if err := client.CreateCollection(ctx, &qdrant.CreateCollection{
+		CollectionName: collection.Name,
+		VectorsConfig:  qdrant.NewVectorsConfig(params),
+	}); err != nil {
+		return fmt.Errorf("create vector collection %s: %w", collection.Name, err)
+	}
+	name := collection.Name
 	wait := true
-	for _, field := range fields {
+	for _, field := range collection.Keywords {
 		if _, err := client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
 			CollectionName: name,
 			FieldName:      field,
@@ -268,32 +283,43 @@ type Scope struct {
 	Values []string
 }
 
+// Query asks for the Limit points within Scope most similar to Vector.
+type Query struct {
+	Vector []float32
+	Scope  Scope
+	Limit  int
+	// Exact scans every point in scope even where a graph would answer
+	// approximately.
+	Exact bool
+}
+
 // Hit is a point a search found, with its similarity to the query.
 type Hit struct {
 	Key   string
 	Score float32
 }
 
-// Search returns the limit points within scope most similar to vector, most
-// similar first. A scope without values finds nothing: every search is
-// scoped by its owner.
-func (c *Client) Search(ctx context.Context, collection string, vector []float32, scope Scope, limit int) ([]Hit, error) {
-	if scope.Field == "" || scope.Field == keyField || limit <= 0 {
+// Search returns the points query asks for, most similar first. A scope
+// without values finds nothing: every search is scoped by its owner.
+func (c *Client) Search(ctx context.Context, collection string, query Query) ([]Hit, error) {
+	if query.Scope.Field == "" || query.Scope.Field == keyField || query.Limit <= 0 {
 		return nil, ErrInvalid
 	}
-	if len(scope.Values) == 0 {
+	if len(query.Scope.Values) == 0 {
 		return nil, nil
 	}
 	client, err := c.connection(ctx)
 	if err != nil {
 		return nil, err
 	}
-	size := uint64(limit)
+	size := uint64(query.Limit)
+	exact := query.Exact
 	points, err := client.Query(ctx, &qdrant.QueryPoints{
 		CollectionName: collection,
-		Query:          qdrant.NewQueryDense(vector),
-		Filter:         &qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewMatchKeywords(scope.Field, scope.Values...)}},
+		Query:          qdrant.NewQueryDense(query.Vector),
+		Filter:         &qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewMatchKeywords(query.Scope.Field, query.Scope.Values...)}},
 		Limit:          &size,
+		Params:         &qdrant.SearchParams{Exact: &exact},
 		WithPayload:    qdrant.NewWithPayloadInclude(keyField),
 	})
 	if err != nil {

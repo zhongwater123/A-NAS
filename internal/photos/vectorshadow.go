@@ -25,15 +25,22 @@ const shadowLimit = maxSemanticResults
 // shadowCuts are the ranks at which the two answers are compared.
 var shadowCuts = []int{10, 100, 500}
 
+// shadowTie is how close to the score at a cut a photo counts as within it:
+// photos that score alike may come in either order.
+const shadowTie = 1e-5
+
 // ShadowComparison is how the index's answer to one search compared with the
 // exact scan's, both ranking the content objects in the search's scope by
-// similarity alone. It holds no query, name or photo.
+// similarity alone. The index scans exactly too, so any share below 1 means
+// it is out of line with the Catalog, not an approximation
+// (docs/research/qdrant-retrieval-features.md). It holds no query, name or
+// photo.
 type ShadowComparison struct {
 	Collection string
 	// Candidates counts the objects with a vector in the search's scope.
 	Candidates int
-	// Overlap maps each cut k to the share of the exact top k that the
-	// index also put in its top k.
+	// Overlap maps each cut k to the share of the index's top k that the
+	// exact scan ranks within its top k, ties at the cut included.
 	Overlap map[int]float64
 	// Index is how long the index took; Warm whether a connection to it was
 	// open before, or the call had to wait for the instance to start.
@@ -108,7 +115,8 @@ func (s *Service) compareWithIndex(ctx context.Context, index VectorIndex, warm 
 		comparison.Warm = warm()
 	}
 	started := time.Now()
-	hits, err := index.Search(ctx, collection.name, query.vector, vectorindex.Scope{Field: librariesField, Values: query.scope}, shadowLimit)
+	hits, err := index.Search(ctx, collection.name, vectorindex.Query{Vector: query.vector,
+		Scope: vectorindex.Scope{Field: librariesField, Values: query.scope}, Limit: shadowLimit, Exact: true})
 	if err != nil {
 		return ShadowComparison{}, false, err
 	}
@@ -148,19 +156,20 @@ func (s *Service) compareWithIndex(ctx context.Context, index VectorIndex, warm 
 	comparison.Exact = time.Since(started)
 	comparison.Candidates = len(exact)
 
+	scores := make(map[string]float64, len(exact))
+	for _, e := range exact {
+		scores[e.object] = e.score
+	}
 	for _, cut := range shadowCuts {
 		want := min(cut, len(exact))
 		if want == 0 {
 			comparison.Overlap[cut] = 1
 			continue
 		}
-		top := make(map[string]bool, want)
-		for _, e := range exact[:want] {
-			top[e.object] = true
-		}
+		floor := exact[want-1].score - shadowTie
 		found := 0
-		for _, hit := range hits[:min(cut, len(hits))] {
-			if top[hit.Key] {
+		for _, hit := range hits[:min(want, len(hits))] {
+			if score, ok := scores[hit.Key]; ok && score >= floor {
 				found++
 			}
 		}

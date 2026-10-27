@@ -161,8 +161,8 @@ func imagesCollection(t *testing.T, index *vectorindex.Client) string {
 // inLibraries lists, sorted, the objects the index finds within libraries.
 func inLibraries(t *testing.T, index *vectorindex.Client, libraries ...string) []string {
 	t.Helper()
-	hits, err := index.Search(context.Background(), imagesCollection(t, index), []float32{0.5, 0.5, 0.5, 0.5},
-		vectorindex.Scope{Field: "libraries", Values: libraries}, 100)
+	hits, err := index.Search(context.Background(), imagesCollection(t, index), vectorindex.Query{Vector: []float32{0.5, 0.5, 0.5, 0.5},
+		Scope: vectorindex.Scope{Field: "libraries", Values: libraries}, Limit: 100, Exact: true})
 	if err != nil {
 		t.Fatal(err)
 	}

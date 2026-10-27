@@ -69,15 +69,15 @@ func TestRequestsAreTyped(t *testing.T) {
 	ctx := context.Background()
 	client := vectorindex.New(filepath.Join(t.TempDir(), "missing.sock"), nil)
 	defer func() { _ = client.Close() }()
-	if hits, err := client.Search(ctx, "c", []float32{1}, vectorindex.Scope{Field: "libraries"}, 10); err != nil || hits != nil {
+	if hits, err := client.Search(ctx, "c", vectorindex.Query{Vector: []float32{1}, Scope: vectorindex.Scope{Field: "libraries"}, Limit: 10}); err != nil || hits != nil {
 		t.Errorf("Search without scope values = %v, %v; want nothing", hits, err)
 	}
 	for name, err := range map[string]error{
 		"unnamed scope": searchErr(client, vectorindex.Scope{Values: []string{"a"}}),
 		"scope on key":  searchErr(client, vectorindex.Scope{Field: "key", Values: []string{"a"}}),
 		"keyword key":   client.Upsert(ctx, "c", []vectorindex.Point{{Key: "a", Vector: []float32{1}, Keywords: map[string][]string{"key": {"b"}}}}),
-		"key as field":  client.CreateCollection(ctx, "c", 2, "key"),
-		"no dimensions": client.CreateCollection(ctx, "c", 0),
+		"key as field":  client.CreateCollection(ctx, vectorindex.Collection{Name: "c", Dimensions: 2, Keywords: []string{"key"}}),
+		"no dimensions": client.CreateCollection(ctx, vectorindex.Collection{Name: "c"}),
 		"no limit":      searchErrLimit(client, 0),
 	} {
 		if !errors.Is(err, vectorindex.ErrInvalid) {
@@ -87,12 +87,13 @@ func TestRequestsAreTyped(t *testing.T) {
 }
 
 func searchErr(client *vectorindex.Client, scope vectorindex.Scope) error {
-	_, err := client.Search(context.Background(), "c", []float32{1}, scope, 10)
+	_, err := client.Search(context.Background(), "c", vectorindex.Query{Vector: []float32{1}, Scope: scope, Limit: 10})
 	return err
 }
 
 func searchErrLimit(client *vectorindex.Client, limit int) error {
-	_, err := client.Search(context.Background(), "c", []float32{1}, vectorindex.Scope{Field: "libraries", Values: []string{"a"}}, limit)
+	_, err := client.Search(context.Background(), "c", vectorindex.Query{Vector: []float32{1},
+		Scope: vectorindex.Scope{Field: "libraries", Values: []string{"a"}}, Limit: limit})
 	return err
 }
 
@@ -102,7 +103,7 @@ func TestIndex(t *testing.T) {
 	client := vectorindex.New(instance.Socket, nil)
 	defer func() { _ = client.Close() }()
 
-	if err := client.CreateCollection(ctx, "images", 3, "libraries"); err != nil {
+	if err := client.CreateCollection(ctx, vectorindex.Collection{Name: "images", Dimensions: 3, Keywords: []string{"libraries"}}); err != nil {
 		t.Fatal(err)
 	}
 	points := []vectorindex.Point{
@@ -114,7 +115,8 @@ func TestIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hits, err := client.Search(ctx, "images", unit(1, 0.2, 0), vectorindex.Scope{Field: "libraries", Values: []string{"alice", "shared"}}, 10)
+	hits, err := client.Search(ctx, "images", vectorindex.Query{Vector: unit(1, 0.2, 0),
+		Scope: vectorindex.Scope{Field: "libraries", Values: []string{"alice", "shared"}}, Limit: 10, Exact: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +134,8 @@ func TestIndex(t *testing.T) {
 	if err := client.Delete(ctx, "images", []string{"northeast", "never-stored"}); err != nil {
 		t.Fatal(err)
 	}
-	hits, err = client.Search(ctx, "images", unit(1, 0, 0), vectorindex.Scope{Field: "libraries", Values: []string{"alice", "shared"}}, 10)
+	hits, err = client.Search(ctx, "images", vectorindex.Query{Vector: unit(1, 0, 0),
+		Scope: vectorindex.Scope{Field: "libraries", Values: []string{"alice", "shared"}}, Limit: 10})
 	if err != nil || len(hits) != 0 {
 		t.Errorf("after the move and the delete, alice and shared find %v, %v; want nothing", hits, err)
 	}

@@ -28,11 +28,11 @@ import (
 // implements it.
 type VectorIndex interface {
 	Collections(ctx context.Context) ([]string, error)
-	CreateCollection(ctx context.Context, name string, dimensions int, fields ...string) error
+	CreateCollection(ctx context.Context, collection vectorindex.Collection) error
 	DeleteCollection(ctx context.Context, name string) error
 	Upsert(ctx context.Context, collection string, points []vectorindex.Point) error
 	Delete(ctx context.Context, collection string, keys []string) error
-	Search(ctx context.Context, collection string, vector []float32, scope vectorindex.Scope, limit int) ([]vectorindex.Hit, error)
+	Search(ctx context.Context, collection string, query vectorindex.Query) ([]vectorindex.Hit, error)
 	Scan(ctx context.Context, collection string, fields []string, visit func(vectorindex.Entry) error) error
 }
 
@@ -276,7 +276,11 @@ func (s *Service) imagesCollection(ctx context.Context, index VectorIndex, repor
 	}
 
 	fresh := imagesCollection{name: imagesCollectionName(model, s.randomHex()[:8]), model: model}
-	if err := index.CreateCollection(ctx, fresh.name, size/4, librariesField); err != nil {
+	// No graph: up to about 100,000 photos an exact scan in the index is as
+	// fast as the in-process one (docs/research/qdrant-retrieval-features.md),
+	// so building one would only cost the device processor and memory.
+	if err := index.CreateCollection(ctx, vectorindex.Collection{Name: fresh.name, Dimensions: size / 4,
+		Keywords: []string{librariesField}}); err != nil {
 		return imagesCollection{}, false, err
 	}
 	// The instance is this service's alone, so any other collection of image
