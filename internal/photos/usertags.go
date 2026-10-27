@@ -89,7 +89,7 @@ func (s *Service) TagCounts(ctx context.Context, p Principal, viewing string) ([
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT t.name, t.asset_id FROM user_tags t JOIN assets a ON a.id = t.asset_id
-WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)`+hiddenVideos(p, "a.object_id")+`
+WHERE `+listedAssets(p, "a")+` AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
 ORDER BY t.created_at DESC, t.asset_id DESC`, scope...)
 	if err != nil {
 		return nil, err
@@ -123,8 +123,8 @@ func (s *Service) TagPhotos(ctx context.Context, p Principal, name, viewing, cur
 	if err != nil {
 		return Page{}, err
 	}
-	where := "WHERE a.library_id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",") +
-		") AND a.trashed_at IS NULL AND a.id IN (SELECT asset_id FROM user_tags WHERE name = ?)"
+	where := "a.library_id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",") +
+		") AND a.id IN (SELECT asset_id FROM user_tags WHERE name = ?)"
 	return s.newestFirst(ctx, p, where, append(slices.Clone(scope), name), cursor, limit)
 }
 

@@ -23,8 +23,9 @@ import (
 // video once at import, a frame of it becomes the thumbnail, and a browser
 // plays either the original or a stream the Worker converts it into.
 // Videos take no part in local AI: no vector, detection or face scan is
-// ever queued for them, search matches them by name and user tags only, and
-// a member's assistant does not see them.
+// ever queued for them, search matches them by name and user tags only, AI
+// clusters and similar photos leave them out, and a member's assistant does
+// not see them (assistantSeesNoVideos).
 
 var (
 	// ErrNotVideo means the asset is a photo where a video was asked for.
@@ -79,15 +80,6 @@ type videoFacts struct {
 // not a video original; only such objects take part in local AI.
 func notVideo(objectID string) string {
 	return "NOT EXISTS (SELECT 1 FROM videos vo WHERE vo.object_id = " + objectID + ")"
-}
-
-// hiddenVideos is the SQL condition, with its leading AND, that keeps
-// videos out of what a member's assistant reads: they take no part in AI.
-func hiddenVideos(p Principal, objectID string) string {
-	if !p.Assistant {
-		return ""
-	}
-	return " AND " + notVideo(objectID)
 }
 
 // readVideo asks the Media Worker what a staged video original holds and

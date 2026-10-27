@@ -529,12 +529,12 @@ func (s *Service) People(ctx context.Context, p Principal, viewing string, hidde
 SELECT pe.id, pe.library_id, pe.kind, pe.name, pe.hidden, IFNULL(pe.cover_occurrence_id, ''), COUNT(DISTINCT a.id),
   (SELECT o2.id FROM person_occurrences po2 JOIN occurrences o2 ON o2.id = po2.occurrence_id
    WHERE po2.person_id = pe.id AND po2.library_id = pe.library_id
-     AND EXISTS (SELECT 1 FROM assets a2 WHERE a2.object_id = o2.object_id AND a2.library_id = pe.library_id AND a2.trashed_at IS NULL)
+     AND EXISTS (SELECT 1 FROM assets a2 WHERE a2.object_id = o2.object_id AND a2.library_id = pe.library_id AND `+listedAssets(p, "a2")+`)
    ORDER BY o2.score DESC, o2.id LIMIT 1)
 FROM people pe
 JOIN person_occurrences po ON po.person_id = pe.id AND po.library_id = pe.library_id
 JOIN occurrences o ON o.id = po.occurrence_id
-JOIN assets a ON a.object_id = o.object_id AND a.library_id = pe.library_id AND a.trashed_at IS NULL
+JOIN assets a ON a.object_id = o.object_id AND a.library_id = pe.library_id AND `+listedAssets(p, "a")+`
 JOIN libraries l ON l.id = pe.library_id AND l.people = 1
 WHERE pe.library_id IN (`+placeholders(len(scope))+`)
 GROUP BY pe.id`, scope...)
@@ -634,7 +634,7 @@ func (s *Service) PersonPhotos(ctx context.Context, p Principal, personID, curso
 	if err != nil {
 		return Page{}, err
 	}
-	where := `WHERE a.library_id = ? AND a.trashed_at IS NULL AND a.object_id IN (
+	where := `a.library_id = ? AND a.object_id IN (
   SELECT o.object_id FROM person_occurrences po JOIN occurrences o ON o.id = po.occurrence_id
   WHERE po.person_id = ? AND po.library_id = ?)`
 	return s.newestFirst(ctx, p, where, []any{person.LibraryID, person.ID, person.LibraryID}, cursor, limit)

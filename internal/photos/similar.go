@@ -101,13 +101,14 @@ func (s *Service) Similar(ctx context.Context, p Principal, assetID string, requ
 // likeHits ranks the candidates with a vector by how much they look like an
 // image with this vector and these objects, closest first and at most
 // maxSemanticResults of them. Photos of the content object exclude, the
-// image's own, are left out.
+// image's own, are left out, and so are videos, which take no part in AI
+// even with a vector.
 func likeHits(candidates []candidate, vectors map[string][]float32, found map[string][]classScore,
 	vector []float32, objects []classScore, exclude string) []searchHit {
 	var hits []searchHit
 	for _, c := range candidates {
 		other, ok := vectors[c.objectID]
-		if !ok || c.objectID == exclude {
+		if !ok || c.video || c.objectID == exclude {
 			continue
 		}
 		score := dot(vector, other) + similarObjectWeight*objectOverlap(objects, found[c.objectID])
