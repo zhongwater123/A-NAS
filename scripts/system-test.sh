@@ -612,7 +612,7 @@ check "cross-space move removes the source from its old location" test ! -e "$mo
 move_trash_id=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" | jq -r '.items[] | select(.name == "move-times") | .id')
 check "cross-space move leaves an operator recycle item" test -n "$move_trash_id" -a "$move_trash_id" != null
 check "another user cannot restore the moved source" test "$(status_of -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" \
-  -H 'Content-Type: application/json' -d '{}' "$api/api/v1/trash/$move_trash_id/restore")" = 404
+  -H 'Content-Type: application/json' -d '{}' "$api/api/v1/trash/$move_trash_id/restore")" = 403
 check "the operator restores the moved source" test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
   -H 'Content-Type: application/json' -d '{}' "$api/api/v1/trash/$move_trash_id/restore")" = 200
 check "the restored source keeps its content" cmp -s /tmp/alice.txt "$move_source/dated.txt"
