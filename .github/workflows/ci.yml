@@ -103,7 +103,16 @@ jobs:
           grep '^numpy==' ai/requirements.lock | python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r /dev/stdin
 
       # The vector index tests run the Qdrant server the release pins
-      # (deploy/qdrant/qdrant.json), checked against its SHA-256.
+      # (deploy/qdrant/qdrant.json), checked against its SHA-256. The cache
+      # holds the checked tarball and binary, so that a run seldom depends on
+      # a download from GitHub; the script checks them again either way.
+      - name: Restore the pinned Qdrant server
+        if: ${{ needs.scope.outputs.docs-only != 'true' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/qdrant
+          key: qdrant-${{ hashFiles('deploy/qdrant/qdrant.json') }}
+
       - name: Fetch the pinned Qdrant server
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         run: scripts/fetch-qdrant.sh
@@ -139,6 +148,12 @@ jobs:
 
       # The vector index tests run the Qdrant server the release pins
       # (deploy/qdrant/qdrant.json), checked against its SHA-256.
+      - name: Restore the pinned Qdrant server
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/qdrant
+          key: qdrant-${{ hashFiles('deploy/qdrant/qdrant.json') }}
+
       - name: Fetch the pinned Qdrant server
         run: scripts/fetch-qdrant.sh
 
@@ -176,6 +191,12 @@ jobs:
           scripts/build-system-test-image.sh anas-systemd:trixie debian:bookworm
 
       # The release stages the pinned Qdrant tarball as deploy-dev.ps1 does.
+      - name: Restore the pinned Qdrant server
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/qdrant
+          key: qdrant-${{ hashFiles('deploy/qdrant/qdrant.json') }}
+
       - name: Fetch the pinned Qdrant server
         run: scripts/fetch-qdrant.sh
 

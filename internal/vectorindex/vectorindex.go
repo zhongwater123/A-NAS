@@ -5,14 +5,13 @@
 // operations the owners need. Callers never pass a filter of their own, so a
 // condition the index does not understand cannot widen a search or a delete.
 //
-// systemd starts the instance on the first connection and stops it once the
-// connection has been idle for a while, so the client connects lazily, sends
-// no keepalive pings and lets the connection go when idle.
+// systemd starts the instance on the first connection and stops it soon after
+// the last one closes, so the client connects lazily, sends no keepalive
+// pings and lets the connection go when idle.
 package vectorindex
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -21,11 +20,15 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/status"
 )
 
 // ServerVersion is the Qdrant release the client is built for, as
@@ -39,9 +42,15 @@ const keyField = "key"
 // scanPage is how many points a scan reads per request.
 const scanPage = 1000
 
-// idleTimeout closes an unused connection, so that the proxy and with it the
-// instance can stop.
+// idleTimeout closes an unused connection. The proxy exits seconds after the
+// last connection closes, and the instance stops with it
+// (anas-vectors-proxy@.service): an instance runs while its owner keeps a
+// connection, so a client that is not Warm meets an instance that has to
+// start.
 var idleTimeout = time.Minute
+
+// pointNamespace is the namespace of point IDs (RFC 9562 name-based UUIDs).
+var pointNamespace = uuid.NewSHA1(uuid.NameSpaceURL, []byte("https://github.com/zhongwater123/A-NAS/vectorindex"))
 
 // ErrIncompatible means the instance runs another Qdrant release than the
 // one the client is built for.
@@ -51,14 +60,20 @@ var ErrIncompatible = errors.New("the vector index runs another Qdrant release")
 // such as a keyword field named like the key.
 var ErrInvalid = errors.New("invalid vector index request")
 
+// ErrRejected means the index refused what was written, such as a vector of
+// another size than its collection's; the same write would be refused again.
+var ErrRejected = errors.New("the vector index rejected the write")
+
 // Client talks to one vector index instance. Its zero value is not usable;
 // call New. It is safe for concurrent use.
 type Client struct {
 	socket string
 	logger *slog.Logger
 
-	mu     sync.Mutex
-	client *qdrant.Client
+	// connecting serialises opening the connection; client holds it once
+	// open, so that Warm never waits for an instance that is starting.
+	connecting sync.Mutex
+	client     atomic.Pointer[qdrant.Client]
 }
 
 // New returns a client for the instance behind socket. It does not connect
@@ -72,31 +87,33 @@ func New(socket string, logger *slog.Logger) *Client {
 
 // Close drops the connection, if any.
 func (c *Client) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.client == nil {
+	c.connecting.Lock()
+	defer c.connecting.Unlock()
+	client := c.client.Swap(nil)
+	if client == nil {
 		return nil
 	}
-	err := c.client.Close()
-	c.client = nil
-	return err
+	return client.Close()
 }
 
-// Warm reports whether a connection to the instance is open and ready, so
-// that the next request does not wait for the instance to start.
+// Warm reports, without waiting, whether a connection to the instance is
+// open and ready: the instance is running, and the next request does not
+// wait for it to start.
 func (c *Client) Warm() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.client != nil && c.client.GetConnection().GetState() == connectivity.Ready
+	client := c.client.Load()
+	return client != nil && client.GetConnection().GetState() == connectivity.Ready
 }
 
 // connection returns the open connection, opening it and checking the
 // instance's release first when there is none.
 func (c *Client) connection(ctx context.Context) (*qdrant.Client, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.client != nil {
-		return c.client, nil
+	if client := c.client.Load(); client != nil {
+		return client, nil
+	}
+	c.connecting.Lock()
+	defer c.connecting.Unlock()
+	if client := c.client.Load(); client != nil {
+		return client, nil
 	}
 	socket := c.socket
 	client, err := qdrant.NewClient(&qdrant.Config{
@@ -126,7 +143,7 @@ func (c *Client) connection(ctx context.Context) (*qdrant.Client, error) {
 		_ = client.Close()
 		return nil, err
 	}
-	c.client = client
+	c.client.Store(client)
 	return client, nil
 }
 
@@ -134,11 +151,10 @@ func compatible(version string) bool {
 	return version == ServerVersion || strings.HasPrefix(version, ServerVersion+".")
 }
 
-// PointID is the Qdrant point ID of a key: a UUID made of the first 16 bytes
-// of the key's SHA-256, so that the same key always names the same point.
+// PointID is the Qdrant point ID of a key: a name-based UUID, so that the
+// same key always names the same point.
 func PointID(key string) string {
-	sum := sha256.Sum256([]byte(key))
-	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
+	return uuid.NewSHA1(pointNamespace, []byte(key)).String()
 }
 
 // Collections lists the instance's collections.
@@ -251,6 +267,9 @@ func (c *Client) Upsert(ctx context.Context, collection string, points []Point) 
 	}
 	wait := true
 	_, err = client.Upsert(ctx, &qdrant.UpsertPoints{CollectionName: collection, Wait: &wait, Points: structs})
+	if status.Code(err) == codes.InvalidArgument {
+		return fmt.Errorf("%w: %v", ErrRejected, err)
+	}
 	return err
 }
 

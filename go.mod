@@ -18,6 +18,7 @@ require (
 	github.com/getkin/kin-openapi v0.145.0
 	github.com/go-audio/wav v1.1.0
 	github.com/godbus/dbus/v5 v5.1.0
+	github.com/google/uuid v1.6.0
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/landlock-lsm/go-landlock v0.10.1
@@ -55,7 +56,6 @@ require (
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/icza/bitio v1.1.0 // indirect
 	github.com/jfreymuth/vorbis v1.0.2 // indirect
 	github.com/mattn/go-shellwords v1.0.12 // indirect

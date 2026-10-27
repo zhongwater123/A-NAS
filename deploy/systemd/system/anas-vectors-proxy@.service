@@ -9,9 +9,12 @@ After=anas-vectors@%i.service anas-vectors-proxy@%i.socket
 JoinsNamespaceOf=anas-vectors@%i.service
 
 [Service]
-# Exits once no connection has been open for five minutes; the instance then
-# stops as well, and the next connection starts both again.
-ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=5min 127.0.0.1:6334
+# Exits seconds after the last connection closes; the instance then stops as
+# well, and the next connection starts both again. The owner keeps its
+# connection for a minute after its last request (internal/vectorindex), so
+# the instance lives that long, and an owner without a connection always
+# meets an instance that has to start: its cold starts are measured as such.
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=10s 127.0.0.1:6334
 DynamicUser=true
 UMask=0077
 NoNewPrivileges=true

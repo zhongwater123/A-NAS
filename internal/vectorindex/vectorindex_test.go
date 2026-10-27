@@ -55,8 +55,9 @@ func TestClientAndServerAreTheSameRelease(t *testing.T) {
 
 func TestPointIDIsAStableUUID(t *testing.T) {
 	id := vectorindex.PointID("3f1a")
-	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`).MatchString(id) {
-		t.Fatalf("PointID = %q, not a UUID", id)
+	// A name-based (version 5) UUID of the RFC 4122 variant.
+	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(id) {
+		t.Fatalf("PointID = %q, not a name-based UUID", id)
 	}
 	if vectorindex.PointID("3f1a") != id || vectorindex.PointID("3f1b") == id {
 		t.Fatal("PointID is not a function of the key")
@@ -103,8 +104,18 @@ func TestIndex(t *testing.T) {
 	client := vectorindex.New(instance.Socket, nil)
 	defer func() { _ = client.Close() }()
 
+	if client.Warm() {
+		t.Error("Warm before any request")
+	}
 	if err := client.CreateCollection(ctx, vectorindex.Collection{Name: "images", Dimensions: 3, Keywords: []string{"libraries"}}); err != nil {
 		t.Fatal(err)
+	}
+	if !client.Warm() {
+		t.Error("not Warm right after a request")
+	}
+	// A vector of another size is refused as such, not as a connection fault.
+	if err := client.Upsert(ctx, "images", []vectorindex.Point{{Key: "short", Vector: []float32{1, 0}}}); !errors.Is(err, vectorindex.ErrRejected) {
+		t.Errorf("Upsert of a 2-d vector into 3-d = %v, want ErrRejected", err)
 	}
 	points := []vectorindex.Point{
 		{Key: "east", Vector: unit(1, 0, 0), Keywords: map[string][]string{"libraries": {"alice", "shared"}}},

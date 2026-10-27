@@ -120,21 +120,17 @@ func forward(t testing.TB, address string) (string, func() int) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// mu guards closed, open and starting a pair's goroutine, so that the
+	// cleanup either sees a pair to close and wait for, or the pair sees the
+	// forwarder closed and closes itself.
 	var connections sync.WaitGroup
 	var mu sync.Mutex
+	closed := false
 	open := map[net.Conn]bool{}
-	track := func(conn net.Conn, add bool) {
-		mu.Lock()
-		defer mu.Unlock()
-		if add {
-			open[conn] = true
-		} else {
-			delete(open, conn)
-		}
-	}
 	t.Cleanup(func() {
 		_ = listener.Close()
 		mu.Lock()
+		closed = true
 		for conn := range open {
 			_ = conn.Close()
 		}
@@ -152,13 +148,22 @@ func forward(t testing.TB, address string) (string, func() int) {
 				_ = client.Close()
 				continue
 			}
-			track(client, true)
-			track(server, true)
+			mu.Lock()
+			if closed {
+				mu.Unlock()
+				_ = client.Close()
+				_ = server.Close()
+				return
+			}
+			open[client], open[server] = true, true
 			connections.Go(func() {
 				pipe(client, server)
-				track(client, false)
-				track(server, false)
+				mu.Lock()
+				delete(open, client)
+				delete(open, server)
+				mu.Unlock()
 			})
+			mu.Unlock()
 		}
 	}()
 	count := func() int {
