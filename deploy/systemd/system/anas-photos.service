@@ -1,8 +1,8 @@
 [Unit]
 Description=A-NAS photo service
 Documentation=https://github.com/zhongwater123/A-NAS
-After=anas-host-agent.service
-Wants=anas-host-agent.service
+After=anas-host-agent.service anas-vectors-proxy@a-nas-photos.socket
+Wants=anas-host-agent.service anas-vectors-proxy@a-nas-photos.socket
 
 [Service]
 Type=simple
@@ -14,6 +14,9 @@ ExecStart=/opt/a-nas/current/anas-api photo-service
 Environment=ANAS_PHOTOS_ROOT=/srv/a-nas/data/photos
 Environment=ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock
 Environment=ANAS_PHOTO_SESSION_SOCKET=/run/a-nas-sessions/photos.sock
+# Its own vector index (ADR 0028), a Qdrant instance only this account
+# reaches; a drop-in setting this empty turns the index off.
+Environment=ANAS_PHOTOS_VECTOR_SOCKET=/run/a-nas-vectors/a-nas-photos.sock
 # Collect decoded rasters before reaching MemoryMax; leave headroom for
 # SQLite, mapped files and other memory outside the Go heap's soft budget.
 Environment=GOMEMLIMIT=1GiB

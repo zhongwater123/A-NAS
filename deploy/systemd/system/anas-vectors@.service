@@ -1,0 +1,77 @@
+[Unit]
+Description=A-NAS vector index of %i
+Documentation=https://github.com/zhongwater123/A-NAS
+# Qdrant holding the vectors of the service whose account names the instance,
+# as an index that service rebuilds from its own Catalog at will (ADR 0028,
+# docs/architecture/vector-index.md). Only that service reaches it, through
+# anas-vectors-proxy@%i.socket; the proxy starts it, and once the proxy has
+# exited for want of connections nothing needs it and it stops. It has no
+# [Install] section: a manual start without the proxy would stop at once.
+StopWhenUnneeded=yes
+AssertPathExists=/opt/a-nas/current/vectors/config.yaml
+
+[Service]
+Type=simple
+# Each instance has a dynamic user of its own; without User= every instance
+# would share one named after the unit.
+User=a-nas-vec-%i
+DynamicUser=true
+# The index on the system disk: derived, never backed up, deleted at will.
+StateDirectory=a-nas-vectors/%i
+StateDirectoryMode=0700
+# Qdrant writes relative paths unless told otherwise; the release directory
+# is read-only, so a stray one fails instead of landing somewhere.
+WorkingDirectory=/opt/a-nas/current/vectors
+Environment=QDRANT__STORAGE__STORAGE_PATH=%S/a-nas-vectors/%i/storage
+Environment=QDRANT__STORAGE__SNAPSHOTS_PATH=%S/a-nas-vectors/%i/snapshots
+Environment=QDRANT__STORAGE__TEMP_PATH=%S/a-nas-vectors/%i/tmp
+Environment=QDRANT_INIT_FILE_PATH=%S/a-nas-vectors/%i/.qdrant-initialized
+# start.sh resolves the release once and execs its Qdrant, after emptying
+# storage that Qdrant cannot use: written by another minor release or a newer
+# one, or behind two failed starts in a row (a damaged segment that makes
+# Qdrant panic while loading). The owner rebuilds the index.
+ExecStart=/opt/a-nas/current/vectors/start.sh %S/a-nas-vectors/%i /opt/a-nas/current
+# Started only once its gRPC port accepts, so the proxy never forwards to a
+# closed port; that also clears the count of failed starts.
+ExecStartPost=/opt/a-nas/current/vectors/wait-ready.sh 6334 %S/a-nas-vectors/%i
+TimeoutStartSec=90s
+TimeoutStopSec=20s
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+# Only its own loopback: nothing leaves the device, and nothing but the proxy
+# in this namespace reaches the ports.
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+InaccessiblePaths=-/srv/a-nas -/var/lib/a-nas -/etc/a-nas -/run/a-nas -/run/a-nas-photos -/run/a-nas-sessions -/run/a-nas-ai
+ProtectProc=invisible
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+TasksMax=256
+# Qdrant keeps a descriptor per segment file; collections, segments and a
+# full-text index outgrow the default soft limit of 1024.
+LimitNOFILE=65536
+# Measured under these limits with graph-free collections: see
+# docs/architecture/vector-index.md#配置. An owner whose collections need more
+# gets a drop-in for its instance; anas-vectors.slice bounds all of them.
+MemoryHigh=512M
+MemoryMax=768M
+# anas-vectors.slice, under anas.slice: background work that gives way to the
+# rest of the device, which the photo service's AI gate does not count.
+Slice=anas-vectors.slice

@@ -62,6 +62,9 @@ type Config struct {
 	// defaults to the kernel's pressure stall information. Tests replace it
 	// so that load on the machine running them cannot hold AI work back.
 	AIPressure func(resource string) (float64, error)
+	// Vectors is the service's own vector index (ADR 0028), kept in line
+	// with the Catalog and compared with searches; nil leaves it off.
+	Vectors photos.VectorIndex
 }
 
 var ErrStoreUnavailable = errors.New("the photo store is not available")
@@ -222,7 +225,7 @@ func supervise(ctx context.Context, config Config, gate *Gate, serve func(http.H
 		background := make(chan struct{})
 		go func() {
 			defer close(background)
-			RunBackground(workers, service, config.Logger, config.AI, gate)
+			RunBackground(workers, service, config.Logger, config.AI, gate, config.Vectors)
 		}()
 		serve(photosapi.New(service, config.Logger))
 		config.Logger.Info("photo service ready", "store", config.Root, "socket", config.SocketPath)
@@ -295,11 +298,13 @@ func openWhenReady(ctx context.Context, config Config) (*photos.Service, error) 
 }
 
 // RunBackground readies the job queue (photos.Service.RecoverJobs), then
-// renders media, runs local AI through ai while gate allows it, and
-// maintains the store until ctx ends. It returns only once all of
-// them have stopped, so the caller may then close service. None needs a user
-// session; a nil ai leaves local AI off.
-func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Logger, ai photos.Embedder, gate *Gate) {
+// renders media, runs local AI through ai while gate allows it, keeps the
+// vector index in line and compares searches with it, and maintains the
+// store until ctx ends. It returns only once all of them have stopped, so
+// the caller may then close service. None needs a user session; a nil ai
+// leaves local AI off, and nil vectors the vector index.
+func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Logger, ai photos.Embedder, gate *Gate,
+	vectors photos.VectorIndex) {
 	if recovery, err := service.RecoverJobs(ctx); err != nil {
 		logger.ErrorContext(ctx, "photo job recovery failed", "error", err)
 	} else if recovery != (photos.JobRecovery{}) {
@@ -319,8 +324,48 @@ func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Lo
 			})
 		})
 	}
+	if vectors != nil {
+		runVectorIndex(ctx, &workers, service, logger, gate, vectors)
+	} else if err := service.ForgetVectorIndex(ctx); err != nil {
+		logger.ErrorContext(ctx, "photo vector index state could not be dropped", "error", err)
+	}
 	workers.Go(func() { maintain(ctx, service, logger) })
 	workers.Wait()
+}
+
+// runVectorIndex starts keeping the vector index in line with the Catalog,
+// as background work, and comparing searches with it
+// (docs/architecture/vector-index.md). The comparisons are what decides
+// whether search moves to the index; they log no query or name.
+func runVectorIndex(ctx context.Context, workers *sync.WaitGroup, service *photos.Service, logger *slog.Logger, gate *Gate,
+	vectors photos.VectorIndex) {
+	workers.Go(func() {
+		service.RunVectorSync(ctx, vectors, gate, min(time.Minute, gate.quiet), func(event photos.VectorSyncEvent) {
+			level := slog.LevelInfo
+			if event.Rejected > 0 {
+				// The index refused these vectors; reconciliation tries them
+				// again tomorrow.
+				level = slog.LevelWarn
+			}
+			logger.Log(ctx, level, "photo vector index "+event.Kind, "collection", event.Collection,
+				"upserted", event.Upserted, "deleted", event.Deleted, "rejected", event.Rejected, "queued", event.Queued)
+		}, func(err error) {
+			logger.WarnContext(ctx, "photo vector index sync failed; it retries", "error", err)
+		})
+	})
+	var warm func() bool
+	if client, ok := vectors.(interface{ Warm() bool }); ok {
+		warm = client.Warm
+	}
+	workers.Go(func() {
+		service.RunVectorShadow(ctx, vectors, warm, min(time.Minute, gate.quiet), func(c photos.ShadowComparison) {
+			logger.InfoContext(ctx, "photo vector index shadow search", "collection", c.Collection, "candidates", c.Candidates,
+				"overlap10", c.Overlap[10], "overlap100", c.Overlap[100], "overlap500", c.Overlap[500],
+				"index_ms", c.Index.Milliseconds(), "exact_ms", c.Exact.Milliseconds(), "warm", c.Warm)
+		}, func(err error) {
+			logger.WarnContext(ctx, "photo vector index shadow search failed", "error", err)
+		})
+	})
 }
 
 // maintain repairs the store after an unclean stop and then expires trashed

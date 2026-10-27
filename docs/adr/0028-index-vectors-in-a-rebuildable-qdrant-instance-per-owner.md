@@ -1,0 +1,43 @@
+# 0028：向量索引由所属服务各自的 Qdrant 实例承担，随时可从 Catalog 重建
+
+状态：proposed（2026-10-26；相册读路径何时切换另行决定）
+
+[#66](https://github.com/zhongwater123/A-NAS/issues/66) 曾决定不引入独立向量库，理由是多一个常驻进程、破坏 Catalog 与向量的一致快照，并且相册在 2 万张规模下用进程内精确扫描就够了。接下来要索引的视频分段（一个视频多个向量、按最佳片段打分）与文件分块（中文全文与语义融合、按文件归并结果，规模可达数十万块）手写就是在重复造轮子。我们决定引入 Qdrant 作为**派生的向量索引**：SQLite Catalog 仍是事实源，每个持有向量的服务有自己的按需实例，索引随时可以清空并由所属服务从自己的 Catalog 重建。
+
+## 决定
+
+1. **只做索引，不做事实源。** 向量照旧写进所属服务的 Catalog（相册的 `embeddings`），再经同一事务写入的 outbox 同步到 Qdrant；后续每个使用方的向量也必须留在自己的 Catalog，这是接入的前提。索引丢失、损坏、换版本或换模型时，所属服务清空它并从 Catalog 重建；Catalog 的备份与恢复不涉及索引。这回应了 #66 的一致快照问题：一致的快照仍然只有 Catalog 一份。
+2. **每个所属服务一个实例，只有它能连。** 实例是 `anas-vectors@<服务账号>` 模板单元，以自己的动态用户运行在私有网络命名空间里，只有回环，看不到数据卷。所属服务经 `0600`、属于自己账号的 Unix 套接字连接，套接字由 `systemd-socket-proxyd` 转进实例的命名空间；所属服务自己的沙箱（只许 `AF_UNIX`）不变。集合由所属服务自己建与删，实例不设 API key。相册是第一个实例；以后的文件索引有它自己的实例；相册视频的分段放在相册实例中。
+3. **按需运行。** 第一次连接时由 systemd 拉起，代理空闲后退出，实例随之停止。这回应了 #66 的常驻进程问题。
+4. **索引命中不构成授权。** 点上只带内容的稳定 ID 与范围键（例如所在图库），不带名称、文本或路径。查询的范围由所属服务按自己的 Policy 给出，结果在返回前照旧按 Catalog 复核（[不变量 6](../architecture/OVERVIEW.md#不变量)）。人脸与宠物向量不进索引：聚类要的是“阈值内的全部邻居”，HNSW 不适合（#66 实测），它们留在 Catalog 中精确计算。
+5. **存储在系统盘，随时可删。** 索引放在实例的 StateDirectory（系统盘 NVMe）。它不进备份；版本变化时由实例自己清空，所属服务重建。这是 [ADR 0011](0011-run-the-photo-library-as-a-dedicated-service-identity.md) 数据位置的一个例外：私有照片的向量不再只在数据卷上。
+6. **离线交付，固定版本。** 与模型相同（[ADR 0016](0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：官方 musl 构建按大小与 SHA-256 固定在 `deploy/qdrant/qdrant.json`，按内容装在 `/opt/a-nas/qdrant/<sha256>/`，release 只引用它；设备不联网获取。Qdrant 的遥测、面板、CORS 与从 URL 恢复快照全部关闭。
+7. **相册第一阶段只同步、影子比对。** 相册的向量同步进索引，文搜图时在后台再用索引查一次并记录重合率与耗时；用户看到的结果仍来自精确扫描。AI 聚合与人物聚类不改。是否切换、何时切换，以 Experimental NAS 上的影子比对与资源数据为准另行决定。
+
+技术细节见[向量索引技术设计](../architecture/vector-index.md)。
+
+## 权衡与后果
+
+- 使用中多一个进程：系统测试中空集合时约 75–92 MB；开发机上从启动到第一次查询完成为 0.2–1.0 秒（10 万条以内），冷启动时第一次请求要多等这段时间，所以相册的第一阶段只在后台查询。实机数字随部署补充。
+- 10 万张以内，索引里的精确检索不比进程内扫描快（开发机实测）；相册若切换，理由只会是内存与重建边界，所以相册的集合不建 HNSW 图，影子比对也用精确检索。
+- 向量存两份：Catalog 一份，索引一份。2 万张约 60 MB，相对系统盘可以忽略。
+- 同步靠 outbox、对账与重建保证最终一致。索引可能短时落后于 Catalog，所以返回前的复核不能省。
+- 产品增加 gRPC 与 protobuf 依赖（官方 Go 客户端只支持 gRPC），并纳入漏洞检查。
+- Qdrant 单节点不能跳过 minor 版本升级。我们不迁移数据：换 minor 版本或降级时清空重建，同一 minor 内的补丁升级保留存储；连续两次启动失败也清空重建。
+- REST 端口无法关闭，只存在于实例的私有命名空间中，代理只转发 gRPC。
+- 换卷或恢复 Catalog 后，索引可能保留旧数据，直到集合名中的随机 nonce 不符或每日对账发现差异。
+
+## 未选择
+
+- **把目录迁到 PostgreSQL，用 pgvector 或 VectorChord**：能在一条 SQL 里同时做授权过滤与向量排序，但要重写十来个模块的 SQLite 与测试，破坏“每个服务独占自己的存储”，数据卷离线时所有模块一起停。Immich 的经验是扩展需要超级用户、PG 与扩展版本互锁、扩展升级要 REINDEX、大版本要导出导入。Debian 13 的 pgvector 0.8.0 带未修复的 CVE，VectorChord 不在 Debian 中。
+- **sqlite-vec**：与 Catalog 同一个文件、同一个事务，最贴近 #66 的原意；但仍是 0.1.x，近似检索只在 alpha 版本中，没有中文全文、分组与融合。
+- **全部手写**：精确扫描对相册足够，但中文分词与 BM25、分组、多向量与融合都要自己实现和维护。
+- **一个共享实例加 JWT**：省一个进程，但要由安装器生成密钥、按集合签发令牌，集合只能由持管理权的一方创建，隔离靠令牌而不是进程边界。
+- **放在数据卷上**：随原图走，但机械盘的随机读慢，Btrfs 写时复制会让 mmap 文件碎片化，数据卷离线时索引也不可用。
+
+## 关联
+
+- [向量索引技术设计](../architecture/vector-index.md)、[Qdrant 检索特性试验](../research/qdrant-retrieval-features.md)
+- [相册本地 AI](../architecture/photo-ai.md)、[相册技术设计](../architecture/photo-library.md#搜索设计)、[相册规格](../specs/photo-library.md)
+- [#66](https://github.com/zhongwater123/A-NAS/issues/66)（向量存储评估与实测）、[#152](https://github.com/zhongwater123/A-NAS/issues/152)（文本向量与 Qdrant 研究分支的审查）、[#262](https://github.com/zhongwater123/A-NAS/issues/262)（嵌入式方案、图 + 向量方案与 Qdrant 的选型横比：结论同为 Qdrant 加 SQLite，关系不需要图数据库）
+- [Qdrant 清单](../../deploy/qdrant/qdrant.json)、[实例配置](../../deploy/qdrant/config.yaml)
