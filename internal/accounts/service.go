@@ -879,12 +879,12 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 		return errors.New("credential provisioner is unavailable")
 	}
 	if status == UserStatusDisabled {
-		// Disabling again only retries the SMB credential.
+		// Disabling again only retries host access and assistant shutdown.
 		return s.disableHostCredential(ctx, username)
 	}
 	// Web access ends first and for good: a Host Agent failure must not leave
 	// the account signed in. The status is also what identity
-	// synchronization converges the SMB credential to.
+	// synchronization uses to retry SMB and assistant shutdown.
 	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

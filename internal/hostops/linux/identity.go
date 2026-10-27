@@ -37,7 +37,7 @@ var fixedGroups = []struct {
 
 // SyncIdentities converges host accounts and group membership without
 // touching passwords. Disabled identities keep their account so files stay
-// attributed, but their SMB credential is disabled.
+// attributed, but their SMB access and assistant units are disabled.
 func (e *Executor) SyncIdentities(ctx context.Context, identities []accounts.Identity) error {
 	if e.identityError != nil {
 		return e.identityError
