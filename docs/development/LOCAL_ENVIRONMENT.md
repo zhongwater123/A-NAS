@@ -312,7 +312,7 @@ Web 测试用 [`test/api.ts`](../../web/src/test/api.ts) 的 `stubAPI` 替换 `f
 | 目标 | 检查 |
 |---|---|
 | `make api-check` | 由接口契约重新生成打包文档、Web 类型与响应校验，与已提交的不一致即失败，见[接口契约](#接口契约) |
-| `make web-lint` | `web/` 中的 `npm run lint`：Oxlint 与 eslint-plugin-react-hooks（含 React Compiler 的规则），再由 Biome 检查格式与导入顺序；规则列在 `web/.oxlintrc.json`，所有文件都须通过 |
+| `make web-lint` | `web/` 中的 `npm run lint`：Oxlint（含 jsx-a11y）与 eslint-plugin-react-hooks（含 React Compiler 的规则），再由 Biome 检查格式与导入顺序；规则列在 `web/.oxlintrc.json`，所有文件都须通过 |
 | `make go-lint` | golangci-lint，版本由 `tools/golangci-lint/go.mod` 固定，首次运行经 `go tool` 从 `proxy.golang.org` 构建；规则与理由见 `.golangci.yml` |
 | `make ai-lint` | Ruff 检查 `ai/`；`ai/requirements-dev.lock` 按哈希固定版本，`PATH` 上的 `ruff` 版本不同即失败。Ruff 在 WSL 中不检查可执行位（EXE001/EXE002），这两条只在 CI 报出：Python 文件在 Git 中是 0644，不写 shebang |
 | `make ops-check` | 对每个受 Git 跟踪的 `*.sh` 运行 ShellCheck（`.shellcheckrc`）与 `bash -n`，由 `tools/depcheck` 确认 Dependabot 不把 0.x 的 Web 包放进分组，再核对单元与安装器的约定；ShellCheck 的版本由 Makefile 的 `SHELLCHECK_VERSION` 固定（不同版本判断不同），CI 按哈希安装同一版本 |

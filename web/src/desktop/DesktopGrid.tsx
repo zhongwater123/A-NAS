@@ -1,7 +1,7 @@
 import {
   KeyboardEvent,
-  PointerEvent as ReactPointerEvent,
   ReactNode,
+  PointerEvent as ReactPointerEvent,
   useCallback,
   useLayoutEffect,
   useRef,
@@ -227,6 +227,8 @@ export function DesktopGrid({ apps }: { apps: DesktopApp[] }) {
           const app = appsByID.get(id);
           if (!app) return null;
           return (
+            // The slot takes the arrow keys and drags of the icon button inside it, to rearrange the icons.
+            // oxlint-disable-next-line jsx-a11y/no-static-element-interactions
             <div
               key={id}
               ref={(slot) => {

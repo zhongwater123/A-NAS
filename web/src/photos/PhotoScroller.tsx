@@ -1,12 +1,13 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-  PointerEvent as ReactPointerEvent,
   ReactNode,
+  PointerEvent as ReactPointerEvent,
   Ref,
   RefObject,
   useCallback,
   useEffect,
   useEffectEvent,
+  useId,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -14,9 +15,9 @@ import {
   useState,
 } from "react";
 
+import type { PhotoAsset } from "./api";
 import type { Box, Entry, PendingPhoto } from "./layout";
 import { fullMonthLabel } from "./model";
-import type { PhotoAsset } from "./api";
 
 export interface ScrollerHandle {
   // beginSwipe follows a press on a tile's check across other tiles.
@@ -108,6 +109,7 @@ export function PhotoScroller({
   handle,
   children,
 }: Props) {
+  const scrollId = useId();
   const virtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement: () => scrollRef.current,
@@ -419,6 +421,7 @@ export function PhotoScroller({
     <div className="ph-scroll-frame">
       <div
         ref={scrollRef}
+        id={scrollId}
         className={`ph-scroll${scrubber ? " with-scrubber" : ""}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -466,6 +469,7 @@ export function PhotoScroller({
       )}
       {scrubber && (
         <Scrubber
+          controls={scrollId}
           entries={entries}
           starts={index.starts}
           total={virtualizer.getTotalSize()}
@@ -482,6 +486,8 @@ export function PhotoScroller({
 }
 
 interface ScrubberProps {
+  // The id of the element it scrolls.
+  controls: string;
   entries: Entry[];
   starts: number[];
   total: number;
@@ -494,7 +500,16 @@ interface ScrubberProps {
 // Scrubber is the timeline's scrollbar: its thumb drags through the photos,
 // years and months are marked where they begin, and a bubble names the month
 // being pointed at, dragged to or scrolled through.
-function Scrubber({ entries, starts: positions, total, offset, viewport, topInset, onScroll }: ScrubberProps) {
+function Scrubber({
+  controls,
+  entries,
+  starts: positions,
+  total,
+  offset,
+  viewport,
+  topInset,
+  onScroll,
+}: ScrubberProps) {
   const rail = useRef<HTMLDivElement>(null);
   const grab = useRef<number>(undefined);
   const [pointer, setPointer] = useState<number>();
@@ -553,6 +568,7 @@ function Scrubber({ entries, starts: positions, total, offset, viewport, topInse
       className={`ph-scrubber${dragging ? " dragging" : ""}`}
       style={{ top: topInset + 8, height }}
       role="scrollbar"
+      aria-controls={controls}
       aria-label="时间轴"
       aria-orientation="vertical"
       aria-valuemin={0}

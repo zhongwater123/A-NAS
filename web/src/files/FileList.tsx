@@ -2,10 +2,10 @@ import { ChevronDown, Clock3, FolderClosed, FolderPlus, Pin, Search } from "luci
 import { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useRef, useState } from "react";
 
 import { formatBytes } from "../lib/bytes";
-import { FileOrder, FileSort, isPinned } from "./useFileOrder";
 import { FileArtwork } from "./FileIcon";
 import { FileBrowserItem, FileView, formatFileDate } from "./model";
 import { DragProps } from "./useDragReorder";
+import { FileOrder, FileSort, isPinned } from "./useFileOrder";
 
 type SelectionRect = { left: number; top: number; width: number; height: number };
 type Modifiers = Pick<ReactMouseEvent, "ctrlKey" | "metaKey" | "shiftKey">;
@@ -95,7 +95,6 @@ export function FileList({
     window.addEventListener("pointerup", stop, { once: true });
   };
   const itemProps = (item: FileBrowserItem) => ({
-    "aria-selected": selectedIDs.includes(item.id),
     "data-file-item": item.id,
     ...dragProps(item),
     onClick: (event: ReactMouseEvent) => onSelect(item, event),
@@ -130,6 +129,7 @@ export function FileList({
                 className={`file-list-row ${selectedIDs.includes(item.id) ? "selected" : ""}`}
                 role="row"
                 key={item.id}
+                aria-selected={selectedIDs.includes(item.id)}
                 {...itemProps(item)}
               >
                 <div className="file-name-cell" role="cell">
@@ -178,6 +178,7 @@ export function FileList({
                 className={`file-icon-card ${selectedIDs.includes(item.id) ? "selected" : ""}`}
                 role="option"
                 key={item.id}
+                aria-selected={selectedIDs.includes(item.id)}
                 {...itemProps(item)}
               >
                 <span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>
