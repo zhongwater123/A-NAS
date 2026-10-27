@@ -28,15 +28,16 @@ import (
 // its message limit, and its file system holds operations on hold-* and
 // stuck-* paths (holdingFS).
 func runTestWorker(volume string, options []string) error {
+	limit := wire.MaxMessage
 	for _, option := range options {
 		value, ok := strings.CutPrefix(option, "max-message=")
-		limit, err := strconv.Atoi(value)
+		parsed, err := strconv.Atoi(value)
 		if !ok || err != nil {
 			return fmt.Errorf("unknown worker option %q", option)
 		}
-		wire.MaxMessage = limit
+		limit = parsed
 	}
-	return runWorker(volume, holdingFS{filesystem.NewRootFileSystem(volume, false)})
+	return runWorker(volume, holdingFS{filesystem.NewRootFileSystem(volume, false)}, limit)
 }
 
 // holdingFS lets a test hold a worker's operation from another process. An
@@ -95,7 +96,7 @@ func TestTheWorkerSendsAScanInPages(t *testing.T) {
 	broker, worker := socketPair(t)
 	served := make(chan error, 1)
 	go func() {
-		served <- serveWorker(context.Background(), worker, filesystem.NewRootFileSystem(volume, false))
+		served <- serveWorker(context.Background(), worker, filesystem.NewRootFileSystem(volume, false), wire.MaxMessage)
 	}()
 
 	if err := wire.WriteMessage(broker, wire.Request{Op: wire.OpScan, Path: volume, Paged: true}, nil); err != nil {

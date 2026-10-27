@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
+	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
@@ -109,11 +110,12 @@ const workerDescriptor = 3
 // runs with the signed-in user's credentials, set by the broker before exec,
 // and refuses to run as root.
 func RunWorker(volumeRoot string) error {
-	return runWorker(volumeRoot, filesystem.NewRootFileSystem(volumeRoot, false))
+	return runWorker(volumeRoot, filesystem.NewRootFileSystem(volumeRoot, false), wire.MaxMessage)
 }
 
-// runWorker is RunWorker over fsys; test workers wrap the file system.
-func runWorker(volumeRoot string, fsys filesystem.FileSystem) error {
+// runWorker is RunWorker over fsys with messages of up to limit bytes; test
+// workers wrap the file system and lower the limit.
+func runWorker(volumeRoot string, fsys filesystem.FileSystem, limit int) error {
 	if os.Geteuid() == 0 || os.Getegid() == 0 {
 		return errors.New("refusing to run a file worker as root")
 	}
@@ -135,14 +137,14 @@ func runWorker(volumeRoot string, fsys filesystem.FileSystem) error {
 		return errors.New("file worker descriptor is not a Unix socket")
 	}
 	defer conn.Close()
-	return serveWorker(context.Background(), conn, fsys)
+	return serveWorker(context.Background(), conn, fsys, limit)
 }
 
 // serveWorker answers the broker's requests one at a time. The broker sends
 // the next request only after the last reply's final message, so the reader
 // alongside sees nothing but cancel messages while a request runs; a cancel
 // stops the request read before it, which may already be done.
-func serveWorker(ctx context.Context, conn *net.UnixConn, fsys filesystem.FileSystem) error {
+func serveWorker(ctx context.Context, conn *net.UnixConn, fsys filesystem.FileSystem, limit int) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	type job struct {
@@ -157,7 +159,7 @@ func serveWorker(ctx context.Context, conn *net.UnixConn, fsys filesystem.FileSy
 		cancel := context.CancelFunc(func() {})
 		for {
 			var req wire.Request
-			extra, err := wire.ReadMessage(conn, &req)
+			extra, err := unixmsg.Read(conn, &req, limit)
 			wire.CloseFile(extra)
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
@@ -182,7 +184,7 @@ func serveWorker(ctx context.Context, conn *net.UnixConn, fsys filesystem.FileSy
 		}
 	}()
 	for j := range jobs {
-		err := respond(j.ctx, conn, fsys, j.req)
+		err := respond(j.ctx, conn, fsys, j.req, limit)
 		j.cancel()
 		if err != nil {
 			if ctx.Err() != nil {
@@ -198,32 +200,32 @@ func serveWorker(ctx context.Context, conn *net.UnixConn, fsys filesystem.FileSy
 // respond runs one request and sends its reply. Only a broken connection is
 // an error: a reply that cannot be encoded within the limit becomes an error
 // reply, so the worker stays up for the next request.
-func respond(ctx context.Context, conn *net.UnixConn, fsys filesystem.FileSystem, req wire.Request) error {
+func respond(ctx context.Context, conn *net.UnixConn, fsys filesystem.FileSystem, req wire.Request, limit int) error {
 	result, file := execute(ctx, fsys, req)
 	defer wire.CloseFile(file)
 	if req.Op == wire.OpScan && req.Paged && result.Error == nil {
-		return sendEntries(ctx, conn, result.Entries)
+		return sendEntries(ctx, conn, result.Entries, limit)
 	}
-	return sendReply(conn, result, file)
+	return sendReply(conn, result, file, limit)
 }
 
 // sendEntries sends a scan in pages of at most scanPage entries; a page over
 // the message limit, as very long paths can make one, is halved until it
 // fits. The broker relays each page as it comes instead of holding the whole
 // tree. A cancel between pages ends the reply with an error.
-func sendEntries(ctx context.Context, conn *net.UnixConn, entries []filesystem.ScanEntry) error {
+func sendEntries(ctx context.Context, conn *net.UnixConn, entries []filesystem.ScanEntry, limit int) error {
 	for {
 		if err := ctx.Err(); err != nil {
-			return sendReply(conn, wire.Response{Error: encodeError(err)}, nil)
+			return sendReply(conn, wire.Response{Error: encodeError(err)}, nil, limit)
 		}
 		page := entries[:min(len(entries), wire.ScanPage)]
-		body, err := wire.EncodeMessage(wire.Response{Entries: page, More: len(page) < len(entries)})
+		body, err := unixmsg.Encode(wire.Response{Entries: page, More: len(page) < len(entries)}, limit)
 		for errors.Is(err, wire.ErrTooLarge) && len(page) > 1 {
 			page = page[:len(page)/2]
-			body, err = wire.EncodeMessage(wire.Response{Entries: page, More: true})
+			body, err = unixmsg.Encode(wire.Response{Entries: page, More: true}, limit)
 		}
 		if err != nil {
-			return sendReply(conn, wire.Response{Error: encodeError(err)}, nil)
+			return sendReply(conn, wire.Response{Error: encodeError(err)}, nil, limit)
 		}
 		if err := wire.WriteEncoded(conn, body, nil); err != nil {
 			return err
@@ -237,11 +239,11 @@ func sendEntries(ctx context.Context, conn *net.UnixConn, entries []filesystem.S
 
 // sendReply sends one message, or an error in its place when the message
 // cannot be encoded within the limit.
-func sendReply(conn *net.UnixConn, result wire.Response, file *os.File) error {
-	body, err := wire.EncodeMessage(result)
+func sendReply(conn *net.UnixConn, result wire.Response, file *os.File, limit int) error {
+	body, err := unixmsg.Encode(result, limit)
 	if err != nil {
 		file = nil
-		if body, err = wire.EncodeMessage(wire.Response{Error: encodeError(err)}); err != nil {
+		if body, err = unixmsg.Encode(wire.Response{Error: encodeError(err)}, limit); err != nil {
 			return err
 		}
 	}

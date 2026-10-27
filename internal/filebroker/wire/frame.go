@@ -8,13 +8,12 @@ import (
 )
 
 // MaxMessage bounds one JSON message. A scan travels in pages far below it;
-// a reply that still does not fit is answered with an error instead. Test
-// workers lower it.
-var MaxMessage = 64 << 20
+// a reply that still does not fit is answered with an error instead.
+const MaxMessage = 64 << 20
 
 // ScanPage bounds the entries in one message of a scan, so neither the
 // broker nor a worker ever holds a whole large tree in one message.
-var ScanPage = 2048
+const ScanPage = 2048
 
 // ErrTooLarge reports a message over MaxMessage.
 var ErrTooLarge = unixmsg.ErrTooLarge

@@ -55,6 +55,17 @@ func (f *fixture) put(rel, content string) {
 	}
 }
 
+// edit writes rel as someone editing it later would: a minute ahead, so the
+// change shows whatever the file system's time resolution, without a sleep.
+func (f *fixture) edit(rel, content string) {
+	f.t.Helper()
+	f.put(rel, content)
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(filepath.Join(f.volume, rel), later, later); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
 func (f *fixture) get(rel string) string {
 	data, err := os.ReadFile(filepath.Join(f.volume, rel))
 	if err != nil {
@@ -170,8 +181,7 @@ func TestATargetChangedAfterTheCardIsNotOverwritten(t *testing.T) {
 	f := newFixture(t)
 	f.put("assistant/alice/files/待确认/计划.md", "助手的版本\n")
 	f.approve(editPlan)
-	time.Sleep(10 * time.Millisecond)
-	f.put("spaces/private/alice/计划.md", "成员自己改的\n")
+	f.edit("spaces/private/alice/计划.md", "成员自己改的\n")
 	result := f.exec.Apply(context.Background(), "alice", f.member, []byte(editPlan))
 	if !strings.Contains(result, "被改动过") || !strings.Contains(result, "什么都没有改变") {
 		t.Fatalf("apply = %s", result)
@@ -857,8 +867,7 @@ func TestACopyWhoseSourceChangedAfterTheCardIsNotMade(t *testing.T) {
 	f.put("spaces/shared/通知.md", "原文\n")
 	copyNote := `{"summary":"复制通知","operations":[{"op":"copy","path":"/nas/个人空间/通知.md","source":"/nas/共享空间/通知.md"}]}`
 	f.approve(copyNote)
-	time.Sleep(10 * time.Millisecond)
-	f.put("spaces/shared/通知.md", "别人改过了\n")
+	f.edit("spaces/shared/通知.md", "别人改过了\n")
 	if result := f.exec.Apply(context.Background(), "alice", f.member, []byte(copyNote)); !strings.Contains(result, "被改动过") {
 		t.Fatalf("apply = %s", result)
 	}

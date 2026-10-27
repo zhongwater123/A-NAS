@@ -47,8 +47,12 @@ type Client struct {
 	icons taskicon.Loader
 }
 
-func NewClient(socketPath string) *Client {
-	dialer := &net.Dialer{Timeout: requestTimeout}
+func NewClient(socketPath string) *Client { return NewClientWithTimeout(socketPath, requestTimeout) }
+
+// NewClientWithTimeout is NewClient with another limit for a request about
+// host state; operations and snapshot listings keep theirs.
+func NewClientWithTimeout(socketPath string, timeout time.Duration) *Client {
+	dialer := &net.Dialer{Timeout: timeout}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return dialer.DialContext(ctx, "unix", socketPath)
@@ -56,7 +60,7 @@ func NewClient(socketPath string) *Client {
 		DisableKeepAlives: true,
 	}
 	return &Client{
-		httpClient:      &http.Client{Transport: transport, Timeout: requestTimeout},
+		httpClient:      &http.Client{Transport: transport, Timeout: timeout},
 		operationClient: &http.Client{Transport: transport, Timeout: 15 * time.Minute},
 		listingClient:   &http.Client{Transport: transport, Timeout: time.Hour},
 	}

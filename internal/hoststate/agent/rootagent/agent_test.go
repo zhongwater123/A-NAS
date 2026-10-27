@@ -381,19 +381,22 @@ func TestClientHonorsCanceledContext(t *testing.T) {
 	}
 }
 
+// The client gives up on an agent that never answers. The agent here holds
+// every request until the test ends, and the client's limit is 50 ms instead
+// of 3 s, so the result does not depend on how loaded the machine is (#223).
 func TestClientTimesOutUnresponsiveAgent(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(5 * time.Second)
-		w.WriteHeader(http.StatusOK)
+	t.Parallel()
+	answer := make(chan struct{})
+	t.Cleanup(func() { close(answer) })
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-answer:
+		case <-r.Context().Done():
+		}
 	})
-	client := agent.NewClient(serve(t, handler))
-	started := time.Now()
-
+	client := agent.NewClientWithTimeout(serve(t, handler), 50*time.Millisecond)
 	if _, err := client.Read(context.Background()); err == nil {
 		t.Fatal("Read() error = nil, want timeout error")
-	}
-	if elapsed := time.Since(started); elapsed > 4*time.Second {
-		t.Fatalf("Read() timed out after %s, want no more than 4s", elapsed)
 	}
 }
 

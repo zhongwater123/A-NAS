@@ -12,6 +12,7 @@ import (
 )
 
 func TestRootFileSystemStaysBeneathItsBase(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	base := t.TempDir()
 	r := NewRootFileSystem(base, false)
@@ -48,6 +49,7 @@ func TestRootFileSystemStaysBeneathItsBase(t *testing.T) {
 }
 
 func TestRootFileSystemPassesTraverseOnlyDirectories(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	base := t.TempDir()
 	r := NewRootFileSystem(base, false)
@@ -88,6 +90,7 @@ func TestRootFileSystemPassesTraverseOnlyDirectories(t *testing.T) {
 }
 
 func TestRootFileSystemRenameAndCopyNeverReplace(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	base := t.TempDir()
 	r := NewRootFileSystem(base, false)
@@ -109,6 +112,7 @@ func TestRootFileSystemRenameAndCopyNeverReplace(t *testing.T) {
 
 // Copies get the modes of files created through the Web, so they inherit the
 // target's default ACL rather than having it masked by the original's modes.
+// Not parallel: it sets the process umask.
 func TestRootFileSystemCopiesAreCreatedLikeNewFiles(t *testing.T) {
 	// On the data volume a default ACL replaces the umask.
 	umask := unix.Umask(0)
