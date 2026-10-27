@@ -77,7 +77,8 @@ type NotificationKind string
 const (
 	NotificationAdminViewing        NotificationKind = "admin_viewing"
 	NotificationAdminLibraryViewing NotificationKind = "admin_library_viewing"
-	NotificationCredentialReset     NotificationKind = "credential_reset"
+	//nolint:gosec // G101: the name of a notification kind, not a credential.
+	NotificationCredentialReset NotificationKind = "credential_reset"
 )
 
 type Notification struct {

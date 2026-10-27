@@ -164,6 +164,7 @@ func validateDocumentation(root string) ([]string, int) {
 				continue
 			}
 			resolved := filepath.Clean(filepath.Join(filepath.Dir(filePath), filepath.FromSlash(target)))
+			//nolint:gosec // G703: a link in a tracked document, only checked for existence.
 			if _, statErr := os.Stat(resolved); statErr != nil {
 				problems = append(problems, fmt.Sprintf("%s links to missing %s", relativePath, target))
 			}

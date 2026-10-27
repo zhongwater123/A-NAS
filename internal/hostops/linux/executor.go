@@ -468,6 +468,7 @@ func validDevicePath(path string) bool {
 }
 
 func writeAtomic(path string, contents []byte, mode os.FileMode) error {
+	//nolint:gosec // G301: parents are system directories such as /etc/samba and /etc/systemd/system; mode protects the file.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

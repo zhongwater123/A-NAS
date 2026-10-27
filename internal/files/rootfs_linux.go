@@ -54,6 +54,7 @@ func (r *RootFileSystem) relative(name string) (string, error) {
 // remounted.
 func (r *RootFileSystem) openBase() (int, error) {
 	if r.createBase {
+		//nolint:gosec // G301: only development volumes create their base; production workers never do.
 		if err := os.MkdirAll(r.base, 0o770); err != nil {
 			return -1, err
 		}

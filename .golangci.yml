@@ -14,6 +14,7 @@ linters:
     - gosec
     - ineffassign
     - modernize
+    - nolintlint
     - staticcheck
     - unused
 
@@ -44,22 +45,24 @@ linters:
       # matches the domain error and never the cause. Comparisons, switches and
       # type assertions on errors are still checked.
       errorf: false
+    # Rules with few findings stay on, so that new code is checked: each
+    # finding they allow carries //nolint:gosec with its reason (#278). The
+    # rules below stay off as a whole because they flag what this product does
+    # by design, many times over; a sample of each found nothing real (#278).
     gosec:
       excludes:
-        - G101 # Hard-coded credentials: matches names such as NotificationCredentialReset.
         - G104 # Unhandled errors: errcheck's subject, with the exclusions above.
-        - G115 # Integer conversions: sizes, counts and IDs are checked where they come in.
-        - G118 # Not a security rule: some work outlives its request on purpose (volume conversion).
-        - G124 # Cookies without Secure: the LAN entry is plain HTTP (ADR 0012); HttpOnly and SameSite=Strict are set.
-        - G202 # SQL concatenation: queries join constant fragments and generated placeholders; values go through args.
-        - G204 # Subprocesses: the Host Agent runs system tools with argument lists by design, never through a shell.
-        - G301 # Directory permissions: chosen per path (shared spaces, ACL-managed trees).
-        - G302 # File permissions: as G301.
-        - G304 # Paths from variables: a NAS opens user paths by design; the file broker enforces access.
-        - G306 # WriteFile permissions: as G301.
-        - G703 # Path traversal by taint: as G304.
-        - G704 # SSRF by taint: requests go to fixed Unix sockets and loopback hosts.
-        - G705 # XSS by taint: handlers write JSON or files with an explicit Content-Type.
+        - G115 # Integer conversions (31 findings): sizes, counts and IDs are checked where they come in.
+        - G202 # SQL concatenation (20): queries join constant fragments and generated placeholders; values go through args.
+        - G204 # Subprocesses (8): the Host Agent runs system tools with argument lists by design, never through a shell.
+        - G302 # File permissions with chmod or OpenFile (8): chosen per path (shared spaces, ACL-managed trees).
+        - G304 # Paths from variables (22): a NAS opens user paths by design; the file broker enforces access.
+        - G704 # SSRF by taint (10): requests go to fixed Unix sockets and loopback hosts.
+        - G705 # XSS by taint (6): handlers write JSON or files with an explicit Content-Type.
+    # A //nolint names its linter and says why.
+    nolintlint:
+      require-explanation: true
+      require-specific: true
 
   exclusions:
     generated: strict
