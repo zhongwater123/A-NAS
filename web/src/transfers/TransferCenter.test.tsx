@@ -37,10 +37,10 @@ const tus = vi.hoisted(() => {
 });
 vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 
+import { json, stubAPI } from "../test/api";
+import type { Transfer } from "./api";
 import { transferStore, type UploadTarget } from "./store";
 import { TransferCenter } from "./TransferCenter";
-import type { Transfer } from "./api";
-import { json, stubAPI } from "../test/api";
 
 const target: UploadTarget = {
   spaceId: "space:shared",

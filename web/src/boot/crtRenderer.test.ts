@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createRenderer, type CrtParams } from "./crtRenderer";
+import { type CrtParams, createRenderer } from "./crtRenderer";
 
 afterEach(() => vi.restoreAllMocks());
 

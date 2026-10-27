@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { type CSSProperties, useLayoutEffect, useRef, useState } from "react";
 
 import type { WallpaperStyle } from "../api.generated";
 import { drawWallpaper, type WallpaperPicture } from "../desktop/wallpaper";

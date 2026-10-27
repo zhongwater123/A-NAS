@@ -46,9 +46,9 @@ vi.mock("../api/client", async (original) => ({
 }));
 
 import { APIError } from "../api/client";
-import { classifyUploadError, TransferStore, type UploadTarget } from "./store";
-import type { Transfer } from "./api";
 import { json, stubAPI } from "../test/api";
+import type { Transfer } from "./api";
+import { classifyUploadError, TransferStore, type UploadTarget } from "./store";
 
 const target: UploadTarget = {
   spaceId: "space:shared",

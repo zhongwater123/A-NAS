@@ -1,7 +1,7 @@
 import { Check, Clapperboard, Ellipsis, Film, Heart, ListPlus, PenLine, Play, Tv, Video } from "lucide-react";
 import {
-  createContext,
   CSSProperties,
+  createContext,
   KeyboardEvent,
   ReactNode,
   useContext,
@@ -12,9 +12,9 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { type ArtworkKind, artworkURL, type Title } from "./api";
 import { useFold } from "./Dropdown";
 import { heading, hue, progressShare, subheading, timecode, typeLabel } from "./format";
-import { artworkURL, type ArtworkKind, type Title } from "./api";
 
 export interface CardAction {
   label: string;

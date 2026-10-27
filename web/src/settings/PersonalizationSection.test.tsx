@@ -2,10 +2,10 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Wallpaper } from "../api.generated";
 import { setSession } from "../api/client";
-import { PersonalizationSection } from "./PersonalizationSection";
+import type { Wallpaper } from "../api.generated";
 import { stubAPI } from "../test/api";
+import { PersonalizationSection } from "./PersonalizationSection";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });

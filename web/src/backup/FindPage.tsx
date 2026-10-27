@@ -3,16 +3,16 @@ import { ReactNode, useEffect, useMemo, useState } from "react";
 
 import type { Space } from "../api.generated";
 import { formatBytes } from "../lib/bytes";
-import { useBackup } from "./BackupCenter";
 import {
   listRemovedEntries,
   messageOf,
-  searchSnapshots,
-  snapshotDownloadURL,
   type RemovedEntry,
   type SnapshotMatch,
   type SnapshotVersion,
+  searchSnapshots,
+  snapshotDownloadURL,
 } from "./api";
+import { useBackup } from "./BackupCenter";
 import { formatCount, formatDateTime, formatDay, spaceLabel } from "./format";
 import { EmptyState, EntryIcon, Notice, Spinner } from "./parts";
 import { snapshotTitle } from "./SnapshotsPage";

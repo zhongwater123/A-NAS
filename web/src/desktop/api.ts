@@ -1,5 +1,5 @@
-import type { HostStateResponse, LocalDisplay, MetricsResponse, Notification, WallpaperStyle } from "../api.generated";
 import { call, client, rawBody } from "../api/client";
+import type { HostStateResponse, LocalDisplay, MetricsResponse, Notification, WallpaperStyle } from "../api.generated";
 
 export type HostState = HostStateResponse;
 export type HostMetrics = MetricsResponse;

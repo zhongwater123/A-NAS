@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BOOT_TIMELINE, TAGLINE, crtParams, startBootIdent, taglineGlyphs } from "./bootIdent";
+import { BOOT_TIMELINE, crtParams, startBootIdent, TAGLINE, taglineGlyphs } from "./bootIdent";
 
 afterEach(() => vi.restoreAllMocks());
 

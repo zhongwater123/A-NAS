@@ -1,8 +1,8 @@
 import { Disc3, ListMusic, Mic2, Music2 } from "lucide-react";
 import { createContext, useContext, useState } from "react";
 
-import { hue, type LibraryIndex } from "./library";
 import { coverURL, type Playlist } from "./api";
+import { hue, type LibraryIndex } from "./library";
 import type { Player } from "./player";
 
 // Place is what the main area shows; detail places sit on a back stack.

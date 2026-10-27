@@ -2,9 +2,9 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  LocalConsoleScreenSaver,
   defaultSleepAfterMinutes,
   isLocalConsole,
+  LocalConsoleScreenSaver,
   loadScreenSaverVideos,
   localConsoleScreenSaverIdleMs,
   selectScreenSaverVideo,

@@ -13,12 +13,12 @@ import {
   Trash2,
 } from "lucide-react";
 import { KeyboardEvent, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-import { TransformComponent, TransformWrapper, type ReactZoomPanPinchContentRef } from "react-zoom-pan-pinch";
+import { type ReactZoomPanPinchContentRef, TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 
+import { displayURL, getPhoto, motionURL, type PhotoAsset, previewURL, thumbnailURL } from "./api";
 import { type Caller, canChange, dayLabel, momentOf, reducedMotion } from "./model";
-import { PhotoDetails, type DetailsActions } from "./PhotoDetails";
-import { getPhoto, displayURL, motionURL, previewURL, thumbnailURL, type PhotoAsset } from "./api";
-import { VideoPlayer, type VideoControls } from "./VideoPlayer";
+import { type DetailsActions, PhotoDetails } from "./PhotoDetails";
+import { type VideoControls, VideoPlayer } from "./VideoPlayer";
 
 export interface ViewerActions extends DetailsActions {
   trash: (asset: PhotoAsset) => void;

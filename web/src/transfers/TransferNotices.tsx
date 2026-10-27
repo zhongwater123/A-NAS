@@ -18,9 +18,9 @@ import { useEffect, useMemo, useState } from "react";
 import { formatRate } from "../lib/bytes";
 import {
   holdText,
+  type ItemStatus,
   isActive,
   isCurrent,
-  type ItemStatus,
   locationParts,
   statusText,
   transferItems,

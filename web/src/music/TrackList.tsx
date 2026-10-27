@@ -13,9 +13,9 @@ import {
   useState,
 } from "react";
 
-import { Cover, carriesTracks, dragType, Equalizer, readDrag, useMusic } from "./context";
-import { artistLine, artistKey, artistsOf, formatDuration, lossless, qualityOf, unknownAlbum } from "./library";
 import type { Track } from "./api";
+import { Cover, carriesTracks, dragType, Equalizer, readDrag, useMusic } from "./context";
+import { artistKey, artistLine, artistsOf, formatDuration, lossless, qualityOf, unknownAlbum } from "./library";
 
 export interface TrackListProps {
   tracks: Track[];

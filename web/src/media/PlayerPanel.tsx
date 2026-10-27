@@ -1,20 +1,20 @@
 import { AudioLines, ChevronsUpDown, LibraryBig, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { messageOf } from "./Browse";
-import { Artwork } from "./Cards";
-import { ChoiceList, type Choice } from "./Dropdown";
-import { episodeCode, progressShare, runtime } from "./format";
 import {
+  type Category,
   getShow,
   listLibraries,
   listTitles,
-  type Category,
   type MediaLibrary,
   type ShowDetail,
   type Title,
   type VideoDetail,
 } from "./api";
+import { messageOf } from "./Browse";
+import { Artwork } from "./Cards";
+import { type Choice, ChoiceList } from "./Dropdown";
+import { episodeCode, progressShare, runtime } from "./format";
 
 export type PanelTab = "episodes" | "library";
 

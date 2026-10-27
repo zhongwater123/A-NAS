@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { APIError } from "./client";
-import { errorCodeText, errorText, type ErrorDomain } from "./errorMessages";
+
+import { describeError as appError } from "../appcenter/model";
 import { messageOf as fileError } from "../files/model";
 import { messageOf as photoError } from "../photos/model";
 import { errorText as shareError } from "../shares/format";
-import { describeError as appError } from "../appcenter/model";
+import { APIError } from "./client";
+import { type ErrorDomain, errorCodeText, errorText } from "./errorMessages";
 
 describe("product error copy", () => {
   it("uses the same volume/network messages in every domain", () => {

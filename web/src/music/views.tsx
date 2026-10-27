@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { MouseEvent, ReactNode, useMemo, useRef } from "react";
 
+import { coverURL, type MusicSources, type Playlist, type Play as PlayRecord, type Track } from "./api";
 import { Cover, Mosaic, useMusic } from "./context";
 import {
   type Album,
@@ -34,7 +35,6 @@ import {
   sourceFolder,
   summary,
 } from "./library";
-import { coverURL, type MusicSources, type Play as PlayRecord, type Playlist, type Track } from "./api";
 import { TrackList, type TrackListProps } from "./TrackList";
 
 const spaceName = (kind: string) => (kind === "shared" ? "共享空间" : "个人空间");

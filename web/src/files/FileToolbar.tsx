@@ -24,8 +24,8 @@ import {
 } from "lucide-react";
 
 import type { Space } from "../api.generated";
-import { FileOrder, FileSort } from "./useFileOrder";
 import { FileFolder, FileView, fileSortLabel, SelectionCommands } from "./model";
+import { FileOrder, FileSort } from "./useFileOrder";
 
 // FileCommands are what the toolbar and the context menu do with the selection.
 export interface FileCommands {

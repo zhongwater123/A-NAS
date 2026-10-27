@@ -1,5 +1,7 @@
+import { Share2, X } from "lucide-react";
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
@@ -7,9 +9,8 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
-import { Share2, X } from "lucide-react";
+
 import type { FileEntry } from "../api.generated";
 import { usePeople } from "../people/people";
 import { getShare, listMessages, listShareNotifications, listShares, type Share, type ShareNotification } from "./api";

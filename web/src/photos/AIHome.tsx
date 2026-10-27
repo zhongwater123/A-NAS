@@ -1,19 +1,19 @@
 import { ChevronDown, ChevronUp, Hash, History, Search, ShieldCheck, X } from "lucide-react";
 import { FormEvent, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { type ImageDropProps, ImageSearchButton } from "./imageSearch";
-import { categoryNames, messageOf } from "./model";
-import { PeopleRow, personGap, personWidth } from "./People";
 import {
   listPeople,
   listPhotoLabels,
   listTagGroups,
-  thumbnailURL,
   type PhotoAIStatus,
   type PhotoLabelCount,
   type PhotoPerson,
   type PhotoTagCount,
+  thumbnailURL,
 } from "./api";
+import { type ImageDropProps, ImageSearchButton } from "./imageSearch";
+import { categoryNames, messageOf } from "./model";
+import { PeopleRow, personGap, personWidth } from "./People";
 
 // AIHomeSnapshot is how AI 聚合 looked when one of its groups opened, so that
 // going back lands on the same spot instead of the top.

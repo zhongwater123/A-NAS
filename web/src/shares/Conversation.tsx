@@ -1,7 +1,8 @@
-import { Fragment, useEffect, useRef, useState } from "react";
 import { ArrowDown, LockKeyhole, Send, X } from "lucide-react";
+import { Fragment, useEffect, useRef, useState } from "react";
+
 import { usePeople } from "../people/people";
-import { listMessages, markRead, requestKey, sendMessage, type Message, type Share } from "./api";
+import { listMessages, type Message, markRead, requestKey, type Share, sendMessage } from "./api";
 import { EmojiInput } from "./EmojiInput";
 import { clock, dayLabel, errorText, isActive, receipt } from "./format";
 import { Avatar, nameOf } from "./parts";

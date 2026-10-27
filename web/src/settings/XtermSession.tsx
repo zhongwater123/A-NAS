@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useEffectEvent, useRef } from "react";
 
-import { SessionStatus, exitCodeFromReason, resizeMessage, terminalSessionURL } from "./terminal";
+import { exitCodeFromReason, resizeMessage, SessionStatus, terminalSessionURL } from "./terminal";
 
 const theme = {
   background: "#0d1117",

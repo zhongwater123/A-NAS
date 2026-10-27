@@ -1,10 +1,10 @@
 import { ChevronsDown } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
-import { gridInset, type GridProps, usePendingThumbnails, useTileRenderer } from "./grid";
-import { type Entry, flatEntries, type Split } from "./layout";
-import { errorText, type ErrorDomain } from "../api/errorMessages";
+import { type ErrorDomain, errorText } from "../api/errorMessages";
 import type { PhotoAsset, PhotoPage } from "./api";
+import { type GridProps, gridInset, usePendingThumbnails, useTileRenderer } from "./grid";
+import { type Entry, flatEntries, type Split } from "./layout";
 import { PhotoScroller, useContentWidth } from "./PhotoScroller";
 
 interface Props extends GridProps {

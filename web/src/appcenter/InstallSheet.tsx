@@ -1,4 +1,3 @@
-import { APIError } from "../api/client";
 import {
   ArrowUpRight,
   Boxes,
@@ -17,8 +16,8 @@ import {
 } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useEffectEvent, useState } from "react";
 
+import { APIError } from "../api/client";
 import { AppJob, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "./api";
-import { AppIcon, JobOutput, Layer, Logins, Progress, RichText } from "./parts";
 import {
   appURL,
   describeError,
@@ -31,6 +30,7 @@ import {
   serviceText,
   useElapsed,
 } from "./model";
+import { AppIcon, JobOutput, Layer, Logins, Progress, RichText } from "./parts";
 
 interface SheetProps {
   app: CatalogApp;

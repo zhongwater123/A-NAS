@@ -1,10 +1,10 @@
-import { errorText } from "../api/errorMessages";
 import { FormEvent, useId, useState } from "react";
 
+import { errorText } from "../api/errorMessages";
 import type { Session } from "../api.generated";
-import { login, setupAdministrator } from "./api";
-import { passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
 import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
+import { passwordProblem, passwordRuleText, usernameProblem, usernameRuleText } from "./accountRules";
+import { login, setupAdministrator } from "./api";
 
 export type AuthMode = "loading" | "setup" | "setup-elsewhere" | "login";
 

@@ -3,9 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FileEntry, Space } from "../api.generated";
+import { stubAPI } from "../test/api";
 import type { SnapshotMatch } from "./api";
 import { VersionsDialog } from "./VersionsDialog";
-import { stubAPI } from "../test/api";
 
 const personal: Space = {
   id: "space:personal",

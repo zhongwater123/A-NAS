@@ -1,8 +1,8 @@
 import { act, fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { BootIdentHooks } from "./bootIdent";
 import { BootSplash, bootIdentStorageKey, shouldPlayBootIdent } from "./BootSplash";
+import type { BootIdentHooks } from "./bootIdent";
 
 const ident = vi.hoisted(() => ({
   hooks: undefined as BootIdentHooks | undefined,

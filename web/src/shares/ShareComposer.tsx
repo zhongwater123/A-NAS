@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
 import { Check, Clock3, LoaderCircle, Search, Send, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
 import type { FileEntry, Profile } from "../api.generated";
 import { formatBytes } from "../lib/bytes";
 import { PersonAvatar } from "../people/PersonAvatar";

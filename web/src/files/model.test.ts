@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import type { FileEntry, Volume } from "../api.generated";
-import { FileOrder } from "./useFileOrder";
 import {
   browserItem,
   duplicateFileName,
   FileBrowserItem,
   personalFileResources,
-  selectionCommands,
   SelectionState,
+  selectionCommands,
   sortedBy,
   spaceLabel,
   volumeUsage,
   withPins,
 } from "./model";
+import { FileOrder } from "./useFileOrder";
 
 const order: FileOrder = { sortBy: "name", direction: "ascending", pinned: [], manual: [] };
 const entry = (id: string, kind: FileEntry["kind"] = "file", parentId?: string): FileEntry => ({

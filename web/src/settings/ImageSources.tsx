@@ -6,22 +6,22 @@ import {
   ImagePlus,
   Images,
   Laptop,
-  UsersRound,
   type LucideIcon,
+  UsersRound,
 } from "lucide-react";
 import { DragEvent, ReactNode, useEffect, useRef, useState } from "react";
 
 import type { FileEntry, Space } from "../api.generated";
 import { listEntries, listSpaces } from "../files/api";
-import { isPreviewableImage } from "../lib/fileTypes";
 import { fileVisualURL } from "../files/preview";
+import { isPreviewableImage } from "../lib/fileTypes";
 import {
   displayURL,
   listPhotoLibraries,
   listTimeline,
-  previewURL,
   type PhotoAsset,
   type PhotoLibrary,
+  previewURL,
 } from "../photos/api";
 import { Banner, messageOf } from "./parts";
 import "./avatar.css";

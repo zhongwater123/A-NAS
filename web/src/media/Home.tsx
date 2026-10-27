@@ -1,9 +1,9 @@
 import { ChevronLeft, ChevronRight, Clapperboard, CloudUpload, FolderPlus, Info, Play, Sparkles } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
+import type { Home as HomeData, Title } from "./api";
 import { Artwork, PosterCard, StillCard, useMediaActions } from "./Cards";
 import { episodeCode, heading, remaining, runtime, typeLabel } from "./format";
-import type { Home as HomeData, Title } from "./api";
 
 // Shelf is a row that scrolls sideways with arrow buttons.
 export function Shelf({

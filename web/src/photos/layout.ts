@@ -1,7 +1,7 @@
 import justifiedLayout from "justified-layout";
 
-import { dayKey, dayLabel, fullMonthLabel, momentOf } from "./model";
 import type { PhotoAsset, PhotoMonth } from "./api";
+import { dayKey, dayLabel, fullMonthLabel, momentOf } from "./model";
 
 // Grid sizes are target row heights; the grid keeps every photo's aspect
 // ratio, so rows come out a little taller or shorter.

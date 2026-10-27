@@ -11,8 +11,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import { dayLabel, momentOf, reducedMotion } from "./model";
 import { displayURL, type PhotoAsset } from "./api";
+import { dayLabel, momentOf, reducedMotion } from "./model";
 
 // How long each photo stays once shown, and how long two photos cross-fade.
 const slideDelay = 4000;

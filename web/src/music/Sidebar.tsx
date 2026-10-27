@@ -1,9 +1,8 @@
-import { errorCodeText } from "../api/errorMessages";
 import {
   Clock3,
   Disc3,
-  FolderOpen,
   FolderCog,
+  FolderOpen,
   Heart,
   Library,
   Loader2,
@@ -16,8 +15,9 @@ import {
 } from "lucide-react";
 import { DragEvent, ReactNode, RefObject, useState } from "react";
 
-import { carriesTracks, Mosaic, type Place, readDrag, useMusic } from "./context";
+import { errorCodeText } from "../api/errorMessages";
 import type { MusicStatus } from "./api";
+import { carriesTracks, Mosaic, type Place, readDrag, useMusic } from "./context";
 import { playlistCovers } from "./views";
 
 interface Props {

@@ -4,10 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
 import { forgetPeople, rememberPerson } from "../people/people";
-import { FeedbackChannel } from "./FeedbackChannel";
-import type { FeedbackComment, FeedbackItem } from "./api";
-import { describeTime } from "./time";
 import { json, stubAPI } from "../test/api";
+import type { FeedbackComment, FeedbackItem } from "./api";
+import { FeedbackChannel } from "./FeedbackChannel";
+import { describeTime } from "./time";
 
 const capture = vi.hoisted(() => ({ result: undefined as Blob | undefined }));
 vi.mock("./capture", async (original) => ({

@@ -27,15 +27,15 @@ import {
 
 import { browserCapabilities } from "../media/api";
 import { canFeed, StreamFeed } from "../media/streamFeed";
-import { clock, messageOf } from "./model";
 import {
   displayURL,
   getVideoPlayback,
-  videoOriginalURL,
-  videoStreamURL,
   type PhotoAsset,
   type VideoPlayback,
+  videoOriginalURL,
+  videoStreamURL,
 } from "./api";
+import { clock, messageOf } from "./model";
 
 // What the viewer's keys do to the video it shows.
 export interface VideoControls {

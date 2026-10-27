@@ -1,5 +1,5 @@
-import { formatClock, calendarDays, relativeUnit, calendarDate, calendarLabel, calendarMoment } from "../lib/time";
 import { errorText as requestErrorText } from "../api/errorMessages";
+import { calendarDate, calendarDays, calendarLabel, calendarMoment, formatClock, relativeUnit } from "../lib/time";
 import type { Job, Recipient, Share, ShareEntry } from "./api";
 
 // Paths inside a share are relative to the share, "资料/计划.txt".

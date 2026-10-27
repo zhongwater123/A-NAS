@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "../App";
 import type { Disk, StoragePlan, User } from "../api.generated";
-import type { SessionStatus } from "./terminal";
 import { healthyState, installAPI, openSettingsSection, resetDesktop, session, stubFetch } from "../test/desktop";
+import type { SessionStatus } from "./terminal";
 
 const xterm = vi.hoisted(() => ({ mounts: 0, onStatus: undefined as ((status: SessionStatus) => void) | undefined }));
 

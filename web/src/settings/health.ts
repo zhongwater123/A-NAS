@@ -1,4 +1,4 @@
-import { Database, FolderLock, HardDrive, Lock, ShieldAlert, Thermometer, Unplug, type LucideIcon } from "lucide-react";
+import { Database, FolderLock, HardDrive, Lock, type LucideIcon, ShieldAlert, Thermometer, Unplug } from "lucide-react";
 
 import type { HealthFinding } from "../api.generated";
 import type { HostState } from "../desktop/api";

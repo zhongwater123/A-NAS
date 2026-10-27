@@ -2,20 +2,21 @@ import {
   Activity,
   ArrowDown,
   ArrowUp,
+  CircuitBoard,
   Cpu,
   HardDrive,
+  Layers,
   MemoryStick,
   Network as NetworkIcon,
   Search,
-  Layers,
-  CircuitBoard,
 } from "lucide-react";
-import { useId, useState, type CSSProperties, type ReactNode } from "react";
+import { type CSSProperties, type ReactNode, useId, useState } from "react";
+
 import { formatBytes, formatRate } from "../lib/bytes";
 import { Banner } from "../settings/parts";
-import { readDevice, readTasks, type Availability, type DeviceSnapshot, type Group, type Task } from "./api";
-import { useSnapshot, type SnapshotView } from "./useSnapshot";
+import { type Availability, type DeviceSnapshot, type Group, readDevice, readTasks, type Task } from "./api";
 import { TaskIcon } from "./TaskIcon";
+import { type SnapshotView, useSnapshot } from "./useSnapshot";
 import "./taskmanager.css";
 
 const deviceTabs = ["总览", "CPU", "GPU", "NPU", "内存", "网络", "硬盘"] as const;

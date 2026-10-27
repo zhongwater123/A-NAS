@@ -1,5 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Search, Smile, X } from "lucide-react";
+import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+
 import { allEmoji, emojiGroups } from "./emoji";
 
 const recentKey = "anas:shares:recent-emoji";

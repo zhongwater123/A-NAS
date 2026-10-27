@@ -1,7 +1,7 @@
 import { UsersRound } from "lucide-react";
 
-import { type Caller, libraryName, libraryOf, ownLibrary, sharedLibrary } from "./model";
 import type { PhotoAsset, PhotoLibrary } from "./api";
+import { type Caller, libraryName, libraryOf, ownLibrary, sharedLibrary } from "./model";
 
 // A search covers the caller's library, the shared one and a member library
 // viewed read-only; it can be narrowed to one of them. An empty choice

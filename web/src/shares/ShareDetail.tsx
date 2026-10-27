@@ -1,5 +1,3 @@
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   Check,
@@ -14,10 +12,13 @@ import {
   Undo2,
   X,
 } from "lucide-react";
+import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+
 import { formatBytes } from "../lib/bytes";
 import { usePeople } from "../people/people";
-import { getShare, listJobs, revokeShare, viewShare, type Job, type Share, type ShareEntry } from "./api";
-import { Conversation, useThread, type Thread } from "./Conversation";
+import { getShare, type Job, listJobs, revokeShare, type Share, type ShareEntry, viewShare } from "./api";
+import { Conversation, type Thread, useThread } from "./Conversation";
 import {
   errorText,
   fileBytes,
@@ -25,6 +26,7 @@ import {
   jobLabel,
   leaf,
   moment,
+  type Phase,
   parentPath,
   phaseLabel,
   phaseOf,
@@ -34,13 +36,12 @@ import {
   shareTitle,
   topLevel,
   when,
-  type Phase,
 } from "./format";
 import { Avatar, EntryTile, kindOf, nameOf, names } from "./parts";
 import { SaveDialog } from "./SaveDialog";
 import { SharePreview } from "./SharePreview";
-import { useShares } from "./SharesProvider";
 import type { Layout } from "./SharesPanel";
+import { useShares } from "./SharesProvider";
 
 const byName = (a: ShareEntry, b: ShareEntry) =>
   Number(b.isDir) - Number(a.isDir) || leaf(a.path).localeCompare(leaf(b.path), "zh-CN");

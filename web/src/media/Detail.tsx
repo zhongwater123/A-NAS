@@ -2,20 +2,20 @@ import { Check, FileVideo, Heart, Languages, ListPlus, Play, RotateCcw, Star, Su
 import { MouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { formatBytes } from "../lib/bytes";
-import { Empty, Loading, messageOf } from "./Browse";
-import { Artwork, useMediaActions, type MediaActions } from "./Cards";
-import { EditableName, splitName } from "./EditableName";
-import { episodeCode, episodeName, progressShare, remaining, runtime, timecode } from "./format";
 import {
+  type Episode,
   getShow,
   getVideo,
   renameShow,
   renameVideoFile,
-  type Episode,
   type ShowDetail,
   type Title,
   type VideoDetail,
 } from "./api";
+import { Empty, Loading, messageOf } from "./Browse";
+import { Artwork, type MediaActions, useMediaActions } from "./Cards";
+import { EditableName, splitName } from "./EditableName";
+import { episodeCode, episodeName, progressShare, remaining, runtime, timecode } from "./format";
 
 const nfoNote = "片名来自 NFO 文件，改名不会改变显示的片名";
 

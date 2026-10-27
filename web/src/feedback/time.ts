@@ -1,4 +1,4 @@
-import { calendarDays, calendarDate, calendarMoment, formatDate, relativeTime } from "../lib/time";
+import { calendarDate, calendarDays, calendarMoment, formatDate, relativeTime } from "../lib/time";
 
 export function describeTime(iso: string, now = new Date()): string {
   const elapsed = Math.abs(now.getTime() - new Date(iso).getTime());

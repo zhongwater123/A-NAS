@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { accountErrorText, nicknameProblem, passwordProblem, usernameProblem } from "./accountRules";
 import { APIError } from "../api/client";
+import { accountErrorText, nicknameProblem, passwordProblem, usernameProblem } from "./accountRules";
 
 describe("account rules", () => {
   it("take the names the NAS takes", () => {

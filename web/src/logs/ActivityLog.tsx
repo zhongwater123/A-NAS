@@ -6,50 +6,50 @@ import {
   HardDrive,
   Images,
   LogIn,
+  type LucideIcon,
   RefreshCw,
   ScrollText,
   ShieldAlert,
   UserCog,
-  type LucideIcon,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Session, User } from "../api.generated";
-import { listUsers } from "../settings/api";
 import { displayName, fullName } from "../people/people";
+import { listUsers } from "../settings/api";
 import { Banner, messageOf } from "../settings/parts";
 import {
-  SearchField,
-  Select,
+  type ActivityCategory,
+  type ActivityEvent,
+  type ActivityFilters,
+  listActivity,
+  type TimeRange,
+  timeRanges,
+} from "./api";
+import {
   downloadText,
   exportLimit,
   fileStamp,
+  SearchField,
+  Select,
   toCSV,
   useDebounced,
   useRemembered,
 } from "./common";
 import {
   type ActivityGroup,
-  type Described,
-  type Part,
   categoryInfo,
   clockTime,
+  type Described,
   dayLabel,
   describeActivity,
   describeGroup,
   fullTime,
   groupActivity,
   originLabel,
+  type Part,
   plainText,
 } from "./describe";
-import {
-  type ActivityCategory,
-  type ActivityEvent,
-  type ActivityFilters,
-  type TimeRange,
-  listActivity,
-  timeRanges,
-} from "./api";
 
 export interface LogsPreset {
   category: ActivityCategory;

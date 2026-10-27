@@ -3,10 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
+import { json, stubAPI } from "../test/api";
 import type { Playlist, Track } from "./api";
 import { MusicPanel } from "./MusicPanel";
 import { track } from "./testTracks";
-import { json, stubAPI } from "../test/api";
 
 const library: Track[] = [
   track("file:a1", {

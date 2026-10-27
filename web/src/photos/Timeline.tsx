@@ -1,10 +1,10 @@
 import { RotateCcw } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { DayHeader, gridInset, type GridProps, scrubberInset, usePendingThumbnails, useTileRenderer } from "./grid";
+import { listTimelineMonth, listTimelineMonths, type PhotoAsset, type PhotoMonth } from "./api";
+import { DayHeader, type GridProps, gridInset, scrubberInset, usePendingThumbnails, useTileRenderer } from "./grid";
 import { type Entry, type MonthState, type PendingPhoto, timelineEntries } from "./layout";
 import { countLabel, messageOf } from "./model";
-import { listTimelineMonth, listTimelineMonths, type PhotoAsset, type PhotoMonth } from "./api";
 import { PhotoScroller, useContentWidth } from "./PhotoScroller";
 import { PendingTile } from "./Tile";
 

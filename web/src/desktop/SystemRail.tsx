@@ -1,11 +1,11 @@
-import { calendarDate, formatClock } from "../lib/time";
 import { Clock3, Grid2X2, Home, LogOut, Monitor, Search, Settings, Share2, UserRound } from "lucide-react";
 import { KeyboardEvent, ReactNode, RefObject, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 import type { Session, User } from "../api.generated";
-import type { DesktopApp } from "./DesktopGrid";
-import { displayName } from "../people/people";
+import { calendarDate, formatClock } from "../lib/time";
 import { PersonAvatar } from "../people/PersonAvatar";
+import { displayName } from "../people/people";
+import type { DesktopApp } from "./DesktopGrid";
 import { useDesktopOrder } from "./useDesktopOrder";
 
 // "windows": some app window is visible; "revealed": the rail hid them and can

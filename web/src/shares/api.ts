@@ -9,6 +9,7 @@ export type {
   MemberShareNotification as ShareNotification,
   MemberShareRecipient as Recipient,
 } from "../api.generated";
+
 type Direction = NonNullable<NonNullable<operations["listMemberShares"]["parameters"]["query"]>["direction"]>;
 
 const share = (shareId: string) => ({ params: { path: { shareId } } });

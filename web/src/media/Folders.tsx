@@ -1,8 +1,8 @@
 import { ChevronRight, Folder as FolderIcon, FolderOpen, FolderX, HardDrive } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { artworkURL, type FolderListing, type FolderRoot, getFolder, listFolderRoots } from "./api";
 import { Empty, Loading, messageOf, PageHeader, TitleGrid } from "./Browse";
-import { artworkURL, getFolder, listFolderRoots, type FolderListing, type FolderRoot } from "./api";
 
 export interface FolderPlace {
   entryId: string;

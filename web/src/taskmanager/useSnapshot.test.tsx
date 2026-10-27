@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+
 import { useSnapshot } from "./useSnapshot";
 
 afterEach(() => {

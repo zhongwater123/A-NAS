@@ -11,11 +11,11 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 
-import { groupPhotoUploads } from "./uploadGroups";
 import { transferStore } from "../transfers/store";
+import { addToAlbum, uploadPhoto } from "./api";
 import type { PendingPhoto } from "./layout";
 import { messageOf } from "./model";
-import { addToAlbum, uploadPhoto } from "./api";
+import { groupPhotoUploads } from "./uploadGroups";
 
 export interface UploadTarget {
   libraryId: string;

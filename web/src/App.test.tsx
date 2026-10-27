@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { AppListResponse as AppList, AppStatus } from "./api.generated";
 import { apiError, json } from "./test/api";
-import { app } from "./test/fixtures";
 import {
   errorResponse,
   healthyState,
@@ -19,6 +18,7 @@ import {
   stubDesktopFetch,
   stubFetch,
 } from "./test/desktop";
+import { app } from "./test/fixtures";
 
 beforeEach(() => {
   localStorage.clear();

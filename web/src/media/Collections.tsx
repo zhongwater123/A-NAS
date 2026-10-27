@@ -1,9 +1,9 @@
 import { ArrowLeft, Layers, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { artworkURL, type Collection, type CollectionDetail, getCollection, listCollections, type Title } from "./api";
 import { Empty, Loading, messageOf, PageHeader, TitleGrid } from "./Browse";
 import { Menu } from "./Cards";
-import { artworkURL, getCollection, listCollections, type Collection, type CollectionDetail, type Title } from "./api";
 
 function Collage({ covers }: { covers: string[] }) {
   const slots = covers.slice(0, 4);

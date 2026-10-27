@@ -1,6 +1,7 @@
-import { APIError } from "./client";
 import { accountErrors } from "../auth/accountRules";
 import { nameErrors } from "../lib/fileNames";
+import { APIError } from "./client";
+
 // Only known product copy reaches the interface. Server/browser messages
 // remain diagnostic data on APIError, never the fallback presented to users.
 const messages: Record<string, string> = {

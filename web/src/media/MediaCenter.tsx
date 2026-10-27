@@ -3,33 +3,33 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Space } from "../api.generated";
 import { listSpaces } from "../files/api";
-import { CategoryPage, FavoritesPage, HistoryPage, Loading, messageOf } from "./Browse";
-import { ActionsContext, type MediaActions } from "./Cards";
-import { CollectionPage, CollectionsPage } from "./Collections";
-import { ShowPage, VideoPage } from "./Detail";
-import { CollectionPicker, RenameDialog, useDialogs, useToasts } from "./feedback";
-import { FoldersPage, type FolderPlace } from "./Folders";
-import { HomePage } from "./Home";
-import { LibrariesPage, LibraryDialog } from "./Libraries";
 import {
+  type Category,
   clearHistory,
   createCollection,
   deleteCollection,
   deleteLibrary,
   getHome,
   getShow,
+  type Home,
   listLibraries,
+  type MediaLibrary,
   removeFromCollection,
   removeHistory,
   renameCollection,
   scanLibrary,
   setFavorite,
   setWatched,
-  type Category,
-  type Home,
-  type MediaLibrary,
   type Title,
 } from "./api";
+import { CategoryPage, FavoritesPage, HistoryPage, Loading, messageOf } from "./Browse";
+import { ActionsContext, type MediaActions } from "./Cards";
+import { CollectionPage, CollectionsPage } from "./Collections";
+import { ShowPage, VideoPage } from "./Detail";
+import { type FolderPlace, FoldersPage } from "./Folders";
+import { CollectionPicker, RenameDialog, useDialogs, useToasts } from "./feedback";
+import { HomePage } from "./Home";
+import { LibrariesPage, LibraryDialog } from "./Libraries";
 import { Player, type PlayRequest } from "./Player";
 import { type Section, Sidebar } from "./Sidebar";
 import { DropOverlay, hasFiles, UploadDialog, UploadPill, uploadTargets } from "./Upload";

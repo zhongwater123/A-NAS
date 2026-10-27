@@ -1,10 +1,10 @@
-import { calendarDate, formatClock } from "../lib/time";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { ReactNode, useEffect, useId, useState } from "react";
 
+import { calendarDate, formatClock } from "../lib/time";
 import { HostState } from "./api";
-import { HostStateView } from "./useHostState";
 import { useHostMetrics } from "./useHostMetrics";
+import { HostStateView } from "./useHostState";
 
 // Gauge geometry: a 210° speedometer arc centred at (60, 56) in a 120×84 box;
 // the open bottom keeps the needle clear of the numeric readout.

@@ -3,10 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Session } from "../api.generated";
+import { json, stubAPI } from "../test/api";
+import type { ActivityEvent, SystemLogEntry } from "./api";
 import { forgetRememberedFilters } from "./common";
 import { LogsSection } from "./LogsSection";
-import type { ActivityEvent, SystemLogEntry } from "./api";
-import { json, stubAPI } from "../test/api";
 
 const admin: Session = {
   csrfToken: "csrf",

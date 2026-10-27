@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fileOrderKey, FileOrder, OrderableFile, reorderFiles, sortFiles, useFileOrder } from "./useFileOrder";
+
+import { FileOrder, fileOrderKey, OrderableFile, reorderFiles, sortFiles, useFileOrder } from "./useFileOrder";
 
 const base: FileOrder = { sortBy: "name", direction: "ascending", pinned: [], manual: [] };
 const items: OrderableFile[] = [

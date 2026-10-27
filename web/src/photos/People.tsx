@@ -1,7 +1,6 @@
 import { Check, ChevronDown, ChevronUp, EyeOff, PawPrint, Pencil, UserRound, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { type Caller, libraryName, messageOf } from "./model";
 import {
   assignFace,
   avatarURL,
@@ -11,6 +10,7 @@ import {
   type PhotoLibrary,
   type PhotoPerson,
 } from "./api";
+import { type Caller, libraryName, messageOf } from "./model";
 
 // People and pets (docs/architecture/photo-people.md): local AI finds the same
 // face, cat or dog again across a library's photos, and members name, merge

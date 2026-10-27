@@ -1,6 +1,6 @@
 import type { FileEntry } from "../api.generated";
-import { fileRenderedPreviewURL, filePreviewURL } from "./api";
 import { isHEIFImage, isVideoFile } from "../lib/fileTypes";
+import { filePreviewURL, fileRenderedPreviewURL } from "./api";
 
 export function fileVisualURL(entry: FileEntry, size: "thumbnail" | "preview" = "preview"): string {
   if (!isHEIFImage(entry.name) && !isVideoFile(entry.name)) return filePreviewURL(entry.id);

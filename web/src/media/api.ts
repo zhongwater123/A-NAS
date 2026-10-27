@@ -10,7 +10,6 @@ import type {
 } from "../api.generated";
 
 export type {
-  MediaLibrary,
   MediaArtwork as Artwork,
   MediaCollection as Collection,
   MediaCollectionDetail as CollectionDetail,
@@ -19,6 +18,7 @@ export type {
   MediaFolderListing as FolderListing,
   MediaFolderRoot as FolderRoot,
   MediaHome as Home,
+  MediaLibrary,
   MediaPlayback as Playback,
   MediaProgress as Progress,
   MediaShowDetail as ShowDetail,

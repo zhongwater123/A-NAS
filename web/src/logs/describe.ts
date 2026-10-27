@@ -1,4 +1,4 @@
-import { calendarDays, calendarDate, relativeUnit } from "../lib/time";
+import { calendarDate, calendarDays, relativeUnit } from "../lib/time";
 import type { ActivityAccount, ActivityCategory, ActivityEvent, LogLevel } from "./api";
 
 // A sentence is plain text with emphasised names in it.

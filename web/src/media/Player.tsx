@@ -24,8 +24,8 @@ import {
   CSSProperties,
   FocusEvent,
   KeyboardEvent,
-  PointerEvent as ReactPointerEvent,
   ReactNode,
+  PointerEvent as ReactPointerEvent,
   RefObject,
   useCallback,
   useEffect,
@@ -36,20 +36,20 @@ import {
   useState,
 } from "react";
 
-import { messageOf } from "./Browse";
-import { episodeCode, episodeName, timecode } from "./format";
 import {
   browserCapabilities,
   getPlayback,
   getVideo,
+  type Playback,
+  type Quality,
   saveProgress,
   streamURL,
   subtitleURL,
-  type Playback,
-  type Quality,
   type VideoDetail,
 } from "./api";
-import { PlayerPanel, type PanelTab } from "./PlayerPanel";
+import { messageOf } from "./Browse";
+import { episodeCode, episodeName, timecode } from "./format";
+import { type PanelTab, PlayerPanel } from "./PlayerPanel";
 import { canFeed, StreamFeed } from "./streamFeed";
 
 const qualityLabels: Record<Quality, string> = { original: "原画", "1080p": "1080p", "720p": "720p", "480p": "480p" };

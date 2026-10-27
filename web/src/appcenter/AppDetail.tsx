@@ -21,8 +21,8 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { CatalogApp } from "./api";
-import { AppIcon, Folded, JobOutput, Logins, Progress, RichText } from "./parts";
 import { appURL, categoryOf, installFailed, leftoverText, openApp, useElapsed } from "./model";
+import { AppIcon, Folded, JobOutput, Logins, Progress, RichText } from "./parts";
 
 interface DetailProps {
   app: CatalogApp;

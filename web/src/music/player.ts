@@ -9,8 +9,8 @@ import {
   useSyncExternalStore,
 } from "react";
 
-import { artistLine, shuffled, unknownAlbum } from "./library";
 import { coverURL, streamURL, type Track } from "./api";
+import { artistLine, shuffled, unknownAlbum } from "./library";
 
 export type Repeat = "off" | "all" | "one";
 

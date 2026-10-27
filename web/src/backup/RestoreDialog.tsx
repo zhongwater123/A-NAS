@@ -1,10 +1,9 @@
 import { ArchiveRestore, ChevronRight, CornerLeftUp, Folder, FolderOpen, MapPin, Trash2 } from "lucide-react";
 import { FormEvent, useEffect, useEffectEvent, useRef, useState } from "react";
 
-import type { FileEntry, Space } from "../api.generated";
 import { APIError } from "../api/client";
+import type { FileEntry, Space } from "../api.generated";
 import { listEntries } from "../files/api";
-
 import { messageOf, restoreEntry, restoreSnapshot } from "./api";
 import { formatDateTime, restoredName, spaceLabel } from "./format";
 import { Dialog, EntryIcon, Spinner } from "./parts";

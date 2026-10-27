@@ -3,10 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
-import type { AppJob, CatalogApp, InstallPlan } from "./api";
-import { AppCenterPanel } from "./AppCenterPanel";
 import { json, stubAPI } from "../test/api";
 import { app } from "../test/fixtures";
+import { AppCenterPanel } from "./AppCenterPanel";
+import type { AppJob, CatalogApp, InstallPlan } from "./api";
 
 function job(overrides: Partial<AppJob> = {}): AppJob {
   return {

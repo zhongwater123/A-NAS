@@ -2,7 +2,6 @@ import { Copy, FileText, FolderOpen, History } from "lucide-react";
 import { ReactNode } from "react";
 
 import type { FileEntry } from "../api.generated";
-import { filePreviewURL } from "./api";
 import { formatBytes } from "../lib/bytes";
 import {
   isOfficeDocument,
@@ -11,6 +10,7 @@ import {
   isTextPreviewable,
   isVideoFile,
 } from "../lib/fileTypes";
+import { filePreviewURL } from "./api";
 import { FileIcon } from "./FileIcon";
 import { FileBrowserItem, formatFileDate, othersSpace } from "./model";
 import { fileVisualURL } from "./preview";

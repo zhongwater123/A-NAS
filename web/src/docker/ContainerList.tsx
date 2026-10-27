@@ -19,11 +19,11 @@ import { DetailTab } from "./ContainerDetail";
 import type { ContainerActions } from "./DockerPanel";
 import {
   AppRef,
-  Group,
   appFor,
   appLink,
   describeContainer,
   formatPercent,
+  Group,
   groupKey,
   totals as sumTotals,
   webPorts,

@@ -1,8 +1,8 @@
 import { FormEvent, useId, useState } from "react";
 
-import { changePassword } from "./api";
-import { passwordProblem, passwordRuleText } from "./accountRules";
 import { messageOf } from "../settings/parts";
+import { passwordProblem, passwordRuleText } from "./accountRules";
+import { changePassword } from "./api";
 
 // PasswordChange blocks the desktop after an administrator reset the
 // password, so only the member knows the password in use.

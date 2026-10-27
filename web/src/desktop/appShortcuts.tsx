@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
-import { appURL } from "../appcenter/model";
 import { AppShortcut, readShortcuts, shortcutIconURL } from "../appcenter/api";
+import { appURL } from "../appcenter/model";
 import type { DesktopApp } from "./DesktopGrid";
 
 // Installed apps are read again while the desktop is in view, so an app

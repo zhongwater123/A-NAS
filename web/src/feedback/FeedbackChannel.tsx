@@ -22,20 +22,20 @@ import {
 } from "react";
 
 import { APIError } from "../api/client";
-import { nameOf, person, usePeople } from "../people/people";
 import { PersonAvatar } from "../people/PersonAvatar";
-import { FEEDBACK_UI } from "./capture";
-import { FeedbackEditor, Draft, emptyDraft, releaseDraft } from "./FeedbackEditor";
+import { nameOf, person, usePeople } from "../people/people";
 import {
-  FeedbackItem,
   createFeedback,
   deleteFeedback,
   describeFeedbackError,
   editFeedback,
+  FeedbackItem,
   feedbackImageURL,
   listFeedback,
   resolveFeedback,
 } from "./api";
+import { FEEDBACK_UI } from "./capture";
+import { Draft, emptyDraft, FeedbackEditor, releaseDraft } from "./FeedbackEditor";
 import { FeedbackThread } from "./FeedbackThread";
 import { Lightbox } from "./Lightbox";
 import { describeTime, fullTime } from "./time";

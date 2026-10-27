@@ -30,7 +30,7 @@ import {
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { formatBytes, formatRate } from "../lib/bytes";
-import { type ConflictChoice, type Hold, transferStore, useTransfers } from "./store";
+import type { TransferLocation } from "./api";
 import {
   dayLabel,
   formatClock,
@@ -38,8 +38,8 @@ import {
   groupItems,
   groupStatus,
   holdText,
-  isCurrent,
   type ItemStatus,
+  isCurrent,
   locationParts,
   speedText,
   statusText,
@@ -48,7 +48,7 @@ import {
   transferItems,
   transferTotals,
 } from "./model";
-import type { TransferLocation } from "./api";
+import { type ConflictChoice, type Hold, transferStore, useTransfers } from "./store";
 import "./transfers.css";
 
 type View = "current" | "uploads" | "downloads" | "history";

@@ -2,6 +2,7 @@ import { ChevronDown, Disc3, Mic2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { APIError } from "../api/client";
+import { coverURL, getLyrics } from "./api";
 import { Cover, useMusic } from "./context";
 import {
   activeLine,
@@ -14,7 +15,6 @@ import {
   qualityOf,
   unknownAlbum,
 } from "./library";
-import { coverURL, getLyrics } from "./api";
 import { usePlaybackTime } from "./player";
 
 type LyricsState = { trackId: string; lyrics?: Lyrics; missing?: boolean; failed?: boolean };

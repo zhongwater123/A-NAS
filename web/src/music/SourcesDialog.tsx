@@ -1,7 +1,7 @@
-import { errorText } from "../api/errorMessages";
 import { ArrowLeft, Check, ChevronRight, Folder, FolderPlus, HardDrive, Loader2, Users, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { errorText } from "../api/errorMessages";
 import type { FileEntry, Space } from "../api.generated";
 import { listEntries, listSpaces } from "../files/api";
 import type { MusicSources } from "./api";

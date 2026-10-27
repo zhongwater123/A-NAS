@@ -1,7 +1,8 @@
 import { fireEvent, render } from "@testing-library/react";
 import { expect, it } from "vitest";
-import { TaskIcon } from "./TaskIcon";
+
 import type { Task } from "./api";
+import { TaskIcon } from "./TaskIcon";
 
 const task: Task = {
   id: "process:1:1",

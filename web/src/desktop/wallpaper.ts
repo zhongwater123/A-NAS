@@ -1,8 +1,8 @@
-import { useEffect, useSyncExternalStore, type CSSProperties } from "react";
+import { type CSSProperties, useEffect, useSyncExternalStore } from "react";
 
 import type { Wallpaper, WallpaperStyle } from "../api.generated";
-import { readWallpaper, wallpaperImageURL } from "./api";
 import defaultWallpaperURL from "../assets/a-nas-wallpaper.png";
+import { readWallpaper, wallpaperImageURL } from "./api";
 
 // Every desktop draws the wallpaper an administrator chose in 设置 → 个性化.
 // Open desktops read it again every minute and when they come back into view,

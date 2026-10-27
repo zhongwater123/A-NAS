@@ -1,4 +1,4 @@
-import { useId, type ComponentType, type SVGProps } from "react";
+import { type ComponentType, type SVGProps, useId } from "react";
 
 export type GlyphProps = SVGProps<SVGSVGElement> & { size?: number | string };
 // AppGlyph is what windows and the dock draw an app with: a Lucide icon or

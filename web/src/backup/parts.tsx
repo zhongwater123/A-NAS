@@ -2,7 +2,6 @@ import { CircleAlert, CircleCheck, FileText, Folder, HardDrive, Minus, Plus, Use
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import type { Space } from "../api.generated";
-
 import type { SnapshotOrigin } from "./api";
 import { spaceLabel } from "./format";
 

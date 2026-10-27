@@ -1,11 +1,12 @@
-import { useEffect } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { SharesProvider, useShares } from "./SharesProvider";
-import { SharesPanel } from "./SharesPanel";
-import type { Share } from "./api";
+
 import { apiError, json, stubAPI } from "../test/api";
+import type { Share } from "./api";
+import { SharesPanel } from "./SharesPanel";
+import { SharesProvider, useShares } from "./SharesProvider";
 
 const file = {
   id: "source",

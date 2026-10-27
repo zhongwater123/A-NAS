@@ -2,18 +2,17 @@ import { CalendarClock, CircleAlert, CircleCheck, Clock3, Info, SlidersHorizonta
 import { useEffect, useRef, useState } from "react";
 
 import type { Space } from "../api.generated";
-
-import { useBackup } from "./BackupCenter";
 import {
+  type Frequency,
   maxKeep,
   messageOf,
-  saveSchedule,
-  type Frequency,
   type Retention,
   type RetentionTiers,
   type ScheduleSettings,
   type SnapshotSchedule,
+  saveSchedule,
 } from "./api";
+import { useBackup } from "./BackupCenter";
 import {
   describeRetention,
   describeSchedule,
@@ -24,11 +23,11 @@ import {
   spaceAudience,
   spaceLabel,
   suggestedTiers,
-  tierLabel,
-  tierTotal,
-  tiersFor,
-  weekdayShort,
   type Tier,
+  tierLabel,
+  tiersFor,
+  tierTotal,
+  weekdayShort,
 } from "./format";
 import { SpaceIcon, Spinner, Stepper, Switch } from "./parts";
 

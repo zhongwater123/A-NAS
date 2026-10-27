@@ -14,9 +14,9 @@ export type {
   PhotoAsset,
   PhotoLibrary,
   PhotoPerson,
-  PhotoTimeline as PhotoPage,
   PhotoSearchResults as PhotoSearchPage,
   PhotoSimilarResults as PhotoSimilarPage,
+  PhotoTimeline as PhotoPage,
 } from "../api.generated";
 export type PhotoTrash = NonNullable<PhotoAsset["trash"]>;
 // A face or pet in a photo; personId is absent while it is nobody yet.

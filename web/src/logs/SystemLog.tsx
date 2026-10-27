@@ -2,18 +2,18 @@ import { ChevronDown, Download, Radio, RefreshCw, ServerCog } from "lucide-react
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { APIError } from "../api/client";
-import { Banner, Pill, messageOf } from "../settings/parts";
-import { SearchField, Select, downloadText, exportLimit, fileStamp, useDebounced, useRemembered } from "./common";
-import { formatDateTime, fullTime, levelLabels, logTime } from "./describe";
+import { Banner, messageOf, Pill } from "../settings/parts";
 import {
+  listSystemLogs,
   type SystemLogEntry,
   type SystemLogFilters,
   type SystemLogService,
-  type TimeRange,
-  listSystemLogs,
   systemLogServices,
+  type TimeRange,
   timeRanges,
 } from "./api";
+import { downloadText, exportLimit, fileStamp, SearchField, Select, useDebounced, useRemembered } from "./common";
+import { formatDateTime, fullTime, levelLabels, logTime } from "./describe";
 
 const pageSize = 200;
 const followInterval = 5000;

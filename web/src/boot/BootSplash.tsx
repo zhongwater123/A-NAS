@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { startBootIdent, type BootIdentPlayer } from "./bootIdent";
+import { type BootIdentPlayer, startBootIdent } from "./bootIdent";
 
 export const bootIdentStorageKey = "a-nas.boot-ident.played.v1";
 

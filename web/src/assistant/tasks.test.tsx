@@ -2,11 +2,11 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { stubAPI } from "../test/api";
 import { scheduledPrompt } from "./AssistantPanel";
 import type { AssistantTask } from "./api";
-import { TaskToasts, plainText } from "./TaskToasts";
 import { TasksView } from "./TasksView";
-import { stubAPI } from "../test/api";
+import { plainText, TaskToasts } from "./TaskToasts";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });

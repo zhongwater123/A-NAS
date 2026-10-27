@@ -6,7 +6,7 @@ import { readLocalDisplay, resetWallpaper, updateLocalDisplay, updateWallpaperSt
 import { localConsoleScreenSaverIdleMs } from "../desktop/LocalConsoleScreenSaver";
 import { publishWallpaper, useWallpaper, wallpaperPicture } from "../desktop/wallpaper";
 import { DesktopPreview } from "./DesktopPreview";
-import { Banner, Group, IconTile, PageHeader, messageOf } from "./parts";
+import { Banner, Group, IconTile, messageOf, PageHeader } from "./parts";
 import { WallpaperDialog } from "./WallpaperDialog";
 import "./personalization.css";
 

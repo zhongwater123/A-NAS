@@ -1,20 +1,20 @@
 import { Check, CircleAlert, CircleCheck, FolderOpen, Info, Layers, Plus, X } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
-import { messageOf } from "./Browse";
-import { episodeCode, heading } from "./format";
-import { splitName } from "./EditableName";
 import {
   addToCollection,
+  type Collection,
   createCollection,
   getShow,
   getVideo,
   listCollections,
   renameShow,
   renameVideoFile,
-  type Collection,
   type Title,
 } from "./api";
+import { messageOf } from "./Browse";
+import { splitName } from "./EditableName";
+import { episodeCode, heading } from "./format";
 
 type DialogRequest =
   | {

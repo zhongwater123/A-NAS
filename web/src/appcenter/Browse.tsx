@@ -10,8 +10,8 @@ import {
 } from "lucide-react";
 
 import { CatalogApp } from "./api";
-import { AppAction, AppIcon } from "./parts";
 import { Category, categories, categoryOf, installFailed, otherCategory, stateText, useElapsed } from "./model";
+import { AppAction, AppIcon } from "./parts";
 
 interface BrowseProps {
   onShow: (app: CatalogApp) => void;

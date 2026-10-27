@@ -3,9 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FileEntry, Space, TrashItem } from "../api.generated";
+import { stubAPI } from "../test/api";
 import { expiryOf, groupItems, restoredName } from "./model";
 import { TrashPanel } from "./TrashPanel";
-import { stubAPI } from "../test/api";
 
 const personal: Space = {
   id: "space:personal",

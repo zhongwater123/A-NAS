@@ -2,20 +2,20 @@ import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { APIError } from "../api/client";
-import { nameOf, person, usePeople } from "../people/people";
 import { PersonAvatar } from "../people/PersonAvatar";
-import { Draft, FeedbackEditor, emptyDraft, releaseDraft } from "./FeedbackEditor";
+import { nameOf, person, usePeople } from "../people/people";
 import {
-  FeedbackComment,
-  FeedbackItem,
-  MAX_COMMENT_IMAGES,
-  MAX_COMMENT_TEXT,
   addComment,
   deleteComment,
   describeFeedbackError,
   editComment,
+  FeedbackComment,
+  FeedbackItem,
   feedbackImageURL,
+  MAX_COMMENT_IMAGES,
+  MAX_COMMENT_TEXT,
 } from "./api";
+import { Draft, emptyDraft, FeedbackEditor, releaseDraft } from "./FeedbackEditor";
 import { describeTime, fullTime } from "./time";
 
 interface ThreadProps {

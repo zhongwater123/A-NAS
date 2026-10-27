@@ -12,8 +12,8 @@ import {
   useRef,
 } from "react";
 
-import type { Box, Entry } from "./layout";
 import { getPhoto, type PhotoAsset } from "./api";
+import type { Box, Entry } from "./layout";
 import type { ScrollerHandle } from "./PhotoScroller";
 import { Tile } from "./Tile";
 

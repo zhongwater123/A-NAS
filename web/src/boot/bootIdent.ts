@@ -1,4 +1,4 @@
-import { createRenderer, type CrtParams } from "./crtRenderer";
+import { type CrtParams, createRenderer } from "./crtRenderer";
 
 // The A-NAS startup ident: an 80s TV-station logo on a CRT. A drive array is
 // built bottom-up, the roof is drawn over it, the name locks in like a VHS

@@ -12,9 +12,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "vite build",
-    "format": "biome format --write .",
+    "format": "biome check --write .",
     "generate": "make -C .. api",
-    "lint": "oxlint --deny-warnings src vite.config.ts && biome format ."
+    "lint": "oxlint --deny-warnings src vite.config.ts && biome check ."
   },
   "dependencies": {
     "@assistant-ui/core": "0.2.23",

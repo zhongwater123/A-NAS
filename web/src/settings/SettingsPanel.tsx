@@ -16,6 +16,7 @@ import {
   KeyRound,
   LayoutDashboard,
   LogOut,
+  type LucideIcon,
   Monitor,
   Network,
   Palette,
@@ -27,14 +28,10 @@ import {
   UserPlus,
   UsersRound,
   UserX,
-  type LucideIcon,
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 import type { Health, Session, User } from "../api.generated";
-import { changePassword, removeAvatar, updateNickname } from "../auth/api";
-import { HostState } from "../desktop/api";
-import { ViewingScope, createMember, disableMember, listUsers, resetMember, startViewing } from "./api";
 import {
   nicknameProblem,
   nicknameRuleText,
@@ -43,29 +40,32 @@ import {
   usernameProblem,
   usernameRuleText,
 } from "../auth/accountRules";
-import { formatBytes } from "../lib/bytes";
+import { changePassword, removeAvatar, updateNickname } from "../auth/api";
+import { HostState } from "../desktop/api";
 import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
-import { LogsSection, type LogsPreset } from "../logs/LogsSection";
+import type { HostStateView } from "../desktop/useHostState";
+import { formatBytes } from "../lib/bytes";
+import { type LogsPreset, LogsSection } from "../logs/LogsSection";
 import { displayName, fullName, usePeople } from "../people/people";
+import { TaskManagerSection } from "../taskmanager/TaskManagerSection";
 import { AvatarDialog } from "./AvatarDialog";
-import { HostStateBanner, HostStatePending } from "./hostState";
+import { createMember, disableMember, listUsers, resetMember, startViewing, ViewingScope } from "./api";
 import { describeFinding } from "./health";
-import { Avatar, Banner, Group, IconTile, PageHeader, Pill, RefreshButton, messageOf, type Tone } from "./parts";
+import { HostStateBanner, HostStatePending } from "./hostState";
 import { PersonalizationSection } from "./PersonalizationSection";
+import { Avatar, Banner, Group, IconTile, messageOf, PageHeader, Pill, RefreshButton, type Tone } from "./parts";
 import {
+  type StoragePlanFlow,
   StorageSection,
   useVolumes,
+  type VolumesView,
   volumeState,
   volumeUsage,
-  type StoragePlanFlow,
-  type VolumesView,
 } from "./StorageSection";
 import { TerminalSection } from "./TerminalSection";
-import { TaskManagerSection } from "../taskmanager/TaskManagerSection";
 import type { SessionStatus } from "./terminal";
-import type { HostStateView } from "../desktop/useHostState";
 
-export { useStoragePlan, type StoragePlanFlow } from "./StorageSection";
+export { type StoragePlanFlow, useStoragePlan } from "./StorageSection";
 
 export type SettingsSection =
   | "account"

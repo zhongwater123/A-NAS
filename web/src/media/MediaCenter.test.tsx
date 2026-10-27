@@ -3,11 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
-import { transferStore } from "../transfers/store";
-import { MediaCenter } from "./MediaCenter";
-import type { Episode, Home, MediaLibrary, ShowDetail, Title, VideoDetail } from "./api";
-import { Player } from "./Player";
 import { json, stubAPI } from "../test/api";
+import { transferStore } from "../transfers/store";
+import type { Episode, Home, MediaLibrary, ShowDetail, Title, VideoDetail } from "./api";
+import { MediaCenter } from "./MediaCenter";
+import { Player } from "./Player";
 
 const art = { poster: true, backdrop: true, thumb: true, version: "1" };
 const film: Title = {

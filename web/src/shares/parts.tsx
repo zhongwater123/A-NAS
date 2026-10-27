@@ -7,12 +7,13 @@ import {
   FileText,
   FileVideo,
   Folder,
-  Presentation,
   type LucideIcon,
+  Presentation,
 } from "lucide-react";
+
 import { isPreviewableImage, isVideoFile } from "../lib/fileTypes";
-import { displayName, person, type People } from "../people/people";
 import { PersonAvatar } from "../people/PersonAvatar";
+import { displayName, type People, person } from "../people/people";
 
 // A kind gives an item its label and tile colour in lists, the header and
 // the send dialog.

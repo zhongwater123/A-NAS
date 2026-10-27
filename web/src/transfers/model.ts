@@ -1,7 +1,7 @@
 import { errorCodeText } from "../api/errorMessages";
 import { formatRate } from "../lib/bytes";
-import type { ExternalUpload, Hold, LocalUpload, TransferRates, TransferSnapshot, UploadPhase } from "./store";
 import type { Transfer, TransferDirection, TransferLocation } from "./api";
+import type { ExternalUpload, Hold, LocalUpload, TransferRates, TransferSnapshot, UploadPhase } from "./store";
 
 export type ItemStatus =
   | "queued"

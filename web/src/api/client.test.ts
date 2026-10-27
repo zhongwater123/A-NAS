@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Session } from "../api.generated";
-import { readHostState } from "../desktop/api";
-import { deleteFile, listSpaces } from "../files/api";
-import { APIError, csrfHeader, onSessionEnded, setSession, uploadForm } from "./client";
 import { readApps } from "../appcenter/api";
+import { readHostState } from "../desktop/api";
 import { readContainers } from "../docker/api";
+import { deleteFile, listSpaces } from "../files/api";
 import { apiError, json, stubAPI } from "../test/api";
+import { APIError, csrfHeader, onSessionEnded, setSession, uploadForm } from "./client";
 
 const session: Session = {
   csrfToken: "csrf-test",

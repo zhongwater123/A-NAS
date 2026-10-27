@@ -3,14 +3,13 @@ import { useEffect, useState } from "react";
 
 import type { FileEntry, Space } from "../api.generated";
 import { formatBytes } from "../lib/bytes";
-
 import {
   listVersions,
   messageOf,
   restoreEntry,
-  snapshotDownloadURL,
   type SnapshotMatch,
   type SnapshotVersion,
+  snapshotDownloadURL,
 } from "./api";
 import { formatDateTime, formatDay, restoredName, spaceLabel } from "./format";
 import { Dialog, EmptyState, EntryIcon, Notice, Spinner } from "./parts";

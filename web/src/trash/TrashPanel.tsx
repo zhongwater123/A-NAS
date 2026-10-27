@@ -17,20 +17,20 @@ import {
 } from "lucide-react";
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { RestoredEntry, Space, TrashItem } from "../api.generated";
 import { APIError } from "../api/client";
-import { listEntries, listSpaces } from "../files/api";
-import { listTrash, purgeTrash, type RestoreConflict, restoreTrash } from "./api";
+import type { RestoredEntry, Space, TrashItem } from "../api.generated";
 import { formatClock, formatDateTime } from "../backup/format";
 import { Dialog, EmptyState, EntryIcon, Notice, Spinner, useToasts } from "../backup/parts";
+import { listEntries, listSpaces } from "../files/api";
 import { formatBytes } from "../lib/bytes";
 import { fileTypeLabel } from "../lib/fileTypes";
 import type { TransferLocation } from "../transfers/api";
+import { listTrash, purgeTrash, type RestoreConflict, restoreTrash } from "./api";
 import {
   type BatchOutcome,
+  type ExpiryTone,
   emptyOutcome,
   expiryOf,
-  type ExpiryTone,
   groupItems,
   locationOf,
   matches,

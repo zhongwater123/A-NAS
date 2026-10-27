@@ -13,9 +13,7 @@ import {
 
 import type { FileEntry, Space } from "../api.generated";
 import { listSpaces } from "../files/api";
-import { BackupCenterGlyph } from "./BackupCenterGlyph";
 import type { TransferLocation } from "../transfers/api";
-
 import {
   createSnapshot,
   getSchedule,
@@ -25,12 +23,13 @@ import {
   type Snapshot,
   type SnapshotSchedule,
 } from "./api";
+import { BackupCenterGlyph } from "./BackupCenterGlyph";
 import { ExternalPage } from "./ExternalPage";
 import { FindPage } from "./FindPage";
 import { defaultSnapshotName, spaceAudience, spaceLabel } from "./format";
 import { OverviewPage } from "./OverviewPage";
-import { Dialog, Spinner, SpaceIcon, useToasts, type Toast } from "./parts";
-import { RestoreDialog, type Crumb, type RestoreRequest } from "./RestoreDialog";
+import { Dialog, SpaceIcon, Spinner, type Toast, useToasts } from "./parts";
+import { type Crumb, RestoreDialog, type RestoreRequest } from "./RestoreDialog";
 import { SchedulesPage } from "./SchedulesPage";
 import { SnapshotsPage } from "./SnapshotsPage";
 import "./backup.css";

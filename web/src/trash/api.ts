@@ -1,5 +1,5 @@
-import type { TrashRestore } from "../api.generated";
 import { call, client } from "../api/client";
+import type { TrashRestore } from "../api.generated";
 
 export const listTrash = async () => (await call(client.GET("/api/v1/trash"))).items;
 // RestoreConflict is what a restore does when its name is taken: ask answers

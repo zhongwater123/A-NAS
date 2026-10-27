@@ -12,8 +12,8 @@ import {
   useState,
 } from "react";
 
-import { captureDesktop } from "./capture";
 import { IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT } from "./api";
+import { captureDesktop } from "./capture";
 
 // An image picked, pasted, dropped or captured but not yet sent; url is an
 // object URL for its preview.

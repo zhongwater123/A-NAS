@@ -1,7 +1,7 @@
 import { GripVertical, ListMusic, X } from "lucide-react";
 import { DragEvent, useState } from "react";
 
-import { Cover, Equalizer, carriesTracks, readDrag, useMusic } from "./context";
+import { Cover, carriesTracks, Equalizer, readDrag, useMusic } from "./context";
 import { artistLine, formatDuration } from "./library";
 
 const queueDrag = "application/x-anas-music-queue";

@@ -1,10 +1,10 @@
-import { APIError } from "../api/client";
 import { CircleAlert, Compass, PackageCheck, RotateCw, Search, ShieldCheck, ShoppingBag, X } from "lucide-react";
 import { KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { AppList, CatalogApp, readApps } from "./api";
+import { APIError } from "../api/client";
 import { AppDetail } from "./AppDetail";
-import { CategoryPage, CategoryTile, Discover, Installed, SearchResults, listedAsInstalled } from "./Browse";
+import { AppList, CatalogApp, readApps } from "./api";
+import { CategoryPage, CategoryTile, Discover, Installed, listedAsInstalled, SearchResults } from "./Browse";
 import { InstallSheet, UninstallDialog } from "./InstallSheet";
 import { categories, categoryOf, isBusy, search } from "./model";
 import { preloadMarkdown } from "./parts";

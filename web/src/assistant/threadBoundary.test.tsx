@@ -1,8 +1,8 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
-import type { SessionMessage } from "./hermes/types/hermes";
 import { stubAPI } from "../test/api";
+import type { SessionMessage } from "./hermes/types/hermes";
 
 // An answer that cannot be rendered, whatever the reason.
 vi.mock("@assistant-ui/react-streamdown", async (original) => ({
