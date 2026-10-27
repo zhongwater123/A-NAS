@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -112,5 +113,50 @@ func TestUnreadableImageRecordDoesNotDiscardRemainingContainers(t *testing.T) {
 	containers, err := docker.Containers(context.Background())
 	if err != nil || len(containers) != 1 {
 		t.Fatalf("containers = %v, %v", containers, err)
+	}
+}
+
+func TestInterruptedInstallNeverRecordsMutableTagsForDeletion(t *testing.T) {
+	docker := &fakeDocker{}
+	runner := &fakeRunner{
+		after: composeOn(docker, []engine.ContainerInfo{{Name: "memos", AppID: "memos", Running: true}}),
+		hold:  func(args []string) bool { return slices.Contains(args, "up") },
+		held:  make(chan struct{}, 1),
+	}
+	store, state := newStore(t, docker, runner)
+	defer store.Stop()
+	plan, err := store.Plan(context.Background(), "memos", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Install(context.Background(), "memos", plan.Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-runner.held:
+	case <-time.After(3 * time.Second):
+		t.Fatal("install did not reach up")
+	}
+	data, err := os.ReadFile(filepath.Join(state, "apps", "memos", "images.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	if err := json.Unmarshal(data, &ids); err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("unconfirmed install grants deletion to %v", ids)
+	}
+	// The original process is interrupted before it records success. The
+	// restarted agent can recover the real container ID without consulting
+	// any tag that an unrelated pull may have moved while it was stopped.
+	restarted := newStoreIn(t, state, docker, &fakeRunner{})
+	if err := restarted.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	restarted.Wait()
+	if !slices.Equal(docker.cleanedImages, []string{"sha256:installed"}) {
+		t.Fatalf("cleanup IDs = %v", docker.cleanedImages)
 	}
 }

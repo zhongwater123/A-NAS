@@ -77,8 +77,8 @@ type RuntimeInfo struct {
 }
 
 type Inspector interface {
-	// CleanupImages resolves only this project's images and its saved image
-	// references to immutable IDs before any container is removed.
+	// CleanupImages inspects this project's containers and saved immutable
+	// image IDs before any container is removed; mutable tags are rejected.
 	CleanupImages(ctx context.Context, project string, references []string) ([]string, error)
 	RemoveProjectContainers(ctx context.Context, project string) error
 	RemoveUnusedImages(ctx context.Context, images []string) error
@@ -311,9 +311,10 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 		if err := os.WriteFile(composeFile, plan.Compose, 0o640); err != nil {
 			return err
 		}
-		// Keep the image references even if up pulls an image but fails
-		// before creating its container, or the agent dies during up.
-		if err := s.saveImages(id, plan.Images); err != nil {
+		// Mark cleanup as pending without granting deletion authority to
+		// mutable tags. Recovery discovers IDs from actual containers; a
+		// download that never created a container has no proven ownership.
+		if err := s.saveImages(id, nil); err != nil {
 			return err
 		}
 		// Compose can fail after creating some of the containers, for

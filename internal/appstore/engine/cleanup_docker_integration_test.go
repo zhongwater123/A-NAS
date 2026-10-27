@@ -112,10 +112,10 @@ volumes:
 			store.SetStartupCheck(100*time.Millisecond, 10*time.Millisecond)
 			t.Cleanup(func() {
 				_ = exec.Command("docker", "rm", "-fv", container).Run()
-				for _, network := range strings.Fields(docker("network", "ls", "-q", "--filter", "label=com.docker.compose.project="+appstore.ProjectName(id))) {
+				for network := range strings.FieldsSeq(docker("network", "ls", "-q", "--filter", "label=com.docker.compose.project="+appstore.ProjectName(id))) {
 					_ = exec.Command("docker", "network", "rm", network).Run()
 				}
-				for _, volume := range strings.Fields(docker("volume", "ls", "-q", "--filter", "label=com.docker.compose.project="+appstore.ProjectName(id))) {
+				for volume := range strings.FieldsSeq(docker("volume", "ls", "-q", "--filter", "label=com.docker.compose.project="+appstore.ProjectName(id))) {
 					_ = exec.Command("docker", "volume", "rm", volume).Run()
 				}
 			})
@@ -168,10 +168,7 @@ volumes:
 			}
 			jobState(appstore.JobSucceeded)
 			deadline := time.Now().Add(time.Minute)
-			for {
-				if exec.Command("docker", "exec", container, "test", "-f", "/tmp/logged").Run() == nil {
-					break
-				}
+			for exec.Command("docker", "exec", container, "test", "-f", "/tmp/logged").Run() != nil {
 				if time.Now().After(deadline) {
 					t.Fatal("log writer did not finish")
 				}
@@ -214,6 +211,18 @@ volumes:
 			jobState(appstore.JobSucceeded)
 			docker("tag", image, image+"-alias")
 			t.Cleanup(func() { _ = exec.Command("docker", "image", "rm", image+"-alias").Run() })
+			if _, err := store.Uninstall(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+			store.Wait()
+			jobState(appstore.JobFailed)
+			assertClean(false)
+			if got := docker("image", "inspect", "--format", "{{.Id}}", image+"-alias"); got != imageID {
+				t.Fatalf("alias changed: %s", got)
+			}
+			// An administrator explicitly resolves the tag conflict; retry
+			// must still find the image although all containers have gone.
+			docker("image", "rm", image+"-alias")
 			uninstall()
 			assertClean(true)
 		})

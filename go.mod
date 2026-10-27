@@ -26,6 +26,7 @@ require (
 	github.com/mewkiz/flac v1.0.14
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.1
+	github.com/opencontainers/go-digest v1.0.0
 	github.com/prometheus/procfs v0.22.0
 	github.com/qdrant/go-client v1.20.1
 	github.com/razsteinmetz/go-ptn v1.0.0
@@ -64,7 +65,6 @@ require (
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/oasdiff/yaml v0.1.1 // indirect
 	github.com/oasdiff/yaml3 v0.0.14 // indirect
-	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect

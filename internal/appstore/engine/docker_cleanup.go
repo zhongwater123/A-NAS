@@ -8,9 +8,16 @@ import (
 
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
+	"github.com/opencontainers/go-digest"
 )
 
 func (d DockerInspector) CleanupImages(ctx context.Context, project string, references []string) ([]string, error) {
+	for _, reference := range references {
+		id, err := digest.Parse(reference)
+		if err != nil || id.Algorithm() != digest.SHA256 {
+			return nil, fmt.Errorf("cleanup record contains a non-immutable image ID: %s", reference)
+		}
+	}
 	containers, err := d.Client.ContainerList(ctx, client.ContainerListOptions{
 		All: true, Filters: make(client.Filters).Add("label", composeProjectLabel+"="+project),
 	})
@@ -97,51 +104,9 @@ func (d DockerInspector) RemoveUnusedImages(ctx context.Context, images []string
 			} else if used {
 				continue
 			}
-			// Multiple tags require untagging before a non-forced ID delete.
-			// Recheck each reference and container use rather than forcing a
-			// deletion that could override Docker's stopped-container guard.
-			image, inspectErr := d.Client.ImageInspect(ctx, id)
-			if errdefs.IsNotFound(inspectErr) {
-				continue
-			}
-			if inspectErr != nil {
-				return inspectErr
-			}
-			if len(image.RepoTags) > 1 {
-				for _, tag := range image.RepoTags[:len(image.RepoTags)-1] {
-					used, checkErr := d.imageInUse(ctx, id)
-					if checkErr != nil {
-						return checkErr
-					}
-					if used {
-						break
-					}
-					current, checkErr := d.Client.ImageInspect(ctx, tag)
-					if errdefs.IsNotFound(checkErr) {
-						continue
-					}
-					if checkErr != nil {
-						return checkErr
-					}
-					if current.ID != id {
-						return fmt.Errorf("image tag %s changed during cleanup", tag)
-					}
-					if _, checkErr := d.Client.ImageRemove(ctx, tag, client.ImageRemoveOptions{}); checkErr != nil && !errdefs.IsNotFound(checkErr) {
-						return checkErr
-					}
-				}
-				used, checkErr := d.imageInUse(ctx, id)
-				if checkErr != nil {
-					return checkErr
-				}
-				if used {
-					continue
-				}
-				_, err = d.Client.ImageRemove(ctx, id, client.ImageRemoveOptions{PruneChildren: true})
-				if errdefs.IsNotFound(err) {
-					continue
-				}
-			}
+			// A tag can change between inspect and delete. Do not untag by
+			// name or force an ID removal to bypass a multiple-tag conflict.
+			return fmt.Errorf("镜像 %s 仍有标签或其他依赖，请确认 Docker 冲突后重试：%w", id, err)
 		}
 		if err != nil {
 			return err
