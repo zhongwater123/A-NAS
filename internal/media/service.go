@@ -16,6 +16,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 )
 
 // Files is the part of files.Service the media center reads through. Every
@@ -48,10 +49,12 @@ type Options struct {
 	// ChangeDelay is how long SpaceChanged waits before scanning, so that a
 	// burst of uploads settles into one scan; it defaults to 3 seconds.
 	ChangeDelay time.Duration
-	// MaxStreams bounds concurrent converted streams; it defaults to 2.
+	// MaxStreams bounds concurrent converted streams; it defaults to
+	// mediaplay.Conversions.
 	MaxStreams int
 	// StreamWait is how long a converted stream waits for a free slot
-	// before the device reports itself busy; it defaults to 4 seconds.
+	// before the device reports itself busy; it defaults to
+	// mediaplay.ConversionWait.
 	StreamWait time.Duration
 	// Now defaults to time.Now. Background scans call it while requests do,
 	// so it must be safe for concurrent use.
@@ -69,15 +72,13 @@ type Service struct {
 	now       func() time.Time
 	random    io.Reader
 	logger    *slog.Logger
-	streams   chan struct{}
+	streams   *mediaplay.Slots
 	// decoding holds the pixels of the artwork being decoded, up to
 	// maxArtworkPixels; decodeWaiting counts the requests waiting for it,
 	// up to maxDecodeWaiting.
 	decoding         *semaphore.Weighted
 	decodeWaiting    atomic.Int64
 	maxDecodeWaiting int64
-	// streamWait is Options.StreamWait.
-	streamWait time.Duration
 	// kick wakes the background worker after a scan found new videos.
 	kick chan struct{}
 
@@ -111,13 +112,13 @@ func NewService(store *Store, options Options) (*Service, error) {
 		options.Logger = slog.Default()
 	}
 	if options.MaxStreams <= 0 {
-		options.MaxStreams = 2
+		options.MaxStreams = mediaplay.Conversions
 	}
 	if options.ChangeDelay <= 0 {
 		options.ChangeDelay = 3 * time.Second
 	}
 	if options.StreamWait <= 0 {
-		options.StreamWait = 4 * time.Second
+		options.StreamWait = mediaplay.ConversionWait
 	}
 	if options.CacheDir != "" {
 		for _, directory := range []string{"frames", "artwork", "subtitles"} {
@@ -132,7 +133,7 @@ func NewService(store *Store, options Options) (*Service, error) {
 		closing: closing, close: closeService,
 		store: store, files: options.Files, spaces: options.Spaces, processor: options.Processor,
 		cacheDir: options.CacheDir, now: options.Now, random: options.Random, logger: options.Logger,
-		streams: make(chan struct{}, options.MaxStreams), streamWait: options.StreamWait, kick: make(chan struct{}, 1),
+		streams: mediaplay.NewSlots(options.MaxStreams, options.StreamWait), kick: make(chan struct{}, 1),
 		decoding: semaphore.NewWeighted(maxArtworkPixels), maxDecodeWaiting: maxArtworkWaiting,
 		scanning: map[string]bool{}, scanLocks: map[string]*sync.Mutex{}, sessions: options.Sessions,
 		queued: map[string]int{}, again: map[string]bool{}, pending: map[string]*time.Timer{}, changeDelay: options.ChangeDelay,

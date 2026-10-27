@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
@@ -21,7 +22,8 @@ import (
 // is an immutable content object like any other. What sets them apart is
 // kept per content object in the videos table: the Media Worker reads a
 // video once at import, a frame of it becomes the thumbnail, and a browser
-// plays either the original or a stream the Worker converts it into.
+// plays either the original or a stream the Worker converts it into, as the
+// media center decides (internal/mediaplay).
 // Videos take no part in local AI: no vector, detection or face scan is
 // ever queued for them, search matches them by name and user tags only, AI
 // clusters and similar photos leave them out, and a member's assistant does
@@ -34,27 +36,16 @@ var (
 	ErrInvalidStart = errors.New("the stream would start outside the video")
 	// ErrMediaBusy means the device is converting as many videos as it
 	// plays at once.
-	ErrMediaBusy = errors.New("the device is converting as many videos as it can")
+	ErrMediaBusy = mediaplay.ErrBusy
 )
 
 const (
-	// maxVideoStreams bounds the videos converting for playback at once.
-	// Playing an original directly takes no slot.
-	maxVideoStreams = 2
-	// videoStreamWait is how long a conversion waits for a slot: a seek
-	// replaces the viewer's stream with one starting elsewhere, and its
-	// request can arrive before the stream it replaces has let go.
-	videoStreamWait   = 3 * time.Second
 	videoProbeTimeout = 15 * time.Second
 	// posterEdge is the long edge of the frame the viewer shows until the
 	// video plays.
 	posterEdge    = 1600
 	posterQuality = 88
 	frameTimeout  = 30 * time.Second
-	// transcodeHeight and transcodeBitrate bound a video converted for a
-	// browser that cannot decode it.
-	transcodeHeight  = 1080
-	transcodeBitrate = 8000
 )
 
 // videoInfo is what deciding how a browser plays a video needs.
@@ -236,16 +227,14 @@ func (s *Service) poster(ctx context.Context, record assetRecord, original *os.F
 
 // BrowserCaps says what a browser decodes beyond H.264 with AAC, MP3, Opus,
 // Vorbis or FLAC sound in MP4.
-type BrowserCaps struct {
-	HEVC, AV1, VP9, WebM, Matroska, AC3, EAC3 bool
-}
+type BrowserCaps = mediaplay.Caps
 
 // Video playback modes: the original itself, the original's video in a new
 // container, or a full conversion.
 const (
-	PlayDirect    = "direct"
-	PlayRemux     = "remux"
-	PlayTranscode = "transcode"
+	PlayDirect    = mediaplay.Direct
+	PlayRemux     = mediaplay.Remux
+	PlayTranscode = mediaplay.Transcode
 )
 
 // VideoPlayback is how a browser plays a video.
@@ -256,69 +245,21 @@ type VideoPlayback struct {
 	Mime string `json:"mime,omitempty"`
 }
 
-var browserAudio = []string{"aac", "mp3", "opus", "vorbis", "flac"}
-
-// decideVideo picks the cheapest way a browser with caps plays a video, as
-// the media center does: the original, its video copied into fragmented MP4
-// with the sound converted, or a conversion to H.264 of at most 1080 lines.
-func decideVideo(info videoInfo, caps BrowserCaps) (string, mediaworker.StreamRequest) {
-	tenBit := strings.Contains(info.PixelFormat, "10")
-	videoOK := false
-	switch info.Codec {
-	case "h264":
-		// Chrome does not decode 10-bit H.264.
-		videoOK = !tenBit
-	case "hevc":
-		videoOK = caps.HEVC
-	case "av1":
-		videoOK = caps.AV1
-	case "vp9":
-		videoOK = caps.VP9 || caps.WebM
-	case "vp8":
-		videoOK = caps.WebM
-	}
-	audioOK := info.Audio == "" || slices.Contains(browserAudio, info.Audio) || info.Audio == "ac3" && caps.AC3 || info.Audio == "eac3" && caps.EAC3
-	containerOK := false
-	formats := strings.Split(info.Container, ",")
-	switch {
-	case slices.Contains(formats, "mov") || slices.Contains(formats, "mp4"):
-		containerOK = true
-	case slices.Contains(formats, "matroska"):
-		webm := (info.Codec == "vp8" || info.Codec == "vp9" || info.Codec == "av1") && (info.Audio == "" || info.Audio == "opus" || info.Audio == "vorbis")
-		containerOK = webm && caps.WebM || caps.Matroska
-	}
-	request := mediaworker.StreamRequest{AudioTrack: -1}
+// playSource describes a video for deciding how it plays. Only its first
+// audio stream was read at import, so that is the one it plays with.
+func (info videoInfo) playSource(mediaType string) mediaplay.Source {
+	source := mediaplay.Source{Container: info.Container, ThreeGPP: mediaType == "video/3gpp",
+		Video: &mediaplay.Video{Codec: info.Codec, PixelFormat: info.PixelFormat}}
 	if info.Audio != "" {
-		request.AudioTrack = 0
+		source.Audio = []mediaplay.Audio{{Codec: info.Audio, Default: true}}
 	}
-	if videoOK && audioOK && containerOK {
-		return PlayDirect, request
-	}
-	request.CopyAudio = info.Audio == "aac" || info.Audio == "mp3"
-	if info.Codec == "h264" && !tenBit || info.Codec == "hevc" && caps.HEVC {
-		request.CopyVideo, request.HEVC = true, info.Codec == "hevc"
-		return PlayRemux, request
-	}
-	request.Height, request.MaxBitrate = transcodeHeight, transcodeBitrate
-	return PlayTranscode, request
+	return source
 }
 
-// streamMime is the type of the fragmented MP4 a stream produces. Browsers
-// take each codec's profile and level from the stream itself.
-func streamMime(info videoInfo, request mediaworker.StreamRequest) string {
-	codecs := []string{"avc1.640033"}
-	if request.CopyVideo && request.HEVC {
-		codecs[0] = "hvc1.1.6.L153.B0"
-	}
-	switch {
-	case request.AudioTrack < 0:
-	case request.CopyAudio && info.Audio == "mp3":
-		codecs = append(codecs, "mp4a.69")
-	default:
-		codecs = append(codecs, "mp4a.40.2")
-	}
-	return `video/mp4; codecs="` + strings.Join(codecs, ",") + `"`
-}
+// defaultPlay is what a viewer of photos chooses: the photo viewer offers no
+// quality or audio track of its own, and a conversion is at most 1080p
+// (docs/specs/photo-video.md).
+var defaultPlay = mediaplay.Choice{AudioTrack: mediaplay.DefaultAudio, Ceiling: mediaplay.Qualities[0]}
 
 // playableVideo returns a video asset p may play. An assistant plays none.
 func (s *Service) playableVideo(ctx context.Context, p Principal, assetID string) (assetRecord, error) {
@@ -345,10 +286,11 @@ func (s *Service) VideoPlayback(ctx context.Context, p Principal, assetID string
 	if err != nil {
 		return VideoPlayback{}, err
 	}
-	mode, request := decideVideo(info, caps)
-	playback := VideoPlayback{Mode: mode, Duration: record.Video.Duration}
-	if mode != PlayDirect {
-		playback.Mime = streamMime(info, request)
+	source := info.playSource(record.MediaType)
+	decision := mediaplay.Decide(source, caps, defaultPlay)
+	playback := VideoPlayback{Mode: decision.Mode, Duration: record.Video.Duration}
+	if decision.Mode != PlayDirect {
+		playback.Mime = mediaplay.StreamMime(source, decision.Stream)
 	}
 	return playback, nil
 }
@@ -383,13 +325,13 @@ type VideoStreamRequest struct {
 
 // StreamVideo converts a video into fragmented MP4 through the Media Worker.
 // The request owns the conversion: closing the stream ends FFmpeg and frees
-// its slot. At most maxVideoStreams run at once.
+// its slot. At most mediaplay.Conversions run at once.
 func (s *Service) StreamVideo(ctx context.Context, p Principal, assetID string, request VideoStreamRequest) (io.ReadCloser, error) {
 	record, err := s.playableVideo(ctx, p, assetID)
 	if err != nil {
 		return nil, err
 	}
-	if math.IsNaN(request.Start) || request.Start < 0 || request.Start >= record.Video.Duration {
+	if !mediaplay.StartWithin(request.Start, record.Video.Duration) {
 		return nil, ErrInvalidStart
 	}
 	if s.media == nil {
@@ -399,16 +341,14 @@ func (s *Service) StreamVideo(ctx context.Context, p Principal, assetID string, 
 	if err != nil {
 		return nil, err
 	}
-	mode, options := decideVideo(info, request.Caps)
-	if request.Transcode || mode == PlayDirect {
-		options.CopyVideo, options.HEVC, options.CopyAudio = false, false, false
-		options.Height, options.MaxBitrate = transcodeHeight, transcodeBitrate
-	}
+	choice := defaultPlay
+	choice.Transcode = request.Transcode
+	options := mediaplay.Converting(info.playSource(record.MediaType), request.Caps, choice).Stream
 	options.Start = request.Start
-	if err := s.takeStream(ctx); err != nil {
+	release, err := s.streams.Take(ctx)
+	if err != nil {
 		return nil, err
 	}
-	release := func() { <-s.streamSlots }
 	original, err := s.openObject(record.objectID)
 	if err != nil {
 		release()
@@ -423,22 +363,4 @@ func (s *Service) StreamVideo(ctx context.Context, p Principal, assetID string, 
 		return nil, err
 	}
 	return motionStream{body, cancel, release}, nil
-}
-
-func (s *Service) takeStream(ctx context.Context) error {
-	select {
-	case s.streamSlots <- struct{}{}:
-		return nil
-	default:
-	}
-	timer := time.NewTimer(s.streamWait)
-	defer timer.Stop()
-	select {
-	case s.streamSlots <- struct{}{}:
-		return nil
-	case <-timer.C:
-		return ErrMediaBusy
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }

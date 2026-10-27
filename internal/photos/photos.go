@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/capacity"
+	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 	"github.com/zhongwater123/A-NAS/internal/photos/labels"
 	"github.com/zhongwater123/A-NAS/internal/photos/objects"
 )
@@ -223,10 +224,8 @@ type Service struct {
 	trashRetention time.Duration
 	maxImportBytes int64
 	maxVideoBytes  int64
-	// streamSlots bounds the videos converting for playback at once, and
-	// streamWait is how long a conversion waits for a slot.
-	streamSlots chan struct{}
-	streamWait  time.Duration
+	// streams bounds the videos converting for playback at once.
+	streams *mediaplay.Slots
 	// admits reports whether incoming bytes still leave the data-volume
 	// reserve free.
 	admits          func(path string, incoming int64) (bool, error)
@@ -309,8 +308,8 @@ func Open(root string, options Options) (*Service, error) {
 	}
 	service := &Service{
 		db: db, root: opened, rootPath: root, media: options.Media,
-		streamSlots: make(chan struct{}, maxVideoStreams), streamWait: videoStreamWait,
-		now: options.Now, random: options.Random,
+		streams: mediaplay.NewSlots(mediaplay.Conversions, mediaplay.ConversionWait),
+		now:     options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes, maxVideoBytes: options.MaxVideoBytes,
 		admits: capacity.Admits, location: options.Location, embedder: options.AI,
 		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1), aiWake: make(chan struct{}, 1),

@@ -20,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/clocktest"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/imagetest"
+	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 )
 
 type testEnv struct {
@@ -507,54 +508,41 @@ func TestRescanKeepsRenamedVideosAndDropsRemovedOnes(t *testing.T) {
 	}
 }
 
-func TestPlaybackPicksDirectRemuxOrTranscode(t *testing.T) {
-	mp4 := "mov,mp4,m4a,3gp,3g2,mj2"
-	mkv := "matroska,webm"
+// How a video plays is decided in internal/mediaplay; the media center
+// describes the video and tells the viewer why the original does not play.
+func TestPlaybackExplainsWhyTheOriginalDoesNotPlay(t *testing.T) {
+	mp4, mkv := "mov,mp4,m4a,3gp,3g2,mj2", "matroska,webm"
 	h264 := &VideoStream{Codec: "h264", Height: 1080, PixelFormat: "yuv420p"}
-	hevc := &VideoStream{Codec: "hevc", Height: 2160, PixelFormat: "yuv420p10le"}
 	aac := []AudioStream{{Codec: "aac", Default: true}}
 	ac3 := []AudioStream{{Codec: "ac3", Default: true}, {Codec: "aac"}}
 	cases := []struct {
-		name    string
 		info    MediaInfo
 		file    string
 		caps    Capabilities
 		audio   int
 		quality string
 		mode    string
-		check   func(StreamOptions) bool
+		reason  string
 	}{
-		{name: "mp4", info: MediaInfo{Container: mp4, Video: h264, Audio: aac}, file: "a.mp4", mode: ModeDirect},
-		{name: "Flash MP4", info: MediaInfo{Container: mp4, Video: h264, Audio: aac}, file: "a.f4v", mode: ModeDirect},
-		{name: "mkv in Chromium", info: MediaInfo{Container: mkv, Video: h264, Audio: aac}, file: "a.mkv", caps: Capabilities{Matroska: true}, mode: ModeDirect},
-		{name: "mkv elsewhere", info: MediaInfo{Container: mkv, Video: h264, Audio: aac}, file: "a.mkv", mode: ModeRemux,
-			check: func(o StreamOptions) bool { return o.CopyVideo && o.CopyAudio }},
-		{name: "AC3 audio", info: MediaInfo{Container: mkv, Video: h264, Audio: ac3}, file: "a.mkv", caps: Capabilities{Matroska: true}, mode: ModeRemux,
-			check: func(o StreamOptions) bool { return o.CopyVideo && !o.CopyAudio && o.AudioTrack == 0 }},
-		{name: "second audio track", info: MediaInfo{Container: mp4, Video: h264, Audio: ac3}, file: "a.mp4", caps: Capabilities{AC3: true}, audio: 1, mode: ModeRemux,
-			check: func(o StreamOptions) bool { return o.AudioTrack == 1 && o.CopyAudio }},
-		{name: "HEVC without support", info: MediaInfo{Container: mkv, Video: hevc, Audio: aac}, file: "a.mkv", mode: ModeTranscode,
-			check: func(o StreamOptions) bool { return !o.CopyVideo && o.Height == 0 }},
-		{name: "HEVC with support", info: MediaInfo{Container: mkv, Video: hevc, Audio: aac}, file: "a.mkv", caps: Capabilities{HEVC: true}, mode: ModeRemux,
-			check: func(o StreamOptions) bool { return o.CopyVideo && o.HEVC }},
-		{name: "AVI", info: MediaInfo{Container: "avi", Video: &VideoStream{Codec: "mpeg4", Height: 480}, Audio: []AudioStream{{Codec: "mp3"}}}, file: "a.avi", mode: ModeTranscode},
-		{name: "lower quality", info: MediaInfo{Container: mp4, Video: h264, Audio: aac}, file: "a.mp4", quality: "720p", mode: ModeTranscode,
-			check: func(o StreamOptions) bool { return o.Height == 720 && o.MaxBitrate == 4000 }},
-		{name: "quality above the source", info: MediaInfo{Container: mp4, Video: &VideoStream{Codec: "h264", Height: 720}, Audio: aac}, file: "a.mp4", quality: "1080p", mode: ModeDirect},
-		{name: "10-bit H.264", info: MediaInfo{Container: mp4, Video: &VideoStream{Codec: "h264", Height: 1080, PixelFormat: "yuv420p10le"}, Audio: aac}, file: "a.mp4", mode: ModeTranscode},
+		{MediaInfo{Container: mp4, Video: h264, Audio: aac}, "a.mp4", Capabilities{}, -1, QualityOriginal, ModeDirect, ""},
+		{MediaInfo{Container: mkv, Video: h264, Audio: aac}, "a.mkv", Capabilities{}, -1, QualityOriginal, ModeRemux, "浏览器不支持此封装格式，正在转换封装"},
+		{MediaInfo{Container: mkv, Video: h264, Audio: ac3}, "a.mkv", Capabilities{Matroska: true}, -1, QualityOriginal, ModeRemux, "浏览器无法播放 AC3 音频，正在转换音频"},
+		{MediaInfo{Container: mp4, Video: h264, Audio: ac3}, "a.mp4", Capabilities{AC3: true}, 1, QualityOriginal, ModeRemux, "切换音轨需要转换封装"},
+		{MediaInfo{Container: "avi", Video: &VideoStream{Codec: "mpeg4", Height: 480}}, "a.avi", Capabilities{}, -1, QualityOriginal, ModeTranscode, "浏览器无法解码此视频，正在实时转码"},
+		{MediaInfo{Container: mp4, Video: h264, Audio: aac}, "a.mp4", Capabilities{}, -1, "720p", ModeTranscode, "已切换到 720p"},
+		{MediaInfo{Container: mp4, Video: &VideoStream{Codec: "hevc"}, Audio: aac}, "clip.3GP", Capabilities{HEVC: true}, -1, QualityOriginal, ModeRemux, "浏览器不支持此封装格式，正在转换封装"},
 	}
 	for _, test := range cases {
-		if test.quality == "" {
-			test.quality = QualityOriginal
+		source, choice := playSource(test.info, test.file), playChoice(test.audio, test.quality)
+		decision := mediaplay.Decide(source, test.caps, choice)
+		if got := reason(decision, source, choice); decision.Mode != test.mode || got != test.reason {
+			t.Errorf("%s %+v: %s %q, want %s %q", test.file, test.info, decision.Mode, got, test.mode, test.reason)
 		}
-		audio := test.audio
-		if audio == 0 && test.name != "AC3 audio" {
-			audio = -1
-		}
-		got := decide(test.info, test.file, test.caps, audio, test.quality)
-		if got.mode != test.mode || test.check != nil && !test.check(got.options) {
-			t.Errorf("%s: decide() = %s %+v, want %s", test.name, got.mode, got.options, test.mode)
-		}
+	}
+	// Converting the original keeps its size up to 2160 lines.
+	film := MediaInfo{Container: "avi", Video: &VideoStream{Codec: "mpeg4", Height: 2160}}
+	if stream := mediaplay.Decide(playSource(film, "a.avi"), Capabilities{}, playChoice(-1, QualityOriginal)).Stream; stream.Height != 2160 || stream.MaxBitrate != 0 {
+		t.Errorf("converting the original = %+v", stream)
 	}
 	if got := availableQualities(MediaInfo{Video: &VideoStream{Height: 1080}}); strings.Join(got, ",") != "original,720p,480p" {
 		t.Errorf("qualities for 1080p = %v", got)
@@ -943,25 +931,6 @@ func TestASeekWaitsForTheStreamItReplaces(t *testing.T) {
 	}
 	_ = second.Close()
 	_ = third.Close()
-}
-
-func TestConvertedStreamsNameTheirCodecs(t *testing.T) {
-	h264 := &VideoStream{Codec: "h264", Height: 1080}
-	hevc := &VideoStream{Codec: "hevc", Height: 2160}
-	cases := []struct {
-		info    MediaInfo
-		options StreamOptions
-		want    string
-	}{
-		{MediaInfo{Video: h264, Audio: []AudioStream{{Codec: "ac3"}}}, StreamOptions{CopyVideo: true, AudioTrack: 0}, `video/mp4; codecs="avc1.640033,mp4a.40.2"`},
-		{MediaInfo{Video: hevc, Audio: []AudioStream{{Codec: "mp3"}}}, StreamOptions{CopyVideo: true, HEVC: true, CopyAudio: true, AudioTrack: 0}, `video/mp4; codecs="hvc1.1.6.L153.B0,mp4a.69"`},
-		{MediaInfo{Video: hevc}, StreamOptions{AudioTrack: -1}, `video/mp4; codecs="avc1.640033"`},
-	}
-	for _, test := range cases {
-		if got := streamMime(test.info, test.options); got != test.want {
-			t.Errorf("streamMime(%+v) = %s, want %s", test.options, got, test.want)
-		}
-	}
 }
 
 // A name another show holds is a conflict before anything else: right after
