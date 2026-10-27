@@ -1,6 +1,6 @@
 # 照片剪辑成视频
 
-状态：draft（第一阶段的 MCP 演示已在开发机实现，用法见[本地环境](../development/LOCAL_ENVIRONMENT.md#照片拼视频演示)；[#283](https://github.com/zhongwater123/A-NAS/issues/283)）
+状态：draft（第一阶段的 MCP 演示已在开发机实现，用法见[运行演示](#运行演示)；[#283](https://github.com/zhongwater123/A-NAS/issues/283)）
 更新时间：2026-10-27
 
 ## 目标
@@ -102,6 +102,28 @@
 - 后续阶段的入口：把 `make_slideshow` 加进 A-NAS 的 MCP 工具，让 VNAS 直接使用。要决定拼接在哪里运行（助手沙箱内，或交给媒体 Worker）、成片写到哪里（助手目录可写，图库不可写），以及剪视频片段时怎样授权：助手身份目前看不到视频资产。
 - 演示代码是否随后演变为产品代码。
 - 检索效果用哪个环境验收：Experimental NAS 上的测试账号，或开发机上带真实模型的本地环境。
+
+## 运行演示
+
+演示只在开发机上运行，不碰实验 NAS。需要 Docker、Python 3.13 与 FFmpeg（macOS 上 `brew install ffmpeg`）。`anas-api` 只能在 Linux 上编译，所以 [`stack.sh`](../../ai/photo_video_demo/stack.sh) 在一次性的 Debian 13 容器（`golang:1.27.3-trixie`）里编译并运行 Fake 产品服务和假 AI Worker，产品服务只监听本机的 `127.0.0.1:18091`。在 Mac 上容器跑在 `anas` 虚拟机中（命令前加 `DOCKER_CONTEXT=colima-anas`），见[本地环境](../development/LOCAL_ENVIRONMENT.md)的“开发机 C：macOS”一节。
+
+```bash
+export ANAS_DEMO_USER=tester ANAS_DEMO_PASSWORD=<12 个字符以上的测试密码>
+ai/photo_video_demo/stack.sh start
+ai/photo_video_demo/stack.sh seed     # 测试账号、6 张照片、1 段视频、1 张已删除的照片
+python3 -m venv ~/.venvs/anas-demo
+~/.venvs/anas-demo/bin/pip install --require-hashes -r ai/photo_video_demo/requirements.lock
+```
+
+第一次启动要在容器里下载 Go 模块并编译，约 8 分钟；模块与编译缓存存在 Docker 卷 `anas-demo-gomod`、`anas-demo-gocache` 中，之后会快很多。`start` 会先删除旧容器，测试账号与照片随之清空，要重新 `seed`。
+
+在 Claude Code 中以 stdio 方式登记服务器（只存入本机的 Claude Code 配置，不进仓库），然后在新会话里用中文提要求：
+
+```bash
+claude mcp add anas-photo-video -e ANAS_DEMO_URL=http://127.0.0.1:18091 -e ANAS_DEMO_USER=tester -e ANAS_DEMO_PASSWORD=<测试密码> -e ANAS_DEMO_OUTPUT=$HOME/anas-demo-videos -- bash -c 'cd <检出>/ai && exec ~/.venvs/anas-demo/bin/python -m photo_video_demo.server'
+```
+
+工具层测试只用标准库，随 `make ai-test` 运行；渲染测试需要 `ffmpeg` 与 `ffprobe`，没有时跳过。MCP SDK 版本固定在 [`requirements.lock`](../../ai/photo_video_demo/requirements.lock)（带哈希，由 `requirements.in` 经 `uv pip compile --universal --generate-hashes` 生成），它不进 AI Worker 的运行环境。用完运行 `ai/photo_video_demo/stack.sh stop`。
 
 ## 验收证据
 
