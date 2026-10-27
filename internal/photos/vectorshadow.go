@@ -47,20 +47,19 @@ type ShadowComparison struct {
 	// so a comparison that is not Warm includes the instance's start.
 	Index time.Duration
 	Warm  bool
-	// Exact is how long the search's own ranking of its candidates took in
-	// the photo service, the work the index would take over.
+	// Exact is how long ranking the same objects by their in-memory vectors
+	// took, the dot products and the sort: the work the index's exact search
+	// does, measured the same way.
 	Exact time.Duration
 }
 
 // shadowQuery is a search handed to the shadow worker: its query vector and
-// model, the libraries it covered, the content objects it ranked and how
-// long that took.
+// model, the libraries it covered and the content objects it ranked.
 type shadowQuery struct {
 	vector  []float32
 	model   string
 	scope   []string
 	objects []string
-	exact   time.Duration
 }
 
 // newShadowQuery prepares a search for comparison while a shadow worker runs;
@@ -93,20 +92,33 @@ func (s *Service) shadowSearch(query *shadowQuery) {
 
 // RunVectorShadow compares the searches handed to it with index until ctx
 // ends. warm reports, without waiting, whether a connection to the index is
-// open.
-func (s *Service) RunVectorShadow(ctx context.Context, index VectorIndex, warm func() bool,
+// open. After a comparison fails it compares nothing for a while, longer
+// after each failure in a row, so that searches against a broken index do not
+// start its instance each time.
+func (s *Service) RunVectorShadow(ctx context.Context, index VectorIndex, warm func() bool, idle time.Duration,
 	report func(ShadowComparison), logError func(error)) {
 	s.shadowing.Store(true)
 	defer s.shadowing.Store(false)
+	failures := 0
+	var resume time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case query := <-s.shadow:
-			comparison, compared, err := s.compareWithIndex(ctx, index, warm, query)
-			if err != nil && ctx.Err() == nil && logError != nil {
-				logError(err)
+			if time.Now().Before(resume) {
+				continue
 			}
+			comparison, compared, err := s.compareWithIndex(ctx, index, warm, query)
+			if err != nil {
+				failures++
+				resume = time.Now().Add(vectorSyncBackoff(idle, failures))
+				if ctx.Err() == nil && logError != nil {
+					logError(err)
+				}
+				continue
+			}
+			failures = 0
 			if compared && report != nil {
 				report(comparison)
 			}
@@ -126,7 +138,7 @@ func (s *Service) compareWithIndex(ctx context.Context, index VectorIndex, warm 
 		return ShadowComparison{}, false, err
 	}
 
-	comparison := ShadowComparison{Collection: collection.name, Exact: query.exact, Overlap: make(map[int]float64, len(shadowCuts))}
+	comparison := ShadowComparison{Collection: collection.name, Overlap: make(map[int]float64, len(shadowCuts))}
 	if warm != nil {
 		comparison.Warm = warm()
 	}
@@ -144,6 +156,7 @@ func (s *Service) compareWithIndex(ctx context.Context, index VectorIndex, warm 
 	}
 	var exact []scored
 	err = s.index.read(ctx, s, collection.model, func(vectors map[string][]float32) {
+		started := time.Now()
 		seen := make(map[string]bool, len(query.objects))
 		for _, object := range query.objects {
 			vector, ok := vectors[object]
@@ -153,13 +166,14 @@ func (s *Service) compareWithIndex(ctx context.Context, index VectorIndex, warm 
 			seen[object] = true
 			exact = append(exact, scored{object, dot(vector, query.vector)})
 		}
+		slices.SortFunc(exact, func(a, b scored) int {
+			return cmp.Or(cmp.Compare(b.score, a.score), cmp.Compare(a.object, b.object))
+		})
+		comparison.Exact = time.Since(started)
 	})
 	if err != nil {
 		return ShadowComparison{}, false, err
 	}
-	slices.SortFunc(exact, func(a, b scored) int {
-		return cmp.Or(cmp.Compare(b.score, a.score), cmp.Compare(a.object, b.object))
-	})
 	comparison.Candidates = len(exact)
 
 	scores := make(map[string]float64, len(exact))

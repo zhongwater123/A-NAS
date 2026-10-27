@@ -384,6 +384,117 @@ func TestTheIndexGoesWithTheLastVector(t *testing.T) {
 	}
 }
 
+// Reconciliation finds what the index holds but should not: a point the
+// Catalog has no photo for, and libraries that went out of date.
+func TestReconciliationRemovesWhatTheCatalogDoesNotHold(t *testing.T) {
+	service, embedder, index, db, _ := indexedService(t)
+	ctx := context.Background()
+	private, shared := libraries(t, service, alice)
+	a := importPhoto(t, service, alice, private.ID, "", "a.png", encodePNG(1))
+	processAll(t, service)
+	processAI(t, service, embedder, &fakeGate{open: true})
+	syncAll(t, service, index)
+	collection := imagesCollection(t, index)
+	objectA := objectOf(t, db, a.ID)
+
+	if err := index.Upsert(ctx, collection, []vectorindex.Point{
+		{Key: "stray", Vector: []float32{1, 0, 0, 0}, Keywords: map[string][]string{"libraries": {private.ID}}},
+		{Key: objectA, Vector: []float32{0, 1, 0, 0}, Keywords: map[string][]string{"libraries": {shared.ID}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var events []photos.VectorSyncEvent
+	if err := service.ReconcileVectors(ctx, index, func(event photos.VectorSyncEvent) { events = append(events, event) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Queued != 2 {
+		t.Fatalf("reconciliation = %+v, want the stray point and a's libraries queued", events)
+	}
+	syncAll(t, service, index)
+	if got := inLibraries(t, index, private.ID); !slices.Equal(got, []string{objectA}) {
+		t.Errorf("alice's library after reconciling = %v, want a alone", got)
+	}
+	if got := inLibraries(t, index, shared.ID); len(got) != 0 {
+		t.Errorf("the shared library after reconciling = %v, want nothing", got)
+	}
+}
+
+// changingIndex changes the Catalog while a sync round writes to the index,
+// as a member who trashes a photo meanwhile would.
+type changingIndex struct {
+	*vectorindex.Client
+	during func()
+}
+
+func (x changingIndex) Upsert(ctx context.Context, collection string, points []vectorindex.Point) error {
+	if x.during != nil {
+		x.during()
+	}
+	return x.Client.Upsert(ctx, collection, points)
+}
+
+// An object that changes after a round has read it stays queued, so that the
+// index learns of the change; the round writes it as it was.
+func TestAChangeDuringSyncStaysQueued(t *testing.T) {
+	service, embedder, index, db, _ := indexedService(t)
+	ctx := context.Background()
+	private, _ := libraries(t, service, alice)
+	a := importPhoto(t, service, alice, private.ID, "", "a.png", encodePNG(1))
+	processAll(t, service)
+	processAI(t, service, embedder, &fakeGate{open: true})
+	syncAll(t, service, index)
+	objectA := objectOf(t, db, a.ID)
+
+	if _, err := service.Trash(ctx, alice, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The round reads a as trashed (no point); a is restored before the
+	// round removes its queue row.
+	changing := changingIndex{Client: index, during: func() {
+		if _, err := service.Restore(ctx, alice, a.ID); err != nil {
+			t.Error(err)
+		}
+	}}
+	if _, err := service.SyncVectors(ctx, changing, nil); err != nil {
+		t.Fatal(err)
+	}
+	if outboxVersion(t, db, objectA) == 0 {
+		t.Fatal("the change made during the round left the queue")
+	}
+	syncAll(t, service, index)
+	if got := inLibraries(t, index, private.ID); !slices.Equal(got, []string{objectA}) {
+		t.Errorf("after the restore was synced, alice's library = %v, want a", got)
+	}
+}
+
+// A new collection takes the size most of the model's vectors have, not the
+// newest row's, which may be the damaged one.
+func TestANewCollectionTakesTheCommonSize(t *testing.T) {
+	service, embedder, index, db, _ := indexedService(t)
+	private, _ := libraries(t, service, alice)
+	var assets []photos.Asset
+	for shade := range uint8(3) {
+		assets = append(assets, importPhoto(t, service, alice, private.ID, "", "p.png", encodePNG(shade+1)))
+	}
+	processAll(t, service)
+	processAI(t, service, embedder, &fakeGate{open: true})
+	damaged := objectOf(t, db, assets[2].ID)
+	if _, err := db.Exec("UPDATE embeddings SET vector = substr(vector, 1, 12), created_at = '9999' WHERE object_id = ?", damaged); err != nil {
+		t.Fatal(err)
+	}
+	events := syncAll(t, service, index)
+	rejected := 0
+	for _, event := range events {
+		rejected += event.Rejected
+	}
+	if rejected != 1 {
+		t.Errorf("sync events = %+v, want only the damaged vector rejected", events)
+	}
+	if got := inLibraries(t, index, private.ID); len(got) != 2 || slices.Contains(got, damaged) {
+		t.Errorf("index = %v, want the two whole vectors", got)
+	}
+}
+
 // With nothing queued a sync round leaves the index alone, so that its
 // instance can stop while the library does not change.
 func TestAnIdleSyncLeavesTheIndexAlone(t *testing.T) {
@@ -478,7 +589,7 @@ func TestShadowComparesFirstPagesOfSearches(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		service.RunVectorShadow(ctx, index, index.Warm, func(c photos.ShadowComparison) { comparisons <- c }, func(err error) { t.Error(err) })
+		service.RunVectorShadow(ctx, index, index.Warm, time.Minute, func(c photos.ShadowComparison) { comparisons <- c }, func(err error) { t.Error(err) })
 	}()
 	defer func() { cancel(); <-done }()
 
@@ -512,5 +623,48 @@ func TestShadowComparesFirstPagesOfSearches(t *testing.T) {
 	case c := <-comparisons:
 		t.Errorf("a later page was compared: %+v", c)
 	case <-time.After(500 * time.Millisecond):
+	}
+
+	// An index out of line with the Catalog shows below 1: a point it lost,
+	// and one the Catalog does not hold, placed first.
+	compare := func() photos.ShadowComparison {
+		t.Helper()
+		if _, err := service.Search(context.Background(), alice, photos.SearchRequest{Query: "猫", Limit: 1}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case c := <-comparisons:
+			return c
+		case <-time.After(30 * time.Second):
+			t.Fatal("the search was not compared with the index")
+			return photos.ShadowComparison{}
+		}
+	}
+	collection := imagesCollection(t, index)
+	all := inLibraries(t, index, private.ID)
+	if err := index.Delete(context.Background(), collection, all[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if c := compare(); c.Overlap[10] > 0.7 {
+		t.Errorf("with a point missing, overlap@10 = %v, want 2/3", c.Overlap[10])
+	}
+	query, err := embedder.EmbedQuery(context.Background(), "猫")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reconciliation puts the lost point back, and they agree again.
+	if err := service.ReconcileVectors(context.Background(), index, nil); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(t, service, index)
+	if c := compare(); c.Overlap[10] != 1 {
+		t.Errorf("after reconciliation, overlap@10 = %v, want 1", c.Overlap[10])
+	}
+	if err := index.Upsert(context.Background(), collection, []vectorindex.Point{{Key: "stray", Vector: query,
+		Keywords: map[string][]string{"libraries": {private.ID}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if c := compare(); c.Overlap[10] > 0.7 {
+		t.Errorf("with a stray point first, overlap@10 = %v, want 2/3", c.Overlap[10])
 	}
 }

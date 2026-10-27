@@ -358,7 +358,7 @@ func runVectorIndex(ctx context.Context, workers *sync.WaitGroup, service *photo
 		warm = client.Warm
 	}
 	workers.Go(func() {
-		service.RunVectorShadow(ctx, vectors, warm, func(c photos.ShadowComparison) {
+		service.RunVectorShadow(ctx, vectors, warm, min(time.Minute, gate.quiet), func(c photos.ShadowComparison) {
 			logger.InfoContext(ctx, "photo vector index shadow search", "collection", c.Collection, "candidates", c.Candidates,
 				"overlap10", c.Overlap[10], "overlap100", c.Overlap[100], "overlap500", c.Overlap[500],
 				"index_ms", c.Index.Milliseconds(), "exact_ms", c.Exact.Milliseconds(), "warm", c.Warm)

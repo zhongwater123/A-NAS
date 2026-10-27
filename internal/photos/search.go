@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/photos/objects"
@@ -258,11 +257,9 @@ func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, af
 // queryVector or nil: name or user tag matches first, then every photo with
 // a vector by similarity, at most maxSemanticResults of them. It records on
 // the page whether the query was encoded and where the closest group ends,
-// and on shadow, unless nil, the content objects it ranked by similarity and
-// how long ranking took.
+// and on shadow, unless nil, the content objects it ranked by similarity.
 func (s *Service) queryHits(ctx context.Context, query string, queryVector []float32, model string, candidates []candidate,
 	page *SearchPage, shadow *shadowQuery) ([]searchHit, error) {
-	started := time.Now()
 	folded := strings.ToLower(query)
 	calibration := s.objectCalibration
 	mentions := s.matcher.Mentions(query)
@@ -317,9 +314,6 @@ func (s *Service) queryHits(ctx context.Context, query string, queryVector []flo
 	sortHits(named)
 	sortHits(detected)
 	sortHits(similar)
-	if shadow != nil {
-		shadow.exact = time.Since(started)
-	}
 	similar = similar[:min(len(similar), maxSemanticResults)]
 	closest := len(detected)
 	if closest == 0 && len(similar) > 0 {

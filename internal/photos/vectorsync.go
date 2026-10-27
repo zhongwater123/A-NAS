@@ -315,9 +315,8 @@ func (s *Service) imagesCollection(ctx context.Context, index VectorIndex, repor
 		return imagesCollection{}, false, err
 	}
 	var model string
-	var size int
-	err = s.db.QueryRowContext(ctx, "SELECT model, length(vector) FROM embeddings WHERE derivation = ? ORDER BY created_at DESC, object_id LIMIT 1",
-		embeddingDerivation).Scan(&model, &size)
+	err = s.db.QueryRowContext(ctx, "SELECT model FROM embeddings WHERE derivation = ? ORDER BY created_at DESC, object_id LIMIT 1",
+		embeddingDerivation).Scan(&model)
 	if errors.Is(err, sql.ErrNoRows) {
 		return imagesCollection{}, false, s.dropImagesCollection(ctx, index, current)
 	}
@@ -336,6 +335,13 @@ func (s *Service) imagesCollection(ctx context.Context, index VectorIndex, repor
 		return current, false, nil
 	}
 
+	// The size every vector of the model has, but for a damaged row: the
+	// most common one, not the newest row's, which may be the damaged one.
+	var size int
+	if err := s.db.QueryRowContext(ctx, `SELECT length(vector) FROM embeddings WHERE derivation = ? AND model = ?
+GROUP BY length(vector) ORDER BY COUNT(*) DESC, length(vector) LIMIT 1`, embeddingDerivation, model).Scan(&size); err != nil {
+		return imagesCollection{}, false, err
+	}
 	fresh := imagesCollection{name: imagesCollectionName(model, s.randomHex()[:8]), model: model}
 	// No graph: up to about 100,000 photos an exact scan in the index is as
 	// fast as the in-process one (docs/research/qdrant-retrieval-features.md),
