@@ -212,3 +212,31 @@ func TestPhotoServiceConfigNeedsAPositiveQuietPeriod(t *testing.T) {
 		}
 	}
 }
+
+// The photo and share services name every path that is not absolute, in
+// the same order every time, as the Product Service does (#192).
+func TestServiceConfigsNameEveryRelativePath(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		load func(map[string]string) error
+		env  map[string]string
+		want string
+	}{
+		{"photos", func(e map[string]string) error { _, err := loadPhotoServiceConfig(e); return err },
+			map[string]string{"ANAS_PHOTOS_ROOT": "photos", "ANAS_MEDIA_SLOTS": "slots", "ANAS_PHOTOS_AI_QUIET_PERIOD": "soon"},
+			"ANAS_MEDIA_SLOTS must be an absolute path\nANAS_PHOTOS_ROOT must be an absolute path\nANAS_PHOTOS_AI_QUIET_PERIOD must be a positive duration such as 5s"},
+		{"shares", func(e map[string]string) error { _, err := loadShareServiceConfig(e); return err },
+			map[string]string{"ANAS_SHARES_ROOT": "shares", "ANAS_SHARE_SESSION_SOCKET": "sessions.sock"},
+			"ANAS_SHARES_ROOT must be an absolute path\nANAS_SHARE_SESSION_SOCKET must be an absolute path"},
+	} {
+		for range 10 {
+			if err := test.load(test.env); err == nil || err.Error() != test.want {
+				t.Fatalf("%s: error = %v, want %q", test.name, err, test.want)
+			}
+		}
+	}
+	config, err := loadShareServiceConfig(map[string]string{"ANAS_SHARES_ROOT": "/srv/a-nas/data/shares/"})
+	if err != nil || config.Root != "/srv/a-nas/data/shares" || config.FilesSocket != "/run/a-nas-share-files/files.sock" {
+		t.Fatalf("loadShareServiceConfig() = %+v, %v", config, err)
+	}
+}

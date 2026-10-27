@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -13,7 +14,7 @@ import (
 // time when they break the contract (web/src/api.ts), so each is validated
 // here, with lists that hold something.
 func TestShellResponsesKeepToTheContract(t *testing.T) {
-	f := newActivityFixture(t, func(*photos.Service) http.Handler { return nil })
+	f := newActivityFixture(t, func(*photos.Service, *accounts.Service) http.Handler { return nil })
 	f.client.do(http.MethodGet, "/api/v1/setup/status", "", nil, http.StatusOK)
 	owner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "", http.StatusCreated)
 	owner.do(http.MethodGet, "/api/v1/setup/status", "", nil, http.StatusOK)

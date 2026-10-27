@@ -19,7 +19,7 @@ import (
 // so it works whether the library runs in this process or in the photo
 // service; without a photo API the activity log leaves photos out.
 func (h *productHandler) photoActivitySource() func(*http.Request, activity.Query) ([]activity.Event, error) {
-	if h.photos == nil {
+	if h.Photos == nil {
 		return nil
 	}
 	return h.photoActivity
@@ -30,7 +30,7 @@ func (h *productHandler) photoActivity(r *http.Request, q activity.Query) ([]act
 	request.Method, request.Body, request.RequestURI = http.MethodGet, http.NoBody, ""
 	request.URL = &url.URL{Path: photosapi.ActivityPath, RawQuery: q.Values().Encode()}
 	response := &bufferedResponse{header: http.Header{}}
-	h.guard(apiroute.Route{Posture: apiroute.Session, Handler: h.photoHandler()})(response, request)
+	h.guard(apiroute.Route{Posture: apiroute.Session, Handler: serve(h.Photos)})(response, request)
 	if response.status != http.StatusOK {
 		return nil, fmt.Errorf("photo activity status %d", response.status)
 	}

@@ -47,7 +47,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/photos"
-	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -219,7 +218,8 @@ func run(logger *slog.Logger) error {
 	// Development opens the library in this process.
 	var photoService *photos.Service
 	var photoAI photos.Embedder
-	var photoAPI http.Handler = photosapi.NewProxy(config.PhotosSocket, logger)
+	var photoGate *photoservice.Gate
+	photoAPI := photoservice.Proxy(config.PhotosSocket, logger)
 	if !live {
 		// Development reaches an AI Worker only when ANAS_AI_SOCKET names
 		// one, so development without the AI component keeps local AI off.
@@ -231,7 +231,13 @@ func run(logger *slog.Logger) error {
 			return err
 		}
 		defer closeAtExit(logger, "photo library", photoService)
-		photoAPI = photosapi.New(photoService, logger)
+		// Requests find their caller, and keep AI work waiting, as in the
+		// photo service, with this process's account store for the Host
+		// Agent's session directory.
+		sessions := accounts.NewSessionDirectory(filepath.Join(stateDirectory, "control.db"))
+		defer closeAtExit(logger, "session directory", sessions)
+		photoGate = photoservice.NewGate(photoservice.QuietPeriod, logger)
+		photoAPI = photoservice.Local(photoService, sessions, photoGate, logger)
 	}
 	mediaStore, err := media.OpenSQLite(filepath.Join(stateDirectory, "media.db"))
 	if err != nil {
@@ -314,7 +320,9 @@ func run(logger *slog.Logger) error {
 		Feedback:     feedbackapi.New(feedbackStore, logger),
 		Transfers:    transferAPI,
 		Assistant:    assistant,
-		SystemLogs:   systemLogs,
+		// Signing in keeps the member's assistant running (ADR 0024).
+		AssistantKeeper: assistant,
+		SystemLogs:      systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
 		FilesChanged: mediaService.SpaceChanged,
@@ -344,7 +352,7 @@ func run(logger *slog.Logger) error {
 	tasks.Go(func() error { transferService.Run(background); return nil })
 	if photoService != nil {
 		tasks.Go(func() error {
-			photoservice.RunBackground(background, photoService, logger, photoAI, photoservice.NewGate(photoservice.QuietPeriod, logger))
+			photoservice.RunBackground(background, photoService, logger, photoAI, photoGate)
 			return nil
 		})
 	}

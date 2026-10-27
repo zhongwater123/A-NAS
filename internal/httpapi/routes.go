@@ -24,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/personalizationapi"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sharesapi"
+	"github.com/zhongwater123/A-NAS/internal/storageapi"
 	"github.com/zhongwater123/A-NAS/internal/systemlogapi"
 	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 	"github.com/zhongwater123/A-NAS/internal/taskmanagerapi"
@@ -40,7 +41,7 @@ func (h *productHandler) table() []apiroute.Route {
 		mutation = apiroute.Mutation
 		admin    = apiroute.Admin
 	)
-	get, post, patch, del := http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete
+	get, post, del := http.MethodGet, http.MethodPost, http.MethodDelete
 	routes := []apiroute.Route{
 		{Method: get, Pattern: "/healthz", Posture: public, Handler: h.serveState},
 		{Method: get, Pattern: "/api/v1/system", Posture: session, Handler: h.serveState},
@@ -53,42 +54,25 @@ func (h *productHandler) table() []apiroute.Route {
 		{Method: post, Pattern: "/api/v1/session", Posture: public, Handler: h.handleCreateSession},
 		{Method: get, Pattern: "/api/v1/session", Posture: session, Handler: h.handleCurrentSession},
 		{Method: del, Pattern: "/api/v1/session", Posture: mutation, Handler: h.handleDeleteSession},
-		{Method: post, Pattern: "/api/v1/session/password", Posture: mutation, Handler: h.handleChangePassword},
-		{Method: get, Pattern: "/api/v1/notifications", Posture: session, Handler: h.handleNotifications},
-		{Method: post, Pattern: "/api/v1/notifications/{notificationID}/acknowledge", Posture: mutation, Handler: h.handleAcknowledgeNotification},
-		{Method: get, Pattern: "/api/v1/users", Posture: session, Handler: h.handleUsers},
-		{Method: post, Pattern: "/api/v1/users", Posture: mutation, Handler: h.handleCreateUser},
-		{Method: patch, Pattern: "/api/v1/users/{userID}/credential", Posture: mutation, Handler: h.handleResetUserCredential},
-		{Method: del, Pattern: "/api/v1/users/{userID}", Posture: mutation, Handler: h.handleDisableUser},
-		{Method: post, Pattern: "/api/v1/users/{userID}/viewing", Posture: mutation, Handler: h.handleStartViewing},
-		{Method: del, Pattern: "/api/v1/viewing/{grantID}", Posture: mutation, Handler: h.handleEndViewing},
-		{Method: get, Pattern: "/api/v1/spaces", Posture: session, Handler: h.handleSpaces},
-
-		{Method: get, Pattern: "/api/v1/volumes", Posture: session, Handler: h.handleVolumes},
-		{Method: post, Pattern: "/api/v1/volumes/{volumeID}/conversion", Posture: admin, Handler: h.handleContinueConversion},
-		{Method: get, Pattern: "/api/v1/storage/plans", Posture: admin, Handler: h.handleUnfinishedStoragePlans},
-		{Method: post, Pattern: "/api/v1/storage/plans", Posture: admin, Handler: h.handleCreateStoragePlan},
-		{Method: post, Pattern: "/api/v1/storage/plans/{planID}/confirm", Posture: admin, Handler: h.handleConfirmStoragePlan},
-		{Method: post, Pattern: "/api/v1/storage/plans/{planID}/execute", Posture: admin, Handler: h.handleExecuteStoragePlan},
-		{Method: post, Pattern: "/api/v1/storage/plans/{planID}/cancel", Posture: admin, Handler: h.handleCancelStoragePlan},
-		{Method: get, Pattern: "/api/v1/operations/{operationID}", Posture: admin, Handler: h.handleOperation},
 
 		{Method: get, Pattern: "/api/v1/terminal", Posture: admin, Handler: h.handleTerminal},
 		{Method: get, Pattern: "/api/v1/terminal/session", Posture: admin, Handler: h.handleTerminal},
 	}
-	logger := h.logger
+	logger := h.Logger
 	// The task manager needs a reader that also observes tasks, as the Host
 	// Agent's client and the Fake Adapter do; without one it is unavailable.
-	tasks, _ := h.reader.(taskmanager.Reader)
+	tasks, _ := h.Reader.(taskmanager.Reader)
 	for _, domain := range []interface{ Routes() []apiroute.Route }{
-		filesapi.New(h.files, h.changed, logger),
-		filepreviewapi.New(h.previews, logger),
-		accountsapi.NewProfiles(h.accounts, h.pictures, logger),
-		personalizationapi.New(h.personalization, h.pictures, logger),
-		musicapi.New(h.music, logger),
-		activityapi.New(activityapi.Sources{Accounts: h.accounts, Files: h.files, Storage: h.storage, Photos: h.photoActivitySource(), Logger: logger}),
-		systemlogapi.New(h.systemLogs, string(h.dataSource), logger),
-		taskmanagerapi.New(tasks, string(h.dataSource), logger),
+		accountsapi.NewUsers(h.Accounts, logger),
+		accountsapi.NewProfiles(h.Accounts, h.pictures, logger),
+		storageapi.New(h.Storage, logger),
+		filesapi.New(h.Files, h.FilesChanged, logger),
+		filepreviewapi.New(h.FilePreviews, logger),
+		personalizationapi.New(h.Personalization, h.pictures, logger),
+		musicapi.New(h.Music, logger),
+		activityapi.New(activityapi.Sources{Accounts: h.Accounts, Files: h.Files, Storage: h.Storage, Photos: h.photoActivitySource(), Logger: logger}),
+		systemlogapi.New(h.SystemLogs, string(h.DataSource), logger),
+		taskmanagerapi.New(tasks, string(h.DataSource), logger),
 	} {
 		routes = append(routes, domain.Routes()...)
 	}
@@ -103,33 +87,33 @@ func (h *productHandler) mounts() []apiroute.Route {
 	mount := func(prefix string, posture apiroute.Posture, handler apiroute.Handler, endpoints []apiroute.Endpoint) {
 		routes = append(routes, apiroute.Mount(prefix, posture, handler, endpoints)...)
 	}
-	if h.containers != nil {
-		mount(containersapi.PathPrefix, apiroute.Admin, serve(h.containers), containersapi.Endpoints())
+	if h.Containers != nil {
+		mount(containersapi.PathPrefix, apiroute.Admin, serve(h.Containers), containersapi.Endpoints())
 	}
-	if h.apps != nil {
-		mount(appstoreapi.PathPrefix, apiroute.Admin, serve(h.apps), appstoreapi.Endpoints())
+	if h.Apps != nil {
+		mount(appstoreapi.PathPrefix, apiroute.Admin, serve(h.Apps), appstoreapi.Endpoints())
 	}
-	if h.shortcuts != nil {
-		mount(appstoreapi.ShortcutsPrefix, apiroute.Session, serve(h.shortcuts), appstoreapi.ShortcutEndpoints())
+	if h.AppShortcuts != nil {
+		mount(appstoreapi.ShortcutsPrefix, apiroute.Session, serve(h.AppShortcuts), appstoreapi.ShortcutEndpoints())
 	}
-	if h.shares != nil {
-		mount(sharesapi.PathPrefix, apiroute.Session, withUser(h.shares, sharesapi.WithUser), sharesapi.Endpoints())
+	if h.Shares != nil {
+		mount(sharesapi.PathPrefix, apiroute.Session, withUser(h.Shares, sharesapi.WithUser), sharesapi.Endpoints())
 	}
-	if h.photos != nil {
-		mount(photosapi.PathPrefix, apiroute.Session, h.photoHandler(), photosapi.Endpoints())
+	if h.Photos != nil {
+		mount(photosapi.PathPrefix, apiroute.Session, serve(h.Photos), photosapi.Endpoints())
 	}
-	if h.media != nil {
-		mount(mediaapi.PathPrefix, apiroute.Session, withUser(h.media, mediaapi.WithUser), mediaapi.Endpoints())
+	if h.Media != nil {
+		mount(mediaapi.PathPrefix, apiroute.Session, withUser(h.Media, mediaapi.WithUser), mediaapi.Endpoints())
 	}
-	if h.feedback != nil {
-		mount(feedbackapi.PathPrefix, apiroute.Session, withUser(h.feedback, feedbackapi.WithUser), feedbackapi.Endpoints())
+	if h.Feedback != nil {
+		mount(feedbackapi.PathPrefix, apiroute.Session, withUser(h.Feedback, feedbackapi.WithUser), feedbackapi.Endpoints())
 	}
-	if h.assistant != nil {
-		mount(assistantapi.PathPrefix, apiroute.Session, withUser(h.assistant, assistantapi.WithUser), assistantapi.Endpoints())
+	if h.Assistant != nil {
+		mount(assistantapi.PathPrefix, apiroute.Session, withUser(h.Assistant, assistantapi.WithUser), assistantapi.Endpoints())
 	}
-	if h.transfers != nil {
+	if h.Transfers != nil {
 		for _, prefix := range []string{transfersapi.TransfersPath, transfersapi.UploadsPath} {
-			mount(prefix, apiroute.Session, withUser(h.transfers, transfersapi.WithUser), transfersapi.Endpoints())
+			mount(prefix, apiroute.Session, withUser(h.Transfers, transfersapi.WithUser), transfersapi.Endpoints())
 		}
 	}
 	return routes
@@ -182,7 +166,7 @@ func (h *productHandler) guard(route apiroute.Route) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) { route.Handler(w, r, accounts.Session{}) }
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		if h.accounts == nil {
+		if h.Accounts == nil {
 			httpjson.WriteError(w, http.StatusServiceUnavailable, "accounts_unavailable", "account service is unavailable")
 			return
 		}
@@ -228,7 +212,9 @@ func allowedDuringPasswordChange(r *http.Request) bool {
 }
 
 // serve hands a request to an API that needs nothing of the session but its
-// token, which the request's context already carries.
+// token, which the request's context already carries. The photo API, in the
+// photo service or in development in this process, finds the caller behind
+// the token itself (photoservice.Authenticate).
 func serve(next http.Handler) apiroute.Handler {
 	return func(w http.ResponseWriter, r *http.Request, _ accounts.Session) { next.ServeHTTP(w, r) }
 }
@@ -237,25 +223,6 @@ func serve(next http.Handler) apiroute.Handler {
 func withUser(next http.Handler, attach func(context.Context, accounts.User) context.Context) apiroute.Handler {
 	return func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 		next.ServeHTTP(w, r.WithContext(attach(r.Context(), session.User)))
-	}
-}
-
-// photoHandler admits signed-in users to the photo API, which applies its
-// own Policy. An in-process photo API receives the caller as a Principal,
-// while a Proxy forwards only the session token for the photo service to
-// confirm.
-func (h *productHandler) photoHandler() apiroute.Handler {
-	if _, proxied := h.photos.(*photosapi.Proxy); proxied {
-		return serve(h.photos)
-	}
-	return func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-		viewings, err := h.accounts.LibraryViewings(r.Context(), session.User)
-		if err != nil {
-			h.internalError(w, r, err)
-			return
-		}
-		principal := photosapi.NewPrincipal(session.User.ID, session.User.Username, session.User.Role == accounts.RoleAdmin, viewings)
-		h.photos.ServeHTTP(w, r.WithContext(photosapi.WithPrincipal(r.Context(), principal)))
 	}
 }
 

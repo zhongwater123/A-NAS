@@ -23,6 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/sharefiles"
 	"github.com/zhongwater123/A-NAS/internal/shares"
 	"github.com/zhongwater123/A-NAS/internal/sharesapi"
@@ -63,12 +64,19 @@ func RequireOwnedStore(root string) error {
 	}
 	return nil
 }
+
+// Proxy forwards the share API to the share service on socketPath; while
+// the service cannot be reached, requests answer shares_unavailable.
+func Proxy(socketPath string, logger *slog.Logger) http.Handler {
+	return serviceproxy.New(socketPath, serviceproxy.Unavailable{Code: "shares_unavailable", Message: "member shares are not available"}, logger)
+}
+
 func authenticate(sessions SessionResolver, logger *slog.Logger, next http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := r.Header.Get(sharesapi.SessionHeader)
+		token := r.Header.Get(serviceproxy.SessionHeader)
 		user, err := sessions.ResolveSessionUser(r.Context(), token)
 		if errors.Is(err, accounts.ErrSessionNotFound) || err == nil && user.UserID == "" {
 			httpjson.WriteError(w, 401, "authentication_required", "authentication is required")
@@ -127,7 +135,10 @@ func Run(parent context.Context, config Config) error {
 		return err
 	}
 	defer func() { _ = os.Remove(config.SocketPath); _ = listener.Close() }()
-	ctx, cancel := context.WithCancel(parent)
+	// Open requests drain before the store closes and interrupts the save
+	// jobs, as the Product Service drains them before closing its stores
+	// (#192): a download in progress still completes.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	defer cancel()
 	var current atomic.Pointer[http.Handler]
 	unavailable := sharesapi.New(nil, config.Logger, config.Sessions.ActiveProfiles)
@@ -140,23 +151,27 @@ func Run(parent context.Context, config Config) error {
 		defer close(supervised)
 		supervise(ctx, config, func(h http.Handler) { current.Store(&h) }, unavailable)
 	}()
+	defer func() {
+		cancel()
+		<-supervised
+	}()
 	select {
-	case <-ctx.Done():
+	case <-parent.Done():
 	case err = <-served:
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
-		}
+		return err
 	}
-	cancel()
-	<-supervised
-	shutdown, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdown, stop := context.WithTimeout(context.Background(), shutdownGrace)
 	defer stop()
-	if shutdownErr := server.Shutdown(shutdown); shutdownErr != nil {
+	if err := server.Shutdown(shutdown); err != nil {
 		_ = server.Close()
-		return shutdownErr
+		return err
 	}
-	return err
+	return nil
 }
+
+// shutdownGrace is how long stopping waits for open requests; the unit's
+// TimeoutStopSec leaves room for closing the store after it.
+const shutdownGrace = 15 * time.Second
 
 type openedStore struct {
 	*shares.Store
