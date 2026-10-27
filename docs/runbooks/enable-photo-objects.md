@@ -19,7 +19,7 @@
   - 设备已按[启用相册本地 AI](enable-photo-ai.md)运行本地 AI。
   - 用户已同意部署本版本。检测器权重只用于内部测试，对外发行前另行确认许可（[模型清单](../../deploy/models/dfine-m-obj365.json)）。
   - 开发机已用官方导出的检测器重新生成 [`v1.calibration.json`](../../internal/photos/objects/v1.calibration.json)：其中的 `model` 必须是 `dfine-m-obj365@cd832825f883+ort-1.31.0+640+s0.05k100`。否则检测照常进行，但融合与“检测到”分段不生效。
-  - 开发机已运行 `make check`，并按[本地环境](../development/LOCAL_ENVIRONMENT.md#系统测试)跑过替身与真实模型（`ANAS_AI_MODEL`、`ANAS_AI_DETECTOR`）两次系统测试。
+  - 开发机已运行 `make check`，并按[本地环境](../development/testing.md#系统测试)跑过替身与真实模型（`ANAS_AI_MODEL`、`ANAS_AI_DETECTOR`）两次系统测试。
 - **资源**：
   - 系统盘增加约 80 MB 的检测器，另加一份新的运行环境（2026-10-13 构建的 `3eca142df9a765c2` 压缩后 189 MB，解开约 542 MB）：锁文件加入 ONNX Runtime 后运行环境 ID 改变，旧的保留供回滚。
   - 检测器加载时 Worker 多占约 400 MiB；单元 `MemoryHigh=1792M`、`MemoryMax=2G`。

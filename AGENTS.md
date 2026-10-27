@@ -14,7 +14,7 @@
 - 难复现、跨边界或可能复发的缺陷：先查 `docs/investigations/`，再更新或创建调查记录。
 - 安装、部署、恢复、磁盘或其他高风险操作：使用 `docs/runbooks/` 中的手册。
 - 产品定位：读 `README.md`；早期产品背景、历史研究或 2026-10-06 的决策盘点：按需读 `PROJECT_CONTEXT.md`。
-- 本机工具或 WSL 问题：读 `docs/development/LOCAL_ENVIRONMENT.md`。
+- 本机工具、WSL 或 Colima 问题：从开发环境入口选择对应平台，读 `docs/development/LOCAL_ENVIRONMENT.md`。
 
 ## 不重复造轮子
 
@@ -28,8 +28,8 @@
 - `make docs-check` 和 `make check` 只使用本地源码与可丢弃构建产物，不访问实验 NAS 或生产环境；可直接运行、修复当前变更导致的失败并重跑相关检查。
 - 纯文档变更运行 `make docs-check`。
 - Go 代码、构建、CI 或跨模块契约变更运行 `make check`。
-- 改了 `api/` 下的接口契约：运行 `make api`（或 `cd web && npm run generate`），提交它写出的打包文档、Web 类型与响应校验；契约的分文件布局见 `docs/development/LOCAL_ENVIRONMENT.md#接口契约`。
-- 改 Web 代码后先运行 `cd web && npm run format`；`make check` 还包含 Oxlint、golangci-lint、Ruff 与 ShellCheck，修改并发代码另跑 `make race-test`（见 `docs/development/LOCAL_ENVIRONMENT.md#静态检查`）。
+- 改了 `api/` 下的接口契约：运行 `make api`（或 `cd web && npm run generate`），提交它写出的打包文档、Web 类型与响应校验；契约的分文件布局见 `docs/development/api-contract.md#接口契约`。
+- 改 Web 代码后先运行 `cd web && npm run format`；`make check` 还包含 Oxlint、golangci-lint、Ruff 与 ShellCheck，修改并发代码另跑 `make race-test`（见 `docs/development/testing.md#静态检查`）。
 - 其他变更运行能证明结果的最小相关检查。
 
 ## Claude Code

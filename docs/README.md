@@ -15,7 +15,8 @@
 | 某项安装、恢复或高风险操作如何安全执行 | [运行手册](runbooks/README.md) | 步骤、前提、回滚或验证变化时 |
 | 某个版本交付了什么、如何验收、有何限制 | [发布记录](releases/README.md) | 创建版本或发布结论变化时 |
 | 某项技术候选有哪些一手证据、限制与基准建议 | [技术研究](research/README.md) | 选型证据或候选发生实质变化时 |
-| 本机开发环境如何使用 | [本地环境](development/LOCAL_ENVIRONMENT.md) | 工具链或账号配置变化时 |
+| 本机开发环境如何使用 | [开发环境入口](development/LOCAL_ENVIRONMENT.md)，按平台选择配置 | 工具链或账号配置变化时 |
+| 开发检查、接口生成或 AI 评估如何运行 | [测试](development/testing.md)、[API 契约](development/api-contract.md)、[AI 开发](development/ai-development.md) | 流程或验证边界变化时 |
 | 产品起点、竞品研究和 2026-10-06 时的决策盘点 | [项目上下文](../PROJECT_CONTEXT.md) | 不再更新（2026-10-06 快照）；之后的产品定位写入仓库 [README](../README.md)，术语写入领域语言，决定写入 ADR，行为写入规格 |
 | 实现何时、由谁、怎样改变 | Git 提交和 Pull Request | 每次实现变更时 |
 

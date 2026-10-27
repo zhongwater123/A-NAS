@@ -120,7 +120,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/hoststate` / `internal/taskmanager` | 只读宿主机状态、CPU/内存/网络指标与设备、服务、进程采样；Fake 与 Debian Linux Adapter | 状态和状态栏指标见[状态栏规格](../specs/host-metrics-status-bar.md)；[任务管理器](../specs/task-manager.md)经同一 Host Agent IPC 向所有已登录账号提供只读观测，不返回命令参数或环境变量 |
 | `internal/accounts` / `internal/files` / `internal/storage` | 账号、会话与空间可见性（含[昵称与头像](../specs/account-profile.md)，头像由 `internal/avatar` 压缩为 256 px JPEG 后存入账号数据库），文件闭环和持久化执行计划；文件授权由 ACL 执行 | 已实现，单元测试与系统测试覆盖 |
 | `internal/capacity` | 数据卷的保留容量：写入后仍须留出卷的 5% 且不少于 10 GiB，文件与相册在同一点用尽空间（不变量 12） | `files.Service` 与相册使用 |
-| `internal/filebroker` | Host Agent 内的文件代理：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）；也是 AI 助手的会话闸门，只把本人的实例连接交给有效会话，并执行助手的更改（`internal/assistantchanges`，Landlock 限制的工作进程；[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 4 与 10，默认关闭） | 已实现，root 集成测试与[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)覆盖；要求 Host Agent 保留 `CAP_SETUID`，见[存储与文件架构](storage-and-files.md#文件代理) |
+| `internal/filebroker` | Host Agent 内的文件代理：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）；也是 AI 助手的会话闸门，只把本人的实例连接交给有效会话，并执行助手的更改（`internal/assistantchanges`，Landlock 限制的工作进程；[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 4 与 10，默认关闭） | 已实现，root 集成测试与[系统测试](../development/testing.md#系统测试)覆盖；要求 Host Agent 保留 `CAP_SETUID`，见[存储与文件架构](storage-and-files.md#文件代理) |
 | `internal/systemdscope` | 把文件代理派生的工作进程与终端 Shell 放进各自的 systemd 临时 scope，绑定 Host Agent 的单元（[#166](https://github.com/zhongwater123/A-NAS/issues/166)） | 已实现，系统测试覆盖 |
 | `internal/hostops/linux` | 固定命令的卷、Linux 身份、空间 ACL、管理员查看授权、Samba 和 Btrfs 快照执行器 | 已实现，Fake command 与 root 集成测试覆盖 |
 | `internal/shares` / `internal/sharesapi` / `internal/shareservice` / `internal/sharefiles` | 成员分享：固定副本、逐人私聊、通知和可撤回保存；独立身份持有副本，文件桥仍按成员身份读取和写入（[ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)） | 已实现，见[成员分享技术设计](member-sharing.md) |
@@ -141,7 +141,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/httpapi` | 产品 API 的组合：路由表与姿态检查、登录与会话、账号、存储、宿主机状态与终端，以及挂在前缀下的各接口；见上文“HTTP 接口约定” | 已实现；规格的每个操作都有路由与姿态测试，产品测试按规格校验每次响应 |
 | `internal/apiroute` / `internal/httpjson` | 路由表的条目与姿态；JSON 读写、请求体规则与错误形状 | 已实现，单元测试覆盖 |
 | `internal/accountsapi` / `internal/filesapi` / `internal/musicapi` / `internal/personalizationapi` / `internal/activityapi` / `internal/systemlogapi` / `internal/taskmanagerapi` / `internal/filepreviewapi` | 各领域的路由与错误映射：昵称与头像、文件与快照、音乐、个性化、活动记录、服务日志、任务管理器、文件预览 | 已实现，经 `internal/httpapi` 的产品测试与契约测试覆盖 |
-| `api/` | 客户端产品接口契约：根文件 `openapi.yaml` 按领域引用 `paths/` 与 `components/` 中的文件；`make api` 打包为 `openapi.bundle.yaml`（Go 契约测试加载它），并生成 Web 客户端的类型与外壳响应的校验 | OpenAPI 3.1，见[接口契约](../development/LOCAL_ENVIRONMENT.md#接口契约) |
+| `api/` | 客户端产品接口契约：根文件 `openapi.yaml` 按领域引用 `paths/` 与 `components/` 中的文件；`make api` 打包为 `openapi.bundle.yaml`（Go 契约测试加载它），并生成 Web 客户端的类型与外壳响应的校验 | OpenAPI 3.1，见[接口契约](../development/api-contract.md#接口契约) |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |
 | `docs/specs` | 可验收的产品行为 | 见[规格索引](../specs/README.md) |
 | `docs/investigations` | 复杂缺陷的证据和根因 | 见[调查索引](../investigations/README.md) |
