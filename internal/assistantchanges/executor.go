@@ -3,6 +3,7 @@ package assistantchanges
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -25,14 +26,26 @@ import (
 const (
 	// MaxContent bounds one staged file; the assistant writes documents.
 	MaxContent = 64 << 20
+	// MaxStaged bounds the staged files of one submission together.
+	MaxStaged = 256 << 20
 	// previewLimit bounds the text a card shows of each file.
 	previewLimit = 64 << 10
 	// GrantTTL is how long a grant waits for the call Hermes makes right after
 	// the member's answer; a grant nobody used by then is void.
 	GrantTTL = 2 * time.Minute
-	// keepChanges is how many changes of an account are kept, newest first.
+	// awaitTTL is how long a card waits for the member's answer. Hermes waits
+	// a day (approvals.timeout in managed-config.yaml); a card older than that
+	// is void.
+	awaitTTL = 25 * time.Hour
+	// keepChanges is how many changes of an account are kept, newest first;
+	// the texts of the newest keepTexts that ended are kept for their cards.
 	keepChanges = 200
+	keepTexts   = 20
 )
+
+// maxPending bounds the copies one account's changes hold while they can
+// still be applied, together with those being made. Tests lower it.
+var maxPending int64 = 512 << 20
 
 // Change statuses.
 const (
@@ -52,13 +65,46 @@ var (
 
 // Executor keeps the account's changes and the copies their cards show in
 // Root, which only root may read, and applies them on the data volume at
-// Volume through the member's own files.FileSystem.
+// Volume through the member's own files.FileSystem. Once a change can no
+// longer be applied, only the start of each copy is kept, for its card.
 type Executor struct {
 	Root   string
 	Volume string
 	Now    func() time.Time
 
-	mu sync.Mutex
+	mu       sync.Mutex
+	accounts map[string]*ledger
+}
+
+// ledger serializes one account's changes; accounts do not wait for each
+// other.
+type ledger struct {
+	sync.Mutex
+	// refused is the last submission Prepare refused, so that Apply can say
+	// why without looking at any file.
+	refused refusal
+	// copying is the size of the copies Prepare is making.
+	copying int64
+}
+
+type refusal struct {
+	digest string
+	err    error
+	at     time.Time
+}
+
+func (e *Executor) ledger(account string) *ledger {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.accounts == nil {
+		e.accounts = map[string]*ledger{}
+	}
+	l, ok := e.accounts[account]
+	if !ok {
+		l = &ledger{}
+		e.accounts[account] = l
+	}
+	return l
 }
 
 // fingerprint is what a target was when the card was made; applying refuses a
@@ -72,19 +118,20 @@ type fingerprint struct {
 }
 
 type step struct {
-	Op         string      `json:"op"`
-	Path       string      `json:"path"`
-	To         string      `json:"to,omitempty"`
-	Rel        string      `json:"rel"`
-	ToRel      string      `json:"toRel,omitempty"`
-	Trash      string      `json:"trash"`
-	Before     fingerprint `json:"before"`
-	BeforeText *string     `json:"beforeText,omitempty"`
-	// A copy's source, and what it was when the card was made.
+	Op     string      `json:"op"`
+	Path   string      `json:"path"`
+	To     string      `json:"to,omitempty"`
+	Rel    string      `json:"rel"`
+	ToRel  string      `json:"toRel,omitempty"`
+	Trash  string      `json:"trash"`
+	Before fingerprint `json:"before"`
+	// A copy's source, and what it was when the card was made, or a write's
+	// staged file; Hash is the SHA-256 of the copy kept of a staged file.
 	Source       string       `json:"source,omitempty"`
 	SourceRel    string       `json:"sourceRel,omitempty"`
 	SourceBefore *fingerprint `json:"sourceBefore,omitempty"`
 	SourceSize   int64        `json:"sourceSize,omitempty"`
+	Hash         string       `json:"hash,omitempty"`
 }
 
 type change struct {
@@ -100,6 +147,37 @@ type change struct {
 	AppliedAt int64  `json:"appliedAt,omitempty"`
 	Done      int    `json:"done,omitempty"`
 	Error     string `json:"error,omitempty"`
+	// Kept is what is left of the copies once the change can no longer be
+	// applied: keptStart, what the card shows, or keptNone.
+	Kept string `json:"kept,omitempty"`
+}
+
+const (
+	keptStart = "start"
+	keptNone  = "none"
+)
+
+// live reports whether a change can still be applied, so its copies are kept
+// whole.
+func live(c change, now time.Time) bool {
+	switch c.Status {
+	case StatusApproved:
+		return now.Sub(time.Unix(c.DecidedAt, 0)) <= GrantTTL
+	case StatusAwaiting, StatusApplying:
+		return now.Sub(time.Unix(c.CreatedAt, 0)) <= awaitTTL
+	}
+	return false
+}
+
+// staged is the size of the change's copies.
+func (c change) staged() int64 {
+	var size int64
+	for _, s := range c.Steps {
+		if s.Op == "write" {
+			size += s.SourceSize
+		}
+	}
+	return size
 }
 
 func (e *Executor) now() time.Time {
@@ -120,29 +198,40 @@ func (e *Executor) Prepare(ctx context.Context, account string, member files.Fil
 	if err != nil {
 		return nil, invalid{err.Error()}
 	}
-	steps, contents, err := e.check(ctx, account, member, submission)
-	if err != nil {
-		return nil, err
+	digest, l := submission.Digest(), e.ledger(account)
+	steps, err := validate(account, submission)
+	if err == nil {
+		err = e.inspect(ctx, member, steps)
 	}
-	id, err := newID()
-	if err != nil {
-		return nil, err
+	c := change{Digest: digest, Summary: submission.Summary, Steps: steps, Status: StatusAwaiting,
+		SessionID: sessionID, RequestID: requestID}
+	var reserved int64
+	if err == nil {
+		reserved, err = e.reserve(account, l, c)
 	}
-	c := change{ID: id, Digest: submission.Digest(), Summary: submission.Summary, Steps: steps, Status: StatusAwaiting,
-		SessionID: sessionID, RequestID: requestID, CreatedAt: e.now().Unix()}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	dir, err := e.snapshotDir(account, id)
-	if err != nil {
-		return nil, err
+	var dir string
+	if err == nil {
+		c.ID, err = newID()
 	}
-	for n, content := range contents {
-		if content != nil {
-			if err := os.WriteFile(filepath.Join(dir, fmt.Sprint(n)), content, 0o600); err != nil {
-				return nil, err
-			}
+	if err == nil {
+		dir, err = e.snapshotDir(account, c.ID)
+	}
+	if err == nil {
+		if err = e.keep(ctx, member, c.Steps, dir); err != nil {
+			_ = os.RemoveAll(dir)
 		}
 	}
+	l.Lock()
+	defer l.Unlock()
+	l.copying -= reserved
+	if errors.Is(err, ErrInvalid) {
+		l.refused = refusal{digest: digest, err: err, at: e.now()}
+	}
+	if err != nil {
+		return nil, err
+	}
+	l.refused = refusal{}
+	c.CreatedAt = e.now().Unix()
 	changes, err := e.load(account)
 	if err != nil {
 		return nil, err
@@ -169,8 +258,9 @@ func (e *Executor) Decide(account, id, decision string) (json.RawMessage, error)
 	if !ok || !accountPattern.MatchString(account) {
 		return nil, ErrNotFound
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	l := e.ledger(account)
+	l.Lock()
+	defer l.Unlock()
 	changes, err := e.load(account)
 	if err != nil {
 		return nil, err
@@ -200,8 +290,9 @@ func (e *Executor) Get(account, id string) (json.RawMessage, error) {
 	if !accountPattern.MatchString(account) {
 		return nil, ErrNotFound
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	l := e.ledger(account)
+	l.Lock()
+	defer l.Unlock()
 	changes, err := e.load(account)
 	if err != nil {
 		return nil, err
@@ -225,8 +316,8 @@ func (e *Executor) Apply(ctx context.Context, account string, member files.FileS
 	if err != nil {
 		return "提交被拒绝，什么都没有改变：\n" + err.Error()
 	}
-	want, now := submission.Digest(), e.now()
-	e.mu.Lock()
+	want, now, l := submission.Digest(), e.now(), e.ledger(account)
+	l.Lock()
 	changes, err := e.load(account)
 	var found *change
 	if err == nil {
@@ -244,21 +335,28 @@ func (e *Executor) Apply(ctx context.Context, account string, member files.FileS
 	if found != nil {
 		granted = *found
 	}
-	e.mu.Unlock()
+	refused := l.refused
+	l.Unlock()
 	if err != nil {
 		return "暂时无法执行更改，什么都没有改变。"
 	}
 	if found == nil {
-		// The product service lets an invalid submission through without a card, so
-		// the assistant learns what is wrong with it instead of hearing that the
-		// member said no.
-		if _, _, err := e.check(ctx, account, member, submission); err != nil {
+		// The product service lets a submission Prepare refused through without
+		// a card, so the assistant learns what is wrong with it instead of
+		// hearing that the member said no. Nothing is looked at for a
+		// submission without a grant: Prepare's reasons are repeated, and any
+		// other submission is checked by its paths alone.
+		err := refused.err
+		if refused.digest != want || now.Sub(refused.at) > GrantTTL {
+			_, err = validate(account, submission)
+		}
+		if err != nil {
 			return "提交被拒绝，什么都没有改变：\n" + strings.TrimPrefix(err.Error(), ErrInvalid.Error()+"：\n")
 		}
 		return "这批更改没有得到用户本人的确认，什么都没有改变。"
 	}
 	done, failure := e.apply(ctx, account, member, granted)
-	e.mu.Lock()
+	l.Lock()
 	if changes, err := e.load(account); err == nil {
 		for i := range changes {
 			if changes[i].ID == granted.ID {
@@ -270,7 +368,7 @@ func (e *Executor) Apply(ctx context.Context, account string, member files.FileS
 		}
 		_ = e.save(account, changes)
 	}
-	e.mu.Unlock()
+	l.Unlock()
 	total := len(granted.Steps)
 	switch {
 	case failure == "":
@@ -287,9 +385,10 @@ func (e *Executor) Recent(account string) string {
 	if !accountPattern.MatchString(account) {
 		return "最近没有更改。"
 	}
-	e.mu.Lock()
+	l := e.ledger(account)
+	l.Lock()
 	changes, err := e.load(account)
-	e.mu.Unlock()
+	l.Unlock()
 	if err != nil || len(changes) == 0 {
 		return "最近没有更改。"
 	}
@@ -306,167 +405,202 @@ func (e *Executor) Recent(account string) string {
 	return strings.Join(lines, "\n")
 }
 
-// check validates a submission against what the member's paths hold now and
-// returns the planned steps with the staged contents to write.
-func (e *Executor) check(ctx context.Context, account string, member files.FileSystem, submission Submission) ([]step, [][]byte, error) {
-	var problems invalid
-	if len(submission.Operations) == 0 {
-		problems = append(problems, "没有任何操作")
+// reserve makes room for a new change's copies. A card its session still
+// waits for is void: Hermes asks for one answer at a time in a session, so
+// the new change replaces it. The copies of changes that can still be
+// applied, with those being made, stay within maxPending.
+func (e *Executor) reserve(account string, l *ledger, next change) (int64, error) {
+	l.Lock()
+	defer l.Unlock()
+	changes, err := e.load(account)
+	if err != nil {
+		return 0, err
 	}
-	var steps []step
-	var contents [][]byte
-	for i, op := range submission.Operations {
-		prefix := fmt.Sprintf("第 %d 项：", i+1)
-		s, content, problem := e.plan(ctx, account, member, op)
-		if problem != "" {
-			problems = append(problems, prefix+problem)
-			continue
+	now, held, replaced := e.now(), l.copying, false
+	for i := range changes {
+		c := &changes[i]
+		if next.SessionID != "" && c.SessionID == next.SessionID && c.Status == StatusAwaiting {
+			c.Status, c.DecidedAt, replaced = StatusExpired, now.Unix(), true
 		}
-		steps, contents = append(steps, s), append(contents, content)
+		if live(*c, now) {
+			held += c.staged()
+		}
 	}
-	if len(problems) > 0 {
-		return nil, nil, problems
+	if replaced {
+		if err := e.save(account, changes); err != nil {
+			return 0, err
+		}
 	}
-	return steps, contents, nil
+	staged := next.staged()
+	if staged > 0 && held+staged > maxPending {
+		return 0, invalid{fmt.Sprintf("还在等待确认的更改与这一批的暂存文件合计超过 %d MiB，等用户处理完那些更改再提交", maxPending>>20)}
+	}
+	l.copying += staged
+	return staged, nil
 }
 
-func (e *Executor) plan(ctx context.Context, account string, member files.FileSystem, op Operation) (step, []byte, string) {
-	switch op.Op {
-	case "write", "copy", "delete", "move", "mkdir":
-	default:
-		return step{}, nil, fmt.Sprintf("未知操作 %q", op.Op)
+// inspect looks at what the steps' paths are now, as the member, without
+// opening any of them. The staged files' sizes come first, so that a
+// submission over the limits is refused before anything else.
+func (e *Executor) inspect(ctx context.Context, member files.FileSystem, steps []step) error {
+	var problems invalid
+	var staged int64
+	for i := range steps {
+		s := &steps[i]
+		if s.Op != "write" {
+			continue
+		}
+		from, err := e.fingerprint(ctx, member, s.SourceRel)
+		switch {
+		case err != nil || !from.Exists || from.Kind != files.KindFile:
+			problems = append(problems, fmt.Sprintf("第 %d 项：source 必须是 %s 中已写好的文件", i+1, StagingDir))
+		case from.Size > MaxContent:
+			problems = append(problems, fmt.Sprintf("第 %d 项：%s 超过 %d MiB", i+1, s.Source, MaxContent>>20))
+		default:
+			s.SourceSize = from.Size
+			staged += from.Size
+		}
 	}
-	target, err := clean(op.Path)
-	if err != nil {
-		return step{}, nil, err.Error()
+	if staged > MaxStaged {
+		problems = append(problems, fmt.Sprintf("暂存文件合计超过 %d MiB", MaxStaged>>20))
 	}
-	rel, err := volumePath(account, target, true)
-	if err != nil {
-		return step{}, nil, err.Error()
+	if len(problems) > 0 {
+		return problems
 	}
-	s := step{Op: op.Op, Path: target, Rel: rel, Trash: trashFor(account, target)}
-	var head []byte
-	s.Before, head, err = e.fingerprint(ctx, member, rel)
-	if err != nil {
-		return step{}, nil, describe(err, target)
+	for i := range steps {
+		if problem := e.plan(ctx, member, &steps[i]); problem != "" {
+			problems = append(problems, fmt.Sprintf("第 %d 项：%s", i+1, problem))
+		}
 	}
-	if (op.Op == "delete" || op.Op == "move") && !s.Before.Exists {
-		return step{}, nil, target + " 不存在"
+	if len(problems) > 0 {
+		return problems
 	}
-	if (op.Op == "write" || op.Op == "copy") && s.Before.Exists && s.Before.Kind != files.KindFile {
-		return step{}, nil, target + " 不是普通文件"
+	return nil
+}
+
+// plan checks one step against what its paths are now and records them.
+func (e *Executor) plan(ctx context.Context, member files.FileSystem, s *step) string {
+	var err error
+	if s.Before, err = e.fingerprint(ctx, member, s.Rel); err != nil {
+		return describe(err, s.Path)
 	}
-	if head != nil {
-		s.BeforeText = preview(head)
+	if (s.Op == "delete" || s.Op == "move") && !s.Before.Exists {
+		return s.Path + " 不存在"
 	}
-	var content []byte
-	switch op.Op {
+	if (s.Op == "write" || s.Op == "copy") && s.Before.Exists && s.Before.Kind != files.KindFile {
+		return s.Path + " 不是普通文件"
+	}
+	switch s.Op {
 	case "move":
-		if s.To, err = clean(op.To); err != nil {
-			return step{}, nil, err.Error()
-		}
-		if s.ToRel, err = volumePath(account, s.To, true); err != nil {
-			return step{}, nil, err.Error()
-		}
-		to, _, err := e.fingerprint(ctx, member, s.ToRel)
+		to, err := e.fingerprint(ctx, member, s.ToRel)
 		if err != nil {
-			return step{}, nil, describe(err, s.To)
+			return describe(err, s.To)
 		}
 		if to.Exists {
-			return step{}, nil, s.To + " 已经存在"
+			return s.To + " 已经存在"
 		}
 	case "copy":
-		// Copied as the member when applied, from wherever the assistant reads;
-		// nothing is staged, so a file of any size can be copied.
-		if s.Source, err = clean(op.Source); err != nil {
-			return step{}, nil, err.Error()
-		}
-		if s.SourceRel, err = sourcePath(account, s.Source); err != nil {
-			return step{}, nil, err.Error()
-		}
-		from, _, err := e.fingerprint(ctx, member, s.SourceRel)
+		from, err := e.fingerprint(ctx, member, s.SourceRel)
 		switch {
 		case err != nil:
-			return step{}, nil, describe(err, s.Source)
+			return describe(err, s.Source)
 		case !from.Exists:
-			return step{}, nil, s.Source + " 不存在"
+			return s.Source + " 不存在"
 		case from.Kind != files.KindFile && from.Kind != files.KindDirectory:
-			return step{}, nil, s.Source + " 不能复制"
+			return s.Source + " 不能复制"
 		case from.Kind == files.KindDirectory && s.Before.Exists:
-			return step{}, nil, target + " 已经存在"
+			return s.Path + " 已经存在"
 		}
 		s.SourceBefore, s.SourceSize = &from, from.Size
 		if from.Kind == files.KindDirectory {
 			if s.SourceSize, err = member.Usage(ctx, e.abs(s.SourceRel)); err != nil {
-				return step{}, nil, describe(err, s.Source)
+				return describe(err, s.Source)
 			}
-		}
-	case "write":
-		source, err := clean(op.Source)
-		if err != nil {
-			return step{}, nil, err.Error()
-		}
-		sourceRel, err := volumePath(account, source, false)
-		if err != nil {
-			return step{}, nil, err.Error()
-		}
-		if content, err = e.read(ctx, member, sourceRel, MaxContent); err != nil {
-			if errors.Is(err, errTooLarge) {
-				return step{}, nil, fmt.Sprintf("%s 超过 %d MiB", source, MaxContent>>20)
-			}
-			return step{}, nil, fmt.Sprintf("source 必须是 %s 中已写好的文件", StagingDir)
 		}
 	}
-	return s, content, ""
+	return ""
 }
 
-var errTooLarge = errors.New("file too large")
+// keep copies, for each write, the start of the file it replaces and the
+// whole staged file into dir, as the member reads them, a block at a time.
+// The staged file must still be the size inspect saw; the SHA-256 of its copy
+// is recorded.
+func (e *Executor) keep(ctx context.Context, member files.FileSystem, steps []step, dir string) error {
+	var problems invalid
+	for i := range steps {
+		s := &steps[i]
+		if s.Op != "write" {
+			continue
+		}
+		name := filepath.Join(dir, fmt.Sprint(i))
+		if s.Before.Exists {
+			target, err := member.Open(ctx, e.abs(s.Rel))
+			if err != nil {
+				problems = append(problems, fmt.Sprintf("第 %d 项：%s", i+1, describe(err, s.Path)))
+				continue
+			}
+			if _, _, err := copyInto(name+".before", target, previewLimit); err != nil {
+				return err
+			}
+		}
+		source, err := member.Open(ctx, e.abs(s.SourceRel))
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("第 %d 项：source 必须是 %s 中已写好的文件", i+1, StagingDir))
+			continue
+		}
+		var copied int64
+		if s.Hash, copied, err = copyInto(name, source, s.SourceSize+1); err != nil {
+			return err
+		}
+		if copied != s.SourceSize {
+			problems = append(problems, fmt.Sprintf("第 %d 项：%s 正在被改写，写完后再提交", i+1, s.Source))
+		}
+	}
+	if len(problems) > 0 {
+		return problems
+	}
+	return nil
+}
+
+// copyInto copies up to limit bytes of from into a new file in Root, closes
+// from, and returns the SHA-256 and length of what it copied.
+func copyInto(name string, from *os.File, limit int64) (string, int64, error) {
+	defer func() { _ = from.Close() }()
+	file, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", 0, err
+	}
+	hash := sha256.New()
+	copied, err := io.Copy(io.MultiWriter(file, hash), io.LimitReader(from, limit))
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	return hex.EncodeToString(hash.Sum(nil)), copied, err
+}
+
+// errDamaged reports a kept copy that is no longer what was copied.
+var errDamaged = errors.New("kept copy changed")
 
 func (e *Executor) abs(rel string) string { return filepath.Join(e.Volume, filepath.FromSlash(rel)) }
 
-// fingerprint describes a target now, with the start of a file's text for the card.
-func (e *Executor) fingerprint(ctx context.Context, member files.FileSystem, rel string) (fingerprint, []byte, error) {
+// fingerprint describes a path now, without opening it.
+func (e *Executor) fingerprint(ctx context.Context, member files.FileSystem, rel string) (fingerprint, error) {
 	info, err := member.Lstat(ctx, e.abs(rel))
 	if errors.Is(err, fs.ErrNotExist) {
-		return fingerprint{Exists: false}, nil, nil
+		return fingerprint{Exists: false}, nil
 	}
 	if err != nil {
-		return fingerprint{}, nil, err
+		return fingerprint{}, err
 	}
-	seen := fingerprint{Exists: true, Kind: info.Kind, Size: info.Size, Inode: info.Inode, ModTime: info.ModTime.UnixNano()}
-	if info.Kind != files.KindFile {
-		return seen, nil, nil
-	}
-	head, err := e.read(ctx, member, rel, previewLimit)
-	if errors.Is(err, errTooLarge) || err == nil {
-		return seen, head, nil
-	}
-	return fingerprint{}, nil, err
-}
-
-// read reads up to limit bytes of a regular file as the member; errTooLarge
-// comes with what was read when the file is longer.
-func (e *Executor) read(ctx context.Context, member files.FileSystem, rel string, limit int64) ([]byte, error) {
-	file, err := member.Open(ctx, e.abs(rel))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = file.Close() }()
-	data, err := io.ReadAll(io.LimitReader(file, limit+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > limit {
-		return data[:limit], errTooLarge
-	}
-	return data, nil
+	return fingerprint{Exists: true, Kind: info.Kind, Size: info.Size, Inode: info.Inode, ModTime: info.ModTime.UnixNano()}, nil
 }
 
 // apply runs the steps as the member; it returns how many were done and why
 // it stopped, if it did.
 func (e *Executor) apply(ctx context.Context, account string, member files.FileSystem, c change) (int, string) {
+	dir := filepath.Join(e.Root, account, c.ID)
 	for _, s := range c.Steps {
-		now, _, err := e.fingerprint(ctx, member, s.Rel)
+		now, err := e.fingerprint(ctx, member, s.Rel)
 		if err != nil {
 			return 0, describe(err, s.Path)
 		}
@@ -474,12 +608,11 @@ func (e *Executor) apply(ctx context.Context, account string, member files.FileS
 			return 0, s.Path + " 在用户确认前后被改动过，请重新提交"
 		}
 		if s.SourceBefore != nil {
-			if now, _, err = e.fingerprint(ctx, member, s.SourceRel); err != nil || now != *s.SourceBefore {
+			if now, err = e.fingerprint(ctx, member, s.SourceRel); err != nil || now != *s.SourceBefore {
 				return 0, s.Source + " 在用户确认前后被改动过，请重新提交"
 			}
 		}
 	}
-	dir := filepath.Join(e.Root, account, c.ID)
 	for n, s := range c.Steps {
 		var err error
 		switch s.Op {
@@ -492,9 +625,8 @@ func (e *Executor) apply(ctx context.Context, account string, member files.FileS
 				err = member.Rename(ctx, e.abs(s.Rel), e.abs(s.ToRel))
 			}
 		case "write":
-			var content []byte
-			if content, err = os.ReadFile(filepath.Join(dir, fmt.Sprint(n))); err == nil {
-				err = e.write(ctx, member, s, content)
+			if err = e.write(ctx, member, s, filepath.Join(dir, fmt.Sprint(n))); errors.Is(err, errDamaged) {
+				return n, s.Path + " 的新内容已不完整，请重新提交"
 			}
 		case "copy":
 			err = e.copy(ctx, member, s)
@@ -506,7 +638,16 @@ func (e *Executor) apply(ctx context.Context, account string, member files.FileS
 	return len(c.Steps), ""
 }
 
-func (e *Executor) write(ctx context.Context, member files.FileSystem, s step, content []byte) error {
+// write copies the kept copy next to the target under a name of its own, a
+// block at a time and checking on the way that it is what was kept, moves a
+// file the target replaces into the recycle bin, and puts the new one in
+// place.
+func (e *Executor) write(ctx context.Context, member files.FileSystem, s step, kept string) error {
+	source, err := os.Open(kept)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = source.Close() }()
 	parent := e.abs(path.Dir(s.Rel))
 	if err := member.MkdirAll(ctx, parent); err != nil {
 		return err
@@ -515,9 +656,13 @@ func (e *Executor) write(ctx context.Context, member files.FileSystem, s step, c
 	if err != nil {
 		return err
 	}
-	_, err = file.Write(content)
+	hash := sha256.New()
+	written, err := io.Copy(io.MultiWriter(file, hash), io.LimitReader(source, s.SourceSize+1))
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
+	}
+	if err == nil && (written != s.SourceSize || hex.EncodeToString(hash.Sum(nil)) != s.Hash) {
+		err = errDamaged
 	}
 	if err == nil && s.Before.Exists {
 		err = e.toTrash(ctx, member, s)
@@ -622,6 +767,7 @@ func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 		Before *string `json:"before,omitempty"`
 		After  *string `json:"after,omitempty"`
 	}
+	dir := filepath.Join(e.Root, account, c.ID)
 	ops := make([]operation, 0, len(c.Steps))
 	for n, s := range c.Steps {
 		op := operation{Op: s.Op, Path: s.Path, To: s.To, Exists: s.Before.Exists}
@@ -630,8 +776,10 @@ func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 			op.From, op.Size, op.Folder = s.Source, &size, s.SourceBefore.Kind == files.KindDirectory
 		}
 		if s.Op == "write" {
-			op.Before = s.BeforeText
-			if data, err := readHead(filepath.Join(e.Root, account, c.ID, fmt.Sprint(n)), previewLimit); err == nil {
+			if data, err := readHead(filepath.Join(dir, fmt.Sprint(n)+".before"), previewLimit); err == nil {
+				op.Before = preview(data)
+			}
+			if data, err := readHead(filepath.Join(dir, fmt.Sprint(n)), previewLimit); err == nil {
 				op.After = preview(data)
 			}
 		}
@@ -667,7 +815,9 @@ func newID() (string, error) {
 	return hex.EncodeToString(raw), nil
 }
 
-// ---- state: Root/<account>/changes.json and Root/<account>/<id>/<step> ----
+// ---- state: Root/<account>/changes.json; for a write, the copy in
+// Root/<account>/<id>/<step> and the start of the file it replaces in
+// <step>.before ----
 
 func (e *Executor) accountDir(account string) (string, error) {
 	dir := filepath.Join(e.Root, account)
@@ -699,7 +849,9 @@ func (e *Executor) load(account string) ([]change, error) {
 }
 
 // save writes the account's changes, dropping the oldest beyond keepChanges
-// with their copies.
+// with their copies. A card nobody answered in time is void. A change that
+// can no longer be applied keeps only the start of each copy, which its card
+// shows, and nothing once it is older than the newest keepTexts.
 func (e *Executor) save(account string, changes []change) error {
 	dir, err := e.accountDir(account)
 	if err != nil {
@@ -708,6 +860,36 @@ func (e *Executor) save(account string, changes []change) error {
 	for len(changes) > keepChanges {
 		_ = os.RemoveAll(filepath.Join(dir, changes[0].ID))
 		changes = changes[1:]
+	}
+	now := e.now()
+	for i := range changes {
+		c := &changes[i]
+		if live(*c, now) {
+			continue
+		}
+		if c.Status == StatusAwaiting {
+			c.Status, c.DecidedAt = StatusExpired, now.Unix()
+		}
+		switch {
+		case i < len(changes)-keepTexts && c.Kept != keptNone:
+			if err := os.RemoveAll(filepath.Join(dir, c.ID)); err != nil {
+				return err
+			}
+			c.Kept = keptNone
+		case c.Kept == "":
+			for n, s := range c.Steps {
+				if s.Op != "write" {
+					continue
+				}
+				name := filepath.Join(dir, c.ID, fmt.Sprint(n))
+				if info, err := os.Stat(name); err == nil && info.Size() > previewLimit {
+					if err := os.Truncate(name, previewLimit); err != nil {
+						return err
+					}
+				}
+			}
+			c.Kept = keptStart
+		}
 	}
 	data, err := json.Marshal(changes)
 	if err != nil {
