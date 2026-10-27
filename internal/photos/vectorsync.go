@@ -178,10 +178,10 @@ func (s *Service) SyncVectors(ctx context.Context, index VectorIndex, report fun
 	if err != nil {
 		return false, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var q queued
 		if err := rows.Scan(&q.object, &q.version); err != nil {
-			_ = rows.Close()
 			return false, err
 		}
 		batch = append(batch, q)
@@ -269,12 +269,12 @@ ORDER BY e.object_id, a.library_id`, args...)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	points := make(map[string]vectorindex.Point)
 	for rows.Next() {
 		var object, library string
 		var vector []byte
 		if err := rows.Scan(&object, &vector, &library); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		point, ok := points[object]
@@ -431,10 +431,10 @@ ORDER BY e.object_id, a.library_id`, embeddingDerivation, current.model)
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var object, library string
 		if err := rows.Scan(&object, &library); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		want[object] = append(want[object], library)
