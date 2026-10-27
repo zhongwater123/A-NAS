@@ -299,6 +299,7 @@ func newHarness(t *testing.T, options ...string) *harness {
 	h.ready.Store(true)
 	identities := map[string]accounts.Identity{
 		"alice-token":    {Username: "alice", UID: 20101, Role: accounts.RoleMember, Enabled: true},
+		"bob-token":      {Username: "bob", UID: 20103, Role: accounts.RoleMember, Enabled: true},
 		"system-token":   {Username: "daemon", UID: 1, Role: accounts.RoleMember, Enabled: true},
 		"impostor-token": {Username: "mallory", UID: 20102, Role: accounts.RoleMember, Enabled: true},
 	}
@@ -311,8 +312,11 @@ func newHarness(t *testing.T, options ...string) *harness {
 			return exec.Command(os.Args[0], append([]string{WorkerArgument, volumeRoot}, options...)...)
 		},
 		LookupUID: func(username string) (int, error) {
-			if username == "alice" {
+			switch username {
+			case "alice":
 				return 20101, nil
+			case "bob":
+				return 20103, nil
 			}
 			return 0, errors.New("unknown user")
 		},

@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
 	"github.com/zhongwater123/A-NAS/internal/assistantlogin"
@@ -83,6 +85,9 @@ type Server struct {
 	executable string
 	mu         sync.Mutex
 	pools      map[workerKey]*pool
+	// starting starts one worker at a time per workerKey, outside mu, so an
+	// account whose worker waits on systemd holds up no other account (#277).
+	starting singleflight.Group
 	// assistants are the broker's copies of the assistant connections it
 	// handed out, cut when the broker stops.
 	assistants map[*net.UnixConn]struct{}
@@ -385,7 +390,7 @@ func (s *Server) takeWorker(ctx context.Context, key workerKey, identity account
 		s.mu.Lock()
 		if s.closed {
 			s.mu.Unlock()
-			return nil, errors.New("file broker is closed")
+			return nil, errClosed
 		}
 		p := s.pools[key]
 		if p == nil {
@@ -406,14 +411,14 @@ func (s *Server) takeWorker(ctx context.Context, key workerKey, identity account
 			}
 		}
 		if len(p.workers) < workersPerUser {
-			w, err := s.startWorker(key, identity)
-			if err == nil {
-				w.busy = true
-				p.workers = append(p.workers, w)
-				s.pools[key] = p
-			}
 			s.mu.Unlock()
-			return w, err
+			// The new worker joins the pool free, and this call looks again:
+			// another call may take it first, and then this one starts the
+			// next or waits.
+			if err := s.addWorker(ctx, key, identity); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		freed := p.freed
 		s.mu.Unlock()
@@ -422,6 +427,49 @@ func (s *Server) takeWorker(ctx context.Context, key workerKey, identity account
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+	}
+}
+
+var errClosed = errors.New("file broker is closed")
+
+// addWorker starts a worker for key's pool, unless the pool filled up
+// meanwhile. Calls for the same key share one start, and its failure; ctx
+// ending stops the wait, not the start, which the other calls may share.
+func (s *Server) addWorker(ctx context.Context, key workerKey, identity accounts.Identity) error {
+	started := s.starting.DoChan(fmt.Sprint(key), func() (any, error) {
+		// Only this function adds workers, and never twice at once for a key,
+		// so a pool below the limit here stays below it until the add.
+		s.mu.Lock()
+		full := s.pools[key] != nil && len(s.pools[key].workers) >= workersPerUser
+		s.mu.Unlock()
+		if full {
+			return nil, nil
+		}
+		w, err := s.startWorker(key, identity)
+		if err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			w.stop()
+			return nil, errClosed
+		}
+		p := s.pools[key]
+		if p == nil {
+			p = &pool{freed: make(chan struct{})}
+			s.pools[key] = p
+		}
+		p.workers = append(p.workers, w)
+		p.wake()
+		s.mu.Unlock()
+		return nil, nil
+	})
+	select {
+	case result := <-started:
+		return result.Err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -476,8 +524,9 @@ func (s *Server) startWorker(key workerKey, identity accounts.Identity) (*worker
 	return w, nil
 }
 
-// placeTimeout bounds asking systemd for a scope; workers start under the
-// broker's lock.
+// placeTimeout bounds asking systemd for a scope. Calls for the account
+// whose worker or shell is being placed wait that long at most; others do not
+// wait (#277).
 const placeTimeout = 5 * time.Second
 
 // place moves a worker or shell into a scope of its own. Web files and the

@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -279,6 +283,128 @@ func TestALongOperationDoesNotHoldUpTheMembersOtherCalls(t *testing.T) {
 	if got := h.spawned.Load(); got != workersPerUser {
 		t.Fatalf("spawned %d workers, want %d", got, workersPerUser)
 	}
+}
+
+// A worker waiting on systemd for its scope holds up its own account only:
+// another account's calls, on a worker it has or on a new one, go on (#277).
+func TestASlowPlacementHoldsUpNoOtherAccount(t *testing.T) {
+	h := newHarness(t)
+	placer := &slowPlacer{slow: "alice", delay: 3 * time.Second, entered: make(chan struct{}), release: make(chan struct{})}
+	h.server.config.Scopes = placer
+	t.Cleanup(placer.unblock)
+	bob := accounts.WithSessionToken(context.Background(), "bob-token")
+	space := filepath.Join(h.volume, "spaces", "bob")
+	if err := os.MkdirAll(space, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.client.Lstat(bob, space); err != nil {
+		t.Fatal(err)
+	}
+	alice := make(chan error, 1)
+	go func() {
+		_, err := h.client.Lstat(accounts.WithSessionToken(context.Background(), "alice-token"), h.volume)
+		alice <- err
+	}()
+	select {
+	case <-placer.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("alice's worker was never placed")
+	}
+	// Bob's free worker serves one call; a long scan holds it, so the next
+	// call starts a second worker while alice's is still being placed. Each
+	// call has less time than the placement takes.
+	quickly := func(what string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(bob, placer.delay/2)
+		defer cancel()
+		if _, err := h.client.Lstat(ctx, space); err != nil {
+			t.Fatalf("Lstat() on %s error = %v", what, err)
+		}
+	}
+	quickly("bob's worker")
+	held := holdScan(t, h, bob, filepath.Join(space, "hold-0"))
+	quickly("bob's new worker")
+	select {
+	case err := <-alice:
+		t.Fatalf("alice's call returned before her worker was placed: %v", err)
+	default:
+	}
+	held.cancel()
+	if err := receive(t, held.done); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled scan error = %v", err)
+	}
+	placer.unblock()
+	if err := receive(t, alice); err != nil {
+		t.Fatalf("alice's call error = %v", err)
+	}
+}
+
+// slowPlacer takes delay, or until unblock, to place slow's processes.
+type slowPlacer struct {
+	slow    string
+	delay   time.Duration
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+	enter   sync.Once
+}
+
+func (p *slowPlacer) Place(ctx context.Context, _ int, _, username string) error {
+	if username != p.slow {
+		return nil
+	}
+	p.enter.Do(func() { close(p.entered) })
+	select {
+	case <-p.release:
+	case <-time.After(p.delay):
+	case <-ctx.Done():
+	}
+	return nil
+}
+
+func (p *slowPlacer) unblock() { p.once.Do(func() { close(p.release) }) }
+
+// Calls that wait on the same worker start share it, and its failure.
+func TestAFailedStartReachesEveryCallWaitingOnIt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var lookups atomic.Int32
+		release := make(chan struct{})
+		server, err := NewServer(Config{
+			Sessions:     resolverFunc(func(string) (accounts.Identity, error) { return accounts.Identity{}, nil }),
+			VolumeRoot:   t.TempDir(),
+			VolumeReady:  func() bool { return true },
+			Command:      func(string) *exec.Cmd { return exec.Command("false") },
+			ProbeCommand: func() *exec.Cmd { return exec.Command("false") },
+			LookupUID: func(string) (int, error) {
+				lookups.Add(1)
+				<-release
+				return 0, errors.New("unknown user")
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		identity := accounts.Identity{Username: "alice", UID: 20101, Role: accounts.RoleMember, Enabled: true}
+		key := workerKey{uid: identity.UID, role: identity.Role}
+		const calls = 3
+		failures := make(chan error, calls)
+		for range calls {
+			go func() {
+				_, err := server.takeWorker(context.Background(), key, identity)
+				failures <- err
+			}()
+		}
+		synctest.Wait()
+		close(release)
+		for range calls {
+			if err := <-failures; err == nil || !strings.Contains(err.Error(), "not provisioned") {
+				t.Fatalf("takeWorker() error = %v, want the start's failure", err)
+			}
+		}
+		if got := lookups.Load(); got != 1 {
+			t.Fatalf("started %d times, want one start for the waiting calls", got)
+		}
+	})
 }
 
 func TestReapingStopsOnlyFreeWorkers(t *testing.T) {
