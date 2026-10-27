@@ -374,7 +374,7 @@ func (s *Service) processDetection(ctx context.Context, m models, gate Gate, inf
 		return false, s.returnDetection(context.WithoutCancel(ctx), input)
 	}
 	if input.err != nil || input.class == jobWaiting {
-		// The input waits for storage or the Media Worker; its jobs keep
+		// The input waits for storage or the FFmpeg Worker; its jobs keep
 		// their attempts.
 		var err error
 		for _, job := range jobs {

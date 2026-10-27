@@ -16,11 +16,11 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/clocktest"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
-// awayDecoder is a Media Worker that answers each HEIC or video frame with
+// awayDecoder is a FFmpeg Worker that answers each HEIC or video frame with
 // the next queued error until none is left, and then decodes. While held is
 // set, a decode reports on held and waits for its caller to give up.
 type awayDecoder struct {
@@ -58,7 +58,7 @@ func (d *awayDecoder) decode(ctx context.Context) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
-func (d *awayDecoder) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
+func (d *awayDecoder) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
 	return phoneVideo(), nil
 }
 func (d *awayDecoder) Image(ctx context.Context, _ *os.File, _ int) ([]byte, error) {
@@ -67,7 +67,7 @@ func (d *awayDecoder) Image(ctx context.Context, _ *os.File, _ int) ([]byte, err
 func (d *awayDecoder) Frame(ctx context.Context, _ *os.File, _ float64, _ int) ([]byte, error) {
 	return d.decode(ctx)
 }
-func (d *awayDecoder) Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error) {
+func (d *awayDecoder) Stream(context.Context, *os.File, ffmpegworker.StreamRequest) (io.ReadCloser, error) {
 	return nil, errors.New("not used")
 }
 
@@ -119,10 +119,10 @@ func TestThumbnailsAndAIWaitForAMediaWorkerThatIsAway(t *testing.T) {
 	asset := importPhoto(t, s, alice, private.ID, "", "IMG_0001.HEIC", heicBytes(1))
 
 	away := []error{
-		fmt.Errorf("%w: dial unix /run/a-nas-media/media.sock: connect: no such file or directory", mediaworker.ErrUnavailable),
-		fmt.Errorf("%w: EOF", mediaworker.ErrUnavailable), // systemd dropped the connection
-		mediaworker.ErrBusy,
-		fmt.Errorf("%w: decoder is unavailable", mediaworker.ErrUnavailable),
+		fmt.Errorf("%w: dial unix /run/a-nas-ffmpeg/ffmpeg.sock: connect: no such file or directory", ffmpegworker.ErrUnavailable),
+		fmt.Errorf("%w: EOF", ffmpegworker.ErrUnavailable), // systemd dropped the connection
+		ffmpegworker.ErrBusy,
+		fmt.Errorf("%w: decoder is unavailable", ffmpegworker.ErrUnavailable),
 	}
 	decoder.fail(away...)
 	for range away {
@@ -174,7 +174,7 @@ func TestAWorkerThatStopsWhileDecodingSpendsTheAttempts(t *testing.T) {
 	s, decoder, c, root := awayService(t)
 	private, _ := libraries(t, s, alice)
 	asset := importPhoto(t, s, alice, private.ID, "", "IMG_0002.HEIC", heicBytes(2))
-	stopped := fmt.Errorf("%w: EOF", mediaworker.ErrInterrupted)
+	stopped := fmt.Errorf("%w: EOF", ffmpegworker.ErrInterrupted)
 	decoder.fail(stopped, stopped, stopped)
 	for attempt := 1; attempt <= 3; attempt++ {
 		if ok, err := s.ProcessMediaJob(ctx); !ok || err != nil {
@@ -196,7 +196,7 @@ func TestAWorkerThatStopsWhileDecodingSpendsTheAttempts(t *testing.T) {
 
 	// Running out of time also spends attempts, and a later start retries it.
 	slow := importPhoto(t, s, alice, private.ID, "", "IMG_0003.HEIC", heicBytes(3))
-	timedOut := fmt.Errorf("%w: timed out", mediaworker.ErrFailed)
+	timedOut := fmt.Errorf("%w: timed out", ffmpegworker.ErrFailed)
 	decoder.fail(timedOut, context.DeadlineExceeded, timedOut)
 	for range 3 {
 		if ok, err := s.ProcessMediaJob(ctx); !ok || err != nil {

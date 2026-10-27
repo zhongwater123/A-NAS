@@ -266,10 +266,10 @@
 - 视频，2026-10-19：见[相册视频](photo-video.md#验收证据)。
 - 幻灯片与补传实况视频，2026-10-14：
   - 测试：[`Slideshow.test.tsx`](../../web/src/photos/Slideshow.test.tsx)（节奏不受视图重绘影响、暂停与手动切换、放完、等视图载入后面的照片），以及 `PhotosPanel.test.tsx` 中的全屏幻灯片、只收到静态画面的提示与补传 MOV。
-  - 环境：同一本地 systemd 环境，换装本分支，并装上新的 `anas-media.socket`。用 Windows Chrome 无头模式以真实鼠标与按键操作。
+  - 环境：同一本地 systemd 环境，换装本分支，并装上新的 `anas-ffmpeg.socket`。用 Windows Chrome 无头模式以真实鼠标与按键操作。
   - 节奏：连续四次换片间隔 4.91 秒，每次换片时旧照片都在新照片之下淡出。
   - 范围：开始时时间线只载入 37 张，幻灯片一路放完图库的全部 51 张后显示“放完了”。
-  - 实况照片：照片中 MakerNote 的 ContentIdentifier 与 MOV 的 QuickTime 元数据是同一标识，用 ffmpeg 生成，由真实的 ffprobe 读取。只拖入照片时出现提示和信息栏说明；再拖入 MOV 后提示“已为 1 张照片补上实况视频”，网格出现“动态照片”，查看器经媒体 Worker 播放。
+  - 实况照片：照片中 MakerNote 的 ContentIdentifier 与 MOV 的 QuickTime 元数据是同一标识，用 ffmpeg 生成，由真实的 ffprobe 读取。只拖入照片时出现提示和信息栏说明；再拖入 MOV 后提示“已为 1 张照片补上实况视频”，网格出现“动态照片”，查看器经 FFmpeg Worker 播放。
 
 ## 关联
 

@@ -151,12 +151,12 @@
 
 ## 验收证据
 
-- `go test ./internal/media/... ./internal/mediaworker/... ./internal/httpapi/...`：命名识别、NFO、扫描分类、可见性、进度与合集、播放方式判断、Worker 协议与 OpenAPI 契约。
+- `go test ./internal/media/... ./internal/ffmpegworker/... ./internal/httpapi/...`：命名识别、NFO、扫描分类、可见性、进度与合集、播放方式判断、Worker 协议与 OpenAPI 契约。
 - `go test ./internal/media/...` 另含：重命名片源连同字幕与海报一起改名、冲突与无权限时拒绝、进度保留；重命名电视剧时文件夹、各集与字幕一起改名，身份、收藏、年份和进度保留，共用文件夹的剧只改文件、同名的剧与没有可改之处时拒绝；跳转换流时等待空出的转码位置；转换流的 MIME 类型；海报解码在像素预算内排队（两张 3000 万像素的依次解码，3000 万与 1000 万的同时解码）、请求结束即放弃等待、排队有上限，解码器 panic 时放开预算并记日志，无法解码的版本在重启前只解码一次。
 - `npm test`（`web/src/media`）：导航、首页、详情、播放器进度保存、媒体库对话框，以及按分类筛选媒体库的上传、经传输中心队列整批上传、文件夹由 NAS 建立、同名文件跳过不覆盖和关闭窗口后的后台上传。
 - `npm test`（`web/src/media`）另含：不填名称的媒体库用所选文件夹的名字、点一下文件夹即选中、箭头进入文件夹；拖到首页的文件进入上传窗口且不被浏览器打开，上传窗口取得焦点、Esc 关闭；最近播放的剧集写明第几集；点剧集一行播放、双击标题只重命名不播放；换到下一集后播放器仍接收按键，音量按键显示提示。
 - `npm test`（`web/src/media`）另含：播放器内选集与片库换片；转换流在缓冲内跳转不重新转码、连续跳转只重新开始一次；`streamFeed` 读够 30 秒即停、回落到 15 秒继续、流结束、浏览器不支持时回退与设备忙的提示；从卡片重命名片源；双击片名重命名片源（Esc 取消、Enter 保存）；双击剧名重命名电视剧、双击一集的标题重命名它的片源；分类页的媒体库与排序下拉（含键盘选择）；播放器片库单击切到下一个媒体库、从展开的列表选择全部媒体库。
-- `scripts/system-test.sh`：媒体 Worker 以动态身份运行、没有网络、读不到数据卷与产品服务状态目录，产品服务能经它探测样例视频。
+- `scripts/system-test.sh`：FFmpeg Worker 以动态身份运行、没有网络、读不到数据卷与产品服务状态目录，产品服务能经它探测样例视频。
 - 本地 fake 模式加 FFmpeg 的界面检查：创建媒体库、扫描、首页、详情、直接播放与转码播放、字幕、收藏、合集和文件夹浏览；新图标在桌面、程序坞与标题栏的显示，窗口无浅色边框；从电影、电视剧、其他与媒体库页上传文件和剧集文件夹后无需重新扫描即出现，拖放上传与后台上传进度。
 - 本地 fake 模式加 FFmpeg 的播放检查（2026-10-13）：片库与选集面板换片；3 分钟 720p、10 秒关键帧间隔的 AC3 样片转封装播放时缓冲约领先 30 秒（改动前 2.4 秒），前进 10 秒不重新转码，跳到缓冲之外 0.5–0.8 秒后出画面（改动前 2.1 秒）；把 `Transformers.2007.720p.f4v` 重命名为 `变形金刚 (2007).f4v` 后片名识别为《变形金刚》。
 - 本地 fake 模式的界面检查（2026-10-14，无头 Chrome 1440×860 截图）：分类页媒体库与排序下拉的展开与当前项；电影片名、片源与剧名、单集标题双击后的输入框贴合名字宽度并显示扩展名与提示；播放器片库的媒体库按钮单击切换与展开列表。转换开销（同一容器内 FFmpeg，1080p H.264 + AC3 样片）：转封装 34 倍速、每 5 分钟 10.6 CPU 秒、256 MB；转码 5 倍速、每 5 分钟 493 CPU 秒。
@@ -167,5 +167,5 @@
 
 - 架构：[影视中心技术设计](../architecture/media-center.md)、[存储与文件架构](../architecture/storage-and-files.md)
 - ADR：[0017：影视中心经文件代理读取媒体，FFmpeg 在隔离 Worker 中运行](../adr/0017-run-the-media-center-through-the-file-broker.md)、[0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)
-- 代码：[`internal/media`](../../internal/media)、[`internal/mediaworker`](../../internal/mediaworker)、[`internal/mediaapi`](../../internal/mediaapi)、[`web/src/media`](../../web/src/media)（上传：[`Upload.tsx`](../../web/src/media/Upload.tsx)、[`uploads.ts`](../../web/src/media/uploads.ts)；原地重命名：[`EditableName.tsx`](../../web/src/media/EditableName.tsx)；下拉：[`Dropdown.tsx`](../../web/src/media/Dropdown.tsx)；重命名：[`rename.go`](../../internal/media/rename.go)）、[应用图标](../../web/src/MediaCenterGlyph.tsx)
+- 代码：[`internal/media`](../../internal/media)、[`internal/ffmpegworker`](../../internal/ffmpegworker)、[`internal/mediaapi`](../../internal/mediaapi)、[`web/src/media`](../../web/src/media)（上传：[`Upload.tsx`](../../web/src/media/Upload.tsx)、[`uploads.ts`](../../web/src/media/uploads.ts)；原地重命名：[`EditableName.tsx`](../../web/src/media/EditableName.tsx)；下拉：[`Dropdown.tsx`](../../web/src/media/Dropdown.tsx)；重命名：[`rename.go`](../../internal/media/rename.go)）、[应用图标](../../web/src/MediaCenterGlyph.tsx)
 - 测试：[`internal/media`](../../internal/media)、[`web/src/media`](../../web/src/media)、[系统测试](../../scripts/system-test.sh)

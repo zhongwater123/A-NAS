@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -23,7 +23,7 @@ func TestRealMotionPhotoCodecs(t *testing.T) {
 	if err != nil {
 		t.Skip("heif-enc not installed")
 	}
-	tools, ok := mediaworker.LocalTools()
+	tools, ok := ffmpegworker.LocalTools()
 	if !ok {
 		t.Skip("media codecs not installed")
 	}
@@ -42,7 +42,7 @@ func TestRealMotionPhotoCodecs(t *testing.T) {
 	}
 	still, _ := os.ReadFile(heic)
 	clip, _ := os.ReadFile(movie)
-	local := mediaworker.Local{Tools: tools}
+	local := ffmpegworker.Local{Tools: tools}
 	service, err := photos.Open(filepath.Join(dir, "store"), photos.Options{Media: local, DisableCapacityReserve: true})
 	if err != nil {
 		t.Fatal(err)

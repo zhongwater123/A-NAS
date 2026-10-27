@@ -40,7 +40,7 @@
 
 - Given：音乐文件夹里有 ALAC（`.m4a`）、APE、WMA、WavPack、AIFF 或 DSD 文件。
 - When：扫描到这些文件，成员播放并拖动进度条。
-- Then：扫描时由媒体 Worker 读出它们的标签、时长与封面，列表中与其他歌曲一样显示，无损格式带格式标记。播放时媒体 Worker 把第一条音轨解码为 FLAC 实时送给浏览器：有损源（如 WMA）解码后无损封装，不会再次有损编码；24 位无损源保留 24 位；DSD 等高于 192 kHz 的采样率降到 176.4 或 192 kHz。拖动进度条时从新的位置重新开始解码，进度条按歌曲全长显示；暂停超过 30 秒后放开解码流，继续播放时从原位置重新开始。媒体 Worker 不可用时这些歌曲提示“设备暂时无法转码这个文件”并跳到下一首；开发环境没有 FFmpeg 时它们只按文件名收录。
+- Then：扫描时由 FFmpeg Worker 读出它们的标签、时长与封面，列表中与其他歌曲一样显示，无损格式带格式标记。播放时 FFmpeg Worker 把第一条音轨解码为 FLAC 实时送给浏览器：有损源（如 WMA）解码后无损封装，不会再次有损编码；24 位无损源保留 24 位；DSD 等高于 192 kHz 的采样率降到 176.4 或 192 kHz。拖动进度条时从新的位置重新开始解码，进度条按歌曲全长显示；暂停超过 30 秒后放开解码流，继续播放时从原位置重新开始。FFmpeg Worker 不可用时这些歌曲提示“设备暂时无法转码这个文件”并跳到下一首；开发环境没有 FFmpeg 时它们只按文件名收录。
 
 ### 播放与队列
 
@@ -77,13 +77,13 @@
 - **后台扫描**需要成员的会话：扫描在打开窗口或点击重新扫描时开始，会话结束即停止，下次打开继续。同一时间只有一个成员的扫描在读文件；扫描进行中再次请求只会在结束后再扫一遍。扫描状态只保存在内存中，产品服务重启后下次打开重新扫描。
 - **派生数据**：歌曲索引与封面缩略图是派生数据，保存在产品服务状态目录（系统盘）的 `music.db` 与 `music-covers/` 中，可删除后由扫描重建。封面以内容的 SHA-256 命名，同一张封面只存一份 240 px 与 720 px 两种 JPEG；请求封面时只有调用者音乐库中引用它的歌曲才能取得。收藏、播放记录、歌单和音乐文件夹是用户数据，按成员保存在同一数据库中，以文件在空间内的稳定 ID 引用歌曲。
 - **共享空间索引共用**：共享空间中同一文件的标签只读取一次，供所有成员共用。这依赖共享空间对所有成员可读；若管理员通过其他途径收紧了某个共享子文件夹的读取权限，成员仍可能在音乐库中看到其中歌曲的名称，但无法播放。
-- **解析安全**：浏览器能播放的格式由 Go 库在产品服务进程内读取标签、封面和时长，单个文件的解析异常只跳过该文件；封面图片限 16 MB、5000 万像素，歌词文件只读前 1 MB。`.lrc` 与内嵌文本按 UTF-8 读取，失败时按 GB18030 读取。其余格式只由媒体 Worker 中的 FFmpeg 解析：每个请求一个无网络、看不到数据卷的独立进程，只收到成员身份打开的这一个只读描述符（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)）。
-- **媒体 Worker 不可用**：扫描时 Worker 暂时不可达，需要它的文件留到下次扫描再读，而不是以缺少标签或内嵌封面的状态入库；只有 Worker 能测的时长（Opus、裸 AAC）也留到下次扫描，而不是记为未知。扫描是后台工作，Worker 正在为他人播放或预览时排队等待，不会因为忙而跳过文件（[准入与失败](../architecture/media-center.md#准入与失败)）。完全没有 Worker（开发环境未装 FFmpeg）时这些文件按文件名收录、不能播放。播放请求返回 `decoder_unavailable`（503）或 `undecodable`（422）。
-- **时长**：MP3 时长按帧计算，首次扫描大型 MP3 库需要读取每首完整文件；Opus 与裸 AAC 的时长由媒体 Worker 的探测补齐。
+- **解析安全**：浏览器能播放的格式由 Go 库在产品服务进程内读取标签、封面和时长，单个文件的解析异常只跳过该文件；封面图片限 16 MB、5000 万像素，歌词文件只读前 1 MB。`.lrc` 与内嵌文本按 UTF-8 读取，失败时按 GB18030 读取。其余格式只由 FFmpeg Worker 中的 FFmpeg 解析：每个请求一个无网络、看不到数据卷的独立进程，只收到成员身份打开的这一个只读描述符（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)）。
+- **FFmpeg Worker 不可用**：扫描时 Worker 暂时不可达，需要它的文件留到下次扫描再读，而不是以缺少标签或内嵌封面的状态入库；只有 Worker 能测的时长（Opus、裸 AAC）也留到下次扫描，而不是记为未知。扫描是后台工作，Worker 正在为他人播放或预览时排队等待，不会因为忙而跳过文件（[准入与失败](../architecture/media-center.md#准入与失败)）。完全没有 Worker（开发环境未装 FFmpeg）时这些文件按文件名收录、不能播放。播放请求返回 `decoder_unavailable`（503）或 `undecodable`（422）。
+- **时长**：MP3 时长按帧计算，首次扫描大型 MP3 库需要读取每首完整文件；Opus 与裸 AAC 的时长由 FFmpeg Worker 的探测补齐。
 
 ## 验收证据
 
-- Go：[音乐库测试](../../internal/music/music_test.go) 用真实生成的 MP3（ID3v2 标签、GBK 文本、内嵌封面与 USLT 歌词）和 FLAC（Vorbis 注释）覆盖标签、封面、`.lrc`、按帧计算的时长、成员隔离、改名后保留身份与收藏、删除、音乐文件夹与歌单权限；[元数据测试](../../internal/music/metadata_test.go) 覆盖 GBK 修复不误伤拉丁文名、歌手与类型拆分、文件名推断和专辑分组；[HTTP 测试](../../internal/httpapi/music_test.go) 对照 [OpenAPI](../../api/openapi.yaml) 校验每个接口的请求与响应，并覆盖未登录、缺少 CSRF、Range 播放与带起点的解码流；[文件服务测试](../../internal/files/service_test.go) 覆盖按文件夹列出子树。需要解码的格式：音乐库测试用替身 Worker 覆盖探测标签（大小写与拼写不同的标签名、GBK）、24 位与 DSD 采样率的选择、超过结尾的起点、Worker 暂时不可达时文件、时长与内嵌封面留到下次扫描（`TestLengthsAndCoversWaitForAWorkerThatIsAway`）、没有 Worker 时按文件名收录；[媒体 Worker 测试](../../internal/mediaworker/worker_test.go) 覆盖 `audio` 请求的范围校验与 FFmpeg 参数。装有 FFmpeg 时 `TestRealFFmpegAudio` 与 `TestRealFFmpegDecodesThroughTheWorker` 用真实 FFmpeg 把 AIFF、WMA、WavPack 解码为 48 kHz/24 位 FLAC，并从真实文件读出标签与时长后经音乐库播放；已在 Debian 13 与 FFmpeg 7.1.5 的容器中通过。
+- Go：[音乐库测试](../../internal/music/music_test.go) 用真实生成的 MP3（ID3v2 标签、GBK 文本、内嵌封面与 USLT 歌词）和 FLAC（Vorbis 注释）覆盖标签、封面、`.lrc`、按帧计算的时长、成员隔离、改名后保留身份与收藏、删除、音乐文件夹与歌单权限；[元数据测试](../../internal/music/metadata_test.go) 覆盖 GBK 修复不误伤拉丁文名、歌手与类型拆分、文件名推断和专辑分组；[HTTP 测试](../../internal/httpapi/music_test.go) 对照 [OpenAPI](../../api/openapi.yaml) 校验每个接口的请求与响应，并覆盖未登录、缺少 CSRF、Range 播放与带起点的解码流；[文件服务测试](../../internal/files/service_test.go) 覆盖按文件夹列出子树。需要解码的格式：音乐库测试用替身 Worker 覆盖探测标签（大小写与拼写不同的标签名、GBK）、24 位与 DSD 采样率的选择、超过结尾的起点、Worker 暂时不可达时文件、时长与内嵌封面留到下次扫描（`TestLengthsAndCoversWaitForAWorkerThatIsAway`）、没有 Worker 时按文件名收录；[FFmpeg Worker 测试](../../internal/ffmpegworker/worker_test.go) 覆盖 `audio` 请求的范围校验与 FFmpeg 参数。装有 FFmpeg 时 `TestRealFFmpegAudio` 与 `TestRealFFmpegDecodesThroughTheWorker` 用真实 FFmpeg 把 AIFF、WMA、WavPack 解码为 48 kHz/24 位 FLAC，并从真实文件读出标签与时长后经音乐库播放；已在 Debian 13 与 FFmpeg 7.1.5 的容器中通过。
 - 前端：[音乐库模型测试](../../web/src/music/library.test.ts) 覆盖专辑、歌手、类型、文件夹的整理、排序、拼音搜索、LRC 与歌单排序；[窗口测试](../../web/src/music/MusicPanel.test.tsx) 覆盖加载并开始扫描、双击播放、拖动解码中的歌曲时带新起点重新请求、收藏、从右键菜单新建歌单与空音乐库。
 - 浏览器检查：Fake 模式本地栈中用合成的 39 首示例歌曲（FLAC/WAV/GBK 标签 MP3、内嵌与文件夹封面、`.lrc` 歌词）检查首次扫描、播放与自动下一首、歌词滚动、拼音搜索、队列、专辑/类型/文件夹/歌手视图、新建歌单、音乐文件夹选择，以及 1440×900 最大化与 660 px 窄窗口布局；在 Debian 13 + FFmpeg 7.1.5 容器中运行的栈上，用 FFmpeg 生成的 ALAC（带封面）、WavPack、AIFF（ID3）与 WMA 检查了标签、封面、时长、播放与拖动后从新起点继续播放。
 
@@ -92,5 +92,5 @@
 - 规格：[基础存储与共享](basic-storage-and-sharing.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)
 - 架构：[架构总览](../architecture/OVERVIEW.md)、[存储与文件架构](../architecture/storage-and-files.md)
 - ADR：[ADR 0018：音乐以文件代理原地索引](../adr/0018-index-music-in-place-through-the-file-broker.md)、[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[ADR 0006](../adr/0006-use-a-managed-photo-library.md)
-- 代码：[音乐库](../../internal/music/music.go)、[扫描](../../internal/music/scan.go)、[元数据](../../internal/music/metadata.go)、[媒体 Worker](../../internal/mediaworker/protocol.go)、[封面](../../internal/music/covers.go)、[HTTP 接口](../../internal/musicapi/musicapi.go)、[音乐窗口](../../web/src/music/MusicPanel.tsx)、[播放器](../../web/src/music/player.ts)、[音乐库模型](../../web/src/music/library.ts)
+- 代码：[音乐库](../../internal/music/music.go)、[扫描](../../internal/music/scan.go)、[元数据](../../internal/music/metadata.go)、[FFmpeg Worker](../../internal/ffmpegworker/protocol.go)、[封面](../../internal/music/covers.go)、[HTTP 接口](../../internal/musicapi/musicapi.go)、[音乐窗口](../../web/src/music/MusicPanel.tsx)、[播放器](../../web/src/music/player.ts)、[音乐库模型](../../web/src/music/library.ts)
 - 测试：见“验收证据”

@@ -20,7 +20,7 @@ import (
 	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 // formats maps the audio file extensions the library indexes to their format.
@@ -137,7 +137,7 @@ var lossyCodecs = map[string]bool{
 // worker's probe, and reports the audio format. Container tag names differ in
 // case and spelling ("album_artist", "Album Artist"), so they are compared
 // without case or separators.
-func fromProbe(m *metadata, probe mediaworker.Probe) audioFormat {
+func fromProbe(m *metadata, probe ffmpegworker.Probe) audioFormat {
 	tags := map[string]string{}
 	collect := func(values map[string]string) {
 		for key, value := range values {
@@ -205,8 +205,8 @@ func fromProbe(m *metadata, probe mediaworker.Probe) audioFormat {
 // playbackRequest asks the media worker for FLAC that browsers play: 24 bits
 // for wide lossless sources, and sample rates above 192 kHz (DSD decodes to
 // 352.8 kHz) halved within their family.
-func playbackRequest(sampleRate, bits int, start float64) mediaworker.AudioRequest {
-	request := mediaworker.AudioRequest{Start: start, Bits: 16}
+func playbackRequest(sampleRate, bits int, start float64) ffmpegworker.AudioRequest {
+	request := ffmpegworker.AudioRequest{Start: start, Bits: 16}
 	if bits > 16 {
 		request.Bits = 24
 	}

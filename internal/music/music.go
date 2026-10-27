@@ -5,7 +5,7 @@
 // production every read runs as the signed-in member through the File Broker
 // (ADR 0008, ADR 0018) and the library never opens a file its member cannot.
 // Formats browsers cannot play are probed and decoded by the shared media
-// worker (mediaworker); this package only decides what to ask it for.
+// worker (ffmpegworker); this package only decides what to ask it for.
 package music
 
 import (
@@ -27,8 +27,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 var (
@@ -80,7 +80,7 @@ type Options struct {
 	Logger *slog.Logger
 	// Worker reads and decodes the formats browsers cannot play. Without
 	// one they are indexed from their names and cannot be played.
-	Worker mediaworker.Worker
+	Worker ffmpegworker.Worker
 }
 
 type Service struct {
@@ -88,7 +88,7 @@ type Service struct {
 	covers  coverStore
 	files   Files
 	spaces  Spaces
-	worker  mediaworker.Worker
+	worker  ffmpegworker.Worker
 	now     func() time.Time
 	random  io.Reader
 	logger  *slog.Logger
@@ -302,9 +302,9 @@ func decoderError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, mediaworker.ErrUnavailable):
+	case errors.Is(err, ffmpegworker.ErrUnavailable):
 		return fmt.Errorf("%w: %w", ErrDecoderUnavailable, err)
-	case errors.Is(err, mediaworker.ErrUnreadable), errors.Is(err, mediaworker.ErrInvalid):
+	case errors.Is(err, ffmpegworker.ErrUnreadable), errors.Is(err, ffmpegworker.ErrInvalid):
 		return fmt.Errorf("%w: %w", ErrUndecodable, err)
 	}
 	return err

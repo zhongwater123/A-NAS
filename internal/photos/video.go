@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 // Videos are photo assets too (docs/specs/photo-video.md): they share the
 // Catalog, Policy, albums, copies and trash with photos, and their original
 // is an immutable content object like any other. What sets them apart is
-// kept per content object in the videos table: the Media Worker reads a
+// kept per content object in the videos table: the FFmpeg Worker reads a
 // video once at import, a frame of it becomes the thumbnail, and a browser
 // plays either the original or a stream the Worker converts it into.
 // Videos take no part in local AI: no vector, detection or face scan is
@@ -65,7 +65,7 @@ type videoInfo struct {
 	Audio string `json:"audio,omitempty"`
 }
 
-// videoFacts is what the Media Worker read from a video original.
+// videoFacts is what the FFmpeg Worker read from a video original.
 type videoFacts struct {
 	duration float64
 	info     videoInfo
@@ -90,19 +90,19 @@ func hiddenVideos(p Principal, objectID string) string {
 	return " AND " + notVideo(objectID)
 }
 
-// readVideo asks the Media Worker what a staged video original holds and
+// readVideo asks the FFmpeg Worker what a staged video original holds and
 // accepts it only with a readable video stream of a known container.
 func (s *Service) readVideo(ctx context.Context, staged *stagedObject) error {
 	if s.media == nil {
-		return mediaworker.ErrUnavailable
+		return ffmpegworker.ErrUnavailable
 	}
 	file, err := s.root.Open(staged.name)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = file.Close() }()
-	probe, err := s.media.Probe(mediaworker.WithTimeout(ctx, videoProbeTimeout), file)
-	if errors.Is(err, mediaworker.ErrUnreadable) {
+	probe, err := s.media.Probe(ffmpegworker.WithTimeout(ctx, videoProbeTimeout), file)
+	if errors.Is(err, ffmpegworker.ErrUnreadable) {
 		return ErrUnsupportedType
 	}
 	if err != nil {
@@ -119,7 +119,7 @@ func (s *Service) readVideo(ctx context.Context, staged *stagedObject) error {
 // videoContainers are the FFmpeg formats a video original may come in.
 var videoContainers = []string{"mov", "mp4", "matroska", "webm", "avi", "mpegts"}
 
-func videoFromProbe(probe mediaworker.Probe) (videoFacts, photoMetadata, bool) {
+func videoFromProbe(probe ffmpegworker.Probe) (videoFacts, photoMetadata, bool) {
 	duration := probe.Format.Duration
 	if math.IsNaN(duration) || math.IsInf(duration, 0) || duration <= 0 {
 		return videoFacts{}, photoMetadata{}, false
@@ -212,12 +212,12 @@ func posterTime(duration float64) float64 { return math.Min(duration/10, 1) }
 // already turns it by the display matrix.
 func (s *Service) renderVideoFrame(ctx context.Context, file *os.File, duration float64, edge, quality int) ([]byte, int, int, error) {
 	if s.media == nil {
-		return nil, 0, 0, mediaworker.ErrUnavailable
+		return nil, 0, 0, ffmpegworker.ErrUnavailable
 	}
-	ctx = mediaworker.WithTimeout(ctx, frameTimeout)
+	ctx = ffmpegworker.WithTimeout(ctx, frameTimeout)
 	at := posterTime(duration)
 	frame, err := s.media.Frame(ctx, file, at, posterEdge)
-	if errors.Is(err, mediaworker.ErrUnreadable) && at > 0 {
+	if errors.Is(err, ffmpegworker.ErrUnreadable) && at > 0 {
 		// A seek into a stream without an index, such as a transport
 		// stream with few keyframes, can find nothing to decode.
 		frame, err = s.media.Frame(ctx, file, 0, posterEdge)
@@ -269,7 +269,7 @@ var browserAudio = []string{"aac", "mp3", "opus", "vorbis", "flac"}
 // decideVideo picks the cheapest way a browser with caps plays a video, as
 // the media center does: the original, its video copied into fragmented MP4
 // with the sound converted, or a conversion to H.264 of at most 1080 lines.
-func decideVideo(info videoInfo, caps BrowserCaps) (string, mediaworker.StreamRequest) {
+func decideVideo(info videoInfo, caps BrowserCaps) (string, ffmpegworker.StreamRequest) {
 	tenBit := strings.Contains(info.PixelFormat, "10")
 	videoOK := false
 	switch info.Codec {
@@ -295,7 +295,7 @@ func decideVideo(info videoInfo, caps BrowserCaps) (string, mediaworker.StreamRe
 		webm := (info.Codec == "vp8" || info.Codec == "vp9" || info.Codec == "av1") && (info.Audio == "" || info.Audio == "opus" || info.Audio == "vorbis")
 		containerOK = webm && caps.WebM || caps.Matroska
 	}
-	request := mediaworker.StreamRequest{AudioTrack: -1}
+	request := ffmpegworker.StreamRequest{AudioTrack: -1}
 	if info.Audio != "" {
 		request.AudioTrack = 0
 	}
@@ -313,7 +313,7 @@ func decideVideo(info videoInfo, caps BrowserCaps) (string, mediaworker.StreamRe
 
 // streamMime is the type of the fragmented MP4 a stream produces. Browsers
 // take each codec's profile and level from the stream itself.
-func streamMime(info videoInfo, request mediaworker.StreamRequest) string {
+func streamMime(info videoInfo, request ffmpegworker.StreamRequest) string {
 	codecs := []string{"avc1.640033"}
 	if request.CopyVideo && request.HEVC {
 		codecs[0] = "hvc1.1.6.L153.B0"
@@ -389,7 +389,7 @@ type VideoStreamRequest struct {
 	Caps      BrowserCaps
 }
 
-// StreamVideo converts a video into fragmented MP4 through the Media Worker.
+// StreamVideo converts a video into fragmented MP4 through the FFmpeg Worker.
 // The request owns the conversion: closing the stream ends FFmpeg and frees
 // its slot. At most maxVideoStreams run at once.
 func (s *Service) StreamVideo(ctx context.Context, p Principal, assetID string, request VideoStreamRequest) (io.ReadCloser, error) {
@@ -401,7 +401,7 @@ func (s *Service) StreamVideo(ctx context.Context, p Principal, assetID string, 
 		return nil, ErrInvalidStart
 	}
 	if s.media == nil {
-		return nil, mediaworker.ErrUnavailable
+		return nil, ffmpegworker.ErrUnavailable
 	}
 	info, err := s.videoInfo(ctx, record.objectID)
 	if err != nil {

@@ -1,4 +1,4 @@
-package mediaworker
+package ffmpegworker
 
 import (
 	"context"
@@ -109,7 +109,7 @@ func (l Local) connect(ctx context.Context) (*net.UnixConn, error) {
 	}
 	conns := make([]*net.UnixConn, 2)
 	for i, descriptor := range pair {
-		file := os.NewFile(uintptr(descriptor), "media-worker")
+		file := os.NewFile(uintptr(descriptor), "ffmpeg-worker")
 		conn, err := net.FileConn(file)
 		_ = file.Close()
 		if err != nil {

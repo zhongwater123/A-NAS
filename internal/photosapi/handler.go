@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -685,9 +685,9 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "invalid_motion_photo", err.Error())
 	case errors.Is(err, photos.ErrNoLiveStill):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "live_photo_not_found", "这个图库里没有在等这段视频的实况照片：请拖到放着对应照片的图库，并使用未修改的原件")
-	case errors.Is(err, mediaworker.ErrUnavailable):
+	case errors.Is(err, ffmpegworker.ErrUnavailable):
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "媒体解码服务暂不可用，请稍后重试")
-	case errors.Is(err, mediaworker.ErrUnreadable):
+	case errors.Is(err, ffmpegworker.ErrUnreadable):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "unreadable_media", "动态片段无法读取，请选择未修改的原件")
 	case errors.Is(err, photos.ErrNoMetadata):
 		httpjson.WriteError(w, http.StatusUnsupportedMediaType, "no_metadata", "视频的拍摄信息还读不了，只有照片的可以")

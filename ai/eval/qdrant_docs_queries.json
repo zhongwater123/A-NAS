@@ -17,7 +17,7 @@
   {"q": "成员分享的文件副本是怎么从发送者复制到 shares 目录的？", "target": "architecture/member-sharing.md#组件与数据流"},
   {"q": "两万张照片的向量在 Catalog 里要占多少空间？", "target": "architecture/photo-ai.md#存储（Catalog migration 4–7）"},
   {"q": "宠物识别为什么可能把同一只狗拆成两个？", "target": "architecture/photo-people.md#风险"},
-  {"q": "媒体 Worker 支持哪几种请求？", "target": "architecture/media-center.md#Worker 协议"},
+  {"q": "FFmpeg Worker 支持哪几种请求？", "target": "architecture/media-center.md#Worker 协议"},
   {"q": "AI Worker 在实验 NAS 上第一次部署时模型和运行环境装在哪个目录？", "target": "runbooks/enable-photo-ai.md#首次实机部署证据"},
   {"q": "怎么把本机的 kiosk 显示会话卸掉但不影响 API 和 SSH？", "target": "runbooks/operate-local-kiosk.md#回滚"},
   {"q": "在 Windows 上怎么把 AI 运行环境暂存到实验 NAS？", "target": "runbooks/enable-photo-ai.md#步骤"},

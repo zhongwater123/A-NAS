@@ -91,12 +91,13 @@ install -m 0644 anas-shares-system.service.incoming anas-shares-system.service
 install -m 0750 install-v1.0.1-system-services.sh.incoming install-v1.0.1-system-services.sh
 install -m 0750 provision-v1.0.1-rc.sh.incoming provision-v1.0.1-rc.sh
 install -m 0750 install-screensavers.sh.incoming install-screensavers.sh
+install -m 0750 install-ffmpeg-units.sh.incoming install-ffmpeg-units.sh
 install -m 0644 anas-system.slice.incoming anas-system.slice
 install -m 0644 anas-ai-system.socket.incoming anas-ai-system.socket
 install -m 0644 anas-ai-system.service.incoming anas-ai-system.service
-install -m 0644 anas-media-system.socket.incoming anas-media-system.socket
-install -m 0644 anas-media-system@.service.incoming anas-media-system@.service
-install -m 0644 anas-media-system.slice.incoming anas-media-system.slice
+install -m 0644 anas-ffmpeg-system.socket.incoming anas-ffmpeg-system.socket
+install -m 0644 anas-ffmpeg-system@.service.incoming anas-ffmpeg-system@.service
+install -m 0644 anas-ffmpeg-system.slice.incoming anas-ffmpeg-system.slice
 install -m 0644 anas-vectors-system.slice.incoming anas-vectors-system.slice
 install -m 0644 anas-vectors-system@.service.incoming anas-vectors-system@.service
 install -m 0644 anas-vectors-proxy-system@.socket.incoming anas-vectors-proxy-system@.socket
@@ -144,9 +145,9 @@ rm -f \
   anas-system.slice.incoming \
   anas-ai-system.socket.incoming \
   anas-ai-system.service.incoming \
-  anas-media-system.socket.incoming \
-  anas-media-system@.service.incoming \
-  anas-media-system.slice.incoming \
+  anas-ffmpeg-system.socket.incoming \
+  anas-ffmpeg-system@.service.incoming \
+  anas-ffmpeg-system.slice.incoming \
   anas-vectors-system.slice.incoming \
   anas-vectors-system@.service.incoming \
   anas-vectors-proxy-system@.socket.incoming \
@@ -176,7 +177,8 @@ rm -f \
   anas-shares-system.service.incoming \
   install-v1.0.1-system-services.sh.incoming \
   provision-v1.0.1-rc.sh.incoming \
-  install-screensavers.sh.incoming
+  install-screensavers.sh.incoming \
+  install-ffmpeg-units.sh.incoming
 
 {
   printf 'version=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\nmode=%s\nsource=%s\n' \

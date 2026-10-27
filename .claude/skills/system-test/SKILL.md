@@ -1,6 +1,6 @@
 ---
 name: system-test
-description: 运行 A-NAS 的 systemd 系统测试（scripts/system-test.sh）。它在以 systemd 为 PID 1 的一次性 Debian 13 容器中，用真实安装器、unit 与发布二进制安装整套服务，再按用户检查 Web 文件、SMB、相册、媒体 Worker、终端、局域网入口与 AI 助手沙箱的权限边界。修改服务单元、安装器、Host Agent、文件代理、文件权限或助手沙箱后，以及部署前使用。
+description: 运行 A-NAS 的 systemd 系统测试（scripts/system-test.sh）。它在以 systemd 为 PID 1 的一次性 Debian 13 容器中，用真实安装器、unit 与发布二进制安装整套服务，再按用户检查 Web 文件、SMB、相册、FFmpeg Worker、终端、局域网入口与 AI 助手沙箱的权限边界。修改服务单元、安装器、Host Agent、文件代理、文件权限或助手沙箱后，以及部署前使用。
 ---
 
 # 运行 systemd 系统测试
@@ -32,6 +32,7 @@ echo "PASS: $(grep -c '^PASS' "$dst.system-test.log" || true)"; grep '^FAIL' "$d
 
 ## 变体
 
+- 改名前的 FFmpeg Worker：将上一版本的 Linux `anas-api` 构建产物放在当前测试副本的 `build/legacy-anas-api`，测试会以旧 `media-worker` 子命令、旧单元与旧套接字验证回滚，再用真实安装器升级并验证音乐解码。没有该文件时，仍测试旧单元布局与切换清理，但解码器用本次构建；输出会明确区分。只复制可确认来源的本地构建产物，不提交二进制。
 - 真实模型：先运行 `scripts/build-ai-runtime.sh`，再设 `ANAS_SYSTEM_TEST_AI=real`，并用 `ANAS_AI_MODEL`、`ANAS_AI_DETECTOR`、`ANAS_AI_FACES` 与 `ANAS_AI_PETS` 指向模型。这些变量的含义见脚本开头的注释，模型位置见本地环境。
 - AI 助手：`ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 指向 `ai/assistant-spike` 构建的 `runtime.tar.gz` 时，会加上策略检查与一个对接脚本化模型的真实助手。
 

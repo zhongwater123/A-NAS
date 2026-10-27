@@ -12,10 +12,10 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/filesapi"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 // API renders with previews; nil answers preview_unavailable.
@@ -54,9 +54,9 @@ func (a *API) preview(w http.ResponseWriter, r *http.Request, session accounts.S
 	result, err := a.previews.Render(r.Context(), session.User, r.PathValue("fileID"), size)
 	if err != nil {
 		switch {
-		case errors.Is(err, filepreview.ErrUnsupported), errors.Is(err, mediaworker.ErrUnreadable):
+		case errors.Is(err, filepreview.ErrUnsupported), errors.Is(err, ffmpegworker.ErrUnreadable):
 			httpjson.WriteError(w, http.StatusUnprocessableEntity, "preview_unsupported", "this file cannot be previewed")
-		case errors.Is(err, mediaworker.ErrUnavailable), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+		case errors.Is(err, ffmpegworker.ErrUnavailable), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 			httpjson.WriteError(w, http.StatusServiceUnavailable, "preview_unavailable", "file preview is unavailable")
 		default:
 			filesapi.WriteError(w, r, a.logger, err)

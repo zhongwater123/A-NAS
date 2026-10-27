@@ -15,14 +15,14 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
-type previewWorker struct{ mediaworker.Worker }
+type previewWorker struct{ ffmpegworker.Worker }
 
 func (previewWorker) Image(context.Context, *os.File, int) ([]byte, error) {
 	var b bytes.Buffer

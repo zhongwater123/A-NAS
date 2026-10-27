@@ -1,9 +1,9 @@
-// Package mediaworker is the one place A-NAS runs media decoders (ADR 0017,
+// Package ffmpegworker is the one place A-NAS runs media decoders (ADR 0017,
 // ADR 0018). It knows nothing about the apps that use it: the media center,
 // music library and ordinary file previews adapt its typed operations.
 //
 // In production systemd starts one worker process per connection on
-// /run/a-nas-media/media.sock, under a dynamic identity with no network and
+// /run/a-nas-ffmpeg/ffmpeg.sock, under a dynamic identity with no network and
 // no view of the data volume or the Product Service's state. The Product
 // Service sends a typed request with the file's read-only descriptor
 // attached; the worker builds the decoder command itself, so a request can
@@ -13,7 +13,7 @@
 //
 // Development runs the same server on one end of a socket pair in-process
 // (Local), so both paths share the protocol and the commands.
-package mediaworker
+package ffmpegworker
 
 import (
 	"encoding/binary"
@@ -42,7 +42,7 @@ var (
 	// ErrUnavailable reports that no worker took the request: none could be
 	// reached, none was free, or it has no decoder for the request. The same
 	// request may succeed later.
-	ErrUnavailable = errors.New("media worker is unavailable")
+	ErrUnavailable = errors.New("FFmpeg worker is unavailable")
 	// ErrBusy reports that every slot a request may use stayed taken while
 	// someone waited for it. It is also ErrUnavailable.
 	ErrBusy = fmt.Errorf("%w: every slot is taken", ErrUnavailable)
@@ -53,11 +53,11 @@ var (
 	ErrInterrupted = fmt.Errorf("%w: it stopped before it finished", ErrUnavailable)
 	// ErrFailed reports that the worker could not finish, as when its decoder
 	// ran out of time.
-	ErrFailed = errors.New("media worker failed")
+	ErrFailed = errors.New("FFmpeg worker failed")
 	// ErrUnreadable reports that FFmpeg cannot read the file.
-	ErrUnreadable = errors.New("media worker cannot read the file")
+	ErrUnreadable = errors.New("FFmpeg worker cannot read the file")
 	// ErrInvalid reports a request the worker refused.
-	ErrInvalid = errors.New("media worker request is invalid")
+	ErrInvalid = errors.New("FFmpeg worker request is invalid")
 )
 
 // Error codes in a response.
@@ -151,7 +151,7 @@ func writeFrame(conn *net.UnixConn, value any, file *os.File) error {
 		return err
 	}
 	if len(body) > maxFrame {
-		return errors.New("media worker message is too large")
+		return errors.New("FFmpeg worker message is too large")
 	}
 	header := make([]byte, 4)
 	binary.BigEndian.PutUint32(header, uint32(len(body)))
@@ -189,7 +189,7 @@ func readFrame(conn *net.UnixConn, value any) (*os.File, error) {
 	length := binary.BigEndian.Uint32(header)
 	if length > maxFrame {
 		closeFile(file)
-		return nil, errors.New("media worker message is too large")
+		return nil, errors.New("FFmpeg worker message is too large")
 	}
 	body := make([]byte, length)
 	if _, err := io.ReadFull(conn, body); err != nil {
@@ -198,7 +198,7 @@ func readFrame(conn *net.UnixConn, value any) (*os.File, error) {
 	}
 	if err := json.Unmarshal(body, value); err != nil {
 		closeFile(file)
-		return nil, fmt.Errorf("decode media worker message: %w", err)
+		return nil, fmt.Errorf("decode FFmpeg worker message: %w", err)
 	}
 	return file, nil
 }

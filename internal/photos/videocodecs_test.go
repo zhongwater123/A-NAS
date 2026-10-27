@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -20,7 +20,7 @@ import (
 // thumbnail, poster and conversion. Run in the disposable Debian codec test
 // image, as the motion photo codec test is.
 func TestRealVideoCodecs(t *testing.T) {
-	tools, ok := mediaworker.LocalTools()
+	tools, ok := ffmpegworker.LocalTools()
 	if !ok {
 		t.Skip("media codecs not installed")
 	}
@@ -50,7 +50,7 @@ func TestRealVideoCodecs(t *testing.T) {
 		"camera.avi":    encode("camera.avi", append(append([]string{}, source...), "-c:v", "mjpeg", "-c:a", "pcm_s16le", "-shortest")...),
 		"camcorder.mts": encode("camcorder.mts", append(append(append([]string{}, source...), h264...), "-f", "mpegts")...),
 	}
-	service, err := photos.Open(filepath.Join(dir, "store"), photos.Options{Media: mediaworker.Local{Tools: tools}, DisableCapacityReserve: true})
+	service, err := photos.Open(filepath.Join(dir, "store"), photos.Options{Media: ffmpegworker.Local{Tools: tools}, DisableCapacityReserve: true})
 	if err != nil {
 		t.Fatal(err)
 	}

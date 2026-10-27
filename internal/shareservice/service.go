@@ -21,8 +21,8 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/sharefiles"
 	"github.com/zhongwater123/A-NAS/internal/shares"
 	"github.com/zhongwater123/A-NAS/internal/sharesapi"
@@ -40,7 +40,7 @@ type Config struct {
 	Logger        *slog.Logger
 	CheckStore    func(string) error
 	RetryInterval time.Duration
-	Media         mediaworker.Worker
+	Media         ffmpegworker.Worker
 }
 
 var ErrStoreUnavailable = errors.New("member-share data volume unavailable")

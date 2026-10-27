@@ -15,24 +15,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
 // videoDecoder reads every file as the video probe describes and renders
 // any frame as a small JPEG; streams and frames are recorded.
 type videoDecoder struct {
-	probe   mediaworker.Probe
+	probe   ffmpegworker.Probe
 	mu      sync.Mutex
 	frames  []float64
-	streams []mediaworker.StreamRequest
+	streams []ffmpegworker.StreamRequest
 }
 
-func (v *videoDecoder) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
+func (v *videoDecoder) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
 	return v.probe, nil
 }
 func (v *videoDecoder) Image(context.Context, *os.File, int) ([]byte, error) {
-	return nil, mediaworker.ErrUnreadable
+	return nil, ffmpegworker.ErrUnreadable
 }
 func (v *videoDecoder) Frame(_ context.Context, _ *os.File, at float64, _ int) ([]byte, error) {
 	v.mu.Lock()
@@ -44,7 +44,7 @@ func (v *videoDecoder) Frame(_ context.Context, _ *os.File, at float64, _ int) (
 	}
 	return buffer.Bytes(), nil
 }
-func (v *videoDecoder) Stream(_ context.Context, _ *os.File, request mediaworker.StreamRequest) (io.ReadCloser, error) {
+func (v *videoDecoder) Stream(_ context.Context, _ *os.File, request ffmpegworker.StreamRequest) (io.ReadCloser, error) {
 	v.mu.Lock()
 	v.streams = append(v.streams, request)
 	v.mu.Unlock()
@@ -53,11 +53,11 @@ func (v *videoDecoder) Stream(_ context.Context, _ *os.File, request mediaworker
 
 // phoneVideo is an iPhone video held upright: stored landscape and turned
 // by its display matrix, recorded at 18:20:30 in UTC+8.
-func phoneVideo() mediaworker.Probe {
-	return mediaworker.Probe{
-		Format: mediaworker.ProbeFormat{Name: "mov,mp4,m4a,3gp,3g2,mj2", Duration: 42.5,
+func phoneVideo() ffmpegworker.Probe {
+	return ffmpegworker.Probe{
+		Format: ffmpegworker.ProbeFormat{Name: "mov,mp4,m4a,3gp,3g2,mj2", Duration: 42.5,
 			Tags: map[string]string{"com.apple.quicktime.creationdate": "2024-05-01T18:20:30+0800", "creation_time": "2024-05-01T10:20:31.000000Z"}},
-		Streams: []mediaworker.ProbeStream{
+		Streams: []ffmpegworker.ProbeStream{
 			{Type: "video", Codec: "hevc", PixelFormat: "yuv420p", Width: 1920, Height: 1080, Rotation: -90},
 			{Type: "audio", Codec: "aac"},
 		},
@@ -73,7 +73,7 @@ func mp4Bytes(seed byte) []byte {
 	return b
 }
 
-func videoService(t *testing.T, probe mediaworker.Probe) (*photos.Service, *videoDecoder, string) {
+func videoService(t *testing.T, probe ffmpegworker.Probe) (*photos.Service, *videoDecoder, string) {
 	t.Helper()
 	decoder := &videoDecoder{probe: probe}
 	root := filepath.Join(t.TempDir(), "photos")
@@ -323,11 +323,11 @@ func TestTheAssistantDoesNotSeeVideos(t *testing.T) {
 }
 
 func TestOnlyReadableVideosAreImported(t *testing.T) {
-	cases := map[string]func(*mediaworker.Probe){
-		"audio only":     func(p *mediaworker.Probe) { p.Streams = p.Streams[1:] },
-		"no duration":    func(p *mediaworker.Probe) { p.Format.Duration = 0 },
-		"unknown format": func(p *mediaworker.Probe) { p.Format.Name = "image2" },
-		"only a cover":   func(p *mediaworker.Probe) { p.Streams[0].AttachedPic = true },
+	cases := map[string]func(*ffmpegworker.Probe){
+		"audio only":     func(p *ffmpegworker.Probe) { p.Streams = p.Streams[1:] },
+		"no duration":    func(p *ffmpegworker.Probe) { p.Format.Duration = 0 },
+		"unknown format": func(p *ffmpegworker.Probe) { p.Format.Name = "image2" },
+		"only a cover":   func(p *ffmpegworker.Probe) { p.Streams[0].AttachedPic = true },
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -348,7 +348,7 @@ func TestOnlyReadableVideosAreImported(t *testing.T) {
 		s, _, _ := newService(t)
 		private, _ := libraries(t, s, alice)
 		_, err := s.Import(context.Background(), alice, photos.ImportRequest{LibraryID: private.ID, Name: "x.mp4", Content: bytes.NewReader(mp4Bytes(5))})
-		if !errors.Is(err, mediaworker.ErrUnavailable) {
+		if !errors.Is(err, ffmpegworker.ErrUnavailable) {
 			t.Fatalf("Import() error = %v", err)
 		}
 	})

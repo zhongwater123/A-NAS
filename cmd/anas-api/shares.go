@@ -12,9 +12,9 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/filebroker"
 	"github.com/zhongwater123/A-NAS/internal/files"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/sharefiles"
 	"github.com/zhongwater123/A-NAS/internal/shares"
@@ -41,7 +41,7 @@ func runShareService(logger *slog.Logger) error {
 	})
 }
 
-func configuredShares(ctx context.Context, config Config, users *accounts.Service, fs *files.Service, media mediaworker.Worker, logger *slog.Logger) (http.Handler, func(), error) {
+func configuredShares(ctx context.Context, config Config, users *accounts.Service, fs *files.Service, media ffmpegworker.Worker, logger *slog.Logger) (http.Handler, func(), error) {
 	local := sharefiles.NewLocal(fs, users)
 	if config.Live() {
 		local.SetBroker(filebroker.NewClient(config.FileBrokerSocket))

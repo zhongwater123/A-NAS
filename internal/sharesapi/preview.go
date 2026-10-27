@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
@@ -73,7 +73,7 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if decodeErr != nil {
-		if errors.Is(decodeErr, mediaworker.ErrUnreadable) {
+		if errors.Is(decodeErr, ffmpegworker.ErrUnreadable) {
 			httpjson.WriteError(w, 422, "share_preview_unreadable", "image cannot be previewed")
 		} else {
 			httpjson.WriteError(w, 503, "share_preview_unavailable", "image preview decoder is unavailable")

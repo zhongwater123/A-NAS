@@ -1,4 +1,4 @@
-package mediaworker
+package ffmpegworker
 
 import (
 	"encoding/json"
