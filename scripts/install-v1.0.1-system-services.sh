@@ -43,6 +43,14 @@ if [[ ! -f "$source_release/Caddyfile" ]]; then
   echo "missing LAN Web entry configuration: $source_release/Caddyfile" >&2
   exit 2
 fi
+# The local console runs as an account of its own from the installed release
+# (issue #174); enabling it stays a runbook step (operate-local-kiosk.md).
+for file in kiosk-launcher anas-kiosk@.service a-nas-kiosk.pam a-nas-kiosk.sysusers; do
+  if [[ ! -f "$source_release/$file" ]]; then
+    echo "missing local console file: $source_release/$file" >&2
+    exit 2
+  fi
+done
 # Local AI is part of every release (ADR 0016): the Worker's code, its units,
 # and manifests that pin its models and Python runtime by content. Each model
 # has a role: its manifest is ai/ROLE.json and the release links its file as
@@ -61,7 +69,7 @@ for role in "${ai_roles[@]}"; do
   fi
 done
 # Media and file previews run Debian's FFmpeg / libheif in the worker sandbox.
-for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 ffmpeg ffprobe heif-thumbnailer; do
+for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 systemd-sysusers ffmpeg ffprobe heif-thumbnailer; do
   if ! command -v "$command" >/dev/null; then
     echo "missing required host command: $command" >&2
     exit 3
@@ -179,6 +187,15 @@ elif getent passwd "$shares_id" >/dev/null; then
 else
   useradd --system --uid "$shares_id" --gid "$shares_id" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin a-nas-shares
 fi
+# The local console's account owns no data, so its ID may differ between
+# installs; it must not be able to log in.
+install -d -o root -g root -m 0755 /etc/sysusers.d
+install -o root -g root -m 0644 "$source_release/a-nas-kiosk.sysusers" /etc/sysusers.d/a-nas-kiosk.conf
+systemd-sysusers /etc/sysusers.d/a-nas-kiosk.conf
+if [[ "$(getent passwd a-nas-kiosk | cut -d: -f6-7)" != /nonexistent:/usr/sbin/nologin ]]; then
+  echo "user a-nas-kiosk exists with a home or shell A-NAS did not give it" >&2
+  exit 3
+fi
 # setgid makes the Product-owned bridge socket inherit the shares-only group.
 install -d -o root -g root -m 0755 /etc/tmpfiles.d
 printf 'd /run/a-nas-share-files 2750 a-nas a-nas-shares -\n' > /etc/tmpfiles.d/a-nas-shares.conf
@@ -255,6 +272,7 @@ install -d -o root -g root -m 0755 "$temporary"
 install -o root -g root -m 0755 "$source_release/anas-api" "$temporary/anas-api"
 install -o root -g root -m 0755 "$source_release/anas-host-agent" "$temporary/anas-host-agent"
 install -o root -g root -m 0755 "$source_release/install-screensavers.sh" "$temporary/install-screensavers.sh"
+install -o root -g root -m 0755 "$source_release/kiosk-launcher" "$temporary/kiosk-launcher"
 install -d -o root -g root -m 0755 "$temporary/ai" "$temporary/ai/anas_ai"
 install -o root -g root -m 0644 "$source_release"/ai/anas_ai/*.py "$temporary/ai/anas_ai/"
 install -o root -g root -m 0644 "$source_release/ai/runtime.json" "$temporary/ai/"
@@ -348,6 +366,9 @@ install -o root -g root -m 0644 "$source_release/anas-media-system@.service" /et
 # All media workers share one memory limit (system-anasmedia.slice).
 install -o root -g root -m 0644 "$source_release/anas-media-system.slice" /etc/systemd/system/system-anasmedia.slice
 install -o root -g root -m 0644 "$source_release/a-nas-chromium-policy.json" /etc/chromium/policies/managed/a-nas.json
+# The local console's unit, enabled or not, starts this release's launcher.
+install -o root -g root -m 0644 "$source_release/anas-kiosk@.service" /etc/systemd/system/anas-kiosk@.service
+install -o root -g root -m 0644 "$source_release/a-nas-kiosk.pam" /etc/pam.d/a-nas-kiosk
 if [[ "$lan_entry" == true ]]; then
   # Keep the administrator's own configuration the first time A-NAS replaces it.
   if [[ -f /etc/caddy/Caddyfile && ! -e /etc/caddy/Caddyfile.before-a-nas ]] &&

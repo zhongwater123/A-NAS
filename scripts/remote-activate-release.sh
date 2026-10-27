@@ -81,6 +81,7 @@ install -m 0644 anas-host-agent.service.incoming anas-host-agent.service
 install -m 0750 kiosk-launcher.incoming kiosk-launcher
 install -m 0644 anas-kiosk@.service.incoming anas-kiosk@.service
 install -m 0644 a-nas-kiosk.pam.incoming a-nas-kiosk.pam
+install -m 0644 a-nas-kiosk.sysusers.incoming a-nas-kiosk.sysusers
 install -m 0644 kiosk.env.incoming kiosk.env
 install -m 0644 a-nas-chromium-policy.json.incoming a-nas-chromium-policy.json
 install -m 0644 Caddyfile.incoming Caddyfile
@@ -141,6 +142,7 @@ rm -f \
   kiosk-launcher.incoming \
   anas-kiosk@.service.incoming \
   a-nas-kiosk.pam.incoming \
+  a-nas-kiosk.sysusers.incoming \
   kiosk.env.incoming \
   a-nas-chromium-policy.json.incoming \
   Caddyfile.incoming \

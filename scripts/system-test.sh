@@ -151,6 +151,10 @@ stage() {
   ln -s "$ai/runtime.tar.gz" "$1/ai/runtime.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
   install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
+  install -m 0750 /src/scripts/run-kiosk.sh "$1/kiosk-launcher"
+  install -m 0644 "/src/deploy/systemd/system/anas-kiosk@.service" "$1/anas-kiosk@.service"
+  install -m 0644 /src/deploy/pam/a-nas-kiosk "$1/a-nas-kiosk.pam"
+  install -m 0644 /src/deploy/sysusers.d/a-nas-kiosk.conf "$1/a-nas-kiosk.sysusers"
 }
 release=/tmp/release
 stage "$release"
@@ -264,6 +268,9 @@ data=/srv/a-nas/data
 
 # --- The units as installed, with every drop-in, read by Debian 13's systemd
 # as on the NAS (#278): each directive and value, and that each command exists.
+# The image has no Wayland compositor: Cage, which the local console's unit
+# starts, is a stand-in that only has to exist.
+[[ -x /usr/bin/cage ]] || install -m 0755 /dev/null /usr/bin/cage
 check "systemd accepts every installed A-NAS unit" \
   verified /etc/systemd/system/anas*.service /etc/systemd/system/anas*.socket /etc/systemd/system/*anas*.slice
 
@@ -285,6 +292,21 @@ check "the moved record is root's alone" \
   test "$(stat -c '%U:%G %a' /var/lib/a-nas-host/app-identities.json)" = 'root:root 600'
 check "the record left the Product Service's directory" test ! -e /var/lib/a-nas/app-identities.json
 check "Product Service cannot list the Host Agent's records" denied as a-nas ls /var/lib/a-nas-host
+
+# --- The local console (issue #174): an account of its own that cannot log
+# in, starting the launcher of the installed release. The container has no
+# display, so the unit is installed but neither enabled nor started.
+check "the local console runs as its own account" \
+  test "$(systemctl show -p User --value anas-kiosk@tty1.service)" = a-nas-kiosk
+check "the local console's account has no home and no login shell" \
+  test "$(getent passwd a-nas-kiosk | cut -d: -f6-7)" = /nonexistent:/usr/sbin/nologin
+check "the local console's account has no password" test "$(passwd -S a-nas-kiosk | cut -d ' ' -f 2)" = L
+check "the local console's launcher is the installed release's" \
+  cmp -s /opt/a-nas/current/kiosk-launcher /src/scripts/run-kiosk.sh
+check "the local console's launcher is root's" test "$(stat -c '%U %a' /opt/a-nas/current/kiosk-launcher)" = 'root 755'
+check "the local console cannot write the staged release" denied as a-nas-kiosk touch "$release/kiosk-launcher"
+check "the installer leaves the local console disabled" \
+  test "$(systemctl is-enabled anas-kiosk@tty1.service 2>/dev/null)" = disabled
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 
 # --- Accounts: an administrator and a member, each with one Linux identity.

@@ -105,9 +105,13 @@ ops-check:
 	$(GO) run ./tools/depcheck
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
-	grep -Fqx 'ConditionPathExists=/home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
-	grep -Fqx 'ExecStart=/usr/bin/cage -s -- /home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
+	grep -Fqx 'ConditionPathExists=/opt/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
+	grep -Fqx 'ExecStart=/usr/bin/cage -s -- /opt/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
+	grep -Fqx 'User=a-nas-kiosk' deploy/systemd/system/anas-kiosk@.service
 	grep -Fqx 'EnvironmentFile=-/etc/a-nas/kiosk.env' deploy/systemd/system/anas-kiosk@.service
+	grep -Eqx 'u a-nas-kiosk - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-kiosk.conf
+	grep -Fq 'a-nas-kiosk.sysusers.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	! grep -rFq /home/anas-dev deploy/systemd/system scripts/install-v1.0.1-system-services.sh
 	grep -Fqx 'ReadWritePaths=%h/.config/a-nas/state' deploy/systemd/user/anas-api.service
 	grep -Fq 'install -d -m 0700 "$$config_dir/state"' scripts/remote-activate-release.sh
 	grep -Fq 'stage-only' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh

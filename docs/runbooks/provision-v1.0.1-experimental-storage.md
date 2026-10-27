@@ -37,13 +37,11 @@
      "$source_release" "$release_id" "$smb_interface"
    ```
 
-3. 安装器成功后，把本地控制台的启动链接切到同一 release；安装器与 `-StageOnly` 都不改它：
+3. 安装器已重启正在运行的本地控制台：它以 `a-nas-kiosk` 运行，启动程序来自 `/opt/a-nas/current`（[issue #174](https://github.com/zhongwater123/A-NAS/issues/174)），不再需要切换 `anas-dev` 名下的启动链接。以 `anas-dev` 运行的旧 kiosk 第一次迁移时，按[本地控制台运行手册](operate-local-kiosk.md#迁移到专用账号)操作。确认：
 
    ```bash
-   runuser -u anas-dev -- ln -sfn "$source_release" /home/anas-dev/apps/a-nas/current.next
-   runuser -u anas-dev -- mv -Tf /home/anas-dev/apps/a-nas/current.next /home/anas-dev/apps/a-nas/current
-   systemctl restart anas-kiosk@tty1.service
-   test "$(basename "$(readlink -f /opt/a-nas/current)")" = "$(basename "$(readlink -f /home/anas-dev/apps/a-nas/current)")"
+   test -x /opt/a-nas/current/kiosk-launcher
+   systemctl show -p User --value anas-kiosk@tty1.service   # a-nas-kiosk
    ```
 
 安装器会切换系统服务并由 Host Agent 幂等修复现有卷的目录和 ACL；它不会重新分区或格式化已经挂载的数据盘。已安装 Caddy 时，安装器同时校验并更新局域网 Web 入口，见[启用局域网 Web 访问](enable-lan-web-access.md)。如果哈希、挂载或网卡核对失败，立即停止。
@@ -190,12 +188,18 @@ if ! grep -Fqx 'StateDirectory=a-nas-host' "$stage/anas-host-agent-system.servic
     fi
   done
 fi
+# The local console's unit and PAM stack come from the same release: before
+# issue #174 they start the launcher in anas-dev's current link as anas-dev.
+install -o root -g root -m 0644 "$stage/anas-kiosk@.service" /etc/systemd/system/anas-kiosk@.service
+install -o root -g root -m 0644 "$stage/a-nas-kiosk.pam" /etc/pam.d/a-nas-kiosk
 ln -sfn -- "/opt/a-nas/releases/$previous" /opt/a-nas/current
 runuser -u anas-dev -- ln -sfn "$stage" /home/anas-dev/apps/a-nas/current.next
 runuser -u anas-dev -- mv -Tf /home/anas-dev/apps/a-nas/current.next /home/anas-dev/apps/a-nas/current
 systemctl daemon-reload
 systemctl restart anas-host-agent anas-photos anas-api anas-kiosk@tty1
 ```
+
+回滚到 issue #174 之前的 release 时，kiosk 回到 `anas-dev`，Chromium 用的是该账号下的旧配置文件：迁移后删掉了它的话，要在电视上重新登录。
 
 AI Worker 的单元写明 release 的模型参数，旧 Worker 不认识新单元的参数（例如 `--detector`），所以带 AI 的 release 要一并恢复 `anas-ai.service`，并停止正在运行的 Worker，下一次连接启动旧 release 的。物体检测器之前的 release 在单元里自带 CPU 上限，没有安装器写的 `anas-ai.service.d/cpu-reserve.conf`，恢复后删掉它（[启用相册物体检测](enable-photo-objects.md#回滚或恢复)）。旧版本也拒绝打开比它新的相册 Catalog：回滚跨过 Catalog 迁移时，先按该版本的手册把 Catalog 退回，例如物体检测的 migration 7。
 

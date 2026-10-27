@@ -23,10 +23,7 @@
 test "$(id -u)" -eq 0
 test "$(hostname)" = a-nas-dev
 system_release=$(readlink -f /opt/a-nas/current)
-kiosk_release=$(readlink -f /home/anas-dev/apps/a-nas/current)
 test "$(dirname "$system_release")" = /opt/a-nas/releases
-test "$(dirname "$kiosk_release")" = /home/anas-dev/apps/a-nas/releases
-test "$(basename "$system_release")" = "$(basename "$kiosk_release")"
 findmnt -T /srv/a-nas/data -o TARGET,SOURCE,FSTYPE,OPTIONS
 ! id -nG anas-dev | tr ' ' '\n' | grep -Fx docker
 
