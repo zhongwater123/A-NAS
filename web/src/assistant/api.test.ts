@@ -1,14 +1,20 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { HttpResponse } from "msw";
+import { describe, expect, it } from "vitest";
 
 import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
+import { http, server } from "../test/server";
 import { assistantStatus, failureText, getMemory, listTasks, sessionMessages } from "./api";
-
-afterEach(() => vi.unstubAllGlobals());
 
 describe("assistant API error messages", () => {
   it("keeps the network explanation after the shared client normalizes fetch failures", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    // The connection drops on every request.
+    server.use(
+      http.get("/api/v1/assistant/status", () => HttpResponse.error()),
+      http.get("/api/v1/assistant/sessions/{sessionId}/messages", () => HttpResponse.error()),
+      http.get("/api/v1/assistant/memory", () => HttpResponse.error()),
+      http.get("/api/v1/assistant/tasks", () => HttpResponse.error()),
+    );
     for (const request of [assistantStatus, () => sessionMessages("session:1"), getMemory, listTasks]) {
       const error = await request().catch((error: unknown) => error);
       expect(error).toBeInstanceOf(APIError);

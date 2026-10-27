@@ -1,12 +1,14 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { HttpResponse } from "msw";
 import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { onSessionEnded } from "../api/client";
-import type { Session } from "../api.generated";
+import type { Session, TaskManagerDeviceResponse, TaskManagerMetricStatus } from "../api.generated";
 import { SettingsPanel, type SettingsSection, type StoragePlanFlow } from "../settings/SettingsPanel";
-import { json, stubAPI } from "../test/api";
 import { taskManagerDevice as device, taskManagerTasks as tasks } from "../test/fixtures";
+import { type TaskManagerSamples, taskManagerHandlers } from "../test/handlers/taskmanager";
+import { apiError, http, server } from "../test/server";
 
 vi.mock("../settings/AvatarDialog", () => ({ AvatarDialog: () => null }));
 vi.mock("../settings/TerminalSection", () => ({ TerminalSection: () => null }));
@@ -37,29 +39,20 @@ function Panel() {
     />
   );
 }
-function api(options: { device?: unknown; tasks?: unknown; status?: number } = {}) {
-  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
-    const path = String(input);
-    const status = path.includes("task-manager") ? (options.status ?? 200) : 200;
-    return json(
-      path.endsWith("/device")
-        ? (options.device ?? device)
-        : path.endsWith("/tasks")
-          ? (options.tasks ?? tasks)
-          : { items: [] },
-      status,
-    );
-  });
-  stubAPI(fetcher);
-  return fetcher;
+// serve answers the task manager's samples, and the settings window's own read
+// of the data volumes, which it shows on 概览 before 任务管理器 is opened.
+function serve(samples: TaskManagerSamples = {}) {
+  server.use(
+    http.get("/api/v1/volumes", ({ response }) => response(200).json({ items: [] })),
+    ...taskManagerHandlers(samples),
+  );
 }
 afterEach(() => {
-  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 it("lets a member navigate every device page and view services and processes", async () => {
-  api();
+  serve();
   render(<Panel />);
   fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
   expect(await screen.findByRole("img", { name: /CPU 使用率，最近/ })).toBeTruthy();
@@ -100,7 +93,7 @@ it("lets a member navigate every device page and view services and processes", a
 });
 
 it("keeps a failed service observation distinct from an empty running list", async () => {
-  api({ tasks: { ...tasks, services: { status: "unavailable", items: [] } } });
+  serve({ tasks: { ...tasks, services: { status: "unavailable", items: [] } } });
   render(<Panel />);
   fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
   fireEvent.click(screen.getByRole("button", { name: "服务与进程" }));
@@ -111,41 +104,49 @@ it("keeps a failed service observation distinct from an empty running list", asy
 it("offers first-load retry and uses the existing expired-session handler", async () => {
   const ended = vi.fn();
   const unsubscribe = onSessionEnded(ended);
-  api({ status: 401 });
+  serve();
+  server.use(
+    http.get("/api/v1/task-manager/device", ({ response }) => response(401).json(apiError("authentication_required"))),
+    http.get("/api/v1/task-manager/tasks", ({ response }) => response(401).json(apiError("authentication_required"))),
+  );
   render(<Panel />);
   fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
   expect(await screen.findByRole("button", { name: "重试" })).toBeTruthy();
   expect(ended).toHaveBeenCalledOnce();
-  api();
+  server.use(...taskManagerHandlers());
   fireEvent.click(screen.getByRole("button", { name: "重试" }));
   expect(await screen.findByRole("img", { name: /CPU 使用率，最近/ })).toBeTruthy();
   unsubscribe();
 });
 
 it("keeps last observed device data and an error after disconnect", async () => {
-  vi.useFakeTimers();
-  const fetcher = api();
+  // MSW answers on the real clock; the fake one only drives the polling.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  serve();
   render(<Panel />);
   fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
-  await act(async () => {});
+  await screen.findByRole("img", { name: /CPU 使用率，最近/ });
   expect(screen.queryByText("模拟数据")).toBeNull();
-  fetcher.mockRejectedValue(new Error("offline"));
+  // The connection drops: the next samples get no answer at all.
+  server.use(
+    http.get("/api/v1/task-manager/device", () => HttpResponse.error()),
+    http.get("/api/v1/task-manager/tasks", () => HttpResponse.error()),
+  );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
   });
-  expect(screen.getByRole("alert").textContent).toContain("连接中断");
+  expect((await screen.findByRole("alert")).textContent).toContain("连接中断");
   expect(screen.getAllByText("25.0%")).toHaveLength(2);
   expect(screen.queryByText(/观测于/)).toBeNull();
 });
 it("shows empty hardware groups explicitly and labels partial network totals", async () => {
-  const options = {
+  serve({
     device: {
       ...device,
       network: { status: "partial", items: device.network.items },
       disks: { status: "available", items: [] },
     },
-  };
-  api(options);
+  });
   render(<Panel />);
   fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
   await screen.findByRole("img", { name: /CPU 使用率，最近/ });
@@ -155,28 +156,27 @@ it("shows empty hardware groups explicitly and labels partial network totals", a
 });
 
 it("leaves a graph gap when observations resume after an interruption", async () => {
-  vi.useFakeTimers();
-  const options = { device };
-  api(options);
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const samples: TaskManagerSamples = { device };
+  serve(samples);
   render(<Panel />);
   fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
-  await act(async () => {});
-  options.device = { ...device, observedAt: "2026-10-15T10:00:10Z" };
+  await screen.findByRole("img", { name: /CPU 使用率，最近 1 个/ });
+  samples.device = { ...device, observedAt: "2026-10-15T10:00:10Z" };
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
   });
-  const path = screen
-    .getByRole("img", { name: /CPU 使用率，最近/ })
-    .querySelector(".tm-trend")
-    ?.getAttribute("d");
+  // The graph draws its grid, then the area under the line, then the line.
+  const graph = await screen.findByRole("img", { name: /CPU 使用率，最近 2 个/ });
+  const path = graph.querySelectorAll("path")[2]?.getAttribute("d");
   expect(path?.match(/M/g)).toHaveLength(2);
   expect(path).not.toContain("L");
 });
-it.each([
+it.each<[TaskManagerMetricStatus, string]>([
   ["unsupported", "当前驱动不提供此指标"],
   ["unavailable", "暂时无法读取"],
 ])("explains a missing GPU metric while other metrics remain available (%s)", async (usageStatus, reason) => {
-  api({
+  serve({
     device: {
       ...device,
       gpu: {
@@ -203,13 +203,16 @@ it.each([
   expect(screen.queryByText("暂无采样数据")).toBeNull();
 });
 
-it.each(["live", "simulated"])("omits the data source and update row for %s observations", async (dataSource) => {
-  api({ device: { ...device, dataSource } });
-  render(<Panel />);
-  fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
-  await screen.findByRole("img", { name: /CPU 使用率，最近/ });
-  expect(screen.queryByText(/模拟数据|实时数据|观测于|每 2 秒/)).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "服务与进程" }));
-  await screen.findByText("a-nas.service");
-  expect(screen.queryByText(/模拟数据|实时数据|观测于|每 2 秒/)).toBeNull();
-});
+it.each<TaskManagerDeviceResponse["dataSource"]>(["live", "simulated"])(
+  "omits the data source and update row for %s observations",
+  async (dataSource) => {
+    serve({ device: { ...device, dataSource } });
+    render(<Panel />);
+    fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
+    await screen.findByRole("img", { name: /CPU 使用率，最近/ });
+    expect(screen.queryByText(/模拟数据|实时数据|观测于|每 2 秒/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "服务与进程" }));
+    await screen.findByText("a-nas.service");
+    expect(screen.queryByText(/模拟数据|实时数据|观测于|每 2 秒/)).toBeNull();
+  },
+);

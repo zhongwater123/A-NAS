@@ -1,3 +1,4 @@
+import { HttpResponse } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Session } from "../api.generated";
@@ -5,7 +6,7 @@ import { readApps } from "../appcenter/api";
 import { readHostState } from "../desktop/api";
 import { readContainers } from "../docker/api";
 import { deleteFile, listSpaces } from "../files/api";
-import { apiError, json, stubAPI } from "../test/api";
+import { apiError, http, pathOf, server } from "../test/server";
 import { APIError, csrfHeader, onSessionEnded, setSession, uploadForm } from "./client";
 
 const session: Session = {
@@ -41,17 +42,33 @@ describe("csrfHeader", () => {
 
 describe("client", () => {
   it("normalizes network failures across domain clients without swallowing cancellation", async () => {
+    server.use(
+      http.get("/api/v1/spaces", () => HttpResponse.error()),
+      http.get("/api/v1/apps", () => HttpResponse.error()),
+      http.get("/api/v1/containers", () => HttpResponse.error()),
+      http.get("/api/v1/host-state", () => HttpResponse.error()),
+    );
     for (const request of [listSpaces, readApps, readContainers, readHostState]) {
-      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
       await expect(request()).rejects.toMatchObject({ status: 0, code: "network_error" });
-      const abort = new DOMException("aborted", "AbortError");
-      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(abort));
+    }
+
+    // A cancelled request rejects with its AbortError, not as a network failure. A
+    // real abort cannot show this here: undici rejects with Node's DOMException,
+    // not the page's (jsdom's), so fetch itself rejects as a browser's would.
+    const abort = new DOMException("aborted", "AbortError");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(abort));
+    for (const request of [listSpaces, readApps, readContainers, readHostState]) {
       await expect(request()).rejects.toBe(abort);
     }
   });
 
   it("retains status and product code for app, container and host failures", async () => {
-    stubAPI(vi.fn(async () => apiError(503, "service_busy", "private server detail")));
+    const busy = apiError("service_busy", "private server detail");
+    server.use(
+      http.get("/api/v1/apps", ({ response }) => response(503).json(busy)),
+      http.get("/api/v1/containers", ({ response }) => response(503).json(busy)),
+      http.get("/api/v1/host-state", ({ response }) => response(503).json(busy)),
+    );
     for (const request of [readApps, readContainers, readHostState]) {
       const error = await request().catch((error: unknown) => error);
       expect(error).toBeInstanceOf(APIError);
@@ -60,44 +77,61 @@ describe("client", () => {
   });
 
   it("classifies an unparseable successful response", async () => {
-    stubAPI(vi.fn(async () => new Response("not json", { headers: { "Content-Type": "application/json" } })));
+    server.use(
+      http.get("/api/v1/spaces", ({ response }) =>
+        // A broken body, so not one the contract can type.
+        response.untyped(new HttpResponse("not json", { headers: { "Content-Type": "application/json" } })),
+      ),
+    );
     await expect(listSpaces()).rejects.toMatchObject({ code: "malformed_response" });
   });
+
   it("sends the CSRF token on writes, whatever the caller passed", async () => {
     setSession(session);
-    const answer = stubAPI(
-      vi.fn(async (path: string, _init?: RequestInit) =>
-        path === "/api/v1/spaces"
-          ? json({ items: [] })
-          : json({
-              id: "trash:1",
-              entryId: "file:1",
-              spaceId: "space:1",
-              name: "a.txt",
-              kind: "file",
-              sizeBytes: 1,
-              originalPath: "",
-              originalGone: false,
-              deletedBy: "owner",
-              deletedAt: "2026-10-23T00:00:00Z",
-              purgeAt: "2026-11-22T00:00:00Z",
-            }),
-      ),
+    const sent: Array<{ method: string; path: string; csrf: string | null }> = [];
+    const record = (request: Request) =>
+      sent.push({ method: request.method, path: pathOf(request), csrf: request.headers.get("X-CSRF-Token") });
+    server.use(
+      http.get("/api/v1/spaces", ({ request, response }) => {
+        record(request);
+        return response(200).json({ items: [] });
+      }),
+      http.delete("/api/v1/files/{fileId}", ({ request, response }) => {
+        record(request);
+        return response(200).json({
+          id: "trash:1",
+          entryId: "file:1",
+          spaceId: "space:1",
+          name: "a.txt",
+          kind: "file",
+          sizeBytes: 1,
+          originalPath: "",
+          originalGone: false,
+          deletedBy: "owner",
+          deletedAt: "2026-10-23T00:00:00Z",
+          purgeAt: "2026-11-22T00:00:00Z",
+        });
+      }),
     );
     await listSpaces();
     await deleteFile("file:1");
-    const [[readPath, read], [writePath, write]] = answer.mock.calls;
-    expect(readPath).toBe("/api/v1/spaces");
-    expect(new Headers(read?.headers).has("X-CSRF-Token")).toBe(false);
-    expect(writePath).toBe("/api/v1/files/file%3A1");
-    expect(write?.method).toBe("DELETE");
-    expect(new Headers(write?.headers).get("X-CSRF-Token")).toBe("csrf-test");
+    expect(sent).toEqual([
+      { method: "GET", path: "/api/v1/spaces", csrf: null },
+      { method: "DELETE", path: "/api/v1/files/file%3A1", csrf: "csrf-test" },
+    ]);
   });
 
   it("turns an error body into an APIError, and a 401 ends the session", async () => {
     const ended = vi.fn();
     const stop = onSessionEnded(ended);
-    stubAPI(vi.fn(async () => apiError(401, "authentication_required", "authentication is required")));
+    server.use(
+      http.get("/api/v1/spaces", ({ response }) =>
+        // Every signed-in route answers 401 once the session ends; the contract lists it for few of them.
+        response.untyped(
+          HttpResponse.json(apiError("authentication_required", "authentication is required"), { status: 401 }),
+        ),
+      ),
+    );
     const failure = await listSpaces().catch((error: unknown) => error);
     stop();
     expect(failure).toBeInstanceOf(APIError);

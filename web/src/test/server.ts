@@ -4,7 +4,9 @@
 // checking. A request no handler answers fails the test (setup.ts).
 //
 // Each test serves what it reads: the handler sets in handlers/ by domain, then
-// server.use(...) for what the test changes; a later server.use wins.
+// server.use(...) for what the test changes. The first handler that matches
+// answers: within one server.use call that is the earlier one, and a later
+// server.use call goes before everything served so far.
 import { setupServer } from "msw/node";
 import { createOpenApiHttp } from "openapi-msw";
 

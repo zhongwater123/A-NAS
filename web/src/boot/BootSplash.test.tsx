@@ -28,22 +28,25 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals());
 
+// The splash is all a BootSplash renders, when it plays.
+const splashIn = (container: HTMLElement) => container.firstElementChild as HTMLElement | null;
+
 describe("boot splash", () => {
   it("plays once per tab and hands over to the desktop when the ident ends", () => {
     const { container, unmount } = render(<BootSplash />);
-    expect(container.querySelector(".boot-splash canvas")).not.toBeNull();
+    expect(splashIn(container)?.querySelector("canvas")).not.toBeNull();
     expect(sessionStorage.getItem(bootIdentStorageKey)).toBe("1");
 
     act(() => ident.hooks!.onFade(0.4));
-    expect(container.querySelector<HTMLElement>(".boot-splash")!.style.opacity).toBe("0.4");
+    expect(splashIn(container)!.style.opacity).toBe("0.4");
 
     act(() => ident.hooks!.onDone());
-    expect(container.querySelector(".boot-splash")).toBeNull();
+    expect(splashIn(container)).toBeNull();
     expect(ident.stop).toHaveBeenCalled();
     unmount();
 
     expect(shouldPlayBootIdent()).toBe(false);
-    expect(render(<BootSplash />).container.querySelector(".boot-splash")).toBeNull();
+    expect(splashIn(render(<BootSplash />).container)).toBeNull();
   });
 
   it("skips on a pointer or any key without letting keys reach the page", () => {
@@ -51,7 +54,7 @@ describe("boot splash", () => {
     const pageKeys = vi.fn();
     document.body.addEventListener("keydown", pageKeys);
 
-    fireEvent.pointerDown(container.querySelector(".boot-splash")!);
+    fireEvent.pointerDown(splashIn(container)!);
     const key = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
     document.body.dispatchEvent(key);
 
@@ -63,13 +66,13 @@ describe("boot splash", () => {
 
   it("goes straight to the desktop when the ident cannot start", () => {
     ident.supported = false;
-    expect(render(<BootSplash />).container.querySelector(".boot-splash")).toBeNull();
+    expect(splashIn(render(<BootSplash />).container)).toBeNull();
   });
 
   it("never plays for users who prefer reduced motion", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce") }));
     expect(shouldPlayBootIdent()).toBe(false);
-    expect(render(<BootSplash />).container.querySelector(".boot-splash")).toBeNull();
+    expect(splashIn(render(<BootSplash />).container)).toBeNull();
     expect(sessionStorage.getItem(bootIdentStorageKey)).toBeNull();
   });
 });

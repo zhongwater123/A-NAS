@@ -17,7 +17,8 @@ const photo = (id: string): PhotoAsset => ({
   height: 3,
   thumbnail: "ready",
 });
-const shown = () => document.querySelector<HTMLImageElement>(".ph-slide:not(.leaving)")?.alt;
+// The photo shown is the one image named; the one fading out has no name.
+const shown = () => screen.queryByRole("img")?.getAttribute("alt");
 // One photo's turn: its fade, then the time it stays.
 const turn = 4900;
 const elapse = async (ms: number) => {
