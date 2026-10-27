@@ -10,3 +10,5 @@
 - [应用目录扩充评审（2026-10）](app-catalog-review-2026-10.md)（完成；入选应用待实机安装验证）
 - [Hermes Agent 作为 AI 助手运行时的可行性](hermes-agent-runtime.md)（开发机 spike 与 DeepSeek 真实模型测试完成；实验 NAS 实测待做）
 - [备份中心 C 端功能评审（2026-10）](backup-center-review-2026-10.md)（完成；快照侧缺口已补齐，外部备份待 #27 决定）
+- [CutClaw：音乐同步的长视频智能剪辑](video-editing-cutclaw.md)（论文与代码精读；指令驱动剪辑的抽帧与片段定位）
+- [FilmAgent：多智能体协作的虚拟影片制作](video-editing-filmagent.md)（论文与代码精读；剪辑计划的生成与审校）
