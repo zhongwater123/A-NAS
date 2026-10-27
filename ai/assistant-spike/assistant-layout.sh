@@ -153,12 +153,20 @@ case $cmd in
           > "$product_tokens/$account.token")
         chown "$product_user" "$product_tokens/$account.token"
       fi
-      if [[ -f /etc/systemd/system/anas-assistant-api@.socket ]]; then
-        systemctl enable --now --quiet "anas-assistant-api@$account.socket"
+      # Token files and Linux group membership survive account disable. Ask
+      # the Host Agent even on the first install, before enabling any entry.
+      if [[ "$gate" == host-agent ]] && ! python3 -I "$here/cron-waker.py" --active "$account"; then
+        continue
       fi
-      if [[ -f /etc/systemd/system/anas-assistant-curator@.timer ]]; then
-        systemctl enable --now --quiet "anas-assistant-curator@$account.timer"
-      fi
+      for template in anas-assistant-api@.socket anas-assistant-curator@.timer; do
+        [[ -f /etc/systemd/system/$template ]] || continue
+        unit=${template/@./@$account.}
+        # Account disable masks all assistant entry points. An update must
+        # preserve that decision instead of re-enabling them or failing here.
+        state=$(systemctl is-enabled "$unit" 2>/dev/null || true)
+        [[ "$state" == masked || "$state" == masked-runtime ]] && continue
+        systemctl enable --now --quiet "$unit"
+      done
     done
     ;;
   quota)

@@ -151,16 +151,22 @@ func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var reconcileFailed atomic.Bool
+	sessions := accounts.NewSessionDirectory(filepath.Join(config.StateDir, "control.db"))
+	defer func() { _ = sessions.Close() }()
+	operations := agent.NewOperationsHandler(agent.Services{
+		Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
+		SystemLogs: journal.New(), ReconcileFailed: reconcileFailed.Load,
+	}, logger)
+	mux := http.NewServeMux()
+	mux.Handle("/", operations)
+	// The root cron waker and installer use the existing active-account lookup
+	// on this private socket, including before the assistant is first enabled.
+	mux.Handle(sessionlookup.AccountUIDPath, sessionlookup.NewHandler(sessions, sessions, logger))
 	server := &http.Server{
-		Handler: agent.NewOperationsHandler(agent.Services{
-			Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
-			SystemLogs: journal.New(), ReconcileFailed: reconcileFailed.Load,
-		}, logger),
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	sessions := accounts.NewSessionDirectory(filepath.Join(config.StateDir, "control.db"))
-	defer func() { _ = sessions.Close() }()
 	assistantChanges := config.AssistantChanges
 	// File workers and terminal shells run in scopes of their own, so they
 	// share neither the Host Agent's limits nor its name in the journal.

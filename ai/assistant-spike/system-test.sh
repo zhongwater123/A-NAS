@@ -22,8 +22,8 @@ assistant_python=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
 
 # --- A second member, created as every account is: through the Product Service.
 bob_password=$(secret)
-curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
-  -d "{\"username\":\"bob\",\"password\":\"$bob_password\"}" "$api/api/v1/users" || true
+bob_user=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"bob\",\"password\":\"$bob_password\"}" "$api/api/v1/users" | jq -r .id || true)
 bob_csrf=$(login bob "$bob_password" /tmp/bob.jar || true)
 alice_csrf=$(login alice "$new_password" /tmp/alice.jar || true)
 for _ in $(seq 1 100); do [[ -d "$data/spaces/private/bob/.a-nas-trash/bob" ]] && break; sleep 0.2; done

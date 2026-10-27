@@ -281,6 +281,11 @@ func (e *Executor) DisableCredential(ctx context.Context, username string) error
 	if !validUsername(username) {
 		return errors.New("invalid username")
 	}
+	// Both boundaries must be closed, even if one subsystem is unavailable.
+	return errors.Join(e.disableAssistant(ctx, username), e.disableHostCredential(ctx, username))
+}
+
+func (e *Executor) disableHostCredential(ctx context.Context, username string) error {
 	if _, err := e.runner.Run(ctx, "smbpasswd", []string{"-d", username}, ""); err != nil {
 		return fmt.Errorf("disable Samba credential: %w", err)
 	}

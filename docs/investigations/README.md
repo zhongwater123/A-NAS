@@ -4,6 +4,8 @@
 
 ## 索引
 
+- [2026-10-27：助手定时任务的成员文件与停用隔离](2026-10-27-assistant-cron-waker-member-isolation.md)
+
 - [2026-10-06：Host Agent 无法创建运行时 Socket](2026-10-06-host-agent-runtime-directory.md)
 - [2026-10-06：本地 Kiosk 可进入通用 Chromium 界面](2026-10-06-kiosk-browser-confinement.md)
 - [2026-10-06：桌面时钟持续落后于系统时间](2026-10-06-system-clock-drift-and-network-sync.md)
