@@ -8,25 +8,19 @@ import (
 	"unicode"
 
 	ptn "github.com/razsteinmetz/go-ptn"
+
+	"github.com/zhongwater123/A-NAS/internal/mediatype"
 )
 
 // Release names ("Title.2019.1080p.x264-GROUP") are split by go-ptn. The
 // rules here only add what it does not know: the Plex/Jellyfin/Kodi folder
 // conventions, Chinese season and episode markers, and camera file names.
 
-// The web uploader keeps the same list (web/src/media/uploads.ts). F4V is
-// Flash's MP4 and plays like one.
-var videoExtensions = map[string]bool{
-	".mp4": true, ".m4v": true, ".mkv": true, ".webm": true, ".mov": true, ".avi": true, ".wmv": true,
-	".flv": true, ".f4v": true, ".ts": true, ".m2ts": true, ".mts": true, ".mpg": true, ".mpeg": true, ".rmvb": true,
-	".rm": true, ".3gp": true, ".vob": true, ".ogv": true, ".asf": true, ".divx": true,
-}
-
 var imageExtensions = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true}
 
 var subtitleExtensions = map[string]string{".srt": "srt", ".ass": "ass", ".ssa": "ass", ".vtt": "webvtt"}
 
-func isVideo(name string) bool { return videoExtensions[strings.ToLower(path.Ext(name))] }
+func isVideo(name string) bool { return mediatype.IsVideo(name) }
 
 func baseName(name string) string { return strings.TrimSuffix(name, path.Ext(name)) }
 
