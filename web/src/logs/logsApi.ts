@@ -62,7 +62,7 @@ export const systemLogServices: Array<{ id: SystemLogService; label: string; uni
   { id: "shares", label: "分享服务", unit: "anas-shares" },
   { id: "containers", label: "容器代理", unit: "anas-container-agent" },
   { id: "ai", label: "本地 AI", unit: "anas-ai" },
-  { id: "media", label: "媒体 Worker", unit: "anas-media@" },
+  { id: "media", label: "FFmpeg Worker", unit: "anas-ffmpeg@" },
   { id: "kiosk", label: "本机屏幕", unit: "anas-kiosk@" },
   { id: "samba", label: "文件共享 Samba", unit: "smbd" },
   { id: "caddy", label: "局域网入口 Caddy", unit: "caddy" },

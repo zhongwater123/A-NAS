@@ -98,7 +98,7 @@ func main() {
 
 const (
 	photoServiceCommand = "photo-service"
-	ffmpegWorkerCommand  = "ffmpeg-worker"
+	ffmpegWorkerCommand = "ffmpeg-worker"
 )
 
 func runFFmpegWorker() error {

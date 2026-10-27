@@ -3,7 +3,7 @@
 # release with the real installer and systemd units into a disposable Debian
 # 13 container where systemd is PID 1, then checks every entry point that
 # touches the data volume: Web files (File Broker workers), SMB, the photo API,
-# the FFmpeg FFmpeg worker shared by the media center and music, the
+# the FFmpeg worker shared by the media center and music, the
 # administrator terminal, and the LAN Web entry that Caddy serves on
 # port 80. Unlike tests that start
 # the daemons by hand, it runs them under the production sandboxes, so it
