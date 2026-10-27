@@ -48,18 +48,23 @@ func Write(conn *net.UnixConn, value any, file *os.File, limit int) error {
 	return WriteBody(conn, body, file)
 }
 
-// WriteBody sends a body that Encode returned, in one sendmsg when the
-// socket takes it whole.
+// WriteBody sends a body that Encode returned. The length and the
+// descriptor go in one sendmsg and the body in a write: the race detector
+// sees a write on one side and a read on the other as ordered, but not
+// sendmsg and recvmsg, so a reply sent whole by sendmsg hid that the
+// sender's work came before the reader's.
 func WriteBody(conn *net.UnixConn, body []byte, file *os.File) error {
-	frame := binary.BigEndian.AppendUint32(make([]byte, 0, headerSize+len(body)), uint32(len(body)))
-	frame = append(frame, body...)
+	header := binary.BigEndian.AppendUint32(make([]byte, 0, headerSize), uint32(len(body)))
 	var rights []byte
 	if file != nil {
 		rights = syscall.UnixRights(int(file.Fd()))
 	}
-	written, _, err := conn.WriteMsgUnix(frame, rights, nil)
-	if err == nil && written < len(frame) {
-		_, err = conn.Write(frame[written:])
+	written, _, err := conn.WriteMsgUnix(header, rights, nil)
+	if err == nil && written < len(header) {
+		_, err = conn.Write(header[written:])
+	}
+	if err == nil {
+		_, err = conn.Write(body)
 	}
 	return err
 }
