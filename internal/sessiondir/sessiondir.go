@@ -15,6 +15,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // Directory resolves session tokens to Linux identities for the File Broker.
@@ -146,11 +147,10 @@ func (d *Directory) open() (*sql.DB, error) {
 	if d.db != nil {
 		return d.db, nil
 	}
-	db, err := sql.Open("sqlite3", "file:"+d.path+"?mode=ro&_busy_timeout=5000")
+	db, err := sqlitedb.OpenReadOnly(d.path)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	db.SetConnMaxLifetime(time.Minute)
 	d.db = db
 	return db, nil

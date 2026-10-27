@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/capacity"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 var (
@@ -125,7 +125,6 @@ func (g BtrfsVolumeGuard) Check(ctx context.Context, volumeRoot string, write bo
 
 type Options struct {
 	Now                    func() time.Time
-	Random                 io.Reader
 	DisableCapacityReserve bool
 	AllowUnverifiedVolume  bool
 	VolumeGuard            VolumeGuard
@@ -141,14 +140,10 @@ type Store struct {
 }
 
 func OpenSQLite(path string) (*Store, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("SQLite path is empty")
-	}
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
+	db, err := sqlitedb.Open(path, sqlitedb.Options{})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
@@ -313,7 +308,6 @@ type Service struct {
 	volumeRoot             string
 	policy                 Policy
 	now                    func() time.Time
-	random                 io.Reader
 	disableCapacityReserve bool
 	allowUnverifiedVolume  bool
 	volumeGuard            VolumeGuard
@@ -377,13 +371,9 @@ func newService(store *Store, volumeRoot string, policy Policy, fsys FileSystem,
 	if now == nil {
 		now = time.Now
 	}
-	random := options.Random
-	if random == nil {
-		random = rand.Reader
-	}
 	service := &Service{
 		store: store, volumeRoot: filepath.Clean(volumeRoot), policy: policy,
-		now: now, random: random, disableCapacityReserve: options.DisableCapacityReserve,
+		now: now, disableCapacityReserve: options.DisableCapacityReserve,
 		allowUnverifiedVolume: options.AllowUnverifiedVolume, volumeGuard: options.VolumeGuard,
 		spaceRoots: make(map[string]string), trashRetention: options.TrashRetention, fs: fsys, snapshots: options.SnapshotBackend,
 		location: options.Location, scheduledSpaces: make(map[string]accounts.Space),
@@ -1919,13 +1909,7 @@ func (s *Service) audit(ctx context.Context, actorID, action, spaceID, resourceI
 	return err
 }
 
-func (s *Service) randomID(prefix string) string {
-	value := make([]byte, 16)
-	if _, err := io.ReadFull(s.random, value); err != nil {
-		panic(err)
-	}
-	return prefix + ":" + hex.EncodeToString(value)
-}
+func (s *Service) randomID(prefix string) string { return prefix + ":" + rand.Text() }
 
 func validName(name string) bool {
 	name = strings.TrimSpace(name)

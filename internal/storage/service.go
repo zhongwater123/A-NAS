@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +19,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/capacity"
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 var (
@@ -134,14 +134,10 @@ type Options struct {
 type Store struct{ db *sql.DB }
 
 func OpenSQLite(path string) (*Store, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("SQLite path is empty")
-	}
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
+	db, err := sqlitedb.Open(path, sqlitedb.Options{})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS storage_plans (
     id TEXT PRIMARY KEY,
     document_json TEXT NOT NULL,
@@ -859,13 +855,7 @@ func clonePlan(plan ExecutionPlan) ExecutionPlan {
 	return plan
 }
 
-func randomID() string {
-	value := make([]byte, 16)
-	if _, err := rand.Read(value); err != nil {
-		panic(err)
-	}
-	return "plan:" + hex.EncodeToString(value)
-}
+func randomID() string { return "plan:" + rand.Text() }
 
 // conversionProgress counts the data and metadata bytes already in the
 // layout's profiles against all of them. They differ while Btrfs converts

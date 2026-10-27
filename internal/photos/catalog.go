@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // migrations are applied in order and recorded in PRAGMA user_version. The
@@ -304,11 +306,10 @@ CREATE TABLE videos (
 }
 
 func openCatalog(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL&_synchronous=FULL")
+	db, err := sqlitedb.Open(path, sqlitedb.Options{Durable: true})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	if err := migrate(context.Background(), db); err != nil {
 		_ = db.Close()
 		return nil, err

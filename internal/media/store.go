@@ -3,11 +3,11 @@ package media
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // Store is media.db on the system disk: libraries, the catalog read from the
@@ -17,14 +17,10 @@ type Store struct {
 }
 
 func OpenSQLite(path string) (*Store, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("SQLite path is empty")
-	}
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
+	db, err := sqlitedb.Open(path, sqlitedb.Options{})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()

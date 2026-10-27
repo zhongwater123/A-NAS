@@ -23,6 +23,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 var (
@@ -120,15 +121,10 @@ type Store struct {
 }
 
 func OpenSQLite(path string) (*Store, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("SQLite path is empty")
-	}
-	dsn := path + "?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL"
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sqlitedb.Open(path, sqlitedb.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("open SQLite: %w", err)
 	}
-	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
@@ -1022,7 +1018,7 @@ func checkPassword(password string) error {
 	return nil
 }
 
-func (s *Service) randomID(prefix string) string { return prefix + ":" + s.randomToken(16) }
+func (s *Service) randomID(prefix string) string { return prefix + ":" + rand.Text() }
 
 func (s *Service) randomToken(size int) string {
 	value := make([]byte, size)
