@@ -8,8 +8,11 @@ package openapitest
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -82,4 +85,48 @@ func Check(t testing.TB, request *http.Request, recorder *httptest.ResponseRecor
 	if err := openapi3filter.ValidateResponse(context.Background(), response); err != nil {
 		t.Fatalf("validate %s %s response: %v", request.Method, request.URL.Path, err)
 	}
+	Record(route, recorder.Code)
+}
+
+// checked holds, per operation, the statuses of the exchanges checked
+// against the contract in this test binary.
+var checked = struct {
+	sync.Mutex
+	statuses map[string]map[int]bool
+}{statuses: map[string]map[int]bool{}}
+
+// Record notes that an exchange on route answered status and kept to the
+// contract.
+func Record(route *routers.Route, status int) {
+	operation := route.Method + " " + route.Path
+	checked.Lock()
+	defer checked.Unlock()
+	if checked.statuses[operation] == nil {
+		checked.statuses[operation] = map[int]bool{}
+	}
+	checked.statuses[operation][status] = true
+}
+
+// WithoutSuccess lists, sorted by path, the contract's operations that no
+// checked exchange answered with a 2xx status (#273).
+func WithoutSuccess() ([]string, error) {
+	document, err := contract()
+	if err != nil {
+		return nil, err
+	}
+	checked.Lock()
+	defer checked.Unlock()
+	var missing []string
+	for path, item := range document.Paths.Map() {
+		for method := range item.Operations() {
+			operation := method + " " + path
+			if !slices.ContainsFunc(slices.Collect(maps.Keys(checked.statuses[operation])), func(status int) bool { return status >= 200 && status < 300 }) {
+				missing = append(missing, operation)
+			}
+		}
+	}
+	slices.SortFunc(missing, func(a, b string) int {
+		return strings.Compare(a[strings.IndexByte(a, ' '):], b[strings.IndexByte(b, ' '):])
+	})
+	return missing, nil
 }

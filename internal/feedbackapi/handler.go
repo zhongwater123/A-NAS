@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/feedback"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
@@ -30,7 +31,7 @@ const maxResolveBytes = 1 << 10
 type handler struct {
 	store  *feedback.Store
 	logger *slog.Logger
-	mux    *http.ServeMux
+	mux    *apiroute.Mux
 }
 
 // New returns the feedback API. A nil store answers 503 feedback_unavailable.
@@ -38,7 +39,7 @@ func New(store *feedback.Store, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &handler{store: store, logger: logger, mux: http.NewServeMux()}
+	h := &handler{store: store, logger: logger, mux: apiroute.NewMux()}
 	routes := map[string]func(http.ResponseWriter, *http.Request, feedback.Actor){
 		"GET ":                              h.list,
 		"POST ":                             h.create,
@@ -58,6 +59,11 @@ func New(store *feedback.Store, logger *slog.Logger) http.Handler {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
 	return h
+}
+
+// Endpoints are the operations the feedback API serves under PathPrefix.
+func Endpoints() []apiroute.Endpoint {
+	return New(nil, nil).(*handler).mux.Endpoints()
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

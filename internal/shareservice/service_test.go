@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 )
 
@@ -48,7 +49,7 @@ func TestAuthenticationIgnoresProductClaimsAndPreservesVerifiedToken(t *testing.
 		status int
 	}{{"forged", 401}, {"reset", 403}, {"bob-session", 204}} {
 		r := httptest.NewRequest("GET", sharesapi.PathPrefix, nil)
-		r.Header.Set(sharesapi.SessionHeader, test.token)
+		r.Header.Set(serviceproxy.SessionHeader, test.token)
 		r = r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: "admin"}))
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
@@ -79,7 +80,7 @@ func TestUnavailableVolumeNeverCreatesFallbackStore(t *testing.T) {
 	var err error
 	for range 100 {
 		req, _ := http.NewRequest("GET", "http://shares"+sharesapi.PathPrefix, nil)
-		req.Header.Set(sharesapi.SessionHeader, "bob-session")
+		req.Header.Set(serviceproxy.SessionHeader, "bob-session")
 		response, err = client.Do(req)
 		if err == nil {
 			break

@@ -431,7 +431,7 @@ func installedShortcuts(t *testing.T) http.Handler {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	identity, _ := appstoreapi.DevelopmentHost{}.AppIdentity(ctx, "navidrome")
+	identity, _ := fakeappstore.Host{}.AppIdentity(ctx, "navidrome")
 	plan, err := store.Plan(ctx, "navidrome", identity)
 	if err != nil {
 		t.Fatal(err)
@@ -448,5 +448,5 @@ func appAPI(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return appstoreapi.New(store, appstoreapi.DataSourceSimulated, appstoreapi.Options{Host: appstoreapi.DevelopmentHost{}})
+	return appstoreapi.New(store, appstoreapi.DataSourceSimulated, appstoreapi.Options{Host: fakeappstore.Host{}})
 }

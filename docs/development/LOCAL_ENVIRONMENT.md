@@ -393,7 +393,7 @@ npm run dev
 | `web/src/api.generated.ts` | openapi-typescript 从打包结果生成的路径、操作与 schema 类型，每个 schema 以自己的名字导出 |
 | `web/src/api.validators.generated.ts` | Ajv 预编译的响应校验函数，只覆盖 `tools/openapi/validators.mjs` 列出的操作 |
 
-`make check` 的第一步 `make api-check` 重新生成这三个文件，与已提交的不一致即失败。Go 契约测试读的是打包结果，改了契约先运行 `make api` 再跑 `go test`。两个分支都改了契约时，生成文件冲突不必手工合并：取任一边，解决源文件的冲突后重新运行 `make api`。
+`make check` 的第一步 `make api-check` 先用 Redocly CLI 检查契约（`redocly lint`，规则在 [`api/redocly.yaml`](../../api/redocly.yaml)，逐条核对过的例外在 `api/.redocly.lint-ignore.yaml`），再重新生成这三个文件，与已提交的不一致即失败。Go 契约测试读的是打包结果，改了契约先运行 `make api` 再跑 `go test`。两个分支都改了契约时，生成文件冲突不必手工合并：取任一边，解决源文件的冲突后重新运行 `make api`。
 
 生成工具在 [`tools/openapi`](../../tools/openapi/package.json) 中有独立的 npm 包，与 `tools/golangci-lint` 同理：openapi-typescript 依赖 TypeScript 5 的编译器 API，而 Web 客户端用 TypeScript 7。Makefile 以 `REDOCLY_TELEMETRY=off` 运行 Redocly CLI，并关闭更新检查，生成过程不联网。
 
@@ -411,7 +411,7 @@ Web 测试用 [`test/api.ts`](../../web/src/test/api.ts) 的 `stubAPI` 替换 `f
 
 | 目标 | 检查 |
 |---|---|
-| `make api-check` | 由接口契约重新生成打包文档、Web 类型与响应校验，与已提交的不一致即失败，见[接口契约](#接口契约) |
+| `make api-check` | 检查接口契约（`redocly lint`），再由它重新生成打包文档、Web 类型与响应校验，与已提交的不一致即失败，见[接口契约](#接口契约) |
 | `make web-lint` | `web/` 中的 `npm run lint`：Oxlint 与 eslint-plugin-react-hooks（含 React Compiler 的规则），再由 Biome 检查格式；规则列在 `web/.oxlintrc.json`，所有文件都须通过 |
 | `make go-lint` | golangci-lint，版本由 `tools/golangci-lint/go.mod` 固定，首次运行经 `go tool` 从 `proxy.golang.org` 构建；规则与理由见 `.golangci.yml` |
 | `make ai-lint` | Ruff 检查 `ai/`；`ai/requirements-dev.lock` 按哈希固定版本，`PATH` 上的 `ruff` 版本不同即失败。Ruff 在 WSL 中不检查可执行位（EXE001/EXE002），这两条只在 CI 报出：Python 文件在 Git 中是 0644，不写 shebang |

@@ -50,8 +50,10 @@ api: api-install
 		--output $(API_OUT)/web/src/api.generated.ts > /dev/null
 	@node tools/openapi/validators.mjs $(API_OUT)/api/openapi.bundle.yaml $(API_OUT)/web/src/api.validators.generated.ts
 
-# Fails when a generated contract file differs from what `make api` writes.
+# Lints the contract (api/redocly.yaml), then fails when a generated contract
+# file differs from what `make api` writes.
 api-check: api-install
+	@$(REDOCLY) lint --config api/redocly.yaml api/openapi.yaml
 	@out="$$(mktemp -d)"; trap 'rm -rf "$$out"' EXIT; \
 	$(MAKE) --no-print-directory api API_OUT="$$out" || exit 1; \
 	for file in api/openapi.bundle.yaml web/src/api.generated.ts web/src/api.validators.generated.ts; do \
