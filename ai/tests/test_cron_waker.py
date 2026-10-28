@@ -125,7 +125,7 @@ class WakeTests(unittest.TestCase):
              patch.object(waker.subprocess, "run", side_effect=lambda *a, **k: order.append("start")) as run:
             waker.wake("alice")
         self.assertEqual(order, ["check", "start"])
-        self.assertEqual(run.call_args.args[0], ["systemctl", "start", "--no-block", "anas-assistant-cron@alice.service"])
+        self.assertEqual(run.call_args.args[0], ["/usr/bin/systemctl", "start", "--no-block", "anas-assistant-cron@alice.service"])
 
     def test_an_account_failure_or_timeout_does_not_skip_the_next_account(self):
         for error in (RuntimeError("bad job"), subprocess.TimeoutExpired("worker", 10)):
