@@ -1,21 +1,14 @@
 import { Clapperboard, ImagePlus, Monitor, Moon, RotateCcw, Scaling } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import {
-  type LocalDisplay,
-  readLocalDisplay,
-  resetWallpaper,
-  updateLocalDisplay,
-  updateWallpaperStyle,
-  type Wallpaper,
-  type WallpaperStyle,
-} from "../api";
-import { localConsoleScreenSaverIdleMs } from "../LocalConsoleScreenSaver";
-import { publishWallpaper, useWallpaper, wallpaperPicture } from "../wallpaper";
+import type { LocalDisplay, Wallpaper, WallpaperStyle } from "../api.generated";
+import { readLocalDisplay, resetWallpaper, updateLocalDisplay, updateWallpaperStyle } from "../desktop/api";
+import { localConsoleScreenSaverIdleMs } from "../desktop/LocalConsoleScreenSaver";
+import { publishWallpaper, useWallpaper, wallpaperPicture } from "../desktop/wallpaper";
 import { DesktopPreview } from "./DesktopPreview";
-import { Banner, Group, IconTile, PageHeader, messageOf } from "./parts";
+import { Banner, Group, IconTile, messageOf, PageHeader } from "./parts";
+import styles from "./settings.module.css";
 import { WallpaperDialog } from "./WallpaperDialog";
-import "./personalization.css";
 
 const saverDelayMinutes = localConsoleScreenSaverIdleMs / 60_000;
 
@@ -90,22 +83,22 @@ function WallpaperGroup({ onError }: { onError: (message: string) => void }) {
         title="桌面壁纸"
         footnote="壁纸对所有账号的桌面生效，包括本机屏幕。图片上传前会缩小到长边不超过 3840 像素，不带拍摄位置等信息。"
       >
-        <div className="pz-wallpaper">
+        <div className={styles.pzWallpaper}>
           <DesktopPreview picture={wallpaper && wallpaperPicture(wallpaper)} style={style} label="当前桌面壁纸的预览" />
-          <div className="pz-wallpaper-side">
-            <div className="pz-wallpaper-name">
+          <div className={styles.pzWallpaperSide}>
+            <div className={styles.pzWallpaperName}>
               <strong>{wallpaper === undefined ? "正在读取…" : custom ? "自定义图片" : "默认壁纸"}</strong>
               <small>{custom ? `${custom.width} × ${custom.height} 像素` : "A-NAS 内置的深蓝抽象壁纸"}</small>
             </div>
             {confirmingReset ? (
-              <div className="pz-confirm" role="group" aria-label="确认恢复默认壁纸">
+              <div className={styles.pzConfirm} role="group" aria-label="确认恢复默认壁纸">
                 <p>所有桌面会换回默认壁纸，样式改回“填充”。</p>
                 <div>
-                  <button className="set-btn" onClick={() => setConfirmingReset(false)} disabled={busy}>
+                  <button className={styles.setBtn} onClick={() => setConfirmingReset(false)} disabled={busy}>
                     取消
                   </button>
                   <button
-                    className="set-btn danger"
+                    className={`${styles.setBtn} ${styles.danger}`}
                     onClick={() => {
                       setConfirmingReset(false);
                       void run(resetWallpaper);
@@ -117,13 +110,17 @@ function WallpaperGroup({ onError }: { onError: (message: string) => void }) {
                 </div>
               </div>
             ) : (
-              <div className="pz-wallpaper-actions">
-                <button className="set-btn primary" onClick={() => setChoosing(true)} disabled={busy || !wallpaper}>
+              <div className={styles.pzWallpaperActions}>
+                <button
+                  className={`${styles.setBtn} primary`}
+                  onClick={() => setChoosing(true)}
+                  disabled={busy || !wallpaper}
+                >
                   <ImagePlus />
                   更换图片…
                 </button>
                 {custom && (
-                  <button className="set-btn" onClick={() => setConfirmingReset(true)} disabled={busy}>
+                  <button className={styles.setBtn} onClick={() => setConfirmingReset(true)} disabled={busy}>
                     <RotateCcw />
                     恢复默认
                   </button>
@@ -132,13 +129,13 @@ function WallpaperGroup({ onError }: { onError: (message: string) => void }) {
             )}
           </div>
         </div>
-        <div className="set-row pz-row">
+        <div className={`${styles.setRow} ${styles.pzRow}`}>
           <IconTile tone="personalize" icon={Scaling} />
-          <div className="set-row-text">
+          <div className={styles.setRowText}>
             <span>样式</span>
             <small>{styleChoices.find((choice) => choice.style === style)?.detail}</small>
           </div>
-          <div className="pz-segmented" role="radiogroup" aria-label="壁纸样式" aria-busy={busy || undefined}>
+          <div className={styles.pzSegmented} role="radiogroup" aria-label="壁纸样式" aria-busy={busy || undefined}>
             {styleChoices.map((choice) => (
               <button
                 key={choice.style}
@@ -204,13 +201,13 @@ function LocalScreenGroup({ onError }: { onError: (message: string) => void }) {
       title="本机屏幕"
       footnote="本机屏幕是直接接在这台 NAS 上的显示器，用手机或电脑浏览器访问时不会息屏。黑屏时视频停止播放，显示器背光仍按它自己的亮度点亮。"
     >
-      <div className="set-row pz-row">
+      <div className={`${styles.setRow} ${styles.pzRow}`}>
         <IconTile tone="sleep" icon={Moon} />
-        <div className="set-row-text">
+        <div className={styles.setRowText}>
           <span>息屏</span>
           <small>屏保播放多久后让屏幕变黑</small>
         </div>
-        <div className="pz-segmented" role="radiogroup" aria-label="息屏时间" aria-busy={saving || undefined}>
+        <div className={styles.pzSegmented} role="radiogroup" aria-label="息屏时间" aria-busy={saving || undefined}>
           {sleepChoices.map(({ minutes, label }) => (
             <button
               key={minutes}
@@ -236,24 +233,24 @@ function SleepTimeline({ sleepAfter }: { sleepAfter: number }) {
   const sleeps = sleepAfter > 0;
   const blackAt = saverDelayMinutes + sleepAfter;
   return (
-    <figure className={`pz-timeline ${sleeps ? "" : "never"}`}>
-      <div className="pz-track" aria-hidden="true">
-        <span className="pz-stage desktop">
+    <figure className={`${styles.pzTimeline} ${sleeps ? "" : styles.never}`}>
+      <div className={styles.pzTrack} aria-hidden="true">
+        <span className={`${styles.pzStage} ${styles.desktop}`}>
           <Monitor />
           桌面
         </span>
-        <span className="pz-stage saver">
+        <span className={`${styles.pzStage} ${styles.saver}`}>
           <Clapperboard />
           屏保
         </span>
         {sleeps && (
-          <span className="pz-stage asleep">
+          <span className={`${styles.pzStage} ${styles.asleep}`}>
             <Moon />
             黑屏
           </span>
         )}
       </div>
-      <div className="pz-ticks" aria-hidden="true">
+      <div className={styles.pzTicks} aria-hidden="true">
         <span>最后一次操作</span>
         <span>{saverDelayMinutes} 分钟</span>
         {sleeps && <span>{minutesText(blackAt)}</span>}

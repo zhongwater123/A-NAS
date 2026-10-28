@@ -13,6 +13,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/openapitest"
 	"github.com/zhongwater123/A-NAS/internal/taskmanager"
+	"github.com/zhongwater123/A-NAS/internal/taskmanager/taskicon"
 )
 
 func TestTaskManagerAuthenticatedResponseContract(t *testing.T) {
@@ -107,7 +108,7 @@ type iconContractReader struct{ *fake.Reader }
 
 func (r iconContractReader) ReadTasks(ctx context.Context) (taskmanager.TaskSnapshot, error) {
 	s, err := r.Reader.ReadTasks(ctx)
-	id, src := taskmanager.NormalizeIcon([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="#369"/></svg>`))
+	id, src := taskicon.Normalize([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="#369"/></svg>`))
 	s.Icons = map[string]string{id: src}
 	s.Processes.Items[0].IconID = id
 	s.Services.Items[0].IconID = id

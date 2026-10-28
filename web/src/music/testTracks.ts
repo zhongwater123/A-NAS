@@ -1,4 +1,4 @@
-import type { Track } from "./musicApi";
+import type { Track } from "./api";
 
 // track builds a library track for tests.
 export function track(id: string, overrides: Partial<Track> = {}): Track {

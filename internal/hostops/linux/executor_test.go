@@ -7,17 +7,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
-	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
 func TestCreateVolumeResolvesStableIDAndWritesUUIDMountUnit(t *testing.T) {
 	host := newDiskHost(t, "disk:test-data")
 	executor := host.executor()
 
-	operation := host.finish(t, executor, startCreate(t, executor, "plan:test", storage.LayoutSingle, host.targets("disk:test-data")...))
-	if operation.State != storage.OperationSucceeded || operation.Volume == nil {
+	operation := host.finish(t, executor, startCreate(t, executor, "plan:test", datavolume.LayoutSingle, host.targets("disk:test-data")...))
+	if operation.State != datavolume.OperationSucceeded || operation.Volume == nil {
 		t.Fatalf("operation = %+v, want succeeded", operation)
 	}
 	if got, want := operation.Volume.FilesystemUUID, host.uuid(1); got != want {
@@ -47,9 +47,9 @@ func TestSetCredentialKeepsPasswordOutOfArgumentsAndAppliesHardenedSambaConfig(t
 	executor := linux.NewExecutor(nil, runner, linux.Options{
 		SystemRoot: systemRoot, MountPoint: mountPoint, SMBInterface: "enp3s0",
 	})
-	request := accounts.CredentialRequest{
+	request := accountid.CredentialRequest{
 		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-		Password: "alice password for testing", Role: accounts.RoleMember, UID: 20100, Enabled: true,
+		Password: "alice password for testing", Role: accountid.RoleMember, UID: 20100, Enabled: true,
 	}
 
 	if err := executor.SetCredential(context.Background(), request); err != nil {
@@ -94,9 +94,9 @@ func TestSetCredentialRefusesPasswordsSmbpasswdWouldCut(t *testing.T) {
 	} {
 		runner := &recordingRunner{}
 		executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: t.TempDir(), MountPoint: filepath.Join(t.TempDir(), "data")})
-		err := executor.SetCredential(context.Background(), accounts.CredentialRequest{
+		err := executor.SetCredential(context.Background(), accountid.CredentialRequest{
 			UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-			Password: password, Role: accounts.RoleMember, UID: 20100, Enabled: true,
+			Password: password, Role: accountid.RoleMember, UID: 20100, Enabled: true,
 		})
 		if err == nil || len(runner.commands) != 0 {
 			t.Errorf("%s password: error = %v, commands = %#v; want refusal before any command", name, err, runner.commands)
@@ -108,9 +108,9 @@ func TestSetCredentialReportsUseraddFailureWithoutIncludingThePassword(t *testin
 	executor := linux.NewExecutor(nil, accountFailureRunner{}, linux.Options{
 		SystemRoot: t.TempDir(), MountPoint: filepath.Join(t.TempDir(), "data"), SMBInterface: "enp3s0",
 	})
-	request := accounts.CredentialRequest{
+	request := accountid.CredentialRequest{
 		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-		Password: "alice password for testing", Role: accounts.RoleAdmin, UID: 20100, Enabled: true,
+		Password: "alice password for testing", Role: accountid.RoleAdmin, UID: 20100, Enabled: true,
 	}
 
 	err := executor.SetCredential(context.Background(), request)

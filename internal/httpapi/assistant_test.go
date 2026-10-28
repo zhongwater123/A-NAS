@@ -133,7 +133,7 @@ func TestSigningInKeepsTheMembersAssistantRunningUntilSigningOut(t *testing.T) {
 		Connector: assistantapi.NewSocketConnector(dir, dir), SocketDir: dir, Logger: logger,
 	})
 	handler := checkedProduct(t, httpapi.ProductDependencies{
-		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, Logger: logger,
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, AssistantKeeper: assistant, Logger: logger,
 	})
 	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler}}
 	asOwner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
@@ -196,7 +196,7 @@ func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *te
 		Connector: assistantapi.NewSocketConnector(dir, dir), SocketDir: dir, Logger: logger,
 	})
 	handler := checkedProduct(t, httpapi.ProductDependencies{
-		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, Logger: logger,
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, AssistantKeeper: assistant, Logger: logger,
 	})
 	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler}}
 	f.client.do(http.MethodGet, "/api/v1/assistant/status", "", nil, http.StatusUnauthorized)

@@ -15,9 +15,10 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/filebroker"
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 // TestRootPermissionMatrix checks the ADR 0008 layout on a real Btrfs volume
@@ -44,21 +45,21 @@ func TestRootPermissionMatrix(t *testing.T) {
 	}
 	run(t, "getent", "group", "a-nas-users")
 	passwords := map[string]string{"keeper": "keeper password for tests", "alice": "alice password for tests", "bob": "bob password for tests"}
-	identities := map[string]accounts.Identity{}
+	identities := map[string]accountid.Identity{}
 	for i, user := range []struct {
 		name string
-		role accounts.Role
-	}{{"keeper", accounts.RoleAdmin}, {"alice", accounts.RoleMember}, {"bob", accounts.RoleMember}} {
-		if err := executor.SetCredential(ctx, accounts.CredentialRequest{
+		role accountid.Role
+	}{{"keeper", accountid.RoleAdmin}, {"alice", accountid.RoleMember}, {"bob", accountid.RoleMember}} {
+		if err := executor.SetCredential(ctx, accountid.CredentialRequest{
 			UserID: "user:" + user.name, PrivateSpaceID: "space:" + user.name, Username: user.name,
 			Password: passwords[user.name], Role: user.role, UID: 20110 + i, Enabled: true,
 		}); err != nil {
 			t.Fatalf("SetCredential(%s) error = %v", user.name, err)
 		}
-		identities[user.name+"-token"] = accounts.Identity{Username: user.name, UID: 20110 + i, Role: user.role, Enabled: true}
+		identities[user.name+"-token"] = accountid.Identity{Username: user.name, UID: 20110 + i, Role: user.role, Enabled: true}
 	}
 	web := startFileBroker(t, mount, executor, identities)
-	as := func(user string) context.Context { return accounts.WithSessionToken(ctx, user+"-token") }
+	as := func(user string) context.Context { return accountid.WithSessionToken(ctx, user+"-token") }
 	private := filepath.Join(mount, "spaces", "private", "alice")
 	shared := filepath.Join(mount, "spaces", "shared")
 	// t.TempDir is private to root; every test identity must read the payload.
@@ -138,10 +139,10 @@ func TestRootPermissionMatrix(t *testing.T) {
 	expect("alice lists the private-space container", false, asUser("alice", "ls", filepath.Join(mount, "spaces", "private")))
 	// The space root itself can be stat'ed through the traverse-only container,
 	// as from a terminal; its contents cannot be listed or examined.
-	if _, err := web.Scan(as("bob"), private, files.ScanSkip{}); !errors.Is(err, files.ErrForbidden) {
+	if _, err := web.Scan(as("bob"), private, filesystem.ScanSkip{}); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Errorf("bob Web listing of alice's space error = %v, want ErrForbidden", err)
 	}
-	if _, err := web.Lstat(as("bob"), filepath.Join(private, "b.txt")); !errors.Is(err, files.ErrForbidden) {
+	if _, err := web.Lstat(as("bob"), filepath.Join(private, "b.txt")); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Errorf("bob Web stat inside alice's space error = %v, want ErrForbidden", err)
 	}
 
@@ -157,7 +158,7 @@ func TestRootPermissionMatrix(t *testing.T) {
 	for _, path := range []string{webTrash, filepath.Join(private, ".a-nas-trash", "alice", "docs", "c.txt"), filepath.Join(private, ".a-nas-trash", "alice", "d.txt")} {
 		expect("alice Web reads trash item "+filepath.Base(path), true, webRead("alice", path))
 	}
-	if entries, err := web.Scan(as("alice"), filepath.Join(private, ".a-nas-trash", "alice"), files.ScanSkip{}); err != nil || len(entries) < 4 {
+	if entries, err := web.Scan(as("alice"), filepath.Join(private, ".a-nas-trash", "alice"), filesystem.ScanSkip{}); err != nil || len(entries) < 4 {
 		t.Errorf("alice Web scan of her trash = %d entries, %v", len(entries), err)
 	}
 	if err := web.Rename(as("alice"), webTrash, filepath.Join(private, "restored.txt")); err != nil {
@@ -195,7 +196,7 @@ func TestRootPermissionMatrix(t *testing.T) {
 		t.Errorf("Shared deletion is not in bob's trash: %v", err)
 	}
 	expect("alice lists bob's Shared trash", false, asUser("alice", "ls", filepath.Join(shared, ".a-nas-trash", "bob")))
-	if _, err := web.Scan(as("alice"), filepath.Join(shared, ".a-nas-trash", "bob"), files.ScanSkip{}); !errors.Is(err, files.ErrForbidden) {
+	if _, err := web.Scan(as("alice"), filepath.Join(shared, ".a-nas-trash", "bob"), filesystem.ScanSkip{}); !errors.Is(err, filesystem.ErrForbidden) {
 		t.Errorf("alice Web scan of bob's trash error = %v, want ErrForbidden", err)
 	}
 	if listing := smb("alice", "Shared", "ls").output; strings.Contains(listing, ".a-nas-trash") {
@@ -204,11 +205,11 @@ func TestRootPermissionMatrix(t *testing.T) {
 	expect("alice SMB renames the Shared trash root", false, smb("alice", "Shared", "rename .a-nas-trash moved"))
 
 	// An identity created by synchronization gets its Shared trash at once.
-	if err := executor.SyncIdentities(ctx, []accounts.Identity{
-		{Username: "keeper", UID: 20110, Role: accounts.RoleAdmin, Enabled: true},
-		{Username: "alice", UID: 20111, Role: accounts.RoleMember, Enabled: true},
-		{Username: "bob", UID: 20112, Role: accounts.RoleMember, Enabled: true},
-		{Username: "carol", UID: 20113, Role: accounts.RoleMember, Enabled: true},
+	if err := executor.SyncIdentities(ctx, []accountid.Identity{
+		{Username: "keeper", UID: 20110, Role: accountid.RoleAdmin, Enabled: true},
+		{Username: "alice", UID: 20111, Role: accountid.RoleMember, Enabled: true},
+		{Username: "bob", UID: 20112, Role: accountid.RoleMember, Enabled: true},
+		{Username: "carol", UID: 20113, Role: accountid.RoleMember, Enabled: true},
 	}); err != nil {
 		t.Fatalf("SyncIdentities() error = %v", err)
 	}
@@ -275,7 +276,7 @@ func TestRootPermissionMatrix(t *testing.T) {
 // startFileBroker serves the File Broker with real per-user workers. The test
 // binary is copied somewhere every user can execute, because the worker is
 // this binary re-executed under the user's credentials.
-func startFileBroker(t *testing.T, mount string, executor *Executor, identities map[string]accounts.Identity) *filebroker.Client {
+func startFileBroker(t *testing.T, mount string, executor *Executor, identities map[string]accountid.Identity) *filebroker.Client {
 	t.Helper()
 	self, err := os.Executable()
 	if err != nil {
@@ -283,12 +284,12 @@ func startFileBroker(t *testing.T, mount string, executor *Executor, identities 
 	}
 	worker := "/usr/local/bin/anas-matrix-file-worker"
 	run(t, "install", "-m", "0755", self, worker)
-	server, err := filebroker.NewServer(filebroker.Config{
+	server, err := rootbroker.NewServer(rootbroker.Config{
 		Sessions: sessionTable(identities), VolumeRoot: mount, VolumeReady: executor.DataVolumeReady,
 		Command: func(volumeRoot string) *exec.Cmd {
-			return exec.Command(worker, filebroker.WorkerArgument, volumeRoot)
+			return exec.Command(worker, rootbroker.WorkerArgument, volumeRoot)
 		},
-		ProbeCommand: func() *exec.Cmd { return exec.Command(worker, filebroker.ProbeArgument) },
+		ProbeCommand: func() *exec.Cmd { return exec.Command(worker, rootbroker.ProbeArgument) },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -309,12 +310,12 @@ func startFileBroker(t *testing.T, mount string, executor *Executor, identities 
 	return filebroker.NewClient(socket)
 }
 
-type sessionTable map[string]accounts.Identity
+type sessionTable map[string]accountid.Identity
 
-func (s sessionTable) ResolveSessionIdentity(_ context.Context, token string) (accounts.Identity, error) {
+func (s sessionTable) ResolveSessionIdentity(_ context.Context, token string) (accountid.Identity, error) {
 	identity, ok := s[token]
 	if !ok {
-		return accounts.Identity{}, accounts.ErrSessionNotFound
+		return accountid.Identity{}, accountid.ErrSessionNotFound
 	}
 	return identity, nil
 }

@@ -14,10 +14,8 @@ package transfers
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"sort"
 	"sync"
@@ -150,8 +148,7 @@ type Spaces interface {
 }
 
 type Options struct {
-	Now    func() time.Time
-	Random io.Reader
+	Now func() time.Time
 	// Sessions lists the signed-in sessions. Ending an abandoned upload
 	// removes its temporary as its owner through one of them.
 	Sessions func(context.Context) []accounts.Session
@@ -168,7 +165,6 @@ type Service struct {
 	sessions func(context.Context) []accounts.Session
 	changed  func(context.Context, accounts.User, string)
 	now      func() time.Time
-	random   io.Reader
 	logger   *slog.Logger
 
 	mu   sync.Mutex
@@ -204,13 +200,10 @@ func Open(path string, fileService *files.Service, spaces Spaces, options Option
 	}
 	service := &Service{
 		store: db, files: fileService, spaces: spaces, sessions: options.Sessions, changed: options.FilesChanged,
-		now: options.Now, random: options.Random, logger: options.Logger, live: make(map[string]*liveTransfer),
+		now: options.Now, logger: options.Logger, live: make(map[string]*liveTransfer),
 	}
 	if service.now == nil {
 		service.now = time.Now
-	}
-	if service.random == nil {
-		service.random = rand.Reader
 	}
 	if service.logger == nil {
 		service.logger = slog.Default()
@@ -577,13 +570,7 @@ func (s *Service) location(ctx context.Context, owner accounts.User, spaceID, fo
 	return location, nil
 }
 
-func (s *Service) newID(direction Direction) string {
-	value := make([]byte, 16)
-	if _, err := io.ReadFull(s.random, value); err != nil {
-		panic(err)
-	}
-	return string(direction) + "-" + hex.EncodeToString(value)
-}
+func (s *Service) newID(direction Direction) string { return string(direction) + "-" + rand.Text() }
 
 // snapshot copies the transfer with its live state; the caller holds Service.mu.
 func (l *liveTransfer) snapshot(now time.Time) Transfer {

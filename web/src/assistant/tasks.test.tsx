@@ -1,18 +1,12 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { assistantTask, noticesHandlers, taskNotice, tasksHandlers } from "../test/handlers/assistant";
+import { http, server } from "../test/server";
 import { scheduledPrompt } from "./AssistantPanel";
-import type { AssistantTask } from "./assistantApi";
-import { TaskToasts, plainText } from "./TaskToasts";
 import { TasksView } from "./TasksView";
-import { stubAPI } from "../test/api";
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-}
-
-afterEach(() => vi.unstubAllGlobals());
+import { plainText, TaskToasts } from "./TaskToasts";
 
 const seconds = (date: Date) => date.getTime() / 1000;
 const today = (hour: number, minute = 0) => {
@@ -21,8 +15,7 @@ const today = (hour: number, minute = 0) => {
   return date;
 };
 
-const daily: AssistantTask = {
-  id: "aaaaaaaaaaaa",
+const daily = assistantTask("aaaaaaaaaaaa", {
   name: "每日小结",
   prompt: "总结共享空间昨天新增的文件",
   schedule: { kind: "cron", expr: "0 8 * * *", display: "0 8 * * *" },
@@ -31,9 +24,8 @@ const daily: AssistantTask = {
   lastRunAt: seconds(today(8, 0)),
   lastStatus: "ok",
   completed: 3,
-};
-const photos: AssistantTask = {
-  id: "bbbbbbbbbbbb",
+});
+const photos = assistantTask("bbbbbbbbbbbb", {
   name: "整理新照片",
   prompt: "把新照片按地点归类，列给我",
   schedule: { kind: "interval", minutes: 360, display: "every 360m" },
@@ -42,30 +34,26 @@ const photos: AssistantTask = {
   lastStatus: "error",
   lastError: "模型没有响应",
   completed: 1,
-};
+});
 
 describe("TasksView", () => {
   it("shows each task's schedule and last run, and opens a run as a conversation", async () => {
-    const calls: string[] = [];
-    stubAPI(
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        calls.push(`${init?.method ?? "GET"} ${url}`);
-        if (url.endsWith("/assistant/tasks")) return json({ tasks: [photos, daily] });
-        if (url.endsWith("/tasks/aaaaaaaaaaaa/runs"))
-          return json({
-            runs: [
-              {
-                id: "cron_aaaaaaaaaaaa_20261020_080000",
-                startedAt: seconds(today(8)),
-                endedAt: seconds(today(8)) + 12,
-                messageCount: 4,
-              },
-            ],
-          });
-        if (url.endsWith("/tasks/bbbbbbbbbbbb/resume"))
-          return json({ task: { ...photos, state: "scheduled", nextRunAt: seconds(today(23)) } });
-        return json({ error: { code: "not_found", message: "not found" } }, 404);
+    const resumed: string[] = [];
+    server.use(
+      ...tasksHandlers([photos, daily], {
+        [daily.id]: [
+          {
+            id: "cron_aaaaaaaaaaaa_20261020_080000",
+            startedAt: seconds(today(8)),
+            endedAt: seconds(today(8)) + 12,
+            messageCount: 4,
+          },
+        ],
+      }),
+      ...noticesHandlers().handlers,
+      http.post("/api/v1/assistant/tasks/{taskId}/resume", ({ params, response }) => {
+        resumed.push(params.taskId);
+        return response(200).json({ task: { ...photos, state: "scheduled", nextRunAt: seconds(today(23)) } });
       }),
     );
     const onOpenRun = vi.fn();
@@ -87,29 +75,15 @@ describe("TasksView", () => {
 
     await user.click(within(cards[1]).getByRole("button", { name: "继续" }));
     await waitFor(() => expect(screen.getAllByText("已开启")).toHaveLength(2));
-    expect(calls).toContain("POST /api/v1/assistant/tasks/bbbbbbbbbbbb/resume");
+    expect(resumed).toEqual([photos.id]);
   });
 
   it("marks a task whose result the member has not read", async () => {
-    stubAPI(
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.endsWith("/assistant/tasks")) return json({ tasks: [daily, photos] });
-        if (url.endsWith("/api/v1/notifications")) {
-          return json({
-            items: [
-              {
-                id: "n9",
-                kind: "assistant_task",
-                actorUsername: "",
-                createdAt: new Date().toISOString(),
-                task: { taskId: daily.id, name: daily.name, status: "ok", ranAt: today(8).toISOString() },
-              },
-            ],
-          });
-        }
-        return json({ error: { code: "not_found", message: "not found" } }, 404);
-      }),
+    server.use(
+      ...tasksHandlers([daily, photos]),
+      ...noticesHandlers([
+        taskNotice("n9", { taskId: daily.id, name: daily.name, status: "ok", ranAt: today(8).toISOString() }),
+      ]).handlers,
     );
     render(<TasksView onOpenRun={() => undefined} onPlan={() => undefined} />);
     const cards = await screen.findAllByRole("listitem");
@@ -118,32 +92,27 @@ describe("TasksView", () => {
   });
 
   it("deletes a task only once the member confirms, runs included", async () => {
-    const calls: string[] = [];
-    stubAPI(
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        calls.push(`${init?.method ?? "GET"} ${url}`);
-        if (url.endsWith("/assistant/tasks")) return json({ tasks: [daily] });
-        if (init?.method === "DELETE") return new Response(null, { status: 204 });
-        return json({ error: { code: "not_found", message: "not found" } }, 404);
+    const deleted: string[] = [];
+    server.use(
+      ...tasksHandlers([daily]),
+      ...noticesHandlers().handlers,
+      http.delete("/api/v1/assistant/tasks/{taskId}", ({ params, response }) => {
+        deleted.push(params.taskId);
+        return response(204).empty();
       }),
     );
     const user = userEvent.setup();
     render(<TasksView onOpenRun={() => undefined} onPlan={() => undefined} />);
     await user.click(await screen.findByRole("button", { name: "删除任务" }));
     expect(screen.getByText(/运行记录也会一起删除/)).toBeTruthy();
-    expect(calls.some((call) => call.startsWith("DELETE"))).toBe(false);
+    expect(deleted).toEqual([]);
     await user.click(screen.getByRole("button", { name: "删除" }));
     expect(await screen.findByText("已删除“每日小结”")).toBeTruthy();
-    expect(calls).toContain("DELETE /api/v1/assistant/tasks/aaaaaaaaaaaa");
+    expect(deleted).toEqual([daily.id]);
   });
 
   it("suggests tasks to ask for when there are none", async () => {
-    stubAPI(
-      vi.fn(async (input: RequestInfo | URL) =>
-        String(input).endsWith("/api/v1/notifications") ? json({ items: [] }) : json({ tasks: [] }),
-      ),
-    );
+    server.use(...tasksHandlers([]), ...noticesHandlers().handlers);
     const onPlan = vi.fn();
     const user = userEvent.setup();
     render(<TasksView onOpenRun={() => undefined} onPlan={onPlan} />);
@@ -155,41 +124,24 @@ describe("TasksView", () => {
 
 describe("TaskToasts", () => {
   it("tells of finished runs only, and reading one acknowledges it", async () => {
-    const calls: string[] = [];
-    stubAPI(
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        calls.push(`${init?.method ?? "GET"} ${url}`);
-        if (url.endsWith("/api/v1/notifications")) {
-          return json({
-            items: [
-              {
-                id: "n1",
-                kind: "admin_viewing",
-                actorUsername: "owner",
-                reason: "恢复文件",
-                createdAt: new Date().toISOString(),
-              },
-              {
-                id: "n2",
-                kind: "assistant_task",
-                actorUsername: "",
-                createdAt: new Date().toISOString(),
-                task: {
-                  taskId: "aaaaaaaaaaaa",
-                  name: "每日小结",
-                  status: "ok",
-                  ranAt: today(8).toISOString(),
-                  sessionId: "cron_aaaaaaaaaaaa_20261020_080000",
-                  summary: "## 今日小结 共享空间新增 **3** 个文件",
-                },
-              },
-            ],
-          });
-        }
-        return new Response(null, { status: 204 });
+    const notices = noticesHandlers([
+      {
+        id: "n1",
+        kind: "admin_viewing",
+        actorUsername: "owner",
+        reason: "恢复文件",
+        createdAt: new Date().toISOString(),
+      },
+      taskNotice("n2", {
+        taskId: "aaaaaaaaaaaa",
+        name: "每日小结",
+        status: "ok",
+        ranAt: today(8).toISOString(),
+        sessionId: "cron_aaaaaaaaaaaa_20261020_080000",
+        summary: "## 今日小结 共享空间新增 **3** 个文件",
       }),
-    );
+    ]);
+    server.use(...notices.handlers);
     const onOpen = vi.fn();
     const user = userEvent.setup();
     render(<TaskToasts enabled onOpen={onOpen} />);
@@ -200,14 +152,21 @@ describe("TaskToasts", () => {
     await user.click(within(toast).getByRole("button", { name: /查看结果/ }));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "cron_aaaaaaaaaaaa_20261020_080000" }));
     expect(screen.queryByRole("status", { name: "定时任务 每日小结" })).toBeNull();
-    await waitFor(() => expect(calls).toContain("POST /api/v1/notifications/n2/acknowledge"));
+    await waitFor(() => expect(notices.acknowledged).toEqual(["n2"]));
   });
 
-  it("asks nothing when the member has no assistant", () => {
-    const fetch = vi.fn();
-    stubAPI(fetch);
+  it("asks nothing when the member has no assistant", async () => {
+    const asked = vi.fn();
+    server.use(
+      http.get("/api/v1/notifications", ({ response }) => {
+        asked();
+        return response(200).json({ items: [] });
+      }),
+    );
     render(<TaskToasts enabled={false} onOpen={() => undefined} />);
-    expect(fetch).not.toHaveBeenCalled();
+    // A request would have been sent by now: the client sends it a few promises later.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(asked).not.toHaveBeenCalled();
   });
 });
 

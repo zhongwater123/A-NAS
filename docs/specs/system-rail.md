@@ -59,7 +59,7 @@
 
 ## 验收证据
 
-- React 行为测试：[桌面测试](../../web/src/App.test.tsx) 覆盖快捷栏只含可用按钮、显示桌面与只恢复被隐藏的窗口、按关键词搜索并用 Enter 打开、Esc 关闭并归还焦点、只能从账号菜单退出登录；[快捷栏测试](../../web/src/SystemRail.test.ts) 覆盖会话说明。
+- React 行为测试：[桌面测试](../../web/src/App.test.tsx) 覆盖快捷栏只含可用按钮、显示桌面与只恢复被隐藏的窗口、按关键词搜索并用 Enter 打开、Esc 关闭并归还焦点、只能从账号菜单退出登录；[快捷栏测试](../../web/src/desktop/SystemRail.test.ts) 覆盖会话说明。
 - 浏览器检查：Fake 模式预览中在 1024×680 与 390×760 下检查快捷栏、名称提示、启动器的方向键导航，以及启动器与账号菜单在窗口之上的显示。
 
 ## 关联
@@ -67,5 +67,5 @@
 - 规格：[Web 桌面宿主机状态](web-desktop-host-state.md)、[设置](settings.md)
 - 架构：不涉及
 - ADR：[Web 桌面技术选择](../adr/0003-use-react-typescript-for-web-desktop.md)
-- 代码：[系统快捷栏](../../web/src/SystemRail.tsx)、[桌面](../../web/src/desktop/Desktop.tsx)、[样式](../../web/src/styles.css)
-- 测试：[桌面测试](../../web/src/App.test.tsx)、[快捷栏测试](../../web/src/SystemRail.test.ts)
+- 代码：[系统快捷栏](../../web/src/desktop/SystemRail.tsx)、[桌面](../../web/src/desktop/Desktop.tsx)、[样式](../../web/src/desktop/desktop.module.css)
+- 测试：[桌面测试](../../web/src/App.test.tsx)、[快捷栏测试](../../web/src/desktop/SystemRail.test.ts)

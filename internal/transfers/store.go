@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // store keeps every user's transfers in transfers.db on the system disk.
@@ -19,14 +20,10 @@ type store struct {
 }
 
 func openStore(path string) (*store, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("SQLite path is empty")
-	}
-	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000&_journal_mode=WAL")
+	db, err := sqlitedb.Open(path, sqlitedb.Options{})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	const schema = `
 CREATE TABLE IF NOT EXISTS transfers (
     id TEXT PRIMARY KEY,
@@ -222,5 +219,4 @@ func scanTransfer(row rowScanner) (Transfer, error) {
 	return t, nil
 }
 
-// formatTime has a fixed width, so stored times sort as text.
-func formatTime(value time.Time) string { return value.UTC().Format("2006-01-02T15:04:05.000000000Z") }
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }

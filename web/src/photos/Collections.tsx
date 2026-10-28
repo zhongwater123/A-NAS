@@ -1,8 +1,9 @@
 import { FolderPlus, Images } from "lucide-react";
 import { ReactNode, useEffect, useEffectEvent, useState } from "react";
 
+import { listAlbums, type PhotoAlbum, thumbnailURL } from "./api";
 import { messageOf } from "./model";
-import { listAlbums, thumbnailURL, type PhotoAlbum } from "./photosApi";
+import styles from "./photos.module.css";
 
 interface AlbumsProps {
   libraryId: string;
@@ -36,16 +37,16 @@ export function AlbumsView({ libraryId, readOnly, refreshKey, topInset, onOpen, 
     };
   }, [libraryId, refreshKey]);
   return (
-    <div className="ph-cards-scroll" style={{ paddingTop: topInset }}>
+    <div className={styles.phCardsScroll} style={{ paddingTop: topInset }}>
       {albums === undefined ? (
-        <div className="ph-loading">
-          <span className="ph-spinner" />
+        <div className={styles.phLoading}>
+          <span className={styles.phSpinner} />
         </div>
       ) : (
-        <div className="ph-cards">
+        <div className={styles.phCards}>
           {!readOnly && (
-            <button type="button" className="ph-card ph-card-new" onClick={onCreate}>
-              <span className="ph-card-cover">
+            <button type="button" className={`${styles.phCard} ${styles.phCardNew}`} onClick={onCreate}>
+              <span className={styles.phCardCover}>
                 <FolderPlus />
               </span>
               <strong>新建相册</strong>
@@ -56,11 +57,11 @@ export function AlbumsView({ libraryId, readOnly, refreshKey, topInset, onOpen, 
             <button
               type="button"
               key={album.id}
-              className="ph-card"
+              className={styles.phCard}
               aria-label={`打开相册 ${album.name}`}
               onClick={() => onOpen(album)}
             >
-              <span className="ph-card-cover">
+              <span className={styles.phCardCover}>
                 {album.coverId ? <img src={thumbnailURL(album.coverId)} alt="" loading="lazy" /> : <Images />}
               </span>
               <strong>{album.name}</strong>
@@ -86,8 +87,8 @@ export function Empty({
   action?: ReactNode;
 }) {
   return (
-    <div className="ph-empty">
-      <span className="ph-empty-icon">{icon}</span>
+    <div className={styles.phEmpty}>
+      <span className={styles.phEmptyIcon}>{icon}</span>
       <strong>{title}</strong>
       <p>{text}</p>
       {action}

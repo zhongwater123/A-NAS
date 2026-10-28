@@ -71,7 +71,9 @@ type activityFixture struct {
 	client   *contractClient
 }
 
-func newActivityFixture(t *testing.T, photoAPI func(*photos.Service) http.Handler) *activityFixture {
+// newActivityFixture serves the product with the photo API that photoAPI
+// returns for the photo library and the account service.
+func newActivityFixture(t *testing.T, photoAPI func(*photos.Service, *accounts.Service) http.Handler) *activityFixture {
 	t.Helper()
 	dir := t.TempDir()
 	now := steadyClock()
@@ -99,7 +101,7 @@ func newActivityFixture(t *testing.T, photoAPI func(*photos.Service) http.Handle
 	t.Cleanup(func() { _ = settings.Close() })
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
-		Photos: photoAPI(photoService), Personalization: settings, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Photos: photoAPI(photoService, accountService), Personalization: settings, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	return &activityFixture{t: t, handler: handler, accounts: accountService, files: fileService, photos: photoService,
 		client: &contractClient{t: t, handler: handler}}
@@ -181,7 +183,9 @@ func sharedSpace(t *testing.T, service *accounts.Service, user accounts.User) ac
 
 func TestActivityLogShowsEveryoneToAdministratorsWithoutPrivateNames(t *testing.T) {
 	ctx := context.Background()
-	f := newActivityFixture(t, func(service *photos.Service) http.Handler { return photosapi.New(service, nil) })
+	f := newActivityFixture(t, func(service *photos.Service, accountService *accounts.Service) http.Handler {
+		return localPhotos(t, service, serviceSessions{accountService})
+	})
 	asAdmin := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
 	session, err := f.accounts.ResolveSession(ctx, asAdmin.cookie.Value)
 	if err != nil {
@@ -313,7 +317,7 @@ func TestActivityLogShowsEveryoneToAdministratorsWithoutPrivateNames(t *testing.
 }
 
 func TestActivityLogReportsAnUnavailablePhotoLibrary(t *testing.T) {
-	f := newActivityFixture(t, func(*photos.Service) http.Handler { return photosapi.New(nil, nil) })
+	f := newActivityFixture(t, func(*photos.Service, *accounts.Service) http.Handler { return photosapi.New(nil, nil) })
 	asAdmin := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
 	page := asAdmin.activity("")
 	if len(page.Unavailable) != 1 || page.Unavailable[0] != "photo" {

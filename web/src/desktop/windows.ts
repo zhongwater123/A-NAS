@@ -30,9 +30,16 @@ export function closedWindow(id: WindowID, bounds: Pick<WindowModel, "x" | "y" |
   return { id, open: false, minimized: false, maximized: false, ...bounds, z: 0, opened: 0 };
 }
 
+// windowReducer returns the same state for an action that changes nothing, such
+// as focusing the window already on top, so the desktop does not re-render.
 export function windowReducer(windows: WindowModel[], action: WindowAction): WindowModel[] {
+  const next = nextWindows(windows, action);
+  return next.every((window, index) => window === windows[index]) ? windows : next;
+}
+
+function nextWindows(windows: WindowModel[], action: WindowAction): WindowModel[] {
   if (action.type === "show-desktop")
-    return windows.map((window) => (window.open ? { ...window, minimized: true } : window));
+    return windows.map((window) => (window.open && !window.minimized ? { ...window, minimized: true } : window));
   if (action.type === "restore") {
     // Bring the windows back above the rest, keeping their stacking order.
     const base = Math.max(...windows.map((window) => window.z)) + 1;
@@ -46,23 +53,27 @@ export function windowReducer(windows: WindowModel[], action: WindowAction): Win
   }
   const top = Math.max(...windows.map((window) => window.z)) + 1;
   const nextOpened = Math.max(...windows.map((window) => window.opened)) + 1;
+  const onTop = (window: WindowModel) => window.z === top - 1;
   return windows.map((window) => {
     if (window.id !== action.id) return window;
     switch (action.type) {
       case "open":
+        if (window.open && !window.minimized && onTop(window)) return window;
         return { ...window, open: true, minimized: false, z: top, opened: window.open ? window.opened : nextOpened };
       case "close":
-        return { ...window, open: false, minimized: false };
+        return window.open ? { ...window, open: false, minimized: false } : window;
       case "minimize":
-        return { ...window, minimized: true };
+        return window.minimized ? window : { ...window, minimized: true };
       case "focus":
-        return window.z === top - 1 ? window : { ...window, z: top };
+        return onTop(window) ? window : { ...window, z: top };
       case "maximize":
         return { ...window, maximized: !window.maximized, z: top };
       case "move":
-        return { ...window, x: action.x, y: action.y };
+        return window.x === action.x && window.y === action.y ? window : { ...window, x: action.x, y: action.y };
       case "resize":
-        return { ...window, width: action.width, height: action.height };
+        return window.width === action.width && window.height === action.height
+          ? window
+          : { ...window, width: action.width, height: action.height };
     }
   });
 }

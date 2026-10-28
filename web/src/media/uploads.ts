@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { type PickedFile, pickedFromInput, pickedFromDrop as pickFromDrop } from "../lib/pickedFiles";
 import { failureText } from "../transfers/model";
 import { type LocalUpload, transferStore, useTransfers } from "../transfers/store";
 
@@ -49,39 +50,14 @@ export interface Picked {
   folder: string;
 }
 
-export function pickedFromList(files: ArrayLike<File>): Picked[] {
-  return Array.from(files).map((file) => ({
-    file,
-    folder: (file.webkitRelativePath ?? "").split("/").filter(Boolean).slice(0, -1).join("/"),
-  }));
-}
+const picked = ({ file, directories }: PickedFile): Picked => ({ file, folder: directories.join("/") });
 
-// pickedFromDrop reads dropped files and folders. The entries must be taken
-// while the drop event runs; reading them may finish later.
-export function pickedFromDrop(transfer: DataTransfer): Promise<Picked[]> {
-  const items = Array.from(transfer.items ?? []).filter((item) => item.kind === "file");
-  const entries = items.map((item) => item.webkitGetAsEntry?.() ?? null);
-  if (!entries.length || entries.some((entry) => !entry)) return Promise.resolve(pickedFromList(transfer.files));
-  return Promise.all(entries.map((entry) => walk(entry!, ""))).then((lists) => lists.flat());
-}
+// pickedFromList reads a file or folder input.
+export const pickedFromList = (files: FileList | null): Picked[] => pickedFromInput(files).map(picked);
 
-async function walk(entry: FileSystemEntry, folder: string): Promise<Picked[]> {
-  if (entry.isFile) {
-    const file = await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject));
-    return [{ file, folder }];
-  }
-  if (!entry.isDirectory) return [];
-  // A directory reader returns its entries in batches until an empty one.
-  const reader = (entry as FileSystemDirectoryEntry).createReader();
-  const children: FileSystemEntry[] = [];
-  for (;;) {
-    const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
-    if (!batch.length) break;
-    children.push(...batch);
-  }
-  const inside = folder ? `${folder}/${entry.name}` : entry.name;
-  return (await Promise.all(children.map((child) => walk(child, inside)))).flat();
-}
+// pickedFromDrop reads dropped files and folders, as the file manager does.
+export const pickedFromDrop = async (transfer: DataTransfer): Promise<Picked[]> =>
+  (await pickFromDrop(transfer)).map(picked);
 
 // Where a batch goes: a folder of a library, by its file entry.
 export interface Destination {

@@ -1,4 +1,4 @@
-import { APIError, apiFetch, call, client, failure } from "../api";
+import { APIError, apiFetch, call, client, failure } from "../api/client";
 import type { CreateMemberShare, MemberShareEntry, operations, SaveMemberShare } from "../api.generated";
 
 export type ShareEntry = MemberShareEntry;
@@ -9,6 +9,7 @@ export type {
   MemberShareNotification as ShareNotification,
   MemberShareRecipient as Recipient,
 } from "../api.generated";
+
 type Direction = NonNullable<NonNullable<operations["listMemberShares"]["parameters"]["query"]>["direction"]>;
 
 const share = (shareId: string) => ({ params: { path: { shareId } } });
