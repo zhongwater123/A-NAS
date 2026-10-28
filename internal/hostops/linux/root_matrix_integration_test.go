@@ -216,6 +216,52 @@ func TestRootPermissionMatrix(t *testing.T) {
 	if info, err := os.Stat(filepath.Join(shared, ".a-nas-trash", "carol")); err != nil || !info.IsDir() {
 		t.Errorf("synchronized identity has no Shared trash: %v", err)
 	}
+	// Agent publication directories are managed roots, not names a member
+	// can claim. Newly synchronized users get the same layout immediately.
+	agentRoot := filepath.Join(shared, "Agent空间")
+	for _, directory := range []string{agentRoot, filepath.Join(agentRoot, "alice"), filepath.Join(agentRoot, "carol")} {
+		if ownerOf(directory) != 0 {
+			t.Errorf("policy directory is not root-owned: %s", directory)
+		}
+	}
+	expect("alice publishes in her Agent directory", true, webWrite("alice", filepath.Join(agentRoot, "alice", "notice.txt")))
+	expect("bob reads alice's publication", true, webRead("bob", filepath.Join(agentRoot, "alice", "notice.txt")))
+	expect("bob cannot write alice's publication", false, webWrite("bob", filepath.Join(agentRoot, "alice", "forged.txt")))
+	expect("SMB cannot rename the Agent root", false, smb("alice", "Shared", "rename Agent空间 taken-agent"))
+	expect("SMB cannot rename an Agent account directory", false, smb("alice", "Shared", `rename Agent空间\alice Agent空间\taken`))
+
+	// A local writer can still replace Shared entries. Reconciliation moves
+	// an impostor aside, including its contents, rather than trusting it.
+	run(t, "mv", agentRoot, filepath.Join(shared, "saved-agent"))
+	expect("alice plants an Agent directory locally", true, asUser("alice", "mkdir", "-p", filepath.Join(agentRoot, "bob")))
+	expect("alice plants content in bob's name", true, asUser("alice", "cp", payload, filepath.Join(agentRoot, "bob", "forged.txt")))
+	if _, err := executor.RepairDataVolumePermissions(ctx); err != nil {
+		t.Fatalf("repair impostor Agent root: %v", err)
+	}
+	if ownerOf(agentRoot) != 0 || ownerOf(filepath.Join(agentRoot, "bob")) != 0 {
+		t.Fatal("Agent roots were not rebuilt with the policy owner")
+	}
+	if _, err := os.Lstat(filepath.Join(agentRoot, "bob", "forged.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("impostor content was adopted: %v", err)
+	}
+	if matches, err := filepath.Glob(agentRoot + ".displaced-*/bob/forged.txt"); err != nil || len(matches) != 1 {
+		t.Errorf("impostor content was not preserved aside: %v, %v", matches, err)
+	}
+	// A link in an account slot must not change the linked directory's ACL.
+	agentVictim := filepath.Join(payloadDirectory, "agent-victim")
+	run(t, "mkdir", agentVictim)
+	beforeACL := run(t, "getfacl", "--omit-header", agentVictim)
+	run(t, "rmdir", filepath.Join(agentRoot, "bob"))
+	run(t, "ln", "-s", agentVictim, filepath.Join(agentRoot, "bob"))
+	if _, err := executor.RepairDataVolumePermissions(ctx); err != nil {
+		t.Fatalf("repair Agent account link: %v", err)
+	}
+	if after := run(t, "getfacl", "--omit-header", agentVictim); after != beforeACL {
+		t.Errorf("Agent repair changed a link target's ACL: %s", after)
+	}
+	if info, err := os.Lstat(filepath.Join(agentRoot, "bob")); err != nil || !info.IsDir() || ownerOf(filepath.Join(agentRoot, "bob")) != 0 {
+		t.Fatalf("Agent account link was not rebuilt: %v", err)
+	}
 
 	// Whoever can write Shared (an app, or a member outside SMB) replaces the
 	// trash root with a link; repair must not follow it.
@@ -241,7 +287,7 @@ func TestRootPermissionMatrix(t *testing.T) {
 
 	// Read-only shared folder: readable by all, writable only by grantees.
 	media := filepath.Join(mount, "spaces", "media")
-	if _, _, err := executor.ensureDirectoryACL(ctx, media, sharedFolderACL("user:alice"), false); err != nil {
+	if _, _, err := executor.ensureDirectoryACL(ctx, media, sharedFolderACL("user:alice"), ordinaryDirectory); err != nil {
 		t.Fatal(err)
 	}
 	expect("alice writes Media", true, asUser("alice", "cp", payload, filepath.Join(media, "m.txt")))
