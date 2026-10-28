@@ -35,3 +35,7 @@ npm test -- src/shares/polling.test.tsx
 - [账号快照](../../internal/shares/authorization.go)、[维护与栅栏](../../internal/shares/store.go)、[生产适配器](../../internal/shareservice/service.go)
 - [服务端回归](../../internal/shares/polling_test.go)、[前端回归](../../web/src/shares/polling.test.tsx)
 - [分享规格](../specs/member-sharing.md)、[私聊](../../web/src/shares/Conversation.tsx)、[窗口可见性](../../web/src/desktop/Desktop.tsx)
+
+## 审查补充
+
+桌面未读徽标属于全局界面，30 秒同步只随网页隐藏暂停，不随分享窗口关闭或最小化暂停，保证其他设备的已读状态最终同步。窗口内容仍暂停轮询，增量对话游标不变。

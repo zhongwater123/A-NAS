@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { apiError, json, stubAPI } from "../test/api";
 import { useThread } from "./Conversation";
 import { SharesPanel } from "./SharesPanel";
-import { SharesProvider } from "./SharesProvider";
+import { SharesProvider, useShares } from "./SharesProvider";
 import type { Share } from "./api";
 
 afterEach(() => {
@@ -104,7 +104,8 @@ it("stops mounted share-window requests when minimized and refreshes on restore"
   requests.length = 0;
   await tick(60_000);
   // Desktop notifications remain available even while the window is closed.
-  expect(requests.filter((url) => !url.includes("/notifications"))).toEqual([]);
+  expect(requests.filter((url) => !url.includes("/notifications") && !url.includes("direction="))).toEqual([]);
+  expect(requests.filter((url) => url.includes("direction="))).toHaveLength(4);
   rerender(panel(true));
   await tick();
   expect(requests.some((url) => url.endsWith("/s1"))).toBe(true);
@@ -137,4 +138,28 @@ it("retries a failed page without dropping history or skipping messages", async 
   await tick(3000);
   expect(cursors.at(-1)).toBe(102);
   expect(result.current.messages).toHaveLength(102);
+});
+
+it("refreshes desktop unread counts with the share window closed and no new notifications", async () => {
+ vi.useFakeTimers();
+ let unread = true;
+ let reads = 0;
+ stubAPI(vi.fn(async (input) => {
+  if (String(input).includes("direction=")) {
+   reads++;
+   return json({items: unread && String(input).includes("received") ? [{id:"s1",status:"published",createdAt:"2026-10-20T00:00:00Z",expiresAt:"2099-01-01T00:00:00Z",preparedBytes:0,sender:{id:"alice",username:"Alice"},recipients:[{userId:"bob",readThrough:0,senderReadThrough:0,lastMessage:1,saved:false,savedFiles:0}],entries:[]}] : []});
+  }
+  return json({items:[]});
+ }));
+ function Badge() { return <output>{useShares().unread.received}</output>; }
+ render(<SharesProvider userId="bob" active={false} windowVisible={false} onOpen={() => undefined}><Badge /></SharesProvider>);
+ await tick();
+ expect(screen.getByRole("status").textContent).toBe("1");
+ unread = false;
+ await tick(30_000);
+ expect(screen.getByRole("status").textContent).toBe("0");
+ const before = reads;
+ Object.defineProperty(document, "visibilityState", {configurable:true,value:"hidden"});
+ try { await tick(30_000); expect(reads).toBe(before); }
+ finally { Object.defineProperty(document,"visibilityState",{configurable:true,value:"visible"}); }
 });

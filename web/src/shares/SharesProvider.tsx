@@ -183,7 +183,6 @@ function Provider({
   }, [key]);
   // The rail and the list's tabs count unread shares; any notice or local
   // read changes the revision, and a slow timer covers another device.
-  const canPollWindow = useEffectEvent(() => pollWindow);
   useEffect(() => {
     let stopped = false;
     const load = async () => {
@@ -202,7 +201,7 @@ function Provider({
     };
     void load();
     const timer = setInterval(() => {
-      if (canPollWindow()) void load();
+      if (document.visibilityState !== "hidden") void load();
     }, 30_000);
     return () => {
       stopped = true;
