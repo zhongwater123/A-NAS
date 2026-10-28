@@ -25,9 +25,9 @@ go test ./internal/files -run 'TestScheduledSnapshotHonorsRetentionChangedDuring
 
 ## 修复与回归证据
 
-每个空间的计划更新、保留操作与清理共用一个可取消的信号量，复用已有空间协调对象与 `golang.org/x/sync/semaphore`。清理持有它时重新读取设置和定时快照列表，直到删除完成才放开；关闭的计划不清理。拍摄与文件清单采集不持有它，其他空间有各自的信号量。
+每个空间的计划更新、保留操作与清理共用一个可取消的信号量，复用已有空间协调对象与 `golang.org/x/sync/semaphore`。清理持有它时重新读取设置和定时快照列表，每删除一份就放开，下一份开始前重新读取；关闭的计划不清理。拍摄与文件清单采集不持有它，其他空间有各自的信号量。
 
-“保留”在等待结束后重新读取快照，已经过期则返回不存在，避免报告虚假的保留成功。手动删除仍按用户的显式操作执行。
+“保留”在等待结束后重新读取快照，已经过期则返回不存在，避免报告虚假的保留成功。手动删除仍按用户的显式操作执行，并与保留操作使用同一闸门。
 
 - 两个拍摄期间修改设置的回归已由失败转为通过。
 - WSL 原生副本中的 `make check-steps` 全部目标通过，包含全部 Web/Go 测试、静态检查、文档、运维和发布构建；上传前项目规范与需求符合性审查均无剩余发现。
@@ -40,3 +40,7 @@ go test ./internal/files -run 'TestScheduledSnapshotHonorsRetentionChangedDuring
 - 代码：[保留清理](../../internal/files/schedule.go)、[快照操作](../../internal/files/snapshot.go)、[空间协调](../../internal/files/ordering.go)
 - 回归：[策略更新与清理并发](../../internal/files/schedule_concurrency_test.go)、[快照计划](../../internal/files/schedule_test.go)、[智能保留](../../internal/files/snapshot_history_test.go)
 - 运行手册：[实验存储验收](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)
+
+## 审查补充
+
+每份删除单独持有空间闸门，下一份删除前重新读取策略与快照列表；等待中的设置更新或保留操作可以在两次删除之间生效。手动删除也持有闸门并重新授权。孤儿清扫只删除未登记完成的对象，不删除可被 KeepSnapshot 保留的已登记后端对象。

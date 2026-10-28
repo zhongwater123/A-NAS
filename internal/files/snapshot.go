@@ -606,6 +606,15 @@ func (s *Service) DeleteSnapshot(ctx context.Context, actor accounts.User, snaps
 	if !canManageSnapshots(actor, space) {
 		return ErrForbidden
 	}
+	unlock, err := s.lockSnapshotRetention(ctx, snapshot.SpaceID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	snapshot, _, err = s.authorizeSnapshot(ctx, actor, snapshotID)
+	if err != nil {
+		return err
+	}
 	if err := s.deleteSnapshot(ctx, snapshot); err != nil {
 		return err
 	}
