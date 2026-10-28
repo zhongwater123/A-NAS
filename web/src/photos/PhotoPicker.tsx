@@ -1,11 +1,13 @@
 import { X } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
+import feedbackStyles from "../ui/feedback.module.css";
 import { AssetGrid } from "./AssetGrid";
+import { listTimeline, type PhotoAlbum, type PhotoAsset } from "./api";
 import { Empty } from "./Collections";
 import { clampRowHeight } from "./layout";
-import { listTimeline, type PhotoAlbum, type PhotoAsset } from "./photosApi";
 import type { ScrollerHandle } from "./PhotoScroller";
+import styles from "./photos.module.css";
 import { useSelection } from "./selection";
 
 interface Props {
@@ -28,13 +30,13 @@ export function PhotoPicker({ album, onAdd, onClose }: Props) {
   const chosen = assets.filter((asset) => selection.selected.has(asset.id));
   return (
     <div
-      className="ph-dialog-backdrop"
+      className={feedbackStyles.phDialogBackdrop}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <div
-        className="ph-dialog ph-photo-picker"
+        className={`${feedbackStyles.phDialog} ${styles.phPhotoPicker}`}
         role="dialog"
         aria-modal="true"
         aria-label={`添加照片到 ${album.name}`}
@@ -48,11 +50,11 @@ export function PhotoPicker({ album, onAdd, onClose }: Props) {
         <header>
           <h3>添加到“{album.name}”</h3>
           <small>{chosen.length ? `已选 ${chosen.length} 张` : "点选照片，可以按住勾选圈拖动或框选"}</small>
-          <button type="button" className="ph-dialog-close" aria-label="关闭" onClick={onClose}>
+          <button type="button" className={feedbackStyles.phDialogClose} aria-label="关闭" onClick={onClose}>
             <X />
           </button>
         </header>
-        <div className="ph-photo-picker-grid">
+        <div className={styles.phPhotoPickerGrid}>
           <AssetGrid
             listKey={`picker:${album.libraryId}`}
             load={load}
@@ -75,7 +77,7 @@ export function PhotoPicker({ album, onAdd, onClose }: Props) {
             topInset={8}
           />
         </div>
-        <footer className="ph-dialog-actions">
+        <footer className={feedbackStyles.phDialogActions}>
           <button type="button" onClick={onClose}>
             取消
           </button>

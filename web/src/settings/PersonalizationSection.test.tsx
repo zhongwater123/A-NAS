@@ -2,50 +2,20 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setSession, type Wallpaper } from "../api";
+import { setSession } from "../api/client";
+import { session } from "../test/fixtures";
+import { type PersonalizationOptions, personalizationHandlers } from "../test/handlers/settings";
+import { server } from "../test/server";
 import { PersonalizationSection } from "./PersonalizationSection";
-import { stubAPI } from "../test/api";
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-const refused = () => json({ error: { code: "forbidden", message: "administrator permission is required" } }, 403);
+const signedIn = session();
 
-function installAPI(options: { sleepAfterMinutes?: number; wallpaper?: Wallpaper; refuse?: boolean } = {}) {
-  let sleepAfterMinutes = options.sleepAfterMinutes ?? 30;
-  let wallpaper: Wallpaper = options.wallpaper ?? { style: "fill" };
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
-    const method = init?.method ?? "GET";
-    if (path === "/api/v1/local-display") {
-      if (method === "PUT") {
-        if (options.refuse) return refused();
-        sleepAfterMinutes = (JSON.parse(String(init?.body)) as { sleepAfterMinutes: number }).sleepAfterMinutes;
-      }
-      return json({ sleepAfterMinutes });
-    }
-    if (path === "/api/v1/wallpaper") {
-      if (method === "PATCH") {
-        if (options.refuse) return refused();
-        wallpaper = { ...wallpaper, style: (JSON.parse(String(init?.body)) as Wallpaper).style };
-      }
-      return json(wallpaper);
-    }
-    if (path === "/api/v1/wallpaper/image" && method === "PUT") {
-      wallpaper = { ...wallpaper, image: { version: "0123456789abcdef", width: 800, height: 600 } };
-      return json(wallpaper);
-    }
-    if (path === "/api/v1/wallpaper/image" && method === "DELETE") {
-      wallpaper = { style: "fill" };
-      return json(wallpaper);
-    }
-    return json({ error: { code: "not_found", message: "not found" } }, 404);
-  });
-  stubAPI(fetchMock);
-  return fetchMock;
+// serve answers 个性化 and returns what the page sent.
+function serve(options: PersonalizationOptions = {}) {
+  const personalization = personalizationHandlers(options);
+  server.use(...personalization.handlers);
+  return personalization.sent;
 }
-
-const sent = (fetchMock: ReturnType<typeof installAPI>, path: string, method: string) =>
-  fetchMock.mock.calls.filter(([input, init]) => String(input) === path && init?.method === method);
 
 // jsdom neither decodes images nor draws on a canvas.
 function stubPictures() {
@@ -78,20 +48,7 @@ function stubPictures() {
 }
 
 describe("Settings → 个性化", () => {
-  beforeEach(() =>
-    setSession({
-      csrfToken: "csrf-token",
-      expiresAt: "2026-10-21T00:00:00Z",
-      user: {
-        id: "user:owner",
-        username: "owner",
-        role: "admin",
-        status: "active",
-        createdAt: "2026-10-07T10:00:00Z",
-        mustChangePassword: false,
-      },
-    }),
-  );
+  beforeEach(() => setSession(signedIn));
   afterEach(() => {
     setSession();
     vi.restoreAllMocks();
@@ -99,7 +56,7 @@ describe("Settings → 个性化", () => {
   });
 
   it("chooses when the local screen goes black", async () => {
-    const fetchMock = installAPI();
+    const sent = serve();
     const user = userEvent.setup();
     render(<PersonalizationSection />);
     const choices = screen.getByRole("radiogroup", { name: "息屏时间" });
@@ -109,9 +66,7 @@ describe("Settings → 个性化", () => {
     await user.click(within(choices).getByRole("radio", { name: "10 分钟" }));
     expect(await within(choices).findByRole("radio", { name: "10 分钟", checked: true })).toBeTruthy();
     expect(screen.getByText("13 分钟")).toBeTruthy();
-    const [[, init]] = sent(fetchMock, "/api/v1/local-display", "PUT");
-    expect(JSON.parse(String(init?.body))).toEqual({ sleepAfterMinutes: 10 });
-    expect(new Headers(init?.headers).get("X-CSRF-Token")).toBe("csrf-token");
+    expect(sent.displays[0]).toEqual({ body: { sleepAfterMinutes: 10 }, csrf: signedIn.csrfToken });
 
     await user.click(within(choices).getByRole("radio", { name: "从不" }));
     expect(await screen.findByText("屏保会一直播放，登录页一直亮着。")).toBeTruthy();
@@ -119,7 +74,7 @@ describe("Settings → 个性化", () => {
   });
 
   it("puts the previous choices back when saving fails", async () => {
-    installAPI({ refuse: true });
+    serve({ refuse: true });
     const user = userEvent.setup();
     render(<PersonalizationSection />);
     const sleep = screen.getByRole("radiogroup", { name: "息屏时间" });
@@ -135,7 +90,7 @@ describe("Settings → 个性化", () => {
   });
 
   it("draws the wallpaper in the chosen style for everyone", async () => {
-    const fetchMock = installAPI();
+    const sent = serve();
     const user = userEvent.setup();
     render(<PersonalizationSection />);
     expect(await screen.findByText("默认壁纸")).toBeTruthy();
@@ -151,13 +106,12 @@ describe("Settings → 个性化", () => {
     expect(await within(styles).findByRole("radio", { name: "平铺", checked: true })).toBeTruthy();
     expect(screen.getByText("按图片原始大小重复铺满桌面")).toBeTruthy();
     expect(screen.getByRole("img", { name: "当前桌面壁纸的预览" }).style.backgroundRepeat).toBe("repeat");
-    const [[, init]] = sent(fetchMock, "/api/v1/wallpaper", "PATCH");
-    expect(JSON.parse(String(init?.body))).toEqual({ style: "tile" });
+    expect(sent.styles).toEqual([{ style: "tile" }]);
   });
 
   it("sets a picture from this computer as the wallpaper after showing it on the desktop", async () => {
     const drawImage = stubPictures();
-    const fetchMock = installAPI();
+    const sent = serve();
     const user = userEvent.setup();
     render(<PersonalizationSection />);
     await user.click(await screen.findByRole("button", { name: "更换图片…" }));
@@ -175,26 +129,24 @@ describe("Settings → 个性化", () => {
     expect(screen.queryByRole("dialog", { name: "更换壁纸" })).toBeNull();
     expect(screen.getByText("800 × 600 像素")).toBeTruthy();
     expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 3840, 1920);
-    const [[, init]] = sent(fetchMock, "/api/v1/wallpaper/image", "PUT");
-    expect(new Headers(init?.headers).get("Content-Type")).toBe("image/jpeg");
-    expect(new Headers(init?.headers).get("X-CSRF-Token")).toBe("csrf-token");
+    expect(sent.images).toEqual([{ type: "image/jpeg", csrf: signedIn.csrfToken, bytes: "jpeg" }]);
     expect(screen.getByRole("img", { name: "当前桌面壁纸的预览" }).style.backgroundImage).toContain(
       "/api/v1/wallpaper/image?v=0123456789abcdef",
     );
   });
 
   it("asks before going back to the default wallpaper", async () => {
-    const fetchMock = installAPI({
+    const sent = serve({
       wallpaper: { style: "center", image: { version: "0123456789abcdef", width: 800, height: 600 } },
     });
     const user = userEvent.setup();
     render(<PersonalizationSection />);
     await user.click(await screen.findByRole("button", { name: "恢复默认" }));
     const confirm = screen.getByRole("group", { name: "确认恢复默认壁纸" });
-    expect(sent(fetchMock, "/api/v1/wallpaper/image", "DELETE")).toHaveLength(0);
+    expect(sent.resets).toBe(0);
     await user.click(within(confirm).getByRole("button", { name: "恢复默认" }));
     expect(await screen.findByText("默认壁纸")).toBeTruthy();
-    expect(sent(fetchMock, "/api/v1/wallpaper/image", "DELETE")).toHaveLength(1);
+    expect(sent.resets).toBe(1);
     expect(
       within(screen.getByRole("radiogroup", { name: "壁纸样式" })).getByRole("radio", { name: "填充", checked: true }),
     ).toBeTruthy();

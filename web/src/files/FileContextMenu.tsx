@@ -14,8 +14,9 @@ import {
   Trash2,
 } from "lucide-react";
 
-import { FileEntry } from "../api";
+import type { FileEntry } from "../api.generated";
 import { FileCommands } from "./FileToolbar";
+import styles from "./files.module.css";
 import { FileBrowserItem, isViewable, othersSpace, SelectionCommands } from "./model";
 
 export type FileContextMenuState = { x: number; y: number; item?: FileBrowserItem };
@@ -56,7 +57,7 @@ export function FileContextMenu({
   const file = item?.entry?.kind === "file" ? item.entry : undefined;
   return (
     <div
-      className="file-context-menu"
+      className={styles.fileContextMenu}
       role="menu"
       aria-label="文件操作"
       data-vnas-private={viewing ? othersSpace : undefined}
@@ -114,7 +115,7 @@ export function FileContextMenu({
             </button>
           )}
           <i />
-          <button className="danger" role="menuitem" disabled={!can.mutate} onClick={choose(commands.remove)}>
+          <button className={styles.danger} role="menuitem" disabled={!can.mutate} onClick={choose(commands.remove)}>
             <Trash2 />
             <span>移到回收站</span>
           </button>

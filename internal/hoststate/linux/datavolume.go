@@ -3,15 +3,13 @@ package linux
 import (
 	"io/fs"
 	"path"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 )
-
-var filesystemUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // btrfsDevices maps each block device of a mounted Btrfs filesystem to that
 // filesystem's UUID, from sysfs (fs/btrfs/<uuid>/devices). lsblk takes
@@ -29,7 +27,7 @@ func btrfsDevices(root fs.FS) map[string]string {
 		return devices
 	}
 	for _, member := range members {
-		if uuid := path.Base(path.Dir(path.Dir(member))); filesystemUUIDPattern.MatchString(uuid) {
+		if uuid := path.Base(path.Dir(path.Dir(member))); datavolume.ValidFilesystemUUID(uuid) {
 			devices[path.Base(member)] = uuid
 		}
 	}
@@ -69,7 +67,7 @@ func holdsBtrfs(device blockDevice, btrfs map[string]string, uuid string) bool {
 // come from sysfs allocation/<type>/<profile>/used_bytes, which exists only
 // for profiles that hold block groups. It is nil without a mounted volume.
 func readDataVolume(root fs.FS, uuid string, disks []hoststate.Disk) *hoststate.DataVolume {
-	if !filesystemUUIDPattern.MatchString(uuid) {
+	if !datavolume.ValidFilesystemUUID(uuid) {
 		return nil
 	}
 	volume := &hoststate.DataVolume{FilesystemUUID: uuid}
@@ -92,7 +90,7 @@ func readDataVolume(root fs.FS, uuid string, disks []hoststate.Disk) *hoststate.
 // profiles that hold data and metadata of the mounted Btrfs filesystem with
 // the UUID, and the exclusive operation running on it.
 func ReadBtrfsAllocation(root fs.FS, uuid string) (data, metadata []hoststate.ProfileUsage, operation hoststate.VolumeOperation) {
-	if !filesystemUUIDPattern.MatchString(uuid) {
+	if !datavolume.ValidFilesystemUUID(uuid) {
 		return nil, nil, hoststate.VolumeOperationNone
 	}
 	base := "sys/fs/btrfs/" + uuid

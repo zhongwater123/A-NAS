@@ -94,7 +94,7 @@ func (s *Service) SearchByImage(ctx context.Context, p Principal, content io.Rea
 	if err != nil {
 		return "", err
 	}
-	s.noticeModel(info.Model)
+	s.ai.noticeModel(info.Model)
 	vector, err := s.embedSearchImage(ctx, thumbnail)
 	if err != nil {
 		return "", err
@@ -125,7 +125,7 @@ func (s *Service) ImageSearchResults(ctx context.Context, p Principal, searchID 
 	if !ok {
 		return Page{}, ErrImageSearchExpired
 	}
-	candidates, err := s.searchCandidates(ctx, scope)
+	candidates, err := s.searchCandidates(ctx, p, scope)
 	if err != nil {
 		return Page{}, err
 	}
@@ -139,7 +139,7 @@ func (s *Service) ImageSearchResults(ctx context.Context, p Principal, searchID 
 	if err = errors.Join(err, vectorErr); err != nil {
 		return Page{}, err
 	}
-	assets, next, err := s.hitPage(ctx, p, hits, after, request.Limit)
+	assets, next, err := s.hitPage(ctx, p, scope, hits, after, request.Limit)
 	if err != nil {
 		return Page{}, err
 	}
@@ -215,9 +215,7 @@ func (s *Service) searchObjects(ctx context.Context, info EmbedderInfo, input []
 	// runner releases it on its next round, since this request kept the gate
 	// closed (releaseModels). One that could not be reached holds nothing.
 	if !errors.Is(err, ErrAIUnavailable) {
-		s.aiModelMu.Lock()
-		s.detectorLoaded = true
-		s.aiModelMu.Unlock()
+		s.ai.markDetectorLoaded()
 	}
 	if err != nil || model != s.objectCalibration.Model || !validBoxes(boxes) {
 		return nil

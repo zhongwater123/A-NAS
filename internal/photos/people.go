@@ -143,9 +143,7 @@ type clusterMember struct {
 // clusterPeople places every face that some library has not considered yet,
 // library by library, and reports whether it changed anything.
 func (s *Service) clusterPeople(ctx context.Context) (bool, error) {
-	s.aiModelMu.Lock()
-	s.scanned = 0
-	s.aiModelMu.Unlock()
+	s.ai.clustered()
 	rows, err := s.db.QueryContext(ctx, `
 SELECT DISTINCT a.library_id, o.kind, o.model FROM occurrences o
 JOIN assets a ON a.object_id = o.object_id
@@ -199,66 +197,92 @@ func (s *Service) clusterLibrary(ctx context.Context, libraryID string, calibrat
 	if err != nil {
 		return false, err
 	}
-	moved := false
-	for _, m := range members {
-		moved = moved || m.source == "moved"
-	}
-	if len(pending) == 0 && !moved {
+	if len(pending) == 0 && !slices.ContainsFunc(members, func(m clusterMember) bool { return m.source == "moved" }) {
 		return false, nil
 	}
-	photosOf := make(map[string]map[string]bool)
-	sums := make(map[string][]float64) // person -> sum of its members' vectors
-	add := func(person string, vector []float32) {
-		if sums[person] == nil {
-			sums[person] = make([]float64, len(vector))
-		}
-		for k, value := range vector {
-			sums[person][k] += float64(value)
-		}
-	}
-	nearMean := func(person string, vector []float32) bool {
-		sum := sums[person]
-		var norm, product float64
-		for k, value := range sum {
-			norm += value * value
-			product += value * float64(vector[k])
-		}
-		return norm > 0 && product/math.Sqrt(norm) >= calibration.Threshold
-	}
+	c := newClustering(members, calibration, func() string { return s.randomID("person") })
+	c.settleMoved()
+	start := c.arrive(pending)
+	c.secondChances(start)
+	return true, s.storeClustering(ctx, libraryID, c, start)
+}
+
+// clustering is one pass over a library's occurrences of one kind and model:
+// the members the library has considered, then those it places now, and
+// what each person holds so far.
+type clustering struct {
+	calibration PeopleCalibration
+	newPerson   func() string
+	members     []clusterMember
+	// photosOf is the content objects each person holds, and sums the sum
+	// of its members' vectors.
+	photosOf map[string]map[string]bool
+	sums     map[string][]float64
+	// created lists the people this pass founded; placed marks the members
+	// it gave a person, and settled the ones moved over from an earlier
+	// model that it decided.
+	created []string
+	placed  map[int]bool
+	settled map[int]bool
+}
+
+func newClustering(members []clusterMember, calibration PeopleCalibration, newPerson func() string) *clustering {
+	c := &clustering{calibration: calibration, newPerson: newPerson, members: members,
+		photosOf: make(map[string]map[string]bool), sums: make(map[string][]float64),
+		placed: make(map[int]bool), settled: make(map[int]bool)}
 	for _, m := range members {
 		if m.person != "" {
-			if photosOf[m.person] == nil {
-				photosOf[m.person] = make(map[string]bool)
+			if c.photosOf[m.person] == nil {
+				c.photosOf[m.person] = make(map[string]bool)
 			}
-			photosOf[m.person][m.objectID] = true
-			add(m.person, m.vector)
+			c.photosOf[m.person][m.objectID] = true
+			c.add(m.person, m.vector)
 		}
 	}
-	var created []string
-	founded := make(map[string][]int) // person -> members that founded it
-	placedSet := make(map[int]bool)
+	return c
+}
 
-	// What moved over from earlier models stays only where the new vectors
-	// agree with the person's core: the faces a member confirmed, or else
-	// the densest group of the person's faces. The rest is nobody again and
-	// gets a second chance below, so a better model can undo an older one's
-	// merges while the name stays with the face it was given for.
-	settled := make(map[int]bool)
+func (c *clustering) add(person string, vector []float32) {
+	if c.sums[person] == nil {
+		c.sums[person] = make([]float64, len(vector))
+	}
+	for k, value := range vector {
+		c.sums[person][k] += float64(value)
+	}
+}
+
+// nearSum reports whether vector is within threshold of the direction of
+// sum, a sum of unit vectors.
+func nearSum(sum []float64, vector []float32, threshold float64) bool {
+	var norm, product float64
+	for k, value := range sum {
+		norm += value * value
+		product += value * float64(vector[k])
+	}
+	return norm > 0 && product/math.Sqrt(norm) >= threshold
+}
+
+// settleMoved keeps what moved over from earlier models only where the new
+// vectors agree with the person's core: the faces a member confirmed, or
+// else the densest group of the person's faces. The rest is nobody again and
+// gets a second chance, so a better model can undo an older one's merges
+// while the name stays with the face it was given for.
+func (c *clustering) settleMoved() {
 	byPerson := make(map[string][]int)
-	for i, m := range members {
+	for i, m := range c.members {
 		switch {
 		case m.person != "":
 			byPerson[m.person] = append(byPerson[m.person], i)
 		case m.source == "moved":
 			// Nobody before, nobody now: it only stops waiting.
-			settled[i] = true
-			members[i].source = "auto"
+			c.settled[i] = true
+			c.members[i].source = "auto"
 		}
 	}
 	for person, held := range byPerson {
 		var waiting, anchors []int
 		for _, i := range held {
-			switch members[i].source {
+			switch c.members[i].source {
 			case "moved":
 				waiting = append(waiting, i)
 			case "user":
@@ -269,171 +293,173 @@ func (s *Service) clusterLibrary(ctx context.Context, libraryID string, calibrat
 			continue
 		}
 		if len(anchors) == 0 {
-			anchors = densestGroup(members, held, calibration.Threshold)
+			anchors = densestGroup(c.members, held, c.calibration.Threshold)
 		}
-		centre := make([]float64, len(members[held[0]].vector))
+		centre := make([]float64, len(c.members[held[0]].vector))
 		for _, i := range anchors {
-			for k, value := range members[i].vector {
+			for k, value := range c.members[i].vector {
 				centre[k] += float64(value)
 			}
 		}
 		for _, i := range waiting {
-			settled[i] = true
-			members[i].source = "auto"
-			var norm, product float64
-			for k, value := range centre {
-				norm += value * value
-				product += value * float64(members[i].vector[k])
-			}
-			if norm > 0 && product/math.Sqrt(norm) >= calibration.Threshold {
+			c.settled[i] = true
+			c.members[i].source = "auto"
+			if nearSum(centre, c.members[i].vector, c.calibration.Threshold) {
 				continue
 			}
-			for k, value := range members[i].vector {
-				sums[person][k] -= float64(value)
+			for k, value := range c.members[i].vector {
+				c.sums[person][k] -= float64(value)
 			}
-			delete(photosOf[person], members[i].objectID)
-			members[i].person = ""
+			delete(c.photosOf[person], c.members[i].objectID)
+			c.members[i].person = ""
 		}
 	}
+}
 
-	// place gives member i a person among the first seen members, if it
-	// earns one: in arrival order a face sees only those before it, as the
-	// evaluation measured, and the second chance sees everyone.
-	place := func(i, seen int) {
-		m := members[i]
-		var near, placed []int
-		for j, other := range members[:seen] {
-			if j == i || other.objectID == m.objectID {
-				continue
-			}
-			if dot(m.vector, other.vector) < calibration.Threshold {
-				continue
-			}
-			near = append(near, j)
-			if other.person != "" && !m.rejected[other.person] && !photosOf[other.person][m.objectID] {
-				placed = append(placed, j)
-			}
-		}
-		slices.SortFunc(placed, func(a, b int) int {
-			return cmp.Compare(dot(m.vector, members[b].vector), dot(m.vector, members[a].vector))
-		})
-		for _, j := range placed {
-			person := members[j].person
-			if calibration.Rule == RuleCentroid && !nearMean(person, m.vector) {
-				continue
-			}
-			members[i].person = person
-			photosOf[person][m.objectID] = true
-			add(person, m.vector)
-			placedSet[i] = true
-			return
-		}
-		if len(placed) > 0 {
-			// Near people, but not near enough to any of them: nobody yet.
-			return
-		}
-		// Found a person with the nearest unplaced neighbours of other photos.
-		slices.SortFunc(near, func(a, b int) int {
-			return cmp.Compare(dot(m.vector, members[b].vector), dot(m.vector, members[a].vector))
-		})
-		group := []int{i}
-		photos := map[string]bool{m.objectID: true}
-		for _, j := range near {
-			if members[j].person == "" && members[j].source == "auto" && !photos[members[j].objectID] {
-				group = append(group, j)
-				photos[members[j].objectID] = true
-			}
-		}
-		if len(group) < calibration.MinCore {
-			return
-		}
-		person := s.randomID("person")
-		created = append(created, person)
-		founded[person] = group
-		photosOf[person] = photos
-		for _, j := range group {
-			members[j].person = person
-			add(person, members[j].vector)
-			placedSet[j] = true
+// arrive adds the occurrences the library has not considered yet, places
+// each in the order their photos arrived, and returns where they start among
+// the members.
+func (c *clustering) arrive(pending []clusterMember) int {
+	start := len(c.members)
+	c.members = append(c.members, pending...)
+	for i := start; i < len(c.members); i++ {
+		if c.members[i].person == "" {
+			c.place(i, i)
 		}
 	}
+	return start
+}
 
-	start := len(members)
-	members = append(members, pending...)
-	for i := start; i < len(members); i++ {
-		if members[i].person == "" {
-			place(i, i)
-		}
-	}
-	// Second chances: an unplaced face can only have become placeable next
-	// to a face this pass placed or added, so only those neighbours are
-	// tried, not every pair of the library again.
+// secondChances places the unplaced members again among everyone. An
+// unplaced face can only have become placeable next to a face this pass
+// placed, added or settled, so only those neighbours are tried, not every
+// pair of the library again.
+func (c *clustering) secondChances(start int) {
 	retry := make(map[int]bool)
-	for i := range settled {
-		retry[i] = members[i].person == ""
+	for i := range c.settled {
+		retry[i] = c.members[i].person == ""
 	}
-	for j := range members {
-		if j < start && !placedSet[j] && !settled[j] {
+	for j := range c.members {
+		if j < start && !c.placed[j] && !c.settled[j] {
 			continue
 		}
-		for i := range members {
-			if !retry[i] && members[i].person == "" && members[i].source == "auto" && i != j &&
-				members[i].objectID != members[j].objectID &&
-				dot(members[i].vector, members[j].vector) >= calibration.Threshold {
+		for i := range c.members {
+			if !retry[i] && c.members[i].person == "" && c.members[i].source == "auto" && i != j &&
+				c.members[i].objectID != c.members[j].objectID &&
+				dot(c.members[i].vector, c.members[j].vector) >= c.calibration.Threshold {
 				retry[i] = true
 			}
 		}
 	}
-	for i := range members {
-		if retry[i] && members[i].person == "" {
-			place(i, len(members))
+	for i := range c.members {
+		if retry[i] && c.members[i].person == "" {
+			c.place(i, len(c.members))
 		}
 	}
+}
 
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+// place gives member i a person among the first seen members, if it earns
+// one: in arrival order a face sees only those before it, as the evaluation
+// measured, and the second chance sees everyone.
+func (c *clustering) place(i, seen int) {
+	m := c.members[i]
+	threshold := c.calibration.Threshold
+	var near, placed []int
+	for j, other := range c.members[:seen] {
+		if j == i || other.objectID == m.objectID {
+			continue
+		}
+		if dot(m.vector, other.vector) < threshold {
+			continue
+		}
+		near = append(near, j)
+		if other.person != "" && !m.rejected[other.person] && !c.photosOf[other.person][m.objectID] {
+			placed = append(placed, j)
+		}
+	}
+	closestFirst := func(a, b int) int {
+		return cmp.Compare(dot(m.vector, c.members[b].vector), dot(m.vector, c.members[a].vector))
+	}
+	slices.SortFunc(placed, closestFirst)
+	for _, j := range placed {
+		person := c.members[j].person
+		if c.calibration.Rule == RuleCentroid && !nearSum(c.sums[person], m.vector, threshold) {
+			continue
+		}
+		c.members[i].person = person
+		c.photosOf[person][m.objectID] = true
+		c.add(person, m.vector)
+		c.placed[i] = true
+		return
+	}
+	if len(placed) > 0 {
+		// Near people, but not near enough to any of them: nobody yet.
+		return
+	}
+	// Found a person with the nearest unplaced neighbours of other photos.
+	slices.SortFunc(near, closestFirst)
+	group := []int{i}
+	photos := map[string]bool{m.objectID: true}
+	for _, j := range near {
+		if c.members[j].person == "" && c.members[j].source == "auto" && !photos[c.members[j].objectID] {
+			group = append(group, j)
+			photos[c.members[j].objectID] = true
+		}
+	}
+	if len(group) < c.calibration.MinCore {
+		return
+	}
+	person := c.newPerson()
+	c.created = append(c.created, person)
+	c.photosOf[person] = photos
+	for _, j := range group {
+		c.members[j].person = person
+		c.add(person, c.members[j].vector)
+		c.placed[j] = true
+	}
+}
+
+// storeClustering records a pass over libraryID whose new members start at
+// start: the people it founded, where the new members went, the moved ones
+// it settled and the unplaced ones it placed. A member's own decisions stay.
+func (s *Service) storeClustering(ctx context.Context, libraryID string, c *clustering, start int) error {
+	return s.withTx(ctx, func(tx *sql.Tx) error {
 		now := formatTime(s.now())
-		kind := personKinds[calibration.Kind]
-		for _, person := range created {
+		kind := personKinds[c.calibration.Kind]
+		for _, person := range c.created {
 			if _, err := tx.ExecContext(ctx,
 				"INSERT INTO people(id, library_id, kind, created_at, updated_at) VALUES(?, ?, ?, ?, ?)",
 				person, libraryID, kind, now, now); err != nil {
 				return err
 			}
 		}
-		for i, m := range members {
+		for i, m := range c.members {
 			var person any
 			if m.person != "" {
 				person = m.person
 			}
-			if i >= start {
-				_, err := tx.ExecContext(ctx, `
+			var err error
+			switch {
+			case i >= start:
+				_, err = tx.ExecContext(ctx, `
 INSERT INTO person_occurrences(library_id, occurrence_id, person_id, source, created_at) VALUES(?, ?, ?, 'auto', ?)
 ON CONFLICT(library_id, occurrence_id) DO NOTHING`, libraryID, m.id, person, now)
-				if err != nil {
-					return err
-				}
-				continue
-			}
-			if settled[i] {
-				if _, err := tx.ExecContext(ctx,
+			case c.settled[i]:
+				_, err = tx.ExecContext(ctx,
 					"UPDATE person_occurrences SET person_id = ?, source = 'auto' WHERE library_id = ? AND occurrence_id = ? AND source = 'moved'",
-					person, libraryID, m.id); err != nil {
-					return err
-				}
-				continue
-			}
-			if placedSet[i] {
+					person, libraryID, m.id)
+			case c.placed[i]:
 				// Only an unplaced face moves, so a member's decision stays.
-				if _, err := tx.ExecContext(ctx,
+				_, err = tx.ExecContext(ctx,
 					"UPDATE person_occurrences SET person_id = ? WHERE library_id = ? AND occurrence_id = ? AND person_id IS NULL",
-					person, libraryID, m.id); err != nil {
-					return err
-				}
+					person, libraryID, m.id)
+			}
+			if err != nil {
+				return err
 			}
 		}
 		return nil
 	})
-	return true, err
 }
 
 // densestGroup is the member of held with the most neighbours within
@@ -529,12 +555,12 @@ func (s *Service) People(ctx context.Context, p Principal, viewing string, hidde
 SELECT pe.id, pe.library_id, pe.kind, pe.name, pe.hidden, IFNULL(pe.cover_occurrence_id, ''), COUNT(DISTINCT a.id),
   (SELECT o2.id FROM person_occurrences po2 JOIN occurrences o2 ON o2.id = po2.occurrence_id
    WHERE po2.person_id = pe.id AND po2.library_id = pe.library_id
-     AND EXISTS (SELECT 1 FROM assets a2 WHERE a2.object_id = o2.object_id AND a2.library_id = pe.library_id AND a2.trashed_at IS NULL)
+     AND EXISTS (SELECT 1 FROM assets a2 WHERE a2.object_id = o2.object_id AND a2.library_id = pe.library_id AND `+listedAssets(p, "a2")+`)
    ORDER BY o2.score DESC, o2.id LIMIT 1)
 FROM people pe
 JOIN person_occurrences po ON po.person_id = pe.id AND po.library_id = pe.library_id
 JOIN occurrences o ON o.id = po.occurrence_id
-JOIN assets a ON a.object_id = o.object_id AND a.library_id = pe.library_id AND a.trashed_at IS NULL
+JOIN assets a ON a.object_id = o.object_id AND a.library_id = pe.library_id AND `+listedAssets(p, "a")+`
 JOIN libraries l ON l.id = pe.library_id AND l.people = 1
 WHERE pe.library_id IN (`+placeholders(len(scope))+`)
 GROUP BY pe.id`, scope...)
@@ -634,7 +660,7 @@ func (s *Service) PersonPhotos(ctx context.Context, p Principal, personID, curso
 	if err != nil {
 		return Page{}, err
 	}
-	where := `WHERE a.library_id = ? AND a.trashed_at IS NULL AND a.object_id IN (
+	where := `a.library_id = ? AND a.object_id IN (
   SELECT o.object_id FROM person_occurrences po JOIN occurrences o ON o.id = po.occurrence_id
   WHERE po.person_id = ? AND po.library_id = ?)`
 	return s.newestFirst(ctx, p, where, []any{person.LibraryID, person.ID, person.LibraryID}, cursor, limit)

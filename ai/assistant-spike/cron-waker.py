@@ -73,7 +73,7 @@ def due(account, now):
 
 def running(unit):
     return subprocess.run(
-        ["systemctl", "is-active", "--quiet", unit], check=False, timeout=COMMAND_TIMEOUT,
+        ["/usr/bin/systemctl", "is-active", "--quiet", unit], check=False, timeout=COMMAND_TIMEOUT,
     ).returncode == 0
 
 
@@ -113,7 +113,7 @@ def wake(account):
     unit = f"anas-assistant-cron@{account}.service"
     if due(account, datetime.now(UTC)) and not running(unit) and active_account(account):
         subprocess.run(
-            ["systemctl", "start", "--no-block", unit], check=True, timeout=COMMAND_TIMEOUT,
+            ["/usr/bin/systemctl", "start", "--no-block", unit], check=True, timeout=COMMAND_TIMEOUT,
         )
         print(f"started {unit}", flush=True)
 

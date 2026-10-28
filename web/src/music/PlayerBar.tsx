@@ -20,6 +20,7 @@ import { KeyboardEvent, PointerEvent, useRef, useState } from "react";
 
 import { Cover, useMusic } from "./context";
 import { artistKey, artistsOf, formatDuration } from "./library";
+import styles from "./music.module.css";
 import { usePlaybackTime } from "./player";
 
 interface SliderProps {
@@ -93,7 +94,7 @@ export function Slider({
   return (
     <div
       ref={track}
-      className={`mu-slider${dragging !== undefined ? " dragging" : ""} ${className}`}
+      className={`${styles.muSlider}${dragging !== undefined ? ` ${styles.dragging}` : ""} ${className}`}
       role="slider"
       tabIndex={0}
       aria-label={label}
@@ -107,13 +108,13 @@ export function Slider({
       onPointerCancel={() => setDragging(undefined)}
       onKeyDown={key}
     >
-      <span className="mu-slider-rail">
+      <span className={styles.muSliderRail}>
         {buffered !== undefined && max > 0 && (
-          <span className="mu-slider-buffered" style={{ width: `${Math.min(100, (buffered / max) * 100)}%` }} />
+          <span className={styles.muSliderBuffered} style={{ width: `${Math.min(100, (buffered / max) * 100)}%` }} />
         )}
-        <span className="mu-slider-fill" style={{ width: `${fraction * 100}%` }} />
+        <span className={styles.muSliderFill} style={{ width: `${fraction * 100}%` }} />
       </span>
-      <span className="mu-slider-thumb" style={{ left: `${fraction * 100}%` }} />
+      <span className={styles.muSliderThumb} style={{ left: `${fraction * 100}%` }} />
     </div>
   );
 }
@@ -123,7 +124,7 @@ function Progress() {
   const time = usePlaybackTime(player);
   const duration = time.duration || (player.current?.durationMs ?? 0) / 1000;
   return (
-    <div className="mu-progress">
+    <div className={styles.muProgress}>
       <span>{formatDuration(time.position * 1000)}</span>
       <Slider
         label="播放进度"
@@ -163,24 +164,24 @@ export function PlayerBar({ view, onView }: Props) {
   const favorite = track ? music.favorites.has(track.id) : false;
   const empty = !player.queue.length;
   return (
-    <footer className="mu-player" aria-label="播放控制">
-      <div className="mu-now">
+    <footer className={styles.muPlayer} aria-label="播放控制">
+      <div className={styles.muNow}>
         {track ? (
           <>
             <button
               type="button"
-              className="mu-now-art"
+              className={styles.muNowArt}
               aria-label="打开正在播放"
               onClick={() => onView(view === "lyrics" ? undefined : "lyrics")}
             >
               <Cover id={track.coverId} name={track.album || track.title} />
-              <span className="mu-now-expand">
+              <span className={styles.muNowExpand}>
                 <ChevronUp />
               </span>
             </button>
-            <div className="mu-now-text">
+            <div className={styles.muNowText}>
               <strong title={track.title}>{track.title}</strong>
-              <span className="mu-links">
+              <span className={styles.muLinks}>
                 {artistsOf(track).map((name, at) => (
                   <span key={name}>
                     {at > 0 && " / "}
@@ -193,7 +194,7 @@ export function PlayerBar({ view, onView }: Props) {
             </div>
             <button
               type="button"
-              className={`mu-icon-button like${favorite ? " on" : ""}`}
+              className={`${styles.muIconButton} ${styles.like}${favorite ? ` ${styles.on}` : ""}`}
               aria-label={favorite ? "取消收藏" : "收藏"}
               aria-pressed={favorite}
               onClick={() => music.toggleFavorite(track.id)}
@@ -202,15 +203,15 @@ export function PlayerBar({ view, onView }: Props) {
             </button>
           </>
         ) : (
-          <p className="mu-now-idle">选一首歌开始播放</p>
+          <p className={styles.muNowIdle}>选一首歌开始播放</p>
         )}
       </div>
 
-      <div className="mu-controls">
-        <div className="mu-buttons">
+      <div className={styles.muControls}>
+        <div className={styles.muButtons}>
           <button
             type="button"
-            className={`mu-icon-button mode${player.shuffle ? " on" : ""}`}
+            className={`${styles.muIconButton} ${styles.mode}${player.shuffle ? ` ${styles.on}` : ""}`}
             aria-label="随机播放"
             aria-pressed={player.shuffle}
             title={player.shuffle ? "随机播放：开" : "随机播放：关"}
@@ -220,7 +221,7 @@ export function PlayerBar({ view, onView }: Props) {
           </button>
           <button
             type="button"
-            className="mu-icon-button"
+            className={styles.muIconButton}
             aria-label="上一首"
             disabled={empty}
             onClick={player.previous}
@@ -229,19 +230,31 @@ export function PlayerBar({ view, onView }: Props) {
           </button>
           <button
             type="button"
-            className="mu-play"
+            className={styles.muPlay}
             aria-label={player.playing ? "暂停" : "播放"}
             disabled={empty}
             onClick={player.toggle}
           >
-            {player.loading && player.playing ? <Loader2 className="spin" /> : player.playing ? <Pause /> : <Play />}
+            {player.loading && player.playing ? (
+              <Loader2 className={styles.spin} />
+            ) : player.playing ? (
+              <Pause />
+            ) : (
+              <Play />
+            )}
           </button>
-          <button type="button" className="mu-icon-button" aria-label="下一首" disabled={empty} onClick={player.next}>
+          <button
+            type="button"
+            className={styles.muIconButton}
+            aria-label="下一首"
+            disabled={empty}
+            onClick={player.next}
+          >
             <SkipForward />
           </button>
           <button
             type="button"
-            className={`mu-icon-button mode${player.repeat !== "off" ? " on" : ""}`}
+            className={`${styles.muIconButton} ${styles.mode}${player.repeat !== "off" ? ` ${styles.on}` : ""}`}
             aria-label={repeatLabels[player.repeat]}
             title={repeatLabels[player.repeat]}
             onClick={player.cycleRepeat}
@@ -252,10 +265,10 @@ export function PlayerBar({ view, onView }: Props) {
         <Progress />
       </div>
 
-      <div className="mu-extras">
+      <div className={styles.muExtras}>
         <button
           type="button"
-          className={`mu-icon-button${view === "lyrics" ? " on" : ""}`}
+          className={`${styles.muIconButton}${view === "lyrics" ? ` ${styles.on}` : ""}`}
           aria-label="歌词"
           aria-pressed={view === "lyrics"}
           title="歌词"
@@ -266,19 +279,19 @@ export function PlayerBar({ view, onView }: Props) {
         </button>
         <button
           type="button"
-          className={`mu-icon-button${view === "queue" ? " on" : ""}`}
+          className={`${styles.muIconButton}${view === "queue" ? ` ${styles.on}` : ""}`}
           aria-label="播放队列"
           aria-pressed={view === "queue"}
           title="播放队列"
           onClick={() => onView(view === "queue" ? undefined : "queue")}
         >
           <ListMusic />
-          {player.queue.length > 0 && <small className="mu-count">{player.queue.length}</small>}
+          {player.queue.length > 0 && <small className={styles.muCount}>{player.queue.length}</small>}
         </button>
-        <div className="mu-volume">
+        <div className={styles.muVolume}>
           <button
             type="button"
-            className="mu-icon-button"
+            className={styles.muIconButton}
             aria-label={player.muted ? "取消静音" : "静音"}
             onClick={player.toggleMute}
           >
@@ -291,7 +304,7 @@ export function PlayerBar({ view, onView }: Props) {
             step={5}
             format={(value) => `${Math.round(value)}%`}
             onChange={(value) => player.setVolume(value / 100)}
-            className="volume"
+            className={styles.volume}
           />
         </div>
       </div>

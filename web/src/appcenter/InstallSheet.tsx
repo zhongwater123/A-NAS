@@ -1,4 +1,3 @@
-import { APIError } from "../api";
 import {
   ArrowUpRight,
   Boxes,
@@ -17,8 +16,9 @@ import {
 } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useEffectEvent, useState } from "react";
 
-import { AppJob, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "../appsApi";
-import { AppIcon, JobOutput, Layer, Logins, Progress, RichText } from "./parts";
+import { APIError } from "../api/client";
+import { AppJob, CatalogApp, InstallPlan, installApp, readPlan, uninstallApp } from "./api";
+import styles from "./appcenter.module.css";
 import {
   appURL,
   describeError,
@@ -31,6 +31,7 @@ import {
   serviceText,
   useElapsed,
 } from "./model";
+import { AppIcon, JobOutput, Layer, Logins, Progress, RichText } from "./parts";
 
 interface SheetProps {
   app: CatalogApp;
@@ -148,40 +149,44 @@ function Review({ app, plan, planning, submitting, failure, busyApp, onConfirm, 
         detail={plan ? `版本 ${plan.version || app.version} · 确认后 A-NAS 将执行下列操作` : "正在生成安装计划…"}
         onClose={submitting ? undefined : onClose}
       />
-      <div className="ac-sheet-body">
+      <div className={styles.acSheetBody}>
         {failure && (
-          <div className="ac-banner-note error" role="alert">
+          <div className={`${styles.acBannerNote} ${styles.error}`} role="alert">
             <CircleAlert />
             {failure}
           </div>
         )}
         {planning && !plan && (
-          <div className="ac-sheet-wait">
+          <div className={styles.acSheetWait}>
             <Progress />
             <p>容器代理正在按 A-NAS 安装策略渲染 Compose 文件…</p>
           </div>
         )}
         {plan && <PlanReview app={app} plan={plan} />}
       </div>
-      <footer className="ac-sheet-foot">
+      <footer className={styles.acSheetFoot}>
         {blocker ? (
-          <small className="ac-blocker">{blocker}</small>
+          <small className={styles.acBlocker}>{blocker}</small>
         ) : (
           plan && (
-            <small className="ac-digest" title={plan.digest}>
+            <small className={styles.acDigest} title={plan.digest}>
               计划摘要 {plan.digest.slice(0, 12)}
             </small>
           )
         )}
-        <button className="ac-btn" onClick={onClose} disabled={submitting}>
+        <button className={styles.acBtn} onClick={onClose} disabled={submitting}>
           取消
         </button>
         {plan || planning ? (
-          <button className="ac-btn primary" onClick={onConfirm} disabled={!plan || submitting || Boolean(blocker)}>
+          <button
+            className={`${styles.acBtn} primary`}
+            onClick={onConfirm}
+            disabled={!plan || submitting || Boolean(blocker)}
+          >
             {submitting ? "正在提交…" : "确认安装"}
           </button>
         ) : (
-          <button className="ac-btn primary" onClick={onReplan}>
+          <button className={`${styles.acBtn} primary`} onClick={onReplan}>
             <RotateCcw />
             重新生成计划
           </button>
@@ -200,24 +205,24 @@ function PlanReview({ app, plan }: { app: CatalogApp; plan: InstallPlan }) {
     .filter(([, count]) => count > 0)
     .map(([kind, count]) => `${mountLabels[kind]} ${count} 个`);
   return (
-    <section className="ac-plan" aria-label="安装内容">
-      <p className="ac-plan-lead">容器不会获得特权、设备或宿主机网络，只能访问下面列出的文件夹。</p>
+    <section className={styles.acPlan} aria-label="安装内容">
+      <p className={styles.acPlanLead}>容器不会获得特权、设备或宿主机网络，只能访问下面列出的文件夹。</p>
       {shared && (
-        <div className="ac-banner-note warning">
+        <div className={`${styles.acBannerNote} ${styles.warning}`}>
           <TriangleAlert />
           {writesShared
             ? `${app.title} 将能读写共享空间中的 ${sharedMounts.length} 个文件夹，与成员的权限相同；卸载时撤销，不能访问任何人的个人空间。`
             : `${app.title} 将能读取共享空间中的 ${sharedMounts.length} 个文件夹，不能修改或删除其中的文件；卸载时撤销，不能访问任何人的个人空间。`}
         </div>
       )}
-      <div className="ac-plan-list">
+      <div className={styles.acPlanList}>
         <PlanItem icon={<UserRound />} tone="identity" title="运行身份" summary={runtimeSummary(plan)}>
-          <span className="ac-plan-row">
+          <span className={styles.acPlanRow}>
             <code>{plan.identity.username}</code>UID {plan.identity.uid}
           </span>
           {(plan.services ?? []).map((service) => (
-            <span key={service.service} className="ac-plan-row">
-              <em className={`ac-runas ${service.runAs}`}>{runAsLabels[service.runAs]}</em>
+            <span key={service.service} className={styles.acPlanRow}>
+              <em className={`${styles.acRunas} ${styles[service.runAs] ?? ""}`}>{runAsLabels[service.runAs]}</em>
               <code>{service.service}</code>
               <small>{serviceText(service, plan)}</small>
             </span>
@@ -236,8 +241,8 @@ function PlanReview({ app, plan }: { app: CatalogApp; plan: InstallPlan }) {
           summary={counts.length ? counts.join(" · ") : "不使用宿主机文件夹"}
         >
           {plan.mounts.map((mount) => (
-            <span key={`${mount.hostPath}:${mount.containerPath}`} className="ac-plan-row">
-              <em className={`ac-mount ${mount.kind}`}>
+            <span key={`${mount.hostPath}:${mount.containerPath}`} className={styles.acPlanRow}>
+              <em className={`${styles.acMount} ${styles[mount.kind] ?? ""}`}>
                 {mountLabels[mount.kind]}
                 {mount.readOnly ? " · 只读" : ""}
               </em>
@@ -253,7 +258,7 @@ function PlanReview({ app, plan }: { app: CatalogApp; plan: InstallPlan }) {
           summary={plan.ports.length ? plan.ports.map((port) => port.hostPort).join("、") : "不开放端口"}
         >
           {plan.ports.map((port) => (
-            <span key={`${port.hostPort}/${port.protocol}`} className="ac-plan-row">
+            <span key={`${port.hostPort}/${port.protocol}`} className={styles.acPlanRow}>
               <code>
                 {port.hostPort}/{port.protocol}
               </code>
@@ -269,7 +274,7 @@ function PlanReview({ app, plan }: { app: CatalogApp; plan: InstallPlan }) {
           summary={plan.networks.length ? `新建 ${plan.networks.length} 个网络` : "使用 Docker 默认网桥，不新建网络"}
         >
           {plan.networks.length > 0 && (
-            <span className="ac-plan-row">
+            <span className={styles.acPlanRow}>
               {plan.networks.map((name) => (
                 <code key={name}>{name}</code>
               ))}
@@ -289,14 +294,14 @@ function PlanReview({ app, plan }: { app: CatalogApp; plan: InstallPlan }) {
           summary={`${plan.containers.length} 个容器`}
           folded
         >
-          <span className="ac-plan-row">
+          <span className={styles.acPlanRow}>
             {plan.containers.map((name) => (
               <code key={name}>{name}</code>
             ))}
           </span>
         </PlanItem>
       </div>
-      <details className="ac-compose">
+      <details className={styles.acCompose}>
         <summary>
           <FileCode />
           查看将运行的 Compose 文件
@@ -325,8 +330,8 @@ function PlanItem({
 }) {
   const head = (
     <>
-      <span className={`ac-plan-icon ${tone}`}>{icon}</span>
-      <span className="ac-plan-title">
+      <span className={`${styles.acPlanIcon} ${styles[tone] ?? ""}`}>{icon}</span>
+      <span className={styles.acPlanTitle}>
         <strong>{title}</strong>
         <span>{summary}</span>
       </span>
@@ -334,16 +339,16 @@ function PlanItem({
   );
   if (folded) {
     return (
-      <details className="ac-plan-item">
+      <details className={styles.acPlanItem}>
         <summary>{head}</summary>
-        <div className="ac-plan-detail">{children}</div>
+        <div className={styles.acPlanDetail}>{children}</div>
       </details>
     );
   }
   return (
-    <div className="ac-plan-item">
-      <div className="ac-plan-summary">{head}</div>
-      {children && <div className="ac-plan-detail">{children}</div>}
+    <div className={styles.acPlanItem}>
+      <div className={styles.acPlanSummary}>{head}</div>
+      {children && <div className={styles.acPlanDetail}>{children}</div>}
     </div>
   );
 }
@@ -353,19 +358,19 @@ function Installing({ app, onClose }: { app: CatalogApp; onClose: () => void }) 
   const latest = app.job?.output.at(-1);
   return (
     <>
-      <div className="ac-stage">
-        <span className="ac-stage-icon busy">
+      <div className={styles.acStage}>
+        <span className={`${styles.acStageIcon} ${styles.busy}`}>
           <AppIcon app={app} size="lg" />
         </span>
         <h3>正在安装 {app.title}</h3>
         <p>拉取镜像和启动容器可能需要几分钟{elapsed && ` · 已用时 ${elapsed}`}</p>
         <Progress />
-        <code className="ac-latest">{latest ?? "正在准备文件夹与运行身份…"}</code>
+        <code className={styles.acLatest}>{latest ?? "正在准备文件夹与运行身份…"}</code>
         {app.job && <JobOutput job={app.job} />}
       </div>
-      <footer className="ac-sheet-foot">
+      <footer className={styles.acSheetFoot}>
         <small>关闭后安装会在后台继续。</small>
-        <button className="ac-btn" onClick={onClose}>
+        <button className={styles.acBtn} onClick={onClose}>
           在后台继续
         </button>
       </footer>
@@ -376,8 +381,8 @@ function Installing({ app, onClose }: { app: CatalogApp; onClose: () => void }) 
 function Finished({ app, onClose }: { app: CatalogApp; onClose: () => void }) {
   return (
     <>
-      <div className="ac-stage">
-        <span className="ac-stage-icon ok">
+      <div className={styles.acStage}>
+        <span className={`${styles.acStageIcon} ${styles.ok}`}>
           <AppIcon app={app} size="lg" />
           <b>
             <Check />
@@ -388,25 +393,25 @@ function Finished({ app, onClose }: { app: CatalogApp; onClose: () => void }) {
           {app.running}/{app.total} 个容器运行中{app.webPort ? ` · 端口 ${app.webPort}` : ""}
         </p>
         {app.credentials?.length ? (
-          <div className="ac-stage-logins">
+          <div className={styles.acStageLogins}>
             <strong>登录信息</strong>
             <Logins credentials={app.credentials} />
           </div>
         ) : null}
         {app.notes && (
-          <div className="ac-stage-notes">
+          <div className={styles.acStageNotes}>
             <strong>使用须知</strong>
             <RichText text={app.notes} />
           </div>
         )}
       </div>
-      <footer className="ac-sheet-foot">
-        <button className="ac-btn" onClick={onClose}>
+      <footer className={styles.acSheetFoot}>
+        <button className={styles.acBtn} onClick={onClose}>
           完成
         </button>
         {appURL(app) && (
           <button
-            className="ac-btn primary"
+            className={`${styles.acBtn} primary`}
             onClick={() => {
               openApp(app);
               onClose();
@@ -425,8 +430,8 @@ function Failed({ app, onClose, onRetry }: { app: CatalogApp; onClose: () => voi
   const leftovers = leftoverText(app);
   return (
     <>
-      <div className="ac-stage">
-        <span className="ac-stage-icon error">
+      <div className={styles.acStage}>
+        <span className={`${styles.acStageIcon} ${styles.error}`}>
           <AppIcon app={app} size="lg" />
           <b>
             <X />
@@ -435,18 +440,18 @@ function Failed({ app, onClose, onRetry }: { app: CatalogApp; onClose: () => voi
         <h3>{app.title} 没有安装成功</h3>
         <p role="alert">{app.job?.error || "Docker Compose 没有成功启动应用，详见下方输出。"}</p>
         {leftovers && (
-          <div className="ac-banner-note warning" role="note">
+          <div className={`${styles.acBannerNote} ${styles.warning}`} role="note">
             <TriangleAlert />
             <span>{leftovers}</span>
           </div>
         )}
         {app.job && <JobOutput job={app.job} open />}
       </div>
-      <footer className="ac-sheet-foot">
-        <button className="ac-btn" onClick={onClose}>
+      <footer className={styles.acSheetFoot}>
+        <button className={styles.acBtn} onClick={onClose}>
           关闭
         </button>
-        <button className="ac-btn primary" onClick={onRetry}>
+        <button className={`${styles.acBtn} primary`} onClick={onRetry}>
           <RotateCcw />
           重新查看安装计划
         </button>
@@ -472,7 +477,7 @@ export function UninstallDialog({ app, onChanged, onClose }: SheetProps) {
   };
   return (
     <Layer label={`确认卸载${app.title}`} size="sm" onDismiss={submitting ? undefined : onClose}>
-      <div className="ac-confirm">
+      <div className={styles.acConfirm}>
         <AppIcon app={app} size="lg" />
         <h3>卸载 {app.title}？</h3>
         <ul>
@@ -490,17 +495,17 @@ export function UninstallDialog({ app, onChanged, onClose }: SheetProps) {
           </li>
         </ul>
         {failure && (
-          <div className="ac-banner-note error" role="alert">
+          <div className={`${styles.acBannerNote} ${styles.error}`} role="alert">
             <CircleAlert />
             {failure}
           </div>
         )}
       </div>
-      <footer className="ac-sheet-foot">
-        <button className="ac-btn" onClick={onClose} disabled={submitting}>
+      <footer className={styles.acSheetFoot}>
+        <button className={styles.acBtn} onClick={onClose} disabled={submitting}>
           取消
         </button>
-        <button className="ac-btn danger" onClick={() => void confirm()} disabled={submitting}>
+        <button className={`${styles.acBtn} ${styles.danger}`} onClick={() => void confirm()} disabled={submitting}>
           {submitting ? "正在卸载…" : "确认卸载"}
         </button>
       </footer>
@@ -520,14 +525,14 @@ function SheetHead({
   onClose?: () => void;
 }) {
   return (
-    <header className="ac-sheet-head">
+    <header className={styles.acSheetHead}>
       <AppIcon app={app} size="sm" />
       <div>
         <h3>{title}</h3>
         <p>{detail}</p>
       </div>
       {onClose && (
-        <button className="ac-icon-btn" aria-label="关闭" onClick={onClose}>
+        <button className={styles.acIconBtn} aria-label="关闭" onClick={onClose}>
           <X />
         </button>
       )}

@@ -50,10 +50,9 @@ def oxford(species):
     root = os.path.join(datasets.ROOT, "oxford-pets")
     found = []
     with open(os.path.join(root, "images.csv"), encoding="utf-8") as file:
-        for row in csv.DictReader(file):
-            # timm's copy labels cats 0 and dogs 1.
-            if {"0": "cat", "1": "dog"}.get(row["species"]) == species:
-                found.append((f"oxford:{row['file']}", os.path.join(root, "images", row["file"]), row["breed"]))
+        # timm's copy labels cats 0 and dogs 1.
+        found.extend((f"oxford:{row['file']}", os.path.join(root, "images", row["file"]), row["breed"])
+                     for row in csv.DictReader(file) if {"0": "cat", "1": "dog"}.get(row["species"]) == species)
     return sorted(found, key=lambda item: stable(item[0]))
 
 

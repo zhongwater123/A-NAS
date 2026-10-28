@@ -1,22 +1,22 @@
 import { CopyPlus, Download, History, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { FileEntry, Space } from "../api";
-import { formatBytes } from "../bytes";
-
+import type { FileEntry, Space } from "../api.generated";
+import { formatBytes } from "../lib/bytes";
+import { Dialog, EmptyState, EntryIcon, Notice, Spinner } from "../ui/workspace";
+import workspaceStyles from "../ui/workspace.module.css";
 import {
   listVersions,
   messageOf,
   restoreEntry,
-  snapshotDownloadURL,
   type SnapshotMatch,
   type SnapshotVersion,
-} from "./backupApi";
+  snapshotDownloadURL,
+} from "./api";
+import styles from "./backup.module.css";
 import { formatDateTime, formatDay, restoredName, spaceLabel } from "./format";
-import { Dialog, EmptyState, EntryIcon, Notice, Spinner } from "./parts";
 import { RestoreDialog, type RestoreRequest } from "./RestoreDialog";
 import { snapshotTitle } from "./SnapshotsPage";
-import "./backup.css";
 
 const versionTime = (version: SnapshotVersion) => formatDateTime(version.modifiedAt ?? version.createdAt);
 
@@ -107,7 +107,7 @@ export function VersionsDialog({
   };
 
   return (
-    <div className="bk-layer" data-vnas-private="快照里的历史版本">
+    <div className={styles.bkLayer} data-vnas-private="快照里的历史版本">
       <Dialog
         title="历史版本"
         icon={<History />}
@@ -115,12 +115,12 @@ export function VersionsDialog({
         busy={busy}
         onClose={onClose}
         footer={
-          <button type="button" className="bk-secondary" data-autofocus onClick={onClose}>
+          <button type="button" className={workspaceStyles.bkSecondary} data-autofocus onClick={onClose}>
             完成
           </button>
         }
       >
-        <div className="bk-history-file">
+        <div className={styles.bkHistoryFile}>
           <EntryIcon kind="file" />
           <div>
             <strong title={entry.name}>{entry.name}</strong>
@@ -131,7 +131,7 @@ export function VersionsDialog({
         </div>
         {notice &&
           (notice.tone === "success" ? (
-            <div className="bk-notice success" role="status">
+            <div className={`${workspaceStyles.bkNotice} ${workspaceStyles.success}`} role="status">
               {notice.text}
             </div>
           ) : (
@@ -140,7 +140,7 @@ export function VersionsDialog({
         {error ? (
           <Notice tone="danger">{error}</Notice>
         ) : !match ? (
-          <div className="bk-loading inline">
+          <div className={`${styles.bkLoading} ${styles.inline}`}>
             <Spinner small />
             正在读取快照中的版本…
           </div>
@@ -149,18 +149,18 @@ export function VersionsDialog({
             它是在最近一次快照之后才出现的。之后每次拍摄快照，都会留下它当时的样子。
           </EmptyState>
         ) : (
-          <ol className="bk-versions bk-history-versions" aria-label="版本">
+          <ol className={`${styles.bkVersions} ${styles.bkHistoryVersions}`} aria-label="版本">
             {match.versions.map((version, index) => (
               <li key={`${version.snapshotId}:${version.entryId}`}>
                 <span
-                  className={`bk-version-dot${version.current || (index === 0 && !match.versions.some((item) => item.current)) ? " newest" : ""}`}
+                  className={`${styles.bkVersionDot}${version.current || (index === 0 && !match.versions.some((item) => item.current)) ? ` ${styles.newest}` : ""}`}
                   aria-hidden="true"
                 />
-                <div className="bk-version-copy">
+                <div className={styles.bkVersionCopy}>
                   <strong>
                     {version.modifiedAt ? `修改于 ${formatDateTime(version.modifiedAt)}` : "版本"}
                     <span> · {formatBytes(version.sizeBytes)}</span>
-                    {version.current && <em className="current">当前版本</em>}
+                    {version.current && <em className={styles.current}>当前版本</em>}
                   </strong>
                   <small>
                     {version.snapshots > 1
@@ -168,9 +168,9 @@ export function VersionsDialog({
                       : `保存在${snapshotOf(version).name === "定时快照" ? "定时快照" : `快照“${version.snapshotName}”`} · ${formatDateTime(version.createdAt)}`}
                   </small>
                 </div>
-                <div className="bk-version-actions">
+                <div className={styles.bkVersionActions}>
                   <a
-                    className="bk-icon-button"
+                    className={workspaceStyles.bkIconButton}
                     href={snapshotDownloadURL(version.snapshotId, version.entryId)}
                     download={entry.name}
                     aria-label={`下载 ${versionTime(version)} 的版本`}
@@ -180,7 +180,7 @@ export function VersionsDialog({
                   </a>
                   <button
                     type="button"
-                    className="bk-text-button"
+                    className={styles.bkTextButton}
                     aria-label={`把 ${versionTime(version)} 的版本另存一份`}
                     title="在原文件夹另存一份，不动现在的文件"
                     onClick={() => copy(version)}
@@ -191,7 +191,7 @@ export function VersionsDialog({
                   {!version.current && (
                     <button
                       type="button"
-                      className="bk-restore-button"
+                      className={workspaceStyles.bkRestoreButton}
                       aria-label={`还原到 ${versionTime(version)} 的版本`}
                       title="换回这个版本，现在的文件移到回收站"
                       onClick={() => {
@@ -209,7 +209,7 @@ export function VersionsDialog({
           </ol>
         )}
         {match && match.versions.some((version) => !version.current) && (
-          <p className="bk-fine">
+          <p className={workspaceStyles.bkFine}>
             “还原”把文件换回那个版本，现在的文件移到回收站；“另存一份”在旁边多存一个文件，不动现在的文件。
           </p>
         )}
@@ -222,10 +222,20 @@ export function VersionsDialog({
           onClose={() => setReplacing(undefined)}
           footer={
             <>
-              <button type="button" className="bk-secondary" disabled={busy} onClick={() => setReplacing(undefined)}>
+              <button
+                type="button"
+                className={workspaceStyles.bkSecondary}
+                disabled={busy}
+                onClick={() => setReplacing(undefined)}
+              >
                 取消
               </button>
-              <button type="button" className="bk-primary" disabled={busy} onClick={() => void replace()}>
+              <button
+                type="button"
+                className={workspaceStyles.bkPrimary}
+                disabled={busy}
+                onClick={() => void replace()}
+              >
                 {busy ? (
                   <>
                     <Spinner small />
@@ -238,12 +248,12 @@ export function VersionsDialog({
             </>
           }
         >
-          <p className="bk-dialog-text">
+          <p className={workspaceStyles.bkDialogText}>
             “{entry.name}”会换成 {versionTime(replacing)} 的版本（{formatBytes(replacing.sizeBytes)}
             ）。现在的文件会移到回收站，30 天内可以恢复。
           </p>
           {replaceError && (
-            <div className="bk-inline-error" role="alert">
+            <div className={workspaceStyles.bkInlineError} role="alert">
               <span>{replaceError}</span>
             </div>
           )}

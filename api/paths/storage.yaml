@@ -29,8 +29,8 @@
     description: >-
       Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk,
       mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts
-      to the layout in the background. 409 volume_unavailable when the volume is not mounted and writable,
-      volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks,
+      to the layout in the background. 423 volume_unavailable when the volume is not mounted and writable;
+      409 volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks,
       layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host
       shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan
       that has not run; while a plan runs it answers 409 plan_state_conflict.
@@ -50,6 +50,7 @@
       "201": { description: Destructive storage plan, content: { application/json: { schema: { $ref: "../components/storage.yaml#/schemas/StoragePlan" } } } }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/storage/plans/{planId}/confirm:
   post:
     operationId: confirmStoragePlan

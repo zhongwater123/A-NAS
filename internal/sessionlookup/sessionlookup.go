@@ -18,7 +18,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
@@ -30,12 +30,12 @@ const (
 )
 
 type Resolver interface {
-	ResolveSessionUser(context.Context, string) (accounts.SessionUser, error)
+	ResolveSessionUser(context.Context, string) (accountid.SessionUser, error)
 }
 
 // AccountResolver is the optional lookup behind AccountUIDPath.
 type AccountResolver interface {
-	ResolveAccountUID(context.Context, int) (accounts.SessionUser, error)
+	ResolveAccountUID(context.Context, int) (accountid.SessionUser, error)
 }
 
 type resolveRequest struct {
@@ -70,7 +70,7 @@ func NewHandler(resolver Resolver, accountResolver AccountResolver, logger *slog
 		}
 		user, err := resolver.ResolveSessionUser(r.Context(), request.Token)
 		switch {
-		case errors.Is(err, accounts.ErrSessionNotFound):
+		case errors.Is(err, accountid.ErrSessionNotFound):
 			httpjson.Write(w, http.StatusUnauthorized, errorResponse{Error: "session_invalid"})
 		case err != nil:
 			logger.ErrorContext(r.Context(), "session lookup failed", "error", err)
@@ -90,7 +90,7 @@ func NewHandler(resolver Resolver, accountResolver AccountResolver, logger *slog
 			}
 			user, err := accountResolver.ResolveAccountUID(r.Context(), request.UID)
 			switch {
-			case errors.Is(err, accounts.ErrUserNotFound):
+			case errors.Is(err, accountid.ErrUserNotFound):
 				httpjson.Write(w, http.StatusUnauthorized, errorResponse{Error: "account_invalid"})
 			case err != nil:
 				logger.ErrorContext(r.Context(), "account lookup failed", "error", err)
@@ -101,7 +101,7 @@ func NewHandler(resolver Resolver, accountResolver AccountResolver, logger *slog
 		})
 	}
 	if directory, ok := resolver.(interface {
-		ActiveProfiles(context.Context) ([]accounts.Profile, error)
+		ActiveProfiles(context.Context) ([]accountid.Profile, error)
 	}); ok {
 		mux.HandleFunc("GET /v1/members", func(w http.ResponseWriter, r *http.Request) {
 			members, err := directory.ActiveProfiles(r.Context())
@@ -131,49 +131,49 @@ func NewClient(socketPath string) *Client {
 	return &Client{client: &http.Client{Transport: transport, Timeout: 5 * time.Second}}
 }
 
-// ResolveSessionUser returns accounts.ErrSessionNotFound for tokens that do
+// ResolveSessionUser returns accountid.ErrSessionNotFound for tokens that do
 // not name an active, unexpired session.
-func (c *Client) ResolveSessionUser(ctx context.Context, token string) (accounts.SessionUser, error) {
-	return c.lookup(ctx, ResolvePath, resolveRequest{Token: token}, http.StatusUnauthorized, accounts.ErrSessionNotFound)
+func (c *Client) ResolveSessionUser(ctx context.Context, token string) (accountid.SessionUser, error) {
+	return c.lookup(ctx, ResolvePath, resolveRequest{Token: token}, http.StatusUnauthorized, accountid.ErrSessionNotFound)
 }
 
-// ResolveAccountUID returns accounts.ErrUserNotFound for a UID that belongs
+// ResolveAccountUID returns accountid.ErrUserNotFound for a UID that belongs
 // to no active user.
-func (c *Client) ResolveAccountUID(ctx context.Context, uid int) (accounts.SessionUser, error) {
-	return c.lookup(ctx, AccountUIDPath, accountRequest{UID: uid}, http.StatusUnauthorized, accounts.ErrUserNotFound)
+func (c *Client) ResolveAccountUID(ctx context.Context, uid int) (accountid.SessionUser, error) {
+	return c.lookup(ctx, AccountUIDPath, accountRequest{UID: uid}, http.StatusUnauthorized, accountid.ErrUserNotFound)
 }
 
-func (c *Client) lookup(ctx context.Context, path string, query any, missingStatus int, missing error) (accounts.SessionUser, error) {
+func (c *Client) lookup(ctx context.Context, path string, query any, missingStatus int, missing error) (accountid.SessionUser, error) {
 	body, err := json.Marshal(query)
 	if err != nil {
-		return accounts.SessionUser{}, err
+		return accountid.SessionUser{}, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://host-agent"+path, bytes.NewReader(body))
 	if err != nil {
-		return accounts.SessionUser{}, err
+		return accountid.SessionUser{}, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 	response, err := c.client.Do(request)
 	if err != nil {
-		return accounts.SessionUser{}, fmt.Errorf("reach the session lookup: %w", err)
+		return accountid.SessionUser{}, fmt.Errorf("reach the session lookup: %w", err)
 	}
 	defer response.Body.Close()
 	switch response.StatusCode {
 	case http.StatusOK:
-		var user accounts.SessionUser
+		var user accountid.SessionUser
 		if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&user); err != nil || user.UserID == "" {
-			return accounts.SessionUser{}, errors.New("session lookup returned an invalid user")
+			return accountid.SessionUser{}, errors.New("session lookup returned an invalid user")
 		}
 		return user, nil
 	case missingStatus:
-		return accounts.SessionUser{}, missing
+		return accountid.SessionUser{}, missing
 	default:
-		return accounts.SessionUser{}, fmt.Errorf("session lookup answered %s", response.Status)
+		return accountid.SessionUser{}, fmt.Errorf("session lookup answered %s", response.Status)
 	}
 }
 
 // ActiveProfiles lists enabled recipients through the private lookup socket.
-func (c *Client) ActiveProfiles(ctx context.Context) ([]accounts.Profile, error) {
+func (c *Client) ActiveProfiles(ctx context.Context) ([]accountid.Profile, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://host-agent/v1/members", nil)
 	if err != nil {
 		return nil, err
@@ -186,7 +186,7 @@ func (c *Client) ActiveProfiles(ctx context.Context) ([]accounts.Profile, error)
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("member directory answered %s", response.Status)
 	}
-	var profiles []accounts.Profile
+	var profiles []accountid.Profile
 	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&profiles); err != nil {
 		return nil, err
 	}

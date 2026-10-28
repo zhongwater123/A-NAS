@@ -182,7 +182,7 @@ def rest(method, path, body=None):
     request = urllib.request.Request(f"http://127.0.0.1:{HTTP_PORT}{path}", data=data, method=method,
                                      headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=600) as response:
+        with urllib.request.urlopen(request, timeout=600) as response:  # noqa: S310  the local Qdrant's http port
             return response.status, json.loads(response.read() or b"null")
     except urllib.error.HTTPError as error:
         return error.code, json.loads(error.read() or b"null")

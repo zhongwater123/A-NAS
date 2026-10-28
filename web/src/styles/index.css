@@ -1,0 +1,9 @@
+/* The order of the layers, declared once (docs/architecture/web-desktop.md):
+   the page's defaults, then the shared components of ui/. The windows' own
+   modules are in no layer, so they win over both whatever the order in which
+   their stylesheets load. */
+@layer base, ui;
+
+@import "./tokens.css";
+@import "./base.css";
+@import "./utilities.css";

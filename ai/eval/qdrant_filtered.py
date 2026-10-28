@@ -177,7 +177,7 @@ def run_queries(qdrant, variant, matrix, masks, queries):
         per_member = {}
         for name, limit, params in searches(variant):
             took, recalls = [], {k: [] for k in ((10, 50) if limit == SMALL_LIMIT else (100, 500))}
-            for (vector, own), (exact, _own) in zip(queries, exact_all):
+            for (vector, own), (exact, _own) in zip(queries, exact_all, strict=True):
                 ms, response = common.timed_ms(qdrant.query_points, COLLECTION, query=vector.tolist(),
                                                query_filter=query_filter, search_params=params,
                                                limit=limit + (own is not None), with_payload=False)

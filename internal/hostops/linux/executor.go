@@ -19,11 +19,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/appid"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
-	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
 type BlockDevice struct {
@@ -187,15 +187,15 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	return executor
 }
 
-func (e *Executor) SetCredential(ctx context.Context, request accounts.CredentialRequest) error {
-	if !validUsername(request.Username) || strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PrivateSpaceID) == "" || !validSambaPassword(request.Password) {
+func (e *Executor) SetCredential(ctx context.Context, request accountid.CredentialRequest) error {
+	if !accountid.ValidUsername(request.Username) || strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PrivateSpaceID) == "" || !validSambaPassword(request.Password) {
 		return errors.New("invalid credential request")
 	}
-	identity := accounts.Identity{Username: request.Username, UID: request.UID, Role: request.Role, Enabled: request.Enabled}
+	identity := accountid.Identity{Username: request.Username, UID: request.UID, Role: request.Role, Enabled: request.Enabled}
 	if err := validIdentity(identity); err != nil {
 		return err
 	}
-	if e.smbInterface != "" && !regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`).MatchString(e.smbInterface) {
+	if e.smbInterface != "" && !smbInterfacePattern.MatchString(e.smbInterface) {
 		return errors.New("invalid Samba interface")
 	}
 	if e.identityError != nil {
@@ -278,7 +278,7 @@ func (e *Executor) RepairDataVolumePermissions(ctx context.Context) ([]string, e
 }
 
 func (e *Executor) DisableCredential(ctx context.Context, username string) error {
-	if !validUsername(username) {
+	if !accountid.ValidUsername(username) {
 		return errors.New("invalid username")
 	}
 	// Both boundaries must be closed, even if one subsystem is unavailable.
@@ -333,7 +333,7 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
     read only = no
     browseable = yes
     access based share enum = yes
-%s`, interfaces, e.mountPoint, sambaShareOptions, e.mountPoint, accounts.UsersGroup, sambaShareOptions)
+%s`, interfaces, e.mountPoint, sambaShareOptions, e.mountPoint, accountid.UsersGroup, sambaShareOptions)
 	configurationPath := filepath.Join(e.systemRoot, "etc", "samba", "smb.conf")
 	candidatePath := configurationPath + ".candidate"
 	if err := writeAtomic(candidatePath, []byte(configuration), 0o644); err != nil {
@@ -383,9 +383,10 @@ const sambaShareOptions = `    inherit acls = yes
     recycle:versions = yes
 `
 
-func validUsername(username string) bool {
-	return regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`).MatchString(username)
-}
+var (
+	smbInterfacePattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`)
+	deviceNamePattern   = regexp.MustCompile(`^[A-Za-z0-9._+-]+$`)
+)
 
 // validSambaPassword reports whether smbpasswd -s receives password whole: it
 // reads each copy as one line of C text into a 256-byte buffer, so a newline,
@@ -457,7 +458,7 @@ func (e *Executor) validSpace(spaceID, root string) bool {
 	if spaceID == sharedSpaceID {
 		return root == filepath.Join(e.mountPoint, "spaces", "shared")
 	}
-	return filepath.Dir(root) == filepath.Join(e.mountPoint, "spaces", "private") && validUsername(filepath.Base(root))
+	return filepath.Dir(root) == filepath.Join(e.mountPoint, "spaces", "private") && accountid.ValidUsername(filepath.Base(root))
 }
 
 func withinDirectory(root, path string) bool {
@@ -469,10 +470,11 @@ func validDevicePath(path string) bool {
 	if filepath.Dir(path) != "/dev" {
 		return false
 	}
-	return regexp.MustCompile(`^[A-Za-z0-9._+-]+$`).MatchString(filepath.Base(path))
+	return deviceNamePattern.MatchString(filepath.Base(path))
 }
 
 func writeAtomic(path string, contents []byte, mode os.FileMode) error {
+	//nolint:gosec // G301: parents are system directories such as /etc/samba and /etc/systemd/system; mode protects the file.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -533,7 +535,7 @@ func hostCommand(ctx context.Context, name string, args []string, stdin string) 
 	return command
 }
 
-var _ storage.VolumeExecutor = (*Executor)(nil)
-var _ accounts.CredentialProvisioner = (*Executor)(nil)
-var _ accounts.ViewingProvisioner = (*Executor)(nil)
+var _ datavolume.VolumeExecutor = (*Executor)(nil)
+var _ accountid.CredentialProvisioner = (*Executor)(nil)
+var _ accountid.ViewingProvisioner = (*Executor)(nil)
 var _ appid.Host = (*Executor)(nil)

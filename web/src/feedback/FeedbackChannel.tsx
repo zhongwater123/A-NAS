@@ -21,25 +21,25 @@ import {
   useState,
 } from "react";
 
-import { APIError } from "../api";
-import { nameOf, person, usePeople } from "../people";
-import { PersonAvatar } from "../PersonAvatar";
-import { FEEDBACK_UI } from "./capture";
-import { FeedbackEditor, Draft, emptyDraft, releaseDraft } from "./FeedbackEditor";
+import { APIError } from "../api/client";
+import { PersonAvatar } from "../people/PersonAvatar";
+import { nameOf, person, usePeople } from "../people/people";
 import {
-  FeedbackItem,
   createFeedback,
   deleteFeedback,
   describeFeedbackError,
   editFeedback,
+  FeedbackItem,
   feedbackImageURL,
   listFeedback,
   resolveFeedback,
-} from "./feedbackApi";
+} from "./api";
+import { FEEDBACK_UI } from "./capture";
+import { Draft, emptyDraft, FeedbackEditor, releaseDraft } from "./FeedbackEditor";
 import { FeedbackThread } from "./FeedbackThread";
+import styles from "./feedback.module.css";
 import { Lightbox } from "./Lightbox";
 import { describeTime, fullTime } from "./time";
-import "./feedback.css";
 
 type Filter = "open" | "resolved" | "all";
 type Preview = { urls: string[]; index: number };
@@ -142,7 +142,7 @@ export function FeedbackChannel() {
       {open && (
         <section
           id={panelID}
-          className="fb-panel"
+          className={styles.fbPanel}
           {...ui}
           role="dialog"
           aria-label="问题反馈"
@@ -150,15 +150,15 @@ export function FeedbackChannel() {
             if (event.key === "Escape") close();
           }}
         >
-          <header className="fb-head">
-            <span className="fb-head-icon" aria-hidden="true">
+          <header className={styles.fbHead}>
+            <span className={styles.fbHeadIcon} aria-hidden="true">
               <MessageSquareText />
             </span>
-            <div className="fb-head-text">
+            <div className={styles.fbHeadText}>
               <h2>问题反馈</h2>
               <p>全员可见 · 任何人都可以编辑、标记已处理</p>
             </div>
-            <button className="fb-icon-button" aria-label="关闭问题反馈" onClick={close}>
+            <button className={styles.fbIconButton} aria-label="关闭问题反馈" onClick={close}>
               <X />
             </button>
           </header>
@@ -180,7 +180,7 @@ export function FeedbackChannel() {
             onCaptured={() => setFlash((value) => value + 1)}
           />
 
-          <div className="fb-filter" role="tablist" aria-label="筛选反馈">
+          <div className={styles.fbFilter} role="tablist" aria-label="筛选反馈">
             {(
               [
                 ["open", "待处理", openCount],
@@ -195,19 +195,19 @@ export function FeedbackChannel() {
             ))}
           </div>
 
-          <div className="fb-scroll">
+          <div className={styles.fbScroll}>
             {items === undefined && !loadError && (
-              <div className="fb-state">
-                <span className="fb-loader" />
+              <div className={styles.fbState}>
+                <span className={styles.fbLoader} />
                 <p>正在读取反馈…</p>
               </div>
             )}
             {loadError && items === undefined && (
-              <div className="fb-state">
+              <div className={styles.fbState}>
                 <Inbox />
                 <h3>无法读取反馈</h3>
                 <p>{loadError}</p>
-                <button className="fb-ghost" onClick={() => void refresh()}>
+                <button className={styles.fbGhost} onClick={() => void refresh()}>
                   <RotateCw />
                   重试
                 </button>
@@ -215,7 +215,7 @@ export function FeedbackChannel() {
             )}
             {items !== undefined && shown.length === 0 && <EmptyState filter={filter} />}
             {shown.length > 0 && (
-              <ul className="fb-list" aria-label="反馈清单">
+              <ul className={styles.fbList} aria-label="反馈清单">
                 {shown.map((item) => (
                   <FeedbackCard
                     key={item.id}
@@ -233,7 +233,7 @@ export function FeedbackChannel() {
           </div>
         </section>
       )}
-      {flash > 0 && <div key={flash} className="fb-flash" {...ui} aria-hidden="true" />}
+      {flash > 0 && <div key={flash} className={styles.fbFlash} {...ui} aria-hidden="true" />}
       {preview && (
         <Lightbox
           urls={preview.urls}
@@ -257,14 +257,14 @@ function order(a: FeedbackItem, b: FeedbackItem, filter: Filter) {
 function EmptyState({ filter }: { filter: Filter }) {
   if (filter === "resolved")
     return (
-      <div className="fb-state">
+      <div className={styles.fbState}>
         <CircleCheckBig />
         <h3>还没有已处理的反馈</h3>
         <p>处理完一条反馈后，勾选它就会划线归到这里。</p>
       </div>
     );
   return (
-    <div className="fb-state">
+    <div className={styles.fbState}>
       <CircleCheckBig />
       <h3>{filter === "open" ? "没有待处理的反馈" : "还没有反馈"}</h3>
       <p>发现问题时，在上面写下来或贴一张截图。</p>
@@ -334,7 +334,7 @@ function FeedbackButton({
   return (
     <button
       ref={ref}
-      className={`fb-fab ${dragging ? "dragging" : ""}`}
+      className={`${styles.fbFab} ${dragging ? styles.dragging : ""}`}
       {...ui}
       // Below the status bar and clear of the bottom edge on any screen.
       style={{ top: `clamp(160px, ${top * 100}%, calc(100% - 64px))` }}
@@ -349,12 +349,12 @@ function FeedbackButton({
         dragged.current = false;
       }}
     >
-      <span className="fb-fab-icon">
+      <span className={styles.fbFabIcon}>
         <MessageSquareText />
       </span>
-      <span className="fb-fab-label">反馈</span>
+      <span className={styles.fbFabLabel}>反馈</span>
       {openCount > 0 && (
-        <span className="fb-fab-count" aria-hidden="true">
+        <span className={styles.fbFabCount} aria-hidden="true">
           {openCount > 99 ? "99+" : openCount}
         </span>
       )}
@@ -480,7 +480,7 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
       .filter((image) => !detached.includes(image.id))
       .map((image) => ({ id: image.id, url: feedbackImageURL(item.id, image.id) }));
     return (
-      <li className="fb-item editing">
+      <li className={`${styles.fbItem} ${styles.editing}`}>
         <FeedbackEditor
           label="编辑反馈"
           draft={draft}
@@ -494,7 +494,7 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
           autoFocus
           notice={
             changedBy && (
-              <div className="fb-conflict" role="status">
+              <div className={styles.fbConflict} role="status">
                 <strong>{changedBy} 刚刚修改了这条反馈</strong>
                 {item.text && <blockquote>{item.text}</blockquote>}
                 <span>你的内容还在下面，再次保存将以你的版本为准。</span>
@@ -511,9 +511,9 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
   }
 
   return (
-    <li className={`fb-item ${resolved ? "resolved" : ""}`}>
+    <li className={`${styles.fbItem} ${resolved ? styles.resolved : ""}`}>
       <button
-        className="fb-check"
+        className={styles.fbCheck}
         role="checkbox"
         aria-checked={resolved}
         aria-label={resolved ? "标记为待处理" : "标记为已处理"}
@@ -522,24 +522,24 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
       >
         <Check />
       </button>
-      <div className="fb-item-body">
+      <div className={styles.fbItemBody}>
         {item.text && (
-          <p className={`fb-item-text ${long && !expanded ? "clamped" : ""}`}>
-            <span className="fb-strike">{item.text}</span>
+          <p className={`${styles.fbItemText} ${long && !expanded ? styles.clamped : ""}`}>
+            <span className={styles.fbStrike}>{item.text}</span>
             {resolved && <span className="sr-only">（已处理）</span>}
           </p>
         )}
         {long && (
-          <button className="fb-more" onClick={() => setExpanded((value) => !value)}>
+          <button className={styles.fbMore} onClick={() => setExpanded((value) => !value)}>
             {expanded ? "收起" : "展开全文"}
           </button>
         )}
         {item.images.length > 0 && (
-          <ul className={`fb-thumbs ${item.images.length === 1 ? "single" : ""}`} aria-label="附图">
+          <ul className={`${styles.fbThumbs} ${item.images.length === 1 ? styles.single : ""}`} aria-label="附图">
             {item.images.map((image, index) => (
               <li key={image.id}>
                 <button
-                  className="fb-thumb"
+                  className={styles.fbThumb}
                   aria-label={`查看附图 ${index + 1}`}
                   onClick={() => onPreview(imageURLs, index)}
                 >
@@ -549,26 +549,29 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
             ))}
           </ul>
         )}
-        <div className="fb-meta">
-          <PersonAvatar who={person(people, { username: item.createdBy })} className="fb-avatar" />
-          <span className="fb-author">{nameOf(people, item.createdBy)}</span>
+        <div className={styles.fbMeta}>
+          <PersonAvatar who={person(people, { username: item.createdBy })} className={styles.fbAvatar} />
+          <span className={styles.fbAuthor}>{nameOf(people, item.createdBy)}</span>
           <time dateTime={item.createdAt} title={fullTime(item.createdAt)}>
             {describeTime(item.createdAt)}
           </time>
           {item.updatedBy && item.updatedAt && (
-            <span className="fb-edited" title={`${nameOf(people, item.updatedBy)} 于 ${fullTime(item.updatedAt)} 编辑`}>
+            <span
+              className={styles.fbEdited}
+              title={`${nameOf(people, item.updatedBy)} 于 ${fullTime(item.updatedAt)} 编辑`}
+            >
               已编辑
             </span>
           )}
-          <span className="fb-meta-end">
+          <span className={styles.fbMetaEnd}>
             {resolved && item.resolvedBy && item.resolvedAt && (
-              <span className="fb-resolved" title={fullTime(item.resolvedAt)}>
+              <span className={styles.fbResolved} title={fullTime(item.resolvedAt)}>
                 <CheckCheck />
                 {nameOf(people, item.resolvedBy)} 已处理
               </span>
             )}
             <button
-              className={`fb-comment-toggle ${commentCount ? "has" : ""}`}
+              className={`${styles.fbCommentToggle} ${commentCount ? styles.has : ""}`}
               aria-expanded={threadOpen}
               aria-controls={threadOpen ? threadID : undefined}
               aria-label={commentCount ? `${commentCount} 条评论` : "写评论"}
@@ -581,11 +584,11 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
               <MessageCircle />
               {commentCount > 0 && commentCount}
               {commentDraft.text.trim() || commentDraft.added.length ? (
-                <span className="fb-draft-dot" aria-hidden="true" />
+                <span className={styles.fbDraftDot} aria-hidden="true" />
               ) : null}
             </button>
             {mode === "view" && (
-              <span className="fb-item-actions">
+              <span className={styles.fbItemActions}>
                 <button aria-label="编辑反馈" title="编辑" onClick={startEdit}>
                   <Pencil />
                 </button>
@@ -604,17 +607,17 @@ function FeedbackCard({ item, onChange, onRemove, onToggled, onRefresh, onPrevie
           </span>
         </div>
         {error && (
-          <p className="fb-item-error" role="alert">
+          <p className={styles.fbItemError} role="alert">
             {error}
           </p>
         )}
         {mode === "delete" && (
-          <div className="fb-confirm" role="group" aria-label="确认删除">
+          <div className={styles.fbConfirm} role="group" aria-label="确认删除">
             <span>删除后所有人都看不到这条反馈。</span>
-            <button className="fb-ghost" disabled={busy} onClick={() => setMode("view")}>
+            <button className={styles.fbGhost} disabled={busy} onClick={() => setMode("view")}>
               取消
             </button>
-            <button className="fb-danger" disabled={busy} onClick={() => void confirmDelete()}>
+            <button className={styles.fbDanger} disabled={busy} onClick={() => void confirmDelete()}>
               删除
             </button>
           </div>

@@ -250,6 +250,7 @@ func (h *Handler) gateway(w http.ResponseWriter, r *http.Request, account string
 	m.mu.Lock()
 	m.upstreams[u] = struct{}{}
 	m.mu.Unlock()
+	//nolint:gosec // G118: reads Hermes until the upstream closes, which ends it; the request's context does not.
 	go u.readHermes()
 	if err := u.declare(ctx); err != nil {
 		h.logger.Warn("assistant gateway did not start", "account", account, "error", err)

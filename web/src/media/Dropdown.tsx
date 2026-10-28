@@ -2,6 +2,8 @@ import { Check, ChevronDown } from "lucide-react";
 import { KeyboardEvent, ReactNode, RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import styles from "./media.module.css";
+
 // useFold keeps a popup mounted while it folds away after closing, so it
 // leaves as smoothly as it came.
 export function useFold(open: boolean, ms = 130): { shown: boolean; closing: boolean } {
@@ -59,7 +61,7 @@ export function ChoiceList({
   const list = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     if (!open || !anchorRef.current) return;
-    const root = anchorRef.current.closest(".mc-player, .mc-app");
+    const root = anchorRef.current.closest(`.${styles.mcPlayer}, .${styles.mcApp}`);
     if (!root) return;
     const frame = root.getBoundingClientRect();
     const box = anchorRef.current.getBoundingClientRect();
@@ -142,7 +144,7 @@ export function ChoiceList({
       aria-label={label}
       aria-hidden={closing || undefined}
       onKeyDown={keys}
-      className={`mc-choices ${place.up ? "up" : ""} ${align === "end" ? "end" : ""} ${closing ? "closing" : ""}`}
+      className={`${styles.mcChoices} ${place.up ? styles.up : ""} ${align === "end" ? styles.end : ""} ${closing ? styles.closing : ""}`}
       style={{ left: place.left, top: place.top, minWidth: place.width, maxHeight: place.maxHeight }}
     >
       {choices.map((choice) => {
@@ -154,13 +156,13 @@ export function ChoiceList({
             role="option"
             aria-selected={selected}
             tabIndex={closing ? -1 : 0}
-            className={selected ? "selected" : ""}
+            className={selected ? styles.selected : ""}
             onClick={() => onPick(choice.value)}
           >
             {choice.icon}
             <span>{choice.label}</span>
             {choice.hint && <small>{choice.hint}</small>}
-            <Check className="mc-choice-check" />
+            <Check className={styles.mcChoiceCheck} />
           </button>
         );
       })}
@@ -202,7 +204,7 @@ export function Dropdown({
       <button
         ref={trigger}
         type="button"
-        className={`mc-dropdown ${open ? "open" : ""} ${className}`}
+        className={`${styles.mcDropdown} ${open ? styles.open : ""} ${className}`}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`${label}：${current?.label ?? ""}`}
@@ -216,9 +218,9 @@ export function Dropdown({
         }}
       >
         {icon}
-        {prefix && <span className="mc-dropdown-prefix">{prefix}</span>}
-        <span className="mc-dropdown-value">{current?.label}</span>
-        <ChevronDown className="mc-dropdown-chevron" />
+        {prefix && <span className={styles.mcDropdownPrefix}>{prefix}</span>}
+        <span className={styles.mcDropdownValue}>{current?.label}</span>
+        <ChevronDown className={styles.mcDropdownChevron} />
       </button>
       <ChoiceList
         anchor={trigger}

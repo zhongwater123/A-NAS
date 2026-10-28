@@ -1,7 +1,5 @@
-import { formatDate, formatClock as clock } from "../format/time";
-import { relativeUnit } from "../format/time";
-import { relativeTime } from "../format/time";
-import { ContainerImage, ContainerSummary } from "../containersApi";
+import { formatClock as clock, formatDate, relativeTime, relativeUnit } from "../lib/time";
+import { ContainerImage, ContainerSummary } from "./api";
 
 export type Tone = "ok" | "warn" | "danger" | "idle";
 export type Health = "healthy" | "unhealthy" | "starting";

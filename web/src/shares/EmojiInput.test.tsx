@@ -1,7 +1,8 @@
-import { useState } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, expect, it } from "vitest";
+
 import { EmojiInput } from "./EmojiInput";
 
 afterEach(() => localStorage.clear());

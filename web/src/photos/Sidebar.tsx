@@ -1,8 +1,9 @@
 import { Images, Library, Plus, Shapes, Sparkles, Trash2 } from "lucide-react";
 import { DragEvent, useEffect, useState } from "react";
 
+import { listAlbums, type PhotoAIStatus, type PhotoAlbum, type PhotoLibrary, thumbnailURL } from "./api";
 import { type Caller, libraryName, type Place } from "./model";
-import { listAlbums, thumbnailURL, type PhotoAIStatus, type PhotoAlbum, type PhotoLibrary } from "./photosApi";
+import styles from "./photos.module.css";
 import { dragType } from "./Tile";
 
 interface Props {
@@ -101,8 +102,8 @@ export function Sidebar({
     place.kind === "search" || place.kind === "cluster" || place.kind === "tag" || place.kind === "image";
 
   return (
-    <nav className="ph-sidebar" aria-label="相册导航">
-      <div className="ph-libraries" role="tablist" aria-label="图库">
+    <nav className={styles.phSidebar} aria-label="相册导航">
+      <div className={styles.phLibraries} role="tablist" aria-label="图库">
         {caller.libraries.map((item) => (
           <LibraryTab
             key={item.id}
@@ -115,11 +116,11 @@ export function Sidebar({
         ))}
       </div>
 
-      <div className="ph-nav">
+      <div className={styles.phNav}>
         {/* The library's photos and videos together, as in Apple's Photos. */}
         <button
           type="button"
-          className={at("timeline") ? "active" : ""}
+          className={at("timeline") ? styles.active : ""}
           aria-current={at("timeline") ? "page" : undefined}
           title="图库中的全部照片和视频"
           onClick={() => onPlace({ kind: "timeline", libraryId })}
@@ -130,7 +131,7 @@ export function Sidebar({
         </button>
         <button
           type="button"
-          className={onAIPage ? "active" : ""}
+          className={onAIPage ? styles.active : ""}
           aria-current={onAIPage ? "page" : undefined}
           onClick={() => onPlace({ kind: "search", viewing, query: "" })}
         >
@@ -140,7 +141,7 @@ export function Sidebar({
         {!readOnly && (
           <button
             type="button"
-            className={at("trash") ? "active" : ""}
+            className={at("trash") ? styles.active : ""}
             aria-current={at("trash") ? "page" : undefined}
             onClick={() => onPlace({ kind: "trash", libraryId })}
           >
@@ -150,10 +151,10 @@ export function Sidebar({
         )}
       </div>
 
-      <div className="ph-nav-section">
+      <div className={styles.phNavSection}>
         <button
           type="button"
-          className={`ph-nav-heading${at("albums") ? " active" : ""}`}
+          className={`${styles.phNavHeading}${at("albums") ? ` ${styles.active}` : ""}`}
           aria-current={at("albums") ? "page" : undefined}
           onClick={() => onPlace({ kind: "albums", libraryId })}
         >
@@ -162,12 +163,18 @@ export function Sidebar({
           <small>{albums.length || ""}</small>
         </button>
         {!readOnly && (
-          <button type="button" className="ph-nav-add" aria-label="新建相册" title="新建相册" onClick={onCreateAlbum}>
+          <button
+            type="button"
+            className={styles.phNavAdd}
+            aria-label="新建相册"
+            title="新建相册"
+            onClick={onCreateAlbum}
+          >
             <Plus />
           </button>
         )}
       </div>
-      <div className="ph-album-list">
+      <div className={styles.phAlbumList}>
         {albums.map((album) => (
           <AlbumLink
             key={album.id}
@@ -178,7 +185,9 @@ export function Sidebar({
             onDrop={(ids) => onDropOnAlbum(album, ids)}
           />
         ))}
-        {!albums.length && <p className="ph-nav-empty">{readOnly ? "没有相册" : "把照片拖到这里的相册，或新建一个"}</p>}
+        {!albums.length && (
+          <p className={styles.phNavEmpty}>{readOnly ? "没有相册" : "把照片拖到这里的相册，或新建一个"}</p>
+        )}
       </div>
 
       <AICard ai={ai} />
@@ -207,7 +216,7 @@ function LibraryTab({
       role="tab"
       aria-selected={active}
       title={library.viewing ? `只读查看 ${libraryName(caller, library)}` : libraryName(caller, library)}
-      className={`${active ? "active" : ""}${library.viewing ? " viewing" : ""}${target.over ? " drop" : ""}`}
+      className={`${active ? styles.active : ""}${library.viewing ? ` ${styles.viewing}` : ""}${target.over ? ` ${styles.drop}` : ""}`}
       onClick={onSelect}
       {...target.props}
     >
@@ -233,12 +242,12 @@ function AlbumLink({
   return (
     <button
       type="button"
-      className={`ph-album-link${active ? " active" : ""}${target.over ? " drop" : ""}`}
+      className={`${styles.phAlbumLink}${active ? ` ${styles.active}` : ""}${target.over ? ` ${styles.drop}` : ""}`}
       aria-current={active ? "page" : undefined}
       onClick={onOpen}
       {...target.props}
     >
-      <span className="ph-album-thumb">
+      <span className={styles.phAlbumThumb}>
         {album.coverId ? <img src={thumbnailURL(album.coverId)} alt="" loading="lazy" /> : <Images />}
       </span>
       <span>{album.name}</span>
@@ -268,7 +277,7 @@ function AICard({ ai }: { ai?: PhotoAIStatus }) {
       ai.state === "paused" && ai.reason !== "foreground" ? "设备正忙，稍后继续整理" : "相册空闲 5 分钟后继续整理";
   }
   return (
-    <div className={`ph-ai ${ai.state}`} role="status" aria-label="本地 AI 状态">
+    <div className={`${styles.phAi} ${styles[ai.state] ?? ""}`} role="status" aria-label="本地 AI 状态">
       <Sparkles />
       <div>
         <strong>{title}</strong>
@@ -277,7 +286,7 @@ function AICard({ ai }: { ai?: PhotoAIStatus }) {
           {ai.failed ? `；${ai.failed} 张无法识别` : ""}
         </small>
         {total > 0 && (
-          <span className="ph-ai-bar">
+          <span className={styles.phAiBar}>
             <span style={{ width: `${Math.round(share * 100)}%` }} />
           </span>
         )}

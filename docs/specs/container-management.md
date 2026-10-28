@@ -75,7 +75,7 @@
 - 领域、Fake 与 Docker 适配器：[Docker 适配器测试](../../internal/containers/docker/manager_test.go) 覆盖多路复用日志解析与截断、TTY 日志、CPU/内存计算、端口去重与非法 ID/状态过滤。
 - 代理 IPC：[容器代理测试](../../internal/containers/agent/agent_test.go) 覆盖往返、错误码映射和只开放类型化操作。
 - 产品 API：[容器 API 测试](../../internal/containersapi/handler_test.go)、[同源写检查测试](../../internal/localorigin/localorigin_test.go)、[管理员与 CSRF 测试](../../internal/httpapi/apps_test.go)、[OpenAPI 契约测试](../../internal/httpapi/openapi_test.go)。
-- 前端：[状态模型测试](../../web/src/docker/model.test.ts) 覆盖 Docker 状态文本的中文化、主动停止与异常退出的区分、筛选、分组、搜索、镜像使用者匹配与端口链接；[Docker 窗口测试](../../web/src/docker/DockerPanel.test.tsx) 覆盖按应用分组、需要关注、异常退出的诊断与日志、停止确认与取消、从应用中心定位分组、镜像使用者与搜索、未启用状态；[桌面测试](../../web/src/App.test.tsx) 覆盖从桌面打开后的停止确认、启动、日志筛选与镜像页。日志视图曾因 Chromium 的 `scrollIntoView` 返回 Promise 在卸载时让整页崩溃，现改为直接设置滚动位置。
+- 前端：[状态模型测试](../../web/src/docker/model.test.ts) 覆盖 Docker 状态文本的中文化、主动停止与异常退出的区分、筛选、分组、搜索、镜像使用者匹配与端口链接；[Docker 窗口测试](../../web/src/docker/DockerPanel.test.tsx) 覆盖按应用分组、需要关注、异常退出的诊断与日志、停止确认与取消、从应用中心定位分组、镜像使用者与搜索、未启用状态，以及独立容器的停止确认、启动、日志筛选与离开日志后的镜像页；[桌面测试](../../web/src/App.test.tsx) 覆盖未运行的已安装应用从桌面图标打开 Docker。日志视图曾因 Chromium 的 `scrollIntoView` 返回 Promise 在卸载时让整页崩溃，现改为直接设置滚动位置。
 - 2026-10-13 在 Fake 模式预览（8 个容器、10 个镜像，含应用分组、异常退出与未使用镜像）中用 Chromium 检查全部容器、需要关注、应用分组、详情、日志筛选、镜像、停止确认与搜索各页面。
 - 2026-10-07 在 WSL2（Docker 29.1.3，API 1.52）以用户态容器代理和 `ANAS_CONTAINERS_MODE=agent` 运行：列出 5 个容器与 2 个镜像及运行中容器的 CPU/内存；对专用测试容器 `anas-docker-smoke` 执行启动、重启、停止均返回 204 且与 `docker inspect` 一致；读取日志 98 行；`text/plain` 跨站请求返回 403；Chromium 中完成确认停止、启动、查看日志与返回列表。
 

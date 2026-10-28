@@ -1,11 +1,13 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import type { FileEntry, Space, TrashItem } from "../api";
+import type { Space, TrashItem } from "../api.generated";
+import { filesHandlers, folder } from "../test/handlers/files";
+import { type Restore, restoredAs, trashHandlers, trashItem } from "../test/handlers/trash";
+import { server } from "../test/server";
 import { expiryOf, groupItems, restoredName } from "./model";
 import { TrashPanel } from "./TrashPanel";
-import { stubAPI } from "../test/api";
 
 const personal: Space = {
   id: "space:personal",
@@ -19,20 +21,16 @@ const day = 86_400_000;
 const at = (offset: number) => new Date(Date.now() + offset).toISOString();
 
 function item(overrides: Partial<TrashItem>): TrashItem {
-  return {
+  return trashItem("计划.docx", {
     id: "trash:plan",
     entryId: "file:plan",
     spaceId: personal.id,
-    name: "计划.docx",
-    kind: "file",
     sizeBytes: 2.3 * 1024 ** 2,
     originalPath: "文档/项目",
-    originalGone: false,
-    deletedBy: "user:owner",
     deletedAt: at(-60_000),
     purgeAt: at(30 * day - 60_000),
     ...overrides,
-  };
+  });
 }
 
 const plan = item({});
@@ -58,67 +56,25 @@ const orphan = item({
   purgeAt: at(0.5 * day),
 });
 
-function json(body: unknown, status = 200) {
-  return new Response(status === 204 ? null : JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-interface Call {
-  url: string;
-  method: string;
-  body?: unknown;
-}
-
-interface RestoreBody {
-  parentId: string;
-  name: string;
-  conflict: string;
-}
-
-const taken = () => json({ error: { code: "name_conflict", message: "a file with this name already exists" } }, 409);
-
-function serve(items: TrashItem[], restore?: (id: string, body: RestoreBody, attempt: number) => Response) {
-  const calls: Call[] = [];
-  let attempts = 0;
-  stubAPI(
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const method = init?.method ?? "GET";
-      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-      calls.push({ url, method, body });
-      if (url === "/api/v1/trash") return json({ items });
-      if (url === "/api/v1/spaces") return json({ items: [personal, shared] });
-      const restoring = url.match(/^\/api\/v1\/trash\/([^/]+)\/restore$/);
-      if (restoring) {
-        const id = decodeURIComponent(restoring[1]);
-        return restore
-          ? restore(id, body, ++attempts)
-          : json({ id, spaceId: personal.id, name: body.name, kind: "file", sizeBytes: 1, modifiedAt: at(0) });
-      }
-      if (method === "DELETE" && url.startsWith("/api/v1/trash/")) return json(null, 204);
-      const docs: FileEntry = {
-        id: "dir:docs",
-        spaceId: personal.id,
-        name: "文档",
-        kind: "directory",
-        sizeBytes: 0,
-        modifiedAt: at(0),
-      };
-      if (url === `/api/v1/spaces/${encodeURIComponent(personal.id)}/entries?parentId=`) return json({ items: [docs] });
-      if (url.includes("/entries?parentId=")) return json({ items: [] });
-      return json({ error: { code: "not_found", message: "not found" } }, 404);
+// serve answers the recycle bin with items, or with what items returns at each
+// read; the two spaces, the personal one holding 文档 but no 文档/项目; and
+// restores through restore. It returns the restores and the items deleted
+// for good.
+function serve(items: TrashItem[] | (() => TrashItem[]), restore?: Restore) {
+  const trash = trashHandlers(typeof items === "function" ? items : () => items, restore);
+  server.use(
+    ...filesHandlers({
+      spaces: [personal, shared],
+      entries: [folder("文档", { id: "dir:docs", spaceId: personal.id, modifiedAt: at(0) })],
     }),
+    ...trash.handlers,
   );
-  return calls;
+  return trash;
 }
 
 const rows = () => screen.getAllByRole("listitem");
 const row = (name: string) => rows().find((element) => element.querySelector("strong")?.textContent === name)!;
 const names = () => rows().map((element) => element.querySelector("strong")?.textContent);
-
-afterEach(() => vi.unstubAllGlobals());
 
 describe("TrashPanel", () => {
   it("says where each item came from, what it holds, when it was deleted and when it goes", async () => {
@@ -180,18 +136,10 @@ describe("TrashPanel", () => {
 
   it("restores to the original folder, keeps both when the name is taken and shows where it went", async () => {
     const shown = vi.fn();
-    const calls = serve([plan], (_id, body) =>
+    const { restores } = serve([plan], (_id, body) =>
       body.conflict === "ask"
-        ? taken()
-        : json({
-            id: plan.entryId,
-            spaceId: personal.id,
-            parentId: "dir:project",
-            name: "计划 (恢复).docx",
-            kind: "file",
-            sizeBytes: plan.sizeBytes,
-            modifiedAt: at(0),
-          }),
+        ? "name_conflict"
+        : restoredAs(plan, "计划 (恢复).docx", { parentId: "dir:project", modifiedAt: at(0) }),
     );
     const user = userEvent.setup();
     render(<TrashPanel onShowInFiles={shown} />);
@@ -209,9 +157,9 @@ describe("TrashPanel", () => {
     await user.click(keep);
 
     expect(await screen.findByText("已恢复“计划 (恢复).docx”到 个人空间 / 文档 / 项目")).toBeTruthy();
-    expect(calls.filter((call) => call.url.endsWith("/restore")).map((call) => call.body)).toEqual([
-      { parentId: "", name: "计划.docx", conflict: "ask" },
-      { parentId: "", name: "计划.docx", conflict: "rename" },
+    expect(restores).toEqual([
+      { trashId: plan.id, parentId: "", name: "计划.docx", conflict: "ask" },
+      { trashId: plan.id, parentId: "", name: "计划.docx", conflict: "rename" },
     ]);
     expect(screen.getByText("回收站是空的")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "在文件管理中显示" }));
@@ -226,32 +174,21 @@ describe("TrashPanel", () => {
 
   it("replaces the file of that name, which goes to the recycle bin, or takes a name of the user's own", async () => {
     let listed = [plan];
-    const calls = serve([], (_id, body) => {
-      if (body.conflict === "ask") return taken();
-      listed = [
-        item({
-          id: "trash:displaced",
-          entryId: "file:displaced",
-          name: "计划.docx",
-          deletedAt: at(0),
-          purgeAt: at(30 * day),
-        }),
-      ];
-      return json({
-        id: plan.entryId,
-        spaceId: personal.id,
-        name: "计划.docx",
-        kind: "file",
-        sizeBytes: plan.sizeBytes,
-        modifiedAt: at(0),
-        replaced: true,
-      });
-    });
-    const fetcher = globalThis.fetch;
-    stubAPI(
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
-        String(input) === "/api/v1/trash" ? json({ items: listed }) : fetcher(input, init),
-      ),
+    const { restores } = serve(
+      () => listed,
+      (_id, body) => {
+        if (body.conflict === "ask") return "name_conflict";
+        listed = [
+          item({
+            id: "trash:displaced",
+            entryId: "file:displaced",
+            name: "计划.docx",
+            deletedAt: at(0),
+            purgeAt: at(30 * day),
+          }),
+        ];
+        return restoredAs(plan, "计划.docx", { modifiedAt: at(0), replaced: true });
+      },
     );
     const user = userEvent.setup();
     render(<TrashPanel onShowInFiles={() => undefined} />);
@@ -275,10 +212,10 @@ describe("TrashPanel", () => {
     expect(
       await screen.findByText("已恢复“计划.docx”到 个人空间 / 文档 / 项目，原来的同名文件已移到回收站"),
     ).toBeTruthy();
-    expect(calls.filter((call) => call.url.endsWith("/restore")).map((call) => call.body)).toEqual([
-      { parentId: "", name: "计划.docx", conflict: "ask" },
-      { parentId: "", name: "计划.docx", conflict: "ask" },
-      { parentId: "", name: "计划.docx", conflict: "replace" },
+    expect(restores).toEqual([
+      { trashId: plan.id, parentId: "", name: "计划.docx", conflict: "ask" },
+      { trashId: plan.id, parentId: "", name: "计划.docx", conflict: "ask" },
+      { trashId: plan.id, parentId: "", name: "计划.docx", conflict: "replace" },
     ]);
     // The replaced file is listed in the recycle bin.
     await waitFor(() => expect(names()).toEqual(["计划.docx"]));
@@ -286,7 +223,7 @@ describe("TrashPanel", () => {
   });
 
   it("never offers to replace with a folder", async () => {
-    serve([photos], () => taken());
+    serve([photos], () => "name_conflict");
     const user = userEvent.setup();
     render(<TrashPanel onShowInFiles={() => undefined} />);
     await user.click(await screen.findByRole("button", { name: "恢复 旅行照片" }));
@@ -327,13 +264,11 @@ describe("TrashPanel", () => {
   });
 
   it("restores a selection and asks once what to do with the items whose name is taken", async () => {
-    const calls = serve([plan, photos, orphan], (id, body) => {
-      if (id !== orphan.id && body.conflict === "ask") return taken();
-      const restored = { spaceId: personal.id, kind: "file", sizeBytes: 1, modifiedAt: at(0) };
-      if (id === plan.id) return json({ ...restored, id: plan.entryId, name: "计划.docx", replaced: true });
-      if (id === photos.id)
-        return json({ ...restored, id: photos.entryId, name: "旅行照片 (恢复)", kind: "directory" });
-      return json({ ...restored, id: orphan.entryId, name: "笔记.txt" });
+    const { restores } = serve([plan, photos, orphan], (id, body) => {
+      if (id !== orphan.id && body.conflict === "ask") return "name_conflict";
+      if (id === plan.id) return restoredAs(plan, "计划.docx", { replaced: true });
+      if (id === photos.id) return restoredAs(photos, "旅行照片 (恢复)");
+      return restoredAs(orphan, "笔记.txt");
     });
     const user = userEvent.setup();
     render(<TrashPanel onShowInFiles={() => undefined} />);
@@ -356,24 +291,20 @@ describe("TrashPanel", () => {
     expect(
       await screen.findByText("已恢复 3 项，其中 1 项改用了新名称、1 项替换了同名文件，原来的文件已移到回收站"),
     ).toBeTruthy();
-    expect(
-      calls
-        .filter((call) => call.url.endsWith("/restore"))
-        .map((call) => [call.url.split("/")[4], (call.body as RestoreBody).conflict]),
-    ).toEqual([
-      ["trash%3Aplan", "ask"],
-      ["trash%3Aphotos", "ask"],
-      ["trash%3Anotes", "ask"],
-      ["trash%3Aplan", "replace"],
-      ["trash%3Aphotos", "rename"],
+    expect(restores.map(({ trashId, conflict }) => [trashId, conflict])).toEqual([
+      ["trash:plan", "ask"],
+      ["trash:photos", "ask"],
+      ["trash:notes", "ask"],
+      ["trash:plan", "replace"],
+      ["trash:photos", "rename"],
     ]);
   });
 
   it("leaves the skipped items in the recycle bin, still selected", async () => {
     serve([plan, photos, orphan], (id, body) =>
       id === photos.id && body.conflict === "ask"
-        ? taken()
-        : json({ id, spaceId: personal.id, name: body.name, kind: "file", sizeBytes: 1, modifiedAt: at(0) }),
+        ? "name_conflict"
+        : restoredAs(id === plan.id ? plan : orphan, body.name, { modifiedAt: at(0) }),
     );
     const user = userEvent.setup();
     render(<TrashPanel onShowInFiles={() => undefined} />);
@@ -396,13 +327,13 @@ describe("TrashPanel", () => {
   });
 
   it("asks before deleting for good, one item, a selection or everything", async () => {
-    const calls = serve([plan, photos, orphan]);
+    const { purged } = serve([plan, photos, orphan]);
     const user = userEvent.setup();
     render(<TrashPanel onShowInFiles={() => undefined} />);
     await user.click(await screen.findByRole("button", { name: "永久删除 计划.docx" }));
     let dialog = await screen.findByRole("dialog", { name: "永久删除？" });
     expect(within(dialog).getByText(/“计划.docx”将被立即删除，无法再恢复/)).toBeTruthy();
-    expect(calls.some((call) => call.method === "DELETE")).toBe(false);
+    expect(purged).toEqual([]);
     await user.click(within(dialog).getByRole("button", { name: "永久删除" }));
     expect(await screen.findByText("已永久删除“计划.docx”")).toBeTruthy();
 
@@ -411,9 +342,7 @@ describe("TrashPanel", () => {
     expect(within(dialog).getByText(/全部 2 个项目（共 3.0 GiB）将被立即删除/)).toBeTruthy();
     await user.click(within(dialog).getByRole("button", { name: "清空回收站" }));
     expect(await screen.findByText("回收站是空的")).toBeTruthy();
-    expect(calls.filter((call) => call.method === "DELETE").map((call) => call.url)).toEqual(
-      [plan, photos, orphan].map((entry) => `/api/v1/trash/${encodeURIComponent(entry.id)}`),
-    );
+    expect(purged).toEqual([plan, photos, orphan].map((entry) => entry.id));
   });
 
   it("is empty with a word on how long items stay", async () => {

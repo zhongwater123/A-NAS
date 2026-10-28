@@ -1,19 +1,20 @@
 import { ChevronDown, ChevronUp, Hash, History, Search, ShieldCheck, X } from "lucide-react";
 import { FormEvent, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { type ImageDropProps, ImageSearchButton } from "./imageSearch";
-import { categoryNames, messageOf } from "./model";
-import { PeopleRow, personGap, personWidth } from "./People";
 import {
   listPeople,
   listPhotoLabels,
   listTagGroups,
-  thumbnailURL,
   type PhotoAIStatus,
   type PhotoLabelCount,
   type PhotoPerson,
   type PhotoTagCount,
-} from "./photosApi";
+  thumbnailURL,
+} from "./api";
+import { type ImageDropProps, ImageSearchButton } from "./imageSearch";
+import { categoryNames, messageOf } from "./model";
+import { PeopleRow, personGap, personWidth } from "./People";
+import styles from "./photos.module.css";
 
 // AIHomeSnapshot is how AI 聚合 looked when one of its groups opened, so that
 // going back lands on the same spot instead of the top.
@@ -121,7 +122,7 @@ export function AIHome({
     const element = scroller.current;
     if (!element) return;
     const measure = () => {
-      const section = element.querySelector<HTMLElement>(".ph-browse");
+      const section = element.querySelector<HTMLElement>(`.${styles.phBrowse}`);
       if (!section) return;
       setPerRow(Math.max(2, Math.floor(((section.clientWidth || 900) + cardGap) / (cardWidth + cardGap))));
       setPeoplePerRow(Math.max(2, Math.floor(((section.clientWidth || 900) + personGap) / (personWidth + personGap))));
@@ -213,11 +214,11 @@ export function AIHome({
         : `已整理全部 ${ai.ready} 张`;
 
   return (
-    <div ref={scroller} className="ph-cards-scroll ph-discover" style={{ paddingTop: topInset }}>
-      <section className="ph-hero" aria-label="用一句话找照片">
+    <div ref={scroller} className={`${styles.phCardsScroll} ${styles.phDiscover}`} style={{ paddingTop: topInset }}>
+      <section className={styles.phHero} aria-label="用一句话找照片">
         <h2>{userName}，您可以用一句话来找照片</h2>
         <form
-          className={`ph-hero-search${image.over ? " image-drop" : ""}`}
+          className={`${styles.phHeroSearch}${image.over ? ` ${styles.imageDrop}` : ""}`}
           role="search"
           onSubmit={submit}
           {...image.drop}
@@ -232,13 +233,13 @@ export function AIHome({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <ImageSearchButton onPick={image.pick} className="ph-hero-image" />
-          <button type="submit" className="ph-button primary" disabled={!query.trim()}>
+          <ImageSearchButton onPick={image.pick} className={styles.phHeroImage} />
+          <button type="submit" className={`${styles.phButton} primary`} disabled={!query.trim()}>
             搜索
           </button>
         </form>
         {recent.length > 0 && (
-          <div className="ph-hero-recent" aria-label="最近搜索">
+          <div className={styles.phHeroRecent} aria-label="最近搜索">
             <History />
             {recent.map((item) => (
               <button type="button" key={item} onClick={() => onSearch(item)}>
@@ -247,7 +248,7 @@ export function AIHome({
             ))}
             <button
               type="button"
-              className="ph-hero-forget"
+              className={styles.phHeroForget}
               aria-label="清除最近搜索"
               title="清除最近搜索"
               onClick={onForget}
@@ -256,10 +257,10 @@ export function AIHome({
             </button>
           </div>
         )}
-        <p className="ph-hero-note">
+        <p className={styles.phHeroNote}>
           <ShieldCheck />
           照片和人脸都在这台 NAS 上由本地 AI 识别，不会离开设备{status ? ` · ${status}` : ""}
-          <button type="button" className="ph-hero-link" onClick={onPeopleSettings}>
+          <button type="button" className={styles.phHeroLink} onClick={onPeopleSettings}>
             人物与宠物设置
           </button>
         </p>
@@ -278,32 +279,32 @@ export function AIHome({
       ) : null}
 
       {clusters === undefined ? (
-        <div className="ph-loading">
-          <span className="ph-spinner" />
+        <div className={styles.phLoading}>
+          <span className={styles.phSpinner} />
         </div>
       ) : groups.length ? (
-        <section className="ph-browse" aria-label="按内容聚合">
+        <section className={styles.phBrowse} aria-label="按内容聚合">
           <header>
             <h3>按内容聚合</h3>
           </header>
           {groups.map(([category, items]) => {
             const expanded = open.has(category);
             return (
-              <div className="ph-browse-group" key={category}>
+              <div className={styles.phBrowseGroup} key={category}>
                 <h4>
                   {categoryNames[category] ?? category}
                   <small>{items.length} 类</small>
                 </h4>
-                <div className="ph-cards things">
+                <div className={`${styles.phCards} ${styles.things}`}>
                   {(expanded ? items : items.slice(0, perRow)).map((label) => (
                     <button
                       type="button"
                       key={label.id}
-                      className="ph-card ph-thing"
+                      className={`${styles.phCard} ${styles.phThing}`}
                       aria-label={`打开 ${label.name}`}
                       onClick={() => onOpenCluster(label, remember())}
                     >
-                      <span className="ph-card-cover">
+                      <span className={styles.phCardCover}>
                         <img src={thumbnailURL(label.coverId)} alt="" loading="lazy" />
                       </span>
                       <strong>{label.name}</strong>
@@ -314,7 +315,7 @@ export function AIHome({
                 {items.length > perRow && (
                   <button
                     type="button"
-                    className="ph-browse-more"
+                    className={styles.phBrowseMore}
                     onClick={() =>
                       setOpen((value) => {
                         const next = new Set(value);
@@ -342,14 +343,14 @@ export function AIHome({
           })}
         </section>
       ) : waiting ? (
-        <section className="ph-browse" aria-label="按内容聚合" aria-busy="true">
+        <section className={styles.phBrowse} aria-label="按内容聚合" aria-busy="true">
           <header>
             <h3>按内容聚合</h3>
           </header>
-          <div className="ph-cards things ph-ghosts" aria-hidden="true">
+          <div className={`${styles.phCards} ${styles.things} ${styles.phGhosts}`} aria-hidden="true">
             {Array.from({ length: perRow }, (_, index) => (
-              <span className="ph-card ph-ghost" key={index}>
-                <span className="ph-card-cover" />
+              <span className={`${styles.phCard} ${styles.phGhost}`} key={index}>
+                <span className={styles.phCardCover} />
                 <strong />
                 <small />
               </span>
@@ -359,22 +360,22 @@ export function AIHome({
       ) : null}
 
       {tags.length > 0 && (
-        <section className="ph-browse ph-tag-groups" aria-label="你的标签">
+        <section className={`${styles.phBrowse} ${styles.phTagGroups}`} aria-label="你的标签">
           <header>
             <h3>你的标签</h3>
           </header>
-          <div className="ph-cards things">
+          <div className={`${styles.phCards} ${styles.things}`}>
             {(allTags ? tags : tags.slice(0, perRow * 2)).map((tag) => (
               <button
                 type="button"
                 key={tag.name}
-                className="ph-card ph-thing"
+                className={`${styles.phCard} ${styles.phThing}`}
                 aria-label={`打开标签 ${tag.name}`}
                 onClick={() => onOpenTag(tag, remember())}
               >
-                <span className="ph-card-cover">
+                <span className={styles.phCardCover}>
                   <img src={thumbnailURL(tag.coverId)} alt="" loading="lazy" />
-                  <span className="ph-tag-mark">
+                  <span className={styles.phTagMark}>
                     <Hash />
                   </span>
                 </span>
@@ -384,7 +385,7 @@ export function AIHome({
             ))}
           </div>
           {tags.length > perRow * 2 && (
-            <button type="button" className="ph-browse-more" onClick={() => setAllTags(!allTags)}>
+            <button type="button" className={styles.phBrowseMore} onClick={() => setAllTags(!allTags)}>
               {allTags ? (
                 <>
                   <ChevronUp />

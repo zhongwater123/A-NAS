@@ -45,7 +45,7 @@ def lfw():
         keys, counts = data["keys"].tolist(), data["counts"].tolist()
         vectors, missing = data["v_auraface"], data["m_auraface"]
     rows, people, start = [], [], 0
-    for index, (key, count) in enumerate(zip(keys, counts)):
+    for index, (key, count) in enumerate(zip(keys, counts, strict=True)):
         if not missing[index]:
             for offset in range(count):
                 rows.append(start + offset)
@@ -122,7 +122,7 @@ def similarity_summary(vectors, people, pairs=200_000, seed=19):
             chosen = vectors[rows[:60]]
             same.extend((chosen @ chosen.T)[np.triu_indices(len(chosen), 1)].tolist())
     left, right = rng.choice(known, pairs), rng.choice(known, pairs)
-    different = np.einsum("ij,ij->i", vectors[left], vectors[right])[[people[a] != people[b] for a, b in zip(left, right)]]
+    different = np.einsum("ij,ij->i", vectors[left], vectors[right])[[people[a] != people[b] for a, b in zip(left, right, strict=True)]]
     return {"sameMedian": round(float(np.median(same)), 4), "sameP10": round(float(np.percentile(same, 10)), 4),
             "differentMedian": round(float(np.median(different)), 4),
             "differentP999": round(float(np.percentile(different, 99.9)), 4),
@@ -166,7 +166,7 @@ def threshold_pass(qdrant, count, params):
             query=point, score_threshold=THRESHOLD, limit=PAGE, offset=offset, params=params)
             for point, offset in batch])
         requests += 1
-        for (point, offset), answer in zip(batch, answers):
+        for (point, offset), answer in zip(batch, answers, strict=True):
             pages += 1
             ids = [p.id for p in answer.points if p.id != point]
             found.extend(min(point, other) * count + max(point, other) for other in ids)
