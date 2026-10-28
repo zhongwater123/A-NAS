@@ -37,6 +37,7 @@ export interface Unread {
 interface SharesContext {
   userId: string;
   active: boolean;
+  windowVisible: boolean;
   focus?: Focus;
   revision: number;
   unread: Unread;
@@ -54,17 +55,19 @@ export function useShares() {
 export function SharesProvider({
   userId,
   active,
+  windowVisible = true,
   onOpen,
   children,
 }: {
   userId: string;
   active: boolean;
+  windowVisible?: boolean;
   onOpen: () => void;
   children: ReactNode;
 }) {
   // A keyed inner provider makes account changes discard messages, recipients and jobs immediately.
   return (
-    <Provider key={userId} userId={userId} active={active} onOpen={onOpen}>
+    <Provider key={userId} userId={userId} active={active} windowVisible={windowVisible} onOpen={onOpen}>
       {children}
     </Provider>
   );
@@ -90,14 +93,23 @@ const countUnread = (items: Share[] | null | undefined, userId: string) =>
 function Provider({
   userId,
   active,
+  windowVisible,
   onOpen,
   children,
 }: {
   userId: string;
   active: boolean;
+  windowVisible: boolean;
   onOpen: () => void;
   children: ReactNode;
 }) {
+  const [documentVisible, setDocumentVisible] = useState(document.visibilityState !== "hidden");
+  useEffect(() => {
+    const change = () => setDocumentVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", change);
+    return () => document.removeEventListener("visibilitychange", change);
+  }, []);
+  const pollWindow = windowVisible && documentVisible;
   const [focus, setFocus] = useState<Focus>();
   const [draft, setDraft] = useState<FileEntry[]>();
   const [revision, setRevision] = useState(0);
@@ -199,7 +211,9 @@ function Provider({
       }
     };
     void load();
-    const timer = setInterval(() => void load(), 30_000);
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "hidden") void load();
+    }, 30_000);
     return () => {
       stopped = true;
       clearInterval(timer);
@@ -219,6 +233,7 @@ function Provider({
       value={{
         userId,
         active: active && !draft,
+        windowVisible: pollWindow,
         focus,
         revision,
         unread,
