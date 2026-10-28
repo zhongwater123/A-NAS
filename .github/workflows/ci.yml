@@ -60,6 +60,7 @@ jobs:
           cache-dependency-path: |
             go.sum
             tools/golangci-lint/go.sum
+            tools/actionlint/go.sum
 
       # make docs-check, alone or within make check, checks the documents'
       # links with this lychee release: the one the Makefile names, checked
