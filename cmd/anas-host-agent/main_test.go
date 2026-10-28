@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 )
 
 func TestConfigPlacesTheBrokerAndTheAssistantsChangesBesideTheirDefaults(t *testing.T) {
@@ -12,7 +12,7 @@ func TestConfigPlacesTheBrokerAndTheAssistantsChangesBesideTheirDefaults(t *test
 		t.Fatal(err)
 	}
 	if c.FileBrokerSocket != "/run/a-nas/file-broker.sock" || c.StateDir != "/var/lib/a-nas" || c.AssistantChanges != "" ||
-		c.PhotoSessionGroup != accounts.PhotoServiceUser || c.ShareSessionGroup != accounts.ShareServiceUser {
+		c.PhotoSessionGroup != accountid.PhotoServiceUser || c.ShareSessionGroup != accountid.ShareServiceUser {
 		t.Fatalf("config = %+v", c)
 	}
 	// The assistant brings the executor of its changes, on the data volume.

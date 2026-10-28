@@ -266,7 +266,7 @@ func feedbackAPI(t *testing.T) (http.Handler, feedback.Item) {
 	api := feedbackapi.New(store, nil)
 	member := accounts.User{ID: "user:contract", Username: "contract", Role: accounts.RoleMember}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		api.ServeHTTP(w, r.WithContext(feedbackapi.WithUser(r.Context(), member)))
+		api.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), member)))
 	}), item
 }
 
@@ -335,7 +335,7 @@ func transfersAPI(t *testing.T) transferContract {
 		t.Fatal(err)
 	}
 	contract.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		api.ServeHTTP(w, r.WithContext(transfersapi.WithUser(r.Context(), admin)))
+		api.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), admin)))
 	})
 	return contract
 }

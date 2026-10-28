@@ -44,5 +44,5 @@
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [存储与文件架构](../architecture/storage-and-files.md)
 - [Web 桌面终端规格](../specs/web-terminal.md)
-- 实现：[`internal/hostops/linux`](../../internal/hostops/linux/acl.go)（身份、ACL 与查看授权）、[`internal/filebroker`](../../internal/filebroker/server.go)（按用户运行的文件 Worker）、[`internal/files/service.go`](../../internal/files/service.go)
+- 实现：[`internal/hostops/linux`](../../internal/hostops/linux/acl.go)（身份、ACL 与查看授权）、[`internal/filebroker`](../../internal/filebroker/rootbroker/server.go)（按用户运行的文件 Worker）、[`internal/files/service.go`](../../internal/files/service.go)
 - 部署约束：[Host Agent 在 systemd 沙箱下丢失 CAP_SETUID](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)

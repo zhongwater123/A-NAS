@@ -51,21 +51,21 @@ type ProductDependencies struct {
 	// Shares serves member shares; production independently confirms sessions.
 	Shares http.Handler
 	// Media serves /api/v1/media to every signed-in user and receives the
-	// user through mediaapi.WithUser; the session token stays in the context
+	// user through accounts.WithUser; the session token stays in the context
 	// for the File Broker.
 	Media http.Handler
 	// Music is the music library; nil answers music_unavailable.
 	Music *music.Service
 	// Feedback serves /api/v1/feedback, the list every signed-in user reads
-	// and edits, and receives the user through feedbackapi.WithUser.
+	// and edits, and receives the user through accounts.WithUser.
 	Feedback http.Handler
 	// Transfers serves /api/v1/transfers and the tus endpoint /api/v1/uploads
 	// to every signed-in user and receives the user through
-	// transfersapi.WithUser.
+	// accounts.WithUser.
 	Transfers http.Handler
 	// Assistant serves /api/v1/assistant to every signed-in user, each reaching
 	// only their own assistant, and receives the user through
-	// assistantapi.WithUser.
+	// accounts.WithUser.
 	Assistant http.Handler
 	// SystemLogs reads the allowlisted service logs for administrators; nil
 	// answers logs_unavailable.

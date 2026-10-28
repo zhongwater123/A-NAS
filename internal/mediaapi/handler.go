@@ -1,6 +1,6 @@
 // Package mediaapi exposes the media center under /api/v1/media. It does not
 // authenticate: the Product Service wraps it so that every request carries
-// the signed-in user (WithUser) and the session token the File Broker needs,
+// the signed-in user (accounts.WithUser) and the session token the File Broker needs,
 // and so that writes have passed CSRF checks.
 package mediaapi
 
@@ -23,13 +23,6 @@ import (
 )
 
 const PathPrefix = "/api/v1/media"
-
-type userKey struct{}
-
-// WithUser attaches the signed-in user.
-func WithUser(ctx context.Context, user accounts.User) context.Context {
-	return context.WithValue(ctx, userKey{}, user)
-}
 
 type handler struct {
 	service *media.Service
@@ -99,7 +92,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) withUser(next func(http.ResponseWriter, *http.Request, accounts.User)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(userKey{}).(accounts.User)
+		user, ok := accounts.UserFrom(r.Context())
 		if !ok || user.ID == "" {
 			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
