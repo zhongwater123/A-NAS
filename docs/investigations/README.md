@@ -8,6 +8,7 @@
 - [2026-10-28：分享历史导致重复 IPC，最小化窗口仍下载完整对话](2026-10-28-share-history-polling.md)
 - [2026-10-27：跨空间移动丢失复制期间到达的内容与修改时间](2026-10-27-cross-space-move-lost-source-changes.md)
 - [2026-10-27：助手定时任务的成员文件与停用隔离](2026-10-27-assistant-cron-waker-member-isolation.md)
+- [2026-10-27：应用日志与卸载残留持续占用系统盘](2026-10-27-app-system-disk-growth.md)
 
 - [2026-10-06：Host Agent 无法创建运行时 Socket](2026-10-06-host-agent-runtime-directory.md)
 - [2026-10-06：本地 Kiosk 可进入通用 Chromium 界面](2026-10-06-kiosk-browser-confinement.md)

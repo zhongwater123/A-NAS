@@ -356,6 +356,34 @@ describe("AppCenterPanel", () => {
     expect(await screen.findByRole("dialog", { name: "安装计划" })).toBeTruthy();
   });
 
+  it("retries an incomplete uninstall after its containers have gone", async () => {
+    let memos = app("memos", {
+      state: "failed",
+      total: 0,
+      running: 0,
+      job: job({ action: "uninstall", state: "failed", error: "镜像清理失败" }),
+    });
+    const posts = serve(
+      () => [memos],
+      () => {
+        const pending = job({ action: "uninstall" });
+        memos = { ...memos, state: "uninstalling", job: pending };
+        return pending;
+      },
+    );
+    const user = userEvent.setup();
+    render(<AppCenterPanel />);
+    await user.click(await screen.findByRole("button", { name: "Memos，卸载未完成" }));
+    const failed = screen.getByRole("region", { name: "卸载未完成" });
+    expect(within(failed).getByText("镜像清理失败")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "安装失败" })).toBeNull();
+    await user.click(within(failed).getByRole("button", { name: "重试卸载" }));
+    const confirm = screen.getByRole("dialog", { name: "确认卸载Memos" });
+    await user.click(within(confirm).getByRole("button", { name: "确认卸载" }));
+    expect(posts).toEqual(["/api/v1/apps/memos/uninstall"]);
+    expect(await screen.findByRole("region", { name: "卸载进度" })).toBeTruthy();
+  });
+
   // #169: Compose failed partway and the rollback did not finish either.
   it("shows the containers a failed install left as a failure, never as installed", async () => {
     const error =
@@ -462,7 +490,7 @@ describe("AppCenterPanel", () => {
     await user.click(more);
     await user.click(screen.getByRole("menuitem", { name: "卸载" }));
     const confirm = screen.getByRole("dialog", { name: "确认卸载Memos" });
-    expect(within(confirm).getByText("保留应用数据，重新安装后可继续使用")).toBeTruthy();
+    expect(within(confirm).getByText("保留应用数据与命名卷，重新安装后可继续使用")).toBeTruthy();
     await user.click(within(confirm).getByRole("button", { name: "确认卸载" }));
     expect(posts).toEqual(["/api/v1/apps/memos/uninstall"]);
     expect(await screen.findByRole("region", { name: "卸载进度" })).toBeTruthy();

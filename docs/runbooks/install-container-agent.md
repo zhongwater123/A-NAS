@@ -1,13 +1,17 @@
 # 安装 Docker 与容器代理
 
 状态：verified（适用于 ADR 0008 后的系统服务部署；2026-10-08 已在 Experimental NAS 验证，2026-10-10 在该机完成到官方源的迁移）
-更新时间：2026-10-10
+更新时间：2026-10-27
 
 ## 目的
 
 在 Experimental NAS 上从 Docker 官方 apt 源安装 Docker Engine 与 Compose 插件（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)），再安装 A-NAS 容器代理，使桌面“Docker”和“应用中心”以实时模式运行。产品服务只能访问容器代理的类型化 Unix socket，不能直接访问等同 root 权限的 `docker.sock`。
 
 ## 前提与停止条件
+
+应用系统盘保护见[应用中心规格](../specs/app-center.md#卸载)。带 #186 修复的容器代理为新建容器设置日志轮转；已有容器不会因更新代理或重启 Docker 自动改变日志配置。先备份需要保留的应用数据，逐个确认应用用途，再从应用中心卸载并重装；卸载会删除匿名卷，匿名卷中的内容不作为可恢复的应用数据保留，命名卷与应用数据目录保留。不要批量重装或执行全局 `docker system prune`。
+
+更新后在“设置 → 概览”核对系统盘占用，安装计划应在空间不足时拒绝。重装后以 `docker inspect --format '{{json .HostConfig.LogConfig}}' <已确认的应用容器>` 核对 `json-file`、`max-size=10m`、`max-file=3`。若显示“卸载未完成”，先检查任务输出和 Docker 状态，再重试卸载；不要删除代理的清理记录。历史上已孤立且无法归属应用的卷或镜像不自动清理。回退旧代理不会撤销已建容器的日志限制；不要在有未完成清理任务时回退。
 
 - 必须在主机名为 `a-nas-dev` 的 Debian 13 amd64 Experimental NAS 上以 root 执行；先按 [SSH 手册](bootstrap-experimental-nas-ssh.md)核对主机指纹。
 - `/opt/a-nas/current` 必须指向已验证的 release（本地控制台也从它启动，[issue #174](https://github.com/zhongwater123/A-NAS/issues/174)）；数据卷必须仍以 Btrfs 挂载在 `/srv/a-nas/data`。

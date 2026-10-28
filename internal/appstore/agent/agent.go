@@ -385,6 +385,7 @@ var errorCodes = []struct {
 	{appstore.ErrPortInUse, http.StatusConflict, "port_in_use"},
 	{appstore.ErrNameInUse, http.StatusConflict, "name_in_use"},
 	{appstore.ErrAddressPoolMissing, http.StatusConflict, "address_pool_missing"},
+	{appstore.ErrSystemSpace, http.StatusConflict, "system_storage_full"},
 	{appstore.ErrRuntimeOutdated, http.StatusConflict, "docker_runtime_outdated"},
 	{appstore.ErrUnavailable, http.StatusServiceUnavailable, "apps_unavailable"},
 }

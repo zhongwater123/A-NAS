@@ -614,6 +614,10 @@ function OverviewSection({
   const volume = volumes.items?.[0];
   const usage = volume ? volumeUsage(volume) : undefined;
   const health = healthPresentation(snapshot.system.health);
+  const systemStorage = snapshot.system.storage;
+  const systemUsedPercent = systemStorage
+    ? Math.round((1 - systemStorage.availableBytes / systemStorage.totalBytes) * 100)
+    : undefined;
   return (
     <>
       {header}
@@ -684,6 +688,17 @@ function OverviewSection({
         </button>
       </div>
       <HealthChecks snapshot={snapshot} onOpenStorage={onOpenStorage} />
+      <Group title="系统盘空间">
+        {systemStorage ? (
+          <>
+            <InfoRow label="已用" value={`${systemUsedPercent}%`} />
+            <InfoRow label="可用空间" value={formatBytes(systemStorage.availableBytes)} />
+            <InfoRow label="总容量" value={formatBytes(systemStorage.totalBytes)} />
+          </>
+        ) : (
+          <InfoRow label="空间占用" value="暂时无法读取" />
+        )}
+      </Group>
       <Group title="关于本机">
         <InfoRow label="产品版本" value={snapshot.productVersion} />
         <InfoRow
