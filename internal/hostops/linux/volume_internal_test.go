@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
-	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
 func TestConversionCommandConvertsOnlyWhatIsOutsideTheLayout(t *testing.T) {
@@ -23,24 +23,24 @@ func TestConversionCommandConvertsOnlyWhatIsOutsideTheLayout(t *testing.T) {
 	}
 	for _, test := range []struct {
 		name      string
-		layout    storage.Layout
+		layout    datavolume.Layout
 		data      usage
 		metadata  usage
 		operation hoststate.VolumeOperation
 		want      []string
 	}{
-		{"single disk joined by a mirror", storage.LayoutMirror, usage{single(9)}, usage{dup(1)}, hoststate.VolumeOperationNone,
+		{"single disk joined by a mirror", datavolume.LayoutMirror, usage{single(9)}, usage{dup(1)}, hoststate.VolumeOperationNone,
 			[]string{"balance", "start", "-dconvert=raid1,soft", "-mconvert=raid1,soft"}},
-		{"cancelled halfway", storage.LayoutMirror, usage{single(4), raid1(5)}, usage{raid1(1)}, hoststate.VolumeOperationNone,
+		{"cancelled halfway", datavolume.LayoutMirror, usage{single(4), raid1(5)}, usage{raid1(1)}, hoststate.VolumeOperationNone,
 			[]string{"balance", "start", "-dconvert=raid1,soft"}},
-		{"span keeps data single", storage.LayoutSpan, usage{single(9)}, usage{dup(1)}, hoststate.VolumeOperationNone,
+		{"span keeps data single", datavolume.LayoutSpan, usage{single(9)}, usage{dup(1)}, hoststate.VolumeOperationNone,
 			[]string{"balance", "start", "-mconvert=raid1,soft"}},
-		{"stripe", storage.LayoutStripe, usage{single(9)}, usage{raid1(1)}, hoststate.VolumeOperationNone,
+		{"stripe", datavolume.LayoutStripe, usage{single(9)}, usage{raid1(1)}, hoststate.VolumeOperationNone,
 			[]string{"balance", "start", "-dconvert=raid0,soft"}},
-		{"empty leftovers", storage.LayoutMirror, usage{single(0), raid1(9)}, usage{raid1(1)}, hoststate.VolumeOperationNone, nil},
-		{"already converting", storage.LayoutMirror, usage{single(9)}, usage{dup(1)}, hoststate.VolumeOperationBalance, nil},
-		{"another operation", storage.LayoutMirror, usage{single(9)}, nil, hoststate.VolumeOperationOther, nil},
-		{"paused at unmount", storage.LayoutMirror, usage{single(9)}, nil, hoststate.VolumeOperationBalancePaused, []string{"balance", "resume"}},
+		{"empty leftovers", datavolume.LayoutMirror, usage{single(0), raid1(9)}, usage{raid1(1)}, hoststate.VolumeOperationNone, nil},
+		{"already converting", datavolume.LayoutMirror, usage{single(9)}, usage{dup(1)}, hoststate.VolumeOperationBalance, nil},
+		{"another operation", datavolume.LayoutMirror, usage{single(9)}, nil, hoststate.VolumeOperationOther, nil},
+		{"paused at unmount", datavolume.LayoutMirror, usage{single(9)}, nil, hoststate.VolumeOperationBalancePaused, []string{"balance", "resume"}},
 	} {
 		if got := conversionCommand(test.layout, test.data, test.metadata, test.operation); !slices.Equal(got, test.want) {
 			t.Errorf("%s: command = %v, want %v", test.name, got, test.want)
@@ -56,7 +56,7 @@ func TestAPendingLayoutTakesEffectOnceTheVolumeHasTheDisks(t *testing.T) {
 	systemRoot := t.TempDir()
 	executor := NewExecutor(nil, nil, Options{SystemRoot: systemRoot, MountPoint: t.TempDir()})
 	if err := executor.writeMarker(volumeMarker{
-		FilesystemUUID: uuid, FormatVersion: 1, Pending: &pendingLayout{PlanID: "plan:add", Layout: storage.LayoutMirror, Devices: 2},
+		FilesystemUUID: uuid, FormatVersion: 1, Pending: &pendingLayout{PlanID: "plan:add", Layout: datavolume.LayoutMirror, Devices: 2},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -74,10 +74,10 @@ func TestAPendingLayoutTakesEffectOnceTheVolumeHasTheDisks(t *testing.T) {
 		t.Fatalf("marker with one of two devices = %+v, %v; want the layout still pending", marker, err)
 	}
 	join("sdb1")
-	if marker, err := executor.promotePendingLayout(); err != nil || marker.Layout != storage.LayoutMirror || marker.Pending != nil {
+	if marker, err := executor.promotePendingLayout(); err != nil || marker.Layout != datavolume.LayoutMirror || marker.Pending != nil {
 		t.Fatalf("marker with both devices = %+v, %v; want the mirror", marker, err)
 	}
-	if marker, err := executor.readMarker(); err != nil || marker.Layout != storage.LayoutMirror || marker.Pending != nil {
+	if marker, err := executor.readMarker(); err != nil || marker.Layout != datavolume.LayoutMirror || marker.Pending != nil {
 		t.Fatalf("stored marker = %+v, %v; want the mirror recorded", marker, err)
 	}
 }

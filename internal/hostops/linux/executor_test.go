@@ -4,20 +4,21 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
-	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
 func TestCreateVolumeResolvesStableIDAndWritesUUIDMountUnit(t *testing.T) {
 	host := newDiskHost(t, "disk:test-data")
 	executor := host.executor()
 
-	operation := host.finish(t, executor, startCreate(t, executor, "plan:test", storage.LayoutSingle, host.targets("disk:test-data")...))
-	if operation.State != storage.OperationSucceeded || operation.Volume == nil {
+	operation := host.finish(t, executor, startCreate(t, executor, "plan:test", datavolume.LayoutSingle, host.targets("disk:test-data")...))
+	if operation.State != datavolume.OperationSucceeded || operation.Volume == nil {
 		t.Fatalf("operation = %+v, want succeeded", operation)
 	}
 	if got, want := operation.Volume.FilesystemUUID, host.uuid(1); got != want {
@@ -47,9 +48,9 @@ func TestSetCredentialKeepsPasswordOutOfArgumentsAndAppliesHardenedSambaConfig(t
 	executor := linux.NewExecutor(nil, runner, linux.Options{
 		SystemRoot: systemRoot, MountPoint: mountPoint, SMBInterface: "enp3s0",
 	})
-	request := accounts.CredentialRequest{
+	request := accountid.CredentialRequest{
 		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-		Password: "alice password for testing", Role: accounts.RoleMember, UID: 20100, Enabled: true,
+		Password: "alice password for testing", Role: accountid.RoleMember, UID: 20100, Enabled: true,
 	}
 
 	if err := executor.SetCredential(context.Background(), request); err != nil {
@@ -85,6 +86,59 @@ func TestSetCredentialKeepsPasswordOutOfArgumentsAndAppliesHardenedSambaConfig(t
 	}
 }
 
+// Shared's options are the common ones with Agent空间 spliced into their veto
+// line, so a change to that line could silently drop the veto that keeps SMB
+// from renaming the Host Agent's managed directories (ADR 0024 decision 5).
+// The root integration test that proves the refusal does not run in CI.
+func TestSambaVetoesAgentSpaceOnlyInShared(t *testing.T) {
+	systemRoot := t.TempDir()
+	executor := linux.NewExecutor(nil, &recordingRunner{}, linux.Options{
+		SystemRoot: systemRoot, MountPoint: filepath.Join(t.TempDir(), "data"),
+	})
+	if err := executor.SetCredential(context.Background(), accountid.CredentialRequest{
+		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
+		Password: "alice password for testing", Role: accountid.RoleMember, UID: 20100, Enabled: true,
+	}); err != nil {
+		t.Fatalf("SetCredential() error = %v", err)
+	}
+	configuration, err := os.ReadFile(filepath.Join(systemRoot, "etc", "samba", "smb.conf"))
+	if err != nil {
+		t.Fatalf("read Samba configuration: %v", err)
+	}
+	vetoes := sambaVetoes(t, string(configuration))
+	for share, want := range map[string]bool{"homes": false, "Shared": true} {
+		if !slices.Contains(vetoes[share], ".a-nas-trash") {
+			t.Errorf("[%s] vetoes %q, want the trash directory hidden:\n%s", share, vetoes[share], configuration)
+		}
+		if got := slices.Contains(vetoes[share], "Agent空间"); got != want {
+			t.Errorf("[%s] vetoes %q, Agent空间 vetoed = %v, want %v:\n%s", share, vetoes[share], got, want, configuration)
+		}
+	}
+}
+
+// sambaVetoes returns the names in each share's veto files option.
+func sambaVetoes(t *testing.T, configuration string) map[string][]string {
+	t.Helper()
+	vetoes := map[string][]string{}
+	share := ""
+	for line := range strings.Lines(configuration) {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			share = strings.Trim(line, "[]")
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(key) != "veto files" {
+			continue
+		}
+		if _, set := vetoes[share]; set {
+			t.Fatalf("[%s] sets veto files twice; Samba keeps only the last", share)
+		}
+		vetoes[share] = strings.FieldsFunc(value, func(r rune) bool { return r == '/' || r == ' ' })
+	}
+	return vetoes
+}
+
 func TestSetCredentialRefusesPasswordsSmbpasswdWouldCut(t *testing.T) {
 	for name, password := range map[string]string{
 		"newline":  "short\nshort\nthen any text",
@@ -94,9 +148,9 @@ func TestSetCredentialRefusesPasswordsSmbpasswdWouldCut(t *testing.T) {
 	} {
 		runner := &recordingRunner{}
 		executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: t.TempDir(), MountPoint: filepath.Join(t.TempDir(), "data")})
-		err := executor.SetCredential(context.Background(), accounts.CredentialRequest{
+		err := executor.SetCredential(context.Background(), accountid.CredentialRequest{
 			UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-			Password: password, Role: accounts.RoleMember, UID: 20100, Enabled: true,
+			Password: password, Role: accountid.RoleMember, UID: 20100, Enabled: true,
 		})
 		if err == nil || len(runner.commands) != 0 {
 			t.Errorf("%s password: error = %v, commands = %#v; want refusal before any command", name, err, runner.commands)
@@ -108,9 +162,9 @@ func TestSetCredentialReportsUseraddFailureWithoutIncludingThePassword(t *testin
 	executor := linux.NewExecutor(nil, accountFailureRunner{}, linux.Options{
 		SystemRoot: t.TempDir(), MountPoint: filepath.Join(t.TempDir(), "data"), SMBInterface: "enp3s0",
 	})
-	request := accounts.CredentialRequest{
+	request := accountid.CredentialRequest{
 		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-		Password: "alice password for testing", Role: accounts.RoleAdmin, UID: 20100, Enabled: true,
+		Password: "alice password for testing", Role: accountid.RoleAdmin, UID: 20100, Enabled: true,
 	}
 
 	err := executor.SetCredential(context.Background(), request)

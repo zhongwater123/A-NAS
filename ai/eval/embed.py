@@ -86,7 +86,7 @@ class Cache:
         self.vectors = {}
         if os.path.exists(path):
             with np.load(path) as data:
-                self.vectors = dict(zip(data["keys"].tolist(), data["vectors"]))
+                self.vectors = dict(zip(data["keys"].tolist(), data["vectors"], strict=True))
 
     def save(self):
         keys = sorted(self.vectors)

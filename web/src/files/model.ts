@@ -1,7 +1,7 @@
-import { errorText } from "../errorMessages";
-import { FileEntry, Space, Volume } from "../api";
-import { fileTypeLabel, isPDFPreviewable, isPreviewableImage } from "../fileTypes";
-import { FileOrder, FileSort, isPinned } from "../useFileOrder";
+import { errorText } from "../api/errorMessages";
+import type { FileEntry, Space, Volume } from "../api.generated";
+import { fileTypeLabel, isPDFPreviewable, isPreviewableImage } from "../lib/fileTypes";
+import { FileOrder, FileSort, isPinned } from "./useFileOrder";
 
 export type FileView = "list" | "icons";
 export type FileResource = "photos" | "music" | "movies";

@@ -64,7 +64,7 @@ type ServiceRuntime struct {
 // before the current rules and keep running as they were until reinstalled.
 const (
 	RuntimeLabel  = "io.a-nas.runtime"
-	RuntimePolicy = "1"
+	RuntimePolicy = "2"
 )
 
 // noNewPrivileges keeps setuid binaries and file capabilities from raising

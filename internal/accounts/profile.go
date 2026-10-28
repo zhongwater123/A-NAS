@@ -51,16 +51,6 @@ func scanUser(row rowScanner) (User, error) {
 	return user, nil
 }
 
-// Profile is how one account appears to everyone signed in: the name to show
-// and the picture. It leaves out role and status, which only administrators
-// manage.
-type Profile struct {
-	ID            string `json:"id"`
-	Username      string `json:"username"`
-	Nickname      string `json:"nickname,omitempty"`
-	AvatarVersion string `json:"avatarVersion,omitempty"`
-}
-
 // Avatar is a stored avatar picture.
 type Avatar struct {
 	Version     string

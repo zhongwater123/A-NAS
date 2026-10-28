@@ -253,6 +253,8 @@ schemas:
         $ref: "#/schemas/Health"
       healthFindings:
         $ref: "#/schemas/HealthFindings"
+      storage:
+        $ref: "#/schemas/SystemStorage"
       productVersion:
         type: string
         minLength: 1
@@ -289,6 +291,22 @@ schemas:
         $ref: "#/schemas/Health"
       healthFindings:
         $ref: "#/schemas/HealthFindings"
+      storage:
+        $ref: "#/schemas/SystemStorage"
+  SystemStorage:
+    type: object
+    description: "Observed capacity and available space on the filesystem at /var/lib, where system state is stored; absent when unavailable."
+    additionalProperties: false
+    required: [totalBytes, availableBytes]
+    properties:
+      totalBytes:
+        type: integer
+        format: int64
+        minimum: 1
+      availableBytes:
+        type: integer
+        format: int64
+        minimum: 0
   HealthFindings:
     type: array
     description: "Why the system is not plainly healthy, most severe first; empty when healthy. The system's health is the severity of the first finding (docs/specs/system-health.md)."

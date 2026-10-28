@@ -68,7 +68,7 @@
 
 ## 验收证据
 
-- React 定时、输入消费、每次进入只随机选择一条并循环、失败补选与远程模式测试见 [`LocalConsoleScreenSaver.test.tsx`](../../web/src/LocalConsoleScreenSaver.test.tsx)。
+- React 定时、输入消费、每次进入只随机选择一条并循环、失败补选与远程模式测试见 [`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)。
 - 清单筛选、匿名 URL、兼容路由与视频 Range 测试见 [`handler_test.go`](../../internal/webui/handler_test.go)。
 - 视频通道见[系统测试](../../scripts/system-test.sh)，全程使用真实的暂存脚本、媒体安装脚本和系统安装器：只上传缺少的视频、复用旧 release 暂存过的视频、升级保留当前池、共有视频只存一份、重复安装不产生变化、不需要暂存区的媒体回滚、拒绝哈希不符或 ID 不符的池且不留改动，以及从旧安装器首次升级时导入旧池。链接切换即时生效见 [`handler_test.go`](../../internal/webui/handler_test.go)。
 - 更换视频、媒体回滚和直连屏幕验收见[本地控制台运行手册](../runbooks/operate-local-kiosk.md)。
@@ -78,6 +78,6 @@
 - 规格：[个性化](personalization.md)
 - 架构：[架构总览](../architecture/OVERVIEW.md)
 - ADR：[本地控制台](../adr/0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)、[屏保视频是系统盘上的长期媒体](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
-- 代码：[`LocalConsoleScreenSaver.tsx`](../../web/src/LocalConsoleScreenSaver.tsx)、[`handler.go`](../../internal/webui/handler.go)、[`install-screensavers.sh`](../../scripts/install-screensavers.sh)、[`remote-stage-screensavers.sh`](../../scripts/remote-stage-screensavers.sh)、[`deploy-screensavers.ps1`](../../scripts/deploy-screensavers.ps1)、[`install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)
-- 测试：[`App.test.tsx`](../../web/src/App.test.tsx)、[`LocalConsoleScreenSaver.test.tsx`](../../web/src/LocalConsoleScreenSaver.test.tsx)、[`handler_test.go`](../../internal/webui/handler_test.go)、[`system-test.sh`](../../scripts/system-test.sh)
+- 代码：[`LocalConsoleScreenSaver.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.tsx)、[`handler.go`](../../internal/webui/handler.go)、[`install-screensavers.sh`](../../scripts/install-screensavers.sh)、[`remote-stage-screensavers.sh`](../../scripts/remote-stage-screensavers.sh)、[`deploy-screensavers.ps1`](../../scripts/deploy-screensavers.ps1)、[`install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)
+- 测试：[`App.test.tsx`](../../web/src/App.test.tsx)、[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)、[`handler_test.go`](../../internal/webui/handler_test.go)、[`system-test.sh`](../../scripts/system-test.sh)
 - Issue：[#49 不带屏保视频的升级会让本地控制台屏保失效](https://github.com/zhongwater123/A-NAS/issues/49)

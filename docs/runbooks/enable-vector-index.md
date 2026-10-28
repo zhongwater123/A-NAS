@@ -1,7 +1,7 @@
 # 启用向量索引
 
-状态：draft（系统测试已验证；Experimental NAS 待执行）
-更新时间：2026-10-26
+状态：draft（系统测试已验证；2026-10-28 在 Experimental NAS 完成第 1–4 步与第 6 步，影子比对的数据待收集）
+更新时间：2026-10-28
 
 ## 目的
 
@@ -52,9 +52,10 @@
    - 命令：`journalctl -u anas-photos -b -o cat | grep 'photo vector index'`。
    - 预期，依次出现：
      - `photo vector index created`，其中 `queued` 等于 Catalog 中的向量数；
-     - 若干条 `photo vector index synced`；
-     - 一条 `photo vector index reconciled`，`queued=0`。
-   - 完成标准：出现 `reconciled`，且 `queued=0`。
+     - 若干条 `photo vector index synced`，最后一条 `queued=0`。
+   - 完成标准：各条 `synced` 的 `upserted` 与 `deleted` 加起来等于 `created` 的 `queued`，最后一条 `queued=0`。
+   - 这时还没有 `photo vector index reconciled`：建出集合的那次对账不再比较。下一次对账在一天后，或相册服务重启后的第一次空闲时，日志应为 `queued=0`。
+   - 2026-10-28 实机：`created` 排队 733，三条 `synced` 共写入 730、删除 3，最后 `queued=0`。
 5. 收集影子比对。
    - 操作：用桌面相册搜索几条中文查询，例如“海边的猫”“车库里的电动车”。
    - 预期：符合条件的查询之后，日志出现一行 `photo vector index shadow search`，带 `overlap10`、`overlap100`、`overlap500`、`index_ms`、`exact_ms`、`warm`。日志里没有查询文本。

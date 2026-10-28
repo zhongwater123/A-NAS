@@ -1,7 +1,7 @@
 # 在实验 NAS 上试用 AI 助手（云端模型）
 
 状态：draft
-更新时间：2026-10-16
+更新时间：2026-10-27
 
 ## 目的
 
@@ -20,7 +20,7 @@
 - 服务影响：安装、更新与移除各重启一次 Host Agent、相册服务与产品服务，几秒内进行中的文件操作、终端、上传与相册整理会断开后重连。
 - 内存：每个实例上限 2 GiB，没有连接约 45 秒后退出；NAS 共 7.7 GB，多人同时使用时留意（#116 记录实测）。
 - 用 spike 脚本代替 Host Agent 的限制：
-  - 安装按路径在成员可写的 Shared 中建立 `Agent空间` 并设置属主与 ACL（Host Agent 会以不跟随链接的方式操作）。因此安装只在全新状态运行，拒绝覆盖已有内容；安装进行的几秒内，若有成员恰好用符号链接替换这些文件夹，仍可能让 root 改到别处。只在信任现有成员时执行。
+  - `Agent空间` 及账号目录由 Host Agent 管理；先更新并重启 Host Agent，确认这些目录归 root 所有且不是链接，再安装新版试用包。安装脚本只检查并复用它们，不按路径重写其 ACL；它们已存在不算旧试用残留，移除试用也保留。助手自身目录仍由 spike 按路径创建，因此只在信任现有成员、没有并发目录改动的全新试用状态执行。Shared 中名为 `Agent空间` 的条目不通过 SMB 访问，发布内容使用 Web 或助手读取。
   - 实例套接字、模型网关与 `/run` 下的挂载点在重启后自动恢复（已启用的单元与 tmpfiles）。Host Agent 重启后，已在运行的实例里绑定的执行方套接字失效，提交更改会失败，直到实例空闲退出后重开。
   - 相册接给助手的方式（ADR 0024 决定 6）：相册服务多开一个只给助手的套接字（`anas-photos-assistant.socket`，由 systemd 持有，只绑定进每个助手的沙箱），按连接者的 UID 认出成员，只读，只看本人私有图库与共享图库，拿不到原图与缩略图；Host Agent 为它提供按 UID 查成员（`ANAS_PHOTO_ASSISTANT_LOOKUP=1`）。窗口里的照片由成员本人的会话加载。
   - 这些设置与会话闸门一起写成 systemd drop-in（`/etc/systemd/system/<服务>.service.d/assistant-trial.conf`，由 [`product-settings.sh`](../../ai/assistant-spike/product-settings.sh) 写入）：正式部署会重写 `/etc/a-nas/*.env`，写在那里的会话闸门每次部署后都要重新加；drop-in 不受部署影响。
@@ -66,6 +66,8 @@
    - 预期：`ready after N s` 与实例内存；第一次启动要把 Hermes 自带的技能写进主目录，最长约一分钟。之后 `photo libraries: 200 [...]` 列出本人的私有图库（`private:`）与共享图库（`shared:`），`photos for "钓鱼"` 列出这个账号搜到的照片名称，与在相册里搜索的结果一致。
 
 ## 更新
+
+包含 [#178 修复](../investigations/2026-10-27-assistant-cron-waker-member-isolation.md) 的版本，先更新 Host Agent，再更新助手 bundle。安装器和定时任务唤醒器现在通过 Host Agent 的私有 socket 查询活动账号；旧 Host Agent 不提供该查询，检查失败时不会启用或唤醒成员助手。停用账号会停止并 mask 其助手、API、定时任务与复盘单元，更新保留这些 mask；不要为排查连接故障手动 unmask 停用账号。回滚到缺少此修复的版本会失去这项保证。
 
 新的 bundle 暂存后，校验并解包（第 2 步），然后：
 

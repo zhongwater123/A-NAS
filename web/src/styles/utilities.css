@@ -1,0 +1,48 @@
+/* The few classes every window uses before they become ui/ components
+   (#268): the primary button, the loading spinner, a spinning icon and
+   text only screen readers announce. In the ui layer, so a window's own
+   rule wins over them. */
+@layer ui {
+  .sr-only {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+  }
+  .spinning {
+    animation: spin 1s linear infinite;
+  }
+
+  .loader.small {
+    width: 13px;
+    height: 13px;
+    border-width: 2px;
+  }
+  .loader {
+    width: 28px;
+    height: 28px;
+    border: 2px solid #d9dee5;
+    border-top-color: #1c9f94;
+    border-radius: 50%;
+    animation: spin 0.85s linear infinite;
+  }
+  .primary {
+    padding: 8px 14px;
+    border: 0;
+    border-radius: 9px;
+    color: white;
+    background: #2679df;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}

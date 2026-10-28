@@ -458,6 +458,8 @@ func WriteError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err
 		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "file space access is forbidden")
 	case errors.Is(err, files.ErrNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "file resource was not found")
+	case errors.Is(err, files.ErrSourceChanged):
+		httpjson.WriteError(w, http.StatusConflict, "source_changed", "source changed during copy; retry after writes finish")
 	case errors.Is(err, files.ErrConflict):
 		httpjson.WriteError(w, http.StatusConflict, "name_conflict", "a file with this name already exists")
 	case errors.Is(err, files.ErrNameTooLong), errors.Is(err, syscall.ENAMETOOLONG):

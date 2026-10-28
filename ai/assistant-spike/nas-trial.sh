@@ -54,7 +54,9 @@ accounts() {
 # leftovers: what install makes, if any of it is there.
 leftovers() {
   local path
-  for path in "$data/assistant" "$data/spaces/shared/Agent空间" /etc/hermes /etc/a-nas-assistant /spike "$trial" \
+  # Agent空间 belongs to the Host Agent's ordinary space layout, including
+  # before the assistant is enabled; its presence is not a stale trial.
+  for path in "$data/assistant" /etc/hermes /etc/a-nas-assistant /spike "$trial" \
     "$runtimes/spike" /opt/a-nas/assistant-skills /etc/systemd/system/anas-assistant@.service; do
     if [[ -e "$path" || -L "$path" ]]; then printf '%s\n' "$path"; fi
   done
@@ -239,13 +241,7 @@ remove_trial() {
     if bash "$here/assistant-layout.sh" remove "$data" "$account"; then say "removed $account's assistant"
     else say "could not remove $account's assistant"; fi
   done
-  # Agent空间 keeps whatever members published; only empty folders go.
-  if [[ -d "$data/spaces/shared/Agent空间" && ! -L "$data/spaces/shared/Agent空间" ]]; then
-    for path in "$data/spaces/shared/Agent空间"/*/; do
-      if [[ -d "$path" ]]; then rmdir "$path" 2>/dev/null || say "kept $path (not empty)"; fi
-    done
-    rmdir "$data/spaces/shared/Agent空间" 2>/dev/null || say "kept $data/spaces/shared/Agent空间 (not empty)"
-  fi
+  # Agent空间 remains managed by the Host Agent, even when no trial is active.
   if [[ -d "$data/assistant" && ! -L "$data/assistant" ]]; then
     drop "$data/assistant/.changes"
     rmdir "$data/assistant" 2>/dev/null || say "kept $data/assistant: $(find "$data/assistant" -mindepth 1 -maxdepth 1 -printf '%f ')"

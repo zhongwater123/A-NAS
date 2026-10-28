@@ -1,7 +1,8 @@
 // Package httpapi composes the product API: the route table and the guard
-// that enforces each route's posture (routes.go), signing in, accounts,
-// storage, the terminal and the host state (this file). Each domain's own
-// routes live in its internal/<domain>api package.
+// that enforces each route's posture (routes.go), setting up the device,
+// signing in and sessions (product.go), the terminal and the host state
+// (this file). Each domain's own routes live in its internal/<domain>api
+// package.
 package httpapi
 
 import (
@@ -94,6 +95,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			UptimeSeconds:  state.System.UptimeSeconds,
 			Health:         assessed.health,
 			HealthFindings: assessed.findings,
+			Storage:        mapSystemStorage(state.System.Storage),
 			ProductVersion: h.productVersion,
 			ObservedAt:     state.ObservedAt.UTC().Format(time.RFC3339),
 		})
@@ -174,6 +176,7 @@ type systemResponse struct {
 	HealthFindings  []healthFindingResponse `json:"healthFindings"`
 	ProductVersion  string                  `json:"productVersion"`
 	ObservedAt      string                  `json:"observedAt"`
+	Storage         *systemStorageResponse  `json:"storage,omitempty"`
 }
 
 type systemStateResponse struct {
@@ -184,6 +187,19 @@ type systemStateResponse struct {
 	UptimeSeconds   uint64                  `json:"uptimeSeconds"`
 	Health          hoststate.Health        `json:"health"`
 	HealthFindings  []healthFindingResponse `json:"healthFindings"`
+	Storage         *systemStorageResponse  `json:"storage,omitempty"`
+}
+
+type systemStorageResponse struct {
+	TotalBytes     uint64 `json:"totalBytes"`
+	AvailableBytes uint64 `json:"availableBytes"`
+}
+
+func mapSystemStorage(usage *hoststate.StorageUsage) *systemStorageResponse {
+	if usage == nil {
+		return nil
+	}
+	return &systemStorageResponse{TotalBytes: usage.TotalBytes, AvailableBytes: usage.AvailableBytes}
 }
 
 // healthFindingResponse is one reason the system is not plainly healthy.
@@ -259,6 +275,7 @@ func mapSystem(system hoststate.System, assessed systemHealth) systemStateRespon
 		UptimeSeconds:  system.UptimeSeconds,
 		Health:         assessed.health,
 		HealthFindings: assessed.findings,
+		Storage:        mapSystemStorage(system.Storage),
 	}
 }
 

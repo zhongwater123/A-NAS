@@ -1,7 +1,7 @@
 # The root of the product API contract. Every path and component lives in a
 # file per domain under paths/ and components/, and is named here once.
 # `make api` bundles them into openapi.bundle.yaml; how to change the
-# contract: docs/development/LOCAL_ENVIRONMENT.md#接口契约.
+# contract: docs/development/api-contract.md#接口契约.
 openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:

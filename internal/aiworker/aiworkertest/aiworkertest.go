@@ -5,7 +5,6 @@ package aiworkertest
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/json"
 	"io"
 	"math"
 	"net"
@@ -13,9 +12,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/zhongwater123/A-NAS/internal/aiworker"
+	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 )
 
 // Handler answers one request; the descriptor is the image sent with it, if
@@ -53,32 +51,17 @@ func Serve(t testing.TB, handle Handler) string {
 
 func serveOne(conn *net.UnixConn, handle Handler) {
 	defer conn.Close()
-	buffer, control := make([]byte, aiworker.MaxFrame+4), make([]byte, unix.CmsgSpace(4))
-	n, controlLength, _, _, err := conn.ReadMsgUnix(buffer, control)
-	if err != nil || n < 4 {
-		return
-	}
-	var file *os.File
-	if messages, err := unix.ParseSocketControlMessage(control[:controlLength]); err == nil && len(messages) == 1 {
-		if fds, err := unix.ParseUnixRights(&messages[0]); err == nil && len(fds) == 1 {
-			file = os.NewFile(uintptr(fds[0]), "image")
-			defer func() { _ = file.Close() }()
-		}
-	}
-	length := binary.BigEndian.Uint32(buffer)
-	if int(length) > n-4 {
-		return
-	}
 	var request aiworker.Request
-	if err := json.Unmarshal(buffer[4:4+length], &request); err != nil {
+	file, err := unixmsg.Read(conn, &request, aiworker.MaxFrame)
+	if err != nil {
 		return
 	}
+	defer unixmsg.CloseFile(file)
 	response := handle(request, file)
 	if response == nil {
 		return
 	}
-	payload, _ := json.Marshal(response)
-	_, _ = conn.Write(append(binary.BigEndian.AppendUint32(nil, uint32(len(payload))), payload...))
+	_ = unixmsg.Write(conn, response, nil, aiworker.MaxFrame)
 }
 
 // Deterministic is a Worker whose vectors come from the image bytes or the

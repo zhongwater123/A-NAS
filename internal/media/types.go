@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 )
 
 var (
@@ -310,9 +311,7 @@ type Playback struct {
 }
 
 // Capabilities are what the browser says it can decode.
-type Capabilities struct {
-	HEVC, AV1, VP9, AC3, EAC3, Matroska, WebM bool
-}
+type Capabilities = mediaplay.Caps
 
 // MediaInfo is what FFmpeg reads from a file.
 type MediaInfo struct {

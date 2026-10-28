@@ -54,7 +54,7 @@ test -x /usr/local/lib/a-nas/anas-container-agent && echo present || echo missin
 
 运行手册现把 `docker-cli` 列为显式依赖。使用 `--no-install-recommends` 的所有主机安装步骤都应在目标发行版上核对实际二进制归属，不能只依据上游软件包名称推断客户端随守护进程安装。
 
-补装 CLI 后的第一次续接成功启动 Container Agent、Host Agent、API 与 Kiosk；API 明确记录 `version=c902acded999` 和 `containers=true`，并稳定运行约 32 秒。续接脚本随后把不存在的 `/screensaver.mp4` 当作屏保路由，连续收到 404 后误判整体 HTTP 健康失败并自动回滚。事故当时产品和测试共同定义的真实路由是 `/local-console/screensaver.mp4`（`internal/webui/handler.go` 与 `web/src/LocalConsoleScreenSaver.tsx`）。最终切换改为逐项打印 `/healthz`、`/` 和真实屏保路由的状态，避免复合断言隐藏具体失败项；后续视频池探针改为先读清单再请求清单内 URL。
+补装 CLI 后的第一次续接成功启动 Container Agent、Host Agent、API 与 Kiosk；API 明确记录 `version=c902acded999` 和 `containers=true`，并稳定运行约 32 秒。续接脚本随后把不存在的 `/screensaver.mp4` 当作屏保路由，连续收到 404 后误判整体 HTTP 健康失败并自动回滚。事故当时产品和测试共同定义的真实路由是 `/local-console/screensaver.mp4`（`internal/webui/handler.go` 与 `web/src/desktop/LocalConsoleScreenSaver.tsx`）。最终切换改为逐项打印 `/healthz`、`/` 和真实屏保路由的状态，避免复合断言隐藏具体失败项；后续视频池探针改为先读清单再请求清单内 URL。
 
 验证脚本属于产品契约的调用者；路由、环境键或 socket 路径不能凭记忆重复书写。优先复用规格/测试中的同一常量；无法直接复用时，运行手册必须链接定义和回归测试，并让每个探针独立输出结果。
 

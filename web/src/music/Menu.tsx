@@ -16,6 +16,7 @@ import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { type MenuTarget, useMusic } from "./context";
 import { artistKey, artistsOf } from "./library";
+import styles from "./music.module.css";
 
 export interface MenuState {
   x: number;
@@ -82,7 +83,7 @@ export function TrackMenu({ menu, onClose, onRemoveFromPlaylist, onInfo }: Props
     onClose();
   };
   const item = (icon: ReactNode, label: string, run: () => void, danger = false) => (
-    <button type="button" role="menuitem" className={danger ? "danger" : ""} onClick={act(run)}>
+    <button type="button" role="menuitem" className={danger ? styles.danger : ""} onClick={act(run)}>
       {icon}
       <span>{label}</span>
     </button>
@@ -91,26 +92,26 @@ export function TrackMenu({ menu, onClose, onRemoveFromPlaylist, onInfo }: Props
   return (
     <div
       ref={ref}
-      className="mu-menu"
+      className={styles.muMenu}
       role="menu"
       style={{ left: position.left, top: position.top }}
       onContextMenu={(event) => event.preventDefault()}
     >
-      {ids.length > 1 && <p className="mu-menu-title">已选 {ids.length} 首歌曲</p>}
+      {ids.length > 1 && <p className={styles.muMenuTitle}>已选 {ids.length} 首歌曲</p>}
       {item(<Play />, "播放", () => music.player.play(ids, 0))}
       {item(<ListStart />, "下一首播放", () => music.player.playNext(ids))}
       {item(<ListEnd />, "添加到播放队列", () => music.player.enqueue(ids))}
-      <div className="mu-menu-sub" onPointerEnter={openSubmenu} onPointerLeave={leaveSubmenu}>
+      <div className={styles.muMenuSub} onPointerEnter={openSubmenu} onPointerLeave={leaveSubmenu}>
         <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={submenu} onClick={openSubmenu}>
           <ListPlus />
           <span>添加到歌单</span>
-          <ChevronRight className="mu-menu-chevron" />
+          <ChevronRight className={styles.muMenuChevron} />
         </button>
         {submenu && (
-          <div className={`mu-menu mu-submenu${position.flip ? " flip" : ""}`} role="menu">
+          <div className={`${styles.muMenu} ${styles.muSubmenu}${position.flip ? ` ${styles.flip}` : ""}`} role="menu">
             {item(<Plus />, "新建歌单…", () => music.addToPlaylist(undefined, ids))}
             {music.playlists.length > 0 && <hr />}
-            <div className="mu-submenu-list">
+            <div className={styles.muSubmenuList}>
               {music.playlists.map((list) => (
                 <button
                   key={list.id}

@@ -3,163 +3,83 @@ package media
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 )
 
 const (
-	ModeDirect      = "direct"
-	ModeRemux       = "remux"
-	ModeTranscode   = "transcode"
+	ModeDirect      = mediaplay.Direct
+	ModeRemux       = mediaplay.Remux
+	ModeTranscode   = mediaplay.Transcode
 	QualityOriginal = "original"
 )
 
-type quality struct {
-	name    string
-	height  int
-	bitrate int
-}
-
-// qualities are the transcoding choices offered under the original.
-var qualities = []quality{{"1080p", 1080, 8000}, {"720p", 720, 4000}, {"480p", 480, 1500}}
-
-func qualityByName(name string) (quality, bool) {
-	for _, candidate := range qualities {
-		if candidate.name == name {
-			return candidate, true
-		}
-	}
-	return quality{}, false
-}
-
-// decision is how one video plays.
-type decision struct {
-	mode    string
-	reason  string
-	options StreamOptions
-}
-
-var browserAudio = map[string]bool{"aac": true, "mp3": true, "opus": true, "vorbis": true, "flac": true}
-
-func audioPlayable(codec string, caps Capabilities) bool {
-	return browserAudio[codec] || codec == "ac3" && caps.AC3 || codec == "eac3" && caps.EAC3
-}
-
-// videoPlayable reports whether the browser decodes the video stream. Chrome
-// does not decode 10-bit H.264.
-func videoPlayable(video *VideoStream, caps Capabilities) bool {
-	if video == nil {
-		return true
-	}
-	switch video.Codec {
-	case "h264":
-		return !strings.Contains(video.PixelFormat, "10")
-	case "hevc":
-		return caps.HEVC
-	case "av1":
-		return caps.AV1
-	case "vp9":
-		return caps.VP9 || caps.WebM
-	case "vp8":
-		return caps.WebM
-	}
-	return false
-}
-
-// decide picks the cheapest way to play: the original file, the video
-// copied with the audio converted, or a full transcode.
-func decide(info MediaInfo, fileName string, caps Capabilities, audio int, chosen string) decision {
-	options := StreamOptions{AudioTrack: -1}
-	if len(info.Audio) > 0 {
-		options.AudioTrack = defaultAudio(info.Audio)
-		if audio >= 0 && audio < len(info.Audio) {
-			options.AudioTrack = audio
-		}
-	}
-	target, lower := qualityByName(chosen)
-	if lower && info.Video != nil && info.Video.Height > 0 && info.Video.Height <= target.height {
-		lower = false
-	}
-	var selected *AudioStream
-	if options.AudioTrack >= 0 {
-		selected = &info.Audio[options.AudioTrack]
-	}
-	videoOK := videoPlayable(info.Video, caps)
-	audioOK := selected == nil || audioPlayable(selected.Codec, caps)
-	if !lower && videoOK && audioOK && options.AudioTrack == defaultAudio(info.Audio) && containerPlayable(info, fileName, caps) {
-		return decision{mode: ModeDirect, options: options}
-	}
-	options.CopyAudio = selected != nil && (selected.Codec == "aac" || selected.Codec == "mp3")
-	// Fragmented MP4 carries H.264 and, where the browser decodes it, HEVC.
-	copyable := info.Video != nil && (info.Video.Codec == "h264" && videoOK || info.Video.Codec == "hevc" && caps.HEVC)
-	if !lower && copyable {
-		options.CopyVideo, options.HEVC = true, info.Video.Codec == "hevc"
-		reason := "浏览器不支持此封装格式，正在转换封装"
-		if !audioOK {
-			reason = "浏览器无法播放 " + codecLabel(selected.Codec) + " 音频，正在转换音频"
-		} else if options.AudioTrack != defaultAudio(info.Audio) {
-			reason = "切换音轨需要转换封装"
-		}
-		return decision{mode: ModeRemux, reason: reason, options: options}
-	}
-	reason := "浏览器无法解码此视频，正在实时转码"
-	if lower {
-		options.Height, options.MaxBitrate = target.height, target.bitrate
-		reason = "已切换到 " + target.name
-	} else if info.Video != nil && info.Video.Height > 2160 {
-		options.Height = 2160
-	}
-	return decision{mode: ModeTranscode, reason: reason, options: options}
-}
-
-func defaultAudio(streams []AudioStream) int {
-	if len(streams) == 0 {
-		return -1
-	}
-	for position, stream := range streams {
-		if stream.Default {
-			return position
-		}
-	}
-	return 0
-}
-
-// containerPlayable: browsers open MP4 and WebM; Chromium also opens
-// Matroska when the codecs inside are ones it decodes.
-func containerPlayable(info MediaInfo, fileName string, caps Capabilities) bool {
-	format := info.Container
+// playSource describes a video for deciding how it plays, which the media
+// center does as the photo library does (internal/mediaplay): by what FFmpeg
+// read and by the file's name.
+func playSource(info MediaInfo, fileName string) mediaplay.Source {
 	extension := strings.ToLower(path.Ext(fileName))
-	switch {
-	case strings.Contains(format, "mp4") || strings.Contains(format, "mov"):
-		return extension != ".3gp" || info.Video == nil || info.Video.Codec == "h264"
-	case strings.Contains(format, "matroska"):
-		webm := info.Video == nil || info.Video.Codec == "vp8" || info.Video.Codec == "vp9" || info.Video.Codec == "av1"
-		for _, audio := range info.Audio {
-			webm = webm && (audio.Codec == "opus" || audio.Codec == "vorbis")
-		}
-		if webm {
-			return caps.WebM
-		}
-		return caps.Matroska
+	source := mediaplay.Source{Container: info.Container, ThreeGPP: extension == ".3gp" || extension == ".3g2"}
+	if info.Video != nil {
+		source.Video = &mediaplay.Video{Codec: info.Video.Codec, PixelFormat: info.Video.PixelFormat, Height: info.Video.Height}
 	}
-	return false
+	for _, audio := range info.Audio {
+		source.Audio = append(source.Audio, mediaplay.Audio{Codec: audio.Codec, Default: audio.Default})
+	}
+	return source
+}
+
+// playChoice is the viewer's audio stream, by position or -1 for the
+// default, and quality, by name.
+func playChoice(audio int, quality string) mediaplay.Choice {
+	lower, _ := mediaplay.QualityNamed(quality)
+	choice := mediaplay.Choice{Lower: lower, Ceiling: originalCeiling}
+	if audio >= 0 {
+		choice.AudioTrack = &audio
+	}
+	return choice
+}
+
+// originalCeiling limits converting the original: it keeps its size up to
+// 2160 lines, without a bitrate cap.
+var originalCeiling = mediaplay.Quality{Name: QualityOriginal, Height: 2160}
+
+// reason tells the viewer why the original does not play directly.
+func reason(decision mediaplay.Decision, source mediaplay.Source, choice mediaplay.Choice) string {
+	switch decision.Why {
+	case mediaplay.Container:
+		return "浏览器不支持此封装格式，正在转换封装"
+	case mediaplay.Sound:
+		if label := codecLabel(source.Audio[decision.Stream.AudioTrack].Codec); label != "" {
+			return "浏览器无法播放 " + label + " 音频，正在转换音频"
+		}
+		return "浏览器无法播放此音频，正在转换音频"
+	case mediaplay.OtherTrack:
+		return "切换音轨需要转换封装"
+	case mediaplay.Picture:
+		return "浏览器无法解码此视频，正在实时转码"
+	case mediaplay.Lowered:
+		return "已切换到 " + choice.Lower.Name
+	}
+	return ""
 }
 
 func availableQualities(info MediaInfo) []string {
 	names := []string{QualityOriginal}
-	for _, candidate := range qualities {
-		if info.Video == nil || info.Video.Height == 0 || info.Video.Height > candidate.height {
-			names = append(names, candidate.name)
+	for _, candidate := range mediaplay.Qualities() {
+		if info.Video == nil || info.Video.Height == 0 || info.Video.Height > candidate.Height {
+			names = append(names, candidate.Name)
 		}
 	}
 	return names
@@ -175,7 +95,7 @@ func (s *Service) Playback(ctx context.Context, actor accounts.User, videoID str
 	if chosen == "" {
 		chosen = QualityOriginal
 	}
-	if _, ok := qualityByName(chosen); !ok && chosen != QualityOriginal {
+	if _, ok := mediaplay.QualityNamed(chosen); !ok && chosen != QualityOriginal {
 		return Playback{}, ErrInvalid
 	}
 	info, err := s.mediaInfo(ctx, videoID)
@@ -188,34 +108,13 @@ func (s *Service) Playback(ctx context.Context, actor accounts.User, videoID str
 		playback.Quality, playback.Qualities = QualityOriginal, []string{QualityOriginal}
 		return playback, nil
 	}
-	choice := decide(info, video.FileName, caps, audio, chosen)
-	playback.Mode, playback.Reason, playback.Audio = choice.mode, choice.reason, choice.options.AudioTrack
-	if choice.mode != ModeDirect {
-		playback.Mime = streamMime(info, choice.options)
+	source, choice := playSource(info, video.FileName), playChoice(audio, chosen)
+	decision := mediaplay.Decide(source, caps, choice)
+	playback.Mode, playback.Reason, playback.Audio = decision.Mode, reason(decision, source, choice), decision.Stream.AudioTrack
+	if decision.Mode != ModeDirect {
+		playback.Mime = mediaplay.StreamMime(source, decision.Stream)
 	}
 	return playback, nil
-}
-
-// streamMime is the type of the fragmented MP4 a stream with these options
-// produces. Browsers take each codec's profile and level from the stream
-// itself, so the codec strings only name the codec.
-func streamMime(info MediaInfo, options StreamOptions) string {
-	var codecs []string
-	switch {
-	case info.Video == nil:
-	case options.CopyVideo && options.HEVC:
-		codecs = append(codecs, "hvc1.1.6.L153.B0")
-	default:
-		codecs = append(codecs, "avc1.640033")
-	}
-	if options.AudioTrack >= 0 && options.AudioTrack < len(info.Audio) {
-		if options.CopyAudio && info.Audio[options.AudioTrack].Codec == "mp3" {
-			codecs = append(codecs, "mp4a.69")
-		} else {
-			codecs = append(codecs, "mp4a.40.2")
-		}
-	}
-	return `video/mp4; codecs="` + strings.Join(codecs, ",") + `"`
 }
 
 // Original opens the video file itself for direct play, as the actor.
@@ -254,7 +153,8 @@ type StreamRequest struct {
 }
 
 // Stream converts a video with FFmpeg into fragmented MP4. At most
-// MaxStreams run at once; closing the stream ends FFmpeg.
+// MaxStreams run at once, and a seek's stream waits up to StreamWait for the
+// one it replaces to let go; closing the stream ends FFmpeg.
 func (s *Service) Stream(ctx context.Context, actor accounts.User, videoID string, request StreamRequest) (io.ReadCloser, error) {
 	if s.processor == nil {
 		return nil, ErrUnavailable
@@ -263,7 +163,7 @@ func (s *Service) Stream(ctx context.Context, actor accounts.User, videoID strin
 	if err != nil {
 		return nil, err
 	}
-	if request.Start < 0 || video.Duration > 0 && request.Start > video.Duration {
+	if !mediaplay.StartWithin(request.Start, video.Duration) {
 		return nil, ErrInvalid
 	}
 	info, err := s.mediaInfo(ctx, videoID)
@@ -273,16 +173,17 @@ func (s *Service) Stream(ctx context.Context, actor accounts.User, videoID strin
 	if request.Quality == "" {
 		request.Quality = QualityOriginal
 	}
-	choice := decide(info, video.FileName, request.Caps, request.Audio, request.Quality)
-	options := choice.options
-	if request.Mode == ModeTranscode && options.CopyVideo {
-		options.CopyVideo, options.HEVC = false, false
-	}
+	choice := playChoice(request.Audio, request.Quality)
+	choice.Transcode = request.Mode == ModeTranscode
+	options := StreamOptions(mediaplay.Converting(playSource(info, video.FileName), request.Caps, choice).Stream)
 	options.Start = request.Start
-	if err := s.takeStream(ctx); err != nil {
+	release, err := s.streams.Take(ctx)
+	if errors.Is(err, mediaplay.ErrBusy) {
+		return nil, ErrBusy
+	}
+	if err != nil {
 		return nil, err
 	}
-	release := sync.OnceFunc(func() { <-s.streams })
 	content, err := s.files.OpenContent(ctx, actor, video.EntryID)
 	if err != nil {
 		release()
@@ -295,28 +196,6 @@ func (s *Service) Stream(ctx context.Context, actor accounts.User, videoID strin
 		return nil, err
 	}
 	return &releasingStream{ReadCloser: stream, release: release}, nil
-}
-
-// takeStream claims a stream slot. A seek replaces the viewer's stream with
-// one starting elsewhere, and its request can arrive before the stream it
-// replaces has let go of its slot, so a full device waits briefly for one
-// instead of failing the seek.
-func (s *Service) takeStream(ctx context.Context) error {
-	select {
-	case s.streams <- struct{}{}:
-		return nil
-	default:
-	}
-	timer := time.NewTimer(s.streamWait)
-	defer timer.Stop()
-	select {
-	case s.streams <- struct{}{}:
-		return nil
-	case <-timer.C:
-		return ErrBusy
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 type releasingStream struct {

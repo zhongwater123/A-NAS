@@ -1,7 +1,8 @@
 import { UsersRound } from "lucide-react";
 
+import type { PhotoAsset, PhotoLibrary } from "./api";
 import { type Caller, libraryName, libraryOf, ownLibrary, sharedLibrary } from "./model";
-import type { PhotoAsset, PhotoLibrary } from "./photosApi";
+import styles from "./photos.module.css";
 
 // A search covers the caller's library, the shared one and a member library
 // viewed read-only; it can be narrowed to one of them. An empty choice
@@ -39,14 +40,14 @@ export function SearchScope({
     ...searchLibraries(caller, viewing).map((library) => ({ id: library.id, label: shortName(caller, library) })),
   ];
   return (
-    <div className="ph-scope" role="radiogroup" aria-label="搜索范围">
+    <div className={styles.phScope} role="radiogroup" aria-label="搜索范围">
       {options.map((option) => (
         <button
           key={option.id || "all"}
           type="button"
           role="radio"
           aria-checked={value === option.id}
-          className={value === option.id ? "active" : ""}
+          className={value === option.id ? styles.active : ""}
           title={
             option.id ? `只搜${libraryName(caller, libraryOf(caller, option.id))}` : scopeText(caller, viewing, "")
           }
@@ -65,7 +66,7 @@ export function SourceBadge({ caller, asset }: { caller: Caller; asset: PhotoAss
   const library = libraryOf(caller, asset.libraryId);
   if (!library || library === ownLibrary(caller)) return null;
   return (
-    <span className="ph-tile-source" title={`来自${libraryName(caller, library)}`}>
+    <span className={styles.phTileSource} title={`来自${libraryName(caller, library)}`}>
       {library.kind === "shared" && <UsersRound />}
       {shortName(caller, library)}
     </span>

@@ -127,7 +127,7 @@ def pairs(n):
 def score(occurrences, person):
     """Pairwise precision and recall, coverage and how people were split or mixed."""
     by_person = collections.defaultdict(list)
-    for o, p in zip(occurrences, person):
+    for o, p in zip(occurrences, person, strict=True):
         if p >= 0:
             by_person[p].append(o.identity)
     identities = collections.Counter(o.identity for o in occurrences)
@@ -142,7 +142,7 @@ def score(occurrences, person):
             mixed += 1
     # How many people each identity ended up as, among those clustered at all.
     split = collections.defaultdict(set)
-    for o, p in zip(occurrences, person):
+    for o, p in zip(occurrences, person, strict=True):
         if p >= 0:
             split[o.identity].add(p)
     assigned = sum(1 for p in person if p >= 0)
@@ -150,11 +150,11 @@ def score(occurrences, person):
     # hundreds of photos do not outweigh everyone else: of an occurrence's
     # person, the share that is its identity; of its identity, the share in
     # its person (an unassigned occurrence is alone).
-    together = collections.Counter((p, o.identity) for o, p in zip(occurrences, person) if p >= 0)
+    together = collections.Counter((p, o.identity) for o, p in zip(occurrences, person, strict=True) if p >= 0)
     sizes = collections.Counter(p for p in person if p >= 0)
-    b_precision = sum(together[(p, o.identity)] / sizes[p] for o, p in zip(occurrences, person) if p >= 0)
+    b_precision = sum(together[(p, o.identity)] / sizes[p] for o, p in zip(occurrences, person, strict=True) if p >= 0)
     b_recall = sum((together[(p, o.identity)] if p >= 0 else 1) / identities[o.identity]
-                   for o, p in zip(occurrences, person))
+                   for o, p in zip(occurrences, person, strict=True))
     return summary({
         "occurrences": len(occurrences),
         "identities": len(identities),
@@ -195,7 +195,7 @@ def total(scores):
 def by_group(occurrences, person):
     """score() restricted to each group's occurrences, for children, relatives and so on."""
     groups = collections.defaultdict(list)
-    for o, p in zip(occurrences, person):
+    for o, p in zip(occurrences, person, strict=True):
         if o.group:
             groups[o.group].append((o, p))
     return {name: score([o for o, _ in found], [p for _, p in found]) for name, found in sorted(groups.items())}

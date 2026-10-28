@@ -1,57 +1,26 @@
 package photos
 
 import (
-	"context"
 	"encoding/binary"
-	"errors"
-	"path/filepath"
 	"testing"
-	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 )
 
-func TestBrowsersPlayVideosTheCheapestWayTheyCan(t *testing.T) {
-	iphone := videoInfo{Container: "mov,mp4,m4a,3gp,3g2,mj2", Codec: "hevc", PixelFormat: "yuv420p10le", Audio: "aac"}
-	android := videoInfo{Container: "mov,mp4,m4a,3gp,3g2,mj2", Codec: "h264", PixelFormat: "yuv420p", Audio: "aac"}
-	camcorder := videoInfo{Container: "mpegts", Codec: "h264", PixelFormat: "yuv420p", Audio: "ac3"}
-	oldCamera := videoInfo{Container: "avi", Codec: "mjpeg", PixelFormat: "yuvj422p", Audio: "pcm_s16le"}
-	webm := videoInfo{Container: "matroska,webm", Codec: "vp9", Audio: "opus"}
-	mkv := videoInfo{Container: "matroska,webm", Codec: "h264", PixelFormat: "yuv420p", Audio: "aac"}
-	for _, test := range []struct {
-		name string
-		info videoInfo
-		caps BrowserCaps
-		mode string
-		mime string
-	}{
-		{"HEVC where the browser decodes it", iphone, BrowserCaps{HEVC: true}, PlayDirect, ""},
-		{"HEVC where it does not", iphone, BrowserCaps{}, PlayTranscode, `video/mp4; codecs="avc1.640033,mp4a.40.2"`},
-		{"H.264 in MP4", android, BrowserCaps{}, PlayDirect, ""},
-		{"a camcorder's transport stream", camcorder, BrowserCaps{}, PlayRemux, `video/mp4; codecs="avc1.640033,mp4a.40.2"`},
-		{"a camcorder's stream where AC-3 plays", camcorder, BrowserCaps{AC3: true}, PlayRemux, `video/mp4; codecs="avc1.640033,mp4a.40.2"`},
-		{"an old camera's AVI", oldCamera, BrowserCaps{HEVC: true}, PlayTranscode, `video/mp4; codecs="avc1.640033,mp4a.40.2"`},
-		{"WebM", webm, BrowserCaps{VP9: true, WebM: true}, PlayDirect, ""},
-		{"Matroska in Chromium", mkv, BrowserCaps{Matroska: true}, PlayDirect, ""},
-		{"Matroska elsewhere", mkv, BrowserCaps{}, PlayRemux, `video/mp4; codecs="avc1.640033,mp4a.40.2"`},
-		{"silent HEVC copied", videoInfo{Container: "mpegts", Codec: "hevc"}, BrowserCaps{HEVC: true}, PlayRemux, `video/mp4; codecs="hvc1.1.6.L153.B0"`},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			mode, request := decideVideo(test.info, test.caps)
-			if mode != test.mode {
-				t.Fatalf("mode = %s; want %s", mode, test.mode)
-			}
-			if mode == PlayDirect {
-				return
-			}
-			if mime := streamMime(test.info, request); mime != test.mime {
-				t.Fatalf("mime = %s; want %s", mime, test.mime)
-			}
-			if mode == PlayRemux && (!request.CopyVideo || request.Height != 0) || mode == PlayTranscode && (request.CopyVideo || request.Height != transcodeHeight) {
-				t.Fatalf("request = %+v for %s", request, mode)
-			}
-			if request.CopyAudio != (test.info.Audio == "aac") {
-				t.Fatalf("copy audio = %v for %s", request.CopyAudio, test.info.Audio)
-			}
-		})
+// How a video plays is decided as in the media center (internal/mediaplay);
+// the library describes its videos from what it read at import.
+func TestVideosDescribeThemselvesForPlayback(t *testing.T) {
+	phone := videoInfo{Container: "mov,mp4,m4a,3gp,3g2,mj2", Codec: "hevc", PixelFormat: "yuv420p10le", Audio: "aac"}
+	source := phone.playSource("video/quicktime")
+	if source.ThreeGPP || source.Video == nil || source.Video.Codec != "hevc" || source.Video.PixelFormat != "yuv420p10le" ||
+		len(source.Audio) != 1 || source.Audio[0] != (mediaplay.Audio{Codec: "aac", Default: true}) {
+		t.Fatalf("playSource() = %+v", source)
+	}
+	if !phone.playSource("video/3gpp").ThreeGPP {
+		t.Fatal("a 3GPP original is not marked")
+	}
+	if silent := (videoInfo{Container: "mpegts", Codec: "h264"}).playSource("video/mp2t"); silent.Audio != nil {
+		t.Fatalf("a silent video plays with %+v", silent.Audio)
 	}
 }
 
@@ -87,26 +56,5 @@ func TestVideoContainersAreToldApartByTheirFirstBytes(t *testing.T) {
 		if got := sniffMediaType([]byte(header)); got != want {
 			t.Errorf("sniffMediaType(%q) = %q; want %q", header[:min(len(header), 16)], got, want)
 		}
-	}
-}
-
-func TestConvertingVideosWaitBrieflyForAFreeSlot(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "photos"), Options{DisableCapacityReserve: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = s.Close() }()
-	s.streamWait = 20 * time.Millisecond
-	for range maxVideoStreams {
-		if err := s.takeStream(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := s.takeStream(context.Background()); !errors.Is(err, ErrMediaBusy) {
-		t.Fatalf("a third conversion: %v", err)
-	}
-	go func() { time.Sleep(5 * time.Millisecond); <-s.streamSlots }()
-	if err := s.takeStream(context.Background()); err != nil {
-		t.Fatalf("a seek replacing a stream did not get its slot: %v", err)
 	}
 }

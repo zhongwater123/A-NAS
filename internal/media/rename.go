@@ -17,8 +17,12 @@ import (
 // rename gives one file or folder a new name inside its folder.
 type rename struct{ id, parent, from, to string }
 
+// validName accepts a name the media center may give a file or folder.
+// Every rename goes through files.Service.Move, which applies the file
+// manager's rules for new names (#222); the media center only adds that a
+// name must not hide the file from its libraries.
 func validName(name string) bool {
-	return name != "" && !strings.ContainsAny(name, "/\\\x00") && !strings.HasPrefix(name, ".") && len(name) <= 255
+	return name != "" && !strings.HasPrefix(name, ".")
 }
 
 // videoRenames plans a video file's new name, with the subtitles, NFO

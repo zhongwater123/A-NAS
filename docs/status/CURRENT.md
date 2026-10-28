@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-27
+更新时间：2026-10-28
 
 本页只记当前事实与下一步。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，合并与部署的经过由 Git 与 PR 保存。
 
@@ -10,10 +10,12 @@
 
 ## 实验 NAS 上运行什么
 
-- 已部署：`80b602275b86`（主干上 PR #250 的合并提交，2026-10-26 安装，日志在 NAS 的 `/var/tmp/a-nas-deploy-80b602275b86.log`），包含此前合并的全部 PR；容器代理与 AI 助手试用包同版本。Host Agent 的记录已移入 root 专属的 `/var/lib/a-nas-host`（#249）。
+- 已部署：`4ec62e17c3b1`（主干上 PR #298 的合并提交，2026-10-28 安装，日志在 NAS 的 `/var/tmp/a-nas-deploy-4ec62e17c3b1.log`），包含此前合并的全部 PR；容器代理与 AI 助手试用包同版本。相册服务的向量索引已启用（Qdrant 1.20.0，相册 Catalog 为 14，[#266](https://github.com/zhongwater123/A-NAS/pull/266)），AI 运行环境为 `842b388a0f1987f5`。Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`（#249）。
 - AI 助手按[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)为全部成员开启，用云端模型，仅供开发测试。
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1（2026-10-20 在 #149 的早期构建上加入第二块盘）。
 - 已合并、尚未部署的 PR 不在本页列出：`git fetch` 后运行 `bash scripts/undeployed.sh`，由 Git 列出“已部署”之后合入 main 的 PR。
+- 本地控制台自 2026-10-28 以专用账号 `a-nas-kiosk` 运行（[#174](https://github.com/zhongwater123/A-NAS/issues/174)）。`anas-dev` 名下的旧 Chromium 配置文件还在，kiosk 至少重启过一次后按[迁移后的验证](../runbooks/operate-local-kiosk.md#迁移后的验证)删除。
+- 应用中心里的 Immich、OpenList 与思源笔记装于 [#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前，容器没有日志上限，卸载后重新安装才有；它们的数据可以丢弃。
 
 ## 阻塞与外部条件
 

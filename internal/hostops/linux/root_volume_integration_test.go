@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
-	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
 // A disk joins a single-disk volume the way adding disks does after
@@ -46,7 +46,7 @@ func TestRootConversionTurnsAJoinedDiskIntoAMirror(t *testing.T) {
 	// killed right after Btrfs added the disk, before it could record the
 	// layout (issue #165): the check takes the layout once the kernel lists
 	// both devices.
-	marker.Pending = &pendingLayout{PlanID: "plan:add", Layout: storage.LayoutMirror, Devices: 2}
+	marker.Pending = &pendingLayout{PlanID: "plan:add", Layout: datavolume.LayoutMirror, Devices: 2}
 	if err := executor.writeMarker(marker); err != nil {
 		t.Fatal(err)
 	}
@@ -58,13 +58,13 @@ func TestRootConversionTurnsAJoinedDiskIntoAMirror(t *testing.T) {
 	if err != nil || !started {
 		t.Fatalf("conversion check after adding a disk = %v, %v; want a balance started", started, err)
 	}
-	if recorded, err := executor.readMarker(); err != nil || recorded.Layout != storage.LayoutMirror || recorded.Pending != nil {
+	if recorded, err := executor.readMarker(); err != nil || recorded.Layout != datavolume.LayoutMirror || recorded.Pending != nil {
 		t.Fatalf("marker after the disk joined = %+v, %v; want the mirror recorded", recorded, err)
 	}
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
 		data, metadata, operation := linuxhoststate.ReadBtrfsAllocation(os.DirFS("/"), uuid)
-		convertData, convertMetadata := storage.OutsideLayout(data, metadata, storage.LayoutMirror)
+		convertData, convertMetadata := datavolume.OutsideLayout(data, metadata, datavolume.LayoutMirror)
 		executor.conversionMu.Lock()
 		busy := executor.converting
 		executor.conversionMu.Unlock()

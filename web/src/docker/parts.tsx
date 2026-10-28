@@ -1,8 +1,9 @@
 import { Box, ExternalLink } from "lucide-react";
 import { KeyboardEvent, ReactNode, useEffect, useRef, useState } from "react";
 
-import { iconURL } from "../appsApi";
-import { ContainerSummary } from "../containersApi";
+import { iconURL } from "../appcenter/api";
+import { ContainerSummary } from "./api";
+import styles from "./docker.module.css";
 import { AppRef, Condition, WebPort } from "./model";
 
 // An App Center app's own icon, or a tile in the container's state colour.
@@ -18,13 +19,16 @@ export function ContainerGlyph({
   const [failed, setFailed] = useState(false);
   if (app && !failed) {
     return (
-      <span className={`dk-glyph app ${size}`} aria-hidden="true">
+      <span className={`${styles.dkGlyph} ${styles.app} ${styles[size] ?? ""}`} aria-hidden="true">
         <img src={iconURL(app.id)} alt="" draggable={false} onError={() => setFailed(true)} />
       </span>
     );
   }
   return (
-    <span className={`dk-glyph ${condition?.tone ?? "ok"} ${size}`} aria-hidden="true">
+    <span
+      className={`${styles.dkGlyph} ${styles[condition?.tone ?? "ok"] ?? ""} ${styles[size] ?? ""}`}
+      aria-hidden="true"
+    >
       <Box />
     </span>
   );
@@ -32,7 +36,7 @@ export function ContainerGlyph({
 
 export function StatePill({ condition }: { condition: Condition }) {
   return (
-    <span className={`dk-pill ${condition.tone}`}>
+    <span className={`${styles.dkPill} ${styles[condition.tone] ?? ""}`}>
       <i />
       {condition.label}
     </span>
@@ -42,11 +46,11 @@ export function StatePill({ condition }: { condition: Condition }) {
 export function PortLinks({ ports, item }: { ports: WebPort[]; item: ContainerSummary }) {
   if (ports.length === 0) return null;
   return (
-    <span className="dk-ports">
+    <span className={styles.dkPorts}>
       {ports.map((port) => (
         <a
           key={port.hostPort}
-          className="dk-port"
+          className={styles.dkPort}
           href={port.url}
           target="_blank"
           rel="noopener noreferrer"
@@ -79,13 +83,13 @@ export function IconAction({
 }) {
   return (
     <button
-      className={`dk-icon-btn ${tone ?? ""}`}
+      className={`${styles.dkIconBtn} ${styles[tone ?? ""] ?? ""}`}
       aria-label={label}
       title={label}
       disabled={disabled}
       onClick={onClick}
     >
-      {busy ? <span className="loader small" /> : icon}
+      {busy ? <span className={`loader ${styles.small}`} /> : icon}
     </button>
   );
 }
@@ -102,8 +106,8 @@ export function Empty({
   children?: ReactNode;
 }) {
   return (
-    <div className="dk-empty">
-      <span className={`dk-empty-art ${tone ?? ""}`}>{icon}</span>
+    <div className={styles.dkEmpty}>
+      <span className={`${styles.dkEmptyArt} ${styles[tone ?? ""] ?? ""}`}>{icon}</span>
       <h3>{title}</h3>
       {children}
     </div>
@@ -121,13 +125,13 @@ export function Layer({ label, onDismiss, children }: { label: string; onDismiss
   };
   return (
     <div
-      className="dk-layer"
+      className={styles.dkLayer}
       onKeyDown={onKeyDown}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onDismiss();
       }}
     >
-      <div ref={sheet} className="dk-sheet" role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
+      <div ref={sheet} className={styles.dkSheet} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
         {children}
       </div>
     </div>
