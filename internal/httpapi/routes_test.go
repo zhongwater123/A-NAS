@@ -2,14 +2,12 @@ package httpapi_test
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 
@@ -55,20 +53,22 @@ func routedProduct(t *testing.T) (http.Handler, *http.Cookie) {
 
 var pathParameter = regexp.MustCompile(`\{[^}]+\}`)
 
-// Every operation in the specification has a route, and the guard answers
-// for its posture before any handler runs: 401 without a session cookie, and
-// 403 without the CSRF token for anything but a read (#192).
+// routeKey names an operation or route by its method and its path with
+// every parameter left anonymous.
+func routeKey(method, path string) string {
+	return method + " " + pathParameter.ReplaceAllString(path, "{}")
+}
+
+// Every operation in the specification has a route, also beneath the
+// prefix of a mounted API (#273), and the guard answers for its posture
+// before any handler runs: 401 without a session cookie, and 403 without the
+// CSRF token for anything but a read (#192).
 func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 	product, cookie := routedProduct(t)
 	document := openapitest.Document(t)
-	errorCode := func(recorder *httptest.ResponseRecorder) string {
-		var body struct {
-			Error struct {
-				Code string `json:"code"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(recorder.Body.Bytes(), &body)
-		return body.Error.Code
+	routed := map[string]bool{}
+	for _, route := range httpapi.Routes(product) {
+		routed[routeKey(route.Method, route.Pattern)] = true
 	}
 	operations := 0
 	for path, item := range document.Paths.Map() {
@@ -76,7 +76,7 @@ func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 		for method, operation := range item.Operations() {
 			operations++
 			name := method + " " + path
-			if pattern := httpapi.RoutePattern(product, httptest.NewRequest(method, target, nil)); pattern == "/" {
+			if pattern := httpapi.RoutePattern(product, httptest.NewRequest(method, target, nil)); pattern == "/" || !routed[routeKey(method, path)] {
 				t.Errorf("%s has no route", name)
 				continue
 			}
@@ -85,7 +85,7 @@ func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 			}
 			recorder := httptest.NewRecorder()
 			product.ServeHTTP(recorder, httptest.NewRequest(method, target, nil))
-			if recorder.Code != http.StatusUnauthorized || errorCode(recorder) != "authentication_required" {
+			if recorder.Code != http.StatusUnauthorized || answerCode(recorder) != "authentication_required" {
 				t.Errorf("%s without a session = %d %s, want 401 authentication_required", name, recorder.Code, recorder.Body.String())
 			}
 			if apiroute.Safe(method) {
@@ -96,7 +96,7 @@ func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 			request.AddCookie(cookie)
 			recorder = httptest.NewRecorder()
 			product.ServeHTTP(recorder, request)
-			if recorder.Code != http.StatusForbidden || errorCode(recorder) != "csrf_failed" {
+			if recorder.Code != http.StatusForbidden || answerCode(recorder) != "csrf_failed" {
 				t.Errorf("%s without the CSRF token = %d %s, want 403 csrf_failed", name, recorder.Code, recorder.Body.String())
 			}
 		}
@@ -106,30 +106,24 @@ func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 	}
 }
 
-// Every route the product registers is in the specification, and the routes
-// that need no session are exactly the operations without security.
+// Every route the product registers is in the specification, also each
+// operation a mounted API serves (#273), and the routes that need no session
+// are exactly the operations without security.
 func TestEveryRouteIsSpecifiedWithItsPosture(t *testing.T) {
 	product, _ := routedProduct(t)
 	document := openapitest.Document(t)
 	specified := map[string]*openapi3.Operation{}
-	var paths []string
 	for path, item := range document.Paths.Map() {
-		paths = append(paths, path)
 		for method, operation := range item.Operations() {
-			specified[method+" "+pathParameter.ReplaceAllString(path, "{}")] = operation
+			specified[routeKey(method, path)] = operation
 		}
 	}
-	for _, route := range httpapi.Routes(product) {
-		if route.Method == "" {
-			// A mounted API serves the operations beneath its prefix.
-			prefix := strings.TrimSuffix(route.Pattern, "/")
-			if !slices.ContainsFunc(paths, func(path string) bool { return path == prefix || strings.HasPrefix(path, prefix+"/") }) {
-				t.Errorf("no operation is specified beneath %s", route.Pattern)
-			}
-			continue
-		}
-		key := route.Method + " " + pathParameter.ReplaceAllString(route.Pattern, "{}")
-		operation, ok := specified[key]
+	routes := httpapi.Routes(product)
+	if len(routes) < 200 {
+		t.Fatalf("expanded only %d routes", len(routes))
+	}
+	for _, route := range routes {
+		operation, ok := specified[routeKey(route.Method, route.Pattern)]
 		if !ok {
 			t.Errorf("route %s %s is not in the specification", route.Method, route.Pattern)
 			continue

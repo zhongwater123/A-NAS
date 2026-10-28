@@ -31,4 +31,4 @@
 
 - [成员分享规格](../specs/member-sharing.md)
 - [技术方案与开发切片](../architecture/member-sharing.md)
-- 现有边界参考：[相册服务](../../internal/photoservice/photoservice.go)、[会话查询](../../internal/sessionlookup/sessionlookup.go)、[文件代理](../../internal/filebroker/server.go)
+- 现有边界参考：[相册服务](../../internal/photoservice/photoservice.go)、[会话查询](../../internal/sessionlookup/sessionlookup.go)、[文件代理](../../internal/filebroker/rootbroker/server.go)

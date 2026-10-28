@@ -1,6 +1,6 @@
 // Package mediaapi exposes the media center under /api/v1/media. It does not
 // authenticate: the Product Service wraps it so that every request carries
-// the signed-in user (WithUser) and the session token the File Broker needs,
+// the signed-in user (accounts.WithUser) and the session token the File Broker needs,
 // and so that writes have passed CSRF checks.
 package mediaapi
 
@@ -17,24 +17,18 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
+	"github.com/zhongwater123/A-NAS/internal/filesapi"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/media"
 )
 
 const PathPrefix = "/api/v1/media"
 
-type userKey struct{}
-
-// WithUser attaches the signed-in user.
-func WithUser(ctx context.Context, user accounts.User) context.Context {
-	return context.WithValue(ctx, userKey{}, user)
-}
-
 type handler struct {
 	service *media.Service
 	logger  *slog.Logger
-	mux     *http.ServeMux
+	mux     *apiroute.Mux
 }
 
 // New returns the media API. A nil service answers 503 media_unavailable.
@@ -42,7 +36,7 @@ func New(service *media.Service, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &handler{service: service, logger: logger, mux: http.NewServeMux()}
+	h := &handler{service: service, logger: logger, mux: apiroute.NewMux()}
 	routes := map[string]func(http.ResponseWriter, *http.Request, accounts.User){
 		"GET /libraries":                        h.libraries,
 		"POST /libraries":                       h.createLibrary,
@@ -89,6 +83,11 @@ func New(service *media.Service, logger *slog.Logger) http.Handler {
 	return h
 }
 
+// Endpoints are the operations the media API serves beneath PathPrefix.
+func Endpoints() []apiroute.Endpoint {
+	return New(nil, nil).(*handler).mux.Endpoints()
+}
+
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.service == nil {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "the media center is unavailable")
@@ -99,7 +98,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) withUser(next func(http.ResponseWriter, *http.Request, accounts.User)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(userKey{}).(accounts.User)
+		user, ok := accounts.UserFrom(r.Context())
 		if !ok || user.ID == "" {
 			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
@@ -108,11 +107,14 @@ func (h *handler) withUser(next func(http.ResponseWriter, *http.Request, account
 	}
 }
 
+// fail answers the media center's own errors, and the files' errors as the
+// file manager does (#222).
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, media.ErrNotFound), errors.Is(err, files.ErrNotFound):
+	case errors.Is(err, context.Canceled):
+	case errors.Is(err, media.ErrNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
-	case errors.Is(err, media.ErrForbidden), errors.Is(err, files.ErrForbidden):
+	case errors.Is(err, media.ErrForbidden):
 		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "you cannot do this")
 	case errors.Is(err, media.ErrInvalid):
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", strings.TrimPrefix(err.Error(), media.ErrInvalid.Error()+": "))
@@ -124,16 +126,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_worker_unavailable", "video conversion is unavailable")
 	case errors.Is(err, media.ErrUnreadable):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "media_unreadable", "the video cannot be read")
-	case errors.Is(err, files.ErrConflict):
-		httpjson.WriteError(w, http.StatusConflict, "name_conflict", "a file with this name already exists")
-	case errors.Is(err, files.ErrInvalidName):
-		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "the file name is invalid")
-	case errors.Is(err, files.ErrVolumeUnavailable):
-		httpjson.WriteError(w, http.StatusServiceUnavailable, "volume_unavailable", "the data volume is unavailable")
-	case errors.Is(err, context.Canceled):
 	default:
-		h.logger.ErrorContext(r.Context(), "media request failed", "path", r.URL.Path, "error", err)
-		httpjson.WriteError(w, http.StatusInternalServerError, "internal_error", "the request failed")
+		filesapi.WriteError(w, r, h.logger, err)
 	}
 }
 

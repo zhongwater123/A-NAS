@@ -92,11 +92,16 @@ type Accelerator struct {
 }
 
 type TaskSnapshot struct {
-	Icons         map[string]string `json:"icons,omitempty"`
-	ObservedAt    time.Time         `json:"observedAt"`
-	SampleSeconds float64           `json:"sampleSeconds"`
-	Processes     TaskGroup         `json:"processes"`
-	Services      TaskGroup         `json:"services"`
+	Icons map[string]string `json:"icons,omitempty"`
+	// IconFiles names, for each icon the rows refer to, the installed files
+	// that may hold it, best first. The Host Agent fills it in place of Icons,
+	// and the Product Service turns it into Icons (taskicon), so that no image
+	// decoder runs as root (#221).
+	IconFiles     map[string][]string `json:"iconFiles,omitempty"`
+	ObservedAt    time.Time           `json:"observedAt"`
+	SampleSeconds float64             `json:"sampleSeconds"`
+	Processes     TaskGroup           `json:"processes"`
+	Services      TaskGroup           `json:"services"`
 }
 
 type TaskGroup struct {

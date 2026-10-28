@@ -6,11 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/filebroker"
-	"github.com/zhongwater123/A-NAS/internal/files"
-	"github.com/zhongwater123/A-NAS/internal/shares"
-	"golang.org/x/sys/unix"
 	"io"
 	"net"
 	"os"
@@ -19,11 +14,19 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker"
+	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
 func TestMain(m *testing.M) {
-	if len(os.Args) == 3 && os.Args[1] == filebroker.WorkerArgument {
-		if e := filebroker.RunWorker(os.Args[2]); e != nil {
+	if len(os.Args) == 3 && os.Args[1] == rootbroker.WorkerArgument {
+		if e := rootbroker.RunWorker(os.Args[2]); e != nil {
 			fmt.Fprintln(os.Stderr, e)
 			os.Exit(1)
 		}
@@ -200,7 +203,7 @@ func TestShareACLMatrix(t *testing.T) {
 	}
 	sessions := accounts.NewSessionDirectory(dbPath)
 	defer func() { _ = sessions.Close() }()
-	broker, e := filebroker.NewServer(filebroker.Config{Sessions: sessions, VolumeRoot: volume, VolumeReady: func() bool { return true }, Command: func(v string) *exec.Cmd { return exec.Command(os.Args[0], filebroker.WorkerArgument, v) }})
+	broker, e := rootbroker.NewServer(rootbroker.Config{Sessions: sessions, VolumeRoot: volume, VolumeReady: func() bool { return true }, Command: func(v string) *exec.Cmd { return exec.Command(os.Args[0], rootbroker.WorkerArgument, v) }})
 	if e != nil {
 		t.Fatal(e)
 	}
