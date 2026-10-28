@@ -710,3 +710,93 @@ export function startBootIdent(canvas: HTMLCanvasElement, hooks: BootIdentHooks)
     stop: halt,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Sign-in lockup: the ident's last frame without the CRT, cropped to the mark,
+// name and tagline. It replays the VHS lock-in when it first shows, then idles
+// with blinking drive lights and a highlight sweep every few seconds.
+
+// Scene pixels around the lockup; its sparkles fade out at the top edge.
+export const LOCKUP = { x: 190, y: 53, width: 644, height: 612 } as const;
+// Scene seconds: the lock-in starts at `from` and rests at `rest`; each idle
+// cycle ends by replaying `glint`..`rest`.
+const LOCKUP_TIMELINE = { from: 2.2, rest: 4.7, glint: 3.6, every: 11 } as const;
+
+export function lockupTime(elapsed: number): number {
+  const { from, rest, glint, every } = LOCKUP_TIMELINE;
+  if (from + elapsed < rest) return from + elapsed;
+  const idle = (from + elapsed - rest) % every,
+    sweep = rest - glint;
+  return idle > every - sweep ? glint + idle - (every - sweep) : rest;
+}
+
+export interface IdentLockup {
+  stop(): void;
+}
+
+// `held` keeps the lockup on its first frame while the boot ident still covers
+// the page. Returns null when the browser cannot draw it.
+export function startIdentLockup(canvas: HTMLCanvasElement, held: () => boolean): IdentLockup | null {
+  let scene: IdentScene | null, context: CanvasRenderingContext2D | null;
+  try {
+    scene = createIdentScene();
+    context = canvas.getContext("2d");
+  } catch {
+    return null;
+  }
+  if (!scene || !context) return null;
+  const s: IdentScene = scene,
+    c: CanvasRenderingContext2D = context;
+  const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  let origin = performance.now(),
+    frame = 0,
+    running = true,
+    drawn = "";
+
+  const paint = (t: number, now: number) => {
+    // At rest only the drive lights change, seven times a second.
+    const key = t >= LOCKUP_TIMELINE.rest ? `rest:${Math.floor(now * 7)}` : `t:${t}`;
+    if (key === drawn) return;
+    drawn = key;
+    s.draw(t, now);
+    c.clearRect(0, 0, canvas.width, canvas.height);
+    c.drawImage(s.canvas, LOCKUP.x, LOCKUP.y, LOCKUP.width, LOCKUP.height, 0, 0, canvas.width, canvas.height);
+  };
+  const fit = () => {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2),
+      box = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.round(box.width * dpr));
+    canvas.height = Math.max(1, Math.round(box.height * dpr));
+    drawn = "";
+  };
+  const stop = () => {
+    running = false;
+    cancelAnimationFrame(frame);
+    window.removeEventListener("resize", resize);
+  };
+  const attempt = (work: () => void) => {
+    try {
+      work();
+      return true;
+    } catch {
+      stop();
+      return false;
+    }
+  };
+  const tick = (ms: number) => {
+    if (!running) return;
+    if (held()) origin = ms;
+    if (!attempt(() => paint(lockupTime((ms - origin) / 1000), ms / 1000))) return;
+    frame = requestAnimationFrame(tick);
+  };
+  const resize = () =>
+    attempt(() => {
+      fit();
+      if (still) paint(LOCKUP_TIMELINE.rest, 0);
+    });
+
+  window.addEventListener("resize", resize);
+  if (!resize()) return null;
+  if (!still) frame = requestAnimationFrame(tick);
+  return { stop };
+}
