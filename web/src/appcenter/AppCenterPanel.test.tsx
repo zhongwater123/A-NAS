@@ -1,6 +1,5 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
@@ -532,13 +531,7 @@ describe("AppCenterPanel", () => {
       http.get("/api/v1/apps/{appId}/plan", ({ response }) =>
         poolConfigured
           ? response(200).json({ ...memosPlan, networks: ["default"], addressPools: ["10.96.64.0/19"] })
-          : // The agent answers 409 address_pool_missing here (internal/appstore/agent);
-            // the contract lists only 422 for the plan.
-            response.untyped(
-              HttpResponse.json(apiError("address_pool_missing", "Docker has no address pool for app networks"), {
-                status: 409,
-              }),
-            ),
+          : response(409).json(apiError("address_pool_missing", "Docker has no address pool for app networks")),
       ),
     );
     const user = userEvent.setup();
