@@ -14,6 +14,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/disintegration/imaging v1.6.2
+	github.com/docker/go-connections v0.8.2
 	github.com/evanoberholster/imagemeta v1.1.0
 	github.com/getkin/kin-openapi v0.152.0
 	github.com/go-audio/wav v1.1.0
@@ -47,7 +48,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/go-connections v0.8.2 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-audio/audio v1.0.0 // indirect
