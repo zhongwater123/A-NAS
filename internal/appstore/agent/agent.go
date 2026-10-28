@@ -98,6 +98,47 @@ func (c *Client) Uninstall(ctx context.Context, id string) (appstore.Job, error)
 	return document.ToDomain()
 }
 
+func (c *Client) ReserveInstall(ctx context.Context, id, digest string, identity appstore.Identity) (appstore.InstallReservation, error) {
+	if !appstore.ValidID(id) {
+		return appstore.InstallReservation{}, appstore.ErrNotFound
+	}
+	var document ReservationDocument
+	request := InstallRequest{Digest: digest, UID: identity.UID, GID: identity.GID}
+	if _, err := c.do(ctx, http.MethodPost, "/v1/apps/"+id+"/install-reserve", request, &document); err != nil {
+		return appstore.InstallReservation{}, err
+	}
+	job, err := document.Job.ToDomain()
+	if err != nil {
+		return appstore.InstallReservation{}, err
+	}
+	if document.Token == "" {
+		return appstore.InstallReservation{}, fmt.Errorf("%w: missing install reservation", appstore.ErrUnavailable)
+	}
+	return appstore.InstallReservation{Token: document.Token, Job: job}, nil
+}
+
+// The agent verifies the host account at commit; the client's identity is
+// deliberately not sent, so it cannot override the actual Linux account.
+func (c *Client) CommitInstall(ctx context.Context, id, token string, _ appstore.Identity) (appstore.Job, error) {
+	if !appstore.ValidID(id) {
+		return appstore.Job{}, appstore.ErrNotFound
+	}
+	var document JobDocument
+	if _, err := c.do(ctx, http.MethodPost, "/v1/apps/"+id+"/install-commit", PreparationRequest{Token: token}, &document); err != nil {
+		return appstore.Job{}, err
+	}
+	return document.ToDomain()
+}
+
+func (c *Client) CancelInstall(ctx context.Context, id, token string) error {
+	if !appstore.ValidID(id) {
+		return appstore.ErrNotFound
+	}
+	var response struct{}
+	_, err := c.do(ctx, http.MethodPost, "/v1/apps/"+id+"/install-cancel", PreparationRequest{Token: token}, &response)
+	return err
+}
+
 func (c *Client) do(ctx context.Context, method, path string, body any, into any) (string, error) {
 	var reader io.Reader
 	if body != nil {
@@ -273,6 +314,58 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		httpjson.Write(w, http.StatusOK, PlanFromDomain(plan))
+	case "install-reserve":
+		if !allow(w, r, http.MethodPost) {
+			return
+		}
+		var request InstallRequest
+		if err := httpjson.Decode(w, r, 1024, &request); err != nil {
+			httpjson.WriteDecodeError(w, err, "invalid_request", "request body is invalid")
+			return
+		}
+		identity, err := h.planIdentity(id, strconv.Itoa(request.UID), strconv.Itoa(request.GID))
+		if errors.Is(err, errInvalidIdentity) {
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "app identity is invalid")
+			return
+		}
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		reservation, err := h.store.ReserveInstall(r.Context(), id, request.Digest, identity)
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		httpjson.Write(w, http.StatusAccepted, ReservationDocument{Token: reservation.Token, Job: JobFromDomain(reservation.Job)})
+	case "install-commit", "install-cancel":
+		if !allow(w, r, http.MethodPost) {
+			return
+		}
+		var request PreparationRequest
+		if err := httpjson.Decode(w, r, 1024, &request); err != nil {
+			httpjson.WriteDecodeError(w, err, "invalid_request", "request body is invalid")
+			return
+		}
+		if operation == "install-cancel" {
+			if err := h.store.CancelInstall(r.Context(), id, request.Token); err != nil {
+				h.fail(w, r, err)
+				return
+			}
+			httpjson.Write(w, http.StatusOK, struct{}{})
+			return
+		}
+		identity, err := h.installIdentity(id)
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		job, err := h.store.CommitInstall(r.Context(), id, request.Token, identity)
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		httpjson.Write(w, http.StatusAccepted, JobFromDomain(job))
 	case "install", "uninstall":
 		if !allow(w, r, http.MethodPost) {
 			return
@@ -313,9 +406,9 @@ var errInvalidIdentity = errors.New("app identity is invalid")
 // first install the account does not exist yet (the Host Agent creates it
 // with the app's folders), and the plan shows the UID the Host Agent
 // reserved, which the caller passes: it must be in the app range and held by
-// no account, nor by a group other than the app's own. Install renders the
-// plan again as the account and compares digests, so only a plan shown with
-// the account's UID installs.
+// no account, nor by a group other than the app's own. ReserveInstall renders
+// and checks the plan digest; CommitInstall then requires the real account
+// to match that identity before Compose can run.
 func (h *handler) planIdentity(id, uid, gid string) (appstore.Identity, error) {
 	identity, ok, err := h.identities.App(id)
 	if err != nil {
@@ -338,8 +431,8 @@ func (h *handler) planIdentity(id, uid, gid string) (appstore.Identity, error) {
 	return reserved, nil
 }
 
-// installIdentity is the app's account, which the Host Agent creates before
-// the product service asks for the install.
+// installIdentity is the actual app account, created by the Host Agent before
+// the product service commits a reservation (or uses the legacy install).
 func (h *handler) installIdentity(id string) (appstore.Identity, error) {
 	identity, ok, err := h.identities.App(id)
 	if err != nil {
@@ -385,6 +478,7 @@ var errorCodes = []struct {
 	{appstore.ErrPortInUse, http.StatusConflict, "port_in_use"},
 	{appstore.ErrNameInUse, http.StatusConflict, "name_in_use"},
 	{appstore.ErrAddressPoolMissing, http.StatusConflict, "address_pool_missing"},
+	{appstore.ErrSystemSpace, http.StatusConflict, "system_storage_full"},
 	{appstore.ErrRuntimeOutdated, http.StatusConflict, "docker_runtime_outdated"},
 	{appstore.ErrUnavailable, http.StatusServiceUnavailable, "apps_unavailable"},
 }

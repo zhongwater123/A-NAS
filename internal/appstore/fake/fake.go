@@ -78,6 +78,17 @@ type memoryDocker struct {
 	subnets int
 }
 
+// CheckStorage keeps simulated installs independent of the developer's disk.
+func (m *memoryDocker) CheckStorage(context.Context) error { return nil }
+
+// Simulated installs create neither images nor volumes. Compose's simulated
+// down below remains responsible for deleting their in-memory containers.
+func (m *memoryDocker) CleanupImages(context.Context, string, []string) ([]string, error) {
+	return nil, nil
+}
+func (m *memoryDocker) RemoveProjectContainers(context.Context, string) error { return nil }
+func (m *memoryDocker) RemoveUnusedImages(context.Context, []string) error    { return nil }
+
 func (m *memoryDocker) Containers(context.Context) ([]engine.ContainerInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -44,9 +44,10 @@ var (
 	ErrSpaceNotFound          = errors.New("space not found")
 	ErrIdentityRangeExhausted = errors.New("A-NAS Linux identity range is exhausted")
 	// ErrSMBDisablePending reports a disabled account whose Web sign-in has
-	// ended but whose SMB credential the Host Agent could not disable yet.
-	// Identity synchronization disables it when the Product Service starts.
-	ErrSMBDisablePending = errors.New("the account is disabled, but its SMB credential could not be disabled yet")
+	// ended but whose SMB access or assistant units could not be disabled yet.
+	// Keep the existing error code; retry and identity synchronization finish
+	// both host operations, including when only one of them failed.
+	ErrSMBDisablePending = errors.New("the account is disabled, but its host services could not all be disabled yet")
 )
 
 // Password rules for every password a user sets. MaxPasswordLength keeps the
@@ -72,6 +73,13 @@ type User struct {
 	Nickname string `json:"nickname,omitempty"`
 	// AvatarVersion names the user's current avatar image; empty means none.
 	AvatarVersion string `json:"avatarVersion,omitempty"`
+}
+
+// ActiveAdministrator reports whether u may administer the device: an
+// administrator whose account is active. Services that change the device
+// check it themselves, besides the route guard (#270).
+func (u User) ActiveAdministrator() bool {
+	return u.Role == RoleAdmin && u.Status == UserStatusActive
 }
 
 type SpaceKind string
@@ -409,7 +417,7 @@ func (s *Service) SetupRequired(ctx context.Context) (bool, error) {
 }
 
 func (s *Service) CreateMember(ctx context.Context, actor User, username, password string) (User, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return User{}, ErrForbidden
 	}
 	return s.createUser(ctx, username, password, RoleMember, actor.ID)
@@ -660,7 +668,7 @@ func (s *Service) EndSession(ctx context.Context, token string) error {
 }
 
 func (s *Service) ListUsers(ctx context.Context, actor User) ([]User, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return nil, ErrForbidden
 	}
 	rows, err := s.store.db.QueryContext(ctx, "SELECT "+userColumns+" FROM users ORDER BY username")
@@ -803,7 +811,7 @@ func (s *Service) UserIDForUsername(ctx context.Context, username string) (strin
 }
 
 func (s *Service) DisableUser(ctx context.Context, actor User, userID string) error {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive || actor.ID == userID {
+	if !actor.ActiveAdministrator() || actor.ID == userID {
 		return ErrForbidden
 	}
 	var username string
@@ -817,12 +825,12 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 		return errors.New("credential provisioner is unavailable")
 	}
 	if status == UserStatusDisabled {
-		// Disabling again only retries the SMB credential.
+		// Disabling again only retries host access and assistant shutdown.
 		return s.disableHostCredential(ctx, username)
 	}
 	// Web access ends first and for good: a Host Agent failure must not leave
 	// the account signed in. The status is also what identity
-	// synchronization converges the SMB credential to.
+	// synchronization uses to retry SMB and assistant shutdown.
 	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -856,7 +864,7 @@ func (s *Service) disableHostCredential(ctx context.Context, username string) er
 // else, with the current one: a session alone must not be enough to take an
 // account over.
 func (s *Service) ResetCredential(ctx context.Context, actor User, userID, password string) error {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive || actor.ID == userID {
+	if !actor.ActiveAdministrator() || actor.ID == userID {
 		return ErrForbidden
 	}
 	if err := checkPassword(password); err != nil {

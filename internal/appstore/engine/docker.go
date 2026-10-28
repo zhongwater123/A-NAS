@@ -2,10 +2,13 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"strconv"
 	"strings"
 
+	"github.com/containerd/errdefs"
+	"github.com/docker/go-connections/nat"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -38,6 +41,44 @@ func (d DockerInspector) Containers(ctx context.Context) ([]ContainerInfo, error
 		for _, port := range item.Ports {
 			if port.PublicPort != 0 {
 				info.PublishedPorts = append(info.PublishedPorts, port.PublicPort)
+			}
+		}
+		// List omits bindings when a container is stopped or only created.
+		// Keep its configured ports reserved so two installed apps cannot
+		// silently share a URL after one of them is restarted.
+		if info.Running || item.State == container.StatePaused {
+			infos = append(infos, info)
+			continue
+		}
+		inspected, err := d.Client.ContainerInspect(ctx, item.ID, client.ContainerInspectOptions{})
+		if errdefs.IsNotFound(err) {
+			continue // Removed after List; its bindings no longer reserve ports.
+		}
+		if err != nil {
+			return nil, err
+		}
+		if inspected.Container.HostConfig == nil {
+			return nil, fmt.Errorf("container %s has no host configuration", item.ID)
+		}
+		seen := make(map[uint16]bool, len(info.PublishedPorts))
+		for _, port := range info.PublishedPorts {
+			seen[port] = true
+		}
+		for _, bindings := range inspected.Container.HostConfig.PortBindings {
+			for _, binding := range bindings {
+				if binding.HostPort == "" {
+					continue
+				}
+				first, last, err := nat.ParsePortRange(binding.HostPort)
+				if err != nil {
+					return nil, fmt.Errorf("container %s has invalid host port: %w", item.ID, err)
+				}
+				for port := first; port <= last; port++ {
+					if port != 0 && !seen[uint16(port)] {
+						seen[uint16(port)] = true
+						info.PublishedPorts = append(info.PublishedPorts, uint16(port))
+					}
+				}
 			}
 		}
 		infos = append(infos, info)

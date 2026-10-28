@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/appid"
 )
@@ -70,10 +71,26 @@ func (c *Center) Install(ctx context.Context, id, digest string) (Job, error) {
 	if plan.Digest != digest {
 		return Job{}, ErrPlanChanged
 	}
+	reservation, err := c.store.ReserveInstall(ctx, id, digest, identity)
+	if err != nil {
+		return Job{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := c.store.CancelInstall(cancelCtx, id, reservation.Token); err != nil {
+				c.logger.ErrorContext(cancelCtx, "cancelling app preparation failed", "app", id, "error", err)
+			}
+		}
+	}()
 	if err := c.host.PrepareApp(ctx, id, plan.HostFolders(), plan.SharesFolders()); err != nil {
 		return Job{}, fmt.Errorf("%w: prepare app folders: %v", ErrUnavailable, err)
 	}
-	return c.store.Install(ctx, id, digest, identity)
+	job, err := c.store.CommitInstall(ctx, id, reservation.Token, identity)
+	committed = err == nil
+	return job, err
 }
 
 // Uninstall starts removing the app's containers and releases its access to
@@ -90,6 +107,20 @@ func (c *Center) Uninstall(ctx context.Context, id string) (Job, error) {
 
 // identity asks the host for the app's Linux identity.
 func (c *Center) identity(ctx context.Context, id string) (Identity, error) {
+	apps, err := c.store.Apps(ctx)
+	if err != nil {
+		return Identity{}, err
+	}
+	found := false
+	for _, app := range apps {
+		if app.ID == id {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return Identity{}, ErrNotFound
+	}
 	if c.host == nil {
 		return Identity{}, fmt.Errorf("%w: no host for app identities", ErrUnavailable)
 	}

@@ -1,7 +1,7 @@
 # 系统健康
 
 状态：implemented
-更新时间：2026-10-21
+更新时间：2026-10-27
 
 ## 目标
 
@@ -71,6 +71,7 @@
 
 ## 边界与失败
 
+- 概览单独显示系统盘空间：已用百分比、可用空间与总容量来自 Host Agent 对 `/var/lib` 所在文件系统的 `statfs` 观测；可用空间使用非特权进程能使用的 `Bavail`。它与硬盘标称容量、数据卷容量分别显示。未观测到时（包括旧 Host Agent）显示“暂时无法读取”，不推算为 0% 或 100%。`system.storage` 在 `/api/v1/system` 与 `/api/v1/host-state` 中均为可选对象，包含 `totalBytes` 和 `availableBytes`。
 - 接口：`/api/v1/system` 与 `/api/v1/host-state` 的 `system` 增加 `healthFindings`。Host Agent 的状态文档在对账失败时带 `reconcileFailed: true`，否则不带这个字段，旧版产品服务读取正常的 Host Agent 不受影响。每项包含 `code`、`severity`（`warning` 或 `critical`），以及可选的 `diskId` 和 `value`（`disk_hot` 为摄氏度，`volume_full`、`volume_nearly_full` 为已用百分比，`volume_errors` 为错误次数）。Host Agent 的状态文档为数据盘增加 `filesystemReadOnly` 与 `filesystemErrors`，其他磁盘带上它们时，产品服务拒绝这份文档。
 - 评估在产品服务中完成，Host Agent 只报告观测，因为只有产品服务知道是否创建过数据卷。Fake 读取器同样经过评估，模拟数据的健康由其中的磁盘状态决定。
 - 成员与管理员看到相同的健康与原因，不涉及个人数据。

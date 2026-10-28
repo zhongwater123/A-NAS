@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/capacity"
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
@@ -230,7 +231,10 @@ func OpenService(reader hoststate.Reader, executor VolumeExecutor, options Optio
 // to the layout. An empty layout creates a single disk or a mirror. The new
 // plan takes the place of any that has not run, which is cancelled: a page
 // reload forgets a pending plan, and it must not hold the next one back.
-func (s *Service) PlanVolume(ctx context.Context, diskIDs []string, layout Layout) (ExecutionPlan, error) {
+func (s *Service) PlanVolume(ctx context.Context, actor accounts.User, diskIDs []string, layout Layout) (ExecutionPlan, error) {
+	if !actor.ActiveAdministrator() {
+		return ExecutionPlan{}, accounts.ErrForbidden
+	}
 	ids, err := distinctDiskIDs(diskIDs)
 	if err != nil {
 		return ExecutionPlan{}, err
@@ -420,7 +424,10 @@ func planActions(kind PlanKind, layout, current Layout) []Action {
 	return append(actions, Action{Kind: "convert_layout", Description: description})
 }
 
-func (s *Service) ConfirmPlan(ctx context.Context, planID, phrase string) (ExecutionPlan, error) {
+func (s *Service) ConfirmPlan(ctx context.Context, actor accounts.User, planID, phrase string) (ExecutionPlan, error) {
+	if !actor.ActiveAdministrator() {
+		return ExecutionPlan{}, accounts.ErrForbidden
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	plan, ok := s.plans[planID]
@@ -452,7 +459,10 @@ func (s *Service) ConfirmPlan(ctx context.Context, planID, phrase string) (Execu
 // operation apart from this request, and the service follows it until it
 // ends. A plan that needs attention is retried the same way: the Host Agent
 // checks the disks again and continues after the steps that are done.
-func (s *Service) ExecutePlan(ctx context.Context, planID string) (ExecutionPlan, error) {
+func (s *Service) ExecutePlan(ctx context.Context, actor accounts.User, planID string) (ExecutionPlan, error) {
+	if !actor.ActiveAdministrator() {
+		return ExecutionPlan{}, accounts.ErrForbidden
+	}
 	s.mu.Lock()
 	plan, ok := s.plans[planID]
 	if !ok {
@@ -561,7 +571,10 @@ func (s *Service) ExecutePlan(ctx context.Context, planID string) (ExecutionPlan
 // CancelPlan gives up a plan that has not run, so that the administrator
 // can leave it or plan again at once instead of waiting for it to expire.
 // Nothing has touched a disk before a plan runs.
-func (s *Service) CancelPlan(ctx context.Context, planID string) (ExecutionPlan, error) {
+func (s *Service) CancelPlan(ctx context.Context, actor accounts.User, planID string) (ExecutionPlan, error) {
+	if !actor.ActiveAdministrator() {
+		return ExecutionPlan{}, accounts.ErrForbidden
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	plan, ok := s.plans[planID]
@@ -630,7 +643,10 @@ func (s *Service) ListVolumes(ctx context.Context) ([]Volume, error) {
 
 // ContinueConversion asks the Host Agent to convert the data volume to its
 // layout now, after a conversion stopped.
-func (s *Service) ContinueConversion(ctx context.Context) error {
+func (s *Service) ContinueConversion(ctx context.Context, actor accounts.User) error {
+	if !actor.ActiveAdministrator() {
+		return accounts.ErrForbidden
+	}
 	volumes, err := s.ListVolumes(ctx)
 	if err != nil {
 		return err

@@ -1358,6 +1358,8 @@ check "a current pool video answers a byte range" test "$(status_of -r 0-1023 "$
 # --- The AI assistant's sandbox on this installer's accounts, spaces and ACLs (#115).
 # shellcheck disable=SC1091 # sourced from the mounted checkout
 . /src/ai/assistant-spike/system-test.sh
+# shellcheck disable=SC1091 # sourced from the mounted checkout
+. /src/ai/assistant-spike/disable-system-test.sh
 
 # --- Last, because other services keep the detached volume busy: the
 # unmount reaches the photo service's private mount namespace, and it stops
