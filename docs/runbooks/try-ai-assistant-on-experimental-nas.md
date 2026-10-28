@@ -1,7 +1,7 @@
 # 在实验 NAS 上试用 AI 助手（云端模型）
 
 状态：draft
-更新时间：2026-10-16
+更新时间：2026-10-27
 
 ## 目的
 
@@ -66,6 +66,8 @@
    - 预期：`ready after N s` 与实例内存；第一次启动要把 Hermes 自带的技能写进主目录，最长约一分钟。之后 `photo libraries: 200 [...]` 列出本人的私有图库（`private:`）与共享图库（`shared:`），`photos for "钓鱼"` 列出这个账号搜到的照片名称，与在相册里搜索的结果一致。
 
 ## 更新
+
+包含 [#178 修复](../investigations/2026-10-27-assistant-cron-waker-member-isolation.md) 的版本，先更新 Host Agent，再更新助手 bundle。安装器和定时任务唤醒器现在通过 Host Agent 的私有 socket 查询活动账号；旧 Host Agent 不提供该查询，检查失败时不会启用或唤醒成员助手。停用账号会停止并 mask 其助手、API、定时任务与复盘单元，更新保留这些 mask；不要为排查连接故障手动 unmask 停用账号。回滚到缺少此修复的版本会失去这项保证。
 
 新的 bundle 暂存后，校验并解包（第 2 步），然后：
 
