@@ -233,13 +233,16 @@ func (r *runner) Run(ctx context.Context, args []string, output io.Writer) error
 			name = args[i+1]
 		case arg == "-f" && i+1 < len(args):
 			file = args[i+1]
-		case arg == "up" || arg == "down" || arg == "logs":
+		case arg == "up" || arg == "down" || arg == "logs" || arg == "pull":
 			action = arg
 		}
 	}
 	var lines []string
 	var rendered *types.Project
 	switch action {
+	case "pull":
+		service := args[len(args)-1]
+		lines = []string{service + " Pulling (simulated)", service + " Pulled"}
 	case "up":
 		compose, err := os.ReadFile(file)
 		if err != nil {
@@ -253,7 +256,6 @@ func (r *runner) Run(ctx context.Context, args []string, output io.Writer) error
 		}); err != nil {
 			return fmt.Errorf("compose file: %w", err)
 		}
-		lines = []string{"Pulling images (simulated)"}
 		for _, network := range slices.Sorted(maps.Keys(rendered.Networks)) {
 			lines = append(lines, "Network "+cmp.Or(rendered.Networks[network].Name, name+"_"+network)+" Created")
 		}

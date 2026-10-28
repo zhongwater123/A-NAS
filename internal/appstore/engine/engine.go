@@ -23,7 +23,8 @@ import (
 )
 
 const (
-	// Image pulls on a slow link can take a long time; uninstall is quick.
+	// Image pulls on a slow link, and their retries (pull.go), can take a
+	// long time; uninstall is quick.
 	installTimeout   = 30 * time.Minute
 	uninstallTimeout = 5 * time.Minute
 	outputTailLines  = 40
@@ -121,6 +122,10 @@ type Store struct {
 	// counts as a success, checking every startupPoll.
 	startupWindow time.Duration
 	startupPoll   time.Duration
+	// pullDelay is the wait before a failed pull's first retry; pullLimit
+	// bounds every wait (pull.go).
+	pullDelay time.Duration
+	pullLimit time.Duration
 
 	// secretsMu serialises generating and storing app secrets.
 	secretsMu sync.Mutex
@@ -149,6 +154,8 @@ func New(entries []appstore.Entry, policy appstore.Policy, stateDir string, dock
 
 		startupWindow: defaultStartupWindow,
 		startupPoll:   defaultStartupPoll,
+		pullDelay:     defaultPullDelay,
+		pullLimit:     defaultPullLimit,
 	}
 	for _, entry := range entries {
 		store.entries[entry.App.ID] = entry
@@ -325,6 +332,21 @@ func (s *Store) install(ctx context.Context, id, digest string, identity appstor
 		if err := os.WriteFile(composeFile, plan.Compose, 0o640); err != nil {
 			return err
 		}
+		services := make([]string, 0, len(plan.Services))
+		for _, service := range plan.Services {
+			services = append(services, service.Service)
+		}
+		if err := s.pullImages(ctx, compose, services, output); err != nil {
+			// A pull creates no container, so there is nothing to roll back;
+			// the images that finished downloading stay for the next install.
+			switch cause := context.Cause(ctx); {
+			case errors.Is(cause, errStopping):
+				return fmt.Errorf("%w，还没有创建容器，请重新安装", errStopping)
+			case errors.Is(cause, context.DeadlineExceeded):
+				err = fmt.Errorf("%w：超过了 %d 分钟的安装时限", errPull, int(installTimeout/time.Minute))
+			}
+			return fmt.Errorf("%w；没有创建容器，已下载完成的镜像已保留，重新安装时不会重复下载", err)
+		}
 		// Mark cleanup as pending without granting deletion authority to
 		// mutable tags. Recovery discovers IDs from actual containers; a
 		// download that never created a container has no proven ownership.
@@ -333,8 +355,10 @@ func (s *Store) install(ctx context.Context, id, digest string, identity appstor
 		}
 		// Compose can fail after creating some of the containers, for
 		// example on a port a host process holds or a dependency that is
-		// slow to turn healthy: those are rolled back like any other.
-		failure := s.runner.Run(ctx, append(compose, "up", "--detach", "--remove-orphans"), output)
+		// slow to turn healthy: those are rolled back like any other. The
+		// images are all present, and up must not reach a registry, where
+		// a failure would not be retried.
+		failure := s.runner.Run(ctx, append(compose, "up", "--detach", "--remove-orphans", "--pull", "never"), output)
 		if failure != nil {
 			failure = &StartupError{Problem: "Docker Compose 没有完成启动（" + failure.Error() + "）"}
 		}

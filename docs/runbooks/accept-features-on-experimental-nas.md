@@ -81,6 +81,7 @@
 - 系统盘保护（#186）：更新产品服务、Host Agent 和容器代理后，在设置概览核对系统盘用量；选定可丢弃应用，备份需要保留的数据，按[容器代理手册](install-container-agent.md)验证新容器的日志轮转与卸载后的资源/数据保留。不要用真实应用或全局 prune 做破坏性压力测试，见[调查](../investigations/2026-10-27-app-system-disk-growth.md)。
 
 - 安装一个新应用，确认 [ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md) 的版本与挂载检查放行正常安装；目录新增的 11 个应用逐个实机安装。
+- 镜像下载重试：更新容器代理后重新安装 Immich。镜像仓库限流时，输出逐行出现“<服务>：镜像仓库限流，N 秒后重试（第 k 次）”，安装随后成功；5 次仍失败时，任务说明原因并保留已下载完成的镜像，再次安装不重新下载它们（`docker image ls` 核对），见[调查](../investigations/2026-10-28-registry-rate-limit-failed-install.md)。
 - 应用身份（[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）：重新安装此前以 root 运行的 Immich，确认它以应用身份运行、手机备份可上传；安装 Navidrome 与 qBittorrent，核对只读与可写共享空间（[调查](../investigations/2026-10-14-app-containers-and-the-shared-acl.md)）。
 - 安装 n8n 确认持续运行；安装 OpenList 并用应用中心显示的密码登录。
 - 桌面快捷方式（#103）：管理员与成员的桌面都出现 Immich，点击打开 `:2283`，停止后标注“未运行”。

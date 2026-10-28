@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -41,7 +42,7 @@ func TestInstallReservationWaitsForTheConfirmedIdentity(t *testing.T) {
 		t.Fatalf("reused token: %v", err)
 	}
 	store.Wait()
-	if got := runner.verbs(); len(got) != 1 || got[0] != "up" {
+	if got := runner.verbs(); !slices.Equal(got, pullsThen(plan, "up")) {
 		t.Fatalf("Compose after preparation: %v", got)
 	}
 }

@@ -1,7 +1,7 @@
 # 应用中心
 
 状态：implemented
-更新时间：2026-10-27
+更新时间：2026-10-28
 
 ## 目标
 
@@ -51,7 +51,7 @@
 
 - Given：用户已查看安装计划。
 - When：点击“确认安装”。
-- Then：请求携带计划摘要；容器代理重新渲染并比对摘要，再检查端口与容器名冲突，然后在后台运行 `docker compose up`，再观察约 20 秒：有容器不断重启、以非零退出码退出、没有启动或健康检查失败时，取 Compose 日志最后 20 行写入输出，执行 `compose down` 回滚，任务以“容器 n8n 启动后不断重启（退出码 1），安装已回滚”这样的原因失败。`up` 本身出错时（例如端口被宿主机进程占用，或 Linkwarden 的 postgres 没有及时通过健康检查，此时已有容器在运行）同样取日志并回滚，任务以“Docker Compose 没有完成启动（…），安装已回滚”失败。面板转为进度：已用时间、不确定进度条、最近一行 Compose 输出和可展开的完整输出，每 1.5 秒刷新；“在后台继续”关闭面板而不中断安装，详情页同样显示进度。成功后面板显示“已安装”、运行中的容器数、端口、登录信息和使用须知，提供“打开”；详情页显示“已安装 · N/N 个容器运行中”、访问地址和登录信息，容器同时出现在 Docker 窗口。安装后才停止运行的容器在详情页逐个说明原因（不断重启、已退出及退出码、没有启动），并提示在 Docker 中查看日志。
+- Then：请求携带计划摘要；容器代理重新渲染并比对摘要，再检查端口与容器名冲突，然后在后台逐个服务拉取缺少的镜像（见[镜像下载与重试](#镜像下载与重试)），全部就绪后运行 `docker compose up --pull never`，再观察约 20 秒：有容器不断重启、以非零退出码退出、没有启动或健康检查失败时，取 Compose 日志最后 20 行写入输出，执行 `compose down` 回滚，任务以“容器 n8n 启动后不断重启（退出码 1），安装已回滚”这样的原因失败。`up` 本身出错时（例如端口被宿主机进程占用，或 Linkwarden 的 postgres 没有及时通过健康检查，此时已有容器在运行）同样取日志并回滚，任务以“Docker Compose 没有完成启动（…），安装已回滚”失败。面板转为进度：已用时间、不确定进度条、最近一行 Compose 输出和可展开的完整输出，每 1.5 秒刷新；“在后台继续”关闭面板而不中断安装，详情页同样显示进度。成功后面板显示“已安装”、运行中的容器数、端口、登录信息和使用须知，提供“打开”；详情页显示“已安装 · N/N 个容器运行中”、访问地址和登录信息，容器同时出现在 Docker 窗口。安装后才停止运行的容器在详情页逐个说明原因（不断重启、已退出及退出码、没有启动），并提示在 Docker 中查看日志。
 
 安装前置检查先于宿主机准备：不在容器代理目录中的 ID 不保留 UID。确认安装时，容器代理先校验摘要、端口与名称冲突以及已安装/忙碌状态，接受后预留唯一任务位置；产品服务再让 Host Agent 创建账号和目录，随后提交预留，容器代理读取实际 Linux 账号并核对计划身份后才启动 Compose。预留一次性使用，准备失败时取消；请求中断导致无人提交时，一分钟后任务失败并释放位置。接受前被拒绝的请求不创建账号和共享目录。
 
@@ -81,6 +81,12 @@
 - Then：对话框列出将删除容器、Docker 网络、匿名卷与未被其他容器使用的镜像，保留应用数据和命名卷，并撤销共享空间访问。确认后后台先停止容器，再通过 Docker Engine 删除容器与匿名卷，随后由 `docker compose down` 清理网络；不使用会删除命名卷的 `down --volumes`。镜像只在没有任何运行中或已停止容器使用时删除，不强制删除；详情页显示卸载进度，完成后应用回到“可安装”。取消时焦点回到“更多操作”。
 - 清理前将镜像 ID 持久化到容器代理的 `apps/<app>/images.json`，因此容器已删除但镜像删除失败、或代理重启后仍能继续。清理失败显示“卸载未完成”和“重试卸载”，不当成安装失败；重新安装也先完成残留清理。安装回滚、中断恢复使用同一清理流程，命名卷和应用数据始终保留。
 - Docker 因多标签或其他依赖拒绝按 ID 删除镜像时，保留该镜像，卸载仍可完成；不自动移除可变标签、不强制删除，也不清扫无法证明属于该应用的历史孤立资源。
+
+### 镜像下载与重试
+
+- Given：确认安装后，应用有本机还没有的镜像。
+- When：容器代理在创建容器前按服务名顺序逐个拉取（`docker compose pull --policy missing <服务>`），本机已有的镜像不访问镜像仓库。
+- Then：镜像仓库限流（429、`toomanyrequests`）、返回 5xx，或连接被重置、超时时，等待后重试这个服务：等待从 10 秒起每次加倍、最长 2 分钟，镜像仓库给出 `retry-after` 时不短于它；重试前输出一行“immich-server：镜像仓库限流，20 秒后重试（第 2 次）”，进度面板把它显示为最近一行。每个服务最多拉取 5 次。仍失败、需要的等待超过 2 分钟或会超过 30 分钟的安装时限，或遇到重试无用的错误（镜像或标签不存在、未授权或被拒绝、下载内容与摘要不符，以及认不出的错误）时，任务立即失败，例如“镜像下载失败：immich-server 遇到镜像仓库限流，重试 4 次后仍未成功（toomanyrequests: …）；没有创建容器，已下载完成的镜像已保留，重新安装时不会重复下载”。拉取失败时还没有容器：不执行 `compose down`，也不删除任何镜像，因为没有容器能证明下载归这个应用所有；应用回到“可安装”，卡片注明上次安装失败，重新安装直接复用已下载的镜像。等待重试时停止容器代理会立即结束等待，任务以“容器代理停止，安装被中断，还没有创建容器，请重新安装”失败。
 
 ### 失败与冲突
 
@@ -121,7 +127,7 @@
 - **Docker 网络**（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）：计划列出 Compose 将新建的网络，包括服务未设 `network_mode: bridge` 时的隐式 `default` 网络。清单自带 `ipam` 子网或驱动的网络被拒绝。应用有网络而 Docker 未配置 `default-address-pools` 时，规划与安装都返回 `409 address_pool_missing`。安装后，项目网络的每个子网都必须落在地址池内；有任一不在池内或无法检查时，立即 `compose down` 回滚，任务失败并写明网络与网段。
 - 局限：镜像自带身份的服务可能以 root 写入它自己的应用数据目录；初始化后降权的镜像，其入口程序与监管进程以 root 运行。rootful Docker 下，容器逃逸漏洞对以 root 运行的容器意味着宿主机 root。
 - 端口冲突检查包含 非运行容器的配置绑定端口（含范围），以及运行中或暂停容器的实际发布端口；未被容器占用但被宿主机进程监听的端口由 Compose 启动失败暴露在任务日志中。
-- 一次只运行一个安装或卸载任务；安装超时 30 分钟、卸载 5 分钟，任务保留最近 40 行输出。每个应用最近一次任务（动作、状态、起止时间、输出与错误）在任务开始和结束时写入容器代理状态目录 `jobs/<app>.json`（目录 0700、文件 0600，输出可能含应用自己的日志），重启后读回；开始时写不进记录则拒绝任务（`503 apps_unavailable`）。应用状态由容器标签与这条记录共同决定：有容器且最近一次是成功的安装（或没有记录，即早于记录的安装）为“已安装”，有容器而最近一次是失败的安装为“failed”。代理单元设 `KillMode=mixed`，停止时 systemd 只向代理本身发 SIGTERM，由代理取消安装并用 Compose 回滚；60 秒后仍剩下的进程被 SIGKILL，留下的安装由下次启动回滚（[#169](https://github.com/zhongwater123/A-NAS/issues/169)）。
+- 一次只运行一个安装或卸载任务；安装超时 30 分钟（含镜像下载与重试的等待）、卸载 5 分钟，任务保留最近 40 行输出。每个应用最近一次任务（动作、状态、起止时间、输出与错误）在任务开始和结束时写入容器代理状态目录 `jobs/<app>.json`（目录 0700、文件 0600，输出可能含应用自己的日志），重启后读回；开始时写不进记录则拒绝任务（`503 apps_unavailable`）。应用状态由容器标签与这条记录共同决定：有容器且最近一次是成功的安装（或没有记录，即早于记录的安装）为“已安装”，有容器而最近一次是失败的安装为“failed”。代理单元设 `KillMode=mixed`，停止时 systemd 只向代理本身发 SIGTERM，由代理取消安装并用 Compose 回滚；60 秒后仍剩下的进程被 SIGKILL，留下的安装由下次启动回滚（[#169](https://github.com/zhongwater123/A-NAS/issues/169)）。
 - **桌面快捷方式**：`GET /api/v1/app-shortcuts` 对所有已登录账号开放，只返回已安装且有网页端口的应用的 ID、名称、网页端口、协议、路径与运行中/全部容器数，不含安装计划、Compose、登录信息或镜像；`GET /api/v1/app-shortcuts/{id}/icon` 返回应用目录中的图标（与应用中心的图标相同的缓存与沙箱头）。应用中心未启用时列表为空，容器代理不可达时返回 `503`，桌面保留上一次的图标。
 - 应用中心仅管理员可用：所有 `/api/v1/apps` 请求需要管理员产品会话，写请求还需要会话的 CSRF 令牌；成员看不到“应用中心”图标。写请求另要求 Host 为 `localhost` 或 IP 地址（[局域网 Web 访问](lan-web-access.md)）、JSON 请求体与同源 Origin；安装请求只接受 `digest` 字段，无法提交 Compose 内容。图标以沙箱化 CSP 与 `nosniff` 返回。
 
@@ -129,6 +135,7 @@
 
 - 系统盘保护：所有服务固定使用 `json-file`、`max-size=10m`、`max-file=3`，覆盖清单自带日志配置。运行规则版本为 2，旧容器需卸载重装才能应用日志限制。[清理回归](../../internal/appstore/engine/cleanup_test.go) 覆盖容器删除后的重试、重启恢复与损坏记录保护；[真实 Docker 回归](../../internal/appstore/engine/cleanup_docker_integration_test.go) 覆盖日志轮转、安装回滚、命名卷/应用数据保留与镜像清理，运行需要本地 Docker、Compose 和带 Python 3 的 `ANAS_TEST_IMAGE`。空间下限由[存储检查测试](../../internal/appstore/engine/storage_test.go)验证，系统占用由[系统健康规格](system-health.md)定义。
 
+- 镜像下载与重试：[拉取测试](../../internal/appstore/engine/pull_test.go) 用假 Compose 覆盖两种 Docker 镜像存储措辞的限流、5xx、重置与超时在重试后安装成功，不短于退避与 `retry-after` 的等待、退避加倍，持续限流在 5 次后失败且不回滚、不删除镜像，不可重试的错误只拉取一次，超过等待上限或安装时限立即失败，等待中停止代理，以及多服务应用在后一个服务失败时保留前面的镜像。2026-10-28 WSL2（Docker 29.1.3 containerd 存储、Compose 2.40.3）：[真实 Docker 拉取测试](../../internal/appstore/engine/pull_docker_integration_test.go) 从本机 TLS 镜像仓库拉取，钉住 8 类失败的措辞与分类，验证限流后一次重试即成功，以及第二个镜像不存在时安装失败、第一个镜像保留且项目没有容器和网络，见[调查](../investigations/2026-10-28-registry-rate-limit-failed-install.md)。
 - 运行身份：[运行规则测试](../../internal/appstore/runtime_test.go) 渲染全部内置应用，确认挂载共享空间的服务都以应用账号（带 20000 组、无能力）或初始化后降权运行、只有审查表列出的共享空间挂载可写、审查表只引用存在的应用与服务、20000 即 `a-nas-users`；[渲染测试](../../internal/appstore/render_test.go) 覆盖保留镜像用户的服务挂载共享空间被拒绝、`PUID` 类镜像在挂载共享空间时以 20000 为 `PGID`、共享空间默认只读而 qBittorrent 可写。
 - 渲染与策略：[渲染测试](../../internal/appstore/render_test.go) 覆盖路径重写、显式 `user` 及字面量 `PUID`/`PGID` 改为应用身份、不让 Docker 创建宿主机文件夹、`/DATA` 只映射到共享空间、缺少身份时拒绝、确定性摘要与 17 类拒绝情形，以及计划列出隐式 `default` 网络、默认网桥不新建网络、清单自带子网被拒绝；[清单测试](../../internal/appstore/catalog_test.go) 另覆盖每个内置应用都有 A-NAS 分类、使用须知与链接的读取以及非 http(s) 链接被丢弃，[文字校订测试](../../internal/appstore/copy_test.go) 覆盖全部内置应用的介绍与须知不含 Zima、无限存储与 CasaOS 设置步骤以及卖点段落的删除规则，[登录信息测试](../../internal/appstore/credentials_test.go) 覆盖列表中每个应用缺少生成值时拒绝渲染、生成值写入 Compose 且清单固定值不再出现、须知不再给出清单密码、保留的值渲染出相同摘要、为旧安装记下的清单值与清单一致，[引擎测试](../../internal/appstore/engine/engine_test.go) 的 `TestInstalledAppsShowTheLoginsTheyUse` 覆盖值只生成一次并以 0600 保存、已安装应用显示保存的值、旧安装显示清单值，[分类测试](../../internal/appstore/categories_test.go) 覆盖分类表不含清单外的应用。
 - 身份与文件夹：[Host Agent 应用身份测试](../../internal/hostops/linux/apps_test.go)（查看计划不改动宿主机账号）；root 集成测试 [`root_apps_integration_test.go`](../../internal/hostops/linux/root_apps_integration_test.go) 在真实 Btrfs 上以绑定挂载模拟容器（与 Docker 一样只给计划中的组，不用宿主机账号的组），验证账号在预建文件夹时才创建且不属于任何附加组、应用数据属主、没有计划中的组时不能写共享空间而有 `a-nas-users` 时可以、ACL 继承、无法读取个人空间、经植入的符号链接预建文件夹被拒绝、释放时清除旧的组成员关系并保留自身数据。
@@ -150,6 +157,7 @@
 - ADR：[0010 内置清单与安装策略](../adr/0010-vendor-a-reviewed-app-catalog-with-an-install-policy.md)、[0009 Docker Engine 与专用容器代理](../adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)、[0022 应用容器只以应用身份接触共享空间](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)
 - 调查：[应用容器拿不到共享空间的组权限，root 镜像绕过 ACL](../investigations/2026-10-14-app-containers-and-the-shared-acl.md)
 - 调查：[安装失败的应用显示为“已安装”，容器代理重启打断安装](../investigations/2026-10-21-failed-app-install-shown-as-installed.md)
+- 调查：[镜像仓库一次限流就让应用安装失败](../investigations/2026-10-28-registry-rate-limit-failed-install.md)
 - 规格：[容器管理](container-management.md)
 - 运行手册：[安装 Docker 与容器代理](../runbooks/install-container-agent.md)
 - 规格：[设置](settings.md)（视觉语言）
