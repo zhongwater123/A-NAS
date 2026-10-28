@@ -572,6 +572,9 @@ export function FilePanel({
           <div className={styles.fileClipboardState} role="status">
             {clipboard.mode === "copy" ? "已复制" : "已剪切"}
             {clipboard.entries.length === 1 ? `“${clipboard.entries[0].name}”` : ` ${clipboard.entries.length} 个项目`}
+            {clipboard.mode === "move" && clipboard.entries.some((entry) => entry.spaceId !== spaceID) && (
+              <span>；跨空间移动后，源内容保留在原空间回收站，清空或到期前仍占用容量。</span>
+            )}
           </div>
         )}
 

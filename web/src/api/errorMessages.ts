@@ -10,6 +10,7 @@ const messages: Record<string, string> = {
   ...accountErrors,
   ...nameErrors,
   volume_unavailable: "数据卷当前不可用，请检查存储状态后重试",
+  source_changed: "源文件在复制期间被修改，请停止写入后重试",
   network_error: "网络连接中断，请检查网络后重试",
   authentication_required: "登录已失效或账号不可用，请重新登录",
   csrf_failed: "登录状态已变化，请刷新页面后重试",
