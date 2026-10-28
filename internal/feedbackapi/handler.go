@@ -1,6 +1,6 @@
 // Package feedbackapi exposes 问题反馈 under /api/v1/feedback. It does not
 // authenticate: the Product Service wraps it so that every request carries
-// the signed-in user (WithUser) and writes have passed CSRF checks. Every
+// the signed-in user (accounts.WithUser) and writes have passed CSRF checks. Every
 // signed-in account may read and change every item and every comment.
 package feedbackapi
 
@@ -27,13 +27,6 @@ const maxRequestBytes = feedback.MaxImages*feedback.MaxImageBytes + 1<<20
 
 // maxResolveBytes bounds the JSON that marks an item resolved.
 const maxResolveBytes = 1 << 10
-
-type userKey struct{}
-
-// WithUser attaches the signed-in user.
-func WithUser(ctx context.Context, user accounts.User) context.Context {
-	return context.WithValue(ctx, userKey{}, user)
-}
 
 type handler struct {
 	store  *feedback.Store
@@ -83,7 +76,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) withUser(next func(http.ResponseWriter, *http.Request, feedback.Actor)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(userKey{}).(accounts.User)
+		user, ok := accounts.UserFrom(r.Context())
 		if !ok || user.ID == "" {
 			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return

@@ -15,22 +15,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker"
 )
 
 func TestMain(m *testing.M) {
 	// The File Broker re-executes this binary as a per-user worker; it runs
 	// as that user with an empty environment, so check for it first.
-	if len(os.Args) == 3 && os.Args[1] == filebroker.WorkerArgument {
-		if err := filebroker.RunWorker(os.Args[2]); err != nil {
+	if len(os.Args) == 3 && os.Args[1] == rootbroker.WorkerArgument {
+		if err := rootbroker.RunWorker(os.Args[2]); err != nil {
 			_, _ = os.Stderr.WriteString(err.Error() + "\n")
 			os.Exit(1)
 		}
 		os.Exit(0)
 	}
-	if len(os.Args) == 2 && os.Args[1] == filebroker.ProbeArgument {
-		if err := filebroker.RunProbe(); err != nil {
+	if len(os.Args) == 2 && os.Args[1] == rootbroker.ProbeArgument {
+		if err := rootbroker.RunProbe(); err != nil {
 			_, _ = os.Stderr.WriteString(err.Error() + "\n")
 			os.Exit(1)
 		}
@@ -50,9 +50,9 @@ func TestRootIdentityLifecycle(t *testing.T) {
 	startSamba(t)
 	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: filepath.Join(t.TempDir(), "offline")})
 	password := "owner password for testing"
-	if err := executor.SetCredential(ctx, accounts.CredentialRequest{
+	if err := executor.SetCredential(ctx, accountid.CredentialRequest{
 		UserID: "user:owner", PrivateSpaceID: "space:owner", Username: "owner",
-		Password: password, Role: accounts.RoleAdmin, UID: 20100, Enabled: true,
+		Password: password, Role: accountid.RoleAdmin, UID: 20100, Enabled: true,
 	}); err != nil {
 		t.Fatalf("SetCredential(owner) error = %v", err)
 	}
@@ -70,11 +70,11 @@ func TestRootIdentityLifecycle(t *testing.T) {
 	}
 
 	before := run(t, "getent", "passwd", "daemon")
-	err := executor.SetCredential(ctx, accounts.CredentialRequest{
+	err := executor.SetCredential(ctx, accountid.CredentialRequest{
 		UserID: "user:daemon", PrivateSpaceID: "space:daemon", Username: "daemon",
-		Password: "daemon password for testing", Role: accounts.RoleMember, UID: 20101, Enabled: true,
+		Password: "daemon password for testing", Role: accountid.RoleMember, UID: 20101, Enabled: true,
 	})
-	if !errors.Is(err, accounts.ErrIdentityConflict) {
+	if !errors.Is(err, accountid.ErrIdentityConflict) {
 		t.Fatalf("SetCredential(daemon) error = %v, want ErrIdentityConflict", err)
 	}
 	if after := run(t, "getent", "passwd", "daemon"); after != before {
@@ -162,9 +162,9 @@ func TestRootRefusedIdentityRegistryLeavesSpacesAlone(t *testing.T) {
 	setUpDataVolume(t, mount)
 	startSamba(t)
 	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: mount})
-	if err := executor.SetCredential(ctx, accounts.CredentialRequest{
+	if err := executor.SetCredential(ctx, accountid.CredentialRequest{
 		UserID: "user:regcheck", PrivateSpaceID: "space:regcheck", Username: "regcheck",
-		Password: "regcheck password for tests", Role: accounts.RoleMember, UID: 20190, Enabled: true,
+		Password: "regcheck password for tests", Role: accountid.RoleMember, UID: 20190, Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}

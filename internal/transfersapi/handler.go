@@ -1,7 +1,7 @@
 // Package transfersapi exposes 传输中心: /api/v1/transfers to follow and
 // manage uploads and downloads, and /api/v1/uploads, the tus endpoint that
 // uploads arrive at (ADR 0019). Like feedbackapi it does not authenticate:
-// the Product Service attaches the signed-in user (WithUser) and the session
+// the Product Service attaches the signed-in user (accounts.WithUser) and the session
 // token the File Broker needs, and checks CSRF on writes.
 package transfersapi
 
@@ -31,15 +31,8 @@ const (
 // long, so a vanished browser frees its upload for another to resume.
 const networkTimeout = 60 * time.Second
 
-type userKey struct{}
-
-// WithUser attaches the signed-in user.
-func WithUser(ctx context.Context, user accounts.User) context.Context {
-	return context.WithValue(ctx, userKey{}, user)
-}
-
 func userOf(ctx context.Context) (accounts.User, bool) {
-	user, ok := ctx.Value(userKey{}).(accounts.User)
+	user, ok := accounts.UserFrom(ctx)
 	return user, ok && user.ID != ""
 }
 

@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/appid"
 	appstoreagent "github.com/zhongwater123/A-NAS/internal/appstore/agent"
 )
@@ -25,9 +25,9 @@ func TestRootAppIdentityAndFolders(t *testing.T) {
 	setUpDataVolume(t, mount)
 	startSamba(t)
 	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: mount})
-	if err := executor.SetCredential(ctx, accounts.CredentialRequest{
+	if err := executor.SetCredential(ctx, accountid.CredentialRequest{
 		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-		Password: "alice password for tests", Role: accounts.RoleMember, UID: 20111, Enabled: true,
+		Password: "alice password for tests", Role: accountid.RoleMember, UID: 20111, Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestRootAppIdentityAndFolders(t *testing.T) {
 	}
 	expect("app writes its data", true, asContainer("app-memos", "", appData, "echo db > /mnt/db"))
 	expect("app without the plan's Shared group writes Shared", false, asContainer("app-memos", "", media, "echo song > /mnt/song.txt"))
-	expect("app with the plan's Shared group writes Shared", true, asContainer("app-memos", accounts.UsersGroup, media, "echo song > /mnt/song.txt"))
+	expect("app with the plan's Shared group writes Shared", true, asContainer("app-memos", accountid.UsersGroup, media, "echo song > /mnt/song.txt"))
 	expect("alice edits the app's Shared file", true, asUser("alice", "sh", "-c", "echo more >> "+filepath.Join(media, "song.txt")))
 	expect("app reads alice's private space", false, asUser("app-memos", "cat", filepath.Join(private, "secret.txt")))
 	expect("alice reads the app's private data", false, asUser("alice", "cat", filepath.Join(appData, "db")))
@@ -90,7 +90,7 @@ func TestRootAppIdentityAndFolders(t *testing.T) {
 	}
 
 	// An account that joined a-nas-users before ADR 0022 leaves it.
-	run(t, "usermod", "--append", "--groups", accounts.UsersGroup, "app-memos")
+	run(t, "usermod", "--append", "--groups", accountid.UsersGroup, "app-memos")
 	if err := executor.ReleaseApp(ctx, "memos"); err != nil {
 		t.Fatalf("ReleaseApp() error = %v", err)
 	}

@@ -24,16 +24,6 @@ import (
 
 const PathPrefix = "/api/v1/shares"
 
-type userKey struct{}
-
-func WithUser(ctx context.Context, user accounts.User) context.Context {
-	return context.WithValue(ctx, userKey{}, user)
-}
-func UserFrom(ctx context.Context) (accounts.User, bool) {
-	user, ok := ctx.Value(userKey{}).(accounts.User)
-	return user, ok && user.ID != ""
-}
-
 type handler struct {
 	store   *shares.Store
 	logger  *slog.Logger
@@ -68,7 +58,7 @@ func Endpoints() []apiroute.Endpoint {
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if _, ok := UserFrom(r.Context()); !ok {
+	if _, ok := accounts.UserFrom(r.Context()); !ok {
 		httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 		return
 	}
@@ -83,7 +73,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mux.ServeHTTP(w, r)
 }
 func actor(r *http.Request) shares.User {
-	u, _ := UserFrom(r.Context())
+	u, _ := accounts.UserFrom(r.Context())
 	return shares.User{ID: u.ID, Username: u.Username}
 }
 func (h *handler) routes() {

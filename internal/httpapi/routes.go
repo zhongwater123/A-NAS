@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"context"
 	"crypto/subtle"
 	"fmt"
 	"net/http"
@@ -80,8 +79,8 @@ func (h *productHandler) table() []apiroute.Route {
 }
 
 // mounts are the APIs that serve every method under their prefix and
-// receive the signed-in user through their package's WithUser. Each lists
-// the operations it serves there, which the table expands (apiroute.Expand).
+// receive the signed-in user through accounts.WithUser. Each lists the
+// operations it serves there, which the table expands (apiroute.Expand).
 func (h *productHandler) mounts() []apiroute.Route {
 	var routes []apiroute.Route
 	mount := func(prefix string, posture apiroute.Posture, handler apiroute.Handler, endpoints []apiroute.Endpoint) {
@@ -97,23 +96,23 @@ func (h *productHandler) mounts() []apiroute.Route {
 		mount(appstoreapi.ShortcutsPrefix, apiroute.Session, serve(h.AppShortcuts), appstoreapi.ShortcutEndpoints())
 	}
 	if h.Shares != nil {
-		mount(sharesapi.PathPrefix, apiroute.Session, withUser(h.Shares, sharesapi.WithUser), sharesapi.Endpoints())
+		mount(sharesapi.PathPrefix, apiroute.Session, withUser(h.Shares), sharesapi.Endpoints())
 	}
 	if h.Photos != nil {
 		mount(photosapi.PathPrefix, apiroute.Session, serve(h.Photos), photosapi.Endpoints())
 	}
 	if h.Media != nil {
-		mount(mediaapi.PathPrefix, apiroute.Session, withUser(h.Media, mediaapi.WithUser), mediaapi.Endpoints())
+		mount(mediaapi.PathPrefix, apiroute.Session, withUser(h.Media), mediaapi.Endpoints())
 	}
 	if h.Feedback != nil {
-		mount(feedbackapi.PathPrefix, apiroute.Session, withUser(h.Feedback, feedbackapi.WithUser), feedbackapi.Endpoints())
+		mount(feedbackapi.PathPrefix, apiroute.Session, withUser(h.Feedback), feedbackapi.Endpoints())
 	}
 	if h.Assistant != nil {
-		mount(assistantapi.PathPrefix, apiroute.Session, withUser(h.Assistant, assistantapi.WithUser), assistantapi.Endpoints())
+		mount(assistantapi.PathPrefix, apiroute.Session, withUser(h.Assistant), assistantapi.Endpoints())
 	}
 	if h.Transfers != nil {
 		for _, prefix := range []string{transfersapi.TransfersPath, transfersapi.UploadsPath} {
-			mount(prefix, apiroute.Session, withUser(h.Transfers, transfersapi.WithUser), transfersapi.Endpoints())
+			mount(prefix, apiroute.Session, withUser(h.Transfers), transfersapi.Endpoints())
 		}
 	}
 	return routes
@@ -220,9 +219,9 @@ func serve(next http.Handler) apiroute.Handler {
 }
 
 // withUser hands an API the signed-in user through attach.
-func withUser(next http.Handler, attach func(context.Context, accounts.User) context.Context) apiroute.Handler {
+func withUser(next http.Handler) apiroute.Handler {
 	return func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
-		next.ServeHTTP(w, r.WithContext(attach(r.Context(), session.User)))
+		next.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), session.User)))
 	}
 }
 

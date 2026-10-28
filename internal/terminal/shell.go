@@ -4,31 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/zhongwater123/A-NAS/internal/ptyshell"
 )
 
-// Shell is an interactive shell on a PTY.
-type Shell interface {
-	io.ReadWriter
-	Resize(cols, rows uint16) error
-	// Done is closed once the shell has exited; ExitCode is meaningful after
-	// that and is -1 when unknown.
-	Done() <-chan struct{}
-	ExitCode() int
-	// Close hangs up the shell and waits for it to exit.
-	Close() error
-}
-
-// Spawner starts shells. In production the File Broker starts them as the
-// signed-in administrator's Linux account (ADR 0008); ctx carries the
-// session token. Development uses a local PTY.
-type Spawner interface {
-	StartShell(ctx context.Context, cols, rows uint16) (Shell, error)
-}
+// Shell and Spawner live in internal/ptyshell, which the root file broker
+// starts shells with without linking this WebSocket handler (#221).
+type (
+	Shell   = ptyshell.Shell
+	Spawner = ptyshell.Spawner
+)
 
 const outputDrainTimeout = 500 * time.Millisecond
 

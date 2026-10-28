@@ -21,7 +21,7 @@ func TestSessionDirectoryResolvesOnlyLiveSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{Now: func() time.Time { return now }})
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{PasswordCost: cheapPasswords, Now: func() time.Time { return now }})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestSessionDirectoryResolvesActiveAccountsByUID(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{})
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +164,7 @@ func TestSessionThatMustChangeItsPasswordActsOnNoFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{})
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +215,7 @@ func TestOneFailedSessionLookupLeavesTheOthersWorking(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{})
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
 	if _, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple"); err != nil {
 		t.Fatal(err)
 	}

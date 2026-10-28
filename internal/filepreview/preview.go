@@ -21,10 +21,19 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/mediatype"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 var ErrUnsupported = errors.New("file has no rendered preview")
+
+// MaxHEIFSource bounds a HEIC or HEIF picture rendered for a preview, in the
+// file manager and in shares alike: a phone's photo takes a few MiB, and the
+// worker reads the whole file (#222).
+const MaxHEIFSource = 64 << 20
+
+// ErrTooLarge reports a picture over MaxHEIFSource.
+var ErrTooLarge = fmt.Errorf("%w: the picture is larger than 64 MiB", ErrUnsupported)
 
 type Source interface {
 	OpenContent(context.Context, accounts.User, string) (files.Content, error)
@@ -57,10 +66,10 @@ func New(source Source, worker mediaworker.Worker) *Service {
 }
 
 func kind(name string) string {
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".heic", ".heif":
+	switch {
+	case IsHEIF(name):
 		return "heif"
-	case ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mpg", ".mpeg", ".mts", ".m2ts", ".flv", ".f4v", ".wmv", ".3gp":
+	case mediatype.IsVideo(name):
 		return "video"
 	}
 	return ""
@@ -117,8 +126,13 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 	}
 	var result Image
 	if format == "heif" {
-		result.ContentType = "image/png"
-		result.Data, err = s.worker.Image(ctx, content.Reader, size)
+		// The opened file's size, not the catalog's: the file may have
+		// changed over SMB since the last reconcile.
+		var info os.FileInfo
+		if info, err = content.Reader.Stat(); err == nil {
+			result.ContentType = "image/png"
+			result.Data, err = RenderHEIF(ctx, s.worker, content.Reader, info.Size(), size)
+		}
 	} else {
 		result.ContentType = "image/jpeg"
 		var probe mediaworker.Probe
@@ -191,6 +205,28 @@ func revisionKey(actor, id, format string, size int, info os.FileInfo) string {
 
 func imageTag(key string, data []byte) string {
 	return fmt.Sprintf("\"%s-%x\"", key, sha256.Sum256(data))
+}
+
+// IsHEIF reports whether name is a HEIC or HEIF picture.
+func IsHEIF(name string) bool {
+	extension := strings.ToLower(filepath.Ext(name))
+	return extension == ".heic" || extension == ".heif"
+}
+
+// RenderHEIF renders a HEIC or HEIF picture of sizeBytes as a PNG of at most
+// size pixels a side, for the file manager's previews and for shares'.
+func RenderHEIF(ctx context.Context, worker mediaworker.Worker, source *os.File, sizeBytes int64, size int) ([]byte, error) {
+	if sizeBytes > MaxHEIFSource {
+		return nil, ErrTooLarge
+	}
+	data, err := worker.Image(ctx, source, size)
+	if err != nil {
+		return nil, err
+	}
+	if !validImage(Image{Data: data, ContentType: "image/png"}) {
+		return nil, mediaworker.ErrUnreadable
+	}
+	return data, nil
 }
 
 func validImage(result Image) bool {

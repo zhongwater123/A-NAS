@@ -56,7 +56,7 @@
     - 调度器启动时清扫，数据卷离线时每分钟重试，之后每小时一次，见 [`schedule.go`](../../internal/files/schedule.go)。[`main.go`](../../cmd/anas-api/main.go) 停止时先等调度器结束，再关闭 `files.db`。
   - 复制：Product Service 在副本创建前就持有它的名字。目录对账以 `ScanSkip.Opaque` 只列出 `.a-nas-copy-*` 而不进入，删除无人持有的副本，见 [`service.go`](../../internal/files/service.go)。
 - 测试：
-  - [Host Agent 客户端测试](../../internal/hoststate/agent/agent_test.go)：10 万个对象按序完整到达；中途失败、缺结束行与总数不符都被拒绝；删除与清扫的往返。
+  - [Host Agent 客户端测试](../../internal/hoststate/agent/rootagent/agent_test.go)：10 万个对象按序完整到达；中途失败、缺结束行与总数不符都被拒绝；删除与清扫的往返。
   - [快照清扫测试](../../internal/files/snapshot_sweep_test.go)：清单失败或请求取消后已拍的快照被删除；删除已不在的快照；清扫两个方向且离线不动；清扫不碰正在拍摄的快照；调度器启动即清扫；2 万个文件的定时快照；开发后端的清扫与修改时间。
   - [复制临时副本测试](../../internal/files/upload_test.go)：进行中的副本保留，无人持有的删除。
   - [系统测试](../../scripts/system-test.sh)在真实安装与 Btrfs 上：

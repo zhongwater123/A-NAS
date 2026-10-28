@@ -146,7 +146,7 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 func mediaAPIFor(service *media.Service, user accounts.User) http.Handler {
 	api := mediaapi.New(service, nil)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		api.ServeHTTP(w, r.WithContext(mediaapi.WithUser(r.Context(), user)))
+		api.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), user)))
 	})
 }
 

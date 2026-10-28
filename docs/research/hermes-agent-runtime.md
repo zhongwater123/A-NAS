@@ -430,7 +430,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 
 ### 验证
 
-- Go：文件代理（[`assistant_test.go`](../../internal/filebroker/assistant_test.go)）的会话核对、管理员连不到别人的助手、会话失效与停止时切断、2026-10-20 起的登录与令牌缓存；产品服务（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)，对着模拟 `hermes serve` 的 [`fakeserve_test.go`](../../internal/assistantapi/fakeserve_test.go)）的白名单、信息去除、审批卡片与授权、回合期间与回合后的连接保持，实例重启后重新登录（`login_test.go`）。
+- Go：文件代理（[`assistant_test.go`](../../internal/filebroker/rootbroker/assistant_test.go)）的会话核对、管理员连不到别人的助手、会话失效与停止时切断、2026-10-20 起的登录与令牌缓存；产品服务（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)，对着模拟 `hermes serve` 的 [`fakeserve_test.go`](../../internal/assistantapi/fakeserve_test.go)）的白名单、信息去除、审批卡片与授权、回合期间与回合后的连接保持，实例重启后重新登录（`login_test.go`）。
 - 系统测试（2026-10-15）：实例套接字只有 root 能连，产品服务不保存令牌；执行方拒绝没有会话与他人会话的请求；经闸门的网关到得了 alice 的实例，`shell.exec` 得 -32601，`session.create` 带 `profile` 得 -32602，新对话的结果中没有系统提示；alice 退出登录后网关在 30 秒时以 1013 关闭。完整链路：假模型调用“提交更改”，窗口收到卡片，alice 以本人会话确认，文件代理以 alice 身份写入、旧版本进回收站，助手在同一回合得到“1 项更改已执行”。
 - 浏览器（本地原型，DeepSeek flash，`approvals.timeout` 120 秒）：窗口 A 请助手改 `计划.md`，卡片只在 A 的对话中出现，显示差异，侧栏标“等你确认”；alice 另一次登录的窗口 B 打开同一对话后看到同一张卡片并确认，两个窗口的卡片都变为“已按你的确认完成”，A 也收到这一轮的回答，旧版本在回收站。不确认时 120 秒后卡片变为“等待确认超时”，助手说明文件没有变化。
 

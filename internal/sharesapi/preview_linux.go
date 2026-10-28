@@ -4,10 +4,13 @@ package sharesapi
 
 import (
 	"fmt"
-	"github.com/zhongwater123/A-NAS/internal/shares"
-	"golang.org/x/sys/unix"
 	"io"
 	"os"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/zhongwater123/A-NAS/internal/filepreview"
+	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
 // The decoder receives a sealed read-only anonymous descriptor, never a
@@ -23,7 +26,7 @@ func anonymousInput(reader io.Reader) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if n > maxPreviewSource {
+	if n > filepreview.MaxHEIFSource {
 		return nil, shares.ErrInvalid
 	}
 	if _, err = unix.FcntlInt(file.Fd(), unix.F_ADD_SEALS, unix.F_SEAL_WRITE|unix.F_SEAL_GROW|unix.F_SEAL_SHRINK|unix.F_SEAL_SEAL); err != nil {

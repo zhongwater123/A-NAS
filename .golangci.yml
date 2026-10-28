@@ -9,6 +9,7 @@ linters:
   default: none
   enable:
     - bodyclose
+    - depguard
     - errcheck
     - errorlint
     - gosec
@@ -20,6 +21,147 @@ linters:
     - unused
 
   settings:
+    depguard:
+      # What the root binaries link (#221). Each rule lists every package in
+      # one binary's dependency closure and allows only the imports they have
+      # today, so a new import there is a reviewed change to this list; shrink
+      # the lists as packages split further. Tests are left out: they may run
+      # a Product Service client against the root side.
+      rules:
+        host-agent:
+          list-mode: strict
+          files:
+            - "**/cmd/anas-host-agent/*.go"
+            - "**/internal/accountid/*.go"
+            - "**/internal/appid/*.go"
+            - "**/internal/assistantchanges/*.go"
+            - "**/internal/assistantlogin/*.go"
+            - "**/internal/capacity/*.go"
+            - "**/internal/datavolume/*.go"
+            - "**/internal/envconfig/*.go"
+            - "**/internal/filebroker/rootbroker/*.go"
+            - "**/internal/filebroker/wire/*.go"
+            - "**/internal/filesystem/*.go"
+            - "**/internal/hostops/linux/*.go"
+            - "**/internal/hoststate/*.go"
+            - "**/internal/hoststate/agent/rootagent/*.go"
+            - "**/internal/hoststate/agent/wire/*.go"
+            - "**/internal/hoststate/linux/*.go"
+            - "**/internal/httpjson/*.go"
+            - "**/internal/ptyshell/*.go"
+            - "**/internal/sessiondir/*.go"
+            - "**/internal/sessionlookup/*.go"
+            - "**/internal/sqlitedb/*.go"
+            - "**/internal/systemdscope/*.go"
+            - "**/internal/systemlog/*.go"
+            - "**/internal/systemlog/journal/*.go"
+            - "**/internal/taskmanager/*.go"
+            - "**/internal/unixmsg/*.go"
+            - "!$test"
+          allow:
+            - "$gostd"
+            - "github.com/caarlos0/env/v11"
+            - "github.com/coreos/go-systemd/v22/dbus"
+            - "github.com/coreos/go-systemd/v22/unit"
+            - "github.com/creack/pty"
+            - "github.com/godbus/dbus/v5"
+            - "github.com/landlock-lsm/go-landlock/landlock"
+            - "github.com/mattn/go-sqlite3"
+            - "golang.org/x/sync/singleflight"
+            - "golang.org/x/sys/unix"
+            - "github.com/zhongwater123/A-NAS/internal/accountid$"
+            - "github.com/zhongwater123/A-NAS/internal/appid$"
+            - "github.com/zhongwater123/A-NAS/internal/assistantchanges$"
+            - "github.com/zhongwater123/A-NAS/internal/assistantlogin$"
+            - "github.com/zhongwater123/A-NAS/internal/capacity$"
+            - "github.com/zhongwater123/A-NAS/internal/datavolume$"
+            - "github.com/zhongwater123/A-NAS/internal/envconfig$"
+            - "github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker$"
+            - "github.com/zhongwater123/A-NAS/internal/filebroker/wire$"
+            - "github.com/zhongwater123/A-NAS/internal/filesystem$"
+            - "github.com/zhongwater123/A-NAS/internal/hostops/linux$"
+            - "github.com/zhongwater123/A-NAS/internal/hoststate$"
+            - "github.com/zhongwater123/A-NAS/internal/hoststate/agent/rootagent$"
+            - "github.com/zhongwater123/A-NAS/internal/hoststate/agent/wire$"
+            - "github.com/zhongwater123/A-NAS/internal/hoststate/linux$"
+            - "github.com/zhongwater123/A-NAS/internal/httpjson$"
+            - "github.com/zhongwater123/A-NAS/internal/ptyshell$"
+            - "github.com/zhongwater123/A-NAS/internal/sessiondir$"
+            - "github.com/zhongwater123/A-NAS/internal/sessionlookup$"
+            - "github.com/zhongwater123/A-NAS/internal/sqlitedb$"
+            - "github.com/zhongwater123/A-NAS/internal/systemdscope$"
+            - "github.com/zhongwater123/A-NAS/internal/systemlog$"
+            - "github.com/zhongwater123/A-NAS/internal/systemlog/journal$"
+            - "github.com/zhongwater123/A-NAS/internal/taskmanager$"
+            - "github.com/zhongwater123/A-NAS/internal/unixmsg$"
+        container-agent:
+          list-mode: strict
+          files:
+            - "**/cmd/anas-container-agent/*.go"
+            - "**/internal/appid/*.go"
+            - "**/internal/appstore/*.go"
+            - "**/internal/appstore/agent/*.go"
+            - "**/internal/appstore/engine/*.go"
+            - "**/internal/containers/*.go"
+            - "**/internal/containers/agent/*.go"
+            - "**/internal/containers/docker/*.go"
+            - "**/internal/envconfig/*.go"
+            - "**/internal/httpjson/*.go"
+            - "!$test"
+          allow:
+            - "$gostd"
+            - "github.com/caarlos0/env/v11"
+            - "github.com/compose-spec/compose-go/v2/loader"
+            - "github.com/compose-spec/compose-go/v2/types"
+            - "github.com/containerd/errdefs"
+            - "github.com/moby/moby/api/pkg/stdcopy"
+            - "github.com/moby/moby/api/types/container"
+            - "github.com/moby/moby/api/types/image"
+            - "github.com/moby/moby/api/types/mount"
+            - "github.com/moby/moby/client"
+            - "go.yaml.in/yaml/v4"
+            - "golang.org/x/mod/semver"
+            - "github.com/zhongwater123/A-NAS/internal/appid$"
+            - "github.com/zhongwater123/A-NAS/internal/appstore$"
+            - "github.com/zhongwater123/A-NAS/internal/appstore/agent$"
+            - "github.com/zhongwater123/A-NAS/internal/appstore/engine$"
+            - "github.com/zhongwater123/A-NAS/internal/containers$"
+            - "github.com/zhongwater123/A-NAS/internal/containers/agent$"
+            - "github.com/zhongwater123/A-NAS/internal/containers/docker$"
+            - "github.com/zhongwater123/A-NAS/internal/envconfig$"
+            - "github.com/zhongwater123/A-NAS/internal/httpjson$"
+        # The Product Service and its other processes reach the root side only
+        # through clients and contract packages.
+        product:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/cmd/anas-host-agent/*.go"
+            - "!**/internal/filebroker/rootbroker/*.go"
+            - "!**/internal/hoststate/agent/rootagent/*.go"
+            - "!**/internal/hostops/linux/*.go"
+            - "!**/internal/hoststate/linux/*.go"
+            - "!**/internal/systemdscope/*.go"
+            - "!**/internal/assistantchanges/*.go"
+            - "!**/internal/systemlog/journal/*.go"
+          deny:
+            - pkg: "github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker"
+              desc: the root file broker; use internal/filebroker
+            - pkg: "github.com/zhongwater123/A-NAS/internal/hoststate/agent/rootagent"
+              desc: the Host Agent's handler; use internal/hoststate/agent
+            - pkg: "github.com/zhongwater123/A-NAS/internal/hostops"
+              desc: privileged executors run in the Host Agent only
+            - pkg: "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
+              desc: host readers run in the Host Agent only
+            - pkg: "github.com/zhongwater123/A-NAS/internal/systemdscope"
+              desc: scopes for the broker's processes, in the Host Agent only
+            - pkg: "github.com/zhongwater123/A-NAS/internal/assistantchanges"
+              desc: the executor runs in the root broker; use filebroker.ErrChange*
+            - pkg: "github.com/zhongwater123/A-NAS/internal/systemlog/journal"
+              desc: journalctl runs in the Host Agent only
+            - pkg: "github.com/landlock-lsm/go-landlock"
+              desc: the root broker confines its workers
     errcheck:
       exclude-functions:
         # A query's failure shows in rows.Err after the loop, which
