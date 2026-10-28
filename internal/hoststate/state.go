@@ -65,6 +65,14 @@ type System struct {
 	Architecture    string
 	UptimeSeconds   uint64
 	Health          Health
+	// Storage observes the filesystem holding system state, independently of
+	// the hardware disk size and the data volume. Nil means not observed.
+	Storage *StorageUsage
+}
+
+type StorageUsage struct {
+	TotalBytes     uint64
+	AvailableBytes uint64
 }
 
 type Disk struct {

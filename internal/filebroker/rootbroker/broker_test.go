@@ -103,6 +103,9 @@ func TestClientRunsFileOperationsThroughAWorker(t *testing.T) {
 	if err := fsys.Copy(ctx, filepath.Join(space, "docs"), filepath.Join(space, "copy")); err != nil {
 		t.Fatalf("Copy() error = %v", err)
 	}
+	if info, err := fsys.Lstat(ctx, filepath.Join(space, "copy", "note.txt")); err != nil || !info.ModTime.Equal(saved) {
+		t.Fatalf("copied modification time = %v, %v; want %v", info.ModTime, err, saved)
+	}
 	if size, err := fsys.Usage(ctx, space); err != nil || size != 2*int64(len(contents)) {
 		t.Fatalf("Usage() = %d, %v", size, err)
 	}

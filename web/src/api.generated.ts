@@ -359,7 +359,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** @description Disable an account. Web sign-in ends first; when the Host Agent then fails to disable the SMB credential the answer is 503 smb_disable_pending, and disabling again retries only that step. */
+        /** @description Disable an account. Web sign-in ends first; if the Host Agent cannot disable SMB access or assistant units, the response retains the 503 smb_disable_pending code. Disabling again retries the host operations. */
         delete: operations["disableUser"];
         options?: never;
         head?: never;
@@ -3758,6 +3758,7 @@ export interface components {
             uptimeSeconds: number;
             health: components["schemas"]["Health"];
             healthFindings: components["schemas"]["HealthFindings"];
+            storage?: components["schemas"]["SystemStorage"];
             productVersion: string;
             /** Format: date-time */
             observedAt: string;
@@ -3771,6 +3772,7 @@ export interface components {
             uptimeSeconds: number;
             health: components["schemas"]["Health"];
             healthFindings: components["schemas"]["HealthFindings"];
+            storage?: components["schemas"]["SystemStorage"];
         };
         /** @description Why the system is not plainly healthy, most severe first; empty when healthy. The system's health is the severity of the first finding (docs/specs/system-health.md). */
         HealthFindings: components["schemas"]["HealthFinding"][];
@@ -5506,6 +5508,13 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** @description Observed capacity and available space on the filesystem at /var/lib, where system state is stored; absent when unavailable. */
+        SystemStorage: {
+            /** Format: int64 */
+            totalBytes: number;
+            /** Format: int64 */
+            availableBytes: number;
+        };
     };
     responses: {
         /** @description Product operation error. */
@@ -5564,7 +5573,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The operation cannot run now: plan_changed, app_busy, already_installed, not_installed, port_in_use, name_in_use, address_pool_missing (the app creates Docker networks but Docker has no A-NAS address pool), docker_runtime_outdated (Docker Compose before 2.30 or an engine API before 1.45 would mount whole volumes), policy_violation or app_engine_error. */
+        /** @description The operation cannot run now: plan_changed, app_busy, already_installed, not_installed, port_in_use, name_in_use, system_storage_full (system state or Docker storage is below the installation reserve), address_pool_missing (the app creates Docker networks but Docker has no A-NAS address pool), docker_runtime_outdated (Docker Compose before 2.30 or an engine API before 1.45 would mount whole volumes), policy_violation or app_engine_error. */
         AppConflict: {
             headers: {
                 [name: string]: unknown;
@@ -5812,6 +5821,7 @@ export type AssistantMemory = components['schemas']['AssistantMemory'];
 export type AssistantApprovalEnvelope = components['schemas']['AssistantApprovalEnvelope'];
 export type AssistantApproval = components['schemas']['AssistantApproval'];
 export type AssistantChange = components['schemas']['AssistantChange'];
+export type SystemStorage = components['schemas']['SystemStorage'];
 export type ResponseProductError = components['responses']['ProductError'];
 export type ResponseMethodNotAllowed = components['responses']['MethodNotAllowed'];
 export type ResponseStateUnavailable = components['responses']['StateUnavailable'];

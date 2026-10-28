@@ -133,6 +133,7 @@ const (
 	CodePermission        = "permission"
 	CodeForbidden         = "forbidden"
 	CodeUnauthenticated   = "unauthenticated"
+	CodeSourceChanged     = "source_changed"
 	CodeUnsupported       = "unsupported"
 	CodeInvalidName       = "invalid_name"
 	CodeNameTooLong       = "name_too_long"
@@ -175,6 +176,8 @@ func (e *Error) Is(target error) bool {
 		return target == fs.ErrPermission || target == filesystem.ErrForbidden
 	case CodeForbidden, CodeUnauthenticated:
 		return target == filesystem.ErrForbidden
+	case CodeSourceChanged:
+		return target == filesystem.ErrSourceChanged
 	case CodeUnsupported:
 		return target == filesystem.ErrUnsupportedType
 	case CodeInvalidName:

@@ -281,6 +281,11 @@ func (e *Executor) DisableCredential(ctx context.Context, username string) error
 	if !accountid.ValidUsername(username) {
 		return errors.New("invalid username")
 	}
+	// Both boundaries must be closed, even if one subsystem is unavailable.
+	return errors.Join(e.disableHostCredential(ctx, username), e.disableAssistant(ctx, username))
+}
+
+func (e *Executor) disableHostCredential(ctx context.Context, username string) error {
 	if _, err := e.runner.Run(ctx, "smbpasswd", []string{"-d", username}, ""); err != nil {
 		return fmt.Errorf("disable Samba credential: %w", err)
 	}
@@ -328,7 +333,8 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
     read only = no
     browseable = yes
     access based share enum = yes
-%s`, interfaces, e.mountPoint, sambaShareOptions, e.mountPoint, accountid.UsersGroup, sambaShareOptions)
+%s`, interfaces, e.mountPoint, sambaShareOptions, e.mountPoint, accountid.UsersGroup,
+		strings.Replace(sambaShareOptions, "veto files = /.a-nas-trash/", "veto files = /.a-nas-trash/Agent空间/", 1))
 	configurationPath := filepath.Join(e.systemRoot, "etc", "samba", "smb.conf")
 	candidatePath := configurationPath + ".candidate"
 	if err := writeAtomic(candidatePath, []byte(configuration), 0o644); err != nil {

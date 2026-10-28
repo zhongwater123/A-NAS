@@ -88,7 +88,7 @@ func (e *Executor) ensureOwnedStore(ctx context.Context, directoryName, serviceU
 	} else if err != nil {
 		return false, err
 	}
-	directory, _, err := e.openVolumeDirectory(photos, 0o700, false)
+	directory, _, err := e.openVolumeDirectory(photos, 0o700, ordinaryDirectory)
 	if err != nil {
 		return false, err
 	}

@@ -152,6 +152,9 @@ func baseState() hoststate.State {
 
 func cloneState(state hoststate.State) hoststate.State {
 	cloned := state
+	if state.System.Storage != nil {
+		cloned.System.Storage = new(*state.System.Storage)
+	}
 	cloned.Disks = make([]hoststate.Disk, len(state.Disks))
 	for i, disk := range state.Disks {
 		cloned.Disks[i] = disk

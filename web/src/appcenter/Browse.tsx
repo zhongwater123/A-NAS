@@ -11,7 +11,16 @@ import {
 
 import { CatalogApp } from "./api";
 import styles from "./appcenter.module.css";
-import { Category, categories, categoryOf, installFailed, otherCategory, stateText, useElapsed } from "./model";
+import {
+  Category,
+  categories,
+  categoryOf,
+  installFailed,
+  otherCategory,
+  stateText,
+  uninstallFailed,
+  useElapsed,
+} from "./model";
 import { AppAction, AppIcon } from "./parts";
 
 interface BrowseProps {
@@ -233,7 +242,7 @@ function statusLine(app: CatalogApp, elapsed?: string): ["ok" | "warn" | "busy" 
     case "uninstalling":
       return ["busy", "正在卸载…"];
     default:
-      return ["error", "安装失败，打开查看原因"];
+      return ["error", uninstallFailed(app) ? "卸载未完成，打开重试" : "安装失败，打开查看原因"];
   }
 }
 
@@ -253,10 +262,12 @@ function AppGrid({
 }
 
 function AppCard({ app, showCategory, onShow, onInstall }: BrowseProps & { app: CatalogApp; showCategory?: boolean }) {
-  const failed = installFailed(app);
+  const failed = installFailed(app) || uninstallFailed(app);
   const partial = app.state === "installed" && app.running < app.total;
   const meta = failed
-    ? "上次安装失败"
+    ? uninstallFailed(app)
+      ? "卸载未完成"
+      : "上次安装失败"
     : partial
       ? `${app.running}/${app.total} 个容器运行中`
       : showCategory

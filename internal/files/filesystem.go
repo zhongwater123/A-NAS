@@ -35,6 +35,7 @@ var (
 	ErrNotFound          = filesystem.ErrNotFound
 	ErrInvalidName       = filesystem.ErrInvalidName
 	ErrNameTooLong       = filesystem.ErrNameTooLong
+	ErrSourceChanged     = filesystem.ErrSourceChanged
 	ErrUnsupportedType   = filesystem.ErrUnsupportedType
 	ErrVolumeUnavailable = filesystem.ErrVolumeUnavailable
 	ErrInsufficientSpace = filesystem.ErrInsufficientSpace

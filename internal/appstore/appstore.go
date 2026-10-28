@@ -25,6 +25,7 @@ var (
 	ErrPortInUse        = errors.New("a published port is already in use")
 	ErrNameInUse        = errors.New("a container name is already in use")
 	ErrUnavailable      = errors.New("app store engine is unavailable")
+	ErrSystemSpace      = errors.New("system storage has too little free space for an app install")
 	// ErrAddressPoolMissing refuses apps that create Docker networks while
 	// Docker allocates from its built-in pools, which overlap common LAN
 	// ranges (ADR 0013).

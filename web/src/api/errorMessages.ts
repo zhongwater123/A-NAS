@@ -10,6 +10,7 @@ const messages: Record<string, string> = {
   ...accountErrors,
   ...nameErrors,
   volume_unavailable: "数据卷当前不可用，请检查存储状态后重试",
+  source_changed: "源文件在复制期间被修改，请停止写入后重试",
   network_error: "网络连接中断，请检查网络后重试",
   authentication_required: "登录已失效或账号不可用，请重新登录",
   csrf_failed: "登录状态已变化，请刷新页面后重试",
@@ -94,6 +95,8 @@ const domains = {
     name_in_use: "容器名已被占用",
     policy_violation: "该应用不符合安装安全策略",
     address_pool_missing: "Docker 尚未配置 A-NAS 网络地址池，暂不能安装会新建网络的应用",
+    system_storage_full:
+      "系统盘或 Docker 存储空间不足，暂不能安装应用。请在设置概览中查看系统盘空间，卸载不用的应用后重试",
     docker_runtime_outdated: "Docker 或 Docker Compose 版本过旧，无法把应用限制在它的文件夹内，请先升级",
     apps_unavailable: "无法连接容器代理",
   },

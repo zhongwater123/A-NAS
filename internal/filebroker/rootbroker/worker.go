@@ -29,6 +29,8 @@ func encodeError(err error) *wire.Error {
 		code = wire.CodePermission
 	case errors.Is(err, filesystem.ErrForbidden):
 		code = wire.CodeForbidden
+	case errors.Is(err, filesystem.ErrSourceChanged):
+		code = wire.CodeSourceChanged
 	case errors.Is(err, filesystem.ErrUnsupportedType), errors.Is(err, syscall.ELOOP), errors.Is(err, syscall.ENOTDIR):
 		code = wire.CodeUnsupported
 	case errors.Is(err, filesystem.ErrNameTooLong), errors.Is(err, syscall.ENAMETOOLONG):

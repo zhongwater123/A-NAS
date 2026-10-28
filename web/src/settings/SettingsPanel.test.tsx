@@ -37,8 +37,11 @@ vi.mock("react-easy-crop", async () => {
   };
 });
 
+// The shell counts in a layout effect, which runs in the commit that puts it
+// in the page: Settings renders it after a request, outside act, where a
+// passive effect may still be pending when findBy sees the element.
 vi.mock("./XtermSession", async () => {
-  const { useEffect, useEffectEvent } = await import("react");
+  const { useEffectEvent, useLayoutEffect } = await import("react");
   return {
     default: function MockXtermSession({ onStatus }: { onStatus: (status: SessionStatus) => void }) {
       const mounted = useEffectEvent(() => {
@@ -46,7 +49,7 @@ vi.mock("./XtermSession", async () => {
         xterm.onStatus = onStatus;
         onStatus({ state: "connected" });
       });
-      useEffect(() => mounted(), []);
+      useLayoutEffect(() => mounted(), []);
       return <div data-testid="xterm-session" />;
     },
   };
@@ -525,6 +528,28 @@ describe("Settings", () => {
     expect(await screen.findByText("运行正常")).toBeTruthy();
     expect(screen.getByText("未发现问题")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "在存储中查看磁盘与数据卷" })).toBeNull();
+  });
+
+  it.each([true, false])("shows system storage separately, observed=%s", async (observed) => {
+    serve({
+      hostState: {
+        ...healthyState,
+        system: {
+          ...healthyState.system,
+          storage: observed ? { totalBytes: 100 * 1024 ** 3, availableBytes: 25 * 1024 ** 3 } : undefined,
+        },
+      },
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "概览");
+    expect(await screen.findByText("系统盘空间")).toBeTruthy();
+    if (observed) {
+      expect(screen.getByText("75%")).toBeTruthy();
+      expect(screen.queryByText("暂时无法读取")).toBeNull();
+    } else {
+      expect(screen.getByText("暂时无法读取")).toBeTruthy();
+    }
   });
 
   it("reports unknown data volume usage instead of a full volume", async () => {
