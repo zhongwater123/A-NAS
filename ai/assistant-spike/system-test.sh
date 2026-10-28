@@ -212,6 +212,12 @@ as bob mkdir -p "$agent_space/alice" || true
 check "after a rename, another member can make an Agent空间 with a folder for alice" \
   test "$(stat -c %U "$agent_space/alice" 2>/dev/null)" = bob
 systemctl restart anas-host-agent
+# The restart recreates /run/a-nas, so the change socket bound at the sandbox's
+# path above is now a deleted file, and a unit started later cannot mount its
+# own over it (226/NAMESPACE). Bind the new socket there again.
+for _ in $(seq 1 50); do [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
+umount /run/anas-change-agent/agent.sock 2>/dev/null || true
+mount --bind /run/a-nas/assistant-changes.sock /run/anas-change-agent/agent.sock || true
 for _ in $(seq 1 50); do
   [[ "$(stat -c %U "$agent_space/alice" 2>/dev/null)" == root ]] && break
   sleep 0.2
