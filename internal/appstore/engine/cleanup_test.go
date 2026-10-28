@@ -160,3 +160,35 @@ func TestInterruptedInstallNeverRecordsMutableTagsForDeletion(t *testing.T) {
 		t.Fatalf("cleanup IDs = %v", docker.cleanedImages)
 	}
 }
+
+func TestInstalledAppSurvivesImageBookkeepingFailure(t *testing.T) {
+	docker := &fakeDocker{inspectImagesErr: errors.New("transient image inspect failure")}
+	runner := &fakeRunner{after: composeOn(docker, []engine.ContainerInfo{{Name: "memos", AppID: "memos", Running: true, Runtime: appstore.RuntimePolicy}})}
+	store, state := newStore(t, docker, runner)
+	plan, err := store.Plan(context.Background(), "memos", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Install(context.Background(), "memos", plan.Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+	apps, err := store.Apps(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app := find(apps, "memos"); app.Job.State != appstore.JobSucceeded || app.Total != 1 {
+		t.Fatalf("running app was rolled back: %+v", app)
+	}
+	if _, err := os.Stat(filepath.Join(state, "apps", "memos", "images.json")); err != nil {
+		t.Fatal(err)
+	}
+	docker.inspectImagesErr = nil
+	if _, err := store.Uninstall(context.Background(), "memos"); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+	if !slices.Equal(docker.cleanedImages, []string{"sha256:installed"}) {
+		t.Fatalf("cleanup did not rediscover image IDs: %v", docker.cleanedImages)
+	}
+}

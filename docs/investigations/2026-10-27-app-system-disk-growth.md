@@ -23,7 +23,7 @@ ANAS_DOCKER_INTEGRATION=1 ANAS_TEST_IMAGE=<带-Python-3-的本地镜像> \
 - 日志策略依赖 Docker 默认设置。[渲染器](../../internal/appstore/render.go)现在为每个服务覆盖日志配置；旧容器的配置不会因更新代理而改变，用运行规则版本标出重装需求。
 - Compose 的 `down --volumes` 会同时删除命名卷，不能直接加上这个参数。[清理流程](../../internal/appstore/engine/cleanup.go)先通过 Docker Engine 删除容器和匿名卷，再由 Compose 清理项目网络，保留命名卷和宿主数据。
 - 容器一旦删除，单靠容器标签无法再找回待清理镜像。安装开始写入空的清理标记，成功后记录容器实际使用的镜像 ID；回滚和恢复同样只从容器与已有 ID 记录取得目标，清理前原子写入并同步记录。容器删除后的失败和重启仍可重试。损坏记录或可变标签会阻止清理，不猜测目标。若拉取在创建任何容器前中断，无法证明归属的下载不自动删除；保存计划中的标签不能作为删除授权，因为停机期间标签可能改指其他镜像。
-- [镜像清理](../../internal/appstore/engine/docker_cleanup.go)检查全部容器，包括已停止的容器，并始终按不可变 ID 非强制删除。多标签或其他 Docker 依赖冲突会保留清理记录并显示失败；不按标签删除，因为标签在核对后仍可能被其他 Docker 操作改指向另一个镜像。管理员处理冲突后可重试，即使原容器已全部移除。
+- [镜像清理](../../internal/appstore/engine/docker_cleanup.go)检查全部容器，包括已停止的容器，并始终按不可变 ID 非强制删除。多标签或其他 Docker 依赖冲突表示镜像仍被引用，保留镜像但允许卸载完成；不按标签删除，因为标签在核对后仍可能被其他 Docker 操作改指向另一个镜像。非冲突的 Docker 错误仍保留记录以便重试，即使原容器已全部移除。
 - [安装空间预检](../../internal/appstore/engine/storage.go)在生成计划和确认安装时检查系统状态所在文件系统与实际 Docker data-root；不足最低余量或无法观测时拒绝。产品接口在预建应用目录前先生成计划。余量是门槛，不是拉取镜像大小的估计，也不是运行时配额。
 
 ## 回归证据
@@ -46,3 +46,7 @@ ANAS_DOCKER_INTEGRATION=1 ANAS_TEST_IMAGE=<带-Python-3-的本地镜像> \
 - [安装与升级容器代理](../runbooks/install-container-agent.md)
 - [实机验收](../runbooks/accept-features-on-experimental-nas.md#应用中心与-docker)
 - [Docker 镜像删除语义](https://docs.docker.com/reference/cli/docker/image/rm/)
+
+## 审查补充
+
+镜像按不可变 ID 非强制删除，Docker 报冲突时作为仍被引用而保留，不阻塞卸载或重新安装。应用通过运行检查后，镜像记录失败只写任务输出并保留已有待清理记录，不回滚正常容器；卸载时从容器重新发现镜像 ID。共享原子写入与容量策略的跨模块重构不混入本次缺陷修复。

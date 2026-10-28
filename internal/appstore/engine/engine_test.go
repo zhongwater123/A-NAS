@@ -19,16 +19,17 @@ import (
 )
 
 type fakeDocker struct {
-	cleanupErr    error
-	imageErr      error
-	cleanedImages []string
-	storageErr    error
-	mu            sync.Mutex
-	containers    []engine.ContainerInfo
-	pools         []netip.Prefix
-	networks      []engine.NetworkInfo
-	mounts        []engine.MountInfo
-	runtimes      []engine.RuntimeInfo
+	cleanupErr       error
+	inspectImagesErr error
+	imageErr         error
+	cleanedImages    []string
+	storageErr       error
+	mu               sync.Mutex
+	containers       []engine.ContainerInfo
+	pools            []netip.Prefix
+	networks         []engine.NetworkInfo
+	mounts           []engine.MountInfo
+	runtimes         []engine.RuntimeInfo
 	// states overrides what ProjectContainers reports.
 	states []engine.ContainerState
 	// apiVersion defaults to an engine that supports volume subpaths.
@@ -40,6 +41,9 @@ func (f *fakeDocker) CheckStorage(context.Context) error { return f.storageErr }
 func (f *fakeDocker) CleanupImages(_ context.Context, project string, references []string) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.inspectImagesErr != nil {
+		return nil, f.inspectImagesErr
+	}
 	if slices.ContainsFunc(f.containers, func(item engine.ContainerInfo) bool { return appstore.ProjectName(item.AppID) == project }) {
 		return []string{"sha256:installed"}, nil
 	}

@@ -99,14 +99,9 @@ func (d DockerInspector) RemoveUnusedImages(ctx context.Context, images []string
 			continue
 		}
 		if errdefs.IsConflict(err) {
-			if used, checkErr := d.imageInUse(ctx, id); checkErr != nil {
-				return checkErr
-			} else if used {
-				continue
-			}
-			// A tag can change between inspect and delete. Do not untag by
-			// name or force an ID removal to bypass a multiple-tag conflict.
-			return fmt.Errorf("镜像 %s 仍有标签或其他依赖，请确认 Docker 冲突后重试：%w", id, err)
+			// Another tag, container or dependent image still owns this ID.
+			// Space reclamation is optional; never force or untag by name.
+			continue
 		}
 		if err != nil {
 			return err

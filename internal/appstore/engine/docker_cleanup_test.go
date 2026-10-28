@@ -54,7 +54,7 @@ func TestImageCleanupDoesNotFollowTagsAfterIDConflict(t *testing.T) {
 	}
 	defer func() { _ = cli.Close() }()
 	err = (DockerInspector{Client: cli}).RemoveUnusedImages(context.Background(), []string{id})
-	if err == nil || deletions.Load() != 1 {
+	if err != nil || deletions.Load() != 1 {
 		t.Fatalf("delete count = %d, error = %v", deletions.Load(), err)
 	}
 }

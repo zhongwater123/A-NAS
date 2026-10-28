@@ -346,7 +346,10 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 			if err == nil {
 				return nil
 			}
-			failure = fmt.Errorf("record installed app images: %w", err)
+			// The app passed all runtime checks. Keep it running; the pending
+			// record survives and cleanup rediscovers IDs from its containers.
+			_, _ = fmt.Fprintf(output, "app is running; image bookkeeping deferred until cleanup: %v\n", err)
+			return nil
 		}
 		if errors.Is(context.Cause(ctx), errStopping) {
 			failure = errStopping
