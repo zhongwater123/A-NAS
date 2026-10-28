@@ -26,6 +26,9 @@ export default defineConfig({
     outDir: "../internal/webui/dist",
     emptyOutDir: true,
     sourcemap: false,
+    // .vite/manifest.json says which files each chunk needs; the first-load
+    // budget reads it (.size-limit.js).
+    manifest: true,
   },
   server: {
     host: "127.0.0.1",

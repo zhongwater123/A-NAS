@@ -104,14 +104,28 @@ type WithoutCSRF<Operation> = Operation extends { parameters: { header: infer He
   : Operation;
 type ClientPaths = { [Path in keyof paths]: { [Method in keyof paths[Path]]: WithoutCSRF<paths[Path][Method]> } };
 
+// The validators are a chunk of their own that the page starts loading at once,
+// beside the first requests, instead of a part of the main bundle. A download
+// that fails fails the responses waiting for it, and the next response tries
+// again, so a moment without the network does not break every later call.
+type ResponseValidators = typeof import("../api.validators.generated")["responseValidators"];
+let validators: Promise<ResponseValidators> | undefined;
+function responseValidators(): Promise<ResponseValidators> {
+  validators ??= import("../api.validators.generated").then(
+    (module) => module.responseValidators,
+    (error: unknown) => {
+      validators = undefined;
+      throw error;
+    },
+  );
+  return validators;
+}
+void responseValidators().catch(() => undefined);
+
 // client calls the product API with the types generated from its contract
 // (api.generated.ts, `npm run generate`). It sends what apiFetch sends, with
 // the CSRF token on writes; call turns its result into data or an APIError.
 // The page's origin is the base because a Request needs an absolute URL.
-// The validators are a chunk of their own that the page starts loading at once,
-// beside the first requests, instead of a part of the main bundle.
-const responseValidators = import("../api.validators.generated").then((module) => module.responseValidators);
-
 export const client = createClient<ClientPaths>({
   baseUrl: window.location.origin,
   headers: { Accept: "application/json" },
@@ -127,7 +141,7 @@ client.use({
   // list (10-07) fails the call instead of blanking the desktop. The list is
   // in tools/openapi/validators.mjs.
   async onResponse({ request, response, schemaPath }) {
-    const validate = (await responseValidators)[`${request.method} ${schemaPath} ${response.status}`];
+    const validate = (await responseValidators())[`${request.method} ${schemaPath} ${response.status}`];
     if (!validate) return undefined;
     const body: unknown = await response
       .clone()
