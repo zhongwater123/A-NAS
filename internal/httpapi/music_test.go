@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/openapitest"
 )
@@ -228,12 +228,12 @@ func TestMusicAPIScansStreamsAndKeepsUserData(t *testing.T) {
 
 // decodingWorker stands in for the media worker: an APE file probes as a
 // one-minute song, and decoding answers with where it started.
-type decodingWorker struct{ mediaworker.Worker }
+type decodingWorker struct{ ffmpegworker.Worker }
 
-func (decodingWorker) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
-	return mediaworker.Probe{Format: mediaworker.ProbeFormat{Name: "ape", Duration: 60, Tags: map[string]string{"title": "Lossless"}}}, nil
+func (decodingWorker) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
+	return ffmpegworker.Probe{Format: ffmpegworker.ProbeFormat{Name: "ape", Duration: 60, Tags: map[string]string{"title": "Lossless"}}}, nil
 }
 
-func (decodingWorker) Audio(_ context.Context, _ *os.File, request mediaworker.AudioRequest) (io.ReadCloser, error) {
+func (decodingWorker) Audio(_ context.Context, _ *os.File, request ffmpegworker.AudioRequest) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("fLaC from " + strconv.FormatFloat(request.Start, 'f', -1, 64))), nil
 }

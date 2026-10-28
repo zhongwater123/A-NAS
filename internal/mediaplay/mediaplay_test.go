@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/mediaplay"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 func TestCapsAreReadFromThePlayersList(t *testing.T) {
@@ -47,17 +47,17 @@ func TestBrowsersPlayVideosTheCheapestWayTheyCan(t *testing.T) {
 		mode   string
 		why    mediaplay.Why
 		mime   string
-		check  func(mediaworker.StreamRequest) bool
+		check  func(ffmpegworker.StreamRequest) bool
 	}{
 		{name: "HEVC where the browser decodes it", source: iphone, caps: mediaplay.Caps{HEVC: true}, mode: mediaplay.Direct},
 		{name: "HEVC where it does not", source: iphone, choice: mediaplay.Choice{Ceiling: tenEighty}, mode: mediaplay.Transcode, why: mediaplay.Picture,
 			mime: `video/mp4; codecs="avc1.640033,mp4a.40.2"`,
-			check: func(r mediaworker.StreamRequest) bool {
+			check: func(r ffmpegworker.StreamRequest) bool {
 				return !r.CopyVideo && r.Height == 1080 && r.MaxBitrate == 8000 && r.CopyAudio
 			}},
 		{name: "H.264 in MP4", source: android, mode: mediaplay.Direct},
 		{name: "a camcorder's transport stream", source: camcorder, mode: mediaplay.Remux, why: mediaplay.Sound, mime: `video/mp4; codecs="avc1.640033,mp4a.40.2"`,
-			check: func(r mediaworker.StreamRequest) bool { return r.CopyVideo && !r.CopyAudio && r.Height == 0 }},
+			check: func(r ffmpegworker.StreamRequest) bool { return r.CopyVideo && !r.CopyAudio && r.Height == 0 }},
 		{name: "a camcorder's stream where AC-3 plays", source: camcorder, caps: mediaplay.Caps{AC3: true}, mode: mediaplay.Remux, why: mediaplay.Container},
 		{name: "an old camera's AVI", source: oldCamera, caps: mediaplay.Caps{HEVC: true}, mode: mediaplay.Transcode, why: mediaplay.Picture,
 			mime: `video/mp4; codecs="avc1.640033,mp4a.40.2"`},
@@ -65,21 +65,21 @@ func TestBrowsersPlayVideosTheCheapestWayTheyCan(t *testing.T) {
 		{name: "WebM where only Matroska is reported", source: webm, caps: mediaplay.Caps{VP9: true, Matroska: true}, mode: mediaplay.Direct},
 		{name: "Matroska in Chromium", source: film, caps: mediaplay.Caps{Matroska: true}, mode: mediaplay.Direct},
 		{name: "Matroska elsewhere", source: film, mode: mediaplay.Remux, why: mediaplay.Container,
-			check: func(r mediaworker.StreamRequest) bool { return r.CopyVideo && r.CopyAudio }},
+			check: func(r ffmpegworker.StreamRequest) bool { return r.CopyVideo && r.CopyAudio }},
 		{name: "silent HEVC copied", source: mediaplay.Source{Container: "mpegts", Video: &mediaplay.Video{Codec: "hevc"}}, caps: mediaplay.Caps{HEVC: true},
 			mode: mediaplay.Remux, why: mediaplay.Container, mime: `video/mp4; codecs="hvc1.1.6.L153.B0"`},
 		{name: "a default AC-3 track", source: mediaplay.Source{Container: mkv, Video: h264, Audio: ac3First}, caps: mediaplay.Caps{Matroska: true},
-			mode: mediaplay.Remux, why: mediaplay.Sound, check: func(r mediaworker.StreamRequest) bool { return r.AudioTrack == 0 && !r.CopyAudio }},
+			mode: mediaplay.Remux, why: mediaplay.Sound, check: func(r ffmpegworker.StreamRequest) bool { return r.AudioTrack == 0 && !r.CopyAudio }},
 		{name: "the second audio track", source: mediaplay.Source{Container: mp4, Video: h264, Audio: ac3First}, caps: mediaplay.Caps{AC3: true},
 			choice: mediaplay.Choice{AudioTrack: &second}, mode: mediaplay.Remux, why: mediaplay.OtherTrack,
-			check: func(r mediaworker.StreamRequest) bool { return r.AudioTrack == 1 && r.CopyAudio }},
+			check: func(r ffmpegworker.StreamRequest) bool { return r.AudioTrack == 1 && r.CopyAudio }},
 		{name: "a default second audio track", source: mediaplay.Source{Container: mp4, Video: h264, Audio: aacSecond}, mode: mediaplay.Direct,
-			check: func(r mediaworker.StreamRequest) bool { return r.AudioTrack == 1 }},
+			check: func(r ffmpegworker.StreamRequest) bool { return r.AudioTrack == 1 }},
 		{name: "an audio stream FFmpeg could not name", source: mediaplay.Source{Container: mkv, Video: h264, Audio: []mediaplay.Audio{{Default: true}}},
 			caps: mediaplay.Caps{Matroska: true}, mode: mediaplay.Remux, why: mediaplay.Sound,
-			check: func(r mediaworker.StreamRequest) bool { return r.AudioTrack == 0 && !r.CopyAudio }},
+			check: func(r ffmpegworker.StreamRequest) bool { return r.AudioTrack == 0 && !r.CopyAudio }},
 		{name: "a lower quality", source: android, choice: mediaplay.Choice{Lower: sevenTwenty}, mode: mediaplay.Transcode,
-			why: mediaplay.Lowered, check: func(r mediaworker.StreamRequest) bool { return r.Height == 720 && r.MaxBitrate == 4000 }},
+			why: mediaplay.Lowered, check: func(r ffmpegworker.StreamRequest) bool { return r.Height == 720 && r.MaxBitrate == 4000 }},
 		{name: "a quality the source does not exceed", source: android, choice: mediaplay.Choice{Lower: tenEighty},
 			mode: mediaplay.Direct},
 		{name: "10-bit H.264", source: mediaplay.Source{Container: mp4, Video: &mediaplay.Video{Codec: "h264", PixelFormat: "yuv420p10le"}, Audio: aac},
@@ -89,9 +89,9 @@ func TestBrowsersPlayVideosTheCheapestWayTheyCan(t *testing.T) {
 			caps: mediaplay.Caps{HEVC: true}, mode: mediaplay.Remux, why: mediaplay.Container},
 		{name: "a failed original", source: film, caps: mediaplay.Caps{Matroska: true},
 			choice: mediaplay.Choice{Ceiling: tenEighty, Transcode: true}, mode: mediaplay.Transcode, why: mediaplay.Failed,
-			check: func(r mediaworker.StreamRequest) bool { return !r.CopyVideo && r.CopyAudio && r.Height == 1080 }},
+			check: func(r ffmpegworker.StreamRequest) bool { return !r.CopyVideo && r.CopyAudio && r.Height == 1080 }},
 		{name: "a conversion without a ceiling", source: iphone, mode: mediaplay.Transcode,
-			why: mediaplay.Picture, check: func(r mediaworker.StreamRequest) bool { return r.Height == 0 && r.MaxBitrate == 0 }},
+			why: mediaplay.Picture, check: func(r ffmpegworker.StreamRequest) bool { return r.Height == 0 && r.MaxBitrate == 0 }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			decision := mediaplay.Decide(test.source, test.caps, test.choice)
@@ -127,14 +127,14 @@ func TestConvertedStreamsNameTheirCodecs(t *testing.T) {
 	hevc := &mediaplay.Video{Codec: "hevc"}
 	for _, test := range []struct {
 		source  mediaplay.Source
-		request mediaworker.StreamRequest
+		request ffmpegworker.StreamRequest
 		want    string
 	}{
-		{mediaplay.Source{Video: h264, Audio: []mediaplay.Audio{{Codec: "ac3"}}}, mediaworker.StreamRequest{CopyVideo: true}, `video/mp4; codecs="avc1.640033,mp4a.40.2"`},
-		{mediaplay.Source{Video: hevc, Audio: []mediaplay.Audio{{Codec: "mp3"}}}, mediaworker.StreamRequest{CopyVideo: true, HEVC: true, CopyAudio: true},
+		{mediaplay.Source{Video: h264, Audio: []mediaplay.Audio{{Codec: "ac3"}}}, ffmpegworker.StreamRequest{CopyVideo: true}, `video/mp4; codecs="avc1.640033,mp4a.40.2"`},
+		{mediaplay.Source{Video: hevc, Audio: []mediaplay.Audio{{Codec: "mp3"}}}, ffmpegworker.StreamRequest{CopyVideo: true, HEVC: true, CopyAudio: true},
 			`video/mp4; codecs="hvc1.1.6.L153.B0,mp4a.69"`},
-		{mediaplay.Source{Video: hevc}, mediaworker.StreamRequest{AudioTrack: -1}, `video/mp4; codecs="avc1.640033"`},
-		{mediaplay.Source{Audio: []mediaplay.Audio{{Codec: "flac"}}}, mediaworker.StreamRequest{}, `video/mp4; codecs="mp4a.40.2"`},
+		{mediaplay.Source{Video: hevc}, ffmpegworker.StreamRequest{AudioTrack: -1}, `video/mp4; codecs="avc1.640033"`},
+		{mediaplay.Source{Audio: []mediaplay.Audio{{Codec: "flac"}}}, ffmpegworker.StreamRequest{}, `video/mp4; codecs="mp4a.40.2"`},
 	} {
 		if got := mediaplay.StreamMime(test.source, test.request); got != test.want {
 			t.Errorf("StreamMime(%+v) = %s, want %s", test.request, got, test.want)

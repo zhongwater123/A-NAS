@@ -13,8 +13,8 @@ import (
 
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	hostagent "github.com/zhongwater123/A-NAS/internal/hoststate/agent"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 // Mode is how the Product Service reaches the host (ANAS_HOSTSTATE_MODE).
@@ -25,7 +25,7 @@ type Mode string
 const (
 	// ModeAgent is a NAS: host state, privileged operations and every file
 	// go through the Host Agent and its File Broker, photos and shares
-	// through their own services, and FFmpeg through the media worker.
+	// through their own services, and FFmpeg through the FFmpeg worker.
 	ModeAgent Mode = "agent"
 	// ModeFake is development and tests: simulated disks and storage, a
 	// local development volume, and the photo library, FFmpeg and Fake
@@ -33,7 +33,7 @@ const (
 	ModeFake Mode = "fake"
 )
 
-// Where FFmpeg runs (ANAS_MEDIA_WORKER).
+// Where FFmpeg runs (ANAS_FFMPEG_WORKER).
 const (
 	mediaWorkerSocket   = "socket"
 	mediaWorkerLocal    = "local"
@@ -72,7 +72,7 @@ type Config struct {
 	ShareFilesSocket string `env:"ANAS_SHARE_FILES_SOCKET" envDefault:"/run/a-nas-share-files/files.sock"`
 	// MediaWorker is socket, local (FFmpeg in this process, development
 	// only) or disabled; it defaults to socket on a NAS and local otherwise.
-	MediaWorker string `env:"ANAS_MEDIA_WORKER"`
+	MediaWorker string `env:"ANAS_FFMPEG_WORKER"`
 	Media       MediaConfig
 	// DevelopmentAISocket names an AI Worker for the photo library that
 	// development runs in this process; on a NAS the photo service has its
@@ -99,17 +99,17 @@ type Config struct {
 	HostAgentChangesSocket string `env:"ANAS_ASSISTANT_CHANGES_SOCKET"`
 }
 
-// MediaConfig reaches the sandboxed media worker. The Product, Photo and
+// MediaConfig reaches the sandboxed FFmpeg worker. The Product, Photo and
 // Share Services take their turns from the same slot directory, which the
 // installer's tmpfiles entry creates, so together they never ask for more
 // workers than the socket admits.
 type MediaConfig struct {
-	Socket string `env:"ANAS_MEDIA_SOCKET" envDefault:"/run/a-nas-media/media.sock"`
-	Slots  string `env:"ANAS_MEDIA_SLOTS" envDefault:"/run/a-nas-media/slots"`
+	Socket string `env:"ANAS_FFMPEG_SOCKET" envDefault:"/run/a-nas-ffmpeg/ffmpeg.sock"`
+	Slots  string `env:"ANAS_FFMPEG_SLOTS" envDefault:"/run/a-nas-ffmpeg/slots"`
 }
 
-func (m MediaConfig) client() mediaworker.Client {
-	return mediaworker.Client{Socket: m.Socket, Slots: m.Slots}
+func (m MediaConfig) client() ffmpegworker.Client {
+	return ffmpegworker.Client{Socket: m.Socket, Slots: m.Slots}
 }
 
 // AssistantConfig configures the AI assistant (ADR 0024), which is off
@@ -177,8 +177,8 @@ func loadConfig(environment map[string]string) (Config, error) {
 		value *string
 	}{
 		{"ANAS_PHOTOS_SOCKET", &c.PhotosSocket}, {"ANAS_SHARES_SOCKET", &c.SharesSocket},
-		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_MEDIA_SOCKET", &c.Media.Socket},
-		{"ANAS_MEDIA_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
+		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
+		{"ANAS_FFMPEG_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
 		{"ANAS_ASSISTANT_SOCKET_DIR", &c.Assistant.SocketDir},
 	} {
 		path(variable.name, variable.value)
@@ -203,10 +203,10 @@ func loadConfig(environment map[string]string) (Config, error) {
 	case mediaWorkerSocket, mediaWorkerDisabled:
 	case mediaWorkerLocal:
 		if live {
-			problem(errors.New("ANAS_MEDIA_WORKER=local runs FFmpeg in the Product Service, which a NAS never does (invariant 16)"))
+			problem(errors.New("ANAS_FFMPEG_WORKER=local runs FFmpeg in the Product Service, which a NAS never does (invariant 16)"))
 		}
 	default:
-		problem(errors.New("ANAS_MEDIA_WORKER must be socket, local or disabled"))
+		problem(errors.New("ANAS_FFMPEG_WORKER must be socket, local or disabled"))
 	}
 
 	if c.Containers == "" {
@@ -311,7 +311,7 @@ func loadPhotoServiceConfig(environment map[string]string) (photoServiceConfig, 
 	problems := absolutePaths(map[string]*string{
 		"ANAS_PHOTOS_ROOT": &c.Root, "ANAS_PHOTOS_SOCKET": &c.Socket, "ANAS_PHOTO_SESSION_SOCKET": &c.SessionSocket,
 		"ANAS_PHOTOS_ASSISTANT_SOCKET": &c.AssistantSocket, "ANAS_AI_SOCKET": &c.AISocket, "ANAS_PHOTOS_VECTOR_SOCKET": &c.VectorSocket,
-		"ANAS_MEDIA_SOCKET": &c.Media.Socket, "ANAS_MEDIA_SLOTS": &c.Media.Slots,
+		"ANAS_FFMPEG_SOCKET": &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
 	})
 	if c.QuietPeriod != "" {
 		if c.Quiet, err = time.ParseDuration(c.QuietPeriod); err != nil || c.Quiet <= 0 {
@@ -357,7 +357,7 @@ func loadShareServiceConfig(environment map[string]string) (shareServiceConfig, 
 	}
 	problems := absolutePaths(map[string]*string{
 		"ANAS_SHARES_ROOT": &c.Root, "ANAS_SHARES_SOCKET": &c.Socket, "ANAS_SHARE_FILES_SOCKET": &c.FilesSocket,
-		"ANAS_SHARE_SESSION_SOCKET": &c.SessionSocket, "ANAS_MEDIA_SOCKET": &c.Media.Socket, "ANAS_MEDIA_SLOTS": &c.Media.Slots,
+		"ANAS_SHARE_SESSION_SOCKET": &c.SessionSocket, "ANAS_FFMPEG_SOCKET": &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
 	})
 	if len(problems) > 0 {
 		return shareServiceConfig{}, errors.Join(problems...)

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 // Derived data is rebuilt from originals and may be deleted at any time. A
@@ -42,21 +42,21 @@ const (
 const (
 	jobErrorUndecodable     = "undecodable"
 	jobErrorMissingOriginal = "missing_original"
-	// jobErrorIO marks storage faults and a Media Worker that ran out of
+	// jobErrorIO marks storage faults and a FFmpeg Worker that ran out of
 	// time. RecoverJobs gives these jobs their attempts again.
 	jobErrorIO = "io"
 	// jobErrorInterrupted marks a job whose lease ran out on every attempt,
 	// as when decoding the original keeps killing the service, or whose
-	// Media Worker stopped while decoding it every time.
+	// FFmpeg Worker stopped while decoding it every time.
 	jobErrorInterrupted = "interrupted"
 )
 
-// jobWaiting is not a failure and is never stored: the Media Worker is not
+// jobWaiting is not a failure and is never stored: the FFmpeg Worker is not
 // there or the service is stopping, so the job goes back without spending
 // its attempt.
 const jobWaiting = "waiting"
 
-// decodeFailure classifies an error from decoding through the Media Worker,
+// decodeFailure classifies an error from decoding through the FFmpeg Worker,
 // following the AI Worker's rule (docs/architecture/photo-ai.md#协议): a
 // worker that never took the input costs nothing, one that stopped or ran
 // out of time while decoding it spends the attempt, and one that could not
@@ -65,11 +65,11 @@ func decodeFailure(err error) string {
 	switch {
 	case errors.Is(err, context.Canceled):
 		return jobWaiting
-	case errors.Is(err, mediaworker.ErrInterrupted):
+	case errors.Is(err, ffmpegworker.ErrInterrupted):
 		return jobErrorInterrupted
-	case errors.Is(err, mediaworker.ErrUnavailable):
+	case errors.Is(err, ffmpegworker.ErrUnavailable):
 		return jobWaiting
-	case errors.Is(err, mediaworker.ErrFailed), errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, ffmpegworker.ErrFailed), errors.Is(err, context.DeadlineExceeded):
 		return jobErrorIO
 	}
 	return jobErrorUndecodable
@@ -165,7 +165,7 @@ type claimedJob struct {
 
 // ProcessMediaJob runs one ready media job and reports whether it finished
 // one. A job whose original cannot be processed is retried with a delay and
-// then marked failed; one that waits for the Media Worker goes back without
+// then marked failed; one that waits for the FFmpeg Worker goes back without
 // spending its attempt and reports false, so the loop pauses rather than
 // try every job against a worker that is not there. The error returned is
 // only for Catalog or storage faults.
@@ -240,7 +240,7 @@ type JobRecovery struct {
 // gives its jobs back, so a job still running was cut off by a crash or a
 // power loss: it runs again now instead of after its lease, and keeps the
 // attempt it spent, so that an original that keeps killing the service still
-// fails as interrupted. Jobs that failed on storage or on a Media Worker that
+// fails as interrupted. Jobs that failed on storage or on a FFmpeg Worker that
 // ran out of time (io) start over, as the disk that was full or the device
 // that was too busy may be fine now; so do those a worker that was not there
 // failed before such failures stopped counting (issue #168).
@@ -277,7 +277,7 @@ WHERE state = 'failed' AND error_class = ?`, now, jobErrorIO)
 
 // renderJob treats a decoder panic like an undecodable original: the same
 // bytes would panic again, and the service must keep serving. Thumbnails are
-// background work: when the Media Worker is busy they wait their turn.
+// background work: when the FFmpeg Worker is busy they wait their turn.
 func (s *Service) renderJob(ctx context.Context, job claimedJob) (thumbnail []byte, width, height int, class string) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -293,7 +293,7 @@ func (s *Service) renderJob(ctx context.Context, job claimedJob) (thumbnail []by
 		return nil, 0, 0, jobErrorIO
 	}
 	defer func() { _ = original.Close() }()
-	ctx = mediaworker.WithPriority(ctx, mediaworker.Background)
+	ctx = ffmpegworker.WithPriority(ctx, ffmpegworker.Background)
 	if job.video {
 		thumbnail, width, height, err = s.renderVideoFrame(ctx, original, job.duration, thumbnailEdge, thumbnailQuality)
 	} else {

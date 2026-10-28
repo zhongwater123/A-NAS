@@ -29,7 +29,7 @@
 
 - ADR [0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[0018](../adr/0018-index-music-in-place-through-the-file-broker.md)、[0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)、[0020](../adr/0020-read-service-logs-through-the-host-agent.md)、[0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)、[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 仍为 proposed，代码已合并并部署。
 - 审计记录的保留期限（规格为永久保存，#167）。
-- 媒体 Worker 的槽位数、分层与 3G 共享内存上限，目前是估计值（#168）。
+- FFmpeg Worker 的槽位数、分层与 3G 共享内存上限，目前是估计值（#168）。
 - 相册视频实现时定下的默认值：格式、4 GiB 上限、封面帧、单独 MOV 的处理、幻灯片跳过视频、AI 助手看不到视频（[规格](../specs/photo-video.md)）。
 - 文件管理的缩略图仍加载原图，是否改用服务端缩略图。
 - 助手的模型仍会提到 Hermes 的 `/help` 与上手引导，如何处理。

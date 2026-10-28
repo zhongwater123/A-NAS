@@ -14,23 +14,23 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
 
 type motionMedia struct{}
 
-func (motionMedia) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
-	return mediaworker.Probe{Format: mediaworker.ProbeFormat{Name: "mov", Duration: 2}, Streams: []mediaworker.ProbeStream{{Type: "video", Width: 16, Height: 16}}}, nil
+func (motionMedia) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
+	return ffmpegworker.Probe{Format: ffmpegworker.ProbeFormat{Name: "mov", Duration: 2}, Streams: []ffmpegworker.ProbeStream{{Type: "video", Width: 16, Height: 16}}}, nil
 }
 func (motionMedia) Image(context.Context, *os.File, int) ([]byte, error) {
-	return nil, mediaworker.ErrUnreadable
+	return nil, ffmpegworker.ErrUnreadable
 }
 func (motionMedia) Frame(context.Context, *os.File, float64, int) ([]byte, error) {
-	return nil, mediaworker.ErrUnreadable
+	return nil, ffmpegworker.ErrUnreadable
 }
-func (motionMedia) Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error) {
+func (motionMedia) Stream(context.Context, *os.File, ffmpegworker.StreamRequest) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader([]byte("mp4"))), nil
 }
 func TestLivePhotoAPIExportRangeAndPolicy(t *testing.T) {

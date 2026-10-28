@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 // The object detector reads a larger image than the 512 px thumbnail that
@@ -122,7 +122,7 @@ func (s *Service) openAIInput(ctx context.Context, job claimedJob) (file *os.Fil
 		return nil, "", err
 	}
 	defer func() { _ = original.Close() }()
-	content, _, _, err := s.renderPhoto(mediaworker.WithPriority(ctx, mediaworker.Background), original, job.orientation, aiInputEdge, aiInputQuality)
+	content, _, _, err := s.renderPhoto(ffmpegworker.WithPriority(ctx, ffmpegworker.Background), original, job.orientation, aiInputEdge, aiInputQuality)
 	if err != nil {
 		return nil, decodeFailure(err), nil
 	}
