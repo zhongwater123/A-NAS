@@ -111,11 +111,14 @@ type Backend interface {
 	Save(context.Context, User, Target, []Entry, func(string) (io.ReadCloser, error), func(string, func() error) error, func(int64)) error
 }
 type Options struct {
-	Now          func() time.Time
-	Backend      Backend
-	Active       func(context.Context, string) (bool, error)
-	Authorize    func(context.Context, User) error
-	CheckVolume  func(context.Context) error
-	MaxTasks     int
-	RequireClone bool
+	Now     func() time.Time
+	Backend Backend
+	Active  func(context.Context, string) (bool, error)
+	// ActiveAccounts supplies one authoritative snapshot for a request or
+	// maintenance cycle. Active remains the single-user check for running jobs.
+	ActiveAccounts func(context.Context) (map[string]bool, error)
+	Authorize      func(context.Context, User) error
+	CheckVolume    func(context.Context) error
+	MaxTasks       int
+	RequireClone   bool
 }

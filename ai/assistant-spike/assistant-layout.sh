@@ -103,12 +103,25 @@ case $cmd in
     # ADR 0024 decision 5: every member reads Agent空间; each member writes only their own
     # folder there (through the change broker), the pattern of .a-nas-trash/<username>. It sits
     # in Shared, which members can write: the product service refuses to rename, move or delete
-    # it, and this repair (the Host Agent's reconciliation) covers what SMB can still do.
-    ensure_dir "$data/spaces/shared/Agent空间" "$(inherited "group:$users:r-x")" owned
+    # it. Product mode uses the Host Agent's managed roots; only the isolated
+    # stand-in creates them here. Samba hides Agent空间 through its veto list.
+    if [[ -z "$gate" ]]; then
+      ensure_dir "$data/spaces/shared/Agent空间" "$(inherited "group:$users:r-x")" owned
+    else
+      [[ -d "$data/spaces/shared/Agent空间" && ! -L "$data/spaces/shared/Agent空间" && "$(stat -c %u "$data/spaces/shared/Agent空间")" == 0 ]] || {
+        echo 'Host Agent must reconcile Agent空间 before preparing the assistant' >&2; exit 1;
+      }
+    fi
     # The change broker walks to the staging area as the member, so members pass through.
     ensure_dir "$data/assistant" "$(container)"
     for account in "$@"; do
-      ensure_dir "$data/spaces/shared/Agent空间/$account" "$(inherited "group:$users:r-x" "user:$account:rwx")" owned
+      if [[ -z "$gate" ]]; then
+        ensure_dir "$data/spaces/shared/Agent空间/$account" "$(inherited "group:$users:r-x" "user:$account:rwx")" owned
+      else
+        [[ -d "$data/spaces/shared/Agent空间/$account" && ! -L "$data/spaces/shared/Agent空间/$account" && "$(stat -c %u "$data/spaces/shared/Agent空间/$account")" == 0 ]] || {
+          echo "Host Agent must reconcile Agent空间/$account before preparing the assistant" >&2; exit 1;
+        }
+      fi
       home=$data/assistant/$account
       ensure_dir "$home" "user::rwx,group::---,other::---,user:$account:--x,mask::--x" "" subvolume
       ensure_dir "$home/files" "$(inherited "user:$account:rwx")"
