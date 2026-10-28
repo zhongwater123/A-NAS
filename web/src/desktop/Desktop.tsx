@@ -214,7 +214,12 @@ export function Desktop({
   };
 
   return (
-    <SharesProvider userId={session.user.id} active={focusedID === "shares"} onOpen={() => open("shares")}>
+    <SharesProvider
+      userId={session.user.id}
+      active={focusedID === "shares"}
+      windowVisible={windows.some((window) => window.id === "shares" && window.open && !window.minimized)}
+      onOpen={() => open("shares")}
+    >
       {/* A click on the wallpaper is a pointer shortcut for 显示桌面, which the
           system rail offers to the keyboard. */}
       {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
