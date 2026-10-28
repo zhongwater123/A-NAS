@@ -9,7 +9,7 @@
 - 已移除 Debian 安装 U 盘；用户已确认实际实验盘型号、500 GB 标称容量、序列号和 WWN，并且产品已显示其稳定 `disk:*` ID。
 - 用户已核对磁盘型号、容量、序列身份和计划列出的待清除签名。
 - 若候选盘显示为系统盘、USB、removable、in-use、swap/md/dm 成员，或稳定 ID 与预期不一致，立即停止。
-- 已在开发机运行 `make check` 与 [`make system-test`](../development/LOCAL_ENVIRONMENT.md#系统测试)，并以 `deploy-dev.ps1 -StageOnly` 把同一制品上传到不可变的 `/home/anas-dev/apps/a-nas/releases/<12 位提交 SHA>`；不要把尚未安装的 stage 目录误记为 `current`。
+- 已在开发机运行 `make check` 与 [`make system-test`](../development/testing.md#系统测试)，并以 `deploy-dev.ps1 -StageOnly` 把同一制品上传到不可变的 `/home/anas-dev/apps/a-nas/releases/<12 位提交 SHA>`；不要把尚未安装的 stage 目录误记为 `current`。
 - 明确选择仅面向可信局域网的接口名，例如 `enp2s0`；不得使用空值、`0.0.0.0` 或未经核对的无线/公网接口。
 
 ## 安装系统服务
@@ -218,6 +218,13 @@ Host Agent 的记录（空间、身份、查看授权、应用身份与数据卷
 - 回滚到 ADR 0011 之前的版本时，先 `systemctl disable --now anas-photos.service`：旧二进制没有 `photo-service` 子命令。
 
 执行格式化后，回滚程序不会恢复旧分区或签名；保留磁盘现状并按 `needs_attention` 调查。绝不对不确定的 `/dev/sdX` 运行手工擦除命令。
+
+## 开发机暂存注意事项
+
+- 先按[测试与验证](../development/testing.md)验证候选提交，再用 `scripts/deploy-dev.ps1 -NasHost a-nas-dev -StageOnly -WslDistribution Ubuntu -WslUser <WSL 用户>` 暂存（开发机 B）；开发机 A 使用脚本默认的 WSL 发行版与用户。SSH 配置见[连接手册](bootstrap-experimental-nas-ssh.md)。
+- `deploy-dev.ps1` 仅在 `build/.validated-build` 与提交、产品版本和二进制哈希一致时复用门禁结果；该清单由 Makefile 的 `check` 目标生成。无 Git 的 ext4 副本运行 `check-steps` 只提供测试证据，不生成部署清单。
+- 屏保视频不随 release 暂存，更换时使用[本地控制台手册](operate-local-kiosk.md#更换屏保视频)中的独立上传流程。早于 [ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md) 的旧安装器分支应先合入主干，再部署。
+- 在 PowerShell 5.1 中运行 `deploy-dev.ps1` 不要加 `2>&1`：Windows OpenSSH 的 `close - IO is still pending` 会变成错误记录，使脚本在 `ErrorActionPreference = 'Stop'` 下中止。
 
 ## 关联
 

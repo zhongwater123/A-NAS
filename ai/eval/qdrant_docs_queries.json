@@ -38,7 +38,7 @@
   {"q": "备份中心的功能评审参照了哪些竞品？", "target": "research/backup-center-review-2026-10.md#方法"},
   {"q": "OpenVINO 官方不支持 Debian 13，这个风险怎么处理？", "target": "research/photo-ai-model-runtime-selection.md#Debian 13 风险"},
   {"q": "产品服务转发给 hermes serve 时放行哪些接口是怎么定的？", "target": "research/hermes-agent-runtime.md#`hermes serve` 的接口面与产品服务白名单（2026-10-15 查阅源码）"},
-  {"q": "只改前端界面时本地怎么起开发服务？", "target": "development/LOCAL_ENVIRONMENT.md#Web 桌面"},
+  {"q": "只改前端界面时本地怎么起开发服务？", "target": "development/testing.md#Web 桌面"},
   {"q": "实验 NAS 用的是哪块硬盘，能放正式数据吗？", "target": "runbooks/provision-v1.0.1-experimental-storage.md#配置并验收 v1.0.1 实验数据卷"},
   {"q": "相册本地 AI 的实施方案现在做到哪一步了？", "target": "architecture/photo-ai.md#相册本地 AI（M2）实施方案"}
 ]

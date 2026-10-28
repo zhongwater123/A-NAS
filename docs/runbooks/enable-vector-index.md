@@ -19,7 +19,7 @@
 - **目标**：主机名 `a-nas-dev`，使用前按 [SSH 运行手册](bootstrap-experimental-nas-ssh.md)核对指纹。
 - **前提**：
   - 用户已同意部署本版本。
-  - 开发机已运行 `make check`，并按[本地环境](../development/LOCAL_ENVIRONMENT.md#系统测试)跑过系统测试。
+  - 开发机已运行 `make check`，并按[本地环境](../development/testing.md#系统测试)跑过系统测试。
   - 开发机已用 `scripts/fetch-qdrant.sh` 取得 [`deploy/qdrant/qdrant.json`](../../deploy/qdrant/qdrant.json) 固定的压缩包。
   - NAS 上有 `/usr/lib/systemd/systemd-socket-proxyd`（Debian 的 `systemd` 包自带）；回退时还要 `sqlite3`。
 - **资源**：
