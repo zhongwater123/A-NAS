@@ -25,17 +25,19 @@ func NewUsers(service *accounts.Service, logger *slog.Logger) *Users {
 
 func (u *Users) Routes() []apiroute.Route {
 	get, post, patch, del := http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete
-	session, mutation := apiroute.Session, apiroute.Mutation
+	session, mutation, admin := apiroute.Session, apiroute.Mutation, apiroute.Admin
+	// Managing accounts is the administrator's: the guard refuses a member
+	// before the service checks again (#270).
 	return []apiroute.Route{
 		{Method: post, Pattern: "/api/v1/session/password", Posture: mutation, Handler: u.changePassword},
 		{Method: get, Pattern: "/api/v1/notifications", Posture: session, Handler: u.notifications},
 		{Method: post, Pattern: "/api/v1/notifications/{notificationID}/acknowledge", Posture: mutation, Handler: u.acknowledgeNotification},
-		{Method: get, Pattern: "/api/v1/users", Posture: session, Handler: u.list},
-		{Method: post, Pattern: "/api/v1/users", Posture: mutation, Handler: u.create},
-		{Method: patch, Pattern: "/api/v1/users/{userID}/credential", Posture: mutation, Handler: u.resetCredential},
-		{Method: del, Pattern: "/api/v1/users/{userID}", Posture: mutation, Handler: u.disable},
-		{Method: post, Pattern: "/api/v1/users/{userID}/viewing", Posture: mutation, Handler: u.startViewing},
-		{Method: del, Pattern: "/api/v1/viewing/{grantID}", Posture: mutation, Handler: u.endViewing},
+		{Method: get, Pattern: "/api/v1/users", Posture: admin, Handler: u.list},
+		{Method: post, Pattern: "/api/v1/users", Posture: admin, Handler: u.create},
+		{Method: patch, Pattern: "/api/v1/users/{userID}/credential", Posture: admin, Handler: u.resetCredential},
+		{Method: del, Pattern: "/api/v1/users/{userID}", Posture: admin, Handler: u.disable},
+		{Method: post, Pattern: "/api/v1/users/{userID}/viewing", Posture: admin, Handler: u.startViewing},
+		{Method: del, Pattern: "/api/v1/viewing/{grantID}", Posture: admin, Handler: u.endViewing},
 		{Method: get, Pattern: "/api/v1/spaces", Posture: session, Handler: u.spaces},
 	}
 }

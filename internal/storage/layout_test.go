@@ -40,17 +40,17 @@ func TestTwoDisksBecomeAMirrorUnlessAnotherLayoutIsChosen(t *testing.T) {
 	executor := &recordingExecutor{}
 	service := storage.NewService(fake.NewWithSpareDisk(), executor, storage.Options{NewID: func() string { return "plan-two" }})
 
-	if _, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, storage.LayoutMirror); !errors.Is(err, storage.ErrInvalidLayout) {
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, storage.LayoutMirror); !errors.Is(err, storage.ErrInvalidLayout) {
 		t.Fatalf("mirror on one disk error = %v, want ErrInvalidLayout", err)
 	}
-	if _, err := service.PlanVolume(ctx, []string{"disk:fake-data-01", "disk:fake-data-02"}, storage.LayoutSingle); !errors.Is(err, storage.ErrInvalidLayout) {
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01", "disk:fake-data-02"}, storage.LayoutSingle); !errors.Is(err, storage.ErrInvalidLayout) {
 		t.Fatalf("single layout on two disks error = %v, want ErrInvalidLayout", err)
 	}
-	if _, err := service.PlanVolume(ctx, []string{"disk:fake-data-01", "disk:fake-data-01"}, ""); !errors.Is(err, storage.ErrDiskNotFound) {
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01", "disk:fake-data-01"}, ""); !errors.Is(err, storage.ErrDiskNotFound) {
 		t.Fatalf("repeated disk error = %v, want ErrDiskNotFound", err)
 	}
 
-	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-01", "disk:fake-data-02"}, "")
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01", "disk:fake-data-02"}, "")
 	if err != nil {
 		t.Fatalf("PlanVolume() error = %v", err)
 	}
@@ -65,10 +65,10 @@ func TestTwoDisksBecomeAMirrorUnlessAnotherLayoutIsChosen(t *testing.T) {
 	if got, want := plan.Disks[1].Signatures, []storage.Signature{{Type: "linux_raid_member", Label: "OrangePi3B:0"}}; !slices.Equal(got, want) {
 		t.Fatalf("signatures = %#v, want %#v", got, want)
 	}
-	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ExecutePlan(ctx, plan.ID); err != nil {
+	if _, err := service.ExecutePlan(ctx, storageAdministrator, plan.ID); err != nil {
 		t.Fatalf("ExecutePlan() error = %v", err)
 	}
 	if got := executor.created; got.Layout != storage.LayoutMirror || len(got.Disks) != 2 || got.Disks[1].DiskID != "disk:fake-data-02" || got.Disks[1].Fingerprint == "" {
@@ -94,7 +94,7 @@ func TestAddingADiskConvertsTheVolumeAndReportsTheProgress(t *testing.T) {
 		t.Fatalf("volumes = %+v, %v; want a single disk with nothing to convert", volumes, err)
 	}
 
-	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-02"}, storage.LayoutMirror)
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-02"}, storage.LayoutMirror)
 	if err != nil {
 		t.Fatalf("PlanVolume() error = %v", err)
 	}
@@ -104,10 +104,10 @@ func TestAddingADiskConvertsTheVolumeAndReportsTheProgress(t *testing.T) {
 	if !slices.ContainsFunc(plan.Actions, func(action storage.Action) bool { return action.Kind == "convert_layout" }) {
 		t.Fatalf("actions = %+v, want the conversion", plan.Actions)
 	}
-	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
 	}
-	executed, err := service.ExecutePlan(ctx, plan.ID)
+	executed, err := service.ExecutePlan(ctx, storageAdministrator, plan.ID)
 	if err != nil {
 		t.Fatalf("ExecutePlan() error = %v", err)
 	}
@@ -134,10 +134,10 @@ func TestAddingADiskConvertsTheVolumeAndReportsTheProgress(t *testing.T) {
 	if !slices.Equal(volumes[0].DiskIDs, []string{"disk:fake-data-01", "disk:fake-data-02"}) {
 		t.Fatalf("disks = %v, want both", volumes[0].DiskIDs)
 	}
-	if _, err := service.PlanVolume(ctx, []string{"disk:fake-data-03"}, storage.LayoutMirror); !errors.Is(err, storage.ErrVolumeBusy) {
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, storage.LayoutMirror); !errors.Is(err, storage.ErrVolumeBusy) {
 		t.Fatalf("plan during a conversion error = %v, want ErrVolumeBusy", err)
 	}
-	if err := service.ContinueConversion(ctx); !errors.Is(err, storage.ErrNoConversion) || executor.continued != 0 {
+	if err := service.ContinueConversion(ctx, storageAdministrator); !errors.Is(err, storage.ErrNoConversion) || executor.continued != 0 {
 		t.Fatalf("continue a running conversion = %v (%d calls), want ErrNoConversion", err, executor.continued)
 	}
 
@@ -147,7 +147,7 @@ func TestAddingADiskConvertsTheVolumeAndReportsTheProgress(t *testing.T) {
 	if volumes[0].Conversion == nil || volumes[0].Conversion.State != storage.ConversionWaiting {
 		t.Fatalf("conversion = %+v, want waiting", volumes[0].Conversion)
 	}
-	if err := service.ContinueConversion(ctx); err != nil || executor.continued != 1 {
+	if err := service.ContinueConversion(ctx, storageAdministrator); err != nil || executor.continued != 1 {
 		t.Fatalf("continue a stopped conversion = %v (%d calls)", err, executor.continued)
 	}
 
@@ -169,10 +169,10 @@ func TestAMirrorMustHoldTheFilesAlreadyThere(t *testing.T) {
 	mountVolume(reader, []string{"disk:fake-data-01"}, 600_000_000_000,
 		[]hoststate.ProfileUsage{{Profile: hoststate.ProfileSingle, UsedBytes: 600_000_000_000}}, nil)
 
-	if _, err := service.PlanVolume(ctx, []string{"disk:fake-data-02"}, storage.LayoutMirror); !errors.Is(err, storage.ErrLayoutTooSmall) {
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-02"}, storage.LayoutMirror); !errors.Is(err, storage.ErrLayoutTooSmall) {
 		t.Fatalf("mirror of 512 GB under 600 GB of files error = %v, want ErrLayoutTooSmall", err)
 	}
-	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-02"}, storage.LayoutSpan)
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-02"}, storage.LayoutSpan)
 	if err != nil || plan.CapacityAfterBytes != 1_512_000_000_000 {
 		t.Fatalf("span plan = %+v, %v; want 1.5 TB", plan, err)
 	}
@@ -189,7 +189,7 @@ func TestAnOfflineMemberOfTheVolumeIsNeverErased(t *testing.T) {
 			reader.state.Disks[index].Signatures = []hoststate.Signature{{Type: "btrfs", Label: "ANAS_DATA", UUID: volumeUUID}}
 		}
 	}
-	if _, err := service.PlanVolume(ctx, []string{"disk:fake-data-02"}, storage.LayoutMirror); !errors.Is(err, storage.ErrDiskNotEligible) {
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-02"}, storage.LayoutMirror); !errors.Is(err, storage.ErrDiskNotEligible) {
 		t.Fatalf("plan for a disk of the volume error = %v, want ErrDiskNotEligible", err)
 	}
 }
@@ -201,48 +201,48 @@ func TestAPlanThatHasNotRunCanBeCancelled(t *testing.T) {
 	ctx := context.Background()
 	executor := &recordingExecutor{}
 	service := storage.NewService(fake.NewWithSpareDisk(), executor, storage.Options{NewID: planIDs()})
-	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, "")
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	replacement, err := service.PlanVolume(ctx, []string{"disk:fake-data-02"}, "")
+	replacement, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-02"}, "")
 	if err != nil {
 		t.Fatalf("plan while another is pending = %v, want it to take that one's place", err)
 	}
 	if replaced, _ := service.GetPlan(plan.ID); replaced.State != storage.PlanStateCancelled {
 		t.Fatalf("replaced plan = %q, want cancelled", replaced.State)
 	}
-	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); !errors.Is(err, storage.ErrPlanState) {
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); !errors.Is(err, storage.ErrPlanState) {
 		t.Fatalf("confirm a replaced plan = %v, want ErrPlanState", err)
 	}
 	plan = replacement
-	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
 	}
-	cancelled, err := service.CancelPlan(ctx, plan.ID)
+	cancelled, err := service.CancelPlan(ctx, storageAdministrator, plan.ID)
 	if err != nil || cancelled.State != storage.PlanStateCancelled {
 		t.Fatalf("CancelPlan() = %+v, %v; want cancelled", cancelled, err)
 	}
-	if again, err := service.CancelPlan(ctx, plan.ID); err != nil || again.State != storage.PlanStateCancelled {
+	if again, err := service.CancelPlan(ctx, storageAdministrator, plan.ID); err != nil || again.State != storage.PlanStateCancelled {
 		t.Fatalf("cancel twice = %+v, %v; want the cancelled plan again", again, err)
 	}
-	if _, err := service.ExecutePlan(ctx, plan.ID); !errors.Is(err, storage.ErrPlanState) || executor.created.PlanID != "" {
+	if _, err := service.ExecutePlan(ctx, storageAdministrator, plan.ID); !errors.Is(err, storage.ErrPlanState) || executor.created.PlanID != "" {
 		t.Fatalf("execute a cancelled plan = %v, executor got %+v; want refused before any disk", err, executor.created)
 	}
-	next, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, "")
+	next, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatalf("plan after cancelling = %v, want allowed at once", err)
 	}
-	if _, err := service.ConfirmPlan(ctx, next.ID, next.ConfirmationPhrase); err != nil {
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, next.ID, next.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ExecutePlan(ctx, next.ID); err != nil {
+	if _, err := service.ExecutePlan(ctx, storageAdministrator, next.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.CancelPlan(ctx, next.ID); !errors.Is(err, storage.ErrPlanState) {
+	if _, err := service.CancelPlan(ctx, storageAdministrator, next.ID); !errors.Is(err, storage.ErrPlanState) {
 		t.Fatalf("cancel a plan that ran = %v, want ErrPlanState", err)
 	}
-	if _, err := service.CancelPlan(ctx, "plan:missing"); !errors.Is(err, storage.ErrPlanNotFound) {
+	if _, err := service.CancelPlan(ctx, storageAdministrator, "plan:missing"); !errors.Is(err, storage.ErrPlanNotFound) {
 		t.Fatalf("cancel a missing plan = %v, want ErrPlanNotFound", err)
 	}
 }
@@ -284,14 +284,14 @@ func spareDiskReader(t *testing.T) *stateReader {
 func createSingleVolume(t *testing.T, service *storage.Service) {
 	t.Helper()
 	ctx := context.Background()
-	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, "")
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ExecutePlan(ctx, plan.ID); err != nil {
+	if _, err := service.ExecutePlan(ctx, storageAdministrator, plan.ID); err != nil {
 		t.Fatal(err)
 	}
 }

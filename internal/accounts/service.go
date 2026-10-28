@@ -75,6 +75,13 @@ type User struct {
 	AvatarVersion string `json:"avatarVersion,omitempty"`
 }
 
+// ActiveAdministrator reports whether u may administer the device: an
+// administrator whose account is active. Services that change the device
+// check it themselves, besides the route guard (#270).
+func (u User) ActiveAdministrator() bool {
+	return u.Role == RoleAdmin && u.Status == UserStatusActive
+}
+
 type SpaceKind string
 
 const (
@@ -410,7 +417,7 @@ func (s *Service) SetupRequired(ctx context.Context) (bool, error) {
 }
 
 func (s *Service) CreateMember(ctx context.Context, actor User, username, password string) (User, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return User{}, ErrForbidden
 	}
 	return s.createUser(ctx, username, password, RoleMember, actor.ID)
@@ -661,7 +668,7 @@ func (s *Service) EndSession(ctx context.Context, token string) error {
 }
 
 func (s *Service) ListUsers(ctx context.Context, actor User) ([]User, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return nil, ErrForbidden
 	}
 	rows, err := s.store.db.QueryContext(ctx, "SELECT "+userColumns+" FROM users ORDER BY username")
@@ -804,7 +811,7 @@ func (s *Service) UserIDForUsername(ctx context.Context, username string) (strin
 }
 
 func (s *Service) DisableUser(ctx context.Context, actor User, userID string) error {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive || actor.ID == userID {
+	if !actor.ActiveAdministrator() || actor.ID == userID {
 		return ErrForbidden
 	}
 	var username string
@@ -857,7 +864,7 @@ func (s *Service) disableHostCredential(ctx context.Context, username string) er
 // else, with the current one: a session alone must not be enough to take an
 // account over.
 func (s *Service) ResetCredential(ctx context.Context, actor User, userID, password string) error {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive || actor.ID == userID {
+	if !actor.ActiveAdministrator() || actor.ID == userID {
 		return ErrForbidden
 	}
 	if err := checkPassword(password); err != nil {
