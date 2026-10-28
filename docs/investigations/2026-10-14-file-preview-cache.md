@@ -1,7 +1,7 @@
 # 视频缩略图重访重复解码与队列阻塞
 
 状态：fixed，待实机验收
-更新时间：2026-10-27
+更新时间：2026-10-28
 
 ## 症状与最小复现
 
@@ -28,6 +28,12 @@ go test ./internal/filepreview -run 'TestDirectoryRevisit|TestCachedPreview' -co
 命中缓存前必须打开源文件检查权限与文件身份。排队只用于未命中请求，出队再次验证，以免等待期间的删除、修改或撤权被忽略；同一图片的并发请求复用前一个请求的结果。解码前后检查文件身份，避免把写入中的图片存到旧版本键。缓存损坏或写入失败降级为重新生成。
 
 成功响应允许浏览器私有存储，但每次复用都必须验证，校验通过后才返回 304；错误不缓存。依据 [RFC 9111 §5.2.2.4](https://www.rfc-editor.org/rfc/rfc9111.html#section-5.2.2.4)，`no-cache` 要求复用前成功验证，并不禁止存储。首次浏览仍需抽帧；缓存容量耗尽后，最久未用的项目会重新生成。本修复不预扫描整个数据卷，也不改变媒体 Worker 的解码隔离。
+
+## 时间戳粒度
+
+缓存键含 inode、ctime、mtime 与大小。SMB 客户端可以写入同样大小的内容并恢复 mtime，这时只有 ctime 能发现修改，而 ctime 的精度由内核决定：Linux 6.13 之前没有细粒度时间戳，同一个时钟节拍内的所有修改得到同一个 ctime。在同一节拍内完成“改动、预览、再次等大改动并恢复 mtime”，`stat` 无法区分两个版本。实际的抽帧耗时远超一个节拍，这个窗口只在测试里出现，产品不修改。
+
+2026-10-28，macOS 开发机的 Colima 虚拟机（Ubuntu 24.04 arm64，内核 6.8，`CONFIG_HZ=1000`）上 `TestPersistentPreviewSurvivesRestartAndRevalidatesSource` 每次都失败（`SMB revision: calls=2`）：测试从创建文件到模拟 SMB 修改不到 1 ms，ctime 没有变化；在虚拟机中探测，紧接着的两次修改 ctime 相同，间隔 1 ms 以上则不同。CI 通过，较可能是运行器的内核或速度使 ctime 前进。测试改为由 `smbEdit` 模拟修改，重复恢复 mtime，直到 ctime 越过旧版本，所验证的仍是“大小与 mtime 不变、ctime 改变时必须重新生成”。
 
 ## 验证
 

@@ -128,7 +128,7 @@ scripts/build-system-test-image.sh anas-systemd:trixie anas-acl-matrix:bookworm
 | 本机工具 | Homebrew 安装的 Go 1.27.3、ShellCheck 0.11.0、bash 5.3、Colima 0.10.3 与 Docker CLI；Node.js 26.11.1、npm 11.20.0；Ruff 0.17.1 按[静态检查](#静态检查)装在 `~/.local/opt/ruff` |
 | `~/.anas-env` | 把 Ruff 与 `/opt/homebrew/bin` 放在 `PATH` 最前面：macOS 自带的 `/bin/bash` 是 3.2，`ops-check` 需要 bash 4 以上 |
 | Linux 虚拟机 | Colima 配置 `anas`：vz、6 核、8 GiB，Ubuntu 24.04 arm64，只供 A-NAS 使用；本机的 `default` 配置留给其他项目 |
-| 虚拟机工具链 | 装在虚拟机用户的 `~/.local/opt`：Go 1.27.3、Node.js 26.9.0（与 CI 相同）、ShellCheck 0.11.0、Ruff 0.17.1；gcc 13.3 来自 apt。由虚拟机的 `~/.anas-env` 加入 `PATH` |
+| 虚拟机工具链 | 装在虚拟机用户的 `~/.local/opt`：Go 1.27.3、Node.js 26.9.0（与 CI 相同）、ShellCheck 0.11.0、lychee 0.24.2（见[静态检查](#静态检查)）、Ruff 0.17.1；gcc 13.3 来自 apt。由虚拟机的 `~/.anas-env` 加入 `PATH` |
 | 虚拟机中的镜像 | `golang:1.27.3-trixie`、`debian:trixie`；系统测试镜像尚未构建 |
 | 模型 | `~/A-NAS-models`，目录结构与 `deploy-dev.ps1` 的默认目录相同（`embeddinggemma-2-740m`、`faces/yunet`、`faces/auraface`、`pets/dinov2-small`、`dfine-obj365`），另有 `faces/sface`；文件按 `deploy/models/*.json` 中的地址下载，并核对 SHA-256。D-FINE 只有官方权重 `dfine_m_obj365.pth`：在 arm64 上按清单导出的 ONNX 大小相同但 SHA-256 不同，Worker 与暂存都会拒绝，放在 `dfine-obj365/arm64-export`，只供本机评估；`dfine-obj365/official` 还需从已有清单所列文件的开发机复制 |
 | 网络 | Docker Hub 时通时断（`registry-1.docker.io` 有时被解析到错误地址），拉取失败时重试；`proxy.golang.org`、`vuln.go.dev`、npm、PyPI、GitHub 与 `deb.debian.org` 可达 |
@@ -427,7 +427,7 @@ tar -xzf /tmp/lychee.tar.gz -C /tmp
 install /tmp/lychee-x86_64-unknown-linux-gnu/lychee ~/.local/opt/bin/lychee
 ```
 
-开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。
+开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。它的 Colima 虚拟机用 `lychee-aarch64-unknown-linux-gnu.tar.gz`，SHA-256 为 `91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c`，装到 `~/.local/opt/lychee/lychee`，由虚拟机的 `~/.anas-env` 加入 `PATH`。
 
 Ruff 不随 npm 或 Go 安装。有 `ensurepip` 的机器装进独立的 venv，再把其 `bin` 加入 `PATH`：
 
