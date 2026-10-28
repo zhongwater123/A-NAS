@@ -282,7 +282,7 @@ describe("Settings terminal", () => {
     // Settings reopens on the terminal with a new shell.
     settings.reopen();
     expect(await screen.findByTestId("xterm-session")).toBeTruthy();
-    expect(xterm.mounts).toBe(2);
+    await waitFor(() => expect(xterm.mounts).toBe(2));
   });
 
   it("offers a new session after the shell exits", async () => {
