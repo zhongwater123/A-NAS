@@ -6,7 +6,7 @@
 #
 # MediaPipe itself. Importing it loads its drawing utilities, which import
 # OpenCV and Matplotlib, so both stay although the Worker only embeds.
-mediapipe==1.1.0
+mediapipe==1.1.1
 # The headless build in place of MediaPipe's opencv-contrib-python, which needs
 # X libraries: requirements.excludes keeps that one out.
 opencv-contrib-python-headless==5.0.0.93
