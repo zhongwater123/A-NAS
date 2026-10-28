@@ -158,7 +158,11 @@ function WindowFailed({ error, resetErrorBoundary }: FallbackProps) {
       <div className={styles.centerState}>
         <CloudOff />
         <h2>这个窗口没有加载出来</h2>
-        <p>A-NAS 可能刚刚更新过，或网络中断了。重新载入页面后再打开，其他窗口里没保存的内容会丢失。</p>
+        <p>
+          A-NAS 可能刚刚更新过，或网络中断了。
+          <br />
+          重新载入页面后再打开，其他窗口里没保存的内容会丢失。
+        </p>
         <button className="primary" onClick={() => window.location.reload()}>
           重新载入页面
         </button>
