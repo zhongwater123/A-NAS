@@ -51,8 +51,10 @@ type errorResponse struct {
 }
 
 // NewHandler serves ResolvePath for one resolver, and AccountUIDPath only when
-// accountResolver is set: the lookup by UID names any account to whoever asks,
-// so it is on only while the photo service serves assistants.
+// accountResolver is set. Photo-service lookup enables it with assistant access;
+// the Host Agent also mounts just AccountUIDPath on its private operations socket
+// for the root installer and scheduled-task waker. The caller must restrict
+// access to that socket, since this lookup names active accounts without sessions.
 func NewHandler(resolver Resolver, accountResolver AccountResolver, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()

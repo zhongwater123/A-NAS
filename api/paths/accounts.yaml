@@ -155,7 +155,7 @@
   delete:
     operationId: disableUser
     parameters: [{ $ref: "../components/accounts.yaml#/parameters/UserID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
-    description: Disable an account. Web sign-in ends first; when the Host Agent then fails to disable the SMB credential the answer is 503 smb_disable_pending, and disabling again retries only that step.
+    description: Disable an account. Web sign-in ends first; if the Host Agent cannot disable SMB access or assistant units, the response retains the 503 smb_disable_pending code. Disabling again retries the host operations.
     responses:
       "204": { description: User disabled }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
