@@ -140,6 +140,9 @@ func (s *Service) BeginUpload(ctx context.Context, actor accounts.User, request 
 		return nil, err
 	}
 	target := filepath.Join(parentPath, request.Name)
+	if isAgentPolicyDirectory(root, space.ID, target) {
+		return nil, ErrForbidden
+	}
 	if !withinRoot(root, target) {
 		return nil, ErrInvalidName
 	}
@@ -235,6 +238,9 @@ func (s *Service) CommitUpload(ctx context.Context, actor accounts.User, upload 
 	parentPath, err := s.uploadParent(ctx, space, root, upload)
 	if err != nil {
 		return CommittedUpload{}, err
+	}
+	if isAgentPolicyDirectory(root, space.ID, filepath.Join(parentPath, upload.Name)) {
+		return CommittedUpload{}, ErrForbidden
 	}
 	done, err := s.change(ctx, space.ID)
 	if err != nil {
@@ -358,14 +364,23 @@ func (s *Service) ensureDirectory(ctx context.Context, actor accounts.User, spac
 	if !withinRoot(root, target) {
 		return Entry{}, "", ErrInvalidName
 	}
-	created := true
-	if err := s.fs.Mkdir(ctx, target); errors.Is(err, fs.ErrExist) {
-		// Another upload of the same folder may have just created it.
-		created = false
-	} else if err != nil {
-		return Entry{}, "", err
+	managed := isAgentPolicyDirectory(root, spaceID, target)
+	created := false
+	if !managed {
+		created = true
+		if err := s.fs.Mkdir(ctx, target); errors.Is(err, fs.ErrExist) {
+			// Another upload of the same folder may have just created it.
+			created = false
+		} else if err != nil {
+			return Entry{}, "", err
+		}
 	}
 	info, err := s.fs.Lstat(ctx, target)
+	// Folder uploads may traverse an existing managed root, preserving its
+	// ID through registerInfo, but cannot create a replacement at that name.
+	if managed && (err != nil || info.Kind != KindDirectory) {
+		return Entry{}, "", ErrForbidden
+	}
 	if err != nil {
 		return Entry{}, "", err
 	}

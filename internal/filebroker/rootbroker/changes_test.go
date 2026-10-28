@@ -87,6 +87,41 @@ func newChangesHarness(t *testing.T) *changesHarness {
 
 const editPlan = `{"summary":"计划加一项","operations":[{"op":"write","path":"/nas/个人空间/计划.md","source":"/nas/助手/待确认/计划.md"}]}`
 
+func TestConfinedWorkerDoesNotFollowWritableDirectoryLinks(t *testing.T) {
+	for _, parent := range []bool{false, true} {
+		name := "member directory"
+		if parent {
+			name = "ancestor directory"
+		}
+		t.Run(name, func(t *testing.T) {
+			h := newChangesHarness(t)
+			shared := filepath.Join(h.volume, "spaces/shared")
+			link := filepath.Join(shared, "Agent空间/alice")
+			outside := shared
+			if parent {
+				link = filepath.Join(shared, "Agent空间")
+				outside = filepath.Join(shared, "alice")
+				if err := os.Mkdir(outside, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Rename(link, link+".original"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(shared, link); err != nil {
+				t.Fatal(err)
+			}
+			member, err := h.server.memberFiles(alice)
+			if err != nil {
+				return // Refusing to start with an unsafe grant is fail-closed.
+			}
+			if err := member.Mkdir(context.Background(), filepath.Join(outside, "unauthorized")); err == nil {
+				t.Fatal("a symlink expanded the confined worker's writable scope")
+			}
+		})
+	}
+}
+
 func TestTheMembersConfirmedChangeIsAppliedByAConfinedWorker(t *testing.T) {
 	h := newChangesHarness(t)
 	session := accountid.WithSessionToken(context.Background(), "alice-token")
