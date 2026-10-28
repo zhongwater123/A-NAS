@@ -81,7 +81,7 @@ jobs:
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 26.9.0
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: |
             web/package-lock.json
@@ -99,20 +99,23 @@ jobs:
           sudo install "$RUNNER_TEMP/shellcheck-v$version/shellcheck" /usr/local/bin/shellcheck
           shellcheck --version
 
-      # The AI Worker runs on Debian 13's CPython 3.13 (ai/requirements.lock).
+      # The AI Worker runs on Debian 13's CPython 3.13 (ai/requirements.txt).
       - name: Set up Python
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
 
-      # Ruff for `make ai-lint`. NumPy, pinned by the runtime's lock, lets the
+      # Ruff for `make ai-lint`. NumPy, pinned by the runtime's lock (its
+      # entry runs to the first line without a continuation), lets the
       # clustering tests run; the real-model tests need model files and stay skipped.
       - name: Install the AI tools and test dependencies
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         run: |
-          python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r ai/requirements-dev.lock
-          grep '^numpy==' ai/requirements.lock | python3 -m pip install --no-deps --require-hashes --only-binary=:all: -r /dev/stdin
+          python3 -m pip install --require-hashes --only-binary=:all: -r ai/requirements-dev.txt
+          sed -n '/^numpy==/,/[^\\]$/p' ai/requirements.txt |
+            python3 -m pip install --require-hashes --only-binary=:all: -r /dev/stdin
+          python3 -m pip check
 
       # The vector index tests run the Qdrant server the release pins
       # (deploy/qdrant/qdrant.json), checked against its SHA-256. The cache
@@ -151,13 +154,6 @@ jobs:
           go-version-file: .go-version
           cache: true
 
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 26.9.0
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
       # The vector index tests run the Qdrant server the release pins
       # (deploy/qdrant/qdrant.json), checked against its SHA-256.
       - name: Restore the pinned Qdrant server
@@ -169,6 +165,8 @@ jobs:
       - name: Fetch the pinned Qdrant server
         run: scripts/fetch-qdrant.sh
 
+      # No Node.js: make race-test leaves out internal/webui, the one package
+      # that needs the built Web assets.
       - name: Run the Go tests with the race detector
         env:
           ANAS_QDRANT_REQUIRED: "1"
@@ -193,14 +191,45 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 26.9.0
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # Assembling the image with debootstrap took two of the job's six
+      # minutes. A cached image serves until its build script changes, or for
+      # a week, after which a rebuild takes in Debian's updates; within the
+      # week every run tests against the same packages.
+      - name: Name the cached Debian 13 systemd image
+        id: image
+        run: echo "key=system-test-image-$(date -u +%G-W%V)-${{ hashFiles('scripts/build-system-test-image.sh') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Debian 13 systemd image
+        id: image-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/anas-systemd.tar
+          key: ${{ steps.image.outputs.key }}
+
+      - name: Load the cached image
+        if: ${{ steps.image-cache.outputs.cache-hit == 'true' }}
+        run: docker load --quiet --input "$RUNNER_TEMP/anas-systemd.tar"
+
       - name: Build the Debian 13 systemd image
+        if: ${{ steps.image-cache.outputs.cache-hit != 'true' }}
         run: |
-          sudo modprobe btrfs
           scripts/build-system-test-image.sh anas-systemd:trixie debian:bookworm
+          docker save --output "$RUNNER_TEMP/anas-systemd.tar" anas-systemd:trixie
+
+      # Saved at once, so that a failing test does not discard the image.
+      - name: Cache the Debian 13 systemd image
+        if: ${{ steps.image-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/anas-systemd.tar
+          key: ${{ steps.image.outputs.key }}
+
+      - name: Load the Btrfs module for the test's data volume
+        run: sudo modprobe btrfs
 
       # The release stages the pinned Qdrant tarball as deploy-dev.ps1 does.
       - name: Restore the pinned Qdrant server

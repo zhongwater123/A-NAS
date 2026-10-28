@@ -12,8 +12,8 @@ builder=${2:-debian:bookworm}
 packages=systemd,systemd-sysv,dbus,udev,acl,btrfs-progs,parted,smartmontools,samba,smbclient,
 packages+=curl,ca-certificates,procps,util-linux,passwd,iproute2,jq,python3,caddy,libegl1,libgles2,ffmpeg,heif-thumbnailer,libheif-plugin-libde265,libheif-examples,libheif-plugin-x265,
 # The AI assistant sandbox (ai/assistant-spike): PID 1 in its PID namespace, the
-# model socket bridge and the file search Hermes runs.
-packages+=tini,socat,ripgrep
+# model socket bridge, the file search Hermes runs, and YAML edits in its tests.
+packages+=tini,socat,ripgrep,yq
 
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT

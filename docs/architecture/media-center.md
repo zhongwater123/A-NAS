@@ -66,17 +66,18 @@ anas-api（a-nas）
 
 ## 播放
 
-`Playback` 根据 ffprobe 的结果与浏览器上报的能力（`caps=hevc,av1,vp9,ac3,eac3,mkv,webm`）决定方式（[`playback.go`](../../internal/media/playback.go)）：
+`Playback` 根据 ffprobe 的结果与浏览器上报的能力（`caps=hevc,av1,vp9,ac3,eac3,mkv,webm`）决定方式。规则与相册共用 [`internal/mediaplay`](../../internal/mediaplay/mediaplay.go)（能力解析、决定、转换流的 MIME、起点校验与转换槽位）；影视中心把视频描述为 `mediaplay.Source`（文件名为 `.3gp` 时标为 3GPP），并给出提示语与画质选项（[`playback.go`](../../internal/media/playback.go)）：
 
 | 方式 | 条件 | 实现 |
 |---|---|---|
-| direct | 封装可直接打开（MP4/MOV，WebM，Chromium 中的 Matroska），视频与所选音轨都能解码，未选择更低画质，使用默认音轨 | `GET /videos/{id}/file`，`http.ServeContent` 支持 Range |
-| remux | 视频是 8 位 H.264（或浏览器支持的 HEVC），但封装、音频或音轨不满足 | FFmpeg 复制视频，音频为 AAC 时复制，否则转为 AAC 立体声 |
-| transcode | 其余情况，或选择了低于原片的画质 | libx264 `veryfast` CRF 22，按画质限制高度与码率 |
+| direct | 封装可直接打开（MP4/MOV，3GPP 只限 H.264；WebM；浏览器报告 Matroska 时的 Matroska），视频与所选音轨都能解码，未选择更低画质，使用默认音轨 | `GET /videos/{id}/file`，`http.ServeContent` 支持 Range |
+| remux | 视频是 8 位 H.264（或浏览器支持的 HEVC），但封装、音频或音轨不满足 | FFmpeg 复制视频，音频为 AAC 或 MP3 时复制，否则转为 AAC 立体声 |
+| transcode | 其余情况，选择了低于原片的画质，或直接播放失败之后 | libx264 `veryfast` CRF 22；未选画质时保留原片高度（最高 2160 行）、不限码率，选择更低画质时按该画质限制；音频为 AAC 或 MP3 时仍复制 |
+
 
 - 转换后的流是分片 MP4（`frag_keyframe+empty_moov+default_base_moof`），不能随机访问。播放器在拖动时用新的 `start` 重新请求，并把该起点加到 `<video>` 的时钟上；进度、字幕与进度条都使用这个绝对时间。
 - 直接播放出错时，播放器自动改为转码一次。
-- 转换流最多同时 2 路（`Options.MaxStreams`），超出返回 `media_busy`；连接断开时 Worker 立即结束 FFmpeg。
+- 转换流最多同时 2 路（`Options.MaxStreams`，默认 `mediaplay.Conversions`），超出返回 `media_busy`；连接断开时 Worker 立即结束 FFmpeg。相册服务在自己的进程中另有 2 路，两者合计最多 4 路，都还要经过媒体 Worker 的共享槽位（见下文“准入与失败”）。
 - 字幕：外挂文件非 UTF-8 时按 GB18030 交给 FFmpeg；内嵌的文本字幕按流索引抽取。转换结果按文件版本缓存。浏览器只把字幕载入隐藏的 `<track>`，由播放器按绝对时间显示，使它在转码重启后仍然对齐。
 - 进度每 10 秒、暂停与关闭时保存；不足 30 秒不记位置，达到 90% 记为已看并清除位置。
 
@@ -100,6 +101,6 @@ anas-api（a-nas）
 ## 关联
 
 - [影视中心规格](../specs/media-center.md)、[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[存储与文件架构](storage-and-files.md)
-- 代码：[`internal/media`](../../internal/media)、[`internal/mediaworker`](../../internal/mediaworker)、[`internal/mediaapi`](../../internal/mediaapi)、[`files.Service.Tree`](../../internal/files/tree.go)、[`web/src/media`](../../web/src/media)
+- 代码：[`internal/media`](../../internal/media)、[`internal/mediaplay`](../../internal/mediaplay)、[`internal/mediaworker`](../../internal/mediaworker)、[`internal/mediaapi`](../../internal/mediaapi)、[`files.Service.Tree`](../../internal/files/tree.go)、[`web/src/media`](../../web/src/media)
 - 部署：[`anas-media.socket`](../../deploy/systemd/system/anas-media.socket)、[`anas-media@.service`](../../deploy/systemd/system/anas-media@.service)、[`system-anasmedia.slice`](../../deploy/systemd/system/system-anasmedia.slice)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)、[系统测试](../../scripts/system-test.sh)
 - 调查：[媒体 Worker 的共享预算与后台任务的永久失败](../investigations/2026-10-21-media-worker-shared-budget.md)

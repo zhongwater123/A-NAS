@@ -1,10 +1,12 @@
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
-import { apiError, json, stubAPI } from "../test/api";
+import { afterEach, expect, it, onTestFinished, vi } from "vitest";
+
+import { readCursors, sharesHandlers } from "../test/handlers/shares";
+import { apiError, http, server } from "../test/server";
+import type { Share } from "./api";
 import { useThread } from "./Conversation";
 import { SharesPanel } from "./SharesPanel";
 import { SharesProvider, useShares } from "./SharesProvider";
-import type { Share } from "./api";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -27,13 +29,13 @@ it("resumes a conversation from its last message across polls, refreshes and vis
   vi.useFakeTimers();
   const requests: { recipient: string; after: number }[] = [];
   let newest = 2;
-  stubAPI(
-    vi.fn(async (input) => {
-      const url = new URL(String(input), "http://nas");
+  server.use(
+    http.get("/api/v1/shares/{shareId}/messages", ({ request, response }) => {
+      const url = new URL(request.url);
       const after = Number(url.searchParams.get("after"));
       const recipient = url.searchParams.get("recipientId") ?? "bob";
       requests.push({ recipient, after });
-      return json({
+      return response(200).json({
         items: Array.from({ length: newest }, (_, index) => message(index + 1, recipient)).filter(
           (item) => item.id > after,
         ),
@@ -79,16 +81,10 @@ it("stops mounted share-window requests when minimized and refreshes on restore"
     recipients: [{ userId: "bob", readThrough: 0, senderReadThrough: 0, lastMessage: 1, saved: false, savedFiles: 0 }],
   };
   const requests: string[] = [];
-  stubAPI(
-    vi.fn(async (input) => {
-      const url = String(input);
-      requests.push(url);
-      if (url.endsWith("/s1") || url.endsWith("/view")) return json(share);
-      if (url.includes("/messages?")) return json({ items: [message(1)] });
-      if (url.includes("direction=received")) return json({ items: [share] });
-      return json({ items: [] });
-    }),
-  );
+  server.use(...sharesHandlers({ received: [share], messages: () => [message(1)] }), readCursors().handler);
+  const track = ({ request }: { request: Request }) => requests.push(request.url);
+  server.events.on("request:start", track);
+  onTestFinished(() => server.events.removeListener("request:start", track));
   const panel = (visible: boolean) => (
     <SharesProvider userId="bob" active={false} windowVisible={visible} onOpen={() => undefined}>
       <SharesPanel />
@@ -116,12 +112,12 @@ it("retries a failed page without dropping history or skipping messages", async 
   vi.useFakeTimers();
   const cursors: number[] = [];
   let fail = true;
-  stubAPI(
-    vi.fn(async (input) => {
-      const after = Number(new URL(String(input), "http://nas").searchParams.get("after"));
+  server.use(
+    http.get("/api/v1/shares/{shareId}/messages", ({ query, response }) => {
+      const after = Number(query.get("after"));
       cursors.push(after);
-      if (after === 100 && fail) return apiError(503, "unavailable");
-      return json({
+      if (after === 100 && fail) return response("default").json(apiError("unavailable"), { status: 503 });
+      return response(200).json({
         items: Array.from({ length: 102 }, (_, index) => message(index + 1))
           .filter((item) => item.id > after)
           .slice(0, 100),
@@ -141,25 +137,60 @@ it("retries a failed page without dropping history or skipping messages", async 
 });
 
 it("refreshes desktop unread counts with the share window closed and no new notifications", async () => {
- vi.useFakeTimers();
- let unread = true;
- let reads = 0;
- stubAPI(vi.fn(async (input) => {
-  if (String(input).includes("direction=")) {
-   reads++;
-   return json({items: unread && String(input).includes("received") ? [{id:"s1",status:"published",createdAt:"2026-10-20T00:00:00Z",expiresAt:"2099-01-01T00:00:00Z",preparedBytes:0,sender:{id:"alice",username:"Alice"},recipients:[{userId:"bob",readThrough:0,senderReadThrough:0,lastMessage:1,saved:false,savedFiles:0}],entries:[]}] : []});
+  vi.useFakeTimers();
+  let unread = true;
+  let reads = 0;
+  server.use(...sharesHandlers());
+  server.use(
+    http.get("/api/v1/shares", ({ query, response }) => {
+      reads++;
+      return response(200).json({
+        items:
+          unread && query.get("direction") === "received"
+            ? [
+                {
+                  id: "s1",
+                  status: "published",
+                  createdAt: "2026-10-20T00:00:00Z",
+                  expiresAt: "2099-01-01T00:00:00Z",
+                  preparedBytes: 0,
+                  sender: { id: "alice", username: "Alice" },
+                  recipients: [
+                    {
+                      userId: "bob",
+                      readThrough: 0,
+                      senderReadThrough: 0,
+                      lastMessage: 1,
+                      saved: false,
+                      savedFiles: 0,
+                    },
+                  ],
+                  entries: [],
+                },
+              ]
+            : [],
+      });
+    }),
+  );
+  function Badge() {
+    return <output>{useShares().unread.received}</output>;
   }
-  return json({items:[]});
- }));
- function Badge() { return <output>{useShares().unread.received}</output>; }
- render(<SharesProvider userId="bob" active={false} windowVisible={false} onOpen={() => undefined}><Badge /></SharesProvider>);
- await tick();
- expect(screen.getByRole("status").textContent).toBe("1");
- unread = false;
- await tick(30_000);
- expect(screen.getByRole("status").textContent).toBe("0");
- const before = reads;
- Object.defineProperty(document, "visibilityState", {configurable:true,value:"hidden"});
- try { await tick(30_000); expect(reads).toBe(before); }
- finally { Object.defineProperty(document,"visibilityState",{configurable:true,value:"visible"}); }
+  render(
+    <SharesProvider userId="bob" active={false} windowVisible={false} onOpen={() => undefined}>
+      <Badge />
+    </SharesProvider>,
+  );
+  await tick();
+  expect(screen.getByRole("status").textContent).toBe("1");
+  unread = false;
+  await tick(30_000);
+  expect(screen.getByRole("status").textContent).toBe("0");
+  const before = reads;
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+  try {
+    await tick(30_000);
+    expect(reads).toBe(before);
+  } finally {
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  }
 });

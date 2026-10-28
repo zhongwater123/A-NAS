@@ -1,6 +1,7 @@
-import { errorText } from "../errorMessages";
-import { type RestoreConflict, type RestoredEntry, type Space, type TrashItem } from "../api";
+import { errorText } from "../api/errorMessages";
+import type { RestoredEntry, Space, TrashItem } from "../api.generated";
 import { formatDay } from "../backup/format";
+import type { RestoreConflict } from "./api";
 
 export type TrashSort = "deleted" | "expiry";
 

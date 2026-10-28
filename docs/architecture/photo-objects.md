@@ -132,7 +132,7 @@ anas-photos ──UDS + 只读 fd──► anas-ai（一个进程）
 ## 交付
 
 - **模型清单** `deploy/models/dfine-m-obj365.json`：来源、revision、文件、大小、SHA-256，并存档许可证全文与作者对 Objects365 权重的声明。
-- **运行环境**：`ai/requirements.lock` 加 `onnxruntime==1.31.0` 与 `protobuf`（wheel 约 24 MB），在 `--no-deps` 下核实没有其他依赖；运行环境 ID 随之变化。
+- **运行环境**：`ai/requirements.txt`（当时为 `requirements.lock`）加 `onnxruntime==1.31.0` 与 `protobuf`（wheel 约 24 MB），在 `--no-deps` 下核实没有其他依赖；运行环境 ID 随之变化。
 - **按角色泛化**：安装器、`remote-activate-release.sh`、`deploy-dev.ps1` 与系统测试从“一个模型”改为按角色处理（`model` 为 litertlm，`detector` 为 onnx，release 中链接为 `ai/detector.onnx` 与 `ai/detector.json`），以后人脸模型只需再加一个角色。
 - **系统测试**：替身检测器文件；模型条目数 1→2、升级检查 2→3；篡改的检测器被拒绝；用替身完成一次检测；沙箱探针照常通过；核对单元的资源限制与安装器写入的 drop-in。为了在测试中看到照片整理完成，相册服务读取 `ANAS_PHOTOS_AI_QUIET_PERIOD`（如 `2s`）缩短空闲期，系统测试经 drop-in 设置，产品不设置。真实模型的运行由 `ANAS_AI_DETECTOR` 指定检测器文件。
 

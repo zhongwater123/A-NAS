@@ -1,6 +1,9 @@
 package photos
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // The photo Policy (ADR 0011). Private libraries belong to one member; an
 // administrator sees another member's private library only through an
@@ -12,6 +15,12 @@ import "time"
 //
 // Callers turn "cannot view" into ErrNotFound so that private content is not
 // revealed by error codes, and "can view but not change" into ErrForbidden.
+//
+// Within a library p can view, asset rules decide which assets p sees. Each
+// is written once, in assetRules, and read two ways: as SQL that every
+// listing applies through listedAssets, and on one asset already read
+// through seesAsset. A listing that wrote its own conditions could show an
+// asset that opening it refuses, or the reverse.
 
 func (p Principal) valid() bool { return p.UserID != "" }
 
@@ -68,4 +77,49 @@ func canChange(p Principal, lib library, createdBy string) bool {
 		return p.Admin || createdBy == p.UserID
 	}
 	return lib.ownerUserID == p.UserID
+}
+
+// assetRule is one rule of which assets in a viewable library p sees.
+type assetRule struct {
+	// binds reports whether the rule applies to p.
+	binds func(Principal) bool
+	// allows reports whether the rule lets p see an asset already read, and
+	// allowsSQL is the same as a condition on the assets row named alias.
+	allows    func(assetRecord) bool
+	allowsSQL func(alias string) string
+}
+
+// assistantSeesNoVideos: videos take no part in local AI, and so none in
+// what a member's assistant reads (ADR 0024, docs/specs/photo-video.md).
+var assistantSeesNoVideos = assetRule{
+	binds:     func(p Principal) bool { return p.Assistant },
+	allows:    func(record assetRecord) bool { return record.Video == nil },
+	allowsSQL: func(alias string) string { return notVideo(alias + ".object_id") },
+}
+
+var assetRules = []assetRule{assistantSeesNoVideos}
+
+// seesAsset reports whether every asset rule that binds p lets it see
+// record, an asset of a library it can view.
+func seesAsset(p Principal, record assetRecord) bool {
+	for _, rule := range assetRules {
+		if rule.binds(p) && !rule.allows(record) {
+			return false
+		}
+	}
+	return true
+}
+
+// listedAssets is the SQL condition that the assets row named alias, in a
+// library p can view, is one a listing shows p: outside the trash and let
+// through by every asset rule that binds p. Listings of a scope that
+// canView admitted apply it, including when they recheck ranked hits.
+func listedAssets(p Principal, alias string) string {
+	conditions := []string{alias + ".trashed_at IS NULL"}
+	for _, rule := range assetRules {
+		if rule.binds(p) {
+			conditions = append(conditions, rule.allowsSQL(alias))
+		}
+	}
+	return strings.Join(conditions, " AND ")
 }

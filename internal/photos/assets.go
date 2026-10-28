@@ -259,8 +259,7 @@ func (s *Service) visibleAsset(ctx context.Context, q queryer, p Principal, asse
 	if !canView(p, record.library, s.now()) {
 		return assetRecord{}, ErrNotFound
 	}
-	// Videos take no part in AI, and so none in the assistant's reads.
-	if p.Assistant && record.Video != nil {
+	if !seesAsset(p, record) {
 		return assetRecord{}, ErrNotFound
 	}
 	if record.Trash != nil && !canChange(p, record.library, record.UploadedBy) {
@@ -310,7 +309,7 @@ func (s *Service) Timeline(ctx context.Context, p Principal, libraryID, cursor s
 	if err != nil {
 		return Page{}, err
 	}
-	return s.newestFirst(ctx, p, "WHERE a.library_id = ? AND a.trashed_at IS NULL", []any{lib.id}, cursor, limit)
+	return s.newestFirst(ctx, p, "a.library_id = ?", []any{lib.id}, cursor, limit)
 }
 
 var ErrInvalidMonth = errors.New("invalid photo timeline month")
@@ -337,7 +336,7 @@ func (s *Service) TimelineMonths(ctx context.Context, p Principal, libraryID str
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT IFNULL(taken_at, imported_at), NOT `+notVideo("assets.object_id")+` FROM assets
-WHERE library_id = ? AND trashed_at IS NULL`+hiddenVideos(p, "assets.object_id")+` ORDER BY IFNULL(taken_at, imported_at) DESC`, lib.id)
+WHERE library_id = ? AND `+listedAssets(p, "assets")+` ORDER BY IFNULL(taken_at, imported_at) DESC`, lib.id)
 	if err != nil {
 		return nil, err
 	}
@@ -378,16 +377,16 @@ func (s *Service) TimelineInMonth(ctx context.Context, p Principal, libraryID, m
 		return Page{}, err
 	}
 	const sortKey = "IFNULL(a.taken_at, a.imported_at)"
-	return s.newestFirst(ctx, p, "WHERE a.library_id = ? AND a.trashed_at IS NULL AND "+sortKey+" >= ? AND "+sortKey+" < ?",
+	return s.newestFirst(ctx, p, "a.library_id = ? AND "+sortKey+" >= ? AND "+sortKey+" < ?",
 		[]any{lib.id, formatTime(start), formatTime(start.AddDate(0, 1, 0))}, cursor, limit)
 }
 
-// newestFirst pages through the assets that where selects, newest capture
-// time first, or import time for originals without one.
-func (s *Service) newestFirst(ctx context.Context, p Principal, where string, args []any, cursor string, limit int) (Page, error) {
+// newestFirst pages through the assets listed to p that condition selects,
+// newest capture time first, or import time for originals without one.
+func (s *Service) newestFirst(ctx context.Context, p Principal, condition string, args []any, cursor string, limit int) (Page, error) {
 	limit = pageSize(limit)
 	const sortKey = "IFNULL(a.taken_at, a.imported_at)"
-	where += hiddenVideos(p, "a.object_id")
+	where := "WHERE " + listedAssets(p, "a") + " AND (" + condition + ")"
 	if cursor != "" {
 		at, id, err := decodeCursor(cursor)
 		if err != nil {
@@ -646,7 +645,7 @@ func (s *Service) restorableTrash(ctx context.Context, p Principal, libraryID st
 	}
 	restorable := records[:0]
 	for _, record := range records {
-		if canChange(p, lib, record.UploadedBy) {
+		if canChange(p, lib, record.UploadedBy) && seesAsset(p, record) {
 			restorable = append(restorable, record)
 		}
 	}

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	_ "github.com/mattn/go-sqlite3"
 	"io"
 	"os"
 	"path"
@@ -19,6 +18,10 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 type requestRecord struct {
@@ -92,11 +95,10 @@ func Open(dbPath, contentDir string, options Options) (*Store, error) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, ErrInvalid
 	}
-	db, err := sql.Open("sqlite3", dbPath+"?_busy_timeout=5000&_journal_mode=WAL&_synchronous=FULL")
+	db, err := sqlitedb.Open(dbPath, sqlitedb.Options{Durable: true})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	s := &Store{db: db, dir: contentDir, options: options, records: map[string]*record{}, running: map[string]running{}, streams: map[string]*contentReader{}, stop: make(chan struct{})}
 	s.fenced = map[string]bool{}
 	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS share_documents(id TEXT PRIMARY KEY, document BLOB NOT NULL)`); err != nil {

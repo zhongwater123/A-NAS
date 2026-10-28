@@ -1,5 +1,3 @@
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   Check,
@@ -14,10 +12,14 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { formatBytes } from "../bytes";
-import { usePeople } from "../people";
-import { getShare, listJobs, revokeShare, viewShare, type Job, type Share, type ShareEntry } from "./api";
-import { Conversation, useThread, type Thread } from "./Conversation";
+import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+
+import { formatBytes } from "../lib/bytes";
+import { usePeople } from "../people/people";
+import { getShare, type Job, listJobs, revokeShare, type Share, type ShareEntry, viewShare } from "./api";
+import { Avatar, nameOf, names } from "./avatars";
+import { Conversation, type Thread, useThread } from "./Conversation";
 import {
   errorText,
   fileBytes,
@@ -25,6 +27,7 @@ import {
   jobLabel,
   leaf,
   moment,
+  type Phase,
   parentPath,
   phaseLabel,
   phaseOf,
@@ -34,13 +37,14 @@ import {
   shareTitle,
   topLevel,
   when,
-  type Phase,
 } from "./format";
-import { Avatar, EntryTile, kindOf, nameOf, names } from "./parts";
+import palette from "./palette.module.css";
+import { EntryTile, kindOf } from "./parts";
 import { SaveDialog } from "./SaveDialog";
 import { SharePreview } from "./SharePreview";
-import { useShares } from "./SharesProvider";
 import type { Layout } from "./SharesPanel";
+import { useShares } from "./SharesProvider";
+import styles from "./shares.module.css";
 
 const byName = (a: ShareEntry, b: ShareEntry) =>
   Number(b.isDir) - Number(a.isDir) || leaf(a.path).localeCompare(leaf(b.path), "zh-CN");
@@ -177,15 +181,15 @@ export function ShareDetail({
 
   if (!share)
     return (
-      <section className="sh-detail">
-        <div className="sh-detail-loading">
+      <section className={styles.shDetail}>
+        <div className={styles.shDetailLoading}>
           {error ? (
-            <p role="alert" className="sh-alert">
+            <p role="alert" className={styles.shAlert}>
               {error}
             </p>
           ) : (
             <>
-              <LoaderCircle className="sh-spin" />
+              <LoaderCircle className={styles.shSpin} />
               正在读取分享…
             </>
           )}
@@ -220,24 +224,24 @@ export function ShareDetail({
   const left = remaining(share);
   const layer = (node: ReactNode) => (layerHost ? createPortal(node, layerHost) : node);
   return (
-    <section className={`sh-detail${chatOpen ? " chat-open" : ""}`}>
-      <div className="sh-detail-main">
-        <header className="sh-head">
+    <section className={`${styles.shDetail}${chatOpen ? " chat-open" : ""}`}>
+      <div className={styles.shDetailMain}>
+        <header className={styles.shHead}>
           {layout === "single" && (
-            <button className="sh-icon-btn sh-back" aria-label="返回分享列表" onClick={onBack}>
+            <button className={`${styles.shIconBtn} ${styles.shBack}`} aria-label="返回分享列表" onClick={onBack}>
               <ArrowLeft />
             </button>
           )}
           {top[0] ? (
             <EntryTile name={top[0].path} isDir={top[0].isDir} size="lg" />
           ) : (
-            <span className="sh-tile sh-tile-lg tone-other">
-              <LoaderCircle className={phase === "preparing" ? "sh-spin" : ""} />
+            <span className={`${styles.shTile} ${styles.shTileLg} ${styles.toneOther}`}>
+              <LoaderCircle className={phase === "preparing" ? styles.shSpin : ""} />
             </span>
           )}
-          <div className="sh-head-text">
+          <div className={styles.shHeadText}>
             <h2 title={top.map((entry) => leaf(entry.path)).join("、")}>{shareTitle(share)}</h2>
-            <p className="sh-byline">
+            <p className={styles.shByline}>
               {sender ? (
                 <span>
                   分享给{" "}
@@ -250,43 +254,43 @@ export function ShareDetail({
                   </b>
                 </span>
               ) : (
-                <span className="sh-byline-person">
+                <span className={styles.shBylinePerson}>
                   <Avatar people={people} id={share.sender.id} username={share.sender.username} size="xs" />
                   <b>{owner}</b> 分享给你
                 </span>
               )}
-              <span className="sh-sep" aria-hidden="true">
+              <span className={styles.shSep} aria-hidden="true">
                 ·
               </span>
               <time dateTime={share.publishedAt ?? share.createdAt}>
                 {moment(share.publishedAt ?? share.createdAt)}
               </time>
             </p>
-            <p className="sh-facts">
+            <p className={styles.shFacts}>
               {top.length > 0 && (
                 <span>
                   {top.length} 项 · {formatBytes(fileBytes(share.entries))}
                 </span>
               )}
               {phase === "active" ? (
-                <span className={left.urgent ? "urgent" : ""} title={`${moment(share.expiresAt)} 到期`}>
+                <span className={left.urgent ? styles.urgent : ""} title={`${moment(share.expiresAt)} 到期`}>
                   <Clock3 />
                   {left.text}
                 </span>
               ) : (
-                <span className={`sh-phase ${phase}`}>{phaseLabel[phase!]}</span>
+                <span className={`${styles.shPhase} ${styles[phase!] ?? ""}`}>{phaseLabel[phase!]}</span>
               )}
             </p>
           </div>
         </header>
         {error && (
-          <p role="alert" className="sh-alert sh-detail-alert">
+          <p role="alert" className={`${styles.shAlert} ${styles.shDetailAlert}`}>
             {error}
           </p>
         )}
         <StateBanner share={share} phase={phase!} sender={sender} owner={owner} />
-        <div className="sh-actionbar">
-          <div className="sh-actionbar-start">
+        <div className={styles.shActionbar}>
+          <div className={styles.shActionbarStart}>
             {sender ? (
               <Recipients share={share} people={people} current={chatOpen ? recipient : undefined} onOpen={openChat} />
             ) : (
@@ -301,10 +305,10 @@ export function ShareDetail({
               )
             )}
           </div>
-          <div className="sh-head-actions">
+          <div className={styles.shHeadActions}>
             <button
               ref={chatToggle}
-              className={`sh-btn sh-chat-toggle${chatOpen ? " on" : ""}`}
+              className={`${styles.shBtn} ${styles.shChatToggle}${chatOpen ? ` ${styles.on}` : ""}`}
               aria-label="私聊"
               aria-expanded={chatOpen}
               onClick={() => (chatOpen ? closeChat() : openChat())}
@@ -312,18 +316,18 @@ export function ShareDetail({
               <MessageCircle />
               <span>私聊</span>
               {ownUnread > 0 ? (
-                <b className="sh-count">{ownUnread}</b>
+                <b className={styles.shCount}>{ownUnread}</b>
               ) : (
                 otherThreadsUnread && (
-                  <span className="sh-dot">
-                    <span className="sh-sr">其他接收者有新消息</span>
+                  <span className={styles.shDot}>
+                    <span className={styles.shSr}>其他接收者有新消息</span>
                   </span>
                 )
               )}
             </button>
             {!sender && (
               <button
-                className="sh-btn primary"
+                className={`${styles.shBtn} primary`}
                 disabled={!available || !top.length}
                 onClick={() => startSave(selected.length ? selected : top.map((entry) => entry.id))}
               >
@@ -332,19 +336,23 @@ export function ShareDetail({
               </button>
             )}
             {sender && phase !== "revoked" && phase !== "failed" && (
-              <button className="sh-btn quiet-danger" disabled={revoking} onClick={() => setConfirmRevoke(true)}>
+              <button
+                className={`${styles.shBtn} ${styles.quietDanger}`}
+                disabled={revoking}
+                onClick={() => setConfirmRevoke(true)}
+              >
                 <Undo2 />
                 撤回
               </button>
             )}
           </div>
         </div>
-        <section className="sh-files" aria-label="分享内容">
-          <div className="sh-files-bar">
+        <section className={styles.shFiles} aria-label="分享内容">
+          <div className={styles.shFilesBar}>
             {!sender && (
               <input
                 type="checkbox"
-                className="sh-check"
+                className={styles.shCheck}
                 aria-label="全选当前文件夹"
                 disabled={!available || !visibleEntries.length}
                 checked={allSelected}
@@ -357,7 +365,7 @@ export function ShareDetail({
                 }
               />
             )}
-            <nav className="sh-crumbs" aria-label="分享内路径">
+            <nav className={styles.shCrumbs} aria-label="分享内路径">
               <button disabled={!directory} onClick={() => navigate("")}>
                 全部文件
               </button>
@@ -377,14 +385,14 @@ export function ShareDetail({
                 ))}
             </nav>
             {selected.length > 0 && (
-              <span className="sh-selection">
+              <span className={styles.shSelection}>
                 已选 {selected.length} 项
                 <button aria-label="清除选择" title="清除选择" onClick={() => setSelected([])}>
                   <X />
                 </button>
               </span>
             )}
-            <label className="sh-search compact">
+            <label className={`${styles.shSearch} ${styles.compact}`}>
               <Search />
               <input
                 type="search"
@@ -395,14 +403,14 @@ export function ShareDetail({
               />
             </label>
           </div>
-          <div className="sh-table" role="list">
+          <div className={styles.shTable} role="list">
             {visibleEntries.length > 0 && (
-              <div className="sh-table-head" aria-hidden="true">
-                {!sender && <span className="c" />}
-                <span className="n">名称</span>
-                <span className="k">类型</span>
-                <span className="s">大小</span>
-                {!sender && available && <span className="a" />}
+              <div className={styles.shTableHead} aria-hidden="true">
+                {!sender && <span className={styles.c} />}
+                <span className={styles.n}>名称</span>
+                <span className={styles.k}>类型</span>
+                <span className={styles.s}>大小</span>
+                {!sender && available && <span className={styles.a} />}
               </div>
             )}
             {visibleEntries.map((entry) => {
@@ -411,13 +419,13 @@ export function ShareDetail({
               return (
                 <div
                   role="listitem"
-                  className={`sh-file${checked ? " selected" : ""}${!entry.isDir && !available ? " locked" : ""}`}
+                  className={`${styles.shFile}${checked ? ` ${styles.selected}` : ""}${!entry.isDir && !available ? ` ${styles.locked}` : ""}`}
                   key={entry.id}
                 >
                   {!sender && (
                     <input
                       type="checkbox"
-                      className="sh-check"
+                      className={styles.shCheck}
                       aria-label={`选择 ${name}`}
                       disabled={!available}
                       checked={checked}
@@ -429,19 +437,19 @@ export function ShareDetail({
                     />
                   )}
                   <button
-                    className="sh-file-open"
+                    className={styles.shFileOpen}
                     title={entry.isDir ? `打开 ${name}` : available ? `预览 ${name}` : name}
                     onClick={() => (entry.isDir ? navigate(entry.path) : setPreview(entry.id))}
                     disabled={!entry.isDir && !available}
                   >
                     <EntryTile name={name} isDir={entry.isDir} />
-                    <span className="sh-file-name">{name}</span>
+                    <span className={styles.shFileName}>{name}</span>
                   </button>
-                  <span className="sh-file-kind">{kindOf(name, entry.isDir).label}</span>
-                  <span className="sh-file-size">{entry.isDir ? "—" : formatBytes(entry.size)}</span>
+                  <span className={styles.shFileKind}>{kindOf(name, entry.isDir).label}</span>
+                  <span className={styles.shFileSize}>{entry.isDir ? "—" : formatBytes(entry.size)}</span>
                   {!sender && available && (
                     <button
-                      className="sh-file-save"
+                      className={styles.shFileSave}
                       aria-label={`保存 ${name}`}
                       title="保存"
                       onClick={() => startSave([entry.id])}
@@ -453,17 +461,17 @@ export function ShareDetail({
               );
             })}
             {!visibleEntries.length && (
-              <div className="sh-files-empty">
+              <div className={styles.shFilesEmpty}>
                 {phase === "preparing" ? (
                   <>
-                    <LoaderCircle className="sh-spin" />
+                    <LoaderCircle className={styles.shSpin} />
                     <p>副本准备好后就能看到文件</p>
                   </>
                 ) : query ? (
                   <>
                     <Search />
                     <p>没有匹配“{query.trim()}”的文件</p>
-                    <button className="sh-btn small" onClick={() => setQuery("")}>
+                    <button className={`${styles.shBtn} ${styles.small}`} onClick={() => setQuery("")}>
                       清除搜索
                     </button>
                   </>
@@ -476,7 +484,7 @@ export function ShareDetail({
           {!sender && <SaveJobs jobs={jobs} places={places} />}
         </section>
       </div>
-      {chatOpen && !docked && <div className="sh-scrim" onClick={closeChat} />}
+      {chatOpen && !docked && <div className={styles.shScrim} onClick={closeChat} />}
       {recipient && (
         <Conversation
           share={share}
@@ -526,15 +534,15 @@ export function ShareDetail({
         )}
       {confirmRevoke &&
         layer(
-          <div className="sh-layer">
+          <div className={`${palette.shPalette} ${styles.shLayer}`}>
             <section
-              className="sh-dialog sh-confirm"
+              className={`${styles.shDialog} ${styles.shConfirm}`}
               role="alertdialog"
               aria-modal="true"
               aria-labelledby="sh-revoke-title"
               aria-describedby="sh-revoke-text"
             >
-              <span className="sh-confirm-mark">
+              <span className={styles.shConfirmMark}>
                 <Undo2 />
               </span>
               <h2 id="sh-revoke-title">撤回这次分享？</h2>
@@ -546,11 +554,16 @@ export function ShareDetail({
                 )}
                 将不能继续预览、保存或回复，正在进行的保存会停止。已经保存的文件无法收回。
               </p>
-              <footer className="sh-dialog-foot">
-                <button className="sh-btn" disabled={revoking} onClick={() => setConfirmRevoke(false)}>
+              <footer className={styles.shDialogFoot}>
+                <button className={styles.shBtn} disabled={revoking} onClick={() => setConfirmRevoke(false)}>
                   取消
                 </button>
-                <button className="sh-btn danger" autoFocus disabled={revoking} onClick={() => void revoke()}>
+                <button
+                  className={`${styles.shBtn} ${styles.danger}`}
+                  autoFocus
+                  disabled={revoking}
+                  onClick={() => void revoke()}
+                >
                   {revoking ? "正在撤回…" : "确认撤回"}
                 </button>
               </footer>
@@ -566,8 +579,8 @@ function StateBanner({ share, phase, sender, owner }: { share: Share; phase: Pha
   if (phase === "active") return null;
   if (phase === "preparing")
     return (
-      <div className="sh-banner info">
-        <LoaderCircle className="sh-spin" />
+      <div className={`${styles.shBanner} ${styles.info}`}>
+        <LoaderCircle className={styles.shSpin} />
         <p>
           <b>正在准备文件副本{share.preparedBytes > 0 && ` · 已复制 ${formatBytes(share.preparedBytes)}`}</b>
           <span>准备好后会自动发给接收者，可以先关闭窗口。</span>
@@ -576,7 +589,7 @@ function StateBanner({ share, phase, sender, owner }: { share: Share; phase: Pha
     );
   if (phase === "failed")
     return (
-      <div className="sh-banner danger">
+      <div className={`${styles.shBanner} ${styles.danger}`}>
         <CircleAlert />
         <p>
           <b>{reason || "副本准备失败"}</b>
@@ -586,7 +599,7 @@ function StateBanner({ share, phase, sender, owner }: { share: Share; phase: Pha
     );
   if (phase === "revoked")
     return (
-      <div className="sh-banner muted">
+      <div className={`${styles.shBanner} ${styles.muted}`}>
         <Undo2 />
         <p>
           <b>{reason || (sender ? "你已撤回这次分享" : `${owner} 已撤回这次分享`)}</b>
@@ -595,7 +608,7 @@ function StateBanner({ share, phase, sender, owner }: { share: Share; phase: Pha
       </div>
     );
   return (
-    <div className="sh-banner muted">
+    <div className={`${styles.shBanner} ${styles.muted}`}>
       <Clock3 />
       <p>
         <b>已于 {moment(share.expiresAt)} 到期</b>
@@ -619,28 +632,28 @@ function Recipients({
   onOpen: (id: string) => void;
 }) {
   return (
-    <div className="sh-recipients" role="group" aria-label="接收者">
+    <div className={styles.shRecipients} role="group" aria-label="接收者">
       {share.recipients.map((item) => {
         const state = receipt(item);
         const unread = item.lastMessage > item.senderReadThrough;
         return (
           <button
             key={item.userId}
-            className={`sh-recipient${current === item.userId ? " on" : ""}`}
+            className={`${styles.shRecipient}${current === item.userId ? ` ${styles.on}` : ""}`}
             aria-label={`与 ${nameOf(people, item.userId)} 私聊`}
             onClick={() => onOpen(item.userId)}
           >
-            <span className="sh-recipient-face">
+            <span className={styles.shRecipientFace}>
               <Avatar people={people} id={item.userId} size="md" />
               {unread && (
-                <span className="sh-dot">
-                  <span className="sh-sr">有新消息</span>
+                <span className={styles.shDot}>
+                  <span className={styles.shSr}>有新消息</span>
                 </span>
               )}
             </span>
-            <span className="sh-recipient-text">
+            <span className={styles.shRecipientText}>
               <strong>{nameOf(people, item.userId)}</strong>
-              <small className={`tone-${state.tone}`}>
+              <small className={`${styles[`tone-${state.tone}`] ?? ""}`}>
                 {state.tone === "saved" && <Check />}
                 {state.text}
               </small>
@@ -671,9 +684,9 @@ function Peek({
   if (!last) return null;
   const own = last.sender.id === userId;
   return (
-    <button className={`sh-peek${unread ? " unread" : ""}`} onClick={onOpen} aria-label="打开私聊">
+    <button className={`${styles.shPeek}${unread ? ` ${styles.unread}` : ""}`} onClick={onOpen} aria-label="打开私聊">
       <Avatar people={people} id={last.sender.id} username={last.sender.username} size="sm" />
-      <span className="sh-peek-text">
+      <span className={styles.shPeekText}>
         <span>
           {own ? "你：" : ""}
           {last.text}
@@ -681,9 +694,9 @@ function Peek({
       </span>
       <time dateTime={last.createdAt}>{when(last.createdAt)}</time>
       {unread > 0 ? (
-        <b className="sh-count">{unread}</b>
+        <b className={styles.shCount}>{unread}</b>
       ) : (
-        <span className="sh-peek-reply">
+        <span className={styles.shPeekReply}>
           回复
           <ChevronRight />
         </span>
@@ -702,17 +715,17 @@ function SaveJobs({ jobs, places }: { jobs: Job[]; places: Record<string, string
   const place = places[job.id];
   const icon =
     job.status === "running" ? (
-      <LoaderCircle className="sh-spin" />
+      <LoaderCircle className={styles.shSpin} />
     ) : job.status === "completed" ? (
       <Check />
     ) : (
       <CircleAlert />
     );
   return (
-    <div className={`sh-job ${job.status}`} aria-label="保存任务">
-      <div className="sh-job-main">
-        <span className="sh-job-icon">{icon}</span>
-        <div className="sh-job-text">
+    <div className={`${styles.shJob} ${styles[job.status] ?? ""}`} aria-label="保存任务">
+      <div className={styles.shJobMain}>
+        <span className={styles.shJobIcon}>{icon}</span>
+        <div className={styles.shJobText}>
           <strong>
             {jobLabel[job.status] ?? job.status}
             {place && <span> 到 {place}</span>}
@@ -728,17 +741,19 @@ function SaveJobs({ jobs, places }: { jobs: Job[]; places: Record<string, string
           )}
         </div>
         {jobs.length > 1 && (
-          <button className="sh-job-history" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <button className={styles.shJobHistory} aria-expanded={open} onClick={() => setOpen(!open)}>
             保存记录 {jobs.length}
             <ChevronDown />
           </button>
         )}
       </div>
       {open && (
-        <ul className="sh-job-list">
+        <ul className={styles.shJobList}>
           {jobs.map((item) => (
             <li key={item.id}>
-              <span className={`sh-job-state ${item.status}`}>{jobLabel[item.status] ?? item.status}</span>
+              <span className={`${styles.shJobState} ${styles[item.status] ?? ""}`}>
+                {jobLabel[item.status] ?? item.status}
+              </span>
               <span>{places[item.id] ?? ""}</span>
               <small>
                 {jobDone(item)} 项{item.error && ` · ${reasonText(item.error)}`}

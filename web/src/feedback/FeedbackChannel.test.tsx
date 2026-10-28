@@ -2,12 +2,13 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setSession } from "../api";
-import { forgetPeople, rememberPerson } from "../people";
+import { setSession } from "../api/client";
+import { forgetPeople, rememberPerson } from "../people/people";
+import { feedbackComment, feedbackHandlers, feedbackItem } from "../test/handlers/feedback";
+import { apiError, formOf, http, server } from "../test/server";
+import type { FeedbackItem } from "./api";
 import { FeedbackChannel } from "./FeedbackChannel";
-import type { FeedbackComment, FeedbackItem } from "./feedbackApi";
 import { describeTime } from "./time";
-import { json, stubAPI } from "../test/api";
 
 const capture = vi.hoisted(() => ({ result: undefined as Blob | undefined }));
 vi.mock("./capture", async (original) => ({
@@ -18,63 +19,41 @@ vi.mock("./capture", async (original) => ({
   }),
 }));
 
-const upload: FeedbackItem = {
-  id: "feedback:upload",
+const upload = feedbackItem("feedback:upload", {
   text: "上传 2 GB 视频时进度停在 99%",
   images: [{ id: "feedback-image:shot", contentType: "image/png", sizeBytes: 2048 }],
-  version: 1,
   createdBy: "lin",
   createdAt: "2026-10-12T08:00:00Z",
-  resolved: false,
-  comments: [],
-};
-const heic: FeedbackItem = {
-  id: "feedback:heic",
+});
+const heic = feedbackItem("feedback:heic", {
   text: "希望相册支持 HEIC",
-  images: [],
   version: 3,
   createdBy: "owner",
   createdAt: "2026-10-12T07:00:00Z",
-  resolved: false,
-  comments: [],
-};
-const reply: FeedbackComment = {
-  id: "feedback-comment:reply",
+});
+const reply = feedbackComment("feedback-comment:reply", {
   text: "我这边也能复现",
   images: [{ id: "feedback-image:reply", contentType: "image/png", sizeBytes: 1024 }],
-  version: 1,
   createdBy: "lin",
   createdAt: "2026-10-12T06:30:00Z",
-};
-const subtitles: FeedbackItem = {
-  id: "feedback:subtitles",
+});
+const subtitles = feedbackItem("feedback:subtitles", {
   text: "全屏字幕偏小",
-  images: [],
-  version: 1,
   createdBy: "owner",
   createdAt: "2026-10-11T07:00:00Z",
   resolved: true,
   resolvedBy: "lin",
   resolvedAt: "2026-10-12T06:00:00Z",
   comments: [reply],
-};
+});
 
-type Handler = (url: string, init: RequestInit) => Response | undefined;
+// The text of an item or a comment as the list shows it, not the draft in an
+// editor's text box.
+const shown = { ignore: "textarea" };
 
-// serve answers the feedback API from a list that write handlers may change.
-function serve(items: FeedbackItem[], ...handlers: Handler[]) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-    const url = String(input);
-    for (const handler of handlers) {
-      const response = handler(url, init);
-      if (response) return response;
-    }
-    if (url === "/api/v1/feedback" && (init.method ?? "GET") === "GET") return json({ items });
-    return json({ error: { code: "not_found", message: "not found" } }, 404);
-  });
-  stubAPI(fetchMock);
-  return fetchMock;
-}
+// Whether a line runs through the whole text: feedback.css draws it as the
+// text's background, which grows across it when the item is handled.
+const struck = (text: HTMLElement) => getComputedStyle(text).backgroundSize.startsWith("100%");
 
 const png = (name = "shot.png") => new File([new Uint8Array([137, 80, 78, 71])], name, { type: "image/png" });
 
@@ -113,24 +92,26 @@ async function openPanel(user: ReturnType<typeof userEvent.setup>) {
 describe("问题反馈", () => {
   it("names authors by nickname next to their avatar", async () => {
     rememberPerson({ id: "user:lin", username: "lin", nickname: "林老师", avatarVersion: "0123abcd" });
-    serve([upload, heic]);
+    server.use(...feedbackHandlers(() => [upload, heic]));
     const user = userEvent.setup();
     render(<FeedbackChannel />);
     const panel = await openPanel(user);
     const card = (await within(panel).findByText(upload.text)).closest("li") as HTMLElement;
     expect(within(card).getByText("林老师")).toBeTruthy();
     expect(within(card).queryByText("lin")).toBeNull();
-    expect(card.querySelector(".fb-avatar img")?.getAttribute("src")).toBe(
+    // The avatar comes right before the name; it is decorative, the name is read.
+    const avatar = (name: HTMLElement) => name.previousElementSibling;
+    expect(avatar(within(card).getByText("林老师"))?.querySelector("img")?.getAttribute("src")).toBe(
       "/api/v1/users/user%3Alin/avatar?v=0123abcd",
     );
     // An author without a profile keeps the account name and its initial.
     const other = within(panel).getByText(heic.text).closest("li") as HTMLElement;
     expect(within(other).getByText("owner")).toBeTruthy();
-    expect(other.querySelector(".fb-avatar")?.textContent).toBe("O");
+    expect(avatar(within(other).getByText("owner"))?.textContent).toBe("O");
   });
 
   it("shows the open count on the edge button and lists open items first", async () => {
-    serve([upload, heic, subtitles]);
+    server.use(...feedbackHandlers(() => [upload, heic, subtitles]));
     const focus = vi.spyOn(HTMLElement.prototype, "focus");
     const user = userEvent.setup();
     render(<FeedbackChannel />);
@@ -152,7 +133,9 @@ describe("问题反馈", () => {
     );
 
     await user.click(within(panel).getByRole("tab", { name: "已处理1" }));
-    expect(within(panel).getByText("全屏字幕偏小").closest("li")?.className).toContain("resolved");
+    const handled = within(panel).getByText("全屏字幕偏小");
+    expect(struck(handled)).toBe(true);
+    expect(within(handled.closest("li")!).getByText("（已处理）")).toBeTruthy();
     expect(within(panel).getByText("lin 已处理")).toBeTruthy();
     await user.click(within(panel).getByRole("tab", { name: "全部3" }));
     expect(
@@ -174,8 +157,13 @@ describe("问题反馈", () => {
       images: [],
       createdAt: "2026-10-12T09:00:00Z",
     };
-    const fetchMock = serve([heic], (url, init) =>
-      url === "/api/v1/feedback" && init.method === "POST" ? json(created, 201) : undefined,
+    const posts: Request[] = [];
+    server.use(
+      ...feedbackHandlers(() => [heic]),
+      http.post("/api/v1/feedback", ({ request, response }) => {
+        posts.push(request);
+        return response(201).json(created);
+      }),
     );
     capture.result = new Blob(["webp"], { type: "image/webp" });
     const user = userEvent.setup();
@@ -201,31 +189,36 @@ describe("问题反馈", () => {
     expect((within(panel).getByLabelText("新反馈内容") as HTMLTextAreaElement).value).toBe("设置页面错位");
 
     await user.keyboard("{Control>}{Enter}{/Control}");
-    await within(panel).findByText("设置页面错位", { selector: ".fb-strike" });
-    const post = fetchMock.mock.calls.find(([url, init]) => url === "/api/v1/feedback" && init?.method === "POST");
-    const body = post?.[1]?.body as FormData;
+    await within(panel).findByText("设置页面错位", shown);
+    expect(posts).toHaveLength(1);
+    const body = formOf(posts[0]);
     expect(body.get("text")).toBe("设置页面错位");
     expect(body.getAll("image").map((image) => (image as File).type)).toEqual(["image/png", "image/webp"]);
-    expect(new Headers(post?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
+    expect(posts[0].headers.get("X-CSRF-Token")).toBe("csrf-test");
     expect((within(panel).getByLabelText("新反馈内容") as HTMLTextAreaElement).value).toBe("");
     expect(within(panel).queryByRole("list", { name: "附图" })).toBeNull();
   });
 
   it("strikes through a handled item and keeps it in place until the view changes", async () => {
-    const fetchMock = serve([upload, heic], (url, init) =>
-      url === "/api/v1/feedback/feedback%3Aheic" && init.method === "PATCH"
-        ? json({ ...heic, resolved: true, resolvedBy: "owner", resolvedAt: "2026-10-12T09:00:00Z" })
-        : undefined,
+    const patches: Array<{ id: string; body: unknown }> = [];
+    server.use(
+      ...feedbackHandlers(() => [upload, heic]),
+      http.patch("/api/v1/feedback/{feedbackId}", async ({ params, request, response }) => {
+        patches.push({ id: params.feedbackId, body: await request.json() });
+        return response(200).json({ ...heic, resolved: true, resolvedBy: "owner", resolvedAt: "2026-10-12T09:00:00Z" });
+      }),
     );
     const user = userEvent.setup();
     render(<FeedbackChannel />);
     const panel = await openPanel(user);
-    const item = (await within(panel).findByText("希望相册支持 HEIC")).closest("li")!;
+    const text = await within(panel).findByText("希望相册支持 HEIC");
+    const item = text.closest("li")!;
+    expect(struck(text)).toBe(false);
     await user.click(within(item).getByRole("checkbox", { name: "标记为已处理" }));
-    expect(item.className).toContain("resolved");
+    expect(struck(text)).toBe(true);
+    expect(within(item).getByRole("checkbox", { name: "标记为待处理" }).getAttribute("aria-checked")).toBe("true");
     expect(await within(item).findByText("owner 已处理")).toBeTruthy();
-    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
-    expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ resolved: true });
+    expect(patches).toEqual([{ id: heic.id, body: { resolved: true } }]);
     expect(within(panel).getByRole("tab", { name: "待处理1" })).toBeTruthy();
 
     await user.click(within(panel).getByRole("tab", { name: "已处理1" }));
@@ -235,23 +228,24 @@ describe("问题反馈", () => {
 
   it("edits from the version it read and saves over a concurrent edit after showing it", async () => {
     let latest = { ...upload };
-    let attempts = 0;
-    const fetchMock = serve([upload], (url, init) => {
-      if (url === "/api/v1/feedback" && (init.method ?? "GET") === "GET") return json({ items: [latest] });
-      if (url !== "/api/v1/feedback/feedback%3Aupload" || init.method !== "PUT") return undefined;
-      attempts += 1;
-      if (attempts === 1) {
-        latest = {
-          ...upload,
-          text: "进度停在 99%，刷新后才完成",
-          version: 2,
-          updatedBy: "lin",
-          updatedAt: "2026-10-12T09:00:00Z",
-        };
-        return json({ error: { code: "feedback_changed", message: "feedback changed since it was read" } }, 409);
-      }
-      return json({ ...latest, text: "我的版本", images: [], version: 3, updatedBy: "owner" });
-    });
+    const edits: Array<{ id: string; form: FormData }> = [];
+    server.use(
+      ...feedbackHandlers(() => [latest]),
+      http.put("/api/v1/feedback/{feedbackId}", ({ params, request, response }) => {
+        edits.push({ id: params.feedbackId, form: formOf(request) });
+        if (edits.length === 1) {
+          latest = {
+            ...upload,
+            text: "进度停在 99%，刷新后才完成",
+            version: 2,
+            updatedBy: "lin",
+            updatedAt: "2026-10-12T09:00:00Z",
+          };
+          return response(409).json(apiError("feedback_changed", "feedback changed since it was read"));
+        }
+        return response(200).json({ ...latest, text: "我的版本", images: [], version: 3, updatedBy: "owner" });
+      }),
+    );
     const user = userEvent.setup();
     render(<FeedbackChannel />);
     const panel = await openPanel(user);
@@ -268,21 +262,23 @@ describe("问题反馈", () => {
     expect(within(editor).getByText("进度停在 99%，刷新后才完成")).toBeTruthy();
     expect((field as HTMLTextAreaElement).value).toBe("我的版本");
     await user.click(within(editor).getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(within(panel).getByText("我的版本", { selector: ".fb-strike" })).toBeTruthy());
+    await waitFor(() => expect(within(panel).getByText("我的版本", shown)).toBeTruthy());
 
-    const edits = fetchMock.mock.calls
-      .filter(([, init]) => init?.method === "PUT")
-      .map(([, init]) => init?.body as FormData);
-    expect(edits.map((body) => [body.get("version"), body.get("text"), body.getAll("keep")])).toEqual([
-      ["1", "我的版本", []],
-      ["2", "我的版本", []],
+    expect(edits.map(({ id, form }) => [id, form.get("version"), form.get("text"), form.getAll("keep")])).toEqual([
+      [upload.id, "1", "我的版本", []],
+      [upload.id, "2", "我的版本", []],
     ]);
     expect(within(panel).getByText("已编辑")).toBeTruthy();
   });
 
   it("deletes an item only after confirming", async () => {
-    const fetchMock = serve([upload, heic], (url, init) =>
-      url === "/api/v1/feedback/feedback%3Aheic" && init.method === "DELETE" ? json(null, 204) : undefined,
+    const deleted: string[] = [];
+    server.use(
+      ...feedbackHandlers(() => [upload, heic]),
+      http.delete("/api/v1/feedback/{feedbackId}", ({ params, response }) => {
+        deleted.push(params.feedbackId);
+        return response(204).empty();
+      }),
     );
     const user = userEvent.setup();
     render(<FeedbackChannel />);
@@ -291,15 +287,16 @@ describe("问题反馈", () => {
     await user.click(within(item).getByRole("button", { name: "删除反馈" }));
     const confirm = within(item).getByRole("group", { name: "确认删除" });
     await user.click(within(confirm).getByRole("button", { name: "取消" }));
-    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+    expect(deleted).toEqual([]);
     await user.click(within(item).getByRole("button", { name: "删除反馈" }));
     await user.click(within(item).getByRole("button", { name: "删除" }));
     await waitFor(() => expect(within(panel).queryByText("希望相册支持 HEIC")).toBeNull());
+    expect(deleted).toEqual([heic.id]);
     expect(within(panel).getByRole("tab", { name: "待处理1" })).toBeTruthy();
   });
 
   it("opens attached images in a viewer that Escape closes without closing the panel", async () => {
-    serve([upload]);
+    server.use(...feedbackHandlers(() => [upload]));
     const user = userEvent.setup();
     render(<FeedbackChannel />);
     const panel = await openPanel(user);
@@ -317,18 +314,21 @@ describe("问题反馈的评论", () => {
     const answered: FeedbackItem = {
       ...heic,
       comments: [
-        {
-          id: "feedback-comment:new",
+        feedbackComment("feedback-comment:new", {
           text: "1.0.2 会支持",
           images: [{ id: "feedback-image:new", contentType: "image/png", sizeBytes: 4 }],
-          version: 1,
           createdBy: "owner",
           createdAt: "2026-10-12T09:00:00Z",
-        },
+        }),
       ],
     };
-    const fetchMock = serve([heic, subtitles], (url, init) =>
-      url === "/api/v1/feedback/feedback%3Aheic/comments" && init.method === "POST" ? json(answered, 201) : undefined,
+    const posts: Array<{ id: string; request: Request }> = [];
+    server.use(
+      ...feedbackHandlers(() => [heic, subtitles]),
+      http.post("/api/v1/feedback/{feedbackId}/comments", ({ params, request, response }) => {
+        posts.push({ id: params.feedbackId, request });
+        return response(201).json(answered);
+      }),
     );
     const user = userEvent.setup();
     render(<FeedbackChannel />);
@@ -344,8 +344,12 @@ describe("问题反馈的评论", () => {
     expect(
       within(thread).getByRole("button", { name: "查看评论附图 1" }).querySelector("img")?.getAttribute("src"),
     ).toBe("/api/v1/feedback/feedback%3Asubtitles/images/feedback-image%3Areply");
-    // The discussion is not struck through with the handled item.
-    expect(within(thread).getByText("我这边也能复现").closest(".fb-strike")).toBeNull();
+    // The discussion is not struck through with the handled item: the line runs
+    // through the item's own text only.
+    const text = within(handled).getByText("全屏字幕偏小");
+    expect(struck(text)).toBe(true);
+    expect(text.contains(thread)).toBe(false);
+    expect(struck(within(thread).getByText("我这边也能复现"))).toBe(false);
 
     // An empty thread opens straight into the comment box.
     const item = within(panel).getByText("希望相册支持 HEIC").closest("li")!;
@@ -360,39 +364,34 @@ describe("问题反馈的评论", () => {
     expect(within(item).getByText("3/3")).toBeTruthy();
     await user.click(within(item).getByRole("button", { name: "评论" }));
 
-    expect(await within(item).findByText("1.0.2 会支持", { selector: ".fb-comment-text" })).toBeTruthy();
+    expect(await within(item).findByText("1.0.2 会支持", shown)).toBeTruthy();
     expect(within(item).getByRole("button", { name: "1 条评论" })).toBeTruthy();
-    const post = fetchMock.mock.calls.find(
-      ([url, init]) => url === "/api/v1/feedback/feedback%3Aheic/comments" && init?.method === "POST",
-    );
-    const body = post?.[1]?.body as FormData;
+    expect(posts.map(({ id }) => id)).toEqual([heic.id]);
+    const body = formOf(posts[0].request);
     expect(body.get("text")).toBe("1.0.2 会支持");
     expect(body.getAll("image")).toHaveLength(3);
-    expect(new Headers(post?.[1]?.headers).get("X-CSRF-Token")).toBe("csrf-test");
+    expect(posts[0].request.headers.get("X-CSRF-Token")).toBe("csrf-test");
     expect((within(item).getByLabelText("写评论内容") as HTMLTextAreaElement).value).toBe("");
   });
 
   it("lets anyone edit a comment, saving over a concurrent edit after showing it, and delete one after confirming", async () => {
     let latest: FeedbackItem = { ...subtitles };
-    let attempts = 0;
-    const fetchMock = serve([subtitles], (url, init) => {
-      if (url === "/api/v1/feedback" && (init.method ?? "GET") === "GET") return json({ items: [latest] });
-      const path = "/api/v1/feedback/feedback%3Asubtitles/comments/feedback-comment%3Areply";
-      if (url === path && init.method === "PUT") {
-        attempts += 1;
-        if (attempts === 1) {
+    const edits: Array<{ ids: string[]; form: FormData }> = [];
+    const deleted: string[][] = [];
+    server.use(
+      ...feedbackHandlers(() => [latest]),
+      http.put("/api/v1/feedback/{feedbackId}/comments/{commentId}", ({ params, request, response }) => {
+        edits.push({ ids: [params.feedbackId, params.commentId], form: formOf(request) });
+        if (edits.length === 1) {
           latest = {
             ...subtitles,
             comments: [
               { ...reply, text: "只在全屏时出现", version: 2, updatedBy: "lin", updatedAt: "2026-10-12T09:00:00Z" },
             ],
           };
-          return json(
-            { error: { code: "comment_changed", message: "feedback comment changed since it was read" } },
-            409,
-          );
+          return response(409).json(apiError("comment_changed", "feedback comment changed since it was read"));
         }
-        return json({
+        return response(200).json({
           ...latest,
           comments: [
             {
@@ -405,10 +404,12 @@ describe("问题反馈的评论", () => {
             },
           ],
         });
-      }
-      if (url === path && init.method === "DELETE") return json({ ...latest, comments: [] });
-      return undefined;
-    });
+      }),
+      http.delete("/api/v1/feedback/{feedbackId}/comments/{commentId}", ({ params, response }) => {
+        deleted.push([params.feedbackId, params.commentId]);
+        return response(200).json({ ...latest, comments: [] });
+      }),
+    );
     const user = userEvent.setup();
     render(<FeedbackChannel />);
     const panel = await openPanel(user);
@@ -427,20 +428,21 @@ describe("问题反馈的评论", () => {
     expect(await within(editor).findByText("lin 刚刚修改了这条评论")).toBeTruthy();
     expect(within(editor).getByText("只在全屏时出现")).toBeTruthy();
     await user.click(within(editor).getByRole("button", { name: "保存" }));
-    expect(await within(item).findByText("已在 1.0.2 修复", { selector: ".fb-comment-text" })).toBeTruthy();
-    const edits = fetchMock.mock.calls
-      .filter(([, init]) => init?.method === "PUT")
-      .map(([, init]) => init?.body as FormData);
-    expect(edits.map((body) => [body.get("version"), body.get("text"), body.getAll("keep")])).toEqual([
-      ["1", "已在 1.0.2 修复", []],
-      ["2", "已在 1.0.2 修复", []],
+    expect(await within(item).findByText("已在 1.0.2 修复", shown)).toBeTruthy();
+    const comment = [subtitles.id, reply.id];
+    expect(edits.map(({ ids, form }) => [...ids, form.get("version"), form.get("text"), form.getAll("keep")])).toEqual([
+      [...comment, "1", "已在 1.0.2 修复", []],
+      [...comment, "2", "已在 1.0.2 修复", []],
     ]);
-    expect(within(item).getByText("已编辑", { selector: ".fb-comment-head .fb-edited" })).toBeTruthy();
+    // The comment, not the item, shows that it was edited.
+    expect(within(within(item).getByRole("region", { name: "评论" })).getByText("已编辑")).toBeTruthy();
 
     await user.click(within(item).getByRole("button", { name: "删除评论" }));
     const confirm = within(item).getByRole("group", { name: "确认删除评论" });
+    expect(deleted).toEqual([]);
     await user.click(within(confirm).getByRole("button", { name: "删除" }));
     await waitFor(() => expect(within(item).queryByText("已在 1.0.2 修复")).toBeNull());
+    expect(deleted).toEqual([comment]);
     expect(within(item).getByRole("button", { name: "写评论" })).toBeTruthy();
   });
 });

@@ -1,0 +1,14 @@
+# The AI Worker's runtime on Debian 13 (CPython 3.13, x86_64). The runtime's
+# packages and hashes are in requirements.txt, which
+#   scripts/build-ai-runtime.sh --lock
+# resolves from this file with uv (`--upgrade-package NAME` passes through).
+# Rerun the real-model tests after any change.
+#
+# MediaPipe itself. Importing it loads its drawing utilities, which import
+# OpenCV and Matplotlib, so both stay although the Worker only embeds.
+mediapipe==1.1.0
+# The headless build in place of MediaPipe's opencv-contrib-python, which needs
+# X libraries: requirements.excludes keeps that one out.
+opencv-contrib-python-headless==5.0.0.93
+# Object detection (docs/architecture/photo-objects.md).
+onnxruntime==1.31.0

@@ -13,16 +13,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 )
 
 // identityRecord is what the Host Agent remembers about an A-NAS Linux
 // identity. The registry is mirrored onto the data volume so a reinstalled
 // system disk can recreate accounts with the UIDs that own the files.
 type identityRecord struct {
-	UID     int           `json:"uid"`
-	Role    accounts.Role `json:"role"`
-	Enabled bool          `json:"enabled"`
+	UID     int            `json:"uid"`
+	Role    accountid.Role `json:"role"`
+	Enabled bool           `json:"enabled"`
 }
 
 const identityManifestName = ".a-nas-identities.json"
@@ -31,14 +31,14 @@ var fixedGroups = []struct {
 	name string
 	gid  int
 }{
-	{name: accounts.UsersGroup, gid: accounts.UsersGID},
-	{name: accounts.AdminsGroup, gid: accounts.AdminsGID},
+	{name: accountid.UsersGroup, gid: accountid.UsersGID},
+	{name: accountid.AdminsGroup, gid: accountid.AdminsGID},
 }
 
 // SyncIdentities converges host accounts and group membership without
 // touching passwords. Disabled identities keep their account so files stay
 // attributed, but their SMB credential is disabled.
-func (e *Executor) SyncIdentities(ctx context.Context, identities []accounts.Identity) error {
+func (e *Executor) SyncIdentities(ctx context.Context, identities []accountid.Identity) error {
 	if e.identityError != nil {
 		return e.identityError
 	}
@@ -66,7 +66,7 @@ func (e *Executor) SyncIdentities(ctx context.Context, identities []accounts.Ide
 	return errors.Join(failures...)
 }
 
-func (e *Executor) syncIdentity(ctx context.Context, identity accounts.Identity) error {
+func (e *Executor) syncIdentity(ctx context.Context, identity accountid.Identity) error {
 	if err := e.ensureIdentity(ctx, identity); err != nil {
 		return err
 	}
@@ -78,14 +78,14 @@ func (e *Executor) syncIdentity(ctx context.Context, identity accounts.Identity)
 	return e.recordIdentity(identity)
 }
 
-func validIdentity(identity accounts.Identity) error {
-	if !validUsername(identity.Username) {
+func validIdentity(identity accountid.Identity) error {
+	if !accountid.ValidUsername(identity.Username) {
 		return errors.New("invalid identity username")
 	}
-	if identity.UID < accounts.FirstUserUID || identity.UID > accounts.LastUserUID {
+	if identity.UID < accountid.FirstUserUID || identity.UID > accountid.LastUserUID {
 		return errors.New("identity UID is outside the A-NAS range")
 	}
-	if identity.Role != accounts.RoleAdmin && identity.Role != accounts.RoleMember {
+	if identity.Role != accountid.RoleAdmin && identity.Role != accountid.RoleMember {
 		return errors.New("invalid identity role")
 	}
 	return nil
@@ -112,13 +112,13 @@ func (e *Executor) ensureFixedGroups(ctx context.Context) error {
 
 // ensureIdentity creates or adopts the Linux account for one A-NAS user. It
 // never modifies an account, group, or UID that A-NAS did not allocate.
-func (e *Executor) ensureIdentity(ctx context.Context, identity accounts.Identity) error {
+func (e *Executor) ensureIdentity(ctx context.Context, identity accountid.Identity) error {
 	if err := e.ensureAccount(ctx, identity.Username, identity.UID); err != nil {
 		return err
 	}
-	groups := accounts.UsersGroup
-	if identity.Role == accounts.RoleAdmin {
-		groups += "," + accounts.AdminsGroup
+	groups := accountid.UsersGroup
+	if identity.Role == accountid.RoleAdmin {
+		groups += "," + accountid.AdminsGroup
 	}
 	if output, err := e.runner.Run(ctx, "usermod", []string{"--groups", groups, identity.Username}, ""); err != nil {
 		return commandError("set identity groups", err, output)
@@ -138,14 +138,14 @@ func (e *Executor) accountState(ctx context.Context, username string, uid int) (
 	}
 	if found {
 		if len(fields) < 4 || fields[2] != id || fields[3] != id {
-			return false, false, fmt.Errorf("%w: %s", accounts.ErrIdentityConflict, username)
+			return false, false, fmt.Errorf("%w: %s", accountid.ErrIdentityConflict, username)
 		}
 		return true, true, nil
 	}
 	if _, taken, err := e.getent(ctx, "passwd", id); err != nil {
 		return false, false, err
 	} else if taken {
-		return false, false, fmt.Errorf("%w: UID %s", accounts.ErrIdentityConflict, id)
+		return false, false, fmt.Errorf("%w: UID %s", accountid.ErrIdentityConflict, id)
 	}
 	group, groupFound, err := e.getent(ctx, "group", username)
 	if err != nil {
@@ -153,14 +153,14 @@ func (e *Executor) accountState(ctx context.Context, username string, uid int) (
 	}
 	if groupFound {
 		if len(group) < 3 || group[2] != id {
-			return false, false, fmt.Errorf("%w: group %s", accounts.ErrIdentityConflict, username)
+			return false, false, fmt.Errorf("%w: group %s", accountid.ErrIdentityConflict, username)
 		}
 		return false, true, nil
 	}
 	if _, taken, err := e.getent(ctx, "group", id); err != nil {
 		return false, false, err
 	} else if taken {
-		return false, false, fmt.Errorf("%w: GID %s", accounts.ErrIdentityConflict, id)
+		return false, false, fmt.Errorf("%w: GID %s", accountid.ErrIdentityConflict, id)
 	}
 	return false, false, nil
 }
@@ -281,7 +281,7 @@ func (e *Executor) loadIdentityRegistry() error {
 	}
 	owners := make(map[int]string, len(records))
 	for username, record := range records {
-		if err := validIdentity(accounts.Identity{Username: username, UID: record.UID, Role: record.Role}); err != nil {
+		if err := validIdentity(accountid.Identity{Username: username, UID: record.UID, Role: record.Role}); err != nil {
 			return fmt.Errorf("identity registry: %w", err)
 		}
 		// accountState never gives one UID to two accounts.
@@ -300,7 +300,7 @@ func (e *Executor) loadIdentityRegistry() error {
 // No other account holds its UID then, so another entry with the UID names
 // an account that is gone, and is dropped: a registry never lists one UID
 // twice.
-func (e *Executor) recordIdentity(identity accounts.Identity) error {
+func (e *Executor) recordIdentity(identity accountid.Identity) error {
 	e.identitiesMu.Lock()
 	defer e.identitiesMu.Unlock()
 	for username, record := range e.identities {
@@ -375,4 +375,4 @@ func (e *Executor) knownIdentities(usernames []string) []string {
 	return known
 }
 
-var _ accounts.IdentitySynchronizer = (*Executor)(nil)
+var _ accountid.IdentitySynchronizer = (*Executor)(nil)

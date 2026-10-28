@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -109,17 +111,34 @@ const simulatedStep = 1500 * time.Millisecond
 // simulatedOperation is a plan's operation; it takes effect when its last
 // step ends.
 type simulatedOperation struct {
+	asked   simulatedRequest
 	started time.Time
 	steps   []storage.OperationStep
 	apply   func()
 	done    bool
 }
 
+// simulatedRequest is what a plan asked the Host Agent for; a plan that
+// asks again must ask for the same, as the Host Agent's journal checks
+// (hostops/linux volumeOperation.asks, #194).
+type simulatedRequest struct {
+	kind           storage.PlanKind
+	disks          []storage.DiskTarget
+	layout         storage.Layout
+	filesystemUUID string
+}
+
+func (r simulatedRequest) same(other simulatedRequest) bool {
+	return r.kind == other.kind && r.layout == other.layout && strings.EqualFold(r.filesystemUUID, other.filesystemUUID) &&
+		slices.Equal(r.disks, other.disks)
+}
+
 func (s *simulatedStorage) StartCreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if operation, ok := s.operations[request.PlanID]; ok {
-		return s.reportLocked(request.PlanID, operation), nil
+	asked := simulatedRequest{kind: storage.PlanKindCreateVolume, disks: request.Disks, layout: request.Layout}
+	if operation, known, err := s.knownLocked(request.PlanID, asked); known || err != nil {
+		return operation, err
 	}
 	if s.volume != nil {
 		return storage.VolumeOperation{}, storage.ErrVolumeExists
@@ -128,7 +147,7 @@ func (s *simulatedStorage) StartCreateVolume(_ context.Context, request storage.
 	for _, disk := range request.Disks {
 		volume.diskIDs = append(volume.diskIDs, disk.DiskID)
 	}
-	return s.startLocked(request.PlanID, []storage.OperationStep{storage.StepErase, storage.StepFormat, storage.StepMount, storage.StepPrepare}, func() {
+	return s.startLocked(request.PlanID, asked, []storage.OperationStep{storage.StepErase, storage.StepFormat, storage.StepMount, storage.StepPrepare}, func() {
 		s.volume = volume
 	}), nil
 }
@@ -136,13 +155,14 @@ func (s *simulatedStorage) StartCreateVolume(_ context.Context, request storage.
 func (s *simulatedStorage) StartAddDisks(_ context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if operation, ok := s.operations[request.PlanID]; ok {
-		return s.reportLocked(request.PlanID, operation), nil
+	asked := simulatedRequest{kind: storage.PlanKindAddDisks, disks: request.Disks, layout: request.Layout, filesystemUUID: request.FilesystemUUID}
+	if operation, known, err := s.knownLocked(request.PlanID, asked); known || err != nil {
+		return operation, err
 	}
 	if s.volume == nil || request.FilesystemUUID != simulatedUUID {
 		return storage.VolumeOperation{}, storage.ErrVolumeChanged
 	}
-	return s.startLocked(request.PlanID, []storage.OperationStep{storage.StepErase, storage.StepAddDevices}, func() {
+	return s.startLocked(request.PlanID, asked, []storage.OperationStep{storage.StepErase, storage.StepAddDevices}, func() {
 		for _, disk := range request.Disks {
 			s.volume.diskIDs = append(s.volume.diskIDs, disk.DiskID)
 		}
@@ -160,11 +180,29 @@ func (s *simulatedStorage) VolumeOperation(_ context.Context, planID string) (st
 	return s.reportLocked(planID, operation), nil
 }
 
-func (s *simulatedStorage) startLocked(planID string, steps []storage.OperationStep, apply func()) storage.VolumeOperation {
+// knownLocked reports the plan's operation when the plan asked before, and
+// refuses it when it asked for another operation then, or when another
+// plan's operation is still running, as the Host Agent does.
+func (s *simulatedStorage) knownLocked(planID string, asked simulatedRequest) (storage.VolumeOperation, bool, error) {
+	if operation, ok := s.operations[planID]; ok {
+		if !operation.asked.same(asked) {
+			return storage.VolumeOperation{}, false, fmt.Errorf("%w: the plan asked for another operation before", storage.ErrPlanState)
+		}
+		return s.reportLocked(planID, operation), true, nil
+	}
+	for other, operation := range s.operations {
+		if s.reportLocked(other, operation).State == storage.OperationRunning {
+			return storage.VolumeOperation{}, false, fmt.Errorf("%w: another data-volume operation is running", storage.ErrPlanState)
+		}
+	}
+	return storage.VolumeOperation{}, false, nil
+}
+
+func (s *simulatedStorage) startLocked(planID string, asked simulatedRequest, steps []storage.OperationStep, apply func()) storage.VolumeOperation {
 	if s.operations == nil {
 		s.operations = make(map[string]*simulatedOperation)
 	}
-	operation := &simulatedOperation{started: s.now(), steps: steps, apply: apply}
+	operation := &simulatedOperation{asked: asked, started: s.now(), steps: steps, apply: apply}
 	s.operations[planID] = operation
 	return s.reportLocked(planID, operation)
 }

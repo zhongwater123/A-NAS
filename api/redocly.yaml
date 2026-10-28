@@ -1,0 +1,16 @@
+# `make api-check` lints the contract with Redocly CLI (the version in
+# tools/openapi/package-lock.json) under its recommended rules, except where
+# the contract says the same thing once for every operation. Single known
+# exceptions are in .redocly.lint-ignore.yaml beside this file.
+extends:
+  - recommended
+rules:
+  # Operations name themselves by operationId and explain what is not
+  # obvious in a description; a summary is optional.
+  operation-summary: off
+  # The guard's 401 and 403 are the same for every operation and documented
+  # once, by the cookieAuth scheme and the CSRF parameter; an operation lists
+  # only the 4xx answers of its own.
+  operation-4xx-response: off
+  # The repository has no license yet (#218).
+  info-license: off

@@ -52,6 +52,7 @@ func (e *Executor) prepareState(directory, legacy string, paths []string) map[st
 // ensureStateDirectory creates directory for root alone, or checks that the
 // one there is a directory of the Host Agent's.
 func ensureStateDirectory(directory string, owner int) error {
+	//nolint:gosec // G301: the parent is /var/lib; the state directory itself is root's alone, below.
 	if err := os.MkdirAll(filepath.Dir(directory), 0o755); err != nil {
 		return err
 	}

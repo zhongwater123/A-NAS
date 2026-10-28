@@ -62,8 +62,12 @@ func TestTaskIconsUseInstalledDesktopAndShareAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Processes.Items[0].IconID == "" || got.Services.Items[0].IconID != got.Processes.Items[0].IconID || len(got.Icons) != 1 {
+	if got.Processes.Items[0].IconID == "" || got.Services.Items[0].IconID != got.Processes.Items[0].IconID || len(got.IconFiles) != 1 {
 		t.Fatalf("icons: %+v", got)
+	}
+	// The Host Agent names the installed file; the Product Service decodes it.
+	if files := got.IconFiles[got.Processes.Items[0].IconID]; len(files) != 1 || files[0] != "/usr/share/icons/hicolor/scalable/apps/player.svg" {
+		t.Fatalf("icon files: %v", files)
 	}
 	if got.Services.Items[0].PID != 0 {
 		t.Fatal("internal service MainPID leaked")
@@ -90,7 +94,6 @@ func TestTaskIconsExactMatchAndUnsafeFilesFallback(t *testing.T) {
 		{"substring", "player-helper", "player", testTaskSVG},
 		{"traversal", "player", "../../private", testTaskSVG},
 		{"outside", "player", "/home/member/private.svg", testTaskSVG},
-		{"invalid", "player", "player", "not an image"},
 		{"oversized", "player", "player", strings.Repeat("x", taskIconFileLimit+1)},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -100,7 +103,7 @@ func TestTaskIconsExactMatchAndUnsafeFilesFallback(t *testing.T) {
 			r.dependencies.readTaskExe = func(int) (string, error) { return "/usr/bin/" + tt.exec, nil }
 			got := taskmanager.TaskSnapshot{Processes: taskmanager.TaskGroup{Items: []taskmanager.Task{{PID: 42}}}}
 			r.attachTaskIcons(context.Background(), &got, nil)
-			if got.Processes.Items[0].IconID != "" || len(got.Icons) != 0 {
+			if got.Processes.Items[0].IconID != "" || len(got.IconFiles) != 0 {
 				t.Fatalf("unsafe/unmatched icon returned: %+v", got)
 			}
 		})
@@ -163,12 +166,12 @@ func TestTaskIconsCancellationAndAssetLimit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	r.attachTaskIcons(ctx, &got, nil)
-	if len(got.Icons) != 0 {
+	if len(got.IconFiles) != 0 {
 		t.Fatal("cancelled read returned icons")
 	}
 	r.attachTaskIcons(context.Background(), &got, nil)
-	if len(got.Icons) != 64 {
-		t.Fatalf("asset cap: %d", len(got.Icons))
+	if len(got.IconFiles) != 64 {
+		t.Fatalf("asset cap: %d", len(got.IconFiles))
 	}
 }
 

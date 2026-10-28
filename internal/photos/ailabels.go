@@ -57,7 +57,7 @@ func (s *Service) embedLabelText(ctx context.Context, embedder Embedder, info Em
 		vector, err := embedder.EmbedQuery(ctx, text)
 		if err != nil || !validVector(vector, info.Dimensions) {
 			if errors.Is(err, ErrAIUnavailable) {
-				s.ai.set(AIUnavailable, "", "")
+				s.ai.progress.set(AIUnavailable, "", "")
 			}
 			s.labelIndex.mu.Lock()
 			s.labelIndex.retryAt = s.now().Add(aiRetryDelay)
@@ -150,7 +150,7 @@ func (s *Service) LabelCounts(ctx context.Context, p Principal, viewing string) 
 	if err != nil || labelVectors == nil {
 		return counts, false, err
 	}
-	candidates, hidden, err := s.clusterCandidates(ctx, scope, "")
+	candidates, hidden, err := s.clusterCandidates(ctx, p, scope, "")
 	if err != nil {
 		return nil, false, err
 	}
@@ -216,7 +216,7 @@ func (s *Service) LabelPhotos(ctx context.Context, p Principal, label, viewing, 
 	if err != nil || labelVectors == nil {
 		return page, err
 	}
-	candidates, hidden, err := s.clusterCandidates(ctx, scope, label)
+	candidates, hidden, err := s.clusterCandidates(ctx, p, scope, label)
 	if err != nil {
 		return Page{}, err
 	}
@@ -255,9 +255,11 @@ func (s *Service) LabelPhotos(ctx context.Context, p Principal, label, viewing, 
 	for i, hit := range hits {
 		ids[i], position[hit.id] = hit.id, i
 	}
-	// A photo trashed since the candidates were read drops out here.
+	// A photo trashed since the candidates were read drops out here, and so
+	// would one outside the scope or hidden from p.
 	records, err := s.queryAssets(ctx, s.db,
-		"WHERE a.trashed_at IS NULL AND a.id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")", ids...)
+		"WHERE "+listedAssets(p, "a")+" AND a.library_id IN ("+placeholders(len(scope))+") AND a.id IN ("+placeholders(len(ids))+")",
+		append(slices.Clone(scope), ids...)...)
 	if err != nil {
 		return Page{}, err
 	}
@@ -271,12 +273,14 @@ func (s *Service) LabelPhotos(ctx context.Context, p Principal, label, viewing, 
 	return page, nil
 }
 
-// clusterCandidates returns the untrashed photos of the libraries in scope
+// clusterCandidates returns the photos listed to p in the libraries of scope
 // and the ones taken out of a cluster, as asset ID and label ID joined by a
-// unit separator; only those of label, when one is given.
-func (s *Service) clusterCandidates(ctx context.Context, scope []any, label string) ([]candidate, map[string]bool, error) {
+// unit separator; only those of label, when one is given. Videos take no
+// part in AI, so none is a candidate even with a vector.
+func (s *Service) clusterCandidates(ctx context.Context, p Principal, scope []any, label string) ([]candidate, map[string]bool, error) {
 	in := "(" + strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",") + ")"
-	rows, err := s.db.QueryContext(ctx, "SELECT id, object_id FROM assets WHERE trashed_at IS NULL AND library_id IN "+in+" ORDER BY id", scope...)
+	rows, err := s.db.QueryContext(ctx, "SELECT id, object_id FROM assets WHERE "+listedAssets(p, "assets")+" AND "+inLocalAI("assets.object_id")+
+		" AND library_id IN "+in+" ORDER BY id", scope...)
 	if err != nil {
 		return nil, nil, err
 	}

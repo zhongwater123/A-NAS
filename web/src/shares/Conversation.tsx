@@ -1,11 +1,13 @@
-import { Fragment, useEffect, useEffectEvent, useRef, useState } from "react";
 import { ArrowDown, LockKeyhole, Send, X } from "lucide-react";
-import { usePeople } from "../people";
-import { listMessages, markRead, requestKey, sendMessage, type Message, type Share } from "./api";
+import { Fragment, useEffect, useEffectEvent, useRef, useState } from "react";
+
+import { usePeople } from "../people/people";
+import { listMessages, type Message, markRead, requestKey, type Share, sendMessage } from "./api";
+import { Avatar, nameOf } from "./avatars";
 import { EmojiInput } from "./EmojiInput";
 import { clock, dayLabel, errorText, isActive, receipt } from "./format";
-import { Avatar, nameOf } from "./parts";
 import { useShares } from "./SharesProvider";
+import styles from "./shares.module.css";
 
 // useThread keeps one private conversation of a share current. It runs while
 // the conversation is collapsed too, so the header can show the newest line.
@@ -177,10 +179,10 @@ export function Conversation({
   const state = sender && contact ? receipt(contact) : undefined;
   const error = thread.error || readError || sendError;
   return (
-    <aside className={`sh-chat${docked ? " docked" : " drawer"}`} hidden={!shown} aria-label="私聊">
-      <header className="sh-chat-head">
+    <aside className={`${styles.shChat}${docked ? " docked" : ` ${styles.drawer}`}`} hidden={!shown} aria-label="私聊">
+      <header className={styles.shChatHead}>
         {sender && share.recipients.length > 1 && (
-          <div className="sh-chat-people" aria-label="选择接收者">
+          <div className={styles.shChatPeople} aria-label="选择接收者">
             {share.recipients.map((item) => (
               <button
                 key={item.userId}
@@ -191,20 +193,20 @@ export function Conversation({
               >
                 <Avatar people={people} id={item.userId} size="md" />
                 {item.lastMessage > item.senderReadThrough && item.userId !== recipientId && (
-                  <span className="sh-dot" />
+                  <span className={styles.shDot} />
                 )}
               </button>
             ))}
           </div>
         )}
-        <div className="sh-chat-who">
+        <div className={styles.shChatWho}>
           {!(sender && share.recipients.length > 1) && (
             <Avatar people={people} id={otherId} username={sender ? undefined : share.sender.username} size="md" />
           )}
-          <span className="sh-chat-who-text">
+          <span className={styles.shChatWhoText}>
             <strong>{otherName}</strong>
             {state ? (
-              <small className={`tone-${state.tone}`}>{state.text}</small>
+              <small className={`${styles[`tone-${state.tone}`] ?? ""}`}>{state.text}</small>
             ) : (
               <small>
                 <LockKeyhole />
@@ -212,14 +214,14 @@ export function Conversation({
               </small>
             )}
           </span>
-          <button className="sh-icon-btn" aria-label="收起私聊" title="收起" onClick={onClose}>
+          <button className={styles.shIconBtn} aria-label="收起私聊" title="收起" onClick={onClose}>
             <X />
           </button>
         </div>
       </header>
       <div
         ref={log}
-        className="sh-thread"
+        className={styles.shThread}
         role="log"
         aria-label="分享私聊"
         onScroll={() => {
@@ -237,19 +239,21 @@ export function Conversation({
           return (
             <Fragment key={message.id}>
               {newDay && (
-                <div className="sh-day">
+                <div className={styles.shDay}>
                   <span>{dayLabel(message.createdAt)}</span>
                 </div>
               )}
-              <article className={`sh-msg${own ? " own" : ""}${first ? " first" : ""}${last ? " last" : ""}`}>
+              <article
+                className={`${styles.shMsg}${own ? ` ${styles.own}` : ""}${first ? ` ${styles.first}` : ""}${last ? ` ${styles.last}` : ""}`}
+              >
                 {!own && (
-                  <span className="sh-msg-face">
+                  <span className={styles.shMsgFace}>
                     {first && (
                       <Avatar people={people} id={message.sender.id} username={message.sender.username} size="sm" />
                     )}
                   </span>
                 )}
-                <div className="sh-msg-body">
+                <div className={styles.shMsgBody}>
                   <p
                     title={`${nameOf(people, message.sender.id, message.sender.username)} · ${clock(message.createdAt)}`}
                   >
@@ -266,11 +270,11 @@ export function Conversation({
             </Fragment>
           );
         })}
-        {!messages.length && thread.loaded && <p className="sh-thread-empty">还没有消息</p>}
+        {!messages.length && thread.loaded && <p className={styles.shThreadEmpty}>还没有消息</p>}
       </div>
       {!atBottom && (
         <button
-          className="sh-latest"
+          className={styles.shLatest}
           onClick={() => {
             if (log.current) log.current.scrollTop = log.current.scrollHeight;
             setAtBottom(true);
@@ -281,13 +285,13 @@ export function Conversation({
         </button>
       )}
       {error && (
-        <p role="alert" className="sh-alert sh-chat-alert">
+        <p role="alert" className={`${styles.shAlert} ${styles.shChatAlert}`}>
           {error}
         </p>
       )}
       {open ? (
         <form
-          className="sh-chat-compose"
+          className={styles.shChatCompose}
           onSubmit={(event) => {
             event.preventDefault();
             void send();
@@ -304,7 +308,7 @@ export function Conversation({
             trailing={
               <button
                 type="submit"
-                className="sh-send"
+                className={styles.shSend}
                 aria-label="发送回复"
                 title="发送 (Enter)"
                 disabled={busy || !text.trim()}
@@ -315,7 +319,7 @@ export function Conversation({
           />
         </form>
       ) : (
-        <p className="sh-chat-ended">分享已结束，不能再回复</p>
+        <p className={styles.shChatEnded}>分享已结束，不能再回复</p>
       )}
     </aside>
   );

@@ -10,9 +10,10 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
-	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // DefaultSleepAfterMinutes applies until an administrator chooses otherwise.
@@ -34,14 +35,10 @@ type Store struct {
 }
 
 func Open(path string) (*Store, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("SQLite path is empty")
-	}
-	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000&_journal_mode=WAL")
+	db, err := sqlitedb.Open(path, sqlitedb.Options{})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	const schema = `
 CREATE TABLE IF NOT EXISTS local_display (
     id INTEGER PRIMARY KEY CHECK (id = 1),

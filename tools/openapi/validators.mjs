@@ -1,7 +1,7 @@
 // node validators.mjs BUNDLE OUT: writes, to OUT, Ajv standalone validators for
 // the JSON success responses of the operations listed below, keyed by
 // "METHOD path status" as the Web client's middleware looks them up
-// (web/src/api.ts). Standalone code needs no eval at run time, which the
+// (web/src/api/client.ts). Standalone code needs no eval at run time, which the
 // desktop's Content-Security-Policy would refuse.
 import { readFileSync, writeFileSync } from "node:fs";
 

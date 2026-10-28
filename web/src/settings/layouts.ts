@@ -1,4 +1,4 @@
-import type { Volume, VolumeConversion, VolumeLayout } from "../api";
+import type { Volume, VolumeConversion, VolumeLayout } from "../api.generated";
 
 // What each data-volume layout means for the person choosing it (ADR 0025).
 // The server decides; these numbers only let the choice show its effect.

@@ -1,8 +1,9 @@
 import { act, render, screen } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 
-import type { SessionMessage } from "./hermes/types/hermes";
-import { stubAPI } from "../test/api";
+import type { AssistantMessage } from "../api.generated";
+import { assistantHandlers, assistantSession } from "../test/handlers/assistant";
+import { server } from "../test/server";
 
 // An answer that cannot be rendered, whatever the reason.
 vi.mock("@assistant-ui/react-streamdown", async (original) => ({
@@ -34,27 +35,16 @@ globalThis.ResizeObserver ??= class {
 } as unknown as typeof ResizeObserver;
 Element.prototype.scrollTo ??= function scrollTo() {};
 
-afterEach(() => vi.unstubAllGlobals());
-
-const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
-const history = [
+const history: AssistantMessage[] = [
   { id: 1, role: "user", content: "打开相册", timestamp: 1_760_000_000 },
   { id: 2, role: "assistant", content: "相册已经打开。", timestamp: 1_760_000_001 },
-] as SessionMessage[];
+];
 
 it("keeps the conversation list and a way out when a conversation fails to render", async () => {
-  stubAPI(
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/assistant/sessions"))
-        return json({
-          sessions: [
-            { id: "20261021_090000_aaaaaa", title: "操作桌面", preview: "", startedAt: 1_760_000_000, messageCount: 2 },
-          ],
-        });
-      if (url.includes("/messages")) return json({ messages: history });
-      if (url.endsWith("/approvals")) return json({ approvals: [] });
-      return json({ available: true });
+  server.use(
+    ...assistantHandlers({
+      sessions: [assistantSession("20261021_090000_aaaaaa", { title: "操作桌面", messageCount: 2 })],
+      messages: history,
     }),
   );
   const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);

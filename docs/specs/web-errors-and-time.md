@@ -13,7 +13,7 @@ JSON 请求、multipart 上传和媒体流都复用会话失效通知：收到 4
 
 ## 时间与日期
 
-显示文案使用 `format/time.ts`，由 `Intl.RelativeTimeFormat` 提供单位及过去/将来时态，`Intl.DateTimeFormat("zh-CN", …)` 提供日期、星期和时钟。显示本地时区；无效日期显示 `—`，分钟级时钟使用 24 小时制。
+显示文案使用 `lib/time.ts`，由 `Intl.RelativeTimeFormat` 提供单位及过去/将来时态，`Intl.DateTimeFormat("zh-CN", …)` 提供日期、星期和时钟。显示本地时区；无效日期显示 `—`，分钟级时钟使用 24 小时制。
 
 - 相对时长依据时间戳之差，不足一分钟显示“刚刚”，未来时间显示“后”。天、周等经过时长保持数值形式（如“2 天前”），不能把取整后的时长当作日历偏移生成“前天”等标签。不同列表可选择何时转为日期；跨年日期包含年份。
 - “今天”“昨天”“明天”按本地日历日期判断，不用固定 24 小时判断相邻日期，避免午夜和夏令时偏差。
@@ -28,7 +28,7 @@ JSON 请求、multipart 上传和媒体流都复用会话失效通知：收到 4
 ## 关联
 
 - [Issue #276](https://github.com/zhongwater123/A-NAS/issues/276)
-- [请求边界](../../web/src/api.ts)、[API 回归](../../web/src/api.test.ts)、[上传分类](../../web/src/transfers/store.ts)
-- [公共与领域错误文案](../../web/src/errorMessages.ts)、[文案回归](../../web/src/errorMessages.test.ts)
-- [公共时间格式](../../web/src/format/time.ts)、[时间回归](../../web/src/format/time.test.ts)
+- [请求边界](../../web/src/api/client.ts)、[API 回归](../../web/src/api/client.test.ts)、[上传分类](../../web/src/transfers/store.ts)
+- [公共与领域错误文案](../../web/src/api/errorMessages.ts)、[文案回归](../../web/src/api/errorMessages.test.ts)
+- [公共时间格式](../../web/src/lib/time.ts)、[时间回归](../../web/src/lib/time.test.ts)
 - [媒体流](../../web/src/media/streamFeed.ts)、[媒体流回归](../../web/src/media/streamFeed.test.ts)
