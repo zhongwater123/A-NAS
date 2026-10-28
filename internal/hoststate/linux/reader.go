@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 )
 
@@ -593,7 +594,7 @@ func mountedBtrfsUUID(devices []blockDevice, mountpoint string) string {
 	for _, device := range devices {
 		for _, candidate := range device.Mountpoints {
 			if candidate != nil && *candidate == mountpoint && strings.EqualFold(device.Filesystem, "btrfs") {
-				if uuid := strings.ToLower(strings.TrimSpace(device.UUID)); filesystemUUIDPattern.MatchString(uuid) {
+				if uuid := strings.ToLower(strings.TrimSpace(device.UUID)); datavolume.ValidFilesystemUUID(uuid) {
 					return uuid
 				}
 			}

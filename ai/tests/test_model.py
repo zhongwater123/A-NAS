@@ -47,7 +47,7 @@ class RealModelTest(unittest.TestCase):
         for label, image in (("红色的圆形", drawing("circle", "red")), ("蓝色的正方形", drawing("square", "blue"))):
             vector = self.provider.embed_image(image)
             self.assertAlmostEqual(sum(value * value for value in vector), 1.0, places=3)
-            scores = {name: sum(a * b for a, b in zip(vector, other)) for name, other in vectors.items()}
+            scores = {name: sum(a * b for a, b in zip(vector, other, strict=True)) for name, other in vectors.items()}
             self.assertEqual(max(scores, key=scores.get), label, scores)
 
     def test_rejects_bytes_that_are_not_an_image(self):

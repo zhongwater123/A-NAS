@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/storage"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 )
 
 // volumeOperation is one plan's data-volume operation in the journal at
@@ -20,21 +20,21 @@ import (
 // operation a restart cut short reads as interrupted and its plan can be
 // retried from where it stopped (issue #165).
 type volumeOperation struct {
-	PlanID string               `json:"planId"`
-	Kind   storage.PlanKind     `json:"kind"`
-	Disks  []storage.DiskTarget `json:"disks"`
-	Layout storage.Layout       `json:"layout"`
+	PlanID string                  `json:"planId"`
+	Kind   datavolume.PlanKind     `json:"kind"`
+	Disks  []datavolume.DiskTarget `json:"disks"`
+	Layout datavolume.Layout       `json:"layout"`
 	// FilesystemUUID is the data volume disks are added to.
 	FilesystemUUID string `json:"filesystemUuid,omitempty"`
 	// Formatted are the filesystems a volume creation made, in order: a
 	// retry before the volume mounted formats the disks again.
-	Formatted []string               `json:"formatted,omitempty"`
-	State     storage.OperationState `json:"state"`
-	Step      storage.OperationStep  `json:"step,omitempty"`
-	Failure   string                 `json:"failure,omitempty"`
-	Volume    *storage.Volume        `json:"volume,omitempty"`
-	StartedAt time.Time              `json:"startedAt"`
-	UpdatedAt time.Time              `json:"updatedAt"`
+	Formatted []string                  `json:"formatted,omitempty"`
+	State     datavolume.OperationState `json:"state"`
+	Step      datavolume.OperationStep  `json:"step,omitempty"`
+	Failure   string                    `json:"failure,omitempty"`
+	Volume    *datavolume.Volume        `json:"volume,omitempty"`
+	StartedAt time.Time                 `json:"startedAt"`
+	UpdatedAt time.Time                 `json:"updatedAt"`
 }
 
 type operationsDocument struct {
@@ -43,37 +43,37 @@ type operationsDocument struct {
 
 // StartCreateVolume starts erasing the planned disks and formatting them as
 // the data volume in the background.
-func (e *Executor) StartCreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
+func (e *Executor) StartCreateVolume(_ context.Context, request datavolume.CreateVolumeRequest) (datavolume.VolumeOperation, error) {
 	if e.resolver == nil || strings.TrimSpace(request.PlanID) == "" || !validDiskTargets(request.Disks) || !request.Layout.Fits(len(request.Disks)) {
-		return storage.VolumeOperation{}, errors.New("invalid create-volume request")
+		return datavolume.VolumeOperation{}, errors.New("invalid create-volume request")
 	}
 	return e.startOperation(volumeOperation{
-		PlanID: request.PlanID, Kind: storage.PlanKindCreateVolume, Disks: request.Disks, Layout: request.Layout,
+		PlanID: request.PlanID, Kind: datavolume.PlanKindCreateVolume, Disks: request.Disks, Layout: request.Layout,
 	}, e.createVolume)
 }
 
 // StartAddDisks starts erasing the planned disks and adding them to the
 // mounted data volume in the background.
-func (e *Executor) StartAddDisks(_ context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
-	if e.resolver == nil || strings.TrimSpace(request.PlanID) == "" || !validDiskTargets(request.Disks) || request.Layout == storage.LayoutSingle ||
-		!request.Layout.Fits(len(request.Disks)+1) || !filesystemUUIDPattern.MatchString(request.FilesystemUUID) {
-		return storage.VolumeOperation{}, errors.New("invalid add-disks request")
+func (e *Executor) StartAddDisks(_ context.Context, request datavolume.AddDisksRequest) (datavolume.VolumeOperation, error) {
+	if e.resolver == nil || strings.TrimSpace(request.PlanID) == "" || !validDiskTargets(request.Disks) || request.Layout == datavolume.LayoutSingle ||
+		!request.Layout.Fits(len(request.Disks)+1) || !datavolume.ValidFilesystemUUID(request.FilesystemUUID) {
+		return datavolume.VolumeOperation{}, errors.New("invalid add-disks request")
 	}
 	return e.startOperation(volumeOperation{
-		PlanID: request.PlanID, Kind: storage.PlanKindAddDisks, Disks: request.Disks, Layout: request.Layout, FilesystemUUID: request.FilesystemUUID,
+		PlanID: request.PlanID, Kind: datavolume.PlanKindAddDisks, Disks: request.Disks, Layout: request.Layout, FilesystemUUID: request.FilesystemUUID,
 	}, e.addDisks)
 }
 
 // VolumeOperation reports the plan's operation from the journal.
-func (e *Executor) VolumeOperation(_ context.Context, planID string) (storage.VolumeOperation, error) {
+func (e *Executor) VolumeOperation(_ context.Context, planID string) (datavolume.VolumeOperation, error) {
 	e.operationsMu.Lock()
 	defer e.operationsMu.Unlock()
 	if e.operationsError != nil {
-		return storage.VolumeOperation{}, e.operationsError
+		return datavolume.VolumeOperation{}, e.operationsError
 	}
 	operation, ok := e.operations[planID]
 	if !ok {
-		return storage.VolumeOperation{}, storage.ErrOperationNotFound
+		return datavolume.VolumeOperation{}, datavolume.ErrOperationNotFound
 	}
 	return operation.report(), nil
 }
@@ -81,23 +81,23 @@ func (e *Executor) VolumeOperation(_ context.Context, planID string) (storage.Vo
 // startOperation runs the plan's operation unless it runs or succeeded
 // already; one that failed or was interrupted runs again and continues
 // after the steps that are done. Another plan's operation must not run.
-func (e *Executor) startOperation(requested volumeOperation, run func(context.Context, *volumeOperation) (storage.Volume, error)) (storage.VolumeOperation, error) {
+func (e *Executor) startOperation(requested volumeOperation, run func(context.Context, *volumeOperation) (datavolume.Volume, error)) (datavolume.VolumeOperation, error) {
 	e.operationsMu.Lock()
 	defer e.operationsMu.Unlock()
 	if e.operationsError != nil {
-		return storage.VolumeOperation{}, e.operationsError
+		return datavolume.VolumeOperation{}, e.operationsError
 	}
 	operation, known := e.operations[requested.PlanID]
 	if known {
 		if !operation.asks(requested) {
-			return storage.VolumeOperation{}, fmt.Errorf("%w: the plan asked for another operation before", storage.ErrPlanState)
+			return datavolume.VolumeOperation{}, fmt.Errorf("%w: the plan asked for another operation before", datavolume.ErrPlanState)
 		}
-		if operation.State == storage.OperationRunning || operation.State == storage.OperationSucceeded {
+		if operation.State == datavolume.OperationRunning || operation.State == datavolume.OperationSucceeded {
 			return operation.report(), nil
 		}
 	}
 	if e.operating != "" {
-		return storage.VolumeOperation{}, fmt.Errorf("%w: another data-volume operation is running", storage.ErrPlanState)
+		return datavolume.VolumeOperation{}, fmt.Errorf("%w: another data-volume operation is running", datavolume.ErrPlanState)
 	}
 	now := e.now().UTC()
 	if !known {
@@ -106,14 +106,14 @@ func (e *Executor) startOperation(requested volumeOperation, run func(context.Co
 		e.operations[operation.PlanID] = operation
 	}
 	previous := *operation
-	operation.State, operation.Failure, operation.UpdatedAt = storage.OperationRunning, "", now
+	operation.State, operation.Failure, operation.UpdatedAt = datavolume.OperationRunning, "", now
 	if err := e.saveOperationsLocked(); err != nil {
 		if known {
 			*operation = previous
 		} else {
 			delete(e.operations, operation.PlanID)
 		}
-		return storage.VolumeOperation{}, fmt.Errorf("record the data-volume operation: %w", err)
+		return datavolume.VolumeOperation{}, fmt.Errorf("record the data-volume operation: %w", err)
 	}
 	e.operating = operation.PlanID
 	go e.runOperation(operation, run)
@@ -123,16 +123,16 @@ func (e *Executor) startOperation(requested volumeOperation, run func(context.Co
 // runOperation runs the steps apart from the request that started them, so
 // that the caller going away does not kill a disk command halfway. Stopping
 // the Host Agent still stops them; the journal then reads interrupted.
-func (e *Executor) runOperation(operation *volumeOperation, run func(context.Context, *volumeOperation) (storage.Volume, error)) {
+func (e *Executor) runOperation(operation *volumeOperation, run func(context.Context, *volumeOperation) (datavolume.Volume, error)) {
 	volume, err := run(context.Background(), operation)
 	e.operationsMu.Lock()
 	defer e.operationsMu.Unlock()
 	e.operating = ""
 	if err != nil {
-		operation.State, operation.Failure = storage.OperationFailed, publicFailure(operation.Step, err)
+		operation.State, operation.Failure = datavolume.OperationFailed, publicFailure(operation.Step, err)
 		e.logger.Error("data-volume operation failed", "plan", operation.PlanID, "kind", operation.Kind, "step", operation.Step, "error", err)
 	} else {
-		operation.State, operation.Step, operation.Volume = storage.OperationSucceeded, "", &volume
+		operation.State, operation.Step, operation.Volume = datavolume.OperationSucceeded, "", &volume
 		e.logger.Info("data-volume operation succeeded", "plan", operation.PlanID, "kind", operation.Kind)
 	}
 	operation.UpdatedAt = e.now().UTC()
@@ -143,9 +143,9 @@ func (e *Executor) runOperation(operation *volumeOperation, run func(context.Con
 
 // publicFailure is what the product may show of a failure: command output
 // names device paths, which stay in the Host Agent's log.
-func publicFailure(step storage.OperationStep, err error) string {
+func publicFailure(step datavolume.OperationStep, err error) string {
 	for _, known := range []error{
-		storage.ErrDiskChanged, storage.ErrDiskNotEligible, storage.ErrVolumeExists, storage.ErrVolumeChanged, storage.ErrVolumeUnavailable,
+		datavolume.ErrDiskChanged, datavolume.ErrDiskNotEligible, datavolume.ErrVolumeExists, datavolume.ErrVolumeChanged, datavolume.ErrVolumeUnavailable,
 	} {
 		if errors.Is(err, known) {
 			return known.Error()
@@ -158,7 +158,7 @@ func publicFailure(step storage.OperationStep, err error) string {
 }
 
 // enter records that the operation starts the step.
-func (e *Executor) enter(operation *volumeOperation, step storage.OperationStep) {
+func (e *Executor) enter(operation *volumeOperation, step datavolume.OperationStep) {
 	e.operationsMu.Lock()
 	defer e.operationsMu.Unlock()
 	operation.Step, operation.UpdatedAt = step, e.now().UTC()
@@ -183,7 +183,7 @@ func (e *Executor) formattedByUnfinishedCreation(uuid string) bool {
 	e.operationsMu.Lock()
 	defer e.operationsMu.Unlock()
 	for _, operation := range e.operations {
-		if operation.Kind == storage.PlanKindCreateVolume && operation.State != storage.OperationSucceeded &&
+		if operation.Kind == datavolume.PlanKindCreateVolume && operation.State != datavolume.OperationSucceeded &&
 			slices.ContainsFunc(operation.Formatted, func(formatted string) bool { return strings.EqualFold(formatted, uuid) }) {
 			return true
 		}
@@ -204,8 +204,8 @@ func (o *volumeOperation) asks(request volumeOperation) bool {
 		slices.Equal(o.Disks, request.Disks)
 }
 
-func (o *volumeOperation) report() storage.VolumeOperation {
-	report := storage.VolumeOperation{PlanID: o.PlanID, State: o.State, Step: o.Step, Failure: o.Failure}
+func (o *volumeOperation) report() datavolume.VolumeOperation {
+	report := datavolume.VolumeOperation{PlanID: o.PlanID, State: o.State, Step: o.Step, Failure: o.Failure}
 	if o.Volume != nil {
 		volume := *o.Volume
 		volume.DiskIDs = append([]string(nil), volume.DiskIDs...)
@@ -240,8 +240,8 @@ func (e *Executor) loadOperations() error {
 		if _, ok := operations[operation.PlanID]; ok {
 			return fmt.Errorf("the data-volume operation journal lists plan %s twice", operation.PlanID)
 		}
-		if operation.State == storage.OperationRunning {
-			operation.State, interrupted = storage.OperationInterrupted, true
+		if operation.State == datavolume.OperationRunning {
+			operation.State, interrupted = datavolume.OperationInterrupted, true
 			operation.Failure = "the Host Agent stopped before the operation changed any disk; retrying starts it again"
 			if operation.Step != "" {
 				operation.Failure = "the Host Agent stopped during the " + string(operation.Step) + " step; retrying continues after the steps that are done"
@@ -259,8 +259,8 @@ func (e *Executor) loadOperations() error {
 // validDiskTargets reports whether a request names its disks, each by an ID.
 // A request is checked with it before it is journaled and the journal again
 // when it loads, so the Host Agent never writes a journal it then refuses.
-func validDiskTargets(disks []storage.DiskTarget) bool {
-	return len(disks) > 0 && !slices.ContainsFunc(disks, func(disk storage.DiskTarget) bool { return strings.TrimSpace(disk.DiskID) == "" })
+func validDiskTargets(disks []datavolume.DiskTarget) bool {
+	return len(disks) > 0 && !slices.ContainsFunc(disks, func(disk datavolume.DiskTarget) bool { return strings.TrimSpace(disk.DiskID) == "" })
 }
 
 // validRecordedOperation checks a journal entry against what the requests
@@ -275,20 +275,20 @@ func validRecordedOperation(operation *volumeOperation) error {
 	if !validDiskTargets(operation.Disks) {
 		return invalid
 	}
-	var steps []storage.OperationStep
+	var steps []datavolume.OperationStep
 	switch operation.Kind {
-	case storage.PlanKindCreateVolume:
+	case datavolume.PlanKindCreateVolume:
 		if !operation.Layout.Fits(len(operation.Disks)) || operation.FilesystemUUID != "" ||
-			slices.ContainsFunc(operation.Formatted, func(uuid string) bool { return !filesystemUUIDPattern.MatchString(uuid) }) {
+			slices.ContainsFunc(operation.Formatted, func(uuid string) bool { return !datavolume.ValidFilesystemUUID(uuid) }) {
 			return invalid
 		}
-		steps = []storage.OperationStep{storage.StepErase, storage.StepFormat, storage.StepMount, storage.StepPrepare}
-	case storage.PlanKindAddDisks:
-		if operation.Layout == storage.LayoutSingle || !operation.Layout.Fits(len(operation.Disks)+1) ||
-			!filesystemUUIDPattern.MatchString(operation.FilesystemUUID) || len(operation.Formatted) != 0 {
+		steps = []datavolume.OperationStep{datavolume.StepErase, datavolume.StepFormat, datavolume.StepMount, datavolume.StepPrepare}
+	case datavolume.PlanKindAddDisks:
+		if operation.Layout == datavolume.LayoutSingle || !operation.Layout.Fits(len(operation.Disks)+1) ||
+			!datavolume.ValidFilesystemUUID(operation.FilesystemUUID) || len(operation.Formatted) != 0 {
 			return invalid
 		}
-		steps = []storage.OperationStep{storage.StepErase, storage.StepAddDevices}
+		steps = []datavolume.OperationStep{datavolume.StepErase, datavolume.StepAddDevices}
 	default:
 		return invalid
 	}
@@ -296,11 +296,11 @@ func validRecordedOperation(operation *volumeOperation) error {
 		return invalid
 	}
 	switch operation.State {
-	case storage.OperationSucceeded:
+	case datavolume.OperationSucceeded:
 		if operation.Volume == nil || operation.Step != "" {
 			return invalid
 		}
-	case storage.OperationRunning, storage.OperationFailed, storage.OperationInterrupted:
+	case datavolume.OperationRunning, datavolume.OperationFailed, datavolume.OperationInterrupted:
 		if operation.Volume != nil {
 			return invalid
 		}

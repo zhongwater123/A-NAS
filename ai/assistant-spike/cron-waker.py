@@ -60,7 +60,7 @@ def due(account, now):
 
 
 def running(unit):
-    return subprocess.run(["systemctl", "is-active", "--quiet", unit], check=False).returncode == 0
+    return subprocess.run(["/usr/bin/systemctl", "is-active", "--quiet", unit], check=False).returncode == 0
 
 
 def main():
@@ -69,7 +69,7 @@ def main():
         for account in accounts():
             unit = f"anas-assistant-cron@{account}.service"
             if due(account, now) and not running(unit):
-                subprocess.run(["systemctl", "start", "--no-block", unit], check=False)
+                subprocess.run(["/usr/bin/systemctl", "start", "--no-block", unit], check=False)
                 print(f"started {unit}", flush=True)
         time.sleep(INTERVAL)
 

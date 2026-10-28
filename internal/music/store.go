@@ -8,6 +8,8 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // Store is the music library's SQLite database in the Product Service state
@@ -18,14 +20,10 @@ type Store struct {
 }
 
 func OpenSQLite(path string) (*Store, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("SQLite path is empty")
-	}
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
+	db, err := sqlitedb.Open(path, sqlitedb.Options{})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
 	if _, err := db.Exec(schema); err != nil {
 		_ = db.Close()
@@ -272,7 +270,7 @@ sample_rate=excluded.sample_rate, bit_depth=excluded.bit_depth`,
 	return err
 }
 
-func formatTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }
 
 var errNoRows = sql.ErrNoRows
 

@@ -12,14 +12,15 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 type fixture struct {
 	t      *testing.T
 	volume string
-	member files.FileSystem
+	member filesystem.FileSystem
 	exec   *Executor
 	clock  time.Time
 }
@@ -38,7 +39,7 @@ func newFixture(t *testing.T) *fixture {
 			t.Fatal(err)
 		}
 	}
-	f := &fixture{t: t, volume: volume, member: files.NewRootFileSystem(volume, false), clock: time.Unix(1_800_000_000, 0)}
+	f := &fixture{t: t, volume: volume, member: filesystem.NewRootFileSystem(volume, false), clock: time.Unix(1_800_000_000, 0)}
 	f.exec = &Executor{Root: filepath.Join(t.TempDir(), "changes"), Volume: volume, Now: func() time.Time { return f.clock }}
 	f.put("spaces/private/alice/计划.md", "# 计划\n- 买菜\n")
 	return f
@@ -51,6 +52,17 @@ func (f *fixture) put(rel, content string) {
 		f.t.Fatal(err)
 	}
 	if err := os.WriteFile(name, []byte(content), 0o644); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// edit writes rel as someone editing it later would: a minute ahead, so the
+// change shows whatever the file system's time resolution, without a sleep.
+func (f *fixture) edit(rel, content string) {
+	f.t.Helper()
+	f.put(rel, content)
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(filepath.Join(f.volume, rel), later, later); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -170,8 +182,7 @@ func TestATargetChangedAfterTheCardIsNotOverwritten(t *testing.T) {
 	f := newFixture(t)
 	f.put("assistant/alice/files/待确认/计划.md", "助手的版本\n")
 	f.approve(editPlan)
-	time.Sleep(10 * time.Millisecond)
-	f.put("spaces/private/alice/计划.md", "成员自己改的\n")
+	f.edit("spaces/private/alice/计划.md", "成员自己改的\n")
 	result := f.exec.Apply(context.Background(), "alice", f.member, []byte(editPlan))
 	if !strings.Contains(result, "被改动过") || !strings.Contains(result, "什么都没有改变") {
 		t.Fatalf("apply = %s", result)
@@ -304,7 +315,7 @@ func TestCopiesAreHeldOnlyWhileAChangeCanBeApplied(t *testing.T) {
 		return card.Status
 	}
 	superseded, rejected, expired := must("s1"), must("s2"), must("s3")
-	if _, err := prepare("s4"); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "等待确认") {
+	if _, err := prepare("s4"); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), "等待确认") {
 		t.Fatalf("a fourth copy while three wait: %v", err)
 	}
 	// A session's next submission replaces the card it waited for.
@@ -515,7 +526,7 @@ func TestTheCapIsCheckedBeforeFoldersAreMeasured(t *testing.T) {
 	both := `{"summary":"x","operations":[` +
 		`{"op":"copy","path":"/nas/个人空间/旅行","source":"/nas/共享空间/旅行"},` +
 		`{"op":"write","path":"/nas/个人空间/计划.md","source":"/nas/助手/待确认/计划.md"}]}`
-	if _, err := f.exec.Prepare(context.Background(), "alice", member, []byte(both), "second", "req-2"); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "等待确认") {
+	if _, err := f.exec.Prepare(context.Background(), "alice", member, []byte(both), "second", "req-2"); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), "等待确认") {
 		t.Fatalf("prepare over the cap: %v", err)
 	}
 	if len(member.measured)+len(member.opened) > 0 {
@@ -561,13 +572,13 @@ func TestAccountsMakeChangesSideBySide(t *testing.T) {
 
 // watched is the member's file system, noting every path looked at or opened.
 type watched struct {
-	files.FileSystem
+	filesystem.FileSystem
 	looked, opened, measured []string
 	// onOpen, when set, runs before a file is opened.
 	onOpen func(path string)
 }
 
-func (w *watched) Lstat(ctx context.Context, path string) (files.FileInfo, error) {
+func (w *watched) Lstat(ctx context.Context, path string) (filesystem.FileInfo, error) {
 	w.looked = append(w.looked, path)
 	return w.FileSystem.Lstat(ctx, path)
 }
@@ -635,7 +646,7 @@ func TestOversizedSubmissionsAreRefusedBeforeAnyFileIsOpened(t *testing.T) {
 		"arguments too large": {`{"summary":"x","operations":[{"op":"mkdir","path":"/nas/个人空间/x"}],"note":"` + strings.Repeat("x", maxArguments) + `"}`, "参数超过 1024 KiB"},
 	} {
 		member.forget()
-		if _, err := f.prepare(c.submission); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), c.want) {
+		if _, err := f.prepare(c.submission); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), c.want) {
 			t.Errorf("%s: prepare = %v, want %q", name, err, c.want)
 		}
 		if result := f.exec.Apply(context.Background(), "alice", member, []byte(c.submission)); !strings.Contains(result, c.want) {
@@ -663,7 +674,7 @@ func TestOversizedSubmissionsAreRefusedBeforeAnyFileIsOpened(t *testing.T) {
 		"files together too large": {`{"operations":[` + strings.Join(together, ",") + `]}`, "合计超过 256 MiB"},
 	} {
 		member.forget()
-		if _, err := f.prepare(c.submission); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), c.want) {
+		if _, err := f.prepare(c.submission); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), c.want) {
 			t.Errorf("%s: prepare = %v, want %q", name, err, c.want)
 		}
 		if len(member.opened) > 0 {
@@ -718,7 +729,7 @@ func TestLinksAreNeverFollowed(t *testing.T) {
 		if !errors.Is(err, ErrInvalid) {
 			t.Fatalf("%s: prepare = %v %v, want ErrInvalid", name, card, err)
 		}
-		if strings.Contains(err.Error(), "secret") {
+		if strings.Contains(Reasons(err), "secret") {
 			t.Fatalf("%s: the refusal shows what is behind the link: %v", name, err)
 		}
 	}
@@ -847,7 +858,7 @@ func TestAFolderCopiesWholeAndNeverOverAnotherFolder(t *testing.T) {
 	if f.get("spaces/private/alice/旅行/行程/2.txt") != "two!" || f.get("spaces/private/alice/旅行/1.jpg") != "one" {
 		t.Fatal("the folder was not copied whole")
 	}
-	if _, err := f.prepare(copyTrip); err == nil || !strings.Contains(err.Error(), "不是普通文件") {
+	if _, err := f.prepare(copyTrip); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), "不是普通文件") {
 		t.Fatalf("a folder over a folder: %v", err)
 	}
 }
@@ -857,8 +868,7 @@ func TestACopyWhoseSourceChangedAfterTheCardIsNotMade(t *testing.T) {
 	f.put("spaces/shared/通知.md", "原文\n")
 	copyNote := `{"summary":"复制通知","operations":[{"op":"copy","path":"/nas/个人空间/通知.md","source":"/nas/共享空间/通知.md"}]}`
 	f.approve(copyNote)
-	time.Sleep(10 * time.Millisecond)
-	f.put("spaces/shared/通知.md", "别人改过了\n")
+	f.edit("spaces/shared/通知.md", "别人改过了\n")
 	if result := f.exec.Apply(context.Background(), "alice", f.member, []byte(copyNote)); !strings.Contains(result, "被改动过") {
 		t.Fatalf("apply = %s", result)
 	}
@@ -877,11 +887,28 @@ func TestCopiesComeOnlyFromWhatTheAssistantReads(t *testing.T) {
 		"/nas/共享空间/不存在.md":                  "不存在",
 	} {
 		submission := `{"summary":"x","operations":[{"op":"copy","path":"/nas/个人空间/x.md","source":"` + source + `"}]}`
-		if _, err := f.prepare(submission); err == nil || !strings.Contains(err.Error(), want) {
+		if _, err := f.prepare(submission); !errors.Is(err, ErrInvalid) || !strings.Contains(Reasons(err), want) {
 			t.Errorf("copy from %s: %v, want %q", source, err, want)
 		}
 	}
 	if _, err := f.prepare(`{"summary":"x","operations":[{"op":"copy","path":"/nas/共享空间/x.md","source":"/nas/个人空间/计划.md"}]}`); err == nil {
 		t.Fatal("a copy into Shared was accepted")
+	}
+}
+
+// Why a submission is refused reaches the assistant in the tool's reply; the
+// error value itself stays plain (#222).
+func TestRefusalReasonsAreInTheReplyNotInTheError(t *testing.T) {
+	t.Parallel()
+	_, err := ParseSubmission([]byte("not json"))
+	han := func(r rune) bool { return unicode.Is(unicode.Han, r) }
+	if !errors.Is(err, ErrInvalid) || strings.ContainsFunc(err.Error(), han) || strings.ContainsFunc(ErrDecided.Error(), han) {
+		t.Fatalf("errors = %q, %q; want plain errors that match ErrInvalid", err, ErrDecided)
+	}
+	if got := Reasons(err); got != "参数不是有效的 JSON 对象" {
+		t.Fatalf("Reasons() = %q", got)
+	}
+	if got := Reasons(errors.New("other")); got != "" {
+		t.Fatalf("Reasons() of another error = %q, want none", got)
 	}
 }

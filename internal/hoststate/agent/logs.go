@@ -8,46 +8,19 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/httpjson"
+	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/wire"
+
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 )
 
-const systemLogsPath = "/v1/system-logs"
-
 // systemLogsTimeout leaves the Host Agent's own read deadline room to answer.
 const systemLogsTimeout = 20 * time.Second
-
-// handleSystemLogs serves GET /v1/system-logs: allowlisted service logs only,
-// with the same filters the product API validated (ADR 0020).
-func (h *handler) handleSystemLogs(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
-		return
-	}
-	if h.systemLogs == nil {
-		httpjson.WriteError(w, http.StatusServiceUnavailable, "logs_unavailable", "system logs are unavailable")
-		return
-	}
-	q, err := systemlog.ParseQuery(r.URL.Query())
-	if err != nil {
-		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
-		return
-	}
-	page, err := h.systemLogs.ReadLogs(r.Context(), q)
-	if err != nil {
-		h.logger.ErrorContext(r.Context(), "system log read failed", "error", err)
-		httpjson.WriteError(w, http.StatusServiceUnavailable, "logs_unavailable", "system logs are unavailable")
-		return
-	}
-	httpjson.Write(w, http.StatusOK, page)
-}
 
 // ReadLogs reads allowlisted service logs through the Host Agent.
 func (c *Client) ReadLogs(ctx context.Context, q systemlog.Query) (systemlog.Page, error) {
 	ctx, cancel := context.WithTimeout(ctx, systemLogsTimeout)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://host-agent"+systemLogsPath+"?"+q.Values().Encode(), nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://host-agent"+wire.SystemLogsPath+"?"+q.Values().Encode(), nil)
 	if err != nil {
 		return systemlog.Page{}, err
 	}

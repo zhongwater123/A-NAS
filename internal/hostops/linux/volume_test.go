@@ -13,21 +13,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
-	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
 func TestCreateVolumeFormatsEveryDiskWithTheLayoutsProfiles(t *testing.T) {
 	host := newDiskHost(t, "disk:first", "disk:second")
 	executor := host.executor()
 
-	operation := host.finish(t, executor, startCreate(t, executor, "plan:mirror", storage.LayoutMirror, host.targets("disk:first", "disk:second")...))
-	if operation.State != storage.OperationSucceeded {
+	operation := host.finish(t, executor, startCreate(t, executor, "plan:mirror", datavolume.LayoutMirror, host.targets("disk:first", "disk:second")...))
+	if operation.State != datavolume.OperationSucceeded {
 		t.Fatalf("operation = %+v, want succeeded", operation)
 	}
 	volume := operation.Volume
-	if volume == nil || !slices.Equal(volume.DiskIDs, []string{"disk:first", "disk:second"}) || volume.Layout != storage.LayoutMirror || volume.CapacityBytes != 500_000_000_000 {
+	if volume == nil || !slices.Equal(volume.DiskIDs, []string{"disk:first", "disk:second"}) || volume.Layout != datavolume.LayoutMirror || volume.CapacityBytes != 500_000_000_000 {
 		t.Fatalf("volume = %+v", volume)
 	}
 	// Each new partition is wiped too: an md superblock inside the old one
@@ -49,18 +49,18 @@ func TestCreateVolumeFormatsEveryDiskWithTheLayoutsProfiles(t *testing.T) {
 func TestCreateVolumeRefusesADiskThatChangedOrIsInUse(t *testing.T) {
 	for _, name := range []string{"changed", "in use"} {
 		host := newDiskHost(t, "disk:first")
-		fingerprint := storage.FingerprintDisk(host.disks["disk:first"].Disk)
+		fingerprint := datavolume.FingerprintDisk(host.disks["disk:first"].Disk)
 		device := host.disks["disk:first"]
 		if name == "changed" {
 			device.Disk.CapacityBytes++
 		} else {
 			device.Disk.InUse = true
-			fingerprint = storage.FingerprintDisk(device.Disk)
+			fingerprint = datavolume.FingerprintDisk(device.Disk)
 		}
 		host.disks["disk:first"] = device
 		executor := host.executor()
-		operation := host.finish(t, executor, startCreate(t, executor, "plan:x", storage.LayoutSingle, storage.DiskTarget{DiskID: "disk:first", Fingerprint: fingerprint}))
-		if operation.State != storage.OperationFailed || operation.Step != "" || len(host.lines()) != 0 {
+		operation := host.finish(t, executor, startCreate(t, executor, "plan:x", datavolume.LayoutSingle, datavolume.DiskTarget{DiskID: "disk:first", Fingerprint: fingerprint}))
+		if operation.State != datavolume.OperationFailed || operation.Step != "" || len(host.lines()) != 0 {
 			t.Fatalf("%s disk: operation = %+v, commands = %v; want refused before any command", name, operation, host.lines())
 		}
 	}
@@ -73,14 +73,14 @@ func TestAVolumeOperationOutlivesTheRequestThatStartedIt(t *testing.T) {
 	host.blockAt = "mkfs.btrfs"
 	executor := host.executor()
 	ctx, cancel := context.WithCancel(context.Background())
-	if _, err := executor.StartCreateVolume(ctx, storage.CreateVolumeRequest{PlanID: "plan:page", Layout: storage.LayoutSingle, Disks: host.targets("disk:first")}); err != nil {
+	if _, err := executor.StartCreateVolume(ctx, datavolume.CreateVolumeRequest{PlanID: "plan:page", Layout: datavolume.LayoutSingle, Disks: host.targets("disk:first")}); err != nil {
 		t.Fatal(err)
 	}
 	host.waitBlocked(t)
 	cancel()
 	host.unblock()
 	operation := host.finish(t, executor, "plan:page")
-	if operation.State != storage.OperationSucceeded || host.killed {
+	if operation.State != datavolume.OperationSucceeded || host.killed {
 		t.Fatalf("operation = %+v, killed = %v; want it finished after the request ended", operation, host.killed)
 	}
 }
@@ -92,25 +92,25 @@ func TestAVolumeOperationOutlivesTheRequestThatStartedIt(t *testing.T) {
 func TestCreatingTheVolumeContinuesAfterTheHostAgentStopsInAnyStep(t *testing.T) {
 	for _, test := range []struct {
 		stopAt  string
-		step    storage.OperationStep
+		step    datavolume.OperationStep
 		mounted bool
 	}{
-		{"wipefs --all /dev/sdb", storage.StepErase, false},
-		{"mkfs.btrfs", storage.StepFormat, false},
-		{"systemctl enable --now", storage.StepMount, false},
-		{"btrfs subvolume create", storage.StepPrepare, true},
+		{"wipefs --all /dev/sdb", datavolume.StepErase, false},
+		{"mkfs.btrfs", datavolume.StepFormat, false},
+		{"systemctl enable --now", datavolume.StepMount, false},
+		{"btrfs subvolume create", datavolume.StepPrepare, true},
 	} {
 		t.Run(string(test.step), func(t *testing.T) {
 			host := newDiskHost(t, "disk:first", "disk:second")
 			host.blockAt = test.stopAt
 			first := host.executor()
-			startCreate(t, first, "plan:cut", storage.LayoutMirror, host.targets("disk:first", "disk:second")...)
+			startCreate(t, first, "plan:cut", datavolume.LayoutMirror, host.targets("disk:first", "disk:second")...)
 			host.waitBlocked(t)
 
 			// The Host Agent starts again while the command still hangs.
 			restarted := host.executor()
 			operation, err := restarted.VolumeOperation(context.Background(), "plan:cut")
-			if err != nil || operation.State != storage.OperationInterrupted || operation.Step != test.step || !strings.Contains(operation.Failure, string(test.step)) {
+			if err != nil || operation.State != datavolume.OperationInterrupted || operation.Step != test.step || !strings.Contains(operation.Failure, string(test.step)) {
 				t.Fatalf("operation after the restart = %+v, %v; want interrupted in %s", operation, err, test.step)
 			}
 			host.abandon()
@@ -119,8 +119,8 @@ func TestCreatingTheVolumeContinuesAfterTheHostAgentStopsInAnyStep(t *testing.T)
 			}
 
 			host.set(func() { host.commands = nil })
-			operation = host.finish(t, restarted, startCreate(t, restarted, "plan:cut", storage.LayoutMirror, host.targets("disk:first", "disk:second")...))
-			if operation.State != storage.OperationSucceeded {
+			operation = host.finish(t, restarted, startCreate(t, restarted, "plan:cut", datavolume.LayoutMirror, host.targets("disk:first", "disk:second")...))
+			if operation.State != datavolume.OperationSucceeded {
 				t.Fatalf("retry = %+v, want succeeded", operation)
 			}
 			erased := slices.ContainsFunc(host.lines(), func(line string) bool { return strings.HasPrefix(line, "wipefs") || strings.HasPrefix(line, "mkfs") })
@@ -144,18 +144,18 @@ func TestCreatingTheVolumeContinuesAfterAKilledCommand(t *testing.T) {
 	host := newDiskHost(t, "disk:first")
 	host.failAt = "btrfs subvolume create"
 	executor := host.executor()
-	operation := host.finish(t, executor, startCreate(t, executor, "plan:killed", storage.LayoutSingle, host.targets("disk:first")...))
-	if operation.State != storage.OperationFailed || operation.Step != storage.StepPrepare || strings.Contains(operation.Failure, "/dev/") {
+	operation := host.finish(t, executor, startCreate(t, executor, "plan:killed", datavolume.LayoutSingle, host.targets("disk:first")...))
+	if operation.State != datavolume.OperationFailed || operation.Step != datavolume.StepPrepare || strings.Contains(operation.Failure, "/dev/") {
 		t.Fatalf("operation = %+v, want failed in prepare without device paths", operation)
 	}
 	host.set(func() { host.failAt, host.commands = "", nil })
-	operation = host.finish(t, executor, startCreate(t, executor, "plan:killed", storage.LayoutSingle, host.targets("disk:first")...))
-	if operation.State != storage.OperationSucceeded || slices.ContainsFunc(host.lines(), func(line string) bool { return strings.HasPrefix(line, "mkfs") }) {
+	operation = host.finish(t, executor, startCreate(t, executor, "plan:killed", datavolume.LayoutSingle, host.targets("disk:first")...))
+	if operation.State != datavolume.OperationSucceeded || slices.ContainsFunc(host.lines(), func(line string) bool { return strings.HasPrefix(line, "mkfs") }) {
 		t.Fatalf("retry = %+v, commands = %v; want the mounted volume prepared without formatting", operation, host.lines())
 	}
 	// Asking again changes nothing.
 	host.set(func() { host.commands = nil })
-	if again := startCreate(t, executor, "plan:killed", storage.LayoutSingle, host.targets("disk:first")...); again != "plan:killed" || len(host.lines()) != 0 {
+	if again := startCreate(t, executor, "plan:killed", datavolume.LayoutSingle, host.targets("disk:first")...); again != "plan:killed" || len(host.lines()) != 0 {
 		t.Fatalf("a succeeded plan ran commands again: %v", host.lines())
 	}
 }
@@ -168,8 +168,8 @@ func TestCreateVolumeRefusesAVolumeThePlanDidNotMake(t *testing.T) {
 		host.mount("aaaaaaaa-0000-4000-8000-000000000001", "disk:old")
 		writeMarker(t, host.mountPoint, `{"filesystemUuid":"aaaaaaaa-0000-4000-8000-000000000001","diskId":"disk:old","formatVersion":1,"planId":"plan:old"}`)
 		executor := host.executor()
-		operation := host.finish(t, executor, startCreate(t, executor, "plan:new", storage.LayoutSingle, host.targets("disk:first")...))
-		if operation.State != storage.OperationFailed || operation.Failure != storage.ErrVolumeExists.Error() || len(host.lines()) != 0 {
+		operation := host.finish(t, executor, startCreate(t, executor, "plan:new", datavolume.LayoutSingle, host.targets("disk:first")...))
+		if operation.State != datavolume.OperationFailed || operation.Failure != datavolume.ErrVolumeExists.Error() || len(host.lines()) != 0 {
 			t.Fatalf("operation = %+v, commands = %v; want refused before any command", operation, host.lines())
 		}
 	})
@@ -177,8 +177,8 @@ func TestCreateVolumeRefusesAVolumeThePlanDidNotMake(t *testing.T) {
 		host := newDiskHost(t, "disk:first")
 		host.writeUnit(t, "aaaaaaaa-0000-4000-8000-000000000001")
 		executor := host.executor()
-		operation := host.finish(t, executor, startCreate(t, executor, "plan:new", storage.LayoutSingle, host.targets("disk:first")...))
-		if operation.State != storage.OperationFailed || operation.Failure != storage.ErrVolumeExists.Error() {
+		operation := host.finish(t, executor, startCreate(t, executor, "plan:new", datavolume.LayoutSingle, host.targets("disk:first")...))
+		if operation.State != datavolume.OperationFailed || operation.Failure != datavolume.ErrVolumeExists.Error() {
 			t.Fatalf("operation = %+v, want refused", operation)
 		}
 		if slices.ContainsFunc(host.lines(), func(line string) bool { return !strings.HasPrefix(line, "blkid --probe") }) {
@@ -193,8 +193,8 @@ func TestCreateVolumeRefusesAVolumeThePlanDidNotMake(t *testing.T) {
 		host.writeUnit(t, "aaaaaaaa-0000-4000-8000-000000000001")
 		host.partitionUUIDs = map[string]string{"/dev/sda1": "aaaaaaaa-0000-4000-8000-000000000001"}
 		executor := host.executor()
-		operation := host.finish(t, executor, startCreate(t, executor, "plan:new", storage.LayoutSingle, host.targets("disk:first")...))
-		if operation.State != storage.OperationSucceeded || host.unitUUID(t) != host.mounted.FilesystemUUID {
+		operation := host.finish(t, executor, startCreate(t, executor, "plan:new", datavolume.LayoutSingle, host.targets("disk:first")...))
+		if operation.State != datavolume.OperationSucceeded || host.unitUUID(t) != host.mounted.FilesystemUUID {
 			t.Fatalf("operation = %+v; want the unit of a filesystem the plan erases replaced", operation)
 		}
 	})
@@ -209,8 +209,8 @@ func TestCreateVolumeTakesOverTheVolumeItsPlanMade(t *testing.T) {
 	host.writeUnit(t, "aaaaaaaa-0000-4000-8000-000000000001")
 	writeMarker(t, host.mountPoint, `{"filesystemUuid":"aaaaaaaa-0000-4000-8000-000000000001","diskId":"disk:first","formatVersion":1}`)
 	executor := host.executor()
-	operation := host.finish(t, executor, startCreate(t, executor, "plan:old", storage.LayoutSingle, host.targets("disk:first")...))
-	if operation.State != storage.OperationSucceeded || operation.Volume.FilesystemUUID != "aaaaaaaa-0000-4000-8000-000000000001" {
+	operation := host.finish(t, executor, startCreate(t, executor, "plan:old", datavolume.LayoutSingle, host.targets("disk:first")...))
+	if operation.State != datavolume.OperationSucceeded || operation.Volume.FilesystemUUID != "aaaaaaaa-0000-4000-8000-000000000001" {
 		t.Fatalf("operation = %+v, want the mounted volume taken over", operation)
 	}
 	if slices.ContainsFunc(host.lines(), func(line string) bool { return strings.HasPrefix(line, "wipefs") || strings.HasPrefix(line, "mkfs") }) {
@@ -224,8 +224,8 @@ func TestCreateVolumeTakesOverTheVolumeItsPlanMade(t *testing.T) {
 func TestAddDisksNeedsTheMountedDataVolume(t *testing.T) {
 	host := newDiskHost(t, "disk:second")
 	executor := host.executor()
-	operation := host.finish(t, executor, startAdd(t, executor, "plan:add", storage.LayoutMirror, host.targets("disk:second")...))
-	if operation.State != storage.OperationFailed || operation.Failure != storage.ErrVolumeUnavailable.Error() || len(host.lines()) != 0 {
+	operation := host.finish(t, executor, startAdd(t, executor, "plan:add", datavolume.LayoutMirror, host.targets("disk:second")...))
+	if operation.State != datavolume.OperationFailed || operation.Failure != datavolume.ErrVolumeUnavailable.Error() || len(host.lines()) != 0 {
 		t.Fatalf("operation on an unmounted volume = %+v, commands = %v; want refused before any command", operation, host.lines())
 	}
 }
@@ -235,18 +235,18 @@ func TestAddDisksNeedsTheMountedDataVolume(t *testing.T) {
 func TestVolumeOperationsNeedEveryDiskByID(t *testing.T) {
 	host := newDiskHost(t, "disk:first")
 	executor := host.executor()
-	disks := append(host.targets("disk:first"), storage.DiskTarget{DiskID: " ", Fingerprint: "f"})
-	if _, err := executor.StartCreateVolume(context.Background(), storage.CreateVolumeRequest{
-		PlanID: "plan:create", Layout: storage.LayoutMirror, Disks: disks,
+	disks := append(host.targets("disk:first"), datavolume.DiskTarget{DiskID: " ", Fingerprint: "f"})
+	if _, err := executor.StartCreateVolume(context.Background(), datavolume.CreateVolumeRequest{
+		PlanID: "plan:create", Layout: datavolume.LayoutMirror, Disks: disks,
 	}); err == nil {
 		t.Error("StartCreateVolume() accepted a disk without an ID")
 	}
-	if _, err := executor.StartAddDisks(context.Background(), storage.AddDisksRequest{
-		PlanID: "plan:add", FilesystemUUID: volumeUUID, Layout: storage.LayoutMirror, Disks: disks[1:],
+	if _, err := executor.StartAddDisks(context.Background(), datavolume.AddDisksRequest{
+		PlanID: "plan:add", FilesystemUUID: volumeUUID, Layout: datavolume.LayoutMirror, Disks: disks[1:],
 	}); err == nil {
 		t.Error("StartAddDisks() accepted a disk without an ID")
 	}
-	if _, err := executor.VolumeOperation(context.Background(), "plan:create"); !errors.Is(err, storage.ErrOperationNotFound) {
+	if _, err := executor.VolumeOperation(context.Background(), "plan:create"); !errors.Is(err, datavolume.ErrOperationNotFound) {
 		t.Fatalf("VolumeOperation() error = %v; want nothing journaled", err)
 	}
 	if len(host.lines()) != 0 {
@@ -262,7 +262,7 @@ func TestAddingDisksRecordsTheLayoutFirstAndContinuesAfterAKill(t *testing.T) {
 	writeMarker(t, host.mountPoint, `{"filesystemUuid":"`+volumeUUID+`","diskId":"disk:first","formatVersion":1}`)
 	host.blockAt = "btrfs device add"
 	executor := host.executor()
-	startAdd(t, executor, "plan:add", storage.LayoutMirror, host.targets("disk:second")...)
+	startAdd(t, executor, "plan:add", datavolume.LayoutMirror, host.targets("disk:second")...)
 	host.waitBlocked(t)
 	marker := readMarker(t, host.mountPoint)
 	pending, _ := marker["pending"].(map[string]any)
@@ -273,13 +273,13 @@ func TestAddingDisksRecordsTheLayoutFirstAndContinuesAfterAKill(t *testing.T) {
 	host.set(func() { host.killAfter = true })
 	host.unblock()
 	operation := host.finish(t, executor, "plan:add")
-	if operation.State != storage.OperationFailed || operation.Step != storage.StepAddDevices || len(host.mounted.DiskIDs) != 2 {
+	if operation.State != datavolume.OperationFailed || operation.Step != datavolume.StepAddDevices || len(host.mounted.DiskIDs) != 2 {
 		t.Fatalf("operation = %+v, members = %v; want killed after the disk joined", operation, host.mounted.DiskIDs)
 	}
 
 	host.set(func() { host.blockAt, host.killAfter, host.commands = "", false, nil })
-	operation = host.finish(t, executor, startAdd(t, executor, "plan:add", storage.LayoutMirror, host.targets("disk:second")...))
-	if operation.State != storage.OperationSucceeded || len(host.lines()) != 0 {
+	operation = host.finish(t, executor, startAdd(t, executor, "plan:add", datavolume.LayoutMirror, host.targets("disk:second")...))
+	if operation.State != datavolume.OperationSucceeded || len(host.lines()) != 0 {
 		t.Fatalf("retry = %+v, commands = %v; want the member skipped", operation, host.lines())
 	}
 	marker = readMarker(t, host.mountPoint)
@@ -292,26 +292,26 @@ func TestOneVolumeOperationRunsAtATime(t *testing.T) {
 	host := newDiskHost(t, "disk:first", "disk:second")
 	host.blockAt = "mkfs.btrfs"
 	executor := host.executor()
-	startCreate(t, executor, "plan:one", storage.LayoutSingle, host.targets("disk:first")...)
+	startCreate(t, executor, "plan:one", datavolume.LayoutSingle, host.targets("disk:first")...)
 	host.waitBlocked(t)
-	if _, err := executor.StartCreateVolume(context.Background(), storage.CreateVolumeRequest{
-		PlanID: "plan:two", Layout: storage.LayoutSingle, Disks: host.targets("disk:second"),
-	}); !errors.Is(err, storage.ErrPlanState) {
+	if _, err := executor.StartCreateVolume(context.Background(), datavolume.CreateVolumeRequest{
+		PlanID: "plan:two", Layout: datavolume.LayoutSingle, Disks: host.targets("disk:second"),
+	}); !errors.Is(err, datavolume.ErrPlanState) {
 		t.Fatalf("second operation error = %v, want ErrPlanState", err)
 	}
-	if _, err := executor.StartCreateVolume(context.Background(), storage.CreateVolumeRequest{
-		PlanID: "plan:one", Layout: storage.LayoutSingle, Disks: host.targets("disk:second"),
-	}); !errors.Is(err, storage.ErrPlanState) {
+	if _, err := executor.StartCreateVolume(context.Background(), datavolume.CreateVolumeRequest{
+		PlanID: "plan:one", Layout: datavolume.LayoutSingle, Disks: host.targets("disk:second"),
+	}); !errors.Is(err, datavolume.ErrPlanState) {
 		t.Fatalf("the plan asking for other disks error = %v, want ErrPlanState", err)
 	}
-	if again, err := executor.StartCreateVolume(context.Background(), storage.CreateVolumeRequest{
-		PlanID: "plan:one", Layout: storage.LayoutSingle, Disks: host.targets("disk:first"),
-	}); err != nil || again.State != storage.OperationRunning {
+	if again, err := executor.StartCreateVolume(context.Background(), datavolume.CreateVolumeRequest{
+		PlanID: "plan:one", Layout: datavolume.LayoutSingle, Disks: host.targets("disk:first"),
+	}); err != nil || again.State != datavolume.OperationRunning {
 		t.Fatalf("starting the running plan again = %+v, %v; want it reported running", again, err)
 	}
 	host.unblock()
 	host.finish(t, executor, "plan:one")
-	if operation, err := host.executor().VolumeOperation(context.Background(), "plan:one"); err != nil || operation.State != storage.OperationSucceeded {
+	if operation, err := host.executor().VolumeOperation(context.Background(), "plan:one"); err != nil || operation.State != datavolume.OperationSucceeded {
 		t.Fatalf("journal after a restart = %+v, %v; want succeeded", operation, err)
 	}
 }
@@ -364,10 +364,10 @@ func (h *diskHost) executor() *linux.Executor {
 	return linux.NewExecutor(h, h, linux.Options{SystemRoot: h.systemRoot, MountPoint: h.mountPoint, MountUnitName: "a-nas-data.mount"})
 }
 
-func (h *diskHost) targets(ids ...string) []storage.DiskTarget {
-	targets := make([]storage.DiskTarget, len(ids))
+func (h *diskHost) targets(ids ...string) []datavolume.DiskTarget {
+	targets := make([]datavolume.DiskTarget, len(ids))
 	for i, id := range ids {
-		targets[i] = storage.DiskTarget{DiskID: id, Fingerprint: storage.FingerprintDisk(h.disks[id].Disk)}
+		targets[i] = datavolume.DiskTarget{DiskID: id, Fingerprint: datavolume.FingerprintDisk(h.disks[id].Disk)}
 	}
 	return targets
 }
@@ -523,7 +523,7 @@ func (h *diskHost) abandon() {
 }
 
 // finish waits until the plan's operation ends.
-func (h *diskHost) finish(t *testing.T, executor *linux.Executor, planID string) storage.VolumeOperation {
+func (h *diskHost) finish(t *testing.T, executor *linux.Executor, planID string) datavolume.VolumeOperation {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -531,7 +531,7 @@ func (h *diskHost) finish(t *testing.T, executor *linux.Executor, planID string)
 		if err != nil {
 			t.Fatalf("VolumeOperation(%s) error = %v", planID, err)
 		}
-		if operation.State != storage.OperationRunning {
+		if operation.State != datavolume.OperationRunning {
 			return operation
 		}
 		if time.Now().After(deadline) {
@@ -572,17 +572,17 @@ func (h *diskHost) unitUUID(t *testing.T) string {
 	return ""
 }
 
-func startCreate(t *testing.T, executor *linux.Executor, planID string, layout storage.Layout, disks ...storage.DiskTarget) string {
+func startCreate(t *testing.T, executor *linux.Executor, planID string, layout datavolume.Layout, disks ...datavolume.DiskTarget) string {
 	t.Helper()
-	if _, err := executor.StartCreateVolume(context.Background(), storage.CreateVolumeRequest{PlanID: planID, Layout: layout, Disks: disks}); err != nil {
+	if _, err := executor.StartCreateVolume(context.Background(), datavolume.CreateVolumeRequest{PlanID: planID, Layout: layout, Disks: disks}); err != nil {
 		t.Fatalf("StartCreateVolume() error = %v", err)
 	}
 	return planID
 }
 
-func startAdd(t *testing.T, executor *linux.Executor, planID string, layout storage.Layout, disks ...storage.DiskTarget) string {
+func startAdd(t *testing.T, executor *linux.Executor, planID string, layout datavolume.Layout, disks ...datavolume.DiskTarget) string {
 	t.Helper()
-	if _, err := executor.StartAddDisks(context.Background(), storage.AddDisksRequest{PlanID: planID, FilesystemUUID: volumeUUID, Layout: layout, Disks: disks}); err != nil {
+	if _, err := executor.StartAddDisks(context.Background(), datavolume.AddDisksRequest{PlanID: planID, FilesystemUUID: volumeUUID, Layout: layout, Disks: disks}); err != nil {
 		t.Fatalf("StartAddDisks() error = %v", err)
 	}
 	return planID

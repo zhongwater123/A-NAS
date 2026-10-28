@@ -4,7 +4,7 @@
 // `hermes serve` and closes the connection when the member's session ends.
 import { useEffect, useMemo, useState } from "react";
 
-import { assistantStatus, failureText, gatewayUrl } from "./assistantApi";
+import { assistantStatus, failureText, gatewayUrl } from "./api";
 import { JsonRpcGatewayClient } from "./hermes/shared/json-rpc-gateway";
 import { isStableOpen, reconnectBackoffDelayMs } from "./hermes/shared/reconnect-backoff";
 

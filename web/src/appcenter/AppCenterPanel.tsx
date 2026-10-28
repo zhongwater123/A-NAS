@@ -1,14 +1,14 @@
-import { APIError } from "../api";
 import { CircleAlert, Compass, PackageCheck, RotateCw, Search, ShieldCheck, ShoppingBag, X } from "lucide-react";
 import { KeyboardEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { AppList, CatalogApp, readApps } from "../appsApi";
+import { APIError } from "../api/client";
 import { AppDetail } from "./AppDetail";
-import { CategoryPage, CategoryTile, Discover, Installed, SearchResults, listedAsInstalled } from "./Browse";
+import { AppList, CatalogApp, readApps } from "./api";
+import styles from "./appcenter.module.css";
+import { CategoryPage, CategoryTile, Discover, Installed, listedAsInstalled, SearchResults } from "./Browse";
 import { InstallSheet, UninstallDialog } from "./InstallSheet";
 import { categories, categoryOf, isBusy, search } from "./model";
 import { preloadMarkdown } from "./parts";
-import "./appcenter.css";
 
 const busyPollInterval = 1_500;
 const idlePollInterval = 10_000;
@@ -77,7 +77,7 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string
     return (
       <FullState icon={<CircleAlert />} title="无法连接应用中心" tone="error">
         <p>请确认容器代理正在运行。</p>
-        <button className="ac-btn primary" onClick={() => void refresh()}>
+        <button className={`${styles.acBtn} primary`} onClick={() => void refresh()}>
           <RotateCw />
           重新连接
         </button>
@@ -91,7 +91,7 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string
   let page: ReactNode;
   if (!list) {
     page = (
-      <div className="ac-loading">
+      <div className={styles.acLoading}>
         <span className="loader" />
         <p>正在载入应用…</p>
       </div>
@@ -149,9 +149,9 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string
     (next.kind !== "category" || (view.kind === "category" && view.id === next.id));
 
   return (
-    <div className="ac-shell">
-      <nav className="ac-nav" aria-label="应用中心导航" inert={Boolean(modal)}>
-        <label className="ac-search">
+    <div className={styles.acShell}>
+      <nav className={styles.acNav} aria-label="应用中心导航" inert={Boolean(modal)}>
+        <label className={styles.acSearch}>
           <Search />
           <input
             value={query}
@@ -164,7 +164,7 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string
             aria-label="搜索应用"
           />
           {query && (
-            <button className="ac-search-clear" aria-label="清除搜索" onClick={() => setQuery("")}>
+            <button className={styles.acSearchClear} aria-label="清除搜索" onClick={() => setQuery("")}>
               <X />
             </button>
           )}
@@ -173,7 +173,7 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string
           active={active({ kind: "discover" })}
           onClick={() => navigate({ kind: "discover" })}
           icon={
-            <span className="ac-tile discover">
+            <span className={`${styles.acTile} ${styles.discover}`}>
               <Compass />
             </span>
           }
@@ -183,20 +183,20 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string
           active={active({ kind: "installed" })}
           onClick={() => navigate({ kind: "installed" })}
           icon={
-            <span className="ac-tile installed">
+            <span className={`${styles.acTile} ${styles.installed}`}>
               <PackageCheck />
             </span>
           }
           label="已安装"
           end={
             busyApp ? (
-              <span className="loader small" aria-label="有任务进行中" />
+              <span className={`loader ${styles.small}`} aria-label="有任务进行中" />
             ) : (
-              installed.length > 0 && <span className="ac-count">{installed.length}</span>
+              installed.length > 0 && <span className={styles.acCount}>{installed.length}</span>
             )
           }
         />
-        <p className="ac-nav-label">分类</p>
+        <p className={styles.acNavLabel}>分类</p>
         {categories.map((item) => {
           const count = apps.filter((app) => app.category === item.id).length;
           if (list && count === 0) return null;
@@ -207,11 +207,11 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string
               onClick={() => navigate({ kind: "category", id: item.id })}
               icon={<CategoryTile category={item} size="sm" />}
               label={item.label}
-              end={list && <span className="ac-count muted">{count}</span>}
+              end={list && <span className={`${styles.acCount} ${styles.muted}`}>{count}</span>}
             />
           );
         })}
-        <footer className="ac-nav-foot">
+        <footer className={styles.acNavFoot}>
           <ShieldCheck />
           <span>
             {apps.length > 0 ? `${apps.length} 个应用均经过安全审查` : "应用均经过安全审查"}
@@ -219,9 +219,9 @@ export function AppCenterPanel({ onOpenDocker }: { onOpenDocker?: (appID: string
           </span>
         </footer>
       </nav>
-      <main className="ac-main" ref={main} inert={Boolean(modal)}>
+      <main className={styles.acMain} ref={main} inert={Boolean(modal)}>
         {error && list && (
-          <div className="ac-banner-note error ac-offline">
+          <div className={`${styles.acBannerNote} ${styles.error} ${styles.acOffline}`}>
             <CircleAlert />
             连接中断，正在显示上次读取的应用状态
           </div>
@@ -253,7 +253,7 @@ function NavItem({
 }) {
   return (
     <button
-      className={`ac-nav-item ${active ? "active" : ""}`}
+      className={`${styles.acNavItem} ${active ? styles.active : ""}`}
       aria-current={active ? "page" : undefined}
       onClick={onClick}
     >
@@ -276,9 +276,9 @@ function FullState({
   children: ReactNode;
 }) {
   return (
-    <div className="ac-shell single">
-      <div className="ac-empty full">
-        <span className={`ac-empty-art ${tone ?? ""}`}>{icon}</span>
+    <div className={`${styles.acShell} ${styles.single}`}>
+      <div className={`${styles.acEmpty} ${styles.full}`}>
+        <span className={`${styles.acEmptyArt} ${styles[tone ?? ""] ?? ""}`}>{icon}</span>
         <h3>{title}</h3>
         {children}
       </div>

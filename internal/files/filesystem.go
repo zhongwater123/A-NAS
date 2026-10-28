@@ -2,83 +2,51 @@ package files
 
 import (
 	"context"
-	"os"
-	"slices"
-	"strings"
-	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
-// FileSystem performs the file operations of one request. In production the
-// File Broker runs them as the signed-in user (ADR 0008), so the kernel
-// decides every access; paths are absolute and must stay on the data volume.
-type FileSystem interface {
-	Lstat(ctx context.Context, path string) (FileInfo, error)
-	// Scan lists everything below path in pre-order. It does not follow
-	// symlinks, does not descend into skipped names, and lists opaque and
-	// unreadable directories without their contents.
-	Scan(ctx context.Context, path string, skip ScanSkip) ([]ScanEntry, error)
-	Mkdir(ctx context.Context, path string) error
-	MkdirAll(ctx context.Context, path string) error
-	// Rename fails with fs.ErrExist instead of replacing an existing target.
-	Rename(ctx context.Context, from, to string) error
-	Remove(ctx context.Context, path string) error
-	RemoveAll(ctx context.Context, path string) error
-	// Open returns a regular file opened read-only.
-	Open(ctx context.Context, path string) (*os.File, error)
-	// CreateTemp creates a new file in dir and returns it opened for writing
-	// together with its path.
-	CreateTemp(ctx context.Context, dir, prefix string) (*os.File, string, error)
-	// Copy copies a regular file or directory tree to a path that must not exist.
-	Copy(ctx context.Context, from, to string) error
-	// Usage returns the total size of the regular files at or below path.
-	Usage(ctx context.Context, path string) (int64, error)
-	// SetModTime sets the modification time of a regular file and leaves
-	// its access time; it never follows a symlink. Restores use it so a
-	// file comes back as it was saved.
-	SetModTime(ctx context.Context, path string, modTime time.Time) error
-}
+// The file system port, its errors and the snapshot objects live in
+// internal/filesystem, which the root file broker links without this package
+// (#221); these names keep the catalog's callers as they were.
+type (
+	FileSystem      = filesystem.FileSystem
+	FileInfo        = filesystem.FileInfo
+	ScanEntry       = filesystem.ScanEntry
+	ScanSkip        = filesystem.ScanSkip
+	RootFileSystem  = filesystem.RootFileSystem
+	EntryKind       = filesystem.EntryKind
+	SnapshotObject  = filesystem.SnapshotObject
+	SnapshotBackend = filesystem.SnapshotBackend
+	SnapshotSurvey  = filesystem.SnapshotSurvey
+)
 
 const (
-	KindFile      = "file"
-	KindDirectory = "directory"
-	KindSymlink   = "symlink"
-	KindOther     = "other"
+	KindFile           = filesystem.KindFile
+	KindDirectory      = filesystem.KindDirectory
+	KindSymlink        = filesystem.KindSymlink
+	KindOther          = filesystem.KindOther
+	EntryKindFile      = filesystem.EntryKindFile
+	EntryKindDirectory = filesystem.EntryKindDirectory
 )
 
-type FileInfo struct {
-	Name    string    `json:"name"`
-	Kind    string    `json:"kind"`
-	Size    int64     `json:"size"`
-	ModTime time.Time `json:"modTime"`
-	Inode   uint64    `json:"inode"`
+var (
+	ErrForbidden         = filesystem.ErrForbidden
+	ErrNotFound          = filesystem.ErrNotFound
+	ErrInvalidName       = filesystem.ErrInvalidName
+	ErrNameTooLong       = filesystem.ErrNameTooLong
+	ErrUnsupportedType   = filesystem.ErrUnsupportedType
+	ErrVolumeUnavailable = filesystem.ErrVolumeUnavailable
+	ErrInsufficientSpace = filesystem.ErrInsufficientSpace
+	ErrInvalidSelection  = filesystem.ErrInvalidSelection
+)
+
+// NewRootFileSystem is filesystem.NewRootFileSystem.
+func NewRootFileSystem(base string, createBase bool) *RootFileSystem {
+	return filesystem.NewRootFileSystem(base, createBase)
 }
 
-type ScanEntry struct {
-	// Path is slash-separated and relative to the scanned directory.
-	Path string   `json:"path"`
-	Info FileInfo `json:"info"`
-}
-
-type ScanSkip struct {
-	Names    []string `json:"names,omitempty"`
-	Prefixes []string `json:"prefixes,omitempty"`
-	// Opaque prefixes name directories that are listed but not entered.
-	Opaque []string `json:"opaque,omitempty"`
-	// Shallow lists the directory's children without entering any of them.
-	Shallow bool `json:"shallow,omitempty"`
-	// Strict refuses a disappearing or unreadable child instead of returning
-	// an incomplete tree. Limit bounds memory for explicit share selections.
-	Strict bool `json:"strict,omitempty"`
-	Limit  int  `json:"limit,omitempty"`
-}
-
-func (s ScanSkip) matches(name string) bool {
-	if slices.Contains(s.Names, name) {
-		return true
-	}
-	return slices.ContainsFunc(s.Prefixes, func(prefix string) bool { return strings.HasPrefix(name, prefix) })
-}
-
-func (s ScanSkip) opaque(name string) bool {
-	return s.Shallow || slices.ContainsFunc(s.Opaque, func(prefix string) bool { return strings.HasPrefix(name, prefix) })
+// WalkSnapshot is filesystem.WalkSnapshot.
+func WalkSnapshot(ctx context.Context, root string, visit func(SnapshotObject) error) error {
+	return filesystem.WalkSnapshot(ctx, root, visit)
 }

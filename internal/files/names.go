@@ -31,9 +31,6 @@ func isAgentPolicyDirectory(root, spaceID, name string) bool {
 // rules keeps its name when it is moved, copied or restored under it.
 
 var (
-	// ErrNameTooLong reports a name over the 255 bytes Linux allows for one
-	// path component: 85 Chinese characters fill it.
-	ErrNameTooLong = fmt.Errorf("%w: longer than %d bytes", ErrInvalidName, maxNameBytes)
 	// ErrNameNotPortable reports a name Windows or macOS cannot hold: control
 	// characters, \ / : * ? " < > |, a trailing space or dot, or a device name
 	// such as CON.

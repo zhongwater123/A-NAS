@@ -5,14 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"time"
 
 	"github.com/creack/pty"
+
+	"github.com/zhongwater123/A-NAS/internal/ptyshell"
 )
 
 const localShellSupported = true
-
-const hangupGracePeriod = 2 * time.Second
 
 // localSpawner starts shells as the Product Service's own user. It is only
 // used for development without a Host Agent.
@@ -29,11 +28,11 @@ func (s localSpawner) StartShell(_ context.Context, cols, rows uint16) (Shell, e
 	if err != nil {
 		return nil, err
 	}
-	return &localShell{group: WatchProcessGroup(cmd), ptmx: ptmx}, nil
+	return &localShell{group: ptyshell.WatchProcessGroup(cmd), ptmx: ptmx}, nil
 }
 
 type localShell struct {
-	group *ProcessGroup
+	group *ptyshell.ProcessGroup
 	ptmx  *os.File
 	close sync.Once
 }
@@ -50,7 +49,7 @@ func (s *localShell) Resize(cols, rows uint16) error {
 // Close hangs up the shell's process group unless the shell already exited.
 func (s *localShell) Close() error {
 	s.close.Do(func() {
-		s.group.HangUp(hangupGracePeriod)
+		s.group.HangUp(ptyshell.HangupGrace)
 		_ = s.ptmx.Close()
 	})
 	return nil

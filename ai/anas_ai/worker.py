@@ -18,6 +18,7 @@ unavailable.
 
 import argparse
 import base64
+import contextlib
 import logging
 import os
 import select
@@ -53,10 +54,8 @@ def listening_socket(path):
         return socket.socket(fileno=SYSTEMD_FIRST_FD)
     if not path:
         raise SystemExit("--socket is required without systemd socket activation")
-    try:
+    with contextlib.suppress(FileNotFoundError):
         os.unlink(path)
-    except FileNotFoundError:
-        pass
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(path)
     listener.listen(8)

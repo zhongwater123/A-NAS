@@ -41,6 +41,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 // concept is what a fixture photo shows. The stand-in Worker sees only the
@@ -223,7 +224,7 @@ func (a api) call(ctx context.Context, member, method, path string, body io.Read
 	if err != nil {
 		return err
 	}
-	request.Header.Set(photosapi.SessionHeader, "seed-"+member)
+	request.Header.Set(serviceproxy.SessionHeader, "seed-"+member)
 	if contentType != "" {
 		request.Header.Set("Content-Type", contentType)
 	}

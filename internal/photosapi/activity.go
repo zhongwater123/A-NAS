@@ -12,8 +12,10 @@ import (
 )
 
 // ActivityPath lists the caller's own photo library events for the activity
-// log, which the Product Service merges with its own audit trails.
-const ActivityPath = PathPrefix + "/activity"
+// log, which the Product Service merges with its own audit trails. It lies
+// outside PathPrefix, which is all the Product Service forwards from
+// browsers: they read the merged log (#273).
+const ActivityPath = "/internal/photos/activity"
 
 type activityEvent struct {
 	ID           string    `json:"id"`

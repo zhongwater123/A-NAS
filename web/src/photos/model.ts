@@ -1,8 +1,8 @@
-import { calendarLabel, formatDate } from "../format/time";
-import { errorText } from "../errorMessages";
-import { APIError } from "../api";
+import { APIError } from "../api/client";
+import { errorText } from "../api/errorMessages";
+import { calendarLabel, formatDate } from "../lib/time";
+import type { PhotoAlbum, PhotoAsset, PhotoLabelCount, PhotoLibrary, PhotoPerson, PhotoTagCount } from "./api";
 import type { ImageQuery } from "./imageSearch";
-import type { PhotoAlbum, PhotoAsset, PhotoLabelCount, PhotoLibrary, PhotoPerson, PhotoTagCount } from "./photosApi";
 
 // A place is what the main area shows. AI 聚合 (a search with an empty query
 // is its start page), its clusters and the user tag groups cover the caller's and the shared

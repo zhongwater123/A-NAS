@@ -14,7 +14,7 @@ import (
 
 func TestOnlyAdministratorsChooseWhenTheLocalScreenSleeps(t *testing.T) {
 	ctx := context.Background()
-	f := newActivityFixture(t, func(*photos.Service) http.Handler { return nil })
+	f := newActivityFixture(t, func(*photos.Service, *accounts.Service) http.Handler { return nil })
 	sleepAfter := func(recorder *httptest.ResponseRecorder) int {
 		t.Helper()
 		var display struct {
