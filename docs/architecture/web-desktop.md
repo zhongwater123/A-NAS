@@ -15,7 +15,7 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 | `desktop/` | 桌面外壳：窗口注册表 `apps.tsx`、窗口状态、`AppWindow`、程序坞、系统快捷栏、状态栏、桌面图标、通知、壁纸与屏保；外壳读取的接口在 `desktop/api.ts`，样式在 `desktop.module.css`（登录页与开机画面也用它） |
 | 功能目录 | 每个应用窗口一个目录：`files`、`trash`、`settings`、`appcenter`、`docker`、`media`、`music`、`photos`、`backup`、`transfers`、`shares`、`assistant`；设置窗口的分区在 `settings/` 下（如 `settings/logs`、`settings/taskmanager`）；桌面上的 `feedback` |
 | 领域目录 | 不是窗口的领域：`auth`（登录与会话）、`people`（各账号的名字与头像）、`boot`（开机画面） |
-| `ui/` | 不认识任何功能的共享组件、钩子与样式：窗口内的对话框与提示（`feedback`）、文件查看器的外框（`viewer`）、备份中心与回收站共用的工作区部件（`workspace`）、存进 localStorage 的状态（`useStoredState`）。从功能移来的部件暂时保留原来的类名前缀 |
+| `ui/` | 不认识任何功能的共享组件、钩子与样式：窗口内的对话框与提示（`feedback`）、文件查看器的外框（`viewer`）、备份中心与回收站共用的工作区部件（`workspace`）、存进 localStorage 的状态（`useStoredState`）、按需加载组件（`lazyCode`）。从功能移来的部件暂时保留原来的类名前缀 |
 | `lib/` | 不依赖 React 与接口的函数：容量与时间格式化、文件名与类型、剪贴板、读取拖入的文件 |
 | `test/` | 测试基础设施：按领域的请求处理器、测试数据与渲染帮助函数 |
 | `assets/` | 静态图片 |
@@ -35,12 +35,16 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 ## 窗口
 
 - **注册：** 每个内置应用在 `desktop/apps.tsx` 中登记标题、图标、初始位置、启动器条目与窗口内容。
-- **懒加载：** 窗口组件一律用 `lazy()` 加载，首次打开时才下载代码与样式。图标随外壳一起加载，桌面与程序坞不必等窗口的代码。
-- **渲染：** 窗口几何与窗口内容分开。拖动与缩放时窗口自己跟随指针，松开后才告诉桌面；窗口内容是 `memo` 组件，桌面给它的上下文只在内容确实变化时才是新对象。所以拖动、缩放与切换焦点不会重新渲染其他窗口。
-- **打开与跳转：** 窗口之间只通过桌面的 `open(id, intent)` 通信，意图的类型在 `WindowIntentPayloads` 中，例如文件管理的某个文件夹、相册的某张照片。窗口按对象身份比较意图：每次请求都是新对象，所以再次请求同一个地方仍会生效。窗口处理完后调用 `onIntentHandled`，桌面随即清除这个意图。
+- **懒加载：** 窗口组件一律用 `ui/lazyCode.ts` 的 `lazyCode()` 加载，首次打开时才下载代码与样式。图标随外壳一起加载，桌面与程序坞不必等窗口的代码。外壳上只在用到时才出现的大部件也这样加载，例如分享的发送对话框。
+- **渲染：** 窗口几何与窗口内容分开。
+  - 拖动与缩放时，按下的标题栏或缩放角捕获指针（pointer capture），窗口自己跟随指针，松开后才告诉桌面；浏览器取消这次按压时窗口回到原处。
+  - 窗口内容是 `memo` 组件。桌面给它的上下文 `WindowContext` 只放很少变化的东西，所以拖动、缩放与切换焦点不会重新渲染其他窗口。
+  - 主机状态每次轮询都是新的。它与设置窗口的分区、待执行的存储计划一起放在 `SettingsStateContext` 中，只有设置窗口因它们重新渲染。
+- **打开与跳转：** 窗口之间只通过桌面的 `open(id, intent)` 通信，意图的类型在 `WindowIntentPayloads` 中，例如文件管理的某个文件夹、相册的某张照片。窗口按对象身份比较意图：每次请求都是新对象，所以再次请求同一个地方仍会生效。窗口处理完后把它处理的那个意图交给 `onIntentHandled(intent)`；桌面只在这个意图仍是最新的时才清除，所以晚到的旧请求不会抹掉新请求。被新请求取代的旧请求不交回。
 - **出错：** 错误边界来自 react-error-boundary。
   - 每个窗口有自己的边界，“重新打开”只重新挂载这一个窗口；
-  - 窗口之外的桌面部件（快捷栏、图标、状态栏、程序坞、通知与提示）各有边界，出错时只有它自己消失；
+  - 窗口的代码没有下载下来时（`lazyCode` 的 `CodeMissing`），窗口请用户重新载入页面：React 在页面存活期间一直记住这次失败，设备更新后页面引用的旧文件也已不存在；
+  - 窗口之外的桌面部件（快捷栏、图标、状态栏、程序坞、通知与提示）与开机画面各有边界，出错时只有它自己消失；
   - 根边界兜底；`createRoot` 的 `onUncaughtError` 处理连兜底页都显示不了的情况。
 
 ## 样式
@@ -70,7 +74,8 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 
 规则：
 
-- 样式只引用令牌；
+- 新写的样式只引用令牌；已有规则中的原始值，改到那条规则时换成令牌；
+- 危险色只写 `var(--color-danger)`（深色背景上写 `var(--color-danger-on-dark)`），不写它的色值；
 - 应用的调色板变量写在该应用的根元素上，取值与令牌相同时直接引用令牌（如 `--set-danger: var(--color-danger)`）；
 - 新增一个值之前，先看已有令牌能否满足。
 
@@ -110,10 +115,12 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 
 ## 包体积
 
-`npm run build`（`make web-build`）在构建后用 size-limit 检查首屏要下载的 JavaScript 与 CSS，即 `index.html` 引用的文件，按 Brotli 压缩后计算。上限写在 [`web/.size-limit.js`](../../web/.size-limit.js) 中，超过即构建失败。
+`npm run build`（`make web-build`）在构建后用 size-limit 检查首屏要下载的 JavaScript 与 CSS，按 Brotli 压缩后计算。上限写在 [`web/.size-limit.js`](../../web/.size-limit.js) 中，超过即构建失败。
 
+- 计入的文件从 Vite 的 manifest（`.vite/manifest.json`）读出：`index.html` 加载的块、它们导入的块、这些块的样式，以及响应校验函数的块。
+- 响应校验函数是单独的块，页面一开始就在第一个请求旁下载它，所以也计入：第一个请求（设置状态）就要校验。下载失败时，等它的响应失败，下一个响应重新下载。
 - 窗口的代码不计入：首次打开时才加载。
-- 响应校验函数是单独的块：页面一开始就并行加载它们，因为第一个请求（设置状态）就要校验。
+- 外壳一开始就显示的部件不导入窗口的样式模块，否则整个窗口的样式进入首屏；它们用自己的小模块，例如 `transfers/notices.module.css`、`shares/toasts.module.css`。
 - 只有每次访问都需要的内容才能让上限上调，并在 PR 中写明原因。
 
 ## 关联
