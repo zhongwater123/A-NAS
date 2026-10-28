@@ -33,3 +33,7 @@ Docker 列表不足以描述停止容器的保留端口；改为读取每个容�
 - [预留回归](../../internal/appstore/engine/preparation_test.go)：提交前无 Compose、身份核对、一次性令牌、超时与停止。
 - [代理协议回归](../../internal/appstore/agent/agent_test.go)：预留时账号可尚未创建，提交必须使用实际账号。
 - [容器代理升级顺序](../runbooks/install-container-agent.md#安装预留协议的升级顺序)
+
+## 审查补充
+
+停止容器的端口范围按区间保留；List 后消失的容器跳过。运行中和暂停的容器使用 List 的已分配端口，减少 Inspect。Docker 检查在任务锁外执行，任务代次变化后拒绝旧结果；准备提交与超时在同一锁下确定结果，已过截止时间的提交拒绝。

@@ -117,8 +117,9 @@ type Store struct {
 	// secretsMu serialises generating and storing app secrets.
 	secretsMu sync.Mutex
 
-	mu     sync.Mutex
-	active string
+	mu       sync.Mutex
+	active   string
+	jobEpoch uint64
 	// cancel ends the context of the active job; stopped refuses new jobs.
 	cancel       context.CancelCauseFunc
 	stopped      bool
@@ -263,12 +264,12 @@ func (s *Store) install(ctx context.Context, id, digest string, identity appstor
 		return appstore.Job{}, appstore.ErrPlanChanged
 	}
 	var leftovers bool
-	check := func() error {
+	check := func(previous *appstore.Job) error {
 		containers, err := s.docker.Containers(ctx)
 		if err != nil {
 			return fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
 		}
-		if err := conflicts(id, plan, containers, failedInstall(s.jobs[id])); err != nil {
+		if err := conflicts(id, plan, containers, failedInstall(previous)); err != nil {
 			return err
 		}
 		leftovers = slices.ContainsFunc(containers, func(container ContainerInfo) bool { return container.AppID == id })
@@ -543,9 +544,9 @@ func (s *Store) start(id string, action appstore.JobAction, timeout time.Duratio
 	return s.startChecked(id, action, timeout, nil, run)
 }
 
-// The conflict snapshot and admission share the job lock: another job cannot
-// complete between inspecting containers and reserving this install's slot.
-func (s *Store) startChecked(id string, action appstore.JobAction, timeout time.Duration, check func() error, run func(context.Context, io.Writer) error) (appstore.Job, error) {
+// Docker inspection runs outside the job lock. An intervening job invalidates
+// the snapshot even if it has already finished before inspection returns.
+func (s *Store) startChecked(id string, action appstore.JobAction, timeout time.Duration, check func(*appstore.Job) error, run func(context.Context, io.Writer) error) (appstore.Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopped {
@@ -555,7 +556,22 @@ func (s *Store) startChecked(id string, action appstore.JobAction, timeout time.
 		return appstore.Job{}, appstore.ErrBusy
 	}
 	if check != nil {
-		if err := check(); err != nil {
+		epoch := s.jobEpoch
+		var previous *appstore.Job
+		if existing := s.jobs[id]; existing != nil {
+			copied := copyJob(existing)
+			previous = &copied
+		}
+		s.mu.Unlock()
+		err := check(previous)
+		s.mu.Lock()
+		if s.stopped {
+			return appstore.Job{}, appstore.ErrUnavailable
+		}
+		if s.active != "" || s.jobEpoch != epoch {
+			return appstore.Job{}, appstore.ErrBusy
+		}
+		if err != nil {
 			return appstore.Job{}, err
 		}
 	}
@@ -565,6 +581,7 @@ func (s *Store) startChecked(id string, action appstore.JobAction, timeout time.
 	}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	s.active, s.cancel = id, cancel
+	s.jobEpoch++
 	s.jobs[id] = job
 
 	s.wait.Go(func() {
