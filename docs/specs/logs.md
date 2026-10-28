@@ -111,7 +111,7 @@
 
 - Go：[活动记录合并与游标](../../internal/activity/activity_test.go)、[账号与登录记录](../../internal/accounts/activity_test.go)、[文件记录的空间与隐藏](../../internal/files/activity_test.go)、[相册活动](../../internal/photosapi/handler_test.go)、[活动记录 API](../../internal/httpapi/activity_test.go)、[系统日志 API](../../internal/httpapi/systemlogs_test.go)、[服务白名单与日志行解析](../../internal/systemlog/systemlog_test.go)、[journal 读取](../../internal/systemlog/journal/journal_test.go)、[Host Agent 系统日志接口](../../internal/hoststate/agent/rootagent/logs_test.go)。
 - React：[日志分区测试](../../web/src/settings/logs/LogsSection.test.tsx)、[描述与合并](../../web/src/settings/logs/describe.test.ts)、[导出中的公式单元格](../../web/src/settings/logs/common.test.ts)，以及[桌面测试](../../web/src/App.test.tsx)中桌面不再有“日志”图标。
-- 系统测试：在 Debian 13 systemd 容器中以真实 Host Agent 单元读取产品服务日志，见[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)。
+- 系统测试：在 Debian 13 systemd 容器中以真实 Host Agent 单元读取产品服务日志，见[系统测试](../development/testing.md#系统测试)。
 - 本地门禁：`make check`。
 
 ## 关联

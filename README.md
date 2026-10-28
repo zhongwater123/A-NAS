@@ -36,7 +36,7 @@ A-NAS 是一套基于 Debian 的 AI 智能家庭 NAS。项目首先保证存储�
 
 ## 本地开发入口
 
-当前推荐环境是 Windows 主机加 WSL2 Ubuntu。项目有两台开发机，差异见[本地开发环境](docs/development/LOCAL_ENVIRONMENT.md)；以下是源码在 `E:\A-NAS`、使用专用 WSL 用户的那一台：
+当前推荐环境是 Windows 主机加 WSL2 Ubuntu。项目有两台 Windows 开发机和一台 macOS 开发机，配置与平台限制见[本地开发环境](docs/development/LOCAL_ENVIRONMENT.md)；以下是源码在 `E:\A-NAS`、使用专用 WSL 用户的那一台：
 
 ```bash
 wsl -d Ubuntu-24.04
@@ -56,7 +56,7 @@ wsl -d Ubuntu-24.04 -u root
 
 ## 开发与检查
 
-运行前端类型检查、lint、格式检查与测试、生产资源构建、文档检查、部署脚本检查、Go 检查（vet 与 golangci-lint）、Python lint 与 AI Worker 测试，并构建三个 Linux 命令（Ruff 需先安装，见[静态检查](docs/development/LOCAL_ENVIRONMENT.md#静态检查)）：
+运行前端类型检查、lint、格式检查与测试、生产资源构建、文档检查、部署脚本检查、Go 检查（vet 与 golangci-lint）、Python lint 与 AI Worker 测试，并构建三个 Linux 命令（Ruff 需先安装，见[静态检查](docs/development/testing.md#静态检查)）：
 
 ```bash
 make check
@@ -70,7 +70,7 @@ build/anas-host-agent
 build/anas-container-agent
 ```
 
-修改服务单元、安装器、Host Agent、文件代理或文件权限时，部署前还要运行在 systemd 下安装整套服务的[系统测试](docs/development/LOCAL_ENVIRONMENT.md#系统测试)：`make system-test`。
+修改服务单元、安装器、Host Agent、文件代理或文件权限时，部署前还要运行在 systemd 下安装整套服务的[系统测试](docs/development/testing.md#系统测试)：`make system-test`。
 
 Go 模块路径为 `github.com/zhongwater123/A-NAS`。架构语言决策记录在 [ADR 0001](docs/adr/0001-use-go-for-product-services.md)。
 

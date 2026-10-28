@@ -37,4 +37,4 @@ Experimental NAS 在 `v1.0.1-rc.3` 中成功创建管理员后，用户从“存
 - [实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [`internal/storage/service_test.go`](../../internal/storage/service_test.go)
 - [`web/src/App.test.tsx`](../../web/src/App.test.tsx)
-- [接口契约与外壳响应校验](../development/LOCAL_ENVIRONMENT.md#接口契约)
+- [接口契约与外壳响应校验](../development/api-contract.md#接口契约)
