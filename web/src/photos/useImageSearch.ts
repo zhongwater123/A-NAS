@@ -1,8 +1,8 @@
 import { type DragEvent, type RefObject, useEffect, useRef } from "react";
 
+import { carriesFiles } from "../lib/pickedFiles";
 import { type ImageDropProps, type ImageQuery, imageFile, pickImage, prepareImageQuery } from "./imageSearch";
 import { type Caller, type Place, placeViewing } from "./model";
-import { carriesFiles } from "./usePanelInput";
 
 interface Options {
   caller: Caller;
@@ -48,7 +48,7 @@ export function useImageSearch({ caller, placeRef, setPlace, setImageOver, endDr
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setImageOver("");
     },
     onDrop: (event) => {
-      if (!carriesFiles(event)) return;
+      if (!carriesFiles(event.dataTransfer)) return;
       event.preventDefault();
       event.stopPropagation();
       endDrag();
@@ -65,7 +65,7 @@ export function useImageSearch({ caller, placeRef, setPlace, setImageOver, endDr
   };
   // imageDragOver marks the search box a file is over by its name.
   const imageDragOver = (name: string) => (event: DragEvent) => {
-    if (!carriesFiles(event)) return;
+    if (!carriesFiles(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = "copy";

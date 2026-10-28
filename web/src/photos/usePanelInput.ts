@@ -1,12 +1,11 @@
 import { type DragEvent, type KeyboardEvent, type RefObject, useRef, useState } from "react";
 
+import { carriesFiles } from "../lib/pickedFiles";
 import type { useDialogs } from "../ui/feedback";
 import type { PhotoAlbum, PhotoAsset } from "./api";
 import type { Place } from "./model";
 import type { useSelection } from "./selection";
 import type { UploadTarget, useUploads } from "./uploads";
-
-export const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes("Files");
 
 interface Options {
   viewer?: { id: string; origin?: DOMRect };
@@ -69,22 +68,22 @@ export function usePanelInput({
   };
   const dropHandlers = {
     onDragEnter: (event: DragEvent) => {
-      if (carriesFiles(event)) {
+      if (carriesFiles(event.dataTransfer)) {
         dragDepth.current++;
         setDragging(true);
       }
     },
     onDragLeave: (event: DragEvent) => {
-      if (carriesFiles(event) && --dragDepth.current <= 0) endDrag();
+      if (carriesFiles(event.dataTransfer) && --dragDepth.current <= 0) endDrag();
     },
     onDragOver: (event: DragEvent) => {
-      if (!carriesFiles(event)) return;
+      if (!carriesFiles(event.dataTransfer)) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = uploadTarget ? "copy" : "none";
       setImageOver("");
     },
     onDrop: (event: DragEvent) => {
-      if (!carriesFiles(event)) return;
+      if (!carriesFiles(event.dataTransfer)) return;
       event.preventDefault();
       endDrag();
       if (uploadTarget) uploads.add(Array.from(event.dataTransfer.files), uploadTarget);

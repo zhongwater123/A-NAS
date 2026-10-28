@@ -56,8 +56,8 @@ export function Notice({ tone = "warning", children }: { tone?: "warning" | "dan
   );
 }
 
-// Dialog is a modal sheet over the backup center. Escape and the close button
-// call onClose unless the dialog is busy.
+// Dialog is a modal sheet over the backup center or the trash. Escape and the
+// close button call onClose unless the dialog is busy.
 export function Dialog({
   title,
   icon,
@@ -87,15 +87,6 @@ export function Dialog({
       panel.current?.querySelector<HTMLElement>(`footer .${workspaceStyles.bkSecondary}`);
     target?.focus();
   }, []);
-  useEffect(() => {
-    // Only the topmost of stacked dialogs answers Escape.
-    const onKey = (event: KeyboardEvent) => {
-      const dialogs = document.querySelectorAll(`.${workspaceStyles.bkDialog}`);
-      if (event.key === "Escape" && !busy && dialogs[dialogs.length - 1] === panel.current) onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [busy, onClose]);
   return (
     <div
       className={workspaceStyles.bkBackdrop}
@@ -103,12 +94,22 @@ export function Dialog({
         if (event.target === event.currentTarget && !busy) onClose();
       }}
     >
+      {/* Escape closes the dialog the focus is in, and only that one: a
+          dialog stacked inside another stops it there, and a dialog in
+          another window never hears it. A click inside keeps the focus here. */}
+      {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div
         ref={panel}
         className={`${workspaceStyles.bkDialog}${wide ? ` ${workspaceStyles.wide}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={label ?? title}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") return;
+          event.stopPropagation();
+          if (!busy) onClose();
+        }}
       >
         <header>
           <span className={`${workspaceStyles.bkDialogIcon} ${workspaceStyles[tone] ?? ""}`} aria-hidden="true">
