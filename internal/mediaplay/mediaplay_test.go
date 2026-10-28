@@ -28,6 +28,8 @@ func TestBrowsersPlayVideosTheCheapestWayTheyCan(t *testing.T) {
 	const mp4, mkv = "mov,mp4,m4a,3gp,3g2,mj2", "matroska,webm"
 	aac := []mediaplay.Audio{{Codec: "aac", Default: true}}
 	ac3First := []mediaplay.Audio{{Codec: "ac3", Default: true}, {Codec: "aac"}}
+	aacSecond := []mediaplay.Audio{{Codec: "aac"}, {Codec: "aac", Default: true}}
+	second := 1
 	h264 := &mediaplay.Video{Codec: "h264", PixelFormat: "yuv420p", Height: 1080}
 	iphone := mediaplay.Source{Container: mp4, Video: &mediaplay.Video{Codec: "hevc", PixelFormat: "yuv420p10le", Height: 2160}, Audio: aac}
 	android := mediaplay.Source{Container: mp4, Video: h264, Audio: aac}
@@ -48,7 +50,8 @@ func TestBrowsersPlayVideosTheCheapestWayTheyCan(t *testing.T) {
 		check  func(mediaworker.StreamRequest) bool
 	}{
 		{name: "HEVC where the browser decodes it", source: iphone, caps: mediaplay.Caps{HEVC: true}, mode: mediaplay.Direct},
-		{name: "HEVC where it does not", source: iphone, mode: mediaplay.Transcode, why: mediaplay.Picture, mime: `video/mp4; codecs="avc1.640033,mp4a.40.2"`,
+		{name: "HEVC where it does not", source: iphone, choice: mediaplay.Choice{Ceiling: tenEighty}, mode: mediaplay.Transcode, why: mediaplay.Picture,
+			mime: `video/mp4; codecs="avc1.640033,mp4a.40.2"`,
 			check: func(r mediaworker.StreamRequest) bool {
 				return !r.CopyVideo && r.Height == 1080 && r.MaxBitrate == 8000 && r.CopyAudio
 			}},
@@ -68,11 +71,16 @@ func TestBrowsersPlayVideosTheCheapestWayTheyCan(t *testing.T) {
 		{name: "a default AC-3 track", source: mediaplay.Source{Container: mkv, Video: h264, Audio: ac3First}, caps: mediaplay.Caps{Matroska: true},
 			mode: mediaplay.Remux, why: mediaplay.Sound, check: func(r mediaworker.StreamRequest) bool { return r.AudioTrack == 0 && !r.CopyAudio }},
 		{name: "the second audio track", source: mediaplay.Source{Container: mp4, Video: h264, Audio: ac3First}, caps: mediaplay.Caps{AC3: true},
-			choice: mediaplay.Choice{AudioTrack: 1}, mode: mediaplay.Remux, why: mediaplay.OtherTrack,
+			choice: mediaplay.Choice{AudioTrack: &second}, mode: mediaplay.Remux, why: mediaplay.OtherTrack,
 			check: func(r mediaworker.StreamRequest) bool { return r.AudioTrack == 1 && r.CopyAudio }},
-		{name: "a lower quality", source: android, choice: mediaplay.Choice{AudioTrack: mediaplay.DefaultAudio, Lower: sevenTwenty}, mode: mediaplay.Transcode,
+		{name: "a default second audio track", source: mediaplay.Source{Container: mp4, Video: h264, Audio: aacSecond}, mode: mediaplay.Direct,
+			check: func(r mediaworker.StreamRequest) bool { return r.AudioTrack == 1 }},
+		{name: "an audio stream FFmpeg could not name", source: mediaplay.Source{Container: mkv, Video: h264, Audio: []mediaplay.Audio{{Default: true}}},
+			caps: mediaplay.Caps{Matroska: true}, mode: mediaplay.Remux, why: mediaplay.Sound,
+			check: func(r mediaworker.StreamRequest) bool { return r.AudioTrack == 0 && !r.CopyAudio }},
+		{name: "a lower quality", source: android, choice: mediaplay.Choice{Lower: sevenTwenty}, mode: mediaplay.Transcode,
 			why: mediaplay.Lowered, check: func(r mediaworker.StreamRequest) bool { return r.Height == 720 && r.MaxBitrate == 4000 }},
-		{name: "a quality the source does not exceed", source: android, choice: mediaplay.Choice{AudioTrack: mediaplay.DefaultAudio, Lower: tenEighty},
+		{name: "a quality the source does not exceed", source: android, choice: mediaplay.Choice{Lower: tenEighty},
 			mode: mediaplay.Direct},
 		{name: "10-bit H.264", source: mediaplay.Source{Container: mp4, Video: &mediaplay.Video{Codec: "h264", PixelFormat: "yuv420p10le"}, Audio: aac},
 			mode: mediaplay.Transcode, why: mediaplay.Picture},
@@ -80,17 +88,13 @@ func TestBrowsersPlayVideosTheCheapestWayTheyCan(t *testing.T) {
 		{name: "3GPP with HEVC", source: mediaplay.Source{Container: mp4, ThreeGPP: true, Video: &mediaplay.Video{Codec: "hevc"}, Audio: aac},
 			caps: mediaplay.Caps{HEVC: true}, mode: mediaplay.Remux, why: mediaplay.Container},
 		{name: "a failed original", source: film, caps: mediaplay.Caps{Matroska: true},
-			choice: mediaplay.Choice{AudioTrack: mediaplay.DefaultAudio, Ceiling: tenEighty, Transcode: true}, mode: mediaplay.Transcode, why: mediaplay.Failed,
+			choice: mediaplay.Choice{Ceiling: tenEighty, Transcode: true}, mode: mediaplay.Transcode, why: mediaplay.Failed,
 			check: func(r mediaworker.StreamRequest) bool { return !r.CopyVideo && r.CopyAudio && r.Height == 1080 }},
-		{name: "a conversion without a ceiling", source: iphone, choice: mediaplay.Choice{AudioTrack: mediaplay.DefaultAudio}, mode: mediaplay.Transcode,
+		{name: "a conversion without a ceiling", source: iphone, mode: mediaplay.Transcode,
 			why: mediaplay.Picture, check: func(r mediaworker.StreamRequest) bool { return r.Height == 0 && r.MaxBitrate == 0 }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			choice := test.choice
-			if choice == (mediaplay.Choice{}) {
-				choice = mediaplay.Choice{AudioTrack: mediaplay.DefaultAudio, Ceiling: tenEighty}
-			}
-			decision := mediaplay.Decide(test.source, test.caps, choice)
+			decision := mediaplay.Decide(test.source, test.caps, test.choice)
 			if decision.Mode != test.mode || decision.Why != test.why {
 				t.Fatalf("Decide() = %s for %d, want %s for %d", decision.Mode, decision.Why, test.mode, test.why)
 			}
@@ -108,12 +112,12 @@ func TestBrowsersPlayVideosTheCheapestWayTheyCan(t *testing.T) {
 
 func TestAStreamOfAPlayableVideoIsAFullConversion(t *testing.T) {
 	source := mediaplay.Source{Container: "mov,mp4", Video: &mediaplay.Video{Codec: "h264"}, Audio: []mediaplay.Audio{{Codec: "aac"}}}
-	decision := mediaplay.Converting(source, mediaplay.Caps{}, mediaplay.Choice{AudioTrack: mediaplay.DefaultAudio, Ceiling: mediaplay.Qualities[0]})
+	decision := mediaplay.Converting(source, mediaplay.Caps{}, mediaplay.Choice{Ceiling: mediaplay.Qualities()[0]})
 	if decision.Mode != mediaplay.Transcode || decision.Why != mediaplay.Failed || decision.Stream.CopyVideo || decision.Stream.Height != 1080 {
 		t.Fatalf("Converting() = %+v", decision)
 	}
 	remux := mediaplay.Source{Container: "avi", Video: &mediaplay.Video{Codec: "h264"}}
-	if decision := mediaplay.Converting(remux, mediaplay.Caps{}, mediaplay.Choice{AudioTrack: mediaplay.DefaultAudio}); decision.Mode != mediaplay.Remux {
+	if decision := mediaplay.Converting(remux, mediaplay.Caps{}, mediaplay.Choice{}); decision.Mode != mediaplay.Remux {
 		t.Fatalf("Converting() of an AVI = %+v, want a remux", decision)
 	}
 }
@@ -153,28 +157,47 @@ func TestStreamsStartWithinTheVideo(t *testing.T) {
 }
 
 func TestConversionsWaitBrieflyForAFreeSlot(t *testing.T) {
-	slots := mediaplay.NewSlots(2, 50*time.Millisecond)
 	ctx := context.Background()
-	first, err := slots.Take(ctx)
-	if err != nil {
-		t.Fatal(err)
+	full := func(wait time.Duration) (*mediaplay.Slots, func()) {
+		t.Helper()
+		slots := mediaplay.NewSlots(2, wait)
+		first, err := slots.Take(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := slots.Take(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return slots, first
 	}
-	if _, err := slots.Take(ctx); err != nil {
-		t.Fatal(err)
-	}
+
+	busy, _ := full(50 * time.Millisecond)
 	began := time.Now()
-	if _, err := slots.Take(ctx); !errors.Is(err, mediaplay.ErrBusy) {
+	if _, err := busy.Take(ctx); !errors.Is(err, mediaplay.ErrBusy) {
 		t.Fatalf("a third conversion: %v, want ErrBusy", err)
 	}
 	if waited := time.Since(began); waited < 40*time.Millisecond {
 		t.Fatalf("a full device answered busy after %v, without waiting", waited)
 	}
-	// A seek's stream gets the slot of the stream it replaces as it closes.
+
+	// A seek's stream gets the slot of the stream it replaces as it closes,
+	// however late the closing stream is scheduled within the wait.
+	seeking, first := full(time.Minute)
 	go func() { time.Sleep(5 * time.Millisecond); first(); first() }()
-	if _, err := slots.Take(ctx); err != nil {
+	if _, err := seeking.Take(ctx); err != nil {
 		t.Fatalf("a seek replacing a stream did not get its slot: %v", err)
 	}
-	if _, err := slots.Take(ctx); !errors.Is(err, mediaplay.ErrBusy) {
+	waiting, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := seeking.Take(waiting); !errors.Is(err, context.Canceled) {
 		t.Fatalf("releasing twice freed two slots: %v", err)
+	}
+}
+
+func TestTheQualityListIsNotTheCallersToChange(t *testing.T) {
+	list := mediaplay.Qualities()
+	list[0].Height = 1
+	if best := mediaplay.Qualities()[0]; best.Height != 1080 {
+		t.Fatalf("the best quality became %+v after a caller changed its copy", best)
 	}
 }

@@ -21,14 +21,18 @@ func AssetRuleForms(ctx context.Context, s *Service, p Principal) (listed, opene
 	return listed, opened, nil
 }
 
-// RecheckHits returns which of assetIDs the page of ranked hits still shows p,
-// as if an index had found them all.
-func RecheckHits(ctx context.Context, s *Service, p Principal, assetIDs ...string) ([]string, error) {
+// RecheckHits returns which of assetIDs the page of ranked hits over the
+// libraries of scope still shows p, as if an index had found them all.
+func RecheckHits(ctx context.Context, s *Service, p Principal, scope []string, assetIDs ...string) ([]string, error) {
 	hits := make([]searchHit, len(assetIDs))
 	for i, id := range assetIDs {
 		hits[i] = searchHit{id: id, score: float64(len(assetIDs) - i)}
 	}
-	assets, _, err := s.hitPage(ctx, p, hits, nil, len(hits))
+	libraries := make([]any, len(scope))
+	for i, id := range scope {
+		libraries[i] = id
+	}
+	assets, _, err := s.hitPage(ctx, p, libraries, hits, nil, len(hits))
 	if err != nil {
 		return nil, err
 	}
@@ -52,4 +56,12 @@ func SearchCandidates(ctx context.Context, s *Service, p Principal, scope ...str
 		ids[i] = c.id
 	}
 	return ids, err
+}
+
+// ForgetVectors drops the in-process vector cache, so that the next read
+// loads what the Catalog holds.
+func ForgetVectors(s *Service) {
+	s.index.mu.Lock()
+	defer s.index.mu.Unlock()
+	s.index.model, s.index.vectors = "", nil
 }

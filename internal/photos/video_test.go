@@ -389,6 +389,8 @@ SELECT (SELECT object_id FROM assets WHERE id = ?), derivation, model, vector, c
 WHERE object_id = (SELECT object_id FROM assets WHERE id = ?)`, video.ID, photo.ID); err != nil {
 		t.Fatal(err)
 	}
+	// The cache may be warm already; the next read must see the new vector.
+	photos.ForgetVectors(s)
 	assistant := photos.Principal{UserID: namedAlice.UserID, Username: "alice", Assistant: true}
 	for _, p := range []photos.Principal{namedAlice, assistant} {
 		if got := cluster(t, s, p, "red"); slices.Contains(got, "red.mp4") || len(got) != 2 {
@@ -412,7 +414,7 @@ WHERE object_id = (SELECT object_id FROM assets WHERE id = ?)`, video.ID, photo.
 			t.Fatalf("%+v search candidates = %v, %v", p, considered, err)
 		}
 		// Whatever an index returns, the page shows only what p may list.
-		shown, err := photos.RecheckHits(ctx, s, p, video.ID, photo.ID)
+		shown, err := photos.RecheckHits(ctx, s, p, []string{private.ID}, video.ID, photo.ID)
 		if want := map[bool]int{false: 2, true: 1}[p.Assistant]; err != nil || len(shown) != want || slices.Contains(shown, video.ID) == p.Assistant {
 			t.Fatalf("%+v recheck of the video and a photo = %v, %v", p, shown, err)
 		}

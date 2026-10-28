@@ -91,7 +91,7 @@ func (s *Service) Similar(ctx context.Context, p Principal, assetID string, requ
 	if err = errors.Join(err, vectorErr); err != nil {
 		return SimilarPage{}, err
 	}
-	page.Assets, page.Next, err = s.hitPage(ctx, p, hits, after, request.Limit)
+	page.Assets, page.Next, err = s.hitPage(ctx, p, scope, hits, after, request.Limit)
 	if err != nil {
 		return SimilarPage{}, err
 	}
@@ -108,7 +108,7 @@ func likeHits(candidates []candidate, vectors map[string][]float32, found map[st
 	var hits []searchHit
 	for _, c := range candidates {
 		other, ok := vectors[c.objectID]
-		if !ok || c.video || c.objectID == exclude {
+		if !ok || !c.inLocalAI() || c.objectID == exclude {
 			continue
 		}
 		score := dot(vector, other) + similarObjectWeight*objectOverlap(objects, found[c.objectID])

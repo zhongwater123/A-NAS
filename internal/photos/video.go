@@ -68,10 +68,16 @@ type videoFacts struct {
 }
 
 // notVideo is the SQL condition that the content object objectID names is
-// not a video original; only such objects take part in local AI.
+// not a video original.
 func notVideo(objectID string) string {
 	return "NOT EXISTS (SELECT 1 FROM videos vo WHERE vo.object_id = " + objectID + ")"
 }
+
+// inLocalAI is the SQL condition that the content object objectID takes part
+// in local AI: photos do, videos never. Every AI queue, index, cluster and
+// ranking applies it, or candidate.inLocalAI on a candidate already read,
+// rather than a video check of its own.
+func inLocalAI(objectID string) string { return notVideo(objectID) }
 
 // readVideo asks the Media Worker what a staged video original holds and
 // accepts it only with a readable video stream of a known container.
@@ -259,7 +265,7 @@ func (info videoInfo) playSource(mediaType string) mediaplay.Source {
 // defaultPlay is what a viewer of photos chooses: the photo viewer offers no
 // quality or audio track of its own, and a conversion is at most 1080p
 // (docs/specs/photo-video.md).
-var defaultPlay = mediaplay.Choice{AudioTrack: mediaplay.DefaultAudio, Ceiling: mediaplay.Qualities[0]}
+var defaultPlay = mediaplay.Choice{Ceiling: mediaplay.Qualities()[0]}
 
 // playableVideo returns a video asset p may play. An assistant plays none.
 func (s *Service) playableVideo(ctx context.Context, p Principal, assetID string) (assetRecord, error) {

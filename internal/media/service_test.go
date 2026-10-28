@@ -533,6 +533,8 @@ func TestPlaybackExplainsWhyTheOriginalDoesNotPlay(t *testing.T) {
 		{MediaInfo{Container: "avi", Video: &VideoStream{Codec: "mpeg4", Height: 480}}, "a.avi", Capabilities{}, -1, QualityOriginal, ModeTranscode, "浏览器无法解码此视频，正在实时转码"},
 		{MediaInfo{Container: mp4, Video: h264, Audio: aac}, "a.mp4", Capabilities{}, -1, "720p", ModeTranscode, "已切换到 720p"},
 		{MediaInfo{Container: mp4, Video: &VideoStream{Codec: "hevc"}, Audio: aac}, "clip.3GP", Capabilities{HEVC: true}, -1, QualityOriginal, ModeRemux, "浏览器不支持此封装格式，正在转换封装"},
+		{MediaInfo{Container: mp4, Video: &VideoStream{Codec: "hevc"}, Audio: aac}, "clip.3g2", Capabilities{HEVC: true}, -1, QualityOriginal, ModeRemux, "浏览器不支持此封装格式，正在转换封装"},
+		{MediaInfo{Container: mkv, Video: h264, Audio: []AudioStream{{Default: true}}}, "a.mkv", Capabilities{Matroska: true}, -1, QualityOriginal, ModeRemux, "浏览器无法播放此音频，正在转换音频"},
 	}
 	for _, test := range cases {
 		source, choice := playSource(test.info, test.file), playChoice(test.audio, test.quality)
@@ -893,6 +895,34 @@ func TestRenamingAVideoRenamesItsFilesAndKeepsItsProgress(t *testing.T) {
 	}
 	if _, err := env.media.RenameVideo(env.ctx, env.alice, mine.Items[0].ID, "Up.mkv"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Alice renamed the owner's private film: %v", err)
+	}
+}
+
+// A stream asked for after the original failed to play converts the picture
+// fully, keeping the original's size up to 2160 lines, and copies the sound
+// the browser plays.
+func TestAFailedOriginalStreamsAsAFullConversion(t *testing.T) {
+	processor := &fakeProcessor{}
+	env := newTestEnv(t, processor)
+	env.write(t, env.shared, "电影/Heat (1995).mp4", video("mov,mp4,m4a,3gp,3g2,mj2", "h264", "aac", 1080, 10200))
+	env.library(t, env.admin, env.shared, LibraryMovies, "电影")
+	env.media.processPending(withSessions(t, env))
+	movies, _ := env.media.Titles(env.ctx, env.bob, TitleQuery{Category: "movie"})
+	if movies.Total != 1 {
+		t.Fatalf("movies = %+v", movies)
+	}
+	id := movies.Items[0].ID
+	if playback, err := env.media.Playback(env.ctx, env.bob, id, Capabilities{}, -1, ""); err != nil || playback.Mode != ModeDirect {
+		t.Fatalf("Playback() = %+v, %v; want the original", playback, err)
+	}
+	stream, err := env.media.Stream(env.ctx, env.bob, id, StreamRequest{Mode: ModeTranscode, Start: 30, Audio: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = stream.Close()
+	if options := processor.streams[0]; options.CopyVideo || !options.CopyAudio || options.AudioTrack != 0 ||
+		options.Height != 2160 || options.MaxBitrate != 0 || options.Start != 30 {
+		t.Fatalf("stream options = %+v; want a full conversion of the picture with the sound copied", options)
 	}
 }
 

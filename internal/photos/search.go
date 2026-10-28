@@ -114,6 +114,9 @@ type candidate struct {
 	video                                     bool
 }
 
+// inLocalAI is the rule of inLocalAI(objectID) on a candidate already read.
+func (c candidate) inLocalAI() bool { return !c.video }
+
 // Search returns photos matching the query by name or meaning. Trashed photos
 // are never included.
 func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest) (SearchPage, error) {
@@ -175,7 +178,7 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 		}
 		s.shadowSearch(shadow)
 	}
-	page.Assets, page.Next, err = s.hitPage(ctx, p, hits, after, request.Limit)
+	page.Assets, page.Next, err = s.hitPage(ctx, p, args, hits, after, request.Limit)
 	if err != nil {
 		return SearchPage{}, err
 	}
@@ -207,9 +210,9 @@ GROUP BY a.id`, scope...)
 
 // hitPage returns the page of ranked hits after the cursor and the cursor of
 // the next page, with duplicate hints. Index hits grant nothing: a photo
-// trashed since the candidates were read, or one the asset rules hide from
-// p, drops out.
-func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, after *searchHit, limit int) ([]Asset, string, error) {
+// outside the libraries of scope, trashed since the candidates were read, or
+// hidden from p by the asset rules drops out.
+func (s *Service) hitPage(ctx context.Context, p Principal, scope []any, hits []searchHit, after *searchHit, limit int) ([]Asset, string, error) {
 	if after != nil {
 		start, _ := slices.BinarySearchFunc(hits, *after, compareHits)
 		if start < len(hits) && hits[start] == *after {
@@ -233,7 +236,8 @@ func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, af
 		ids[i] = hit.id
 	}
 	records, err := s.queryAssets(ctx, s.db,
-		"WHERE "+listedAssets(p, "a")+" AND a.id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")", ids...)
+		"WHERE "+listedAssets(p, "a")+" AND a.library_id IN ("+placeholders(len(scope))+") AND a.id IN ("+placeholders(len(ids))+")",
+		append(slices.Clone(scope), ids...)...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -275,7 +279,7 @@ func (s *Service) queryHits(ctx context.Context, query string, queryVector []flo
 		}
 		vectorErr = s.index.read(ctx, s, model, func(vectors map[string][]float32) {
 			for _, c := range candidates {
-				if c.video {
+				if !c.inLocalAI() {
 					if strings.Contains(strings.ToLower(c.name), folded) || tagMatches(c.tags, folded) {
 						named = append(named, searchHit{c.id, nameBand})
 					}

@@ -386,7 +386,7 @@ func (s *Service) TimelineInMonth(ctx context.Context, p Principal, libraryID, m
 func (s *Service) newestFirst(ctx context.Context, p Principal, condition string, args []any, cursor string, limit int) (Page, error) {
 	limit = pageSize(limit)
 	const sortKey = "IFNULL(a.taken_at, a.imported_at)"
-	where := "WHERE " + listedAssets(p, "a") + " AND " + condition
+	where := "WHERE " + listedAssets(p, "a") + " AND (" + condition + ")"
 	if cursor != "" {
 		at, id, err := decodeCursor(cursor)
 		if err != nil {

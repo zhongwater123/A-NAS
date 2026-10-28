@@ -31,6 +31,9 @@ type aiRunner struct {
 	// model, detector, faces and animals are the Worker's models whose stale
 	// results have already been queued again; empty until a round asks.
 	model, detector, faces, animals string
+	// generation counts the times they were forgotten, so that a requeue
+	// running meanwhile does not record them again.
+	generation int
 	// detectorLoaded is whether the Worker may still hold the detector.
 	detectorLoaded bool
 	// scanned counts face and pet scans stored since people last clustered.
@@ -497,22 +500,25 @@ func (r *aiRunner) markDetectorLoaded() {
 
 // requeueStale queues every vector and detection of another model again the
 // first time a model is seen. The old results stay until their replacements
-// exist.
+// exist. The queueing reads every result, so it runs outside the runner's
+// lock, which searches and the AI status take too; the models are recorded
+// afterwards unless something forgot them meanwhile, and then the next round
+// asks again. Queueing twice is harmless: a job already queued stays.
 func (r *aiRunner) requeueStale(ctx context.Context, info EmbedderInfo) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	model, detector, faces, animals, generation := r.model, r.detector, r.faces, r.animals, r.generation
+	r.mu.Unlock()
 	lib := r.lib
 	now := formatTime(lib.now())
-	if r.model != info.Model {
+	if model != info.Model {
 		if _, err := lib.db.ExecContext(ctx, `
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT object_id, derivation, 'pending', ?, ? FROM embeddings WHERE derivation = ? AND model <> ?
 ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, embeddingDerivation, info.Model); err != nil {
 			return err
 		}
-		r.model = info.Model
 	}
-	if info.Detector != "" && r.detector != info.Detector {
+	if info.Detector != "" && detector != info.Detector {
 		if _, err := lib.db.ExecContext(ctx, `
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT object_id, derivation, 'pending', ?, ? FROM detections WHERE derivation = ? AND model <> ?
@@ -520,8 +526,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, detectionDerivation, i
 			return err
 		}
 	}
-	r.detector = info.Detector
-	if info.Faces != "" && r.faces != info.Faces {
+	if info.Faces != "" && faces != info.Faces {
 		if _, err := lib.db.ExecContext(ctx, `
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT sc.object_id, sc.derivation, 'pending', ?, ? FROM scans sc
@@ -530,8 +535,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, facesDerivation, info.
 			return err
 		}
 	}
-	r.faces = info.Faces
-	if info.Animals != "" && r.animals != info.Animals {
+	if info.Animals != "" && animals != info.Animals {
 		if _, err := lib.db.ExecContext(ctx, `
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT sc.object_id, sc.derivation, 'pending', ?, ? FROM scans sc
@@ -543,7 +547,11 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 			return err
 		}
 	}
-	r.animals = info.Animals
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.generation == generation {
+		r.model, r.detector, r.faces, r.animals = info.Model, info.Detector, info.Faces, info.Animals
+	}
 	return nil
 }
 
@@ -552,6 +560,7 @@ func (r *aiRunner) forgetModels() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.model, r.detector, r.faces, r.animals = "", "", "", ""
+	r.generation++
 }
 
 // knownModel is the Worker's model the runner last worked for, or "" before
@@ -577,6 +586,7 @@ func (r *aiRunner) noticeModel(model string) {
 	changed := r.model != "" && r.model != model
 	if changed {
 		r.model = ""
+		r.generation++
 	}
 	r.mu.Unlock()
 	if changed {

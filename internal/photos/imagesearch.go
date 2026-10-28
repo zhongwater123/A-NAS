@@ -139,7 +139,7 @@ func (s *Service) ImageSearchResults(ctx context.Context, p Principal, searchID 
 	if err = errors.Join(err, vectorErr); err != nil {
 		return Page{}, err
 	}
-	assets, next, err := s.hitPage(ctx, p, hits, after, request.Limit)
+	assets, next, err := s.hitPage(ctx, p, scope, hits, after, request.Limit)
 	if err != nil {
 		return Page{}, err
 	}

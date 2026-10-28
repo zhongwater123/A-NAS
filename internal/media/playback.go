@@ -29,7 +29,8 @@ const (
 // center does as the photo library does (internal/mediaplay): by what FFmpeg
 // read and by the file's name.
 func playSource(info MediaInfo, fileName string) mediaplay.Source {
-	source := mediaplay.Source{Container: info.Container, ThreeGPP: strings.EqualFold(path.Ext(fileName), ".3gp")}
+	extension := strings.ToLower(path.Ext(fileName))
+	source := mediaplay.Source{Container: info.Container, ThreeGPP: extension == ".3gp" || extension == ".3g2"}
 	if info.Video != nil {
 		source.Video = &mediaplay.Video{Codec: info.Video.Codec, PixelFormat: info.Video.PixelFormat, Height: info.Video.Height}
 	}
@@ -43,7 +44,11 @@ func playSource(info MediaInfo, fileName string) mediaplay.Source {
 // default, and quality, by name.
 func playChoice(audio int, quality string) mediaplay.Choice {
 	lower, _ := mediaplay.QualityNamed(quality)
-	return mediaplay.Choice{AudioTrack: audio, Lower: lower, Ceiling: originalCeiling}
+	choice := mediaplay.Choice{Lower: lower, Ceiling: originalCeiling}
+	if audio >= 0 {
+		choice.AudioTrack = &audio
+	}
+	return choice
 }
 
 // originalCeiling limits converting the original: it keeps its size up to
@@ -56,7 +61,10 @@ func reason(decision mediaplay.Decision, source mediaplay.Source, choice mediapl
 	case mediaplay.Container:
 		return "浏览器不支持此封装格式，正在转换封装"
 	case mediaplay.Sound:
-		return "浏览器无法播放 " + codecLabel(source.Audio[decision.Stream.AudioTrack].Codec) + " 音频，正在转换音频"
+		if label := codecLabel(source.Audio[decision.Stream.AudioTrack].Codec); label != "" {
+			return "浏览器无法播放 " + label + " 音频，正在转换音频"
+		}
+		return "浏览器无法播放此音频，正在转换音频"
 	case mediaplay.OtherTrack:
 		return "切换音轨需要转换封装"
 	case mediaplay.Picture:
@@ -69,7 +77,7 @@ func reason(decision mediaplay.Decision, source mediaplay.Source, choice mediapl
 
 func availableQualities(info MediaInfo) []string {
 	names := []string{QualityOriginal}
-	for _, candidate := range mediaplay.Qualities {
+	for _, candidate := range mediaplay.Qualities() {
 		if info.Video == nil || info.Video.Height == 0 || info.Video.Height > candidate.Height {
 			names = append(names, candidate.Name)
 		}

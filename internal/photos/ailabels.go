@@ -255,9 +255,11 @@ func (s *Service) LabelPhotos(ctx context.Context, p Principal, label, viewing, 
 	for i, hit := range hits {
 		ids[i], position[hit.id] = hit.id, i
 	}
-	// A photo trashed since the candidates were read drops out here.
+	// A photo trashed since the candidates were read drops out here, and so
+	// would one outside the scope or hidden from p.
 	records, err := s.queryAssets(ctx, s.db,
-		"WHERE "+listedAssets(p, "a")+" AND a.id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")", ids...)
+		"WHERE "+listedAssets(p, "a")+" AND a.library_id IN ("+placeholders(len(scope))+") AND a.id IN ("+placeholders(len(ids))+")",
+		append(slices.Clone(scope), ids...)...)
 	if err != nil {
 		return Page{}, err
 	}
@@ -277,7 +279,7 @@ func (s *Service) LabelPhotos(ctx context.Context, p Principal, label, viewing, 
 // part in AI, so none is a candidate even with a vector.
 func (s *Service) clusterCandidates(ctx context.Context, p Principal, scope []any, label string) ([]candidate, map[string]bool, error) {
 	in := "(" + strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",") + ")"
-	rows, err := s.db.QueryContext(ctx, "SELECT id, object_id FROM assets WHERE "+listedAssets(p, "assets")+" AND "+notVideo("assets.object_id")+
+	rows, err := s.db.QueryContext(ctx, "SELECT id, object_id FROM assets WHERE "+listedAssets(p, "assets")+" AND "+inLocalAI("assets.object_id")+
 		" AND library_id IN "+in+" ORDER BY id", scope...)
 	if err != nil {
 		return nil, nil, err

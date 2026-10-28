@@ -88,26 +88,27 @@ type Quality struct {
 	Bitrate int
 }
 
-// Qualities are the conversions offered below the original, best first.
-var Qualities = []Quality{{"1080p", 1080, 8000}, {"720p", 720, 4000}, {"480p", 480, 1500}}
+var qualities = []Quality{{"1080p", 1080, 8000}, {"720p", 720, 4000}, {"480p", 480, 1500}}
+
+// Qualities returns the conversions offered below the original, best first.
+// The list is a copy: both services read the one list, so neither can change
+// it for the other.
+func Qualities() []Quality { return slices.Clone(qualities) }
 
 // QualityNamed returns the quality called name.
 func QualityNamed(name string) (Quality, bool) {
-	index := slices.IndexFunc(Qualities, func(quality Quality) bool { return quality.Name == name })
+	index := slices.IndexFunc(qualities, func(quality Quality) bool { return quality.Name == name })
 	if index < 0 {
 		return Quality{}, false
 	}
-	return Qualities[index], true
+	return qualities[index], true
 }
 
-// DefaultAudio chooses the audio stream a player picks by itself.
-const DefaultAudio = -1
-
-// Choice is what the viewer asked for.
+// Choice is what the viewer asked for; the zero Choice asks for nothing.
 type Choice struct {
-	// AudioTrack is the position of the audio stream to hear, or
-	// DefaultAudio. A position outside the source is the default too.
-	AudioTrack int
+	// AudioTrack, when set, is the position of the audio stream to hear;
+	// nil, or a position outside the source, keeps the default stream.
+	AudioTrack *int
 	// Lower is a quality the viewer lowered the picture to; the zero
 	// Quality keeps the original, and so does one at or above the source's
 	// height.
@@ -158,8 +159,8 @@ var browserAudio = []string{"aac", "mp3", "opus", "vorbis", "flac"}
 func Decide(source Source, caps Caps, choice Choice) Decision {
 	defaultTrack := defaultAudio(source.Audio)
 	request := mediaworker.StreamRequest{AudioTrack: defaultTrack}
-	if choice.AudioTrack >= 0 && choice.AudioTrack < len(source.Audio) {
-		request.AudioTrack = choice.AudioTrack
+	if track := choice.AudioTrack; track != nil && *track >= 0 && *track < len(source.Audio) {
+		request.AudioTrack = *track
 	}
 	sound := ""
 	if request.AudioTrack >= 0 {
@@ -167,7 +168,7 @@ func Decide(source Source, caps Caps, choice Choice) Decision {
 	}
 	lower := choice.Lower.Height > 0 && (source.Video == nil || source.Video.Height <= 0 || source.Video.Height > choice.Lower.Height)
 	videoOK := videoPlayable(source.Video, caps)
-	audioOK := sound == "" || audioPlayable(sound, caps)
+	audioOK := request.AudioTrack < 0 || audioPlayable(sound, caps)
 	if !choice.Transcode && !lower && videoOK && audioOK && request.AudioTrack == defaultTrack && containerPlayable(source, caps) {
 		return Decision{Mode: Direct, Stream: request}
 	}
