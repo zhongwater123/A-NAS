@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { onSessionEnded } from "../api/client";
 import { aheadOf, StreamFeed } from "./streamFeed";
-import { onSessionEnded } from "../api";
 
 // Each chunk of the fake stream holds five seconds of video.
 const chunkSeconds = 5;

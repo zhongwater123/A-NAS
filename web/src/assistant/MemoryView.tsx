@@ -1,4 +1,3 @@
-import { formatDate } from "../format/time";
 // 记忆: what the assistant carries into every new conversation — its notes, what
 // it noted about the member, and the skills it learned — from Hermes's own
 // learning graph. The member can read each in full and delete it, or clear
@@ -18,16 +17,18 @@ import {
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 
+import { formatDate } from "../lib/time";
 import {
   type AssistantMemory,
-  type LearnedSkill,
-  type MemoryItem,
   clearMemory,
   failureText,
   forgetMemoryItem,
   getMemory,
+  type LearnedSkill,
+  type MemoryItem,
   memoryItem,
-} from "./assistantApi";
+} from "./api";
+import styles from "./assistant.module.css";
 
 export function MemoryView({ onConversationsDeleted }: { onConversationsDeleted(): void }) {
   const [memory, setMemory] = useState<AssistantMemory>();
@@ -79,14 +80,14 @@ export function MemoryView({ onConversationsDeleted }: { onConversationsDeleted(
 
   if (!memory) {
     return (
-      <div className="as-memory">
+      <div className={styles.asMemory}>
         {error ? (
-          <div className="as-error" role="alert">
+          <div className={styles.asError} role="alert">
             <CircleAlert />
             <span>{error}</span>
           </div>
         ) : (
-          <div className="as-loading">
+          <div className={styles.asLoading}>
             <LoaderCircle />
             正在读取…
           </div>
@@ -98,9 +99,9 @@ export function MemoryView({ onConversationsDeleted }: { onConversationsDeleted(
   const aboutYou = memory.memories.filter((item) => item.store === "profile");
   const empty = !memory.memories.length && !memory.skills.length;
   return (
-    <div className="as-memory">
-      <section className="as-memory-intro">
-        <span className="as-memory-mark">
+    <div className={styles.asMemory}>
+      <section className={styles.asMemoryIntro}>
+        <span className={styles.asMemoryMark}>
           <Brain />
         </span>
         <div>
@@ -108,7 +109,7 @@ export function MemoryView({ onConversationsDeleted }: { onConversationsDeleted(
           <p>每个新对话开始时，VNAS 都会带上这里的记忆和它学会的技能。删除后，新对话不再带入。</p>
         </div>
       </section>
-      <p className="as-memory-note">
+      <p className={styles.asMemoryNote}>
         <Info />
         <span>
           继续以前的对话时，那个对话开始时的记忆仍在其中，VNAS
@@ -116,7 +117,7 @@ export function MemoryView({ onConversationsDeleted }: { onConversationsDeleted(
         </span>
       </p>
       {notice && (
-        <div className="as-memory-notice" role="status">
+        <div className={styles.asMemoryNotice} role="status">
           <span>{notice}</span>
           <button type="button" aria-label="关闭" onClick={() => setNotice("")}>
             <X />
@@ -125,7 +126,7 @@ export function MemoryView({ onConversationsDeleted }: { onConversationsDeleted(
       )}
 
       {empty ? (
-        <div className="as-memory-empty">
+        <div className={styles.asMemoryEmpty}>
           <Brain />
           <strong>VNAS 还没有记住任何内容</strong>
           <span>它记下的笔记、对你的了解和学会的技能会出现在这里。</span>
@@ -141,11 +142,11 @@ export function MemoryView({ onConversationsDeleted }: { onConversationsDeleted(
             onForget={forget}
           />
           {memory.skills.length > 0 && (
-            <section className="as-memory-group">
+            <section className={styles.asMemoryGroup}>
               <header>
                 <Sparkles />
                 <h4>学会的技能</h4>
-                <span className="as-memory-count">{memory.skills.length}</span>
+                <span className={styles.asMemoryCount}>{memory.skills.length}</span>
                 <small>删除的技能移进归档，新对话不再使用</small>
               </header>
               <ul>
@@ -177,11 +178,11 @@ function MemoryGroup({
 }) {
   if (!items.length) return null;
   return (
-    <section className="as-memory-group">
+    <section className={styles.asMemoryGroup}>
       <header>
         {icon}
         <h4>{title}</h4>
-        <span className="as-memory-count">{items.length}</span>
+        <span className={styles.asMemoryCount}>{items.length}</span>
         <small>{hint}</small>
       </header>
       <ul>
@@ -197,12 +198,12 @@ function MemoryRow({ item, onForget }: { item: MemoryItem; onForget(): Promise<v
   const [open, setOpen] = useState(false);
   const long = item.text.length > 160 || item.text.split("\n").length > 3;
   return (
-    <li className="as-memory-item">
-      <p className={open || !long ? "" : "clamped"}>{item.text}</p>
+    <li className={styles.asMemoryItem}>
+      <p className={open || !long ? "" : styles.clamped}>{item.text}</p>
       <footer>
         {item.updatedAt && <small>{dateText(item.updatedAt)}</small>}
         {long && (
-          <button type="button" className="as-link" onClick={() => setOpen((value) => !value)}>
+          <button type="button" className={styles.asLink} onClick={() => setOpen((value) => !value)}>
             {open ? (
               <>
                 收起
@@ -240,20 +241,22 @@ function SkillRow({ skill, onForget }: { skill: LearnedSkill; onForget(): Promis
         ? "VNAS 自己总结"
         : `用过 ${skill.useCount} 次`;
   return (
-    <li className="as-memory-item skill">
-      <div className="as-skill-line">
+    <li className={`${styles.asMemoryItem} skill`}>
+      <div className={styles.asSkillLine}>
         <code>{skill.id}</code>
-        <span className="as-chip">{origin}</span>
-        {skill.category && skill.category !== "general" && <span className="as-chip quiet">{skill.category}</span>}
+        <span className={styles.asChip}>{origin}</span>
+        {skill.category && skill.category !== "general" && (
+          <span className={`${styles.asChip} ${styles.quiet}`}>{skill.category}</span>
+        )}
       </div>
       {open &&
         (error ? (
-          <p className="as-memory-error">
+          <p className={styles.asMemoryError}>
             <CircleAlert />
             {error}
           </p>
         ) : content === undefined ? (
-          <p className="as-memory-loading">
+          <p className={styles.asMemoryLoading}>
             <LoaderCircle />
             正在读取…
           </p>
@@ -262,7 +265,7 @@ function SkillRow({ skill, onForget }: { skill: LearnedSkill; onForget(): Promis
         ))}
       <footer>
         {skill.updatedAt && <small>{dateText(skill.updatedAt)}</small>}
-        <button type="button" className="as-link" onClick={toggle}>
+        <button type="button" className={styles.asLink} onClick={toggle}>
           {open ? (
             <>
               收起
@@ -287,16 +290,16 @@ function Forget({ label, onConfirm }: { label: string; onConfirm(): Promise<void
   const [busy, setBusy] = useState(false);
   if (!asking)
     return (
-      <button type="button" className="as-forget" aria-label="删除" onClick={() => setAsking(true)}>
+      <button type="button" className={styles.asForget} aria-label="删除" onClick={() => setAsking(true)}>
         <Trash2 />
       </button>
     );
   return (
-    <span className="as-forget-ask">
+    <span className={styles.asForgetAsk}>
       <span>{label}</span>
       <button
         type="button"
-        className="danger"
+        className={styles.danger}
         disabled={busy}
         onClick={() => {
           setBusy(true);
@@ -320,7 +323,7 @@ function ClearAll({ onClear }: { onClear(conversations: boolean): Promise<void> 
   const [conversations, setConversations] = useState(true);
   const [busy, setBusy] = useState(false);
   return (
-    <section className={`as-memory-clear${asking ? " asking" : ""}`}>
+    <section className={`${styles.asMemoryClear}${asking ? ` ${styles.asking}` : ""}`}>
       {!asking ? (
         <>
           <div>
@@ -344,13 +347,13 @@ function ClearAll({ onClear }: { onClear(conversations: boolean): Promise<void> 
               同时删除全部对话（这样才彻底，删除后无法恢复）
             </label>
           </div>
-          <span className="as-memory-clear-actions">
+          <span className={styles.asMemoryClearActions}>
             <button type="button" disabled={busy} onClick={() => setAsking(false)}>
               取消
             </button>
             <button
               type="button"
-              className="danger"
+              className={styles.danger}
               disabled={busy}
               onClick={() => {
                 setBusy(true);

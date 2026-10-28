@@ -26,7 +26,7 @@ func runShareService(logger *slog.Logger) error {
 	if os.Geteuid() == 0 {
 		return errors.New("the share service must run as its own identity, never root")
 	}
-	config, err := envconfig.Parse[shareServiceConfig](envconfig.Environment())
+	config, err := loadShareServiceConfig(envconfig.Environment())
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func configuredShares(ctx context.Context, config Config, users *accounts.Servic
 		if err != nil {
 			return nil, nil, err
 		}
-		return sharesapi.NewProxy(config.SharesSocket, logger), closeBridge, nil
+		return shareservice.Proxy(config.SharesSocket, logger), closeBridge, nil
 	}
 	members := func(ctx context.Context) ([]accounts.Profile, error) {
 		active, err := users.ActiveUsers(ctx)

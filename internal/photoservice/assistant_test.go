@@ -20,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 // uidAccounts is the Host Agent's lookup of active accounts by Linux UID.
@@ -112,7 +113,7 @@ func TestAssistantIsTheMemberThePeerUIDNames(t *testing.T) {
 		}
 	}
 	// A session token sent along changes nothing: the peer UID decides.
-	asAlice := http.Header{photosapi.SessionHeader: {"alice-token"}}
+	asAlice := http.Header{serviceproxy.SessionHeader: {"alice-token"}}
 
 	var ids []string
 	for _, lib := range decodeItems[photos.Library](t, assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/libraries", asAlice)) {
@@ -181,7 +182,7 @@ func sessionJSON(t *testing.T, r running, token, method, path, body string, out 
 	request.Header.Set("Content-Type", "application/json")
 	request = request.WithContext(accounts.WithSessionToken(request.Context(), token))
 	recorder := httptest.NewRecorder()
-	photosapi.NewProxy(r.socket, nil).ServeHTTP(recorder, request)
+	photoservice.Proxy(r.socket, nil).ServeHTTP(recorder, request)
 	if recorder.Code >= 300 {
 		return fmt.Errorf("%s %s: %d %s", method, path, recorder.Code, recorder.Body)
 	}
@@ -257,7 +258,7 @@ func TestAssistantSocketNeedsAPrivateDirectory(t *testing.T) {
 
 func TestAssistantNeedsAnActiveAccountForItsUID(t *testing.T) {
 	_, socket := startWithAssistant(t, accounts.SessionUser{})
-	if response := assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/libraries", http.Header{photosapi.SessionHeader: {"alice-token"}}); response.StatusCode != http.StatusUnauthorized {
+	if response := assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/libraries", http.Header{serviceproxy.SessionHeader: {"alice-token"}}); response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("unknown UID = %d, want 401", response.StatusCode)
 	}
 

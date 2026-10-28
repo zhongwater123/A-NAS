@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
+	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -26,26 +26,7 @@ func (h *handler) videoRoutes() {
 // browserCaps reads what the browser decodes, as the media center's player
 // reports it: a comma-separated caps parameter.
 func browserCaps(values url.Values) photos.BrowserCaps {
-	var caps photos.BrowserCaps
-	for value := range strings.SplitSeq(values.Get("caps"), ",") {
-		switch strings.TrimSpace(value) {
-		case "hevc":
-			caps.HEVC = true
-		case "av1":
-			caps.AV1 = true
-		case "vp9":
-			caps.VP9 = true
-		case "webm":
-			caps.WebM = true
-		case "mkv":
-			caps.Matroska = true
-		case "ac3":
-			caps.AC3 = true
-		case "eac3":
-			caps.EAC3 = true
-		}
-	}
-	return caps
+	return mediaplay.ParseCaps(values.Get("caps"))
 }
 
 func (h *handler) videoPlayback(w http.ResponseWriter, r *http.Request) {

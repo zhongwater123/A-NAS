@@ -430,7 +430,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 
 ### 验证
 
-- Go：文件代理（[`assistant_test.go`](../../internal/filebroker/assistant_test.go)）的会话核对、管理员连不到别人的助手、会话失效与停止时切断、2026-10-20 起的登录与令牌缓存；产品服务（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)，对着模拟 `hermes serve` 的 [`fakeserve_test.go`](../../internal/assistantapi/fakeserve_test.go)）的白名单、信息去除、审批卡片与授权、回合期间与回合后的连接保持，实例重启后重新登录（`login_test.go`）。
+- Go：文件代理（[`assistant_test.go`](../../internal/filebroker/rootbroker/assistant_test.go)）的会话核对、管理员连不到别人的助手、会话失效与停止时切断、2026-10-20 起的登录与令牌缓存；产品服务（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)，对着模拟 `hermes serve` 的 [`fakeserve_test.go`](../../internal/assistantapi/fakeserve_test.go)）的白名单、信息去除、审批卡片与授权、回合期间与回合后的连接保持，实例重启后重新登录（`login_test.go`）。
 - 系统测试（2026-10-15）：实例套接字只有 root 能连，产品服务不保存令牌；执行方拒绝没有会话与他人会话的请求；经闸门的网关到得了 alice 的实例，`shell.exec` 得 -32601，`session.create` 带 `profile` 得 -32602，新对话的结果中没有系统提示；alice 退出登录后网关在 30 秒时以 1013 关闭。完整链路：假模型调用“提交更改”，窗口收到卡片，alice 以本人会话确认，文件代理以 alice 身份写入、旧版本进回收站，助手在同一回合得到“1 项更改已执行”。
 - 浏览器（本地原型，DeepSeek flash，`approvals.timeout` 120 秒）：窗口 A 请助手改 `计划.md`，卡片只在 A 的对话中出现，显示差异，侧栏标“等你确认”；alice 另一次登录的窗口 B 打开同一对话后看到同一张卡片并确认，两个窗口的卡片都变为“已按你的确认完成”，A 也收到这一轮的回答，旧版本在回收站。不确认时 120 秒后卡片变为“等待确认超时”，助手说明文件没有变化。
 
@@ -902,7 +902,7 @@ E1–E6 用 DeepSeek flash（[`review-scenarios.sh`](../../ai/assistant-spike/re
 - Hermes 自带的两种看画面工具都走不到 WebOS：`computer_use` 截 Hermes 那台机器的屏幕；`browser_vision` 截 Hermes 自己的浏览器，绑定了控制器时它以 `browser_vision` 动作交给控制器，而这个动作不在控制器能力白名单里（`gateway/browser_control_broker.py`），直接失败、不回退。上游文档写明视觉“不在控制器协议中”，但白名单预留了 `browser_screenshot`，固定提交与 main `c5a3c0f8` 都没有工具用它。
 - 比较过的取画面办法：窗口自己把页面画成图（`modern-screenshot`，问题反馈与程序坞预览已在用）；屏幕共享（`getDisplayMedia`，真像素，但只在 HTTPS 或 localhost 可用，局域网入口按 ADR 0012 是明文 HTTP，且每次要成员允许）；浏览器扩展（`captureVisibleTab`，每台电脑要装）。用户提出的沙箱里另开一个 WebOS 镜像客户端：每位成员要常驻一个无头 Chromium，客户端状态只能靠逐条同步 DOM 变化复制，跨域 iframe 与视频复制不了，还要把成员的登录交给沙箱，与决定 10 冲突，没有采用。用户选了第一种。
 - 补丁 0003 让 `browser_vision` 在窗口作为控制器的会话里向窗口要 `browser_screenshot`，把 PNG 存进 `cache/screenshots`，再像本地截图一样处理（`text` 模式下由看图模型描述成文字）；窗口能截图时这个工具才出现。
-- 窗口与“问题反馈”共用一个画法（[`desktopPicture.ts`](../../web/src/desktopPicture.ts)：画整个页面，包括桌面外层的菜单、预览与提示，跳过整个落在可见区域外的元素，几千个文件的文件夹也不卡）。VNAS 用最长边不超过 1600 像素的 PNG，不含 VNAS 自己的窗口与提示；`annotate` 时在每个控件上标出快照里的编号，可以按编号点击；base64 超过 4,000,000 字符时缩小重画。一条结果的上限从 64 KiB 提到 5 MiB。
+- 窗口与“问题反馈”共用一个画法（[`desktopPicture.ts`](../../web/src/desktop/desktopPicture.ts)：画整个页面，包括桌面外层的菜单、预览与提示，跳过整个落在可见区域外的元素，几千个文件的文件夹也不卡）。VNAS 用最长边不超过 1600 像素的 PNG，不含 VNAS 自己的窗口与提示；`annotate` 时在每个控件上标出快照里的编号，可以按编号点击；base64 超过 4,000,000 字符时缩小重画。一条结果的上限从 64 KiB 提到 5 MiB。
 - 用户决定试用期间不遮挡“VNAS 不能查看”的区域，画面发到 DeepSeek 只做可行性验证，以后接入本地算力。
 
 ### 真实模型

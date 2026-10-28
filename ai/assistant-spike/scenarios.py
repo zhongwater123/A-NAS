@@ -292,13 +292,14 @@ async def converse(paragraph):
         answers, said = line.split("|", 1) if "|" in line else (opts.answer, line)
         lines.append(([a.strip() for a in answers.split(",")], said.strip()))
     session = None
-    async for session, turn, run in (serve_conversation if CHANNEL == "serve" else api_conversation)(lines):
+    # session is read after the loop: the last turn's.
+    async for session, turn, run in (serve_conversation if CHANNEL == "serve" else api_conversation)(lines):  # noqa: B007
         log_before = len(MODEL_LOG.read_text().splitlines()) if MODEL_LOG.exists() else 0
         started = time.time()
         print(f"\n### [{','.join(turn.answers)}] {turn.said}")
         await run(turn)
         if MODEL_LOG.exists():
-            records = [json.loads(l) for l in MODEL_LOG.read_text().splitlines()[log_before:]]
+            records = [json.loads(record) for record in MODEL_LOG.read_text().splitlines()[log_before:]]
             tokens = sum((r.get("usage") or {}).get("total_tokens", 0) for r in records)
             print(f"  {len(records)} model requests, {tokens} tokens, {time.time() - started:.0f} s")
     _, page = broker("GET", "/changes")

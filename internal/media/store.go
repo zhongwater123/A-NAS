@@ -3,11 +3,11 @@ package media
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // Store is media.db on the system disk: libraries, the catalog read from the
@@ -21,14 +21,10 @@ func OpenSQLite(path string) (*Store, error) { return openSQLite("sqlite3", path
 // openSQLite opens the catalog through the named database/sql driver, which
 // tests replace with one that fails reads part way.
 func openSQLite(driverName, path string) (*Store, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("SQLite path is empty")
-	}
-	db, err := sql.Open(driverName, path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
+	db, err := sqlitedb.Open(path, sqlitedb.Options{Driver: driverName})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
@@ -166,7 +162,7 @@ END;
 	return err
 }
 
-func formatTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }
 
 func parseTime(value string) time.Time {
 	parsed, _ := time.Parse(time.RFC3339Nano, value)

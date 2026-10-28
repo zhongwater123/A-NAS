@@ -1,9 +1,10 @@
 import { ChevronLeft, ChevronRight, Clapperboard, CloudUpload, FolderPlus, Info, Play, Sparkles } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
+import type { Home as HomeData, Title } from "./api";
 import { Artwork, PosterCard, StillCard, useMediaActions } from "./Cards";
 import { episodeCode, heading, remaining, runtime, typeLabel } from "./format";
-import type { Home as HomeData, Title } from "./mediaApi";
+import styles from "./media.module.css";
 
 // Shelf is a row that scrolls sideways with arrow buttons.
 export function Shelf({
@@ -38,30 +39,40 @@ export function Shelf({
   const scroll = (direction: number) =>
     track.current?.scrollBy({ left: direction * track.current.clientWidth * 0.85, behavior: "smooth" });
   return (
-    <section className="mc-shelf" aria-label={title}>
+    <section className={styles.mcShelf} aria-label={title}>
       <header>
         <h2>
           {title}
           {count !== undefined && <small>{count}</small>}
         </h2>
         {onMore && (
-          <button type="button" className="mc-link" onClick={onMore}>
+          <button type="button" className={styles.mcLink} onClick={onMore}>
             查看全部
             <ChevronRight />
           </button>
         )}
       </header>
-      <div className="mc-shelf-body">
+      <div className={styles.mcShelfBody}>
         {!edges.start && (
-          <button type="button" className="mc-shelf-arrow left" aria-label={`${title}向左`} onClick={() => scroll(-1)}>
+          <button
+            type="button"
+            className={`${styles.mcShelfArrow} ${styles.left}`}
+            aria-label={`${title}向左`}
+            onClick={() => scroll(-1)}
+          >
             <ChevronLeft />
           </button>
         )}
-        <div ref={track} className="mc-shelf-track" onScroll={measure}>
+        <div ref={track} className={styles.mcShelfTrack} onScroll={measure}>
           {children}
         </div>
         {!edges.end && (
-          <button type="button" className="mc-shelf-arrow right" aria-label={`${title}向右`} onClick={() => scroll(1)}>
+          <button
+            type="button"
+            className={`${styles.mcShelfArrow} ${styles.right}`}
+            aria-label={`${title}向右`}
+            onClick={() => scroll(1)}
+          >
             <ChevronRight />
           </button>
         )}
@@ -95,7 +106,7 @@ function Hero({ items, continuing }: { items: Title[]; continuing: Set<string> }
   ].filter(Boolean);
   return (
     <section
-      className="mc-hero"
+      className={styles.mcHero}
       aria-roledescription="carousel"
       aria-label="精选"
       onPointerEnter={() => setPaused(true)}
@@ -104,45 +115,45 @@ function Hero({ items, continuing }: { items: Title[]; continuing: Set<string> }
       {items.map((item, position) => (
         <div
           key={item.id}
-          className={`mc-hero-slide ${position === index ? "active" : ""}`}
+          className={`${styles.mcHeroSlide} ${position === index ? styles.active : ""}`}
           aria-hidden={position !== index}
         >
           <Artwork title={item} kind="backdrop" fallback="thumb" label={false} eager={position === 0} />
         </div>
       ))}
-      <div className="mc-hero-shade" />
-      <div className="mc-hero-content" key={current.id}>
+      <div className={styles.mcHeroShade} />
+      <div className={styles.mcHeroContent} key={current.id}>
         {continuing.has(current.id) ? (
-          <p className="mc-hero-kicker">
+          <p className={styles.mcHeroKicker}>
             <Play />
             继续观看
           </p>
         ) : (
-          <p className="mc-hero-kicker">
+          <p className={styles.mcHeroKicker}>
             <Sparkles />
             最近添加
           </p>
         )}
         <h1>{heading(current)}</h1>
-        <p className="mc-hero-meta">
+        <p className={styles.mcHeroMeta}>
           {meta.map((part, position) => (
             <span key={position}>{part}</span>
           ))}
         </p>
         {current.type === "episode" && current.title && !current.title.startsWith("第 ") && (
-          <p className="mc-hero-plot">{current.title}</p>
+          <p className={styles.mcHeroPlot}>{current.title}</p>
         )}
-        <div className="mc-hero-actions">
-          <button type="button" className="mc-primary" onClick={() => actions.play(current)}>
+        <div className={styles.mcHeroActions}>
+          <button type="button" className={styles.mcPrimary} onClick={() => actions.play(current)}>
             <Play />
             {resuming ? "继续播放" : "播放"}
           </button>
-          <button type="button" className="mc-glass" onClick={() => actions.open(current)}>
+          <button type="button" className={styles.mcGlass} onClick={() => actions.open(current)}>
             <Info />
             详情
           </button>
           {resuming && current.progress && (
-            <span className="mc-hero-left">{remaining(current.progress.position, current.progress.duration)}</span>
+            <span className={styles.mcHeroLeft}>{remaining(current.progress.position, current.progress.duration)}</span>
           )}
         </div>
       </div>
@@ -150,7 +161,7 @@ function Hero({ items, continuing }: { items: Title[]; continuing: Set<string> }
         <>
           <button
             type="button"
-            className="mc-hero-arrow left"
+            className={`${styles.mcHeroArrow} ${styles.left}`}
             aria-label="上一个"
             onClick={() => setIndex((index - 1 + count) % count)}
           >
@@ -158,13 +169,13 @@ function Hero({ items, continuing }: { items: Title[]; continuing: Set<string> }
           </button>
           <button
             type="button"
-            className="mc-hero-arrow right"
+            className={`${styles.mcHeroArrow} ${styles.right}`}
             aria-label="下一个"
             onClick={() => setIndex((index + 1) % count)}
           >
             <ChevronRight />
           </button>
-          <div className="mc-hero-dots" role="tablist">
+          <div className={styles.mcHeroDots} role="tablist">
             {items.map((item, position) => (
               <button
                 key={item.id}
@@ -203,8 +214,8 @@ export function HomePage({
   const empty = !home.recent.length;
   if (!home.libraries) {
     return (
-      <div className="mc-welcome">
-        <div className="mc-welcome-art" aria-hidden="true">
+      <div className={styles.mcWelcome}>
+        <div className={styles.mcWelcomeArt} aria-hidden="true">
           <Clapperboard />
         </div>
         <h1>把你的视频变成私人影院</h1>
@@ -226,7 +237,7 @@ export function HomePage({
           </li>
         </ol>
         {canCreate && (
-          <button type="button" className="mc-primary" onClick={onCreateLibrary}>
+          <button type="button" className={styles.mcPrimary} onClick={onCreateLibrary}>
             <FolderPlus />
             新建媒体库
           </button>
@@ -236,8 +247,8 @@ export function HomePage({
   }
   if (empty) {
     return (
-      <div className="mc-state">
-        {home.scanning ? <span className="mc-spinner" /> : <Clapperboard />}
+      <div className={styles.mcState}>
+        {home.scanning ? <span className={styles.mcSpinner} /> : <Clapperboard />}
         <h2>{home.scanning ? "正在扫描媒体库…" : "媒体库里还没有视频"}</h2>
         <p>
           {home.scanning
@@ -246,14 +257,14 @@ export function HomePage({
               ? "上传视频，或把视频放进媒体库的文件夹，稍后就会出现在这里。"
               : "把视频放进媒体库的文件夹后，重新扫描即可看到。"}
         </p>
-        <div className="mc-state-actions">
+        <div className={styles.mcStateActions}>
           {!home.scanning && onUpload && (
-            <button type="button" className="mc-primary mc-upload-button" onClick={onUpload}>
+            <button type="button" className={`${styles.mcPrimary} ${styles.mcUploadButton}`} onClick={onUpload}>
               <CloudUpload />
               上传视频
             </button>
           )}
-          <button type="button" className="mc-glass" onClick={onLibraries}>
+          <button type="button" className={styles.mcGlass} onClick={onLibraries}>
             管理媒体库
           </button>
         </div>
@@ -261,11 +272,11 @@ export function HomePage({
     );
   }
   return (
-    <div className="mc-home">
+    <div className={styles.mcHome}>
       {home.featured.length > 0 && (
         <Hero items={home.featured} continuing={new Set(home.continue.map((title) => title.id))} />
       )}
-      <div className="mc-home-rows">
+      <div className={styles.mcHomeRows}>
         {home.continue.length > 0 && (
           <Shelf title="继续观看" onMore={() => onCategory("history")}>
             {home.continue.map((title) => (

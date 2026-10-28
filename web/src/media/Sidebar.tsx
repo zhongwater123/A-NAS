@@ -1,7 +1,8 @@
 import { Film, FolderOpen, Heart, History, House, Layers, LayoutGrid, Library, Tv, Video } from "lucide-react";
 import { ReactNode } from "react";
 
-import type { Category, MediaLibrary } from "./mediaApi";
+import type { Category, MediaLibrary } from "./api";
+import styles from "./media.module.css";
 
 export type Section =
   | "home"
@@ -46,7 +47,7 @@ function Item({
   return (
     <button
       type="button"
-      className={active ? "active" : ""}
+      className={active ? styles.active : ""}
       aria-current={active ? "page" : undefined}
       onClick={() => onSelect(section)}
     >
@@ -89,8 +90,8 @@ export function Sidebar({
     0,
   );
   return (
-    <nav className="mc-sidebar" aria-label="影视中心导航">
-      <div className="mc-nav">
+    <nav className={styles.mcSidebar} aria-label="影视中心导航">
+      <div className={styles.mcNav}>
         {primary.map((item) => (
           <Item
             key={item.section}
@@ -101,8 +102,8 @@ export function Sidebar({
           />
         ))}
       </div>
-      <p className="mc-nav-heading">分类</p>
-      <div className="mc-nav">
+      <p className={styles.mcNavHeading}>分类</p>
+      <div className={styles.mcNav}>
         {categories.map((item) => (
           <Item
             key={item.section}
@@ -113,10 +114,10 @@ export function Sidebar({
           />
         ))}
       </div>
-      <div className="mc-sidebar-fill" />
+      <div className={styles.mcSidebarFill} />
       {(scanning.length > 0 || (processing && pending > 0)) && (
-        <div className="mc-scan-card" role="status">
-          <span className="mc-spinner tiny" />
+        <div className={styles.mcScanCard} role="status">
+          <span className={`${styles.mcSpinner} ${styles.tiny}`} />
           <div>
             <strong>
               {scanning.length ? `正在扫描 ${scanning.map((library) => library.name).join("、")}` : "正在整理视频"}

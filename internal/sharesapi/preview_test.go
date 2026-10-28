@@ -5,9 +5,6 @@ package sharesapi
 import (
 	"bytes"
 	"context"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
-	"github.com/zhongwater123/A-NAS/internal/shares"
 	"image"
 	"image/png"
 	"io"
@@ -18,6 +15,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
 type heicBackend struct{ backend }
@@ -80,7 +81,7 @@ func TestRevokeCancelsHEICConversionAndWithholdsResult(t *testing.T) {
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		r := httptest.NewRequest("GET", PathPrefix+"/"+v.ID+"/entries/"+v.Entries[0].ID+"/preview", nil)
-		r = r.WithContext(WithUser(r.Context(), accounts.User{ID: "b"}))
+		r = r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: "b"}))
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		done <- w

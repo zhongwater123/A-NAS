@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 // ChangeStore is the executor of 提交更改 (ADR 0024 decision 4). It checks a
@@ -70,9 +71,6 @@ var (
 
 var changeIDPattern = regexp.MustCompile(`^[0-9a-f]{8}$`)
 
-// SessionHeader carries the member's session token to the executor.
-const SessionHeader = "X-A-NAS-Session"
-
 // BrokerChanges is the spike's change broker (ai/assistant-spike/change_broker.py)
 // on its product socket, standing in for the File Broker.
 func BrokerChanges(socket string) ChangeStore {
@@ -127,7 +125,7 @@ func (b *brokerChanges) do(ctx context.Context, account, method, path string, bo
 	if err != nil {
 		return Change{}, err
 	}
-	request.Header.Set(SessionHeader, accounts.SessionToken(ctx))
+	request.Header.Set(serviceproxy.SessionHeader, accounts.SessionToken(ctx))
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}

@@ -1,11 +1,12 @@
 import { RotateCcw } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { DayHeader, gridInset, type GridProps, scrubberInset, usePendingThumbnails, useTileRenderer } from "./grid";
+import { listTimelineMonth, listTimelineMonths, type PhotoAsset, type PhotoMonth } from "./api";
+import { DayHeader, type GridProps, gridInset, scrubberInset, usePendingThumbnails, useTileRenderer } from "./grid";
 import { type Entry, type MonthState, type PendingPhoto, timelineEntries } from "./layout";
 import { countLabel, messageOf } from "./model";
-import { listTimelineMonth, listTimelineMonths, type PhotoAsset, type PhotoMonth } from "./photosApi";
 import { PhotoScroller, useContentWidth } from "./PhotoScroller";
+import styles from "./photos.module.css";
 import { PendingTile } from "./Tile";
 
 interface Props extends GridProps {
@@ -149,7 +150,7 @@ export function Timeline(props: Props) {
     switch (entry.kind) {
       case "month":
         return (
-          <div className="ph-month">
+          <div className={styles.phMonth}>
             <h2>{entry.label}</h2>
             <small>{entry.videos ? countLabel(entry.photos, entry.videos, " · ") : `${entry.photos} 张`}</small>
           </div>
@@ -158,14 +159,14 @@ export function Timeline(props: Props) {
         return <DayHeader entry={entry} selected={props.selected} onSelect={props.onSelectGroup} />;
       case "heading":
         return (
-          <div className="ph-heading">
+          <div className={styles.phHeading}>
             <h2>{entry.label}</h2>
             {entry.detail && <small>{entry.detail}</small>}
           </div>
         );
       case "placeholder":
         return entry.failed ? (
-          <div className="ph-skeleton failed">
+          <div className={`${styles.phSkeleton} ${styles.failed}`}>
             <span>这个月的照片没能载入</span>
             <button
               type="button"
@@ -184,7 +185,7 @@ export function Timeline(props: Props) {
           </div>
         ) : (
           <div
-            className="ph-skeleton"
+            className={styles.phSkeleton}
             style={{ ["--row" as string]: `${rowHeight + 4}px` }}
             aria-label={`正在载入${entry.label}`}
           />

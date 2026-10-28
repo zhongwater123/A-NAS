@@ -168,6 +168,7 @@ func (h *API) handleMusicCover(w http.ResponseWriter, r *http.Request, session a
 		h.writeError(w, r, err)
 		return
 	}
+	//nolint:gosec // G703: the music catalog names its own cover cache file; the request only selects a catalog entry.
 	content, err := os.Open(file)
 	if err != nil {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "music resource was not found")

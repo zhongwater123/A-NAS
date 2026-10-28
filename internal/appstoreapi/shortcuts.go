@@ -2,8 +2,8 @@ package appstoreapi
 
 import (
 	"net/http"
-	"strings"
 
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/appstore"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
@@ -17,12 +17,23 @@ const ShortcutsPrefix = "/api/v1/app-shortcuts"
 
 type shortcutsHandler struct {
 	store appstore.Store
+	mux   *apiroute.Mux
 }
 
 // NewShortcuts returns the shortcuts API; with a nil store, as when the App
 // Center is disabled, the list is empty.
 func NewShortcuts(store appstore.Store) http.Handler {
-	return &shortcutsHandler{store: store}
+	h := &shortcutsHandler{store: store, mux: apiroute.NewMux()}
+	h.mux.Only(http.MethodGet, ShortcutsPrefix, h.list)
+	h.mux.Only(http.MethodGet, ShortcutsPrefix+"/{appID}/icon", withApp(h.icon))
+	h.mux.HandleFunc("/", notFound)
+	return h
+}
+
+// ShortcutEndpoints are the operations the shortcuts API serves under
+// ShortcutsPrefix.
+func ShortcutEndpoints() []apiroute.Endpoint {
+	return NewShortcuts(nil).(*shortcutsHandler).mux.Endpoints()
 }
 
 // ShortcutDocument is an installed app the desktop can open in a new window.
@@ -43,29 +54,20 @@ type shortcutsResponse struct {
 
 func (h *shortcutsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !allow(w, r, http.MethodGet) {
+	h.mux.ServeHTTP(w, r)
+}
+
+func (h *shortcutsHandler) icon(w http.ResponseWriter, r *http.Request) {
+	if h.store == nil {
+		notFound(w, r)
 		return
 	}
-	if r.URL.Path == ShortcutsPrefix {
-		h.list(w, r)
-		return
-	}
-	id, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, ShortcutsPrefix+"/"), "/icon")
-	if !ok || !appstore.ValidID(id) || h.store == nil {
-		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
-		return
-	}
-	icon, contentType, err := h.store.Icon(r.Context(), id)
+	icon, contentType, err := h.store.Icon(r.Context(), r.PathValue("appID"))
 	if err != nil {
-		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
+		notFound(w, r)
 		return
 	}
-	// Catalog icons are fixed for a release; SVGs must not run scripts.
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=86400")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write(icon)
+	writeIcon(w, icon, contentType)
 }
 
 // list returns installed apps that have a web interface; installing,

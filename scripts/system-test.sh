@@ -162,6 +162,10 @@ stage() {
   ln -s "$ai/runtime.tar.gz" "$1/ai/runtime.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
   install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
+  install -m 0750 /src/scripts/run-kiosk.sh "$1/kiosk-launcher"
+  install -m 0644 "/src/deploy/systemd/system/anas-kiosk@.service" "$1/anas-kiosk@.service"
+  install -m 0644 /src/deploy/pam/a-nas-kiosk "$1/a-nas-kiosk.pam"
+  install -m 0644 /src/deploy/sysusers.d/a-nas-kiosk.conf "$1/a-nas-kiosk.sysusers"
 }
 release=/tmp/release
 stage "$release"
@@ -263,8 +267,23 @@ in_trash() { # USER SPACE_DIR FILE: FILE's bytes are in USER's recycle bin
 }
 status_of() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 secret() { head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20; }
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+verified() { # UNIT_FILE...: systemd-analyze verify reports nothing, not even a warning
+  local report
+  report=$(systemd-analyze verify --man=no "$@" 2>&1) && [[ -z "$report" ]] && return
+  printf '%s\n' "$report" >&2
+  return 1
+}
 api=http://127.0.0.1:8080
 data=/srv/a-nas/data
+
+# --- The units as installed, with every drop-in, read by Debian 13's systemd
+# as on the NAS (#278): each directive and value, and that each command exists.
+# The image has no Wayland compositor: Cage, which the local console's unit
+# starts, is a stand-in that only has to exist.
+[[ -x /usr/bin/cage ]] || install -m 0755 /dev/null /usr/bin/cage
+check "systemd accepts every installed A-NAS unit" \
+  verified /etc/systemd/system/anas*.service /etc/systemd/system/anas*.socket /etc/systemd/system/*anas*.slice
 
 # --- Every service runs under its production unit (issue #38).
 check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares smbd
@@ -284,6 +303,28 @@ check "the moved record is root's alone" \
   test "$(stat -c '%U:%G %a' /var/lib/a-nas-host/app-identities.json)" = 'root:root 600'
 check "the record left the Product Service's directory" test ! -e /var/lib/a-nas/app-identities.json
 check "Product Service cannot list the Host Agent's records" denied as a-nas ls /var/lib/a-nas-host
+
+# --- The local console (issue #174): an account of its own that cannot log
+# in, starting the launcher of the installed release. The container has no
+# display, so the unit is installed but neither enabled nor started.
+check "the local console runs as its own account" \
+  test "$(systemctl show -p User --value anas-kiosk@tty1.service)" = a-nas-kiosk
+check "the local console's account has no home and no login shell" \
+  test "$(getent passwd a-nas-kiosk | cut -d: -f6-7)" = /nonexistent:/usr/sbin/nologin
+check "the local console's account has no password" test "$(passwd -S a-nas-kiosk | cut -d ' ' -f 2)" = L
+check "the local console's launcher is the installed release's" \
+  cmp -s /opt/a-nas/current/kiosk-launcher /src/scripts/run-kiosk.sh
+check "the local console's launcher is root's" test "$(stat -c '%U %a' /opt/a-nas/current/kiosk-launcher)" = 'root 755'
+# A staging account laid out as anas-dev's on the NAS: its staged releases are
+# its own, and the owner's write shows the directory is writable at all.
+id anas-dev >/dev/null 2>&1 || useradd --create-home --shell /bin/bash anas-dev
+staging=/home/anas-dev/apps/a-nas/releases
+install -d -o anas-dev -g anas-dev -m 0750 /home/anas-dev/apps /home/anas-dev/apps/a-nas "$staging"
+check "the staging account writes its staged releases" as anas-dev touch "$staging/staged-by-anas-dev"
+check "the local console cannot write the staged releases" denied as a-nas-kiosk touch "$staging/staged-by-kiosk"
+check "the local console is not in the staging account's group" denied grep -qw anas-dev <<<"$(id -nG a-nas-kiosk)"
+check "the installer leaves the local console disabled" \
+  test "$(systemctl is-enabled anas-kiosk@tty1.service 2>/dev/null)" = disabled
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 
 # --- Accounts: an administrator and a member, each with one Linux identity.

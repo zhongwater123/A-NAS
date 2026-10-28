@@ -1,7 +1,8 @@
 import { CircleDot, Copy, Film, FolderPlus, Pencil, Plus, X } from "lucide-react";
 import { FormEvent, useState } from "react";
 
-import { formatBytes } from "../bytes";
+import { formatBytes } from "../lib/bytes";
+import { addPhotoTag, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, removePhotoTag } from "./api";
 import {
   type Caller,
   canChange,
@@ -17,7 +18,7 @@ import {
   videoLines,
 } from "./model";
 import { PhotoFaces } from "./People";
-import { addPhotoTag, removePhotoTag, type PhotoAlbum, type PhotoAsset, type PhotoLibrary } from "./photosApi";
+import styles from "./photos.module.css";
 
 export interface DetailsActions {
   rename: (asset: PhotoAsset) => Promise<PhotoAsset | undefined>;
@@ -99,8 +100,8 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
   const albums = details?.albums ?? [];
 
   return (
-    <div className="ph-details">
-      <div className="ph-details-name">
+    <div className={styles.phDetails}>
+      <div className={styles.phDetailsName}>
         <h3>{current.name}</h3>
         {editable && (
           <button
@@ -113,7 +114,7 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
           </button>
         )}
       </div>
-      <p className="ph-details-when">{current.takenAt ? formatDateTime(current.takenAt) : "没有拍摄时间"}</p>
+      <p className={styles.phDetailsWhen}>{current.takenAt ? formatDateTime(current.takenAt) : "没有拍摄时间"}</p>
       <dl>
         {video && (
           <>
@@ -162,12 +163,12 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
         )}
       </dl>
       {current.alsoKeptBy?.length ? (
-        <p className="ph-details-hint">
+        <p className={styles.phDetailsHint}>
           {current.alsoKeptBy.join("、")} 也保存了这{video ? "段视频" : "张照片"}。
         </p>
       ) : null}
       {current.liveVideoMissing && (
-        <section className="ph-details-live" aria-label="实况照片">
+        <section className={styles.phDetailsLive} aria-label="实况照片">
           <p>
             <CircleDot />
             实况照片只上传了静态画面
@@ -175,7 +176,7 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
           <small>{liveVideoHint}</small>
           {editable && (
             <button type="button" disabled={attaching} onClick={pickLiveVideo}>
-              {attaching ? <span className="ph-spinner" /> : <Film />}
+              {attaching ? <span className={styles.phSpinner} /> : <Film />}
               {attaching ? "正在上传视频" : "上传视频"}
             </button>
           )}
@@ -197,16 +198,16 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
 
       <section aria-label="标签">
         <h4>标签</h4>
-        <div className="ph-chips">
+        <div className={styles.phChips}>
           {tags.map((name) => (
-            <span className="ph-chip" key={name}>
+            <span className={styles.phChip} key={name}>
               <button type="button" title="查看带这个标签的照片" onClick={() => actions.openTag(name)}>
                 {name}
               </button>
               {editable && (
                 <button
                   type="button"
-                  className="ph-chip-remove"
+                  className={styles.phChipRemove}
                   aria-label={`删除标签 ${name}`}
                   onClick={() => void run(() => removePhotoTag(asset.id, name))}
                 >
@@ -216,7 +217,7 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
             </span>
           ))}
           {editable && (
-            <form className="ph-tag-form" onSubmit={submitTag}>
+            <form className={styles.phTagForm} onSubmit={submitTag}>
               <input
                 aria-label="添加标签"
                 placeholder="添加标签"
@@ -229,32 +230,32 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
               </button>
             </form>
           )}
-          {!tags.length && !editable && <span className="ph-muted">没有标签</span>}
+          {!tags.length && !editable && <span className={styles.phMuted}>没有标签</span>}
         </div>
       </section>
 
       <section aria-label="相册">
         <h4>相册</h4>
-        <div className="ph-chips">
+        <div className={styles.phChips}>
           {albums.map((album) => (
-            <span className="ph-chip" key={album.id}>
+            <span className={styles.phChip} key={album.id}>
               <button type="button" onClick={() => actions.openAlbum({ ...album, libraryId: asset.libraryId })}>
                 {album.name}
               </button>
             </span>
           ))}
           {writable && (
-            <button type="button" className="ph-chip-add" onClick={() => actions.addToAlbum([current])}>
+            <button type="button" className={styles.phChipAdd} onClick={() => actions.addToAlbum([current])}>
               <FolderPlus />
               加入相册
             </button>
           )}
-          {!albums.length && !writable && <span className="ph-muted">不在任何相册中</span>}
+          {!albums.length && !writable && <span className={styles.phMuted}>不在任何相册中</span>}
         </div>
       </section>
 
       {writable && (
-        <section className="ph-details-actions">
+        <section className={styles.phDetailsActions}>
           {library?.kind === "private" && shared && (
             <button type="button" onClick={() => actions.copy(current, shared)}>
               <Copy />

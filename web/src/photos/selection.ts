@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
-import type { PhotoAsset } from "./photosApi";
+import type { PhotoAsset } from "./api";
 
 const between = (order: PhotoAsset[], from: string, to: string) => {
   const start = order.findIndex((asset) => asset.id === from);

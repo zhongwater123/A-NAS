@@ -18,6 +18,7 @@
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { description: A folder is already part of another library (folders_overlap), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/media/libraries/{libraryId}:
   parameters: [{ $ref: "../components/media.yaml#/parameters/MediaLibraryID" }]
   get:
@@ -37,6 +38,7 @@
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
   delete:
     operationId: deleteMediaLibrary
     summary: Forget a library with its progress and favorites; no file is touched
@@ -96,6 +98,8 @@
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/media/videos/{videoId}:
   get:
     operationId: getMediaVideo
@@ -116,6 +120,8 @@
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/media/videos/{videoId}/playback:
   get:
     operationId: getMediaPlayback
@@ -129,6 +135,7 @@
       "200": { description: How to play, content: { application/json: { schema: { $ref: "../components/media.yaml#/schemas/MediaPlayback" } } } }
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/media/videos/{videoId}/file:
   get:
     operationId: getMediaVideoFile
@@ -138,6 +145,7 @@
       "200": { description: The file, content: { video/*: { schema: { type: string, format: binary } } } }
       "206": { description: Part of the file, content: { video/*: { schema: { type: string, format: binary } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/media/videos/{videoId}/stream:
   get:
@@ -155,6 +163,7 @@
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { description: FFmpeg cannot read the file (media_unreadable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { description: "Every conversion slot is in use (media_busy), or FFmpeg is unavailable (media_worker_unavailable)", content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
 /api/v1/media/videos/{videoId}/subtitles/{trackId}:
   get:
@@ -165,6 +174,7 @@
       "200": { description: WebVTT, content: { text/vtt: { schema: { type: string } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/media/videos/{videoId}/progress:
   put:
@@ -293,6 +303,7 @@
     summary: The folders of every visible library
     responses:
       "200": { description: Library folders, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/media.yaml#/schemas/MediaFolderRoot" } } } } } } }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/media/folders/{entryId}:
   get:
     operationId: getMediaFolder
@@ -303,6 +314,7 @@
     responses:
       "200": { description: The folder, content: { application/json: { schema: { $ref: "../components/media.yaml#/schemas/MediaFolderListing" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/media/artwork/{titleId}/{kind}:
   get:
     operationId: getMediaArtwork
@@ -314,3 +326,4 @@
       "200": { description: JPEG, content: { image/jpeg: { schema: { type: string, format: binary } } } }
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }

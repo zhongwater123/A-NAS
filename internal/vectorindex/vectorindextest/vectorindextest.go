@@ -47,6 +47,7 @@ func Start(t testing.TB) Instance {
 	if binary == "" {
 		binary = fetchedBinary(t, root)
 	}
+	//nolint:gosec // G703: the pinned binary, fetched by hash or named by the developer for tests.
 	if _, err := os.Stat(binary); err != nil {
 		if os.Getenv("ANAS_QDRANT_REQUIRED") == "1" {
 			t.Fatalf("Qdrant is required but missing (%v); run scripts/fetch-qdrant.sh or set ANAS_QDRANT_BINARY", err)
