@@ -3,8 +3,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { usePeople } from "../people/people";
 import { listShares, type Share } from "./api";
+import { Avatar, nameOf, names, PeopleStack } from "./avatars";
 import { errorText, isUnread, phaseLabel, phaseOf, receipt, remaining, shareTitle, topLevel, when } from "./format";
-import { Avatar, EntryTile, nameOf, names, PeopleStack } from "./parts";
+import palette from "./palette.module.css";
+import { EntryTile } from "./parts";
 import { ShareDetail } from "./ShareDetail";
 import { useShares } from "./SharesProvider";
 import styles from "./shares.module.css";
@@ -107,7 +109,7 @@ export function SharesPanel() {
   return (
     <div
       ref={root}
-      className={`${styles.shApp} ${styles[`layout-${layout}`] ?? ""}${selected ? ` ${styles.hasDetail}` : ""}`}
+      className={`${palette.shPalette} ${styles.shApp} ${styles[`layout-${layout}`] ?? ""}${selected ? ` ${styles.hasDetail}` : ""}`}
     >
       <aside className={styles.shSidebar} aria-label="分享">
         <div className={styles.shSidebarHead}>

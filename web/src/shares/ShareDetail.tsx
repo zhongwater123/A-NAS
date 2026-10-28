@@ -18,6 +18,7 @@ import { createPortal } from "react-dom";
 import { formatBytes } from "../lib/bytes";
 import { usePeople } from "../people/people";
 import { getShare, type Job, listJobs, revokeShare, type Share, type ShareEntry, viewShare } from "./api";
+import { Avatar, nameOf, names } from "./avatars";
 import { Conversation, type Thread, useThread } from "./Conversation";
 import {
   errorText,
@@ -37,7 +38,8 @@ import {
   topLevel,
   when,
 } from "./format";
-import { Avatar, EntryTile, kindOf, nameOf, names } from "./parts";
+import palette from "./palette.module.css";
+import { EntryTile, kindOf } from "./parts";
 import { SaveDialog } from "./SaveDialog";
 import { SharePreview } from "./SharePreview";
 import type { Layout } from "./SharesPanel";
@@ -531,7 +533,7 @@ export function ShareDetail({
         )}
       {confirmRevoke &&
         layer(
-          <div className={styles.shLayer}>
+          <div className={`${palette.shPalette} ${styles.shLayer}`}>
             <section
               className={`${styles.shDialog} ${styles.shConfirm}`}
               role="alertdialog"

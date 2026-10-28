@@ -6,6 +6,7 @@ import { createDirectory, listEntries, listSpaces } from "../files/api";
 import { formatBytes } from "../lib/bytes";
 import { type Job, requestKey, type Share, saveShare } from "./api";
 import { errorText, leaf } from "./format";
+import palette from "./palette.module.css";
 import { EntryTile } from "./parts";
 import styles from "./shares.module.css";
 
@@ -136,7 +137,7 @@ export function SaveDialog({
   return (
     <div
       ref={layer}
-      className={styles.shLayer}
+      className={`${palette.shPalette} ${styles.shLayer}`}
       onKeyDown={(event) => {
         if (event.key === "Escape" && naming === undefined && !busy) {
           event.stopPropagation();

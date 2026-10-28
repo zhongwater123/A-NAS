@@ -3,9 +3,9 @@ import { Fragment, useEffect, useRef, useState } from "react";
 
 import { usePeople } from "../people/people";
 import { listMessages, type Message, markRead, requestKey, type Share, sendMessage } from "./api";
+import { Avatar, nameOf } from "./avatars";
 import { EmojiInput } from "./EmojiInput";
 import { clock, dayLabel, errorText, isActive, receipt } from "./format";
-import { Avatar, nameOf } from "./parts";
 import { useShares } from "./SharesProvider";
 import styles from "./shares.module.css";
 

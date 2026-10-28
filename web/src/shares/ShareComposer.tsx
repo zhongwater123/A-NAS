@@ -6,8 +6,10 @@ import { formatBytes } from "../lib/bytes";
 import { PersonAvatar } from "../people/PersonAvatar";
 import { displayName } from "../people/people";
 import { createShare, listMembers, requestKey } from "./api";
+import avatars from "./avatars.module.css";
 import { EmojiInput } from "./EmojiInput";
 import { errorText } from "./format";
+import palette from "./palette.module.css";
 import { EntryTile } from "./parts";
 import styles from "./shares.module.css";
 
@@ -90,7 +92,7 @@ export function ShareComposer({
   const first = entries[0];
 
   return (
-    <div className={styles.shBackdrop}>
+    <div className={`${palette.shPalette} ${styles.shBackdrop}`}>
       <form
         ref={form}
         className={styles.shCompose}
@@ -171,7 +173,7 @@ export function ShareComposer({
                 <ul className={styles.shChosen} aria-label="已选成员">
                   {chosen.map((member, index) => (
                     <li key={member.id}>
-                      <PersonAvatar who={member} className={`${styles.shAvatar} ${styles.shAvatarXs}`} />
+                      <PersonAvatar who={member} className={`${avatars.shAvatar} ${avatars.shAvatarXs}`} />
                       <span>{displayName(member)}</span>
                       <button
                         type="button"
@@ -260,7 +262,7 @@ export function ShareComposer({
                         }
                       />
                       <span className={styles.shPersonFace}>
-                        <PersonAvatar who={member} className={`${styles.shAvatar} ${styles.shAvatarXl}`} />
+                        <PersonAvatar who={member} className={`${avatars.shAvatar} ${avatars.shAvatarXl}`} />
                         <span className={styles.shPersonCheck} aria-hidden="true">
                           <Check />
                         </span>

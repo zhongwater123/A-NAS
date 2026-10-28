@@ -2,6 +2,7 @@ import { Share2, X } from "lucide-react";
 import {
   createContext,
   type ReactNode,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -10,14 +11,20 @@ import {
   useRef,
   useState,
 } from "react";
+import { ErrorBoundary } from "react-error-boundary";
 
 import type { FileEntry } from "../api.generated";
 import { usePeople } from "../people/people";
+import { CodeMissing, lazyCode } from "../ui/lazyCode";
 import { getShare, listMessages, listShareNotifications, listShares, type Share, type ShareNotification } from "./api";
+import { Avatar, nameOf } from "./avatars";
 import { errorText, isUnread, shareTitle } from "./format";
-import { Avatar, nameOf } from "./parts";
-import { ShareComposer } from "./ShareComposer";
-import styles from "./shares.module.css";
+import palette from "./palette.module.css";
+import styles from "./toasts.module.css";
+
+// The send dialog loads its code and the window's styles when first opened,
+// as the windows do; the desktop starts with only the toasts.
+const ShareComposer = lazyCode(() => import("./ShareComposer").then((module) => module.ShareComposer));
 
 interface Focus {
   id: string;
@@ -96,6 +103,9 @@ function Provider({
   const [revision, setRevision] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [pollError, setPollError] = useState("");
+  // Why the send dialog closed on its own: its code did not download, which
+  // lasts until a reload, or it failed.
+  const [composerFailure, setComposerFailure] = useState("");
   const [unread, setUnread] = useState<Unread>({ received: 0, sent: 0 });
   // What was unread when the desktop opened is summarised once instead of
   // replaying every notice since this browser last looked.
@@ -220,18 +230,44 @@ function Provider({
     >
       {children}
       {draft && (
-        <ShareComposer
-          entries={draft}
-          onClose={() => setDraft(undefined)}
-          onCreated={(id) => {
+        <ErrorBoundary
+          fallback={null}
+          onError={(error) => {
+            console.error("A-NAS share composer failed", error);
             setDraft(undefined);
-            refresh();
-            open(id);
+            setComposerFailure(
+              error instanceof CodeMissing
+                ? "发送分享的窗口没有加载出来。A-NAS 可能刚刚更新过，重新载入页面后再分享。"
+                : "发送分享的窗口出错了，请再试一次。",
+            );
           }}
-        />
+        >
+          <Suspense fallback={null}>
+            <ShareComposer
+              entries={draft}
+              onClose={() => setDraft(undefined)}
+              onCreated={(id) => {
+                setDraft(undefined);
+                refresh();
+                open(id);
+              }}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )}
-      {(toasts.length > 0 || pollError || summary) && (
-        <aside className={styles.shToasts} aria-label="分享通知" aria-live="polite">
+      {(toasts.length > 0 || pollError || composerFailure || summary) && (
+        <aside className={`${palette.shPalette} ${styles.shToasts}`} aria-label="分享通知" aria-live="polite">
+          {composerFailure && (
+            <div className={`${styles.shToast} ${styles.shToastPlain}`} role="alert">
+              <span className={styles.shToastMark}>
+                <Share2 />
+              </span>
+              <p>{composerFailure}</p>
+              <button className={styles.shToastClose} aria-label="关闭提示" onClick={() => setComposerFailure("")}>
+                <X />
+              </button>
+            </div>
+          )}
           {pollError && (
             <div className={`${styles.shToast} ${styles.shToastPlain}`} role="status">
               <span className={styles.shToastMark}>
@@ -372,7 +408,13 @@ function NoticeToast({
     >
       <button className={styles.shToastOpen} onClick={onOpen}>
         {toast.author ? (
-          <Avatar people={people} id={toast.author.id} username={toast.author.username} size="md" />
+          <Avatar
+            people={people}
+            id={toast.author.id}
+            username={toast.author.username}
+            size="md"
+            className={styles.shToastAvatar}
+          />
         ) : (
           <span className={styles.shToastMark}>
             <Share2 />
