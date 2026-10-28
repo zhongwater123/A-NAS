@@ -446,6 +446,7 @@ func (e *Executor) ReconcileConversion(ctx context.Context) (bool, error) {
 	e.converting = true
 	args = append(args, e.mountPoint)
 	e.logger.InfoContext(ctx, "converting the data volume", "layout", marker.Layout, "command", "btrfs "+strings.Join(args, " "))
+	//nolint:gosec // G118: a conversion runs for hours and outlives the request that starts it; converting tracks it.
 	go func() {
 		output, err := e.runner.Run(context.Background(), "btrfs", args, "")
 		e.conversionMu.Lock()

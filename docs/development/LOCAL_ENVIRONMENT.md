@@ -151,7 +151,7 @@ docker context use colima    # colima start 会把 Docker 上下文切到 colima
 - 用 apt 安装 `build-essential`、`jq`、`rsync` 与 `python3-venv`。
 - Go 与 Node.js 从官方地址下载 linux-arm64 包，按官方公布的 SHA-256 核对。
 - ShellCheck 用 GitHub 发布的 `shellcheck-v0.11.0.linux.aarch64.tar.xz`，SHA-256 为 `12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588`。
-- Ruff 按[静态检查](#静态检查)的命令安装。
+- Ruff、pip-audit 与 uv 按[静态检查](#静态检查)的命令安装：`make check` 的 `vuln-check` 需要 pip-audit。
 
 镜像拉不下来时，可以从已有该镜像的虚拟机复制：`docker --context <来源> save <镜像> | docker --context colima-anas load`。
 
@@ -236,7 +236,7 @@ docker run --rm --cpuset-cpus=0-3 -v "$PWD:/src:ro" -w /src/ai \
   -e PYTHONDONTWRITEBYTECODE=1 anas-ai-dev:trixie /opt/anas-ai/bin/python -m unittest discover -s tests -t .
 ```
 
-发行用的 Worker 运行环境（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）也在开发机上构建：`scripts/build-ai-runtime.sh` 在同一开发镜像中按 [`ai/requirements.lock`](../../ai/requirements.lock) 的哈希安装 wheel，打包为 `build/ai-runtime/<ID>.tar.gz`，并写出 `deploy-dev.ps1` 读取的 `build/ai-runtime.json`。同一 ID 的包已存在时直接复用，因此 NAS 上看到的哈希不变；锁文件改了版本后先运行 `scripts/build-ai-runtime.sh --lock` 更新哈希。两者都从 PyPI 下载，NAS 不需要。2026-10-10 的包 `ccd886271b067afa` 压缩后 163 MB，解开约 460 MB；2026-10-13 加入 ONNX Runtime 后为 `3eca142df9a765c2`，压缩后 189 MB，解开约 542 MB。
+发行用的 Worker 运行环境（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）也在开发机上构建：`scripts/build-ai-runtime.sh` 在同一开发镜像中用 uv 按 [`ai/requirements.txt`](../../ai/requirements.txt) 的哈希安装 wheel，再运行 `pip check`，打包为 `build/ai-runtime/<ID>.tar.gz`，并写出 `deploy-dev.ps1` 读取的 `build/ai-runtime.json`。同一 ID 的包已存在时直接复用，因此 NAS 上看到的哈希不变。锁文件由 `ai/requirements.in` 生成：改了它之后，或要升级某个包时，运行 `scripts/build-ai-runtime.sh --lock [--upgrade-package 包名]`，它用 `uv pip compile` 重新解析运行环境与开发工具的两个锁文件。两者都需要 `ai/requirements-dev.txt` 固定版本的 uv 与 jq，都从 PyPI 下载，NAS 不需要。2026-10-10 的包 `ccd886271b067afa` 压缩后 163 MB，解开约 460 MB；2026-10-13 加入 ONNX Runtime 后为 `3eca142df9a765c2`，压缩后 189 MB，解开约 542 MB。
 
 AI 的评估（`ai/eval/`：标签阈值校准、搜索取舍与分块向量）使用放在 `D:\A-NAS-datasets`（WSL 中为 `/mnt/d/A-NAS-datasets`）的公开数据集，只在开发机使用，不进入仓库、NAS 或发行包；数据集来源、许可与结论见[标签校准报告](../research/photo-ai-label-calibration.md)。COCO 与 Open Images 元数据按报告中的地址下载并解压后，依次逐张下载其余图片、计算向量、校准阈值：
 
@@ -305,6 +305,7 @@ docker run --rm --privileged -e CGO_ENABLED=1 \
 
 root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不到正式 systemd unit 的沙箱。[ADR 0008 升级后 Web 文件无法使用](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)正是这类缺口。系统测试在以 systemd 为 PID 1 的 Debian 13 容器中，用真实安装器、unit 与发布二进制安装 A-NAS，再按用户检查：
 
+- 装好的单元连同安装器写的 drop-in，经与 NAS 相同版本的 `systemd-analyze verify` 校验，警告也算失败。`make ops-check` 的 grep 只核对单元中的约定值，不做这项：校验要求单元启动的命令与依赖的单元都存在，开发机与 CI 的检查作业没有它们；
 - Host Agent 保留 `CAP_SETUID`/`CAP_SETGID` 并通过启动自检；
 - Web 文件的读写、下载、删除与恢复以登录用户 UID 落盘，成员与管理员互相不可见；
 - SMB 与 Web 互相可见对方写入的文件，使用同一组 ACL、同一个回收站和同一个密码；
@@ -414,7 +415,7 @@ Web 测试由 [MSW](https://mswjs.io/) 应答产品 API（[`test/server.ts`](../
 | `make api-check` | 检查接口契约（`redocly lint`），再由它重新生成打包文档、Web 类型与响应校验，与已提交的不一致即失败，见[接口契约](#接口契约) |
 | `make web-lint` | `web/` 中的 `npm run lint`：Oxlint（含 jsx-a11y）与 eslint-plugin-react-hooks（含 React Compiler 的规则），再由 Biome 检查格式与导入顺序；规则列在 `web/.oxlintrc.json`，所有文件都须通过 |
 | `make go-lint` | golangci-lint，版本由 `tools/golangci-lint/go.mod` 固定，首次运行经 `go tool` 从 `proxy.golang.org` 构建；规则与理由见 `.golangci.yml` |
-| `make ai-lint` | Ruff 检查 `ai/`；`ai/requirements-dev.lock` 按哈希固定版本，`PATH` 上的 `ruff` 版本不同即失败。Ruff 在 WSL 中不检查可执行位（EXE001/EXE002），这两条只在 CI 报出：Python 文件在 Git 中是 0644，不写 shebang |
+| `make ai-lint` | Ruff 检查 `ai/`，规则与理由见 `ai/ruff.toml`；`ai/requirements-dev.txt` 按哈希固定版本，`PATH` 上的 `ruff` 版本不同即失败。Ruff 在 WSL 中不检查可执行位（EXE001/EXE002），这两条只在 CI 报出：Python 文件在 Git 中是 0644，不写 shebang |
 | `make docs-check` | [`tools/doccheck`](../../tools/doccheck/main.go) 按[文档的写入规则](../README.md#写入规则)核对状态与索引；再由 lychee 离线检查每个受 Git 跟踪的 `*.md` 中的链接：目标文件存在，指向 Markdown 的锚点对应真实的标题。lychee 的版本由 Makefile 的 `LYCHEE_VERSION` 固定（不同版本生成标题锚点的规则不同），CI 按哈希安装同一版本 |
 | `make ops-check` | 对每个受 Git 跟踪的 `*.sh` 运行 ShellCheck（`.shellcheckrc`）与 `bash -n`，由 `tools/depcheck` 确认 Dependabot 不把 0.x 的 Web 包放进分组，再核对单元与安装器的约定；ShellCheck 的版本由 Makefile 的 `SHELLCHECK_VERSION` 固定（不同版本判断不同），CI 按哈希安装同一版本 |
 
@@ -429,22 +430,26 @@ install /tmp/lychee-x86_64-unknown-linux-gnu/lychee ~/.local/opt/bin/lychee
 
 开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。
 
-Ruff 不随 npm 或 Go 安装。有 `ensurepip` 的机器装进独立的 venv，再把其 `bin` 加入 `PATH`：
+Ruff、pip-audit 与 uv 不随 npm 或 Go 安装，[`ai/requirements-dev.txt`](../../ai/requirements-dev.txt) 按哈希固定它们。有 `ensurepip` 的机器装进独立的 venv，再把其 `bin` 加入 `PATH`：
 
 ```bash
-python3 -m venv ~/.local/opt/ruff
-~/.local/opt/ruff/bin/pip install --no-deps --require-hashes --only-binary=:all: -r ai/requirements-dev.lock
+python3 -m venv ~/.local/opt/ai-tools
+~/.local/opt/ai-tools/bin/pip install --require-hashes --only-binary=:all: -r ai/requirements-dev.txt
 ```
 
-开发机 B 的 Python 3.14 没有 `ensurepip`：从 PyPI 下载本机平台的 wheel，核对 SHA-256 与锁文件中的一项相同，再解出其中的 `ruff-<版本>.data/scripts/ruff`。
+开发机 B 的 Python 3.14 没有 `ensurepip`：先从 uv 的 GitHub 发布页下载锁文件固定版本的 `uv-x86_64-unknown-linux-gnu.tar.gz`，按同页的 `.sha256` 核对后装进 `~/.local/opt/bin`，再用 `uv venv ~/.local/opt/ai-tools` 建环境，`uv pip install --python ~/.local/opt/ai-tools/bin/python --require-hashes -r ai/requirements-dev.txt` 安装。
 
-`make race-test` 以竞态检测器、每次 4 个包运行全部 Go 测试，需要 gcc；CI 另开作业运行，修改并发代码时本地也运行。测试注入的时钟与 ID 生成器也会被后台 goroutine 调用，要像 `time.Now` 一样可以并发调用：时钟用 `internal/clocktest`，不要在闭包里改写捕获的变量，否则这个作业会偶发失败。
+`make race-test` 以竞态检测器、每次 4 个包运行 `internal/webui` 以外的全部 Go 测试，需要 gcc，不需要 Node.js；CI 另开作业运行，修改并发代码时本地也运行。测试注入的时钟与 ID 生成器也会被后台 goroutine 调用，要像 `time.Now` 一样可以并发调用：时钟用 `internal/clocktest`，不要在闭包里改写捕获的变量，否则这个作业会偶发失败。
 
 Web 代码由 Biome 格式化并排列导入（`web/biome.json`：先 Node 与 npm 包，空一行，再相对路径）：提交前运行 `cd web && npm run format`。2026-10-22 对全部 Web 代码的一次格式化提交列在 `.git-blame-ignore-revs`，GitHub 的 blame 跳过它，本地运行 `git config blame.ignoreRevsFile .git-blame-ignore-revs`。在它之前分出的分支先合并它的父提交，在分支上运行 `npm run format` 并提交，再合并 `main`，这样只剩真正的冲突。
 
 ## CI
 
 `.github/workflows/ci.yml` 对每个 PR 和每次合入 `main` 运行三个作业：`Project checks`（`make check`）、`Go tests with the race detector`（`make race-test`）与 `System test (Debian 13, systemd)`（`make system-test`）。`main` 的规则集按作业名要求三者通过才能合并，改作业名时同时改规则集。新的强制检查加进这三个作业，通常是 Makefile 的 `check-steps`，规则集不用改。
+
+各作业的 Go 版本取自 `.go-version`，Node.js 版本取自 `.nvmrc`；`package.json` 的 `engines` 只是允许的范围。竞态作业不装 Node.js：`make race-test` 不跑只服务前端构建产物的 `internal/webui`，它由 `make check` 覆盖。系统测试的 Debian 13 镜像按构建脚本的哈希与所在的周缓存，构建脚本改了或过了一周才重新组装。
+
+另有两个每周定时、不在规则集中的工作流：`vuln.yml` 运行 `make vuln-check`，报告此后新发布的公告；`fuzz.yml` 从代码中找出全部 `func Fuzz…`，每个目标跑 5 分钟，失败时上传触发失败的输入，把它放进该包的 `testdata/fuzz/<目标>/` 就成为回归用例。
 
 PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作业按条件跳过，GitHub 把条件跳过的作业记为通过。文档指 `docs/` 下的文件、根目录的 `*.md` 和 `.claude/skills/` 中的 `*.md`；其他目录中的 Markdown 随产品发布（助手技能、应用目录的说明），按代码处理。判定见 `scripts/ci-scope.sh`，判定失败时三个作业照常完整运行。合入 `main` 后的运行总是完整的。
 

@@ -232,6 +232,7 @@ func (h *productHandler) handleDeleteSession(w http.ResponseWriter, r *http.Requ
 	if h.AssistantKeeper != nil {
 		h.AssistantKeeper.Forget(token)
 	}
+	//nolint:gosec // G124: the LAN entry is plain HTTP (ADR 0012), where a Secure cookie would not be sent.
 	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -274,6 +275,7 @@ func (h *productHandler) setSessionCookie(w http.ResponseWriter, session account
 	if session.LocalConsole() {
 		expires = time.Now().Add(maxCookieLifetime)
 	}
+	//nolint:gosec // G124: the LAN entry is plain HTTP (ADR 0012), where a Secure cookie would not be sent.
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Value: session.Token, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteStrictMode, Expires: expires,

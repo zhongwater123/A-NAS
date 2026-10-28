@@ -119,7 +119,7 @@ class Cache:
                 vectors = {name[2:]: data[name] for name in data.files if name.startswith("v_")}
                 missing = {name: data["m_" + name] for name in vectors}
                 start = 0
-                for index, (key, count) in enumerate(zip(keys, counts)):
+                for index, (key, count) in enumerate(zip(keys, counts, strict=True)):
                     self.photos[key] = {
                         "boxes": boxes[start:start + count],
                         "vectors": {name: found[start:start + count] for name, found in vectors.items()

@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-27
+更新时间：2026-10-28
 
 本页只记当前事实与下一步。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，合并与部署的经过由 Git 与 PR 保存。
 
@@ -14,6 +14,7 @@
 - AI 助手按[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)为全部成员开启，用云端模型，仅供开发测试。
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1（2026-10-20 在 #149 的早期构建上加入第二块盘）。
 - 已合并、尚未部署的 PR 不在本页列出：`git fetch` 后运行 `bash scripts/undeployed.sh`，由 Git 列出“已部署”之后合入 main 的 PR。
+- 本地控制台仍以暂存账号 `anas-dev` 运行。下一次安装会把它换成专用账号 `a-nas-kiosk`（[#174](https://github.com/zhongwater123/A-NAS/issues/174)），安装前要先在本机屏幕上退出登录，见[实机配置手册的安装第 2 步](../runbooks/provision-v1.0.1-experimental-storage.md#安装系统服务)。同一次部署还会上传新的 AI 运行环境（约 190 MB，锁文件改由 uv 生成并升级了 Pillow）。
 
 ## 阻塞与外部条件
 

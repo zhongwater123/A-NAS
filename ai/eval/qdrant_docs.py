@@ -122,7 +122,7 @@ def hits(chunks, queries, rankings, files=None):
     """
     totals = {"hit@1": 0, "hit@5": 0, "hit@10": 0, "mrr@10": 0.0, "fileHit@1": 0, "fileHit@5": 0}
     ranks = []
-    for number, (query, ranked) in enumerate(zip(queries, rankings)):
+    for number, (query, ranked) in enumerate(zip(queries, rankings, strict=True)):
         targets = set(query["targets"])
         rank = next((r for r, index in enumerate(ranked) if chunks[index].id.split("~")[0] in targets), None)
         if rank is not None:
