@@ -13,11 +13,21 @@ afterEach(() => {
   localStorage.clear();
 });
 
-const tick = async (milliseconds = 0) => {
+// tick moves the fake clock by ms, then 200 ms more in small steps, so the
+// requests that started get their answers: MSW answers through a socket that
+// waits on timers (setImmediate), which are fake here, so a reply takes a few
+// steps of the clock. 200 ms is far below the 3 s and 5 s polls.
+async function tick(ms = 0) {
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(milliseconds);
+    await vi.advanceTimersByTimeAsync(ms);
   });
-};
+  for (let step = 0; step < 20; step++) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+  }
+}
+
 const message = (id: number, recipient = "bob") => ({
   id,
   sender: { id: recipient, username: recipient },
