@@ -328,7 +328,8 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
     read only = no
     browseable = yes
     access based share enum = yes
-%s`, interfaces, e.mountPoint, sambaShareOptions, e.mountPoint, accountid.UsersGroup, sambaShareOptions)
+%s`, interfaces, e.mountPoint, sambaShareOptions, e.mountPoint, accountid.UsersGroup,
+		strings.Replace(sambaShareOptions, "veto files = /.a-nas-trash/", "veto files = /.a-nas-trash/Agent空间/", 1))
 	configurationPath := filepath.Join(e.systemRoot, "etc", "samba", "smb.conf")
 	candidatePath := configurationPath + ".candidate"
 	if err := writeAtomic(candidatePath, []byte(configuration), 0o644); err != nil {
