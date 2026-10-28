@@ -334,7 +334,7 @@
   background: linear-gradient(160deg, #ffb24a, #e8660f);
 }
 .lg-cat.danger {
-  background: linear-gradient(160deg, #ff7a7f, #d23b48);
+  background: linear-gradient(160deg, #ff7a7f, var(--color-danger));
 }
 .lg-cat.success {
   background: linear-gradient(160deg, #57d68f, #1b9459);
@@ -1168,6 +1168,11 @@
   max-width: 100%;
   max-height: 560px;
   scrollbar-width: thin;
+}
+/* The table scrolls inside its card, under its sticky header; a plain card
+   clips its content instead. */
+.set-card.tm-table-scroll {
+  overflow: auto;
 }
 .tm-table {
   width: 100%;
@@ -2442,7 +2447,7 @@
   background: linear-gradient(160deg, #7690ff, #4560d6);
 }
 .set-tile.danger {
-  background: linear-gradient(160deg, #ff7a7f, #d23b48);
+  background: linear-gradient(160deg, #ff7a7f, var(--color-danger));
 }
 .set-tile.nickname {
   background: linear-gradient(160deg, #ff8fb8, #e0457f);

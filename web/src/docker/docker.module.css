@@ -272,7 +272,7 @@
   background: linear-gradient(160deg, #a7b0bf, #6f7a8c);
 }
 .dk-tile.attention {
-  background: linear-gradient(160deg, #ff7f86, #d23b48);
+  background: linear-gradient(160deg, #ff7f86, var(--color-danger));
 }
 .dk-tile.images {
   background: linear-gradient(160deg, #b59cff, #7350e0);
@@ -316,7 +316,7 @@
   background: linear-gradient(155deg, #ffc560, #e08a12);
 }
 .dk-glyph.danger {
-  background: linear-gradient(155deg, #ff858c, #d23b48);
+  background: linear-gradient(155deg, #ff858c, var(--color-danger));
 }
 .dk-glyph.app {
   background: #f4f6fa;
@@ -850,7 +850,7 @@
   --dk-tint: #e08a12;
 }
 .dk-head.danger {
-  --dk-tint: #d23b48;
+  --dk-tint: var(--color-danger);
 }
 .dk-head-text {
   min-width: 0;

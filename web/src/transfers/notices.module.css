@@ -342,7 +342,7 @@
   color: #b06a10;
 }
 .status-transfers-pop li.failed .state {
-  color: #d23b48;
+  color: var(--color-danger);
 }
 .status-transfers-pop .bar {
   grid-column: 1 / -1;
