@@ -1,5 +1,5 @@
 import { ArrowDownUp, FolderClosed, Music2, Settings, Share2, ShoppingBag, Trash2 } from "lucide-react";
-import { lazy, ReactNode } from "react";
+import { createContext, ReactNode, use } from "react";
 
 import type { Session, User } from "../api.generated";
 import { AssistantGlyph } from "../assistant/AssistantGlyph";
@@ -12,31 +12,24 @@ import { PhotosGlyph } from "../photos/PhotosGlyph";
 import type { SettingsSection } from "../settings/SettingsPanel";
 import type { StoragePlanFlow } from "../settings/storagePlan";
 import type { TransferLocation } from "../transfers/api";
+import { lazyCode } from "../ui/lazyCode";
 import { DesktopApp } from "./DesktopGrid";
 import type { HostStateView } from "./useHostState";
 
 // Every window loads its code and styles when it is first opened; the desktop
-// needs only the apps' icons. The desktop shows a spinner in the window until then.
-const AppCenterPanel = lazy(() =>
-  import("../appcenter/AppCenterPanel").then((module) => ({ default: module.AppCenterPanel })),
-);
-const AssistantPanel = lazy(() =>
-  import("../assistant/AssistantPanel").then((module) => ({ default: module.AssistantPanel })),
-);
-const BackupCenter = lazy(() => import("../backup/BackupCenter").then((module) => ({ default: module.BackupCenter })));
-const DockerPanel = lazy(() => import("../docker/DockerPanel").then((module) => ({ default: module.DockerPanel })));
-const FilePanel = lazy(() => import("../files/FilePanel").then((module) => ({ default: module.FilePanel })));
-const MediaCenter = lazy(() => import("../media/MediaCenter").then((module) => ({ default: module.MediaCenter })));
-const MusicPanel = lazy(() => import("../music/MusicPanel").then((module) => ({ default: module.MusicPanel })));
-const PhotosPanel = lazy(() => import("../photos/PhotosPanel").then((module) => ({ default: module.PhotosPanel })));
-const SettingsPanel = lazy(() =>
-  import("../settings/SettingsPanel").then((module) => ({ default: module.SettingsPanel })),
-);
-const SharesPanel = lazy(() => import("../shares/SharesPanel").then((module) => ({ default: module.SharesPanel })));
-const TransferCenter = lazy(() =>
-  import("../transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })),
-);
-const TrashPanel = lazy(() => import("../trash/TrashPanel").then((module) => ({ default: module.TrashPanel })));
+// needs only the apps' icons and shows a spinner in the window until then.
+const AppCenterPanel = lazyCode(() => import("../appcenter/AppCenterPanel").then((module) => module.AppCenterPanel));
+const AssistantPanel = lazyCode(() => import("../assistant/AssistantPanel").then((module) => module.AssistantPanel));
+const BackupCenter = lazyCode(() => import("../backup/BackupCenter").then((module) => module.BackupCenter));
+const DockerPanel = lazyCode(() => import("../docker/DockerPanel").then((module) => module.DockerPanel));
+const FilePanel = lazyCode(() => import("../files/FilePanel").then((module) => module.FilePanel));
+const MediaCenter = lazyCode(() => import("../media/MediaCenter").then((module) => module.MediaCenter));
+const MusicPanel = lazyCode(() => import("../music/MusicPanel").then((module) => module.MusicPanel));
+const PhotosPanel = lazyCode(() => import("../photos/PhotosPanel").then((module) => module.PhotosPanel));
+const SettingsPanel = lazyCode(() => import("../settings/SettingsPanel").then((module) => module.SettingsPanel));
+const SharesPanel = lazyCode(() => import("../shares/SharesPanel").then((module) => module.SharesPanel));
+const TransferCenter = lazyCode(() => import("../transfers/TransferCenter").then((module) => module.TransferCenter));
+const TrashPanel = lazyCode(() => import("../trash/TrashPanel").then((module) => module.TrashPanel));
 
 // What another window can ask an app to show when it opens it.
 export interface WindowIntentPayloads {
@@ -50,8 +43,9 @@ export interface WindowIntentPayloads {
   assistant: { sessionId?: string; title?: string };
 }
 // The intents waiting for their windows. Every request is a new object, so a
-// window sees a request for the place it already shows; the window reports it
-// handled and the desktop forgets it.
+// window sees a request for the place it already shows. The window hands back
+// the intent it handled, and the desktop forgets it only if no newer request
+// has taken its place.
 export type WindowIntents = { [ID in keyof WindowIntentPayloads]?: WindowIntentPayloads[ID] };
 // OpenWindow opens or raises an app's window, with what to show for apps that take an intent.
 export type OpenWindow = <ID extends WindowID>(
@@ -59,23 +53,46 @@ export type OpenWindow = <ID extends WindowID>(
   ...intent: ID extends keyof WindowIntentPayloads ? [intent?: WindowIntentPayloads[ID]] : []
 ) => void;
 
-// WindowContext is what the desktop gives the apps' windows and icons.
+// WindowContext is what the desktop gives the apps' windows and icons. A new
+// one re-renders every open window, so it holds only what changes rarely.
 export interface WindowContext {
   session: Session;
   isAdmin: boolean;
-  host: HostStateView;
   // The assistant opens only when this device runs one for this account (ADR 0024).
   assistantReady: boolean;
   open: OpenWindow;
   intents: WindowIntents;
-  intentHandled: (id: keyof WindowIntentPayloads) => void;
-  // The section and any pending storage plan outlive the settings window, so
-  // reopening it returns to where the user left off.
-  settingsSection: SettingsSection;
-  setSettingsSection: (section: SettingsSection) => void;
-  storagePlan: StoragePlanFlow;
+  intentHandled: <ID extends keyof WindowIntentPayloads>(id: ID, handled: WindowIntentPayloads[ID]) => void;
   changeUser: (user: User) => void;
   logout: () => void;
+}
+
+// SettingsState is what the desktop keeps for the settings window alone: the
+// host's state, new with every poll, and the section and any pending storage
+// plan, which outlive the window so reopening it returns to where the user
+// left off. A context of its own re-renders only that window.
+export interface SettingsState {
+  host: HostStateView;
+  section: SettingsSection;
+  setSection: (section: SettingsSection) => void;
+  storagePlan: StoragePlanFlow;
+}
+export const SettingsStateContext = createContext<SettingsState | undefined>(undefined);
+
+function SettingsWindow({ session, changeUser, logout }: Pick<WindowContext, "session" | "changeUser" | "logout">) {
+  const state = use(SettingsStateContext);
+  if (!state) throw new Error("SettingsWindow outside the desktop");
+  return (
+    <SettingsPanel
+      session={session}
+      host={state.host}
+      section={state.section}
+      onSectionChange={state.setSection}
+      storagePlan={state.storagePlan}
+      onUserChange={changeUser}
+      onLogout={logout}
+    />
+  );
 }
 
 interface AppDefinition {
@@ -123,7 +140,7 @@ const definitions = {
       <FilePanel
         userID={session.user.id}
         intent={intents.files}
-        onIntentHandled={() => intentHandled("files")}
+        onIntentHandled={(handled) => intentHandled("files", handled)}
         onOpenTransfers={() => open("transfers")}
         onOpenPhotos={() => open("photos")}
         onOpenMedia={() => open("media")}
@@ -150,16 +167,8 @@ const definitions = {
       keywords: ({ isAdmin }) =>
         `账号 密码 smb 用户 成员 权限 存储 磁盘 数据卷 系统 日志 审计 登录记录 活动 log${isAdmin ? " 终端 shell 命令行 bash" : ""}`,
     },
-    render: (context) => (
-      <SettingsPanel
-        session={context.session}
-        host={context.host}
-        section={context.settingsSection}
-        onSectionChange={context.setSettingsSection}
-        storagePlan={context.storagePlan}
-        onUserChange={context.changeUser}
-        onLogout={context.logout}
-      />
+    render: ({ session, changeUser, logout }) => (
+      <SettingsWindow session={session} changeUser={changeUser} logout={logout} />
     ),
   },
   store: {
@@ -214,7 +223,7 @@ const definitions = {
     render: ({ intents, intentHandled, open }) => (
       <DockerPanel
         intent={intents.docker}
-        onIntentHandled={() => intentHandled("docker")}
+        onIntentHandled={(handled) => intentHandled("docker", handled)}
         onOpenStore={() => open("store")}
       />
     ),
@@ -232,7 +241,7 @@ const definitions = {
         userName={displayName(session.user)}
         isAdmin={isAdmin}
         intent={intents.photos}
-        onIntentHandled={() => intentHandled("photos")}
+        onIntentHandled={(handled) => intentHandled("photos", handled)}
       />
     ),
   },
@@ -260,7 +269,7 @@ const definitions = {
         username={session.user.username}
         onShowPhoto={(assetId) => open("photos", { assetId })}
         intent={intents.assistant}
-        onIntentHandled={() => intentHandled("assistant")}
+        onIntentHandled={(handled) => intentHandled("assistant", handled)}
       />
     ),
   },

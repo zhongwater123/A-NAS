@@ -51,3 +51,21 @@ Object.defineProperty(document, "hidden", {
   configurable: true,
   value: false,
 });
+
+// jsdom captures no pointer (jsdom 30), and windows follow a drag by pointer
+// capture (desktop/AppWindow.tsx). Here a capture ends as a browser ends it:
+// the press is released or cancelled anywhere, then the element hears that it
+// lost the pointer. Moves are not redirected; tests send them to the element
+// they pressed.
+if (!Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = function (this: Element) {
+    const end = () => {
+      document.removeEventListener("pointerup", end, true);
+      document.removeEventListener("pointercancel", end, true);
+      // After the release has reached every listener.
+      queueMicrotask(() => this.dispatchEvent(new Event("lostpointercapture")));
+    };
+    document.addEventListener("pointerup", end, true);
+    document.addEventListener("pointercancel", end, true);
+  };
+}

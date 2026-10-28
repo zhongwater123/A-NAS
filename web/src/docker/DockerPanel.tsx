@@ -67,7 +67,7 @@ export function DockerPanel({
 }: {
   // The App Center asks to show one app's containers.
   intent?: { project: string };
-  onIntentHandled?: () => void;
+  onIntentHandled?: (handled: { project: string }) => void;
   onOpenStore?: () => void;
 }) {
   const { snapshot, error, refreshing, refresh } = useContainerSnapshot();
@@ -93,9 +93,9 @@ export function DockerPanel({
       setQuery("");
     }
   }
-  const intentHandled = useEffectEvent(() => onIntentHandled?.());
+  const intentHandled = useEffectEvent((handled: { project: string }) => onIntentHandled?.(handled));
   useEffect(() => {
-    if (intent) intentHandled();
+    if (intent) intentHandled(intent);
   }, [intent]);
   const selectedId = selected?.id;
   useLayoutEffect(() => {

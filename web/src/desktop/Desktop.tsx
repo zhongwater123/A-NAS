@@ -29,7 +29,18 @@ import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices"
 import { AppWindow } from "./AppWindow";
 import type { AssistantTaskNotice } from "./api";
 import { shortcutApp, useAppShortcuts } from "./appShortcuts";
-import { apps, desktopApps, OpenWindow, WindowContext, WindowID, WindowIntents, windowIDs } from "./apps";
+import {
+  apps,
+  desktopApps,
+  OpenWindow,
+  type SettingsState,
+  SettingsStateContext,
+  WindowContext,
+  WindowID,
+  WindowIntentPayloads,
+  WindowIntents,
+  windowIDs,
+} from "./apps";
 import { DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import styles from "./desktop.module.css";
@@ -119,7 +130,8 @@ export function Desktop({
     dispatch({ type: "open", id });
   }, []);
   const intentHandled = useCallback(
-    (id: keyof WindowIntents) => setIntents((current) => (current[id] ? { ...current, [id]: undefined } : current)),
+    <ID extends keyof WindowIntentPayloads>(id: ID, handled: WindowIntentPayloads[ID]) =>
+      setIntents((current) => (current[id] === handled ? { ...current, [id]: undefined } : current)),
     [],
   );
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("overview");
@@ -145,35 +157,15 @@ export function Desktop({
     open("assistant", { sessionId: run.sessionId, title: `${run.name} · ${whenText(Date.parse(run.ranAt) / 1000)}` });
   const isAdmin = session.user.role === "admin";
   // The windows' content re-renders only when this changes, not when a
-  // window is dragged, resized or brought to the front.
+  // window is dragged, resized or brought to the front, nor when the host's
+  // state is polled: that reaches the settings window alone.
   const context = useMemo<WindowContext>(
-    () => ({
-      session,
-      isAdmin,
-      host,
-      assistantReady,
-      open,
-      intents,
-      intentHandled,
-      settingsSection,
-      setSettingsSection,
-      storagePlan,
-      changeUser,
-      logout: onLogout,
-    }),
-    [
-      session,
-      isAdmin,
-      host,
-      assistantReady,
-      open,
-      intents,
-      intentHandled,
-      settingsSection,
-      storagePlan,
-      changeUser,
-      onLogout,
-    ],
+    () => ({ session, isAdmin, assistantReady, open, intents, intentHandled, changeUser, logout: onLogout }),
+    [session, isAdmin, assistantReady, open, intents, intentHandled, changeUser, onLogout],
+  );
+  const settingsState = useMemo<SettingsState>(
+    () => ({ host, section: settingsSection, setSection: setSettingsSection, storagePlan }),
+    [host, settingsSection, storagePlan],
   );
   const shortcuts = useAppShortcuts();
   const launcherApps = [
@@ -269,17 +261,19 @@ export function Desktop({
           <NotificationCenter />
         </ShellPart>
 
-        <section className={styles.windowLayer} aria-label="A-NAS 桌面窗口">
-          {windows.map((window) => {
-            // Minimized windows stay mounted so a running terminal session in Settings survives.
-            if (!window.open) return null;
-            return (
-              <AppWindow key={window.id} model={window} dispatch={dispatch}>
-                <WindowContent id={window.id} context={context} />
-              </AppWindow>
-            );
-          })}
-        </section>
+        <SettingsStateContext.Provider value={settingsState}>
+          <section className={styles.windowLayer} aria-label="A-NAS 桌面窗口">
+            {windows.map((window) => {
+              // Minimized windows stay mounted so a running terminal session in Settings survives.
+              if (!window.open) return null;
+              return (
+                <AppWindow key={window.id} model={window} dispatch={dispatch}>
+                  <WindowContent id={window.id} context={context} />
+                </AppWindow>
+              );
+            })}
+          </section>
+        </SettingsStateContext.Provider>
 
         <ShellPart name="dock">
           <Dock

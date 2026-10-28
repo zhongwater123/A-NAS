@@ -481,6 +481,37 @@ describe("PhotosPanel viewer", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("shows the newer of two photos asked for in a row and hands back only that request", async () => {
+    let releaseSlow = () => {};
+    const slow = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+    serve(
+      { timelines: mine(() => [asset("photo:a")]) },
+      http.get("/api/v1/photos/assets/{assetId}", async ({ params, response }) => {
+        if (params.assetId !== "photo:slow") return undefined;
+        await slow;
+        return response(200).json(asset("photo:slow"));
+      }),
+      photoDetails(() => [asset("photo:z")]),
+    );
+    const handled = vi.fn();
+    const first = { assetId: "photo:slow" };
+    const second = { assetId: "photo:z" };
+    const panel = (intent: { assetId: string }) => (
+      <PhotosPanel userId="user:alice" userName="alice" isAdmin={false} intent={intent} onIntentHandled={handled} />
+    );
+    const { rerender } = render(panel(first));
+    rerender(panel(second));
+
+    expect(await screen.findByRole("dialog", { name: "查看 photo:z.jpg" })).toBeTruthy();
+    expect(handled).toHaveBeenCalledWith(second);
+    releaseSlow();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(handled).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "查看 photo:slow.jpg" })).toBeNull();
+  });
+
   it("says so when a photo another window asks for cannot be read", async () => {
     serve(
       { timelines: mine(() => [asset("photo:a")]) },

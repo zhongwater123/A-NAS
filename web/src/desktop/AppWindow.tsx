@@ -1,7 +1,8 @@
-import { CircleAlert, Maximize2, Minus, PanelLeftClose, X } from "lucide-react";
+import { CircleAlert, CloudOff, Maximize2, Minus, PanelLeftClose, X } from "lucide-react";
 import { ErrorInfo, ReactNode, PointerEvent as ReactPointerEvent, useState } from "react";
 import { ErrorBoundary, type FallbackProps } from "react-error-boundary";
 
+import { CodeMissing } from "../ui/lazyCode";
 import { apps } from "./apps";
 import styles from "./desktop.module.css";
 import { WINDOW_ID } from "./windowSnapshot";
@@ -18,27 +19,39 @@ export function AppWindow({
 }) {
   // While the pointer moves, the window keeps its place and size here and
   // tells the desktop once released, so the desktop and the other windows do
-  // not re-render on every move.
+  // not re-render on every move. The pressed title bar or handle captures the
+  // pointer: its moves arrive wherever the pointer goes, a press the browser
+  // cancels puts the window back, and the listeners go with the element.
   const [moving, setMoving] = useState<{ x: number; y: number }>();
   const [sizing, setSizing] = useState<{ width: number; height: number }>();
   const follow = <Value,>(
+    press: ReactPointerEvent<HTMLElement>,
     update: (moveEvent: PointerEvent) => Value,
     show: (value?: Value) => void,
     done: (value: Value) => void,
   ) => {
+    const target = press.currentTarget;
+    target.setPointerCapture(press.pointerId);
     let latest: Value | undefined;
     const move = (moveEvent: PointerEvent) => {
       latest = update(moveEvent);
       show(latest);
     };
-    const stop = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
+    const release = () => {
       if (latest !== undefined) done(latest);
-      show(undefined);
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop, { once: true });
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", release, { once: true });
+    // Follows pointerup, or pointercancel without one.
+    target.addEventListener(
+      "lostpointercapture",
+      () => {
+        target.removeEventListener("pointermove", move);
+        target.removeEventListener("pointerup", release);
+        show(undefined);
+      },
+      { once: true },
+    );
   };
 
   const beginDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -47,6 +60,7 @@ export function AppWindow({
     dispatch({ type: "focus", id: model.id });
     const origin = { pointerX: event.clientX, pointerY: event.clientY, x: model.x, y: model.y };
     follow(
+      event,
       (moveEvent) => ({
         x: Math.max(88, origin.x + moveEvent.clientX - origin.pointerX),
         y: Math.max(12, origin.y + moveEvent.clientY - origin.pointerY),
@@ -61,6 +75,7 @@ export function AppWindow({
     event.preventDefault();
     const origin = { pointerX: event.clientX, pointerY: event.clientY, width: model.width, height: model.height };
     follow(
+      event,
       (moveEvent) => ({
         width: Math.max(520, origin.width + moveEvent.clientX - origin.pointerX),
         height: Math.max(330, origin.height + moveEvent.clientY - origin.pointerY),
@@ -135,8 +150,20 @@ const logWindowError = (id: string) => (error: unknown, info: ErrorInfo) =>
   console.error(`A-NAS ${id} window failed`, error, info.componentStack);
 
 // WindowFailed replaces a window whose content threw. Reopening mounts the
-// content afresh; the desktop and the other windows keep running.
-function WindowFailed({ resetErrorBoundary }: FallbackProps) {
+// content afresh; the desktop and the other windows keep running. A window
+// whose code did not download comes back only with the page.
+function WindowFailed({ error, resetErrorBoundary }: FallbackProps) {
+  if (error instanceof CodeMissing)
+    return (
+      <div className={styles.centerState}>
+        <CloudOff />
+        <h2>这个窗口没有加载出来</h2>
+        <p>A-NAS 可能刚刚更新过，或网络中断了。重新载入页面后再打开，其他窗口里没保存的内容会丢失。</p>
+        <button className="primary" onClick={() => window.location.reload()}>
+          重新载入页面
+        </button>
+      </div>
+    );
   return (
     <div className={styles.centerState}>
       <CircleAlert />

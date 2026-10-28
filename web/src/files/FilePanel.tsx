@@ -54,9 +54,9 @@ import { useTextPreview } from "./useTextPreview";
 
 interface FilePanelProps {
   userID: string;
-  // A folder another window asked for; onIntentHandled tells the desktop it is shown.
+  // A folder another window asked for; onIntentHandled hands it back once it is shown.
   intent?: TransferLocation;
-  onIntentHandled: () => void;
+  onIntentHandled: (handled: TransferLocation) => void;
   onOpenTransfers: () => void;
   onOpenPhotos: () => void;
   onOpenMedia: () => void;
@@ -134,7 +134,7 @@ export function FilePanel({
   }
   const intentHandled = useEffectEvent(onIntentHandled);
   useEffect(() => {
-    if (intent) intentHandled();
+    if (intent) intentHandled(intent);
   }, [intent]);
   // Another item gets another try at its preview.
   const [previewedID, setPreviewedID] = useState(selectedItemID);

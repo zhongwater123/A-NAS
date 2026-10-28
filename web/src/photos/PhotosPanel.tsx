@@ -34,9 +34,9 @@ interface Props {
   userId: string;
   userName: string;
   isAdmin: boolean;
-  /** A photo to show on its own, asked for by another window; onIntentHandled clears it. */
+  /** A photo to show on its own, asked for by another window; onIntentHandled hands it back once shown. */
   intent?: { assetId: string };
-  onIntentHandled?(): void;
+  onIntentHandled?(handled: { assetId: string }): void;
 }
 
 const narrowWidth = 720;

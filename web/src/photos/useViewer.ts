@@ -24,9 +24,9 @@ import type { PhotoActions } from "./usePhotoActions";
 import type { ViewerActions } from "./Viewer";
 
 interface Options {
-  /** A photo to show on its own, asked for by another window; onIntentHandled clears it. */
+  /** A photo to show on its own, asked for by another window; onIntentHandled hands it back once shown. */
   intent?: { assetId: string };
-  onIntentHandled?(): void;
+  onIntentHandled?(handled: { assetId: string }): void;
   viewAssets: PhotoAsset[];
   place?: Place;
   setPlace: (place: Place) => void;
@@ -142,8 +142,10 @@ export function useViewer({
     error: reportError,
   };
   // Runs once per intent; the callbacks it uses do not decide what to show.
+  // An intent replaced before its photo arrived is left to its successor,
+  // which hands back its own.
   const focusFailed = useEffectEvent(reportError);
-  const intentHandled = useEffectEvent(() => onIntentHandled?.());
+  const intentHandled = useEffectEvent((handled: { assetId: string }) => onIntentHandled?.(handled));
   useEffect(() => {
     if (!intent) return;
     let current = true;
@@ -157,7 +159,9 @@ export function useViewer({
       .catch((reason) => {
         if (current) focusFailed(messageOf(reason));
       })
-      .finally(() => intentHandled());
+      .finally(() => {
+        if (current) intentHandled(intent);
+      });
     return () => {
       current = false;
     };

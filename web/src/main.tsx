@@ -8,8 +8,9 @@ import styles from "./desktop/desktop.module.css";
 
 const container = document.getElementById("root")!;
 
-// The desktop's last resort: a window or a part of the desktop that fails
-// has its own boundary, so this shows only when the desktop itself cannot.
+// The desktop's last resort: a window, a part of the desktop or the boot
+// splash that fails has its own boundary, so this shows only when the desktop
+// itself cannot.
 function DesktopFailed() {
   return (
     <main className={styles.authShell}>
@@ -40,6 +41,12 @@ createRoot(container, {
     >
       <App />
     </ErrorBoundary>
-    <BootSplash />
+    {/* The splash only covers the start; if it fails, the page goes on without it. */}
+    <ErrorBoundary
+      fallback={null}
+      onError={(error, info) => console.error("A-NAS boot splash failed", error, info.componentStack)}
+    >
+      <BootSplash />
+    </ErrorBoundary>
   </StrictMode>,
 );
