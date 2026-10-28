@@ -525,6 +525,12 @@ func copyFileAt(ctx context.Context, sourceDir int, sourceName string, targetDir
 		}
 	}
 	if err == nil {
+		var after unix.Stat_t
+		if err = unix.Fstat(inputFD, &after); err == nil && (after.Size != stat.Size || after.Mtim != stat.Mtim || after.Ctim != stat.Ctim) {
+			err = fmt.Errorf("%w: source changed during copy", ErrConflict)
+		}
+	}
+	if err == nil {
 		err = unix.UtimesNanoAt(outputFD, "", []unix.Timespec{{Nsec: unix.UTIME_OMIT}, stat.Mtim}, unix.AT_EMPTY_PATH)
 	}
 	if err == nil {

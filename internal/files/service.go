@@ -508,6 +508,10 @@ func (s *Service) OpenContent(ctx context.Context, actor accounts.User, entryID 
 }
 
 func (s *Service) Delete(ctx context.Context, actor accounts.User, spaceID, entryID string) (TrashItem, error) {
+	return s.trashEntry(ctx, actor, spaceID, entryID, true)
+}
+
+func (s *Service) trashEntry(ctx context.Context, actor accounts.User, spaceID, entryID string, auditDelete bool) (TrashItem, error) {
 	_, root, err := s.authorizedSpace(ctx, actor, spaceID, true)
 	if err != nil {
 		return TrashItem{}, err
@@ -587,7 +591,9 @@ VALUES(?,?,?,?,?,?,?,?,?)`, trashID, entry.ID, spaceID, entry.ParentID, folderOf
 		rollback()
 		return TrashItem{}, err
 	}
-	_ = s.audit(ctx, actor.ID, "file.trashed", spaceID, entry.ID, entry.Name)
+	if auditDelete {
+		_ = s.audit(ctx, actor.ID, "file.trashed", spaceID, entry.ID, entry.Name)
+	}
 	return s.trashItem(ctx, trashID)
 }
 
@@ -1206,7 +1212,7 @@ func (s *Service) moveBetweenSpaces(ctx context.Context, actor accounts.User, en
 	// An atomic recycle-bin rename keeps uncopied additions and newer bytes
 	// recoverable instead of permanently removing them with RemoveAll.
 	cleanup := context.WithoutCancel(ctx)
-	if _, err := s.Delete(cleanup, actor, spaceID, entryID); err != nil {
+	if _, err := s.trashEntry(cleanup, actor, spaceID, entryID, false); err != nil {
 		return Entry{}, err
 	}
 	_ = s.audit(cleanup, actor.ID, "file.moved", moved.SpaceID, moved.ID, moved.Name)

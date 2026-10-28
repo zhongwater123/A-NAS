@@ -41,3 +41,7 @@ go test ./internal/files -run 'TestCrossSpaceMove|TestCopyPreservesFileAndDirect
 - [文件服务](../../internal/files/service.go)、[描述符内复制](../../internal/files/rootfs_linux.go)
 - [跨空间回归](../../internal/files/cross_space_move_test.go)、[文件系统回归](../../internal/files/filesystem_test.go)、[文件代理回归](../../internal/filebroker/broker_test.go)
 - [存储与文件架构](../architecture/storage-and-files.md)、[文件规格](../specs/basic-storage-and-sharing.md)
+
+## 审查补充
+
+跨空间移动回收源内容时只记移动审计，不另记用户删除。界面在跨空间粘贴前提示原空间回收站仍占容量。普通文件复制前后比较大小、mtime 和 ctime；发生变化则拒绝副本并清理目标文件，不给变化中的副本盖旧时间。该检查不提供文件树一致性快照，也不能阻止检查完成后的写入。
