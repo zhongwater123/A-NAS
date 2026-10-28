@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 )
 
@@ -172,10 +173,24 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 			Architecture:    r.dependencies.architecture,
 			UptimeSeconds:   uptime,
 			Health:          hoststate.HealthUnknown,
+			Storage:         r.systemStorage(),
 		},
 		Disks:      disks,
 		DataVolume: dataVolume,
 	}, nil
+}
+
+func (r *Reader) systemStorage() *hoststate.StorageUsage {
+	if r.dependencies.readFilesystemUsage == nil {
+		return nil
+	}
+	// /var/lib holds A-NAS state and Docker's default storage. It may be a
+	// separate filesystem from /, so observe it rather than disk capacity.
+	usage, err := r.dependencies.readFilesystemUsage("/var/lib")
+	if err != nil || usage.total == 0 || usage.available > usage.total {
+		return nil
+	}
+	return &hoststate.StorageUsage{TotalBytes: usage.total, AvailableBytes: usage.available}
 }
 
 // stRDOnly is ST_RDONLY in statfs flags: the filesystem is mounted read-only.
@@ -593,7 +608,7 @@ func mountedBtrfsUUID(devices []blockDevice, mountpoint string) string {
 	for _, device := range devices {
 		for _, candidate := range device.Mountpoints {
 			if candidate != nil && *candidate == mountpoint && strings.EqualFold(device.Filesystem, "btrfs") {
-				if uuid := strings.ToLower(strings.TrimSpace(device.UUID)); filesystemUUIDPattern.MatchString(uuid) {
+				if uuid := strings.ToLower(strings.TrimSpace(device.UUID)); datavolume.ValidFilesystemUUID(uuid) {
 					return uuid
 				}
 			}

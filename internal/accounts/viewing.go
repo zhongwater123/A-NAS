@@ -8,17 +8,14 @@ import (
 	"fmt"
 	"strings"
 	"time"
-)
 
-// ViewingDuration is how long Administrative Viewing Mode lasts unless the
-// administrator ends it sooner (ADR 0008).
-const ViewingDuration = 24 * time.Hour
+	"github.com/zhongwater123/A-NAS/internal/sessiondir"
+)
 
 var (
 	ErrReasonRequired    = errors.New("a reason is required to view a member's private space")
 	ErrViewingActive     = errors.New("this private space is already being viewed")
 	ErrPasswordUnchanged = errors.New("the new password must differ from the current one")
-	ErrVolumeUnavailable = errors.New("the data volume is offline")
 )
 
 // ViewingAccess marks a space the actor sees through Administrative Viewing
@@ -27,17 +24,6 @@ type ViewingAccess struct {
 	GrantID   string    `json:"grantId"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
-
-// ViewingScope is what an Administrative Viewing grant opens: a member's
-// private space (through ACL entries the Host Agent adds) or their private
-// photo library (enforced by the photo service's Policy, ADR 0011). Each
-// scope is granted, audited, notified and ended on its own.
-type ViewingScope string
-
-const (
-	ViewingScopeSpace   ViewingScope = "space"
-	ViewingScopeLibrary ViewingScope = "library"
-)
 
 type ViewingGrant struct {
 	ID          string       `json:"id"`
@@ -49,35 +35,13 @@ type ViewingGrant struct {
 	ExpiresAt   time.Time    `json:"expiresAt"`
 }
 
-// LibraryViewing is an unexpired grant to view one member's private photo
-// library read-only.
-type LibraryViewing struct {
-	GrantID     string    `json:"grantId"`
-	OwnerUserID string    `json:"ownerUserId"`
-	ExpiresAt   time.Time `json:"expiresAt"`
-}
-
-// ViewingRequest asks the Host Agent to give an administrator temporary
-// read-only ACL entries on a private space.
-type ViewingRequest struct {
-	ID            string
-	SpaceID       string
-	AdminUsername string
-	AdminUID      int
-	ExpiresAt     time.Time
-}
-
-type ViewingProvisioner interface {
-	GrantViewing(context.Context, ViewingRequest) error
-	RevokeViewing(context.Context, string) error
-}
-
 type NotificationKind string
 
 const (
 	NotificationAdminViewing        NotificationKind = "admin_viewing"
 	NotificationAdminLibraryViewing NotificationKind = "admin_library_viewing"
-	NotificationCredentialReset     NotificationKind = "credential_reset"
+	//nolint:gosec // G101: the name of a notification kind, not a credential.
+	NotificationCredentialReset NotificationKind = "credential_reset"
 )
 
 type Notification struct {
@@ -224,7 +188,7 @@ func (s *Service) recordViewingStarted(ctx context.Context, tx *sql.Tx, actor Us
 // prepareViewing checks what every Administrative Viewing grant requires and
 // returns the trimmed reason and the owner's private space.
 func (s *Service) prepareViewing(ctx context.Context, actor User, ownerUserID, password, reason string) (string, string, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return "", "", ErrForbidden
 	}
 	reason = strings.TrimSpace(reason)
@@ -249,38 +213,15 @@ func (s *Service) prepareViewing(ctx context.Context, actor User, ownerUserID, p
 // LibraryViewings lists the actor's unexpired, unended grants to view
 // members' private photo libraries.
 func (s *Service) LibraryViewings(ctx context.Context, actor User) ([]LibraryViewing, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return nil, nil
 	}
-	return queryLibraryViewings(ctx, s.store.db, actor.ID, s.now().UTC())
-}
-
-func queryLibraryViewings(ctx context.Context, db *sql.DB, adminUserID string, now time.Time) ([]LibraryViewing, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, owner_user_id, expires_at FROM viewing_grants
-WHERE admin_user_id = ? AND scope = ? AND ended_at IS NULL AND expires_at > ? ORDER BY expires_at`,
-		adminUserID, ViewingScopeLibrary, formatTime(now))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var viewings []LibraryViewing
-	for rows.Next() {
-		var viewing LibraryViewing
-		var expiresAt string
-		if err := rows.Scan(&viewing.GrantID, &viewing.OwnerUserID, &expiresAt); err != nil {
-			return nil, err
-		}
-		if viewing.ExpiresAt, err = time.Parse(time.RFC3339Nano, expiresAt); err != nil {
-			return nil, err
-		}
-		viewings = append(viewings, viewing)
-	}
-	return viewings, rows.Err()
+	return sessiondir.LibraryViewings(ctx, s.store.db, actor.ID, s.now().UTC())
 }
 
 // EndViewing revokes an administrator's viewing grant before it expires.
 func (s *Service) EndViewing(ctx context.Context, actor User, grantID string) error {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return ErrForbidden
 	}
 	var spaceID, ownerUserID string
@@ -315,7 +256,7 @@ WHERE id = ? AND admin_user_id = ? AND ended_at IS NULL`, grantID, actor.ID).Sca
 // activeGrant returns the actor's unexpired, unended grant on spaceID, or a
 // zero grant.
 func (s *Service) activeGrant(ctx context.Context, actor User, spaceID string) (ViewingGrant, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return ViewingGrant{}, nil
 	}
 	var grant ViewingGrant
@@ -337,7 +278,7 @@ ORDER BY expires_at DESC LIMIT 1`, actor.ID, spaceID, formatTime(s.now().UTC()))
 
 // viewedSpaces lists the private spaces the actor currently views.
 func (s *Service) viewedSpaces(ctx context.Context, actor User) ([]Space, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return nil, nil
 	}
 	rows, err := s.store.db.QueryContext(ctx, `SELECT sp.id, sp.kind, sp.name, COALESCE(sp.owner_user_id, ''), sp.created_at, g.id, g.expires_at
@@ -442,7 +383,7 @@ JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private' WHERE u.id = ?`, 
 	if newPassword == currentPassword {
 		return ErrPasswordUnchanged
 	}
-	passwordHash, err := hashPassword(newPassword, s.random)
+	passwordHash, err := hashPassword(newPassword, s.random, s.passwordCost)
 	if err != nil {
 		return err
 	}

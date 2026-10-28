@@ -230,6 +230,7 @@ try {
         @{ Source = (Join-Path $repoRoot 'scripts\run-kiosk.sh'); Destination = "${target}:$release/kiosk-launcher.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-kiosk@.service'); Destination = "${target}:$release/anas-kiosk@.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\pam\a-nas-kiosk'); Destination = "${target}:$release/a-nas-kiosk.pam.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\sysusers.d\a-nas-kiosk.conf'); Destination = "${target}:$release/a-nas-kiosk.sysusers.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\config\experimental-nas-kiosk.env'); Destination = "${target}:$release/kiosk.env.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\chromium\policies\managed\a-nas.json'); Destination = "${target}:$release/a-nas-chromium-policy.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\caddy\Caddyfile'); Destination = "${target}:$release/Caddyfile.incoming" },

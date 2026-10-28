@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/storage"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 )
 
 const testMount = "/srv/a-nas/data"
@@ -317,7 +317,7 @@ func TestStateRecordsAreCheckedLikeTheirRequests(t *testing.T) {
 	// The valid journal entry of the add-disks kind loads.
 	host := newStateHost(t)
 	writeFile(t, host.current("volume-operations.json"), operation(func(map[string]any) {}))
-	if executor := host.executor(); executor.operationsError != nil || executor.operations["plan:2"].State != storage.OperationInterrupted {
+	if executor := host.executor(); executor.operationsError != nil || executor.operations["plan:2"].State != datavolume.OperationInterrupted {
 		t.Fatalf("valid journal = %v, %v", executor.operations, executor.operationsError)
 	}
 }
@@ -339,7 +339,7 @@ func TestStateViewingGrantsOutsideTheRulesLoadExpired(t *testing.T) {
 		return map[string]any{"spaceId": "space:alice", "admin": admin, "uid": uid, "expiresAt": expires}
 	}
 	grants, err := json.Marshal(map[string]any{
-		"viewing:valid":    grant("owner", 20101, testNow.Add(accounts.ViewingDuration)),
+		"viewing:valid":    grant("owner", 20101, testNow.Add(accountid.ViewingDuration)),
 		"viewing:past":     grant("owner", 20101, testNow.Add(-time.Hour)),
 		"viewing:forever":  grant("owner", 20101, testNow.AddDate(10, 0, 0)),
 		"viewing:demoted":  grant("former", 20102, testNow.Add(time.Hour)),
@@ -356,7 +356,7 @@ func TestStateViewingGrantsOutsideTheRulesLoadExpired(t *testing.T) {
 		t.Fatal(executor.viewingError)
 	}
 	for id, want := range map[string]time.Time{
-		"viewing:valid": testNow.Add(accounts.ViewingDuration), "viewing:past": testNow.Add(-time.Hour),
+		"viewing:valid": testNow.Add(accountid.ViewingDuration), "viewing:past": testNow.Add(-time.Hour),
 		"viewing:forever": {}, "viewing:demoted": {}, "viewing:disabled": {}, "viewing:uid": {}, "viewing:unknown": {},
 	} {
 		if got := executor.viewing[id].ExpiresAt; !got.Equal(want) {

@@ -6,16 +6,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"path"
-	"strings"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/shares"
 )
-
-const maxPreviewSource = 64 << 20
 
 func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 	reader, entry, err := h.store.OpenContent(r.Context(), actor(r), r.PathValue("shareID"), r.PathValue("entryID"))
@@ -24,8 +21,7 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer reader.Close()
-	extension := strings.ToLower(path.Ext(entry.Path))
-	if extension != ".heic" && extension != ".heif" {
+	if !filepreview.IsHEIF(entry.Path) {
 		reader.Close()
 		h.content(w, r)
 		return
@@ -34,7 +30,7 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, 503, "share_preview_unavailable", "image preview decoder is unavailable")
 		return
 	}
-	if entry.Size > maxPreviewSource {
+	if entry.Size > filepreview.MaxHEIFSource {
 		httpjson.WriteError(w, 413, "share_preview_too_large", "HEIC preview source exceeds 64 MiB")
 		return
 	}
@@ -50,7 +46,7 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, errors.New("guarded source seeking unavailable"))
 		return
 	}
-	file, err := anonymousInput(io.LimitReader(reader, maxPreviewSource+1))
+	file, err := anonymousInput(io.LimitReader(reader, filepreview.MaxHEIFSource+1))
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -67,21 +63,20 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 	}
-	data, decodeErr := h.media.Image(workerCtx, file, 1600)
+	data, decodeErr := filepreview.RenderHEIF(workerCtx, h.media, file, entry.Size, 1600)
 	if _, err = seeker.Seek(0, io.SeekCurrent); err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	if decodeErr != nil {
-		if errors.Is(decodeErr, ffmpegworker.ErrUnreadable) {
-			httpjson.WriteError(w, 422, "share_preview_unreadable", "image cannot be previewed")
-		} else {
-			httpjson.WriteError(w, 503, "share_preview_unavailable", "image preview decoder is unavailable")
-		}
+	switch {
+	case errors.Is(decodeErr, filepreview.ErrTooLarge):
+		httpjson.WriteError(w, 413, "share_preview_too_large", "HEIC preview source exceeds 64 MiB")
 		return
-	}
-	if len(data) > 16<<20 || !bytes.HasPrefix(data, []byte{137, 80, 78, 71, 13, 10, 26, 10}) {
-		httpjson.WriteError(w, 422, "share_preview_unreadable", "image decoder returned invalid output")
+	case errors.Is(decodeErr, ffmpegworker.ErrUnreadable):
+		httpjson.WriteError(w, 422, "share_preview_unreadable", "image cannot be previewed")
+		return
+	case decodeErr != nil:
+		httpjson.WriteError(w, 503, "share_preview_unavailable", "image preview decoder is unavailable")
 		return
 	}
 	w.Header().Set("Content-Type", "image/png")

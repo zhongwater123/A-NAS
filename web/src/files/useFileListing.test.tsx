@@ -2,10 +2,12 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import * as api from "../api";
+import type { FileEntry } from "../api.generated";
+import * as settingsApi from "../settings/api";
+import * as api from "./api";
 import { useFileListing } from "./useFileListing";
 
-const entry = (id: string): api.FileEntry => ({
+const entry = (id: string): FileEntry => ({
   id,
   spaceId: "space:a",
   name: id,
@@ -15,9 +17,9 @@ const entry = (id: string): api.FileEntry => ({
 });
 
 function pendingList() {
-  let resolve!: (items: api.FileEntry[]) => void;
+  let resolve!: (items: FileEntry[]) => void;
   let reject!: (error: Error) => void;
-  const promise = new Promise<api.FileEntry[]>((done, fail) => {
+  const promise = new Promise<FileEntry[]>((done, fail) => {
     resolve = done;
     reject = fail;
   });
@@ -30,7 +32,7 @@ beforeEach(() => {
     { id: "space:a", kind: "shared", name: "A", createdAt: "2026-10-26T00:00:00Z" },
     { id: "space:b", kind: "shared", name: "B", createdAt: "2026-10-26T00:00:00Z" },
   ]);
-  vi.spyOn(api, "listVolumes").mockResolvedValue([]);
+  vi.spyOn(settingsApi, "listVolumes").mockResolvedValue([]);
   vi.spyOn(api, "listEntries").mockResolvedValue([]);
 });
 

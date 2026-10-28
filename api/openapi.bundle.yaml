@@ -410,6 +410,7 @@ paths:
   /api/v1/users/{userId}/viewing:
     post:
       operationId: startViewing
+      x-anas-posture: admin
       description: Administrative Viewing Mode. An administrator re-enters their password and a reason to read another account's private space for 24 hours; the access is audited and the owner is notified.
       parameters:
         - $ref: '#/components/parameters/UserID'
@@ -440,6 +441,7 @@ paths:
   /api/v1/viewing/{grantId}:
     delete:
       operationId: endViewing
+      x-anas-posture: admin
       parameters:
         - name: grantId
           in: path
@@ -455,6 +457,7 @@ paths:
   /api/v1/users:
     get:
       operationId: listUsers
+      x-anas-posture: admin
       responses:
         '200':
           description: Users
@@ -473,6 +476,7 @@ paths:
           $ref: '#/components/responses/ProductError'
     post:
       operationId: createUser
+      x-anas-posture: admin
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -495,10 +499,11 @@ paths:
   /api/v1/users/{userId}:
     delete:
       operationId: disableUser
+      x-anas-posture: admin
       parameters:
         - $ref: '#/components/parameters/UserID'
         - $ref: '#/components/parameters/CSRFToken'
-      description: Disable an account. Web sign-in ends first; when the Host Agent then fails to disable the SMB credential the answer is 503 smb_disable_pending, and disabling again retries only that step.
+      description: Disable an account. Web sign-in ends first; if the Host Agent cannot disable SMB access or assistant units, the response retains the 503 smb_disable_pending code. Disabling again retries the host operations.
       responses:
         '204':
           description: User disabled
@@ -511,6 +516,7 @@ paths:
   /api/v1/users/{userId}/credential:
     patch:
       operationId: resetUserCredential
+      x-anas-posture: admin
       parameters:
         - $ref: '#/components/parameters/UserID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -550,6 +556,7 @@ paths:
           $ref: '#/components/responses/ProductError'
     put:
       operationId: updateLocalDisplay
+      x-anas-posture: admin
       description: Administrators only. The local console uses the new value from its next idle period.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
@@ -594,6 +601,7 @@ paths:
           $ref: '#/components/responses/ProductError'
     patch:
       operationId: updateWallpaperStyle
+      x-anas-posture: admin
       description: Administrators only. Changes how every desktop draws the wallpaper.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
@@ -647,6 +655,7 @@ paths:
           $ref: '#/components/responses/ProductError'
     put:
       operationId: setWallpaperImage
+      x-anas-posture: admin
       description: Administrators only. Replace the picture with the one in the body, keeping the style. The server turns it upright, scales the long side down to at most 3840 pixels, fills transparency with the default wallpaper's navy and stores a JPEG without the original's metadata. Pages scale the picture first.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
@@ -696,6 +705,7 @@ paths:
           $ref: '#/components/responses/ProductError'
     delete:
       operationId: resetWallpaper
+      x-anas-posture: admin
       description: Administrators only. Go back to the built-in wallpaper, filled.
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
@@ -732,6 +742,7 @@ paths:
   /api/v1/volumes/{volumeId}/conversion:
     post:
       operationId: continueVolumeConversion
+      x-anas-posture: admin
       description: Starts converting the data volume to its layout now, after a shutdown or an error stopped the conversion; the Host Agent otherwise continues it at startup and every 15 minutes. Administrators only.
       parameters:
         - name: volumeId
@@ -750,6 +761,7 @@ paths:
   /api/v1/storage/plans:
     get:
       operationId: listUnfinishedStoragePlans
+      x-anas-posture: admin
       description: 'Administrators only. The plans that still need the administrator, newest first: the one running, and the newest one that stopped in needs_attention unless a plan made after it has run. The settings page shows them again after a reload.'
       responses:
         '200':
@@ -770,7 +782,8 @@ paths:
           $ref: '#/components/responses/ProductError'
     post:
       operationId: createStoragePlan
-      description: 'Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts to the layout in the background. 409 volume_unavailable when the volume is not mounted and writable, volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict.'
+      x-anas-posture: admin
+      description: 'Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts to the layout in the background. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict.'
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -803,9 +816,12 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/storage/plans/{planId}/confirm:
     post:
       operationId: confirmStoragePlan
+      x-anas-posture: admin
       parameters:
         - $ref: '#/components/parameters/PlanID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -832,6 +848,7 @@ paths:
   /api/v1/storage/plans/{planId}/execute:
     post:
       operationId: executeStoragePlan
+      x-anas-posture: admin
       description: 'Starts a confirmed plan on the Host Agent, which runs it apart from this request: closing the page or restarting the product service does not stop it. 202 with the plan running, whose step tells how far it came; GET /api/v1/operations/{planId} follows it. 200 when it already ended. A plan in needs_attention is retried: the Host Agent checks the disks again and continues after the steps that are done, and takes over a data volume the plan made before it stopped. Executing a running or succeeded plan returns it unchanged.'
       parameters:
         - $ref: '#/components/parameters/PlanID'
@@ -856,6 +873,7 @@ paths:
   /api/v1/storage/plans/{planId}/cancel:
     post:
       operationId: cancelStoragePlan
+      x-anas-posture: admin
       description: Gives up a planned or confirmed plan, which has not touched any disk, so that a new plan can be made at once. Cancelling a cancelled plan returns it again; a running or finished plan answers 409 plan_state_conflict.
       parameters:
         - $ref: '#/components/parameters/PlanID'
@@ -874,6 +892,7 @@ paths:
   /api/v1/operations/{operationId}:
     get:
       operationId: getOperation
+      x-anas-posture: admin
       parameters:
         - name: operationId
           in: path
@@ -1594,6 +1613,7 @@ paths:
   /api/v1/system-logs:
     get:
       operationId: listSystemLogs
+      x-anas-posture: admin
       summary: Read A-NAS service logs from the systemd journal through the Host Agent, newest first
       description: Administrators only. The Host Agent reads only the allowlisted A-NAS services (ADR 0020); levels, messages and fields of JSON log lines come from the line itself. A page stops after 20,000 scanned lines; next then continues from the last line scanned.
       parameters:
@@ -4076,6 +4096,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/media/libraries/{libraryId}:
     parameters:
       - $ref: '#/components/parameters/MediaLibraryID'
@@ -4116,6 +4138,8 @@ paths:
         '404':
           $ref: '#/components/responses/ProductError'
         '409':
+          $ref: '#/components/responses/ProductError'
+        '423':
           $ref: '#/components/responses/ProductError'
     delete:
       operationId: deleteMediaLibrary
@@ -4280,6 +4304,10 @@ paths:
           $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/media/videos/{videoId}:
     get:
       operationId: getMediaVideo
@@ -4331,6 +4359,10 @@ paths:
           $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/media/videos/{videoId}/playback:
     get:
       operationId: getMediaPlayback
@@ -4368,6 +4400,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/media/videos/{videoId}/file:
     get:
       operationId: getMediaVideoFile
@@ -4390,6 +4424,8 @@ paths:
                 type: string
                 format: binary
         '404':
+          $ref: '#/components/responses/ProductError'
+        '423':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
@@ -4447,6 +4483,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '423':
+          $ref: '#/components/responses/ProductError'
         '503':
           description: Every conversion slot is in use (media_busy), or FFmpeg is unavailable (media_worker_unavailable)
           content:
@@ -4474,6 +4512,8 @@ paths:
         '404':
           $ref: '#/components/responses/ProductError'
         '422':
+          $ref: '#/components/responses/ProductError'
+        '423':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
@@ -4786,6 +4826,8 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/MediaFolderRoot'
+        '423':
+          $ref: '#/components/responses/ProductError'
   /api/v1/media/folders/{entryId}:
     get:
       operationId: getMediaFolder
@@ -4810,6 +4852,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/MediaFolderListing'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '423':
           $ref: '#/components/responses/ProductError'
   /api/v1/media/artwork/{titleId}/{kind}:
     get:
@@ -4837,6 +4881,8 @@ paths:
         '400':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '423':
           $ref: '#/components/responses/ProductError'
   /api/v1/music/library:
     get:
@@ -5232,6 +5278,7 @@ paths:
   /api/v1/apps:
     get:
       operationId: listApps
+      x-anas-posture: admin
       summary: List App Center catalog apps with their install state
       responses:
         '200':
@@ -5242,11 +5289,14 @@ paths:
                 $ref: '#/components/schemas/AppListResponse'
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
+        '502':
+          $ref: '#/components/responses/AppConflict'
         '503':
           $ref: '#/components/responses/AppsUnavailable'
   /api/v1/apps/{appId}/icon:
     get:
       operationId: getAppIcon
+      x-anas-posture: admin
       summary: Read an app icon from the catalog
       parameters:
         - $ref: '#/components/parameters/AppId'
@@ -5265,6 +5315,8 @@ paths:
           $ref: '#/components/responses/AppNotFound'
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
+        '502':
+          $ref: '#/components/responses/AppConflict'
         '503':
           $ref: '#/components/responses/AppsUnavailable'
   /api/v1/app-shortcuts:
@@ -5311,8 +5363,9 @@ paths:
   /api/v1/apps/{appId}/plan:
     get:
       operationId: getAppInstallPlan
+      x-anas-posture: admin
       summary: Render the install plan the owner must confirm
-      description: Administrators only. The plan lists the app's Linux identity, images, containers, published host ports and host folders, plus the rendered Compose file and its SHA-256 digest. App data lives in the app's own folder on the data volume; shared mounts resolve inside the Shared folder. Manifests that violate the install policy answer 422.
+      description: Administrators only. The plan lists the app's Linux identity, images, containers, published host ports and host folders, plus the rendered Compose file and its SHA-256 digest. App data lives in the app's own folder on the data volume; shared mounts resolve inside the Shared folder. Manifests that violate the install policy answer 422. 409 address_pool_missing when the app creates networks while Docker has no A-NAS address pool, docker_runtime_outdated when Compose or the engine cannot mount subpaths.
       parameters:
         - $ref: '#/components/parameters/AppId'
       responses:
@@ -5326,13 +5379,18 @@ paths:
           $ref: '#/components/responses/AppNotFound'
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          $ref: '#/components/responses/AppConflict'
         '422':
+          $ref: '#/components/responses/AppConflict'
+        '502':
           $ref: '#/components/responses/AppConflict'
         '503':
           $ref: '#/components/responses/AppsUnavailable'
   /api/v1/apps/{appId}/install:
     post:
       operationId: installApp
+      x-anas-posture: admin
       summary: Start installing an app from a confirmed plan
       description: Administrators only, with the session CSRF token. The plan is re-rendered for the app identity and refused with plan_changed unless the digest matches; the Host Agent then creates the mounted folders (Docker never creates host folders) and grants Shared access if the plan mounts from it. Refused with 423 volume_unavailable while the data volume is offline. Only one install or uninstall runs at a time. Requests must also name this device by localhost or IP address in the Host header, use a JSON body and, when an Origin is sent, come from the same origin.
       parameters:
@@ -5378,6 +5436,7 @@ paths:
   /api/v1/apps/{appId}/uninstall:
     post:
       operationId: uninstallApp
+      x-anas-posture: admin
       summary: Start removing an installed app while keeping its data
       description: Administrators only, with the session CSRF token. The app identity's Shared access is withdrawn at once.
       parameters:
@@ -5413,6 +5472,7 @@ paths:
   /api/v1/containers:
     get:
       operationId: getContainerSnapshot
+      x-anas-posture: admin
       summary: List containers and images from the container engine
       description: Administrators only; container actions also need the session CSRF token. Running containers include CPU and memory usage sampled over about one second. Responses are not cacheable. ANAS_CONTAINERS_MODE selects simulated, live (container agent) or disabled management.
       responses:
@@ -5424,11 +5484,14 @@ paths:
                 $ref: '#/components/schemas/ContainerSnapshotResponse'
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
+        '502':
+          $ref: '#/components/responses/ContainerEngineError'
         '503':
           $ref: '#/components/responses/ContainersUnavailable'
   /api/v1/containers/{containerId}/actions:
     post:
       operationId: applyContainerAction
+      x-anas-posture: admin
       summary: Start, stop or restart one container
       description: Only lifecycle actions are accepted; creating, removing or reconfiguring containers is not part of this API. Requests must name this device by localhost or IP address in the Host header, use a JSON body and, when an Origin is sent, come from the same origin. Stop and restart give the container ten seconds to exit before it is killed.
       parameters:
@@ -5471,6 +5534,7 @@ paths:
   /api/v1/containers/{containerId}/logs:
     get:
       operationId: getContainerLogs
+      x-anas-posture: admin
       summary: Read the latest lines a container wrote to stdout and stderr
       parameters:
         - $ref: '#/components/parameters/ContainerId'
@@ -5502,6 +5566,7 @@ paths:
   /api/v1/terminal:
     get:
       operationId: getTerminalStatus
+      x-anas-posture: admin
       summary: Report whether interactive terminal sessions are enabled
       responses:
         '200':
@@ -5519,6 +5584,7 @@ paths:
   /api/v1/terminal/session:
     get:
       operationId: openTerminalSession
+      x-anas-posture: admin
       summary: Upgrade to a WebSocket bridged to a login shell on a new PTY
       description: Only loopback peers (the local console, or the LAN entry proxying a LAN browser) whose Host names this device by localhost or IP address and whose browser Origin is the same origin are accepted. Binary frames carry raw terminal input and output. The only client text frame is `{"type":"resize","cols":N,"rows":N}` with both values between 1 and 1000. When the shell exits the server closes with status 1000 and reason `exit <code>`; other endings use 1001.
       responses:
@@ -6634,7 +6700,7 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     AppConflict:
-      description: 'The operation cannot run now: plan_changed, app_busy, already_installed, not_installed, port_in_use, name_in_use, address_pool_missing (the app creates Docker networks but Docker has no A-NAS address pool), docker_runtime_outdated (Docker Compose before 2.30 or an engine API before 1.45 would mount whole volumes), policy_violation or app_engine_error.'
+      description: 'The operation cannot run now: plan_changed, app_busy, already_installed, not_installed, port_in_use, name_in_use, system_storage_full (system state or Docker storage is below the installation reserve), address_pool_missing (the app creates Docker networks but Docker has no A-NAS address pool), docker_runtime_outdated (Docker Compose before 2.30 or an engine API before 1.45 would mount whole volumes), policy_violation or app_engine_error.'
       content:
         application/json:
           schema:
@@ -7094,6 +7160,8 @@ components:
           $ref: '#/components/schemas/Health'
         healthFindings:
           $ref: '#/components/schemas/HealthFindings'
+        storage:
+          $ref: '#/components/schemas/SystemStorage'
         productVersion:
           type: string
           minLength: 1
@@ -7130,6 +7198,8 @@ components:
           $ref: '#/components/schemas/Health'
         healthFindings:
           $ref: '#/components/schemas/HealthFindings'
+        storage:
+          $ref: '#/components/schemas/SystemStorage'
     HealthFindings:
       type: array
       description: Why the system is not plainly healthy, most severe first; empty when healthy. The system's health is the severity of the first finding (docs/specs/system-health.md).
@@ -11459,3 +11529,19 @@ components:
               after:
                 type: string
                 description: Text the write leaves; absent when it is not text.
+    SystemStorage:
+      type: object
+      description: Observed capacity and available space on the filesystem at /var/lib, where system state is stored; absent when unavailable.
+      additionalProperties: false
+      required:
+        - totalBytes
+        - availableBytes
+      properties:
+        totalBytes:
+          type: integer
+          format: int64
+          minimum: 1
+        availableBytes:
+          type: integer
+          format: int64
+          minimum: 0

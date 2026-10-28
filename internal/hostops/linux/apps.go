@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/appid"
 )
 
@@ -31,7 +32,7 @@ func (e *Executor) AppIdentity(ctx context.Context, appID string) (appid.Identit
 		return appid.Identity{}, e.appsError
 	}
 	username := appid.Username(appID)
-	if !appid.Valid(appID) || !validUsername(username) {
+	if !appid.Valid(appID) || !accountid.ValidUsername(username) {
 		return appid.Identity{}, errors.New("app ID cannot name a Linux account")
 	}
 	e.appsMu.Lock()
@@ -159,14 +160,14 @@ func (e *Executor) ensureAppsSubvolume(ctx context.Context) error {
 		return err
 	}
 	// Only root and Docker reach app data; containers see their own folder.
-	_, _, err := e.ensureDirectoryACL(ctx, apps, strings.Join([]string{"user::rwx", "group::---", "other::---"}, ","), false)
+	_, _, err := e.ensureDirectoryACL(ctx, apps, strings.Join([]string{"user::rwx", "group::---", "other::---"}, ","), ordinaryDirectory)
 	return err
 }
 
 // makeFolder opens or creates one folder without following links and, when
 // owner is set, gives it to the app.
 func (e *Executor) makeFolder(ctx context.Context, path string, mode uint32, owner string) error {
-	folder, _, err := e.openVolumeDirectory(path, mode, false)
+	folder, _, err := e.openVolumeDirectory(path, mode, ordinaryDirectory)
 	if err != nil {
 		return err
 	}
@@ -210,7 +211,7 @@ func (e *Executor) loadAppsRegistry() error {
 	}
 	owners := make(map[int]string, len(apps))
 	for id, uid := range apps {
-		if !appid.Valid(id) || !validUsername(appid.Username(id)) || uid < appid.FirstUID || uid > appid.LastUID {
+		if !appid.Valid(id) || !accountid.ValidUsername(appid.Username(id)) || uid < appid.FirstUID || uid > appid.LastUID {
 			return fmt.Errorf("app identity registry: the entry for %q is invalid", id)
 		}
 		// AppIdentity never gives one UID to two apps.

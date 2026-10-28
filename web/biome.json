@@ -26,6 +26,14 @@
     "enabled": false
   },
   "assist": {
-    "enabled": false
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": {
+          "level": "on",
+          "options": { "groups": [[":NODE:", ":PACKAGE:"], ":BLANK_LINE:", ":PATH:"] }
+        }
+      }
+    }
   }
 }

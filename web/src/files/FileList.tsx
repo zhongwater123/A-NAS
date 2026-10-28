@@ -1,19 +1,20 @@
 import { ChevronDown, Clock3, FolderClosed, FolderPlus, Pin, Search } from "lucide-react";
 import { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useRef, useState } from "react";
 
-import { formatBytes } from "../bytes";
-import { FileOrder, FileSort, isPinned } from "../useFileOrder";
+import { formatBytes } from "../lib/bytes";
 import { FileArtwork } from "./FileIcon";
+import styles from "./files.module.css";
 import { FileBrowserItem, FileView, formatFileDate } from "./model";
 import { DragProps } from "./useDragReorder";
+import { FileOrder, FileSort, isPinned } from "./useFileOrder";
 
 type SelectionRect = { left: number; top: number; width: number; height: number };
 type Modifiers = Pick<ReactMouseEvent, "ctrlKey" | "metaKey" | "shiftKey">;
 
 const columns: Array<{ sort: Exclude<FileSort, "manual">; label: string; className?: string }> = [
   { sort: "name", label: "名称" },
-  { sort: "modifiedAt", label: "修改时间", className: "file-date-column" },
-  { sort: "type", label: "类型", className: "file-type-column" },
+  { sort: "modifiedAt", label: "修改时间", className: styles.fileDateColumn },
+  { sort: "type", label: "类型", className: styles.fileTypeColumn },
   { sort: "sizeBytes", label: "大小" },
 ];
 
@@ -95,7 +96,6 @@ export function FileList({
     window.addEventListener("pointerup", stop, { once: true });
   };
   const itemProps = (item: FileBrowserItem) => ({
-    "aria-selected": selectedIDs.includes(item.id),
     "data-file-item": item.id,
     ...dragProps(item),
     onClick: (event: ReactMouseEvent) => onSelect(item, event),
@@ -103,13 +103,18 @@ export function FileList({
     onContextMenu: (event: ReactMouseEvent) => onContextMenu(event, item),
   });
   const pinBadge = (item: FileBrowserItem) =>
-    isPinned(item, order) && <Pin className="file-pin-badge" aria-label="已置顶" />;
+    isPinned(item, order) && <Pin className={styles.filePinBadge} aria-label="已置顶" />;
 
   return (
-    <div className="file-list-shell" ref={shellRef} onPointerDown={beginBoxSelection} onContextMenu={onContextMenu}>
+    <div
+      className={styles.fileListShell}
+      ref={shellRef}
+      onPointerDown={beginBoxSelection}
+      onContextMenu={onContextMenu}
+    >
       {view === "list" ? (
-        <div className="file-list" role="table" aria-label="文件列表" aria-busy={loading}>
-          <div className="file-list-header" role="row">
+        <div className={styles.fileList} role="table" aria-label="文件列表" aria-busy={loading}>
+          <div className={styles.fileListHeader} role="row">
             {columns.map((column) => (
               <div
                 key={column.sort}
@@ -119,7 +124,9 @@ export function FileList({
               >
                 <button onClick={() => onSort(column.sort)}>
                   {column.label}
-                  {sortBy === column.sort && <ChevronDown className={direction === "ascending" ? "ascending" : ""} />}
+                  {sortBy === column.sort && (
+                    <ChevronDown className={direction === "ascending" ? styles.ascending : ""} />
+                  )}
                 </button>
               </div>
             ))}
@@ -127,16 +134,19 @@ export function FileList({
           {!loading &&
             items.map((item) => (
               <div
-                className={`file-list-row ${selectedIDs.includes(item.id) ? "selected" : ""}`}
+                className={`${styles.fileListRow} ${selectedIDs.includes(item.id) ? styles.selected : ""}`}
                 role="row"
                 key={item.id}
+                aria-selected={selectedIDs.includes(item.id)}
                 {...itemProps(item)}
               >
-                <div className="file-name-cell" role="cell">
-                  <span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>
+                <div className={styles.fileNameCell} role="cell">
+                  <span
+                    className={`${styles.fileTypeIcon} ${styles[item.kind] ?? ""} ${styles[item.resource ?? ""] ?? ""}`}
+                  >
                     <FileArtwork item={item} />
                   </span>
-                  <span className="file-name-copy">
+                  <span className={styles.fileNameCopy}>
                     <span>
                       <strong>
                         {pinBadge(item)}
@@ -147,7 +157,7 @@ export function FileList({
                     </span>
                   </span>
                 </div>
-                <div className="file-date-cell file-date-column" role="cell">
+                <div className={`${styles.fileDateCell} ${styles.fileDateColumn}`} role="cell">
                   {item.modifiedAt ? (
                     <>
                       <Clock3 />
@@ -157,30 +167,35 @@ export function FileList({
                     "—"
                   )}
                 </div>
-                <div className="file-type-cell file-type-column" role="cell">
+                <div className={`${styles.fileTypeCell} ${styles.fileTypeColumn}`} role="cell">
                   <span
-                    className={item.kind === "directory" ? "directory" : item.kind === "resource" ? "resource" : ""}
+                    className={
+                      item.kind === "directory" ? styles.directory : item.kind === "resource" ? styles.resource : ""
+                    }
                   >
                     {item.type}
                   </span>
                 </div>
-                <div className="file-size-cell" role="cell">
+                <div className={styles.fileSizeCell} role="cell">
                   {item.kind === "file" ? formatBytes(item.sizeBytes) : "—"}
                 </div>
               </div>
             ))}
         </div>
       ) : (
-        <div className="file-icon-view" role="listbox" aria-label="文件图标">
+        <div className={styles.fileIconView} role="listbox" aria-label="文件图标">
           {!loading &&
             items.map((item) => (
               <button
-                className={`file-icon-card ${selectedIDs.includes(item.id) ? "selected" : ""}`}
+                className={`${styles.fileIconCard} ${selectedIDs.includes(item.id) ? styles.selected : ""}`}
                 role="option"
                 key={item.id}
+                aria-selected={selectedIDs.includes(item.id)}
                 {...itemProps(item)}
               >
-                <span className={`file-type-icon ${item.kind} ${item.resource ?? ""}`}>
+                <span
+                  className={`${styles.fileTypeIcon} ${styles[item.kind] ?? ""} ${styles[item.resource ?? ""] ?? ""}`}
+                >
                   <FileArtwork item={item} />
                 </span>
                 <strong>
@@ -192,28 +207,28 @@ export function FileList({
             ))}
         </div>
       )}
-      {selectionRect && <div className="file-selection-box" aria-hidden="true" style={selectionRect} />}
+      {selectionRect && <div className={styles.fileSelectionBox} aria-hidden="true" style={selectionRect} />}
       {loading ? (
-        <div className="file-empty-state" role="status">
+        <div className={styles.fileEmptyState} role="status">
           <span className="loader" />
           <strong>正在读取文件…</strong>
           <span>正在加载这个目录的内容</span>
         </div>
       ) : !hasSpace ? (
-        <div className="file-empty-state">
+        <div className={styles.fileEmptyState}>
           <FolderClosed />
           <strong>还没有可用空间</strong>
           <span>完成数据卷与账号设置后，空间会显示在这里。</span>
         </div>
       ) : !items.length && query ? (
-        <div className="file-empty-state">
+        <div className={styles.fileEmptyState}>
           <Search />
           <strong>没有匹配的项目</strong>
           <span>请尝试其他名称，或清除搜索条件。</span>
           <button onClick={onClearQuery}>清除搜索</button>
         </div>
       ) : !items.length ? (
-        <div className="file-empty-state">
+        <div className={styles.fileEmptyState}>
           <FolderPlus />
           <strong>这个文件夹是空的</strong>
           <span>{viewing ? "这里暂时没有内容。" : "把文件或文件夹拖到这里上传，或新建文件夹开始整理。"}</span>

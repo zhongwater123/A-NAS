@@ -23,20 +23,16 @@ func slotDir(t *testing.T) string {
 	return dir
 }
 
-// impatient shortens the waits so that a busy worker shows within a test.
-func impatient(t *testing.T) {
-	t.Helper()
-	oldPatience, oldPoll := patience, poll
-	patience = [priorities]time.Duration{Interactive: 200 * time.Millisecond, Streaming: 200 * time.Millisecond}
-	poll = [priorities]time.Duration{Interactive: 10 * time.Millisecond, Streaming: 10 * time.Millisecond, Background: 10 * time.Millisecond}
-	t.Cleanup(func() { patience, poll = oldPatience, oldPoll })
+// impatient are short waits, so that a busy worker shows within a test.
+var impatient = waits{
+	patience: [priorities]time.Duration{Interactive: 200 * time.Millisecond, Streaming: 200 * time.Millisecond},
+	poll:     [priorities]time.Duration{Interactive: 10 * time.Millisecond, Streaming: 10 * time.Millisecond, Background: 10 * time.Millisecond},
 }
 
-// process is one process's view of a slot directory.
-func process(dir string) *admission { return &admission{dir: dir, freed: make(chan struct{})} }
+// process is one process's view of a slot directory, with impatient waits.
+func process(dir string) *admission { return newAdmission(dir, impatient) }
 
 func TestPrioritiesKeepSlotsForThoseWhoWait(t *testing.T) {
-	impatient(t)
 	ctx := context.Background()
 	slots := process(slotDir(t))
 	for i := range Slots - 2 {
@@ -78,7 +74,6 @@ func TestPrioritiesKeepSlotsForThoseWhoWait(t *testing.T) {
 }
 
 func TestBackgroundWorkWaitsForAnotherProcess(t *testing.T) {
-	impatient(t)
 	ctx := context.Background()
 	dir := slotDir(t)
 	photos, product := process(dir), process(dir)
@@ -121,7 +116,6 @@ func TestBackgroundWorkWaitsForAnotherProcess(t *testing.T) {
 }
 
 func TestSlotsWithoutTheirDirectoryStayInTheProcess(t *testing.T) {
-	impatient(t)
 	slots := process(filepath.Join(t.TempDir(), "missing"))
 	for range Slots {
 		if _, err := slots.acquire(context.Background(), Interactive); err != nil {
@@ -141,9 +135,9 @@ func TestSlotsWithoutTheirDirectoryStayInTheProcess(t *testing.T) {
 }
 
 func TestRequestsGiveTheirSlotsBack(t *testing.T) {
-	impatient(t)
 	echo := script(t, "cat")
-	local := Local{Tools: Tools{FFmpeg: echo, FFprobe: echo}}
+	slots := process("")
+	local := Local{Tools: Tools{FFmpeg: echo, FFprobe: echo}, slots: slots}
 	ctx := context.Background()
 	probe := `{"streams":[],"format":{"format_name":"mp3","duration":"3"}}`
 	for i := range 2 * Slots {
@@ -155,7 +149,7 @@ func TestRequestsGiveTheirSlotsBack(t *testing.T) {
 			t.Fatalf("stream %d: %v", i+1, err)
 		}
 		_ = stream.Close()
-		failing := Local{Tools: Tools{FFmpeg: script(t, "exit 1")}}
+		failing := Local{Tools: Tools{FFmpeg: script(t, "exit 1")}, slots: slots}
 		if _, err := failing.Frame(ctx, openFile(t, "x"), 0, 640); !errors.Is(err, ErrUnreadable) {
 			t.Fatalf("frame %d: %v", i+1, err)
 		}
@@ -228,14 +222,13 @@ func TestFailuresSayWhetherTheWorkerHadTheRequest(t *testing.T) {
 }
 
 func TestTimeoutsStartOnceARequestHasItsSlot(t *testing.T) {
-	impatient(t)
-	patience[Interactive] = 2 * time.Second
+	slots := process("")
+	slots.waits.patience[Interactive] = 2 * time.Second
 	slow := script(t, "sleep 0.3; cat")
-	local := Local{Tools: Tools{FFmpeg: slow, FFprobe: slow}}
-	slots, _ := admissions.LoadOrStore("", process(""))
+	local := Local{Tools: Tools{FFmpeg: slow, FFprobe: slow}, slots: slots}
 	var held []func()
 	for range Slots {
-		release, err := slots.(*admission).acquire(context.Background(), Interactive)
+		release, err := slots.acquire(context.Background(), Interactive)
 		if err != nil {
 			t.Fatal(err)
 		}

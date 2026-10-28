@@ -49,13 +49,21 @@ const Slots = 8
 // within its reach, leaving the lower ones to the others.
 var reach = [priorities]int{Interactive: Slots, Streaming: Slots - 2, Background: 2}
 
-// patience is how long a request someone waits on queues for a slot before
-// the worker counts as busy; background work waits as long as its context.
-var patience = [priorities]time.Duration{Interactive: 20 * time.Second, Streaming: 5 * time.Second}
+// waits says how long a request queues for a slot.
+type waits struct {
+	// patience is how long a request someone waits on queues for a slot
+	// before the worker counts as busy; background work waits as long as its
+	// context.
+	patience [priorities]time.Duration
+	// poll is how often a waiting request looks for a slot another process
+	// freed; a slot freed in this process wakes its waiters at once.
+	poll [priorities]time.Duration
+}
 
-// poll is how often a waiting request looks for a slot another process freed;
-// a slot freed in this process wakes its waiters at once.
-var poll = [priorities]time.Duration{Interactive: 50 * time.Millisecond, Streaming: 100 * time.Millisecond, Background: time.Second}
+var defaultWaits = waits{
+	patience: [priorities]time.Duration{Interactive: 20 * time.Second, Streaming: 5 * time.Second},
+	poll:     [priorities]time.Duration{Interactive: 50 * time.Millisecond, Streaming: 100 * time.Millisecond, Background: time.Second},
+}
 
 type priorityKey struct{}
 
@@ -96,6 +104,7 @@ func priorityOf(ctx context.Context, op string) Priority {
 // of it however the holder exits. Without the directory (development, tests)
 // the slots are this process's alone.
 type admission struct {
+	waits   waits
 	mu      sync.Mutex
 	dir     string
 	checked bool
@@ -112,19 +121,23 @@ var admissions sync.Map // slot directory → *admission
 func admit(ctx context.Context, dir string, priority Priority) (func(), error) {
 	value, ok := admissions.Load(dir)
 	if !ok {
-		value, _ = admissions.LoadOrStore(dir, &admission{dir: dir, freed: make(chan struct{})})
+		value, _ = admissions.LoadOrStore(dir, newAdmission(dir, defaultWaits))
 	}
 	return value.(*admission).acquire(ctx, priority)
 }
 
+func newAdmission(dir string, waits waits) *admission {
+	return &admission{waits: waits, dir: dir, freed: make(chan struct{})}
+}
+
 func (a *admission) acquire(ctx context.Context, priority Priority) (func(), error) {
 	var expired <-chan time.Time
-	if wait := patience[priority]; wait > 0 {
+	if wait := a.waits.patience[priority]; wait > 0 {
 		timer := time.NewTimer(wait)
 		defer timer.Stop()
 		expired = timer.C
 	}
-	ticker := time.NewTicker(poll[priority])
+	ticker := time.NewTicker(a.waits.poll[priority])
 	defer ticker.Stop()
 	for {
 		release, freed, err := a.take(reach[priority])

@@ -11,10 +11,20 @@ import (
 
 type InstallRequest struct {
 	Digest string `json:"digest,omitempty"`
-	// UID and GID are what agents before issue #176 run the app as. Newer
-	// agents look the app's account up themselves and ignore them.
+	// The reservation uses these only until the host account exists. Commit
+	// checks the real account against that identity. The legacy install
+	// endpoint ignores these fields and looks up the account itself (#176).
 	UID int `json:"uid,omitempty"`
 	GID int `json:"gid,omitempty"`
+}
+
+type ReservationDocument struct {
+	Token string      `json:"token"`
+	Job   JobDocument `json:"job"`
+}
+
+type PreparationRequest struct {
+	Token string `json:"token"`
 }
 
 type AppsDocument struct {

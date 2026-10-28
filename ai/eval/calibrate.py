@@ -189,7 +189,7 @@ def precision_thresholds(scores, truth, rows, columns, min_precision, min_recall
 
 def display_quality(scores, truth, rows, thresholds):
     correct = wrong = unknown = photos = 0
-    for row, columns in zip(np.flatnonzero(rows), shown(scores[rows], thresholds)):
+    for row, columns in zip(np.flatnonzero(rows), shown(scores[rows], thresholds), strict=True):
         photos += bool(columns)
         for column in columns:
             value = int(truth[row, column])

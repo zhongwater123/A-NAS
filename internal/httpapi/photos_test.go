@@ -12,16 +12,18 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/photos"
-	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/photoservice"
 )
 
 func TestPhotoAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
-	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	controlDB := filepath.Join(t.TempDir(), "control.db")
+	store, err := accounts.OpenSQLite(controlDB)
 	if err != nil {
 		t.Fatalf("open account store: %v", err)
 	}
@@ -34,7 +36,7 @@ func TestPhotoAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
 		Accounts: accounts.NewService(store, apiCredentials{}, accounts.Options{}),
-		Photos:   photosapi.New(photoService, nil),
+		Photos:   localPhotos(t, photoService, sessionDirectory(t, controlDB)),
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 
@@ -146,7 +148,8 @@ func (c *apiClient) call(method, path string, body any, wantStatus int, target a
 }
 
 func TestLibraryViewingThroughTheProductAPI(t *testing.T) {
-	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	controlDB := filepath.Join(t.TempDir(), "control.db")
+	store, err := accounts.OpenSQLite(controlDB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +162,7 @@ func TestLibraryViewingThroughTheProductAPI(t *testing.T) {
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
 		Accounts: accounts.NewService(store, apiCredentials{}, accounts.Options{}),
-		Photos:   photosapi.New(photoService, nil),
+		Photos:   localPhotos(t, photoService, sessionDirectory(t, controlDB)),
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	admin := &apiClient{t: t, handler: handler}
@@ -236,4 +239,38 @@ func tinyPNG(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return encoded.Bytes()
+}
+
+// localPhotos is the photo API of service as development runs it in the
+// Product Service: behind the photo service's own authentication.
+func localPhotos(t *testing.T, service *photos.Service, sessions photoservice.SessionResolver) http.Handler {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return photoservice.Local(service, sessions, photoservice.NewGate(time.Hour, logger), logger)
+}
+
+// sessionDirectory reads the sessions of the account store at controlDB, as
+// development does.
+func sessionDirectory(t *testing.T, controlDB string) *accounts.SessionDirectory {
+	t.Helper()
+	sessions := accounts.NewSessionDirectory(controlDB)
+	t.Cleanup(func() { _ = sessions.Close() })
+	return sessions
+}
+
+// serviceSessions resolves sessions through the account service and its
+// clock, for fixtures whose time is not the wall clock's.
+type serviceSessions struct{ *accounts.Service }
+
+func (s serviceSessions) ResolveSessionUser(ctx context.Context, token string) (accounts.SessionUser, error) {
+	session, err := s.ResolveSession(ctx, token)
+	if err != nil {
+		return accounts.SessionUser{}, err
+	}
+	viewings, err := s.LibraryViewings(ctx, session.User)
+	if err != nil {
+		return accounts.SessionUser{}, err
+	}
+	user := session.User
+	return accounts.SessionUser{UserID: user.ID, Username: user.Username, Role: user.Role, MustChangePassword: user.MustChangePassword, Viewing: viewings}, nil
 }

@@ -83,7 +83,7 @@ A-NAS 把 Qdrant 作为可重建的派生向量索引：SQLite 仍是事实源�
 
 ### 复现
 
-脚本在 [`ai/eval/`](../../ai/eval/)，命令写在各脚本开头；本机环境见[本地环境](../development/LOCAL_ENVIRONMENT.md)。每个脚本把报告写到开发机 `D:\A-NAS-datasets\runs\qdrant\<实验>-<时间>.json`，长任务边跑边写。
+脚本在 [`ai/eval/`](../../ai/eval/)，命令写在各脚本开头；本机环境见[AI 开发与评估](../development/ai-development.md)。每个脚本把报告写到开发机 `D:\A-NAS-datasets\runs\qdrant\<实验>-<时间>.json`，长任务边跑边写。
 
 | 脚本 | 内容 |
 |---|---|

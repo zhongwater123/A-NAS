@@ -6,10 +6,10 @@
 import { CalendarClock, ChevronRight, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { AssistantTaskNotice } from "../api";
+import type { AssistantTaskNotice } from "../desktop/api";
 import { loadTaskNotices, readTaskNotice, useTaskNotices } from "./taskNotices";
 import { whenText } from "./taskTime";
-import "./taskToasts.css";
+import styles from "./taskToasts.module.css";
 
 // The product service checks the member's tasks about once a minute.
 const POLL_MS = 60_000;
@@ -49,7 +49,9 @@ export function TaskToasts({ enabled, onOpen }: { enabled: boolean; onOpen(notic
   const shown = showing.slice(-SHOWN).reverse();
   return (
     <div
-      className="vt-toasts"
+      className={styles.vtToasts}
+      // VNAS does not look at its own toasts when it reads the desktop.
+      data-vnas-overlay=""
       aria-live="polite"
       onPointerEnter={() => setHeld(true)}
       onPointerLeave={() => setHeld(false)}
@@ -62,14 +64,14 @@ export function TaskToasts({ enabled, onOpen }: { enabled: boolean; onOpen(notic
         return (
           <section
             key={item.id}
-            className={`vt-toast${failed ? " failed" : ""}`}
+            className={`${styles.vtToast}${failed ? ` ${styles.failed}` : ""}`}
             role="status"
             aria-label={`定时任务 ${run.name}`}
           >
-            <span className="vt-toast-mark">
+            <span className={styles.vtToastMark}>
               <CalendarClock />
             </span>
-            <div className="vt-toast-copy">
+            <div className={styles.vtToastCopy}>
               <small>VNAS 定时任务 · {whenText(Date.parse(run.ranAt) / 1000)}</small>
               <strong>
                 {run.name}
@@ -78,7 +80,7 @@ export function TaskToasts({ enabled, onOpen }: { enabled: boolean; onOpen(notic
               {run.summary && <p>{plainText(run.summary)}</p>}
               <button
                 type="button"
-                className="vt-toast-open"
+                className={styles.vtToastOpen}
                 onClick={() => {
                   readTaskNotice(item.id);
                   onOpen(run);
@@ -88,14 +90,19 @@ export function TaskToasts({ enabled, onOpen }: { enabled: boolean; onOpen(notic
                 <ChevronRight />
               </button>
             </div>
-            <button type="button" className="vt-toast-close" aria-label="关闭" onClick={() => readTaskNotice(item.id)}>
+            <button
+              type="button"
+              className={styles.vtToastClose}
+              aria-label="关闭"
+              onClick={() => readTaskNotice(item.id)}
+            >
               <X />
             </button>
           </section>
         );
       })}
       {showing.length > SHOWN && (
-        <p className="vt-toast-more">还有 {showing.length - SHOWN} 个任务的结果，在 VNAS 的定时任务里查看</p>
+        <p className={styles.vtToastMore}>还有 {showing.length - SHOWN} 个任务的结果，在 VNAS 的定时任务里查看</p>
       )}
     </div>
   );

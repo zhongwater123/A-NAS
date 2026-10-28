@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
 )
 
@@ -39,7 +39,7 @@ func TestAppIdentitiesComeFromTheAppRangeAndAreNeverReused(t *testing.T) {
 	}
 
 	host.users["app-squatter"] = [2]int{1200, 1200}
-	if _, err := restarted.AppIdentity(ctx, "squatter"); !errors.Is(err, accounts.ErrIdentityConflict) {
+	if _, err := restarted.AppIdentity(ctx, "squatter"); !errors.Is(err, accountid.ErrIdentityConflict) {
 		t.Fatalf("AppIdentity over an existing account error = %v, want ErrIdentityConflict", err)
 	}
 	if _, err := restarted.AppIdentity(ctx, "Not Valid"); err == nil {

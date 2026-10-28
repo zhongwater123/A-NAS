@@ -2,7 +2,8 @@
 set -Eeuo pipefail
 
 url="${ANAS_KIOSK_URL:-http://127.0.0.1:8080/?local-console=1}"
-profile_root="${XDG_STATE_HOME:-$HOME/.local/state}/a-nas/chromium"
+# anas-kiosk@.service's state directory; outside it, the user's own.
+profile_root="${STATE_DIRECTORY:-${XDG_STATE_HOME:-$HOME/.local/state}/a-nas}/chromium"
 output="${ANAS_KIOSK_OUTPUT:-}"
 transform="${ANAS_KIOSK_TRANSFORM:-normal}"
 scale="${ANAS_KIOSK_SCALE:-1}"

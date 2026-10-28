@@ -1,7 +1,29 @@
 # 配置实验 NAS 的 SSH 开发账号
 
 状态：verified
-更新时间：2026-10-06
+更新时间：2026-10-27
+
+## 实验 NAS 接入
+
+以下配置记录于 2026-10-27；连接前仍须按本手册核对目标与指纹。
+
+| 项目 | 当前状态 |
+|---|---|
+| 主机名 | `a-nas-dev` |
+| 系统 | Debian 13 trixie amd64 |
+| SSH | OpenSSH 已启用；开发机 A 以 `anas-dev`、开发机 B 以 `guoyi` 的密钥登录已验证 |
+| 开发账号 | `anas-dev`（暂存制品）与 `guoyi`（只读联调），均无 `sudo` 权限 |
+| 地址 | DHCP 地址，不写入仓库；每次使用前按需确认 |
+
+尚未关闭密码登录；完成恢复路径与第二把管理员密钥设计前不做 SSH 全局加固。
+
+## 开发机 B 的连接配置
+
+- SSH 别名 `a-nas` 写在 `%USERPROFILE%\.ssh\config`，以 Debian 安装时创建的普通账号 `guoyi` 登录，密钥为 `%USERPROFILE%\.ssh\a-nas-guoyi_ed25519`（无口令，只授权给本机）。该账号不属于 `sudo`，只用于只读检查与联调；任何 root 操作仍由管理员按运行手册执行。
+- SSH 别名 `a-nas-dev` 以 `anas-dev` 登录，密钥为 `%USERPROFILE%\.ssh\a-nas-dev_ed25519`（无口令，只授权给本机），用于暂存 release。
+- 撤销本机访问：删除 NAS 上 `/home/guoyi/.ssh/authorized_keys` 中注释为 `claude-code@SKZ00011303->guoyi@a-nas` 的一行。
+
+撤销前核对该行的公钥指纹并保留管理员恢复通道；恢复流程见[回滚或恢复](#回滚或恢复)。
 
 ## 目的
 

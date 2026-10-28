@@ -64,16 +64,16 @@
 ## 验收证据
 
 - 系统测试：[系统测试](../../scripts/system-test.sh)在 Debian 13 systemd 容器中用真实安装器验证新设备上终端关闭且拒绝会话、按手册开启后管理员经局域网入口获得以本人 UID 运行、起始于个人空间且不能列出成员个人空间的 Shell、退出码经关闭帧到达浏览器、本机屏幕同样可用、成员会话被拒绝、Shell 运行在自己的 scope 中、`logger -t anas-host-agent` 写入的内容不出现在 Host Agent 的日志中、Shell 不能创建命名空间、数据卷只读时终端仍可打开，以及升级保留 `ANAS_TERMINAL=enabled`。
-- 服务端：[终端测试](../../internal/terminal/terminal_test.go) 覆盖启用开关、回环对端与 Host 校验（含经局域网入口以 IP 访问）、跨源拒绝、Shell 执行与退出码、PTY 尺寸、超时后存活、并发上限和优雅关闭；[代理终端测试](../../internal/filebroker/terminal_test.go) 覆盖仅管理员、经传递的 PTY 读写与调整尺寸、断开时挂断（含忽略 `SIGHUP` 的 Shell）、会话失效后结束、会话库短暂出错不挂断而持续出错会挂断、读不出会话时暂不可用，以及 Shell 进入 scope 后才执行和 scope 建不成时照常启动；[进程组测试](../../internal/terminal/process_linux_test.go) 覆盖已退出的 Shell 不再收到信号、忽略 `SIGHUP` 时升级。
+- 服务端：[终端测试](../../internal/terminal/terminal_test.go) 覆盖启用开关、回环对端与 Host 校验（含经局域网入口以 IP 访问）、跨源拒绝、Shell 执行与退出码、PTY 尺寸、超时后存活、并发上限和优雅关闭；[代理终端测试](../../internal/filebroker/rootbroker/terminal_test.go) 覆盖仅管理员、经传递的 PTY 读写与调整尺寸、断开时挂断（含忽略 `SIGHUP` 的 Shell）、会话失效后结束、会话库短暂出错不挂断而持续出错会挂断、读不出会话时暂不可用，以及 Shell 进入 scope 后才执行和 scope 建不成时照常启动；[进程组测试](../../internal/ptyshell/process_linux_test.go) 覆盖已退出的 Shell 不再收到信号、忽略 `SIGHUP` 时升级。
 - root：[终端身份测试](../../internal/hostops/linux/root_terminal_integration_test.go) 在特权容器中验证 Shell 的 UID、组、起始目录与 PTY 属主，且读取其他成员的文件被拒绝。
 - 契约：[OpenAPI 测试](../../internal/httpapi/openapi_test.go)。
-- 前端：[桌面测试](../../web/src/App.test.tsx) 覆盖桌面上没有终端图标；[设置测试](../../web/src/SettingsPanel.test.tsx) 覆盖从设置打开、切换分区与最小化后保留同一 Shell、关闭设置后结束、退出后新建会话与未开启说明；[协议测试](../../web/src/terminal.test.ts) 覆盖地址、调整尺寸消息与退出码解析。
+- 前端：[桌面测试](../../web/src/App.test.tsx) 覆盖桌面上没有终端图标、最小化设置后保留同一 Shell、关闭设置后结束；[设置测试](../../web/src/settings/SettingsPanel.test.tsx) 覆盖从设置打开、切换分区后保留同一 Shell、关闭后重新打开时新建 Shell、退出后新建会话与未开启说明；[协议测试](../../web/src/settings/terminal.test.ts) 覆盖地址、调整尺寸消息与退出码解析。
 - 2026-10-07 在 WSL2 中以 `ANAS_TERMINAL=enabled` 运行 `build/anas-api`，经浏览器从图标打开终端，验证命令输出、中文、窗口自适应、最小化后变量保留与退出提示。
 - 2026-10-13 在模拟模式下经无头 Chrome 打开“设置 → 终端”，验证已连接状态、命令与中文输出、最大化和窄窗口下的行列自适应、切到“日志”时终端隐藏且侧栏显示运行圆点、切回后仍是同一 Shell、退出后的提示，以及未开启时的说明页。
 
 ## 关联
 
-- 代码：[`internal/terminal`](../../internal/terminal/terminal.go)、[`internal/filebroker`](../../internal/filebroker/terminal.go)、[`cmd/anas-api`](../../cmd/anas-api/main.go)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)、[`TerminalSection`](../../web/src/settings/TerminalSection.tsx)、[`XtermSession`](../../web/src/XtermSession.tsx)
+- 代码：[`internal/terminal`](../../internal/terminal/terminal.go)、[`internal/filebroker`](../../internal/filebroker/terminal.go)、[`cmd/anas-api`](../../cmd/anas-api/main.go)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)、[`TerminalSection`](../../web/src/settings/TerminalSection.tsx)、[`XtermSession`](../../web/src/settings/XtermSession.tsx)
 - 规格：[设置](settings.md)、[Web 桌面宿主机状态](web-desktop-host-state.md)
 - 运行手册：[开启管理员终端](../runbooks/enable-admin-terminal.md)
 - 调查：[本地 Kiosk 浏览器约束](../investigations/2026-10-06-kiosk-browser-confinement.md)、[一处故障让 Host Agent 的全部入口失效](../investigations/2026-10-21-host-agent-single-failures-stop-everything.md)

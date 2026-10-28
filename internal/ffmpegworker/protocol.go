@@ -16,15 +16,13 @@
 package ffmpegworker
 
 import (
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net"
 	"os"
-	"syscall"
+
+	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 )
 
 const (
@@ -145,91 +143,14 @@ func (r Request) Validate() error {
 	return nil
 }
 
+// writeFrame and readFrame speak internal/unixmsg with the worker's limit.
 func writeFrame(conn *net.UnixConn, value any, file *os.File) error {
-	body, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	if len(body) > maxFrame {
-		return errors.New("FFmpeg worker message is too large")
-	}
-	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(body)))
-	var rights []byte
-	if file != nil {
-		rights = syscall.UnixRights(int(file.Fd()))
-	}
-	if _, _, err := conn.WriteMsgUnix(header, rights, nil); err != nil {
-		return err
-	}
-	_, err = conn.Write(body)
-	return err
+	return unixmsg.Write(conn, value, file, maxFrame)
 }
 
 // readFrame reads one message and the descriptor attached to it, if any.
 func readFrame(conn *net.UnixConn, value any) (*os.File, error) {
-	header := make([]byte, 4)
-	rights := make([]byte, syscall.CmsgSpace(4*4))
-	count, rightsCount, _, _, err := conn.ReadMsgUnix(header, rights)
-	// A cancelled recvmsg may report -1, not only zero.
-	if count <= 0 && err != nil {
-		return nil, err
-	}
-	file, rightsErr := receivedFile(rights[:rightsCount])
-	if count < len(header) {
-		if _, err := io.ReadFull(conn, header[count:]); err != nil {
-			closeFile(file)
-			return nil, err
-		}
-	}
-	if rightsErr != nil {
-		closeFile(file)
-		return nil, rightsErr
-	}
-	length := binary.BigEndian.Uint32(header)
-	if length > maxFrame {
-		closeFile(file)
-		return nil, errors.New("FFmpeg worker message is too large")
-	}
-	body := make([]byte, length)
-	if _, err := io.ReadFull(conn, body); err != nil {
-		closeFile(file)
-		return nil, err
-	}
-	if err := json.Unmarshal(body, value); err != nil {
-		closeFile(file)
-		return nil, fmt.Errorf("decode FFmpeg worker message: %w", err)
-	}
-	return file, nil
+	return unixmsg.Read(conn, value, maxFrame)
 }
 
-func receivedFile(rights []byte) (*os.File, error) {
-	if len(rights) == 0 {
-		return nil, nil
-	}
-	messages, err := syscall.ParseSocketControlMessage(rights)
-	if err != nil {
-		return nil, err
-	}
-	var descriptors []int
-	for _, message := range messages {
-		received, err := syscall.ParseUnixRights(&message)
-		if err != nil {
-			return nil, err
-		}
-		descriptors = append(descriptors, received...)
-	}
-	if len(descriptors) == 0 {
-		return nil, nil
-	}
-	for _, extra := range descriptors[1:] {
-		_ = syscall.Close(extra)
-	}
-	return os.NewFile(uintptr(descriptors[0]), "media"), nil
-}
-
-func closeFile(file *os.File) {
-	if file != nil {
-		_ = file.Close()
-	}
-}
+func closeFile(file *os.File) { unixmsg.CloseFile(file) }

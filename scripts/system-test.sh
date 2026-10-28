@@ -162,6 +162,10 @@ stage() {
   ln -s "$ai/runtime.tar.gz" "$1/ai/runtime.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
   install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
+  install -m 0750 /src/scripts/run-kiosk.sh "$1/kiosk-launcher"
+  install -m 0644 "/src/deploy/systemd/system/anas-kiosk@.service" "$1/anas-kiosk@.service"
+  install -m 0644 /src/deploy/pam/a-nas-kiosk "$1/a-nas-kiosk.pam"
+  install -m 0644 /src/deploy/sysusers.d/a-nas-kiosk.conf "$1/a-nas-kiosk.sysusers"
 }
 release=/tmp/release
 stage "$release"
@@ -263,8 +267,23 @@ in_trash() { # USER SPACE_DIR FILE: FILE's bytes are in USER's recycle bin
 }
 status_of() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 secret() { head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20; }
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+verified() { # UNIT_FILE...: systemd-analyze verify reports nothing, not even a warning
+  local report
+  report=$(systemd-analyze verify --man=no "$@" 2>&1) && [[ -z "$report" ]] && return
+  printf '%s\n' "$report" >&2
+  return 1
+}
 api=http://127.0.0.1:8080
 data=/srv/a-nas/data
+
+# --- The units as installed, with every drop-in, read by Debian 13's systemd
+# as on the NAS (#278): each directive and value, and that each command exists.
+# The image has no Wayland compositor: Cage, which the local console's unit
+# starts, is a stand-in that only has to exist.
+[[ -x /usr/bin/cage ]] || install -m 0755 /dev/null /usr/bin/cage
+check "systemd accepts every installed A-NAS unit" \
+  verified /etc/systemd/system/anas*.service /etc/systemd/system/anas*.socket /etc/systemd/system/*anas*.slice
 
 # --- Every service runs under its production unit (issue #38).
 check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares smbd
@@ -284,6 +303,28 @@ check "the moved record is root's alone" \
   test "$(stat -c '%U:%G %a' /var/lib/a-nas-host/app-identities.json)" = 'root:root 600'
 check "the record left the Product Service's directory" test ! -e /var/lib/a-nas/app-identities.json
 check "Product Service cannot list the Host Agent's records" denied as a-nas ls /var/lib/a-nas-host
+
+# --- The local console (issue #174): an account of its own that cannot log
+# in, starting the launcher of the installed release. The container has no
+# display, so the unit is installed but neither enabled nor started.
+check "the local console runs as its own account" \
+  test "$(systemctl show -p User --value anas-kiosk@tty1.service)" = a-nas-kiosk
+check "the local console's account has no home and no login shell" \
+  test "$(getent passwd a-nas-kiosk | cut -d: -f6-7)" = /nonexistent:/usr/sbin/nologin
+check "the local console's account has no password" test "$(passwd -S a-nas-kiosk | cut -d ' ' -f 2)" = L
+check "the local console's launcher is the installed release's" \
+  cmp -s /opt/a-nas/current/kiosk-launcher /src/scripts/run-kiosk.sh
+check "the local console's launcher is root's" test "$(stat -c '%U %a' /opt/a-nas/current/kiosk-launcher)" = 'root 755'
+# A staging account laid out as anas-dev's on the NAS: its staged releases are
+# its own, and the owner's write shows the directory is writable at all.
+id anas-dev >/dev/null 2>&1 || useradd --create-home --shell /bin/bash anas-dev
+staging=/home/anas-dev/apps/a-nas/releases
+install -d -o anas-dev -g anas-dev -m 0750 /home/anas-dev/apps /home/anas-dev/apps/a-nas "$staging"
+check "the staging account writes its staged releases" as anas-dev touch "$staging/staged-by-anas-dev"
+check "the local console cannot write the staged releases" denied as a-nas-kiosk touch "$staging/staged-by-kiosk"
+check "the local console is not in the staging account's group" denied grep -qw anas-dev <<<"$(id -nG a-nas-kiosk)"
+check "the installer leaves the local console disabled" \
+  test "$(systemctl is-enabled anas-kiosk@tty1.service 2>/dev/null)" = disabled
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 
 # --- Accounts: an administrator and a member, each with one Linux identity.
@@ -590,6 +631,32 @@ check "SMB delete" quiet smb alice alice "del alice-smb.txt"
 check "SMB delete appears in the member's Web recycle bin" \
   grep -qx alice-smb.txt <(curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" | jq -r '.items[].name')
 check "SMB-deleted bytes are in the same recycle bin" in_trash alice "$data/spaces/private/alice" /tmp/alice-smb.txt
+
+# --- Cross-space moves (#180) preserve times through the confined Worker
+# and recycle the source instead of deleting it permanently.
+move_source="$data/spaces/private/alice/move-times"
+move_target="$data/spaces/shared/move-times"
+as alice mkdir "$move_source"
+as alice cp /tmp/alice.txt "$move_source/dated.txt"
+as alice touch -m -d '2020-01-02 03:04:05.123456789 UTC' "$move_source/dated.txt" "$move_source"
+move_file_time=$(stat -c %y "$move_source/dated.txt")
+move_dir_time=$(stat -c %y "$move_source")
+move_source_id=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/spaces/$alice_private/entries" | jq -r '.items[] | select(.name == "move-times") | .id')
+move_id=$(curl -fsS -X PATCH -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
+  -H 'Content-Type: application/json' -d "$(jq -nc --arg space "$shared" '{spaceId:$space}')" \
+  "$api/api/v1/files/$move_source_id" | jq -r .id || true)
+check "cross-space move publishes a new entry" test -n "$move_id" -a "$move_id" != null -a "$move_id" != "$move_source_id"
+check "cross-space move preserves file nanosecond mtime" test "$(stat -c %y "$move_target/dated.txt" 2>/dev/null)" = "$move_file_time"
+check "cross-space move preserves directory nanosecond mtime" test "$(stat -c %y "$move_target" 2>/dev/null)" = "$move_dir_time"
+check "cross-space move inherits Shared read permissions" as owner cmp -s /tmp/alice.txt "$move_target/dated.txt"
+check "cross-space move removes the source from its old location" test ! -e "$move_source"
+move_trash_id=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" | jq -r '.items[] | select(.name == "move-times") | .id')
+check "cross-space move leaves an operator recycle item" test -n "$move_trash_id" -a "$move_trash_id" != null
+check "another user cannot restore the moved source" test "$(status_of -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" \
+  -H 'Content-Type: application/json' -d '{}' "$api/api/v1/trash/$move_trash_id/restore")" = 403
+check "the operator restores the moved source" test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
+  -H 'Content-Type: application/json' -d '{}' "$api/api/v1/trash/$move_trash_id/restore")" = 200
+check "the restored source keeps its content" cmp -s /tmp/alice.txt "$move_source/dated.txt"
 
 # --- Snapshots (#162): a space of 100,000 files, far beyond the 1 MiB the
 # Host Agent's reply used to be cut at, and the sweep that removes what a
@@ -1360,6 +1427,8 @@ check "a current pool video answers a byte range" test "$(status_of -r 0-1023 "$
 # --- The AI assistant's sandbox on this installer's accounts, spaces and ACLs (#115).
 # shellcheck disable=SC1091 # sourced from the mounted checkout
 . /src/ai/assistant-spike/system-test.sh
+# shellcheck disable=SC1091 # sourced from the mounted checkout
+. /src/ai/assistant-spike/disable-system-test.sh
 
 # --- Last, because other services keep the detached volume busy: the
 # unmount reaches the photo service's private mount namespace, and it stops

@@ -33,5 +33,23 @@ jobs:
           go-version-file: .go-version
           cache: true
 
-      - name: Run govulncheck
+      # pip-audit, pinned by the development tools' lock.
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      # A block: on one line, ":all: -r" would read as a YAML mapping and void
+      # the whole workflow.
+      - name: Install pip-audit
+        run: |
+          python3 -m pip install --require-hashes --only-binary=:all: -r ai/requirements-dev.txt
+
+      # npm audit reads web/package-lock.json; it needs no installed packages.
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Run govulncheck, pip-audit and npm audit
         run: make vuln-check

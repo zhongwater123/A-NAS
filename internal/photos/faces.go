@@ -156,7 +156,7 @@ INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT ?, ?, 'pending', ?, ?
 WHERE NOT EXISTS (SELECT 1 FROM scans WHERE object_id = ? AND derivation = ?)
   AND EXISTS (SELECT 1 FROM derived_files WHERE object_id = ? AND derivation = ?)
-  AND `+inPeopleLibrary("?")+` AND `+notVideo("?")+`
+  AND `+inPeopleLibrary("?")+` AND `+inLocalAI("?")+`
 ON CONFLICT(object_id, derivation) DO NOTHING`,
 		objectID, facesDerivation, now, now, objectID, facesDerivation, objectID, thumbnailDerivation, objectID, objectID)
 	return err
@@ -299,21 +299,13 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET width = excluded.width, height 
 			return err
 		}
 	}
-	s.aiModelMu.Lock()
-	s.scanned++
-	s.aiModelMu.Unlock()
+	s.ai.countScan()
 	return nil
 }
 
 // clusterEvery is how many face or pet scans a long run stores before people
 // cluster again; otherwise they cluster once the scans are done.
 const clusterEvery = 50
-
-func (s *Service) scansSinceClustering() int {
-	s.aiModelMu.Lock()
-	defer s.aiModelMu.Unlock()
-	return s.scanned
-}
 
 func sheetRows(faces int) int { return (faces + avatarColumns - 1) / avatarColumns }
 

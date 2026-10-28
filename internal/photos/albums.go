@@ -42,7 +42,7 @@ type albumRecord struct {
 // albumSelect reads albums with how many photos p sees in each and the
 // newest of them as its cover.
 func albumSelect(p Principal) string {
-	shown := "a.trashed_at IS NULL" + hiddenVideos(p, "a.object_id")
+	shown := listedAssets(p, "a")
 	return `
 SELECT al.id, al.library_id, al.name, al.created_by, al.created_at,
        (SELECT COUNT(*) FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
@@ -158,7 +158,7 @@ func (s *Service) AlbumPhotos(ctx context.Context, p Principal, albumID, cursor 
 	if err != nil {
 		return Page{}, err
 	}
-	return s.newestFirst(ctx, p, "WHERE a.id IN (SELECT asset_id FROM album_assets WHERE album_id = ?) AND a.trashed_at IS NULL",
+	return s.newestFirst(ctx, p, "a.id IN (SELECT asset_id FROM album_assets WHERE album_id = ?)",
 		[]any{record.ID}, cursor, limit)
 }
 

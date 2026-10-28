@@ -54,4 +54,4 @@ description: 在开发机上启动一套 Fake 模式的 A-NAS 预览栈：模拟
 
 ## 只改界面时
 
-端口 8080 空闲时，可以在 `web/` 中运行 `npm run dev`。Vite 把 `/api` 代理到固定的 `127.0.0.1:8080`，所以同一时间只能有一套这样的栈；在 `/mnt` 下运行时加 `CHOKIDAR_USEPOLLING=1`，见[本地环境](../../../docs/development/LOCAL_ENVIRONMENT.md#运行检查)。
+端口 8080 空闲时，可以在 `web/` 中运行 `npm run dev`。Vite 把 `/api` 代理到固定的 `127.0.0.1:8080`，所以同一时间只能有一套这样的栈；在 `/mnt` 下运行时加 `CHOKIDAR_USEPOLLING=1`，见[本地环境](../../../docs/development/environments/windows.md#运行检查)。

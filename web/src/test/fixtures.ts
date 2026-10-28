@@ -2,7 +2,6 @@
 // fixture that leaves out what the server always sends does not compile, and
 // the client's check of the desktop shell's responses would refuse it.
 import type {
-  AppStatus,
   HostStateResponse,
   MetricsResponse,
   Session,
@@ -26,31 +25,6 @@ export function user(overrides: Partial<User> = {}): User {
 // session signs in the owner unless account names someone else.
 export function session(account: Partial<User> = {}, overrides: Partial<Omit<Session, "user">> = {}): Session {
   return { csrfToken: "csrf-test", expiresAt: "2026-10-07T22:00:00Z", user: user(account), ...overrides };
-}
-
-// app is a catalog app as the App Center lists it, not installed.
-export function app(id: string, overrides: Partial<AppStatus> = {}): AppStatus {
-  return {
-    id,
-    title: id[0].toUpperCase() + id.slice(1),
-    tagline: "",
-    description: "",
-    notes: "",
-    category: "notes",
-    version: "1.0",
-    author: "",
-    developer: "",
-    website: "",
-    repo: "",
-    docs: "",
-    updated: "",
-    scheme: "http",
-    path: "/",
-    state: "available",
-    running: 0,
-    total: 0,
-    ...overrides,
-  };
 }
 
 export const healthyState: HostStateResponse = {

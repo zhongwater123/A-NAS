@@ -1,6 +1,6 @@
 import { FileText, Film, FolderClosed, Image, Music2 } from "lucide-react";
 
-import { isPreviewableImage, isVideoFile } from "../fileTypes";
+import { isPreviewableImage, isVideoFile } from "../lib/fileTypes";
 import { FileBrowserItem } from "./model";
 import { fileVisualURL } from "./preview";
 

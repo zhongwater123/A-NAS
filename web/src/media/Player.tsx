@@ -24,8 +24,8 @@ import {
   CSSProperties,
   FocusEvent,
   KeyboardEvent,
-  PointerEvent as ReactPointerEvent,
   ReactNode,
+  PointerEvent as ReactPointerEvent,
   RefObject,
   useCallback,
   useEffect,
@@ -36,20 +36,21 @@ import {
   useState,
 } from "react";
 
-import { messageOf } from "./Browse";
-import { episodeCode, episodeName, timecode } from "./format";
 import {
   browserCapabilities,
   getPlayback,
   getVideo,
+  type Playback,
+  type Quality,
   saveProgress,
   streamURL,
   subtitleURL,
-  type Playback,
-  type Quality,
   type VideoDetail,
-} from "./mediaApi";
-import { PlayerPanel, type PanelTab } from "./PlayerPanel";
+} from "./api";
+import { messageOf } from "./Browse";
+import { episodeCode, episodeName, timecode } from "./format";
+import styles from "./media.module.css";
+import { type PanelTab, PlayerPanel } from "./PlayerPanel";
 import { canFeed, StreamFeed } from "./streamFeed";
 
 const qualityLabels: Record<Quality, string> = { original: "原画", "1080p": "1080p", "720p": "720p", "480p": "480p" };
@@ -150,7 +151,7 @@ interface Notice {
 // SkipIcon is the circular arrow of a ten-second skip with its seconds on it.
 function SkipIcon({ forward }: { forward?: boolean }) {
   return (
-    <span className="mc-skip-icon">
+    <span className={styles.mcSkipIcon}>
       {forward ? <RotateCw /> : <RotateCcw />}
       <small>10</small>
     </span>
@@ -756,7 +757,7 @@ export function Player({
   return (
     <div
       ref={container}
-      className={`mc-player ${showChrome ? "chrome" : "bare"} ${panel ? "paneled" : ""}`}
+      className={`${styles.mcPlayer} ${showChrome ? styles.chrome : styles.bare} ${panel ? styles.paneled : ""}`}
       tabIndex={-1}
       role="dialog"
       aria-label={titleText ? `播放 ${titleText}` : "播放器"}
@@ -768,7 +769,7 @@ export function Player({
       <video
         ref={video}
         src={source || undefined}
-        className="mc-video"
+        className={styles.mcVideo}
         playsInline
         preload="auto"
         onClick={() => (panel ? setPanel(undefined) : toggle())}
@@ -785,49 +786,49 @@ export function Player({
           />
         )}
       </video>
-      <canvas ref={still} className={`mc-still ${frozen ? "shown" : ""}`} aria-hidden="true" />
+      <canvas ref={still} className={`${styles.mcStill} ${frozen ? styles.shown : ""}`} aria-hidden="true" />
       {activeCues.length > 0 && (
-        <div className="mc-cues" aria-live="off">
+        <div className={styles.mcCues} aria-live="off">
           {activeCues.map((cue, index) => (
             <span key={index}>{cue.text}</span>
           ))}
         </div>
       )}
-      {(waiting || jump !== undefined) && !failure && <span className="mc-player-spinner" aria-label="正在载入" />}
+      {(waiting || jump !== undefined) && !failure && <span className={styles.mcPlayerSpinner} aria-label="正在载入" />}
       {jump !== undefined && !failure && (
-        <span className="mc-jump" role="status">
+        <span className={styles.mcJump} role="status">
           跳转到 {timecode(jump)}
         </span>
       )}
       {halted && !waiting && jump === undefined && !failure && countdown === undefined && (
-        <button type="button" className="mc-player-center" aria-label="播放" onClick={toggle}>
+        <button type="button" className={styles.mcPlayerCenter} aria-label="播放" onClick={toggle}>
           <Play />
         </button>
       )}
       {notice && (
-        <span key={notice.id} className="mc-notice" role="status">
+        <span key={notice.id} className={styles.mcNotice} role="status">
           {notice.icon}
           {notice.text}
         </span>
       )}
       {failure && (
-        <div className="mc-player-failure" role="alert">
+        <div className={styles.mcPlayerFailure} role="alert">
           <p>{failure}</p>
           <div>
             {detail && playback && (
-              <button type="button" className="mc-primary" onClick={() => begin(playback, absolute(), true)}>
+              <button type="button" className={styles.mcPrimary} onClick={() => begin(playback, absolute(), true)}>
                 <RotateCcw />
                 重试
               </button>
             )}
-            <button type="button" className="mc-glass" onClick={onClose}>
+            <button type="button" className={styles.mcGlass} onClick={onClose}>
               关闭
             </button>
           </div>
         </div>
       )}
       {resumed !== undefined && !failure && (
-        <div className="mc-resume" role="status">
+        <div className={styles.mcResume} role="status">
           已从 {timecode(resumed)} 继续播放
           <button
             type="button"
@@ -842,25 +843,29 @@ export function Player({
         </div>
       )}
       {countdown !== undefined && detail?.nextId && (
-        <div className="mc-next" role="status">
+        <div className={styles.mcNext} role="status">
           <span>{countdown} 秒后播放下一集</span>
           <strong>{upNext ?? "下一集"}</strong>
           <div>
-            <button type="button" className="mc-primary small" onClick={() => go(detail.nextId!)}>
+            <button type="button" className={`${styles.mcPrimary} ${styles.small}`} onClick={() => go(detail.nextId!)}>
               <SkipForward />
               立即播放
             </button>
-            <button type="button" className="mc-glass small" onClick={() => setCountdown(undefined)}>
+            <button
+              type="button"
+              className={`${styles.mcGlass} ${styles.small}`}
+              onClick={() => setCountdown(undefined)}
+            >
               取消
             </button>
           </div>
         </div>
       )}
 
-      <header className="mc-player-top">
+      <header className={styles.mcPlayerTop}>
         <button
           type="button"
-          className="mc-player-button"
+          className={styles.mcPlayerButton}
           aria-label="退出播放"
           data-tip="退出播放 (Esc)"
           data-tip-at="below start"
@@ -868,21 +873,21 @@ export function Player({
         >
           <ArrowLeft />
         </button>
-        <div className="mc-player-title">
+        <div className={styles.mcPlayerTitle}>
           <strong>{titleText}</strong>
           {subtitleText && <small>{subtitleText}</small>}
         </div>
         {playback && (
-          <span className={`mc-player-mode ${playback.mode}`} title={playback.reason}>
+          <span className={`${styles.mcPlayerMode} ${styles[playback.mode] ?? ""}`} title={playback.reason}>
             {modeLabel}
           </span>
         )}
       </header>
 
-      <footer className="mc-player-bottom" onPointerDown={(event) => event.stopPropagation()}>
+      <footer className={styles.mcPlayerBottom} onPointerDown={(event) => event.stopPropagation()}>
         <div
           ref={bar}
-          className="mc-seek"
+          className={styles.mcSeek}
           role="slider"
           aria-label="播放进度"
           aria-valuemin={0}
@@ -895,32 +900,32 @@ export function Player({
           onPointerUp={endScrub}
           onPointerLeave={() => setHover(undefined)}
         >
-          <span className="mc-seek-track">
+          <span className={styles.mcSeekTrack}>
             {duration > 0 &&
               ranges.map(([start, end]) => (
                 <span
                   key={start}
-                  className="mc-seek-buffer"
+                  className={styles.mcSeekBuffer}
                   style={{
                     left: `${Math.min(100, (start / duration) * 100)}%`,
                     width: `${Math.max(0, Math.min(1, (end - start) / duration)) * 100}%`,
                   }}
                 />
               ))}
-            <span className="mc-seek-fill" style={{ width: `${share * 100}%` }} />
+            <span className={styles.mcSeekFill} style={{ width: `${share * 100}%` }} />
           </span>
-          <span className="mc-seek-thumb" style={{ left: `${share * 100}%` }} />
+          <span className={styles.mcSeekThumb} style={{ left: `${share * 100}%` }} />
           {hover && duration > 0 && (
-            <span className="mc-seek-tip" style={{ left: hover.x }}>
+            <span className={styles.mcSeekTip} style={{ left: hover.x }}>
               {timecode(hover.time)}
             </span>
           )}
         </div>
-        <div className="mc-controls">
+        <div className={styles.mcControls}>
           {detail?.previousId && (
             <button
               type="button"
-              className="mc-player-button"
+              className={styles.mcPlayerButton}
               aria-label="上一集"
               data-tip="上一集"
               onClick={() => go(detail.previousId!)}
@@ -930,7 +935,7 @@ export function Player({
           )}
           <button
             type="button"
-            className="mc-player-button big"
+            className={`${styles.mcPlayerButton} ${styles.big}`}
             aria-label={paused ? "播放" : "暂停"}
             data-tip={paused ? "播放 (空格)" : "暂停 (空格)"}
             data-tip-at={detail?.previousId ? undefined : "start"}
@@ -941,7 +946,7 @@ export function Player({
           {detail?.nextId && (
             <button
               type="button"
-              className="mc-player-button"
+              className={styles.mcPlayerButton}
               aria-label="下一集"
               data-tip="下一集"
               onClick={() => go(detail.nextId!)}
@@ -951,7 +956,7 @@ export function Player({
           )}
           <button
             type="button"
-            className="mc-player-button"
+            className={styles.mcPlayerButton}
             aria-label="后退 10 秒"
             data-tip="后退 10 秒 (←)"
             onClick={() => seek(position() - 10, settleSkips)}
@@ -960,17 +965,17 @@ export function Player({
           </button>
           <button
             type="button"
-            className="mc-player-button"
+            className={styles.mcPlayerButton}
             aria-label="前进 10 秒"
             data-tip="快进 10 秒 (→)"
             onClick={() => seek(position() + 10, settleSkips)}
           >
             <SkipIcon forward />
           </button>
-          <div className="mc-volume">
+          <div className={styles.mcVolume}>
             <button
               type="button"
-              className="mc-player-button"
+              className={styles.mcPlayerButton}
               aria-label={muted ? "取消静音" : "静音"}
               data-tip={muted ? "取消静音 (M)" : "静音 (M)"}
               onClick={() => setMuted(!muted)}
@@ -991,15 +996,15 @@ export function Player({
               style={{ "--mc-level": `${(muted ? 0 : volume) * 100}%` } as CSSProperties}
             />
           </div>
-          <span className="mc-time">
+          <span className={styles.mcTime}>
             {timecode(shown)}
             <span> / {timecode(duration)}</span>
           </span>
-          <span className="mc-controls-gap" />
+          <span className={styles.mcControlsGap} />
           {detail && (
             <button
               type="button"
-              className={`mc-player-button labeled ${panel ? "on" : ""}`}
+              className={`${styles.mcPlayerButton} ${styles.labeled} ${panel ? styles.on : ""}`}
               aria-label={episodic ? "选集" : "片库"}
               aria-expanded={Boolean(panel)}
               data-tip={episodic ? "选择其他集" : "换一部看"}
@@ -1012,7 +1017,7 @@ export function Player({
           {detail && detail.subtitles.length > 0 && (
             <button
               type="button"
-              className={`mc-player-button ${subtitle !== "off" ? "on" : ""}`}
+              className={`${styles.mcPlayerButton} ${subtitle !== "off" ? styles.on : ""}`}
               aria-label="字幕"
               data-tip="字幕"
               aria-expanded={menu === "subtitles"}
@@ -1023,7 +1028,7 @@ export function Player({
           )}
           <button
             type="button"
-            className="mc-player-button"
+            className={styles.mcPlayerButton}
             aria-label="播放设置"
             data-tip="画质、倍速与音轨"
             data-tip-at="end"
@@ -1037,7 +1042,7 @@ export function Player({
           </button>
           <button
             type="button"
-            className="mc-player-button"
+            className={styles.mcPlayerButton}
             aria-label={fullscreen ? "退出全屏" : "全屏"}
             data-tip={fullscreen ? "退出全屏 (F)" : "全屏 (F)"}
             data-tip-at="end"
@@ -1047,7 +1052,7 @@ export function Player({
           </button>
         </div>
         {menu && detail && playback && (
-          <div className="mc-player-menu" role="menu" onPointerDown={(event) => event.stopPropagation()}>
+          <div className={styles.mcPlayerMenu} role="menu" onPointerDown={(event) => event.stopPropagation()}>
             {menu === "settings" && (
               <>
                 <button type="button" role="menuitem" onClick={() => setMenu("quality")}>
@@ -1070,7 +1075,7 @@ export function Player({
                   <small>{rate === 1 ? "正常" : `${rate}×`}</small>
                   <ChevronRight />
                 </button>
-                {playback.reason && <p className="mc-player-reason">{playback.reason}</p>}
+                {playback.reason && <p className={styles.mcPlayerReason}>{playback.reason}</p>}
               </>
             )}
             {menu === "quality" &&
@@ -1082,7 +1087,7 @@ export function Player({
                   aria-checked={quality === playback.quality}
                   onClick={() => void reconfigure({ quality })}
                 >
-                  {quality === playback.quality ? <Check /> : <span className="mc-menu-blank" />}
+                  {quality === playback.quality ? <Check /> : <span className={styles.mcMenuBlank} />}
                   <span>{qualityLabels[quality]}</span>
                   {quality !== "original" && <small>转码</small>}
                 </button>
@@ -1096,7 +1101,7 @@ export function Player({
                   aria-checked={track.index === playback.audio}
                   onClick={() => void reconfigure({ audio: track.index })}
                 >
-                  {track.index === playback.audio ? <Check /> : <span className="mc-menu-blank" />}
+                  {track.index === playback.audio ? <Check /> : <span className={styles.mcMenuBlank} />}
                   <span>{track.label}</span>
                 </button>
               ))}
@@ -1112,7 +1117,7 @@ export function Player({
                     setMenu(undefined);
                   }}
                 >
-                  {value === rate ? <Check /> : <span className="mc-menu-blank" />}
+                  {value === rate ? <Check /> : <span className={styles.mcMenuBlank} />}
                   <span>{value === 1 ? "正常" : `${value}×`}</span>
                 </button>
               ))}
@@ -1128,7 +1133,7 @@ export function Player({
                     setMenu(undefined);
                   }}
                 >
-                  {track.id === subtitle ? <Check /> : <span className="mc-menu-blank" />}
+                  {track.id === subtitle ? <Check /> : <span className={styles.mcMenuBlank} />}
                   <span>{track.label}</span>
                   {track.id !== "off" && <small>{track.external ? "外挂" : "内嵌"}</small>}
                 </button>

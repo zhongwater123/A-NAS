@@ -5,13 +5,13 @@ description: 在 Windows 开发机上运行 A-NAS 的完整门禁（make check �
 
 # 在 WSL 的 ext4 副本中运行门禁
 
-什么变更跑什么检查以 [AGENTS.md](../../../AGENTS.md#验证) 为准；工具链与两台开发机的差异见[本地环境](../../../docs/development/LOCAL_ENVIRONMENT.md)。
+什么变更跑什么检查以 [AGENTS.md](../../../AGENTS.md#验证) 为准；工具链与两台开发机的差异见[Windows 与 WSL 环境](../../../docs/development/environments/windows.md)。
 
 ## 为什么用副本
 
 - 开发机的 Go、Node、jq 与 ShellCheck 只在 WSL 中；开发机 B 由 `. ~/.anas-env` 加入 `PATH`。
 - 在 `/mnt/<盘符>` 上运行时 vitest worker 启动超时，复制到 WSL 的 ext4 目录后正常。复制时排除 `.git`、`web/node_modules` 与 `build`。
-- 副本没有 `.git`，所以运行 `make check-steps`。它就是 `make check` 的全部检查；`make check` 之后还要用 `git rev-parse` 写部署用的 `build/.validated-build`，只在部署前需要，见本地环境中的“与实验 NAS 联调”。
+- 副本没有 `.git`，所以运行 `make check-steps`。它就是 `make check` 的全部检查；`make check` 之后还要用 `git rev-parse` 写部署用的 `build/.validated-build`，只在部署前需要，见[测试与验证](../../../docs/development/testing.md)和[暂存注意事项](../../../docs/runbooks/provision-v1.0.1-experimental-storage.md#开发机暂存注意事项)。
 
 ## 步骤
 
@@ -26,7 +26,7 @@ dst=~/anas-check/$(basename "$src")
 mkdir -p "$dst"
 rsync -a --delete --exclude .git --exclude web/node_modules --exclude build "$src"/ "$dst"/
 cd "$dst"
-# The vector index tests run the pinned Qdrant (docs/development/LOCAL_ENVIRONMENT.md).
+# The vector index tests run the pinned Qdrant (docs/development/testing.md).
 bash scripts/fetch-qdrant.sh >/dev/null
 export ANAS_QDRANT_REQUIRED=1
 if make check-steps > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
@@ -34,7 +34,7 @@ EOF
 ```
 
 - 每个检出有自己的副本，副本名取检出目录名。再次运行时，rsync 只同步改动，`web/node_modules` 留在副本中；锁文件没变时 `make web-install` 不会重新安装。
-- 默认发行版不是开发用的发行版时，在 `wsl.exe` 后加 `-d <发行版>`。开发机 A 的发行版与账号见本地环境。
+- 默认发行版不是开发用的发行版时，在 `wsl.exe` 后加 `-d <发行版>`。开发机 A 的发行版与账号见上述 Windows 与 WSL 环境。
 - 只想跑其中几项时，把 `check-steps` 换成对应目标，例如 `make docs-check ops-check vet test`。
 
 ## 结果

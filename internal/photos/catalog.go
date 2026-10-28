@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // migrations are applied in order and recorded in PRAGMA user_version. The
@@ -359,11 +361,10 @@ END;
 }
 
 func openCatalog(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL&_synchronous=FULL")
+	db, err := sqlitedb.Open(path, sqlitedb.Options{Durable: true})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	if err := migrate(context.Background(), db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -399,11 +400,10 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// timeLayout has a fixed width so that stored timestamps sort correctly as
-// text; time.RFC3339Nano trims trailing zeros and would not.
-const timeLayout = "2006-01-02T15:04:05.000000000Z"
+// timeLayout is how stored timestamps are read (sqlitedb.TimeLayout).
+const timeLayout = sqlitedb.TimeLayout
 
-func formatTime(value time.Time) string { return value.UTC().Format(timeLayout) }
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }
 
 func parseTime(value string) (time.Time, error) { return time.Parse(timeLayout, value) }
 

@@ -5,7 +5,7 @@ description: 运行 A-NAS 的 systemd 系统测试（scripts/system-test.sh）�
 
 # 运行 systemd 系统测试
 
-系统测试覆盖的内容与原因见[本地环境 · 系统测试](../../../docs/development/LOCAL_ENVIRONMENT.md#系统测试)，入口在 [`scripts/system-test.sh`](../../../scripts/system-test.sh) 与 Makefile 的 `system-test` 目标。CI 的 `System test (Debian 13, systemd)` 作业对每次 push 与 PR 运行同一流程；以下情况才需要在本机运行：推送前就要结果、调试失败，或部署前用真实模型复测。
+系统测试覆盖的内容与原因见[测试与验证 · 系统测试](../../../docs/development/testing.md#系统测试)，入口在 [`scripts/system-test.sh`](../../../scripts/system-test.sh) 与 Makefile 的 `system-test` 目标。CI 的 `System test (Debian 13, systemd)` 作业对每次 push 与 PR 运行同一流程；以下情况才需要在本机运行：推送前就要结果、调试失败，或部署前用真实模型复测。
 
 ## 前提
 
@@ -17,7 +17,7 @@ description: 运行 A-NAS 的 systemd 系统测试（scripts/system-test.sh）�
   ```
 
   镜像用 debootstrap 从 `deb.debian.org` 组装，不需要 Docker Hub。
-- 发布二进制 `build/anas-api` 与 `build/anas-host-agent`。`make system-test` 会先运行 `build-binaries`，它需要 gcc（cgo SQLite）。WSL 中没有 gcc 时，按本地环境中“运行检查”一节在 `anas-acl-matrix:bookworm` 中构建，再直接运行 `bash scripts/system-test.sh`。
+- 发布二进制 `build/anas-api` 与 `build/anas-host-agent`。`make system-test` 会先运行 `build-binaries`，它需要 gcc（cgo SQLite）。WSL 中没有 gcc 时，按 [Windows 环境的运行检查](../../../docs/development/environments/windows.md#运行检查)在 `anas-acl-matrix:bookworm` 中构建，再直接运行 `bash scripts/system-test.sh`。
 
 ## 步骤
 
@@ -33,7 +33,7 @@ echo "PASS: $(grep -c '^PASS' "$dst.system-test.log" || true)"; grep '^FAIL' "$d
 ## 变体
 
 - 改名前的 FFmpeg Worker：将上一版本的 Linux `anas-api` 构建产物放在当前测试副本的 `build/legacy-anas-api`，测试会以旧 `media-worker` 子命令、旧单元与旧套接字验证回滚，再用真实安装器升级并验证音乐解码。没有该文件时，仍测试旧单元布局与切换清理，但解码器用本次构建；输出会明确区分。只复制可确认来源的本地构建产物，不提交二进制。
-- 真实模型：先运行 `scripts/build-ai-runtime.sh`，再设 `ANAS_SYSTEM_TEST_AI=real`，并用 `ANAS_AI_MODEL`、`ANAS_AI_DETECTOR`、`ANAS_AI_FACES` 与 `ANAS_AI_PETS` 指向模型。这些变量的含义见脚本开头的注释，模型位置见本地环境。
+- 真实模型：先运行 `scripts/build-ai-runtime.sh`，再设 `ANAS_SYSTEM_TEST_AI=real`，并用 `ANAS_AI_MODEL`、`ANAS_AI_DETECTOR`、`ANAS_AI_FACES` 与 `ANAS_AI_PETS` 指向模型。这些变量的含义见脚本开头的注释，模型位置见 [AI 开发与评估](../../../docs/development/ai-development.md)。
 - AI 助手：`ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME` 指向 `ai/assistant-spike` 构建的 `runtime.tar.gz` 时，会加上策略检查与一个对接脚本化模型的真实助手。
 
 ## 结果

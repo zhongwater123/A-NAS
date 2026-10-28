@@ -1,4 +1,3 @@
-import { errorText } from "../errorMessages";
 import { ArrowLeft, CircleAlert } from "lucide-react";
 import {
   KeyboardEvent,
@@ -11,20 +10,10 @@ import {
   useState,
 } from "react";
 
-import { formatBytes } from "../bytes";
-import { useDialogs, useToasts } from "../photos/feedback";
-import { type Music, MusicContext, type Place } from "./context";
-import {
-  buildIndex,
-  formatDuration,
-  type PinyinMatch,
-  qualityOf,
-  search,
-  type SongSort,
-  unknownAlbum,
-  unknownArtist,
-} from "./library";
-import { type MenuState, TrackMenu } from "./Menu";
+import { errorText } from "../api/errorMessages";
+import { formatBytes } from "../lib/bytes";
+import { useDialogs, useToasts } from "../ui/feedback";
+import { useStoredState } from "../ui/useStoredState";
 import {
   addToPlaylist,
   clearRecent,
@@ -40,19 +29,31 @@ import {
   type MusicLibrary,
   type MusicSources,
   type MusicStatus,
-  type Play as PlayRecord,
   type Playlist,
+  type Play as PlayRecord,
   recordPlay,
   scanMusic,
   setFavorite,
   setSources,
   type Track,
   updatePlaylist,
-} from "./musicApi";
+} from "./api";
+import { type Music, MusicContext, type Place } from "./context";
+import {
+  buildIndex,
+  formatDuration,
+  type PinyinMatch,
+  qualityOf,
+  type SongSort,
+  search,
+  unknownAlbum,
+  unknownArtist,
+} from "./library";
+import { type MenuState, TrackMenu } from "./Menu";
 import { NowPlaying } from "./NowPlaying";
+import { PlayerBar } from "./PlayerBar";
 import { loadPinyin } from "./pinyin";
 import { usePlayer } from "./player";
-import { PlayerBar } from "./PlayerBar";
 import { QueuePanel } from "./QueuePanel";
 import { Sidebar } from "./Sidebar";
 import { SourcesDialog } from "./SourcesDialog";
@@ -71,8 +72,10 @@ import {
   SearchView,
   SongsView,
 } from "./views";
-import "../photos/photos.css";
-import "./music.css";
+import "../photos/photos.module.css";
+
+import feedbackStyles from "../ui/feedback.module.css";
+import styles from "./music.module.css";
 
 interface Props {
   userId: string;
@@ -114,31 +117,6 @@ function messageOf(error: unknown): string {
   return errorText(error, "music");
 }
 
-function useStored<T>(key: string, initial: T): [T, (value: T | ((current: T) => T)) => void] {
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const stored = window.localStorage.getItem(key);
-      return stored === null ? initial : (JSON.parse(stored) as T);
-    } catch {
-      return initial;
-    }
-  });
-  const set = useCallback(
-    (next: T | ((current: T) => T)) =>
-      setValue((current) => {
-        const resolved = typeof next === "function" ? (next as (current: T) => T)(current) : next;
-        try {
-          window.localStorage.setItem(key, JSON.stringify(resolved));
-        } catch {
-          /* storage is optional */
-        }
-        return resolved;
-      }),
-    [key],
-  );
-  return [value, set];
-}
-
 // moveRows moves the entries at positions to just before target.
 export function moveRows<T>(items: T[], positions: number[], target: number): T[] {
   const moving = new Set(positions);
@@ -166,12 +144,15 @@ export function MusicPanel({ userId, onOpenFiles }: Props) {
   const [menu, setMenu] = useState<MenuState>();
   const [info, setInfo] = useState<string>();
   const [sourcesOpen, setSourcesOpen] = useState(false);
-  const [songSort, setSongSort] = useStored<{ by: SongSort; descending: boolean }>("a-nas.music.songSort", {
+  const [songSort, setSongSort] = useStoredState<{ by: SongSort; descending: boolean }>("a-nas.music.songSort", {
     by: "title",
     descending: false,
   });
-  const [albumSort, setAlbumSort] = useStored<"title" | "artist" | "year" | "added">("a-nas.music.albumSort", "title");
-  const [searches, setSearches] = useStored<string[]>(`a-nas.music.${userId}.searches`, []);
+  const [albumSort, setAlbumSort] = useStoredState<"title" | "artist" | "year" | "added">(
+    "a-nas.music.albumSort",
+    "title",
+  );
+  const [searches, setSearches] = useStoredState<string[]>(`a-nas.music.${userId}.searches`, []);
   const [pinyin, setPinyin] = useState<PinyinMatch>();
   const { prompt, confirm, dialog } = useDialogs();
   const { toast, element: toasts } = useToasts();
@@ -500,14 +481,14 @@ export function MusicPanel({ userId, onOpenFiles }: Props) {
   let content;
   if (failure) {
     content = (
-      <div className="mu-view mu-welcome">
-        <span className="mu-welcome-art offline">
+      <div className={`${styles.muView} ${styles.muWelcome}`}>
+        <span className={`${styles.muWelcomeArt} ${styles.offline}`}>
           <CircleAlert />
         </span>
         <h1>音乐库暂时打不开</h1>
         <p>{failure}</p>
-        <div className="mu-hero-actions">
-          <button type="button" className="mu-primary" onClick={() => window.location.reload()}>
+        <div className={styles.muHeroActions}>
+          <button type="button" className={styles.muPrimary} onClick={() => window.location.reload()}>
             重新载入
           </button>
         </div>
@@ -515,10 +496,10 @@ export function MusicPanel({ userId, onOpenFiles }: Props) {
     );
   } else if (!library) {
     content = (
-      <div className="mu-view mu-loading" aria-busy="true">
-        <span className="mu-skeleton title" />
+      <div className={`${styles.muView} ${styles.muLoading}`} aria-busy="true">
+        <span className={`${styles.muSkeleton} ${styles.title}`} />
         {Array.from({ length: 8 }, (_, row) => (
-          <span key={row} className="mu-skeleton row" />
+          <span key={row} className={`${styles.muSkeleton} row`} />
         ))}
       </div>
     );
@@ -601,7 +582,7 @@ export function MusicPanel({ userId, onOpenFiles }: Props) {
   return (
     <MusicContext.Provider value={music}>
       <div
-        className={`mu-app${overlay === "lyrics" && player.current ? " staged" : ""}`}
+        className={`${styles.muApp}${overlay === "lyrics" && player.current ? ` ${styles.staged}` : ""}`}
         ref={appRef}
         tabIndex={-1}
         onKeyDown={onKeyDown}
@@ -618,15 +599,15 @@ export function MusicPanel({ userId, onOpenFiles }: Props) {
           onRescan={rescan}
           onSources={() => setSourcesOpen(true)}
         />
-        <main className={`mu-main${history.length > 1 ? " has-back" : ""}`}>
-          <div className="mu-topbar">
+        <main className={`${styles.muMain}${history.length > 1 ? ` ${styles.hasBack}` : ""}`}>
+          <div className={styles.muTopbar}>
             {history.length > 1 && (
-              <button type="button" className="mu-back" aria-label="返回" onClick={back}>
+              <button type="button" className={styles.muBack} aria-label="返回" onClick={back}>
                 <ArrowLeft />
               </button>
             )}
           </div>
-          <div className="mu-content" key={placeKey(place)}>
+          <div className={styles.muContent} key={placeKey(place)}>
             {content}
           </div>
           {overlay === "queue" && <QueuePanel onClose={() => setOverlay(undefined)} />}
@@ -684,12 +665,17 @@ function TrackInfo({ track, sources, onClose }: { track: Track; sources?: MusicS
   ];
   return (
     <div
-      className="ph-dialog-backdrop"
+      className={feedbackStyles.phDialogBackdrop}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="ph-dialog mu-info" role="dialog" aria-modal="true" aria-label="歌曲信息">
+      <div
+        className={`${feedbackStyles.phDialog} ${styles.muInfo}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="歌曲信息"
+      >
         <h3>歌曲信息</h3>
         <dl>
           {rows.map(([label, value]) => (
@@ -699,7 +685,7 @@ function TrackInfo({ track, sources, onClose }: { track: Track; sources?: MusicS
             </div>
           ))}
         </dl>
-        <div className="ph-dialog-actions">
+        <div className={`${styles.phDialogActions} ${feedbackStyles.phDialogActions}`}>
           <button type="button" className="primary" onClick={onClose}>
             完成
           </button>

@@ -25,6 +25,9 @@
 
 ### 文件管理、登录与账号
 
+- Agent空间（#177）：更新 Host Agent、产品服务及助手试用包后，Web 不能改名、移走或删除管理目录，但本人仍能在自己的子目录写文件、其他成员可读；Windows SMB 看不到且不能打开 Shared 中名为 `Agent空间` 的条目，普通 Shared 文件仍可协作。若升级时出现 `.displaced-*`，先保存原位置、所有者及内容清单，由管理员确认保留数据的去向，不自动接管回管理目录（[调查](../investigations/2026-10-27-agent-space-policy-directories.md)）。
+- 跨空间移动（#180）：只用可丢弃目录，在 Web 从 Shared 移到个人空间，复制期间经另一成员的 SMB 新增和覆盖文件；移动者可从源空间回收站恢复这些内容，其他成员不可读取其回收站。用没有并发写入的文件核对移动前后的修改时间一致。源副本在回收站中继续占用容量，验收结束后只清理本次测试数据（[调查](../investigations/2026-10-27-cross-space-move-lost-source-changes.md)）。
+
 - 文件管理三栏缩放、左右栏收起、列表/图标切换、排序、上传入口与资源文件夹跳转；在个人空间与 Shared 上传、删除、恢复（[issue #38 调查](../investigations/2026-10-08-host-agent-loses-setuid-under-systemd.md)）。
 - 回收站批量恢复，原文件夹已删除时恢复到空间根目录；双击预览 20 MB 照片与 PDF；容量单位为 1024 进制（[规格](../specs/size-units.md)）。核对后在“问题反馈”中把 Codex 的 6 条建议标为已处理。
 - 超长、Windows/macOS 不兼容与只差大小写的名称被拒绝；Windows SMB 能打开 Web 新建的文件夹。
@@ -74,6 +77,8 @@
 经局域网 Web 入口在 Wi-Fi 上：概况与批次的上下行速度、影视中心一次上传整季剧集时的完整列表与状态栏文件名、几 GB 文件的上传速度、断开 Wi-Fi 后续传、重启产品服务后从头上传与临时文件回收，以及成员向他人个人空间上传被 ACL 拒绝。Caddy 默认不缓冲请求体，分片应直接流入产品服务。
 
 ### 应用中心与 Docker
+
+- 系统盘保护（#186）：更新产品服务、Host Agent 和容器代理后，在设置概览核对系统盘用量；选定可丢弃应用，备份需要保留的数据，按[容器代理手册](install-container-agent.md)验证新容器的日志轮转与卸载后的资源/数据保留。不要用真实应用或全局 prune 做破坏性压力测试，见[调查](../investigations/2026-10-27-app-system-disk-growth.md)。
 
 - 安装一个新应用，确认 [ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md) 的版本与挂载检查放行正常安装；目录新增的 11 个应用逐个实机安装。
 - 应用身份（[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）：重新安装此前以 root 运行的 Immich，确认它以应用身份运行、手机备份可上传；安装 Navidrome 与 qBittorrent，核对只读与可写共享空间（[调查](../investigations/2026-10-14-app-containers-and-the-shared-acl.md)）。

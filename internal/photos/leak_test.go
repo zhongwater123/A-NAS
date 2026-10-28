@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -204,5 +205,20 @@ func TestViewedLibraryCarriesItsGrant(t *testing.T) {
 		if lib.ID != alicePrivate.ID && lib.Viewing != nil {
 			t.Fatalf("library %s carries a grant it does not need: %+v", lib.ID, lib.Viewing)
 		}
+	}
+}
+
+// An index hit grants nothing: whatever a search ranks, its page shows only
+// assets of the libraries the search covers.
+func TestARankedHitOutsideTheSearchedLibrariesIsDropped(t *testing.T) {
+	ctx := context.Background()
+	service, _, _ := newService(t)
+	alicePrivate, shared := libraries(t, service, alice)
+	bobPrivate, _ := libraries(t, service, bob)
+	mine := importPhoto(t, service, alice, alicePrivate.ID, "", "mine.png", pngBytes(t, 1))
+	theirs := importPhoto(t, service, bob, bobPrivate.ID, "", "theirs.png", pngBytes(t, 2))
+	shown, err := photos.RecheckHits(ctx, service, alice, []string{alicePrivate.ID, shared.ID}, theirs.ID, mine.ID)
+	if err != nil || !slices.Equal(shown, []string{mine.ID}) {
+		t.Fatalf("recheck of bob's and alice's photo = %v, %v; want alice's alone", shown, err)
 	}
 }

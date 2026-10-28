@@ -4,7 +4,6 @@ package accounts
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
@@ -12,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,7 +21,9 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/argon2"
 
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 var (
@@ -34,43 +34,20 @@ var (
 	ErrPasswordTooLong    = fmt.Errorf("%w: it must contain at most %d characters", ErrInvalidPassword, MaxPasswordLength)
 	ErrPasswordCharacters = fmt.Errorf("%w: it must not contain control characters", ErrInvalidPassword)
 	ErrInvalidCredentials = errors.New("invalid username or password")
-	ErrSessionNotFound    = errors.New("session is invalid or expired")
 	// ErrSessionElsewhere reports a valid session presented by another client
 	// than the one that signed in (issue #161).
-	ErrSessionElsewhere    = errors.New("session was signed in from another client")
-	ErrUsernameUnavailable = errors.New("username is unavailable")
-	ErrUsernameReserved    = fmt.Errorf("%w: it is reserved for A-NAS or Samba", ErrUsernameUnavailable)
-	ErrCredentialProvision = errors.New("account credential provisioning failed")
-	ErrForbidden           = errors.New("operation is forbidden")
-	ErrUserNotFound        = errors.New("user not found")
-	ErrSpaceNotFound       = errors.New("space not found")
-	// ErrIdentityConflict reports that the host already has an account,
-	// group, or UID that A-NAS did not allocate for this user.
-	ErrIdentityConflict       = errors.New("username or Linux identity conflicts with an existing host account")
+	ErrSessionElsewhere       = errors.New("session was signed in from another client")
+	ErrUsernameUnavailable    = errors.New("username is unavailable")
+	ErrUsernameReserved       = fmt.Errorf("%w: it is reserved for A-NAS or Samba", ErrUsernameUnavailable)
+	ErrCredentialProvision    = errors.New("account credential provisioning failed")
+	ErrForbidden              = errors.New("operation is forbidden")
+	ErrSpaceNotFound          = errors.New("space not found")
 	ErrIdentityRangeExhausted = errors.New("A-NAS Linux identity range is exhausted")
 	// ErrSMBDisablePending reports a disabled account whose Web sign-in has
-	// ended but whose SMB credential the Host Agent could not disable yet.
-	// Identity synchronization disables it when the Product Service starts.
-	ErrSMBDisablePending = errors.New("the account is disabled, but its SMB credential could not be disabled yet")
-)
-
-// Linux identity layout shared with the Host Agent (ADR 0008). Fixed group
-// GIDs and user UIDs are recorded on the data volume, so they must never change.
-const (
-	UsersGroup   = "a-nas-users"
-	AdminsGroup  = "a-nas-admins"
-	UsersGID     = 20000
-	AdminsGID    = 20001
-	FirstUserUID = 20100
-	LastUserUID  = 29999
-	// PhotoServiceUser owns the data volume's photos subvolume alone
-	// (ADR 0011). Its UID sits outside the account (20100–29999) and app
-	// (30000–30999) ranges and is fixed, so a reinstalled system disk owns the
-	// same photos again.
-	PhotoServiceUser = "a-nas-photos"
-	PhotoServiceUID  = 31000
-	ShareServiceUser = "a-nas-shares"
-	ShareServiceUID  = 31001
+	// ended but whose SMB access or assistant units could not be disabled yet.
+	// Keep the existing error code; retry and identity synchronization finish
+	// both host operations, including when only one of them failed.
+	ErrSMBDisablePending = errors.New("the account is disabled, but its host services could not all be disabled yet")
 )
 
 // Password rules for every password a user sets. MaxPasswordLength keeps the
@@ -80,22 +57,6 @@ const (
 	MinPasswordLength = 12
 	MaxPasswordLength = 64
 	maxPasswordBytes  = 254
-)
-
-type Role string
-
-const (
-	RoleAdmin  Role = "admin"
-	RoleMember Role = "member"
-)
-
-type UserStatus string
-
-const (
-	UserStatusPending  UserStatus = "pending"
-	UserStatusActive   UserStatus = "active"
-	UserStatusDisabled UserStatus = "disabled"
-	UserStatusError    UserStatus = "error"
 )
 
 type User struct {
@@ -112,6 +73,13 @@ type User struct {
 	Nickname string `json:"nickname,omitempty"`
 	// AvatarVersion names the user's current avatar image; empty means none.
 	AvatarVersion string `json:"avatarVersion,omitempty"`
+}
+
+// ActiveAdministrator reports whether u may administer the device: an
+// administrator whose account is active. Services that change the device
+// check it themselves, besides the route guard (#270).
+func (u User) ActiveAdministrator() bool {
+	return u.Role == RoleAdmin && u.Status == UserStatusActive
 }
 
 type SpaceKind string
@@ -151,40 +119,12 @@ var localConsoleExpiry = time.Date(9999, time.December, 31, 23, 59, 59, 0, time.
 // LocalConsole reports a session signed in on the device's own screen.
 func (s Session) LocalConsole() bool { return s.ExpiresAt.Equal(localConsoleExpiry) }
 
-type CredentialRequest struct {
-	UserID         string
-	PrivateSpaceID string
-	Username       string
-	Password       string
-	Role           Role
-	UID            int
-	// Enabled is false when an administrator resets the credential of a
-	// disabled account; the SMB credential must stay disabled.
-	Enabled bool
-}
-
-type CredentialProvisioner interface {
-	SetCredential(context.Context, CredentialRequest) error
-	DisableCredential(context.Context, string) error
-}
-
-// Identity is the Linux account the Host Agent keeps for one A-NAS user.
-type Identity struct {
-	Username string
-	UID      int
-	Role     Role
-	Enabled  bool
-}
-
-// IdentitySynchronizer converges host accounts and groups on the control plane
-// without changing any password.
-type IdentitySynchronizer interface {
-	SyncIdentities(context.Context, []Identity) error
-}
-
 type Options struct {
 	Now    func() time.Time
 	Random io.Reader
+	// PasswordCost's fields left zero take DefaultPasswordCost's; tests
+	// lower them.
+	PasswordCost PasswordCost
 }
 
 type Store struct {
@@ -192,15 +132,10 @@ type Store struct {
 }
 
 func OpenSQLite(path string) (*Store, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("SQLite path is empty")
-	}
-	dsn := path + "?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL"
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sqlitedb.Open(path, sqlitedb.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("open SQLite: %w", err)
 	}
-	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
@@ -397,7 +332,9 @@ type Service struct {
 	credentials CredentialProvisioner
 	now         func() time.Time
 	random      io.Reader
-	sessions    sessionMemory
+	// passwordCost is the work spent on each password set.
+	passwordCost PasswordCost
+	sessions     sessionMemory
 }
 
 func NewService(store *Store, credentials CredentialProvisioner, options Options) *Service {
@@ -409,7 +346,17 @@ func NewService(store *Store, credentials CredentialProvisioner, options Options
 	if random == nil {
 		random = rand.Reader
 	}
-	return &Service{store: store, credentials: credentials, now: now, random: random}
+	cost := options.PasswordCost
+	if cost.MemoryKiB == 0 {
+		cost.MemoryKiB = DefaultPasswordCost.MemoryKiB
+	}
+	if cost.Iterations == 0 {
+		cost.Iterations = DefaultPasswordCost.Iterations
+	}
+	if cost.Parallelism == 0 {
+		cost.Parallelism = DefaultPasswordCost.Parallelism
+	}
+	return &Service{store: store, credentials: credentials, now: now, random: random, passwordCost: cost}
 }
 
 func (s *Service) SetupAdministrator(ctx context.Context, username, password string) (User, error) {
@@ -435,7 +382,7 @@ FROM users u JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private'`).Sc
 	if err := checkPassword(password); err != nil {
 		return User{}, err
 	}
-	passwordHash, err := hashPassword(password, s.random)
+	passwordHash, err := hashPassword(password, s.random, s.passwordCost)
 	if err != nil {
 		return User{}, err
 	}
@@ -470,7 +417,7 @@ func (s *Service) SetupRequired(ctx context.Context) (bool, error) {
 }
 
 func (s *Service) CreateMember(ctx context.Context, actor User, username, password string) (User, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return User{}, ErrForbidden
 	}
 	return s.createUser(ctx, username, password, RoleMember, actor.ID)
@@ -486,7 +433,7 @@ func (s *Service) createUser(ctx context.Context, username, password string, rol
 	if err := checkPassword(password); err != nil {
 		return User{}, err
 	}
-	passwordHash, err := hashPassword(password, s.random)
+	passwordHash, err := hashPassword(password, s.random, s.passwordCost)
 	if err != nil {
 		return User{}, err
 	}
@@ -721,7 +668,7 @@ func (s *Service) EndSession(ctx context.Context, token string) error {
 }
 
 func (s *Service) ListUsers(ctx context.Context, actor User) ([]User, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return nil, ErrForbidden
 	}
 	rows, err := s.store.db.QueryContext(ctx, "SELECT "+userColumns+" FROM users ORDER BY username")
@@ -864,7 +811,7 @@ func (s *Service) UserIDForUsername(ctx context.Context, username string) (strin
 }
 
 func (s *Service) DisableUser(ctx context.Context, actor User, userID string) error {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive || actor.ID == userID {
+	if !actor.ActiveAdministrator() || actor.ID == userID {
 		return ErrForbidden
 	}
 	var username string
@@ -878,12 +825,12 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 		return errors.New("credential provisioner is unavailable")
 	}
 	if status == UserStatusDisabled {
-		// Disabling again only retries the SMB credential.
+		// Disabling again only retries host access and assistant shutdown.
 		return s.disableHostCredential(ctx, username)
 	}
 	// Web access ends first and for good: a Host Agent failure must not leave
 	// the account signed in. The status is also what identity
-	// synchronization converges the SMB credential to.
+	// synchronization uses to retry SMB and assistant shutdown.
 	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -917,7 +864,7 @@ func (s *Service) disableHostCredential(ctx context.Context, username string) er
 // else, with the current one: a session alone must not be enough to take an
 // account over.
 func (s *Service) ResetCredential(ctx context.Context, actor User, userID, password string) error {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive || actor.ID == userID {
+	if !actor.ActiveAdministrator() || actor.ID == userID {
 		return ErrForbidden
 	}
 	if err := checkPassword(password); err != nil {
@@ -935,7 +882,7 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 	if err != nil {
 		return err
 	}
-	passwordHash, err := hashPassword(password, s.random)
+	passwordHash, err := hashPassword(password, s.random, s.passwordCost)
 	if err != nil {
 		return err
 	}
@@ -1057,10 +1004,6 @@ func (s *Service) appendAuditTo(ctx context.Context, db sqlExecutor, actorID, ac
 	return err
 }
 
-// usernamePattern is a portable Linux account name; the Host Agent accepts the
-// same names.
-var usernamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`)
-
 // reservedUsernames are Samba's special sections and the Shared share. Share
 // names ignore case, so a member named shared would reach Shared instead of
 // their private space over SMB.
@@ -1072,7 +1015,7 @@ var reservedUsernames = []string{"global", "homes", "printers", "shared"}
 // would block that account for good.
 func checkUsername(username string) error {
 	switch {
-	case !usernamePattern.MatchString(username):
+	case !accountid.ValidUsername(username):
 		return ErrInvalidUsername
 	case slices.Contains(reservedUsernames, username), username == "a-nas",
 		strings.HasPrefix(username, "a-nas-"), strings.HasPrefix(username, "app-"):
@@ -1098,7 +1041,7 @@ func checkPassword(password string) error {
 	return nil
 }
 
-func (s *Service) randomID(prefix string) string { return prefix + ":" + s.randomToken(16) }
+func (s *Service) randomID(prefix string) string { return prefix + ":" + rand.Text() }
 
 func (s *Service) randomToken(size int) string {
 	value := make([]byte, size)
@@ -1108,66 +1051,86 @@ func (s *Service) randomToken(size int) string {
 	return hex.EncodeToString(value)
 }
 
-func hashPassword(password string, random io.Reader) (string, error) {
-	const memory = 64 * 1024
-	const iterations = 3
-	const parallelism = 2
+// PasswordCost is the work argon2id spends on a password a user sets. A
+// stored hash records its own cost, so a password set at one cost is still
+// verified after the cost changes.
+type PasswordCost struct {
+	MemoryKiB   uint32
+	Iterations  uint32
+	Parallelism uint8
+}
+
+// DefaultPasswordCost is 64 MiB, three passes and two lanes.
+var DefaultPasswordCost = PasswordCost{MemoryKiB: 64 * 1024, Iterations: 3, Parallelism: 2}
+
+func hashPassword(password string, random io.Reader, cost PasswordCost) (string, error) {
 	salt := make([]byte, 16)
 	if _, err := io.ReadFull(random, salt); err != nil {
 		return "", err
 	}
-	key := argon2.IDKey([]byte(password), salt, iterations, memory, parallelism, 32)
-	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", memory, iterations, parallelism,
+	key := argon2.IDKey([]byte(password), salt, cost.Iterations, cost.MemoryKiB, cost.Parallelism, 32)
+	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s", cost.MemoryKiB, cost.Iterations, cost.Parallelism,
 		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
 }
 
 func verifyPassword(password, encoded string) bool {
-	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" || parts[2] != "v=19" {
+	hash, ok := parsePasswordHash(encoded)
+	if !ok {
 		return false
 	}
-	var memory uint64
-	var iterations uint64
-	var parallelism uint64
+	got := argon2.IDKey([]byte(password), hash.salt, hash.cost.Iterations, hash.cost.MemoryKiB, hash.cost.Parallelism, uint32(len(hash.key)))
+	return subtle.ConstantTimeCompare(got, hash.key) == 1
+}
+
+type passwordHash struct {
+	cost      PasswordCost
+	salt, key []byte
+}
+
+// parsePasswordHash reads an encoded argon2id hash as hashPassword writes it.
+func parsePasswordHash(encoded string) (passwordHash, bool) {
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 6 || parts[1] != "argon2id" || parts[2] != "v=19" {
+		return passwordHash{}, false
+	}
+	var hash passwordHash
 	for value := range strings.SplitSeq(parts[3], ",") {
 		key, raw, found := strings.Cut(value, "=")
 		if !found {
-			return false
+			return passwordHash{}, false
 		}
 		parsed, err := strconv.ParseUint(raw, 10, 32)
 		if err != nil {
-			return false
+			return passwordHash{}, false
 		}
 		switch key {
 		case "m":
-			memory = parsed
+			hash.cost.MemoryKiB = uint32(parsed)
 		case "t":
-			iterations = parsed
+			hash.cost.Iterations = uint32(parsed)
 		case "p":
-			parallelism = parsed
+			if parsed > 255 {
+				return passwordHash{}, false
+			}
+			hash.cost.Parallelism = uint8(parsed)
 		}
 	}
-	if memory == 0 || iterations == 0 || parallelism == 0 || parallelism > 255 {
-		return false
+	if hash.cost.MemoryKiB == 0 || hash.cost.Iterations == 0 || hash.cost.Parallelism == 0 {
+		return passwordHash{}, false
 	}
-	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil {
-		return false
+	var err error
+	if hash.salt, err = base64.RawStdEncoding.DecodeString(parts[4]); err != nil {
+		return passwordHash{}, false
 	}
-	want, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil || len(want) == 0 {
-		return false
+	if hash.key, err = base64.RawStdEncoding.DecodeString(parts[5]); err != nil || len(hash.key) == 0 {
+		return passwordHash{}, false
 	}
-	got := argon2.IDKey([]byte(password), salt, uint32(iterations), uint32(memory), uint8(parallelism), uint32(len(want)))
-	return subtle.ConstantTimeCompare(got, want) == 1
+	return hash, true
 }
 
-func tokenHash(token string) string {
-	digest := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(digest[:])
-}
+func tokenHash(token string) string { return accountid.TokenHash(token) }
 
-func formatTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }
 
 func nullableString(value string) any {
 	if value == "" {

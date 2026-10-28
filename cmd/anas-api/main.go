@@ -26,7 +26,6 @@ import (
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
-	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
 	"github.com/zhongwater123/A-NAS/internal/containers"
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
@@ -42,12 +41,12 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/httpidle"
 	"github.com/zhongwater123/A-NAS/internal/media"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/photos"
-	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -227,7 +226,8 @@ func run(logger *slog.Logger) error {
 	// Development opens the library in this process.
 	var photoService *photos.Service
 	var photoAI photos.Embedder
-	var photoAPI http.Handler = photosapi.NewProxy(config.PhotosSocket, logger)
+	var photoGate *photoservice.Gate
+	photoAPI := photoservice.Proxy(config.PhotosSocket, logger)
 	if !live {
 		// Development reaches an AI Worker only when ANAS_AI_SOCKET names
 		// one, so development without the AI component keeps local AI off.
@@ -239,7 +239,13 @@ func run(logger *slog.Logger) error {
 			return err
 		}
 		defer closeAtExit(logger, "photo library", photoService)
-		photoAPI = photosapi.New(photoService, logger)
+		// Requests find their caller, and keep AI work waiting, as in the
+		// photo service, with this process's account store for the Host
+		// Agent's session directory.
+		sessions := accounts.NewSessionDirectory(filepath.Join(stateDirectory, "control.db"))
+		defer closeAtExit(logger, "session directory", sessions)
+		photoGate = photoservice.NewGate(photoservice.QuietPeriod, logger)
+		photoAPI = photoservice.Local(photoService, sessions, photoGate, logger)
 	}
 	mediaStore, err := media.OpenSQLite(filepath.Join(stateDirectory, "media.db"))
 	if err != nil {
@@ -291,7 +297,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	appOptions := appstoreapi.Options{Host: appstoreapi.DevelopmentHost{}, Logger: logger}
+	appOptions := appstoreapi.Options{Host: fakeappstore.Host{}, Logger: logger}
 	if live {
 		host, ok := operations.(appid.Host)
 		if !ok {
@@ -322,7 +328,9 @@ func run(logger *slog.Logger) error {
 		Feedback:     feedbackapi.New(feedbackStore, logger),
 		Transfers:    transferAPI,
 		Assistant:    assistant,
-		SystemLogs:   systemLogs,
+		// Signing in keeps the member's assistant running (ADR 0024).
+		AssistantKeeper: assistant,
+		SystemLogs:      systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
 		FilesChanged: mediaService.SpaceChanged,
@@ -335,7 +343,9 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	server := &http.Server{
-		Addr: config.HTTPAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second,
+		// Uploads, downloads and video streams take as long as they keep
+		// moving; a client that stops for requestIdle is let go.
+		Addr: config.HTTPAddr, Handler: httpidle.Handler(handler, requestIdle), ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
 		// Panics in handlers and TLS or protocol errors are logged as JSON
 		// like everything else.
@@ -352,7 +362,7 @@ func run(logger *slog.Logger) error {
 	tasks.Go(func() error { transferService.Run(background); return nil })
 	if photoService != nil {
 		tasks.Go(func() error {
-			photoservice.RunBackground(background, photoService, logger, photoAI, photoservice.NewGate(photoservice.QuietPeriod, logger), nil)
+			photoservice.RunBackground(background, photoService, logger, photoAI, photoGate, nil)
 			return nil
 		})
 	}
@@ -371,6 +381,10 @@ func run(logger *slog.Logger) error {
 	_ = tasks.Wait()
 	return err
 }
+
+// requestIdle is how long a read of a request's body or a write of its
+// response may wait on the client (internal/httpidle, #192).
+const requestIdle = time.Minute
 
 // shutdownGrace is how long stopping waits for open requests. The system
 // unit's TimeoutStopSec of 20 s leaves room for the background work that is
@@ -608,11 +622,11 @@ func (e executedChanges) Get(ctx context.Context, _, id string) (assistantapi.Ch
 
 func asChange(raw json.RawMessage, err error) (assistantapi.Change, error) {
 	switch {
-	case errors.Is(err, assistantchanges.ErrInvalid):
+	case errors.Is(err, filebroker.ErrChangeInvalid):
 		return assistantapi.Change{}, fmt.Errorf("%w: %v", assistantapi.ErrInvalidSubmission, err)
-	case errors.Is(err, assistantchanges.ErrDecided):
+	case errors.Is(err, filebroker.ErrChangeDecided):
 		return assistantapi.Change{}, assistantapi.ErrChangeDecided
-	case errors.Is(err, assistantchanges.ErrNotFound):
+	case errors.Is(err, filebroker.ErrChangeNotFound):
 		return assistantapi.Change{}, assistantapi.ErrChangeNotFound
 	case errors.Is(err, files.ErrForbidden):
 		return assistantapi.Change{}, assistantapi.ErrChangeSession
