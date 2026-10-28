@@ -155,8 +155,15 @@ case $cmd in
       fi
       # Token files and Linux group membership survive account disable. Ask
       # the Host Agent even on the first install, before enabling any entry.
-      if [[ "$gate" == host-agent ]] && ! python3 -I "$here/cron-waker.py" --active "$account"; then
-        continue
+      if [[ "$gate" == host-agent ]]; then
+        if python3 -I "$here/cron-waker.py" --active "$account"; then
+          :
+        else
+          status=$?
+          if [[ "$status" == 1 ]]; then continue; fi
+          echo "cannot query active identity for $account; assistant installation incomplete" >&2
+          exit "$status"
+        fi
       fi
       for template in anas-assistant-api@.socket anas-assistant-curator@.timer; do
         [[ -f /etc/systemd/system/$template ]] || continue

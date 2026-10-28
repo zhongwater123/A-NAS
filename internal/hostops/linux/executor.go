@@ -282,7 +282,7 @@ func (e *Executor) DisableCredential(ctx context.Context, username string) error
 		return errors.New("invalid username")
 	}
 	// Both boundaries must be closed, even if one subsystem is unavailable.
-	return errors.Join(e.disableAssistant(ctx, username), e.disableHostCredential(ctx, username))
+	return errors.Join(e.disableHostCredential(ctx, username), e.disableAssistant(ctx, username))
 }
 
 func (e *Executor) disableHostCredential(ctx context.Context, username string) error {

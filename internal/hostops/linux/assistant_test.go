@@ -29,8 +29,10 @@ func TestDisabledAccountsStopAndMaskAssistantUnits(t *testing.T) {
 			if err := os.MkdirAll(units, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(units, "anas-assistant@.service"), []byte("[Service]\n"), 0o644); err != nil {
-				t.Fatal(err)
+			for _, template := range []string{"anas-assistant@.service", "anas-assistant-api@.service", "anas-assistant-api@.socket", "anas-assistant-cron@.service", "anas-assistant-curator@.service", "anas-assistant-curator@.timer"} {
+				if err := os.WriteFile(filepath.Join(units, template), []byte("[Service]\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			host := newFakeHost()
 			var runner linux.CommandRunner = host
@@ -58,5 +60,38 @@ func TestDisabledAccountsStopAndMaskAssistantUnits(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDisableAssistantWithOnlyOptionalSocketInstalled(t *testing.T) {
+	root := t.TempDir()
+	units := filepath.Join(root, "etc", "systemd", "system")
+	if err := os.MkdirAll(units, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(units, "anas-assistant-api@.socket"), []byte("[Socket]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	host := newFakeHost()
+	executor := linux.NewExecutor(nil, host, linux.Options{SystemRoot: root, MountPoint: filepath.Join(t.TempDir(), "data")})
+	if err := executor.DisableCredential(context.Background(), "alice"); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"disable", "mask"} {
+		if !host.ran("systemctl " + action + " --now anas-assistant-api@alice.socket") {
+			t.Fatalf("commands: %v", host.commands)
+		}
+	}
+	smb, stop := -1, -1
+	for i, command := range host.commands {
+		if strings.HasPrefix(command, "smbpasswd") {
+			smb = i
+		}
+		if strings.HasPrefix(command, "systemctl disable") {
+			stop = i
+		}
+	}
+	if smb < 0 || stop < smb {
+		t.Fatalf("SMB must be revoked first: %v", host.commands)
 	}
 }

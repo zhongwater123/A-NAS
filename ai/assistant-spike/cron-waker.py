@@ -97,8 +97,10 @@ def active_account(account):
             {"Content-Type": "application/json"},
         )
         response = connection.getresponse()
-        if response.status != 200:
+        if response.status == 401:
             return False
+        if response.status != 200:
+            raise RuntimeError(f"Host Agent identity query failed: HTTP {response.status}")
         user = json.loads(response.read(4097))
         return isinstance(user, dict) and user.get("username") == account
     finally:
@@ -143,7 +145,7 @@ if __name__ == "__main__":
             wake(sys.argv[2])
         except Exception as error:  # noqa: BLE001 - this worker handles one untrusted member store.
             print(f"skipped {sys.argv[2]}: {type(error).__name__}", file=sys.stderr, flush=True)
-            sys.exit(1)
+            sys.exit(2)
     elif len(sys.argv) == 1:
         main()
     else:

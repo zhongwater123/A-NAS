@@ -78,7 +78,7 @@ class JobFileTests(unittest.TestCase):
 
 class WakeTests(unittest.TestCase):
     def test_activity_is_verified_over_the_host_agents_unix_socket(self):
-        for status, name, expected in ((200, "alice", True), (200, "bob", False), (401, "alice", False), (503, "alice", False)):
+        for status, name, expected in ((200, "alice", True), (200, "bob", False), (401, "alice", False), (404, "alice", None), (503, "alice", None)):
             with self.subTest(status=status, name=name), tempfile.TemporaryDirectory() as root:
                 requests = []
 
@@ -99,7 +99,11 @@ class WakeTests(unittest.TestCase):
                     try:
                         with patch.object(waker, "HOST_SOCKET", path), patch.object(waker.pwd, "getpwnam") as account:
                             account.return_value.pw_uid = 20100
-                            self.assertEqual(waker.active_account("alice"), expected)
+                            if expected is None:
+                                with self.assertRaises(RuntimeError):
+                                    waker.active_account("alice")
+                            else:
+                                self.assertEqual(waker.active_account("alice"), expected)
                         self.assertEqual(requests, [("/v1/accounts/resolve-uid", {"uid": 20100})])
                     finally:
                         server.shutdown()

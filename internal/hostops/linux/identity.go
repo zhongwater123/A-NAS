@@ -71,7 +71,7 @@ func (e *Executor) syncIdentity(ctx context.Context, identity accounts.Identity)
 		return err
 	}
 	if !identity.Enabled {
-		if err := errors.Join(e.disableAssistant(ctx, identity.Username), e.disableSambaIfPresent(ctx, identity.Username)); err != nil {
+		if err := errors.Join(e.disableSambaIfPresent(ctx, identity.Username), e.disableAssistant(ctx, identity.Username)); err != nil {
 			return err
 		}
 	}

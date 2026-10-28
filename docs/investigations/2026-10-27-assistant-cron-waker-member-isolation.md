@@ -32,3 +32,7 @@ go test ./internal/hostops/linux -run TestDisabledAccountsStopAndMaskAssistantUn
 - [AI 助手规格](../specs/ai-assistant.md)
 - [试用与升级手册](../runbooks/try-ai-assistant-on-experimental-nas.md)
 - [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
+
+## 审查补充
+
+停用先撤销 SMB 凭据，再停止助手；只操作已安装模板的实例，部分安装不导致永久重试。活动查询的 401 表示未激活，其余 HTTP 错误或通信失败使安装明确失败，不能以成功状态跳过所有成员。
