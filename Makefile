@@ -23,6 +23,9 @@ VALIDATION_MANIFEST ?= $(BUILD_DIR)/.validated-build
 # golangci-lint has a module of its own: in go.mod its 200-odd dependencies
 # would raise versions the product builds with (logrus, jsonschema and others).
 GOLANGCI_LINT ?= $(GO) tool -modfile=tools/golangci-lint/go.mod golangci-lint
+# actionlint checks the GitHub workflows (ops-check), with ShellCheck on their
+# run: scripts; a module of its own for the same reason as golangci-lint.
+ACTIONLINT ?= $(GO) tool -modfile=tools/actionlint/go.mod actionlint
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
@@ -106,14 +109,16 @@ docs-check:
 	{ git ls-files '*.md' 2>/dev/null || find . -name '*.md' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' -not -path '*/build/*' -not -path '*/dist/*'; } | \
 	lychee --offline --include-fragments --no-progress --files-from -
 
-# Shell scripts, units and installer conventions, Dependabot's groups
-# (tools/depcheck keeps 0.x web packages out of them), and the AI locks: every
-# pin has a hash, and the runtime's leaves out what ai/requirements.excludes
-# names, which a lock regenerated without --excludes (Dependabot's) would not.
+# Shell scripts, the GitHub workflows (actionlint), units and installer
+# conventions, Dependabot's groups (tools/depcheck keeps 0.x web packages out
+# of them), and the AI locks: every pin has a hash, and the runtime's leaves
+# out what ai/requirements.excludes names, which a lock regenerated without
+# --excludes (Dependabot's) would not.
 ops-check:
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
 	shellcheck $(SHELL_SCRIPTS)
+	$(ACTIONLINT) .github/workflows/*.yml
 	@for script in $(SHELL_SCRIPTS); do bash -n "$$script" || exit 1; done
 	$(GO) run ./tools/depcheck
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config

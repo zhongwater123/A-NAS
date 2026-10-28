@@ -200,18 +200,22 @@ check "another member cannot upload into her folder on the Web" test "$(status_o
 # Deleting moves it into bob's recycle bin, another folder: that needs write access to it.
 check "another member cannot delete Agent空间 on the Web" \
   test "$(status_of -b /tmp/bob.jar -H "X-CSRF-Token: $bob_csrf" -X DELETE "$api/api/v1/files/$agent_space_id" || true)" != 200 -a -d "$agent_space"
-# Renaming in place needs only write access to Shared. The product service is to refuse it on
-# the Web (decided with #115); what the Web answers today is recorded.
+# Both Web and SMB refuse to rename the managed publication roots (#177).
 renamed=$(status_of -b /tmp/bob.jar -H "X-CSRF-Token: $bob_csrf" -H 'Content-Type: application/json' -X PATCH \
   -d '{"name":"Agent空间-bob"}' "$api/api/v1/files/$agent_space_id" || true)
-echo "INFO assistant Agent空间: another member renames it on the Web: HTTP $renamed"
-# Over SMB the rename cannot be refused, and bob can then make his own Agent空间 with a folder
-# for alice. The Host Agent's repair moves that impostor aside, with what he made inside it.
+check "another member cannot rename Agent空间 on the Web" test "$renamed" = 403
+check "SMB cannot rename Agent空间" denied smb alice Shared 'rename Agent空间 Agent空间-smb'
+# A local process can still write Shared. Reconciliation repairs an impostor
+# through descriptors; it must not rely on the old spike's path-based setup.
 if [[ -d "$agent_space" ]]; then as bob mv -T "$agent_space" "$data/spaces/shared/Agent空间-bob" || true; fi
 as bob mkdir -p "$agent_space/alice" || true
 check "after a rename, another member can make an Agent空间 with a folder for alice" \
   test "$(stat -c %U "$agent_space/alice" 2>/dev/null)" = bob
-ASSISTANT_GATE=host-agent PRODUCT_USER=a-nas bash /spike/assistant-layout.sh prepare "$data" owner alice bob >/dev/null 2>&1 || true
+systemctl restart anas-host-agent
+for _ in $(seq 1 50); do
+  [[ "$(stat -c %U "$agent_space/alice" 2>/dev/null)" == root ]] && break
+  sleep 0.2
+done
 check "the repair moves the impostor aside with what was made inside it" \
   test -n "$(find "$data/spaces/shared" -mindepth 1 -maxdepth 1 -name 'Agent空间.displaced-*' -user bob)"
 check "and puts Agent空间 and her folder back as root's" \

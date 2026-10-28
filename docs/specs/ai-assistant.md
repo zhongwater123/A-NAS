@@ -298,6 +298,8 @@
 
 ## 关联
 
+- [Agent空间 保留目录与 Landlock 调查](../investigations/2026-10-27-agent-space-policy-directories.md)：Web 保留名、Host Agent 修复、SMB 访问边界及回归证据。
+
 - 架构：[架构总览](../architecture/OVERVIEW.md)、[存储与文件架构](../architecture/storage-and-files.md)
 - ADR：[0024 每个账号一个沙箱中的 Hermes Agent](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - 研究：[Hermes Agent 可行性](../research/hermes-agent-runtime.md)

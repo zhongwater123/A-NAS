@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -83,6 +84,59 @@ func TestSetCredentialKeepsPasswordOutOfArgumentsAndAppliesHardenedSambaConfig(t
 			t.Fatalf("Samba configuration is missing %q:\n%s", required, configuration)
 		}
 	}
+}
+
+// Shared's options are the common ones with Agent空间 spliced into their veto
+// line, so a change to that line could silently drop the veto that keeps SMB
+// from renaming the Host Agent's managed directories (ADR 0024 decision 5).
+// The root integration test that proves the refusal does not run in CI.
+func TestSambaVetoesAgentSpaceOnlyInShared(t *testing.T) {
+	systemRoot := t.TempDir()
+	executor := linux.NewExecutor(nil, &recordingRunner{}, linux.Options{
+		SystemRoot: systemRoot, MountPoint: filepath.Join(t.TempDir(), "data"),
+	})
+	if err := executor.SetCredential(context.Background(), accountid.CredentialRequest{
+		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
+		Password: "alice password for testing", Role: accountid.RoleMember, UID: 20100, Enabled: true,
+	}); err != nil {
+		t.Fatalf("SetCredential() error = %v", err)
+	}
+	configuration, err := os.ReadFile(filepath.Join(systemRoot, "etc", "samba", "smb.conf"))
+	if err != nil {
+		t.Fatalf("read Samba configuration: %v", err)
+	}
+	vetoes := sambaVetoes(t, string(configuration))
+	for share, want := range map[string]bool{"homes": false, "Shared": true} {
+		if !slices.Contains(vetoes[share], ".a-nas-trash") {
+			t.Errorf("[%s] vetoes %q, want the trash directory hidden:\n%s", share, vetoes[share], configuration)
+		}
+		if got := slices.Contains(vetoes[share], "Agent空间"); got != want {
+			t.Errorf("[%s] vetoes %q, Agent空间 vetoed = %v, want %v:\n%s", share, vetoes[share], got, want, configuration)
+		}
+	}
+}
+
+// sambaVetoes returns the names in each share's veto files option.
+func sambaVetoes(t *testing.T, configuration string) map[string][]string {
+	t.Helper()
+	vetoes := map[string][]string{}
+	share := ""
+	for line := range strings.Lines(configuration) {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			share = strings.Trim(line, "[]")
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(key) != "veto files" {
+			continue
+		}
+		if _, set := vetoes[share]; set {
+			t.Fatalf("[%s] sets veto files twice; Samba keeps only the last", share)
+		}
+		vetoes[share] = strings.FieldsFunc(value, func(r rune) bool { return r == '/' || r == ' ' })
+	}
+	return vetoes
 }
 
 func TestSetCredentialRefusesPasswordsSmbpasswdWouldCut(t *testing.T) {
