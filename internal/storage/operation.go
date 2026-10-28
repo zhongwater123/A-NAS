@@ -8,44 +8,6 @@ import (
 	"time"
 )
 
-// OperationState is how far the host has come with the operation a plan
-// runs there.
-type OperationState string
-
-const (
-	OperationRunning   OperationState = "running"
-	OperationSucceeded OperationState = "succeeded"
-	// OperationFailed: a step failed. Retrying the plan checks the disks
-	// again and continues after the steps that are done.
-	OperationFailed OperationState = "failed"
-	// OperationInterrupted: the Host Agent stopped while the operation ran,
-	// at a restart or a power cut. Retrying continues it the same way.
-	OperationInterrupted OperationState = "interrupted"
-)
-
-// OperationStep is the step an operation is at, or the one it stopped in.
-type OperationStep string
-
-const (
-	StepErase      OperationStep = "erase"
-	StepFormat     OperationStep = "format"
-	StepMount      OperationStep = "mount"
-	StepPrepare    OperationStep = "prepare"
-	StepAddDevices OperationStep = "add_devices"
-)
-
-// VolumeOperation is a plan's operation on the host. The Host Agent runs it
-// apart from the request that started it, so that closing the page, losing
-// the connection or restarting the product service does not kill a disk
-// command halfway (issue #165).
-type VolumeOperation struct {
-	PlanID  string         `json:"planId"`
-	State   OperationState `json:"state"`
-	Step    OperationStep  `json:"step,omitempty"`
-	Failure string         `json:"failure,omitempty"`
-	Volume  *Volume        `json:"volume,omitempty"`
-}
-
 const (
 	// operationCallTimeout bounds one call to the Host Agent about an
 	// operation; the operation itself takes as long as the disks need.

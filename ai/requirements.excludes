@@ -1,0 +1,10 @@
+# Dependencies of MediaPipe that the AI Worker's runtime leaves out, for
+# `uv pip compile --excludes` and `uv pip install --excludes`
+# (scripts/build-ai-runtime.sh). `pip check` reports them as missing, and the
+# build accepts exactly these reports.
+#
+# The GUI build of OpenCV needs X libraries; requirements.in names the headless
+# build, which provides the same module.
+opencv-contrib-python
+# Serves only MediaPipe's audio tasks (and brings cffi and pycparser).
+sounddevice

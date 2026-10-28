@@ -87,9 +87,11 @@ GPU、NPU 的识别和指标可用性分别表达：未发现设备显示“未�
 
 ### 图标来源
 
-Host Agent 根据进程可执行文件的完整路径及服务 MainPID 匹配本机安装的 desktop entry，读取 `/usr/share` 与 `/usr/local/share` 下的图标资源，不执行 desktop entry 的命令、不读取用户目录、不通过远程网址获取图标。服务 MainPID 仅在采集端用于图标关联，不替代服务的 cgroup 统计。
+Host Agent 根据进程可执行文件的完整路径及服务 MainPID 匹配本机安装的 desktop entry，在 `/usr/share` 与 `/usr/local/share` 下找出可能是图标的文件，不执行 desktop entry 的命令、不读取用户目录、不通过远程网址获取图标。服务 MainPID 仅在采集端用于图标关联，不替代服务的 cgroup 统计。
 
-支持 PNG、JPEG、WebP 和自包含的静态 SVG；位图限制尺寸后缩为 64px PNG，SVG 拒绝脚本、外部资源及活动内容。缓存图标索引，按内容哈希去重，快照最多携带 64 个图标、单项 24 KiB、总计 1 MiB。没有可安全使用的图标不影响指标采集，页面退回默认图标。
+Host Agent 不读取也不解码图标内容：它只给出每个图标的候选文件（至多 8 个，按优先顺序），由产品服务读取并解码，所以 root 进程中没有图片解码器（[#221](https://github.com/zhongwater123/A-NAS/issues/221)）。产品服务只读取这两个目录下的文件，并经 `os.Root` 打开，符号链接出不了目录。
+
+支持 PNG、JPEG、WebP 和自包含的静态 SVG；位图限制尺寸后缩为 64px PNG，SVG 拒绝脚本、外部资源及活动内容。一个候选文件无法使用时换下一个。解码结果（包括失败）缓存 5 分钟，按内容哈希去重，快照最多携带 64 个图标、单项 24 KiB、总计 1 MiB。没有可安全使用的图标不影响指标采集，页面退回默认图标。
 
 ## 验收证据
 
@@ -107,10 +109,10 @@ Host Agent 根据进程可执行文件的完整路径及服务 MainPID 匹配本
 - [容量与大小单位](size-units.md)
 - [系统架构](../architecture/OVERVIEW.md)
 - [Host Agent IPC 决策](../adr/0004-use-http-json-over-unix-socket-for-host-state.md)
-- 代码：[设置页](../../web/src/SettingsPanel.tsx)、[Linux 指标采样](../../internal/hoststate/linux/metrics.go)、[Host Agent](../../internal/hoststate/agent/agent.go)
-- 测试：[指标采样测试](../../internal/hoststate/linux/metrics_test.go)、[IPC 测试](../../internal/hoststate/agent/agent_test.go)、[产品 API 测试](../../internal/httpapi/product_test.go)
+- 代码：[设置页](../../web/src/settings/SettingsPanel.tsx)、[Linux 指标采样](../../internal/hoststate/linux/metrics.go)、[Host Agent](../../internal/hoststate/agent/agent.go)
+- 测试：[指标采样测试](../../internal/hoststate/linux/metrics_test.go)、[IPC 测试](../../internal/hoststate/agent/rootagent/agent_test.go)、[产品 API 测试](../../internal/httpapi/product_test.go)
 
 - [任务管理器领域契约](../../internal/taskmanager/model.go)、[设备采样](../../internal/hoststate/linux/task_devices.go)、[服务与进程采样](../../internal/hoststate/linux/task_workloads.go)
-- [任务管理器页面](../../web/src/taskmanager/TaskManagerSection.tsx)、[采样回归测试](../../internal/hoststate/linux/task_manager_test.go)、[访问权限测试](../../internal/httpapi/task_manager_test.go)、[契约回归测试](../../internal/httpapi/task_manager_contract_test.go)
+- [任务管理器页面](../../web/src/settings/taskmanager/TaskManagerSection.tsx)、[采样回归测试](../../internal/hoststate/linux/task_manager_test.go)、[访问权限测试](../../internal/httpapi/task_manager_test.go)、[契约回归测试](../../internal/httpapi/task_manager_contract_test.go)
 
-- [图标采集](../../internal/hoststate/linux/task_icons.go)、[图标格式校验](../../internal/taskmanager/icons.go)、[图标采集测试](../../internal/hoststate/linux/task_icons_test.go)、[图标回退测试](../../web/src/taskmanager/TaskIcon.test.tsx)
+- [图标采集](../../internal/hoststate/linux/task_icons.go)、[图标格式校验](../../internal/taskmanager/icons.go)、[图标解码](../../internal/taskmanager/taskicon/loader.go)、[图标采集测试](../../internal/hoststate/linux/task_icons_test.go)、[图标回退测试](../../web/src/settings/taskmanager/TaskIcon.test.tsx)

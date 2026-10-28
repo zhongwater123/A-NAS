@@ -1,0 +1,18 @@
+# Known exceptions to the rules in redocly.yaml, each checked by hand.
+openapi.yaml:
+  # GET /api/v1/shares/jobs/{jobId} overlaps the paths of one share, whose
+  # IDs never equal "jobs"; sharesapi routes it before its ServeMux.
+  no-ambiguous-paths:
+    - '#/paths/~1api~1v1~1shares~1{shareId}~1view'
+    - '#/paths/~1api~1v1~1shares~1{shareId}~1messages'
+    - '#/paths/~1api~1v1~1shares~1{shareId}~1read'
+    - '#/paths/~1api~1v1~1shares~1{shareId}~1save'
+    - '#/paths/~1api~1v1~1shares~1{shareId}~1jobs'
+    - '#/paths/~1api~1v1~1shares~1{shareId}~1revoke'
+# WebSocket upgrades answer 101, not 2xx.
+paths/terminal.yaml:
+  operation-2xx-response:
+    - '#/~1api~1v1~1terminal~1session/get/responses'
+paths/assistant.yaml:
+  operation-2xx-response:
+    - '#/~1api~1v1~1assistant~1ws/get/responses'

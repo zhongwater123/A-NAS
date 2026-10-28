@@ -21,7 +21,7 @@ Experimental NAS 在公司开机过夜后，本机屏幕上的 Web 桌面显示�
 - 网卡与上游端口 `LnkCtl` 均为 `ASPM Disabled`，内核提示 OS 没有 ASPM 控制权。
 - Kiosk 固定打开 `http://127.0.0.1:8080/?local-console=1`（[`run-kiosk.sh`](../../scripts/run-kiosk.sh)），本机屏幕的请求不经过网卡。
 - 会话自登录起固定 12 小时有效、不续期（[`Authenticate`](../../internal/accounts/service.go)）；`/api/v1/host-state` 与 `/api/v1/metrics` 经 `withSession` 校验，失效后返回 `401 authentication_required`（[`product.go`](../../internal/httpapi/product.go)）。只有登录接口以 `401 invalid_credentials` 表示密码错误；已登录后的再次认证失败为 `403 reauthentication_failed`。
-- 修复前前端只在页面加载时读取一次会话；[`useHostState`](../../web/src/useHostState.ts)与[`useHostMetrics`](../../web/src/useHostMetrics.ts)把任何非 2xx 视为连接中断并继续轮询，没有任何代码处理 `401`。
+- 修复前前端只在页面加载时读取一次会话；[`useHostState`](../../web/src/desktop/useHostState.ts)与[`useHostMetrics`](../../web/src/desktop/useHostMetrics.ts)把任何非 2xx 视为连接中断并继续轮询，没有任何代码处理 `401`。
 - 设备所有者确认重启后本机屏幕要求重新登录。登录时刻未写入系统日志；按 18:15 开机估算，会话约在 10-09 06:15 过期。
 
 ## 假设
@@ -40,7 +40,7 @@ Experimental NAS 在公司开机过夜后，本机屏幕上的 Web 桌面显示�
 
 ## 修复与回归证据
 
-- 修复：[`apiFetch`](../../web/src/api.ts)作为产品 API 的统一 fetch，已登录时遇到 `401` 通知 [`App`](../../web/src/App.tsx)；`App` 清除会话与 CSRF 令牌，回到登录页并提示“登录已过期，请重新登录”，重新登录后清除提示。状态、指标、通用请求、Docker、应用中心和终端状态请求均经过它；屏保清单为免认证资源，不经过它。
+- 修复：[`apiFetch`](../../web/src/api/client.ts)作为产品 API 的统一 fetch，已登录时遇到 `401` 通知 [`App`](../../web/src/App.tsx)；`App` 清除会话与 CSRF 令牌，回到登录页并提示“登录已过期，请重新登录”，重新登录后清除提示。状态、指标、通用请求、Docker、应用中心和终端状态请求均经过它；屏保清单为免认证资源，不经过它。
 - 测试：新增“会话过期回到登录页”回归测试，覆盖过期后显示登录页、不显示连接中断、重新登录回到桌面；修复前失败，修复后 `make web-typecheck` 通过、`make web-test` 9 个文件 66 个测试全部通过。
 - 产品决定（2026-10-09，设备所有者）：本机屏幕的登录在主动退出前一直保持。[`AuthenticateLocalConsole`](../../internal/accounts/service.go)为本机会话写入永不到达的到期时间，因此产品服务、File Broker 与相册服务沿用原有到期检查；[`authenticate`](../../internal/httpapi/product.go)只对无转发头的直接回环连接授予本机会话，前端仅在 `?local-console=1` 时申请。`TestProductAPIKeepsLocalConsoleSessionsUntilSignOut` 覆盖本机会话跨越 30 天仍有效、远程与带转发头的请求仍为 12 小时、读取会话续签 Cookie、退出后立即失效。
 - 规格：[基础存储与共享](../specs/basic-storage-and-sharing.md#角色与可见性)记录会话期限与过期行为，[状态栏](../specs/host-metrics-status-bar.md)区分会话失效与连接中断。

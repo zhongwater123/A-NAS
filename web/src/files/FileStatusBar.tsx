@@ -1,7 +1,8 @@
 import { CSSProperties } from "react";
 
-import { formatBytes } from "../bytes";
+import { formatBytes } from "../lib/bytes";
 import { useTransfers } from "../transfers/store";
+import styles from "./files.module.css";
 import { FileBrowserItem, FileView } from "./model";
 
 // FileStatusBar counts what the folder shows and follows uploads into the
@@ -38,7 +39,7 @@ export function FileStatusBar({
     : 0;
   const uploadAttention = uploadsHere.some((upload) => upload.phase === "conflict" || upload.phase === "waiting");
   return (
-    <footer className="file-status-bar">
+    <footer className={styles.fileStatusBar}>
       <span>
         {resourceCount ? `${resourceCount} 个应用资源，` : ""}
         {directoryCount ? `${directoryCount} 个文件夹` : ""}
@@ -49,7 +50,7 @@ export function FileStatusBar({
       <span>{totalSize > 0 && `文件共 ${formatBytes(totalSize)}`}</span>
       {uploadsHere.length > 0 && (
         <button
-          className={`file-transfer-chip ${uploadAttention ? "attention" : ""}`}
+          className={`${styles.fileTransferChip} ${uploadAttention ? styles.attention : ""}`}
           title="在传输中心查看上传"
           aria-label={
             uploadAttention
@@ -58,7 +59,7 @@ export function FileStatusBar({
           }
           onClick={onOpenTransfers}
         >
-          <span className="file-transfer-ring" style={{ "--percent": uploadPercent } as CSSProperties} />
+          <span className={styles.fileTransferRing} style={{ "--percent": uploadPercent } as CSSProperties} />
           <span>
             {uploadAttention ? `${uploadsHere.length} 个需处理` : `上传 ${uploadsHere.length} · ${uploadPercent}%`}
           </span>

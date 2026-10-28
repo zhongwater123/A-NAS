@@ -183,8 +183,9 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	httpjson.WriteError(w, status, code, err.Error())
 }
 
-// statusForError maps domain errors to the codes shared by the agent and the
-// product API, so the desktop can tell a missing container from a down engine.
+// statusForError maps domain errors to the agent's codes, which
+// errorFromCode restores in the client, so a missing container stays apart
+// from a down engine.
 func statusForError(err error) (int, string) {
 	switch {
 	case errors.Is(err, containers.ErrInvalidID), errors.Is(err, containers.ErrInvalidAction):
@@ -196,11 +197,6 @@ func statusForError(err error) (int, string) {
 	default:
 		return http.StatusBadGateway, "container_engine_error"
 	}
-}
-
-// StatusForError exposes the shared error mapping to the product API.
-func StatusForError(err error) (int, string) {
-	return statusForError(err)
 }
 
 func errorFromCode(code string, status int) error {

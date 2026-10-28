@@ -3,8 +3,6 @@ package sharesapi
 import (
 	"context"
 	"encoding/json"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/shares"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +11,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
 type backend struct{}
@@ -43,7 +44,7 @@ func request(h http.Handler, user, method, url, body string) *httptest.ResponseR
 		r.Header.Set("Content-Type", "application/json")
 	}
 	if user != "" {
-		r = r.WithContext(WithUser(r.Context(), accounts.User{ID: user, Username: user}))
+		r = r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: user, Username: user}))
 	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -140,7 +141,7 @@ func TestPrivateThreadsViewedStateAndRangeExpiry(t *testing.T) {
 	url := base + "/entries/" + v.Entries[0].ID + "/content"
 	r := httptest.NewRequest("GET", url, nil)
 	r.Header.Set("Range", "bytes=1-3")
-	r = r.WithContext(WithUser(r.Context(), accounts.User{ID: "b"}))
+	r = r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: "b"}))
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != 206 || w.Body.String() != "ell" {

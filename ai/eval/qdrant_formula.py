@@ -47,10 +47,7 @@ def photos():
 def queries(matcher, captions):
     """[(text, vector)]: every vocabulary label name, then COCO-CN test captions, through the retrieval prompt."""
     texts = load_vectors(common.IMAGE_VECTORS, "texts")
-    found = []
-    for label in datasets.load_vocabulary():
-        if QUERY_PROMPT.format(label["name"]) in texts:
-            found.append(label["name"])
+    found = [label["name"] for label in datasets.load_vocabulary() if QUERY_PROMPT.format(label["name"]) in texts]
     _images, by_image = datasets.coco_cn("test")
     written = sorted({c for entry in by_image.values() for c in entry["written"] if QUERY_PROMPT.format(c) in texts})
     found += common.stable_sample(written, captions, "formula-captions")
@@ -76,12 +73,12 @@ def formula_for(text, mentions, calibration):
     tier = None
     if mentions and len(enabled) == len(mentions) and share >= calibration["tierCoverage"] and None not in limits:
         words = []
-        for (_word, ids), limit in zip(mentions, limits):
+        for (_word, ids), limit in zip(mentions, limits, strict=True):
             words.append(models.Filter(should=[models.FieldCondition(key=f"det.c{cls}", range=models.Range(gte=limit))
                                                for cls in sorted(ids)]))
         parts.append(models.MultExpression(mult=[TIER_BONUS, models.MinExpression(min=words)]))
         tier = models.Filter(must=words)
-    return models.SumExpression(sum=parts), {name: 0.0 for name in names}, tier
+    return models.SumExpression(sum=parts), dict.fromkeys(names, 0.0), tier
 
 
 def reference(text, mentions, scores, vector_scores, calibration):

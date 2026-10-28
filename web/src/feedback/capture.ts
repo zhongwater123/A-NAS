@@ -1,4 +1,4 @@
-import { drawDesktop } from "../desktopPicture";
+import { drawDesktop } from "../desktop/desktopPicture";
 
 // FEEDBACK_UI marks the feedback button, panel and viewer, which a
 // screenshot leaves out so it shows the desktop underneath.

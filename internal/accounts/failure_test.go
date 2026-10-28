@@ -53,7 +53,7 @@ func newFaultFixture(t *testing.T) faultFixture {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	host := &hostDouble{grants: map[string]bool{}}
-	service := accounts.NewService(store, host, accounts.Options{})
+	service := accounts.NewService(store, host, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(context.Background(), "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)

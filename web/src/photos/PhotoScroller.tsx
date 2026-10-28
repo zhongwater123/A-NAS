@@ -1,12 +1,13 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-  PointerEvent as ReactPointerEvent,
   ReactNode,
+  PointerEvent as ReactPointerEvent,
   Ref,
   RefObject,
   useCallback,
   useEffect,
   useEffectEvent,
+  useId,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -14,9 +15,10 @@ import {
   useState,
 } from "react";
 
+import type { PhotoAsset } from "./api";
 import type { Box, Entry, PendingPhoto } from "./layout";
 import { fullMonthLabel } from "./model";
-import type { PhotoAsset } from "./photosApi";
+import styles from "./photos.module.css";
 
 export interface ScrollerHandle {
   // beginSwipe follows a press on a tile's check across other tiles.
@@ -108,6 +110,7 @@ export function PhotoScroller({
   handle,
   children,
 }: Props) {
+  const scrollId = useId();
   const virtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement: () => scrollRef.current,
@@ -309,7 +312,9 @@ export function PhotoScroller({
     if (
       event.button !== 0 ||
       !onMarquee ||
-      (event.target as HTMLElement).closest("button, a, input, .ph-tile, .ph-scrubber, [data-no-marquee]")
+      (event.target as HTMLElement).closest(
+        `button, a, input, .${styles.phTile}, .${styles.phScrubber}, [data-no-marquee]`,
+      )
     )
       return;
     if (event.clientX > event.currentTarget.getBoundingClientRect().right - 14) return; // the scrollbar
@@ -416,10 +421,11 @@ export function PhotoScroller({
       : undefined;
 
   return (
-    <div className="ph-scroll-frame">
+    <div className={styles.phScrollFrame}>
       <div
         ref={scrollRef}
-        className={`ph-scroll${scrubber ? " with-scrubber" : ""}`}
+        id={scrollId}
+        className={`${styles.phScroll}${scrubber ? ` ${styles.withScrubber}` : ""}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -432,14 +438,14 @@ export function PhotoScroller({
           }
         }}
       >
-        <div className="ph-scroll-content" style={{ height: virtualizer.getTotalSize() }}>
+        <div className={styles.phScrollContent} style={{ height: virtualizer.getTotalSize() }}>
           {items.map((item) => {
             const entry = entries[item.index];
             if (!entry) return null;
             return (
               <div
                 key={item.key}
-                className={`ph-entry ph-entry-${entry.kind}`}
+                className={`${styles.phEntry} ph-entry-${styles[entry.kind] ?? ""}`}
                 style={{ transform: `translateY(${item.start}px)`, height: entry.size, left: inset, right: insetRight }}
               >
                 {entry.kind === "row"
@@ -452,7 +458,7 @@ export function PhotoScroller({
           })}
           {marquee && (
             <div
-              className="ph-marquee"
+              className={styles.phMarquee}
               style={{ left: marquee.x + inset, top: marquee.y, width: marquee.width, height: marquee.height }}
             />
           )}
@@ -460,12 +466,13 @@ export function PhotoScroller({
         {children}
       </div>
       {labelEntry?.label && (
-        <div className="ph-floating-date" style={{ top: topInset + 10 }} aria-hidden="true">
+        <div className={styles.phFloatingDate} style={{ top: topInset + 10 }} aria-hidden="true">
           {labelEntry.label}
         </div>
       )}
       {scrubber && (
         <Scrubber
+          controls={scrollId}
           entries={entries}
           starts={index.starts}
           total={virtualizer.getTotalSize()}
@@ -482,6 +489,8 @@ export function PhotoScroller({
 }
 
 interface ScrubberProps {
+  // The id of the element it scrolls.
+  controls: string;
   entries: Entry[];
   starts: number[];
   total: number;
@@ -494,7 +503,16 @@ interface ScrubberProps {
 // Scrubber is the timeline's scrollbar: its thumb drags through the photos,
 // years and months are marked where they begin, and a bubble names the month
 // being pointed at, dragged to or scrolled through.
-function Scrubber({ entries, starts: positions, total, offset, viewport, topInset, onScroll }: ScrubberProps) {
+function Scrubber({
+  controls,
+  entries,
+  starts: positions,
+  total,
+  offset,
+  viewport,
+  topInset,
+  onScroll,
+}: ScrubberProps) {
   const rail = useRef<HTMLDivElement>(null);
   const grab = useRef<number>(undefined);
   const [pointer, setPointer] = useState<number>();
@@ -550,9 +568,10 @@ function Scrubber({ entries, starts: positions, total, offset, viewport, topInse
   return (
     <div
       ref={rail}
-      className={`ph-scrubber${dragging ? " dragging" : ""}`}
+      className={`${styles.phScrubber}${dragging ? ` ${styles.dragging}` : ""}`}
       style={{ top: topInset + 8, height }}
       role="scrollbar"
+      aria-controls={controls}
       aria-label="时间轴"
       aria-orientation="vertical"
       aria-valuemin={0}
@@ -600,16 +619,16 @@ function Scrubber({ entries, starts: positions, total, offset, viewport, topInse
       }}
     >
       {years.map((mark) => (
-        <span key={mark.year} className="ph-scrubber-year" style={{ top: mark.y }}>
+        <span key={mark.year} className={styles.phScrubberYear} style={{ top: mark.y }}>
           {mark.year}
         </span>
       ))}
       {months.map((month) => (
-        <i key={month.month} className="ph-scrubber-tick" style={{ top: toY(month.start) + thumb / 2 }} />
+        <i key={month.month} className={styles.phScrubberTick} style={{ top: toY(month.start) + thumb / 2 }} />
       ))}
-      <span className="ph-scrubber-thumb" style={{ top: thumbTop, height: thumb }} />
+      <span className={styles.phScrubberThumb} style={{ top: thumbTop, height: thumb }} />
       {(dragging || scrolling || pointer !== undefined) && (
-        <span className="ph-scrubber-bubble" style={{ top: bubbleTop }}>
+        <span className={styles.phScrubberBubble} style={{ top: bubbleTop }}>
           {fullMonthLabel(bubbleMonth)}
         </span>
       )}

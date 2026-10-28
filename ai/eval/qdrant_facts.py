@@ -160,7 +160,7 @@ def check_formula(qdrant, checks):
     payloads = [{"x": 1.0}, {}, {"x": 0.5, "arr": [0.1, 0.9]}, {"obj": {"c7": 0.25}}]
     qdrant.create_collection("formula", vectors_config=models.VectorParams(size=DIM, distance=models.Distance.DOT))
     qdrant.upsert("formula", [models.PointStruct(id=i, vector=v.tolist(), payload=p)
-                              for i, (v, p) in enumerate(zip(vectors, payloads))], wait=True)
+                              for i, (v, p) in enumerate(zip(vectors, payloads, strict=True))], wait=True)
     query = unit(1, 6)[0]
     exact = vectors @ query
     prefetch = models.Prefetch(query=query.tolist(), limit=4)

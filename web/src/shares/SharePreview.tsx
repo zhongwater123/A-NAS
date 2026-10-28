@@ -1,11 +1,13 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
-import { formatBytes } from "../bytes";
-import { isHEIFImage, isPDFPreviewable, isPreviewableImage, isTextPreviewable, isVideoFile } from "../fileTypes";
-import "../files/viewer.css";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+
+import { formatBytes } from "../lib/bytes";
+import { isHEIFImage, isPDFPreviewable, isPreviewableImage, isTextPreviewable, isVideoFile } from "../lib/fileTypes";
+import viewerStyles from "../ui/viewer.module.css";
 import { contentURL, readText, type ShareEntry } from "./api";
 import { errorText, leaf } from "./format";
 import { EntryTile, isAudio, kindOf } from "./parts";
+import styles from "./shares.module.css";
 
 // SharePreview looks like the file manager's viewer and steps through the
 // files of the open folder; it reads the share's own copy, never the source.
@@ -58,13 +60,13 @@ export function SharePreview({
   const step = (delta: number) => onIndex((index + delta + entries.length) % entries.length);
   const media = isPreviewableImage(name) || isHEIFImage(name);
   const save = onSave && (
-    <button type="button" className="fv-download" onClick={() => onSave(entry)}>
+    <button type="button" className={`${styles.fvDownload} ${viewerStyles.fvDownload}`} onClick={() => onSave(entry)}>
       <Download />
       保存
     </button>
   );
   const unsupported = (
-    <div className="fv-failed sh-preview-file">
+    <div className={`${viewerStyles.fvFailed} ${styles.shPreviewFile}`}>
       <EntryTile name={name} isDir={false} size="lg" />
       <strong>{name}</strong>
       <span>
@@ -76,7 +78,7 @@ export function SharePreview({
   return (
     <div
       ref={layer}
-      className="fv-layer sh-preview"
+      className={`${viewerStyles.fvLayer} ${styles.shPreview}`}
       role="dialog"
       aria-modal="true"
       aria-label={`预览 ${name}`}
@@ -97,28 +99,34 @@ export function SharePreview({
         }
       }}
     >
-      <header className="fv-bar">
-        <div className="fv-title">
+      <header className={viewerStyles.fvBar}>
+        <div className={viewerStyles.fvTitle}>
           <strong title={name}>{name}</strong>
           <small>
             {[formatBytes(entry.size), many && `${index + 1} / ${entries.length}`].filter(Boolean).join(" · ")}
           </small>
         </div>
-        <div className="fv-actions">
+        <div className={viewerStyles.fvActions}>
           {save}
-          <button type="button" className="fv-icon" aria-label="关闭预览" title="关闭 (Esc)" onClick={onClose}>
+          <button
+            type="button"
+            className={viewerStyles.fvIcon}
+            aria-label="关闭预览"
+            title="关闭 (Esc)"
+            onClick={onClose}
+          >
             <X />
           </button>
         </div>
       </header>
       <div
-        className="fv-stage"
+        className={`${styles.fvStage} ${viewerStyles.fvStage}`}
         onClick={(event) => {
           if (event.target === event.currentTarget) onClose();
         }}
       >
         {error ? (
-          <div className="fv-failed" role="alert">
+          <div className={viewerStyles.fvFailed} role="alert">
             <strong>无法预览</strong>
             <span>{error}</span>
             {save}
@@ -126,16 +134,16 @@ export function SharePreview({
         ) : media ? (
           <img
             key={entry.id}
-            className="ready"
+            className={viewerStyles.ready}
             src={url}
             alt={name}
             draggable={false}
             onError={() => setError("无法显示这张图片，保存后用其他应用查看。")}
           />
         ) : isPDFPreviewable(name) ? (
-          <iframe key={entry.id} className="fv-pdf" title={name} src={url} />
+          <iframe key={entry.id} className={viewerStyles.fvPdf} title={name} src={url} />
         ) : isTextPreviewable(name) ? (
-          <div className="sh-preview-text">
+          <div className={styles.shPreviewText}>
             <pre>{text === undefined ? "正在读取…" : text}</pre>
             {entry.size > 262144 && <p>只预览前 256 KiB，保存后可查看完整内容。</p>}
           </div>
@@ -147,7 +155,7 @@ export function SharePreview({
             onError={() => setError("浏览器无法播放这个视频，保存后用其他应用查看。")}
           />
         ) : isAudio(name) ? (
-          <div className="sh-preview-audio">
+          <div className={styles.shPreviewAudio}>
             <EntryTile name={name} isDir={false} size="lg" />
             <strong>{name}</strong>
             <audio
@@ -165,14 +173,20 @@ export function SharePreview({
         <>
           <button
             type="button"
-            className="fv-step prev"
+            className={`${viewerStyles.fvStep} ${viewerStyles.prev}`}
             aria-label="上一个"
             title="上一个 (←)"
             onClick={() => step(-1)}
           >
             <ChevronLeft />
           </button>
-          <button type="button" className="fv-step next" aria-label="下一个" title="下一个 (→)" onClick={() => step(1)}>
+          <button
+            type="button"
+            className={`${viewerStyles.fvStep} ${viewerStyles.next}`}
+            aria-label="下一个"
+            title="下一个 (→)"
+            onClick={() => step(1)}
+          >
             <ChevronRight />
           </button>
         </>

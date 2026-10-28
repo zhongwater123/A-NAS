@@ -6,7 +6,7 @@
 // answering Hermes itself.
 //
 // It does not authenticate: the Product Service wraps it so every request
-// carries the signed-in user (WithUser) and its session, and writes have passed
+// carries the signed-in user (accounts.WithUser) and its session, and writes have passed
 // CSRF checks. It never decides what the assistant may read or write; the
 // instance's sandbox and the executor of changes do. It reaches only the
 // caller's own instance, through the session gate (decision 10).
@@ -22,12 +22,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
@@ -44,8 +45,6 @@ const (
 	// maxTitleRunes is Hermes's own title limit (hermes_state MAX_TITLE_LENGTH).
 	maxTitleRunes = 100
 )
-
-var accountPattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 
 type Options struct {
 	// Connector reaches the signed-in member's instance; nil leaves the
@@ -67,18 +66,11 @@ type Options struct {
 	Context context.Context
 }
 
-type userKey struct{}
-
-// WithUser attaches the signed-in user.
-func WithUser(ctx context.Context, user accounts.User) context.Context {
-	return context.WithValue(ctx, userKey{}, user)
-}
-
 // Handler is the assistant API.
 type Handler struct {
 	options Options
 	logger  *slog.Logger
-	mux     *http.ServeMux
+	mux     *apiroute.Mux
 	ctx     context.Context
 	// background runs the kept instances and the watch over their tasks.
 	background sync.WaitGroup
@@ -105,7 +97,7 @@ func New(options Options) *Handler {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	h := &Handler{options: options, logger: logger, mux: http.NewServeMux(), ctx: ctx, members: map[string]*member{}, keeps: map[string]*keep{}}
+	h := &Handler{options: options, logger: logger, mux: apiroute.NewMux(), ctx: ctx, members: map[string]*member{}, keeps: map[string]*keep{}}
 	routes := map[string]func(http.ResponseWriter, *http.Request, string){
 		"GET /status":                  h.status,
 		"GET /ws":                      h.gateway,
@@ -138,6 +130,11 @@ func New(options Options) *Handler {
 	return h
 }
 
+// Endpoints are the operations the assistant API serves beneath PathPrefix.
+func Endpoints() []apiroute.Endpoint {
+	return New(Options{}).mux.Endpoints()
+}
+
 // Wait keeps anything new from starting and returns once the background work
 // already running stopped. Call it after Options.Context ended; requests may
 // still be arriving.
@@ -159,12 +156,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) withAccount(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(userKey{}).(accounts.User)
+		user, ok := accounts.UserFrom(r.Context())
 		if !ok || user.ID == "" {
 			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		}
-		if !accountPattern.MatchString(user.Username) {
+		if !accountid.ValidAssistantAccount(user.Username) {
 			httpjson.WriteError(w, http.StatusForbidden, "assistant_unavailable", "this account has no assistant")
 			return
 		}

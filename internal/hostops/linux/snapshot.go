@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 // Create takes a read-only Btrfs snapshot of a space. A snapshot that already
@@ -38,28 +38,28 @@ func (e *Executor) Create(ctx context.Context, spaceID, snapshotID string) error
 
 // Objects walks a read-only snapshot, so the same snapshot always lists the
 // same objects.
-func (e *Executor) Objects(ctx context.Context, snapshotID string, visit func(files.SnapshotObject) error) error {
+func (e *Executor) Objects(ctx context.Context, snapshotID string, visit func(filesystem.SnapshotObject) error) error {
 	root := e.snapshotRoot(snapshotID)
 	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
-		return files.ErrNotFound
+		return filesystem.ErrNotFound
 	} else if err != nil {
 		return err
 	}
-	return files.WalkSnapshot(ctx, root, visit)
+	return filesystem.WalkSnapshot(ctx, root, visit)
 }
 
 // Open opens one object of a snapshot. The kernel resolves the key beneath
 // the snapshot root and refuses ".." out of it and any symbolic link on the
 // way, as Objects skips them; O_NONBLOCK keeps a FIFO from blocking the open.
-func (e *Executor) Open(_ context.Context, snapshotID, key string) (io.ReadCloser, files.SnapshotObject, error) {
+func (e *Executor) Open(_ context.Context, snapshotID, key string) (io.ReadCloser, filesystem.SnapshotObject, error) {
 	root := e.snapshotRoot(snapshotID)
 	relative := filepath.FromSlash(key)
 	if strings.ContainsRune(relative, 0) {
-		return nil, files.SnapshotObject{}, files.ErrNotFound
+		return nil, filesystem.SnapshotObject{}, filesystem.ErrNotFound
 	}
 	rootFD, err := unix.Open(root, unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, files.SnapshotObject{}, snapshotOpenError(root, err)
+		return nil, filesystem.SnapshotObject{}, snapshotOpenError(root, err)
 	}
 	defer unix.Close(rootFD)
 	fd, err := unix.Openat2(rootFD, relative, &unix.OpenHow{
@@ -67,19 +67,19 @@ func (e *Executor) Open(_ context.Context, snapshotID, key string) (io.ReadClose
 		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
 	})
 	if err != nil {
-		return nil, files.SnapshotObject{}, snapshotOpenError(key, err)
+		return nil, filesystem.SnapshotObject{}, snapshotOpenError(key, err)
 	}
 	reader := os.NewFile(uintptr(fd), filepath.Join(root, relative))
 	info, err := reader.Stat()
 	if err != nil {
 		_ = reader.Close()
-		return nil, files.SnapshotObject{}, err
+		return nil, filesystem.SnapshotObject{}, err
 	}
 	if !info.Mode().IsRegular() {
 		_ = reader.Close()
-		return nil, files.SnapshotObject{}, files.ErrUnsupportedType
+		return nil, filesystem.SnapshotObject{}, filesystem.ErrUnsupportedType
 	}
-	return reader, files.SnapshotObject{Key: key, Name: info.Name(), Kind: files.EntryKindFile, SizeBytes: info.Size()}, nil
+	return reader, filesystem.SnapshotObject{Key: key, Name: info.Name(), Kind: filesystem.EntryKindFile, SizeBytes: info.Size()}, nil
 }
 
 // snapshotOpenError reads a missing entry, a symbolic link on the way, or a
@@ -87,7 +87,7 @@ func (e *Executor) Open(_ context.Context, snapshotID, key string) (io.ReadClose
 func snapshotOpenError(path string, err error) error {
 	for _, missing := range []error{unix.ENOENT, unix.ENOTDIR, unix.ELOOP, unix.EXDEV} {
 		if errors.Is(err, missing) {
-			return files.ErrNotFound
+			return filesystem.ErrNotFound
 		}
 	}
 	return &os.PathError{Op: "open", Path: path, Err: err}
@@ -99,7 +99,7 @@ func (e *Executor) Delete(ctx context.Context, spaceID, snapshotID string) error
 	}
 	root := e.snapshotRoot(snapshotID)
 	if !withinDirectory(e.snapshotsRoot(), root) {
-		return files.ErrNotFound
+		return filesystem.ErrNotFound
 	}
 	// Already gone counts as deleted, so a deletion that stopped half way
 	// can be finished.
@@ -116,25 +116,25 @@ func (e *Executor) Delete(ctx context.Context, spaceID, snapshotID string) error
 // and how many other subvolumes there are named the way snapshotRoot names
 // them. It deletes nothing: the Product Service deletes the snapshots it
 // knows to be unfinished one by one (#269).
-func (e *Executor) Survey(_ context.Context, known []string) (files.SnapshotSurvey, error) {
+func (e *Executor) Survey(_ context.Context, known []string) (filesystem.SnapshotSurvey, error) {
 	if !e.dataVolumeReady() {
-		return files.SnapshotSurvey{}, files.ErrVolumeUnavailable
+		return filesystem.SnapshotSurvey{}, filesystem.ErrVolumeUnavailable
 	}
 	return e.surveySnapshots(known)
 }
 
-func (e *Executor) surveySnapshots(known []string) (files.SnapshotSurvey, error) {
+func (e *Executor) surveySnapshots(known []string) (filesystem.SnapshotSurvey, error) {
 	wanted := make(map[string]string, len(known))
 	for _, id := range known {
 		wanted[filepath.Base(e.snapshotRoot(id))] = id
 	}
-	survey := files.SnapshotSurvey{Present: []string{}}
+	survey := filesystem.SnapshotSurvey{Present: []string{}}
 	items, err := os.ReadDir(e.snapshotsRoot())
 	if errors.Is(err, os.ErrNotExist) {
 		return survey, nil
 	}
 	if err != nil {
-		return files.SnapshotSurvey{}, err
+		return filesystem.SnapshotSurvey{}, err
 	}
 	for _, item := range items {
 		if id, ok := wanted[item.Name()]; ok {
@@ -156,7 +156,7 @@ func (e *Executor) resolveSpaceRoot(spaceID string) (string, error) {
 	defer e.spaceRootsMu.RUnlock()
 	root, ok := e.spaceRoots[spaceID]
 	if !ok || !withinDirectory(e.mountPoint, root) {
-		return "", files.ErrNotFound
+		return "", filesystem.ErrNotFound
 	}
 	return root, nil
 }
@@ -171,4 +171,4 @@ func (e *Executor) snapshotRoot(snapshotID string) string {
 // snapshotDirectoryName matches the names snapshotRoot gives.
 var snapshotDirectoryName = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
-var _ files.SnapshotBackend = (*Executor)(nil)
+var _ filesystem.SnapshotBackend = (*Executor)(nil)

@@ -1,21 +1,22 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import { APIError } from "../api";
-import { nameOf, person, usePeople } from "../people";
-import { PersonAvatar } from "../PersonAvatar";
-import { Draft, FeedbackEditor, emptyDraft, releaseDraft } from "./FeedbackEditor";
+import { APIError } from "../api/client";
+import { PersonAvatar } from "../people/PersonAvatar";
+import { nameOf, person, usePeople } from "../people/people";
 import {
-  FeedbackComment,
-  FeedbackItem,
-  MAX_COMMENT_IMAGES,
-  MAX_COMMENT_TEXT,
   addComment,
   deleteComment,
   describeFeedbackError,
   editComment,
+  FeedbackComment,
+  FeedbackItem,
   feedbackImageURL,
-} from "./feedbackApi";
+  MAX_COMMENT_IMAGES,
+  MAX_COMMENT_TEXT,
+} from "./api";
+import { Draft, emptyDraft, FeedbackEditor, releaseDraft } from "./FeedbackEditor";
+import styles from "./feedback.module.css";
 import { describeTime, fullTime } from "./time";
 
 interface ThreadProps {
@@ -71,9 +72,9 @@ export function FeedbackThread({
   };
 
   return (
-    <section id={id} className="fb-thread" aria-label="评论">
+    <section id={id} className={styles.fbThread} aria-label="评论">
       {item.comments.length > 0 && (
-        <ol className="fb-comments">
+        <ol className={styles.fbComments}>
           {item.comments.map((comment) => (
             <CommentRow
               key={comment.id}
@@ -209,7 +210,7 @@ function CommentRow({ item, comment, onChange, onRemove, onRefresh, onPreview, o
       .filter((image) => !detached.includes(image.id))
       .map((image) => ({ id: image.id, url: feedbackImageURL(item.id, image.id) }));
     return (
-      <li className="fb-comment editing">
+      <li className={`${styles.fbComment} ${styles.editing}`}>
         <FeedbackEditor
           compact
           label="编辑评论"
@@ -226,7 +227,7 @@ function CommentRow({ item, comment, onChange, onRemove, onRefresh, onPreview, o
           maxText={MAX_COMMENT_TEXT}
           notice={
             changedBy && (
-              <div className="fb-conflict" role="status">
+              <div className={styles.fbConflict} role="status">
                 <strong>{changedBy} 刚刚修改了这条评论</strong>
                 {comment.text && <blockquote>{comment.text}</blockquote>}
                 <span>你的内容还在下面，再次保存将以你的版本为准。</span>
@@ -243,24 +244,24 @@ function CommentRow({ item, comment, onChange, onRemove, onRefresh, onPreview, o
   }
 
   return (
-    <li className="fb-comment">
-      <PersonAvatar who={person(people, { username: comment.createdBy })} className="fb-avatar" />
-      <div className="fb-comment-body">
-        <div className="fb-comment-head">
-          <span className="fb-author">{nameOf(people, comment.createdBy)}</span>
+    <li className={styles.fbComment}>
+      <PersonAvatar who={person(people, { username: comment.createdBy })} className={styles.fbAvatar} />
+      <div className={styles.fbCommentBody}>
+        <div className={styles.fbCommentHead}>
+          <span className={styles.fbAuthor}>{nameOf(people, comment.createdBy)}</span>
           <time dateTime={comment.createdAt} title={fullTime(comment.createdAt)}>
             {describeTime(comment.createdAt)}
           </time>
           {comment.updatedBy && comment.updatedAt && (
             <span
-              className="fb-edited"
+              className={styles.fbEdited}
               title={`${nameOf(people, comment.updatedBy)} 于 ${fullTime(comment.updatedAt)} 编辑`}
             >
               已编辑
             </span>
           )}
           {mode === "view" && (
-            <span className="fb-comment-actions">
+            <span className={styles.fbCommentActions}>
               <button aria-label="编辑评论" title="编辑" onClick={startEdit}>
                 <Pencil />
               </button>
@@ -277,13 +278,13 @@ function CommentRow({ item, comment, onChange, onRemove, onRefresh, onPreview, o
             </span>
           )}
         </div>
-        {comment.text && <p className="fb-comment-text">{comment.text}</p>}
+        {comment.text && <p className={styles.fbCommentText}>{comment.text}</p>}
         {comment.images.length > 0 && (
-          <ul className="fb-thumbs small" aria-label="评论附图">
+          <ul className={`${styles.fbThumbs} ${styles.small}`} aria-label="评论附图">
             {comment.images.map((image, index) => (
               <li key={image.id}>
                 <button
-                  className="fb-thumb"
+                  className={styles.fbThumb}
                   aria-label={`查看评论附图 ${index + 1}`}
                   onClick={() => onPreview(imageURLs, index)}
                 >
@@ -294,17 +295,17 @@ function CommentRow({ item, comment, onChange, onRemove, onRefresh, onPreview, o
           </ul>
         )}
         {error && (
-          <p className="fb-item-error" role="alert">
+          <p className={styles.fbItemError} role="alert">
             {error}
           </p>
         )}
         {mode === "delete" && (
-          <div className="fb-confirm" role="group" aria-label="确认删除评论">
+          <div className={styles.fbConfirm} role="group" aria-label="确认删除评论">
             <span>删除这条评论？</span>
-            <button className="fb-ghost" disabled={busy} onClick={() => setMode("view")}>
+            <button className={styles.fbGhost} disabled={busy} onClick={() => setMode("view")}>
               取消
             </button>
-            <button className="fb-danger" disabled={busy} onClick={() => void confirmDelete()}>
+            <button className={styles.fbDanger} disabled={busy} onClick={() => void confirmDelete()}>
               删除
             </button>
           </div>

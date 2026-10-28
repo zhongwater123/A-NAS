@@ -176,13 +176,13 @@ func TestQueuedPolicyChangeStopsBatchAfterCurrentDeletion(t *testing.T) {
 	f.open()
 	settings := files.SnapshotScheduleSettings{Enabled: true, Frequency: files.FrequencyHourly, Time: "00:15", Keep: 10}
 	f.setSchedule(f.admin, f.private, settings)
-	for hour := 8; hour < 11; hour++ {
+	for hour := 11; hour < 14; hour++ {
 		f.clock.Set(at(0, hour, 15))
 		f.runDue()
 	}
 	settings.Keep = 1
 	f.setSchedule(f.admin, f.private, settings)
-	f.clock.Set(at(0, 11, 15))
+	f.clock.Set(at(0, 14, 15))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	done := make(chan error, 1)

@@ -1,0 +1,58 @@
+/* The desktop's design tokens, the one place for its colours, shadows,
+   radii and spacing. Apps point their own palette variables at these and do
+   not introduce new values where a token fits (docs/architecture/web-desktop.md). */
+:root {
+  /* Text and lines on light surfaces. */
+  --color-text: #1b2430;
+  --color-muted: #66717f;
+  --color-faint: #98a1ad;
+  --color-line: rgba(20, 30, 45, 0.08);
+  --color-line-strong: rgba(20, 30, 45, 0.15);
+
+  /* Surfaces. */
+  --color-bg: #f3f5f8;
+  --color-surface: #fff;
+
+  /* The accent and the states. There is one danger colour; on the cinema's
+     dark surface it is lightened to keep its contrast. */
+  --color-accent: #2f6fe4;
+  --color-accent-soft: #e9f0fd;
+  --color-success: #1b9459;
+  --color-success-soft: #e5f5ec;
+  --color-warning: #b06a10;
+  --color-warning-soft: #fdf3e1;
+  --color-danger: #d23b48;
+  --color-danger-soft: #fdeeef;
+  --color-danger-on-dark: #ff5f6d;
+
+  /* Shadows. */
+  --shadow-card: 0 1px 2px rgba(20, 30, 45, 0.04);
+  --shadow-window: 0 26px 80px rgba(15, 22, 44, 0.28);
+
+  /* Radii. */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* Spacing. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* The desktop shell's own text, glass and status lights. */
+  --text: #18202c;
+  --muted: #6d7581;
+  --line: rgba(27, 36, 48, 0.11);
+  --glass-strong: rgba(255, 255, 255, 0.93);
+  --green: #2fc865;
+  --amber: #e48d28;
+  --red: var(--color-danger);
+  --shadow: var(--shadow-window);
+}

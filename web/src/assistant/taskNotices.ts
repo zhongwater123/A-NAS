@@ -3,7 +3,8 @@
 // share them; reading a run anywhere clears its task's notice on every device.
 import { useSyncExternalStore } from "react";
 
-import { type Notification, acknowledgeNotification, listNotifications } from "../api";
+import type { Notification } from "../api.generated";
+import { acknowledgeNotification, listNotifications } from "../desktop/api";
 
 let notices: Notification[] = [];
 const listeners = new Set<() => void>();

@@ -5,6 +5,7 @@ big-endian length followed by JSON of at most MAX_FRAME bytes. An image
 travels as one descriptor in the request's SCM_RIGHTS control message.
 """
 
+import contextlib
 import json
 import os
 import socket
@@ -90,7 +91,5 @@ def failure(code, message):
 
 
 def _close(fd):
-    try:
+    with contextlib.suppress(OSError):
         os.close(fd)
-    except OSError:
-        pass
