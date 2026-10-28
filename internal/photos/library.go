@@ -115,7 +115,7 @@ func (s *Service) ListDirectory(ctx context.Context, p Principal, libraryID, dir
 	}
 	limit = pageSize(limit)
 	listing := DirectoryListing{Directories: []Directory{}, Assets: []Asset{}}
-	where := "WHERE a.library_id = ? AND IFNULL(a.directory_id, '') = ? AND a.trashed_at IS NULL"
+	where := "WHERE a.library_id = ? AND IFNULL(a.directory_id, '') = ? AND " + listedAssets(p, "a")
 	args := []any{lib.id, directoryID}
 	if cursor != "" {
 		name, id, err := decodeCursor(cursor)

@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -228,6 +229,9 @@ func TestVideosTakeNoPartInLocalAI(t *testing.T) {
 		}
 		queued++
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if queued == 0 {
 		t.Fatal("the photo was not queued for AI; the test proves nothing")
 	}
@@ -301,6 +305,8 @@ func TestTheAssistantDoesNotSeeVideos(t *testing.T) {
 	onlyPhoto("tag", page, err)
 	found, err := s.Search(ctx, assistant, photos.SearchRequest{Query: "生日"})
 	onlyPhoto("search", photos.Page{Assets: found.Assets}, err)
+	listing, err := s.ListDirectory(ctx, assistant, private.ID, "", "", 10)
+	onlyPhoto("directory", photos.Page{Assets: listing.Assets}, err)
 	months, err := s.TimelineMonths(ctx, assistant, private.ID)
 	if err != nil || len(months) != 1 || months[0].Photos != 1 {
 		t.Fatalf("assistant months = %+v, %v", months, err)
@@ -316,6 +322,102 @@ func TestTheAssistantDoesNotSeeVideos(t *testing.T) {
 	// The member sees both.
 	if months, err := s.TimelineMonths(ctx, alice, private.ID); err != nil || len(months) != 2 || months[0].Videos != 0 || months[1].Videos != 1 {
 		t.Fatalf("member months = %+v, %v; want the photo's and the video's", months, err)
+	}
+}
+
+// Each asset rule is written once and read two ways: as SQL for listings and
+// on a record for a single asset. The two must agree, or a listing would
+// show what opening the asset refuses.
+func TestAssetRulesReadTheSameInListingsAndOnOneAsset(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := videoService(t, phoneVideo())
+	private, shared := libraries(t, s, alice)
+	video := importPhoto(t, s, alice, private.ID, "", "clip.mp4", mp4Bytes(4))
+	importPhoto(t, s, alice, private.ID, "", "still.png", pngBytes(t, 4))
+	importPhoto(t, s, bob, shared.ID, "", "shared.mp4", mp4Bytes(5))
+	trashed := importPhoto(t, s, alice, private.ID, "", "gone.png", pngBytes(t, 5))
+	if _, err := s.Trash(ctx, alice, trashed.ID); err != nil {
+		t.Fatal(err)
+	}
+	assistant := photos.Principal{UserID: alice.UserID, Assistant: true}
+	for _, p := range []photos.Principal{alice, assistant} {
+		listed, opened, err := photos.AssetRuleForms(ctx, s, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(listed, opened) {
+			t.Fatalf("%+v: listings show %v, single assets %v", p, listed, opened)
+		}
+		// The forms agree on something: the assistant loses both videos.
+		if want := 3 - 2*boolInt(p.Assistant); len(listed) != want || slices.Contains(listed, trashed.ID) {
+			t.Fatalf("%+v sees %v, want %d untrashed assets", p, listed, want)
+		}
+		if slices.Contains(listed, video.ID) == p.Assistant {
+			t.Fatalf("%+v sees %v; only the member sees the video", p, listed)
+		}
+	}
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// Videos take no part in local AI because no AI job is ever queued for them,
+// not because each AI listing happens to find no vector: one stored anyway,
+// as an index that also covered videos would hold, shows up nowhere.
+func TestAVideoWithAVectorStaysOutOfClustersAndSimilarPhotos(t *testing.T) {
+	ctx := context.Background()
+	embedder := &colorEmbedder{}
+	root := filepath.Join(t.TempDir(), "photos")
+	s, err := photos.Open(root, photos.Options{Now: newClock().Now, DisableCapacityReserve: true,
+		Media: &videoDecoder{probe: phoneVideo()}, AI: embedder, Labels: colourLabels(t, "colour-1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	private, _ := libraries(t, s, namedAlice)
+	photo := importPhoto(t, s, namedAlice, private.ID, "", "red.png", red)
+	other := importPhoto(t, s, namedAlice, private.ID, "", "crimson.png", solidPNG(250, 5, 5))
+	video := importPhoto(t, s, namedAlice, private.ID, "", "red.mp4", mp4Bytes(6))
+	index(t, s, embedder)
+	db := catalog(t, root)
+	if _, err := db.Exec(`INSERT INTO embeddings(object_id, derivation, model, vector, created_at)
+SELECT (SELECT object_id FROM assets WHERE id = ?), derivation, model, vector, created_at FROM embeddings
+WHERE object_id = (SELECT object_id FROM assets WHERE id = ?)`, video.ID, photo.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The cache may be warm already; the next read must see the new vector.
+	photos.ForgetVectors(s)
+	assistant := photos.Principal{UserID: namedAlice.UserID, Username: "alice", Assistant: true}
+	for _, p := range []photos.Principal{namedAlice, assistant} {
+		if got := cluster(t, s, p, "red"); slices.Contains(got, "red.mp4") || len(got) != 2 {
+			t.Fatalf("%+v red cluster = %v, want the two photos", p, got)
+		}
+		counts, ready, err := s.LabelCounts(ctx, p, "")
+		if err != nil || !ready || len(counts) != 1 || counts[0].Photos != 2 {
+			t.Fatalf("%+v label counts = %+v, %v, %v; want red with two photos", p, counts, ready, err)
+		}
+		similar, err := s.Similar(ctx, p, other.ID, photos.SimilarRequest{})
+		if err != nil || !similar.Ready || len(similar.Assets) != 1 || similar.Assets[0].ID != photo.ID {
+			t.Fatalf("%+v similar to crimson = %+v, %v; want the red photo alone", p, similar, err)
+		}
+		// Search matches a video by its name only, and never for the assistant.
+		found, err := s.Search(ctx, p, photos.SearchRequest{Query: "red.mp4"})
+		if err != nil || slices.Contains(names(found.Assets), "red.mp4") == p.Assistant {
+			t.Fatalf("%+v search for the video's name = %v, %v", p, names(found.Assets), err)
+		}
+		considered, err := photos.SearchCandidates(ctx, s, p, private.ID)
+		if err != nil || len(considered) != 3-boolInt(p.Assistant) || slices.Contains(considered, video.ID) == p.Assistant {
+			t.Fatalf("%+v search candidates = %v, %v", p, considered, err)
+		}
+		// Whatever an index returns, the page shows only what p may list.
+		shown, err := photos.RecheckHits(ctx, s, p, []string{private.ID}, video.ID, photo.ID)
+		if want := map[bool]int{false: 2, true: 1}[p.Assistant]; err != nil || len(shown) != want || slices.Contains(shown, video.ID) == p.Assistant {
+			t.Fatalf("%+v recheck of the video and a photo = %v, %v", p, shown, err)
+		}
 	}
 }
 

@@ -15,9 +15,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/capacity"
+	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 	"github.com/zhongwater123/A-NAS/internal/photos/labels"
 	"github.com/zhongwater123/A-NAS/internal/photos/objects"
 )
@@ -223,34 +225,17 @@ type Service struct {
 	trashRetention time.Duration
 	maxImportBytes int64
 	maxVideoBytes  int64
-	// streamSlots bounds the videos converting for playback at once, and
-	// streamWait is how long a conversion waits for a slot.
-	streamSlots chan struct{}
-	streamWait  time.Duration
+	// streams bounds the videos converting for playback at once.
+	streams *mediaplay.Slots
 	// admits reports whether incoming bytes still leave the data-volume
 	// reserve free.
 	admits          func(path string, incoming int64) (bool, error)
 	location        *time.Location
 	sharedLibraryID string
-	// mediaWake tells RunMedia that an import queued work, and aiWake tells
-	// RunAI that a thumbnail did.
+	// mediaWake tells RunMedia that an import queued work.
 	mediaWake chan struct{}
-	aiWake    chan struct{}
-	// ai is what RunAI last observed; aiModel and aiDetector are the models
-	// whose stale vectors and detections have already been queued again,
-	// and detectorLoaded whether the Worker may still hold the detector.
-	ai             aiProgress
-	aiModelMu      sync.Mutex
-	aiModel        string
-	aiDetector     string
-	aiFaces        string
-	aiAnimals      string
-	detectorLoaded bool
-	// scanned counts face and pet scans stored since people last clustered.
-	scanned int
-	// nextDetection is the next detection job with its input, rendered
-	// while the Worker detected the one before. Only the AI runner uses it.
-	nextDetection *detectionInput
+	// ai runs local AI and owns what its rounds share (airunner.go).
+	ai *aiRunner
 	// embedder encodes search queries, index holds image vectors for search
 	// and AI clusters, and detected the detector's best score per class.
 	embedder   Embedder
@@ -264,6 +249,12 @@ type Service struct {
 	matcher           *objects.Matcher
 	// searches keeps what image searches need for their later pages.
 	searches imageSearches
+	// shadow hands searches to RunVectorShadow while shadowing says it runs
+	// (vectorshadow.go); vectorChecked is the image collection the sync loop
+	// last found in the index (vectorsync.go).
+	shadow        chan shadowQuery
+	shadowing     atomic.Bool
+	vectorChecked atomic.Pointer[imagesCollection]
 	// peopleCalibrations say how each kind of occurrence clusters.
 	peopleCalibrations []PeopleCalibration
 
@@ -309,13 +300,15 @@ func Open(root string, options Options) (*Service, error) {
 	}
 	service := &Service{
 		db: db, root: opened, rootPath: root, media: options.Media,
-		streamSlots: make(chan struct{}, maxVideoStreams), streamWait: videoStreamWait,
-		now: options.Now, random: options.Random,
+		streams: mediaplay.NewSlots(mediaplay.Conversions, mediaplay.ConversionWait),
+		now:     options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes, maxVideoBytes: options.MaxVideoBytes,
 		admits: capacity.Admits, location: options.Location, embedder: options.AI,
-		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1), aiWake: make(chan struct{}, 1),
+		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1),
 		searches: imageSearches{encoding: make(chan struct{}, 1)},
+		shadow:   make(chan shadowQuery, 1),
 	}
+	service.ai = newAIRunner(service)
 	if options.DisableCapacityReserve {
 		service.admits = func(string, int64) (bool, error) { return true, nil }
 	}

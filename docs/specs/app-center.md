@@ -1,7 +1,7 @@
 # 应用中心
 
 状态：implemented
-更新时间：2026-10-21
+更新时间：2026-10-27
 
 ## 目标
 
@@ -42,6 +42,7 @@
 
 ### 规划与确认安装
 
+- 生成计划与确认安装时均检查系统状态文件系统（`/var/lib`）和 Docker 实际 `data-root` 的剩余空间。任一处不足总容量的 5% 或 2 GiB（取较大者）时返回 `system_storage_full`，提示查看设置概览并卸载不用的应用；观测失败时拒绝安装。该检查是安装前的最低余量，不是镜像体积估计或磁盘配额，不能保证任意镜像拉取后仍保有该余量。
 - Given：应用状态为“可安装”。
 - When：用户在卡片或详情页点击“安装”。
 - Then：详情页上方打开“安装计划”面板，先显示正在生成计划，随后逐项列出运行身份（应用账号与每个服务的运行方式：应用账号、初始化后降权或镜像自带身份，见下文“运行身份”）、使用的文件夹（区分应用数据、共享空间、系统只读，并标出只读）、开放端口与用途、将新建的 Docker 网络及其地址池，以及 A-NAS 为这次安装生成的登录信息（见下文“生成的登录信息”）；拉取的镜像与创建的容器默认折叠为数量，最终 Compose 文件可展开。计划挂载共享空间时，面板顶部以警示说明该权限，并区分“将能读取共享空间中的 N 个文件夹，不能修改或删除其中的文件”与“将能读写共享空间中的 N 个文件夹，与成员的权限相同”。底栏固定显示计划摘要、“取消”与“确认安装”。另一个应用正在安装或卸载时，“确认安装”不可用并说明原因。未确认前不执行任何操作；Esc、点击面板外或“取消”关闭面板，焦点回到“安装”按钮。
@@ -51,6 +52,10 @@
 - Given：用户已查看安装计划。
 - When：点击“确认安装”。
 - Then：请求携带计划摘要；容器代理重新渲染并比对摘要，再检查端口与容器名冲突，然后在后台运行 `docker compose up`，再观察约 20 秒：有容器不断重启、以非零退出码退出、没有启动或健康检查失败时，取 Compose 日志最后 20 行写入输出，执行 `compose down` 回滚，任务以“容器 n8n 启动后不断重启（退出码 1），安装已回滚”这样的原因失败。`up` 本身出错时（例如端口被宿主机进程占用，或 Linkwarden 的 postgres 没有及时通过健康检查，此时已有容器在运行）同样取日志并回滚，任务以“Docker Compose 没有完成启动（…），安装已回滚”失败。面板转为进度：已用时间、不确定进度条、最近一行 Compose 输出和可展开的完整输出，每 1.5 秒刷新；“在后台继续”关闭面板而不中断安装，详情页同样显示进度。成功后面板显示“已安装”、运行中的容器数、端口、登录信息和使用须知，提供“打开”；详情页显示“已安装 · N/N 个容器运行中”、访问地址和登录信息，容器同时出现在 Docker 窗口。安装后才停止运行的容器在详情页逐个说明原因（不断重启、已退出及退出码、没有启动），并提示在 Docker 中查看日志。
+
+安装前置检查先于宿主机准备：不在容器代理目录中的 ID 不保留 UID。确认安装时，容器代理先校验摘要、端口与名称冲突以及已安装/忙碌状态，接受后预留唯一任务位置；产品服务再让 Host Agent 创建账号和目录，随后提交预留，容器代理读取实际 Linux 账号并核对计划身份后才启动 Compose。预留一次性使用，准备失败时取消；请求中断导致无人提交时，一分钟后任务失败并释放位置。接受前被拒绝的请求不创建账号和共享目录。
+
+停止或处于 created 状态的容器仍占用其 `HostConfig.PortBindings` 中的宿主机端口；相同端口是硬冲突。运行中动态分配的端口也从 Docker 列表中保留。停止容器检查遇到 NotFound 表示已删除，可以跳过；其他检查失败拒绝本次安装，不能将它当作没有占用。
 
 ### 打开与管理已安装应用
 
@@ -73,7 +78,9 @@
 
 - Given：应用已安装。
 - When：在“更多操作”中选择“卸载”，并在对话框中确认。
-- Then：对话框列出将停止并删除容器和 Docker 网络、保留应用数据、立即撤销它获得过的共享空间访问。确认后后台运行 `docker compose down`，删除容器与项目网络，保留应用数据目录；详情页显示卸载进度，完成后应用回到“可安装”。取消时焦点回到“更多操作”。
+- Then：对话框列出将删除容器、Docker 网络、匿名卷与未被其他容器使用的镜像，保留应用数据和命名卷，并撤销共享空间访问。确认后后台先停止容器，再通过 Docker Engine 删除容器与匿名卷，随后由 `docker compose down` 清理网络；不使用会删除命名卷的 `down --volumes`。镜像只在没有任何运行中或已停止容器使用时删除，不强制删除；详情页显示卸载进度，完成后应用回到“可安装”。取消时焦点回到“更多操作”。
+- 清理前将镜像 ID 持久化到容器代理的 `apps/<app>/images.json`，因此容器已删除但镜像删除失败、或代理重启后仍能继续。清理失败显示“卸载未完成”和“重试卸载”，不当成安装失败；重新安装也先完成残留清理。安装回滚、中断恢复使用同一清理流程，命名卷和应用数据始终保留。
+- Docker 因多标签或其他依赖拒绝按 ID 删除镜像时，保留该镜像，卸载仍可完成；不自动移除可变标签、不强制删除，也不清扫无法证明属于该应用的历史孤立资源。
 
 ### 失败与冲突
 
@@ -102,7 +109,7 @@
 - **打开应用**：本机屏幕同样在新窗口中打开；Kiosk 中新窗口会盖住桌面，浏览器约束见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
 - 路径：`/DATA/AppData/<app>/…` → `ANAS_APP_DATA_ROOT/<app>/…`（默认数据卷上的 `/srv/a-nas/data/apps`，不经 SMB 发布，成员不可列出）；其余 `/DATA/…`（含整个 `/DATA`）→ `ANAS_SHARED_DATA_ROOT/…`（默认 Shared 共享文件夹 `/srv/a-nas/data/spaces/shared`，绝不映射到数据卷根目录）；`/etc/localtime` 强制只读，`/etc/timezone` 被移除并以 `TZ` 代替。其他应用的数据目录、相对路径、`..` 逃逸和其余宿主机路径一律拒绝。
 - **挂载方式**：数据卷上的文件夹不以绑定挂载交给 Docker（Docker 每次启动都会跟随绑定源路径中的符号链接，而能写共享空间或应用自身数据的人可以把其中的文件夹换成指向宿主机的链接）。渲染结果改为两个 A-NAS 卷：`a-nas-appdata` 以 `apps/<app>`、`a-nas-shared` 以共享空间为根（`local` 驱动、`o=bind`，根目录的名称只有 root 能改），具体文件夹作为 `volume.subpath`，并设 `nocopy`。Docker 每次启动在卷内解析子路径，链接指向卷外时拒绝启动；它既不创建卷根也不创建子路径。清单不能声明 `a-nas-` 前缀的卷。子目录挂载需要 Docker Compose 2.30 及以上与 Engine API 1.45 及以上：容器代理在规划时检查，不满足时返回 `409 docker_runtime_outdated`。Compose 2.29 及以前把子目录交给旧的绑定接口，引擎会挂载整个卷（[调查](../investigations/2026-10-09-old-compose-mounted-whole-app-volumes.md)）。安装后，容器代理核对每个容器对 A-NAS 卷的挂载都是计划中的子目录；有任一不符或无法检查时立即 `compose down` 回滚，任务失败并写明容器、卷与挂载点。Docker 来自官方软件源（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
-- **运行身份**（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）：每个应用对应 Host Agent 分配的 Linux 账号 `app-<id>`（UID/GID 30000–30999，永不复用）。查看计划只在 Host Agent 登记表中预留 UID，账号在安装前预建文件夹时才创建。容器代理自己从宿主机的账号库读取 `app-<id>`，不采用调用方给的 UID/GID（[#176](https://github.com/zhongwater123/A-NAS/issues/176)）：只接受 UID 等于 GID、在应用区间内、有同名组，且该 UID 解析到的账号就是它自己（与 `getent` 一样取第一条）的账号；安装时账号必须已经存在。账号创建之前查看计划，才显示产品服务转来的预留 UID，且这个 UID 不得被任何账号占用，也不得被该应用以外的组占用（Host Agent 先建组再建账号，中途停下时只留下应用自己的组）；安装时按账号重新渲染并比对摘要，所以只有按账号的 UID 显示的计划能安装。环境变量插值只提供 `AppID`、`TZ`、`PUID`、`PGID`，不读取容器代理自身环境。每个服务按 [`runtime.go`](../../internal/appstore/runtime.go) 恰好以一种方式运行，计划逐个列出：
+- **运行身份**（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）：每个应用对应 Host Agent 分配的 Linux 账号 `app-<id>`（UID/GID 30000–30999，永不复用）。查看计划只在 Host Agent 登记表中预留 UID，账号在安装前预建文件夹时才创建。容器代理自己从宿主机的账号库读取 `app-<id>`，不采用调用方给的 UID/GID（[#176](https://github.com/zhongwater123/A-NAS/issues/176)）：只接受 UID 等于 GID、在应用区间内、有同名组，且该 UID 解析到的账号就是它自己（与 `getent` 一样取第一条）的账号；提交安装预留时账号必须已经存在。账号创建之前查看计划和预留安装，才使用产品服务转来的预留 UID，且这个 UID 不得被任何账号占用，也不得被该应用以外的组占用（Host Agent 先建组再建账号，中途停下时只留下应用自己的组）；预留安装时重新渲染并比对摘要，准备后提交时核对实际账号与预留计划的身份，所以只有按账号的 UID 显示的计划能安装。环境变量插值只提供 `AppID`、`TZ`、`PUID`、`PGID`，不读取容器代理自身环境。每个服务按 [`runtime.go`](../../internal/appstore/runtime.go) 恰好以一种方式运行，计划逐个列出：
   - **应用账号**（`app`）：Compose `user` 为 `app-<id>`，`cap_drop: [ALL]`。清单声明 `user`（无论原值），或审查表 `reviewedRunAs` 确认镜像能以任意 UID 运行时采用：n8n、Grafana、PsiTransfer 的镜像固定以非 root 用户运行（2026-10-13 Demo 测试中 n8n 因写不了文件夹而不断重启）；Audiobookshelf、Immich 的服务端、Kavita、Navidrome、PhotoPrism、Swing Music 的镜像默认以 root 运行，但它们挂载共享空间。
   - **初始化后降权**（`app-after-init`）：清单声明 `PUID`/`PGID`（无论原值是变量还是字面量）。容器以 root 启动，入口程序准备后切换到计划设定的 `PUID`/`PGID`；入口程序的监管进程在容器生命周期内保持 root。
   - **镜像自带身份**（`image`）：其余服务保留镜像的用户，可能是 root；只能挂载自己的应用数据，挂载共享空间时规划失败。
@@ -113,12 +120,14 @@
 - 数据卷离线时安装返回 `423 volume_unavailable`，不预建任何文件夹。
 - **Docker 网络**（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）：计划列出 Compose 将新建的网络，包括服务未设 `network_mode: bridge` 时的隐式 `default` 网络。清单自带 `ipam` 子网或驱动的网络被拒绝。应用有网络而 Docker 未配置 `default-address-pools` 时，规划与安装都返回 `409 address_pool_missing`。安装后，项目网络的每个子网都必须落在地址池内；有任一不在池内或无法检查时，立即 `compose down` 回滚，任务失败并写明网络与网段。
 - 局限：镜像自带身份的服务可能以 root 写入它自己的应用数据目录；初始化后降权的镜像，其入口程序与监管进程以 root 运行。rootful Docker 下，容器逃逸漏洞对以 root 运行的容器意味着宿主机 root。
-- 端口冲突检查基于 Docker 已发布端口；未被容器占用但被宿主机进程监听的端口由 Compose 启动失败暴露在任务日志中。
+- 端口冲突检查包含 非运行容器的配置绑定端口（含范围），以及运行中或暂停容器的实际发布端口；未被容器占用但被宿主机进程监听的端口由 Compose 启动失败暴露在任务日志中。
 - 一次只运行一个安装或卸载任务；安装超时 30 分钟、卸载 5 分钟，任务保留最近 40 行输出。每个应用最近一次任务（动作、状态、起止时间、输出与错误）在任务开始和结束时写入容器代理状态目录 `jobs/<app>.json`（目录 0700、文件 0600，输出可能含应用自己的日志），重启后读回；开始时写不进记录则拒绝任务（`503 apps_unavailable`）。应用状态由容器标签与这条记录共同决定：有容器且最近一次是成功的安装（或没有记录，即早于记录的安装）为“已安装”，有容器而最近一次是失败的安装为“failed”。代理单元设 `KillMode=mixed`，停止时 systemd 只向代理本身发 SIGTERM，由代理取消安装并用 Compose 回滚；60 秒后仍剩下的进程被 SIGKILL，留下的安装由下次启动回滚（[#169](https://github.com/zhongwater123/A-NAS/issues/169)）。
 - **桌面快捷方式**：`GET /api/v1/app-shortcuts` 对所有已登录账号开放，只返回已安装且有网页端口的应用的 ID、名称、网页端口、协议、路径与运行中/全部容器数，不含安装计划、Compose、登录信息或镜像；`GET /api/v1/app-shortcuts/{id}/icon` 返回应用目录中的图标（与应用中心的图标相同的缓存与沙箱头）。应用中心未启用时列表为空，容器代理不可达时返回 `503`，桌面保留上一次的图标。
 - 应用中心仅管理员可用：所有 `/api/v1/apps` 请求需要管理员产品会话，写请求还需要会话的 CSRF 令牌；成员看不到“应用中心”图标。写请求另要求 Host 为 `localhost` 或 IP 地址（[局域网 Web 访问](lan-web-access.md)）、JSON 请求体与同源 Origin；安装请求只接受 `digest` 字段，无法提交 Compose 内容。图标以沙箱化 CSP 与 `nosniff` 返回。
 
 ## 验收证据
+
+- 系统盘保护：所有服务固定使用 `json-file`、`max-size=10m`、`max-file=3`，覆盖清单自带日志配置。运行规则版本为 2，旧容器需卸载重装才能应用日志限制。[清理回归](../../internal/appstore/engine/cleanup_test.go) 覆盖容器删除后的重试、重启恢复与损坏记录保护；[真实 Docker 回归](../../internal/appstore/engine/cleanup_docker_integration_test.go) 覆盖日志轮转、安装回滚、命名卷/应用数据保留与镜像清理，运行需要本地 Docker、Compose 和带 Python 3 的 `ANAS_TEST_IMAGE`。空间下限由[存储检查测试](../../internal/appstore/engine/storage_test.go)验证，系统占用由[系统健康规格](system-health.md)定义。
 
 - 运行身份：[运行规则测试](../../internal/appstore/runtime_test.go) 渲染全部内置应用，确认挂载共享空间的服务都以应用账号（带 20000 组、无能力）或初始化后降权运行、只有审查表列出的共享空间挂载可写、审查表只引用存在的应用与服务、20000 即 `a-nas-users`；[渲染测试](../../internal/appstore/render_test.go) 覆盖保留镜像用户的服务挂载共享空间被拒绝、`PUID` 类镜像在挂载共享空间时以 20000 为 `PGID`、共享空间默认只读而 qBittorrent 可写。
 - 渲染与策略：[渲染测试](../../internal/appstore/render_test.go) 覆盖路径重写、显式 `user` 及字面量 `PUID`/`PGID` 改为应用身份、不让 Docker 创建宿主机文件夹、`/DATA` 只映射到共享空间、缺少身份时拒绝、确定性摘要与 17 类拒绝情形，以及计划列出隐式 `default` 网络、默认网桥不新建网络、清单自带子网被拒绝；[清单测试](../../internal/appstore/catalog_test.go) 另覆盖每个内置应用都有 A-NAS 分类、使用须知与链接的读取以及非 http(s) 链接被丢弃，[文字校订测试](../../internal/appstore/copy_test.go) 覆盖全部内置应用的介绍与须知不含 Zima、无限存储与 CasaOS 设置步骤以及卖点段落的删除规则，[登录信息测试](../../internal/appstore/credentials_test.go) 覆盖列表中每个应用缺少生成值时拒绝渲染、生成值写入 Compose 且清单固定值不再出现、须知不再给出清单密码、保留的值渲染出相同摘要、为旧安装记下的清单值与清单一致，[引擎测试](../../internal/appstore/engine/engine_test.go) 的 `TestInstalledAppsShowTheLoginsTheyUse` 覆盖值只生成一次并以 0600 保存、已安装应用显示保存的值、旧安装显示清单值，[分类测试](../../internal/appstore/categories_test.go) 覆盖分类表不含清单外的应用。
@@ -130,9 +139,11 @@
 - 桌面快捷方式：[桌面测试](../../web/src/App.test.tsx) 的 “Installed apps on the desktop” 覆盖点击图标与在启动器中回车都按当前主机和网页端口在新窗口打开、未运行的应用标注“未运行”且管理员点击后打开 Docker、成员也能看到已安装的应用而未运行的不可点击。
 - 执行层：[引擎测试](../../internal/appstore/engine/engine_test.go) 覆盖按确认计划写入并执行、摘要不符、端口冲突、并发任务、卸载保留数据与失败输出；`TestAppNetworksNeedAnAddressPool`、`TestInstallRollsBackANetworkOutsideThePool` 与 `TestInstallKeepsANetworkInsideThePool` 覆盖没有地址池时拒绝、网络不在池内时回滚与池内正常安装。`TestPlanRefusesADockerThatDropsVolumeSubpaths`、`TestInstallRollsBackAMountBeyondItsFolder` 与 `TestInstallKeepsMountsOnTheirFolders` 覆盖过旧的 Compose 或 Engine API 被拒绝、挂载超出计划文件夹时回滚与正确挂载时正常安装；`TestInstallRollsBackAContainerThatDoesNotRunAsPlanned`、`TestInstallRollsBackAWritableReadOnlyFolder` 与 `TestAppsReportContainersFromOlderRuntimeRules` 覆盖用户、组、能力、`no-new-privileges` 或服务与计划不符时回滚、只读挂载变成可写时回滚，以及按旧规则安装的应用被标出。[#169](https://github.com/zhongwater123/A-NAS/issues/169) 的两种情形：`TestInstallRollsBackWhenComposeFailsPartway` 让 `up` 在建出 Linkwarden 的 3 个容器中的 2 个运行后出错，确认依次执行 `up`、`logs`、`down` 且应用回到“可安装”并给出原因；`TestContainersOfAFailedInstallAreNotAnInstalledApp` 让回滚也失败，确认状态为 failed（2/3 运行、不显示登录信息），重新安装先按项目 `down` 再 `up`；`TestStoppingTheAgentRollsBackARunningInstall` 在 `up` 进行中停止代理，确认安装被取消并回滚、停止后拒绝新任务、记录为 0600，且重新启动的代理显示同一失败原因；`TestRecoverRollsBackAnInstallTheAgentDiedIn` 与 `TestRecoverFinishesAnUninstallTheAgentDiedIn` 模拟代理在安装或卸载中途被杀，确认再次启动后回滚期间显示“安装中”并拒绝其他任务，随后删除容器并报告失败，或完成卸载。
 - 协议与 API：[代理测试](../../internal/appstore/agent/agent_test.go)（含分类、使用须知与链接往返，丢弃旧版代理的 CasaOS 分类，以及 `TestAgentRunsAppsAsTheirAccounts`：计划与安装按宿主机上的应用账号运行而不采用请求中的 UID，账号创建前只接受没人占用（或只有应用自己的组）的预留 UID，账号不存在时拒绝安装）、root 集成测试 `TestRootContainerAgentReadsAppIdentitiesFromTheHost`（从真实账号库读取，拒绝组不同名、UID 在应用区间外或 UID 解析到别的账号的 `app-*` 账号，并接受只建了应用自己的组的预留 UID）、[应用中心 API 测试](../../internal/appstoreapi/handler_test.go)、[OpenAPI 契约测试](../../internal/httpapi/openapi_test.go)。
-- 前端：[应用中心测试](../../web/src/appcenter/AppCenterPanel.test.tsx) 覆盖分类浏览、按命中位置排序的搜索与 Esc 清空、回滚没有完成的安装显示为失败（不显示“打开”与运行中的容器数，说明留下的容器，提供卸载与重新安装）、Markdown 与使用须知（表格、无图片、新窗口链接）、A-NAS 版须知与折叠的上游原始说明及其标题层级、计划 → 进度 → 完成并按当前主机打开应用、关闭计划后焦点回到“安装”、失败原因与重新安装、重新安装时不把上一次的失败当作结果、另一任务进行时禁止确认、已安装列表与从菜单卸载（取消时焦点回到菜单按钮）、未分类应用列在“其他”、登录信息默认隐藏并可显示与复制（复制后焦点留在按钮上）、旧安装显示清单默认密码的警示、计划逐个列出服务的运行方式并说明共享空间只读、按旧规则安装的应用提示重装，写请求都带 CSRF 令牌；[桌面测试](../../web/src/App.test.tsx) 覆盖从桌面打开后按摘要安装、端口冲突提示、未启用状态、Docker 网络与地址池显示、地址池缺失与数据卷不可用提示。
+- 前端：[应用中心测试](../../web/src/appcenter/AppCenterPanel.test.tsx) 覆盖分类浏览、按命中位置排序的搜索与 Esc 清空、回滚没有完成的安装显示为失败（不显示“打开”与运行中的容器数，说明留下的容器，提供卸载与重新安装）、Markdown 与使用须知（表格、无图片、新窗口链接）、A-NAS 版须知与折叠的上游原始说明及其标题层级、计划 → 进度 → 完成并按当前主机打开应用、关闭计划后焦点回到“安装”、失败原因与重新安装、重新安装时不把上一次的失败当作结果、另一任务进行时禁止确认、已安装列表与从菜单卸载（取消时焦点回到菜单按钮）、未分类应用列在“其他”、登录信息默认隐藏并可显示与复制（复制后焦点留在按钮上）、旧安装显示清单默认密码的警示、计划逐个列出服务的运行方式并说明共享空间只读、按旧规则安装的应用提示重装、按计划摘要安装、端口冲突提示、未启用状态、Docker 网络与地址池显示、地址池缺失与数据卷不可用提示，写请求都带 CSRF 令牌。
 - 2026-10-12 Chromium，模拟模式：在 1180×780（默认窗口与最大化）和 800×660（窄窗口横条）下检查发现、分类、搜索、已安装、详情、安装计划、进度、完成、卸载确认与卸载进度；以临时替换的接口数据检查安装失败、部分容器未运行与安装中的列表和详情。
 - 2026-10-07 WSL2（Docker 29.1.3、Compose 2.40.3）：通过产品 API 与容器代理安装 Memos——本机 Docker 无法访问 Docker Hub，首次安装如实失败并显示拉取错误；以本地镜像临时标记为 `neosmemo/memos:0.28.0` 后，安装成功（容器带 `a-nas-memos` 项目与 `io.a-nas.app` 标签，绑定目录重写到应用数据根，Docker 窗口可见），重复安装返回 `already_installed`，卸载后容器与网络删除且数据保留；过期摘要返回 `plan_changed`，跨站请求返回 `forbidden`。Chromium 中模拟模式完成浏览、计划、安装、卸载全流程，26 个图标全部加载。临时镜像标签与测试数据已清理。
+
+安装前置顺序和端口回归由[API 测试](../../internal/appstoreapi/preflight_test.go)、[Docker 检查测试](../../internal/appstore/engine/docker_test.go)、[预留生命周期测试](../../internal/appstore/engine/preparation_test.go)覆盖；[代理协议测试](../../internal/appstore/agent/agent_test.go)验证跨进程提交时仍按真实账号授权。复现与边界见[调查记录](../investigations/2026-10-27-app-install-preparation-order.md)。
 
 ## 关联
 

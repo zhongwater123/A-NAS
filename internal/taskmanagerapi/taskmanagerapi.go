@@ -38,8 +38,8 @@ func New(reader taskmanager.Reader, dataSource string, logger *slog.Logger) *API
 // after authentication instead of falling through to the catch-all 404.
 func (a *API) Routes() []apiroute.Route {
 	return []apiroute.Route{
-		{Pattern: devicePath, Posture: apiroute.Session, Handler: a.serve},
-		{Pattern: tasksPath, Posture: apiroute.Session, Handler: a.serve},
+		{Pattern: devicePath, Posture: apiroute.Session, Handler: a.serve, Endpoints: []apiroute.Endpoint{{Method: http.MethodGet, Pattern: devicePath}}},
+		{Pattern: tasksPath, Posture: apiroute.Session, Handler: a.serve, Endpoints: []apiroute.Endpoint{{Method: http.MethodGet, Pattern: tasksPath}}},
 	}
 }
 

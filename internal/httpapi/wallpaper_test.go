@@ -25,7 +25,7 @@ type wallpaperView struct {
 
 func TestAdministratorsChooseTheWallpaperEveryoneSees(t *testing.T) {
 	ctx := context.Background()
-	f := newActivityFixture(t, func(*photos.Service) http.Handler { return nil })
+	f := newActivityFixture(t, func(*photos.Service, *accounts.Service) http.Handler { return nil })
 	decode := func(recorder *httptest.ResponseRecorder) wallpaperView {
 		t.Helper()
 		var wallpaper wallpaperView

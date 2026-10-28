@@ -13,9 +13,10 @@ import {
   useState,
 } from "react";
 
+import type { Track } from "./api";
 import { Cover, carriesTracks, dragType, Equalizer, readDrag, useMusic } from "./context";
-import { artistLine, artistKey, artistsOf, formatDuration, lossless, qualityOf, unknownAlbum } from "./library";
-import type { Track } from "./musicApi";
+import { artistKey, artistLine, artistsOf, formatDuration, lossless, qualityOf, unknownAlbum } from "./library";
+import styles from "./music.module.css";
 
 export interface TrackListProps {
   tracks: Track[];
@@ -35,7 +36,7 @@ const rowHeight = 54;
 // dragLabel is the small pill that follows the pointer while dragging songs.
 function dragLabel(count: number): HTMLElement {
   const label = document.createElement("div");
-  label.className = "mu-drag-label";
+  label.className = styles.muDragLabel;
   label.textContent = count === 1 ? "1 首歌曲" : `${count} 首歌曲`;
   document.body.appendChild(label);
   window.setTimeout(() => label.remove(), 0);
@@ -178,7 +179,7 @@ export function TrackList({
   return (
     <div
       ref={listRef}
-      className={`mu-tracks${showAlbum ? "" : " no-album"}${extra ? " with-extra" : ""}`}
+      className={`${styles.muTracks}${showAlbum ? "" : ` ${styles.noAlbum}`}${extra ? ` ${styles.withExtra}` : ""}`}
       role="grid"
       aria-label="歌曲"
       aria-rowcount={tracks.length}
@@ -188,18 +189,18 @@ export function TrackList({
         if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropAt(undefined);
       }}
     >
-      <div className="mu-track-head" role="row">
+      <div className={styles.muTrackHead} role="row">
         <span>#</span>
         <span>标题</span>
-        <span className="mu-col-artist">歌手</span>
-        {showAlbum && <span className="mu-col-album">专辑</span>}
-        {extra && <span className="mu-col-extra">{extra.label}</span>}
-        <span className="mu-col-time" aria-label="时长">
+        <span className={styles.muColArtist}>歌手</span>
+        {showAlbum && <span className={styles.muColAlbum}>专辑</span>}
+        {extra && <span className={styles.muColExtra}>{extra.label}</span>}
+        <span className={styles.muColTime} aria-label="时长">
           <Clock3 />
         </span>
         <span />
       </div>
-      <div className="mu-track-body" style={{ height: virtualizer.getTotalSize() }}>
+      <div className={styles.muTrackBody} style={{ height: virtualizer.getTotalSize() }}>
         {items.map((item) => {
           const track = tracks[item.index];
           return (
@@ -274,7 +275,7 @@ function TrackRow({
   const artists = artistsOf(track);
   return (
     <div
-      className={`mu-track${selected ? " selected" : ""}${current ? " current" : ""}${dropBefore ? " drop-before" : ""}${dropAfter ? " drop-after" : ""}`}
+      className={`${styles.muTrack}${selected ? ` ${styles.selected}` : ""}${current ? ` ${styles.current}` : ""}${dropBefore ? ` ${styles.dropBefore}` : ""}${dropAfter ? ` ${styles.dropAfter}` : ""}`}
       role="row"
       aria-selected={selected}
       aria-rowindex={position + 1}
@@ -286,11 +287,11 @@ function TrackRow({
       onDragStart={(event) => onDragStart(event, position)}
       {...dropProps}
     >
-      <span className="mu-track-index">
+      <span className={styles.muTrackIndex}>
         {current ? <Equalizer paused={paused} /> : <span className="mu-track-number">{number}</span>}
         <button
           type="button"
-          className="mu-track-play"
+          className={styles.muTrackPlay}
           aria-label={`播放 ${track.title}`}
           onClick={(event) => {
             event.stopPropagation();
@@ -300,17 +301,17 @@ function TrackRow({
           <Play />
         </button>
       </span>
-      <span className="mu-track-title">
+      <span className={styles.muTrackTitle}>
         <Cover id={track.coverId} name={track.album || track.title} kind="track" />
-        <span className="mu-track-name">
+        <span className={styles.muTrackName}>
           <strong title={track.title}>
             {track.title}
-            {lossless(track) && <em className="mu-badge">{qualityOf(track)}</em>}
+            {lossless(track) && <em className={styles.muBadge}>{qualityOf(track)}</em>}
           </strong>
-          <small className="mu-track-sub">{artistLine(track)}</small>
+          <small className={styles.muTrackSub}>{artistLine(track)}</small>
         </span>
       </span>
-      <span className="mu-col-artist mu-links">
+      <span className={`${styles.muColArtist} ${styles.muLinks}`}>
         {artists.map((name, at) => (
           <span key={name}>
             {at > 0 && " / "}
@@ -327,7 +328,7 @@ function TrackRow({
         ))}
       </span>
       {showAlbum && (
-        <span className="mu-col-album mu-links">
+        <span className={`${styles.muColAlbum} ${styles.muLinks}`}>
           <button
             type="button"
             onClick={(event) => {
@@ -339,12 +340,12 @@ function TrackRow({
           </button>
         </span>
       )}
-      {extra !== undefined && <span className="mu-col-extra">{extra}</span>}
-      <span className="mu-col-time">{formatDuration(track.durationMs)}</span>
-      <span className="mu-track-like">
+      {extra !== undefined && <span className={styles.muColExtra}>{extra}</span>}
+      <span className={styles.muColTime}>{formatDuration(track.durationMs)}</span>
+      <span className={styles.muTrackLike}>
         <button
           type="button"
-          className={favorite ? "on" : ""}
+          className={favorite ? styles.on : ""}
           aria-label={favorite ? "取消收藏" : "收藏"}
           aria-pressed={favorite}
           onClick={(event) => {

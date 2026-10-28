@@ -1,7 +1,7 @@
 # 闲时检测只用了约 1 个核
 
-状态：fixed locally；Experimental NAS verification pending
-更新时间：2026-10-13
+状态：fixed（[PR #88](https://github.com/zhongwater123/A-NAS/pull/88)），待实机验收
+更新时间：2026-10-27
 
 ## 症状与影响
 

@@ -1,0 +1,18 @@
+[Unit]
+Description=A-NAS vector index socket of %i
+Documentation=https://github.com/zhongwater123/A-NAS
+
+[Socket]
+# The only way into the vector index of the service whose account names the
+# instance (docs/architecture/vector-index.md). The socket belongs to that
+# account alone: services that share a group with it, as the Product Service
+# shares a-nas-photos, stay out.
+ListenStream=/run/a-nas-vectors/%i.sock
+SocketUser=%i
+SocketGroup=%i
+SocketMode=0600
+DirectoryMode=0755
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

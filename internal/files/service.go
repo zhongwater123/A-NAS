@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,28 +20,17 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/capacity"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 var (
-	ErrForbidden         = errors.New("file space access is forbidden")
-	ErrNotFound          = errors.New("file entry not found")
-	ErrConflict          = errors.New("file entry already exists")
-	ErrInvalidName       = errors.New("invalid file name")
-	ErrUnsupportedType   = errors.New("unsupported file type")
-	ErrVolumeUnavailable = errors.New("data volume is unavailable")
-	ErrInsufficientSpace = errors.New("data volume reserve would be exhausted")
-	ErrInvalidQuery      = errors.New("search text must hold 1 to 100 characters")
-	ErrInvalidSchedule   = errors.New("invalid snapshot schedule")
-)
-
-type EntryKind string
-
-const (
-	EntryKindFile      EntryKind = "file"
-	EntryKindDirectory EntryKind = "directory"
+	ErrConflict        = errors.New("file entry already exists")
+	ErrInvalidQuery    = errors.New("search text must hold 1 to 100 characters")
+	ErrInvalidSchedule = errors.New("invalid snapshot schedule")
 )
 
 type Entry struct {
@@ -137,7 +125,6 @@ func (g BtrfsVolumeGuard) Check(ctx context.Context, volumeRoot string, write bo
 
 type Options struct {
 	Now                    func() time.Time
-	Random                 io.Reader
 	DisableCapacityReserve bool
 	AllowUnverifiedVolume  bool
 	VolumeGuard            VolumeGuard
@@ -152,15 +139,15 @@ type Store struct {
 	db *sql.DB
 }
 
-func OpenSQLite(path string) (*Store, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("SQLite path is empty")
-	}
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
+func OpenSQLite(path string) (*Store, error) { return openSQLite("sqlite3", path) }
+
+// openSQLite opens the catalog through the named database/sql driver, which
+// tests replace with one that fails reads part way.
+func openSQLite(driverName, path string) (*Store, error) {
+	db, err := sqlitedb.Open(path, sqlitedb.Options{Driver: driverName})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
@@ -205,6 +192,11 @@ CREATE TABLE IF NOT EXISTS snapshots (
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL,
     UNIQUE(space_id, name)
+);
+CREATE TABLE IF NOT EXISTS pending_snapshots (
+    id TEXT PRIMARY KEY,
+    space_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS snapshot_entries (
     id TEXT PRIMARY KEY,
@@ -325,7 +317,6 @@ type Service struct {
 	volumeRoot             string
 	policy                 Policy
 	now                    func() time.Time
-	random                 io.Reader
 	disableCapacityReserve bool
 	allowUnverifiedVolume  bool
 	volumeGuard            VolumeGuard
@@ -343,11 +334,14 @@ type Service struct {
 	temporariesMu sync.Mutex
 	temporaries   map[string]struct{}
 	// takingSnapshots holds the snapshots being taken. snapshotsMu also
-	// orders sweeps against them (see SweepSnapshots).
-	snapshotsMu     sync.Mutex
-	takingSnapshots map[string]struct{}
-	ordersMu        sync.Mutex
-	orders          map[string]*spaceOrder
+	// orders sweeps against them (see SweepSnapshots) and guards what the
+	// last sweep reported as left alone.
+	snapshotsMu        sync.Mutex
+	takingSnapshots    map[string]struct{}
+	reportedUnrecorded int
+	reportedUnfound    int
+	ordersMu           sync.Mutex
+	orders             map[string]*spaceOrder
 }
 
 // queryer is the catalog or a transaction on it.
@@ -389,13 +383,9 @@ func newService(store *Store, volumeRoot string, policy Policy, fsys FileSystem,
 	if now == nil {
 		now = time.Now
 	}
-	random := options.Random
-	if random == nil {
-		random = rand.Reader
-	}
 	service := &Service{
 		store: store, volumeRoot: filepath.Clean(volumeRoot), policy: policy,
-		now: now, random: random, disableCapacityReserve: options.DisableCapacityReserve,
+		now: now, disableCapacityReserve: options.DisableCapacityReserve,
 		allowUnverifiedVolume: options.AllowUnverifiedVolume, volumeGuard: options.VolumeGuard,
 		spaceRoots: make(map[string]string), trashRetention: options.TrashRetention, fs: fsys, snapshots: options.SnapshotBackend,
 		location: options.Location, scheduledSpaces: make(map[string]accounts.Space),
@@ -496,6 +486,10 @@ func (s *Service) OpenContent(ctx context.Context, actor accounts.User, entryID 
 }
 
 func (s *Service) Delete(ctx context.Context, actor accounts.User, spaceID, entryID string) (TrashItem, error) {
+	return s.trashEntry(ctx, actor, spaceID, entryID, true)
+}
+
+func (s *Service) trashEntry(ctx context.Context, actor accounts.User, spaceID, entryID string, auditDelete bool) (TrashItem, error) {
 	_, root, err := s.authorizedSpace(ctx, actor, spaceID, true)
 	if err != nil {
 		return TrashItem{}, err
@@ -508,6 +502,9 @@ func (s *Service) Delete(ctx context.Context, actor accounts.User, spaceID, entr
 	entry, source, err := s.entryPath(ctx, root, spaceID, entryID)
 	if err != nil {
 		return TrashItem{}, err
+	}
+	if isAgentPolicyDirectory(root, spaceID, source) {
+		return TrashItem{}, ErrForbidden
 	}
 	trashID := s.randomID("trash")
 	// Web and Samba recycle share .a-nas-trash/<username>; the Host Agent
@@ -575,7 +572,9 @@ VALUES(?,?,?,?,?,?,?,?,?)`, trashID, entry.ID, spaceID, entry.ParentID, folderOf
 		rollback()
 		return TrashItem{}, err
 	}
-	_ = s.audit(ctx, actor.ID, "file.trashed", spaceID, entry.ID, entry.Name)
+	if auditDelete {
+		_ = s.audit(ctx, actor.ID, "file.trashed", spaceID, entry.ID, entry.Name)
+	}
 	return s.trashItem(ctx, trashID)
 }
 
@@ -693,17 +692,17 @@ FROM trash WHERE space_id = ? AND deleted_by = ? AND deleted_at <= ?`, spaceID, 
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	type expiredItem struct{ id, entryID, relative, name string }
 	var expired []expiredItem
 	for rows.Next() {
 		var item expiredItem
 		if err := rows.Scan(&item.id, &item.entryID, &item.relative, &item.name); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		expired = append(expired, item)
 	}
-	if err := rows.Close(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
 	for _, item := range expired {
@@ -961,6 +960,9 @@ FROM trash t LEFT JOIN entries e ON e.id = t.entry_id WHERE t.id = ?`, trashID).
 	if !withinRoot(root, source) || !withinRoot(root, filepath.Join(parent, targetName)) {
 		return Restored{}, ErrNotFound
 	}
+	if isAgentPolicyDirectory(root, item.SpaceID, filepath.Join(parent, targetName)) {
+		return Restored{}, ErrForbidden
+	}
 	replaced := false
 	if conflict == ConflictReplace {
 		existing := targetName
@@ -1099,7 +1101,7 @@ FROM trash WHERE id = ?`, trashID).Scan(
 // Move moves an entry to a folder of its own space or, given targetSpaceID,
 // of another space. Spaces are separate Btrfs subvolumes with their own root
 // ACLs, so a move between spaces copies the entry, letting the copy inherit
-// the target's ACL, and then removes the original.
+// the target's ACL, and then puts the original in the operator's recycle bin.
 func (s *Service) Move(ctx context.Context, actor accounts.User, entryID, targetSpaceID, targetParentID, targetName string) (Entry, error) {
 	spaceID, err := s.spaceOf(ctx, entryID)
 	if err != nil {
@@ -1121,6 +1123,9 @@ func (s *Service) Move(ctx context.Context, actor accounts.User, entryID, target
 	if err != nil {
 		return Entry{}, err
 	}
+	if isAgentPolicyDirectory(root, spaceID, source) {
+		return Entry{}, ErrForbidden
+	}
 	if targetName == "" {
 		targetName = entry.Name
 	}
@@ -1138,6 +1143,9 @@ func (s *Service) Move(ctx context.Context, actor accounts.User, entryID, target
 		}
 	}
 	target := filepath.Join(parent, targetName)
+	if isAgentPolicyDirectory(root, spaceID, target) {
+		return Entry{}, ErrForbidden
+	}
 	if source == target {
 		return entry, nil
 	}
@@ -1182,32 +1190,19 @@ WHERE space_id = ? AND trashed = 0 AND (relative_path = ? OR substr(relative_pat
 	return moved, err
 }
 
-// moveBetweenSpaces copies an entry into another space and then removes the
+// moveBetweenSpaces copies an entry into another space and then recycles the
 // original, which needs write access to both spaces. The copy gets new IDs.
 func (s *Service) moveBetweenSpaces(ctx context.Context, actor accounts.User, entryID, spaceID, targetSpaceID, targetParentID, targetName string) (Entry, error) {
-	moved, source, err := s.copyEntry(ctx, actor, entryID, spaceID, targetSpaceID, targetParentID, targetName, true)
+	moved, err := s.copyEntry(ctx, actor, entryID, spaceID, targetSpaceID, targetParentID, targetName, true)
 	if err != nil {
 		return Entry{}, err
 	}
 	// The copy is complete, so finish the move even if the client has gone.
-	// If removing fails part way, the next listing drops what was removed.
+	// SMB can still write while copying, even with the service's locks held.
+	// An atomic recycle-bin rename keeps uncopied additions and newer bytes
+	// recoverable instead of permanently removing them with RemoveAll.
 	cleanup := context.WithoutCancel(ctx)
-	done, err := s.change(cleanup, spaceID)
-	if err != nil {
-		return Entry{}, err
-	}
-	defer done()
-	var oldRelative string
-	if err := s.store.db.QueryRowContext(ctx, "SELECT relative_path FROM entries WHERE id = ?", entryID).Scan(&oldRelative); err != nil {
-		return Entry{}, err
-	}
-	if err := s.fs.RemoveAll(cleanup, source); err != nil {
-		return Entry{}, err
-	}
-	if _, err := s.store.db.ExecContext(cleanup, `
-DELETE FROM entries
-WHERE space_id = ? AND trashed = 0 AND (relative_path = ? OR substr(relative_path, 1, length(?) + 1) = ? || '/')`,
-		spaceID, oldRelative, oldRelative, oldRelative); err != nil {
+	if _, err := s.trashEntry(cleanup, actor, spaceID, entryID, false); err != nil {
 		return Entry{}, err
 	}
 	_ = s.audit(cleanup, actor.ID, "file.moved", moved.SpaceID, moved.ID, moved.Name)
@@ -1221,67 +1216,73 @@ func (s *Service) Copy(ctx context.Context, actor accounts.User, entryID, target
 	if err != nil {
 		return Entry{}, err
 	}
-	copied, _, err := s.copyEntry(ctx, actor, entryID, spaceID, targetSpaceID, targetParentID, targetName, false)
+	copied, err := s.copyEntry(ctx, actor, entryID, spaceID, targetSpaceID, targetParentID, targetName, false)
 	if err == nil {
 		_ = s.audit(ctx, actor.ID, "file.copied", copied.SpaceID, copied.ID, copied.Name)
 	}
 	return copied, err
 }
 
-// copyEntry copies an entry into the target space and returns the copy and
-// the original's path. Reading the original is enough when the copy goes to
+// copyEntry copies an entry into the target space and returns the copy.
+// Reading the original is enough when the copy goes to
 // another space and the original stays.
-func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, spaceID, targetSpaceID, targetParentID, targetName string, removingSource bool) (Entry, string, error) {
+func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, spaceID, targetSpaceID, targetParentID, targetName string, removingSource bool) (Entry, error) {
 	if targetSpaceID == "" {
 		targetSpaceID = spaceID
 	}
 	_, sourceRoot, err := s.authorizedSpace(ctx, actor, spaceID, removingSource || targetSpaceID == spaceID)
 	if err != nil {
-		return Entry{}, "", err
+		return Entry{}, err
 	}
 	entry, source, err := s.entryPath(ctx, sourceRoot, spaceID, entryID)
 	if err != nil {
-		return Entry{}, "", err
+		return Entry{}, err
+	}
+	if removingSource && isAgentPolicyDirectory(sourceRoot, spaceID, source) {
+		return Entry{}, ErrForbidden
 	}
 	root := sourceRoot
 	if targetSpaceID != spaceID {
 		if _, root, err = s.authorizedSpace(ctx, actor, targetSpaceID, true); err != nil {
-			return Entry{}, "", err
+			return Entry{}, err
 		}
 	}
 	if targetName == "" {
 		targetName = entry.Name
 	}
 	if err := checkName(targetName, entry.Name); err != nil {
-		return Entry{}, "", err
+		return Entry{}, err
 	}
 	parent, err := s.parentPath(ctx, root, targetSpaceID, targetParentID)
 	if err != nil {
-		return Entry{}, "", err
+		return Entry{}, err
 	}
 	// The original counts too: a copy beside it may not differ only in case.
 	if err := s.refuseCaseTwin(ctx, targetSpaceID, targetParentID, targetName, ""); err != nil {
-		return Entry{}, "", err
+		return Entry{}, err
 	}
 	if entry.Kind == EntryKindDirectory {
 		relative, relErr := filepath.Rel(source, parent)
 		if relErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return Entry{}, "", ErrConflict
+			return Entry{}, ErrConflict
 		}
 	}
 	target := filepath.Join(parent, targetName)
+	if isAgentPolicyDirectory(root, targetSpaceID, target) {
+		return Entry{}, ErrForbidden
+	}
 	if _, err := s.fs.Lstat(ctx, target); err == nil {
-		return Entry{}, "", ErrConflict
+		return Entry{}, ErrConflict
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return Entry{}, "", err
+		return Entry{}, err
 	}
 	// A directory's own size says nothing about its contents.
 	size, err := s.fs.Usage(ctx, source)
 	if err != nil {
-		return Entry{}, "", err
+		return Entry{}, err
 	}
 	if err := s.ensureCapacity(size); err != nil {
-		return Entry{}, "", err
+		return Entry{}, err
 	}
 	temporary := filepath.Join(parent, copyTemporaryPrefix+safeSegment(s.randomID("copy")))
 	// Held from before it exists until it is renamed or removed; one that a
@@ -1290,25 +1291,25 @@ func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, s
 	defer s.holdTemporary(filepath.Base(temporary), false)
 	if err := s.fs.Copy(ctx, source, temporary); err != nil {
 		_ = s.fs.RemoveAll(context.WithoutCancel(ctx), temporary)
-		return Entry{}, "", err
+		return Entry{}, err
 	}
 	// Reconciliation skips the temporary, so the copy becomes a change only
 	// when it takes its name.
 	done, err := s.change(ctx, targetSpaceID)
 	if err != nil {
 		_ = s.fs.RemoveAll(context.WithoutCancel(ctx), temporary)
-		return Entry{}, "", err
+		return Entry{}, err
 	}
 	defer done()
 	if err := s.fs.Rename(ctx, temporary, target); err != nil {
 		_ = s.fs.RemoveAll(context.WithoutCancel(ctx), temporary)
 		if errors.Is(err, fs.ErrExist) {
-			return Entry{}, "", ErrConflict
+			return Entry{}, ErrConflict
 		}
-		return Entry{}, "", err
+		return Entry{}, err
 	}
 	copied, err := s.registerTree(ctx, targetSpaceID, targetParentID, root, target)
-	return copied, source, err
+	return copied, err
 }
 
 // registerTree catalogs a file or folder that A-NAS has just put at target,
@@ -1378,6 +1379,9 @@ func (s *Service) createDirectory(ctx context.Context, actor accounts.User, spac
 		return Entry{}, err
 	}
 	target := filepath.Join(parentPath, name)
+	if isAgentPolicyDirectory(root, spaceID, target) {
+		return Entry{}, ErrForbidden
+	}
 	if !withinRoot(root, target) {
 		return Entry{}, ErrInvalidName
 	}
@@ -1422,6 +1426,9 @@ func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, pare
 		return Entry{}, err
 	}
 	target := filepath.Join(parentPath, name)
+	if isAgentPolicyDirectory(root, spaceID, target) {
+		return Entry{}, ErrForbidden
+	}
 	if !withinRoot(root, target) {
 		return Entry{}, ErrInvalidName
 	}
@@ -1931,13 +1938,7 @@ func (s *Service) audit(ctx context.Context, actorID, action, spaceID, resourceI
 	return err
 }
 
-func (s *Service) randomID(prefix string) string {
-	value := make([]byte, 16)
-	if _, err := io.ReadFull(s.random, value); err != nil {
-		panic(err)
-	}
-	return prefix + ":" + hex.EncodeToString(value)
-}
+func (s *Service) randomID(prefix string) string { return prefix + ":" + rand.Text() }
 
 func validName(name string) bool {
 	name = strings.TrimSpace(name)
@@ -1963,4 +1964,4 @@ func safeSegment(value string) string {
 	return builder.String()
 }
 
-func formatTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }

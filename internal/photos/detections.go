@@ -162,12 +162,12 @@ func (s *Service) loadDetections(ctx context.Context, model string) (map[string]
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	scores := make(map[string][]classScore)
 	for rows.Next() {
 		var objectID string
 		var encoded []byte
 		if err := rows.Scan(&objectID, &encoded); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		boxes, err := decodeBoxes(encoded)
@@ -186,7 +186,7 @@ func (s *Service) enqueueDetection(ctx context.Context, tx *sql.Tx, objectID str
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT ?, ?, 'pending', ?, ?
-WHERE NOT EXISTS (SELECT 1 FROM detections WHERE object_id = ? AND derivation = ?) AND `+notVideo("?")+`
+WHERE NOT EXISTS (SELECT 1 FROM detections WHERE object_id = ? AND derivation = ?) AND `+inLocalAI("?")+`
 ON CONFLICT(object_id, derivation) DO NOTHING`,
 		objectID, detectionDerivation, now, now, objectID, detectionDerivation, objectID)
 	return err

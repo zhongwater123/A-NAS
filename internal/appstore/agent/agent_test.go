@@ -208,3 +208,55 @@ func TestSystemIdentitiesReadTheHostsAccounts(t *testing.T) {
 		t.Fatalf("Unused(0) = %v, %v; root holds it", unused, err)
 	}
 }
+
+func TestInstallPreparationRoundTripUsesTheCreatedAccount(t *testing.T) {
+	store, err := fake.New(time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.Stop)
+	accounts := fakeIdentities{accounts: map[string]appstore.Identity{}, users: map[int]bool{}, groups: map[int]string{}}
+	client := agent.NewClient(serve(t, agent.NewHandler(store, accounts, discard)))
+	ctx := context.Background()
+	reserved := appstore.Identity{Username: "app-navidrome", UID: 30004, GID: 30004}
+	plan, err := client.Plan(ctx, "navidrome", reserved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := client.ReserveInstall(ctx, "navidrome", plan.Digest, reserved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.CommitInstall(ctx, "navidrome", reservation.Token, reserved); !errors.Is(err, appstore.ErrUnavailable) {
+		t.Fatalf("commit without Linux account: %v", err)
+	}
+	wrong := reserved
+	wrong.UID++
+	wrong.GID++
+	accounts.accounts["navidrome"] = wrong
+	if _, err := client.CommitInstall(ctx, "navidrome", reservation.Token, reserved); !errors.Is(err, appstore.ErrPlanChanged) {
+		t.Fatalf("commit with changed Linux account: %v", err)
+	}
+	accounts.accounts["navidrome"] = reserved
+	if _, err := client.CommitInstall(ctx, "navidrome", reservation.Token, wrong); err != nil {
+		t.Fatalf("agent must use its account, not caller identity: %v", err)
+	}
+	store.Wait()
+
+	identity := appstore.Identity{Username: "app-memos", UID: 30005, GID: 30005}
+	plan, err = client.Plan(ctx, "memos", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, err = client.ReserveInstall(ctx, "memos", plan.Digest, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.CancelInstall(ctx, "navidrome", reservation.Token); !errors.Is(err, appstore.ErrPlanChanged) {
+		t.Fatalf("cancel another app's reservation: %v", err)
+	}
+	if err := client.CancelInstall(ctx, "memos", reservation.Token); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+}

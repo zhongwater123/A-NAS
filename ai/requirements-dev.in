@@ -1,0 +1,13 @@
+# Development tools for ai/ and its runtime, resolved for every platform into
+# requirements-dev.txt by
+#   scripts/build-ai-runtime.sh --lock
+# CI installs them with
+#   python3 -m pip install --require-hashes --only-binary=:all: -r ai/requirements-dev.txt
+#
+# Ruff for `make ai-lint`, which refuses another version: another may judge
+# differently.
+ruff==0.17.1
+# Known vulnerabilities in the runtime's packages (`make vuln-check`).
+pip-audit==2.10.1
+# Resolves the lock files and installs the runtime (scripts/build-ai-runtime.sh).
+uv==0.13.1

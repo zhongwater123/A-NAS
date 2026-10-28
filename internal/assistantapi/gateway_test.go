@@ -45,7 +45,7 @@ func newHarness(t *testing.T) *harness {
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := WithUser(accounts.WithSessionToken(r.Context(), "alice-session"), accounts.User{ID: "u-alice", Username: "alice"})
+		ctx := accounts.WithUser(accounts.WithSessionToken(r.Context(), "alice-session"), accounts.User{ID: "u-alice", Username: "alice"})
 		api.ServeHTTP(w, r.WithContext(ctx))
 	}))
 	t.Cleanup(server.Close)

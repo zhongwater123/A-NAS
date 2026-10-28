@@ -76,7 +76,6 @@ type Spaces interface {
 
 type Options struct {
 	Now    func() time.Time
-	Random io.Reader
 	Logger *slog.Logger
 	// Worker reads and decodes the formats browsers cannot play. Without
 	// one they are indexed from their names and cannot be played.
@@ -90,7 +89,6 @@ type Service struct {
 	spaces  Spaces
 	worker  mediaworker.Worker
 	now     func() time.Time
-	random  io.Reader
 	logger  *slog.Logger
 	version atomic.Int64
 
@@ -109,14 +107,11 @@ func New(store *Store, coverRoot string, fileService Files, spaces Spaces, optio
 	base, cancel := context.WithCancel(context.Background())
 	service := &Service{
 		store: store, covers: coverStore{root: coverRoot}, files: fileService, spaces: spaces, worker: options.Worker,
-		now: options.Now, random: options.Random, logger: options.Logger,
+		now: options.Now, logger: options.Logger,
 		base: base, cancel: cancel, work: make(chan struct{}, 1), scans: map[string]*scanJob{},
 	}
 	if service.now == nil {
 		service.now = time.Now
-	}
-	if service.random == nil {
-		service.random = rand.Reader
 	}
 	if service.logger == nil {
 		service.logger = slog.Default()
@@ -689,20 +684,19 @@ func (s *Service) Playlists(ctx context.Context, actor accounts.User) ([]Playlis
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	items := []Playlist{}
 	for rows.Next() {
 		var item Playlist
 		var created, updated string
 		if err := rows.Scan(&item.ID, &item.Name, &created, &updated); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 		item.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
 		items = append(items, item)
 	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
 	for index := range items {
@@ -772,10 +766,7 @@ func (s *Service) CreatePlaylist(ctx context.Context, actor accounts.User, name 
 	if err != nil || !validTrackIDs(trackIDs) {
 		return Playlist{}, ErrInvalid
 	}
-	id, err := s.randomID("playlist")
-	if err != nil {
-		return Playlist{}, err
-	}
+	id := s.randomID("playlist")
 	now := formatTime(s.now())
 	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -889,10 +880,4 @@ func (s *Service) DeletePlaylist(ctx context.Context, actor accounts.User, id st
 	return nil
 }
 
-func (s *Service) randomID(prefix string) (string, error) {
-	value := make([]byte, 16)
-	if _, err := io.ReadFull(s.random, value); err != nil {
-		return "", err
-	}
-	return prefix + ":" + hex.EncodeToString(value), nil
-}
+func (s *Service) randomID(prefix string) string { return prefix + ":" + rand.Text() }

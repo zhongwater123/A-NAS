@@ -9,9 +9,19 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-import { CatalogApp } from "../appsApi";
+import { CatalogApp } from "./api";
+import styles from "./appcenter.module.css";
+import {
+  Category,
+  categories,
+  categoryOf,
+  installFailed,
+  otherCategory,
+  stateText,
+  uninstallFailed,
+  useElapsed,
+} from "./model";
 import { AppAction, AppIcon } from "./parts";
-import { Category, categories, categoryOf, installFailed, otherCategory, stateText, useElapsed } from "./model";
 
 interface BrowseProps {
   onShow: (app: CatalogApp) => void;
@@ -34,16 +44,16 @@ export function Discover({
     .filter((shelf) => shelf.apps.length > 0);
   const art = [...apps].sort((a, b) => rank(a) - rank(b)).slice(0, 5);
   return (
-    <div className="ac-page">
-      <section className="ac-banner" aria-label="应用中心简介">
-        <div className="ac-banner-text">
-          <p className="ac-eyebrow">发现</p>
+    <div className={styles.acPage}>
+      <section className={styles.acBanner} aria-label="应用中心简介">
+        <div className={styles.acBannerText}>
+          <p className={styles.acEyebrow}>发现</p>
           <h2>给 NAS 装上好用的应用</h2>
           <p>
             {apps.length} 个应用均经过 A-NAS
             安全审查。安装前列出它会用到的文件夹和端口，确认后才执行；每个应用以独立账号运行，卸载时保留数据。
           </p>
-          <ul className="ac-banner-points">
+          <ul className={styles.acBannerPoints}>
             <li>
               <ShieldCheck />
               安装前可审查
@@ -58,24 +68,24 @@ export function Discover({
             </li>
           </ul>
         </div>
-        <div className="ac-banner-art" aria-hidden="true">
+        <div className={styles.acBannerArt} aria-hidden="true">
           {art.map((app, index) => (
-            <span key={app.id} className={`ac-banner-icon i${index}`}>
+            <span key={app.id} className={`${styles.acBannerIcon} ${styles[`i${index}`] ?? ""}`}>
               <AppIcon app={app} size="lg" />
             </span>
           ))}
         </div>
       </section>
       {shelves.map(({ category, apps: shelf }) => (
-        <section key={category.id} className="ac-shelf" aria-label={category.label}>
-          <header className="ac-shelf-head">
+        <section key={category.id} className={styles.acShelf} aria-label={category.label}>
+          <header className={styles.acShelfHead}>
             <CategoryTile category={category} />
             <div>
               <h3>{category.label}</h3>
               <p>{category.blurb}</p>
             </div>
             {shelf.length > shelfSize && category.id && (
-              <button className="ac-link-button" onClick={() => onCategory(category.id)}>
+              <button className={styles.acLinkButton} onClick={() => onCategory(category.id)}>
                 全部 {shelf.length} 个<ChevronRight />
               </button>
             )}
@@ -99,8 +109,8 @@ export function CategoryPage({
   onInstall,
 }: BrowseProps & { category: Category; apps: CatalogApp[] }) {
   return (
-    <div className="ac-page">
-      <header className="ac-page-head">
+    <div className={styles.acPage}>
+      <header className={styles.acPageHead}>
         <CategoryTile category={category} size="lg" />
         <div>
           <h2>{category.label}</h2>
@@ -122,8 +132,8 @@ export function SearchResults({
   onBrowse,
 }: BrowseProps & { query: string; apps: CatalogApp[]; onBrowse: () => void }) {
   return (
-    <div className="ac-page">
-      <header className="ac-page-head">
+    <div className={styles.acPage}>
+      <header className={styles.acPageHead}>
         <div>
           <h2>“{query.trim()}”的搜索结果</h2>
           <p>{apps.length > 0 ? `找到 ${apps.length} 个应用` : "按名称、简介或分类搜索"}</p>
@@ -132,13 +142,13 @@ export function SearchResults({
       {apps.length > 0 ? (
         <AppGrid apps={apps} showCategory onShow={onShow} onInstall={onInstall} />
       ) : (
-        <div className="ac-empty">
-          <span className="ac-empty-art">
+        <div className={styles.acEmpty}>
+          <span className={styles.acEmptyArt}>
             <Search />
           </span>
           <h3>没有匹配的应用</h3>
           <p>换个关键词试试，或者按分类浏览全部应用。</p>
-          <button className="ac-btn" onClick={onBrowse}>
+          <button className={styles.acBtn} onClick={onBrowse}>
             <Compass />
             浏览全部应用
           </button>
@@ -155,9 +165,9 @@ export function Installed({
   onBrowse,
 }: BrowseProps & { apps: CatalogApp[]; onBrowse: () => void }) {
   return (
-    <div className="ac-page">
-      <header className="ac-page-head">
-        <span className="ac-tile lg installed">
+    <div className={styles.acPage}>
+      <header className={styles.acPageHead}>
+        <span className={`${styles.acTile} ${styles.lg} ${styles.installed}`}>
           <PackageCheck />
         </span>
         <div>
@@ -168,19 +178,19 @@ export function Installed({
         </div>
       </header>
       {apps.length > 0 ? (
-        <div className="ac-list" role="list">
+        <div className={styles.acList} role="list">
           {apps.map((app) => (
             <InstalledRow key={app.id} app={app} onShow={onShow} onInstall={onInstall} />
           ))}
         </div>
       ) : (
-        <div className="ac-empty">
-          <span className="ac-empty-art">
+        <div className={styles.acEmpty}>
+          <span className={styles.acEmptyArt}>
             <PackageOpen />
           </span>
           <h3>还没有安装应用</h3>
           <p>在“发现”中挑选应用，查看安装计划后一键安装。</p>
-          <button className="ac-btn primary" onClick={onBrowse}>
+          <button className={`${styles.acBtn} primary`} onClick={onBrowse}>
             <Compass />
             去发现应用
           </button>
@@ -197,19 +207,23 @@ function InstalledRow({ app, onShow, onInstall }: BrowseProps & { app: CatalogAp
   const elapsed = useElapsed(app.job?.startedAt, app.job?.state === "running");
   const [tone, line] = statusLine(app, elapsed);
   return (
-    <article className="ac-row" role="listitem">
+    <article className={styles.acRow} role="listitem">
       <AppIcon app={app} size="sm" />
-      <div className="ac-row-text">
-        <button className="ac-card-link" aria-label={`${app.title}，${stateText(app)}`} onClick={() => onShow(app)}>
+      <div className={styles.acRowText}>
+        <button
+          className={styles.acCardLink}
+          aria-label={`${app.title}，${stateText(app)}`}
+          onClick={() => onShow(app)}
+        >
           {app.title}
         </button>
-        <small className={`ac-status ${tone}`}>
+        <small className={`${styles.acStatus} ${styles[tone] ?? ""}`}>
           <i />
           {line}
         </small>
       </div>
       <AppAction app={app} onInstall={onInstall} />
-      <ChevronRight className="ac-row-chevron" aria-hidden="true" />
+      <ChevronRight className={styles.acRowChevron} aria-hidden="true" />
     </article>
   );
 }
@@ -228,7 +242,7 @@ function statusLine(app: CatalogApp, elapsed?: string): ["ok" | "warn" | "busy" 
     case "uninstalling":
       return ["busy", "正在卸载…"];
     default:
-      return ["error", "安装失败，打开查看原因"];
+      return ["error", uninstallFailed(app) ? "卸载未完成，打开重试" : "安装失败，打开查看原因"];
   }
 }
 
@@ -239,7 +253,7 @@ function AppGrid({
   onInstall,
 }: BrowseProps & { apps: CatalogApp[]; showCategory?: boolean }) {
   return (
-    <div className="ac-grid" role="list">
+    <div className={styles.acGrid} role="list">
       {apps.map((app) => (
         <AppCard key={app.id} app={app} showCategory={showCategory} onShow={onShow} onInstall={onInstall} />
       ))}
@@ -248,24 +262,30 @@ function AppGrid({
 }
 
 function AppCard({ app, showCategory, onShow, onInstall }: BrowseProps & { app: CatalogApp; showCategory?: boolean }) {
-  const failed = installFailed(app);
+  const failed = installFailed(app) || uninstallFailed(app);
   const partial = app.state === "installed" && app.running < app.total;
   const meta = failed
-    ? "上次安装失败"
+    ? uninstallFailed(app)
+      ? "卸载未完成"
+      : "上次安装失败"
     : partial
       ? `${app.running}/${app.total} 个容器运行中`
       : showCategory
         ? categoryOf(app).label
         : undefined;
   return (
-    <article className="ac-card" role="listitem">
+    <article className={styles.acCard} role="listitem">
       <AppIcon app={app} />
-      <div className="ac-card-text">
-        <button className="ac-card-link" aria-label={`${app.title}，${stateText(app)}`} onClick={() => onShow(app)}>
+      <div className={styles.acCardText}>
+        <button
+          className={styles.acCardLink}
+          aria-label={`${app.title}，${stateText(app)}`}
+          onClick={() => onShow(app)}
+        >
           {app.title}
         </button>
         <p>{app.tagline || app.description}</p>
-        {meta && <small className={failed ? "danger" : partial ? "warn" : undefined}>{meta}</small>}
+        {meta && <small className={failed ? styles.danger : partial ? styles.warn : undefined}>{meta}</small>}
       </div>
       <AppAction app={app} onInstall={onInstall} />
     </article>
@@ -275,7 +295,10 @@ function AppCard({ app, showCategory, onShow, onInstall }: BrowseProps & { app: 
 export function CategoryTile({ category, size }: { category: Category; size?: "sm" | "lg" }) {
   const Icon = category.icon;
   return (
-    <span className={`ac-tile ${size ?? ""} ${category.id || "other"}`} aria-hidden="true">
+    <span
+      className={`${styles.acTile} ${styles[size ?? ""] ?? ""} ${styles[category.id || "other"] ?? ""}`}
+      aria-hidden="true"
+    >
       <Icon />
     </span>
   );

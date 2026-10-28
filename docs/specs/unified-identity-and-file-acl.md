@@ -89,7 +89,7 @@
 - 数据卷离线时文件代理拒绝所有文件操作，不在系统盘创建替代目录。
 - UID 永不复用；删除账号后其 UID 仍保留。
 - 账号名不能修改：个人空间目录、回收站目录、Samba 个人共享与身份注册表都以账号名为键。删除账号（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）需要同时决定账号名是否也像 UID 一样永不复用。
-- 禁用账号会禁用 Samba 凭据并断开其已建立的 SMB 会话；管理员重置已禁用账号的密码不会重新启用该账号。禁用先在同一事务中改状态、删除全部会话并写审计，再停用 SMB：Host Agent 失败时网页登录已经结束，接口返回 `503 smb_disable_pending`；再次禁用只重试 SMB，产品服务启动时的身份同步也会停用它。启动同步失败时从 2 秒起加倍间隔重试，最长 15 分钟一次，直到成功或服务停止。
+- 禁用账号会禁用 Samba 凭据并断开其已建立的 SMB 会话，同时停止并屏蔽该账号的助手、API/socket、定时任务与复盘单元；管理员重置已禁用账号的密码不会重新启用该账号。禁用先在同一事务中改状态、删除全部会话并写审计，再停用宿主机服务：Host Agent 未能停用 SMB 或助手时，网页登录已经结束，接口保留 `503 smb_disable_pending` 错误码；再次禁用重试宿主机步骤，产品服务启动时的身份同步也会补做停用。启动同步失败时从 2 秒起加倍间隔重试，最长 15 分钟一次，直到成功或服务停止。
 
 ## 验收证据
 
@@ -105,4 +105,4 @@
 - 规格：[基础存储与共享](basic-storage-and-sharing.md)、[Web 桌面终端](web-terminal.md)
 - 问题：[issue #9](https://github.com/zhongwater123/A-NAS/issues/9)、[成员账户架构审查 #98](https://github.com/zhongwater123/A-NAS/issues/98)
 - 调查：[smbstatus 的告警让禁用与身份同步失败](../investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md)
-- 代码：[账号名与密码规则](../../internal/accounts/service.go)、[`rules_test.go`](../../internal/accounts/rules_test.go)、[前端规则](../../web/src/accountRules.ts)、[Host Agent 的 SMB 密码检查](../../internal/hostops/linux/executor.go)
+- 代码：[账号名与密码规则](../../internal/accounts/service.go)、[`rules_test.go`](../../internal/accounts/rules_test.go)、[前端规则](../../web/src/auth/accountRules.ts)、[Host Agent 的 SMB 密码检查](../../internal/hostops/linux/executor.go)

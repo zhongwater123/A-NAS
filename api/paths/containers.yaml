@@ -14,6 +14,8 @@
           application/json:
             schema:
               $ref: "../components/containers.yaml#/schemas/ContainerSnapshotResponse"
+      "502":
+        $ref: "../components/containers.yaml#/responses/ContainerEngineError"
       "503":
         $ref: "../components/containers.yaml#/responses/ContainersUnavailable"
       "405":

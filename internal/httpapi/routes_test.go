@@ -2,14 +2,12 @@ package httpapi_test
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 
@@ -26,11 +24,13 @@ import (
 // the guard never lets a request reach, and an administrator's session.
 func routedProduct(t *testing.T) (http.Handler, *http.Cookie) {
 	t.Helper()
-	product, session := routedProductSession(t, false)
-	return product, &http.Cookie{Name: "anas_session", Value: session.Token}
+	product, owner, _ := routedSessions(t)
+	return product, &http.Cookie{Name: "anas_session", Value: owner.Token}
 }
 
-func routedProductSession(t *testing.T, member bool) (http.Handler, accounts.Session) {
+// routedSessions is routedProduct with the sessions of an administrator and
+// of a member.
+func routedSessions(t *testing.T) (http.Handler, accounts.Session, accounts.Session) {
 	t.Helper()
 	ctx := context.Background()
 	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
@@ -42,18 +42,16 @@ func routedProductSession(t *testing.T, member bool) (http.Handler, accounts.Ses
 	if _, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple"); err != nil {
 		t.Fatal(err)
 	}
-	session, err := service.Authenticate(signedInDirectly(ctx), "owner", "correct horse battery staple")
+	owner, err := service.Authenticate(signedInDirectly(ctx), "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if member {
-		if _, err := service.CreateMember(ctx, session.User, "member", "correct horse battery staple"); err != nil {
-			t.Fatal(err)
-		}
-		session, err = service.Authenticate(signedInDirectly(ctx), "member", "correct horse battery staple")
-		if err != nil {
-			t.Fatal(err)
-		}
+	if _, err := service.CreateMember(ctx, owner.User, "member", "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	member, err := service.Authenticate(signedInDirectly(ctx), "member", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
 	}
 	unreached := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("%s %s passed the guard", r.Method, r.URL.Path)
@@ -65,87 +63,27 @@ func routedProductSession(t *testing.T, member bool) (http.Handler, accounts.Ses
 		Shares: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
-	return product, session
+	return product, owner, member
 }
 
 var pathParameter = regexp.MustCompile(`\{[^}]+\}`)
 
-// Match the actual mux-selected route, including an Admin mount. Checking
-// every operation in both directions catches either a weakened route or a
-// missing specification marker, without trusting one as the other's source.
-func TestAdministratorOperationsMatchSpecificationAndRejectMembers(t *testing.T) {
-	product, member := routedProductSession(t, true)
-	routes := map[string]apiroute.Route{}
-	for _, route := range httpapi.Routes(product) {
-		pattern := route.Pattern
-		if route.Method != "" {
-			pattern = route.Method + " " + pattern
-		}
-		routes[pattern] = route
-	}
-	checked := 0
-	for path, item := range openapitest.Document(t).Paths.Map() {
-		for method, operation := range item.Operations() {
-			t.Run(method+" "+path, func(t *testing.T) {
-				request := httptest.NewRequest(method, "http://127.0.0.1:8080"+pathParameter.ReplaceAllString(path, "x"), strings.NewReader("{}"))
-				pattern := httpapi.RoutePattern(product, request)
-				route, ok := routes[pattern]
-				if !ok {
-					t.Fatalf("no route for operation %s", operation.OperationID)
-				}
-				marker, declared := operation.Extensions["x-anas-posture"]
-				if declared && marker != "admin" {
-					t.Fatalf("invalid administrator posture: %v", marker)
-				}
-				if declared != (route.Posture == apiroute.Admin) {
-					t.Fatalf("specification admin = %v, route %s is %s", declared, pattern, route.Posture)
-				}
-				if !declared {
-					return
-				}
-				if operation.Security != nil && len(*operation.Security) == 0 {
-					t.Fatal("administrator operation declared public")
-				}
-				checked++
-				request.Header.Set("Content-Type", "application/json")
-				request.Header.Set("X-CSRF-Token", member.CSRFToken)
-				request.AddCookie(&http.Cookie{Name: "anas_session", Value: member.Token})
-				recorder := httptest.NewRecorder()
-				product.ServeHTTP(recorder, request)
-				var body struct {
-					Error struct {
-						Code string `json:"code"`
-					} `json:"error"`
-				}
-				if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-					t.Fatal(err)
-				}
-				if recorder.Code != http.StatusForbidden || body.Error.Code != "forbidden" {
-					t.Fatalf("member request = %d %s, want 403 forbidden", recorder.Code, recorder.Body.String())
-				}
-			})
-		}
-	}
-	if checked == 0 {
-		t.Fatal("no administrator operations checked")
-	}
-	t.Logf("checked %d administrator operations with a member session and valid CSRF token", checked)
+// routeKey names an operation or route by its method and its path with
+// every parameter left anonymous.
+func routeKey(method, path string) string {
+	return method + " " + pathParameter.ReplaceAllString(path, "{}")
 }
 
-// Every operation in the specification has a route, and the guard answers
-// for its posture before any handler runs: 401 without a session cookie, and
-// 403 without the CSRF token for anything but a read (#192).
+// Every operation in the specification has a route, also beneath the
+// prefix of a mounted API (#273), and the guard answers for its posture
+// before any handler runs: 401 without a session cookie, and 403 without the
+// CSRF token for anything but a read (#192).
 func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 	product, cookie := routedProduct(t)
 	document := openapitest.Document(t)
-	errorCode := func(recorder *httptest.ResponseRecorder) string {
-		var body struct {
-			Error struct {
-				Code string `json:"code"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(recorder.Body.Bytes(), &body)
-		return body.Error.Code
+	routed := map[string]bool{}
+	for _, route := range httpapi.Routes(product) {
+		routed[routeKey(route.Method, route.Pattern)] = true
 	}
 	operations := 0
 	for path, item := range document.Paths.Map() {
@@ -153,7 +91,7 @@ func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 		for method, operation := range item.Operations() {
 			operations++
 			name := method + " " + path
-			if pattern := httpapi.RoutePattern(product, httptest.NewRequest(method, target, nil)); pattern == "/" {
+			if pattern := httpapi.RoutePattern(product, httptest.NewRequest(method, target, nil)); pattern == "/" || !routed[routeKey(method, path)] {
 				t.Errorf("%s has no route", name)
 				continue
 			}
@@ -162,7 +100,7 @@ func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 			}
 			recorder := httptest.NewRecorder()
 			product.ServeHTTP(recorder, httptest.NewRequest(method, target, nil))
-			if recorder.Code != http.StatusUnauthorized || errorCode(recorder) != "authentication_required" {
+			if recorder.Code != http.StatusUnauthorized || answerCode(recorder) != "authentication_required" {
 				t.Errorf("%s without a session = %d %s, want 401 authentication_required", name, recorder.Code, recorder.Body.String())
 			}
 			if apiroute.Safe(method) {
@@ -173,7 +111,7 @@ func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 			request.AddCookie(cookie)
 			recorder = httptest.NewRecorder()
 			product.ServeHTTP(recorder, request)
-			if recorder.Code != http.StatusForbidden || errorCode(recorder) != "csrf_failed" {
+			if recorder.Code != http.StatusForbidden || answerCode(recorder) != "csrf_failed" {
 				t.Errorf("%s without the CSRF token = %d %s, want 403 csrf_failed", name, recorder.Code, recorder.Body.String())
 			}
 		}
@@ -183,30 +121,25 @@ func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 	}
 }
 
-// Every route the product registers is in the specification, and the routes
-// that need no session are exactly the operations without security.
+// Every route the product registers is in the specification, also each
+// operation a mounted API serves (#273); the routes that need no session are
+// exactly the operations without security, and the administrator's routes
+// exactly those marked x-anas-posture: admin (#270).
 func TestEveryRouteIsSpecifiedWithItsPosture(t *testing.T) {
 	product, _ := routedProduct(t)
 	document := openapitest.Document(t)
 	specified := map[string]*openapi3.Operation{}
-	var paths []string
 	for path, item := range document.Paths.Map() {
-		paths = append(paths, path)
 		for method, operation := range item.Operations() {
-			specified[method+" "+pathParameter.ReplaceAllString(path, "{}")] = operation
+			specified[routeKey(method, path)] = operation
 		}
 	}
-	for _, route := range httpapi.Routes(product) {
-		if route.Method == "" {
-			// A mounted API serves the operations beneath its prefix.
-			prefix := strings.TrimSuffix(route.Pattern, "/")
-			if !slices.ContainsFunc(paths, func(path string) bool { return path == prefix || strings.HasPrefix(path, prefix+"/") }) {
-				t.Errorf("no operation is specified beneath %s", route.Pattern)
-			}
-			continue
-		}
-		key := route.Method + " " + pathParameter.ReplaceAllString(route.Pattern, "{}")
-		operation, ok := specified[key]
+	routes := httpapi.Routes(product)
+	if len(routes) < 200 {
+		t.Fatalf("expanded only %d routes", len(routes))
+	}
+	for _, route := range routes {
+		operation, ok := specified[routeKey(route.Method, route.Pattern)]
 		if !ok {
 			t.Errorf("route %s %s is not in the specification", route.Method, route.Pattern)
 			continue
@@ -215,5 +148,38 @@ func TestEveryRouteIsSpecifiedWithItsPosture(t *testing.T) {
 		if public != (route.Posture == apiroute.Public) {
 			t.Errorf("route %s %s is %s, but the specification says public = %v", route.Method, route.Pattern, route.Posture, public)
 		}
+		marker, marked := operation.Extensions["x-anas-posture"]
+		if marked && marker != "admin" {
+			t.Errorf("operation %s %s has x-anas-posture %v; the only value is admin", route.Method, route.Pattern, marker)
+		}
+		if marked != (route.Posture == apiroute.Admin) {
+			t.Errorf("route %s %s is %s, but the specification says admin = %v", route.Method, route.Pattern, route.Posture, marked)
+		}
+	}
+}
+
+// A member is refused every administrator route before its handler runs,
+// even with a valid CSRF token: one posture changed by mistake fails here,
+// whatever the service behind it checks (#270).
+func TestMembersAreRefusedEveryAdministratorRoute(t *testing.T) {
+	product, _, member := routedSessions(t)
+	checked := 0
+	for _, route := range httpapi.Routes(product) {
+		if route.Posture != apiroute.Admin {
+			continue
+		}
+		checked++
+		request := httptest.NewRequest(route.Method, "http://127.0.0.1:8080"+pathParameter.ReplaceAllString(route.Pattern, "x"), strings.NewReader("{}"))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-CSRF-Token", member.CSRFToken)
+		request.AddCookie(&http.Cookie{Name: "anas_session", Value: member.Token})
+		recorder := httptest.NewRecorder()
+		product.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusForbidden || answerCode(recorder) != "forbidden" {
+			t.Errorf("member %s %s = %d %s, want 403 forbidden", route.Method, route.Pattern, recorder.Code, recorder.Body.String())
+		}
+	}
+	if checked < 20 {
+		t.Fatalf("checked only %d administrator routes", checked)
 	}
 }

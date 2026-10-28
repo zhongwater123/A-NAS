@@ -1,7 +1,7 @@
 # AI 助手
 
 状态：draft（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 已在开发机 spike 中验证；窗口经产品服务与会话闸门使用 `hermes serve`，对话、回合内审批卡片与多窗口已在开发机原型上跑通；待评审）
-更新时间：2026-10-16
+更新时间：2026-10-27
 
 ## 目标
 
@@ -73,7 +73,7 @@
 ### 查看与清除助手记住的内容
 
 - When：成员打开助手的“记忆”。
-- Then：看到助手记住的每一条（包括它对成员本人的记录）和它自己创建的技能，可以查看全文、逐条删除或全部清除；清除后的新对话不再带入这些内容。删除的技能移进归档，可以找回，不再进入对话。系统附带的技能不在其中，也不能删除。对话不属于“记忆”：继续以前的对话时，那个对话开始时的记忆仍在其中，助手也能从以前的对话中检索到相关内容；所以页面写明只有同时删除全部对话，清除才彻底，全部清除时可以选择一并删除（[研究](../research/hermes-agent-runtime.md#记忆与自建技能1142026-10-15开发机)）。
+- Then：看到助手记住的每一条（包括它对成员本人的记录）和它自己创建的技能，可以查看全文、逐条删除或全部清除；清除后的新对话不再带入这些内容。删除的技能移进归档，可以找回，不再进入对话。系统附带的技能不在其中，也不能删除。对话不属于“记忆”：继续以前的对话时，那个对话开始时的记忆仍在其中，助手也能从以前的对话中检索到相关内容；所以页面写明只有同时删除全部对话，清除才彻底，全部清除时可以选择一并删除（[研究](../research/hermes-agent-runtime.md#记忆与自建技能)）。
 
 ### 读取与搜索
 
@@ -215,7 +215,7 @@
 
 - Given：成员问“你看看我屏幕上这张图是什么”“设置里那个红色的提示说的是什么”，或快照里的文字说明不了的内容（照片与图片里是什么、颜色、布局、窗口叠在哪里）。
 - When：VNAS 处理这句话。
-- Then：VNAS 用 Hermes 的 `browser_vision` 看成员桌面此刻的画面：成员的 VNAS 窗口把当前的 WebOS 页面画成一张 PNG（与“问题反馈”的截图是同一张画法，最长边不超过 1600 像素，不含 VNAS 自己的窗口），交给看图模型，对话里留下的是模型对画面的文字描述。要点击画面上看到的东西时，VNAS 可以让画面上的每个控件标出它的编号（如 `e12`），再按编号点击。“处理过程”里显示“看桌面画面”和它问的问题（2026-10-21 用户决定开放，[研究](../research/hermes-agent-runtime.md#让-vnas-操作-webos2026-10-20开发机)）。
+- Then：VNAS 用 Hermes 的 `browser_vision` 看成员桌面此刻的画面：成员的 VNAS 窗口把当前的 WebOS 页面画成一张 PNG（与“问题反馈”的截图是同一张画法，最长边不超过 1600 像素，不含 VNAS 自己的窗口），交给看图模型，对话里留下的是模型对画面的文字描述。要点击画面上看到的东西时，VNAS 可以让画面上的每个控件标出它的编号（如 `e12`），再按编号点击。“处理过程”里显示“看桌面画面”和它问的问题（2026-10-21 用户决定开放，[研究](../research/hermes-agent-runtime.md#让-vnas-操作-webos)）。
 - 画面是页面按当前状态重新画出来的，不是屏幕录制：窗口、打开的菜单、内容、滚动位置与正在播放的视频画面都与成员看到的一致；第三方应用的内嵌页面可能是空白。
 - 试用期间画面发到云端模型，只做可行性验证；“VNAS 不能查看”的区域在画面里不遮挡（用户 2026-10-21 决定：以后接入本地算力，此时不考虑这方面的隐私）。
 
@@ -260,7 +260,7 @@
 
 - Given：Hermes 的后台复盘在一轮回答之后改了助手的记忆或技能。
 - When：成员的窗口还开着，或已经关闭。
-- Then：窗口开着时，这一轮下方显示 Hermes 的说明（例如“自我改进回顾：记忆已更新”）和“查看记忆”，新一轮开始时消失；窗口已关闭时复盘照常跑完，产品服务为此最多再保持 2 分钟连接，改动在“记忆”中可见。复盘只能写记忆与技能、读文件，不能运行命令、写文件或提交更改（[研究](../research/hermes-agent-runtime.md#后台复盘与闲时整理2026-10-16开发机)）。每周一次，在助手未运行时，Hermes 把 30 天没用的自建技能移入归档，与删除的技能一样不再进入对话。
+- Then：窗口开着时，这一轮下方显示 Hermes 的说明（例如“自我改进回顾：记忆已更新”）和“查看记忆”，新一轮开始时消失；窗口已关闭时复盘照常跑完，产品服务为此最多再保持 2 分钟连接，改动在“记忆”中可见。复盘只能写记忆与技能、读文件，不能运行命令、写文件或提交更改（[研究](../research/hermes-agent-runtime.md#后台复盘与闲时整理)）。每周一次，在助手未运行时，Hermes 把 30 天没用的自建技能移入归档，与删除的技能一样不再进入对话。
 
 ## 边界与失败
 
@@ -272,36 +272,38 @@
 - 窗口只显示中文的失败说明，按错误码选择（实例无响应、正忙、对话不存在、重名、更改已处理等）；Hermes 与模型服务商的英文错误只留在日志中。
 - 数据卷离线时助手不可用，不回退到系统盘；实例崩溃时由下一次请求重新启动，进行中的确认随这一轮作废。
 - 一轮没有正常结束时（服务商出错、被停止等），对话中这一轮已执行的步骤照常显示，下面是 Hermes 的一行中文提示（“这一轮没有完成，其中一些操作可能已经执行；重新发送前请先确认结果。”），以后打开这个对话也一样。一个对话仍然显示不了时，只有这个对话区显示“这个对话暂时无法显示”，侧栏、其他对话与等成员回答的卡片照常可用，可以开始新对话，不需要重新载入 WebOS；对话的记录再变化时重新显示（[调查](../investigations/2026-10-21-vnas-window-crash-and-stacked-cards.md)）。
-- 成员登录 WebOS 时实例在后台启动，登录期间常驻，打开助手时直接连上（开发机上实例已运行时，从点开到窗口可用 0.7 秒）；全部会话结束（退出登录、过期或账号停用）后约 45 秒退出。登录后立即打开时，窗口在实例启动完成前显示“正在连接 VNAS”（冷启动在实验 NAS 上约 5 秒，开发机 5.5–11 秒）。同一成员同时打开多个窗口时共用一个实例（[研究](../research/hermes-agent-runtime.md#登录即启动并常驻2026-10-19开发机)）。
+- 成员登录 WebOS 时实例在后台启动，登录期间常驻，打开助手时直接连上（开发机上实例已运行时，从点开到窗口可用 0.7 秒）；全部会话结束（退出登录或过期）后约 45 秒退出；账号停用时，由 Host Agent 停止并禁用其助手、API socket、定时任务与复盘单元，屏蔽再次激活，安装与更新也不为停用账号启用单元。登录后立即打开时，窗口在实例启动完成前显示“正在连接 VNAS”（冷启动在实验 NAS 上约 5 秒，开发机 5.5–11 秒）。同一成员同时打开多个窗口时共用一个实例（[研究](../research/hermes-agent-runtime.md#登录即启动并常驻)）。
 - 实例内存上限 768 MiB，超过 640 MiB 时内核先回收（开发机用真实模型多轮对话后常驻约 375 MB、峰值不超过 442 MB）；任务数上限 256。
 - 操作桌面的一步最多等 30 秒（Hermes 等浏览器命令的时限），所以确认卡片 25 秒内不回答就不执行；快照不超过 14,000 字符，更长的部分省略并提示滚动或关掉不需要的窗口。桌面的画面在成员的浏览器里画（开发机上一次约 2 秒，页面刚载入后的第一次更久），PNG 的 base64 不超过 4,000,000 字符（过大时缩小重画），产品服务转给实例的一条结果不超过 5 MiB。
-- 定时任务由 root 的唤醒服务每 30 秒检查一次是否到期，所以最多晚 30 秒开始；一次运行最长 1 小时。成员登录期间产品服务每分钟查看一次任务是否运行完，所以结果最晚约一分钟后提示。
+- 定时任务由 root 的唤醒服务每轮处理后等待 30 秒再检查；单个账号最多占用十秒，异常不阻断后续账号，因此故障账号较多时一轮会延长。只读取不超过 4 MiB 的普通 jobs.json 文件；启动前经 Host Agent 确认账号仍活动，核验失败不启动。一次任务运行最长 1 小时。成员登录期间产品服务每分钟查看一次任务是否运行完，所以结果最晚约一分钟后提示。
 - 一次“提交更改”最多 100 项操作，说明与路径合计不超过 64 KiB；暂存文件每个不超过 64 MiB，合计不超过 256 MiB（复制不经暂存，不受这两项限制）。超出时不出卡片，助手收到原因，执行方在打开任何文件之前就拒绝。移动只在同一处进行（个人空间之内，或 `Agent空间/<本人>` 之内），两处之间是不同的子卷，改名会失败，所以助手用复制再删除（[#173](https://github.com/zhongwater123/A-NAS/issues/173)）。卡片中的副本在数据卷上只有 root 能读的 `assistant/.changes` 中：一个成员还能执行的更改（等待确认，或刚确认、还在 2 分钟授权内）的副本合计不超过 512 MiB，超出时新的提交被拒绝；同一对话的新提交使这个对话中仍在等待确认的卡片作废，超过 Hermes 的等待时限（1 天）没有回答的卡片也作废。更改执行、失败、被拒绝或作废后，副本只留卡片显示的开头；结束 2 分钟后，最近 20 次之外的连开头也删除。
 - 助手目录的容量上限为每个账号 10 GiB，写满时写入失败。确认的等待时限为 1 天（`approvals.timeout: 86400`）；卡片只在打开这一轮的登录会话有效时存在，浏览器登录 12 小时后过期，会话先结束时这一轮与卡片随之结束。
 
 ## 验收证据
 
-- 系统测试在真实单元中运行沙箱探针：实例读不到其他成员的个人空间与快照，写不进个人空间与共享空间，打不开外网连接，看不到实例外的进程（开发机 spike 的 22 项探针见[研究](../research/hermes-agent-runtime.md#spike-结果2026-10-14开发机)第 5 项与 [`probe.sh`](../../ai/assistant-spike/probe.sh)，正式实现移入系统测试）。
-- 执行进程的 Landlock 测试：对个人空间与 `Agent空间/<本人>` 之外的写入返回拒绝（[`internal/filebroker/changes_test.go`](../../internal/filebroker/changes_test.go)，内核 ACL 允许写的位置也被拒绝）。执行方本身的规则（只执行本人授权过且参数相同的更改、一次、写卡片中的副本并按 SHA-256 核对、目标变化即拒绝、不经过任何链接、超出上限或没有授权的提交不打开任何文件、跨空间的移动被拒绝）见 [`internal/assistantchanges/executor_test.go`](../../internal/assistantchanges/executor_test.go)。
+- 系统测试在真实单元中运行沙箱探针：实例读不到其他成员的个人空间与快照，写不进个人空间与共享空间，打不开外网连接，看不到实例外的进程（开发机 spike 的 22 项探针见[研究](../research/hermes-agent-runtime.md#沙箱探针)与 [`probe.sh`](../../ai/assistant-spike/probe.sh)，正式实现移入系统测试）。
+- 执行进程的 Landlock 测试：对个人空间与 `Agent空间/<本人>` 之外的写入返回拒绝（[`internal/filebroker/rootbroker/changes_test.go`](../../internal/filebroker/rootbroker/changes_test.go)，内核 ACL 允许写的位置也被拒绝）。执行方本身的规则（只执行本人授权过且参数相同的更改、一次、写卡片中的副本并按 SHA-256 核对、目标变化即拒绝、不经过任何链接、超出上限或没有授权的提交不打开任何文件、跨空间的移动被拒绝）见 [`internal/assistantchanges/executor_test.go`](../../internal/assistantchanges/executor_test.go)。
 - 工具测试：模型只被提供 managed scope 启用的工具集，其余每个工具集都在关闭清单中（探针中的 `toolsets-check.py`）；终端以本人身份在助手目录中运行，能把共享空间的图片复制进助手目录与暂存区，写不进个人空间与共享空间，没有名字解析与外连，任何进程的环境中都没有会话令牌；危险命令与代码等到批准才运行，拒绝后不运行（[`serve-terminal.sh`](../../ai/assistant-spike/serve-terminal.sh)）。
 - 卡片测试：危险命令与代码成为命令卡片，回答经 `approval.respond`（含“本对话中都允许”）；提问成为问题卡片，回答作为对 Hermes 请求的应答（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)、[`cards.test.tsx`](../../web/src/assistant/cards.test.tsx)）；窗口只显示等待回答的卡片，另一个窗口回答后随即收起；带 Hermes 未完成提示的对话能打开，工具调用编号重复时窗口不崩溃，对话显示不了时侧栏与“开始新对话”仍可用，历史翻页后消息不改名（[`AssistantPanel.test.tsx`](../../web/src/assistant/AssistantPanel.test.tsx)、[`threadBoundary.test.tsx`](../../web/src/assistant/threadBoundary.test.tsx)、[`useAssistantThread.test.ts`](../../web/src/assistant/useAssistantThread.test.ts)）；复制从共享空间到个人空间、整个文件夹、来源在确认后变化即不执行（[`executor_test.go`](../../internal/assistantchanges/executor_test.go)）。
-- 边界测试：Hermes 启动时加载的配置、`.env`、`SOUL.md`、钩子与插件在实例中只读；越界与经符号链接的提交被拒绝；真实模型面对“授权跳过确认”、写他人与共享根目录、索要密钥以及共享空间中的诱导文字时，不越界、不执行诱导，对话中不把诱导写进记忆（[研究](../research/hermes-agent-runtime.md#边界测试2026-10-14开发机)）。后台复盘（保留）可能在回合结束后把诱导文字的内容写进记忆或技能：验收看成员能在“记忆”中看到并删除它们，以及复盘发起的“提交更改”审批被产品服务拒绝（[研究](../research/hermes-agent-runtime.md#记忆与自建技能1142026-10-15开发机)）；复盘只能用记忆、技能与只读的文件工具，每周的闲时整理只在实例未运行时运行（[`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)、[`curator.sh`](../../ai/assistant-spike/curator.sh)）。
-- 产品服务测试：越界提交不出卡片；非本人会话与助手通道的确认被拒绝；Hermes 未经本人点击的“同意”不执行；时限过后或停止后的确认无效；参数与卡片不一致时不执行；卡片之后改写的暂存内容不被写入，目标变化后不执行；同一更改不能执行两次。spike 中的对应测试见[研究](../research/hermes-agent-runtime.md#回合内审批1112026-10-15开发机)。
+- 边界测试：Hermes 启动时加载的配置、`.env`、`SOUL.md`、钩子与插件在实例中只读；越界与经符号链接的提交被拒绝；真实模型面对“授权跳过确认”、写他人与共享根目录、索要密钥以及共享空间中的诱导文字时，不越界、不执行诱导，对话中不把诱导写进记忆（[研究](../research/hermes-agent-runtime.md#边界测试)）。后台复盘（保留）可能在回合结束后把诱导文字的内容写进记忆或技能：验收看成员能在“记忆”中看到并删除它们，以及复盘发起的“提交更改”审批被产品服务拒绝（[研究](../research/hermes-agent-runtime.md#记忆与自建技能)）；复盘只能用记忆、技能与只读的文件工具，每周的闲时整理只在实例未运行时运行（[`review-whitelist.sh`](../../ai/assistant-spike/review-whitelist.sh)、[`curator.sh`](../../ai/assistant-spike/curator.sh)）。
+- 产品服务测试：越界提交不出卡片；非本人会话与助手通道的确认被拒绝；Hermes 未经本人点击的“同意”不执行；时限过后或停止后的确认无效；参数与卡片不一致时不执行；卡片之后改写的暂存内容不被写入，目标变化后不执行；同一更改不能执行两次。spike 中的对应测试见[研究](../research/hermes-agent-runtime.md#回合内审批)。
 - 相册服务测试：带助手标记的 Principal 不能写入，不带查看授权与管理员身份，不替成员创建私有图库；助手套接字按对端 UID 认定成员，只开放工具用到的读取路由（[`internal/photos/assistant_test.go`](../../internal/photos/assistant_test.go)、[`policy_test.go`](../../internal/photos/policy_test.go)、[`internal/photoservice/assistant_test.go`](../../internal/photoservice/assistant_test.go)）。spike 中经真实沙箱的检查见 [`photos-socket.sh`](../../ai/assistant-spike/photos-socket.sh)。
-- 真实模型场景：修改、删除、发布、总结、找回已删文件与共享空间中的诱导文字，按[研究](../research/hermes-agent-runtime.md#真实模型deepseek2026-10-14开发机)中的场景重跑，提交全部指向允许的位置并说明需要确认。
-- 浏览器验收：从提交到确认、拒绝、过期与部分失败的确认卡片。原型已改为 `hermes serve` 与回合内审批，在开发机上用真实模型跑通：卡片只出现在提交它的对话中，侧栏标“等你确认”；同一成员另一个窗口打开这个对话后看到同一张卡片并确认，两个窗口都显示已完成，文件已修改、旧版本在回收站；不回答时卡片在等待时限后变为超时，文件不变（[研究](../research/hermes-agent-runtime.md#集成会话闸门与产品服务的转发2026-10-15开发机)）。拒绝、停止与部分失败在浏览器中尚未验收。“记忆”页已在原型中用真实模型验收查看、逐条删除与连同对话全部清除。
+- 真实模型场景：修改、删除、发布、总结、找回已删文件与共享空间中的诱导文字，按[研究](../research/hermes-agent-runtime.md#真实模型deepseek)中的场景重跑，提交全部指向允许的位置并说明需要确认。
+- 浏览器验收：从提交到确认、拒绝、过期与部分失败的确认卡片。原型已改为 `hermes serve` 与回合内审批，在开发机上用真实模型跑通：卡片只出现在提交它的对话中，侧栏标“等你确认”；同一成员另一个窗口打开这个对话后看到同一张卡片并确认，两个窗口都显示已完成，文件已修改、旧版本在回收站；不回答时卡片在等待时限后变为超时，文件不变（[研究](../research/hermes-agent-runtime.md#会话闸门与产品服务的转发)）。拒绝、停止与部分失败在浏览器中尚未验收。“记忆”页已在原型中用真实模型验收查看、逐条删除与连同对话全部清除。
 - 契约测试：`/api/v1/assistant` 每个接口的请求与响应符合 [OpenAPI](../../api/openapi.yaml)；管理员与其他成员到不了别人的实例；写操作需要 CSRF 令牌（[`assistant_test.go`](../../internal/httpapi/assistant_test.go)）。网关只放行白名单中的方法、参数与事件，审批只经卡片接口回答，窗口离开后回合期间保持到实例的连接，同一对话在多个窗口中都收到事件（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)）。
 - 定时任务：任务列表不转出 Hermes 的内部字段（主目录、模型、投递目标、运行的系统提示），按名称或格式不对的编号到不了 Hermes，立即运行等几秒后答“已开始”，删除先删运行（[`tasks_test.go`](../../internal/assistantapi/tasks_test.go)）；登录期间每个结束的运行只告知一次，静默的运行记为已读（同一文件）；每个任务至多一条未读通知（[`assistanttasks_test.go`](../../internal/accounts/assistanttasks_test.go)）；窗口与桌面提示见 [`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)。真实沙箱中任务在实例停止时按时运行、以成员身份写助手目录、要改个人空间的被拒绝（[`cron.sh`](../../ai/assistant-spike/cron.sh)），系统测试在真实安装器上检查唤醒、按时运行、产品服务列出任务与告知结果（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)）。
 - 操作桌面：页面快照只含窗口与控件、不含 VNAS 自己、密码与标为不可查看的区域，按编号点击、输入（React 能收到）与按键（不落到 VNAS 的输入框）；剪切后粘贴到共享空间、分享、表单里按 Enter 引起的写入在成员允许前不发出，同一步的几个写入只问一次，无害的写入与没有列出的写入分别放行与询问，VNAS 的一步过去之后页面自己的写入不问；输入框外的 Delete 与组合键被拒绝；终端与 Docker 里的一步先问、拒绝时不点击、允许后同一窗口一段时间内不重复问；桌面的画面不含 VNAS 自己的窗口、是 PNG，标注的编号就是点击用的编号（[`webosControl.test.ts`](../../web/src/assistant/webosControl.test.ts)）；网关只放行 VNAS 窗口这一种控制器和它的能力，命令只到注册的窗口，回合进行中另一个窗口不能注册，回合之间发消息的窗口接手，不再操作的窗口离开时不注销正在操作的窗口，窗口的截图送得到实例而更大的结果被拒绝（[`gateway_test.go`](../../internal/assistantapi/gateway_test.go)）；Hermes 在窗口的会话里用截图回答 `browser_vision`，只接受 PNG（[`hermes-patches/0003`](../../ai/assistant-spike/hermes-patches/0003-browser-vision-through-the-controller.patch) 中的测试）；真实沙箱中旧令牌被拒绝、登录过的窗口注册、模型只拿到窗口提供的浏览器工具与 `browser_vision`、命令往返、截图交给看图模型（[`browser-control.sh`](../../ai/assistant-spike/browser-control.sh)）。
-- Hermes 自己的登录：文件代理用实例密钥登录、缓存令牌、实例拒绝后重新登录一次，密钥错误时不可用（[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)、[`internal/assistantlogin`](../../internal/assistantlogin/login_test.go)、[`login_test.go`](../../internal/assistantapi/login_test.go)）。
-- 会话闸门：文件代理拒绝伪造与缺少的会话，管理员连不到别人的助手，会话失效或 Host Agent 停止时交出的连接被切断（[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)）；系统测试在真实安装器上检查产品服务连不上实例套接字、执行方只接受本人的会话、经产品服务与闸门的网关到得了本人的实例，以及退出登录后连接在 30 秒内被切断（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)）。
+- Hermes 自己的登录：文件代理用实例密钥登录、缓存令牌、实例拒绝后重新登录一次，密钥错误时不可用（[`internal/filebroker/rootbroker/assistant_test.go`](../../internal/filebroker/rootbroker/assistant_test.go)、[`internal/assistantlogin`](../../internal/assistantlogin/login_test.go)、[`login_test.go`](../../internal/assistantapi/login_test.go)）。
+- 会话闸门：文件代理拒绝伪造与缺少的会话，管理员连不到别人的助手，会话失效或 Host Agent 停止时交出的连接被切断（[`internal/filebroker/rootbroker/assistant_test.go`](../../internal/filebroker/rootbroker/assistant_test.go)）；系统测试在真实安装器上检查产品服务连不上实例套接字、执行方只接受本人的会话、经产品服务与闸门的网关到得了本人的实例，以及退出登录后连接在 30 秒内被切断（[`system-test.sh`](../../ai/assistant-spike/system-test.sh)）。
 
 ## 关联
+
+- [Agent空间 保留目录与 Landlock 调查](../investigations/2026-10-27-agent-space-policy-directories.md)：Web 保留名、Host Agent 修复、SMB 访问边界及回归证据。
 
 - 架构：[架构总览](../architecture/OVERVIEW.md)、[存储与文件架构](../architecture/storage-and-files.md)
 - ADR：[0024 每个账号一个沙箱中的 Hermes Agent](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - 研究：[Hermes Agent 可行性](../research/hermes-agent-runtime.md)
-- 代码（原型）：产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)（网关 [`gateway.go`](../../internal/assistantapi/gateway.go)、白名单 [`rpc.go`](../../internal/assistantapi/rpc.go)、卡片 [`approvals.go`](../../internal/assistantapi/approvals.go)），会话闸门 [`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[应用图标](../../web/src/AssistantGlyph.tsx) 与连接层 [`useAssistantGateway.ts`](../../web/src/assistant/useAssistantGateway.ts)、[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层与 JSON-RPC 客户端 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；执行方 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 在文件代理中运行（[`changes.go`](../../internal/filebroker/changes.go)），没有文件代理的开发模式由 spike 的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
-- 操作桌面：窗口中的控制器 [`webosControl.ts`](../../web/src/assistant/webosControl.ts) 与写入清单 [`webosWrites.ts`](../../web/src/assistant/webosWrites.ts)，页面写入的闸门在 [`api.ts`](../../web/src/api.ts) 的 `apiFetch` 与 `uploadForm`，问题 [#160](https://github.com/zhongwater123/A-NAS/issues/160)，系统技能 [`anas-desktop`](../../ai/assistant-spike/skills/anas-desktop/SKILL.md)，Hermes 自己的登录 [`internal/assistantlogin`](../../internal/assistantlogin/login.go)
+- 代码（原型）：产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)（网关 [`gateway.go`](../../internal/assistantapi/gateway.go)、白名单 [`rpc.go`](../../internal/assistantapi/rpc.go)、卡片 [`approvals.go`](../../internal/assistantapi/approvals.go)），会话闸门 [`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[应用图标](../../web/src/assistant/AssistantGlyph.tsx) 与连接层 [`useAssistantGateway.ts`](../../web/src/assistant/useAssistantGateway.ts)、[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层与 JSON-RPC 客户端 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；执行方 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 在文件代理中运行（[`changes.go`](../../internal/filebroker/changes.go)），没有文件代理的开发模式由 spike 的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
+- 操作桌面：窗口中的控制器 [`webosControl.ts`](../../web/src/assistant/webosControl.ts) 与写入清单 [`webosWrites.ts`](../../web/src/assistant/webosWrites.ts)，页面写入的闸门在 [`api.ts`](../../web/src/api/client.ts) 的 `apiFetch` 与 `uploadForm`，问题 [#160](https://github.com/zhongwater123/A-NAS/issues/160)，系统技能 [`anas-desktop`](../../ai/assistant-spike/skills/anas-desktop/SKILL.md)，Hermes 自己的登录 [`internal/assistantlogin`](../../internal/assistantlogin/login.go)
 - 定时任务：产品服务 [`tasks.go`](../../internal/assistantapi/tasks.go) 与 [`tasknotices.go`](../../internal/assistantapi/tasknotices.go)，通知 [`internal/accounts/assistanttasks.go`](../../internal/accounts/assistanttasks.go)，窗口 [`TasksView.tsx`](../../web/src/assistant/TasksView.tsx) 与桌面提示 [`TaskToasts.tsx`](../../web/src/assistant/TaskToasts.tsx)，唤醒 [`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)，系统技能 [`anas-scheduled-tasks`](../../ai/assistant-spike/skills/anas-scheduled-tasks/SKILL.md)
-- 测试：[`internal/assistantapi/gateway_test.go`](../../internal/assistantapi/gateway_test.go)、[`internal/filebroker/assistant_test.go`](../../internal/filebroker/assistant_test.go)、[`internal/httpapi/assistant_test.go`](../../internal/httpapi/assistant_test.go)
+- 测试：[`internal/assistantapi/gateway_test.go`](../../internal/assistantapi/gateway_test.go)、[`internal/filebroker/rootbroker/assistant_test.go`](../../internal/filebroker/rootbroker/assistant_test.go)、[`internal/httpapi/assistant_test.go`](../../internal/httpapi/assistant_test.go)

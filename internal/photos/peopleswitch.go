@@ -98,7 +98,7 @@ func (s *Service) SetPeople(ctx context.Context, p Principal, libraryID string, 
 		if err := s.enqueueMissingPets(ctx, s.objectCalibration.Model); err != nil {
 			return Library{}, err
 		}
-		s.wakeAI()
+		s.ai.wakeUp()
 	}
 	public := publicLibrary(p, lib, s.now())
 	public.People, public.CanSetPeople = on, true
@@ -114,7 +114,7 @@ INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT DISTINCT a.object_id, ?, 'pending', ?, ? FROM assets a
 JOIN derived_files t ON t.object_id = a.object_id AND t.derivation = ?
 WHERE a.library_id = ? AND NOT EXISTS (SELECT 1 FROM scans s WHERE s.object_id = a.object_id AND s.derivation = ?)
-  AND `+notVideo("a.object_id")+`
+  AND `+inLocalAI("a.object_id")+`
 ON CONFLICT(object_id, derivation) DO NOTHING`,
 		facesDerivation, now, now, thumbnailDerivation, libraryID, facesDerivation)
 	return err
@@ -140,11 +140,11 @@ func (s *Service) clearPeople(ctx context.Context, tx *sql.Tx, libraryID string)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	var sheets [][2]string
 	for rows.Next() {
 		var sheet [2]string
 		if err := rows.Scan(&sheet[0], &sheet[1]); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		sheets = append(sheets, sheet)

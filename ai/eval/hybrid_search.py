@@ -96,7 +96,7 @@ def class_scores(detections, keys):
     scores = np.zeros((len(keys), 366), dtype=np.float32)
     for row, key in enumerate(keys):
         classes, found, _boxes = detections.get(key, ((), (), ()))
-        for cls, score in zip(classes, found):
+        for cls, score in zip(classes, found, strict=True):
             scores[row, cls] = max(scores[row, cls], score)
     return scores
 
@@ -217,7 +217,7 @@ def product(text, mentions, scores, vector, calibration):
     limits = [(word_verdict(calibration, ids) or {}).get("tierScore") for _word, ids in mentions]
     if not mentions or len(enabled) != len(mentions) or share < calibration["tierCoverage"] or None in limits:
         return fused, None
-    found = [scores[:, sorted(ids)].max(axis=1) >= limit for (_word, ids), limit in zip(mentions, limits)]
+    found = [scores[:, sorted(ids)].max(axis=1) >= limit for (_word, ids), limit in zip(mentions, limits, strict=True)]
     return fused, np.logical_and.reduce(found)
 
 

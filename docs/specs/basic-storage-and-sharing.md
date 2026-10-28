@@ -49,7 +49,7 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - 成功预览响应 `private, no-cache`、`Vary: Cookie` 与 ETag；浏览器每次复用前须向服务端校验，未变化返回无图片正文的 304，错误响应不缓存。文件修改、替换、删除或撤销权限均重新校验。只有缓存未命中的请求串行等待解码，排队随请求取消、排队时不持有源文件描述符；出队后再次打开并校验源文件，解码限时 30 秒。缓存命中不等待解码，首次浏览新文件仍需抽帧。HEIF 输入最多 256 MiB，Worker 使用自己的匿名内存文件供 libheif 读取，输出最多 12 MiB；下载始终返回原文件。
 - 详情栏只显示所选资源的预览、元数据与说明，不承载文件操作按钮；JPEG、PNG、GIF、WebP、BMP 与 AVIF 使用同源文件接口内联预览，预览图保持原始宽高比并随详情栏宽度自适应，单击打开预览；HEIC/HEIF 和视频使用上述派生预览，HEIC/HEIF 可单击打开；PDF 使用浏览器内嵌预览，1 MiB 以内的 Markdown、纯文本和常见源代码文件显示真实文本内容。Word 与 PowerPoint 在文档转换服务落地前明确显示为暂不可预览，不得伪装为真实预览；剪切、复制、粘贴、重命名和删除统一从命令栏或右键菜单发起。
 - 目录栏底部显示数据卷文件系统的已用空间与总空间；容量由 Host Agent 从已挂载的数据卷实时观测，观测暂不可用时显示未知，不得把缺失值解释为磁盘已满。
-- 剪切或复制后在另一个空间粘贴时，条目先完整复制到目标位置，新文件继承目标空间的权限并获得新的文件 ID；剪切在复制完成后删除原条目，不经过回收站。剪切需要两个空间的写权限，复制只需能读取原条目。复制完成之前目标位置只有一个隐藏副本，列表与 SMB 都看不到写了一半的条目；服务重启中断的复制留下的隐藏副本在之后的目录对账中删除。目标文件夹只在目标空间中查找，未指定空间时为原条目所在空间。
+- 剪切或复制后在另一个空间粘贴时，条目先完整复制到目标位置，新文件继承目标空间的权限并获得新的文件 ID，每个文件和目录保留开始复制该条目时的修改时间。跨空间剪切在复制完成后把原条目原子改名进操作者在源空间的回收站，沿用 30 天保留及本人恢复规则；复制期间经 SMB 新增或修改的源内容因此仍可恢复，不永久删除。源移入回收站失败时保留源和已完成的副本并报告失败。剪切需要两个空间的写权限，复制只需能读取原条目；同空间移动仍直接改名。复制完成之前目标位置只有一个隐藏副本，列表与 SMB 都看不到写了一半的条目；服务重启中断的复制留下的隐藏副本在之后的目录对账中删除。目标文件夹只在目标空间中查找，未指定空间时为原条目所在空间。
 - 路径穿越、符号链接和设备文件被拒绝；名称冲突（含只差大小写）返回 `409`，名称不符合[名称规则](#名称规则)返回 `422`，目录不能移动或复制到自身之内。
 - Web 与 Samba 删除均进入隐藏的按空间、按删除者回收站，默认保留 30 天。回收站条目只有删除者能看到、恢复和清空（[统一身份与文件授权](unified-identity-and-file-acl.md)）。
 - 回收站窗口顶部汇总项目数、占用空间与 7 天内将被清理的数量，不另写保留规则的说明文字。项目按删除日期分组（今天、昨天、具体日期），每项一行：类型图标、名称与类型，原位置（空间与文件夹路径），大小（文件夹为其中已索引文件的合计），删除时间，剩余天数（圆环显示剩余比例，7 天以内标黄、1 天以内标红，悬停显示确切的清理时间），以及“恢复”和永久删除。可按名称搜索、按空间筛选，或改为按“即将清理”排序（分为 7 天内与更晚两组）。窗口变窄时每项变为两行，原位置、大小、删除时间与剩余时间带文字标签排在名称下方。
@@ -92,6 +92,8 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 
 ## 关联
 
+- [跨空间移动调查](../investigations/2026-10-27-cross-space-move-lost-source-changes.md)与[回归测试](../../internal/files/cross_space_move_test.go)
+
 - [存储与文件架构](../architecture/storage-and-files.md)
 - [ADR 0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
 - [统一身份与文件授权规格](unified-identity-and-file-acl.md)：取代本规格中的空间权限实现方式
@@ -101,7 +103,7 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - [`web/src/trash/TrashPanel.tsx`](../../web/src/trash/TrashPanel.tsx) 与 [`TrashPanel.test.tsx`](../../web/src/trash/TrashPanel.test.tsx)：回收站窗口，单个与批量恢复的同名处理
 - [`web/src/files/FilePanel.tsx`](../../web/src/files/FilePanel.tsx)：文件管理窗口
 - [`web/src/files/model.ts`](../../web/src/files/model.ts) 与 [`model.test.ts`](../../web/src/files/model.test.ts)：所选项目可用的命令、粘贴位置、排序与置顶
-- [`web/src/useFileOrder.ts`](../../web/src/useFileOrder.ts) 与 [`useFileOrder.test.ts`](../../web/src/useFileOrder.test.ts)：置顶、手动排列、偏好隔离与存储降级
+- [`web/src/files/useFileOrder.ts`](../../web/src/files/useFileOrder.ts) 与 [`useFileOrder.test.ts`](../../web/src/files/useFileOrder.test.ts)：置顶、手动排列、偏好隔离与存储降级
 - [`web/src/files/FilePanel.test.tsx`](../../web/src/files/FilePanel.test.tsx)：文件管理交互
 - [文件列表乱序响应调查](../investigations/2026-10-26-file-listing-navigation-race.md)：导航、异步操作完成后的刷新与重命名回归
 - [`web/src/App.test.tsx`](../../web/src/App.test.tsx)：会话过期回到登录页、本机屏幕申请持久会话

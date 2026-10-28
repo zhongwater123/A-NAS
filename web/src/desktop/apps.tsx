@@ -1,71 +1,98 @@
 import { ArrowDownUp, FolderClosed, Music2, Settings, Share2, ShoppingBag, Trash2 } from "lucide-react";
-import { lazy, ReactNode, Suspense } from "react";
+import { createContext, ReactNode, use } from "react";
 
-import { Session, User } from "../api";
-import { AppCenterPanel } from "../appcenter/AppCenterPanel";
-import type { AssistantFocus } from "../assistant/AssistantPanel";
-import { AssistantGlyph } from "../AssistantGlyph";
-import { BackupCenter } from "../backup/BackupCenter";
-import { BackupCenterGlyph } from "../BackupCenterGlyph";
-import { DesktopApp } from "../DesktopGrid";
-import { DockerFocus, DockerPanel } from "../docker/DockerPanel";
-import { DockerGlyph } from "../DockerGlyph";
-import { FilePanel } from "../files/FilePanel";
-import { MediaCenter } from "../media/MediaCenter";
-import { type AppGlyph, MediaCenterGlyph } from "../MediaCenterGlyph";
-import { MusicPanel } from "../music/MusicPanel";
-import { displayName } from "../people";
-import { PhotosGlyph } from "../PhotosGlyph";
-import { PhotosPanel } from "../photos/PhotosPanel";
-import { SettingsPanel, SettingsSection, useStoragePlan } from "../SettingsPanel";
-import { SharesPanel } from "../shares/SharesPanel";
-import type { TransferLocation } from "../transfers/transfersApi";
-import { TrashPanel } from "../trash/TrashPanel";
-import type { HostStateView } from "../useHostState";
+import type { Session, User } from "../api.generated";
+import { AssistantGlyph } from "../assistant/AssistantGlyph";
+import { BackupCenterGlyph } from "../backup/BackupCenterGlyph";
+import { DockerGlyph } from "../docker/DockerGlyph";
+import { appProject } from "../docker/model";
+import { type AppGlyph, MediaCenterGlyph } from "../media/MediaCenterGlyph";
+import { displayName } from "../people/people";
+import { PhotosGlyph } from "../photos/PhotosGlyph";
+import type { SettingsSection } from "../settings/SettingsPanel";
+import type { StoragePlanFlow } from "../settings/storagePlan";
+import type { TransferLocation } from "../transfers/api";
+import { lazyCode } from "../ui/lazyCode";
+import { DesktopApp } from "./DesktopGrid";
+import type { HostStateView } from "./useHostState";
 
-// The assistant window, with its chat libraries, loads when first opened.
-const AssistantPanel = lazy(() =>
-  import("../assistant/AssistantPanel").then((module) => ({ default: module.AssistantPanel })),
-);
-// The transfer center loads when first opened; the desktop only needs its
-// status-bar pill and toasts.
-const TransferCenter = lazy(() =>
-  import("../transfers/TransferCenter").then((module) => ({ default: module.TransferCenter })),
-);
+// Every window loads its code and styles when it is first opened; the desktop
+// needs only the apps' icons and shows a spinner in the window until then.
+const AppCenterPanel = lazyCode(() => import("../appcenter/AppCenterPanel").then((module) => module.AppCenterPanel));
+const AssistantPanel = lazyCode(() => import("../assistant/AssistantPanel").then((module) => module.AssistantPanel));
+const BackupCenter = lazyCode(() => import("../backup/BackupCenter").then((module) => module.BackupCenter));
+const DockerPanel = lazyCode(() => import("../docker/DockerPanel").then((module) => module.DockerPanel));
+const FilePanel = lazyCode(() => import("../files/FilePanel").then((module) => module.FilePanel));
+const MediaCenter = lazyCode(() => import("../media/MediaCenter").then((module) => module.MediaCenter));
+const MusicPanel = lazyCode(() => import("../music/MusicPanel").then((module) => module.MusicPanel));
+const PhotosPanel = lazyCode(() => import("../photos/PhotosPanel").then((module) => module.PhotosPanel));
+const SettingsPanel = lazyCode(() => import("../settings/SettingsPanel").then((module) => module.SettingsPanel));
+const SharesPanel = lazyCode(() => import("../shares/SharesPanel").then((module) => module.SharesPanel));
+const TransferCenter = lazyCode(() => import("../transfers/TransferCenter").then((module) => module.TransferCenter));
+const TrashPanel = lazyCode(() => import("../trash/TrashPanel").then((module) => module.TrashPanel));
 
-// Where another window asked an app to go. The app clears it once shown, so
-// asking for the same place again shows it again.
-export interface WindowFocus {
+// What another window can ask an app to show when it opens it.
+export interface WindowIntentPayloads {
   // A folder the transfer center, the trash or the backup center asks the file manager to show.
-  files?: TransferLocation;
+  files: TransferLocation;
   // A photo another window names, such as one the assistant found.
-  photos?: { assetId: string; at: number };
+  photos: { assetId: string };
   // The App Center's 在 Docker 中查看 opens Docker on that app's containers.
-  docker?: DockerFocus;
-  // A toast of a scheduled task opens its run in VNAS.
-  assistant?: AssistantFocus;
+  docker: { project: string };
+  // A toast of a scheduled task opens its run in VNAS, or the tasks.
+  assistant: { sessionId?: string; title?: string };
 }
+// The intents waiting for their windows. Every request is a new object, so a
+// window sees a request for the place it already shows. The window hands back
+// the intent it handled, and the desktop forgets it only if no newer request
+// has taken its place.
+export type WindowIntents = { [ID in keyof WindowIntentPayloads]?: WindowIntentPayloads[ID] };
+// OpenWindow opens or raises an app's window, with what to show for apps that take an intent.
+export type OpenWindow = <ID extends WindowID>(
+  id: ID,
+  ...intent: ID extends keyof WindowIntentPayloads ? [intent?: WindowIntentPayloads[ID]] : []
+) => void;
 
-// WindowContext is what the desktop gives the apps' windows and icons.
+// WindowContext is what the desktop gives the apps' windows and icons. A new
+// one re-renders every open window, so it holds only what changes rarely.
 export interface WindowContext {
   session: Session;
   isAdmin: boolean;
-  host: HostStateView;
   // The assistant opens only when this device runs one for this account (ADR 0024).
   assistantReady: boolean;
-  open: (id: WindowID) => void;
-  showInFiles: (location: TransferLocation) => void;
-  showInDocker: (appID: string) => void;
-  showPhoto: (assetId: string) => void;
-  focus: WindowFocus;
-  focusHandled: (id: keyof WindowFocus) => void;
-  // The section and any pending storage plan outlive the settings window, so
-  // reopening it returns to where the user left off.
-  settingsSection: SettingsSection;
-  setSettingsSection: (section: SettingsSection) => void;
-  storagePlan: ReturnType<typeof useStoragePlan>;
+  open: OpenWindow;
+  intents: WindowIntents;
+  intentHandled: <ID extends keyof WindowIntentPayloads>(id: ID, handled: WindowIntentPayloads[ID]) => void;
   changeUser: (user: User) => void;
   logout: () => void;
+}
+
+// SettingsState is what the desktop keeps for the settings window alone: the
+// host's state, new with every poll, and the section and any pending storage
+// plan, which outlive the window so reopening it returns to where the user
+// left off. A context of its own re-renders only that window.
+export interface SettingsState {
+  host: HostStateView;
+  section: SettingsSection;
+  setSection: (section: SettingsSection) => void;
+  storagePlan: StoragePlanFlow;
+}
+export const SettingsStateContext = createContext<SettingsState | undefined>(undefined);
+
+function SettingsWindow({ session, changeUser, logout }: Pick<WindowContext, "session" | "changeUser" | "logout">) {
+  const state = use(SettingsStateContext);
+  if (!state) throw new Error("SettingsWindow outside the desktop");
+  return (
+    <SettingsPanel
+      session={session}
+      host={state.host}
+      section={state.section}
+      onSectionChange={state.setSection}
+      storagePlan={state.storagePlan}
+      onUserChange={changeUser}
+      onLogout={logout}
+    />
+  );
 }
 
 interface AppDefinition {
@@ -93,12 +120,6 @@ interface AppDefinition {
   render: (context: WindowContext) => ReactNode;
 }
 
-const loading = (
-  <div className="center-state">
-    <span className="loader" />
-  </div>
-);
-
 // The desktop's built-in apps. Their order is the initial order of the desktop
 // icons and of the windows on the page.
 const definitions = {
@@ -115,11 +136,11 @@ const definitions = {
     tone: "files",
     bounds: { x: 230, y: 70, width: 900, height: 620 },
     launcher: { id: "files", keywords: "文件 共享 上传 shared" },
-    render: ({ session, focus, focusHandled, open }) => (
+    render: ({ session, intents, intentHandled, open }) => (
       <FilePanel
         userID={session.user.id}
-        navigation={focus.files}
-        onNavigated={() => focusHandled("files")}
+        intent={intents.files}
+        onIntentHandled={(handled) => intentHandled("files", handled)}
         onOpenTransfers={() => open("transfers")}
         onOpenPhotos={() => open("photos")}
         onOpenMedia={() => open("media")}
@@ -133,7 +154,7 @@ const definitions = {
     tone: "trash",
     bounds: { x: 260, y: 76, width: 920, height: 620 },
     launcher: { id: "trash", keywords: "删除 恢复" },
-    render: ({ showInFiles }) => <TrashPanel onShowInFiles={showInFiles} />,
+    render: ({ open }) => <TrashPanel onShowInFiles={(location) => open("files", location)} />,
   },
   settings: {
     title: "设置",
@@ -146,16 +167,8 @@ const definitions = {
       keywords: ({ isAdmin }) =>
         `账号 密码 smb 用户 成员 权限 存储 磁盘 数据卷 系统 日志 审计 登录记录 活动 log${isAdmin ? " 终端 shell 命令行 bash" : ""}`,
     },
-    render: (context) => (
-      <SettingsPanel
-        session={context.session}
-        host={context.host}
-        section={context.settingsSection}
-        onSectionChange={context.setSettingsSection}
-        storagePlan={context.storagePlan}
-        onUserChange={context.changeUser}
-        onLogout={context.logout}
-      />
+    render: ({ session, changeUser, logout }) => (
+      <SettingsWindow session={session} changeUser={changeUser} logout={logout} />
     ),
   },
   store: {
@@ -164,7 +177,7 @@ const definitions = {
     tone: "store",
     bounds: { x: 300, y: 60, width: 940, height: 660 },
     launcher: { id: "store", keywords: "应用 安装 商店 app", adminOnly: true },
-    render: ({ showInDocker }) => <AppCenterPanel onOpenDocker={showInDocker} />,
+    render: ({ open }) => <AppCenterPanel onOpenDocker={(appID) => open("docker", { project: appProject(appID) })} />,
   },
   media: {
     title: "影视中心",
@@ -181,10 +194,8 @@ const definitions = {
     bounds: { x: 270, y: 84, width: 900, height: 600 },
     // The id stays "download" so the icon keeps its place on desktops arranged before the rename.
     launcher: { id: "download", keywords: "传输 上传 下载 进度 续传 transfer upload download" },
-    render: ({ open, showInFiles }) => (
-      <Suspense fallback={loading}>
-        <TransferCenter onOpenFiles={() => open("files")} onOpenLocation={showInFiles} />
-      </Suspense>
+    render: ({ open }) => (
+      <TransferCenter onOpenFiles={() => open("files")} onOpenLocation={(location) => open("files", location)} />
     ),
   },
   backup: {
@@ -194,11 +205,11 @@ const definitions = {
     bounds: { x: 220, y: 52, width: 1080, height: 700 },
     // 备份中心 replaced the separate 文件快照 window and the planned 备份 entry; it keeps the backup ID so stored icon orders still place it.
     launcher: { id: "backup", keywords: "备份 快照 文件快照 恢复 找回 历史版本 定时 snapshot backup" },
-    render: ({ session, isAdmin, showInFiles, open }) => (
+    render: ({ session, isAdmin, open }) => (
       <BackupCenter
         userId={session.user.id}
         isAdmin={isAdmin}
-        onShowInFiles={showInFiles}
+        onShowInFiles={(location) => open("files", location)}
         onOpenTrash={() => open("trash")}
       />
     ),
@@ -209,10 +220,10 @@ const definitions = {
     tone: "docker",
     bounds: { x: 300, y: 70, width: 960, height: 660 },
     launcher: { id: "docker", keywords: "容器 镜像 container", adminOnly: true },
-    render: ({ focus, focusHandled, open }) => (
+    render: ({ intents, intentHandled, open }) => (
       <DockerPanel
-        focus={focus.docker}
-        onFocusHandled={() => focusHandled("docker")}
+        intent={intents.docker}
+        onIntentHandled={(handled) => intentHandled("docker", handled)}
         onOpenStore={() => open("store")}
       />
     ),
@@ -224,13 +235,13 @@ const definitions = {
     lightTitle: true,
     bounds: { x: 250, y: 64, width: 960, height: 660 },
     launcher: { id: "photos", keywords: "照片 图片 图库 photo" },
-    render: ({ session, isAdmin, focus, focusHandled }) => (
+    render: ({ session, isAdmin, intents, intentHandled }) => (
       <PhotosPanel
         userId={session.user.id}
         userName={displayName(session.user)}
         isAdmin={isAdmin}
-        focus={focus.photos}
-        onFocusHandled={() => focusHandled("photos")}
+        intent={intents.photos}
+        onIntentHandled={(handled) => intentHandled("photos", handled)}
       />
     ),
   },
@@ -253,15 +264,13 @@ const definitions = {
       keywords: "vnas 助手 智能 问答 聊天 assistant ai",
       ready: ({ assistantReady }) => assistantReady,
     },
-    render: ({ session, showPhoto, focus, focusHandled }) => (
-      <Suspense fallback={null}>
-        <AssistantPanel
-          username={session.user.username}
-          onShowPhoto={showPhoto}
-          focus={focus.assistant}
-          onFocusHandled={() => focusHandled("assistant")}
-        />
-      </Suspense>
+    render: ({ session, open, intents, intentHandled }) => (
+      <AssistantPanel
+        username={session.user.username}
+        onShowPhoto={(assetId) => open("photos", { assetId })}
+        intent={intents.assistant}
+        onIntentHandled={(handled) => intentHandled("assistant", handled)}
+      />
     ),
   },
 } satisfies Record<string, AppDefinition>;

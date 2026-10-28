@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useEffectEvent, useState } from "react";
 
-import { FileEntry, Space, Volume, listEntries, listSpaces, listVolumes } from "../api";
+import type { FileEntry, Space, Volume } from "../api.generated";
+import { listVolumes } from "../settings/api";
 import { transferStore } from "../transfers/store";
+import { listEntries, listSpaces } from "./api";
 import { FileFolder, messageOf } from "./model";
 
 // useFileListing follows the open space and folder: the spaces there are,

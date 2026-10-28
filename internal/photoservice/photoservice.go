@@ -26,6 +26,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 type SessionResolver interface {
@@ -62,6 +63,9 @@ type Config struct {
 	// defaults to the kernel's pressure stall information. Tests replace it
 	// so that load on the machine running them cannot hold AI work back.
 	AIPressure func(resource string) (float64, error)
+	// Vectors is the service's own vector index (ADR 0028), kept in line
+	// with the Catalog and compared with searches; nil leaves it off.
+	Vectors photos.VectorIndex
 }
 
 var ErrStoreUnavailable = errors.New("the photo store is not available")
@@ -145,7 +149,7 @@ func Run(parent context.Context, config Config) error {
 		(*api.Load()).ServeHTTP(w, r)
 	})
 	server := &http.Server{
-		Handler:           authenticate(config.Sessions, config.Logger, gate, current),
+		Handler:           Authenticate(config.Sessions, config.Logger, gate, current),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
 	}
 	serveError := make(chan error, 2)
@@ -160,14 +164,15 @@ func Run(parent context.Context, config Config) error {
 		go func() { serveError <- assistantServer.Serve(assistantListener) }()
 	}
 
-	ctx, stop := context.WithCancel(parent)
+	// As in the Product Service, background work stops as soon as the
+	// process is told to stop, while open requests drain; the Catalog closes
+	// only after both, so an upload in progress still lands (#192).
+	serving, stop := context.WithCancel(context.WithoutCancel(parent))
 	supervised := make(chan struct{})
 	go func() {
 		defer close(supervised)
-		supervise(ctx, config, gate, serve, unavailable)
+		supervise(serving, parent, config, gate, serve, unavailable)
 	}()
-	// The Catalog closes only after requests and workers using it have
-	// stopped.
 	defer func() {
 		stop()
 		<-supervised
@@ -176,9 +181,9 @@ func Run(parent context.Context, config Config) error {
 	select {
 	case err := <-serveError:
 		return err
-	case <-ctx.Done():
+	case <-parent.Done():
 	}
-	shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	shutdown, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	var shutdownErr error
 	if assistantServer != nil {
@@ -206,23 +211,28 @@ func requirePrivateDirectory(dir string) error {
 	return nil
 }
 
-// supervise keeps the photo API backed by an open store until ctx ends. It
+// shutdownGrace is how long stopping waits for open requests; the unit's
+// TimeoutStopSec leaves room for closing the Catalog after it.
+const shutdownGrace = 15 * time.Second
+
+// supervise keeps the photo API backed by an open store until ctx ends, and
+// runs background work until background ends. It
 // opens the store once it passes its check and closes it again as soon as it
 // stops passing or its path names another directory, as when the data volume
 // goes offline, turns read-only or is remounted. The open Catalog never
 // follows the path onto the system disk, and reopening reconciles whatever an
 // abrupt loss left behind. Requests in between answer photos_unavailable.
-func supervise(ctx context.Context, config Config, gate *Gate, serve func(http.Handler), unavailable http.Handler) {
+func supervise(ctx, background context.Context, config Config, gate *Gate, serve func(http.Handler), unavailable http.Handler) {
 	for {
 		service, err := openWhenReady(ctx, config)
 		if err != nil {
 			return
 		}
-		workers, stopWorkers := context.WithCancel(ctx)
+		workers, stopWorkers := context.WithCancel(background)
 		background := make(chan struct{})
 		go func() {
 			defer close(background)
-			RunBackground(workers, service, config.Logger, config.AI, gate)
+			RunBackground(workers, service, config.Logger, config.AI, gate, config.Vectors)
 		}()
 		serve(photosapi.New(service, config.Logger))
 		config.Logger.Info("photo service ready", "store", config.Root, "socket", config.SocketPath)
@@ -295,11 +305,13 @@ func openWhenReady(ctx context.Context, config Config) (*photos.Service, error) 
 }
 
 // RunBackground readies the job queue (photos.Service.RecoverJobs), then
-// renders media, runs local AI through ai while gate allows it, and
-// maintains the store until ctx ends. It returns only once all of
-// them have stopped, so the caller may then close service. None needs a user
-// session; a nil ai leaves local AI off.
-func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Logger, ai photos.Embedder, gate *Gate) {
+// renders media, runs local AI through ai while gate allows it, keeps the
+// vector index in line and compares searches with it, and maintains the
+// store until ctx ends. It returns only once all of them have stopped, so
+// the caller may then close service. None needs a user session; a nil ai
+// leaves local AI off, and nil vectors the vector index.
+func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Logger, ai photos.Embedder, gate *Gate,
+	vectors photos.VectorIndex) {
 	if recovery, err := service.RecoverJobs(ctx); err != nil {
 		logger.ErrorContext(ctx, "photo job recovery failed", "error", err)
 	} else if recovery != (photos.JobRecovery{}) {
@@ -319,8 +331,48 @@ func RunBackground(ctx context.Context, service *photos.Service, logger *slog.Lo
 			})
 		})
 	}
+	if vectors != nil {
+		runVectorIndex(ctx, &workers, service, logger, gate, vectors)
+	} else if err := service.ForgetVectorIndex(ctx); err != nil {
+		logger.ErrorContext(ctx, "photo vector index state could not be dropped", "error", err)
+	}
 	workers.Go(func() { maintain(ctx, service, logger) })
 	workers.Wait()
+}
+
+// runVectorIndex starts keeping the vector index in line with the Catalog,
+// as background work, and comparing searches with it
+// (docs/architecture/vector-index.md). The comparisons are what decides
+// whether search moves to the index; they log no query or name.
+func runVectorIndex(ctx context.Context, workers *sync.WaitGroup, service *photos.Service, logger *slog.Logger, gate *Gate,
+	vectors photos.VectorIndex) {
+	workers.Go(func() {
+		service.RunVectorSync(ctx, vectors, gate, min(time.Minute, gate.quiet), func(event photos.VectorSyncEvent) {
+			level := slog.LevelInfo
+			if event.Rejected > 0 {
+				// The index refused these vectors; reconciliation tries them
+				// again tomorrow.
+				level = slog.LevelWarn
+			}
+			logger.Log(ctx, level, "photo vector index "+event.Kind, "collection", event.Collection,
+				"upserted", event.Upserted, "deleted", event.Deleted, "rejected", event.Rejected, "queued", event.Queued)
+		}, func(err error) {
+			logger.WarnContext(ctx, "photo vector index sync failed; it retries", "error", err)
+		})
+	})
+	var warm func() bool
+	if client, ok := vectors.(interface{ Warm() bool }); ok {
+		warm = client.Warm
+	}
+	workers.Go(func() {
+		service.RunVectorShadow(ctx, vectors, warm, min(time.Minute, gate.quiet), func(c photos.ShadowComparison) {
+			logger.InfoContext(ctx, "photo vector index shadow search", "collection", c.Collection, "candidates", c.Candidates,
+				"overlap10", c.Overlap[10], "overlap100", c.Overlap[100], "overlap500", c.Overlap[500],
+				"index_ms", c.Index.Milliseconds(), "exact_ms", c.Exact.Milliseconds(), "warm", c.Warm)
+		}, func(err error) {
+			logger.WarnContext(ctx, "photo vector index shadow search failed", "error", err)
+		})
+	})
 }
 
 // maintain repairs the store after an unclean stop and then expires trashed
@@ -345,14 +397,31 @@ func maintain(ctx context.Context, service *photos.Service, logger *slog.Logger)
 	}
 }
 
-// authenticate turns the forwarded session token into the caller's
-// Principal. It trusts the Host Agent's answer, never the Product Service.
-// Each request by a signed-in person keeps background AI work waiting until
-// it is served, such as a video playing or a long upload, except reading the
-// AI status, which a window may poll while left open.
-func authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, next http.Handler) http.Handler {
+// Proxy forwards the photo API to the photo service on socketPath; while
+// the service cannot be reached, requests answer photos_unavailable.
+func Proxy(socketPath string, logger *slog.Logger) http.Handler {
+	return serviceproxy.New(socketPath, serviceproxy.Unavailable{
+		Code: "photos_unavailable", Message: "the photo library is not available on this device",
+	}, logger)
+}
+
+// Local serves the photo API of service in this process, as development
+// runs it in the Product Service: with the photo service's authentication
+// and gate, behind the request rewriting of Proxy.
+func Local(service *photos.Service, sessions SessionResolver, gate *Gate, logger *slog.Logger) http.Handler {
+	return serviceproxy.Local(Authenticate(sessions, logger, gate, photosapi.New(service, logger)))
+}
+
+// Authenticate turns the forwarded session token into the caller's
+// Principal (serviceproxy.SessionHeader). The photo service trusts only the
+// Host Agent's answer, never the Product Service; development, which runs
+// the photo API in the Product Service, asks its own account store the same
+// way. Each request by a signed-in person keeps background AI work waiting
+// until it is served, such as a video playing or a long upload, except
+// reading the AI status, which a window may poll while left open.
+func Authenticate(sessions SessionResolver, logger *slog.Logger, gate *Gate, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, err := sessions.ResolveSessionUser(r.Context(), r.Header.Get(photosapi.SessionHeader))
+		user, err := sessions.ResolveSessionUser(r.Context(), r.Header.Get(serviceproxy.SessionHeader))
 		switch {
 		case errors.Is(err, accounts.ErrSessionNotFound):
 			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")

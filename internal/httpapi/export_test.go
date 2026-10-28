@@ -21,7 +21,8 @@ func RoutePattern(product http.Handler, r *http.Request) string {
 	return pattern
 }
 
-// Routes is the product's route table.
+// Routes is the product's route table with every mounted API expanded into
+// the operations it serves.
 func Routes(product http.Handler) []apiroute.Route {
-	return product.(*productHandler).table()
+	return apiroute.Expand(product.(*productHandler).table())
 }

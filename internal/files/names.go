@@ -3,9 +3,27 @@ package files
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 )
+
+// Agent空间 and its immediate children are policy directories managed by
+// the Host Agent, not member-created entries. The same name elsewhere is
+// ordinary user data for these Web mutation rules. Samba separately vetoes
+// this name at every depth in Shared. Contents below each member's directory
+// remain editable through Web operations.
+func isAgentPolicyDirectory(root, spaceID, name string) bool {
+	if spaceID != "space:shared" {
+		return false
+	}
+	relative, err := filepath.Rel(root, name)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	return len(parts) <= 2 && strings.EqualFold(parts[0], "Agent空间")
+}
 
 // Names a user gives to new or renamed items must also work over SMB on
 // Windows and macOS (docs/specs/basic-storage-and-sharing.md#名称规则).
@@ -13,9 +31,6 @@ import (
 // rules keeps its name when it is moved, copied or restored under it.
 
 var (
-	// ErrNameTooLong reports a name over the 255 bytes Linux allows for one
-	// path component: 85 Chinese characters fill it.
-	ErrNameTooLong = fmt.Errorf("%w: longer than %d bytes", ErrInvalidName, maxNameBytes)
 	// ErrNameNotPortable reports a name Windows or macOS cannot hold: control
 	// characters, \ / : * ? " < > |, a trailing space or dot, or a device name
 	// such as CON.

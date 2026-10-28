@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/netip"
 	"time"
 
@@ -170,16 +171,16 @@ func (s *Service) Directory(ctx context.Context) (Directory, error) {
 	if err != nil {
 		return Directory{}, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var id string
 		var user DirectoryUser
 		if err := rows.Scan(&id, &user.Username, &user.Nickname, &user.Role); err != nil {
-			rows.Close()
 			return Directory{}, err
 		}
 		directory.Users[id] = user
 	}
-	if err := rows.Close(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return Directory{}, err
 	}
 	rows, err = s.store.db.QueryContext(ctx, "SELECT id, kind, name, COALESCE(owner_user_id, ''), created_at FROM spaces")

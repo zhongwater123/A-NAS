@@ -31,6 +31,8 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 
 ## 卷与目录
 
+`Agent空间` 的管理位置由 Host Agent 维护，访问与修复规则见 [ADR 0024 决定 5](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md#决定)。Shared 的 Samba 配置额外 veto 名为 `Agent空间` 的条目；下面的通用 Samba 选项仍用于个人空间。
+
 - 数据卷固定挂载到 `/srv/a-nas/data`，mount unit 使用 `UUID=`、`noatime,compress=zstd:3,nodev,nosuid,noexec`。
 - 数据卷可以由多块硬盘组成，用 Btrfs 自带的多设备配置（[ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)）：mount unit 不变，Btrfs 在全部成员出现后挂载；挂载表只列出其中一块设备，所以宿主机状态从 sysfs 的 `fs/btrfs/<uuid>/devices` 认出每块成员盘，任何已挂载 Btrfs 的设备都算使用中；`lsblk` 的文件系统列来自 udev 数据库，加盘后在重启前是旧的（[调查](../investigations/2026-10-20-added-disk-shown-unused-until-reboot.md)）。卷标记 `.a-nas-volume.json` 的 `layout` 记录目标冗余方式（镜像、扩容或条带；单盘时没有），Host Agent 在启动时和每 15 分钟检查 sysfs 的 `allocation/<类型>/<profile>/used_bytes` 与 `exclusive_operation`，把不在目标 profile 中的数据以 `soft` 过滤的 balance 转换过去。停止 Host Agent 或关机会取消正在进行的 balance，下一次检查接着做。产品服务从同一份观测计算转换进度，目标冗余方式取自最近一次成功的存储计划。
 - 根目录必须同时是 Btrfs 且存在 root 创建的 `.a-nas-volume.json`。缺少任一证据时，文件服务返回 `volume_unavailable`，不会创建空间目录。
@@ -44,6 +46,8 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
   | `spaces/shared` | `a-nas-users` `rwx`（只读共享文件夹为 `r-x`，另授写入者 `rwx`） | 同访问 ACL |
   | `<空间>/.a-nas-trash` | 该空间的用户仅 `--x` | 无 |
   | `<空间>/.a-nas-trash/<username>` | 该用户 `rwx` | 同访问 ACL |
+  | `spaces/shared/Agent空间` | `a-nas-users` 只读 `r-x` | 同访问 ACL |
+  | `spaces/shared/Agent空间/<username>` | 本人 `rwx`，`a-nas-users` 只读 `r-x` | 同访问 ACL |
   | `apps`、`apps/<id>` | `apps` 仅 root；`apps/<id>` 属主为应用身份 `app-<id>` | 无 |
   | `photos` | 属主为相册服务身份 `a-nas-photos`（UID/GID 31000），`0700`，无扩展 ACL（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | 无 |
 
@@ -60,7 +64,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - 账号对应 UID 20100–29999 的 Linux 身份，固定组 `a-nas-users`/`a-nas-admins` 使用 GID 20000/20001（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）。Product Service 启动时把全部已启用和已禁用账号同步给 Host Agent；Host Agent 拒绝接管区间外或非 A-NAS 分配的同名账号，并把身份表写入 `/var/lib/a-nas-host/identity-registry.json` 与数据卷 `.a-nas-identities.json`。
 - Host Agent 的记录（空间登记、身份表、查看授权、应用身份与数据卷操作日志）在它自己的 `StateDirectory`：`/var/lib/a-nas-host`，`root:root 0700`，产品服务打不开（[#176](https://github.com/zhongwater123/A-NAS/issues/176)）。只读取 root 所有、只有一个链接的普通文件，并按对应请求的规则逐条校验：空间根只能是 `spaces/shared` 或以账号命名的 `spaces/private/<用户名>`；身份与应用身份不得共用 UID；查看授权超出时限或管理员已不能查看时按已到期读入，下次检查即撤销；操作日志的每条记录须与其类型的盘数、冗余方式、步骤和结果一致。校验不通过的记录整份停用，相应操作报错；身份表停用时不重做任何空间的 ACL（否则每个个人空间都会落到无属主的封闭 ACL），也不覆盖数据卷上的身份表副本。每次写入记录都在改名后刷盘所在目录，操作日志等在断电后仍在。更早的版本把它们放在产品服务的 `/var/lib/a-nas`，Host Agent 启动时移过来一次，回滚步骤见[实机配置手册](../runbooks/provision-v1.0.1-experimental-storage.md#回滚)。
 - 普通文件以 `file:*` ID 标识；Catalog 用空间、inode 与相对路径维持重命名后的身份。
-- Web 文件操作经文件代理以登录者身份执行（见下节），同步更新文件系统与 Catalog；SMB 变更由目录对账吸收（见下条）。每个空间是独立的 Btrfs 子卷并有自己的根 ACL，跨空间改名会失败（`EXDEV`），即使成功也会带走原空间的 ACL；因此跨空间剪切由 Product Service 拆成复制到目标空间、再删除原条目，复制品是新条目。复制先写成目标文件夹中的隐藏副本 `.a-nas-copy-*`，完成后改名就位；Product Service 在内存中持有进行中的副本，目录对账只列出副本本身而不进入，并删除无人持有的副本（重启中断的复制留下的）。隐藏目录、符号链接、设备文件和越界路径不进入目录。同一路径被新 inode 占用时，旧行先让出路径，避免唯一约束使对账永久失败。
+- Web 文件操作经文件代理以登录者身份执行（见下节），同步更新文件系统与 Catalog；SMB 变更由目录对账吸收（见下条）。每个空间是独立的 Btrfs 子卷并有自己的根 ACL，跨空间改名会失败（`EXDEV`），即使成功也会带走原空间的 ACL；因此跨空间剪切由 Product Service 拆成复制到目标空间、再把原条目原子改名进操作者的源空间回收站，复制品是新条目。复制期间经 SMB 到达的新内容仍保留在源条目中，恢复与到期规则见[文件规格](../specs/basic-storage-and-sharing.md)。复制通过已打开的描述符读取并保留每个文件和目录的修改时间，不继承源 ACL。复制先写成目标文件夹中的隐藏副本 `.a-nas-copy-*`，完成后改名就位；Product Service 在内存中持有进行中的副本，目录对账只列出副本本身而不进入，并删除无人持有的副本（重启中断的复制留下的）。隐藏目录、符号链接、设备文件和越界路径不进入目录。同一路径被新 inode 占用时，旧行先让出路径，避免唯一约束使对账永久失败。
 - 对账与 Web 变更按空间排序（[调查](../investigations/2026-10-21-stale-reconcile-scan-rewrote-trash-rows.md)）。删除、恢复、清除、移动、复制、上传与新建文件夹从第一次文件操作到其行提交为止处于“在途”；对账与 Samba 回收导入记下扫描开始时的代次，开始时有变更在途、或扫描期间有变更开始或结束，就整体丢弃这次扫描：变更自己的行已是最新，SMB 的改动由下一轮补上。扫描结果在一个事务内写入，期间同一空间的新变更等待。必须拿到结果的扫描（上传完成时的文件夹已被 SMB 移走，分享选择的文件夹内容）先等在途变更结束，再独占扫描与写入。扫描到的 inode 属于回收站行时，回收站仍持有该 inode 或无法确认就不收录，否则删除这条过期的回收站行；打开条目时路径上的 inode 必须与记录一致，不一致视为不存在。写入时一行也没改的对账不推进代次，因此浏览文件夹不会让同时进行的整空间对账被丢弃。
 - 对账只覆盖请求涉及的范围（[#167](https://github.com/zhongwater123/A-NAS/issues/167)，[调查](../investigations/2026-10-21-whole-space-reconcile-scale.md)）：列目录只扫描该文件夹的直接子项，影视、音乐等读取文件夹之下全部内容的 `Tree` 只扫描该子树；写入时与范围内的现有行逐项比较，只写有变化的行，未变化的范围不写任何行。只有整空间对账能断定没找到的条目已不存在并删除其行：后台每 5 分钟的对账、快照比较与“最近删除”、对整个空间的 `Tree`，以及文件夹不在记录位置（经 SMB 移走）时的查找。部分对账没找到的行改到 `.a-nas-stale/<id>` 待定，列表与重名检查都不包含它们；之后任何一次对账在别处找到同一 inode，就以原 ID 放回。文件夹经 SMB 改名或移动时，其下各行随它改写路径（经它的待定路径中转，避免中途撞上唯一约束）；同名位置被另一个文件夹占用时，旧文件夹下的行随旧行一起待定。同一空间的整空间对账一次只跑一个，等待的请求由开始于其请求之后的那一次满足；后台循环跳过 4 分钟内已对账过的空间，共享空间每轮只对账一次。
 - 后台每 5 分钟的目录对账、Samba 回收导入和回收站到期清除只为本进程见过且仍有效的会话执行；长期未登录用户在下次登录时补做。
@@ -111,7 +115,7 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 ## 快照
 
 - 手动快照与定时快照都是空间子卷的 Btrfs 只读快照，由 root Host Agent 创建、列出、读出对象与删除；快照目录在系统盘的 `files.db`，为每个文件记录大小与修改时间，供备份中心把相同的版本合并显示。
-- 拍摄分两步：Host Agent 先创建只读快照，再按需逐行流式返回其中的文件与文件夹（`GET /v1/snapshots/{id}/objects`，每行一个 JSON 对象，以带总数的结束行收尾）；Product Service 读完全部清单后在一个短事务中写入目录，所以清单长度不受单次回复大小限制，单连接的目录也不会在遍历期间被占住。创建与删除都按快照 ID 幂等：已存在的快照算拍好，已不存在的算删除。Product Service 从请求 Host Agent 拍摄之前起就持有这份快照，直到目录记下它；其间失败或中断（关闭标签页、服务停止）都会删除它，停止时等这一步完成后才关闭目录。崩溃留下的由清扫处理：Product Service 启动后（数据卷离线时等它上线）以及之后每小时，把目录记录的快照与正在拍摄的快照交给 Host Agent（`PUT /v1/snapshots`），Host Agent 只在挂载着数据卷时删除 `.a-nas-snapshots` 中不在其中的快照子卷，并回报哪些仍在；不在数据卷上的快照，其目录记录随之删除。原因与取舍见[调查](../investigations/2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)。
+- 拍摄分两步：Host Agent 先创建只读快照，再按需逐行流式返回其中的文件与文件夹（`GET /v1/snapshots/{id}/objects`，每行一个 JSON 对象，以带总数的结束行收尾）；Product Service 读完全部清单后在一个短事务中写入目录，所以清单长度不受单次回复大小限制，单连接的目录也不会在遍历期间被占住。创建与删除都按快照 ID 幂等：已存在的快照算拍好，已不存在的算删除。Product Service 从请求 Host Agent 拍摄之前起就持有这份快照，直到目录记下它；其间失败或中断（关闭标签页、服务停止）都会删除它，停止时等这一步完成后才关闭目录。为了让崩溃留下的快照也能删掉，目录在请求拍摄之前把它登记到 `pending_snapshots`，并在记下快照的同一个事务中删除登记；拍摄失败后删不掉的快照，登记会保留。清扫只删除登记过的快照：Product Service 启动后（数据卷离线时等它上线）以及之后每小时，逐个删除不在拍摄中的登记快照（`DELETE /v1/snapshots/{id}`）。随后把目录记录的快照与正在拍摄的快照交给 Host Agent 核对（`POST /v1/snapshot-survey`）。核对只读，只在挂载着数据卷时进行，回报其中哪些仍在、数据卷上另有几份。不在数据卷上的快照，其目录记录随之删除；但如果目录记录的快照一份都不在，更可能是快照文件夹丢失或无法读取，这时保留记录。目录既没有记录、也没有登记的快照一律保留，因为目录可能丢失过，或者从旧副本恢复过；清扫在这类快照的数量变化时写一条活动日志。读目录中途出错时，清扫不删除任何东西。Host Agent 不再提供按名单批量删除的 `PUT /v1/snapshots`（[#269](https://github.com/zhongwater123/A-NAS/issues/269)）。原因与取舍见[调查](../investigations/2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)。
 - 每个空间至多一份快照计划。Product Service 每分钟检查一次，到期时直接请求 Host Agent 拍摄，不经过文件代理，因此不需要任何用户会话；拍摄前确认挂载的是预期数据卷，否则记录失败并在 15 分钟后重试。成功后按计划的保留方式（固定份数或智能保留）删除该空间不再保留的定时快照，手动快照不受影响。
 - 恢复文件夹时，文件代理以用户身份先建目录、再逐个复制文件，新条目照常继承目标空间的默认 ACL；文件写完后由文件代理以用户身份把修改时间设回快照中的值（`set_mod_time`，只作用于普通文件、不跟随符号链接）。“还原此版本”先把整份文件写成临时文件，再把当前文件移入回收站并改名就位，与替换上传相同。快照对象仍由 Host Agent 读出（见上文的例外）。
 - 快照与现在的比较、“最近删除或移走”只读 `files.db`：按路径把快照条目与文件目录逐行比对，打开快照顶层与列出最近删除前先对账空间，以计入 SMB 的改动。
@@ -145,5 +149,5 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 - [Host Agent 记录的目录与迁移](../../internal/hostops/linux/state.go)、[读入校验与迁移测试](../../internal/hostops/linux/state_internal_test.go) 与 [root 集成测试 `TestRootStateLeavesTheProductServiceDirectory`](../../internal/hostops/linux/root_integration_test.go)
 - [目录对账与变更的排序](../../internal/files/ordering.go) 与[交错回归测试](../../internal/files/reconcile_race_test.go)
 - [按范围对账](../../internal/files/reconcile.go)、[范围回归测试](../../internal/files/reconcile_scope_test.go) 与[规模测量](../../internal/files/reconcile_scale_test.go)
-- [文件代理的分页、取消与工作进程池](../../internal/filebroker/server.go) 与[测试](../../internal/filebroker/worker_test.go)
+- [文件代理的分页、取消与工作进程池](../../internal/filebroker/rootbroker/server.go) 与[测试](../../internal/filebroker/rootbroker/worker_test.go)
 - [相册存储区修复](../../internal/hostops/linux/photos.go)

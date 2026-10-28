@@ -368,3 +368,15 @@ func TestQueuedPreviewRechecksRevokedAccess(t *testing.T) {
 		t.Fatal("revoked source was decoded")
 	}
 }
+
+// File and share previews refuse the same oversized pictures, before any
+// decoding.
+func TestHEIFOverTheLimitIsNotDecoded(t *testing.T) {
+	t.Parallel()
+	if _, err := RenderHEIF(context.Background(), nil, nil, MaxHEIFSource+1, 320); !errors.Is(err, ErrTooLarge) || !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("RenderHEIF() of %d bytes error = %v, want ErrTooLarge", MaxHEIFSource+1, err)
+	}
+	if !IsHEIF("IMG_0001.HEIC") || IsHEIF("IMG_0001.JPG") {
+		t.Fatal("HEIF pictures are not recognized by extension")
+	}
+}

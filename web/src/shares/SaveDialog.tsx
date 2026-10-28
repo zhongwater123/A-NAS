@@ -1,10 +1,14 @@
-import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Folder, FolderPlus, HardDrive, LoaderCircle, Users, X } from "lucide-react";
-import { createDirectory, listEntries, listSpaces, type FileEntry, type Space } from "../api";
-import { formatBytes } from "../bytes";
-import { requestKey, saveShare, type Job, type Share } from "./api";
+import { useEffect, useRef, useState } from "react";
+
+import type { FileEntry, Space } from "../api.generated";
+import { createDirectory, listEntries, listSpaces } from "../files/api";
+import { formatBytes } from "../lib/bytes";
+import { type Job, requestKey, type Share, saveShare } from "./api";
 import { errorText, leaf } from "./format";
+import palette from "./palette.module.css";
 import { EntryTile } from "./parts";
+import styles from "./shares.module.css";
 
 const spaceName = (space: Space) => (space.kind === "private" ? "个人空间" : space.name);
 
@@ -88,7 +92,7 @@ export function SaveDialog({
     };
   }, [spaceId, parentId]);
   useEffect(() => {
-    layer.current?.querySelector<HTMLElement>(".sh-save-spaces button")?.focus();
+    layer.current?.querySelector<HTMLElement>(`.${styles.shSaveSpaces} button`)?.focus();
   }, [spaces.length]);
 
   const chosen = share.entries.filter((entry) => entryIds.includes(entry.id));
@@ -133,7 +137,7 @@ export function SaveDialog({
   return (
     <div
       ref={layer}
-      className="sh-layer"
+      className={`${palette.shPalette} ${styles.shLayer}`}
       onKeyDown={(event) => {
         if (event.key === "Escape" && naming === undefined && !busy) {
           event.stopPropagation();
@@ -141,22 +145,22 @@ export function SaveDialog({
         }
       }}
     >
-      <section className="sh-dialog sh-save" role="dialog" aria-modal="true" aria-labelledby="sh-save-title">
-        <header className="sh-dialog-head">
+      <section className={`${styles.shDialog} sh-save`} role="dialog" aria-modal="true" aria-labelledby="sh-save-title">
+        <header className={styles.shDialogHead}>
           <div>
             <h2 id="sh-save-title">保存到我的空间</h2>
-            <p className="sh-save-what">
+            <p className={styles.shSaveWhat}>
               {chosen[0] && <EntryTile name={chosen[0].path} isDir={chosen[0].isDir} size="sm" />}
               <span>{summary}</span>
               {bytes > 0 && <small>{formatBytes(bytes)}</small>}
             </p>
           </div>
-          <button className="sh-icon-btn" aria-label="关闭保存位置" disabled={busy} onClick={onClose}>
+          <button className={styles.shIconBtn} aria-label="关闭保存位置" disabled={busy} onClick={onClose}>
             <X />
           </button>
         </header>
-        <div className="sh-save-body">
-          <nav className="sh-save-spaces" aria-label="目标空间">
+        <div className={styles.shSaveBody}>
+          <nav className={styles.shSaveSpaces} aria-label="目标空间">
             {spaces.map((item) => (
               <button
                 key={item.id}
@@ -173,8 +177,8 @@ export function SaveDialog({
               </button>
             ))}
           </nav>
-          <div className="sh-save-browser">
-            <nav className="sh-crumbs" aria-label="保存位置">
+          <div className={styles.shSaveBrowser}>
+            <nav className={styles.shCrumbs} aria-label="保存位置">
               <button disabled={!trail.length || busy} onClick={() => setTrail([])}>
                 {space ? spaceName(space) : "—"}
               </button>
@@ -190,10 +194,10 @@ export function SaveDialog({
                 </span>
               ))}
             </nav>
-            <div className="sh-folders" aria-busy={loading}>
+            <div className={styles.shFolders} aria-busy={loading}>
               {naming !== undefined && (
                 <form
-                  className="sh-folder-new"
+                  className={styles.shFolderNew}
                   onSubmit={(event) => {
                     event.preventDefault();
                     void create();
@@ -215,21 +219,30 @@ export function SaveDialog({
                     }}
                     onChange={(event) => setNaming(event.target.value)}
                   />
-                  <button type="submit" className="sh-btn primary small" disabled={busy || !naming.trim()}>
+                  <button
+                    type="submit"
+                    className={`${styles.shBtn} primary ${styles.small}`}
+                    disabled={busy || !naming.trim()}
+                  >
                     创建
                   </button>
-                  <button type="button" className="sh-btn small" disabled={busy} onClick={() => setNaming(undefined)}>
+                  <button
+                    type="button"
+                    className={`${styles.shBtn} ${styles.small}`}
+                    disabled={busy}
+                    onClick={() => setNaming(undefined)}
+                  >
                     取消
                   </button>
                 </form>
               )}
               {loading ? (
-                <p className="sh-folders-note">
-                  <LoaderCircle className="sh-spin" />
+                <p className={styles.shFoldersNote}>
+                  <LoaderCircle className={styles.shSpin} />
                   正在读取文件夹…
                 </p>
               ) : !spaces.length ? (
-                <p className="sh-folders-note">没有可以写入的个人空间或共享文件夹</p>
+                <p className={styles.shFoldersNote}>没有可以写入的个人空间或共享文件夹</p>
               ) : (
                 folders.map((entry) => (
                   <button
@@ -247,19 +260,19 @@ export function SaveDialog({
                 ))
               )}
               {!loading && spaces.length > 0 && !folders.length && naming === undefined && (
-                <p className="sh-folders-note">这里没有子文件夹</p>
+                <p className={styles.shFoldersNote}>这里没有子文件夹</p>
               )}
             </div>
           </div>
         </div>
         {error && (
-          <p role="alert" className="sh-alert sh-dialog-alert">
+          <p role="alert" className={`${styles.shAlert} ${styles.shDialogAlert}`}>
             {error}
           </p>
         )}
-        <footer className="sh-dialog-foot">
+        <footer className={styles.shDialogFoot}>
           <button
-            className="sh-btn ghost"
+            className={`${styles.shBtn} ${styles.ghost}`}
             disabled={!spaceId || busy || naming !== undefined}
             onClick={() => {
               setNaming("");
@@ -268,16 +281,16 @@ export function SaveDialog({
             <FolderPlus />
             新建文件夹
           </button>
-          <span className="sh-foot-note">同名文件会自动改名，不会覆盖</span>
-          <button className="sh-btn" disabled={busy} onClick={onClose}>
+          <span className={styles.shFootNote}>同名文件会自动改名，不会覆盖</span>
+          <button className={styles.shBtn} disabled={busy} onClick={onClose}>
             取消
           </button>
           <button
-            className="sh-btn primary"
+            className={`${styles.shBtn} primary`}
             disabled={busy || loading || !spaceId || naming !== undefined}
             onClick={() => void save()}
           >
-            {working === "save" && <LoaderCircle className="sh-spin" />}
+            {working === "save" && <LoaderCircle className={styles.shSpin} />}
             {working === "save" ? "正在创建任务…" : "保存到此文件夹"}
           </button>
         </footer>

@@ -11,8 +11,9 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { displayURL, type PhotoAsset } from "./api";
 import { dayLabel, momentOf, reducedMotion } from "./model";
-import { displayURL, type PhotoAsset } from "./photosApi";
+import styles from "./photos.module.css";
 
 // How long each photo stays once shown, and how long two photos cross-fade.
 const slideDelay = 4000;
@@ -274,7 +275,7 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
   return createPortal(
     <div
       ref={root}
-      className={`ph-slideshow${shownChrome ? " chrome" : ""}${fade ? "" : " still"}`}
+      className={`${styles.phSlideshow}${shownChrome ? ` ${styles.chrome}` : ""}${fade ? "" : ` ${styles.still}`}`}
       role="dialog"
       aria-label="幻灯片"
       tabIndex={-1}
@@ -285,16 +286,16 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
       {leaving && leaving.id !== current.id && (
         <img
           key={`leaving-${leaving.id}`}
-          className="ph-slide leaving"
+          className={`${styles.phSlide} ${styles.leaving}`}
           src={displayURL(leaving)}
           alt=""
           draggable={false}
         />
       )}
-      <img key={current.id} className="ph-slide" src={displayURL(current)} alt={current.name} draggable={false} />
+      <img key={current.id} className={styles.phSlide} src={displayURL(current)} alt={current.name} draggable={false} />
 
-      <header className="ph-slideshow-bar">
-        <div className="ph-slideshow-caption">
+      <header className={styles.phSlideshowBar}>
+        <div className={styles.phSlideshowCaption}>
           <strong>{dayLabel(moment)}</strong>
           <small>
             {moment.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} ·{" "}
@@ -306,7 +307,7 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
         </button>
       </header>
       {!ended && (
-        <div className="ph-slideshow-controls" role="toolbar" aria-label="幻灯片控制">
+        <div className={styles.phSlideshowControls} role="toolbar" aria-label="幻灯片控制">
           <button
             type="button"
             aria-label="上一张"
@@ -318,7 +319,7 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
           </button>
           <button
             type="button"
-            className="main"
+            className={styles.main}
             aria-label={paused ? "继续播放" : "暂停"}
             title={paused ? "继续 (空格)" : "暂停 (空格)"}
             onClick={() => {
@@ -334,22 +335,22 @@ export function Slideshow({ assets: all, startId, total, more, onReveal, onExit 
         </div>
       )}
       {!ended && (
-        <div className="ph-slideshow-progress" aria-hidden="true">
+        <div className={styles.phSlideshowProgress} aria-hidden="true">
           <span
             key={`${current.id}:${paused}`}
-            className={paused || awaitingMore ? "paused" : ""}
+            className={paused || awaitingMore ? styles.paused : ""}
             style={{ animationDuration: `${slideDelay + (fade ? fadeTime : 0)}ms` }}
           />
         </div>
       )}
       {(slow || awaitingMore) && !ended && (
-        <div className="ph-slideshow-wait" role="status">
-          <span className="ph-spinner" />
+        <div className={styles.phSlideshowWait} role="status">
+          <span className={styles.phSpinner} />
           {awaitingMore ? "正在载入后面的照片" : "正在载入下一张"}
         </div>
       )}
       {ended && (
-        <div className="ph-slideshow-end" role="status">
+        <div className={styles.phSlideshowEnd} role="status">
           <strong>放完了</strong>
           <small>{`共 ${assets.length} 张照片`}</small>
           <div>

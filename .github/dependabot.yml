@@ -6,6 +6,12 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # The client stays on the Qdrant release deploy/qdrant/qdrant.json pins
+      # (internal/vectorindex tests that they match); both move by hand, so
+      # security updates still come.
+      - dependency-name: github.com/qdrant/go-client
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       go:
         update-types: [minor, patch]
@@ -18,6 +24,14 @@ updates:
       interval: monthly
     allow:
       - dependency-name: github.com/golangci/golangci-lint/v2
+
+  # actionlint's own module (Makefile, ops-check), as golangci-lint's.
+  - package-ecosystem: gomod
+    directory: /tools/actionlint
+    schedule:
+      interval: monthly
+    allow:
+      - dependency-name: github.com/rhysd/actionlint
 
   # Web packages come in groups, because a breaking update in one package
   # holds back the rest of its pull request: when all of them were one group
@@ -58,6 +72,20 @@ updates:
         update-types: ["version-update:semver-major"]
     groups:
       openapi:
+        update-types: [minor, patch]
+
+  # The AI Worker's runtime and the development tools of ai/, which
+  # `uv pip compile` resolves from requirements.in and requirements-dev.in
+  # (scripts/build-ai-runtime.sh --lock). Dependabot's uv runs it without the
+  # script's --python-platform and --excludes: when ops-check fails on its
+  # pull request, run the script on the branch. A runtime update needs the
+  # real-model tests before it merges (docs/development/LOCAL_ENVIRONMENT.md).
+  - package-ecosystem: uv
+    directory: /ai
+    schedule:
+      interval: monthly
+    groups:
+      ai:
         update-types: [minor, patch]
 
   - package-ecosystem: github-actions

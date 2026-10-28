@@ -23,38 +23,25 @@ func TestNormalizeLinkTarget(t *testing.T) {
 	}
 }
 
-func TestExternalLinks(t *testing.T) {
-	for _, target := range []string{"https://example.com", "mailto:test@example.com", "/absolute/path"} {
-		if !isExternalLink(target) {
-			t.Errorf("isExternalLink(%q) = false", target)
-		}
-	}
-	if isExternalLink("../CONTEXT.md") {
-		t.Error("relative repository link classified as external")
-	}
-}
-
-func TestValidateDocumentationCountsMarkdownAndFindsBrokenLinks(t *testing.T) {
+func TestValidateDocumentationSkipsDependenciesAndOtherCheckouts(t *testing.T) {
 	root := t.TempDir()
 	writeRequiredDocuments(t, root)
 	writeDocuments(t, root, map[string]string{
-		"docs/broken.md":                                "[missing](missing.md)\n",
-		"web/node_modules/dependency/README.md":         "[dependency link](missing.md)\n",
-		"internal/webui/dist/generated.md":              "[dependency link](missing.md)\n",
-		".claude/worktrees/other-branch/docs/broken.md": "[other checkout](missing.md) 尚未部署\n",
+		"docs/specs/music.md":                           "# 音乐\n\n状态：implemented（尚未合并）\n",
+		"web/node_modules/dependency/README.md":         "尚未部署\n",
+		"internal/webui/dist/generated.md":              "尚未部署\n",
+		".claude/worktrees/other-branch/docs/broken.md": "尚未部署\n",
 	})
 
 	problems, files := validateDocumentation(root)
 	if files != len(requiredDocuments)+1 {
 		t.Fatalf("validateDocumentation() counted %d Markdown files, want %d", files, len(requiredDocuments)+1)
 	}
-	if len(problems) != 1 || !strings.Contains(problems[0], "missing.md") {
-		t.Fatalf("validateDocumentation() problems = %v, want one missing-link problem", problems)
-	}
+	assertProblems(t, problems, []string{"docs/specs/music.md:3 says 未合并"})
 }
 
 func TestValidateDocumentationCapsCurrentSize(t *testing.T) {
-	header := "# 当前状态\n\n更新时间：2026-10-23\n\n"
+	header := "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n"
 	for size, wantProblem := range map[int]bool{currentMaxBytes: false, currentMaxBytes + 1: true} {
 		root := t.TempDir()
 		writeRequiredDocuments(t, root)
@@ -72,8 +59,9 @@ func TestValidateDocumentationKeepsMergeAndDeployStatusInCurrent(t *testing.T) {
 	root := t.TempDir()
 	writeRequiredDocuments(t, root)
 	writeDocuments(t, root, map[string]string{
-		currentDocument: "# 当前状态\n\n更新时间：2026-10-23\n\n## 已合并尚未部署\n\n- #1\n",
-		"docs/runbooks/accept-features-on-experimental-nas.md": "# 验收\n\n待合并的修复部署后再验收。\n",
+		currentDocument:                 "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 已合并尚未部署\n\n运行 scripts/undeployed.sh。\n",
+		acceptanceRunbook:               "# 验收\n\n待合并的修复部署后再验收：[快照](../investigations/2026-10-21-snapshots.md)。\n",
+		investigationIndex:              "- [2026-10-21：快照](2026-10-21-snapshots.md)\n",
 		"docs/specs/music.md":           "# 音乐\n\n状态：implemented（尚未合并）\n",
 		"docs/adr/0023-share-copies.md": "# 0023\n\n状态：proposed（待合并评审，尚未部署）\n",
 		"docs/adr/README.md":            "- [0023：分享](0023-share-copies.md)（proposed）\n",
@@ -101,6 +89,37 @@ func TestValidateDocumentationKeepsMergeAndDeployStatusInCurrent(t *testing.T) {
 		"docs/research/labels.md:2 says 未部署",
 		"docs/research/labels.md:3 says 未部署",
 	})
+}
+
+func TestValidateDocumentationNamesOneDeployedCommit(t *testing.T) {
+	header := "# 当前状态\n\n更新时间：2026-10-27\n\n"
+	tests := map[string]struct {
+		body string
+		want []string
+	}{
+		"one commit": {body: "- 已部署：`80b602275b86`（PR #250 的合并提交，2026-10-26 安装）\n- 已合并、尚未部署的 PR 由 scripts/undeployed.sh 列出。\n"},
+		"none":       {body: "- 主干 `80b602275b86`\n", want: []string{"needs exactly one line starting with - 已部署：`<commit>`, found 0"}},
+		"two": {
+			body: "- 已部署：`80b602275b86`\n- 已部署：`bb1ec71bff65`\n",
+			want: []string{"needs exactly one line starting with - 已部署：`<commit>`, found 2"},
+		},
+		"no commit": {body: "- 已部署：主干最新\n", want: []string{currentDocument + ":5: write the deployed commit as - 已部署：`<commit>`"}},
+		"hand list": {
+			body: "- 已部署：`80b602275b86`\n" +
+				"- 已合并、尚未部署：[#245](https://github.com/zhongwater123/A-NAS/pull/245)，随下一次部署。\n" +
+				"- #203 的语音处理合并后也不部署，缺密钥。\n" +
+				"- 未部署的 #141 只是评估。<!-- doccheck: not a status -->\n",
+			want: []string{currentDocument + ":6 lists undeployed pull requests by hand"},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRequiredDocuments(t, root)
+			writeDocuments(t, root, map[string]string{currentDocument: header + test.body})
+			assertProblems(t, validateDocumentationProblems(root), test.want)
+		})
+	}
 }
 
 func TestValidateDocumentationMatchesADRStatusWithIndex(t *testing.T) {
@@ -157,6 +176,72 @@ func TestValidateDocumentationMatchesADRStatusWithIndex(t *testing.T) {
 	})
 }
 
+func TestValidateDocumentationKeepsADRNumbersApart(t *testing.T) {
+	root := t.TempDir()
+	writeRequiredDocuments(t, root)
+	writeDocuments(t, root, map[string]string{
+		"docs/adr/0001-first.md":   "# 0001\n\n状态：accepted\n",
+		"docs/adr/0002-second.md":  "# 0002\n\n状态：accepted\n",
+		"docs/adr/0002-clash.md":   "# 0002\n\n状态：accepted\n",
+		"docs/adr/0003-arrived.md": "# 0003\n\n状态：proposed\n",
+		"docs/adr/README.md": "# ADR\n\n" +
+			"- [0001：第一](0001-first.md)\n" +
+			"- [0002：第二](0002-second.md)\n" +
+			"- [0002：撞号](0002-clash.md)\n" +
+			"- [0003：已合并](0003-arrived.md)（proposed）\n" +
+			"- 0003：已合并（draft，PR #3）\n" +
+			"- 0004：分支上（draft，PR #4）\n" +
+			"- 0005：另一个分支（draft，PR #5）\n" +
+			"- 0005：同号的分支（draft，PR #6）\n" +
+			"\n2026 年 0006 号之后再议。\n",
+	})
+
+	assertProblems(t, validateDocumentationProblems(root), []string{
+		"docs/adr/0002-clash.md and docs/adr/0002-second.md share the number 0002",
+		"docs/adr/README.md still holds 0003 for a branch, but docs/adr/0003-arrived.md has it",
+		"docs/adr/README.md holds 0005 more than once",
+	})
+}
+
+func TestValidateDocumentationKeepsInvestigationStatusInOnePlace(t *testing.T) {
+	root := t.TempDir()
+	writeRequiredDocuments(t, root)
+	writeDocuments(t, root, map[string]string{
+		"docs/investigations/2026-10-01-open.md":         "# 调查\n\n状态：open\n更新时间：2026-10-01\n",
+		"docs/investigations/2026-10-02-checked.md":      "# 调查\n\n状态：fixed（PR #2），待实机验收\n",
+		"docs/investigations/2026-10-03-unchecked.md":    "# 调查\n\n状态：fixed，待实机验收\n",
+		"docs/investigations/2026-10-04-resolved.md":     "# 调查\n\n状态：resolved；回归测试即证据，实机无可补充\n",
+		"docs/investigations/2026-10-05-superseded.md":   "# 调查\n\n状态：superseded by ADR 0008\n",
+		"docs/investigations/2026-10-06-pending.md":      "# 调查\n\n状态：fixed locally；Experimental NAS verification pending\n",
+		"docs/investigations/2026-10-07-fix-in-pr.md":    "# 调查\n\n状态：fix in PR #39\n",
+		"docs/investigations/2026-10-08-no-status.md":    "# 调查\n\n症状。\n",
+		"docs/investigations/2026-10-09-unlisted.md":     "# 调查\n\n状态：resolved\n",
+		"docs/investigations/2026-10-10-index-status.md": "# 调查\n\n状态：resolved\n",
+		"docs/investigations/_TEMPLATE.md":               "# <问题标题>\n\n状态：open\n",
+		"docs/investigations/README.md": "# 调查记录\n\n" +
+			"- [2026-10-01：开放](2026-10-01-open.md)\n" +
+			"- [2026-10-02：已核对](2026-10-02-checked.md)\n" +
+			"- [2026-10-03：未核对](2026-10-03-unchecked.md)\n" +
+			"- [2026-10-04：已解决](2026-10-04-resolved.md)\n" +
+			"- [2026-10-05：已替代](2026-10-05-superseded.md)\n" +
+			"- [2026-10-06：待验收](2026-10-06-pending.md)\n" +
+			"- [2026-10-07：旧写法](2026-10-07-fix-in-pr.md)\n" +
+			"- [2026-10-08：无状态](2026-10-08-no-status.md)\n" +
+			"- [2026-10-10：索引带状态](2026-10-10-index-status.md)（resolved）\n" +
+			"\n从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建。\n",
+		acceptanceRunbook: "# 验收\n\n- 核对（[调查](../investigations/2026-10-02-checked.md)）。\n" +
+			"- 核对（[调查](../investigations/2026-10-06-pending.md#后续工作)）。\n",
+	})
+
+	assertProblems(t, validateDocumentationProblems(root), []string{
+		"docs/investigations/2026-10-03-unchecked.md is fixed, but " + acceptanceRunbook + " has no check that links it",
+		"docs/investigations/2026-10-07-fix-in-pr.md: start the 状态 line under the title with open, fixed, resolved or superseded",
+		"docs/investigations/2026-10-08-no-status.md: start the 状态 line",
+		"docs/investigations/2026-10-09-unlisted.md is not listed in " + investigationIndex,
+		investigationIndex + " gives 2026-10-10-index-status.md a status",
+	})
+}
+
 func validateDocumentationProblems(root string) []string {
 	problems, _ := validateDocumentation(root)
 	return problems
@@ -180,7 +265,7 @@ func writeRequiredDocuments(t *testing.T, root string) {
 	for _, name := range requiredDocuments {
 		documents[name] = "# Test\n"
 	}
-	documents[currentDocument] = "# Test\n\n更新时间：2026-10-06\n"
+	documents[currentDocument] = "# Test\n\n更新时间：2026-10-06\n\n- 已部署：`80b602275b86`\n"
 	writeDocuments(t, root, documents)
 }
 

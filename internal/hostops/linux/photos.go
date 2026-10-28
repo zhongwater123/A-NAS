@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 )
 
 // The photo service owns the data volume's photos subvolume alone
@@ -44,7 +44,7 @@ func (e *Executor) EnsurePhotosStore(ctx context.Context) ([]string, error) {
 // one, and never walks the contents. It reports whether an existing store had
 // drifted.
 func (e *Executor) ensurePhotosStore(ctx context.Context) (bool, error) {
-	return e.ensureOwnedStore(ctx, photosDirectory, accounts.PhotoServiceUser, accounts.PhotoServiceUID)
+	return e.ensureOwnedStore(ctx, photosDirectory, accountid.PhotoServiceUser, accountid.PhotoServiceUID)
 }
 
 // EnsureSharesStore owns only the immutable sharing copies, outside member spaces.
@@ -54,7 +54,7 @@ func (e *Executor) EnsureSharesStore(ctx context.Context) ([]string, error) {
 	}
 	e.materializeMu.Lock()
 	defer e.materializeMu.Unlock()
-	drifted, err := e.ensureOwnedStore(ctx, "shares", accounts.ShareServiceUser, accounts.ShareServiceUID)
+	drifted, err := e.ensureOwnedStore(ctx, "shares", accountid.ShareServiceUser, accountid.ShareServiceUID)
 	if drifted {
 		return []string{filepath.Join(e.mountPoint, "shares")}, err
 	}
@@ -88,7 +88,7 @@ func (e *Executor) ensureOwnedStore(ctx context.Context, directoryName, serviceU
 	} else if err != nil {
 		return false, err
 	}
-	directory, _, err := e.openVolumeDirectory(photos, 0o700, false)
+	directory, _, err := e.openVolumeDirectory(photos, 0o700, ordinaryDirectory)
 	if err != nil {
 		return false, err
 	}

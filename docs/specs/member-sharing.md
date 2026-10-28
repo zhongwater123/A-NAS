@@ -18,6 +18,7 @@
 - 保存显示进度，关闭分享窗口不停止任务；失败显示原因。
 - 分享者可附初始留言，双方可连续对话并使用表情。多名接收者分别与分享者私聊，互相看不到其他人的回复。
 - 新回复有小通知和未读标记；正在查看对应讨论时更新消息，不重复弹窗。
+- 分享窗口最小化或页面隐藏时暂停窗口内容的定时读取，恢复后补齐；桌面通知继续接收。对话使用最后一条已读取消息的 ID 增量加载，不周期性重下完整历史。
 - 分享者可以看到每位接收者是否查看、是否曾成功保存，但看不到保存目标路径。消息已读、分享已查看和文件已保存分别记录。
 - 分享者可撤回分享。撤回立即停止正在运行的保存任务；自然到期允许到期前已开始的保存任务继续完成，但不再接受新保存任务。两种情况均停止预览和回复，保留分享记录、文件名称清单和历史消息；临时分享副本在不再被允许继续的任务使用后清理，已经保存或下载的内容无法收回。
 
@@ -177,6 +178,6 @@
 - 架构：[总览](../architecture/OVERVIEW.md)、[存储与文件](../architecture/storage-and-files.md)。
 - ADR：[统一身份与文件 ACL](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[相册服务身份与 Catalog 授权](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)。
 - 规格：[基础存储与共享](basic-storage-and-sharing.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[传输中心](transfer-center.md)。
-- 现有代码：[文件代理](../../internal/filebroker/server.go)、[文件操作](../../internal/files/service.go)、[桌面](../../web/src/desktop/Desktop.tsx)与[通知](../../web/src/desktop/NotificationCenter.tsx)、[文件预览](../../web/src/files/FileViewer.tsx)。
+- 现有代码：[文件代理](../../internal/filebroker/rootbroker/server.go)、[文件操作](../../internal/files/service.go)、[桌面](../../web/src/desktop/Desktop.tsx)与[通知](../../web/src/desktop/NotificationCenter.tsx)、[文件预览](../../web/src/files/FileViewer.tsx)。
 - 界面：[分享窗口](../../web/src/shares/SharesPanel.tsx)、[详情](../../web/src/shares/ShareDetail.tsx)、[私聊](../../web/src/shares/Conversation.tsx)、[提醒与未读](../../web/src/shares/SharesProvider.tsx)；[界面测试](../../web/src/shares/shares.test.tsx)；已读游标见[讨论](../../internal/shares/discussions.go)与[测试](../../internal/shares/lifecycle_test.go)。
 - 现有测试参考：[文件操作测试](../../internal/files/service_test.go)、[文件管理测试](../../web/src/files/FilePanel.test.tsx)。
