@@ -46,6 +46,8 @@
 - [2026-10-26：smbstatus 的告警混进 JSON，禁用账号与启动时的身份同步失败](2026-10-26-smbstatus-warning-fails-identity-sync.md)
 - [2026-10-26：未识别块设备阻断整次宿主机观测](2026-10-26-unidentified-device-blocks-host-state.md)
 
+- [2026-10-28：保存快照保留设置后，后台仍按旧策略删除快照](2026-10-28-snapshot-retention-policy-race.md)
+
 ## 状态
 
 每篇调查的状态只写在文件标题下的“状态：”一行，索引不重复。状态以下列词开头，其后可以补充说明：
