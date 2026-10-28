@@ -503,6 +503,9 @@ func (s *Service) trashEntry(ctx context.Context, actor accounts.User, spaceID, 
 	if err != nil {
 		return TrashItem{}, err
 	}
+	if isAgentPolicyDirectory(root, spaceID, source) {
+		return TrashItem{}, ErrForbidden
+	}
 	trashID := s.randomID("trash")
 	// Web and Samba recycle share .a-nas-trash/<username>; the Host Agent
 	// prepares it with the user's ACL. Creating it here only happens on
@@ -957,6 +960,9 @@ FROM trash t LEFT JOIN entries e ON e.id = t.entry_id WHERE t.id = ?`, trashID).
 	if !withinRoot(root, source) || !withinRoot(root, filepath.Join(parent, targetName)) {
 		return Restored{}, ErrNotFound
 	}
+	if isAgentPolicyDirectory(root, item.SpaceID, filepath.Join(parent, targetName)) {
+		return Restored{}, ErrForbidden
+	}
 	replaced := false
 	if conflict == ConflictReplace {
 		existing := targetName
@@ -1117,6 +1123,9 @@ func (s *Service) Move(ctx context.Context, actor accounts.User, entryID, target
 	if err != nil {
 		return Entry{}, err
 	}
+	if isAgentPolicyDirectory(root, spaceID, source) {
+		return Entry{}, ErrForbidden
+	}
 	if targetName == "" {
 		targetName = entry.Name
 	}
@@ -1134,6 +1143,9 @@ func (s *Service) Move(ctx context.Context, actor accounts.User, entryID, target
 		}
 	}
 	target := filepath.Join(parent, targetName)
+	if isAgentPolicyDirectory(root, spaceID, target) {
+		return Entry{}, ErrForbidden
+	}
 	if source == target {
 		return entry, nil
 	}
@@ -1226,6 +1238,9 @@ func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, s
 	if err != nil {
 		return Entry{}, err
 	}
+	if removingSource && isAgentPolicyDirectory(sourceRoot, spaceID, source) {
+		return Entry{}, ErrForbidden
+	}
 	root := sourceRoot
 	if targetSpaceID != spaceID {
 		if _, root, err = s.authorizedSpace(ctx, actor, targetSpaceID, true); err != nil {
@@ -1253,6 +1268,9 @@ func (s *Service) copyEntry(ctx context.Context, actor accounts.User, entryID, s
 		}
 	}
 	target := filepath.Join(parent, targetName)
+	if isAgentPolicyDirectory(root, targetSpaceID, target) {
+		return Entry{}, ErrForbidden
+	}
 	if _, err := s.fs.Lstat(ctx, target); err == nil {
 		return Entry{}, ErrConflict
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -1361,6 +1379,9 @@ func (s *Service) createDirectory(ctx context.Context, actor accounts.User, spac
 		return Entry{}, err
 	}
 	target := filepath.Join(parentPath, name)
+	if isAgentPolicyDirectory(root, spaceID, target) {
+		return Entry{}, ErrForbidden
+	}
 	if !withinRoot(root, target) {
 		return Entry{}, ErrInvalidName
 	}
@@ -1405,6 +1426,9 @@ func (s *Service) upload(ctx context.Context, actor accounts.User, spaceID, pare
 		return Entry{}, err
 	}
 	target := filepath.Join(parentPath, name)
+	if isAgentPolicyDirectory(root, spaceID, target) {
+		return Entry{}, ErrForbidden
+	}
 	if !withinRoot(root, target) {
 		return Entry{}, ErrInvalidName
 	}

@@ -37,8 +37,11 @@ vi.mock("react-easy-crop", async () => {
   };
 });
 
+// The shell counts in a layout effect, which runs in the commit that puts it
+// in the page: Settings renders it after a request, outside act, where a
+// passive effect may still be pending when findBy sees the element.
 vi.mock("./XtermSession", async () => {
-  const { useEffect, useEffectEvent } = await import("react");
+  const { useEffectEvent, useLayoutEffect } = await import("react");
   return {
     default: function MockXtermSession({ onStatus }: { onStatus: (status: SessionStatus) => void }) {
       const mounted = useEffectEvent(() => {
@@ -46,7 +49,7 @@ vi.mock("./XtermSession", async () => {
         xterm.onStatus = onStatus;
         onStatus({ state: "connected" });
       });
-      useEffect(() => mounted(), []);
+      useLayoutEffect(() => mounted(), []);
       return <div data-testid="xterm-session" />;
     },
   };
@@ -282,7 +285,7 @@ describe("Settings terminal", () => {
     // Settings reopens on the terminal with a new shell.
     settings.reopen();
     expect(await screen.findByTestId("xterm-session")).toBeTruthy();
-    await waitFor(() => expect(xterm.mounts).toBe(2));
+    expect(xterm.mounts).toBe(2);
   });
 
   it("offers a new session after the shell exits", async () => {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 )
 
 // spaceOrder orders the writers of one space's catalog rows (#164). Changes
@@ -16,6 +18,9 @@ import (
 // back.
 type spaceOrder struct {
 	mu sync.Mutex
+	// Retention decisions and policy changes share a separate gate. Taking
+	// a snapshot does not hold it, so a slow manifest cannot block settings.
+	snapshotRetention *semaphore.Weighted
 	// generation counts changes begun and ended and scans that changed
 	// rows when written. A scan that found the rows as they were leaves it,
 	// so listing folders does not stop a longer scan from being written.
@@ -38,10 +43,18 @@ func (s *Service) order(spaceID string) *spaceOrder {
 	defer s.ordersMu.Unlock()
 	order, ok := s.orders[spaceID]
 	if !ok {
-		order = &spaceOrder{idle: make(chan struct{}), wholeSlot: make(chan struct{}, 1)}
+		order = &spaceOrder{idle: make(chan struct{}), wholeSlot: make(chan struct{}, 1), snapshotRetention: semaphore.NewWeighted(1)}
 		s.orders[spaceID] = order
 	}
 	return order
+}
+
+func (s *Service) lockSnapshotRetention(ctx context.Context, spaceID string) (func(), error) {
+	gate := s.order(spaceID).snapshotRetention
+	if err := gate.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	return func() { gate.Release(1) }, nil
 }
 
 // change marks a change to a space's files as in flight, from before its

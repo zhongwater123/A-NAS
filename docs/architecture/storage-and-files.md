@@ -31,6 +31,8 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
 
 ## 卷与目录
 
+`Agent空间` 的管理位置由 Host Agent 维护，访问与修复规则见 [ADR 0024 决定 5](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md#决定)。Shared 的 Samba 配置额外 veto 名为 `Agent空间` 的条目；下面的通用 Samba 选项仍用于个人空间。
+
 - 数据卷固定挂载到 `/srv/a-nas/data`，mount unit 使用 `UUID=`、`noatime,compress=zstd:3,nodev,nosuid,noexec`。
 - 数据卷可以由多块硬盘组成，用 Btrfs 自带的多设备配置（[ADR 0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)）：mount unit 不变，Btrfs 在全部成员出现后挂载；挂载表只列出其中一块设备，所以宿主机状态从 sysfs 的 `fs/btrfs/<uuid>/devices` 认出每块成员盘，任何已挂载 Btrfs 的设备都算使用中；`lsblk` 的文件系统列来自 udev 数据库，加盘后在重启前是旧的（[调查](../investigations/2026-10-20-added-disk-shown-unused-until-reboot.md)）。卷标记 `.a-nas-volume.json` 的 `layout` 记录目标冗余方式（镜像、扩容或条带；单盘时没有），Host Agent 在启动时和每 15 分钟检查 sysfs 的 `allocation/<类型>/<profile>/used_bytes` 与 `exclusive_operation`，把不在目标 profile 中的数据以 `soft` 过滤的 balance 转换过去。停止 Host Agent 或关机会取消正在进行的 balance，下一次检查接着做。产品服务从同一份观测计算转换进度，目标冗余方式取自最近一次成功的存储计划。
 - 根目录必须同时是 Btrfs 且存在 root 创建的 `.a-nas-volume.json`。缺少任一证据时，文件服务返回 `volume_unavailable`，不会创建空间目录。
@@ -44,6 +46,8 @@ Windows SMB ── SMB3 ── 个人子卷 / Shared 子卷
   | `spaces/shared` | `a-nas-users` `rwx`（只读共享文件夹为 `r-x`，另授写入者 `rwx`） | 同访问 ACL |
   | `<空间>/.a-nas-trash` | 该空间的用户仅 `--x` | 无 |
   | `<空间>/.a-nas-trash/<username>` | 该用户 `rwx` | 同访问 ACL |
+  | `spaces/shared/Agent空间` | `a-nas-users` 只读 `r-x` | 同访问 ACL |
+  | `spaces/shared/Agent空间/<username>` | 本人 `rwx`，`a-nas-users` 只读 `r-x` | 同访问 ACL |
   | `apps`、`apps/<id>` | `apps` 仅 root；`apps/<id>` 属主为应用身份 `app-<id>` | 无 |
   | `photos` | 属主为相册服务身份 `a-nas-photos`（UID/GID 31000），`0700`，无扩展 ACL（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | 无 |
 
