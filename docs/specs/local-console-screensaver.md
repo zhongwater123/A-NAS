@@ -1,7 +1,7 @@
 # 本地控制台屏幕保护程序
 
 状态：implemented
-更新时间：2026-10-20
+更新时间：2026-10-28
 
 ## 目标
 
@@ -26,6 +26,12 @@
 - Given：屏保正在播放。
 - When：用户移动或点击鼠标、滚动、按键或触摸屏幕。
 - Then：屏保立即关闭、重新开始三分钟计时，触发退出的输入不会传递给桌面窗口或图标；下次进入时从全部仍可用视频中重新随机选择。
+
+### 覆盖期间下层页面不渲染
+
+- Given：屏保或黑屏正盖着本机屏幕，下层桌面的表盘仍在更新，窗口里可能有动画。
+- When：覆盖层出现 0.3 秒后（屏保淡入结束）。
+- Then：页面的其余部分不再计算样式、布局与绘制，本机屏幕的开销只剩视频本身，黑屏时接近 0；第一次输入后桌面原样回来，窗口、滚动位置与正在播放的音乐都不受影响。
 
 ### 远程浏览不启动屏保
 
@@ -60,6 +66,8 @@
 ## 边界与失败
 
 - `local-console=1` 只是显示模式标记，不是权限凭据；产品 API 和 Host Agent 权限边界不变。
+- 两种覆盖层都是 `<body>` 的直接子元素，不在页面根节点内；样式表据此在覆盖期间让其余部分 `content-visibility: hidden`。只盖一层不透明元素时，Chromium 仍会每帧渲染它下面的桌面（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。
+- 视频由 Chromium 通过 VA-API 硬件解码，宿主机要装 GPU 的 VA-API 驱动，见[本地控制台运行手册](../runbooks/operate-local-kiosk.md#硬件视频解码)。没有驱动时屏保照常播放，但 1080p 视频在 CPU 上解码，单条约 0.16–0.35 个核。
 - 产品服务只读扫描 `ANAS_SCREENSAVER_DIRECTORY` 指向的绝对目录，只接纳该目录第一层的普通 `.mp4` 文件；默认值与系统安装器写入的值都是 `/var/lib/a-nas/screensavers/current`。该路径可以是指向目录的符号链接，每次请求重新读取，因此切换链接后无需重启产品服务。
 - `/local-console/screensavers` 返回不含宿主机文件名的同源视频 URL 清单；各视频 URL 支持标准字节 Range。原 `/local-console/screensaver.mp4` 保留为读取排序后首个视频的兼容路由。
 - 屏保视频是系统盘上的长期媒体，不随 release 发布（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)）。每个视频以 SHA-256 命名存放在 `/var/lib/a-nas/screensavers/objects/`；池是 `pools/<池 ID>/` 下匿名编号的硬链接和 `SHA256SUMS`，池 ID 是清单 SHA-256 的前 16 位十六进制；`current` 链接指向当前池。外部媒体缺失不阻止产品服务、登录或桌面启动。
@@ -68,7 +76,8 @@
 
 ## 验收证据
 
-- React 定时、输入消费、每次进入只随机选择一条并循环、失败补选与远程模式测试见 [`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)。
+- React 定时、输入消费、每次进入只随机选择一条并循环、失败补选、覆盖层位于页面根节点之外与远程模式测试见 [`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)。
+- 覆盖期间下层页面停止渲染、唤醒后恢复，由无头 Chrome 对照验证；硬件解码与实机 CPU 用 [`measure-local-console-cpu.sh`](../../scripts/measure-local-console-cpu.sh) 测量，数据见[调查](../investigations/2026-10-28-screensaver-video-cpu.md)。
 - 清单筛选、匿名 URL、兼容路由与视频 Range 测试见 [`handler_test.go`](../../internal/webui/handler_test.go)。
 - 视频通道见[系统测试](../../scripts/system-test.sh)，全程使用真实的暂存脚本、媒体安装脚本和系统安装器：只上传缺少的视频、复用旧 release 暂存过的视频、升级保留当前池、共有视频只存一份、重复安装不产生变化、不需要暂存区的媒体回滚、拒绝哈希不符或 ID 不符的池且不留改动，以及从旧安装器首次升级时导入旧池。链接切换即时生效见 [`handler_test.go`](../../internal/webui/handler_test.go)。
 - 更换视频、媒体回滚和直连屏幕验收见[本地控制台运行手册](../runbooks/operate-local-kiosk.md)。
@@ -78,6 +87,7 @@
 - 规格：[个性化](personalization.md)
 - 架构：[架构总览](../architecture/OVERVIEW.md)
 - ADR：[本地控制台](../adr/0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)、[屏保视频是系统盘上的长期媒体](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
-- 代码：[`LocalConsoleScreenSaver.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.tsx)、[`handler.go`](../../internal/webui/handler.go)、[`install-screensavers.sh`](../../scripts/install-screensavers.sh)、[`remote-stage-screensavers.sh`](../../scripts/remote-stage-screensavers.sh)、[`deploy-screensavers.ps1`](../../scripts/deploy-screensavers.ps1)、[`install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)
+- 调查：[本机屏幕播放屏保时占用约 1.4 个核](../investigations/2026-10-28-screensaver-video-cpu.md)
+- 代码：[`LocalConsoleScreenSaver.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.tsx)、[`desktop.module.css`](../../web/src/desktop/desktop.module.css)、[`run-kiosk.sh`](../../scripts/run-kiosk.sh)、[`handler.go`](../../internal/webui/handler.go)、[`install-screensavers.sh`](../../scripts/install-screensavers.sh)、[`remote-stage-screensavers.sh`](../../scripts/remote-stage-screensavers.sh)、[`deploy-screensavers.ps1`](../../scripts/deploy-screensavers.ps1)、[`install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)
 - 测试：[`App.test.tsx`](../../web/src/App.test.tsx)、[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)、[`handler_test.go`](../../internal/webui/handler_test.go)、[`system-test.sh`](../../scripts/system-test.sh)
 - Issue：[#49 不带屏保视频的升级会让本地控制台屏保失效](https://github.com/zhongwater123/A-NAS/issues/49)

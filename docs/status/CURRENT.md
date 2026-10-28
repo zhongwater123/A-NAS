@@ -15,6 +15,7 @@
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1（2026-10-20 在 #149 的早期构建上加入第二块盘）。
 - 已合并、尚未部署的 PR 不在本页列出：`git fetch` 后运行 `bash scripts/undeployed.sh`，由 Git 列出“已部署”之后合入 main 的 PR。
 - 本地控制台仍以暂存账号 `anas-dev` 运行。下一次安装会把它换成专用账号 `a-nas-kiosk`（[#174](https://github.com/zhongwater123/A-NAS/issues/174)），安装前要先在本机屏幕上退出登录，见[实机配置手册的安装第 2 步](../runbooks/provision-v1.0.1-experimental-storage.md#安装系统服务)。同一次部署还会上传新的 AI 运行环境（约 190 MB，锁文件改由 uv 生成并升级了 Pillow）。
+- 本机屏幕没有 VA-API 驱动，屏保视频在 CPU 上解码，播放时约占 1.4 个核，黑屏时仍占约 0.27 个核（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。安装驱动并前后测量的一次性 root 脚本已暂存为 `/home/anas-dev/kiosk-vaapi.sh`，待 root 执行；黑屏时的开销要等覆盖期间停止渲染下层页面的版本部署后才消失。
 
 ## 阻塞与外部条件
 

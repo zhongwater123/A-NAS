@@ -840,6 +840,18 @@
     animation: none;
   }
 }
+/* While either cover is up, everything else on the page, portals included,
+   skips rendering. Under an opaque cover the desktop would otherwise go on
+   drawing its gauges' transitions and any running animation every frame; the
+   kiosk spent about a quarter of a core on that behind the black screen
+   (docs/investigations/2026-10-28-screensaver-video-cpu.md). The page keeps
+   its DOM and layout, so the first input brings it back as it was. The switch
+   waits until the screen saver has faded in. */
+body:has(> .local-console-screensaver, > .local-console-sleep)
+  > :not(.local-console-screensaver, .local-console-sleep) {
+  content-visibility: hidden;
+  transition: content-visibility 0s 0.3s allow-discrete;
+}
 /* 息屏: plain black over everything, the photo slideshow and sign-in page included, until the first input. */
 .local-console-sleep {
   position: fixed;

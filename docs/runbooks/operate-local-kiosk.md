@@ -1,7 +1,7 @@
 # 运行实验 NAS 本地控制台
 
-状态：implemented, display and pointer verified; confinement and VT recovery pending; dedicated account not yet verified on hardware
-更新时间：2026-10-27
+状态：implemented, display and pointer verified; confinement and VT recovery pending; dedicated account and hardware video decoding not yet verified on hardware
+更新时间：2026-10-28
 
 ## 目的
 
@@ -31,7 +31,7 @@
 
 屏保视频不在 release 中，见[屏保视频](#屏保视频)。
 
-2026-10-06 已在实机确认这些图形包和 Chromium 154 安装完成。重装或新设备由管理员执行：
+2026-10-06 已在实机确认这些图形包和 Chromium 154 安装完成；最后两个包是 Chromium 硬件解码视频要用的 VA-API 驱动与它的检查工具，按[硬件视频解码](#硬件视频解码)补装。重装或新设备由管理员执行：
 
 ```bash
 apt update
@@ -42,9 +42,11 @@ apt install --no-install-recommends \
   chromium-l10n \
   fonts-noto-cjk \
   wlr-randr \
-  libinput-tools
+  libinput-tools \
+  intel-media-va-driver \
+  vainfo
 
-dpkg-query -W cage chromium chromium-sandbox chromium-l10n fonts-noto-cjk wlr-randr libinput-tools
+dpkg-query -W cage chromium chromium-sandbox chromium-l10n fonts-noto-cjk wlr-randr libinput-tools intel-media-va-driver vainfo
 systemctl status display-manager.service --no-pager || true
 ```
 
@@ -209,6 +211,37 @@ find "$pools" -mindepth 1 -maxdepth 1 -type d ! -name objects ! -name pools
 
 单视频时期的安装可能在 `$pools` 根部留下独立的 `.mp4`（Experimental NAS 为 `computer-chip.mp4`），导入不会处理它。其 SHA-256 在 `current/SHA256SUMS` 中时是副本，可以删除；不在时是独有视频。要保留它，以 root 把它复制到暂存账号目录，下载到开发机后用 `scripts/deploy-screensavers.ps1` 与当前池的视频一起暂存为新池，安装新池并用 `cmp` 确认新池中的对应文件与原文件相同后再删除原文件。2026-10-10 Experimental NAS 按此加入后，当前池为六条。
 
+## 硬件视频解码
+
+Debian 13 的 Chromium 154 默认通过 VA-API 用 GPU 解码视频，不需要额外的启动参数：`AcceleratedVideoDecoder`、`AcceleratedVideoDecodeLinuxGL` 与 `AcceleratedVideoDecodeLinuxZeroCopyGL` 都是默认开启的特性，Debian 的 amd64 构建也带着 VA-API。它缺的只是 GPU 的 VA-API 驱动。没有驱动时，Chromium 在 CPU 上解码，再把每一帧上传给 GPU：Experimental NAS 播放 1080p 屏保时本机屏幕约占 1.4 个核（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。不要往启动器里加 `--enable-features=…`：这些已是默认值，特性改名后旧名字只会被静默忽略。
+
+驱动按 GPU 选择：Intel 核显（Broadwell 及以后，Experimental NAS 的 UHD 730 属于此列）用 `intel-media-va-driver`，AMD 用 `mesa-va-drivers`；Chromium 不支持 NVIDIA 的 VA-API 驱动。启动器在找不到任何 VA-API 驱动时向 kiosk 的 journal 写一行 `no VA-API driver is installed`。
+
+以 root 安装并重启 kiosk：
+
+```bash
+apt install --no-install-recommends intel-media-va-driver vainfo
+vainfo --display drm --device /dev/dri/renderD128 2>&1 | grep -E 'Driver version|VAProfileH264High'
+systemctl restart anas-kiosk@tty1.service
+```
+
+`vainfo` 应显示 `Intel iHD driver`，并列出 `VAProfileH264High : VAEntrypointVLD`。
+
+kiosk 中打不开 `chrome://gpu` 与 `chrome://media-internals`，开远程调试又会把已登录的本机会话交给本机任何账号，所以改由内核核对：i915 在 `/proc/<pid>/fdinfo` 中按客户端记录每个 GPU 引擎的忙碌时间。屏保播放时运行 [`measure-local-console-cpu.sh`](../../scripts/measure-local-console-cpu.sh)，它只读：
+
+```bash
+# 开发机上，只读账号只能看到 CPU 与线程：
+ssh a-nas 'bash -s 60' < scripts/measure-local-console-cpu.sh
+```
+
+root 运行时还会列出 GPU 引擎、已加载的驱动与正在播放的视频。脚本不随 release 安装，像其他 root 步骤一样由暂存账号上传，root 复制到 `/root` 并核对 SHA-256 后运行。硬件解码生效时：
+
+- `VA-API driver` 一行是 `iHD_drv_video.so`；
+- `GPU video` 的忙碌比例大于 0；
+- 最忙的线程里没有渲染进程的 `Media` 线程。
+
+撤销：`apt purge intel-media-va-driver vainfo` 后重启 kiosk，Chromium 回到软件解码。
+
 ## 验收
 
 1. 开机后直连屏幕显示 A-NAS 桌面，中文字体正常，键盘和鼠标可用。
@@ -222,6 +255,7 @@ find "$pools" -mindepth 1 -maxdepth 1 -type d ! -name objects ! -name pools
 9. 临时使当前选中的一个已确认池文件不可读并重启页面时，应从剩余条目中补选一条；恢复权限后再验收。不要删除源文件或整个池来制造故障。
 10. 管理员在“设置 → 个性化”把息屏设为 10 分钟后，本机屏幕保持 13 分钟无输入应变为纯黑（屏保先播放 10 分钟）；第一次移动鼠标或按键只回到桌面。退出登录后在登录页保持 13 分钟无输入同样变黑，唤醒后已输入的账号保留。验收后按需改回 30 分钟。行为见[个性化规格](../specs/personalization.md)。
 11. 管理员在另一台电脑的浏览器中通过“设置 → 个性化 → 更换图片…”设置壁纸并改为“适应”，本机屏幕的桌面应在 1 分钟内换成该图片，空白处为深蓝色；“恢复默认”后在 1 分钟内回到默认壁纸。
+12. 屏保播放时按[硬件视频解码](#硬件视频解码)以 root 运行测量脚本：硬件解码生效，kiosk 会话（`session scope`）远低于 0.3 个核；转为黑屏后再测一次，会话接近 0，最忙的线程里没有持续出帧的 `Compositor` 与 `VizCompositor`。两次的数据写进[调查](../investigations/2026-10-28-screensaver-video-cpu.md)。
 
 如果分辨率、方向或 UI 大小不正确，先在同一 Wayland 会话中用 `wlr-randr` 临时验证，再更新 `/etc/a-nas/kiosk.env`；不要在不知道输出名称时写死显卡或 connector。
 
@@ -254,6 +288,7 @@ Experimental NAS 上原来五条视频的池为 `53e12079d8d50c4c`，2026-10-10 
 - [Cage 官方 systemd 启动说明](https://github.com/cage-kiosk/cage/wiki/Starting-Cage-on-boot-with-systemd)
 - [Debian 13 Cage 手册](https://manpages.debian.org/trixie/cage/cage.1.en.html)
 - [systemd.exec 对 PAM、TTY 和运行时目录的说明](https://manpages.debian.org/trixie/systemd/systemd.exec.5.en.html)
+- [Chromium 154 的视频解码特性](https://chromium.googlesource.com/chromium/src/+/refs/tags/154.0.8037.92/media/mojo/services/gpu_mojo_media_client_linux.cc)与 [VA-API 说明](https://chromium.googlesource.com/chromium/src/+/refs/tags/154.0.8037.92/docs/gpu/vaapi.md)
 - [本地控制台屏保规格](../specs/local-console-screensaver.md)
 - [个性化规格（息屏）](../specs/personalization.md)
 - [ADR 0014：屏保视频是系统盘上的长期媒体](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
