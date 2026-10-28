@@ -52,8 +52,8 @@ Web 桌面加载时先播放约 7 秒的 A-NAS 开机动画：80 年代电视台
 
 ## 验收证据
 
-- [时间线与降级测试](../../web/src/bootIdent.test.ts)：开机光线、稳定画面、关机收线和光点，以及无法绘制时不启动。
-- [覆盖层测试](../../web/src/BootSplash.test.tsx)：每个标签页只播放一次、淡出后交给桌面、指针和按键跳过且按键不泄漏、无法启动时直接进入、减少动态效果时不播放。
+- [时间线与降级测试](../../web/src/boot/bootIdent.test.ts)：开机光线、稳定画面、关机收线和光点，以及无法绘制时不启动。
+- [覆盖层测试](../../web/src/boot/BootSplash.test.tsx)：每个标签页只播放一次、淡出后交给桌面、指针和按键跳过且按键不泄漏、无法启动时直接进入、减少动态效果时不播放。
 - 2026-10-08 在本机 Chromium 打开 `make web-build` 产物，确认完整播放后进入登录页、空格跳到关机收线、刷新不重播。
 - 待完成：在 Experimental NAS 的 Kiosk 直连屏幕上确认帧率和 CRT 效果。
 
@@ -61,5 +61,5 @@ Web 桌面加载时先播放约 7 秒的 A-NAS 开机动画：80 年代电视台
 
 - 架构：不涉及
 - ADR：[本地控制台 Kiosk](../adr/0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)
-- 代码：[覆盖层](../../web/src/BootSplash.tsx)、[画面与时间线](../../web/src/bootIdent.ts)、[CRT 渲染](../../web/src/crtRenderer.ts)、[挂载入口](../../web/src/main.tsx)
-- 测试：[bootIdent.test.ts](../../web/src/bootIdent.test.ts)、[BootSplash.test.tsx](../../web/src/BootSplash.test.tsx)
+- 代码：[覆盖层](../../web/src/boot/BootSplash.tsx)、[画面与时间线](../../web/src/boot/bootIdent.ts)、[CRT 渲染](../../web/src/boot/crtRenderer.ts)、[挂载入口](../../web/src/main.tsx)
+- 测试：[bootIdent.test.ts](../../web/src/boot/bootIdent.test.ts)、[BootSplash.test.tsx](../../web/src/boot/BootSplash.test.tsx)

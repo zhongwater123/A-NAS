@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -61,7 +62,7 @@ func principalFrom(r *http.Request) (photos.Principal, bool) {
 type handler struct {
 	service *photos.Service
 	logger  *slog.Logger
-	mux     *http.ServeMux
+	mux     *apiroute.Mux
 }
 
 // New returns the photo API. A nil service means the photo library is not
@@ -70,9 +71,14 @@ func New(service *photos.Service, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &handler{service: service, logger: logger, mux: http.NewServeMux()}
+	h := &handler{service: service, logger: logger, mux: apiroute.NewMux()}
 	h.routes()
 	return h
+}
+
+// Endpoints are the operations the photo API serves beneath PathPrefix.
+func Endpoints() []apiroute.Endpoint {
+	return New(nil, nil).(*handler).mux.Endpoints()
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +105,8 @@ func (h *handler) routes() {
 	p := PathPrefix
 	h.mux.HandleFunc("GET "+p+"/libraries", h.listLibraries)
 	h.mux.HandleFunc("GET "+AIStatusPath, h.aiStatus)
-	h.mux.HandleFunc("GET "+ActivityPath, h.activity)
+	// Only the Product Service asks for this; browsers never reach it.
+	h.mux.ServeMux.HandleFunc("GET "+ActivityPath, h.activity)
 	h.mux.HandleFunc("GET "+p+"/search", h.search)
 	h.mux.HandleFunc("POST "+p+"/image-searches", h.searchByImage)
 	h.mux.HandleFunc("GET "+p+"/image-searches/{searchID}/assets", h.imageSearchResults)

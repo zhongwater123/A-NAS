@@ -8,17 +8,14 @@ import (
 	"fmt"
 	"strings"
 	"time"
-)
 
-// ViewingDuration is how long Administrative Viewing Mode lasts unless the
-// administrator ends it sooner (ADR 0008).
-const ViewingDuration = 24 * time.Hour
+	"github.com/zhongwater123/A-NAS/internal/sessiondir"
+)
 
 var (
 	ErrReasonRequired    = errors.New("a reason is required to view a member's private space")
 	ErrViewingActive     = errors.New("this private space is already being viewed")
 	ErrPasswordUnchanged = errors.New("the new password must differ from the current one")
-	ErrVolumeUnavailable = errors.New("the data volume is offline")
 )
 
 // ViewingAccess marks a space the actor sees through Administrative Viewing
@@ -28,17 +25,6 @@ type ViewingAccess struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// ViewingScope is what an Administrative Viewing grant opens: a member's
-// private space (through ACL entries the Host Agent adds) or their private
-// photo library (enforced by the photo service's Policy, ADR 0011). Each
-// scope is granted, audited, notified and ended on its own.
-type ViewingScope string
-
-const (
-	ViewingScopeSpace   ViewingScope = "space"
-	ViewingScopeLibrary ViewingScope = "library"
-)
-
 type ViewingGrant struct {
 	ID          string       `json:"id"`
 	Scope       ViewingScope `json:"scope"`
@@ -47,29 +33,6 @@ type ViewingGrant struct {
 	Reason      string       `json:"reason"`
 	GrantedAt   time.Time    `json:"grantedAt"`
 	ExpiresAt   time.Time    `json:"expiresAt"`
-}
-
-// LibraryViewing is an unexpired grant to view one member's private photo
-// library read-only.
-type LibraryViewing struct {
-	GrantID     string    `json:"grantId"`
-	OwnerUserID string    `json:"ownerUserId"`
-	ExpiresAt   time.Time `json:"expiresAt"`
-}
-
-// ViewingRequest asks the Host Agent to give an administrator temporary
-// read-only ACL entries on a private space.
-type ViewingRequest struct {
-	ID            string
-	SpaceID       string
-	AdminUsername string
-	AdminUID      int
-	ExpiresAt     time.Time
-}
-
-type ViewingProvisioner interface {
-	GrantViewing(context.Context, ViewingRequest) error
-	RevokeViewing(context.Context, string) error
 }
 
 type NotificationKind string
@@ -253,30 +216,7 @@ func (s *Service) LibraryViewings(ctx context.Context, actor User) ([]LibraryVie
 	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
 		return nil, nil
 	}
-	return queryLibraryViewings(ctx, s.store.db, actor.ID, s.now().UTC())
-}
-
-func queryLibraryViewings(ctx context.Context, db *sql.DB, adminUserID string, now time.Time) ([]LibraryViewing, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, owner_user_id, expires_at FROM viewing_grants
-WHERE admin_user_id = ? AND scope = ? AND ended_at IS NULL AND expires_at > ? ORDER BY expires_at`,
-		adminUserID, ViewingScopeLibrary, formatTime(now))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var viewings []LibraryViewing
-	for rows.Next() {
-		var viewing LibraryViewing
-		var expiresAt string
-		if err := rows.Scan(&viewing.GrantID, &viewing.OwnerUserID, &expiresAt); err != nil {
-			return nil, err
-		}
-		if viewing.ExpiresAt, err = time.Parse(time.RFC3339Nano, expiresAt); err != nil {
-			return nil, err
-		}
-		viewings = append(viewings, viewing)
-	}
-	return viewings, rows.Err()
+	return sessiondir.LibraryViewings(ctx, s.store.db, actor.ID, s.now().UTC())
 }
 
 // EndViewing revokes an administrator's viewing grant before it expires.
@@ -443,7 +383,7 @@ JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private' WHERE u.id = ?`, 
 	if newPassword == currentPassword {
 		return ErrPasswordUnchanged
 	}
-	passwordHash, err := hashPassword(newPassword, s.random)
+	passwordHash, err := hashPassword(newPassword, s.random, s.passwordCost)
 	if err != nil {
 		return err
 	}

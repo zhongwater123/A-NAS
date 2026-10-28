@@ -1,8 +1,9 @@
 import { GripVertical, ListMusic, X } from "lucide-react";
 import { DragEvent, useState } from "react";
 
-import { Cover, Equalizer, carriesTracks, readDrag, useMusic } from "./context";
+import { Cover, carriesTracks, Equalizer, readDrag, useMusic } from "./context";
 import { artistLine, formatDuration } from "./library";
+import styles from "./music.module.css";
 
 const queueDrag = "application/x-anas-music-queue";
 
@@ -35,7 +36,7 @@ export function QueuePanel({ onClose }: { onClose: () => void }) {
 
   return (
     <aside
-      className={`mu-queue${over ? " drop" : ""}`}
+      className={`${styles.muQueue}${over ? ` ${styles.drop}` : ""}`}
       aria-label="播放队列"
       onDragOver={(event) => {
         if (accepts(event)) {
@@ -54,19 +55,19 @@ export function QueuePanel({ onClose }: { onClose: () => void }) {
           <small>{player.queue.length ? `${player.queue.length} 首` : "空"}</small>
         </div>
         {upcoming.length > 0 && (
-          <button type="button" className="mu-text-button" onClick={player.clearUpcoming}>
+          <button type="button" className={styles.muTextButton} onClick={player.clearUpcoming}>
             清空接下来
           </button>
         )}
-        <button type="button" className="mu-icon-button" aria-label="关闭播放队列" onClick={onClose}>
+        <button type="button" className={styles.muIconButton} aria-label="关闭播放队列" onClick={onClose}>
           <X />
         </button>
       </header>
-      <div className="mu-queue-list">
+      <div className={styles.muQueueList}>
         {current && (
           <>
             <h3>正在播放</h3>
-            <div className="mu-queue-item current">
+            <div className={`${styles.muQueueItem} ${styles.current}`}>
               <Cover id={current.coverId} name={current.album || current.title} />
               <span>
                 <strong>{current.title}</strong>
@@ -80,7 +81,7 @@ export function QueuePanel({ onClose }: { onClose: () => void }) {
         {upcoming.map(({ id, position, track }) => (
           <div
             key={`${id}:${position}`}
-            className={`mu-queue-item${dropAt === position ? " drop-before" : ""}`}
+            className={`${styles.muQueueItem}${dropAt === position ? ` ${styles.dropBefore}` : ""}`}
             draggable
             onDragStart={(event) => {
               event.dataTransfer.effectAllowed = "move";
@@ -99,10 +100,10 @@ export function QueuePanel({ onClose }: { onClose: () => void }) {
             }}
             onDoubleClick={() => player.jump(position)}
           >
-            <GripVertical className="mu-grip" />
+            <GripVertical className={styles.muGrip} />
             <button
               type="button"
-              className="mu-queue-jump"
+              className={styles.muQueueJump}
               onClick={() => player.jump(position)}
               aria-label={`播放 ${track?.title ?? "歌曲"}`}
             >
@@ -115,7 +116,7 @@ export function QueuePanel({ onClose }: { onClose: () => void }) {
             <em>{formatDuration(track?.durationMs)}</em>
             <button
               type="button"
-              className="mu-icon-button small"
+              className={`${styles.muIconButton} ${styles.small}`}
               aria-label={`从队列移除 ${track?.title ?? "歌曲"}`}
               onClick={() => player.remove(position)}
             >
@@ -124,7 +125,7 @@ export function QueuePanel({ onClose }: { onClose: () => void }) {
           </div>
         ))}
         {!player.queue.length && (
-          <div className="mu-queue-empty">
+          <div className={styles.muQueueEmpty}>
             <ListMusic />
             <p>队列是空的</p>
             <small>双击歌曲开始播放，或把歌曲拖到这里。</small>

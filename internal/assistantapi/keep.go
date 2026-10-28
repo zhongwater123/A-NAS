@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 )
 
@@ -45,7 +46,7 @@ type keep struct {
 // Keep starts keeping the member's instance, or adds a session to the ones it
 // is kept with. It returns at once.
 func (h *Handler) Keep(user accounts.User, sessionToken string) {
-	if h.options.Connector == nil || sessionToken == "" || user.ID == "" || !accountPattern.MatchString(user.Username) || h.ctx.Err() != nil {
+	if h.options.Connector == nil || sessionToken == "" || user.ID == "" || !accountid.ValidAssistantAccount(user.Username) || h.ctx.Err() != nil {
 		return
 	}
 	if h.options.SocketDir != "" {

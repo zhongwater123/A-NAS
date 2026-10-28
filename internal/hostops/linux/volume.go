@@ -8,16 +8,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
-	"github.com/zhongwater123/A-NAS/internal/storage"
 )
-
-var filesystemUUIDPattern = regexp.MustCompile(`^[0-9a-fA-F-]{16,64}$`)
 
 // volumeMarker is .a-nas-volume.json at the root of the data volume: the
 // evidence that the mounted filesystem is the data volume, and the layout
@@ -30,7 +27,7 @@ type volumeMarker struct {
 	// before issue #165.
 	PlanID string `json:"planId,omitempty"`
 	// Layout is absent on volumes created on one disk before ADR 0025.
-	Layout storage.Layout `json:"layout,omitempty"`
+	Layout datavolume.Layout `json:"layout,omitempty"`
 	// Pending is the layout disks being added call for. It is recorded
 	// before they are added and becomes Layout once the volume has them, so
 	// that disks a killed run added still get it (issue #165).
@@ -38,8 +35,8 @@ type volumeMarker struct {
 }
 
 type pendingLayout struct {
-	PlanID string         `json:"planId"`
-	Layout storage.Layout `json:"layout"`
+	PlanID string            `json:"planId"`
+	Layout datavolume.Layout `json:"layout"`
 	// Devices is how many devices the volume has with the disks added.
 	Devices int `json:"devices"`
 }
@@ -56,7 +53,7 @@ func (e *Executor) readMarker() (volumeMarker, error) {
 		return volumeMarker{}, err
 	}
 	var marker volumeMarker
-	if err := json.Unmarshal(contents, &marker); err != nil || marker.FormatVersion != 1 || !filesystemUUIDPattern.MatchString(marker.FilesystemUUID) {
+	if err := json.Unmarshal(contents, &marker); err != nil || marker.FormatVersion != 1 || !datavolume.ValidFilesystemUUID(marker.FilesystemUUID) {
 		return volumeMarker{}, errors.New("data-volume identity marker is invalid")
 	}
 	return marker, nil
@@ -76,56 +73,56 @@ func (e *Executor) writeMarker(marker volumeMarker) error {
 // and one that never mounted is formatted again from the start, since no
 // file can be on it. It refuses to touch a data volume, or a mount unit for
 // one, that the plan did not make (issue #165).
-func (e *Executor) createVolume(ctx context.Context, operation *volumeOperation) (storage.Volume, error) {
+func (e *Executor) createVolume(ctx context.Context, operation *volumeOperation) (datavolume.Volume, error) {
 	mounted, err := e.resolver.MountedDataVolume(ctx)
 	if err != nil {
-		return storage.Volume{}, fmt.Errorf("read the mounted data volume: %w", err)
+		return datavolume.Volume{}, fmt.Errorf("read the mounted data volume: %w", err)
 	}
 	if mounted != nil {
 		if !e.madeBy(operation, mounted) {
-			return storage.Volume{}, storage.ErrVolumeExists
+			return datavolume.Volume{}, datavolume.ErrVolumeExists
 		}
 		return e.prepareVolume(ctx, operation, mounted.FilesystemUUID)
 	}
 	if e.dataVolumeReady() {
-		return storage.Volume{}, storage.ErrVolumeExists
+		return datavolume.Volume{}, datavolume.ErrVolumeExists
 	}
 	devices, err := e.resolveTargets(ctx, operation.Disks)
 	if err != nil {
-		return storage.Volume{}, err
+		return datavolume.Volume{}, err
 	}
 	if err := e.checkMountUnit(ctx, devices); err != nil {
-		return storage.Volume{}, err
+		return datavolume.Volume{}, err
 	}
-	e.enter(operation, storage.StepErase)
+	e.enter(operation, datavolume.StepErase)
 	for _, device := range devices {
 		if err := e.prepareDisk(ctx, device); err != nil {
-			return storage.Volume{}, err
+			return datavolume.Volume{}, err
 		}
 	}
-	e.enter(operation, storage.StepFormat)
+	e.enter(operation, datavolume.StepFormat)
 	data, metadata := operation.Layout.Profiles()
 	format := []string{"--force", "--label", "ANAS_DATA", "--data", string(data), "--metadata", string(metadata)}
 	for _, device := range devices {
 		format = append(format, device.PartitionPath)
 	}
 	if output, err := e.runner.Run(ctx, "mkfs.btrfs", format, ""); err != nil {
-		return storage.Volume{}, commandError("mkfs.btrfs failed", err, output)
+		return datavolume.Volume{}, commandError("mkfs.btrfs failed", err, output)
 	}
 	uuidBytes, err := e.runner.Output(ctx, "blkid", []string{"--output", "value", "--match-tag", "UUID", devices[0].PartitionPath}, "")
 	if err != nil {
-		return storage.Volume{}, fmt.Errorf("read Btrfs UUID: %w", err)
+		return datavolume.Volume{}, fmt.Errorf("read Btrfs UUID: %w", err)
 	}
 	uuid := strings.TrimSpace(string(uuidBytes))
-	if !filesystemUUIDPattern.MatchString(uuid) {
-		return storage.Volume{}, errors.New("blkid returned an invalid filesystem UUID")
+	if !datavolume.ValidFilesystemUUID(uuid) {
+		return datavolume.Volume{}, errors.New("blkid returned an invalid filesystem UUID")
 	}
 	if err := e.recordFormatted(operation, uuid); err != nil {
-		return storage.Volume{}, fmt.Errorf("record the new filesystem: %w", err)
+		return datavolume.Volume{}, fmt.Errorf("record the new filesystem: %w", err)
 	}
-	e.enter(operation, storage.StepMount)
+	e.enter(operation, datavolume.StepMount)
 	if err := os.MkdirAll(e.mountPoint, 0o750); err != nil {
-		return storage.Volume{}, fmt.Errorf("create mount point: %w", err)
+		return datavolume.Volume{}, fmt.Errorf("create mount point: %w", err)
 	}
 	unit := fmt.Sprintf(`[Unit]
 Description=A-NAS data volume
@@ -143,7 +140,7 @@ TimeoutSec=30
 WantedBy=local-fs.target
 `, uuid, e.mountPoint)
 	if err := writeAtomic(e.mountUnitPath(), []byte(unit), 0o644); err != nil {
-		return storage.Volume{}, fmt.Errorf("install data-volume mount unit: %w", err)
+		return datavolume.Volume{}, fmt.Errorf("install data-volume mount unit: %w", err)
 	}
 	// A filesystem on several disks mounts once the kernel knows them all.
 	steps := []struct {
@@ -156,15 +153,15 @@ WantedBy=local-fs.target
 	}
 	for _, step := range steps {
 		if output, err := e.runner.Run(ctx, step.name, step.args, ""); err != nil {
-			return storage.Volume{}, commandError(step.name+" failed after formatting", err, output)
+			return datavolume.Volume{}, commandError(step.name+" failed after formatting", err, output)
 		}
 	}
 	mounted, err = e.resolver.MountedDataVolume(ctx)
 	if err != nil {
-		return storage.Volume{}, fmt.Errorf("read the mounted data volume: %w", err)
+		return datavolume.Volume{}, fmt.Errorf("read the mounted data volume: %w", err)
 	}
 	if mounted == nil || !strings.EqualFold(mounted.FilesystemUUID, uuid) {
-		return storage.Volume{}, errors.New("the new data volume is not mounted")
+		return datavolume.Volume{}, errors.New("the new data volume is not mounted")
 	}
 	return e.prepareVolume(ctx, operation, uuid)
 }
@@ -172,18 +169,18 @@ WantedBy=local-fs.target
 // prepareVolume readies the new data volume once it is mounted: the spaces
 // subvolume, the snapshot directory, the marker naming the plan, and the
 // registered spaces. Each step may be repeated.
-func (e *Executor) prepareVolume(ctx context.Context, operation *volumeOperation, uuid string) (storage.Volume, error) {
-	e.enter(operation, storage.StepPrepare)
+func (e *Executor) prepareVolume(ctx context.Context, operation *volumeOperation, uuid string) (datavolume.Volume, error) {
+	e.enter(operation, datavolume.StepPrepare)
 	spaces := filepath.Join(e.mountPoint, "spaces")
 	if _, err := os.Lstat(spaces); errors.Is(err, os.ErrNotExist) {
 		if output, err := e.runner.Run(ctx, "btrfs", []string{"subvolume", "create", spaces}, ""); err != nil {
-			return storage.Volume{}, commandError("btrfs failed after formatting", err, output)
+			return datavolume.Volume{}, commandError("btrfs failed after formatting", err, output)
 		}
 	} else if err != nil {
-		return storage.Volume{}, err
+		return datavolume.Volume{}, err
 	}
 	if err := os.MkdirAll(filepath.Join(e.mountPoint, ".a-nas-snapshots"), 0o700); err != nil {
-		return storage.Volume{}, err
+		return datavolume.Volume{}, err
 	}
 	marker := volumeMarker{FilesystemUUID: uuid, DiskID: operation.Disks[0].DiskID, FormatVersion: 1, PlanID: operation.PlanID}
 	if len(operation.Disks) > 1 {
@@ -193,16 +190,16 @@ func (e *Executor) prepareVolume(ctx context.Context, operation *volumeOperation
 	err := e.writeMarker(marker)
 	e.markerMu.Unlock()
 	if err != nil {
-		return storage.Volume{}, fmt.Errorf("write data-volume identity marker: %w", err)
+		return datavolume.Volume{}, fmt.Errorf("write data-volume identity marker: %w", err)
 	}
 	if _, err := e.materializeRegisteredSpaces(ctx); err != nil {
-		return storage.Volume{}, fmt.Errorf("materialize registered spaces: %w", err)
+		return datavolume.Volume{}, fmt.Errorf("materialize registered spaces: %w", err)
 	}
 	// Best effort: a failure only delays managed stores until the Host Agent's
 	// periodic repair, which logs it.
 	_, _ = e.EnsurePhotosStore(ctx)
 	_, _ = e.EnsureSharesStore(ctx)
-	volume := storage.Volume{ID: "volume:data", FilesystemUUID: uuid, Layout: operation.Layout, State: storage.VolumeStateAvailable}
+	volume := datavolume.Volume{ID: "volume:data", FilesystemUUID: uuid, Layout: operation.Layout, State: datavolume.VolumeStateAvailable}
 	sizes := make([]uint64, 0, len(operation.Disks))
 	for _, disk := range operation.Disks {
 		volume.DiskIDs = append(volume.DiskIDs, disk.DiskID)
@@ -211,7 +208,7 @@ func (e *Executor) prepareVolume(ctx context.Context, operation *volumeOperation
 		}
 	}
 	if len(sizes) == len(operation.Disks) {
-		volume.CapacityBytes = storage.UsableBytes(operation.Layout, sizes)
+		volume.CapacityBytes = datavolume.UsableBytes(operation.Layout, sizes)
 	}
 	return volume, nil
 }
@@ -258,8 +255,8 @@ func (e *Executor) checkMountUnit(ctx context.Context, devices []BlockDevice) er
 			uuid = strings.TrimSpace(value)
 		}
 	}
-	if !filesystemUUIDPattern.MatchString(uuid) {
-		return storage.ErrVolumeExists
+	if !datavolume.ValidFilesystemUUID(uuid) {
+		return datavolume.ErrVolumeExists
 	}
 	if e.formattedByUnfinishedCreation(uuid) {
 		return nil
@@ -270,7 +267,7 @@ func (e *Executor) checkMountUnit(ctx context.Context, devices []BlockDevice) er
 			return nil
 		}
 	}
-	return storage.ErrVolumeExists
+	return datavolume.ErrVolumeExists
 }
 
 // addDisks erases the planned disks, adds them to the mounted data volume
@@ -280,44 +277,44 @@ func (e *Executor) checkMountUnit(ctx context.Context, devices []BlockDevice) er
 // disks (issue #165). Run again for the same plan, it skips the disks that
 // are members already. Files stay where they are and the volume stays in
 // use throughout.
-func (e *Executor) addDisks(ctx context.Context, operation *volumeOperation) (storage.Volume, error) {
+func (e *Executor) addDisks(ctx context.Context, operation *volumeOperation) (datavolume.Volume, error) {
 	mounted, err := e.resolver.MountedDataVolume(ctx)
 	if err != nil {
-		return storage.Volume{}, fmt.Errorf("read the mounted data volume: %w", err)
+		return datavolume.Volume{}, fmt.Errorf("read the mounted data volume: %w", err)
 	}
 	if mounted == nil {
-		return storage.Volume{}, storage.ErrVolumeUnavailable
+		return datavolume.Volume{}, datavolume.ErrVolumeUnavailable
 	}
 	if !strings.EqualFold(mounted.FilesystemUUID, operation.FilesystemUUID) {
-		return storage.Volume{}, storage.ErrVolumeChanged
+		return datavolume.Volume{}, datavolume.ErrVolumeChanged
 	}
-	var adding []storage.DiskTarget
+	var adding []datavolume.DiskTarget
 	for _, disk := range operation.Disks {
 		if !slices.ContainsFunc(mounted.DiskIDs, func(id hoststate.ResourceID) bool { return id.String() == disk.DiskID }) {
 			adding = append(adding, disk)
 		}
 	}
 	if err := e.recordPendingLayout(operation, len(mounted.DiskIDs)+len(adding)); err != nil {
-		return storage.Volume{}, err
+		return datavolume.Volume{}, err
 	}
 	if len(adding) > 0 {
 		devices, err := e.resolveTargets(ctx, adding)
 		if err != nil {
-			return storage.Volume{}, err
+			return datavolume.Volume{}, err
 		}
-		e.enter(operation, storage.StepErase)
+		e.enter(operation, datavolume.StepErase)
 		for _, device := range devices {
 			if err := e.prepareDisk(ctx, device); err != nil {
-				return storage.Volume{}, err
+				return datavolume.Volume{}, err
 			}
 		}
-		e.enter(operation, storage.StepAddDevices)
+		e.enter(operation, datavolume.StepAddDevices)
 		add := []string{"device", "add", "-f"}
 		for _, device := range devices {
 			add = append(add, device.PartitionPath)
 		}
 		if output, err := e.runner.Run(ctx, "btrfs", append(add, e.mountPoint), ""); err != nil {
-			return storage.Volume{}, commandError("btrfs device add failed", err, output)
+			return datavolume.Volume{}, commandError("btrfs device add failed", err, output)
 		}
 		// udev probed the new partitions while they were still wiped and hears
 		// nothing of the superblock the kernel wrote; probe them again so lsblk
@@ -336,12 +333,12 @@ func (e *Executor) addDisks(ctx context.Context, operation *volumeOperation) (st
 	// The disks belong to the volume now; the layout becomes the volume's
 	// before anything else can fail, so the Host Agent's check converts to it.
 	if err := e.applyLayout(operation); err != nil {
-		return storage.Volume{}, err
+		return datavolume.Volume{}, err
 	}
 	if _, err := e.ReconcileConversion(ctx); err != nil {
 		e.logger.WarnContext(ctx, "data-volume conversion did not start; the periodic check retries it", "error", err)
 	}
-	volume := storage.Volume{FilesystemUUID: mounted.FilesystemUUID, Layout: operation.Layout, State: storage.VolumeStateAvailable}
+	volume := datavolume.Volume{FilesystemUUID: mounted.FilesystemUUID, Layout: operation.Layout, State: datavolume.VolumeStateAvailable}
 	for _, disk := range operation.Disks {
 		volume.DiskIDs = append(volume.DiskIDs, disk.DiskID)
 	}
@@ -356,10 +353,10 @@ func (e *Executor) recordPendingLayout(operation *volumeOperation, devices int) 
 	defer e.markerMu.Unlock()
 	marker, err := e.readMarker()
 	if err != nil {
-		return storage.ErrVolumeUnavailable
+		return datavolume.ErrVolumeUnavailable
 	}
 	if !strings.EqualFold(marker.FilesystemUUID, operation.FilesystemUUID) {
-		return storage.ErrVolumeChanged
+		return datavolume.ErrVolumeChanged
 	}
 	if marker.Pending != nil && marker.Pending.PlanID == operation.PlanID {
 		return nil
@@ -381,7 +378,7 @@ func (e *Executor) applyLayout(operation *volumeOperation) error {
 		return fmt.Errorf("record the data-volume layout: %w", err)
 	}
 	if marker.Pending != nil && marker.Pending.PlanID != operation.PlanID {
-		return storage.ErrVolumeChanged
+		return datavolume.ErrVolumeChanged
 	}
 	marker.Layout, marker.Pending = operation.Layout, nil
 	if err := e.writeMarker(marker); err != nil {
@@ -413,7 +410,7 @@ func (e *Executor) promotePendingLayout() (volumeMarker, error) {
 func (e *Executor) ContinueConversion(ctx context.Context) error {
 	started, err := e.ReconcileConversion(ctx)
 	if err == nil && !started {
-		return storage.ErrNoConversion
+		return datavolume.ErrNoConversion
 	}
 	return err
 }
@@ -467,7 +464,7 @@ func (e *Executor) ReconcileConversion(ctx context.Context) (bool, error) {
 // conversionCommand is the btrfs command that converts data and metadata
 // outside the layout's profiles, or nil when there is nothing to convert or
 // Btrfs runs another exclusive operation. A paused balance is resumed.
-func conversionCommand(layout storage.Layout, data, metadata []hoststate.ProfileUsage, operation hoststate.VolumeOperation) []string {
+func conversionCommand(layout datavolume.Layout, data, metadata []hoststate.ProfileUsage, operation hoststate.VolumeOperation) []string {
 	switch operation {
 	case hoststate.VolumeOperationBalancePaused:
 		return []string{"balance", "resume"}
@@ -475,7 +472,7 @@ func conversionCommand(layout storage.Layout, data, metadata []hoststate.Profile
 	default:
 		return nil
 	}
-	convertData, convertMetadata := storage.OutsideLayout(data, metadata, layout)
+	convertData, convertMetadata := datavolume.OutsideLayout(data, metadata, layout)
 	if !convertData && !convertMetadata {
 		return nil
 	}
@@ -493,7 +490,7 @@ func conversionCommand(layout storage.Layout, data, metadata []hoststate.Profile
 
 // resolveTargets finds the planned disks again and checks that each is
 // still the disk that was planned and may be erased.
-func (e *Executor) resolveTargets(ctx context.Context, disks []storage.DiskTarget) ([]BlockDevice, error) {
+func (e *Executor) resolveTargets(ctx context.Context, disks []datavolume.DiskTarget) ([]BlockDevice, error) {
 	if len(disks) == 0 {
 		return nil, errors.New("no disks to erase")
 	}
@@ -507,11 +504,11 @@ func (e *Executor) resolveTargets(ctx context.Context, disks []storage.DiskTarge
 		if err != nil {
 			return nil, fmt.Errorf("resolve stable disk ID: %w", err)
 		}
-		if device.Disk.ID.String() != target.DiskID || storage.FingerprintDisk(device.Disk) != target.Fingerprint {
-			return nil, storage.ErrDiskChanged
+		if device.Disk.ID.String() != target.DiskID || datavolume.FingerprintDisk(device.Disk) != target.Fingerprint {
+			return nil, datavolume.ErrDiskChanged
 		}
 		if device.Disk.Role != hoststate.DiskRoleUnassigned || device.Disk.InUse || device.Disk.Removable || (device.Disk.Transport != hoststate.TransportSATA && device.Disk.Transport != hoststate.TransportNVMe) {
-			return nil, storage.ErrDiskNotEligible
+			return nil, datavolume.ErrDiskNotEligible
 		}
 		if !validDevicePath(device.DevicePath) || !validDevicePath(device.PartitionPath) || device.DevicePath == device.PartitionPath {
 			return nil, errors.New("resolved block-device path is invalid")

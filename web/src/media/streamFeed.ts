@@ -1,4 +1,4 @@
-import { apiFetch, failure } from "../api";
+import { apiFetch, failure } from "../api/client";
 import { messageOf } from "./Browse";
 
 // A browser plays a converted stream progressively and reads only about two

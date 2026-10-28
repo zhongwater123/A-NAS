@@ -19,7 +19,7 @@ func TestFailedViewingGrantIsRevokedAndNeitherNotifiedNorActive(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	provisioner := &viewingRecorder{}
-	service := accounts.NewService(store, provisioner, accounts.Options{})
+	service := accounts.NewService(store, provisioner, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +67,7 @@ func TestAdministrativeViewingIsAuthenticatedReadOnlyAuditedAndTemporary(t *test
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	provisioner := &viewingRecorder{}
-	service := accounts.NewService(store, provisioner, accounts.Options{Now: func() time.Time { return now }})
+	service := accounts.NewService(store, provisioner, accounts.Options{PasswordCost: cheapPasswords, Now: func() time.Time { return now }})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestResetPasswordMustBeChangedBeforeAnythingElse(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	provisioner := &viewingRecorder{}
-	service := accounts.NewService(store, provisioner, accounts.Options{})
+	service := accounts.NewService(store, provisioner, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)

@@ -146,7 +146,7 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 func mediaAPIFor(service *media.Service, user accounts.User) http.Handler {
 	api := mediaapi.New(service, nil)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		api.ServeHTTP(w, r.WithContext(mediaapi.WithUser(r.Context(), user)))
+		api.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), user)))
 	})
 }
 
@@ -213,6 +213,11 @@ func TestMediaAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 	}
 	if subtitle := send(http.MethodGet, "/api/v1/media/videos/"+fixture.film+"/subtitles/x0", "", ""); subtitle.Code != http.StatusOK || !strings.Contains(subtitle.Body.String(), "你好") {
 		t.Fatalf("subtitle = %d %s", subtitle.Code, subtitle.Body.String())
+	}
+	// A name the file manager refuses is refused here with its answer (#222).
+	if renamed := send(http.MethodPatch, "/api/v1/media/videos/"+fixture.film, `{"fileName":"Heat: Part 2.mkv"}`, session.CSRFToken); renamed.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(renamed.Body.String(), `"name_not_portable"`) {
+		t.Fatalf("rename to a name Windows cannot hold = %d %s", renamed.Code, renamed.Body.String())
 	}
 }
 

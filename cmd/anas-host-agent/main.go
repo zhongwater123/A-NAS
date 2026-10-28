@@ -16,12 +16,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
-	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker"
 	linuxhostops "github.com/zhongwater123/A-NAS/internal/hostops/linux"
-	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
+	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/rootagent"
+	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/wire"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
+	"github.com/zhongwater123/A-NAS/internal/sessiondir"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/systemdscope"
 	"github.com/zhongwater123/A-NAS/internal/systemlog/journal"
@@ -30,22 +32,22 @@ import (
 var version = "dev"
 
 func main() {
-	if len(os.Args) == 3 && os.Args[1] == filebroker.WorkerArgument {
-		if err := filebroker.RunWorker(os.Args[2]); err != nil {
+	if len(os.Args) == 3 && os.Args[1] == rootbroker.WorkerArgument {
+		if err := rootbroker.RunWorker(os.Args[2]); err != nil {
 			fmt.Fprintln(os.Stderr, "A-NAS file worker:", err)
 			os.Exit(1)
 		}
 		return
 	}
-	if len(os.Args) >= 4 && os.Args[1] == filebroker.ShellGateArgument {
-		if err := filebroker.RunShellGate(os.Args[2:]); err != nil {
+	if len(os.Args) >= 4 && os.Args[1] == rootbroker.ShellGateArgument {
+		if err := rootbroker.RunShellGate(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "A-NAS terminal:", err)
 			os.Exit(1)
 		}
 		return
 	}
-	if len(os.Args) == 2 && os.Args[1] == filebroker.ProbeArgument {
-		if err := filebroker.RunProbe(); err != nil {
+	if len(os.Args) == 2 && os.Args[1] == rootbroker.ProbeArgument {
+		if err := rootbroker.RunProbe(); err != nil {
 			fmt.Fprintln(os.Stderr, "A-NAS file worker probe:", err)
 			os.Exit(1)
 		}
@@ -96,7 +98,7 @@ func loadConfig(environment map[string]string) (config, error) {
 	if err != nil {
 		return c, err
 	}
-	if c.Socket, err = agent.SocketPath(c.Socket, c.RuntimeDir); err != nil {
+	if c.Socket, err = wire.SocketPath(c.Socket, c.RuntimeDir); err != nil {
 		return c, err
 	}
 	if c.FileBrokerSocket == "" {
@@ -109,10 +111,10 @@ func loadConfig(environment map[string]string) (config, error) {
 		c.AssistantChanges = ""
 	}
 	if c.PhotoSessionGroup == "" {
-		c.PhotoSessionGroup = accounts.PhotoServiceUser
+		c.PhotoSessionGroup = accountid.PhotoServiceUser
 	}
 	if c.ShareSessionGroup == "" {
-		c.ShareSessionGroup = accounts.ShareServiceUser
+		c.ShareSessionGroup = accountid.ShareServiceUser
 	}
 	return c, nil
 }
@@ -152,27 +154,27 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	var reconcileFailed atomic.Bool
 	server := &http.Server{
-		Handler: agent.NewOperationsHandler(agent.Services{
+		Handler: rootagent.NewOperationsHandler(rootagent.Services{
 			Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
 			SystemLogs: journal.New(), ReconcileFailed: reconcileFailed.Load,
 		}, logger),
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 1 << 20,
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	sessions := accounts.NewSessionDirectory(filepath.Join(config.StateDir, "control.db"))
+	sessions := sessiondir.New(filepath.Join(config.StateDir, "control.db"))
 	defer func() { _ = sessions.Close() }()
 	assistantChanges := config.AssistantChanges
 	// File workers and terminal shells run in scopes of their own, so they
 	// share neither the Host Agent's limits nor its name in the journal.
 	// Without systemd, as in development, they stay in the Host Agent's.
-	var scopes filebroker.Placer
+	var scopes rootbroker.Placer
 	if placer, err := systemdscope.New(ctx); err != nil {
 		logger.Warn("file workers and terminals run in the Host Agent's cgroup", "error", err)
 	} else {
 		defer placer.Close()
 		scopes = placer
 	}
-	broker, err := filebroker.NewServer(filebroker.Config{
+	broker, err := rootbroker.NewServer(rootbroker.Config{
 		Sessions: sessions, VolumeRoot: mountPoint, VolumeReady: executor.DataVolumeReady, Logger: logger,
 		AssistantSockets: config.AssistantSockets,
 		AssistantTokens:  config.AssistantTokens,
@@ -257,7 +259,7 @@ func run(logger *slog.Logger) error {
 // serveAssistantChanges answers the assistants' MCP tool. The socket is open
 // to everyone but sits in /run/a-nas, which members cannot enter; the units
 // bind it into each assistant's sandbox, and the member is the caller's UID.
-func serveAssistantChanges(socketPath string, broker *filebroker.Server, logger *slog.Logger) (func(), error) {
+func serveAssistantChanges(socketPath string, broker *rootbroker.Server, logger *slog.Logger) (func(), error) {
 	_ = os.Remove(socketPath)
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -283,7 +285,7 @@ func serveAssistantChanges(socketPath string, broker *filebroker.Server, logger 
 // session token (ADR 0011). Only the photo service's group can reach the
 // socket; without that group the photo service is not installed and nothing
 // is served.
-func serveSessionLookup(config config, sessions *accounts.SessionDirectory, logger *slog.Logger) (func(), error) {
+func serveSessionLookup(config config, sessions *sessiondir.Directory, logger *slog.Logger) (func(), error) {
 	group := config.PhotoSessionGroup
 	if _, err := user.LookupGroup(group); err != nil {
 		logger.Info("photo service is not installed; session lookup is off", "group", group)
@@ -476,7 +478,7 @@ func listen(socketPath, groupName string) (net.Listener, error) {
 	return listener, nil
 }
 
-func serveShareSessionLookup(config config, sessions *accounts.SessionDirectory, logger *slog.Logger) (func(), error) {
+func serveShareSessionLookup(config config, sessions *sessiondir.Directory, logger *slog.Logger) (func(), error) {
 	group := config.ShareSessionGroup
 	if _, err := user.LookupGroup(group); err != nil {
 		logger.Info("share service is not installed; lookup is off")

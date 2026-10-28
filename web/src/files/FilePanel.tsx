@@ -1,7 +1,7 @@
 import { CircleAlert, FolderPlus, FolderUp, ShieldCheck } from "lucide-react";
 import {
-  DragEvent as ReactDragEvent,
   FormEvent,
+  DragEvent as ReactDragEvent,
   MouseEvent as ReactMouseEvent,
   useEffect,
   useEffectEvent,
@@ -9,15 +9,16 @@ import {
   useState,
 } from "react";
 
-import { FileEntry, Space, copyFile, createDirectory, deleteFile, endViewing, moveFile } from "../api";
+import type { FileEntry, Space } from "../api.generated";
 import { VersionsDialog } from "../backup/VersionsDialog";
-import { nameProblem } from "../fileNames";
-import { displayName, usePeople } from "../people";
+import { nameProblem } from "../lib/fileNames";
+import { carriesFiles, PickedFile, pickedFromDrop } from "../lib/pickedFiles";
+import { displayName, usePeople } from "../people/people";
+import { endViewing } from "../settings/api";
 import { useShares } from "../shares/SharesProvider";
-import { carriesFiles, PickedFile, pickedFromDrop } from "../transfers/picker";
+import type { TransferLocation } from "../transfers/api";
 import { transferStore } from "../transfers/store";
-import type { TransferLocation } from "../transfers/transfersApi";
-import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "../useFileOrder";
+import { copyFile, createDirectory, deleteFile, moveFile } from "./api";
 import { FileContextMenu, FileContextMenuState } from "./FileContextMenu";
 import { DeleteDialog, RenameDialog } from "./FileDialogs";
 import { FileInspector } from "./FileInspector";
@@ -27,6 +28,7 @@ import { FileStatusBar } from "./FileStatusBar";
 import { FileCommandBar, FileCommands, FileNavigationBar, FileOrderBar } from "./FileToolbar";
 import { FileUploadControl } from "./FileUploadControl";
 import { FileViewer } from "./FileViewer";
+import styles from "./files.module.css";
 import {
   browserItem,
   duplicateFileName,
@@ -46,14 +48,15 @@ import {
 } from "./model";
 import { useDragReorder } from "./useDragReorder";
 import { useFileListing } from "./useFileListing";
+import { FileSort, isPinned, reorderFiles, sortFiles, useFileOrder } from "./useFileOrder";
 import { usePaneWidths } from "./usePaneWidths";
 import { useTextPreview } from "./useTextPreview";
-import "./files.css";
 
 interface FilePanelProps {
   userID: string;
-  navigation?: TransferLocation;
-  onNavigated: () => void;
+  // A folder another window asked for; onIntentHandled hands it back once it is shown.
+  intent?: TransferLocation;
+  onIntentHandled: (handled: TransferLocation) => void;
   onOpenTransfers: () => void;
   onOpenPhotos: () => void;
   onOpenMedia: () => void;
@@ -62,8 +65,8 @@ interface FilePanelProps {
 
 export function FilePanel({
   userID,
-  navigation,
-  onNavigated,
+  intent,
+  onIntentHandled,
   onOpenTransfers,
   onOpenPhotos,
   onOpenMedia,
@@ -117,22 +120,22 @@ export function FilePanel({
   const { order, save: saveOrder, storageError, scope: orderScope } = useFileOrder(userID, spaceID, parentID);
 
   // A transfer's location opens here.
-  const [navigatedTo, setNavigatedTo] = useState<TransferLocation>();
-  if (navigatedTo !== navigation) {
-    setNavigatedTo(navigation);
-    if (navigation) {
-      setSpaceID(navigation.spaceId);
-      setTrail(navigation.folders.map((folder) => ({ id: folder.id, name: folder.name })));
+  const [intentBefore, setIntentBefore] = useState<TransferLocation>();
+  if (intentBefore !== intent) {
+    setIntentBefore(intent);
+    if (intent) {
+      setSpaceID(intent.spaceId);
+      setTrail(intent.folders.map((folder) => ({ id: folder.id, name: folder.name })));
       setQuery("");
       setSelectedItemID("");
       setSelectedItemIDs([]);
       setContextMenu(undefined);
     }
   }
-  const navigated = useEffectEvent(onNavigated);
+  const intentHandled = useEffectEvent(onIntentHandled);
   useEffect(() => {
-    if (navigation) navigated();
-  }, [navigation]);
+    if (intent) intentHandled(intent);
+  }, [intent]);
   // Another item gets another try at its preview.
   const [previewedID, setPreviewedID] = useState(selectedItemID);
   if (previewedID !== selectedItemID) {
@@ -479,7 +482,7 @@ export function FilePanel({
   };
 
   return (
-    <div className="file-manager" ref={managerRef} style={panes.style}>
+    <div className={styles.fileManager} ref={managerRef} style={panes.style}>
       <FileSidebar
         spaces={spaces}
         spaceID={spaceID}
@@ -495,7 +498,7 @@ export function FilePanel({
       />
 
       <div
-        className="file-pane-resizer"
+        className={styles.filePaneResizer}
         role="separator"
         aria-label="调整目录栏宽度"
         aria-orientation="vertical"
@@ -504,7 +507,7 @@ export function FilePanel({
       />
 
       <section
-        className="file-browser"
+        className={styles.fileBrowser}
         aria-label="文件浏览器"
         data-vnas-private={viewing ? othersSpace : undefined}
         {...dragEvents}
@@ -546,18 +549,18 @@ export function FilePanel({
           searching={Boolean(normalizedQuery)}
         />
         {storageError && (
-          <div className="file-order-notice" role="status">
+          <div className={styles.fileOrderNotice} role="status">
             {storageError}
           </div>
         )}
         {error && (
-          <div className="status-banner error">
+          <div className={`${styles.statusBanner} ${styles.error}`}>
             <CircleAlert />
             {error}
           </div>
         )}
         {viewing && (
-          <div className="status-banner viewing-banner" role="status">
+          <div className={`${styles.statusBanner} ${styles.viewingBanner}`} role="status">
             <ShieldCheck />
             <span>正在只读查看他人个人空间；访问已审计，将于 {formatFileDate(viewing.expiresAt)} 自动结束。</span>
             <button disabled={Boolean(activity)} onClick={() => void stopViewing()}>
@@ -566,14 +569,18 @@ export function FilePanel({
           </div>
         )}
         {clipboard && (
-          <div className="file-clipboard-state" role="status">
+          <div className={styles.fileClipboardState} role="status">
             {clipboard.mode === "copy" ? "已复制" : "已剪切"}
             {clipboard.entries.length === 1 ? `“${clipboard.entries[0].name}”` : ` ${clipboard.entries.length} 个项目`}
           </div>
         )}
 
         {creatingDirectory && !viewing && (
-          <form className="file-create-form" aria-label="新建文件夹" onSubmit={(event) => void makeDirectory(event)}>
+          <form
+            className={styles.fileCreateForm}
+            aria-label="新建文件夹"
+            onSubmit={(event) => void makeDirectory(event)}
+          >
             <FolderPlus />
             <input autoFocus name="name" aria-label="新文件夹名称" placeholder="输入文件夹名称" required />
             <button disabled={Boolean(activity)}>创建</button>
@@ -604,7 +611,7 @@ export function FilePanel({
           <FileUploadControl menuOpen={uploadMenuOpen} onMenuOpen={setUploadMenuOpen} onUpload={upload} />
         )}
         {dragging && (
-          <div className={`file-drop-overlay ${viewing ? "refused" : ""}`} aria-hidden="true">
+          <div className={`${styles.fileDropOverlay} ${viewing ? styles.refused : ""}`} aria-hidden="true">
             <div>
               <FolderUp />
               <strong>{viewing ? "只读查看时不能上传" : "松开即可上传"}</strong>
@@ -627,7 +634,7 @@ export function FilePanel({
       </section>
 
       <div
-        className="file-pane-resizer"
+        className={styles.filePaneResizer}
         role="separator"
         aria-label="调整详细信息栏宽度"
         aria-orientation="vertical"

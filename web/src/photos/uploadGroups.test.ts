@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+
 import { groupPhotoUploads } from "./uploadGroups";
+
 const file = (name: string) => new File(["data"], name);
 describe("Live Photo selection", () => {
   it("groups a matching movie first or last into one asset", () => {

@@ -3,8 +3,6 @@ package media
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -56,7 +54,6 @@ type Options struct {
 	// Now defaults to time.Now. Background scans call it while requests do,
 	// so it must be safe for concurrent use.
 	Now    func() time.Time
-	Random io.Reader
 	Logger *slog.Logger
 }
 
@@ -67,7 +64,6 @@ type Service struct {
 	processor Processor
 	cacheDir  string
 	now       func() time.Time
-	random    io.Reader
 	logger    *slog.Logger
 	streams   chan struct{}
 	// decoding holds the pixels of the artwork being decoded, up to
@@ -104,9 +100,6 @@ func NewService(store *Store, options Options) (*Service, error) {
 	if options.Now == nil {
 		options.Now = time.Now
 	}
-	if options.Random == nil {
-		options.Random = rand.Reader
-	}
 	if options.Logger == nil {
 		options.Logger = slog.Default()
 	}
@@ -131,7 +124,7 @@ func NewService(store *Store, options Options) (*Service, error) {
 	return &Service{
 		closing: closing, close: closeService,
 		store: store, files: options.Files, spaces: options.Spaces, processor: options.Processor,
-		cacheDir: options.CacheDir, now: options.Now, random: options.Random, logger: options.Logger,
+		cacheDir: options.CacheDir, now: options.Now, logger: options.Logger,
 		streams: make(chan struct{}, options.MaxStreams), streamWait: options.StreamWait, kick: make(chan struct{}, 1),
 		decoding: semaphore.NewWeighted(maxArtworkPixels), maxDecodeWaiting: maxArtworkWaiting,
 		scanning: map[string]bool{}, scanLocks: map[string]*sync.Mutex{}, sessions: options.Sessions,
@@ -154,13 +147,7 @@ func (s *Service) Close() {
 // Processing reports whether FFmpeg is available.
 func (s *Service) Processing() bool { return s.processor != nil }
 
-func (s *Service) randomID(prefix string) string {
-	buffer := make([]byte, 12)
-	if _, err := io.ReadFull(s.random, buffer); err != nil {
-		panic(err)
-	}
-	return prefix + ":" + hex.EncodeToString(buffer)
-}
+func (s *Service) randomID(prefix string) string { return prefix + ":" + rand.Text() }
 
 func (s *Service) wake() {
 	select {
