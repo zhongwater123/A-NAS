@@ -902,7 +902,7 @@ E1–E6 用 DeepSeek flash（[`review-scenarios.sh`](../../ai/assistant-spike/re
 - Hermes 自带的两种看画面工具都走不到 WebOS：`computer_use` 截 Hermes 那台机器的屏幕；`browser_vision` 截 Hermes 自己的浏览器，绑定了控制器时它以 `browser_vision` 动作交给控制器，而这个动作不在控制器能力白名单里（`gateway/browser_control_broker.py`），直接失败、不回退。上游文档写明视觉“不在控制器协议中”，但白名单预留了 `browser_screenshot`，固定提交与 main `c5a3c0f8` 都没有工具用它。
 - 比较过的取画面办法：窗口自己把页面画成图（`modern-screenshot`，问题反馈与程序坞预览已在用）；屏幕共享（`getDisplayMedia`，真像素，但只在 HTTPS 或 localhost 可用，局域网入口按 ADR 0012 是明文 HTTP，且每次要成员允许）；浏览器扩展（`captureVisibleTab`，每台电脑要装）。用户提出的沙箱里另开一个 WebOS 镜像客户端：每位成员要常驻一个无头 Chromium，客户端状态只能靠逐条同步 DOM 变化复制，跨域 iframe 与视频复制不了，还要把成员的登录交给沙箱，与决定 10 冲突，没有采用。用户选了第一种。
 - 补丁 0003 让 `browser_vision` 在窗口作为控制器的会话里向窗口要 `browser_screenshot`，把 PNG 存进 `cache/screenshots`，再像本地截图一样处理（`text` 模式下由看图模型描述成文字）；窗口能截图时这个工具才出现。
-- 窗口与“问题反馈”共用一个画法（[`desktopPicture.ts`](../../web/src/desktopPicture.ts)：画整个页面，包括桌面外层的菜单、预览与提示，跳过整个落在可见区域外的元素，几千个文件的文件夹也不卡）。VNAS 用最长边不超过 1600 像素的 PNG，不含 VNAS 自己的窗口与提示；`annotate` 时在每个控件上标出快照里的编号，可以按编号点击；base64 超过 4,000,000 字符时缩小重画。一条结果的上限从 64 KiB 提到 5 MiB。
+- 窗口与“问题反馈”共用一个画法（[`desktopPicture.ts`](../../web/src/desktop/desktopPicture.ts)：画整个页面，包括桌面外层的菜单、预览与提示，跳过整个落在可见区域外的元素，几千个文件的文件夹也不卡）。VNAS 用最长边不超过 1600 像素的 PNG，不含 VNAS 自己的窗口与提示；`annotate` 时在每个控件上标出快照里的编号，可以按编号点击；base64 超过 4,000,000 字符时缩小重画。一条结果的上限从 64 KiB 提到 5 MiB。
 - 用户决定试用期间不遮挡“VNAS 不能查看”的区域，画面发到 DeepSeek 只做可行性验证，以后接入本地算力。
 
 ### 真实模型

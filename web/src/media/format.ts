@@ -1,6 +1,5 @@
-import { calendarDays, relativeUnit, calendarDate } from "../format/time";
-import { relativeTime } from "../format/time";
-import type { Episode, Title } from "./mediaApi";
+import { calendarDate, calendarDays, relativeTime, relativeUnit } from "../lib/time";
+import type { Episode, Title } from "./api";
 
 // timecode shows a position as 1:02:03 or 12:34.
 export function timecode(seconds: number): string {

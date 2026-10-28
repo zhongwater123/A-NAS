@@ -12,10 +12,11 @@ import {
 } from "lucide-react";
 import { ReactNode } from "react";
 
-import { formatBytes } from "../bytes";
-import { ContainerSummary } from "../containersApi";
+import { formatBytes } from "../lib/bytes";
+import { ContainerSummary } from "./api";
 import { ContainerLogs } from "./ContainerLogs";
 import type { ContainerActions } from "./DockerPanel";
+import styles from "./docker.module.css";
 import {
   AppRef,
   Condition,
@@ -50,55 +51,65 @@ export function ContainerDetail({ item, app, tab, backLabel, actions, onTab, onB
   const busy = Boolean(pending);
 
   return (
-    <div className={`dk-detail ${tab}`}>
-      <button className="dk-back" onClick={onBack}>
+    <div className={`${styles.dkDetail} ${styles[tab] ?? ""}`}>
+      <button className={styles.dkBack} onClick={onBack}>
         <ChevronLeft />
         {backLabel}
       </button>
-      <header className={`dk-head ${condition.tone}`}>
+      <header className={`${styles.dkHead} ${styles[condition.tone] ?? ""}`}>
         <ContainerGlyph app={app} condition={condition} size="lg" />
-        <div className="dk-head-text">
+        <div className={styles.dkHeadText}>
           <h2>{item.name}</h2>
-          <div className="dk-head-meta">
+          <div className={styles.dkHeadMeta}>
             <StatePill condition={condition} />
             <span>{condition.detail}</span>
           </div>
         </div>
-        <div className="dk-head-actions">
+        <div className={styles.dkHeadActions}>
           {primary && alive && (
-            <a className="dk-btn" href={primary.url} target="_blank" rel="noopener noreferrer" title={primary.url}>
+            <a
+              className={styles.dkBtn}
+              href={primary.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={primary.url}
+            >
               <ExternalLink />
               打开
             </a>
           )}
           {alive ? (
             <>
-              <button className="dk-btn" disabled={busy} onClick={() => actions.request(item, "restart")}>
-                {pending === "restart" ? <span className="loader small" /> : <RotateCw />}重启
+              <button className={styles.dkBtn} disabled={busy} onClick={() => actions.request(item, "restart")}>
+                {pending === "restart" ? <span className={`loader ${styles.small}`} /> : <RotateCw />}重启
               </button>
-              <button className="dk-btn danger-soft" disabled={busy} onClick={() => actions.request(item, "stop")}>
-                {pending === "stop" ? <span className="loader small" /> : <Square />}停止
+              <button
+                className={`${styles.dkBtn} ${styles.dangerSoft}`}
+                disabled={busy}
+                onClick={() => actions.request(item, "stop")}
+              >
+                {pending === "stop" ? <span className={`loader ${styles.small}`} /> : <Square />}停止
               </button>
             </>
           ) : (
             <button
-              className="dk-btn primary"
+              className={`${styles.dkBtn} primary`}
               disabled={busy || item.state === "removing"}
               onClick={() => actions.request(item, "start")}
             >
-              {pending === "start" ? <span className="loader small" /> : <Play />}启动
+              {pending === "start" ? <span className={`loader ${styles.small}`} /> : <Play />}启动
             </button>
           )}
         </div>
       </header>
       {failure && (
-        <div className="dk-note error" role="alert">
+        <div className={`${styles.dkNote} ${styles.error}`} role="alert">
           <CircleAlert />
           {failure}
         </div>
       )}
 
-      <div className="dk-tabs" role="tablist" aria-label="容器详情">
+      <div className={styles.dkTabs} role="tablist" aria-label="容器详情">
         <button role="tab" aria-selected={tab === "overview"} onClick={() => onTab("overview")}>
           概览
         </button>
@@ -134,20 +145,20 @@ function Overview({
   const memoryShare = usage && usage.memoryLimitBytes > 0 ? Math.min(1, usage.memoryBytes / usage.memoryLimitBytes) : 0;
 
   return (
-    <div className="dk-overview" role="tabpanel" aria-label="概览">
+    <div className={styles.dkOverview} role="tabpanel" aria-label="概览">
       {condition.attention && <Diagnosis condition={condition} onLogs={onLogs} />}
 
       {usage && (
-        <div className="dk-stats">
-          <div className="dk-stat">
-            <span className="dk-stat-label">
+        <div className={styles.dkStats}>
+          <div className={styles.dkStat}>
+            <span className={styles.dkStatLabel}>
               <Cpu />
               CPU
             </span>
             <strong>{formatPercent(usage.cpuPercent)}</strong>
           </div>
-          <div className="dk-stat">
-            <span className="dk-stat-label">
+          <div className={styles.dkStat}>
+            <span className={styles.dkStatLabel}>
               <MemoryStick />
               内存
             </span>
@@ -157,7 +168,7 @@ function Overview({
             </strong>
             {usage.memoryLimitBytes > 0 && (
               <span
-                className="dk-meter"
+                className={styles.dkMeter}
                 role="meter"
                 aria-label="内存占用"
                 aria-valuemin={0}
@@ -169,20 +180,22 @@ function Overview({
             )}
           </div>
           {condition.health && (
-            <div className="dk-stat">
-              <span className="dk-stat-label">
+            <div className={styles.dkStat}>
+              <span className={styles.dkStatLabel}>
                 <HeartPulse />
                 健康检查
               </span>
-              <strong className={`dk-health ${condition.health}`}>{healthLabels[condition.health]}</strong>
+              <strong className={`${styles.dkHealth} ${styles[condition.health] ?? ""}`}>
+                {healthLabels[condition.health]}
+              </strong>
             </div>
           )}
         </div>
       )}
 
-      <section className="dk-section" aria-label="详细信息">
+      <section className={styles.dkSection} aria-label="详细信息">
         <h3>详细信息</h3>
-        <dl className="dk-facts">
+        <dl className={styles.dkFacts}>
           <Fact label="镜像">
             <code>{item.image}</code>
           </Fact>
@@ -199,9 +212,9 @@ function Overview({
             )}
           </Fact>
           <Fact label="端口">
-            {ports.length === 0 && unpublished.length === 0 && <span className="dk-faint">没有发布端口</span>}
+            {ports.length === 0 && unpublished.length === 0 && <span className={styles.dkFaint}>没有发布端口</span>}
             {ports.map((port) => (
-              <span className="dk-fact-port" key={port.hostPort}>
+              <span className={styles.dkFactPort} key={port.hostPort}>
                 <code>
                   {port.hostPort} → {port.containerPort}/tcp
                 </code>
@@ -216,14 +229,14 @@ function Overview({
             {item.ports
               .filter((port) => port.hostPort && port.protocol !== "tcp")
               .map((port) => (
-                <span className="dk-fact-port" key={`${port.hostPort}/${port.protocol}`}>
+                <span className={styles.dkFactPort} key={`${port.hostPort}/${port.protocol}`}>
                   <code>
                     {port.hostPort} → {port.containerPort}/{port.protocol}
                   </code>
                 </span>
               ))}
             {unpublished.length > 0 && (
-              <span className="dk-faint">
+              <span className={styles.dkFaint}>
                 仅容器内：{unpublished.map((port) => `${port.containerPort}/${port.protocol}`).join("、")}
               </span>
             )}
@@ -233,7 +246,7 @@ function Overview({
           </Fact>
           <Fact label="创建时间">{formatDateTime(item.createdAt)}</Fact>
           <Fact label="容器 ID">
-            <code className="dk-id">{item.id}</code>
+            <code className={styles.dkId}>{item.id}</code>
           </Fact>
         </dl>
       </section>
@@ -261,13 +274,13 @@ function Diagnosis({ condition, onLogs }: { condition: Condition; onLogs: () => 
     detail = "引擎没能停止或删除它，可能需要在主机上处理。";
   }
   return (
-    <div className="dk-diagnosis" role="status">
+    <div className={styles.dkDiagnosis} role="status">
       <CircleAlert />
       <div>
         <strong>{title}</strong>
         <p>{detail}</p>
       </div>
-      <button className="dk-btn" onClick={onLogs}>
+      <button className={styles.dkBtn} onClick={onLogs}>
         <ScrollText />
         查看日志
       </button>
@@ -277,7 +290,7 @@ function Diagnosis({ condition, onLogs }: { condition: Condition; onLogs: () => 
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="dk-fact">
+    <div className={styles.dkFact}>
       <dt>{label}</dt>
       <dd>{children}</dd>
     </div>

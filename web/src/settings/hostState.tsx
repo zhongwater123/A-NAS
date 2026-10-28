@@ -1,14 +1,15 @@
 import { CircleAlert } from "lucide-react";
 
-import type { HostState } from "../api";
-import type { HostStateView } from "../useHostState";
+import type { HostState } from "../desktop/api";
+import type { HostStateView } from "../desktop/useHostState";
 import { Banner } from "./parts";
+import styles from "./settings.module.css";
 
 // How the overview and storage sections show the shared host snapshot while
 // it loads, fails or ages.
 
 export function HostStatePending({ host, inline }: { host: HostStateView; inline?: boolean }) {
-  const className = inline ? "set-state" : "set-card set-state";
+  const className = inline ? styles.setState : `${styles.setCard} ${styles.setState}`;
   if (host.loading)
     return (
       <div className={className}>
@@ -22,7 +23,7 @@ export function HostStatePending({ host, inline }: { host: HostStateView; inline
       <CircleAlert />
       <h4>暂时无法读取设备状态</h4>
       <p>请确认产品服务和 Host Agent 正在运行。</p>
-      <button className="set-btn primary" onClick={() => void host.refresh()}>
+      <button className={`${styles.setBtn} primary`} onClick={() => void host.refresh()}>
         重新连接
       </button>
     </div>

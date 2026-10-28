@@ -1,7 +1,7 @@
 import { Check, Clapperboard, Ellipsis, Film, Heart, ListPlus, PenLine, Play, Tv, Video } from "lucide-react";
 import {
-  createContext,
   CSSProperties,
+  createContext,
   KeyboardEvent,
   ReactNode,
   useContext,
@@ -12,9 +12,10 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { type ArtworkKind, artworkURL, type Title } from "./api";
 import { useFold } from "./Dropdown";
 import { heading, hue, progressShare, subheading, timecode, typeLabel } from "./format";
-import { artworkURL, type ArtworkKind, type Title } from "./mediaApi";
+import styles from "./media.module.css";
 
 export interface CardAction {
   label: string;
@@ -78,14 +79,14 @@ export function Artwork({
   if (!chosen || failed) {
     const Icon = typeIcons[title.type] ?? Clapperboard;
     return (
-      <div className={`mc-art mc-art-empty ${className}`} style={style} aria-hidden="true">
-        <Icon className="mc-art-icon" />
+      <div className={`${styles.mcArt} ${styles.mcArtEmpty} ${className}`} style={style} aria-hidden="true">
+        <Icon className={styles.mcArtIcon} />
         {label && <span>{heading(title)}</span>}
       </div>
     );
   }
   return (
-    <div className={`mc-art ${className}`} style={style}>
+    <div className={`${styles.mcArt} ${className}`} style={style}>
       <img
         src={artworkURL(title.id, chosen, title.artwork.version)}
         alt=""
@@ -101,7 +102,7 @@ function ProgressBar({ title }: { title: Title }) {
   const share = progressShare(title.progress);
   if (!share || title.progress?.watched) return null;
   return (
-    <span className="mc-progress" aria-label={`已看 ${Math.round(share * 100)}%`}>
+    <span className={styles.mcProgress} aria-label={`已看 ${Math.round(share * 100)}%`}>
       <span style={{ width: `${Math.max(4, share * 100)}%` }} />
     </span>
   );
@@ -111,16 +112,18 @@ function Badges({ title }: { title: Title }) {
   const watched =
     title.type === "show" ? title.episodes && title.watchedEpisodes === title.episodes : title.progress?.watched;
   return (
-    <div className="mc-badges">
-      {title.resolution === "4K" && <span className="mc-badge">4K</span>}
-      {title.hdr && <span className="mc-badge hdr">{title.hdr === "Dolby Vision" ? "DV" : "HDR"}</span>}
+    <div className={styles.mcBadges}>
+      {title.resolution === "4K" && <span className={styles.mcBadge}>4K</span>}
+      {title.hdr && (
+        <span className={`${styles.mcBadge} ${styles.hdr}`}>{title.hdr === "Dolby Vision" ? "DV" : "HDR"}</span>
+      )}
       {watched ? (
-        <span className="mc-badge watched" aria-label="已看完">
+        <span className={`${styles.mcBadge} ${styles.watched}`} aria-label="已看完">
           <Check />
         </span>
       ) : null}
       {title.type === "show" && !watched && title.episodes ? (
-        <span className="mc-badge count">{title.episodes - (title.watchedEpisodes ?? 0)}</span>
+        <span className={`${styles.mcBadge} ${styles.count}`}>{title.episodes - (title.watchedEpisodes ?? 0)}</span>
       ) : null}
     </div>
   );
@@ -171,7 +174,7 @@ export function Menu({
   const menu = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     if (!open || !trigger.current) return;
-    const root = trigger.current.closest(".mc-app");
+    const root = trigger.current.closest(`.${styles.mcApp}`);
     if (!root) return;
     const app = root.getBoundingClientRect();
     const box = trigger.current.getBoundingClientRect();
@@ -229,7 +232,7 @@ export function Menu({
         createPortal(
           <div
             ref={menu}
-            className={`mc-menu ${place.up ? "up" : ""} ${closing ? "closing" : ""}`}
+            className={`${styles.mcMenu} ${place.up ? styles.up : ""} ${closing ? styles.closing : ""}`}
             role="menu"
             aria-label={label}
             aria-hidden={closing || undefined}
@@ -241,7 +244,7 @@ export function Menu({
                 key={item.label}
                 type="button"
                 role="menuitem"
-                className={item.danger ? "danger" : ""}
+                className={item.danger ? styles.danger : ""}
                 onClick={(event) => {
                   event.stopPropagation();
                   setOpen(false);
@@ -263,9 +266,9 @@ export function Menu({
 export function PosterCard({ title, extra }: { title: Title; extra?: CardAction[] }) {
   const actions = useMediaActions();
   return (
-    <article className="mc-card mc-poster-card" aria-label={heading(title)}>
+    <article className={`${styles.mcCard} ${styles.mcPosterCard}`} aria-label={heading(title)}>
       <div
-        className="mc-card-art"
+        className={styles.mcCardArt}
         role="button"
         tabIndex={0}
         aria-label={`打开${heading(title)}`}
@@ -277,10 +280,10 @@ export function PosterCard({ title, extra }: { title: Title; extra?: CardAction[
         <Artwork title={title} kind="poster" fallback="thumb" />
         <Badges title={title} />
         <ProgressBar title={title} />
-        <div className="mc-card-hover">
+        <div className={styles.mcCardHover}>
           <button
             type="button"
-            className="mc-card-play"
+            className={styles.mcCardPlay}
             aria-label={`播放${heading(title)}`}
             onClick={(event) => {
               event.stopPropagation();
@@ -291,7 +294,7 @@ export function PosterCard({ title, extra }: { title: Title; extra?: CardAction[
           </button>
           <button
             type="button"
-            className={`mc-card-heart ${title.favorite ? "on" : ""}`}
+            className={`${styles.mcCardHeart} ${title.favorite ? styles.on : ""}`}
             aria-label={title.favorite ? "取消收藏" : "收藏"}
             aria-pressed={title.favorite}
             onClick={(event) => {
@@ -304,11 +307,11 @@ export function PosterCard({ title, extra }: { title: Title; extra?: CardAction[
           <Menu
             label={`${heading(title)}的更多操作`}
             items={cardActions(title, actions, extra)}
-            className="mc-card-more"
+            className={styles.mcCardMore}
           />
         </div>
       </div>
-      <div className="mc-card-text">
+      <div className={styles.mcCardText}>
         <strong title={heading(title)}>{heading(title)}</strong>
         <small>{subheading(title) || typeLabel[title.type]}</small>
       </div>
@@ -323,9 +326,9 @@ export function StillCard({ title, extra, caption }: { title: Title; extra?: Car
   const playOnClick = title.type === "episode" || Boolean(title.progress?.position);
   const primary = () => (playOnClick ? actions.play(title) : actions.open(title));
   return (
-    <article className="mc-card mc-still-card" aria-label={heading(title)}>
+    <article className={`${styles.mcCard} ${styles.mcStillCard}`} aria-label={heading(title)}>
       <div
-        className="mc-card-art"
+        className={styles.mcCardArt}
         role="button"
         tabIndex={0}
         aria-label={playOnClick ? `播放${heading(title)}` : `打开${heading(title)}`}
@@ -337,10 +340,10 @@ export function StillCard({ title, extra, caption }: { title: Title; extra?: Car
         <Artwork title={title} kind="thumb" fallback="backdrop" label={false} />
         <Badges title={title} />
         <ProgressBar title={title} />
-        <div className="mc-card-hover">
+        <div className={styles.mcCardHover}>
           <button
             type="button"
-            className="mc-card-play"
+            className={styles.mcCardPlay}
             aria-label={`播放${heading(title)}`}
             onClick={(event) => {
               event.stopPropagation();
@@ -352,12 +355,12 @@ export function StillCard({ title, extra, caption }: { title: Title; extra?: Car
           <Menu
             label={`${heading(title)}的更多操作`}
             items={cardActions(title, actions, extra)}
-            className="mc-card-more"
+            className={styles.mcCardMore}
           />
         </div>
-        {title.duration ? <span className="mc-card-duration">{timecode(title.duration)}</span> : null}
+        {title.duration ? <span className={styles.mcCardDuration}>{timecode(title.duration)}</span> : null}
       </div>
-      <div className="mc-card-text">
+      <div className={styles.mcCardText}>
         <strong title={heading(title)}>{heading(title)}</strong>
         <small>{caption ?? (subheading(title) || typeLabel[title.type])}</small>
       </div>

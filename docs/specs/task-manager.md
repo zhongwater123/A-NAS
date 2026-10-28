@@ -109,10 +109,10 @@ Host Agent 不读取也不解码图标内容：它只给出每个图标的候选
 - [容量与大小单位](size-units.md)
 - [系统架构](../architecture/OVERVIEW.md)
 - [Host Agent IPC 决策](../adr/0004-use-http-json-over-unix-socket-for-host-state.md)
-- 代码：[设置页](../../web/src/SettingsPanel.tsx)、[Linux 指标采样](../../internal/hoststate/linux/metrics.go)、[Host Agent](../../internal/hoststate/agent/agent.go)
+- 代码：[设置页](../../web/src/settings/SettingsPanel.tsx)、[Linux 指标采样](../../internal/hoststate/linux/metrics.go)、[Host Agent](../../internal/hoststate/agent/agent.go)
 - 测试：[指标采样测试](../../internal/hoststate/linux/metrics_test.go)、[IPC 测试](../../internal/hoststate/agent/rootagent/agent_test.go)、[产品 API 测试](../../internal/httpapi/product_test.go)
 
 - [任务管理器领域契约](../../internal/taskmanager/model.go)、[设备采样](../../internal/hoststate/linux/task_devices.go)、[服务与进程采样](../../internal/hoststate/linux/task_workloads.go)
-- [任务管理器页面](../../web/src/taskmanager/TaskManagerSection.tsx)、[采样回归测试](../../internal/hoststate/linux/task_manager_test.go)、[访问权限测试](../../internal/httpapi/task_manager_test.go)、[契约回归测试](../../internal/httpapi/task_manager_contract_test.go)
+- [任务管理器页面](../../web/src/settings/taskmanager/TaskManagerSection.tsx)、[采样回归测试](../../internal/hoststate/linux/task_manager_test.go)、[访问权限测试](../../internal/httpapi/task_manager_test.go)、[契约回归测试](../../internal/httpapi/task_manager_contract_test.go)
 
-- [图标采集](../../internal/hoststate/linux/task_icons.go)、[图标格式校验](../../internal/taskmanager/icons.go)、[图标解码](../../internal/taskmanager/taskicon/loader.go)、[图标采集测试](../../internal/hoststate/linux/task_icons_test.go)、[图标回退测试](../../web/src/taskmanager/TaskIcon.test.tsx)
+- [图标采集](../../internal/hoststate/linux/task_icons.go)、[图标格式校验](../../internal/taskmanager/icons.go)、[图标解码](../../internal/taskmanager/taskicon/loader.go)、[图标采集测试](../../internal/hoststate/linux/task_icons_test.go)、[图标回退测试](../../web/src/settings/taskmanager/TaskIcon.test.tsx)

@@ -5,7 +5,7 @@
 import cronstrue from "cronstrue";
 import "cronstrue/locales/zh_CN";
 
-import type { AssistantTask } from "./assistantApi";
+import type { AssistantTask } from "./api";
 import { whenText } from "./taskTime";
 
 export { whenText };

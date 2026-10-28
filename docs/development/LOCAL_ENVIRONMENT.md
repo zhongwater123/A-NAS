@@ -397,13 +397,13 @@ npm run dev
 
 生成工具在 [`tools/openapi`](../../tools/openapi/package.json) 中有独立的 npm 包，与 `tools/golangci-lint` 同理：openapi-typescript 依赖 TypeScript 5 的编译器 API，而 Web 客户端用 TypeScript 7。Makefile 以 `REDOCLY_TELEMETRY=off` 运行 Redocly CLI，并关闭更新检查，生成过程不联网。
 
-Web 客户端只经 [`api.ts`](../../web/src/api.ts) 的 `client`（openapi-fetch）调用产品 API，类型从 `api.generated.ts` 取，不再手写接口：
+Web 客户端只经 [`api.ts`](../../web/src/api/client.ts) 的 `client`（openapi-fetch）调用产品 API，类型从 `api.generated.ts` 取，不再手写接口：
 
 - `call()` 把结果展开为数据，失败时抛出带服务端错误码的 `APIError`；二进制与 multipart 请求体经 `rawBody()` 原样发送。
 - CSRF 令牌由客户端按方法添加：除 GET 与 HEAD 外的请求都带 `X-CSRF-Token`，与服务端 `withMutation` 的划分一致。带进度的上传（XHR）与 tus 也从 `csrfHeader(method)` 取同一规则，调用方不再传参。
 - 桌面外壳在窗口错误边界之外读取的响应（登录、状态栏、通知、头像、壁纸、应用快捷方式、VNAS、分享提醒、传输提示与问题反馈），由客户端中间件按契约校验，不符合的响应让这次调用以 `malformed_response` 失败，而不是让桌面空白（[10-07 的空白桌面](../investigations/2026-10-07-blank-disk-plan-ui-crash.md)）。校验只管形状（类型、必有字段、枚举与 `null`），格式与字符串长度留给服务端：服务端按字符数限制昵称，生成的校验只能按 UTF-16 单元计数。外壳新读取一个接口时，把操作加进 `validators.mjs` 的列表并运行 `make api`；这些响应在 Go 侧也要有契约测试，用 `openapitest.Check` 校验请求与响应（如 `internal/httpapi/shell_contract_test.go`）。
 
-Web 测试用 [`test/api.ts`](../../web/src/test/api.ts) 的 `stubAPI` 替换 `fetch`：桩函数仍以路径与 init 看到每个请求，返回真实的 `Response`。共用的测试数据在 [`test/fixtures.ts`](../../web/src/test/fixtures.ts)，以生成的类型声明；漏掉服务端总会返回的字段时无法通过类型检查，外壳的响应在运行时也会被拒绝。
+Web 测试由 [MSW](https://mswjs.io/) 应答产品 API（[`test/server.ts`](../../web/src/test/server.ts)）。处理器用 openapi-msw 按 `api.generated.ts` 的路径与类型编写，按领域放在 [`test/handlers/`](../../web/src/test/handlers/shell.ts)，测试数据也以生成的类型声明：路径不在契约中、状态码或响应形状不对时无法通过类型检查，外壳的响应在运行时还会被客户端拒绝。没有处理器应答的请求让发出它的测试失败（[`test/setup.ts`](../../web/src/test/setup.ts)）。jsdom 的 `FormData` 进不了 Node 的 `Request`，[`test/forms.ts`](../../web/src/test/forms.ts) 为处理器留下原表单（`formOf`）；带进度的上传与 tus 在测试中替换 `XMLHttpRequest` 或 tus-js-client。
 
 ## 静态检查
 
@@ -412,7 +412,7 @@ Web 测试用 [`test/api.ts`](../../web/src/test/api.ts) 的 `stubAPI` 替换 `f
 | 目标 | 检查 |
 |---|---|
 | `make api-check` | 检查接口契约（`redocly lint`），再由它重新生成打包文档、Web 类型与响应校验，与已提交的不一致即失败，见[接口契约](#接口契约) |
-| `make web-lint` | `web/` 中的 `npm run lint`：Oxlint 与 eslint-plugin-react-hooks（含 React Compiler 的规则），再由 Biome 检查格式；规则列在 `web/.oxlintrc.json`，所有文件都须通过 |
+| `make web-lint` | `web/` 中的 `npm run lint`：Oxlint（含 jsx-a11y）与 eslint-plugin-react-hooks（含 React Compiler 的规则），再由 Biome 检查格式与导入顺序；规则列在 `web/.oxlintrc.json`，所有文件都须通过 |
 | `make go-lint` | golangci-lint，版本由 `tools/golangci-lint/go.mod` 固定，首次运行经 `go tool` 从 `proxy.golang.org` 构建；规则与理由见 `.golangci.yml` |
 | `make ai-lint` | Ruff 检查 `ai/`；`ai/requirements-dev.lock` 按哈希固定版本，`PATH` 上的 `ruff` 版本不同即失败。Ruff 在 WSL 中不检查可执行位（EXE001/EXE002），这两条只在 CI 报出：Python 文件在 Git 中是 0644，不写 shebang |
 | `make docs-check` | [`tools/doccheck`](../../tools/doccheck/main.go) 按[文档的写入规则](../README.md#写入规则)核对状态与索引；再由 lychee 离线检查每个受 Git 跟踪的 `*.md` 中的链接：目标文件存在，指向 Markdown 的锚点对应真实的标题。lychee 的版本由 Makefile 的 `LYCHEE_VERSION` 固定（不同版本生成标题锚点的规则不同），CI 按哈希安装同一版本 |
@@ -440,7 +440,7 @@ python3 -m venv ~/.local/opt/ruff
 
 `make race-test` 以竞态检测器、每次 4 个包运行全部 Go 测试，需要 gcc；CI 另开作业运行，修改并发代码时本地也运行。测试注入的时钟与 ID 生成器也会被后台 goroutine 调用，要像 `time.Now` 一样可以并发调用：时钟用 `internal/clocktest`，不要在闭包里改写捕获的变量，否则这个作业会偶发失败。
 
-Web 代码由 Biome 格式化：提交前运行 `cd web && npm run format`。2026-10-22 对全部 Web 代码的一次格式化提交列在 `.git-blame-ignore-revs`，GitHub 的 blame 跳过它，本地运行 `git config blame.ignoreRevsFile .git-blame-ignore-revs`。在它之前分出的分支先合并它的父提交，在分支上运行 `npm run format` 并提交，再合并 `main`，这样只剩真正的冲突。
+Web 代码由 Biome 格式化并排列导入（`web/biome.json`：先 Node 与 npm 包，空一行，再相对路径）：提交前运行 `cd web && npm run format`。2026-10-22 对全部 Web 代码的一次格式化提交列在 `.git-blame-ignore-revs`，GitHub 的 blame 跳过它，本地运行 `git config blame.ignoreRevsFile .git-blame-ignore-revs`。在它之前分出的分支先合并它的父提交，在分支上运行 `npm run format` 并提交，再合并 `main`，这样只剩真正的冲突。
 
 ## CI
 

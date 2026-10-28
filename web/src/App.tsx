@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 
-import { Session, currentSession, getSetupStatus, logout, onSessionEnded, setSession } from "./api";
-import { AuthMode, Authentication } from "./auth/Authentication";
+import { onSessionEnded, setSession } from "./api/client";
+import type { Session } from "./api.generated";
+import { Authentication, AuthMode } from "./auth/Authentication";
+import { currentSession, getSetupStatus, logout } from "./auth/api";
 import { PasswordChange } from "./auth/PasswordChange";
 import { Desktop } from "./desktop/Desktop";
-import { isLocalConsole, LocalConsoleScreenSaver } from "./LocalConsoleScreenSaver";
+import { isLocalConsole, LocalConsoleScreenSaver } from "./desktop/LocalConsoleScreenSaver";
 import { transferStore } from "./transfers/store";
-import "./styles.css";
+import "./styles/index.css";
+import "./desktop/desktop.module.css";
 
 export default function App() {
   const [session, setSessionState] = useState<Session>();
