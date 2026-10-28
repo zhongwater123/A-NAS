@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ContainerImage, ContainerSummary } from "../containersApi";
+import { ContainerImage, ContainerSummary } from "./api";
 import {
   AppRef,
   appProject,

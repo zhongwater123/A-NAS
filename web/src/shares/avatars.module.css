@@ -1,0 +1,83 @@
+/* Faces in 分享: one person's avatar and the overlapping faces of a share's
+   recipients. The desktop toasts show them too, so they load with the desktop. */
+.sh-avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-weight: 650;
+  line-height: 1;
+}
+.sh-avatar-xs {
+  width: 18px;
+  height: 18px;
+  font-size: 9.5px;
+}
+.sh-avatar-sm {
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+}
+.sh-avatar-md {
+  width: 32px;
+  height: 32px;
+  font-size: 13px;
+}
+.sh-avatar-lg {
+  width: 40px;
+  height: 40px;
+  font-size: 15px;
+}
+.sh-avatar-xl {
+  width: 52px;
+  height: 52px;
+  font-size: 19px;
+}
+.sh-stack {
+  position: relative;
+  display: block;
+  width: 40px;
+  height: 40px;
+}
+.sh-stack .sh-avatar {
+  position: absolute;
+  box-shadow: 0 0 0 2px var(--sh-stack-ring, var(--sh-bg));
+}
+.sh-stack.count-1 .sh-avatar {
+  inset: 0;
+  width: 40px;
+  height: 40px;
+  font-size: 15px;
+  box-shadow: none;
+}
+.sh-stack.count-2 .sh-avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+}
+.sh-stack.count-2 .sh-avatar:nth-child(2) {
+  left: 12px;
+  top: 12px;
+}
+.sh-stack.count-3 .sh-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 10.5px;
+}
+.sh-stack.count-3 .sh-avatar:nth-child(1) {
+  left: 8px;
+  top: 0;
+}
+.sh-stack.count-3 .sh-avatar:nth-child(2) {
+  left: 0;
+  top: 16px;
+}
+.sh-stack.count-3 .sh-avatar:nth-child(3) {
+  left: 16px;
+  top: 16px;
+}
+.sh-stack-more {
+  color: var(--sh-ink-2);
+  background: #e3e6ea;
+  font-size: 10px !important;
+}

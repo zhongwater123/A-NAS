@@ -1,7 +1,8 @@
 // Package httpapi composes the product API: the route table and the guard
-// that enforces each route's posture (routes.go), signing in, accounts,
-// storage, the terminal and the host state (this file). Each domain's own
-// routes live in its internal/<domain>api package.
+// that enforces each route's posture (routes.go), setting up the device,
+// signing in and sessions (product.go), the terminal and the host state
+// (this file). Each domain's own routes live in its internal/<domain>api
+// package.
 package httpapi
 
 import (

@@ -1,8 +1,9 @@
 import { ChevronRight, Folder as FolderIcon, FolderOpen, FolderX, HardDrive } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { artworkURL, type FolderListing, type FolderRoot, getFolder, listFolderRoots } from "./api";
 import { Empty, Loading, messageOf, PageHeader, TitleGrid } from "./Browse";
-import { artworkURL, getFolder, listFolderRoots, type FolderListing, type FolderRoot } from "./mediaApi";
+import styles from "./media.module.css";
 
 export interface FolderPlace {
   entryId: string;
@@ -13,12 +14,12 @@ function Cover({ id }: { id?: string }) {
   const [failed, setFailed] = useState(false);
   if (!id || failed)
     return (
-      <span className="mc-folder-cover empty">
+      <span className={`${styles.mcFolderCover} ${styles.empty}`}>
         <FolderIcon />
       </span>
     );
   return (
-    <span className="mc-folder-cover">
+    <span className={styles.mcFolderCover}>
       <img src={artworkURL(id, "thumb")} alt="" loading="lazy" onError={() => setFailed(true)} />
       <FolderIcon />
     </span>
@@ -76,24 +77,24 @@ export function FoldersPage({
 
   if (!place) {
     return (
-      <div className="mc-page">
+      <div className={styles.mcPage}>
         <PageHeader title="文件夹" count={roots?.length} />
         {!roots ? (
           <Loading />
         ) : !roots.length ? (
           <Empty icon={<FolderOpen />} title="还没有媒体库文件夹" text="新建媒体库后，可以在这里按文件夹浏览视频。" />
         ) : (
-          <div className="mc-folder-grid">
+          <div className={styles.mcFolderGrid}>
             {roots.map((root) => (
               <button
                 key={root.entryId}
                 type="button"
-                className={`mc-folder ${root.missing ? "missing" : ""}`}
+                className={`${styles.mcFolder} ${root.missing ? styles.missing : ""}`}
                 onClick={() => onPlace({ entryId: root.entryId, path: "" })}
                 disabled={root.missing}
               >
                 <Cover id={root.cover} />
-                <span className="mc-folder-text">
+                <span className={styles.mcFolderText}>
                   <strong>{root.name}</strong>
                   <small>{root.missing ? "文件夹不存在" : `${root.libraryName} · ${root.videos} 个视频`}</small>
                 </span>
@@ -106,8 +107,8 @@ export function FoldersPage({
   }
   const crumbs = place.path ? place.path.split("/") : [];
   return (
-    <div className="mc-page">
-      <nav className="mc-crumbs" aria-label="文件夹路径">
+    <div className={styles.mcPage}>
+      <nav className={styles.mcCrumbs} aria-label="文件夹路径">
         <button type="button" onClick={() => onPlace(undefined)}>
           <HardDrive />
           全部文件夹
@@ -121,7 +122,7 @@ export function FoldersPage({
           {listing?.root.name ?? "…"}
         </button>
         {crumbs.map((crumb, index) => (
-          <span key={index} className="mc-crumb">
+          <span key={index} className={styles.mcCrumb}>
             <ChevronRight />
             <button
               type="button"
@@ -140,16 +141,16 @@ export function FoldersPage({
       ) : (
         <>
           {listing.folders.length > 0 && (
-            <div className="mc-folder-grid">
+            <div className={styles.mcFolderGrid}>
               {listing.folders.map((folder) => (
                 <button
                   key={folder.path}
                   type="button"
-                  className="mc-folder"
+                  className={styles.mcFolder}
                   onClick={() => onPlace({ entryId: place.entryId, path: folder.path })}
                 >
                   <Cover id={folder.cover} />
-                  <span className="mc-folder-text">
+                  <span className={styles.mcFolderText}>
                     <strong>{folder.name}</strong>
                     <small>{folder.videos} 个视频</small>
                   </span>

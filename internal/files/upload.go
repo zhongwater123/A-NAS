@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 // ConflictPolicy decides what an upload does when its name is already taken
@@ -46,8 +47,7 @@ var (
 
 const (
 	uploadTemporaryPrefix = ".a-nas-upload-"
-	// maxNameBytes is the Linux limit for one path component.
-	maxNameBytes = 255
+	maxNameBytes          = filesystem.MaxNameBytes
 	// maxUploadDirectories bounds how deep a folder upload may nest.
 	maxUploadDirectories = 32
 	// maxNumberedCopies bounds the "name (n)" search when keeping both files.

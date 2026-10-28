@@ -59,13 +59,13 @@
 ## 验收证据
 
 - Linux 采样：[指标测试](../../internal/hoststate/linux/metrics_test.go) 覆盖基线窗口、复用上次采样、快速轮询缓存、计数器重置、虚拟接口排除与回退、格式错误。
-- IPC 与 API：[Host Agent 测试](../../internal/hoststate/agent/agent_test.go)、[HTTP 测试](../../internal/httpapi/server_test.go)、[OpenAPI 测试](../../internal/httpapi/openapi_test.go)。
-- 前端：[桌面测试](../../web/src/App.test.tsx)（含点击网速打开传输中心、点击仪表盘打开任务管理器）与 [速率格式测试](../../web/src/StatusBar.test.ts)。
+- IPC 与 API：[Host Agent 测试](../../internal/hoststate/agent/rootagent/agent_test.go)、[HTTP 测试](../../internal/httpapi/server_test.go)、[OpenAPI 测试](../../internal/httpapi/openapi_test.go)。
+- 前端：[桌面测试](../../web/src/App.test.tsx)（含点击网速打开传输中心、点击仪表盘打开任务管理器）与 [速率格式测试](../../web/src/desktop/StatusBar.test.ts)。
 - 2026-10-07 在 WSL2 以 `ANAS_HOSTSTATE_MODE=agent` 运行 Host Agent 与产品服务：14 核与 7.5 GiB 内存被正确识别，CPU 压测时仪表升至约 66%，限速下载期间下行速率与 curl 实际速率一致；并在 1024、820 和 375 px 宽度下检查布局。
 
 ## 关联
 
-- 代码：[`linux/metrics.go`](../../internal/hoststate/linux/metrics.go)、[`hoststate.Metrics`](../../internal/hoststate/state.go)、[`StatusBar`](../../web/src/StatusBar.tsx)、[`useHostMetrics`](../../web/src/useHostMetrics.ts)
+- 代码：[`linux/metrics.go`](../../internal/hoststate/linux/metrics.go)、[`hoststate.Metrics`](../../internal/hoststate/state.go)、[`StatusBar`](../../web/src/desktop/StatusBar.tsx)、[`useHostMetrics`](../../web/src/desktop/useHostMetrics.ts)
 - 契约：[OpenAPI](../../api/openapi.yaml)
 - ADR：[Host Agent IPC](../adr/0004-use-http-json-over-unix-socket-for-host-state.md)
 - 规格：[Web 桌面宿主机状态](web-desktop-host-state.md)

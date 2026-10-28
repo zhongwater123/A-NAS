@@ -20,9 +20,10 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { CatalogApp } from "../appsApi";
-import { AppIcon, Folded, JobOutput, Logins, Progress, RichText } from "./parts";
+import { CatalogApp } from "./api";
+import styles from "./appcenter.module.css";
 import { appURL, categoryOf, installFailed, leftoverText, openApp, uninstallFailed, useElapsed } from "./model";
+import { AppIcon, Folded, JobOutput, Logins, Progress, RichText } from "./parts";
 
 interface DetailProps {
   app: CatalogApp;
@@ -50,15 +51,15 @@ export function AppDetail({ app, backLabel, onBack, onInstall, onUninstall, onOp
   ].filter((link) => link.href);
 
   return (
-    <div className="ac-detail">
-      <button className="ac-back" onClick={onBack}>
+    <div className={styles.acDetail}>
+      <button className={styles.acBack} onClick={onBack}>
         <ChevronLeft />
         {backLabel}
       </button>
 
-      <header className={`ac-app-head ${category.id || "other"}`}>
+      <header className={`${styles.acAppHead} ${styles[category.id || "other"] ?? ""}`}>
         <AppIcon app={app} size="xl" />
-        <div className="ac-app-title">
+        <div className={styles.acAppTitle}>
           <h2>{app.title}</h2>
           <p>{app.tagline}</p>
           {developer && <small>{developer}</small>}
@@ -66,7 +67,7 @@ export function AppDetail({ app, backLabel, onBack, onInstall, onUninstall, onOp
         <HeaderActions app={app} onInstall={onInstall} onUninstall={onUninstall} onOpenDocker={onOpenDocker} />
       </header>
 
-      <dl className="ac-facts">
+      <dl className={styles.acFacts}>
         {facts.map((fact) => (
           <div key={fact.label}>
             <dt>{fact.label}</dt>
@@ -78,7 +79,7 @@ export function AppDetail({ app, backLabel, onBack, onInstall, onUninstall, onOp
       <StatusPanel app={app} onInstall={onInstall} onUninstall={onUninstall} onOpenDocker={onOpenDocker} />
 
       {app.notes && (
-        <section className="ac-notes" aria-label="使用须知">
+        <section className={styles.acNotes} aria-label="使用须知">
           <h3>
             <KeyRound />
             使用须知
@@ -87,7 +88,7 @@ export function AppDetail({ app, backLabel, onBack, onInstall, onUninstall, onOp
             <RichText text={app.notes} />
           </Folded>
           {app.upstreamNotes ? (
-            <details className="ac-upstream">
+            <details className={styles.acUpstream}>
               <summary>
                 <span>上游原始说明</span>
                 <small>来自 CasaOS 应用商店，其中的设置步骤和路径针对 CasaOS，在 A-NAS 中不适用</small>
@@ -101,7 +102,7 @@ export function AppDetail({ app, backLabel, onBack, onInstall, onUninstall, onOp
       )}
 
       {(app.description || app.tagline) && (
-        <section className="ac-section">
+        <section className={styles.acSection}>
           <h3>介绍</h3>
           <Folded>
             <RichText text={app.description || app.tagline} />
@@ -109,9 +110,9 @@ export function AppDetail({ app, backLabel, onBack, onInstall, onUninstall, onOp
         </section>
       )}
 
-      <section className="ac-section">
+      <section className={styles.acSection}>
         <h3>A-NAS 如何运行它</h3>
-        <ul className="ac-trust">
+        <ul className={styles.acTrust}>
           <li>
             <ScanSearch />
             <span>
@@ -135,20 +136,20 @@ export function AppDetail({ app, backLabel, onBack, onInstall, onUninstall, onOp
       </section>
 
       {links.length > 0 && (
-        <section className="ac-section">
+        <section className={styles.acSection}>
           <h3>链接</h3>
-          <div className="ac-links">
+          <div className={styles.acLinks}>
             {links.map(({ label, href, icon: Icon }) => (
               <a key={label} href={href} target="_blank" rel="noopener noreferrer">
                 <Icon />
                 {label}
-                <ArrowUpRight className="ac-link-arrow" />
+                <ArrowUpRight className={styles.acLinkArrow} />
               </a>
             ))}
           </div>
         </section>
       )}
-      <p className="ac-source">
+      <p className={styles.acSource}>
         清单来自 CasaOS AppStore（Apache-2.0），由 A-NAS 审查后内置；介绍和使用须知已按 A-NAS 校订。
       </p>
     </div>
@@ -163,9 +164,9 @@ function HeaderActions({
 }: Pick<DetailProps, "app" | "onInstall" | "onUninstall" | "onOpenDocker">) {
   if (app.state === "installing" || app.state === "uninstalling") {
     return (
-      <div className="ac-app-actions">
-        <button className="ac-btn lg" disabled>
-          <Loader className="ac-spin" />
+      <div className={styles.acAppActions}>
+        <button className={`${styles.acBtn} ${styles.lg}`} disabled>
+          <Loader className={styles.acSpin} />
           {app.state === "installing" ? "安装中…" : "卸载中…"}
         </button>
       </div>
@@ -173,8 +174,8 @@ function HeaderActions({
   }
   if (app.state === "available" || app.state === "failed") {
     return (
-      <div className="ac-app-actions">
-        <button className="ac-btn primary lg" onClick={onInstall}>
+      <div className={styles.acAppActions}>
+        <button className={`${styles.acBtn} primary ${styles.lg}`} onClick={onInstall}>
           <Download />
           安装
         </button>
@@ -183,14 +184,14 @@ function HeaderActions({
     );
   }
   return (
-    <div className="ac-app-actions">
+    <div className={styles.acAppActions}>
       {appURL(app) ? (
-        <button className="ac-btn primary lg" onClick={() => openApp(app)}>
+        <button className={`${styles.acBtn} primary ${styles.lg}`} onClick={() => openApp(app)}>
           打开
           <ArrowUpRight />
         </button>
       ) : (
-        <span className="ac-btn lg static">
+        <span className={`${styles.acBtn} ${styles.lg} ${styles.static}`}>
           <Check />
           已安装
         </span>
@@ -220,7 +221,7 @@ function MoreMenu({ onUninstall, onOpenDocker }: { onUninstall: () => void; onOp
   };
   return (
     <div
-      className="ac-menu-anchor"
+      className={styles.acMenuAnchor}
       ref={anchor}
       onKeyDown={(event) => {
         if (event.key === "Escape" && open) {
@@ -231,7 +232,7 @@ function MoreMenu({ onUninstall, onOpenDocker }: { onUninstall: () => void; onOp
     >
       <button
         ref={trigger}
-        className={`ac-icon-btn ${open ? "open" : ""}`}
+        className={`${styles.acIconBtn} ${open ? styles.open : ""}`}
         aria-label="更多操作"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -240,13 +241,13 @@ function MoreMenu({ onUninstall, onOpenDocker }: { onUninstall: () => void; onOp
         <Ellipsis />
       </button>
       {open && (
-        <div className="ac-menu" role="menu">
+        <div className={styles.acMenu} role="menu">
           {onOpenDocker && (
             <button role="menuitem" onClick={() => choose(onOpenDocker)}>
               <Boxes />在 Docker 中查看
             </button>
           )}
-          <button role="menuitem" className="danger" onClick={() => choose(onUninstall)}>
+          <button role="menuitem" className={styles.danger} onClick={() => choose(onUninstall)}>
             <Trash2 />
             卸载
           </button>
@@ -276,13 +277,13 @@ function StatusPanel({
     const installing = app.state === "installing";
     const latest = app.job?.output.at(-1);
     return (
-      <section className="ac-status-card busy" aria-label={installing ? "安装进度" : "卸载进度"}>
-        <div className="ac-status-head">
-          <Loader className="ac-spin" />
+      <section className={`${styles.acStatusCard} ${styles.busy}`} aria-label={installing ? "安装进度" : "卸载进度"}>
+        <div className={styles.acStatusHead}>
+          <Loader className={styles.acSpin} />
           <div>
             <strong>
               {installing ? "正在安装" : "正在卸载"}
-              {elapsed && <span className="ac-elapsed"> · 已用时 {elapsed}</span>}
+              {elapsed && <span className={styles.acElapsed}> · 已用时 {elapsed}</span>}
             </strong>
             <p>
               {installing
@@ -292,7 +293,7 @@ function StatusPanel({
           </div>
         </div>
         <Progress />
-        {latest && <code className="ac-latest">{latest}</code>}
+        {latest && <code className={styles.acLatest}>{latest}</code>}
         {app.job && <JobOutput job={app.job} />}
       </section>
     );
@@ -300,14 +301,14 @@ function StatusPanel({
 
   if (app.state === "failed" && uninstallFailed(app) && app.job) {
     return (
-      <section className="ac-status-card error" aria-label="卸载未完成">
-        <div className="ac-status-head">
+      <section className={`${styles.acStatusCard} ${styles.error}`} aria-label="卸载未完成">
+        <div className={styles.acStatusHead}>
           <CircleAlert />
           <div>
             <strong>卸载还未完成</strong>
             <p>{app.job.error}</p>
           </div>
-          <button className="ac-btn" onClick={onUninstall}>
+          <button className={styles.acBtn} onClick={onUninstall}>
             <RotateCcw />
             重试卸载
           </button>
@@ -320,8 +321,8 @@ function StatusPanel({
   if (app.state === "installed") {
     const healthy = app.running === app.total;
     return (
-      <section className={`ac-status-card ${healthy ? "ok" : "warn"}`} aria-label="运行状态">
-        <div className="ac-status-head">
+      <section className={`${styles.acStatusCard} ${healthy ? styles.ok : styles.warn}`} aria-label="运行状态">
+        <div className={styles.acStatusHead}>
           {healthy ? <ShieldCheck /> : <CircleAlert />}
           <div>
             <strong>
@@ -341,24 +342,24 @@ function StatusPanel({
             </p>
           </div>
           {onOpenDocker && (
-            <button className="ac-btn" onClick={onOpenDocker}>
+            <button className={styles.acBtn} onClick={onOpenDocker}>
               <Boxes />在 Docker 中查看
             </button>
           )}
         </div>
         {!healthy && (
-          <ul className="ac-problems" aria-label="没有运行的容器">
+          <ul className={styles.acProblems} aria-label="没有运行的容器">
             {(app.problems?.length ? app.problems : [{ service: "", state: "", exitCode: 0 }]).map((problem, index) => (
               <li key={`${problem.service}-${index}`}>
                 <CircleAlert />
                 {problemText(problem)}
               </li>
             ))}
-            <li className="ac-problems-hint">原因通常在容器日志里，可在 Docker 中查看。</li>
+            <li className={styles.acProblemsHint}>原因通常在容器日志里，可在 Docker 中查看。</li>
           </ul>
         )}
         {app.runtimeOutdated && (
-          <div className="ac-banner-note warning" role="note">
+          <div className={`${styles.acBannerNote} ${styles.warning}`} role="note">
             <TriangleAlert />
             <span>
               它按旧的运行规则安装，尚未应用当前的身份、权限或日志限制。卸载（应用数据会保留）后重新安装，即按当前规则运行，并限制容器日志占用。
@@ -366,7 +367,7 @@ function StatusPanel({
           </div>
         )}
         {app.credentials?.length ? (
-          <div className="ac-status-logins" aria-label="登录信息">
+          <div className={styles.acStatusLogins} aria-label="登录信息">
             <strong>登录信息</strong>
             <Logins credentials={app.credentials} />
           </div>
@@ -381,20 +382,20 @@ function StatusPanel({
   if (installFailed(app) && app.job) {
     const leftovers = leftoverText(app);
     return (
-      <section className="ac-status-card error" aria-label="安装失败">
-        <div className="ac-status-head">
+      <section className={`${styles.acStatusCard} ${styles.error}`} aria-label="安装失败">
+        <div className={styles.acStatusHead}>
           <CircleAlert />
           <div>
             <strong>上次安装没有完成</strong>
             <p>{app.job.error || "Docker Compose 没有成功启动应用，详见下方输出。"}</p>
           </div>
-          <button className="ac-btn" onClick={onInstall}>
+          <button className={styles.acBtn} onClick={onInstall}>
             <RotateCcw />
             重新安装
           </button>
         </div>
         {leftovers && (
-          <div className="ac-banner-note warning" role="note">
+          <div className={`${styles.acBannerNote} ${styles.warning}`} role="note">
             <TriangleAlert />
             <span>{leftovers}</span>
           </div>

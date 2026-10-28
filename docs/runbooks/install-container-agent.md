@@ -14,7 +14,7 @@
 更新后在“设置 → 概览”核对系统盘占用，安装计划应在空间不足时拒绝。重装后以 `docker inspect --format '{{json .HostConfig.LogConfig}}' <已确认的应用容器>` 核对 `json-file`、`max-size=10m`、`max-file=3`。若显示“卸载未完成”，先检查任务输出和 Docker 状态，再重试卸载；不要删除代理的清理记录。历史上已孤立且无法归属应用的卷或镜像不自动清理。回退旧代理不会撤销已建容器的日志限制；不要在有未完成清理任务时回退。
 
 - 必须在主机名为 `a-nas-dev` 的 Debian 13 amd64 Experimental NAS 上以 root 执行；先按 [SSH 手册](bootstrap-experimental-nas-ssh.md)核对主机指纹。
-- `/opt/a-nas/current` 与 `/home/anas-dev/apps/a-nas/current` 必须指向同一个已验证 release；数据卷必须仍以 Btrfs 挂载在 `/srv/a-nas/data`。
+- `/opt/a-nas/current` 必须指向已验证的 release（本地控制台也从它启动，[issue #174](https://github.com/zhongwater123/A-NAS/issues/174)）；数据卷必须仍以 Btrfs 挂载在 `/srv/a-nas/data`。
 - 当前架构的产品服务身份是系统账号 `a-nas`。不得沿用 ADR 0008 以前的用户级预览步骤给 `anas-dev` 授权，也不得把 `a-nas`、`anas-dev` 或 Kiosk 账号加入 `docker` 组。
 - Docker 会改写 iptables/nftables 规则并在 `/var/lib/docker` 写入镜像与容器状态；它新建的网络会改变宿主机路由，所以必须先配置地址池。安装失败、Compose 低于 2.30 或 Engine API 低于 1.45（应用中心会拒绝安装，见[应用中心规格](../specs/app-center.md)）、cgroup 不是 v2、代理单元无法以 `anas-container` 启动，或身份/组不符合预期时立即停止。
 - 升级前备份 `/etc/a-nas/anas-api.env`；回滚只停用能力，不自动删除 `/var/lib/docker`、应用数据、镜像或容器。
@@ -27,10 +27,7 @@
 test "$(id -u)" -eq 0
 test "$(hostname)" = a-nas-dev
 system_release=$(readlink -f /opt/a-nas/current)
-kiosk_release=$(readlink -f /home/anas-dev/apps/a-nas/current)
 test "$(dirname "$system_release")" = /opt/a-nas/releases
-test "$(dirname "$kiosk_release")" = /home/anas-dev/apps/a-nas/releases
-test "$(basename "$system_release")" = "$(basename "$kiosk_release")"
 findmnt -T /srv/a-nas/data -o TARGET,SOURCE,FSTYPE,OPTIONS
 ! id -nG anas-dev | tr ' ' '\n' | grep -Fx docker
 

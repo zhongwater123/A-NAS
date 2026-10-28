@@ -64,6 +64,9 @@ type Client struct {
 // the systemd units. It runs FFmpeg with the Product Service's identity.
 type Local struct {
 	Tools Tools
+	// slots, when set, are the slots this Local takes in place of the
+	// process's own; tests give theirs shorter waits.
+	slots *admission
 }
 
 var (
@@ -90,7 +93,13 @@ func (c Client) dial(ctx context.Context, op string) (*net.UnixConn, func(), err
 }
 
 func (l Local) dial(ctx context.Context, op string) (*net.UnixConn, func(), error) {
-	release, err := admit(ctx, "", priorityOf(ctx, op))
+	var release func()
+	var err error
+	if l.slots != nil {
+		release, err = l.slots.acquire(ctx, priorityOf(ctx, op))
+	} else {
+		release, err = admit(ctx, "", priorityOf(ctx, op))
+	}
 	if err != nil {
 		return nil, nil, err
 	}

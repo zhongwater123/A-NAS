@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { defineConfig } from "vitest/config";
 
 const keepFile = fileURLToPath(new URL("../internal/webui/dist/.keep", import.meta.url));
 
@@ -15,10 +15,20 @@ export default defineConfig({
       },
     },
   ],
+  css: {
+    modules: {
+      // Code reads .ph-tile as styles.phTile; a name built at run time
+      // (`tone-${tone}`) reads the dashed form, which camelCase also exports.
+      localsConvention: "camelCase",
+    },
+  },
   build: {
     outDir: "../internal/webui/dist",
     emptyOutDir: true,
     sourcemap: false,
+    // .vite/manifest.json says which files each chunk needs; the first-load
+    // budget reads it (.size-limit.js).
+    manifest: true,
   },
   server: {
     host: "127.0.0.1",
@@ -29,7 +39,8 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    setupFiles: ["./src/test/setup.ts"],
+    // forms.ts replaces Request before MSW (setup.ts) takes it.
+    setupFiles: ["./src/test/forms.ts", "./src/test/setup.ts"],
     css: true,
     pool: "threads",
     fileParallelism: false,

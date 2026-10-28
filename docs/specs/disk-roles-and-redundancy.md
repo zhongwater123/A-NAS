@@ -177,9 +177,9 @@ M1：
 
 - 存储服务（[`layout_test.go`](../../internal/storage/layout_test.go)）：两块盘默认镜像、冗余方式与硬盘数不符、加入硬盘的计划与容量、转换进度与 `volume_busy`、继续转换、已有文件放不进镜像、离线数据卷的成员不可清除、单盘时期存下的计划仍可读取。
 - 宿主机状态（[`datavolume_test.go`](../../internal/hoststate/linux/datavolume_test.go)、[`reader_test.go`](../../internal/hoststate/linux/reader_test.go) 的 `TestDeviceInUseOnlyForActiveStorageStacks`）：按文件系统 UUID 找到数据卷的每块盘、从 sysfs 读出各 profile 的用量与正在进行的 balance、只有正在使用的阵列、卷组、加密卷或 swap 才算使用中。
-- Host Agent（[`volume_test.go`](../../internal/hostops/linux/volume_test.go)、[`volume_internal_test.go`](../../internal/hostops/linux/volume_internal_test.go)、[`volume_test.go`](../../internal/hoststate/agent/volume_test.go)）：多盘格式化的命令与卷标记、新分区再清一次签名、身份变化或使用中的盘在任何命令前被拒绝、数据卷未挂载时不加盘、只转换不在目标方式中的数据、暂停的 balance 被恢复、IPC 文档的往返与校验。
+- Host Agent（[`volume_test.go`](../../internal/hostops/linux/volume_test.go)、[`volume_internal_test.go`](../../internal/hostops/linux/volume_internal_test.go)、[`volume_test.go`](../../internal/hoststate/agent/rootagent/volume_test.go)）：多盘格式化的命令与卷标记、新分区再清一次签名、身份变化或使用中的盘在任何命令前被拒绝、数据卷未挂载时不加盘、只转换不在目标方式中的数据、暂停的 balance 被恢复、IPC 文档的往返与校验。
 - 接口契约（[`storage_test.go`](../../internal/httpapi/storage_test.go)）：两块盘的计划、确认、执行、数据卷列表与继续转换都符合 [OpenAPI](../../api/openapi.yaml)。
-- React（[`SettingsPanel.test.tsx`](../../web/src/SettingsPanel.test.tsx)、[`layouts.test.ts`](../../web/src/settings/layouts.test.ts)）：发现未使用的硬盘、旧数据与不合格原因、用途与冗余方式、带旧签名的计划、加入后的完成提示、转换进度与继续转换、两块盘新建时选择扩容。
+- React（[`SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)、[`layouts.test.ts`](../../web/src/settings/layouts.test.ts)）：发现未使用的硬盘、旧数据与不合格原因、用途与冗余方式、带旧签名的计划、加入后的完成提示、转换进度与继续转换、两块盘新建时选择扩容。
 - root 集成测试（[`root_volume_integration_test.go`](../../internal/hostops/linux/root_volume_integration_test.go)）：回环设备上的真实 Btrfs 单盘加入第二块后，按卷标记转为镜像。
 - 实机：按[运行手册](../runbooks/add-a-disk-to-the-data-volume.md)在实验 NAS 上把 `sda` 加入数据卷并转为镜像，Scrub 没有错误。
 
@@ -188,8 +188,8 @@ M1：
 - 存储服务（[`operation_test.go`](../../internal/storage/operation_test.go)）：请求结束后计划接着运行并被跟随到结束、产品服务重启后接着跟随、Host Agent 没收到的计划进入 `needs_attention`、停下的计划交给 Host Agent 重试并接管它建出的卷、之后运行过的计划取代停下的计划、没有登记的数据卷挡住新建。
 - Host Agent（[`volume_test.go`](../../internal/hostops/linux/volume_test.go)、[`volume_internal_test.go`](../../internal/hostops/linux/volume_internal_test.go)）：请求被取消后操作照常完成；在清除、格式化、挂载、准备每一步停下后，重启的 Host Agent 报告 `interrupted` 与步骤，重试只在卷挂载前重新清除与格式化；命令被杀后重试；拒绝不是本计划建出的卷与指向它的挂载配置；接管本计划建出的卷；加盘先记下冗余方式，硬盘加入后被杀，重试跳过已加入的硬盘；同一时间只运行一个操作，日志在重启后仍在；待定的冗余方式在设备齐全后生效。
 - root 集成测试（[`root_volume_integration_test.go`](../../internal/hostops/linux/root_volume_integration_test.go)）：真实 Btrfs 上先记下镜像、再加入硬盘，检查把它转为镜像。
-- 接口契约（[`storage_test.go`](../../internal/httpapi/storage_test.go)）与 Host Agent IPC（[`agent_test.go`](../../internal/hoststate/agent/agent_test.go)）：执行返回 `202` 与步骤、`GET /api/v1/storage/plans`、`GET /v1/storage/operations/{planId}` 与错误码。
-- React（[`SettingsPanel.test.tsx`](../../web/src/SettingsPanel.test.tsx)）：页面回来后接着显示进行中的计划直到完成；停下的计划显示步骤并重试；重试再次停下时显示新的原因。
+- 接口契约（[`storage_test.go`](../../internal/httpapi/storage_test.go)）与 Host Agent IPC（[`agent_test.go`](../../internal/hoststate/agent/rootagent/agent_test.go)）：执行返回 `202` 与步骤、`GET /api/v1/storage/plans`、`GET /v1/storage/operations/{planId}` 与错误码。
+- React（[`SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)）：页面回来后接着显示进行中的计划直到完成；停下的计划显示步骤并重试；重试再次停下时显示新的原因。
 
 M2、M3 另需：缺盘时的降级挂载与系统测试（[`scripts/system-test.sh`](../../scripts/system-test.sh)）、更换与移除的 root 集成测试，以及拔盘开机、接回恢复的实机验证。
 - 实机：按运行手册在实验 NAS 上：
@@ -202,6 +202,6 @@ M2、M3 另需：缺盘时的降级挂载与系统测试（[`scripts/system-test
 - ADR：[0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)（修订 [0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md) 的单盘限制）
 - 规格：[基础存储与共享](basic-storage-and-sharing.md#数据卷初始化)、[设置](settings.md)中的“存储”分区、[系统健康](system-health.md)
 - 架构：[存储与文件架构](../architecture/storage-and-files.md)
-- 代码：[`internal/storage/service.go`](../../internal/storage/service.go) 与 [`layout.go`](../../internal/storage/layout.go)（计划与冗余方式）、[`internal/hostops/linux/volume.go`](../../internal/hostops/linux/volume.go)（格式化、加盘、转换检查）、[`internal/hoststate/linux/datavolume.go`](../../internal/hoststate/linux/datavolume.go)（数据卷观测）、[`cmd/anas-api/devstorage.go`](../../cmd/anas-api/devstorage.go)（fake 模式的模拟）、[`web/src/settings/StorageSection.tsx`](../../web/src/settings/StorageSection.tsx)
+- 代码：[`internal/storage/service.go`](../../internal/storage/service.go) 与 [`layout.go`](../../internal/datavolume/layout.go)（计划与冗余方式）、[`internal/hostops/linux/volume.go`](../../internal/hostops/linux/volume.go)（格式化、加盘、转换检查）、[`internal/hoststate/linux/datavolume.go`](../../internal/hoststate/linux/datavolume.go)（数据卷观测）、[`cmd/anas-api/devstorage.go`](../../cmd/anas-api/devstorage.go)（fake 模式的模拟）、[`web/src/settings/StorageSection.tsx`](../../web/src/settings/StorageSection.tsx)
 - 运行手册：[把硬盘加入数据卷](../runbooks/add-a-disk-to-the-data-volume.md)
 - 项目背景：[PROJECT_CONTEXT.md](../../PROJECT_CONTEXT.md) 的“增加第二块数据盘，用于验证镜像、掉盘、替换和重建”

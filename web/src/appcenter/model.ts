@@ -1,5 +1,3 @@
-import { errorText } from "../errorMessages";
-import { APIError } from "../api";
 import {
   Activity,
   BookOpen,
@@ -16,7 +14,9 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { CatalogApp, InstallPlan, ServiceRuntime } from "../appsApi";
+import { APIError } from "../api/client";
+import { errorText } from "../api/errorMessages";
+import { CatalogApp, InstallPlan, ServiceRuntime } from "./api";
 
 export interface Category {
   id: string;

@@ -1,20 +1,21 @@
 import { AudioLines, ChevronsUpDown, LibraryBig, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { messageOf } from "./Browse";
-import { Artwork } from "./Cards";
-import { ChoiceList, type Choice } from "./Dropdown";
-import { episodeCode, progressShare, runtime } from "./format";
 import {
+  type Category,
   getShow,
   listLibraries,
   listTitles,
-  type Category,
   type MediaLibrary,
   type ShowDetail,
   type Title,
   type VideoDetail,
-} from "./mediaApi";
+} from "./api";
+import { messageOf } from "./Browse";
+import { Artwork } from "./Cards";
+import { type Choice, ChoiceList } from "./Dropdown";
+import { episodeCode, progressShare, runtime } from "./format";
+import styles from "./media.module.css";
 
 export type PanelTab = "episodes" | "library";
 
@@ -26,7 +27,7 @@ const categories: { value: Category; label: string }[] = [
 
 function NowPlaying() {
   return (
-    <span className="mc-pick-now">
+    <span className={styles.mcPickNow}>
       <AudioLines />
       正在播放
     </span>
@@ -51,18 +52,18 @@ export function PlayerPanel({
   const episodic = detail.type === "episode" && Boolean(detail.showId);
   return (
     <aside
-      className="mc-player-panel"
+      className={styles.mcPlayerPanel}
       aria-label={tab === "episodes" ? "选集" : "片库"}
       onPointerDown={(event) => event.stopPropagation()}
     >
       <header>
-        <div className="mc-pick-tabs" role="tablist" aria-label="选择播放内容">
+        <div className={styles.mcPickTabs} role="tablist" aria-label="选择播放内容">
           {episodic && (
             <button
               type="button"
               role="tab"
               aria-selected={tab === "episodes"}
-              className={tab === "episodes" ? "active" : ""}
+              className={tab === "episodes" ? styles.active : ""}
               onClick={() => onTab("episodes")}
             >
               选集
@@ -72,13 +73,13 @@ export function PlayerPanel({
             type="button"
             role="tab"
             aria-selected={tab === "library"}
-            className={tab === "library" ? "active" : ""}
+            className={tab === "library" ? styles.active : ""}
             onClick={() => onTab("library")}
           >
             片库
           </button>
         </div>
-        <button type="button" className="mc-player-button" aria-label="收起" onClick={onClose}>
+        <button type="button" className={styles.mcPlayerButton} aria-label="收起" onClick={onClose}>
           <X />
         </button>
       </header>
@@ -114,17 +115,17 @@ function Episodes({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: s
   useEffect(() => {
     current.current?.scrollIntoView?.({ block: "center" });
   }, [show, season]);
-  if (error) return <p className="mc-pick-empty">{error}</p>;
-  if (!show) return <span className="mc-spinner small mc-pick-loading" />;
+  if (error) return <p className={styles.mcPickEmpty}>{error}</p>;
+  if (!show) return <span className={`${styles.mcSpinner} ${styles.small} ${styles.mcPickLoading}`} />;
   return (
     <>
       {show.seasonList.length > 1 && (
-        <div className="mc-pick-chips" role="group" aria-label="季">
+        <div className={styles.mcPickChips} role="group" aria-label="季">
           {show.seasonList.map((item) => (
             <button
               key={item.number}
               type="button"
-              className={item.number === season ? "active" : ""}
+              className={item.number === season ? styles.active : ""}
               aria-pressed={item.number === season}
               onClick={() => setSeason(item.number)}
             >
@@ -133,7 +134,7 @@ function Episodes({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: s
           ))}
         </div>
       )}
-      <ol className="mc-pick-list episodes" aria-label="剧集">
+      <ol className={`${styles.mcPickList} episodes`} aria-label="剧集">
         {episodes.map((episode) => {
           const playing = episode.id === detail.id;
           const share = progressShare(episode.progress);
@@ -151,21 +152,21 @@ function Episodes({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: s
             <li key={episode.id} ref={playing ? current : undefined}>
               <button
                 type="button"
-                className={`mc-pick ${playing ? "playing" : ""}`}
+                className={`${styles.mcPick} ${playing ? styles.playing : ""}`}
                 aria-current={playing ? "true" : undefined}
                 onClick={() => {
                   if (!playing) onPick(episode.id);
                 }}
               >
-                <span className="mc-pick-thumb">
+                <span className={styles.mcPickThumb}>
                   <Artwork title={title} kind="thumb" fallback="backdrop" label={false} />
                   {share > 0 && !episode.progress?.watched && (
-                    <span className="mc-progress">
+                    <span className={styles.mcProgress}>
                       <span style={{ width: `${share * 100}%` }} />
                     </span>
                   )}
                 </span>
-                <span className="mc-pick-text">
+                <span className={styles.mcPickText}>
                   <strong>{episodeCode(episode.season, episode.episode) || episode.title}</strong>
                   <small>
                     {episode.title && !episode.title.startsWith("第 ") ? episode.title : runtime(episode.duration)}
@@ -206,10 +207,10 @@ function LibrarySwitch({
     if (refocus) toggle.current?.focus({ preventScroll: true });
   };
   return (
-    <div ref={box} className={`mc-scope ${open ? "open" : ""}`}>
+    <div ref={box} className={`${styles.mcScope} ${open ? styles.open : ""}`}>
       <button
         type="button"
-        className="mc-scope-name"
+        className={styles.mcScopeName}
         title={`切换到${following.label}`}
         aria-label={`媒体库：${current.label}，切换到${following.label}`}
         onClick={() => onChange(following.value)}
@@ -220,7 +221,7 @@ function LibrarySwitch({
       <button
         ref={toggle}
         type="button"
-        className="mc-scope-toggle"
+        className={styles.mcScopeToggle}
         aria-label="选择媒体库"
         title="选择媒体库"
         aria-haspopup="listbox"
@@ -341,9 +342,9 @@ function Library({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: st
   );
   return (
     <>
-      <div className="mc-pick-filters">
-        <div className="mc-pick-row">
-          <label className="mc-pick-search">
+      <div className={styles.mcPickFilters}>
+        <div className={styles.mcPickRow}>
+          <label className={styles.mcPickSearch}>
             <Search />
             <input
               value={query}
@@ -354,12 +355,12 @@ function Library({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: st
           </label>
           {libraries.length > 1 && <LibrarySwitch value={scope} choices={scopes} onChange={setScope} />}
         </div>
-        <div className="mc-pick-chips" role="group" aria-label="分类">
+        <div className={styles.mcPickChips} role="group" aria-label="分类">
           {categories.map((item) => (
             <button
               key={item.value}
               type="button"
-              className={item.value === category ? "active" : ""}
+              className={item.value === category ? styles.active : ""}
               aria-pressed={item.value === category}
               onClick={() => setCategory(item.value)}
             >
@@ -368,13 +369,13 @@ function Library({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: st
           ))}
         </div>
       </div>
-      {error && <p className="mc-pick-empty">{error}</p>}
+      {error && <p className={styles.mcPickEmpty}>{error}</p>}
       {!items ? (
-        <span className="mc-spinner small mc-pick-loading" />
+        <span className={`${styles.mcSpinner} ${styles.small} ${styles.mcPickLoading}`} />
       ) : !items.length && !error ? (
-        <p className="mc-pick-empty">{empty}</p>
+        <p className={styles.mcPickEmpty}>{empty}</p>
       ) : (
-        <ul className={`mc-pick-list ${still ? "stills" : "posters"}`} aria-label="影片">
+        <ul className={`${styles.mcPickList} ${still ? "stills" : "posters"}`} aria-label="影片">
           {items.map((title) => {
             const playing = title.id === playingID;
             const share = progressShare(title.progress);
@@ -382,12 +383,12 @@ function Library({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: st
               <li key={title.id}>
                 <button
                   type="button"
-                  className={`mc-pick ${playing ? "playing" : ""}`}
+                  className={`${styles.mcPick} ${playing ? styles.playing : ""}`}
                   aria-current={playing ? "true" : undefined}
                   disabled={opening === title.id}
                   onClick={() => void pick(title)}
                 >
-                  <span className={`mc-pick-thumb ${still ? "" : "poster"}`}>
+                  <span className={`${styles.mcPickThumb} ${still ? "" : styles.poster}`}>
                     <Artwork
                       title={title}
                       kind={still ? "thumb" : "poster"}
@@ -395,12 +396,12 @@ function Library({ detail, onPick }: { detail: VideoDetail; onPick: (videoId: st
                       label={false}
                     />
                     {share > 0 && !title.progress?.watched && (
-                      <span className="mc-progress">
+                      <span className={styles.mcProgress}>
                         <span style={{ width: `${share * 100}%` }} />
                       </span>
                     )}
                   </span>
-                  <span className="mc-pick-text">
+                  <span className={styles.mcPickText}>
                     <strong>{title.title}</strong>
                     <small>
                       {[

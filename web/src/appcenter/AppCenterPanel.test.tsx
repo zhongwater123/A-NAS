@@ -2,40 +2,13 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setSession } from "../api";
-import type { AppJob, CatalogApp, InstallPlan } from "../appsApi";
+import { setSession } from "../api/client";
+import type { AppJob } from "../api.generated";
+import { session } from "../test/fixtures";
+import { app, appsHandlers, job, memosPlan } from "../test/handlers/apps";
+import { apiError, http, pathOf, server } from "../test/server";
 import { AppCenterPanel } from "./AppCenterPanel";
-import { json, stubAPI } from "../test/api";
-import { app } from "../test/fixtures";
-
-function job(overrides: Partial<AppJob> = {}): AppJob {
-  return {
-    appId: "memos",
-    action: "install",
-    state: "running",
-    startedAt: new Date().toISOString(),
-    output: [],
-    ...overrides,
-  };
-}
-
-const memosPlan: InstallPlan = {
-  appId: "memos",
-  title: "Memos",
-  version: "0.28.0",
-  project: "a-nas-memos",
-  identity: { username: "app-memos", uid: 30000, gid: 30000 },
-  images: ["neosmemo/memos:0.28.0"],
-  containers: ["memos"],
-  ports: [{ hostPort: 5230, containerPort: 5230, protocol: "tcp", purpose: "WebUI" }],
-  mounts: [
-    { hostPath: "/srv/a-nas/data/apps/memos/memos", containerPath: "/var/opt/memos", kind: "appdata", readOnly: false },
-  ],
-  networks: [],
-  addressPools: [],
-  digest: "d".repeat(64),
-  compose: "name: a-nas-memos\n",
-};
+import type { CatalogApp, InstallPlan } from "./api";
 
 // Navidrome as the current container agent plans it: the app identity reads
 // Music through a-nas-users; a second service keeps its image's user.
@@ -58,26 +31,35 @@ const navidromePlan: InstallPlan = {
 };
 
 // serve answers the App Center API from a list the test changes as the server
-// would; every write must carry the session's CSRF token.
-function serve(
-  apps: () => CatalogApp[],
-  onPost: (url: string) => Response = () => json(job(), 202),
-  plan: InstallPlan = memosPlan,
-) {
+// would, and returns the installs and uninstalls it accepted. Like the server,
+// it refuses a write without the session's CSRF token.
+function serve(apps: () => CatalogApp[], onPost: (path: string) => AppJob = () => job(), plan = memosPlan) {
   const posts: string[] = [];
-  stubAPI(
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (init?.method === "POST") {
-        expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("csrf-test");
-        posts.push(url);
-        return onPost(url);
-      }
-      if (url.endsWith("/plan")) return json(plan);
-      return json({ dataSource: "simulated", apps: apps() });
+  const accept = (request: Request) => {
+    if (request.headers.get("X-CSRF-Token") !== session().csrfToken) return undefined;
+    posts.push(pathOf(request));
+    return onPost(pathOf(request));
+  };
+  server.use(
+    ...appsHandlers(apps, plan),
+    http.post("/api/v1/apps/{appId}/install", ({ request, response }) => {
+      const started = accept(request);
+      return started ? response(202).json(started) : response(403).json(apiError("csrf_invalid"));
+    }),
+    http.post("/api/v1/apps/{appId}/uninstall", ({ request, response }) => {
+      const started = accept(request);
+      return started ? response(202).json(started) : response(403).json(apiError("csrf_invalid"));
     }),
   );
   return posts;
+}
+
+// The catalog the desktop's tests used: Memos and Navidrome, neither installed.
+function catalog(memos: Partial<CatalogApp> = {}): CatalogApp[] {
+  return [
+    app("memos", { title: "Memos", tagline: "轻量笔记", category: "notes", webPort: 5230, ...memos }),
+    app("navidrome", { title: "Navidrome", tagline: "音乐流媒体", category: "media", webPort: 4533 }),
+  ];
 }
 
 // The panel polls; a visibility change asks it to read the list right away.
@@ -88,18 +70,7 @@ async function refresh() {
 }
 
 beforeEach(() => {
-  setSession({
-    csrfToken: "csrf-test",
-    expiresAt: "2026-10-12T22:00:00Z",
-    user: {
-      id: "user:owner",
-      username: "owner",
-      role: "admin",
-      status: "active",
-      createdAt: "2026-10-12T00:00:00Z",
-      mustChangePassword: false,
-    },
-  });
+  setSession(session({}, { expiresAt: "2026-10-12T22:00:00Z" }));
 });
 
 afterEach(() => {
@@ -148,7 +119,7 @@ describe("AppCenterPanel", () => {
       }),
     ]);
     const user = userEvent.setup();
-    const { container } = render(<AppCenterPanel />);
+    render(<AppCenterPanel />);
     await user.click(await screen.findByRole("button", { name: "Memos，可安装" }));
 
     const notes = screen.getByRole("region", { name: "使用须知" });
@@ -157,7 +128,9 @@ describe("AppCenterPanel", () => {
     expect(await screen.findByText("轻量")).toHaveProperty("tagName", "STRONG");
     expect(screen.getByRole("link", { name: "官网" }).getAttribute("target")).toBe("_blank");
     expect(screen.getByRole("link", { name: /源码/ }).getAttribute("href")).toBe("https://github.com/usememos/memos");
-    expect(container.querySelector(".ac-prose img")).toBeNull();
+    // The description's image is dropped, not shown.
+    expect(screen.queryByRole("img", { name: "截图" })).toBeNull();
+    expect(document.querySelector('img[src="https://example.com/shot.png"]')).toBeNull();
   });
 
   it("shows notes written for A-NAS and keeps the manifest's own folded away", async () => {
@@ -170,7 +143,7 @@ describe("AppCenterPanel", () => {
       app("memos", { notes: "默认账号 `admin`" }),
     ]);
     const user = userEvent.setup();
-    const { container } = render(<AppCenterPanel />);
+    render(<AppCenterPanel />);
     await user.click(await screen.findByRole("button", { name: "Immich，可安装" }));
 
     const notes = screen.getByRole("region", { name: "使用须知" });
@@ -184,7 +157,9 @@ describe("AppCenterPanel", () => {
     expect(within(upstream).getByText(/右上角的设置图标/)).toBeTruthy();
     expect(within(notes).queryByText(/文件夹与端口以安装计划为准/)).toBeNull();
 
-    await user.click(container.querySelector<HTMLButtonElement>(".ac-back")!);
+    // The detail's back button is named after the list it returns to.
+    const nav = screen.getByRole("navigation", { name: "应用中心导航" });
+    await user.click(screen.getAllByRole("button", { name: "发现" }).find((button) => !nav.contains(button))!);
     await user.click(await screen.findByRole("button", { name: "Memos，可安装" }));
     const memosNotes = screen.getByRole("region", { name: "使用须知" });
     expect(memosNotes.querySelector("details")).toBeNull();
@@ -264,7 +239,7 @@ describe("AppCenterPanel", () => {
       () => [memos],
       () => {
         memos = { ...memos, state: "installing", job: job({ output: ["Pulling images"] }) };
-        return json(job(), 202);
+        return job();
       },
     );
     const open = vi.spyOn(window, "open").mockReturnValue(null);
@@ -301,6 +276,53 @@ describe("AppCenterPanel", () => {
     );
     expect(screen.queryByRole("dialog", { name: "安装完成" })).toBeNull();
     expect(screen.getByText(/已安装 · 1\/1 个容器运行中/)).toBeTruthy();
+  });
+
+  // Moved from the desktop's tests, where the App Center opened from its icon.
+  it("installs an app after confirming its plan, sending the plan's digest", async () => {
+    const installs: unknown[] = [];
+    let installed = false;
+    server.use(
+      ...appsHandlers(() =>
+        catalog(
+          installed
+            ? {
+                state: "installed",
+                running: 1,
+                total: 1,
+                job: job({
+                  state: "succeeded",
+                  startedAt: "2026-10-07T00:00:00Z",
+                  output: ["Container memos  Started"],
+                }),
+              }
+            : {},
+        ),
+      ),
+      http.post("/api/v1/apps/{appId}/install", async ({ request, response }) => {
+        installs.push({ path: pathOf(request), body: await request.json() });
+        installed = true;
+        return response(202).json(job({ startedAt: "2026-10-07T00:00:00Z" }));
+      }),
+    );
+    const user = userEvent.setup();
+    render(<AppCenterPanel />);
+
+    await user.click(await screen.findByRole("button", { name: "安装 Memos" }));
+    const plan = await screen.findByRole("dialog", { name: "安装计划" });
+    expect(await within(plan).findByText("neosmemo/memos:0.28.0")).toBeTruthy();
+    expect(within(plan).getByText("5230/tcp")).toBeTruthy();
+    expect(within(plan).getByText("/srv/a-nas/data/apps/memos/memos")).toBeTruthy();
+    expect(within(plan).getByText("app-memos")).toBeTruthy();
+    expect(within(plan).getByText(/只访问自己的应用数据/)).toBeTruthy();
+    expect(within(plan).getByText("使用 Docker 默认网桥，不新建网络")).toBeTruthy();
+    expect(installs).toHaveLength(0);
+
+    await user.click(within(plan).getByRole("button", { name: "确认安装" }));
+    expect(installs).toEqual([{ path: "/api/v1/apps/memos/install", body: { digest: memosPlan.digest } }]);
+    expect(await screen.findByText("Memos 已安装")).toBeTruthy();
+    expect(screen.getByText(/已安装 · 1\/1 个容器运行中/)).toBeTruthy();
+    expect(screen.getByText(/Container memos\s+Started/)).toBeTruthy();
   });
 
   it("returns focus to the install button when the plan is dismissed", async () => {
@@ -399,7 +421,7 @@ describe("AppCenterPanel", () => {
     let memos = app("memos", { job: earlier });
     serve(
       () => [memos],
-      () => json(retried, 202),
+      () => retried,
     );
     const user = userEvent.setup();
     render(<AppCenterPanel />);
@@ -438,7 +460,7 @@ describe("AppCenterPanel", () => {
       () => [memos, app("navidrome", { category: "media" })],
       () => {
         memos = { ...memos, state: "uninstalling", job: job({ action: "uninstall" }) };
-        return json(job({ action: "uninstall" }), 202);
+        return job({ action: "uninstall" });
       },
     );
     const openDocker = vi.fn();
@@ -506,5 +528,66 @@ describe("AppCenterPanel", () => {
     expect(
       within(await screen.findByRole("region", { name: "其他" })).getByRole("button", { name: "Memos，可安装" }),
     ).toBeTruthy();
+  });
+
+  // Moved from the desktop's tests.
+  it("explains install conflicts and a disabled App Center", async () => {
+    server.use(
+      ...appsHandlers(() => catalog()),
+      http.post("/api/v1/apps/{appId}/install", ({ response }) =>
+        response(409).json(apiError("port_in_use", "a published port is already in use: 5230 is used by other")),
+      ),
+    );
+    const user = userEvent.setup();
+    const { unmount } = render(<AppCenterPanel />);
+    await user.click(await screen.findByRole("button", { name: "安装 Memos" }));
+    await user.click(await screen.findByRole("button", { name: "确认安装" }));
+    const conflict = (await screen.findByRole("alert")).textContent;
+    expect(conflict).toContain("端口已被占用（5230）");
+    expect(conflict).not.toContain("is used by");
+    unmount();
+
+    server.use(http.get("/api/v1/apps", ({ response }) => response(503).json(apiError("apps_disabled", "disabled"))));
+    render(<AppCenterPanel />);
+    expect(await screen.findByText("应用中心未启用")).toBeTruthy();
+  });
+
+  it("shows the Docker networks an app creates and refuses them without an address pool", async () => {
+    let poolConfigured = true;
+    server.use(...appsHandlers(() => catalog()));
+    server.use(
+      http.get("/api/v1/apps/{appId}/plan", ({ response }) =>
+        poolConfigured
+          ? response(200).json({ ...memosPlan, networks: ["default"], addressPools: ["10.96.64.0/19"] })
+          : response(409).json(apiError("address_pool_missing", "Docker has no address pool for app networks")),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<AppCenterPanel />);
+    await user.click(await screen.findByRole("button", { name: "Memos，可安装" }));
+    await user.click(screen.getByRole("button", { name: "安装" }));
+    const plan = await screen.findByRole("dialog", { name: "安装计划" });
+    expect(await within(plan).findByText("default")).toBeTruthy();
+    expect(within(plan).getByText(/地址只从 10\.96\.64\.0\/19 分配/)).toBeTruthy();
+
+    await user.click(within(plan).getByRole("button", { name: "取消" }));
+    poolConfigured = false;
+    await user.click(screen.getByRole("button", { name: "安装" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Docker 尚未配置 A-NAS 网络地址池");
+  });
+
+  it("explains when app installation is blocked by an unavailable data volume", async () => {
+    server.use(
+      ...appsHandlers(() => catalog()),
+      http.post("/api/v1/apps/{appId}/install", ({ response }) =>
+        response(423).json(apiError("volume_unavailable", "the data volume is not available")),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<AppCenterPanel />);
+    await user.click(await screen.findByRole("button", { name: "Memos，可安装" }));
+    await user.click(screen.getByRole("button", { name: "安装" }));
+    await user.click(await screen.findByRole("button", { name: "确认安装" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("数据卷当前不可用");
   });
 });

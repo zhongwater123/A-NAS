@@ -20,7 +20,7 @@ func TestSessionWorksOnlyFromTheClientThatSignedIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{})
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
 	if _, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple"); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestSessionsFromBeforeTheBindingAreBoundOrRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{})
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
 	if _, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple"); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestSessionsFromBeforeTheBindingAreBoundOrRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service = accounts.NewService(store, &identityRecorder{}, accounts.Options{})
+	service = accounts.NewService(store, &identityRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
 	if _, err := service.ResolveClientSession(ctx, console.Token, accounts.ClientOrigin{Via: accounts.ViaLoopback}); err != nil {
 		t.Errorf("earlier local console session on the device: %v", err)
 	}

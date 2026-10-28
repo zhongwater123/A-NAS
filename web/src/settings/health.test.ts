@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { HostState } from "../api";
+import type { HostState } from "../desktop/api";
 import { describeFinding } from "./health";
 
 const disk = (id: string, model: string, rotational: boolean): HostState["disks"][number] => ({

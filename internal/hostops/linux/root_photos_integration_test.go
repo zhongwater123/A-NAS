@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 )
 
 // TestRootPhotosStoreBelongsToThePhotoServiceAlone creates the photos
@@ -28,9 +28,9 @@ func TestRootPhotosStoreBelongsToThePhotoServiceAlone(t *testing.T) {
 	run(t, "chmod", "0750", mount)
 	startSamba(t)
 	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: mount})
-	if err := executor.SetCredential(ctx, accounts.CredentialRequest{
+	if err := executor.SetCredential(ctx, accountid.CredentialRequest{
 		UserID: "user:petra", PrivateSpaceID: "space:petra", Username: "petra",
-		Password: "petra password for tests", Role: accounts.RoleAdmin, UID: 20131, Enabled: true,
+		Password: "petra password for tests", Role: accountid.RoleAdmin, UID: 20131, Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -50,29 +50,29 @@ func TestRootPhotosStoreBelongsToThePhotoServiceAlone(t *testing.T) {
 		t.Fatalf("photos store created before the photo service identity exists: %v", err)
 	}
 
-	uid := strconv.Itoa(accounts.PhotoServiceUID)
-	run(t, "groupadd", "--system", "--gid", uid, accounts.PhotoServiceUser)
-	run(t, "useradd", "--system", "--uid", uid, "--gid", uid, "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", accounts.PhotoServiceUser)
+	uid := strconv.Itoa(accountid.PhotoServiceUID)
+	run(t, "groupadd", "--system", "--gid", uid, accountid.PhotoServiceUser)
+	run(t, "useradd", "--system", "--uid", uid, "--gid", uid, "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", accountid.PhotoServiceUser)
 	t.Cleanup(func() {
-		_ = exec.Command("userdel", accounts.PhotoServiceUser).Run()
-		_ = exec.Command("groupdel", accounts.PhotoServiceUser).Run()
+		_ = exec.Command("userdel", accountid.PhotoServiceUser).Run()
+		_ = exec.Command("groupdel", accountid.PhotoServiceUser).Run()
 	})
 	if _, err := executor.EnsurePhotosStore(ctx); err != nil {
 		t.Fatal(err)
 	}
 	var stat syscall.Stat_t
-	if err := syscall.Lstat(photos, &stat); err != nil || stat.Uid != accounts.PhotoServiceUID || stat.Gid != accounts.PhotoServiceUID || stat.Mode&0o7777 != 0o700 {
+	if err := syscall.Lstat(photos, &stat); err != nil || stat.Uid != accountid.PhotoServiceUID || stat.Gid != accountid.PhotoServiceUID || stat.Mode&0o7777 != 0o700 {
 		t.Fatalf("photos store = uid %d gid %d mode %o, %v; want a-nas-photos 0700", stat.Uid, stat.Gid, stat.Mode&0o7777, err)
 	}
 	run(t, "btrfs", "subvolume", "show", photos)
 
 	writeSecret := asUser("petra", "sh", "-c", "echo secret > "+filepath.Join(private, "secret.txt"))
 	expect("petra writes her space", true, writeSecret)
-	expect("photo service writes its store", true, asUser(accounts.PhotoServiceUser, "sh", "-c", "echo catalog > "+filepath.Join(photos, "probe")))
-	expect("photo service reads the volume marker", true, asUser(accounts.PhotoServiceUser, "cat", filepath.Join(mount, ".a-nas-volume.json")))
-	expect("photo service reads a member's private space", false, asUser(accounts.PhotoServiceUser, "cat", filepath.Join(private, "secret.txt")))
-	expect("photo service lists the Shared folder", false, asUser(accounts.PhotoServiceUser, "ls", filepath.Join(mount, "spaces", "shared")))
-	expect("photo service lists the volume root", false, asUser(accounts.PhotoServiceUser, "ls", mount))
+	expect("photo service writes its store", true, asUser(accountid.PhotoServiceUser, "sh", "-c", "echo catalog > "+filepath.Join(photos, "probe")))
+	expect("photo service reads the volume marker", true, asUser(accountid.PhotoServiceUser, "cat", filepath.Join(mount, ".a-nas-volume.json")))
+	expect("photo service reads a member's private space", false, asUser(accountid.PhotoServiceUser, "cat", filepath.Join(private, "secret.txt")))
+	expect("photo service lists the Shared folder", false, asUser(accountid.PhotoServiceUser, "ls", filepath.Join(mount, "spaces", "shared")))
+	expect("photo service lists the volume root", false, asUser(accountid.PhotoServiceUser, "ls", mount))
 	expect("an administrator lists the photo store", false, asUser("petra", "ls", photos))
 	expect("the Product Service lists the photo store", false, asUser("a-nas", "ls", photos))
 	expect("an administrator's terminal reads a photo file", false, asUser("petra", "cat", filepath.Join(photos, "probe")))
@@ -88,5 +88,5 @@ func TestRootPhotosStoreBelongsToThePhotoServiceAlone(t *testing.T) {
 		t.Errorf("repairs = %v, want the photos store", repaired)
 	}
 	expect("an administrator lists the repaired store", false, asUser("petra", "ls", photos))
-	expect("photo service still reads its store", true, asUser(accounts.PhotoServiceUser, "cat", filepath.Join(photos, "probe")))
+	expect("photo service still reads its store", true, asUser(accountid.PhotoServiceUser, "cat", filepath.Join(photos, "probe")))
 }

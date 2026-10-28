@@ -4,8 +4,6 @@ package sharefiles
 
 import (
 	"context"
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -18,6 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/shares"
+	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 )
 
 type wireRequest struct {
@@ -39,100 +38,24 @@ type wireResponse struct {
 
 const wireLimit = 8 << 20
 
+// writeWire and readWire speak internal/unixmsg; an oversized message or
+// one whose descriptors were cut is invalid.
 func writeWire(conn *net.UnixConn, value any, file *os.File) error {
-	body, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	if len(body) > wireLimit {
+	return asInvalid(unixmsg.Write(conn, value, file, wireLimit))
+}
+
+func readWire(conn *net.UnixConn, value any) (*os.File, error) {
+	file, err := unixmsg.Read(conn, value, wireLimit)
+	return file, asInvalid(err)
+}
+
+func asInvalid(err error) error {
+	if errors.Is(err, unixmsg.ErrTooLarge) || errors.Is(err, unixmsg.ErrTruncated) {
 		return shares.ErrInvalid
 	}
-	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(body)))
-	var rights []byte
-	if file != nil {
-		rights = syscall.UnixRights(int(file.Fd()))
-	}
-	n, _, err := conn.WriteMsgUnix(header, rights, nil)
-	if err != nil {
-		return err
-	}
-	if n < 4 {
-		if _, err = conn.Write(header[n:]); err != nil {
-			return err
-		}
-	}
-	_, err = io.Copy(conn, bytesReader(body))
 	return err
 }
 
-type byteReader struct{ data []byte }
-
-func bytesReader(b []byte) *byteReader { return &byteReader{data: b} }
-func (b *byteReader) Read(p []byte) (int, error) {
-	if len(b.data) == 0 {
-		return 0, io.EOF
-	}
-	n := copy(p, b.data)
-	b.data = b.data[n:]
-	return n, nil
-}
-func readWire(conn *net.UnixConn, value any) (*os.File, error) {
-	header := make([]byte, 4)
-	oob := make([]byte, syscall.CmsgSpace(4*4))
-	n, on, flags, _, err := conn.ReadMsgUnix(header, oob)
-	if err != nil {
-		return nil, err
-	}
-	var file *os.File
-	controls, parseErr := syscall.ParseSocketControlMessage(oob[:on])
-	if parseErr != nil {
-		return nil, parseErr
-	}
-	for _, control := range controls {
-		fds, e := syscall.ParseUnixRights(&control)
-		if e != nil {
-			if file != nil {
-				_ = file.Close()
-			}
-			return nil, e
-		}
-		for _, fd := range fds {
-			syscall.CloseOnExec(fd)
-			if file == nil {
-				file = os.NewFile(uintptr(fd), "share-source")
-			} else {
-				syscall.Close(fd)
-			}
-		}
-	}
-	fail := func(err error) (*os.File, error) {
-		if file != nil {
-			_ = file.Close()
-		}
-		return nil, err
-	}
-	if flags&syscall.MSG_CTRUNC != 0 {
-		return fail(shares.ErrInvalid)
-	}
-	if n < 4 {
-		if _, err := io.ReadFull(conn, header[n:]); err != nil {
-			return fail(err)
-		}
-	}
-	size := binary.BigEndian.Uint32(header)
-	if size > wireLimit {
-		return fail(shares.ErrInvalid)
-	}
-	body := make([]byte, size)
-	if _, err := io.ReadFull(conn, body); err != nil {
-		return fail(err)
-	}
-	if err := json.Unmarshal(body, value); err != nil {
-		return fail(err)
-	}
-	return file, nil
-}
 func wireError(err error) string {
 	switch {
 	case errors.Is(err, shares.ErrBusy):

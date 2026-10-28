@@ -7,6 +7,7 @@ SHELLCHECK_VERSION = 0.11.0
 SHELL_SCRIPTS = $(shell git ls-files '*.sh' 2>/dev/null || find . -name '*.sh' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' | sed 's|^\./||' | sort)
 NPM ?= npm
 RUFF ?= ruff
+PIP_AUDIT ?= pip-audit
 BUILD_DIR ?= build
 VERSION ?= dev
 WEB_DEPS_STAMP ?= web/node_modules/.package-lock.json
@@ -50,8 +51,10 @@ api: api-install
 		--output $(API_OUT)/web/src/api.generated.ts > /dev/null
 	@node tools/openapi/validators.mjs $(API_OUT)/api/openapi.bundle.yaml $(API_OUT)/web/src/api.validators.generated.ts
 
-# Fails when a generated contract file differs from what `make api` writes.
+# Lints the contract (api/redocly.yaml), then fails when a generated contract
+# file differs from what `make api` writes.
 api-check: api-install
+	@$(REDOCLY) lint --config api/redocly.yaml api/openapi.yaml
 	@out="$$(mktemp -d)"; trap 'rm -rf "$$out"' EXIT; \
 	$(MAKE) --no-print-directory api API_OUT="$$out" || exit 1; \
 	for file in api/openapi.bundle.yaml web/src/api.generated.ts web/src/api.validators.generated.ts; do \
@@ -63,6 +66,8 @@ api-check: api-install
 
 web-install: $(WEB_DEPS_STAMP)
 
+# --no-audit: the install's own audit only prints; vuln-check runs npm audit
+# so that an advisory fails the check.
 $(WEB_DEPS_STAMP): web/package.json web/package-lock.json
 	cd web && $(NPM) ci --no-audit --no-fund
 	@test -f $(WEB_DEPS_STAMP)
@@ -101,8 +106,10 @@ docs-check:
 	{ git ls-files '*.md' 2>/dev/null || find . -name '*.md' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' -not -path '*/build/*' -not -path '*/dist/*'; } | \
 	lychee --offline --include-fragments --no-progress --files-from -
 
-# Shell scripts, units and installer conventions, and Dependabot's groups
-# (tools/depcheck keeps 0.x web packages out of them).
+# Shell scripts, units and installer conventions, Dependabot's groups
+# (tools/depcheck keeps 0.x web packages out of them), and the AI locks: every
+# pin has a hash, and the runtime's leaves out what ai/requirements.excludes
+# names, which a lock regenerated without --excludes (Dependabot's) would not.
 ops-check:
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
@@ -111,9 +118,13 @@ ops-check:
 	$(GO) run ./tools/depcheck
 	env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=90 ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
 	! env ANAS_KIOSK_OUTPUT=DP-2 ANAS_KIOSK_TRANSFORM=sideways ANAS_KIOSK_SCALE=1.5 bash scripts/run-kiosk.sh --check-output-config
-	grep -Fqx 'ConditionPathExists=/home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
-	grep -Fqx 'ExecStart=/usr/bin/cage -s -- /home/anas-dev/apps/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
+	grep -Fqx 'ConditionPathExists=/opt/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
+	grep -Fqx 'ExecStart=/usr/bin/cage -s -- /opt/a-nas/current/kiosk-launcher' deploy/systemd/system/anas-kiosk@.service
+	grep -Fqx 'User=a-nas-kiosk' deploy/systemd/system/anas-kiosk@.service
 	grep -Fqx 'EnvironmentFile=-/etc/a-nas/kiosk.env' deploy/systemd/system/anas-kiosk@.service
+	grep -Eqx 'u a-nas-kiosk - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-kiosk.conf
+	grep -Fq 'a-nas-kiosk.sysusers.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	! grep -rFq /home/anas-dev deploy/systemd/system scripts/install-v1.0.1-system-services.sh
 	grep -Fqx 'ReadWritePaths=%h/.config/a-nas/state' deploy/systemd/user/anas-api.service
 	grep -Fq 'install -d -m 0700 "$$config_dir/state"' scripts/remote-activate-release.sh
 	grep -Fq 'stage-only' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
@@ -233,7 +244,9 @@ ops-check:
 	grep -Fqx 'const Slots = 8' internal/mediaworker/admission.go
 	grep -Fq 'for slot in 0 1 2 3 4 5 6 7; do' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'ffmpeg ffprobe heif-thumbnailer; do' scripts/install-v1.0.1-system-services.sh
-	! grep -E '^[A-Za-z0-9_.-]+==' ai/requirements.lock | grep -v -- ' --hash=sha256:[0-9a-f]\{64\}$$'
+	awk '/^[A-Za-z0-9]/ { if (pin && !hashed) bad = bad " " pin; pin = $$1; hashed = 0 } /--hash=sha256:[0-9a-f]{64}/ { hashed = 1 } \
+		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt
+	! grep -E "^($$(sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' ai/requirements.excludes | paste -sd '|'))==" ai/requirements.txt
 
 vet:
 	$(GO) vet ./...
@@ -241,23 +254,33 @@ vet:
 go-lint:
 	$(GOLANGCI_LINT) run ./...
 
-# Fails on known vulnerabilities that the code can reach. The scanner is pinned
-# by the tool directive in go.mod; it fetches the database from vuln.go.dev.
+# Fails on known vulnerabilities in what ships: Go code the product can reach
+# (govulncheck, pinned by the tool directive in go.mod, with the database from
+# vuln.go.dev), the AI runtime's packages (pip-audit, pinned by
+# ai/requirements-dev.txt, with PyPI's advisories) and the Web UI's runtime
+# packages (npm audit, with the registry's advisories). A new advisory fails it
+# without a change; fix that first (AGENTS.md).
 vuln-check:
 	$(GO) tool govulncheck ./...
+	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r ai/requirements.txt
+	cd web && $(NPM) audit --omit=dev
 
 test:
 	$(GO) test ./...
 
-# CI runs this beside `make check`; the Web UI tests need the built assets.
-race-test: web-build
-	$(GO) test -race -p $(RACE_PARALLEL) ./...
+# CI runs this beside `make check`. It leaves out internal/webui, which only
+# serves the built Web assets and runs no goroutines: `make test` covers it
+# after `make web-build`, so this run needs no Node.js. The list is taken first,
+# so that a package go list cannot load fails the run instead of dropping out.
+race-test:
+	packages="$$($(GO) list ./...)" && \
+	$(GO) test -race -p $(RACE_PARALLEL) $$(printf '%s\n' "$$packages" | grep -v '/internal/webui$$')
 
-# Ruff as ai/requirements-dev.lock pins it: another version may judge differently.
+# Ruff as ai/requirements-dev.txt pins it: another version may judge differently.
 ai-lint:
-	@want="$$(sed -n 's/^ruff==\([0-9.]*\).*/\1/p' ai/requirements-dev.lock)"; \
+	@want="$$(sed -n 's/^ruff==\([0-9.]*\).*/\1/p' ai/requirements-dev.txt)"; \
 	have="$$($(RUFF) --version 2>/dev/null | cut -d ' ' -f 2)"; \
-	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.lock pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
+	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.txt pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
 	cd ai && $(RUFF) check .
 
 # The AI Worker's tests need only the Python standard library; tests with the

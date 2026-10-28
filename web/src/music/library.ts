@@ -1,7 +1,7 @@
-import { relativeTime as formatRelativeTime } from "../format/time";
 import { Lrc } from "lrc-kit";
 
-import type { MusicSource, Track } from "./musicApi";
+import { relativeTime as formatRelativeTime } from "../lib/time";
+import type { MusicSource, Track } from "./api";
 
 export const unknownAlbum = "未知专辑";
 export const unknownArtist = "未知歌手";

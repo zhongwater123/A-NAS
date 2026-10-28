@@ -72,7 +72,7 @@ func (s *Service) Similar(ctx context.Context, p Principal, assetID string, requ
 	if err != nil {
 		return SimilarPage{}, err
 	}
-	candidates, err := s.searchCandidates(ctx, scope)
+	candidates, err := s.searchCandidates(ctx, p, scope)
 	if err != nil {
 		return SimilarPage{}, err
 	}
@@ -91,7 +91,7 @@ func (s *Service) Similar(ctx context.Context, p Principal, assetID string, requ
 	if err = errors.Join(err, vectorErr); err != nil {
 		return SimilarPage{}, err
 	}
-	page.Assets, page.Next, err = s.hitPage(ctx, p, hits, after, request.Limit)
+	page.Assets, page.Next, err = s.hitPage(ctx, p, scope, hits, after, request.Limit)
 	if err != nil {
 		return SimilarPage{}, err
 	}
@@ -101,13 +101,14 @@ func (s *Service) Similar(ctx context.Context, p Principal, assetID string, requ
 // likeHits ranks the candidates with a vector by how much they look like an
 // image with this vector and these objects, closest first and at most
 // maxSemanticResults of them. Photos of the content object exclude, the
-// image's own, are left out.
+// image's own, are left out, and so are videos, which take no part in AI
+// even with a vector.
 func likeHits(candidates []candidate, vectors map[string][]float32, found map[string][]classScore,
 	vector []float32, objects []classScore, exclude string) []searchHit {
 	var hits []searchHit
 	for _, c := range candidates {
 		other, ok := vectors[c.objectID]
-		if !ok || c.objectID == exclude {
+		if !ok || !c.inLocalAI() || c.objectID == exclude {
 			continue
 		}
 		score := dot(vector, other) + similarObjectWeight*objectOverlap(objects, found[c.objectID])

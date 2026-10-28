@@ -107,7 +107,7 @@ def expected_fusion(name, bm25, dense):
 def compare(found, expected):
     """(largest score difference, whether the lists agree): the same ids above the last place's
     score, any order among tied scores."""
-    worst = max((abs(a[1] - b[1]) for a, b in zip(found, expected)), default=0.0)
+    worst = max((abs(a[1] - b[1]) for a, b in zip(found, expected, strict=False)), default=0.0)
     if len(found) != len(expected):
         return worst, False
     last = expected[-1][1] if expected else 0.0
@@ -155,8 +155,8 @@ def run_methods(qdrant, chunks, vectors, queries, query_vectors):
     for name, ranks in rankings.items():
         dense_ranks = rankings["dense"]
         results[name]["vsDenseTop5"] = {
-            "onlyThis": sum(1 for a, b in zip(ranks, dense_ranks) if a is not None and a < 5 and (b is None or b >= 5)),
-            "onlyDense": sum(1 for a, b in zip(ranks, dense_ranks) if b is not None and b < 5 and (a is None or a >= 5))}
+            "onlyThis": sum(1 for a, b in zip(ranks, dense_ranks, strict=True) if a is not None and a < 5 and (b is None or b >= 5)),
+            "onlyDense": sum(1 for a, b in zip(ranks, dense_ranks, strict=True) if b is not None and b < 5 and (a is None or a >= 5))}
     return results
 
 

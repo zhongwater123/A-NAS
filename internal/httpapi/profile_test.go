@@ -43,7 +43,7 @@ func decodeUser(t *testing.T, recorder *httptest.ResponseRecorder) accounts.User
 
 func TestEveryoneChoosesTheirOwnNicknameAndAvatar(t *testing.T) {
 	ctx := context.Background()
-	f := newActivityFixture(t, func(*photos.Service) http.Handler { return nil })
+	f := newActivityFixture(t, func(*photos.Service, *accounts.Service) http.Handler { return nil })
 	owner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "", http.StatusCreated)
 	admin, err := f.accounts.UserIDForUsername(ctx, "owner")
 	if err != nil {

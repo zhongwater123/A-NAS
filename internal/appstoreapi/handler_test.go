@@ -109,7 +109,7 @@ type preparation struct {
 }
 
 type recordingHost struct {
-	appstoreapi.DevelopmentHost
+	fake.Host
 	prepared []preparation
 	released []string
 }
@@ -149,7 +149,10 @@ func TestWritesAreGuardedAndErrorsUseStableCodes(t *testing.T) {
 		{name: "stale plan", handler: handler, method: http.MethodPost, path: "/api/v1/apps/memos/install", body: `{"digest":"` + digest + `"}`, headers: local, want: http.StatusConflict, code: "plan_changed"},
 		{name: "not installed", handler: handler, method: http.MethodPost, path: "/api/v1/apps/memos/uninstall", body: `{}`, headers: local, want: http.StatusConflict, code: "not_installed"},
 		{name: "unknown app", handler: handler, method: http.MethodGet, path: "/api/v1/apps/unknown/plan", want: http.StatusNotFound, code: "app_not_found"},
-		{name: "path traversal", handler: handler, method: http.MethodGet, path: "/api/v1/apps/../plan", want: http.StatusNotFound, code: "not_found"},
+		// ServeMux sends a path with dot segments to its clean form, which
+		// lies outside the App Center.
+		{name: "path traversal", handler: handler, method: http.MethodGet, path: "/api/v1/apps/../plan", want: http.StatusTemporaryRedirect},
+		{name: "invalid app ID", handler: handler, method: http.MethodGet, path: "/api/v1/apps/Not_An_App/plan", want: http.StatusNotFound, code: "not_found"},
 		{name: "disabled", handler: appstoreapi.New(nil, appstoreapi.DataSourceLive, options()), method: http.MethodGet, path: "/api/v1/apps", want: http.StatusServiceUnavailable, code: "apps_disabled"},
 	}
 	for _, test := range tests {
@@ -194,7 +197,7 @@ func decode(t *testing.T, recorder *httptest.ResponseRecorder, status int, into 
 }
 
 func options() appstoreapi.Options {
-	return appstoreapi.Options{Host: appstoreapi.DevelopmentHost{}, Logger: discard()}
+	return appstoreapi.Options{Host: fake.Host{}, Logger: discard()}
 }
 
 func discard() *slog.Logger {

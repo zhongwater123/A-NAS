@@ -1,9 +1,12 @@
-import { errorText } from "../errorMessages";
 import { ArrowLeft, Check, ChevronRight, Folder, FolderPlus, HardDrive, Loader2, Users, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { type FileEntry, listEntries, listSpaces, type Space } from "../api";
-import type { MusicSources } from "./musicApi";
+import { errorText } from "../api/errorMessages";
+import type { FileEntry, Space } from "../api.generated";
+import { listEntries, listSpaces } from "../files/api";
+import feedbackStyles from "../ui/feedback.module.css";
+import type { MusicSources } from "./api";
+import styles from "./music.module.css";
 
 interface Chosen {
   spaceId: string;
@@ -47,16 +50,21 @@ export function SourcesDialog({ sources, onSave, onClose }: Props) {
   };
   return (
     <div
-      className="ph-dialog-backdrop"
+      className={feedbackStyles.phDialogBackdrop}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget && !saving) onClose();
       }}
     >
-      <div className="ph-dialog mu-sources" role="dialog" aria-modal="true" aria-label="音乐文件夹">
+      <div
+        className={`${feedbackStyles.phDialog} ${styles.muSources}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="音乐文件夹"
+      >
         <header>
           <h3>音乐文件夹</h3>
           <small>音乐库只整理这些位置里的音乐。文件留在原处，不会被复制或移动。</small>
-          <button type="button" className="ph-dialog-close" aria-label="关闭" onClick={onClose}>
+          <button type="button" className={feedbackStyles.phDialogClose} aria-label="关闭" onClick={onClose}>
             <X />
           </button>
         </header>
@@ -74,15 +82,15 @@ export function SourcesDialog({ sources, onSave, onClose }: Props) {
           />
         ) : (
           <>
-            <div className="mu-source-modes" role="radiogroup" aria-label="音乐来源">
+            <div className={styles.muSourceModes} role="radiogroup" aria-label="音乐来源">
               <button
                 type="button"
                 role="radio"
                 aria-checked={!custom}
-                className={!custom ? "active" : ""}
+                className={!custom ? styles.active : ""}
                 onClick={() => setCustom(false)}
               >
-                <span className="mu-radio" />
+                <span className={styles.muRadio} />
                 <span>
                   <strong>个人空间和共享空间</strong>
                   <small>自动整理两个空间里的全部音乐（推荐）</small>
@@ -92,10 +100,10 @@ export function SourcesDialog({ sources, onSave, onClose }: Props) {
                 type="button"
                 role="radio"
                 aria-checked={custom}
-                className={custom ? "active" : ""}
+                className={custom ? styles.active : ""}
                 onClick={() => setCustom(true)}
               >
-                <span className="mu-radio" />
+                <span className={styles.muRadio} />
                 <span>
                   <strong>只整理指定的文件夹</strong>
                   <small>适合把有声书、录音等和音乐分开</small>
@@ -103,9 +111,9 @@ export function SourcesDialog({ sources, onSave, onClose }: Props) {
               </button>
             </div>
             {custom && (
-              <div className="mu-source-list">
+              <div className={styles.muSourceList}>
                 {chosen.map((item) => (
-                  <div key={`${item.spaceId}:${item.path}`} className="mu-source">
+                  <div key={`${item.spaceId}:${item.path}`} className={styles.muSource}>
                     {item.spaceKind === "shared" ? <Users /> : <HardDrive />}
                     <span>
                       <strong>{item.path ? item.path.split("/").at(-1) : spaceLabel(item.spaceKind)}</strong>
@@ -116,7 +124,7 @@ export function SourcesDialog({ sources, onSave, onClose }: Props) {
                     </span>
                     <button
                       type="button"
-                      className="mu-icon-button small"
+                      className={`${styles.muIconButton} ${styles.small}`}
                       aria-label="移除文件夹"
                       onClick={() => setChosen((current) => current.filter((other) => other !== item))}
                     >
@@ -124,15 +132,15 @@ export function SourcesDialog({ sources, onSave, onClose }: Props) {
                     </button>
                   </div>
                 ))}
-                {!chosen.length && <p className="mu-source-empty">还没有选择文件夹</p>}
-                <button type="button" className="mu-source-add" onClick={() => setPicking(true)}>
+                {!chosen.length && <p className={styles.muSourceEmpty}>还没有选择文件夹</p>}
+                <button type="button" className={styles.muSourceAdd} onClick={() => setPicking(true)}>
                   <FolderPlus />
                   添加文件夹
                 </button>
               </div>
             )}
-            {error && <p className="mu-form-error">{error}</p>}
-            <div className="ph-dialog-actions">
+            {error && <p className={styles.muFormError}>{error}</p>}
+            <div className={`${styles.phDialogActions} ${feedbackStyles.phDialogActions}`}>
               <button type="button" onClick={onClose}>
                 取消
               </button>
@@ -188,11 +196,11 @@ function FolderPicker({ onPick, onCancel }: { onPick: (item: Chosen) => void; on
   }, [space, parent]);
   const path = trail.map((entry) => entry.name).join("/");
   return (
-    <div className="mu-picker">
-      <div className="mu-picker-bar">
+    <div className={styles.muPicker}>
+      <div className={styles.muPickerBar}>
         <button
           type="button"
-          className="mu-icon-button small"
+          className={`${styles.muIconButton} ${styles.small}`}
           aria-label="返回"
           onClick={() => {
             if (trail.length) setTrail(trail.slice(0, -1));
@@ -204,7 +212,7 @@ function FolderPicker({ onPick, onCancel }: { onPick: (item: Chosen) => void; on
         </button>
         <span>{space ? `${spaceLabel(space.kind)}${path ? ` / ${path}` : ""}` : "选择位置"}</span>
       </div>
-      <div className="mu-picker-list">
+      <div className={styles.muPickerList}>
         {!space &&
           (spaces ?? []).map((item) => (
             <button key={item.id} type="button" onClick={() => setSpace(item)}>
@@ -214,8 +222,8 @@ function FolderPicker({ onPick, onCancel }: { onPick: (item: Chosen) => void; on
             </button>
           ))}
         {space && !entries && (
-          <p className="mu-picker-note">
-            <Loader2 className="spin" />
+          <p className={styles.muPickerNote}>
+            <Loader2 className={styles.spin} />
             正在读取…
           </p>
         )}
@@ -227,10 +235,10 @@ function FolderPicker({ onPick, onCancel }: { onPick: (item: Chosen) => void; on
               <ChevronRight />
             </button>
           ))}
-        {space && entries && !entries.length && <p className="mu-picker-note">这里没有子文件夹</p>}
-        {error && <p className="mu-form-error">{error}</p>}
+        {space && entries && !entries.length && <p className={styles.muPickerNote}>这里没有子文件夹</p>}
+        {error && <p className={styles.muFormError}>{error}</p>}
       </div>
-      <div className="ph-dialog-actions">
+      <div className={`${styles.phDialogActions} ${feedbackStyles.phDialogActions}`}>
         <button type="button" onClick={onCancel}>
           取消
         </button>

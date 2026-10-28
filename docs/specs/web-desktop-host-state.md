@@ -106,7 +106,7 @@
 
 ## 验收证据
 
-- React 行为测试：[桌面测试](../../web/src/App.test.tsx)。
+- React 行为测试：[桌面测试](../../web/src/App.test.tsx)；设置概览的读取中、失联与重试见[设置测试](../../web/src/settings/SettingsPanel.test.tsx)。
 - 浏览器检查：Fake 模式 1280×800 下，悬停后台、已最小化与最大化后最小化的窗口图标都显示完整且比例正确的缩略图，移到相邻图标立即切换，缩略图与关闭按钮分别把窗口切到前台和关闭窗口，绘制后被最小化的窗口不残留内联样式。
 - 浏览器检查：Fake 模式 1280×800 下，点击壁纸、图标间空隙和最大化窗口下方的壁纸都收起全部窗口；把窗口拖过上边缘后在壁纸上松开、用来关闭启动器的那次点击都不收起；“显示桌面”按原层叠顺序恢复。
 - 产品契约测试：[HTTP 测试](../../internal/httpapi/server_test.go)、[OpenAPI 测试](../../internal/httpapi/openapi_test.go)。
@@ -115,7 +115,7 @@
 ## 关联
 
 - ADR：[Web 桌面技术选择](../adr/0003-use-react-typescript-for-web-desktop.md)
-- 代码：[程序坞](../../web/src/Dock.tsx)、[窗口缩略图](../../web/src/windowSnapshot.ts)
+- 代码：[程序坞](../../web/src/desktop/Dock.tsx)、[窗口缩略图](../../web/src/desktop/windowSnapshot.ts)
 - ADR：[客户端 REST/OpenAPI](../adr/0002-use-rest-openapi-for-product-clients.md)
 - 运行手册：[部署开发预览](../runbooks/deploy-web-preview-to-experimental-nas.md)
 - 运行手册：[本地控制台](../runbooks/operate-local-kiosk.md)

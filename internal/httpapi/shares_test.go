@@ -9,7 +9,6 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
-	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 )
 
 func TestShareRoutesRequireSessionAndCSRFPreserveOriginalIdentity(t *testing.T) {
@@ -26,7 +25,7 @@ func TestShareRoutesRequireSessionAndCSRFPreserveOriginalIdentity(t *testing.T) 
 	calls := 0
 	probe := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		actor, ok := sharesapi.UserFrom(r.Context())
+		actor, ok := accounts.UserFrom(r.Context())
 		if !ok || actor.ID != owner.ID || accounts.SessionToken(r.Context()) == "" {
 			t.Errorf("lost original caller: %+v", actor)
 		}

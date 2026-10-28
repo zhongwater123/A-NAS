@@ -390,7 +390,8 @@ var errorCodes = []struct {
 	{appstore.ErrUnavailable, http.StatusServiceUnavailable, "apps_unavailable"},
 }
 
-// StatusForError maps domain errors to codes shared with the product API.
+// StatusForError maps domain errors to the agent's codes, which ErrorFromCode
+// restores in the client.
 func StatusForError(err error) (int, string) {
 	for _, mapping := range errorCodes {
 		if errors.Is(err, mapping.err) {

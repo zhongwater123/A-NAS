@@ -60,9 +60,8 @@ def lfw():
         if not os.path.isdir(folder):
             continue
         library = f"lfw-{int(hashlib.sha256(person.encode()).hexdigest()[:8], 16) % LFW_LIBRARIES}"
-        for name in sorted(os.listdir(folder)):
-            if name.endswith(".jpg"):
-                photos.append(Photo(f"lfw:{name[:-4]}", os.path.join(folder, name), [Face(person)], library))
+        photos.extend(Photo(f"lfw:{name[:-4]}", os.path.join(folder, name), [Face(person)], library)
+                      for name in sorted(os.listdir(folder)) if name.endswith(".jpg"))
     return photos
 
 

@@ -308,6 +308,7 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 		if err := os.MkdirAll(directory, 0o750); err != nil {
 			return err
 		}
+		//nolint:gosec // G306: as its directory, readable by the agent's own group only; app secrets are kept apart.
 		if err := os.WriteFile(composeFile, plan.Compose, 0o640); err != nil {
 			return err
 		}

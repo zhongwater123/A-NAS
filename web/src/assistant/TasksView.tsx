@@ -32,7 +32,8 @@ import {
   resumeTask,
   runTask,
   taskRuns,
-} from "./assistantApi";
+} from "./api";
+import styles from "./assistant.module.css";
 import { loadTaskNotices, useTaskNotices } from "./taskNotices";
 import { scheduleText, whenText } from "./taskSchedule";
 
@@ -107,14 +108,14 @@ export function TasksView({
 
   if (!tasks) {
     return (
-      <div className="as-memory as-tasks">
+      <div className={`${styles.asMemory} as-tasks`}>
         {error ? (
-          <div className="as-error" role="alert">
+          <div className={styles.asError} role="alert">
             <CircleAlert />
             <span>{error}</span>
           </div>
         ) : (
-          <div className="as-loading">
+          <div className={styles.asLoading}>
             <LoaderCircle />
             正在读取…
           </div>
@@ -124,9 +125,9 @@ export function TasksView({
   }
   const ordered = [...tasks].sort((a, b) => rank(a) - rank(b) || (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity));
   return (
-    <div className="as-memory as-tasks">
-      <section className="as-memory-intro">
-        <span className="as-memory-mark">
+    <div className={`${styles.asMemory} as-tasks`}>
+      <section className={styles.asMemoryIntro}>
+        <span className={styles.asMemoryMark}>
           <CalendarClock />
         </span>
         <div>
@@ -134,20 +135,20 @@ export function TasksView({
           <p>在对话里告诉 VNAS 什么时候做什么，它就会按时去做；做完会在桌面上提醒你，结果在这里查看。</p>
         </div>
         {tasks.length > 0 && (
-          <button type="button" className="as-task-plan" onClick={() => onPlan()}>
+          <button type="button" className={styles.asTaskPlan} onClick={() => onPlan()}>
             <MessageSquarePlus />
             安排新任务
           </button>
         )}
       </section>
-      <p className="as-memory-note">
+      <p className={styles.asMemoryNote}>
         <ShieldCheck />
         <span>
           定时任务运行时你不一定在场，所以它只查看内容、在“助手”文件夹里写东西。需要改动你的文件时，这一步会被拒绝，结果里会说明，你可以回到对话里确认。
         </span>
       </p>
       {notice && (
-        <div className="as-memory-notice" role="status">
+        <div className={styles.asMemoryNotice} role="status">
           <span>{notice}</span>
           <button type="button" aria-label="关闭" onClick={() => setNotice("")}>
             <X />
@@ -155,18 +156,18 @@ export function TasksView({
         </div>
       )}
       {error && (
-        <div className="as-memory-error" role="alert">
+        <div className={styles.asMemoryError} role="alert">
           <CircleAlert />
           {error}
         </div>
       )}
 
       {tasks.length === 0 ? (
-        <div className="as-tasks-empty">
+        <div className={styles.asTasksEmpty}>
           <CalendarClock />
           <strong>还没有定时任务</strong>
           <span>说一句话就能安排，比如：</span>
-          <div className="as-suggestions">
+          <div className={styles.asSuggestions}>
             {IDEAS.map((text) => (
               <button type="button" key={text} onClick={() => onPlan(text)}>
                 {text}
@@ -176,7 +177,7 @@ export function TasksView({
           </div>
         </div>
       ) : (
-        <ul className="as-task-list">
+        <ul className={styles.asTaskList}>
           {ordered.map((task) => (
             <TaskCard
               key={task.id}
@@ -272,23 +273,23 @@ function TaskCard({
           : "—";
 
   return (
-    <li className={`as-task ${state.key}`}>
-      <header className="as-task-head">
+    <li className={`${styles.asTask} ${styles[state.key] ?? ""}`}>
+      <header className={styles.asTaskHead}>
         <div>
           <strong>{task.name}</strong>
-          <span className="as-task-schedule">
+          <span className={styles.asTaskSchedule}>
             <CalendarClock />
             {scheduleText(task.schedule)}
           </span>
         </div>
-        <span className={`as-task-state ${state.key}`}>
+        <span className={`${styles.asTaskState} ${styles[state.key] ?? ""}`}>
           {task.running && <LoaderCircle />}
           {state.text}
         </span>
       </header>
-      <p className={`as-task-prompt${expanded ? "" : " clamped"}`}>{task.prompt}</p>
+      <p className={`${styles.asTaskPrompt}${expanded ? "" : ` ${styles.clamped}`}`}>{task.prompt}</p>
       {task.prompt.length > 90 && (
-        <button type="button" className="as-task-more" onClick={() => setExpanded((open) => !open)}>
+        <button type="button" className={styles.asTaskMore} onClick={() => setExpanded((open) => !open)}>
           {expanded ? (
             <>
               <ChevronUp />
@@ -302,7 +303,7 @@ function TaskCard({
           )}
         </button>
       )}
-      <dl className="as-task-facts">
+      <dl className={styles.asTaskFacts}>
         <div>
           <dt>下次运行</dt>
           <dd>{next}</dd>
@@ -312,12 +313,12 @@ function TaskCard({
           <dd>
             {task.lastRunAt ? (
               <>
-                <span className={`as-task-outcome ${failed ? "failed" : "ok"}`}>
+                <span className={`${styles.asTaskOutcome} ${failed ? styles.failed : styles.ok}`}>
                   {failed ? <CircleAlert /> : <CircleCheck />}
                   {whenText(task.lastRunAt)} · {failed ? "没有完成" : "完成"}
                 </span>
-                {fresh && <span className="as-task-fresh">新结果</span>}
-                <button type="button" className="as-task-link" onClick={() => void openLatest()}>
+                {fresh && <span className={styles.asTaskFresh}>新结果</span>}
+                <button type="button" className={styles.asTaskLink} onClick={() => void openLatest()}>
                   查看结果
                   <ChevronRight />
                 </button>
@@ -329,16 +330,16 @@ function TaskCard({
         </div>
       </dl>
       {failed && task.lastError && (
-        <p className="as-task-error">
+        <p className={styles.asTaskError}>
           <CircleAlert />
           <span>{task.lastError}</span>
         </p>
       )}
 
       {asking ? (
-        <div className="as-forget-ask">
+        <div className={styles.asForgetAsk}>
           <span>删除“{task.name}”？它不会再运行，运行记录也会一起删除。</span>
-          <button type="button" className="danger" onClick={onDelete}>
+          <button type="button" className={styles.danger} onClick={onDelete}>
             删除
           </button>
           <button type="button" onClick={() => setAsking(false)}>
@@ -346,7 +347,7 @@ function TaskCard({
           </button>
         </div>
       ) : (
-        <footer className="as-task-actions">
+        <footer className={styles.asTaskActions}>
           <button
             type="button"
             onClick={onRun}
@@ -373,21 +374,21 @@ function TaskCard({
             <History />
             运行记录{task.completed > 0 && <small>{task.completed}</small>}
           </button>
-          <button type="button" className="as-task-delete" aria-label="删除任务" onClick={() => setAsking(true)}>
+          <button type="button" className={styles.asTaskDelete} aria-label="删除任务" onClick={() => setAsking(true)}>
             <Trash2 />
           </button>
         </footer>
       )}
 
       {showRuns && (
-        <div className="as-task-runs">
+        <div className={styles.asTaskRuns}>
           {!runs ? (
-            <p className="as-memory-loading">
+            <p className={styles.asMemoryLoading}>
               <LoaderCircle />
               正在读取…
             </p>
           ) : !runs.length ? (
-            <p className="as-task-runs-empty">
+            <p className={styles.asTaskRunsEmpty}>
               <Info />
               还没有运行记录
             </p>
@@ -402,7 +403,7 @@ function TaskCard({
                       <ChevronRight />
                     </button>
                   ) : (
-                    <span className="as-task-run-plain">
+                    <span className={styles.asTaskRunPlain}>
                       <span>{whenText(run.startedAt)}</span>
                       <small>只运行了脚本</small>
                     </span>
