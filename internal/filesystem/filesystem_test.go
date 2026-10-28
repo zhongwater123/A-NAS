@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -45,6 +46,36 @@ func TestRootFileSystemStaysBeneathItsBase(t *testing.T) {
 	}
 	if err := r.RemoveAll(ctx, base); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("RemoveAll(base) error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestCopyPreservesFileAndDirectoryModificationTimes(t *testing.T) {
+	base := t.TempDir()
+	source := filepath.Join(base, "source")
+	if err := os.Mkdir(source, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(source, "file.txt")
+	if err := os.WriteFile(file, []byte("unchanged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2020, 1, 2, 3, 4, 5, 123456789, time.UTC)
+	for _, name := range []string{file, source} {
+		if err := os.Chtimes(name, want, want); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := NewRootFileSystem(base, false).Copy(context.Background(), source, filepath.Join(base, "copy")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"copy", "copy/file.txt"} {
+		info, err := os.Stat(filepath.Join(base, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.ModTime().Equal(want) {
+			t.Errorf("%s mtime = %s, want %s", name, info.ModTime(), want)
+		}
 	}
 }
 
