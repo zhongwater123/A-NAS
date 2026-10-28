@@ -10,7 +10,7 @@
 最小回归使用普通 Linux 开发用户，命令如下：
 
 ```bash
-go test ./internal/files ./internal/filebroker -run 'TestAgentSpacePolicyDirectoriesCannotBeMovedOrDeleted|TestConfinedWorkerDoesNotFollowWritableDirectoryLinks' -count=1
+go test ./internal/files ./internal/filebroker/rootbroker -run 'TestAgentSpacePolicyDirectoriesCannotBeMovedOrDeleted|TestConfinedWorkerDoesNotFollowWritableDirectoryLinks' -count=1
 ```
 
 修复前，6 个保留目录的 Web 操作均返回成功；真实受 Landlock 约束的 Worker 在两种链接替换后均能创建 `unauthorized` 目录。另在可丢弃特权 Debian 容器运行 `TestRootPermissionMatrix`，确认 Host Agent 完成账号同步后根本没有 `Agent空间`。
@@ -36,7 +36,7 @@ SMB 采用 issue 允许的 veto 方案：Shared 中名为 `Agent空间` 的条�
 ## 关联
 
 - [文件服务保留名回归](../../internal/files/agent_space_test.go)
-- [Landlock 实现](../../internal/filebroker/confine_linux.go)与[Worker 回归](../../internal/filebroker/changes_test.go)
+- [Landlock 实现](../../internal/filebroker/rootbroker/confine_linux.go)与[Worker 回归](../../internal/filebroker/rootbroker/changes_test.go)
 - [目录核对](../../internal/hostops/linux/acl.go)与[真实权限矩阵](../../internal/hostops/linux/root_matrix_integration_test.go)
 - [助手规格](../specs/ai-assistant.md)、[存储架构](../architecture/storage-and-files.md)、[助手试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)
 - [Samba 官方配置文档](https://www.samba.org/samba/docs/current/man-html/smb.conf.5)：veto files 的访问范围。
