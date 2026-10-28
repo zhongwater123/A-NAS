@@ -49,6 +49,7 @@ var (
 	ErrForbidden         = errors.New("file space access is forbidden")
 	ErrNotFound          = errors.New("file entry not found")
 	ErrInvalidName       = errors.New("invalid file name")
+	ErrSourceChanged     = errors.New("source changed during copy")
 	ErrUnsupportedType   = errors.New("unsupported file type")
 	ErrVolumeUnavailable = errors.New("data volume is unavailable")
 	ErrInsufficientSpace = errors.New("data volume reserve would be exhausted")
