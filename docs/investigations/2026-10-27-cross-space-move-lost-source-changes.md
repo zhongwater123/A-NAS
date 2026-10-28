@@ -38,7 +38,7 @@ go test ./internal/files -run 'TestCrossSpaceMove|TestCopyPreservesFileAndDirect
 ## 关联
 
 - [issue #180](https://github.com/zhongwater123/A-NAS/issues/180)
-- [文件服务](../../internal/files/service.go)、[描述符内复制](../../internal/files/rootfs_linux.go)
+- [文件服务](../../internal/files/service.go)、[描述符内复制](../../internal/filesystem/rootfs_linux.go)
 - [跨空间回归](../../internal/files/cross_space_move_test.go)、[文件系统回归](../../internal/files/filesystem_test.go)、[文件代理回归](../../internal/filebroker/broker_test.go)
 - [存储与文件架构](../architecture/storage-and-files.md)、[文件规格](../specs/basic-storage-and-sharing.md)
 

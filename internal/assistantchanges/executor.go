@@ -20,7 +20,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 const (
@@ -63,12 +64,12 @@ const (
 
 var (
 	ErrNotFound = errors.New("no such change")
-	ErrDecided  = errors.New("这项更改已经处理过了")
+	ErrDecided  = errors.New("the change was already decided")
 )
 
 // Executor keeps the account's changes and the copies their cards show in
 // Root, which only root may read, and applies them on the data volume at
-// Volume through the member's own files.FileSystem. Once a change can no
+// Volume through the member's own filesystem.FileSystem. Once a change can no
 // longer be applied, only the start of each copy is kept, for its card.
 type Executor struct {
 	Root   string
@@ -217,13 +218,13 @@ func (e *Executor) now() time.Time {
 // Prepare checks a submission against what the member's paths hold now and
 // copies what it would write. It returns the card; ErrInvalid lists why a
 // submission cannot be applied.
-func (e *Executor) Prepare(ctx context.Context, account string, member files.FileSystem, raw []byte, sessionID, requestID string) (json.RawMessage, error) {
-	if !accountPattern.MatchString(account) {
+func (e *Executor) Prepare(ctx context.Context, account string, member filesystem.FileSystem, raw []byte, sessionID, requestID string) (json.RawMessage, error) {
+	if !accountid.ValidAssistantAccount(account) {
 		return nil, errors.New("invalid account")
 	}
 	submission, err := ParseSubmission(raw)
 	if err != nil {
-		return nil, invalid{err.Error()}
+		return nil, err
 	}
 	digest, l := submission.Digest(), e.ledger(account)
 	steps, err := validate(account, submission)
@@ -282,7 +283,7 @@ func (e *Executor) Decide(account, id, decision string) (json.RawMessage, error)
 		"expire":  {[]string{StatusAwaiting, StatusApproved}, StatusExpired},
 	}
 	move, ok := moves[decision]
-	if !ok || !accountPattern.MatchString(account) {
+	if !ok || !accountid.ValidAssistantAccount(account) {
 		return nil, ErrNotFound
 	}
 	l := e.ledger(account)
@@ -319,7 +320,7 @@ func (e *Executor) Decide(account, id, decision string) (json.RawMessage, error)
 
 // Get returns a change's card as it is now.
 func (e *Executor) Get(account, id string) (json.RawMessage, error) {
-	if !accountPattern.MatchString(account) {
+	if !accountid.ValidAssistantAccount(account) {
 		return nil, ErrNotFound
 	}
 	l := e.ledger(account)
@@ -340,13 +341,13 @@ func (e *Executor) Get(account, id string) (json.RawMessage, error) {
 // Apply is the MCP tool's call: it applies the change the member approved
 // with exactly these arguments, once, from the copies the member saw, and says
 // what happened in words for the assistant.
-func (e *Executor) Apply(ctx context.Context, account string, member files.FileSystem, raw []byte) string {
-	if !accountPattern.MatchString(account) {
+func (e *Executor) Apply(ctx context.Context, account string, member filesystem.FileSystem, raw []byte) string {
+	if !accountid.ValidAssistantAccount(account) {
 		return "这批更改没有得到用户本人的确认，什么都没有改变。"
 	}
 	submission, err := ParseSubmission(raw)
 	if err != nil {
-		return "提交被拒绝，什么都没有改变：\n" + err.Error()
+		return "提交被拒绝，什么都没有改变：\n" + Reasons(err)
 	}
 	want, now, l := submission.Digest(), e.now(), e.ledger(account)
 	l.Lock()
@@ -388,7 +389,7 @@ func (e *Executor) Apply(ctx context.Context, account string, member files.FileS
 			_, err = validate(account, submission)
 		}
 		if err != nil {
-			return "提交被拒绝，什么都没有改变：\n" + strings.TrimPrefix(err.Error(), ErrInvalid.Error()+"：\n")
+			return "提交被拒绝，什么都没有改变：\n" + Reasons(err)
 		}
 		return "这批更改没有得到用户本人的确认，什么都没有改变。"
 	}
@@ -420,7 +421,7 @@ func (e *Executor) Apply(ctx context.Context, account string, member files.FileS
 
 // Recent lists the account's latest changes for the assistant.
 func (e *Executor) Recent(account string) string {
-	if !accountPattern.MatchString(account) {
+	if !accountid.ValidAssistantAccount(account) {
 		return "最近没有更改。"
 	}
 	l := e.ledger(account)
@@ -485,7 +486,7 @@ func (e *Executor) reserve(account string, l *ledger, next *change) (int64, erro
 // measure checks the sizes of the staged files the steps write, from their
 // metadata, so that a submission over the limits is refused before any file
 // is opened.
-func (e *Executor) measure(ctx context.Context, member files.FileSystem, steps []step) error {
+func (e *Executor) measure(ctx context.Context, member filesystem.FileSystem, steps []step) error {
 	var problems invalid
 	for i := range steps {
 		s := &steps[i]
@@ -494,7 +495,7 @@ func (e *Executor) measure(ctx context.Context, member files.FileSystem, steps [
 		}
 		from, err := e.fingerprint(ctx, member, s.SourceRel)
 		switch {
-		case err != nil || !from.Exists || from.Kind != files.KindFile:
+		case err != nil || !from.Exists || from.Kind != filesystem.KindFile:
 			problems = append(problems, fmt.Sprintf("第 %d 项：source 必须是 %s 中已写好的文件", i+1, StagingDir))
 		case from.Size > MaxContent:
 			problems = append(problems, fmt.Sprintf("第 %d 项：%s 超过 %d MiB", i+1, s.Source, MaxContent>>20))
@@ -513,7 +514,7 @@ func (e *Executor) measure(ctx context.Context, member files.FileSystem, steps [
 
 // inspect looks at what the steps' paths are now, as the member, without
 // opening any of them.
-func (e *Executor) inspect(ctx context.Context, member files.FileSystem, steps []step) error {
+func (e *Executor) inspect(ctx context.Context, member filesystem.FileSystem, steps []step) error {
 	var problems invalid
 	for i := range steps {
 		if problem := e.plan(ctx, member, &steps[i]); problem != "" {
@@ -527,7 +528,7 @@ func (e *Executor) inspect(ctx context.Context, member files.FileSystem, steps [
 }
 
 // plan checks one step against what its paths are now and records them.
-func (e *Executor) plan(ctx context.Context, member files.FileSystem, s *step) string {
+func (e *Executor) plan(ctx context.Context, member filesystem.FileSystem, s *step) string {
 	var err error
 	if s.Before, err = e.fingerprint(ctx, member, s.Rel); err != nil {
 		return describe(err, s.Path)
@@ -535,7 +536,7 @@ func (e *Executor) plan(ctx context.Context, member files.FileSystem, s *step) s
 	if (s.Op == "delete" || s.Op == "move") && !s.Before.Exists {
 		return s.Path + " 不存在"
 	}
-	if (s.Op == "write" || s.Op == "copy") && s.Before.Exists && s.Before.Kind != files.KindFile {
+	if (s.Op == "write" || s.Op == "copy") && s.Before.Exists && s.Before.Kind != filesystem.KindFile {
 		return s.Path + " 不是普通文件"
 	}
 	switch s.Op {
@@ -554,13 +555,13 @@ func (e *Executor) plan(ctx context.Context, member files.FileSystem, s *step) s
 			return describe(err, s.Source)
 		case !from.Exists:
 			return s.Source + " 不存在"
-		case from.Kind != files.KindFile && from.Kind != files.KindDirectory:
+		case from.Kind != filesystem.KindFile && from.Kind != filesystem.KindDirectory:
 			return s.Source + " 不能复制"
-		case from.Kind == files.KindDirectory && s.Before.Exists:
+		case from.Kind == filesystem.KindDirectory && s.Before.Exists:
 			return s.Path + " 已经存在"
 		}
 		s.SourceBefore, s.SourceSize = &from, from.Size
-		if from.Kind == files.KindDirectory {
+		if from.Kind == filesystem.KindDirectory {
 			if s.SourceSize, err = member.Usage(ctx, e.abs(s.SourceRel)); err != nil {
 				return describe(err, s.Source)
 			}
@@ -573,7 +574,7 @@ func (e *Executor) plan(ctx context.Context, member files.FileSystem, s *step) s
 // whole staged file into dir, as the member reads them, a block at a time.
 // The staged file must still be the size inspect saw; the SHA-256 of its copy
 // is recorded.
-func (e *Executor) keep(ctx context.Context, member files.FileSystem, steps []step, dir string) error {
+func (e *Executor) keep(ctx context.Context, member filesystem.FileSystem, steps []step, dir string) error {
 	var problems invalid
 	for i := range steps {
 		s := &steps[i]
@@ -639,7 +640,7 @@ var errDamaged = errors.New("kept copy changed")
 func (e *Executor) abs(rel string) string { return filepath.Join(e.Volume, filepath.FromSlash(rel)) }
 
 // fingerprint describes a path now, without opening it.
-func (e *Executor) fingerprint(ctx context.Context, member files.FileSystem, rel string) (fingerprint, error) {
+func (e *Executor) fingerprint(ctx context.Context, member filesystem.FileSystem, rel string) (fingerprint, error) {
 	info, err := member.Lstat(ctx, e.abs(rel))
 	if errors.Is(err, fs.ErrNotExist) {
 		return fingerprint{Exists: false}, nil
@@ -652,7 +653,7 @@ func (e *Executor) fingerprint(ctx context.Context, member files.FileSystem, rel
 
 // apply runs the steps as the member; it returns how many were done and why
 // it stopped, if it did.
-func (e *Executor) apply(ctx context.Context, account string, member files.FileSystem, c change) (int, string) {
+func (e *Executor) apply(ctx context.Context, account string, member filesystem.FileSystem, c change) (int, string) {
 	dir := filepath.Join(e.Root, account, c.ID)
 	for _, s := range c.Steps {
 		now, err := e.fingerprint(ctx, member, s.Rel)
@@ -697,7 +698,7 @@ func (e *Executor) apply(ctx context.Context, account string, member files.FileS
 // block at a time and checking on the way that it is what was kept, moves a
 // file the target replaces into the recycle bin, and puts the new one in
 // place.
-func (e *Executor) write(ctx context.Context, member files.FileSystem, s step, kept string) error {
+func (e *Executor) write(ctx context.Context, member filesystem.FileSystem, s step, kept string) error {
 	source, err := os.Open(kept)
 	if err != nil {
 		return err
@@ -732,7 +733,7 @@ func (e *Executor) write(ctx context.Context, member files.FileSystem, s step, k
 
 // copy copies the source next to the target under a name of its own, moves a
 // file the target replaces into the recycle bin, and puts the copy in place.
-func (e *Executor) copy(ctx context.Context, member files.FileSystem, s step) error {
+func (e *Executor) copy(ctx context.Context, member filesystem.FileSystem, s step) error {
 	parent := path.Dir(s.Rel)
 	if err := member.MkdirAll(ctx, e.abs(parent)); err != nil {
 		return err
@@ -758,7 +759,7 @@ func (e *Executor) copy(ctx context.Context, member files.FileSystem, s step) er
 // toTrash moves a target into the member's recycle bin. Samba's
 // recycle:versions keeps an earlier copy there and names the next "Copy #1 of
 // <name>"; the rename never replaces anything.
-func (e *Executor) toTrash(ctx context.Context, member files.FileSystem, s step) error {
+func (e *Executor) toTrash(ctx context.Context, member filesystem.FileSystem, s step) error {
 	if err := member.MkdirAll(ctx, e.abs(s.Trash)); err != nil {
 		return err
 	}
@@ -777,7 +778,7 @@ func (e *Executor) toTrash(ctx context.Context, member files.FileSystem, s step)
 // describe puts a file error in words for the assistant and the card.
 func describe(err error, target string) string {
 	switch {
-	case errors.Is(err, files.ErrUnsupportedType), errors.Is(err, syscall.ELOOP), errors.Is(err, syscall.ENOTDIR):
+	case errors.Is(err, filesystem.ErrUnsupportedType), errors.Is(err, syscall.ELOOP), errors.Is(err, syscall.ENOTDIR):
 		return target + " 经过链接或文件，不能更改"
 	case errors.Is(err, fs.ErrPermission):
 		return "没有权限：" + target
@@ -785,7 +786,7 @@ func describe(err error, target string) string {
 		return target + " 已经存在"
 	case errors.Is(err, fs.ErrNotExist):
 		return target + " 不存在"
-	case errors.Is(err, files.ErrInsufficientSpace):
+	case errors.Is(err, filesystem.ErrInsufficientSpace):
 		return "空间不足：" + target
 	default:
 		return fmt.Sprintf("%v：%s", err, target)
@@ -827,7 +828,7 @@ func (e *Executor) preview(account string, c change) (json.RawMessage, error) {
 		op := operation{Op: s.Op, Path: s.Path, To: s.To, Exists: s.Before.Exists}
 		if s.Op == "copy" && s.SourceBefore != nil {
 			size := s.SourceSize
-			op.From, op.Size, op.Folder = s.Source, &size, s.SourceBefore.Kind == files.KindDirectory
+			op.From, op.Size, op.Folder = s.Source, &size, s.SourceBefore.Kind == filesystem.KindDirectory
 		}
 		if s.Op == "write" {
 			if data, err := readHead(filepath.Join(dir, fmt.Sprint(n)+".before"), previewLimit); err == nil {

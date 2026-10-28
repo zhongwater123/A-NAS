@@ -49,7 +49,7 @@ systemd v257 的 `exec-invoke.c`：服务带 seccomp 过滤（`RestrictAddressFa
 ## 修复与回归证据
 
 - 修复：[`anas-host-agent.service`](../../deploy/systemd/system/anas-host-agent.service) 删除 `User=root`/`Group=root`，保留 `NoNewPrivileges`、`RestrictAddressFamilies=AF_UNIX` 与全部文件系统沙箱；`make ops-check` 禁止该 unit 再写 `User=`/`Group=`。不采用 `AmbientCapabilities=CAP_SETUID`，也不放宽沙箱或恢复 `a-nas` 的空间 ACL。
-- 启动自检：File Broker 以与 Worker 完全相同的启动参数、以 `nobody` 身份运行探针（[`probe.go`](../../internal/filebroker/probe.go)），日志为 `file broker identity switch verified`，失败时记录 `file broker cannot switch to user identities` 而不是在每个请求上失败。
+- 启动自检：File Broker 以与 Worker 完全相同的启动参数、以 `nobody` 身份运行探针（[`probe.go`](../../internal/filebroker/rootbroker/probe.go)），日志为 `file broker identity switch verified`，失败时记录 `file broker cannot switch to user identities` 而不是在每个请求上失败。
 - 安装器：重启服务后核对 Host Agent 的 `CapEff` 含 `CAP_SETUID`/`CAP_SETGID` 且启动自检通过，否则以退出码 5 结束并要求回滚。
 - 单元测试：无此能力时探针返回 `EPERM`（`TestIdentitySwitchProbeFailsWithoutTheCapabilities`）；root 集成测试要求探针成功。
 - 系统测试：[`scripts/system-test.sh`](../../scripts/system-test.sh) 在 Debian 13 systemd 容器中用真实安装器、unit 与二进制安装发布，按用户检查 Web、SMB、相册与服务身份的权限矩阵，共 40 项。

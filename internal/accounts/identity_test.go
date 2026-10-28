@@ -134,7 +134,7 @@ func newIdentityService(t *testing.T, path string) (*accounts.Service, *identity
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	credentials := &identityRecorder{}
-	return accounts.NewService(store, credentials, accounts.Options{}), credentials
+	return accounts.NewService(store, credentials, accounts.Options{PasswordCost: cheapPasswords}), credentials
 }
 
 type identityRecorder struct {

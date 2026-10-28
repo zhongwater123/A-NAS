@@ -276,7 +276,7 @@ def detector_pixels(data):
 def kept_boxes(labels, boxes, scores):
     """[class, score, x0, y0, x1, y1] above MIN_BOX_SCORE, best first, corners in [0, 1]."""
     found = []
-    for label, box, score in zip(labels, boxes, scores):
+    for label, box, score in zip(labels, boxes, scores, strict=True):
         if score >= MIN_BOX_SCORE:
             corners = [round(min(1.0, max(0.0, value)), 4) for value in box]
             found.append([int(label), round(float(score), 4), *corners])
@@ -421,7 +421,7 @@ class FaceProvider:
         crops = [align_face(image, numpy.array(row[4:14]).reshape(5, 2)) for row in rows]
         vectors = self._embed(crops, run) if crops else []
         faces = []
-        for row, vector in zip(rows, vectors):
+        for row, vector in zip(rows, vectors, strict=True):
             x, y, w, h = row[:4]
             box = [x / width, y / height, (x + w) / width, (y + h) / height]
             landmarks = [value / (width if i % 2 == 0 else height) for i, value in enumerate(row[4:14])]
@@ -527,7 +527,7 @@ class FakeFaces:
             person = digest[1 + i] % self.FAKE_PEOPLE
             base = FakeProvider(self.dimensions)._vector(b"fake person %d" % person)
             noise = FakeProvider(self.dimensions)._vector(data + bytes([i]))
-            vector = [b + 0.05 * n for b, n in zip(base, noise)]
+            vector = [b + 0.05 * n for b, n in zip(base, noise, strict=True)]
             norm = math.sqrt(sum(value * value for value in vector))
             x0 = 0.05 + 0.3 * i
             faces.append({
@@ -655,7 +655,7 @@ class FakeAnimals:
             pet = hashlib.sha256(seed).digest()[0] % self.FAKE_PETS
             base = FakeProvider(self.dimensions)._vector(b"fake pet %d" % pet)
             noise = FakeProvider(self.dimensions)._vector(seed)
-            vector = [b + 0.05 * n for b, n in zip(base, noise)]
+            vector = [b + 0.05 * n for b, n in zip(base, noise, strict=True)]
             norm = math.sqrt(sum(value * value for value in vector))
             vectors.append(encode_unit(value / norm for value in vector))
         return vectors

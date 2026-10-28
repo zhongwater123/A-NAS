@@ -1,7 +1,7 @@
 import { Check, ChevronDown, ChevronUp, EyeOff, PawPrint, Pencil, UserRound, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { type Caller, libraryName, messageOf } from "./model";
+import feedbackStyles from "../ui/feedback.module.css";
 import {
   assignFace,
   avatarURL,
@@ -10,7 +10,9 @@ import {
   type PhotoAssetPerson,
   type PhotoLibrary,
   type PhotoPerson,
-} from "./photosApi";
+} from "./api";
+import { type Caller, libraryName, messageOf } from "./model";
+import styles from "./photos.module.css";
 
 // People and pets (docs/architecture/photo-people.md): local AI finds the same
 // face, cat or dog again across a library's photos, and members name, merge
@@ -41,7 +43,7 @@ export function Avatar({
     setFailed(false);
   }
   return (
-    <span className={`ph-avatar ${className}`} style={{ width: size, height: size }}>
+    <span className={`${styles.phAvatar} ${className}`} style={{ width: size, height: size }}>
       {occurrenceId && !failed ? (
         <img src={avatarURL(occurrenceId)} alt="" loading="lazy" draggable={false} onError={() => setFailed(true)} />
       ) : kind === "person" ? (
@@ -74,18 +76,18 @@ export function PeopleRow({ people, perRow, expanded, showHidden, onExpand, onSh
   const hidden = people.filter((person) => person.hidden);
   const shown = expanded ? visible : visible.slice(0, perRow);
   return (
-    <section className="ph-browse ph-people" aria-label="人物与宠物">
+    <section className={`${styles.phBrowse} ph-people`} aria-label="人物与宠物">
       <header>
         <h3>人物与宠物</h3>
       </header>
-      <div className="ph-people-grid">
+      <div className={styles.phPeopleGrid}>
         {shown.map((person) => (
           <PersonCard key={person.id} person={person} onOpen={onOpen} />
         ))}
       </div>
-      <div className="ph-people-more">
+      <div className={styles.phPeopleMore}>
         {visible.length > perRow && (
-          <button type="button" className="ph-browse-more" onClick={() => onExpand(!expanded)}>
+          <button type="button" className={styles.phBrowseMore} onClick={() => onExpand(!expanded)}>
             {expanded ? (
               <>
                 <ChevronUp />
@@ -100,14 +102,18 @@ export function PeopleRow({ people, perRow, expanded, showHidden, onExpand, onSh
           </button>
         )}
         {hidden.length > 0 && (
-          <button type="button" className="ph-browse-more quiet" onClick={() => onShowHidden(!showHidden)}>
+          <button
+            type="button"
+            className={`${styles.phBrowseMore} ${styles.quiet}`}
+            onClick={() => onShowHidden(!showHidden)}
+          >
             <EyeOff />
             {showHidden ? "收起已隐藏的" : `已隐藏 ${hidden.length} 位`}
           </button>
         )}
       </div>
       {showHidden && hidden.length > 0 && (
-        <div className="ph-people-grid hidden-people" aria-label="已隐藏的人物">
+        <div className={`${styles.phPeopleGrid} ${styles.hiddenPeople}`} aria-label="已隐藏的人物">
           {hidden.map((person) => (
             <PersonCard key={person.id} person={person} onOpen={onOpen} />
           ))}
@@ -121,7 +127,7 @@ function PersonCard({ person, onOpen }: { person: PhotoPerson; onOpen: (person: 
   return (
     <button
       type="button"
-      className={`ph-person${person.name ? "" : " nameless"}`}
+      className={`${styles.phPerson}${person.name ? "" : ` ${styles.nameless}`}`}
       aria-label={`打开 ${personName(person)}`}
       onClick={() => onOpen(person)}
     >
@@ -147,13 +153,13 @@ export function PeopleSettings({
   const libraries = caller.libraries.filter((library) => !library.viewing);
   return (
     <div
-      className="ph-dialog-backdrop"
+      className={feedbackStyles.phDialogBackdrop}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <div
-        className="ph-dialog ph-people-settings"
+        className={`${feedbackStyles.phDialog} ${styles.phPeopleSettings}`}
         role="dialog"
         aria-modal="true"
         aria-label="人物与宠物设置"
@@ -167,16 +173,16 @@ export function PeopleSettings({
         <header>
           <h3>人物与宠物</h3>
           <small>本地 AI 在这台 NAS 上认出反复出现的人、猫和狗，每个图库分别设置</small>
-          <button type="button" className="ph-dialog-close" aria-label="关闭" onClick={onClose}>
+          <button type="button" className={feedbackStyles.phDialogClose} aria-label="关闭" onClick={onClose}>
             <X />
           </button>
         </header>
-        <div className="ph-switch-list">
+        <div className={styles.phSwitchList}>
           {libraries.map((library) => {
             const on = library.people !== false;
             const label = libraryName(caller, library);
             return (
-              <div className="ph-switch-row" key={library.id}>
+              <div className={styles.phSwitchRow} key={library.id}>
                 <span>
                   <strong>{label}</strong>
                   <small>
@@ -193,7 +199,7 @@ export function PeopleSettings({
                   aria-checked={on}
                   aria-label={`${label}的人物与宠物`}
                   disabled={!library.canSetPeople}
-                  className={`ph-switch${on ? " on" : ""}`}
+                  className={`${styles.phSwitch}${on ? ` ${styles.on}` : ""}`}
                   onClick={() => onSet(library, !on)}
                 >
                   <span />
@@ -202,7 +208,7 @@ export function PeopleSettings({
             );
           })}
         </div>
-        <p className="ph-people-settings-note">
+        <p className={styles.phPeopleSettingsNote}>
           关闭会删除这个图库里识别出的人脸与宠物；起的名字和做过的更正都会保留，重新开启后随识别结果回来。
         </p>
       </div>
@@ -248,13 +254,13 @@ export function PersonPicker({
   );
   return (
     <div
-      className="ph-dialog-backdrop"
+      className={feedbackStyles.phDialogBackdrop}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <div
-        className="ph-dialog ph-picker ph-person-picker"
+        className={`${feedbackStyles.phDialog} ${styles.phPicker} ${styles.phPersonPicker}`}
         role="dialog"
         aria-modal="true"
         aria-label="合并到"
@@ -268,12 +274,12 @@ export function PersonPicker({
         <header>
           <h3>把{person.name ? `“${person.name}”` : "这个人"}合并到…</h3>
           <small>这些照片都会归到所选的人名下</small>
-          <button type="button" className="ph-dialog-close" aria-label="关闭" onClick={onClose}>
+          <button type="button" className={feedbackStyles.phDialogClose} aria-label="关闭" onClick={onClose}>
             <X />
           </button>
         </header>
         <input
-          className="ph-person-filter"
+          className={styles.phPersonFilter}
           autoFocus
           aria-label="按名字筛选"
           placeholder="按名字筛选"
@@ -281,20 +287,20 @@ export function PersonPicker({
           onChange={(event) => setFilter(event.target.value)}
         />
         {people === undefined ? (
-          <div className="ph-loading">
-            <span className="ph-spinner" />
+          <div className={styles.phLoading}>
+            <span className={styles.phSpinner} />
           </div>
         ) : (
-          <div className="ph-picker-list">
+          <div className={styles.phPickerList}>
             {candidates.map((other) => (
-              <button type="button" key={other.id} className="ph-picker-item" onClick={() => onPick(other)}>
+              <button type="button" key={other.id} className={styles.phPickerItem} onClick={() => onPick(other)}>
                 <Avatar occurrenceId={other.coverId} kind={other.kind} size={34} />
                 <span>{personName(other)}</span>
                 <small>{other.photos} 张</small>
               </button>
             ))}
             {!candidates.length && (
-              <p className="ph-muted">{filter.trim() ? "没有叫这个名字的人" : "这个图库里没有其他人可以合并"}</p>
+              <p className={styles.phMuted}>{filter.trim() ? "没有叫这个名字的人" : "这个图库里没有其他人可以合并"}</p>
             )}
           </div>
         )}
@@ -381,7 +387,7 @@ export function PhotoFaces({ asset, faces, editable, viewing, onChanged, onOpenP
   };
   if (!faces.length) return null;
   return (
-    <section className="ph-faces" aria-label="照片中的人物">
+    <section className={styles.phFaces} aria-label="照片中的人物">
       <h4>照片中的人物</h4>
       <ul>
         {faces.map((item) => {
@@ -408,10 +414,10 @@ export function PhotoFaces({ asset, faces, editable, viewing, onChanged, onOpenP
                     }}
                   />
                   <button type="submit" aria-label="保存名字" disabled={!name.trim() || saving}>
-                    {saving ? <span className="ph-spinner" /> : <Check />}
+                    {saving ? <span className={styles.phSpinner} /> : <Check />}
                   </button>
                   {suggestions.length > 0 && (
-                    <div className="ph-face-suggestions" role="listbox" aria-label="已有的人">
+                    <div className={styles.phFaceSuggestions} role="listbox" aria-label="已有的人">
                       {suggestions.map((person) => (
                         <button
                           type="button"
@@ -433,7 +439,7 @@ export function PhotoFaces({ asset, faces, editable, viewing, onChanged, onOpenP
                 <>
                   <button
                     type="button"
-                    className="ph-face-name"
+                    className={styles.phFaceName}
                     title="查看 TA 的全部照片"
                     onClick={() => onOpenPerson(item.personId!)}
                   >
@@ -442,7 +448,7 @@ export function PhotoFaces({ asset, faces, editable, viewing, onChanged, onOpenP
                   {editable && (
                     <button
                       type="button"
-                      className="ph-face-edit"
+                      className={styles.phFaceEdit}
                       aria-label={`不是${item.name}？改成别人`}
                       title="不是 TA？改成别人"
                       onClick={() => start(item)}
@@ -455,7 +461,7 @@ export function PhotoFaces({ asset, faces, editable, viewing, onChanged, onOpenP
                 <>
                   <button
                     type="button"
-                    className="ph-face-name quiet"
+                    className={`${styles.phFaceName} ${styles.quiet}`}
                     title="查看 TA 的全部照片"
                     onClick={() => onOpenPerson(item.personId!)}
                   >
@@ -464,7 +470,7 @@ export function PhotoFaces({ asset, faces, editable, viewing, onChanged, onOpenP
                   {editable && (
                     <button
                       type="button"
-                      className="ph-face-edit"
+                      className={styles.phFaceEdit}
                       aria-label="添加名字"
                       title="添加名字"
                       onClick={() => start(item)}
@@ -474,11 +480,13 @@ export function PhotoFaces({ asset, faces, editable, viewing, onChanged, onOpenP
                   )}
                 </>
               ) : editable ? (
-                <button type="button" className="ph-face-name add" onClick={() => start(item)}>
+                <button type="button" className={`${styles.phFaceName} ${styles.add}`} onClick={() => start(item)}>
                   {kind === "person" ? "这是谁？" : "添加名字"}
                 </button>
               ) : (
-                <span className="ph-face-name quiet">{kind === "person" ? "未认出" : "未命名"}</span>
+                <span className={`${styles.phFaceName} ${styles.quiet}`}>
+                  {kind === "person" ? "未认出" : "未命名"}
+                </span>
               )}
             </li>
           );

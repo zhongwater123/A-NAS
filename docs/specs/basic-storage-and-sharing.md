@@ -102,7 +102,7 @@ v1.0.1 让一名管理员和普通成员通过 Web 与 SMB3 对同一份个人�
 - [`web/src/trash/TrashPanel.tsx`](../../web/src/trash/TrashPanel.tsx) 与 [`TrashPanel.test.tsx`](../../web/src/trash/TrashPanel.test.tsx)：回收站窗口，单个与批量恢复的同名处理
 - [`web/src/files/FilePanel.tsx`](../../web/src/files/FilePanel.tsx)：文件管理窗口
 - [`web/src/files/model.ts`](../../web/src/files/model.ts) 与 [`model.test.ts`](../../web/src/files/model.test.ts)：所选项目可用的命令、粘贴位置、排序与置顶
-- [`web/src/useFileOrder.ts`](../../web/src/useFileOrder.ts) 与 [`useFileOrder.test.ts`](../../web/src/useFileOrder.test.ts)：置顶、手动排列、偏好隔离与存储降级
+- [`web/src/files/useFileOrder.ts`](../../web/src/files/useFileOrder.ts) 与 [`useFileOrder.test.ts`](../../web/src/files/useFileOrder.test.ts)：置顶、手动排列、偏好隔离与存储降级
 - [`web/src/files/FilePanel.test.tsx`](../../web/src/files/FilePanel.test.tsx)：文件管理交互
 - [文件列表乱序响应调查](../investigations/2026-10-26-file-listing-navigation-race.md)：导航、异步操作完成后的刷新与重命名回归
 - [`web/src/App.test.tsx`](../../web/src/App.test.tsx)：会话过期回到登录页、本机屏幕申请持久会话

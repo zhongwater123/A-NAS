@@ -2,7 +2,7 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   // Oxlint's correctness rules, and eslint-plugin-react-hooks with the React Compiler's checks. The plugin
   // runs as react-hooks-js: Oxlint keeps the name react-hooks for its own port, which is turned off.
-  "plugins": ["typescript", "unicorn", "oxc", "react", "import", "vitest"],
+  "plugins": ["typescript", "unicorn", "oxc", "react", "import", "vitest", "jsx-a11y"],
   "jsPlugins": [{ "name": "react-hooks-js", "specifier": "eslint-plugin-react-hooks" }],
   "categories": { "correctness": "error" },
   "rules": {
@@ -36,7 +36,70 @@
     // Type parameters on vi.fn() are a typing style; tsc checks the tests.
     "vitest/require-mock-type-parameters": "off",
     // Request stubs check each request's headers as it arrives.
-    "vitest/no-conditional-expect": "off"
+    "vitest/no-conditional-expect": "off",
+    // Lists styled without bullets keep role="list", and windows, menus and listboxes are composite widgets
+    // that no native element provides.
+    "jsx-a11y/prefer-tag-over-role": "off",
+    // A dialog puts focus on its first field when it opens, as the WAI-ARIA dialog pattern asks.
+    "jsx-a11y/no-autofocus": "off",
+    // Members' own videos and music have no caption tracks to offer.
+    "jsx-a11y/media-has-caption": "off",
+    // A scrolling region takes focus so it can be scrolled from the keyboard.
+    "jsx-a11y/no-noninteractive-tabindex": ["error", { "roles": ["tabpanel", "region"] }],
+    // Buttons name themselves with text a few elements down; a separator is not a control.
+    "jsx-a11y/control-has-associated-label": ["error", { "depth": 4, "ignoreRoles": ["separator"] }]
   },
+  "overrides": [
+    {
+      // Hand-written dialogs, menus, popovers and overlays: they take Esc and clicks on their backdrop
+      // themselves. #268 moves them to Radix, which brings the keyboard and focus handling; remove a file
+      // from this list once it has none left. Do not add files.
+      "files": [
+        "src/appcenter/AppDetail.tsx",
+        "src/appcenter/parts.tsx",
+        "src/assistant/AssistantPanel.tsx",
+        "src/backup/BackupCenter.tsx",
+        "src/desktop/SystemRail.tsx",
+        "src/docker/parts.tsx",
+        "src/feedback/FeedbackChannel.tsx",
+        "src/feedback/FeedbackEditor.tsx",
+        "src/feedback/Lightbox.tsx",
+        "src/files/FileViewer.tsx",
+        "src/media/Cards.tsx",
+        "src/media/Detail.tsx",
+        "src/media/Dropdown.tsx",
+        "src/media/Libraries.tsx",
+        "src/media/MediaCenter.tsx",
+        "src/media/Player.tsx",
+        "src/media/Upload.tsx",
+        "src/media/feedback.tsx",
+        "src/music/Menu.tsx",
+        "src/music/MusicPanel.tsx",
+        "src/music/QueuePanel.tsx",
+        "src/music/TrackList.tsx",
+        "src/music/views.tsx",
+        "src/photos/AlbumPicker.tsx",
+        "src/photos/People.tsx",
+        "src/photos/PhotoPicker.tsx",
+        "src/photos/PhotosPanel.tsx",
+        "src/photos/Slideshow.tsx",
+        "src/photos/VideoPlayer.tsx",
+        "src/photos/Viewer.tsx",
+        "src/shares/EmojiInput.tsx",
+        "src/shares/SaveDialog.tsx",
+        "src/shares/ShareComposer.tsx",
+        "src/shares/ShareDetail.tsx",
+        "src/shares/SharePreview.tsx",
+        "src/trash/TrashPanel.tsx",
+        "src/ui/feedback.tsx"
+      ],
+      "rules": {
+        "jsx-a11y/click-events-have-key-events": "off",
+        "jsx-a11y/interactive-supports-focus": "off",
+        "jsx-a11y/no-noninteractive-element-interactions": "off",
+        "jsx-a11y/no-static-element-interactions": "off"
+      }
+    }
+  ],
   "ignorePatterns": ["src/assistant/hermes/**", "src/*.generated.ts"]
 }

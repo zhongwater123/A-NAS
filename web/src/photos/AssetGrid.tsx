@@ -1,11 +1,12 @@
 import { ChevronsDown } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
-import { gridInset, type GridProps, usePendingThumbnails, useTileRenderer } from "./grid";
+import { type ErrorDomain, errorText } from "../api/errorMessages";
+import type { PhotoAsset, PhotoPage } from "./api";
+import { type GridProps, gridInset, usePendingThumbnails, useTileRenderer } from "./grid";
 import { type Entry, flatEntries, type Split } from "./layout";
-import { errorText, type ErrorDomain } from "../errorMessages";
-import type { PhotoAsset, PhotoPage } from "./photosApi";
 import { PhotoScroller, useContentWidth } from "./PhotoScroller";
+import styles from "./photos.module.css";
 
 interface Props extends GridProps {
   // listKey names the list; a new key starts it over.
@@ -113,15 +114,15 @@ export function AssetGrid(props: Props) {
   const renderTile = useTileRenderer(props, props.badge);
   const renderEntry = (entry: Entry): ReactNode =>
     entry.kind === "more" ? (
-      <div className="ph-more">
-        <span className="ph-spinner" />
+      <div className={styles.phMore}>
+        <span className={styles.phSpinner} />
         正在载入更多
       </div>
     ) : entry.kind === "end" ? (
-      <div className="ph-end">{entry.text}</div>
+      <div className={styles.phEnd}>{entry.text}</div>
     ) : entry.kind === "divider" ? (
-      <div className="ph-divider" role="separator" aria-label={entry.title}>
-        <span className="ph-divider-title">
+      <div className={styles.phDivider} role="separator" aria-label={entry.title}>
+        <span className={styles.phDividerTitle}>
           <ChevronsDown />
           {entry.title}
         </span>
@@ -150,13 +151,13 @@ export function AssetGrid(props: Props) {
     >
       {assets === undefined
         ? (props.loading ?? (
-            <div className="ph-loading" style={{ paddingTop: props.topInset }}>
-              <span className="ph-spinner" />
+            <div className={styles.phLoading} style={{ paddingTop: props.topInset }}>
+              <span className={styles.phSpinner} />
             </div>
           ))
         : !shown?.length && (
             // A taller toolbar, such as one with a search box under it, moves the empty state down with it.
-            <div className="ph-empty-place" style={{ top: Math.max(0, props.topInset - 72) }}>
+            <div className={styles.phEmptyPlace} style={{ top: Math.max(0, props.topInset - 72) }}>
               {props.empty}
             </div>
           )}

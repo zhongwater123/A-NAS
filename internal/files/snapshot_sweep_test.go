@@ -541,7 +541,7 @@ func TestDevelopmentSnapshotsAreSweptToo(t *testing.T) {
 	for _, item := range items {
 		left = append(left, item.Name())
 	}
-	want := []string{"snapshotforeign", strings.ReplaceAll(snapshot.ID, ":", "")}
+	want := []string{"snapshotforeign", strings.ToLower(strings.ReplaceAll(snapshot.ID, ":", ""))}
 	slices.Sort(want)
 	if !slices.Equal(left, want) {
 		t.Fatalf("development snapshots after the sweep = %v, want %v", left, want)

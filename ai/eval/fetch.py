@@ -29,14 +29,14 @@ def with_retries(action, attempts=5):
 
 
 def size_of(url):
-    request = urllib.request.Request(url, method="HEAD")
-    with with_retries(lambda: urllib.request.urlopen(request, timeout=60)) as response:
+    request = urllib.request.Request(url, method="HEAD")  # noqa: S310  datasets' https URLs
+    with with_retries(lambda: urllib.request.urlopen(request, timeout=60)) as response:  # noqa: S310  datasets' https URLs
         return int(response.headers["Content-Length"])
 
 
 def download(url, path):
     def fetch():
-        with urllib.request.urlopen(url, timeout=120) as response:
+        with urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310  datasets' https URLs
             return response.read()
 
     data = with_retries(fetch)

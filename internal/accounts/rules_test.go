@@ -22,7 +22,7 @@ func TestNewAccountNamesFollowTheNameRules(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	credentials := &credentialRecorder{}
-	service := accounts.NewService(store, credentials, accounts.Options{})
+	service := accounts.NewService(store, credentials, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestPasswordsBeingSetFollowThePasswordRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &credentialRecorder{}, accounts.Options{})
+	service := accounts.NewService(store, &credentialRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestAdministratorsChangeTheirOwnPasswordOnlyWithTheCurrentOne(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &credentialRecorder{}, accounts.Options{})
+	service := accounts.NewService(store, &credentialRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestConcurrentSetupsCreateOneAdministrator(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &credentialRecorder{}, accounts.Options{Random: &setupBarrier{ready: make(chan struct{})}})
+	service := accounts.NewService(store, &credentialRecorder{}, accounts.Options{PasswordCost: cheapPasswords, Random: &setupBarrier{ready: make(chan struct{})}})
 	type result struct {
 		user accounts.User
 		err  error

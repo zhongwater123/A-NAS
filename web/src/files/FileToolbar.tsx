@@ -23,9 +23,10 @@ import {
   Trash2,
 } from "lucide-react";
 
-import { Space } from "../api";
-import { FileOrder, FileSort } from "../useFileOrder";
+import type { Space } from "../api.generated";
+import styles from "./files.module.css";
 import { FileFolder, FileView, fileSortLabel, SelectionCommands } from "./model";
+import { FileOrder, FileSort } from "./useFileOrder";
 
 // FileCommands are what the toolbar and the context menu do with the selection.
 export interface FileCommands {
@@ -68,10 +69,10 @@ export function FileNavigationBar({
   onChooseSpace: (spaceID: string) => void;
 }) {
   return (
-    <div className="file-navigation-bar">
-      <div className="file-history-actions">
+    <div className={styles.fileNavigationBar}>
+      <div className={styles.fileHistoryActions}>
         <button
-          className="file-icon-button"
+          className={styles.fileIconButton}
           aria-label="后退"
           title="后退"
           disabled={!trail.length || loading}
@@ -79,11 +80,11 @@ export function FileNavigationBar({
         >
           <ArrowLeft />
         </button>
-        <button className="file-icon-button" aria-label="前进" title="前进" disabled>
+        <button className={styles.fileIconButton} aria-label="前进" title="前进" disabled>
           <ArrowRight />
         </button>
         <button
-          className="file-icon-button"
+          className={styles.fileIconButton}
           aria-label="向上一级"
           title="向上一级"
           disabled={!trail.length || loading}
@@ -92,7 +93,7 @@ export function FileNavigationBar({
           <ArrowUp />
         </button>
         <button
-          className="file-icon-button"
+          className={styles.fileIconButton}
           aria-label="刷新文件列表"
           title="刷新"
           disabled={!spaceID || loading}
@@ -102,7 +103,7 @@ export function FileNavigationBar({
         </button>
       </div>
       <select
-        className="file-space-select"
+        className={styles.fileSpaceSelect}
         aria-label="空间"
         value={spaceID}
         onChange={(event) => onChooseSpace(event.target.value)}
@@ -117,7 +118,7 @@ export function FileNavigationBar({
           </option>
         ))}
       </select>
-      <nav className="file-breadcrumb" aria-label="当前路径">
+      <nav className={styles.fileBreadcrumb} aria-label="当前路径">
         <FolderOpen />
         <button onClick={() => onNavigate(0)}>{locationLabel || "空间"}</button>
         {trail.map((item, index) => (
@@ -132,7 +133,7 @@ export function FileNavigationBar({
           </span>
         ))}
       </nav>
-      <label className="file-search">
+      <label className={styles.fileSearch}>
         <Search />
         <input
           type="search"
@@ -175,14 +176,14 @@ export function FileCommandBar({
 }) {
   const { sortBy, direction } = order;
   return (
-    <div className="file-action-bar" aria-label="文件命令">
-      <button className="file-command-button" disabled={!canCreate} onClick={onToggleCreate}>
+    <div className={styles.fileActionBar} aria-label="文件命令">
+      <button className={styles.fileCommandButton} disabled={!canCreate} onClick={onToggleCreate}>
         <FolderPlus />
         <span>新建</span>
       </button>
       <i />
       <button
-        className="file-command-button"
+        className={styles.fileCommandButton}
         aria-label="分享"
         title="分享给成员"
         disabled={!can.mutate}
@@ -192,7 +193,7 @@ export function FileCommandBar({
         <span>分享</span>
       </button>
       <button
-        className="file-command-button"
+        className={styles.fileCommandButton}
         aria-label="剪切"
         title="剪切"
         disabled={!can.mutate}
@@ -202,7 +203,7 @@ export function FileCommandBar({
         <span>剪切</span>
       </button>
       <button
-        className="file-command-button"
+        className={styles.fileCommandButton}
         aria-label="复制"
         title="复制"
         disabled={!can.mutate}
@@ -212,7 +213,7 @@ export function FileCommandBar({
         <span>复制</span>
       </button>
       <button
-        className="file-command-button"
+        className={styles.fileCommandButton}
         aria-label="粘贴"
         title="粘贴到当前目录"
         disabled={!can.paste}
@@ -222,7 +223,7 @@ export function FileCommandBar({
         <span>粘贴</span>
       </button>
       <button
-        className="file-command-button"
+        className={styles.fileCommandButton}
         aria-label={can.archive ? "打包下载" : "下载"}
         title={can.archive ? "打包为 ZIP 下载" : "下载"}
         disabled={!can.download}
@@ -232,7 +233,7 @@ export function FileCommandBar({
         <span>下载</span>
       </button>
       <button
-        className="file-command-button"
+        className={styles.fileCommandButton}
         aria-label="重命名"
         title="重命名"
         disabled={!can.rename}
@@ -241,12 +242,17 @@ export function FileCommandBar({
         <Pencil />
         <span>重命名</span>
       </button>
-      <button className="file-command-button file-command-optional" aria-label="共享" title="共享功能规划中" disabled>
+      <button
+        className={`${styles.fileCommandButton} ${styles.fileCommandOptional}`}
+        aria-label="共享"
+        title="共享功能规划中"
+        disabled
+      >
         <Share2 />
         <span>共享</span>
       </button>
       <button
-        className="file-command-button danger"
+        className={`${styles.fileCommandButton} ${styles.danger}`}
         aria-label="删除"
         title="移到回收站"
         disabled={!can.mutate}
@@ -257,7 +263,7 @@ export function FileCommandBar({
       </button>
       <i />
       <button
-        className="file-command-button"
+        className={styles.fileCommandButton}
         aria-label="切换排序方向"
         title={`按${fileSortLabel(sortBy)}${direction === "ascending" ? "升序" : "降序"}`}
         disabled={sortBy === "manual"}
@@ -266,9 +272,9 @@ export function FileCommandBar({
         <ArrowUpDown />
         <span>排序</span>
       </button>
-      <div className="file-view-control">
+      <div className={styles.fileViewControl}>
         <button
-          className="file-command-button"
+          className={styles.fileCommandButton}
           aria-expanded={viewMenuOpen}
           onClick={() => onViewMenuOpen(!viewMenuOpen)}
         >
@@ -277,9 +283,9 @@ export function FileCommandBar({
           <ChevronDown />
         </button>
         {viewMenuOpen && (
-          <div className="file-view-menu">
+          <div className={styles.fileViewMenu}>
             <button
-              className={view === "list" ? "active" : ""}
+              className={view === "list" ? styles.active : ""}
               onClick={() => {
                 onView("list");
                 onViewMenuOpen(false);
@@ -289,7 +295,7 @@ export function FileCommandBar({
               列表视图
             </button>
             <button
-              className={view === "icons" ? "active" : ""}
+              className={view === "icons" ? styles.active : ""}
               onClick={() => {
                 onView("icons");
                 onViewMenuOpen(false);
@@ -301,11 +307,16 @@ export function FileCommandBar({
           </div>
         )}
       </div>
-      <button className="file-command-button file-command-optional" aria-label="更多操作" title="更多操作" disabled>
+      <button
+        className={`${styles.fileCommandButton} ${styles.fileCommandOptional}`}
+        aria-label="更多操作"
+        title="更多操作"
+        disabled
+      >
         <Ellipsis />
       </button>
       {activity && (
-        <span className="file-activity" role="status">
+        <span className={styles.fileActivity} role="status">
           <span className="loader" />
           {activity}
         </span>
@@ -337,7 +348,7 @@ export function FileOrderBar({
   searching: boolean;
 }) {
   return (
-    <div className="file-order-bar" aria-label="文件排列">
+    <div className={styles.fileOrderBar} aria-label="文件排列">
       <label>
         排序方式
         <select

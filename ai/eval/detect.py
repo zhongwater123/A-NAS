@@ -149,7 +149,7 @@ def load(path):
     with np.load(path) as data:
         keys, offsets = data["keys"].tolist(), data["offsets"]
         classes, scores, boxes = data["classes"], data["scores"], data["boxes"]
-    return {key: (classes[a:b], scores[a:b], boxes[a:b]) for key, a, b in zip(keys, offsets[:-1], offsets[1:])}
+    return {key: (classes[a:b], scores[a:b], boxes[a:b]) for key, a, b in zip(keys, offsets[:-1], offsets[1:], strict=True)}
 
 
 def bench(detector, embedder_path, weight_cache, count, threads):

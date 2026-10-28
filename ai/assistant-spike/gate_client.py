@@ -26,10 +26,10 @@ origin = url.replace("ws://", "http://").split("/api/")[0]
 
 
 def confirm(request_id, csrf):
-    request = urllib.request.Request(f"{origin}/api/v1/assistant/approvals/{request_id}/confirm", method="POST",
-                                     headers={"Cookie": f"anas_session={cookie}", "X-CSRF-Token": csrf})
+    request = urllib.request.Request(f"{origin}/api/v1/assistant/approvals/{request_id}/confirm",  # noqa: S310
+                                     method="POST", headers={"Cookie": f"anas_session={cookie}", "X-CSRF-Token": csrf})
     try:
-        with urllib.request.urlopen(request, timeout=120) as reply:
+        with urllib.request.urlopen(request, timeout=120) as reply:  # noqa: S310  origin is the product's http URL
             return reply.status
     except urllib.error.HTTPError as failure:
         return failure.code

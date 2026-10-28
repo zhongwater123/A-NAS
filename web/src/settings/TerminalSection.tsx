@@ -1,11 +1,11 @@
 import { RotateCcw, SquareTerminal } from "lucide-react";
-import { Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
-import { readTerminalEnabled, type SessionStatus } from "../terminal";
 import { Banner, IconTile, PageHeader, Pill } from "./parts";
-import "./terminal.css";
+import styles from "./settings.module.css";
+import { readTerminalEnabled, type SessionStatus } from "./terminal";
 
-const XtermSession = lazy(() => import("../XtermSession"));
+const XtermSession = lazy(() => import("./XtermSession"));
 
 type Availability = "checking" | "enabled" | "disabled" | "unreachable";
 
@@ -60,10 +60,10 @@ export function TerminalSection({
 
   if (availability !== "enabled") {
     return (
-      <div className="set-page" hidden={!active}>
+      <div className={styles.setPage} hidden={!active}>
         <PageHeader title="终端" subtitle="在网页里打开这台设备的 Shell" />
         {availability === "checking" && (
-          <div className="set-card tm-notice tm-checking">
+          <div className={`${styles.setCard} ${styles.tmNotice} ${styles.tmChecking}`}>
             <span className="loader" />
             <p>正在检查终端…</p>
           </div>
@@ -71,21 +71,21 @@ export function TerminalSection({
         {availability === "unreachable" && (
           <Banner tone="error">
             无法读取终端状态，请确认 A-NAS 产品服务正在运行。
-            <button className="set-btn tm-banner-action" onClick={checkAgain}>
+            <button className={`${styles.setBtn} ${styles.tmBannerAction}`} onClick={checkAgain}>
               重试
             </button>
           </Banner>
         )}
         {availability === "disabled" && (
-          <div className="set-card tm-notice">
+          <div className={`${styles.setCard} ${styles.tmNotice}`}>
             <IconTile tone="terminal" icon={SquareTerminal} size="lg" />
             <h3>终端尚未开启</h3>
             <p>终端让管理员以自己的 Linux 账号在{device}上运行命令。为安全起见它默认关闭，只能由设备的 root 开启：</p>
-            <pre className="tm-code" aria-label="开启终端的命令">
+            <pre className={styles.tmCode} aria-label="开启终端的命令">
               <code>{"echo ANAS_TERMINAL=enabled >> /etc/a-nas/anas-api.env\nsystemctl restart anas-api"}</code>
             </pre>
-            <p className="tm-notice-foot">开启后，系统升级会保留这个设置。</p>
-            <button className="set-btn" onClick={checkAgain}>
+            <p className={styles.tmNoticeFoot}>开启后，系统升级会保留这个设置。</p>
+            <button className={styles.setBtn} onClick={checkAgain}>
               重新检查
             </button>
           </div>
@@ -96,36 +96,36 @@ export function TerminalSection({
 
   const ended = status.state === "ended";
   return (
-    <div className="set-page tm-page" hidden={!active}>
+    <div className={`${styles.setPage} ${styles.tmPage}`} hidden={!active}>
       <PageHeader
         title="终端"
         subtitle={`以 ${username} 的 Linux 账号在${device}上运行的 Shell`}
         action={
-          <div className="tm-actions">
+          <div className={styles.tmActions}>
             <StatusPill status={status} />
-            <button className="set-btn" title="结束当前 Shell，打开一个新的" onClick={restart}>
+            <button className={styles.setBtn} title="结束当前 Shell，打开一个新的" onClick={restart}>
               <RotateCcw />
               新建会话
             </button>
           </div>
         }
       />
-      <section className={`tm-console ${ended ? "ended" : ""}`} aria-label="Shell">
-        <header className="tm-console-bar">
-          <span className="tm-prompt">
-            <span className={`tm-led ${status.state}`} aria-hidden="true" />
+      <section className={`${styles.tmConsole} ${ended ? styles.ended : ""}`} aria-label="Shell">
+        <header className={styles.tmConsoleBar}>
+          <span className={styles.tmPrompt}>
+            <span className={`${styles.tmLed} ${styles[status.state] ?? ""}`} aria-hidden="true" />
             {username}@{hostname || "a-nas"}
           </span>
           {size && (
-            <span className="tm-size">
+            <span className={styles.tmSize}>
               {size.cols} × {size.rows}
             </span>
           )}
         </header>
-        <div className="tm-screen">
+        <div className={styles.tmScreen}>
           <Suspense
             fallback={
-              <div className="tm-loading">
+              <div className={styles.tmLoading}>
                 <span className="loader" />
                 正在载入终端…
               </div>
@@ -135,16 +135,16 @@ export function TerminalSection({
           </Suspense>
         </div>
         {ended && (
-          <div className="tm-ended" role="status">
+          <div className={styles.tmEnded} role="status">
             <span>{status.exitCode === undefined ? "终端连接已断开" : `Shell 已退出（代码 ${status.exitCode}）`}</span>
-            <button className="set-btn primary" onClick={restart}>
+            <button className={`${styles.setBtn} primary`} onClick={restart}>
               <RotateCcw />
               新建会话
             </button>
           </div>
         )}
       </section>
-      <p className="set-footnote">
+      <p className={styles.setFootnote}>
         Shell 的文件权限与你在网页中一致，没有 root 或
         sudo。切换到其他分区或最小化窗口时它继续运行，关闭设置窗口会结束它。
       </p>

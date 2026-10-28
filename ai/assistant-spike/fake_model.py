@@ -11,6 +11,7 @@ answers deterministically:
   anything else              -> "ok"
 The log also counts the image parts a request carried (#113).
 """
+import contextlib
 import json
 import os
 import re
@@ -53,10 +54,8 @@ def decide(messages):
         args = rest[0] if rest else "{}"
         # Hermes appends system notes to some user messages (a first turn, changed skills);
         # the arguments are only the JSON object the line starts with.
-        try:
+        with contextlib.suppress(ValueError):
             args = json.dumps(json.JSONDecoder().raw_decode(args)[0], ensure_ascii=False)
-        except ValueError:
-            pass
         for kind in ("photo", "album"):
             if "{{" + kind + "}}" in args:
                 found = [m for msg in messages if msg.get("role") == "tool"
@@ -157,5 +156,5 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 if os.path.exists(SOCK):
     os.unlink(SOCK)
 with Server(SOCK, Handler) as server:
-    os.chmod(SOCK, 0o666)
+    os.chmod(SOCK, 0o666)  # noqa: S103  the sandboxed assistant connects as another user
     server.serve_forever()
