@@ -368,7 +368,7 @@ describe("AppCenterPanel", () => {
       () => {
         const pending = job({ action: "uninstall" });
         memos = { ...memos, state: "uninstalling", job: pending };
-        return json(pending, 202);
+        return pending;
       },
     );
     const user = userEvent.setup();

@@ -528,7 +528,7 @@ describe("Settings", () => {
   });
 
   it.each([true, false])("shows system storage separately, observed=%s", async (observed) => {
-    installAPI({
+    serve({
       hostState: {
         ...healthyState,
         system: {
@@ -538,15 +538,14 @@ describe("Settings", () => {
       },
     });
     const user = userEvent.setup();
-    render(<App />);
-    await openSettingsSection(user, await screen.findByRole("region", { name: "桌面应用" }), "概览");
-    const settings = screen.getByRole("dialog", { name: "设置" });
-    expect(within(settings).getByText("系统盘空间")).toBeTruthy();
+    renderSettings();
+    await openSection(user, "概览");
+    expect(await screen.findByText("系统盘空间")).toBeTruthy();
     if (observed) {
-      expect(within(settings).getByText("75%")).toBeTruthy();
-      expect(within(settings).queryByText("暂时无法读取")).toBeNull();
+      expect(screen.getByText("75%")).toBeTruthy();
+      expect(screen.queryByText("暂时无法读取")).toBeNull();
     } else {
-      expect(within(settings).getByText("暂时无法读取")).toBeTruthy();
+      expect(screen.getByText("暂时无法读取")).toBeTruthy();
     }
   });
 
