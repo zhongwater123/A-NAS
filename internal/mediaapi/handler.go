@@ -21,6 +21,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/filesapi"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/media"
+	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 )
 
 const PathPrefix = "/api/v1/media"
@@ -244,26 +245,7 @@ func (h *handler) video(w http.ResponseWriter, r *http.Request, user accounts.Us
 
 // capabilities reads the browser's codec support from caps=hevc,av1,...
 func capabilities(values url.Values) media.Capabilities {
-	var caps media.Capabilities
-	for value := range strings.SplitSeq(values.Get("caps"), ",") {
-		switch strings.TrimSpace(value) {
-		case "hevc":
-			caps.HEVC = true
-		case "av1":
-			caps.AV1 = true
-		case "vp9":
-			caps.VP9 = true
-		case "ac3":
-			caps.AC3 = true
-		case "eac3":
-			caps.EAC3 = true
-		case "mkv":
-			caps.Matroska = true
-		case "webm":
-			caps.WebM = true
-		}
-	}
-	return caps
+	return mediaplay.ParseCaps(values.Get("caps"))
 }
 
 func (h *handler) playback(w http.ResponseWriter, r *http.Request, user accounts.User) {
