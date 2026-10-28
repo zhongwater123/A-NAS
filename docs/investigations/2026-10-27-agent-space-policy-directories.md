@@ -21,7 +21,7 @@ go test ./internal/files ./internal/filebroker -run 'TestAgentSpacePolicyDirecto
 2. **Landlock 库按路径重新打开授权位置。** Worker 先用 `openat2` 的 `RESOLVE_NO_SYMLINKS`、`RESOLVE_BENEATH` 打开并持有目录，再把 `/proc/self/fd` 路径交给已有 go-landlock 库，直到规则生效才关闭描述符。未创建的授权目录可以略过；链接、越界或其他打开错误使 Worker 拒绝启动。不采用先检查路径、再由库重开的办法，避免检查与使用之间替换链接。
 3. **Host Agent 未接入管理目录核对。** 在既有启动、身份同步和 15 分钟核对中创建与维护这些目录；非 root 所有的冒名目录、链接或其他类型移到同级 `.displaced-*`，保留内容并重建正确目录。ACL 操作继续使用已打开的描述符，不跟随链接目标、不递归接管内容。助手试用安装复用这些目录，不再把它们当作残留或在移除试用时删除。
 
-SMB 采用 issue 允许的 veto 方案：Shared 中名为 `Agent空间` 的条目及其内容不通过 SMB 访问，使用 Web 或助手读取发布内容。Samba 的规则匹配名称，因此也适用于 Shared 子目录里的同名条目；个人空间不添加这个 veto。没有给整个 Shared 根目录加粘滞位，普通文件的跨成员协作仍沿用原 ACL。具体产品规则见 [ADR 0024 决定 5](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md#决定)。
+SMB 采用 issue 允许的 veto 方案：Shared 中名为 `Agent空间` 的条目及其内容不通过 SMB 访问，使用 Web 或助手读取发布内容。Samba 的规则匹配名称，因此也适用于 Shared 子目录里的同名条目；个人空间不添加这个 veto。默认 `delete veto files = no` 还会阻止通过 SMB 删除含有这种条目的父目录；应先在 Web 中核对内容并处理，不能开启递归删除隐藏条目来绕过保护。没有给整个 Shared 根目录加粘滞位，普通文件的跨成员协作仍沿用原 ACL。具体产品规则见 [ADR 0024 决定 5](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md#决定)。
 
 本地终端或已授权应用仍可能改名 Shared 顶层目录，Host Agent 在下一次核对修复，修复前的可用性不是即时保证。链接不会扩大新 Worker 的 Landlock 授权；移动到旁边的内容不会自动删除。管理员查看调查内容后再处理，不应把 `.displaced-*` 自动搬回管理目录。
 

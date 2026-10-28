@@ -10,7 +10,9 @@ import (
 
 // Agent空间 and its immediate children are policy directories managed by
 // the Host Agent, not member-created entries. The same name elsewhere is
-// ordinary user data. Contents below each member's directory remain editable.
+// ordinary user data for these Web mutation rules. Samba separately vetoes
+// this name at every depth in Shared. Contents below each member's directory
+// remain editable through Web operations.
 func isAgentPolicyDirectory(root, spaceID, name string) bool {
 	if spaceID != "space:shared" {
 		return false
