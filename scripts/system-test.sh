@@ -315,7 +315,14 @@ check "the local console's account has no password" test "$(passwd -S a-nas-kios
 check "the local console's launcher is the installed release's" \
   cmp -s /opt/a-nas/current/kiosk-launcher /src/scripts/run-kiosk.sh
 check "the local console's launcher is root's" test "$(stat -c '%U %a' /opt/a-nas/current/kiosk-launcher)" = 'root 755'
-check "the local console cannot write the staged release" denied as a-nas-kiosk touch "$release/kiosk-launcher"
+# A staging account laid out as anas-dev's on the NAS: its staged releases are
+# its own, and the owner's write shows the directory is writable at all.
+id anas-dev >/dev/null 2>&1 || useradd --create-home --shell /bin/bash anas-dev
+staging=/home/anas-dev/apps/a-nas/releases
+install -d -o anas-dev -g anas-dev -m 0750 /home/anas-dev/apps /home/anas-dev/apps/a-nas "$staging"
+check "the staging account writes its staged releases" as anas-dev touch "$staging/staged-by-anas-dev"
+check "the local console cannot write the staged releases" denied as a-nas-kiosk touch "$staging/staged-by-kiosk"
+check "the local console is not in the staging account's group" denied grep -qw anas-dev <<<"$(id -nG a-nas-kiosk)"
 check "the installer leaves the local console disabled" \
   test "$(systemctl is-enabled anas-kiosk@tty1.service 2>/dev/null)" = disabled
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done

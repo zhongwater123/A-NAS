@@ -17,7 +17,14 @@
 已初始化数据卷的设备升级时，不要重新执行磁盘初始化或首次配置向导，只核对暂存制品并运行系统服务安装器：
 
 1. 在开发机对候选提交运行门禁，再只暂存不激活：`scripts/deploy-dev.ps1 -NasHost <NAS_HOST> -StageOnly`。release 目录以 12 位提交 SHA 命名，脚本会输出 API 与 Host Agent 的 SHA-256。不要省略 `-StageOnly`：没有它时脚本会安装 ADR 0008 之前的用户级服务，见[旧部署手册](deploy-web-preview-to-experimental-nas.md)。
-2. 以 root 核对并安装：
+2. 以 root 查看本地控制台以哪个账号运行：
+
+   ```bash
+   systemctl show -p User --value anas-kiosk@tty1.service
+   ```
+
+   结果是 `anas-dev` 时，这是第一次安装含 [issue #174](https://github.com/zhongwater123/A-NAS/issues/174) 的 release：安装器会把本地控制台换成 `a-nas-kiosk`。先按[本地控制台运行手册的迁移前步骤](operate-local-kiosk.md#迁移前)记下当前状态，并在本机屏幕上退出登录，再继续。
+3. 以 root 核对并安装：
 
    ```bash
    release_id=<12 位提交 SHA>
@@ -37,7 +44,7 @@
      "$source_release" "$release_id" "$smb_interface"
    ```
 
-3. 安装器已重启正在运行的本地控制台：它以 `a-nas-kiosk` 运行，启动程序来自 `/opt/a-nas/current`（[issue #174](https://github.com/zhongwater123/A-NAS/issues/174)），不再需要切换 `anas-dev` 名下的启动链接。以 `anas-dev` 运行的旧 kiosk 第一次迁移时，按[本地控制台运行手册](operate-local-kiosk.md#迁移到专用账号)操作。确认：
+4. 安装器已重启正在运行的本地控制台：它以 `a-nas-kiosk` 运行，启动程序来自 `/opt/a-nas/current`，不再需要切换 `anas-dev` 名下的启动链接。第一次迁移后，在本机屏幕上重新登录，再按[迁移后的验证](operate-local-kiosk.md#迁移后的验证)核对。其余时候确认：
 
    ```bash
    test -x /opt/a-nas/current/kiosk-launcher
@@ -199,7 +206,7 @@ systemctl daemon-reload
 systemctl restart anas-host-agent anas-photos anas-api anas-kiosk@tty1
 ```
 
-回滚到 issue #174 之前的 release 时，kiosk 回到 `anas-dev`，Chromium 用的是该账号下的旧配置文件：迁移后删掉了它的话，要在电视上重新登录。
+回滚到 issue #174 之前的 release 时，kiosk 回到 `anas-dev`，Chromium 用的是该账号下的旧配置文件：迁移后删掉了它的话，要在本机屏幕上重新登录。
 
 AI Worker 的单元写明 release 的模型参数，旧 Worker 不认识新单元的参数（例如 `--detector`），所以带 AI 的 release 要一并恢复 `anas-ai.service`，并停止正在运行的 Worker，下一次连接启动旧 release 的。物体检测器之前的 release 在单元里自带 CPU 上限，没有安装器写的 `anas-ai.service.d/cpu-reserve.conf`，恢复后删掉它（[启用相册物体检测](enable-photo-objects.md#回滚或恢复)）。旧版本也拒绝打开比它新的相册 Catalog：回滚跨过 Catalog 迁移时，先按该版本的手册把 Catalog 退回，例如物体检测的 migration 7。
 

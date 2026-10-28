@@ -270,9 +270,11 @@ test:
 
 # CI runs this beside `make check`. It leaves out internal/webui, which only
 # serves the built Web assets and runs no goroutines: `make test` covers it
-# after `make web-build`, so this run needs no Node.js.
+# after `make web-build`, so this run needs no Node.js. The list is taken first,
+# so that a package go list cannot load fails the run instead of dropping out.
 race-test:
-	$(GO) test -race -p $(RACE_PARALLEL) $$($(GO) list ./... | grep -v '/internal/webui$$')
+	packages="$$($(GO) list ./...)" && \
+	$(GO) test -race -p $(RACE_PARALLEL) $$(printf '%s\n' "$$packages" | grep -v '/internal/webui$$')
 
 # Ruff as ai/requirements-dev.txt pins it: another version may judge differently.
 ai-lint:

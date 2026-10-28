@@ -93,12 +93,12 @@ journalctl -u anas-kiosk@tty1.service -b --no-pager -n 100
    systemctl show -p User --value anas-kiosk@tty1.service      # anas-dev
    ```
 
-2. 在电视上退出登录。本机控制台会话不过期，它的令牌存在 `anas-dev` 名下的 Chromium 配置文件中，读得到这个账号的人就能用它。退出登录后产品服务作废这个会话，旧配置文件随之失去用处。新账号不沿用旧配置文件。
+2. 运行安装器之前，在本机屏幕上退出登录。本机会话不过期，它的令牌存在 `anas-dev` 名下的 Chromium 配置文件中，读得到这个账号的人就能用它。退出登录后产品服务作废这个会话，旧配置文件随之失去用处。新账号不沿用旧配置文件。
 
 ### 迁移
 
-1. 按[实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务)暂存并安装 release。安装器建立 `a-nas-kiosk`，把启动程序装进新 release，换上新的单元与 PAM 配置，再重启正在运行的 kiosk。kiosk 以空的配置文件启动，电视显示登录页。
-2. 在电视上重新登录，再按[验收](#验收)第 1、2 项确认画面、字体与输入。
+1. 按[实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务)暂存并安装 release。安装器建立 `a-nas-kiosk`，把启动程序装进新 release，换上新的单元与 PAM 配置，再重启正在运行的 kiosk。kiosk 以空的配置文件启动，本机屏幕显示登录页。
+2. 在本机屏幕上重新登录，再按[验收](#验收)第 1、2 项确认画面、字体与输入。
 
 ### 迁移后的验证
 
@@ -111,12 +111,14 @@ passwd -S a-nas-kiosk                                       # 第二列是 L：�
 stat -c '%U %a %n' /var/lib/a-nas-kiosk /var/lib/a-nas-kiosk/chromium
 ! setpriv --reuid=a-nas-kiosk --regid=a-nas-kiosk --init-groups test -w /home/anas-dev/apps/a-nas/releases
 ! ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new a-nas-kiosk@127.0.0.1 true
-systemd-analyze verify anas-kiosk@tty1.service
+systemctl is-active "user@$(id -u a-nas-kiosk).service"     # active
+systemd-analyze verify --recursive-errors=no anas-kiosk@tty1.service; echo "exit=$?"
 ```
 
 - 两个目录都属于 `a-nas-kiosk`，权限为 `700`；
 - 带 `!` 的两行不输出任何内容，即命令失败：kiosk 账号写不了暂存目录，SSH 拒绝它登录；
-- `systemd-analyze verify` 不输出任何内容。
+- 本机会话还会启动这个账号的用户服务管理器 `user@<UID>.service`。账号没有家目录，它仍应为 `active`：2026-10-28 在 Debian 13 容器中试过，与有家目录的账号相同；
+- `systemd-analyze verify` 的退出码为 0。`--recursive-errors=no` 只按本单元判断：它依赖的发行方单元打印的告警与迁移无关。
 
 确认无误并至少重启过一次 kiosk 后，删除旧配置文件：
 
@@ -143,7 +145,7 @@ systemctl show -p User --value anas-kiosk@tty1.service      # anas-dev
 ```
 
 - 旧启动程序只打开 `http://127.0.0.1:8080/?local-console=1`，可以与新 release 的产品服务一起使用。
-- 迁移前已在电视上退出登录，所以要重新登录。
+- 迁移前已在本机屏幕上退出登录，所以要重新登录。
 - 下一次运行安装器又会装上新单元，因此先查明原因再安装。
 - `a-nas-kiosk` 账号与 `/var/lib/a-nas-kiosk` 留着不影响旧 kiosk。
 

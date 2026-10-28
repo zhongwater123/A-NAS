@@ -14,7 +14,8 @@
 # build/ai-runtime.json. --lock resolves ai/requirements.in and
 # ai/requirements-dev.in into their .txt locks; options such as
 # `--upgrade-package pillow` go to `uv pip compile`. Both need uv, the version
-# ai/requirements-dev.txt pins, and jq, and download from PyPI.
+# ai/requirements-dev.txt pins, and download from PyPI; the first form also
+# needs Docker and jq.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
