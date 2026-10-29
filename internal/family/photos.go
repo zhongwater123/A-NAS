@@ -2,6 +2,7 @@ package family
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -47,4 +48,17 @@ func (s *Store) lookup(ctx context.Context, actor Actor, ids []string) (map[stri
 		}
 	}
 	return found, nil
+}
+
+// readable asks Photos which of ids actor can see, to show them. When the
+// photo service cannot answer, known is false and every stored photo stands:
+// pages show placeholders until the photo service is back, and it still
+// authorizes every thumbnail and original. Writes that name photos use
+// lookup, and refuse instead.
+func (s *Store) readable(ctx context.Context, actor Actor, ids []string) (visible map[string]Photo, known bool, err error) {
+	visible, err = s.lookup(ctx, actor, ids)
+	if errors.Is(err, ErrPhotosUnavailable) {
+		return nil, false, nil
+	}
+	return visible, err == nil, err
 }

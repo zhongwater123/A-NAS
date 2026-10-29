@@ -296,6 +296,18 @@ func TestPhotoRecordsShowOnlyWhatTheReaderCanSee(t *testing.T) {
 	f.photos.down = true
 	_, err = f.store.AddRecord(ctx, mom, baby.ID, RecordInput{Kind: KindPhotos, Photos: []string{"p-park-2"}})
 	wantErr(t, err, ErrPhotosUnavailable)
+	// Reading goes on with what the channel stored; pages show placeholders
+	// until the photo service answers again.
+	stored := 0
+	for _, record := range must(f.store.Records(ctx, mom, baby.ID, "", "")).Records {
+		stored += len(record.Photos)
+	}
+	if stored != 3 {
+		t.Fatalf("photos listed while the photo service is down = %d, want the 3 stored", stored)
+	}
+	if album := must(f.store.Album(ctx, mom, baby.ID, "")); len(album.Photos) != 3 {
+		t.Fatalf("album while the photo service is down = %+v", album.Photos)
+	}
 }
 
 func TestTheCloudAlbumGroupsByMonthOfLife(t *testing.T) {

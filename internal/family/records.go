@@ -247,7 +247,7 @@ func (s *Store) present(ctx context.Context, q queryer, actor Actor, baby Baby, 
 	for _, r := range rows {
 		ids = append(ids, r.photoIDs...)
 	}
-	visible, err := s.lookup(ctx, actor, ids)
+	visible, known, err := s.readable(ctx, actor, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -262,6 +262,9 @@ func (s *Store) present(ctx context.Context, q queryer, actor Actor, baby Baby, 
 		rec.Photos = []RecordPhoto{}
 		for _, id := range r.photoIDs {
 			photo, ok := visible[id]
+			if !known {
+				photo, ok = Photo{ID: id, Video: r.photoVideo[id]}, true
+			}
 			if !ok {
 				rec.HiddenPhotos++
 				continue

@@ -96,12 +96,15 @@ GROUP BY p.asset_id`
 		for _, candidate := range candidates {
 			ids = append(ids, candidate.photo.AssetID)
 		}
-		visible, err := s.lookup(ctx, actor, ids)
+		visible, known, err := s.readable(ctx, actor, ids)
 		if err != nil {
 			return AlbumPage{}, err
 		}
 		for _, candidate := range candidates {
 			found, ok := visible[candidate.photo.AssetID]
+			if !known {
+				found, ok = Photo{ID: candidate.photo.AssetID, Video: candidate.photo.Video}, true
+			}
 			if !ok {
 				continue
 			}
