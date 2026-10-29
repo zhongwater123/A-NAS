@@ -51,28 +51,28 @@ class Failing:
 
 
 class WorkerTest(unittest.TestCase):
-    def start(self, provider, reason=None, idle_seconds=30, detector=None, faces=None, animals=None):
+    def start(self, provider, reason=None, idle_seconds=30, detector=None, faces=None, animals=None, started=0):
         directory = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, directory, True)
         path = os.path.join(directory, "ai.sock")
         listener = worker.listening_socket(path)
         self.addCleanup(listener.close)
         thread = threading.Thread(target=worker.serve,
-                                  args=(listener, provider, reason, idle_seconds, detector, faces, animals),
+                                  args=(listener, provider, reason, idle_seconds, detector, faces, animals, started),
                                   daemon=True)
         thread.start()
         return path, thread
 
     def image(self, content):
-        file = tempfile.TemporaryFile()
+        file = self.enterContext(tempfile.TemporaryFile())
         file.write(content)
         file.seek(0)
-        self.addCleanup(file.close)
         return file
 
     def test_info_and_deterministic_image_vectors(self):
         path, _ = self.start(providers.FakeProvider(dimensions=8))
-        self.assertEqual(call(path, {"op": "info"}), {"ok": True, "model": "fake-sha256-8", "dimensions": 8})
+        self.assertEqual(call(path, {"op": "info"}),
+                         {"ok": True, "model": "fake-sha256-8", "dimensions": 8, "memoryBytes": 0})
 
         first = call(path, {"op": "embed_image"}, self.image(b"thumbnail bytes"))
         again = call(path, {"op": "embed_image"}, self.image(b"thumbnail bytes"))
@@ -149,7 +149,7 @@ class WorkerTest(unittest.TestCase):
                 vectors.append((content, vector))
         # The same fake person comes back in other photos with nearly the same
         # vector, and different people are far apart.
-        similarities = [sum(x * y for x, y in zip(a, b))
+        similarities = [sum(x * y for x, y in zip(a, b, strict=True))
                         for i, (photo_a, a) in enumerate(vectors) for photo_b, b in vectors[i + 1:] if photo_a != photo_b]
         self.assertTrue(any(value > 0.99 for value in similarities))
         self.assertTrue(any(value < 0.5 for value in similarities))
@@ -176,7 +176,7 @@ class WorkerTest(unittest.TestCase):
                 vector = struct.unpack(f"<{fake.dimensions}f", base64.b64decode(encoded))
                 self.assertAlmostEqual(sum(value * value for value in vector), 1.0, places=4)
                 vectors.append(vector)
-        similarities = [sum(x * y for x, y in zip(a, b)) for i, a in enumerate(vectors) for b in vectors[i + 1:]]
+        similarities = [sum(x * y for x, y in zip(a, b, strict=True)) for i, a in enumerate(vectors) for b in vectors[i + 1:]]
         self.assertTrue(any(value > 0.99 for value in similarities))
         self.assertTrue(any(value < 0.5 for value in similarities))
         for bad in (None, [], [[0.1, 0.2, 0.5]], [[0.5, 0.2, 0.1, 0.9]], [[0, 0, 1, 1.5]], [[0, 0, True, 1]],
@@ -284,6 +284,17 @@ class WorkerTest(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertLess(time.monotonic() - started, 10)
 
+    def test_info_tells_what_the_worker_holds_with_every_model_loaded(self):
+        embedder, detector, faces = providers.FakeProvider(dimensions=8), providers.FakeDetector(), providers.FakeFaces()
+        embedder.memory, detector.memory, faces.memory = 128 << 20, 272 << 20, 400 << 20
+        # The animal model could not load, so it takes nothing.
+        path, _ = self.start(embedder, detector=worker.Detector(detector), faces=worker.Detector(faces),
+                             animals=worker.Detector(reason="no animal model"), started=300 << 20)
+        self.assertEqual(call(path, {"op": "info"})["memoryBytes"], (300 + 128 + 272 + 400) << 20)
+
+    def test_the_worker_knows_what_it_holds_once_started(self):
+        self.assertGreater(worker.started_memory(), 0)
+
 
 class ManifestTest(unittest.TestCase):
     def test_only_the_pinned_file_passes(self):
@@ -294,12 +305,21 @@ class ManifestTest(unittest.TestCase):
             file.write(b"weights")
         manifest = os.path.join(directory, "manifest.json")
 
-        def pin(size, digest):
+        def pin(size, digest, memory=1 << 20):
             with open(manifest, "w", encoding="utf-8") as file:
-                json.dump({"name": "test", "sizeBytes": size, "sha256": digest}, file)
+                fields = {"name": "test", "sizeBytes": size, "sha256": digest}
+                if memory is not None:
+                    fields["memoryBytes"] = memory
+                json.dump(fields, file)
 
         pin(7, hashlib.sha256(b"weights").hexdigest())
         self.assertEqual(providers.verify_model(model, manifest)["name"], "test")
+        # The gate weighs the model's memory before loading it, so a manifest
+        # must give it.
+        for memory in (None, -1, True, "1 MiB"):
+            pin(7, hashlib.sha256(b"weights").hexdigest(), memory)
+            with self.assertRaises(providers.Unavailable):
+                providers.verify_model(model, manifest)
         pin(8, hashlib.sha256(b"weights").hexdigest())
         with self.assertRaises(providers.Unavailable):
             providers.verify_model(model, manifest)
@@ -318,7 +338,8 @@ class ManifestTest(unittest.TestCase):
             file.write(b"weights")
         manifest = os.path.join(directory, "manifest.json")
         with open(manifest, "w", encoding="utf-8") as file:
-            json.dump({"name": "test", "sizeBytes": 7, "sha256": hashlib.sha256(b"weights").hexdigest()}, file)
+            json.dump({"name": "test", "sizeBytes": 7, "memoryBytes": 1 << 20,
+                       "sha256": hashlib.sha256(b"weights").hexdigest()}, file)
         with self.assertRaises(providers.Unavailable):
             providers.MediaPipeProvider(model, manifest)
 

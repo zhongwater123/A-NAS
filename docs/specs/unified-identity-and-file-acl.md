@@ -1,7 +1,7 @@
 # 统一身份与文件授权
 
 状态：implemented（ADR 0008，[#11–#16](https://github.com/zhongwater123/A-NAS/issues?q=is%3Aissue+%5BADR+0008%5D)）；实机验收进度见[当前状态](../status/CURRENT.md)
-更新时间：2026-10-14
+更新时间：2026-10-26
 
 ## 目标
 
@@ -89,14 +89,14 @@
 - 数据卷离线时文件代理拒绝所有文件操作，不在系统盘创建替代目录。
 - UID 永不复用；删除账号后其 UID 仍保留。
 - 账号名不能修改：个人空间目录、回收站目录、Samba 个人共享与身份注册表都以账号名为键。删除账号（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）需要同时决定账号名是否也像 UID 一样永不复用。
-- 禁用账号会禁用 Samba 凭据并断开其已建立的 SMB 会话；管理员重置已禁用账号的密码不会重新启用该账号。禁用先在同一事务中改状态、删除全部会话并写审计，再停用 SMB：Host Agent 失败时网页登录已经结束，接口返回 `503 smb_disable_pending`；再次禁用只重试 SMB，产品服务启动时的身份同步也会停用它。
+- 禁用账号会禁用 Samba 凭据并断开其已建立的 SMB 会话，同时停止并屏蔽该账号的助手、API/socket、定时任务与复盘单元；管理员重置已禁用账号的密码不会重新启用该账号。禁用先在同一事务中改状态、删除全部会话并写审计，再停用宿主机服务：Host Agent 未能停用 SMB 或助手时，网页登录已经结束，接口保留 `503 smb_disable_pending` 错误码；再次禁用重试宿主机步骤，产品服务启动时的身份同步也会补做停用。启动同步失败时从 2 秒起加倍间隔重试，最长 15 分钟一次，直到成功或服务停止。
 
 ## 验收证据
 
 - 自动化：在具备 root 的容器或 CI 环境中，对 {Web, SMB, 终端, 应用} × {个人空间, 可写共享, 只读共享} × {读, 写, 改名, 删除进回收站, 恢复} 运行权限矩阵测试，并覆盖 Web/SMB 两种删除顺序。当前覆盖见 [`root_matrix_integration_test.go`](../../internal/hostops/linux/root_matrix_integration_test.go)：真实 Btrfs 与 Samba 下的 SMB、本地进程（终端入口）与经文件代理的 Web（真实的按用户工作进程），并验证产品服务账号无权访问；应用身份见 [`root_apps_integration_test.go`](../../internal/hostops/linux/root_apps_integration_test.go)。
 - 应用的共享空间授权来自 `a-nas-users`（GID 20000），即与成员相同的共享空间 ACL，但这个组写在应用服务自身的 Compose 中：Docker 不把宿主机账号的组成员关系带进容器，`app-<id>` 在宿主机上不属于任何附加组（[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）。只有以应用身份运行（或初始化后降到应用身份）的服务能挂载共享空间，挂载默认只读；保留镜像用户、可能以 root 运行的服务不受 ACL 约束，只能挂载自己的应用数据。应用数据位于数据卷 `apps/<id>`（仅 root 可列出）。挂载的文件夹都是 A-NAS 卷的子路径，Docker 每次启动在卷内解析，应用或成员把其中的文件夹换成链接也无法让容器挂载卷外路径。
 - 安全：产品服务进程直接访问任何空间均失败；伪造或过期的会话令牌无法驱动文件代理；系统账号同名被拒绝。
-- 部署级：[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)在以 systemd 为 PID 1 的 Debian 13 容器中用真实安装器、unit 与二进制，按用户检查 Web、SMB、相册与服务身份，CI 每次推送运行。
+- 部署级：[系统测试](../development/testing.md#系统测试)在以 systemd 为 PID 1 的 Debian 13 容器中用真实安装器、unit 与二进制，按用户检查 Web、SMB、相册与服务身份，CI 每次推送运行。
 - 实机：按[实机配置手册](../runbooks/provision-v1.0.1-experimental-storage.md)收集 `getfacl`、`stat`、Samba 日志与审计证据；进度见[当前状态](../status/CURRENT.md)。
 
 ## 关联
@@ -104,4 +104,5 @@
 - ADR：[0008 统一 Linux 身份与文件系统 ACL](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0007 类型化特权边界](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
 - 规格：[基础存储与共享](basic-storage-and-sharing.md)、[Web 桌面终端](web-terminal.md)
 - 问题：[issue #9](https://github.com/zhongwater123/A-NAS/issues/9)、[成员账户架构审查 #98](https://github.com/zhongwater123/A-NAS/issues/98)
-- 代码：[账号名与密码规则](../../internal/accounts/service.go)、[`rules_test.go`](../../internal/accounts/rules_test.go)、[前端规则](../../web/src/accountRules.ts)、[Host Agent 的 SMB 密码检查](../../internal/hostops/linux/executor.go)
+- 调查：[smbstatus 的告警让禁用与身份同步失败](../investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md)
+- 代码：[账号名与密码规则](../../internal/accounts/service.go)、[`rules_test.go`](../../internal/accounts/rules_test.go)、[前端规则](../../web/src/auth/accountRules.ts)、[Host Agent 的 SMB 密码检查](../../internal/hostops/linux/executor.go)

@@ -6,17 +6,30 @@ const tus = vi.hoisted(() => {
     url: string | null;
     started = 0;
     aborted = 0;
-    constructor(readonly file: File, readonly options: Record<string, any>) {
+    constructor(
+      readonly file: File,
+      readonly options: Record<string, any>,
+    ) {
       this.url = options.uploadUrl ?? null;
       uploads.push(this);
     }
-    start() { this.started += 1; }
-    abort() { this.aborted += 1; return Promise.resolve(); }
-    created(id: string) { this.url = `http://nas/api/v1/uploads/${id}`; this.options.onUploadUrlAvailable(); }
+    start() {
+      this.started += 1;
+    }
+    abort() {
+      this.aborted += 1;
+      return Promise.resolve();
+    }
+    created(id: string) {
+      this.url = `http://nas/api/v1/uploads/${id}`;
+      this.options.onUploadUrlAvailable();
+    }
     fail(method: string, status: number, code = "") {
       const error = Object.assign(new Error(`${method} ${status}`), {
         originalRequest: { getMethod: () => method },
-        originalResponse: status ? { getStatus: () => status, getBody: () => (code ? JSON.stringify({ error: { code, message: code } }) : "") } : null,
+        originalResponse: status
+          ? { getStatus: () => status, getBody: () => (code ? JSON.stringify({ error: { code, message: code } }) : "") }
+          : null,
       });
       this.options.onError(error);
     }
@@ -27,30 +40,41 @@ const tus = vi.hoisted(() => {
 vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 
 const api = vi.hoisted(() => ({ sessionEnded: vi.fn() }));
-vi.mock("../api", async (original) => ({ ...(await original<typeof import("../api")>()), sessionEnded: api.sessionEnded }));
+vi.mock("../api/client", async (original) => ({
+  ...(await original<typeof import("../api/client")>()),
+  sessionEnded: api.sessionEnded,
+}));
 
+import { APIError } from "../api/client";
+import { transfersHandlers } from "../test/handlers/transfers";
+import { server } from "../test/server";
+import type { Transfer } from "./api";
 import { classifyUploadError, TransferStore, type UploadTarget } from "./store";
-import type { Transfer } from "./transfersApi";
 
-const target: UploadTarget = { spaceId: "space:shared", spaceKind: "shared", parentId: "file:photos", folders: [{ id: "file:photos", name: "照片" }] };
-const file = (name: string, size = 10, lastModified = 1_760_000_000_000) => new File(["x".repeat(size)], name, { lastModified });
+const target: UploadTarget = {
+  spaceId: "space:shared",
+  spaceKind: "shared",
+  parentId: "file:photos",
+  folders: [{ id: "file:photos", name: "照片" }],
+};
+const file = (name: string, size = 10, lastModified = 1_760_000_000_000) =>
+  new File(["x".repeat(size)], name, { lastModified });
 
-let server: Transfer[];
+// listed is what the NAS lists for the account; calls are the changes asked of it.
+let listed: Transfer[];
 let calls: Array<{ path: string; method: string }>;
 let store: TransferStore;
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  // The clock stands still unless a test moves it, so speeds come out exact.
+  // MSW's interceptors answer on setImmediate, which stays real.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
   tus.uploads.length = 0;
-  server = [];
-  calls = [];
+  listed = [];
   api.sessionEnded.mockReset();
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
-    calls.push({ path, method: init?.method ?? "GET" });
-    const body = path === "/api/v1/transfers" ? { items: server } : { id: path.split("/")[4], state: path.endsWith("/cancel") ? "canceled" : "paused" };
-    return { ok: true, status: 200, json: async () => body } as Response;
-  }));
+  const transfers = transfersHandlers(() => listed);
+  calls = transfers.sent;
+  server.use(...transfers.handlers);
   store = new TransferStore();
   store.attach("user:alice");
 });
@@ -58,7 +82,6 @@ beforeEach(() => {
 afterEach(() => {
   store.reset();
   vi.useRealTimers();
-  vi.unstubAllGlobals();
 });
 
 const phases = () => store.getSnapshot().uploads.map((upload) => upload.phase);
@@ -67,11 +90,20 @@ describe("the upload queue", () => {
   it("sends three files at a time and continues when one finishes", async () => {
     const uploaded = vi.fn();
     store.onUploaded(uploaded);
-    store.enqueue(["a.jpg", "b.jpg", "c.jpg", "d.jpg"].map((name) => ({ file: file(name) })), target);
+    store.enqueue(
+      ["a.jpg", "b.jpg", "c.jpg", "d.jpg"].map((name) => ({ file: file(name) })),
+      target,
+    );
     expect(tus.uploads).toHaveLength(3);
     expect(phases()).toEqual(["running", "running", "running", "queued"]);
     expect(tus.uploads[0].options.endpoint).toBe("/api/v1/uploads");
-    expect(tus.uploads[0].options.metadata).toMatchObject({ filename: "a.jpg", spaceId: "space:shared", parentId: "file:photos", conflict: "ask", relativePath: "" });
+    expect(tus.uploads[0].options.metadata).toMatchObject({
+      filename: "a.jpg",
+      spaceId: "space:shared",
+      parentId: "file:photos",
+      conflict: "ask",
+      relativePath: "",
+    });
 
     tus.uploads[0].created("upload-a");
     tus.uploads[0].options.onProgress(5, 10);
@@ -114,7 +146,10 @@ describe("the upload queue", () => {
   });
 
   it("holds the queue while the volume is full until the user continues", () => {
-    store.enqueue([{ file: file("a.jpg") }, { file: file("b.jpg") }, { file: file("c.jpg") }, { file: file("d.jpg") }], target);
+    store.enqueue(
+      [{ file: file("a.jpg") }, { file: file("b.jpg") }, { file: file("c.jpg") }, { file: file("d.jpg") }],
+      target,
+    );
     // A file too large to fit fails alone before sending anything.
     tus.uploads[0].fail("POST", 507, "insufficient_storage");
     expect(phases()).toEqual(["failed", "running", "running", "running"]);
@@ -145,16 +180,24 @@ describe("the upload queue", () => {
     store.enqueue([{ file: file("a.jpg") }], target);
     tus.uploads[0].created("upload-a");
     tus.uploads[0].fail("PATCH", 404, "ERR_UPLOAD_NOT_FOUND");
-    expect(store.getSnapshot().uploads[0]).toMatchObject({ phase: "running", restarted: true, transferred: 0, superseded: ["upload-a"] });
+    expect(store.getSnapshot().uploads[0]).toMatchObject({
+      phase: "running",
+      restarted: true,
+      transferred: 0,
+      superseded: ["upload-a"],
+    });
     expect(tus.uploads[1].options.endpoint).toBe("/api/v1/uploads");
-    await vi.advanceTimersByTimeAsync(0);
     // The NAS's record of the lost upload goes; the restarted one replaces it.
-    expect(calls).toContainEqual({ path: "/api/v1/transfers/upload-a", method: "DELETE" });
+    // (A request reaches MSW's handlers a few turns of the event loop later.)
+    await vi.waitFor(() => expect(calls).toContainEqual({ path: "/api/v1/transfers/upload-a", method: "DELETE" }));
     tus.uploads[1].created("upload-a2");
     tus.uploads[1].fail("HEAD", 404);
     expect(store.getSnapshot().uploads[0]).toMatchObject({ phase: "failed", error: { code: "upload_lost" } });
 
-    store.enqueue(["b", "c", "d", "e"].map((name) => ({ file: file(name) })), target);
+    store.enqueue(
+      ["b", "c", "d", "e"].map((name) => ({ file: file(name) })),
+      target,
+    );
     // The folder went away while b was being sent.
     tus.uploads[2].fail("PATCH", 404, "not_found");
     expect(phases().slice(1)).toEqual(["failed", "running", "running", "failed"]);
@@ -166,22 +209,32 @@ describe("the upload queue", () => {
     store.pause(store.getSnapshot().uploads[0].key);
     expect(tus.uploads[0].aborted).toBe(1);
     expect(phases()).toEqual(["paused"]);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(calls).toContainEqual({ path: "/api/v1/transfers/upload-a/pause", method: "POST" });
+    await vi.waitFor(() => expect(calls).toContainEqual({ path: "/api/v1/transfers/upload-a/pause", method: "POST" }));
     store.resume(store.getSnapshot().uploads[0].key);
     expect(tus.uploads[1].options.uploadUrl).toBe("/api/v1/uploads/upload-a");
     store.cancel(store.getSnapshot().uploads[0].key);
     await vi.advanceTimersByTimeAsync(0);
     expect(phases()).toEqual(["canceled"]);
-    expect(calls).toContainEqual({ path: "/api/v1/transfers/upload-a/cancel", method: "POST" });
+    await vi.waitFor(() => expect(calls).toContainEqual({ path: "/api/v1/transfers/upload-a/cancel", method: "POST" }));
   });
 
   it("matches files picked again to uploads a closed page left behind", async () => {
     const left = (id: string, name: string, size: number, lastModified: number): Transfer => ({
-      id, direction: "upload", kind: "file", name, location: { spaceId: "space:shared", spaceKind: "shared", folders: [{ id: "file:photos", name: "照片" }] },
-      totalBytes: size, transferredBytes: 4, bytesPerSecond: 0, state: "interrupted", batch: "b-old", lastModified, createdAt: "2026-10-12T08:00:00Z", updatedAt: "2026-10-12T08:00:00Z",
+      id,
+      direction: "upload",
+      kind: "file",
+      name,
+      location: { spaceId: "space:shared", spaceKind: "shared", folders: [{ id: "file:photos", name: "照片" }] },
+      totalBytes: size,
+      transferredBytes: 4,
+      bytesPerSecond: 0,
+      state: "interrupted",
+      batch: "b-old",
+      lastModified,
+      createdAt: "2026-10-12T08:00:00Z",
+      updatedAt: "2026-10-12T08:00:00Z",
     });
-    server = [left("upload-x", "x.mov", 10, 1), left("upload-y", "y.mov", 10, 2)];
+    listed = [left("upload-x", "x.mov", 10, 1), left("upload-y", "y.mov", 10, 2)];
     await store.refresh();
     const result = store.reattach([file("x.mov", 10, 1), file("y.mov", 10, 99), file("z.mov", 10, 1)]);
     expect(result).toEqual({ matched: 1, unmatched: 2 });
@@ -190,7 +243,10 @@ describe("the upload queue", () => {
   });
 
   it("shows the upload speed of a batch of files too short to have their own", async () => {
-    store.enqueue(Array.from({ length: 9 }, (_, index) => ({ file: file(`photo-${index}.jpg`, 4_000_000) })), target);
+    store.enqueue(
+      Array.from({ length: 9 }, (_, index) => ({ file: file(`photo-${index}.jpg`, 4_000_000) })),
+      target,
+    );
     for (let index = 0; index < 9; index += 1) {
       await vi.advanceTimersByTimeAsync(100);
       const upload = tus.uploads[index];
@@ -226,17 +282,26 @@ describe("the upload queue", () => {
 
   it("measures downloads by what the NAS sent between polls", async () => {
     const download = (sent: number, state: Transfer["state"]): Transfer => ({
-      id: "download-1", direction: "download", kind: "file", name: "film.mkv", location: target, totalBytes: 100_000_000, transferredBytes: sent,
-      bytesPerSecond: 0, state, createdAt: "2026-10-13T08:00:00Z", updatedAt: "2026-10-13T08:00:00Z",
+      id: "download-1",
+      direction: "download",
+      kind: "file",
+      name: "film.mkv",
+      location: { spaceId: target.spaceId, spaceKind: target.spaceKind, folders: target.folders },
+      totalBytes: 100_000_000,
+      transferredBytes: sent,
+      bytesPerSecond: 0,
+      state,
+      createdAt: "2026-10-13T08:00:00Z",
+      updatedAt: "2026-10-13T08:00:00Z",
     });
-    server = [download(0, "pending")];
+    listed = [download(0, "pending")];
     await store.refresh();
-    server = [download(30_000_000, "running")];
+    listed = [download(30_000_000, "running")];
     await vi.advanceTimersByTimeAsync(1500);
     await store.refresh();
     expect(store.getSnapshot().rates.download).toBe(20_000_000);
     // A download finishing between two polls still counts.
-    server = [download(100_000_000, "completed")];
+    listed = [download(100_000_000, "completed")];
     await vi.advanceTimersByTimeAsync(1500);
     await store.refresh();
     expect(store.getSnapshot().rates.download).toBeGreaterThan(30_000_000);
@@ -270,17 +335,41 @@ describe("the upload queue", () => {
 });
 
 describe("classifyUploadError", () => {
-  const failure = (method: string, status: number, body = "") => Object.assign(new Error("failed"), {
-    originalRequest: { getMethod: () => method },
-    originalResponse: { getStatus: () => status, getBody: () => body },
-  });
+  const failure = (method: string, status: number, body = "") =>
+    Object.assign(new Error("failed"), {
+      originalRequest: { getMethod: () => method },
+      originalResponse: { getStatus: () => status, getBody: () => body },
+    });
   it("tells what the queue should do", () => {
+    expect(classifyUploadError(new Error("NotReadableError"))).toBeInstanceOf(APIError);
     expect(classifyUploadError(new Error("NotReadableError")).kind).toBe("file");
     expect(classifyUploadError(failure("PATCH", 409, "ERR_MISMATCHED_OFFSET: mismatched offset")).kind).toBe("server");
-    expect(classifyUploadError(failure("POST", 409, JSON.stringify({ error: { code: "folder_blocked" } }))).kind).toBe("invalid");
+    expect(classifyUploadError(failure("POST", 409, JSON.stringify({ error: { code: "folder_blocked" } }))).kind).toBe(
+      "invalid",
+    );
     expect(classifyUploadError(failure("PATCH", 423, "ERR_UPLOAD_LOCKED")).kind).toBe("busy");
-    expect(classifyUploadError(failure("POST", 423, JSON.stringify({ error: { code: "volume_unavailable" } }))).kind).toBe("volume");
-    expect(classifyUploadError(failure("POST", 403, JSON.stringify({ error: { code: "forbidden" } }))).kind).toBe("denied");
-    expect(classifyUploadError(failure("PATCH", 410, JSON.stringify({ error: { code: "canceled" } }))).kind).toBe("canceled");
+    expect(
+      classifyUploadError(failure("POST", 423, JSON.stringify({ error: { code: "volume_unavailable" } }))).kind,
+    ).toBe("volume");
+    expect(classifyUploadError(failure("POST", 403, JSON.stringify({ error: { code: "forbidden" } }))).kind).toBe(
+      "denied",
+    );
+    expect(classifyUploadError(failure("PATCH", 410, JSON.stringify({ error: { code: "canceled" } }))).kind).toBe(
+      "canceled",
+    );
+  });
+  it("never retries an upload the member did not allow VNAS to start", () => {
+    // tus-js-client wraps what onBeforeRequest threw, without a response.
+    const refused = Object.assign(new Error("tus: failed to create upload"), {
+      originalRequest: { getMethod: () => "POST" },
+      originalResponse: null,
+      causingError: new APIError(403, "not_allowed_for_vnas", "没有允许 VNAS 这一步，什么都没有改"),
+    });
+    expect(classifyUploadError(refused)).toMatchObject({
+      status: 403,
+      kind: "denied",
+      code: "not_allowed_for_vnas",
+      message: "没有允许 VNAS 这一步，什么都没有改",
+    });
   });
 });

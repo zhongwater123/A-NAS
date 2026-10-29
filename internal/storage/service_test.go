@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -22,9 +23,9 @@ func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 		NewID: func() string { return "plan-01" },
 	})
 
-	plan, err := service.PlanCreateVolume(context.Background(), "disk:fake-data-01")
+	plan, err := service.PlanVolume(context.Background(), storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
-		t.Fatalf("PlanCreateVolume() error = %v", err)
+		t.Fatalf("PlanVolume() error = %v", err)
 	}
 	if got, want := plan.State, storage.PlanStatePlanned; got != want {
 		t.Fatalf("plan state = %q, want %q", got, want)
@@ -39,7 +40,7 @@ func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 		t.Fatal("plan has no explicit actions")
 	}
 
-	confirmed, err := service.ConfirmPlan(context.Background(), plan.ID, plan.ConfirmationPhrase)
+	confirmed, err := service.ConfirmPlan(context.Background(), storageAdministrator, plan.ID, plan.ConfirmationPhrase)
 	if err != nil {
 		t.Fatalf("ConfirmPlan() error = %v", err)
 	}
@@ -47,7 +48,7 @@ func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 		t.Fatalf("confirmed state = %q, want %q", got, want)
 	}
 
-	completed, err := service.ExecutePlan(context.Background(), plan.ID)
+	completed, err := service.ExecutePlan(context.Background(), storageAdministrator, plan.ID)
 	if err != nil {
 		t.Fatalf("ExecutePlan() error = %v", err)
 	}
@@ -57,8 +58,9 @@ func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 	if got, want := executor.executedDiskID, "disk:fake-data-01"; got != want {
 		t.Fatalf("executed disk = %q, want %q", got, want)
 	}
-	if _, err := service.PlanCreateVolume(context.Background(), "disk:fake-data-01"); err != storage.ErrVolumeExists {
-		t.Fatalf("second volume plan error = %v, want ErrVolumeExists", err)
+	// The fake host never mounts the volume, so nothing can join it.
+	if _, err := service.PlanVolume(context.Background(), storageAdministrator, []string{"disk:fake-data-01"}, storage.LayoutMirror); !errors.Is(err, storage.ErrVolumeUnavailable) {
+		t.Fatalf("plan for an offline volume error = %v, want ErrVolumeUnavailable", err)
 	}
 }
 
@@ -68,11 +70,11 @@ func TestPlanForBlankDiskSerializesEmptySignaturesArray(t *testing.T) {
 		NewID: func() string { return "plan-blank-disk" },
 	})
 
-	plan, err := service.PlanCreateVolume(context.Background(), "disk:fake-data-01")
+	plan, err := service.PlanVolume(context.Background(), storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
-		t.Fatalf("PlanCreateVolume() error = %v", err)
+		t.Fatalf("PlanVolume() error = %v", err)
 	}
-	if plan.Signatures == nil {
+	if plan.Disks[0].Signatures == nil {
 		t.Fatal("blank-disk signatures = nil, want an empty array")
 	}
 	payload, err := json.Marshal(plan)
@@ -98,11 +100,11 @@ func TestExecutionPlanSurvivesServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := service.PlanCreateVolume(ctx, "disk:fake-data-01")
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -119,7 +121,7 @@ func TestExecutionPlanSurvivesServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, err := restarted.ExecutePlan(ctx, plan.ID)
+	completed, err := restarted.ExecutePlan(ctx, storageAdministrator, plan.ID)
 	if err != nil {
 		t.Fatalf("ExecutePlan() after restart error = %v", err)
 	}
@@ -133,7 +135,7 @@ func TestExecutionPlanSurvivesServiceRestart(t *testing.T) {
 	if len(volumes) != 1 || volumes[0].ID != "volume:data" {
 		t.Fatalf("volumes = %#v", volumes)
 	}
-	audit, err := restarted.ListAudit(ctx)
+	audit, err := restarted.Activity(ctx, activity.Query{Limit: activity.MaxLimit})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,14 +158,14 @@ func TestListVolumesRefreshesFilesystemUsageFromHostState(t *testing.T) {
 	}
 	reader := &stateReader{state: state}
 	service := storage.NewService(reader, &recordingExecutor{}, storage.Options{NewID: func() string { return "plan-usage" }})
-	plan, err := service.PlanCreateVolume(ctx, "disk:fake-data-01")
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ExecutePlan(ctx, plan.ID); err != nil {
+	if _, err := service.ExecutePlan(ctx, storageAdministrator, plan.ID); err != nil {
 		t.Fatal(err)
 	}
 	total, available := uint64(500_107_862_016), uint64(482_000_000_000)
@@ -197,14 +199,14 @@ func TestDataVolumeFilesystemUUIDNeedsNoHostRead(t *testing.T) {
 	if got := service.DataVolumeFilesystemUUID(); got != "" {
 		t.Fatalf("UUID before any volume = %q, want empty", got)
 	}
-	plan, err := service.PlanCreateVolume(ctx, "disk:fake-data-01")
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ExecutePlan(ctx, plan.ID); err != nil {
+	if _, err := service.ExecutePlan(ctx, storageAdministrator, plan.ID); err != nil {
 		t.Fatal(err)
 	}
 	reader.reads = 0
@@ -220,12 +222,35 @@ func TestDataVolumeFilesystemUUIDNeedsNoHostRead(t *testing.T) {
 
 type recordingExecutor struct {
 	executedDiskID string
+	created        storage.CreateVolumeRequest
+	added          []storage.AddDisksRequest
+	continued      int
 }
 
 type stateReader struct {
 	state   hoststate.State
 	reads   int
 	failing bool
+}
+
+func TestUnusableDiskObservationsCannotBePlanned(t *testing.T) {
+	reader := fake.NewWithUnusableDisks()
+	state, err := reader.Read(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := storage.NewService(reader, &recordingExecutor{}, storage.Options{})
+	for _, disk := range state.Disks {
+		if len(disk.ObservationIssues) == 0 {
+			continue
+		}
+		if _, err := service.PlanVolume(t.Context(), storageAdministrator, []string{disk.ID.String()}, ""); !errors.Is(err, storage.ErrDiskNotEligible) {
+			t.Fatalf("plan for %s = %v, want ErrDiskNotEligible", disk.ID, err)
+		}
+	}
+	if _, err := service.PlanVolume(t.Context(), storageAdministrator, []string{"disk:fake-data-01"}, ""); err != nil {
+		t.Fatalf("unusable devices blocked healthy disk plan: %v", err)
+	}
 }
 
 func (r *stateReader) Read(ctx context.Context) (hoststate.State, error) {
@@ -239,7 +264,27 @@ func (r *stateReader) Read(ctx context.Context) (hoststate.State, error) {
 	return r.state, nil
 }
 
-func (e *recordingExecutor) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
-	e.executedDiskID = request.DiskID
-	return storage.Volume{ID: "volume:data", DiskID: request.DiskID, FilesystemUUID: "0f6e1c2a-data", State: storage.VolumeStateAvailable}, nil
+// recordingExecutor finishes every operation at once.
+func (e *recordingExecutor) StartCreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.VolumeOperation, error) {
+	e.executedDiskID = request.Disks[0].DiskID
+	e.created = request
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		ID: "volume:data", DiskIDs: []string{request.Disks[0].DiskID}, FilesystemUUID: "0f6e1c2a-data", State: storage.VolumeStateAvailable,
+	}}, nil
+}
+
+func (e *recordingExecutor) StartAddDisks(_ context.Context, request storage.AddDisksRequest) (storage.VolumeOperation, error) {
+	e.added = append(e.added, request)
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		FilesystemUUID: request.FilesystemUUID, State: storage.VolumeStateAvailable,
+	}}, nil
+}
+
+func (e *recordingExecutor) VolumeOperation(context.Context, string) (storage.VolumeOperation, error) {
+	return storage.VolumeOperation{}, storage.ErrOperationNotFound
+}
+
+func (e *recordingExecutor) ContinueConversion(context.Context) error {
+	e.continued++
+	return nil
 }

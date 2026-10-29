@@ -8,11 +8,14 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 // ActivityPath lists the caller's own photo library events for the activity
-// log, which the Product Service merges with its own audit trails.
-const ActivityPath = PathPrefix + "/activity"
+// log, which the Product Service merges with its own audit trails. It lies
+// outside PathPrefix, which is all the Product Service forwards from
+// browsers: they read the merged log (#273).
+const ActivityPath = "/internal/photos/activity"
 
 type activityEvent struct {
 	ID           string    `json:"id"`
@@ -31,7 +34,7 @@ func (h *handler) activity(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
 	q, err := activity.ParseQuery(r.URL.Query())
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid_query", "activity filters are invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_query", "activity filters are invalid")
 		return
 	}
 	events, err := h.service.Activity(r.Context(), principal, q)
@@ -46,7 +49,7 @@ func (h *handler) activity(w http.ResponseWriter, r *http.Request) {
 			ResourceID: event.ResourceID, OccurredAt: event.OccurredAt, Detail: event.Detail, Cursor: event.Key.String(),
 		})
 	}
-	writeJSON(w, http.StatusOK, itemsResponse[activityEvent]{Items: items})
+	httpjson.Write(w, http.StatusOK, itemsResponse[activityEvent]{Items: items})
 }
 
 // DecodeActivity reads an ActivityPath response.

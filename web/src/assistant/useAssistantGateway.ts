@@ -4,7 +4,7 @@
 // `hermes serve` and closes the connection when the member's session ends.
 import { useEffect, useMemo, useState } from "react";
 
-import { assistantStatus, failureText, gatewayUrl } from "./assistantApi";
+import { assistantStatus, failureText, gatewayUrl } from "./api";
 import { JsonRpcGatewayClient } from "./hermes/shared/json-rpc-gateway";
 import { isStableOpen, reconnectBackoffDelayMs } from "./hermes/shared/reconnect-backoff";
 
@@ -33,14 +33,21 @@ export function useAssistantGateway(): AssistantGateway {
       // A socket that dropped right after opening counts as a failed attempt.
       if (isStableOpen(openedAt)) attempt = 0;
       openedAt = null;
-      timer = window.setTimeout(() => { timer = undefined; void dial(); }, reconnectBackoffDelayMs(attempt++));
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        void dial();
+      }, reconnectBackoffDelayMs(attempt++));
     };
     const explain = () => {
       // The socket says nothing about why it closed; the status route does, and a
       // session that ended is handled there like everywhere else on the desktop.
       assistantStatus()
-        .then((status) => { if (!stopped) setProblem(status.available ? "" : "你的账号还没有 VNAS"); })
-        .catch((reason) => { if (!stopped) setProblem(failureText(reason)); });
+        .then((status) => {
+          if (!stopped) setProblem(status.available ? "" : "你的账号还没有 VNAS");
+        })
+        .catch((reason) => {
+          if (!stopped) setProblem(failureText(reason));
+        });
     };
     const dial = async () => {
       if (stopped) return;

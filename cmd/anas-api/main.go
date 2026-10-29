@@ -13,9 +13,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/aiworker"
@@ -25,13 +26,14 @@ import (
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
-	"github.com/zhongwater123/A-NAS/internal/assistantchanges"
 	"github.com/zhongwater123/A-NAS/internal/containers"
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
+	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/feedback"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/filebroker"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -39,12 +41,12 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/httpidle"
 	"github.com/zhongwater123/A-NAS/internal/media"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/music"
+	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/photos"
-	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 	"github.com/zhongwater123/A-NAS/internal/storage"
@@ -52,6 +54,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/terminal"
 	"github.com/zhongwater123/A-NAS/internal/transfers"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
+	"github.com/zhongwater123/A-NAS/internal/vectorindex"
 	"github.com/zhongwater123/A-NAS/internal/webui"
 )
 
@@ -61,15 +64,17 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	// The photo service runs from the same binary as its own process and
 	// identity (ADR 0011), so releases keep two hashed binaries.
-	// systemd starts a media worker per connection, with the connection as
+	// systemd starts a FFmpeg worker per connection, with the connection as
 	// standard input (ADR 0017).
-	if len(os.Args) == 2 && os.Args[1] == mediaWorkerCommand {
-		if err := runMediaWorker(); err != nil {
-			logger.Error("A-NAS media worker failed", "error", err)
+	if len(os.Args) == 2 && os.Args[1] == ffmpegWorkerCommand {
+		if err := runFFmpegWorker(); err != nil {
+			logger.Error("A-NAS FFmpeg worker failed", "error", err)
 			os.Exit(1)
 		}
 		return
 	}
+	// Code without a logger of its own, such as decode guards, logs here too.
+	slog.SetDefault(logger)
 	if len(os.Args) == 2 && os.Args[1] == "share-service" {
 		if err := runShareService(logger); err != nil {
 			logger.Error("A-NAS share service stopped", "error", err)
@@ -92,67 +97,68 @@ func main() {
 
 const (
 	photoServiceCommand = "photo-service"
-	mediaWorkerCommand  = "media-worker"
+	ffmpegWorkerCommand = "ffmpeg-worker"
 )
 
-func runMediaWorker() error {
+func runFFmpegWorker() error {
 	if os.Geteuid() == 0 {
-		return errors.New("the media worker must run under its own dynamic identity, never root")
+		return errors.New("the FFmpeg worker must run under its own dynamic identity, never root")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return mediaworker.ServeStandardInput(ctx, mediaworker.Tools{FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe", HEIFThumbnailer: "/usr/bin/heif-thumbnailer"})
+	return ffmpegworker.ServeStandardInput(ctx, ffmpegworker.Tools{FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe", HEIFThumbnailer: "/usr/bin/heif-thumbnailer"})
 }
 
 func runPhotoService(logger *slog.Logger) error {
 	if os.Geteuid() == 0 {
 		return errors.New("the photo service must run as its own identity, never root")
 	}
-	// The system test shortens how long the library must go unused before AI
-	// work starts, so that it sees a photo organised; products keep the default.
-	var quiet time.Duration
-	if value := strings.TrimSpace(os.Getenv("ANAS_PHOTOS_AI_QUIET_PERIOD")); value != "" {
-		parsed, err := time.ParseDuration(value)
-		if err != nil || parsed <= 0 {
-			return errors.New("ANAS_PHOTOS_AI_QUIET_PERIOD must be a positive duration such as 5s")
-		}
-		quiet = parsed
+	config, err := loadPhotoServiceConfig(envconfig.Environment())
+	if err != nil {
+		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	lookup := sessionlookup.NewClient(environment("ANAS_PHOTO_SESSION_SOCKET", "/run/a-nas-sessions/photos.sock"))
+	lookup := sessionlookup.NewClient(config.SessionSocket)
+	var vectors photos.VectorIndex
+	if config.VectorSocket != "" {
+		client := vectorindex.New(config.VectorSocket, logger)
+		defer func() { _ = client.Close() }()
+		vectors = client
+	}
 	return photoservice.Run(ctx, photoservice.Config{
-		Root:       environment("ANAS_PHOTOS_ROOT", "/srv/a-nas/data/photos"),
-		SocketPath: environment("ANAS_PHOTOS_SOCKET", "/run/a-nas-photos/photos.sock"),
-		Sessions:   lookup,
-		// The AI assistant is not shipped yet (ADR 0024), so its socket is off
-		// unless named. A socket unit may hold it (FileDescriptorName=assistant)
-		// so that it outlives restarts of this service.
-		AssistantSocketPath: os.Getenv("ANAS_PHOTOS_ASSISTANT_SOCKET"),
+		Root:                config.Root,
+		SocketPath:          config.Socket,
+		Sessions:            lookup,
+		AssistantSocketPath: config.AssistantSocket,
 		Accounts:            lookup,
 		Logger:              logger,
-		// Without the AI component the socket is absent and photos wait for it.
-		AI:            aiworker.Client{SocketPath: environment("ANAS_AI_SOCKET", "/run/a-nas-ai/ai.sock")},
-		AIQuietPeriod: quiet,
-		Photos:        photos.Options{Media: mediaworker.Client{Socket: environment("ANAS_MEDIA_SOCKET", "/run/a-nas-media/media.sock")}},
+		AI:                  aiworker.Client{SocketPath: config.AISocket},
+		AIQuietPeriod:       config.Quiet,
+		Photos:              photos.Options{Media: config.Media.client()},
+		Vectors:             vectors,
 	})
 }
 
 func run(logger *slog.Logger) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	address := environment("ANAS_HTTP_ADDR", "127.0.0.1:8080")
-	stateDirectory, err := stateDirectory()
+	config, err := loadConfig(envconfig.Environment())
 	if err != nil {
 		return err
 	}
+	live, stateDirectory, volumeRoot := config.Live(), config.StateDir, config.DataMount
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// Background work stops as soon as the process is told to stop, while
+	// open requests drain, so that both fit in the unit's TimeoutStopSec; or
+	// when the server fails. run waits for it before returning, and so before
+	// the deferred closes of the stores it writes to.
+	background, stopBackground := context.WithCancel(ctx)
+	defer stopBackground()
+	var tasks errgroup.Group
 	if err := os.MkdirAll(stateDirectory, 0o700); err != nil {
 		return err
 	}
-	reader, dataSource, operations, live, err := configuredServices()
-	if err != nil {
-		return err
-	}
+	reader, dataSource, operations := configuredServices(config)
 	// Development shows invented service logs; the Host Agent reads the
 	// journal (ADR 0020).
 	var systemLogs systemlog.Reader = systemlog.NewFake(nil)
@@ -163,64 +169,54 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer accountStore.Close()
+	defer closeAtExit(logger, "control.db", accountStore)
 	fileStore, err := files.OpenSQLite(filepath.Join(stateDirectory, "files.db"))
 	if err != nil {
 		return err
 	}
-	defer fileStore.Close()
+	defer closeAtExit(logger, "files.db", fileStore)
 	storageStore, err := storage.OpenSQLite(filepath.Join(stateDirectory, "storage.db"))
 	if err != nil {
 		return err
 	}
-	defer storageStore.Close()
+	defer closeAtExit(logger, "storage.db", storageStore)
 	accountService := accounts.NewService(accountStore, operations, accounts.Options{})
 	storageService, err := storage.OpenService(reader, operations, storage.Options{Store: storageStore})
 	if err != nil {
 		return err
 	}
-	volumeRoot := strings.TrimSpace(os.Getenv("ANAS_DATA_MOUNT"))
-	if volumeRoot == "" {
-		if live {
-			volumeRoot = "/srv/a-nas/data"
-		} else {
-			volumeRoot = filepath.Join(stateDirectory, "development-volume")
-		}
-	}
-	fileOptions := files.Options{AllowUnverifiedVolume: !live}
-	terminalConfig := terminal.Config{}
+	defer storageService.Close()
+	terminalConfig := terminal.Config{Enabled: config.TerminalEnabled}
 	var broker *filebroker.Client
+	var fileService *files.Service
+	var volumeGuard files.VolumeGuard
 	if live {
 		// The guard runs before every file request, so the expected UUID
 		// comes from the stored volume, not from a Host Agent disk read; the
 		// guard itself proves the mounted volume carries it.
-		fileOptions.VolumeGuard = sandboxedVolumeGuard{files.BtrfsVolumeGuard{ExpectedFilesystemUUID: func(context.Context) (string, error) {
+		volumeGuard = sandboxedVolumeGuard{files.BtrfsVolumeGuard{ExpectedFilesystemUUID: func(context.Context) (string, error) {
 			return storageService.DataVolumeFilesystemUUID(), nil
 		}}}
-		fileOptions.SnapshotBackend = operations
-		brokerSocket, err := fileBrokerSocket()
-		if err != nil {
-			return err
-		}
-		broker = filebroker.NewClient(brokerSocket)
-		fileOptions.FileSystem = broker
+		broker = filebroker.NewClient(config.FileBrokerSocket)
+		fileService = files.NewService(fileStore, volumeRoot, accountService, broker, files.Options{
+			VolumeGuard: volumeGuard, SnapshotBackend: operations,
+		})
 		// Terminal shells run as the signed-in administrator, not as a-nas.
 		terminalConfig.Spawner = broker
-	} else if err := os.MkdirAll(volumeRoot, 0o700); err != nil {
-		return err
+	} else {
+		if err := os.MkdirAll(volumeRoot, 0o700); err != nil {
+			return err
+		}
+		fileService = files.NewLocalService(fileStore, volumeRoot, accountService, files.Options{AllowUnverifiedVolume: true})
 	}
-	fileService := files.NewService(fileStore, volumeRoot, accountService, fileOptions)
 	// The media center and the music library share one FFmpeg boundary and
 	// adapt its operations to their own needs (ADR 0017, ADR 0018).
-	mediaWorker, err := configuredMediaWorker(live)
-	if err != nil {
-		return err
-	}
+	mediaWorker := configuredFFmpegWorker(config)
 	musicStore, err := music.OpenSQLite(filepath.Join(stateDirectory, "music.db"))
 	if err != nil {
 		return err
 	}
-	defer musicStore.Close()
+	defer closeAtExit(logger, "music.db", musicStore)
 	// Runs before the deferred musicStore.Close, after the server stopped.
 	musicService := music.New(musicStore, filepath.Join(stateDirectory, "music-covers"), fileService, accountService, music.Options{Logger: logger, Worker: mediaWorker})
 	defer musicService.Close()
@@ -230,21 +226,32 @@ func run(logger *slog.Logger) error {
 	// Development opens the library in this process.
 	var photoService *photos.Service
 	var photoAI photos.Embedder
-	var photoAPI http.Handler = photosapi.NewProxy(environment("ANAS_PHOTOS_SOCKET", "/run/a-nas-photos/photos.sock"), logger)
+	var photoGate *photoservice.Gate
+	photoAPI := photoservice.Proxy(config.PhotosSocket, logger)
 	if !live {
-		photoAI = developmentAI()
+		// Development reaches an AI Worker only when ANAS_AI_SOCKET names
+		// one, so development without the AI component keeps local AI off.
+		if config.DevelopmentAISocket != "" {
+			photoAI = aiworker.Client{SocketPath: config.DevelopmentAISocket}
+		}
 		photoService, err = photos.Open(filepath.Join(volumeRoot, "photos"), photos.Options{AI: photoAI, Media: mediaWorker})
 		if err != nil {
 			return err
 		}
-		defer photoService.Close()
-		photoAPI = photosapi.New(photoService, logger)
+		defer closeAtExit(logger, "photo library", photoService)
+		// Requests find their caller, and keep AI work waiting, as in the
+		// photo service, with this process's account store for the Host
+		// Agent's session directory.
+		sessions := accounts.NewSessionDirectory(filepath.Join(stateDirectory, "control.db"))
+		defer closeAtExit(logger, "session directory", sessions)
+		photoGate = photoservice.NewGate(photoservice.QuietPeriod, logger)
+		photoAPI = photoservice.Local(photoService, sessions, photoGate, logger)
 	}
 	mediaStore, err := media.OpenSQLite(filepath.Join(stateDirectory, "media.db"))
 	if err != nil {
 		return err
 	}
-	defer mediaStore.Close()
+	defer closeAtExit(logger, "media.db", mediaStore)
 	var processor media.Processor
 	if mediaWorker != nil {
 		processor = media.WorkerProcessor{Worker: mediaWorker}
@@ -266,49 +273,49 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer feedbackStore.Close()
+	defer closeAtExit(logger, "feedback.db", feedbackStore)
+	personalizationStore, err := personalization.Open(filepath.Join(stateDirectory, "personalization.db"))
+	if err != nil {
+		return err
+	}
+	defer closeAtExit(logger, "personalization.db", personalizationStore)
 	transferService, err := transfers.Open(filepath.Join(stateDirectory, "transfers.db"), fileService, accountService, transfers.Options{
 		Sessions: accountService.RememberedSessions, FilesChanged: mediaService.SpaceChanged, Logger: logger,
 	})
 	if err != nil {
 		return err
 	}
-	defer transferService.Close()
+	defer closeAtExit(logger, "transfers.db", transferService)
 	transferAPI, err := transfersapi.New(transferService, logger)
 	if err != nil {
 		return err
 	}
-	terminalEnabled, err := configuredTerminal()
-	if err != nil {
-		return err
-	}
-	terminalConfig.Enabled = terminalEnabled
 	terminals := terminal.New(terminalConfig, logger)
 
-	containerManager, appStore, containerSource, err := configuredContainers(dataSource)
+	containerManager, appStore, containerSource, err := configuredContainers(config)
 	if err != nil {
 		return err
 	}
 
-	appOptions := appstoreapi.Options{Host: appstoreapi.DevelopmentHost{}, Logger: logger}
+	appOptions := appstoreapi.Options{Host: fakeappstore.Host{}, Logger: logger}
 	if live {
 		host, ok := operations.(appid.Host)
 		if !ok {
 			return errors.New("host agent client cannot prepare apps")
 		}
 		appOptions.Host = host
-		guard := fileOptions.VolumeGuard
-		appOptions.VolumeReady = func(ctx context.Context) error { return guard.Check(ctx, volumeRoot, false) }
+		appOptions.VolumeReady = func(ctx context.Context) error { return volumeGuard.Check(ctx, volumeRoot, false) }
 	}
 
-	shareAPI, closeShares, err := configuredShares(ctx, live, volumeRoot, accountService, fileService, mediaWorker, logger)
+	shareAPI, closeShares, err := configuredShares(ctx, config, accountService, fileService, mediaWorker, logger)
 	if err != nil {
 		return err
 	}
 	defer closeShares()
+	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
-		Accounts: accountService, Files: fileService, Storage: storageService,
+		Accounts: accountService, Files: fileService, Storage: storageService, Personalization: personalizationStore,
 		Terminal:     terminals,
 		Containers:   containersapi.New(containerManager, containerSource, logger),
 		Apps:         appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
@@ -320,67 +327,109 @@ func run(logger *slog.Logger) error {
 		FilePreviews: previewService,
 		Feedback:     feedbackapi.New(feedbackStore, logger),
 		Transfers:    transferAPI,
-		Assistant:    assistantAPI(logger, broker),
-		SystemLogs:   systemLogs,
+		Assistant:    assistant,
+		// Signing in keeps the member's assistant running (ADR 0024).
+		AssistantKeeper: assistant,
+		SystemLogs:      systemLogs,
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
 		FilesChanged: mediaService.SpaceChanged,
 		Logger:       logger,
 	})
 	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
-		ScreensaverDirectory: configuredScreensaverDirectory(),
+		ScreensaverDirectory: config.ScreensaverDirectory,
 	})
 	if err != nil {
 		return err
 	}
 	server := &http.Server{
-		Addr: address, Handler: handler, ReadHeaderTimeout: 5 * time.Second,
+		// Uploads, downloads and video streams take as long as they keep
+		// moving; a client that stops for requestIdle is let go.
+		Addr: config.HTTPAddr, Handler: httpidle.Handler(handler, requestIdle), ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
+		// Panics in handlers and TLS or protocol errors are logged as JSON
+		// like everything else.
+		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	go syncIdentities(ctx, accountService, logger)
-	go runDirectoryReconciliation(ctx, accountService, fileService, logger)
-	// The Host Agent takes scheduled snapshots, so they need no session.
-	go fileService.RunSnapshotSchedules(ctx, accountService, logger)
-	go mediaService.Run(ctx)
-	go transferService.Run(ctx)
+	tasks.Go(func() error { syncIdentities(background, accountService.SyncIdentities, logger); return nil })
+	tasks.Go(func() error { runDirectoryReconciliation(background, accountService, fileService, logger); return nil })
+	// The Host Agent takes scheduled snapshots, so they need no session. A
+	// snapshot that stopping interrupts is deleted again before the catalog
+	// closes.
+	tasks.Go(func() error { fileService.RunSnapshotSchedules(background, accountService, logger); return nil })
+	tasks.Go(func() error { mediaService.Run(background); return nil })
+	// Its last flush of transfer progress lands before transfers.db closes.
+	tasks.Go(func() error { transferService.Run(background); return nil })
 	if photoService != nil {
-		background := make(chan struct{})
-		go func() {
-			defer close(background)
-			photoservice.RunBackground(ctx, photoService, logger, photoAI, photoservice.NewGate(photoservice.QuietPeriod, logger))
-		}()
-		// Runs before the deferred photoService.Close.
-		defer func() {
-			stop()
-			<-background
-		}()
+		tasks.Go(func() error {
+			photoservice.RunBackground(background, photoService, logger, photoAI, photoGate, nil)
+			return nil
+		})
 	}
+	// The assistant's kept instances record task notices in control.db.
+	tasks.Go(func() error {
+		<-background.Done()
+		assistant.Wait()
+		return nil
+	})
+	listener, err := net.Listen("tcp", config.HTTPAddr)
+	if err == nil {
+		logger.Info("A-NAS API listening", "address", config.HTTPAddr, "version", version, "data_source", dataSource, "terminal", config.TerminalEnabled, "containers", containerManager != nil)
+		err = serve(ctx, server, listener, terminals, logger)
+	}
+	stopBackground()
+	_ = tasks.Wait()
+	return err
+}
+
+// requestIdle is how long a read of a request's body or a write of its
+// response may wait on the client (internal/httpidle, #192).
+const requestIdle = time.Minute
+
+// shutdownGrace is how long stopping waits for open requests. The system
+// unit's TimeoutStopSec of 20 s leaves room for the background work that is
+// still stopping then.
+var shutdownGrace = 15 * time.Second
+
+// serve runs server on listener until the process is told to stop or the
+// server fails. Stopping ends the terminal sessions, which hijacked their
+// connections, while it waits shutdownGrace for the other requests; each has
+// the whole grace period. Connections still open then, such as long media,
+// music or download streams, are closed, which is not a failure.
+func serve(ctx context.Context, server *http.Server, listener net.Listener, terminals *terminal.Handler, logger *slog.Logger) error {
 	listenError := make(chan error, 1)
-	go func() {
-		logger.Info("A-NAS API listening", "address", address, "version", version, "data_source", dataSource, "terminal", terminalEnabled, "containers", containerManager != nil)
-		listenError <- server.ListenAndServe()
-	}()
+	go func() { listenError <- server.Serve(listener) }()
 	select {
 	case err := <-listenError:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
 		return err
 	case <-ctx.Done():
-		logger.Info("A-NAS API shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			return err
-		}
+	}
+	logger.Info("A-NAS API shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	terminalsEnded := make(chan struct{})
+	go func() {
+		defer close(terminalsEnded)
 		if err := terminals.Shutdown(shutdownCtx); err != nil {
-			return err
+			logger.Warn("terminal sessions did not end in time", "error", err)
 		}
-		err := <-listenError
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
+	}()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("requests still open when stopping were cut off", "error", err)
+		_ = server.Close()
+	}
+	<-terminalsEnded
+	if err := <-listenError; !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	return nil
+}
+
+// closeAtExit closes what run opened, once the server has stopped. The
+// process is on its way out, so a failure can only be logged.
+func closeAtExit(logger *slog.Logger, name string, closer io.Closer) {
+	if err := closer.Close(); err != nil {
+		logger.Error("A-NAS API could not close a store", "store", name, "error", err)
 	}
 }
 
@@ -395,47 +444,53 @@ func (g sandboxedVolumeGuard) Check(ctx context.Context, volumeRoot string, _ bo
 	return g.VolumeGuard.Check(ctx, volumeRoot, false)
 }
 
-// configuredMediaWorker picks where FFmpeg runs. Production uses the
+// configuredFFmpegWorker picks where FFmpeg runs. Production uses the
 // sandboxed worker socket; development runs FFmpeg in this process when it
 // is installed, and otherwise the media center and music work without it.
-func configuredMediaWorker(live bool) (mediaworker.Worker, error) {
-	mode := os.Getenv("ANAS_MEDIA_WORKER")
-	if mode == "" {
-		mode = "local"
-		if live {
-			mode = "socket"
+func configuredFFmpegWorker(config Config) ffmpegworker.Worker {
+	switch config.MediaWorker {
+	case mediaWorkerSocket:
+		return config.Media.client()
+	case mediaWorkerLocal:
+		if tools, ok := ffmpegworker.LocalTools(); ok {
+			return ffmpegworker.Local{Tools: tools}
 		}
-	}
-	switch mode {
-	case "socket":
-		return mediaworker.Client{Socket: environment("ANAS_MEDIA_SOCKET", "/run/a-nas-media/media.sock")}, nil
-	case "local":
-		if tools, ok := mediaworker.LocalTools(); ok {
-			return mediaworker.Local{Tools: tools}, nil
-		}
-		return nil, nil
-	case "disabled":
-		return nil, nil
-	}
-	return nil, errors.New("ANAS_MEDIA_WORKER must be socket, local or disabled")
-}
-
-// developmentAI reaches an AI Worker only when ANAS_AI_SOCKET names one, so
-// development without the AI component keeps local AI off.
-func developmentAI() photos.Embedder {
-	if socket := os.Getenv("ANAS_AI_SOCKET"); socket != "" {
-		return aiworker.Client{SocketPath: socket}
 	}
 	return nil
 }
 
+// The pause before synchronizing identities again after a failure, doubling
+// up to identitySyncRetryMax. Tests shorten them.
+var (
+	identitySyncRetryMin = 2 * time.Second
+	identitySyncRetryMax = 15 * time.Minute
+)
+
 // syncIdentities converges host accounts on the control plane at startup, so
-// accounts created before ADR 0008 receive their A-NAS UID and groups.
-func syncIdentities(ctx context.Context, accountService *accounts.Service, logger *slog.Logger) {
-	syncCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	if err := accountService.SyncIdentities(syncCtx); err != nil {
-		logger.ErrorContext(ctx, "identity synchronization failed", "error", err)
+// accounts created before ADR 0008 receive their A-NAS UID and groups, and
+// disabled accounts lose their SMB sessions. It tries again until it
+// succeeds: when both services restart together, the Host Agent may not be
+// accepting connections yet.
+func syncIdentities(ctx context.Context, sync func(context.Context) error, logger *slog.Logger) {
+	delay := identitySyncRetryMin
+	for attempt := 1; ; attempt++ {
+		syncCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		err := sync(syncCtx)
+		cancel()
+		if err == nil {
+			logger.InfoContext(ctx, "identity synchronization succeeded", "attempt", attempt)
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		logger.ErrorContext(ctx, "identity synchronization failed", "error", err, "attempt", attempt, "retry", delay)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, identitySyncRetryMax)
 	}
 }
 
@@ -466,70 +521,19 @@ type productOperations interface {
 	files.SnapshotBackend
 }
 
-func configuredServices() (hoststate.Observer, httpapi.DataSource, productOperations, bool, error) {
-	switch mode := os.Getenv("ANAS_HOSTSTATE_MODE"); mode {
-	case "", "fake":
-		operations := &developmentOperations{}
-		return fake.NewHealthy(), httpapi.DataSourceSimulated, operations, false, nil
-	case "agent":
-		socketPath, err := agent.SocketPath()
-		if err != nil {
-			return nil, "", nil, false, err
-		}
-		client := agent.NewClient(socketPath)
-		return client, httpapi.DataSourceLive, client, true, nil
-	default:
-		return nil, "", nil, false, errors.New("ANAS_HOSTSTATE_MODE must be fake or agent")
+// configuredServices reaches the host through the Host Agent on a NAS, and
+// through simulated disks and storage in development.
+func configuredServices(config Config) (hoststate.Observer, httpapi.DataSource, productOperations) {
+	if config.Live() {
+		client := agent.NewClient(config.HostAgentSocket)
+		return client, httpapi.DataSourceLive, client
 	}
+	simulated := newSimulatedStorage(fake.NewWithSpareDisk())
+	return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated}
 }
 
-// fileBrokerSocket defaults to the File Broker socket beside the Host Agent's.
-func fileBrokerSocket() (string, error) {
-	if configured := strings.TrimSpace(os.Getenv("ANAS_FILE_BROKER_SOCKET")); configured != "" {
-		if !filepath.IsAbs(configured) {
-			return "", errors.New("ANAS_FILE_BROKER_SOCKET must be an absolute path")
-		}
-		return filepath.Clean(configured), nil
-	}
-	socketPath, err := agent.SocketPath()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(filepath.Dir(socketPath), "file-broker.sock"), nil
-}
-
-func stateDirectory() (string, error) {
-	if configured := strings.TrimSpace(os.Getenv("ANAS_STATE_DIR")); configured != "" {
-		if !filepath.IsAbs(configured) {
-			return "", errors.New("ANAS_STATE_DIR must be an absolute path")
-		}
-		return filepath.Clean(configured), nil
-	}
-	directory, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(directory, "a-nas", "state"), nil
-}
-
-func environment(name, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func configuredScreensaverDirectory() string {
-	if directory := strings.TrimSpace(os.Getenv("ANAS_SCREENSAVER_DIRECTORY")); directory != "" {
-		return directory
-	}
-	if legacyVideo := strings.TrimSpace(os.Getenv("ANAS_SCREENSAVER_VIDEO")); legacyVideo != "" {
-		return filepath.Dir(legacyVideo)
-	}
-	return "/var/lib/a-nas/screensavers/current"
-}
-
-type developmentOperations struct{}
+// developmentOperations stand in for the Host Agent in fake mode.
+type developmentOperations struct{ *simulatedStorage }
 
 func (*developmentOperations) SetCredential(context.Context, accounts.CredentialRequest) error {
 	return nil
@@ -541,82 +545,60 @@ func (*developmentOperations) GrantViewing(context.Context, accounts.ViewingRequ
 	return nil
 }
 func (*developmentOperations) RevokeViewing(context.Context, string) error { return nil }
-func (*developmentOperations) CreateVolume(_ context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
-	return storage.Volume{ID: "volume:data", DiskID: request.DiskID, FilesystemUUID: "development", State: storage.VolumeStateAvailable}, nil
+func (*developmentOperations) Create(context.Context, string, string) error {
+	return errors.New("development snapshot backend is not configured")
 }
-func (*developmentOperations) Create(context.Context, string, string) ([]files.SnapshotObject, error) {
-	return nil, errors.New("development snapshot backend is not configured")
+func (*developmentOperations) Objects(context.Context, string, func(files.SnapshotObject) error) error {
+	return files.ErrNotFound
 }
 func (*developmentOperations) Open(context.Context, string, string) (io.ReadCloser, files.SnapshotObject, error) {
 	return nil, files.SnapshotObject{}, files.ErrNotFound
 }
 func (*developmentOperations) Delete(context.Context, string, string) error { return files.ErrNotFound }
-
-func configuredTerminal() (bool, error) {
-	switch mode := os.Getenv("ANAS_TERMINAL"); mode {
-	case "", "disabled":
-		return false, nil
-	case "enabled":
-		return true, nil
-	default:
-		return false, errors.New("ANAS_TERMINAL must be enabled or disabled")
-	}
+func (*developmentOperations) Survey(context.Context, []string) (files.SnapshotSurvey, error) {
+	return files.SnapshotSurvey{}, errors.New("development snapshot backend is not configured")
 }
 
 // configuredContainers selects container management and the App Center
-// together, since both run through the container agent. It defaults to the
-// Fake Adapters only alongside simulated host state, so a live deployment
-// never shows invented containers or apps.
-func configuredContainers(hostSource httpapi.DataSource) (containers.Manager, appstore.Store, containersapi.DataSource, error) {
-	mode := os.Getenv("ANAS_CONTAINERS_MODE")
-	if mode == "" {
-		mode = "disabled"
-		if hostSource == httpapi.DataSourceSimulated {
-			mode = "fake"
-		}
-	}
-	switch mode {
-	case "fake":
+// together, since both run through the container agent.
+func configuredContainers(config Config) (containers.Manager, appstore.Store, containersapi.DataSource, error) {
+	switch config.Containers {
+	case containersFake:
 		apps, err := fakeappstore.New(700 * time.Millisecond)
 		if err != nil {
 			return nil, nil, "", err
 		}
 		return fakecontainers.New(), apps, containersapi.DataSourceSimulated, nil
-	case "agent":
-		socketPath, err := containeragent.SocketPath()
-		if err != nil {
-			return nil, nil, "", err
-		}
-		return containeragent.NewClient(socketPath), appstoreagent.NewClient(socketPath), containersapi.DataSourceLive, nil
-	case "disabled":
-		return nil, nil, containersapi.DataSourceLive, nil
+	case containersAgent:
+		socket := config.ContainerAgentSocket
+		return containeragent.NewClient(socket), appstoreagent.NewClient(socket), containersapi.DataSourceLive, nil
 	default:
-		return nil, nil, "", errors.New("ANAS_CONTAINERS_MODE must be fake, agent or disabled")
+		return nil, nil, containersapi.DataSourceLive, nil
 	}
 }
 
-// assistantAPI configures the AI assistant (ADR 0024). Without
-// ANAS_ASSISTANT_SOCKET_DIR it answers assistant_unavailable and the desktop
-// keeps the assistant as planned. With the File Broker every connection to a
-// member's instance goes through it, the session gate (decision 10); without
-// it, in development only, the sockets are dialled directly with the tokens in
-// ANAS_ASSISTANT_TOKEN_DIR. The File Broker also executes the assistant's
-// changes; ANAS_ASSISTANT_CHANGES_SOCKET points at the spike's change broker
-// instead, which stands in for it where there is no File Broker.
-func assistantAPI(logger *slog.Logger, broker *filebroker.Client) http.Handler {
-	sockets := strings.TrimSpace(os.Getenv("ANAS_ASSISTANT_SOCKET_DIR"))
-	options := assistantapi.Options{SocketDir: sockets, Logger: logger}
+// assistantAPI configures the AI assistant (ADR 0024). Without a socket
+// directory it answers assistant_unavailable and the desktop keeps the
+// assistant as planned. On a NAS every connection to a member's instance goes
+// through the File Broker, the session gate (decision 10), which also
+// executes the assistant's changes; development dials the sockets directly
+// with their tokens and may name the spike's change broker. The account store
+// keeps the notices of the members' scheduled tasks. Its background work ends
+// with background.
+func assistantAPI(background context.Context, config AssistantConfig, logger *slog.Logger, broker *filebroker.Client, notices assistantapi.TaskNotices) *assistantapi.Handler {
+	options := assistantapi.Options{SocketDir: config.SocketDir, Notices: notices, Logger: logger, Context: background}
 	switch {
-	case sockets == "":
+	case config.SocketDir == "":
 	case broker != nil:
 		options.Connector = gatedAssistant{broker}
 	default:
-		options.Connector = assistantapi.SocketConnector{SocketDir: sockets, TokenDir: os.Getenv("ANAS_ASSISTANT_TOKEN_DIR")}
+		options.Connector = assistantapi.NewSocketConnector(config.SocketDir, config.TokenDir)
 	}
-	if socket := os.Getenv("ANAS_ASSISTANT_CHANGES_SOCKET"); socket != "" {
-		options.Changes = assistantapi.BrokerChanges(socket)
-	} else if broker != nil {
+	switch {
+	case broker != nil:
 		options.Changes = executedChanges{broker}
+	case config.SpikeBrokerSocket != "":
+		options.Changes = assistantapi.BrokerChanges(config.SpikeBrokerSocket)
 	}
 	return assistantapi.New(options)
 }
@@ -640,11 +622,11 @@ func (e executedChanges) Get(ctx context.Context, _, id string) (assistantapi.Ch
 
 func asChange(raw json.RawMessage, err error) (assistantapi.Change, error) {
 	switch {
-	case errors.Is(err, assistantchanges.ErrInvalid):
+	case errors.Is(err, filebroker.ErrChangeInvalid):
 		return assistantapi.Change{}, fmt.Errorf("%w: %v", assistantapi.ErrInvalidSubmission, err)
-	case errors.Is(err, assistantchanges.ErrDecided):
+	case errors.Is(err, filebroker.ErrChangeDecided):
 		return assistantapi.Change{}, assistantapi.ErrChangeDecided
-	case errors.Is(err, assistantchanges.ErrNotFound):
+	case errors.Is(err, filebroker.ErrChangeNotFound):
 		return assistantapi.Change{}, assistantapi.ErrChangeNotFound
 	case errors.Is(err, files.ErrForbidden):
 		return assistantapi.Change{}, assistantapi.ErrChangeSession
@@ -663,8 +645,8 @@ func asChange(raw json.RawMessage, err error) (assistantapi.Change, error) {
 // checks the session itself and cuts the connection when it ends.
 type gatedAssistant struct{ broker *filebroker.Client }
 
-func (g gatedAssistant) Connect(ctx context.Context, account string) (net.Conn, string, error) {
-	conn, err := g.broker.ConnectAssistant(ctx)
+func (g gatedAssistant) Connect(ctx context.Context, account string, fresh bool) (net.Conn, string, error) {
+	conn, err := g.broker.ConnectAssistant(ctx, fresh)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, "", assistantapi.ErrNoAssistant

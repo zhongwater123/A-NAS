@@ -26,12 +26,51 @@ func NewWarning() *Reader {
 	state := baseState()
 	state.System.Health = hoststate.HealthWarning
 	state.Disks[1].Health = hoststate.HealthWarning
-	state.Disks[1].TemperatureCelsius = intPointer(55)
+	state.Disks[1].TemperatureCelsius = new(55)
+	return newReader(state)
+}
+
+// NewWithSpareDisk adds a second data disk that another NAS left an md
+// array signature on, so a volume can be created on two disks or grown.
+func NewWithSpareDisk() *Reader {
+	state := baseState()
+	state.Disks = append(state.Disks, hoststate.Disk{
+		ID:                 mustResourceID("disk:fake-data-02"),
+		Model:              "A-NAS Fake HDD",
+		Transport:          hoststate.TransportSATA,
+		CapacityBytes:      512_000_000_000,
+		Rotational:         true,
+		Role:               hoststate.DiskRoleUnassigned,
+		Health:             hoststate.HealthHealthy,
+		SMARTStatus:        hoststate.HealthHealthy,
+		TemperatureCelsius: new(32),
+		Filesystems:        []string{"linux_raid_member"},
+		Signatures:         []hoststate.Signature{{Type: "linux_raid_member", Label: "OrangePi3B:0", UUID: "2a5a4bd2-c45f-586f-20c3-f2657f46b405"}},
+	})
 	return newReader(state)
 }
 
 func NewUnavailable() *Reader {
 	return &Reader{err: errUnavailable}
+}
+
+// NewWithUnusableDisks keeps a usable disk alongside an empty card reader
+// and two disks reporting the same hardware identity.
+func NewWithUnusableDisks() *Reader {
+	state := baseState()
+	state.Disks = append(state.Disks, hoststate.Disk{
+		ID: mustResourceID("observation:empty-reader"), Transport: hoststate.TransportUSB,
+		Role: hoststate.DiskRoleUnassigned, Health: hoststate.HealthUnknown, SMARTStatus: hoststate.HealthUnknown,
+		ObservationIssues: []hoststate.DiskObservationIssue{hoststate.DiskMissingModel, hoststate.DiskMissingCapacity, hoststate.DiskMissingIdentity},
+	})
+	for _, id := range []string{"observation:duplicate-1", "observation:duplicate-2"} {
+		state.Disks = append(state.Disks, hoststate.Disk{
+			ID: mustResourceID(id), Model: "Duplicate bridge", CapacityBytes: 512_000_000_000, Transport: hoststate.TransportSATA,
+			Role: hoststate.DiskRoleUnassigned, Health: hoststate.HealthUnknown, SMARTStatus: hoststate.HealthUnknown,
+			ObservationIssues: []hoststate.DiskObservationIssue{hoststate.DiskDuplicateIdentity},
+		})
+	}
+	return newReader(state)
 }
 
 func newReader(state hoststate.State) *Reader {
@@ -92,7 +131,7 @@ func baseState() hoststate.State {
 				Role:               hoststate.DiskRoleSystem,
 				Health:             hoststate.HealthHealthy,
 				SMARTStatus:        hoststate.HealthHealthy,
-				TemperatureCelsius: intPointer(36),
+				TemperatureCelsius: new(36),
 				InUse:              true,
 				Filesystems:        []string{"ext4"},
 			},
@@ -105,7 +144,7 @@ func baseState() hoststate.State {
 				Role:               hoststate.DiskRoleUnassigned,
 				Health:             hoststate.HealthHealthy,
 				SMARTStatus:        hoststate.HealthHealthy,
-				TemperatureCelsius: intPointer(31),
+				TemperatureCelsius: new(31),
 			},
 		},
 	}
@@ -113,11 +152,14 @@ func baseState() hoststate.State {
 
 func cloneState(state hoststate.State) hoststate.State {
 	cloned := state
+	if state.System.Storage != nil {
+		cloned.System.Storage = new(*state.System.Storage)
+	}
 	cloned.Disks = make([]hoststate.Disk, len(state.Disks))
 	for i, disk := range state.Disks {
 		cloned.Disks[i] = disk
 		if disk.TemperatureCelsius != nil {
-			cloned.Disks[i].TemperatureCelsius = intPointer(*disk.TemperatureCelsius)
+			cloned.Disks[i].TemperatureCelsius = new(*disk.TemperatureCelsius)
 		}
 		if disk.FilesystemCapacityBytes != nil {
 			value := *disk.FilesystemCapacityBytes
@@ -127,7 +169,20 @@ func cloneState(state hoststate.State) hoststate.State {
 			value := *disk.FilesystemAvailableBytes
 			cloned.Disks[i].FilesystemAvailableBytes = &value
 		}
+		if disk.FilesystemErrors != nil {
+			value := *disk.FilesystemErrors
+			cloned.Disks[i].FilesystemErrors = &value
+		}
 		cloned.Disks[i].Filesystems = append([]string(nil), disk.Filesystems...)
+		cloned.Disks[i].Signatures = append([]hoststate.Signature(nil), disk.Signatures...)
+		cloned.Disks[i].ObservationIssues = append([]hoststate.DiskObservationIssue(nil), disk.ObservationIssues...)
+	}
+	if state.DataVolume != nil {
+		volume := *state.DataVolume
+		volume.DiskIDs = append([]hoststate.ResourceID(nil), volume.DiskIDs...)
+		volume.Data = append([]hoststate.ProfileUsage(nil), volume.Data...)
+		volume.Metadata = append([]hoststate.ProfileUsage(nil), volume.Metadata...)
+		cloned.DataVolume = &volume
 	}
 	return cloned
 }
@@ -138,10 +193,6 @@ func mustResourceID(value string) hoststate.ResourceID {
 		panic(err)
 	}
 	return id
-}
-
-func intPointer(value int) *int {
-	return &value
 }
 
 var _ hoststate.Observer = (*Reader)(nil)

@@ -168,18 +168,33 @@ func (s *Service) SpaceChanged(ctx context.Context, actor accounts.User, spaceID
 	}
 }
 
-// RefreshStale scans the actor's visible libraries whose last scan is older
-// than staleScan, as the actor; opening the media center calls it.
+// RefreshStale scans the actor's visible libraries whose last scan ended
+// more than staleScan ago, as the actor; opening the media center calls it,
+// and the open media center every 20 seconds. A library already being
+// scanned, or waiting to be, is left alone: asking its scan to run once more
+// would keep a library that takes longer than staleScan to scan scanning
+// for as long as the media center stays open (#167). Web changes still ask
+// for that one more run (SpaceChanged).
 func (s *Service) RefreshStale(ctx context.Context, actor accounts.User) {
 	libraries, err := s.visibleLibraries(ctx, actor)
 	if err != nil {
 		return
 	}
 	for _, library := range libraries {
+		if s.scanBusy(library.ID) {
+			continue
+		}
 		if library.ScannedAt == "" || s.now().Sub(parseTime(library.ScannedAt)) > staleScan {
 			s.ScanInBackground(ctx, actor, library.ID)
 		}
 	}
+}
+
+// scanBusy reports whether a library is being scanned or waits to be.
+func (s *Service) scanBusy(libraryID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.queued[libraryID] > 0 || s.scanning[libraryID]
 }
 
 // Scan scans a library now as actor and returns when it is done, after any
@@ -277,16 +292,16 @@ func (s *Service) scanLocked(ctx context.Context, actor accounts.User, library l
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	var folders []folderRow
 	for rows.Next() {
 		var folder folderRow
 		if err := rows.Scan(&folder.entryID); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		folders = append(folders, folder)
 	}
-	if err := rows.Close(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
 	firstScan := library.ScannedAt == ""
@@ -370,7 +385,7 @@ func (s *Service) readFolder(ctx context.Context, actor accounts.User, library l
 }
 
 func hiddenPath(directory string) bool {
-	for _, part := range strings.Split(directory, "/") {
+	for part := range strings.SplitSeq(directory, "/") {
 		if strings.HasPrefix(part, ".") || strings.HasPrefix(part, "@") || part == "#recycle" {
 			return true
 		}
@@ -730,16 +745,16 @@ func (s *Service) commitScan(ctx context.Context, library libraryRow, videos []s
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var entryID string
 		var video existingVideo
 		if err := rows.Scan(&video.id, &entryID, &video.size, &video.modified, &video.addedAt); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		existing[entryID] = video
 	}
-	if err := rows.Close(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
 	showIDs := map[string]string{}
@@ -747,15 +762,15 @@ func (s *Service) commitScan(ctx context.Context, library libraryRow, videos []s
 	if err != nil {
 		return err
 	}
+	defer showRows.Close()
 	for showRows.Next() {
 		var id, key string
 		if err := showRows.Scan(&id, &key); err != nil {
-			_ = showRows.Close()
 			return err
 		}
 		showIDs[key] = id
 	}
-	if err := showRows.Close(); err != nil {
+	if err := errors.Join(showRows.Err(), showRows.Close()); err != nil {
 		return err
 	}
 	now := formatTime(s.now())

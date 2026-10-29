@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -170,10 +171,8 @@ func (q Query) Wants(categories ...Category) bool {
 		return true
 	}
 	for _, wanted := range q.Categories {
-		for _, held := range categories {
-			if wanted == held {
-				return true
-			}
+		if slices.Contains(categories, wanted) {
+			return true
 		}
 	}
 	return false
@@ -257,19 +256,53 @@ type Table struct {
 	SpaceColumn bool
 }
 
+// atExpression is an event's time as Cursor.At has it. The log orders and
+// pages by it, so IndexStatement indexes this very expression.
+const atExpression = "COALESCE(strftime('%Y-%m-%dT%H:%M:%f', occurred_at), '0000-00-00T00:00:00.000')"
+
+// IndexStatement creates the index that lets List read a table's newest
+// events, and continue from a cursor, without sorting the whole table
+// (#167). Modules run it when they open their database.
+const IndexStatement = "CREATE INDEX IF NOT EXISTS audit_events_at ON audit_events(" + atExpression + ", id)"
+
 // List returns up to q.Limit+1 events matching q, newest first, so callers
 // can tell whether more follow.
 func (t Table) List(ctx context.Context, q Query) ([]Event, error) {
+	statement, arguments, ok := t.query(q)
+	if !ok {
+		return nil, nil
+	}
+	rows, err := t.DB.QueryContext(ctx, statement, arguments...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var events []Event
+	for rows.Next() {
+		var event Event
+		var occurredAt string
+		if err := rows.Scan(&event.ID, &event.ActorUserID, &event.Action, &event.ResourceType, &event.ResourceID,
+			&occurredAt, &event.Detail, &event.SpaceID, &event.Key.At); err != nil {
+			return nil, err
+		}
+		event.Key.ID = event.ID
+		event.OccurredAt, _ = time.Parse(time.RFC3339Nano, occurredAt)
+		events = append(events, event)
+	}
+	return events, rows.Err()
+}
+
+// query builds List's statement; ok is false when nothing can match.
+func (t Table) query(q Query) (statement string, arguments []any, ok bool) {
 	space := "''"
 	if t.SpaceColumn {
 		space = "space_id"
 	}
-	statement := `SELECT id, actor, action, resource_type, resource_id, occurred_at, detail, space, at FROM (
+	statement = `SELECT id, actor, action, resource_type, resource_id, occurred_at, detail, space, at FROM (
 SELECT id, COALESCE(actor_user_id, '') AS actor, action, resource_type, resource_id, occurred_at, detail, ` + space + ` AS space,
-COALESCE(strftime('%Y-%m-%dT%H:%M:%f', occurred_at), '0000-00-00T00:00:00.000') AS at
+` + atExpression + ` AS at
 FROM audit_events)`
 	var conditions []string
-	var arguments []any
 	add := func(condition string, values ...any) {
 		conditions = append(conditions, condition)
 		arguments = append(arguments, values...)
@@ -292,7 +325,7 @@ FROM audit_events)`
 			}
 		}
 		if len(alternatives) == 0 {
-			return nil, nil
+			return "", nil, false
 		}
 		conditions = append(conditions, "("+strings.Join(alternatives, " OR ")+")")
 	}
@@ -307,7 +340,7 @@ FROM audit_events)`
 			arguments = append(arguments, values(q.Subject.ResourceIDs)...)
 		}
 		if len(alternatives) == 0 {
-			return nil, nil
+			return "", nil, false
 		}
 		conditions = append(conditions, "("+strings.Join(alternatives, " OR ")+")")
 	}
@@ -339,24 +372,7 @@ FROM audit_events)`
 	}
 	statement += "\nORDER BY at DESC, id DESC LIMIT ?"
 	arguments = append(arguments, q.Limit+1)
-	rows, err := t.DB.QueryContext(ctx, statement, arguments...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var events []Event
-	for rows.Next() {
-		var event Event
-		var occurredAt string
-		if err := rows.Scan(&event.ID, &event.ActorUserID, &event.Action, &event.ResourceType, &event.ResourceID,
-			&occurredAt, &event.Detail, &event.SpaceID, &event.Key.At); err != nil {
-			return nil, err
-		}
-		event.Key.ID = event.ID
-		event.OccurredAt, _ = time.Parse(time.RFC3339Nano, occurredAt)
-		events = append(events, event)
-	}
-	return events, rows.Err()
+	return statement, arguments, true
 }
 
 // Merge combines pages that sources returned for the same query into one page

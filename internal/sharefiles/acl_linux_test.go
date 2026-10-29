@@ -6,11 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/filebroker"
-	"github.com/zhongwater123/A-NAS/internal/files"
-	"github.com/zhongwater123/A-NAS/internal/shares"
-	"golang.org/x/sys/unix"
 	"io"
 	"net"
 	"os"
@@ -19,11 +14,19 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/filebroker"
+	"github.com/zhongwater123/A-NAS/internal/filebroker/rootbroker"
+	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
 func TestMain(m *testing.M) {
-	if len(os.Args) == 3 && os.Args[1] == filebroker.WorkerArgument {
-		if e := filebroker.RunWorker(os.Args[2]); e != nil {
+	if len(os.Args) == 3 && os.Args[1] == rootbroker.WorkerArgument {
+		if e := rootbroker.RunWorker(os.Args[2]); e != nil {
 			fmt.Fprintln(os.Stderr, e)
 			os.Exit(1)
 		}
@@ -45,10 +48,10 @@ func aclHelper(args []string) error {
 		if e != nil {
 			return e
 		}
-		f.Close()
+		_ = f.Close()
 		f, e = os.OpenFile(args[1], os.O_WRONLY, 0)
 		if f != nil {
-			f.Close()
+			_ = f.Close()
 			return errors.New("sender writes read-only source")
 		}
 		if !errors.Is(e, os.ErrPermission) {
@@ -59,7 +62,7 @@ func aclHelper(args []string) error {
 		for _, p := range args[1:3] {
 			f, e := os.Open(p)
 			if f != nil {
-				f.Close()
+				_ = f.Close()
 				return fmt.Errorf("shares identity opened source %s", p)
 			}
 			if !errors.Is(e, os.ErrPermission) {
@@ -67,12 +70,12 @@ func aclHelper(args []string) error {
 			}
 		}
 		src := os.NewFile(3, "broker-source")
-		defer src.Close()
+		defer func() { _ = src.Close() }()
 		dst, e := os.OpenFile(args[3], os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if e != nil {
 			return e
 		}
-		defer dst.Close()
+		defer func() { _ = dst.Close() }()
 		if e = unix.IoctlFileClone(int(dst.Fd()), int(src.Fd())); e != nil {
 			return e
 		}
@@ -84,7 +87,7 @@ func aclHelper(args []string) error {
 		for _, flag := range []int{os.O_RDONLY, os.O_WRONLY} {
 			f, e := os.OpenFile(args[1], flag, 0)
 			if f != nil {
-				f.Close()
+				_ = f.Close()
 				return errors.New("recipient accessed managed share content")
 			}
 			if !errors.Is(e, os.ErrPermission) {
@@ -97,7 +100,7 @@ func aclHelper(args []string) error {
 		if e != nil {
 			return e
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		_, e = io.Copy(os.Stdout, f)
 		return e
 	}
@@ -117,7 +120,7 @@ func TestShareACLMatrix(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer os.RemoveAll(base)
+	defer func() { _ = os.RemoveAll(base) }()
 	if e = os.Chmod(base, 0755); e != nil {
 		t.Fatal(e)
 	}
@@ -127,7 +130,7 @@ func TestShareACLMatrix(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	users := accounts.NewService(db, credentials{}, accounts.Options{})
 	alice, e := users.SetupAdministrator(context.Background(), "alice", "correct horse battery staple")
 	if e != nil {
@@ -199,8 +202,8 @@ func TestShareACLMatrix(t *testing.T) {
 		t.Fatalf("set default ACL: %s %v", out, e)
 	}
 	sessions := accounts.NewSessionDirectory(dbPath)
-	defer sessions.Close()
-	broker, e := filebroker.NewServer(filebroker.Config{Sessions: sessions, VolumeRoot: volume, VolumeReady: func() bool { return true }, Command: func(v string) *exec.Cmd { return exec.Command(os.Args[0], filebroker.WorkerArgument, v) }})
+	defer func() { _ = sessions.Close() }()
+	broker, e := rootbroker.NewServer(rootbroker.Config{Sessions: sessions, VolumeRoot: volume, VolumeReady: func() bool { return true }, Command: func(v string) *exec.Cmd { return exec.Command(os.Args[0], rootbroker.WorkerArgument, v) }})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -210,15 +213,15 @@ func TestShareACLMatrix(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer listener.Close()
-	go broker.Serve(listener)
+	defer func() { _ = listener.Close() }()
+	go func() { _ = broker.Serve(listener) }()
 	client := filebroker.NewClient(socket)
 	catalog, e := files.OpenSQLite(filepath.Join(state, "files.db"))
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer catalog.Close()
-	fs := files.NewService(catalog, volume, users, files.Options{FileSystem: client, AllowUnverifiedVolume: true, DisableCapacityReserve: true})
+	defer func() { _ = catalog.Close() }()
+	fs := files.NewService(catalog, volume, users, client, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
 	local := NewLocal(fs, users)
 	local.SetBroker(client)
 	bridgePath := filepath.Join(state, "bridge.sock")
@@ -239,7 +242,7 @@ func TestShareACLMatrix(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	// Prove sender cannot write the shared source through its actual worker.
 	if _, _, e = client.CreateTemp(ac, shared, "denied-"); !errors.Is(e, os.ErrPermission) {
 		t.Fatalf("sender unexpectedly writes shared directory: %v", e)

@@ -1,14 +1,71 @@
 import { describe, expect, it } from "vitest";
 
-import { activeLine, buildIndex, folderKey, folderTracks, formatDuration, formatTotal, parseLyrics, search, sortTracks } from "./library";
+import {
+  activeLine,
+  buildIndex,
+  folderKey,
+  folderTracks,
+  formatDuration,
+  formatTotal,
+  parseLyrics,
+  relativeTime,
+  search,
+  sortTracks,
+} from "./library";
 import { moveRows } from "./MusicPanel";
 import { track } from "./testTracks";
 
+describe("music elapsed time labels", () => {
+  it("does not turn elapsed days into calendar names after crossing midnight", () => {
+    const now = new Date(2026, 9, 27, 0, 5).getTime();
+    expect(relativeTime(new Date(2026, 9, 24, 23, 59).toISOString(), now)).toBe("2 天前");
+    expect(relativeTime(new Date(2026, 9, 25, 0, 6).toISOString(), now)).toBe("1 天前");
+    expect(relativeTime(new Date(2026, 9, 29, 0, 6).toISOString(), now)).toBe("2 天后");
+  });
+});
+
 const library = [
-  track("a1", { title: "晴天", artist: "周杰伦", artists: ["周杰伦"], album: "叶惠美", albumId: "album:yhm", trackNo: 2, folder: "音乐/周杰伦/叶惠美", genres: ["流行"], coverId: "c1", durationMs: 269_000 }),
-  track("a2", { title: "以父之名", artist: "周杰伦", artists: ["周杰伦"], album: "叶惠美", albumId: "album:yhm", trackNo: 1, folder: "音乐/周杰伦/叶惠美", genres: ["流行"], durationMs: 342_000 }),
-  track("b1", { title: "Lantern Light", artist: "Mira Chen feat. Leo", artists: ["Mira Chen", "Leo"], album: "Midnight", albumId: "album:mid", folder: "音乐/Mira/Midnight/CD1", genres: ["R&B"] }),
-  track("b2", { title: "Slow Tide", artist: "Mira Chen", artists: ["Mira Chen"], album: "Midnight", albumId: "album:mid", folder: "音乐/Mira/Midnight/CD2", discNo: 2 }),
+  track("a1", {
+    title: "晴天",
+    artist: "周杰伦",
+    artists: ["周杰伦"],
+    album: "叶惠美",
+    albumId: "album:yhm",
+    trackNo: 2,
+    folder: "音乐/周杰伦/叶惠美",
+    genres: ["流行"],
+    coverId: "c1",
+    durationMs: 269_000,
+  }),
+  track("a2", {
+    title: "以父之名",
+    artist: "周杰伦",
+    artists: ["周杰伦"],
+    album: "叶惠美",
+    albumId: "album:yhm",
+    trackNo: 1,
+    folder: "音乐/周杰伦/叶惠美",
+    genres: ["流行"],
+    durationMs: 342_000,
+  }),
+  track("b1", {
+    title: "Lantern Light",
+    artist: "Mira Chen feat. Leo",
+    artists: ["Mira Chen", "Leo"],
+    album: "Midnight",
+    albumId: "album:mid",
+    folder: "音乐/Mira/Midnight/CD1",
+    genres: ["R&B"],
+  }),
+  track("b2", {
+    title: "Slow Tide",
+    artist: "Mira Chen",
+    artists: ["Mira Chen"],
+    album: "Midnight",
+    albumId: "album:mid",
+    folder: "音乐/Mira/Midnight/CD2",
+    discNo: 2,
+  }),
   track("c1", { title: "十年", artist: "陈奕迅", artists: ["陈奕迅"], folder: "" }),
 ];
 
@@ -37,17 +94,25 @@ describe("buildIndex", () => {
     // Chinese collation puts Hanzi, by pinyin, before Latin names.
     expect(music.folders.map((folder) => folder.name)).toEqual(["周杰伦", "Mira"]);
     expect(index.folders.get(folderKey("space:shared", ""))!.total).toBe(5);
-    expect(folderTracks(index.folders.get(folderKey("space:shared", "音乐/Mira/Midnight"))!).map((item) => item.id)).toEqual(["b1", "b2"]);
+    expect(
+      folderTracks(index.folders.get(folderKey("space:shared", "音乐/Mira/Midnight"))!).map((item) => item.id),
+    ).toEqual(["b1", "b2"]);
   });
 
   it("collects genres", () => {
-    expect(index.genres.map((genre) => [genre.name, genre.tracks.length])).toEqual([["流行", 2], ["R&B", 1]]);
+    expect(index.genres.map((genre) => [genre.name, genre.tracks.length])).toEqual([
+      ["流行", 2],
+      ["R&B", 1],
+    ]);
   });
 });
 
 describe("search", () => {
   const index = buildIndex(library);
-  const pinyin = (text: string, query: string) => ({ 周杰伦: ["zjl", "zhoujielun"], 晴天: ["qt", "qingtian"] } as Record<string, string[]>)[text]?.some((value) => value.includes(query)) ?? false;
+  const pinyin = (text: string, query: string) =>
+    (({ 周杰伦: ["zjl", "zhoujielun"], 晴天: ["qt", "qingtian"] }) as Record<string, string[]>)[text]?.some((value) =>
+      value.includes(query),
+    ) ?? false;
 
   it("matches titles, artists and albums and ranks title matches first", () => {
     const results = search(index, "mira");
@@ -94,7 +159,13 @@ describe("formatting and lyrics", () => {
 
   it("keeps lyrics without time tags as plain text", () => {
     const lyrics = parseLyrics("第一句\n\n第二句");
-    expect(lyrics).toEqual({ synced: false, lines: [{ time: -1, text: "第一句" }, { time: -1, text: "第二句" }] });
+    expect(lyrics).toEqual({
+      synced: false,
+      lines: [
+        { time: -1, text: "第一句" },
+        { time: -1, text: "第二句" },
+      ],
+    });
     expect(activeLine(lyrics, 3)).toBe(-1);
   });
 });

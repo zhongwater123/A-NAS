@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Kills a member's assistant and checks that systemd notices despite PrivatePIDs.
 main=$(systemctl show -p MainPID --value anas-assistant@bob.service)
-echo "bob main pid: $main ($(cat /proc/$main/comm 2>/dev/null))"
+echo "bob main pid: $main ($(cat "/proc/$main/comm" 2>/dev/null))"
 kill -9 "$main"
 for i in $(seq 1 20); do
   # Only ActiveState: systemctl does not print several --value properties in the order asked.

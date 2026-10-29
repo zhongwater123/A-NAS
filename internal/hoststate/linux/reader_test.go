@@ -103,12 +103,12 @@ func TestReaderReturnsOneDebianObservation(t *testing.T) {
 
 func TestObserveDataVolumeUsageReportsFilesystemCapacity(t *testing.T) {
 	disks := []hoststate.Disk{{Role: hoststate.DiskRoleData}}
-	observeDataVolumeUsage(disks, func(path string) (uint64, uint64, error) {
+	observeDataVolume(disks, func(path string) (filesystemUsage, error) {
 		if path != "/srv/a-nas/data" {
 			t.Fatalf("usage path = %q", path)
 		}
-		return 500_107_862_016, 482_000_000_000, nil
-	})
+		return filesystemUsage{total: 500_107_862_016, available: 482_000_000_000}, nil
+	}, nil)
 
 	if disks[0].FilesystemCapacityBytes == nil || *disks[0].FilesystemCapacityBytes != 500_107_862_016 {
 		t.Fatalf("filesystem capacity = %v", disks[0].FilesystemCapacityBytes)
@@ -202,25 +202,8 @@ func TestReaderKeepsDiskIdentityWhenKernelNameChanges(t *testing.T) {
 
 func TestReaderRejectsInvalidBlockDeviceObservations(t *testing.T) {
 	tests := map[string]string{
-		"malformed JSON": `{`,
-		"missing stable identity": `{
-  "blockdevices": [{
-    "name": "sda", "type": "disk", "size": 1, "model": "Disk",
-    "mountpoints": ["/"]
-  }]
-}`,
-		"duplicate stable identity": `{
-  "blockdevices": [
-    {
-      "name": "sda", "type": "disk", "size": 1, "model": "Disk A",
-      "wwn": "duplicate", "mountpoints": ["/"]
-    },
-    {
-      "name": "sdb", "type": "disk", "size": 2, "model": "Disk B",
-      "wwn": "duplicate", "mountpoints": []
-    }
-  ]
-}`,
+		"malformed JSON":        `{`,
+		"invalid capacity type": `{"blockdevices":[{"name":"sda","type":"disk","size":"bad"}]}`,
 	}
 
 	for name, observation := range tests {
@@ -271,10 +254,23 @@ func TestReaderReportsRemovableUseAndFilesystemEvidence(t *testing.T) {
 	}
 }
 
-func TestDeviceInUseRejectsStorageStackMembersEvenWhenUnmounted(t *testing.T) {
+// A signature another system left behind is not use: only an assembled
+// array, an active volume group, an open LUKS mapping or active swap is.
+func TestDeviceInUseOnlyForActiveStorageStacks(t *testing.T) {
+	swap := "[SWAP]"
 	for _, filesystem := range []string{"swap", "linux_raid_member", "LVM2_member", "crypto_LUKS"} {
-		if !deviceInUse(blockDevice{Type: "part", Filesystem: filesystem}) {
-			t.Fatalf("deviceInUse(%q) = false, want true", filesystem)
+		if deviceInUse(blockDevice{Type: "part", Filesystem: filesystem}) {
+			t.Errorf("deviceInUse(unused %q) = true, want false", filesystem)
+		}
+	}
+	for name, device := range map[string]blockDevice{
+		"assembled md array": {Type: "part", Filesystem: "linux_raid_member", Children: []blockDevice{{Name: "md127", Type: "raid1"}}},
+		"active LVM volume":  {Type: "part", Filesystem: "LVM2_member", Children: []blockDevice{{Name: "vg-data", Type: "lvm"}}},
+		"open LUKS mapping":  {Type: "part", Filesystem: "crypto_LUKS", Children: []blockDevice{{Name: "luks-1", Type: "crypt"}}},
+		"active swap":        {Type: "part", Filesystem: "swap", Mountpoints: []*string{&swap}},
+	} {
+		if !deviceInUse(device) {
+			t.Errorf("deviceInUse(%s) = false, want true", name)
 		}
 	}
 }

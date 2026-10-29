@@ -14,7 +14,9 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/sessiondir"
 )
 
 // holdControlDatabaseArgument makes the test binary act as the Product
@@ -39,7 +41,7 @@ func holdControlDatabase(path string) error {
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	service := accounts.NewService(store, acceptAll{}, accounts.Options{})
 	if _, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple"); err != nil && !errors.Is(err, accounts.ErrSetupComplete) {
 		return err
@@ -55,8 +57,8 @@ func holdControlDatabase(path string) error {
 
 type acceptAll struct{}
 
-func (acceptAll) SetCredential(context.Context, accounts.CredentialRequest) error { return nil }
-func (acceptAll) DisableCredential(context.Context, string) error                 { return nil }
+func (acceptAll) SetCredential(context.Context, accountid.CredentialRequest) error { return nil }
+func (acceptAll) DisableCredential(context.Context, string) error                  { return nil }
 
 // TestRootSessionDirectoryLeavesProductStateUntouched checks that the root
 // File Broker reads the Product Service's live SQLite database without
@@ -98,12 +100,12 @@ func TestRootSessionDirectoryLeavesProductStateUntouched(t *testing.T) {
 	}
 	token = strings.TrimSpace(token)
 
-	directory := accounts.NewSessionDirectory(database)
+	directory := sessiondir.New(database)
 	identity, err := directory.ResolveSessionIdentity(context.Background(), token)
 	if err != nil {
 		t.Fatalf("ResolveSessionIdentity() while the service holds the database error = %v", err)
 	}
-	if identity.Username != "owner" || identity.UID != accounts.FirstUserUID {
+	if identity.Username != "owner" || identity.UID != accountid.FirstUserUID {
 		t.Fatalf("identity = %#v", identity)
 	}
 	_ = stdin.Close()

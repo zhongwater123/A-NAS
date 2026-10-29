@@ -83,7 +83,7 @@ func TestRenameShowKeepsIdentityWhenAnOlderScanIsInFlight(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := env.media.Show(ctx, env.admin, original.ID)
-	if err != nil || result.Title.Title != "Blossoms" || !result.Title.Favorite {
+	if err != nil || result.Title.Title != "Blossoms" || !result.Favorite {
 		t.Fatalf("rename lost show identity or favorite after old scan: %+v, %v", result.Title, err)
 	}
 }

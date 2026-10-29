@@ -43,7 +43,7 @@ func decodeUser(t *testing.T, recorder *httptest.ResponseRecorder) accounts.User
 
 func TestEveryoneChoosesTheirOwnNicknameAndAvatar(t *testing.T) {
 	ctx := context.Background()
-	f := newActivityFixture(t, func(*photos.Service) http.Handler { return nil })
+	f := newActivityFixture(t, func(*photos.Service, *accounts.Service) http.Handler { return nil })
 	owner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "", http.StatusCreated)
 	admin, err := f.accounts.UserIDForUsername(ctx, "owner")
 	if err != nil {
@@ -60,13 +60,14 @@ func TestEveryoneChoosesTheirOwnNicknameAndAvatar(t *testing.T) {
 	}
 	owner.do(http.MethodPatch, "/api/v1/session/profile", `{"nickname":"小爱"}`, nil, http.StatusConflict)
 	owner.do(http.MethodPatch, "/api/v1/session/profile", `{"nickname":"ALICE"}`, nil, http.StatusConflict)
-	alice.do(http.MethodPatch, "/api/v1/session/profile", `{"nickname":"a‮b"}`, nil, http.StatusUnprocessableEntity)
+	alice.do(http.MethodPatch, "/api/v1/session/profile", `{"nickname":"a\u202eb"}`, nil, http.StatusUnprocessableEntity)
 	// Requests the contract itself rules out are sent around the contract client.
 	outsideContract := func(method, path, contentType, body string) int {
 		request := httptest.NewRequest(method, path, strings.NewReader(body))
 		request.AddCookie(alice.cookie)
 		request.Header.Set("Content-Type", contentType)
 		request.Header.Set("X-CSRF-Token", alice.csrf)
+		request.Header.Set("X-Forwarded-For", alice.forwardedFor)
 		recorder := httptest.NewRecorder()
 		f.handler.ServeHTTP(recorder, request)
 		return recorder.Code

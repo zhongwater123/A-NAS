@@ -25,7 +25,7 @@ func newProfileFixture(t *testing.T) profileFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &credentialRecorder{}, accounts.Options{})
+	service := accounts.NewService(store, &credentialRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestNicknamesAreTidiedCheckedAndShownToEveryone(t *testing.T) {
 	}{
 		{nickname: strings.Repeat("长", accounts.MaxNicknameLength+1), want: accounts.ErrInvalidNickname},
 		{nickname: "line\nbreak", want: accounts.ErrInvalidNickname},
-		{nickname: "evil‮name", want: accounts.ErrInvalidNickname},
+		{nickname: "evil\u202ename", want: accounts.ErrInvalidNickname},
 		{nickname: "OWNER", want: accounts.ErrNicknameUnavailable},
 	} {
 		if _, err := f.service.SetNickname(ctx, f.alice, test.nickname); !errors.Is(err, test.want) {

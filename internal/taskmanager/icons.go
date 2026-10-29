@@ -6,58 +6,26 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/xml"
-	"image"
-	_ "image/jpeg"
+	"errors"
 	"image/png"
 	"io"
+	"io/fs"
 	"strings"
 	"unicode"
-
-	"github.com/disintegration/imaging"
-	_ "golang.org/x/image/webp"
 )
 
 const MaxIcons = 64
 const MaxIconDataURL = 24576
 const MaxIconBytes = 256 << 10
 
-// NormalizeIcon accepts installed artwork, never arbitrary file content. Raster
-// inputs become small PNGs; SVGs must be self-contained static image documents.
-func NormalizeIcon(data []byte) (id, dataURL string) {
-	if len(data) == 0 || len(data) > MaxIconBytes {
-		return "", ""
-	}
-	mime := "image/png"
-	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("<")) {
-		if !staticSVG(data) {
-			return "", ""
-		}
-		mime = "image/svg+xml"
-	} else {
-		config, _, err := image.DecodeConfig(bytes.NewReader(data))
-		if err != nil || config.Width <= 0 || config.Height <= 0 || config.Width > 2048 || config.Height > 2048 || config.Width*config.Height > 1024*1024 {
-			return "", ""
-		}
-		original, _, err := image.Decode(bytes.NewReader(data))
-		if err != nil {
-			return "", ""
-		}
-		var out bytes.Buffer
-		if err := png.Encode(&out, imaging.Fit(original, 64, 64, imaging.Lanczos)); err != nil {
-			return "", ""
-		}
-		data = out.Bytes()
-	}
-	dataURL = "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
-	if len(dataURL) > MaxIconDataURL {
-		return "", ""
-	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), dataURL
-}
+// IconRoots are the directories whose installed artwork names task icons.
+var IconRoots = []string{"/usr/local/share", "/usr/share"}
+
+// MaxIconFiles bounds the files named for one icon.
+const MaxIconFiles = 8
 
 func (s TaskSnapshot) iconsValid() bool {
-	if len(s.Icons) > MaxIcons {
+	if len(s.Icons) > MaxIcons || len(s.IconFiles) > MaxIcons {
 		return false
 	}
 	total := 0
@@ -67,16 +35,42 @@ func (s TaskSnapshot) iconsValid() bool {
 			return false
 		}
 	}
+	for id, files := range s.IconFiles {
+		if len(id) != 64 || len(files) == 0 || len(files) > MaxIconFiles {
+			return false
+		}
+		for _, name := range files {
+			if !IconFile(name) {
+				return false
+			}
+		}
+	}
 	for _, group := range []TaskGroup{s.Services, s.Processes} {
 		for _, row := range group.Items {
 			if row.IconID != "" {
-				if _, ok := s.Icons[row.IconID]; !ok {
+				_, icon := s.Icons[row.IconID]
+				_, files := s.IconFiles[row.IconID]
+				if !icon && !files {
 					return false
 				}
 			}
 		}
 	}
 	return true
+}
+
+// IconFile reports whether name is an installed file below IconRoots, as the
+// Host Agent names task icons.
+func IconFile(name string) bool {
+	if len(name) > 4096 {
+		return false
+	}
+	for _, root := range IconRoots {
+		if rest, ok := strings.CutPrefix(name, root+"/"); ok && fs.ValidPath(rest) {
+			return true
+		}
+	}
+	return false
 }
 func validIcon(id, source string) bool {
 	if len(source) > MaxIconDataURL || len(id) != 64 {
@@ -95,24 +89,25 @@ func validIcon(id, source string) bool {
 		return false
 	}
 	if header == "data:image/svg+xml;base64" {
-		return staticSVG(data)
+		return StaticSVG(data)
 	}
 	config, err := png.DecodeConfig(bytes.NewReader(data))
 	return err == nil && config.Width > 0 && config.Height > 0 && config.Width <= 64 && config.Height <= 64
 }
 
-// SVG images are embedded only via img. Reject active content and any external
-// resource so rendering an installed icon never causes a browser network fetch.
-func staticSVG(data []byte) bool {
+// StaticSVG reports an SVG that is a static image document. SVG images are
+// embedded only via img. Reject active content and any external resource so
+// rendering an installed icon never causes a browser network fetch.
+func StaticSVG(data []byte) bool {
 	if len(data) > 18000 {
 		return false
 	}
 	tags := map[string]bool{}
-	for _, name := range strings.Fields("svg g path rect circle ellipse line polyline polygon defs linearGradient radialGradient stop clipPath mask title desc use symbol") {
+	for name := range strings.FieldsSeq("svg g path rect circle ellipse line polyline polygon defs linearGradient radialGradient stop clipPath mask title desc use symbol") {
 		tags[name] = true
 	}
 	attrs := map[string]bool{}
-	for _, name := range strings.Fields("xmlns version id class width height viewBox preserveAspectRatio x y x1 x2 y1 y2 cx cy r rx ry d points fill fill-rule fill-opacity stroke stroke-width stroke-linecap stroke-linejoin stroke-miterlimit stroke-dasharray stroke-dashoffset stroke-opacity opacity transform gradientUnits gradientTransform spreadMethod offset stop-color stop-opacity clip-path clip-rule mask maskUnits maskContentUnits filter href style role aria-label aria-labelledby focusable") {
+	for name := range strings.FieldsSeq("xmlns version id class width height viewBox preserveAspectRatio x y x1 x2 y1 y2 cx cy r rx ry d points fill fill-rule fill-opacity stroke stroke-width stroke-linecap stroke-linejoin stroke-miterlimit stroke-dasharray stroke-dashoffset stroke-opacity opacity transform gradientUnits gradientTransform spreadMethod offset stop-color stop-opacity clip-path clip-rule mask maskUnits maskContentUnits filter href style role aria-label aria-labelledby focusable") {
 		attrs[name] = true
 	}
 	decoder := xml.NewDecoder(bytes.NewReader(data))
@@ -120,7 +115,7 @@ func staticSVG(data []byte) bool {
 	closed := false
 	for {
 		token, err := decoder.Token()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return closed && depth == 0 && elements > 0
 		}
 		if err != nil {

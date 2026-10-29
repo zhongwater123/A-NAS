@@ -3,6 +3,7 @@ package assistantapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -39,17 +40,21 @@ func newHarness(t *testing.T) *harness {
 	serve := newFakeServe(t)
 	changes := &fakeChanges{}
 	api := New(Options{
-		Connector: SocketConnector{SocketDir: serve.dir, TokenDir: serve.dir},
+		Connector: NewSocketConnector(serve.dir, serve.dir),
 		SocketDir: serve.dir, Changes: changes,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := WithUser(accounts.WithSessionToken(r.Context(), "alice-session"), accounts.User{ID: "u-alice", Username: "alice"})
+		ctx := accounts.WithUser(accounts.WithSessionToken(r.Context(), "alice-session"), accounts.User{ID: "u-alice", Username: "alice"})
 		api.ServeHTTP(w, r.WithContext(ctx))
 	}))
 	t.Cleanup(server.Close)
 	return &harness{t: t, serve: serve, changes: changes, server: server}
 }
+
+// frameWait bounds the wait for one frame. It only stops a hang: under the
+// race detector the 4 MiB screenshot takes seconds to cross a CI runner.
+const frameWait = 30 * time.Second
 
 type window struct {
 	t    *testing.T
@@ -75,7 +80,7 @@ func (w *window) send(method, params string) string {
 	w.t.Helper()
 	w.next++
 	id := "r" + string(rune('0'+w.next))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), frameWait)
 	defer cancel()
 	if err := w.conn.Write(ctx, websocket.MessageText, []byte(`{"jsonrpc":"2.0","id":"`+id+`","method":"`+method+`","params":`+params+`}`)); err != nil {
 		w.t.Fatal(err)
@@ -92,7 +97,7 @@ func (w *window) call(method, params string) frame {
 
 func (w *window) waitFor(match func(frame) bool) frame {
 	w.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), frameWait)
 	defer cancel()
 	for {
 		_, data, err := w.conn.Read(ctx)
@@ -427,6 +432,137 @@ func TestEveryWindowWithTheConversationOpenFollowsItsTurn(t *testing.T) {
 	h.serve.finish()
 	second.waitFor(func(f frame) bool { return isEvent(f, "message.complete") })
 	first.waitFor(func(f frame) bool { return isEvent(f, "message.complete") })
+}
+
+func TestTheWindowIsTheBrowserOfItsOwnSessionOnly(t *testing.T) {
+	h := newHarness(t)
+	first := h.open()
+	first.call("session.create", `{"cols":80}`)
+	register := `{"session_id":"` + fakeRuntime + `","protocol_version":1,"controller_id":"vnas-window","browser_profile_id":"webos","capabilities":%s}`
+	for _, refused := range []string{
+		fmt.Sprintf(register, `["browser_navigate"]`),
+		fmt.Sprintf(register, `["browser_snapshot","browser_cdp"]`),
+		fmt.Sprintf(register, `[]`),
+		strings.Replace(fmt.Sprintf(register, `["browser_snapshot"]`), "vnas-window", "extension", 1),
+		strings.Replace(fmt.Sprintf(register, `["browser_snapshot"]`), `"protocol_version":1`, `"protocol_version":true`, 1),
+	} {
+		if response := first.call("browser.controller.register", refused); len(response.Error) == 0 {
+			t.Fatalf("registration %s passed", refused)
+		}
+	}
+	if response := first.call("browser.controller.register", fmt.Sprintf(register, `["browser_snapshot","browser_click"]`)); len(response.Error) > 0 {
+		t.Fatalf("registration refused: %s", response.Error)
+	}
+	// A second window with the conversation open follows its turn, but the
+	// browser commands go to the window that is the session's browser only,
+	// and the second cannot become the browser while that turn runs.
+	second := h.open()
+	second.call("session.resume", `{"session_id":"`+fakeStored+`","cols":80}`)
+	first.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"browse"}`)
+	command := waitBrowse(t, first)
+	if response := second.call("browser.controller.register", fmt.Sprintf(register, `["browser_snapshot"]`)); len(response.Error) == 0 {
+		t.Fatal("another window became the browser of a turn under way")
+	}
+	answerBrowse(t, first, command, `- button \"相册\" [ref=e1]`)
+	second.waitFor(func(f frame) bool {
+		if isEvent(f, "browser.controller.command") {
+			t.Fatal("a browser command reached another window")
+		}
+		return isEvent(f, "message.complete") && strings.Contains(string(f.Params), "相册")
+	})
+	// Between turns the window the member sends from becomes the browser.
+	if response := second.call("browser.controller.register", fmt.Sprintf(register, `["browser_snapshot"]`)); len(response.Error) > 0 {
+		t.Fatalf("registration between turns refused: %s", response.Error)
+	}
+	second.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"browse"}`)
+	answerBrowse(t, second, waitBrowse(t, second), `- button \"音乐\" [ref=e1]`)
+	second.waitFor(func(f frame) bool {
+		return isEvent(f, "message.complete") && strings.Contains(string(f.Params), "音乐")
+	})
+	// The window that is no longer the browser leaves without detaching the
+	// session from the one that is.
+	_ = first.conn.Close(websocket.StatusNormalClosure, "")
+	select {
+	case <-h.serve.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first window's connection stayed open")
+	}
+	if strings.Contains(strings.Join(h.serve.methodsSeen(), "\n"), "browser.controller.detach") {
+		t.Fatal("a window that was not the browser detached the session")
+	}
+	// The window that leaves stops being the session's browser.
+	_ = second.conn.Close(websocket.StatusNormalClosure, "")
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(strings.Join(h.serve.methodsSeen(), "\n"), "browser.controller.detach") {
+		if time.Now().After(deadline) {
+			t.Fatalf("no detach after the window left: %v", h.serve.methodsSeen())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestTheWindowAnswersWithAScreenshotOfItsPage(t *testing.T) {
+	h := newHarness(t)
+	w := h.open()
+	w.call("session.create", `{"cols":80}`)
+	register := `{"session_id":"` + fakeRuntime + `","protocol_version":1,"controller_id":"vnas-window","browser_profile_id":"webos","capabilities":["browser_snapshot","browser_screenshot"]}`
+	if response := w.call("browser.controller.register", register); len(response.Error) > 0 {
+		t.Fatalf("registration with screenshots refused: %s", response.Error)
+	}
+	w.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"look"}`)
+	w.waitFor(func(f frame) bool {
+		return isEvent(f, "browser.controller.command") && strings.Contains(string(f.Params), `"action":"browser_screenshot"`)
+	})
+	// The page as a PNG in base64 is far larger than any message.
+	image := strings.Repeat("A", 4<<20)
+	if response := w.call("browser.controller.result", `{"session_id":"`+fakeRuntime+`","command_id":"fedcba9876543210fedcba9876543210",`+
+		`"ok":true,"result":{"mime_type":"image/png","data":"`+image+`"}}`); len(response.Error) > 0 {
+		t.Fatalf("screenshot refused: %s", response.Error)
+	}
+	done := w.waitFor(func(f frame) bool { return isEvent(f, "message.complete") })
+	var ev struct {
+		Payload struct {
+			Text string `json:"text"`
+		} `json:"payload"`
+	}
+	_ = json.Unmarshal(done.Params, &ev)
+	var received int
+	if _, err := fmt.Sscanf(ev.Payload.Text, "received %d bytes", &received); err != nil || received < len(image) {
+		t.Fatalf("Hermes got %q, not the screenshot", ev.Payload.Text)
+	}
+	// Anything larger than a screenshot is still refused.
+	w.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"look"}`)
+	w.waitFor(func(f frame) bool { return isEvent(f, "browser.controller.command") })
+	if response := w.call("browser.controller.result", `{"session_id":"`+fakeRuntime+`","command_id":"fedcba9876543210fedcba9876543210",`+
+		`"ok":true,"result":{"data":"`+strings.Repeat("A", maxControllerResult)+`"}}`); len(response.Error) == 0 {
+		t.Fatal("a result over the limit passed")
+	}
+}
+
+// waitBrowse waits for the browser_snapshot of the fake's browse turn at the
+// window that is the session's browser, and returns its command id.
+func waitBrowse(t *testing.T, w *window) string {
+	t.Helper()
+	command := w.waitFor(func(f frame) bool { return isEvent(f, "browser.controller.command") })
+	var ev struct {
+		Payload struct {
+			CommandID string `json:"command_id"`
+			Action    string `json:"action"`
+		} `json:"payload"`
+	}
+	_ = json.Unmarshal(command.Params, &ev)
+	if ev.Payload.Action != "browser_snapshot" {
+		t.Fatalf("command = %s", command.Params)
+	}
+	return ev.Payload.CommandID
+}
+
+func answerBrowse(t *testing.T, w *window, commandID, snapshot string) {
+	t.Helper()
+	if response := w.call("browser.controller.result", `{"session_id":"`+fakeRuntime+`","command_id":"`+commandID+
+		`","ok":true,"result":{"snapshot":"`+snapshot+`"}}`); len(response.Error) > 0 {
+		t.Fatalf("result refused: %s", response.Error)
+	}
 }
 
 func TestIdleWindowClosingLetsTheInstanceGo(t *testing.T) {

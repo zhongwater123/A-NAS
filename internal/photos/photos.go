@@ -15,9 +15,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/capacity"
+	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 	"github.com/zhongwater123/A-NAS/internal/photos/labels"
 	"github.com/zhongwater123/A-NAS/internal/photos/objects"
 )
@@ -38,8 +40,11 @@ const (
 	// DefaultMaxImportBytes caps one original until the product freezes a
 	// per-file limit.
 	DefaultMaxImportBytes = 256 << 20
-	// maxImagePixels rejects decompression bombs before anything decodes the
-	// full image.
+	// DefaultMaxVideoBytes caps one video original
+	// (docs/specs/photo-video.md).
+	DefaultMaxVideoBytes = 4 << 30
+	// maxImagePixels bounds metadata accepted for externally decoded media.
+	// JPEG/PNG also obey the stricter local budget in imagedecode.go.
 	maxImagePixels = 1 << 28
 )
 
@@ -119,8 +124,15 @@ type Motion struct {
 	Duration float64 `json:"duration"`
 }
 
+// Video marks an asset that is a video; it plays in the viewer and takes no
+// part in local AI (docs/specs/photo-video.md).
+type Video struct {
+	Duration float64 `json:"duration"`
+}
+
 type Asset struct {
 	Motion *Motion `json:"motion,omitempty"`
+	Video  *Video  `json:"video,omitempty"`
 	// LiveVideoMissing marks the still of an Apple Live Photo imported
 	// without its MOV; uploading that MOV later completes it.
 	LiveVideoMissing bool      `json:"liveVideoMissing,omitempty"`
@@ -179,6 +191,8 @@ type Options struct {
 	TrashRetention time.Duration
 	// MaxImportBytes defaults to DefaultMaxImportBytes.
 	MaxImportBytes int64
+	// MaxVideoBytes defaults to DefaultMaxVideoBytes.
+	MaxVideoBytes int64
 	// DisableCapacityReserve skips the data-volume reserve check; only tests
 	// on ordinary temporary directories may set it.
 	DisableCapacityReserve bool
@@ -200,8 +214,9 @@ type Options struct {
 // owned by the photo service identity; the caller proves the volume is
 // mounted before calling Open.
 type Service struct {
+	// media decodes HEIC and video. Its turns are shared with the Product
+	// and Share Services, so there is no limit of its own here.
 	media          MediaDecoder
-	decodeSlots    chan struct{}
 	db             *sql.DB
 	root           *os.Root
 	rootPath       string
@@ -209,30 +224,18 @@ type Service struct {
 	random         io.Reader
 	trashRetention time.Duration
 	maxImportBytes int64
+	maxVideoBytes  int64
+	// streams bounds the videos converting for playback at once.
+	streams *mediaplay.Slots
 	// admits reports whether incoming bytes still leave the data-volume
 	// reserve free.
 	admits          func(path string, incoming int64) (bool, error)
 	location        *time.Location
 	sharedLibraryID string
-	// mediaWake tells RunMedia that an import queued work, and aiWake tells
-	// RunAI that a thumbnail did.
+	// mediaWake tells RunMedia that an import queued work.
 	mediaWake chan struct{}
-	aiWake    chan struct{}
-	// ai is what RunAI last observed; aiModel and aiDetector are the models
-	// whose stale vectors and detections have already been queued again,
-	// and detectorLoaded whether the Worker may still hold the detector.
-	ai             aiProgress
-	aiModelMu      sync.Mutex
-	aiModel        string
-	aiDetector     string
-	aiFaces        string
-	aiAnimals      string
-	detectorLoaded bool
-	// scanned counts face and pet scans stored since people last clustered.
-	scanned int
-	// nextDetection is the next detection job with its input, rendered
-	// while the Worker detected the one before. Only the AI runner uses it.
-	nextDetection *detectionInput
+	// ai runs local AI and owns what its rounds share (airunner.go).
+	ai *aiRunner
 	// embedder encodes search queries, index holds image vectors for search
 	// and AI clusters, and detected the detector's best score per class.
 	embedder   Embedder
@@ -246,6 +249,12 @@ type Service struct {
 	matcher           *objects.Matcher
 	// searches keeps what image searches need for their later pages.
 	searches imageSearches
+	// shadow hands searches to RunVectorShadow while shadowing says it runs
+	// (vectorshadow.go); vectorChecked is the image collection the sync loop
+	// last found in the index (vectorsync.go).
+	shadow        chan shadowQuery
+	shadowing     atomic.Bool
+	vectorChecked atomic.Pointer[imagesCollection]
 	// peopleCalibrations say how each kind of occurrence clusters.
 	peopleCalibrations []PeopleCalibration
 
@@ -290,13 +299,16 @@ func Open(root string, options Options) (*Service, error) {
 		return nil, err
 	}
 	service := &Service{
-		db: db, root: opened, rootPath: root, media: options.Media, decodeSlots: make(chan struct{}, 2),
-		now: options.Now, random: options.Random,
-		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes,
+		db: db, root: opened, rootPath: root, media: options.Media,
+		streams: mediaplay.NewSlots(mediaplay.Conversions, mediaplay.ConversionWait),
+		now:     options.Now, random: options.Random,
+		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes, maxVideoBytes: options.MaxVideoBytes,
 		admits: capacity.Admits, location: options.Location, embedder: options.AI,
-		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1), aiWake: make(chan struct{}, 1),
+		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1),
 		searches: imageSearches{encoding: make(chan struct{}, 1)},
+		shadow:   make(chan shadowQuery, 1),
 	}
+	service.ai = newAIRunner(service)
 	if options.DisableCapacityReserve {
 		service.admits = func(string, int64) (bool, error) { return true, nil }
 	}
@@ -336,6 +348,9 @@ func Open(root string, options Options) (*Service, error) {
 	}
 	if service.maxImportBytes <= 0 {
 		service.maxImportBytes = DefaultMaxImportBytes
+	}
+	if service.maxVideoBytes <= 0 {
+		service.maxVideoBytes = DefaultMaxVideoBytes
 	}
 	if err := service.ensureSharedLibrary(); err != nil {
 		_ = service.Close()

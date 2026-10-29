@@ -1,6 +1,7 @@
 import { Lrc } from "lrc-kit";
 
-import type { MusicSource, Track } from "./musicApi";
+import { relativeTime as formatRelativeTime } from "../lib/time";
+import type { MusicSource, Track } from "./api";
 
 export const unknownAlbum = "未知专辑";
 export const unknownArtist = "未知歌手";
@@ -61,18 +62,22 @@ export interface LibraryIndex {
 
 export const artistKey = (name: string) => name.trim().toLocaleLowerCase("zh-CN");
 export const folderKey = (spaceId: string, path: string) => `${spaceId}\u0000${path}`;
-export const artistsOf = (track: Track) => track.artists?.length ? track.artists : [track.artist || unknownArtist];
-export const artistLine = (track: Track) => track.artists?.length ? track.artists.join(" / ") : track.artist || unknownArtist;
+export const artistsOf = (track: Track) => (track.artists?.length ? track.artists : [track.artist || unknownArtist]);
+export const artistLine = (track: Track) =>
+  track.artists?.length ? track.artists.join(" / ") : track.artist || unknownArtist;
 
 export const byAlbumOrder = (left: Track, right: Track) =>
-  (left.discNo ?? 1) - (right.discNo ?? 1) || (left.trackNo ?? 0) - (right.trackNo ?? 0) || compareText(left.name, right.name);
+  (left.discNo ?? 1) - (right.discNo ?? 1) ||
+  (left.trackNo ?? 0) - (right.trackNo ?? 0) ||
+  compareText(left.name, right.name);
 
 export function buildIndex(tracks: Track[]): LibraryIndex {
   const byId = new Map(tracks.map((track) => [track.id, track]));
   const albumTracks = new Map<string, Track[]>();
   for (const track of tracks) {
     const list = albumTracks.get(track.albumId);
-    if (list) list.push(track); else albumTracks.set(track.albumId, [track]);
+    if (list) list.push(track);
+    else albumTracks.set(track.albumId, [track]);
   }
   const albums: Album[] = [];
   for (const [id, list] of albumTracks) {
@@ -82,8 +87,10 @@ export function buildIndex(tracks: Track[]): LibraryIndex {
     const unknown = id === "album:unknown";
     albums.push({
       id,
-      title: unknown ? unknownAlbum : first.album ?? unknownAlbum,
-      artist: unknown ? variousArtists : first.albumArtist || (credited.size === 1 ? artistsOf(first)[0] : variousArtists),
+      title: unknown ? unknownAlbum : (first.album ?? unknownAlbum),
+      artist: unknown
+        ? variousArtists
+        : first.albumArtist || (credited.size === 1 ? artistsOf(first)[0] : variousArtists),
       year: list.find((track) => track.year)?.year,
       tracks: list,
       coverId: list.find((track) => track.coverId)?.coverId,
@@ -91,7 +98,11 @@ export function buildIndex(tracks: Track[]): LibraryIndex {
       addedAt: list.reduce((latest, track) => (track.addedAt > latest ? track.addedAt : latest), ""),
     });
   }
-  albums.sort((left, right) => Number(left.id === "album:unknown") - Number(right.id === "album:unknown") || compareText(left.title, right.title));
+  albums.sort(
+    (left, right) =>
+      Number(left.id === "album:unknown") - Number(right.id === "album:unknown") ||
+      compareText(left.title, right.title),
+  );
   const albumsById = new Map(albums.map((album) => [album.id, album]));
 
   const artistsByKey = new Map<string, Artist>();
@@ -99,33 +110,56 @@ export function buildIndex(tracks: Track[]): LibraryIndex {
     for (const name of artistsOf(track)) {
       const key = artistKey(name);
       let artist = artistsByKey.get(key);
-      if (!artist) { artist = { key, name, tracks: [], albums: [] }; artistsByKey.set(key, artist); }
+      if (!artist) {
+        artist = { key, name, tracks: [], albums: [] };
+        artistsByKey.set(key, artist);
+      }
       artist.tracks.push(track);
     }
   }
   for (const artist of artistsByKey.values()) {
     const ids = new Set(artist.tracks.map((track) => track.albumId));
-    artist.albums = albums.filter((album) => ids.has(album.id) && album.id !== "album:unknown")
+    artist.albums = albums
+      .filter((album) => ids.has(album.id) && album.id !== "album:unknown")
       .sort((left, right) => (right.year ?? 0) - (left.year ?? 0) || compareText(left.title, right.title));
-    artist.coverId = artist.albums.find((album) => album.coverId)?.coverId ?? artist.tracks.find((track) => track.coverId)?.coverId;
+    artist.coverId =
+      artist.albums.find((album) => album.coverId)?.coverId ?? artist.tracks.find((track) => track.coverId)?.coverId;
     artist.tracks.sort((left, right) => compareText(left.title, right.title));
   }
-  const artists = [...artistsByKey.values()].sort((left, right) =>
-    Number(left.name === unknownArtist) - Number(right.name === unknownArtist) || compareText(left.name, right.name));
+  const artists = [...artistsByKey.values()].sort(
+    (left, right) =>
+      Number(left.name === unknownArtist) - Number(right.name === unknownArtist) || compareText(left.name, right.name),
+  );
 
   const genresByKey = new Map<string, Genre>();
   for (const track of tracks) {
     for (const name of track.genres ?? []) {
       const key = artistKey(name);
       let genre = genresByKey.get(key);
-      if (!genre) { genre = { key, name, tracks: [], coverIds: [] }; genresByKey.set(key, genre); }
+      if (!genre) {
+        genre = { key, name, tracks: [], coverIds: [] };
+        genresByKey.set(key, genre);
+      }
       genre.tracks.push(track);
-      if (track.coverId && genre.coverIds.length < 4 && !genre.coverIds.includes(track.coverId)) genre.coverIds.push(track.coverId);
+      if (track.coverId && genre.coverIds.length < 4 && !genre.coverIds.includes(track.coverId))
+        genre.coverIds.push(track.coverId);
     }
   }
-  const genres = [...genresByKey.values()].sort((left, right) => right.tracks.length - left.tracks.length || compareText(left.name, right.name));
+  const genres = [...genresByKey.values()].sort(
+    (left, right) => right.tracks.length - left.tracks.length || compareText(left.name, right.name),
+  );
 
-  return { tracks, byId, albums, albumsById, artists, artistsByKey, genres, genresByKey, folders: buildFolders(tracks) };
+  return {
+    tracks,
+    byId,
+    albums,
+    albumsById,
+    artists,
+    artistsByKey,
+    genres,
+    genresByKey,
+    folders: buildFolders(tracks),
+  };
 }
 
 // buildFolders makes the folder tree of every space that holds music; the
@@ -149,7 +183,11 @@ function buildFolders(tracks: Track[]): Map<string, Folder> {
     folder.tracks.push(track);
     for (let current: Folder | undefined = folder; current; ) {
       current.total += 1;
-      const parentPath: string | undefined = current.path ? (current.path.includes("/") ? current.path.slice(0, current.path.lastIndexOf("/")) : "") : undefined;
+      const parentPath: string | undefined = current.path
+        ? current.path.includes("/")
+          ? current.path.slice(0, current.path.lastIndexOf("/"))
+          : ""
+        : undefined;
       current = parentPath === undefined ? undefined : folders.get(folderKey(track.spaceId, parentPath));
     }
   }
@@ -161,7 +199,8 @@ function buildFolders(tracks: Track[]): Map<string, Folder> {
 }
 
 // sourceFolder is the folder a music source starts at, if it holds music.
-export const sourceFolder = (index: LibraryIndex, source: MusicSource) => index.folders.get(folderKey(source.spaceId, source.path));
+export const sourceFolder = (index: LibraryIndex, source: MusicSource) =>
+  index.folders.get(folderKey(source.spaceId, source.path));
 
 // folderTracks lists every track in a folder and below it, in folder order.
 export function folderTracks(folder: Folder): Track[] {
@@ -173,7 +212,10 @@ export type SongSort = "title" | "artist" | "album" | "added" | "duration";
 export function sortTracks(tracks: Track[], sort: SongSort, descending = false): Track[] {
   const compare: Record<SongSort, (left: Track, right: Track) => number> = {
     title: (left, right) => compareText(left.title, right.title),
-    artist: (left, right) => compareText(artistLine(left), artistLine(right)) || compareText(left.album, right.album) || byAlbumOrder(left, right),
+    artist: (left, right) =>
+      compareText(artistLine(left), artistLine(right)) ||
+      compareText(left.album, right.album) ||
+      byAlbumOrder(left, right),
     album: (left, right) => compareText(left.album, right.album) || byAlbumOrder(left, right),
     added: (left, right) => left.addedAt.localeCompare(right.addedAt),
     duration: (left, right) => (left.durationMs ?? 0) - (right.durationMs ?? 0),
@@ -200,7 +242,11 @@ function matchScore(text: string | undefined, query: string, pinyin?: PinyinMatc
   return 0;
 }
 
-export interface SearchResults { tracks: Track[]; albums: Album[]; artists: Artist[] }
+export interface SearchResults {
+  tracks: Track[];
+  albums: Album[];
+  artists: Artist[];
+}
 
 // search matches every word of the query against titles, artists and albums,
 // by text or, for Hanzi, by pinyin, and orders closer matches first.
@@ -212,7 +258,9 @@ export function search(index: LibraryIndex, rawQuery: string, pinyin?: PinyinMat
     let total = 0;
     for (const word of words) {
       let best = 0;
-      fields.forEach((field, position) => { best = Math.max(best, matchScore(field, word, pinyin) * weights[position]); });
+      fields.forEach((field, position) => {
+        best = Math.max(best, matchScore(field, word, pinyin) * weights[position]);
+      });
       if (!best) {
         // A whole query in pinyin may span words: "zhou jie lun".
         if (words.length > 1 && pinyin && fields.some((field) => matchScore(field, query, pinyin))) return 1;
@@ -222,15 +270,28 @@ export function search(index: LibraryIndex, rawQuery: string, pinyin?: PinyinMat
     }
     return total;
   };
-  const rank = <T,>(items: T[], score: (item: T) => number, name: (item: T) => string) => items
-    .map((item) => ({ item, score: score(item) }))
-    .filter((entry) => entry.score > 0)
-    .sort((left, right) => right.score - left.score || compareText(name(left.item), name(right.item)))
-    .map((entry) => entry.item);
+  const rank = <T>(items: T[], score: (item: T) => number, name: (item: T) => string) =>
+    items
+      .map((item) => ({ item, score: score(item) }))
+      .filter((entry) => entry.score > 0)
+      .sort((left, right) => right.score - left.score || compareText(name(left.item), name(right.item)))
+      .map((entry) => entry.item);
   return {
-    tracks: rank(index.tracks, (track) => scoreAll([track.title, artistLine(track), track.album], [3, 2, 1]), (track) => track.title),
-    albums: rank(index.albums.filter((album) => album.id !== "album:unknown"), (album) => scoreAll([album.title, album.artist], [3, 2]), (album) => album.title),
-    artists: rank(index.artists, (artist) => scoreAll([artist.name], [3]), (artist) => artist.name),
+    tracks: rank(
+      index.tracks,
+      (track) => scoreAll([track.title, artistLine(track), track.album], [3, 2, 1]),
+      (track) => track.title,
+    ),
+    albums: rank(
+      index.albums.filter((album) => album.id !== "album:unknown"),
+      (album) => scoreAll([album.title, album.artist], [3, 2]),
+      (album) => album.title,
+    ),
+    artists: rank(
+      index.artists,
+      (artist) => scoreAll([artist.name], [3]),
+      (artist) => artist.name,
+    ),
   };
 }
 
@@ -260,27 +321,39 @@ export function summary(tracks: Track[]): string {
 }
 
 export function relativeTime(iso: string, now = Date.now()): string {
-  const elapsed = Math.max(0, now - Date.parse(iso));
-  const minute = 60_000;
-  if (elapsed < minute) return "刚刚";
-  if (elapsed < 60 * minute) return `${Math.floor(elapsed / minute)} 分钟前`;
-  if (elapsed < 24 * 60 * minute) return `${Math.floor(elapsed / (60 * minute))} 小时前`;
-  const days = Math.floor(elapsed / (24 * 60 * minute));
-  if (days === 1) return "昨天";
-  if (days < 7) return `${days} 天前`;
-  return new Date(iso).toLocaleDateString("zh-CN", { month: "long", day: "numeric" });
+  return formatRelativeTime(iso, now, { dateAfterDays: 7 });
 }
 
 export const formatLabel: Record<string, string> = {
-  mp3: "MP3", flac: "FLAC", m4a: "AAC", aac: "AAC", ogg: "OGG", opus: "OPUS", wav: "WAV", ape: "APE", wma: "WMA", wv: "WavPack", aiff: "AIFF", dsf: "DSD", dff: "DSD",
+  mp3: "MP3",
+  flac: "FLAC",
+  m4a: "AAC",
+  aac: "AAC",
+  ogg: "OGG",
+  opus: "OPUS",
+  wav: "WAV",
+  ape: "APE",
+  wma: "WMA",
+  wv: "WavPack",
+  aiff: "AIFF",
+  dsf: "DSD",
+  dff: "DSD",
 };
-export const qualityOf = (track: Track) => track.codec === "alac" ? "ALAC" : formatLabel[track.format] ?? track.format.toUpperCase();
+export const qualityOf = (track: Track) =>
+  track.codec === "alac" ? "ALAC" : (formatLabel[track.format] ?? track.format.toUpperCase());
 const losslessFormats = new Set(["flac", "wav", "ape", "wv", "aiff", "dsf", "dff"]);
 // WMA Lossless shares the .wma extension with lossy WMA.
-export const lossless = (track: Track) => losslessFormats.has(track.format) || track.codec === "alac" || track.codec === "wmalossless";
+export const lossless = (track: Track) =>
+  losslessFormats.has(track.format) || track.codec === "alac" || track.codec === "wmalossless";
 
-export interface LyricLine { time: number; text: string }
-export interface Lyrics { synced: boolean; lines: LyricLine[] }
+export interface LyricLine {
+  time: number;
+  text: string;
+}
+export interface Lyrics {
+  synced: boolean;
+  lines: LyricLine[];
+}
 
 // parseLyrics reads LRC text with lrc-kit; text without time tags is shown
 // as plain lyrics. Times are in seconds.
@@ -290,7 +363,10 @@ export function parseLyrics(text: string): Lyrics {
     .map((lyric) => ({ time: lyric.timestamp, text: lyric.content.trim() }))
     .sort((left, right) => left.time - right.time);
   if (lines.length) return { synced: true, lines };
-  const plain = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !/^\[[a-z]+:.*\]$/i.test(line));
+  const plain = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^\[[a-z]+:.*\]$/i.test(line));
   return { synced: false, lines: plain.map((line) => ({ time: -1, text: line })) };
 }
 
@@ -299,7 +375,8 @@ export function activeLine(lyrics: Lyrics, time: number): number {
   if (!lyrics.synced) return -1;
   let found = -1;
   for (let index = 0; index < lyrics.lines.length; index++) {
-    if (lyrics.lines[index].time <= time + 0.15) found = index; else break;
+    if (lyrics.lines[index].time <= time + 0.15) found = index;
+    else break;
   }
   return found;
 }

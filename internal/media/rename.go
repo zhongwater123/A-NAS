@@ -17,8 +17,12 @@ import (
 // rename gives one file or folder a new name inside its folder.
 type rename struct{ id, parent, from, to string }
 
+// validName accepts a name the media center may give a file or folder.
+// Every rename goes through files.Service.Move, which applies the file
+// manager's rules for new names (#222); the media center only adds that a
+// name must not hide the file from its libraries.
 func validName(name string) bool {
-	return name != "" && !strings.ContainsAny(name, "/\\\x00") && !strings.HasPrefix(name, ".") && len(name) <= 255
+	return name != "" && !strings.HasPrefix(name, ".")
 }
 
 // videoRenames plans a video file's new name, with the subtitles, NFO
@@ -68,7 +72,7 @@ func (s *Service) applyRenames(ctx context.Context, actor accounts.User, renames
 // keep their IDs across a rename, so progress, favorites and collections
 // stay; the library is rescanned to read the title from the new name.
 func (s *Service) RenameVideo(ctx context.Context, actor accounts.User, videoID, name string) (VideoDetail, error) {
-	video, library, err := s.visibleVideo(ctx, actor, videoID)
+	_, library, err := s.visibleVideo(ctx, actor, videoID)
 	if err != nil {
 		return VideoDetail{}, err
 	}
@@ -76,7 +80,7 @@ func (s *Service) RenameVideo(ctx context.Context, actor accounts.User, videoID,
 	// catalog update. Reload after waiting, because another rename may have run.
 	unlock := s.lockRename(ctx, actor, library.ID)
 	defer unlock()
-	video, library, err = s.visibleVideo(ctx, actor, videoID)
+	video, library, err := s.visibleVideo(ctx, actor, videoID)
 	if err != nil {
 		return VideoDetail{}, err
 	}

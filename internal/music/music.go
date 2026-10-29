@@ -5,7 +5,7 @@
 // production every read runs as the signed-in member through the File Broker
 // (ADR 0008, ADR 0018) and the library never opens a file its member cannot.
 // Formats browsers cannot play are probed and decoded by the shared media
-// worker (mediaworker); this package only decides what to ask it for.
+// worker (ffmpegworker); this package only decides what to ask it for.
 package music
 
 import (
@@ -27,8 +27,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 var (
@@ -76,11 +76,10 @@ type Spaces interface {
 
 type Options struct {
 	Now    func() time.Time
-	Random io.Reader
 	Logger *slog.Logger
 	// Worker reads and decodes the formats browsers cannot play. Without
 	// one they are indexed from their names and cannot be played.
-	Worker mediaworker.Worker
+	Worker ffmpegworker.Worker
 }
 
 type Service struct {
@@ -88,9 +87,8 @@ type Service struct {
 	covers  coverStore
 	files   Files
 	spaces  Spaces
-	worker  mediaworker.Worker
+	worker  ffmpegworker.Worker
 	now     func() time.Time
-	random  io.Reader
 	logger  *slog.Logger
 	version atomic.Int64
 
@@ -109,14 +107,11 @@ func New(store *Store, coverRoot string, fileService Files, spaces Spaces, optio
 	base, cancel := context.WithCancel(context.Background())
 	service := &Service{
 		store: store, covers: coverStore{root: coverRoot}, files: fileService, spaces: spaces, worker: options.Worker,
-		now: options.Now, random: options.Random, logger: options.Logger,
+		now: options.Now, logger: options.Logger,
 		base: base, cancel: cancel, work: make(chan struct{}, 1), scans: map[string]*scanJob{},
 	}
 	if service.now == nil {
 		service.now = time.Now
-	}
-	if service.random == nil {
-		service.random = rand.Reader
 	}
 	if service.logger == nil {
 		service.logger = slog.Default()
@@ -293,7 +288,7 @@ func (s *Service) Decode(ctx context.Context, actor accounts.User, id string, st
 	}
 	// The worker receives its own descriptor; this one closes once the
 	// request is sent.
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	stream, err := s.worker.Audio(ctx, content.Reader, playbackRequest(value.SampleRate, value.BitDepth, start))
 	return stream, decoderError(err)
 }
@@ -302,9 +297,9 @@ func decoderError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, mediaworker.ErrUnavailable):
+	case errors.Is(err, ffmpegworker.ErrUnavailable):
 		return fmt.Errorf("%w: %w", ErrDecoderUnavailable, err)
-	case errors.Is(err, mediaworker.ErrUnreadable), errors.Is(err, mediaworker.ErrInvalid):
+	case errors.Is(err, ffmpegworker.ErrUnreadable), errors.Is(err, ffmpegworker.ErrInvalid):
 		return fmt.Errorf("%w: %w", ErrUndecodable, err)
 	}
 	return err
@@ -343,7 +338,7 @@ func (s *Service) Lyrics(ctx context.Context, actor accounts.User, id string) (s
 	if value.LyricsFile != "" {
 		content, err := s.files.OpenContent(ctx, actor, value.LyricsFile)
 		if err == nil {
-			defer content.Reader.Close()
+			defer func() { _ = content.Reader.Close() }()
 			raw, err := io.ReadAll(io.LimitReader(content.Reader, maxLyricsBytes))
 			if err != nil {
 				return "", err
@@ -361,7 +356,7 @@ func (s *Service) Lyrics(ctx context.Context, actor accounts.User, id string) (s
 	if err != nil {
 		return "", err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	lyrics := readLyrics(content.Reader)
 	if lyrics == "" {
 		return "", ErrNotFound
@@ -689,20 +684,19 @@ func (s *Service) Playlists(ctx context.Context, actor accounts.User) ([]Playlis
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	items := []Playlist{}
 	for rows.Next() {
 		var item Playlist
 		var created, updated string
 		if err := rows.Scan(&item.ID, &item.Name, &created, &updated); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 		item.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
 		items = append(items, item)
 	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
 	for index := range items {
@@ -772,10 +766,7 @@ func (s *Service) CreatePlaylist(ctx context.Context, actor accounts.User, name 
 	if err != nil || !validTrackIDs(trackIDs) {
 		return Playlist{}, ErrInvalid
 	}
-	id, err := s.randomID("playlist")
-	if err != nil {
-		return Playlist{}, err
-	}
+	id := s.randomID("playlist")
 	now := formatTime(s.now())
 	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -889,10 +880,4 @@ func (s *Service) DeletePlaylist(ctx context.Context, actor accounts.User, id st
 	return nil
 }
 
-func (s *Service) randomID(prefix string) (string, error) {
-	value := make([]byte, 16)
-	if _, err := io.ReadFull(s.random, value); err != nil {
-		return "", err
-	}
-	return prefix + ":" + hex.EncodeToString(value), nil
-}
+func (s *Service) randomID(prefix string) string { return prefix + ":" + rand.Text() }

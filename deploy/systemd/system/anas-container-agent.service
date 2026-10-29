@@ -27,7 +27,10 @@ StateDirectoryMode=0750
 UMask=0007
 Restart=on-failure
 RestartSec=2s
-# Lets a running Compose install finish its current step on shutdown.
+# On stop the agent cancels a running install and rolls it back with Compose
+# itself, so only the agent gets SIGTERM; whatever is left at the timeout is
+# killed, and the agent rolls the install back when it starts again.
+KillMode=mixed
 TimeoutStopSec=60s
 NoNewPrivileges=true
 ProtectSystem=strict

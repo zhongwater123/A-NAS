@@ -1,8 +1,9 @@
 import { Check, Copy, Eye, EyeOff, Loader, TriangleAlert } from "lucide-react";
 import { CSSProperties, KeyboardEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { AppCredential, AppJob, CatalogApp, iconURL } from "../appsApi";
-import { copyText } from "../clipboard";
+import { copyText } from "../lib/clipboard";
+import { AppCredential, AppJob, CatalogApp, iconURL } from "./api";
+import styles from "./appcenter.module.css";
 import { appURL, openApp } from "./model";
 
 // The Markdown renderer is its own chunk. Once loaded it renders synchronously
@@ -11,15 +12,21 @@ import { appURL, openApp } from "./model";
 let markdown: typeof import("./AppMarkdown") | undefined;
 let loadingMarkdown: Promise<unknown> | undefined;
 export function preloadMarkdown(): Promise<unknown> {
-  loadingMarkdown ??= import("./AppMarkdown").then((module) => { markdown = module; });
+  loadingMarkdown ??= import("./AppMarkdown").then((module) => {
+    markdown = module;
+  });
   return loadingMarkdown;
 }
 
 export function AppIcon({ app, size = "md" }: { app: CatalogApp; size?: "sm" | "md" | "lg" | "xl" }) {
   const [failed, setFailed] = useState(false);
   return (
-    <span className={`ac-icon ${size}`} aria-hidden="true">
-      {failed ? <b>{app.title.slice(0, 1).toUpperCase()}</b> : <img src={iconURL(app.id)} alt="" draggable={false} onError={() => setFailed(true)} />}
+    <span className={`${styles.acIcon} ${styles[size] ?? ""}`} aria-hidden="true">
+      {failed ? (
+        <b>{app.title.slice(0, 1).toUpperCase()}</b>
+      ) : (
+        <img src={iconURL(app.id)} alt="" draggable={false} onError={() => setFailed(true)} />
+      )}
     </span>
   );
 }
@@ -27,14 +34,34 @@ export function AppIcon({ app, size = "md" }: { app: CatalogApp; size?: "sm" | "
 // The compact action on a card or row: install, open, or what is happening.
 export function AppAction({ app, onInstall }: { app: CatalogApp; onInstall: (app: CatalogApp) => void }) {
   if (app.state === "installing" || app.state === "uninstalling") {
-    return <span className="ac-get busy"><Loader className="ac-spin" />{app.state === "installing" ? "安装中" : "卸载中"}</span>;
+    return (
+      <span className={`${styles.acGet} ${styles.busy}`}>
+        <Loader className={styles.acSpin} />
+        {app.state === "installing" ? "安装中" : "卸载中"}
+      </span>
+    );
   }
   if (app.state === "installed") {
-    return appURL(app)
-      ? <button className="ac-get open" aria-label={`打开 ${app.title}`} onClick={() => openApp(app)}>打开</button>
-      : <span className="ac-get done"><Check />已安装</span>;
+    return appURL(app) ? (
+      <button
+        className={`${styles.acGet} ${styles.open}`}
+        aria-label={`打开 ${app.title}`}
+        onClick={() => openApp(app)}
+      >
+        打开
+      </button>
+    ) : (
+      <span className={`${styles.acGet} ${styles.done}`}>
+        <Check />
+        已安装
+      </span>
+    );
   }
-  return <button className="ac-get" aria-label={`安装 ${app.title}`} onClick={() => onInstall(app)}>安装</button>;
+  return (
+    <button className={styles.acGet} aria-label={`安装 ${app.title}`} onClick={() => onInstall(app)}>
+      安装
+    </button>
+  );
 }
 
 // Manifest Markdown. Until the renderer has loaded, a few placeholder lines
@@ -46,9 +73,19 @@ export function RichText({ text }: { text: string }) {
   }, []);
   const Markdown = markdown?.default;
   if (!Markdown) {
-    return <div className="ac-prose ac-prose-loading" role="status" aria-label="正在载入说明"><span /><span /><span /></div>;
+    return (
+      <div className={`${styles.acProse} ${styles.acProseLoading}`} role="status" aria-label="正在载入说明">
+        <span />
+        <span />
+        <span />
+      </div>
+    );
   }
-  return <div className="ac-prose"><Markdown>{text}</Markdown></div>;
+  return (
+    <div className={styles.acProse}>
+      <Markdown>{text}</Markdown>
+    </div>
+  );
 }
 
 // Long text folds to a few lines with a control to show the rest.
@@ -67,9 +104,18 @@ export function Folded({ children, lines = 6 }: { children: ReactNode; lines?: n
     return () => observer?.disconnect();
   }, [open]);
   return (
-    <div className={`ac-folded ${open ? "open" : ""} ${overflows ? "overflows" : ""}`} style={{ "--ac-fold-lines": lines } as CSSProperties}>
-      <div ref={body} className="ac-folded-body"><div ref={content}>{children}</div></div>
-      {(overflows || open) && <button className="ac-link-button" onClick={() => setOpen(!open)}>{open ? "收起" : "展开全部"}</button>}
+    <div
+      className={`${styles.acFolded} ${open ? styles.open : ""} ${overflows ? styles.overflows : ""}`}
+      style={{ "--ac-fold-lines": lines } as CSSProperties}
+    >
+      <div ref={body} className={styles.acFoldedBody}>
+        <div ref={content}>{children}</div>
+      </div>
+      {(overflows || open) && (
+        <button className={styles.acLinkButton} onClick={() => setOpen(!open)}>
+          {open ? "收起" : "展开全部"}
+        </button>
+      )}
     </div>
   );
 }
@@ -77,7 +123,7 @@ export function Folded({ children, lines = 6 }: { children: ReactNode; lines?: n
 export function JobOutput({ job, summary = "显示详细输出", open }: { job: AppJob; summary?: string; open?: boolean }) {
   if (job.output.length === 0) return null;
   return (
-    <details className="ac-output" open={open}>
+    <details className={styles.acOutput} open={open}>
       <summary>{summary}</summary>
       <pre>{job.output.join("\n")}</pre>
     </details>
@@ -90,11 +136,20 @@ export function JobOutput({ job, summary = "显示详细输出", open }: { job: 
 export function Logins({ credentials }: { credentials: AppCredential[] }) {
   const upstream = credentials.some((credential) => credential.upstream);
   return (
-    <div className={`ac-logins ${upstream ? "upstream" : ""}`}>
-      {credentials.map((credential) => <Login key={credential.label} credential={credential} />)}
-      {upstream
-        ? <p className="ac-logins-warning"><TriangleAlert />这是安装清单公开的默认密码，任何人都查得到。应用安装于 A-NAS 生成独立密码之前，请在应用里改成自己的密码。</p>
-        : <small>由 A-NAS 为本机随机生成，只有管理员能看到。在应用里改过密码，或重新安装时沿用了更早的数据，以那时的密码为准。</small>}
+    <div className={`${styles.acLogins} ${upstream ? "upstream" : ""}`}>
+      {credentials.map((credential) => (
+        <Login key={credential.label} credential={credential} />
+      ))}
+      {upstream ? (
+        <p className={styles.acLoginsWarning}>
+          <TriangleAlert />
+          这是安装清单公开的默认密码，任何人都查得到。应用安装于 A-NAS 生成独立密码之前，请在应用里改成自己的密码。
+        </p>
+      ) : (
+        <small>
+          由 A-NAS 为本机随机生成，只有管理员能看到。在应用里改过密码，或重新安装时沿用了更早的数据，以那时的密码为准。
+        </small>
+      )}
     </div>
   );
 }
@@ -108,18 +163,35 @@ function Login({ credential }: { credential: AppCredential }) {
     return () => window.clearTimeout(timer);
   }, [copied]);
   return (
-    <dl className="ac-login">
+    <dl className={styles.acLogin}>
       {credential.username && (
-        <div><dt>账号</dt><dd><code>{credential.username}</code></dd></div>
+        <div>
+          <dt>账号</dt>
+          <dd>
+            <code>{credential.username}</code>
+          </dd>
+        </div>
       )}
       <div>
         <dt>{credential.label}</dt>
         <dd>
-          <code className={shown ? "" : "hidden"} aria-label={shown ? undefined : `${credential.label}已隐藏`}>{shown ? credential.secret : "•".repeat(14)}</code>
-          <button className="ac-icon-btn" aria-label={shown ? `隐藏${credential.label}` : `显示${credential.label}`} title={shown ? "隐藏" : "显示"} onClick={() => setShown(!shown)}>
+          <code className={shown ? "" : styles.hidden} aria-label={shown ? undefined : `${credential.label}已隐藏`}>
+            {shown ? credential.secret : "•".repeat(14)}
+          </code>
+          <button
+            className={styles.acIconBtn}
+            aria-label={shown ? `隐藏${credential.label}` : `显示${credential.label}`}
+            title={shown ? "隐藏" : "显示"}
+            onClick={() => setShown(!shown)}
+          >
             {shown ? <EyeOff /> : <Eye />}
           </button>
-          <button className={`ac-icon-btn ${copied ? "done" : ""}`} aria-label={copied ? "已复制" : `复制${credential.label}`} title={copied ? "已复制" : "复制"} onClick={() => setCopied(copyText(credential.secret))}>
+          <button
+            className={`${styles.acIconBtn} ${copied ? styles.done : ""}`}
+            aria-label={copied ? "已复制" : `复制${credential.label}`}
+            title={copied ? "已复制" : "复制"}
+            onClick={() => setCopied(copyText(credential.secret))}
+          >
             {copied ? <Check /> : <Copy />}
           </button>
         </dd>
@@ -129,12 +201,26 @@ function Login({ credential }: { credential: AppCredential }) {
 }
 
 export function Progress() {
-  return <span className="ac-progress" aria-hidden="true"><i /></span>;
+  return (
+    <span className={styles.acProgress} aria-hidden="true">
+      <i />
+    </span>
+  );
 }
 
 // A window-modal layer over the App Center that takes focus; Escape or a
 // click beside it dismisses it. The panel makes the rest inert meanwhile.
-export function Layer({ label, onDismiss, children, size = "md" }: { label: string; onDismiss?: () => void; children: ReactNode; size?: "sm" | "md" }) {
+export function Layer({
+  label,
+  onDismiss,
+  children,
+  size = "md",
+}: {
+  label: string;
+  onDismiss?: () => void;
+  children: ReactNode;
+  size?: "sm" | "md";
+}) {
   const sheet = useRef<HTMLDivElement>(null);
   useEffect(() => sheet.current?.focus(), []);
   const onKeyDown = (event: KeyboardEvent) => {
@@ -143,8 +229,21 @@ export function Layer({ label, onDismiss, children, size = "md" }: { label: stri
     onDismiss();
   };
   return (
-    <div className="ac-layer" onKeyDown={onKeyDown} onPointerDown={(event) => { if (event.target === event.currentTarget) onDismiss?.(); }}>
-      <div ref={sheet} className={`ac-sheet ${size}`} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
+    <div
+      className={styles.acLayer}
+      onKeyDown={onKeyDown}
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onDismiss?.();
+      }}
+    >
+      <div
+        ref={sheet}
+        className={`${styles.acSheet} ${styles[size] ?? ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        tabIndex={-1}
+      >
         {children}
       </div>
     </div>

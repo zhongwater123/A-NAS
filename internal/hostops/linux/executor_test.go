@@ -4,52 +4,39 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
-	"github.com/zhongwater123/A-NAS/internal/hoststate"
-	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
 func TestCreateVolumeResolvesStableIDAndWritesUUIDMountUnit(t *testing.T) {
-	diskID, _ := hoststate.NewResourceID("disk:test-data")
-	disk := hoststate.Disk{
-		ID: diskID, Model: "Test Data Disk", Transport: hoststate.TransportSATA,
-		CapacityBytes: 512_000_000_000, Role: hoststate.DiskRoleUnassigned,
-	}
-	resolver := fixedResolver{device: linux.BlockDevice{Disk: disk, DevicePath: "/dev/sdb", PartitionPath: "/dev/sdb1"}}
-	runner := &recordingRunner{}
-	systemRoot := t.TempDir()
-	mountPoint := filepath.Join(t.TempDir(), "data")
-	executor := linux.NewExecutor(resolver, runner, linux.Options{
-		SystemRoot: systemRoot, MountPoint: mountPoint, MountUnitName: "a-nas-data.mount",
-	})
+	host := newDiskHost(t, "disk:test-data")
+	executor := host.executor()
 
-	volume, err := executor.CreateVolume(context.Background(), storage.CreateVolumeRequest{
-		PlanID: "plan:test", DiskID: disk.ID.String(), Fingerprint: storage.FingerprintDisk(disk),
-	})
-	if err != nil {
-		t.Fatalf("CreateVolume() error = %v", err)
+	operation := host.finish(t, executor, startCreate(t, executor, "plan:test", datavolume.LayoutSingle, host.targets("disk:test-data")...))
+	if operation.State != datavolume.OperationSucceeded || operation.Volume == nil {
+		t.Fatalf("operation = %+v, want succeeded", operation)
 	}
-	if got, want := volume.FilesystemUUID, "11111111-2222-3333-4444-555555555555"; got != want {
+	if got, want := operation.Volume.FilesystemUUID, host.uuid(1); got != want {
 		t.Fatalf("filesystem UUID = %q, want %q", got, want)
 	}
-	unitPath := filepath.Join(systemRoot, "etc", "systemd", "system", "a-nas-data.mount")
-	unit, err := os.ReadFile(unitPath)
+	unit, err := os.ReadFile(filepath.Join(host.systemRoot, "etc", "systemd", "system", "a-nas-data.mount"))
 	if err != nil {
 		t.Fatalf("read mount unit: %v", err)
 	}
-	if !strings.Contains(string(unit), "What=UUID=11111111-2222-3333-4444-555555555555") || !strings.Contains(string(unit), "Options=noatime,compress=zstd:3,nodev,nosuid,noexec") {
+	if !strings.Contains(string(unit), "What=UUID="+host.uuid(1)) || !strings.Contains(string(unit), "Options=noatime,compress=zstd:3,nodev,nosuid,noexec") {
 		t.Fatalf("mount unit does not bind the verified UUID and safe options:\n%s", unit)
 	}
-	if len(runner.commands) < 7 {
-		t.Fatalf("commands = %#v, want destructive steps plus mount setup", runner.commands)
+	if len(host.lines()) < 7 {
+		t.Fatalf("commands = %#v, want destructive steps plus mount setup", host.lines())
 	}
-	for _, command := range runner.commands {
-		if strings.Contains(strings.Join(command.args, " "), "disk:test-data") {
-			t.Fatalf("stable ID leaked into a host command: %#v", command)
+	for _, line := range host.lines() {
+		if strings.Contains(line, "disk:test-data") {
+			t.Fatalf("stable ID leaked into a host command: %q", line)
 		}
 	}
 }
@@ -61,9 +48,9 @@ func TestSetCredentialKeepsPasswordOutOfArgumentsAndAppliesHardenedSambaConfig(t
 	executor := linux.NewExecutor(nil, runner, linux.Options{
 		SystemRoot: systemRoot, MountPoint: mountPoint, SMBInterface: "enp3s0",
 	})
-	request := accounts.CredentialRequest{
+	request := accountid.CredentialRequest{
 		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-		Password: "alice password for testing", Role: accounts.RoleMember, UID: 20100, Enabled: true,
+		Password: "alice password for testing", Role: accountid.RoleMember, UID: 20100, Enabled: true,
 	}
 
 	if err := executor.SetCredential(context.Background(), request); err != nil {
@@ -99,6 +86,59 @@ func TestSetCredentialKeepsPasswordOutOfArgumentsAndAppliesHardenedSambaConfig(t
 	}
 }
 
+// Shared's options are the common ones with Agent空间 spliced into their veto
+// line, so a change to that line could silently drop the veto that keeps SMB
+// from renaming the Host Agent's managed directories (ADR 0024 decision 5).
+// The root integration test that proves the refusal does not run in CI.
+func TestSambaVetoesAgentSpaceOnlyInShared(t *testing.T) {
+	systemRoot := t.TempDir()
+	executor := linux.NewExecutor(nil, &recordingRunner{}, linux.Options{
+		SystemRoot: systemRoot, MountPoint: filepath.Join(t.TempDir(), "data"),
+	})
+	if err := executor.SetCredential(context.Background(), accountid.CredentialRequest{
+		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
+		Password: "alice password for testing", Role: accountid.RoleMember, UID: 20100, Enabled: true,
+	}); err != nil {
+		t.Fatalf("SetCredential() error = %v", err)
+	}
+	configuration, err := os.ReadFile(filepath.Join(systemRoot, "etc", "samba", "smb.conf"))
+	if err != nil {
+		t.Fatalf("read Samba configuration: %v", err)
+	}
+	vetoes := sambaVetoes(t, string(configuration))
+	for share, want := range map[string]bool{"homes": false, "Shared": true} {
+		if !slices.Contains(vetoes[share], ".a-nas-trash") {
+			t.Errorf("[%s] vetoes %q, want the trash directory hidden:\n%s", share, vetoes[share], configuration)
+		}
+		if got := slices.Contains(vetoes[share], "Agent空间"); got != want {
+			t.Errorf("[%s] vetoes %q, Agent空间 vetoed = %v, want %v:\n%s", share, vetoes[share], got, want, configuration)
+		}
+	}
+}
+
+// sambaVetoes returns the names in each share's veto files option.
+func sambaVetoes(t *testing.T, configuration string) map[string][]string {
+	t.Helper()
+	vetoes := map[string][]string{}
+	share := ""
+	for line := range strings.Lines(configuration) {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			share = strings.Trim(line, "[]")
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(key) != "veto files" {
+			continue
+		}
+		if _, set := vetoes[share]; set {
+			t.Fatalf("[%s] sets veto files twice; Samba keeps only the last", share)
+		}
+		vetoes[share] = strings.FieldsFunc(value, func(r rune) bool { return r == '/' || r == ' ' })
+	}
+	return vetoes
+}
+
 func TestSetCredentialRefusesPasswordsSmbpasswdWouldCut(t *testing.T) {
 	for name, password := range map[string]string{
 		"newline":  "short\nshort\nthen any text",
@@ -108,9 +148,9 @@ func TestSetCredentialRefusesPasswordsSmbpasswdWouldCut(t *testing.T) {
 	} {
 		runner := &recordingRunner{}
 		executor := linux.NewExecutor(nil, runner, linux.Options{SystemRoot: t.TempDir(), MountPoint: filepath.Join(t.TempDir(), "data")})
-		err := executor.SetCredential(context.Background(), accounts.CredentialRequest{
+		err := executor.SetCredential(context.Background(), accountid.CredentialRequest{
 			UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-			Password: password, Role: accounts.RoleMember, UID: 20100, Enabled: true,
+			Password: password, Role: accountid.RoleMember, UID: 20100, Enabled: true,
 		})
 		if err == nil || len(runner.commands) != 0 {
 			t.Errorf("%s password: error = %v, commands = %#v; want refusal before any command", name, err, runner.commands)
@@ -122,9 +162,9 @@ func TestSetCredentialReportsUseraddFailureWithoutIncludingThePassword(t *testin
 	executor := linux.NewExecutor(nil, accountFailureRunner{}, linux.Options{
 		SystemRoot: t.TempDir(), MountPoint: filepath.Join(t.TempDir(), "data"), SMBInterface: "enp3s0",
 	})
-	request := accounts.CredentialRequest{
+	request := accountid.CredentialRequest{
 		UserID: "user:alice", PrivateSpaceID: "space:alice", Username: "alice",
-		Password: "alice password for testing", Role: accounts.RoleAdmin, UID: 20100, Enabled: true,
+		Password: "alice password for testing", Role: accountid.RoleAdmin, UID: 20100, Enabled: true,
 	}
 
 	err := executor.SetCredential(context.Background(), request)
@@ -136,12 +176,6 @@ func TestSetCredentialReportsUseraddFailureWithoutIncludingThePassword(t *testin
 	}
 }
 
-type fixedResolver struct{ device linux.BlockDevice }
-
-func (r fixedResolver) ResolveDevice(context.Context, string) (linux.BlockDevice, error) {
-	return r.device, nil
-}
-
 type recordedCommand struct {
 	name  string
 	args  []string
@@ -150,12 +184,26 @@ type recordedCommand struct {
 
 type recordingRunner struct{ commands []recordedCommand }
 
+// lines are the recorded commands as command lines.
+func (r *recordingRunner) lines() []string {
+	lines := make([]string, len(r.commands))
+	for i, command := range r.commands {
+		lines[i] = strings.Join(append([]string{command.name}, command.args...), " ")
+	}
+	return lines
+}
+
 func (r *recordingRunner) Run(_ context.Context, name string, args []string, stdin string) ([]byte, error) {
 	r.commands = append(r.commands, recordedCommand{name: name, args: append([]string(nil), args...), stdin: stdin})
 	if name == "blkid" {
 		return []byte("11111111-2222-3333-4444-555555555555\n"), nil
 	}
 	return nil, nil
+}
+
+// Output is Run: the recorded commands print nothing on standard error.
+func (r *recordingRunner) Output(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	return r.Run(ctx, name, args, stdin)
 }
 
 type accountFailureRunner struct{}
@@ -169,4 +217,8 @@ func (accountFailureRunner) Run(_ context.Context, name string, _ []string, _ st
 	default:
 		return nil, nil
 	}
+}
+
+func (r accountFailureRunner) Output(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	return r.Run(ctx, name, args, stdin)
 }

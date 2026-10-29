@@ -9,19 +9,16 @@ package aiworker
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net"
 	"os"
 	"runtime"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 )
 
 // MaxFrame bounds a request or response body.
@@ -83,6 +80,9 @@ type Response struct {
 	Faces []WireFace `json:"faces,omitempty"`
 	// AnimalModel names the animal model, in answer to info.
 	AnimalModel string `json:"animalModel,omitempty"`
+	// MemoryBytes is what the Worker holds with every model it serves
+	// loaded, its own start included, in answer to info.
+	MemoryBytes uint64 `json:"memoryBytes,omitempty"`
 	// Vectors answer embed_animals, one per box, each as Vector is.
 	Vectors [][]byte   `json:"vectors,omitempty"`
 	Error   *WireError `json:"error,omitempty"`
@@ -127,7 +127,7 @@ func (c Client) Info(ctx context.Context) (photos.EmbedderInfo, error) {
 		return photos.EmbedderInfo{}, errors.New("AI worker described no model")
 	}
 	return photos.EmbedderInfo{Model: response.Model, Dimensions: response.Dimensions, Detector: response.Detector,
-		Faces: response.FaceModel, Animals: response.AnimalModel}, nil
+		Faces: response.FaceModel, Animals: response.AnimalModel, MemoryBytes: response.MemoryBytes}, nil
 }
 
 func (c Client) EmbedImage(ctx context.Context, image *os.File) ([]float32, error) {
@@ -261,40 +261,20 @@ func (c Client) call(ctx context.Context, request Request, file *os.File) (Respo
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 
-	payload, err := json.Marshal(request)
-	if err != nil {
-		return Response{}, err
-	}
-	frame := binary.BigEndian.AppendUint32(nil, uint32(len(payload)))
-	frame = append(frame, payload...)
-	var rights []byte
-	if file != nil {
-		rights = unix.UnixRights(int(file.Fd()))
-	}
-	_, _, err = conn.(*net.UnixConn).WriteMsgUnix(frame, rights, nil)
+	unixConn := conn.(*net.UnixConn)
+	err = unixmsg.Write(unixConn, request, file, MaxFrame)
 	runtime.KeepAlive(file)
 	if err != nil {
 		return Response{}, fmt.Errorf("send to AI worker: %w", err)
 	}
-
-	var header [4]byte
-	if _, err := io.ReadFull(conn, header[:]); err != nil {
+	var response Response
+	received, err := unixmsg.Read(unixConn, &response, MaxFrame)
+	unixmsg.CloseFile(received)
+	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return Response{}, fmt.Errorf("%w: %v", ctxErr, err)
 		}
 		return Response{}, fmt.Errorf("read from AI worker: %w", err)
-	}
-	length := binary.BigEndian.Uint32(header[:])
-	if length > MaxFrame {
-		return Response{}, fmt.Errorf("AI worker response of %d bytes exceeds the limit", length)
-	}
-	body := make([]byte, length)
-	if _, err := io.ReadFull(conn, body); err != nil {
-		return Response{}, fmt.Errorf("read from AI worker: %w", err)
-	}
-	var response Response
-	if err := json.Unmarshal(body, &response); err != nil {
-		return Response{}, fmt.Errorf("decode AI worker response: %w", err)
 	}
 	if !response.OK {
 		if response.Error == nil {

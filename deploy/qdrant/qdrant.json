@@ -1,0 +1,10 @@
+{
+  "name": "qdrant",
+  "version": "1.20.0",
+  "source": "https://github.com/qdrant/qdrant/releases/download/v1.20.0/qdrant-x86_64-unknown-linux-musl.tar.gz",
+  "file": "qdrant-x86_64-unknown-linux-musl.tar.gz",
+  "sizeBytes": 33773335,
+  "sha256": "b03a64616a1f41ddab78b480a318466541765f19835318113b1821cbea8df52c",
+  "binary": "qdrant",
+  "license": "Apache-2.0 (https://github.com/qdrant/qdrant/blob/v1.20.0/LICENSE). The release's statically linked x86_64 musl build; GitHub publishes the same SHA-256 as the asset's digest."
+}

@@ -19,16 +19,71 @@ import (
 )
 
 type fakeDocker struct {
-	mu         sync.Mutex
-	containers []engine.ContainerInfo
-	pools      []netip.Prefix
-	networks   []engine.NetworkInfo
-	mounts     []engine.MountInfo
-	runtimes   []engine.RuntimeInfo
+	cleanupErr       error
+	inspectImagesErr error
+	imageErr         error
+	cleanedImages    []string
+	storageErr       error
+	mu               sync.Mutex
+	containers       []engine.ContainerInfo
+	pools            []netip.Prefix
+	networks         []engine.NetworkInfo
+	mounts           []engine.MountInfo
+	runtimes         []engine.RuntimeInfo
 	// states overrides what ProjectContainers reports.
 	states []engine.ContainerState
 	// apiVersion defaults to an engine that supports volume subpaths.
 	apiVersion string
+}
+
+func (f *fakeDocker) CheckStorage(context.Context) error { return f.storageErr }
+
+func (f *fakeDocker) CleanupImages(_ context.Context, project string, references []string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.inspectImagesErr != nil {
+		return nil, f.inspectImagesErr
+	}
+	if slices.ContainsFunc(f.containers, func(item engine.ContainerInfo) bool { return appstore.ProjectName(item.AppID) == project }) {
+		return []string{"sha256:installed"}, nil
+	}
+	return slices.Clone(references), nil
+}
+
+func (f *fakeDocker) RemoveProjectContainers(_ context.Context, project string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cleanupErr != nil {
+		return f.cleanupErr
+	}
+	f.containers = slices.DeleteFunc(f.containers, func(item engine.ContainerInfo) bool { return appstore.ProjectName(item.AppID) == project })
+	return nil
+}
+
+func (f *fakeDocker) RemoveUnusedImages(_ context.Context, images []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cleanedImages = slices.Clone(images)
+	return f.imageErr
+}
+
+func TestInstallRechecksSystemSpaceBeforeRunningCompose(t *testing.T) {
+	docker, runner := &fakeDocker{}, &fakeRunner{}
+	store, _ := newStore(t, docker, runner)
+	plan, err := store.Plan(context.Background(), "memos", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	docker.storageErr = appstore.ErrSystemSpace
+	if _, err := store.Plan(context.Background(), "memos", identity); !errors.Is(err, appstore.ErrSystemSpace) {
+		t.Fatalf("plan error = %v", err)
+	}
+	if _, err := store.Install(context.Background(), "memos", plan.Digest, identity); !errors.Is(err, appstore.ErrSystemSpace) {
+		t.Fatalf("install error = %v", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("Compose ran with insufficient storage: %v", runner.calls)
+	}
 }
 
 func (f *fakeDocker) Containers(context.Context) ([]engine.ContainerInfo, error) {
@@ -87,6 +142,12 @@ type fakeRunner struct {
 	err   error
 	gate  chan struct{}
 	after func(args []string)
+	// fail, when set, gives each call's error in place of err.
+	fail func(args []string) error
+	// hold makes the calls it picks report on held and then wait until
+	// their context ends, as Compose does until it is killed.
+	hold func(args []string) bool
+	held chan struct{}
 	// compose defaults to a Compose that keeps volume subpaths.
 	compose string
 }
@@ -98,33 +159,62 @@ func (f *fakeRunner) ComposeVersion(context.Context) (string, error) {
 	return f.compose, nil
 }
 
-func (f *fakeRunner) Run(_ context.Context, args []string, output io.Writer) error {
+func (f *fakeRunner) Run(ctx context.Context, args []string, output io.Writer) error {
 	f.mu.Lock()
 	f.calls = append(f.calls, args)
 	f.mu.Unlock()
 	if f.gate != nil {
 		<-f.gate
 	}
-	for i := 0; i < 45; i++ {
-		fmt.Fprintf(output, "step %d\n", i)
+	for i := range 45 {
+		_, _ = fmt.Fprintf(output, "step %d\n", i)
 	}
 	if f.after != nil {
 		f.after(args)
 	}
+	if f.hold != nil && f.hold(args) {
+		f.held <- struct{}{}
+		<-ctx.Done()
+		return fmt.Errorf("compose command failed: %w", ctx.Err())
+	}
+	if f.fail != nil {
+		return f.fail(args)
+	}
 	return f.err
 }
 
+// verbs lists the Compose commands the runner was given.
+func (f *fakeRunner) verbs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var verbs []string
+	for _, call := range f.calls {
+		for _, verb := range []string{"up", "logs", "down"} {
+			if slices.Contains(call, verb) {
+				verbs = append(verbs, verb)
+			}
+		}
+	}
+	return verbs
+}
+
 func newStore(t *testing.T, docker *fakeDocker, runner *fakeRunner) (*engine.Store, string) {
+	t.Helper()
+	state := t.TempDir()
+	return newStoreIn(t, state, docker, runner), state
+}
+
+// newStoreIn starts an agent on an existing state directory, as a restart does.
+func newStoreIn(t *testing.T, state string, docker *fakeDocker, runner *fakeRunner) *engine.Store {
 	t.Helper()
 	entries, err := appstore.Catalog()
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := t.TempDir()
 	policy := appstore.Policy{AppDataRoot: "/srv/a-nas/data/apps", DataRoot: "/srv/a-nas/data/spaces/shared", TZ: "UTC", ReservedPorts: []uint16{8080}}
 	store := engine.New(entries, policy, state, docker, runner)
 	store.SetStartupCheck(30*time.Millisecond, 10*time.Millisecond)
-	return store, state
+	return store
 }
 
 func TestInstallRunsTheConfirmedComposeFile(t *testing.T) {
@@ -499,15 +589,7 @@ func TestInstallFailsWhenAContainerKeepsRestarting(t *testing.T) {
 	if job.State != appstore.JobFailed || !strings.Contains(job.Error, "容器 n8n 启动后不断重启（退出码 1）") || !strings.Contains(job.Error, "安装已回滚") {
 		t.Fatalf("job = %+v", job)
 	}
-	var verbs []string
-	for _, call := range runner.calls {
-		for _, verb := range []string{"up", "logs", "down"} {
-			if slices.Contains(call, verb) {
-				verbs = append(verbs, verb)
-			}
-		}
-	}
-	if !slices.Equal(verbs, []string{"up", "logs", "down"}) {
+	if verbs := runner.verbs(); !slices.Equal(verbs, []string{"up", "logs", "down"}) {
 		t.Fatalf("compose ran %v, want up, logs, down", verbs)
 	}
 }
@@ -564,5 +646,248 @@ func TestInstalledAppsShowTheLoginsTheyUse(t *testing.T) {
 	}
 	if got := find(apps, "memos").Credentials; got != nil {
 		t.Fatalf("an app that is not installed shows %+v", got)
+	}
+}
+
+// linkwardenPartway is what Compose leaves when Linkwarden's postgres is not
+// healthy in time on the NAS: up exits 1 with postgres and meilisearch
+// running and linkwarden created but never started (#169).
+var linkwardenPartway = []engine.ContainerInfo{
+	{Name: "linkwarden-postgres", AppID: "linkwarden", Service: "linkwarden-postgres", Running: true},
+	{Name: "linkwarden-meilisearch", AppID: "linkwarden", Service: "linkwarden-meilisearch", Running: true},
+	{Name: "linkwarden", AppID: "linkwarden", Service: "linkwarden", State: "created"},
+}
+
+// composeOn has up create containers and down remove the app's.
+func composeOn(docker *fakeDocker, created []engine.ContainerInfo) func([]string) {
+	return func(args []string) {
+		docker.mu.Lock()
+		defer docker.mu.Unlock()
+		switch {
+		case slices.Contains(args, "up"):
+			docker.containers = append(docker.containers, created...)
+		case slices.Contains(args, "down"):
+			docker.containers = slices.DeleteFunc(docker.containers, func(container engine.ContainerInfo) bool {
+				return slices.ContainsFunc(created, func(app engine.ContainerInfo) bool { return app.AppID == container.AppID })
+			})
+		}
+	}
+}
+
+func failUp(args []string) error {
+	if slices.Contains(args, "up") {
+		return errors.New("compose command failed: exit status 1")
+	}
+	return nil
+}
+
+func linkwardenPlan(t *testing.T, store *engine.Store) appstore.Plan {
+	t.Helper()
+	plan, err := store.Plan(context.Background(), "linkwarden", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
+}
+
+// A Compose that fails after creating some containers is rolled back like a
+// failed check: the app is not installed and says why.
+func TestInstallRollsBackWhenComposeFailsPartway(t *testing.T) {
+	docker := &fakeDocker{pools: []netip.Prefix{netip.MustParsePrefix("10.96.64.0/19")}}
+	runner := &fakeRunner{after: composeOn(docker, linkwardenPartway), fail: failUp}
+	store, _ := newStore(t, docker, runner)
+	ctx := context.Background()
+
+	if _, err := store.Install(ctx, "linkwarden", linkwardenPlan(t, store).Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+
+	if verbs := runner.verbs(); !slices.Equal(verbs, []string{"up", "logs", "down"}) {
+		t.Fatalf("compose ran %v, want up, logs, down", verbs)
+	}
+	apps, _ := store.Apps(ctx)
+	status := find(apps, "linkwarden")
+	if status.State != appstore.StateAvailable || status.Total != 0 {
+		t.Fatalf("status = %s with %d containers, want available with none", status.State, status.Total)
+	}
+	if job := status.Job; job.State != appstore.JobFailed || !strings.Contains(job.Error, "Docker Compose 没有完成启动（compose command failed: exit status 1）") ||
+		!strings.Contains(job.Error, "安装已回滚") {
+		t.Fatalf("job = %+v, want a failed install that was rolled back", job)
+	}
+}
+
+// When the rollback fails too, the containers that are left are a failed
+// install, not an installed app; installing again removes them first, and
+// they never block it.
+func TestContainersOfAFailedInstallAreNotAnInstalledApp(t *testing.T) {
+	docker := &fakeDocker{pools: []netip.Prefix{netip.MustParsePrefix("10.96.64.0/19")}}
+	docker.cleanupErr = errors.New("cannot connect to Docker")
+	broken := true
+	runner := &fakeRunner{after: func(args []string) {
+		if !broken || !slices.Contains(args, "down") {
+			composeOn(docker, linkwardenPartway)(args)
+		}
+	}}
+	runner.fail = func(args []string) error {
+		if broken && slices.Contains(args, "down") {
+			return errors.New("compose command failed: Cannot connect to the Docker daemon")
+		}
+		if broken {
+			return failUp(args)
+		}
+		return nil
+	}
+	store, _ := newStore(t, docker, runner)
+	ctx := context.Background()
+	plan := linkwardenPlan(t, store)
+
+	if _, err := store.Install(ctx, "linkwarden", plan.Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	store.Wait()
+	apps, _ := store.Apps(ctx)
+	status := find(apps, "linkwarden")
+	if status.State != appstore.StateFailed || status.Running != 2 || status.Total != 3 || status.Credentials != nil {
+		t.Fatalf("status = %s %d/%d credentials %v, want failed with the 3 containers left", status.State, status.Running, status.Total, status.Credentials)
+	}
+	if !strings.Contains(status.Job.Error, "could not be rolled back") {
+		t.Fatalf("job error = %q", status.Job.Error)
+	}
+
+	broken = false
+	docker.cleanupErr = nil
+	runner.calls = nil
+	if _, err := store.Install(ctx, "linkwarden", plan.Digest, identity); err != nil {
+		t.Fatalf("installing again over a failed install: %v", err)
+	}
+	store.Wait()
+	if len(runner.calls) < 2 || slices.Contains(runner.calls[0], "-f") || !slices.Contains(runner.calls[0], "down") || !slices.Contains(runner.calls[1], "up") {
+		t.Fatalf("runner calls = %v, want the leftovers taken down before up", runner.calls)
+	}
+	apps, _ = store.Apps(ctx)
+	if status := find(apps, "linkwarden"); status.State != appstore.StateInstalled || status.Total != 3 || status.Job.State != appstore.JobSucceeded {
+		t.Fatalf("status = %s with %d containers, job %+v, want installed", status.State, status.Total, status.Job)
+	}
+	if _, err := store.Install(ctx, "linkwarden", plan.Digest, identity); !errors.Is(err, appstore.ErrAlreadyInstalled) {
+		t.Fatalf("installing an installed app: %v, want ErrAlreadyInstalled", err)
+	}
+}
+
+// Stopping the agent, as a deploy, apt upgrade or Docker restart does,
+// cancels a running install and rolls it back before the agent exits; the
+// agent started again still reports why the install failed.
+func TestStoppingTheAgentRollsBackARunningInstall(t *testing.T) {
+	docker := &fakeDocker{pools: []netip.Prefix{netip.MustParsePrefix("10.96.64.0/19")}}
+	runner := &fakeRunner{
+		after: composeOn(docker, linkwardenPartway),
+		hold:  func(args []string) bool { return slices.Contains(args, "up") },
+		held:  make(chan struct{}, 1),
+	}
+	store, state := newStore(t, docker, runner)
+	ctx := context.Background()
+	if _, err := store.Install(ctx, "linkwarden", linkwardenPlan(t, store).Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	<-runner.held
+	store.Stop()
+
+	if verbs := runner.verbs(); !slices.Equal(verbs, []string{"up", "down"}) {
+		t.Fatalf("compose ran %v, want up cancelled and then down", verbs)
+	}
+	memos, _ := store.Plan(ctx, "memos", identity)
+	if _, err := store.Install(ctx, "memos", memos.Digest, identity); !errors.Is(err, appstore.ErrUnavailable) {
+		t.Fatalf("install on a stopped agent: %v, want ErrUnavailable", err)
+	}
+	info, err := os.Stat(filepath.Join(state, "jobs", "linkwarden.json"))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("job record = %v, %v", info, err)
+	}
+
+	restarted := newStoreIn(t, state, docker, &fakeRunner{})
+	if err := restarted.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	restarted.Wait()
+	apps, _ := restarted.Apps(ctx)
+	status := find(apps, "linkwarden")
+	if status.State != appstore.StateAvailable || status.Job == nil || status.Job.State != appstore.JobFailed ||
+		!strings.Contains(status.Job.Error, "容器代理停止，安装被中断，已回滚") {
+		t.Fatalf("after a restart: status %s job %+v", status.State, status.Job)
+	}
+}
+
+// An agent killed in the middle of an install (SIGKILL at the stop timeout,
+// a crash) finds the install still recorded as running when it starts again
+// and removes its containers, which were never checked against the plan.
+func TestRecoverRollsBackAnInstallTheAgentDiedIn(t *testing.T) {
+	docker := &fakeDocker{pools: []netip.Prefix{netip.MustParsePrefix("10.96.64.0/19")}}
+	dead := &fakeRunner{gate: make(chan struct{})}
+	store, state := newStore(t, docker, dead)
+	ctx := context.Background()
+	if _, err := store.Install(ctx, "linkwarden", linkwardenPlan(t, store).Digest, identity); err != nil {
+		t.Fatal(err)
+	}
+	// Compose got this far before the agent died.
+	docker.mu.Lock()
+	docker.containers = slices.Clone(linkwardenPartway)
+	docker.mu.Unlock()
+	defer func() {
+		close(dead.gate)
+		store.Wait()
+	}()
+
+	runner := &fakeRunner{gate: make(chan struct{}), after: composeOn(docker, linkwardenPartway)}
+	restarted := newStoreIn(t, state, docker, runner)
+	if err := restarted.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	apps, _ := restarted.Apps(ctx)
+	if state := find(apps, "linkwarden").State; state != appstore.StateInstalling {
+		t.Fatalf("while rolling back: %s, want installing", state)
+	}
+	memos, _ := restarted.Plan(ctx, "memos", identity)
+	if _, err := restarted.Install(ctx, "memos", memos.Digest, identity); !errors.Is(err, appstore.ErrBusy) {
+		t.Fatalf("install while rolling back: %v, want ErrBusy", err)
+	}
+	close(runner.gate)
+	restarted.Wait()
+
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != "compose --progress plain -p a-nas-linkwarden down --remove-orphans" {
+		t.Fatalf("runner calls = %v, want the project taken down", runner.calls)
+	}
+	apps, _ = restarted.Apps(ctx)
+	status := find(apps, "linkwarden")
+	if status.State != appstore.StateAvailable || status.Job.State != appstore.JobFailed ||
+		!strings.Contains(status.Job.Error, "容器代理在安装过程中重启") || !strings.Contains(status.Job.Error, "安装已回滚") {
+		t.Fatalf("after recovery: status %s job %+v", status.State, status.Job)
+	}
+}
+
+// An uninstall the agent died in is finished when it starts again.
+func TestRecoverFinishesAnUninstallTheAgentDiedIn(t *testing.T) {
+	memos := []engine.ContainerInfo{{Name: "memos", AppID: "memos", Running: true}}
+	docker := &fakeDocker{containers: slices.Clone(memos)}
+	dead := &fakeRunner{gate: make(chan struct{})}
+	store, state := newStore(t, docker, dead)
+	if _, err := store.Uninstall(context.Background(), "memos"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		close(dead.gate)
+		store.Wait()
+	}()
+
+	runner := &fakeRunner{after: composeOn(docker, memos)}
+	restarted := newStoreIn(t, state, docker, runner)
+	if err := restarted.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	restarted.Wait()
+	apps, _ := restarted.Apps(context.Background())
+	status := find(apps, "memos")
+	if verbs := runner.verbs(); !slices.Equal(verbs, []string{"down"}) || status.State != appstore.StateAvailable ||
+		status.Job.Action != appstore.JobUninstall || status.Job.State != appstore.JobSucceeded {
+		t.Fatalf("compose ran %v; status %s job %+v", verbs, status.State, status.Job)
 	}
 }

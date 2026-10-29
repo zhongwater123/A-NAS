@@ -44,7 +44,8 @@ func (c ContainerState) problem() string {
 	return ""
 }
 
-// StartupError reports the container that did not keep running.
+// StartupError reports the container that did not keep running, or, without
+// a service, Compose not starting the app at all.
 type StartupError struct {
 	Service string
 	Problem string

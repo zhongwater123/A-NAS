@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 // Scan phases: listing the music folders, reading the tags of new and changed
@@ -168,7 +168,7 @@ const batchSize = 25
 var ignoredFolders = map[string]bool{"@eadir": true, "#recycle": true, "$recycle.bin": true, "system volume information": true, "lost+found": true}
 
 func ignored(relative string) bool {
-	for _, part := range strings.Split(relative, "/") {
+	for part := range strings.SplitSeq(relative, "/") {
 		if strings.HasPrefix(part, ".") || ignoredFolders[strings.ToLower(part)] {
 			return true
 		}
@@ -189,7 +189,10 @@ func stem(name string) string { return strings.ToLower(strings.TrimSuffix(name, 
 // them while reading tags; MP3 needs every frame counted.
 var quickDuration = map[string]bool{"flac": true, "m4a": true, "ogg": true, "wav": true}
 
+// scan reads the member's music. Its requests to the media worker are
+// background work, which waits while the worker serves people.
 func (s *Service) scan(ctx context.Context, actor accounts.User, job *scanJob) (scanSummary, error) {
+	ctx = ffmpegworker.WithPriority(ctx, ffmpegworker.Background)
 	var summary scanSummary
 	sources, err := s.Sources(ctx, actor)
 	if err != nil {
@@ -360,7 +363,15 @@ func (s *Service) scan(ctx context.Context, actor accounts.User, job *scanJob) (
 			value.DurationMs, value.DurationState = duration.Milliseconds(), "done"
 		} else if s.worker != nil {
 			// Opus and raw AAC have no Go reader for their length.
-			if probe, err := s.worker.Probe(ctx, content.Reader); err == nil && probe.Format.Duration > 0 {
+			probe, err := s.worker.Probe(ctx, content.Reader)
+			if errors.Is(err, ffmpegworker.ErrUnavailable) || ctx.Err() != nil {
+				// The length stays to be measured by the next scan rather
+				// than recorded as unknown.
+				_ = content.Reader.Close()
+				job.step()
+				continue
+			}
+			if err == nil && probe.Format.Duration > 0 {
 				value.DurationMs, value.DurationState = int64(probe.Format.Duration*1000), "done"
 			}
 		}
@@ -385,7 +396,7 @@ func (s *Service) readTrack(ctx context.Context, actor accounts.User, entry file
 	if err != nil {
 		return row{}, err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	format := formatOf(entry.Name)
 	var tags metadata
 	if tagFormats[format] {
@@ -394,7 +405,7 @@ func (s *Service) readTrack(ctx context.Context, actor accounts.User, entry file
 	var probed audioFormat
 	if s.worker != nil && (!tagFormats[format] || !playsInBrowser(format, tags.Codec)) {
 		probe, err := s.worker.Probe(ctx, content.Reader)
-		if errors.Is(err, mediaworker.ErrUnavailable) {
+		if errors.Is(err, ffmpegworker.ErrUnavailable) {
 			// Skip the file rather than index it without its tags; the next
 			// scan reads it again.
 			return row{}, err
@@ -412,8 +423,13 @@ func (s *Service) readTrack(ctx context.Context, actor accounts.User, entry file
 		SampleRate: probed.SampleRate, BitDepth: probed.Bits,
 	}
 	if len(tags.Picture) == 0 && probed.Cover {
-		// The worker renders the attached picture as a JPEG.
-		if picture, err := s.worker.Frame(ctx, content.Reader, 0, coverPixels[CoverLarge]); err == nil {
+		// The worker renders the attached picture as a JPEG; without the
+		// worker the file waits for the next scan, as for its tags.
+		picture, err := s.worker.Frame(ctx, content.Reader, 0, coverPixels[CoverLarge])
+		if errors.Is(err, ffmpegworker.ErrUnavailable) {
+			return row{}, err
+		}
+		if err == nil {
 			tags.Picture = picture
 		}
 	}

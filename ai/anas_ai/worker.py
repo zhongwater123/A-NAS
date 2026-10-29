@@ -18,8 +18,10 @@ unavailable.
 
 import argparse
 import base64
+import contextlib
 import logging
 import os
+import resource
 import select
 import socket
 import sys
@@ -53,19 +55,35 @@ def listening_socket(path):
         return socket.socket(fileno=SYSTEMD_FIRST_FD)
     if not path:
         raise SystemExit("--socket is required without systemd socket activation")
-    try:
+    with contextlib.suppress(FileNotFoundError):
         os.unlink(path)
-    except FileNotFoundError:
-        pass
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(path)
     listener.listen(8)
     return listener
 
 
+def started_memory():
+    """What this process holds once its models are verified, as the photo service's gate counts it.
+
+    Under systemd that is the memory of the Worker's own cgroup, page cache
+    included; elsewhere, its peak resident memory.
+    """
+    try:
+        with open("/proc/self/cgroup", encoding="utf-8") as file:
+            path = next(line[3:].strip() for line in file if line.startswith("0::"))
+        with open(f"/sys/fs/cgroup{path}/memory.current", encoding="utf-8") as file:
+            return int(file.read())
+    except (OSError, StopIteration, ValueError):
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss << 10
+
+
 def serve(listener, provider, unavailable_reason=None, idle_seconds=IDLE_SECONDS, detector=None, faces=None,
-          animals=None):
-    """Answers connections until none arrives for idle_seconds or one asks it to release everything."""
+          animals=None, started=0):
+    """Answers connections until none arrives for idle_seconds or one asks it to release everything.
+
+    started is what the Worker held before serving, which info adds to its models' memory.
+    """
     detector = detector or Detector(reason="no object detector")
     faces = faces or Detector(reason="no face models")
     animals = animals or Detector(reason="no animal model")
@@ -78,12 +96,12 @@ def serve(listener, provider, unavailable_reason=None, idle_seconds=IDLE_SECONDS
             return
         with conn:
             conn.settimeout(None)
-            if handle(conn, provider, unavailable_reason, detector, faces, animals):
+            if handle(conn, provider, unavailable_reason, detector, faces, animals, started):
                 log.info("released everything; exiting")
                 return
 
 
-def handle(conn, provider, unavailable_reason, detector, faces=None, animals=None):
+def handle(conn, provider, unavailable_reason, detector, faces=None, animals=None, started=0):
     """Answers one request; returns whether the Worker should exit."""
     try:
         request, fds = protocol.read_request(conn)
@@ -91,7 +109,7 @@ def handle(conn, provider, unavailable_reason, detector, faces=None, animals=Non
         log.warning("dropped a malformed request: %s", error)
         return False
     try:
-        response = respond(request, fds, provider, unavailable_reason, detector, conn, faces, animals)
+        response = respond(request, fds, provider, unavailable_reason, detector, conn, faces, animals, started)
     finally:
         for fd in fds:
             os.close(fd)
@@ -104,7 +122,7 @@ def handle(conn, provider, unavailable_reason, detector, faces=None, animals=Non
     return request.get("op") == protocol.OP_RELEASE and request.get("what") == "all" and response["ok"]
 
 
-def respond(request, fds, provider, unavailable_reason, detector, conn=None, faces=None, animals=None):
+def respond(request, fds, provider, unavailable_reason, detector, conn=None, faces=None, animals=None, started=0):
     """The response to request, or None when the caller hung up before it was ready."""
     faces = faces or Detector(reason="no face models")
     animals = animals or Detector(reason="no animal model")
@@ -112,7 +130,9 @@ def respond(request, fds, provider, unavailable_reason, detector, conn=None, fac
         return protocol.failure(protocol.CODE_UNAVAILABLE, unavailable_reason)
     op = request.get("op")
     if op == protocol.OP_INFO:
-        fields = {"model": provider.model, "dimensions": provider.dimensions}
+        models = (provider, detector.provider, faces.provider, animals.provider)
+        memory = started + sum(getattr(model, "memory", 0) for model in models if model is not None)
+        fields = {"model": provider.model, "dimensions": provider.dimensions, "memoryBytes": memory}
         if detector.provider is not None:
             fields["detector"] = detector.provider.model
         if faces.provider is not None:
@@ -225,7 +245,7 @@ def detected(detector, fd, conn, key):
     def work():
         try:
             outcome["found"] = detector.detect(data, run)
-        except BaseException as error:  # pylint: disable=broad-except
+        except BaseException as error:  # noqa: BLE001  handed to the waiting thread, which reports it
             outcome["error"] = error
 
     thread = threading.Thread(target=work, name="detect", daemon=True)
@@ -352,8 +372,10 @@ def main(argv=None):
         log.info("finding faces with %s", faces.provider.model)
     if animals.provider is not None:
         log.info("telling pets apart with %s", animals.provider.model)
+    started = started_memory()
+    log.info("started with %d MiB", started >> 20)
     with listening_socket(args.socket) as listener:
-        serve(listener, provider, reason, args.idle_seconds, detector, faces, animals)
+        serve(listener, provider, reason, args.idle_seconds, detector, faces, animals, started)
     # Hand the memory back at once. Tearing the models down object by object
     # took 40 seconds under memory pressure on the local stack, and until the
     # process ends systemd cannot start the Worker the next search needs.

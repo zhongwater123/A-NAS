@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -19,41 +20,41 @@ func (h *handler) uploadLive(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 2*photos.DefaultMaxImportBytes+(1<<20))
 	reader, err := r.MultipartReader()
 	if err != nil {
-		WriteError(w, 400, "invalid_multipart", "请选择照片与同名 MOV")
+		httpjson.WriteError(w, 400, "invalid_multipart", "请选择照片与同名 MOV")
 		return
 	}
 	var directoryID string
 	for {
 		part, err := reader.NextPart()
 		if err != nil {
-			WriteError(w, 400, "invalid_multipart", "请选择照片与同名 MOV")
+			httpjson.WriteError(w, 400, "invalid_multipart", "请选择照片与同名 MOV")
 			return
 		}
 		if part.FormName() == "directoryId" {
 			value, err := io.ReadAll(io.LimitReader(part, 4097))
-			part.Close()
+			_ = part.Close()
 			if err != nil || len(value) > 4096 {
-				WriteError(w, 400, "invalid_multipart", "目录无效")
+				httpjson.WriteError(w, 400, "invalid_multipart", "目录无效")
 				return
 			}
 			directoryID = string(value)
 			continue
 		}
 		if part.FormName() != "file" {
-			part.Close()
-			WriteError(w, 400, "invalid_multipart", "请先提交照片，再提交同名 MOV")
+			_ = part.Close()
+			httpjson.WriteError(w, 400, "invalid_multipart", "请先提交照片，再提交同名 MOV")
 			return
 		}
 		name := part.FileName()
 		motionName := strings.TrimSuffix(name, filepath.Ext(name)) + ".MOV"
 		principal, _ := principalFrom(r)
 		asset, err := h.service.Import(r.Context(), principal, photos.ImportRequest{LibraryID: r.PathValue("libraryID"), DirectoryID: directoryID, Name: name, Content: part, MotionName: motionName, MotionContent: &pairedPartReader{reader: reader, name: motionName}})
-		part.Close()
+		_ = part.Close()
 		if err != nil {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, asset)
+		httpjson.Write(w, http.StatusCreated, asset)
 		return
 	}
 }
@@ -64,7 +65,7 @@ func (h *handler) uploadLiveVideo(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, photos.DefaultMaxImportBytes+(1<<20))
 	reader, err := r.MultipartReader()
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
 		return
 	}
 	for {
@@ -89,10 +90,10 @@ func (h *handler) uploadLiveVideo(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, itemsResponse[photos.Asset]{Items: assets})
+		httpjson.Write(w, http.StatusOK, itemsResponse[photos.Asset]{Items: assets})
 		return
 	}
-	WriteError(w, http.StatusBadRequest, "file_required", "one file part is required")
+	httpjson.WriteError(w, http.StatusBadRequest, "file_required", "one file part is required")
 }
 
 type pairedPartReader struct {
@@ -135,6 +136,29 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 	}
 	h.serve(w, r, content, "inline")
 }
+
+// view is a photo as a model looks at it, for members' AI assistants.
+func (h *handler) view(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	content, err := h.service.View(r.Context(), principal, r.PathValue("assetID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.serve(w, r, content, "inline")
+}
+
+// metadata is what a photo's original records about it, its location among it.
+func (h *handler) metadata(w http.ResponseWriter, r *http.Request) {
+	principal, _ := principalFrom(r)
+	metadata, err := h.service.Metadata(r.Context(), principal, r.PathValue("assetID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, metadata)
+}
+
 func (h *handler) motion(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
 	content, err := h.service.OpenMotion(r.Context(), principal, r.PathValue("assetID"))
@@ -177,13 +201,13 @@ func (h *handler) download(w http.ResponseWriter, r *http.Request) {
 		h.serve(w, r, photo, "attachment")
 		return
 	}
-	defer photo.Reader.Close()
+	defer func() { _ = photo.Reader.Close() }()
 	motion, err := h.service.OpenMotion(r.Context(), principal, id)
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	defer motion.Reader.Close()
+	defer func() { _ = motion.Reader.Close() }()
 	base := strings.TrimSuffix(photo.Name, filepath.Ext(photo.Name))
 	if base == "" {
 		base = "photo"

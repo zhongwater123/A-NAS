@@ -1,7 +1,6 @@
 package httpapi_test
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -14,63 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/getkin/kin-openapi/openapi3filter"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 )
-
-// contractChecked validates every exchange on a snapshot, version or removed
-// item path against the OpenAPI document: responses always, requests when
-// the server accepted them.
-func contractChecked(t *testing.T, next http.Handler) http.Handler {
-	t.Helper()
-	ctx := context.Background()
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatalf("load OpenAPI document: %v", err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatalf("create OpenAPI router: %v", err)
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		recorder := httptest.NewRecorder()
-		next.ServeHTTP(recorder, r)
-		if strings.Contains(r.URL.Path, "snapshot") || strings.HasSuffix(r.URL.Path, "/versions") || strings.HasSuffix(r.URL.Path, "/removed-entries") {
-			request := httptest.NewRequest(r.Method, "http://127.0.0.1:8080"+r.URL.RequestURI(), bytes.NewReader(body))
-			request.Header = r.Header.Clone()
-			route, params, err := router.FindRoute(request)
-			if err != nil {
-				t.Errorf("find OpenAPI route for %s %s: %v", r.Method, r.URL.Path, err)
-			} else {
-				input := &openapi3filter.RequestValidationInput{Request: request, PathParams: params, Route: route, Options: &openapi3filter.Options{
-					AuthenticationFunc: func(context.Context, *openapi3filter.AuthenticationInput) error { return nil },
-				}}
-				if recorder.Code < 300 {
-					if err := openapi3filter.ValidateRequest(ctx, input); err != nil {
-						t.Errorf("validate request %s %s: %v", r.Method, r.URL.Path, err)
-					}
-				}
-				response := &openapi3filter.ResponseValidationInput{RequestValidationInput: input, Status: recorder.Code, Header: recorder.Header()}
-				response.SetBodyBytes(recorder.Body.Bytes())
-				if err := openapi3filter.ValidateResponse(ctx, response); err != nil {
-					t.Errorf("validate response %s %s: %v", r.Method, r.URL.Path, err)
-				}
-			}
-		}
-		for key, values := range recorder.Header() {
-			w.Header()[key] = values
-		}
-		w.WriteHeader(recorder.Code)
-		_, _ = w.Write(recorder.Body.Bytes())
-	})
-}
 
 func TestBackupCenterAPIManagesSchedulesSearchesAndRestoresFolders(t *testing.T) {
 	ctx := context.Background()
@@ -88,14 +35,14 @@ func TestBackupCenterAPIManagesSchedulesSearchesAndRestoresFolders(t *testing.T)
 	var mu sync.Mutex
 	now := time.Date(2026, 10, 12, 10, 30, 0, 0, time.UTC)
 	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
-	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{
+	fileService := files.NewLocalService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{
 		DisableCapacityReserve: true, AllowUnverifiedVolume: true, Now: clock, Location: time.UTC,
 	})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := contractChecked(t, httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated,
 		Accounts: accountService, Files: fileService, Logger: logger,
-	}))
+	})
 
 	admin := &apiClient{t: t, handler: handler}
 	admin.call(http.MethodPost, "/api/v1/setup/admin", map[string]string{"username": "owner", "password": "correct horse battery staple"}, http.StatusCreated, nil)

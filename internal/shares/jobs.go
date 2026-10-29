@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -186,10 +187,8 @@ func (s *Store) save(ctx context.Context, u User, shareID, jobID string, entries
 		if err := s.jobAllowed(ctx, u, r, j); err != nil {
 			return err
 		}
-		for _, done := range j.Job.CompletedIDs {
-			if done == id {
-				return ErrConflict
-			}
+		if slices.Contains(j.Job.CompletedIDs, id) {
+			return ErrConflict
 		}
 		if err := publish(); err != nil {
 			return err

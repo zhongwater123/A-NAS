@@ -54,9 +54,8 @@ func TestSpaceRootIsPreparedOnceRatherThanOnEveryOperation(t *testing.T) {
 	t.Cleanup(func() { _ = catalog.Close() })
 	volumeRoot := filepath.Join(t.TempDir(), "volume")
 	fsys := &countingFileSystem{FileSystem: files.NewRootFileSystem(volumeRoot, true), mkdirAll: map[string]int{}}
-	service := files.NewService(catalog, volumeRoot, accountService, files.Options{
-		DisableCapacityReserve: true, AllowUnverifiedVolume: true, FileSystem: fsys,
-	})
+	service := files.NewService(catalog, volumeRoot, accountService, fsys, files.Options{
+		DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 
 	for range 3 {
 		if _, err := service.List(ctx, admin, privateSpace.ID, ""); err != nil {
@@ -104,7 +103,7 @@ func TestMemberCanManageFilesWithoutSeeingAnotherPrivateSpace(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
 	volumeRoot := filepath.Join(t.TempDir(), "volume")
-	service := files.NewService(catalog, volumeRoot, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	service := files.NewLocalService(catalog, volumeRoot, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 
 	directory, err := service.CreateDirectory(ctx, alice, privateSpace.ID, "", "家庭")
 	if err != nil {
@@ -147,7 +146,7 @@ func TestMemberCanManageFilesWithoutSeeingAnotherPrivateSpace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenContent() error = %v", err)
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	gotContents, err := io.ReadAll(content.Reader)
 	if err != nil {
 		t.Fatalf("read restored content: %v", err)
@@ -212,7 +211,7 @@ func TestMemberCanManageFilesWithoutSeeingAnotherPrivateSpace(t *testing.T) {
 		t.Fatalf("snapshot-restored content = %q, err = %v", snapshotBytes, err)
 	}
 
-	if _, err := service.List(ctx, bob, privateSpace.ID, ""); err != files.ErrForbidden {
+	if _, err := service.List(ctx, bob, privateSpace.ID, ""); !errors.Is(err, files.ErrForbidden) {
 		t.Fatalf("Bob List(Alice private) error = %v, want ErrForbidden", err)
 	}
 }
@@ -241,7 +240,7 @@ func TestFileServiceDoesNotCreateSpaceOnAnUnavailableVolume(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
 	volumeRoot := filepath.Join(t.TempDir(), "missing-volume")
-	service := files.NewService(catalog, volumeRoot, accountService, files.Options{})
+	service := files.NewLocalService(catalog, volumeRoot, accountService, files.Options{})
 
 	_, err = service.CreateDirectory(ctx, admin, privateSpace.ID, "", "must-not-land-on-system-disk")
 	if !errors.Is(err, files.ErrVolumeUnavailable) {
@@ -275,7 +274,7 @@ func TestSambaRecycleItemIsImportedAndCanBeRestored(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
 	volumeRoot := filepath.Join(t.TempDir(), "volume")
-	service := files.NewService(catalog, volumeRoot, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	service := files.NewLocalService(catalog, volumeRoot, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	spaceRoot := filepath.Join(volumeRoot, "spaces", "private", "owner")
 	if err := os.MkdirAll(spaceRoot, 0o700); err != nil {
 		t.Fatal(err)
@@ -342,7 +341,7 @@ func TestTreeListsEverythingBelowAFolderWithStableIDs(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
 	volumeRoot := filepath.Join(t.TempDir(), "volume")
-	service := files.NewService(catalog, volumeRoot, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	service := files.NewLocalService(catalog, volumeRoot, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	root := filepath.Join(volumeRoot, "spaces", "private", "owner")
 	// "Music Videos" and "Music-2" sort near "Music/" but are not below it.
 	for _, name := range []string{"Music/a.mp3", "Music/Live/b.mp3", "Music Videos/c.mp3", "Music-2/d.mp3", "e.mp3"} {
@@ -445,14 +444,14 @@ func TestCutAndCopyBetweenSpaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
-	service := files.NewService(catalog, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	service := files.NewLocalService(catalog, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	read := func(user accounts.User, id string) string {
 		t.Helper()
 		content, err := service.OpenContent(ctx, user, id)
 		if err != nil {
 			t.Fatalf("OpenContent(%s) error = %v", id, err)
 		}
-		defer content.Reader.Close()
+		defer func() { _ = content.Reader.Close() }()
 		data, _ := io.ReadAll(content.Reader)
 		return string(data)
 	}

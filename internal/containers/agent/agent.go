@@ -13,24 +13,25 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/containers"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 const (
 	defaultSocketPath = "/run/a-nas-container/agent.sock"
-	socketEnvironment = "ANAS_CONTAINER_AGENT_SOCKET"
 	// Stats sampling alone takes about a second; stop and restart wait up to ten.
 	requestTimeout = 20 * time.Second
 )
 
-func SocketPath() (string, error) {
-	configured := strings.TrimSpace(os.Getenv(socketEnvironment))
+// SocketPath is the container agent's socket: configured
+// (ANAS_CONTAINER_AGENT_SOCKET) when set, otherwise the one systemd's
+// RuntimeDirectory provides.
+func SocketPath(configured string) (string, error) {
 	if configured == "" {
 		return defaultSocketPath, nil
 	}
@@ -136,13 +137,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, SnapshotFromDomain(snapshot))
+		httpjson.Write(w, http.StatusOK, SnapshotFromDomain(snapshot))
 		return
 	}
 
 	id, operation, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v1/containers/"), "/")
 	if !strings.HasPrefix(r.URL.Path, "/v1/containers/") || !ok || strings.Contains(operation, "/") {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
 	if operation == "logs" {
@@ -155,12 +156,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, LogsFromDomain(lines))
+		httpjson.Write(w, http.StatusOK, LogsFromDomain(lines))
 		return
 	}
 	action := containers.Action(operation)
 	if !action.Valid() {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
 	if !allowMethod(w, r, http.MethodPost) {
@@ -179,11 +180,12 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	if status >= 500 {
 		h.logger.ErrorContext(r.Context(), "container operation failed", "path", r.URL.Path, "error", err)
 	}
-	writeError(w, status, code, err.Error())
+	httpjson.WriteError(w, status, code, err.Error())
 }
 
-// statusForError maps domain errors to the codes shared by the agent and the
-// product API, so the desktop can tell a missing container from a down engine.
+// statusForError maps domain errors to the agent's codes, which
+// errorFromCode restores in the client, so a missing container stays apart
+// from a down engine.
 func statusForError(err error) (int, string) {
 	switch {
 	case errors.Is(err, containers.ErrInvalidID), errors.Is(err, containers.ErrInvalidAction):
@@ -195,11 +197,6 @@ func statusForError(err error) (int, string) {
 	default:
 		return http.StatusBadGateway, "container_engine_error"
 	}
-}
-
-// StatusForError exposes the shared error mapping to the product API.
-func StatusForError(err error) (int, string) {
-	return statusForError(err)
 }
 
 func errorFromCode(code string, status int) error {
@@ -220,7 +217,7 @@ func allowMethod(w http.ResponseWriter, r *http.Request, method string) bool {
 		return true
 	}
 	w.Header().Set("Allow", method)
-	writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	return false
 }
 
@@ -387,18 +384,6 @@ type errorDetail struct {
 
 type errorDocument struct {
 	Error errorDetail `json:"error"`
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, errorDocument{Error: errorDetail{Code: code, Message: message}})
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		panic(err)
-	}
 }
 
 var _ containers.Manager = (*Client)(nil)

@@ -1,9 +1,19 @@
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, X } from "lucide-react";
-import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  KeyboardEvent,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 
+import { displayURL, type PhotoAsset } from "./api";
 import { dayLabel, momentOf, reducedMotion } from "./model";
-import { displayURL, type PhotoAsset } from "./photosApi";
+import styles from "./photos.module.css";
 
 // How long each photo stays once shown, and how long two photos cross-fade.
 const slideDelay = 4000;
@@ -17,8 +27,8 @@ const slowDecode = 1200;
 const decodeLimit = 15000;
 
 interface Props {
-  // The photos of the view the slideshow started from, in its order; the
-  // list grows while the view loads more.
+  // The photos and videos of the view the slideshow started from, in its
+  // order; the list grows while the view loads more. Only photos are shown.
   assets: PhotoAsset[];
   startId: string;
   // All photos of the view, when known.
@@ -41,8 +51,12 @@ function prepare(prepared: Prepared, asset: PhotoAsset) {
     const image = new Image();
     image.src = displayURL(asset);
     // A photo that cannot be decoded is shown as the browser manages.
-    const decoded = typeof image.decode === "function" ? image.decode().catch(() => undefined)
-      : new Promise<void>((resolve) => { image.onload = image.onerror = () => resolve(); });
+    const decoded =
+      typeof image.decode === "function"
+        ? image.decode().catch(() => undefined)
+        : new Promise<void>((resolve) => {
+            image.onload = image.onerror = () => resolve();
+          });
     const ready = Promise.race([decoded, new Promise<void>((resolve) => window.setTimeout(resolve, decodeLimit))]);
     entry = { image, ready };
     prepared.set(asset.id, entry);
@@ -54,9 +68,17 @@ function prepare(prepared: Prepared, asset: PhotoAsset) {
 // slideDelay once shown, the next is decoded before it fades in over the
 // last, and the controls appear only while the pointer moves. It runs past
 // the photos loaded so far by keeping the view below at the photo shown.
-export function Slideshow({ assets, startId, total, more, onReveal, onExit }: Props) {
+// Videos are passed over; started from one, it starts at the photo after it.
+export function Slideshow({ assets: all, startId, total, more, onReveal, onExit }: Props) {
   const root = useRef<HTMLDivElement>(null);
-  const [current, setCurrent] = useState<PhotoAsset | undefined>(() => assets.find((asset) => asset.id === startId) ?? assets[0]);
+  const assets = useMemo(() => all.filter((asset) => !asset.video), [all]);
+  const [current, setCurrent] = useState<PhotoAsset | undefined>(() => {
+    const start = Math.max(
+      0,
+      all.findIndex((asset) => asset.id === startId),
+    );
+    return all.slice(start).find((asset) => !asset.video) ?? assets[0];
+  });
   const [leaving, setLeaving] = useState<PhotoAsset>();
   const [paused, setPaused] = useState(false);
   const [ended, setEnded] = useState(false);
@@ -67,8 +89,10 @@ export function Slideshow({ assets, startId, total, more, onReveal, onExit }: Pr
 
   // Everything the timers act on is read through refs, so that renders of
   // the view below never restart them.
-  const latest = useRef({ assets, current, more, onReveal, onExit });
-  latest.current = { assets, current, more, onReveal, onExit };
+  const latest = useRef({ assets, all, current, more, onReveal, onExit });
+  useLayoutEffect(() => {
+    latest.current = { assets, all, current, more, onReveal, onExit };
+  });
   const prepared = useRef<Prepared>(new Map());
   const move = useRef(0);
 
@@ -77,14 +101,14 @@ export function Slideshow({ assets, startId, total, more, onReveal, onExit }: Pr
   // go shows the photo delta places away once it is decoded. Moving past the
   // end waits for the view to load more, or ends.
   const go = useCallback(async (delta: number) => {
-    const { assets: list, current: shown, more: loading, onReveal: reveal } = latest.current;
+    const { assets: list, all: loaded, current: shown, more: loading, onReveal: reveal } = latest.current;
     const from = shown ? list.findIndex((asset) => asset.id === shown.id) : -1;
     const target = list[from + delta];
     if (!target) {
       if (delta < 0) return;
-      if (loading && list.length) {
+      if (loading && loaded.length) {
         setAwaitingMore(true);
-        reveal(list[list.length - 1].id);
+        reveal(loaded[loaded.length - 1].id);
       } else setEnded(true);
       return;
     }
@@ -100,37 +124,71 @@ export function Slideshow({ assets, startId, total, more, onReveal, onExit }: Pr
 
   // The next photo starts decoding as soon as one is shown; ones far behind
   // are let go.
-  useEffect(() => {
+  const currentId = current?.id;
+  const prepareNext = useEffectEvent(() => {
     if (!current) return;
-    latest.current.onReveal(current.id);
+    onReveal(current.id);
     const next = assets[position + 1];
     if (next) void prepare(prepared.current, next);
     const keep = new Set(assets.slice(Math.max(0, position - 1), position + 3).map((asset) => asset.id));
     for (const id of prepared.current.keys()) if (!keep.has(id)) prepared.current.delete(id);
-  }, [current?.id]);
+  });
+  useEffect(() => prepareNext(), [currentId]);
 
   useEffect(() => {
     if (!leaving) return;
     const timer = window.setTimeout(() => setLeaving(undefined), fade ? fadeTime : 0);
     return () => window.clearTimeout(timer);
-  }, [leaving]);
+  }, [leaving, fade]);
 
   // Each photo stays slideDelay after its fade; pausing stops the clock and
   // playing again gives the photo its full time.
   useEffect(() => {
-    if (paused || ended || awaitingMore || !current) return;
+    if (paused || ended || awaitingMore || !currentId) return;
     const timer = window.setTimeout(() => void go(1), slideDelay + (fade ? fadeTime : 0));
     return () => window.clearTimeout(timer);
-  }, [current?.id, paused, ended, awaitingMore, go]);
+  }, [currentId, paused, ended, awaitingMore, go, fade]);
 
-  // At the end of what is loaded, the view below loads the photos after it.
+  // At the end of what is loaded, the view below loads the photos after it,
+  // and past any videos after those. Once it has loaded more, the slideshow
+  // goes on at once; when it has no more, the slideshow ends.
+  const loadedNow = `${assets.length}/${all.length}/${more}`;
+  const [loadedSeen, setLoadedSeen] = useState(loadedNow);
+  const [goOn, setGoOn] = useState(0);
+  if (loadedSeen !== loadedNow) {
+    setLoadedSeen(loadedNow);
+    if (awaitingMore && assets.length > position + 1) {
+      setAwaitingMore(false);
+      setGoOn((value) => value + 1);
+    } else if (awaitingMore && !more) {
+      setAwaitingMore(false);
+      setEnded(true);
+    }
+  }
+  const wentOn = useRef(0);
+  useEffect(() => {
+    if (goOn === wentOn.current) return;
+    wentOn.current = goOn;
+    void go(1);
+  }, [goOn, go]);
+  const revealLast = useEffectEvent(() => {
+    if (all.length) onReveal(all[all.length - 1].id);
+  });
   useEffect(() => {
     if (!awaitingMore) return;
-    if (assets.length > position + 1) { setAwaitingMore(false); void go(1); return; }
-    if (!more) { setAwaitingMore(false); setEnded(true); return; }
-    const timer = window.setTimeout(() => { setAwaitingMore(false); setEnded(true); }, moreWait);
+    revealLast();
+    const timer = window.setTimeout(() => {
+      setAwaitingMore(false);
+      setEnded(true);
+    }, moreWait);
     return () => window.clearTimeout(timer);
-  }, [awaitingMore, assets.length, more]);
+  }, [awaitingMore, assets.length, all.length, more]);
+
+  // A view of videos alone has nothing to show.
+  const exitIfEmpty = useEffectEvent(() => {
+    if (!current) onExit(startId);
+  });
+  useEffect(() => exitIfEmpty(), []);
 
   // The controls show while the pointer moves, and stay while paused.
   const idle = useRef(0);
@@ -139,7 +197,10 @@ export function Slideshow({ assets, startId, total, more, onReveal, onExit }: Pr
     window.clearTimeout(idle.current);
     idle.current = window.setTimeout(() => setControls(false), controlsDelay);
   }, []);
-  useEffect(() => { wake(); return () => window.clearTimeout(idle.current); }, [wake]);
+  useEffect(() => {
+    idle.current = window.setTimeout(() => setControls(false), controlsDelay);
+    return () => window.clearTimeout(idle.current);
+  }, []);
 
   const exit = useCallback(() => {
     const shown = latest.current.current;
@@ -164,32 +225,57 @@ export function Slideshow({ assets, startId, total, more, onReveal, onExit }: Pr
     };
   }, [exit]);
 
-  const step = (delta: number) => { wake(); setEnded(false); void go(delta); };
+  const step = (delta: number) => {
+    wake();
+    setEnded(false);
+    void go(delta);
+  };
   const restart = () => {
     const first = latest.current.assets[0];
     if (!first) return;
     setEnded(false);
     setPaused(false);
-    void prepare(prepared.current, first).then(() => { setLeaving(latest.current.current); setCurrent(first); });
+    void prepare(prepared.current, first).then(() => {
+      setLeaving(latest.current.current);
+      setCurrent(first);
+    });
   };
   const keyDown = (event: KeyboardEvent) => {
-    const handled = () => { event.preventDefault(); event.stopPropagation(); };
+    const handled = () => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
     switch (event.key) {
-      case "Escape": handled(); exit(); break;
-      case " ": handled(); wake(); setPaused(!paused); break;
-      case "ArrowRight": handled(); step(1); break;
-      case "ArrowLeft": handled(); step(-1); break;
+      case "Escape":
+        handled();
+        exit();
+        break;
+      case " ":
+        handled();
+        wake();
+        setPaused(!paused);
+        break;
+      case "ArrowRight":
+        handled();
+        step(1);
+        break;
+      case "ArrowLeft":
+        handled();
+        step(-1);
+        break;
     }
   };
 
   if (!current) return null;
   const moment = momentOf(current);
-  const count = total ?? (more ? undefined : assets.length);
+  // The view's total counts its videos too; without them the count is known
+  // once everything is loaded.
+  const count = !more ? assets.length : all.some((asset) => asset.video) ? undefined : total;
   const shownChrome = controls || paused || ended;
   return createPortal(
     <div
       ref={root}
-      className={`ph-slideshow${shownChrome ? " chrome" : ""}${fade ? "" : " still"}`}
+      className={`${styles.phSlideshow}${shownChrome ? ` ${styles.chrome}` : ""}${fade ? "" : ` ${styles.still}`}`}
       role="dialog"
       aria-label="幻灯片"
       tabIndex={-1}
@@ -197,30 +283,84 @@ export function Slideshow({ assets, startId, total, more, onReveal, onExit }: Pr
       onPointerMove={wake}
       onPointerDown={wake}
     >
-      {leaving && leaving.id !== current.id && <img key={`leaving-${leaving.id}`} className="ph-slide leaving" src={displayURL(leaving)} alt="" draggable={false} />}
-      <img key={current.id} className="ph-slide" src={displayURL(current)} alt={current.name} draggable={false} />
+      {leaving && leaving.id !== current.id && (
+        <img
+          key={`leaving-${leaving.id}`}
+          className={`${styles.phSlide} ${styles.leaving}`}
+          src={displayURL(leaving)}
+          alt=""
+          draggable={false}
+        />
+      )}
+      <img key={current.id} className={styles.phSlide} src={displayURL(current)} alt={current.name} draggable={false} />
 
-      <header className="ph-slideshow-bar">
-        <div className="ph-slideshow-caption">
+      <header className={styles.phSlideshowBar}>
+        <div className={styles.phSlideshowCaption}>
           <strong>{dayLabel(moment)}</strong>
-          <small>{moment.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} · {count ? `${position + 1} / ${count}` : `第 ${position + 1} 张`}</small>
+          <small>
+            {moment.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} ·{" "}
+            {count ? `${position + 1} / ${count}` : `第 ${position + 1} 张`}
+          </small>
         </div>
-        <button type="button" aria-label="退出幻灯片" title="退出 (Esc)" onClick={exit}><X /></button>
+        <button type="button" aria-label="退出幻灯片" title="退出 (Esc)" onClick={exit}>
+          <X />
+        </button>
       </header>
-      {!ended && <div className="ph-slideshow-controls" role="toolbar" aria-label="幻灯片控制">
-        <button type="button" aria-label="上一张" title="上一张 (←)" disabled={position <= 0} onClick={() => step(-1)}><ChevronLeft /></button>
-        <button type="button" className="main" aria-label={paused ? "继续播放" : "暂停"} title={paused ? "继续 (空格)" : "暂停 (空格)"} onClick={() => { wake(); setPaused(!paused); }}>{paused ? <Play /> : <Pause />}</button>
-        <button type="button" aria-label="下一张" title="下一张 (→)" onClick={() => step(1)}><ChevronRight /></button>
-      </div>}
-      {!ended && <div className="ph-slideshow-progress" aria-hidden="true"><span key={`${current.id}:${paused}`} className={paused || awaitingMore ? "paused" : ""} style={{ animationDuration: `${slideDelay + (fade ? fadeTime : 0)}ms` }} /></div>}
-      {(slow || awaitingMore) && !ended && <div className="ph-slideshow-wait" role="status"><span className="ph-spinner" />{awaitingMore ? "正在载入后面的照片" : "正在载入下一张"}</div>}
+      {!ended && (
+        <div className={styles.phSlideshowControls} role="toolbar" aria-label="幻灯片控制">
+          <button
+            type="button"
+            aria-label="上一张"
+            title="上一张 (←)"
+            disabled={position <= 0}
+            onClick={() => step(-1)}
+          >
+            <ChevronLeft />
+          </button>
+          <button
+            type="button"
+            className={styles.main}
+            aria-label={paused ? "继续播放" : "暂停"}
+            title={paused ? "继续 (空格)" : "暂停 (空格)"}
+            onClick={() => {
+              wake();
+              setPaused(!paused);
+            }}
+          >
+            {paused ? <Play /> : <Pause />}
+          </button>
+          <button type="button" aria-label="下一张" title="下一张 (→)" onClick={() => step(1)}>
+            <ChevronRight />
+          </button>
+        </div>
+      )}
+      {!ended && (
+        <div className={styles.phSlideshowProgress} aria-hidden="true">
+          <span
+            key={`${current.id}:${paused}`}
+            className={paused || awaitingMore ? styles.paused : ""}
+            style={{ animationDuration: `${slideDelay + (fade ? fadeTime : 0)}ms` }}
+          />
+        </div>
+      )}
+      {(slow || awaitingMore) && !ended && (
+        <div className={styles.phSlideshowWait} role="status">
+          <span className={styles.phSpinner} />
+          {awaitingMore ? "正在载入后面的照片" : "正在载入下一张"}
+        </div>
+      )}
       {ended && (
-        <div className="ph-slideshow-end" role="status">
+        <div className={styles.phSlideshowEnd} role="status">
           <strong>放完了</strong>
           <small>{`共 ${assets.length} 张照片`}</small>
           <div>
-            <button type="button" onClick={restart}><RotateCcw />从头再放</button>
-            <button type="button" className="primary" onClick={exit}>退出</button>
+            <button type="button" onClick={restart}>
+              <RotateCcw />
+              从头再放
+            </button>
+            <button type="button" className="primary" onClick={exit}>
+              退出
+            </button>
           </div>
         </div>
       )}

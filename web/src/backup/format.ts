@@ -1,62 +1,51 @@
-import type { Space } from "../api";
-
-import type { Frequency, RetentionTiers, ScheduleSettings, Snapshot, SnapshotSchedule } from "./backupApi";
+import { errorCodeText } from "../api/errorMessages";
+import type { Space } from "../api.generated";
+import { calendarLabel, calendarMoment, relativeTime, relativeUnit } from "../lib/time";
+import type { Frequency, RetentionTiers, ScheduleSettings, Snapshot, SnapshotSchedule } from "./api";
 
 const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 export const weekdayShort = ["日", "一", "二", "三", "四", "五", "六"];
 
 export const formatCount = (count: number) => count.toLocaleString("zh-CN");
 
-const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
-const dayDifference = (date: Date, now: Date) => Math.round((startOfDay(now).getTime() - startOfDay(date).getTime()) / 86_400_000);
-
-export const formatClock = (value: string | Date) =>
-  new Date(value).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+export { formatClock } from "../lib/time";
 
 // formatDay names a calendar day: 今天, 昨天, 10月10日 周六, or with the year
 // when it is not this year.
 export function formatDay(value: string | Date, now = new Date()): string {
-  const date = new Date(value);
-  const days = dayDifference(date, now);
-  if (days === 0) return "今天";
-  if (days === 1) return "昨天";
-  if (days === -1) return "明天";
-  const month = `${date.getMonth() + 1}月${date.getDate()}日`;
-  return date.getFullYear() === now.getFullYear() ? `${month} ${weekdays[date.getDay()]}` : `${date.getFullYear()}年${month}`;
+  return calendarLabel(value, now, new Date(value).getFullYear() === now.getFullYear() ? "short" : undefined);
+}
+
+// formatShortDay names a day without its weekday, for narrow places.
+export function formatShortDay(value: string | Date, now = new Date()): string {
+  return calendarLabel(value, now);
 }
 
 export function formatDateTime(value: string | Date, now = new Date()): string {
-  const date = new Date(value);
-  const days = dayDifference(date, now);
-  const day = Math.abs(days) <= 1 ? formatDay(date, now) : date.getFullYear() === now.getFullYear()
-    ? `${date.getMonth() + 1}月${date.getDate()}日` : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
-  return `${day} ${formatClock(date)}`;
+  return calendarMoment(value, now);
 }
 
 export function formatRelative(value: string | Date, now = new Date()): string {
-  const seconds = (now.getTime() - new Date(value).getTime()) / 1000;
-  if (seconds < 60) return "刚刚";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
-  if (seconds < 86_400) return `${Math.floor(seconds / 3600)} 小时前`;
-  const days = dayDifference(new Date(value), now);
-  if (days < 30) return `${days} 天前`;
-  return formatDateTime(value, now);
+  return relativeTime(value, now, { withTime: true });
 }
 
 // formatUntil words a future time: 12 分钟后, 今天 15:00, 明天 03:00 …
 export function formatUntil(value: string | Date, now = new Date()): string {
   const seconds = (new Date(value).getTime() - now.getTime()) / 1000;
   if (seconds < 90) return "即将开始";
-  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟后`;
+  if (seconds < 3600) return relativeUnit(Math.round(seconds / 60), "minute");
   return formatDateTime(value, now);
 }
 
 export function describeSchedule(settings: Pick<ScheduleSettings, "frequency" | "time" | "weekday">): string {
   const minute = settings.time.slice(3);
   switch (settings.frequency) {
-    case "hourly": return minute === "00" ? "每小时整点" : `每小时第 ${Number(minute)} 分`;
-    case "weekly": return `每${weekdays[settings.weekday]} ${settings.time}`;
-    default: return `每天 ${settings.time}`;
+    case "hourly":
+      return minute === "00" ? "每小时整点" : `每小时第 ${Number(minute)} 分`;
+    case "weekly":
+      return `每${weekdays[settings.weekday]} ${settings.time}`;
+    default:
+      return `每天 ${settings.time}`;
   }
 }
 
@@ -87,7 +76,9 @@ export function suggestedTiers(frequency: Frequency): RetentionTiers {
 export const tierTotal = (tiers: RetentionTiers) => tiers.hourly + tiers.daily + tiers.weekly + tiers.monthly;
 
 // describeRetention says how far back the kept scheduled snapshots reach.
-export function describeRetention(settings: Pick<ScheduleSettings, "frequency" | "keep" | "retention" | "tiers">): string {
+export function describeRetention(
+  settings: Pick<ScheduleSettings, "frequency" | "keep" | "retention" | "tiers">,
+): string {
   if (settings.retention !== "tiered") return `可回到最近 ${settings.keep} ${spanUnit[settings.frequency]}内的任一份`;
   const widest = [...tierOrder].reverse().find((tier) => settings.tiers[tier] > 0);
   if (!widest) return "没有保留任何定时快照";
@@ -101,9 +92,12 @@ export const originLabel = (snapshot: Pick<Snapshot, "origin">) => (snapshot.ori
 
 export function runErrorText(schedule: SnapshotSchedule): string {
   switch (schedule.lastRun?.error) {
-    case "volume_unavailable": return "数据卷不可用";
-    case "space_unavailable": return "空间已不存在";
-    default: return "快照创建失败";
+    case "volume_unavailable":
+      return errorCodeText("volume_unavailable")!;
+    case "space_unavailable":
+      return "空间已不存在";
+    default:
+      return "快照创建失败";
   }
 }
 

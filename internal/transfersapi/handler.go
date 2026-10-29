@@ -1,25 +1,25 @@
 // Package transfersapi exposes 传输中心: /api/v1/transfers to follow and
 // manage uploads and downloads, and /api/v1/uploads, the tus endpoint that
 // uploads arrive at (ADR 0019). Like feedbackapi it does not authenticate:
-// the Product Service attaches the signed-in user (WithUser) and the session
+// the Product Service attaches the signed-in user (accounts.WithUser) and the session
 // token the File Broker needs, and checks CSRF on writes.
 package transfersapi
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	tusd "github.com/tus/tusd/v2/pkg/handler"
 	"github.com/tus/tusd/v2/pkg/memorylocker"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/transfers"
 	xslog "golang.org/x/exp/slog"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
+	"github.com/zhongwater123/A-NAS/internal/transfers"
 )
 
 const (
@@ -31,15 +31,8 @@ const (
 // long, so a vanished browser frees its upload for another to resume.
 const networkTimeout = 60 * time.Second
 
-type userKey struct{}
-
-// WithUser attaches the signed-in user.
-func WithUser(ctx context.Context, user accounts.User) context.Context {
-	return context.WithValue(ctx, userKey{}, user)
-}
-
 func userOf(ctx context.Context) (accounts.User, bool) {
-	user, ok := ctx.Value(userKey{}).(accounts.User)
+	user, ok := accounts.UserFrom(ctx)
 	return user, ok && user.ID != ""
 }
 
@@ -47,7 +40,7 @@ type handler struct {
 	service *transfers.Service
 	uploads http.Handler
 	logger  *slog.Logger
-	mux     *http.ServeMux
+	mux     *apiroute.Mux
 }
 
 // New returns the transfer API. A nil service answers 503
@@ -56,7 +49,7 @@ func New(service *transfers.Service, logger *slog.Logger) (http.Handler, error) 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &handler{service: service, logger: logger, mux: http.NewServeMux()}
+	h := &handler{service: service, logger: logger, mux: apiroute.NewMux()}
 	if service != nil {
 		composer := tusd.NewStoreComposer()
 		store := uploadStore{service: service, logger: logger}
@@ -89,21 +82,31 @@ func New(service *transfers.Service, logger *slog.Logger) (http.Handler, error) 
 		"GET " + TransfersPath + "/{id}/content": h.content,
 		"POST " + TransfersPath + "/{id}/pause":  h.pause,
 		"POST " + TransfersPath + "/{id}/cancel": h.cancel,
-		UploadsPath:                              h.upload,
-		UploadsPath + "/":                        h.upload,
+		// tus 1.0 without its extensions for downloads and concatenation.
+		"POST " + UploadsPath:             h.upload,
+		"HEAD " + UploadsPath + "/{id}":   h.upload,
+		"PATCH " + UploadsPath + "/{id}":  h.upload,
+		"DELETE " + UploadsPath + "/{id}": h.upload,
 	}
 	for pattern, route := range routes {
 		h.mux.HandleFunc(pattern, h.withUser(route))
 	}
 	h.mux.HandleFunc(TransfersPath+"/", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
 	return h, nil
 }
 
+// Endpoints are the operations the transfer API serves under TransfersPath
+// and UploadsPath.
+func Endpoints() []apiroute.Endpoint {
+	h, _ := New(nil, nil)
+	return h.(*handler).mux.Endpoints()
+}
+
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.service == nil {
-		writeError(w, http.StatusServiceUnavailable, "transfers_unavailable", "transfers are unavailable")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "transfers_unavailable", "transfers are unavailable")
 		return
 	}
 	h.mux.ServeHTTP(w, r)
@@ -113,7 +116,7 @@ func (h *handler) withUser(next func(http.ResponseWriter, *http.Request, account
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := userOf(r.Context())
 		if !ok {
-			writeError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		}
 		next(w, r, user)
@@ -129,7 +132,7 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request, user accounts.Use
 	if items == nil {
 		items = []transfers.Transfer{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *handler) get(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -138,15 +141,14 @@ func (h *handler) get(w http.ResponseWriter, r *http.Request, user accounts.User
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	httpjson.Write(w, http.StatusOK, t)
 }
 
 func (h *handler) createDownload(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	var request struct {
 		EntryIDs []string `json:"entryIds"`
 	}
-	if err := decode(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid")
+	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
 	t, err := h.service.CreateDownload(r.Context(), user, request.EntryIDs)
@@ -154,7 +156,7 @@ func (h *handler) createDownload(w http.ResponseWriter, r *http.Request, user ac
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, t)
+	httpjson.Write(w, http.StatusCreated, t)
 }
 
 // content sends a download. Once the response has begun, a failure cuts
@@ -177,7 +179,7 @@ func (h *handler) pause(w http.ResponseWriter, r *http.Request, user accounts.Us
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	httpjson.Write(w, http.StatusOK, t)
 }
 
 func (h *handler) cancel(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -186,7 +188,7 @@ func (h *handler) cancel(w http.ResponseWriter, r *http.Request, user accounts.U
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	httpjson.Write(w, http.StatusOK, t)
 }
 
 func (h *handler) remove(w http.ResponseWriter, r *http.Request, user accounts.User) {
@@ -237,28 +239,5 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	if status == http.StatusInternalServerError {
 		h.logger.ErrorContext(r.Context(), "transfer request failed", "path", r.URL.Path, "error", err)
 	}
-	writeError(w, status, failure.Code, failure.Message)
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, errorBody(code, message))
-}
-
-func errorBody(code, message string) map[string]map[string]string {
-	return map[string]map[string]string{"error": {"code": code, "message": message}}
-}
-
-func decode(r *http.Request, target any) error {
-	if mediaType := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0])); mediaType != "application/json" {
-		return errors.New("Content-Type must be application/json")
-	}
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
+	httpjson.WriteError(w, status, failure.Code, failure.Message)
 }

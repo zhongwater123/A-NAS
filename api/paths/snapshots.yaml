@@ -1,0 +1,126 @@
+/api/v1/spaces/{spaceId}/snapshots:
+  get:
+    operationId: listSnapshots
+    parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }]
+    responses:
+      "200": { description: Snapshots, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/snapshots.yaml#/schemas/Snapshot" } } } } } } }
+  post:
+    operationId: createSnapshot
+    parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } } }
+    responses:
+      "201": { description: Snapshot created, content: { application/json: { schema: { $ref: "../components/snapshots.yaml#/schemas/Snapshot" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/spaces/{spaceId}/snapshot-schedule:
+  get:
+    operationId: getSnapshotSchedule
+    summary: Read the snapshot schedule of a space
+    description: >-
+      Spaces without a stored schedule report a disabled default. The schedule is read from the catalog on the
+      system disk and is available while the data volume is offline.
+    parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }]
+    responses:
+      "200": { description: The schedule and its latest run, content: { application/json: { schema: { $ref: "../components/snapshots.yaml#/schemas/SnapshotSchedule" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+  put:
+    operationId: updateSnapshotSchedule
+    summary: Change the snapshot schedule of a space
+    description: >-
+      Only the owner of a personal space and administrators for the shared space may change it. Times are local
+      to the device. After each successful scheduled snapshot, scheduled snapshots the retention no longer keeps
+      are deleted: beyond the newest keep under count retention, or outside every tier under tiered retention.
+      Manual snapshots are never deleted by a schedule.
+    parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/snapshots.yaml#/schemas/SnapshotScheduleSettings" } } } }
+    responses:
+      "200": { description: The updated schedule, content: { application/json: { schema: { $ref: "../components/snapshots.yaml#/schemas/SnapshotSchedule" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/spaces/{spaceId}/snapshot-search:
+  get:
+    operationId: searchSnapshots
+    summary: Find files and folders by name in all snapshots of a space
+    parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }, { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 100 } }]
+    responses:
+      "200":
+        description: Matching paths, exact names first, each with its distinct versions newest first.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [items, truncated]
+              properties:
+                items: { type: array, items: { $ref: "../components/snapshots.yaml#/schemas/SnapshotMatch" } }
+                truncated: { type: boolean, description: More paths matched than were returned. }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/spaces/{spaceId}/removed-entries:
+  get:
+    operationId: listRemovedEntries
+    summary: List what the snapshots of a space hold that the space no longer lists, most recently removed first
+    description: >-
+      The space is reconciled first, so deletions over SMB are included. Only the topmost removed item of a removed
+      folder is listed. Moved or renamed items are listed under their old path.
+    parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }]
+    responses:
+      "200":
+        description: Removed items
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [items, truncated]
+              properties:
+                items: { type: array, items: { $ref: "../components/snapshots.yaml#/schemas/RemovedEntry" } }
+                truncated: { type: boolean, description: The list stopped at 200 items or before the oldest snapshot was compared. }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "423": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/snapshots/{snapshotId}/restore:
+  post:
+    operationId: restoreSnapshot
+    summary: Copy everything a snapshot holds into a new folder of its space
+    parameters: [{ $ref: "../components/snapshots.yaml#/parameters/SnapshotID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileDestination" } } } }
+    responses:
+      "201": { description: The new folder holding the snapshot's files, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/snapshots/{snapshotId}/entries:
+  get:
+    operationId: listSnapshotEntries
+    description: Each entry is compared with the space as it is now; opening the top level reconciles the space first.
+    parameters: [{ $ref: "../components/snapshots.yaml#/parameters/SnapshotID" }, { name: parentId, in: query, schema: { type: string } }]
+    responses:
+      "200": { description: Snapshot entries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/snapshots.yaml#/schemas/SnapshotEntry" } } } } } } }
+/api/v1/snapshots/{snapshotId}/entries/{entryId}/restore:
+  post:
+    operationId: restoreSnapshotEntry
+    parameters: [{ $ref: "../components/snapshots.yaml#/parameters/SnapshotID" }, { name: entryId, in: path, required: true, schema: { type: string } }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/snapshots.yaml#/schemas/SnapshotRestore" } } } }
+    responses:
+      "201": { description: File or folder restored as a new entry; a folder brings everything below it, content: { application/json: { schema: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/snapshots/{snapshotId}/entries/{entryId}/content:
+  get:
+    operationId: downloadSnapshotFile
+    summary: Download one file from a snapshot
+    description: The content is streamed from the snapshot and cannot be requested in ranges.
+    parameters: [{ $ref: "../components/snapshots.yaml#/parameters/SnapshotID" }, { name: entryId, in: path, required: true, schema: { type: string } }]
+    responses:
+      "200": { description: File content, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/snapshots/{snapshotId}/keep:
+  post:
+    operationId: keepSnapshot
+    summary: Turn a scheduled snapshot into a manual one that schedules never delete
+    parameters: [{ $ref: "../components/snapshots.yaml#/parameters/SnapshotID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The kept snapshot, content: { application/json: { schema: { $ref: "../components/snapshots.yaml#/schemas/Snapshot" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/snapshots/{snapshotId}:
+  delete:
+    operationId: deleteSnapshot
+    parameters: [{ $ref: "../components/snapshots.yaml#/parameters/SnapshotID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Snapshot deleted }

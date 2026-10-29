@@ -10,6 +10,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
 
@@ -25,8 +26,11 @@ type AccountResolver interface {
 }
 
 // assistantRoutes are the reads the assistant's photo tools use. Originals,
-// thumbnails, the AI status, the activity log and uploads stay out of reach:
-// no pixels leave through the assistant, and nothing changes.
+// thumbnails, the AI status, the activity log and uploads stay out of reach,
+// and nothing changes; a photo's pixels leave only as its view (a 1600-pixel
+// JPEG without the original's metadata), for the model to look at when the
+// member asks it to, and its metadata, location included, as read from the
+// original.
 var assistantRoutes = []string{
 	"/libraries",
 	"/libraries/{libraryID}/timeline",
@@ -36,6 +40,8 @@ var assistantRoutes = []string{
 	"/search",
 	"/assets/{assetID}",
 	"/assets/{assetID}/similar",
+	"/assets/{assetID}/view",
+	"/assets/{assetID}/metadata",
 	"/tags",
 	"/tags/{name}/assets",
 }
@@ -71,7 +77,7 @@ func assistantAPI(api http.Handler) http.Handler {
 		mux.Handle("GET "+photosapi.PathPrefix+route, api)
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		photosapi.WriteError(w, http.StatusNotFound, "not_found", "the assistant cannot use this part of the photo library")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "the assistant cannot use this part of the photo library")
 	})
 	return mux
 }
@@ -86,20 +92,20 @@ func authenticateAssistant(resolver AccountResolver, logger *slog.Logger, gate *
 			// Only assistants, running as members, reach this socket: no credentials
 			// or root at the other end means it is wired wrong.
 			logger.ErrorContext(r.Context(), "assistant socket peer is not a member", "uid", uid, "credentials", ok)
-			photosapi.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
 			return
 		}
 		user, err := resolver.ResolveAccountUID(r.Context(), uid)
 		switch {
 		case errors.Is(err, accounts.ErrUserNotFound):
-			photosapi.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		case err != nil:
 			logger.ErrorContext(r.Context(), "account lookup failed", "error", err)
-			photosapi.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
 			return
 		case user.MustChangePassword:
-			photosapi.WriteError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
+			httpjson.WriteError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
 			return
 		}
 		gate.Touch()

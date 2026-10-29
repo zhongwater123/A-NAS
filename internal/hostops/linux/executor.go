@@ -2,10 +2,12 @@
 package linux
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,11 +19,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/appid"
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
-	"github.com/zhongwater123/A-NAS/internal/storage"
 )
 
 type BlockDevice struct {
@@ -32,6 +34,9 @@ type BlockDevice struct {
 
 type DeviceResolver interface {
 	ResolveDevice(context.Context, string) (BlockDevice, error)
+	// MountedDataVolume is the Btrfs filesystem mounted at the data mount
+	// point, with the disks the kernel lists for it, or nil.
+	MountedDataVolume(context.Context) (*hoststate.DataVolume, error)
 }
 
 type HostStateResolver struct {
@@ -49,8 +54,27 @@ func (r HostStateResolver) ResolveDevice(ctx context.Context, diskID string) (Bl
 	return BlockDevice{Disk: device.Disk, DevicePath: device.DevicePath, PartitionPath: device.PartitionPath}, nil
 }
 
+func (r HostStateResolver) MountedDataVolume(ctx context.Context) (*hoststate.DataVolume, error) {
+	if r.Reader == nil {
+		return nil, errors.New("Linux host-state reader is unavailable")
+	}
+	state, err := r.Reader.Read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return state.DataVolume, nil
+}
+
+// CommandRunner runs the fixed host commands with their arguments and
+// standard input.
 type CommandRunner interface {
+	// Run returns what the command wrote to standard output and standard
+	// error together, for commands whose output only explains a failure.
 	Run(context.Context, string, []string, string) ([]byte, error)
+	// Output returns only what the command wrote to standard output, for
+	// commands whose output is parsed: Samba tools print warnings on standard
+	// error even when they succeed. A failure's error carries standard error.
+	Output(context.Context, string, []string, string) ([]byte, error)
 }
 
 type Options struct {
@@ -59,6 +83,9 @@ type Options struct {
 	MountUnitName string
 	SMBInterface  string
 	Now           func() time.Time
+	// Logger receives what background work, such as converting the data
+	// volume, reports after the request that started it returned.
+	Logger *slog.Logger
 }
 
 type Executor struct {
@@ -68,6 +95,10 @@ type Executor struct {
 	mountPoint    string
 	mountUnitName string
 	smbInterface  string
+	// stateOwner owns the Host Agent's records: root, as which it runs.
+	stateOwner int
+	// stateFailures are the records that cannot be used, by path.
+	stateFailures map[string]error
 	spaceRootsMu  sync.RWMutex
 	spaceRoots    map[string]string
 	registryPath  string
@@ -86,6 +117,18 @@ type Executor struct {
 	apps          map[string]int
 	appsPath      string
 	appsError     error
+	logger        *slog.Logger
+	conversionMu  sync.Mutex
+	converting    bool
+	// markerMu orders changes to the data-volume marker.
+	markerMu sync.Mutex
+	// operations is the journal of data-volume operations by plan ID.
+	operationsMu    sync.Mutex
+	operations      map[string]*volumeOperation
+	operationsPath  string
+	operationsError error
+	// operating is the plan whose operation runs now; one runs at a time.
+	operating string
 }
 
 func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options) *Executor {
@@ -113,26 +156,46 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	if executor.now == nil {
 		executor.now = time.Now
 	}
-	executor.registryPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "space-registry.json")
+	executor.logger = options.Logger
+	if executor.logger == nil {
+		executor.logger = slog.Default()
+	}
+	stateDirectory := filepath.Join(executor.systemRoot, "var", "lib", stateDirectoryName)
+	executor.registryPath = filepath.Join(stateDirectory, "space-registry.json")
+	executor.identityPath = filepath.Join(stateDirectory, "identity-registry.json")
+	executor.viewingPath = filepath.Join(stateDirectory, "viewing-grants.json")
+	executor.appsPath = filepath.Join(stateDirectory, "app-identities.json")
+	executor.operationsPath = filepath.Join(stateDirectory, "volume-operations.json")
+	executor.stateOwner = os.Geteuid()
+	executor.stateFailures = executor.prepareState(stateDirectory, filepath.Join(executor.systemRoot, "var", "lib", legacyStateDirectoryName), []string{
+		executor.registryPath, executor.identityPath, executor.viewingPath, executor.appsPath, executor.operationsPath,
+	})
 	executor.registryError = executor.loadSpaceRegistry()
-	executor.identityPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "identity-registry.json")
+	// Viewing grants are checked against the identities, so those load first.
 	executor.identityError = executor.loadIdentityRegistry()
-	executor.viewingPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "viewing-grants.json")
 	executor.viewingError = executor.loadViewingRegistry()
-	executor.appsPath = filepath.Join(executor.systemRoot, "var", "lib", "a-nas", "app-identities.json")
 	executor.appsError = executor.loadAppsRegistry()
+	executor.operationsError = executor.loadOperations()
+	for path, err := range map[string]error{
+		executor.registryPath: executor.registryError, executor.identityPath: executor.identityError,
+		executor.viewingPath: executor.viewingError, executor.appsPath: executor.appsError, executor.operationsPath: executor.operationsError,
+	} {
+		if err != nil {
+			executor.logger.Error("a Host Agent record cannot be used; the operations that need it fail", "file", path, "error", err)
+		}
+	}
 	return executor
 }
 
-func (e *Executor) SetCredential(ctx context.Context, request accounts.CredentialRequest) error {
-	if !validUsername(request.Username) || strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PrivateSpaceID) == "" || !validSambaPassword(request.Password) {
+func (e *Executor) SetCredential(ctx context.Context, request accountid.CredentialRequest) error {
+	if !accountid.ValidUsername(request.Username) || strings.TrimSpace(request.UserID) == "" || strings.TrimSpace(request.PrivateSpaceID) == "" || !validSambaPassword(request.Password) {
 		return errors.New("invalid credential request")
 	}
-	identity := accounts.Identity{Username: request.Username, UID: request.UID, Role: request.Role, Enabled: request.Enabled}
+	identity := accountid.Identity{Username: request.Username, UID: request.UID, Role: request.Role, Enabled: request.Enabled}
 	if err := validIdentity(identity); err != nil {
 		return err
 	}
-	if e.smbInterface != "" && !regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`).MatchString(e.smbInterface) {
+	if e.smbInterface != "" && !smbInterfacePattern.MatchString(e.smbInterface) {
 		return errors.New("invalid Samba interface")
 	}
 	if e.identityError != nil {
@@ -215,9 +278,14 @@ func (e *Executor) RepairDataVolumePermissions(ctx context.Context) ([]string, e
 }
 
 func (e *Executor) DisableCredential(ctx context.Context, username string) error {
-	if !validUsername(username) {
+	if !accountid.ValidUsername(username) {
 		return errors.New("invalid username")
 	}
+	// Both boundaries must be closed, even if one subsystem is unavailable.
+	return errors.Join(e.disableHostCredential(ctx, username), e.disableAssistant(ctx, username))
+}
+
+func (e *Executor) disableHostCredential(ctx context.Context, username string) error {
 	if _, err := e.runner.Run(ctx, "smbpasswd", []string{"-d", username}, ""); err != nil {
 		return fmt.Errorf("disable Samba credential: %w", err)
 	}
@@ -265,13 +333,14 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
     read only = no
     browseable = yes
     access based share enum = yes
-%s`, interfaces, e.mountPoint, sambaShareOptions, e.mountPoint, accounts.UsersGroup, sambaShareOptions)
+%s`, interfaces, e.mountPoint, sambaShareOptions, e.mountPoint, accountid.UsersGroup,
+		strings.Replace(sambaShareOptions, "veto files = /.a-nas-trash/", "veto files = /.a-nas-trash/Agent空间/", 1))
 	configurationPath := filepath.Join(e.systemRoot, "etc", "samba", "smb.conf")
 	candidatePath := configurationPath + ".candidate"
 	if err := writeAtomic(candidatePath, []byte(configuration), 0o644); err != nil {
 		return err
 	}
-	defer os.Remove(candidatePath)
+	defer func() { _ = os.Remove(candidatePath) }()
 	if output, err := e.runner.Run(ctx, "testparm", []string{"--suppress-prompt", candidatePath}, ""); err != nil {
 		return fmt.Errorf("validate Samba configuration: %w: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -315,9 +384,10 @@ const sambaShareOptions = `    inherit acls = yes
     recycle:versions = yes
 `
 
-func validUsername(username string) bool {
-	return regexp.MustCompile(`^[a-z][a-z0-9_-]{2,31}$`).MatchString(username)
-}
+var (
+	smbInterfacePattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`)
+	deviceNamePattern   = regexp.MustCompile(`^[A-Za-z0-9._+-]+$`)
+)
 
 // validSambaPassword reports whether smbpasswd -s receives password whole: it
 // reads each copy as one line of C text into a 256-byte buffer, so a newline,
@@ -336,7 +406,7 @@ func commandError(action string, err error, output []byte) error {
 }
 
 func (e *Executor) loadSpaceRegistry() error {
-	contents, err := os.ReadFile(e.registryPath)
+	contents, err := e.readState(e.registryPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -347,12 +417,14 @@ func (e *Executor) loadSpaceRegistry() error {
 	if err := json.Unmarshal(contents, &roots); err != nil {
 		return fmt.Errorf("decode space registry: %w", err)
 	}
+	// A registry that fails a check is not used at all.
 	for spaceID, root := range roots {
-		clean := filepath.Clean(root)
-		if strings.TrimSpace(spaceID) == "" || !withinDirectory(e.mountPoint, clean) {
-			return errors.New("space registry contains an invalid path")
+		if !e.validSpace(spaceID, root) {
+			return fmt.Errorf("space registry: %s is not a space root", root)
 		}
-		e.spaceRoots[spaceID] = clean
+	}
+	if roots != nil {
+		e.spaceRoots = roots
 	}
 	return nil
 }
@@ -364,10 +436,10 @@ func (e *Executor) registerSpaces(spaces map[string]string) error {
 	e.spaceRootsMu.Lock()
 	defer e.spaceRootsMu.Unlock()
 	for spaceID, root := range spaces {
-		if strings.TrimSpace(spaceID) == "" || !withinDirectory(e.mountPoint, root) {
+		if !e.validSpace(spaceID, root) {
 			return errors.New("cannot register invalid space path")
 		}
-		e.spaceRoots[spaceID] = filepath.Clean(root)
+		e.spaceRoots[spaceID] = root
 	}
 	contents, err := json.MarshalIndent(e.spaceRoots, "", "  ")
 	if err != nil {
@@ -377,120 +449,33 @@ func (e *Executor) registerSpaces(spaces map[string]string) error {
 	return writeAtomic(e.registryPath, contents, 0o600)
 }
 
+// validSpace reports whether root is where a space with the ID lives: the
+// Shared folder, or a private space named after its owner (ADR 0008).
+// Registered roots are kept as written, so they must be clean.
+func (e *Executor) validSpace(spaceID, root string) bool {
+	if strings.TrimSpace(spaceID) == "" || root != filepath.Clean(root) {
+		return false
+	}
+	if spaceID == sharedSpaceID {
+		return root == filepath.Join(e.mountPoint, "spaces", "shared")
+	}
+	return filepath.Dir(root) == filepath.Join(e.mountPoint, "spaces", "private") && accountid.ValidUsername(filepath.Base(root))
+}
+
 func withinDirectory(root, path string) bool {
 	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
-}
-
-func (e *Executor) CreateVolume(ctx context.Context, request storage.CreateVolumeRequest) (storage.Volume, error) {
-	if e.resolver == nil || strings.TrimSpace(request.PlanID) == "" || strings.TrimSpace(request.DiskID) == "" || strings.TrimSpace(request.Fingerprint) == "" {
-		return storage.Volume{}, errors.New("invalid create-volume request")
-	}
-	device, err := e.resolver.ResolveDevice(ctx, request.DiskID)
-	if err != nil {
-		return storage.Volume{}, fmt.Errorf("resolve stable disk ID: %w", err)
-	}
-	if device.Disk.ID.String() != request.DiskID || storage.FingerprintDisk(device.Disk) != request.Fingerprint {
-		return storage.Volume{}, storage.ErrDiskChanged
-	}
-	if device.Disk.Role != hoststate.DiskRoleUnassigned || device.Disk.InUse || device.Disk.Removable || (device.Disk.Transport != hoststate.TransportSATA && device.Disk.Transport != hoststate.TransportNVMe) {
-		return storage.Volume{}, storage.ErrDiskNotEligible
-	}
-	if !validDevicePath(device.DevicePath) || !validDevicePath(device.PartitionPath) || device.DevicePath == device.PartitionPath {
-		return storage.Volume{}, errors.New("resolved block-device path is invalid")
-	}
-	commands := []struct {
-		name string
-		args []string
-	}{
-		{name: "wipefs", args: []string{"--all", device.DevicePath}},
-		{name: "parted", args: []string{"--script", device.DevicePath, "mklabel", "gpt", "mkpart", "primary", "btrfs", "1MiB", "100%"}},
-		{name: "partprobe", args: []string{device.DevicePath}},
-		{name: "udevadm", args: []string{"settle", "--timeout=10"}},
-		{name: "mkfs.btrfs", args: []string{"--force", "--label", "ANAS_DATA", device.PartitionPath}},
-	}
-	for _, command := range commands {
-		if _, err := e.runner.Run(ctx, command.name, command.args, ""); err != nil {
-			return storage.Volume{}, fmt.Errorf("%s failed: %w", command.name, err)
-		}
-	}
-	uuidBytes, err := e.runner.Run(ctx, "blkid", []string{"--output", "value", "--match-tag", "UUID", device.PartitionPath}, "")
-	if err != nil {
-		return storage.Volume{}, fmt.Errorf("read Btrfs UUID: %w", err)
-	}
-	uuid := strings.TrimSpace(string(uuidBytes))
-	if !regexp.MustCompile(`^[0-9A-Fa-f-]{16,64}$`).MatchString(uuid) {
-		return storage.Volume{}, errors.New("blkid returned an invalid filesystem UUID")
-	}
-	if err := os.MkdirAll(e.mountPoint, 0o750); err != nil {
-		return storage.Volume{}, fmt.Errorf("create mount point: %w", err)
-	}
-	unit := fmt.Sprintf(`[Unit]
-Description=A-NAS data volume
-After=local-fs-pre.target
-Before=local-fs.target
-
-[Mount]
-What=UUID=%s
-Where=%s
-Type=btrfs
-Options=noatime,compress=zstd:3,nodev,nosuid,noexec
-TimeoutSec=30
-
-[Install]
-WantedBy=local-fs.target
-`, uuid, e.mountPoint)
-	unitPath := filepath.Join(e.systemRoot, "etc", "systemd", "system", e.mountUnitName)
-	if err := writeAtomic(unitPath, []byte(unit), 0o644); err != nil {
-		return storage.Volume{}, fmt.Errorf("install data-volume mount unit: %w", err)
-	}
-	for _, command := range []struct {
-		name string
-		args []string
-	}{
-		{name: "systemctl", args: []string{"daemon-reload"}},
-		{name: "systemctl", args: []string{"enable", "--now", e.mountUnitName}},
-		{name: "btrfs", args: []string{"subvolume", "create", filepath.Join(e.mountPoint, "spaces")}},
-	} {
-		if _, err := e.runner.Run(ctx, command.name, command.args, ""); err != nil {
-			return storage.Volume{}, fmt.Errorf("%s failed after formatting: %w", command.name, err)
-		}
-	}
-	if err := os.MkdirAll(filepath.Join(e.mountPoint, ".a-nas-snapshots"), 0o700); err != nil {
-		return storage.Volume{}, err
-	}
-	marker, err := json.Marshal(struct {
-		FilesystemUUID string `json:"filesystemUuid"`
-		DiskID         string `json:"diskId"`
-		FormatVersion  int    `json:"formatVersion"`
-	}{FilesystemUUID: uuid, DiskID: request.DiskID, FormatVersion: 1})
-	if err != nil {
-		return storage.Volume{}, err
-	}
-	if err := writeAtomic(filepath.Join(e.mountPoint, ".a-nas-volume.json"), append(marker, '\n'), 0o644); err != nil {
-		return storage.Volume{}, fmt.Errorf("write data-volume identity marker: %w", err)
-	}
-	if _, err := e.materializeRegisteredSpaces(ctx); err != nil {
-		return storage.Volume{}, fmt.Errorf("materialize registered spaces: %w", err)
-	}
-	// Best effort: a failure only delays managed stores until the Host Agent's
-	// periodic repair, which logs it.
-	_, _ = e.EnsurePhotosStore(ctx)
-	_, _ = e.EnsureSharesStore(ctx)
-	return storage.Volume{
-		ID: "volume:data", DiskID: request.DiskID, FilesystemUUID: uuid,
-		CapacityBytes: device.Disk.CapacityBytes, State: storage.VolumeStateAvailable,
-	}, nil
 }
 
 func validDevicePath(path string) bool {
 	if filepath.Dir(path) != "/dev" {
 		return false
 	}
-	return regexp.MustCompile(`^[A-Za-z0-9._+-]+$`).MatchString(filepath.Base(path))
+	return deviceNamePattern.MatchString(filepath.Base(path))
 }
 
 func writeAtomic(path string, contents []byte, mode os.FileMode) error {
+	//nolint:gosec // G301: parents are system directories such as /etc/samba and /etc/systemd/system; mode protects the file.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -522,20 +507,36 @@ func writeAtomic(path string, contents []byte, mode os.FileMode) error {
 		return err
 	}
 	committed = true
-	return nil
+	// The rename is on disk only once the directory is: records such as the
+	// operation journal must survive a power cut right after they are written.
+	return syncDirectory(filepath.Dir(path))
 }
 
 type execCommandRunner struct{}
 
 func (execCommandRunner) Run(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	return hostCommand(ctx, name, args, stdin).CombinedOutput()
+}
+
+func (execCommandRunner) Output(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	output, err := hostCommand(ctx, name, args, stdin).Output()
+	if exitError, ok := errors.AsType[*exec.ExitError](err); ok {
+		if detail := bytes.TrimSpace(exitError.Stderr); len(detail) != 0 {
+			err = fmt.Errorf("%w: %s", err, detail)
+		}
+	}
+	return output, err
+}
+
+func hostCommand(ctx context.Context, name string, args []string, stdin string) *exec.Cmd {
 	command := exec.CommandContext(ctx, name, args...)
 	if stdin != "" {
 		command.Stdin = strings.NewReader(stdin)
 	}
-	return command.CombinedOutput()
+	return command
 }
 
-var _ storage.VolumeExecutor = (*Executor)(nil)
-var _ accounts.CredentialProvisioner = (*Executor)(nil)
-var _ accounts.ViewingProvisioner = (*Executor)(nil)
+var _ datavolume.VolumeExecutor = (*Executor)(nil)
+var _ accountid.CredentialProvisioner = (*Executor)(nil)
+var _ accountid.ViewingProvisioner = (*Executor)(nil)
 var _ appid.Host = (*Executor)(nil)

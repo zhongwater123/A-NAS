@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/avatar"
+	"github.com/zhongwater123/A-NAS/internal/imagetest"
 )
 
 func encodePNG(t *testing.T, picture image.Image) []byte {
@@ -81,6 +82,7 @@ func TestTransparencyTurnsWhiteAndSmallPicturesAreNotEnlarged(t *testing.T) {
 }
 
 func TestOnlyReasonablePicturesAreAccepted(t *testing.T) {
+	panics := imagetest.LoggedPanics(t)
 	// A PNG header that claims 20000x20000 pixels is refused before decoding.
 	huge := encodePNG(t, image.NewGray(image.Rect(0, 0, 1, 1)))
 	binary.BigEndian.PutUint32(huge[16:20], 20000)
@@ -95,9 +97,13 @@ func TestOnlyReasonablePicturesAreAccepted(t *testing.T) {
 		"empty":      {nil, avatar.ErrUnsupported},
 		"dimensions": {huge, avatar.ErrTooLarge},
 		"bytes":      {make([]byte, avatar.MaxUploadBytes+1), avatar.ErrTooLarge},
+		"decoder":    {imagetest.PanickingPicture(), avatar.ErrUnsupported},
 	} {
 		if _, err := avatar.Normalize(test.picture); !errors.Is(err, test.want) {
 			t.Errorf("%s: Normalize() error = %v, want %v", name, err, test.want)
 		}
 	}
+	// The decoder's panic is logged; pictures refused before or by the
+	// decoder are not.
+	imagetest.RequirePanicLogged(t, panics(), "avatar")
 }

@@ -3,7 +3,7 @@
 # release with the real installer and systemd units into a disposable Debian
 # 13 container where systemd is PID 1, then checks every entry point that
 # touches the data volume: Web files (File Broker workers), SMB, the photo API,
-# the FFmpeg media worker shared by the media center and music, the
+# the FFmpeg worker shared by the media center and music, the
 # administrator terminal, and the LAN Web entry that Caddy serves on
 # port 80. Unlike tests that start
 # the daemons by hand, it runs them under the production sandboxes, so it
@@ -32,6 +32,8 @@ if [[ "${1:-}" != --inside ]]; then
   for binary in anas-api anas-host-agent; do
     [[ -x "$repo/build/$binary" ]] || { echo "missing build/$binary: run make build-binaries" >&2; exit 2; }
   done
+  qdrant_tarball="$repo/build/qdrant/$(jq -r .sha256 "$repo/deploy/qdrant/qdrant.json")/$(jq -r .file "$repo/deploy/qdrant/qdrant.json")"
+  [[ -f "$qdrant_tarball" ]] || { echo "missing $qdrant_tarball: run scripts/fetch-qdrant.sh" >&2; exit 2; }
   real_ai=()
   if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
     [[ -f "$repo/build/ai-runtime.json" ]] || { echo "missing build/ai-runtime.json: run scripts/build-ai-runtime.sh" >&2; exit 2; }
@@ -129,15 +131,25 @@ printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/
 # stage DIR: a release as scripts/deploy-dev.ps1 stages it.
 stage() {
   install -d "$1"
-  install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh "$1/"
+  install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh /src/scripts/install-ffmpeg-units.sh "$1/"
   for unit in anas-api anas-host-agent anas-photos anas-shares; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
   done
   install -m 0644 /src/deploy/systemd/system/anas.slice "$1/anas-system.slice"
   install -m 0644 /src/deploy/systemd/system/anas-ai.socket "$1/anas-ai-system.socket"
   install -m 0644 /src/deploy/systemd/system/anas-ai.service "$1/anas-ai-system.service"
-  install -m 0644 /src/deploy/systemd/system/anas-media.socket "$1/anas-media-system.socket"
-  install -m 0644 "/src/deploy/systemd/system/anas-media@.service" "$1/anas-media-system@.service"
+  install -m 0644 /src/deploy/systemd/system/anas-ffmpeg.socket "$1/anas-ffmpeg-system.socket"
+  install -m 0644 "/src/deploy/systemd/system/anas-ffmpeg@.service" "$1/anas-ffmpeg-system@.service"
+  install -m 0644 /src/deploy/systemd/system/system-anasffmpeg.slice "$1/anas-ffmpeg-system.slice"
+  install -m 0644 /src/deploy/systemd/system/anas-vectors.slice "$1/anas-vectors-system.slice"
+  install -m 0644 "/src/deploy/systemd/system/anas-vectors@.service" "$1/anas-vectors-system@.service"
+  install -m 0644 "/src/deploy/systemd/system/anas-vectors-proxy@.socket" "$1/anas-vectors-proxy-system@.socket"
+  install -m 0644 "/src/deploy/systemd/system/anas-vectors-proxy@.service" "$1/anas-vectors-proxy-system@.service"
+  install -d "$1/vectors"
+  install -m 0644 /src/deploy/qdrant/qdrant.json /src/deploy/qdrant/config.yaml "$1/vectors/"
+  install -m 0755 /src/deploy/qdrant/start.sh /src/deploy/qdrant/wait-ready.sh "$1/vectors/"
+  ln -s "/src/build/qdrant/$(jq -r .sha256 /src/deploy/qdrant/qdrant.json)/$(jq -r .file /src/deploy/qdrant/qdrant.json)" \
+    "$1/vectors/qdrant.tar.gz"
   install -d "$1/ai/anas_ai"
   install -m 0644 /src/ai/anas_ai/*.py "$1/ai/anas_ai/"
   install -m 0644 "$ai/model.json" "$ai/detector.json" "$ai/face-detector.json" "$ai/face-embedder.json" \
@@ -150,6 +162,10 @@ stage() {
   ln -s "$ai/runtime.tar.gz" "$1/ai/runtime.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
   install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
+  install -m 0750 /src/scripts/run-kiosk.sh "$1/kiosk-launcher"
+  install -m 0644 "/src/deploy/systemd/system/anas-kiosk@.service" "$1/anas-kiosk@.service"
+  install -m 0644 /src/deploy/pam/a-nas-kiosk "$1/a-nas-kiosk.pam"
+  install -m 0644 /src/deploy/sysusers.d/a-nas-kiosk.conf "$1/a-nas-kiosk.sysusers"
 }
 release=/tmp/release
 stage "$release"
@@ -186,6 +202,13 @@ SHIM
 chmod 0755 /usr/local/sbin/lsblk
 # The Host Agent derives disk IDs from the WWN (internal/hoststate/linux).
 data_disk="disk:$(printf 'a-nas:disk:v1\0wwn:0x5000000000000002' | sha256sum | cut -c1-32)"
+
+# A record of the Host Agent's as a release before issue #176 left it, in the
+# Product Service's StateDirectory; the Host Agent moves it to its own.
+install -d -m 0700 /var/lib/a-nas
+printf '{\n  "legacy-app": 30000\n}\n' > /var/lib/a-nas/app-identities.json
+chmod 0600 /var/lib/a-nas/app-identities.json
+cp -p /var/lib/a-nas/app-identities.json /tmp/legacy-app-identities.json
 
 iface=$(ip -o -4 route show to default | awk '{print $5; exit}')
 ip=$(ip -o -4 addr show dev "$iface" | awk '{split($4, a, "/"); print a[1]; exit}')
@@ -244,14 +267,64 @@ in_trash() { # USER SPACE_DIR FILE: FILE's bytes are in USER's recycle bin
 }
 status_of() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 secret() { head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20; }
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+verified() { # UNIT_FILE...: systemd-analyze verify reports nothing, not even a warning
+  local report
+  report=$(systemd-analyze verify --man=no "$@" 2>&1) && [[ -z "$report" ]] && return
+  printf '%s\n' "$report" >&2
+  return 1
+}
 api=http://127.0.0.1:8080
 data=/srv/a-nas/data
+
+# --- The units as installed, with every drop-in, read by Debian 13's systemd
+# as on the NAS (#278): each directive and value, and that each command exists.
+# The image has no Wayland compositor: Cage, which the local console's unit
+# starts, is a stand-in that only has to exist.
+[[ -x /usr/bin/cage ]] || install -m 0755 /dev/null /usr/bin/cage
+check "systemd accepts every installed A-NAS unit" \
+  verified /etc/systemd/system/anas*.service /etc/systemd/system/anas*.socket /etc/systemd/system/*anas*.slice
 
 # --- Every service runs under its production unit (issue #38).
 check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares smbd
 check "Host Agent keeps CAP_SETUID and CAP_SETGID" has_capabilities anas-host-agent
 check "Host Agent proved it can start workers as users" \
   journal_has anas-host-agent "$installed_at" 'file broker identity switch verified'
+# Hardening that everything below runs under (issue #166).
+check "Host Agent holds only the capabilities its unit names" \
+  test "$(awk '/^CapBnd:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-host-agent)/status")" = 00000000012a00ff
+check "Host Agent's memory and tasks are limited" \
+  test "$(systemctl show -p MemoryMax --value anas-host-agent):$(systemctl show -p TasksMax --value anas-host-agent)" = 1073741824:512
+# Its records live where only root can open them (issue #176).
+check "Host Agent's state directory is root's alone" test "$(stat -c '%U:%G %a' /var/lib/a-nas-host)" = 'root:root 700'
+check "Host Agent moved an older release's record into it" \
+  cmp -s /tmp/legacy-app-identities.json /var/lib/a-nas-host/app-identities.json
+check "the moved record is root's alone" \
+  test "$(stat -c '%U:%G %a' /var/lib/a-nas-host/app-identities.json)" = 'root:root 600'
+check "the record left the Product Service's directory" test ! -e /var/lib/a-nas/app-identities.json
+check "Product Service cannot list the Host Agent's records" denied as a-nas ls /var/lib/a-nas-host
+
+# --- The local console (issue #174): an account of its own that cannot log
+# in, starting the launcher of the installed release. The container has no
+# display, so the unit is installed but neither enabled nor started.
+check "the local console runs as its own account" \
+  test "$(systemctl show -p User --value anas-kiosk@tty1.service)" = a-nas-kiosk
+check "the local console's account has no home and no login shell" \
+  test "$(getent passwd a-nas-kiosk | cut -d: -f6-7)" = /nonexistent:/usr/sbin/nologin
+check "the local console's account has no password" test "$(passwd -S a-nas-kiosk | cut -d ' ' -f 2)" = L
+check "the local console's launcher is the installed release's" \
+  cmp -s /opt/a-nas/current/kiosk-launcher /src/scripts/run-kiosk.sh
+check "the local console's launcher is root's" test "$(stat -c '%U %a' /opt/a-nas/current/kiosk-launcher)" = 'root 755'
+# A staging account laid out as anas-dev's on the NAS: its staged releases are
+# its own, and the owner's write shows the directory is writable at all.
+id anas-dev >/dev/null 2>&1 || useradd --create-home --shell /bin/bash anas-dev
+staging=/home/anas-dev/apps/a-nas/releases
+install -d -o anas-dev -g anas-dev -m 0750 /home/anas-dev/apps /home/anas-dev/apps/a-nas "$staging"
+check "the staging account writes its staged releases" as anas-dev touch "$staging/staged-by-anas-dev"
+check "the local console cannot write the staged releases" denied as a-nas-kiosk touch "$staging/staged-by-kiosk"
+check "the local console is not in the staging account's group" denied grep -qw anas-dev <<<"$(id -nG a-nas-kiosk)"
+check "the installer leaves the local console disabled" \
+  test "$(systemctl is-enabled anas-kiosk@tty1.service 2>/dev/null)" = disabled
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 
 # --- Accounts: an administrator and a member, each with one Linux identity.
@@ -292,6 +365,12 @@ check "Web upload is owned by the member's UID" \
   test "$(owner_uid "$data/spaces/private/alice/alice.txt")" = "$alice_id"
 check "Web download returns the uploaded bytes" \
   cmp -s /tmp/alice.txt <(curl -fsS -b /tmp/alice.jar "$api/api/v1/files/$alice_file/content")
+# The unit a process runs in: its cgroup's last part. The container's systemd
+# may sit below the host's cgroup root, so only the end is fixed.
+scope_of() { sed -n 's|^0::.*/||p' "/proc/$1/cgroup"; }
+alice_worker=$(pgrep -u "$alice_id" -f 'anas-host-agent file-worker' | head -n 1 || true)
+check "the member's file worker runs in a scope of its own, not the Host Agent's" \
+  grep -Eqx 'anas-files-alice-[0-9]+\.scope' <<<"$(scope_of "$alice_worker" 2>/dev/null)"
 check "member cannot list the administrator's private space" \
   test "$(status_of -b /tmp/alice.jar "$api/api/v1/spaces/$owner_private/entries")" != 200
 check "member cannot download the administrator's file" \
@@ -334,6 +413,12 @@ printf 'lan %s\n' "$(secret)" > /tmp/lan.txt
 curl -fsS -o /dev/null -b /tmp/lan.jar -H "X-CSRF-Token: $lan_csrf" \
   -F "file=@/tmp/lan.txt;filename=lan.txt" "$lan/api/v1/spaces/$alice_private/uploads" || true
 check "LAN upload is owned by the member's UID" test "$(owner_uid "$data/spaces/private/alice/lan.txt" 2>/dev/null)" = "$alice_id"
+# Installed apps get the session cookie too (issue #161): it works only from
+# the client that signed in, and only the desktop may frame its pages.
+check "a LAN session is refused from another client" test "$(status_of -b /tmp/lan.jar "$api/api/v1/session")" = 401
+check "the local console session is refused through the LAN entry" test "$(status_of -b /tmp/console.jar "$lan/api/v1/session")" = 401
+check "the desktop cannot be framed through the LAN entry" \
+  bash -c "curl -fsS -D - -o /dev/null '$lan/' | tr -d '\r' | grep -qix 'x-frame-options: deny'"
 
 # --- Resumable uploads (ADR 0019): tus parts land in the member's own temporary.
 tus_meta() { # KEY VALUE ... -> Upload-Metadata
@@ -469,6 +554,50 @@ check "the shell's exit code reaches the browser" grep -qx 'close 1000 exit 7' <
 check "the local console reaches the terminal too" \
   grep -qx 'close 1000 exit 0' <<<"$(terminal "$api" /tmp/owner.jar $'exit 0\n' || true)"
 check "a member's session gets no shell" denied terminal "$lan" /tmp/lan.jar 'exit 0'
+# The shell runs in a scope of its own, so what it logs is not the Host
+# Agent's, even under its name (issue #166).
+forged_at=$(date '+%Y-%m-%d %H:%M:%S')
+scope_output=$(terminal "$lan" /tmp/owner-lan.jar $'echo "cgroup:$(cat /proc/self/cgroup)"\nlogger -t anas-host-agent "forged by a terminal"\nunshare --user true 2>/dev/null; echo "unshare:$?"\nexit 0\n' || true)
+check "the shell runs in a scope of its own" grep -Eqx 'cgroup:0::/(.*/)?anas-terminal-owner-[0-9]+\.scope' <<<"$scope_output"
+check "the shell cannot create namespaces" grep -qx 'unshare:[1-9][0-9]*' <<<"$scope_output"
+check "what a shell logs reaches the journal" \
+  bash -c "for _ in \$(seq 1 20); do journalctl -t anas-host-agent --since '$forged_at' -o cat --no-pager | grep -Fq 'forged by a terminal' && exit 0; sleep 0.2; done; exit 1"
+check "but not as the Host Agent's" denied journal_has anas-host-agent "$forged_at" 'forged by a terminal'
+check "nor in the Host Agent's log in Settings" \
+  test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/system-logs?service=host-agent&q=forged" | jq '.items | length')" = 0
+
+# --- A data volume the Host Agent cannot reconcile leaves it serving (issue
+# #166). Btrfs turns a volume read-only when it finds errors; a remount stands
+# in. The photo and share services hold databases open for writing on it,
+# which a read-only remount refuses.
+entries /tmp/alice.jar "$alice_private" >/dev/null || true
+scopes_before=$(systemctl list-units --plain --no-legend 'anas-files-*' 'anas-terminal-*' | awk '{print $1}')
+systemctl stop anas-photos anas-shares
+check "the data volume remounts read-only" mount -o remount,ro "$data"
+readonly_at=$(date '+%Y-%m-%d %H:%M:%S')
+systemctl restart anas-host-agent
+for _ in $(seq 1 50); do journal_has anas-host-agent "$readonly_at" 'data-volume reconciliation failed' && break; sleep 0.2; done
+check "restarting the Host Agent ends the scopes it started" \
+  test -n "$scopes_before" -a -z "$(for scope in $scopes_before; do systemctl is-active --quiet "$scope" && echo "$scope"; done)"
+check "the Host Agent serves on a read-only data volume" systemctl is-active --quiet anas-host-agent
+check "it logs that it cannot reconcile the volume" journal_has anas-host-agent "$readonly_at" 'data-volume reconciliation failed'
+check "and reports that in the host state" \
+  bash -c "curl -fsS --unix-socket /run/a-nas/host-agent.sock http://host-agent/v1/state | jq -e '.reconcileFailed == true' >/dev/null"
+check "Web files still list" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
+check "the terminal still opens" grep -qx 'close 1000 exit 0' <<<"$(terminal "$api" /tmp/owner.jar $'exit 0\n' || true)"
+check "the Host Agent's log still reads in Settings" \
+  bash -c "curl -fsS -b /tmp/owner.jar '$api/api/v1/system-logs?service=host-agent&q=reconciliation' | jq -e '.items | length > 0' >/dev/null"
+check "the health check names the read-only data volume" \
+  bash -c "curl -fsS -b /tmp/owner.jar '$api/api/v1/system' | jq -e '[.healthFindings[].code] | index(\"volume_read_only\")' >/dev/null"
+mount -o remount,rw "$data"
+writable_at=$(date '+%Y-%m-%d %H:%M:%S')
+systemctl restart anas-host-agent
+systemctl start anas-photos anas-shares
+check "once the volume is writable, the Host Agent reconciles it" \
+  bash -c "for _ in \$(seq 1 50); do journalctl -u anas-host-agent --since '$writable_at' -o cat --no-pager | grep -Fq 'data volume reconciled' && exit 0; sleep 0.2; done; exit 1"
+check "and reports nothing wrong" \
+  bash -c "curl -fsS --unix-socket /run/a-nas/host-agent.sock http://host-agent/v1/state | jq -e '.reconcileFailed != true' >/dev/null"
+check "sharing recovers on the writable volume" shares_ready
 
 # --- No service identity reaches a space.
 check "Product Service account cannot list a private space" denied as a-nas ls "$data/spaces/private/alice"
@@ -503,6 +632,103 @@ check "SMB delete appears in the member's Web recycle bin" \
   grep -qx alice-smb.txt <(curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" | jq -r '.items[].name')
 check "SMB-deleted bytes are in the same recycle bin" in_trash alice "$data/spaces/private/alice" /tmp/alice-smb.txt
 
+# --- Cross-space moves (#180) preserve times through the confined Worker
+# and recycle the source instead of deleting it permanently.
+move_source="$data/spaces/private/alice/move-times"
+move_target="$data/spaces/shared/move-times"
+as alice mkdir "$move_source"
+as alice cp /tmp/alice.txt "$move_source/dated.txt"
+as alice touch -m -d '2020-01-02 03:04:05.123456789 UTC' "$move_source/dated.txt" "$move_source"
+move_file_time=$(stat -c %y "$move_source/dated.txt")
+move_dir_time=$(stat -c %y "$move_source")
+move_source_id=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/spaces/$alice_private/entries" | jq -r '.items[] | select(.name == "move-times") | .id')
+move_id=$(curl -fsS -X PATCH -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
+  -H 'Content-Type: application/json' -d "$(jq -nc --arg space "$shared" '{spaceId:$space}')" \
+  "$api/api/v1/files/$move_source_id" | jq -r .id || true)
+check "cross-space move publishes a new entry" test -n "$move_id" -a "$move_id" != null -a "$move_id" != "$move_source_id"
+check "cross-space move preserves file nanosecond mtime" test "$(stat -c %y "$move_target/dated.txt" 2>/dev/null)" = "$move_file_time"
+check "cross-space move preserves directory nanosecond mtime" test "$(stat -c %y "$move_target" 2>/dev/null)" = "$move_dir_time"
+check "cross-space move inherits Shared read permissions" as owner cmp -s /tmp/alice.txt "$move_target/dated.txt"
+check "cross-space move removes the source from its old location" test ! -e "$move_source"
+move_trash_id=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/trash" | jq -r '.items[] | select(.name == "move-times") | .id')
+check "cross-space move leaves an operator recycle item" test -n "$move_trash_id" -a "$move_trash_id" != null
+check "another user cannot restore the moved source" test "$(status_of -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" \
+  -H 'Content-Type: application/json' -d '{}' "$api/api/v1/trash/$move_trash_id/restore")" = 403
+check "the operator restores the moved source" test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
+  -H 'Content-Type: application/json' -d '{}' "$api/api/v1/trash/$move_trash_id/restore")" = 200
+check "the restored source keeps its content" cmp -s /tmp/alice.txt "$move_source/dated.txt"
+
+# --- Snapshots (#162): a space of 100,000 files, far beyond the 1 MiB the
+# Host Agent's reply used to be cut at, and the sweep that removes what a
+# failed or interrupted snapshot leaves on the volume or in the catalog.
+alice_root="$data/spaces/private/alice"
+subvolume_of() { # SNAPSHOT_ID -> the Host Agent's subvolume path for it
+  printf '%s/.a-nas-snapshots/%s' "$data" "$(printf 'a-nas:snapshot:v1\0%s' "$1" | sha256sum | cut -c1-32)"
+}
+snapshot_ids() { curl -fsS -b /tmp/alice.jar "$api/api/v1/spaces/$alice_private/snapshots" | jq -r '.items[].id'; }
+take_snapshot() { # NAME -> the snapshot JSON
+  curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$1\"}" "$api/api/v1/spaces/$alice_private/snapshots"
+}
+as alice python3 - "$alice_root/快照压力" <<'PY'
+import os, sys
+for folder in range(100):
+    path = os.path.join(sys.argv[1], f"文件夹 {folder:03d}")
+    os.makedirs(path)
+    for index in range(1000):
+        open(os.path.join(path, f"照片_{index:04d}.jpg"), "wb").close()
+PY
+large_snapshot=$(take_snapshot 十万个文件 || true)
+large_snapshot_id=$(jq -r '.id // empty' <<<"$large_snapshot" 2>/dev/null || true)
+check "a snapshot of a space with 100,000 files succeeds" \
+  test "$(jq -r '.fileCount // 0' <<<"$large_snapshot" 2>/dev/null || echo 0)" -ge 100000
+check "the backup center lists it" grep -qx "$large_snapshot_id" <(snapshot_ids)
+check "its folders can be browsed" grep -qx 快照压力 \
+  <(curl -fsS -b /tmp/alice.jar "$api/api/v1/snapshots/$large_snapshot_id/entries" | jq -r '.items[].name')
+# Later sections list this space; keep them quick.
+rm -rf "$alice_root/快照压力"
+gone_snapshot=$(take_snapshot 卷上已删除 | jq -r '.id // empty' || true)
+btrfs subvolume delete "$(subvolume_of "$gone_snapshot")" >/dev/null 2>&1 || true
+check "a snapshot already gone from the volume can still be deleted" \
+  test "$(status_of -X DELETE -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" "$api/api/v1/snapshots/$gone_snapshot")" = 204
+check "its record is gone" denied grep -qx "$gone_snapshot" <(snapshot_ids)
+# What a crash leaves: a subvolume noted as pending and a record without a
+# subvolume. The Product Service sweeps both when it starts, and leaves a
+# subvolume the catalog never noted, as one of a lost catalog (#269).
+systemctl stop anas-api
+orphan=$(subvolume_of snapshot:crashed)
+foreign="$data/.a-nas-snapshots/ffffffffffffffffffffffffffffffff"
+btrfs subvolume snapshot -r "$alice_root" "$orphan" >/dev/null
+btrfs subvolume snapshot -r "$alice_root" "$foreign" >/dev/null
+setpriv --reuid=a-nas --regid=a-nas --init-groups python3 - "$alice_private" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect("/var/lib/a-nas/files.db")
+db.execute("INSERT INTO snapshots(id, space_id, name, origin, created_by, created_at, file_count, size_bytes)"
+           " VALUES(?,?,?,?,?,?,?,?)", ("snapshot:lost", sys.argv[1], "卷上已没有", "manual", "system", "2026-10-20T00:00:00Z", 0, 0))
+db.execute("INSERT INTO pending_snapshots(id, space_id, created_at) VALUES(?,?,?)",
+           ("snapshot:crashed", sys.argv[1], "2026-10-20T00:00:00Z"))
+db.commit()
+PY
+systemctl start anas-api
+for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+lost_record_gone() { snapshot_ids >/tmp/snapshot-ids.txt && ! grep -qx snapshot:lost /tmp/snapshot-ids.txt; }
+for _ in $(seq 1 100); do test ! -e "$orphan" && lost_record_gone && break; sleep 0.2; done
+check "on start the Product Service deletes a snapshot whose taking never finished" test ! -e "$orphan"
+check "and the record of a snapshot gone from the volume" lost_record_gone
+check "recorded snapshots survive the sweep" test -d "$(subvolume_of "$large_snapshot_id")"
+check "a snapshot the catalog never noted survives too" test -d "$foreign"
+curl -fsS -b /tmp/owner.jar "$api/api/v1/activity?category=file" | jq -r '.items[].action' >/tmp/sweep-actions.txt || true
+check "the sweep is in the activity log" grep -qx snapshot.missing /tmp/sweep-actions.txt
+check "so is the snapshot it left alone" grep -qx snapshot.unrecorded /tmp/sweep-actions.txt
+btrfs subvolume delete "$foreign" >/dev/null 2>&1 || true
+# A copy that a restart cut short leaves a hidden duplicate; listing the
+# space removes it.
+as alice mkdir -p "$alice_root/.a-nas-copy-0123456789abcdef/副本"
+as alice touch "$alice_root/.a-nas-copy-0123456789abcdef/副本/a.jpg"
+curl -fsS -o /dev/null -b /tmp/alice.jar "$api/api/v1/spaces/$alice_private/entries" || true
+check "listing a space removes a copy that a restart cut short" test ! -e "$alice_root/.a-nas-copy-0123456789abcdef"
+
 # --- Photos: the photo service's own identity, the member's own library.
 python3 - /tmp/photo.png <<'PY'
 import struct, sys, zlib
@@ -514,7 +740,7 @@ png += chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 open(sys.argv[1], "wb").write(png)
 PY
 check "photo service becomes ready on its own" \
-  bash -c "for _ in \$(seq 1 30); do journalctl -u anas-photos -o cat --no-pager | grep -Fq 'photo service ready' && exit 0; sleep 1; done; exit 1"
+  bash -c "for _ in \$(seq 1 30); do journalctl -u anas-photos --since '$writable_at' -o cat --no-pager | grep -Fq 'photo service ready' && exit 0; sleep 1; done; exit 1"
 library_of() { curl -fsS -b "$1" "$api/api/v1/photos/libraries" | jq -r --arg user "$2" '[.items[] | select(.kind == "private" and .ownerUserId == $user)][0].id'; }
 alice_user=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/session" | jq -r .user.id || true)
 alice_library=$(library_of /tmp/alice.jar "$alice_user" || true)
@@ -536,6 +762,17 @@ dynamic_identity() { # UNIT: runs under a UID systemd allocates for it, not root
   uid=$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value "$1")/status")
   ((uid >= 61184 && uid <= 65519))
 }
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+worker_memory_beside_photos() { # where internal/photoservice/gate.go workerCgroup reads it
+  local photos root worker held
+  photos=$(systemctl show -p ControlGroup --value anas-photos.service)
+  root=${photos%/system.slice/*} # this container's systemd root under the host's
+  worker=$(systemctl show -p ControlGroup --value anas-ai.service)
+  # cgroup files report a size of 0, so read the value.
+  held=$(cat "/sys/fs/cgroup$root/anas.slice/anas-ai.slice/anas-ai.service/memory.current" 2>/dev/null)
+  [[ "$worker" == "$root/anas.slice/anas-ai.slice/anas-ai.service" && "$held" =~ ^[1-9][0-9]*$ ]] ||
+    { echo "the Worker is in '$worker' holding '$held', the photo service in '$photos'" >&2; return 1; }
+}
 check "the installer enables the AI socket" systemctl is-enabled --quiet anas-ai.socket
 check "only the photo service reaches the AI socket" \
   test "$(stat -c '%a %U %G' /run/a-nas-ai/ai.sock)" = "660 root a-nas-photos"
@@ -549,8 +786,12 @@ check "the release links the models and runtime kept once by content" \
 ai_cores=$(($(nproc) > 2 ? $(nproc) - 2 : 1))
 check "the Worker may use every core but two" \
   test "$(systemctl show -p CPUQuotaPerSecUSec --value anas-ai.service)" = "${ai_cores}s"
-check "the kernel reclaims the Worker's memory before its hard limit" \
-  test "$(systemctl show -p MemoryHigh --value anas-ai.service):$(systemctl show -p MemoryMax --value anas-ai.service)" = 2684354560:3221225472
+memory_kib=$(awk '$1 == "MemTotal:" { print $2 }' /proc/meminfo)
+check "the Worker's memory is capped only at all but 2.5 GiB, against a runaway" \
+  test "$(systemctl show -p MemoryHigh --value anas-ai.service):$(systemctl show -p MemoryMax --value anas-ai.service)" = \
+  "infinity:$(((memory_kib > 3670016 ? memory_kib - 2621440 : 1048576) * 1024))"
+check "the Worker's models are never swapped out, and it is the first to end when memory runs out" \
+  test "$(systemctl show -p MemorySwapMax --value anas-ai.service):$(systemctl show -p OOMScoreAdjust --value anas-ai.service)" = 0:500
 check "the Worker runs in its own slice, apart from the device's other work" \
   test "$(systemctl show -p Slice --value anas-ai.service)" = anas-ai.slice
 check "background work gives way to the device's other work where weights compare" \
@@ -559,6 +800,9 @@ check "AI work yields to the pressure of the device's other work, not its own" \
   journal_has anas-photos.service "$installed_at" "AI work yields to the pressure of"
 check "search starts the Worker through its socket" semantic_search 猫
 check "the Worker runs under its own dynamic identity" dynamic_identity anas-ai.service
+check "the Worker's memory is where the photo service's gate reads it" worker_memory_beside_photos
+check "the Worker records what it holds once started, for its models' memory" \
+  journal_has anas-ai.service "$installed_at" "started with"
 if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
   check "the Worker serves the real model in its sandbox" \
     journal_has anas-ai.service "$installed_at" "serving $(jq -r .name "$ai/model.json")@$(jq -r .sha256 "$ai/model.json" | cut -c1-12)"
@@ -627,12 +871,205 @@ check "the refused detector changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
   -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = "$models_kept"
 
+# --- The vector index (ADR 0028): one Qdrant instance per owning service,
+# reached only through its owner's socket, started on demand in a network
+# namespace of its own and stopped when idle.
+vectors_state=/var/lib/private/a-nas-vectors/a-nas-photos
+qdrant_sha=$(jq -r .sha256 /src/deploy/qdrant/qdrant.json)
+# grpc-answers.py SOCKET: an HTTP/2 server answers the client preface through it.
+cat > /usr/local/lib/grpc-answers.py <<'PY'
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.settimeout(60)
+s.connect(sys.argv[1])
+s.sendall(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" + bytes([0, 0, 0, 4, 0, 0, 0, 0, 0]))
+frame = b""
+while len(frame) < 9:
+    chunk = s.recv(9 - len(frame))
+    if not chunk:
+        sys.exit(1)
+    frame += chunk
+sys.exit(0 if frame[3] == 4 else 1)
+PY
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+unit_stops() { # UNIT: becomes inactive within 90 seconds, the owner's idle minute included
+  for _ in $(seq 1 180); do
+    systemctl is-active --quiet "$1" || return 0
+    sleep 0.5
+  done
+  return 1
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+same_network_namespace() {
+  local index proxy
+  index=$(systemctl show -p MainPID --value anas-vectors@a-nas-photos.service)
+  proxy=$(systemctl show -p MainPID --value anas-vectors-proxy@a-nas-photos.service)
+  [[ "$index" != 0 && "$proxy" != 0 && "$(readlink "/proc/$index/ns/net")" == "$(readlink "/proc/$proxy/ns/net")" &&
+    "$(readlink "/proc/$index/ns/net")" != "$(readlink /proc/1/ns/net)" ]]
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+journal_shows() { # UNIT SINCE TEXT: the unit logs TEXT within three minutes; the vector sync waits,
+  # as AI work does, while the device's other work is under pressure
+  for _ in $(seq 1 360); do
+    journal_has "$@" && return 0
+    sleep 0.5
+  done
+  return 1
+}
+check "the installer enables the photo service's vector index socket" \
+  systemctl is-enabled --quiet anas-vectors-proxy@a-nas-photos.socket
+check "the photo service builds its vector index from the Catalog" \
+  journal_shows anas-photos.service "$installed_at" "photo vector index created"
+check "and brings the organised photo into it" \
+  journal_shows anas-photos.service "$installed_at" "photo vector index synced"
+journalctl -u anas-photos.service --since "$installed_at" -o cat --no-pager | grep -F 'vector index' | tail -n 3 || true
+check "a search is compared with the vector index in the background" semantic_search 猫
+check "and the comparison is logged" \
+  journal_shows anas-photos.service "$installed_at" "photo vector index shadow search"
+check "only the photo service reaches its vector index" \
+  test "$(stat -c '%a %U %G' /run/a-nas-vectors/a-nas-photos.sock)" = "600 a-nas-photos a-nas-photos"
+check "the Product Service account cannot connect to the photo vector index" \
+  denied as a-nas python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas-vectors/a-nas-photos.sock")'
+check "the release links Qdrant kept once by content" \
+  test "$(readlink /opt/a-nas/current/vectors/qdrant)" = "/opt/a-nas/qdrant/$qdrant_sha/qdrant"
+check "all vector index instances share one memory limit" \
+  test "$(systemctl show -p MemoryMax --value anas-vectors.slice)" = 1610612736
+check "connecting starts the vector index and reaches its gRPC server" \
+  as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock
+# hold SOCKET SECONDS: keeps a connection open while the test looks at the
+# running instance.
+hold() { python3 -c 'import socket, sys, time; s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); time.sleep(float(sys.argv[2]))' "$1" "$2"; }
+# index_rest PATH [CURL OPTION...]: a REST answer of the photo vector index,
+# from inside its network namespace.
+index_rest() {
+  nsenter -t "$(systemctl show -p MainPID --value anas-vectors@a-nas-photos.service)" -n curl -fsS "http://127.0.0.1:6333$1" "${@:2}"
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+index_holds_photos() { # the photo service's collection holds at least one point
+  local name
+  name=$(index_rest /collections | jq -r '.result.collections[].name | select(startswith("images_v1_"))')
+  [[ -n "$name" ]] && (($(index_rest "/collections/$name" | jq -r '.result.points_count') >= 1))
+}
+systemctl start anas-vectors-proxy@a-nas-shares.socket
+hold /run/a-nas-vectors/a-nas-photos.sock 8 &
+holder=$!
+hold /run/a-nas-vectors/a-nas-shares.sock 8 &
+other_holder=$!
+sleep 3
+check "the vector index runs under a dynamic identity of its own" \
+  test "$(systemctl show -p User --value anas-vectors@a-nas-photos.service)" = a-nas-vec-a-nas-photos
+check "the vector index's dynamic identity is not root" dynamic_identity anas-vectors@a-nas-photos.service
+check "another owner's instance runs under another identity" \
+  test "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-vectors@a-nas-photos.service)/status")" != \
+  "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-vectors@a-nas-shares.service)/status")"
+check "another owner's socket is its own" test "$(stat -c '%a %U' /run/a-nas-vectors/a-nas-shares.sock)" = "600 a-nas-shares"
+check "the photo service cannot connect to another owner's vector index" \
+  denied as a-nas-photos python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas-vectors/a-nas-shares.sock")'
+check "the proxy shares the vector index's own network namespace" same_network_namespace
+check "the vector index's namespace has only its loopback" \
+  test "$(nsenter -t "$(systemctl show -p MainPID --value anas-vectors@a-nas-photos.service)" -n ip -o link | awk -F': ' '{print $2}')" = lo
+check "the photo service's collection holds the organised photo" index_holds_photos
+check "the vector index keeps its storage in its own state directory" test -d "$vectors_state/storage"
+check "the vector index runs in its slice under background work's" \
+  test "$(systemctl show -p Slice --value anas-vectors@a-nas-photos.service):$(systemctl show -p Slice --value anas-vectors.slice)" = anas-vectors.slice:anas.slice
+check "the vector index may keep many files open" \
+  test "$(systemctl show -p LimitNOFILE --value anas-vectors@a-nas-photos.service)" = 65536
+echo "INFO the vector index's memory: $(systemctl show -p MemoryCurrent --value anas-vectors@a-nas-photos.service) bytes"
+wait "$holder" "$other_holder"
+systemctl stop anas-vectors-proxy@a-nas-shares.socket anas-vectors-proxy@a-nas-shares.service anas-vectors@a-nas-shares.service
+check "the vector index stops once its proxy has been idle" unit_stops anas-vectors@a-nas-photos.service
+echo "INFO the vector index's memory peak: $(systemctl show -p MemoryPeak --value anas-vectors@a-nas-photos.service) bytes"
+# mark NAME: a file in the index's storage, as its dynamic user would leave it.
+mark() {
+  touch "$vectors_state/storage/$1"
+  chown --reference="$vectors_state" "$vectors_state/storage/$1"
+}
+mark kept-by-the-same-release
+check "the same Qdrant release starts" \
+  as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock
+check "and keeps its index" test -e "$vectors_state/storage/kept-by-the-same-release"
+check "the vector index stops again once idle" unit_stops anas-vectors@a-nas-photos.service
+printf '1.19.9\n' > "$vectors_state/qdrant-version"
+chown --reference="$vectors_state" "$vectors_state/qdrant-version"
+mark written-by-another-minor-release
+check "a vector index another minor release wrote starts" \
+  as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock
+check "and starts empty" test ! -e "$vectors_state/storage/written-by-another-minor-release"
+# A collection whose stored configuration is damaged makes Qdrant panic while
+# loading: the instance cannot start until its storage is emptied.
+hold /run/a-nas-vectors/a-nas-photos.sock 4 &
+holder=$!
+sleep 2
+index_rest /collections/damaged -X PUT -H 'Content-Type: application/json' -d '{"vectors":{"size":4,"distance":"Dot"}}' >/dev/null
+wait "$holder"
+check "the vector index stops before the damage" unit_stops anas-vectors@a-nas-photos.service
+printf 'damaged\n' > "$vectors_state/storage/collections/damaged/config.json"
+failed_starts=0
+until as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock; do
+  failed_starts=$((failed_starts + 1))
+  ((failed_starts < 5)) || break
+  sleep 1
+done
+echo "INFO starts that failed on the damaged index: $failed_starts"
+check "a damaged vector index fails to start at first" test "$failed_starts" -ge 1
+check "and starts empty after two failures in a row" \
+  test "$failed_starts" -le 3 -a ! -e "$vectors_state/storage/collections/damaged"
+check "failed starts leave the vector index socket listening" systemctl is-active --quiet anas-vectors-proxy@a-nas-photos.socket
+# A probe in the vector index's own unit, in place of Qdrant.
+cat > /usr/local/lib/anas-vectors-probe.py <<'PY'
+import os, socket, sys
+leaks = []
+with open("/proc/net/dev") as devices:
+    interfaces = {line.split(":")[0].strip() for line in devices.readlines()[2:]}
+if interfaces != {"lo"}:
+    leaks.append(f"sees interfaces {sorted(interfaces)}")
+try:
+    socket.create_connection(("1.1.1.1", 53), timeout=3).close()
+    leaks.append("reached the network")
+except OSError:
+    pass
+try:
+    socket.socket(socket.AF_NETLINK, socket.SOCK_DGRAM).close()
+    leaks.append("opened a netlink socket")
+except OSError:
+    pass
+for path in ("/srv/a-nas/data", "/var/lib/a-nas"):
+    try:
+        os.listdir(path)
+        leaks.append(f"listed {path}")
+    except OSError:
+        pass
+print("; ".join(leaks) or "contained")
+sys.exit(1 if leaks else 0)
+PY
+sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-vectors-probe.py|' \
+  -e 's|^Type=.*|Type=oneshot|' -e '/^ExecStartPre=/d' -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded=/d' \
+  "/etc/systemd/system/anas-vectors@.service" > "/etc/systemd/system/anas-vectors-probe@.service"
+systemctl daemon-reload
+check "the vector index probe finds the network and data volume outside the sandbox" \
+  denied python3 /usr/local/lib/anas-vectors-probe.py
+check "the vector index's sandbox has only loopback and cannot read the data volume or product state" \
+  systemctl start anas-vectors-probe@a-nas-photos.service
+journalctl -u anas-vectors-probe@a-nas-photos.service -o cat --no-pager | grep -E 'contained|sees|reached|opened|listed' | tail -n 1 || true
+qdrant_kept=$(find /opt/a-nas/qdrant -mindepth 1 -maxdepth 1 | wc -l)
+staged_tampered=/tmp/tampered-qdrant
+stage "$staged_tampered"
+rm "$staged_tampered/vectors/qdrant.tar.gz"
+head -c 1024 /dev/urandom > "$staged_tampered/vectors/qdrant.tar.gz"
+jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
+  /src/deploy/qdrant/qdrant.json > "$staged_tampered/vectors/qdrant.json"
+check "a staged Qdrant that does not match its manifest is refused" \
+  denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
+check "the refused Qdrant changes nothing" \
+  test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
+  -a "$(find /opt/a-nas/qdrant -mindepth 1 -maxdepth 1 | wc -l)" = "$qdrant_kept"
+
 # --- Media center (ADR 0017): files are read as the user through the File
 # Broker; FFmpeg runs in a per-connection worker without network, data volume
 # or Product Service state.
-check "the installer enables the media worker socket" systemctl is-enabled --quiet anas-media.socket
-check "the Product and Photo Services reach the media worker socket" \
-  test "$(stat -c '%a %U %G' /run/a-nas-media/media.sock)" = "660 root a-nas-photos"
+check "the installer enables the FFmpeg worker socket" systemctl is-enabled --quiet anas-ffmpeg.socket
+check "the Product and Photo Services reach the FFmpeg worker socket" \
+  test "$(stat -c '%a %U %G' /run/a-nas-ffmpeg/ffmpeg.sock)" = "660 root a-nas-photos"
 # Photo Service also uses the same descriptor-only worker socket.
 ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=160x120:rate=12:duration=1 -c:v libx264 /tmp/photo.mov
 live_photo=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
@@ -657,7 +1094,7 @@ curl -fsS -b /tmp/alice.jar -D /tmp/video-preview.headers "$api/api/v1/files/$vi
 preview_etag=$(sed -n 's/^[Ee][Tt][Aa][Gg]: //p' /tmp/video-preview.headers | tr -d '\r')
 check "file previews return an ETag" test -n "$preview_etag"
 check "file preview cache is private to Product Service" test "$(stat -c '%a %U' /var/lib/a-nas/file-previews)" = "700 a-nas"
-systemctl stop anas-media.socket
+systemctl stop anas-ffmpeg.socket
 systemctl restart anas-api
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 check "video preview survives restart without the decoder" \
@@ -665,7 +1102,7 @@ check "video preview survives restart without the decoder" \
 check "persisted video preview is unchanged" cmp /tmp/video-preview.jpg /tmp/video-preview-restarted.jpg
 check "unchanged video preview revalidates with 304" \
   test "$(status_of -b /tmp/alice.jar -H "If-None-Match: $preview_etag" "$api/api/v1/files/$video_file/preview?size=thumbnail")" = 304
-systemctl start anas-media.socket
+systemctl start anas-ffmpeg.socket
 ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=orange:s=640x480 -frames:v 1 /tmp/preview.png
 heif-enc -o /tmp/preview.heic /tmp/preview.png >/tmp/heif-encode.log 2>&1
 heif_file=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F 'parentId=' \
@@ -678,6 +1115,38 @@ done
 curl -fsS -b /tmp/alice.jar "$api/api/v1/files/$heif_file/content" -o /tmp/heif-original.heic
 check "HEIC download remains the original" cmp /tmp/preview.heic /tmp/heif-original.heic
 check "Product Service cannot open the HEIC source itself" denied as a-nas cat "$data/spaces/shared/preview.HEIC"
+
+# The services take turns from shared slots before they connect (issue #168):
+# with every slot held elsewhere, a preview waits for one instead of failing.
+check "the FFmpeg worker's slots are open to its callers only" \
+  test "$(stat -c '%a %U %G' /run/a-nas-ffmpeg/slots):$(find /run/a-nas-ffmpeg/slots -type f -perm 0440 | wc -l)" = "750 root a-nas-photos:8"
+# Each account with the groups its unit gives it.
+for account in a-nas:a-nas-photos,a-nas-shares a-nas-photos:a-nas-photos a-nas-shares:a-nas-photos; do
+  check "${account%%:*} can take a FFmpeg worker slot" \
+    setpriv --reuid="${account%%:*}" --regid="${account%%:*}" --groups="${account#*:}" flock -n /run/a-nas-ffmpeg/slots/7 true
+done
+check "all FFmpeg workers share one memory limit" test \
+  "$(systemctl show -p Slice --value anas-ffmpeg@slot-check.service):$(systemctl show -p MemoryMax --value system-anasffmpeg.slice)" = "system-anasffmpeg.slice:3221225472"
+ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=teal:s=320x240 -frames:v 1 /tmp/slots.png
+heif-enc -o /tmp/slots.heic /tmp/slots.png >/tmp/heif-encode.log 2>&1
+slots_file=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F 'parentId=' \
+  -F 'file=@/tmp/slots.heic;filename=slots.HEIC' "$api/api/v1/spaces/$shared/uploads" | jq -r .id)
+slot_holders=()
+for slot in 0 1 2 3 4 5 6 7; do
+  flock -n -o "/run/a-nas-ffmpeg/slots/$slot" sleep 60 &
+  slot_holders+=("$!")
+done
+sleep 0.5
+# Only someone waiting can take the top slot: neither streams nor background
+# work reach it.
+(sleep 2; kill "${slot_holders[7]}") &
+slot_releaser=$!
+waited_from=$(date +%s%N)
+slot_status=$(status_of -b /tmp/alice.jar "$api/api/v1/files/$slots_file/preview?size=thumbnail")
+waited_ms=$(( ($(date +%s%N) - waited_from) / 1000000 ))
+kill "${slot_holders[@]:0:7}" 2>/dev/null || true
+wait "${slot_holders[@]}" "$slot_releaser" 2>/dev/null || true
+check "a preview waits for a slot other processes hold, then renders" test "$slot_status:$((waited_ms >= 1500))" = "200:1"
 
 media_library=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
   -d "{\"name\":\"Movies\",\"kind\":\"movies\",\"spaceId\":\"$shared\",\"folderIds\":[\"$movies_dir\"]}" \
@@ -694,17 +1163,17 @@ for _ in $(seq 1 60); do
 done
 film=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/media/titles?category=movie" | jq -r '.items[0].id' || true)
 check "the member sees the scanned film" test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/media/videos/$film" | jq -r .title)" = Heat
-check "the media worker reads the film's duration in its sandbox" test "${film_duration%.*}" -ge 5
+check "the FFmpeg worker reads the film's duration in its sandbox" test "${film_duration%.*}" -ge 5
 check "the member plays the original with range requests" \
   test "$(status_of -b /tmp/alice.jar -H 'Range: bytes=0-99' "$api/api/v1/media/videos/$film/file")" = 206
-check "the media worker converts the film to fragmented MP4" bash -c \
+check "the FFmpeg worker converts the film to fragmented MP4" bash -c \
   "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/media/videos/$film/stream?mode=transcode&start=1&audio=0&quality=original' | head -c 64 | grep -aq ftyp"
-check "the media worker takes a frame of the film" bash -c \
+check "the FFmpeg worker takes a frame of the film" bash -c \
   "for _ in \$(seq 1 30); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/media/artwork/$film/thumb') == 200 ]] && exit 0; sleep 1; done; exit 1"
 check "Product Service account cannot read the film itself" denied as a-nas cat "$data/spaces/shared/Movies/Heat (1995).mkv"
 
 # --- Music (ADR 0018) indexes the same files in place and has the shared
-# media worker probe and decode the formats browsers cannot play.
+# FFmpeg worker probe and decode the formats browsers cannot play.
 ffmpeg -hide_banner -loglevel error -f lavfi -i sine=frequency=440:duration=5 -c:a wavpack \
   -metadata title=Aria -metadata artist=Quartet /tmp/aria.wv
 curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F "parentId=" \
@@ -717,11 +1186,11 @@ done
 song=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/music/tracks" | jq -c '.items[] | select(.title == "Aria")' || true)
 check "the member's music library holds the WavPack song with its tags" \
   test "$(jq -r '.artist + " " + (.transcode | tostring)' <<<"${song:-null}" 2>/dev/null)" = "Quartet true"
-check "the media worker reads the song's duration in its sandbox" test "$(jq -r '.durationMs // 0' <<<"${song:-null}" 2>/dev/null)" -ge 4900
-check "the media worker decodes the song to FLAC from a start position" bash -c \
+check "the FFmpeg worker reads the song's duration in its sandbox" test "$(jq -r '.durationMs // 0' <<<"${song:-null}" 2>/dev/null)" -ge 4900
+check "the FFmpeg worker decodes the song to FLAC from a start position" bash -c \
   "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/music/tracks/$(jq -r .id <<<"${song:-null}" 2>/dev/null)/stream?start=1' | head -c 4 | grep -aq fLaC"
-# A probe in the media worker's own unit, in place of the worker.
-cat > /usr/local/lib/anas-media-probe.py <<'PY'
+# A probe in the FFmpeg worker's own unit, in place of the worker.
+cat > /usr/local/lib/anas-ffmpeg-probe.py <<'PY'
 import os, socket, sys
 leaks = []
 for family, kind in ((socket.AF_INET, socket.SOCK_STREAM), (socket.AF_INET6, socket.SOCK_STREAM), (socket.AF_NETLINK, socket.SOCK_DGRAM)):
@@ -741,13 +1210,82 @@ if not 61184 <= os.getuid() <= 65519:
 print("; ".join(leaks) or "contained")
 sys.exit(1 if leaks else 0)
 PY
-sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-media-probe.py|' -e 's|^Type=.*|Type=oneshot|' \
-  -e '/^StandardInput=/d' /etc/systemd/system/anas-media@.service > /etc/systemd/system/anas-media-probe.service
+sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-ffmpeg-probe.py|' -e 's|^Type=.*|Type=oneshot|' \
+  -e '/^StandardInput=/d' /etc/systemd/system/anas-ffmpeg@.service > /etc/systemd/system/anas-ffmpeg-probe.service
 systemctl daemon-reload
-check "the media probe finds the network and data volume outside the sandbox" denied python3 /usr/local/lib/anas-media-probe.py
-check "the media worker's sandbox has no network, data volume or Product Service state" \
-  systemctl start anas-media-probe.service
-journalctl -u anas-media-probe.service -o cat --no-pager | grep -E 'contained|opened|listed|ran as' | tail -n 1 || true
+check "the media probe finds the network and data volume outside the sandbox" denied python3 /usr/local/lib/anas-ffmpeg-probe.py
+check "the FFmpeg worker's sandbox has no network, data volume or Product Service state" \
+  systemctl start anas-ffmpeg-probe.service
+journalctl -u anas-ffmpeg-probe.service -o cat --no-pager | grep -E 'contained|opened|listed|ran as' | tail -n 1 || true
+
+# The rollback helper restores the legacy worker layout before the real
+# installer upgrades it again. An optional locally built pre-rename binary
+# proves the old subcommand too; CI always tests both unit layouts.
+worker_installer=/opt/a-nas/current/install-ffmpeg-units.sh
+install -d /tmp/worker-legacy /opt/a-nas/releases/worker-legacy
+for suffix in .socket @.service .slice; do
+  sed -e 's/anas-ffmpeg/anas-media/g' -e 's/a-nas-ffmpeg/a-nas-media/g' \
+    -e 's/anasffmpeg/anasmedia/g' -e 's/ffmpeg.sock/media.sock/g' \
+    "$release/anas-ffmpeg-system$suffix" > "/tmp/worker-legacy/anas-media-system$suffix"
+done
+if [[ -x /src/build/legacy-anas-api ]]; then
+  install -m 0755 /src/build/legacy-anas-api /opt/a-nas/releases/worker-legacy/anas-api
+  sed -i 's/ ffmpeg-worker$/ media-worker/' /tmp/worker-legacy/anas-media-system@.service
+  echo 'legacy worker validation: pre-rename binary'
+else
+  install -m 0755 /src/build/anas-api /opt/a-nas/releases/worker-legacy/anas-api
+  echo 'legacy worker validation: old unit layout, current decoder binary'
+fi
+# Match the Product Service unit's SupplementaryGroups, not the account's
+# login groups: a-nas deliberately has no permanent photo-store membership.
+cat > /tmp/probe-worker.py <<'PY'
+import array, json, socket, struct, sys
+
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+    conn.settimeout(15)
+    conn.connect(sys.argv[1])
+    with open('/tmp/heat.mkv', 'rb') as source:
+        body = json.dumps({'op': 'probe', 'stream': 0, 'audioTrack': 0}).encode()
+        assert conn.sendmsg([struct.pack('>I', len(body))],
+                            [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [source.fileno()]))]) == 4
+        conn.sendall(body)
+        with conn.makefile('rb') as reply:
+            size = struct.unpack('>I', reply.read(4))[0]
+            assert json.loads(reply.read(size))['ok']
+            assert json.load(reply)['streams']
+PY
+check "incomplete rollback stage is rejected before stopping the active socket" \
+  denied "$worker_installer" /tmp/nonexistent-worker-release
+check "failed rollback preflight leaves the new worker working" \
+  setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
+systemctl stop anas-api anas-photos anas-shares
+"$worker_installer" /tmp/worker-legacy
+ln -sfn /opt/a-nas/releases/worker-legacy /opt/a-nas/current
+systemctl enable --now anas-media.socket
+check "rollback restores a working worker through the legacy unit and release link" \
+  setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-media/media.sock
+check "rollback removes the new worker units, socket and tmpfiles configuration" \
+  test ! -e /etc/systemd/system/anas-ffmpeg.socket -a ! -e /etc/systemd/system/anas-ffmpeg@.service \
+  -a ! -e /etc/systemd/system/system-anasffmpeg.slice -a ! -e /run/a-nas-ffmpeg/ffmpeg.sock \
+  -a ! -e /etc/tmpfiles.d/a-nas-ffmpeg.conf
+check "rollback restores legacy client environment and eight admission slots" \
+  test "$(grep -c '^ANAS_MEDIA_' /etc/a-nas/anas-api.env):$(grep -c '^ANAS_FFMPEG_' /etc/a-nas/anas-api.env):$(find /run/a-nas-media/slots -type f | wc -l)" = 2:0:8
+stage /tmp/worker-upgrade
+if ! bash /src/scripts/install-v1.0.1-system-services.sh /tmp/worker-upgrade worker-upgrade "$iface" >/tmp/worker-upgrade.log 2>&1; then
+  cat /tmp/worker-upgrade.log
+  exit 1
+fi
+for _ in $(seq 1 150); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "upgrade restores a working worker through the new unit and release link" \
+  setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
+check "upgrade removes legacy worker units, socket and tmpfiles configuration" \
+  test ! -e /etc/systemd/system/anas-media.socket -a ! -e /etc/systemd/system/anas-media@.service \
+  -a ! -e /etc/systemd/system/system-anasmedia.slice -a ! -e /run/a-nas-media/media.sock \
+  -a ! -e /etc/tmpfiles.d/a-nas-media.conf
+check "upgrade restores new client environment and eight admission slots" \
+  test "$(grep -c '^ANAS_FFMPEG_' /etc/a-nas/anas-api.env):$(grep -c '^ANAS_MEDIA_' /etc/a-nas/anas-api.env):$(find /run/a-nas-ffmpeg/slots -type f | wc -l)" = 2:0:8
+check "music decodes through the new worker after upgrading the old layout" bash -c \
+  "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/music/tracks/$(jq -r .id <<<"${song:-null}" 2>/dev/null)/stream?start=1' | head -c 4 | grep -aq fLaC"
 
 # --- One password for Web and SMB.
 new_password=$(secret)
@@ -757,6 +1295,39 @@ check "member changes her password on the Web" test "$(status_of -b /tmp/alice.j
 check "the old password no longer opens SMB" denied smb alice alice ls
 smb_auth alice "$new_password"
 check "the new password opens SMB" quiet smb alice alice ls
+
+# --- Disabling an account ends its SMB sessions. Under the Host Agent's
+# RestrictAddressFamilies=AF_UNIX, smbstatus warns on standard error that it
+# found no network interfaces; read together with its JSON, the warning
+# failed every disable and every start's identity synchronization
+# (docs/investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md).
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+smb_sessions_of() { # USER -> how many SMB sessions USER has
+  smbstatus --processes --user="$1" --json 2>/dev/null | jq --arg user "$1" '[.sessions[] | select(.username == $user)] | length'
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+smb_sessions_end() { for _ in $(seq 1 50); do [[ "$(smb_sessions_of "$1")" == 0 ]] && return; sleep 0.2; done; return 1; }
+carol_password=$(secret)
+carol_user=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"carol\",\"password\":\"$carol_password\"}" "$api/api/v1/users" | jq -r .id || true)
+smb_auth carol "$carol_password"
+# A client that stays connected, as a mapped drive does.
+smbclient "//$ip/carol" -A /tmp/carol.smb -m SMB3 --client-protection=encrypt < <(sleep 60) >/dev/null 2>&1 &
+carol_client=$!
+for _ in $(seq 1 50); do [[ "$(smb_sessions_of carol)" -gt 0 ]] && break; sleep 0.2; done
+check "a member stays connected over SMB" test "$(smb_sessions_of carol)" -gt 0
+check "the administrator disables the member" test "$(status_of -X DELETE -b /tmp/owner.jar \
+  -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$carol_user")" = 204
+check "disabling ends the member's SMB session" smb_sessions_end carol
+check "the disabled member cannot open SMB" denied smb carol carol ls
+kill "$carol_client" 2>/dev/null || true
+# Every start synchronizes identities, the disabled member's SMB entry too.
+synced_at=$(date '+%Y-%m-%d %H:%M:%S')
+systemctl restart anas-api
+for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "the Product Service's start synchronizes identities with a disabled SMB account" \
+  bash -c "for _ in \$(seq 1 30); do journalctl -u anas-api --since '$synced_at' -o cat --no-pager |
+    grep -Fq 'identity synchronization succeeded' && exit 0; sleep 1; done; exit 1"
 
 # --- Restarting the Host Agent keeps all of the above.
 restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
@@ -874,6 +1445,8 @@ check "a current pool video answers a byte range" test "$(status_of -r 0-1023 "$
 # --- The AI assistant's sandbox on this installer's accounts, spaces and ACLs (#115).
 # shellcheck disable=SC1091 # sourced from the mounted checkout
 . /src/ai/assistant-spike/system-test.sh
+# shellcheck disable=SC1091 # sourced from the mounted checkout
+. /src/ai/assistant-spike/disable-system-test.sh
 
 # --- Last, because other services keep the detached volume busy: the
 # unmount reaches the photo service's private mount namespace, and it stops

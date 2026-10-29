@@ -1,0 +1,466 @@
+responses:
+  StateUnavailable:
+    description: Host state cannot currently be read.
+    content:
+      application/json:
+        schema:
+          $ref: "common.yaml#/schemas/ErrorResponse"
+schemas:
+  TaskManagerStatus:
+    type: string
+    enum: [available, partial, unavailable, unsupported, absent]
+    description: Availability of a collection or accelerator; unknown metrics remain null.
+  TaskManagerID:
+    type: string
+    minLength: 1
+    maxLength: 512
+    description: Opaque observation identity, never a host path. Process identities include PID and start time.
+  TaskManagerPercent:
+    type: [number, "null"]
+    minimum: 0
+    maximum: 100
+    description: Percentage of whole-machine CPU capacity or of the named accelerator; null when unknown.
+  TaskManagerRate:
+    type: [number, "null"]
+    minimum: 0
+    description: Bytes per second during sampleSeconds; null without a valid sampling baseline.
+  TaskManagerBytes:
+    type: [integer, "null"]
+    minimum: 0
+    description: Bytes, or null when the observation is unavailable.
+  TaskManagerCPU:
+    type: object
+    additionalProperties: false
+    required: [model, logicalCores, usagePercent]
+    properties:
+      model: { type: string }
+      logicalCores: { type: integer, minimum: 1 }
+      usagePercent: { $ref: "#/schemas/TaskManagerPercent" }
+  TaskManagerMemory:
+    type: object
+    additionalProperties: false
+    required: [totalBytes, usedBytes]
+    properties:
+      totalBytes: { type: integer, minimum: 1 }
+      usedBytes:
+        type: integer
+        minimum: 0
+        description: MemTotal minus MemAvailable; reclaimable cache is available memory.
+  TaskManagerNetwork:
+    type: object
+    additionalProperties: false
+    required: [id, name, physical, receiveBytes, transmitBytes, receiveBytesPerSecond, transmitBytesPerSecond]
+    properties:
+      id: { $ref: "#/schemas/TaskManagerID" }
+      name: { type: string, minLength: 1 }
+      physical: { type: boolean }
+      receiveBytes: { type: integer, minimum: 0 }
+      transmitBytes: { type: integer, minimum: 0 }
+      receiveBytesPerSecond: { $ref: "#/schemas/TaskManagerRate" }
+      transmitBytesPerSecond: { $ref: "#/schemas/TaskManagerRate" }
+  TaskManagerDisk:
+    type: object
+    additionalProperties: false
+    required: [id, model, capacityBytes, readBytesPerSecond, writeBytesPerSecond]
+    properties:
+      id: { $ref: "#/schemas/TaskManagerID" }
+      model: { type: string }
+      capacityBytes: { type: integer, minimum: 0 }
+      readBytesPerSecond: { $ref: "#/schemas/TaskManagerRate" }
+      writeBytesPerSecond: { $ref: "#/schemas/TaskManagerRate" }
+  TaskManagerMetricStatus:
+    type: string
+    enum: [available, unsupported, unavailable]
+    description: Per-metric availability; unsupported means the driver lacks the interface, unavailable means reading failed.
+  TaskManagerAccelerator:
+    type: object
+    additionalProperties: false
+    required: [id, name, driver, status, usageStatus, memoryUsedStatus, memoryTotalStatus, usagePercent, memoryUsedBytes, memoryTotalBytes]
+    properties:
+      id: { $ref: "#/schemas/TaskManagerID" }
+      name: { type: string, minLength: 1 }
+      driver: { type: string }
+      usageStatus: { $ref: "#/schemas/TaskManagerMetricStatus" }
+      memoryUsedStatus: { $ref: "#/schemas/TaskManagerMetricStatus" }
+      memoryTotalStatus: { $ref: "#/schemas/TaskManagerMetricStatus" }
+      status: { $ref: "#/schemas/TaskManagerStatus" }
+      usagePercent: { $ref: "#/schemas/TaskManagerPercent" }
+      memoryUsedBytes: { $ref: "#/schemas/TaskManagerBytes" }
+      memoryTotalBytes: { $ref: "#/schemas/TaskManagerBytes" }
+  TaskManagerTask:
+    type: object
+    additionalProperties: false
+    required: [id, name, pid, state, cpuPercent, memoryBytes, readBytesPerSecond, writeBytesPerSecond]
+    properties:
+      iconId:
+        type: string
+        pattern: "^[a-f0-9]{64}$"
+        description: Content hash referencing an optional installed icon in the snapshot.
+      id: { $ref: "#/schemas/TaskManagerID" }
+      name: { type: string, minLength: 1 }
+      pid:
+        type: integer
+        minimum: 0
+        description: Process ID; services use zero because their usage aggregates the cgroup.
+      state: { type: string }
+      cpuPercent: { $ref: "#/schemas/TaskManagerPercent" }
+      memoryBytes: { $ref: "#/schemas/TaskManagerBytes" }
+      readBytesPerSecond: { $ref: "#/schemas/TaskManagerRate" }
+      writeBytesPerSecond: { $ref: "#/schemas/TaskManagerRate" }
+  TaskManagerNetworkGroup:
+    type: object
+    additionalProperties: false
+    required: [status, items]
+    properties:
+      status: { $ref: "#/schemas/TaskManagerStatus" }
+      items:
+        type: array
+        maxItems: 4096
+        items: { $ref: "#/schemas/TaskManagerNetwork" }
+  TaskManagerDiskGroup:
+    type: object
+    additionalProperties: false
+    required: [status, items]
+    properties:
+      status: { $ref: "#/schemas/TaskManagerStatus" }
+      items:
+        type: array
+        maxItems: 4096
+        items: { $ref: "#/schemas/TaskManagerDisk" }
+  TaskManagerAcceleratorGroup:
+    type: object
+    additionalProperties: false
+    required: [status, items]
+    properties:
+      status: { $ref: "#/schemas/TaskManagerStatus" }
+      items:
+        type: array
+        maxItems: 4096
+        items: { $ref: "#/schemas/TaskManagerAccelerator" }
+  TaskManagerProcessGroup:
+    type: object
+    additionalProperties: false
+    required: [status, items]
+    properties:
+      status: { $ref: "#/schemas/TaskManagerStatus" }
+      items:
+        type: array
+        maxItems: 4096
+        items: { $ref: "#/schemas/TaskManagerTask" }
+  TaskManagerServiceGroup:
+    type: object
+    additionalProperties: false
+    required: [status, items]
+    properties:
+      status: { $ref: "#/schemas/TaskManagerStatus" }
+      items:
+        type: array
+        maxItems: 1024
+        items: { $ref: "#/schemas/TaskManagerTask" }
+  TaskManagerDeviceResponse:
+    type: object
+    additionalProperties: false
+    required: [observedAt, sampleSeconds, dataSource, cpu, memory, network, disks, gpu, npu]
+    properties:
+      observedAt: { type: string, format: date-time }
+      sampleSeconds:
+        type: number
+        exclusiveMinimum: 0
+        description: Shared sampling window in seconds.
+      dataSource: { $ref: "common.yaml#/schemas/DataSource" }
+      cpu: { $ref: "#/schemas/TaskManagerCPU" }
+      memory: { $ref: "#/schemas/TaskManagerMemory" }
+      network: { $ref: "#/schemas/TaskManagerNetworkGroup" }
+      disks: { $ref: "#/schemas/TaskManagerDiskGroup" }
+      gpu: { $ref: "#/schemas/TaskManagerAcceleratorGroup" }
+      npu: { $ref: "#/schemas/TaskManagerAcceleratorGroup" }
+  TaskManagerTasksResponse:
+    type: object
+    additionalProperties: false
+    required: [observedAt, sampleSeconds, dataSource, processes, services]
+    properties:
+      icons:
+        type: object
+        maxProperties: 64
+        description: Deduplicated installed artwork; bounded to 1 MiB total. No host paths or remote URLs.
+        additionalProperties:
+          type: string
+          maxLength: 24576
+          pattern: '^data:image/(png|svg\+xml);base64,[A-Za-z0-9+/]+=*$'
+      observedAt: { type: string, format: date-time }
+      sampleSeconds:
+        type: number
+        exclusiveMinimum: 0
+        description: Shared sampling window in seconds.
+      dataSource: { $ref: "common.yaml#/schemas/DataSource" }
+      processes: { $ref: "#/schemas/TaskManagerProcessGroup" }
+      services: { $ref: "#/schemas/TaskManagerServiceGroup" }
+  Health:
+    type: string
+    enum: [healthy, warning, critical, unknown]
+  DiskRole:
+    type: string
+    enum: [system, data, unassigned]
+  Transport:
+    type: string
+    enum: [nvme, sata, usb, unknown]
+  HealthResponse:
+    type: object
+    additionalProperties: false
+    required: [status]
+    properties:
+      status:
+        type: string
+        const: ok
+  OperatingSystem:
+    type: object
+    additionalProperties: false
+    required: [name, version]
+    properties:
+      name:
+        type: string
+      version:
+        type: string
+  SystemResponse:
+    type: object
+    additionalProperties: false
+    required:
+      - id
+      - hostname
+      - operatingSystem
+      - architecture
+      - uptimeSeconds
+      - health
+      - healthFindings
+      - productVersion
+      - observedAt
+    properties:
+      id:
+        $ref: "common.yaml#/schemas/StableResourceID"
+      hostname:
+        type: string
+        minLength: 1
+      operatingSystem:
+        $ref: "#/schemas/OperatingSystem"
+      architecture:
+        type: string
+        minLength: 1
+      uptimeSeconds:
+        type: integer
+        format: int64
+        minimum: 0
+      health:
+        $ref: "#/schemas/Health"
+      healthFindings:
+        $ref: "#/schemas/HealthFindings"
+      storage:
+        $ref: "#/schemas/SystemStorage"
+      productVersion:
+        type: string
+        minLength: 1
+      observedAt:
+        type: string
+        format: date-time
+  SystemState:
+    type: object
+    additionalProperties: false
+    required:
+      - id
+      - hostname
+      - operatingSystem
+      - architecture
+      - uptimeSeconds
+      - health
+      - healthFindings
+    properties:
+      id:
+        $ref: "common.yaml#/schemas/StableResourceID"
+      hostname:
+        type: string
+        minLength: 1
+      operatingSystem:
+        $ref: "#/schemas/OperatingSystem"
+      architecture:
+        type: string
+        minLength: 1
+      uptimeSeconds:
+        type: integer
+        format: int64
+        minimum: 0
+      health:
+        $ref: "#/schemas/Health"
+      healthFindings:
+        $ref: "#/schemas/HealthFindings"
+      storage:
+        $ref: "#/schemas/SystemStorage"
+  SystemStorage:
+    type: object
+    description: "Observed capacity and available space on the filesystem at /var/lib, where system state is stored; absent when unavailable."
+    additionalProperties: false
+    required: [totalBytes, availableBytes]
+    properties:
+      totalBytes:
+        type: integer
+        format: int64
+        minimum: 1
+      availableBytes:
+        type: integer
+        format: int64
+        minimum: 0
+  HealthFindings:
+    type: array
+    description: "Why the system is not plainly healthy, most severe first; empty when healthy. The system's health is the severity of the first finding (docs/specs/system-health.md)."
+    items:
+      $ref: "#/schemas/HealthFinding"
+  HealthFinding:
+    type: object
+    additionalProperties: false
+    required: [code, severity]
+    properties:
+      code:
+        type: string
+        enum: [disk_failing, disk_warning, disk_health_unknown, disk_hot, volume_offline, volume_read_only, volume_full, volume_nearly_full, volume_errors, volume_reconcile_failed]
+      severity:
+        type: string
+        enum: [warning, critical]
+      diskId:
+        $ref: "common.yaml#/schemas/StableResourceID"
+      value:
+        type: integer
+        format: int64
+        description: "disk_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted."
+  Disk:
+    type: object
+    additionalProperties: false
+    required:
+      - id
+      - model
+      - transport
+      - capacityBytes
+      - rotational
+      - removable
+      - inUse
+      - filesystems
+      - role
+      - health
+      - smartStatus
+      - eligibleForDataVolume
+      - ineligibleReasons
+    properties:
+      id:
+        $ref: "common.yaml#/schemas/StableResourceID"
+      model:
+        type: string
+        description: Empty when the device does not report a model; then ineligibleReasons includes missing_model.
+      transport:
+        $ref: "#/schemas/Transport"
+      capacityBytes:
+        type: integer
+        format: int64
+        minimum: 0
+        description: Zero when capacity is unavailable or there is no medium; such devices cannot be selected for storage.
+      rotational:
+        type: boolean
+      removable:
+        type: boolean
+      inUse:
+        type: boolean
+      filesystems:
+        type: array
+        items:
+          type: string
+      role:
+        $ref: "#/schemas/DiskRole"
+      health:
+        $ref: "#/schemas/Health"
+      smartStatus:
+        $ref: "#/schemas/Health"
+      eligibleForDataVolume:
+        type: boolean
+      ineligibleReasons:
+        type: array
+        description: Includes missing_identity, duplicate_identity, missing_model, missing_capacity, read_only or invalid_device_name for unusable observations. Devices without a unique identity have display-only observation-prefixed IDs, never valid storage operation targets.
+        items:
+          type: string
+      temperatureCelsius:
+        type: integer
+        minimum: -273
+  DisksResponse:
+    type: object
+    additionalProperties: false
+    required: [observedAt, items]
+    properties:
+      observedAt:
+        type: string
+        format: date-time
+      items:
+        type: array
+        items:
+          $ref: "#/schemas/Disk"
+  HostStateResponse:
+    type: object
+    additionalProperties: false
+    required: [dataSource, productVersion, observedAt, system, disks]
+    properties:
+      dataSource:
+        $ref: "common.yaml#/schemas/DataSource"
+      productVersion:
+        type: string
+        minLength: 1
+      observedAt:
+        type: string
+        format: date-time
+      system:
+        $ref: "#/schemas/SystemState"
+      disks:
+        type: array
+        items:
+          $ref: "#/schemas/Disk"
+  MetricsResponse:
+    type: object
+    additionalProperties: false
+    required: [dataSource, observedAt, cpu, memory, network]
+    properties:
+      dataSource:
+        $ref: "common.yaml#/schemas/DataSource"
+      observedAt:
+        type: string
+        format: date-time
+      cpu:
+        type: object
+        additionalProperties: false
+        required: [usagePercent, logicalCores]
+        properties:
+          usagePercent:
+            type: number
+            minimum: 0
+            maximum: 100
+          logicalCores:
+            type: integer
+            minimum: 1
+      memory:
+        type: object
+        additionalProperties: false
+        required: [totalBytes, usedBytes]
+        properties:
+          totalBytes:
+            type: integer
+            format: int64
+            minimum: 1
+          usedBytes:
+            type: integer
+            format: int64
+            minimum: 0
+      network:
+        type: object
+        additionalProperties: false
+        required: [receiveBytesPerSecond, transmitBytesPerSecond]
+        properties:
+          receiveBytesPerSecond:
+            type: integer
+            format: int64
+            minimum: 0
+          transmitBytesPerSecond:
+            type: integer
+            format: int64
+            minimum: 0

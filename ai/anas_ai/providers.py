@@ -44,9 +44,18 @@ def inference_threads():
 
 
 def verify_model(model_path, manifest_path):
-    """Returns the manifest when model_path is exactly the file it pins."""
+    """Returns the manifest when model_path is exactly the file it pins.
+
+    The manifest also gives memoryBytes: how much the Worker's memory, as its
+    cgroup counts it, grows the first time the model runs, with the model file
+    already in the page cache. The photo service's gate weighs it before
+    background work loads the model (docs/architecture/photo-objects.md#资源策略).
+    """
     with open(manifest_path, encoding="utf-8") as file:
         manifest = json.load(file)
+    memory = manifest.get("memoryBytes")
+    if type(memory) is not int or memory < 0:
+        raise Unavailable(f"the manifest {manifest_path} gives no memoryBytes")
     try:
         size = os.stat(model_path).st_size
     except OSError as error:
@@ -104,6 +113,8 @@ class MediaPipeProvider:
             )
         )
         self.dimensions = len(self._vector(self._embedder.embed_text("probe")))
+        # The text probe has run; what the first image adds is still to come.
+        self.memory = manifest["memoryBytes"]
         # The runtime and the token budget change the vectors, so they are
         # part of the model the vectors came from.
         self.model = (
@@ -134,6 +145,8 @@ class MediaPipeProvider:
 
 class FakeProvider:
     """A deterministic stand-in: equal images get equal unit vectors."""
+
+    memory = 0
 
     def __init__(self, dimensions=768):
         self.dimensions = dimensions
@@ -200,6 +213,7 @@ class OnnxDetector:
             raise Unavailable("the AI runtime has no ONNX Runtime") from error
         self._path = model_path
         self._session = None
+        self.memory = manifest["memoryBytes"]
         self.threads = threads or inference_threads()
         # The runtime, the input size and what is kept change the boxes, so
         # they are part of the model the boxes came from.
@@ -276,7 +290,7 @@ def detector_pixels(data):
 def kept_boxes(labels, boxes, scores):
     """[class, score, x0, y0, x1, y1] above MIN_BOX_SCORE, best first, corners in [0, 1]."""
     found = []
-    for label, box, score in zip(labels, boxes, scores):
+    for label, box, score in zip(labels, boxes, scores, strict=True):
         if score >= MIN_BOX_SCORE:
             corners = [round(min(1.0, max(0.0, value)), 4) for value in box]
             found.append([int(label), round(float(score), 4), *corners])
@@ -292,6 +306,7 @@ class FakeDetector:
     """
 
     model = "fake-detector-sha256"
+    memory = 0
 
     def __init__(self, delay=0.0):
         self.delay = delay
@@ -389,6 +404,7 @@ class FaceProvider:
                 raise Unavailable("the AI runtime has no ONNX Runtime") from error
         self._detector_path, self._embedder_path = detector_path, embedder_path
         self._detector = self._embedder = None
+        self.memory = detector["memoryBytes"] + embedder["memoryBytes"]
         self.threads = threads or inference_threads()
         self.model = (
             f"{detector['name']}@{detector['sha256'][:12]}+{embedder['name']}@{embedder['sha256'][:12]}"
@@ -421,7 +437,7 @@ class FaceProvider:
         crops = [align_face(image, numpy.array(row[4:14]).reshape(5, 2)) for row in rows]
         vectors = self._embed(crops, run) if crops else []
         faces = []
-        for row, vector in zip(rows, vectors):
+        for row, vector in zip(rows, vectors, strict=True):
             x, y, w, h = row[:4]
             box = [x / width, y / height, (x + w) / width, (y + h) / height]
             landmarks = [value / (width if i % 2 == 0 else height) for i, value in enumerate(row[4:14])]
@@ -508,6 +524,7 @@ class FakeFaces:
     """
 
     model = "fake-faces-sha256"
+    memory = 0
     dimensions = 128
     FAKE_PEOPLE = 3
 
@@ -527,7 +544,7 @@ class FakeFaces:
             person = digest[1 + i] % self.FAKE_PEOPLE
             base = FakeProvider(self.dimensions)._vector(b"fake person %d" % person)
             noise = FakeProvider(self.dimensions)._vector(data + bytes([i]))
-            vector = [b + 0.05 * n for b, n in zip(base, noise)]
+            vector = [b + 0.05 * n for b, n in zip(base, noise, strict=True)]
             norm = math.sqrt(sum(value * value for value in vector))
             x0 = 0.05 + 0.3 * i
             faces.append({
@@ -579,6 +596,7 @@ class AnimalProvider:
             raise Unavailable("the AI runtime has no ONNX Runtime") from error
         self._path = model_path
         self._session = None
+        self.memory = manifest["memoryBytes"]
         self.threads = threads or inference_threads()
         self.model = f"{manifest['name']}@{manifest['sha256'][:12]}+{runtime}+m{ANIMAL_MARGIN:g}"
 
@@ -636,6 +654,7 @@ class FakeAnimals:
     image bytes and the box, with nearly the same vector in every photo."""
 
     model = "fake-animals-sha256"
+    memory = 0
     dimensions = 64
     FAKE_PETS = 2
 
@@ -655,7 +674,7 @@ class FakeAnimals:
             pet = hashlib.sha256(seed).digest()[0] % self.FAKE_PETS
             base = FakeProvider(self.dimensions)._vector(b"fake pet %d" % pet)
             noise = FakeProvider(self.dimensions)._vector(seed)
-            vector = [b + 0.05 * n for b, n in zip(base, noise)]
+            vector = [b + 0.05 * n for b, n in zip(base, noise, strict=True)]
             norm = math.sqrt(sum(value * value for value in vector))
             vectors.append(encode_unit(value / norm for value in vector))
         return vectors

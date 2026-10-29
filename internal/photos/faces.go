@@ -156,9 +156,9 @@ INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT ?, ?, 'pending', ?, ?
 WHERE NOT EXISTS (SELECT 1 FROM scans WHERE object_id = ? AND derivation = ?)
   AND EXISTS (SELECT 1 FROM derived_files WHERE object_id = ? AND derivation = ?)
-  AND `+inPeopleLibrary("?")+`
+  AND `+inPeopleLibrary("?")+` AND `+inLocalAI("?")+`
 ON CONFLICT(object_id, derivation) DO NOTHING`,
-		objectID, facesDerivation, now, now, objectID, facesDerivation, objectID, thumbnailDerivation, objectID)
+		objectID, facesDerivation, now, now, objectID, facesDerivation, objectID, thumbnailDerivation, objectID, objectID)
 	return err
 }
 
@@ -211,7 +211,10 @@ func (s *Service) completeScan(ctx context.Context, job claimedJob, result scan,
 	var sheet []byte
 	if len(result.found) > 0 {
 		var err error
-		if sheet, err = avatarSheet(input, result.found, result.margin); err != nil {
+		if sheet, err = avatarSheet(ctx, input, result.found, result.margin); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
 			return s.failJob(ctx, job, jobErrorUndecodable)
 		}
 	}
@@ -296,21 +299,13 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET width = excluded.width, height 
 			return err
 		}
 	}
-	s.aiModelMu.Lock()
-	s.scanned++
-	s.aiModelMu.Unlock()
+	s.ai.countScan()
 	return nil
 }
 
 // clusterEvery is how many face or pet scans a long run stores before people
 // cluster again; otherwise they cluster once the scans are done.
 const clusterEvery = 50
-
-func (s *Service) scansSinceClustering() int {
-	s.aiModelMu.Lock()
-	defer s.aiModelMu.Unlock()
-	return s.scanned
-}
 
 func sheetRows(faces int) int { return (faces + avatarColumns - 1) / avatarColumns }
 
@@ -390,25 +385,21 @@ func (s *Service) occurrencesOf(ctx context.Context, q queryer, objectID, deriva
 }
 
 // avatarSheet crops everything found out of the upright input onto one grid.
-func avatarSheet(input *os.File, items []found, margin float64) ([]byte, error) {
+func avatarSheet(ctx context.Context, input *os.File, items []found, margin float64) ([]byte, error) {
 	if _, err := input.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
-	src, err := imaging.Decode(input)
-	if err != nil {
-		return nil, err
-	}
-	sheet := imaging.New(avatarColumns*avatarEdge, sheetRows(len(items))*avatarEdge, color.White)
-	for i, item := range items {
-		tile := imaging.Fill(imaging.Crop(src, avatarSquare(src.Bounds(), item.box, margin)), avatarEdge, avatarEdge,
-			imaging.Center, imaging.Lanczos)
-		sheet = imaging.Paste(sheet, tile, image.Pt(i%avatarColumns*avatarEdge, i/avatarColumns*avatarEdge))
-	}
 	var buffer bytes.Buffer
-	if err := imaging.Encode(&buffer, sheet, imaging.JPEG, imaging.JPEGQuality(avatarQuality)); err != nil {
-		return nil, err
-	}
-	return buffer.Bytes(), nil
+	err := withDecodedImage(ctx, input, func(src image.Image) error {
+		sheet := imaging.New(avatarColumns*avatarEdge, sheetRows(len(items))*avatarEdge, color.White)
+		for i, item := range items {
+			tile := imaging.Fill(imaging.Crop(src, avatarSquare(src.Bounds(), item.box, margin)), avatarEdge, avatarEdge,
+				imaging.Center, imaging.Lanczos)
+			sheet = imaging.Paste(sheet, tile, image.Pt(i%avatarColumns*avatarEdge, i/avatarColumns*avatarEdge))
+		}
+		return imaging.Encode(&buffer, sheet, imaging.JPEG, imaging.JPEGQuality(avatarQuality))
+	})
+	return buffer.Bytes(), err
 }
 
 // avatarSquare is the square around a box, margin times its longer side,
@@ -425,24 +416,20 @@ func avatarSquare(bounds image.Rectangle, box [4]float32, margin float64) image.
 
 // avatarTile cuts occurrence ordinal out of its object's avatar sheet of
 // derivation.
-func (s *Service) avatarTile(derivation, objectID string, ordinal int) ([]byte, error) {
+func (s *Service) avatarTile(ctx context.Context, derivation, objectID string, ordinal int) ([]byte, error) {
 	file, err := s.root.Open(derivedPath(derivation, objectID))
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	sheet, err := imaging.Decode(file)
-	if err != nil {
-		return nil, err
-	}
-	at := image.Pt(ordinal%avatarColumns*avatarEdge, ordinal/avatarColumns*avatarEdge)
-	if !at.In(sheet.Bounds()) {
-		return nil, fmt.Errorf("avatar %d is outside its sheet", ordinal)
-	}
+	defer func() { _ = file.Close() }()
 	var buffer bytes.Buffer
-	tile := imaging.Crop(sheet, image.Rectangle{Min: at, Max: at.Add(image.Pt(avatarEdge, avatarEdge))})
-	if err := imaging.Encode(&buffer, tile, imaging.JPEG, imaging.JPEGQuality(avatarQuality)); err != nil {
-		return nil, err
-	}
-	return buffer.Bytes(), nil
+	err = withDecodedImage(ctx, file, func(sheet image.Image) error {
+		at := image.Pt(ordinal%avatarColumns*avatarEdge, ordinal/avatarColumns*avatarEdge)
+		if !at.In(sheet.Bounds()) {
+			return fmt.Errorf("avatar %d is outside its sheet", ordinal)
+		}
+		tile := imaging.Crop(sheet, image.Rectangle{Min: at, Max: at.Add(image.Pt(avatarEdge, avatarEdge))})
+		return imaging.Encode(&buffer, tile, imaging.JPEG, imaging.JPEGQuality(avatarQuality))
+	})
+	return buffer.Bytes(), err
 }

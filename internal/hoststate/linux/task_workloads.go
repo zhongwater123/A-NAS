@@ -73,7 +73,7 @@ func (r *Reader) ReadTasks(ctx context.Context) (taskmanager.TaskSnapshot, error
 		row := usage.row
 		if before, ok := previous.processes[id]; ok && before.identity == usage.identity {
 			if previous.cpu.logicalCores == current.cpu.logicalCores && current.cpu.cpuTotal > previous.cpu.cpuTotal && usage.cpu != nil && before.cpu != nil && *usage.cpu >= *before.cpu {
-				row.CPUPercent = taskFloat(math.Min(100, float64(*usage.cpu-*before.cpu)/float64(current.cpu.cpuTotal-previous.cpu.cpuTotal)*100))
+				row.CPUPercent = new(math.Min(100, float64(*usage.cpu-*before.cpu)/float64(current.cpu.cpuTotal-previous.cpu.cpuTotal)*100))
 			}
 			row.ReadBytesPerSecond = taskRate(before.read, usage.read, seconds)
 			row.WriteBytesPerSecond = taskRate(before.write, usage.write, seconds)
@@ -85,7 +85,7 @@ func (r *Reader) ReadTasks(ctx context.Context) (taskmanager.TaskSnapshot, error
 		if before, ok := previous.services[id]; ok && usage.identity != "" && before.identity == usage.identity {
 			if previous.cpu.logicalCores == current.cpu.logicalCores {
 				if rate := taskRate(before.cpu, usage.cpu, seconds); rate != nil {
-					row.CPUPercent = taskFloat(math.Min(100, *rate/(float64(current.cpu.logicalCores)*1e6)*100))
+					row.CPUPercent = new(math.Min(100, *rate/(float64(current.cpu.logicalCores)*1e6)*100))
 				}
 			}
 			row.ReadBytesPerSecond = taskRate(before.read, usage.read, seconds)
@@ -146,9 +146,9 @@ func parseTaskProcess(data []byte, pid int) (taskUsage, error) {
 	}
 	row := taskmanager.Task{ID: fmt.Sprintf("process:%d:%d", pid, start), Name: name, PID: pid, State: fields[0]}
 	if e4 == nil && rss <= ^uint64(0)/uint64(os.Getpagesize()) {
-		row.MemoryBytes = taskUintPointer(rss * uint64(os.Getpagesize()))
+		row.MemoryBytes = new(rss * uint64(os.Getpagesize()))
 	}
-	return taskUsage{row: row, identity: strconv.FormatUint(start, 10), cpu: taskUintPointer(user + system)}, nil
+	return taskUsage{row: row, identity: strconv.FormatUint(start, 10), cpu: new(user + system)}, nil
 }
 func readTaskProcesses(ctx context.Context, root fs.FS) (map[string]taskUsage, taskmanager.Status) {
 	result := map[string]taskUsage{}
@@ -211,7 +211,7 @@ func readTaskProcesses(ctx context.Context, root fs.FS) (map[string]taskUsage, t
 	return result, status
 }
 func parseProcessIO(data []byte) (read, write *uint64) {
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		key, value, ok := strings.Cut(line, ":")
 		if !ok {
 			continue
@@ -222,9 +222,9 @@ func parseProcessIO(data []byte) (read, write *uint64) {
 		}
 		switch key {
 		case "read_bytes":
-			read = taskUintPointer(n)
+			read = new(n)
 		case "write_bytes":
-			write = taskUintPointer(n)
+			write = new(n)
 		}
 	}
 	return
@@ -248,12 +248,12 @@ func (r *Reader) readTaskServices(ctx context.Context) (map[string]taskUsage, ta
 	root := r.dependencies.root
 	validBlocks := 0
 	_, controllersErr := fs.Stat(root, "sys/fs/cgroup/cgroup.controllers")
-	for _, block := range strings.Split(strings.TrimSpace(string(data)), "\n\n") {
+	for block := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n\n") {
 		if ctx.Err() != nil {
 			return result, taskmanager.Partial
 		}
 		values := map[string]string{}
-		for _, line := range strings.Split(block, "\n") {
+		for line := range strings.SplitSeq(block, "\n") {
 			k, v, ok := strings.Cut(line, "=")
 			if ok {
 				values[k] = v
@@ -290,11 +290,11 @@ func (r *Reader) readTaskServices(ctx context.Context) (map[string]taskUsage, ta
 		// These v2 counters are hierarchical. Summing child cgroups again would
 		// count their resource use twice. No process list traversal is required.
 		if cpuData, err := readTaskFile(root, path+"cpu.stat"); err == nil {
-			for _, line := range strings.Split(string(cpuData), "\n") {
+			for line := range strings.SplitSeq(string(cpuData), "\n") {
 				f := strings.Fields(line)
 				if len(f) == 2 && f[0] == "usage_usec" {
 					if n, e := taskNumber(f[1]); e == nil {
-						usage.cpu = taskUintPointer(n)
+						usage.cpu = new(n)
 					}
 				}
 			}
@@ -322,7 +322,7 @@ func (r *Reader) readTaskServices(ctx context.Context) (map[string]taskUsage, ta
 }
 func parseCgroupIO(data []byte) (*uint64, *uint64) {
 	var read, write uint64
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
@@ -358,5 +358,5 @@ func parseCgroupIO(data []byte) (*uint64, *uint64) {
 			return nil, nil
 		}
 	}
-	return taskUintPointer(read), taskUintPointer(write)
+	return new(read), new(write)
 }

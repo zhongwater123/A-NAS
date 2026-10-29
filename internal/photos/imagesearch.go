@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/disintegration/imaging"
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
 // Image search finds the photos like an image that is not in the library,
@@ -83,7 +83,7 @@ func (s *Service) SearchByImage(ctx context.Context, p Principal, content io.Rea
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
-	thumbnail, detectorInput, err := renderSearchImage(data)
+	thumbnail, detectorInput, err := renderSearchImage(ctx, data)
 	if err != nil {
 		return "", err
 	}
@@ -94,7 +94,7 @@ func (s *Service) SearchByImage(ctx context.Context, p Principal, content io.Rea
 	if err != nil {
 		return "", err
 	}
-	s.noticeModel(info.Model)
+	s.ai.noticeModel(info.Model)
 	vector, err := s.embedSearchImage(ctx, thumbnail)
 	if err != nil {
 		return "", err
@@ -125,7 +125,7 @@ func (s *Service) ImageSearchResults(ctx context.Context, p Principal, searchID 
 	if !ok {
 		return Page{}, ErrImageSearchExpired
 	}
-	candidates, err := s.searchCandidates(ctx, scope)
+	candidates, err := s.searchCandidates(ctx, p, scope)
 	if err != nil {
 		return Page{}, err
 	}
@@ -139,7 +139,7 @@ func (s *Service) ImageSearchResults(ctx context.Context, p Principal, searchID 
 	if err = errors.Join(err, vectorErr); err != nil {
 		return Page{}, err
 	}
-	assets, next, err := s.hitPage(ctx, p, hits, after, request.Limit)
+	assets, next, err := s.hitPage(ctx, p, scope, hits, after, request.Limit)
 	if err != nil {
 		return Page{}, err
 	}
@@ -150,9 +150,10 @@ func (s *Service) ImageSearchResults(ctx context.Context, p Principal, searchID 
 // photo for local AI: the upright thumbnail its vector comes from and the
 // detector's larger upright input, from one decode. A decoder panic counts
 // as an undecodable image, as for thumbnails.
-func renderSearchImage(data []byte) (thumbnail, detectorInput []byte, err error) {
+func renderSearchImage(ctx context.Context, data []byte) (thumbnail, detectorInput []byte, err error) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("photo search image", recovered)
 			thumbnail, detectorInput, err = nil, nil, ErrUnsupportedType
 		}
 	}()
@@ -161,18 +162,21 @@ func renderSearchImage(data []byte) (thumbnail, detectorInput []byte, err error)
 	if mediaType == "" || err != nil || "image/"+format != mediaType || config.Width <= 0 || config.Height <= 0 {
 		return nil, nil, ErrUnsupportedType
 	}
-	if int64(config.Width)*int64(config.Height) > maxSearchImagePixels {
+	if int64(config.Width) > maxSearchImagePixels/int64(config.Height) {
 		return nil, nil, ErrTooLarge
 	}
 	orientation, _ := readEXIF(bytes.NewReader(data), time.UTC)
-	src, err := imaging.Decode(bytes.NewReader(data))
+	err = withDecodedImage(ctx, bytes.NewReader(data), func(src image.Image) error {
+		if thumbnail, _, _, err = uprightJPEG(src, orientation, thumbnailEdge, thumbnailQuality); err != nil {
+			return err
+		}
+		detectorInput, _, _, err = uprightJPEG(src, orientation, aiInputEdge, aiInputQuality)
+		return err
+	})
 	if err != nil {
-		return nil, nil, ErrUnsupportedType
-	}
-	if thumbnail, _, _, err = uprightJPEG(src, orientation, thumbnailEdge, thumbnailQuality); err != nil {
-		return nil, nil, err
-	}
-	if detectorInput, _, _, err = uprightJPEG(src, orientation, aiInputEdge, aiInputQuality); err != nil {
+		if !errors.Is(err, ErrTooLarge) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			err = ErrUnsupportedType
+		}
 		return nil, nil, err
 	}
 	return thumbnail, detectorInput, nil
@@ -184,7 +188,7 @@ func (s *Service) embedSearchImage(ctx context.Context, thumbnail []byte) ([]flo
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	vector, err := s.embedder.EmbedImage(ctx, file)
 	if errors.Is(err, ErrAIRejected) {
 		return nil, ErrUnsupportedType
@@ -205,15 +209,13 @@ func (s *Service) searchObjects(ctx context.Context, info EmbedderInfo, input []
 	if err != nil {
 		return nil
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	model, boxes, err := detector.DetectObjects(ctx, file)
 	// A Worker that took the request keeps the detector loaded; the AI
 	// runner releases it on its next round, since this request kept the gate
 	// closed (releaseModels). One that could not be reached holds nothing.
 	if !errors.Is(err, ErrAIUnavailable) {
-		s.aiModelMu.Lock()
-		s.detectorLoaded = true
-		s.aiModelMu.Unlock()
+		s.ai.markDetectorLoaded()
 	}
 	if err != nil || model != s.objectCalibration.Model || !validBoxes(boxes) {
 		return nil

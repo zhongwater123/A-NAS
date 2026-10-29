@@ -1,7 +1,22 @@
-import { Activity, BookOpen, Download, FolderSync, Images, type LucideIcon, Music, NotebookPen, Router, Shapes, Workflow, Wrench } from "lucide-react";
+import {
+  Activity,
+  BookOpen,
+  Download,
+  FolderSync,
+  Images,
+  type LucideIcon,
+  Music,
+  NotebookPen,
+  Router,
+  Shapes,
+  Workflow,
+  Wrench,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { AppsAPIError, CatalogApp, InstallPlan, ServiceRuntime } from "../appsApi";
+import { APIError } from "../api/client";
+import { errorText } from "../api/errorMessages";
+import { CatalogApp, InstallPlan, ServiceRuntime } from "./api";
 
 export interface Category {
   id: string;
@@ -49,14 +64,21 @@ export function runtimeSummary(plan: InstallPlan): string {
   const account = plan.identity.username;
   if (services.length === 0) return `账号 ${account}`;
   if (services.every((service) => service.runAs === "image")) return "以镜像自带的身份运行，可能是 root";
-  if (services.some((service) => service.runAs === "image")) return `部分服务以镜像自带的身份运行，其余以 ${account} 运行`;
-  if (services.some((service) => service.runAs === "app-after-init")) return `以 root 初始化后，以独立账号 ${account} 运行`;
+  if (services.some((service) => service.runAs === "image"))
+    return `部分服务以镜像自带的身份运行，其余以 ${account} 运行`;
+  if (services.some((service) => service.runAs === "app-after-init"))
+    return `以 root 初始化后，以独立账号 ${account} 运行`;
   return `以独立账号 ${account} 运行`;
 }
 
 // What one service is allowed, in the words of the install plan.
 export function serviceText(service: ServiceRuntime, plan: InstallPlan): string {
-  const shared = service.shared === "write" ? "，经 a-nas-users 读写共享空间" : service.shared === "read" ? "，经 a-nas-users 只读访问共享空间" : "";
+  const shared =
+    service.shared === "write"
+      ? "，经 a-nas-users 读写共享空间"
+      : service.shared === "read"
+        ? "，经 a-nas-users 只读访问共享空间"
+        : "";
   switch (service.runAs) {
     case "app":
       return `UID ${plan.identity.uid}，没有特权能力${shared}`;
@@ -68,9 +90,23 @@ export function serviceText(service: ServiceRuntime, plan: InstallPlan): string 
 }
 
 export const isBusy = (app: CatalogApp) => app.state === "installing" || app.state === "uninstalling";
-export const installFailed = (app: CatalogApp) => app.state === "available" && app.job?.action === "install" && app.job.state === "failed";
+// A failed install was rolled back (available) or left containers behind (failed).
+export const installFailed = (app: CatalogApp) =>
+  !uninstallFailed(app) &&
+  (app.state === "failed" ||
+    (app.state === "available" && app.job?.action === "install" && app.job.state === "failed"));
+
+export const uninstallFailed = (app: CatalogApp) => app.job?.action === "uninstall" && app.job.state === "failed";
+
+// The containers a failed install could not remove, which were never checked against its plan.
+export function leftoverText(app: CatalogApp): string | undefined {
+  if (app.state !== "failed") return undefined;
+  if (app.total === 0) return "应用容器已移除，部分资源还未清理完。可以重试卸载，重新安装也会先清理这些资源。";
+  return `回滚没有完成：${app.total} 个容器留在 Docker 中（${app.running} 个运行中），它们没有按安装计划核对。重新安装会先删除它们，也可以在“更多操作”中卸载。`;
+}
 
 export function stateText(app: CatalogApp): string {
+  if (app.state === "failed" && uninstallFailed(app)) return "卸载未完成";
   switch (app.state) {
     case "installed":
       return app.running === app.total ? "已安装" : `已安装 · ${app.running}/${app.total} 运行`;
@@ -84,7 +120,10 @@ export function stateText(app: CatalogApp): string {
 }
 
 // The app's web interface on the address this desktop was opened from.
-export function appURL(app: Pick<CatalogApp, "webPort" | "scheme" | "path">, location: Location = window.location): string | undefined {
+export function appURL(
+  app: Pick<CatalogApp, "webPort" | "scheme" | "path">,
+  location: Location = window.location,
+): string | undefined {
   if (!app.webPort) return undefined;
   const url = new URL(location.href);
   url.protocol = `${app.scheme || "http"}:`;
@@ -105,37 +144,40 @@ export function openApp(app: Pick<CatalogApp, "webPort" | "scheme" | "path">) {
 export function search(apps: CatalogApp[], query: string): CatalogApp[] {
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const scored = apps.map((app) => {
-    const fields: Array<[string, number]> = [[`${app.title} ${app.id}`, 8], [categoryOf(app).label, 4], [app.tagline, 3], [app.description, 1]];
+    const fields: Array<[string, number]> = [
+      [`${app.title} ${app.id}`, 8],
+      [categoryOf(app).label, 4],
+      [app.tagline, 3],
+      [app.description, 1],
+    ];
     let score = 0;
     for (const word of words) {
-      const best = Math.max(0, ...fields.filter(([text]) => text.toLowerCase().includes(word)).map(([, weight]) => weight));
+      const best = Math.max(
+        0,
+        ...fields.filter(([text]) => text.toLowerCase().includes(word)).map(([, weight]) => weight),
+      );
       if (best === 0) return { app, score: 0 };
       score += best;
     }
     return { app, score };
   });
-  return scored.filter((item) => item.score > 0).sort((a, b) => b.score - a.score).map((item) => item.app);
+  return scored
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.app);
 }
 
 export function describeError(error: unknown): string {
-  if (!(error instanceof AppsAPIError)) return "操作失败，请稍后重试";
-  // Conflict messages end with the port or container that is taken.
-  const taken = error.detail.split(": ").pop();
-  const messages: Record<string, string> = {
-    plan_changed: "应用清单已变化，请重新确认安装计划",
-    app_busy: "另一个应用正在安装或卸载，请稍候",
-    already_installed: "该应用已经安装",
-    not_installed: "该应用尚未安装",
-    port_in_use: `端口已被占用${taken ? `（${taken}）` : ""}`,
-    name_in_use: `容器名已被占用${taken ? `（${taken}）` : ""}`,
-    policy_violation: "该应用不符合安装安全策略",
-    address_pool_missing: "Docker 尚未配置 A-NAS 网络地址池，暂不能安装会新建网络的应用",
-    docker_runtime_outdated: "Docker 或 Docker Compose 版本过旧，无法把应用限制在它的文件夹内，请先升级",
-    volume_unavailable: "数据卷当前不可用，请检查存储状态后重试",
-    apps_unavailable: "无法连接容器代理",
-    network_error: "无法连接 A-NAS",
-  };
-  return messages[error.code] ?? "容器引擎未能完成操作";
+  const text = errorText(error, "apps");
+  if (error instanceof APIError && ["port_in_use", "name_in_use"].includes(error.code)) {
+    const detail = error.message.split(": ").slice(1).join(": ");
+    const taken =
+      error.code === "port_in_use"
+        ? /^(\d{1,5}(?:\/(?:tcp|udp))?)(?: is used by .+)?$/.exec(detail)?.[1]
+        : /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.exec(detail)?.[0];
+    if (taken) return `${text}（${taken}）`;
+  }
+  return text;
 }
 
 // Elapsed time of a running job as m:ss, ticking once a second.
@@ -143,9 +185,13 @@ export function useElapsed(startedAt: string | undefined, running: boolean): str
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!running) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
+    const tick = () => setNow(Date.now());
+    const first = window.setTimeout(tick, 0);
+    const timer = window.setInterval(tick, 1_000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+    };
   }, [running]);
   const started = startedAt ? Date.parse(startedAt) : NaN;
   if (!running || Number.isNaN(started)) return undefined;

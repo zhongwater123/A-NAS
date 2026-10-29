@@ -1,0 +1,153 @@
+parameters:
+  UserID: { name: userId, in: path, required: true, schema: { type: string } }
+schemas:
+  SetupStatus:
+    type: object
+    additionalProperties: false
+    required: [setupRequired, setupAllowed]
+    properties:
+      setupRequired: { type: boolean }
+      setupAllowed:
+        type: boolean
+        description: Whether this connection may set the device up. Only a direct loopback connection without forwarding headers may (the local console or an SSH tunnel); LAN browsers reach the API through Caddy.
+  SetupRequest:
+    type: object
+    additionalProperties: false
+    required: [username, password]
+    properties:
+      username: { $ref: "#/schemas/NewUsername" }
+      password: { $ref: "#/schemas/NewPassword" }
+      localConsole:
+        type: boolean
+        description: Requests a local console session that lasts until sign-out. Honoured only for a direct loopback connection without forwarding headers; otherwise the session lasts 12 hours.
+  LoginRequest:
+    type: object
+    additionalProperties: false
+    required: [username, password]
+    properties:
+      username: { type: string, pattern: "^[a-z][a-z0-9_-]{2,31}$" }
+      password: { type: string, minLength: 12 }
+      localConsole:
+        type: boolean
+        description: Requests a local console session that lasts until sign-out. Honoured only for a direct loopback connection without forwarding headers; otherwise the session lasts 12 hours.
+  CredentialInput:
+    type: object
+    additionalProperties: false
+    required: [username, password]
+    properties:
+      username: { $ref: "#/schemas/NewUsername" }
+      password: { $ref: "#/schemas/NewPassword" }
+  NewUsername:
+    type: string
+    pattern: "^[a-z][a-z0-9_-]{2,31}$"
+    description: >-
+      The account and Linux user name, after trimming and lowercasing. global, homes, printers, shared, a-nas,
+      and names starting a-nas- or app- are reserved (409 username_unavailable), as are names of existing host
+      accounts and groups; other malformed names answer 422 invalid_username.
+  NewPassword:
+    type: string
+    minLength: 12
+    maxLength: 64
+    description: >-
+      Counted in Unicode code points, at most 254 UTF-8 bytes, without control characters such as newlines
+      (422 invalid_password). Only passwords being set are checked; signing in is not.
+  User:
+    type: object
+    additionalProperties: false
+    required: [id, username, role, status, createdAt, mustChangePassword]
+    properties:
+      id: { type: string }
+      username: { type: string }
+      role: { type: string, enum: [admin, member] }
+      status: { type: string, enum: [pending, active, disabled, error] }
+      createdAt: { type: string, format: date-time }
+      mustChangePassword: { type: boolean }
+      nickname: { type: string, maxLength: 24, description: "The name pages show instead of username; absent when the user has not chosen one." }
+      avatarVersion: { type: string, description: "Names the current avatar; absent when the user has none. See getAvatar." }
+  Profile:
+    type: object
+    additionalProperties: false
+    required: [id, username]
+    properties:
+      id: { type: string }
+      username: { type: string }
+      nickname: { type: string }
+      avatarVersion: { type: string }
+  ProfileChange:
+    type: object
+    additionalProperties: false
+    required: [nickname]
+    properties:
+      nickname:
+        type: string
+        description: >-
+          Trimmed, with runs of spaces folded into one; at most 24 Unicode code points without control or invisible
+          formatting characters (a zero-width joiner inside emoji is allowed), else 422 invalid_nickname. It must
+          not equal, ignoring case, another account's username or nickname (409 nickname_unavailable). Empty
+          clears it.
+  PasswordChange:
+    type: object
+    additionalProperties: false
+    required: [currentPassword, newPassword]
+    properties:
+      currentPassword: { type: string }
+      newPassword: { $ref: "#/schemas/NewPassword" }
+  Notification:
+    type: object
+    additionalProperties: false
+    required: [id, kind, actorUsername, createdAt]
+    properties:
+      id: { type: string }
+      kind: { type: string, enum: [admin_viewing, admin_library_viewing, credential_reset, assistant_task] }
+      actorUsername: { type: string }
+      reason: { type: string }
+      expiresAt: { type: string, format: date-time }
+      task:
+        type: object
+        description: "The run an assistant_task notification tells of: one of the member's scheduled tasks ran. At most one waits per task; a run that answered only Hermes's silence marker is not shown."
+        additionalProperties: false
+        required: [taskId, name, status, ranAt]
+        properties:
+          taskId: { type: string }
+          name: { type: string }
+          status: { type: string, description: "ok, or what went wrong." }
+          ranAt: { type: string, format: date-time }
+          sessionId: { type: string, description: "The run's conversation." }
+          summary: { type: string, description: "The start of the run's answer, or of its error." }
+      createdAt: { type: string, format: date-time }
+  ViewingRequest:
+    type: object
+    additionalProperties: false
+    required: [password, reason]
+    properties:
+      password: { type: string }
+      reason: { type: string, minLength: 1, maxLength: 500 }
+      scope: { type: string, enum: [space, library], default: space, description: The member's private space (ACL entries) or private photo library (photo Policy). }
+  ViewingGrant:
+    type: object
+    additionalProperties: false
+    required: [id, scope, spaceId, ownerUserId, reason, grantedAt, expiresAt]
+    properties:
+      id: { type: string }
+      scope: { type: string, enum: [space, library] }
+      spaceId: { type: string }
+      ownerUserId: { type: string }
+      reason: { type: string }
+      grantedAt: { type: string, format: date-time }
+      expiresAt: { type: string, format: date-time }
+  Session:
+    type: object
+    additionalProperties: false
+    required: [csrfToken, expiresAt, user]
+    properties:
+      csrfToken: { type: string }
+      expiresAt: { type: string, format: date-time, description: "9999-12-31T23:59:59Z marks a local console session, which lasts until sign-out." }
+      user: { $ref: "#/schemas/User" }
+      credentialReset:
+        type: object
+        additionalProperties: false
+        required: [actorUsername, at]
+        description: The latest time an administrator chose this user's password. It stays after the notification is acknowledged.
+        properties:
+          actorUsername: { type: string }
+          at: { type: string, format: date-time }

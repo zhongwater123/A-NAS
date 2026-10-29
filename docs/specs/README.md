@@ -4,13 +4,15 @@
 
 ## 索引
 
+- [Web 错误提示与时间格式](web-errors-and-time.md)（implemented）
 - [只读宿主机状态](read-only-host-state.md)（implemented）
 - [Debian 只读宿主机状态](read-only-linux-host-state.md)（implemented）
 - [Web 桌面宿主机状态](web-desktop-host-state.md)（implemented）
 - [基础存储与共享](basic-storage-and-sharing.md)（implemented）
-- [成员文件分享](member-sharing.md)（开发分支已实现，尚未部署）
+- [成员文件分享](member-sharing.md)（implemented）
 - [相册与本地智能检索](photo-library.md)（M1 切片 1–6 implemented；M2、M3 draft）
 - [动态照片](photo-motion.md)（implemented）
+- [相册视频](photo-video.md)（implemented）
 - [Web 相册界面](photo-gallery-ui.md)（implemented）
 - [Web 桌面终端](web-terminal.md)（implemented，opt-in）
 - [桌面状态栏与实时资源指标](host-metrics-status-bar.md)（implemented）
@@ -21,17 +23,20 @@
 - [开机动画](boot-ident.md)（implemented）
 - [局域网 Web 访问](lan-web-access.md)（implemented）
 - [设置](settings.md)（implemented）
+- [个性化](personalization.md)（implemented）
 - [任务管理器](task-manager.md)（implemented）
-- [头像与昵称](account-profile.md)（implemented，尚未部署）
+- [系统健康](system-health.md)（implemented）
+- [头像与昵称](account-profile.md)（implemented）
 - [系统快捷栏](system-rail.md)（implemented）
 - [影视中心](media-center.md)（implemented）
-- [音乐](music.md)（implemented，尚未部署）
+- [音乐](music.md)（implemented）
 - [问题反馈](feedback.md)（implemented）
-- [传输中心](transfer-center.md)（implemented，尚未部署）
-- [备份中心](backup-center.md)（implemented，尚未部署）
+- [传输中心](transfer-center.md)（implemented）
+- [备份中心](backup-center.md)（implemented）
 - [日志](logs.md)（implemented）
 - [容量与大小的显示单位](size-units.md)（implemented）
 - [AI 助手](ai-assistant.md)（draft）
+- [硬盘用途与数据卷冗余](disk-roles-and-redundancy.md)（M1 implemented；M2、M3 draft）
 
 状态只表示规格的实现阶段。哪些功能已部署到 Experimental NAS、哪些实机验收未完成，统一记录在[当前状态](../status/CURRENT.md)，规格中不再重复。
 

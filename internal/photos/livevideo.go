@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 // A Live Photo's still and MOV are meant to travel together, but a Mac often
@@ -42,7 +42,7 @@ func (s *Service) stillLiveID(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	return appleContentID(file), nil
 }
 
@@ -63,7 +63,7 @@ func (s *Service) AttachLiveVideo(ctx context.Context, p Principal, request Live
 		return nil, ErrForbidden
 	}
 	if s.media == nil {
-		return nil, mediaworker.ErrUnavailable
+		return nil, ffmpegworker.ErrUnavailable
 	}
 	clip, err := s.stageContent(request.Content, true)
 	if err != nil {
@@ -80,6 +80,13 @@ func (s *Service) AttachLiveVideo(ctx context.Context, p Principal, request Live
 		// only come with its still.
 		return nil, ErrInvalidMotion
 	}
+	return s.completeLivePhotos(ctx, p, lib, name, clip, liveID, probe.Format.Duration)
+}
+
+// completeLivePhotos gives a staged MOV with Apple's identifier liveID to
+// the stills of a library that carry it, have no video yet and that p may
+// change, and returns them; ErrNoLiveStill when there are none.
+func (s *Service) completeLivePhotos(ctx context.Context, p Principal, lib library, name string, clip stagedObject, liveID string, duration float64) ([]Asset, error) {
 	if err := s.readLiveIDs(ctx, lib.id, strings.TrimSuffix(name, filepath.Ext(name))); err != nil {
 		return nil, err
 	}
@@ -111,7 +118,7 @@ func (s *Service) AttachLiveVideo(ctx context.Context, p Principal, request Live
 			}
 			// The video takes the still's name, as a paired upload does.
 			video := &motionImport{object: clip, name: strings.TrimSuffix(still, filepath.Ext(still)) + filepath.Ext(name),
-				kind: "live-photo", duration: probe.Format.Duration}
+				kind: "live-photo", duration: duration}
 			if err := s.insertMotion(ctx, tx, id, video); err != nil {
 				return err
 			}
@@ -154,11 +161,11 @@ WHERE a.library_id = ? AND a.trashed_at IS NULL AND a.motion_object_id IS NULL A
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	var unread []string
 	for rows.Next() {
 		var objectID, name string
 		if err := rows.Scan(&objectID, &name); err != nil {
-			_ = rows.Close()
 			return err
 		}
 		if strings.EqualFold(strings.TrimSuffix(name, filepath.Ext(name)), stem) {
@@ -194,11 +201,11 @@ ORDER BY a.imported_at, a.id`, lib.id, liveID)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	var ids []string
 	for rows.Next() {
 		var id, uploadedBy string
 		if err := rows.Scan(&id, &uploadedBy); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		if canChange(p, lib, uploadedBy) {

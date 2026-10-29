@@ -33,8 +33,7 @@ func TestEmbeddedCatalogPassesPolicy(t *testing.T) {
 	for _, entry := range entries {
 		plan, err := appstore.Render(context.Background(), entry, testPolicy, testIdentity, secretsFor(entry.App.ID))
 		if err != nil {
-			var policyError *appstore.PolicyError
-			if errors.As(err, &policyError) {
+			if policyError, ok := errors.AsType[*appstore.PolicyError](err); ok {
 				t.Errorf("%s: %s", entry.App.ID, strings.Join(policyError.Reasons, " | "))
 				continue
 			}

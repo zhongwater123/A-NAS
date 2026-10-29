@@ -7,20 +7,24 @@ import (
 	"os"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 // MediaDecoder accepts only already-authorized read-only descriptors. Production
-// decoding remains inside the isolated Media Worker, never the photo service.
+// decoding remains inside the isolated FFmpeg Worker, never the photo service.
 type MediaDecoder interface {
-	Probe(context.Context, *os.File) (mediaworker.Probe, error)
+	Probe(context.Context, *os.File) (ffmpegworker.Probe, error)
 	Image(context.Context, *os.File, int) ([]byte, error)
-	Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error)
+	// Frame renders the video frame at a time, upright, at most width wide.
+	Frame(context.Context, *os.File, float64, int) ([]byte, error)
+	Stream(context.Context, *os.File, ffmpegworker.StreamRequest) (io.ReadCloser, error)
 }
 
 func readHEICMetadata(file *os.File, location *time.Location) (metadata photoMetadata, err error) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("photo HEIC metadata", recovered)
 			metadata = photoMetadata{}
 			err = ErrUnsupportedType
 		}
@@ -36,31 +40,28 @@ func readHEICMetadata(file *os.File, location *time.Location) (metadata photoMet
 	return metadata, nil
 }
 
+// heicTimeout bounds decoding one HEIC once the FFmpeg Worker has taken it;
+// waiting for a worker does not count.
+const heicTimeout = 30 * time.Second
+
 func (s *Service) renderPhoto(ctx context.Context, file *os.File, orientation, edge, quality int) ([]byte, int, int, error) {
 	var header [32]byte
 	n, _ := file.ReadAt(header[:], 0)
 	if sniffMediaType(header[:n]) != "image/heic" {
-		return renderUpright(file, orientation, edge, quality)
+		return renderUpright(ctx, file, orientation, edge, quality)
 	}
 	if s.media == nil {
-		return nil, 0, 0, mediaworker.ErrUnavailable
+		return nil, 0, 0, ffmpegworker.ErrUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	select {
-	case s.decodeSlots <- struct{}{}:
-		defer func() { <-s.decodeSlots }()
-	case <-ctx.Done():
-		return nil, 0, 0, ctx.Err()
-	}
-	data, err := s.media.Image(ctx, file, 1600)
+	data, err := s.media.Image(ffmpegworker.WithTimeout(ctx, heicTimeout), file, 1600)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	return renderUpright(bytes.NewReader(data), 1, edge, quality)
+	return renderUpright(ctx, bytes.NewReader(data), 1, edge, quality)
 }
 
-// Preview returns a compatible JPEG for HEIC; originals stay immutable.
+// Preview returns a compatible JPEG for HEIC and a video's poster frame;
+// originals stay immutable.
 func (s *Service) Preview(ctx context.Context, p Principal, id string) (Content, error) {
 	record, err := s.visibleAsset(ctx, s.db, p, id)
 	if err != nil {
@@ -70,10 +71,14 @@ func (s *Service) Preview(ctx context.Context, p Principal, id string) (Content,
 	if err != nil {
 		return Content{}, err
 	}
+	if record.Video != nil {
+		defer func() { _ = original.Reader.Close() }()
+		return s.poster(ctx, record, original.Reader)
+	}
 	if record.MediaType != "image/heic" {
 		return original, nil
 	}
-	defer original.Reader.Close()
+	defer func() { _ = original.Reader.Close() }()
 	data, _, _, err := s.renderPhoto(ctx, original.Reader, 1, 1600, 92)
 	if err != nil {
 		return Content{}, err

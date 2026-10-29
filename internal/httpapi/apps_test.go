@@ -33,7 +33,7 @@ func TestDockerAndAppCenterAreForAdministratorsWithCSRF(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService,
 		Containers:   containersapi.New(fakecontainers.New(), containersapi.DataSourceSimulated, logger),
 		Apps:         appAPI(t),

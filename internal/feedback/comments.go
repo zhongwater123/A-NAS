@@ -149,13 +149,13 @@ FROM comments WHERE ? = '' OR item_id = ? ORDER BY created_at, id`, itemID, item
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	comments := []itemComment{}
 	byID := map[string]int{}
 	for rows.Next() {
-		comment := itemComment{Comment: Comment{Images: []Image{}}}
+		comment := itemComment{Images: []Image{}}
 		var createdAt, updatedAt string
 		if err := rows.Scan(&comment.itemID, &comment.ID, &comment.Text, &comment.Version, &comment.CreatedBy, &createdAt, &comment.UpdatedBy, &updatedAt); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		comment.CreatedAt = parseTime(createdAt)

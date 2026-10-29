@@ -15,7 +15,7 @@ from eval import datasets
 
 
 class Face:
-    __slots__ = ("identity", "box", "eyes", "group")
+    __slots__ = ("box", "eyes", "group", "identity")
 
     def __init__(self, identity, box=None, group="", eyes=None):
         # None for a face whose identity nobody labelled (WIDER FACE): it
@@ -30,7 +30,7 @@ class Face:
 
 
 class Photo:
-    __slots__ = ("key", "path", "faces", "library")
+    __slots__ = ("faces", "key", "library", "path")
 
     def __init__(self, key, path, faces, library=""):
         self.key = key
@@ -60,9 +60,8 @@ def lfw():
         if not os.path.isdir(folder):
             continue
         library = f"lfw-{int(hashlib.sha256(person.encode()).hexdigest()[:8], 16) % LFW_LIBRARIES}"
-        for name in sorted(os.listdir(folder)):
-            if name.endswith(".jpg"):
-                photos.append(Photo(f"lfw:{name[:-4]}", os.path.join(folder, name), [Face(person)], library))
+        photos.extend(Photo(f"lfw:{name[:-4]}", os.path.join(folder, name), [Face(person)], library)
+                      for name in sorted(os.listdir(folder)) if name.endswith(".jpg"))
     return photos
 
 

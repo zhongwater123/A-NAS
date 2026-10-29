@@ -11,8 +11,20 @@ import (
 
 type InstallRequest struct {
 	Digest string `json:"digest,omitempty"`
-	UID    int    `json:"uid,omitempty"`
-	GID    int    `json:"gid,omitempty"`
+	// The reservation uses these only until the host account exists. Commit
+	// checks the real account against that identity. The legacy install
+	// endpoint ignores these fields and looks up the account itself (#176).
+	UID int `json:"uid,omitempty"`
+	GID int `json:"gid,omitempty"`
+}
+
+type ReservationDocument struct {
+	Token string      `json:"token"`
+	Job   JobDocument `json:"job"`
+}
+
+type PreparationRequest struct {
+	Token string `json:"token"`
 }
 
 type AppsDocument struct {
@@ -178,11 +190,9 @@ func (document AppsDocument) ToDomain() ([]appstore.AppStatus, error) {
 			item.Category = ""
 		}
 		apps[i] = appstore.AppStatus{
-			App: appstore.App{
-				ID: item.ID, Title: item.Title, Tagline: item.Tagline, Description: item.Description, Notes: item.Notes, UpstreamNotes: item.UpstreamNotes,
-				Category: item.Category, Version: item.Version, Author: item.Author, Developer: item.Developer, Website: item.Website, Repo: item.Repo,
-				Docs: item.Docs, Updated: item.Updated, WebPort: item.WebPort, Scheme: item.Scheme, Path: item.Path,
-			},
+			ID: item.ID, Title: item.Title, Tagline: item.Tagline, Description: item.Description, Notes: item.Notes, UpstreamNotes: item.UpstreamNotes,
+			Category: item.Category, Version: item.Version, Author: item.Author, Developer: item.Developer, Website: item.Website, Repo: item.Repo,
+			Docs: item.Docs, Updated: item.Updated, WebPort: item.WebPort, Scheme: item.Scheme, Path: item.Path,
 			State: item.State, Running: item.Running, Total: item.Total, RuntimeOutdated: item.RuntimeOutdated,
 		}
 		if item.Job != nil {

@@ -8,7 +8,6 @@ package photosapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -18,7 +17,9 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -61,7 +62,7 @@ func principalFrom(r *http.Request) (photos.Principal, bool) {
 type handler struct {
 	service *photos.Service
 	logger  *slog.Logger
-	mux     *http.ServeMux
+	mux     *apiroute.Mux
 }
 
 // New returns the photo API. A nil service means the photo library is not
@@ -70,26 +71,31 @@ func New(service *photos.Service, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &handler{service: service, logger: logger, mux: http.NewServeMux()}
+	h := &handler{service: service, logger: logger, mux: apiroute.NewMux()}
 	h.routes()
 	return h
+}
+
+// Endpoints are the operations the photo API serves beneath PathPrefix.
+func Endpoints() []apiroute.Endpoint {
+	return New(nil, nil).(*handler).mux.Endpoints()
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if h.service == nil {
-		WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available on this device")
 		return
 	}
 	principal, ok := principalFrom(r)
 	if !ok {
-		WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
+		httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 		return
 	}
 	// The photo Policy already refuses an assistant every change; refusing
 	// all but reads here also keeps it from searching by an uploaded image.
 	if principal.Assistant && r.Method != http.MethodGet && r.Method != http.MethodHead {
-		WriteError(w, http.StatusForbidden, "assistant_read_only", "the assistant can only read the photo library")
+		httpjson.WriteError(w, http.StatusForbidden, "assistant_read_only", "the assistant can only read the photo library")
 		return
 	}
 	h.mux.ServeHTTP(w, r)
@@ -99,7 +105,8 @@ func (h *handler) routes() {
 	p := PathPrefix
 	h.mux.HandleFunc("GET "+p+"/libraries", h.listLibraries)
 	h.mux.HandleFunc("GET "+AIStatusPath, h.aiStatus)
-	h.mux.HandleFunc("GET "+ActivityPath, h.activity)
+	// Only the Product Service asks for this; browsers never reach it.
+	h.mux.ServeMux.HandleFunc("GET "+ActivityPath, h.activity)
 	h.mux.HandleFunc("GET "+p+"/search", h.search)
 	h.mux.HandleFunc("POST "+p+"/image-searches", h.searchByImage)
 	h.mux.HandleFunc("GET "+p+"/image-searches/{searchID}/assets", h.imageSearchResults)
@@ -114,6 +121,8 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("POST "+p+"/libraries/{libraryID}/live-photos", h.uploadLive)
 	h.mux.HandleFunc("POST "+p+"/libraries/{libraryID}/live-videos", h.uploadLiveVideo)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/preview", h.preview)
+	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/view", h.view)
+	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/metadata", h.metadata)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/motion", h.motion)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/motion/play", h.playMotion)
 	h.mux.HandleFunc("GET "+p+"/assets/{assetID}/download", h.download)
@@ -133,8 +142,9 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("DELETE "+p+"/trash/{assetID}", h.purgeAsset)
 	h.metadataRoutes()
 	h.peopleRoutes()
+	h.videoRoutes()
 	h.mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		WriteError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
 }
 
@@ -177,7 +187,7 @@ func (h *handler) listLibraries(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, itemsResponse[photos.Library]{Items: libraries})
+	httpjson.Write(w, http.StatusOK, itemsResponse[photos.Library]{Items: libraries})
 }
 
 func (h *handler) aiStatus(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +197,7 @@ func (h *handler) aiStatus(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, status)
+	httpjson.Write(w, http.StatusOK, status)
 }
 
 // pageLimit reads the optional limit query parameter; 0 means the default.
@@ -198,7 +208,7 @@ func pageLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
 	}
 	limit, err := strconv.Atoi(value)
 	if err != nil || limit < 1 {
-		WriteError(w, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
 		return 0, false
 	}
 	return limit, true
@@ -222,7 +232,7 @@ func (h *handler) timeline(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
+	httpjson.Write(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
 }
 
 func (h *handler) timelineMonths(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +242,7 @@ func (h *handler) timelineMonths(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, itemsResponse[photos.TimelineMonth]{Items: months})
+	httpjson.Write(w, http.StatusOK, itemsResponse[photos.TimelineMonth]{Items: months})
 }
 
 type labelsResponse struct {
@@ -250,7 +260,7 @@ func (h *handler) labels(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, labelsResponse{Items: counts, Ready: ready})
+	httpjson.Write(w, http.StatusOK, labelsResponse{Items: counts, Ready: ready})
 }
 
 func (h *handler) labelPhotos(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +275,7 @@ func (h *handler) labelPhotos(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
+	httpjson.Write(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
 }
 
 // tags lists the users' own tags as groups, beside the AI clusters.
@@ -276,7 +286,7 @@ func (h *handler) tags(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, itemsResponse[photos.TagCount]{Items: counts})
+	httpjson.Write(w, http.StatusOK, itemsResponse[photos.TagCount]{Items: counts})
 }
 
 func (h *handler) tagPhotos(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +301,7 @@ func (h *handler) tagPhotos(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
+	httpjson.Write(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
 }
 
 func (h *handler) search(w http.ResponseWriter, r *http.Request) {
@@ -313,7 +323,7 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 	if page.Objects != nil {
 		response.Objects = &objectsFound{Words: page.Objects.Words, Detected: page.Objects.Detected, Undetected: page.Objects.Undetected}
 	}
-	writeJSON(w, http.StatusOK, response)
+	httpjson.Write(w, http.StatusOK, response)
 }
 
 type similarResponse struct {
@@ -337,7 +347,7 @@ func (h *handler) similar(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, similarResponse{Items: page.Assets, Next: page.Next, Ready: page.Ready})
+	httpjson.Write(w, http.StatusOK, similarResponse{Items: page.Assets, Next: page.Next, Ready: page.Ready})
 }
 
 type imageSearchResponse struct {
@@ -351,7 +361,7 @@ func (h *handler) searchByImage(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
 	reader, err := r.MultipartReader()
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
 		return
 	}
 	for {
@@ -360,7 +370,7 @@ func (h *handler) searchByImage(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if err != nil {
-			WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
 			return
 		}
 		if part.FormName() != "file" {
@@ -373,10 +383,10 @@ func (h *handler) searchByImage(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, imageSearchResponse{ID: id})
+		httpjson.Write(w, http.StatusCreated, imageSearchResponse{ID: id})
 		return
 	}
-	WriteError(w, http.StatusBadRequest, "file_required", "one file part is required")
+	httpjson.WriteError(w, http.StatusBadRequest, "file_required", "one file part is required")
 }
 
 func (h *handler) imageSearchResults(w http.ResponseWriter, r *http.Request) {
@@ -393,7 +403,7 @@ func (h *handler) imageSearchResults(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
+	httpjson.Write(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
 }
 
 func (h *handler) entries(w http.ResponseWriter, r *http.Request) {
@@ -408,7 +418,7 @@ func (h *handler) entries(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, listing)
+	httpjson.Write(w, http.StatusOK, listing)
 }
 
 // upload accepts one multipart "file" part, optionally preceded by a
@@ -417,7 +427,7 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
 	reader, err := r.MultipartReader()
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
 		return
 	}
 	var directoryID string
@@ -427,7 +437,7 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if err != nil {
-			WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_multipart", "multipart upload is invalid")
 			return
 		}
 		switch part.FormName() {
@@ -435,12 +445,12 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 			value, readErr := io.ReadAll(io.LimitReader(part, 4097))
 			_ = part.Close()
 			if readErr != nil || len(value) > 4096 {
-				WriteError(w, http.StatusBadRequest, "invalid_request", "directory ID is invalid")
+				httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "directory ID is invalid")
 				return
 			}
 			directoryID = string(value)
 		case "file":
-			asset, err := h.service.Import(r.Context(), principal, photos.ImportRequest{
+			result, err := h.service.Upload(r.Context(), principal, photos.ImportRequest{
 				LibraryID: r.PathValue("libraryID"), DirectoryID: directoryID, Name: part.FileName(), Content: part,
 			})
 			_ = part.Close()
@@ -448,13 +458,13 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request) {
 				h.fail(w, r, err)
 				return
 			}
-			writeJSON(w, http.StatusCreated, asset)
+			h.uploadResult(w, result)
 			return
 		default:
 			_ = part.Close()
 		}
 	}
-	WriteError(w, http.StatusBadRequest, "file_required", "one file part is required")
+	httpjson.WriteError(w, http.StatusBadRequest, "file_required", "one file part is required")
 }
 
 type directoryRequest struct {
@@ -473,7 +483,7 @@ func (h *handler) createDirectory(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, directory)
+	httpjson.Write(w, http.StatusCreated, directory)
 }
 
 // changeRequest renames and/or moves. A present parentId or directoryId of ""
@@ -491,7 +501,7 @@ func (h *handler) changeDirectory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.DirectoryID != nil || (request.Name == nil && request.ParentID == nil) {
-		WriteError(w, http.StatusBadRequest, "invalid_request", "send name and/or parentId")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "send name and/or parentId")
 		return
 	}
 	directory, err := h.service.UpdateDirectory(r.Context(), principal, r.PathValue("directoryID"),
@@ -500,7 +510,7 @@ func (h *handler) changeDirectory(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, directory)
+	httpjson.Write(w, http.StatusOK, directory)
 }
 
 func (h *handler) deleteDirectory(w http.ResponseWriter, r *http.Request) {
@@ -519,7 +529,7 @@ func (h *handler) getAsset(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	httpjson.Write(w, http.StatusOK, asset)
 }
 
 func (h *handler) changeAsset(w http.ResponseWriter, r *http.Request) {
@@ -529,7 +539,7 @@ func (h *handler) changeAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.ParentID != nil || (request.Name == nil && request.DirectoryID == nil) {
-		WriteError(w, http.StatusBadRequest, "invalid_request", "send name and/or directoryId")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "send name and/or directoryId")
 		return
 	}
 	asset, err := h.service.Update(r.Context(), principal, r.PathValue("assetID"),
@@ -538,7 +548,7 @@ func (h *handler) changeAsset(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	httpjson.Write(w, http.StatusOK, asset)
 }
 
 func (h *handler) trashAsset(w http.ResponseWriter, r *http.Request) {
@@ -548,7 +558,7 @@ func (h *handler) trashAsset(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	httpjson.Write(w, http.StatusOK, asset)
 }
 
 func (h *handler) restoreAsset(w http.ResponseWriter, r *http.Request) {
@@ -558,7 +568,7 @@ func (h *handler) restoreAsset(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	httpjson.Write(w, http.StatusOK, asset)
 }
 
 func (h *handler) purgeAsset(w http.ResponseWriter, r *http.Request) {
@@ -577,7 +587,7 @@ func (h *handler) listTrash(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, itemsResponse[photos.Asset]{Items: assets})
+	httpjson.Write(w, http.StatusOK, itemsResponse[photos.Asset]{Items: assets})
 }
 
 type emptyTrashResponse struct {
@@ -591,7 +601,7 @@ func (h *handler) emptyTrash(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, emptyTrashResponse{Purged: purged})
+	httpjson.Write(w, http.StatusOK, emptyTrashResponse{Purged: purged})
 }
 
 type copyRequest struct {
@@ -610,7 +620,7 @@ func (h *handler) copyAsset(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, asset)
+	httpjson.Write(w, http.StatusCreated, asset)
 }
 
 // original serves the original inline for the viewer, or as an attachment
@@ -642,7 +652,7 @@ func (h *handler) thumbnail(w http.ResponseWriter, r *http.Request) {
 // serve streams content. Responses may be cached privately but must be
 // revalidated, so that access ending also ends what the browser shows.
 func (h *handler) serve(w http.ResponseWriter, r *http.Request, content photos.Content, disposition string) {
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	w.Header().Set("Cache-Control", "private, no-cache")
 	w.Header().Set("Content-Type", content.MediaType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -655,78 +665,65 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	var bodyLimit *http.MaxBytesError
 	switch {
 	case errors.As(err, &bodyLimit):
-		WriteError(w, http.StatusRequestEntityTooLarge, "too_large", photos.ErrTooLarge.Error())
+		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "too_large", photos.ErrTooLarge.Error())
 	case errors.Is(err, photos.ErrNotFound):
-		WriteError(w, http.StatusNotFound, "not_found", "photo library item was not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "photo library item was not found")
+	case errors.Is(err, photos.ErrNotVideo):
+		httpjson.WriteError(w, http.StatusNotFound, "not_video", "this photo library item is not a video")
+	case errors.Is(err, photos.ErrInvalidStart):
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	case errors.Is(err, photos.ErrMediaBusy):
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_busy", "正在同时转换播放的视频太多，请稍后再试")
 	case errors.Is(err, photos.ErrThumbnailUnavailable):
-		WriteError(w, http.StatusNotFound, "thumbnail_unavailable", "the thumbnail is not ready; use the original")
+		httpjson.WriteError(w, http.StatusNotFound, "thumbnail_unavailable", "the thumbnail is not ready; use the original")
 	case errors.Is(err, photos.ErrForbidden):
-		WriteError(w, http.StatusForbidden, "forbidden", "this photo library item cannot be changed by you")
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "this photo library item cannot be changed by you")
 	case errors.Is(err, photos.ErrConflict):
-		WriteError(w, http.StatusConflict, "conflict", "the item conflicts with its current state or an existing name")
+		httpjson.WriteError(w, http.StatusConflict, "conflict", "the item conflicts with its current state or an existing name")
 	case errors.Is(err, photos.ErrInvalidName):
-		WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	case errors.Is(err, photos.ErrInvalidCursor):
-		WriteError(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_cursor", err.Error())
 	case errors.Is(err, photos.ErrInvalidMonth):
-		WriteError(w, http.StatusBadRequest, "invalid_month", "month must be YYYY-MM")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_month", "month must be YYYY-MM")
 	case errors.Is(err, photos.ErrInvalidQuery):
-		WriteError(w, http.StatusBadRequest, "invalid_query", "search needs a query of 1 to "+strconv.Itoa(photos.MaxQueryRunes)+" characters")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_query", "search needs a query of 1 to "+strconv.Itoa(photos.MaxQueryRunes)+" characters")
 	case errors.Is(err, photos.ErrInvalidMotion):
-		WriteError(w, http.StatusUnprocessableEntity, "invalid_motion_photo", err.Error())
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "invalid_motion_photo", err.Error())
 	case errors.Is(err, photos.ErrNoLiveStill):
-		WriteError(w, http.StatusUnprocessableEntity, "live_photo_not_found", "这个图库里没有在等这段视频的实况照片：请拖到放着对应照片的图库，并使用未修改的原件")
-	case errors.Is(err, mediaworker.ErrUnavailable):
-		WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "媒体解码服务暂不可用，请稍后重试")
-	case errors.Is(err, mediaworker.ErrUnreadable):
-		WriteError(w, http.StatusUnprocessableEntity, "unreadable_media", "动态片段无法读取，请选择未修改的原件")
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "live_photo_not_found", "这个图库里没有在等这段视频的实况照片：请拖到放着对应照片的图库，并使用未修改的原件")
+	case errors.Is(err, ffmpegworker.ErrUnavailable):
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "媒体解码服务暂不可用，请稍后重试")
+	case errors.Is(err, ffmpegworker.ErrUnreadable):
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "unreadable_media", "动态片段无法读取，请选择未修改的原件")
+	case errors.Is(err, photos.ErrNoMetadata):
+		httpjson.WriteError(w, http.StatusUnsupportedMediaType, "no_metadata", "视频的拍摄信息还读不了，只有照片的可以")
+	case errors.Is(err, photos.ErrNoView):
+		httpjson.WriteError(w, http.StatusUnsupportedMediaType, "no_view", "视频没有可以查看的画面，只有照片有")
 	case errors.Is(err, photos.ErrUnsupportedType):
-		WriteError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "支持 JPEG、PNG 和 HEIC 照片；Live Photo 请同时选择照片与同名 MOV")
+		httpjson.WriteError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "支持 JPEG、PNG、HEIC 照片与 MP4、MOV 等常见视频；Live Photo 请同时选择照片与同名 MOV")
 	case errors.Is(err, photos.ErrTooLarge):
-		WriteError(w, http.StatusRequestEntityTooLarge, "too_large", err.Error())
+		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "too_large", err.Error())
 	case errors.Is(err, photos.ErrInsufficientSpace):
-		WriteError(w, http.StatusInsufficientStorage, "insufficient_storage", err.Error())
+		httpjson.WriteError(w, http.StatusInsufficientStorage, "insufficient_storage", err.Error())
 	case errors.Is(err, photos.ErrImageSearchExpired):
-		WriteError(w, http.StatusNotFound, "search_expired", "the image search is no longer kept; send the image again")
+		httpjson.WriteError(w, http.StatusNotFound, "search_expired", "the image search is no longer kept; send the image again")
 	case errors.Is(err, photos.ErrAIUnavailable):
-		WriteError(w, http.StatusServiceUnavailable, "ai_unavailable", "local AI cannot read the image right now; try again later")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "ai_unavailable", "local AI cannot read the image right now; try again later")
 	default:
 		h.logger.ErrorContext(r.Context(), "photo request failed", "path", r.URL.Path, "error", err)
-		WriteError(w, http.StatusInternalServerError, "internal_error", "request could not be completed")
+		httpjson.WriteError(w, http.StatusInternalServerError, "internal_error", "request could not be completed")
 	}
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
-	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if mediaType != "application/json" {
-		WriteError(w, http.StatusUnsupportedMediaType, "invalid_request", "Content-Type must be application/json")
-		return false
+	switch err := httpjson.Decode(w, r, httpjson.Limit, target); {
+	case err == nil:
+		return true
+	case errors.Is(err, httpjson.ErrContentType):
+		httpjson.WriteError(w, http.StatusUnsupportedMediaType, "invalid_request", "Content-Type must be application/json")
+	default:
+		httpjson.WriteDecodeError(w, err, "invalid_request", "request body must be one JSON object")
 	}
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil || decoder.More() {
-		WriteError(w, http.StatusBadRequest, "invalid_request", "request body must be one JSON object")
-		return false
-	}
-	return true
-}
-
-type errorResponse struct {
-	Error errorDetail `json:"error"`
-}
-
-type errorDetail struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-// WriteError answers with the product API's error shape.
-func WriteError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, errorResponse{Error: errorDetail{Code: code, Message: message}})
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+	return false
 }

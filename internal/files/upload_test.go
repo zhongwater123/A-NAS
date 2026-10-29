@@ -27,6 +27,13 @@ type uploadFixture struct {
 
 func newUploadFixture(t *testing.T) *uploadFixture {
 	t.Helper()
+	return newUploadFixtureOn(t, nil)
+}
+
+// newUploadFixtureOn runs file operations on the file system that fileSystem
+// returns for the data volume, or on the default one when it is nil.
+func newUploadFixtureOn(t *testing.T, fileSystem func(volume string) files.FileSystem) *uploadFixture {
+	t.Helper()
 	ctx := context.Background()
 	accountStore, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
 	if err != nil {
@@ -54,9 +61,14 @@ func newUploadFixture(t *testing.T) *uploadFixture {
 	fixture := &uploadFixture{ctx: ctx, alice: alice, space: findPrivateSpace(t, spaces), now: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)}
 	volume := filepath.Join(t.TempDir(), "volume")
 	fixture.root = filepath.Join(volume, "spaces", "private", "alice")
-	fixture.service = files.NewService(catalog, volume, accountService, files.Options{
+	options := files.Options{
 		DisableCapacityReserve: true, AllowUnverifiedVolume: true, Now: func() time.Time { return fixture.now },
-	})
+	}
+	if fileSystem != nil {
+		fixture.service = files.NewService(catalog, volume, accountService, fileSystem(volume), options)
+	} else {
+		fixture.service = files.NewLocalService(catalog, volume, accountService, options)
+	}
 	return fixture
 }
 
@@ -275,6 +287,71 @@ func TestReconciliationRemovesOnlyUnheldUploadTemporaries(t *testing.T) {
 	}
 	if temporaries, _ := filepath.Glob(filepath.Join(f.root, ".a-nas-upload-*")); len(temporaries) != 0 {
 		t.Fatalf("aborted temporary was kept: %v", temporaries)
+	}
+}
+
+// pausedCopies holds every copy after its hidden duplicate is written,
+// until the test resumes it.
+type pausedCopies struct {
+	files.FileSystem
+	started chan string
+	resume  chan struct{}
+}
+
+func (p *pausedCopies) Copy(ctx context.Context, from, to string) error {
+	if err := p.FileSystem.Copy(ctx, from, to); err != nil {
+		return err
+	}
+	p.started <- to
+	<-p.resume
+	return nil
+}
+
+// A copy first writes a hidden duplicate. Reconciliation keeps the one a
+// copy in progress holds and removes those a restart left behind (#162).
+func TestReconciliationRemovesOnlyUnheldCopyTemporaries(t *testing.T) {
+	copies := &pausedCopies{started: make(chan string), resume: make(chan struct{})}
+	f := newUploadFixtureOn(t, func(volume string) files.FileSystem {
+		copies.FileSystem = files.NewRootFileSystem(volume, true)
+		return copies
+	})
+	f.send(t, files.UploadRequest{Directories: []string{"相册"}, Name: "a.jpg"}, "aaaa")
+	entries, err := f.service.List(f.ctx, f.alice, f.space.ID, "")
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("List() = %v, %v", entries, err)
+	}
+	leftover := filepath.Join(f.root, ".a-nas-copy-0123456789abcdef")
+	if err := os.MkdirAll(filepath.Join(leftover, "相册"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(leftover, "相册", "a.jpg"), []byte("aaaa"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	copied := make(chan error, 1)
+	go func() {
+		_, err := f.service.Copy(f.ctx, f.alice, entries[0].ID, "", "", "相册 副本")
+		copied <- err
+	}()
+	inProgress := <-copies.started
+	if got := f.names(t, ""); !slices.Equal(got, []string{"相册"}) {
+		t.Fatalf("names while copying = %v, want only 相册", got)
+	}
+	if _, err := os.Stat(filepath.Join(inProgress, "a.jpg")); err != nil {
+		t.Fatalf("the duplicate of a copy in progress was removed: %v", err)
+	}
+	if _, err := os.Stat(leftover); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a duplicate nobody holds was kept: %v", err)
+	}
+	close(copies.resume)
+	if err := <-copied; err != nil {
+		t.Fatalf("Copy() error = %v", err)
+	}
+	if got := f.names(t, ""); !slices.Equal(got, []string{"相册", "相册 副本"}) {
+		t.Fatalf("names after the copy = %v", got)
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(f.root, ".a-nas-copy-*")); len(leftovers) != 0 {
+		t.Fatalf("copy temporaries remain: %v", leftovers)
 	}
 }
 

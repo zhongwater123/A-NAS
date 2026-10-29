@@ -9,12 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
-	"github.com/zhongwater123/A-NAS/internal/sharefiles"
-	"github.com/zhongwater123/A-NAS/internal/shares"
-	"github.com/zhongwater123/A-NAS/internal/sharesapi"
-	"golang.org/x/sys/unix"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,6 +17,16 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
+	"github.com/zhongwater123/A-NAS/internal/sharefiles"
+	"github.com/zhongwater123/A-NAS/internal/shares"
+	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 )
 
 type SessionResolver interface {
@@ -37,7 +41,7 @@ type Config struct {
 	Logger        *slog.Logger
 	CheckStore    func(string) error
 	RetryInterval time.Duration
-	Media         mediaworker.Worker
+	Media         ffmpegworker.Worker
 }
 
 var ErrStoreUnavailable = errors.New("member-share data volume unavailable")
@@ -60,28 +64,35 @@ func RequireOwnedStore(root string) error {
 	}
 	return nil
 }
+
+// Proxy forwards the share API to the share service on socketPath; while
+// the service cannot be reached, requests answer shares_unavailable.
+func Proxy(socketPath string, logger *slog.Logger) http.Handler {
+	return serviceproxy.New(socketPath, serviceproxy.Unavailable{Code: "shares_unavailable", Message: "member shares are not available"}, logger)
+}
+
 func authenticate(sessions SessionResolver, logger *slog.Logger, next http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := r.Header.Get(sharesapi.SessionHeader)
+		token := r.Header.Get(serviceproxy.SessionHeader)
 		user, err := sessions.ResolveSessionUser(r.Context(), token)
 		if errors.Is(err, accounts.ErrSessionNotFound) || err == nil && user.UserID == "" {
-			sharesapi.WriteError(w, 401, "authentication_required", "authentication is required")
+			httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
 			return
 		}
 		if err != nil {
 			logger.WarnContext(r.Context(), "share session lookup failed", "error", err)
-			sharesapi.WriteError(w, 503, "shares_unavailable", "session lookup unavailable")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "shares_unavailable", "session lookup unavailable")
 			return
 		}
 		if user.MustChangePassword {
-			sharesapi.WriteError(w, 403, "password_change_required", "choose a new password before continuing")
+			httpjson.WriteError(w, http.StatusForbidden, "password_change_required", "choose a new password before continuing")
 			return
 		}
 		ctx := accounts.WithSessionToken(r.Context(), token)
-		ctx = sharesapi.WithUser(ctx, accounts.User{ID: user.UserID, Username: user.Username, Role: user.Role})
+		ctx = accounts.WithUser(ctx, accounts.User{ID: user.UserID, Username: user.Username, Role: user.Role})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -101,7 +112,7 @@ func listen(socket string) (net.Listener, error) {
 		return nil, err
 	}
 	if err = os.Chmod(socket, 0660); err != nil {
-		listener.Close()
+		_ = listener.Close()
 		return nil, err
 	}
 	return listener, nil
@@ -123,9 +134,11 @@ func Run(parent context.Context, config Config) error {
 	if err != nil {
 		return err
 	}
-	defer listener.Close()
-	defer os.Remove(config.SocketPath)
-	ctx, cancel := context.WithCancel(parent)
+	defer func() { _ = os.Remove(config.SocketPath); _ = listener.Close() }()
+	// Open requests drain before the store closes and interrupts the save
+	// jobs, as the Product Service drains them before closing its stores
+	// (#192): a download in progress still completes.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	defer cancel()
 	var current atomic.Pointer[http.Handler]
 	unavailable := sharesapi.New(nil, config.Logger, config.Sessions.ActiveProfiles)
@@ -138,23 +151,27 @@ func Run(parent context.Context, config Config) error {
 		defer close(supervised)
 		supervise(ctx, config, func(h http.Handler) { current.Store(&h) }, unavailable)
 	}()
+	defer func() {
+		cancel()
+		<-supervised
+	}()
 	select {
-	case <-ctx.Done():
+	case <-parent.Done():
 	case err = <-served:
-		if errors.Is(err, http.ErrServerClosed) {
-			err = nil
-		}
+		return err
 	}
-	cancel()
-	<-supervised
-	shutdown, stop := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdown, stop := context.WithTimeout(context.Background(), shutdownGrace)
 	defer stop()
-	if shutdownErr := server.Shutdown(shutdown); shutdownErr != nil {
+	if err := server.Shutdown(shutdown); err != nil {
 		_ = server.Close()
-		return shutdownErr
+		return err
 	}
-	return err
+	return nil
 }
+
+// shutdownGrace is how long stopping waits for open requests; the unit's
+// TimeoutStopSec leaves room for closing the store after it.
+const shutdownGrace = 15 * time.Second
 
 type openedStore struct {
 	*shares.Store
@@ -207,7 +224,18 @@ func openStore(ctx context.Context, config Config) (*openedStore, error) {
 		}
 		return nil
 	}
-	store, err := shares.Open(filepath.Join(config.Root, "catalog.db"), filepath.Join(config.Root, "content"), shares.Options{Backend: sharefiles.NewBackend(remote), Active: active, Authorize: authorize, CheckVolume: check, RequireClone: true})
+	activeAccounts := func(ctx context.Context) (map[string]bool, error) {
+		profiles, err := config.Sessions.ActiveProfiles(ctx)
+		if err != nil {
+			return nil, err
+		}
+		result := make(map[string]bool, len(profiles))
+		for _, profile := range profiles {
+			result[profile.ID] = true
+		}
+		return result, nil
+	}
+	store, err := shares.Open(filepath.Join(config.Root, "catalog.db"), filepath.Join(config.Root, "content"), shares.Options{Backend: sharefiles.NewBackend(remote), Active: active, ActiveAccounts: activeAccounts, Authorize: authorize, CheckVolume: check, RequireClone: true})
 	if err != nil {
 		return nil, err
 	}

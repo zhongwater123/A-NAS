@@ -22,8 +22,9 @@ assistant_python=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
 
 # --- A second member, created as every account is: through the Product Service.
 bob_password=$(secret)
-curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
-  -d "{\"username\":\"bob\",\"password\":\"$bob_password\"}" "$api/api/v1/users" || true
+# shellcheck disable=SC2034 # consumed by disable-system-test.sh in the same sourced shell.
+bob_user=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -d "{\"username\":\"bob\",\"password\":\"$bob_password\"}" "$api/api/v1/users" | jq -r .id || true)
 bob_csrf=$(login bob "$bob_password" /tmp/bob.jar || true)
 alice_csrf=$(login alice "$new_password" /tmp/alice.jar || true)
 for _ in $(seq 1 100); do [[ -d "$data/spaces/private/bob/.a-nas-trash/bob" ]] && break; sleep 0.2; done
@@ -53,10 +54,11 @@ check "the Product Service cannot connect to one directly" denied as a-nas pytho
 check "session tokens are root's alone" test "$(stat -c '%a %U' /etc/a-nas-assistant/tokens/alice.env 2>/dev/null)" = "600 root"
 check "the Product Service holds no copy of the tokens" test ! -e /run/anas-spike-tokens/alice.token
 check "each member's weekly curator is enabled" systemctl is-enabled --quiet anas-assistant-curator@alice.timer anas-assistant-curator@bob.timer
-# The gate on, and the assistant's API in the Product Service (both off by default).
-printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\n' >> /etc/a-nas/host-agent.env
-printf 'ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant\n' >> /etc/a-nas/anas-api.env
-{ systemctl restart anas-host-agent && systemctl restart anas-api; } || true
+# The session gate, the assistant's API in the Product Service and the photo service's socket
+# for assistants, all off by default, switched on the way the trial does it.
+bash /spike/product-settings.sh on >/tmp/product-settings.log 2>&1 || tail -n 5 /tmp/product-settings.log
+check "the assistant's settings are on in the product's services" \
+  test "$(bash /spike/product-settings.sh state)" = "session gate on, photos for assistants on"
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
 changes_socket='import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas/assistant-changes.sock")'
 check "the executor's assistant socket is out of a member's reach outside the sandbox" denied as alice python3 -c "$changes_socket"
@@ -103,6 +105,10 @@ fold() {
 }
 assistant_probe() { # ACCOUNT LEAST_PASSES
   systemctl start "anas-assistant-probe@$1.service" || true
+  # The oneshot has exited, but journald reads its stdout stream on its own time: a short
+  # probe's lines could still be on their way (CI once read none of owner's). Have journald
+  # take in everything written so far before reading it.
+  journalctl --sync || true
   fold "assistant sandbox ($1)" < <(journalctl -u "anas-assistant-probe@$1.service" -o cat --no-pager | grep -E '^(PASS|FAIL|INFO)' || true)
   check "the probe ran in $1's sandbox" test "$folded" -ge "$2"
 }
@@ -194,18 +200,28 @@ check "another member cannot upload into her folder on the Web" test "$(status_o
 # Deleting moves it into bob's recycle bin, another folder: that needs write access to it.
 check "another member cannot delete Agent空间 on the Web" \
   test "$(status_of -b /tmp/bob.jar -H "X-CSRF-Token: $bob_csrf" -X DELETE "$api/api/v1/files/$agent_space_id" || true)" != 200 -a -d "$agent_space"
-# Renaming in place needs only write access to Shared. The product service is to refuse it on
-# the Web (decided with #115); what the Web answers today is recorded.
+# Both Web and SMB refuse to rename the managed publication roots (#177).
 renamed=$(status_of -b /tmp/bob.jar -H "X-CSRF-Token: $bob_csrf" -H 'Content-Type: application/json' -X PATCH \
   -d '{"name":"Agent空间-bob"}' "$api/api/v1/files/$agent_space_id" || true)
-echo "INFO assistant Agent空间: another member renames it on the Web: HTTP $renamed"
-# Over SMB the rename cannot be refused, and bob can then make his own Agent空间 with a folder
-# for alice. The Host Agent's repair moves that impostor aside, with what he made inside it.
+check "another member cannot rename Agent空间 on the Web" test "$renamed" = 403
+check "SMB cannot rename Agent空间" denied smb alice Shared 'rename Agent空间 Agent空间-smb'
+# A local process can still write Shared. Reconciliation repairs an impostor
+# through descriptors; it must not rely on the old spike's path-based setup.
 if [[ -d "$agent_space" ]]; then as bob mv -T "$agent_space" "$data/spaces/shared/Agent空间-bob" || true; fi
 as bob mkdir -p "$agent_space/alice" || true
 check "after a rename, another member can make an Agent空间 with a folder for alice" \
   test "$(stat -c %U "$agent_space/alice" 2>/dev/null)" = bob
-ASSISTANT_GATE=host-agent PRODUCT_USER=a-nas bash /spike/assistant-layout.sh prepare "$data" owner alice bob >/dev/null 2>&1 || true
+systemctl restart anas-host-agent
+# The restart recreates /run/a-nas, so the change socket bound at the sandbox's
+# path above is now a deleted file, and a unit started later cannot mount its
+# own over it (226/NAMESPACE). Bind the new socket there again.
+for _ in $(seq 1 50); do [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
+umount /run/anas-change-agent/agent.sock 2>/dev/null || true
+mount --bind /run/a-nas/assistant-changes.sock /run/anas-change-agent/agent.sock || true
+for _ in $(seq 1 50); do
+  [[ "$(stat -c %U "$agent_space/alice" 2>/dev/null)" == root ]] && break
+  sleep 0.2
+done
 check "the repair moves the impostor aside with what was made inside it" \
   test -n "$(find "$data/spaces/shared" -mindepth 1 -maxdepth 1 -name 'Agent空间.displaced-*' -user bob)"
 check "and puts Agent空间 and her folder back as root's" \
@@ -236,8 +252,36 @@ if [[ -x "$assistant_python" ]]; then
   serve_out=$("$assistant_python" /spike/serve_client.py alice chat hello 'CALL read_file {"path": "/nas/个人空间/计划.md"}' 2>&1 || true)
   check "alice's assistant answers over its socket" grep -qx '< ok' <<<"$serve_out"
   check "it reads her own file" grep -q 买菜 <<<"$serve_out"
+  # Her photos (decision 6, #113): the photo service's socket, held by systemd and bound into
+  # her sandbox, answers her UID with her own library and the shared one, read-only.
+  # The unit's main process (tini) shares the sandbox's mount namespace.
+  alice_pid=$(systemctl show -p MainPID --value anas-assistant@alice.service)
+  in_alice_sandbox() {
+    nsenter -t "$alice_pid" -m -- setpriv --reuid alice --regid alice --init-groups -- \
+      "$assistant_python" /spike/photos_peer.py /run/anas-assistant-photos/photos.sock "$@"
+  }
+  sandbox_libraries=$(in_alice_sandbox libraries 2>&1 || true)
+  check "her assistant reaches her photo library and the shared one" \
+    grep -qE 'private:.*shared:|shared:.*private:' <<<"$sandbox_libraries"
+  check "and finds her photo" grep -q photo.png <<<"$(in_alice_sandbox search photo 2>&1 || true)"
+  alice_photo=$(in_alice_sandbox ids photo 2>/dev/null | grep -o 'photo.png=[^,'"'"' ]*' | cut -d= -f2 || true)
+  renamed=0
+  in_alice_sandbox rename "$alice_photo" >/dev/null 2>&1 || renamed=$?
+  check "but cannot rename it" test "$renamed" = 1
+  photo_out=$("$assistant_python" /spike/serve_client.py alice chat 'CALL mcp__anas__search_photos {"query": "photo"}' 2>&1 || true)
+  check "Hermes's photo search tool returns it" grep -q photo.png <<<"$photo_out"
+  echo "INFO assistant photos: $sandbox_libraries"
   check "it runs under alice's own UID" \
     test "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-assistant@alice.service)/status" 2>/dev/null)" = "$alice_id"
+  # Hermes's own login and browser control (decisions 8 to 10): the old session token is
+  # refused, and a logged-in window becomes the browser of its own session only.
+  browser_out=$("$assistant_python" /spike/browser_control.py alice 2>&1 || true)
+  check "her instance refuses the old session token" grep -q '^PASS the old session token is refused' <<<"$browser_out"
+  browser_ok=no
+  grep -q '^PASS browser_snapshot reaches the window' <<<"$browser_out" &&
+    grep -q '^browser control: 0 failed' <<<"$browser_out" && browser_ok=yes
+  check "a logged-in window becomes the browser of its session and answers its commands" test "$browser_ok" = yes
+  grep '^FAIL' <<<"$browser_out" | sed 's/^/INFO assistant browser control: /' || true
   check "the first model request offers the A-NAS MCP tool" \
     bash -c "grep -m 1 -F '\"tools\": [\"' /var/log/fake-model.jsonl | grep -q mcp__anas__submit_changes"
   # The window's way in: the Product Service, then the gate, then alice's instance.
@@ -280,6 +324,20 @@ if [[ -x "$assistant_python" ]]; then
   check "signing out cuts the window's connection to the instance" \
     test "$(sed -n 's/^closed after \([0-9]*\) s.*/\1/p' /tmp/gate.out)" -le 40
   echo "INFO assistant gate: $(tr '\n' ';' </tmp/gate.out)"
+  # The Product Service keeps a member's assistant running while they are signed in: alice is
+  # still signed in with /tmp/alice.jar (above). Once she signs out everywhere it exits idle;
+  # signing in starts it in the background, with no window open, and keeps it running.
+  check "she signs out of her last session" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X DELETE "$api/api/v1/session")" = 204
+  for _ in $(seq 1 180); do systemctl is-active --quiet anas-assistant@alice.service || break; sleep 0.5; done
+  check "once she is signed out everywhere her assistant exits idle" test "$(systemctl is-active anas-assistant@alice.service || true)" != active
+  keep_csrf=$(login alice "$new_password" /tmp/alice-keep.jar || true)
+  for _ in $(seq 1 120); do systemctl is-active --quiet anas-assistant@alice.service && break; sleep 0.5; done
+  check "signing in starts her assistant with no window open" systemctl is-active --quiet anas-assistant@alice.service
+  sleep 50
+  check "it keeps running while she is signed in, past the idle exit" systemctl is-active --quiet anas-assistant@alice.service
+  check "she signs out again" \
+    test "$(status_of -b /tmp/alice-keep.jar -H "X-CSRF-Token: $keep_csrf" -X DELETE "$api/api/v1/session")" = 204
   # Hermes's curator as the weekly timer starts it: in alice's sandbox, only while her
   # assistant is not running.
   systemctl stop anas-assistant-api@alice.service anas-assistant@alice.service 2>/dev/null || true
@@ -287,6 +345,31 @@ if [[ -x "$assistant_python" ]]; then
   check "Hermes's curator runs in her sandbox while her assistant is stopped" \
     test "$(systemctl show -p Result --value anas-assistant-curator@alice.service)" = success -a -s "$data/assistant/alice/hermes/skills/.curator_state"
   echo "INFO assistant curator: $(journalctl -u anas-assistant-curator@alice.service -o cat --no-pager | grep -m 1 '^auto:' || true)"
+  # Scheduled tasks (decision 8): alice makes one in a conversation with Hermes's own tool;
+  # when it is due, the waker runs it in her sandbox with her assistant stopped, and the
+  # Product Service lists it and tells her of the run once she is signed in.
+  check "the waker that starts due tasks runs" systemctl is-active --quiet anas-assistant-cron-waker.service
+  "$assistant_python" /spike/serve_client.py alice chat \
+    'CALL cronjob_manage {"action": "create", "name": "系统测试任务", "schedule": "every 1m", "prompt": "SAY 共享空间今天没有变化 END"}' >/dev/null 2>&1 || true
+  systemctl stop anas-assistant-api@alice.service anas-assistant@alice.service 2>/dev/null || true
+  jobs_file="$data/assistant/alice/hermes/cron/jobs.json"
+  for _ in $(seq 1 60); do jq -e '.jobs[0].last_run_at' "$jobs_file" >/dev/null 2>&1 && break; sleep 5; done
+  check "her task ran when due, in her sandbox, with her assistant stopped" \
+    jq -e '.jobs[0].last_status == "ok"' "$jobs_file"
+  check "her assistant itself stayed stopped" test "$(systemctl is-active anas-assistant@alice.service || true)" != active
+  echo "INFO assistant tasks: $(jq -c '.jobs[0] | {name, last_status, last_error}' "$jobs_file" 2>/dev/null || true)"
+  # The system test's last check uses /tmp/alice.jar.
+  alice_csrf=$(login alice "$new_password" /tmp/alice.jar || true)
+  tasks=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/tasks" || true)
+  check "the Product Service lists her task without Hermes's internals" \
+    jq -e '.tasks[0].name == "系统测试任务" and .tasks[0].lastStatus == "ok" and (tostring | contains("hermes_home") | not)' <<<"$tasks"
+  task_id=$(jq -r '.tasks[0].id // empty' <<<"$tasks" || true)
+  notices() { curl -fsS -b /tmp/alice.jar "$api/api/v1/notifications" || true; }
+  for _ in $(seq 1 60); do jq -e 'any(.items[]; .kind == "assistant_task")' <<<"$(notices)" >/dev/null 2>&1 && break; sleep 2; done
+  check "signed in, she is told of the run with what it answered" \
+    jq -e 'any(.items[]; .kind == "assistant_task" and .task.name == "系统测试任务" and .task.summary == "共享空间今天没有变化")' <<<"$(notices)"
+  check "she deletes the task" \
+    test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X DELETE "$api/api/v1/assistant/tasks/$task_id")" = 204
 fi
 
 # --- The layout, for comparison with the spike's (layout-acl.sh in both).

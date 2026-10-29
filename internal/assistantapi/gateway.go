@@ -14,12 +14,17 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 const (
-	// maxBrowserFrame bounds one frame from the window; a message is at most
-	// maxInputBytes.
-	maxBrowserFrame = maxInputBytes + 16<<10
+	// maxControllerResult bounds the result of one browser command the window
+	// carries out: a screenshot of the page is the largest, a PNG the window
+	// keeps under 4 MiB of base64.
+	maxControllerResult = 5 << 20
+	// maxBrowserFrame bounds one frame from the window: a message is at most
+	// maxInputBytes, a browser command's result maxControllerResult.
+	maxBrowserFrame = maxControllerResult + 16<<10
 	// maxUpstreamBytes bounds one frame or REST reply from Hermes; resuming a
 	// long conversation returns its messages.
 	maxUpstreamBytes = 64 << 20
@@ -37,7 +42,7 @@ var lingerCheck = 5 * time.Second
 // through the session gate for one window. It can outlive the window while
 // a turn runs, because the instance exits when no connection is left.
 type upstream struct {
-	h       *handler
+	h       *Handler
 	m       *member
 	conn    *websocket.Conn
 	session string // the member's session token, for the executor
@@ -209,9 +214,9 @@ func (u *upstream) serverRequestOf(requestID string) string {
 
 // gateway serves the window's WebSocket: the member's own instance through the
 // session gate, with only the allowed part of `hermes serve` passed either way.
-func (h *handler) gateway(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) gateway(w http.ResponseWriter, r *http.Request, account string) {
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		writeError(w, http.StatusUpgradeRequired, "upgrade_required", "the assistant gateway is a WebSocket")
+		httpjson.WriteError(w, http.StatusUpgradeRequired, "upgrade_required", "the assistant gateway is a WebSocket")
 		return
 	}
 	// Server read and write timeouts stay attached to hijacked connections.
@@ -245,6 +250,7 @@ func (h *handler) gateway(w http.ResponseWriter, r *http.Request, account string
 	m.mu.Lock()
 	m.upstreams[u] = struct{}{}
 	m.mu.Unlock()
+	//nolint:gosec // G118: reads Hermes until the upstream closes, which ends it; the request's context does not.
 	go u.readHermes()
 	if err := u.declare(ctx); err != nil {
 		h.logger.Warn("assistant gateway did not start", "account", account, "error", err)
@@ -256,6 +262,7 @@ func (h *handler) gateway(w http.ResponseWriter, r *http.Request, account string
 	u.mu.Lock()
 	u.browser = nil
 	u.mu.Unlock()
+	u.detachControllers(ctx)
 	u.linger(ctx)
 	u.close()
 }
@@ -358,6 +365,11 @@ func (u *upstream) hermesEvent(f frame) {
 		}
 	}
 	u.h.observe(u.m, u, ev)
+	if controllerEvents[ev.Type] {
+		// Only this connection's window registered as the session's browser.
+		u.toBrowser(f)
+		return
+	}
 	if !forwardedEvents[ev.Type] {
 		return
 	}
@@ -427,6 +439,10 @@ func (u *upstream) adjustResult(call forwardedCall, raw json.RawMessage) (json.R
 	var session string
 	_ = json.Unmarshal(call.params["session_id"], &session)
 	switch call.method {
+	case "browser.controller.register":
+		u.m.becomeBrowser(session, u)
+	case "browser.controller.detach":
+		u.m.leaveBrowser(u, session)
 	case "session.create", "session.resume", "session.activate":
 		var live, stored string
 		_ = json.Unmarshal(result["session_id"], &live)
@@ -509,6 +525,10 @@ func (u *upstream) readBrowser(ctx context.Context) {
 			u.toBrowser(rpcError(f.ID, code, err.Error()))
 			continue
 		}
+		if f.Method == "browser.controller.register" && u.m.browserTaken(unquote(params["session_id"]), u) {
+			u.toBrowser(rpcError(f.ID, codeInvalidParams, "another window is the browser of the turn under way"))
+			continue
+		}
 		u.mu.Lock()
 		u.next++
 		id := "b" + strconv.Itoa(u.next)
@@ -522,6 +542,56 @@ func (u *upstream) readBrowser(ctx context.Context) {
 			u.toBrowser(rpcError(f.ID, codeUnavailable, "the assistant is unavailable"))
 		}
 	}
+}
+
+// detachControllers ends the window's part as the browser of its sessions once
+// it left: a turn going on without it then has no browser tools, instead of
+// commands that wait for a window that is gone. A session whose browser is now
+// another window keeps it.
+func (u *upstream) detachControllers(ctx context.Context) {
+	for _, session := range u.m.leaveBrowser(u, "") {
+		detachCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		if _, err := u.call(detachCtx, "browser.controller.detach", map[string]string{"session_id": session}); err != nil {
+			u.h.logger.Debug("assistant browser not detached", "account", u.m.account, "session", session, "error", err)
+		}
+		cancel()
+	}
+}
+
+// becomeBrowser records the window that registered last as the session's
+// browser: Hermes sends the session's commands to it alone from now on.
+func (m *member) becomeBrowser(session string, u *upstream) {
+	if !runtimeIDPattern.MatchString(session) {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.session(session).browser = u
+}
+
+// browserTaken reports whether a turn runs on the session with another window
+// as its browser: that window stays its browser until the turn ends, so a step
+// and its confirmation never move to another device mid-turn (#160).
+func (m *member) browserTaken(session string, u *upstream) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.sessions[session]
+	return s != nil && s.turn && s.browser != nil && s.browser != u
+}
+
+// leaveBrowser forgets u as the browser of one session, or of all its
+// sessions when session is empty, and returns the sessions it was the browser of.
+func (m *member) leaveBrowser(u *upstream, session string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var left []string
+	for id, s := range m.sessions {
+		if s.browser == u && (session == "" || id == session) {
+			s.browser = nil
+			left = append(left, id)
+		}
+	}
+	return left
 }
 
 // local answers the methods that are the Product Service's own.

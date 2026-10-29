@@ -1,11 +1,34 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { type PickedFile, pickedFromInput, pickedFromDrop as pickFromDrop } from "../lib/pickedFiles";
 import { failureText } from "../transfers/model";
 import { type LocalUpload, transferStore, useTransfers } from "../transfers/store";
 
 // The files a library scan reads: the scanner's video extensions plus the
 // subtitles, NFO documents and artwork it picks up beside them.
-const videoTypes = [".mp4", ".m4v", ".mkv", ".webm", ".mov", ".avi", ".wmv", ".flv", ".f4v", ".ts", ".m2ts", ".mts", ".mpg", ".mpeg", ".rmvb", ".rm", ".3gp", ".vob", ".ogv", ".asf", ".divx"];
+const videoTypes = [
+  ".mp4",
+  ".m4v",
+  ".mkv",
+  ".webm",
+  ".mov",
+  ".avi",
+  ".wmv",
+  ".flv",
+  ".f4v",
+  ".ts",
+  ".m2ts",
+  ".mts",
+  ".mpg",
+  ".mpeg",
+  ".rmvb",
+  ".rm",
+  ".3gp",
+  ".vob",
+  ".ogv",
+  ".asf",
+  ".divx",
+];
 const subtitleTypes = [".srt", ".ass", ".ssa", ".vtt"];
 const imageTypes = [".jpg", ".jpeg", ".png", ".webp"];
 export const acceptedTypes = [...videoTypes, ...subtitleTypes, ".nfo", ...imageTypes].join(",");
@@ -22,47 +45,46 @@ export function roleOf(name: string): FileRole {
 
 // Picked is a file with the folders it sat in when a whole folder was
 // chosen or dropped ("" for a single file).
-export interface Picked { file: File; folder: string }
-
-export function pickedFromList(files: ArrayLike<File>): Picked[] {
-  return Array.from(files).map((file) => ({ file, folder: (file.webkitRelativePath ?? "").split("/").filter(Boolean).slice(0, -1).join("/") }));
+export interface Picked {
+  file: File;
+  folder: string;
 }
 
-// pickedFromDrop reads dropped files and folders. The entries must be taken
-// while the drop event runs; reading them may finish later.
-export function pickedFromDrop(transfer: DataTransfer): Promise<Picked[]> {
-  const items = Array.from(transfer.items ?? []).filter((item) => item.kind === "file");
-  const entries = items.map((item) => item.webkitGetAsEntry?.() ?? null);
-  if (!entries.length || entries.some((entry) => !entry)) return Promise.resolve(pickedFromList(transfer.files));
-  return Promise.all(entries.map((entry) => walk(entry!, ""))).then((lists) => lists.flat());
-}
+const picked = ({ file, directories }: PickedFile): Picked => ({ file, folder: directories.join("/") });
 
-async function walk(entry: FileSystemEntry, folder: string): Promise<Picked[]> {
-  if (entry.isFile) {
-    const file = await new Promise<File>((resolve, reject) => (entry as FileSystemFileEntry).file(resolve, reject));
-    return [{ file, folder }];
-  }
-  if (!entry.isDirectory) return [];
-  // A directory reader returns its entries in batches until an empty one.
-  const reader = (entry as FileSystemDirectoryEntry).createReader();
-  const children: FileSystemEntry[] = [];
-  for (;;) {
-    const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
-    if (!batch.length) break;
-    children.push(...batch);
-  }
-  const inside = folder ? `${folder}/${entry.name}` : entry.name;
-  return (await Promise.all(children.map((child) => walk(child, inside)))).flat();
-}
+// pickedFromList reads a file or folder input.
+export const pickedFromList = (files: FileList | null): Picked[] => pickedFromInput(files).map(picked);
+
+// pickedFromDrop reads dropped files and folders, as the file manager does.
+export const pickedFromDrop = async (transfer: DataTransfer): Promise<Picked[]> =>
+  (await pickFromDrop(transfer)).map(picked);
 
 // Where a batch goes: a folder of a library, by its file entry.
-export interface Destination { libraryId: string; libraryName: string; spaceId: string; spaceKind: "private" | "shared"; parentId: string; place: string }
+export interface Destination {
+  libraryId: string;
+  libraryName: string;
+  spaceId: string;
+  spaceKind: "private" | "shared";
+  parentId: string;
+  place: string;
+}
 
 export type UploadState = "ready" | "waiting" | "uploading" | "done" | "exists" | "skipped" | "failed" | "canceled";
-export interface UploadItem { id: number; file: File; folder: string; role: FileRole; state: UploadState; progress: number; error?: string; to?: Destination }
+export interface UploadItem {
+  id: number;
+  file: File;
+  folder: string;
+  role: FileRole;
+  state: UploadState;
+  progress: number;
+  error?: string;
+  to?: Destination;
+}
 
 const active = (item: UploadItem) => item.state === "waiting" || item.state === "uploading";
-const hidden = (picked: Picked) => [...picked.folder.split("/"), picked.file.name].some((part) => part.startsWith(".")) || /^(thumbs\.db|desktop\.ini)$/i.test(picked.file.name);
+const hidden = (picked: Picked) =>
+  [...picked.folder.split("/"), picked.file.name].some((part) => part.startsWith(".")) ||
+  /^(thumbs\.db|desktop\.ini)$/i.test(picked.file.name);
 
 export interface Uploads {
   items: UploadItem[];
@@ -79,18 +101,35 @@ export interface Uploads {
 
 // Staged is a picked file: ready until the user chooses where it goes, then
 // a file of the transfer center's queue under key.
-interface Staged { id: number; file: File; folder: string; role: FileRole; key?: string; to?: Destination }
+interface Staged {
+  id: number;
+  file: File;
+  folder: string;
+  role: FileRole;
+  key?: string;
+  to?: Destination;
+}
 
 // stateOf tells a queued upload's state in the media center's words.
 function stateOf(upload: LocalUpload): Pick<UploadItem, "state" | "progress" | "error"> {
   const progress = upload.size ? Math.min(1, upload.transferred / upload.size) : 0;
   switch (upload.phase) {
-    case "running": return { state: "uploading", progress };
-    case "completed": return { state: "done", progress: 1 };
-    case "skipped": return { state: "exists", progress: 0 };
-    case "failed": return { state: "failed", progress: 0, error: upload.error?.code === "forbidden" ? "没有权限上传到这个文件夹" : failureText(upload.error?.code ?? "") };
-    case "canceled": return { state: "canceled", progress: 0 };
-    default: return { state: "waiting", progress };
+    case "running":
+      return { state: "uploading", progress };
+    case "completed":
+      return { state: "done", progress: 1 };
+    case "skipped":
+      return { state: "exists", progress: 0 };
+    case "failed":
+      return {
+        state: "failed",
+        progress: 0,
+        error: upload.error?.code === "forbidden" ? "没有权限上传到这个文件夹" : failureText(upload.error?.code ?? ""),
+      };
+    case "canceled":
+      return { state: "canceled", progress: 0 };
+    default:
+      return { state: "waiting", progress };
   }
 }
 
@@ -99,12 +138,18 @@ function stateOf(upload: LocalUpload): Pick<UploadItem, "state" | "progress" | "
 // parts, and folders of a folder upload are created by the NAS as the
 // signed-in user. Files that already exist are left alone, never replaced
 // or duplicated; the media center rescans the library once a file lands.
-export function useUploads({ onUploaded, onSettled }: { onUploaded: (item: UploadItem) => void; onSettled: (items: UploadItem[]) => void }): Uploads {
+export function useUploads({
+  onUploaded,
+  onSettled,
+}: {
+  onUploaded: (item: UploadItem) => void;
+  onSettled: (items: UploadItem[]) => void;
+}): Uploads {
   const snapshot = useTransfers();
   const [staged, setStaged] = useState<Staged[]>([]);
   const next = useRef(0);
-  const callbacks = useRef({ onUploaded, onSettled });
-  callbacks.current = { onUploaded, onSettled };
+  const uploaded = useEffectEvent(onUploaded);
+  const settle = useEffectEvent(onSettled);
 
   const items = useMemo(() => {
     const queued = new Map(snapshot.uploads.map((upload) => [upload.key, upload]));
@@ -126,40 +171,63 @@ export function useUploads({ onUploaded, onSettled }: { onUploaded: (item: Uploa
       if (!item.to || active(item) || announced.current.has(item.id)) continue;
       announced.current.add(item.id);
       settled.current.push(item);
-      if (item.state === "done") callbacks.current.onUploaded(item);
+      if (item.state === "done") uploaded(item);
     }
     if (!running && settled.current.length) {
       const batch = settled.current;
       settled.current = [];
-      callbacks.current.onSettled(batch);
+      settle(batch);
     }
   }, [items, running]);
 
-  const add = useCallback((picked: Picked[]) => setStaged((current) => {
-    const known = new Set(current.filter((entry) => !entry.key || items.some((item) => item.id === entry.id && active(item))).map((entry) => `${entry.folder}/${entry.file.name}/${entry.file.size}`));
-    const added: Staged[] = [];
-    for (const entry of picked) {
-      const key = `${entry.folder}/${entry.file.name}/${entry.file.size}`;
-      if (hidden(entry) || known.has(key)) continue;
-      known.add(key);
-      added.push({ id: ++next.current, file: entry.file, folder: entry.folder, role: roleOf(entry.file.name) });
-    }
-    return added.length ? [...current, ...added] : current;
-  }), [items]);
+  const add = useCallback(
+    (picked: Picked[]) =>
+      setStaged((current) => {
+        const known = new Set(
+          current
+            .filter((entry) => !entry.key || items.some((item) => item.id === entry.id && active(item)))
+            .map((entry) => `${entry.folder}/${entry.file.name}/${entry.file.size}`),
+        );
+        const added: Staged[] = [];
+        for (const entry of picked) {
+          const key = `${entry.folder}/${entry.file.name}/${entry.file.size}`;
+          if (hidden(entry) || known.has(key)) continue;
+          known.add(key);
+          added.push({ id: ++next.current, file: entry.file, folder: entry.folder, role: roleOf(entry.file.name) });
+        }
+        return added.length ? [...current, ...added] : current;
+      }),
+    [items],
+  );
 
   const latest = useRef(staged);
-  latest.current = staged;
+  useLayoutEffect(() => {
+    latest.current = staged;
+  });
   const start = useCallback((to: Destination) => {
     const ready = latest.current.filter((entry) => !entry.key && entry.role !== "other");
     if (!ready.length) return;
     const batch = transferStore.enqueue(
       ready.map((entry) => ({ file: entry.file, directories: entry.folder ? entry.folder.split("/") : [] })),
-      { spaceId: to.spaceId, spaceKind: to.spaceKind, parentId: to.parentId, folders: [], label: `影视中心 · ${to.place}` },
+      {
+        spaceId: to.spaceId,
+        spaceKind: to.spaceKind,
+        parentId: to.parentId,
+        folders: [],
+        label: `影视中心 · ${to.place}`,
+      },
       { choice: "skip" },
     );
     // The queue keeps the batch in the order it was given.
-    const keys = new Map(transferStore.getSnapshot().uploads.filter((upload) => upload.batch === batch).map((upload, index) => [ready[index].id, upload.key]));
-    setStaged((current) => current.map((entry) => (keys.has(entry.id) ? { ...entry, key: keys.get(entry.id), to } : entry)));
+    const keys = new Map(
+      transferStore
+        .getSnapshot()
+        .uploads.filter((upload) => upload.batch === batch)
+        .map((upload, index) => [ready[index].id, upload.key]),
+    );
+    setStaged((current) =>
+      current.map((entry) => (keys.has(entry.id) ? { ...entry, key: keys.get(entry.id), to } : entry)),
+    );
   }, []);
 
   const keyOf = (id: number) => staged.find((entry) => entry.id === id)?.key;
@@ -168,10 +236,26 @@ export function useUploads({ onUploaded, onSettled }: { onUploaded: (item: Uploa
     running,
     add,
     start,
-    remove: (id) => setStaged((current) => current.filter((entry) => entry.id !== id || items.some((item) => item.id === id && active(item)))),
-    cancel: (id) => { const key = keyOf(id); if (key) transferStore.cancel(key); },
-    cancelAll: () => { for (const item of items) if (active(item)) { const key = keyOf(item.id); if (key) transferStore.cancel(key); } },
-    retry: (id) => { const key = keyOf(id); if (key) transferStore.retry(key); },
-    clear: () => setStaged((current) => current.filter((entry) => items.some((item) => item.id === entry.id && active(item)))),
+    remove: (id) =>
+      setStaged((current) =>
+        current.filter((entry) => entry.id !== id || items.some((item) => item.id === id && active(item))),
+      ),
+    cancel: (id) => {
+      const key = keyOf(id);
+      if (key) transferStore.cancel(key);
+    },
+    cancelAll: () => {
+      for (const item of items)
+        if (active(item)) {
+          const key = keyOf(item.id);
+          if (key) transferStore.cancel(key);
+        }
+    },
+    retry: (id) => {
+      const key = keyOf(id);
+      if (key) transferStore.retry(key);
+    },
+    clear: () =>
+      setStaged((current) => current.filter((entry) => items.some((item) => item.id === entry.id && active(item)))),
   };
 }

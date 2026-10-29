@@ -5,6 +5,7 @@ big-endian length followed by JSON of at most MAX_FRAME bytes. An image
 travels as one descriptor in the request's SCM_RIGHTS control message.
 """
 
+import contextlib
 import json
 import os
 import socket
@@ -12,6 +13,10 @@ import struct
 
 MAX_FRAME = 1 << 20
 
+# Describes the Worker: "model" and "dimensions" of its image vectors, the
+# "detector", "faceModel" and "animalModel" it can use, and "memoryBytes", what
+# it holds once all of them have run, its own start included, as its cgroup
+# counts memory.
 OP_INFO = "info"
 OP_EMBED_IMAGE = "embed_image"
 # Encodes "text" as a search query; the provider adds the model's prompt.
@@ -90,7 +95,5 @@ def failure(code, message):
 
 
 def _close(fd):
-    try:
+    with contextlib.suppress(OSError):
         os.close(fd)
-    except OSError:
-        pass

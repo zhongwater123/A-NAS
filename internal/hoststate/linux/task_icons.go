@@ -2,11 +2,14 @@ package linux
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"io/fs"
 	"os"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,9 +22,8 @@ const (
 	taskIconFileLimit    = 512 << 10
 	taskDesktopFileLimit = 64 << 10
 	taskIconCacheAge     = 5 * time.Minute
-	taskIconAssetLimit   = 64
-	taskIconPayloadLimit = 1 << 20
-	taskIconURLLimit     = 24576
+	taskIconAssetLimit   = taskmanager.MaxIcons
+	taskIconPayloadLimit = 64 << 10
 )
 
 type taskIconRoot struct {
@@ -33,7 +35,14 @@ type taskIconLocation struct {
 	root string
 	name string
 }
-type taskIconAsset struct{ id, data string }
+
+// taskIconAsset is an icon as the Host Agent names it: the installed files
+// that may hold it, which the Product Service reads and decodes (#221).
+type taskIconAsset struct {
+	id    string
+	files []string
+	size  int
+}
 type taskIconCache struct {
 	at        time.Time
 	desktops  map[string]string
@@ -73,12 +82,7 @@ func resolveTaskExecutable(name string) string {
 		if dir == "/etc/alternatives" {
 			return true
 		}
-		for _, candidate := range dirs {
-			if dir == candidate {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(dirs, dir)
 	}
 	candidates := []string{name}
 	if !path.IsAbs(name) {
@@ -159,7 +163,7 @@ func (r *Reader) attachTaskIcons(ctx context.Context, result *taskmanager.TaskSn
 		cache.discover(discoveryCtx, open(), r.dependencies.resolveTaskExecutable)
 		stopDiscovery()
 	}
-	assets := map[string]string{}
+	assets := map[string][]string{}
 	bytes := 0
 	attach := func(row *taskmanager.Task, pid int) {
 		if ctx.Err() != nil || pid <= 0 {
@@ -185,7 +189,7 @@ func (r *Reader) attachTaskIcons(ctx context.Context, result *taskmanager.TaskSn
 		}
 		asset, cached := cache.assets[icon]
 		if !cached {
-			// Cache misses too, so an invalid installed image is not repeatedly decoded.
+			// Cache misses too, so a missing installed image is not looked up again.
 			asset = cache.load(ctx, open(), icon)
 			cache.assets[icon] = asset
 		}
@@ -193,11 +197,11 @@ func (r *Reader) attachTaskIcons(ctx context.Context, result *taskmanager.TaskSn
 			return
 		}
 		if _, exists := assets[asset.id]; !exists {
-			if len(assets) >= taskIconAssetLimit || bytes+len(asset.data) > taskIconPayloadLimit {
+			if len(assets) >= taskIconAssetLimit || bytes+asset.size > taskIconPayloadLimit {
 				return
 			}
-			assets[asset.id] = asset.data
-			bytes += len(asset.data)
+			assets[asset.id] = asset.files
+			bytes += asset.size
 		}
 		row.IconID = asset.id
 	}
@@ -208,7 +212,7 @@ func (r *Reader) attachTaskIcons(ctx context.Context, result *taskmanager.TaskSn
 		attach(&result.Services.Items[i], services[result.Services.Items[i].ID].mainPID)
 	}
 	if len(assets) != 0 {
-		result.Icons = assets
+		result.IconFiles = assets
 	}
 }
 
@@ -310,8 +314,9 @@ func (c *taskIconCache) load(ctx context.Context, roots []taskIconRoot, icon str
 			}
 		}
 	}
+	var asset taskIconAsset
 	for _, location := range locations {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || len(asset.files) >= taskmanager.MaxIconFiles {
 			break
 		}
 		var source fs.FS
@@ -321,21 +326,26 @@ func (c *taskIconCache) load(ctx context.Context, roots []taskIconRoot, icon str
 				break
 			}
 		}
-		if source == nil {
+		if source == nil || !fs.ValidPath(location.name) {
 			continue
 		}
-		data, err := readTaskIconFile(source, location.name, taskIconFileLimit)
-		if err != nil {
+		// Only the file's kind and size are checked here; the Product Service
+		// reads and decodes it, and falls back to the next file.
+		info, err := fs.Stat(source, location.name)
+		if err != nil || !info.Mode().IsRegular() || info.Size() > taskIconFileLimit {
 			continue
 		}
-		id, url := taskmanager.NormalizeIcon(data)
-		if id == "" || len(url) > taskIconURLLimit || c.bytes+len(url) > taskIconPayloadLimit {
-			continue
-		}
-		c.bytes += len(url)
-		return taskIconAsset{id: id, data: url}
+		name := location.root + "/" + location.name
+		asset.files = append(asset.files, name)
+		asset.size += len(name)
 	}
-	return taskIconAsset{}
+	if len(asset.files) == 0 || c.bytes+asset.size > taskIconPayloadLimit {
+		return taskIconAsset{}
+	}
+	sum := sha256.Sum256([]byte(strings.Join(asset.files, "\n")))
+	asset.id = hex.EncodeToString(sum[:])
+	c.bytes += asset.size
+	return asset
 }
 
 func readTaskIconFile(root fs.FS, name string, limit int) ([]byte, error) {
@@ -353,7 +363,7 @@ func readTaskIconFile(root fs.FS, name string, limit int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err = file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() > int64(limit) {
 		return nil, errTaskObservationLimit
@@ -368,7 +378,7 @@ func readTaskIconFile(root fs.FS, name string, limit int) ([]byte, error) {
 func parseTaskDesktop(data []byte) (string, string) {
 	section := ""
 	values := map[string]string{}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "[") {
 			section = line

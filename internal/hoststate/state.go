@@ -65,9 +65,21 @@ type System struct {
 	Architecture    string
 	UptimeSeconds   uint64
 	Health          Health
+	// Storage observes the filesystem holding system state, independently of
+	// the hardware disk size and the data volume. Nil means not observed.
+	Storage *StorageUsage
+}
+
+type StorageUsage struct {
+	TotalBytes     uint64
+	AvailableBytes uint64
 }
 
 type Disk struct {
+	// ObservationIssues prevent this observation from being used for storage
+	// operations. Unidentified disks have display-only observation:* IDs,
+	// never a replacement identity derived from a kernel device path.
+	ObservationIssues        []DiskObservationIssue
 	ID                       ResourceID
 	Model                    string
 	Transport                Transport
@@ -82,12 +94,117 @@ type Disk struct {
 	Health                   Health
 	SMARTStatus              Health
 	TemperatureCelsius       *int
+	// FilesystemReadOnly and FilesystemErrors describe the data volume on a
+	// data disk: whether it is mounted read-only, as Btrfs does after an
+	// error, and the read, write, flush, checksum and generation errors
+	// Btrfs has counted on it since it was created; nil when not observed.
+	FilesystemReadOnly bool
+	FilesystemErrors   *uint64
+	// Signatures are the partition tables, filesystems and storage-stack
+	// memberships found on the disk, in use or left behind by another system.
+	Signatures []Signature
+}
+
+// DiskObservationIssue is a local device problem, not a failed host read.
+type DiskObservationIssue string
+
+const (
+	DiskMissingIdentity   DiskObservationIssue = "missing_identity"
+	DiskDuplicateIdentity DiskObservationIssue = "duplicate_identity"
+	DiskMissingModel      DiskObservationIssue = "missing_model"
+	DiskMissingCapacity   DiskObservationIssue = "missing_capacity"
+	DiskReadOnly          DiskObservationIssue = "read_only"
+	DiskInvalidDeviceName DiskObservationIssue = "invalid_device_name"
+)
+
+func (issue DiskObservationIssue) Valid() bool {
+	switch issue {
+	case DiskMissingIdentity, DiskDuplicateIdentity, DiskMissingModel, DiskMissingCapacity, DiskReadOnly, DiskInvalidDeviceName:
+		return true
+	default:
+		return false
+	}
+}
+
+// Signature is one on-disk format blkid recognised, such as btrfs or
+// linux_raid_member, with the label and UUID it carries.
+type Signature struct {
+	Type  string
+	Label string
+	UUID  string
+}
+
+// Profile is a Btrfs block-group profile.
+type Profile string
+
+const (
+	ProfileSingle  Profile = "single"
+	ProfileDup     Profile = "dup"
+	ProfileRAID0   Profile = "raid0"
+	ProfileRAID1   Profile = "raid1"
+	ProfileRAID1C3 Profile = "raid1c3"
+	ProfileRAID1C4 Profile = "raid1c4"
+	ProfileRAID10  Profile = "raid10"
+	ProfileRAID5   Profile = "raid5"
+	ProfileRAID6   Profile = "raid6"
+)
+
+func (p Profile) Valid() bool {
+	switch p {
+	case ProfileSingle, ProfileDup, ProfileRAID0, ProfileRAID1, ProfileRAID1C3, ProfileRAID1C4, ProfileRAID10, ProfileRAID5, ProfileRAID6:
+		return true
+	default:
+		return false
+	}
+}
+
+// ProfileUsage is how many bytes of data or metadata a profile holds.
+type ProfileUsage struct {
+	Profile   Profile
+	UsedBytes uint64
+}
+
+// VolumeOperation is the exclusive Btrfs operation running on the data volume.
+type VolumeOperation string
+
+const (
+	VolumeOperationNone          VolumeOperation = ""
+	VolumeOperationBalance       VolumeOperation = "balance"
+	VolumeOperationBalancePaused VolumeOperation = "balance_paused"
+	VolumeOperationOther         VolumeOperation = "other"
+)
+
+func (o VolumeOperation) Valid() bool {
+	switch o {
+	case VolumeOperationNone, VolumeOperationBalance, VolumeOperationBalancePaused, VolumeOperationOther:
+		return true
+	default:
+		return false
+	}
+}
+
+// DataVolume is the Btrfs filesystem mounted as the data volume. Its disks
+// are found by filesystem UUID, because the mount table names only one of
+// them; Data and Metadata hold more than one profile while a conversion runs.
+type DataVolume struct {
+	FilesystemUUID string
+	DiskIDs        []ResourceID
+	Data           []ProfileUsage
+	Metadata       []ProfileUsage
+	Operation      VolumeOperation
 }
 
 type State struct {
 	ObservedAt time.Time
 	System     System
 	Disks      []Disk
+	// DataVolume is nil when nothing is mounted as the data volume.
+	DataVolume *DataVolume
+	// ReconcileFailed says the Host Agent's last reconciliation of the data
+	// volume failed: repairing the space permissions, writing the identity
+	// manifest onto it or refreshing the Samba configuration for it. The Host
+	// Agent keeps serving and tries again (#166).
+	ReconcileFailed bool
 }
 
 // Reader returns one point-in-time observation of the host and its disks.

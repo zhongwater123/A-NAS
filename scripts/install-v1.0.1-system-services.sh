@@ -23,13 +23,13 @@ if [[ ! -d "$source_release" ]]; then
   echo "source release is not a directory: $source_release" >&2
   exit 2
 fi
-for binary in anas-api anas-host-agent install-screensavers.sh; do
+for binary in anas-api anas-host-agent install-screensavers.sh install-ffmpeg-units.sh; do
   if [[ ! -f "$source_release/$binary" || ! -x "$source_release/$binary" ]]; then
     echo "missing executable: $source_release/$binary" >&2
     exit 2
   fi
 done
-for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-shares-system.service anas-media-system.socket anas-media-system@.service; do
+for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-shares-system.service anas-ffmpeg-system.socket anas-ffmpeg-system@.service anas-ffmpeg-system.slice; do
   if [[ ! -f "$source_release/$unit" ]]; then
     echo "missing system unit: $source_release/$unit" >&2
     exit 2
@@ -43,6 +43,14 @@ if [[ ! -f "$source_release/Caddyfile" ]]; then
   echo "missing LAN Web entry configuration: $source_release/Caddyfile" >&2
   exit 2
 fi
+# The local console runs as an account of its own from the installed release
+# (issue #174); enabling it stays a runbook step (operate-local-kiosk.md).
+for file in kiosk-launcher anas-kiosk@.service a-nas-kiosk.pam a-nas-kiosk.sysusers; do
+  if [[ ! -f "$source_release/$file" ]]; then
+    echo "missing local console file: $source_release/$file" >&2
+    exit 2
+  fi
+done
 # Local AI is part of every release (ADR 0016): the Worker's code, its units,
 # and manifests that pin its models and Python runtime by content. Each model
 # has a role: its manifest is ai/ROLE.json and the release links its file as
@@ -60,13 +68,27 @@ for role in "${ai_roles[@]}"; do
     exit 2
   fi
 done
+# The vector index (ADR 0028): the Qdrant release its manifest pins by
+# content, the settings every instance shares, and the scripts its unit runs.
+for file in anas-vectors-system@.service anas-vectors-proxy-system@.socket anas-vectors-proxy-system@.service \
+  anas-vectors-system.slice vectors/qdrant.json vectors/config.yaml vectors/start.sh vectors/wait-ready.sh; do
+  if [[ ! -f "$source_release/$file" ]]; then
+    echo "missing vector index file: $source_release/$file" >&2
+    exit 2
+  fi
+done
 # Media and file previews run Debian's FFmpeg / libheif in the worker sandbox.
-for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 ffmpeg ffprobe heif-thumbnailer; do
+for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 systemd-sysusers ffmpeg ffprobe heif-thumbnailer; do
   if ! command -v "$command" >/dev/null; then
     echo "missing required host command: $command" >&2
     exit 3
   fi
 done
+# Each vector index is reached through systemd's socket proxy.
+if [[ ! -x /usr/lib/systemd/systemd-socket-proxyd ]]; then
+  echo "missing required host command: /usr/lib/systemd/systemd-socket-proxyd" >&2
+  exit 3
+fi
 # MediaPipe links these even on the CPU (Debian packages libegl1 and libgles2).
 for library in libEGL.so.1 libGLESv2.so.2; do
   if ! ldconfig -p | grep -Fq "$library ("; then
@@ -116,6 +138,21 @@ if [[ ! -d "$runtime_path" && ! -f "$source_release/ai/runtime.tar.gz" ]]; then
   echo "missing AI runtime: neither $runtime_path nor $source_release/ai/runtime.tar.gz" >&2
   exit 2
 fi
+# Qdrant, like the models, is kept once by content: the official tarball is
+# checked, and only its binary is kept, under the tarball's SHA-256.
+qdrant_sha=$(manifest_field "$source_release/vectors/qdrant.json" sha256)
+qdrant_size=$(manifest_field "$source_release/vectors/qdrant.json" sizeBytes)
+qdrant_binary=$(manifest_field "$source_release/vectors/qdrant.json" binary)
+if [[ ! "$qdrant_sha" =~ ^[0-9a-f]{64}$ || ! "$qdrant_size" =~ ^[0-9]+$ ||
+  ! "$qdrant_binary" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "invalid Qdrant manifest: $source_release/vectors/qdrant.json" >&2
+  exit 2
+fi
+qdrant_path=/opt/a-nas/qdrant/$qdrant_sha/qdrant
+if [[ ! -f "$qdrant_path" && ! -f "$source_release/vectors/qdrant.tar.gz" ]]; then
+  echo "missing Qdrant: neither $qdrant_path nor $source_release/vectors/qdrant.tar.gz" >&2
+  exit 2
+fi
 # The LAN Web entry is optional: installing Caddy enables it (ADR 0012).
 # Validate before changing anything, so a bad configuration stops the upgrade.
 lan_entry=false
@@ -124,6 +161,23 @@ if command -v caddy >/dev/null; then
     { echo "LAN Web entry configuration does not validate: $source_release/Caddyfile" >&2; exit 2; }
   lan_entry=true
 fi
+# The Host Agent moves each of its records out of /var/lib/a-nas when it
+# starts, but only a regular file with one link that root owns (issue #176):
+# any other record would be unusable after the restart. Stop before changing
+# anything; the provisioning runbook says how to check such a file.
+for record in space-registry identity-registry viewing-grants app-identities volume-operations; do
+  legacy=/var/lib/a-nas/$record.json
+  [[ -e "$legacy" || -L "$legacy" ]] || continue
+  [[ -e "/var/lib/a-nas-host/$record.json" || -L "/var/lib/a-nas-host/$record.json" ]] && continue
+  details=$(stat -c '%u %h %F' -- "$legacy")
+  case "$details" in
+    '0 1 regular file' | '0 1 regular empty file') ;;
+    *)
+      echo "$legacy is not a regular file with one link owned by root ($details), so the Host Agent would not move it; check it as the provisioning runbook describes, then run the installer again" >&2
+      exit 3
+      ;;
+  esac
+done
 
 getent group a-nas >/dev/null || groupadd --system a-nas
 if ! id a-nas >/dev/null 2>&1; then
@@ -162,6 +216,15 @@ elif getent passwd "$shares_id" >/dev/null; then
 else
   useradd --system --uid "$shares_id" --gid "$shares_id" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin a-nas-shares
 fi
+# The local console's account owns no data, so its ID may differ between
+# installs; it must not be able to log in.
+install -d -o root -g root -m 0755 /etc/sysusers.d
+install -o root -g root -m 0644 "$source_release/a-nas-kiosk.sysusers" /etc/sysusers.d/a-nas-kiosk.conf
+systemd-sysusers /etc/sysusers.d/a-nas-kiosk.conf
+if [[ "$(getent passwd a-nas-kiosk | cut -d: -f6-7)" != /nonexistent:/usr/sbin/nologin ]]; then
+  echo "user a-nas-kiosk exists with a home or shell A-NAS did not give it" >&2
+  exit 3
+fi
 # setgid makes the Product-owned bridge socket inherit the shares-only group.
 install -d -o root -g root -m 0755 /etc/tmpfiles.d
 printf 'd /run/a-nas-share-files 2750 a-nas a-nas-shares -\n' > /etc/tmpfiles.d/a-nas-shares.conf
@@ -170,12 +233,15 @@ systemd-tmpfiles --create /etc/tmpfiles.d/a-nas-shares.conf
 install -d -o root -g root -m 0755 /opt/a-nas/releases
 install -d -o a-nas -g a-nas -m 0700 /var/lib/a-nas
 install -d -o root -g a-nas -m 0750 /var/lib/a-nas/screensavers
+# The Host Agent's records (its StateDirectory); it moves those of older
+# releases out of /var/lib/a-nas when it starts (issue #176).
+install -d -o root -g root -m 0700 /var/lib/a-nas-host
 install -d -o root -g a-nas -m 0750 /srv/a-nas /srv/a-nas/data
 install -d -o root -g a-nas -m 0750 /etc/a-nas
 install -d -o root -g root -m 0755 /etc/samba
 install -d -o root -g root -m 0755 /etc/chromium /etc/chromium/policies /etc/chromium/policies/managed
 install -d -o root -g root -m 0755 /var/lib/samba /run/samba
-install -d -o root -g root -m 0755 /opt/a-nas/models /opt/a-nas/ai-runtimes
+install -d -o root -g root -m 0755 /opt/a-nas/models /opt/a-nas/ai-runtimes /opt/a-nas/qdrant
 
 # Staged content is copied before it is checked, so the staging account cannot
 # change it after the check.
@@ -210,6 +276,23 @@ if [[ ! -d "$runtime_path" ]]; then
   mv -T -- "$incoming" "$runtime_path"
   incoming=
 fi
+if [[ ! -f "$qdrant_path" ]]; then
+  incoming=$(mktemp -d /opt/a-nas/qdrant/.incoming-XXXXXX)
+  cp -- "$source_release/vectors/qdrant.tar.gz" "$incoming.tar.gz"
+  if [[ "$(stat -c %s "$incoming.tar.gz")" != "$qdrant_size" ]] ||
+    ! printf '%s  %s\n' "$qdrant_sha" "$incoming.tar.gz" | sha256sum --check --quiet - >/dev/null 2>&1; then
+    echo "the staged Qdrant does not match its manifest: $source_release/vectors/qdrant.tar.gz" >&2
+    exit 4
+  fi
+  install -d -m 0700 "$incoming/unpacked"
+  tar -C "$incoming/unpacked" --no-same-owner -xzf "$incoming.tar.gz" "$qdrant_binary"
+  rm -f -- "$incoming.tar.gz"
+  install -o root -g root -m 0755 "$incoming/unpacked/$qdrant_binary" "$incoming/qdrant"
+  rm -rf -- "$incoming/unpacked"
+  chmod 0755 "$incoming"
+  mv -T -- "$incoming" "/opt/a-nas/qdrant/$qdrant_sha"
+  incoming=
+fi
 trap - EXIT
 
 target="/opt/a-nas/releases/$release_id"
@@ -223,6 +306,8 @@ install -d -o root -g root -m 0755 "$temporary"
 install -o root -g root -m 0755 "$source_release/anas-api" "$temporary/anas-api"
 install -o root -g root -m 0755 "$source_release/anas-host-agent" "$temporary/anas-host-agent"
 install -o root -g root -m 0755 "$source_release/install-screensavers.sh" "$temporary/install-screensavers.sh"
+install -o root -g root -m 0755 "$source_release/install-ffmpeg-units.sh" "$temporary/install-ffmpeg-units.sh"
+install -o root -g root -m 0755 "$source_release/kiosk-launcher" "$temporary/kiosk-launcher"
 install -d -o root -g root -m 0755 "$temporary/ai" "$temporary/ai/anas_ai"
 install -o root -g root -m 0644 "$source_release"/ai/anas_ai/*.py "$temporary/ai/anas_ai/"
 install -o root -g root -m 0644 "$source_release/ai/runtime.json" "$temporary/ai/"
@@ -232,6 +317,10 @@ for role in "${ai_roles[@]}"; do
   ln -s -- "${model_path[$name]}" "$temporary/ai/$name.${role#*:}"
 done
 ln -s -- "$runtime_path" "$temporary/ai/runtime"
+install -d -o root -g root -m 0755 "$temporary/vectors"
+install -o root -g root -m 0644 "$source_release/vectors/qdrant.json" "$source_release/vectors/config.yaml" "$temporary/vectors/"
+install -o root -g root -m 0755 "$source_release/vectors/start.sh" "$source_release/vectors/wait-ready.sh" "$temporary/vectors/"
+ln -s -- "$qdrant_path" "$temporary/vectors/qdrant"
 mv -- "$temporary" "$target"
 trap - EXIT
 
@@ -266,7 +355,7 @@ printf '%s\n' \
   'ANAS_HOST_AGENT_SOCKET=/run/a-nas/host-agent.sock' \
   'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' \
   'ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock' \
-  'ANAS_MEDIA_SOCKET=/run/a-nas-media/media.sock' \
+  'ANAS_FFMPEG_SOCKET=/run/a-nas-ffmpeg/ffmpeg.sock' \
   'ANAS_STATE_DIR=/var/lib/a-nas' \
   'ANAS_SCREENSAVER_DIRECTORY=/var/lib/a-nas/screensavers/current' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' > /etc/a-nas/anas-api.env
@@ -311,9 +400,32 @@ install -d -o root -g root -m 0755 /etc/systemd/system/anas-ai.service.d
 printf '# Written by the A-NAS installer for %s cores: all but two.\n[Service]\nCPUQuota=%s%%\n' \
   "$cores" "$((cores > 2 ? (cores - 2) * 100 : 100))" > /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
 chmod 0644 /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
-install -o root -g root -m 0644 "$source_release/anas-media-system.socket" /etc/systemd/system/anas-media.socket
-install -o root -g root -m 0644 "$source_release/anas-media-system@.service" /etc/systemd/system/anas-media@.service
+# Its memory has no budget: background work loads a model only while 1 GiB
+# stays free (anas-ai.service). The cap, all of this machine's memory but
+# 2.5 GiB and at least 1 GiB, only stops a runaway.
+memory_kib=$(awk '$1 == "MemTotal:" { print $2 }' /proc/meminfo)
+printf '# Written by the A-NAS installer for %s KiB of memory: all but 2.5 GiB.\n[Service]\nMemoryMax=%sK\n' \
+  "$memory_kib" "$((memory_kib > 3670016 ? memory_kib - 2621440 : 1048576))" \
+  > /etc/systemd/system/anas-ai.service.d/memory-reserve.conf
+chmod 0644 /etc/systemd/system/anas-ai.service.d/memory-reserve.conf
+# One vector index instance per owning service, reached only through its
+# proxy socket (ADR 0028).
+install -o root -g root -m 0644 "$source_release/anas-vectors-system.slice" /etc/systemd/system/anas-vectors.slice
+install -o root -g root -m 0644 "$source_release/anas-vectors-system@.service" /etc/systemd/system/anas-vectors@.service
+install -o root -g root -m 0644 "$source_release/anas-vectors-proxy-system@.socket" /etc/systemd/system/anas-vectors-proxy@.socket
+install -o root -g root -m 0644 "$source_release/anas-vectors-proxy-system@.service" /etc/systemd/system/anas-vectors-proxy@.service
+# A renamed worker must not coexist with old clients using a separate slot
+# directory. Stop clients before replacing units; restart after the switch.
+for service in anas-api anas-photos anas-shares; do
+  if [[ $(systemctl show -p LoadState --value "$service.service") != not-found ]]; then
+    systemctl stop "$service.service"
+  fi
+done
+"$target/install-ffmpeg-units.sh" "$source_release"
 install -o root -g root -m 0644 "$source_release/a-nas-chromium-policy.json" /etc/chromium/policies/managed/a-nas.json
+# The local console's unit, enabled or not, starts this release's launcher.
+install -o root -g root -m 0644 "$source_release/anas-kiosk@.service" /etc/systemd/system/anas-kiosk@.service
+install -o root -g root -m 0644 "$source_release/a-nas-kiosk.pam" /etc/pam.d/a-nas-kiosk
 if [[ "$lan_entry" == true ]]; then
   # Keep the administrator's own configuration the first time A-NAS replaces it.
   if [[ -f /etc/caddy/Caddyfile && ! -e /etc/caddy/Caddyfile.before-a-nas ]] &&
@@ -331,10 +443,14 @@ systemctl enable --now smbd.service
 systemctl stop anas-ai.service
 systemctl enable anas-ai.socket
 systemctl restart anas-ai.socket
-# Each connection runs its own media worker; streams already playing finish
-# with the previous release.
-systemctl enable anas-media.socket
-systemctl restart anas-media.socket
+# Clients reconnect to this release's worker and its shared admission slots.
+systemctl enable anas-ffmpeg.socket
+systemctl restart anas-ffmpeg.socket
+# A running vector index belongs to the previous release; the photo service's
+# next connection starts this release's.
+systemctl stop 'anas-vectors-proxy@*.service' 'anas-vectors@*.service'
+systemctl enable anas-vectors-proxy@a-nas-photos.socket
+systemctl restart anas-vectors-proxy@a-nas-photos.socket
 systemctl enable anas-host-agent.service anas-photos.service anas-api.service anas-shares.service
 restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service
@@ -346,7 +462,7 @@ if [[ "$lan_entry" == true ]]; then
   systemctl reload-or-restart caddy.service
 fi
 
-systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-ai.socket anas-media.socket
+systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must
 # keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at startup

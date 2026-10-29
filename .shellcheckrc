@@ -1,0 +1,4 @@
+# ShellCheck reads this for every script in the repository: follow the files
+# a script sources, looking for them beside the script.
+external-sources=true
+source-path=SCRIPTDIR

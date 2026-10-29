@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 )
 
 func TestMaterializeRegisteredSpacesProtectsPrivateSpaceBeforeIdentitySync(t *testing.T) {
@@ -44,8 +44,8 @@ func TestMaterializeRegisteredSpacesAppliesTheACLLayout(t *testing.T) {
 	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
 	executor.spaceRoots = map[string]string{"space:alice": privateRoot, sharedSpaceID: sharedRoot}
 	executor.identities = map[string]identityRecord{
-		"alice": {UID: 20101, Role: accounts.RoleMember, Enabled: true},
-		"bob":   {UID: 20102, Role: accounts.RoleMember, Enabled: true},
+		"alice": {UID: 20101, Role: accountid.RoleMember, Enabled: true},
+		"bob":   {UID: 20102, Role: accountid.RoleMember, Enabled: true},
 	}
 
 	repaired, err := executor.materializeRegisteredSpaces(context.Background())
@@ -167,7 +167,7 @@ func TestMaterializeRegisteredSpacesMovesAsidePlantedTrashLink(t *testing.T) {
 	runner := &spacePermissionRunner{}
 	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
 	executor.spaceRoots = map[string]string{sharedSpaceID: sharedRoot}
-	executor.identities = map[string]identityRecord{"alice": {UID: 20101, Role: accounts.RoleMember, Enabled: true}}
+	executor.identities = map[string]identityRecord{"alice": {UID: 20101, Role: accountid.RoleMember, Enabled: true}}
 
 	repaired, err := executor.materializeRegisteredSpaces(context.Background())
 	if err != nil {
@@ -224,6 +224,10 @@ func (r *unknownACLUserRunner) Run(ctx context.Context, name string, args []stri
 	return output, err
 }
 
+func (r *unknownACLUserRunner) Output(ctx context.Context, name string, args []string, input string) ([]byte, error) {
+	return r.Run(ctx, name, args, input)
+}
+
 func (r *spacePermissionRunner) ran(command spacePermissionCommand) bool {
 	return slices.ContainsFunc(r.commands, func(got spacePermissionCommand) bool {
 		return got.name == command.name && slices.Equal(got.args, command.args)
@@ -243,4 +247,8 @@ func (r *spacePermissionRunner) Run(_ context.Context, name string, args []strin
 	}
 	r.commands = append(r.commands, spacePermissionCommand{name: name, args: recorded})
 	return nil, nil
+}
+
+func (r *spacePermissionRunner) Output(ctx context.Context, name string, args []string, input string) ([]byte, error) {
+	return r.Run(ctx, name, args, input)
 }

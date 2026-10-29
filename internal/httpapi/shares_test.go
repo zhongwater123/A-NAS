@@ -9,7 +9,6 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
-	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 )
 
 func TestShareRoutesRequireSessionAndCSRFPreserveOriginalIdentity(t *testing.T) {
@@ -17,7 +16,7 @@ func TestShareRoutesRequireSessionAndCSRFPreserveOriginalIdentity(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	users := accounts.NewService(store, apiCredentials{}, accounts.Options{})
 	owner, err := users.SetupAdministrator(context.Background(), "owner", "correct horse battery staple")
 	if err != nil {
@@ -26,12 +25,14 @@ func TestShareRoutesRequireSessionAndCSRFPreserveOriginalIdentity(t *testing.T) 
 	calls := 0
 	probe := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		actor, ok := sharesapi.UserFrom(r.Context())
+		actor, ok := accounts.UserFrom(r.Context())
 		if !ok || actor.ID != owner.ID || accounts.SessionToken(r.Context()) == "" {
 			t.Errorf("lost original caller: %+v", actor)
 		}
 		w.WriteHeader(204)
 	})
+	// The probe stands in for the share API, so the exchanges are not the
+	// specified ones.
 	handler := httpapi.NewProduct(httpapi.ProductDependencies{Accounts: users, Shares: probe})
 	account := signIn(t, handler, "owner", "correct horse battery staple")
 	for _, path := range []string{"/api/v1/shares", "/api/v1/shares/id/messages", "/api/v1/shares/id/save", "/api/v1/shares/id/revoke"} {

@@ -1,4 +1,4 @@
-// Package filepreview renders ordinary files through the isolated media worker.
+// Package filepreview renders ordinary files through the isolated FFmpeg worker.
 // Every request opens the source as its caller, including cache hits.
 package filepreview
 
@@ -20,11 +20,20 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/mediatype"
 )
 
 var ErrUnsupported = errors.New("file has no rendered preview")
+
+// MaxHEIFSource bounds a HEIC or HEIF picture rendered for a preview, in the
+// file manager and in shares alike: a phone's photo takes a few MiB, and the
+// worker reads the whole file (#222).
+const MaxHEIFSource = 64 << 20
+
+// ErrTooLarge reports a picture over MaxHEIFSource.
+var ErrTooLarge = fmt.Errorf("%w: the picture is larger than 64 MiB", ErrUnsupported)
 
 type Source interface {
 	OpenContent(context.Context, accounts.User, string) (files.Content, error)
@@ -43,7 +52,7 @@ type cached struct {
 
 type Service struct {
 	source Source
-	worker mediaworker.Worker
+	worker ffmpegworker.Worker
 	mu     sync.Mutex
 	disk   *diskCache
 	gate   chan struct{}
@@ -52,22 +61,22 @@ type Service struct {
 	clock  uint64
 }
 
-func New(source Source, worker mediaworker.Worker) *Service {
+func New(source Source, worker ffmpegworker.Worker) *Service {
 	return &Service{source: source, worker: worker, gate: make(chan struct{}, 1), cache: make(map[string]cached)}
 }
 
 func kind(name string) string {
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".heic", ".heif":
+	switch {
+	case IsHEIF(name):
 		return "heif"
-	case ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mpg", ".mpeg", ".mts", ".m2ts", ".flv", ".f4v", ".wmv", ".3gp":
+	case mediatype.IsVideo(name):
 		return "video"
 	}
 	return ""
 }
 
 // NewWithCache adds a disposable, bounded cache in the product state directory.
-func NewWithCache(source Source, worker mediaworker.Worker, directory string) (*Service, error) {
+func NewWithCache(source Source, worker ffmpegworker.Worker, directory string) (*Service, error) {
 	disk, err := openDiskCache(directory)
 	if err != nil {
 		return nil, err
@@ -81,16 +90,16 @@ func NewWithCache(source Source, worker mediaworker.Worker, directory string) (*
 // the decoder; the decode timeout starts after the cancellable queue wait.
 func (s *Service) Render(ctx context.Context, actor accounts.User, id string, size int) (Image, error) {
 	if size != 320 && size != 1600 {
-		return Image{}, mediaworker.ErrInvalid
+		return Image{}, ffmpegworker.ErrInvalid
 	}
 	if err := ctx.Err(); err != nil {
 		return Image{}, err
 	}
-	content, key, format, err := s.open(ctx, actor, id, size)
+	content, key, _, err := s.open(ctx, actor, id, size)
 	if err != nil {
 		return Image{}, err
 	}
-	content.Reader.Close()
+	_ = content.Reader.Close()
 	if hit, ok := s.lookup(key); ok {
 		return hit, nil
 	}
@@ -104,24 +113,29 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 	defer cancel()
 	// Reopen after waiting: permissions, source revision, or the file itself may
 	// have changed in the queue. Queued requests hold no source descriptors.
-	content, key, format, err = s.open(ctx, actor, id, size)
+	content, key, format, err := s.open(ctx, actor, id, size)
 	if err != nil {
 		return Image{}, err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	if hit, ok := s.lookup(key); ok {
 		return hit, nil
 	}
 	if s.worker == nil {
-		return Image{}, mediaworker.ErrUnavailable
+		return Image{}, ffmpegworker.ErrUnavailable
 	}
 	var result Image
 	if format == "heif" {
-		result.ContentType = "image/png"
-		result.Data, err = s.worker.Image(ctx, content.Reader, size)
+		// The opened file's size, not the catalog's: the file may have
+		// changed over SMB since the last reconcile.
+		var info os.FileInfo
+		if info, err = content.Reader.Stat(); err == nil {
+			result.ContentType = "image/png"
+			result.Data, err = RenderHEIF(ctx, s.worker, content.Reader, info.Size(), size)
+		}
 	} else {
 		result.ContentType = "image/jpeg"
-		var probe mediaworker.Probe
+		var probe ffmpegworker.Probe
 		probe, err = s.worker.Probe(ctx, content.Reader)
 		if err == nil {
 			at := math.Min(probe.Format.Duration/10, 10)
@@ -135,7 +149,7 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 		return Image{}, err
 	}
 	if !validImage(result) {
-		return Image{}, mediaworker.ErrUnreadable
+		return Image{}, ffmpegworker.ErrUnreadable
 	}
 	// A writer can edit an open source while the worker is decoding. Do not
 	// associate that result with either revision; the next request retries.
@@ -144,7 +158,7 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 		return Image{}, err
 	}
 	if revisionKey(actor.ID, id, format, size, after) != key {
-		return Image{}, mediaworker.ErrUnreadable
+		return Image{}, ffmpegworker.ErrUnreadable
 	}
 	result.ETag = imageTag(key, result.Data)
 	s.remember(key, result)
@@ -172,7 +186,7 @@ func (s *Service) open(ctx context.Context, actor accounts.User, id string, size
 		}
 	}
 	if err != nil {
-		content.Reader.Close()
+		_ = content.Reader.Close()
 		return files.Content{}, "", "", err
 	}
 	return content, key, format, nil
@@ -191,6 +205,28 @@ func revisionKey(actor, id, format string, size int, info os.FileInfo) string {
 
 func imageTag(key string, data []byte) string {
 	return fmt.Sprintf("\"%s-%x\"", key, sha256.Sum256(data))
+}
+
+// IsHEIF reports whether name is a HEIC or HEIF picture.
+func IsHEIF(name string) bool {
+	extension := strings.ToLower(filepath.Ext(name))
+	return extension == ".heic" || extension == ".heif"
+}
+
+// RenderHEIF renders a HEIC or HEIF picture of sizeBytes as a PNG of at most
+// size pixels a side, for the file manager's previews and for shares'.
+func RenderHEIF(ctx context.Context, worker ffmpegworker.Worker, source *os.File, sizeBytes int64, size int) ([]byte, error) {
+	if sizeBytes > MaxHEIFSource {
+		return nil, ErrTooLarge
+	}
+	data, err := worker.Image(ctx, source, size)
+	if err != nil {
+		return nil, err
+	}
+	if !validImage(Image{Data: data, ContentType: "image/png"}) {
+		return nil, ffmpegworker.ErrUnreadable
+	}
+	return data, nil
 }
 
 func validImage(result Image) bool {

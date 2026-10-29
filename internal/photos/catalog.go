@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // migrations are applied in order and recorded in PRAGMA user_version. The
@@ -290,14 +292,79 @@ ON CONFLICT(object_id, derivation) DO NOTHING;
 	// service first sees the animal model; the dogs found keep what members
 	// decided, by the place they were found in.
 	`DELETE FROM scans WHERE derivation = 'pets/v1';`,
+	// 13: videos (docs/specs/photo-video.md). A content object that is a
+	// video original keeps how long it plays and what the FFmpeg Worker read
+	// from it, so the timeline and the decision how a browser plays it need
+	// no decoder. Videos take no part in local AI.
+	`
+CREATE TABLE videos (
+    object_id TEXT PRIMARY KEY REFERENCES objects(id) ON DELETE CASCADE,
+    duration REAL NOT NULL,
+    info TEXT NOT NULL
+);
+`,
+	// 14: the vector index's outbox (docs/architecture/vector-index.md). Every
+	// change to an object's image vector, or to which libraries hold it,
+	// queues the object in the same transaction; the sync loop brings the
+	// index in line and drops the row unless it changed again meanwhile.
+	// The outbox has no foreign key: when an object goes, its row must stay
+	// for the index to drop the point. A cascade from objects deletes the
+	// vector through the embeddings trigger as well. The triggers upsert
+	// rather than INSERT OR REPLACE: an upsert that fires them, as storing a
+	// vector does, makes their own conflict handling abort.
+	`
+CREATE TABLE vector_outbox (
+    object_id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+-- The sync loop finds the newest vector's model before every batch.
+CREATE INDEX embeddings_by_age ON embeddings(derivation, created_at, object_id);
+
+-- Which collection holds the index, once the sync loop has made one.
+CREATE TABLE vector_index_state (
+    name TEXT PRIMARY KEY,
+    collection TEXT NOT NULL,
+    model TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TRIGGER embeddings_vector_outbox_insert AFTER INSERT ON embeddings BEGIN
+    INSERT INTO vector_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER embeddings_vector_outbox_update AFTER UPDATE ON embeddings BEGIN
+    INSERT INTO vector_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER embeddings_vector_outbox_delete AFTER DELETE ON embeddings BEGIN
+    INSERT INTO vector_outbox(object_id) VALUES (OLD.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_vector_outbox_insert AFTER INSERT ON assets BEGIN
+    INSERT INTO vector_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_vector_outbox_delete AFTER DELETE ON assets BEGIN
+    INSERT INTO vector_outbox(object_id) VALUES (OLD.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+CREATE TRIGGER assets_vector_outbox_update AFTER UPDATE OF trashed_at, library_id, object_id ON assets
+WHEN OLD.trashed_at IS NOT NEW.trashed_at OR OLD.library_id IS NOT NEW.library_id OR OLD.object_id IS NOT NEW.object_id
+BEGIN
+    INSERT INTO vector_outbox(object_id) VALUES (OLD.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+    INSERT INTO vector_outbox(object_id) VALUES (NEW.object_id)
+    ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
+END;
+`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL&_synchronous=FULL")
+	db, err := sqlitedb.Open(path, sqlitedb.Options{Durable: true})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 	if err := migrate(context.Background(), db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -333,11 +400,10 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// timeLayout has a fixed width so that stored timestamps sort correctly as
-// text; time.RFC3339Nano trims trailing zeros and would not.
-const timeLayout = "2006-01-02T15:04:05.000000000Z"
+// timeLayout is how stored timestamps are read (sqlitedb.TimeLayout).
+const timeLayout = sqlitedb.TimeLayout
 
-func formatTime(value time.Time) string { return value.UTC().Format(timeLayout) }
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }
 
 func parseTime(value string) (time.Time, error) { return time.Parse(timeLayout, value) }
 
@@ -479,13 +545,17 @@ SELECT a.id, a.library_id, IFNULL(a.directory_id, ''), a.name, o.media_type, o.s
          ELSE 'first'
        END,
        a.object_id, IFNULL(a.motion_object_id, ''), a.motion_name, a.motion_kind, a.motion_duration,
-       a.motion_object_id IS NULL AND IFNULL(o.live_id, '') <> '', l.kind, IFNULL(l.owner_user_id, ''), l.created_at
+       a.motion_object_id IS NULL AND IFNULL(o.live_id, '') <> '', IFNULL(v.duration, -1),
+       l.kind, IFNULL(l.owner_user_id, ''), l.created_at
 FROM assets a
 JOIN objects o ON o.id = a.object_id
-JOIN libraries l ON l.id = a.library_id`
+JOIN libraries l ON l.id = a.library_id
+LEFT JOIN videos v ON v.object_id = a.object_id`
 
 type assetRecord struct {
 	Asset
+	// orientation is the EXIF orientation of the original (1 when upright).
+	orientation    int
 	objectID       string
 	motionObjectID string
 	motionName     string
@@ -498,11 +568,12 @@ func scanAsset(row rowScanner) (assetRecord, error) {
 	var duplicate, thumbnail string
 	var metadata photoMetadata
 	var motion Motion
+	var video Video
 	if err := row.Scan(&record.ID, &record.LibraryID, &record.DirectoryID, &record.Name, &record.MediaType,
 		&record.SizeBytes, &record.UploadedBy, &importedAt, &trashedAt, &trashedBy, &purgeAfter,
 		&takenAt, &metadata.width, &metadata.height, &metadata.orientation, &thumbnail, &duplicate,
 		&record.objectID, &record.motionObjectID, &record.motionName, &motion.Kind, &motion.Duration,
-		&record.LiveVideoMissing, &record.library.kind, &record.library.ownerUserID, &libraryCreatedAt); err != nil {
+		&record.LiveVideoMissing, &video.Duration, &record.library.kind, &record.library.ownerUserID, &libraryCreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return assetRecord{}, ErrNotFound
 		}
@@ -511,9 +582,13 @@ func scanAsset(row rowScanner) (assetRecord, error) {
 	if record.motionObjectID != "" {
 		record.Motion = &motion
 	}
+	if video.Duration >= 0 {
+		record.Video = &video
+	}
 	record.Duplicate = DuplicateRole(duplicate)
 	record.Thumbnail = ThumbnailState(thumbnail)
 	record.Width, record.Height = metadata.displaySize()
+	record.orientation = metadata.orientation
 	record.library.id = record.LibraryID
 	var err error
 	if record.ImportedAt, err = parseTime(importedAt); err != nil {

@@ -5,11 +5,11 @@
 set -uo pipefail
 user=${1:-alice}
 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
-token=$(sed -n 's/^HERMES_DASHBOARD_SESSION_TOKEN=//p' "/etc/a-nas-assistant/tokens/$user.env")
+token=$("$py" /spike/hermes_login.py "$user")  # an access token of Hermes's own login
 "$py" /spike/serve_client.py "$user" ready >/dev/null
 sleep 3  # MCP discovery starts with the first client
 nspid() { awk '/^NSpid/ {print $NF}' "/proc/$1/status"; }
-serve=$(nspid "$(pgrep -u "$user" -f 'hermes serve' | head -1)")
+serve=$(nspid "$(pgrep -u "$user" -f serve_nondumpable | head -1)")
 mcp=$(nspid "$(pgrep -u "$user" -f anas_mcp.py | head -1)")
 echo "inside the instance: tini is pid 1, hermes serve pid $serve, the MCP server pid $mcp"
 # The kernel's answer, from a shell in the same sandbox (shell.exec runs there as the member).

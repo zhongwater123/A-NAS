@@ -22,7 +22,7 @@ func (h *harness) request(method, path, body string) (int, string) {
 	}
 	defer response.Body.Close()
 	data, _ := io.ReadAll(response.Body)
-	return response.StatusCode, string(data)
+	return response.StatusCode, strings.TrimSuffix(string(data), "\n")
 }
 
 func TestTheMemoryPageReadsAndForgetsWhatTheAssistantLearned(t *testing.T) {
@@ -35,20 +35,28 @@ func TestTheMemoryPageReadsAndForgetsWhatTheAssistantLearned(t *testing.T) {
 	if len(page.Memories) != 2 || page.Memories[0].Text != "alice 喜欢简短的回答" || page.Memories[1].Store != "profile" {
 		t.Fatalf("memories = %+v", page.Memories)
 	}
-	// A-NAS's own skills are not the member's to see or delete here.
-	if len(page.Skills) != 1 || page.Skills[0].ID != "family-trip" || page.Skills[0].CreatedBy != "learn" {
+	// Every skill the assistant made is the member's, its name notwithstanding: the
+	// review named one anas-photos on the Experimental NAS. A-NAS's own skills are
+	// not in Hermes's graph, so not the member's to see or delete here.
+	if len(page.Skills) != 2 || page.Skills[0].ID != "family-trip" || page.Skills[0].CreatedBy != "learn" ||
+		page.Skills[1].ID != "anas-photos" || page.Skills[1].CreatedBy != "agent" {
 		t.Fatalf("skills = %+v", page.Skills)
 	}
 	if status, body := h.request(http.MethodGet, "/memory/items/family-trip", ""); status != http.StatusOK || !strings.Contains(body, "出游计划") {
 		t.Fatalf("skill = %d %s", status, body)
 	}
 	for _, id := range []string{"anas-files", "../config", "nothing-like-this"} {
+		if status, _ := h.request(http.MethodGet, "/memory/items/"+url.PathEscape(id), ""); status == http.StatusOK {
+			t.Fatalf("reading %s was passed on", id)
+		}
 		if status, _ := h.request(http.MethodDelete, "/memory/items/"+url.PathEscape(id), ""); status == http.StatusNoContent {
 			t.Fatalf("deleting %s was passed on", id)
 		}
 	}
-	if status, body := h.request(http.MethodDelete, "/memory/items/"+url.PathEscape(page.Memories[0].ID), ""); status != http.StatusNoContent {
-		t.Fatalf("delete = %d %s", status, body)
+	for _, id := range []string{page.Memories[0].ID, "anas-photos"} {
+		if status, body := h.request(http.MethodDelete, "/memory/items/"+url.PathEscape(id), ""); status != http.StatusNoContent {
+			t.Fatalf("delete %s = %d %s", id, status, body)
+		}
 	}
 	// Clearing everything, conversations too: the one with a turn writing to it stays.
 	status, body = h.request(http.MethodPost, "/memory/clear", `{"conversations":true}`)

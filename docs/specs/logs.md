@@ -1,7 +1,7 @@
 # 日志
 
 状态：implemented
-更新时间：2026-10-14
+更新时间：2026-10-21
 
 ## 目标
 
@@ -13,7 +13,7 @@
 - 不做诊断包；“导出”只把当前筛选下的记录保存为文件。
 - 不提供删除、清空或修改记录的入口，也不改变保留期限：活动记录永久保存在系统盘的各模块数据库中，系统日志的保留由 journald 配置决定。
 - 不读取 A-NAS 服务清单之外的系统日志，不读取内核、SSH、sudo 或其他用户的日志，也不读取应用中心安装的容器日志（容器日志仍在 Docker 中查看，见[容器管理](container-management.md)）。
-- 不改变 `/api/v1/audit`：它仍是管理员原样导出全部审计的接口，供运行手册收集证据。
+- 不提供绕过遮蔽的原样审计导出。旧接口 `/api/v1/audit` 不做遮蔽，会把成员个人空间的文件名与文件 ID 交给管理员，已于 2026-10-21 删除（[#163](https://github.com/zhongwater123/A-NAS/issues/163)），现在返回 `404`；收集证据使用活动记录的“导出”。
 - 不追溯补齐历史：登录记录从部署本功能后开始产生。
 
 ## 结构
@@ -46,7 +46,7 @@
 
 - Given：列表中有一条记录。
 - When：点击它。
-- Then：在原位置展开详细信息：完整时间（含秒和时区）、操作代码（如 `file.uploaded`）、对象类型与 ID、来源、原始详情和记录 ID，供对照运行手册与审计导出。再次点击收起；合并的记录展开后先显示其中每一条。
+- Then：在原位置展开详细信息：完整时间（含秒和时区）、操作代码（如 `file.uploaded`）、对象类型与 ID、来源、原始详情和记录 ID，供对照运行手册与导出的 CSV。再次点击收起；合并的记录展开后先显示其中每一条。
 
 ### 登录、登录失败与退出登录被记录
 
@@ -64,7 +64,7 @@
 
 - Given：成员 `alice` 在个人空间上传了 `体检报告.pdf`，并在相册中导入了照片。
 - When：管理员浏览或搜索活动记录。
-- Then：文件记录显示为“alice 在个人空间上传了 1 个文件”，不显示文件名和文件 ID，详细信息中也没有；搜索“体检”不会命中这条记录。相册记录只对操作者本人可见，管理员看不到 `alice` 的照片操作。共享空间中的操作和管理员自己的操作显示完整名称。这与[统一身份与文件授权](unified-identity-and-file-acl.md)中“管理员默认看不到成员的个人空间和私有图库”一致；需要找回内容时仍使用可审计的只读查看。
+- Then：文件记录显示为“alice 在个人空间上传了 1 个文件”，不显示文件名和文件 ID，详细信息中也没有；搜索“体检”或这个文件的 ID 都不会命中这条记录。相册记录只对操作者本人可见，管理员看不到 `alice` 的照片操作。共享空间中的操作和管理员自己的操作显示完整名称。这与[统一身份与文件授权](unified-identity-and-file-acl.md)中“管理员默认看不到成员的个人空间和私有图库”一致；需要找回内容时仍使用可审计的只读查看。
 
 ### 导出活动记录
 
@@ -82,7 +82,7 @@
 ### 按服务、级别、时间和关键词筛选系统日志
 
 - Given：系统日志已显示。
-- When：选择服务（全部服务、产品服务、Host Agent、相册服务、分享服务、容器代理、本地 AI、媒体 Worker、本机屏幕、文件共享 Samba、局域网入口 Caddy）、级别（全部、警告及以上、仅错误）、时间范围，或输入关键词。
+- When：选择服务（全部服务、产品服务、Host Agent、相册服务、分享服务、容器代理、本地 AI、FFmpeg Worker、本机屏幕、文件共享 Samba、局域网入口 Caddy）、级别（全部、警告及以上、仅错误）、时间范围，或输入关键词。
 - Then：从最新重新读取。产品服务等 A-NAS 进程以 JSON 写日志，级别、消息和字段取自日志本身；systemd 自身与其他程序的行使用 journald 优先级。一次读取最多检查 20,000 行；在此之前没有凑满一页时，页尾说明“已检查到某时间”，可以继续加载更早的日志。
 
 ### 实时跟随
@@ -109,9 +109,9 @@
 
 ## 验收证据
 
-- Go：[活动记录合并与游标](../../internal/activity/activity_test.go)、[账号与登录记录](../../internal/accounts/activity_test.go)、[文件记录的空间与隐藏](../../internal/files/activity_test.go)、[相册活动](../../internal/photosapi/handler_test.go)、[活动记录 API](../../internal/httpapi/activity_test.go)、[系统日志 API](../../internal/httpapi/systemlogs_test.go)、[服务白名单与日志行解析](../../internal/systemlog/systemlog_test.go)、[journal 读取](../../internal/systemlog/journal/journal_test.go)、[Host Agent 系统日志接口](../../internal/hoststate/agent/logs_test.go)。
-- React：[日志分区测试](../../web/src/logs/LogsSection.test.tsx)、[描述与合并](../../web/src/logs/describe.test.ts)、[导出中的公式单元格](../../web/src/logs/common.test.ts)，以及[桌面测试](../../web/src/App.test.tsx)中桌面不再有“日志”图标。
-- 系统测试：在 Debian 13 systemd 容器中以真实 Host Agent 单元读取产品服务日志，见[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)。
+- Go：[活动记录合并与游标](../../internal/activity/activity_test.go)、[账号与登录记录](../../internal/accounts/activity_test.go)、[文件记录的空间与隐藏](../../internal/files/activity_test.go)、[相册活动](../../internal/photosapi/handler_test.go)、[活动记录 API](../../internal/httpapi/activity_test.go)、[系统日志 API](../../internal/httpapi/systemlogs_test.go)、[服务白名单与日志行解析](../../internal/systemlog/systemlog_test.go)、[journal 读取](../../internal/systemlog/journal/journal_test.go)、[Host Agent 系统日志接口](../../internal/hoststate/agent/rootagent/logs_test.go)。
+- React：[日志分区测试](../../web/src/settings/logs/LogsSection.test.tsx)、[描述与合并](../../web/src/settings/logs/describe.test.ts)、[导出中的公式单元格](../../web/src/settings/logs/common.test.ts)，以及[桌面测试](../../web/src/App.test.tsx)中桌面不再有“日志”图标。
+- 系统测试：在 Debian 13 systemd 容器中以真实 Host Agent 单元读取产品服务日志，见[系统测试](../development/testing.md#系统测试)。
 - 本地门禁：`make check`。
 
 ## 关联
@@ -119,5 +119,5 @@
 - 规格：[设置](settings.md)、[统一身份与文件授权](unified-identity-and-file-acl.md)、[局域网 Web 访问](lan-web-access.md)
 - 架构：[系统总览](../architecture/OVERVIEW.md)
 - ADR：[0020：系统日志经 Host Agent 的白名单 journal 查询读取](../adr/0020-read-service-logs-through-the-host-agent.md)
-- 代码：[日志分区](../../web/src/logs/LogsSection.tsx)、[活动记录](../../internal/activity/activity.go)、[系统日志](../../internal/systemlog/systemlog.go)、[journal 读取](../../internal/systemlog/journal/journal.go)
+- 代码：[日志分区](../../web/src/settings/logs/LogsSection.tsx)、[活动记录](../../internal/activity/activity.go)、[系统日志](../../internal/systemlog/systemlog.go)、[journal 读取](../../internal/systemlog/journal/journal.go)
 - 测试：见“验收证据”

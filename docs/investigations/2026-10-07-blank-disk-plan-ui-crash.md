@@ -27,6 +27,7 @@ Experimental NAS 在 `v1.0.1-rc.3` 中成功创建管理员后，用户从“存
 - 存储计划、确认和执行增加明确的忙碌状态；执行期间显示 `running` 和“请勿关闭设备”。
 - 每个桌面窗口增加错误边界，面板异常时保留桌面并提供重新载入入口。
 - 后端回归断言空盘计划 JSON 包含 `"signatures":[]`；React 回归把 `signatures/actions` 故意设为 `null` 并验证桌面仍可操作。
+- 2026-10-23 起（#220），Web 客户端的类型由契约生成，桌面外壳在窗口错误边界之外读取的响应在运行时按契约校验：数组字段收到 `null` 时，这次调用失败，桌面不受影响。
 
 `go test ./internal/storage`、`npm test -- --run src/App.test.tsx` 与 `make check VERSION=v1.0.1-rc.4` 已通过。实机只需重新生成计划验证页面，不得把此前蓝屏描述为已经执行过格式化。
 
@@ -36,3 +37,4 @@ Experimental NAS 在 `v1.0.1-rc.3` 中成功创建管理员后，用户从“存
 - [实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [`internal/storage/service_test.go`](../../internal/storage/service_test.go)
 - [`web/src/App.test.tsx`](../../web/src/App.test.tsx)
+- [接口契约与外壳响应校验](../development/api-contract.md#接口契约)

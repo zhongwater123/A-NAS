@@ -38,7 +38,7 @@ func TestScaleBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 
 	members := []Principal{
 		{UserID: "user:alice", Username: "alice"}, {UserID: "user:bob", Username: "bob"},

@@ -8,7 +8,7 @@
 - iPhone：在同一次选择中提交同目录、同名的 JPEG/HEIC 与 MOV，扩展名及文件名大小写不敏感。前端拒绝缺失照片或同名候选不唯一的组合。服务端读取 Apple MakerNote 的 ContentIdentifier 与 MOV 的 `com.apple.quicktime.content.identifier`；只要一端有标识，就要求两端存在且相同。两端均无标识的导出件允许以用户明确选择的唯一同名组合导入。跨批次只按 Apple 标识精确配对，见“补传视频”；任何时候都不按文件名或后台猜测配对。
 - 安卓：识别 Google Camera XMP 中的 MotionPhoto + Container Directory，以及旧式 MicroVideo + MicroVideoOffset。按命名空间读取属性和元素，不依赖前缀；视频位置由文件尾和声明长度确定，支持视频前有 GainMap 的组合。MotionPhoto=0 明确表示普通照片。已识别的声明若缺视频、长度越界或视频无法探测，整个导入失败，不默默降级成静态照片。
 - JPEG 从扫描数据前的 APP1 读取 XMP。HEIC 当前从前 4 MiB 读取完整 XMP packet；非标准厂商封装、扩展 XMP、超出窗口的元数据及 AVIF 暂不保证动态识别。浏览器或分享软件已经移除的视频不能恢复，上传界面提示选择未修改原件。
-- 每个原文件最多 256 MiB；iPhone 两个文件分别计限。动态视频须有有效视频轨且时长大于 0、不超过 30 秒。独立视频不作为照片导入。
+- 每个原文件最多 256 MiB；iPhone 两个文件分别计限。动态视频须有有效视频轨且时长大于 0、不超过 30 秒。独立视频作为普通视频导入（[相册视频](photo-video.md)），不当作照片。
 - 配对上传按照片、MOV 的顺序流式写入受管暂存目录，不缓冲完整原件或写入系统临时盘。上传完成不等待 AI。视频探测和静态头部校验先完成，两份对象引用和资产在一个事务内提交；失败回收暂存文件及本次新发布的无引用对象。
 
 ## 补传视频
@@ -20,7 +20,7 @@
   - 上传完成的提示写明“其中 N 张实况照片只收到了静态画面”，展开后说明“文件 → 导出 → 导出未修改的原件”。
   - 查看器信息栏显示同样的说明和“上传视频”按钮。
   - 网格不加标记。
-- **补传：** 单独上传的 MOV 不再被前端拒绝，而是发往 `POST /api/v1/photos/libraries/{libraryId}/live-videos`。
+- **补传：** 单独上传的 MOV 与其他文件一样发往 `POST /api/v1/photos/libraries/{libraryId}/uploads`（2026-10-19 起，[相册视频](photo-video.md)）。它是带 `com.apple.quicktime.content.identifier` 的完整短视频、且图库中有在等它的照片时，补上这些照片并返回 `200 {"completed": [...]}`；否则作为普通视频加入图库并返回 `201`。信息栏的“上传视频”按钮仍发往 `POST /api/v1/photos/libraries/{libraryId}/live-videos`，只补照片，规则如下：
   - MOV 须是带 `com.apple.quicktime.content.identifier` 的完整短视频；没有标识时返回 `invalid_motion_photo`。
   - 相册服务在该图库中查找调用者可以修改、照片标识与之完全相同、还没有视频的资产，为它们全部补上这段视频，含同一原件的重复照片。
   - 视频名取照片名主体加 `.MOV`，与成对上传一致；每张写入活动记录 `photo.motion_attached`。
@@ -41,9 +41,9 @@ Catalog 的资产保存主图和视频引用、视频名称、类型与时长。
 
 网格只显示静态缩略图与“动态照片”标识，不加载视频。查看器提供明确的动态播放按钮，默认静音，可用播放器控件开声；播放结束、切换照片或关闭查看器停止播放。失败时保留静态图和原件下载入口。
 
-HEIC 主图的尺寸和容器旋转从 primary item 关联属性读取；通过隔离 Media Worker 的 libheif 生成兼容图片。动态片段按需通过同一 Worker 转为最高 1080 高度的 H.264/AAC MP4，不写转码缓存。相册同时最多两个解码或播放任务，图片任务 30 秒、视频播放请求 45 秒超时；请求断开取消解码。元数据探测有 15 秒超时。Worker 本身继续受 systemd 的连接数、CPU、内存和无网络约束。
+HEIC 主图的尺寸和容器旋转从 primary item 关联属性读取；通过隔离 FFmpeg Worker 的 libheif 生成兼容图片。动态片段按需通过同一 Worker 转为最高 1080 高度的 H.264/AAC MP4，不写转码缓存。相册同时最多两个解码或播放任务，图片任务 30 秒、视频播放请求 45 秒超时；请求断开取消解码。元数据探测有 15 秒超时。Worker 本身继续受 systemd 的连接数、CPU、内存和无网络约束。
 
-`anas-media.socket` 使用 `root:a-nas-photos 0660`，已有该附加组的产品服务与相册服务均可访问。相册服务不加入产品服务组，Worker 不获得受管图库路径权限；所有输入仍是只读 FD。
+`anas-ffmpeg.socket` 使用 `root:a-nas-photos 0660`，已有该附加组的产品服务与相册服务均可访问。相册服务不加入产品服务组，Worker 不获得受管图库路径权限；所有输入仍是只读 FD。
 
 ## AI 与模型边界
 
@@ -56,7 +56,7 @@ HEIC 主图的尺寸和容器旋转从 primary item 关联属性读取；通过�
 
 - 调查：[Apple 配对标识解析](../investigations/2026-10-14-live-photo-identifiers.md)
 
-- 规格：[相册](photo-library.md)、[相册界面](photo-gallery-ui.md)
+- 规格：[相册](photo-library.md)、[相册界面](photo-gallery-ui.md)、[相册视频](photo-video.md)
 - 架构：[相册技术设计](../architecture/photo-library.md)、[AI 调度](../architecture/photo-ai.md)
 - 实现：[资产与视频生命周期](../../internal/photos/motion.go)、[补传视频](../../internal/photos/livevideo.go)、[安卓格式识别](../../internal/photos/motionformat.go)、[HEIF 主图属性](../../internal/photos/heifmetadata.go)、[API 与导出](../../internal/photosapi/motion.go)、[上传配对](../../web/src/photos/uploadGroups.ts)、[查看器](../../web/src/photos/Viewer.tsx)
 - 验证：[生命周期、Apple 标识与 AI 队列](../../internal/photos/motion_test.go)、[补传视频的匹配、范围与旧照片](../../internal/photos/livevideo_test.go)、[真实编解码](../../internal/photos/motioncodecs_test.go)、[格式边界](../../internal/photos/motionformat_test.go)、[接口权限、Range 与原件导出](../../internal/photosapi/motion_test.go)、[前端配对](../../web/src/photos/uploadGroups.test.ts)

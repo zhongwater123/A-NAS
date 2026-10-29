@@ -6,6 +6,7 @@ every request (tools offered, messages) and the token usage it saw. With
 GATEWAY_LOG_MESSAGES=0 (the trial on the Experimental NAS, where the requests
 carry members' files) it logs how many messages there were instead of them.
 """
+import contextlib
 import http.client
 import json
 import os
@@ -13,9 +14,10 @@ import socketserver
 import sys
 import time
 from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 
 SOCK, LOG, UPSTREAM_HOST, KEY_FILE = sys.argv[1:5]
-KEY = open(KEY_FILE, encoding="utf-8").read().strip()
+KEY = Path(KEY_FILE).read_text(encoding="utf-8").strip()
 LOG_MESSAGES = os.environ.get("GATEWAY_LOG_MESSAGES", "1") != "0"
 
 
@@ -53,10 +55,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
-            try:
+            with contextlib.suppress(ValueError):
                 usage = json.loads(data).get("usage")
-            except ValueError:
-                pass
         else:
             self.end_headers()
             while chunk := resp.read1(65536):
@@ -65,10 +65,8 @@ class Handler(BaseHTTPRequestHandler):
                 tail = (tail + chunk)[-8192:]
             for line in tail.decode("utf-8", "replace").splitlines():
                 if line.startswith("data: {") and '"usage"' in line:
-                    try:
+                    with contextlib.suppress(ValueError):
                         usage = json.loads(line[6:]).get("usage") or usage
-                    except ValueError:
-                        pass
         self.close_connection = True
         return resp.status, usage
 
@@ -98,5 +96,5 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 if os.path.exists(SOCK):
     os.unlink(SOCK)
 with Server(SOCK, Handler) as server:
-    os.chmod(SOCK, 0o666)
+    os.chmod(SOCK, 0o666)  # noqa: S103  the sandboxed assistant connects as another user
     server.serve_forever()

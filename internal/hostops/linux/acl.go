@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,10 +14,18 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 )
 
 const sharedSpaceID = "space:shared"
+
+type directoryProtection uint8
+
+const (
+	ordinaryDirectory directoryProtection = iota
+	reservedDirectory                     // Displace a file or link, preserving directory contents.
+	managedDirectory                      // Also displace directories owned by an untrusted user.
+)
 
 // Space roots, trash directories, and their containers are owned by
 // root:root and authorized only by POSIX ACLs. Owners cannot change the ACL of
@@ -25,7 +34,7 @@ const sharedSpaceID = "space:shared"
 func containerACL() string {
 	return strings.Join([]string{
 		"user::rwx", "group::---", "other::---",
-		"group:" + accounts.UsersGroup + ":--x", "mask::--x",
+		"group:" + accountid.UsersGroup + ":--x", "mask::--x",
 	}, ",")
 }
 
@@ -61,9 +70,9 @@ func viewerEntries(viewers []string) []string {
 // sharedFolderACL lets every A-NAS account read a shared folder and grants
 // write access to the listed users or groups (for example "group:a-nas-users").
 func sharedFolderACL(writers ...string) string {
-	entries := []string{"group:" + accounts.UsersGroup + ":r-x"}
+	entries := []string{"group:" + accountid.UsersGroup + ":r-x"}
 	for _, writer := range writers {
-		if writer == "group:"+accounts.UsersGroup {
+		if writer == "group:"+accountid.UsersGroup {
 			entries[0] = writer + ":rwx"
 			continue
 		}
@@ -88,11 +97,17 @@ func userTrashACL(username string, viewers ...string) string {
 }
 
 func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, error) {
+	// Each space's ACL names its owner and its trash users from the identity
+	// registry. Without the registry every private space would get the
+	// fail-closed ACL below, so nothing is applied until it loads.
+	if e.identityError != nil {
+		return nil, e.identityError
+	}
 	e.materializeMu.Lock()
 	defer e.materializeMu.Unlock()
 	var repaired []string
-	apply := func(path, acl string, created, reserved bool) error {
-		changed, existed, err := e.ensureDirectoryACL(ctx, path, acl, reserved)
+	apply := func(path, acl string, created bool, protection directoryProtection) error {
+		changed, existed, err := e.ensureDirectoryACL(ctx, path, acl, protection)
 		if changed && existed && !created {
 			repaired = append(repaired, path)
 		}
@@ -110,15 +125,13 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 		}
 	}
 	for _, path := range []string{filepath.Join(e.mountPoint, "spaces"), filepath.Join(e.mountPoint, "spaces", "private")} {
-		if err := apply(path, containerACL(), false, false); err != nil {
+		if err := apply(path, containerACL(), false, ordinaryDirectory); err != nil {
 			return repaired, err
 		}
 	}
 	e.spaceRootsMu.RLock()
 	spaces := make(map[string]string, len(e.spaceRoots))
-	for spaceID, root := range e.spaceRoots {
-		spaces[spaceID] = root
-	}
+	maps.Copy(spaces, e.spaceRoots)
 	e.spaceRootsMu.RUnlock()
 	spaceIDs := make([]string, 0, len(spaces))
 	for spaceID := range spaces {
@@ -131,13 +144,13 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 		if err != nil {
 			return repaired, err
 		}
-		spaceACL := sharedFolderACL("group:" + accounts.UsersGroup)
-		principal := "group:" + accounts.UsersGroup
+		spaceACL := sharedFolderACL("group:" + accountid.UsersGroup)
+		principal := "group:" + accountid.UsersGroup
 		trashUsers := e.identityUsernames()
 		var viewers []string
 		if spaceID != sharedSpaceID {
 			username := filepath.Base(root)
-			if !validUsername(username) {
+			if !accountid.ValidUsername(username) {
 				return repaired, errors.New("registered private space has an invalid owner")
 			}
 			if e.identityKnown(username) {
@@ -156,7 +169,7 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 				trashUsers = nil
 			}
 		}
-		if err := apply(root, spaceACL, created, false); err != nil {
+		if err := apply(root, spaceACL, created, ordinaryDirectory); err != nil {
 			return repaired, err
 		}
 		// Trash directories sit in folders their users can write, so
@@ -166,12 +179,23 @@ func (e *Executor) materializeRegisteredSpaces(ctx context.Context) ([]string, e
 		if principal != "" {
 			trashACL = trashRootACL(principal, viewers...)
 		}
-		if err := apply(trashRoot, trashACL, false, true); err != nil {
+		if err := apply(trashRoot, trashACL, false, reservedDirectory); err != nil {
 			return repaired, err
 		}
 		for _, username := range trashUsers {
-			if err := apply(filepath.Join(trashRoot, username), userTrashACL(username, viewers...), false, true); err != nil {
+			if err := apply(filepath.Join(trashRoot, username), userTrashACL(username, viewers...), false, reservedDirectory); err != nil {
 				return repaired, err
+			}
+		}
+		if spaceID == sharedSpaceID {
+			agentRoot := filepath.Join(root, "Agent空间")
+			if err := apply(agentRoot, sharedFolderACL(), false, managedDirectory); err != nil {
+				return repaired, err
+			}
+			for _, username := range trashUsers {
+				if err := apply(filepath.Join(agentRoot, username), sharedFolderACL("user:"+username), false, managedDirectory); err != nil {
+					return repaired, err
+				}
 			}
 		}
 	}
@@ -195,18 +219,18 @@ func (e *Executor) ensureSpaceSubvolume(ctx context.Context, root string) (bool,
 // Every command acts on the directory opened without following symbolic
 // links, never on path again: whoever can rename entries next to it cannot
 // redirect root to another file between the check and the change.
-func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string, reserved bool) (changed, existed bool, err error) {
-	directory, existed, err := e.openVolumeDirectory(path, 0o700, reserved)
+func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string, protection directoryProtection) (changed, existed bool, err error) {
+	directory, existed, err := e.openVolumeDirectory(path, 0o700, protection)
 	if err != nil {
 		return false, existed, err
 	}
-	defer directory.Close()
+	defer func() { _ = directory.Close() }()
 	info, err := directory.Stat()
 	if err != nil {
 		return false, existed, err
 	}
 	target := openedPath(directory)
-	current, err := e.runner.Run(ctx, "getfacl", []string{"--absolute-names", "--omit-header", target}, "")
+	current, err := e.runner.Output(ctx, "getfacl", []string{"--absolute-names", "--omit-header", target}, "")
 	if err != nil {
 		return false, existed, commandError("read ACL", err, current)
 	}
@@ -242,10 +266,11 @@ func (e *Executor) ensureDirectoryACL(ctx context.Context, path, acl string, res
 
 // openVolumeDirectory opens the directory at path below the data-volume mount
 // point without following symbolic links, creating it with mode when nothing
-// is there. existed reports whether anything was at path. When reserved is
-// set, a non-directory at path, such as a symbolic link planted by a user who
-// can write the parent, is renamed aside and replaced by a new directory.
-func (e *Executor) openVolumeDirectory(path string, mode uint32, reserved bool) (*os.File, bool, error) {
+// is there. existed reports whether anything was at path. Reserved names
+// displace non-directories; managed names also displace directories owned by
+// anyone other than the executor (root in the Host Agent). Contents are kept
+// alongside the reserved name, never adopted into a trusted member's folder.
+func (e *Executor) openVolumeDirectory(path string, mode uint32, protection directoryProtection) (*os.File, bool, error) {
 	relative, err := filepath.Rel(e.mountPoint, path)
 	if err != nil || relative == "." || !filepath.IsLocal(relative) {
 		return nil, false, fmt.Errorf("%s is not below the data volume", path)
@@ -255,7 +280,7 @@ func (e *Executor) openVolumeDirectory(path string, mode uint32, reserved bool) 
 	if err != nil {
 		return nil, false, err
 	}
-	defer mount.Close()
+	defer func() { _ = mount.Close() }()
 	parentFD, err := unix.Openat2(int(mount.Fd()), filepath.Dir(relative), &unix.OpenHow{
 		Flags:   unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC,
 		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS,
@@ -273,6 +298,17 @@ func (e *Executor) openVolumeDirectory(path string, mode uint32, reserved bool) 
 	// after a few rounds rather than loop.
 	for attempt := range 3 {
 		fd, err := unix.Openat(parentFD, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		if err == nil && protection == managedDirectory {
+			var stat unix.Stat_t
+			if statErr := unix.Fstat(fd, &stat); statErr != nil {
+				_ = unix.Close(fd)
+				return nil, existed, statErr
+			}
+			if stat.Uid != uint32(os.Geteuid()) {
+				_ = unix.Close(fd)
+				err = unix.ENOTDIR // Use the same displacement path for an impostor.
+			}
+		}
 		switch {
 		case err == nil:
 			return os.NewFile(uintptr(fd), path), existed, nil
@@ -281,7 +317,7 @@ func (e *Executor) openVolumeDirectory(path string, mode uint32, reserved bool) 
 			if err := unix.Mkdirat(parentFD, name, mode); err != nil && !errors.Is(err, unix.EEXIST) {
 				return nil, false, fmt.Errorf("create %s: %w", path, err)
 			}
-		case (errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR)) && reserved:
+		case (errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR)) && protection != ordinaryDirectory:
 			aside := fmt.Sprintf("%s.displaced-%d", name, time.Now().UnixNano())
 			if err := unix.Renameat2(parentFD, name, parentFD, aside, unix.RENAME_NOREPLACE); err != nil && !errors.Is(err, unix.ENOENT) {
 				return nil, true, fmt.Errorf("move aside %s: %w", path, err)
@@ -307,7 +343,7 @@ func (e *Executor) ensureTraversal(ctx context.Context, path string) error {
 	if path == "/" || path == "." {
 		return nil
 	}
-	if output, err := e.runner.Run(ctx, "setfacl", []string{"--modify", "group:" + accounts.UsersGroup + ":--x", path}, ""); err != nil {
+	if output, err := e.runner.Run(ctx, "setfacl", []string{"--modify", "group:" + accountid.UsersGroup + ":--x", path}, ""); err != nil {
 		return commandError("allow traversal to the data volume", err, output)
 	}
 	return nil
@@ -322,7 +358,7 @@ func rootOwned(info os.FileInfo) bool {
 // entries, ignoring comments such as "#effective:".
 func sameACL(getfacl, spec string) bool {
 	var current []string
-	for _, line := range strings.Split(getfacl, "\n") {
+	for line := range strings.SplitSeq(getfacl, "\n") {
 		line, _, _ = strings.Cut(line, "#")
 		if line = strings.TrimSpace(line); line != "" {
 			current = append(current, line)

@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
 // TestRootAdministrativeViewing grants and revokes real ACL entries on a
@@ -28,21 +28,21 @@ func TestRootAdministrativeViewing(t *testing.T) {
 	clock := time.Date(2026, time.October, 7, 12, 0, 0, 0, time.UTC)
 	now := func() time.Time { return clock }
 	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: mount, Now: now})
-	identities := map[string]accounts.Identity{}
+	identities := map[string]accountid.Identity{}
 	for i, user := range []struct {
 		name string
-		role accounts.Role
-	}{{"keeper", accounts.RoleAdmin}, {"alice", accounts.RoleMember}, {"bob", accounts.RoleMember}} {
-		if err := executor.SetCredential(ctx, accounts.CredentialRequest{
+		role accountid.Role
+	}{{"keeper", accountid.RoleAdmin}, {"alice", accountid.RoleMember}, {"bob", accountid.RoleMember}} {
+		if err := executor.SetCredential(ctx, accountid.CredentialRequest{
 			UserID: "user:" + user.name, PrivateSpaceID: "space:" + user.name, Username: user.name,
 			Password: user.name + " password for tests", Role: user.role, UID: 20110 + i, Enabled: true,
 		}); err != nil {
 			t.Fatalf("SetCredential(%s) error = %v", user.name, err)
 		}
-		identities[user.name+"-token"] = accounts.Identity{Username: user.name, UID: 20110 + i, Role: user.role, Enabled: true}
+		identities[user.name+"-token"] = accountid.Identity{Username: user.name, UID: 20110 + i, Role: user.role, Enabled: true}
 	}
 	web := startFileBroker(t, mount, executor, identities)
-	as := func(user string) context.Context { return accounts.WithSessionToken(ctx, user+"-token") }
+	as := func(user string) context.Context { return accountid.WithSessionToken(ctx, user+"-token") }
 	private := filepath.Join(mount, "spaces", "private", "alice")
 	expect := func(what string, allowed bool, result outcome) {
 		t.Helper()
@@ -73,13 +73,13 @@ func TestRootAdministrativeViewing(t *testing.T) {
 		"mkdir "+private+"/docs && echo a > "+private+"/docs/a.txt && echo b > "+private+"/b.txt"))
 	maskBefore := maskOf(t, filepath.Join(private, "b.txt"))
 	expect("admin Web reads before viewing", false, webRead("keeper", filepath.Join(private, "b.txt")))
-	expiry := clock.Add(accounts.ViewingDuration)
+	expiry := clock.Add(accountid.ViewingDuration)
 
 	// Nothing would apply a grant made while the volume is offline.
 	offline := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: filepath.Join(t.TempDir(), "offline"), Now: now})
-	if err := offline.GrantViewing(ctx, accounts.ViewingRequest{
+	if err := offline.GrantViewing(ctx, accountid.ViewingRequest{
 		ID: "viewing:offline", SpaceID: "space:alice", AdminUsername: "keeper", AdminUID: 20110, ExpiresAt: expiry,
-	}); !errors.Is(err, accounts.ErrVolumeUnavailable) {
+	}); !errors.Is(err, accountid.ErrVolumeUnavailable) {
 		t.Fatalf("GrantViewing() offline error = %v, want ErrVolumeUnavailable", err)
 	}
 
@@ -87,7 +87,7 @@ func TestRootAdministrativeViewing(t *testing.T) {
 	stuck := filepath.Join(private, "docs", "stuck.txt")
 	expect("alice creates a file", true, asUser("alice", "sh", "-c", "echo s > "+stuck))
 	run(t, "chattr", "+i", stuck)
-	err := executor.GrantViewing(ctx, accounts.ViewingRequest{
+	err := executor.GrantViewing(ctx, accountid.ViewingRequest{
 		ID: "viewing:failed", SpaceID: "space:alice", AdminUsername: "keeper", AdminUID: 20110, ExpiresAt: expiry,
 	})
 	run(t, "chattr", "-i", stuck)
@@ -102,14 +102,14 @@ func TestRootAdministrativeViewing(t *testing.T) {
 	}
 	run(t, "rm", stuck)
 
-	if err := executor.GrantViewing(ctx, accounts.ViewingRequest{
+	if err := executor.GrantViewing(ctx, accountid.ViewingRequest{
 		ID: "viewing:1", SpaceID: "space:alice", AdminUsername: "keeper", AdminUID: 20110, ExpiresAt: expiry,
 	}); err != nil {
 		t.Fatalf("GrantViewing() error = %v", err)
 	}
 	expect("admin Web reads a file", true, webRead("keeper", filepath.Join(private, "b.txt")))
 	expect("admin Web reads a nested file", true, webRead("keeper", filepath.Join(private, "docs", "a.txt")))
-	if entries, err := web.Scan(as("keeper"), private, files.ScanSkip{}); err != nil || len(entries) < 3 {
+	if entries, err := web.Scan(as("keeper"), private, filesystem.ScanSkip{}); err != nil || len(entries) < 3 {
 		t.Errorf("admin Web listing = %d entries, %v", len(entries), err)
 	}
 	expect("admin terminal reads", true, asUser("keeper", "cat", filepath.Join(private, "docs", "a.txt")))
@@ -145,7 +145,7 @@ func TestRootAdministrativeViewing(t *testing.T) {
 	if again, err := restarted.ExpireViewing(ctx); err != nil || len(again) != 0 {
 		t.Errorf("second ExpireViewing() = %v, %v", again, err)
 	}
-	if _, err := os.Stat("/var/lib/a-nas/viewing-grants.json"); err != nil {
+	if _, err := os.Stat("/var/lib/a-nas-host/viewing-grants.json"); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -53,7 +54,7 @@ func (h *handler) changeLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.People == nil {
-		WriteError(w, http.StatusBadRequest, "invalid_request", "say whether the library recognises people and pets")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "say whether the library recognises people and pets")
 		return
 	}
 	library, err := h.service.SetPeople(r.Context(), principal, r.PathValue("libraryID"), *request.People)
@@ -61,7 +62,7 @@ func (h *handler) changeLibrary(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, library)
+	httpjson.Write(w, http.StatusOK, library)
 }
 
 func (h *handler) listPeople(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +73,7 @@ func (h *handler) listPeople(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, itemsResponse[photos.Person]{Items: people})
+	httpjson.Write(w, http.StatusOK, itemsResponse[photos.Person]{Items: people})
 }
 
 func (h *handler) personPhotos(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +87,7 @@ func (h *handler) personPhotos(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
+	httpjson.Write(w, http.StatusOK, timelineResponse{Items: page.Assets, Next: page.Next})
 }
 
 func (h *handler) changePerson(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +102,7 @@ func (h *handler) changePerson(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, person)
+	httpjson.Write(w, http.StatusOK, person)
 }
 
 func (h *handler) mergePeople(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +116,7 @@ func (h *handler) mergePeople(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, person)
+	httpjson.Write(w, http.StatusOK, person)
 }
 
 func (h *handler) removeFromPerson(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +140,7 @@ func (h *handler) assignOccurrence(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	httpjson.Write(w, http.StatusOK, asset)
 }
 
 // occurrenceAvatar serves the square crop of one face or pet. An occurrence's

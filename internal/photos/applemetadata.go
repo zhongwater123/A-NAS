@@ -9,6 +9,8 @@ import (
 
 	"github.com/evanoberholster/imagemeta/meta"
 	"github.com/evanoberholster/imagemeta/meta/isobmff"
+
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
 )
 
 // Apple uses a 14-byte maker-note preamble and offsets relative to that
@@ -16,7 +18,8 @@ import (
 // Keep this narrow reader until that dependency's regression is fixed.
 func appleContentID(file *os.File) (id string) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("photo Apple content ID", recovered)
 			id = ""
 		}
 	}()
@@ -91,7 +94,7 @@ func ifdEntry(data []byte, offset uint32, order binary.ByteOrder, tag uint16) []
 	if start+count*12 > uint64(len(data)) {
 		return nil
 	}
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		entry := data[start+i*12 : start+(i+1)*12]
 		if order.Uint16(entry) == tag {
 			return entry

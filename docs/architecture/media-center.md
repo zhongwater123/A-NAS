@@ -17,17 +17,17 @@ anas-api（a-nas）
    │     └── 播放、探测、截图、字幕：files.Service.OpenContent 得到只读 fd
    │                 │ SCM_RIGHTS + 类型化请求
    │                 ▼
-   └── media.WorkerProcessor ──► internal/mediaworker.Client ──► /run/a-nas-media/media.sock（root:a-nas 0660）
+   └── media.WorkerProcessor ──► internal/ffmpegworker.Client ──► /run/a-nas-ffmpeg/ffmpeg.sock（root:a-nas 0660）
                                           │ Accept=yes，每个连接一个实例
                                           ▼
-                                anas-media@.service（DynamicUser，无网络，
+                                anas-ffmpeg@.service（DynamicUser，无网络，
                                 看不到 /srv/a-nas 与 /var/lib/a-nas）
                                           └── ffprobe / ffmpeg，输入为 fd:，输出到连接
 ```
 
-开发模式（`ANAS_HOSTSTATE_MODE=fake`）用 `mediaworker.Local` 在进程内的 socketpair 上运行同一个服务端，协议与命令完全相同；找不到 FFmpeg 时影视中心只按文件名与 NFO 工作，所有视频都尝试直接播放。
+开发模式（`ANAS_HOSTSTATE_MODE=fake`）用 `ffmpegworker.Local` 在进程内的 socketpair 上运行同一个服务端，协议与命令完全相同；找不到 FFmpeg 时影视中心只按文件名与 NFO 工作，所有视频都尝试直接播放。
 
-`internal/mediaworker` 是 A-NAS 共用的 FFmpeg 边界，不引用任何应用的类型：探测返回 ffprobe 的中性结果，错误是它自己的 `ErrUnavailable`、`ErrUnreadable`、`ErrInvalid`。影视中心的 [`media.WorkerProcessor`](../../internal/media/worker.go) 把它适配为 `media.Processor`：挑选视频、音轨与字幕流，判断 HDR，并把错误换成影视中心的错误。音乐用同一个 Worker 探测与解码浏览器不能播放的音频（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)）。
+`internal/ffmpegworker` 是 A-NAS 共用的 FFmpeg 边界，不引用任何应用的类型：探测返回 ffprobe 的中性结果，错误是它自己的 `ErrUnavailable`、`ErrUnreadable`、`ErrInvalid`。影视中心的 [`media.WorkerProcessor`](../../internal/media/worker.go) 把它适配为 `media.Processor`：挑选视频、音轨与字幕流，判断 HDR，并把错误换成影视中心的错误。音乐用同一个 Worker 探测与解码浏览器不能播放的音频（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)）。
 
 ## 身份与可见性
 
@@ -53,30 +53,57 @@ anas-api（a-nas）
 - 外挂字幕是文件名以视频名开头的 `.srt/.ass/.ssa/.vtt`，语言由中间的标记识别。
 - 首次扫描时“添加时间”取文件修改时间，之后新发现的视频取发现时间，避免第一次扫描把整个片库都显示为“最近添加”。
 
+## 海报与剧照
+
+同目录的海报、背景图与剧照由 anas-api 在进程内用 `imaging` 与 `x/image` 解码，按 EXIF 方向转正后缩放为 480×720、1280×720 或 640×360 的 JPEG，按条目 ID、尺寸与修改时间缓存在 `media-cache/artwork`（[`artwork.go`](../../internal/media/artwork.go)）；没有图片时用 FFmpeg Worker 截取的画面。缓存命中不再解码。无法解码的版本（头部读不出或超出上限、解码器拒绝或 panic）在同一目录留下空的 `<条目>--undecodable-<修改时间>` 标记，文件改动前不再读取，所以海报墙每次打开时一张坏图片不会再解码一次；读文件出错或等待预算时请求结束不留标记。服务启动时删除全部标记，每张坏图片在每次启动后再试一次，因为解码器或这里的代码可能已经修好，单张上限也可能调高。不再被引用的标记与缓存一起清理。成员能往媒体库放任意图片，客户端能同时请求很多张，而 `anas-api.service` 没有 `MemoryMax`，所以解码内存有两道上限，都按头部声明的像素数计：
+
+- **单张**：超过 5000 万像素的图片不解码，按没有图片处理。TMDB 海报原图约 600 万像素（2000×3000），4K 背景图约 830 万像素，8K 背景图约 3300 万像素，都在上限内。宽或高不为正数的头部同样拒绝。
+- **合计**：正在解码的图片合计不超过 5000 万像素。解码前从加权信号量（`golang.org/x/sync/semaphore`）取得与像素数相同的份额，解码、转正、缩放与编码结束后放开，解码器 panic 时也放开。份额不够时请求排队，请求结束（客户端断开）即放弃；信号量先到先得，大图不会被不断到来的小图饿死。常见海报可以 8 张同时解码，5000 万像素的一张独占全部份额。排队的请求各自开着图片文件，最多 256 个，再来的返回 `503 media_busy`；一面海报墙同时请求的远少于此。
+
+合计上限取单张上限，是因为内存随像素数线性增长，最坏的情况由格式决定。在 4900 万像素的图片上实测，解码、缩放与编码共分配：基线 JPEG（4:2:0）2.0 字节/像素，8 位 PNG 4.5，16 位 PNG 8.5。渐进式 JPEG 解码时还要为每个全分辨率分量保留 4 字节/像素的 DCT 系数（`image/jpeg` 的 `progCoeffs`），构造的 4:4:4 CMYK 渐进式图片因此约 20 字节/像素。所以无论多少请求同时到达，正在解码的海报普通情况下约 100 MB（JPEG）到 425 MB（16 位 PNG），构造的最坏情况约 1 GB，约为 8 GB 设备内存的八分之一；此前没有合计上限，每个并发请求都可能占这么多。Go 的垃圾回收在下一轮之前还留着已放开的缓冲，进程常驻内存可能短暂高于这个数。
+
+不按格式估算字节数：`image.DecodeConfig` 给出的颜色模型能区分 PNG 的位深，却看不出 JPEG 是否渐进式与色度采样，为每种解码器维护估算表也不比按像素计更可靠。同一进程里的其他解码另有自己的上限，合起来仍有界：音乐封面用同样的单张上限，只在扫描中解码，而音乐扫描在全进程逐个进行（[`music.go`](../../internal/music/music.go) 的 `work`）；上传的头像与壁纸不超过 2500 万像素，经产品服务共用的一个信号量一次只解码一张（[`accountsapi.go`](../../internal/accountsapi/accountsapi.go)、[`personalizationapi.go`](../../internal/personalizationapi/personalizationapi.go)）。
+
 ## 播放
 
-`Playback` 根据 ffprobe 的结果与浏览器上报的能力（`caps=hevc,av1,vp9,ac3,eac3,mkv,webm`）决定方式（[`playback.go`](../../internal/media/playback.go)）：
+`Playback` 根据 ffprobe 的结果与浏览器上报的能力（`caps=hevc,av1,vp9,ac3,eac3,mkv,webm`）决定方式。规则与相册共用 [`internal/mediaplay`](../../internal/mediaplay/mediaplay.go)（能力解析、决定、转换流的 MIME、起点校验与转换槽位）；影视中心把视频描述为 `mediaplay.Source`（文件名为 `.3gp` 时标为 3GPP），并给出提示语与画质选项（[`playback.go`](../../internal/media/playback.go)）：
 
 | 方式 | 条件 | 实现 |
 |---|---|---|
-| direct | 封装可直接打开（MP4/MOV，WebM，Chromium 中的 Matroska），视频与所选音轨都能解码，未选择更低画质，使用默认音轨 | `GET /videos/{id}/file`，`http.ServeContent` 支持 Range |
-| remux | 视频是 8 位 H.264（或浏览器支持的 HEVC），但封装、音频或音轨不满足 | FFmpeg 复制视频，音频为 AAC 时复制，否则转为 AAC 立体声 |
-| transcode | 其余情况，或选择了低于原片的画质 | libx264 `veryfast` CRF 22，按画质限制高度与码率 |
+| direct | 封装可直接打开（MP4/MOV，3GPP 只限 H.264；WebM；浏览器报告 Matroska 时的 Matroska），视频与所选音轨都能解码，未选择更低画质，使用默认音轨 | `GET /videos/{id}/file`，`http.ServeContent` 支持 Range |
+| remux | 视频是 8 位 H.264（或浏览器支持的 HEVC），但封装、音频或音轨不满足 | FFmpeg 复制视频，音频为 AAC 或 MP3 时复制，否则转为 AAC 立体声 |
+| transcode | 其余情况，选择了低于原片的画质，或直接播放失败之后 | libx264 `veryfast` CRF 22；未选画质时保留原片高度（最高 2160 行）、不限码率，选择更低画质时按该画质限制；音频为 AAC 或 MP3 时仍复制 |
+
 
 - 转换后的流是分片 MP4（`frag_keyframe+empty_moov+default_base_moof`），不能随机访问。播放器在拖动时用新的 `start` 重新请求，并把该起点加到 `<video>` 的时钟上；进度、字幕与进度条都使用这个绝对时间。
 - 直接播放出错时，播放器自动改为转码一次。
-- 转换流最多同时 2 路（`Options.MaxStreams`），超出返回 `media_busy`；连接断开时 Worker 立即结束 FFmpeg。
+- 转换流最多同时 2 路（`Options.MaxStreams`，默认 `mediaplay.Conversions`），超出返回 `media_busy`；连接断开时 Worker 立即结束 FFmpeg。相册服务在自己的进程中另有 2 路，两者合计最多 4 路，都还要经过媒体 Worker 的共享槽位（见下文“准入与失败”）。
 - 字幕：外挂文件非 UTF-8 时按 GB18030 交给 FFmpeg；内嵌的文本字幕按流索引抽取。转换结果按文件版本缓存。浏览器只把字幕载入隐藏的 `<track>`，由播放器按绝对时间显示，使它在转码重启后仍然对齐。
 - 进度每 10 秒、暂停与关闭时保存；不足 30 秒不记位置，达到 90% 记为已看并清除位置。
 
 ## Worker 协议
 
-- 帧格式与文件代理相同：4 字节大端长度加 JSON，请求的长度前缀上附带 `SCM_RIGHTS` 文件描述符（[`protocol.go`](../../internal/mediaworker/protocol.go)）。
-- 请求只有五种：`probe`、`frame`（时间点与宽度）、`subtitle`（格式与字符集，或内嵌流索引）、`stream`（起点、复制或转码、高度、码率、音轨）、`audio`（起点、采样率、16 或 24 位，把第一条音轨解码为 FLAC，供音乐使用）。每个字段先校验范围，FFmpeg 参数由 [`command.go`](../../internal/mediaworker/command.go) 拼装，输入固定为标准输入上的 `fd:`（FFmpeg 6.1 起支持，可在普通文件上 seek），输出固定为标准输出。
+- 帧格式与文件代理相同：4 字节大端长度加 JSON，请求的长度前缀上附带 `SCM_RIGHTS` 文件描述符（[`protocol.go`](../../internal/ffmpegworker/protocol.go)）。
+- 请求只有五种：`probe`、`frame`（时间点与宽度）、`subtitle`（格式与字符集，或内嵌流索引）、`stream`（起点、复制或转码、高度、码率、音轨）、`audio`（起点、采样率、16 或 24 位，把第一条音轨解码为 FLAC，供音乐使用）。每个字段先校验范围，FFmpeg 参数由 [`command.go`](../../internal/ffmpegworker/command.go) 拼装，输入固定为标准输入上的 `fd:`（FFmpeg 6.1 起支持，可在普通文件上 seek），输出固定为标准输出。
 - 有限输出的操作缓冲后一次返回，并限制大小与时间；`stream` 与 `audio` 在 FFmpeg 产出第一块数据后才回复成功，失败时带回 stderr 最后一行。对端不会在请求后再写入，所以连接上任何读取返回都表示对端已断开，Worker 随即杀掉 FFmpeg。
+- 客户端在请求中带 `ack`，Worker 读到请求与描述符后先回一帧 `accepted`，再开始工作并回复结果。没有 `ack` 的请求（旧客户端）直接得到结果，新客户端遇到旧 Worker 也把第一帧当作结果，所以部署时新旧进程短暂混用不会出错。
+
+## 准入与失败
+
+继续按工作类型共用预算，不按应用预留固定份额（[#73](https://github.com/zhongwater123/A-NAS/issues/73)）。影视转换已有最多 2 路的应用上限，不会独占 6 个流槽位；后台扫描最多占 2 个，交互请求始终另有余量。给音乐、相册等各划固定份额会在其他应用闲置时浪费容量，而且不能增加设备的 CPU 与内存。现有规则不保证每个应用在其他调用方持续繁忙时都有专属槽位；若实机显示音乐仍被其他流长期阻塞，再根据测量调整公平性。本次保持 8 个槽位、分层范围与 3G 共享内存上限，参数的实机评估仍见 #168。
+
+产品服务（影视中心、音乐、文件预览）、相册服务与分享服务共用同一个 FFmpeg Worker。原先各自限流、互不知道对方，超过 `MaxConnections=8` 的连接被 systemd 接受后立即关闭，调用方读到 EOF 便当作 Worker 不在，后台任务因此永久失败（[#168](https://github.com/zhongwater123/A-NAS/issues/168)，[调查](../investigations/2026-10-21-media-worker-shared-budget.md)）。
+
+- **共享槽位**：每个请求在连接前先取得 8 个槽位之一，应答或流关闭时放开（[`admission.go`](../../internal/ffmpegworker/admission.go)）。槽位是 `/run/a-nas-ffmpeg/slots/0`…`7` 八个文件，由安装器的 tmpfiles 条目创建（目录 `root:a-nas-photos 0750`，文件 `0440`）；三个服务都通过主组或 systemd 单元的 `SupplementaryGroups` 获得 `a-nas-photos` 组身份，以只读方式打开并 `flock(2)` 独占其一，所以 `ProtectSystem=strict` 下只读的 `/run` 就够。持有者无论怎样退出，内核都会放开它的锁。没有这个目录时（开发、测试）槽位只在本进程内。
+- **优先级**：交互请求（预览、海报、导入时的探测、字幕、实况照片的动态片段）可用全部 8 个；流（视频转换、音乐解码）最多 6 个，始终给交互留 2 个；后台工作（相册缩略图与 AI 输入、影视中心的探测与截图、音乐扫描）最多 2 个。每种优先级取自己范围内编号最高的空槽，把低编号留给其他优先级。后台请求一直等到有空槽或服务停止，不会因为忙而失败；交互等 20 秒、流等 5 秒，仍没有空槽时返回 `ErrBusy`（也是 `ErrUnavailable`，界面照旧提示稍后再试）。本进程放开的槽位立即唤醒等待者，其他进程放开的由轮询发现（交互 50 ms、流 100 ms、后台 1 秒）。调用方用 `WithPriority` 标记后台工作；`stream` 与 `audio` 默认是流，其余默认是交互。
+- **时限从取得槽位起算**：调用方用 `WithTimeout` 给出的时限不包括排队时间，例如 HEIC 解码与视频帧 30 秒、导入时的探测 15 秒、动态片段 45 秒。原先相册的 30 秒包括等待自己仅有的 2 个解码位，而播放中的实况照片整段占着其中一个，前台播放会让后台任务超时。
+- **连接上限与内存**：`anas-ffmpeg.socket` 的 `MaxConnections=16` 高于槽位数，多出的部分留给调用方已放开槽位、仍在退出的 Worker，正常情况下 systemd 不再丢弃连接。所有 Worker 实例在 [`system-anasffmpeg.slice`](../../deploy/systemd/system/system-anasffmpeg.slice) 中共用 `MemoryMax=3G`（每个实例仍为 2G），超出时内核先回收、再结束这个 slice 中的 Worker，而不是设备上的其他进程；slice 位于 `system.slice` 之下而不是后台的 `anas.slice`，因为播放有人在看，`CPUWeight=50`、`IOWeight=50` 让它在争用时让出 CPU 与磁盘。权重只在同级之间比较，所以写在 slice 上，而不是彼此同级的实例上。
+- **失败分类**：Worker 回 `accepted` 之前的失败（连不上、被 systemd 丢弃、没有对应的解码器、等不到槽位）是 `ErrUnavailable`，同一请求稍后可能成功；之后连接断开是 `ErrInterrupted`（也是 `ErrUnavailable`），表示 Worker 接下了输入却停了，例如解码器耗尽内存，可能与输入有关；Worker 回答超时等无法完成是 `ErrFailed`；读不了文件是 `ErrUnreadable`。后台工作按此决定是否计入尝试：相册遵循与 AI Worker 相同的规则，见[相册的后台任务](photo-library.md#后台任务与资源隔离)；影视中心与音乐没有尝试次数，`ErrUnavailable`（包括中途停止）的文件留到下一轮，影视中心每分钟一轮，音乐在下次扫描，可读出的错误才记为失败。
 
 ## 关联
 
+- 改名升级与回滚：[Worker 单元安装器](../../scripts/install-ffmpeg-units.sh)、[回滚手册](../runbooks/provision-v1.0.1-experimental-storage.md#回滚)。安装器先停止使用方和旧 Worker，再更换单元、套接字、准入目录与环境变量；旧 release 仍使用 `anas-media` 布局。维护会中断当前播放，完成后重新播放。
 - [影视中心规格](../specs/media-center.md)、[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[存储与文件架构](storage-and-files.md)
-- 代码：[`internal/media`](../../internal/media)、[`internal/mediaworker`](../../internal/mediaworker)、[`internal/mediaapi`](../../internal/mediaapi)、[`files.Service.Tree`](../../internal/files/tree.go)、[`web/src/media`](../../web/src/media)
-- 部署：[`anas-media.socket`](../../deploy/systemd/system/anas-media.socket)、[`anas-media@.service`](../../deploy/systemd/system/anas-media@.service)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)、[系统测试](../../scripts/system-test.sh)
+- 代码：[`internal/media`](../../internal/media)、[`internal/mediaplay`](../../internal/mediaplay)、[`internal/ffmpegworker`](../../internal/ffmpegworker)、[`internal/mediaapi`](../../internal/mediaapi)、[`files.Service.Tree`](../../internal/files/tree.go)、[`web/src/media`](../../web/src/media)
+- 部署：[`anas-ffmpeg.socket`](../../deploy/systemd/system/anas-ffmpeg.socket)、[`anas-ffmpeg@.service`](../../deploy/systemd/system/anas-ffmpeg@.service)、[`system-anasffmpeg.slice`](../../deploy/systemd/system/system-anasffmpeg.slice)、[系统服务安装器](../../scripts/install-v1.0.1-system-services.sh)、[系统测试](../../scripts/system-test.sh)
+- 调查：[FFmpeg Worker 的共享预算与后台任务的永久失败](../investigations/2026-10-21-media-worker-shared-budget.md)

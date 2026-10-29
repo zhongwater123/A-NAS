@@ -45,6 +45,8 @@ const (
 	// A failed run is retried after scheduleRetryDelay until the next run is due.
 	scheduleRetryDelay = 15 * time.Minute
 	scheduleTick       = time.Minute
+	// snapshotSweepInterval separates sweeps after the first one ran.
+	snapshotSweepInterval = time.Hour
 	// systemActor records scheduled snapshots and their expiry in the audit log.
 	systemActor = "system"
 )
@@ -117,9 +119,10 @@ type SpaceLookup interface {
 // defaultSchedule protects a space nobody has set a schedule for: a daily
 // snapshot at 03:00, keeping the latest 14.
 func defaultSchedule(spaceID string) SnapshotSchedule {
-	return SnapshotSchedule{SpaceID: spaceID, SnapshotScheduleSettings: SnapshotScheduleSettings{
-		Enabled: true, Frequency: FrequencyDaily, Time: "03:00", Keep: 14, Retention: RetentionCount,
-	}, minuteOfDay: 3 * 60}
+	return SnapshotSchedule{
+		SpaceID: spaceID, Enabled: true, Frequency: FrequencyDaily, Time: "03:00", Keep: 14, Retention: RetentionCount,
+		minuteOfDay: 3 * 60,
+	}
 }
 
 // SnapshotSchedule returns the schedule of a space the actor can see. It reads
@@ -163,6 +166,11 @@ func (s *Service) UpdateSnapshotSchedule(ctx context.Context, actor accounts.Use
 	if err := settings.checkRetention(); err != nil {
 		return SnapshotSchedule{}, err
 	}
+	unlock, err := s.lockSnapshotRetention(ctx, spaceID)
+	if err != nil {
+		return SnapshotSchedule{}, err
+	}
+	defer unlock()
 	tiers := settings.Tiers
 	if _, err := s.store.db.ExecContext(ctx, `
 INSERT INTO snapshot_schedules(space_id, enabled, frequency, minute_of_day, weekday, keep, retention,
@@ -360,11 +368,16 @@ func (s SnapshotSchedule) nextRun(now time.Time, location *time.Location) time.T
 }
 
 // RunSnapshotSchedules takes the snapshots that schedules are due for, looking
-// every minute until ctx ends.
+// every minute until ctx ends. It sweeps snapshots first, so what a crash
+// left is removed before new ones are taken, and then every hour.
 func (s *Service) RunSnapshotSchedules(ctx context.Context, spaces SpaceLookup, logger *slog.Logger) {
 	ticker := time.NewTicker(scheduleTick)
 	defer ticker.Stop()
+	var nextSweep time.Time
 	for {
+		if now := s.now(); !now.Before(nextSweep) {
+			nextSweep = now.Add(s.sweepSnapshots(ctx, logger))
+		}
 		if err := s.RunDueSnapshots(ctx, spaces, logger); err != nil && ctx.Err() == nil {
 			logger.ErrorContext(ctx, "snapshot schedules failed", "error", err)
 		}
@@ -373,6 +386,35 @@ func (s *Service) RunSnapshotSchedules(ctx context.Context, spaces SpaceLookup, 
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+// sweepSnapshots sweeps snapshots, logs what the sweep removed and returns
+// how long to wait before the next one. While the data volume is offline it
+// tries again on the next tick.
+func (s *Service) sweepSnapshots(ctx context.Context, logger *slog.Logger) time.Duration {
+	sweep, err := s.SweepSnapshots(ctx)
+	if sweep.Snapshots > 0 {
+		logger.InfoContext(ctx, "removed snapshots whose taking never finished", "count", sweep.Snapshots)
+	}
+	if sweep.Unrecorded > 0 {
+		logger.InfoContext(ctx, "left snapshots on the data volume that the catalog does not know", "count", sweep.Unrecorded)
+	}
+	if sweep.Unfound > 0 {
+		logger.WarnContext(ctx, "none of the catalog's snapshots is on the data volume, so their records stay", "count", sweep.Unfound)
+	}
+	for _, snapshot := range sweep.Records {
+		logger.WarnContext(ctx, "removed the record of a snapshot that is no longer on the data volume",
+			"space_id", snapshot.SpaceID, "snapshot", snapshot.ID, "name", snapshot.Name)
+	}
+	switch {
+	case err == nil:
+		return snapshotSweepInterval
+	case errors.Is(err, ErrVolumeUnavailable) || ctx.Err() != nil:
+		return 0
+	default:
+		logger.WarnContext(ctx, "snapshot sweep failed", "error", err)
+		return scheduleRetryDelay
 	}
 }
 
@@ -435,7 +477,7 @@ func (s *Service) runSchedule(ctx context.Context, spaces SpaceLookup, schedule 
 		return err
 	}
 	if err == nil {
-		if err := s.expireScheduledSnapshots(ctx, schedule); err != nil {
+		if err := s.expireScheduledSnapshots(ctx, schedule.SpaceID); err != nil {
 			logger.ErrorContext(ctx, "expiring scheduled snapshots failed", "space_id", schedule.SpaceID, "error", err)
 		}
 	}
@@ -467,24 +509,53 @@ func (s *Service) takeScheduledSnapshot(ctx context.Context, spaces SpaceLookup,
 
 // expireScheduledSnapshots deletes the scheduled snapshots of a space that
 // its retention no longer keeps. Manual snapshots are never expired.
-func (s *Service) expireScheduledSnapshots(ctx context.Context, schedule SnapshotSchedule) error {
-	snapshots, err := s.spaceSnapshots(ctx, schedule.SpaceID, SnapshotOriginScheduled)
-	if err != nil {
-		return err
-	}
-	kept := schedule.retained(snapshots, s.location)
+func (s *Service) expireScheduledSnapshots(ctx context.Context, spaceID string) error {
+	attempted := map[string]bool{}
 	var failures []error
+	for {
+		more, err := s.expireNextSnapshot(ctx, spaceID, attempted)
+		if err != nil {
+			failures = append(failures, err)
+		}
+		if !more {
+			return errors.Join(failures...)
+		}
+	}
+}
+
+// Release the gate after each deletion so a queued settings/keep request can
+// take effect before another irreversible operation. Recompute retention each
+// time; a failed ID is attempted only once per cycle.
+func (s *Service) expireNextSnapshot(ctx context.Context, spaceID string, attempted map[string]bool) (bool, error) {
+	unlock, err := s.lockSnapshotRetention(ctx, spaceID)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	schedules, err := s.loadSchedules(ctx, "WHERE space_id = ?", spaceID)
+	if err != nil {
+		return false, err
+	}
+	if len(schedules) == 0 || !schedules[0].Enabled {
+		return false, nil
+	}
+	snapshots, err := s.spaceSnapshots(ctx, spaceID, SnapshotOriginScheduled)
+	if err != nil {
+		return false, err
+	}
+	kept := schedules[0].retained(snapshots, s.location)
 	for _, snapshot := range snapshots {
-		if kept[snapshot.ID] {
+		if kept[snapshot.ID] || attempted[snapshot.ID] {
 			continue
 		}
+		attempted[snapshot.ID] = true
 		if err := s.deleteSnapshot(ctx, snapshot); err != nil {
-			failures = append(failures, fmt.Errorf("expire snapshot %s: %w", snapshot.ID, err))
-			continue
+			return true, fmt.Errorf("expire snapshot %s: %w", snapshot.ID, err)
 		}
 		_ = s.audit(ctx, systemActor, "snapshot.expired", snapshot.SpaceID, snapshot.ID, snapshot.Name)
+		return true, nil
 	}
-	return errors.Join(failures...)
+	return false, nil
 }
 
 // retained names the scheduled snapshots, given newest first, that the

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -183,6 +184,12 @@ func Render(ctx context.Context, entry Entry, policy Policy, identity Identity, 
 	sort.Strings(serviceNames)
 	for _, name := range serviceNames {
 		service := project.Services[name]
+		// Bound container stdout/stderr independently of the daemon defaults
+		// and the upstream manifest. Docker keeps at most three 10 MiB files.
+		service.Logging = &types.LoggingConfig{
+			Driver:  "json-file",
+			Options: map[string]string{"max-size": "10m", "max-file": "3"},
+		}
 		descriptions := casaosDescriptions(service.Extensions)
 		checkService(name, service, reject)
 		runAs := runAsFor(entry.App.ID, name, service)
@@ -424,10 +431,8 @@ func casaosDescriptions(extensions types.Extensions) serviceDescriptions {
 }
 
 func appendUnique(items []string, item string) []string {
-	for _, existing := range items {
-		if existing == item {
-			return items
-		}
+	if slices.Contains(items, item) {
+		return items
 	}
 	return append(items, item)
 }

@@ -3,39 +3,112 @@
 // model over its own JSON-RPC client; the conversation list, confirmation cards
 // and styling are A-NAS's.
 import {
+  type AppendMessage,
   AssistantRuntimeProvider,
   ChainOfThoughtPrimitive,
   ComposerPrimitive,
+  type ExternalStoreAdapter,
   MessagePrimitive,
+  type ThreadMessageLike,
   ThreadPrimitive,
+  type ToolCallMessagePartComponent,
   useAuiState,
   useExternalStoreRuntime,
-  type AppendMessage,
-  type ThreadMessageLike,
-  type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
-import { type CodeHeaderProps, type StreamdownTextComponents, StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
+import {
+  type CodeHeaderProps,
+  type StreamdownTextComponents,
+  StreamdownTextPrimitive,
+} from "@assistant-ui/react-streamdown";
 import { diffLines } from "diff";
 import {
-  ArrowUp, Brain, Check, ChevronRight, CircleAlert, CircleHelp, Clock, Code, Copy, FilePen, FileSearch, FileText, FolderPlus, Hand, History,
-  Image as ImageIcon, Info, ListChecks, LoaderCircle, LockKeyhole, MessageSquarePlus, MoveRight, Pencil, Search, Send, ShieldCheck, Square, SquareTerminal,
-  Trash2, Users, Video, Wrench, X,
+  ArrowUp,
+  Brain,
+  CalendarClock,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  CircleHelp,
+  Code,
+  Copy,
+  Eye,
+  FilePen,
+  FileSearch,
+  FileText,
+  FolderPlus,
+  Hand,
+  History,
+  Image as ImageIcon,
+  Info,
+  Keyboard,
+  ListChecks,
+  LoaderCircle,
+  LockKeyhole,
+  MessageSquarePlus,
+  MonitorSmartphone,
+  MousePointerClick,
+  MoveRight,
+  Pencil,
+  Search,
+  Send,
+  ShieldCheck,
+  Square,
+  SquareTerminal,
+  Trash2,
+  Users,
+  Video,
+  Wrench,
+  X,
 } from "lucide-react";
-import { type ComponentPropsWithoutRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-
-import { AssistantGlyph } from "../AssistantGlyph";
-import { copyText } from "../clipboard";
 import {
-  type Approval, type AssistantQuestion, type AssistantSession, type ChangeOperation,
-  answerQuestions, decideApproval, deleteSession, failureText, listApprovals, listSessions, renameSession,
-} from "./assistantApi";
+  type ComponentPropsWithoutRef,
+  createContext,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useEffectEvent,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { ErrorBoundary } from "react-error-boundary";
+
+import { WINDOW_ID } from "../desktop/windowSnapshot";
+import { formatBytes } from "../lib/bytes";
+import { copyText } from "../lib/clipboard";
+import { relativeTime as formatRelativeTime } from "../lib/time";
+import { AssistantGlyph } from "./AssistantGlyph";
+import {
+  type Approval,
+  type AssistantQuestion,
+  type AssistantSession,
+  answerQuestions,
+  type ChangeOperation,
+  decideApproval,
+  deleteSession,
+  failureText,
+  listApprovals,
+  listSessions,
+  renameSession,
+} from "./api";
+import styles from "./assistant.module.css";
+import { chatMessageText } from "./hermes/lib/chat-messages/parts";
+import { withUniqueToolCallIdsWithinMessage } from "./hermes/lib/chat-messages/tool-parts";
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
 import type { SessionActiveListResult } from "./hermes/shared/gateway-contract.generated";
 import { MemoryView } from "./MemoryView";
-import { linkPhotos, photoOf } from "./photoLinks";
+import { linkPhotos, type NamedPhoto, photoOf, photosIn } from "./photoLinks";
+import { TasksView } from "./TasksView";
+import { readTaskNotices, taskOfRun, useTaskNotices } from "./taskNotices";
 import { useAssistantGateway } from "./useAssistantGateway";
 import { useAssistantThread } from "./useAssistantThread";
-import "./assistant.css";
+import { ControlError, type Danger, WebosController } from "./webosControl";
 
 const SUGGESTIONS = [
   "总结一下共享空间里有哪些文件",
@@ -43,16 +116,49 @@ const SUGGESTIONS = [
   "我之前删掉过一个文件，帮我在回收站找找",
 ];
 
+// How long a step VNAS takes on the desktop waits for the member to allow it:
+// Hermes gives the window 30 s to answer a browser command.
+const CONTROL_CONFIRM_MS = 25_000;
+// The window serves these of Hermes's browser commands (internal/assistantapi rpc.go);
+// a screenshot is what Hermes's browser_vision looks at (hermes-patches/0003).
+const CONTROL_CAPABILITIES = [
+  "browser_snapshot",
+  "browser_click",
+  "browser_type",
+  "browser_press",
+  "browser_scroll",
+  "browser_screenshot",
+];
+
 // Opens a photo the assistant named in the photo app, from the desktop.
 const PhotoOpener = createContext<((assetId: string) => void) | undefined>(undefined);
 
-export function AssistantPanel({ username, onShowPhoto }: { username: string; onShowPhoto?(assetId: string): void }) {
+// Opening a run reads its task's notices.
+function readRun(id: string) {
+  const task = taskOfRun(id);
+  if (task) readTaskNotices(task);
+}
+
+export function AssistantPanel({
+  username,
+  onShowPhoto,
+  intent,
+  onIntentHandled,
+}: {
+  username: string;
+  onShowPhoto?(assetId: string): void;
+  /** What the desktop asks the window to show: a run of a scheduled task, or the tasks. */
+  intent?: { sessionId?: string; title?: string };
+  onIntentHandled?(handled: { sessionId?: string; title?: string }): void;
+}) {
   const gateway = useAssistantGateway();
   const [sessions, setSessions] = useState<AssistantSession[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [activeId, setActiveId] = useState<string>();
-  // The window shows a conversation, or what the assistant remembers.
-  const [view, setView] = useState<"chat" | "memory">("chat");
+  // The window shows a conversation, what the assistant remembers, or its scheduled tasks.
+  const [view, setView] = useState<"chat" | "memory" | "tasks">("chat");
+  // A run of a scheduled task opened from its task: not in the conversation list.
+  const [run, setRun] = useState<{ id: string; title: string }>();
   const [approvals, setApprovals] = useState<Map<string, Approval>>(new Map());
   // Stored conversations with a turn running in the instance, wherever it was started.
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -64,30 +170,44 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
   // A list that failed while the instance was still starting says so until a
   // later load succeeds.
   const listFailure = useRef("");
-  const refreshSessions = useCallback(() => listSessions()
-    .then((list) => {
-      setSessions(list);
-      setSessionsLoaded(true);
-      const failure = listFailure.current;
-      listFailure.current = "";
-      if (failure) setNotice((current) => (current === failure ? "" : current));
-    })
-    .catch((reason) => {
-      listFailure.current = failureText(reason);
-      setNotice(listFailure.current);
-    }), []);
+  const refreshSessions = useCallback(
+    () =>
+      listSessions()
+        .then((list) => {
+          setSessions(list);
+          setSessionsLoaded(true);
+          const failure = listFailure.current;
+          listFailure.current = "";
+          if (failure) setNotice((current) => (current === failure ? "" : current));
+        })
+        .catch((reason) => {
+          listFailure.current = failureText(reason);
+          setNotice(listFailure.current);
+        }),
+    [],
+  );
   const refreshBusy = useCallback(() => {
     if (!gateway.ready) return;
-    gateway.client.request<SessionActiveListResult>("session.active_list")
-      .then((result) => setBusy(new Set(result.sessions.filter((item) => item.status !== "idle").map((item) => item.session_key))))
+    gateway.client
+      .request<SessionActiveListResult>("session.active_list")
+      .then((result) =>
+        setBusy(new Set(result.sessions.filter((item) => item.status !== "idle").map((item) => item.session_key))),
+      )
       .catch(() => undefined);
   }, [gateway.client, gateway.ready]);
-  const keep = useCallback((approval: Approval) => setApprovals((all) => new Map(all).set(approval.requestId, approval)), []);
+  const keep = useCallback(
+    (approval: Approval) => setApprovals((all) => new Map(all).set(approval.requestId, approval)),
+    [],
+  );
   const reloadApprovals = useCallback(() => {
-    listApprovals().then((list) => setApprovals(new Map(list.map((approval) => [approval.requestId, approval])))).catch(() => undefined);
+    listApprovals()
+      .then((list) => setApprovals(new Map(list.map((approval) => [approval.requestId, approval]))))
+      .catch(() => undefined);
   }, []);
 
-  useEffect(() => { void refreshSessions(); }, [refreshSessions]);
+  useEffect(() => {
+    void refreshSessions();
+  }, [refreshSessions]);
   // Conversations, cards and running turns, again on every (re)connection.
   useEffect(() => {
     if (!gateway.ready) return;
@@ -98,32 +218,37 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
   // The product service tells every window of the member how each card stands;
   // a card from a conversation this window has not listed yet, or Hermes saying
   // the conversations changed, brings the list up to date.
-  const known = useRef(new Set<string>());
-  known.current = new Set(sessions.map((session) => session.id));
-  useEffect(() => gateway.client.onEvent((event) => {
-    const type = event.type as string;
-    if (type === "anas.approval" && event.payload) {
-      const approval = event.payload as unknown as Approval;
-      keep(approval);
-      if (approval.storedSessionId && !known.current.has(approval.storedSessionId)) void refreshSessions();
-    }
-    const session = typeof event.session_id === "string" ? event.session_id : "";
-    if (type === "review.summary" && session) {
-      // Hermes leads with 💾; the notice has its own icon.
-      const text = String((event.payload as { text?: unknown } | undefined)?.text ?? "").replace(/^\p{Extended_Pictographic}️?\s*/u, "").trim();
-      if (text) setReviews((all) => new Map(all).set(session, text));
-    }
-    if (type === "message.start" && session) {
-      setReviews((all) => {
-        if (!all.has(session)) return all;
-        const next = new Map(all);
-        next.delete(session);
-        return next;
-      });
-    }
-    if (type === "sessions.changed" || type === "session.title") void refreshSessions();
-    if (type === "sessions.changed" || type === "message.complete") refreshBusy();
-  }), [gateway.client, keep, refreshBusy, refreshSessions]);
+  const known = useEffectEvent((id: string) => sessions.some((session) => session.id === id));
+  useEffect(
+    () =>
+      gateway.client.onEvent((event) => {
+        const type = event.type as string;
+        if (type === "anas.approval" && event.payload) {
+          const approval = event.payload as unknown as Approval;
+          keep(approval);
+          if (approval.storedSessionId && !known(approval.storedSessionId)) void refreshSessions();
+        }
+        const session = typeof event.session_id === "string" ? event.session_id : "";
+        if (type === "review.summary" && session) {
+          // Hermes leads with 💾; the notice has its own icon.
+          const text = String((event.payload as { text?: unknown } | undefined)?.text ?? "")
+            .replace(/^\p{Extended_Pictographic}️?\s*/u, "")
+            .trim();
+          if (text) setReviews((all) => new Map(all).set(session, text));
+        }
+        if (type === "message.start" && session) {
+          setReviews((all) => {
+            if (!all.has(session)) return all;
+            const next = new Map(all);
+            next.delete(session);
+            return next;
+          });
+        }
+        if (type === "sessions.changed" || type === "session.title") void refreshSessions();
+        if (type === "sessions.changed" || type === "message.complete") refreshBusy();
+      }),
+    [gateway.client, keep, refreshBusy, refreshSessions],
+  );
 
   const changed = useCallback(() => {
     void refreshSessions();
@@ -131,20 +256,168 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
     // Hermes names a new conversation in the background after its first turn.
     window.setTimeout(() => void refreshSessions(), 4000);
   }, [refreshSessions, refreshBusy]);
-  const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed });
+  // VNAS operates the WebOS page it is on as Hermes's browser for its live
+  // conversation (Hermes's browser control). A step whose writes delete, move,
+  // share or change settings, and any step in the terminal, Docker or 应用中心,
+  // waits here for the member.
+  const [controlAsk, setControlAsk] = useState<{ danger: Danger; until: number; answer(allowed: boolean): void }>();
+  const asking = useRef<(allowed: boolean) => void>(undefined);
+  // One card at a time: a write that arrives while another card is open waits its turn.
+  const cards = useRef(Promise.resolve());
+  const controller = useRef<WebosController>(undefined);
+  useEffect(() => {
+    const installed = new WebosController({
+      exclude: (element) => Boolean(element.closest(`[${WINDOW_ID}="assistant"], [data-vnas-overlay]`)),
+      confirm: (danger) => {
+        const shown = cards.current.then(
+          () =>
+            new Promise<boolean>((resolve) => {
+              let timer = 0;
+              const answer = (allowed: boolean) => {
+                window.clearTimeout(timer);
+                asking.current = undefined;
+                setControlAsk(undefined);
+                resolve(allowed);
+              };
+              asking.current = answer;
+              timer = window.setTimeout(() => answer(false), CONTROL_CONFIRM_MS);
+              setControlAsk({ danger, until: Date.now() + CONTROL_CONFIRM_MS, answer });
+            }),
+        );
+        cards.current = shown.then(() => undefined);
+        return shown;
+      },
+    });
+    controller.current = installed;
+    return installed.install();
+  }, []);
+  // The window that sends a prompt is the conversation's browser for its turn:
+  // it registers again before every prompt, so the steps and their cards stay
+  // on the device the member is using; a window that only shows the
+  // conversation never registers (#160). These are the live sessions this
+  // connection registered for.
+  const controlled = useRef(new Set<string>());
+  useLayoutEffect(() => {
+    controlled.current.clear();
+  }, [gateway.generation]);
+  const beforePrompt = useCallback(
+    (liveId: string) =>
+      gateway.client
+        .request("browser.controller.register", {
+          session_id: liveId,
+          protocol_version: 1,
+          controller_id: "vnas-window",
+          browser_profile_id: "webos",
+          capabilities: CONTROL_CAPABILITIES,
+        })
+        .then(
+          () => {
+            controlled.current.add(liveId);
+          },
+          () => {
+            controlled.current.delete(liveId);
+          },
+        ),
+    [gateway.client],
+  );
+  useEffect(
+    () =>
+      gateway.client.onEvent((event) => {
+        const type = event.type as string;
+        const session = typeof event.session_id === "string" ? event.session_id : "";
+        if (type === "browser.controller.cancel") {
+          // Hermes stopped waiting: the step is not taken.
+          asking.current?.(false);
+          return;
+        }
+        if (type !== "browser.controller.command" || !controlled.current.has(session)) return;
+        const command = (event.payload ?? {}) as {
+          command_id?: string;
+          action?: string;
+          arguments?: Record<string, unknown>;
+        };
+        if (!command.command_id || !command.action || !controller.current) return;
+        void controller.current
+          .run(command.action, command.arguments ?? {})
+          .then(
+            (result) => ({ ok: true, result }),
+            (reason) => ({
+              ok: false,
+              error: { message: reason instanceof ControlError ? reason.message : "这一步没有完成" },
+            }),
+          )
+          .then((outcome) =>
+            gateway.client.request("browser.controller.result", {
+              session_id: session,
+              command_id: command.command_id,
+              ...outcome,
+            }),
+          )
+          .catch(() => undefined);
+      }),
+    [gateway.client],
+  );
+
+  const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed, beforePrompt });
   const { send, cancel } = thread;
+
+  // Results of scheduled tasks the member has not read; opening a run reads its task's.
+  const unread = useTaskNotices().length;
+  const showRun = useCallback((id: string, title: string) => {
+    setRun({ id, title });
+    setActiveId(id);
+    setView("chat");
+  }, []);
+  const openRun = useCallback(
+    (id: string, title: string) => {
+      readRun(id);
+      showRun(id, title);
+    },
+    [showRun],
+  );
+  // A task asked for from the tasks page goes to a new conversation, once the
+  // thread has left the one that was open.
+  const [plan, setPlan] = useState<string>();
+  const [planned, setPlanned] = useState<{ text: string }>();
+  if (plan !== undefined && !activeId) {
+    setPlan(undefined);
+    setPlanned({ text: plan });
+  }
+  const sendPlan = useEffectEvent((text: string) => void send(text));
+  const sentPlan = useRef<{ text: string }>(undefined);
+  useEffect(() => {
+    if (!planned || sentPlan.current === planned) return;
+    sentPlan.current = planned;
+    sendPlan(planned.text);
+  }, [planned]);
+  // A toast on the desktop opens a run, or the tasks.
+  const [intentBefore, setIntentBefore] = useState<typeof intent>();
+  if (intentBefore !== intent) {
+    setIntentBefore(intent);
+    if (intent?.sessionId) showRun(intent.sessionId, intent.title ?? "定时任务");
+    else if (intent) setView("tasks");
+  }
+  const intentHandled = useEffectEvent((handled: { sessionId?: string; title?: string }) => onIntentHandled?.(handled));
+  useEffect(() => {
+    if (!intent) return;
+    if (intent.sessionId) readRun(intent.sessionId);
+    intentHandled(intent);
+  }, [intent]);
 
   // assistant-ui re-reads its store whenever the adapter changes, so it only
   // changes with the messages or the running state.
   const visible = useMemo(() => thread.messages.filter((message) => !message.hidden), [thread.messages]);
-  const adapter = useMemo(() => ({
-    messages: visible,
-    isRunning: thread.running,
-    convertMessage: toThreadMessage,
-    onNew: async (message: AppendMessage) => send(message.content.map((part) => (part.type === "text" ? part.text : "")).join("")),
-    onCancel: async () => cancel(),
-  }), [visible, thread.running, send, cancel]);
-  const runtime = useExternalStoreRuntime<ChatMessage>(adapter);
+  const adapter = useMemo(
+    () => ({
+      messages: visible,
+      isRunning: thread.running,
+      convertMessage: toThreadMessage,
+      onNew: async (message: AppendMessage) =>
+        send(message.content.map((part) => (part.type === "text" ? part.text : "")).join("")),
+      onCancel: async () => cancel(),
+    }),
+    [visible, thread.running, send, cancel],
+  );
 
   const remove = async (session: AssistantSession) => {
     if (!window.confirm(`删除对话“${session.title || "新对话"}”？删除后无法恢复。`)) return;
@@ -159,8 +432,12 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
   };
 
   const rename = async (session: AssistantSession, title: string) => {
-    const updated = await renameSession(session.id, title).catch((reason) => { setNotice(failureText(reason)); return undefined; });
-    if (updated) setSessions((list) => list.map((item) => (item.id === updated.id ? { ...item, title: updated.title } : item)));
+    const updated = await renameSession(session.id, title).catch((reason) => {
+      setNotice(failureText(reason));
+      return undefined;
+    });
+    if (updated)
+      setSessions((list) => list.map((item) => (item.id === updated.id ? { ...item, title: updated.title } : item)));
   };
 
   const decide = async (approval: Approval, confirm: boolean, forSession = false) => {
@@ -181,117 +458,406 @@ export function AssistantPanel({ username, onShowPhoto }: { username: string; on
     }
   };
 
-  // A card belongs to the conversation it was asked in and shows only there; the
-  // list marks the conversations waiting for an answer.
+  // A card belongs to the conversation it was asked in and shows only there,
+  // above the composer, while it waits for the member: once answered (here or
+  // in another window), withdrawn or timed out it leaves, and what came of it
+  // is in the steps and the reply. The list marks the conversations waiting
+  // for an answer.
   const active = sessions.find((session) => session.id === activeId);
   const waiting = new Map<string, number>();
   for (const approval of approvals.values()) {
-    if (approval.status === "awaiting" && approval.storedSessionId) waiting.set(approval.storedSessionId, (waiting.get(approval.storedSessionId) ?? 0) + 1);
+    if (approval.status === "awaiting" && approval.storedSessionId)
+      waiting.set(approval.storedSessionId, (waiting.get(approval.storedSessionId) ?? 0) + 1);
   }
   const here = [...approvals.values()]
-    .filter((approval) => (activeId && approval.storedSessionId === activeId) || (thread.liveId && approval.sessionId === thread.liveId))
-    .filter((approval) => approval.status === "awaiting" || approval.status === "deciding" || Date.now() / 1000 - approval.createdAt < 600)
+    .filter(
+      (approval) =>
+        (activeId && approval.storedSessionId === activeId) || (thread.liveId && approval.sessionId === thread.liveId),
+    )
+    .filter((approval) => approval.status === "awaiting" || approval.status === "deciding")
     .sort((a, b) => a.createdAt - b.createdAt);
   const unreachable = !gateway.ready && gateway.problem;
+  const runOpen = Boolean(run && run.id === activeId && !active);
+  const dock = (
+    <>
+      {controlAsk && <ControlCard ask={controlAsk} />}
+      {here.length > 0 && (
+        <section className={styles.asChanges} aria-label="本对话中等你确认或回答的事">
+          {here.map((approval) =>
+            approval.kind === "command" ? (
+              <CommandCard
+                key={approval.requestId}
+                approval={approval}
+                onDecide={(confirm, forSession) => decide(approval, confirm, forSession)}
+              />
+            ) : approval.kind === "question" ? (
+              <QuestionCard
+                key={approval.requestId}
+                approval={approval}
+                onAnswer={(answers) => answer(approval, answers)}
+                onSkip={() => decide(approval, false)}
+              />
+            ) : (
+              <ApprovalCard
+                key={approval.requestId}
+                approval={approval}
+                onDecide={(confirm) => decide(approval, confirm)}
+              />
+            ),
+          )}
+        </section>
+      )}
+    </>
+  );
 
   return (
     <PhotoOpener.Provider value={onShowPhoto}>
-    <div className="as-app">
-      <aside className="as-side">
-        <button type="button" className="as-new" onClick={() => { setActiveId(undefined); setView("chat"); }}><MessageSquarePlus />新对话</button>
-        <button type="button" className={`as-nav${view === "memory" ? " active" : ""}`} aria-pressed={view === "memory"} onClick={() => setView("memory")}>
-          <Brain />记忆<small>VNAS 记住的内容</small>
-        </button>
-        <div className="as-side-label"><History />对话</div>
-        <ul className="as-sessions">
-          {sessions.map((session) => (
-            <SessionRow key={session.id} session={session} active={session.id === activeId} waiting={waiting.get(session.id) ?? 0}
-              running={busy.has(session.id)}
-              onOpen={() => { setActiveId(session.id); setView("chat"); }} onRename={(title) => void rename(session, title)} onDelete={() => void remove(session)} />
-          ))}
-          {!sessions.length && <li className="as-sessions-empty">{sessionsLoaded ? "还没有对话" : <><LoaderCircle />正在启动 VNAS…</>}</li>}
-        </ul>
-        <TrustNote />
-      </aside>
-
-      <main className="as-main">
-        <header className="as-head">
-          <h2>{view === "memory" ? "记忆" : active?.title || (activeId ? "新对话" : "开始一个对话")}</h2>
-          {thread.running && <span className="as-working"><LoaderCircle />正在处理</span>}
-          {!gateway.ready && !unreachable && <span className="as-working"><LoaderCircle />正在连接 VNAS</span>}
-        </header>
-
-        {view === "memory" && <MemoryView onConversationsDeleted={() => { setActiveId(undefined); void refreshSessions(); }} />}
-        <AssistantRuntimeProvider runtime={runtime}>
-          <ThreadPrimitive.Root className="as-thread" hidden={view !== "chat"}>
-            <ThreadPrimitive.Viewport className="as-viewport" autoScroll={Boolean(activeId)}>
-              {!activeId && !thread.messages.length ? (
-                <Welcome username={username} onPick={(text) => void send(text)} />
-              ) : thread.loading && !thread.messages.length ? (
-                <div className="as-loading"><LoaderCircle />正在打开对话…</div>
-              ) : (
-                <ThreadPrimitive.Messages components={THREAD_COMPONENTS} />
-              )}
-              {(thread.error || notice || unreachable) && (
-                <div className="as-error" role="alert">
-                  <CircleAlert /><span>{thread.error || notice || unreachable}</span>
-                  {notice && <button type="button" aria-label="关闭" onClick={() => setNotice("")}><X /></button>}
-                </div>
-              )}
-              {thread.liveId && reviews.get(thread.liveId) && (
-                <div className="as-review" role="status">
-                  <div className="as-review-note">
-                    <Brain /><span>{reviews.get(thread.liveId)}</span>
-                    <button type="button" onClick={() => setView("memory")}>查看记忆</button>
-                  </div>
-                </div>
-              )}
-              <div className="as-viewport-spacer" />
-            </ThreadPrimitive.Viewport>
-
-            {here.length > 0 && (
-              <section className="as-changes" aria-label="本对话中等你确认或回答的事">
-                {here.map((approval) => approval.kind === "command" ? (
-                  <CommandCard key={approval.requestId} approval={approval} onDecide={(confirm, forSession) => decide(approval, confirm, forSession)} />
-                ) : approval.kind === "question" ? (
-                  <QuestionCard key={approval.requestId} approval={approval} onAnswer={(answers) => answer(approval, answers)} onSkip={() => decide(approval, false)} />
-                ) : (
-                  <ApprovalCard key={approval.requestId} approval={approval} onDecide={(confirm) => decide(approval, confirm)} />
-                ))}
-              </section>
+      <div className={styles.asApp}>
+        <aside className={styles.asSide}>
+          <button
+            type="button"
+            className={styles.asNew}
+            onClick={() => {
+              setActiveId(undefined);
+              setView("chat");
+            }}
+          >
+            <MessageSquarePlus />
+            新对话
+          </button>
+          <button
+            type="button"
+            className={`${styles.asNav}${view === "memory" ? ` ${styles.active}` : ""}`}
+            aria-pressed={view === "memory"}
+            onClick={() => setView("memory")}
+          >
+            <Brain />
+            记忆<small>VNAS 记住的内容</small>
+          </button>
+          <button
+            type="button"
+            className={`${styles.asNav}${view === "tasks" ? ` ${styles.active}` : ""}`}
+            aria-pressed={view === "tasks"}
+            onClick={() => setView("tasks")}
+          >
+            <CalendarClock />
+            定时任务
+            {unread > 0 ? (
+              <span className={styles.asNavCount} title={`${unread} 个任务有新结果`}>
+                {unread}
+              </span>
+            ) : (
+              <small>按时替你做事</small>
             )}
+          </button>
+          <div className={styles.asSideLabel}>
+            <History />
+            对话
+          </div>
+          <ul className={styles.asSessions}>
+            {sessions.map((session) => (
+              <SessionRow
+                key={session.id}
+                session={session}
+                active={session.id === activeId}
+                waiting={waiting.get(session.id) ?? 0}
+                running={busy.has(session.id)}
+                onOpen={() => {
+                  setActiveId(session.id);
+                  setView("chat");
+                }}
+                onRename={(title) => void rename(session, title)}
+                onDelete={() => void remove(session)}
+              />
+            ))}
+            {!sessions.length && (
+              <li className={styles.asSessionsEmpty}>
+                {sessionsLoaded ? (
+                  "还没有对话"
+                ) : (
+                  <>
+                    <LoaderCircle />
+                    正在启动 VNAS…
+                  </>
+                )}
+              </li>
+            )}
+          </ul>
+          <TrustNote />
+        </aside>
 
-            <ComposerPrimitive.Root className="as-composer">
-              <ComposerPrimitive.Input className="as-input" placeholder="让 VNAS 帮你找文件、整理内容，或修改你的文件…" rows={1} autoFocus submitOnEnter />
-              {thread.running
-                ? <ComposerPrimitive.Cancel className="as-send stop" aria-label="停止"><Square /></ComposerPrimitive.Cancel>
-                : <ComposerPrimitive.Send className="as-send" aria-label="发送"><ArrowUp /></ComposerPrimitive.Send>}
-            </ComposerPrimitive.Root>
-          </ThreadPrimitive.Root>
-        </AssistantRuntimeProvider>
-      </main>
-    </div>
+        <main className={styles.asMain}>
+          <header className={styles.asHead}>
+            {view === "chat" && runOpen && (
+              <button
+                type="button"
+                className={styles.asHeadBack}
+                onClick={() => setView("tasks")}
+                aria-label="回到定时任务"
+              >
+                <ChevronLeft />
+                <CalendarClock />
+              </button>
+            )}
+            <h2>
+              {view === "memory"
+                ? "记忆"
+                : view === "tasks"
+                  ? "定时任务"
+                  : active?.title || (runOpen ? run?.title : activeId ? "新对话" : "开始一个对话")}
+            </h2>
+            {thread.running && (
+              <span className={styles.asWorking}>
+                <LoaderCircle />
+                正在处理
+              </span>
+            )}
+            {!gateway.ready && !unreachable && (
+              <span className={styles.asWorking}>
+                <LoaderCircle />
+                正在连接 VNAS
+              </span>
+            )}
+          </header>
+
+          {view === "memory" && (
+            <MemoryView
+              onConversationsDeleted={() => {
+                setActiveId(undefined);
+                void refreshSessions();
+              }}
+            />
+          )}
+          {view === "tasks" && (
+            <TasksView
+              onOpenRun={openRun}
+              onPlan={(text) => {
+                setActiveId(undefined);
+                setView("chat");
+                if (text) setPlan(text);
+              }}
+            />
+          )}
+          {/* A conversation that fails to render takes down only itself: the list,
+              the cards waiting for the member and the other conversations stay
+              usable. The next change of its messages tries again. */}
+          <ErrorBoundary
+            key={activeId ?? ""}
+            resetKeys={[thread.messages]}
+            onError={(error, info) => console.error("VNAS conversation render failed", error, info.componentStack)}
+            fallback={
+              <div className={styles.asThread} hidden={view !== "chat"}>
+                <div className={styles.asThreadFailed} role="alert">
+                  <CircleAlert />
+                  <strong>这个对话暂时无法显示</strong>
+                  <p>VNAS 仍在后台处理，等你确认的事照常显示在下方。可以打开其他对话，或开始新对话。</p>
+                  <button type="button" onClick={() => setActiveId(undefined)}>
+                    <MessageSquarePlus />
+                    开始新对话
+                  </button>
+                </div>
+                {dock}
+              </div>
+            }
+          >
+            <ConversationRuntime adapter={adapter}>
+              <ThreadPrimitive.Root className={styles.asThread} hidden={view !== "chat"}>
+                <ThreadPrimitive.Viewport className={styles.asViewport} autoScroll={Boolean(activeId)}>
+                  {!activeId && !thread.messages.length ? (
+                    <Welcome username={username} onPick={(text) => void send(text)} />
+                  ) : thread.loading && !thread.messages.length ? (
+                    <div className={styles.asLoading}>
+                      <LoaderCircle />
+                      正在打开对话…
+                    </div>
+                  ) : (
+                    <ThreadPrimitive.Messages components={THREAD_COMPONENTS} />
+                  )}
+                  {(thread.error || notice || unreachable) && (
+                    <div className={styles.asError} role="alert">
+                      <CircleAlert />
+                      <span>{thread.error || notice || unreachable}</span>
+                      {notice && (
+                        <button type="button" aria-label="关闭" onClick={() => setNotice("")}>
+                          <X />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {thread.liveId && reviews.get(thread.liveId) && (
+                    <div className={styles.asReview} role="status">
+                      <div className={styles.asReviewNote}>
+                        <Brain />
+                        <span>{reviews.get(thread.liveId)}</span>
+                        <button type="button" onClick={() => setView("memory")}>
+                          查看记忆
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className={styles.asViewportSpacer} />
+                </ThreadPrimitive.Viewport>
+
+                {dock}
+
+                <ComposerPrimitive.Root className={styles.asComposer}>
+                  <ComposerPrimitive.Input
+                    className={styles.asInput}
+                    placeholder="让 VNAS 帮你找文件、整理内容，或修改你的文件…"
+                    rows={1}
+                    autoFocus
+                    submitOnEnter
+                  />
+                  {thread.running ? (
+                    <ComposerPrimitive.Cancel className={`${styles.asSend} ${styles.stop}`} aria-label="停止">
+                      <Square />
+                    </ComposerPrimitive.Cancel>
+                  ) : (
+                    <ComposerPrimitive.Send className={styles.asSend} aria-label="发送">
+                      <ArrowUp />
+                    </ComposerPrimitive.Send>
+                  )}
+                </ComposerPrimitive.Root>
+              </ThreadPrimitive.Root>
+            </ConversationRuntime>
+          </ErrorBoundary>
+        </main>
+      </div>
     </PhotoOpener.Provider>
   );
 }
 
-function toThreadMessage(message: ChatMessage): ThreadMessageLike {
+// The conversation's assistant-ui runtime. It lives inside the conversation's
+// boundary, so a message assistant-ui refuses while taking it in is caught there
+// as well, and each conversation starts with a fresh one.
+function ConversationRuntime({
+  adapter,
+  children,
+}: {
+  adapter: ExternalStoreAdapter<ChatMessage>;
+  children: ReactNode;
+}) {
+  const runtime = useExternalStoreRuntime<ChatMessage>(adapter);
+  return <AssistantRuntimeProvider runtime={runtime}>{children}</AssistantRuntimeProvider>;
+}
+
+// Hermes opens each run of a scheduled task with its own instructions for the
+// run (cron/scheduler_prompt.py), then the task's prompt.
+const CRON_PREAMBLE = /^\[IMPORTANT: You are running as a scheduled cron job[\s\S]*?\]\s*\n\n/;
+
+/** The task's prompt, when the message is the start of a scheduled run. */
+export function scheduledPrompt(message: ChatMessage): string | undefined {
+  if (message.role !== "user") return undefined;
+  const text = message.parts.map((part) => (part.type === "text" ? part.text : "")).join("");
+  const preamble = CRON_PREAMBLE.exec(text);
+  return preamble ? text.slice(preamble[0].length).trim() : undefined;
+}
+
+// Hermes closes a turn that ended without an answer with a notice of its own
+// (agent/turn_failure_copy.py), which its history serves as a system message;
+// the member reads it in their own words.
+const TURN_NOTICES: Record<string, string> = {
+  "Your request was not processed. Send it again if you still want me to carry it out.":
+    "这次请求没有处理。如果还需要，请重新发送。",
+  "This turn did not complete. Some actions may already have run; verify their effects before resending.":
+    "这一轮没有完成，其中一些操作可能已经执行；重新发送前请先确认结果。",
+};
+
+// assistant-ui throws, and takes the whole window down with it, on a message it
+// cannot take: a status on anything but an answer, a notice that is not exactly
+// one text, anything but text from the member, or a tool call id repeated in one
+// message. Messages are shaped as Hermes Desktop shapes them for it
+// (lib/chat-runtime.ts, and #87857 for the ids).
+export function toThreadMessage(original: ChatMessage): ThreadMessageLike {
+  const message = withUniqueToolCallIdsWithinMessage(original);
   const createdAt = message.timestamp ? new Date(message.timestamp * 1000) : undefined;
-  if (message.role === "user") return { id: message.id, role: "user", content: message.parts, createdAt };
+  const prompt = scheduledPrompt(message);
+  if (prompt !== undefined) {
+    return {
+      id: message.id,
+      role: "user",
+      content: [{ type: "text", text: prompt }],
+      createdAt,
+      metadata: { custom: { scheduled: true } },
+    };
+  }
+  if (message.role === "user")
+    return { id: message.id, role: "user", content: message.parts.filter((part) => part.type === "text"), createdAt };
+  if (message.role === "system") {
+    const text = chatMessageText(message).trim();
+    return { id: message.id, role: "system", content: [{ type: "text", text: TURN_NOTICES[text] ?? text }], createdAt };
+  }
   return {
     id: message.id,
-    role: message.role === "system" ? "system" : "assistant",
+    role: "assistant",
     content: message.parts.map((part) => (part.type === "text" ? { ...part, text: linkPhotos(part.text) } : part)),
     createdAt,
-    status: message.pending ? { type: "running" }
-      : message.interrupted ? { type: "incomplete", reason: "cancelled" }
-      : message.error ? { type: "incomplete", reason: "error" }
-      : { type: "complete", reason: "stop" },
+    status: message.pending
+      ? { type: "running" }
+      : message.interrupted
+        ? { type: "incomplete", reason: "cancelled" }
+        : message.error
+          ? { type: "incomplete", reason: "error" }
+          : { type: "complete", reason: "stop" },
   } as ThreadMessageLike;
 }
 
-function SessionRow({ session, active, waiting, running, onOpen, onRename, onDelete }: {
-  session: AssistantSession; active: boolean; waiting: number; running: boolean; onOpen(): void; onRename(title: string): void; onDelete(): void;
+// A step VNAS wants to take on the desktop that deletes, replaces or resets
+// something: the member allows it, or not, before Hermes stops waiting.
+function ControlCard({ ask }: { ask: { danger: Danger; until: number; answer(allowed: boolean): void } }) {
+  const [left, setLeft] = useState(() => Math.max(0, Math.ceil((ask.until - Date.now()) / 1000)));
+  useEffect(() => {
+    const timer = window.setInterval(() => setLeft(Math.max(0, Math.ceil((ask.until - Date.now()) / 1000))), 500);
+    return () => window.clearInterval(timer);
+  }, [ask.until]);
+  return (
+    <section className={styles.asChanges} aria-label="VNAS 想在桌面上执行的操作">
+      <article
+        className={`${styles.asChange} ${styles.asCommand} awaiting`}
+        role="alertdialog"
+        aria-label={`VNAS 想${ask.danger.what}`}
+      >
+        <header>
+          <span className={styles.asChangeMark}>
+            <MousePointerClick />
+          </span>
+          <div>
+            <strong>VNAS 想{ask.danger.what}</strong>
+            <small>
+              在“{ask.danger.where}”中 · {ask.danger.why} · {left} 秒内不回答就不执行
+            </small>
+          </div>
+        </header>
+        <footer>
+          <button type="button" className={styles.asReject} onClick={() => ask.answer(false)}>
+            不允许
+          </button>
+          <button type="button" className={styles.asConfirm} onClick={() => ask.answer(true)}>
+            <Check />
+            允许
+          </button>
+        </footer>
+      </article>
+    </section>
+  );
+}
+
+function SessionRow({
+  session,
+  active,
+  waiting,
+  running,
+  onOpen,
+  onRename,
+  onDelete,
+}: {
+  session: AssistantSession;
+  active: boolean;
+  waiting: number;
+  running: boolean;
+  onOpen(): void;
+  onRename(title: string): void;
+  onDelete(): void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.title);
@@ -300,24 +866,56 @@ function SessionRow({ session, active, waiting, running, onOpen, onRename, onDel
     if (draft.trim() && draft.trim() !== session.title) onRename(draft.trim());
   };
   return (
-    <li className={`as-session${active ? " active" : ""}`}>
+    <li className={`${styles.asSession}${active ? ` ${styles.active}` : ""}`}>
       {editing ? (
-        <input className="as-session-edit" value={draft} autoFocus maxLength={100} onChange={(event) => setDraft(event.target.value)} onBlur={finish}
-          onKeyDown={(event) => { if (event.key === "Enter") finish(); if (event.key === "Escape") { setDraft(session.title); setEditing(false); } }} />
+        <input
+          className={styles.asSessionEdit}
+          value={draft}
+          autoFocus
+          maxLength={100}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={finish}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") finish();
+            if (event.key === "Escape") {
+              setDraft(session.title);
+              setEditing(false);
+            }
+          }}
+        />
       ) : (
-        <button type="button" className="as-session-open" onClick={onOpen}>
-          <span className="as-session-line">
+        <button type="button" className={styles.asSessionOpen} onClick={onOpen}>
+          <span className={styles.asSessionLine}>
             <strong>{session.title || session.preview || "新对话"}</strong>
-            {waiting > 0 ? <span className="as-session-badge" title={`${waiting} 项更改等你确认`}>{waiting}</span>
-              : running && <LoaderCircle className="as-session-running" aria-label="正在回答" />}
+            {waiting > 0 ? (
+              <span className={styles.asSessionBadge} title={`${waiting} 项更改等你确认`}>
+                {waiting}
+              </span>
+            ) : (
+              running && <LoaderCircle className={styles.asSessionRunning} aria-label="正在回答" />
+            )}
           </span>
-          <small>{relativeTime(session.lastActive ?? session.startedAt)}{waiting > 0 ? <em> · 等你确认</em> : running && " · 正在回答"}</small>
+          <small>
+            {relativeTime(session.lastActive ?? session.startedAt)}
+            {waiting > 0 ? <em> · 等你确认</em> : running && " · 正在回答"}
+          </small>
         </button>
       )}
       {!editing && (
-        <span className="as-session-actions">
-          <button type="button" aria-label="改名" onClick={() => { setDraft(session.title); setEditing(true); }}><Pencil /></button>
-          <button type="button" aria-label="删除" onClick={onDelete}><Trash2 /></button>
+        <span className={styles.asSessionActions}>
+          <button
+            type="button"
+            aria-label="改名"
+            onClick={() => {
+              setDraft(session.title);
+              setEditing(true);
+            }}
+          >
+            <Pencil />
+          </button>
+          <button type="button" aria-label="删除" onClick={onDelete}>
+            <Trash2 />
+          </button>
         </span>
       )}
     </li>
@@ -328,9 +926,21 @@ function SessionRow({ session, active, waiting, running, onOpen, onRename, onDel
 // an agent. Each line holds only what ADR 0024 enforces; none says the model
 // runs on this device, because during development it does not.
 const TRUST: { icon: ReactNode; title: string; text: string }[] = [
-  { icon: <ShieldCheck />, title: "安全", text: "它只看得到你的文件和照片，以及家里共享的内容；看不到家人的私人文件，也碰不到系统设置。" },
-  { icon: <Hand />, title: "可控", text: "改动你的文件前，它会先把要改的地方给你看，你点“确认更改”才生效；运行有风险的命令也要先问你。被替换或删除的旧文件会放进回收站，可以找回。" },
-  { icon: <LockKeyhole />, title: "隐私", text: "每位家人的 VNAS 各自独立。你和它的对话、它记住的事，家里其他人都看不到，管理员也不行；在“记忆”里可以随时删掉。" },
+  {
+    icon: <ShieldCheck />,
+    title: "安全",
+    text: "它只看得到你的文件和照片，以及家里共享的内容；看不到家人的私人文件，也碰不到系统设置。",
+  },
+  {
+    icon: <Hand />,
+    title: "可控",
+    text: "改动你的文件前，它会先把要改的地方给你看，你点“确认更改”才生效；运行有风险的命令也要先问你。被替换或删除的旧文件会放进回收站，可以找回。",
+  },
+  {
+    icon: <LockKeyhole />,
+    title: "隐私",
+    text: "每位家人的 VNAS 各自独立。你和它的对话、它记住的事，家里其他人都看不到，管理员也不行；在“记忆”里可以随时删掉。",
+  },
 ];
 
 // The sidebar's one line about trust. Pointing at it or focusing it with the
@@ -342,7 +952,9 @@ function TrustNote() {
   const id = useId();
   useEffect(() => {
     if (!pinned) return;
-    const away = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setPinned(false); };
+    const away = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setPinned(false);
+    };
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
   }, [pinned]);
@@ -352,15 +964,29 @@ function TrustNote() {
     (document.activeElement as HTMLElement | null)?.blur();
   };
   return (
-    <div ref={root} className={`as-trust${pinned ? " open" : ""}`} onKeyDown={escape}>
-      <button type="button" className="as-trust-button" aria-describedby={id} aria-expanded={pinned} onClick={() => setPinned((open) => !open)}>
-        <ShieldCheck /><span>你的私人 Agent</span><Info className="as-trust-hint" />
+    <div ref={root} className={`${styles.asTrust}${pinned ? ` ${styles.open}` : ""}`} onKeyDown={escape}>
+      <button
+        type="button"
+        className={styles.asTrustButton}
+        aria-describedby={id}
+        aria-expanded={pinned}
+        onClick={() => setPinned((open) => !open)}
+      >
+        <ShieldCheck />
+        <span>你的私人 Agent</span>
+        <Info className={styles.asTrustHint} />
       </button>
-      <div id={id} role="tooltip" className="as-trust-pop">
+      <div id={id} role="tooltip" className={styles.asTrustPop}>
         <strong>为什么可以放心用</strong>
         <ul>
           {TRUST.map((item) => (
-            <li key={item.title}><span className="as-trust-icon">{item.icon}</span><div><b>{item.title}</b><p>{item.text}</p></div></li>
+            <li key={item.title}>
+              <span className={styles.asTrustIcon}>{item.icon}</span>
+              <div>
+                <b>{item.title}</b>
+                <p>{item.text}</p>
+              </div>
+            </li>
           ))}
         </ul>
       </div>
@@ -370,31 +996,83 @@ function TrustNote() {
 
 function Welcome({ username, onPick }: { username: string; onPick(text: string): void }) {
   return (
-    <div className="as-welcome">
-      <span className="as-welcome-mark"><AssistantGlyph /></span>
+    <div className={styles.asWelcome}>
+      <span className={styles.asWelcomeMark}>
+        <AssistantGlyph />
+      </span>
       <h3>你好，{username}</h3>
       <p>我是你的私人 NAS 助理，需要我做什么？</p>
-      <div className="as-suggestions">
-        {SUGGESTIONS.map((text) => <button type="button" key={text} onClick={() => onPick(text)}>{text}<ChevronRight /></button>)}
+      <div className={styles.asSuggestions}>
+        {SUGGESTIONS.map((text) => (
+          <button type="button" key={text} onClick={() => onPick(text)}>
+            {text}
+            <ChevronRight />
+          </button>
+        ))}
       </div>
     </div>
   );
 }
 
 function UserMessage() {
+  const scheduled = useAuiState((state) => Boolean(state.message.metadata?.custom?.scheduled));
+  if (scheduled) return <ScheduledStart />;
   return (
-    <MessagePrimitive.Root className="as-msg user">
-      <div className="as-bubble"><MessagePrimitive.Parts /></div>
+    <MessagePrimitive.Root className={`${styles.asMsg} ${styles.user}`}>
+      <div className={styles.asBubble}>
+        <MessagePrimitive.Parts />
+      </div>
+    </MessagePrimitive.Root>
+  );
+}
+
+// A run of a scheduled task starts with no one having typed anything: a marker,
+// with what the task asks folded under it.
+function ScheduledStart() {
+  const [open, setOpen] = useState(false);
+  return (
+    <MessagePrimitive.Root className={`${styles.asMsg} ${styles.scheduled}`}>
+      <div className={styles.asScheduled}>
+        <button type="button" aria-expanded={open} onClick={() => setOpen((shown) => !shown)}>
+          <CalendarClock />
+          <span>定时任务按计划运行</span>
+          <small>{open ? "收起" : "要做的事"}</small>
+          <ChevronDown className={open ? styles.open : undefined} />
+        </button>
+        {open && (
+          <div className={styles.asScheduledPrompt}>
+            <MessagePrimitive.Parts />
+          </div>
+        )}
+      </div>
+    </MessagePrimitive.Root>
+  );
+}
+
+// A notice Hermes wrote into the conversation itself, such as a turn that did
+// not complete: a quiet line, not VNAS speaking.
+function SystemNotice() {
+  return (
+    <MessagePrimitive.Root className={`${styles.asMsg} ${styles.notice}`}>
+      <div className={styles.asNotice}>
+        <Info />
+        <div>
+          <MessagePrimitive.Parts />
+        </div>
+      </div>
     </MessagePrimitive.Root>
   );
 }
 
 function AssistantMessage() {
   return (
-    <MessagePrimitive.Root className="as-msg assistant">
-      <span className="as-avatar"><AssistantGlyph /></span>
-      <div className="as-answer">
+    <MessagePrimitive.Root className={`${styles.asMsg} assistant`}>
+      <span className={styles.asAvatar}>
+        <AssistantGlyph />
+      </span>
+      <div className={styles.asAnswer}>
         <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
+        <AnswerPhotos />
         <Outcome />
       </div>
     </MessagePrimitive.Root>
@@ -403,16 +1081,32 @@ function AssistantMessage() {
 
 // How a reply that did not finish ended: stopped by the member, or failed.
 function Outcome() {
-  const reason = useAuiState((state) => (state.message.status?.type === "incomplete" ? state.message.status.reason : undefined));
-  if (reason === "cancelled") return <p className="as-outcome stopped"><Square />已停止</p>;
-  if (reason === "error") return <p className="as-outcome failed"><CircleAlert />这次回答没有完成</p>;
+  const reason = useAuiState((state) =>
+    state.message.status?.type === "incomplete" ? state.message.status.reason : undefined,
+  );
+  if (reason === "cancelled")
+    return (
+      <p className={`${styles.asOutcome} ${styles.stopped}`}>
+        <Square />
+        已停止
+      </p>
+    );
+  if (reason === "error")
+    return (
+      <p className={`${styles.asOutcome} ${styles.failed}`}>
+        <CircleAlert />
+        这次回答没有完成
+      </p>
+    );
   return null;
 }
 
 // Streamdown's own code, table, diagram and image buttons are styled with
 // Tailwind, which A-NAS does not load, so they are off; code blocks get the
 // window's own header with a copy button instead.
-export const MarkdownText = () => <StreamdownTextPrimitive className="as-markdown" components={MARKDOWN_COMPONENTS} controls={false} />;
+export const MarkdownText = () => (
+  <StreamdownTextPrimitive className={styles.asMarkdown} components={MARKDOWN_COMPONENTS} controls={false} />
+);
 
 // A code block's header: its language, and a copy that works on the LAN's
 // plain HTTP, where the Clipboard API is unavailable. The props are typed as
@@ -427,27 +1121,128 @@ function CodeHeader({ language, code }: { [K in keyof CodeHeaderProps]?: unknown
   }, [copied]);
   const text = typeof code === "string" ? code.replace(/\n$/, "") : "";
   return (
-    <div className="as-code-head">
+    <div className={styles.asCodeHead}>
       <span>{typeof language === "string" && language ? language : "文本"}</span>
-      <button type="button" className={copied ? "copied" : undefined} aria-label={copied ? "已复制" : "复制代码"} onClick={() => setCopied(copyText(text))}>
-        {copied ? <Check /> : <Copy />}{copied ? "已复制" : "复制"}
+      <button
+        type="button"
+        className={copied ? styles.copied : undefined}
+        aria-label={copied ? "已复制" : "复制代码"}
+        onClick={() => setCopied(copyText(text))}
+      >
+        {copied ? <Check /> : <Copy />}
+        {copied ? "已复制" : "复制"}
       </button>
     </div>
   );
 }
 
-// A photo the assistant names shows as its thumbnail and opens in the photo
-// app; other links open in a new tab.
+// A photo the assistant names is a link to it in the text (the picture itself
+// shows under the answer) and opens in the photo app; other links open in a
+// new tab.
 function MarkdownLink({ href, children, node: _node, ...rest }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
   const open = useContext(PhotoOpener);
-  const [broken, setBroken] = useState(false);
   const photo = photoOf(href);
-  if (!photo) return <a href={href} target="_blank" rel="noreferrer" {...rest}>{children}</a>;
+  if (!photo)
+    return (
+      <a href={href} target="_blank" rel="noreferrer" {...rest}>
+        {children}
+      </a>
+    );
   return (
-    <button type="button" className="as-photo" title="在相册中打开" disabled={!open} onClick={() => open?.(photo)}>
-      {broken ? <span className="as-photo-none"><ImageIcon /></span>
-        : <img src={`/api/v1/photos/assets/${encodeURIComponent(photo)}/thumbnail`} alt="" loading="lazy" onError={() => setBroken(true)} />}
-      <span>{children}</span>
+    <button
+      type="button"
+      className={styles.asPhotoRef}
+      title="在相册中打开"
+      disabled={!open}
+      onClick={() => open?.(photo)}
+    >
+      <ImageIcon />
+      {children}
+    </button>
+  );
+}
+
+// Pictures in an answer load only from A-NAS itself. An outside address
+// would have the member's browser fetch it, carrying whatever the model put in
+// it, which the sandbox having no network is meant to rule out (ADR 0024); the
+// desktop's CSP blocks such images too (issue #161). It shows as a link the
+// member may open instead.
+function MarkdownImage({ src, alt, node: _node, ...rest }: ComponentPropsWithoutRef<"img"> & { node?: unknown }) {
+  if (typeof src === "string" && onDevice(src)) return <img src={src} alt={alt} {...rest} />;
+  return (
+    <a
+      className={styles.asOutsideImage}
+      href={typeof src === "string" ? src : undefined}
+      target="_blank"
+      rel="noreferrer"
+      title="外部图片不会自动加载"
+    >
+      <ImageIcon />
+      {alt || "外部图片"}
+    </a>
+  );
+}
+
+function onDevice(src: string) {
+  if (/^data:image\//i.test(src)) return true;
+  try {
+    return new URL(src, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+// More than this many photos show as the first ones and a count.
+const ANSWER_PHOTOS = 12;
+
+// The photos an answer names, under it as the pictures themselves, the way a
+// chat shows photos sent in it: one large, several as tiles. They load with
+// the member's own session; a click opens the photo in the photo app.
+function AnswerPhotos() {
+  const text = useAuiState((state) =>
+    state.message.content.map((part) => (part.type === "text" ? part.text : "")).join("\n"),
+  );
+  const photos = useMemo(() => photosIn(text), [text]);
+  if (!photos.length) return null;
+  const shown = photos.slice(0, ANSWER_PHOTOS);
+  return (
+    <div className={`${styles.asGallery}${shown.length === 1 ? ` ${styles.one}` : ""}`}>
+      {shown.map((photo) => (
+        <AnswerPhoto key={photo.id} photo={photo} />
+      ))}
+      {photos.length > shown.length && (
+        <p className={styles.asGalleryMore}>另有 {photos.length - shown.length} 张，点上文的名称查看</p>
+      )}
+    </div>
+  );
+}
+
+function AnswerPhoto({ photo }: { photo: NamedPhoto }) {
+  const open = useContext(PhotoOpener);
+  const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
+  return (
+    <button
+      type="button"
+      className={`${styles.asGalleryItem} ${styles[state] ?? ""}`}
+      aria-label={`${photo.name}，在相册中打开`}
+      title="在相册中打开"
+      disabled={!open}
+      onClick={() => open?.(photo.id)}
+    >
+      <span className={styles.asGalleryFrame}>
+        {state === "missing" ? (
+          <ImageIcon />
+        ) : (
+          <img
+            src={`/api/v1/photos/assets/${encodeURIComponent(photo.id)}/thumbnail`}
+            alt=""
+            loading="lazy"
+            onLoad={() => setState("ready")}
+            onError={() => setState("missing")}
+          />
+        )}
+      </span>
+      <span className={styles.asGalleryName}>{state === "missing" ? `${photo.name}（打不开）` : photo.name}</span>
     </button>
   );
 }
@@ -460,16 +1255,31 @@ function Steps() {
   const running = useAuiState((state) => state.chainOfThought.status.type === "running");
   const latest = useAuiState((state) => state.chainOfThought.parts.at(-1));
   const tools = useAuiState((state) => state.chainOfThought.parts.filter((part) => part.type === "tool-call").length);
-  const current = latest?.type === "tool-call" ? describeTool(latest.toolName, (latest.args ?? {}) as Record<string, unknown>) : undefined;
+  const current =
+    latest?.type === "tool-call"
+      ? describeTool(latest.toolName, (latest.args ?? {}) as Record<string, unknown>)
+      : undefined;
   return (
-    <ChainOfThoughtPrimitive.Root className={`as-steps${collapsed ? "" : " open"}${running ? " running" : ""}`}>
-      <ChainOfThoughtPrimitive.AccordionTrigger className="as-steps-trigger">
-        {running ? <LoaderCircle className="spin" /> : <ListChecks />}
+    <ChainOfThoughtPrimitive.Root
+      className={`${styles.asSteps}${collapsed ? "" : ` ${styles.open}`}${running ? ` ${styles.running}` : ""}`}
+    >
+      <ChainOfThoughtPrimitive.AccordionTrigger className={styles.asStepsTrigger}>
+        {running ? <LoaderCircle className={styles.spin} /> : <ListChecks />}
         <span>{running ? "正在处理" : "处理过程"}</span>
-        <small>{running && current ? `${current.label}${current.detail ? ` ${current.detail}` : ""}` : tools ? `${tools} 个动作` : `${count} 步`}</small>
-        <ChevronRight className="chevron" />
+        <small>
+          {running && current
+            ? `${current.label}${current.detail ? ` ${current.detail}` : ""}`
+            : tools
+              ? `${tools} 个动作`
+              : `${count} 步`}
+        </small>
+        <ChevronRight className={styles.chevron} />
       </ChainOfThoughtPrimitive.AccordionTrigger>
-      {!collapsed && <div className="as-steps-body"><ChainOfThoughtPrimitive.Parts components={STEP_PARTS} /></div>}
+      {!collapsed && (
+        <div className={styles.asStepsBody}>
+          <ChainOfThoughtPrimitive.Parts components={STEP_PARTS} />
+        </div>
+      )}
     </ChainOfThoughtPrimitive.Root>
   );
 }
@@ -478,14 +1288,23 @@ function Steps() {
 // dots only mean something while the reply is still coming.
 function Thinking() {
   const running = useAuiState((state) => state.message.status?.type === "running");
-  return running ? <div className="as-thinking"><span /><span /><span /></div> : null;
+  return running ? (
+    <div className={styles.asThinking}>
+      <span />
+      <span />
+      <span />
+    </div>
+  ) : null;
 }
 
 function Reasoning({ text }: { text: string }) {
   if (!text.trim()) return null;
   return (
-    <details className="as-reasoning">
-      <summary><Brain />思考过程</summary>
+    <details className={styles.asReasoning}>
+      <summary>
+        <Brain />
+        思考过程
+      </summary>
       <p>{text}</p>
     </details>
   );
@@ -495,22 +1314,100 @@ function Reasoning({ text }: { text: string }) {
 function describeTool(name: string, args: Record<string, unknown>): { icon: ReactNode; label: string; detail: string } {
   const path = typeof args.path === "string" ? friendlyPath(args.path) : "";
   switch (name) {
-    case "read_file": return { icon: <FileText />, label: "读取", detail: path };
-    case "search_files": return { icon: <Search />, label: "搜索", detail: [typeof args.pattern === "string" ? `“${args.pattern}”` : "", path && `在 ${path}`].filter(Boolean).join(" ") };
-    case "write_file": return { icon: <FilePen />, label: "写入草稿", detail: path };
-    case "patch": return { icon: <FilePen />, label: "修改草稿", detail: path };
-    case "mcp__anas__submit_changes": return { icon: <Send />, label: "提交更改", detail: typeof args.summary === "string" ? args.summary : "等你确认" };
-    case "terminal": return { icon: <SquareTerminal />, label: "运行命令", detail: typeof args.command === "string" ? short(args.command) : "" };
-    case "process_manage": return { icon: <SquareTerminal />, label: "管理后台命令", detail: "" };
-    case "execute_code": return { icon: <Code />, label: "运行代码", detail: "" };
-    case "delegate_task": return { icon: <Users />, label: "分派子任务", detail: typeof args.goal === "string" ? short(args.goal) : "" };
-    case "clarify": return { icon: <CircleHelp />, label: "问你", detail: "" };
-    case "vision_analyze": return { icon: <ImageIcon />, label: "看图", detail: typeof args.image_url === "string" ? friendlyPath(args.image_url) : "" };
-    case "video_analyze": return { icon: <Video />, label: "看视频", detail: typeof args.video_url === "string" ? friendlyPath(args.video_url) : "" };
-    case "memory": return { icon: <Brain />, label: "记住", detail: "" };
-    case "session_search": return { icon: <FileSearch />, label: "查找以前的对话", detail: "" };
-    case "skill_view": case "skills_list": case "skill_manage": return { icon: <Wrench />, label: "查看技能", detail: typeof args.name === "string" ? args.name : "" };
-    default: return { icon: <Wrench />, label: name, detail: "" };
+    case "read_file":
+      return { icon: <FileText />, label: "读取", detail: path };
+    case "search_files":
+      return {
+        icon: <Search />,
+        label: "搜索",
+        detail: [typeof args.pattern === "string" ? `“${args.pattern}”` : "", path && `在 ${path}`]
+          .filter(Boolean)
+          .join(" "),
+      };
+    case "write_file":
+      return { icon: <FilePen />, label: "写入草稿", detail: path };
+    case "patch":
+      return { icon: <FilePen />, label: "修改草稿", detail: path };
+    case "mcp__anas__submit_changes":
+      return {
+        icon: <Send />,
+        label: "提交更改",
+        detail: typeof args.summary === "string" ? args.summary : "等你确认",
+      };
+    case "terminal":
+      return {
+        icon: <SquareTerminal />,
+        label: "运行命令",
+        detail: typeof args.command === "string" ? short(args.command) : "",
+      };
+    case "process_manage":
+      return { icon: <SquareTerminal />, label: "管理后台命令", detail: "" };
+    case "execute_code":
+      return { icon: <Code />, label: "运行代码", detail: "" };
+    case "delegate_task":
+      return { icon: <Users />, label: "分派子任务", detail: typeof args.goal === "string" ? short(args.goal) : "" };
+    case "clarify":
+      return { icon: <CircleHelp />, label: "问你", detail: "" };
+    case "mcp__anas__recent_changes":
+      return { icon: <History />, label: "查看最近的更改", detail: "" };
+    case "mcp__anas__search_photos":
+      return { icon: <Search />, label: "搜索照片", detail: typeof args.query === "string" ? `“${args.query}”` : "" };
+    case "mcp__anas__browse_photos":
+      return { icon: <ImageIcon />, label: "浏览照片", detail: typeof args.month === "string" ? args.month : "" };
+    case "mcp__anas__photo_details":
+      return { icon: <ImageIcon />, label: "查看照片信息", detail: "" };
+    case "mcp__anas__similar_photos":
+      return { icon: <ImageIcon />, label: "找相似的照片", detail: "" };
+    case "mcp__anas__look_at_photo":
+      return { icon: <ImageIcon />, label: "取出照片画面", detail: "" };
+    // A photo's view lands in Hermes's image cache; the question says more than that path.
+    case "vision_analyze":
+      return {
+        icon: <ImageIcon />,
+        label: "看图",
+        detail:
+          typeof args.question === "string" && args.question
+            ? short(args.question)
+            : typeof args.image_url === "string"
+              ? friendlyPath(args.image_url)
+              : "",
+      };
+    case "video_analyze":
+      return {
+        icon: <Video />,
+        label: "看视频",
+        detail: typeof args.video_url === "string" ? friendlyPath(args.video_url) : "",
+      };
+    case "memory":
+      return { icon: <Brain />, label: "记住", detail: "" };
+    case "session_search":
+      return { icon: <FileSearch />, label: "查找以前的对话", detail: "" };
+    case "skill_view":
+    case "skills_list":
+    case "skill_manage":
+      return { icon: <Wrench />, label: "查看技能", detail: typeof args.name === "string" ? args.name : "" };
+    case "browser_snapshot":
+      return { icon: <MonitorSmartphone />, label: "查看桌面", detail: "" };
+    case "browser_vision":
+      return {
+        icon: <Eye />,
+        label: "看桌面画面",
+        detail: typeof args.question === "string" ? short(args.question) : "",
+      };
+    case "browser_click":
+      return { icon: <MousePointerClick />, label: "点击", detail: typeof args.ref === "string" ? args.ref : "" };
+    case "browser_type":
+      return {
+        icon: <Keyboard />,
+        label: "输入",
+        detail: typeof args.text === "string" ? `“${short(args.text)}”` : "",
+      };
+    case "browser_press":
+      return { icon: <Keyboard />, label: "按键", detail: typeof args.key === "string" ? args.key : "" };
+    case "browser_scroll":
+      return { icon: <MousePointerClick />, label: "滚动", detail: args.direction === "up" ? "向上" : "向下" };
+    default:
+      return { icon: <Wrench />, label: name, detail: "" };
   }
 }
 
@@ -520,12 +1417,12 @@ const ToolActivity: ToolCallMessagePartComponent = ({ toolName, args, result, st
   const failed = isError || status.type === "incomplete";
   const output = typeof result === "string" ? result : result === undefined ? "" : JSON.stringify(result, null, 2);
   return (
-    <details className={`as-tool${running ? " running" : ""}${failed ? " failed" : ""}`}>
+    <details className={`${styles.asTool}${running ? ` ${styles.running}` : ""}${failed ? ` ${styles.failed}` : ""}`}>
       <summary>
-        <span className="as-tool-icon">{icon}</span>
-        <span className="as-tool-label">{label}</span>
-        {detail && <span className="as-tool-detail">{detail}</span>}
-        <span className="as-tool-state">{running ? <LoaderCircle /> : failed ? <CircleAlert /> : <Check />}</span>
+        <span className={styles.asToolIcon}>{icon}</span>
+        <span className={styles.asToolLabel}>{label}</span>
+        {detail && <span className={styles.asToolDetail}>{detail}</span>}
+        <span className={styles.asToolState}>{running ? <LoaderCircle /> : failed ? <CircleAlert /> : <Check />}</span>
       </summary>
       {output && <pre>{output.length > 4000 ? `${output.slice(0, 4000)}…` : output}</pre>}
     </details>
@@ -539,34 +1436,45 @@ function ApprovalCard({ approval, onDecide }: { approval: Approval; onDecide(con
     void onDecide(confirm).finally(() => setBusy(false));
   };
   const { change, status } = approval;
-  const open = status === "awaiting" || status === "deciding";
   if (!change) return null;
+  const operations = change.operations ?? [];
   return (
-    <article className={`as-change ${status}`}>
+    <article className={styles.asChange}>
       <header>
-        <span className="as-change-mark">{CARD_MARKS[status]}</span>
+        <span className={styles.asChangeMark}>
+          <ShieldCheck />
+        </span>
         <div>
           <strong>{change.summary || "VNAS 提交的更改"}</strong>
-          <small>{statusText(approval)}</small>
+          <small>{operations.length} 项操作 · 确认前文件不会变化</small>
         </div>
       </header>
-      {open && <ul className="as-change-ops">{change.operations.map((operation, index) => <OperationRow key={index} operation={operation} />)}</ul>}
-      {open && (
-        <footer>
-          <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(false)}>拒绝</button>
-          <button type="button" className="as-confirm" disabled={busy || status !== "awaiting"} onClick={() => choose(true)}>
-            {busy || status === "deciding" ? <LoaderCircle /> : <Check />}确认更改
-          </button>
-        </footer>
-      )}
+      <ul className={styles.asChangeOps}>
+        {operations.map((operation, index) => (
+          <OperationRow key={index} operation={operation} />
+        ))}
+      </ul>
+      <footer>
+        <button
+          type="button"
+          className={styles.asReject}
+          disabled={busy || status !== "awaiting"}
+          onClick={() => choose(false)}
+        >
+          拒绝
+        </button>
+        <button
+          type="button"
+          className={styles.asConfirm}
+          disabled={busy || status !== "awaiting"}
+          onClick={() => choose(true)}
+        >
+          {busy || status === "deciding" ? <LoaderCircle /> : <Check />}确认更改
+        </button>
+      </footer>
     </article>
   );
 }
-
-const CARD_MARKS: Record<Approval["status"], ReactNode> = {
-  awaiting: <ShieldCheck />, deciding: <ShieldCheck />, approved: <LoaderCircle />, answered: <Check />, applied: <Check />,
-  failed: <CircleAlert />, rejected: <X />, expired: <Clock />, stopped: <Square />,
-};
 
 // Hermes names why it asks in English; the common reasons, in the member's words.
 const COMMAND_REASONS: Record<string, string> = {
@@ -576,62 +1484,80 @@ const COMMAND_REASONS: Record<string, string> = {
   "kill process": "会结束进程",
 };
 
-export function CommandCard({ approval, onDecide }: { approval: Approval; onDecide(confirm: boolean, forSession: boolean): Promise<void> }) {
+export function CommandCard({
+  approval,
+  onDecide,
+}: {
+  approval: Approval;
+  onDecide(confirm: boolean, forSession: boolean): Promise<void>;
+}) {
   const [busy, setBusy] = useState(false);
   const choose = (confirm: boolean, forSession = false) => {
     setBusy(true);
     void onDecide(confirm, forSession).finally(() => setBusy(false));
   };
   const { command, status } = approval;
-  const open = status === "awaiting" || status === "deciding";
   const script = Boolean(command?.script);
-  const reason = command?.description ? COMMAND_REASONS[command.description] ?? command.description : "";
-  const shown = script ? (command?.text ?? "").replace(/^execute_code <<'PY'\n/, "").replace(/\nPY$/, "") : command?.text ?? "";
+  const reason = command?.description ? (COMMAND_REASONS[command.description] ?? command.description) : "";
+  const shown = script
+    ? (command?.text ?? "").replace(/^execute_code <<'PY'\n/, "").replace(/\nPY$/, "")
+    : (command?.text ?? "");
   return (
-    <article className={`as-change as-command ${status === "approved" ? "allowed" : status}`}>
+    <article className={`${styles.asChange} ${styles.asCommand}`}>
       <header>
-        <span className="as-change-mark">{status === "approved" ? <Check /> : script ? <Code /> : <SquareTerminal />}</span>
+        <span className={styles.asChangeMark}>{script ? <Code /> : <SquareTerminal />}</span>
         <div>
           <strong>{script ? "VNAS 想运行一段代码" : `VNAS 想运行一条命令${reason ? `：${reason}` : ""}`}</strong>
-          <small>{commandStatus(approval)}</small>
+          <small>只影响 VNAS 自己的文件夹和对话记录；你的个人空间与共享空间不会被改动</small>
         </div>
       </header>
-      {open && <pre className="as-command-text">{shown}</pre>}
-      {open && (
-        <footer>
-          <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(false)}>拒绝</button>
-          {command?.forSession && (
-            <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => choose(true, true)}>本对话中都允许</button>
-          )}
-          <button type="button" className="as-confirm" disabled={busy || status !== "awaiting"} onClick={() => choose(true)}>
-            {busy || status === "deciding" ? <LoaderCircle /> : <Check />}允许
+      <pre className={styles.asCommandText}>{shown}</pre>
+      <footer>
+        <button
+          type="button"
+          className={styles.asReject}
+          disabled={busy || status !== "awaiting"}
+          onClick={() => choose(false)}
+        >
+          拒绝
+        </button>
+        {command?.forSession && (
+          <button
+            type="button"
+            className={styles.asReject}
+            disabled={busy || status !== "awaiting"}
+            onClick={() => choose(true, true)}
+          >
+            本对话中都允许
           </button>
-        </footer>
-      )}
+        )}
+        <button
+          type="button"
+          className={styles.asConfirm}
+          disabled={busy || status !== "awaiting"}
+          onClick={() => choose(true)}
+        >
+          {busy || status === "deciding" ? <LoaderCircle /> : <Check />}允许
+        </button>
+      </footer>
     </article>
   );
 }
 
-function commandStatus({ status, command }: Approval) {
-  const what = command?.script ? "代码" : "命令";
-  switch (status) {
-    case "approved": return `已允许，${what}在 VNAS 自己的文件夹里运行`;
-    case "rejected": return `你拒绝了，${what}没有运行`;
-    case "expired": return `等待确认超时，${what}没有运行`;
-    case "stopped": return `这一轮已停止，${what}没有运行`;
-    default: return `只影响 VNAS 自己的文件夹和对话记录；你的个人空间与共享空间不会被改动`;
-  }
-}
-
-export function QuestionCard({ approval, onAnswer, onSkip }: {
-  approval: Approval; onAnswer(answers: Record<string, string | null>): Promise<void>; onSkip(): Promise<void>;
+export function QuestionCard({
+  approval,
+  onAnswer,
+  onSkip,
+}: {
+  approval: Approval;
+  onAnswer(answers: Record<string, string | null>): Promise<void>;
+  onSkip(): Promise<void>;
 }) {
   const questions = approval.questions ?? [];
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [written, setWritten] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const { status } = approval;
-  const open = status === "awaiting" || status === "deciding";
   // The answer Hermes Desktop sends for a question (clarify/pending.tsx stagedAnswer): one
   // choice or the text, which replace each other; for several choices a JSON list of them
   // with the text as one more.
@@ -648,7 +1574,11 @@ export function QuestionCard({ approval, onAnswer, onSkip }: {
   const pick = (question: AssistantQuestion, choice: string) => {
     setPicked((all) => {
       const current = all[question.id] ?? [];
-      const next = !question.multiSelect ? [choice] : current.includes(choice) ? current.filter((item) => item !== choice) : [...current, choice];
+      const next = !question.multiSelect
+        ? [choice]
+        : current.includes(choice)
+          ? current.filter((item) => item !== choice)
+          : [...current, choice];
       return { ...all, [question.id]: next };
     });
     if (!question.multiSelect) setWritten((all) => ({ ...all, [question.id]: "" }));
@@ -662,50 +1592,68 @@ export function QuestionCard({ approval, onAnswer, onSkip }: {
     void work().finally(() => setBusy(false));
   };
   return (
-    <article className={`as-change as-question ${status}`}>
+    <article className={`${styles.asChange} ${styles.asQuestion}`}>
       <header>
-        <span className="as-change-mark">{status === "answered" ? <Check /> : <CircleHelp />}</span>
+        <span className={styles.asChangeMark}>
+          <CircleHelp />
+        </span>
         <div>
           <strong>VNAS 想问你</strong>
-          <small>{questionStatus(approval)}</small>
+          <small>{questions.length} 个问题 · 回答后 VNAS 接着做</small>
         </div>
       </header>
-      <div className="as-questions">
+      <div className={styles.asQuestions}>
         {questions.map((question) => (
-          <div key={question.id} className="as-question-item">
+          <div key={question.id} className={styles.asQuestionItem}>
             <p>{question.text}</p>
-            {open ? (
-              <>
-                {question.choices?.length ? (
-                  <div className="as-choices" role="group" aria-label={question.text}>
-                    {question.choices.map((choice) => (
-                      <button key={choice} type="button" aria-pressed={(picked[question.id] ?? []).includes(choice)} disabled={busy}
-                        onClick={() => pick(question, choice)}>
-                        {plainChoice(choice)}
-                        {RECOMMENDED.test(choice) && <small>推荐</small>}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <input className="as-answer-input" aria-label={`回答：${question.text}`} placeholder={question.choices?.length ? "或者写下你的回答" : "写下你的回答"}
-                  value={written[question.id] ?? ""} disabled={busy} maxLength={4000}
-                  onChange={(event) => write(question, event.target.value)} />
-              </>
-            ) : status === "answered" ? (
-              <span className="as-answered">{plainChoice(approval.answers?.[question.id] ?? "没有回答")}</span>
+            {question.choices?.length ? (
+              <div className={styles.asChoices} role="group" aria-label={question.text}>
+                {question.choices.map((choice) => (
+                  <button
+                    key={choice}
+                    type="button"
+                    aria-pressed={(picked[question.id] ?? []).includes(choice)}
+                    disabled={busy}
+                    onClick={() => pick(question, choice)}
+                  >
+                    {plainChoice(choice)}
+                    {RECOMMENDED.test(choice) && <small>推荐</small>}
+                  </button>
+                ))}
+              </div>
             ) : null}
+            <input
+              className={styles.asAnswerInput}
+              aria-label={`回答：${question.text}`}
+              placeholder={question.choices?.length ? "或者写下你的回答" : "写下你的回答"}
+              value={written[question.id] ?? ""}
+              disabled={busy}
+              maxLength={4000}
+              onChange={(event) => write(question, event.target.value)}
+            />
           </div>
         ))}
       </div>
-      {open && (
-        <footer>
-          <button type="button" className="as-reject" disabled={busy || status !== "awaiting"} onClick={() => run(onSkip)}>跳过</button>
-          <button type="button" className="as-confirm" disabled={busy || status !== "awaiting" || !anything}
-            onClick={() => run(() => onAnswer(Object.fromEntries(questions.map((question) => [question.id, answerOf(question)]))))}>
-            {busy || status === "deciding" ? <LoaderCircle /> : <Send />}回答
-          </button>
-        </footer>
-      )}
+      <footer>
+        <button
+          type="button"
+          className={styles.asReject}
+          disabled={busy || status !== "awaiting"}
+          onClick={() => run(onSkip)}
+        >
+          跳过
+        </button>
+        <button
+          type="button"
+          className={styles.asConfirm}
+          disabled={busy || status !== "awaiting" || !anything}
+          onClick={() =>
+            run(() => onAnswer(Object.fromEntries(questions.map((question) => [question.id, answerOf(question)]))))
+          }
+        >
+          {busy || status === "deciding" ? <LoaderCircle /> : <Send />}回答
+        </button>
+      </footer>
     </article>
   );
 }
@@ -716,36 +1664,17 @@ export function QuestionCard({ approval, onAnswer, onSkip }: {
 const RECOMMENDED = /\s*\(Recommended\)$/;
 const plainChoice = (choice: string) => choice.replace(RECOMMENDED, "");
 
-function questionStatus({ status, questions }: Approval) {
-  switch (status) {
-    case "answered": return "已回答";
-    case "rejected": return "你跳过了这些问题";
-    case "expired": return "等待回答超时";
-    case "stopped": return "这一轮已停止";
-    default: return `${questions?.length ?? 0} 个问题 · 回答后 VNAS 接着做`;
-  }
-}
-
-function statusText({ status, change }: Approval) {
-  if (!change) return "";
-  switch (status) {
-    case "approved": return "已确认，正在执行";
-    case "applied": return "已按你的确认完成；被替换或删除的旧文件在回收站";
-    case "failed": return `没有完成：${change.error ?? "未知原因"}`;
-    case "rejected": return "你拒绝了这项更改，文件没有变化";
-    case "expired": return "等待确认超时，文件没有变化";
-    case "stopped": return "这一轮已停止，文件没有变化";
-    default: return `${change.operations.length} 项操作 · 确认前文件不会变化`;
-  }
-}
-
 function OperationRow({ operation }: { operation: ChangeOperation }) {
   const target = friendlyPath(operation.path);
   if (operation.op === "write") {
     const created = !operation.exists;
     return (
       <li>
-        <div className="as-op-title"><FilePen /><span>{created ? "新建" : "修改"}</span><code>{target}</code></div>
+        <div className={styles.asOpTitle}>
+          <FilePen />
+          <span>{created ? "新建" : "修改"}</span>
+          <code>{target}</code>
+        </div>
         <Diff before={operation.before ?? ""} after={operation.after ?? ""} />
       </li>
     );
@@ -753,30 +1682,56 @@ function OperationRow({ operation }: { operation: ChangeOperation }) {
   if (operation.op === "copy") {
     return (
       <li>
-        <div className="as-op-title"><Copy /><span>{operation.exists ? "复制并替换" : "复制"}</span>
-          <code>{friendlyPath(operation.from ?? "")}</code><MoveRight /><code>{target}</code>
-          {operation.size !== undefined && <small>{operation.folder ? "文件夹，" : ""}{formatBytes(operation.size)}</small>}
+        <div className={styles.asOpTitle}>
+          <Copy />
+          <span>{operation.exists ? "复制并替换" : "复制"}</span>
+          <code>{friendlyPath(operation.from ?? "")}</code>
+          <MoveRight />
+          <code>{target}</code>
+          {operation.size !== undefined && (
+            <small>
+              {operation.folder ? "文件夹，" : ""}
+              {formatBytes(operation.size)}
+            </small>
+          )}
         </div>
-        {operation.exists && <p className="as-op-note">原来的文件会移到回收站</p>}
+        {operation.exists && <p className={styles.asOpNote}>原来的文件会移到回收站</p>}
       </li>
     );
   }
   const verb = operation.op === "delete" ? "删除（移入回收站）" : operation.op === "move" ? "移动" : "新建文件夹";
   const icon = operation.op === "delete" ? <Trash2 /> : operation.op === "move" ? <MoveRight /> : <FolderPlus />;
   return (
-    <li><div className="as-op-title">{icon}<span>{verb}</span><code>{target}</code>{operation.to && <><MoveRight /><code>{friendlyPath(operation.to)}</code></>}</div></li>
+    <li>
+      <div className={styles.asOpTitle}>
+        {icon}
+        <span>{verb}</span>
+        <code>{target}</code>
+        {operation.to && (
+          <>
+            <MoveRight />
+            <code>{friendlyPath(operation.to)}</code>
+          </>
+        )}
+      </div>
+    </li>
   );
 }
 
 function Diff({ before, after }: { before: string; after: string }) {
   const parts = useMemo(() => diffLines(before, after), [before, after]);
   return (
-    <pre className="as-diff">
+    <pre className={styles.asDiff}>
       {parts.map((part, index) => {
         const lines = part.value.replace(/\n$/, "").split("\n");
         const kind = part.added ? "add" : part.removed ? "del" : "same";
         const shown = kind === "same" && lines.length > 6 ? [...lines.slice(0, 2), "…", ...lines.slice(-2)] : lines;
-        return shown.map((line, row) => <span key={`${index}-${row}`} className={kind}><i aria-hidden>{kind === "add" ? "+" : kind === "del" ? "−" : ""}</i>{line || " "}</span>);
+        return shown.map((line, row) => (
+          <span key={`${index}-${row}`} className={styles[kind]}>
+            <i aria-hidden>{kind === "add" ? "+" : kind === "del" ? "−" : ""}</i>
+            {line || " "}
+          </span>
+        ));
       })}
     </pre>
   );
@@ -784,22 +1739,12 @@ function Diff({ before, after }: { before: string; after: string }) {
 
 // assistant-ui keeps its message state keyed on these, so they must not be
 // recreated per render (Hermes Desktop hoists them the same way).
-const MARKDOWN_COMPONENTS: StreamdownTextComponents = { a: MarkdownLink, CodeHeader };
+const MARKDOWN_COMPONENTS: StreamdownTextComponents = { a: MarkdownLink, img: MarkdownImage, CodeHeader };
 const ASSISTANT_PARTS = { Text: MarkdownText, ChainOfThought: Steps, Empty: Thinking };
 const STEP_PARTS = { Reasoning, tools: { Fallback: ToolActivity } };
-const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: AssistantMessage };
+const THREAD_COMPONENTS = { UserMessage, AssistantMessage, SystemMessage: SystemNotice };
 
 // Sizes in 1024 units, as everywhere in A-NAS (docs/specs/size-units.md).
-function formatBytes(bytes: number) {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${unit === 0 ? value : value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
-}
 
 function short(text: string) {
   const line = text.split("\n")[0];
@@ -811,10 +1756,5 @@ function friendlyPath(path: string) {
 }
 
 function relativeTime(seconds: number) {
-  const elapsed = Date.now() / 1000 - seconds;
-  if (elapsed < 60) return "刚刚";
-  if (elapsed < 3600) return `${Math.floor(elapsed / 60)} 分钟前`;
-  if (elapsed < 86400) return `${Math.floor(elapsed / 3600)} 小时前`;
-  const date = new Date(seconds * 1000);
-  return `${date.getMonth() + 1}月${date.getDate()}日`;
+  return formatRelativeTime(seconds * 1000, Date.now(), { dateAfterDays: 1 });
 }

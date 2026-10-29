@@ -19,7 +19,8 @@ import (
 	"github.com/mewkiz/flac"
 	"golang.org/x/text/encoding/simplifiedchinese"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 // formats maps the audio file extensions the library indexes to their format.
@@ -68,7 +69,8 @@ func readTags(r io.ReadSeeker, format string) (result metadata) {
 	defer func() {
 		// The tag readers trust lengths stored in the file; a malformed file
 		// must not stop the scan.
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("music tags", recovered)
 			result = metadata{}
 		}
 		if format == "m4a" {
@@ -105,7 +107,8 @@ func readTags(r io.ReadSeeker, format string) (result metadata) {
 // readLyrics returns the lyrics embedded in an audio file's tags.
 func readLyrics(r io.ReadSeeker) (lyrics string) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("music lyrics", recovered)
 			lyrics = ""
 		}
 	}()
@@ -134,7 +137,7 @@ var lossyCodecs = map[string]bool{
 // worker's probe, and reports the audio format. Container tag names differ in
 // case and spelling ("album_artist", "Album Artist"), so they are compared
 // without case or separators.
-func fromProbe(m *metadata, probe mediaworker.Probe) audioFormat {
+func fromProbe(m *metadata, probe ffmpegworker.Probe) audioFormat {
 	tags := map[string]string{}
 	collect := func(values map[string]string) {
 		for key, value := range values {
@@ -202,8 +205,8 @@ func fromProbe(m *metadata, probe mediaworker.Probe) audioFormat {
 // playbackRequest asks the media worker for FLAC that browsers play: 24 bits
 // for wide lossless sources, and sample rates above 192 kHz (DSD decodes to
 // 352.8 kHz) halved within their family.
-func playbackRequest(sampleRate, bits int, start float64) mediaworker.AudioRequest {
-	request := mediaworker.AudioRequest{Start: start, Bits: 16}
+func playbackRequest(sampleRate, bits int, start float64) ffmpegworker.AudioRequest {
+	request := ffmpegworker.AudioRequest{Start: start, Bits: 16}
 	if bits > 16 {
 		request.Bits = 24
 	}
@@ -233,8 +236,15 @@ func fillFromName(m *metadata, name string) {
 }
 
 // mp4Codec names the audio codec of an MP4 file: AAC plays in browsers, ALAC
-// does not.
-func mp4Codec(r io.ReadSeeker) string {
+// does not. It runs in readTags's deferred function, after that guard has
+// recovered, so it has a guard of its own.
+func mp4Codec(r io.ReadSeeker) (codec string) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("music codec", recovered)
+			codec = ""
+		}
+	}()
 	path := mp4.BoxPath{mp4.BoxTypeMoov(), mp4.BoxTypeTrak(), mp4.BoxTypeMdia(), mp4.BoxTypeMinf(), mp4.BoxTypeStbl(), mp4.BoxTypeStsd(), mp4.StrToBoxType("alac")}
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return ""
@@ -255,6 +265,7 @@ func mp4Codec(r io.ReadSeeker) string {
 func readDuration(r io.ReadSeeker, format string) (duration time.Duration, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
+			decodepanic.Log("music duration", recovered)
 			duration, err = 0, fmt.Errorf("read duration: %v", recovered)
 		}
 	}()

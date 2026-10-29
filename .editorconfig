@@ -16,3 +16,6 @@ indent_size = 4
 
 [Makefile]
 indent_style = tab
+
+[*.{ps1,cmd,bat}]
+end_of_line = crlf

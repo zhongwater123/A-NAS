@@ -17,13 +17,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
-
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/openapitest"
+	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
@@ -72,7 +71,9 @@ type activityFixture struct {
 	client   *contractClient
 }
 
-func newActivityFixture(t *testing.T, photoAPI func(*photos.Service) http.Handler) *activityFixture {
+// newActivityFixture serves the product with the photo API that photoAPI
+// returns for the photo library and the account service.
+func newActivityFixture(t *testing.T, photoAPI func(*photos.Service, *accounts.Service) http.Handler) *activityFixture {
 	t.Helper()
 	dir := t.TempDir()
 	now := steadyClock()
@@ -87,43 +88,47 @@ func newActivityFixture(t *testing.T, photoAPI func(*photos.Service) http.Handle
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
-	fileService := files.NewService(fileStore, filepath.Join(dir, "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true, Now: now})
+	fileService := files.NewLocalService(fileStore, filepath.Join(dir, "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true, Now: now})
 	photoService, err := photos.Open(filepath.Join(dir, "photos"), photos.Options{DisableCapacityReserve: true, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = photoService.Close() })
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	settings, err := personalization.Open(filepath.Join(dir, "personalization.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = settings.Close() })
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
-		Photos: photoAPI(photoService), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Photos: photoAPI(photoService, accountService), Personalization: settings, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatal(err)
-	}
 	return &activityFixture{t: t, handler: handler, accounts: accountService, files: fileService, photos: photoService,
-		client: &contractClient{t: t, handler: handler, router: router}}
+		client: &contractClient{t: t, handler: handler}}
 }
 
-// signIn signs in from a LAN browser and returns a client acting as that user.
+// signIn signs in from a LAN browser, or sets the device up from its own
+// screen, checks the exchange against the contract and returns a client
+// acting as that user.
 func (f *activityFixture) signIn(path, username, password, address string, want int) *contractClient {
 	f.t.Helper()
-	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"username":"`+username+`","password":"`+password+`"}`))
-	request.Header.Set("Content-Type", "application/json")
-	if path == "/api/v1/setup/admin" {
-		fromLocalConsole(request)
-	} else {
-		request.Header.Set("X-Forwarded-For", address)
+	newRequest := func() *http.Request {
+		request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080"+path, strings.NewReader(`{"username":"`+username+`","password":"`+password+`"}`))
+		request.Header.Set("Content-Type", "application/json")
+		if path == "/api/v1/setup/admin" {
+			fromLocalConsole(request)
+		} else {
+			request.Header.Set("X-Forwarded-For", address)
+		}
+		return request
 	}
+	request := newRequest()
 	recorder := httptest.NewRecorder()
 	f.handler.ServeHTTP(recorder, request)
 	if recorder.Code != want {
 		f.t.Fatalf("sign in %s status = %d, want %d; body=%s", username, recorder.Code, want, recorder.Body.String())
 	}
+	openapitest.Check(f.t, newRequest(), recorder)
 	if want >= 300 {
 		return nil
 	}
@@ -132,7 +137,7 @@ func (f *activityFixture) signIn(path, username, password, address string, want 
 	}
 	_ = json.Unmarshal(recorder.Body.Bytes(), &session)
 	client := *f.client
-	client.cookie, client.csrf = recorder.Result().Cookies()[0], session.CSRFToken
+	client.cookie, client.csrf, client.forwardedFor = recorder.Result().Cookies()[0], session.CSRFToken, request.Header.Get("X-Forwarded-For")
 	return &client
 }
 
@@ -178,7 +183,9 @@ func sharedSpace(t *testing.T, service *accounts.Service, user accounts.User) ac
 
 func TestActivityLogShowsEveryoneToAdministratorsWithoutPrivateNames(t *testing.T) {
 	ctx := context.Background()
-	f := newActivityFixture(t, func(service *photos.Service) http.Handler { return photosapi.New(service, nil) })
+	f := newActivityFixture(t, func(service *photos.Service, accountService *accounts.Service) http.Handler {
+		return localPhotos(t, service, serviceSessions{accountService})
+	})
 	asAdmin := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
 	session, err := f.accounts.ResolveSession(ctx, asAdmin.cookie.Value)
 	if err != nil {
@@ -191,7 +198,8 @@ func TestActivityLogShowsEveryoneToAdministratorsWithoutPrivateNames(t *testing.
 	}
 	f.signIn("/api/v1/session", "alice", "not alice's password", "172.18.45.66", http.StatusUnauthorized)
 	asAlice := f.signIn("/api/v1/session", "alice", "alice password for testing", "172.18.45.20", http.StatusOK)
-	if _, err := f.files.Upload(ctx, alice, privateSpace(t, f.accounts, alice).ID, "", "体检报告.pdf", strings.NewReader("x")); err != nil {
+	report, err := f.files.Upload(ctx, alice, privateSpace(t, f.accounts, alice).ID, "", "体检报告.pdf", strings.NewReader("x"))
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.files.Upload(ctx, alice, sharedSpace(t, f.accounts, alice).ID, "", "家庭旅行.pdf", strings.NewReader("x")); err != nil {
@@ -233,6 +241,23 @@ func TestActivityLogShowsEveryoneToAdministratorsWithoutPrivateNames(t *testing.
 	}
 	if !byDetail["家庭旅行.pdf"] || !byDetail["体检记录.xlsx"] {
 		t.Fatalf("shared and own names missing: %v", byDetail)
+	}
+	// Neither the name nor the ID of alice's private file reaches the
+	// administrator anywhere in the response, and searching for the ID finds
+	// nothing.
+	if body := asAdmin.do(http.MethodGet, "/api/v1/activity", "", nil, http.StatusOK).Body.String(); strings.Contains(body, "体检报告") || strings.Contains(body, report.ID) {
+		t.Fatalf("administrator's activity reveals alice's private file %s: %s", report.ID, body)
+	}
+	if found := asAdmin.activity("?q=" + url.QueryEscape(report.ID)); len(found.Items) != 0 {
+		t.Fatalf("search for alice's private file ID = %+v", found.Items)
+	}
+	// The unredacted audit export is gone (#163).
+	auditRequest := httptest.NewRequest(http.MethodGet, "/api/v1/audit", nil)
+	auditRequest.AddCookie(asAdmin.cookie)
+	audit := httptest.NewRecorder()
+	f.handler.ServeHTTP(audit, auditRequest)
+	if audit.Code != http.StatusNotFound {
+		t.Fatalf("GET /api/v1/audit status = %d, want 404; body=%s", audit.Code, audit.Body.String())
 	}
 	if found := asAdmin.activity("?q=" + url.QueryEscape("体检")); len(found.Items) != 1 || found.Items[0].Detail != "体检记录.xlsx" {
 		t.Fatalf("search for 体检 = %+v", found.Items)
@@ -292,7 +317,7 @@ func TestActivityLogShowsEveryoneToAdministratorsWithoutPrivateNames(t *testing.
 }
 
 func TestActivityLogReportsAnUnavailablePhotoLibrary(t *testing.T) {
-	f := newActivityFixture(t, func(*photos.Service) http.Handler { return photosapi.New(nil, nil) })
+	f := newActivityFixture(t, func(*photos.Service, *accounts.Service) http.Handler { return photosapi.New(nil, nil) })
 	asAdmin := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
 	page := asAdmin.activity("")
 	if len(page.Unavailable) != 1 || page.Unavailable[0] != "photo" {

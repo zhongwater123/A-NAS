@@ -83,14 +83,25 @@ func (s *Store) SendMessage(ctx context.Context, u User, shareID, recipientID, r
 	previousMessages := len(r.Threads[recipientID])
 	previousEvents := len(r.Events)
 	previousLast := p.LastMessage
+	cursor := &p.ReadThrough
+	if u.ID == r.Share.Sender.ID {
+		cursor = &p.SenderReadThrough
+	}
+	previousCursor := *cursor
 	r.Threads[recipientID] = append(r.Threads[recipientID], m)
 	p.LastMessage = m.ID
+	// The author has read their own message. The cursor follows it only when
+	// nothing unread comes before it, so it never skips the other side's reply.
+	if *cursor >= previousLast {
+		*cursor = m.ID
+	}
 	r.Requests[key] = requestRecord{Hash: digest, MessageID: m.ID}
 	s.event(r, other, recipientID, "message", m.ID)
 	if err = s.persist(r); err != nil {
 		r.Threads[recipientID] = r.Threads[recipientID][:previousMessages]
 		r.Events = r.Events[:previousEvents]
 		p.LastMessage = previousLast
+		*cursor = previousCursor
 		delete(r.Requests, key)
 		return Message{}, err
 	}

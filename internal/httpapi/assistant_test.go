@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
@@ -11,9 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/getkin/kin-openapi/openapi3"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
+	"github.com/coder/websocket"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
@@ -23,10 +24,18 @@ import (
 
 const assistantStored = "20261015_120000_abcdef"
 
+// assistantInstance reports the gateway connections of the stand-in.
+type assistantInstance struct {
+	opened chan struct{}
+	closed chan struct{}
+}
+
 // serveAssistantInstance stands in for alice's `hermes serve` on
-// <dir>/alice.sock with the rows it really returns.
-func serveAssistantInstance(t *testing.T, dir string) {
+// <dir>/alice.sock with the rows it really returns, behind Hermes's password
+// login with her instance's secret.
+func serveAssistantInstance(t *testing.T, dir string) *assistantInstance {
 	t.Helper()
+	instance := &assistantInstance{opened: make(chan struct{}, 8), closed: make(chan struct{}, 8)}
 	if err := os.WriteFile(filepath.Join(dir, "alice.token"), []byte("serve-token-alice\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +44,32 @@ func serveAssistantInstance(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Hermes-Session-Token") != "serve-token-alice" || r.Host != "127.0.0.1:9119" {
+		if r.Method == http.MethodPost && r.URL.Path == "/auth/password-login" {
+			var login struct{ Provider, Username, Password string }
+			_ = json.NewDecoder(r.Body).Decode(&login)
+			if login.Provider != "basic" || login.Username != "alice" || login.Password != "serve-token-alice" {
+				http.Error(w, `{"detail":"Invalid credentials"}`, http.StatusUnauthorized)
+				return
+			}
+			http.SetCookie(w, &http.Cookie{Name: "hermes_session_at", Value: "access-alice", MaxAge: 43200, Path: "/"})
+			_, _ = io.WriteString(w, `{"ok":true,"next":"/"}`)
+			return
+		}
+		if r.URL.Path == "/api/ws" && r.URL.Query().Get("token") == "access-alice" && r.Host == "127.0.0.1:9119" {
+			conn, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				return
+			}
+			instance.opened <- struct{}{}
+			defer func() { instance.closed <- struct{}{} }()
+			_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"jsonrpc":"2.0","method":"event","params":{"type":"gateway.ready","payload":{}}}`))
+			for {
+				if _, _, err := conn.Read(r.Context()); err != nil {
+					return
+				}
+			}
+		}
+		if r.Header.Get("Authorization") != "Bearer access-alice" || r.Host != "127.0.0.1:9119" {
 			http.Error(w, `{"detail":"Unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
@@ -74,6 +108,71 @@ func serveAssistantInstance(t *testing.T, dir string) {
 	server.Listener = listener
 	server.Start()
 	t.Cleanup(server.Close)
+	return instance
+}
+
+// Signing in starts the member's assistant in the background and keeps it
+// running until they sign out, so that opening it does not wait for a cold
+// start.
+func TestSigningInKeepsTheMembersAssistantRunningUntilSigningOut(t *testing.T) {
+	ctx := context.Background()
+	dir, err := os.MkdirTemp("", "as")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	instance := serveAssistantInstance(t, dir)
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	assistant := assistantapi.New(assistantapi.Options{
+		Connector: assistantapi.NewSocketConnector(dir, dir), SocketDir: dir, Logger: logger,
+	})
+	handler := checkedProduct(t, httpapi.ProductDependencies{
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, AssistantKeeper: assistant, Logger: logger,
+	})
+	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler}}
+	asOwner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
+	owner, err := accountService.ResolveSession(ctx, asOwner.cookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := accountService.CreateMember(ctx, owner.User, "alice", "alice password for testing"); err != nil {
+		t.Fatal(err)
+	}
+	// The owner has no assistant here, so nothing is started for them.
+	select {
+	case <-instance.opened:
+		t.Fatal("an assistant was started for a member without one")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	asAlice := f.signIn("/api/v1/session", "alice", "alice password for testing", "172.18.45.20", http.StatusOK)
+	select {
+	case <-instance.opened:
+	case <-time.After(5 * time.Second):
+		t.Fatal("signing in did not start alice's assistant")
+	}
+	// Loading the desktop again keeps the same connection.
+	asAlice.do(http.MethodGet, "/api/v1/session", "", nil, http.StatusOK)
+	select {
+	case <-instance.opened:
+		t.Fatal("a second connection was opened for the same member")
+	case <-instance.closed:
+		t.Fatal("the kept connection closed while alice is signed in")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	asAlice.do(http.MethodDelete, "/api/v1/session", "", nil, http.StatusNoContent)
+	select {
+	case <-instance.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("signing out did not let alice's assistant go")
+	}
 }
 
 func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *testing.T) {
@@ -84,7 +183,7 @@ func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *te
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	serveAssistantInstance(t, dir)
+	_ = serveAssistantInstance(t, dir)
 
 	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "control.db"))
 	if err != nil {
@@ -94,20 +193,12 @@ func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *te
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	assistant := assistantapi.New(assistantapi.Options{
-		Connector: assistantapi.SocketConnector{SocketDir: dir, TokenDir: dir}, SocketDir: dir, Logger: logger,
+		Connector: assistantapi.NewSocketConnector(dir, dir), SocketDir: dir, Logger: logger,
 	})
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
-		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, Logger: logger,
+	handler := checkedProduct(t, httpapi.ProductDependencies{
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Assistant: assistant, AssistantKeeper: assistant, Logger: logger,
 	})
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler, router: router}}
+	f := &activityFixture{t: t, handler: handler, accounts: accountService, client: &contractClient{t: t, handler: handler}}
 	f.client.do(http.MethodGet, "/api/v1/assistant/status", "", nil, http.StatusUnauthorized)
 
 	asOwner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
@@ -161,13 +252,14 @@ func TestAssistantAPIReachesOnlyTheMembersOwnInstanceAndFollowsTheContract(t *te
 	// Writes need the CSRF token like every other product write.
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/assistant/approvals/req-1/confirm", nil)
 	request.AddCookie(asAlice.cookie)
+	request.Header.Set("X-Forwarded-For", asAlice.forwardedFor)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("confirm without CSRF token = %d", recorder.Code)
 	}
 
-	unconfigured := httpapi.NewProduct(httpapi.ProductDependencies{
+	unconfigured := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService,
 		Assistant: assistantapi.New(assistantapi.Options{}), Logger: logger,
 	})

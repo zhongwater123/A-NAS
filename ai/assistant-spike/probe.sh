@@ -28,6 +28,7 @@ expect_ok   "read another member's Agent space"  cat /nas/共享空间/Agent空�
 expect_fail "read another member's shared trash" cat /nas/共享空间/.a-nas-trash/bob/gone.txt
 expect_ok   "recursive file search over Shared"  sh -c 'rg --files -g "*" -- /nas/共享空间 >/dev/null; [ $? -le 1 ]'
 expect_ok   "recursive file search over personal" sh -c 'rg --files -g "*" -- /nas/个人空间 >/dev/null; [ $? -le 1 ]'
+# shellcheck disable=SC2012 # names listed for the log
 echo "INFO shared bin as seen: $(ls -A /nas/共享空间/.a-nas-trash | tr '
 ' ' ')"
 if [ -z "$(ls -A /srv 2>/dev/null)" ]; then ok "data volume hidden (/srv empty)"; else bad "data volume hidden" "$(ls -A /srv)"; fi
@@ -74,14 +75,20 @@ sys.exit(0 if r == 0 else 1)'
 expect_fail "setuid to root"                     python3 -c 'import os; os.setuid(0)'
 expect_fail "unshare a user namespace"           unshare -U true
 echo "INFO lsm: $(cat /sys/kernel/security/lsm 2>/dev/null || echo unreadable)"
-# The photo service's assistant socket (#113), when the sandbox runs with SPIKE_PHOTOS.
+# The photo service's assistant socket (#113): the spike's photo service (SPIKE_PHOTOS) or,
+# on the real installer's layout, A-NAS's own with product-settings.sh.
 photos=/run/anas-assistant-photos/photos.sock
 if [ -S "$photos" ]; then
-  expect_ok   "read own and shared photo libraries" sh -c "python3 /spike/photos_peer.py $photos libraries | grep -q 'private:user:alice.*shared'"
-  expect_ok   "search photos without another member's" sh -c "out=\$(python3 /spike/photos_peer.py $photos search 海边) && echo \"\$out\" | grep -q IMG_3101 && ! echo \"\$out\" | grep -q IMG_900"
+  expect_ok   "read own and shared photo libraries" sh -c "python3 /spike/photos_peer.py $photos libraries | grep -q 'private:.*shared:'"
+  # The spike seeds alice's, bob's and the shared library with beach photos.
+  if python3 /spike/photos_peer.py "$photos" search 海边 2>/dev/null | grep -q IMG_3101; then
+    expect_ok "search photos without another member's" sh -c "out=\$(python3 /spike/photos_peer.py $photos search 海边) && echo \"\$out\" | grep -q IMG_3101 && ! echo \"\$out\" | grep -q IMG_900"
+  else
+    echo "INFO photo search: no seeded photos here (the system test checks its own)"
+  fi
   expect_fail "reach the photo service's session socket" python3 /spike/photos_peer.py /run/a-nas-photos/photos.sock --session seed-alice libraries
 else
-  echo "INFO photo socket not bound (sandbox without SPIKE_PHOTOS)"
+  echo "INFO photo socket not bound (no photo service for assistants)"
 fi
 # Policy, not sandbox: every toolset and tool Hermes knows is allowed or disabled, so a
 # Hermes upgrade that adds one fails here (toolsets-check.py).

@@ -62,8 +62,9 @@ def submit_changes(summary: str, operations: list[dict]) -> str:
       {"op": "write", "path": 目标文件, "source": 暂存区 /nas/助手/待确认/ 中写好完整新内容的文件}
       {"op": "copy", "path": 目标, "source": 个人空间、共享空间或 /nas/助手 中要复制的文件或文件夹}（图片、视频等任意文件，不需要暂存）
       {"op": "delete", "path": 要删除的文件或文件夹（进入回收站）}
-      {"op": "move", "path": 原路径, "to": 新路径}（移动或改名）
+      {"op": "move", "path": 原路径, "to": 新路径}（移动或改名，只在个人空间之内或 Agent空间之内；两者之间先 copy 再 delete）
       {"op": "mkdir", "path": 新文件夹}
+    一批最多 100 项操作；暂存文件每个不超过 64 MiB，一批合计不超过 256 MiB。
     """
     return broker("POST", "/apply", {"summary": summary, "operations": operations})
 
@@ -151,8 +152,8 @@ def failed(error: PhotoError) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=f"相册：{error}")], is_error=True)
 
 
-PHOTO_NOTE = ("只读。你看不到照片画面，只有名称、拍摄时间（taken）、所在图库（我的／共享）、"
-              "本人加的标签与相册；没有拍摄地点，也认不出照片里是谁。回答中提到某张照片时写成 "
+PHOTO_NOTE = ("只读。结果里没有照片画面，只有名称、拍摄时间（taken）、所在图库（我的／共享）、"
+              "本人加的标签与相册；拍摄地点与相机等原图信息用 photo_details 查，认不出照片里是谁。要看画面用 look_at_photo。回答中提到某张照片时写成 "
               "[名称](照片的 id)，id 原样照抄（它本身以 photo: 开头），窗口会显示它的缩略图。")
 
 
@@ -209,12 +210,16 @@ def browse_photos(month: str = "", album_id: str = "", tag: str = "", page: str 
 
 
 @server.tool(annotations=READ_ONLY, structured_output=False, description=(
-    "一张照片的详细信息：在搜索与浏览结果之外只多出尺寸、标签与所在相册；没有地点、人物或画面内容，"
+    "一张照片的详细信息：尺寸、标签、所在相册，以及原图记录的全部元数据（exif：相机、镜头、曝光、拍摄时间等；"
+    "location：相机记下的拍摄位置，经纬度与海拔，没有记下就没有）。经纬度可以换算成大致地点；没有人物与画面内容，"
     "不要为找这些逐张查看。" + PHOTO_NOTE))
 def photo_details(photo_id: str):
+    quoted = urllib.parse.quote(photo_id, safe='')
     try:
-        asset = photos(f"/assets/{urllib.parse.quote(photo_id, safe='')}")
+        asset = photos(f"/assets/{quoted}")
         data = photo(asset, libraries())
+        if asset.get("mediaType", "").startswith("image/"):
+            data.update(photos(f"/assets/{quoted}/metadata"))
     except PhotoError as error:
         return failed(error)
     data.update(width=asset["width"], height=asset["height"], bytes=asset["sizeBytes"])
@@ -229,6 +234,42 @@ def similar_photos(photo_id: str, page: str = ""):
         return paged(page_of, libraries())
     except PhotoError as error:
         return failed(error)
+
+
+def photo_view(photo_id: str) -> bytes:
+    """A photo's view from the photo service: a JPEG of at most 1600 pixels without the
+    original's metadata (ADR 0024 decision 6)."""
+    conn = UnixHTTP(PHOTOS)
+    try:
+        conn.request("GET", f"/api/v1/photos/assets/{urllib.parse.quote(photo_id, safe='')}/view")
+        response = conn.getresponse()
+        raw = response.read()
+    except OSError:
+        raise PhotoError("相册暂时连不上，请稍后再试") from None
+    finally:
+        conn.close()
+    if response.status != 200:
+        try:
+            message = (json.loads(raw).get("error") or {}).get("message")
+        except ValueError:
+            message = None
+        raise PhotoError(message or f"相册返回 {response.status}")
+    return raw
+
+
+@server.tool(annotations=READ_ONLY, structured_output=False, description=(
+    "取出一张照片的画面，好看清里面有什么：成员要你看照片，或问到名称、时间、标签回答不了的画面内容时用。"
+    "返回一张图片（最长边不超过 1600 像素，不带拍摄地点等原图信息）；结果里有它的路径，用 vision_analyze "
+    "读这个路径并写清要看什么，才能看到画面。一次一张，只取需要的几张；视频没有画面可取。photo_id：照片的 id。"))
+def look_at_photo(photo_id: str):
+    try:
+        data = photo_view(photo_id)
+    except PhotoError as error:
+        return failed(error)
+    return CallToolResult(content=[
+        TextContent(type="text", text=f"照片 {photo_id} 的画面如下；用 vision_analyze 看它。"),
+        ImageContent(type="image", data=base64.b64encode(data).decode(), mime_type="image/jpeg"),
+    ])
 
 
 if os.environ.get("ANAS_SPIKE_PHOTO_PIXELS"):

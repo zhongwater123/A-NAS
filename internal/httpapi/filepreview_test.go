@@ -15,14 +15,14 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
-type previewWorker struct{ mediaworker.Worker }
+type previewWorker struct{ ffmpegworker.Worker }
 
 func (previewWorker) Image(context.Context, *os.File, int) ([]byte, error) {
 	var b bytes.Buffer
@@ -35,7 +35,7 @@ func TestFilePreviewRequiresSessionAndSourceAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
 	owner, err := accountService.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
@@ -48,8 +48,8 @@ func TestFilePreviewRequiresSessionAndSourceAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fileStore.Close()
-	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	defer func() { _ = fileStore.Close() }()
+	fileService := files.NewLocalService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	spaces, err := accountService.ListSpaces(ctx, owner)
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestFilePreviewRequiresSessionAndSourceAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := httpapi.NewProduct(httpapi.ProductDependencies{
+	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), Accounts: accountService, Files: fileService,
 		FilePreviews: filepreview.New(fileService, previewWorker{}), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})

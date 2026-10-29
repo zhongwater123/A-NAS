@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 )
 
 // TestRootTerminalRunsAsTheAdministrator starts a Web terminal shell
@@ -23,18 +23,18 @@ func TestRootTerminalRunsAsTheAdministrator(t *testing.T) {
 	setUpDataVolume(t, mount)
 	startSamba(t)
 	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: mount})
-	identities := map[string]accounts.Identity{}
+	identities := map[string]accountid.Identity{}
 	for i, user := range []struct {
 		name string
-		role accounts.Role
-	}{{"keeper", accounts.RoleAdmin}, {"alice", accounts.RoleMember}} {
-		if err := executor.SetCredential(ctx, accounts.CredentialRequest{
+		role accountid.Role
+	}{{"keeper", accountid.RoleAdmin}, {"alice", accountid.RoleMember}} {
+		if err := executor.SetCredential(ctx, accountid.CredentialRequest{
 			UserID: "user:" + user.name, PrivateSpaceID: "space:" + user.name, Username: user.name,
 			Password: user.name + " password for tests", Role: user.role, UID: 20110 + i, Enabled: true,
 		}); err != nil {
 			t.Fatalf("SetCredential(%s) error = %v", user.name, err)
 		}
-		identities[user.name+"-token"] = accounts.Identity{Username: user.name, UID: 20110 + i, Role: user.role, Enabled: true}
+		identities[user.name+"-token"] = accountid.Identity{Username: user.name, UID: 20110 + i, Role: user.role, Enabled: true}
 	}
 	alicePrivate := filepath.Join(mount, "spaces", "private", "alice")
 	if result := asUser("alice", "sh", "-c", "echo secret > "+filepath.Join(alicePrivate, "secret.txt")); !result.ok {
@@ -42,14 +42,14 @@ func TestRootTerminalRunsAsTheAdministrator(t *testing.T) {
 	}
 	broker := startFileBroker(t, mount, executor, identities)
 
-	if _, err := broker.StartShell(accounts.WithSessionToken(ctx, "alice-token"), 80, 24); err == nil {
+	if _, err := broker.StartShell(accountid.WithSessionToken(ctx, "alice-token"), 80, 24); err == nil {
 		t.Fatal("a member opened a terminal")
 	}
-	shell, err := broker.StartShell(accounts.WithSessionToken(ctx, "keeper-token"), 80, 24)
+	shell, err := broker.StartShell(accountid.WithSessionToken(ctx, "keeper-token"), 80, 24)
 	if err != nil {
 		t.Fatalf("StartShell() error = %v", err)
 	}
-	defer shell.Close()
+	defer func() { _ = shell.Close() }()
 	script := "echo uid=$(id -u) groups=$(id -Gn) home=$(pwd); cat " + filepath.Join(alicePrivate, "secret.txt") + "; ls -l $(tty); exit\n"
 	if _, err := shell.Write([]byte(script)); err != nil {
 		t.Fatal(err)

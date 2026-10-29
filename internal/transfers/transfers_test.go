@@ -74,7 +74,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { _ = catalog.Close() })
 	volume := filepath.Join(t.TempDir(), "volume")
 	f.root = filepath.Join(volume, "spaces", "shared")
-	f.files = files.NewService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	f.files = files.NewLocalService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	f.path = filepath.Join(t.TempDir(), "transfers.db")
 	f.open(t)
 	return f
@@ -109,8 +109,8 @@ func (f *fixture) advance(by time.Duration) {
 func (f *fixture) beginUpload(t *testing.T, owner accounts.User, name string, size int64) Transfer {
 	t.Helper()
 	upload, err := f.service.BeginUpload(f.ctx, owner, UploadRequest{
-		UploadRequest: files.UploadRequest{SpaceID: f.shared.ID, Name: name, Size: size, Conflict: files.ConflictAsk},
-		Batch:         "batch-1", LastModified: 1760000000000,
+		SpaceID: f.shared.ID, Name: name, Size: size, Conflict: files.ConflictAsk,
+		Batch: "batch-1", LastModified: 1760000000000,
 	})
 	if err != nil {
 		t.Fatalf("BeginUpload(%s) error = %v", name, err)
@@ -201,7 +201,7 @@ func TestUploadKeepsBothAndReportsTheSavedName(t *testing.T) {
 	if err != nil || saved.SavedName != "a (1).txt" {
 		t.Fatalf("late conflict = %#v, %v", saved, err)
 	}
-	if _, err := f.service.BeginUpload(f.ctx, f.alice, UploadRequest{UploadRequest: files.UploadRequest{SpaceID: f.shared.ID, Name: "a.txt", Size: 1, Conflict: files.ConflictAsk}}); !errors.Is(err, files.ErrConflict) {
+	if _, err := f.service.BeginUpload(f.ctx, f.alice, UploadRequest{SpaceID: f.shared.ID, Name: "a.txt", Size: 1, Conflict: files.ConflictAsk}); !errors.Is(err, files.ErrConflict) {
 		t.Fatalf("asking upload of a taken name error = %v", err)
 	}
 	if failure := FailureOf(files.ErrConflict); failure.Code != "name_conflict" {
@@ -455,7 +455,7 @@ func TestCanceledDownloadStopsAndUnstartedOnesFail(t *testing.T) {
 
 func TestHistoryKeepsTheNewestFinishedTransfers(t *testing.T) {
 	f := newFixture(t)
-	for index := 0; index < maxFinished+3; index++ {
+	for index := range maxFinished + 3 {
 		upload := f.beginUpload(t, f.alice, "f"+strconv.Itoa(index)+".txt", 0)
 		_, _ = f.service.Cancel(f.ctx, f.alice, upload.ID)
 		f.advance(time.Second)

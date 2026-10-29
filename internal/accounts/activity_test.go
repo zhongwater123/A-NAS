@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func TestSignInsFailuresAndSignOutsAreRecordedWithTheirOrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &viewingRecorder{}, accounts.Options{Now: ticking()})
+	service := accounts.NewService(store, &viewingRecorder{}, accounts.Options{PasswordCost: cheapPasswords, Now: ticking()})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -80,9 +81,9 @@ func TestSignInsFailuresAndSignOutsAreRecordedWithTheirOrigin(t *testing.T) {
 	}
 	type summary struct{ actor, action, via, address, username, reason string }
 	var got []summary
-	for index := len(events) - 1; index >= 0; index-- {
-		detail := detailOf(t, events[index])
-		got = append(got, summary{events[index].ActorUserID, events[index].Action, detail.Via, detail.Address, detail.Username, detail.Reason})
+	for _, event := range slices.Backward(events) {
+		detail := detailOf(t, event)
+		got = append(got, summary{event.ActorUserID, event.Action, detail.Via, detail.Address, detail.Username, detail.Reason})
 	}
 	want := []summary{
 		{alice.ID, "session.signed_in", "lan", "172.18.45.12", "", ""},
@@ -110,7 +111,7 @@ func TestMembersOnlySeeActivityAboutThemselves(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &viewingRecorder{}, accounts.Options{Now: ticking()})
+	service := accounts.NewService(store, &viewingRecorder{}, accounts.Options{PasswordCost: cheapPasswords, Now: ticking()})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)

@@ -26,7 +26,7 @@ try:
     from hermes_cli.plugins import discover_plugins
 
     discover_plugins()  # plugins may register toolsets of their own
-except Exception as exc:
+except Exception as exc:  # noqa: BLE001  any failure fails the check
     print(f"plugin discovery failed: {exc}")
     sys.exit(1)
 from model_tools import _select_tool_names
@@ -52,7 +52,13 @@ for name in known:
 
 wanted = {tool for name in allowed for tool in toolsets.resolve_toolset(name)}
 kept = _select_tool_names(allowed, disabled, True)
-problems += [f"allowed tool {tool!r} is removed by a disabled toolset" for tool in sorted(wanted - kept)]
+# Tools of an allowed toolset that a disabled one takes out on purpose: browser brings raw
+# DevTools access (browser_cdp, browser_dialog) and the Browser Use CLI (browser_exec), which
+# the disabled browser-cdp and browser-use remove; the VNAS window serves only the browser
+# control's own capabilities.
+removed_on_purpose = {"browser_cdp", "browser_dialog", "browser_exec"}
+problems += [f"allowed tool {tool!r} is removed by a disabled toolset" for tool in sorted(wanted - kept - removed_on_purpose)]
+problems += [f"tool {tool!r} should be removed but is kept" for tool in sorted(removed_on_purpose & kept)]
 # The widest selection any platform could make: every toolset, then the disabled ones removed.
 widest = _select_tool_names(known, disabled, True)
 problems += [f"tool {tool!r} survives the disabled list" for tool in sorted(widest - wanted)]

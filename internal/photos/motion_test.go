@@ -10,25 +10,29 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
-type motionDecoder struct{ probe mediaworker.Probe }
+type motionDecoder struct{ probe ffmpegworker.Probe }
 
-func (m motionDecoder) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
+func (m motionDecoder) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
 	return m.probe, nil
 }
 func (m motionDecoder) Image(context.Context, *os.File, int) ([]byte, error) {
-	return nil, mediaworker.ErrUnreadable
+	return nil, ffmpegworker.ErrUnreadable
 }
-func (m motionDecoder) Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error) {
+func (m motionDecoder) Frame(context.Context, *os.File, float64, int) ([]byte, error) {
+	return nil, ffmpegworker.ErrUnreadable
+}
+func (m motionDecoder) Stream(context.Context, *os.File, ffmpegworker.StreamRequest) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader([]byte("compatible movie"))), nil
 }
-func motionProbe() mediaworker.Probe {
-	return mediaworker.Probe{Format: mediaworker.ProbeFormat{Name: "mov,mp4", Duration: 3}, Streams: []mediaworker.ProbeStream{{Type: "video", Width: 320, Height: 240}}}
+func motionProbe() ffmpegworker.Probe {
+	return ffmpegworker.Probe{Format: ffmpegworker.ProbeFormat{Name: "mov,mp4", Duration: 3}, Streams: []ffmpegworker.ProbeStream{{Type: "video", Width: 320, Height: 240}}}
 }
 func movieBytes() []byte {
 	b := make([]byte, 64)
@@ -36,14 +40,14 @@ func movieBytes() []byte {
 	copy(b[4:], "ftypqt  ")
 	return b
 }
-func motionService(t *testing.T, probe mediaworker.Probe) (*photos.Service, string) {
+func motionService(t *testing.T, probe ffmpegworker.Probe) (*photos.Service, string) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "photos")
 	s, err := photos.Open(root, photos.Options{Media: motionDecoder{probe}, DisableCapacityReserve: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s, root
 }
 func TestLivePhotoLifecycleAndAIQueue(t *testing.T) {
@@ -75,7 +79,7 @@ func TestLivePhotoLifecycleAndAIQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var videoJobs int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM jobs j JOIN objects o ON o.id=j.object_id WHERE o.media_type LIKE 'video/%'`).Scan(&videoJobs); err != nil || videoJobs != 0 {
 		t.Fatalf("video reached AI: %d %v", videoJobs, err)
@@ -91,7 +95,7 @@ func TestLivePhotoLifecycleAndAIQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := io.ReadAll(content.Reader)
-	content.Reader.Close()
+	_ = content.Reader.Close()
 	if !bytes.Equal(got, clip) {
 		t.Fatal("copy lost original movie")
 	}
@@ -169,7 +173,7 @@ func TestAndroidMotionPhotoFormats(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, _ := io.ReadAll(original.Reader)
-			original.Reader.Close()
+			_ = original.Reader.Close()
 			if !bytes.Equal(data, got) {
 				t.Fatal("Android original changed")
 			}
@@ -178,7 +182,7 @@ func TestAndroidMotionPhotoFormats(t *testing.T) {
 				t.Fatal(err)
 			}
 			got, _ = io.ReadAll(movie.Reader)
-			movie.Reader.Close()
+			_ = movie.Reader.Close()
 			if !bytes.Equal(clip, got) {
 				t.Fatal("wrong video extraction")
 			}
@@ -188,7 +192,7 @@ func TestAndroidMotionPhotoFormats(t *testing.T) {
 
 // Minimal, big-endian EXIF with Apple's maker-note content identifier. The
 // inline ASCII value exercises the real metadata parser without a personal file.
-func appleJPEG(t *testing.T, id string) []byte {
+func appleJPEG(t testing.TB, id string) []byte {
 	if len(id) < 1 || len(id) > 100 {
 		t.Fatal("invalid fixture identifier")
 	}
@@ -229,6 +233,28 @@ func appleJPEG(t *testing.T, id string) []byte {
 	result = append(result, segment...)
 	result = append(result, payload...)
 	return append(result, original[2:]...)
+}
+func FuzzAppleJPEGContentID(f *testing.F) {
+	for _, id := range []string{"abc", "01234567-89AB-CDEF-0123-456789ABCDEF"} {
+		f.Add(appleJPEG(f, id))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		path := filepath.Join(t.TempDir(), "live.jpg")
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = file.Close() }()
+		packets, _ := photos.JPEGAPP1(file, int64(len(data)), []byte("Exif\x00\x00"))
+		for _, packet := range packets {
+			if id := photos.AppleTIFFID(packet); len(id) > 128 || strings.ContainsFunc(id, func(r rune) bool { return r < 33 || r > 126 }) {
+				t.Fatalf("content identifier %q", id)
+			}
+		}
+	})
 }
 func TestAppleContentIdentifiersPairAndRejectMismatch(t *testing.T) {
 	for _, id := range []string{"abc", "bad", "01234567-89AB-CDEF-0123-456789ABCDEF"} {

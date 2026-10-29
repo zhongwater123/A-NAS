@@ -1,17 +1,31 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PhotoAsset } from "./photosApi";
+import type { PhotoAsset } from "./api";
 import { Slideshow } from "./Slideshow";
 
 const photo = (id: string): PhotoAsset => ({
-  id, libraryId: "library:mine", name: `${id}.jpg`, mediaType: "image/jpeg", sizeBytes: 1, uploadedBy: "user:alice",
-  importedAt: "2026-10-08T09:00:00Z", takenAt: "2026-05-01T08:00:00Z", width: 4, height: 3, thumbnail: "ready",
+  id,
+  libraryId: "library:mine",
+  name: `${id}.jpg`,
+  mediaType: "image/jpeg",
+  sizeBytes: 1,
+  uploadedBy: "user:alice",
+  importedAt: "2026-10-08T09:00:00Z",
+  takenAt: "2026-05-01T08:00:00Z",
+  width: 4,
+  height: 3,
+  thumbnail: "ready",
 });
-const shown = () => document.querySelector<HTMLImageElement>(".ph-slide:not(.leaving)")?.alt;
+// The photo shown is the one image named; the one fading out has no name.
+const shown = () => screen.queryByRole("img")?.getAttribute("alt");
 // One photo's turn: its fade, then the time it stays.
 const turn = 4900;
-const elapse = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+const elapse = async (ms: number) => {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+};
 
 // jsdom loads no images; here every photo decodes at once.
 const decode = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "decode");
@@ -29,7 +43,9 @@ describe("Slideshow", () => {
   it("keeps its pace whatever the view below does, and ends after the last photo", async () => {
     const photos = [photo("a"), photo("b"), photo("c")];
     const onReveal = vi.fn();
-    const { rerender } = render(<Slideshow assets={photos} startId="a" more={false} onReveal={onReveal} onExit={() => undefined} />);
+    const { rerender } = render(
+      <Slideshow assets={photos} startId="a" more={false} onReveal={onReveal} onExit={() => undefined} />,
+    );
     expect(shown()).toBe("a.jpg");
     expect(screen.getByText(/1 \/ 3/)).toBeTruthy();
     // The view re-renders with new callbacks midway; the clock goes on.
@@ -52,7 +68,16 @@ describe("Slideshow", () => {
 
   it("pauses, steps by hand and leaves at the photo shown", async () => {
     const onExit = vi.fn();
-    render(<Slideshow assets={[photo("a"), photo("b"), photo("c")]} startId="b" total={3} more={false} onReveal={() => undefined} onExit={onExit} />);
+    render(
+      <Slideshow
+        assets={[photo("a"), photo("b"), photo("c")]}
+        startId="b"
+        total={3}
+        more={false}
+        onReveal={() => undefined}
+        onExit={onExit}
+      />,
+    );
     const show = screen.getByRole("dialog", { name: "幻灯片" });
     fireEvent.keyDown(show, { key: " " });
     await elapse(turn * 3);
@@ -73,15 +98,55 @@ describe("Slideshow", () => {
   it("runs on into the photos the view loads after the last one", async () => {
     const onReveal = vi.fn();
     const first = [photo("a"), photo("b")];
-    const { rerender } = render(<Slideshow assets={first} startId="b" total={3} more onReveal={onReveal} onExit={() => undefined} />);
+    const { rerender } = render(
+      <Slideshow assets={first} startId="b" total={3} more onReveal={onReveal} onExit={() => undefined} />,
+    );
     await elapse(turn);
     // At the end of what is loaded it asks the view for more and waits.
     expect(shown()).toBe("b.jpg");
     expect(onReveal).toHaveBeenLastCalledWith("b");
     expect(screen.getByText("正在载入后面的照片")).toBeTruthy();
-    rerender(<Slideshow assets={[...first, photo("c")]} startId="b" total={3} more={false} onReveal={onReveal} onExit={() => undefined} />);
+    rerender(
+      <Slideshow
+        assets={[...first, photo("c")]}
+        startId="b"
+        total={3}
+        more={false}
+        onReveal={onReveal}
+        onExit={() => undefined}
+      />,
+    );
     await elapse(0);
     expect(shown()).toBe("c.jpg");
     expect(screen.queryByText("放完了")).toBeNull();
+  });
+
+  it("passes over videos, starting at the photo after one", async () => {
+    const video = (id: string): PhotoAsset => ({
+      ...photo(id),
+      name: `${id}.mp4`,
+      mediaType: "video/mp4",
+      video: { duration: 12 },
+    });
+    render(
+      <Slideshow
+        assets={[photo("a"), video("v"), photo("b"), video("w")]}
+        startId="v"
+        total={4}
+        more={false}
+        onReveal={() => undefined}
+        onExit={() => undefined}
+      />,
+    );
+    expect(shown()).toBe("b.jpg");
+    expect(screen.getByText(/2 \/ 2/)).toBeTruthy();
+    await elapse(turn);
+    expect(screen.getByText("放完了")).toBeTruthy();
+    expect(screen.getByText("共 2 张照片")).toBeTruthy();
+
+    // Videos alone leave nothing to show.
+    const onExit = vi.fn();
+    render(<Slideshow assets={[video("x")]} startId="x" more={false} onReveal={() => undefined} onExit={onExit} />);
+    expect(onExit).toHaveBeenCalledWith("x");
   });
 });

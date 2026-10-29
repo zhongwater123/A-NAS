@@ -25,6 +25,7 @@ var (
 	ErrPortInUse        = errors.New("a published port is already in use")
 	ErrNameInUse        = errors.New("a container name is already in use")
 	ErrUnavailable      = errors.New("app store engine is unavailable")
+	ErrSystemSpace      = errors.New("system storage has too little free space for an app install")
 	// ErrAddressPoolMissing refuses apps that create Docker networks while
 	// Docker allocates from its built-in pools, which overlap common LAN
 	// ranges (ADR 0013).
@@ -97,6 +98,10 @@ const (
 	StateInstalled    InstallState = "installed"
 	StateInstalling   InstallState = "installing"
 	StateUninstalling InstallState = "uninstalling"
+	// StateFailed is an app whose last install failed and could not remove
+	// the containers it created; they were never checked against the plan.
+	// Installing again removes them first, and uninstalling removes them.
+	StateFailed InstallState = "failed"
 )
 
 type JobAction string
@@ -114,7 +119,8 @@ const (
 	JobFailed    JobState = "failed"
 )
 
-// Job is the latest install or uninstall run of one app.
+// Job is the latest install or uninstall run of one app. The container
+// agent keeps it across restarts.
 type Job struct {
 	AppID      string
 	Action     JobAction
@@ -170,5 +176,15 @@ type Store interface {
 	Icon(ctx context.Context, id string) ([]byte, string, error)
 	Plan(ctx context.Context, id string, identity Identity) (Plan, error)
 	Install(ctx context.Context, id, digest string, identity Identity) (Job, error)
+	ReserveInstall(ctx context.Context, id, digest string, identity Identity) (InstallReservation, error)
+	CommitInstall(ctx context.Context, id, token string, identity Identity) (Job, error)
+	CancelInstall(ctx context.Context, id, token string) error
 	Uninstall(ctx context.Context, id string) (Job, error)
+}
+
+// InstallReservation holds the agent's install slot while the Host Agent
+// prepares the confirmed plan's identity and folders. The token is single-use.
+type InstallReservation struct {
+	Token string
+	Job   Job
 }

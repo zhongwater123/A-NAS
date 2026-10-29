@@ -1,0 +1,205 @@
+From: A-NAS
+Subject: [PATCH] feat(browser-control): browser_vision on a controller lane inspects its screenshot
+
+On a lane bound to a browser controller every browser tool is routed to the
+controller, browser_vision included, and fails closed: vision is not a
+controller capability ("bound browser controller cannot execute
+browser_vision"). The controller protocol does allow `browser_screenshot`
+(gateway/browser_control_broker.py), but at the pinned 0e427d78 and on main
+c5a3c0f8 (2026-10-20) no tool asks for it, so a model driving a controller's
+browser can read its accessibility snapshot but never see the page.
+
+On such a lane browser_vision now asks the controller for `browser_screenshot`
+({"annotate": bool} -> {"mime_type": "image/png", "data": <base64>,
+"annotations"?}), keeps the PNG in cache/screenshots like a local capture and
+inspects it the same way: attached for a native-vision main model, else
+described once by the auxiliary vision model. The tool is offered there when a
+vision backend exists. Without a controller that takes screenshots nothing
+changes. Drop this file once upstream routes browser_vision through
+`browser_screenshot`.
+---
+diff --git a/tests/tools/test_browser_vision_controller.py b/tests/tools/test_browser_vision_controller.py
+new file mode 100755
+index 00000000..8bac63fd
+--- /dev/null
++++ b/tests/tools/test_browser_vision_controller.py
+@@ -0,0 +1,81 @@
++"""browser_vision on a bound controller lane (A-NAS patch 0003): vision is not a controller
++capability, so Hermes asks the controller for ``browser_screenshot`` and inspects that PNG."""
++
++import base64
++import json
++
++import pytest
++
++import tools.browser_tool as bt
++from tools.registry import registry
++
++# A 1x1 PNG.
++PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
++
++
++@pytest.fixture
++def lane(monkeypatch, tmp_path):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    monkeypatch.setattr(bt, "extension_controller_available", lambda action: action == "browser_screenshot")
++    monkeypatch.setattr("tools.vision_tools._should_use_native_vision_fast_path", lambda: False)
++    routed = []
++
++    def answer(reply):
++        def route(action, args, **kw):
++            routed.append((action, args, kw.get("session_id")))
++            return reply
++        monkeypatch.setattr(bt, "routed_browser_handler", route)
++    return routed, answer
++
++
++def call(args):
++    return json.loads(registry.get_entry("browser_vision").handler(args, task_id="task", session_id="session"))
++
++
++def test_inspects_the_controllers_screenshot(lane, monkeypatch):
++    routed, answer = lane
++    answer(json.dumps({"mime_type": "image/png", "data": base64.b64encode(PNG).decode(), "width": 1, "height": 1}))
++    seen = []
++    monkeypatch.setattr(bt._vision, "_analyze_screenshot_with_aux_llm",
++                        lambda path, question: seen.append((path.read_bytes(), question)) or "a desktop with one window")
++    out = call({"question": "what is open?"})
++    assert routed == [("browser_screenshot", {"annotate": False}, "session")]
++    assert out["success"] is True and out["analysis"] == "a desktop with one window"
++    assert seen == [(PNG, "what is open?")]
++
++
++def test_passes_the_controllers_annotations_on(lane, monkeypatch):
++    routed, answer = lane
++    labels = [{"ref": "e1", "label": "相册"}]
++    answer(json.dumps({"mime_type": "image/png", "data": base64.b64encode(PNG).decode(), "annotations": labels}))
++    monkeypatch.setattr(bt._vision, "_analyze_screenshot_with_aux_llm", lambda path, question: "labels")
++    out = call({"question": "where is 相册?", "annotate": True})
++    assert routed[0][1] == {"annotate": True}
++    assert out["annotations"] == labels
++
++
++@pytest.mark.parametrize("reply", [
++    json.dumps({"mime_type": "image/jpeg", "data": base64.b64encode(PNG).decode()}),
++    json.dumps({"mime_type": "image/png", "data": base64.b64encode(b"not a png").decode()}),
++    json.dumps({"mime_type": "image/png", "data": "%%%"}),
++    "not json",
++    None,
++])
++def test_refuses_anything_but_a_png(lane, monkeypatch, reply):
++    _, answer = lane
++    answer(reply)
++    monkeypatch.setattr(bt._vision, "_analyze_screenshot_with_aux_llm", lambda *a: pytest.fail("analysed a non-PNG"))
++    out = call({"question": "?"})
++    assert out["success"] is False and "PNG" in out["error"]
++
++
++def test_offered_on_a_lane_that_takes_screenshots(monkeypatch):
++    monkeypatch.setattr(bt._install, "check_browser_vision_requirements", lambda: False)
++    monkeypatch.setattr("tools.vision_tools.check_vision_requirements", lambda: True)
++    monkeypatch.setattr(bt, "extension_controller_available", lambda action: action == "browser_screenshot")
++    assert bt.check_browser_vision_routed_requirements() is True
++    monkeypatch.setattr(bt, "extension_controller_available", lambda action: False)
++    assert bt.check_browser_vision_routed_requirements() is False
++    monkeypatch.setattr(bt, "extension_controller_available", lambda action: True)
++    monkeypatch.setattr("tools.vision_tools.check_vision_requirements", lambda: False)
++    assert bt.check_browser_vision_routed_requirements() is False
+diff --git a/tools/browser_tool.py b/tools/browser_tool.py
+index 4a665e38..0d4bee9b 100644
+--- a/tools/browser_tool.py
++++ b/tools/browser_tool.py
+@@ -1319,6 +1319,17 @@ def check_browser_routed_requirements(action: str = "browser_snapshot") -> bool:
+     return _install.check_browser_requirements() or extension_controller_available(action)
+ 
+ 
++def check_browser_vision_routed_requirements() -> bool:
++    """browser_vision needs a vision backend and a page to look at: the local browser, or a
++    bound controller that takes screenshots (``browser_screenshot``)."""
++    if _install.check_browser_vision_requirements():
++        return True
++    if not extension_controller_available("browser_screenshot"):
++        return False
++    from tools.vision_tools import check_vision_requirements
++    return check_vision_requirements()
++
++
+ def _fallback_call(fn_name: str, arg_defaults: dict[str, Any], extra_kw: tuple = ()):
+     """Adapter from the registry's ``(args, kw)`` to ``<fn_name>(**schema_args, task_id=...)``;
+     the function is looked up in module globals at call time so monkeypatching works."""
+@@ -1343,7 +1354,7 @@ _BROWSER_TOOL_TABLE = (
+     ("browser_back", "◀️", None, {}),
+     ("browser_press", "⌨️", None, {"key": ""}),
+     ("browser_get_images", "🖼️", _install.check_browser_requirements, {}),
+-    ("browser_vision", "👁️", _install.check_browser_vision_requirements, {"question": "", "annotate": False}),
++    ("browser_vision", "👁️", check_browser_vision_routed_requirements, {"question": "", "annotate": False}),
+     ("browser_console", "🖥️", _install.check_browser_requirements, {"clear": False, "expression": None}),
+ )
+ 
+@@ -1365,9 +1376,65 @@ def _routed_handler(name: str, fallback):
+     return handler
+ 
+ 
++def _controller_vision(args: dict, kw: dict) -> str | dict[str, Any]:
++    """browser_vision on a bound controller lane. Vision is not a controller capability but a
++    screenshot is: take the controller's PNG of its page and inspect it as a local capture is."""
++    import base64
++    import uuid as uuid_mod
++    from hermes_constants import get_hermes_dir
++
++    question, annotate = str(args.get("question") or ""), bool(args.get("annotate", False))
++    raw = routed_browser_handler("browser_screenshot", {"annotate": annotate}, fallback=lambda: None,
++                                 task_id=kw.get("task_id"), session_id=kw.get("session_id"))
++    shot: Any = None
++    image = b""
++    try:
++        shot = json.loads(raw) if isinstance(raw, str) else None
++        if isinstance(shot, dict) and shot.get("mime_type") == "image/png":
++            image = base64.b64decode(shot.get("data") or "", validate=True)
++    except (ValueError, TypeError):
++        image = b""
++    if not image.startswith(b"\x89PNG\r\n\x1a\n"):
++        return _dumps(_err("The browser did not return a PNG screenshot."))
++    screenshots_dir = get_hermes_dir("cache/screenshots", "browser_screenshots")
++    screenshots_dir.mkdir(parents=True, exist_ok=True)
++    _lifecycle._cleanup_old_screenshots(screenshots_dir, max_age_hours=24)
++    screenshot_path = screenshots_dir / f"browser_screenshot_{uuid_mod.uuid4().hex}.png"
++    screenshot_path.write_bytes(image)
++    annotations = shot.get("annotations") if annotate else None
++    result = {"data": {"annotations": annotations}} if annotations else {}
++    try:
++        from tools.vision_tools import _should_use_native_vision_fast_path
++        if _should_use_native_vision_fast_path():
++            return _vision._native_vision_result(screenshot_path, question, annotate, result, None)
++        analysis = _vision._analyze_screenshot_with_aux_llm(screenshot_path, question)
++    except Exception as e:
++        logger.warning("browser_vision failed: %s", e, exc_info=True)
++        return _dumps(_err(f"Error during vision analysis: {e!s}", screenshot_path=str(screenshot_path),
++                           note="Screenshot was captured but vision analysis failed. You can still share it via MEDIA:<path>."))
++    response_data = {"success": True, "analysis": analysis or "Vision analysis returned no content.",
++                     "screenshot_path": str(screenshot_path)}
++    if annotations:
++        response_data["annotations"] = annotations
++    return _dumps(response_data)
++
++
++def _vision_handler(fallback):
++    """browser_vision routes like the other browser tools, except on a lane whose controller takes
++    screenshots: there Hermes inspects the controller's screenshot itself."""
++    routed = _routed_handler("browser_vision", fallback)
++
++    def handler(args, **kw):
++        if not extension_controller_available("browser_screenshot"):
++            return routed(args, **kw)
++        return record_browser_call(lambda legacy: _controller_vision(args, kw), _cloud.browser_backend_name)
++    return handler
++
++
+ for _name, _emoji, _check_fn, _defaults, *_extra in _BROWSER_TOOL_TABLE:
+     if _check_fn is None:  # also binds the legacy check_browser_<x>_requirements globals (tests + callers)
+         _check_fn = globals()[f"check_{_name}_requirements"] = _routed_check_fn(_name)
++    _fallback = _fallback_call(_name, _defaults, *_extra)
+     registry.register(name=_name, toolset="browser", schema=_BROWSER_SCHEMA_MAP[_name],
+-                      handler=_routed_handler(_name, _fallback_call(_name, _defaults, *_extra)),
++                      handler=_vision_handler(_fallback) if _name == "browser_vision" else _routed_handler(_name, _fallback),
+                       check_fn=_check_fn, emoji=_emoji)

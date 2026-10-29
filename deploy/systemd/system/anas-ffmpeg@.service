@@ -1,0 +1,46 @@
+[Unit]
+Description=A-NAS FFmpeg worker (FFmpeg and libheif)
+Documentation=https://github.com/zhongwater123/A-NAS
+
+[Service]
+Type=simple
+# Runs FFmpeg or libheif on the one file (video, song, or HEIF image) the Product Service opened as the signed-in user and passed as a
+# descriptor. It has no network and sees neither the
+# data volume nor the Product Service's state (ADR 0017); the system test
+# proves both. The connection is standard input; logs go to the journal so
+# they never mix with the protocol.
+ExecStart=/opt/a-nas/current/anas-api ffmpeg-worker
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal
+DynamicUser=true
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+ProtectHome=true
+ProtectSystem=strict
+InaccessiblePaths=-/srv/a-nas -/var/lib/a-nas -/etc/a-nas -/run/a-nas -/run/a-nas-photos -/run/a-nas-sessions -/run/a-nas-ai
+ProtectProc=invisible
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# A 4K HEVC transcode is the heaviest job. All workers together stay within
+# their slice's memory, and yield the CPU and disk to the rest of the device
+# there: weights compare only siblings, which instances are to each other.
+MemoryMax=2G
+Slice=system-anasffmpeg.slice
+RuntimeMaxSec=8h

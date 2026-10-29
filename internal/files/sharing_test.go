@@ -19,7 +19,7 @@ func TestShareSelectionDeduplicatesDescendantsAndKeepsEmptyDirectories(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	users := accounts.NewService(store, acceptingCredentials{}, accounts.Options{})
 	owner, err := users.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
@@ -31,9 +31,9 @@ func TestShareSelectionDeduplicatesDescendantsAndKeepsEmptyDirectories(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer catalog.Close()
+	defer func() { _ = catalog.Close() }()
 	volume := t.TempDir()
-	service := files.NewService(catalog, volume, users, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
+	service := files.NewLocalService(catalog, volume, users, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
 	dir, err := service.CreateDirectory(ctx, owner, space.ID, "", "photos")
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestShareSelectionDeduplicatesDescendantsAndKeepsEmptyDirectories(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	data, err := io.ReadAll(content.Reader)
 	if err != nil || string(data) != "hello" {
 		t.Fatalf("content %q: %v", data, err)

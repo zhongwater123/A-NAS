@@ -18,7 +18,11 @@ const reply = [
 ].join("\n");
 
 function renderReply(text: string) {
-  return render(<TextMessagePartProvider text={text}><MarkdownText /></TextMessagePartProvider>);
+  return render(
+    <TextMessagePartProvider text={text}>
+      <MarkdownText />
+    </TextMessagePartProvider>,
+  );
 }
 
 describe("an answer's Markdown", () => {
@@ -39,13 +43,27 @@ describe("an answer's Markdown", () => {
   it("copies the code without the Clipboard API, which plain HTTP lacks", async () => {
     // jsdom has no execCommand; the browser's copies the selected field.
     const copied: (string | undefined)[] = [];
-    Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn(() => {
-      copied.push(document.querySelector("textarea")?.value);
-      return true;
-    }) });
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn(() => {
+        copied.push(document.querySelector("textarea")?.value);
+        return true;
+      }),
+    });
     renderReply(reply);
     fireEvent.click(await screen.findByRole("button", { name: "复制代码" }));
     expect(copied).toEqual(["# 计划\n- 交电费"]);
     expect(screen.getByRole("button", { name: "已复制" })).toBeTruthy();
+  });
+
+  it("never loads a picture from outside the device, only links to it", async () => {
+    const { container } = renderReply(
+      '![账单](http://203.0.113.9/p.png?d=secret) <img src="http://203.0.113.9/q.png"> ![图](/api/v1/photos/assets/p1/thumbnail)',
+    );
+    const outside = await screen.findByRole("link", { name: "账单" });
+    expect(outside.getAttribute("href")).toBe("http://203.0.113.9/p.png?d=secret");
+    expect(screen.getByRole("link", { name: "外部图片" })).toBeTruthy();
+    const images = [...container.querySelectorAll("img")];
+    expect(images.map((image) => image.getAttribute("src"))).toEqual(["/api/v1/photos/assets/p1/thumbnail"]);
   });
 });

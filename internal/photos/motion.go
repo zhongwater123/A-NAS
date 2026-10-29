@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 var ErrInvalidMotion = errors.New("动态照片无效：请将同名照片与 MOV 一起上传，并保留原始配对信息；视频须完整且不超过 30 秒")
@@ -26,7 +26,7 @@ func (s *Service) prepareMotion(ctx context.Context, photo stagedObject, request
 	if err != nil {
 		return nil, err
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	var reader io.Reader
 	name, kind := request.MotionName, "live-photo"
 	if request.MotionContent != nil {
@@ -47,7 +47,7 @@ func (s *Service) prepareMotion(ctx context.Context, photo stagedObject, request
 		kind = "motion-photo"
 	}
 	if s.media == nil {
-		return nil, mediaworker.ErrUnavailable
+		return nil, ffmpegworker.ErrUnavailable
 	}
 	clip, err := s.stageContent(reader, true)
 	if err != nil {
@@ -76,27 +76,25 @@ func (s *Service) prepareMotion(ctx context.Context, photo stagedObject, request
 	return &motionImport{object: clip, name: name, kind: kind, duration: probe.Format.Duration}, nil
 }
 
-// probeMotion reads a staged clip's format through the Media Worker and
+// probeMotion reads a staged clip's format through the FFmpeg Worker and
 // accepts only a short, complete video.
-func (s *Service) probeMotion(ctx context.Context, clip stagedObject) (mediaworker.Probe, error) {
+func (s *Service) probeMotion(ctx context.Context, clip stagedObject) (ffmpegworker.Probe, error) {
 	file, err := s.root.Open(clip.name)
 	if err != nil {
-		return mediaworker.Probe{}, err
+		return ffmpegworker.Probe{}, err
 	}
-	defer file.Close()
-	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	probe, err := s.media.Probe(probeCtx, file)
+	defer func() { _ = file.Close() }()
+	probe, err := s.media.Probe(ffmpegworker.WithTimeout(ctx, 15*time.Second), file)
 	if err != nil {
-		return mediaworker.Probe{}, err
+		return ffmpegworker.Probe{}, err
 	}
 	if !validMotionProbe(probe) {
-		return mediaworker.Probe{}, ErrInvalidMotion
+		return ffmpegworker.Probe{}, ErrInvalidMotion
 	}
 	return probe, nil
 }
 
-func validMotionProbe(p mediaworker.Probe) bool {
+func validMotionProbe(p ffmpegworker.Probe) bool {
 	if math.IsNaN(p.Format.Duration) || math.IsInf(p.Format.Duration, 0) || p.Format.Duration <= 0 || p.Format.Duration > 30 {
 		return false
 	}
@@ -131,7 +129,7 @@ func (s *Service) OpenMotion(ctx context.Context, p Principal, id string) (Conte
 	}
 	info, err := file.Stat()
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return Content{}, err
 	}
 	mediaType := "video/quicktime"
@@ -150,29 +148,18 @@ type motionStream struct {
 func (s motionStream) Close() error { s.cancel(); err := s.ReadCloser.Close(); s.release(); return err }
 
 // PlayMotion produces a browser-compatible H.264/AAC stream only on demand.
-// The request owns the decoder; closing it cancels work and releases the slot.
+// The request owns the decoder; closing it cancels work and frees the
+// worker. A clip lasts seconds and someone is watching, so it is interactive
+// rather than playback that may keep its worker for hours.
 func (s *Service) PlayMotion(ctx context.Context, p Principal, id string) (io.ReadCloser, error) {
 	content, err := s.OpenMotion(ctx, p, id)
 	if err != nil {
 		return nil, err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	if s.media == nil {
-		return nil, mediaworker.ErrUnavailable
+		return nil, ffmpegworker.ErrUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	select {
-	case s.decodeSlots <- struct{}{}:
-	case <-ctx.Done():
-		cancel()
-		return nil, ctx.Err()
-	}
-	release := func() { <-s.decodeSlots }
-	body, err := s.media.Stream(ctx, content.Reader, mediaworker.StreamRequest{Height: 1080, MaxBitrate: 4000, AudioTrack: 0})
-	if err != nil {
-		cancel()
-		release()
-		return nil, err
-	}
-	return motionStream{body, cancel, release}, nil
+	ctx = ffmpegworker.WithTimeout(ffmpegworker.WithPriority(ctx, ffmpegworker.Interactive), 45*time.Second)
+	return s.media.Stream(ctx, content.Reader, ffmpegworker.StreamRequest{Height: 1080, MaxBitrate: 4000, AudioTrack: 0})
 }

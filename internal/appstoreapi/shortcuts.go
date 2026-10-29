@@ -2,9 +2,10 @@ package appstoreapi
 
 import (
 	"net/http"
-	"strings"
 
+	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/appstore"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 // ShortcutsPrefix serves the desktop shortcuts of installed apps to every
@@ -16,12 +17,23 @@ const ShortcutsPrefix = "/api/v1/app-shortcuts"
 
 type shortcutsHandler struct {
 	store appstore.Store
+	mux   *apiroute.Mux
 }
 
 // NewShortcuts returns the shortcuts API; with a nil store, as when the App
 // Center is disabled, the list is empty.
 func NewShortcuts(store appstore.Store) http.Handler {
-	return &shortcutsHandler{store: store}
+	h := &shortcutsHandler{store: store, mux: apiroute.NewMux()}
+	h.mux.Only(http.MethodGet, ShortcutsPrefix, h.list)
+	h.mux.Only(http.MethodGet, ShortcutsPrefix+"/{appID}/icon", withApp(h.icon))
+	h.mux.HandleFunc("/", notFound)
+	return h
+}
+
+// ShortcutEndpoints are the operations the shortcuts API serves under
+// ShortcutsPrefix.
+func ShortcutEndpoints() []apiroute.Endpoint {
+	return NewShortcuts(nil).(*shortcutsHandler).mux.Endpoints()
 }
 
 // ShortcutDocument is an installed app the desktop can open in a new window.
@@ -41,29 +53,21 @@ type shortcutsResponse struct {
 }
 
 func (h *shortcutsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !allow(w, r, http.MethodGet) {
+	w.Header().Set("Cache-Control", "no-store")
+	h.mux.ServeHTTP(w, r)
+}
+
+func (h *shortcutsHandler) icon(w http.ResponseWriter, r *http.Request) {
+	if h.store == nil {
+		notFound(w, r)
 		return
 	}
-	if r.URL.Path == ShortcutsPrefix {
-		h.list(w, r)
-		return
-	}
-	id, ok := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, ShortcutsPrefix+"/"), "/icon")
-	if !ok || !appstore.ValidID(id) || h.store == nil {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
-		return
-	}
-	icon, contentType, err := h.store.Icon(r.Context(), id)
+	icon, contentType, err := h.store.Icon(r.Context(), r.PathValue("appID"))
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		notFound(w, r)
 		return
 	}
-	// Catalog icons are fixed for a release; SVGs must not run scripts.
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=86400")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write(icon)
+	writeIcon(w, icon, contentType)
 }
 
 // list returns installed apps that have a web interface; installing,
@@ -71,12 +75,12 @@ func (h *shortcutsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *shortcutsHandler) list(w http.ResponseWriter, r *http.Request) {
 	response := shortcutsResponse{Items: []ShortcutDocument{}}
 	if h.store == nil {
-		writeJSON(w, http.StatusOK, response)
+		httpjson.Write(w, http.StatusOK, response)
 		return
 	}
 	apps, err := h.store.Apps(r.Context())
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "apps_unavailable", "the container engine could not list apps")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "apps_unavailable", "the container engine could not list apps")
 		return
 	}
 	for _, app := range apps {
@@ -87,5 +91,5 @@ func (h *shortcutsHandler) list(w http.ResponseWriter, r *http.Request) {
 			ID: app.ID, Title: app.Title, WebPort: app.WebPort, Scheme: app.Scheme, Path: app.Path, Running: app.Running, Total: app.Total,
 		})
 	}
-	writeJSON(w, http.StatusOK, response)
+	httpjson.Write(w, http.StatusOK, response)
 }

@@ -8,33 +8,16 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 	"github.com/zhongwater123/A-NAS/internal/files"
 )
 
 var shanghai = time.FixedZone("CST", 8*60*60)
-
-type testClock struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-func (c *testClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
-}
-
-func (c *testClock) Set(now time.Time) {
-	c.mu.Lock()
-	c.now = now
-	c.mu.Unlock()
-}
 
 // switchableVolume stands in for the data volume guard; it can go offline.
 type switchableVolume struct{ offline atomic.Bool }
@@ -56,8 +39,13 @@ type snapshotFixture struct {
 	private       accounts.Space // the administrator's
 	memberPrivate accounts.Space
 	shared        accounts.Space
-	clock         *testClock
+	clock         *clocktest.Clock
 	volume        *switchableVolume
+	// backend replaces the development snapshot backend when set before open.
+	backend files.SnapshotBackend
+	// driver, when set before open, names the database/sql driver that the
+	// catalog is opened through.
+	driver string
 }
 
 // at is a local time on 2026-10-12, a Monday, plus whole days.
@@ -85,7 +73,7 @@ func newSnapshotFixture(t *testing.T) *snapshotFixture {
 	fixture := &snapshotFixture{
 		t: t, accounts: accountService, admin: admin, member: member,
 		catalogPath: filepath.Join(t.TempDir(), "files.db"), volumeRoot: filepath.Join(t.TempDir(), "volume"),
-		clock: &testClock{now: at(0, 10, 30)}, volume: &switchableVolume{},
+		clock: clocktest.New(at(0, 10, 30)), volume: &switchableVolume{},
 	}
 	spaces, err := accountService.ListSpaces(ctx, admin)
 	if err != nil {
@@ -109,13 +97,18 @@ func newSnapshotFixture(t *testing.T) *snapshotFixture {
 // open opens the catalog; tests that prepare an older catalog call it later.
 func (f *snapshotFixture) open() *files.Service {
 	f.t.Helper()
-	catalog, err := files.OpenSQLite(f.catalogPath)
+	driver := f.driver
+	if driver == "" {
+		driver = "sqlite3"
+	}
+	catalog, err := files.OpenSQLiteWithDriver(driver, f.catalogPath)
 	if err != nil {
 		f.t.Fatalf("open file catalog: %v", err)
 	}
 	f.t.Cleanup(func() { _ = catalog.Close() })
-	f.files = files.NewService(catalog, f.volumeRoot, f.accounts, files.Options{
+	f.files = files.NewLocalService(catalog, f.volumeRoot, f.accounts, files.Options{
 		DisableCapacityReserve: true, VolumeGuard: f.volume, Now: f.clock.Now, Location: shanghai,
+		SnapshotBackend: f.backend,
 	})
 	return f.files
 }

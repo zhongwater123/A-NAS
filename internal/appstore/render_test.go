@@ -18,6 +18,37 @@ func entry(compose string) appstore.Entry {
 	return appstore.Entry{App: appstore.App{ID: "demo", Title: "Demo"}, Compose: []byte(compose)}
 }
 
+func TestRenderBoundsLogsForEveryService(t *testing.T) {
+	plan, err := appstore.Render(context.Background(), entry(`
+services:
+  web:
+    image: example/web:1
+  cache:
+    image: example/cache:1
+    logging:
+      driver: json-file
+      options:
+        max-size: "-1"
+        max-file: "99"
+`), testPolicy, testIdentity, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := loader.LoadWithContext(context.Background(), types.ConfigDetails{
+		WorkingDir:  "/",
+		ConfigFiles: []types.ConfigFile{{Filename: "/docker-compose.yml", Content: plan.Compose}},
+	}, func(options *loader.Options) { options.SetProjectName("a-nas-demo", true) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, service := range project.Services {
+		if service.Logging == nil || service.Logging.Driver != "json-file" ||
+			service.Logging.Options["max-size"] != "10m" || service.Logging.Options["max-file"] != "3" {
+			t.Errorf("%s logging = %+v, want json-file rotated at 10m with 3 files", name, service.Logging)
+		}
+	}
+}
+
 func TestRenderRewritesPathsAndLabelsServices(t *testing.T) {
 	plan, err := appstore.Render(context.Background(), entry(`
 name: demo
@@ -58,7 +89,7 @@ x-casaos:
 		"TZ: Asia/Shanghai",
 		"name: a-nas-demo",
 		"user: 30005:30005",
-		"io.a-nas.runtime: \"1\"",
+		"io.a-nas.runtime: \"2\"",
 		"no-new-privileges:true",
 	} {
 		if !strings.Contains(compose, want) {
@@ -170,8 +201,7 @@ func TestRenderRejectsHostPrivileges(t *testing.T) {
 	for name, option := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, err := appstore.Render(context.Background(), entry("services:\n  web:\n    image: example/web:1\n    "+option+"\n"), testPolicy, testIdentity, nil)
-			var policyError *appstore.PolicyError
-			if !errors.As(err, &policyError) {
+			if _, ok := errors.AsType[*appstore.PolicyError](err); !ok {
 				t.Fatalf("Render() error = %v, want policy error", err)
 			}
 		})
@@ -243,16 +273,14 @@ services:
 volumes:
   a-nas-shared: {}
 `), testPolicy, testIdentity, nil)
-	var policyError *appstore.PolicyError
-	if !errors.As(err, &policyError) {
+	if _, ok := errors.AsType[*appstore.PolicyError](err); !ok {
 		t.Fatalf("Render() error = %v, want policy error", err)
 	}
 }
 
 func TestRenderRequiresAnAppIdentity(t *testing.T) {
 	_, err := appstore.Render(context.Background(), entry("services:\n  web:\n    image: example/web:1\n"), testPolicy, appstore.Identity{}, nil)
-	var policyError *appstore.PolicyError
-	if !errors.As(err, &policyError) {
+	if _, ok := errors.AsType[*appstore.PolicyError](err); !ok {
 		t.Fatalf("Render() without identity error = %v, want policy error", err)
 	}
 }

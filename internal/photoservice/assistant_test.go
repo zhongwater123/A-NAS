@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 // uidAccounts is the Host Agent's lookup of active accounts by Linux UID.
@@ -59,9 +61,7 @@ func assistantRequest(t *testing.T, socket, method, path string, header http.Hea
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}}
 	request, _ := http.NewRequest(method, "http://photos"+path, strings.NewReader(""))
-	for key, values := range header {
-		request.Header[key] = values
-	}
+	maps.Copy(request.Header, header)
 	response, err := client.Do(request)
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, path, err)
@@ -113,7 +113,7 @@ func TestAssistantIsTheMemberThePeerUIDNames(t *testing.T) {
 		}
 	}
 	// A session token sent along changes nothing: the peer UID decides.
-	asAlice := http.Header{photosapi.SessionHeader: {"alice-token"}}
+	asAlice := http.Header{serviceproxy.SessionHeader: {"alice-token"}}
 
 	var ids []string
 	for _, lib := range decodeItems[photos.Library](t, assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/libraries", asAlice)) {
@@ -182,7 +182,7 @@ func sessionJSON(t *testing.T, r running, token, method, path, body string, out 
 	request.Header.Set("Content-Type", "application/json")
 	request = request.WithContext(accounts.WithSessionToken(request.Context(), token))
 	recorder := httptest.NewRecorder()
-	photosapi.NewProxy(r.socket, nil).ServeHTTP(recorder, request)
+	photoservice.Proxy(r.socket, nil).ServeHTTP(recorder, request)
 	if recorder.Code >= 300 {
 		return fmt.Errorf("%s %s: %d %s", method, path, recorder.Code, recorder.Body)
 	}
@@ -203,6 +203,15 @@ func TestAssistantSocketServesOnlyTheToolsReads(t *testing.T) {
 
 	if response := assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/assets/"+asset.ID, nil); response.StatusCode != http.StatusOK {
 		t.Fatalf("details = %d, want 200", response.StatusCode)
+	}
+	// Its pixels leave only as the view the assistant's model looks at.
+	if response := assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/assets/"+asset.ID+"/view", nil); response.StatusCode != http.StatusOK ||
+		response.Header.Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("view = %d %s, want a JPEG", response.StatusCode, response.Header.Get("Content-Type"))
+	}
+	// And what its original records about it.
+	if response := assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/assets/"+asset.ID+"/metadata", nil); response.StatusCode != http.StatusOK {
+		t.Fatalf("metadata = %d, want 200", response.StatusCode)
 	}
 	for _, request := range [][2]string{
 		{http.MethodGet, "/api/v1/photos/assets/" + asset.ID + "/thumbnail"},
@@ -249,7 +258,7 @@ func TestAssistantSocketNeedsAPrivateDirectory(t *testing.T) {
 
 func TestAssistantNeedsAnActiveAccountForItsUID(t *testing.T) {
 	_, socket := startWithAssistant(t, accounts.SessionUser{})
-	if response := assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/libraries", http.Header{photosapi.SessionHeader: {"alice-token"}}); response.StatusCode != http.StatusUnauthorized {
+	if response := assistantRequest(t, socket, http.MethodGet, "/api/v1/photos/libraries", http.Header{serviceproxy.SessionHeader: {"alice-token"}}); response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("unknown UID = %d, want 401", response.StatusCode)
 	}
 

@@ -1,4 +1,4 @@
-import { APIError } from "../api";
+import { apiFetch, failure } from "../api/client";
 import { messageOf } from "./Browse";
 
 // A browser plays a converted stream progressively and reads only about two
@@ -25,7 +25,11 @@ export interface FeedOptions {
 
 export function canFeed(mime?: string): mime is string {
   if (!mime || typeof MediaSource === "undefined" || typeof URL.createObjectURL !== "function") return false;
-  try { return MediaSource.isTypeSupported(mime); } catch { return false; }
+  try {
+    return MediaSource.isTypeSupported(mime);
+  } catch {
+    return false;
+  }
 }
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -33,8 +37,14 @@ const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(reso
 function settled(buffer: SourceBuffer): Promise<void> {
   if (!buffer.updating) return Promise.resolve();
   return new Promise((resolve, reject) => {
-    const done = () => { buffer.removeEventListener("error", failed); resolve(); };
-    const failed = () => { buffer.removeEventListener("updateend", done); reject(new Error("source buffer error")); };
+    const done = () => {
+      buffer.removeEventListener("error", failed);
+      resolve();
+    };
+    const failed = () => {
+      buffer.removeEventListener("updateend", done);
+      reject(new Error("source buffer error"));
+    };
     buffer.addEventListener("updateend", done, { once: true });
     buffer.addEventListener("error", failed, { once: true });
   });
@@ -58,7 +68,12 @@ export class StreamFeed {
   private readonly resume: number;
   private readonly behind: number;
 
-  constructor(private readonly stream: string, private readonly mime: string, private readonly media: () => HTMLVideoElement | null, private readonly options: FeedOptions) {
+  constructor(
+    private readonly stream: string,
+    private readonly mime: string,
+    private readonly media: () => HTMLVideoElement | null,
+    private readonly options: FeedOptions,
+  ) {
     this.ahead = options.ahead ?? 30;
     this.resume = options.resume ?? 15;
     this.behind = options.behind ?? 90;
@@ -86,14 +101,20 @@ export class StreamFeed {
     }
     let response: Response;
     try {
-      response = await fetch(this.stream, { credentials: "same-origin", signal: this.controller.signal, headers: { Accept: "video/mp4" } });
-    } catch {
-      if (!this.closed) this.options.onError("网络连接中断，请重试");
+      response = await apiFetch(this.stream, {
+        credentials: "same-origin",
+        signal: this.controller.signal,
+        headers: { Accept: "video/mp4" },
+      });
+    } catch (error) {
+      if (!this.closed) this.options.onError(messageOf(error));
       return;
     }
     if (!response.ok || !response.body) {
-      const body = await response.json().catch(() => undefined) as { error?: { code?: string; message?: string } } | undefined;
-      if (!this.closed) this.options.onError(messageOf(new APIError(response.status, body?.error?.code ?? "request_failed", body?.error?.message ?? "转码失败，请稍后重试")));
+      const body = (await response.json().catch(() => undefined)) as
+        | { error?: { code?: string; message?: string } }
+        | undefined;
+      if (!this.closed) this.options.onError(messageOf(failure(response.status, body)));
       return;
     }
     const reader = response.body.getReader();
@@ -157,6 +178,8 @@ export class StreamFeed {
     try {
       buffer.remove(buffer.buffered.start(0), end);
       await settled(buffer);
-    } catch { /* trimming is housekeeping */ }
+    } catch {
+      /* trimming is housekeeping */
+    }
   }
 }

@@ -1,16 +1,35 @@
-import { type DetailedError, Upload } from "tus-js-client";
 import { useSyncExternalStore } from "react";
+import { type DetailedError, Upload } from "tus-js-client";
 
-import { csrfHeaders, sessionEnded } from "../api";
-import { RateMeter } from "./meter";
+import { APIError, csrfHeader, passWriteGate, sessionEnded } from "../api/client";
 import {
-  cancelTransfer, clearFinishedTransfers, createDownload, getTransfer, listTransfers, pauseTransfer, removeTransfer,
-  type Transfer, type TransferFailure, type TransferLocation, uploadEndpoint, uploadURL,
-} from "./transfersApi";
+  cancelTransfer,
+  clearFinishedTransfers,
+  createDownload,
+  getTransfer,
+  listTransfers,
+  pauseTransfer,
+  removeTransfer,
+  type Transfer,
+  type TransferFailure,
+  type TransferLocation,
+  uploadEndpoint,
+  uploadURL,
+} from "./api";
+import { RateMeter } from "./meter";
 
 export type ConflictPolicy = "ask" | "rename" | "replace";
 export type ConflictChoice = "skip" | "rename" | "replace";
-export type UploadPhase = "queued" | "running" | "paused" | "waiting" | "conflict" | "completed" | "failed" | "canceled" | "skipped";
+export type UploadPhase =
+  | "queued"
+  | "running"
+  | "paused"
+  | "waiting"
+  | "conflict"
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "skipped";
 // A hold stops the whole queue until its cause clears: uploads wait instead
 // of failing one by one.
 export type Hold = "offline" | "session" | "volume" | "space";
@@ -99,17 +118,40 @@ const chunkSize = 8 * 1024 * 1024;
 const retryDelays = [0, 1000, 3000, 6000, 10000];
 const unfinishedPhases: UploadPhase[] = ["queued", "running", "paused", "waiting", "conflict"];
 
-export type FailureKind = "network" | "file" | "session" | "denied" | "conflict" | "missing" | "lost" | "invalid" | "volume" | "space" | "toolarge" | "busy" | "canceled" | "server";
-export interface ClassifiedFailure { kind: FailureKind; code: string; message: string }
+export type FailureKind =
+  | "network"
+  | "file"
+  | "session"
+  | "denied"
+  | "conflict"
+  | "missing"
+  | "lost"
+  | "invalid"
+  | "volume"
+  | "space"
+  | "toolarge"
+  | "busy"
+  | "canceled"
+  | "server";
+export interface ClassifiedFailure extends APIError {
+  kind: FailureKind;
+}
 
 // classifyUploadError says what an upload failure means for the queue. The
 // product API answers JSON errors; tusd's own protocol errors are text.
 export function classifyUploadError(error: Error): ClassifiedFailure {
   const detailed = error as Partial<DetailedError>;
-  if (!detailed.originalRequest) return { kind: "file", code: "file_unreadable", message: error.message };
+  const classified = (kind: FailureKind, status: number, code: string, message: string): ClassifiedFailure =>
+    Object.assign(new APIError(status, code, message), { kind });
+  // The member did not allow the VNAS step that started it; a retry must not
+  // outlast the step and go without asking.
+  const cause = detailed.causingError;
+  if (cause instanceof APIError && cause.code === "not_allowed_for_vnas")
+    return classified("denied", cause.status, cause.code, cause.message);
+  if (!detailed.originalRequest) return classified("file", 0, "file_unreadable", error.message);
   const response = detailed.originalResponse;
   const status = response?.getStatus() ?? 0;
-  if (!response || status === 0) return { kind: "network", code: "network_error", message: error.message };
+  if (!response || status === 0) return classified("network", 0, "network_error", error.message);
   let code = "";
   let message = "";
   try {
@@ -119,39 +161,68 @@ export function classifyUploadError(error: Error): ClassifiedFailure {
   } catch {
     message = response.getBody();
   }
-  const failure = (kind: FailureKind, fallback: string): ClassifiedFailure => ({ kind, code: code || fallback, message });
+  const failure = (kind: FailureKind, fallback: string): ClassifiedFailure =>
+    classified(kind, status, code || fallback, message);
   switch (status) {
-    case 401: return failure("session", "authentication_required");
-    case 403: return code === "csrf_failed" ? failure("session", code) : failure("denied", "forbidden");
+    case 401:
+      return failure("session", "authentication_required");
+    case 403:
+      return code === "csrf_failed" ? failure("session", code) : failure("denied", "forbidden");
     // The product API's not_found is the target folder; tusd's own 404 is
     // an upload the NAS no longer knows.
-    case 404: return code === "not_found" ? failure("missing", code) : failure("lost", "upload_lost");
-    case 409: return code === "name_conflict" ? failure("conflict", code) : code === "folder_blocked" ? failure("invalid", code) : failure("server", "upload_offset");
-    case 410: return failure("canceled", "canceled");
-    case 423: return code === "volume_unavailable" ? failure("volume", code) : failure("busy", "upload_locked");
-    case 429: return failure("busy", "too_many_uploads");
+    case 404:
+      return code === "not_found" ? failure("missing", code) : failure("lost", "upload_lost");
+    case 409:
+      return code === "name_conflict"
+        ? failure("conflict", code)
+        : code === "folder_blocked"
+          ? failure("invalid", code)
+          : failure("server", "upload_offset");
+    case 410:
+      return failure("canceled", "canceled");
+    case 423:
+      return code === "volume_unavailable" ? failure("volume", code) : failure("busy", "upload_locked");
+    case 429:
+      return failure("busy", "too_many_uploads");
     // Refused before any byte: this file alone does not fit.
-    case 507: return detailed.originalRequest.getMethod() === "POST" ? { kind: "toolarge", code: "file_too_large", message } : failure("space", "insufficient_storage");
+    case 507:
+      return detailed.originalRequest.getMethod() === "POST"
+        ? classified("toolarge", status, "file_too_large", message)
+        : failure("space", "insufficient_storage");
   }
   if (status >= 400 && status < 500) return failure("invalid", "validation_failed");
   return failure("server", "internal_error");
 }
 
-const retryable = (failure: ClassifiedFailure) => failure.kind === "server" || failure.kind === "busy" || (failure.kind === "network" && navigator.onLine !== false);
+const retryable = (failure: ClassifiedFailure) =>
+  failure.kind === "server" || failure.kind === "busy" || (failure.kind === "network" && navigator.onLine !== false);
 
 // TransferStore runs this browser's uploads and follows every transfer of the
 // signed-in account. It lives outside React, so uploads survive closing the
 // transfer center or the file manager, and even an expired session: they
 // wait and continue after the same account signs in again.
 export class TransferStore {
-  private snapshot: TransferSnapshot = { uploads: [], batches: [], external: [], server: [], holds: [], rates: noRates, loaded: false };
+  private snapshot: TransferSnapshot = {
+    uploads: [],
+    batches: [],
+    external: [],
+    server: [],
+    holds: [],
+    rates: noRates,
+    loaded: false,
+  };
   private listeners = new Set<() => void>();
   private uploadedListeners = new Set<(target: UploadTarget) => void>();
   private running = new Map<string, Upload>();
   // Speeds count the bytes every transfer moved: this browser's uploads as
   // they are sent, and the NAS's other transfers by what each poll adds.
   private moved = { upload: 0, download: 0, batches: new Map<string, number>() };
-  private meters = { upload: new RateMeter(), download: new RateMeter(), batches: new Map<string, RateMeter>(), items: new Map<string, RateMeter>() };
+  private meters = {
+    upload: new RateMeter(),
+    download: new RateMeter(),
+    batches: new Map<string, RateMeter>(),
+    items: new Map<string, RateMeter>(),
+  };
   // sent is how far each upload of this browser had come; seen is what each
   // NAS transfer had moved at the previous poll, once the first poll ran.
   private sent = new Map<string, number>();
@@ -167,7 +238,9 @@ export class TransferStore {
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
+    return () => {
+      this.listeners.delete(listener);
+    };
   };
 
   getSnapshot = () => this.snapshot;
@@ -175,7 +248,9 @@ export class TransferStore {
   // onUploaded tells a view that a file arrived in a folder, so it can reload.
   onUploaded(listener: (target: UploadTarget) => void) {
     this.uploadedListeners.add(listener);
-    return () => { this.uploadedListeners.delete(listener); };
+    return () => {
+      this.uploadedListeners.delete(listener);
+    };
   }
 
   // attach starts following the signed-in account. Another account's
@@ -211,25 +286,48 @@ export class TransferStore {
   watch() {
     this.watchers += 1;
     void this.refresh();
-    return () => { this.watchers = Math.max(0, this.watchers - 1); };
+    return () => {
+      this.watchers = Math.max(0, this.watchers - 1);
+    };
   }
 
   // unfinished counts this browser's uploads that closing the page would stop.
   unfinished() {
-    return this.snapshot.uploads.filter((upload) => unfinishedPhases.includes(upload.phase)).length
-      + this.snapshot.external.filter((upload) => upload.phase === "running").length;
+    return (
+      this.snapshot.uploads.filter((upload) => unfinishedPhases.includes(upload.phase)).length +
+      this.snapshot.external.filter((upload) => upload.phase === "running").length
+    );
   }
 
   // enqueue queues files as one batch; choice answers its name conflicts in
   // advance, for callers that never want to be asked.
-  enqueue(files: Array<{ file: File; directories?: string[] }>, target: UploadTarget, options: { choice?: ConflictChoice } = {}): string {
+  enqueue(
+    files: Array<{ file: File; directories?: string[] }>,
+    target: UploadTarget,
+    options: { choice?: ConflictChoice } = {},
+  ): string {
     const now = Date.now();
-    const batch = `b-${now.toString(36)}-${(this.counter += 1).toString(36)}`;
-    const uploads = files.map(({ file, directories = [] }): LocalUpload => ({
-      key: `u${(this.counter += 1)}`, batch, file, name: file.name, directories, size: file.size, target,
-      conflict: "ask", phase: "queued", transferred: 0, speed: 0, createdAt: now,
-    }));
-    this.set({ uploads: [...this.snapshot.uploads, ...uploads], batches: [...this.snapshot.batches, { id: batch, target, createdAt: now, choice: options.choice }] });
+    const batch = `b-${now.toString(36)}-${((this.counter += 1)).toString(36)}`;
+    const uploads = files.map(
+      ({ file, directories = [] }): LocalUpload => ({
+        key: `u${(this.counter += 1)}`,
+        batch,
+        file,
+        name: file.name,
+        directories,
+        size: file.size,
+        target,
+        conflict: "ask",
+        phase: "queued",
+        transferred: 0,
+        speed: 0,
+        createdAt: now,
+      }),
+    );
+    this.set({
+      uploads: [...this.snapshot.uploads, ...uploads],
+      batches: [...this.snapshot.batches, { id: batch, target, createdAt: now, choice: options.choice }],
+    });
     this.schedule();
     return batch;
   }
@@ -255,7 +353,13 @@ export class TransferStore {
   retry(key: string) {
     const upload = this.find(key);
     if (upload?.phase === "canceled") {
-      this.update(key, { phase: "queued", transferId: undefined, transferred: 0, error: undefined, finishedAt: undefined });
+      this.update(key, {
+        phase: "queued",
+        transferId: undefined,
+        transferred: 0,
+        error: undefined,
+        finishedAt: undefined,
+      });
       this.schedule();
     } else this.resume(key);
   }
@@ -265,20 +369,34 @@ export class TransferStore {
     if (!upload || !unfinishedPhases.concat("failed").includes(upload.phase)) return;
     this.stop(key);
     this.update(key, { phase: "canceled", speed: 0, hold: undefined, finishedAt: Date.now() });
-    if (upload.transferId) void cancelTransfer(upload.transferId).then((transfer) => this.merge(transfer)).catch(() => undefined);
+    if (upload.transferId)
+      void cancelTransfer(upload.transferId)
+        .then((transfer) => this.merge(transfer))
+        .catch(() => undefined);
     this.schedule();
   }
 
-  pauseBatch(batch: string) { for (const upload of this.batchUploads(batch)) this.pause(upload.key); }
-  resumeBatch(batch: string) { for (const upload of this.batchUploads(batch)) this.resume(upload.key); }
-  cancelBatch(batch: string) { for (const upload of this.batchUploads(batch)) this.cancel(upload.key); }
-  pauseAll() { for (const upload of this.snapshot.uploads) this.pause(upload.key); }
-  resumeAll() { for (const upload of this.snapshot.uploads) if (upload.phase === "paused") this.resume(upload.key); }
+  pauseBatch(batch: string) {
+    for (const upload of this.batchUploads(batch)) this.pause(upload.key);
+  }
+  resumeBatch(batch: string) {
+    for (const upload of this.batchUploads(batch)) this.resume(upload.key);
+  }
+  cancelBatch(batch: string) {
+    for (const upload of this.batchUploads(batch)) this.cancel(upload.key);
+  }
+  pauseAll() {
+    for (const upload of this.snapshot.uploads) this.pause(upload.key);
+  }
+  resumeAll() {
+    for (const upload of this.snapshot.uploads) if (upload.phase === "paused") this.resume(upload.key);
+  }
 
   // resolveConflicts answers the name conflicts of a batch; with remember
   // the answer also covers conflicts the batch meets later.
   resolveConflicts(batch: string, choice: ConflictChoice, remember: boolean) {
-    if (remember) this.set({ batches: this.snapshot.batches.map((item) => item.id === batch ? { ...item, choice } : item) });
+    if (remember)
+      this.set({ batches: this.snapshot.batches.map((item) => (item.id === batch ? { ...item, choice } : item)) });
     for (const upload of this.batchUploads(batch)) if (upload.phase === "conflict") this.answer(upload, choice);
     this.schedule();
   }
@@ -296,7 +414,9 @@ export class TransferStore {
     this.holdTimers.delete(hold);
     this.set({
       holds: this.snapshot.holds.filter((item) => item !== hold),
-      uploads: this.snapshot.uploads.map((upload) => upload.phase === "waiting" && upload.hold === hold ? { ...upload, phase: "queued", hold: undefined } : upload),
+      uploads: this.snapshot.uploads.map((upload) =>
+        upload.phase === "waiting" && upload.hold === hold ? { ...upload, phase: "queued", hold: undefined } : upload,
+      ),
     });
     this.schedule();
   }
@@ -304,7 +424,8 @@ export class TransferStore {
   // dismiss removes a finished transfer from the lists.
   dismiss(id: string) {
     const local = this.snapshot.uploads.find((upload) => upload.key === id || upload.transferId === id);
-    const transferId = local?.transferId ?? (this.snapshot.server.some((transfer) => transfer.id === id) ? id : undefined);
+    const transferId =
+      local?.transferId ?? (this.snapshot.server.some((transfer) => transfer.id === id) ? id : undefined);
     this.set({
       uploads: this.snapshot.uploads.filter((upload) => upload !== local),
       external: this.snapshot.external.filter((upload) => upload.key !== id),
@@ -331,24 +452,49 @@ export class TransferStore {
   // matched by name, size and modification time.
   reattach(files: File[]) {
     const owned = new Set(this.snapshot.uploads.map((upload) => upload.transferId));
-    const candidates = this.snapshot.server.filter((transfer) => transfer.direction === "upload" && (transfer.state === "paused" || transfer.state === "interrupted") && !owned.has(transfer.id));
+    const candidates = this.snapshot.server.filter(
+      (transfer) =>
+        transfer.direction === "upload" &&
+        (transfer.state === "paused" || transfer.state === "interrupted") &&
+        !owned.has(transfer.id),
+    );
     const now = Date.now();
     const uploads: LocalUpload[] = [];
     const batches = new Map<string, UploadBatch>();
     for (const file of files) {
-      const index = candidates.findIndex((transfer) => transfer.name === file.name && transfer.totalBytes === file.size && (!transfer.lastModified || transfer.lastModified === file.lastModified));
+      const index = candidates.findIndex(
+        (transfer) =>
+          transfer.name === file.name &&
+          transfer.totalBytes === file.size &&
+          (!transfer.lastModified || transfer.lastModified === file.lastModified),
+      );
       if (index < 0) continue;
       const [transfer] = candidates.splice(index, 1);
       const target: UploadTarget = { ...transfer.location, parentId: transfer.location.folders.at(-1)?.id ?? "" };
       const batch = transfer.batch || `r-${transfer.id}`;
-      if (!this.snapshot.batches.some((item) => item.id === batch)) batches.set(batch, { id: batch, target, createdAt: Date.parse(transfer.createdAt) || now });
+      if (!this.snapshot.batches.some((item) => item.id === batch))
+        batches.set(batch, { id: batch, target, createdAt: Date.parse(transfer.createdAt) || now });
       uploads.push({
-        key: `u${(this.counter += 1)}`, batch, file, name: transfer.name, directories: [], size: file.size, target, conflict: "ask",
-        phase: "queued", transferred: transfer.transferredBytes, speed: 0, transferId: transfer.id, createdAt: Date.parse(transfer.createdAt) || now,
+        key: `u${(this.counter += 1)}`,
+        batch,
+        file,
+        name: transfer.name,
+        directories: [],
+        size: file.size,
+        target,
+        conflict: "ask",
+        phase: "queued",
+        transferred: transfer.transferredBytes,
+        speed: 0,
+        transferId: transfer.id,
+        createdAt: Date.parse(transfer.createdAt) || now,
       });
     }
     if (uploads.length) {
-      this.set({ uploads: [...this.snapshot.uploads, ...uploads], batches: [...this.snapshot.batches, ...batches.values()] });
+      this.set({
+        uploads: [...this.snapshot.uploads, ...uploads],
+        batches: [...this.snapshot.batches, ...batches.values()],
+      });
       this.schedule();
     }
     return { matched: uploads.length, unmatched: files.length - uploads.length };
@@ -356,7 +502,10 @@ export class TransferStore {
 
   // abandon cancels uploads a closed page left behind.
   abandon(transferIds: string[]) {
-    for (const id of transferIds) void cancelTransfer(id).then((transfer) => this.merge(transfer)).catch(() => undefined);
+    for (const id of transferIds)
+      void cancelTransfer(id)
+        .then((transfer) => this.merge(transfer))
+        .catch(() => undefined);
   }
 
   // download asks the NAS to prepare a download and lets the browser fetch
@@ -384,10 +533,22 @@ export class TransferStore {
   // trackExternal shows another app's upload here and returns how to report it.
   // An app that keeps its own queue reports each file as soon as it is
   // added (queued), so the transfer center lists the whole queue at once.
-  trackExternal(upload: Pick<ExternalUpload, "key" | "app" | "name" | "size" | "label" | "batch">, options: { queued?: boolean } = {}) {
-    const entry: ExternalUpload = { ...upload, progress: 0, phase: options.queued ? "queued" : "running", createdAt: Date.now() };
+  trackExternal(
+    upload: Pick<ExternalUpload, "key" | "app" | "name" | "size" | "label" | "batch">,
+    options: { queued?: boolean } = {},
+  ) {
+    const entry: ExternalUpload = {
+      ...upload,
+      progress: 0,
+      phase: options.queued ? "queued" : "running",
+      createdAt: Date.now(),
+    };
     this.set({ external: [...this.snapshot.external.filter((item) => item.key !== upload.key), entry] });
-    const change = (value: Partial<ExternalUpload>, immediate = true) => this.set({ external: this.snapshot.external.map((item) => item.key === upload.key ? { ...item, ...value } : item) }, immediate);
+    const change = (value: Partial<ExternalUpload>, immediate = true) =>
+      this.set(
+        { external: this.snapshot.external.map((item) => (item.key === upload.key ? { ...item, ...value } : item)) },
+        immediate,
+      );
     this.sent.set(upload.key, 0);
     return {
       start: () => {
@@ -425,7 +586,9 @@ export class TransferStore {
   private poll(delay?: number) {
     clearTimeout(this.pollTimer);
     if (!this.userID) return;
-    const serverActive = this.snapshot.server.some((transfer) => transfer.state === "pending" || transfer.state === "running");
+    const serverActive = this.snapshot.server.some(
+      (transfer) => transfer.state === "pending" || transfer.state === "running",
+    );
     const localActive = this.snapshot.uploads.some((upload) => upload.phase === "running");
     const next = delay ?? (this.watchers > 0 || serverActive ? 1500 : localActive ? 4000 : 30000);
     this.pollTimer = setTimeout(() => void this.refresh(), next);
@@ -434,7 +597,9 @@ export class TransferStore {
   private schedule() {
     if (this.snapshot.holds.length || !this.userID) return;
     const active = this.snapshot.uploads.filter((upload) => upload.phase === "running").length;
-    const ready = this.snapshot.uploads.filter((upload) => upload.phase === "queued").slice(0, Math.max(0, parallelUploads - active));
+    const ready = this.snapshot.uploads
+      .filter((upload) => upload.phase === "queued")
+      .slice(0, Math.max(0, parallelUploads - active));
     for (const upload of ready) this.start(upload);
   }
 
@@ -453,11 +618,21 @@ export class TransferStore {
       retryDelays,
       storeFingerprintForResuming: false,
       metadata: {
-        filename: task.name, spaceId: task.target.spaceId, parentId: task.target.parentId, relativePath: task.directories.join("/"),
-        conflict: task.conflict, lastModified: String(task.file.lastModified || 0), batch: task.batch,
+        filename: task.name,
+        spaceId: task.target.spaceId,
+        parentId: task.target.parentId,
+        relativePath: task.directories.join("/"),
+        conflict: task.conflict,
+        lastModified: String(task.file.lastModified || 0),
+        batch: task.batch,
       },
-      // The token can change when the same account signs in again.
-      onBeforeRequest: (request) => { for (const [name, value] of Object.entries(csrfHeaders())) request.setHeader(name, value); },
+      // The token can change when the same account signs in again. Creating
+      // the upload is the write a VNAS step may have to ask the member about
+      // (a conflict answered with 替换); its parts follow from it.
+      onBeforeRequest: async (request) => {
+        for (const [name, value] of Object.entries(csrfHeader(request.getMethod()))) request.setHeader(name, value);
+        if (request.getMethod() === "POST") await passWriteGate("POST", request.getURL());
+      },
       onUploadUrlAvailable: () => {
         const id = upload.url ? decodeURIComponent(upload.url.slice(upload.url.lastIndexOf("/") + 1)) : "";
         if (id && id !== this.find(task.key)?.transferId) this.update(task.key, { transferId: id });
@@ -522,7 +697,10 @@ export class TransferStore {
       if (first || owned.has(transfer.id)) continue;
       const before = this.seen!.get(transfer.id);
       // A transfer that started again counts from its new beginning.
-      const delta = before === undefined || transfer.transferredBytes < before ? transfer.transferredBytes : transfer.transferredBytes - before;
+      const delta =
+        before === undefined || transfer.transferredBytes < before
+          ? transfer.transferredBytes
+          : transfer.transferredBytes - before;
       if (delta > 0) this.moved[transfer.direction] += delta;
     }
     this.seen = seen;
@@ -535,11 +713,15 @@ export class TransferStore {
   // a pause after which its next part would show as a burst of speed.
   private tick() {
     const now = Date.now();
-    const running = [...this.snapshot.uploads, ...this.snapshot.external].filter((upload) => upload.phase === "running");
+    const running = [...this.snapshot.uploads, ...this.snapshot.external].filter(
+      (upload) => upload.phase === "running",
+    );
     if (running.length) this.meters.upload.add(now, this.moved.upload);
-    for (const upload of this.snapshot.uploads) if (upload.phase === "running") this.meters.items.get(upload.key)?.add(now, upload.transferred);
+    for (const upload of this.snapshot.uploads)
+      if (upload.phase === "running") this.meters.items.get(upload.key)?.add(now, upload.transferred);
     const batches = new Set(running.map((upload) => upload.batch));
-    for (const [batch, meter] of this.meters.batches) if (batches.has(batch)) meter.add(now, this.moved.batches.get(batch) ?? 0);
+    for (const [batch, meter] of this.meters.batches)
+      if (batches.has(batch)) meter.add(now, this.moved.batches.get(batch) ?? 0);
     this.measure();
   }
 
@@ -548,13 +730,21 @@ export class TransferStore {
   private measure(immediate = true) {
     const now = Date.now();
     const batches: Record<string, number> = {};
-    const runningBatches = new Set([...this.snapshot.uploads, ...this.snapshot.external].filter((upload) => upload.phase === "running").map((upload) => upload.batch));
+    const runningBatches = new Set(
+      [...this.snapshot.uploads, ...this.snapshot.external]
+        .filter((upload) => upload.phase === "running")
+        .map((upload) => upload.batch),
+    );
     for (const [batch, meter] of this.meters.batches) {
       const rate = meter.rate(now);
       if (rate > 0) batches[batch] = rate;
       else if (!runningBatches.has(batch)) this.meters.batches.delete(batch);
     }
-    const rates: TransferRates = { upload: this.meters.upload.rate(now), download: this.meters.download.rate(now), batches };
+    const rates: TransferRates = {
+      upload: this.meters.upload.rate(now),
+      download: this.meters.download.rate(now),
+      batches,
+    };
     const uploads = this.snapshot.uploads.map((upload) => {
       if (upload.phase !== "running") return upload;
       const speed = this.meters.items.get(upload.key)?.rate(now) ?? 0;
@@ -562,9 +752,12 @@ export class TransferStore {
     });
     const moving = rates.upload > 0 || rates.download > 0 || this.running.size > 0 || runningBatches.size > 0;
     const previous = this.snapshot.rates;
-    const changed = Math.round(previous.upload) !== Math.round(rates.upload) || Math.round(previous.download) !== Math.round(rates.download)
-      || Object.keys(previous.batches).length !== Object.keys(batches).length || Object.entries(batches).some(([batch, rate]) => Math.round(previous.batches[batch] ?? 0) !== Math.round(rate))
-      || uploads.some((upload, index) => upload !== this.snapshot.uploads[index]);
+    const changed =
+      Math.round(previous.upload) !== Math.round(rates.upload) ||
+      Math.round(previous.download) !== Math.round(rates.download) ||
+      Object.keys(previous.batches).length !== Object.keys(batches).length ||
+      Object.entries(batches).some(([batch, rate]) => Math.round(previous.batches[batch] ?? 0) !== Math.round(rate)) ||
+      uploads.some((upload, index) => upload !== this.snapshot.uploads[index]);
     if (changed) this.set({ rates, uploads }, immediate);
     if (moving && !this.rateTimer) this.rateTimer = setInterval(() => this.tick(), 1000);
     if (!moving && this.rateTimer) {
@@ -583,7 +776,9 @@ export class TransferStore {
     this.update(key, { phase: "completed", transferred: upload.size, speed: 0, finishedAt: Date.now() });
     for (const listener of this.uploadedListeners) listener(upload.target);
     if (upload.transferId) {
-      void getTransfer(upload.transferId).then((transfer) => this.update(key, { savedName: transfer.savedName, replaced: transfer.replaced })).catch(() => undefined);
+      void getTransfer(upload.transferId)
+        .then((transfer) => this.update(key, { savedName: transfer.savedName, replaced: transfer.replaced }))
+        .catch(() => undefined);
     }
     this.schedule();
     this.poll(1000);
@@ -626,8 +821,12 @@ export class TransferStore {
       case "missing":
         // The target folder is gone for every upload still bound for it.
         this.set({
-          uploads: this.snapshot.uploads.map((item) => item.key === key || (item.phase === "queued" && sameTarget(item.target, upload.target) && item.directories.length === 0)
-            ? { ...item, phase: "failed", error: { code: "not_found", message: reason.message }, speed: 0 } : item),
+          uploads: this.snapshot.uploads.map((item) =>
+            item.key === key ||
+            (item.phase === "queued" && sameTarget(item.target, upload.target) && item.directories.length === 0)
+              ? { ...item, phase: "failed", error: { code: "not_found", message: reason.message }, speed: 0 }
+              : item,
+          ),
         });
         break;
       case "canceled":
@@ -654,18 +853,34 @@ export class TransferStore {
     const holds = this.snapshot.holds.includes(hold) ? this.snapshot.holds : [...this.snapshot.holds, hold];
     this.set({
       holds,
-      uploads: this.snapshot.uploads.map((upload) => upload.key === key || upload.phase === "running" ? { ...upload, phase: "waiting", hold, speed: 0 } : upload),
+      uploads: this.snapshot.uploads.map((upload) =>
+        upload.key === key || upload.phase === "running" ? { ...upload, phase: "waiting", hold, speed: 0 } : upload,
+      ),
     });
     if (hold === "session" || this.holdTimers.has(hold)) return;
     const every = { offline: 5000, volume: 30000, space: 60000 }[hold];
-    this.holdTimers.set(hold, setInterval(() => void this.probe(hold), every));
+    this.holdTimers.set(
+      hold,
+      setInterval(() => void this.probe(hold), every),
+    );
   }
 
   private async probe(hold: Hold) {
-    if (hold !== "offline") { this.release(hold); return; }
+    if (hold !== "offline") {
+      this.release(hold);
+      return;
+    }
     try {
-      const response = await fetch("/api/v1/session", { credentials: "same-origin", headers: { Accept: "application/json" } });
-      if (response.status === 401) { this.release("offline"); this.hold("session", ""); sessionEnded(); return; }
+      const response = await fetch("/api/v1/session", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (response.status === 401) {
+        this.release("offline");
+        this.hold("session", "");
+        sessionEnded();
+        return;
+      }
       this.release("offline");
     } catch {
       // Still unreachable.
@@ -690,13 +905,20 @@ export class TransferStore {
     window.addEventListener("online", () => this.release("offline"));
     // Closing or reloading the page stops this browser's uploads.
     window.addEventListener("beforeunload", (event) => {
-      if (this.unfinished() > 0) { event.preventDefault(); event.returnValue = ""; }
+      if (this.unfinished() > 0) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
     });
   }
 
   private merge(transfer: Transfer) {
     const exists = this.snapshot.server.some((item) => item.id === transfer.id);
-    this.set({ server: exists ? this.snapshot.server.map((item) => item.id === transfer.id ? transfer : item) : [transfer, ...this.snapshot.server] });
+    this.set({
+      server: exists
+        ? this.snapshot.server.map((item) => (item.id === transfer.id ? transfer : item))
+        : [transfer, ...this.snapshot.server],
+    });
   }
 
   private pruneBatches() {
@@ -704,12 +926,21 @@ export class TransferStore {
     this.set({ batches: this.snapshot.batches.filter((batch) => used.has(batch.id)) });
   }
 
-  private find(key: string) { return this.snapshot.uploads.find((upload) => upload.key === key); }
-  private batch(id: string) { return this.snapshot.batches.find((batch) => batch.id === id); }
-  private batchUploads(batch: string) { return this.snapshot.uploads.filter((upload) => upload.batch === batch); }
+  private find(key: string) {
+    return this.snapshot.uploads.find((upload) => upload.key === key);
+  }
+  private batch(id: string) {
+    return this.snapshot.batches.find((batch) => batch.id === id);
+  }
+  private batchUploads(batch: string) {
+    return this.snapshot.uploads.filter((upload) => upload.batch === batch);
+  }
 
   private update(key: string, change: Partial<LocalUpload>, immediate = true) {
-    this.set({ uploads: this.snapshot.uploads.map((upload) => upload.key === key ? { ...upload, ...change } : upload) }, immediate);
+    this.set(
+      { uploads: this.snapshot.uploads.map((upload) => (upload.key === key ? { ...upload, ...change } : upload)) },
+      immediate,
+    );
   }
 
   // set replaces the snapshot; progress is announced at most every 150 ms.

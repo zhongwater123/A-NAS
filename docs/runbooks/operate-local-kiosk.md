@@ -1,7 +1,7 @@
 # 运行实验 NAS 本地控制台
 
-状态：implemented, display and pointer verified; confinement and VT recovery pending
-更新时间：2026-10-10
+状态：implemented, display and pointer verified; dedicated account verified on the Experimental NAS (2026-10-28); confinement and VT recovery pending
+更新时间：2026-10-28
 
 ## 目的
 
@@ -9,20 +9,25 @@
 
 ## 安全边界
 
-- Kiosk 以 `anas-dev` 运行，不以 root 运行 Chromium，也不使用 `--no-sandbox`。
-- Cage 通过 PAM 向 `systemd-logind` 注册真实本地会话，由 logind 授予活动 seat 的显示和输入设备访问；不要预先把 `anas-dev` 加入 `input` 或 `video` 组。
+- Kiosk 以安装器建立的专用系统账号 `a-nas-kiosk` 运行（[issue #174](https://github.com/zhongwater123/A-NAS/issues/174)），不以 root 运行 Chromium，也不使用 `--no-sandbox`。账号由 [`deploy/sysusers.d/a-nas-kiosk.conf`](../../deploy/sysusers.d/a-nas-kiosk.conf) 声明：没有口令和登录 shell，家目录是 `/nonexistent`，所以 SSH 无从登录，也放不进授权密钥；它不是暂存账号 `anas-dev`，写不了暂存的 release。单元把状态目录 `/var/lib/a-nas-kiosk` 当作 `HOME`，Chromium 的配置文件在其中的 `chromium/`。
+- 启动程序来自已安装的 release：`/opt/a-nas/current/kiosk-launcher` 归 root 所有，随产品一起切换与回滚。
+- Cage 通过 PAM 向 `systemd-logind` 注册真实本地会话，由 logind 授予活动 seat 的显示和输入设备访问；不要预先把 `a-nas-kiosk` 加入 `input` 或 `video` 组。
 - Cage 已使用 `-s` 请求允许 VT 切换，但 Experimental NAS 的实体切换尚未成功，当前恢复路径仍是 SSH；Kiosk 不是登录界面，也不提供终端。
 - 页面仍来自只监听 `127.0.0.1:8080` 的产品服务；直连屏幕不会扩大网络暴露面。
 - 如果机器已经存在其他 display manager，停止配置并先决定唯一图形会话所有者。
 
 ## 前提
 
-按[实机配置手册的安装步骤](provision-v1.0.1-experimental-storage.md#安装系统服务)暂存并安装一个 release，并把 `~anas-dev/apps/a-nas/current` 切到该 release，使以下版本化文件出现在其中：
+按[实机配置手册的安装步骤](provision-v1.0.1-experimental-storage.md#安装系统服务)暂存并安装一个 release。安装器每次都会：
 
-- `kiosk-launcher`
-- `anas-kiosk@.service`
-- `a-nas-kiosk.pam`
-- `kiosk.env`（Experimental NAS 已实机校准的输出配置）
+- 建立账号 `a-nas-kiosk`（已有时保留，但它必须没有家目录与登录 shell）；
+- 把启动程序装进 release，即 `/opt/a-nas/current/kiosk-launcher`；
+- 安装但不启用单元 `/etc/systemd/system/anas-kiosk@.service` 与 PAM 配置 `/etc/pam.d/a-nas-kiosk`；
+- kiosk 正在运行时重启它。
+
+与硬件相关的输出配置 `kiosk.env`（Experimental NAS 已实机校准）不由安装器安装，它留在暂存目录 `/home/anas-dev/apps/a-nas/releases/<release ID>/` 中。
+
+以 `anas-dev` 运行的旧 kiosk 第一次安装这样的 release 时，先按[迁移到专用账号](#迁移到专用账号)操作。
 
 屏保视频不在 release 中，见[屏保视频](#屏保视频)。
 
@@ -48,25 +53,19 @@ systemctl status display-manager.service --no-pager || true
 以下命令必须从 SSH 管理会话执行；不要在即将被接管的 `tty1` 本地 shell 中启动服务。
 
 ```bash
-install -m 0644 \
-  /home/anas-dev/apps/a-nas/current/a-nas-kiosk.pam \
-  /etc/pam.d/a-nas-kiosk
-install -m 0644 \
-  /home/anas-dev/apps/a-nas/current/anas-kiosk@.service \
-  /etc/systemd/system/anas-kiosk@.service
+release_id=<已安装的 12 位提交 SHA>
 install -d -m 0755 /etc/a-nas
 install -m 0644 \
-  /home/anas-dev/apps/a-nas/current/kiosk.env \
+  "/home/anas-dev/apps/a-nas/releases/$release_id/kiosk.env" \
   /etc/a-nas/kiosk.env
 
-systemctl daemon-reload
 systemctl set-default graphical.target
 systemctl enable anas-kiosk@tty1.service
 ```
 
 该单元只通过 `graphical.target.wants` 启动，不声明 `display-manager.service` 别名。Debian 13 的 systemd 会拒绝把显式模板实例别名为非模板单元，而该别名并不是 Kiosk 随 `graphical.target` 启动的必要条件。
 
-系统级单元中的启动器路径固定为 `/home/anas-dev/apps/a-nas/current/kiosk-launcher`，不使用 `%h`；系统管理器会把 `%h` 解析为 `/root`，即使服务配置了 `User=anas-dev`。
+系统级单元中的启动器路径固定为 `/opt/a-nas/current/kiosk-launcher`。账号没有家目录，单元用 `StateDirectory=a-nas-kiosk` 建立 `/var/lib/a-nas-kiosk`（0700），并以 `Environment=HOME=%S/a-nas-kiosk` 把它交给 Cage 与 Chromium；启动器从 systemd 给的 `STATE_DIRECTORY` 取 Chromium 配置文件的位置。
 
 本机屏幕已在 `DP-2` 的原生 `1536x2048@60.6Hz` 模式下实机校准为逆时针 `90` 度、缩放 `1.5`。这些硬件相关值位于 root 管理的 `/etc/a-nas/kiosk.env`；启动器会先校验配置，再在 Chromium 启动前原子应用 transform 和 scale。其他硬件不得直接复用 connector 名称。
 
@@ -79,6 +78,79 @@ journalctl -u anas-kiosk@tty1.service -b --no-pager -n 100
 ```
 
 服务与 `getty@tty1` 冲突并接管该虚拟终端。启动器最多等待产品 `/healthz` 30 秒；产品尚未就绪时退出，由 systemd 自动重试，而不是把 Chromium 错误页留在屏幕上。
+
+## 迁移到专用账号
+
+已部署的 NAS 上，kiosk 以暂存账号 `anas-dev` 运行，启动程序取自 `/home/anas-dev/apps/a-nas/current`，Chromium 配置文件在 `/home/anas-dev/.local/state/a-nas/chromium`。第一次安装含 [issue #174](https://github.com/zhongwater123/A-NAS/issues/174) 的 release 时，安装器把它换成 `a-nas-kiosk`。以下命令都从 SSH 管理会话以 root 执行。
+
+### 迁移前
+
+1. 记下当前状态，回滚时要用：
+
+   ```bash
+   readlink -f /opt/a-nas/current                              # 产品当前的 release
+   readlink -f /home/anas-dev/apps/a-nas/current               # 旧 kiosk 的 release
+   systemctl show -p User --value anas-kiosk@tty1.service      # anas-dev
+   ```
+
+2. 运行安装器之前，在本机屏幕上退出登录。本机会话不过期，它的令牌存在 `anas-dev` 名下的 Chromium 配置文件中，读得到这个账号的人就能用它。退出登录后产品服务作废这个会话，旧配置文件随之失去用处。新账号不沿用旧配置文件。
+
+### 迁移
+
+1. 按[实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务)暂存并安装 release。安装器建立 `a-nas-kiosk`，把启动程序装进新 release，换上新的单元与 PAM 配置，再重启正在运行的 kiosk。kiosk 以空的配置文件启动，本机屏幕显示登录页。
+2. 在本机屏幕上重新登录，再按[验收](#验收)第 1、2 项确认画面、字体与输入。
+
+### 迁移后的验证
+
+```bash
+systemctl show -p User --value anas-kiosk@tty1.service      # a-nas-kiosk
+ps -o user:20=,args= -C cage                                # a-nas-kiosk … /opt/a-nas/current/kiosk-launcher
+ps -o user:20= -C chromium | sort -u                        # 只有 a-nas-kiosk
+getent passwd a-nas-kiosk                                   # 以 :/nonexistent:/usr/sbin/nologin 结尾
+passwd -S a-nas-kiosk                                       # 第二列是 L：没有可用的口令
+stat -c '%U %a %n' /var/lib/a-nas-kiosk /var/lib/a-nas-kiosk/chromium
+! setpriv --reuid=a-nas-kiosk --regid=a-nas-kiosk --init-groups test -w /home/anas-dev/apps/a-nas/releases
+! ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new a-nas-kiosk@127.0.0.1 true
+systemctl is-active "user@$(id -u a-nas-kiosk).service"     # active
+systemd-analyze verify --recursive-errors=no anas-kiosk@tty1.service; echo "exit=$?"
+```
+
+- `ps` 默认把超过 8 个字符的用户名截成 `a-nas-k+`，所以用 `user:20` 指定列宽；
+- 两个目录都属于 `a-nas-kiosk`，权限为 `700`；
+- 带 `!` 的两行不输出任何内容，即命令失败：kiosk 账号写不了暂存目录，SSH 拒绝它登录；
+- 本机会话还会启动这个账号的用户服务管理器 `user@<UID>.service`。账号没有家目录，它仍应为 `active`：2026-10-28 在 Debian 13 容器中试过，与有家目录的账号相同；
+- `systemd-analyze verify` 的退出码为 0。`--recursive-errors=no` 只按本单元判断：它依赖的发行方单元打印的告警与迁移无关。
+
+确认无误并至少重启过一次 kiosk 后，删除旧配置文件：
+
+```bash
+rm -r -- /home/anas-dev/.local/state/a-nas/chromium
+```
+
+`/home/anas-dev/apps/a-nas/current` 不再被 kiosk 使用，保留它：回滚到更早的 release 时仍要用到。
+
+### 迁移失败时回滚
+
+kiosk 起不来（黑屏、journal 中反复重启）时，只把 kiosk 换回旧账号，产品保持新 release：
+
+```bash
+journalctl -u anas-kiosk@tty1.service -b --no-pager -n 100  # 先留下原因
+previous=<迁移前记下的旧 kiosk 的 release ID>
+stage=/home/anas-dev/apps/a-nas/releases/$previous
+install -o root -g root -m 0644 "$stage/anas-kiosk@.service" /etc/systemd/system/anas-kiosk@.service
+install -o root -g root -m 0644 "$stage/a-nas-kiosk.pam" /etc/pam.d/a-nas-kiosk
+readlink -f /home/anas-dev/apps/a-nas/current               # 应仍是 $stage
+systemctl daemon-reload
+systemctl restart anas-kiosk@tty1.service
+systemctl show -p User --value anas-kiosk@tty1.service      # anas-dev
+```
+
+- 旧启动程序只打开 `http://127.0.0.1:8080/?local-console=1`，可以与新 release 的产品服务一起使用。
+- 迁移前已在本机屏幕上退出登录，所以要重新登录。
+- 下一次运行安装器又会装上新单元，因此先查明原因再安装。
+- `a-nas-kiosk` 账号与 `/var/lib/a-nas-kiosk` 留着不影响旧 kiosk。
+
+产品整体回滚到本变更之前的 release 时，旧 release 中没有 `kiosk-launcher`，要连同 kiosk 的单元一起恢复，见[实机配置手册的回滚](provision-v1.0.1-experimental-storage.md#回滚)。
 
 ## 屏保视频
 
@@ -142,13 +214,15 @@ find "$pools" -mindepth 1 -maxdepth 1 -type d ! -name objects ! -name pools
 
 1. 开机后直连屏幕显示 A-NAS 桌面，中文字体正常，键盘和鼠标可用。
 2. 桌面右上角状态栏显示“模拟数据”或“实时主机”，CPU/内存仪表盘与网速有读数；打开“设置 → 概览”可读取对应状态（`173cbb5499ce` 及更早版本为“资源管理”）。
-3. `ps` 显示 Cage 与 Chromium 均属于 `anas-dev`，Chromium 参数中不存在 `--no-sandbox`。
+3. `ps` 显示 Cage 与 Chromium 均属于 `a-nas-kiosk`，Chromium 参数中不存在 `--no-sandbox`；该账号不能经 SSH 登录，也不能写暂存目录，检查命令见[迁移后的验证](#迁移后的验证)。
 4. SSH 停止 `anas-api.service` 后，Kiosk 页面进入失联状态；恢复服务后自动重新连接。
 5. `Ctrl+Alt+F2` 应切到恢复终端并能以 `Ctrl+Alt+F1` 返回；当前 Experimental NAS 未通过此项，见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
 6. `F1`、浏览器导航、开发工具、不受控缩放和右键菜单不可逃离产品界面；当前 Experimental NAS 未通过 `F1` 和缩放项，不能把本地 Kiosk 视为面向非受信任用户的安全边界。
 7. 登录后请求 `/local-console/screensavers`，返回的匿名 URL 数应与 `current/SHA256SUMS` 的行数相同；逐个以 `Range: bytes=0-1023` 请求时均返回 `206` 和 1024 字节。
 8. 登录后保持三分钟无输入，屏保应从池中选择一条，静音、居中铺满且无黑边；让视频自然结束，确认仍循环同一条而不切换。第一次移动鼠标或按键只退出屏保，不打开或操作下层应用；再次等待三分钟后应重新随机选择池内一条，允许与上次相同。
 9. 临时使当前选中的一个已确认池文件不可读并重启页面时，应从剩余条目中补选一条；恢复权限后再验收。不要删除源文件或整个池来制造故障。
+10. 管理员在“设置 → 个性化”把息屏设为 10 分钟后，本机屏幕保持 13 分钟无输入应变为纯黑（屏保先播放 10 分钟）；第一次移动鼠标或按键只回到桌面。退出登录后在登录页保持 13 分钟无输入同样变黑，唤醒后已输入的账号保留。验收后按需改回 30 分钟。行为见[个性化规格](../specs/personalization.md)。
+11. 管理员在另一台电脑的浏览器中通过“设置 → 个性化 → 更换图片…”设置壁纸并改为“适应”，本机屏幕的桌面应在 1 分钟内换成该图片，空白处为深蓝色；“恢复默认”后在 1 分钟内回到默认壁纸。
 
 如果分辨率、方向或 UI 大小不正确，先在同一 Wayland 会话中用 `wlr-randr` 临时验证，再更新 `/etc/a-nas/kiosk.env`；不要在不知道输出名称时写死显卡或 connector。
 
@@ -164,7 +238,7 @@ systemctl daemon-reload
 systemctl reset-failed
 ```
 
-这只移除本地显示会话，不停止 A-NAS API、Host Agent 或 SSH。
+这只移除本地显示会话，不停止 A-NAS API、Host Agent 或 SSH。之后每次运行安装器都会重新装上单元与 PAM 配置，但不启用它们，所以本地显示会话保持关闭。
 
 按[实机配置手册](provision-v1.0.1-experimental-storage.md#回滚)回滚产品不会改变正在播放的屏保池。媒体回滚就是重新安装一个已安装的池，不需要暂存区：
 
@@ -174,7 +248,7 @@ cat /var/lib/a-nas/screensavers/pools/<池 ID>/SHA256SUMS
 /opt/a-nas/current/install-screensavers.sh <池 ID>
 ```
 
-之后按验收第 7 项复核清单数量和 Range 请求。不要删除当前池作为回滚手段；对象和旧池的清理不属于常规回滚，必须另行确认。
+Experimental NAS 上原来五条视频的池为 `53e12079d8d50c4c`，2026-10-10 起的当前池是六条视频的 `68299080c557c520`。之后按验收第 7 项复核清单数量和 Range 请求。不要删除当前池作为回滚手段；对象和旧池的清理不属于常规回滚，必须另行确认。
 
 ## 依据
 
@@ -182,4 +256,5 @@ cat /var/lib/a-nas/screensavers/pools/<池 ID>/SHA256SUMS
 - [Debian 13 Cage 手册](https://manpages.debian.org/trixie/cage/cage.1.en.html)
 - [systemd.exec 对 PAM、TTY 和运行时目录的说明](https://manpages.debian.org/trixie/systemd/systemd.exec.5.en.html)
 - [本地控制台屏保规格](../specs/local-console-screensaver.md)
+- [个性化规格（息屏）](../specs/personalization.md)
 - [ADR 0014：屏保视频是系统盘上的长期媒体](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)

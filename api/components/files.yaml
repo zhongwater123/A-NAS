@@ -1,0 +1,103 @@
+parameters:
+  SpaceID: { name: spaceId, in: path, required: true, schema: { type: string } }
+  FileID: { name: fileId, in: path, required: true, schema: { type: string } }
+  TrashID: { name: trashId, in: path, required: true, schema: { type: string } }
+schemas:
+  Space:
+    type: object
+    additionalProperties: false
+    required: [id, kind, name, createdAt]
+    properties:
+      id: { type: string }
+      kind: { type: string, enum: [private, shared] }
+      name: { type: string }
+      ownerUserId: { type: string }
+      createdAt: { type: string, format: date-time }
+      writable: { type: boolean, description: Whether this caller can write to this space; child ACLs are checked on save. }
+      viewing:
+        description: Present when an administrator reads this private space through Administrative Viewing Mode; access is read-only.
+        type: object
+        additionalProperties: false
+        required: [grantId, expiresAt]
+        properties:
+          grantId: { type: string }
+          expiresAt: { type: string, format: date-time }
+  FileEntry:
+    type: object
+    additionalProperties: false
+    required: [id, spaceId, name, kind, sizeBytes, modifiedAt]
+    properties:
+      id: { type: string }
+      spaceId: { type: string }
+      parentId: { type: string }
+      name: { type: string }
+      kind: { type: string, enum: [file, directory] }
+      sizeBytes: { type: integer, format: int64, minimum: 0 }
+      modifiedAt: { type: string, format: date-time }
+  FileDestination:
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      parentId: { type: string }
+      name: { type: string, minLength: 1 }
+  FileTransfer:
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      spaceId: { type: string, description: Target space; defaults to the entry's own space. A move to another space copies the entry with new IDs and then removes the original. }
+      parentId: { type: string, description: Target folder in the target space; empty for its root. }
+      name: { type: string, minLength: 1 }
+  TrashItem:
+    type: object
+    additionalProperties: false
+    required: [id, entryId, spaceId, name, kind, sizeBytes, originalPath, originalGone, deletedBy, deletedAt, purgeAt]
+    properties:
+      id: { type: string }
+      entryId: { type: string }
+      spaceId: { type: string }
+      name: { type: string }
+      kind: { type: string, enum: [file, directory] }
+      sizeBytes:
+        type: integer
+        format: int64
+        minimum: 0
+        description: Total size of the files the item holds, as last indexed.
+      originalPath:
+        type: string
+        description: >-
+          Folder the item was deleted from, relative to the space root and empty for the root;
+          restoring without a parentId puts it back there. When originalGone is true it is where
+          the folder was, or empty when that was not recorded.
+      originalGone:
+        type: boolean
+        description: The original folder no longer exists, so restoring without a parentId puts the item at the space root.
+      deletedBy: { type: string }
+      deletedAt: { type: string, format: date-time }
+      purgeAt: { type: string, format: date-time, description: When the recycle bin deletes the item for good. }
+  TrashRestore:
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      parentId: { type: string }
+      name: { type: string, minLength: 1 }
+      conflict:
+        type: string
+        enum: [ask, rename, replace]
+        default: ask
+        description: "When the name is taken: ask answers 409 name_conflict; rename keeps both, the item taking the first free \"name (恢复).ext\", \"name (恢复 2).ext\"…; replace, for a file only (422 otherwise), sends the file of that name to the recycle bin and puts the item in its place. A folder in the way is never replaced: the file then comes back beside it."
+  RestoredEntry:
+    type: object
+    additionalProperties: false
+    required: [id, spaceId, name, kind, sizeBytes, modifiedAt]
+    properties:
+      id: { type: string }
+      spaceId: { type: string }
+      parentId: { type: string }
+      name: { type: string, description: The name the item came back under. }
+      kind: { type: string, enum: [file, directory] }
+      sizeBytes: { type: integer, format: int64, minimum: 0 }
+      modifiedAt: { type: string, format: date-time }
+      replaced: { type: boolean, description: "The item took the place of a file of its name, which went to the recycle bin." }

@@ -1,7 +1,7 @@
 # 启用相册本地 AI
 
 状态：verified（2026-10-10 在 Experimental NAS 首次部署 `6833c7637f73`）
-更新时间：2026-10-10
+更新时间：2026-10-28
 
 ## 目的
 
@@ -18,10 +18,10 @@
 - **前提**：
   - 设备已在运行相册服务（[启用相册服务](enable-photo-service.md)）。
   - 系统有 `python3`（3.13）、`libegl1` 与 `libgles2`。2026-10-10 只读核对 Experimental NAS：Python 3.13.5，两个库均已安装。
-  - 开发机已构建运行环境，并用真实模型跑过系统测试（[本地环境](../development/LOCAL_ENVIRONMENT.md#系统测试)）。
+  - 开发机已构建运行环境，并用真实模型跑过系统测试（[本地环境](../development/testing.md#系统测试)）。
 - **资源**：
   - 系统盘增加约 950 MB：模型 485 MB，运行环境约 460 MB。
-  - Worker 工作时占用约 1.2–1.4 GiB 内存，单元上限 2 GiB；空闲 10 分钟后退出。
+  - Worker 工作时占用约 1.2–1.4 GiB 内存；后台任务只在加载模型后仍有 1 GiB 可用时才加载，单元上限为总内存减 2.5 GiB（[资源策略](../architecture/photo-objects.md#资源策略)）；空闲 10 分钟后退出。
   - 已有照片在相册空闲 5 分钟后开始整理，每张约 0.6 秒 CPU 时间（开发机 4 核实测；i3-12100 待测）。
 - **隐私**：Worker 在自己的网络命名空间中只有回环接口，也打不开网络套接字，读不到数据卷。系统测试已证明这些，部署后再做一次只读核对。
 - **停止条件**（出现任一项立即停止）：
@@ -32,7 +32,7 @@
 ## 步骤
 
 1. 在开发机构建运行环境并暂存。
-   - 命令（WSL）：`scripts/build-ai-runtime.sh`，再按[本地环境](../development/LOCAL_ENVIRONMENT.md#系统测试)运行门禁与两次系统测试。
+   - 命令（WSL）：`scripts/build-ai-runtime.sh`，再按[本地环境](../development/testing.md#系统测试)运行门禁与两次系统测试。
    - 命令（Windows）：`scripts/deploy-dev.ps1 -NasHost a-nas-dev -StageOnly -WslDistribution Ubuntu -WslUser <WSL 用户>`。
    - 预期：输出“The NAS already holds embeddinggemma-2-740m.litertlm.”（模型已于 2026-10-10 按哈希暂存）；运行环境压缩包只在第一次上传，约 163 MB。脚本最后输出 API 与 Host Agent 的 SHA-256。
    - 完成标准：暂存的 release 中 `ai/model.litertlm` 与 `ai/runtime.tar.gz` 都是指向暂存区的链接，暂存脚本已核对两者的哈希。

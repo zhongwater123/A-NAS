@@ -14,13 +14,14 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
 产品服务（非特权，只监听 127.0.0.1:8080）
   ├── Auth / Files / Storage / Share / Jobs / Policy
   ├── Transfers（/api/v1/uploads 的 tus 分片写入文件代理以用户身份创建的临时文件；下载按发送字节跟踪；ADR 0019）
-  ├── /api/v1/media ── 影视中心：经文件代理以用户身份读取 ──► 媒体 Worker（按连接启动，无网络、无数据卷）
-  ├── Music（原地索引个人空间与 Shared 中的音频，经 Files 以成员身份读取；浏览器不能播放的格式经同一媒体 Worker 探测与解码；ADR 0018）
+  ├── /api/v1/media ── 影视中心：经文件代理以用户身份读取 ──► FFmpeg Worker（按连接启动，无网络、无数据卷）
+  ├── Music（原地索引个人空间与 Shared 中的音频，经 Files 以成员身份读取；浏览器不能播放的格式经同一 FFmpeg Worker 探测与解码；ADR 0018）
   ├── /api/v1/assistant ── 按白名单转发 ──► 成员自己的 Hermes 实例（hermes serve，沙箱；连接经 File Broker 的会话闸门；ADR 0024）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
   │                              ├── 助手套接字 ◄── 成员的 AI 助手（对端 UID 即成员，只读；ADR 0024）
-  │                              └── AI Orchestrator ──► AI Worker（M2 规划；只读 fd，无网络）
+  │                              ├── AI Orchestrator ──► AI Worker（systemd 套接字按需启动；只读 fd，无网络；ADR 0016）
+  │                              └── 向量同步与影子比对 ──► 自己的向量索引（Qdrant，按需启动，私有网络，可从 Catalog 重建；ADR 0028）
   └── hoststate.Reader
           ├── Fake Adapter（当前本地开发与契约测试）
           └── Host Agent Client Adapter
@@ -60,7 +61,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 6. 个人空间和共享空间的文件数据由 POSIX ACL 授权（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)），Web 与 SMB 都以登录者本人身份访问；照片资产由相册 Catalog Policy 授权；独立分享副本由分享服务按参与者、有效期与任务授权（[ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)）。搜索与 AI 检索在返回前按同一 Policy 过滤。
 7. AI 派生数据可重建、可清除，原文件只读进入 AI Pipeline。
 8. Fake 与 Linux Adapter 遵循同一契约，差异由契约测试暴露。
-9. 本地控制台、隧道与局域网浏览器使用同一 Web UI 和产品 API；产品服务只监听回环，局域网只经 Caddy 入口进入并带转发头（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。Kiosk 只多一个不过期的本机会话，不获得额外宿主机权限。
+9. 本地控制台、隧道与局域网浏览器使用同一 Web UI 和产品 API；产品服务只监听回环，局域网只经 Caddy 入口进入并带转发头（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。Kiosk 只多一个不过期的本机会话，不获得额外宿主机权限。会话只在登录时的客户端上有效，桌面页面不允许其他来源嵌入：已安装应用与桌面同站，会收到会话 Cookie（ADR 0012 决定 7）。
 10. 受管图库以稳定照片资产 ID 表达用户可见身份；内容对象路径和内容哈希不成为公共文件身份。
 11. AI Worker 不能写原图、权限或用户元数据；只有 Photo Library Module 可以提交权威目录状态。
 12. 数据卷离线、只读或低于保留容量时拒绝写入；不得在系统盘创建替代空间。
@@ -69,41 +70,86 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 15. 应用的 Docker 网络只从现场确认空闲的地址池分配，应用不能改变宿主机到局域网客户端的路由；地址池未配置时拒绝安装会新建网络的应用，安装后不在池内即回滚（[ADR 0013](../adr/0013-allocate-docker-networks-from-an-a-nas-address-pool.md)）。应用挂载 A-NAS 卷时只得到计划中的子目录：容器代理在规划时检查 Compose 与 Engine 的最低版本，安装后核对挂载（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
 16. 影视中心不持有存储：媒体文件只经文件代理以有效会话的用户身份读取，媒体库的可见性与所在空间的读权限一致；FFmpeg 只在没有网络、看不到数据卷与产品服务状态的按连接 Worker 中运行，只接收只读描述符（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）。
 17. 应用容器只以应用身份接触共享空间：服务以 `app-<id>` 启动，或由入口程序从 root 降到 `app-<id>`，并通过写在自身 Compose 中的 `a-nas-users` 组访问共享空间，挂载默认只读；保留镜像用户（可能是 root）的服务只能挂载自己的应用数据。宿主机账号的组成员关系不进入容器，容器代理安装后核对用户、组、能力与只读挂载（[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）。
+18. 在服务进程内解码用户文件或宿主机图片时（音乐封面、影视海报、头像、壁纸、任务图标、相册缩略图与搜图），先读头部限制像素数，并把解码器 panic 当作无法解码处理；后台扫描和 Host Agent 不能因一张图片退出或反复出错。恢复的 panic 经 [`internal/decodepanic`](../../internal/decodepanic/decodepanic.go) 记一条错误日志，只含解码点名称、panic 值的类型（运行时错误另记其消息，它只说长度与类型）与不带源码路径的栈；解码器自己的 panic 消息可能引用正在读的内容，所以不记，文件名也不记，因为管理员能读系统日志（[日志规格](../specs/logs.md)）。同一种 panic 沿同一个栈每 10 分钟只记一条，附上其间的重复次数，反复请求同一个坏文件不会刷屏。这样解码器缺陷、有人试探缺陷与我们自己代码的缺陷不会被当成一张坏图片。新增解码点同样处理，并用 `internal/imagetest` 的测试图片与日志记录覆盖。
+19. 产品服务的配置在启动时从环境一次解析并校验（[`cmd/anas-api/config.go`](../../cmd/anas-api/config.go)，各二进制经 [`internal/envconfig`](../../internal/envconfig/envconfig.go) 读取环境）。`ANAS_HOSTSTATE_MODE` 没有默认值，开发写 `fake`，NAS 写 `agent`；`agent` 拒绝任何开发用的 Adapter：进程内 FFmpeg、Fake 容器、开发用 AI、直连助手套接字与 spike 的更改代理。监听地址只能是回环地址。文件服务必须由调用方给出文件系统：生产是文件代理，进程内的本地文件系统只能经 `files.NewLocalService` 显式选择（[#192](https://github.com/zhongwater123/A-NAS/issues/192)）。
+20. 向量索引是派生数据（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)）：每个持有向量的服务有自己的 Qdrant 实例，只有它能连；索引只由它从自己的 Catalog 经事务内的 outbox 同步与重建，随时可以清空。点上只有内容 ID 与范围键，索引命中不构成授权，结果返回前仍按 Policy 复核。人脸与宠物向量不进索引。
+
+## HTTP 接口约定
+
+产品 API 按领域拆包（[#192](https://github.com/zhongwater123/A-NAS/issues/192)）：
+
+- 领域逻辑在 `internal/<domain>`，不依赖 HTTP；它的 HTTP 接口在 `internal/<domain>api`，负责解析请求、调用领域服务，并把领域错误映射为状态码与错误码。别的接口也要回答这个领域的错误时，复用该包导出的 `WriteError`，例如 `filesapi.WriteError` 与 `accountsapi.WriteError`。
+- `<domain>api` 用 `Routes()` 返回 [`apiroute.Route`](../../internal/apiroute/apiroute.go) 列表，每项包含方法、路径、姿态与处理函数。姿态有四种：`public`、`session`、`mutation`、`admin`。
+- 产品服务（[`internal/httpapi`](../../internal/httpapi/routes.go)）把各包的路由与自己的合成一张表，在处理函数之前统一检查姿态：
+  - 本客户端的会话 Cookie；
+  - 管理员重置密码后，先要求改密；
+  - GET 与 HEAD 以外的请求要有 CSRF 令牌；
+  - `admin` 姿态要求有效的管理员，与领域服务用同一个判定（`accounts.User.ActiveAdministrator`）。
+
+  处理函数不再自己做这些检查。读操作不能标为 `mutation`，写操作不能只标 `session`；姿态必须显式设置，零值与未知值均非法，表不合规时产品服务在构造时就失败。
+- 管理员专用操作在 `api/paths/` 的 OpenAPI 操作上声明 `x-anas-posture: admin`，路由表也必须标为 `admin`。契约测试逐项核对实际匹配的路由（包括前缀挂载），并用有效成员会话和 CSRF 令牌确认返回 `403 forbidden`。账号管理与存储变更在领域服务入口再次检查操作者是有效管理员；存储的规划、确认、执行、取消与转换重试在读取或改变计划、调用 Host Agent 之前拒绝其他操作者。
+- 两类接口整体挂在一个前缀下，姿态为 `session` 或 `admin`，写请求同样要 CSRF，登录用户经各自包里的 `WithUser` 传入：
+  - 由另一个进程提供的接口：相册与分享，产品服务经 [`internal/serviceproxy`](../../internal/serviceproxy/serviceproxy.go) 转发，只带会话令牌；开发模式在产品进程内以相册服务自己的认证运行相册接口（`photoservice.Local`）；
+  - 第三方 Handler：tus 上传。
+
+  挂载的接口在 [`apiroute.Mux`](../../internal/apiroute/apiroute.go) 上注册，并以 `Endpoints()` 列出自己的每个操作。产品服务按前缀挂载，路由表中再展开为逐个操作，`session` 挂载下的写操作计为 `mutation`（[#273](https://github.com/zhongwater123/A-NAS/issues/273)）。
+- 每次读请求体、每次写响应，最多等客户端一分钟（[`internal/httpidle`](../../internal/httpidle/httpidle.go)）：停住的客户端被放开，仍在传输的上传、下载与视频流不受限，处理函数自己的耗时也不计入。
+- JSON 只经 [`internal/httpjson`](../../internal/httpjson/httpjson.go) 读写：
+  - 错误统一为 `{"error":{"code","message"}}`；
+  - 请求体必须声明为 `application/json`，不超过限额（默认 1 MiB，超出回 413 `request_too_large`），不含未知字段，并且只有一个 JSON 值；
+  - 响应编码失败时记日志并回 500，不 panic。
+- 契约由 `internal/httpapi` 的测试保证：
+  - 遍历接口契约（`make api` 打包的 `api/openapi.bundle.yaml`）的每个操作，检查展开后的路由表中有它、没有 Cookie 时回 401、非 GET 请求没有 CSRF 时回 403；
+  - 展开后的每条路由，包括挂载接口的每个操作，都要在规格中，并且 `public` 与规格中的 `security: []` 一致；
+  - 产品测试的每次请求都经同一个包装器按规格校验，规格未声明的状态码同样失败（kin-openapi 的 `IncludeResponseStatus`）；规格中没有的请求也失败，回答 `404 not_found` 或 `405 method_not_allowed` 的除外；
+  - 包装器记下每个操作被校验过的状态码，跑完全部测试后列出没有任何 2xx 被校验过的操作（在 `internal/httpapi` 中运行 `go test` 可见），目前只报告、不失败。
 
 ## 当前代码入口
 
 | 路径 | 责任 | 实现状态 |
 |---|---|---|
-| `cmd/anas-api` | 非特权产品 API 进程入口 | 持久化账号、存储、文件、回收站、手动与定时快照、可选终端与容器管理已接线 |
+| `cmd/anas-api` | 非特权产品 API 进程入口；`config.go` 是产品、相册与分享服务进程的全部环境变量及其校验 | 持久化账号、存储、文件、回收站、手动与定时快照、可选终端与容器管理已接线 |
 | `cmd/anas-host-agent` | root Host Agent 进程入口 | 通过组限制 UDS 提供状态、类型化特权操作、File Broker 与相册会话查询 |
-| `web` / `internal/webui` | React Web 桌面、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、相册、回收站、[备份中心](../specs/backup-center.md)（快照、找回与定时快照）、[设置](../specs/settings.md)（我的账号、概览、存储、用户与权限、[日志](../specs/logs.md)、[终端](../specs/web-terminal.md)）、Docker 窗口与随机单视频循环屏保已实现 |
+| `web` / `internal/webui` | React Web 桌面（目录、样式、数据获取与测试的约定见 [Web 桌面结构与约定](web-desktop.md)）、嵌入式静态资源和本地控制台外部媒体 Handler | 登录、文件、相册、回收站、[备份中心](../specs/backup-center.md)（快照、找回与定时快照）、[设置](../specs/settings.md)（我的账号、概览、存储、[个性化](../specs/personalization.md)、用户与权限、[日志](../specs/logs.md)、[终端](../specs/web-terminal.md)）、Docker 窗口、随机单视频循环屏保与屏保后息屏已实现 |
 | `internal/containers` / `cmd/anas-container-agent` | 容器领域模型、Fake 与 Docker Adapter、容器代理及其 UDS 协议 | 列表、启停、日志已实现，见[容器管理规格](../specs/container-management.md) |
-| `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染（含每个服务的运行方式，[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）、Compose 执行任务与安装后核对、`/api/v1/apps`（仅管理员）与 `/api/v1/app-shortcuts`（所有已登录账号的桌面快捷方式） | 已实现，见[应用中心规格](../specs/app-center.md) |
-| `internal/containersapi` / `internal/localorigin` | `/api/v1/containers` 与写操作的本机 Host、同源校验 | 已实现；Host 接受 `localhost` 与 IP 地址 |
+| `internal/appid` | 应用中心与 Host Agent 共用的应用身份：合法的应用 ID，以及每个应用运行所用的 Linux 账号（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）；不依赖其他包，root Host Agent 因此保持精简 | 已实现 |
+| `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染（含每个服务的运行方式，[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）、安装编排（`appstore.Center`：卷检查、应用身份、计划摘要、准备目录）、Compose 执行任务与安装后核对、`/api/v1/apps`（仅管理员，公开文档与容器代理的线格式分开）与 `/api/v1/app-shortcuts`（所有已登录账号的桌面快捷方式）；`appstore/fake` 的内存 Docker 按渲染出的 Compose 建容器，与真实 Docker 共用 `engine/enginetest` 的契约表 | 已实现，见[应用中心规格](../specs/app-center.md) |
+| `internal/containersapi` / `internal/localorigin` | `/api/v1/containers`（公开文档与容器代理的线格式分开）与写操作的本机 Host、同源校验 | 已实现；Host 接受 `localhost` 与 IP 地址 |
 | `internal/assistantchanges` | AI 助手“提交更改”的执行方：检查提交、为卡片复制暂存内容、登记本人的一次性授权、以本人身份经文件代理的受限工作进程执行（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 4） | 单元测试与系统测试；随助手默认关闭 |
 | `internal/assistantapi` | AI 助手的产品接口：经会话闸门按白名单转发成员实例上 `hermes serve` 的 JSON-RPC 与对话 REST，把 Hermes 的审批对应到“提交更改”并生成确认卡片（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)） | 开发机原型与系统测试；默认关闭（`ANAS_ASSISTANT_SOCKET_DIR`），见 [AI 助手规格](../specs/ai-assistant.md) |
+| `internal/assistantlogin` | 用 Hermes 自带的密码登录（dashboard basic auth）登录成员实例上的 `hermes serve`；实例的 root 专属密钥就是密码，登录过的连接带有成员身份，Hermes 的浏览器控制需要它（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10） | 由文件代理的会话闸门与 `internal/assistantapi` 使用；随助手默认关闭 |
 | `internal/terminal` | 经本机屏幕或局域网入口的同源 WebSocket 上的 PTY 终端；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，由 root 写入 `ANAS_TERMINAL=enabled` 开启且升级保留，入口在“设置 → 终端”，见[终端规格](../specs/web-terminal.md) |
 | `deploy/caddy` | 局域网 Web 入口的 Caddy 配置；系统服务安装器在已安装 Caddy 时校验并写入 | 已实现，系统测试覆盖，见[局域网 Web 访问规格](../specs/lan-web-access.md) |
 | `deploy/systemd/system` / `deploy/pam` / `deploy/config` | Host Agent、产品服务、相册服务与容器代理的系统服务单元，以及直连屏幕的非特权 Cage/Chromium 会话与设备配置 | Kiosk 显示和鼠标已验收；浏览器约束与 VT 恢复待处理 |
-| `internal/hoststate/agent` | Unix Socket 上的 Host Agent server/client Adapter | 状态、指标、卷、凭据与快照 IPC 已实现 |
-| `internal/hoststate` / `internal/taskmanager` | 只读宿主机状态、CPU/内存/网络指标与设备、服务、进程采样；Fake 与 Debian Linux Adapter | 状态和状态栏指标见[状态栏规格](../specs/host-metrics-status-bar.md)；[任务管理器](../specs/task-manager.md)经同一 Host Agent IPC 向所有已登录账号提供只读观测，不返回命令参数或环境变量 |
+| `internal/hoststate/agent` / `internal/hoststate/agent/wire` / `internal/hoststate/agent/rootagent` | Unix Socket 上的 Host Agent IPC：产品服务的客户端、双方共用的文档与路径、Host Agent 的处理器；产品服务不链接处理器，Host Agent 不链接客户端（[#221](https://github.com/zhongwater123/A-NAS/issues/221)） | 状态、指标、卷、凭据与快照 IPC 已实现 |
+| `internal/hoststate` / `internal/taskmanager` | 只读宿主机状态、CPU/内存/网络指标与设备、服务、进程采样；Fake 与 Debian Linux Adapter | 状态和状态栏指标见[状态栏规格](../specs/host-metrics-status-bar.md)；[任务管理器](../specs/task-manager.md)经同一 Host Agent IPC 向所有已登录账号提供只读观测，不返回命令参数或环境变量；任务图标由 Host Agent 指名、产品服务中的 `internal/taskmanager/taskicon` 解码 |
 | `internal/accounts` / `internal/files` / `internal/storage` | 账号、会话与空间可见性（含[昵称与头像](../specs/account-profile.md)，头像由 `internal/avatar` 压缩为 256 px JPEG 后存入账号数据库），文件闭环和持久化执行计划；文件授权由 ACL 执行 | 已实现，单元测试与系统测试覆盖 |
-| `internal/filebroker` | Host Agent 内的文件代理：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）；也是 AI 助手的会话闸门，只把本人的实例连接交给有效会话，并执行助手的更改（`internal/assistantchanges`，Landlock 限制的工作进程；[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 4 与 10，默认关闭） | 已实现，root 集成测试与[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)覆盖；要求 Host Agent 保留 `CAP_SETUID`，见[存储与文件架构](storage-and-files.md#文件代理) |
+| `internal/accountid` / `internal/sessiondir` / `internal/filesystem` / `internal/datavolume` / `internal/ptyshell` | 产品服务与 root Host Agent 共用的契约：Linux 身份、角色与会话令牌，root 只读的会话目录，文件系统端口与 `RootFileSystem`，数据卷的布局、操作与执行端口，PTY Shell；`accounts`、`files`、`storage`、`terminal` 保留同名别名，Host Agent 不链接这些服务。`.golangci.yml` 的 depguard 列出两个代理依赖闭包中的包与它们允许的导入，并禁止产品代码导入 root 侧的包（[#221](https://github.com/zhongwater123/A-NAS/issues/221)） | 已实现 |
+| `internal/unixmsg` / `internal/sqlitedb` / `internal/mediatype` | 共用的基础代码：Unix 套接字上的帧（4 字节长度、JSON 与至多一个随控制消息传递的描述符，文件代理、FFmpeg Worker、分享桥与 AI Worker 共用）；SQLite 的打开方式与存储时间格式；哪些文件是视频（[#222](https://github.com/zhongwater123/A-NAS/issues/222)） | 已实现，`unixmsg` 有 fuzz 测试 |
+| `internal/capacity` | 数据卷的保留容量：写入后仍须留出卷的 5% 且不少于 10 GiB，文件与相册在同一点用尽空间（不变量 12） | `files.Service` 与相册使用 |
+| `internal/filebroker` / `internal/filebroker/wire` / `internal/filebroker/rootbroker` | 产品服务的客户端、双方共用的协议，以及 Host Agent 内的文件代理（`rootbroker`）：自行校验会话，以用户本人身份执行 Web 文件操作并启动终端 Shell（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)）；也是 AI 助手的会话闸门，只把本人的实例连接交给有效会话，并执行助手的更改（`internal/assistantchanges`，Landlock 限制的工作进程；[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 4 与 10，默认关闭） | 已实现，root 集成测试与[系统测试](../development/testing.md#系统测试)覆盖；要求 Host Agent 保留 `CAP_SETUID`，见[存储与文件架构](storage-and-files.md#文件代理) |
+| `internal/systemdscope` | 把文件代理派生的工作进程与终端 Shell 放进各自的 systemd 临时 scope，绑定 Host Agent 的单元（[#166](https://github.com/zhongwater123/A-NAS/issues/166)） | 已实现，系统测试覆盖 |
 | `internal/hostops/linux` | 固定命令的卷、Linux 身份、空间 ACL、管理员查看授权、Samba 和 Btrfs 快照执行器 | 已实现，Fake command 与 root 集成测试覆盖 |
-| internal/shares / internal/sharesapi / internal/shareservice / internal/sharefiles | 成员分享：固定副本、逐人私聊、通知和可撤回保存；独立身份持有副本，文件桥仍按成员身份读取和写入 | 开发分支已实现，见[成员分享技术设计](member-sharing.md) |
-| internal/photos | 相册 Module：数据卷上的 Catalog、内容寻址原图、Policy、虚拟目录、回收站与崩溃对账（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | JPEG/PNG 库、EXIF 元数据、缩略图持久任务与测试完成；开发模式由产品服务进程内运行，生产由相册服务进程运行 |
-| `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话或助手 UID 的查询接口 | 已实现，root 集成测试、相册冒烟与系统测试覆盖 |
-| `internal/music` | 音乐库：经 `files.Service` 以成员身份扫描个人空间与 Shared 的音频、读取标签/封面/时长与歌词，保存歌曲索引、封面缩略图和每名成员的收藏、播放记录、歌单与音乐文件夹（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)） | 已实现，由 `internal/httpapi` 提供 `/api/v1/music`，见[音乐规格](../specs/music.md)；尚未部署 |
-| `internal/photosapi` | `/api/v1/photos`：只接受上游确认的 `photos.Principal`，不自行认证 | 已实现并通过 OpenAPI 契约测试；生产中由产品服务转发到相册服务，相册服务不可用时返回 `photos_unavailable` |
+| `internal/shares` / `internal/sharesapi` / `internal/shareservice` / `internal/sharefiles` | 成员分享：固定副本、逐人私聊、通知和可撤回保存；独立身份持有副本，文件桥仍按成员身份读取和写入（[ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)） | 已实现，见[成员分享技术设计](member-sharing.md) |
+| `internal/photos` | 相册 Module：数据卷上的 Catalog、内容寻址原图、Policy、虚拟目录、回收站与崩溃对账（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | JPEG/PNG 库、EXIF 元数据、缩略图持久任务与测试完成；开发模式由产品服务进程内运行，生产由相册服务进程运行 |
+| `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话或助手 UID 的查询接口；由会话得到相册 `Principal` 只有 `photoservice.Authenticate` 一处，开发模式经 `photoservice.Local` 在产品进程内使用同一实现 | 已实现，root 集成测试、相册冒烟与系统测试覆盖 |
+| `internal/music` | 音乐库：经 `files.Service` 以成员身份扫描个人空间与 Shared 的音频、读取标签/封面/时长与歌词，保存歌曲索引、封面缩略图和每名成员的收藏、播放记录、歌单与音乐文件夹（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)） | 已实现，`internal/musicapi` 提供 `/api/v1/music`，见[音乐规格](../specs/music.md) |
+| `internal/vectorindex` | 服务与自己的向量索引之间的客户端：经 Unix 套接字连接所属的 Qdrant 实例（官方 Go 客户端，只有一个连接，空闲即断开，让实例能停止），只提供类型化的建集合、写入、删除、按范围搜索与扫描；`vectorindextest` 运行固定版本的二进制（[向量索引技术设计](vector-index.md)） | 已实现，用真实二进制的单元测试与系统测试覆盖；相册服务用于同步与影子比对 |
+| `internal/aiworker` | 相册服务调用 AI Worker 的客户端：每次请求连接 systemd 按需激活的 Unix 套接字，一帧是 4 字节长度加 JSON；图片作为只读描述符随控制消息传递，从不传路径，Worker 因此不需要访问数据卷（[本地 AI 实施方案](photo-ai.md)） | 已实现，单元测试与针对 `ai/` 中 Python Worker（替身 Provider）的协议测试覆盖 |
+| `internal/photosapi` | `/api/v1/photos`：只接受上游确认的 `photos.Principal`，不自行认证；`/internal/photos/activity` 只供产品服务合并活动记录 | 已实现；部分路由在 `httpapi` 的 OpenAPI 契约测试中；生产中由产品服务转发到相册服务，相册服务不可用时返回 `photos_unavailable` |
 | `internal/media` / `internal/mediaapi` | 影视中心：媒体库、按文件名与 NFO 识别的目录、每个用户的进度、收藏与合集，以及 `/api/v1/media` | 已实现，单元测试、OpenAPI 契约测试与系统测试覆盖，见[影视中心技术设计](media-center.md) |
-| `internal/filepreview` | 普通文件的视频抽帧与 HEIC/HEIF 预览；每次以用户身份打开文件后使用隔离 Worker，带有界内存与系统盘派生缓存，命中与 HTTP 304 前仍验证源文件访问权 | 见[基础存储与共享](../specs/basic-storage-and-sharing.md) |
-| `internal/mediaworker` | 媒体 Worker：与应用无关的类型化协议（探测、截图、HEIF 图片、字幕、视频流、音频解码）、FFmpeg 与 libheif 命令、按连接服务端（`anas-api media-worker`）与客户端，只使用自己的类型与错误；影视中心经 `media.WorkerProcessor`、音乐经 `music.Options.Worker`、相册经 `photos.Options.Media` 使用它；开发模式在进程内运行同一服务端 | 已实现，含真实 FFmpeg 测试（安装时运行） |
-| `internal/transfers` / `internal/transfersapi` | 传输中心：每名账号的上传与下载记录（`transfers.db`），tus 分片上传（tusd `pkg/handler` 与写入 `files.PendingUpload` 的数据存储，[ADR 0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)）、按发送字节跟踪的下载与 ZIP 打包，以及 `/api/v1/transfers`、`/api/v1/uploads` | 已实现，单元测试、真实 tus 请求的 API 测试与 OpenAPI 契约测试覆盖，见[传输中心规格](../specs/transfer-center.md)；尚未部署 |
+| `internal/filepreview` | 普通文件的视频抽帧与 HEIC/HEIF 预览；每次以用户身份打开文件后使用隔离 Worker，带有界内存与系统盘派生缓存，命中与 HTTP 304 前仍验证源文件访问权 | `internal/filepreviewapi` 提供 `/api/v1/files/{fileId}/preview`，见[基础存储与共享](../specs/basic-storage-and-sharing.md) |
+| `internal/mediaplay` | 浏览器怎样播放视频：能力解析、直接播放/转封装/转码的决定、转换流的 MIME、起点校验与每个进程的转换槽位；影视中心与相册各自把视频描述为 `mediaplay.Source` 并适配决定 | 已实现，影视中心与相册共用 |
+| `internal/ffmpegworker` | FFmpeg Worker：与应用无关的类型化协议（探测、截图、HEIF 图片、字幕、视频流、音频解码）、FFmpeg 与 libheif 命令、按连接服务端（`anas-api ffmpeg-worker`）与客户端，只使用自己的类型与错误；影视中心经 `media.WorkerProcessor`、音乐经 `music.Options.Worker`、相册经 `photos.Options.Media` 使用它；开发模式在进程内运行同一服务端 | 已实现，含真实 FFmpeg 测试（安装时运行） |
+| `internal/transfers` / `internal/transfersapi` | 传输中心：每名账号的上传与下载记录（`transfers.db`），tus 分片上传（tusd `pkg/handler` 与写入 `files.PendingUpload` 的数据存储，[ADR 0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)）、按发送字节跟踪的下载与 ZIP 打包，以及 `/api/v1/transfers`、`/api/v1/uploads` | 已实现，单元测试、真实 tus 请求的 API 测试与 OpenAPI 契约测试覆盖，见[传输中心规格](../specs/transfer-center.md) |
 | `internal/feedback` / `internal/feedbackapi` | 问题反馈：系统盘上 `feedback.db` 中全员共享的清单、评论与内嵌图片，以及 `/api/v1/feedback` | 已实现，单元测试与 OpenAPI 契约测试覆盖，见[问题反馈规格](../specs/feedback.md) |
-| `internal/activity` | 各模块 `audit_events` 表的统一查询：同一筛选与毫秒时间加记录 ID 的游标，合并为一页活动记录；成员只看自己的记录，管理员看不到他人个人空间中的名称 | 已实现，由 `internal/httpapi` 提供 `/api/v1/activity`，相册记录经相册 API 读取，见[日志规格](../specs/logs.md) |
+| `internal/personalization` | “设置 → 个性化”的设备级设置：系统盘上 `personalization.db` 中全体账号共用的桌面壁纸（图片经转正、缩到 3840 px 并重新编码为 JPEG）与样式，以及本机屏幕的息屏时长 | 已实现，单元测试覆盖；`internal/personalizationapi` 提供 `/api/v1/wallpaper`（已登录读取）与 `/api/v1/local-display`（读取无需登录），修改仅管理员，见[个性化规格](../specs/personalization.md) |
+| `internal/activity` | 各模块 `audit_events` 表的统一查询：同一筛选与毫秒时间加记录 ID 的游标，合并为一页活动记录；成员只看自己的记录，管理员看不到他人个人空间中的名称 | 已实现，`internal/activityapi` 提供 `/api/v1/activity`，相册记录经相册 API 读取，见[日志规格](../specs/logs.md) |
 | `internal/systemlog` / `internal/systemlog/journal` | A-NAS 服务日志：服务白名单、查询与 JSON 日志行解析、开发用 Fake，以及 Host Agent 中以固定参数运行 `journalctl` 的读取器（[ADR 0020](../adr/0020-read-service-logs-through-the-host-agent.md)） | 已实现，Host Agent `/v1/system-logs` 与产品 API `/api/v1/system-logs` 仅管理员可用；系统测试覆盖真实单元 |
-| `internal/httpapi` | REST/JSON 路由与 DTO 映射 | 已实现并通过 OpenAPI 契约测试 |
-| `api/openapi.yaml` | 客户端产品接口契约 | OpenAPI 3.1 |
+| `internal/httpapi` | 产品 API 的组合：路由表与姿态检查、首次设置、登录与会话、宿主机状态与终端，以及挂在前缀下的各接口；见上文“HTTP 接口约定” | 已实现；规格的每个操作都有路由与姿态测试，产品测试按规格校验每次响应 |
+| `internal/apiroute` / `internal/httpjson` / `internal/httpidle` / `internal/serviceproxy` | 路由表的条目、姿态与挂载接口的操作清单；JSON 读写、请求体规则与错误形状；按读写空闲时间放开停住的客户端；转发到相册服务与分享服务，只带会话令牌 | 已实现，单元测试覆盖 |
+| `internal/accountsapi` / `internal/storageapi` / `internal/filesapi` / `internal/musicapi` / `internal/personalizationapi` / `internal/activityapi` / `internal/systemlogapi` / `internal/taskmanagerapi` / `internal/filepreviewapi` | 各领域的路由与错误映射：账号管理、通知、查看授权、昵称与头像，数据卷与存储计划，文件与快照，音乐，个性化，活动记录，服务日志，任务管理器，文件预览 | 已实现，经 `internal/httpapi` 的产品测试与契约测试覆盖 |
+| `api/` | 客户端产品接口契约：根文件 `openapi.yaml` 按领域引用 `paths/` 与 `components/` 中的文件；`make api` 打包为 `openapi.bundle.yaml`（Go 契约测试加载它），并生成 Web 客户端的类型与外壳响应的校验 | OpenAPI 3.1，见[接口契约](../development/api-contract.md#接口契约) |
 | `tools/doccheck` | 文档结构和链接检查 | 开发工具 |
 | `docs/specs` | 可验收的产品行为 | 见[规格索引](../specs/README.md) |
 | `docs/investigations` | 复杂缺陷的证据和根因 | 见[调查索引](../investigations/README.md) |
@@ -113,8 +159,9 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 
 ## 关联
 
-- [成员分享技术设计](member-sharing.md)（开发分支已实现，尚未部署）
-
+- [`internal/httpapi/routes_test.go`](../../internal/httpapi/routes_test.go)：管理员规格与路由对照、成员拒绝测试（[#270](https://github.com/zhongwater123/A-NAS/issues/270)）
+- [`internal/storage/authorization_test.go`](../../internal/storage/authorization_test.go)：服务层授权及被拒绝后不改变计划、不执行磁盘操作
+- [成员分享技术设计](member-sharing.md)
 - [领域语言](../../CONTEXT.md)
 - [当前状态](../status/CURRENT.md)
 - [ADR 索引](../adr/README.md)
@@ -129,7 +176,9 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [相册本地 AI（M2）实施方案](photo-ai.md)
 - [相册物体检测与混合检索实施方案](photo-objects.md)
 - [相册人物与宠物实施方案](photo-people.md)
+- [向量索引技术设计](vector-index.md)与 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)
 - [存储与文件架构](storage-and-files.md)
+- [Web 桌面结构与约定](web-desktop.md)
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [基础存储 ADR](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
 - [相册与本地智能检索规格](../specs/photo-library.md)

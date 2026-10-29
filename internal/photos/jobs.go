@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/decodepanic"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 // Derived data is rebuilt from originals and may be deleted at any time. A
@@ -41,11 +42,38 @@ const (
 const (
 	jobErrorUndecodable     = "undecodable"
 	jobErrorMissingOriginal = "missing_original"
-	jobErrorIO              = "io"
+	// jobErrorIO marks storage faults and a FFmpeg Worker that ran out of
+	// time. RecoverJobs gives these jobs their attempts again.
+	jobErrorIO = "io"
 	// jobErrorInterrupted marks a job whose lease ran out on every attempt,
-	// as when decoding the original keeps killing the service.
+	// as when decoding the original keeps killing the service, or whose
+	// FFmpeg Worker stopped while decoding it every time.
 	jobErrorInterrupted = "interrupted"
 )
+
+// jobWaiting is not a failure and is never stored: the FFmpeg Worker is not
+// there or the service is stopping, so the job goes back without spending
+// its attempt.
+const jobWaiting = "waiting"
+
+// decodeFailure classifies an error from decoding through the FFmpeg Worker,
+// following the AI Worker's rule (docs/architecture/photo-ai.md#协议): a
+// worker that never took the input costs nothing, one that stopped or ran
+// out of time while decoding it spends the attempt, and one that could not
+// read it fails the job.
+func decodeFailure(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return jobWaiting
+	case errors.Is(err, ffmpegworker.ErrInterrupted):
+		return jobErrorInterrupted
+	case errors.Is(err, ffmpegworker.ErrUnavailable):
+		return jobWaiting
+	case errors.Is(err, ffmpegworker.ErrFailed), errors.Is(err, context.DeadlineExceeded):
+		return jobErrorIO
+	}
+	return jobErrorUndecodable
+}
 
 var ErrThumbnailUnavailable = errors.New("photo thumbnail is not available yet")
 
@@ -130,11 +158,17 @@ type claimedJob struct {
 	derivation  string
 	attempts    int
 	orientation int
+	// video is set for a video original, with how long it plays.
+	video    bool
+	duration float64
 }
 
-// ProcessMediaJob runs one ready media job and reports whether there was one.
-// A job whose original cannot be processed is retried with a delay and then
-// marked failed; the error returned is only for Catalog or storage faults.
+// ProcessMediaJob runs one ready media job and reports whether it finished
+// one. A job whose original cannot be processed is retried with a delay and
+// then marked failed; one that waits for the FFmpeg Worker goes back without
+// spending its attempt and reports false, so the loop pauses rather than
+// try every job against a worker that is not there. The error returned is
+// only for Catalog or storage faults.
 func (s *Service) ProcessMediaJob(ctx context.Context) (bool, error) {
 	job, err := s.claimJob(ctx, thumbnailDerivation)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -144,7 +178,13 @@ func (s *Service) ProcessMediaJob(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	thumbnail, width, height, class := s.renderJob(ctx, job)
-	if class != "" {
+	switch {
+	case ctx.Err() != nil:
+		// Stopping: the job keeps its place and its attempt.
+		return false, s.returnJob(context.WithoutCancel(ctx), job)
+	case class == jobWaiting:
+		return false, s.releaseJob(ctx, job)
+	case class != "":
 		return true, s.failJob(ctx, job, class)
 	}
 	return true, s.completeJob(ctx, job, thumbnail, width, height)
@@ -171,12 +211,12 @@ WHERE derivation = ? AND state = 'running' AND lease_until <= ? AND attempts >= 
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		now := formatTime(s.now())
 		if err := tx.QueryRowContext(ctx, `
-SELECT j.object_id, j.derivation, j.attempts, o.orientation
-FROM jobs j JOIN objects o ON o.id = j.object_id
+SELECT j.object_id, j.derivation, j.attempts, o.orientation, v.object_id IS NOT NULL, IFNULL(v.duration, 0)
+FROM jobs j JOIN objects o ON o.id = j.object_id LEFT JOIN videos v ON v.object_id = j.object_id
 WHERE j.derivation = ? AND ((j.state = 'pending' AND j.not_before <= ?) OR (j.state = 'running' AND j.lease_until <= ?))
   AND (? = '' OR j.object_id = ?)
 ORDER BY j.not_before, j.object_id
-LIMIT 1`, derivation, now, now, objectID, objectID).Scan(&job.objectID, &job.derivation, &job.attempts, &job.orientation); err != nil {
+LIMIT 1`, derivation, now, now, objectID, objectID).Scan(&job.objectID, &job.derivation, &job.attempts, &job.orientation, &job.video, &job.duration); err != nil {
 			return err
 		}
 		job.attempts++
@@ -188,11 +228,60 @@ LIMIT 1`, derivation, now, now, objectID, objectID).Scan(&job.objectID, &job.der
 	return job, err
 }
 
+// JobRecovery counts the jobs RecoverJobs put back in the queue.
+type JobRecovery struct {
+	// Resumed counts jobs a crash left running.
+	Resumed int `json:"resumed"`
+	// Requeued counts failed jobs that get their attempts again.
+	Requeued int `json:"requeued"`
+}
+
+// RecoverJobs readies the queue before any job loop runs. A stopping service
+// gives its jobs back, so a job still running was cut off by a crash or a
+// power loss: it runs again now instead of after its lease, and keeps the
+// attempt it spent, so that an original that keeps killing the service still
+// fails as interrupted. Jobs that failed on storage or on a FFmpeg Worker that
+// ran out of time (io) start over, as the disk that was full or the device
+// that was too busy may be fine now; so do those a worker that was not there
+// failed before such failures stopped counting (issue #168).
+func (s *Service) RecoverJobs(ctx context.Context) (JobRecovery, error) {
+	var recovery JobRecovery
+	err := s.withTx(ctx, func(tx *sql.Tx) error {
+		now := formatTime(s.now())
+		if _, err := tx.ExecContext(ctx, `
+UPDATE jobs SET state = 'failed', lease_until = NULL, error_class = ?
+WHERE state = 'running' AND attempts >= ?`, jobErrorInterrupted, jobMaxAttempts); err != nil {
+			return err
+		}
+		resumed, err := tx.ExecContext(ctx, "UPDATE jobs SET state = 'pending', lease_until = NULL WHERE state = 'running'")
+		if err != nil {
+			return err
+		}
+		requeued, err := tx.ExecContext(ctx, `
+UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, not_before = ?, error_class = ''
+WHERE state = 'failed' AND error_class = ?`, now, jobErrorIO)
+		if err != nil {
+			return err
+		}
+		count, err := resumed.RowsAffected()
+		recovery.Resumed = int(count)
+		if err != nil {
+			return err
+		}
+		count, err = requeued.RowsAffected()
+		recovery.Requeued = int(count)
+		return err
+	})
+	return recovery, err
+}
+
 // renderJob treats a decoder panic like an undecodable original: the same
-// bytes would panic again, and the service must keep serving.
+// bytes would panic again, and the service must keep serving. Thumbnails are
+// background work: when the FFmpeg Worker is busy they wait their turn.
 func (s *Service) renderJob(ctx context.Context, job claimedJob) (thumbnail []byte, width, height int, class string) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			decodepanic.Log("photo thumbnail", recovered)
 			thumbnail, width, height, class = nil, 0, 0, jobErrorUndecodable
 		}
 	}()
@@ -203,13 +292,15 @@ func (s *Service) renderJob(ctx context.Context, job claimedJob) (thumbnail []by
 	if err != nil {
 		return nil, 0, 0, jobErrorIO
 	}
-	defer original.Close()
-	thumbnail, width, height, err = s.renderPhoto(ctx, original, job.orientation, thumbnailEdge, thumbnailQuality)
+	defer func() { _ = original.Close() }()
+	ctx = ffmpegworker.WithPriority(ctx, ffmpegworker.Background)
+	if job.video {
+		thumbnail, width, height, err = s.renderVideoFrame(ctx, original, job.duration, thumbnailEdge, thumbnailQuality)
+	} else {
+		thumbnail, width, height, err = s.renderPhoto(ctx, original, job.orientation, thumbnailEdge, thumbnailQuality)
+	}
 	if err != nil {
-		if errors.Is(err, mediaworker.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			return nil, 0, 0, jobErrorIO
-		}
-		return nil, 0, 0, jobErrorUndecodable
+		return nil, 0, 0, decodeFailure(err)
 	}
 	return thumbnail, width, height, ""
 }
@@ -243,7 +334,8 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET width = excluded.width, height 
 			return err
 		}
 		// The thumbnail is the vector's input and proves the original
-		// decodes for the detector and the face models.
+		// decodes for the detector and the face models. A video's queues
+		// none of them.
 		if err := s.enqueueEmbedding(ctx, tx, job.objectID); err != nil {
 			return err
 		}
@@ -254,7 +346,7 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET width = excluded.width, height 
 	}); err != nil {
 		return err
 	}
-	s.wakeAI()
+	s.ai.wakeUp()
 	return nil
 }
 

@@ -1,6 +1,6 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
-import type { PhotoAsset } from "./photosApi";
+import type { PhotoAsset } from "./api";
 
 const between = (order: PhotoAsset[], from: string, to: string) => {
   const start = order.findIndex((asset) => asset.id === from);
@@ -16,10 +16,13 @@ export function useSelection(order: PhotoAsset[]) {
   const anchor = useRef<string>(undefined);
   // What was selected when a marquee or swipe began, which it adds to.
   const base = useRef<ReadonlySet<string>>(undefined);
+  // The callbacks read the latest order and selection without changing identity.
   const orderRef = useRef(order);
-  orderRef.current = order;
   const selectedRef = useRef(selected);
-  selectedRef.current = selected;
+  useLayoutEffect(() => {
+    orderRef.current = order;
+    selectedRef.current = selected;
+  });
 
   const toggle = useCallback((asset: PhotoAsset, range: boolean) => {
     const from = anchor.current;
@@ -40,7 +43,9 @@ export function useSelection(order: PhotoAsset[]) {
     setSelected((current) => {
       const next = new Set(current);
       const all = ids.every((id) => next.has(id));
-      for (const id of ids) if (all) next.delete(id); else next.add(id);
+      for (const id of ids)
+        if (all) next.delete(id);
+        else next.add(id);
       return next;
     });
   }, []);
@@ -56,16 +61,24 @@ export function useSelection(order: PhotoAsset[]) {
   const beginSwipe = useCallback((asset: PhotoAsset) => {
     const snapshot = selectedRef.current;
     const target = !snapshot.has(asset.id);
-    return (to: string) => setSelected(() => {
-      const next = new Set(snapshot);
-      for (const id of between(orderRef.current, asset.id, to)) if (target) next.add(id); else next.delete(id);
-      anchor.current = to;
-      return next;
-    });
+    return (to: string) =>
+      setSelected(() => {
+        const next = new Set(snapshot);
+        for (const id of between(orderRef.current, asset.id, to))
+          if (target) next.add(id);
+          else next.delete(id);
+        anchor.current = to;
+        return next;
+      });
   }, []);
 
-  const endGesture = useCallback(() => { base.current = undefined; }, []);
-  const clear = useCallback(() => { setSelected(new Set()); anchor.current = undefined; }, []);
+  const endGesture = useCallback(() => {
+    base.current = undefined;
+  }, []);
+  const clear = useCallback(() => {
+    setSelected(new Set());
+    anchor.current = undefined;
+  }, []);
   const replace = useCallback((ids: Iterable<string>) => setSelected(new Set(ids)), []);
   return { selected, toggle, setGroup, marquee, beginSwipe, endGesture, clear, replace };
 }

@@ -9,21 +9,22 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 // The 记忆 page (docs/specs/ai-assistant.md): what the assistant remembers and
 // the skills it made, from Hermes's own learning graph — the routes Hermes
 // Desktop's star map uses (docs/research/hermes-agent-runtime.md, "记忆与自建技能").
 // Only reading and deleting are passed; Hermes keeps a deleted skill in its
-// archive, as it does everywhere.
+// archive, as it does everywhere. A-NAS's own skills come from
+// skills.external_dirs, which Hermes leaves out of the graph and refuses to
+// delete; the graph is taken as it is, whatever a skill is named: the
+// assistant may well call one it made anas-photos.
 
 // memoryIDPattern bounds a learning-graph id: memory:<store>:<n>:<fingerprint>
 // or a skill's name. An id must also be in the graph just read.
 var memoryIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:_.-]{0,199}$`)
-
-// systemSkills are A-NAS's own, read-only to the assistant; they are never the
-// member's to delete.
-const systemSkillPrefix = "anas-"
 
 type memoryItem struct {
 	ID string `json:"id"`
@@ -50,7 +51,7 @@ type learned struct {
 }
 
 // learning reads the member's learning graph.
-func (h *handler) learning(ctx context.Context, account string) (learned, error) {
+func (h *Handler) learning(ctx context.Context, account string) (learned, error) {
 	status, data, err := h.rest(ctx, account, http.MethodGet, "/api/learning/graph", nil)
 	if err != nil {
 		return learned{}, err
@@ -93,9 +94,6 @@ func (h *handler) learning(ctx context.Context, account string) (learned, error)
 			text := bodies[node.Source+":"+parts[len(parts)-1]]
 			result.Memories = append(result.Memories, memoryItem{ID: node.ID, Store: node.Source, Text: text, UpdatedAt: node.Timestamp})
 		case "skill":
-			if strings.HasPrefix(node.ID, systemSkillPrefix) {
-				continue
-			}
 			result.Skills = append(result.Skills, learnedSkill{ID: node.ID, Category: node.Category, CreatedBy: node.CreatedBy,
 				UseCount: node.UseCount, UpdatedAt: node.Timestamp})
 		}
@@ -117,20 +115,20 @@ func (l learned) has(id string) bool {
 	return false
 }
 
-func (h *handler) getMemory(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) getMemory(w http.ResponseWriter, r *http.Request, account string) {
 	result, err := h.learning(r.Context(), account)
 	if err != nil {
 		h.unavailable(w, account, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	httpjson.Write(w, http.StatusOK, result)
 }
 
 // memoryID reads the path's id and checks that it is in the member's graph now.
-func (h *handler) memoryID(w http.ResponseWriter, r *http.Request, account string) (string, bool) {
+func (h *Handler) memoryID(w http.ResponseWriter, r *http.Request, account string) (string, bool) {
 	id := r.PathValue("id")
 	if !memoryIDPattern.MatchString(id) {
-		writeError(w, http.StatusBadRequest, "invalid_memory", "invalid memory id")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_memory", "invalid memory id")
 		return "", false
 	}
 	current, err := h.learning(r.Context(), account)
@@ -139,13 +137,13 @@ func (h *handler) memoryID(w http.ResponseWriter, r *http.Request, account strin
 		return "", false
 	}
 	if !current.has(id) {
-		writeError(w, http.StatusNotFound, "memory_not_found", "the assistant no longer has this")
+		httpjson.WriteError(w, http.StatusNotFound, "memory_not_found", "the assistant no longer has this")
 		return "", false
 	}
 	return id, true
 }
 
-func (h *handler) getMemoryItem(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) getMemoryItem(w http.ResponseWriter, r *http.Request, account string) {
 	id, ok := h.memoryID(w, r, account)
 	if !ok {
 		return
@@ -157,17 +155,17 @@ func (h *handler) getMemoryItem(w http.ResponseWriter, r *http.Request, account 
 	if !h.call(w, r, account, http.MethodGet, "/api/learning/node?"+url.Values{"id": {id}}.Encode(), nil, &detail) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"id": id, "kind": detail.Kind, "content": detail.Content})
+	httpjson.Write(w, http.StatusOK, map[string]string{"id": id, "kind": detail.Kind, "content": detail.Content})
 }
 
-func (h *handler) deleteMemoryItem(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) deleteMemoryItem(w http.ResponseWriter, r *http.Request, account string) {
 	id, ok := h.memoryID(w, r, account)
 	if !ok {
 		return
 	}
 	switch err := h.forget(r.Context(), account, id); {
 	case errors.Is(err, errMemoryChanged):
-		writeError(w, http.StatusConflict, "memory_changed", "the assistant's memory changed; reload it")
+		httpjson.WriteError(w, http.StatusConflict, "memory_changed", "the assistant's memory changed; reload it")
 	case err != nil:
 		h.unavailable(w, account, err)
 	default:
@@ -179,7 +177,7 @@ var errMemoryChanged = errors.New("the learning graph changed")
 
 // forget deletes one node. Hermes removes a memory inside the memory tool's own
 // lock, finding it again by its text, and moves a skill into its archive.
-func (h *handler) forget(ctx context.Context, account, id string) error {
+func (h *Handler) forget(ctx context.Context, account, id string) error {
 	payload, _ := json.Marshal(map[string]string{"id": id})
 	status, data, err := h.rest(ctx, account, http.MethodDelete, "/api/learning/node", payload)
 	if err != nil {
@@ -197,7 +195,7 @@ func (h *handler) forget(ctx context.Context, account, id string) error {
 // clearMemory forgets everything in the graph and, when asked, deletes every
 // conversation too: only then is it gone for good, since a conversation keeps
 // the memory it started with and the assistant can search earlier ones.
-func (h *handler) clearMemory(w http.ResponseWriter, r *http.Request, account string) {
+func (h *Handler) clearMemory(w http.ResponseWriter, r *http.Request, account string) {
 	var body struct {
 		Conversations bool `json:"conversations"`
 	}
@@ -237,12 +235,12 @@ func (h *handler) clearMemory(w http.ResponseWriter, r *http.Request, account st
 	}
 	h.logger.Info("assistant memory cleared", "account", account, "memories", result["memories"], "skills", result["skills"],
 		"conversations", result["conversations"])
-	writeJSON(w, http.StatusOK, result)
+	httpjson.Write(w, http.StatusOK, result)
 }
 
 // deleteConversations deletes every stored conversation; one with a turn
 // running is left and counted as busy.
-func (h *handler) deleteConversations(ctx context.Context, account string) (int, int, error) {
+func (h *Handler) deleteConversations(ctx context.Context, account string) (int, int, error) {
 	var ids []string
 	for offset := 0; ; offset += sessionLimit {
 		query := url.Values{"limit": {fmt.Sprint(sessionLimit)}, "offset": {fmt.Sprint(offset)}, "archived": {"include"}}

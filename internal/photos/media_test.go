@@ -87,7 +87,7 @@ func readThumbnail(t *testing.T, service *photos.Service, p photos.Principal, as
 	if err != nil {
 		t.Fatalf("Thumbnail() error = %v", err)
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	if content.MediaType != "image/jpeg" {
 		t.Fatalf("thumbnail type = %q", content.MediaType)
 	}
@@ -247,7 +247,7 @@ func TestExpiredJobLeaseIsReclaimedAfterACrash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open catalog: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	leaseUntil := c.Now().Add(5 * time.Minute).UTC().Format("2006-01-02T15:04:05.000000000Z")
 	if _, err := db.Exec("UPDATE jobs SET state = 'running', attempts = 1, lease_until = ?", leaseUntil); err != nil {
 		t.Fatalf("simulate claimed job: %v", err)
@@ -276,7 +276,7 @@ func TestJobThatKeepsLosingItsLeaseFailsInsteadOfLooping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open catalog: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	leaseUntil := c.Now().Add(5 * time.Minute).UTC().Format("2006-01-02T15:04:05.000000000Z")
 	if _, err := db.Exec("UPDATE jobs SET state = 'running', attempts = 3, lease_until = ?", leaseUntil); err != nil {
 		t.Fatalf("simulate claimed job: %v", err)

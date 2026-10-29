@@ -2,12 +2,14 @@ package photos
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/xml"
+	"errors"
 	"io"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/abema/go-mp4"
 )
 
 const cameraNS = "http://ns.google.com/photos/1.0/camera/"
@@ -35,12 +37,8 @@ func motionRange(file *os.File, size int64, mediaType string) (int64, int64, err
 			return 0, 0, ErrInvalidMotion
 		}
 		offset := size - length
-		var header [12]byte
-		if _, err := file.ReadAt(header[:], offset); err != nil || string(header[4:8]) != "ftyp" {
-			return 0, 0, ErrInvalidMotion
-		}
-		box := int64(binary.BigEndian.Uint32(header[:4]))
-		if box < 12 || box > length {
+		box, err := mp4.ReadBoxInfo(io.NewSectionReader(file, offset, length))
+		if err != nil || box.Type != mp4.BoxTypeFtyp() || box.ExtendToEOF || box.Size < 12 || box.Size > uint64(length) {
 			return 0, 0, ErrInvalidMotion
 		}
 		return offset, length, nil
@@ -94,7 +92,7 @@ func motionLength(data []byte) (int64, bool, error) {
 	directoryDepth, depth := 0, 0
 	for {
 		token, err := decoder.Token()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

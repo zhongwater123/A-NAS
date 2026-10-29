@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/activity"
 )
 
 func TestFailedViewingGrantIsRevokedAndNeitherNotifiedNorActive(t *testing.T) {
@@ -18,7 +19,7 @@ func TestFailedViewingGrantIsRevokedAndNeitherNotifiedNorActive(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	provisioner := &viewingRecorder{}
-	service := accounts.NewService(store, provisioner, accounts.Options{})
+	service := accounts.NewService(store, provisioner, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +67,7 @@ func TestAdministrativeViewingIsAuthenticatedReadOnlyAuditedAndTemporary(t *test
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	provisioner := &viewingRecorder{}
-	service := accounts.NewService(store, provisioner, accounts.Options{Now: func() time.Time { return now }})
+	service := accounts.NewService(store, provisioner, accounts.Options{PasswordCost: cheapPasswords, Now: func() time.Time { return now }})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +134,7 @@ func TestAdministrativeViewingIsAuthenticatedReadOnlyAuditedAndTemporary(t *test
 	if remaining, _ := service.Notifications(ctx, alice); len(remaining) != 0 {
 		t.Fatalf("acknowledged notification is still shown: %#v", remaining)
 	}
-	events, err := service.ListAudit(ctx, admin)
+	events, err := service.Activity(ctx, admin, activity.Query{Limit: activity.MaxLimit})
 	if err != nil || !hasAudit(events, "space.viewing_started", aliceSpace) {
 		t.Fatalf("audit = %#v, %v; want space.viewing_started", events, err)
 	}
@@ -170,7 +171,7 @@ func TestResetPasswordMustBeChangedBeforeAnythingElse(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	provisioner := &viewingRecorder{}
-	service := accounts.NewService(store, provisioner, accounts.Options{})
+	service := accounts.NewService(store, provisioner, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +262,7 @@ func containsSpace(spaces []accounts.Space, spaceID string) bool {
 	return false
 }
 
-func hasAudit(events []accounts.AuditEvent, action, resourceID string) bool {
+func hasAudit(events []activity.Event, action, resourceID string) bool {
 	for _, event := range events {
 		if event.Action == action && event.ResourceID == resourceID {
 			return true

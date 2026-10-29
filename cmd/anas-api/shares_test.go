@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
+	"github.com/zhongwater123/A-NAS/internal/openapitest"
 	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
@@ -28,7 +28,7 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	users := accounts.NewService(db, &developmentOperations{}, accounts.Options{})
 	owner, err := users.SetupAdministrator(ctx, "owner", "owner strong password")
 	if err != nil {
@@ -41,11 +41,13 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 	if err = users.ChangePassword(ctx, member, "initial member password", "member changed password"); err != nil {
 		t.Fatal(err)
 	}
-	ownerSession, err := users.Authenticate(ctx, "owner", "owner strong password")
+	// httptest requests are direct loopback connections, where these sessions work.
+	direct := accounts.WithClientOrigin(ctx, accounts.ClientOrigin{Via: accounts.ViaLoopback})
+	ownerSession, err := users.Authenticate(direct, "owner", "owner strong password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	memberSession, err := users.Authenticate(ctx, "member", "member changed password")
+	memberSession, err := users.Authenticate(direct, "member", "member changed password")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,24 +55,17 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer catalog.Close()
+	defer func() { _ = catalog.Close() }()
 	volume := filepath.Join(root, "volume")
-	fs := files.NewService(catalog, volume, users, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
+	fs := files.NewLocalService(catalog, volume, users, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	api, closeShares, err := configuredShares(ctx, false, volume, users, fs, nil, logger)
+	api, closeShares, err := configuredShares(ctx, Config{Mode: ModeFake, DataMount: volume}, users, fs, nil, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer closeShares()
 	handler := httpapi.NewProduct(httpapi.ProductDependencies{Accounts: users, Files: fs, Shares: api, Logger: logger})
-	document, err := openapi3.NewLoader().LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatal(err)
-	}
+	router := openapitest.Router(t)
 	call := func(session accounts.Session, method, url string, body any) *httptest.ResponseRecorder {
 		var reader io.Reader
 		if body != nil {
@@ -91,7 +86,8 @@ func TestMemberSharingProductWorkflow(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			input := &openapi3filter.ResponseValidationInput{RequestValidationInput: &openapi3filter.RequestValidationInput{Request: request, PathParams: params, Route: route}, Status: response.Code, Header: response.Header()}
+			input := &openapi3filter.ResponseValidationInput{RequestValidationInput: &openapi3filter.RequestValidationInput{Request: request, PathParams: params, Route: route}, Status: response.Code, Header: response.Header(),
+				Options: &openapi3filter.Options{IncludeResponseStatus: true}}
 			input.SetBodyBytes(response.Body.Bytes())
 			if err := openapi3filter.ValidateResponse(ctx, input); err != nil {
 				t.Fatalf("%s %s contract: %v", method, url, err)

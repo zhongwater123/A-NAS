@@ -2,6 +2,17 @@
 
 *.sh text eol=lf
 *.bash text eol=lf
+# Read on Linux as written, whatever a Windows checkout's core.autocrlf says.
+*.service text eol=lf
+*.socket text eol=lf
+*.timer text eol=lf
+*.slice text eol=lf
+*.tmpfiles text eol=lf
+*.conf text eol=lf
+*.py text eol=lf
+Makefile text eol=lf
+Caddyfile text eol=lf
+# Windows scripts keep CRLF; .editorconfig says the same.
 *.ps1 text eol=crlf
 *.cmd text eol=crlf
 *.bat text eol=crlf
@@ -11,6 +22,13 @@
 *.yml text eol=lf
 # git apply needs the hunks exactly as written.
 *.patch text eol=lf
+
+# Copied from Hermes by ai/assistant-spike/vendor-hermes-ui.py; GitHub folds it in diffs.
+web/src/assistant/hermes/** linguist-generated=true
+# Written by `make api`, which api-check compares byte for byte; Biome skips
+# the TypeScript ones, so nothing else would keep them LF.
+api/openapi.bundle.yaml linguist-generated=true
+web/src/*.generated.ts text eol=lf linguist-generated=true
 
 *.png binary
 *.jpg binary

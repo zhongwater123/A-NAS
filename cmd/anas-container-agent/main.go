@@ -23,6 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/appstore/engine"
 	"github.com/zhongwater123/A-NAS/internal/containers/agent"
 	"github.com/zhongwater123/A-NAS/internal/containers/docker"
+	"github.com/zhongwater123/A-NAS/internal/envconfig"
 )
 
 var version = "dev"
@@ -35,8 +36,25 @@ func main() {
 	}
 }
 
+// config is the container agent's configuration, read from its environment
+// once. systemd sets STATE_DIRECTORY for StateDirectory=; Compose files and
+// the Docker CLI configuration live there. App data lives on the data volume
+// beside the spaces; shared mounts resolve inside the Shared folder, never at
+// the volume root (ADR 0008).
+type config struct {
+	Socket         string `env:"ANAS_CONTAINER_AGENT_SOCKET"`
+	StateDir       string `env:"STATE_DIRECTORY" envDefault:"/var/lib/a-nas-container"`
+	AppDataRoot    string `env:"ANAS_APP_DATA_ROOT" envDefault:"/srv/a-nas/data/apps"`
+	SharedDataRoot string `env:"ANAS_SHARED_DATA_ROOT" envDefault:"/srv/a-nas/data/spaces/shared"`
+	TZ             string `env:"TZ" envDefault:"Etc/UTC"`
+}
+
 func run(logger *slog.Logger) error {
-	socketPath, err := agent.SocketPath()
+	config, err := envconfig.Parse[config](envconfig.Environment())
+	if err != nil {
+		return err
+	}
+	socketPath, err := agent.SocketPath(config.Socket)
 	if err != nil {
 		return err
 	}
@@ -44,13 +62,19 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer manager.Close()
+	defer func() { _ = manager.Close() }()
 
-	apps, err := configuredAppStore()
+	apps, err := configuredAppStore(config)
 	if err != nil {
 		return err
 	}
-	defer apps.Wait()
+	// An install this agent was stopped in is rolled back in the background.
+	if err := apps.Recover(); err != nil {
+		logger.Error("some app job records could not be read", "error", err)
+	}
+	// An install still running on shutdown is cancelled and rolled back
+	// before the agent exits; an uninstall is let finish.
+	defer apps.Stop()
 
 	listener, err := listen(socketPath)
 	if err != nil {
@@ -62,12 +86,13 @@ func run(logger *slog.Logger) error {
 	}()
 
 	server := &http.Server{
-		Handler:           route(agent.NewHandler(manager, logger), appstoreagent.NewHandler(apps, logger)),
+		Handler:           route(agent.NewHandler(manager, logger), appstoreagent.NewHandler(apps, appstoreagent.SystemIdentities{}, logger)),
 		ReadHeaderTimeout: 2 * time.Second,
 		ReadTimeout:       5 * time.Second,
 		// Stop and restart wait up to ten seconds for the container to exit.
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  30 * time.Second,
+		ErrorLog:     slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -109,21 +134,17 @@ func route(containerHandler, appHandler http.Handler) http.Handler {
 	})
 }
 
-// configuredAppStore reads the install policy from the environment. systemd
-// sets STATE_DIRECTORY for StateDirectory=; Compose files and the Docker CLI
-// configuration live there.
-func configuredAppStore() (*engine.Store, error) {
+// configuredAppStore applies the configured install policy.
+func configuredAppStore(config config) (*engine.Store, error) {
 	entries, err := appstore.Catalog()
 	if err != nil {
 		return nil, err
 	}
-	stateDir := valueOr(os.Getenv("STATE_DIRECTORY"), "/var/lib/a-nas-container")
-	// App data lives on the data volume beside the spaces; shared mounts
-	// resolve inside the Shared folder, never at the volume root (ADR 0008).
+	stateDir := config.StateDir
 	policy := appstore.Policy{
-		AppDataRoot:   valueOr(os.Getenv("ANAS_APP_DATA_ROOT"), "/srv/a-nas/data/apps"),
-		DataRoot:      valueOr(os.Getenv("ANAS_SHARED_DATA_ROOT"), "/srv/a-nas/data/spaces/shared"),
-		TZ:            valueOr(os.Getenv("TZ"), "Etc/UTC"),
+		AppDataRoot:   config.AppDataRoot,
+		DataRoot:      config.SharedDataRoot,
+		TZ:            config.TZ,
 		ReservedPorts: []uint16{8080},
 	}
 	for _, root := range []string{policy.AppDataRoot, policy.DataRoot, stateDir} {
@@ -131,19 +152,12 @@ func configuredAppStore() (*engine.Store, error) {
 			return nil, errors.New("app data roots and state directory must be absolute paths")
 		}
 	}
-	engineClient, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+	engineClient, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, err
 	}
 	runner := engine.CLIRunner{Environment: []string{"DOCKER_CONFIG=" + filepath.Join(stateDir, "docker-config")}}
 	return engine.New(entries, policy, stateDir, engine.DockerInspector{Client: engineClient}, runner), nil
-}
-
-func valueOr(value, fallback string) string {
-	if value == "" {
-		return fallback
-	}
-	return value
 }
 
 // listen creates the socket with group read/write so that only members of the

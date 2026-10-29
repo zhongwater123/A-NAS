@@ -90,7 +90,7 @@
 - 评论有自己的版本号，编辑冲突返回 `409 comment_changed`；添加或删除评论不改变条目的版本。评论文字最多 2000 字、图片最多 3 张，图片规则与条目相同，通过所属条目的图片地址读取。
 - 条目或图片已被删除时返回 `404`，面板把它从清单中移除；评论已被删除时返回 `404 comment_not_found`，面板刷新清单。删除条目同时删除它的全部评论与评论图片。
 - 面板打开时每 15 秒刷新清单（包括评论），收起时每 60 秒刷新待处理数量。刷新失败时保留已显示的清单；首次读取失败时显示“无法读取反馈”和重试按钮。
-- “截取界面”在浏览器中把桌面页面绘制成 WebP，分辨率按屏幕像素比（最多 2 倍）；局域网入口是明文 HTTP，浏览器不允许那里使用屏幕录制接口。截图失败时提示改用系统截图后粘贴。截图库在第一次截图时才加载。
+- “截取界面”在浏览器中把浏览器窗口里的整个页面（桌面、窗口，以及画在桌面外层的菜单、预览与提示）绘制成 WebP，分辨率按屏幕像素比（最多 2 倍），完全在窗口外的元素不画；VNAS 看桌面用的是同一个画法（[`desktopPicture.ts`](../../web/src/desktop/desktopPicture.ts)）；局域网入口是明文 HTTP，浏览器不允许那里使用屏幕录制接口。截图失败时提示改用系统截图后粘贴。截图库在第一次截图时才加载。
 - 打开面板时光标落在撰写框，但不滚动桌面：窗口超出屏幕时桌面本身可以被滚动，滚动后整个桌面会错位。
 - 系统偏好减少动态效果时取消面板、条目与查看器的动画和截图闪光，划线直接出现。
 - 反馈保存在产品服务状态目录的 `feedback.db`（SQLite），图片随条目存放在同一数据库；删除条目同时删除图片并回收空间。评论与评论图片在单独的表中，打开评论功能之前的数据库时自动添加；回到没有评论功能的版本时，旧版本看不到评论，也不会把评论图片当成条目图片。
@@ -106,5 +106,5 @@
 - 规格：[系统快捷栏](system-rail.md)、[Web 桌面宿主机状态](web-desktop-host-state.md)
 - 架构：[架构总览](../architecture/OVERVIEW.md)
 - ADR：不涉及
-- 代码：[反馈存储](../../internal/feedback/feedback.go)、[反馈 API](../../internal/feedbackapi/handler.go)、[产品 API 挂载](../../internal/httpapi/product.go)、[接口契约](../../api/openapi.yaml)、[反馈面板](../../web/src/feedback/FeedbackChannel.tsx)、[撰写框](../../web/src/feedback/FeedbackEditor.tsx)、[评论区](../../web/src/feedback/FeedbackThread.tsx)、[评论存储](../../internal/feedback/comments.go)、[界面截图](../../web/src/feedback/capture.ts)
+- 代码：[反馈存储](../../internal/feedback/feedback.go)、[反馈 API](../../internal/feedbackapi/handler.go)、[产品 API 挂载](../../internal/httpapi/routes.go)、[接口契约](../../api/openapi.yaml)、[反馈面板](../../web/src/feedback/FeedbackChannel.tsx)、[撰写框](../../web/src/feedback/FeedbackEditor.tsx)、[评论区](../../web/src/feedback/FeedbackThread.tsx)、[评论存储](../../internal/feedback/comments.go)、[界面截图](../../web/src/feedback/capture.ts) 与[桌面画法](../../web/src/desktop/desktopPicture.ts)
 - 测试：[反馈存储测试](../../internal/feedback/feedback_test.go)、[评论存储测试](../../internal/feedback/comments_test.go)、[产品 API 测试](../../internal/httpapi/feedback_test.go)、[反馈面板测试](../../web/src/feedback/FeedbackChannel.test.tsx)

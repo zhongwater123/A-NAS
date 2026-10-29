@@ -5,18 +5,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const tus = vi.hoisted(() => {
   class FakeUpload {
     url: string | null;
-    constructor(readonly file: File, readonly options: Record<string, any>) {
+    constructor(
+      readonly file: File,
+      readonly options: Record<string, any>,
+    ) {
       this.url = options.uploadUrl ?? null;
       uploads.push(this);
     }
     start() {}
-    abort() { return Promise.resolve(); }
-    created(id: string) { this.url = `http://nas/api/v1/uploads/${id}`; this.options.onUploadUrlAvailable(); }
+    abort() {
+      return Promise.resolve();
+    }
+    created(id: string) {
+      this.url = `http://nas/api/v1/uploads/${id}`;
+      this.options.onUploadUrlAvailable();
+    }
     fail(method: string, status: number, code: string) {
-      this.options.onError(Object.assign(new Error(code), {
-        originalRequest: { getMethod: () => method },
-        originalResponse: { getStatus: () => status, getBody: () => JSON.stringify({ error: { code, message: code } }) },
-      }));
+      this.options.onError(
+        Object.assign(new Error(code), {
+          originalRequest: { getMethod: () => method },
+          originalResponse: {
+            getStatus: () => status,
+            getBody: () => JSON.stringify({ error: { code, message: code } }),
+          },
+        }),
+      );
     }
   }
   const uploads: FakeUpload[] = [];
@@ -24,34 +37,29 @@ const tus = vi.hoisted(() => {
 });
 vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 
+import { transfer, transfersHandlers } from "../test/handlers/transfers";
+import { server } from "../test/server";
+import type { Transfer } from "./api";
 import { transferStore, type UploadTarget } from "./store";
 import { TransferCenter } from "./TransferCenter";
-import type { Transfer } from "./transfersApi";
 
-const target: UploadTarget = { spaceId: "space:shared", spaceKind: "shared", parentId: "file:photos", folders: [{ id: "file:photos", name: "照片" }] };
-let server: Transfer[];
-
-function transfer(change: Partial<Transfer>): Transfer {
-  const now = new Date().toISOString();
-  return {
-    id: "download-1", direction: "download", kind: "file", name: "片段.mp4", location: { spaceId: "space:shared", spaceKind: "shared", folders: [] },
-    totalBytes: 1024, transferredBytes: 1024, bytesPerSecond: 0, state: "completed", contentUrl: "/api/v1/transfers/download-1/content",
-    createdAt: now, updatedAt: now, finishedAt: now, ...change,
-  };
-}
+const target: UploadTarget = {
+  spaceId: "space:shared",
+  spaceKind: "shared",
+  parentId: "file:photos",
+  folders: [{ id: "file:photos", name: "照片" }],
+};
+// listed is what the NAS lists for the account.
+let listed: Transfer[];
 
 beforeEach(() => {
   tus.uploads.length = 0;
-  server = [];
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-    const body = String(input) === "/api/v1/transfers" ? { items: server } : {};
-    return { ok: true, status: 200, json: async () => body } as Response;
-  }));
+  listed = [];
+  server.use(...transfersHandlers(() => listed).handlers);
 });
 
 afterEach(() => {
   transferStore.reset();
-  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -90,7 +98,8 @@ describe("传输中心", () => {
     tus.uploads[0].fail("PATCH", 507, "insufficient_storage");
     open();
     const user = userEvent.setup();
-    expect(await screen.findByText("数据卷空间不足", { selector: ".tc-banner strong" })).toBeTruthy();
+    // The banner explains the hold; the upload's own row names it too.
+    expect(within(await screen.findByRole("status")).getByText("数据卷空间不足")).toBeTruthy();
     expect(screen.getByRole("article", { name: "上传 big.iso" }).textContent).toContain("等待恢复");
     await user.click(screen.getByRole("button", { name: /继续上传/ }));
     expect(tus.uploads).toHaveLength(2);
@@ -99,9 +108,18 @@ describe("传输中心", () => {
 
   it("lists finished transfers by day and fetches a download again", async () => {
     const yesterday = new Date(Date.now() - 86_400_000).toISOString();
-    server = [
-      transfer({}),
-      transfer({ id: "upload-1", direction: "upload", name: "报告.pdf", state: "failed", error: { code: "service_restarted", message: "" }, contentUrl: undefined, createdAt: yesterday, finishedAt: yesterday }),
+    listed = [
+      transfer(),
+      transfer({
+        id: "upload-1",
+        direction: "upload",
+        name: "报告.pdf",
+        state: "failed",
+        error: { code: "service_restarted", message: "" },
+        contentUrl: undefined,
+        createdAt: yesterday,
+        finishedAt: yesterday,
+      }),
     ];
     transferStore.attach("user:alice");
     open();
@@ -111,21 +129,33 @@ describe("传输中心", () => {
     expect(screen.getByRole("region", { name: "昨天" }).textContent).toContain("NAS 服务重启，上传需要重新开始");
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     await user.click(within(today).getByRole("button", { name: "重新下载" }));
-    expect(click.mock.contexts[0]).toHaveProperty("href", expect.stringContaining("/api/v1/transfers/download-1/content"));
+    expect(click.mock.contexts[0]).toHaveProperty(
+      "href",
+      expect.stringContaining("/api/v1/transfers/download-1/content"),
+    );
     await user.click(screen.getByRole("radio", { name: "失败与取消" }));
     expect(screen.queryByRole("region", { name: "今天" })).toBeNull();
   });
 
   it("continues uploads a closed page left behind once the same files are picked", async () => {
-    server = [transfer({
-      id: "upload-x", direction: "upload", name: "x.mov", totalBytes: 4, transferredBytes: 2, state: "interrupted",
-      lastModified: 7, contentUrl: undefined, finishedAt: undefined,
-    })];
+    listed = [
+      transfer({
+        id: "upload-x",
+        direction: "upload",
+        name: "x.mov",
+        totalBytes: 4,
+        transferredBytes: 2,
+        state: "interrupted",
+        lastModified: 7,
+        contentUrl: undefined,
+        finishedAt: undefined,
+      }),
+    ];
     transferStore.attach("user:alice");
-    const { container } = render(<TransferCenter onOpenFiles={() => undefined} onOpenLocation={() => undefined} />);
+    render(<TransferCenter onOpenFiles={() => undefined} onOpenLocation={() => undefined} />);
     const user = userEvent.setup();
     expect(await screen.findByText("1 个上传在上次中断")).toBeTruthy();
-    const input = container.querySelector<HTMLInputElement>(".tc-banner input[type=file]")!;
+    const input = screen.getByRole("status").querySelector<HTMLInputElement>("input[type=file]")!;
     await user.upload(input, new File(["abcd"], "x.mov", { lastModified: 7 }));
     await waitFor(() => expect(tus.uploads).toHaveLength(1));
     expect(tus.uploads[0].options.uploadUrl).toBe("/api/v1/uploads/upload-x");

@@ -5,9 +5,6 @@ package sharesapi
 import (
 	"bytes"
 	"context"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
-	"github.com/zhongwater123/A-NAS/internal/shares"
 	"image"
 	"image/png"
 	"io"
@@ -18,6 +15,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
 type heicBackend struct{ backend }
@@ -27,20 +28,20 @@ func (heicBackend) Capture(ctx context.Context, u shares.User, ids []string, vis
 }
 
 type imageWorker struct {
-	mediaworker.Worker
+	ffmpegworker.Worker
 	image func(context.Context, *os.File, int) ([]byte, error)
 }
 
 func (w imageWorker) Image(ctx context.Context, file *os.File, size int) ([]byte, error) {
 	return w.image(ctx, file, size)
 }
-func previewFixture(t *testing.T, worker mediaworker.Worker) (*shares.Store, http.Handler, shares.Share) {
+func previewFixture(t *testing.T, worker ffmpegworker.Worker) (*shares.Store, http.Handler, shares.Share) {
 	dir := t.TempDir()
 	s, err := shares.Open(filepath.Join(dir, "db"), filepath.Join(dir, "content"), shares.Options{Backend: heicBackend{}, Active: func(context.Context, string) (bool, error) { return true, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	v := published(t, s)
 	return s, NewWithPreview(s, nil, nil, worker), v
 }
@@ -80,7 +81,7 @@ func TestRevokeCancelsHEICConversionAndWithholdsResult(t *testing.T) {
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		r := httptest.NewRequest("GET", PathPrefix+"/"+v.ID+"/entries/"+v.Entries[0].ID+"/preview", nil)
-		r = r.WithContext(WithUser(r.Context(), accounts.User{ID: "b"}))
+		r = r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: "b"}))
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		done <- w

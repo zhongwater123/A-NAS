@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func TestSessionDirectoryResolvesOnlyLiveSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{Now: func() time.Time { return now }})
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{PasswordCost: cheapPasswords, Now: func() time.Time { return now }})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +110,7 @@ func TestSessionDirectoryResolvesActiveAccountsByUID(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{})
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +164,7 @@ func TestSessionThatMustChangeItsPasswordActsOnNoFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{})
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -199,6 +200,58 @@ func TestSessionThatMustChangeItsPasswordActsOnNoFiles(t *testing.T) {
 	}
 	if remembered := service.RememberedSessions(ctx); len(remembered) != 1 || remembered[0].Token != session.Token {
 		t.Fatalf("remembered sessions after change = %#v", remembered)
+	}
+}
+
+// A lookup that fails, here because its caller gave up, must not take the
+// lookups of everyone else sharing the directory down with it (#166): the
+// File Broker, terminals, assistants and the photo service all read through
+// one handle.
+func TestOneFailedSessionLookupLeavesTheOthersWorking(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "control.db")
+	store, err := accounts.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service := accounts.NewService(store, &identityRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
+	if _, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.Authenticate(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := accounts.NewSessionDirectory(path)
+	t.Cleanup(func() { _ = directory.Close() })
+	abandoned, cancel := context.WithCancel(ctx)
+	cancel()
+	failures := make(chan error, 1)
+	var lookups sync.WaitGroup
+	for range 8 {
+		lookups.Go(func() {
+			for range 200 {
+				if _, err := directory.ResolveSessionIdentity(ctx, session.Token); err != nil {
+					select {
+					case failures <- err:
+					default:
+					}
+					return
+				}
+			}
+		})
+	}
+	for range 200 {
+		if _, err := directory.ResolveSessionIdentity(abandoned, session.Token); err == nil || errors.Is(err, accounts.ErrSessionNotFound) {
+			t.Fatalf("abandoned lookup error = %v, want the context's error", err)
+		}
+	}
+	lookups.Wait()
+	select {
+	case err := <-failures:
+		t.Fatalf("a live session's lookup failed beside an abandoned one: %v", err)
+	default:
 	}
 }
 

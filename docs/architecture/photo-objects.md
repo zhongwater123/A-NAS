@@ -1,7 +1,7 @@
 # 相册物体检测与混合检索（切片 18）实施方案
 
-状态：accepted（2026-10-13 用户确认）；全部 10 步已在分支 `feat/photo-objects`（[#83](https://github.com/zhongwater123/A-NAS/pull/83)）实现，尚未部署。阈值文件按官方导出的模型生成，结果见[研究](../research/photo-ai-object-detection.md#官方导出与产品规则2026-10-13)
-更新时间：2026-10-13
+状态：accepted（2026-10-13 用户确认）；全部 10 步已实现（[#83](https://github.com/zhongwater123/A-NAS/pull/83)）。阈值文件按官方导出的模型生成，结果见[研究](../research/photo-ai-object-detection.md#官方导出与产品规则2026-10-13)
+更新时间：2026-10-28
 
 本文把[相册技术设计](photo-library.md)的切片 18 细化为可实现的方案：后台为每张照片检测物体，文搜图把检测结果与照片向量融合，以物体词为主的查询如实说出“检测到”或“没有检测到”，并新增以图搜图。依据见[物体检测与混合检索研究](../research/photo-ai-object-detection.md)；方案复用 M2 的 Worker、持久任务、空闲门控与内置交付（[相册本地 AI](photo-ai.md)、[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
 
@@ -126,13 +126,30 @@ anas-photos ──UDS + 只读 fd──► anas-ai（一个进程）
   - 相册服务启动时在日志中写明读的是哪些 cgroup；不在 systemd 服务中（如开发时直接运行）时退回全系统的压力。
   - 本地栈实测（2026-10-13，开发机 14 个逻辑核，Worker 12 个线程，其他负载空闲）：整理 40 张新照片约 2 分钟，没有一次暂停或取消；`system.slice` 的压力最高 2.0%，整机最高 7.4%。
   - 实机首次运行（2026-10-13）没有达到目标：检测被取消 17 次，每次之后空等至少 1 分钟，Worker 平均只用了约 1 个核（[调查](../investigations/2026-10-13-idle-detection-used-one-core.md)）。[#88](https://github.com/zhongwater123/A-NAS/pull/88) 改为上面的做法（5 秒复查、`anas.slice` 的权重、渲染与推理重叠、线程不自旋），实机复测待部署。
-- **内存**：检测器只在有检测任务时加载；检测队列清空或有人使用设备时，相册服务发 `release` 卸载检测会话（约 380 MiB）。CPU 或 I/O 压力只取消正在进行的检测、不卸载：取消已经让出处理器，卸载后压力一过又要重新加载，压力反复时大部分工作都花在加载上。内存吃紧时卸载全部模型，Worker 随即直接退出，不逐个析构模型（[调查](../investigations/2026-10-13-ai-worker-kept-cancelled-detector-sessions.md)）。向量模型因为搜索要用，保留到现有的 10 分钟空闲超时。内存吃紧指 PSI memory 超过阈值或系统 MemAvailable 低于余量（初值 1.5 GiB，实测后定），此时门控关闭并请求卸载全部模型，之后的搜索重新加载、多等几秒。单元加 `MemoryHigh=1792M` 让内核先回收，`MemoryMax=2G` 保留为硬上限，部署后按两个模型都加载时的 `MemoryPeak` 调整；真实模型的系统测试会打印它。
+- **内存**（2026-10-28 用户确定：和 CPU 一样不设固定预算，闲时有多少用多少，始终留出 1 GiB）：
+  - 检测器只在有检测任务时加载；检测队列清空或有人使用设备时，相册服务发 `release` 卸载检测会话。CPU 或 I/O 压力只取消正在进行的检测、不卸载：取消已经让出处理器，卸载后压力一过又要重新加载，压力反复时大部分工作都花在加载上。向量模型因为搜索要用，保留到现有的 10 分钟空闲超时。
+  - **加载前判断**：后台任务开始前，门控核对“系统 MemAvailable − 还要加载的部分 ≥ 1 GiB”；不满足就以 `memory_for_models` 暂停，每分钟复查，已加载的模型不卸载（卸载并不能让其余模型更早加载）。还要加载的部分是 Worker 报告的总需要减去它的 cgroup 已占用的内存（`anas-ai.service` 的 `memory.current`，没在运行时为 0）。总需要由 Worker 在 `info` 中报告：它启动后（模型已校验、文本编码已加载）自己 cgroup 的内存，加上各模型清单里的 `memoryBytes`。相册服务第一次问 `info` 之前不知道总需要，这一次只按余量判断。
+  - **释放**：MemAvailable 低于 1 GiB 或 PSI memory 超过阈值时，门控以 `memory_low` 或 `memory_pressure` 关闭并请求卸载全部模型，Worker 随即直接退出，不逐个析构模型（[调查](../investigations/2026-10-13-ai-worker-kept-cancelled-detector-sessions.md)），之后的搜索重新加载、多等几秒。
+  - **前台不受限**：搜索、以图搜图等有人在等的请求照常加载所需模型，不经过加载前判断。
+  - **上限只防失控**：单元不再有 `MemoryHigh` 与固定的 `MemoryMax`。安装器按本机内存写入 `anas-ai.service.d/memory-reserve.conf`，`MemoryMax` 为总内存减 2.5 GiB、至少 1 GiB（实验 NAS 7.7 GiB，约 5.0 GiB）。`MemorySwapMax=0`：模型不换出，换出后推理极慢且磁盘持续繁忙；`OOMScoreAdjust=500`：内存真的耗尽时，内核先结束 Worker。
+  - **`memoryBytes` 的测法**：[`ai/eval/worker_memory.py`](../../ai/eval/worker_memory.py) 每次在一个新容器（新 cgroup）里运行，模型文件已在页缓存中，XNNPack 缓存保留，与设备上相同；它按扫描的顺序逐个触发模型，记下 cgroup 内存峰值的增量。清单取实测最大值加约 5%，向上取整到 16 MiB。开发机 14 个逻辑核、推理 12 个线程，NAS 只有 6 个线程，实机应更低。2026-10-28 的结果：
+
+    | 模型 | 增量（cgroup） | 清单 |
+    |---|---|---|
+    | 向量模型的第一张图片（视觉编码；文本部分启动时已加载） | 111–112 MiB | 128 MiB |
+    | 物体检测 D-FINE | 253–254 MiB | 272 MiB |
+    | 人脸检测 YuNet | 4–5 MiB | 16 MiB |
+    | 人脸编码 AuraFace（SFace 相同） | 350–354 MiB | 384 MiB |
+    | 宠物 DINOv2-small | 82–96 MiB | 112 MiB |
+
+    Worker 启动后约占 270 MiB；冷启动时校验模型读入的页缓存也记在它名下，约 695 MiB。全部加载后 cgroup 约 1.0 GiB（冷启动 1.43 GiB），Worker 报告的总需要为 1184 MiB（冷启动 1607 MiB），比实际高约 170 MiB，判断偏向等待。按进程常驻内存（RSS）计各步增量更大，但多出的是映射的模型文件页，它们本已在页缓存中并计入 MemAvailable，不是新占的内存。连续整理多张照片后 Worker 还会再涨：真实模型的系统测试（冷启动、整理数张照片）四次的 `MemoryPeak` 在 0.93–1.75 GiB 之间，最高比逐个模型首次运行的 1.43 GiB 高约 0.3 GiB。加载前判断只管加载这一刻，之后的上涨由释放规则兜底。
+  - 实机待测：部署后记录空闲时的 MemAvailable、Worker 日志里的 `started with … MiB` 与全部加载后的 `MemoryPeak`，与上表对照。
 - **突发请求时**：前台请求关闭门控，不再领取新任务（已有）；正在执行的检测任务被取消并退回队列，不计尝试次数；正在执行的向量任务只能等它完成（用满线程后约 1 秒，实测验证）。前台搜索编码查询时，至多等一个无法取消的向量任务；目标是后台带来的额外等待不超过约 1 秒，达不到再给查询单独一条路径。
 
 ## 交付
 
 - **模型清单** `deploy/models/dfine-m-obj365.json`：来源、revision、文件、大小、SHA-256，并存档许可证全文与作者对 Objects365 权重的声明。
-- **运行环境**：`ai/requirements.lock` 加 `onnxruntime==1.31.0` 与 `protobuf`（wheel 约 24 MB），在 `--no-deps` 下核实没有其他依赖；运行环境 ID 随之变化。
+- **运行环境**：`ai/requirements.txt`（当时为 `requirements.lock`）加 `onnxruntime==1.31.0` 与 `protobuf`（wheel 约 24 MB），在 `--no-deps` 下核实没有其他依赖；运行环境 ID 随之变化。
 - **按角色泛化**：安装器、`remote-activate-release.sh`、`deploy-dev.ps1` 与系统测试从“一个模型”改为按角色处理（`model` 为 litertlm，`detector` 为 onnx，release 中链接为 `ai/detector.onnx` 与 `ai/detector.json`），以后人脸模型只需再加一个角色。
 - **系统测试**：替身检测器文件；模型条目数 1→2、升级检查 2→3；篡改的检测器被拒绝；用替身完成一次检测；沙箱探针照常通过；核对单元的资源限制与安装器写入的 drop-in。为了在测试中看到照片整理完成，相册服务读取 `ANAS_PHOTOS_AI_QUIET_PERIOD`（如 `2s`）缩短空闲期，系统测试经 drop-in 设置，产品不设置。真实模型的运行由 `ANAS_AI_DETECTOR` 指定检测器文件。
 
@@ -156,7 +173,7 @@ anas-photos ──UDS + 只读 fd──► anas-ai（一个进程）
 ## 风险
 
 - 导出的模型与已评估的社区转换不一致；第 2 步是关口。
-- 内存：EmbeddingGemma 在 NAS 上峰值 815 MB，加检测器约 380 MiB，`MemoryMax=2G`；内存超限被杀会消耗任务尝试次数，部署后实测。开发机上真实模型的系统测试（Debian 13 容器，2026-10-13）在两个模型都加载、整理完一张照片后 `MemoryPeak` 为 1.65 GiB，含模型文件的页缓存，低于 `MemoryHigh`（1.75 GiB）但余量不大；同一模型在开发机上的内存本来就比实机高（1.2–1.4 GiB 对 815 MB）。
+- 内存：加载前判断只看清单声明的 `memoryBytes`；声明低于实际时仍可能越过 1 GiB 余量，由释放规则与 `OOMScoreAdjust` 兜底。被内核结束会消耗任务尝试次数。实机数字部署后补充（[资源策略](#资源策略)）。
 - 1200 万像素照片缩到 640 后小物体更小；切片推理待真实照片评估。
 - 2 万张的积压在原来 2 核上限下约需 8–15 小时空闲时间，放开到 6 线程后应明显缩短，以实测为准；最早的照片先处理。
 - 超线程的兄弟核仍会互相拖慢，所以留出一个完整的物理核；向量任务无法中途取消，突发延迟以实测为准。

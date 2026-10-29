@@ -115,7 +115,7 @@ i3-12100 Debian 裸机：真实磁盘、网络、systemd 和破坏性集成测�
 - 已建立隔离的非特权开发用户 `anas-dev`，其独立 home 为 `/home/anas-dev`；
 - WSL 工作区入口为 `~/workspace/A-NAS`，指向 `/mnt/e/A-NAS`；
 - Git、通用编译工具、Python、SQLite、Ansible 和常用检查工具已经就绪；
-- Go 1.27.1 已作为产品服务和 Host Agent 工具链；Web 桌面使用 Node.js 26、npm、React、TypeScript 和 Vite；数据库服务和容器运行时仍等待原型与 ADR。
+- Go 已作为产品服务和 Host Agent 工具链，版本由 `.go-version` 与 `go.mod` 的 `toolchain` 行固定；Web 桌面使用 Node.js 26、npm、React、TypeScript 和 Vite；数据库服务和容器运行时仍等待原型与 ADR。
 
 详细使用方式见 `docs/development/LOCAL_ENVIRONMENT.md`。
 
@@ -132,7 +132,7 @@ logs      收集服务日志和诊断包
 
 ## 5. 建议的软件边界
 
-产品服务和 Host Agent 已确定使用 Go 起步，当前工具链版本为 Go 1.27.1。语言选择不改变既定架构边界：产品层仍保持非特权，Host Agent 仍通过窄而类型化的 IPC 隔离特权操作；硬件集成或本地 AI Runtime 将来可以在显式 Adapter 边界后采用其他语言。
+产品服务和 Host Agent 已确定使用 Go 起步，工具链版本由 `.go-version` 与 `go.mod` 的 `toolchain` 行固定。语言选择不改变既定架构边界：产品层仍保持非特权，Host Agent 仍通过窄而类型化的 IPC 隔离特权操作；硬件集成或本地 AI Runtime 将来可以在显式 Adapter 边界后采用其他语言。
 
 ```text
 浏览器 / 手机端 / 桌面客户端

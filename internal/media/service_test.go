@@ -5,16 +5,22 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/jpeg"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/imagetest"
+	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 )
 
 type testEnv struct {
@@ -22,12 +28,16 @@ type testEnv struct {
 	accounts *accounts.Service
 	files    *files.Service
 	media    *Service
+	catalog  string // the media catalog's path
 	volume   string
 	admin    accounts.User
 	alice    accounts.User
 	bob      accounts.User
 	shared   accounts.Space
 	private  map[string]accounts.Space
+	// clock ticks a second per read until a test sets it; background scans
+	// read it too.
+	clock *clocktest.Clock
 }
 
 type acceptingCredentials struct{}
@@ -92,22 +102,23 @@ func newTestEnv(t *testing.T, processor Processor) *testEnv {
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
 	volume := filepath.Join(t.TempDir(), "volume")
-	fileService := files.NewService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
-	store, err := OpenSQLite(filepath.Join(t.TempDir(), "media.db"))
+	fileService := files.NewLocalService(catalog, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	mediaCatalog := filepath.Join(t.TempDir(), "media.db")
+	store, err := OpenSQLite(mediaCatalog)
 	if err != nil {
 		t.Fatalf("open media store: %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	clock := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	clock := clocktest.Ticking(time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC), time.Second)
 	service, err := NewService(store, Options{
 		Files: fileService, Spaces: accountService, Processor: processor, CacheDir: filepath.Join(t.TempDir(), "cache"),
-		Now: func() time.Time { clock = clock.Add(time.Second); return clock }, ChangeDelay: 10 * time.Millisecond, StreamWait: 200 * time.Millisecond,
+		Now: clock.Now, ChangeDelay: 10 * time.Millisecond, StreamWait: 200 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
 	t.Cleanup(service.Close)
-	env := &testEnv{ctx: ctx, accounts: accountService, files: fileService, media: service, volume: volume, admin: admin, alice: alice, bob: bob, private: map[string]accounts.Space{}}
+	env := &testEnv{ctx: ctx, accounts: accountService, files: fileService, media: service, catalog: mediaCatalog, volume: volume, admin: admin, alice: alice, bob: bob, private: map[string]accounts.Space{}, clock: clock}
 	for _, user := range []accounts.User{admin, alice, bob} {
 		spaces, err := accountService.ListSpaces(ctx, user)
 		if err != nil {
@@ -499,54 +510,43 @@ func TestRescanKeepsRenamedVideosAndDropsRemovedOnes(t *testing.T) {
 	}
 }
 
-func TestPlaybackPicksDirectRemuxOrTranscode(t *testing.T) {
-	mp4 := "mov,mp4,m4a,3gp,3g2,mj2"
-	mkv := "matroska,webm"
+// How a video plays is decided in internal/mediaplay; the media center
+// describes the video and tells the viewer why the original does not play.
+func TestPlaybackExplainsWhyTheOriginalDoesNotPlay(t *testing.T) {
+	mp4, mkv := "mov,mp4,m4a,3gp,3g2,mj2", "matroska,webm"
 	h264 := &VideoStream{Codec: "h264", Height: 1080, PixelFormat: "yuv420p"}
-	hevc := &VideoStream{Codec: "hevc", Height: 2160, PixelFormat: "yuv420p10le"}
 	aac := []AudioStream{{Codec: "aac", Default: true}}
 	ac3 := []AudioStream{{Codec: "ac3", Default: true}, {Codec: "aac"}}
 	cases := []struct {
-		name    string
 		info    MediaInfo
 		file    string
 		caps    Capabilities
 		audio   int
 		quality string
 		mode    string
-		check   func(StreamOptions) bool
+		reason  string
 	}{
-		{name: "mp4", info: MediaInfo{Container: mp4, Video: h264, Audio: aac}, file: "a.mp4", mode: ModeDirect},
-		{name: "Flash MP4", info: MediaInfo{Container: mp4, Video: h264, Audio: aac}, file: "a.f4v", mode: ModeDirect},
-		{name: "mkv in Chromium", info: MediaInfo{Container: mkv, Video: h264, Audio: aac}, file: "a.mkv", caps: Capabilities{Matroska: true}, mode: ModeDirect},
-		{name: "mkv elsewhere", info: MediaInfo{Container: mkv, Video: h264, Audio: aac}, file: "a.mkv", mode: ModeRemux,
-			check: func(o StreamOptions) bool { return o.CopyVideo && o.CopyAudio }},
-		{name: "AC3 audio", info: MediaInfo{Container: mkv, Video: h264, Audio: ac3}, file: "a.mkv", caps: Capabilities{Matroska: true}, mode: ModeRemux,
-			check: func(o StreamOptions) bool { return o.CopyVideo && !o.CopyAudio && o.AudioTrack == 0 }},
-		{name: "second audio track", info: MediaInfo{Container: mp4, Video: h264, Audio: ac3}, file: "a.mp4", caps: Capabilities{AC3: true}, audio: 1, mode: ModeRemux,
-			check: func(o StreamOptions) bool { return o.AudioTrack == 1 && o.CopyAudio }},
-		{name: "HEVC without support", info: MediaInfo{Container: mkv, Video: hevc, Audio: aac}, file: "a.mkv", mode: ModeTranscode,
-			check: func(o StreamOptions) bool { return !o.CopyVideo && o.Height == 0 }},
-		{name: "HEVC with support", info: MediaInfo{Container: mkv, Video: hevc, Audio: aac}, file: "a.mkv", caps: Capabilities{HEVC: true}, mode: ModeRemux,
-			check: func(o StreamOptions) bool { return o.CopyVideo && o.HEVC }},
-		{name: "AVI", info: MediaInfo{Container: "avi", Video: &VideoStream{Codec: "mpeg4", Height: 480}, Audio: []AudioStream{{Codec: "mp3"}}}, file: "a.avi", mode: ModeTranscode},
-		{name: "lower quality", info: MediaInfo{Container: mp4, Video: h264, Audio: aac}, file: "a.mp4", quality: "720p", mode: ModeTranscode,
-			check: func(o StreamOptions) bool { return o.Height == 720 && o.MaxBitrate == 4000 }},
-		{name: "quality above the source", info: MediaInfo{Container: mp4, Video: &VideoStream{Codec: "h264", Height: 720}, Audio: aac}, file: "a.mp4", quality: "1080p", mode: ModeDirect},
-		{name: "10-bit H.264", info: MediaInfo{Container: mp4, Video: &VideoStream{Codec: "h264", Height: 1080, PixelFormat: "yuv420p10le"}, Audio: aac}, file: "a.mp4", mode: ModeTranscode},
+		{MediaInfo{Container: mp4, Video: h264, Audio: aac}, "a.mp4", Capabilities{}, -1, QualityOriginal, ModeDirect, ""},
+		{MediaInfo{Container: mkv, Video: h264, Audio: aac}, "a.mkv", Capabilities{}, -1, QualityOriginal, ModeRemux, "浏览器不支持此封装格式，正在转换封装"},
+		{MediaInfo{Container: mkv, Video: h264, Audio: ac3}, "a.mkv", Capabilities{Matroska: true}, -1, QualityOriginal, ModeRemux, "浏览器无法播放 AC3 音频，正在转换音频"},
+		{MediaInfo{Container: mp4, Video: h264, Audio: ac3}, "a.mp4", Capabilities{AC3: true}, 1, QualityOriginal, ModeRemux, "切换音轨需要转换封装"},
+		{MediaInfo{Container: "avi", Video: &VideoStream{Codec: "mpeg4", Height: 480}}, "a.avi", Capabilities{}, -1, QualityOriginal, ModeTranscode, "浏览器无法解码此视频，正在实时转码"},
+		{MediaInfo{Container: mp4, Video: h264, Audio: aac}, "a.mp4", Capabilities{}, -1, "720p", ModeTranscode, "已切换到 720p"},
+		{MediaInfo{Container: mp4, Video: &VideoStream{Codec: "hevc"}, Audio: aac}, "clip.3GP", Capabilities{HEVC: true}, -1, QualityOriginal, ModeRemux, "浏览器不支持此封装格式，正在转换封装"},
+		{MediaInfo{Container: mp4, Video: &VideoStream{Codec: "hevc"}, Audio: aac}, "clip.3g2", Capabilities{HEVC: true}, -1, QualityOriginal, ModeRemux, "浏览器不支持此封装格式，正在转换封装"},
+		{MediaInfo{Container: mkv, Video: h264, Audio: []AudioStream{{Default: true}}}, "a.mkv", Capabilities{Matroska: true}, -1, QualityOriginal, ModeRemux, "浏览器无法播放此音频，正在转换音频"},
 	}
 	for _, test := range cases {
-		if test.quality == "" {
-			test.quality = QualityOriginal
+		source, choice := playSource(test.info, test.file), playChoice(test.audio, test.quality)
+		decision := mediaplay.Decide(source, test.caps, choice)
+		if got := reason(decision, source, choice); decision.Mode != test.mode || got != test.reason {
+			t.Errorf("%s %+v: %s %q, want %s %q", test.file, test.info, decision.Mode, got, test.mode, test.reason)
 		}
-		audio := test.audio
-		if audio == 0 && test.name != "AC3 audio" {
-			audio = -1
-		}
-		got := decide(test.info, test.file, test.caps, audio, test.quality)
-		if got.mode != test.mode || test.check != nil && !test.check(got.options) {
-			t.Errorf("%s: decide() = %s %+v, want %s", test.name, got.mode, got.options, test.mode)
-		}
+	}
+	// Converting the original keeps its size up to 2160 lines.
+	film := MediaInfo{Container: "avi", Video: &VideoStream{Codec: "mpeg4", Height: 2160}}
+	if stream := mediaplay.Decide(playSource(film, "a.avi"), Capabilities{}, playChoice(-1, QualityOriginal)).Stream; stream.Height != 2160 || stream.MaxBitrate != 0 {
+		t.Errorf("converting the original = %+v", stream)
 	}
 	if got := availableQualities(MediaInfo{Video: &VideoStream{Height: 1080}}); strings.Join(got, ",") != "original,720p,480p" {
 		t.Errorf("qualities for 1080p = %v", got)
@@ -601,6 +601,186 @@ func TestStreamsSubtitlesAndArtworkGoThroughTheProcessor(t *testing.T) {
 	if _, err := env.media.Artwork(env.ctx, env.bob, id, "poster"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("poster without one: %v", err)
 	}
+}
+
+// postered scans a movie library holding a film for each poster and returns
+// the films' title IDs by title.
+func postered(t *testing.T, env *testEnv, posters map[string][]byte) map[string]string {
+	t.Helper()
+	for name, poster := range posters {
+		env.write(t, env.shared, "电影/"+name+".mkv", "video")
+		env.write(t, env.shared, "电影/"+name+"-poster.jpg", string(poster))
+	}
+	env.library(t, env.admin, env.shared, LibraryMovies, "电影")
+	movies, err := env.media.Titles(env.ctx, env.bob, TitleQuery{Category: "movie"})
+	if err != nil || movies.Total != len(posters) {
+		t.Fatalf("Titles() = %+v, %v", movies.Items, err)
+	}
+	ids := map[string]string{}
+	for _, movie := range movies.Items {
+		if !movie.Artwork.Poster {
+			t.Fatalf("%s has no poster", movie.Title)
+		}
+		ids[movie.Title] = movie.ID
+	}
+	return ids
+}
+
+func jpegPoster(t *testing.T, width, height int) []byte {
+	t.Helper()
+	var poster bytes.Buffer
+	if err := jpeg.Encode(&poster, image.NewGray(image.Rect(0, 0, width, height)), nil); err != nil {
+		t.Fatal(err)
+	}
+	return poster.Bytes()
+}
+
+func waitUntil(t *testing.T, what string, done func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); !done(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
+func TestArtworkTheDecoderPanicsOnIsNotFound(t *testing.T) {
+	panics := imagetest.LoggedPanics(t)
+	env := newTestEnv(t, nil)
+	id := postered(t, env, map[string][]byte{"Heat (1995)": imagetest.PanickingPicture()})["Heat"]
+	if _, err := env.media.Artwork(env.ctx, env.bob, id, "poster"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Artwork() error = %v, want ErrNotFound", err)
+	}
+	imagetest.RequirePanicLogged(t, panics(), "media artwork", "Heat", "电影")
+	// The panicking decode gave its pixels back.
+	if !env.media.decoding.TryAcquire(maxArtworkPixels) {
+		t.Fatal("the decode budget is still held after the panic")
+	}
+	env.media.decoding.Release(maxArtworkPixels)
+
+	// The version is remembered: the file now holds a good picture, but
+	// until the catalog sees the change it is not read again.
+	env.write(t, env.shared, "电影/Heat (1995)-poster.jpg", string(jpegPoster(t, 60, 90)))
+	if _, err := env.media.Artwork(env.ctx, env.bob, id, "poster"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Artwork() of a version remembered as undecodable = %v, want ErrNotFound", err)
+	}
+	// A new version is decoded.
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(filepath.Join(env.spaceRoot(env.shared), "电影", "Heat (1995)-poster.jpg"), later, later); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.files.Tree(env.ctx, env.admin, env.shared.ID, env.folder(t, env.admin, env.shared, "电影")); err != nil {
+		t.Fatal(err)
+	}
+	served, err := env.media.Artwork(env.ctx, env.bob, id, "poster")
+	if err != nil {
+		t.Fatalf("Artwork() of the replaced picture = %v", err)
+	}
+	_ = served.File.Close()
+
+	// A restart forgets what could not be decoded, in case the decoder or
+	// this code has been fixed.
+	restarted, err := NewService(env.media.store, Options{Files: env.files, Spaces: env.accounts, CacheDir: env.media.cacheDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(restarted.Close)
+	cached, err := os.ReadDir(filepath.Join(env.media.cacheDir, "artwork"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range cached {
+		if strings.Contains(entry.Name(), "--undecodable-") {
+			t.Fatalf("%s is still in the cache after a restart", entry.Name())
+		}
+	}
+}
+
+func TestArtworkDecodesShareAPixelBudget(t *testing.T) {
+	env := newTestEnv(t, nil)
+	ids := postered(t, env, map[string][]byte{
+		"Heat (1995)":  imagetest.HeldPicture(6000, 5000), // 30 MP
+		"Up (2009)":    imagetest.HeldPicture(6000, 5000),
+		"Alien (1979)": imagetest.HeldPicture(4000, 2500), // 10 MP
+	})
+	results := make(chan error, len(ids))
+	request := func(title string) {
+		go func() {
+			served, err := env.media.Artwork(env.ctx, env.bob, ids[title], "poster")
+			if err == nil {
+				_ = served.File.Close()
+			}
+			results <- err
+		}()
+	}
+
+	request("Heat")
+	waitUntil(t, "Heat to decode", func() bool { return imagetest.HeldDecoding() == 1 })
+	// 60 MP do not fit: Up waits for Heat.
+	request("Up")
+	waitUntil(t, "Up to wait", func() bool { return env.media.decodeWaiting.Load() == 1 })
+	if decoding := imagetest.HeldDecoding(); decoding != 1 {
+		t.Fatalf("%d posters decode at once, want 1 of the two 30 MP ones", decoding)
+	}
+	imagetest.ReleaseHeld()
+	waitUntil(t, "Up to decode", func() bool { return env.media.decodeWaiting.Load() == 0 && imagetest.HeldDecoding() == 1 })
+	// 40 MP fit: Alien decodes beside Up.
+	request("Alien")
+	waitUntil(t, "Alien to decode beside Up", func() bool { return imagetest.HeldDecoding() == 2 })
+	imagetest.ReleaseHeld()
+	imagetest.ReleaseHeld()
+	for range len(ids) {
+		if err := <-results; err != nil {
+			t.Fatalf("Artwork() = %v", err)
+		}
+	}
+	if !env.media.decoding.TryAcquire(maxArtworkPixels) {
+		t.Fatal("the decodes did not give their pixels back")
+	}
+}
+
+func TestArtworkWaitsEndWithTheirRequestsAndAreBounded(t *testing.T) {
+	env := newTestEnv(t, nil)
+	id := postered(t, env, map[string][]byte{"Heat (1995)": jpegPoster(t, 60, 90)})["Heat"]
+	env.media.maxDecodeWaiting = 2
+	if !env.media.decoding.TryAcquire(maxArtworkPixels) {
+		t.Fatal("the decode budget is not free")
+	}
+	waiting, cancel := context.WithCancel(env.ctx)
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := env.media.Artwork(waiting, env.bob, id, "poster")
+			results <- err
+		}()
+	}
+	waitUntil(t, "two requests to wait", func() bool { return env.media.decodeWaiting.Load() == 2 })
+	if _, err := env.media.Artwork(env.ctx, env.bob, id, "poster"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("Artwork() with the queue full = %v, want ErrBusy", err)
+	}
+	cancel()
+	for range 2 {
+		if err := <-results; !errors.Is(err, context.Canceled) {
+			t.Fatalf("Artwork() whose request ended while waiting = %v, want context.Canceled", err)
+		}
+	}
+	env.media.decoding.Release(maxArtworkPixels)
+
+	served, err := env.media.Artwork(env.ctx, env.bob, id, "poster")
+	if err != nil {
+		t.Fatalf("Artwork() with the budget free = %v", err)
+	}
+	_ = served.File.Close()
+	// A cached poster is not decoded, so it needs no budget.
+	if !env.media.decoding.TryAcquire(maxArtworkPixels) {
+		t.Fatal("the decode did not give its pixels back")
+	}
+	served, err = env.media.Artwork(env.ctx, env.bob, id, "poster")
+	if err != nil {
+		t.Fatalf("cached Artwork() with no budget free = %v", err)
+	}
+	_ = served.File.Close()
+	env.media.decoding.Release(maxArtworkPixels)
 }
 
 func TestWebChangesRescanTheLibrariesOfTheirSpace(t *testing.T) {
@@ -673,6 +853,16 @@ func TestRenamingAVideoRenamesItsFilesAndKeepsItsProgress(t *testing.T) {
 	if _, err := env.media.RenameVideo(env.ctx, env.alice, id, "超凡蜘蛛侠2.txt"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("renaming without a video extension error = %v, want ErrInvalid", err)
 	}
+	// The file manager's rules for new names apply, also to the files
+	// renamed with it (#222).
+	for name, want := range map[string]error{"超凡蜘蛛侠2: 决战.mkv": files.ErrNameNotPortable, "a/b.mkv": files.ErrInvalidName, ".hidden.mkv": ErrInvalid} {
+		if _, err := env.media.RenameVideo(env.ctx, env.alice, id, name); !errors.Is(err, want) {
+			t.Fatalf("renaming to %q error = %v, want %v", name, err, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(env.spaceRoot(env.shared), "电影", old+".chs.srt")); err != nil {
+		t.Fatalf("a refused rename moved the subtitles: %v", err)
+	}
 	detail, err := env.media.RenameVideo(env.ctx, env.alice, id, "超凡蜘蛛侠2 (2014).mkv")
 	if err != nil || detail.File.Name != "超凡蜘蛛侠2 (2014).mkv" {
 		t.Fatalf("RenameVideo() = %+v, %v", detail.File, err)
@@ -718,6 +908,34 @@ func TestRenamingAVideoRenamesItsFilesAndKeepsItsProgress(t *testing.T) {
 	}
 }
 
+// A stream asked for after the original failed to play converts the picture
+// fully, keeping the original's size up to 2160 lines, and copies the sound
+// the browser plays.
+func TestAFailedOriginalStreamsAsAFullConversion(t *testing.T) {
+	processor := &fakeProcessor{}
+	env := newTestEnv(t, processor)
+	env.write(t, env.shared, "电影/Heat (1995).mp4", video("mov,mp4,m4a,3gp,3g2,mj2", "h264", "aac", 1080, 10200))
+	env.library(t, env.admin, env.shared, LibraryMovies, "电影")
+	env.media.processPending(withSessions(t, env))
+	movies, _ := env.media.Titles(env.ctx, env.bob, TitleQuery{Category: "movie"})
+	if movies.Total != 1 {
+		t.Fatalf("movies = %+v", movies)
+	}
+	id := movies.Items[0].ID
+	if playback, err := env.media.Playback(env.ctx, env.bob, id, Capabilities{}, -1, ""); err != nil || playback.Mode != ModeDirect {
+		t.Fatalf("Playback() = %+v, %v; want the original", playback, err)
+	}
+	stream, err := env.media.Stream(env.ctx, env.bob, id, StreamRequest{Mode: ModeTranscode, Start: 30, Audio: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = stream.Close()
+	if options := processor.streams[0]; options.CopyVideo || !options.CopyAudio || options.AudioTrack != 0 ||
+		options.Height != 2160 || options.MaxBitrate != 0 || options.Start != 30 {
+		t.Fatalf("stream options = %+v; want a full conversion of the picture with the sound copied", options)
+	}
+}
+
 func TestASeekWaitsForTheStreamItReplaces(t *testing.T) {
 	env := newTestEnv(t, &fakeProcessor{})
 	env.write(t, env.shared, "电影/Heat (1995).mkv", video("matroska,webm", "h264", "ac3", 1080, 10200))
@@ -755,25 +973,6 @@ func TestASeekWaitsForTheStreamItReplaces(t *testing.T) {
 	}
 	_ = second.Close()
 	_ = third.Close()
-}
-
-func TestConvertedStreamsNameTheirCodecs(t *testing.T) {
-	h264 := &VideoStream{Codec: "h264", Height: 1080}
-	hevc := &VideoStream{Codec: "hevc", Height: 2160}
-	cases := []struct {
-		info    MediaInfo
-		options StreamOptions
-		want    string
-	}{
-		{MediaInfo{Video: h264, Audio: []AudioStream{{Codec: "ac3"}}}, StreamOptions{CopyVideo: true, AudioTrack: 0}, `video/mp4; codecs="avc1.640033,mp4a.40.2"`},
-		{MediaInfo{Video: hevc, Audio: []AudioStream{{Codec: "mp3"}}}, StreamOptions{CopyVideo: true, HEVC: true, CopyAudio: true, AudioTrack: 0}, `video/mp4; codecs="hvc1.1.6.L153.B0,mp4a.69"`},
-		{MediaInfo{Video: hevc}, StreamOptions{AudioTrack: -1}, `video/mp4; codecs="avc1.640033"`},
-	}
-	for _, test := range cases {
-		if got := streamMime(test.info, test.options); got != test.want {
-			t.Errorf("streamMime(%+v) = %s, want %s", test.options, got, test.want)
-		}
-	}
 }
 
 // A name another show holds is a conflict before anything else: right after
@@ -920,5 +1119,47 @@ func TestRenamingAShowRenamesItsFolderAndEpisodesAndKeepsItsID(t *testing.T) {
 	loose := waitForShow("影视")
 	if _, err := env.media.RenameShow(env.ctx, env.admin, loose.ID, "某部剧"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("renaming a show with nothing to rename: %v, want ErrInvalid", err)
+	}
+}
+
+// heldTree counts the trees a scan reads and holds each until release.
+type heldTree struct {
+	Files
+	reached chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (h *heldTree) Tree(ctx context.Context, actor accounts.User, spaceID, directoryID string) ([]files.TreeEntry, error) {
+	h.calls.Add(1)
+	h.reached <- struct{}{}
+	<-h.release
+	return h.Files.Tree(ctx, actor, spaceID, directoryID)
+}
+
+// Opening the media center, as its 20-second refresh does, while a library
+// is being scanned does not queue another scan: a library that takes longer
+// than staleScan would otherwise scan for as long as the window is open
+// (#167).
+func TestRefreshLeavesAScanInProgressAlone(t *testing.T) {
+	env := newTestEnv(t, nil)
+	env.write(t, env.shared, "电影/Heat (1995).mkv", "video")
+	library := env.library(t, env.admin, env.shared, LibraryMovies, "电影")
+	held := &heldTree{Files: env.media.files, reached: make(chan struct{}, 10), release: make(chan struct{})}
+	env.media.files = held
+	later := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	env.clock.Set(later)
+
+	env.media.RefreshStale(env.ctx, env.admin)
+	<-held.reached
+	for range 5 {
+		later = later.Add(3 * time.Minute)
+		env.clock.Set(later)
+		env.media.RefreshStale(env.ctx, env.admin)
+	}
+	close(held.release)
+	env.media.background.Wait()
+	if calls := held.calls.Load(); calls != 1 {
+		t.Fatalf("refreshing during a scan of %s read its folder %d times, want 1", library.Name, calls)
 	}
 }

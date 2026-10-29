@@ -6,10 +6,12 @@ answers deterministically:
                                 "{{album}}" in them become the first such ID in an
                                 earlier tool result of the conversation
   user "SLEEP <seconds>"     -> "ok" after that many seconds (a long model call)
+  user "SAY <text> END"      -> that text as the answer; a backslash and n make a line break
   last message is a tool result -> text echoing the start of that result
   anything else              -> "ok"
 The log also counts the image parts a request carried (#113).
 """
+import contextlib
 import json
 import os
 import re
@@ -42,15 +44,18 @@ def decide(messages):
                         if t.startswith("REVIEW CALL ")), "")
         if planned:
             return decide([{"role": "user", "content": planned[len("REVIEW "):]}])
+    if said.startswith("[IMPORTANT: You are running as a scheduled cron job"):
+        # A scheduled job's prompt comes after Hermes's cron hint (cron/scheduler_prompt.py).
+        planned = re.search(r"^(?:CALL|SAY) .*$", said, re.MULTILINE)
+        if planned:
+            said = planned.group(0)
     if said.startswith("CALL "):
         _, name, *rest = said.split(" ", 2)
         args = rest[0] if rest else "{}"
         # Hermes appends system notes to some user messages (a first turn, changed skills);
         # the arguments are only the JSON object the line starts with.
-        try:
+        with contextlib.suppress(ValueError):
             args = json.dumps(json.JSONDecoder().raw_decode(args)[0], ensure_ascii=False)
-        except ValueError:
-            pass
         for kind in ("photo", "album"):
             if "{{" + kind + "}}" in args:
                 found = [m for msg in messages if msg.get("role") == "tool"
@@ -59,6 +64,10 @@ def decide(messages):
         return {"tool": name, "args": args}
     if said.startswith("SLEEP "):
         return {"text": "ok", "sleep": float(said.split()[1])}
+    if said.startswith("SAY "):
+        # An answer written out up to " END" (Hermes appends notes to some user messages),
+        # a literal \n also making a line break.
+        return {"text": said[4:].split(" END", 1)[0].replace("\\n", "\n")}
     return {"text": "ok"}
 
 
@@ -147,5 +156,5 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 if os.path.exists(SOCK):
     os.unlink(SOCK)
 with Server(SOCK, Handler) as server:
-    os.chmod(SOCK, 0o666)
+    os.chmod(SOCK, 0o666)  # noqa: S103  the sandboxed assistant connects as another user
     server.serve_forever()

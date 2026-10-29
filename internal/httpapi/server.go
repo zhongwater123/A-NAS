@@ -1,14 +1,18 @@
-// Package httpapi exposes read-only A-NAS product endpoints over HTTP.
+// Package httpapi composes the product API: the route table and the guard
+// that enforces each route's posture (routes.go), setting up the device,
+// signing in and sessions (product.go), the terminal and the host state
+// (this file). Each domain's own routes live in its internal/<domain>api
+// package.
 package httpapi
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
 type handler struct {
@@ -16,6 +20,9 @@ type handler struct {
 	dataSource     DataSource
 	productVersion string
 	logger         *slog.Logger
+	// dataVolumeExpected says a data volume was created, so the health
+	// assessment can tell an offline volume from none; nil means none.
+	dataVolumeExpected func() bool
 }
 
 type DataSource string
@@ -25,7 +32,7 @@ const (
 	DataSourceLive      DataSource = "live"
 )
 
-func New(reader hoststate.Observer, dataSource DataSource, productVersion string, logger *slog.Logger) http.Handler {
+func newStateHandler(reader hoststate.Observer, dataSource DataSource, productVersion string, logger *slog.Logger) *handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -37,25 +44,37 @@ func New(reader hoststate.Observer, dataSource DataSource, productVersion string
 	}
 }
 
+// assess rates the observed system (docs/specs/system-health.md).
+func (h *handler) assess(state hoststate.State) systemHealth {
+	expected := hoststate.Expectations{DataVolume: h.dataVolumeExpected != nil && h.dataVolumeExpected()}
+	health, findings := hoststate.Assess(state, expected)
+	items := make([]healthFindingResponse, len(findings))
+	for i, finding := range findings {
+		items[i] = healthFindingResponse{Code: finding.Code, Severity: finding.Severity, DiskID: finding.DiskID.String(), Value: finding.Value}
+	}
+	return systemHealth{health: health, findings: items}
+}
+
+type systemHealth struct {
+	health   hoststate.Health
+	findings []healthFindingResponse
+}
+
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
-	case "/healthz", "/api/v1/system", "/api/v1/disks", "/api/v1/host-state", "/api/v1/metrics", "/api/v1/task-manager/device", "/api/v1/task-manager/tasks":
+	case "/healthz", "/api/v1/system", "/api/v1/disks", "/api/v1/host-state", "/api/v1/metrics":
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
-			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
 	default:
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
 
-	if r.URL.Path == "/api/v1/task-manager/device" || r.URL.Path == "/api/v1/task-manager/tasks" {
-		h.handleTaskManager(w, r)
-		return
-	}
 	if r.URL.Path == "/healthz" {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		httpjson.Write(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
 	if r.URL.Path == "/api/v1/system" {
@@ -64,7 +83,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.writeStateUnavailable(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, systemResponse{
+		assessed := h.assess(state)
+		httpjson.Write(w, http.StatusOK, systemResponse{
 			ID:       state.System.ID.String(),
 			Hostname: state.System.Hostname,
 			OperatingSystem: operatingSystemResponse{
@@ -73,7 +93,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 			Architecture:   state.System.Architecture,
 			UptimeSeconds:  state.System.UptimeSeconds,
-			Health:         state.System.Health,
+			Health:         assessed.health,
+			HealthFindings: assessed.findings,
+			Storage:        mapSystemStorage(state.System.Storage),
 			ProductVersion: h.productVersion,
 			ObservedAt:     state.ObservedAt.UTC().Format(time.RFC3339),
 		})
@@ -90,7 +112,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			items[i] = mapDisk(disk)
 		}
 		sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
-		writeJSON(w, http.StatusOK, disksResponse{
+		httpjson.Write(w, http.StatusOK, disksResponse{
 			ObservedAt: state.ObservedAt.UTC().Format(time.RFC3339),
 			Items:      items,
 		})
@@ -100,12 +122,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		metrics, err := h.reader.ReadMetrics(r.Context())
 		if err != nil {
 			h.logger.ErrorContext(r.Context(), "host metrics read failed", "path", r.URL.Path, "error", err)
-			writeError(w, http.StatusServiceUnavailable, "metrics_unavailable", "host metrics are unavailable")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "metrics_unavailable", "host metrics are unavailable")
 			return
 		}
 		// Utilisation changes every poll; intermediaries must not reuse it.
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusOK, metricsResponse{
+		httpjson.Write(w, http.StatusOK, metricsResponse{
 			DataSource: h.dataSource,
 			ObservedAt: metrics.ObservedAt.UTC().Format(time.RFC3339),
 			CPU:        cpuMetricsResponse{UsagePercent: metrics.CPU.UsagePercent, LogicalCores: metrics.CPU.LogicalCores},
@@ -123,11 +145,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.writeStateUnavailable(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, hostStateResponse{
+		httpjson.Write(w, http.StatusOK, hostStateResponse{
 			DataSource:     h.dataSource,
 			ProductVersion: h.productVersion,
 			ObservedAt:     state.ObservedAt.UTC().Format(time.RFC3339),
-			System:         mapSystem(state.System),
+			System:         mapSystem(state.System, h.assess(state)),
 			Disks:          mapDisks(state.Disks),
 		})
 		return
@@ -136,7 +158,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) writeStateUnavailable(w http.ResponseWriter, r *http.Request, err error) {
 	h.logger.ErrorContext(r.Context(), "host state read failed", "path", r.URL.Path, "error", err)
-	writeError(w, http.StatusServiceUnavailable, "state_unavailable", "host state is unavailable")
+	httpjson.WriteError(w, http.StatusServiceUnavailable, "state_unavailable", "host state is unavailable")
 }
 
 type operatingSystemResponse struct {
@@ -151,8 +173,10 @@ type systemResponse struct {
 	Architecture    string                  `json:"architecture"`
 	UptimeSeconds   uint64                  `json:"uptimeSeconds"`
 	Health          hoststate.Health        `json:"health"`
+	HealthFindings  []healthFindingResponse `json:"healthFindings"`
 	ProductVersion  string                  `json:"productVersion"`
 	ObservedAt      string                  `json:"observedAt"`
+	Storage         *systemStorageResponse  `json:"storage,omitempty"`
 }
 
 type systemStateResponse struct {
@@ -162,6 +186,28 @@ type systemStateResponse struct {
 	Architecture    string                  `json:"architecture"`
 	UptimeSeconds   uint64                  `json:"uptimeSeconds"`
 	Health          hoststate.Health        `json:"health"`
+	HealthFindings  []healthFindingResponse `json:"healthFindings"`
+	Storage         *systemStorageResponse  `json:"storage,omitempty"`
+}
+
+type systemStorageResponse struct {
+	TotalBytes     uint64 `json:"totalBytes"`
+	AvailableBytes uint64 `json:"availableBytes"`
+}
+
+func mapSystemStorage(usage *hoststate.StorageUsage) *systemStorageResponse {
+	if usage == nil {
+		return nil
+	}
+	return &systemStorageResponse{TotalBytes: usage.TotalBytes, AvailableBytes: usage.AvailableBytes}
+}
+
+// healthFindingResponse is one reason the system is not plainly healthy.
+type healthFindingResponse struct {
+	Code     hoststate.FindingCode `json:"code"`
+	Severity hoststate.Health      `json:"severity"`
+	DiskID   string                `json:"diskId,omitempty"`
+	Value    *int64                `json:"value,omitempty"`
 }
 
 type diskResponse struct {
@@ -217,7 +263,7 @@ type networkMetricsResponse struct {
 	TransmitBytesPerSecond uint64 `json:"transmitBytesPerSecond"`
 }
 
-func mapSystem(system hoststate.System) systemStateResponse {
+func mapSystem(system hoststate.System, assessed systemHealth) systemStateResponse {
 	return systemStateResponse{
 		ID:       system.ID.String(),
 		Hostname: system.Hostname,
@@ -225,9 +271,11 @@ func mapSystem(system hoststate.System) systemStateResponse {
 			Name:    system.OperatingSystem.Name,
 			Version: system.OperatingSystem.Version,
 		},
-		Architecture:  system.Architecture,
-		UptimeSeconds: system.UptimeSeconds,
-		Health:        system.Health,
+		Architecture:   system.Architecture,
+		UptimeSeconds:  system.UptimeSeconds,
+		Health:         assessed.health,
+		HealthFindings: assessed.findings,
+		Storage:        mapSystemStorage(system.Storage),
 	}
 }
 
@@ -246,9 +294,13 @@ func mapDisk(disk hoststate.Disk) diskResponse {
 		filesystems = []string{}
 	}
 	reasons := make([]string, 0, 4)
-	if disk.Role == hoststate.DiskRoleSystem {
+	for _, issue := range disk.ObservationIssues {
+		reasons = append(reasons, string(issue))
+	}
+	switch disk.Role {
+	case hoststate.DiskRoleSystem:
 		reasons = append(reasons, "system_disk")
-	} else if disk.Role == hoststate.DiskRoleData {
+	case hoststate.DiskRoleData:
 		reasons = append(reasons, "data_volume")
 	}
 	if disk.Transport == hoststate.TransportUSB || disk.Transport == hoststate.TransportUnknown {
@@ -267,26 +319,5 @@ func mapDisk(disk hoststate.Disk) diskResponse {
 		Role: disk.Role, Health: disk.Health, SMARTStatus: disk.SMARTStatus,
 		Eligible:          len(reasons) == 0 && disk.Role == hoststate.DiskRoleUnassigned,
 		IneligibleReasons: reasons, TemperatureCelsius: disk.TemperatureCelsius,
-	}
-}
-
-type errorDetail struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-type errorResponse struct {
-	Error errorDetail `json:"error"`
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, errorResponse{Error: errorDetail{Code: code, Message: message}})
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		panic(err)
 	}
 }

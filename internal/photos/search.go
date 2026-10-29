@@ -107,8 +107,15 @@ type searchHit struct {
 }
 
 // A candidate's tags are its user tags joined by unit separators; when is its
-// capture time, or its import time without one.
-type candidate struct{ id, objectID, libraryID, name, tags, when string }
+// capture time, or its import time without one. A video takes no part in
+// AI and is matched by name and user tags only.
+type candidate struct {
+	id, objectID, libraryID, name, tags, when string
+	video                                     bool
+}
+
+// inLocalAI is the rule of inLocalAI(objectID) on a candidate already read.
+func (c candidate) inLocalAI() bool { return !c.video }
 
 // Search returns photos matching the query by name or meaning. Trashed photos
 // are never included.
@@ -132,7 +139,7 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 		}
 		args = []any{request.Library}
 	}
-	candidates, err := s.searchCandidates(ctx, args)
+	candidates, err := s.searchCandidates(ctx, p, args)
 	if err != nil {
 		return SearchPage{}, err
 	}
@@ -157,32 +164,43 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 		hits = newestHits(candidates)
 		page.Semantic = true
 		page.Closest = len(hits)
-	} else if hits, err = s.queryHits(ctx, cmp.Or(rest, query), candidates, &page); err != nil {
-		return SearchPage{}, err
+	} else {
+		text := cmp.Or(rest, query)
+		queryVector, model := s.embedQuery(ctx, text)
+		// The vector index answers the same question in the background;
+		// only a first page without people compares like with like.
+		var shadow *shadowQuery
+		if after == nil && len(names) == 0 {
+			shadow = s.newShadowQuery(queryVector, model, args)
+		}
+		if hits, err = s.queryHits(ctx, text, queryVector, model, candidates, &page, shadow); err != nil {
+			return SearchPage{}, err
+		}
+		s.shadowSearch(shadow)
 	}
-	page.Assets, page.Next, err = s.hitPage(ctx, p, hits, after, request.Limit)
+	page.Assets, page.Next, err = s.hitPage(ctx, p, args, hits, after, request.Limit)
 	if err != nil {
 		return SearchPage{}, err
 	}
 	return page, nil
 }
 
-// searchCandidates lists the untrashed photos of the libraries in scope with
-// their user tags.
-func (s *Service) searchCandidates(ctx context.Context, scope []any) ([]candidate, error) {
+// searchCandidates lists the photos listed to p in the libraries of scope,
+// with their user tags.
+func (s *Service) searchCandidates(ctx context.Context, p Principal, scope []any) ([]candidate, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.object_id, a.library_id, a.name, IFNULL(group_concat(t.name, char(31)), ''),
-  IFNULL(a.taken_at, a.imported_at)
+  IFNULL(a.taken_at, a.imported_at), NOT `+notVideo("a.object_id")+`
 FROM assets a LEFT JOIN user_tags t ON t.asset_id = a.id
-WHERE a.trashed_at IS NULL AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
+WHERE `+listedAssets(p, "a")+` AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
 GROUP BY a.id`, scope...)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.id, &c.objectID, &c.libraryID, &c.name, &c.tags, &c.when); err != nil {
-			_ = rows.Close()
+		if err := rows.Scan(&c.id, &c.objectID, &c.libraryID, &c.name, &c.tags, &c.when, &c.video); err != nil {
 			return nil, err
 		}
 		candidates = append(candidates, c)
@@ -191,9 +209,10 @@ GROUP BY a.id`, scope...)
 }
 
 // hitPage returns the page of ranked hits after the cursor and the cursor of
-// the next page, with duplicate hints. A photo trashed since the candidates
-// were read drops out.
-func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, after *searchHit, limit int) ([]Asset, string, error) {
+// the next page, with duplicate hints. Index hits grant nothing: a photo
+// outside the libraries of scope, trashed since the candidates were read, or
+// hidden from p by the asset rules drops out.
+func (s *Service) hitPage(ctx context.Context, p Principal, scope []any, hits []searchHit, after *searchHit, limit int) ([]Asset, string, error) {
 	if after != nil {
 		start, _ := slices.BinarySearchFunc(hits, *after, compareHits)
 		if start < len(hits) && hits[start] == *after {
@@ -217,7 +236,8 @@ func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, af
 		ids[i] = hit.id
 	}
 	records, err := s.queryAssets(ctx, s.db,
-		"WHERE a.trashed_at IS NULL AND a.id IN ("+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+")", ids...)
+		"WHERE "+listedAssets(p, "a")+" AND a.library_id IN ("+placeholders(len(scope))+") AND a.id IN ("+placeholders(len(ids))+")",
+		append(slices.Clone(scope), ids...)...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -235,12 +255,13 @@ func (s *Service) hitPage(ctx context.Context, p Principal, hits []searchHit, af
 	return assets, next, nil
 }
 
-// queryHits ranks the candidates for a query: name or user tag matches first,
-// then every photo with a vector by similarity, at most maxSemanticResults
-// of them. It records on the page whether the query was encoded and where the
-// closest group ends.
-func (s *Service) queryHits(ctx context.Context, query string, candidates []candidate, page *SearchPage) ([]searchHit, error) {
-	queryVector, model := s.embedQuery(ctx, query)
+// queryHits ranks the candidates for a query, whose vector of model is
+// queryVector or nil: name or user tag matches first, then every photo with
+// a vector by similarity, at most maxSemanticResults of them. It records on
+// the page whether the query was encoded and where the closest group ends,
+// and on shadow, unless nil, the content objects it ranked by similarity.
+func (s *Service) queryHits(ctx context.Context, query string, queryVector []float32, model string, candidates []candidate,
+	page *SearchPage, shadow *shadowQuery) ([]searchHit, error) {
 	folded := strings.ToLower(query)
 	calibration := s.objectCalibration
 	mentions := s.matcher.Mentions(query)
@@ -258,10 +279,19 @@ func (s *Service) queryHits(ctx context.Context, query string, candidates []cand
 		}
 		vectorErr = s.index.read(ctx, s, model, func(vectors map[string][]float32) {
 			for _, c := range candidates {
+				if !c.inLocalAI() {
+					if strings.Contains(strings.ToLower(c.name), folded) || tagMatches(c.tags, folded) {
+						named = append(named, searchHit{c.id, nameBand})
+					}
+					continue
+				}
 				vector, embedded := vectors[c.objectID]
 				score := 0.0
 				if embedded && queryVector != nil {
 					score = dot(vector, queryVector)
+					if shadow != nil {
+						shadow.objects = append(shadow.objects, c.objectID)
+					}
 				}
 				scores, wasDetected := found[c.objectID]
 				if !wasDetected {
@@ -469,7 +499,7 @@ func (s *Service) embedQuery(ctx context.Context, query string) ([]float32, stri
 	if err != nil {
 		return nil, ""
 	}
-	s.noticeModel(info.Model)
+	s.ai.noticeModel(info.Model)
 	vector, err := s.embedder.EmbedQuery(ctx, query)
 	if err != nil || !validVector(vector, info.Dimensions) {
 		return nil, ""
@@ -573,12 +603,12 @@ func (s *Service) loadVectors(ctx context.Context, model string) (map[string][]f
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	vectors := make(map[string][]float32)
 	for rows.Next() {
 		var objectID string
 		var encoded []byte
 		if err := rows.Scan(&objectID, &encoded); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		vectors[objectID] = decodeVector(encoded)

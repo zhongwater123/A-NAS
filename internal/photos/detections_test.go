@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"io"
 	"os"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +28,8 @@ type detectingEmbedder struct {
 	inputs   []image.Config
 	released []bool
 	wait     func(ctx context.Context, detection int)
+	// memory is what the Worker says its models take.
+	memory uint64
 }
 
 func newDetectingEmbedder() *detectingEmbedder {
@@ -42,7 +45,7 @@ func (d *detectingEmbedder) Info(ctx context.Context) (photos.EmbedderInfo, erro
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err == nil {
-		info.Detector = d.detector
+		info.Detector, info.MemoryBytes = d.detector, d.memory
 	}
 	return info, err
 }
@@ -82,17 +85,41 @@ func (d *detectingEmbedder) releases() []bool {
 	return append([]bool(nil), d.released...)
 }
 
-// switchGate is a gate the test opens and closes while work runs.
+// switchGate is a gate the test opens and closes while work runs. It
+// records the memory needs it was asked about.
 type switchGate struct {
 	mu     sync.Mutex
 	open   bool
 	reason string
+	needs  []uint64
 }
 
-func (g *switchGate) Open(context.Context) (bool, string) {
+func (g *switchGate) Open(_ context.Context, need uint64) (bool, string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.needs = append(g.needs, need)
 	return g.open, g.reason
+}
+
+func (g *switchGate) asked() []uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]uint64(nil), g.needs...)
+}
+
+// roomGate opens for work whose models take at most room.
+type roomGate struct {
+	mu   sync.Mutex
+	room uint64
+}
+
+func (g *roomGate) Open(_ context.Context, need uint64) (bool, string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if need > g.room {
+		return false, "memory_for_models"
+	}
+	return true, ""
 }
 
 func (g *switchGate) set(open bool, reason string) {
@@ -397,6 +424,52 @@ func TestTheNextInputIsRenderedWhileTheWorkerDetects(t *testing.T) {
 	}
 }
 
+func TestRoundsAtOnceShareTheDetectionAhead(t *testing.T) {
+	service, _, root := newService(t)
+	private, _ := libraries(t, service, alice)
+	worker, gate := newDetectingEmbedder(), &switchGate{open: true}
+	const photoCount = 8
+	for i := range photoCount {
+		importPhoto(t, service, alice, private.ID, "", string(rune('a'+i))+".png", encodePNG(uint8(i+1)))
+	}
+	processAll(t, service)
+
+	// ProcessAIJob is exported, so rounds may run at once: each takes the
+	// detection rendered ahead and leaves one behind.
+	var rounds sync.WaitGroup
+	failures := make(chan error, 4)
+	for range 4 {
+		rounds.Go(func() {
+			for {
+				processed, err := service.ProcessAIJob(context.Background(), worker, gate)
+				if err != nil {
+					failures <- err
+					return
+				}
+				if !processed {
+					return
+				}
+			}
+		})
+	}
+	rounds.Wait()
+	close(failures)
+	for err := range failures {
+		t.Errorf("ProcessAIJob() at once: %v", err)
+	}
+	// A round that found every job claimed stopped early; the rest follows.
+	processAI(t, service, worker, gate)
+
+	db := catalogDB(t, root)
+	var detected, claimed int
+	if err := db.QueryRow("SELECT COUNT(*) FROM detections").Scan(&detected); err != nil || detected != photoCount {
+		t.Fatalf("detections = %d, %v; want all %d photos", detected, err, photoCount)
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM jobs WHERE state = 'running'").Scan(&claimed); err != nil || claimed != 0 {
+		t.Fatalf("%d jobs still claimed (%v); a detection rendered ahead was lost", claimed, err)
+	}
+}
+
 func TestMemoryPressureEndsTheWholeWorker(t *testing.T) {
 	service, _, _ := newService(t)
 	private, _ := libraries(t, service, alice)
@@ -418,6 +491,57 @@ func TestMemoryPressureEndsTheWholeWorker(t *testing.T) {
 	}
 	if releases := worker.releases(); len(releases) != 1 || !releases[0] {
 		t.Fatalf("releases = %v, want the whole Worker released once", releases)
+	}
+}
+
+func TestWaitingForMemoryKeepsTheModelsAlreadyLoaded(t *testing.T) {
+	service, _, _ := newService(t)
+	private, _ := libraries(t, service, alice)
+	worker, gate := newDetectingEmbedder(), &switchGate{open: true}
+	worker.memory = 1536 << 20
+	importPhoto(t, service, alice, private.ID, "", "a.png", encodePNG(1))
+	importPhoto(t, service, alice, private.ID, "", "b.png", encodePNG(2))
+	processAll(t, service)
+	for range 3 { // two vectors, one detection
+		if ok, err := service.ProcessAIJob(context.Background(), worker, gate); !ok || err != nil {
+			t.Fatalf("ProcessAIJob() = %v, %v", ok, err)
+		}
+	}
+	if needs := gate.asked(); !slices.Contains(needs, worker.memory) {
+		t.Fatalf("the gate was asked about %v, never about the models' %d bytes", needs, worker.memory)
+	}
+	gate.set(false, "memory_for_models")
+	if ok, err := service.ProcessAIJob(context.Background(), worker, gate); ok || err != nil {
+		t.Fatalf("ProcessAIJob() while waiting for memory = %v, %v", ok, err)
+	}
+	if releases := worker.releases(); len(releases) != 0 {
+		t.Fatalf("releases = %v; waiting for memory must not unload the models already loaded", releases)
+	}
+	if status := aiStatus(t, service, alice); status.State != photos.AIPaused || status.Reason != "memory_for_models" {
+		t.Fatalf("AI status = %+v, want paused for memory_for_models", status)
+	}
+}
+
+func TestTheModelsWaitForRoomBeforeTheirFirstLoad(t *testing.T) {
+	service, _, root := newService(t)
+	private, _ := libraries(t, service, alice)
+	worker, gate := newDetectingEmbedder(), &roomGate{room: 1 << 30}
+	worker.memory = 1536 << 20
+	importPhoto(t, service, alice, private.ID, "", "a.png", encodePNG(1))
+	processAll(t, service)
+	// The first round learns what the models take only from the Worker's
+	// answer, and asks the gate again before any model loads.
+	if ok, err := service.ProcessAIJob(context.Background(), worker, gate); ok || err != nil {
+		t.Fatalf("ProcessAIJob() without room for the models = %v, %v", ok, err)
+	}
+	if state, attempts, _ := jobState(t, root, "embedding/v1"); state != "pending" || attempts != 0 {
+		t.Fatalf("vector job = %s after %d attempts; want it waiting at no cost", state, attempts)
+	}
+	gate.mu.Lock()
+	gate.room = 4 << 30
+	gate.mu.Unlock()
+	if ok, err := service.ProcessAIJob(context.Background(), worker, gate); !ok || err != nil {
+		t.Fatalf("ProcessAIJob() with room = %v, %v", ok, err)
 	}
 }
 

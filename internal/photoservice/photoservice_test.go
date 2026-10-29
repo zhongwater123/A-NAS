@@ -24,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 type sessions map[string]accounts.SessionUser
@@ -82,7 +83,7 @@ func start(t *testing.T, configure ...func(*photoservice.Config)) running {
 		change(&config)
 	}
 	go func() { r.done <- photoservice.Run(ctx, config) }()
-	t.Cleanup(func() { cancel(); <-r.done })
+	t.Cleanup(func() { cancel(); <-r.done }) //nolint:errcheck // Waits for Run to stop; tests that expect a clean stop check its error first.
 	// The socket file appears on bind, a moment before it accepts.
 	waitFor(t, func() bool {
 		conn, err := net.Dial("unix", r.socket)
@@ -112,7 +113,7 @@ func (r running) get(t *testing.T, path, token string) *http.Response {
 	}}}
 	request, _ := http.NewRequest(http.MethodGet, "http://photos"+path, nil)
 	if token != "" {
-		request.Header.Set(photosapi.SessionHeader, token)
+		request.Header.Set(serviceproxy.SessionHeader, token)
 	}
 	response, err := client.Do(request)
 	if err != nil {
@@ -163,11 +164,75 @@ func TestServesOnceTheStoreIsReadyAndConfirmsEverySession(t *testing.T) {
 	}
 }
 
+// slowSessions holds the lookup of the token "slow" until release closes,
+// then answers it as alice's.
+type slowSessions struct {
+	sessions
+	arrived, release chan struct{}
+}
+
+func (s slowSessions) ResolveSessionUser(ctx context.Context, token string) (accounts.SessionUser, error) {
+	if token == "slow" {
+		close(s.arrived)
+		<-s.release
+		token = "alice-token"
+	}
+	return s.sessions.ResolveSessionUser(ctx, token)
+}
+
+// Stopping lets a request in progress finish against the open store, as
+// the Product Service drains its requests before closing its stores; the
+// Catalog closes after it (#192).
+func TestStoppingServesRequestsInProgressBeforeClosingTheStore(t *testing.T) {
+	slow := slowSessions{sessions: knownSessions, arrived: make(chan struct{}), release: make(chan struct{})}
+	r := start(t, func(config *photoservice.Config) { config.Sessions = slow })
+	r.ready.Store(true)
+	waitFor(t, func() bool { return r.get(t, "/api/v1/photos/libraries", "alice-token").StatusCode == http.StatusOK })
+
+	type answer struct {
+		status int
+		err    error
+	}
+	answered := make(chan answer, 1)
+	go func() {
+		client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", r.socket)
+		}}}
+		request, _ := http.NewRequest(http.MethodGet, "http://photos/api/v1/photos/libraries", nil)
+		request.Header.Set(serviceproxy.SessionHeader, "slow")
+		response, err := client.Do(request)
+		if err != nil {
+			answered <- answer{err: err}
+			return
+		}
+		_ = response.Body.Close()
+		answered <- answer{status: response.StatusCode}
+	}()
+	<-slow.arrived
+	r.cancel()
+	// Once the service no longer accepts connections, it is stopping.
+	waitFor(t, func() bool {
+		conn, err := net.Dial("unix", r.socket)
+		if err == nil {
+			_ = conn.Close()
+		}
+		return err != nil
+	})
+	close(slow.release)
+	if got := <-answered; got.err != nil || got.status != http.StatusOK {
+		t.Fatalf("request in progress while stopping = %d, %v; want 200", got.status, got.err)
+	}
+	if err := <-r.done; err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	r.done <- nil
+}
+
 func TestProductProxyForwardsOnlyTheVerifiedSessionToken(t *testing.T) {
 	r := start(t)
 	r.ready.Store(true)
 	waitFor(t, func() bool { return r.get(t, "/api/v1/photos/libraries", "alice-token").StatusCode == http.StatusOK })
-	proxy := photosapi.NewProxy(r.socket, nil)
+	proxy := photoservice.Proxy(r.socket, nil)
 
 	call := func(method, path, contentType string, body []byte, token string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, bytes.NewReader(body))
@@ -175,7 +240,7 @@ func TestProductProxyForwardsOnlyTheVerifiedSessionToken(t *testing.T) {
 			request.Header.Set("Content-Type", contentType)
 		}
 		// A browser cannot choose who it is by sending the header itself.
-		request.Header.Set(photosapi.SessionHeader, "alice-token")
+		request.Header.Set(serviceproxy.SessionHeader, "alice-token")
 		request.AddCookie(&http.Cookie{Name: "anas_session", Value: "cookie-secret"})
 		request = request.WithContext(accounts.WithSessionToken(request.Context(), token))
 		recorder := httptest.NewRecorder()
@@ -216,7 +281,7 @@ func TestProductProxyForwardsOnlyTheVerifiedSessionToken(t *testing.T) {
 
 	unreachable := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/photos/libraries", nil)
-	photosapi.NewProxy(filepath.Join(t.TempDir(), "absent.sock"), nil).ServeHTTP(unreachable, request)
+	photoservice.Proxy(filepath.Join(t.TempDir(), "absent.sock"), nil).ServeHTTP(unreachable, request)
 	if unreachable.Code != http.StatusServiceUnavailable || !strings.Contains(unreachable.Body.String(), "photos_unavailable") {
 		t.Fatalf("unreachable photo service = %d %s", unreachable.Code, unreachable.Body.String())
 	}
@@ -348,7 +413,7 @@ func (r running) upload(t *testing.T, token, libraryID, name string) *httptest.R
 	request.Header.Set("Content-Type", writer.FormDataContentType())
 	request = request.WithContext(accounts.WithSessionToken(request.Context(), token))
 	recorder := httptest.NewRecorder()
-	photosapi.NewProxy(r.socket, nil).ServeHTTP(recorder, request)
+	photoservice.Proxy(r.socket, nil).ServeHTTP(recorder, request)
 	return recorder
 }
 

@@ -1,0 +1,654 @@
+/api/v1/photos/libraries:
+  get:
+    operationId: listPhotoLibraries
+    summary: List the caller's private library, the shared library and any member library being viewed
+    responses:
+      "200": { description: Visible photo libraries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoLibrary" } } } } } } }
+      "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+/api/v1/photos/ai:
+  get:
+    operationId: getPhotoAIStatus
+    summary: Report local AI progress over the caller's visible photos; polling it does not count as activity
+    responses:
+      "200": { description: Local AI status, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAIStatus" } } } }
+      "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+/api/v1/photos/search:
+  get:
+    operationId: searchPhotos
+    summary: Find untrashed photos in the caller's private and the shared library by name or meaning, name and user tag matches first and then every photo by similarity; closest says where the closest group ends
+    parameters:
+      - { name: q, in: query, required: true, description: "1 to 200 characters, such as 海边的猫.", schema: { type: string, minLength: 1, maxLength: 200 } }
+      - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to search it as well.", schema: { type: string } }
+      - { name: library, in: query, description: "One library of the search's scope (the caller's private library, the shared library or the viewed one) to search alone; any other answers 404.", schema: { type: string } }
+      - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+    responses:
+      "200": { description: One page of results, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoSearchResults" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+/api/v1/photos/image-searches:
+  post:
+    operationId: searchPhotosByImage
+    summary: Search by an image that is not in the library; local AI encodes it and looks for objects in it at once, the image itself is never stored, and its results stay listed under the returned ID until 30 minutes after their last use
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { file: { type: string, format: binary, description: "A JPEG or PNG of at most 32 MiB and 2^26 (about 67 million) pixels. The Web client sends it upright, scaled to at most 1600 px." } } } } } }
+    responses:
+      "201": { description: The image was encoded, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoImageSearch" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "415": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { description: "Local AI cannot read the image now (ai_unavailable), or the photo library is not available on this device (photos_unavailable)", content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+/api/v1/photos/image-searches/{searchId}/assets:
+  get:
+    operationId: listImageSearchResults
+    summary: The untrashed photos in the caller's search scope most like an image search's image, closest first, by image vectors and the objects found in both, as for similar photos
+    parameters:
+      - { name: searchId, in: path, required: true, schema: { type: string } }
+      - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to look in it as well.", schema: { type: string } }
+      - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+    responses:
+      "200": { description: One page of results, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoTimeline" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { description: "search_expired when the search is no longer kept or was started by someone else, so the image is to be sent again; not_found for a viewed library the caller cannot see", content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+      "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+/api/v1/photos/labels:
+  get:
+    operationId: listPhotoLabels
+    summary: List the AI clusters of untrashed photos in the caller's private and the shared library, most photos first; clusters never take part in search
+    parameters:
+      - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to count it as well.", schema: { type: string } }
+    responses:
+      "200": { description: Cluster counts, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoLabelCounts" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+/api/v1/photos/labels/{labelId}/assets:
+  get:
+    operationId: listPhotoLabelCluster
+    summary: List the photos in an AI cluster within the caller's private and the shared library, clearest match first; empty while AI clusters are not available
+    parameters:
+      - { name: labelId, in: path, required: true, description: "A label that has a cluster, such as cat.", schema: { type: string } }
+      - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to list it as well.", schema: { type: string } }
+      - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+    responses:
+      "200": { description: One page of the cluster, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoTimeline" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+/api/v1/photos/tags:
+  get:
+    operationId: listPhotoTagGroups
+    summary: List the users' own tags on untrashed photos in the caller's private and the shared library as groups, most photos first
+    parameters:
+      - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to count it as well.", schema: { type: string } }
+    responses:
+      "200": { description: Tag groups, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoTagCounts" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+/api/v1/photos/tags/{name}/assets:
+  get:
+    operationId: listPhotoTagGroup
+    summary: List the untrashed photos in the caller's private and the shared library that carry a user tag, newest first
+    parameters:
+      - { name: name, in: path, required: true, description: "A user tag, such as 小橘.", schema: { type: string } }
+      - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to list it as well.", schema: { type: string } }
+      - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+    responses:
+      "200": { description: One page of the group, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoTimeline" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+/api/v1/photos/people:
+  get:
+    operationId: listPhotoPeople
+    summary: List the people and pets of the caller's private and the shared library, named ones first, then by photos; someone seen in fewer than two photos is listed once named
+    parameters:
+      - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to list its people as well (read-only).", schema: { type: string } }
+      - { name: hidden, in: query, description: "1 to include people the members hid.", schema: { type: string, enum: ["1"] } }
+    responses:
+      "200": { description: People, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoPeople" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+/api/v1/photos/people/{personId}:
+  patch:
+    operationId: changePhotoPerson
+    summary: Name, hide or show a person, or choose the face that stands for them; the owner of a private library and every member in the shared library may
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoPersonID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              name: { type: string, maxLength: 160, description: "At most 40 characters; empty clears the name." }
+              hidden: { type: boolean }
+              coverId: { type: string, description: "One of the person's occurrences." }
+    responses:
+      "200": { description: The person, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoPerson" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/people/{personId}/assets:
+  get:
+    operationId: listPhotoPersonPhotos
+    summary: List the untrashed photos of a person, newest first
+    parameters:
+      - { $ref: "../components/photos.yaml#/parameters/PhotoPersonID" }
+      - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+    responses:
+      "200": { description: One page of the person's photos, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoTimeline" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/people/{personId}/merge:
+  post:
+    operationId: mergePhotoPeople
+    summary: Move every face of a person into another person of the same library and kind; the merged person is gone afterwards
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoPersonID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content: { application/json: { schema: { type: object, additionalProperties: false, required: [into], properties: { into: { type: string } } } } }
+    responses:
+      "200": { description: The person the faces moved into, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoPerson" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/people/{personId}/assets/{assetId}:
+  delete:
+    operationId: removePhotoFromPerson
+    summary: Take a photo out of a person; clustering never gives it back to that person
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoPersonID" }, { $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Taken out }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/people/{occurrenceId}:
+  put:
+    operationId: assignPhotoFace
+    summary: Say who a face or pet in a photo is, an existing person of the photo's library or a new one by name; clustering never changes it
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/photos.yaml#/parameters/PhotoOccurrenceID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              personId: { type: string }
+              name: { type: string, maxLength: 160, description: "A new person's name when personId is absent." }
+    responses:
+      "200": { description: The photo's details, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/occurrences/{occurrenceId}/avatar:
+  get:
+    operationId: getPhotoOccurrenceAvatar
+    summary: The square crop of a face or pet in a photo the caller can see; the ID changes whenever the photo is scanned again
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoOccurrenceID" }]
+    responses:
+      "200": { description: JPEG, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/libraries/{libraryId}:
+  patch:
+    operationId: changePhotoLibrary
+    summary: Turn a library's people and pets on or off; the owner of a private library and an administrator for the shared library may. Off clears the faces, pets and automatic people found there and keeps names and what members decided; on scans the library again
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [people]
+            properties:
+              people: { type: boolean }
+    responses:
+      "200": { description: The library, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoLibrary" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/libraries/{libraryId}/albums:
+  get:
+    operationId: listPhotoAlbums
+    summary: List a library's albums, newest first
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }]
+    responses:
+      "200": { description: Albums, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoAlbum" } } } } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+  post:
+    operationId: createPhotoAlbum
+    summary: Create an album in a library the caller may add to
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoNameRequest" } } } }
+    responses:
+      "201": { description: Album created, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAlbum" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/albums/{albumId}:
+  patch:
+    operationId: renamePhotoAlbum
+    summary: Rename an album; its creator, the library owner or an administrator of the shared library may
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAlbumID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoNameRequest" } } } }
+    responses:
+      "200": { description: Album renamed, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAlbum" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: deletePhotoAlbum
+    summary: Delete an album; its photos stay in the library
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAlbumID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Album deleted }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/albums/{albumId}/assets:
+  get:
+    operationId: listPhotoAlbumAssets
+    summary: List an album's photos outside the trash, newest capture time first
+    parameters:
+      - { $ref: "../components/photos.yaml#/parameters/PhotoAlbumID" }
+      - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+    responses:
+      "200": { description: One page, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoTimeline" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+  post:
+    operationId: addPhotoToAlbum
+    summary: Add a photo to an album; a photo of another library is copied into the album's library first
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAlbumID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [assetId], properties: { assetId: { type: string } } } } } }
+    responses:
+      "200": { description: "The photo the album now holds, with its details", content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/albums/{albumId}/assets/{assetId}:
+  delete:
+    operationId: removePhotoFromAlbum
+    summary: Take a photo out of an album without deleting it
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAlbumID" }, { $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Photo removed from the album }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/tags:
+  post:
+    operationId: addPhotoTag
+    summary: Add a user tag of at most 30 characters; whoever may rename the photo may tag it
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoNameRequest" } } } }
+    responses:
+      "200": { description: The photo's details, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/tags/{name}:
+  delete:
+    operationId: removePhotoTag
+    summary: Remove a user tag
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { name: name, in: path, required: true, schema: { type: string } }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The photo's details, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/ai-labels/{labelId}:
+  delete:
+    operationId: hidePhotoAILabel
+    summary: Take this photo out of an AI cluster; the correction holds for this photo only and outlives model upgrades
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { name: labelId, in: path, required: true, schema: { type: string } }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The photo's details, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/libraries/{libraryId}/timeline:
+  get:
+    operationId: listPhotoTimeline
+    summary: List available photo assets, newest capture time first
+    parameters:
+      - { $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }
+      - { name: month, in: query, description: "Only this month (YYYY-MM) of the device's time zone.", schema: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" } }
+      - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+    responses:
+      "200": { description: One timeline page, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoTimeline" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/libraries/{libraryId}/timeline/months:
+  get:
+    operationId: listPhotoTimelineMonths
+    summary: Count available photo assets by month of the device's time zone, newest month first
+    parameters:
+      - { $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }
+    responses:
+      "200": { description: Months with photos, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoTimelineMonths" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/libraries/{libraryId}/entries:
+  get:
+    operationId: listPhotoEntries
+    summary: List one level of the library projection; assets by name, a page at a time
+    parameters:
+      - { $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }
+      - { name: directoryId, in: query, description: Empty or absent for the library root., schema: { type: string } }
+      - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+    responses:
+      "200": { description: Virtual directories and photo assets, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoDirectoryListing" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/libraries/{libraryId}/uploads:
+  post:
+    operationId: uploadPhoto
+    summary: Import one photo or video original; returns once the original is durable
+    description: "A photo (JPEG, PNG, HEIC; at most 256 MiB) or a video (MP4, MOV, M4V, 3GP, MKV, WebM, AVI, MTS/M2TS; at most 4 GiB) that the FFmpeg Worker can read. A Live Photo's MOV, short and carrying Apple's content identifier, whose stills in the library are still waiting for it completes them instead and answers 200; without such stills it is imported as a video. 503 media_unavailable when a video cannot be read because the FFmpeg Worker is unavailable."
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { directoryId: { type: string, description: "Must precede the file part, which is streamed as it arrives; parts after the file are not read." }, file: { type: string, format: binary } } } } } }
+    responses:
+      "200": { description: The Live Photos a MOV completed; no asset was created, content: { application/json: { schema: { type: object, additionalProperties: false, required: [completed], properties: { completed: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } } } } }
+      "201": { description: Photo asset created, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "415": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/libraries/{libraryId}/directories:
+  post:
+    operationId: createPhotoDirectory
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [name], properties: { parentId: { type: string }, name: { type: string, minLength: 1 } } } } } }
+    responses:
+      "201": { description: Virtual directory created, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoDirectory" } } } }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/libraries/{libraryId}/trash:
+  get:
+    operationId: listPhotoTrash
+    summary: List trashed photo assets the caller may restore or purge
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }]
+    responses:
+      "200": { description: Trashed photo assets, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } } } } }
+  delete:
+    operationId: emptyPhotoTrash
+    summary: Permanently delete every trashed photo asset the caller may purge
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: Number of purged assets, content: { application/json: { schema: { type: object, additionalProperties: false, required: [purged], properties: { purged: { type: integer, minimum: 0 } } } } } }
+/api/v1/photos/directories/{directoryId}:
+  patch:
+    operationId: changePhotoDirectory
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoDirectoryID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1 }, parentId: { type: string, description: Empty for the library root. } } } } } }
+    responses:
+      "200": { description: Virtual directory changed, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoDirectory" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: deletePhotoDirectory
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoDirectoryID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Empty virtual directory removed }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}:
+  get:
+    operationId: getPhotoAsset
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200": { description: Photo asset, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+  patch:
+    operationId: changePhotoAsset
+    summary: Rename an asset and/or move it to another virtual directory of its library
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, minProperties: 1, properties: { name: { type: string, minLength: 1 }, directoryId: { type: string, description: Empty for the library root. } } } } } }
+    responses:
+      "200": { description: Photo asset changed, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: trashPhotoAsset
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: Photo asset moved to trash, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/libraries/{libraryId}/live-photos:
+  post:
+    operationId: uploadLivePhoto
+    summary: Atomically import a same-name still and MOV as one asset
+    description: Stream directoryId (optional), file, then motion in that order. Each original is at most 256 MiB. Available Apple content identifiers must match. No other parts are accepted after motion.
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [file, motion]
+            properties:
+              directoryId: { type: string }
+              file: { type: string, format: binary }
+              motion: { type: string, format: binary }
+    responses:
+      "201": { description: One complete photo asset, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "415": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/libraries/{libraryId}/live-videos:
+  post:
+    operationId: attachLivePhotoVideo
+    summary: Complete Live Photos whose still was imported without its MOV
+    description: "One file part, a MOV of at most 256 MiB and 30 seconds that carries Apple's content identifier. Every photo of the library the caller may change whose still carries the same identifier and has no video yet gets this video; nothing is matched by name. 422 live_photo_not_found when no photo of the library is waiting for it, 422 invalid_motion_photo when the MOV has no identifier or is not a short, complete video."
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { multipart/form-data: { schema: { type: object, required: [file], properties: { file: { type: string, format: binary } } } } } }
+    responses:
+      "200": { description: The photos now complete, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/preview:
+  get:
+    operationId: previewPhoto
+    summary: Display a compatible JPEG for HEIC, a video's poster frame, or the original for JPEG and PNG
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200": { description: Compatible still image, content: { image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
+      "304": { description: ETag still matches after authorization }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/video/playback:
+  get:
+    operationId: getPhotoVideoPlayback
+    summary: Decide how this browser plays a video asset
+    description: "direct plays video/original; remux and transcode play video/stream, whose fragmented MP4 has the type mime. 404 not_video for a photo."
+    parameters:
+      - { $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }
+      - { name: caps, in: query, description: "What the browser decodes beyond H.264, AAC, MP3, Opus, Vorbis and FLAC in MP4, comma-separated: hevc, av1, vp9, webm, mkv, ac3, eac3.", schema: { type: string } }
+    responses:
+      "200":
+        description: How to play the video
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mode, duration]
+              properties:
+                mode: { type: string, enum: [direct, remux, transcode] }
+                duration: { type: number, exclusiveMinimum: 0 }
+                mime: { type: string, description: "Type of the converted stream, for Media Source Extensions; absent for direct play." }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/video/original:
+  get:
+    operationId: playPhotoVideoOriginal
+    summary: Read a video's original for direct play, typed as browsers accept it
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200": { description: Original video, content: { video/mp4: { schema: { type: string, format: binary } }, video/webm: { schema: { type: string, format: binary } }, video/x-matroska: { schema: { type: string, format: binary } } } }
+      "206": { description: Range of the original video }
+      "304": { description: ETag still matches after authorization }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/video/stream:
+  get:
+    operationId: streamPhotoVideo
+    summary: Convert a video for this browser from a start time; disconnect cancels conversion
+    description: "Remuxes or transcodes to H.264/AAC (at most 1080 lines) as the playback decision says, or always transcodes with transcode=1. The stream cannot seek; a player restarts it at a new start. At most two conversions run at once: 503 media_busy after a short wait."
+    parameters:
+      - { $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }
+      - { name: start, in: query, schema: { type: number, minimum: 0 }, description: Seconds into the video; before its end. }
+      - { name: transcode, in: query, schema: { type: string, enum: ["1"] } }
+      - { name: caps, in: query, schema: { type: string }, description: As for the playback decision. }
+    responses:
+      "200": { description: Fragmented MP4, content: { video/mp4: { schema: { type: string, format: binary } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/view:
+  get:
+    operationId: viewPhoto
+    summary: The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
+    description: An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none.
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200": { description: The photo's view, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      "304": { description: ETag still matches after authorization }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "415": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/metadata:
+  get:
+    operationId: getPhotoMetadata
+    summary: What a photo's original records about it, read when asked (ADR 0024 decision 6)
+    description: Everything its EXIF holds, under ifd0, exif and gps, and where the photo was taken when the camera recorded it. Videos have none yet.
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200":
+        description: The photo's metadata; empty when the original has no EXIF
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                location:
+                  type: object
+                  required: [latitude, longitude]
+                  properties:
+                    latitude: { type: number }
+                    longitude: { type: number }
+                    altitude: { type: number }
+                exif: { type: object, additionalProperties: true }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "415": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/motion:
+  get:
+    operationId: openPhotoMotion
+    summary: Read the untouched motion component under the asset's Policy
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200": { description: Original video, content: { video/quicktime: { schema: { type: string, format: binary } }, video/mp4: { schema: { type: string, format: binary } } } }
+      "206": { description: Range of the original video }
+      "304": { description: ETag still matches after authorization }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/motion/play:
+  get:
+    operationId: playPhotoMotion
+    summary: Stream an on-demand H.264/AAC preview; disconnect cancels decoding
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200": { description: Fragmented MP4, content: { video/mp4: { schema: { type: string, format: binary } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/download:
+  get:
+    operationId: downloadPhotoAsset
+    summary: Download an original or a ZIP containing both Live Photo originals
+    description: Android Motion Photo downloads retain the embedded video in the unchanged original.
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200": { description: Complete original asset, content: { application/zip: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } }, image/heic: { schema: { type: string, format: binary } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/original:
+  get:
+    operationId: getPhotoOriginal
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { name: download, in: query, schema: { type: string, enum: ["1"] } }, { name: Range, in: header, schema: { type: string } }]
+    responses:
+      "200": { description: "The primary original, inline unless download=1; use /download for both Live Photo originals", content: { image/heic: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
+      "206": { description: Part of the original, content: { image/heic: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/png: { schema: { type: string, format: binary } } } }
+      "304": { description: The client's copy still matches the ETag }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/thumbnail:
+  get:
+    operationId: getPhotoThumbnail
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200": { description: Upright JPEG thumbnail at most 512 pixels on its longer side, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      "304": { description: The client's copy still matches the ETag }
+      "404": { description: "Not found, or thumbnail_unavailable while it is pending or failed (use the original)", content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+/api/v1/photos/assets/{assetId}/similar:
+  get:
+    operationId: listSimilarPhotos
+    summary: The untrashed photos in the caller's search scope most like this one, closest first, by image vectors and the objects found in both; never its copies or duplicates
+    parameters:
+      - { $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }
+      - { name: viewing, in: query, description: "A member's private library the caller is viewing through Administrative Viewing Mode, to look in it as well.", schema: { type: string } }
+      - { name: cursor, in: query, description: The next value of the previous page., schema: { type: string } }
+      - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+    responses:
+      "200": { description: One page of similar photos, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoSimilarResults" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { description: "Not found: missing, trashed, or outside the caller's search scope", content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+      "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
+/api/v1/photos/assets/{assetId}/copies:
+  post:
+    operationId: copyPhotoAsset
+    summary: Create an independent photo asset that reuses the original's bytes
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [libraryId], properties: { libraryId: { type: string }, directoryId: { type: string } } } } } }
+    responses:
+      "201": { description: Photo asset copied, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/restore:
+  post:
+    operationId: restorePhotoAsset
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: Photo asset restored, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/trash/{assetId}:
+  delete:
+    operationId: purgePhotoAsset
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Photo asset permanently deleted }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }

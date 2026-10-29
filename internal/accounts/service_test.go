@@ -18,7 +18,8 @@ func TestFirstAdministratorCanBeCreatedAndAuthenticated(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	credentials := &credentialRecorder{}
 	service := accounts.NewService(store, credentials, accounts.Options{
-		Now: func() time.Time { return time.Date(2026, time.October, 7, 10, 0, 0, 0, time.UTC) },
+		PasswordCost: cheapPasswords,
+		Now:          func() time.Time { return time.Date(2026, time.October, 7, 10, 0, 0, 0, time.UTC) },
 	})
 
 	admin, err := service.SetupAdministrator(context.Background(), "owner", "correct horse battery staple")
@@ -62,7 +63,7 @@ func TestFirstAdministratorSetupCanRetryAfterCredentialProvisioningFailure(t *te
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	credentials := &credentialRecorder{failure: errors.New("Samba unavailable")}
-	service := accounts.NewService(store, credentials, accounts.Options{})
+	service := accounts.NewService(store, credentials, accounts.Options{PasswordCost: cheapPasswords})
 	if _, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple"); !errors.Is(err, accounts.ErrCredentialProvision) {
 		t.Fatalf("first setup error = %v, want ErrCredentialProvision", err)
 	}
@@ -85,7 +86,7 @@ func TestMembersCannotDiscoverAnotherMembersPrivateSpace(t *testing.T) {
 		t.Fatalf("OpenSQLite() error = %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	service := accounts.NewService(store, &credentialRecorder{}, accounts.Options{})
+	service := accounts.NewService(store, &credentialRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(context.Background(), "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatalf("setup administrator: %v", err)
@@ -124,7 +125,7 @@ func TestAdministratorCanResetAndDisableMemberCredential(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	credentials := &credentialRecorder{}
-	service := accounts.NewService(store, credentials, accounts.Options{})
+	service := accounts.NewService(store, credentials, accounts.Options{PasswordCost: cheapPasswords})
 	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +144,7 @@ func TestAdministratorCanResetAndDisableMemberCredential(t *testing.T) {
 	if credentials.password != "a newly reset password" {
 		t.Fatalf("provisioned password = %q", credentials.password)
 	}
-	if _, err := service.ResolveSession(ctx, oldSession.Token); err != accounts.ErrSessionNotFound {
+	if _, err := service.ResolveSession(ctx, oldSession.Token); !errors.Is(err, accounts.ErrSessionNotFound) {
 		t.Fatalf("old session error = %v, want ErrSessionNotFound", err)
 	}
 	if _, err := service.Authenticate(ctx, "alice", "a newly reset password"); err != nil {
@@ -152,7 +153,7 @@ func TestAdministratorCanResetAndDisableMemberCredential(t *testing.T) {
 	if err := service.DisableUser(ctx, admin, member.ID); err != nil {
 		t.Fatalf("DisableUser() error = %v", err)
 	}
-	if _, err := service.Authenticate(ctx, "alice", "a newly reset password"); err != accounts.ErrInvalidCredentials {
+	if _, err := service.Authenticate(ctx, "alice", "a newly reset password"); !errors.Is(err, accounts.ErrInvalidCredentials) {
 		t.Fatalf("disabled authentication error = %v", err)
 	}
 }

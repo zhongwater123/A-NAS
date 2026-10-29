@@ -11,8 +11,10 @@ import (
 	"strings"
 
 	tusd "github.com/tus/tusd/v2/pkg/handler"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/transfers"
 )
 
@@ -51,10 +53,8 @@ func (s uploadStore) NewUpload(ctx context.Context, info tusd.FileInfo) (tusd.Up
 	}
 	lastModified, _ := strconv.ParseInt(meta["lastModified"], 10, 64)
 	t, err := s.service.BeginUpload(ctx, user, transfers.UploadRequest{
-		UploadRequest: files.UploadRequest{
-			SpaceID: meta["spaceId"], ParentID: meta["parentId"], Directories: directories,
-			Name: meta["filename"], Size: info.Size, Conflict: conflict,
-		},
+		SpaceID: meta["spaceId"], ParentID: meta["parentId"], Directories: directories,
+		Name: meta["filename"], Size: info.Size, Conflict: conflict,
 		Batch: meta["batch"], RelativePath: strings.Join(directories, "/"), LastModified: lastModified,
 	})
 	if err != nil {
@@ -136,7 +136,7 @@ func (s uploadStore) failure(ctx context.Context, err error) error {
 }
 
 func uploadError(status int, code, message string) tusd.Error {
-	body, _ := json.Marshal(errorBody(code, message))
+	body, _ := json.Marshal(httpjson.Error{Error: httpjson.ErrorDetail{Code: code, Message: message}})
 	return tusd.Error{
 		ErrorCode: code, Message: message,
 		HTTPResponse: tusd.HTTPResponse{StatusCode: status, Body: string(body), Header: tusd.HTTPHeader{"Content-Type": "application/json"}},

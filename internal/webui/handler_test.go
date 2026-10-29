@@ -50,6 +50,34 @@ func TestHandlerServesEmbeddedDesktopAndImmutableAssets(t *testing.T) {
 	}
 }
 
+// Installed apps are served from other ports of the device's address, which
+// browsers count as the same site, so only the desktop itself may frame its
+// pages (issue #161).
+func TestHandlerKeepsOtherOriginsFromFramingTheDesktop(t *testing.T) {
+	handler := newHandler(t)
+	for _, path := range []string{"/", "/local-console/screensavers", "/missing"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := recorder.Header().Get("X-Frame-Options"); got != "DENY" {
+			t.Errorf("%s X-Frame-Options = %q, want DENY", path, got)
+		}
+		policy := recorder.Header().Get("Content-Security-Policy")
+		for _, directive := range []string{"frame-ancestors 'none'", "default-src 'self'", "script-src 'self'", "img-src 'self' data: blob:", "connect-src 'self' data: blob:", "frame-src 'self'", "object-src 'none'"} {
+			if !strings.Contains(policy, directive) {
+				t.Errorf("%s Content-Security-Policy = %q, want %q", path, policy, directive)
+			}
+		}
+	}
+	// File previews, such as PDFs, are framed by the desktop itself.
+	for _, path := range []string{"/api/v1/missing", "/healthz"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := recorder.Header().Get("X-Frame-Options"); got != "SAMEORIGIN" {
+			t.Errorf("%s X-Frame-Options = %q, want SAMEORIGIN", path, got)
+		}
+	}
+}
+
 func TestHandlerKeepsUnknownAPIErrorsAsJSON(t *testing.T) {
 	handler := newHandler(t)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/missing", nil)
@@ -224,7 +252,9 @@ func newHandler(t *testing.T) http.Handler {
 func newHandlerWithOptions(t *testing.T, options webui.Options) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	api := httpapi.New(fake.NewHealthy(), httpapi.DataSourceSimulated, "test-version", logger)
+	api := httpapi.NewProduct(httpapi.ProductDependencies{
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, ProductVersion: "test-version", Logger: logger,
+	})
 	handler, err := webui.NewWithOptions(api, options)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

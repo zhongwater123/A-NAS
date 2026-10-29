@@ -1,4 +1,5 @@
-import { ContainerImage, ContainerSummary } from "../containersApi";
+import { formatClock as clock, formatDate, relativeTime, relativeUnit } from "../lib/time";
+import { ContainerImage, ContainerSummary } from "./api";
 
 export type Tone = "ok" | "warn" | "danger" | "idle";
 export type Health = "healthy" | "unhealthy" | "starting";
@@ -26,9 +27,16 @@ export function describeContainer(item: ContainerSummary): Condition {
   const ended = /^(?:Exited|Restarting) \((-?\d+)\) (.+) ago$/i.exec(status);
   const uptime = up ? duration(up[1]) : undefined;
   const marker = up?.[2]?.toLowerCase();
-  const health: Health | undefined = marker === "healthy" ? "healthy" : marker === "unhealthy" ? "unhealthy" : marker === "health: starting" ? "starting" : undefined;
+  const health: Health | undefined =
+    marker === "healthy"
+      ? "healthy"
+      : marker === "unhealthy"
+        ? "unhealthy"
+        : marker === "health: starting"
+          ? "starting"
+          : undefined;
   const exitCode = ended ? Number(ended[1]) : undefined;
-  const since = ended ? duration(ended[2]) : undefined;
+  const since = ended ? dockerAgo(ended[2]) : undefined;
 
   switch (item.state) {
     case "running": {
@@ -38,13 +46,32 @@ export function describeContainer(item: ContainerSummary): Condition {
       return { label: "运行中", tone: "ok", detail, health, attention: false };
     }
     case "paused":
-      return { label: "已暂停", tone: "warn", detail: uptime ? `${after("已运行", uptime)}，已暂停` : status, attention: false };
+      return {
+        label: "已暂停",
+        tone: "warn",
+        detail: uptime ? `${after("已运行", uptime)}，已暂停` : status,
+        attention: false,
+      };
     case "restarting":
-      return { label: "重启中", tone: "warn", detail: since === undefined ? status : `${ago(since)}退出 · 退出码 ${exitCode}`, exitCode, attention: true };
+      return {
+        label: "重启中",
+        tone: "warn",
+        detail: since === undefined ? status : `${since}退出 · 退出码 ${exitCode}`,
+        exitCode,
+        attention: true,
+      };
     case "exited": {
-      if (since === undefined || exitCode === undefined) return { label: "已停止", tone: "idle", detail: status, attention: false };
-      const when = since === "" ? "刚刚停止" : `${since}前停止`;
-      if (stopExitCodes.has(exitCode)) return { label: "已停止", tone: "idle", detail: exitCode === 0 ? when : `${when} · 退出码 ${exitCode}`, exitCode, attention: false };
+      if (since === undefined || exitCode === undefined)
+        return { label: "已停止", tone: "idle", detail: status, attention: false };
+      const when = `${since}停止`;
+      if (stopExitCodes.has(exitCode))
+        return {
+          label: "已停止",
+          tone: "idle",
+          detail: exitCode === 0 ? when : `${when} · 退出码 ${exitCode}`,
+          exitCode,
+          attention: false,
+        };
       return { label: "异常退出", tone: "danger", detail: `${when} · 退出码 ${exitCode}`, exitCode, attention: true };
     }
     case "created":
@@ -64,7 +91,15 @@ function duration(text: string): string | undefined {
   if (/^about an hour$/i.test(value)) return "约 1 小时";
   const match = /^(\d+) (second|minute|hour|day|week|month|year)s?$/i.exec(value);
   if (!match) return undefined;
-  const units: Record<string, string> = { second: "秒", minute: "分钟", hour: "小时", day: "天", week: "周", month: "个月", year: "年" };
+  const units: Record<string, string> = {
+    second: "秒",
+    minute: "分钟",
+    hour: "小时",
+    day: "天",
+    week: "周",
+    month: "个月",
+    year: "年",
+  };
   return `${match[1]} ${units[match[2].toLowerCase()]}`;
 }
 
@@ -73,13 +108,22 @@ function after(prefix: string, value: string): string {
   return /^\d/.test(value) ? `${prefix} ${value}` : `${prefix}${value}`;
 }
 
-function ago(since: string): string {
-  return since === "" ? "刚刚" : `${since}前`;
+function dockerAgo(text: string): string | undefined {
+  if (/^less than a second$/i.test(text)) return "刚刚";
+  const approximate = /^about an? (minute|hour)$/i.exec(text);
+  if (approximate) return `约 ${relativeUnit(-1, approximate[1].toLowerCase() as "minute" | "hour")}`;
+  const match = /^(\d+) (second|minute|hour|day|week|month|year)s?$/i.exec(text);
+  return match ? relativeUnit(-Number(match[1]), match[2].toLowerCase() as Intl.RelativeTimeFormatUnit) : undefined;
 }
 
 export type Filter = "all" | "running" | "stopped" | "attention";
 
-export const filterLabels: Record<Filter, string> = { all: "全部容器", running: "运行中", stopped: "已停止", attention: "需要关注" };
+export const filterLabels: Record<Filter, string> = {
+  all: "全部容器",
+  running: "运行中",
+  stopped: "已停止",
+  attention: "需要关注",
+};
 
 // Running covers every container the engine keeps alive, paused or restarting included.
 export function isActive(item: ContainerSummary): boolean {
@@ -149,14 +193,18 @@ export function groupContainers(items: ContainerSummary[], apps: ReadonlyMap<str
   }
   const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
   for (const group of groups.values()) group.containers.sort((a, b) => collator.compare(a.name, b.name));
-  return [...groups.values()].sort((a, b) => (a.key === "" ? 1 : 0) - (b.key === "" ? 1 : 0) || collator.compare(a.title, b.title));
+  return [...groups.values()].sort(
+    (a, b) => (a.key === "" ? 1 : 0) - (b.key === "" ? 1 : 0) || collator.compare(a.title, b.title),
+  );
 }
 
 // Every word must appear in the name, image, project or app name.
 export function matchesQuery(item: ContainerSummary, query: string, apps: ReadonlyMap<string, AppRef>): boolean {
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
-  const text = [item.name, item.image, item.project ?? "", appFor(groupKey(item), apps)?.title ?? ""].join(" ").toLowerCase();
+  const text = [item.name, item.image, item.project ?? "", appFor(groupKey(item), apps)?.title ?? ""]
+    .join(" ")
+    .toLowerCase();
   return words.every((word) => text.includes(word));
 }
 
@@ -189,7 +237,9 @@ export function totals(items: ContainerSummary[]): Totals {
 // older container agent that does not report one.
 export function imageUsers(image: ContainerImage, items: ContainerSummary[]): ContainerSummary[] {
   const tags = new Set(image.tags.map(normalizeReference));
-  return items.filter((item) => (item.imageId ? item.imageId === image.id : item.image === image.id || tags.has(normalizeReference(item.image))));
+  return items.filter((item) =>
+    item.imageId ? item.imageId === image.id : item.image === image.id || tags.has(normalizeReference(item.image)),
+  );
 }
 
 // docker.io/library/nginx@sha256:… and nginx:latest name the same image.
@@ -228,13 +278,21 @@ export interface WebPort {
 
 // Published TCP ports, each opened on the address this desktop was loaded
 // from; an App Center app's own web port keeps its scheme and path.
-export function webPorts(item: ContainerSummary, app: AppRef | undefined, location: Location = window.location): WebPort[] {
+export function webPorts(
+  item: ContainerSummary,
+  app: AppRef | undefined,
+  location: Location = window.location,
+): WebPort[] {
   const seen = new Set<number>();
   const ports: WebPort[] = [];
   for (const port of item.ports) {
     if (!port.hostPort || port.protocol !== "tcp" || seen.has(port.hostPort)) continue;
     seen.add(port.hostPort);
-    ports.push({ hostPort: port.hostPort, containerPort: port.containerPort, url: portURL(port.hostPort, app, location) });
+    ports.push({
+      hostPort: port.hostPort,
+      containerPort: port.containerPort,
+      url: portURL(port.hostPort, app, location),
+    });
   }
   return ports;
 }
@@ -260,26 +318,21 @@ export function formatPercent(value: number): string {
 }
 
 export function formatDateTime(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+  return formatDate(value, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
 }
 
 export function formatClock(value: string | number | Date): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(date);
+  return Number.isNaN(new Date(value).getTime()) ? "" : clock(value, true);
 }
 
 // "3 周前" for an image's age; exact dates live in the tooltip.
 export function formatAgo(value: string, now = Date.now()): string {
-  const time = Date.parse(value);
-  if (Number.isNaN(time)) return "—";
-  const seconds = Math.round((time - now) / 1_000);
-  const steps: Array<[Intl.RelativeTimeFormatUnit, number]> = [["year", 31_536_000], ["month", 2_592_000], ["week", 604_800], ["day", 86_400], ["hour", 3_600], ["minute", 60]];
-  const format = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" });
-  for (const [unit, size] of steps) {
-    if (Math.abs(seconds) >= size) return format.format(Math.trunc(seconds / size), unit);
-  }
-  return "刚刚";
+  return relativeTime(value, now, { dateAfterDays: Infinity });
 }

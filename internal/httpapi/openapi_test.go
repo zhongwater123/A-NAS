@@ -15,9 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/getkin/kin-openapi/openapi3filter"
-	legacyrouter "github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
@@ -28,6 +25,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
+	"github.com/zhongwater123/A-NAS/internal/openapitest"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
@@ -36,19 +34,6 @@ import (
 )
 
 func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
-	ctx := context.Background()
-	loader := openapi3.NewLoader()
-	document, err := loader.LoadFromFile(filepath.Join("..", "..", "api", "openapi.yaml"))
-	if err != nil {
-		t.Fatalf("load OpenAPI document: %v", err)
-	}
-	if err := document.Validate(ctx); err != nil {
-		t.Fatalf("validate OpenAPI document: %v", err)
-	}
-	router, err := legacyrouter.NewRouter(document)
-	if err != nil {
-		t.Fatalf("create OpenAPI router: %v", err)
-	}
 
 	photoHandler, photoLibraryID, photoAssetID := photoAPI(t)
 	movies := newMediaFixture(t)
@@ -75,6 +60,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 	commentStale, commentStaleType := feedbackForm{text: "旧版本", version: 99}.encode(t)
 	searchImage, searchImageType := imageSearchForm(t)
 	liveVideo, liveVideoType := multipartFile(t, "IMG_1.MOV", []byte("\x00\x00\x00\x18ftypqt  "))
+	video, videoType := multipartFile(t, "beach.mp4", []byte("\x00\x00\x00\x18ftypisom"))
 	tests := []struct {
 		name        string
 		method      string
@@ -116,6 +102,10 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "photo similar missing", path: "/api/v1/photos/assets/photo:missing/similar", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo image search without local AI", method: http.MethodPost, body: searchImage, contentType: searchImageType, path: "/api/v1/photos/image-searches", handler: photoHandler, csrf: true, wantStatus: http.StatusServiceUnavailable},
 		{name: "photo live video without media", method: http.MethodPost, body: liveVideo, contentType: liveVideoType, path: "/api/v1/photos/libraries/" + photoLibraryID + "/live-videos", handler: photoHandler, csrf: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "photo video without media", method: http.MethodPost, body: video, contentType: videoType, path: "/api/v1/photos/libraries/" + photoLibraryID + "/uploads", handler: photoHandler, csrf: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "photo video playback of a photo", path: "/api/v1/photos/assets/" + photoAssetID + "/video/playback?caps=hevc,webm", handler: photoHandler, wantStatus: http.StatusNotFound},
+		{name: "photo video original of a photo", path: "/api/v1/photos/assets/" + photoAssetID + "/video/original", handler: photoHandler, wantStatus: http.StatusNotFound},
+		{name: "photo video stream of a photo", path: "/api/v1/photos/assets/" + photoAssetID + "/video/stream?start=1", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo image search expired", path: "/api/v1/photos/image-searches/0123/assets?limit=2", handler: photoHandler, wantStatus: http.StatusNotFound},
 		{name: "photo albums", path: "/api/v1/photos/libraries/" + photoLibraryID + "/albums", handler: photoHandler, wantStatus: http.StatusOK},
 		{name: "photo album missing", path: "/api/v1/photos/albums/album:missing/assets", handler: photoHandler, wantStatus: http.StatusNotFound},
@@ -192,6 +182,8 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 		{name: "system", path: "/api/v1/system", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
 		{name: "disks", path: "/api/v1/disks", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
 		{name: "host state", path: "/api/v1/host-state", reader: fake.NewHealthy(), wantStatus: http.StatusOK},
+		{name: "system with health findings", path: "/api/v1/system", reader: fake.NewWarning(), wantStatus: http.StatusOK},
+		{name: "host state with health findings", path: "/api/v1/host-state", reader: fake.NewWarning(), wantStatus: http.StatusOK},
 		{name: "system unavailable", path: "/api/v1/system", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
 		{name: "disks unavailable", path: "/api/v1/disks", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
 		{name: "host state unavailable", path: "/api/v1/host-state", reader: fake.NewUnavailable(), wantStatus: http.StatusServiceUnavailable},
@@ -252,30 +244,7 @@ func TestOpenAPIContractMatchesHTTPResponses(t *testing.T) {
 			if got := recorder.Code; got != test.wantStatus {
 				t.Fatalf("status = %d, want %d", got, test.wantStatus)
 			}
-			route, pathParams, err := router.FindRoute(request)
-			if err != nil {
-				t.Fatalf("find OpenAPI route: %v", err)
-			}
-			requestInput := &openapi3filter.RequestValidationInput{
-				Request:    request,
-				PathParams: pathParams,
-				Route:      route,
-				Options: &openapi3filter.Options{AuthenticationFunc: func(context.Context, *openapi3filter.AuthenticationInput) error {
-					return nil
-				}},
-			}
-			if err := openapi3filter.ValidateRequest(ctx, requestInput); err != nil {
-				t.Fatalf("validate request: %v", err)
-			}
-			responseInput := &openapi3filter.ResponseValidationInput{
-				RequestValidationInput: requestInput,
-				Status:                 recorder.Code,
-				Header:                 recorder.Header(),
-			}
-			responseInput.SetBodyBytes(recorder.Body.Bytes())
-			if err := openapi3filter.ValidateResponse(ctx, responseInput); err != nil {
-				t.Fatalf("validate response: %v", err)
-			}
+			openapitest.Check(t, request, recorder)
 		})
 	}
 }
@@ -297,7 +266,7 @@ func feedbackAPI(t *testing.T) (http.Handler, feedback.Item) {
 	api := feedbackapi.New(store, nil)
 	member := accounts.User{ID: "user:contract", Username: "contract", Role: accounts.RoleMember}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		api.ServeHTTP(w, r.WithContext(feedbackapi.WithUser(r.Context(), member)))
+		api.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), member)))
 	}), item
 }
 
@@ -336,7 +305,7 @@ func transfersAPI(t *testing.T) transferContract {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
-	fileService := files.NewService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	fileService := files.NewLocalService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	entry, err := fileService.Upload(ctx, admin, contract.space, "", "clip.bin", strings.NewReader("0123456789"))
 	if err != nil {
 		t.Fatal(err)
@@ -353,9 +322,9 @@ func transfersAPI(t *testing.T) transferContract {
 	}
 	contract.download = download.ID
 	for name, target := range map[string]*string{"first.bin": &contract.upload, "second.bin": &contract.other} {
-		upload, err := service.BeginUpload(ctx, admin, transfers.UploadRequest{UploadRequest: files.UploadRequest{
+		upload, err := service.BeginUpload(ctx, admin, transfers.UploadRequest{
 			SpaceID: contract.space, Name: name, Size: 4, Conflict: files.ConflictAsk,
-		}})
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -366,7 +335,7 @@ func transfersAPI(t *testing.T) transferContract {
 		t.Fatal(err)
 	}
 	contract.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		api.ServeHTTP(w, r.WithContext(transfersapi.WithUser(r.Context(), admin)))
+		api.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), admin)))
 	})
 	return contract
 }
@@ -462,7 +431,7 @@ func installedShortcuts(t *testing.T) http.Handler {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	identity, _ := appstoreapi.DevelopmentHost{}.AppIdentity(ctx, "navidrome")
+	identity, _ := fakeappstore.Host{}.AppIdentity(ctx, "navidrome")
 	plan, err := store.Plan(ctx, "navidrome", identity)
 	if err != nil {
 		t.Fatal(err)
@@ -479,5 +448,5 @@ func appAPI(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return appstoreapi.New(store, appstoreapi.DataSourceSimulated, appstoreapi.Options{Host: appstoreapi.DevelopmentHost{}})
+	return appstoreapi.New(store, appstoreapi.DataSourceSimulated, appstoreapi.Options{Host: fakeappstore.Host{}})
 }

@@ -13,19 +13,23 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 )
 
 const (
 	hostIdentityDomain = "a-nas:host:v1"
 	diskIdentityDomain = "a-nas:disk:v1"
+	dataMountPoint     = "/srv/a-nas/data"
 )
 
 type dependencies struct {
@@ -35,7 +39,7 @@ type dependencies struct {
 	now                   func() time.Time
 	readBlockDevices      func(context.Context) ([]byte, error)
 	readSMART             func(context.Context, string) ([]byte, error)
-	readFilesystemUsage   func(string) (uint64, uint64, error)
+	readFilesystemUsage   func(string) (filesystemUsage, error)
 	sleep                 func(context.Context, time.Duration) error
 	readTaskServices      func(context.Context) ([]byte, error)
 	readTaskBlockDevices  func(context.Context) ([]byte, error)
@@ -80,17 +84,21 @@ func New() *Reader {
 				"--bytes",
 				"--tree",
 				"--exclude", "7",
-				"--output", "NAME,TYPE,SIZE,MODEL,TRAN,ROTA,RM,FSTYPE,MOUNTPOINTS,WWN,SERIAL",
+				"--output", "NAME,TYPE,SIZE,MODEL,TRAN,ROTA,RM,RO,FSTYPE,UUID,LABEL,MOUNTPOINTS,WWN,SERIAL",
 			).Output()
 		},
 		readSMART: readSMARTCommand,
-		readFilesystemUsage: func(path string) (uint64, uint64, error) {
+		readFilesystemUsage: func(path string) (filesystemUsage, error) {
 			var stats syscall.Statfs_t
 			if err := syscall.Statfs(path, &stats); err != nil {
-				return 0, 0, err
+				return filesystemUsage{}, err
 			}
 			blockSize := uint64(stats.Bsize)
-			return uint64(stats.Blocks) * blockSize, uint64(stats.Bavail) * blockSize, nil
+			return filesystemUsage{
+				total:     uint64(stats.Blocks) * blockSize,
+				available: uint64(stats.Bavail) * blockSize,
+				readOnly:  stats.Flags&stRDOnly != 0,
+			}, nil
 		},
 	})
 }
@@ -136,12 +144,20 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 	if err != nil {
 		return hoststate.State{}, fmt.Errorf("read block devices: %w", err)
 	}
-	disks, smartTargets, err := parseDisks(blockDevices, r.smartFor)
+	btrfs := btrfsDevices(r.dependencies.root)
+	disks, smartTargets, err := parseDisks(blockDevices, r.smartFor, btrfs)
 	if err != nil {
 		return hoststate.State{}, fmt.Errorf("read block devices: %w", err)
 	}
 	r.refreshSMARTInBackground(smartTargets)
-	observeDataVolumeUsage(disks, r.dependencies.readFilesystemUsage)
+	observeDataVolume(disks, r.dependencies.readFilesystemUsage, func() *uint64 {
+		return readBtrfsErrors(r.dependencies.root, mountedDevices(blockDevices, dataMountPoint))
+	})
+	var dataVolume *hoststate.DataVolume
+	var document blockDeviceDocument
+	if json.Unmarshal(blockDevices, &document) == nil {
+		dataVolume = readDataVolume(r.dependencies.root, dataVolumeUUID(document.BlockDevices, btrfs), disks)
+	}
 
 	hostID, err := derivedResourceID("host", hostIdentityDomain, machineID)
 	if err != nil {
@@ -157,27 +173,131 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 			Architecture:    r.dependencies.architecture,
 			UptimeSeconds:   uptime,
 			Health:          hoststate.HealthUnknown,
+			Storage:         r.systemStorage(),
 		},
-		Disks: disks,
+		Disks:      disks,
+		DataVolume: dataVolume,
 	}, nil
 }
 
-func observeDataVolumeUsage(disks []hoststate.Disk, readUsage func(string) (uint64, uint64, error)) {
-	if readUsage == nil {
-		return
+func (r *Reader) systemStorage() *hoststate.StorageUsage {
+	if r.dependencies.readFilesystemUsage == nil {
+		return nil
 	}
+	// /var/lib holds A-NAS state and Docker's default storage. It may be a
+	// separate filesystem from /, so observe it rather than disk capacity.
+	usage, err := r.dependencies.readFilesystemUsage("/var/lib")
+	if err != nil || usage.total == 0 || usage.available > usage.total {
+		return nil
+	}
+	return &hoststate.StorageUsage{TotalBytes: usage.total, AvailableBytes: usage.available}
+}
+
+// stRDOnly is ST_RDONLY in statfs flags: the filesystem is mounted read-only.
+const stRDOnly = 0x1
+
+type filesystemUsage struct {
+	total, available uint64
+	readOnly         bool
+}
+
+// observeDataVolume adds the mounted data volume's size, free space,
+// read-only state and Btrfs error count to the data disk.
+func observeDataVolume(disks []hoststate.Disk, readUsage func(string) (filesystemUsage, error), readErrors func() *uint64) {
 	for index := range disks {
 		if disks[index].Role != hoststate.DiskRoleData {
 			continue
 		}
-		total, available, err := readUsage("/srv/a-nas/data")
-		if err != nil || total == 0 || available > total {
+		if readErrors != nil {
+			disks[index].FilesystemErrors = readErrors()
+		}
+		if readUsage == nil {
 			return
 		}
-		disks[index].FilesystemCapacityBytes = &total
-		disks[index].FilesystemAvailableBytes = &available
+		usage, err := readUsage(dataMountPoint)
+		if err != nil || usage.total == 0 || usage.available > usage.total {
+			return
+		}
+		disks[index].FilesystemCapacityBytes = &usage.total
+		disks[index].FilesystemAvailableBytes = &usage.available
+		disks[index].FilesystemReadOnly = usage.readOnly
 		return
 	}
+}
+
+// readBtrfsErrors sums the write, read, flush, checksum and generation
+// errors Linux has counted for every device of the Btrfs filesystem on one
+// of devices (sysfs devinfo/*/error_stats, Linux 5.14 and later). The counts
+// live in the filesystem and grow until reset with "btrfs device stats -z".
+// It is nil when the filesystem is not found there.
+func readBtrfsErrors(root fs.FS, devices []string) *uint64 {
+	if root == nil || len(devices) == 0 {
+		return nil
+	}
+	members, err := fs.Glob(root, "sys/fs/btrfs/*/devices/*")
+	if err != nil {
+		return nil
+	}
+	for _, member := range members {
+		if !slices.Contains(devices, path.Base(member)) {
+			continue
+		}
+		stats, err := fs.Glob(root, path.Dir(path.Dir(member))+"/devinfo/*/error_stats")
+		if err != nil || len(stats) == 0 {
+			return nil
+		}
+		var total uint64
+		for _, file := range stats {
+			contents, err := fs.ReadFile(root, file)
+			if err != nil {
+				return nil
+			}
+			for line := range strings.SplitSeq(strings.TrimSpace(string(contents)), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) != 2 {
+					return nil
+				}
+				count, err := strconv.ParseUint(fields[1], 10, 64)
+				if err != nil {
+					return nil
+				}
+				total += count
+			}
+		}
+		return &total
+	}
+	return nil
+}
+
+// mountedDevices names the block devices lsblk shows mounted at mountpoint.
+func mountedDevices(contents []byte, mountpoint string) []string {
+	var document blockDeviceDocument
+	if json.Unmarshal(contents, &document) != nil {
+		return nil
+	}
+	return namesMountedAt(document.BlockDevices, mountpoint)
+}
+
+// namesMountedAt names the devices in the tree mounted at mountpoint; the
+// mount table, unlike FSTYPE and UUID, does not come from udev.
+func namesMountedAt(devices []blockDevice, mountpoint string) []string {
+	var names []string
+	var visit func(blockDevice)
+	visit = func(device blockDevice) {
+		for _, candidate := range device.Mountpoints {
+			if candidate != nil && *candidate == mountpoint && device.Name != "" {
+				names = append(names, device.Name)
+				break
+			}
+		}
+		for _, child := range device.Children {
+			visit(child)
+		}
+	}
+	for _, device := range devices {
+		visit(device)
+	}
+	return names
 }
 
 // ResolveDevice maps an opaque disk ID to a current kernel device path for the
@@ -191,13 +311,19 @@ func (r *Reader) ResolveDevice(ctx context.Context, diskID string) (ResolvedDevi
 	if err := json.Unmarshal(contents, &document); err != nil {
 		return ResolvedDevice{}, err
 	}
-	disks, _, err := parseDisks(contents, r.smartFor)
+	disks, _, err := parseDisks(contents, r.smartFor, btrfsDevices(r.dependencies.root))
 	if err != nil {
 		return ResolvedDevice{}, err
 	}
 	byID := make(map[string]hoststate.Disk, len(disks))
 	for _, disk := range disks {
 		byID[disk.ID.String()] = disk
+	}
+	// A display-only observation, or a formerly valid disk whose identity
+	// is now duplicated, must never resolve to the first matching path.
+	disk, found := byID[diskID]
+	if !found || len(disk.ObservationIssues) != 0 {
+		return ResolvedDevice{}, errors.New("disk has no usable hardware observation")
 	}
 	for _, device := range document.BlockDevices {
 		if device.Type != "disk" {
@@ -308,7 +434,10 @@ type blockDevice struct {
 	Transport   string        `json:"tran"`
 	Rotational  bool          `json:"rota"`
 	Removable   bool          `json:"rm"`
+	ReadOnly    bool          `json:"ro"`
 	Filesystem  string        `json:"fstype"`
+	UUID        string        `json:"uuid"`
+	Label       string        `json:"label"`
 	Mountpoints []*string     `json:"mountpoints"`
 	WWN         string        `json:"wwn"`
 	Serial      string        `json:"serial"`
@@ -317,7 +446,10 @@ type blockDevice struct {
 
 // parseDisks maps lsblk's disks to public disks with the SMART readings smart
 // has for them, and lists the disks SMART can be read from. smart may be nil.
-func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, *int)) ([]hoststate.Disk, []smartTarget, error) {
+// btrfs maps devices of mounted Btrfs filesystems to their UUIDs (see
+// btrfsDevices); such a device is in use, and those of the data volume make
+// their disks data disks, whatever the udev database says.
+func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, *int), btrfs map[string]string) ([]hoststate.Disk, []smartTarget, error) {
 	var document blockDeviceDocument
 	if err := json.Unmarshal(contents, &document); err != nil {
 		return nil, nil, err
@@ -325,41 +457,64 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 
 	disks := make([]hoststate.Disk, 0, len(document.BlockDevices))
 	targets := make([]smartTarget, 0, len(document.BlockDevices))
-	seen := make(map[string]struct{})
-	systemDisks := 0
+	identities := make(map[string]int)
 	for _, device := range document.BlockDevices {
+		if device.Type == "disk" {
+			if identity, err := stableDiskIdentity(device); err == nil {
+				identities[identity]++
+			}
+		}
+	}
+	systemDisks := 0
+	dataUUID := dataVolumeUUID(document.BlockDevices, btrfs)
+	for index, device := range document.BlockDevices {
 		if device.Type != "disk" {
 			continue
 		}
-		if device.Size == 0 || strings.TrimSpace(device.Model) == "" {
-			return nil, nil, fmt.Errorf("disk %q is missing model or capacity", device.Name)
+		var issues []hoststate.DiskObservationIssue
+		if device.Size == 0 {
+			issues = append(issues, hoststate.DiskMissingCapacity)
+		}
+		if strings.TrimSpace(device.Model) == "" {
+			issues = append(issues, hoststate.DiskMissingModel)
+		}
+		if device.ReadOnly {
+			issues = append(issues, hoststate.DiskReadOnly)
+		}
+		if device.Name == "" || strings.ContainsAny(device.Name, `/\\`) {
+			issues = append(issues, hoststate.DiskInvalidDeviceName)
 		}
 		identity, err := stableDiskIdentity(device)
 		if err != nil {
-			return nil, nil, fmt.Errorf("disk %q: %w", device.Name, err)
+			issues = append(issues, hoststate.DiskMissingIdentity)
+		} else if identities[identity] > 1 {
+			issues = append(issues, hoststate.DiskDuplicateIdentity)
 		}
-		id, err := derivedResourceID("disk", diskIdentityDomain, identity)
+		kind, domain, source := "disk", diskIdentityDomain, identity
+		if identity == "" || identities[identity] > 1 {
+			// Only a row key for this observation; never accepted by ResolveDevice.
+			// The separate namespace cannot collide with a persisted disk ID.
+			kind, domain = "observation", "a-nas:disk-observation:v1"
+			source = fmt.Sprintf("%s\x00%s\x00%d", identity, device.Name, index)
+		}
+		id, err := derivedResourceID(kind, domain, source)
 		if err != nil {
 			return nil, nil, fmt.Errorf("disk %q: %w", device.Name, err)
 		}
-		if _, exists := seen[id.String()]; exists {
-			return nil, nil, errors.New("duplicate stable disk identity")
-		}
-		seen[id.String()] = struct{}{}
 
 		role := hoststate.DiskRoleUnassigned
 		if containsMountpoint(device, "/") {
 			role = hoststate.DiskRoleSystem
 			systemDisks++
-		} else if containsMountpoint(device, "/srv/a-nas/data") {
+		} else if containsMountpoint(device, dataMountPoint) || (dataUUID != "" && (containsBtrfs(device, dataUUID) || holdsBtrfs(device, btrfs, dataUUID))) {
 			role = hoststate.DiskRoleData
 		}
 		smartStatus := hoststate.HealthUnknown
 		var temperature *int
-		if smart != nil {
+		if smart != nil && len(issues) == 0 {
 			smartStatus, temperature = smart(identity)
 		}
-		if device.Name != "" && !strings.ContainsAny(device.Name, `/\\`) {
+		if len(issues) == 0 {
 			targets = append(targets, smartTarget{identity: identity, name: device.Name})
 		}
 		health := smartStatus
@@ -367,14 +522,16 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 			health = hoststate.HealthUnknown
 		}
 		disks = append(disks, hoststate.Disk{
+			ObservationIssues:  issues,
 			ID:                 id,
 			Model:              strings.TrimSpace(device.Model),
 			Transport:          mapTransport(device.Transport),
 			CapacityBytes:      device.Size,
 			Rotational:         device.Rotational,
 			Removable:          device.Removable,
-			InUse:              deviceInUse(device),
+			InUse:              deviceInUse(device) || holdsBtrfs(device, btrfs, ""),
 			Filesystems:        collectFilesystems(device),
+			Signatures:         collectSignatures(device),
 			Role:               role,
 			Health:             health,
 			SMARTStatus:        smartStatus,
@@ -391,22 +548,86 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 	return disks, targets, nil
 }
 
+// deviceInUse reports whether something uses the device now: a mount or
+// active swap, or a holder such as an assembled md array, an active LVM
+// volume or an open LUKS mapping, which lsblk lists as a child. A signature
+// alone, such as a linux_raid_member another NAS left behind, is not use:
+// the storage plan lists it and erasing it needs the confirmation phrase.
 func deviceInUse(device blockDevice) bool {
 	for _, mountpoint := range device.Mountpoints {
 		if mountpoint != nil && strings.TrimSpace(*mountpoint) != "" {
 			return true
 		}
 	}
-	filesystem := strings.ToLower(strings.TrimSpace(device.Filesystem))
-	if filesystem == "swap" || filesystem == "linux_raid_member" || filesystem == "lvm2_member" || filesystem == "crypto_luks" {
+	switch kind := strings.ToLower(strings.TrimSpace(device.Type)); {
+	case kind == "crypt", kind == "lvm", kind == "md", kind == "dm", kind == "mpath", strings.HasPrefix(kind, "raid"):
 		return true
 	}
-	switch strings.ToLower(strings.TrimSpace(device.Type)) {
-	case "crypt", "lvm", "raid", "md", "mpath":
+	return slices.ContainsFunc(device.Children, deviceInUse)
+}
+
+// collectSignatures lists the formats blkid found on the disk and its
+// partitions, sorted and without repeats.
+func collectSignatures(device blockDevice) []hoststate.Signature {
+	seen := make(map[hoststate.Signature]struct{})
+	var visit func(blockDevice)
+	visit = func(candidate blockDevice) {
+		if kind := strings.ToLower(strings.TrimSpace(candidate.Filesystem)); kind != "" {
+			seen[hoststate.Signature{
+				Type: kind, Label: strings.TrimSpace(candidate.Label), UUID: strings.ToLower(strings.TrimSpace(candidate.UUID)),
+			}] = struct{}{}
+		}
+		for _, child := range candidate.Children {
+			visit(child)
+		}
+	}
+	visit(device)
+	if len(seen) == 0 {
+		return nil
+	}
+	signatures := make([]hoststate.Signature, 0, len(seen))
+	for signature := range seen {
+		signatures = append(signatures, signature)
+	}
+	sort.Slice(signatures, func(i, j int) bool {
+		left, right := signatures[i], signatures[j]
+		if left.Type != right.Type {
+			return left.Type < right.Type
+		}
+		if left.Label != right.Label {
+			return left.Label < right.Label
+		}
+		return left.UUID < right.UUID
+	})
+	return signatures
+}
+
+// mountedBtrfsUUID is the filesystem UUID of the Btrfs device lsblk shows
+// mounted at mountpoint, or "" when there is none.
+func mountedBtrfsUUID(devices []blockDevice, mountpoint string) string {
+	for _, device := range devices {
+		for _, candidate := range device.Mountpoints {
+			if candidate != nil && *candidate == mountpoint && strings.EqualFold(device.Filesystem, "btrfs") {
+				if uuid := strings.ToLower(strings.TrimSpace(device.UUID)); datavolume.ValidFilesystemUUID(uuid) {
+					return uuid
+				}
+			}
+		}
+		if uuid := mountedBtrfsUUID(device.Children, mountpoint); uuid != "" {
+			return uuid
+		}
+	}
+	return ""
+}
+
+// containsBtrfs reports whether the device or a partition on it is a member
+// of the Btrfs filesystem with the UUID.
+func containsBtrfs(device blockDevice, uuid string) bool {
+	if strings.EqualFold(device.Filesystem, "btrfs") && strings.EqualFold(strings.TrimSpace(device.UUID), uuid) {
 		return true
 	}
 	for _, child := range device.Children {
-		if deviceInUse(child) {
+		if containsBtrfs(child, uuid) {
 			return true
 		}
 	}

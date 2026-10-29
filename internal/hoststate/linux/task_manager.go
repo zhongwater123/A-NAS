@@ -51,7 +51,7 @@ func readTaskFile(root fs.FS, name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, taskReadLimit+1))
 	if err != nil {
 		return nil, err
@@ -66,7 +66,7 @@ func taskDirectories(root fs.FS, name string, limit int) ([]fs.DirEntry, bool, e
 	if err != nil {
 		return nil, false, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	dir, ok := file.(fs.ReadDirFile)
 	if !ok {
 		return nil, false, errors.New("directory cannot be enumerated")
@@ -130,20 +130,20 @@ func taskUint(root fs.FS, path string) (*uint64, error) {
 	}
 	return &v, nil
 }
-func taskFloat(v float64) *float64 { return &v }
+
 func taskRate(before, after *uint64, seconds float64) *float64 {
 	if before == nil || after == nil || *after < *before || seconds <= 0 {
 		return nil
 	}
-	return taskFloat(float64(*after-*before) / seconds)
+	return new(float64(*after-*before) / seconds)
 }
-func taskUintPointer(v uint64) *uint64    { return &v }
+
 func taskNumber(v string) (uint64, error) { return strconv.ParseUint(v, 10, 64) }
 func taskCPUPercent(before, after *counterSample) *float64 {
 	if after.cpuTotal <= before.cpuTotal || after.cpuBusy < before.cpuBusy || after.logicalCores != before.logicalCores {
 		return nil
 	}
-	return taskFloat(cpuUsagePercent(before, after))
+	return new(cpuUsagePercent(before, after))
 }
 func taskCPU(root fs.FS, at time.Time) (*counterSample, error) {
 	busy, total, cores, err := readCPU(boundedTaskFS{root})

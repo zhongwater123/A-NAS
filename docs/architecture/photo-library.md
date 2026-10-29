@@ -13,7 +13,7 @@
 - 账号、会话、角色和管理员查看授权由 [ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md) 提供，相册服务经 Host Agent 的会话查询接口（`internal/sessionlookup`）确认身份，照片资产权限由 Catalog Policy（`internal/photos/policy.go`）判定。
 - 本地目录 Adapter、临时卷与系统测试只验证契约，不能替代 Experimental NAS 真实数据卷上的断盘和恢复验收（切片 7）。
 - AI 模型已有基线候选，但质量、处理速度、峰值内存、温度和前台影响必须通过代表性图库基准后才能成为发布默认值。
-- RAW、动态照片和视频的完整设备样本矩阵仍需扩充；动态照片已实现边界见[规格](../specs/photo-motion.md)。
+- RAW、动态照片和视频的完整设备样本矩阵仍需扩充；动态照片与普通视频已实现的边界见[动态照片规格](../specs/photo-motion.md)与[相册视频规格](../specs/photo-video.md)。
 
 ## 组件与数据流
 
@@ -53,7 +53,27 @@ anas-photos（a-nas-photos）◄──────┘
 
 首版不为目录表、对象路径、SQLite、OpenVINO 或某个向量扩展建立公共 Interface。真正需要 Adapter 的边界只有外部环境或昂贵依赖：受管存储目录、媒体解码、AI Provider、时钟和 Policy。
 
-HEIC 和动态照片经 `photos.Options.Media` 使用隔离 Media Worker，双原件引用、原子提交、提取视频的存储取舍以及模型输入边界统一记录在[动态照片规格](../specs/photo-motion.md)。
+### 资产可见性
+
+Policy 在图库一级判定能否查看（`canView`）；在能查看的图库内，哪些照片资产可见由 Policy 的资产规则决定（[`policy.go`](../../internal/photos/policy.go) 的 `assetRules`）。每条规则只写一次，有两种读法：
+
+- 列表用 `listedAssets` 给出的 SQL 条件：不在回收站，并满足约束调用方的每条规则。时间线、月份计数、相册及其计数与封面、用户标签、AI 聚合、目录、人物与人物的照片，以及搜索、找相似与以图搜图的候选都用它；排序后的结果在返回前按调用方的图库范围与同一条件回查，索引命中本身不构成授权。
+- 单张照片用 `seesAsset`，在读出记录之后判定：详情、原图、视图、元数据与播放都经过它；回收站列表逐条判定。
+
+两种读法由测试对照（[`video_test.go`](../../internal/photos/video_test.go) 的 `TestAssetRulesReadTheSameInListingsAndOnOneAsset`）。目前只有一条规则：助手看不到视频（`assistantSeesNoVideos`）。新增规则时只改 `assetRules`，列表与单张照片同时生效。
+
+HEIC、动态照片和普通视频经 `photos.Options.Media` 使用隔离 FFmpeg Worker，双原件引用、原子提交、提取视频的存储取舍以及模型输入边界统一记录在[动态照片规格](../specs/photo-motion.md)，普通视频见下面的“视频”。
+
+### 视频
+
+普通视频是照片资产（[规格](../specs/photo-video.md)）：资产、内容对象、重复组、复制、相册、回收站与 Policy 都不区分照片和视频。区别只在内容对象上：
+
+- **识别与导入**：暂存时按前 512 字节识别容器（ISO 媒体与 QuickTime、Matroska/WebM、AVI、MPEG-TS/M2TS），视频按 `MaxVideoBytes`（默认 4 GiB）计限。发布前由 FFmpeg Worker 的 `probe` 读出时长、第一条视频轨（尺寸、编码、像素格式、显示矩阵旋转）、第一条音轨的编码和录制时间，必须有可读的视频轨。尺寸按旋转转正后写入 `objects.width/height`，方向记为 1；读出的事实写入 Catalog 第 13 次迁移的 `videos(object_id, duration, info)`，随内容对象级联删除，复制与重复照片共用。
+- **封面**：缩略图任务对视频对象调用 Worker 的 `frame`，取 `min(时长/10, 1)` 秒处的一帧，在那里取不到时取第一帧；FFmpeg 已按显示矩阵转正。查看器的 1600 px 封面按需渲染、不缓存，与 HEIC 预览相同。
+- **AI 排除**：入队向量、检测、人脸（含按图库重新入队）的 SQL 都带 `notVideo` 条件，所以没有任何代码路径能为视频对象排 AI 任务；AI 进度不计视频对象，搜索只按名称与用户标签匹配视频、也不把它们计入“尚未识别完”，找相似对视频返回不存在；AI 聚合、聚合计数与找相似的候选明确排除视频，即使视频有了向量（例如将来覆盖视频的索引）也不出现。哪些内容对象参与本地 AI 只由一条规则决定（[`video.go`](../../internal/photos/video.go) 的 `inLocalAI`，以及已读出候选上的同名方法）：AI 任务入队、向量索引同步、AI 聚合、找相似与搜索的语义排序都用它，不各自判断视频。成员的 AI 助手（`Principal.Assistant`）看不到视频，这是 Policy 的资产规则（见下文“资产可见性”）。
+- **播放**：`VideoPlayback` 按浏览器报告的能力（`caps`）决定直接播放、转封装或转码，规则与影视中心共用 [`internal/mediaplay`](../../internal/mediaplay/mediaplay.go)（[影视中心的播放](media-center.md#播放)）：相册把导入时读到的第一条音轨当作默认音轨，按 `video/3gpp` 标出 3GPP，没有画质与音轨选择，所以转码总是最高 1080 行、8000 kbps。直接播放读 `/video/original`（QuickTime 与 3GP 以 `video/mp4` 返回，浏览器按 MP4 播放），转换经 Worker 的 `stream` 生成分段 MP4，同时最多两路（`mediaplay.Conversions`），新请求最多等 4 秒，仍无空位时返回 `media_busy`。转换由请求持有，断开即取消。
+- **前台活动**：相册服务把每个仍在服务中的用户请求（播放中的视频、长时间上传）都计为前台使用，`Gate.Use` 结束后才开始 5 分钟静默计时。
+- **回滚**：降级到第 12 次迁移前，必须先彻底删除所有视频资产（回收站清空），再删除 `videos` 表并把 `user_version` 设为 12；旧版本不认识视频对象，会把它们当作图片生成缩略图并排入 AI。
 
 ## 持久化与崩溃一致性
 
@@ -72,7 +92,7 @@ HEIC 和动态照片经 `photos.Options.Media` 使用隔离 Media Worker，双�
 ### 原图提交
 
 1. 在 `photos` 子卷的 `staging/` 流式写入并同时计算 SHA-256，不先把整个文件读入内存；写入过程中按块检查大小上限与容量保留，前 8 字节判定 JPEG/PNG。
-2. 刷新文件后只读取图片头校验格式与像素上限，再设为只读并以硬链接发布到 `objects/<2 位>/<2 位>/<SHA-256>`，随后刷新所在目录；同名对象已存在时直接复用，从不覆盖。
+2. 刷新文件后只读取图片头校验格式与[本机解码预算](../specs/photo-library.md)，再设为只读并以硬链接发布到 `objects/<2 位>/<2 位>/<SHA-256>`，随后刷新所在目录；同名对象已存在时直接复用，从不覆盖。HEIC/视频继续使用 FFmpeg Worker 的尺寸边界。
 3. 在单个数据库事务中创建对象行与独立照片资产；重复组不单独存表，由同一图库内引用同一对象的未删除资产推导。
 4. 发布对象与引用它的事务、清除最后一个引用与删除对象文件，都在同一把提交锁内成对完成，因此清除不会删掉刚被导入复用的对象。崩溃后由对账删除不在写入中的 staging 文件与没有对象行的对象文件，并报告有引用但文件缺失的原图；任何自动回收都不能触碰仍有引用的对象。
 
@@ -80,19 +100,27 @@ HEIC 和动态照片经 `photos.Options.Media` 使用隔离 Media Worker，双�
 
 ## 后台任务与资源隔离
 
+`anas-photos` 的所有进程内完整图片解码共用一个可取消的槽位（已有依赖 `golang.org/x/sync/semaphore`），从解码前持有到缩放、裁剪、编码完成，覆盖缩略图、AI 预取、助手视图、图库外图片搜索和人脸/宠物头像。每次重新读取文件头检查[预算](../specs/photo-library.md)，因此历史原图也不能绕过。FFmpeg Worker 调用在槽位外进行，只在处理其返回的 JPEG 时进入槽位，避免等待外部 Worker 时阻塞本机解码。
+
+相册服务单元设置 `GOMEMLIMIT=1GiB`，保留 `MemoryMax=2G`。前者是 Go GC 的软目标，不能代替像素预算和并发限制；硬上限还要容纳 SQLite、映射文件和 Go 之外的内存。单次像素预算与串行渲染为缩放中间图和索引留出余量；这不是对任意规模图库或无限并发 HTTP 输入的总 RSS 承诺。超限图片不进入完整解码，历史派生任务按 `undecodable` 永久失败。等待槽位取消遵循原任务退回规则。
+
 SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、尝试次数、`lease_until`、下次可执行时间和稳定错误类别。Worker 以短租约领取单张、单能力任务；重复执行由唯一约束收敛为同一当前结果。只依赖原图字节的派生（缩略图、基础元数据，以及未来的 Embedding）以 `(object_id, derivation)` 为键，副本与重复照片共用；依赖图库设置或用户数据的派生才以照片资产为键。派生文件位于 `derived/<派生版本>/`，与原图分开统计和清除；最后一个引用被清除时随原图一起删除。
 
 任务分为两类，共用同一张表和租约语义：
 
 - **媒体任务**：缩略图、兼容预览和基础元数据，由 `anas-photos` 在上传后立即执行，不等待空闲条件，也不依赖 AI Worker；低优先级由 `anas-photos.service` 的 `CPUWeight=20` 与 `IOWeight=20` 实现，只在争用时让出 CPU 与磁盘。`IOWeight` 只在 BFQ 或 `io.cost` 下生效，实验 NAS 数据盘的 `mq-deadline` 下不起作用（[调查](../investigations/2026-10-13-idle-detection-used-one-core.md)）。尺寸、EXIF 方向与拍摄时间在导入时只读文件头获得：尺寸用 Go 标准库 `image.DecodeConfig`，EXIF 用 [imagemeta](https://github.com/evanoberholster/imagemeta)（MIT，同时覆盖后续的 HEIC 与常见 RAW）；无时区偏移的拍摄时间按 NAS 本地时区解释。JPEG/PNG 缩略图用 [imaging](https://github.com/disintegration/imaging)（MIT，纯 Go）先缩放后按方向转正，再合成白底编码为 JPEG；像素上限在导入时已检查。HEIC、RAW 和视频依赖的 C 解码器（libheif、FFmpeg 等）在无网络、受内存限制的子进程中运行。媒体任务未完成或失败时，JPEG/PNG 直接显示原图。进程内解码的 panic 按 `undecodable` 记为永久失败；每次领取都计入尝试次数，租约连续 3 次到期（例如解码反复拖垮进程）后任务以 `interrupted` 失败，不再无限重领。
+  - **经 FFmpeg Worker 解码的任务**（HEIC 与视频的缩略图、HEIC 的检测输入）是后台工作，Worker 忙时排队等待（[准入与失败](media-center.md#准入与失败)），失败按 AI Worker 的规则分类（[`decodeFailure`](../../internal/photos/jobs.go)）：Worker 没有接下输入（不在、被 systemd 丢弃、没有解码器）时任务退回、不计次数，1 分钟后再试，循环随之暂停而不是拿每个任务去试；接下后中途停止记 `interrupted`、超时记 `io`，各计一次，3 次后失败；读不了记 `undecodable`。停止服务时，正在执行的任务带着尝试次数退回原位。此前这三种环境错误都记 `io`，Worker 几分钟不可用就会让期间导入的照片永久没有缩略图、向量、检测与人脸（[调查](../investigations/2026-10-21-media-worker-shared-budget.md)）。
 - **AI 任务**：Embedding、标签、人脸和描述，只由 AI Worker 执行并遵守下述空闲与资源策略。
+  - **AI Job Coordinator** 是 [`aiRunner`](../../internal/photos/airunner.go)，`RunAI` 与 `ProcessAIJob` 是它的入口。它一轮处理一项，并在自己的锁下保存各轮共用的状态：上次观察到的进度、已为哪些模型重新排队过旧结果、Worker 是否可能仍加载着检测器、检测时预先渲染的下一张，以及上次聚类后存下的扫描数。导出的 `ProcessAIJob` 可以同时运行（[#193](https://github.com/zhongwater123/A-NAS/issues/193)）。领取任务、保存结果与记录失败等目录操作仍属于相册 Module。
+
+启动恢复：每次打开相册库、在任务循环开始前，`RecoverJobs` 让崩溃或断电遗留的 `running` 任务立即重新排队，而不是等租约到期，并保留已计的次数，所以反复拖垮进程的原图仍以 `interrupted` 结束、不会在重启间无限重试；`io` 失败的任务（存储错误、Worker 超时，以及修复前被 Worker 缺席记为 `io` 的任务）重新获得 3 次尝试，因为写满的磁盘或过忙的设备此时可能已恢复。`interrupted` 不重新排队。
 
 默认执行策略：
 
 - 连续 5 分钟无前台活动后才领取新任务，并发 1，每次只让一个模型族常驻（2026-10-13 起改为按需加载、用完即放，见[物体检测的资源策略](photo-objects.md#资源策略)）。前台活动来自相册与文件 API 的用户请求（不含状态栏等定时轮询）；SMB 传输不经过产品服务，因此同时参考 Host Agent 的磁盘与网络吞吐。
 - 检测到上传、下载、播放、交互、内存压力、I/O 压力或温度上限后立即停止领取新任务；已经开始的单张原子推理允许完成。
-- 初始 systemd 预算为 `CPUQuota=200%`、`MemoryHigh=2G`、`MemoryMax=3G`、低 CPU/I/O 优先级；这些是安全起点，不是实机结论。2026-10-13 用户确定原则：闲时有多少资源就用多少，始终留出余量，用户有突发请求时正确释放；随切片 18 改为按核数减 2 的线程与上限、按需加载与卸载、可取消的检测任务（[资源策略](photo-objects.md#资源策略)）。
-- OOM、进程退出和重启只会让租约到期并重试，不得影响原图与基础相册。
+- 初始 systemd 预算为 `CPUQuota=200%`、`MemoryHigh=2G`、`MemoryMax=3G`、低 CPU/I/O 优先级；这些是安全起点，不是实机结论。2026-10-13 用户确定原则：闲时有多少资源就用多少，始终留出余量，用户有突发请求时正确释放；随切片 18 改为按核数减 2 的线程与上限、按需加载与卸载、可取消的检测任务；2026-10-28 内存也不再有固定预算：后台任务加载模型前确认加载后仍余 1 GiB，`MemoryMax` 只防失控（[资源策略](photo-objects.md#资源策略)）。
+- OOM、进程退出和重启只会让任务重试（重启后由启动恢复立即重新排队，否则等租约到期），不得影响原图与基础相册。
 
 ## AI 模型基线
 
@@ -102,7 +130,7 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 |---|---|---|---|
 | 中文语义向量与开放标签 | 已选定 Google EmbeddingGemma 2 全模态 740M 官方 LiteRT 包（2026-10-09 决定） | Google DeepMind 于 2026-10-06 发布、支持 100+ 语言，许可待核对（见 [M2 实施方案](photo-ai.md)）；全模态包约 485 MB，440M 文本+视觉包约 388 MB，官方列出图片检索与图片分类用途；零样本标签依赖图文同一向量空间的相似度，官方未给出中文图文指标 | 作为首个集成目标；中文家庭照片质量、Debian x86 Runtime、RSS、查询延迟与吞吐达标后冻结为发行默认；发布过新必须保留回退 |
 | 人脸检测与聚类向量 | Open Model Zoo `face-detection-retail-0004` + `landmarks-regression-retail-0009` + `face-reidentification-retail-0095` | 三段均有 Apache-2.0 模型清单、模型很小并直接运行于 OpenVINO；[实施方案](photo-people.md)改用运行环境已有的 OpenCV 与 ONNX Runtime 运行候选模型（YuNet 检测，SFace 或 AuraFace 向量，由评估决定），本组合降为回退 | 在家庭合照、侧脸、儿童成长和误合并样本上校准阈值；不满足质量则不默认发布 |
-| 按需中文描述 | 高置信标签、时间和地点的可追溯结构化摘要 | 无需常驻 VLM，中文稳定，可逐项说明事实来源并避免把幻觉写入检索事实 | 小型可商用 VLM 通过中文质量、3 GB 上限和响应时间基准后，才能替换为自由生成 Provider |
+| 按需中文描述 | 高置信标签、时间和地点的可追溯结构化摘要 | 无需常驻 VLM，中文稳定，可逐项说明事实来源并避免把幻觉写入检索事实 | 小型可商用 VLM 通过中文质量、内存（目标 NAS 上加载后仍留 1 GiB 余量）和响应时间基准后，才能替换为自由生成 Provider |
 
 （2026-10-10 起标签只以 AI 聚合呈现、不参与搜索，见 [M2 实施方案“AI 聚合”](photo-ai.md#ai-聚合)。）图文 Embedding 模型不直接输出固定类别。系统维护版本化中文标签词表，为每个标签预计算文本向量，按标签独立校准阈值，只展示超过阈值的少量候选；不能用一个全局阈值承诺识别所有物体。“猫”“电动车”“3D 打印机”即使没有形成可见标签，仍可通过文本与图片向量相似度参与语义搜索。
 
@@ -117,8 +145,8 @@ Qwen3-VL-Embedding-2B 继续作为有官方 OpenVINO INT4 路线的成熟质量�
 ## Runtime 与进程边界
 
 - Go 相册服务 `anas-photos` 负责所有权威状态、权限、任务租约、结果提交和检索组合；`anas-api` 只承担浏览器边界与转发。
-- 成员的 AI 助手不经 `anas-api`，也没有会话：它沙箱中的 MCP 服务以成员本人的 UID 连接相册服务的助手套接字（`ANAS_PHOTOS_ASSISTANT_SOCKET`，未设置时关闭），相册服务按内核给出的对端 UID 经 Host Agent 的 `/v1/accounts/resolve-uid` 确认在用账号，构造带助手标记的只读 `Principal`：只看本人私有图库与共享图库，不带管理员身份与查看授权，不创建私有图库；这个套接字对所有 UID 开放，所以相册服务只在它所在的目录私有于自己时才打开它，由 systemd 只绑定进助手沙箱；Host Agent 的按 UID 查询也默认关闭（`ANAS_PHOTO_ASSISTANT_LOOKUP=1` 才提供）。这个套接字只开放助手工具用到的读取路由，原图与缩略图在服务层也对助手拒绝（`internal/photoservice/assistant.go`，[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 6）。
-- Python AI Worker 负责模型预处理与推理，通过只在本机可用的窄协议接受 `capability`、经 `SCM_RIGHTS` 传入的只读文件描述符和期望版本，返回结构化结果。Worker 使用独立系统身份，systemd 起始约束为无网络（`PrivateNetwork=yes`）、不可访问数据卷、`MemoryMax=3G`、`CPUQuota=200%` 与低 CPU/I/O 优先级；现行单元的内存与 CPU 限制见[相册本地 AI](photo-ai.md#ai-workeranas-ai)（切片 18 起 CPU 上限为逻辑核数减 2）。
+- 成员的 AI 助手不经 `anas-api`，也没有会话：它沙箱中的 MCP 服务以成员本人的 UID 连接相册服务的助手套接字（`ANAS_PHOTOS_ASSISTANT_SOCKET`，未设置时关闭），相册服务按内核给出的对端 UID 经 Host Agent 的 `/v1/accounts/resolve-uid` 确认在用账号，构造带助手标记的只读 `Principal`：只看本人私有图库与共享图库，不带管理员身份与查看授权，不创建私有图库；这个套接字对所有 UID 开放，所以相册服务只在它所在的目录私有于自己时才打开它，由 systemd 只绑定进助手沙箱；Host Agent 的按 UID 查询也默认关闭（`ANAS_PHOTO_ASSISTANT_LOOKUP=1` 才提供）。这个套接字只开放助手工具用到的读取路由，原图与缩略图在服务层也对助手拒绝（`internal/photoservice/assistant.go`，[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 6）；画面只以视图离开（`GET /assets/{id}/view`，`internal/photos/view.go`）：从像素重新编码、最长边不超过 1600 像素、不带原图元数据的 JPEG，供成员要求时交给模型去看；元数据按需从原图读出（`GET /assets/{id}/metadata`，`internal/photos/photometadata.go`）：EXIF 的全部标签与相机记下的拍摄位置，成员与助手都只能读自己看得到的照片的。
+- Python AI Worker 负责模型预处理与推理，通过只在本机可用的窄协议接受 `capability`、经 `SCM_RIGHTS` 传入的只读文件描述符和期望版本，返回结构化结果。Worker 使用独立系统身份，systemd 起始约束为无网络（`PrivateNetwork=yes`）、不可访问数据卷、`MemoryMax=3G`、`CPUQuota=200%` 与低 CPU/I/O 优先级；现行单元的内存与 CPU 限制见[相册本地 AI](photo-ai.md#ai-workeranas-ai)（切片 18 起 CPU 上限为逻辑核数减 2，2026-10-28 起内存不设固定预算）。
 - AI 随系统内置安装、默认开启，设备不联网获取模型（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：Worker 的 Python 依赖以锁定哈希的离线 wheel、模型文件连同来源、许可证、SHA-256 与预处理版本清单随发行制品交付，按内容各存一份并由 release 引用。Worker 不可用时基础相册不受影响。
 - EmbeddingGemma 2 的全模态 740M 官方 LiteRT 包经 MediaPipe Universal Embedder 运行（LiteRT-LM 自身的 Python API 没有向量接口，见 [M2 实施方案](photo-ai.md)），并用 Transformers/Sentence Transformers 结果抽样核对量化正确性；人脸模型优先使用 OpenVINO CPU Provider。OCR 于 2026-10-09 决定不做，2026-10-19 决定恢复，方案另写（[模型评估](../research/photo-ocr-model-evaluation.md)）。UHD 730 仅作为后续实机对照，不把 GPU 驱动可用性作为首版前提。
 - Debian 13 不在当前 OpenVINO 官方支持发行版列表中，因此必须在目标系统完成离线安装、模型加载、连续运行和服务重启测试；失败时回退 ONNX Runtime CPU，不能让 Runtime 兼容性阻塞基础相册。
@@ -126,9 +154,9 @@ Qwen3-VL-Embedding-2B 继续作为有官方 OpenVINO INT4 路线的成熟质量�
 
 ## 搜索设计
 
-结构化查询、文件名、用户标签和 AI 标签使用 SQLite 与 FTS5。语义向量按 `derivation_id` 分代保存；在 20,000 张照片基线下，首版把当前代归一化向量加载到进程内，针对调用方有权访问的图库执行精确余弦扫描，不引入独立向量数据库。
+结构化查询、文件名、用户标签和 AI 标签使用 SQLite 与 FTS5。语义向量按 `derivation_id` 分代保存在 Catalog 中，Catalog 是它们唯一的事实源；在 20,000 张照片基线下，首版把当前代归一化向量加载到进程内，针对调用方有权访问的图库执行精确余弦扫描。
 
-以 768 维 `float32` 估算，20,000 个图片向量原始数据约 59 MiB；即使候选使用 2,048 维也约 156 MiB，仍适合以简单、可校验的精确索引起步。模型进程内存而不是向量表大小才是 8 GB 设备的主要约束。只有实测规模或延迟不达标时，才在相册 Module 内增加 ANN Adapter。
+以 768 维 `float32` 估算，20,000 个图片向量原始数据约 59 MiB；即使候选使用 2,048 维也约 156 MiB，仍适合以简单、可校验的精确索引起步。模型进程内存而不是向量表大小才是 8 GB 设备的主要约束。2026-10-26 起向量另外同步到相册服务独占的 Qdrant 向量索引（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)、[技术设计](vector-index.md)）：引入它是为了视频分段与文件分块，相册第一阶段只做影子比对，记录与精确扫描的重合率和耗时；只有实机数据表明规模或延迟需要时，才把相册的读路径切换过去。
 
 排序先列名称与用户标签的匹配，再按语义分数排列其余照片，并分为“最接近”与“相关度较低”两段（[M2 实施方案](photo-ai.md#语义搜索)）；时间、地点与人物条件在对应能力实现后从查询中解析并过滤。Policy 必须在候选生成前约束图库范围，并在返回前再次验证资产可见性，索引命中本身不构成授权。
 
@@ -172,8 +200,8 @@ FTS5 在搜索切片中按实测决定是否采用：`mattn/go-sqlite3` 需要�
 
 **M3 人物、格式、导入与发布**
 
-13. 人脸 occurrence 与分图库人物库，猫和狗按个体并入人物库；实施方案见[相册人物与宠物](photo-people.md)（已合并，未部署）。
-14. HEIC 与动态照片的导入、预览、短片播放和静态 AI 输入已实现，见[规格](../specs/photo-motion.md)；GIF、RAW 与普通视频仍待实现。
+13. 人脸 occurrence 与分图库人物库，猫和狗按个体并入人物库；实施方案见[相册人物与宠物](photo-people.md)（已实现）。
+14. HEIC 与动态照片的导入、预览、短片播放和静态 AI 输入已实现，见[规格](../specs/photo-motion.md)；普通视频的导入、封面与播放已实现（2026-10-19，[规格](../specs/photo-video.md)，见上文“视频”）；GIF 与 RAW 仍待实现。
 15. 从个人空间或共享文件夹导入（经文件代理以用户身份传入描述符）与 USB 导入。
 16. 文件管理图库投影与只读 SMB/NFS；后者的发布方式需另行决策。
 17. 账号删除时的图库转移、导出与待删除，私有图库 AI 开关与派生数据清除，备份恢复，以及 4 名成员、20,000 张照片、2,000 个视频的完整验收。
@@ -200,11 +228,13 @@ USB 存储识别与挂载、账号删除和备份目前都不是已有产品能�
 - 单张与整库照片/分钟、首轮建库时间、Worker 峰值 RSS、CPU、I/O、温度与功耗。
 - Worker 空闲、运行、停止领取任务和完成当前原子任务时的前台 API p95 延迟。
 
-目标 NAS 的部署门禁按 EmbeddingGemma 2、Qwen3-VL-Embedding-2B、SigLIP2 Base、Chinese-CLIP RN50 的顺序验证；开发机资源允许时另跑 WeMM-Embedding-2B BF16，定义中文质量上限但不把它当作 8 GB 部署候选。任何候选只要许可证不能确认、峰值 RSS 超过 3 GB、导致前台明显卡顿或中文质量不达标，就不成为默认模型；功能可以显示为等待兼容模型，而不是降低基础相册可靠性。
+目标 NAS 的部署门禁按 EmbeddingGemma 2、Qwen3-VL-Embedding-2B、SigLIP2 Base、Chinese-CLIP RN50 的顺序验证；开发机资源允许时另跑 WeMM-Embedding-2B BF16，定义中文质量上限但不把它当作 8 GB 部署候选。任何候选只要许可证不能确认、峰值内存在目标 NAS 上放不下（加载后不足 1 GiB 余量）、导致前台明显卡顿或中文质量不达标，就不成为默认模型；功能可以显示为等待兼容模型，而不是降低基础相册可靠性。
 
 ## 关联
 
+- [进程内解码内存调查](../investigations/2026-10-26-photo-decode-memory-budget.md)；[预算与共享槽位](../../internal/photos/imagedecode.go)、[回归测试](../../internal/photos/imagedecode_test.go)
 - [动态照片规格与实现](../specs/photo-motion.md)
+- [相册视频规格](../specs/photo-video.md)；代码：[`video.go`](../../internal/photos/video.go)、[`photosapi/video.go`](../../internal/photosapi/video.go)、与影视中心共用的播放规则 [`internal/mediaplay`](../../internal/mediaplay/mediaplay.go)
 
 - [架构总览](OVERVIEW.md)
 - [相册规格](../specs/photo-library.md)

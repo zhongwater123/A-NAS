@@ -1,6 +1,7 @@
 package linux
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,16 +13,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 )
 
 // identityRecord is what the Host Agent remembers about an A-NAS Linux
 // identity. The registry is mirrored onto the data volume so a reinstalled
 // system disk can recreate accounts with the UIDs that own the files.
 type identityRecord struct {
-	UID     int           `json:"uid"`
-	Role    accounts.Role `json:"role"`
-	Enabled bool          `json:"enabled"`
+	UID     int            `json:"uid"`
+	Role    accountid.Role `json:"role"`
+	Enabled bool           `json:"enabled"`
 }
 
 const identityManifestName = ".a-nas-identities.json"
@@ -30,14 +31,14 @@ var fixedGroups = []struct {
 	name string
 	gid  int
 }{
-	{name: accounts.UsersGroup, gid: accounts.UsersGID},
-	{name: accounts.AdminsGroup, gid: accounts.AdminsGID},
+	{name: accountid.UsersGroup, gid: accountid.UsersGID},
+	{name: accountid.AdminsGroup, gid: accountid.AdminsGID},
 }
 
 // SyncIdentities converges host accounts and group membership without
 // touching passwords. Disabled identities keep their account so files stay
-// attributed, but their SMB credential is disabled.
-func (e *Executor) SyncIdentities(ctx context.Context, identities []accounts.Identity) error {
+// attributed, but their SMB access and assistant units are disabled.
+func (e *Executor) SyncIdentities(ctx context.Context, identities []accountid.Identity) error {
 	if e.identityError != nil {
 		return e.identityError
 	}
@@ -65,26 +66,26 @@ func (e *Executor) SyncIdentities(ctx context.Context, identities []accounts.Ide
 	return errors.Join(failures...)
 }
 
-func (e *Executor) syncIdentity(ctx context.Context, identity accounts.Identity) error {
+func (e *Executor) syncIdentity(ctx context.Context, identity accountid.Identity) error {
 	if err := e.ensureIdentity(ctx, identity); err != nil {
 		return err
 	}
 	if !identity.Enabled {
-		if err := e.disableSambaIfPresent(ctx, identity.Username); err != nil {
+		if err := errors.Join(e.disableSambaIfPresent(ctx, identity.Username), e.disableAssistant(ctx, identity.Username)); err != nil {
 			return err
 		}
 	}
 	return e.recordIdentity(identity)
 }
 
-func validIdentity(identity accounts.Identity) error {
-	if !validUsername(identity.Username) {
+func validIdentity(identity accountid.Identity) error {
+	if !accountid.ValidUsername(identity.Username) {
 		return errors.New("invalid identity username")
 	}
-	if identity.UID < accounts.FirstUserUID || identity.UID > accounts.LastUserUID {
+	if identity.UID < accountid.FirstUserUID || identity.UID > accountid.LastUserUID {
 		return errors.New("identity UID is outside the A-NAS range")
 	}
-	if identity.Role != accounts.RoleAdmin && identity.Role != accounts.RoleMember {
+	if identity.Role != accountid.RoleAdmin && identity.Role != accountid.RoleMember {
 		return errors.New("invalid identity role")
 	}
 	return nil
@@ -111,13 +112,13 @@ func (e *Executor) ensureFixedGroups(ctx context.Context) error {
 
 // ensureIdentity creates or adopts the Linux account for one A-NAS user. It
 // never modifies an account, group, or UID that A-NAS did not allocate.
-func (e *Executor) ensureIdentity(ctx context.Context, identity accounts.Identity) error {
+func (e *Executor) ensureIdentity(ctx context.Context, identity accountid.Identity) error {
 	if err := e.ensureAccount(ctx, identity.Username, identity.UID); err != nil {
 		return err
 	}
-	groups := accounts.UsersGroup
-	if identity.Role == accounts.RoleAdmin {
-		groups += "," + accounts.AdminsGroup
+	groups := accountid.UsersGroup
+	if identity.Role == accountid.RoleAdmin {
+		groups += "," + accountid.AdminsGroup
 	}
 	if output, err := e.runner.Run(ctx, "usermod", []string{"--groups", groups, identity.Username}, ""); err != nil {
 		return commandError("set identity groups", err, output)
@@ -137,14 +138,14 @@ func (e *Executor) accountState(ctx context.Context, username string, uid int) (
 	}
 	if found {
 		if len(fields) < 4 || fields[2] != id || fields[3] != id {
-			return false, false, fmt.Errorf("%w: %s", accounts.ErrIdentityConflict, username)
+			return false, false, fmt.Errorf("%w: %s", accountid.ErrIdentityConflict, username)
 		}
 		return true, true, nil
 	}
 	if _, taken, err := e.getent(ctx, "passwd", id); err != nil {
 		return false, false, err
 	} else if taken {
-		return false, false, fmt.Errorf("%w: UID %s", accounts.ErrIdentityConflict, id)
+		return false, false, fmt.Errorf("%w: UID %s", accountid.ErrIdentityConflict, id)
 	}
 	group, groupFound, err := e.getent(ctx, "group", username)
 	if err != nil {
@@ -152,14 +153,14 @@ func (e *Executor) accountState(ctx context.Context, username string, uid int) (
 	}
 	if groupFound {
 		if len(group) < 3 || group[2] != id {
-			return false, false, fmt.Errorf("%w: group %s", accounts.ErrIdentityConflict, username)
+			return false, false, fmt.Errorf("%w: group %s", accountid.ErrIdentityConflict, username)
 		}
 		return false, true, nil
 	}
 	if _, taken, err := e.getent(ctx, "group", id); err != nil {
 		return false, false, err
 	} else if taken {
-		return false, false, fmt.Errorf("%w: GID %s", accounts.ErrIdentityConflict, id)
+		return false, false, fmt.Errorf("%w: GID %s", accountid.ErrIdentityConflict, id)
 	}
 	return false, false, nil
 }
@@ -191,7 +192,7 @@ type exitCoder interface{ ExitCode() int }
 // getent returns the colon-separated fields of one passwd or group entry.
 // Exit status 2 means the key does not exist.
 func (e *Executor) getent(ctx context.Context, database, key string) ([]string, bool, error) {
-	output, err := e.runner.Run(ctx, "getent", []string{database, key}, "")
+	output, err := e.runner.Output(ctx, "getent", []string{database, key}, "")
 	if err != nil {
 		var coded exitCoder
 		if errors.As(err, &coded) && coded.ExitCode() == 2 {
@@ -226,11 +227,14 @@ var smbPID = regexp.MustCompile(`^[1-9][0-9]{0,9}$`)
 // disabled user loses established sessions instead of keeping them until the
 // client disconnects.
 func (e *Executor) disconnectSMBSessions(ctx context.Context, username string) error {
-	output, err := e.runner.Run(ctx, "smbstatus", []string{"--processes", "--user=" + username, "--json"}, "")
+	// Only standard output is JSON: under the unit's RestrictAddressFamilies,
+	// smbstatus also warns on standard error that it found no network
+	// interfaces.
+	output, err := e.runner.Output(ctx, "smbstatus", []string{"--processes", "--user=" + username, "--json"}, "")
 	if err != nil {
 		return commandError("list SMB sessions", err, output)
 	}
-	if len(strings.TrimSpace(string(output))) == 0 {
+	if len(bytes.TrimSpace(output)) == 0 {
 		return nil
 	}
 	var status struct {
@@ -241,7 +245,7 @@ func (e *Executor) disconnectSMBSessions(ctx context.Context, username string) e
 			} `json:"server_id"`
 		} `json:"sessions"`
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(output)))
+	decoder := json.NewDecoder(bytes.NewReader(output))
 	decoder.UseNumber()
 	if err := decoder.Decode(&status); err != nil {
 		return fmt.Errorf("decode SMB sessions: %w", err)
@@ -264,7 +268,7 @@ func (e *Executor) disconnectSMBSessions(ctx context.Context, username string) e
 }
 
 func (e *Executor) loadIdentityRegistry() error {
-	contents, err := os.ReadFile(e.identityPath)
+	contents, err := e.readState(e.identityPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -275,18 +279,35 @@ func (e *Executor) loadIdentityRegistry() error {
 	if err := json.Unmarshal(contents, &records); err != nil {
 		return fmt.Errorf("decode identity registry: %w", err)
 	}
+	owners := make(map[int]string, len(records))
 	for username, record := range records {
-		if err := validIdentity(accounts.Identity{Username: username, UID: record.UID, Role: record.Role}); err != nil {
+		if err := validIdentity(accountid.Identity{Username: username, UID: record.UID, Role: record.Role}); err != nil {
 			return fmt.Errorf("identity registry: %w", err)
 		}
-		e.identities[username] = record
+		// accountState never gives one UID to two accounts.
+		if other, taken := owners[record.UID]; taken {
+			return fmt.Errorf("identity registry: %s and %s have UID %d", other, username, record.UID)
+		}
+		owners[record.UID] = username
+	}
+	if records != nil {
+		e.identities = records
 	}
 	return nil
 }
 
-func (e *Executor) recordIdentity(identity accounts.Identity) error {
+// recordIdentity records an identity ensureIdentity has just made sure of.
+// No other account holds its UID then, so another entry with the UID names
+// an account that is gone, and is dropped: a registry never lists one UID
+// twice.
+func (e *Executor) recordIdentity(identity accountid.Identity) error {
 	e.identitiesMu.Lock()
 	defer e.identitiesMu.Unlock()
+	for username, record := range e.identities {
+		if record.UID == identity.UID && username != identity.Username {
+			delete(e.identities, username)
+		}
+	}
 	e.identities[identity.Username] = identityRecord{UID: identity.UID, Role: identity.Role, Enabled: identity.Enabled}
 	return e.writeIdentityRegistryLocked(e.identityPath)
 }
@@ -312,9 +333,11 @@ func (e *Executor) writeIdentityRegistryLocked(path string) error {
 }
 
 // mirrorIdentityManifest copies the identity registry onto the data volume
-// when it is mounted. An offline volume is left untouched.
+// when it is mounted. An offline volume is left untouched, and so is the copy
+// on the volume while the registry cannot be loaded: it may be what restores
+// the accounts.
 func (e *Executor) mirrorIdentityManifest() error {
-	if !e.dataVolumeReady() {
+	if e.identityError != nil || !e.dataVolumeReady() {
 		return nil
 	}
 	e.identitiesMu.Lock()
@@ -352,4 +375,4 @@ func (e *Executor) knownIdentities(usernames []string) []string {
 	return known
 }
 
-var _ accounts.IdentitySynchronizer = (*Executor)(nil)
+var _ accountid.IdentitySynchronizer = (*Executor)(nil)

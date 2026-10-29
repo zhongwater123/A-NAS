@@ -9,9 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"errors"
-	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -19,6 +17,8 @@ import (
 	"unicode/utf8"
 
 	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 const (
@@ -82,14 +82,12 @@ type Content struct {
 }
 
 type Options struct {
-	Now    func() time.Time
-	Random io.Reader
+	Now func() time.Time
 }
 
 type Store struct {
-	db     *sql.DB
-	now    func() time.Time
-	random io.Reader
+	db  *sql.DB
+	now func() time.Time
 }
 
 func Open(path string, options Options) (*Store, error) {
@@ -99,16 +97,12 @@ func Open(path string, options Options) (*Store, error) {
 	if options.Now == nil {
 		options.Now = time.Now
 	}
-	if options.Random == nil {
-		options.Random = rand.Reader
-	}
 	// Images are stored inline, so deleting them should return the space.
-	db, err := sql.Open("sqlite3", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL&_auto_vacuum=full")
+	db, err := sqlitedb.Open(path, sqlitedb.Options{AutoVacuum: true})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	store := &Store{db: db, now: options.Now, random: options.Random}
+	store := &Store{db: db, now: options.Now}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -177,12 +171,12 @@ FROM items ORDER BY created_at DESC, id`)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	items := []Item{}
 	byID := map[string]int{}
 	for rows.Next() {
 		item, err := scanItem(rows)
 		if err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		byID[item.ID] = len(items)
@@ -343,10 +337,10 @@ FROM items WHERE id = ?`, id))
 	if err != nil {
 		return Item{}, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var image Image
 		if err := rows.Scan(&image.ID, &image.ContentType, &image.SizeBytes); err != nil {
-			_ = rows.Close()
 			return Item{}, err
 		}
 		item.Images = append(item.Images, image)
@@ -457,18 +451,9 @@ func (s *Store) inTransaction(ctx context.Context, apply func(*sql.Tx) error) er
 	return tx.Commit()
 }
 
-func (s *Store) randomID(prefix string) string {
-	buffer := make([]byte, 12)
-	if _, err := io.ReadFull(s.random, buffer); err != nil {
-		panic(err)
-	}
-	return prefix + ":" + hex.EncodeToString(buffer)
-}
+func (s *Store) randomID(prefix string) string { return prefix + ":" + rand.Text() }
 
-// Times are stored at a fixed width so that they sort as text.
-func formatTime(value time.Time) string {
-	return value.UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
-}
+func formatTime(value time.Time) string { return sqlitedb.FormatTime(value) }
 
 func parseTime(value string) time.Time {
 	parsed, _ := time.Parse(time.RFC3339Nano, value)

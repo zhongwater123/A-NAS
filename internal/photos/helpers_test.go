@@ -8,10 +8,10 @@ import (
 	"image/jpeg"
 	"image/png"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
@@ -21,24 +21,7 @@ var (
 	admin = photos.Principal{UserID: "user:admin", Admin: true}
 )
 
-type clock struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-func newClock() *clock { return &clock{now: time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC)} }
-
-func (c *clock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
-}
-
-func (c *clock) Advance(d time.Duration) {
-	c.mu.Lock()
-	c.now = c.now.Add(d)
-	c.mu.Unlock()
-}
+func newClock() *clocktest.Clock { return clocktest.New(time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC)) }
 
 func openService(t *testing.T, root string, now func() time.Time) *photos.Service {
 	t.Helper()
@@ -50,7 +33,7 @@ func openService(t *testing.T, root string, now func() time.Time) *photos.Servic
 	return service
 }
 
-func newService(t *testing.T) (*photos.Service, *clock, string) {
+func newService(t *testing.T) (*photos.Service, *clocktest.Clock, string) {
 	t.Helper()
 	c := newClock()
 	root := filepath.Join(t.TempDir(), "photos")
@@ -77,7 +60,7 @@ func encodePNG(shade uint8) []byte {
 	return buffer.Bytes()
 }
 
-func jpegBytes(t *testing.T) []byte {
+func jpegBytes(t testing.TB) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
 	var buffer bytes.Buffer

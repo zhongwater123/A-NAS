@@ -45,7 +45,7 @@ func setupFS(t *testing.T, wrap func(files.FileSystem) files.FileSystem) *fixtur
 	if e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	users := accounts.NewService(db, credentials{}, accounts.Options{})
 	alice, e := users.SetupAdministrator(ctx, "alice", "correct horse battery staple")
 	if e != nil {
@@ -70,7 +70,7 @@ func setupFS(t *testing.T, wrap func(files.FileSystem) files.FileSystem) *fixtur
 	if e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { catalog.Close() })
+	t.Cleanup(func() { _ = catalog.Close() })
 	volume := filepath.Join(root, "volume")
 	if e = os.Mkdir(volume, 0700); e != nil {
 		t.Fatal(e)
@@ -79,7 +79,7 @@ func setupFS(t *testing.T, wrap func(files.FileSystem) files.FileSystem) *fixtur
 	if wrap != nil {
 		fsys = wrap(fsys)
 	}
-	fs := files.NewService(catalog, volume, users, files.Options{FileSystem: fsys, AllowUnverifiedVolume: true, DisableCapacityReserve: true})
+	fs := files.NewService(catalog, volume, users, fsys, files.Options{AllowUnverifiedVolume: true, DisableCapacityReserve: true})
 	f := &fixture{local: NewLocal(fs, users), files: fs, users: users, alice: alice, bob: bob, ac: accounts.WithSessionToken(ctx, a.Token), bc: accounts.WithSessionToken(ctx, b.Token), volume: volume}
 	for _, u := range []accounts.User{alice, bob} {
 		spaces, e := users.ListSpaces(ctx, u)
@@ -101,7 +101,7 @@ func setupFS(t *testing.T, wrap func(files.FileSystem) files.FileSystem) *fixtur
 	if e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { os.RemoveAll(socketDir) })
+	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
 	if group := os.Getenv("ANAS_SHARE_TEST_GID"); group != "" {
 		gid, e := strconv.Atoi(group)
 		if e != nil {
@@ -156,7 +156,7 @@ func TestRemoteCaptureSaveKeepsEmptyDirectoriesAndRenames(t *testing.T) {
 	if len(entries) != 3 {
 		t.Fatalf("entries %+v", entries)
 	}
-	for n := 0; n < 2; n++ {
+	for range 2 {
 		e = backend.Save(f.bc, user(f.bob), shares.Target{RootID: f.bs, ShareID: "share"}, entries, func(id string) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(contents[id])), nil }, func(_ string, publish func() error) error { return publish() }, nil)
 		if e != nil {
 			t.Fatal(e)
@@ -386,7 +386,7 @@ func TestPublicationTimeoutIsUnknownUntilWorkerSettles(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	b, e := io.ReadAll(content.Reader)
 	if e != nil || string(b) != "whole" {
 		t.Fatalf("late file is not complete: %q %v", b, e)

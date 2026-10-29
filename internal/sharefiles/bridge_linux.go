@@ -4,8 +4,6 @@ package sharefiles
 
 import (
 	"context"
-	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -18,6 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/shares"
+	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 )
 
 type wireRequest struct {
@@ -39,100 +38,24 @@ type wireResponse struct {
 
 const wireLimit = 8 << 20
 
+// writeWire and readWire speak internal/unixmsg; an oversized message or
+// one whose descriptors were cut is invalid.
 func writeWire(conn *net.UnixConn, value any, file *os.File) error {
-	body, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	if len(body) > wireLimit {
+	return asInvalid(unixmsg.Write(conn, value, file, wireLimit))
+}
+
+func readWire(conn *net.UnixConn, value any) (*os.File, error) {
+	file, err := unixmsg.Read(conn, value, wireLimit)
+	return file, asInvalid(err)
+}
+
+func asInvalid(err error) error {
+	if errors.Is(err, unixmsg.ErrTooLarge) || errors.Is(err, unixmsg.ErrTruncated) {
 		return shares.ErrInvalid
 	}
-	header := make([]byte, 4)
-	binary.BigEndian.PutUint32(header, uint32(len(body)))
-	var rights []byte
-	if file != nil {
-		rights = syscall.UnixRights(int(file.Fd()))
-	}
-	n, _, err := conn.WriteMsgUnix(header, rights, nil)
-	if err != nil {
-		return err
-	}
-	if n < 4 {
-		if _, err = conn.Write(header[n:]); err != nil {
-			return err
-		}
-	}
-	_, err = io.Copy(conn, bytesReader(body))
 	return err
 }
 
-type byteReader struct{ data []byte }
-
-func bytesReader(b []byte) *byteReader { return &byteReader{data: b} }
-func (b *byteReader) Read(p []byte) (int, error) {
-	if len(b.data) == 0 {
-		return 0, io.EOF
-	}
-	n := copy(p, b.data)
-	b.data = b.data[n:]
-	return n, nil
-}
-func readWire(conn *net.UnixConn, value any) (*os.File, error) {
-	header := make([]byte, 4)
-	oob := make([]byte, syscall.CmsgSpace(4*4))
-	n, on, flags, _, err := conn.ReadMsgUnix(header, oob)
-	if err != nil {
-		return nil, err
-	}
-	var file *os.File
-	controls, parseErr := syscall.ParseSocketControlMessage(oob[:on])
-	if parseErr != nil {
-		return nil, parseErr
-	}
-	for _, control := range controls {
-		fds, e := syscall.ParseUnixRights(&control)
-		if e != nil {
-			if file != nil {
-				file.Close()
-			}
-			return nil, e
-		}
-		for _, fd := range fds {
-			syscall.CloseOnExec(fd)
-			if file == nil {
-				file = os.NewFile(uintptr(fd), "share-source")
-			} else {
-				syscall.Close(fd)
-			}
-		}
-	}
-	fail := func(err error) (*os.File, error) {
-		if file != nil {
-			file.Close()
-		}
-		return nil, err
-	}
-	if flags&syscall.MSG_CTRUNC != 0 {
-		return fail(shares.ErrInvalid)
-	}
-	if n < 4 {
-		if _, err := io.ReadFull(conn, header[n:]); err != nil {
-			return fail(err)
-		}
-	}
-	size := binary.BigEndian.Uint32(header)
-	if size > wireLimit {
-		return fail(shares.ErrInvalid)
-	}
-	body := make([]byte, size)
-	if _, err := io.ReadFull(conn, body); err != nil {
-		return fail(err)
-	}
-	if err := json.Unmarshal(body, value); err != nil {
-		return fail(err)
-	}
-	return file, nil
-}
 func wireError(err error) string {
 	switch {
 	case errors.Is(err, shares.ErrBusy):
@@ -220,14 +143,14 @@ func Serve(parent context.Context, socket string, local *Local) (func(), error) 
 		err = os.Chmod(socket, 0660)
 	}
 	if err != nil {
-		listener.Close()
+		_ = listener.Close()
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(parent)
 	var wg sync.WaitGroup
 	accepted := make(chan struct{})
 	slots := make(chan struct{}, 32)
-	stop := context.AfterFunc(ctx, func() { listener.Close() })
+	stop := context.AfterFunc(ctx, func() { _ = listener.Close() })
 	go func() {
 		defer close(accepted)
 		for {
@@ -241,16 +164,14 @@ func Serve(parent context.Context, socket string, local *Local) (func(), error) 
 				conn.Close()
 				continue
 			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				defer func() { <-slots }()
 				defer conn.Close()
 				_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 				stopConn := context.AfterFunc(ctx, func() { conn.Close() })
 				defer stopConn()
 				serveConnection(ctx, conn, local)
-			}()
+			})
 		}
 	}()
 	var once sync.Once
@@ -258,7 +179,7 @@ func Serve(parent context.Context, socket string, local *Local) (func(), error) 
 		once.Do(func() {
 			cancel()
 			stop()
-			listener.Close()
+			_ = listener.Close()
 			<-accepted
 			_, _ = local.Reset(context.Background())
 			wg.Wait()
@@ -270,7 +191,7 @@ func serveConnection(ctx context.Context, conn *net.UnixConn, local *Local) {
 	var req wireRequest
 	inbound, err := readWire(conn, &req)
 	if inbound != nil {
-		inbound.Close()
+		_ = inbound.Close()
 		err = shares.ErrInvalid
 	}
 	if err != nil {
@@ -336,7 +257,7 @@ func serveConnection(ctx context.Context, conn *net.UnixConn, local *Local) {
 		}
 	}
 	if descriptor != nil {
-		defer descriptor.Close()
+		defer func() { _ = descriptor.Close() }()
 	}
 	resp.Code = wireError(err)
 	_ = writeWire(conn, resp, descriptor)
@@ -348,7 +269,7 @@ func NewRemote(ctx context.Context, socket string) (*Remote, error) {
 	r := &Remote{socket: socket}
 	resp, f, err := r.call(ctx, wireRequest{Op: "reset"}, nil)
 	if f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	if err != nil {
 		return nil, err
@@ -388,7 +309,7 @@ func (r *Remote) call(ctx context.Context, req wireRequest, body io.Reader) (wir
 		err = responseError(resp.Code)
 	}
 	if err != nil && f != nil {
-		f.Close()
+		_ = f.Close()
 		f = nil
 	}
 	return resp, f, err
@@ -396,7 +317,7 @@ func (r *Remote) call(ctx context.Context, req wireRequest, body io.Reader) (wir
 func (r *Remote) Select(ctx context.Context, _ shares.User, ids []string) ([]files.ShareSource, error) {
 	resp, f, e := r.call(ctx, wireRequest{Op: "select", IDs: ids}, nil)
 	if f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	return resp.Items, e
 }
@@ -410,7 +331,7 @@ func (r *Remote) Open(ctx context.Context, _ shares.User, id string) (*os.File, 
 func (r *Remote) simple(ctx context.Context, req wireRequest, body io.Reader) (string, error) {
 	resp, f, e := r.call(ctx, req, body)
 	if f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	return resp.ID, e
 }
@@ -425,17 +346,17 @@ func (r *Remote) reliableWithin(ctx context.Context, req wireRequest, attemptLim
 	resp, f, err := r.call(attempt, req, nil)
 	stopAttempt()
 	if f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	if err == nil || resp.Code != "" {
 		return resp.ID, err
 	}
 	retry, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconcileLimit)
 	defer cancel()
-	for attempt := 0; attempt < 3; attempt++ {
+	for range 3 {
 		result, f, e := r.call(retry, wireRequest{Op: "status", ID: req.ID, Name: req.Op}, nil)
 		if f != nil {
-			f.Close()
+			_ = f.Close()
 		}
 		if e == nil {
 			return result.ID, nil
@@ -449,7 +370,7 @@ func (r *Remote) reliableWithin(ctx context.Context, req wireRequest, attemptLim
 		if result.Code == "not_found" {
 			result, f, e = r.call(retry, req, nil)
 			if f != nil {
-				f.Close()
+				_ = f.Close()
 			}
 			if e == nil || result.Code != "" {
 				return result.ID, e
@@ -469,7 +390,7 @@ func (r *Remote) Stage(ctx context.Context, _ shares.User, t shares.Target, e sh
 	req := wireRequest{Op: "stage", ID: id, Target: t, ShareID: t.ShareID, Entry: e}
 	resp, f, err := r.call(ctx, req, reader)
 	if f != nil {
-		f.Close()
+		_ = f.Close()
 	}
 	if err == nil {
 		return resp.ID, nil
@@ -479,7 +400,7 @@ func (r *Remote) Stage(ctx context.Context, _ shares.User, t shares.Target, e sh
 	if resp.Code == "" {
 		result, f, e := r.call(cleanup, wireRequest{Op: "status", ID: id, Name: "stage"}, nil)
 		if f != nil {
-			f.Close()
+			_ = f.Close()
 		}
 		if e == nil {
 			return result.ID, nil

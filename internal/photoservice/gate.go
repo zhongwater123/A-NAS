@@ -27,11 +27,17 @@ type Gate struct {
 	quiet   time.Duration
 	now     func() time.Time
 	lastUse atomic.Int64
+	// using counts requests still being served, such as a video playing or
+	// a long upload; while there are any, the library is in use.
+	using atomic.Int64
 	// pressure returns the share of the last 10 seconds in which some task
 	// other than the AI Worker's stalled on a resource, in percent.
 	pressure func(resource string) (float64, error)
 	// available returns the memory the system could still give out, in bytes.
 	available func() (uint64, error)
+	// workerMemory returns the memory the AI Worker holds, in bytes: 0 while
+	// it is not running. Without it the Worker counts as holding nothing.
+	workerMemory func() uint64
 
 	// watched lists the cgroups whose pressure counts; none means the whole
 	// system's.
@@ -41,17 +47,21 @@ type Gate struct {
 	logger *slog.Logger
 
 	mu sync.Mutex
-	// pressed holds the resources over their limit at the last look, and
-	// short whether memory was below the reserve.
+	// pressed holds the resources over their limit at the last look, short
+	// whether memory was below the reserve, and waiting whether the models
+	// waited for memory to load.
 	pressed map[string]bool
 	short   bool
+	waiting bool
 }
 
-// MemoryReserve is the memory AI work leaves for the user: below it the gate
-// closes and the AI Worker is asked to release its models
-// (docs/architecture/photo-objects.md#资源策略). A starting value, to be
-// tuned on the device.
-const MemoryReserve = 1536 << 20
+// MemoryReserve is the memory AI work always leaves for the user's next
+// request (docs/architecture/photo-objects.md#资源策略): background work loads
+// a model only if this much stays free afterwards, and below it the gate
+// closes and the AI Worker is asked to release its models. The user set it
+// to 1 GiB on 2026-10-28. Requests someone makes, such as a search, load what
+// they need regardless.
+const MemoryReserve = 1 << 30
 
 // pressureLimits are how long, in percent of the last 10 seconds, the
 // device's other work may wait on a resource before AI work stops; it starts
@@ -71,7 +81,8 @@ const QuietPeriod = 5 * time.Minute
 // now. A nil logger records nothing.
 func NewGate(quiet time.Duration, logger *slog.Logger) *Gate {
 	watched := systemSlices("/proc/self/cgroup", "/sys/fs/cgroup")
-	gate := &Gate{quiet: quiet, now: time.Now, pressure: othersPressure(watched), available: memAvailable, watched: watched, logger: logger}
+	gate := &Gate{quiet: quiet, now: time.Now, pressure: othersPressure(watched), available: memAvailable,
+		workerMemory: cgroupMemory(workerCgroup("/proc/self/cgroup", "/sys/fs/cgroup")), watched: watched, logger: logger}
 	gate.Touch()
 	return gate
 }
@@ -79,8 +90,22 @@ func NewGate(quiet time.Duration, logger *slog.Logger) *Gate {
 // Touch records that someone is using the photo library.
 func (g *Gate) Touch() { g.lastUse.Store(g.now().UnixNano()) }
 
-func (g *Gate) Open(context.Context) (bool, string) {
-	if g.now().Sub(time.Unix(0, g.lastUse.Load())) < g.quiet {
+// Use records that someone uses the photo library until done is called;
+// the quiet period starts then.
+func (g *Gate) Use() (done func()) {
+	g.using.Add(1)
+	g.Touch()
+	return func() {
+		g.Touch()
+		g.using.Add(-1)
+	}
+}
+
+// Open reports whether background AI work may start another item, and why
+// not otherwise; need is the memory the AI Worker's models take, 0 for work
+// that loads none (photos.Gate).
+func (g *Gate) Open(_ context.Context, need uint64) (bool, string) {
+	if g.using.Load() > 0 || g.now().Sub(time.Unix(0, g.lastUse.Load())) < g.quiet {
 		return false, "foreground"
 	}
 	for _, check := range pressureLimits {
@@ -95,11 +120,45 @@ func (g *Gate) Open(context.Context) (bool, string) {
 		}
 	}
 	if g.available != nil {
-		if free, err := g.available(); err == nil && g.memoryShort(free) {
-			return false, "memory_low"
+		if free, err := g.available(); err == nil {
+			if g.memoryShort(free) {
+				return false, "memory_low"
+			}
+			// Work that loads no model, such as the vector sync, leaves the
+			// models' waiting and its log alone.
+			if need > 0 && g.cannotLoad(free, need) {
+				return false, "memory_for_models"
+			}
 		}
 	}
 	return true, ""
+}
+
+// cannotLoad reports whether loading what the AI Worker does not hold yet of
+// need would leave less than the reserve free. need and what the Worker
+// holds are both counted as its cgroup counts memory, page cache included;
+// the models' manifests round their measured growth up
+// (docs/architecture/photo-objects.md#资源策略), so the estimate errs towards
+// waiting.
+func (g *Gate) cannotLoad(free, need uint64) bool {
+	var held uint64
+	if g.workerMemory != nil {
+		held = g.workerMemory()
+	}
+	load := need - min(need, held)
+	waiting := free < MemoryReserve+load
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if waiting != g.waiting && g.logger != nil {
+		if waiting {
+			g.logger.Info("AI work waits for memory to load its models", "available_mib", free>>20,
+				"load_mib", load>>20, "reserve_mib", MemoryReserve>>20)
+		} else {
+			g.logger.Info("AI work has memory to load its models", "available_mib", free>>20, "load_mib", load>>20)
+		}
+	}
+	g.waiting = waiting
+	return waiting
 }
 
 // memoryShort reports whether free memory is below the reserve.
@@ -171,15 +230,16 @@ func waiting(slice, resource string) string {
 		}
 	}
 	slices.SortFunc(members, func(a, b member) int { return cmp.Compare(b.avg10, a.avg10) })
-	text := strconv.FormatFloat(own, 'f', 2, 64)
+	var text strings.Builder
+	text.WriteString(strconv.FormatFloat(own, 'f', 2, 64))
 	for i, m := range members[:min(3, len(members))] {
 		separator := ", "
 		if i == 0 {
 			separator = ": "
 		}
-		text += separator + m.name + " " + strconv.FormatFloat(m.avg10, 'f', 2, 64)
+		text.WriteString(separator + m.name + " " + strconv.FormatFloat(m.avg10, 'f', 2, 64))
 	}
-	return text
+	return text.String()
 }
 
 // systemSlices returns the cgroups that hold the device's work other than
@@ -188,29 +248,67 @@ func waiting(slice, resource string) string {
 // anas-ai.slice, which systemd places under anas.slice, beside them. Outside a
 // systemd service there are none.
 func systemSlices(selfCgroup, mount string) []string {
-	data, err := os.ReadFile(selfCgroup)
-	if err != nil {
+	root, ok := systemdRoot(selfCgroup)
+	if !ok {
 		return nil
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	var slices []string
+	for _, name := range []string{"system.slice", "user.slice"} {
+		slice := filepath.Join(mount, root, name)
+		if _, err := os.Stat(filepath.Join(slice, "cpu.pressure")); err == nil {
+			slices = append(slices, slice)
+		}
+	}
+	return slices
+}
+
+// workerCgroup returns the AI Worker's cgroup in the systemd instance this
+// process runs under (deploy/systemd/system/anas-ai.service), or "" outside a
+// systemd service. It exists only while the Worker runs.
+func workerCgroup(selfCgroup, mount string) string {
+	root, ok := systemdRoot(selfCgroup)
+	if !ok {
+		return ""
+	}
+	return filepath.Join(mount, root, "anas.slice", "anas-ai.slice", "anas-ai.service")
+}
+
+// systemdRoot returns the cgroup of the systemd instance this process runs
+// under as one of its services, read from its own cgroup: "" on the host, or
+// a container's cgroup.
+func systemdRoot(selfCgroup string) (string, bool) {
+	data, err := os.ReadFile(selfCgroup)
+	if err != nil {
+		return "", false
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
 		path, ok := strings.CutPrefix(line, "0::")
 		if !ok {
 			continue
 		}
-		i := strings.LastIndex(path, "/system.slice/")
-		if i < 0 {
-			return nil
-		}
-		var slices []string
-		for _, name := range []string{"system.slice", "user.slice"} {
-			slice := filepath.Join(mount, path[:i], name)
-			if _, err := os.Stat(filepath.Join(slice, "cpu.pressure")); err == nil {
-				slices = append(slices, slice)
-			}
-		}
-		return slices
+		root, _, ok := strings.CutLast(path, "/system.slice/")
+		return root, ok
 	}
-	return nil
+	return "", false
+}
+
+// cgroupMemory returns a function reading the memory a cgroup holds, page
+// cache included, or 0 while it does not exist; nil for no cgroup.
+func cgroupMemory(cgroup string) func() uint64 {
+	if cgroup == "" {
+		return nil
+	}
+	return func() uint64 {
+		data, err := os.ReadFile(filepath.Join(cgroup, "memory.current"))
+		if err != nil {
+			return 0
+		}
+		value, err := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64)
+		if err != nil {
+			return 0
+		}
+		return value
+	}
 }
 
 // othersPressure measures the highest pressure among slices, or the whole
@@ -244,7 +342,7 @@ func cgroupSomeAvg10(path string) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 || fields[0] != "some" {
 			continue

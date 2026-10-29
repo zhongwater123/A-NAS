@@ -13,11 +13,18 @@ EnvironmentFile=/etc/a-nas/host-agent.env
 ExecStart=/opt/a-nas/current/anas-host-agent
 Restart=on-failure
 RestartSec=2s
-TimeoutStartSec=30min
+# The Host Agent serves at once and reconciles the data volume afterwards, so
+# a volume it cannot reconcile no longer stops it (issue #166).
 TimeoutStopSec=20s
 # Separate session directories preserve the photo and share socket group permissions.
 RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions
 RuntimeDirectoryMode=0750
+# The Host Agent's records (spaces, identities, viewing grants, app
+# identities, data-volume operations) live where only root can open them.
+# Releases before issue #176 kept them in /var/lib/a-nas, the Product
+# Service's StateDirectory; the Host Agent moves them from there at start.
+StateDirectory=a-nas-host
+StateDirectoryMode=0700
 UMask=0007
 NoNewPrivileges=true
 PrivateTmp=true
@@ -25,8 +32,33 @@ ProtectHome=true
 ProtectSystem=strict
 # shadow-utils creates transient lock and backup files beside passwd/group.
 # The Host Agent is already the typed root trust boundary and writes systemd units.
-ReadWritePaths=/etc /var/lib/a-nas /var/lib/samba /srv/a-nas /run/a-nas /run/samba
+# /sys/devices: after adding a disk to the data volume, the Host Agent asks
+# udev to probe it again by writing its uevent file (ProtectKernelTunables).
+# /var/lib/a-nas: the Product Service's session database, which the File
+# Broker reads, and the records of older releases it moves out.
+ReadWritePaths=/etc /var/lib/a-nas /var/lib/samba /srv/a-nas /run/a-nas /run/samba /sys/devices
 RestrictAddressFamilies=AF_UNIX
+# What the Host Agent and its commands use (issue #166): users' identities for
+# file workers and terminals (SETUID, SETGID); owners and ACLs on everyone's
+# files (CHOWN, DAC_*, FOWNER, FSETID); disks, mounts and Btrfs (SYS_ADMIN,
+# SYS_RAWIO for SMART); stopping workers and shells (KILL); the task manager's
+# I/O and icon reads of other users' processes (SYS_PTRACE); and the system
+# disk's root reserve for its own records (SYS_RESOURCE).
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_FSETID CAP_KILL CAP_SETGID CAP_SETUID CAP_SYS_ADMIN CAP_SYS_PTRACE CAP_SYS_RAWIO CAP_SYS_RESOURCE
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+# Without DeviceAllow= this leaves every device reachable: it only implies
+# DeviceAllow=char-rtc where a device policy is already set (systemd 257).
+ProtectClock=true
+LockPersonality=true
+# Also holds for the administrators' shells, which start from here.
+RestrictNamespaces=true
+SystemCallArchitectures=native
+# File workers and terminal shells run in scopes of their own and are not
+# counted here (issue #166).
+MemoryMax=1G
+TasksMax=512
 
 [Install]
 WantedBy=multi-user.target

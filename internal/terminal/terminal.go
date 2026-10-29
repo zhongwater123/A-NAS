@@ -12,7 +12,6 @@ package terminal
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 )
 
@@ -98,17 +98,18 @@ func (h *Handler) Shutdown(ctx context.Context) error {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if r.URL.Path != StatusPath && r.URL.Path != SessionPath {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 		return
 	}
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
 	if r.URL.Path == StatusPath {
-		writeJSON(w, http.StatusOK, statusResponse{Enabled: h.config.Enabled})
+		httpjson.Write(w, http.StatusOK, statusResponse{Enabled: h.config.Enabled})
 		return
 	}
 	h.serveSession(w, r)
@@ -116,23 +117,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) serveSession(w http.ResponseWriter, r *http.Request) {
 	if !h.config.Enabled {
-		writeError(w, http.StatusForbidden, "terminal_disabled", "terminal is disabled")
+		httpjson.WriteError(w, http.StatusForbidden, "terminal_disabled", "terminal is disabled")
 		return
 	}
 	if !isLoopbackPeer(r.RemoteAddr) || !localorigin.DeviceHost(r.Host) {
-		writeError(w, http.StatusForbidden, "terminal_forbidden", "terminal is only available through this device's Web entry")
+		httpjson.WriteError(w, http.StatusForbidden, "terminal_forbidden", "terminal is only available through this device's Web entry")
 		return
 	}
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		writeError(w, http.StatusUpgradeRequired, "upgrade_required", "terminal sessions require WebSocket")
+		httpjson.WriteError(w, http.StatusUpgradeRequired, "upgrade_required", "terminal sessions require WebSocket")
 		return
 	}
-	switch h.acquire() {
-	case errShuttingDown:
-		writeError(w, http.StatusServiceUnavailable, "terminal_unavailable", "server is shutting down")
+	switch err := h.acquire(); {
+	case errors.Is(err, errShuttingDown):
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "terminal_unavailable", "server is shutting down")
 		return
-	case errBusy:
-		writeError(w, http.StatusTooManyRequests, "terminal_busy", "too many terminal sessions")
+	case errors.Is(err, errBusy):
+		httpjson.WriteError(w, http.StatusTooManyRequests, "terminal_busy", "too many terminal sessions")
 		return
 	}
 	defer h.release()
@@ -248,26 +249,4 @@ func valueOr(value, fallback string) string {
 
 type statusResponse struct {
 	Enabled bool `json:"enabled"`
-}
-
-type errorDetail struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-type errorResponse struct {
-	Error errorDetail `json:"error"`
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, errorResponse{Error: errorDetail{Code: code, Message: message}})
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		panic(err)
-	}
 }

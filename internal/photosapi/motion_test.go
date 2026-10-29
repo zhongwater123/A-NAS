@@ -14,20 +14,23 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
 
 type motionMedia struct{}
 
-func (motionMedia) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
-	return mediaworker.Probe{Format: mediaworker.ProbeFormat{Name: "mov", Duration: 2}, Streams: []mediaworker.ProbeStream{{Type: "video", Width: 16, Height: 16}}}, nil
+func (motionMedia) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
+	return ffmpegworker.Probe{Format: ffmpegworker.ProbeFormat{Name: "mov", Duration: 2}, Streams: []ffmpegworker.ProbeStream{{Type: "video", Width: 16, Height: 16}}}, nil
 }
 func (motionMedia) Image(context.Context, *os.File, int) ([]byte, error) {
-	return nil, mediaworker.ErrUnreadable
+	return nil, ffmpegworker.ErrUnreadable
 }
-func (motionMedia) Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error) {
+func (motionMedia) Frame(context.Context, *os.File, float64, int) ([]byte, error) {
+	return nil, ffmpegworker.ErrUnreadable
+}
+func (motionMedia) Stream(context.Context, *os.File, ffmpegworker.StreamRequest) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader([]byte("mp4"))), nil
 }
 func TestLivePhotoAPIExportRangeAndPolicy(t *testing.T) {
@@ -35,7 +38,7 @@ func TestLivePhotoAPIExportRangeAndPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 	h := photosapi.New(service, nil)
 	c := client{t: t, handler: h, as: alice}
 	private, _ := librariesOf(c)
@@ -46,10 +49,10 @@ func TestLivePhotoAPIExportRangeAndPolicy(t *testing.T) {
 	binary.BigEndian.PutUint32(movie, 24)
 	copy(movie[4:], "ftypqt  ")
 	part, _ := writer.CreateFormFile("file", "live.png")
-	part.Write(photo)
+	_, _ = part.Write(photo)
 	part, _ = writer.CreateFormFile("motion", "live.MOV")
-	part.Write(movie)
-	writer.Close()
+	_, _ = part.Write(movie)
+	_ = writer.Close()
 	result := c.do(http.MethodPost, "/api/v1/photos/libraries/"+private.ID+"/live-photos", body.Bytes(), writer.FormDataContentType())
 	if result.Code != 201 {
 		t.Fatalf("upload: %d %s", result.Code, result.Body.String())
@@ -97,7 +100,7 @@ func TestLiveVideoAloneNeedsItsAppleIdentifier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() { _ = service.Close() }()
 	c := client{t: t, handler: photosapi.New(service, nil), as: alice}
 	private, _ := librariesOf(c)
 	send := func(name string) *httptest.ResponseRecorder {
@@ -108,9 +111,9 @@ func TestLiveVideoAloneNeedsItsAppleIdentifier(t *testing.T) {
 			movie := make([]byte, 64)
 			binary.BigEndian.PutUint32(movie, 24)
 			copy(movie[4:], "ftypqt  ")
-			part.Write(movie)
+			_, _ = part.Write(movie)
 		}
-		writer.Close()
+		_ = writer.Close()
 		return c.do(http.MethodPost, "/api/v1/photos/libraries/"+private.ID+"/live-videos", body.Bytes(), writer.FormDataContentType())
 	}
 	// The stand-in decoder reports no Apple identifier: nothing to match.

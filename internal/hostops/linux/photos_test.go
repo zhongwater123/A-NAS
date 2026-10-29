@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/accountid"
 )
 
 // photosRunner answers getent for the photo service account and creates
@@ -23,7 +23,7 @@ func (r *photosRunner) Run(ctx context.Context, name string, args []string, stdi
 		return nil, err
 	}
 	switch {
-	case name == "getent" && args[0] == "passwd" && (args[1] == accounts.PhotoServiceUser || args[1] == accounts.ShareServiceUser) && r.passwd != "":
+	case name == "getent" && args[0] == "passwd" && (args[1] == accountid.PhotoServiceUser || args[1] == accountid.ShareServiceUser) && r.passwd != "":
 		return []byte(r.passwd + "\n"), nil
 	case name == "getent":
 		return nil, notFound{}
@@ -32,6 +32,10 @@ func (r *photosRunner) Run(ctx context.Context, name string, args []string, stdi
 	default:
 		return nil, nil
 	}
+}
+
+func (r *photosRunner) Output(ctx context.Context, name string, args []string, stdin string) ([]byte, error) {
+	return r.Run(ctx, name, args, stdin)
 }
 
 // notFound is getent's exit status for an unknown key.
@@ -59,7 +63,7 @@ func TestPhotosStoreRefusesAnUnexpectedPhotoServiceUID(t *testing.T) {
 	mountPoint := filepath.Join(t.TempDir(), "data")
 	runner := &photosRunner{passwd: "a-nas-photos:x:998:998::/nonexistent:/usr/sbin/nologin"}
 	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
-	if _, err := executor.ensurePhotosStore(context.Background()); !errors.Is(err, accounts.ErrIdentityConflict) {
+	if _, err := executor.ensurePhotosStore(context.Background()); !errors.Is(err, accountid.ErrIdentityConflict) {
 		t.Fatalf("ensurePhotosStore() error = %v, want ErrIdentityConflict", err)
 	}
 	for _, command := range runner.commands {
@@ -116,7 +120,7 @@ func TestSpacesReconcileDespiteABrokenPhotoServiceIdentity(t *testing.T) {
 	if _, err := executor.materializeRegisteredSpaces(context.Background()); err != nil {
 		t.Fatalf("materializeRegisteredSpaces() error = %v; a photo store problem must not block spaces", err)
 	}
-	if runner.ran(spacePermissionCommand{name: "getent", args: []string{"passwd", accounts.PhotoServiceUser}}) {
+	if runner.ran(spacePermissionCommand{name: "getent", args: []string{"passwd", accountid.PhotoServiceUser}}) {
 		t.Fatalf("space reconciliation consulted the photo service identity")
 	}
 }
@@ -128,7 +132,7 @@ func TestSharesStoreUsesItsOwnFixedIdentity(t *testing.T) {
 	}
 	runner := &photosRunner{passwd: "a-nas-shares:x:31001:31001::/nonexistent:/usr/sbin/nologin"}
 	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
-	drifted, err := executor.ensureOwnedStore(context.Background(), "shares", accounts.ShareServiceUser, accounts.ShareServiceUID)
+	drifted, err := executor.ensureOwnedStore(context.Background(), "shares", accountid.ShareServiceUser, accountid.ShareServiceUID)
 	if err != nil || drifted {
 		t.Fatalf("new share store: %v, %v", drifted, err)
 	}
@@ -144,7 +148,7 @@ func TestSharesStoreUsesItsOwnFixedIdentity(t *testing.T) {
 		}
 	}
 	runner.passwd = "a-nas-shares:x:998:998::/nonexistent:/usr/sbin/nologin"
-	if _, err := executor.ensureOwnedStore(context.Background(), "shares", accounts.ShareServiceUser, accounts.ShareServiceUID); !errors.Is(err, accounts.ErrIdentityConflict) {
+	if _, err := executor.ensureOwnedStore(context.Background(), "shares", accountid.ShareServiceUser, accountid.ShareServiceUID); !errors.Is(err, accountid.ErrIdentityConflict) {
 		t.Fatalf("unexpected identity accepted: %v", err)
 	}
 }

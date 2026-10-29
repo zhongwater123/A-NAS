@@ -8,11 +8,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 func TestProbeBecomesMediaInfo(t *testing.T) {
-	probe, err := mediaworker.ParseProbe([]byte(`{
+	probe, err := ffmpegworker.ParseProbe([]byte(`{
   "streams": [
     {"index": 0, "codec_type": "video", "codec_name": "hevc", "width": 3840, "height": 2160, "pix_fmt": "yuv420p10le",
      "avg_frame_rate": "24000/1001", "color_transfer": "smpte2084", "side_data_list": [{"side_data_type": "DOVI configuration record"}]},
@@ -38,22 +38,22 @@ func TestProbeBecomesMediaInfo(t *testing.T) {
 }
 
 type failingWorker struct {
-	mediaworker.Worker
+	ffmpegworker.Worker
 	err error
 }
 
-func (w failingWorker) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
-	return mediaworker.Probe{}, w.err
+func (w failingWorker) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
+	return ffmpegworker.Probe{}, w.err
 }
-func (w failingWorker) Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error) {
+func (w failingWorker) Stream(context.Context, *os.File, ffmpegworker.StreamRequest) (io.ReadCloser, error) {
 	return nil, w.err
 }
 
 func TestWorkerErrorsBecomeMediaCenterErrors(t *testing.T) {
 	cases := map[error]error{
-		mediaworker.ErrUnavailable: ErrUnavailable,
-		mediaworker.ErrUnreadable:  ErrUnreadable,
-		mediaworker.ErrInvalid:     ErrInvalid,
+		ffmpegworker.ErrUnavailable: ErrUnavailable,
+		ffmpegworker.ErrUnreadable:  ErrUnreadable,
+		ffmpegworker.ErrInvalid:     ErrInvalid,
 	}
 	for workerErr, want := range cases {
 		processor := WorkerProcessor{Worker: failingWorker{err: fmt.Errorf("%w: detail", workerErr)}}

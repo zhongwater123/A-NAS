@@ -269,9 +269,9 @@ print(json.dumps(inspect(payload) if command == "inspect" else apply(payload), e
 def member(account: str, command: str, payload) -> object:
     user = pwd.getpwnam(account)
     try:
-        run = subprocess.run(["setpriv", f"--reuid={user.pw_uid}", f"--regid={user.pw_gid}", "--groups=20000", "--",
-                              "python3", "-c", MEMBER, command], input=json.dumps(payload, ensure_ascii=False),
-                             capture_output=True, text=True, timeout=60)
+        run = subprocess.run(["/usr/bin/setpriv", f"--reuid={user.pw_uid}", f"--regid={user.pw_gid}", "--groups=20000", "--",
+                              "/usr/bin/python3", "-c", MEMBER, command], input=json.dumps(payload, ensure_ascii=False),
+                             capture_output=True, text=True, timeout=60, check=False)
     except subprocess.TimeoutExpired:
         raise RuntimeError("执行进程超时") from None
     try:

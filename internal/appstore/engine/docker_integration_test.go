@@ -1,10 +1,9 @@
 //go:build dockerintegration
 
-package engine
+package engine_test
 
 import (
 	"context"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,11 +13,15 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/zhongwater123/A-NAS/internal/appstore"
+	"github.com/zhongwater123/A-NAS/internal/appstore/engine"
+	"github.com/zhongwater123/A-NAS/internal/appstore/engine/enginetest"
 )
 
 // TestRealDockerRunsAServiceAsItsPlan renders a plan, starts it with the
-// Docker Compose CLI and checks it the way an install does, so the runtime
-// and mount checks are known to read what a real Docker reports (ADR 0022).
+// Docker Compose CLI and checks what Docker reports against the contract
+// that the install checks and the fake engine rely on (enginetest), so the
+// runtime and mount checks are known to read what a real Docker reports
+// (ADR 0022).
 // It needs Docker with Compose 2.30 or later and a local image with a shell
 // and setfacl, named by ANAS_TEST_IMAGE; it creates and removes a folder
 // laid out like the data volume, owned through a helper container.
@@ -67,37 +70,13 @@ services:
 	if err != nil {
 		t.Fatal(err)
 	}
-	composeFile := filepath.Join(t.TempDir(), "docker-compose.yml")
-	if err := os.WriteFile(composeFile, plan.Compose, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runner := CLIRunner{}
-	compose := []string{"compose", "-p", plan.Project, "-f", composeFile}
-	t.Cleanup(func() { _ = runner.Run(context.Background(), append(compose, "down", "--volumes"), io.Discard) })
-	if err := runner.Run(ctx, append(compose, "up", "--detach"), io.Discard); err != nil {
-		t.Fatal(err)
-	}
-
-	engineClient, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+	engineClient, err := client.New(client.FromEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := New(nil, policy, t.TempDir(), DockerInspector{Client: engineClient}, runner)
-	if err := store.mountProblems(ctx, plan); err != nil {
-		t.Errorf("mount check: %v", err)
-	}
-	if err := store.runtimeProblems(ctx, plan); err != nil {
-		t.Errorf("runtime check: %v", err)
-	}
-	containers, err := store.docker.Containers(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, container := range containers {
-		if container.AppID == "demo" && container.Runtime != appstore.RuntimePolicy {
-			t.Errorf("container %s runtime label = %q", container.Name, container.Runtime)
-		}
-	}
+	// The table the fake engine keeps to as well; the project runs until
+	// the test ends.
+	enginetest.CheckProject(t, engine.DockerInspector{Client: engineClient}, engine.CLIRunner{}, plan)
 
 	// What the process can do, seen from inside.
 	name := plan.Containers[0]

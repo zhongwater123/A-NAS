@@ -20,8 +20,9 @@ import (
 	"github.com/mewkiz/flac"
 	"github.com/mewkiz/flac/meta"
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/imagetest"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"golang.org/x/text/encoding/simplifiedchinese"
 )
@@ -47,7 +48,7 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture { return newFixtureWith(t, nil) }
 
 // newFixtureWith gives the library a media worker.
-func newFixtureWith(t *testing.T, worker mediaworker.Worker) *fixture {
+func newFixtureWith(t *testing.T, worker ffmpegworker.Worker) *fixture {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -71,7 +72,7 @@ func newFixtureWith(t *testing.T, worker mediaworker.Worker) *fixture {
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
 	volume := filepath.Join(dir, "volume")
-	fileService := files.NewService(fileStore, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
+	fileService := files.NewLocalService(fileStore, volume, accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
 	musicStore, err := music.OpenSQLite(filepath.Join(dir, "music.db"))
 	if err != nil {
 		t.Fatalf("open music: %v", err)
@@ -187,9 +188,9 @@ func text(value string) []byte { return append([]byte{3}, value...) } // UTF-8
 func flacFile(t *testing.T, samples uint64, picture []byte, tags ...[2]string) []byte {
 	t.Helper()
 	info := &meta.StreamInfo{BlockSizeMin: 4096, BlockSizeMax: 4096, SampleRate: 44100, NChannels: 2, BitsPerSample: 16, NSamples: samples}
-	blocks := []*meta.Block{{Header: meta.Header{Type: meta.TypeVorbisComment, Length: 1}, Body: &meta.VorbisComment{Vendor: "test", Tags: tags}}}
+	blocks := []*meta.Block{{Type: meta.TypeVorbisComment, Length: 1, Body: &meta.VorbisComment{Vendor: "test", Tags: tags}}}
 	if picture != nil {
-		blocks = append(blocks, &meta.Block{Header: meta.Header{Type: meta.TypePicture, Length: 1}, Body: &meta.Picture{Type: 3, MIME: "image/png", Width: 64, Height: 48, Data: picture}})
+		blocks = append(blocks, &meta.Block{Type: meta.TypePicture, Length: 1, Body: &meta.Picture{Type: 3, MIME: "image/png", Width: 64, Height: 48, Data: picture}})
 	}
 	var encoded bytes.Buffer
 	encoder, err := flac.NewEncoder(&encoded, info, blocks...)
@@ -291,6 +292,36 @@ func TestScanIndexesTagsCoversLyricsAndDurations(t *testing.T) {
 	if err != nil || string(header) != "fLaC" || stream.Track.ContentType() != "audio/flac" {
 		t.Errorf("stream starts %q with %q (%v)", header, stream.Track.ContentType(), err)
 	}
+}
+
+func TestCoversThatPanicTheDecoderLeaveTheScanRunning(t *testing.T) {
+	panics := imagetest.LoggedPanics(t)
+	panicking := imagetest.PanickingPicture()
+	f := newFixture(t)
+	write(t, filepath.Join(f.shared, "Embedded", "song.mp3"), mp3File(10,
+		id3Frame("TIT2", text("Song")),
+		id3Frame("APIC", append(append([]byte{0}, "image/png\x00"...), append([]byte{3, 0}, panicking...)...)),
+	))
+	write(t, filepath.Join(f.shared, "Folder", "aria.flac"), flacFile(t, 44100, nil, [2]string{"TITLE", "Aria"}))
+	write(t, filepath.Join(f.shared, "Folder", "cover.jpg"), panicking)
+
+	status := f.scan(t, f.admin)
+	if status.Tracks != 2 {
+		t.Fatalf("library holds %d tracks, want 2", status.Tracks)
+	}
+	tracks := f.tracks(t, f.admin)
+	for _, title := range []string{"Song", "Aria"} {
+		track, ok := tracks[title]
+		if !ok || track.CoverID != "" {
+			t.Errorf("track %q = %+v (indexed %v), want it indexed without a cover", title, track, ok)
+		}
+	}
+	// Both covers are logged as decoder panics, without the files' names.
+	logged := panics()
+	if len(logged) != 2 {
+		t.Fatalf("logged %d recovered panics, want 2: %+v", len(logged), logged)
+	}
+	imagetest.RequirePanicLogged(t, logged, "music cover", "song.mp3", "cover.jpg", "Embedded", "Folder")
 }
 
 func TestMembersOnlySeeTheirOwnSpaceAndTheSharedSpace(t *testing.T) {
@@ -438,31 +469,36 @@ func TestPlaylistsBelongToTheirMember(t *testing.T) {
 // that records how it was asked for.
 type fakeWorker struct {
 	mu          sync.Mutex
-	probe       mediaworker.Probe
+	probe       ffmpegworker.Probe
 	cover       []byte
 	unavailable bool
-	requests    []mediaworker.AudioRequest
+	// coverless makes rendering a cover find no worker.
+	coverless bool
+	requests  []ffmpegworker.AudioRequest
 }
 
-func (w *fakeWorker) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
+func (w *fakeWorker) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
 	if w.unavailable {
-		return mediaworker.Probe{}, mediaworker.ErrUnavailable
+		return ffmpegworker.Probe{}, ffmpegworker.ErrUnavailable
 	}
 	return w.probe, nil
 }
 func (w *fakeWorker) Frame(context.Context, *os.File, float64, int) ([]byte, error) {
+	if w.coverless {
+		return nil, ffmpegworker.ErrUnavailable
+	}
 	return w.cover, nil
 }
 func (w *fakeWorker) Image(context.Context, *os.File, int) ([]byte, error) {
 	return nil, errors.New("not used by music")
 }
-func (w *fakeWorker) Subtitle(context.Context, *os.File, mediaworker.SubtitleRequest) ([]byte, error) {
+func (w *fakeWorker) Subtitle(context.Context, *os.File, ffmpegworker.SubtitleRequest) ([]byte, error) {
 	return nil, errors.New("not used by music")
 }
-func (w *fakeWorker) Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error) {
+func (w *fakeWorker) Stream(context.Context, *os.File, ffmpegworker.StreamRequest) (io.ReadCloser, error) {
 	return nil, errors.New("not used by music")
 }
-func (w *fakeWorker) Audio(_ context.Context, _ *os.File, request mediaworker.AudioRequest) (io.ReadCloser, error) {
+func (w *fakeWorker) Audio(_ context.Context, _ *os.File, request ffmpegworker.AudioRequest) (io.ReadCloser, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.requests = append(w.requests, request)
@@ -470,11 +506,11 @@ func (w *fakeWorker) Audio(_ context.Context, _ *os.File, request mediaworker.Au
 }
 
 func TestFormatsBrowsersCannotPlayAreProbedAndDecoded(t *testing.T) {
-	worker := &fakeWorker{cover: pngImage(t, 90), probe: mediaworker.Probe{
-		Format: mediaworker.ProbeFormat{Name: "ape", Duration: 245.5, Tags: map[string]string{
+	worker := &fakeWorker{cover: pngImage(t, 90), probe: ffmpegworker.Probe{
+		Format: ffmpegworker.ProbeFormat{Name: "ape", Duration: 245.5, Tags: map[string]string{
 			"Title": "无损的歌", "Artist": "林间", "Album Artist": "林间", "Album": "山野", "Track": "2/9", "Year": "2020", "Genre": "民谣",
 		}},
-		Streams: []mediaworker.ProbeStream{
+		Streams: []ffmpegworker.ProbeStream{
 			{Index: 0, Type: "audio", Codec: "ape", SampleRate: 96000, SampleFormat: "s32p", Bits: 24},
 			{Index: 1, Type: "video", Codec: "mjpeg", AttachedPic: true},
 		},
@@ -502,7 +538,7 @@ func TestFormatsBrowsersCannotPlayAreProbedAndDecoded(t *testing.T) {
 	}
 	data, _ := io.ReadAll(body)
 	_ = body.Close()
-	if string(data) != "fLaC decoded" || len(worker.requests) != 1 || worker.requests[0] != (mediaworker.AudioRequest{Start: 30, Bits: 24}) {
+	if string(data) != "fLaC decoded" || len(worker.requests) != 1 || worker.requests[0] != (ffmpegworker.AudioRequest{Start: 30, Bits: 24}) {
 		t.Fatalf("decoded %q with %+v", data, worker.requests)
 	}
 	if _, err := f.library.Decode(f.ctx, f.admin, song.ID, 400); !errors.Is(err, music.ErrInvalid) {
@@ -537,7 +573,7 @@ func TestWithoutAWorkerDecodedFormatsKeepTheirNames(t *testing.T) {
 		t.Fatalf("indexed %d tracks while the worker was down", status.Tracks)
 	}
 	worker.unavailable = false
-	worker.probe = mediaworker.Probe{Format: mediaworker.ProbeFormat{Name: "wv", Duration: 3, Tags: map[string]string{"TITLE": "Back"}}}
+	worker.probe = ffmpegworker.Probe{Format: ffmpegworker.ProbeFormat{Name: "wv", Duration: 3, Tags: map[string]string{"TITLE": "Back"}}}
 	if _, ok := g.tracks(t, g.admin)["Back"]; ok {
 		t.Fatal("track appeared before a scan")
 	}
@@ -547,14 +583,50 @@ func TestWithoutAWorkerDecodedFormatsKeepTheirNames(t *testing.T) {
 	}
 }
 
+func TestLengthsAndCoversWaitForAWorkerThatIsAway(t *testing.T) {
+	// Opus has no Go reader for its length: the worker measures it once the
+	// tags are read, and a worker that is away leaves it for the next scan
+	// instead of recording it as unknown for good.
+	worker := &fakeWorker{unavailable: true}
+	f := newFixtureWith(t, worker)
+	write(t, filepath.Join(f.shared, "晚风.opus"), []byte("OggS opus"))
+	f.scan(t, f.admin)
+	if song, ok := f.tracks(t, f.admin)["晚风"]; !ok || song.DurationMs != 0 {
+		t.Fatalf("track while the worker was away = %+v (%v)", song, ok)
+	}
+	worker.unavailable = false
+	worker.probe = ffmpegworker.Probe{Format: ffmpegworker.ProbeFormat{Name: "ogg", Duration: 61.5}}
+	f.scan(t, f.admin)
+	if song := f.tracks(t, f.admin)["晚风"]; song.DurationMs != 61500 {
+		t.Fatalf("length after the worker returned = %d ms, want 61500", song.DurationMs)
+	}
+
+	// An embedded cover only the worker renders waits with its file.
+	worker.coverless, worker.cover = true, pngImage(t, 90)
+	worker.probe = ffmpegworker.Probe{
+		Format:  ffmpegworker.ProbeFormat{Name: "ape", Duration: 3, Tags: map[string]string{"Title": "封面"}},
+		Streams: []ffmpegworker.ProbeStream{{Index: 0, Type: "audio", Codec: "ape"}, {Index: 1, Type: "video", Codec: "mjpeg", AttachedPic: true}},
+	}
+	write(t, filepath.Join(f.shared, "cover.ape"), []byte("MAC"))
+	f.scan(t, f.admin)
+	if song, ok := f.tracks(t, f.admin)["封面"]; ok {
+		t.Fatalf("indexed without the cover the worker could not render: %+v", song)
+	}
+	worker.coverless = false
+	f.scan(t, f.admin)
+	if song, ok := f.tracks(t, f.admin)["封面"]; !ok || song.CoverID == "" {
+		t.Fatalf("track after the worker returned = %+v (%v)", song, ok)
+	}
+}
+
 // TestRealFFmpegDecodesThroughTheWorker indexes and plays WavPack and AIFF
 // files with FFmpeg when it is installed.
 func TestRealFFmpegDecodesThroughTheWorker(t *testing.T) {
-	tools, ok := mediaworker.LocalTools()
+	tools, ok := ffmpegworker.LocalTools()
 	if !ok {
 		t.Skip("FFmpeg is not installed")
 	}
-	f := newFixtureWith(t, mediaworker.Local{Tools: tools})
+	f := newFixtureWith(t, ffmpegworker.Local{Tools: tools})
 	for _, sample := range []struct{ name, codec, title string }{{"wavpack.wv", "wavpack", "WavPack 歌曲"}, {"aiff.aiff", "pcm_s24be", "AIFF 歌曲"}} {
 		path := filepath.Join(f.shared, "Lossless", sample.name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -8,6 +8,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,7 +22,7 @@ func TestInfoAndImageEmbeddingCrossTheSocket(t *testing.T) {
 	socket := aiworkertest.Serve(t, func(request aiworker.Request, file *os.File) *aiworker.Response {
 		switch request.Op {
 		case aiworker.OpInfo:
-			return &aiworker.Response{OK: true, Model: "fake-1", Dimensions: 2}
+			return &aiworker.Response{OK: true, Model: "fake-1", Dimensions: 2, MemoryBytes: 1 << 30}
 		case aiworker.OpEmbedImage:
 			if file == nil {
 				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: "no image"}}
@@ -38,7 +40,7 @@ func TestInfoAndImageEmbeddingCrossTheSocket(t *testing.T) {
 	client := aiworker.Client{SocketPath: socket}
 
 	info, err := client.Info(context.Background())
-	if err != nil || info != (photos.EmbedderInfo{Model: "fake-1", Dimensions: 2}) {
+	if err != nil || info != (photos.EmbedderInfo{Model: "fake-1", Dimensions: 2, MemoryBytes: 1 << 30}) {
 		t.Fatalf("Info() = %+v, %v", info, err)
 	}
 	image := filepath.Join(t.TempDir(), "thumbnail.jpg")
@@ -49,7 +51,7 @@ func TestInfoAndImageEmbeddingCrossTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	vector, err := client.EmbedImage(context.Background(), file)
 	if err != nil || len(vector) != 2 || vector[0] != 7 || vector[1] != 0.5 {
 		t.Fatalf("EmbedImage() = %v, %v; want the Worker to read the 7 bytes behind the descriptor", vector, err)
@@ -106,10 +108,14 @@ func TestRejectedInputAndTimeouts(t *testing.T) {
 }
 
 func TestDetectionAndReleaseCrossTheSocket(t *testing.T) {
+	// The fake serves each connection on its own goroutine.
+	var mu sync.Mutex
 	var released []string
 	socket := aiworkertest.Serve(t, func(request aiworker.Request, file *os.File) *aiworker.Response {
 		if request.Op == aiworker.OpRelease {
+			mu.Lock()
 			released = append(released, request.What)
+			mu.Unlock()
 		}
 		return aiworkertest.WithDetector(aiworkertest.Deterministic("fake-1", 2), "detector-1")(request, file)
 	})
@@ -127,7 +133,7 @@ func TestDetectionAndReleaseCrossTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	model, boxes, err := client.DetectObjects(context.Background(), file)
 	want := aiworkertest.HashBoxes(content)
 	if err != nil || model != "detector-1" || len(boxes) != len(want) {
@@ -144,8 +150,11 @@ func TestDetectionAndReleaseCrossTheSocket(t *testing.T) {
 	if err := client.Release(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
-	if len(released) != 2 || released[0] != "detector" || released[1] != "all" {
-		t.Fatalf("released %v", released)
+	mu.Lock()
+	got := slices.Clone(released)
+	mu.Unlock()
+	if len(got) != 2 || got[0] != "detector" || got[1] != "all" {
+		t.Fatalf("released %v", got)
 	}
 
 	malformed := aiworkertest.Serve(t, func(aiworker.Request, *os.File) *aiworker.Response {
@@ -212,7 +221,7 @@ func TestAnimalsCrossTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	boxes := [][4]float32{{0.25, 0.5, 0.75, 1}, {0, 0, 0.5, 0.5}}
 	model, vectors, err := client.EmbedAnimals(context.Background(), file, boxes)
 	if err != nil || model != "animals-1" || len(vectors) != len(boxes) {
@@ -257,7 +266,7 @@ func TestCancellingADetectionHangsUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(100*time.Millisecond, cancel)
 	_, _, err = (aiworker.Client{SocketPath: socket}).DetectObjects(ctx, file)

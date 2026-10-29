@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
 )
 
@@ -51,11 +52,13 @@ type pendingVideo struct {
 }
 
 // processPending probes durations and codecs and takes a frame of every
-// pending video, one at a time, as a user who can read it.
+// pending video, one at a time, as a user who can read it. This is
+// background work: it waits while the media worker serves people.
 func (s *Service) processPending(ctx context.Context) {
 	if s.processor == nil {
 		return
 	}
+	ctx = ffmpegworker.WithPriority(ctx, ffmpegworker.Background)
 	libraries, err := s.allLibraries(ctx)
 	if err != nil {
 		return
@@ -121,7 +124,7 @@ func (s *Service) processVideo(ctx context.Context, actor accounts.User, video p
 		}
 		return err
 	}
-	defer content.Reader.Close()
+	defer func() { _ = content.Reader.Close() }()
 	duration := video.duration
 	if video.probe == "pending" {
 		info, err := s.processor.Probe(ctx, content.Reader)
@@ -209,13 +212,20 @@ func (s *Service) dropFrames(ids []string) {
 	}
 }
 
+// writeAtomically puts data at target through a synced temporary file. A
+// cached file that exists is served as it is, so a crash must never leave an
+// empty one behind under its final name.
 func writeAtomically(target string, data []byte) error {
 	temporary, err := os.CreateTemp(filepath.Dir(target), ".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer os.Remove(temporary.Name())
+	defer func() { _ = os.Remove(temporary.Name()) }()
 	if _, err := temporary.Write(data); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
 		_ = temporary.Close()
 		return err
 	}
@@ -244,19 +254,23 @@ UNION SELECT poster_entry FROM shows UNION SELECT backdrop_entry FROM shows`)
 	if err != nil {
 		return
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var id string
 		if rows.Scan(&id) == nil && id != "" {
 			referenced[cacheName(id)] = true
 		}
 	}
-	_ = rows.Close()
+	// A read cut short would leave artwork in use looking unreferenced.
+	if errors.Join(rows.Err(), rows.Close()) != nil {
+		return
+	}
 	entries, err := os.ReadDir(filepath.Join(s.cacheDir, "artwork"))
 	if err != nil {
 		return
 	}
 	for _, entry := range entries {
-		// Names are <entry>--<size>-<modified>.jpg.
+		// Names are <entry>--<size>-<modified>.jpg and <entry>--undecodable-<modified>.
 		if key, _, _ := strings.Cut(entry.Name(), "--"); !referenced[key] {
 			_ = os.Remove(filepath.Join(s.cacheDir, "artwork", entry.Name()))
 		}
