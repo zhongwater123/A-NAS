@@ -120,6 +120,10 @@ func baseState() hoststate.State {
 			Architecture:    "amd64",
 			UptimeSeconds:   3600,
 			Health:          hoststate.HealthHealthy,
+			Thermal: &hoststate.Thermal{
+				CPU:  &hoststate.Temperature{Celsius: 46, HotCelsius: 90},
+				GPUs: []hoststate.GPU{{ID: mustResourceID("gpu:fake-01"), Name: "A-NAS Fake GPU", Integrated: true}},
+			},
 		},
 		Disks: []hoststate.Disk{
 			{
@@ -154,6 +158,17 @@ func cloneState(state hoststate.State) hoststate.State {
 	cloned := state
 	if state.System.Storage != nil {
 		cloned.System.Storage = new(*state.System.Storage)
+	}
+	if thermal := state.System.Thermal; thermal != nil {
+		cloned.System.Thermal = &hoststate.Thermal{GPUs: append([]hoststate.GPU(nil), thermal.GPUs...)}
+		if thermal.CPU != nil {
+			cloned.System.Thermal.CPU = new(*thermal.CPU)
+		}
+		for i, gpu := range thermal.GPUs {
+			if gpu.Temperature != nil {
+				cloned.System.Thermal.GPUs[i].Temperature = new(*gpu.Temperature)
+			}
+		}
 	}
 	cloned.Disks = make([]hoststate.Disk, len(state.Disks))
 	for i, disk := range state.Disks {

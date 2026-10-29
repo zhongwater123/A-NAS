@@ -5,6 +5,11 @@ import "math"
 func finiteNonnegative(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 }
 func rateValid(v *float64) bool        { return v == nil || finiteNonnegative(*v) }
 func percentValid(v *float64) bool     { return v == nil || (finiteNonnegative(*v) && *v <= 100) }
+
+// Readings outside -40..150 °C come from a misreporting sensor.
+func temperatureValid(t *Temperature) bool {
+	return t == nil || (t.Celsius >= -40 && t.Celsius <= 150 && t.HotCelsius > 0 && t.HotCelsius <= 150)
+}
 func (s Status) valid() bool {
 	switch s {
 	case Available, Partial, Unavailable, Unsupported, Absent:
@@ -23,7 +28,7 @@ func identityValid(id string, seen map[string]bool) bool {
 // Valid checks observations at the IPC boundary before serving them to clients.
 func (s DeviceSnapshot) Valid() bool {
 	if s.ObservedAt.IsZero() || !finiteNonnegative(s.SampleSeconds) || s.SampleSeconds == 0 ||
-		s.CPU.LogicalCores < 1 || !percentValid(s.CPU.UsagePercent) || s.Memory.TotalBytes == 0 || s.Memory.UsedBytes > s.Memory.TotalBytes ||
+		s.CPU.LogicalCores < 1 || !percentValid(s.CPU.UsagePercent) || !temperatureValid(s.CPU.Temperature) || s.Memory.TotalBytes == 0 || s.Memory.UsedBytes > s.Memory.TotalBytes ||
 		!s.Network.Status.valid() || s.Network.Items == nil || len(s.Network.Items) > 4096 ||
 		!s.Disks.Status.valid() || s.Disks.Items == nil || len(s.Disks.Items) > 4096 {
 		return false
@@ -36,7 +41,7 @@ func (s DeviceSnapshot) Valid() bool {
 	}
 	seen = make(map[string]bool)
 	for _, d := range s.Disks.Items {
-		if !identityValid(d.ID, seen) || !rateValid(d.ReadBytesPerSecond) || !rateValid(d.WriteBytesPerSecond) {
+		if !identityValid(d.ID, seen) || !rateValid(d.ReadBytesPerSecond) || !rateValid(d.WriteBytesPerSecond) || !temperatureValid(d.Temperature) {
 			return false
 		}
 	}
@@ -49,7 +54,7 @@ func (g AcceleratorGroup) valid() bool {
 	}
 	seen := make(map[string]bool)
 	for _, a := range g.Items {
-		if !identityValid(a.ID, seen) || a.Name == "" || !a.Status.valid() || !percentValid(a.UsagePercent) || !metricStatusValid(a.UsageStatus, a.UsagePercent != nil) || !metricStatusValid(a.MemoryUsedStatus, a.MemoryUsedBytes != nil) || !metricStatusValid(a.MemoryTotalStatus, a.MemoryTotalBytes != nil) {
+		if !identityValid(a.ID, seen) || a.Name == "" || !a.Status.valid() || !percentValid(a.UsagePercent) || !metricStatusValid(a.UsageStatus, a.UsagePercent != nil) || !metricStatusValid(a.MemoryUsedStatus, a.MemoryUsedBytes != nil) || !metricStatusValid(a.MemoryTotalStatus, a.MemoryTotalBytes != nil) || !temperatureValid(a.Temperature) {
 			return false
 		}
 		if a.MemoryUsedBytes != nil && a.MemoryTotalBytes != nil && *a.MemoryUsedBytes > *a.MemoryTotalBytes {

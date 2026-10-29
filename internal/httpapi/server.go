@@ -96,6 +96,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Health:         assessed.health,
 			HealthFindings: assessed.findings,
 			Storage:        mapSystemStorage(state.System.Storage),
+			Thermal:        mapThermal(state.System.Thermal),
 			ProductVersion: h.productVersion,
 			ObservedAt:     state.ObservedAt.UTC().Format(time.RFC3339),
 		})
@@ -177,6 +178,7 @@ type systemResponse struct {
 	ProductVersion  string                  `json:"productVersion"`
 	ObservedAt      string                  `json:"observedAt"`
 	Storage         *systemStorageResponse  `json:"storage,omitempty"`
+	Thermal         *thermalResponse        `json:"thermal,omitempty"`
 }
 
 type systemStateResponse struct {
@@ -188,6 +190,44 @@ type systemStateResponse struct {
 	Health          hoststate.Health        `json:"health"`
 	HealthFindings  []healthFindingResponse `json:"healthFindings"`
 	Storage         *systemStorageResponse  `json:"storage,omitempty"`
+	Thermal         *thermalResponse        `json:"thermal,omitempty"`
+}
+
+// thermalResponse is what the CPU and GPU sensors read
+// (docs/specs/device-temperatures.md).
+type thermalResponse struct {
+	CPU  *temperatureResponse `json:"cpu,omitempty"`
+	GPUs []gpuResponse        `json:"gpus"`
+}
+
+type gpuResponse struct {
+	ID          string               `json:"id"`
+	Name        string               `json:"name"`
+	Integrated  bool                 `json:"integrated"`
+	Temperature *temperatureResponse `json:"temperature,omitempty"`
+}
+
+type temperatureResponse struct {
+	Celsius    int `json:"celsius"`
+	HotCelsius int `json:"hotCelsius"`
+}
+
+func mapThermal(thermal *hoststate.Thermal) *thermalResponse {
+	if thermal == nil {
+		return nil
+	}
+	response := &thermalResponse{CPU: mapTemperature(thermal.CPU), GPUs: make([]gpuResponse, len(thermal.GPUs))}
+	for i, gpu := range thermal.GPUs {
+		response.GPUs[i] = gpuResponse{ID: gpu.ID.String(), Name: gpu.Name, Integrated: gpu.Integrated, Temperature: mapTemperature(gpu.Temperature)}
+	}
+	return response
+}
+
+func mapTemperature(temperature *hoststate.Temperature) *temperatureResponse {
+	if temperature == nil {
+		return nil
+	}
+	return &temperatureResponse{Celsius: temperature.Celsius, HotCelsius: temperature.HotCelsius}
 }
 
 type systemStorageResponse struct {
@@ -225,6 +265,9 @@ type diskResponse struct {
 	Eligible           bool                `json:"eligibleForDataVolume"`
 	IneligibleReasons  []string            `json:"ineligibleReasons"`
 	TemperatureCelsius *int                `json:"temperatureCelsius,omitempty"`
+	// TemperatureHotCelsius comes with TemperatureCelsius: where the disk
+	// counts as running hot and the system health reports it.
+	TemperatureHotCelsius *int `json:"temperatureHotCelsius,omitempty"`
 }
 
 type disksResponse struct {
@@ -276,6 +319,7 @@ func mapSystem(system hoststate.System, assessed systemHealth) systemStateRespon
 		Health:         assessed.health,
 		HealthFindings: assessed.findings,
 		Storage:        mapSystemStorage(system.Storage),
+		Thermal:        mapThermal(system.Thermal),
 	}
 }
 
@@ -312,6 +356,10 @@ func mapDisk(disk hoststate.Disk) diskResponse {
 	if disk.InUse {
 		reasons = append(reasons, "in_use")
 	}
+	var hot *int
+	if disk.TemperatureCelsius != nil {
+		hot = new(hoststate.DiskHotCelsius(disk.Rotational))
+	}
 	return diskResponse{
 		ID: disk.ID.String(), Model: disk.Model, Transport: disk.Transport,
 		CapacityBytes: disk.CapacityBytes, Rotational: disk.Rotational,
@@ -319,5 +367,6 @@ func mapDisk(disk hoststate.Disk) diskResponse {
 		Role: disk.Role, Health: disk.Health, SMARTStatus: disk.SMARTStatus,
 		Eligible:          len(reasons) == 0 && disk.Role == hoststate.DiskRoleUnassigned,
 		IneligibleReasons: reasons, TemperatureCelsius: disk.TemperatureCelsius,
+		TemperatureHotCelsius: hot,
 	}
 }

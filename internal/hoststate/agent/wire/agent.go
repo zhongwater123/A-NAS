@@ -188,6 +188,78 @@ type systemDocument struct {
 	UptimeSeconds   uint64                  `json:"uptimeSeconds"`
 	Health          hoststate.Health        `json:"health"`
 	Storage         *StorageUsageDocument   `json:"storage,omitempty"`
+	Thermal         *thermalDocument        `json:"thermal,omitempty"`
+}
+
+type thermalDocument struct {
+	CPU  *temperatureDocument `json:"cpu,omitempty"`
+	GPUs []gpuDocument        `json:"gpus"`
+}
+
+type gpuDocument struct {
+	ID          string               `json:"id"`
+	Name        string               `json:"name"`
+	Integrated  bool                 `json:"integrated,omitempty"`
+	Temperature *temperatureDocument `json:"temperature,omitempty"`
+}
+
+type temperatureDocument struct {
+	Celsius    int `json:"celsius"`
+	HotCelsius int `json:"hotCelsius"`
+}
+
+func thermalFromDomain(thermal *hoststate.Thermal) *thermalDocument {
+	if thermal == nil {
+		return nil
+	}
+	document := &thermalDocument{CPU: temperatureFromDomain(thermal.CPU), GPUs: make([]gpuDocument, len(thermal.GPUs))}
+	for i, gpu := range thermal.GPUs {
+		document.GPUs[i] = gpuDocument{ID: gpu.ID.String(), Name: gpu.Name, Integrated: gpu.Integrated, Temperature: temperatureFromDomain(gpu.Temperature)}
+	}
+	return document
+}
+
+func temperatureFromDomain(temperature *hoststate.Temperature) *temperatureDocument {
+	if temperature == nil {
+		return nil
+	}
+	return &temperatureDocument{Celsius: temperature.Celsius, HotCelsius: temperature.HotCelsius}
+}
+
+func (document *thermalDocument) toDomain() (*hoststate.Thermal, error) {
+	if document == nil {
+		return nil, nil
+	}
+	cpu, err := document.CPU.toDomain()
+	if err != nil {
+		return nil, err
+	}
+	thermal := &hoststate.Thermal{CPU: cpu, GPUs: make([]hoststate.GPU, len(document.GPUs))}
+	seen := make(map[string]bool, len(document.GPUs))
+	for i, gpu := range document.GPUs {
+		id, err := hoststate.NewResourceID(gpu.ID)
+		if err != nil || seen[id.String()] || strings.TrimSpace(gpu.Name) == "" {
+			return nil, errors.New("invalid GPU")
+		}
+		seen[id.String()] = true
+		temperature, err := gpu.Temperature.toDomain()
+		if err != nil {
+			return nil, err
+		}
+		thermal.GPUs[i] = hoststate.GPU{ID: id, Name: gpu.Name, Integrated: gpu.Integrated, Temperature: temperature}
+	}
+	return thermal, nil
+}
+
+func (document *temperatureDocument) toDomain() (*hoststate.Temperature, error) {
+	if document == nil {
+		return nil, nil
+	}
+	temperature := hoststate.Temperature{Celsius: document.Celsius, HotCelsius: document.HotCelsius}
+	if !temperature.Valid() {
+		return nil, errors.New("invalid temperature")
+	}
+	return &temperature, nil
 }
 
 type StorageUsageDocument struct {
@@ -278,6 +350,7 @@ func DocumentFromDomain(state hoststate.State) StateDocument {
 			UptimeSeconds: state.System.UptimeSeconds,
 			Health:        state.System.Health,
 			Storage:       storageFromDomain(state.System.Storage),
+			Thermal:       thermalFromDomain(state.System.Thermal),
 		},
 		Disks:           disks,
 		DataVolume:      dataVolume,
@@ -300,6 +373,10 @@ func (document StateDocument) ToDomain() (hoststate.State, error) {
 			return hoststate.State{}, errors.New("invalid system storage usage")
 		}
 		storage = &hoststate.StorageUsage{TotalBytes: usage.TotalBytes, AvailableBytes: usage.AvailableBytes}
+	}
+	thermal, err := document.System.Thermal.toDomain()
+	if err != nil {
+		return hoststate.State{}, err
 	}
 	observedAt, err := time.Parse(time.RFC3339, document.ObservedAt)
 	if err != nil {
@@ -402,6 +479,7 @@ func (document StateDocument) ToDomain() (hoststate.State, error) {
 			UptimeSeconds: document.System.UptimeSeconds,
 			Health:        document.System.Health,
 			Storage:       storage,
+			Thermal:       thermal,
 		},
 		Disks:           disks,
 		DataVolume:      dataVolume,

@@ -3637,6 +3637,8 @@ export interface components {
             model: string;
             logicalCores: number;
             usagePercent: components["schemas"]["TaskManagerPercent"];
+            /** @description The hottest CPU package. */
+            temperature: components["schemas"]["TaskManagerTemperature"];
         };
         TaskManagerMemory: {
             totalBytes: number;
@@ -3656,8 +3658,11 @@ export interface components {
             id: components["schemas"]["TaskManagerID"];
             model: string;
             capacityBytes: number;
+            rotational: boolean;
             readBytesPerSecond: components["schemas"]["TaskManagerRate"];
             writeBytesPerSecond: components["schemas"]["TaskManagerRate"];
+            /** @description Read live from an NVMe drive; the last SMART reading of any other disk, at most ten minutes old unless the disk is in standby. */
+            temperature: components["schemas"]["TaskManagerTemperature"];
         };
         /**
          * @description Per-metric availability; unsupported means the driver lacks the interface, unavailable means reading failed.
@@ -3675,6 +3680,9 @@ export interface components {
             usagePercent: components["schemas"]["TaskManagerPercent"];
             memoryUsedBytes: components["schemas"]["TaskManagerBytes"];
             memoryTotalBytes: components["schemas"]["TaskManagerBytes"];
+            /** @description A GPU inside the CPU package, which shares the CPU's temperature. */
+            integrated: boolean;
+            temperature: components["schemas"]["TaskManagerTemperature"];
         };
         TaskManagerTask: {
             /** @description Content hash referencing an optional installed icon in the snapshot. */
@@ -3759,6 +3767,7 @@ export interface components {
             health: components["schemas"]["Health"];
             healthFindings: components["schemas"]["HealthFindings"];
             storage?: components["schemas"]["SystemStorage"];
+            thermal?: components["schemas"]["SystemThermal"];
             productVersion: string;
             /** Format: date-time */
             observedAt: string;
@@ -3773,18 +3782,19 @@ export interface components {
             health: components["schemas"]["Health"];
             healthFindings: components["schemas"]["HealthFindings"];
             storage?: components["schemas"]["SystemStorage"];
+            thermal?: components["schemas"]["SystemThermal"];
         };
         /** @description Why the system is not plainly healthy, most severe first; empty when healthy. The system's health is the severity of the first finding (docs/specs/system-health.md). */
         HealthFindings: components["schemas"]["HealthFinding"][];
         HealthFinding: {
             /** @enum {string} */
-            code: "disk_failing" | "disk_warning" | "disk_health_unknown" | "disk_hot" | "volume_offline" | "volume_read_only" | "volume_full" | "volume_nearly_full" | "volume_errors" | "volume_reconcile_failed";
+            code: "disk_failing" | "disk_warning" | "disk_health_unknown" | "disk_hot" | "cpu_hot" | "volume_offline" | "volume_read_only" | "volume_full" | "volume_nearly_full" | "volume_errors" | "volume_reconcile_failed";
             /** @enum {string} */
             severity: "warning" | "critical";
             diskId?: components["schemas"]["StableResourceID"];
             /**
              * Format: int64
-             * @description disk_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted.
+             * @description disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted.
              */
             value?: number;
         };
@@ -3809,6 +3819,8 @@ export interface components {
             /** @description Includes missing_identity, duplicate_identity, missing_model, missing_capacity, read_only or invalid_device_name for unusable observations. Devices without a unique identity have display-only observation-prefixed IDs, never valid storage operation targets. */
             ineligibleReasons: string[];
             temperatureCelsius?: number;
+            /** @description Present with temperatureCelsius: where the disk counts as running hot and the system health reports disk_hot, 55 °C for a hard disk and 70 °C for an SSD. */
+            temperatureHotCelsius?: number;
         };
         DisksResponse: {
             /** Format: date-time */
@@ -5515,6 +5527,31 @@ export interface components {
             /** Format: int64 */
             availableBytes: number;
         };
+        /** @description A sensor reading in whole degrees Celsius and the reading from which it counts as running hot. */
+        Temperature: {
+            celsius: number;
+            /** @description For a CPU or GPU 10 °C below the critical temperature its sensor reports (85 °C without one); the system health reports a CPU from here. */
+            hotCelsius: number;
+        };
+        GPU: {
+            id: components["schemas"]["StableResourceID"];
+            name: string;
+            /** @description A GPU inside the CPU package, which has no sensor of its own and shares the CPU's temperature. */
+            integrated: boolean;
+            /** @description Absent when the driver reports none. */
+            temperature?: components["schemas"]["Temperature"];
+        };
+        /** @description What the CPU and GPU temperature sensors read; disks carry their own temperatures. Absent when not observed, as from an older Host Agent (docs/specs/device-temperatures.md). */
+        SystemThermal: {
+            /** @description The hottest CPU package; absent without a sensor. */
+            cpu?: components["schemas"]["Temperature"];
+            gpus: components["schemas"]["GPU"][];
+        };
+        /** @description Same as Temperature; null when no sensor reports one. */
+        TaskManagerTemperature: {
+            celsius: number;
+            hotCelsius: number;
+        } | null;
     };
     responses: {
         /** @description Product operation error. */
@@ -5822,6 +5859,10 @@ export type AssistantApprovalEnvelope = components['schemas']['AssistantApproval
 export type AssistantApproval = components['schemas']['AssistantApproval'];
 export type AssistantChange = components['schemas']['AssistantChange'];
 export type SystemStorage = components['schemas']['SystemStorage'];
+export type Temperature = components['schemas']['Temperature'];
+export type Gpu = components['schemas']['GPU'];
+export type SystemThermal = components['schemas']['SystemThermal'];
+export type TaskManagerTemperature = components['schemas']['TaskManagerTemperature'];
 export type ResponseProductError = components['responses']['ProductError'];
 export type ResponseMethodNotAllowed = components['responses']['MethodNotAllowed'];
 export type ResponseStateUnavailable = components['responses']['StateUnavailable'];

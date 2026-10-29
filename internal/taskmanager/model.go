@@ -38,6 +38,15 @@ type CPU struct {
 	Model        string   `json:"model"`
 	LogicalCores int      `json:"logicalCores"`
 	UsagePercent *float64 `json:"usagePercent"`
+	// Temperature is the hottest CPU package; null without a sensor.
+	Temperature *Temperature `json:"temperature"`
+}
+
+// Temperature is a sensor reading in whole degrees Celsius and the reading
+// from which it counts as running hot (docs/specs/device-temperatures.md).
+type Temperature struct {
+	Celsius    int `json:"celsius"`
+	HotCelsius int `json:"hotCelsius"`
 }
 
 type Memory struct {
@@ -69,8 +78,13 @@ type Disk struct {
 	ID                  string   `json:"id"`
 	Model               string   `json:"model"`
 	CapacityBytes       uint64   `json:"capacityBytes"`
+	Rotational          bool     `json:"rotational"`
 	ReadBytesPerSecond  *float64 `json:"readBytesPerSecond"`
 	WriteBytesPerSecond *float64 `json:"writeBytesPerSecond"`
+	// Temperature is read live from an NVMe drive and is the last SMART
+	// reading of any other disk, at most ten minutes old unless the disk
+	// is in standby; null when unknown.
+	Temperature *Temperature `json:"temperature"`
 }
 
 type AcceleratorGroup struct {
@@ -89,6 +103,10 @@ type Accelerator struct {
 	UsagePercent      *float64 `json:"usagePercent"`
 	MemoryUsedBytes   *uint64  `json:"memoryUsedBytes"`
 	MemoryTotalBytes  *uint64  `json:"memoryTotalBytes"`
+	// Integrated GPUs sit in the CPU package and share its temperature.
+	Integrated bool `json:"integrated"`
+	// Temperature is null when the driver reports none.
+	Temperature *Temperature `json:"temperature"`
 }
 
 type TaskSnapshot struct {

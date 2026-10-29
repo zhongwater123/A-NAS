@@ -74,6 +74,19 @@ func (r *Reader) smartFor(identity string) (hoststate.Health, *int) {
 	return reading.health, reading.temperature
 }
 
+// diskReadings returns a disk's SMART verdict and temperature. An NVMe
+// drive's temperature is read now from its own sensor, that of any other
+// disk is its last SMART reading.
+func (r *Reader) diskReadings(identity string, device blockDevice) (hoststate.Health, *int) {
+	health, celsius := r.smartFor(identity)
+	if strings.EqualFold(device.Transport, "nvme") && device.Name != "" && !strings.ContainsAny(device.Name, `/\\`) {
+		if live := readDeviceTemperature(r.dependencies.root, "sys/class/block/"+device.Name+"/device", "Composite"); live != nil {
+			celsius = &live.Celsius
+		}
+	}
+	return health, celsius
+}
+
 // RefreshSMART reads every disk's SMART now and waits for it. The Host Agent
 // calls it once at startup so the first state read already has readings.
 func (r *Reader) RefreshSMART(ctx context.Context) error {
