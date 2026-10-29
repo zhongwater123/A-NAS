@@ -35,6 +35,13 @@ export function describeFinding(
         title: `${lead}温度 ${value} °C，偏高`,
         detail: `${disk?.rotational === false ? "固态硬盘最好低于 70 °C" : "机械硬盘最好低于 55 °C"}。请检查机箱通风和风扇，长期高温会缩短硬盘寿命。`,
       };
+    case "cpu_hot":
+      return {
+        icon: Thermometer,
+        title: `处理器温度 ${value} °C，偏高`,
+        detail:
+          "处理器已接近降频的温度。请检查散热器和机箱风扇是否在转、进出风口是否被挡住；长时间的 AI 识别或视频转码也会让温度升高。",
+      };
     case "volume_offline":
       return {
         icon: Unplug,

@@ -9,13 +9,24 @@ import {
   MemoryStick,
   Network as NetworkIcon,
   Search,
+  Thermometer,
 } from "lucide-react";
 import { type CSSProperties, type ReactNode, useId, useState } from "react";
 
 import { formatBytes, formatRate } from "../../lib/bytes";
 import { Banner } from "../parts";
 import styles from "../settings.module.css";
-import { type Availability, type DeviceSnapshot, type Group, readDevice, readTasks, type Task } from "./api";
+import { TemperatureGauge } from "../Temperature";
+import {
+  type Availability,
+  type DeviceSnapshot,
+  type Disk,
+  type Group,
+  readDevice,
+  readTasks,
+  type Task,
+  type Temperature,
+} from "./api";
 import { TaskIcon } from "./TaskIcon";
 import { type SnapshotView, useSnapshot } from "./useSnapshot";
 
@@ -24,6 +35,8 @@ type DeviceTab = (typeof deviceTabs)[number];
 const percent = (value: number | null) => (value === null ? "—" : `${value.toFixed(1)}%`);
 const size = (value: number | null) => (value === null ? "—" : formatBytes(value));
 const rate = (value: number | null) => (value === null ? "—" : formatRate(value));
+const celsius = (value: { celsius: number } | null) => (value === null ? "—" : `${value.celsius} °C`);
+const diskKind = (disk: Disk) => (disk.rotational ? "机械硬盘" : "固态硬盘");
 const memoryPercent = (data: DeviceSnapshot) =>
   data.memory.totalBytes > 0 ? (data.memory.usedBytes / data.memory.totalBytes) * 100 : null;
 const availabilityText: Record<Exclude<Availability, "available">, string> = {
@@ -205,6 +218,7 @@ function DeviceDetails({
             detail={data.disks.status === "partial" ? "数据不完整" : undefined}
           />
         </div>
+        <Temperatures data={data} />
         <div className={styles.tmHardwareStrip}>
           {(["gpu", "npu"] as const).map((kind) => (
             <div key={kind} className={styles.tmHardware}>
@@ -248,6 +262,21 @@ function DeviceDetails({
           detail={`${data.cpu.logicalCores} 个逻辑核心 · 整机总容量为 100%`}
         />
         {cpu}
+        <Metric
+          title="CPU 温度"
+          tone="rose"
+          value={celsius(data.cpu.temperature)}
+          times={history.map((point) => Date.parse(point.observedAt))}
+          values={history.map((point) => point.cpu.temperature?.celsius ?? null)}
+          max={100}
+          scale="0–100 °C"
+          icon={<Thermometer />}
+          detail={
+            data.cpu.temperature
+              ? `最热的处理器封装 · ${data.cpu.temperature.hotCelsius} °C 起为偏高`
+              : "未检测到 CPU 温度传感器"
+          }
+        />
       </>
     );
   if (tab === "内存")
@@ -311,7 +340,17 @@ function DeviceDetails({
       )}
       {data.disks.items.map((item) => (
         <section className={styles.tmResource} key={item.id}>
-          <ResourceTitle title={item.model || "硬盘"} detail={`${size(item.capacityBytes)} · ${item.id}`} />
+          <ResourceTitle
+            title={item.model || "硬盘"}
+            detail={`${size(item.capacityBytes)} · ${diskKind(item)} · ${item.id}`}
+            aside={
+              item.temperature ? (
+                <TemperatureGauge temperature={item.temperature} label={item.model || "硬盘"} />
+              ) : (
+                <span className={styles.tempMissing}>暂无温度读数</span>
+              )
+            }
+          />
           <div className={styles.tmGrid}>
             <Metric
               title="读取速度"
@@ -335,12 +374,63 @@ function DeviceDetails({
     </>
   );
 }
-function ResourceTitle({ title, detail }: { title: string; detail: string }) {
+function ResourceTitle({ title, detail, aside }: { title: string; detail: string; aside?: ReactNode }) {
   return (
     <header className={styles.tmResourceTitle}>
-      <h3>{title}</h3>
-      <p>{detail}</p>
+      <div>
+        <h3>{title}</h3>
+        <p>{detail}</p>
+      </div>
+      {aside}
     </header>
+  );
+}
+// Temperatures shows every sensor at a glance: the CPU, each GPU and each
+// disk (docs/specs/device-temperatures.md).
+function Temperatures({ data }: { data: DeviceSnapshot }) {
+  const tiles: Array<{ id: string; name: string; kind: string; temperature: Temperature | null; missing: string }> = [
+    {
+      id: "cpu",
+      name: "CPU",
+      kind: "处理器",
+      temperature: data.cpu.temperature,
+      missing: "未检测到传感器",
+    },
+    ...data.gpu.items.map((gpu) => ({
+      id: gpu.id,
+      name: gpu.integrated ? "核显" : gpu.name,
+      kind: gpu.integrated ? "集成在处理器中" : "GPU",
+      temperature: gpu.integrated ? null : gpu.temperature,
+      missing: gpu.integrated ? "同 CPU" : "驱动不提供",
+    })),
+    ...data.disks.items.map((disk) => ({
+      id: disk.id,
+      name: disk.model || "硬盘",
+      kind: diskKind(disk),
+      temperature: disk.temperature,
+      missing: "暂无读数",
+    })),
+  ];
+  return (
+    <section className={styles.tmThermal} aria-label="温度">
+      <h3>
+        <Thermometer />
+        温度
+      </h3>
+      <div>
+        {tiles.map((tile) => (
+          <div key={tile.id} className={styles.tmThermalTile}>
+            <span title={tile.name}>{tile.name}</span>
+            <small>{tile.kind}</small>
+            {tile.temperature ? (
+              <TemperatureGauge temperature={tile.temperature} label={tile.name} />
+            ) : (
+              <span className={styles.tempMissing}>{tile.missing}</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 function Fact({ label, value }: { label: string; value: string }) {
@@ -381,6 +471,18 @@ function Accelerators({
             detail={item.usagePercent === null ? acceleratorMissing(item.usageStatus) : undefined}
           />
           <div className={`${styles.setCard} ${styles.tmFacts}`}>
+            {kind === "gpu" && (
+              <Fact
+                label="温度"
+                value={
+                  item.integrated
+                    ? `同 CPU${data.cpu.temperature ? `（${celsius(data.cpu.temperature)}）` : ""}`
+                    : item.temperature
+                      ? celsius(item.temperature)
+                      : "当前驱动不提供温度"
+                }
+              />
+            )}
             <Fact
               label={kind === "gpu" ? "已用显存" : "已用设备内存"}
               value={
@@ -413,6 +515,7 @@ function Metric({
   tone = "blue",
   valueLabel,
   secondary,
+  scale = "0–100%",
 }: {
   title: string;
   value: string;
@@ -420,6 +523,7 @@ function Metric({
   values: Array<number | null>;
   times: number[];
   max?: number;
+  scale?: string;
   icon?: ReactNode;
   tone?: string;
   valueLabel?: string;
@@ -459,7 +563,7 @@ function Metric({
           {icon}
           {title}
         </span>
-        {max && <span className={styles.tmChartScale}>0–100%</span>}
+        {max && <span className={styles.tmChartScale}>{scale}</span>}
       </header>
       <div className={styles.tmValues}>
         <div>
