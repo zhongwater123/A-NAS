@@ -117,14 +117,22 @@ kiosk：
 两处相互独立的开销：
 
 1. **软件解码**：NAS 上没有 VA-API 驱动。Chromium 154 默认会用 VA-API，但 libva 没有驱动可加载，于是渲染进程用 FFmpeg 在 CPU 上解码 1080p H.264（每条 0.16–0.35 个核，60 fps 的两条最贵），GPU 进程主线程再把每一帧上传成纹理。
-2. **覆盖层下的页面照常渲染**：屏保与息屏只是盖在桌面上的元素。桌面表盘的过渡与窗口里的动画让 Chromium 一直出帧，黑屏阶段这部分就是全部开销，播放阶段则叠加在视频之上。
+2. **覆盖层下的页面照常渲染**：屏保与息屏只是盖在桌面上的元素。桌面表盘的过渡与窗口里的动画让 Chromium 一直出帧，黑屏阶段这部分就是全部开销，播放阶段则叠加在视频之上。登录画面（[#313](https://github.com/zhongwater123/A-NAS/pull/313)）的流星雨与字标用 `requestAnimationFrame` 逐帧绘制，本机屏幕没有登录时，黑屏同样盖在它们上面。
 
 ## 修复与回归证据
 
 - 驱动：Experimental NAS 上由 root 安装 `intel-media-va-driver` 与 `vainfo`，不改 Chromium 参数。安装与核对步骤见[本地控制台手册的硬件视频解码](../runbooks/operate-local-kiosk.md#硬件视频解码)。kiosk 启动器在找不到任何 VA-API 驱动时向 journal 写一行警告（[`run-kiosk.sh`](../../scripts/run-kiosk.sh)）。
 - 页面：两种覆盖层改为 `<body>` 的直接子元素，覆盖期间样式表让页面其余部分 `content-visibility: hidden`，等屏保淡入的 0.28 秒结束后才切换（[`LocalConsoleScreenSaver.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.tsx)、[`desktop.module.css`](../../web/src/desktop/desktop.module.css)）。
+- 登录画面：`content-visibility` 停掉样式、布局与绘制，却停不掉脚本逐帧运行的循环。[`AuthStage.tsx`](../../web/src/auth/AuthStage.tsx) 用 `IntersectionObserver` 得知画面不再显示，暂停流星雨与字标的循环，重新显示后继续（[`meteorShower.ts`](../../web/src/auth/meteorShower.ts)、[`bootIdent.ts`](../../web/src/boot/bootIdent.ts)）。Chrome 156 中，元素在 `content-visibility: hidden` 之下约 0.5 秒后观察者报告不再相交，覆盖层移除后 17 毫秒恢复。无头 Chrome 打开 Fake 栈的登录页，盖上黑屏覆盖层，每种情况 10 秒：
+
+  | 情况 | 渲染进程 CPU | 主线程 |
+  |---|---|---|
+  | 登录页，未覆盖 | 0.145 核 | 0.091 核 |
+  | 黑屏覆盖，循环照跑（禁用 `IntersectionObserver` 模拟改动前） | 0.056 核 | 0.047 核 |
+  | 黑屏覆盖，循环暂停 | ≈ 0 | 0.003 核 |
+  | 移除覆盖后 | 0.144 核 | 0.081 核 |
 - 测量：[`measure-local-console-cpu.sh`](../../scripts/measure-local-console-cpu.sh) 只读地给出 kiosk 会话与用户 slice 的 CPU、最忙的线程、各 GPU 引擎的忙碌比例与已加载的 VA-API 驱动。
-- 测试：[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx) 确认两种覆盖层都在页面根节点之外、是 `<body>` 的子元素；`content-visibility` 的效果由上面的开发机对照与实机测量证明，jsdom 不计算样式。
+- 测试：[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx) 确认两种覆盖层都在页面根节点之外、是 `<body>` 的子元素；`content-visibility` 的效果由上面的开发机对照与实机测量证明，jsdom 不计算样式。[`meteorShower.test.ts`](../../web/src/auth/meteorShower.test.ts) 与 [`bootIdent.test.ts`](../../web/src/boot/bootIdent.test.ts) 确认两个循环暂停期间不绘制、恢复后继续，[`AuthStage.test.tsx`](../../web/src/auth/AuthStage.test.tsx) 确认画面不可见时两者都暂停。
 - 实机：2026-10-29 装上驱动后，屏保播放时 kiosk 会话从 0.87 核降到 0.53 核，见上面的实机测量。页面改动部署后复测屏保与黑屏。
 
 ## 后续工作
