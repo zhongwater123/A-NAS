@@ -373,10 +373,14 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         "剪的时候不能越出；score 是各条探针里最高的分数，probes 给出每条探针的最高分与出现的时刻 at；tags 是词表里最接近的几个词，"
         "只说明大致内容；group 相同的卡片画面相似，别重复用同一画面。分数低于 threshold 时与“库里没有”分不开。"
         "videos：只在这些视频里找，可省略；指令带地点、事件这类条件时，先单独检索条件，用分数过 threshold 的卡片所在的视频，"
-        "再在这些视频里检索画面主题。"
+        "再在这些视频里检索画面主题。when：画面本身能看出、但会和主题混在一起的条件，如白天黑夜、室内室外，"
+        "每条是 {is, not}，例如 {\"is\": \"夜晚\", \"not\": \"白天\"}，只留更像 is 的画面；"
+        "例如“下雨天的街道”：probes 检索街道，when 要求 {\"is\": \"下雨\", \"not\": \"晴天\"}。"
         "结果里没有画面：向成员介绍片段时只说标签和分数支持的内容，并说明没有看过画面，不要描述猜出来的细节。"))
-    def search_video_moments(probes: list[str], limit: int = 20, videos: list[str] | None = None):
-        body = {"probes": probes, "limit": limit} | ({"videos": videos} if videos else {})
+    def search_video_moments(probes: list[str], limit: int = 20, videos: list[str] | None = None,
+                             when: list[dict] | None = None):
+        body = {"probes": probes, "limit": limit} | ({"videos": videos} if videos else {}) | (
+            {"when": when} if when else {})
         try:
             status, _kind, raw = video_moments("/search", body)
         except PhotoError as error:

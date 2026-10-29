@@ -26,6 +26,7 @@ Steps:
 """
 
 import argparse
+import itertools
 import json
 import os
 import random
@@ -105,7 +106,8 @@ def rules(args):
     instructions = load_instructions(args.instructions)
     os.makedirs(args.weight_cache, exist_ok=True)
     provider = providers.MediaPipeProvider(args.model, MANIFEST, cache_dir=args.weight_cache)
-    texts = sorted({t for i in instructions for t in [i["text"], *i["topic"], *i.get("condition", [])]})
+    texts = sorted({t for i in instructions
+                    for t in [i["text"], *i["topic"], *i.get("condition", []), *itertools.chain(*i.get("when", []))]})
     vectors = {t: np.asarray(provider.embed_query(t), dtype=np.float32) for t in texts}
     directory = os.path.join(vm.CACHE, provider.model)
     provider.close()
@@ -118,7 +120,8 @@ def rules(args):
         if instruction.get("condition"):
             found = index.search({t: vectors[t] for t in instruction["condition"]}, moments.CARDS_MAX)["cards"]
             videos = sorted({c["video"] for c in found if c["score"] >= moments.THRESHOLD})
-        segments = index.plan({t: vectors[t] for t in instruction["topic"]}, instruction["seconds"], videos)
+        when = [(vectors[a], vectors[b]) for a, b in instruction.get("when", [])]
+        segments = index.plan({t: vectors[t] for t in instruction["topic"]}, instruction["seconds"], videos, when)
         plan = {"videos": videos, "segments": segments}
         if segments:
             clips = index.check(segments)

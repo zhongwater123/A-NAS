@@ -106,14 +106,16 @@ class Index:
             card["group"] = firsts[g]
         return cards
 
-    def search(self, probes: dict[str, np.ndarray], limit: int = CARDS_MAX, videos=None) -> dict:
-        """The cards whose best window is highest for any probe, best first; only in videos when given."""
+    def search(self, probes: dict[str, np.ndarray], limit: int = CARDS_MAX, videos=None, when=()) -> dict:
+        """The cards whose best window is highest for any probe, best first; only in videos
+        when given, and only over windows that meet every condition in when."""
         scores = {text: self.frames @ vector for text, vector in probes.items()}
+        out = self._left_out(when)
         found = []
         for card in self.cards:
             if videos is not None and card["video"] not in videos:
                 continue
-            windows = [i for i in card["windows"] if not self.flat[i]]
+            windows = [i for i in card["windows"] if not out[i]]
             if not windows:
                 continue
             best = {}
@@ -169,7 +171,7 @@ class Index:
             raise PlanError(problems)
         return clips
 
-    def plan(self, probes: dict[str, np.ndarray], seconds: float, videos=None) -> list[dict]:
+    def plan(self, probes: dict[str, np.ndarray], seconds: float, videos=None, when=()) -> list[dict]:
         """A plan with no model. The target is an upper bound: only cards at or over
         THRESHOLD, best first, and when they run out the cut is shorter. Each card gives
         one segment grown from its best window over neighbours also over THRESHOLD and
@@ -177,7 +179,8 @@ class Index:
         it does; a segment showing the same picture as one taken from the same shot is
         left out. Then each video's segments in time order."""
         scores = np.max([self.frames @ vector for vector in probes.values()], axis=0)
-        found = [c for c in self.search(probes, CARDS_MAX, videos)["cards"] if c["score"] >= THRESHOLD]
+        found = [c for c in self.search(probes, CARDS_MAX, videos, when)["cards"] if c["score"] >= THRESHOLD]
+        out = self._left_out(when)
         cards = {c["id"]: c for c in self.cards}
         segments, taken, left = [], [], seconds
         for card in found:
@@ -185,9 +188,9 @@ class Index:
                 break
             lo, hi = card["shot"]
             windows = sorted(cards[card["id"]]["windows"], key=lambda i: self.rows[i][1])
-            usable = [i for i in windows if not self.flat[i]]
+            usable = [i for i in windows if not out[i]]
             best = max(usable, key=lambda i: scores[i])
-            run = self._grow(windows, best, scores, (lo, hi), left)
+            run = self._grow(windows, best, scores, out, (lo, hi), left)
             start, end = max(lo, self.rows[run[0]][1]), min(hi, self.rows[run[-1]][2])
             if end - start < SEGMENT_MIN + 0.02:  # a short shot: the whole of it
                 start, end = max(lo, min(start, card["start"])), min(hi, max(end, card["end"]))
@@ -216,14 +219,23 @@ class Index:
         frames = self.frames[run]
         return bool((frames @ frames.T).min() >= STILL)
 
-    def _grow(self, windows: list[int], best: int, scores: np.ndarray, shot: tuple, left: float) -> list[int]:
+    def _left_out(self, when) -> np.ndarray:
+        """Flat windows, and those failing a condition: a picture that is (is, isnt) is
+        closer to is than to isnt, as night to 夜晚 rather than 白天."""
+        out = self.flat.copy()
+        for is_, isnt in when:
+            out |= self.frames @ is_ <= self.frames @ isnt
+        return out
+
+    def _grow(self, windows: list[int], best: int, scores: np.ndarray, out: np.ndarray, shot: tuple,
+              left: float) -> list[int]:
         """Windows next to best, the higher-scoring side first, while each is over
-        THRESHOLD and not flat and the run stays within its length."""
+        THRESHOLD and not left out and the run stays within its length."""
         n = windows.index(best)
         a, b = n, n
         while True:
             sides = [k for k in (a - 1, b + 1) if 0 <= k < len(windows)
-                     and not self.flat[windows[k]] and scores[windows[k]] >= THRESHOLD]
+                     and not out[windows[k]] and scores[windows[k]] >= THRESHOLD]
             if not sides:
                 return windows[a:b + 1]
             k = max(sides, key=lambda k: scores[windows[k]])

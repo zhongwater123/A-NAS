@@ -172,6 +172,12 @@ class MomentsTest(unittest.TestCase):
         self.assertEqual(self.index.check(segments), [("07", 8.0, 14.0), ("07", 28.0, 34.0)])
         self.assertEqual(self.index.plan({"城堡": -self.castle}, 10), [])
 
+    def test_search_keeps_to_windows_meeting_a_condition(self):
+        # The castle seen from the other side (28-48 s) leans to basis 2; asking for that
+        # rather than basis 1 leaves out the first castle part.
+        found = self.index.search({"城堡": self.castle}, when=[(np.eye(8)[2], np.eye(8)[1] * 0.7)])
+        self.assertEqual([c["id"] for c in found["cards"]], ["07-1-1"])
+
     def test_a_plan_with_no_segments_is_refused(self):
         with self.assertRaises(moments.PlanError):
             self.index.check([])

@@ -6,7 +6,8 @@ the model's probes with the AI Worker and answers on its own assistant
 socket, which any member of a-nas-users may use, known by the caller's UID.
 
   POST /search   {"probes": [...], "limit": n,   shot cards (montage.moments),
-                  "videos": [...]}                only in those videos if given
+                  "videos": [...],                only in those videos if given,
+                  "when": [{"is", "not"}]}        only over windows closer to is than to not
   POST /montage  {"segments": [...]}             the cut as video/mp4, or the
                                                  plan's problems with 422
 
@@ -33,6 +34,7 @@ import numpy as np
 from montage import moments, render
 
 PROBES_MAX = 8
+WHEN_MAX = 4
 PROBE_CHARS = 200
 BODY_MAX = 1 << 16
 MEMBERS = "a-nas-users"
@@ -102,6 +104,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def search(self, body):
         probes, limit, videos = body.get("probes"), body.get("limit", 20), body.get("videos")
+        when = body.get("when", [])
         if (not isinstance(probes, list) or not 1 <= len(probes) <= PROBES_MAX
                 or not all(isinstance(p, str) and 1 <= len(p.strip()) <= PROBE_CHARS for p in probes)):
             return self.reply(400, {"error": f"probes 要有 1–{PROBES_MAX} 条，每条 1–{PROBE_CHARS} 个字符"})
@@ -110,11 +113,18 @@ class Handler(BaseHTTPRequestHandler):
         if videos is not None and (not isinstance(videos, list) or not videos
                                    or not all(v in self.server.index.videos for v in videos)):
             return self.reply(400, {"error": "videos 要是检索结果里出现过的视频编号列表"})
+        if (not isinstance(when, list) or len(when) > WHEN_MAX
+                or not all(isinstance(w, dict) and all(isinstance(w.get(k), str)
+                                                       and 1 <= len(w[k].strip()) <= PROBE_CHARS for k in ("is", "not"))
+                           for w in when)):
+            return self.reply(400, {"error": f"when 最多 {WHEN_MAX} 条，每条是 {{is, not}} 两句短描述"})
         try:
-            vectors = {p: embed_query(self.server.ai_socket, p) for p in dict.fromkeys(probes)}
+            texts = dict.fromkeys([*probes, *(w[k] for w in when for k in ("is", "not"))])
+            vectors = {t: embed_query(self.server.ai_socket, t) for t in texts}
         except OSError as error:
             return self.reply(503, {"error": f"设备上的 AI 暂时不可用：{error}"})
-        return self.reply(200, self.server.index.search(vectors, limit, videos))
+        pairs = [(vectors[w["is"]], vectors[w["not"]]) for w in when]
+        return self.reply(200, self.server.index.search({p: vectors[p] for p in probes}, limit, videos, pairs))
 
     def montage(self, body):
         segments = body.get("segments")
