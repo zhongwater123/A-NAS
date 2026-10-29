@@ -39,6 +39,8 @@ from montage import moments, render
 INSTRUCTIONS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "video_montage.json")
 DRAWS = 200
 SEED = 322
+# Each random segment is as long as a still one the rules would take.
+RANDOM_PIECE = 4.0
 METRICS = ("onTopic", "crossShot", "flat", "shotShare", "reversals", "length")
 
 
@@ -82,14 +84,13 @@ def clips_of(index, segments):
 
 
 def random_plan(index, found, seconds, rng):
-    """Cards picked at random from what a search returns, PIECE of each anywhere in it,
-    as long as the rules would take."""
+    """Cards picked at random from what a search returns, RANDOM_PIECE of each anywhere in it."""
     clips, left = [], seconds
     for card in rng.sample(found, len(found)):
         if left < moments.SEGMENT_MIN:
             break
         lo, hi = card["start"], card["end"]
-        piece = min(moments.PIECE, left, hi - lo)
+        piece = min(RANDOM_PIECE, left, hi - lo)
         if piece < moments.SEGMENT_MIN:
             continue
         start = rng.uniform(lo, hi - piece)

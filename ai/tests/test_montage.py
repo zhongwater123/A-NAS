@@ -163,12 +163,13 @@ class MomentsTest(unittest.TestCase):
     def test_search_keeps_to_the_videos_given(self):
         self.assertEqual(self.index.search({"城堡": self.castle}, videos=["08"])["cards"], [])
 
-    def test_rules_plan_the_best_cards_one_of_each_shot_in_time_order(self):
-        segments = self.index.plan({"城堡": self.castle}, 10)
-        # Only the castle shot passes the threshold: one piece of it around the best window.
-        self.assertEqual([s["card"] for s in segments], ["07-1-0"])
-        self.assertEqual((segments[0]["start"], segments[0]["end"]), (8, 12))
-        self.assertEqual(self.index.check(segments), [("07", 8.0, 12.0)])
+    def test_rules_take_a_still_picture_briefly_and_never_fill_the_target(self):
+        segments = self.index.plan({"城堡": self.castle}, 60)
+        # Two pictures of the castle shot pass the threshold, each the same for 20 s:
+        # STILL_MAX of each around its best window, and nothing more however long the target.
+        self.assertEqual([(s["card"], s["start"], s["end"]) for s in segments],
+                         [("07-1-0", 8, 12), ("07-1-1", 28, 32)])
+        self.assertEqual(self.index.check(segments), [("07", 8.0, 12.0), ("07", 28.0, 32.0)])
         self.assertEqual(self.index.plan({"城堡": -self.castle}, 10), [])
 
     def test_a_plan_with_no_segments_is_refused(self):

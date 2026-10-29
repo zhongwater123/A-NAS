@@ -371,7 +371,7 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         "同一个意思可以换几种说法；地点、时间这类条件画面里看不出来，不要和画面主题写在一条里。limit：卡片数，1–40，默认 20。"
         "每张卡片是一个镜头里最长 20 秒的一部分：id；video；start、end 是这张卡片覆盖的秒数；shot 是所在镜头的起止，"
         "剪的时候不能越出；score 是各条探针里最高的分数，probes 给出每条探针的最高分与出现的时刻 at；tags 是词表里最接近的几个词，"
-        "只说明大致内容；group 相同的卡片画面相似，成片里别都用。分数低于 threshold 时与“库里没有”分不开。"
+        "只说明大致内容；group 相同的卡片画面相似，别重复用同一画面。分数低于 threshold 时与“库里没有”分不开。"
         "videos：只在这些视频里找，可省略；指令带地点、事件这类条件时，先单独检索条件，用分数过 threshold 的卡片所在的视频，"
         "再在这些视频里检索画面主题。"
         "结果里没有画面：向成员介绍片段时只说标签和分数支持的内容，并说明没有看过画面，不要描述猜出来的细节。"))
@@ -392,6 +392,8 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         "segments：按播放顺序排列，每段是 {card, start, end, reason}：card 是 search_video_moments 返回的卡片 id，"
         "start、end 是秒数，必须落在这张卡片的 shot 范围内，每段至少 1.5 秒，不能含纯黑或纯色画面，各段不能用同一段画面；"
         "总长不超过 180 秒。reason 用一句话写为什么选这段、为什么放在这个位置，随成片存档。"
+        "成员说的时长是上限：切题的片段不够就剪短并说明，不要为了换画面或凑时长放进不切题的片段；"
+        "画面几乎不变的一段不要超过约 4 秒，画面一直在变的可以到约 8 秒。"
         "计划不合规则时整次拒绝并逐条说明是哪一段、哪一条，照着改了再调用。成片只在助手目录里；"
         "成员要放进个人空间时，再用 submit_changes 的 copy 提交。"))
     def make_montage(segments: list[dict]):

@@ -33,8 +33,10 @@ SEGMENT_MIN = 1.5
 SEGMENTS_MAX = 30
 TOTAL_MAX = 180.0
 REASON_CHARS = 200
-# A plan by rule takes at most this much of one shot, around its best window.
-PIECE = 4.0
+# A segment may run this long while its picture hardly changes (every window
+# SAME_PICTURE alike), and this long while it keeps changing.
+STILL_MAX = 4.0
+MOVING_MAX = 8.0
 
 
 class PlanError(Exception):
@@ -165,42 +167,69 @@ class Index:
         return clips
 
     def plan(self, probes: dict[str, np.ndarray], seconds: float, videos=None) -> list[dict]:
-        """A plan with no model: the cards at or over THRESHOLD, best first, at most PIECE
-        of each shot, around the best window and clear of flat frames, until the target;
-        one card of each group first, the rest of a group only to fill the target. Then
-        each video's segments in time order."""
+        """A plan with no model. The target is an upper bound: only cards at or over
+        THRESHOLD, best first, and when they run out the cut is shorter. Each card gives
+        one segment grown from its best window over neighbours also over THRESHOLD and
+        not flat, at most STILL_MAX while the picture hardly changes and MOVING_MAX while
+        it does; a segment showing the same picture as one taken from the same shot is
+        left out. Then each video's segments in time order."""
+        scores = np.max([self.frames @ vector for vector in probes.values()], axis=0)
         found = [c for c in self.search(probes, CARDS_MAX, videos)["cards"] if c["score"] >= THRESHOLD]
-        segments, groups, shots, left = [], set(), set(), seconds
-        for second_pass in (False, True):
-            for card in found:
-                shot = (card["video"], *card["shot"])
-                if left < SEGMENT_MIN + 0.02 or shot in shots or (card["group"] in groups and not second_pass):
-                    continue
-                at = max(card["probes"].values(), key=lambda p: p["score"])["at"]
-                lo, hi = self._clear(card, at)
-                piece = min(PIECE, left, hi - lo)
-                if piece < SEGMENT_MIN + 0.02:
-                    continue
-                start = min(max(lo, (at[0] + at[1] - piece) / 2), hi - piece)
-                # Rounded inward, so that the segment stays inside its shot.
-                start, end = math.ceil(start * 100) / 100, math.floor((start + piece) * 100) / 100
-                segments.append({"card": card["id"], "start": start, "end": end,
-                                 "reason": f"规则：分数 {card['score']}，标签 {'、'.join(card['tags'][:3])}"})
-                groups.add(card["group"])
-                shots.add(shot)
-                left -= end - start
+        cards = {c["id"]: c for c in self.cards}
+        segments, taken, left = [], [], seconds
+        for card in found:
+            if left < SEGMENT_MIN + 0.02:
+                break
+            lo, hi = card["shot"]
+            windows = sorted(cards[card["id"]]["windows"], key=lambda i: self.rows[i][1])
+            usable = [i for i in windows if not self.flat[i]]
+            best = max(usable, key=lambda i: scores[i])
+            run = self._grow(windows, best, scores, (lo, hi), left)
+            start, end = max(lo, self.rows[run[0]][1]), min(hi, self.rows[run[-1]][2])
+            if end - start < SEGMENT_MIN + 0.02:  # a short shot: the whole of it
+                start, end = max(lo, min(start, card["start"])), min(hi, max(end, card["end"]))
+            cap = min(left, STILL_MAX if self._still(run) else MOVING_MAX)
+            if end - start > cap:  # trimmed around the best window
+                middle = (self.rows[best][1] + self.rows[best][2]) / 2
+                start = min(max(start, middle - cap / 2), end - cap)
+                end = start + cap
+            picture = self.frames[run].mean(axis=0)
+            picture /= np.linalg.norm(picture)
+            shot = (card["video"], lo, hi)
+            if any(s == shot and float(p @ picture) >= SAME_PICTURE for s, p in taken):
+                continue
+            # Rounded inward, so that the segment stays inside its shot.
+            start, end = math.ceil(start * 100) / 100, math.floor(end * 100) / 100
+            if end - start < SEGMENT_MIN:
+                continue
+            segments.append({"card": card["id"], "start": start, "end": end,
+                             "reason": f"规则：分数 {card['score']}，标签 {'、'.join(card['tags'][:3])}"})
+            taken.append((shot, picture))
+            left -= end - start
         order = {video: n for n, video in enumerate(dict.fromkeys(c["video"] for c in found))}
         return sorted(segments, key=lambda s: (order[s["card"].rsplit("-", 2)[0]], s["start"]))
 
-    def _clear(self, card: dict, at: list[float]) -> tuple[float, float]:
-        """The stretch of the card's shot around the window at, up to the nearest flat window."""
-        lo, hi = card["shot"]
-        for i in sorted(self._shot_windows(card), key=lambda i: self.rows[i][1]):
-            if self.flat[i] and self.rows[i][2] <= at[0]:
-                lo = max(lo, self.rows[i][2])
-            elif self.flat[i] and self.rows[i][1] >= at[1]:
-                hi = min(hi, self.rows[i][1])
-        return lo, hi
+    def _still(self, run: list[int]) -> bool:
+        frames = self.frames[run]
+        return bool((frames @ frames.T).min() >= SAME_PICTURE)
+
+    def _grow(self, windows: list[int], best: int, scores: np.ndarray, shot: tuple, left: float) -> list[int]:
+        """Windows next to best, the higher-scoring side first, while each is over
+        THRESHOLD and not flat and the run stays within its length."""
+        n = windows.index(best)
+        a, b = n, n
+        while True:
+            sides = [k for k in (a - 1, b + 1) if 0 <= k < len(windows)
+                     and not self.flat[windows[k]] and scores[windows[k]] >= THRESHOLD]
+            if not sides:
+                return windows[a:b + 1]
+            k = max(sides, key=lambda k: scores[windows[k]])
+            na, nb = min(a, k), max(b, k)
+            run = windows[na:nb + 1]
+            length = min(shot[1], self.rows[run[-1]][2]) - max(shot[0], self.rows[run[0]][1])
+            if length > min(left, STILL_MAX if self._still(run) else MOVING_MAX) + 2:
+                return windows[a:b + 1]
+            a, b = na, nb
 
     def _shot_windows(self, card: dict) -> list[int]:
         lo, hi = card["shot"]
