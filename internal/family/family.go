@@ -177,7 +177,7 @@ CREATE TABLE records (
     recording_bytes INTEGER,
     recording_name TEXT
 );
-CREATE INDEX records_feed ON records(baby_id, created_at DESC, id DESC);
+CREATE INDEX records_timeline ON records(baby_id, occurred_on DESC, created_at DESC, id DESC);
 CREATE UNIQUE INDEX records_request ON records(author_id, request_key) WHERE request_key IS NOT NULL;
 CREATE UNIQUE INDEX records_auto ON records(baby_id, auto_key) WHERE auto_key IS NOT NULL AND deleted_at IS NULL;
 CREATE TABLE record_photos (

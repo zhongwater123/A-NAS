@@ -196,7 +196,7 @@
   parameters: [{ $ref: "../components/family.yaml#/parameters/FamilyBabyID" }]
   get:
     operationId: listFamilyRecords
-    summary: "A channel's records, most recently added first, 30 a page; only photos the reader can see, and photo records with none left are skipped"
+    summary: "A channel's records as a timeline: by the day each happened, newest first, 30 a page; only photos the reader can see, and photo records with none left are skipped"
     parameters:
       - { $ref: "../components/family.yaml#/parameters/FamilyCursor" }
       - { name: kind, in: query, required: false, schema: { type: string, enum: [photos, recording, journal, measurement, vaccine, milestone] } }

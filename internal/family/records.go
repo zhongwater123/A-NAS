@@ -290,7 +290,8 @@ func (s *Store) present(ctx context.Context, q queryer, actor Actor, baby Baby, 
 	return records, nil
 }
 
-// Records pages through a baby's records, most recently added first. kind,
+// Records pages through a baby's records as a timeline: by the day each
+// happened, newest first, and on the same day the latest added first. kind,
 // when set, keeps only that kind.
 func (s *Store) Records(ctx context.Context, actor Actor, babyID string, kind Kind, cursor string) (Page, error) {
 	if _, _, err := s.requireMember(ctx, s.db, actor); err != nil {
@@ -315,10 +316,11 @@ func (s *Store) Records(ctx context.Context, actor Actor, babyID string, kind Ki
 			args = append(args, kind)
 		}
 		if after != nil {
-			query += " AND (created_at < ? OR (created_at = ? AND id < ?))"
-			args = append(args, after.at, after.at, after.id)
+			on, created, _ := strings.Cut(after.at, " ")
+			query += " AND (occurred_on < ? OR (occurred_on = ? AND (created_at < ? OR (created_at = ? AND id < ?))))"
+			args = append(args, on, on, created, created, after.id)
 		}
-		query += " ORDER BY created_at DESC, id DESC LIMIT ?"
+		query += " ORDER BY occurred_on DESC, created_at DESC, id DESC LIMIT ?"
 		args = append(args, PageSize)
 		rows, err := s.queryRows(ctx, s.db, query, args...)
 		if err != nil {
@@ -334,7 +336,7 @@ func (s *Store) Records(ctx context.Context, actor Actor, babyID string, kind Ki
 		}
 		page.Records = append(page.Records, records...)
 		last := rows[len(rows)-1]
-		after = &cursorKey{at: last.created, id: last.record.ID}
+		after = &cursorKey{at: last.record.OccurredOn + " " + last.created, id: last.record.ID}
 		page.Next = after.String()
 		if len(rows) < PageSize {
 			page.Next = ""

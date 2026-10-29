@@ -1645,7 +1645,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** A channel's records, most recently added first, 30 a page; only photos the reader can see, and photo records with none left are skipped */
+        /** A channel's records as a timeline: by the day each happened, newest first, 30 a page; only photos the reader can see, and photo records with none left are skipped */
         get: operations["listFamilyRecords"];
         put?: never;
         /** Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID */

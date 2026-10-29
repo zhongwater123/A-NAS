@@ -672,3 +672,34 @@ func TestTheCatalogIsWellFormed(t *testing.T) {
 		t.Fatalf("DTaP is given at 2, 4, 6 and 18 months and 6 years since 2025, got %v", months)
 	}
 }
+
+func TestTheTimelineRunsByWhenThingsHappened(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	baby := f.family(t)
+	// Added in one order, dated in another, across more than one page.
+	var dates []string
+	for i := range PageSize + 5 {
+		date := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC).AddDate(0, 0, (i*37)%220).Format(dateLayout)
+		dates = append(dates, date)
+		must(f.store.AddRecord(ctx, grandma, baby.ID, RecordInput{Kind: KindJournal, OccurredOn: date, Text: "第" + itoa(i) + "篇"}))
+		f.now = f.now.Add(time.Minute)
+	}
+	var got []string
+	cursor := ""
+	for {
+		page := must(f.store.Records(ctx, mom, baby.ID, "", cursor))
+		for _, record := range page.Records {
+			got = append(got, record.OccurredOn)
+		}
+		if page.Next == "" {
+			break
+		}
+		cursor = page.Next
+	}
+	want := slices.Clone(dates)
+	slices.SortFunc(want, func(a, b string) int { return strings.Compare(b, a) })
+	if !slices.Equal(got, want) {
+		t.Fatalf("timeline dates = %v\nwant           %v", got, want)
+	}
+}
