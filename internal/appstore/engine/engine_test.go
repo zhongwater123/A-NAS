@@ -139,11 +139,14 @@ func (f *fakeDocker) ProjectContainers(_ context.Context, project string) ([]eng
 type fakeRunner struct {
 	mu    sync.Mutex
 	calls [][]string
-	// at is when each call started.
-	at    []time.Time
-	err   error
-	gate  chan struct{}
-	after func(args []string)
+	// at is when each call started; running counts the calls under way
+	// and most the largest count seen.
+	at      []time.Time
+	running int
+	most    int
+	err     error
+	gate    chan struct{}
+	after   func(args []string)
 	// quiet leaves out the 45 lines of output each call writes otherwise.
 	quiet bool
 	// say, when set, gives a line the call writes last, as Compose ends
@@ -170,7 +173,14 @@ func (f *fakeRunner) Run(ctx context.Context, args []string, output io.Writer) e
 	f.mu.Lock()
 	f.calls = append(f.calls, args)
 	f.at = append(f.at, time.Now())
+	f.running++
+	f.most = max(f.most, f.running)
 	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.running--
+		f.mu.Unlock()
+	}()
 	if f.gate != nil {
 		<-f.gate
 	}
@@ -261,12 +271,12 @@ func TestInstallRunsTheConfirmedComposeFile(t *testing.T) {
 	if verbs := runner.verbs(); !slices.Equal(verbs, pullsThen(plan, "up")) {
 		t.Fatalf("compose ran %v, want each service pulled and then up", verbs)
 	}
-	compose := "compose --progress plain -p a-nas-uptimekuma -f " + filepath.Join(state, "apps", "uptimekuma", "docker-compose.yml")
-	if got := strings.Join(runner.calls[0], " "); got != compose+" pull --policy missing "+plan.Services[0].Service {
+	project := "-p a-nas-uptimekuma -f " + filepath.Join(state, "apps", "uptimekuma", "docker-compose.yml")
+	if got := strings.Join(runner.calls[0], " "); got != "compose --progress json "+project+" pull --policy missing "+plan.Services[0].Service {
 		t.Fatalf("pull args = %s", got)
 	}
 	// Every image is present by then; up must not reach a registry.
-	if got := strings.Join(runner.calls[1], " "); got != compose+" up --detach --remove-orphans --pull never" {
+	if got := strings.Join(runner.calls[1], " "); got != "compose --progress plain "+project+" up --detach --remove-orphans --pull never" {
 		t.Fatalf("up args = %s", got)
 	}
 	apps, _ := store.Apps(ctx)

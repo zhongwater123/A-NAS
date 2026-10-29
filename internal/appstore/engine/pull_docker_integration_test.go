@@ -58,11 +58,11 @@ func TestRealDockerPullFailures(t *testing.T) {
 		{"corrupt", ""},
 	} {
 		t.Run(test.repository, func(t *testing.T) {
-			compose := registry.project(t, map[string]string{"app": test.repository})
+			project, file := registry.project(t, map[string]string{"app": test.repository})
 			var output bytes.Buffer
-			watch := &pullWatch{output: &output}
-			err := CLIRunner{}.Run(context.Background(), slices.Concat(compose, []string{"pull", "--policy", "missing", "app"}), watch)
-			watch.flush()
+			watch := newPullWatch(&output)
+			err := CLIRunner{}.Run(context.Background(), pullArgs(project, file, "app"), watch)
+			watch.Flush()
 			t.Logf("Docker said:\n%s", output.String())
 			if err == nil {
 				t.Fatal("the pull succeeded")
@@ -87,10 +87,10 @@ func TestRealDockerRetriesARateLimitedPull(t *testing.T) {
 	}
 	registry := newTestRegistry(t)
 	registry.throttled.Store(true)
-	compose := registry.project(t, map[string]string{"app": "throttled"})
+	project, file := registry.project(t, map[string]string{"app": "throttled"})
 	store := &Store{runner: CLIRunner{}, pullDelay: 50 * time.Millisecond, pullLimit: time.Second}
 	output := &retryWatch{registry: registry}
-	if err := store.pullImages(context.Background(), compose, []string{"app"}, output); err != nil {
+	if err := store.pullImages(context.Background(), project, file, []string{"app"}, output); err != nil {
 		t.Fatalf("pull: %v\n%s", err, output.String())
 	}
 	if !strings.Contains(output.String(), "app：镜像仓库限流，1 秒后重试（第 1 次）") {
@@ -181,6 +181,12 @@ services:
 // fails in the way the repository's name says: ratelimit, unavailable,
 // missing, private and reset fail the manifest; layerratelimit, layerreset
 // and corrupt the layer; throttled answers 429 while throttled is set.
+//
+// It is written here rather than taken from go-containerregistry, whose
+// in-memory registry would still need a handler around it for each of these
+// failures (a TCP reset without TLS close_notify, a corrupted layer, a 429
+// on HEAD) and would add a module tree to go.mod for this one test; the
+// image is three fixed blobs.
 type testRegistry struct {
 	*httptest.Server
 	manifest, config, layer []byte
@@ -194,7 +200,10 @@ func newTestRegistry(t *testing.T) *testRegistry {
 	t.Helper()
 	var archive bytes.Buffer
 	writer := tar.NewWriter(&archive)
-	content := bytes.Repeat([]byte("a-nas pull test\n"), 64)
+	// The layer is new to Docker in each test: the containerd store keeps a
+	// partial download, even a corrupt one, and resumes it on the next pull
+	// of the same layer.
+	content := bytes.Repeat(fmt.Appendf(nil, "a-nas pull test %d\n", time.Now().UnixNano()), 64)
 	if err := writer.WriteHeader(&tar.Header{Name: "hello.txt", Mode: 0o644, Size: int64(len(content))}); err != nil {
 		t.Fatal(err)
 	}
@@ -244,8 +253,8 @@ func (r *testRegistry) image(t *testing.T, mode string) string {
 }
 
 // project writes a Compose file with a service pulling from each named
-// repository and returns the Compose arguments an install uses for it.
-func (r *testRegistry) project(t *testing.T, services map[string]string) []string {
+// repository and returns a new project name and the file.
+func (r *testRegistry) project(t *testing.T, services map[string]string) (string, string) {
 	t.Helper()
 	var compose strings.Builder
 	compose.WriteString("services:\n")
@@ -257,7 +266,7 @@ func (r *testRegistry) project(t *testing.T, services map[string]string) []strin
 	if err := os.WriteFile(file, []byte(compose.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return []string{"compose", "--progress", "plain", "-p", fmt.Sprintf("a-nas-pulltest-%d", time.Now().UnixNano()), "-f", file}
+	return fmt.Sprintf("a-nas-pulltest-%d", time.Now().UnixNano()), file
 }
 
 func (r *testRegistry) serve(w http.ResponseWriter, request *http.Request) {

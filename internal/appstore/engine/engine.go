@@ -3,7 +3,6 @@
 package engine
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/mod/semver"
 
@@ -28,9 +28,13 @@ const (
 	installTimeout   = 30 * time.Minute
 	uninstallTimeout = 5 * time.Minute
 	outputTailLines  = 40
+	// outputLineRunes bounds each line a job keeps; Compose can pass on an
+	// app's own log lines.
+	outputLineRunes = 2000
 
 	// Compose before 2.30 sends volume subpaths through the legacy bind API,
 	// which drops them; the engine API gained subpaths in 1.45 (ADR 0015).
+	// Pulls also read the JSON progress that Compose 2.29 added (pull.go).
 	minComposeVersion = "v2.30.0"
 	minEngineAPI      = "v1.45"
 )
@@ -336,7 +340,7 @@ func (s *Store) install(ctx context.Context, id, digest string, identity appstor
 		for _, service := range plan.Services {
 			services = append(services, service.Service)
 		}
-		if err := s.pullImages(ctx, compose, services, output); err != nil {
+		if err := s.pullImages(ctx, plan.Project, composeFile, services, output); err != nil {
 			// A pull creates no container, so there is nothing to roll back;
 			// the images that finished downloading stay for the next install.
 			switch cause := context.Cause(ctx); {
@@ -661,7 +665,7 @@ func (s *Store) startChecked(id string, action appstore.JobAction, timeout time.
 
 	s.wait.Go(func() {
 		timed, stop := context.WithTimeout(ctx, timeout)
-		err := run(timed, &jobWriter{store: s, job: job})
+		err := run(timed, newJobWriter(s, job))
 		stop()
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -705,34 +709,36 @@ func conflicts(id string, plan appstore.Plan, containers []ContainerInfo, replac
 
 // jobWriter keeps the last lines of Compose output on the job.
 type jobWriter struct {
-	store   *Store
-	job     *appstore.Job
-	partial string
+	store *Store
+	job   *appstore.Job
+	lines lineWriter
+}
+
+func newJobWriter(store *Store, job *appstore.Job) *jobWriter {
+	w := &jobWriter{store: store, job: job}
+	w.lines.each = w.add
+	return w
 }
 
 func (w *jobWriter) Write(data []byte) (int, error) {
 	w.store.mu.Lock()
 	defer w.store.mu.Unlock()
-	scanner := bufio.NewScanner(strings.NewReader(w.partial + string(data)))
-	w.partial = ""
-	complete := strings.HasSuffix(string(data), "\n")
-	var lines []string
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if !complete && len(lines) > 0 {
-		w.partial = lines[len(lines)-1]
-		lines = lines[:len(lines)-1]
-	}
-	for _, line := range lines {
-		if line = strings.TrimSpace(line); line != "" {
-			w.job.Output = append(w.job.Output, line)
-		}
-	}
+	written, err := w.lines.Write(data)
 	if extra := len(w.job.Output) - outputTailLines; extra > 0 {
 		w.job.Output = append([]string(nil), w.job.Output[extra:]...)
 	}
-	return len(data), nil
+	return written, err
+}
+
+// add keeps a line, cut to outputLineRunes; s.mu is held.
+func (w *jobWriter) add(line string) {
+	if line = strings.TrimSpace(line); line == "" {
+		return
+	}
+	if utf8.RuneCountInString(line) > outputLineRunes {
+		line = string([]rune(line)[:outputLineRunes]) + "…"
+	}
+	w.job.Output = append(w.job.Output, line)
 }
 
 func copyJob(job *appstore.Job) appstore.Job {
