@@ -3,6 +3,9 @@
 // Everything is drawn on a 2D canvas, so an offline console needs no assets.
 
 export interface MeteorShower {
+  // pause stops drawing until resume, while nothing on the page shows the sky.
+  pause(): void;
+  resume(): void;
   stop(): void;
 }
 
@@ -169,7 +172,8 @@ export function startMeteorShower(canvas: HTMLCanvasElement): MeteorShower | nul
 
   let frame = 0,
     last = performance.now(),
-    running = true;
+    running = true,
+    paused = false;
   const stop = () => {
     running = false;
     cancelAnimationFrame(frame);
@@ -185,9 +189,9 @@ export function startMeteorShower(canvas: HTMLCanvasElement): MeteorShower | nul
       return false;
     }
   };
-  // Time runs on the clock; after a hidden tab resumes, the step is capped rather than replayed.
+  // Time runs on the clock; after a hidden tab or a pause resumes, the step is capped rather than replayed.
   const tick = (now: number) => {
-    if (!running || !attempt(() => draw(now / 1000, Math.min(0.05, (now - last) / 1000)))) return;
+    if (!running || paused || !attempt(() => draw(now / 1000, Math.min(0.05, (now - last) / 1000)))) return;
     last = now;
     frame = requestAnimationFrame(tick);
   };
@@ -200,5 +204,16 @@ export function startMeteorShower(canvas: HTMLCanvasElement): MeteorShower | nul
   window.addEventListener("resize", resize);
   if (!resize()) return null;
   if (!still) frame = requestAnimationFrame(tick);
-  return { stop };
+  return {
+    stop,
+    pause() {
+      paused = true;
+      cancelAnimationFrame(frame);
+    },
+    resume() {
+      if (!running || !paused) return;
+      paused = false;
+      if (!still) frame = requestAnimationFrame(tick);
+    },
+  };
 }
