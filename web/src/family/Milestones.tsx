@@ -1,8 +1,7 @@
 import { Cake, Flag, ImagePlus, Plus, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
-import { type FamilyBaby, type FamilyTimelineEntry, listMilestones } from "./api";
+import { type FamilyBaby, type FamilyTimelineEntry, familyError, listMilestones } from "./api";
 import type { Draft } from "./Composer";
 import { useFamily } from "./context";
 import styles from "./family.module.css";
@@ -32,7 +31,7 @@ export function Milestones({
         if (live) setEntries(items);
       },
       (caught: unknown) => {
-        if (live) setFailure(errorText(caught, "family"));
+        if (live) setFailure(familyError(caught));
       },
     );
     return () => {

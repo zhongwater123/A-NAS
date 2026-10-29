@@ -1,7 +1,8 @@
 // 家庭中心's calls to /api/v1/family. Photos and videos go into the shared
 // photo library through the photo API first; records name them by asset ID.
 
-import { call, client, rawBody, uploadForm } from "../api/client";
+import { APIError, call, client, rawBody, uploadForm } from "../api/client";
+import { errorText } from "../api/errorMessages";
 import type {
   FamilyAlbumPage,
   FamilyBaby,
@@ -145,3 +146,26 @@ export const requestKey = () => crypto.randomUUID();
 
 // CustomVaccineCode records a dose of a vaccine the catalog does not list.
 export const CustomVaccineCode = "custom";
+
+// The family center's own error codes, in its words. They stay here rather
+// than in api/errorMessages.ts, which the desktop loads before any window.
+const familyMessages: Record<string, string> = {
+  not_family_member: "加入家庭后才能看到这里",
+  forbidden: "只有家长或添加它的人可以这样做",
+  last_guardian: "家庭里至少要有一位家长，请先把另一位家人设为家长",
+  changed: "已经有人先保存了修改，请关闭后重新打开再改",
+  conflict: "这和现有的内容冲突，例如这个大事记已经配过说明，或有记录早于新的出生日",
+  validation_failed: "填写的内容不符合要求，请检查日期和数值",
+  photos_unavailable: "相册暂时不可用，请稍后再试照片相关的内容",
+  family_unavailable: "家庭中心暂时不可用，请稍后再试",
+  too_large: "文件太大了",
+  unsupported_image: "请选择 JPEG、PNG、GIF 或 WebP 图片",
+  media_unavailable: "这段录音暂时不能播放",
+  not_found: "内容已不存在",
+};
+
+// familyError explains a failed request in the family center's words.
+export function familyError(error: unknown): string {
+  if (error instanceof APIError && Object.hasOwn(familyMessages, error.code)) return familyMessages[error.code];
+  return errorText(error);
+}

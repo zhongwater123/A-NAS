@@ -1,7 +1,6 @@
 import { Crown, MessageCircleHeart, Send, UserPlus } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
 import { relativeTime } from "../lib/time";
 import {
   addWallMessage,
@@ -10,6 +9,7 @@ import {
   type FamilyBaby,
   type FamilyComment,
   type FamilyMember,
+  familyError,
   leaveFamily,
   listWall,
   rejectJoin,
@@ -34,7 +34,7 @@ export function Members({ baby }: { baby: FamilyBaby }) {
       await family.reload();
       if (done) family.toast({ text: done, tone: "done" });
     } catch (caught) {
-      family.toast({ text: errorText(caught, "family"), tone: "error" });
+      family.toast({ text: familyError(caught), tone: "error" });
     }
   };
 
@@ -169,7 +169,7 @@ function Wall({ baby }: { baby: FamilyBaby }) {
         if (live) setMessages(items);
       },
       (caught: unknown) => {
-        if (live) toast({ text: errorText(caught, "family"), tone: "error" });
+        if (live) toast({ text: familyError(caught), tone: "error" });
       },
     );
     return () => {
@@ -186,7 +186,7 @@ function Wall({ baby }: { baby: FamilyBaby }) {
       setMessages((current) => [message, ...(current ?? [])]);
       setText("");
     } catch (caught) {
-      toast({ text: errorText(caught, "family"), tone: "error" });
+      toast({ text: familyError(caught), tone: "error" });
     }
     setBusy(false);
   };
@@ -242,7 +242,7 @@ function Wall({ baby }: { baby: FamilyBaby }) {
                           run: () =>
                             void deleteComment(message.id).then(
                               () => setMessages((current) => current?.filter((item) => item.id !== message.id)),
-                              (caught: unknown) => toast({ text: errorText(caught, "family"), tone: "error" }),
+                              (caught: unknown) => toast({ text: familyError(caught), tone: "error" }),
                             ),
                         },
                       ]

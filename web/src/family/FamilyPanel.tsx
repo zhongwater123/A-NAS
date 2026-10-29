@@ -1,7 +1,6 @@
 import { Baby, Check, Clock3, HeartHandshake, Plus, RotateCcw, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
 import { PersonAvatar } from "../people/PersonAvatar";
 import { person, usePeople } from "../people/people";
 import { useDialogs, useToasts } from "../ui/feedback";
@@ -10,6 +9,7 @@ import {
   type FamilyBaby,
   type FamilyCatalog,
   type FamilyOverview,
+  familyError,
   getCatalog,
   getFamily,
   joinFamily,
@@ -47,7 +47,7 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
       );
       return next;
     } catch (caught) {
-      setFailure(errorText(caught, "family"));
+      setFailure(familyError(caught));
       return undefined;
     }
   }, []);
@@ -72,7 +72,7 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
         setSelected(family.babies[0]?.id);
       },
       (caught: unknown) => {
-        if (live) setFailure(errorText(caught, "family"));
+        if (live) setFailure(familyError(caught));
       },
     );
     return () => {
@@ -112,7 +112,7 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
               await joinFamily(role);
               await reload();
             } catch (caught) {
-              toast({ text: errorText(caught, "family"), tone: "error" });
+              toast({ text: familyError(caught), tone: "error" });
             }
           }}
           onCancel={async () => {
@@ -120,7 +120,7 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
               await cancelJoin();
               await reload();
             } catch (caught) {
-              toast({ text: errorText(caught, "family"), tone: "error" });
+              toast({ text: familyError(caught), tone: "error" });
             }
           }}
         />
@@ -146,7 +146,7 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
               setSelected(deleted.id);
               toast({ text: `已恢复${deleted.name}的频道`, tone: "done" });
             } catch (caught) {
-              toast({ text: errorText(caught, "family"), tone: "error" });
+              toast({ text: familyError(caught), tone: "error" });
             }
           }}
         />

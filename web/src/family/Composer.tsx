@@ -11,6 +11,7 @@ import {
   type FamilyKind,
   type FamilyRecord,
   type FamilyRecordInput,
+  familyError,
   getGrowth,
   requestKey,
   updateRecord,
@@ -246,7 +247,7 @@ export function Composer({
       }
       onSaved();
     } catch (caught) {
-      setProblem(caught instanceof Problem ? caught.message : errorText(caught, "family"));
+      setProblem(caught instanceof Problem ? caught.message : familyError(caught));
       setBusy(false);
     }
   };

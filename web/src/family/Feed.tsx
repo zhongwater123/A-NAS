@@ -1,7 +1,6 @@
 import { Camera, Flag, Mic, NotebookPen, RotateCcw, Ruler, Send, Syringe, Trash2 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
 import { relativeTime } from "../lib/time";
 import {
   addComment,
@@ -11,6 +10,7 @@ import {
   type FamilyBaby,
   type FamilyKind,
   type FamilyRecord,
+  familyError,
   listRecords,
   listTrash,
   requestKey,
@@ -60,7 +60,7 @@ export function Feed({
         setFailure("");
       },
       (caught: unknown) => {
-        if (live) setFailure(errorText(caught, "family"));
+        if (live) setFailure(familyError(caught));
       },
     );
     return () => {
@@ -76,7 +76,7 @@ export function Feed({
       setRecords((current) => [...(current ?? []), ...page.records]);
       setNext(page.next ?? "");
     } catch (caught) {
-      family.toast({ text: errorText(caught, "family"), tone: "error" });
+      family.toast({ text: familyError(caught), tone: "error" });
     }
     setLoading(false);
   };
@@ -95,13 +95,13 @@ export function Feed({
           label: "撤销",
           run: () =>
             void restoreRecord(record.id).then(onChanged, (caught: unknown) =>
-              family.toast({ text: errorText(caught, "family"), tone: "error" }),
+              family.toast({ text: familyError(caught), tone: "error" }),
             ),
         },
       });
       onChanged();
     } catch (caught) {
-      family.toast({ text: errorText(caught, "family"), tone: "error" });
+      family.toast({ text: familyError(caught), tone: "error" });
     }
   };
 
@@ -296,7 +296,7 @@ function Comments({ record, onChanged }: { record: FamilyRecord; onChanged: (rec
       onChanged({ ...record, comments: [...record.comments, comment] });
       setText("");
     } catch (caught) {
-      family.toast({ text: errorText(caught, "family"), tone: "error" });
+      family.toast({ text: familyError(caught), tone: "error" });
     }
     setBusy(false);
   };
@@ -305,7 +305,7 @@ function Comments({ record, onChanged }: { record: FamilyRecord; onChanged: (rec
       await deleteComment(commentId);
       onChanged({ ...record, comments: record.comments.filter((comment) => comment.id !== commentId) });
     } catch (caught) {
-      family.toast({ text: errorText(caught, "family"), tone: "error" });
+      family.toast({ text: familyError(caught), tone: "error" });
     }
   };
   return (
@@ -367,7 +367,7 @@ function TrashDialog({ baby, onClose, onRestored }: { baby: FamilyBaby; onClose:
         if (live) setRecords(items);
       },
       (caught: unknown) => {
-        if (live) toast({ text: errorText(caught, "family"), tone: "error" });
+        if (live) toast({ text: familyError(caught), tone: "error" });
       },
     );
     return () => {
@@ -380,7 +380,7 @@ function TrashDialog({ baby, onClose, onRestored }: { baby: FamilyBaby; onClose:
       setRecords((current) => current?.filter((item) => item.id !== record.id));
       onRestored();
     } catch (caught) {
-      family.toast({ text: errorText(caught, "family"), tone: "error" });
+      family.toast({ text: familyError(caught), tone: "error" });
     }
   };
   return (

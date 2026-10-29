@@ -1,9 +1,8 @@
 import { ImagePlus, Play } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
 import type { FamilyAlbumPhoto } from "../api.generated";
-import { type FamilyBaby, getAlbum } from "./api";
+import { type FamilyBaby, familyError, getAlbum } from "./api";
 import { useFamily } from "./context";
 import styles from "./family.module.css";
 import { monthLabel } from "./format";
@@ -29,7 +28,7 @@ export function Album({ baby, version, onAdd }: { baby: FamilyBaby; version: num
         setNext(page.next ?? "");
       },
       (caught: unknown) => {
-        if (live) setFailure(errorText(caught, "family"));
+        if (live) setFailure(familyError(caught));
       },
     );
     return () => {
@@ -51,7 +50,7 @@ export function Album({ baby, version, onAdd }: { baby: FamilyBaby; version: num
           setLoading(false);
         },
         (caught: unknown) => {
-          family.toast({ text: errorText(caught, "family"), tone: "error" });
+          family.toast({ text: familyError(caught), tone: "error" });
           setLoading(false);
         },
       );

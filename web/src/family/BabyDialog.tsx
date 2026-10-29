@@ -1,12 +1,12 @@
 import { Baby, Camera, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
 import {
   addBaby,
   babyAvatarURL,
   deleteBaby,
   type FamilyBaby,
+  familyError,
   removeBabyAvatar,
   setBabyAvatar,
   updateBaby,
@@ -63,7 +63,7 @@ export function BabyDialog({
       const saved = current ? await updateBaby(current.id, fields) : await addBaby(fields);
       await onSaved(saved);
     } catch (caught) {
-      setProblem(errorText(caught, "family"));
+      setProblem(familyError(caught));
       setBusy(false);
     }
   };
@@ -76,7 +76,7 @@ export function BabyDialog({
       setCurrent(await setBabyAvatar(current.id, file));
       void family.reload();
     } catch (caught) {
-      setProblem(errorText(caught, "family"));
+      setProblem(familyError(caught));
     }
     setBusy(false);
   };
@@ -88,7 +88,7 @@ export function BabyDialog({
       setCurrent(await removeBabyAvatar(current.id));
       void family.reload();
     } catch (caught) {
-      setProblem(errorText(caught, "family"));
+      setProblem(familyError(caught));
     }
     setBusy(false);
   };
@@ -112,7 +112,7 @@ export function BabyDialog({
       await family.reload();
       family.toast({ text: `已删除${current.name}的频道，15 天内可以在左侧“最近删除”中恢复` });
     } catch (caught) {
-      setProblem(errorText(caught, "family"));
+      setProblem(familyError(caught));
     }
   };
 

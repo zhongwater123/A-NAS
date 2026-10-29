@@ -1,9 +1,8 @@
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
 import type { FamilyAssessment, FamilyGrowthPoint } from "../api.generated";
-import { deleteRecord, type FamilyBaby, type FamilyGrowth, getGrowth, getRecord } from "./api";
+import { deleteRecord, type FamilyBaby, type FamilyGrowth, familyError, getGrowth, getRecord } from "./api";
 import type { Draft } from "./Composer";
 import { useFamily } from "./context";
 import styles from "./family.module.css";
@@ -51,7 +50,7 @@ export function Growth({
         if (live) setGrowth(next);
       },
       (caught: unknown) => {
-        if (live) setFailure(errorText(caught, "family"));
+        if (live) setFailure(familyError(caught));
       },
     );
     return () => {
@@ -64,7 +63,7 @@ export function Growth({
       const record = await getRecord(recordId);
       onEdit({ kind: "measurement", record });
     } catch (caught) {
-      family.toast({ text: errorText(caught, "family"), tone: "error" });
+      family.toast({ text: familyError(caught), tone: "error" });
     }
   };
   const remove = async (recordId: string) => {
@@ -79,7 +78,7 @@ export function Growth({
       await deleteRecord(recordId);
       onChanged();
     } catch (caught) {
-      family.toast({ text: errorText(caught, "family"), tone: "error" });
+      family.toast({ text: familyError(caught), tone: "error" });
     }
   };
 

@@ -1,11 +1,11 @@
 import { Check, CircleDashed, Clock3, ListChecks, Plus, Syringe } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
 import {
   type FamilyBaby,
   type FamilyScheduledDose,
   type FamilyVaccineSchedule,
+  familyError,
   getVaccines,
   setVaccinePlan,
 } from "./api";
@@ -40,7 +40,7 @@ export function Vaccines({
         if (live) setSchedule(next);
       },
       (caught: unknown) => {
-        if (live) setFailure(errorText(caught, "family"));
+        if (live) setFailure(familyError(caught));
       },
     );
     return () => {
@@ -126,7 +126,7 @@ export function Vaccines({
               setPlanning(false);
               onChanged();
             } catch (caught) {
-              family.toast({ text: errorText(caught, "family"), tone: "error" });
+              family.toast({ text: familyError(caught), tone: "error" });
             }
           }}
         />
