@@ -33,8 +33,11 @@ SEGMENT_MIN = 1.5
 SEGMENTS_MAX = 30
 TOTAL_MAX = 180.0
 REASON_CHARS = 200
-# A segment may run this long while its picture hardly changes (every window
-# SAME_PICTURE alike), and this long while it keeps changing.
+# A segment may run this long while its picture hardly changes (every two of its
+# windows at least STILL alike: a slow pan or a followed boat is 0.93-0.98, a new
+# shot 0.63-0.75), and this long while it keeps changing. Grey-level frame
+# differences cannot tell: a moving camera changes the pixels, not the picture.
+STILL = 0.9
 STILL_MAX = 4.0
 MOVING_MAX = 8.0
 
@@ -211,7 +214,7 @@ class Index:
 
     def _still(self, run: list[int]) -> bool:
         frames = self.frames[run]
-        return bool((frames @ frames.T).min() >= SAME_PICTURE)
+        return bool((frames @ frames.T).min() >= STILL)
 
     def _grow(self, windows: list[int], best: int, scores: np.ndarray, shot: tuple, left: float) -> list[int]:
         """Windows next to best, the higher-scoring side first, while each is over
