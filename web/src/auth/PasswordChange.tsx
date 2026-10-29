@@ -1,16 +1,17 @@
-import { FormEvent, useId, useState } from "react";
+import { LockKeyhole } from "lucide-react";
+import { FormEvent, useState } from "react";
 
 import { errorText } from "../api/errorMessages";
-import styles from "../desktop/desktop.module.css";
+import { AuthError, AuthField, AuthHero, AuthStage, AuthSubmit } from "./AuthStage";
 import { passwordProblem, passwordRuleText } from "./accountRules";
 import { changePassword } from "./api";
+import styles from "./auth.module.css";
 
 // PasswordChange blocks the desktop after an administrator reset the
 // password, so only the member knows the password in use.
 export function PasswordChange({ onChanged, onLogout }: { onChanged: () => void; onLogout: () => void }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const hint = useId();
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
@@ -36,42 +37,48 @@ export function PasswordChange({ onChanged, onLogout }: { onChanged: () => void;
     }
   };
   return (
-    <main className={styles.authShell}>
-      <form className={styles.authCard} autoComplete="off" onSubmit={(event) => void submit(event)}>
-        <span className={`${styles.brandMark} ${styles.large}`}>A</span>
-        <p className={styles.sectionLabel}>PASSWORD RESET</p>
-        <h1>设置新密码</h1>
-        <p>管理员重置了你的密码。继续使用 A-NAS 和 SMB 共享前，请设置只有你知道的新密码。</p>
-        <label>
-          当前密码
-          <input name="currentPassword" type="password" required autoComplete="current-password" />
-        </label>
-        <div className={styles.authField}>
-          <label>
-            新密码
-            <input
-              name="newPassword"
-              type="password"
-              minLength={12}
-              required
-              autoComplete="new-password"
-              aria-describedby={hint}
-            />
-          </label>
-          <small id={hint}>{passwordRuleText}</small>
+    <AuthStage>
+      <form className={styles.authPanel} autoComplete="off" onSubmit={(event) => void submit(event)}>
+        <AuthHero
+          eyebrow="PASSWORD RESET"
+          title="设置新密码"
+          lede="管理员重置了你的密码。继续使用 A-NAS 和 SMB 共享前，请设置只有你知道的新密码。"
+        />
+        <div className={styles.authFields}>
+          <AuthField
+            label="当前密码"
+            icon={<LockKeyhole />}
+            name="currentPassword"
+            type="password"
+            required
+            autoComplete="current-password"
+          />
+          <AuthField
+            label="新密码"
+            icon={<LockKeyhole />}
+            name="newPassword"
+            type="password"
+            minLength={12}
+            required
+            autoComplete="new-password"
+            hint={passwordRuleText}
+          />
+          <AuthField
+            label="确认新密码"
+            icon={<LockKeyhole />}
+            name="confirmPassword"
+            type="password"
+            minLength={12}
+            required
+            autoComplete="new-password"
+          />
+          {error && <AuthError text={error} />}
+          <AuthSubmit label="保存新密码" submitting={submitting} />
+          <button type="button" className={styles.authLink} onClick={onLogout}>
+            退出登录
+          </button>
         </div>
-        <label>
-          确认新密码
-          <input name="confirmPassword" type="password" minLength={12} required autoComplete="new-password" />
-        </label>
-        {error && <p className={styles.formError}>{error}</p>}
-        <button className="primary" disabled={submitting}>
-          {submitting ? "处理中…" : "保存新密码"}
-        </button>
-        <button type="button" className={styles.linkButton} onClick={onLogout}>
-          退出登录
-        </button>
       </form>
-    </main>
+    </AuthStage>
   );
 }
