@@ -5,7 +5,8 @@ it holds the index of a set of test videos (eval.video_moments index), embeds
 the model's probes with the AI Worker and answers on its own assistant
 socket, which any member of a-nas-users may use, known by the caller's UID.
 
-  POST /search   {"probes": [...], "limit": n}   shot cards (montage.moments)
+  POST /search   {"probes": [...], "limit": n,   shot cards (montage.moments),
+                  "videos": [...]}                only in those videos if given
   POST /montage  {"segments": [...]}             the cut as video/mp4, or the
                                                  plan's problems with 422
 
@@ -100,17 +101,20 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply(404, {"error": "没有这个接口"})
 
     def search(self, body):
-        probes, limit = body.get("probes"), body.get("limit", 20)
+        probes, limit, videos = body.get("probes"), body.get("limit", 20), body.get("videos")
         if (not isinstance(probes, list) or not 1 <= len(probes) <= PROBES_MAX
                 or not all(isinstance(p, str) and 1 <= len(p.strip()) <= PROBE_CHARS for p in probes)):
             return self.reply(400, {"error": f"probes 要有 1–{PROBES_MAX} 条，每条 1–{PROBE_CHARS} 个字符"})
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= moments.CARDS_MAX:
             return self.reply(400, {"error": f"limit 要在 1–{moments.CARDS_MAX} 之间"})
+        if videos is not None and (not isinstance(videos, list) or not videos
+                                   or not all(v in self.server.index.videos for v in videos)):
+            return self.reply(400, {"error": "videos 要是检索结果里出现过的视频编号列表"})
         try:
             vectors = {p: embed_query(self.server.ai_socket, p) for p in dict.fromkeys(probes)}
         except OSError as error:
             return self.reply(503, {"error": f"设备上的 AI 暂时不可用：{error}"})
-        return self.reply(200, self.server.index.search(vectors, limit))
+        return self.reply(200, self.server.index.search(vectors, limit, videos))
 
     def montage(self, body):
         segments = body.get("segments")

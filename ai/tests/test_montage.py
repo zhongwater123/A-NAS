@@ -153,6 +153,24 @@ class MomentsTest(unittest.TestCase):
         for words in ("跨过镜头切点", "至少 1.5 秒", "同一段画面", "不是检索结果里的镜头卡片"):
             self.assertTrue(any(words in p for p in problems), words)
 
+    def test_a_plan_over_a_flat_frame_or_with_a_long_reason_is_refused(self):
+        with self.assertRaises(moments.PlanError) as caught:
+            self.index.check([{"card": "07-2-0", "start": 48, "end": 50},
+                              {"card": "07-0-0", "start": 1, "end": 4, "reason": "长" * 201}])
+        self.assertEqual(len(caught.exception.problems), 2)
+        self.assertIn("纯黑或纯色", caught.exception.problems[0])
+
+    def test_search_keeps_to_the_videos_given(self):
+        self.assertEqual(self.index.search({"城堡": self.castle}, videos=["08"])["cards"], [])
+
+    def test_rules_plan_the_best_cards_one_of_each_shot_in_time_order(self):
+        segments = self.index.plan({"城堡": self.castle}, 10)
+        # Only the castle shot passes the threshold: one piece of it around the best window.
+        self.assertEqual([s["card"] for s in segments], ["07-1-0"])
+        self.assertEqual((segments[0]["start"], segments[0]["end"]), (8, 12))
+        self.assertEqual(self.index.check(segments), [("07", 8.0, 12.0)])
+        self.assertEqual(self.index.plan({"城堡": -self.castle}, 10), [])
+
     def test_a_plan_with_no_segments_is_refused(self):
         with self.assertRaises(moments.PlanError):
             self.index.check([])

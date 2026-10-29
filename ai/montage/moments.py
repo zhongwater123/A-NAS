@@ -9,7 +9,9 @@ a group shared with the parts that look alike. Text and numbers only; the
 model that plans never sees the frames.
 
 A plan is a list of segments, each inside the shot of the card it names. The
-checks are plain rules, so a refusal says which segment broke which one.
+checks are plain rules, so a refusal says which segment broke which one. The
+same rules also make a plan with no model (plan), the version a model's plan
+is compared with.
 """
 
 import json
@@ -30,6 +32,9 @@ TAGS = 5
 SEGMENT_MIN = 1.5
 SEGMENTS_MAX = 30
 TOTAL_MAX = 180.0
+REASON_CHARS = 200
+# A plan by rule takes at most this much of one shot, around its best window.
+PIECE = 4.0
 
 
 class PlanError(Exception):
@@ -96,11 +101,13 @@ class Index:
             card["group"] = firsts[g]
         return cards
 
-    def search(self, probes: dict[str, np.ndarray], limit: int = CARDS_MAX) -> dict:
-        """The cards whose best window is highest for any probe, best first."""
+    def search(self, probes: dict[str, np.ndarray], limit: int = CARDS_MAX, videos=None) -> dict:
+        """The cards whose best window is highest for any probe, best first; only in videos when given."""
         scores = {text: self.frames @ vector for text, vector in probes.items()}
         found = []
         for card in self.cards:
+            if videos is not None and card["video"] not in videos:
+                continue
             windows = [i for i in card["windows"] if not self.flat[i]]
             if not windows:
                 continue
@@ -142,6 +149,11 @@ class Index:
                 problems.append(f"第 {n} 段 {start:g}–{end:g} 秒越出了镜头 {lo:g}–{hi:g} 秒，片段不能跨过镜头切点")
             if end - start < SEGMENT_MIN:
                 problems.append(f"第 {n} 段只有 {end - start:.2g} 秒，每段至少 {SEGMENT_MIN:g} 秒")
+            if any(self.flat[i] and self.rows[i][1] < end and start < self.rows[i][2] for i in self._shot_windows(card)):
+                problems.append(f"第 {n} 段 {start:g}–{end:g} 秒里有纯黑或纯色的画面")
+            reason = segment.get("reason", "")
+            if not isinstance(reason, str) or len(reason) > REASON_CHARS:
+                problems.append(f"第 {n} 段的 reason 要是一句话，最多 {REASON_CHARS} 个字符")
             clips.append((card["video"], float(start), float(end)))
         problems += [f"第 {a + 1} 段和第 {b + 1} 段用了同一段画面" for a in range(len(clips)) for b in range(a)
                      if clips[a][0] == clips[b][0] and min(clips[a][2], clips[b][2]) > max(clips[a][1], clips[b][1])]
@@ -151,3 +163,46 @@ class Index:
         if problems:
             raise PlanError(problems)
         return clips
+
+    def plan(self, probes: dict[str, np.ndarray], seconds: float, videos=None) -> list[dict]:
+        """A plan with no model: the cards at or over THRESHOLD, best first, at most PIECE
+        of each shot, around the best window and clear of flat frames, until the target;
+        one card of each group first, the rest of a group only to fill the target. Then
+        each video's segments in time order."""
+        found = [c for c in self.search(probes, CARDS_MAX, videos)["cards"] if c["score"] >= THRESHOLD]
+        segments, groups, shots, left = [], set(), set(), seconds
+        for second_pass in (False, True):
+            for card in found:
+                shot = (card["video"], *card["shot"])
+                if left < SEGMENT_MIN + 0.02 or shot in shots or (card["group"] in groups and not second_pass):
+                    continue
+                at = max(card["probes"].values(), key=lambda p: p["score"])["at"]
+                lo, hi = self._clear(card, at)
+                piece = min(PIECE, left, hi - lo)
+                if piece < SEGMENT_MIN + 0.02:
+                    continue
+                start = min(max(lo, (at[0] + at[1] - piece) / 2), hi - piece)
+                # Rounded inward, so that the segment stays inside its shot.
+                start, end = math.ceil(start * 100) / 100, math.floor((start + piece) * 100) / 100
+                segments.append({"card": card["id"], "start": start, "end": end,
+                                 "reason": f"规则：分数 {card['score']}，标签 {'、'.join(card['tags'][:3])}"})
+                groups.add(card["group"])
+                shots.add(shot)
+                left -= end - start
+        order = {video: n for n, video in enumerate(dict.fromkeys(c["video"] for c in found))}
+        return sorted(segments, key=lambda s: (order[s["card"].rsplit("-", 2)[0]], s["start"]))
+
+    def _clear(self, card: dict, at: list[float]) -> tuple[float, float]:
+        """The stretch of the card's shot around the window at, up to the nearest flat window."""
+        lo, hi = card["shot"]
+        for i in sorted(self._shot_windows(card), key=lambda i: self.rows[i][1]):
+            if self.flat[i] and self.rows[i][2] <= at[0]:
+                lo = max(lo, self.rows[i][2])
+            elif self.flat[i] and self.rows[i][1] >= at[1]:
+                hi = min(hi, self.rows[i][1])
+        return lo, hi
+
+    def _shot_windows(self, card: dict) -> list[int]:
+        lo, hi = card["shot"]
+        return [i for i, (video, start, end) in enumerate(self.rows)
+                if video == card["video"] and start < hi and lo < end]
