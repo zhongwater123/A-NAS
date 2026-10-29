@@ -42,7 +42,7 @@ func (shadeEmbedder) EmbedQuery(context.Context, string) ([]float32, error) {
 
 type openGate struct{}
 
-func (openGate) Open(context.Context) (bool, string) { return true, "" }
+func (openGate) Open(context.Context, uint64) (bool, string) { return true, "" }
 
 func (c client) searchByImage(content []byte) *httptest.ResponseRecorder {
 	c.t.Helper()

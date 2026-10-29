@@ -26,7 +26,7 @@ func TestGateWaitsForPressureToFallWellBelowItsLimit(t *testing.T) {
 			return 0, nil
 		},
 	}
-	open := func() bool { ok, _ := gate.Open(context.Background()); return ok }
+	open := func() bool { ok, _ := gate.Open(context.Background(), 0); return ok }
 	if open() {
 		t.Fatal("Open() with others waiting 15% of the time = open")
 	}
@@ -101,7 +101,7 @@ func TestGateWaitsForQuietAndLowPressure(t *testing.T) {
 			return value, nil
 		},
 	}
-	open := func() (bool, string) { return gate.Open(context.Background()) }
+	open := func() (bool, string) { return gate.Open(context.Background(), 0) }
 
 	gate.Touch()
 	if ok, reason := open(); ok || reason != "foreground" {
@@ -134,6 +134,97 @@ func TestGateWaitsForQuietAndLowPressure(t *testing.T) {
 	}
 }
 
+func TestModelsLoadOnlyIfTheReserveStaysFree(t *testing.T) {
+	const need = 1536 << 20
+	var free, held uint64
+	var logged bytes.Buffer
+	gate := &Gate{
+		now:          func() time.Time { return time.Date(2026, 10, 28, 20, 0, 0, 0, time.UTC) },
+		pressure:     func(string) (float64, error) { return 0, nil },
+		available:    func() (uint64, error) { return free, nil },
+		workerMemory: func() uint64 { return held },
+		logger:       slog.New(slog.NewTextHandler(&logged, nil)),
+	}
+	open := func(need uint64) (bool, string) { return gate.Open(context.Background(), need) }
+
+	// A Worker that is not running waits for room for all of its models.
+	free = MemoryReserve + need - 1
+	if ok, reason := open(need); ok || reason != "memory_for_models" {
+		t.Fatalf("Open() without room for the models = %v, %q", ok, reason)
+	}
+	if ok, reason := open(0); !ok {
+		t.Fatalf("Open() for work that loads no model = closed (%s)", reason)
+	}
+	free = MemoryReserve + need
+	if ok, reason := open(need); !ok {
+		t.Fatalf("Open() with room for the models = closed (%s)", reason)
+	}
+	// Models already loaded need no more room, so a scan is not stopped by
+	// the memory its own models take.
+	held, free = need, MemoryReserve
+	if ok, reason := open(need); !ok {
+		t.Fatalf("Open() with the models loaded = closed (%s)", reason)
+	}
+	held, free = need/2, MemoryReserve+need/2-1
+	if ok, reason := open(need); ok || reason != "memory_for_models" {
+		t.Fatalf("Open() without room for the other half = %v, %q", ok, reason)
+	}
+	// Below the reserve the models are released, whatever they take.
+	free = MemoryReserve - 1
+	if ok, reason := open(need); ok || reason != "memory_low" {
+		t.Fatalf("Open() below the reserve = %v, %q", ok, reason)
+	}
+
+	want := []string{
+		`msg="AI work waits for memory to load its models" available_mib=2559 load_mib=1536 reserve_mib=1024`,
+		`msg="AI work has memory to load its models" available_mib=2560 load_mib=1536`,
+		`msg="AI work waits for memory to load its models" available_mib=1791 load_mib=768 reserve_mib=1024`,
+		`msg="AI work yields to low memory" available_mib=1023 reserve_mib=1024`,
+	}
+	lines := strings.Split(strings.TrimSpace(logged.String()), "\n")
+	if len(lines) != len(want) {
+		t.Fatalf("log =\n%s\nwant %d lines", logged.String(), len(want))
+	}
+	for i, line := range lines {
+		if !strings.HasSuffix(line, want[i]) {
+			t.Fatalf("log line %d = %s\nwant it to end with %s", i+1, line, want[i])
+		}
+	}
+}
+
+func TestTheWorkerHoldsWhatItsCgroupHolds(t *testing.T) {
+	mount := t.TempDir()
+	root := "/system.slice/docker-1.scope" // as in the system test's container
+	self := filepath.Join(t.TempDir(), "cgroup")
+	if err := os.WriteFile(self, []byte("0::"+root+"/system.slice/anas-photos.service\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cgroup := workerCgroup(self, mount)
+	if want := filepath.Join(mount, root, "anas.slice", "anas-ai.slice", "anas-ai.service"); cgroup != want {
+		t.Fatalf("workerCgroup() = %s, want %s", cgroup, want)
+	}
+	held := cgroupMemory(cgroup)
+	if value := held(); value != 0 {
+		t.Fatalf("a Worker that is not running holds %d bytes", value)
+	}
+	if err := os.MkdirAll(cgroup, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cgroup, "memory.current"), []byte("734003200\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if value := held(); value != 734003200 {
+		t.Fatalf("the Worker holds %d bytes, want 734003200", value)
+	}
+
+	if err := os.WriteFile(self, []byte("0::/user.slice/user-1000.slice/session-2.scope\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cgroup := workerCgroup(self, mount); cgroup != "" || cgroupMemory(cgroup) != nil {
+		t.Fatalf("workerCgroup() outside a service = %q, want none", cgroup)
+	}
+}
+
 func TestGateRecordsWhatHeldAIWorkBack(t *testing.T) {
 	slice := filepath.Join(t.TempDir(), "system.slice")
 	write := func(member string, some float64) {
@@ -160,7 +251,7 @@ func TestGateRecordsWhatHeldAIWorkBack(t *testing.T) {
 		available: func() (uint64, error) { return free, nil },
 		logger:    slog.New(slog.NewTextHandler(&logged, nil)),
 	}
-	open := func() (bool, string) { return gate.Open(context.Background()) }
+	open := func() (bool, string) { return gate.Open(context.Background(), 0) }
 
 	// Each change is recorded once, however often the gate is asked.
 	for range 3 {
@@ -186,7 +277,7 @@ func TestGateRecordsWhatHeldAIWorkBack(t *testing.T) {
 	want := []string{
 		`msg="AI work yields to pressure" resource=io avg10=12.3 limit=10 system.slice="12.30: anas-host-agent.service 8.10, anas-photos.service 4.00"`,
 		`msg="AI work no longer yields to pressure" resource=io avg10=3 below=5`,
-		`msg="AI work yields to low memory" available_mib=1535 reserve_mib=1536`,
+		`msg="AI work yields to low memory" available_mib=1023 reserve_mib=1024`,
 		`msg="AI work no longer yields to low memory" available_mib=4096`,
 	}
 	lines := strings.Split(strings.TrimSpace(logged.String()), "\n")
@@ -206,16 +297,16 @@ func TestGateStaysClosedWhileARequestIsServed(t *testing.T) {
 	done := gate.Use()
 	// A video played for longer than the quiet period is still use.
 	now = now.Add(time.Hour)
-	if ok, reason := gate.Open(context.Background()); ok || reason != "foreground" {
+	if ok, reason := gate.Open(context.Background(), 0); ok || reason != "foreground" {
 		t.Fatalf("Open() while a video plays = %v, %q", ok, reason)
 	}
 	done()
 	now = now.Add(time.Minute - time.Second)
-	if ok, _ := gate.Open(context.Background()); ok {
+	if ok, _ := gate.Open(context.Background(), 0); ok {
 		t.Fatal("Open() within the quiet period after playing ended = open")
 	}
 	now = now.Add(time.Second)
-	if ok, _ := gate.Open(context.Background()); !ok {
+	if ok, _ := gate.Open(context.Background(), 0); !ok {
 		t.Fatal("Open() a quiet period after playing ended = closed")
 	}
 }
