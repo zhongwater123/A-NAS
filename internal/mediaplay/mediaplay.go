@@ -3,7 +3,7 @@
 // whether it plays the original, the original's video in fragmented MP4 or
 // a conversion, the type of a converted stream and how many conversions run
 // at once (docs/architecture/media-center.md#播放). Each service describes its
-// videos as a Source and turns a Decision into its own API; the Media Worker
+// videos as a Source and turns a Decision into its own API; the FFmpeg Worker
 // runs the stream.
 package mediaplay
 
@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 // The ways a video plays: the original itself, the original's video copied
@@ -146,9 +146,9 @@ const (
 type Decision struct {
 	Mode string
 	Why  Why
-	// Stream is what to ask the Media Worker for unless Mode is Direct;
+	// Stream is what to ask the FFmpeg Worker for unless Mode is Direct;
 	// the caller sets where it starts.
-	Stream mediaworker.StreamRequest
+	Stream ffmpegworker.StreamRequest
 }
 
 var browserAudio = []string{"aac", "mp3", "opus", "vorbis", "flac"}
@@ -158,7 +158,7 @@ var browserAudio = []string{"aac", "mp3", "opus", "vorbis", "flac"}
 // conversion to H.264 within the ceiling or the quality the viewer chose.
 func Decide(source Source, caps Caps, choice Choice) Decision {
 	defaultTrack := defaultAudio(source.Audio)
-	request := mediaworker.StreamRequest{AudioTrack: defaultTrack}
+	request := ffmpegworker.StreamRequest{AudioTrack: defaultTrack}
 	if track := choice.AudioTrack; track != nil && *track >= 0 && *track < len(source.Audio) {
 		request.AudioTrack = *track
 	}
@@ -262,7 +262,7 @@ func containerPlayable(source Source, caps Caps) bool {
 // source, for Media Source Extensions. Browsers take each codec's profile
 // and level from the stream itself, so the codec strings only name the
 // codec.
-func StreamMime(source Source, request mediaworker.StreamRequest) string {
+func StreamMime(source Source, request ffmpegworker.StreamRequest) string {
 	var codecs []string
 	switch {
 	case source.Video == nil:

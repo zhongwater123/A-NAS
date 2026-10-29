@@ -29,14 +29,14 @@ A-NAS 是一套基于 Debian 的 AI 智能家庭 NAS。项目首先保证存储�
 | `anas-photos` | `a-nas-photos` | 相册服务，独占数据卷上的照片库（[ADR 0011](docs/adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） |
 | `anas-shares` | `a-nas-shares` | 成员分享的独立副本（[ADR 0023](docs/adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)） |
 | `anas-ai` | 动态身份 | 相册的本地 AI Worker，按需启动，无网络、看不到数据卷（[ADR 0016](docs/adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)） |
-| `anas-media@` | 动态身份 | FFmpeg 媒体 Worker，按连接启动，无网络、看不到数据卷 |
+| `anas-ffmpeg@` | 动态身份 | FFmpeg FFmpeg Worker，按连接启动，无网络、看不到数据卷 |
 | `anas-container-agent` | `anas-container` | Docker 的类型化代理（[ADR 0009](docs/adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)） |
 | `caddy`、`smbd` | — | 局域网 Web 入口（[ADR 0012](docs/adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）与 SMB3 |
 | `anas-kiosk@tty1` | `anas-dev` | 直连屏幕上的 Cage + Chromium |
 
 ## 本地开发入口
 
-当前推荐环境是 Windows 主机加 WSL2 Ubuntu。项目有两台开发机，差异见[本地开发环境](docs/development/LOCAL_ENVIRONMENT.md)；以下是源码在 `E:\A-NAS`、使用专用 WSL 用户的那一台：
+当前推荐环境是 Windows 主机加 WSL2 Ubuntu。项目有两台 Windows 开发机和一台 macOS 开发机，配置与平台限制见[本地开发环境](docs/development/LOCAL_ENVIRONMENT.md)；以下是源码在 `E:\A-NAS`、使用专用 WSL 用户的那一台：
 
 ```bash
 wsl -d Ubuntu-24.04
@@ -56,7 +56,7 @@ wsl -d Ubuntu-24.04 -u root
 
 ## 开发与检查
 
-运行前端类型检查、lint、格式检查与测试、生产资源构建、文档检查、部署脚本检查、Go 检查（vet 与 golangci-lint）、Python lint 与 AI Worker 测试，并构建三个 Linux 命令（Ruff 需先安装，见[静态检查](docs/development/LOCAL_ENVIRONMENT.md#静态检查)）：
+运行前端类型检查、lint、格式检查与测试、生产资源构建、文档检查、部署脚本检查、Go 检查（vet 与 golangci-lint）、Python lint 与 AI Worker 测试，并构建三个 Linux 命令（Ruff 需先安装，见[静态检查](docs/development/testing.md#静态检查)）：
 
 ```bash
 make check
@@ -70,7 +70,7 @@ build/anas-host-agent
 build/anas-container-agent
 ```
 
-修改服务单元、安装器、Host Agent、文件代理或文件权限时，部署前还要运行在 systemd 下安装整套服务的[系统测试](docs/development/LOCAL_ENVIRONMENT.md#系统测试)：`make system-test`。
+修改服务单元、安装器、Host Agent、文件代理或文件权限时，部署前还要运行在 systemd 下安装整套服务的[系统测试](docs/development/testing.md#系统测试)：`make system-test`。
 
 Go 模块路径为 `github.com/zhongwater123/A-NAS`。架构语言决策记录在 [ADR 0001](docs/adr/0001-use-go-for-product-services.md)。
 

@@ -21,8 +21,8 @@ const (
 	ConversionWait = 4 * time.Second
 )
 
-// Slots bounds the conversions one process runs at once. The Media Worker
-// admits every request of every process to its own slots (mediaworker.Slots);
+// Slots bounds the conversions one process runs at once. The FFmpeg Worker
+// admits every request of every process to its own slots (ffmpegworker.Slots);
 // these leave room there for previews, posters and the other service's
 // playback.
 type Slots struct {

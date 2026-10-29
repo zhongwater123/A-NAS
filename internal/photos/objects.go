@@ -29,7 +29,7 @@ type stagedObject struct {
 	size      int64
 	mediaType string
 	metadata  photoMetadata
-	// video is what the Media Worker read from a video original.
+	// video is what the FFmpeg Worker read from a video original.
 	video *videoFacts
 }
 
@@ -44,7 +44,7 @@ var (
 const sniffHeader = 512
 
 // sniffMediaType names the format an original's first bytes declare.
-// Videos are only candidates here; the Media Worker decides whether they
+// Videos are only candidates here; the FFmpeg Worker decides whether they
 // hold a video at all (docs/specs/photo-video.md).
 func sniffMediaType(header []byte) string {
 	box, brand := "", ""
@@ -181,7 +181,7 @@ func (s *Service) stageContent(content io.Reader, clip bool) (staged stagedObjec
 }
 
 // classify names the format of an original, or of a clip, from its first
-// bytes. A clip is always a QuickTime or MP4 file; the Media Worker reads
+// bytes. A clip is always a QuickTime or MP4 file; the FFmpeg Worker reads
 // it before it is accepted.
 func classify(header []byte, clip bool) (string, error) {
 	if clip {

@@ -21,7 +21,7 @@
 
 ## 方法
 
-代码在 [`ai/eval/`](../../ai/eval/)，本机运行方法见[本地环境](../development/LOCAL_ENVIRONMENT.md)。
+代码在 [`ai/eval/`](../../ai/eval/)，本机运行方法见[AI 开发与评估](../development/ai-development.md)。
 
 - **输入**：评估图片先按相册服务的缩略图规则处理（[`thumbnail.go`](../../internal/photos/thumbnail.go)：长边 512 px、Lanczos、白底、JPEG 质量 82），再经 [`MediaPipeProvider`](../../ai/anas_ai/providers.py) 编码，与 Worker 使用同一路径。
 - **词表**：[`internal/photos/labels/v1.json`](../../internal/photos/labels/v1.json) 共 330 个标签，每项有稳定 ID、中文名、同义词与分类；[`ground_truth.json`](../../ai/eval/ground_truth.json) 把其中 248 个映射到公开数据集的类别，其余没有可用真值。

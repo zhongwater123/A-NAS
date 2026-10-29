@@ -1,6 +1,6 @@
 # Web 桌面结构与约定
 
-Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/0003-use-react-typescript-for-web-desktop.md)），由 Vite 构建后嵌入产品二进制。本页写代码放在哪里、样式与数据怎样组织；产品接口的契约与生成见[本地环境](../development/LOCAL_ENVIRONMENT.md#接口契约)，检查命令见[静态检查](../development/LOCAL_ENVIRONMENT.md#静态检查)。
+Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/0003-use-react-typescript-for-web-desktop.md)），由 Vite 构建后嵌入产品二进制。本页写代码放在哪里、样式与数据怎样组织；产品接口的契约与生成见[本地环境](../development/api-contract.md#接口契约)，检查命令见[静态检查](../development/testing.md#静态检查)。
 
 ## 目录
 

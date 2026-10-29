@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 type sourceStub struct {
@@ -45,7 +45,7 @@ func (s *sourceStub) OpenContent(_ context.Context, _ accounts.User, _ string) (
 }
 
 type workerStub struct {
-	mediaworker.Worker
+	ffmpegworker.Worker
 	data  []byte
 	calls int
 	at    float64
@@ -57,8 +57,8 @@ func (w *workerStub) Image(_ context.Context, _ *os.File, size int) ([]byte, err
 	w.size = size
 	return w.data, nil
 }
-func (w *workerStub) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
-	var p mediaworker.Probe
+func (w *workerStub) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
+	var p ffmpegworker.Probe
 	p.Format.Duration = 200
 	return p, nil
 }
@@ -155,14 +155,14 @@ func TestVideoPreviewUsesBoundedRepresentativeFrame(t *testing.T) {
 func TestPreviewRejectsBadInputAndCancelledQueue(t *testing.T) {
 	service, source, worker := fixture(t, "photo.heif")
 	ctx := context.Background()
-	if _, err := service.Render(ctx, accounts.User{}, "photo", 99999); !errors.Is(err, mediaworker.ErrInvalid) {
+	if _, err := service.Render(ctx, accounts.User{}, "photo", 99999); !errors.Is(err, ffmpegworker.ErrInvalid) {
 		t.Fatal(err)
 	}
 	if source.opens != 0 {
 		t.Fatal("invalid size opened source")
 	}
 	worker.data = []byte("not a PNG")
-	if _, err := service.Render(ctx, accounts.User{}, "photo", 320); !errors.Is(err, mediaworker.ErrUnreadable) {
+	if _, err := service.Render(ctx, accounts.User{}, "photo", 320); !errors.Is(err, ffmpegworker.ErrUnreadable) {
 		t.Fatal(err)
 	}
 	source.name = "notes.txt"
@@ -171,7 +171,7 @@ func TestPreviewRejectsBadInputAndCancelledQueue(t *testing.T) {
 	}
 	source.name = "photo.heif"
 	service.worker = nil
-	if _, err := service.Render(ctx, accounts.User{}, "photo", 320); !errors.Is(err, mediaworker.ErrUnavailable) {
+	if _, err := service.Render(ctx, accounts.User{}, "photo", 320); !errors.Is(err, ffmpegworker.ErrUnavailable) {
 		t.Fatal(err)
 	}
 	service.gate <- struct{}{}
