@@ -12,3 +12,4 @@
 - [备份中心 C 端功能评审（2026-10）](backup-center-review-2026-10.md)（完成；快照侧缺口已补齐，外部备份待 #27 决定）
 - [相册证件与票据 OCR 模型评估](photo-ocr-model-evaluation.md)（开发机完成；Qwen3.5-2B 字段抽取最好、GLM-OCR 为轻量备选，均需核对层；真实证件与回单未测）
 - [Qdrant 检索特性试验（1.20.0）](qdrant-retrieval-features.md)（完成；开发机试验，视频片段、文件块与照片各用哪些特性，照片何时可切换）
+- [视频剪辑 baseline：时间窗抽帧与 EmbeddingGemma 2](video-moment-retrieval.md)（试点完成；MediaPipe Python 不能多帧一次编码，试点建议每 2 秒 1 帧；基线成片已逐段排查；正式评估集待采集）
