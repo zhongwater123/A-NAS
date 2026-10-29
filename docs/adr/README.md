@@ -36,6 +36,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - 0027：语音处理在云端转写与整理，声纹只在本机计算和保存（draft，[PR #203](https://github.com/zhongwater123/A-NAS/pull/203)）
 
 - [0028：向量索引由所属服务各自的 Qdrant 实例承担，随时可从 Catalog 重建](0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)（proposed；修订 0011 的数据位置：派生的向量索引放在系统盘）
+- [0029：宝宝是档案而不是账号，频道照片存入共享图库，记录由家庭服务持有](0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)（proposed）
 
 ## 格式
 

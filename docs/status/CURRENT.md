@@ -35,6 +35,7 @@
 - 文件管理的缩略图仍加载原图，是否改用服务端缩略图。
 - 助手的模型仍会提到 Hermes 的 `/help` 与上手引导，如何处理。
 - 向量索引 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)（proposed）：引入 Qdrant 作为各服务可重建的派生索引，推翻了 #66 “不引入独立向量库”的决定。第一阶段只做同步与影子比对；相册读路径何时切换，等实机影子比对的数据再定。
+- 家庭中心（宝宝频道）的[规格](../specs/family-center.md)与 [ADR 0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)：2026-10-29 起草，其中的默认规则与里程碑划分待确认，确认后开始实现。
 - 进行中的 PR：局域网算力 PAIR 的隐私边界与下载（[#196](https://github.com/zhongwater123/A-NAS/pull/196)，草稿）；语音处理的云端密钥与存储桶（[#203](https://github.com/zhongwater123/A-NAS/pull/203)）。
 
 ## 下一步
