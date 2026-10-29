@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { animationFrames, drawableCanvas } from "../test/canvas";
 import {
   BOOT_TIMELINE,
   crtParams,
@@ -10,7 +11,10 @@ import {
   taglineGlyphs,
 } from "./bootIdent";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("boot ident timeline", () => {
   it("powers on from a beam through static to a steady picture", () => {
@@ -52,5 +56,27 @@ describe("sign-in lockup", () => {
   it("does not start when the browser cannot draw on a canvas", () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => null);
     expect(startIdentLockup(document.createElement("canvas"), () => false)).toBeNull();
+  });
+
+  it("draws nothing while paused and carries on when resumed", () => {
+    const clears = drawableCanvas();
+    const frames = animationFrames();
+    const lockup = startIdentLockup(document.createElement("canvas"), () => false);
+    expect(lockup).not.toBeNull();
+    expect(frames.queued).toHaveLength(1);
+
+    lockup?.pause();
+    expect(frames.cancelled).toHaveBeenCalledWith(1);
+    // A frame the browser had already handed out draws nothing and asks for no other.
+    const drawn = clears.mock.calls.length;
+    frames.queued[0](16);
+    expect(clears.mock.calls.length).toBe(drawn);
+    expect(frames.queued).toHaveLength(1);
+
+    lockup?.resume();
+    frames.queued[1](32);
+    expect(clears.mock.calls.length).toBeGreaterThan(drawn);
+    expect(frames.queued).toHaveLength(3);
+    lockup?.stop();
   });
 });

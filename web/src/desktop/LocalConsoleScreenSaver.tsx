@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { readLocalDisplay } from "./api";
 import styles from "./desktop.module.css";
@@ -53,6 +54,10 @@ export function selectScreenSaverVideo(
 // 个性化. Without videos (or on the sign-in page, where videos is false) the
 // screen goes black at the same moment. The first input after either only
 // wakes the page.
+//
+// Both covers are children of <body>, next to the page rather than inside it,
+// so that the stylesheet can stop the page beneath from rendering while they
+// are up (see .local-console-screensaver).
 export function LocalConsoleScreenSaver({
   enabled,
   videos = true,
@@ -187,16 +192,17 @@ export function LocalConsoleScreenSaver({
   if (!enabled) return null;
 
   if (phase === "asleep") {
-    return (
+    return createPortal(
       <section className={styles.localConsoleSleep} role="dialog" aria-label="息屏">
         <p className="sr-only">按任意键、移动鼠标或触摸屏幕即可唤醒</p>
-      </section>
+      </section>,
+      document.body,
     );
   }
 
   if (phase !== "saver" || !currentSrc) return null;
 
-  return (
+  return createPortal(
     <section className={styles.localConsoleScreensaver} role="dialog" aria-label="屏幕保护程序">
       <video
         ref={video}
@@ -209,6 +215,7 @@ export function LocalConsoleScreenSaver({
         onError={() => disableVideo(currentSrc)}
       />
       <p className="sr-only">移动鼠标、按键或触摸屏幕即可返回桌面</p>
-    </section>
+    </section>,
+    document.body,
   );
 }

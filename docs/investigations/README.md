@@ -53,6 +53,7 @@
 - [2026-10-26：未识别块设备阻断整次宿主机观测](2026-10-26-unidentified-device-blocks-host-state.md)
 
 - [2026-10-28：保存快照保留设置后，后台仍按旧策略删除快照](2026-10-28-snapshot-retention-policy-race.md)
+- [2026-10-28：本机屏幕播放屏保时占用约 1.4 个核](2026-10-28-screensaver-video-cpu.md)
 
 ## 状态
 
