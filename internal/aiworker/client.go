@@ -80,6 +80,9 @@ type Response struct {
 	Faces []WireFace `json:"faces,omitempty"`
 	// AnimalModel names the animal model, in answer to info.
 	AnimalModel string `json:"animalModel,omitempty"`
+	// MemoryBytes is what the Worker holds with every model it serves
+	// loaded, its own start included, in answer to info.
+	MemoryBytes uint64 `json:"memoryBytes,omitempty"`
 	// Vectors answer embed_animals, one per box, each as Vector is.
 	Vectors [][]byte   `json:"vectors,omitempty"`
 	Error   *WireError `json:"error,omitempty"`
@@ -124,7 +127,7 @@ func (c Client) Info(ctx context.Context) (photos.EmbedderInfo, error) {
 		return photos.EmbedderInfo{}, errors.New("AI worker described no model")
 	}
 	return photos.EmbedderInfo{Model: response.Model, Dimensions: response.Dimensions, Detector: response.Detector,
-		Faces: response.FaceModel, Animals: response.AnimalModel}, nil
+		Faces: response.FaceModel, Animals: response.AnimalModel, MemoryBytes: response.MemoryBytes}, nil
 }
 
 func (c Client) EmbedImage(ctx context.Context, image *os.File) ([]float32, error) {

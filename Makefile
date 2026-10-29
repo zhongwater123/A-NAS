@@ -198,7 +198,11 @@ ops-check:
 	grep -Fq 'ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx)' scripts/install-v1.0.1-system-services.sh
 	! grep -q '^CPUQuota=' deploy/systemd/system/anas-ai.service
 	grep -Fq 'anas-ai.service.d/cpu-reserve.conf' scripts/install-v1.0.1-system-services.sh
-	grep -Fqx 'MemoryMax=3G' deploy/systemd/system/anas-ai.service
+	! grep -Eq '^Memory(High|Max)=' deploy/systemd/system/anas-ai.service
+	grep -Fq 'anas-ai.service.d/memory-reserve.conf' scripts/install-v1.0.1-system-services.sh
+	grep -Fqx 'MemorySwapMax=0' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'OOMScoreAdjust=500' deploy/systemd/system/anas-ai.service
+	jq -e 'all(.[]; .memoryBytes | type == "number" and . > 0)' -s deploy/models/*.json >/dev/null
 	grep -Fqx 'Slice=anas-ai.slice' deploy/systemd/system/anas-ai.service
 	grep -Fqx 'CPUWeight=10' deploy/systemd/system/anas.slice
 	grep -Fq 'anas-system.slice.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh

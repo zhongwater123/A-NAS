@@ -22,7 +22,7 @@ func TestInfoAndImageEmbeddingCrossTheSocket(t *testing.T) {
 	socket := aiworkertest.Serve(t, func(request aiworker.Request, file *os.File) *aiworker.Response {
 		switch request.Op {
 		case aiworker.OpInfo:
-			return &aiworker.Response{OK: true, Model: "fake-1", Dimensions: 2}
+			return &aiworker.Response{OK: true, Model: "fake-1", Dimensions: 2, MemoryBytes: 1 << 30}
 		case aiworker.OpEmbedImage:
 			if file == nil {
 				return &aiworker.Response{Error: &aiworker.WireError{Code: aiworker.CodeInvalidInput, Message: "no image"}}
@@ -40,7 +40,7 @@ func TestInfoAndImageEmbeddingCrossTheSocket(t *testing.T) {
 	client := aiworker.Client{SocketPath: socket}
 
 	info, err := client.Info(context.Background())
-	if err != nil || info != (photos.EmbedderInfo{Model: "fake-1", Dimensions: 2}) {
+	if err != nil || info != (photos.EmbedderInfo{Model: "fake-1", Dimensions: 2, MemoryBytes: 1 << 30}) {
 		t.Fatalf("Info() = %+v, %v", info, err)
 	}
 	image := filepath.Join(t.TempDir(), "thumbnail.jpg")

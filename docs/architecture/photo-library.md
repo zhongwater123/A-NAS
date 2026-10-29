@@ -119,7 +119,7 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 
 - 连续 5 分钟无前台活动后才领取新任务，并发 1，每次只让一个模型族常驻（2026-10-13 起改为按需加载、用完即放，见[物体检测的资源策略](photo-objects.md#资源策略)）。前台活动来自相册与文件 API 的用户请求（不含状态栏等定时轮询）；SMB 传输不经过产品服务，因此同时参考 Host Agent 的磁盘与网络吞吐。
 - 检测到上传、下载、播放、交互、内存压力、I/O 压力或温度上限后立即停止领取新任务；已经开始的单张原子推理允许完成。
-- 初始 systemd 预算为 `CPUQuota=200%`、`MemoryHigh=2G`、`MemoryMax=3G`、低 CPU/I/O 优先级；这些是安全起点，不是实机结论。2026-10-13 用户确定原则：闲时有多少资源就用多少，始终留出余量，用户有突发请求时正确释放；随切片 18 改为按核数减 2 的线程与上限、按需加载与卸载、可取消的检测任务（[资源策略](photo-objects.md#资源策略)）。
+- 初始 systemd 预算为 `CPUQuota=200%`、`MemoryHigh=2G`、`MemoryMax=3G`、低 CPU/I/O 优先级；这些是安全起点，不是实机结论。2026-10-13 用户确定原则：闲时有多少资源就用多少，始终留出余量，用户有突发请求时正确释放；随切片 18 改为按核数减 2 的线程与上限、按需加载与卸载、可取消的检测任务；2026-10-28 内存也不再有固定预算：后台任务加载模型前确认加载后仍余 1 GiB，`MemoryMax` 只防失控（[资源策略](photo-objects.md#资源策略)）。
 - OOM、进程退出和重启只会让任务重试（重启后由启动恢复立即重新排队，否则等租约到期），不得影响原图与基础相册。
 
 ## AI 模型基线
@@ -130,7 +130,7 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 |---|---|---|---|
 | 中文语义向量与开放标签 | 已选定 Google EmbeddingGemma 2 全模态 740M 官方 LiteRT 包（2026-10-09 决定） | Google DeepMind 于 2026-10-06 发布、支持 100+ 语言，许可待核对（见 [M2 实施方案](photo-ai.md)）；全模态包约 485 MB，440M 文本+视觉包约 388 MB，官方列出图片检索与图片分类用途；零样本标签依赖图文同一向量空间的相似度，官方未给出中文图文指标 | 作为首个集成目标；中文家庭照片质量、Debian x86 Runtime、RSS、查询延迟与吞吐达标后冻结为发行默认；发布过新必须保留回退 |
 | 人脸检测与聚类向量 | Open Model Zoo `face-detection-retail-0004` + `landmarks-regression-retail-0009` + `face-reidentification-retail-0095` | 三段均有 Apache-2.0 模型清单、模型很小并直接运行于 OpenVINO；[实施方案](photo-people.md)改用运行环境已有的 OpenCV 与 ONNX Runtime 运行候选模型（YuNet 检测，SFace 或 AuraFace 向量，由评估决定），本组合降为回退 | 在家庭合照、侧脸、儿童成长和误合并样本上校准阈值；不满足质量则不默认发布 |
-| 按需中文描述 | 高置信标签、时间和地点的可追溯结构化摘要 | 无需常驻 VLM，中文稳定，可逐项说明事实来源并避免把幻觉写入检索事实 | 小型可商用 VLM 通过中文质量、3 GB 上限和响应时间基准后，才能替换为自由生成 Provider |
+| 按需中文描述 | 高置信标签、时间和地点的可追溯结构化摘要 | 无需常驻 VLM，中文稳定，可逐项说明事实来源并避免把幻觉写入检索事实 | 小型可商用 VLM 通过中文质量、内存（目标 NAS 上加载后仍留 1 GiB 余量）和响应时间基准后，才能替换为自由生成 Provider |
 
 （2026-10-10 起标签只以 AI 聚合呈现、不参与搜索，见 [M2 实施方案“AI 聚合”](photo-ai.md#ai-聚合)。）图文 Embedding 模型不直接输出固定类别。系统维护版本化中文标签词表，为每个标签预计算文本向量，按标签独立校准阈值，只展示超过阈值的少量候选；不能用一个全局阈值承诺识别所有物体。“猫”“电动车”“3D 打印机”即使没有形成可见标签，仍可通过文本与图片向量相似度参与语义搜索。
 
@@ -146,7 +146,7 @@ Qwen3-VL-Embedding-2B 继续作为有官方 OpenVINO INT4 路线的成熟质量�
 
 - Go 相册服务 `anas-photos` 负责所有权威状态、权限、任务租约、结果提交和检索组合；`anas-api` 只承担浏览器边界与转发。
 - 成员的 AI 助手不经 `anas-api`，也没有会话：它沙箱中的 MCP 服务以成员本人的 UID 连接相册服务的助手套接字（`ANAS_PHOTOS_ASSISTANT_SOCKET`，未设置时关闭），相册服务按内核给出的对端 UID 经 Host Agent 的 `/v1/accounts/resolve-uid` 确认在用账号，构造带助手标记的只读 `Principal`：只看本人私有图库与共享图库，不带管理员身份与查看授权，不创建私有图库；这个套接字对所有 UID 开放，所以相册服务只在它所在的目录私有于自己时才打开它，由 systemd 只绑定进助手沙箱；Host Agent 的按 UID 查询也默认关闭（`ANAS_PHOTO_ASSISTANT_LOOKUP=1` 才提供）。这个套接字只开放助手工具用到的读取路由，原图与缩略图在服务层也对助手拒绝（`internal/photoservice/assistant.go`，[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 6）；画面只以视图离开（`GET /assets/{id}/view`，`internal/photos/view.go`）：从像素重新编码、最长边不超过 1600 像素、不带原图元数据的 JPEG，供成员要求时交给模型去看；元数据按需从原图读出（`GET /assets/{id}/metadata`，`internal/photos/photometadata.go`）：EXIF 的全部标签与相机记下的拍摄位置，成员与助手都只能读自己看得到的照片的。
-- Python AI Worker 负责模型预处理与推理，通过只在本机可用的窄协议接受 `capability`、经 `SCM_RIGHTS` 传入的只读文件描述符和期望版本，返回结构化结果。Worker 使用独立系统身份，systemd 起始约束为无网络（`PrivateNetwork=yes`）、不可访问数据卷、`MemoryMax=3G`、`CPUQuota=200%` 与低 CPU/I/O 优先级；现行单元的内存与 CPU 限制见[相册本地 AI](photo-ai.md#ai-workeranas-ai)（切片 18 起 CPU 上限为逻辑核数减 2）。
+- Python AI Worker 负责模型预处理与推理，通过只在本机可用的窄协议接受 `capability`、经 `SCM_RIGHTS` 传入的只读文件描述符和期望版本，返回结构化结果。Worker 使用独立系统身份，systemd 起始约束为无网络（`PrivateNetwork=yes`）、不可访问数据卷、`MemoryMax=3G`、`CPUQuota=200%` 与低 CPU/I/O 优先级；现行单元的内存与 CPU 限制见[相册本地 AI](photo-ai.md#ai-workeranas-ai)（切片 18 起 CPU 上限为逻辑核数减 2，2026-10-28 起内存不设固定预算）。
 - AI 随系统内置安装、默认开启，设备不联网获取模型（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：Worker 的 Python 依赖以锁定哈希的离线 wheel、模型文件连同来源、许可证、SHA-256 与预处理版本清单随发行制品交付，按内容各存一份并由 release 引用。Worker 不可用时基础相册不受影响。
 - EmbeddingGemma 2 的全模态 740M 官方 LiteRT 包经 MediaPipe Universal Embedder 运行（LiteRT-LM 自身的 Python API 没有向量接口，见 [M2 实施方案](photo-ai.md)），并用 Transformers/Sentence Transformers 结果抽样核对量化正确性；人脸模型优先使用 OpenVINO CPU Provider。不做 OCR（2026-10-09 决定）。UHD 730 仅作为后续实机对照，不把 GPU 驱动可用性作为首版前提。
 - Debian 13 不在当前 OpenVINO 官方支持发行版列表中，因此必须在目标系统完成离线安装、模型加载、连续运行和服务重启测试；失败时回退 ONNX Runtime CPU，不能让 Runtime 兼容性阻塞基础相册。
@@ -228,7 +228,7 @@ USB 存储识别与挂载、账号删除和备份目前都不是已有产品能�
 - 单张与整库照片/分钟、首轮建库时间、Worker 峰值 RSS、CPU、I/O、温度与功耗。
 - Worker 空闲、运行、停止领取任务和完成当前原子任务时的前台 API p95 延迟。
 
-目标 NAS 的部署门禁按 EmbeddingGemma 2、Qwen3-VL-Embedding-2B、SigLIP2 Base、Chinese-CLIP RN50 的顺序验证；开发机资源允许时另跑 WeMM-Embedding-2B BF16，定义中文质量上限但不把它当作 8 GB 部署候选。任何候选只要许可证不能确认、峰值 RSS 超过 3 GB、导致前台明显卡顿或中文质量不达标，就不成为默认模型；功能可以显示为等待兼容模型，而不是降低基础相册可靠性。
+目标 NAS 的部署门禁按 EmbeddingGemma 2、Qwen3-VL-Embedding-2B、SigLIP2 Base、Chinese-CLIP RN50 的顺序验证；开发机资源允许时另跑 WeMM-Embedding-2B BF16，定义中文质量上限但不把它当作 8 GB 部署候选。任何候选只要许可证不能确认、峰值内存在目标 NAS 上放不下（加载后不足 1 GiB 余量）、导致前台明显卡顿或中文质量不达标，就不成为默认模型；功能可以显示为等待兼容模型，而不是降低基础相册可靠性。
 
 ## 关联
 

@@ -116,7 +116,7 @@ func (s *Service) RunVectorSync(ctx context.Context, index VectorIndex, gate Gat
 	}
 	for {
 		wait := idle
-		if open, reason := gate.Open(ctx); !open {
+		if open, reason := gate.Open(ctx, 0); !open {
 			if pausedByPressure(reason) {
 				wait = min(wait, pressureRecheck)
 			}
