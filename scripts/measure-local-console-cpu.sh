@@ -5,9 +5,8 @@
 #
 #   measure-local-console-cpu.sh [SECONDS]
 #
-# Any account can read the CPU figures. GPU engine time, the loaded VA-API
-# driver and the video being served need root (or, for the first two, the
-# kiosk's own account); without it those lines say so.
+# Any account can read the CPU figures. GPU engine time and the loaded VA-API
+# driver need root or the kiosk's own account; without them those lines say so.
 # See docs/investigations/2026-10-28-screensaver-video-cpu.md.
 set -euo pipefail
 export LC_ALL=C
@@ -62,27 +61,18 @@ engines() {
     END { for (name in busy) print name, busy[name] }' | sort
 }
 
-# serving prints the screen saver files the Product Service has open.
-serving() {
-  local api
-  api=$(pgrep -o -x anas-api || true)
-  [[ -n $api ]] || return 0
-  find "/proc/$api/fd" -mindepth 1 -maxdepth 1 -lname '/var/lib/a-nas/screensavers/*' -printf '%l\n' 2>/dev/null || true
-}
-
+start=$(date +%s.%N)
 before_scope=$(usage "$cgroup")
 before_slice=$(usage "$slice")
 before_threads=$(threads)
 before_engines=$(engines)
-videos=$(serving)
-for _ in $(seq 1 "$seconds"); do
-  sleep 1
-  videos+=$'\n'$(serving)
-done
+sleep "$seconds"
 after_scope=$(usage "$cgroup")
 after_slice=$(usage "$slice")
 after_threads=$(threads)
 after_engines=$(engines)
+# Rates are over the time actually elapsed, reading the counters included.
+seconds=$(awk -v a="$start" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }')
 
 cores() { awk -v a="$1" -v b="$2" -v s="$seconds" 'BEGIN { printf "%.3f", (b - a) / 1e6 / s }'; }
 echo "time:          $(date --iso-8601=seconds), over ${seconds}s"
@@ -101,16 +91,6 @@ if [[ -n $gpu ]] && maps=$(cat "/proc/$gpu/maps" 2>/dev/null); then
   echo "VA-API driver: ${driver:-none loaded}"
 else
   echo "VA-API driver: unreadable (needs root or the kiosk account)"
-fi
-if [[ $EUID -ne 0 ]]; then
-  echo "screen saver:  unreadable (needs root)"
-else
-  playing=$(sed '/^$/d' <<<"$videos" | sort -u)
-  echo "screen saver:  ${playing:-no video served}"
-  [[ -z $playing ]] || while read -r video; do
-    ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,profile,width,height,avg_frame_rate,bit_rate \
-      -of compact=p=0 "$video" 2>/dev/null | sed 's/^/               /' || true
-  done <<<"$playing"
 fi
 
 echo "busiest threads (cores):"

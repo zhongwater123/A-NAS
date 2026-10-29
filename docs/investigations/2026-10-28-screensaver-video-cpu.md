@@ -1,7 +1,7 @@
 # 本机屏幕播放屏保时占用约 1.4 个核
 
-状态：fixed，待实机验收：驱动由 root 安装，页面改动随下一次部署
-更新时间：2026-10-28
+状态：fixed，待实机验收：驱动 2026-10-29 已装并确认硬件解码，页面改动随下一次部署
+更新时间：2026-10-29
 
 ## 症状与影响
 
@@ -13,7 +13,7 @@
 
 1. Experimental NAS 运行 `80b602275b86`，本地控制台已登录，屏保池里有视频。
 2. 本机屏幕 3 分钟无输入，屏保开始播放；再等息屏时长，屏幕转黑。
-3. 在两个阶段各运行一次 `scripts/measure-local-console-cpu.sh 60`（root 运行时还能读出 GPU 引擎时间与正在播放的视频）。
+3. 在两个阶段各运行一次 `scripts/measure-local-console-cpu.sh 60`（root 或 kiosk 账号运行时还能读出 GPU 引擎时间与已加载的驱动）。
 4. 实际：播放时约 1.4 个核，黑屏时约 0.27 个核。期望：远低于 0.3 个核。
 
 ## 观察事实
@@ -52,9 +52,10 @@
 | 假设 | 验证方法 | 结果 |
 |---|---|---|
 | 没有 VA-API 驱动，Chromium 退回 FFmpeg 软件解码，GPU 进程再把每一帧拷进显存 | 读 Chromium 154 的源码；查已装软件包；读 GPU 进程的 `drm-engine-video` | 确认：特性默认开启、构建带 VA-API、唯一缺的是驱动；视频引擎累计 0 ns |
-| 只装驱动、不加 Chromium 参数就能硬件解码 | root 安装 `intel-media-va-driver` 后重启 kiosk，读 GPU 进程加载的驱动、`drm-engine-video` 与渲染进程的 `Media` 线程 | pending：待实机 |
+| 只装驱动、不加 Chromium 参数就能硬件解码 | root 安装 `intel-media-va-driver` 后重启 kiosk，读 GPU 进程加载的驱动、`drm-engine-video` 与渲染进程的 `Media` 线程 | 确认，见下面的实机测量 |
+| 硬件解码后仍剩约 0.5 个核，主要是覆盖层下桌面的渲染与每秒 60 帧的合成 | 部署本改动后按同样方法复测屏保与黑屏 | pending：待部署 |
 | 黑屏时的约 0.27 个核来自覆盖层下面仍在出帧的桌面 | 无头 Chrome 156 载入 Fake 模式的本机屏幕页面，表盘读数逐次变化，比较覆盖层下的样式计算与布局次数 | 确认，见下面的开发机对照 |
-| 重新编码视频池（按屏幕裁成 4:3、降到 30 fps、去掉音轨）还能显著降低 | 硬件解码到位后，比较 60 fps 与 30 fps 两类视频的整机占用 | pending：等实机数据再决定 |
+| 重新编码视频池（按屏幕裁成 4:3、降到 30 fps、去掉音轨）还能显著降低 | 页面改动部署后，比较 60 fps 与 30 fps 两类视频的整机占用 | pending：等部署后的数据再决定 |
 
 ### 开发机对照（2026-10-28）
 
@@ -81,6 +82,36 @@
 
 屏保出现后 0、100、200 毫秒时根节点仍是 `visible`，400 毫秒时为 `hidden`：淡入期间仍能看到下面的桌面，之后才停止渲染。
 
+### 实机测量（2026-10-29）
+
+Experimental NAS 运行 `4ec62e17c3b1`，kiosk 以 `a-nas-kiosk` 运行，页面仍是改动前的版本。root 运行一次性脚本安装驱动，并在前后各测两次（日志在 NAS 的 `/var/tmp/a-nas-kiosk-vaapi.log`）。每次测量先重启 kiosk，等 215 秒让屏保开始，再测 60 秒。池中视频随机选择，无法确定每次播放的是哪一条。
+
+ffmpeg 解码每条视频的前 20 秒（不解音频），每秒视频耗的 CPU：
+
+| 池中名称 | 软件解码 | VA-API |
+|---|---|---|
+| `screensaver-000.mp4`（60 fps） | 0.349 核 | 0.032 核 |
+| `screensaver-001.mp4`（60 fps） | 0.354 核 | 0.033 核 |
+| `screensaver-002.mp4` | 0.155 核 | 0.015 核 |
+| `screensaver-003.mp4` | 0.250 核 | 0.022 核 |
+| `screensaver-004.mp4` | 0.169 核 | 0.013 核 |
+| `screensaver-005.mp4` | 0.209 核 | 0.018 核 |
+
+kiosk：
+
+| 采样 | kiosk 会话 | 渲染进程 `Media` 线程 | GPU 进程主线程 | GPU 3D 引擎 | GPU 视频引擎 |
+|---|---|---|---|---|---|
+| 软件解码 1 | 0.867 核 | 0.332 核 | 0.194 核 | 34.2% | 0% |
+| 软件解码 2 | 0.700 核 | 无 | 0.165 核 | 28.9% | 0% |
+| VA-API 1 | 0.531 核 | 0.030 核 | 0.157 核 | 58.8% | 23.2% |
+| VA-API 2 | 0.536 核 | 0.030 核 | 0.160 核 | 59.1% | 23.2% |
+
+- **只装驱动就生效**：没有改任何 Chromium 参数，GPU 进程就加载了 `iHD_drv_video.so`，视频引擎 23% 忙，渲染进程的解码从约 0.33 核降到 0.03 核。`vainfo` 报告 `Intel iHD driver 25.2.3`，支持 H.264 Main/High 与 HEVC Main 解码。
+- **软件解码第 2 次没有 `Media` 线程**：采样时屏保没有在播放视频，原因不明（可能是屏保还没开始，或者画面被输入唤醒了）。它反映的是桌面本身的开销，不能算作屏保的数据。
+- **仍剩约 0.5 个核**：GPU 进程主线程 0.16 核，渲染进程主线程 0.09 核，`VizCompositor` 0.06 核，Cage 0.04 核，浏览器主线程 0.035 核，其余线程各 0.03 核以下。之后只读采样时，Cage 每秒唤醒约 128 次，即按每秒 60 帧出画。渲染进程主线程的大部分与 GPU 进程的一部分工作来自覆盖层下的桌面，要等本改动部署后复测。
+- **GPU 3D 引擎从 34% 升到 59%**：一种可能是解码出的帧在 GPU 上又做了一次格式转换，即 Chromium 在 EGL 不能直接导入 NV12 时走 AR24 的一次拷贝路径。这占的是 GPU 时间，不是 CPU，原因待查。
+- 这几次测量把计数差按 60 秒计算，但读取计数本身还要 1–2 秒，所以表中数值偏高约 2–3%。脚本现已改为按实际经过的时间计算，并删去了识别播放视频的部分：产品服务只在回应一次范围请求时打开文件，四次采样都没有抓到。
+
 ## 根因
 
 两处相互独立的开销：
@@ -92,13 +123,15 @@
 
 - 驱动：Experimental NAS 上由 root 安装 `intel-media-va-driver` 与 `vainfo`，不改 Chromium 参数。安装与核对步骤见[本地控制台手册的硬件视频解码](../runbooks/operate-local-kiosk.md#硬件视频解码)。kiosk 启动器在找不到任何 VA-API 驱动时向 journal 写一行警告（[`run-kiosk.sh`](../../scripts/run-kiosk.sh)）。
 - 页面：两种覆盖层改为 `<body>` 的直接子元素，覆盖期间样式表让页面其余部分 `content-visibility: hidden`，等屏保淡入的 0.28 秒结束后才切换（[`LocalConsoleScreenSaver.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.tsx)、[`desktop.module.css`](../../web/src/desktop/desktop.module.css)）。
-- 测量：[`measure-local-console-cpu.sh`](../../scripts/measure-local-console-cpu.sh) 只读地给出 kiosk 会话与用户 slice 的 CPU、最忙的线程、各 GPU 引擎的忙碌比例、已加载的 VA-API 驱动与正在播放的视频。
+- 测量：[`measure-local-console-cpu.sh`](../../scripts/measure-local-console-cpu.sh) 只读地给出 kiosk 会话与用户 slice 的 CPU、最忙的线程、各 GPU 引擎的忙碌比例与已加载的 VA-API 驱动。
 - 测试：[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx) 确认两种覆盖层都在页面根节点之外、是 `<body>` 的子元素；`content-visibility` 的效果由上面的开发机对照与实机测量证明，jsdom 不计算样式。
-- 实机：待 root 运行一次性脚本（安装驱动，前后各两次屏保采样，以及每条视频的 ffmpeg 软件与 VA-API 解码对照）后补上改动前后的数据。
+- 实机：2026-10-29 装上驱动后，屏保播放时 kiosk 会话从 0.87 核降到 0.53 核，见上面的实机测量。页面改动部署后复测屏保与黑屏。
 
 ## 后续工作
 
-- 实机数据到位后决定是否重新编码视频池：按屏幕裁成 4:3 的 1440×1080、60 fps 降到 30 fps、去掉不播放的音轨。硬件解码下码率几乎不影响 CPU，剩下的开销与帧率成正比；降帧会让画面不如原来顺滑，要用实测换算后再定。
+- 部署页面改动后，按[本地控制台手册](../runbooks/operate-local-kiosk.md#验收)第 12 项复测屏保与黑屏。
+- 若屏保仍明显高于 0.3 个核，就分别测 60 fps 与 30 fps 的片段，例如临时安装只含一条视频的池，再决定是否重新编码视频池：按屏幕裁成 4:3 的 1440×1080，60 fps 降到 30 fps，去掉不播放的音轨。硬件解码下码率几乎不影响 CPU，剩下的开销与帧率成正比；但降帧会让画面不如原来顺滑。
+- 查明硬件解码后 GPU 3D 引擎忙碌比例上升的原因（是否走了 AR24 的一次拷贝路径）。
 - 其他硬件：AMD 核显用 `mesa-va-drivers`；NVIDIA 的 VA-API 驱动 Chromium 不支持。
 
 ## 关联

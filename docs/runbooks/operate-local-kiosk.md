@@ -1,7 +1,7 @@
 # 运行实验 NAS 本地控制台
 
-状态：implemented, display and pointer verified; dedicated account verified on the Experimental NAS (2026-10-28); confinement and VT recovery pending; hardware video decoding not yet verified on hardware
-更新时间：2026-10-28
+状态：implemented, display and pointer verified; dedicated account verified on the Experimental NAS (2026-10-28); hardware video decoding verified on the Experimental NAS (2026-10-29); confinement and VT recovery pending
+更新时间：2026-10-29
 
 ## 目的
 
@@ -31,7 +31,7 @@
 
 屏保视频不在 release 中，见[屏保视频](#屏保视频)。
 
-2026-10-06 已在实机确认这些图形包和 Chromium 154 安装完成；最后两个包是 Chromium 硬件解码视频要用的 VA-API 驱动与它的检查工具，按[硬件视频解码](#硬件视频解码)补装。重装或新设备由管理员执行：
+2026-10-06 已在实机确认这些图形包和 Chromium 154 安装完成；最后两个包是 Chromium 硬件解码视频要用的 VA-API 驱动与它的检查工具，2026-10-29 按[硬件视频解码](#硬件视频解码)补装。重装或新设备由管理员执行：
 
 ```bash
 apt update
@@ -214,7 +214,7 @@ find "$pools" -mindepth 1 -maxdepth 1 -type d ! -name objects ! -name pools
 
 ## 硬件视频解码
 
-Debian 13 的 Chromium 154 默认通过 VA-API 用 GPU 解码视频，不需要额外的启动参数：`AcceleratedVideoDecoder`、`AcceleratedVideoDecodeLinuxGL` 与 `AcceleratedVideoDecodeLinuxZeroCopyGL` 都是默认开启的特性，Debian 的 amd64 构建也带着 VA-API。它缺的只是 GPU 的 VA-API 驱动。没有驱动时，Chromium 在 CPU 上解码，再把每一帧上传给 GPU：Experimental NAS 播放 1080p 屏保时本机屏幕约占 1.4 个核（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。不要往启动器里加 `--enable-features=…`：这些已是默认值，特性改名后旧名字只会被静默忽略。
+Debian 13 的 Chromium 154 默认通过 VA-API 用 GPU 解码视频，不需要额外的启动参数：`AcceleratedVideoDecoder`、`AcceleratedVideoDecodeLinuxGL` 与 `AcceleratedVideoDecodeLinuxZeroCopyGL` 都是默认开启的特性，Debian 的 amd64 构建也带着 VA-API。它缺的只是 GPU 的 VA-API 驱动。没有驱动时，Chromium 在 CPU 上解码，再把每一帧上传给 GPU。Experimental NAS 装驱动前，播放 1080p 屏保时 kiosk 会话约占 0.87 个核，装上后约 0.53 个核，其中解码本身从约 0.33 核降到 0.03 核（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。不要往启动器里加 `--enable-features=…`：这些已是默认值，特性改名后旧名字只会被静默忽略。
 
 驱动按 GPU 选择：Intel 核显（Broadwell 及以后，Experimental NAS 的 UHD 730 属于此列）用 `intel-media-va-driver`，AMD 用 `mesa-va-drivers`；Chromium 不支持 NVIDIA 的 VA-API 驱动。启动器在找不到任何 VA-API 驱动时向 kiosk 的 journal 写一行 `no VA-API driver is installed`。
 
@@ -235,7 +235,7 @@ kiosk 中打不开 `chrome://gpu` 与 `chrome://media-internals`，开远程调�
 ssh a-nas 'bash -s 60' < scripts/measure-local-console-cpu.sh
 ```
 
-root 运行时还会列出 GPU 引擎、已加载的驱动与正在播放的视频。脚本不随 release 安装，像其他 root 步骤一样由暂存账号上传，root 复制到 `/root` 并核对 SHA-256 后运行。硬件解码生效时：
+以 root 或 kiosk 账号运行时，还会列出各 GPU 引擎的忙碌比例与已加载的驱动。脚本不随 release 安装，像其他 root 步骤一样由暂存账号上传，root 复制到 `/root` 并核对 SHA-256 后运行。硬件解码生效时：
 
 - `VA-API driver` 一行是 `iHD_drv_video.so`；
 - `GPU video` 的忙碌比例大于 0；
