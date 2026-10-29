@@ -166,10 +166,10 @@ class MomentsTest(unittest.TestCase):
     def test_rules_take_a_still_picture_briefly_and_never_fill_the_target(self):
         segments = self.index.plan({"城堡": self.castle}, 60)
         # Two pictures of the castle shot pass the threshold, each the same for 20 s:
-        # STILL_MAX of each around its best window, and nothing more however long the target.
+        # STILL_MAX of each from its best window, and nothing more however long the target.
         self.assertEqual([(s["card"], s["start"], s["end"]) for s in segments],
-                         [("07-1-0", 8, 12), ("07-1-1", 28, 32)])
-        self.assertEqual(self.index.check(segments), [("07", 8.0, 12.0), ("07", 28.0, 32.0)])
+                         [("07-1-0", 8, 14), ("07-1-1", 28, 34)])
+        self.assertEqual(self.index.check(segments), [("07", 8.0, 14.0), ("07", 28.0, 34.0)])
         self.assertEqual(self.index.plan({"城堡": -self.castle}, 10), [])
 
     def test_a_plan_with_no_segments_is_refused(self):

@@ -38,7 +38,7 @@ REASON_CHARS = 200
 # shot 0.63-0.75), and this long while it keeps changing. Grey-level frame
 # differences cannot tell: a moving camera changes the pixels, not the picture.
 STILL = 0.9
-STILL_MAX = 4.0
+STILL_MAX = 6.0
 MOVING_MAX = 8.0
 
 
