@@ -50,7 +50,7 @@ schemas:
       unavailable: { type: array, items: { $ref: "#/schemas/ActivityCategory" }, description: Categories whose records could not be read this time. }
   SystemLogService:
     type: string
-    enum: [api, host-agent, photos, shares, containers, ai, media, kiosk, samba, caddy]
+    enum: [api, host-agent, photos, shares, family, containers, ai, media, kiosk, samba, caddy]
   SystemLogEntry:
     type: object
     additionalProperties: false

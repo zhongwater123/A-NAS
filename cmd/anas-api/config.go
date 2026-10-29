@@ -70,6 +70,7 @@ type Config struct {
 	PhotosSocket     string `env:"ANAS_PHOTOS_SOCKET" envDefault:"/run/a-nas-photos/photos.sock"`
 	SharesSocket     string `env:"ANAS_SHARES_SOCKET" envDefault:"/run/a-nas-shares/shares.sock"`
 	ShareFilesSocket string `env:"ANAS_SHARE_FILES_SOCKET" envDefault:"/run/a-nas-share-files/files.sock"`
+	FamilySocket     string `env:"ANAS_FAMILY_SOCKET" envDefault:"/run/a-nas-family/family.sock"`
 	// MediaWorker is socket, local (FFmpeg in this process, development
 	// only) or disabled; it defaults to socket on a NAS and local otherwise.
 	MediaWorker string `env:"ANAS_FFMPEG_WORKER"`
@@ -177,7 +178,7 @@ func loadConfig(environment map[string]string) (Config, error) {
 		value *string
 	}{
 		{"ANAS_PHOTOS_SOCKET", &c.PhotosSocket}, {"ANAS_SHARES_SOCKET", &c.SharesSocket},
-		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
+		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
 		{"ANAS_FFMPEG_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
 		{"ANAS_ASSISTANT_SOCKET_DIR", &c.Assistant.SocketDir},
 	} {
@@ -361,6 +362,35 @@ func loadShareServiceConfig(environment map[string]string) (shareServiceConfig, 
 	})
 	if len(problems) > 0 {
 		return shareServiceConfig{}, errors.Join(problems...)
+	}
+	return c, nil
+}
+
+// familyServiceConfig configures the family service (ADR 0029), which runs
+// from this binary as its own process and identity.
+type familyServiceConfig struct {
+	Root          string `env:"ANAS_FAMILY_ROOT" envDefault:"/srv/a-nas/data/family"`
+	Socket        string `env:"ANAS_FAMILY_SOCKET" envDefault:"/run/a-nas-family/family.sock"`
+	SessionSocket string `env:"ANAS_FAMILY_SESSION_SOCKET" envDefault:"/run/a-nas-family-sessions/family.sock"`
+	// PhotosSocket is the photo service, which the family service asks, with
+	// the reader's session, which channel photos the reader can see.
+	PhotosSocket string `env:"ANAS_PHOTOS_SOCKET" envDefault:"/run/a-nas-photos/photos.sock"`
+	Media        MediaConfig
+}
+
+// loadFamilyServiceConfig resolves and validates the family service's
+// configuration, reporting every problem at once.
+func loadFamilyServiceConfig(environment map[string]string) (familyServiceConfig, error) {
+	c, err := envconfig.Parse[familyServiceConfig](environment)
+	if err != nil {
+		return familyServiceConfig{}, err
+	}
+	problems := absolutePaths(map[string]*string{
+		"ANAS_FAMILY_ROOT": &c.Root, "ANAS_FAMILY_SOCKET": &c.Socket, "ANAS_FAMILY_SESSION_SOCKET": &c.SessionSocket,
+		"ANAS_PHOTOS_SOCKET": &c.PhotosSocket, "ANAS_FFMPEG_SOCKET": &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
+	})
+	if len(problems) > 0 {
+		return familyServiceConfig{}, errors.Join(problems...)
 	}
 	return c, nil
 }

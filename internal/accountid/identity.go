@@ -39,6 +39,9 @@ const (
 	PhotoServiceUID  = 31000
 	ShareServiceUser = "a-nas-shares"
 	ShareServiceUID  = 31001
+	// FamilyServiceUser owns the family store (ADR 0029).
+	FamilyServiceUser = "a-nas-family"
+	FamilyServiceUID  = 31002
 )
 
 type Role string

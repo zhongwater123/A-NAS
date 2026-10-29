@@ -82,6 +82,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) == 2 && os.Args[1] == familyServiceCommand {
+		if err := runFamilyService(logger); err != nil {
+			logger.Error("A-NAS family service stopped", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == photoServiceCommand {
 		if err := runPhotoService(logger); err != nil {
 			logger.Error("A-NAS photo service stopped", "error", err)
@@ -312,6 +319,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeShares()
+	familyAPI, closeFamily, err := configuredFamily(config, accountService, photoAPI, mediaWorker, logger)
+	if err != nil {
+		return err
+	}
+	defer closeFamily()
 	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
@@ -322,6 +334,7 @@ func run(logger *slog.Logger) error {
 		AppShortcuts: appstoreapi.NewShortcuts(appStore),
 		Photos:       photoAPI,
 		Shares:       shareAPI,
+		Family:       familyAPI,
 		Media:        mediaapi.New(mediaService, logger),
 		Music:        musicService,
 		FilePreviews: previewService,

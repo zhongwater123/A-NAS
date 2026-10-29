@@ -16,8 +16,9 @@ RestartSec=2s
 # The Host Agent serves at once and reconciles the data volume afterwards, so
 # a volume it cannot reconcile no longer stops it (issue #166).
 TimeoutStopSec=20s
-# Separate session directories preserve the photo and share socket group permissions.
-RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions
+# Separate session directories preserve the photo, share and family socket
+# group permissions.
+RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions
 RuntimeDirectoryMode=0750
 # The Host Agent's records (spaces, identities, viewing grants, app
 # identities, data-volume operations) live where only root can open them.

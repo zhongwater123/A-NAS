@@ -23,7 +23,7 @@ func (r *photosRunner) Run(ctx context.Context, name string, args []string, stdi
 		return nil, err
 	}
 	switch {
-	case name == "getent" && args[0] == "passwd" && (args[1] == accountid.PhotoServiceUser || args[1] == accountid.ShareServiceUser) && r.passwd != "":
+	case name == "getent" && args[0] == "passwd" && (args[1] == accountid.PhotoServiceUser || args[1] == accountid.ShareServiceUser || args[1] == accountid.FamilyServiceUser) && r.passwd != "":
 		return []byte(r.passwd + "\n"), nil
 	case name == "getent":
 		return nil, notFound{}
@@ -149,6 +149,34 @@ func TestSharesStoreUsesItsOwnFixedIdentity(t *testing.T) {
 	}
 	runner.passwd = "a-nas-shares:x:998:998::/nonexistent:/usr/sbin/nologin"
 	if _, err := executor.ensureOwnedStore(context.Background(), "shares", accountid.ShareServiceUser, accountid.ShareServiceUID); !errors.Is(err, accountid.ErrIdentityConflict) {
+		t.Fatalf("unexpected identity accepted: %v", err)
+	}
+}
+
+func TestFamilyStoreUsesItsOwnFixedIdentity(t *testing.T) {
+	mountPoint := filepath.Join(t.TempDir(), "data")
+	if err := os.MkdirAll(mountPoint, 0755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &photosRunner{passwd: "a-nas-family:x:31002:31002::/nonexistent:/usr/sbin/nologin"}
+	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
+	drifted, err := executor.ensureOwnedStore(context.Background(), "family", accountid.FamilyServiceUser, accountid.FamilyServiceUID)
+	if err != nil || drifted {
+		t.Fatalf("new family store: %v, %v", drifted, err)
+	}
+	root := filepath.Join(mountPoint, "family")
+	for _, command := range []spacePermissionCommand{
+		{name: "btrfs", args: []string{"subvolume", "create", root}},
+		{name: "chown", args: []string{"31002:31002", root}},
+		{name: "chmod", args: []string{"0700", root}},
+		{name: "setfacl", args: []string{"--modify", "user:a-nas-family:--x", mountPoint}},
+	} {
+		if !runner.ran(command) {
+			t.Errorf("missing %s %v", command.name, command.args)
+		}
+	}
+	runner.passwd = "a-nas-family:x:998:998::/nonexistent:/usr/sbin/nologin"
+	if _, err := executor.ensureOwnedStore(context.Background(), "family", accountid.FamilyServiceUser, accountid.FamilyServiceUID); !errors.Is(err, accountid.ErrIdentityConflict) {
 		t.Fatalf("unexpected identity accepted: %v", err)
 	}
 }

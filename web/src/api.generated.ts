@@ -1386,6 +1386,504 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/family": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's standing in the family and, for members, the family: members, babies and, for guardians, join requests and babies they can restore */
+        get: operations["getFamily"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What pages offer when adding: preset family roles, suggested milestones, the vaccine catalog and the growth standard's name */
+        get: operations["getFamilyCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask to join with a family role; the first account, or the first after everyone has gone, founds the family as its guardian */
+        post: operations["joinFamily"];
+        /** Withdraw the caller's own join request */
+        delete: operations["cancelFamilyJoin"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/leave": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Leave the family; what the caller added stays. The last guardian must name another first (last_guardian) */
+        post: operations["leaveFamily"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Change the caller's own family role */
+        patch: operations["setFamilyRole"];
+        trace?: never;
+    };
+    "/api/v1/family/requests/{accountId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A guardian admits a requester; 爸爸 and 妈妈 become guardians */
+        post: operations["approveFamilyJoin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/requests/{accountId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** A guardian turns a join request down; the account may ask again */
+        delete: operations["rejectFamilyJoin"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/members/{accountId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                accountId: components["parameters"]["FamilyAccountID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** A guardian takes another member out of the family; what they added stays */
+        delete: operations["removeFamilyMember"];
+        options?: never;
+        head?: never;
+        /** A guardian makes a member a guardian or a relative; the family keeps at least one guardian (last_guardian) */
+        patch: operations["setFamilyGuardian"];
+        trace?: never;
+    };
+    "/api/v1/family/hints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What the desktop has not told the caller yet: vaccine doses due or due within 30 days and, for guardians, join requests. Empty outside the family */
+        get: operations["listFamilyHints"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/hints/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that the caller was told, so the desktop does not tell them again */
+        post: operations["markFamilyHintsSeen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A guardian adds a baby and so a new channel */
+        post: operations["addFamilyBaby"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        /** A baby's profile */
+        get: operations["getFamilyBaby"];
+        put?: never;
+        post?: never;
+        /** A guardian moves a baby and the channel into the trash for 15 days; name repeats the baby's name */
+        delete: operations["deleteFamilyBaby"];
+        options?: never;
+        head?: never;
+        /** A guardian edits a baby's profile; changed when someone saved first, conflict when records would fall before the new birth date */
+        patch: operations["updateFamilyBaby"];
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A guardian brings a deleted baby and the channel back */
+        post: operations["restoreFamilyBaby"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        /** The baby's avatar, a square JPEG; cache it by the baby's avatarVersion */
+        get: operations["getFamilyBabyAvatar"];
+        /** A guardian sets the avatar from a picture, cropped to a square and shrunk like an account avatar */
+        put: operations["setFamilyBabyAvatar"];
+        post?: never;
+        /** A guardian removes the avatar */
+        delete: operations["removeFamilyBabyAvatar"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        /** A channel's records, most recently added first, 30 a page; only photos the reader can see, and photo records with none left are skipped */
+        get: operations["listFamilyRecords"];
+        put?: never;
+        /** Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID */
+        post: operations["addFamilyRecord"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/recordings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a recording; the text fields come before the file, which is streamed to the store */
+        post: operations["addFamilyRecording"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A channel's recently deleted records the caller may restore: their own, or everyone's for a guardian */
+        get: operations["listFamilyTrash"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/album": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The cloud album: a channel's photos and videos the reader can see, newest taken first, with the month of life each was taken in */
+        get: operations["getFamilyAlbum"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/growth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 成长记录: the measurements, the growth standard's curves for the baby's sex, and where the latest values lie */
+        get: operations["getFamilyGrowth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/vaccines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The baby's vaccination schedule: the programme's doses and the planned ones, each with its status, and every dose recorded */
+        get: operations["getFamilyVaccines"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/vaccine-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Choose the non-programme vaccines whose doses the schedule lists */
+        put: operations["setFamilyVaccinePlan"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/milestones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 大事记: milestones oldest first, the automatic ones (birth, 满月, 百天, birthdays) among them and the next one at the end */
+        get: operations["listFamilyMilestones"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/wall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        /** The channel's message wall in 亲友团, newest first */
+        get: operations["listFamilyWall"];
+        put?: never;
+        /** Leave a message on the wall */
+        post: operations["addFamilyWallMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/records/{recordId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recordId: components["parameters"]["FamilyRecordID"];
+            };
+            cookie?: never;
+        };
+        /** One record that is not in the trash */
+        get: operations["getFamilyRecord"];
+        put?: never;
+        post?: never;
+        /** Move a record into the channel's recent deletions for 15 days; authors delete their own, guardians anyone's. Photos stay in the shared library */
+        delete: operations["deleteFamilyRecord"];
+        options?: never;
+        head?: never;
+        /** The author edits their record; changed when they edited it elsewhere first */
+        patch: operations["updateFamilyRecord"];
+        trace?: never;
+    };
+    "/api/v1/family/records/{recordId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bring a deleted record back with its comments */
+        post: operations["restoreFamilyRecord"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/records/{recordId}/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Play a recording: as stored with Range, or converted to FLAC by the media worker for AMR and 3GPP, which cannot seek */
+        get: operations["getFamilyRecordingAudio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/records/{recordId}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Comment under a record */
+        post: operations["addFamilyComment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/comments/{commentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a comment or wall message for good; authors delete their own, guardians anyone's */
+        delete: operations["deleteFamilyComment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/photos/libraries": {
         parameters: {
             query?: never;
@@ -4371,7 +4869,7 @@ export interface components {
             unavailable?: components["schemas"]["ActivityCategory"][];
         };
         /** @enum {string} */
-        SystemLogService: "api" | "host-agent" | "photos" | "shares" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
+        SystemLogService: "api" | "host-agent" | "photos" | "shares" | "family" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
         SystemLogEntry: {
             cursor: string;
             /** Format: date-time */
@@ -4547,6 +5045,338 @@ export interface components {
                 rootId: string;
                 parentId?: string;
             };
+        };
+        /**
+         * Format: date
+         * @description A calendar date without time of day or zone.
+         */
+        FamilyDate: string;
+        FamilyMe: {
+            /**
+             * @description none: not in the family; pending: waiting for a guardian's approval.
+             * @enum {string}
+             */
+            status: "none" | "pending" | "member";
+            role?: string;
+            guardian: boolean;
+        };
+        FamilyMember: {
+            accountId: string;
+            username: string;
+            /** @description The member's family role, a name for them as seen from the babies, such as 外婆. */
+            role: string;
+            /** @description Guardians add babies, edit their profiles, approve joining and delete anyone's content. */
+            guardian: boolean;
+            /** Format: date-time */
+            joinedAt: string;
+            /** @description False once the account is disabled or gone; such members keep their content but no place in the family. */
+            active: boolean;
+        };
+        FamilyJoinRequest: {
+            accountId: string;
+            username: string;
+            role: string;
+            /** Format: date-time */
+            requestedAt: string;
+        };
+        FamilyAge: {
+            years: number;
+            months: number;
+            days: number;
+            /** @description The month of life, from 0 for the first month. */
+            totalMonths: number;
+        };
+        FamilyBaby: {
+            id: string;
+            name: string;
+            nickname: string;
+            /** @enum {string} */
+            sex: "female" | "male";
+            birthDate: components["schemas"]["FamilyDate"];
+            age: components["schemas"]["FamilyAge"];
+            /** @description Changes with each new avatar; 0 means there is none. */
+            avatarVersion: number;
+            /** @description Counts edits to the profile. */
+            version: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Account ID of the guardian who added the baby. */
+            createdBy: string;
+            /**
+             * Format: date-time
+             * @description Set while the baby is in the trash; restorable for 15 days.
+             */
+            deletedAt?: string;
+        };
+        FamilyBabyFields: {
+            name: string;
+            nickname?: string;
+            /** @enum {string} */
+            sex: "female" | "male";
+            birthDate: components["schemas"]["FamilyDate"];
+            /** @description When editing, the version the edit was made from. */
+            version?: number;
+        };
+        FamilyOverview: {
+            /** @description Whether anyone has founded the family yet. */
+            exists: boolean;
+            me: components["schemas"]["FamilyMe"];
+            /** @description Empty unless the caller is a member. */
+            members: components["schemas"]["FamilyMember"][];
+            /** @description Join requests; empty unless the caller is a guardian. */
+            requests: components["schemas"]["FamilyJoinRequest"][];
+            /** @description Oldest first; empty unless the caller is a member. */
+            babies: components["schemas"]["FamilyBaby"][];
+            /** @description Babies a guardian can still restore. */
+            deletedBabies: components["schemas"]["FamilyBaby"][];
+        };
+        FamilyMeasurement: {
+            /** @description Recumbent length or standing height, one decimal. */
+            heightCm?: number;
+            /** @description Two decimals. */
+            weightKg?: number;
+            /** @description Head circumference, one decimal. */
+            headCm?: number;
+        };
+        FamilyVaccineDose: {
+            /** @description A vaccine of the catalog, or custom with name. */
+            code: string;
+            /** @description The vaccine's name when code is custom. */
+            name?: string;
+            dose: number;
+            clinic?: string;
+            batch?: string;
+        };
+        FamilyMilestone: {
+            title: string;
+            /** @description The automatic milestone the record annotates: birth, month-1, day-100, year-1 or birthday-N. */
+            autoKey?: string;
+        };
+        FamilyRecording: {
+            contentType: string;
+            sizeBytes: number;
+            fileName: string;
+        };
+        FamilyRecordPhoto: {
+            /** @description A photo asset of the shared photo library. */
+            assetId: string;
+            /** Format: date-time */
+            takenAt?: string;
+            video: boolean;
+            /**
+             * @description Certificates prove a vaccination and stay out of the cloud album.
+             * @enum {string}
+             */
+            role: "album" | "certificate";
+        };
+        FamilyComment: {
+            id: string;
+            /** @description The record the comment is under; absent on the message wall. */
+            recordId?: string;
+            text: string;
+            authorId: string;
+            /** @description Username of the author when they wrote it. */
+            authorName: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        FamilyCommentInput: {
+            /** @description Repeating a request with the same key returns the first comment. */
+            requestKey?: string;
+            text: string;
+        };
+        FamilyRecord: {
+            id: string;
+            babyId: string;
+            /** @enum {string} */
+            kind: "photos" | "recording" | "journal" | "measurement" | "vaccine" | "milestone";
+            occurredOn: components["schemas"]["FamilyDate"];
+            age?: components["schemas"]["FamilyAge"];
+            text: string;
+            /** @description Only the photos the reader can see now. */
+            photos: components["schemas"]["FamilyRecordPhoto"][];
+            measurement?: components["schemas"]["FamilyMeasurement"];
+            vaccine?: components["schemas"]["FamilyVaccineDose"];
+            milestone?: components["schemas"]["FamilyMilestone"];
+            recording?: components["schemas"]["FamilyRecording"];
+            authorId: string;
+            /** @description Username of the author when they added it. */
+            authorName: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            version: number;
+            /** Format: date-time */
+            deletedAt?: string;
+            /** @description Oldest first. */
+            comments: components["schemas"]["FamilyComment"][];
+        };
+        FamilyRecordInput: {
+            /** @description Repeating a request with the same key returns the first record. */
+            requestKey?: string;
+            /**
+             * @description Required when adding; an edit keeps the kind.
+             * @enum {string}
+             */
+            kind?: "photos" | "journal" | "measurement" | "vaccine" | "milestone";
+            occurredOn?: components["schemas"]["FamilyDate"];
+            text?: string;
+            /** @description Photo asset IDs of the shared library, in order; on an edit, replaces the photos. */
+            photos?: string[];
+            /** @description A vaccination's proof photos. */
+            certificates?: string[];
+            /** @description A photo record goes into these babies' channels too. */
+            alsoBabies?: string[];
+            measurement?: components["schemas"]["FamilyMeasurement"];
+            vaccine?: components["schemas"]["FamilyVaccineDose"];
+            milestone?: components["schemas"]["FamilyMilestone"];
+            /** @description When editing, the version the edit was made from. */
+            version?: number;
+        };
+        FamilyRecordPage: {
+            records: components["schemas"]["FamilyRecord"][];
+            next?: string;
+        };
+        FamilyAlbumPhoto: {
+            assetId: string;
+            recordId: string;
+            /** Format: date-time */
+            takenAt?: string;
+            video: boolean;
+            /** @description The month of life the photo was taken in, from 0; -1 before birth. */
+            monthOfLife: number;
+        };
+        FamilyAlbumPage: {
+            /** @description Newest taken first. */
+            photos: components["schemas"]["FamilyAlbumPhoto"][];
+            next?: string;
+        };
+        FamilyGrowthPoint: {
+            ageMonths: number;
+            /** @description One value per percentile, lowest first. */
+            values: number[];
+        };
+        FamilyAssessment: {
+            value: number;
+            date: components["schemas"]["FamilyDate"];
+            ageMonths: number;
+            /** @description The percentile below the value; absent below the lowest or outside the standard's ages. */
+            lower?: string;
+            /** @description The percentile above the value; absent above the highest or outside the standard's ages. */
+            upper?: string;
+        };
+        FamilyGrowth: {
+            /** @enum {string} */
+            sex: "female" | "male";
+            birthDate: components["schemas"]["FamilyDate"];
+            standard: string;
+            percentiles: string[];
+            curves: {
+                height: components["schemas"]["FamilyGrowthPoint"][];
+                weight: components["schemas"]["FamilyGrowthPoint"][];
+                head: components["schemas"]["FamilyGrowthPoint"][];
+            };
+            /** @description Oldest first. */
+            measurements: {
+                recordId: string;
+                date: components["schemas"]["FamilyDate"];
+                ageMonths: number;
+                heightCm?: number;
+                weightKg?: number;
+                headCm?: number;
+            }[];
+            latest: {
+                height?: components["schemas"]["FamilyAssessment"];
+                weight?: components["schemas"]["FamilyAssessment"];
+                head?: components["schemas"]["FamilyAssessment"];
+            };
+        };
+        FamilyCatalogDose: {
+            dose: number;
+            /** @description The recommended age; 0 is at birth. */
+            ageMonths: number;
+            ageLabel: string;
+            /** @enum {string} */
+            sex?: "female" | "male";
+        };
+        FamilyCatalogVaccine: {
+            code: string;
+            name: string;
+            /** @description A vaccine of the national immunization programme; the others are non-programme vaccines a family chooses. */
+            programme: boolean;
+            /** @description Programme vaccines whose doses this one stands in for, dose by dose. */
+            covers?: string[];
+            /** @description Only the covered vaccines' first doses, up to this one. */
+            coversUpTo?: number;
+            /** @description Alternative programme vaccines of which a region uses one; the first is the default. */
+            group?: string;
+            /** @description Empty for vaccines only recorded, such as influenza. */
+            doses: components["schemas"]["FamilyCatalogDose"][];
+            note?: string;
+        };
+        FamilyVaccineCatalog: {
+            version: string;
+            title: string;
+            source: string;
+            vaccines: components["schemas"]["FamilyCatalogVaccine"][];
+        };
+        FamilyScheduledDose: {
+            code: string;
+            name: string;
+            dose: number;
+            programme: boolean;
+            ageLabel: string;
+            dueDate: components["schemas"]["FamilyDate"];
+            /**
+             * @description available: the recommended age has come; soon: within 30 days.
+             * @enum {string}
+             */
+            status: "given" | "replaced" | "available" | "soon" | "upcoming";
+            givenOn?: components["schemas"]["FamilyDate"];
+            recordId?: string;
+            /** @description The non-programme vaccine whose dose stood in. */
+            replacedBy?: string;
+        };
+        FamilyVaccineSchedule: {
+            version: string;
+            title: string;
+            source: string;
+            /** @description By due date. */
+            doses: components["schemas"]["FamilyScheduledDose"][];
+            /** @description The non-programme vaccines the family plans. */
+            plan: string[];
+            /** @description Every dose recorded, oldest first. */
+            records: components["schemas"]["FamilyRecord"][];
+        };
+        FamilyTimelineEntry: {
+            date: components["schemas"]["FamilyDate"];
+            age: components["schemas"]["FamilyAge"];
+            /** @description The automatic milestone's key, when the entry is one. */
+            auto?: string;
+            title: string;
+            /** @description The next automatic milestone, still to come. */
+            upcoming: boolean;
+            record?: components["schemas"]["FamilyRecord"];
+        };
+        FamilyHint: {
+            key: string;
+            /** @enum {string} */
+            kind: "vaccine" | "join_request";
+            babyId?: string;
+            babyName?: string;
+            vaccine?: string;
+            dose?: number;
+            dueDate?: components["schemas"]["FamilyDate"];
+            accountId?: string;
+            username?: string;
+            role?: string;
+        };
+        FamilyCatalog: {
+            roles: string[];
+            milestones: string[];
+            vaccines: components["schemas"]["FamilyVaccineCatalog"];
+            growthStandard: string;
         };
         PhotoLibrary: {
             id: string;
@@ -5648,6 +6478,12 @@ export interface components {
         /** @description Full 64-character engine container ID; names and short IDs are rejected. */
         ContainerId: string;
         FeedbackID: string;
+        FamilyAccountID: string;
+        FamilyBabyID: string;
+        FamilyRecordID: string;
+        FamilyCommentID: string;
+        /** @description The `next` of the previous page. */
+        FamilyCursor: string;
         /** @description A stored Hermes session id: a conversation, or a run of a scheduled task (cron_<task>_<time>). */
         AssistantSessionID: string;
         /** @description A Hermes cron job id; a job's name is not accepted. */
@@ -5756,6 +6592,37 @@ export type MemberShareJob = components['schemas']['MemberShareJob'];
 export type MemberShareNotification = components['schemas']['MemberShareNotification'];
 export type CreateMemberShare = components['schemas']['CreateMemberShare'];
 export type SaveMemberShare = components['schemas']['SaveMemberShare'];
+export type FamilyDate = components['schemas']['FamilyDate'];
+export type FamilyMe = components['schemas']['FamilyMe'];
+export type FamilyMember = components['schemas']['FamilyMember'];
+export type FamilyJoinRequest = components['schemas']['FamilyJoinRequest'];
+export type FamilyAge = components['schemas']['FamilyAge'];
+export type FamilyBaby = components['schemas']['FamilyBaby'];
+export type FamilyBabyFields = components['schemas']['FamilyBabyFields'];
+export type FamilyOverview = components['schemas']['FamilyOverview'];
+export type FamilyMeasurement = components['schemas']['FamilyMeasurement'];
+export type FamilyVaccineDose = components['schemas']['FamilyVaccineDose'];
+export type FamilyMilestone = components['schemas']['FamilyMilestone'];
+export type FamilyRecording = components['schemas']['FamilyRecording'];
+export type FamilyRecordPhoto = components['schemas']['FamilyRecordPhoto'];
+export type FamilyComment = components['schemas']['FamilyComment'];
+export type FamilyCommentInput = components['schemas']['FamilyCommentInput'];
+export type FamilyRecord = components['schemas']['FamilyRecord'];
+export type FamilyRecordInput = components['schemas']['FamilyRecordInput'];
+export type FamilyRecordPage = components['schemas']['FamilyRecordPage'];
+export type FamilyAlbumPhoto = components['schemas']['FamilyAlbumPhoto'];
+export type FamilyAlbumPage = components['schemas']['FamilyAlbumPage'];
+export type FamilyGrowthPoint = components['schemas']['FamilyGrowthPoint'];
+export type FamilyAssessment = components['schemas']['FamilyAssessment'];
+export type FamilyGrowth = components['schemas']['FamilyGrowth'];
+export type FamilyCatalogDose = components['schemas']['FamilyCatalogDose'];
+export type FamilyCatalogVaccine = components['schemas']['FamilyCatalogVaccine'];
+export type FamilyVaccineCatalog = components['schemas']['FamilyVaccineCatalog'];
+export type FamilyScheduledDose = components['schemas']['FamilyScheduledDose'];
+export type FamilyVaccineSchedule = components['schemas']['FamilyVaccineSchedule'];
+export type FamilyTimelineEntry = components['schemas']['FamilyTimelineEntry'];
+export type FamilyHint = components['schemas']['FamilyHint'];
+export type FamilyCatalog = components['schemas']['FamilyCatalog'];
 export type PhotoLibrary = components['schemas']['PhotoLibrary'];
 export type PhotoDirectory = components['schemas']['PhotoDirectory'];
 export type PhotoAsset = components['schemas']['PhotoAsset'];
@@ -5857,6 +6724,11 @@ export type ParameterCoverId = components['parameters']['CoverID'];
 export type ParameterAppId = components['parameters']['AppId'];
 export type ParameterContainerId = components['parameters']['ContainerId'];
 export type ParameterFeedbackId = components['parameters']['FeedbackID'];
+export type ParameterFamilyAccountId = components['parameters']['FamilyAccountID'];
+export type ParameterFamilyBabyId = components['parameters']['FamilyBabyID'];
+export type ParameterFamilyRecordId = components['parameters']['FamilyRecordID'];
+export type ParameterFamilyCommentId = components['parameters']['FamilyCommentID'];
+export type ParameterFamilyCursor = components['parameters']['FamilyCursor'];
 export type ParameterAssistantSessionId = components['parameters']['AssistantSessionID'];
 export type ParameterAssistantTaskId = components['parameters']['AssistantTaskID'];
 export type ParameterAssistantMemoryId = components['parameters']['AssistantMemoryID'];
@@ -8557,6 +9429,1082 @@ export interface operations {
                 };
             };
             default: components["responses"]["ProductError"];
+        };
+    };
+    getFamily: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The family as the caller sees it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyOverview"];
+                };
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getFamilyCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyCatalog"];
+                };
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    joinFamily: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    role: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The caller's standing now */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyMe"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    cancelFamilyJoin: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Withdrawn */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    leaveFamily: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Left */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    setFamilyRole: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    role: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The caller as a member */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyMember"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    approveFamilyJoin: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                accountId: components["parameters"]["FamilyAccountID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The new member */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyMember"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    rejectFamilyJoin: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                accountId: components["parameters"]["FamilyAccountID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rejected */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    removeFamilyMember: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                accountId: components["parameters"]["FamilyAccountID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    setFamilyGuardian: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                accountId: components["parameters"]["FamilyAccountID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    guardian: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The member */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyMember"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    listFamilyHints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hints */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FamilyHint"][];
+                    };
+                };
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    markFamilyHintsSeen: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    keys: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Recorded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    addFamilyBaby: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FamilyBabyFields"];
+            };
+        };
+        responses: {
+            /** @description The baby */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyBaby"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    getFamilyBaby: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The baby */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyBaby"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    deleteFamilyBaby: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    updateFamilyBaby: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FamilyBabyFields"];
+            };
+        };
+        responses: {
+            /** @description The baby */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyBaby"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    restoreFamilyBaby: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The baby */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyBaby"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getFamilyBabyAvatar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The avatar */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    setFamilyBabyAvatar: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description JPEG, PNG, GIF or WebP; at most 12 MiB.
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The baby */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyBaby"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    removeFamilyBabyAvatar: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The baby */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyBaby"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    listFamilyRecords: {
+        parameters: {
+            query?: {
+                /** @description The `next` of the previous page. */
+                cursor?: components["parameters"]["FamilyCursor"];
+                kind?: "photos" | "recording" | "journal" | "measurement" | "vaccine" | "milestone";
+            };
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of records */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyRecordPage"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    addFamilyRecord: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FamilyRecordInput"];
+            };
+        };
+        responses: {
+            /** @description The record */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyRecord"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    addFamilyRecording: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    requestKey?: string;
+                    title?: string;
+                    occurredOn?: components["schemas"]["FamilyDate"];
+                    /**
+                     * Format: binary
+                     * @description MP3, M4A/AAC, WAV, Ogg, WebM, FLAC, AMR or 3GPP audio; at most 200 MiB.
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The record */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyRecord"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            415: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    listFamilyTrash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted records */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FamilyRecord"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getFamilyAlbum: {
+        parameters: {
+            query?: {
+                /** @description The `next` of the previous page. */
+                cursor?: components["parameters"]["FamilyCursor"];
+            };
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of the album */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyAlbumPage"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getFamilyGrowth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Growth */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyGrowth"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getFamilyVaccines: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The schedule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyVaccineSchedule"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    setFamilyVaccinePlan: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    codes: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description The schedule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyVaccineSchedule"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listFamilyMilestones: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The timeline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FamilyTimelineEntry"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listFamilyWall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Messages */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FamilyComment"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    addFamilyWallMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FamilyCommentInput"];
+            };
+        };
+        responses: {
+            /** @description The message */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyComment"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    getFamilyRecord: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recordId: components["parameters"]["FamilyRecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyRecord"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    deleteFamilyRecord: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                recordId: components["parameters"]["FamilyRecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    updateFamilyRecord: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                recordId: components["parameters"]["FamilyRecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FamilyRecordInput"];
+            };
+        };
+        responses: {
+            /** @description The record */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyRecord"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    restoreFamilyRecord: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                recordId: components["parameters"]["FamilyRecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyRecord"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getFamilyRecordingAudio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recordId: components["parameters"]["FamilyRecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The audio */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            /** @description Part of the audio */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            /** @description The requested range is outside the recording */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    addFamilyComment: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                recordId: components["parameters"]["FamilyRecordID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FamilyCommentInput"];
+            };
+        };
+        responses: {
+            /** @description The comment */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyComment"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    deleteFamilyComment: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                commentId: components["parameters"]["FamilyCommentID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
         };
     };
     listPhotoLibraries: {
