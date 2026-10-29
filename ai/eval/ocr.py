@@ -70,7 +70,7 @@ def glm_kie(item):
 
 def hunyuan_kie(item):
     # README "Application-oriented Prompts": 提取图片中的: ['key1','key2', ...] 的字段内容，并按照JSON格式返回。
-    keys = ", ".join("'%s'" % key for key in schema_of(item["question"]))
+    keys = ", ".join(f"'{key}'" for key in schema_of(item["question"]))
     return f"提取图片中的: [{keys}] 的字段内容，并按照JSON格式返回。"
 
 
@@ -121,7 +121,8 @@ def load_subset(name):
                 "subset": name, "kind": kind, "index": row["index"], "image_name": row["image_name"],
                 "image": row["image"], "question": row["question"], "answer": row["answer"],
             })
-    items.sort(key=lambda item: hashlib.sha1(item["image_name"].encode()).hexdigest())
+    # The hash only orders the samples, the same order every run.
+    items.sort(key=lambda item: hashlib.sha1(item["image_name"].encode(), usedforsecurity=False).hexdigest())
     return items
 
 
@@ -175,7 +176,7 @@ class Server:
 
     def start(self):
         began = time.time()
-        self.log = open(self.log_path, "ab")
+        self.log = open(self.log_path, "ab")  # noqa: SIM115  the server writes to it until stop() closes it
         self.process = subprocess.Popen(self.args, stdout=self.log, stderr=subprocess.STDOUT)
         while True:
             if self.process.poll() is not None:
@@ -240,7 +241,7 @@ class Server:
         )
         text, tokens, finish, timings, first = [], [], None, None, None
         began = time.time()
-        with urllib.request.urlopen(request, timeout=1800) as response:
+        with urllib.request.urlopen(request, timeout=1800) as response:  # noqa: S310  the local llama-server's http port
             for line in response:
                 if not line.startswith(b"data: ") or line.strip() == b"data: [DONE]":
                     continue
@@ -252,8 +253,10 @@ class Server:
                         if first is None:
                             first = time.time() - began
                         text.append(piece)
-                    for token in (choice.get("logprobs") or {}).get("content") or []:
-                        tokens.append([token["token"], round(token["logprob"], 4)])
+                    tokens.extend(
+                        [token["token"], round(token["logprob"], 4)]
+                        for token in (choice.get("logprobs") or {}).get("content") or []
+                    )
                     finish = choice.get("finish_reason") or finish
                 if len(text) >= 400 and len(text) % 50 == 0 and looping("".join(text)):
                     finish = "repetition"
