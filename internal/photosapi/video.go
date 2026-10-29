@@ -12,7 +12,7 @@ import (
 )
 
 // A video plays in one of two ways (docs/specs/photo-video.md): the browser
-// reads the original by ranges, or it reads a stream the Media Worker
+// reads the original by ranges, or it reads a stream the FFmpeg Worker
 // converts the original into, restarted at a new start for each seek. The
 // playback route says which, for the codecs the browser reports in caps.
 

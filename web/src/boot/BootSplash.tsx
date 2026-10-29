@@ -16,6 +16,10 @@ export function shouldPlayBootIdent(): boolean {
   }
 }
 
+// Whether the ident still covers the page, so what lies beneath can hold its
+// entrance. The sign-in screen's styles read the same data-boot-splash hook.
+export const bootSplashShowing = () => document.querySelector("[data-boot-splash]") !== null;
+
 // Full-screen startup ident above the desktop. The desktop keeps loading
 // underneath; any key or pointer press skips to the switch-off.
 export function BootSplash() {
@@ -61,6 +65,7 @@ export function BootSplash() {
     <div
       ref={shellRef}
       className={styles.bootSplash}
+      data-boot-splash
       aria-hidden="true"
       onPointerDown={() => playerRef.current?.skip()}
     >

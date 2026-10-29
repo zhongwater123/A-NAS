@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 // A Live Photo's still and MOV are meant to travel together, but a Mac often
@@ -63,7 +63,7 @@ func (s *Service) AttachLiveVideo(ctx context.Context, p Principal, request Live
 		return nil, ErrForbidden
 	}
 	if s.media == nil {
-		return nil, mediaworker.ErrUnavailable
+		return nil, ffmpegworker.ErrUnavailable
 	}
 	clip, err := s.stageContent(request.Content, true)
 	if err != nil {

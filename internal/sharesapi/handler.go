@@ -17,8 +17,8 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
@@ -34,14 +34,14 @@ type handler struct {
 	// /jobs/{jobID} and /{shareID}/messages (the resource IDs never equal
 	// "jobs").
 	jobMux       *apiroute.Mux
-	media        mediaworker.Worker
+	media        ffmpegworker.Worker
 	previewSlots chan struct{}
 }
 
 func New(store *shares.Store, logger *slog.Logger, members func(context.Context) ([]accounts.Profile, error)) http.Handler {
 	return NewWithPreview(store, logger, members, nil)
 }
-func NewWithPreview(store *shares.Store, logger *slog.Logger, members func(context.Context) ([]accounts.Profile, error), media mediaworker.Worker) http.Handler {
+func NewWithPreview(store *shares.Store, logger *slog.Logger, members func(context.Context) ([]accounts.Profile, error), media ffmpegworker.Worker) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}

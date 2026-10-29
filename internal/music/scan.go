@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 // Scan phases: listing the music folders, reading the tags of new and changed
@@ -192,7 +192,7 @@ var quickDuration = map[string]bool{"flac": true, "m4a": true, "ogg": true, "wav
 // scan reads the member's music. Its requests to the media worker are
 // background work, which waits while the worker serves people.
 func (s *Service) scan(ctx context.Context, actor accounts.User, job *scanJob) (scanSummary, error) {
-	ctx = mediaworker.WithPriority(ctx, mediaworker.Background)
+	ctx = ffmpegworker.WithPriority(ctx, ffmpegworker.Background)
 	var summary scanSummary
 	sources, err := s.Sources(ctx, actor)
 	if err != nil {
@@ -364,7 +364,7 @@ func (s *Service) scan(ctx context.Context, actor accounts.User, job *scanJob) (
 		} else if s.worker != nil {
 			// Opus and raw AAC have no Go reader for their length.
 			probe, err := s.worker.Probe(ctx, content.Reader)
-			if errors.Is(err, mediaworker.ErrUnavailable) || ctx.Err() != nil {
+			if errors.Is(err, ffmpegworker.ErrUnavailable) || ctx.Err() != nil {
 				// The length stays to be measured by the next scan rather
 				// than recorded as unknown.
 				_ = content.Reader.Close()
@@ -405,7 +405,7 @@ func (s *Service) readTrack(ctx context.Context, actor accounts.User, entry file
 	var probed audioFormat
 	if s.worker != nil && (!tagFormats[format] || !playsInBrowser(format, tags.Codec)) {
 		probe, err := s.worker.Probe(ctx, content.Reader)
-		if errors.Is(err, mediaworker.ErrUnavailable) {
+		if errors.Is(err, ffmpegworker.ErrUnavailable) {
 			// Skip the file rather than index it without its tags; the next
 			// scan reads it again.
 			return row{}, err
@@ -426,7 +426,7 @@ func (s *Service) readTrack(ctx context.Context, actor accounts.User, entry file
 		// The worker renders the attached picture as a JPEG; without the
 		// worker the file waits for the next scan, as for its tags.
 		picture, err := s.worker.Frame(ctx, content.Reader, 0, coverPixels[CoverLarge])
-		if errors.Is(err, mediaworker.ErrUnavailable) {
+		if errors.Is(err, ffmpegworker.ErrUnavailable) {
 			return row{}, err
 		}
 		if err == nil {

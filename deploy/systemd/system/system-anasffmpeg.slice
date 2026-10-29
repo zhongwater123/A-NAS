@@ -1,9 +1,9 @@
 [Unit]
-Description=A-NAS media workers
+Description=A-NAS FFmpeg workers
 Documentation=https://github.com/zhongwater123/A-NAS
 
 [Slice]
-# Every connection to anas-media.socket runs its own anas-media@ instance,
+# Every connection to anas-ffmpeg.socket runs its own anas-ffmpeg@ instance,
 # each limited to 2G; up to 8 run at once (the shared slots). Together they
 # stay within this, so a busy evening of transcodes on an 8 GB device cannot
 # take the memory the rest of A-NAS needs; past it the kernel reclaims, then

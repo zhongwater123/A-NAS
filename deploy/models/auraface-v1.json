@@ -5,6 +5,7 @@
   "revision": "af6d057c9b0ec4071d4c49c80e3539258798b609",
   "file": "glintr100.onnx",
   "sizeBytes": 260694151,
+  "memoryBytes": 402653184,
   "sha256": "a7933ea5330113b01c9b60351d8f4c33003f145d8470ac5f0e52ee2effe25c60",
   "license": "Apache-2.0 (the model card); the card says it was trained on commercially available data. Only glintr100.onnx is AuraFace's own: the repository's other files are byte-identical to InsightFace's non-commercial antelopev2 and are never used. Its hash differs from antelopev2's glintr100.onnx (4ab1d643...)."
 }

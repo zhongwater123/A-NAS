@@ -20,11 +20,11 @@
 以下是实现时选择的默认做法，用户可以改：
 
 - **一段视频是一个照片资产**：与照片使用同一套稳定资源 ID、Policy、回收站、复制、相册、用户标签和重复组；不另设“视频库”。
-- **格式**：MP4、MOV、M4V、3GP（ISO 媒体文件与 QuickTime），MKV 与 WebM，AVI，以及摄像机的 MTS/M2TS。服务端按文件头识别容器，再由隔离的媒体 Worker 读取，必须有可读的视频轨、时长大于 0、画面不超过照片的像素上限。GIF、AVIF 与 Canon CR3 不按视频导入。
+- **格式**：MP4、MOV、M4V、3GP（ISO 媒体文件与 QuickTime），MKV 与 WebM，AVI，以及摄像机的 MTS/M2TS。服务端按文件头识别容器，再由隔离的 FFmpeg Worker 读取，必须有可读的视频轨、时长大于 0、画面不超过照片的像素上限。GIF、AVIF 与 Canon CR3 不按视频导入。
 - **单文件上限 4 GiB**（照片仍为 256 MiB），网页单次上传，不支持断点续传。约为 iPhone 4K 视频 10 分钟。
 - **封面**：在第 `min(时长 / 10, 1)` 秒取一帧，转正后作为网格缩略图与查看器封面；片头常见的黑场因此多半被跳过。传输流等没有索引的容器在该处取不到画面时改取第一帧。
 - **拍摄时间**：优先读 QuickTime 的 `com.apple.quicktime.creationdate`（iPhone 写入，带时区），其次读容器的 `creation_time`（UTC）；1970 年以前或缺失时按导入时间排序。AVI 与 MTS 通常没有这两项。不读取视频里的位置。
-- **播放**：浏览器能直接解码的原件直接播放，拖动由浏览器按范围读取；浏览器解不了封装（AVI、MTS 等）或编码时，由媒体 Worker 实时转换为 H.264/AAC 的分段 MP4：画面编码浏览器能解的只转封装，否则转码为最高 1080p。转换的视频拖动到尚未转换的位置时从那里重新开始转换。原件直接播放失败时改为转码再试一次。不保存转换结果。
+- **播放**：浏览器能直接解码的原件直接播放，拖动由浏览器按范围读取；浏览器解不了封装（AVI、MTS 等）或编码时，由 FFmpeg Worker 实时转换为 H.264/AAC 的分段 MP4：画面编码浏览器能解的只转封装，否则转码为最高 1080p。转换的视频拖动到尚未转换的位置时从那里重新开始转换。原件直接播放失败时改为转码再试一次。不保存转换结果。
 - **单独上传的 MOV**：带 Apple 实况标识、且图库里有正在等它的实况照片时，照旧补上实况视频（[补传视频](photo-motion.md#补传视频)）；否则作为普通视频加入图库。以前这种 MOV 会被拒绝并提示拖到对应的图库。
 - **计数**：时间线顶栏与月份写“2 张照片 · 3 个视频”，没有视频时仍写“N 张照片”“N 张”；永久删除确认、恢复提示与加入相册对话框按选中的内容写照片和视频的数目。其他提示仍以“张”计。
 - **幻灯片只放照片**，跳过视频；从视频打开幻灯片时从它之后的照片开始，视图里只有视频时直接回到查看器。
@@ -44,7 +44,7 @@
 
 - Given：成员有权向一个图库添加内容。
 - When：成员把一段 iPhone 拍的 MOV（或安卓的 MP4）拖进相册窗口，或在上传对话框中选择它。
-- Then：上传队列与网格中出现这段视频及其进度，网格显示浏览器能解码的第一帧；原件完整写入受管存储并通过媒体 Worker 校验后，视频以照片资产出现在拍摄时间所在的位置，网格上是封面帧与“▶ 时长”标记，竖拍的视频按竖排显示。上传请求不等待封面生成。
+- Then：上传队列与网格中出现这段视频及其进度，网格显示浏览器能解码的第一帧；原件完整写入受管存储并通过 FFmpeg Worker 校验后，视频以照片资产出现在拍摄时间所在的位置，网格上是封面帧与“▶ 时长”标记，竖拍的视频按竖排显示。上传请求不等待封面生成。
 
 ### 浏览与播放
 
@@ -84,7 +84,7 @@
 
 ## 边界与失败
 
-- 媒体 Worker 不可用时上传视频返回 `media_unavailable`，原件不保存；文件头像视频但 Worker 读不出视频轨时返回 `unsupported_media_type`。
+- FFmpeg Worker 不可用时上传视频返回 `media_unavailable`，原件不保存；文件头像视频但 Worker 读不出视频轨时返回 `unsupported_media_type`。
 - 封面生成失败时网格显示胶片占位，查看器仍可播放与下载。
 - 同时最多两路转换播放；第三路等待片刻后返回 `media_busy`，播放器提示稍后再试。直接播放原件不占用转换名额。
 - 播放与上传请求（包括在查看器里暂停的转换流）持续期间，后台 AI 视为前台正在使用，不领取新任务；请求结束后照常计时 5 分钟。
@@ -95,7 +95,7 @@
 ## 验收证据
 
 - 服务端：[视频导入、封面、AI 排除与助手不可见](../../internal/photos/video_test.go)，[播放决定、容器识别与转换名额](../../internal/photos/videoplay_test.go)，[接口与权限](../../internal/photosapi/video_test.go)，[OpenAPI 契约](../../internal/httpapi/openapi_test.go)，[进行中的请求让 AI 等待](../../internal/photoservice/gate_test.go)。
-- 真实编解码：[`TestRealVideoCodecs`](../../internal/photos/videocodecs_test.go) 用 FFmpeg 生成 MP4、带旋转的 MOV、MKV、MJPEG AVI 与 MPEG-TS，走完导入、缩略图、封面与转换流；2026-10-19 在 `anas-media-dev:trixie`（FFmpeg 7.1）中通过。
+- 真实编解码：[`TestRealVideoCodecs`](../../internal/photos/videocodecs_test.go) 用 FFmpeg 生成 MP4、带旋转的 MOV、MKV、MJPEG AVI 与 MPEG-TS，走完导入、缩略图、封面与转换流；2026-10-19 在 `anas-ffmpeg-dev:trixie`（FFmpeg 7.1）中通过。
 - 前端：[上传分组](../../web/src/photos/uploadGroups.test.ts)、[相册窗口的上传、网格、播放与回退](../../web/src/photos/PhotosPanel.test.tsx)、[幻灯片跳过视频](../../web/src/photos/Slideshow.test.tsx)。
 - 本地浏览器检查（2026-10-19，开发模式产品服务 + 真实 FFmpeg，Chromium 无 HEVC）：H.264 MP4 与竖拍 MOV 直接播放并拖动；HEVC 与 MJPEG AVI 转码播放，MTS 转封装播放；2 分 30 秒的 AVI 拖到未转换处时从 49.979 秒重新转换；拖入上传、按名称搜索、计数与信息栏。
 
@@ -103,5 +103,5 @@
 
 - 规格：[相册](photo-library.md)、[动态照片](photo-motion.md)、[相册界面](photo-gallery-ui.md)
 - 架构：[相册技术设计](../architecture/photo-library.md#视频)
-- ADR：[受管图库](../adr/0006-use-a-managed-photo-library.md)、[相册服务身份](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[媒体 Worker 经文件代理](../adr/0017-run-the-media-center-through-the-file-broker.md)
+- ADR：[受管图库](../adr/0006-use-a-managed-photo-library.md)、[相册服务身份](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[FFmpeg Worker 经文件代理](../adr/0017-run-the-media-center-through-the-file-broker.md)
 - 代码：[视频导入与播放](../../internal/photos/video.go)、[导入与上传](../../internal/photos/assets.go)、[容器识别](../../internal/photos/objects.go)、[接口](../../internal/photosapi/video.go)、[播放器](../../web/src/photos/VideoPlayer.tsx)、[上传队列](../../web/src/photos/uploads.tsx)

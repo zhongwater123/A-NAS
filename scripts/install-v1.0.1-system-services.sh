@@ -23,13 +23,13 @@ if [[ ! -d "$source_release" ]]; then
   echo "source release is not a directory: $source_release" >&2
   exit 2
 fi
-for binary in anas-api anas-host-agent install-screensavers.sh; do
+for binary in anas-api anas-host-agent install-screensavers.sh install-ffmpeg-units.sh; do
   if [[ ! -f "$source_release/$binary" || ! -x "$source_release/$binary" ]]; then
     echo "missing executable: $source_release/$binary" >&2
     exit 2
   fi
 done
-for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-shares-system.service anas-media-system.socket anas-media-system@.service anas-media-system.slice; do
+for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-shares-system.service anas-ffmpeg-system.socket anas-ffmpeg-system@.service anas-ffmpeg-system.slice; do
   if [[ ! -f "$source_release/$unit" ]]; then
     echo "missing system unit: $source_release/$unit" >&2
     exit 2
@@ -230,18 +230,6 @@ install -d -o root -g root -m 0755 /etc/tmpfiles.d
 printf 'd /run/a-nas-share-files 2750 a-nas a-nas-shares -\n' > /etc/tmpfiles.d/a-nas-shares.conf
 chmod 0644 /etc/tmpfiles.d/a-nas-shares.conf
 systemd-tmpfiles --create /etc/tmpfiles.d/a-nas-shares.conf
-# The services that use the media worker take turns from these slots before
-# they connect (internal/mediaworker/admission.go): files they open read-only
-# and flock, one per worker that may run at once.
-{
-  printf 'd /run/a-nas-media 0755 root root -\n'
-  printf 'd /run/a-nas-media/slots 0750 root a-nas-photos -\n'
-  for slot in 0 1 2 3 4 5 6 7; do
-    printf 'f /run/a-nas-media/slots/%s 0440 root a-nas-photos -\n' "$slot"
-  done
-} > /etc/tmpfiles.d/a-nas-media.conf
-chmod 0644 /etc/tmpfiles.d/a-nas-media.conf
-systemd-tmpfiles --create /etc/tmpfiles.d/a-nas-media.conf
 install -d -o root -g root -m 0755 /opt/a-nas/releases
 install -d -o a-nas -g a-nas -m 0700 /var/lib/a-nas
 install -d -o root -g a-nas -m 0750 /var/lib/a-nas/screensavers
@@ -318,6 +306,7 @@ install -d -o root -g root -m 0755 "$temporary"
 install -o root -g root -m 0755 "$source_release/anas-api" "$temporary/anas-api"
 install -o root -g root -m 0755 "$source_release/anas-host-agent" "$temporary/anas-host-agent"
 install -o root -g root -m 0755 "$source_release/install-screensavers.sh" "$temporary/install-screensavers.sh"
+install -o root -g root -m 0755 "$source_release/install-ffmpeg-units.sh" "$temporary/install-ffmpeg-units.sh"
 install -o root -g root -m 0755 "$source_release/kiosk-launcher" "$temporary/kiosk-launcher"
 install -d -o root -g root -m 0755 "$temporary/ai" "$temporary/ai/anas_ai"
 install -o root -g root -m 0644 "$source_release"/ai/anas_ai/*.py "$temporary/ai/anas_ai/"
@@ -366,7 +355,7 @@ printf '%s\n' \
   'ANAS_HOST_AGENT_SOCKET=/run/a-nas/host-agent.sock' \
   'ANAS_FILE_BROKER_SOCKET=/run/a-nas/file-broker.sock' \
   'ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock' \
-  'ANAS_MEDIA_SOCKET=/run/a-nas-media/media.sock' \
+  'ANAS_FFMPEG_SOCKET=/run/a-nas-ffmpeg/ffmpeg.sock' \
   'ANAS_STATE_DIR=/var/lib/a-nas' \
   'ANAS_SCREENSAVER_DIRECTORY=/var/lib/a-nas/screensavers/current' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' > /etc/a-nas/anas-api.env
@@ -411,16 +400,28 @@ install -d -o root -g root -m 0755 /etc/systemd/system/anas-ai.service.d
 printf '# Written by the A-NAS installer for %s cores: all but two.\n[Service]\nCPUQuota=%s%%\n' \
   "$cores" "$((cores > 2 ? (cores - 2) * 100 : 100))" > /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
 chmod 0644 /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
+# Its memory has no budget: background work loads a model only while 1 GiB
+# stays free (anas-ai.service). The cap, all of this machine's memory but
+# 2.5 GiB and at least 1 GiB, only stops a runaway.
+memory_kib=$(awk '$1 == "MemTotal:" { print $2 }' /proc/meminfo)
+printf '# Written by the A-NAS installer for %s KiB of memory: all but 2.5 GiB.\n[Service]\nMemoryMax=%sK\n' \
+  "$memory_kib" "$((memory_kib > 3670016 ? memory_kib - 2621440 : 1048576))" \
+  > /etc/systemd/system/anas-ai.service.d/memory-reserve.conf
+chmod 0644 /etc/systemd/system/anas-ai.service.d/memory-reserve.conf
 # One vector index instance per owning service, reached only through its
 # proxy socket (ADR 0028).
 install -o root -g root -m 0644 "$source_release/anas-vectors-system.slice" /etc/systemd/system/anas-vectors.slice
 install -o root -g root -m 0644 "$source_release/anas-vectors-system@.service" /etc/systemd/system/anas-vectors@.service
 install -o root -g root -m 0644 "$source_release/anas-vectors-proxy-system@.socket" /etc/systemd/system/anas-vectors-proxy@.socket
 install -o root -g root -m 0644 "$source_release/anas-vectors-proxy-system@.service" /etc/systemd/system/anas-vectors-proxy@.service
-install -o root -g root -m 0644 "$source_release/anas-media-system.socket" /etc/systemd/system/anas-media.socket
-install -o root -g root -m 0644 "$source_release/anas-media-system@.service" /etc/systemd/system/anas-media@.service
-# All media workers share one memory limit (system-anasmedia.slice).
-install -o root -g root -m 0644 "$source_release/anas-media-system.slice" /etc/systemd/system/system-anasmedia.slice
+# A renamed worker must not coexist with old clients using a separate slot
+# directory. Stop clients before replacing units; restart after the switch.
+for service in anas-api anas-photos anas-shares; do
+  if [[ $(systemctl show -p LoadState --value "$service.service") != not-found ]]; then
+    systemctl stop "$service.service"
+  fi
+done
+"$target/install-ffmpeg-units.sh" "$source_release"
 install -o root -g root -m 0644 "$source_release/a-nas-chromium-policy.json" /etc/chromium/policies/managed/a-nas.json
 # The local console's unit, enabled or not, starts this release's launcher.
 install -o root -g root -m 0644 "$source_release/anas-kiosk@.service" /etc/systemd/system/anas-kiosk@.service
@@ -442,10 +443,9 @@ systemctl enable --now smbd.service
 systemctl stop anas-ai.service
 systemctl enable anas-ai.socket
 systemctl restart anas-ai.socket
-# Each connection runs its own media worker; streams already playing finish
-# with the previous release.
-systemctl enable anas-media.socket
-systemctl restart anas-media.socket
+# Clients reconnect to this release's worker and its shared admission slots.
+systemctl enable anas-ffmpeg.socket
+systemctl restart anas-ffmpeg.socket
 # A running vector index belongs to the previous release; the photo service's
 # next connection starts this release's.
 systemctl stop 'anas-vectors-proxy@*.service' 'anas-vectors@*.service'
@@ -462,7 +462,7 @@ if [[ "$lan_entry" == true ]]; then
   systemctl reload-or-restart caddy.service
 fi
 
-systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-ai.socket anas-media.socket anas-vectors-proxy@a-nas-photos.socket
+systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must
 # keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at startup

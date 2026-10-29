@@ -8,17 +8,17 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 // MediaDecoder accepts only already-authorized read-only descriptors. Production
-// decoding remains inside the isolated Media Worker, never the photo service.
+// decoding remains inside the isolated FFmpeg Worker, never the photo service.
 type MediaDecoder interface {
-	Probe(context.Context, *os.File) (mediaworker.Probe, error)
+	Probe(context.Context, *os.File) (ffmpegworker.Probe, error)
 	Image(context.Context, *os.File, int) ([]byte, error)
 	// Frame renders the video frame at a time, upright, at most width wide.
 	Frame(context.Context, *os.File, float64, int) ([]byte, error)
-	Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error)
+	Stream(context.Context, *os.File, ffmpegworker.StreamRequest) (io.ReadCloser, error)
 }
 
 func readHEICMetadata(file *os.File, location *time.Location) (metadata photoMetadata, err error) {
@@ -40,7 +40,7 @@ func readHEICMetadata(file *os.File, location *time.Location) (metadata photoMet
 	return metadata, nil
 }
 
-// heicTimeout bounds decoding one HEIC once the Media Worker has taken it;
+// heicTimeout bounds decoding one HEIC once the FFmpeg Worker has taken it;
 // waiting for a worker does not count.
 const heicTimeout = 30 * time.Second
 
@@ -51,9 +51,9 @@ func (s *Service) renderPhoto(ctx context.Context, file *os.File, orientation, e
 		return renderUpright(ctx, file, orientation, edge, quality)
 	}
 	if s.media == nil {
-		return nil, 0, 0, mediaworker.ErrUnavailable
+		return nil, 0, 0, ffmpegworker.ErrUnavailable
 	}
-	data, err := s.media.Image(mediaworker.WithTimeout(ctx, heicTimeout), file, 1600)
+	data, err := s.media.Image(ffmpegworker.WithTimeout(ctx, heicTimeout), file, 1600)
 	if err != nil {
 		return nil, 0, 0, err
 	}

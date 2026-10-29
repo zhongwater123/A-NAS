@@ -1,0 +1,661 @@
+/* Sign-in, setup and password reset: a late-night broadcast after the boot
+   ident. Warm black, cream type, the ident's sunset stripes, CRT texture.
+   The sunset palette is the ident's own and has no token; it is set on the
+   screen's root. */
+.auth-shell {
+  --auth-ink: #f4ead6;
+  --auth-muted: rgba(244, 234, 214, 0.6);
+  --auth-faint: rgba(244, 234, 214, 0.36);
+  --auth-amber: #ffb547;
+  --auth-pink: #ff2f6d;
+  --auth-orange: #ff7b1c;
+  --auth-yellow: #ffd23a;
+  --auth-glow: 255, 123, 28;
+  --auth-mono: "SFMono-Regular", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+  --auth-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  isolation: isolate;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  overflow: hidden auto;
+  padding: 72px clamp(24px, 5vw, 72px);
+  color: var(--auth-ink);
+  background: #070605;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(244, 234, 214, 0.22) transparent;
+}
+.auth-backdrop,
+.auth-shell::before,
+.auth-crt,
+.auth-crt::before,
+.auth-crt::after,
+.auth-osd {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+.auth-backdrop {
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+}
+/* A dark well behind the form and a CRT vignette at the corners. */
+.auth-shell::before {
+  content: "";
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 30% 46% at 72% 52%, rgba(7, 6, 5, 0.9), rgba(7, 6, 5, 0.45) 60%, transparent 92%),
+    radial-gradient(ellipse 120% 100% at 50% 50%, transparent 52%, rgba(0, 0, 0, 0.7));
+}
+
+/* ---- Layout: the lockup on the left, the screen's content on the right. */
+.auth-layout {
+  width: min(1120px, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
+  align-items: center;
+  gap: clamp(40px, 7vw, 112px);
+}
+.auth-brand {
+  display: grid;
+  place-items: center;
+}
+/* The ident draws on black; screen blending lets the meteors show through it. */
+.auth-brand canvas {
+  width: min(100%, 460px);
+  aspect-ratio: 644 / 612;
+  mix-blend-mode: screen;
+  filter: drop-shadow(0 0 32px rgba(var(--auth-glow), 0.2));
+  -webkit-mask-image:
+    linear-gradient(to right, transparent, #000 7% 93%, transparent), linear-gradient(to bottom, transparent, #000 9%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to right, transparent, #000 7% 93%, transparent), linear-gradient(to bottom, transparent, #000 9%);
+  mask-composite: intersect;
+}
+.auth-side {
+  min-width: 0;
+}
+.auth-panel {
+  display: grid;
+  gap: 40px;
+}
+
+/* ---- Headline */
+.auth-hero {
+  display: grid;
+  justify-items: start;
+}
+.auth-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 18px;
+  color: rgba(244, 234, 214, 0.5);
+  font: 700 13px / 1 var(--auth-mono);
+  letter-spacing: 0.32em;
+}
+/* The ident's tagline stripes, in miniature. */
+.auth-eyebrow::before {
+  content: "";
+  flex: none;
+  width: 30px;
+  height: 10px;
+  background: linear-gradient(
+    var(--auth-yellow) 0 2px,
+    transparent 2px 4px,
+    var(--auth-orange) 4px 6px,
+    transparent 6px 8px,
+    var(--auth-pink) 8px 10px
+  );
+}
+.auth-hero h1 {
+  margin: 0;
+  font-size: clamp(44px, 4.8vw, 66px);
+  font-weight: 800;
+  line-height: 1.16;
+  letter-spacing: 0.06em;
+  text-wrap: balance;
+  color: transparent;
+  background: linear-gradient(180deg, #fff8ec 30%, #ffd9b0);
+  -webkit-background-clip: text;
+  background-clip: text;
+  /* Red and cyan fringes, like a slightly misconverged picture tube. */
+  filter: drop-shadow(-1.5px 0 rgba(255, 47, 109, 0.6)) drop-shadow(1.5px 0 rgba(90, 210, 230, 0.4));
+  /* Speed stripes cut the lower half of every line, as they cut the A-NAS wordmark. */
+  -webkit-mask-size: 100% 1.16em;
+  mask-size: 100% 1.16em;
+  -webkit-mask-image: linear-gradient(
+    #000 64%,
+    transparent 64% 67%,
+    #000 67% 76%,
+    transparent 76% 80%,
+    #000 80% 87%,
+    transparent 87% 92%,
+    #000 92%
+  );
+  mask-image: linear-gradient(
+    #000 64%,
+    transparent 64% 67%,
+    #000 67% 76%,
+    transparent 76% 80%,
+    #000 80% 87%,
+    transparent 87% 92%,
+    #000 92%
+  );
+}
+.auth-lede {
+  margin: 16px 0 0;
+  color: var(--auth-muted);
+  font-size: 15px;
+  line-height: 1.75;
+  letter-spacing: 0.06em;
+}
+.auth-hero .auth-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: clamp(26px, 3vw, 34px);
+}
+.auth-cursor {
+  width: 0.5em;
+  height: 0.9em;
+  background: var(--auth-amber);
+  box-shadow: 0 0 12px rgba(255, 181, 71, 0.6);
+  animation: auth-blink 1.06s steps(1, end) infinite;
+}
+.auth-note {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 18px 22px;
+  border-left: 3px solid var(--auth-orange);
+  color: var(--auth-muted);
+  background: rgba(244, 234, 214, 0.04);
+  font-size: 13px;
+  line-height: 1.75;
+}
+.auth-note p {
+  margin: 0;
+}
+
+/* ---- Fields */
+.auth-fields {
+  display: grid;
+  gap: 14px;
+}
+.auth-field {
+  display: grid;
+  gap: var(--space-2);
+}
+.auth-field small {
+  padding: 0 var(--space-6);
+  color: var(--auth-faint);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.auth-input {
+  display: flex;
+  align-items: center;
+  height: 56px;
+  border-radius: var(--radius-pill);
+  background: rgba(22, 18, 14, 0.78);
+  box-shadow:
+    inset 0 0 0 1px rgba(244, 234, 214, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  transition:
+    background 0.25s,
+    box-shadow 0.25s;
+}
+.auth-input:hover {
+  background: rgba(30, 25, 19, 0.85);
+}
+.auth-input:focus-within {
+  background: rgba(30, 24, 17, 0.92);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 214, 165, 0.72),
+    0 0 0 4px rgba(var(--auth-glow), 0.14),
+    0 0 34px -8px rgba(var(--auth-glow), 0.5);
+}
+.auth-input > svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-left: var(--space-6);
+  color: var(--auth-faint);
+  transition: color 0.25s;
+}
+.auth-input:focus-within > svg {
+  color: var(--auth-amber);
+}
+.auth-input input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 24px 0 14px;
+  border: 0;
+  outline: 0;
+  color: var(--auth-ink);
+  caret-color: var(--auth-amber);
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  letter-spacing: 0.03em;
+}
+.auth-input input::placeholder {
+  color: var(--auth-faint);
+}
+/* Chromium paints autofilled fields light; keep them on the dark pill. */
+.auth-input input:-webkit-autofill {
+  -webkit-text-fill-color: var(--auth-ink);
+  transition: background-color 600000s 0s;
+}
+.auth-reveal {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin-right: var(--space-2);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--auth-faint);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    background 0.2s;
+}
+.auth-reveal:hover,
+.auth-reveal:focus-visible {
+  color: var(--auth-ink);
+  background: rgba(244, 234, 214, 0.08);
+  outline: 0;
+}
+.auth-reveal svg {
+  width: 18px;
+  height: 18px;
+}
+.auth-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-xl);
+  color: var(--color-danger-on-dark);
+  background: color-mix(in srgb, var(--color-danger-on-dark) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-danger-on-dark) 32%, transparent);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.auth-error svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+}
+
+/* ---- Primary action: a cream pill with racing stripes. */
+.auth-submit {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 56px;
+  margin-top: var(--space-2);
+  padding: 0 72px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: #160f08;
+  background: linear-gradient(#fff8ec, #f3dfc2);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 -2px 0 rgba(140, 80, 20, 0.16),
+    0 16px 44px -18px rgba(var(--auth-glow), 0.7);
+  font-size: 16px;
+  font-weight: 750;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  transition:
+    transform 0.35s var(--auth-ease),
+    box-shadow 0.35s var(--auth-ease);
+}
+.auth-submit > span:first-child {
+  padding-left: 0.2em;
+}
+.auth-submit > svg {
+  width: 18px;
+  height: 18px;
+}
+/* A highlight sweeps across on hover, like the ident's shine. */
+.auth-submit::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 32%,
+    rgba(255, 255, 255, 0.95) 48%,
+    rgba(255, 220, 170, 0.6) 53%,
+    transparent 68%
+  );
+  transform: translateX(-110%);
+  transition: transform 0.9s var(--auth-ease);
+}
+.auth-submit > * {
+  position: relative;
+}
+.auth-stripes {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 30px;
+  display: flex;
+  gap: 5px;
+  transform: skewX(-24deg);
+  transition:
+    gap 0.35s var(--auth-ease),
+    transform 0.35s var(--auth-ease);
+}
+.auth-stripes i {
+  width: 6px;
+  background: var(--auth-yellow);
+}
+.auth-stripes i:nth-child(2) {
+  background: var(--auth-orange);
+}
+.auth-stripes i:nth-child(3) {
+  background: var(--auth-pink);
+}
+.auth-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 -2px 0 rgba(140, 80, 20, 0.16),
+    0 22px 60px -16px rgba(var(--auth-glow), 0.85);
+}
+.auth-submit:hover:not(:disabled)::before {
+  transform: translateX(110%);
+}
+.auth-submit:hover:not(:disabled) .auth-stripes {
+  gap: 8px;
+  transform: skewX(-24deg) translateX(8px);
+}
+.auth-submit:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.auth-submit:focus-visible {
+  outline: 2px solid var(--auth-amber);
+  outline-offset: 4px;
+}
+.auth-submit:disabled {
+  cursor: progress;
+  opacity: 0.8;
+}
+.auth-link {
+  justify-self: center;
+  padding: 6px 12px;
+  border: 0;
+  color: var(--auth-faint);
+  background: transparent;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.auth-link:hover,
+.auth-link:focus-visible {
+  color: var(--auth-ink);
+  outline: 0;
+}
+
+/* ---- On-screen display, like a TV's channel number and a camcorder's date stamp. */
+.auth-osd {
+  z-index: 2;
+  font: 500 13px / 1.4 var(--auth-mono);
+  letter-spacing: 0.16em;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.85);
+}
+.auth-osd > * {
+  position: absolute;
+}
+.auth-osd-channel {
+  top: 26px;
+  left: 32px;
+  color: rgba(244, 234, 214, 0.72);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+.auth-osd-version {
+  bottom: 28px;
+  left: 32px;
+  color: rgba(244, 234, 214, 0.26);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+}
+.auth-osd-clock {
+  bottom: 24px;
+  right: 32px;
+  display: grid;
+  justify-items: end;
+  color: var(--auth-amber);
+  font-size: 15px;
+  font-weight: 700;
+  text-shadow:
+    0 0 10px rgba(255, 150, 40, 0.45),
+    1px 1px 0 rgba(0, 0, 0, 0.85);
+}
+
+/* ---- CRT: scanlines, a slow rolling bar and film grain over everything. */
+.auth-crt {
+  z-index: 3;
+  background: repeating-linear-gradient(rgba(0, 0, 0, 0.2) 0 1px, transparent 1px 3px);
+}
+.auth-crt::before {
+  content: "";
+  bottom: auto;
+  height: 36%;
+  background: linear-gradient(transparent, rgba(255, 236, 205, 0.035) 50%, transparent);
+  animation: auth-roll 9s linear infinite;
+}
+.auth-crt::after {
+  content: "";
+  inset: -60%;
+  opacity: 0.1;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 .96 0 0 0 0 .9 0 0 0 2.2 -1.1'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: auth-grain 0.7s steps(1, end) infinite;
+}
+
+/* ---- Entrance: each line tunes in like a VHS picture settling. */
+.auth-hero > *,
+.auth-fields > *,
+.auth-osd > * {
+  animation: auth-tune 0.8s var(--auth-ease) both;
+}
+.auth-hero > :nth-child(2) {
+  animation-delay: 0.1s;
+}
+.auth-hero > :nth-child(3) {
+  animation-delay: 0.18s;
+}
+.auth-fields > :nth-child(1) {
+  animation-delay: 0.3s;
+}
+.auth-fields > :nth-child(2) {
+  animation-delay: 0.36s;
+}
+.auth-fields > :nth-child(3) {
+  animation-delay: 0.42s;
+}
+.auth-fields > :nth-child(4) {
+  animation-delay: 0.48s;
+}
+.auth-fields > :nth-child(5) {
+  animation-delay: 0.54s;
+}
+.auth-osd > * {
+  animation-delay: 0.7s;
+}
+.auth-fields > .auth-error {
+  animation: auth-shake 0.42s var(--auth-ease);
+}
+/* Held while the boot ident still covers the page (boot/BootSplash.tsx). */
+body:has([data-boot-splash]) .auth-shell *,
+body:has([data-boot-splash]) .auth-shell *::before,
+body:has([data-boot-splash]) .auth-shell *::after {
+  animation-play-state: paused;
+}
+
+@keyframes auth-tune {
+  0% {
+    opacity: 0;
+    transform: translateX(-16px) skewX(-10deg);
+    filter: blur(4px);
+  }
+  35% {
+    opacity: 0.9;
+    transform: translateX(6px) skewX(4deg);
+    filter: blur(0);
+  }
+  50% {
+    opacity: 0.45;
+  }
+  65% {
+    opacity: 1;
+    transform: translateX(-2px) skewX(0);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes auth-shake {
+  20%,
+  60% {
+    transform: translateX(-5px);
+  }
+  40%,
+  80% {
+    transform: translateX(5px);
+  }
+}
+@keyframes auth-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes auth-roll {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(380%);
+  }
+}
+@keyframes auth-grain {
+  0% {
+    transform: translate(0, 0);
+  }
+  17% {
+    transform: translate(-7%, 4%);
+  }
+  33% {
+    transform: translate(5%, -6%);
+  }
+  50% {
+    transform: translate(-3%, 8%);
+  }
+  67% {
+    transform: translate(8%, 2%);
+  }
+  83% {
+    transform: translate(-5%, -4%);
+  }
+}
+
+/* ---- Narrow and portrait screens stack the lockup above the content and
+   move the OSD to the top, where scrolled content cannot run under it. */
+@media (max-width: 900px), (orientation: portrait) {
+  .auth-layout {
+    grid-template-columns: minmax(0, 400px);
+    justify-content: center;
+    gap: 12px;
+  }
+  .auth-brand canvas {
+    width: min(70vw, 300px, 36vh);
+  }
+  .auth-osd-channel {
+    top: 18px;
+    left: 20px;
+    font-size: 16px;
+  }
+  .auth-osd-clock {
+    top: 16px;
+    right: 20px;
+    bottom: auto;
+    font-size: 12px;
+  }
+  .auth-osd-version {
+    display: none;
+  }
+  .auth-hero {
+    justify-items: center;
+    text-align: center;
+  }
+  .auth-shell::before {
+    background:
+      radial-gradient(ellipse 60% 40% at 50% 62%, rgba(7, 6, 5, 0.88), transparent 90%),
+      radial-gradient(ellipse 120% 100% at 50% 50%, transparent 52%, rgba(0, 0, 0, 0.7));
+  }
+}
+/* Phones: the greeting sits high and the form rests near the bottom. */
+@media (max-width: 560px) and (orientation: portrait) {
+  .auth-shell {
+    place-items: stretch;
+    padding: 56px 20px 32px;
+  }
+  .auth-layout {
+    min-height: 100%;
+    grid-template-rows: auto 1fr;
+  }
+  .auth-brand canvas {
+    width: min(62vw, 240px);
+  }
+  .auth-side,
+  .auth-panel,
+  .auth-fields,
+  .auth-field {
+    display: grid;
+    /* Let nested tracks shrink below the inputs' intrinsic width. */
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .auth-panel {
+    align-content: space-between;
+    gap: 32px;
+  }
+  .auth-hero h1 {
+    font-size: 40px;
+  }
+}
+@media (max-height: 680px) and (orientation: landscape) {
+  .auth-shell {
+    padding-block: 48px;
+  }
+  .auth-panel {
+    gap: 28px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .auth-shell *,
+  .auth-shell *::before,
+  .auth-shell *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

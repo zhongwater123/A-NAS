@@ -49,7 +49,7 @@ description: 在开发机上启动一套 Fake 模式的 A-NAS 预览栈：模拟
 
 ## 预览覆盖不到的
 
-- 影视、音乐、视频与 HEIC 需要 `ffmpeg`、`ffprobe` 与 `heif-thumbnailer`：开发模式在进程内运行媒体 Worker，WSL 中没有这些命令时，相关功能报错。
+- 影视、音乐、视频与 HEIC 需要 `ffmpeg`、`ffprobe` 与 `heif-thumbnailer`：开发模式在进程内运行 FFmpeg Worker，WSL 中没有这些命令时，相关功能报错。
 - 相册本地 AI 与 AI 助手默认不可用；文件权限、Samba 与 systemd 沙箱只能由 [system-test](../system-test/SKILL.md) 或实机验证。
 
 ## 只改界面时

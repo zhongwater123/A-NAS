@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"io/fs"
-	"strings"
 	"sync"
 	"time"
 )
@@ -36,6 +35,9 @@ type aiRunner struct {
 	generation int
 	// detectorLoaded is whether the Worker may still hold the detector.
 	detectorLoaded bool
+	// need is what the Worker said its models take
+	// (EmbedderInfo.MemoryBytes); 0 until a round asks.
+	need uint64
 	// scanned counts face and pet scans stored since people last clustered.
 	scanned int
 }
@@ -151,7 +153,7 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	// detection comes next; otherwise its job goes back to the queue.
 	next := r.ahead.take()
 	defer func() { err = errors.Join(err, r.lib.returnDetection(context.WithoutCancel(ctx), next)) }()
-	if open, reason := gate.Open(ctx); !open {
+	if open, reason := gate.Open(ctx, r.memoryNeed()); !open {
 		r.progress.set(AIPaused, reason, "")
 		r.releaseModels(ctx, detector, reason)
 		return false, nil
@@ -182,6 +184,15 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	}
 	if err != nil {
 		return false, err
+	}
+	// The first answer, or a new release, tells what the models take, which
+	// the gate weighs before any of them loads.
+	if r.setMemoryNeed(info.MemoryBytes) {
+		if open, reason := gate.Open(ctx, info.MemoryBytes); !open {
+			r.progress.set(AIPaused, reason, "")
+			r.releaseModels(ctx, detector, reason)
+			return false, nil
+		}
 	}
 	if detector == nil {
 		info.Detector = ""
@@ -288,7 +299,7 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 		return false, r.lib.returnDetection(context.WithoutCancel(ctx), input)
 	}
 	if input.err != nil || input.class == jobWaiting {
-		// The input waits for storage or the Media Worker; its jobs keep
+		// The input waits for storage or the FFmpeg Worker; its jobs keep
 		// their attempts.
 		var err error
 		for _, job := range jobs {
@@ -327,7 +338,7 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 		return false, nil
 	}
 	detectCtx, cancel := context.WithCancel(ctx)
-	stopWatching := watchGate(detectCtx, gate, cancel)
+	stopWatching := watchGate(detectCtx, gate, info.MemoryBytes, cancel)
 	ahead := make(chan *detectionInput, 1)
 	go func() {
 		// A fault shows again at the next claim.
@@ -435,9 +446,10 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 	return carryOn(err)
 }
 
-// watchGate cancels a running detection when gate closes. stop ends the
-// watch and returns why gate closed, or "" when it stayed open.
-func watchGate(ctx context.Context, gate Gate, cancel context.CancelFunc) (stop func() string) {
+// watchGate cancels a running detection when gate closes for work whose
+// models take need. stop ends the watch and returns why gate closed, or ""
+// when it stayed open.
+func watchGate(ctx context.Context, gate Gate, need uint64, cancel context.CancelFunc) (stop func() string) {
 	done := make(chan struct{})
 	var reason string
 	var watcher sync.WaitGroup
@@ -451,7 +463,7 @@ func watchGate(ctx context.Context, gate Gate, cancel context.CancelFunc) (stop 
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if open, why := gate.Open(ctx); !open {
+				if open, why := gate.Open(ctx, need); !open {
 					reason = why
 					cancel()
 					return
@@ -469,14 +481,17 @@ func watchGate(ctx context.Context, gate Gate, cancel context.CancelFunc) (stop 
 // releaseModels frees the Worker's memory when background work stops
 // (docs/architecture/photo-objects.md#资源策略): the detector once there is
 // nothing to detect or someone uses the device, and the whole Worker under
-// memory pressure. It only calls a Worker that detected since the last
-// release, so it never starts one just to stop it.
+// memory pressure or below the memory reserve. It only calls a Worker that
+// detected since the last release, so it never starts one just to stop it.
 //
 // CPU or I/O pressure only cancels the running detection: that hands the
 // processor back already, and unloading would cost a reload as soon as the
-// pressure passes, which under flapping pressure is most of the work.
+// pressure passes, which under flapping pressure is most of the work. Waiting
+// for memory to load the models keeps the ones already loaded: freeing them
+// would not let the rest load sooner.
 func (r *aiRunner) releaseModels(ctx context.Context, detector Detector, reason string) {
-	if detector == nil || (reason != "" && reason != "foreground" && !strings.HasPrefix(reason, "memory")) {
+	all := reason == "memory_low" || reason == "memory_pressure"
+	if detector == nil || (reason != "" && reason != "foreground" && !all) {
 		return
 	}
 	r.mu.Lock()
@@ -485,8 +500,25 @@ func (r *aiRunner) releaseModels(ctx context.Context, detector Detector, reason 
 	r.mu.Unlock()
 	if loaded {
 		// A Worker that has gone has released everything already.
-		_ = detector.Release(ctx, strings.HasPrefix(reason, "memory"))
+		_ = detector.Release(ctx, all)
 	}
+}
+
+// memoryNeed is what the Worker last said its models take.
+func (r *aiRunner) memoryNeed() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.need
+}
+
+// setMemoryNeed records what the Worker says its models take and reports
+// whether that changed.
+func (r *aiRunner) setMemoryNeed(need uint64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	changed := r.need != need
+	r.need = need
+	return changed
 }
 
 // markDetectorLoaded records that the Worker loaded its detector, which it

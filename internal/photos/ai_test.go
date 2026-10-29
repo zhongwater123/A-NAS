@@ -78,7 +78,7 @@ type fakeGate struct {
 	reason string
 }
 
-func (g *fakeGate) Open(context.Context) (bool, string) { return g.open, g.reason }
+func (g *fakeGate) Open(context.Context, uint64) (bool, string) { return g.open, g.reason }
 
 func processAI(t *testing.T, service *photos.Service, embedder photos.Embedder, gate photos.Gate) int {
 	t.Helper()

@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
@@ -22,19 +22,19 @@ import (
 // videoMedia reads every file as a 10-second H.264 video with AAC sound.
 type videoMedia struct{}
 
-func (videoMedia) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
-	return mediaworker.Probe{Format: mediaworker.ProbeFormat{Name: "mov,mp4,m4a,3gp,3g2,mj2", Duration: 10},
-		Streams: []mediaworker.ProbeStream{{Type: "video", Codec: "h264", PixelFormat: "yuv420p", Width: 1280, Height: 720}, {Type: "audio", Codec: "aac"}}}, nil
+func (videoMedia) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
+	return ffmpegworker.Probe{Format: ffmpegworker.ProbeFormat{Name: "mov,mp4,m4a,3gp,3g2,mj2", Duration: 10},
+		Streams: []ffmpegworker.ProbeStream{{Type: "video", Codec: "h264", PixelFormat: "yuv420p", Width: 1280, Height: 720}, {Type: "audio", Codec: "aac"}}}, nil
 }
 func (videoMedia) Image(context.Context, *os.File, int) ([]byte, error) {
-	return nil, mediaworker.ErrUnreadable
+	return nil, ffmpegworker.ErrUnreadable
 }
 func (videoMedia) Frame(context.Context, *os.File, float64, int) ([]byte, error) {
 	var buffer bytes.Buffer
 	err := jpeg.Encode(&buffer, image.NewRGBA(image.Rect(0, 0, 16, 9)), nil)
 	return buffer.Bytes(), err
 }
-func (videoMedia) Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error) {
+func (videoMedia) Stream(context.Context, *os.File, ffmpegworker.StreamRequest) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader([]byte("fragmented mp4"))), nil
 }
 

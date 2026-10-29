@@ -47,7 +47,7 @@ func TestParseMessageReadsJSONLogsAndKeepsPlainLines(t *testing.T) {
 
 func TestServicesCoverTemplatesAndNothingElse(t *testing.T) {
 	for unit, want := range map[string]string{
-		"anas-api.service": "api", "anas-media@3-1418-0.service": "media", "anas-media.socket": "media",
+		"anas-api.service": "api", "anas-ffmpeg@3-1418-0.service": "media", "anas-ffmpeg.socket": "media",
 		"anas-kiosk@tty1.service": "kiosk", "smbd.service": "samba", "caddy.service": "caddy",
 	} {
 		if got, ok := systemlog.ServiceOfUnit(unit); !ok || got != want {

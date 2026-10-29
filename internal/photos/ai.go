@@ -41,6 +41,10 @@ type EmbedderInfo struct {
 	// Animals names the animal model in the same way, or is empty when the
 	// Worker has none it can use.
 	Animals string
+	// MemoryBytes is what the Worker holds once every model it serves is
+	// loaded, its own start included, or 0 when it does not say. Background
+	// work loads models only while memory allows (Gate).
+	MemoryBytes uint64
 }
 
 // Detector is the AI Worker's object detector
@@ -84,9 +88,13 @@ type Box struct {
 // Gate tells background AI work whether it may start another item now, and
 // why not otherwise: "foreground" while someone uses the photo library,
 // "cpu_pressure", "io_pressure" or "memory_pressure" while the device's
-// other work waits on that resource, or "memory_low".
+// other work waits on that resource, "memory_low" when free memory is below
+// the reserve the user keeps, or "memory_for_models" when loading what the
+// Worker does not hold yet of need, the memory its models take
+// (EmbedderInfo.MemoryBytes), would go below that reserve. Work that loads
+// no model passes 0.
 type Gate interface {
-	Open(ctx context.Context) (open bool, reason string)
+	Open(ctx context.Context, need uint64) (open bool, reason string)
 }
 
 var (

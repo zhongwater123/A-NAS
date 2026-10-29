@@ -293,7 +293,7 @@ ON CONFLICT(object_id, derivation) DO NOTHING;
 	// decided, by the place they were found in.
 	`DELETE FROM scans WHERE derivation = 'pets/v1';`,
 	// 13: videos (docs/specs/photo-video.md). A content object that is a
-	// video original keeps how long it plays and what the Media Worker read
+	// video original keeps how long it plays and what the FFmpeg Worker read
 	// from it, so the timeline and the decision how a browser plays it need
 	// no decoder. Videos take no part in local AI.
 	`

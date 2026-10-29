@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 const (
@@ -58,7 +58,7 @@ func (s *Service) processPending(ctx context.Context) {
 	if s.processor == nil {
 		return
 	}
-	ctx = mediaworker.WithPriority(ctx, mediaworker.Background)
+	ctx = ffmpegworker.WithPriority(ctx, ffmpegworker.Background)
 	libraries, err := s.allLibraries(ctx)
 	if err != nil {
 		return

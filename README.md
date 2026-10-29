@@ -29,7 +29,7 @@ A-NAS 是一套基于 Debian 的 AI 智能家庭 NAS。项目首先保证存储�
 | `anas-photos` | `a-nas-photos` | 相册服务，独占数据卷上的照片库（[ADR 0011](docs/adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） |
 | `anas-shares` | `a-nas-shares` | 成员分享的独立副本（[ADR 0023](docs/adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)） |
 | `anas-ai` | 动态身份 | 相册的本地 AI Worker，按需启动，无网络、看不到数据卷（[ADR 0016](docs/adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)） |
-| `anas-media@` | 动态身份 | FFmpeg 媒体 Worker，按连接启动，无网络、看不到数据卷 |
+| `anas-ffmpeg@` | 动态身份 | FFmpeg FFmpeg Worker，按连接启动，无网络、看不到数据卷 |
 | `anas-container-agent` | `anas-container` | Docker 的类型化代理（[ADR 0009](docs/adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)） |
 | `caddy`、`smbd` | — | 局域网 Web 入口（[ADR 0012](docs/adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）与 SMB3 |
 | `anas-kiosk@tty1` | `anas-dev` | 直连屏幕上的 Cage + Chromium |

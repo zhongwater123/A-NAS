@@ -40,16 +40,16 @@ RestrictNamespaces=true
 RestrictRealtime=true
 LockPersonality=true
 SystemCallArchitectures=native
-# The embedding model peaked at 815 MB on the Experimental NAS, the detector
-# adds about 400 MiB while it is loaded (docs/architecture/photo-objects.md),
-# and the face models load and unload with it
-# (docs/architecture/photo-people.md): with all three loaded the Worker held
-# 1.74 GiB on the development machine, model page cache included, which the
-# old 1792M would have reclaimed from mid-scan. Above MemoryHigh the kernel
-# reclaims first; MemoryMax is the hard limit, the 3 GB the photo design
-# budgets for the Worker on an 8 GB device.
-MemoryHigh=2560M
-MemoryMax=3G
+# Memory has no fixed budget (user, 2026-10-28): background work loads a
+# model only if 1 GiB stays free afterwards, and the Worker releases its
+# models when free memory falls below that (internal/photoservice/gate.go,
+# docs/architecture/photo-objects.md#资源策略). The installer's
+# anas-ai.service.d/memory-reserve.conf caps the Worker at all of this
+# machine's memory but 2.5 GiB, only against a runaway. The models are never
+# swapped out, which would make inference crawl and keep the disk busy, and
+# when memory runs out the kernel ends the Worker before anything else.
+MemorySwapMax=0
+OOMScoreAdjust=500
 # AI works while the photo library is idle with every core but two, which stay
 # free for what the user does next: the Worker runs that many threads, and the
 # installer caps it at that many cores in anas-ai.service.d/cpu-reserve.conf.

@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
@@ -72,7 +72,7 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(decodeErr, filepreview.ErrTooLarge):
 		httpjson.WriteError(w, 413, "share_preview_too_large", "HEIC preview source exceeds 64 MiB")
 		return
-	case errors.Is(decodeErr, mediaworker.ErrUnreadable):
+	case errors.Is(decodeErr, ffmpegworker.ErrUnreadable):
 		httpjson.WriteError(w, 422, "share_preview_unreadable", "image cannot be previewed")
 		return
 	case decodeErr != nil:

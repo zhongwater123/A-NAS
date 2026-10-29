@@ -41,7 +41,7 @@
 - [2026-10-20：VNAS 自建的技能不出现在“记忆”中](2026-10-20-assistant-skills-hidden-by-name.md)
 - [2026-10-21：安装失败的应用显示为“已安装”，容器代理重启打断安装](2026-10-21-failed-app-install-shown-as-installed.md)
 - [2026-10-21：一处故障让 Host Agent 的全部入口失效](2026-10-21-host-agent-single-failures-stop-everything.md)
-- [2026-10-21：媒体 Worker 短暂不可用让 HEIC 与视频的缩略图和 AI 永久失败](2026-10-21-media-worker-shared-budget.md)
+- [2026-10-21：FFmpeg Worker 短暂不可用让 HEIC 与视频的缩略图和 AI 永久失败](2026-10-21-media-worker-shared-budget.md)
 - [2026-10-21：快照清单超过 1 MiB 即失败，并留下孤儿子卷](2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)
 - [2026-10-21：过期的目录对账扫描改写回收站行，文件夹无法恢复](2026-10-21-stale-reconcile-scan-rewrote-trash-rows.md)
 - [2026-10-21：存储计划执行绑定浏览器请求，被打断的建卷无法恢复](2026-10-21-storage-plan-bound-to-browser-request.md)
