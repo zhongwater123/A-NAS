@@ -13,7 +13,7 @@ judges here are:
   editing      pacing, repetition, still pictures held too long, flashes and how
                the segments follow one another, as an editor would see them
 
-Each judge is one request to a vision model on an OpenAI-compatible API (the
+Each judge scores 0-10 against anchored levels and is one request to a vision model on an OpenAI-compatible API (the
 development machine uses SiliconFlow; the key comes from SILICONFLOW_API_KEY and
 never enters the repository) with temperature 0: the instruction, the segments'
 lengths and one frame a second from each segment (at most FRAMES_MAX, short side
@@ -30,6 +30,7 @@ instructions label on-topic seconds, each segment's verdict is set against them
 
 import argparse
 import base64
+import concurrent.futures
 import json
 import os
 import subprocess
@@ -49,20 +50,39 @@ COMMON = """你在为一个家庭相册的“一句话剪视频”功能评审�
 {segments}
 下面的图片按播放顺序排列，每秒一帧，每张图前面标了它属于第几段、在成片里的第几秒。只根据你看到的画面评价，不要猜测没看到的内容。"""
 
+# Scores run 0-10, the even ones anchored, so that cuts that are all "fine" still spread out.
 JUDGES = {
     "quality": """作为摄影与画面美学评审，评价这段成片的画面质量（按 Vlog 的标准，不按电影）。
 评分维度：光线、色彩、构图、运镜（稳定、对焦、曝光）、画面吸引力。另外指出瑕疵：纯黑或纯色画面、一闪而过的无关画面、模糊、抖动、水印或字幕等叠加文字。
-分数：5 惊艳，4 很好，3 合格可用，2 有明显问题，1 很差。
-只输出 JSON：{"overall": 1-5, "lighting": 1-5, "color": 1-5, "composition": 1-5, "camera": 1-5, "interest": 1-5,
+打 0–10 分，按下面的档位，介于两档之间就给奇数：
+10 每一段都可以直接放进专业旅行短片：光线、色彩、构图出色，运镜稳；
+8 整体好看，个别段落有小瑕疵（略暗、略晃、构图略偏）；
+6 能用，但有几段明显平淡或有瑕疵（模糊、晃动、过曝欠曝、叠加文字）；
+4 一半左右的画面质量差，或有明显的黑屏、闪帧、水印；
+2 大部分画面质量差；
+0 几乎不能看。
+只输出 JSON：{"overall": 0-10, "lighting": 0-10, "color": 0-10, "composition": 0-10, "camera": 0-10, "interest": 0-10,
 "defects": [{"segment": 段号, "what": "瑕疵"}], "analysis": "两三句话"}""",
     "instruction": """作为指令跟随评审，逐段判断画面是否符合成员的指令。
 on：画面明确就是指令要的内容；partly：沾边但不完全是（比如只占画面一小部分，或只满足指令的一半条件）；off：不是指令要的内容。
-再给整段成片打分：5 全部切题，4 大部分切题、个别沾边，3 一半左右切题，2 少数切题，1 基本跑题。素材少导致成片短不扣分。
-只输出 JSON：{"segments": [{"segment": 段号, "verdict": "on|partly|off", "seen": "画面是什么，一句话"}], "overall": 1-5, "analysis": "两三句话"}""",
+再给整段成片打 0–10 分，按切题的时长占比，介于两档之间就给奇数；素材少导致成片短不扣分：
+10 每一段都明确切题；
+8 约 80% 的时长切题，其余沾边，没有跑题的段；
+6 约 60% 切题，或有一段跑题；
+4 约一半切题；
+2 只有少数段切题；
+0 完全跑题。
+只输出 JSON：{"segments": [{"segment": 段号, "verdict": "on|partly|off", "seen": "画面是什么，一句话"}], "overall": 0-10, "analysis": "两三句话"}""",
     "editing": """作为剪辑师，评价这段成片剪得像不像人剪的：节奏是否合适，同一个画面是否重复或停留太久（几乎不动的画面超过约 6 秒算太长），有没有一闪而过的碎镜头，段与段之间的衔接和先后顺序是否顺，整体有没有一条线。
 不评价画面是否切题，也不因为成片短扣分。
-分数：5 像专业剪辑师剪的，4 自然流畅、小问题，3 能看但有明显生硬处，2 生硬、重复或拖沓，1 很难看下去。
-只输出 JSON：{"overall": 1-5, "pacing": 1-5, "repetition": 1-5, "flow": 1-5,
+打 0–10 分，按下面的档位，介于两档之间就给奇数：
+10 像专业剪辑师剪的：节奏贴合内容，衔接顺，有清楚的线索，没有重复和拖沓；
+8 自然流畅，只有一两处小问题（某段略长、某处衔接略跳）；
+6 能看，但有明显的生硬处：重复的画面、拖沓的段落或突兀的跳切；
+4 多处生硬，或有一闪而过的碎镜头、明显的重复；
+2 很生硬，像随便拼起来的；
+0 无法观看。
+只输出 JSON：{"overall": 0-10, "pacing": 0-10, "repetition": 0-10, "flow": 0-10,
 "problems": [{"segment": 段号, "what": "问题"}], "analysis": "两三句话"}""",
 }
 
@@ -183,6 +203,7 @@ def main():
     parser.add_argument("--model", default=MODEL, help="the judging vision model")
     parser.add_argument("--only", nargs="*", help="versions to judge, all by default")
     parser.add_argument("--summary", action="store_true", help="table the saved verdicts, send nothing")
+    parser.add_argument("--workers", type=int, default=3, help="cuts judged at once")
     args = parser.parse_args()
     vm.use_set(args.set)
     with open(args.instructions, encoding="utf-8") as file:
@@ -193,20 +214,25 @@ def main():
         return
     key = os.environ["SILICONFLOW_API_KEY"]
     os.makedirs(out, exist_ok=True)
-    for version, instruction, path, lengths, _segments in cuts(args.cache, instructions):
-        if args.only and version not in args.only:
-            continue
-        images = frames(path, lengths)
-        listing = "\n".join(f"第 {n} 段：{length:.1f} 秒" for n, length in enumerate(lengths, 1))
-        common = COMMON.format(text=instruction["text"], seconds=instruction["seconds"], count=len(lengths),
-                               segments=listing)
-        for judge, task in JUDGES.items():
-            prompt = common + "\n\n" + task
-            verdict, usage = ask(args.model, prompt, images, key)
-            with open(os.path.join(out, f"{version}-{instruction['id']}-{judge}.json"), "w", encoding="utf-8") as f:
-                json.dump({"model": args.model, "cut": path, "lengths": lengths, "frames": [t for _n, t, _j in images],
-                           "prompt": prompt, "verdict": verdict, "usage": usage}, f, ensure_ascii=False, indent=2)
-            print(version, instruction["id"], judge, verdict.get("overall"), flush=True)
+    jobs = [c for c in cuts(args.cache, instructions) if not args.only or c[0] in args.only]
+    with concurrent.futures.ThreadPoolExecutor(args.workers) as pool:
+        for _ in pool.map(lambda c: judge_cut(c, args.model, key, out), jobs):
+            pass
+
+
+def judge_cut(cut, model, key, out):
+    version, instruction, path, lengths, _segments = cut
+    images = frames(path, lengths)
+    listing = "\n".join(f"第 {n} 段：{length:.1f} 秒" for n, length in enumerate(lengths, 1))
+    common = COMMON.format(text=instruction["text"], seconds=instruction["seconds"], count=len(lengths),
+                           segments=listing)
+    for judge, task in JUDGES.items():
+        prompt = common + "\n\n" + task
+        verdict, usage = ask(model, prompt, images, key)
+        with open(os.path.join(out, f"{version}-{instruction['id']}-{judge}.json"), "w", encoding="utf-8") as f:
+            json.dump({"model": model, "cut": path, "lengths": lengths, "frames": [t for _n, t, _j in images],
+                       "prompt": prompt, "verdict": verdict, "usage": usage}, f, ensure_ascii=False, indent=2)
+        print(version, instruction["id"], judge, verdict.get("overall"), flush=True)
 
 
 if __name__ == "__main__":
