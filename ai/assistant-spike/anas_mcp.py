@@ -371,7 +371,8 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         "同一个意思可以换几种说法；地点、时间这类条件画面里看不出来，不要和画面主题写在一条里。limit：卡片数，1–40，默认 20。"
         "每张卡片是一个镜头里最长 20 秒的一部分：id；video；start、end 是这张卡片覆盖的秒数；shot 是所在镜头的起止，"
         "剪的时候不能越出；score 是各条探针里最高的分数，probes 给出每条探针的最高分与出现的时刻 at；tags 是词表里最接近的几个词，"
-        "只说明大致内容；group 相同的卡片画面相似，成片里别都用。分数低于 threshold 时与“库里没有”分不开。结果里没有画面。"))
+        "只说明大致内容；group 相同的卡片画面相似，成片里别都用。分数低于 threshold 时与“库里没有”分不开。"
+        "结果里没有画面：向成员介绍片段时只说标签和分数支持的内容，并说明没有看过画面，不要描述猜出来的细节。"))
     def search_video_moments(probes: list[str], limit: int = 20):
         try:
             status, _kind, raw = video_moments("/search", {"probes": probes, "limit": limit})

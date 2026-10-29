@@ -134,7 +134,7 @@ claude mcp add anas -e HERMES_SPIKE_NAME=video-montage-sbx -e DOCKER_CONTEXT=col
 
 - 单元测试 [`ai/tests/test_montage.py`](../../ai/tests/test_montage.py)：淡入淡出不改变总长；视频片段逐个精确定位；横竖照片与不同尺寸的视频片段都渲染成 1920×1080、时长正确；FFmpeg 失败时不留文件；长镜头等分成卡片、相似的卡片同组、纯色帧不参与；合规的计划得到片段，不合规的计划列出每一条问题。
 - 照片：#283 中 Claude 经助手工具检索 717 张真实照片，做出 20 秒与 15 秒（淡入淡出）的成片（2026-10-29）。
-- 视频：见 [#322](https://github.com/zhongwater123/A-NAS/issues/322) 与[研究文档](../research/video-moment-retrieval.md)。
+- 视频（2026-10-29，67 分钟的爱丁堡散步，Claude Code 经 `mcp-as-member.sh` 只用两个视频工具）：“城堡和老城石头街道 30 秒”与“公交车和热闹街头 20 秒”各一次检索、一次剪辑就得到成片，逐秒看帧分别有 5/6 与 10/10 段切题；“海边冲浪”时模型说明库里没有、不剪。模型看不到画面，会按探针名描述没看过的细节，工具说明要求它只说标签与分数支持的内容；检索选错的片段只有看画面才能发现。细节见[研究文档](../research/video-moment-retrieval.md#模型规划3222026-10-29)。
 
 ## 关联
 
