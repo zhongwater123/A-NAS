@@ -408,7 +408,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     await act(async () => {
       vi.advanceTimersByTime(2_000);
     });
-    expect(await screen.findByRole("heading", { name: "登录 A-NAS" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "欢迎回来" })).toBeTruthy();
     expect(screen.getByText("登录已过期，请重新登录")).toBeTruthy();
     expect(screen.queryByText(/连接中断/)).toBeNull();
 
