@@ -628,8 +628,12 @@ body:has([data-boot-splash]) .auth-shell *::after {
     width: min(62vw, 240px);
   }
   .auth-side,
-  .auth-panel {
+  .auth-panel,
+  .auth-fields,
+  .auth-field {
     display: grid;
+    /* Let nested tracks shrink below the inputs' intrinsic width. */
+    grid-template-columns: minmax(0, 1fr);
   }
   .auth-panel {
     align-content: space-between;
