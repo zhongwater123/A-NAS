@@ -1,5 +1,5 @@
-import { Camera, Flag, ImagePlus, Mic, NotebookPen, Ruler, Square, Syringe, TriangleAlert, X } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ImagePlus, Mic, Square, TriangleAlert, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { errorText } from "../api/errorMessages";
 import { listPhotoLibraries, uploadPhoto } from "../photos/api";
@@ -29,15 +29,6 @@ export interface Draft {
   vaccine?: { code: string; dose: number };
   milestone?: { autoKey: string; title: string; date: string };
 }
-
-const icons: Record<FamilyKind, ReactNode> = {
-  photos: <Camera size={17} />,
-  recording: <Mic size={17} />,
-  journal: <NotebookPen size={17} />,
-  measurement: <Ruler size={17} />,
-  vaccine: <Syringe size={17} />,
-  milestone: <Flag size={17} />,
-};
 
 // A file chosen to upload, and how far it got.
 interface Pending {
@@ -286,7 +277,6 @@ export function Composer({
   return (
     <Modal
       title={heading}
-      icon={icons[kind]}
       busy={busy}
       wide={kind === "photos" || kind === "journal"}
       onClose={onClose}
@@ -422,7 +412,7 @@ export function Composer({
         >
           {kind === "journal" || kind === "milestone" ? (
             <textarea
-              className={styles.fcTextarea}
+              className={`${styles.fcTextarea} ${kind === "journal" ? styles.writing : ""}`}
               rows={kind === "journal" ? 6 : 3}
               maxLength={5000}
               value={text}

@@ -1,12 +1,11 @@
-import { Check, CircleDashed, Clock3, ListChecks, Plus, Syringe } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ListChecks, Plus } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import {
   type FamilyBaby,
   type FamilyScheduledDose,
   type FamilyVaccineSchedule,
   familyError,
-  getVaccines,
   setVaccinePlan,
 } from "./api";
 import type { Draft } from "./Composer";
@@ -15,38 +14,26 @@ import styles from "./family.module.css";
 import { daysUntil, shortDate } from "./format";
 import { Modal } from "./parts";
 
-// Vaccines is 疫苗接种: the national programme's doses and the planned
-// non-programme ones, by recommended age, each with where it stands.
+const done = (dose: FamilyScheduledDose) => dose.status === "given" || dose.status === "replaced";
+
+// Vaccines is the channel's 接种本: the national programme's doses and the
+// planned non-programme ones by recommended age, a stamp on each given dose.
+// The ages already done fold into one line. The channel reads the schedule
+// for this board and the side panel; null means it failed.
 export function Vaccines({
   baby,
-  version,
+  schedule,
+  onPlanned,
   onRecord,
-  onChanged,
 }: {
   baby: FamilyBaby;
-  version: number;
+  schedule?: FamilyVaccineSchedule | null;
+  onPlanned: (schedule: FamilyVaccineSchedule) => void;
   onRecord: (draft: Draft) => void;
-  onChanged: () => void;
 }) {
   const family = useFamily();
-  const [schedule, setSchedule] = useState<FamilyVaccineSchedule>();
-  const [failure, setFailure] = useState("");
   const [planning, setPlanning] = useState(false);
-
-  useEffect(() => {
-    let live = true;
-    getVaccines(baby.id).then(
-      (next) => {
-        if (live) setSchedule(next);
-      },
-      (caught: unknown) => {
-        if (live) setFailure(familyError(caught));
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [baby.id, version]);
+  const [showDone, setShowDone] = useState(false);
 
   const groups = useMemo(() => {
     const result: Array<{ due: string; label: string; doses: FamilyScheduledDose[] }> = [];
@@ -58,35 +45,58 @@ export function Vaccines({
     return result;
   }, [schedule]);
 
-  if (failure) return <p className={styles.fcFailure}>{failure}</p>;
-  if (!schedule) return <span className="loader" aria-label="正在读取疫苗程序" />;
+  if (schedule === null) return <p className={styles.fcFailure}>暂时读不到接种本，请稍后再试。</p>;
+  if (!schedule) return <span className="loader" aria-label="正在读取接种本" />;
   const count = (...statuses: FamilyScheduledDose["status"][]) =>
     schedule.doses.filter((dose) => statuses.includes(dose.status)).length;
   const scheduled = new Set(schedule.doses.map((dose) => dose.recordId).filter(Boolean));
   const others = schedule.records.filter((record) => !scheduled.has(record.id));
+  // The leading ages whose doses are all done fold away, unless asked for.
+  const folded = groups.findIndex((group) => !group.doses.every(done));
+  const finished = folded === -1 ? groups.length : folded;
+  const visible = showDone || finished < 2 ? groups : groups.slice(finished);
+  const finishedDoses = groups.slice(0, finished).reduce((sum, group) => sum + group.doses.length, 0);
   return (
     <div className={styles.fcVaccines}>
-      <div className={styles.fcVaccineSummary}>
-        <Summary tone="done" value={count("given", "replaced")} label="已完成" />
-        <Summary tone="due" value={count("available")} label="可以接种" />
-        <Summary tone="soon" value={count("soon")} label="30 天内到期" />
-        <Summary tone="later" value={count("upcoming")} label="未到时间" />
-        <span className={styles.fcGrow} />
+      <header className={styles.fcBoardHead}>
+        <div>
+          <h2>接种本</h2>
+          <p>依据{schedule.title}。到了月龄会在这里和桌面上提醒，接种时间以当地接种门诊的安排为准。</p>
+        </div>
         <button type="button" className={styles.fcSecondary} onClick={() => setPlanning(true)}>
-          <ListChecks size={14} /> 自费疫苗计划
+          <ListChecks size={14} /> 自费疫苗
         </button>
-        <button type="button" className={styles.fcPrimarySmall} onClick={() => onRecord({ kind: "vaccine" })}>
+        <button type="button" className={styles.fcSecondary} onClick={() => onRecord({ kind: "vaccine" })}>
           <Plus size={14} /> 记录接种
         </button>
+      </header>
+
+      <div className={`${styles.fcFacts} ${styles.fcTally}`}>
+        <Tally value={count("given", "replaced")} label="已完成" />
+        <Tally value={count("available")} label="可以接种" tone={styles.due} />
+        <Tally value={count("soon")} label="30 天内" tone={styles.soon} />
+        <Tally value={count("upcoming")} label="还没到月龄" />
       </div>
-      <ol className={styles.fcSchedule}>
-        {groups.map((group) => (
-          <li key={group.due} className={styles.fcScheduleGroup}>
-            <div className={styles.fcScheduleAge}>
-              <strong>{group.label}</strong>
+
+      {finished >= 2 && (
+        <button
+          type="button"
+          className={`${styles.fcFold} ${showDone ? styles.open : ""}`}
+          aria-expanded={showDone}
+          onClick={() => setShowDone((value) => !value)}
+        >
+          {groups[0].label} — {groups[finished - 1].label}的 {finishedDoses} 剂都已完成
+          <ChevronDown size={14} />
+        </button>
+      )}
+      <ol className={styles.fcBook}>
+        {visible.map((group) => (
+          <li key={group.due} className={styles.fcMonth}>
+            <header className={styles.fcMonthHead}>
+              <h2>{group.label}</h2>
               <small>{shortDate(group.due)}</small>
-            </div>
-            <ul>
+            </header>
+            <ul className={styles.fcDoses}>
               {group.doses.map((dose) => (
                 <DoseRow
                   key={`${dose.code}-${dose.dose}`}
@@ -98,33 +108,34 @@ export function Vaccines({
           </li>
         ))}
       </ol>
+
       {others.length > 0 && (
-        <section className={styles.fcSection}>
+        <section className={styles.fcBoardSection}>
           <h3>其他接种记录</h3>
-          <ul className={styles.fcOtherDoses}>
+          <ul className={styles.fcDoses}>
             {others.map((record) => (
-              <li key={record.id}>
-                <Syringe size={14} />
-                {record.vaccine?.name ||
-                  family.catalog.vaccines.vaccines.find((vaccine) => vaccine.code === record.vaccine?.code)?.name}{" "}
-                第 {record.vaccine?.dose} 剂<small>{shortDate(record.occurredOn)}</small>
+              <li key={record.id} className={`${styles.fcDose} ${styles.given}`}>
+                <span className={styles.fcDoseName}>
+                  {record.vaccine?.name ||
+                    family.catalog.vaccines.vaccines.find((vaccine) => vaccine.code === record.vaccine?.code)?.name}
+                  <small>第 {record.vaccine?.dose} 剂</small>
+                </span>
+                <Stamp date={record.occurredOn} />
               </li>
             ))}
           </ul>
         </section>
       )}
-      <p className={styles.fcSource}>
-        依据：{schedule.title}。{schedule.source}
-      </p>
+      <p className={styles.fcSource}>{schedule.source}</p>
+
       {planning && (
         <PlanDialog
           plan={schedule.plan}
           onClose={() => setPlanning(false)}
           onSave={async (codes) => {
             try {
-              setSchedule(await setVaccinePlan(baby.id, codes));
+              onPlanned(await setVaccinePlan(baby.id, codes));
               setPlanning(false);
-              onChanged();
             } catch (caught) {
               family.toast({ text: familyError(caught), tone: "error" });
             }
@@ -135,46 +146,64 @@ export function Vaccines({
   );
 }
 
-function Summary({ tone, value, label }: { tone: string; value: number; label: string }) {
+function Tally({ value, label, tone }: { value: number; label: string; tone?: string }) {
   return (
-    <div className={`${styles.fcSummary} ${styles[tone] ?? ""}`}>
-      <strong>{value}</strong>
+    <div className={value > 0 ? tone : undefined}>
       <span>{label}</span>
+      <strong>
+        {value}
+        <small>剂</small>
+      </strong>
     </div>
   );
 }
 
+// Stamp marks a given dose the way a clinic stamps the paper booklet.
+function Stamp({ date, by }: { date?: string; by?: string }) {
+  return (
+    <span className={`${styles.fcStamp} ${by ? styles.replaced : ""}`}>
+      <span className={styles.fcStampSeal} aria-hidden="true">
+        {by ? "替代" : "已种"}
+      </span>
+      <small>{by ? `已由${by}完成` : date ? `${shortDate(date)}接种` : "已接种"}</small>
+    </span>
+  );
+}
+
 function DoseRow({ dose, onRecord }: { dose: FamilyScheduledDose; onRecord: () => void }) {
-  const done = dose.status === "given" || dose.status === "replaced";
   const days = daysUntil(dose.dueDate);
-  const status = {
-    given: `${dose.givenOn ? shortDate(dose.givenOn) : ""}已接种`,
-    replaced: `已由${dose.replacedBy}完成`,
-    available: "可以接种",
-    soon: days === 0 ? "今天到月龄" : `${days} 天后`,
-    upcoming: "未到时间",
-  }[dose.status];
   return (
     <li className={`${styles.fcDose} ${styles[dose.status] ?? ""}`}>
-      <span className={styles.fcDoseIcon} aria-hidden="true">
-        {done ? <Check size={13} /> : dose.status === "upcoming" ? <CircleDashed size={13} /> : <Clock3 size={13} />}
-      </span>
       <span className={styles.fcDoseName}>
         {dose.name}
         <small>
           第 {dose.dose} 剂{dose.programme ? "" : " · 自费"}
         </small>
       </span>
-      <span className={styles.fcDoseStatus}>{status}</span>
-      {!done && (
-        <button
-          type="button"
-          className={styles.fcDoseRecord}
-          onClick={onRecord}
-          aria-label={`记录${dose.name}第 ${dose.dose} 剂`}
-        >
-          记录
-        </button>
+      {dose.status === "given" ? (
+        <Stamp date={dose.givenOn} />
+      ) : dose.status === "replaced" ? (
+        <Stamp by={dose.replacedBy} />
+      ) : (
+        <>
+          <span className={styles.fcDoseStatus}>
+            {dose.status === "available"
+              ? "可以接种"
+              : dose.status === "soon"
+                ? days === 0
+                  ? "今天到月龄"
+                  : `还有 ${days} 天`
+                : "还没到月龄"}
+          </span>
+          <button
+            type="button"
+            className={styles.fcDoseRecord}
+            onClick={onRecord}
+            aria-label={`记录${dose.name}第 ${dose.dose} 剂`}
+          >
+            记录
+          </button>
+        </>
       )}
     </li>
   );
@@ -206,7 +235,6 @@ function PlanDialog({
   return (
     <Modal
       title="自费疫苗计划"
-      icon={<ListChecks size={17} />}
       busy={busy}
       wide
       onClose={onClose}
@@ -231,8 +259,8 @@ function PlanDialog({
         </>
       }
     >
-      <p className={styles.fcFootnote}>
-        选中的疫苗会按常见程序列进接种表并提醒。不同产品程序不同，以说明书和接种门诊为准。
+      <p className={styles.fcNote}>
+        选中的疫苗会按常见程序排进接种本并提醒。不同产品程序不同，以说明书和接种门诊为准。
       </p>
       {groups.map((group) => {
         const options = vaccines.filter((vaccine) => vaccine.group === group);

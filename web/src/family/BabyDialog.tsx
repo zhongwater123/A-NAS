@@ -1,4 +1,4 @@
-import { Baby, Camera, Trash2 } from "lucide-react";
+import { Camera, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 
 import {
@@ -110,7 +110,7 @@ export function BabyDialog({
       await deleteBaby(current.id, typed.trim());
       onClose();
       await family.reload();
-      family.toast({ text: `已删除${current.name}的频道，15 天内可以在左侧“最近删除”中恢复` });
+      family.toast({ text: `已删除${current.name}的频道，15 天内可以在左栏底部的“最近删除”中恢复` });
     } catch (caught) {
       setProblem(familyError(caught));
     }
@@ -119,7 +119,6 @@ export function BabyDialog({
   return (
     <Modal
       title={current ? "宝宝资料" : "添加宝宝"}
-      icon={<Baby size={17} />}
       busy={busy}
       onClose={onClose}
       footer={

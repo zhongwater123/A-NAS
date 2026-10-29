@@ -1,16 +1,16 @@
-import { Cake, Flag, ImagePlus, Plus, Sparkles } from "lucide-react";
+import { Flag, ImagePlus, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { type FamilyBaby, type FamilyTimelineEntry, familyError, listMilestones } from "./api";
 import type { Draft } from "./Composer";
 import { useFamily } from "./context";
 import styles from "./family.module.css";
-import { ageText, daysUntil, longDate } from "./format";
-import { PhotoGrid } from "./parts";
+import { ageText, daysUntil, longDate, sealText } from "./format";
+import { Mosaic } from "./parts";
 
 // Milestones is 大事记: the days every baby has (birth, 满月, 百天, each
-// birthday) among the family's own milestones, oldest first, ending with the
-// next one to come.
+// birthday) among the family's own milestones, oldest first, each on a seal,
+// ending with the next one to come.
 export function Milestones({
   baby,
   version,
@@ -42,43 +42,40 @@ export function Milestones({
   if (failure) return <p className={styles.fcFailure}>{failure}</p>;
   if (!entries) return <span className="loader" aria-label="正在读取大事记" />;
   return (
-    <div className={styles.fcTimelineWrap}>
-      <div className={styles.fcBoardBar}>
-        <span>出生、满月、百天和生日会自动出现，可以给它们配上照片和说明。</span>
-        <button type="button" className={styles.fcPrimarySmall} onClick={() => onAdd({ kind: "milestone" })}>
+    <div className={styles.fcMilestones}>
+      <header className={styles.fcBoardHead}>
+        <div>
+          <h2>大事记</h2>
+          <p>出生、满月、百天和生日会自动出现，可以给它们配上照片和说明；第一次翻身、长牙、迈步也记在这里。</p>
+        </div>
+        <button type="button" className={styles.fcSecondary} onClick={() => onAdd({ kind: "milestone" })}>
           <Plus size={14} /> 添加大事记
         </button>
-      </div>
-      <ol className={styles.fcTimeline}>
+      </header>
+      <ol className={styles.fcSeals}>
         {entries.map((entry) => {
-          const key = `${entry.date}-${entry.auto ?? entry.record?.id}`;
           const mine = entry.record && entry.record.authorId === family.userId;
+          const photos = entry.record?.photos.filter((photo) => photo.role === "album") ?? [];
           return (
             <li
-              key={key}
-              className={`${styles.fcMoment} ${entry.auto ? styles.auto : ""} ${entry.upcoming ? styles.upcoming : ""}`}
+              key={`${entry.date}-${entry.auto ?? entry.record?.id}`}
+              className={`${styles.fcSealEntry} ${entry.upcoming ? styles.upcoming : ""}`}
             >
-              <span className={styles.fcMomentDot} aria-hidden="true">
-                {entry.auto?.startsWith("birthday") || entry.auto === "year-1" ? (
-                  <Cake size={13} />
-                ) : entry.auto ? (
-                  <Sparkles size={13} />
-                ) : (
-                  <Flag size={13} />
-                )}
+              <span className={`${styles.fcSeal} ${entry.auto ? "" : styles.own}`} aria-hidden="true">
+                {entry.auto ? sealText(entry.title) : <Flag size={16} strokeWidth={1.6} />}
               </span>
-              <div className={styles.fcMomentBody}>
-                <p className={styles.fcMomentDate}>
+              <div className={styles.fcSealBody}>
+                <small>
                   {longDate(entry.date)}
                   {entry.upcoming
                     ? ` · 还有 ${daysUntil(entry.date)} 天`
                     : entry.auto === "birth"
                       ? ""
-                      : ` · ${ageText(entry.age)}`}
-                </p>
+                      : ` · ${ageText(entry.age, false)}`}
+                </small>
                 <h3>{entry.title}</h3>
-                {entry.record?.text && <p className={styles.fcText}>{entry.record.text}</p>}
-                {entry.record && <PhotoGrid photos={entry.record.photos} limit={6} />}
+                {entry.record?.text && <p>{entry.record.text}</p>}
+                <Mosaic photos={photos} />
                 {entry.auto && !entry.upcoming && !entry.record && (
                   <button
                     type="button"

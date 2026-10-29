@@ -1,12 +1,10 @@
-import { Baby, Check, Clock3, HeartHandshake, Plus, RotateCcw, Users } from "lucide-react";
+import { Check, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { PersonAvatar } from "../people/PersonAvatar";
-import { person, usePeople } from "../people/people";
+import { relativeTime } from "../lib/time";
 import { useDialogs, useToasts } from "../ui/feedback";
 import {
   cancelJoin,
-  type FamilyBaby,
   type FamilyCatalog,
   type FamilyOverview,
   familyError,
@@ -19,7 +17,7 @@ import { BabyAvatar, BabyDialog } from "./BabyDialog";
 import { Channel } from "./Channel";
 import { FamilyContext } from "./context";
 import styles from "./family.module.css";
-import { ageText } from "./format";
+import { Modal } from "./parts";
 
 interface Props {
   userId: string;
@@ -27,16 +25,18 @@ interface Props {
 }
 
 // FamilyPanel is the 家庭中心 window. Accounts outside the family see how to
-// join; members pick a baby on the left and read the channel on the right.
+// join; members pick a baby in the narrow rail and read the channel beside it.
 export function FamilyPanel({ userId, onShowPhoto }: Props) {
   const [overview, setOverview] = useState<FamilyOverview>();
   const [catalog, setCatalog] = useState<FamilyCatalog>();
   const [failure, setFailure] = useState("");
   const [selected, setSelected] = useState<string>();
   const [adding, setAdding] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const { prompt, confirm, dialog } = useDialogs();
   const { toast, element: toasts } = useToasts();
+
   const reload = useCallback(async () => {
     try {
       const next = await getFamily();
@@ -85,14 +85,14 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
       <div className={styles.fcApp} ref={root}>
         <div className={styles.fcCentered}>
           <p className={styles.fcFailure}>{failure}</p>
-          <button type="button" className="primary" onClick={() => void reload()}>
+          <button type="button" className={styles.fcSecondary} onClick={() => void reload()}>
             重试
           </button>
         </div>
       </div>
     );
   }
-  if (!overview || !catalog) {
+  if (!overview || !catalog || !context) {
     return (
       <div className={styles.fcApp} ref={root}>
         <div className={styles.fcCentered}>
@@ -132,31 +132,42 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
   const baby = overview.babies.find((item) => item.id === selected);
   return (
     <FamilyContext value={context}>
-      <div className={`${styles.fcApp} ${styles.fcSplit}`} ref={root}>
-        <Sidebar
-          userId={userId}
-          overview={overview}
-          selected={selected}
-          onSelect={setSelected}
-          onAdd={() => setAdding(true)}
-          onRestore={async (deleted) => {
-            try {
-              await restoreBaby(deleted.id);
-              await reload();
-              setSelected(deleted.id);
-              toast({ text: `已恢复${deleted.name}的频道`, tone: "done" });
-            } catch (caught) {
-              toast({ text: familyError(caught), tone: "error" });
-            }
-          }}
-        />
-        <main className={styles.fcMain}>
-          {baby ? (
-            <Channel key={baby.id} baby={baby} />
-          ) : (
-            <NoBabies guardian={overview.me.guardian} onAdd={() => setAdding(true)} />
+      <div className={`${styles.fcApp} ${styles.fcLayout}`} ref={root}>
+        <nav className={styles.fcRail} aria-label="宝宝">
+          {overview.babies.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`${styles.fcRailBaby} ${item.id === selected ? styles.active : ""}`}
+              aria-current={item.id === selected ? "page" : undefined}
+              onClick={() => setSelected(item.id)}
+            >
+              <BabyAvatar baby={item} className={styles.fcRailFace} />
+              <span>{item.nickname || item.name}</span>
+            </button>
+          ))}
+          {overview.me.guardian && (
+            <button type="button" className={styles.fcRailAdd} onClick={() => setAdding(true)} aria-label="添加宝宝">
+              <Plus size={18} />
+            </button>
           )}
-        </main>
+          {overview.deletedBabies.length > 0 && (
+            <button
+              type="button"
+              className={styles.fcRailTrash}
+              onClick={() => setRestoring(true)}
+              aria-label="最近删除的宝宝"
+              title="最近删除的宝宝"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+        </nav>
+        {baby ? (
+          <Channel key={baby.id} baby={baby} />
+        ) : (
+          <NoBabies guardian={overview.me.guardian} onAdd={() => setAdding(true)} />
+        )}
         {adding && (
           <BabyDialog
             onClose={() => setAdding(false)}
@@ -167,6 +178,39 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
             }}
           />
         )}
+        {restoring && (
+          <Modal title="最近删除的宝宝" onClose={() => setRestoring(false)}>
+            <p className={styles.fcNote}>删除的频道保留 15 天，恢复后记录、录音和留言都会回来。</p>
+            <ul className={styles.fcRows}>
+              {overview.deletedBabies.map((deleted) => (
+                <li key={deleted.id}>
+                  <BabyAvatar baby={deleted} className={styles.fcFace} />
+                  <span className={styles.fcRowMain}>
+                    {deleted.name}
+                    <small>{deleted.deletedAt ? `删除于${relativeTime(deleted.deletedAt)}` : ""}</small>
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.fcSecondary}
+                    onClick={async () => {
+                      try {
+                        await restoreBaby(deleted.id);
+                        await reload();
+                        setSelected(deleted.id);
+                        setRestoring(false);
+                        toast({ text: `已恢复${deleted.name}的频道`, tone: "done" });
+                      } catch (caught) {
+                        toast({ text: familyError(caught), tone: "error" });
+                      }
+                    }}
+                  >
+                    <RotateCcw size={13} /> 恢复
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </Modal>
+        )}
         {dialog}
         {toasts}
       </div>
@@ -174,98 +218,18 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
   );
 }
 
-function Sidebar({
-  userId,
-  overview,
-  selected,
-  onSelect,
-  onAdd,
-  onRestore,
-}: {
-  userId: string;
-  overview: FamilyOverview;
-  selected?: string;
-  onSelect: (id: string) => void;
-  onAdd: () => void;
-  onRestore: (baby: FamilyBaby) => void;
-}) {
-  const people = usePeople();
-  const me = overview.members.find((member) => member.accountId === userId);
-  return (
-    <aside className={styles.fcSide}>
-      <header className={styles.fcSideHead}>
-        <span className={styles.fcSideMark} aria-hidden="true">
-          <HeartHandshake size={18} />
-        </span>
-        <div>
-          <strong>家庭中心</strong>
-          <small>{overview.members.length} 位家人</small>
-        </div>
-      </header>
-      <nav aria-label="宝宝" className={styles.fcBabyList}>
-        <span className={styles.fcSideLabel}>宝宝</span>
-        {overview.babies.map((baby) => (
-          <button
-            key={baby.id}
-            type="button"
-            className={`${styles.fcBabyItem} ${baby.id === selected ? styles.active : ""}`}
-            aria-current={baby.id === selected ? "page" : undefined}
-            onClick={() => onSelect(baby.id)}
-          >
-            <BabyAvatar baby={baby} className={styles.fcBabyItemFace} />
-            <span>
-              <strong>{baby.nickname || baby.name}</strong>
-              <small>{ageText(baby.age, false)}</small>
-            </span>
-          </button>
-        ))}
-        {overview.me.guardian && (
-          <button type="button" className={styles.fcAddBaby} onClick={onAdd}>
-            <Plus size={15} /> 添加宝宝
-          </button>
-        )}
-      </nav>
-      {overview.deletedBabies.length > 0 && (
-        <div className={styles.fcDeleted}>
-          <span className={styles.fcSideLabel}>最近删除</span>
-          {overview.deletedBabies.map((baby) => (
-            <div key={baby.id} className={styles.fcDeletedItem}>
-              <span>{baby.name}</span>
-              <button type="button" onClick={() => onRestore(baby)} aria-label={`恢复${baby.name}的频道`}>
-                <RotateCcw size={13} /> 恢复
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      <footer className={styles.fcMe}>
-        {me && (
-          <PersonAvatar who={person(people, { id: me.accountId, username: me.username })} className={styles.fcMeFace} />
-        )}
-        <span>
-          <strong>我是{overview.me.role}</strong>
-          <small>{overview.me.guardian ? "家长" : "亲友"}</small>
-        </span>
-      </footer>
-    </aside>
-  );
-}
-
 function NoBabies({ guardian, onAdd }: { guardian: boolean; onAdd: () => void }) {
   return (
-    <div className={styles.fcEmptyChannel}>
-      <span className={styles.fcEmptyIcon} aria-hidden="true">
-        <Baby size={34} />
-      </span>
-      <h2>{guardian ? "添加第一个宝宝" : "还没有宝宝"}</h2>
+    <div className={styles.fcBlank}>
+      <h2>{guardian ? "为宝宝建一本成长手账" : "还没有宝宝"}</h2>
       <p>
         {guardian
-          ? "每个宝宝有自己的频道：照片视频、录音、日志、身高体重、疫苗和大事记都记在这里，全家一起看。"
-          : "家长添加宝宝后，这里会出现宝宝的频道。"}
+          ? "每个宝宝一本：照片视频、录音、日志、身高体重、疫苗和大事记都按月龄记在里面，全家一起看、一起写。"
+          : "家长添加宝宝后，这里会出现宝宝的成长手账。"}
       </p>
       {guardian && (
         <button type="button" className={styles.fcPrimary} onClick={onAdd}>
-          <Plus size={16} /> 添加宝宝
+          添加宝宝
         </button>
       )}
     </div>
@@ -297,16 +261,12 @@ function JoinScreen({
   return (
     <div className={styles.fcJoin}>
       <div className={styles.fcJoinCard}>
-        <span className={styles.fcJoinBadge} aria-hidden="true">
-          <Users size={28} />
-        </span>
+        <span className={styles.fcEyebrow}>家庭中心</span>
         {pending ? (
           <>
             <h1>已申请加入</h1>
-            <p>你申请以“{overview.me.role}”的身份加入家庭。家长批准后，你就能看到宝宝的频道， 和家人一起记录。</p>
-            <div className={styles.fcPending}>
-              <Clock3 size={16} /> 等待家长批准
-            </div>
+            <p>你申请以“{overview.me.role}”的身份加入。家长同意后，就能看到宝宝的成长手账，和家人一起记录。</p>
+            <p className={styles.fcWaiting}>等待家长批准</p>
             <button type="button" className={styles.fcLink} onClick={() => void onCancel()}>
               撤回申请
             </button>
@@ -316,8 +276,8 @@ function JoinScreen({
             <h1>{overview.exists ? "加入家庭中心" : "创建家庭中心"}</h1>
             <p>
               {overview.exists
-                ? "选择你在家里的称呼。家长批准后，你就能看到宝宝的频道，上传照片、写日志、留言。"
-                : "你是第一位家人。选择你的称呼来创建家庭，你会成为家长，可以添加宝宝、批准其他家人加入。"}
+                ? "选择你在家里的称呼。家长同意后，你就能看到宝宝的成长手账，上传照片、写日志、留言。"
+                : "你是第一位家人。选择你的称呼来创建家庭，你会成为家长，可以添加宝宝、同意其他家人加入。"}
             </p>
             <div className={styles.fcRoles} role="radiogroup" aria-label="我在家里是">
               {[...roles, "其他"].map((item) => (
@@ -337,7 +297,7 @@ function JoinScreen({
             {role === "其他" && (
               <input
                 className={styles.fcInput}
-                placeholder="例如：舅舅、姑姑、小姨"
+                placeholder="舅舅、姑姑、小姨…"
                 maxLength={8}
                 value={custom}
                 onChange={(event) => setCustom(event.target.value)}
@@ -348,7 +308,7 @@ function JoinScreen({
             <button type="button" className={styles.fcPrimary} disabled={!chosen || busy} onClick={() => void submit()}>
               {overview.exists ? "申请加入" : "创建家庭"}
             </button>
-            <p className={styles.fcFootnote}>宝宝的照片视频存进共享图库，NAS 上的每个账号都能在相册里看到。</p>
+            <p className={styles.fcNote}>宝宝的照片视频存进共享图库，NAS 上的每个账号都能在相册里看到。</p>
           </>
         )}
       </div>

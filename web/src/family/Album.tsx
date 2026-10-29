@@ -6,7 +6,7 @@ import { type FamilyBaby, familyError, getAlbum } from "./api";
 import { useFamily } from "./context";
 import styles from "./family.module.css";
 import { monthLabel } from "./format";
-import { Thumb } from "./parts";
+import { MonthTitle, Thumb } from "./parts";
 
 // Album is 云相册: the channel's photos and videos, newest first, grouped by
 // the month of life they were taken in. The photos live in the shared
@@ -73,9 +73,9 @@ export function Album({ baby, version, onAdd }: { baby: FamilyBaby; version: num
   if (!photos) return <span className="loader" aria-label="正在读取云相册" />;
   if (photos.length === 0)
     return (
-      <div className={styles.fcEmptyBoard}>
-        <p>云相册还是空的</p>
-        <span>在频道里上传的照片视频都会放在这里，按{baby.nickname || baby.name}的月龄排好。</span>
+      <div className={styles.fcBlank}>
+        <h2>相册还是空的</h2>
+        <p>在频道里上传的照片视频都会放在这里，按{baby.nickname || baby.name}的月龄排好。</p>
         <button type="button" className={styles.fcPrimary} onClick={onAdd}>
           <ImagePlus size={15} /> 上传照片视频
         </button>
@@ -84,11 +84,13 @@ export function Album({ baby, version, onAdd }: { baby: FamilyBaby; version: num
   return (
     <div className={styles.fcAlbum}>
       {groups.map((group) => (
-        <section key={group.month} className={styles.fcAlbumGroup} aria-label={monthLabel(group.month)}>
-          <h3>
-            {monthLabel(group.month)}
+        <section key={group.month} className={styles.fcMonth} aria-label={monthLabel(group.month)}>
+          <header className={styles.fcMonthHead}>
+            <h2>
+              <MonthTitle month={group.month} />
+            </h2>
             <small>{group.photos.length} 项</small>
-          </h3>
+          </header>
           <div className={styles.fcAlbumGrid}>
             {group.photos.map((photo) => (
               <button

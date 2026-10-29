@@ -8,13 +8,13 @@ import { thumbnailURL } from "../photos/api";
 import type { FamilyRecord } from "./api";
 import { memberOf, useFamily } from "./context";
 import styles from "./family.module.css";
+import { monthLabel } from "./format";
 
 // Modal is a dialog inside the family window. It stays in the window, as the
 // desktop's other in-window dialogs do, so the rest of the desktop keeps
 // working; Escape and the close button end it unless it is busy.
 export function Modal({
   title,
-  icon,
   busy,
   wide,
   onClose,
@@ -22,7 +22,6 @@ export function Modal({
   footer,
 }: {
   title: string;
-  icon?: ReactNode;
   busy?: boolean;
   wide?: boolean;
   onClose: () => void;
@@ -52,11 +51,6 @@ export function Modal({
           onInteractOutside={(event) => event.preventDefault()}
         >
           <header className={styles.fcModalHead}>
-            {icon && (
-              <span className={styles.fcModalIcon} aria-hidden="true">
-                {icon}
-              </span>
-            )}
             <Dialog.Title>{title}</Dialog.Title>
             <Dialog.Close className={styles.fcIconButton} aria-label="关闭" disabled={busy}>
               <X size={17} />
@@ -70,29 +64,40 @@ export function Modal({
   );
 }
 
-// PhotoGrid shows a record's photos the way a chat shows them: one large,
-// a few side by side, many as a grid ending in +N. A photo opens in 相册.
-export function PhotoGrid({ photos, limit = 9 }: { photos: FamilyRecord["photos"]; limit?: number }) {
+// MonthTitle is a month of life as a section heading: “7 个月”, and “1 岁”
+// over “2 个月” where the column is too narrow for both.
+export function MonthTitle({ month }: { month: number }) {
+  const years = Math.floor(month / 12);
+  if (month < 12 || month % 12 === 0) return <>{monthLabel(month)}</>;
+  return (
+    <>
+      <span>{years} 岁</span> <span>{month % 12} 个月</span>
+    </>
+  );
+}
+
+// Mosaic lays a record's photos out as one picture: a single photo large,
+// a few side by side, more as a large first photo beside a grid that ends in
+// +N. A photo opens in 相册.
+export function Mosaic({ photos, limit = 5 }: { photos: FamilyRecord["photos"]; limit?: number }) {
   const { onShowPhoto } = useFamily();
   if (photos.length === 0) return null;
-  const shown = photos.slice(0, limit);
+  const shown = photos.slice(0, Math.min(limit, 5));
   const more = photos.length - shown.length;
-  const layout =
-    photos.length === 1 ? styles.one : photos.length === 2 || photos.length === 4 ? styles.two : styles.three;
   return (
-    <div className={`${styles.fcPhotoGrid} ${layout}`}>
+    <div className={styles.fcMosaic} data-count={shown.length}>
       {shown.map((photo, index) => (
         <button
           key={photo.assetId}
           type="button"
-          className={styles.fcPhoto}
+          className={styles.fcTile}
           onClick={() => onShowPhoto(photo.assetId)}
-          aria-label={`在相册中打开第 ${index + 1} 张${photo.video ? "视频" : "照片"}`}
+          aria-label={`在相册中打开第 ${index + 1} ${photo.video ? "段视频" : "张照片"}`}
         >
           <Thumb assetId={photo.assetId} />
           {photo.video && (
             <span className={styles.fcVideoMark} aria-hidden="true">
-              <Play size={14} fill="currentColor" />
+              <Play size={12} fill="currentColor" />
             </span>
           )}
           {more > 0 && index === shown.length - 1 && <span className={styles.fcMore}>+{more}</span>}
@@ -102,8 +107,8 @@ export function PhotoGrid({ photos, limit = 9 }: { photos: FamilyRecord["photos"
   );
 }
 
-// Thumb shows a photo's thumbnail, or a soft placeholder while the photo
-// service is still making it.
+// Thumb shows a photo's thumbnail, or a quiet placeholder while the photo
+// service is still making it or cannot be reached.
 export function Thumb({ assetId }: { assetId: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) return <span className={styles.fcThumbPending} aria-hidden="true" />;
@@ -133,7 +138,8 @@ export function MemberFace({
   return <PersonAvatar who={person(people, { id: accountId, username })} className={className} />;
 }
 
-// MemberName is the member's nickname and family role, as the family calls them.
+// useMemberName names a member as the family sees them: their nickname, and
+// their family role.
 export function useMemberName() {
   const family = useFamily();
   const people = usePeople();
@@ -156,8 +162,8 @@ export function ItemMenu({ label, items }: { label: string; items: MenuItem[] })
   if (items.length === 0) return null;
   return (
     <DropdownMenu.Root modal={false}>
-      <DropdownMenu.Trigger className={styles.fcIconButton} aria-label={label}>
-        <Ellipsis size={17} />
+      <DropdownMenu.Trigger className={`${styles.fcIconButton} ${styles.fcMenuTrigger}`} aria-label={label}>
+        <Ellipsis size={16} />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content className={styles.fcMenu} align="end" sideOffset={4}>

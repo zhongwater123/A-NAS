@@ -1,4 +1,3 @@
-import { Crown, MessageCircleHeart, Send, UserPlus } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { relativeTime } from "../lib/time";
@@ -22,8 +21,8 @@ import { canDelete, useFamily } from "./context";
 import styles from "./family.module.css";
 import { ItemMenu, MemberFace, type MenuItem, useMemberName } from "./parts";
 
-// Members is 亲友团: who is in the family, who asks to join, and the message
-// wall for the baby.
+// Members is 家人 (亲友团): who asks to join, who is in the family, and the
+// letters the family leaves for the baby to read when grown.
 export function Members({ baby }: { baby: FamilyBaby }) {
   const family = useFamily();
   const nameOf = useMemberName();
@@ -89,17 +88,22 @@ export function Members({ baby }: { baby: FamilyBaby }) {
 
   return (
     <div className={styles.fcMembers}>
+      <header className={styles.fcBoardHead}>
+        <div>
+          <h2>家人</h2>
+          <p>家长可以添加宝宝、修改宝宝资料、同意加入、删除任何人的内容；亲友可以记录和留言，修改自己添加的内容。</p>
+        </div>
+      </header>
+
       {overview.requests.length > 0 && (
-        <section className={styles.fcSection}>
-          <h3>
-            <UserPlus size={15} /> 申请加入
-          </h3>
-          <ul className={styles.fcRequests}>
+        <section className={styles.fcBoardSection}>
+          <h3>申请加入</h3>
+          <ul className={styles.fcRows}>
             {overview.requests.map((request) => (
               <li key={request.accountId}>
                 <MemberFace accountId={request.accountId} username={request.username} className={styles.fcFace} />
-                <span className={styles.fcRequestWho}>
-                  <strong>{nameOf(request.accountId, request.username).name}</strong>
+                <span className={styles.fcRowMain}>
+                  {nameOf(request.accountId, request.username).name}
                   <small>
                     想以“{request.role}”的身份加入 · {relativeTime(request.requestedAt)}
                   </small>
@@ -113,7 +117,7 @@ export function Members({ baby }: { baby: FamilyBaby }) {
                 </button>
                 <button
                   type="button"
-                  className={styles.fcPrimarySmall}
+                  className={styles.fcPrimary}
                   onClick={() => void run(() => approveJoin(request.accountId), `${request.role}已加入家庭`)}
                 >
                   同意
@@ -123,44 +127,41 @@ export function Members({ baby }: { baby: FamilyBaby }) {
           </ul>
         </section>
       )}
-      <section className={styles.fcSection}>
-        <h3>家人 · {overview.members.length}</h3>
-        <ul className={styles.fcMemberGrid}>
-          {overview.members.map((member) => {
-            const who = nameOf(member.accountId, member.username);
-            return (
-              <li key={member.accountId} className={styles.fcMemberCard}>
-                <MemberFace accountId={member.accountId} username={member.username} className={styles.fcFaceLarge} />
-                <strong>{who.name}</strong>
-                <span className={styles.fcRoleTag}>{member.role}</span>
-                {member.guardian && (
-                  <span className={styles.fcGuardian}>
-                    <Crown size={11} /> 家长
-                  </span>
-                )}
-                <div className={styles.fcMemberMenu}>
-                  <ItemMenu label={`${who.name}的操作`} items={menu(member)} />
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-        <p className={styles.fcFootnote}>
-          家长可以添加宝宝、修改宝宝资料、批准加入、删除任何人的内容；亲友可以添加内容和留言，修改自己添加的内容。
-        </p>
-      </section>
-      <Wall baby={baby} />
+
+      <ul className={styles.fcPeople} aria-label="家人">
+        {overview.members.map((member) => {
+          const who = nameOf(member.accountId, member.username);
+          return (
+            <li key={member.accountId}>
+              <MemberFace accountId={member.accountId} username={member.username} className={styles.fcFaceLarge} />
+              <strong>{member.role}</strong>
+              <span className={styles.fcPeopleWho}>
+                {who.name}
+                {member.guardian && <em>家长</em>}
+              </span>
+              <div className={styles.fcPeopleMenu}>
+                <ItemMenu label={`${who.name}的操作`} items={menu(member)} />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      <Letters baby={baby} />
     </div>
   );
 }
 
-function Wall({ baby }: { baby: FamilyBaby }) {
+// Letters is the message wall: what the family writes to the baby, newest
+// first, to read when grown.
+function Letters({ baby }: { baby: FamilyBaby }) {
   const family = useFamily();
   const { toast } = family;
   const nameOf = useMemberName();
   const [messages, setMessages] = useState<FamilyComment[]>();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const name = baby.nickname || baby.name;
 
   useEffect(() => {
     let live = true;
@@ -192,12 +193,10 @@ function Wall({ baby }: { baby: FamilyBaby }) {
   };
 
   return (
-    <section className={styles.fcSection}>
-      <h3>
-        <MessageCircleHeart size={15} /> 给{baby.nickname || baby.name}的留言
-      </h3>
+    <section className={styles.fcBoardSection}>
+      <h3>写给{name}的话</h3>
       <form
-        className={styles.fcWallForm}
+        className={styles.fcLetterForm}
         onSubmit={(event) => {
           event.preventDefault();
           void send();
@@ -205,50 +204,47 @@ function Wall({ baby }: { baby: FamilyBaby }) {
       >
         <textarea
           className={styles.fcTextarea}
-          rows={2}
+          rows={3}
           maxLength={1000}
-          placeholder={`写给${baby.nickname || baby.name}的话，等TA长大了看`}
+          placeholder={`写给${name}的话，等TA长大了看`}
           value={text}
           onChange={(event) => setText(event.target.value)}
           aria-label="留言"
         />
-        <button type="submit" className={styles.fcPrimarySmall} disabled={!text.trim() || busy}>
-          <Send size={14} /> 留言
+        <button type="submit" className={styles.fcPrimary} disabled={!text.trim() || busy}>
+          留言
         </button>
       </form>
       {messages === undefined && <span className="loader small" aria-label="正在读取留言" />}
-      <ul className={styles.fcWall}>
+      <ul className={styles.fcLetters}>
         {messages?.map((message) => {
           const who = nameOf(message.authorId, message.authorName);
           return (
             <li key={message.id}>
-              <MemberFace accountId={message.authorId} username={message.authorName} className={styles.fcFace} />
-              <div>
-                <p className={styles.fcWallWho}>
-                  <strong>{who.name}</strong>
-                  {who.role && <span className={styles.fcRoleTag}>{who.role}</span>}
-                  <small>{relativeTime(message.createdAt)}</small>
-                </p>
-                <p className={styles.fcText}>{message.text}</p>
-              </div>
-              <ItemMenu
-                label="留言操作"
-                items={
-                  canDelete(family, message.authorId)
-                    ? [
-                        {
-                          label: "删除留言",
-                          danger: true,
-                          run: () =>
-                            void deleteComment(message.id).then(
-                              () => setMessages((current) => current?.filter((item) => item.id !== message.id)),
-                              (caught: unknown) => toast({ text: familyError(caught), tone: "error" }),
-                            ),
-                        },
-                      ]
-                    : []
-                }
-              />
+              <p>{message.text}</p>
+              <footer>
+                <MemberFace accountId={message.authorId} username={message.authorName} className={styles.fcFaceTiny} />
+                <b>{who.role || who.name}</b>
+                <span>{relativeTime(message.createdAt)}</span>
+                <ItemMenu
+                  label="留言操作"
+                  items={
+                    canDelete(family, message.authorId)
+                      ? [
+                          {
+                            label: "删除留言",
+                            danger: true,
+                            run: () =>
+                              void deleteComment(message.id).then(
+                                () => setMessages((current) => current?.filter((item) => item.id !== message.id)),
+                                (caught: unknown) => toast({ text: familyError(caught), tone: "error" }),
+                              ),
+                          },
+                        ]
+                      : []
+                  }
+                />
+              </footer>
             </li>
           );
         })}

@@ -92,12 +92,43 @@ describe("FamilyPanel", () => {
       }),
     );
     render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
-    expect(await screen.findByRole("heading", { name: /小米粒/ })).toBeTruthy();
-    expect(screen.getByText("7 个月 14 天")).toBeTruthy();
-    expect(await screen.findByText("百白破疫苗第 2 剂可以接种了")).toBeTruthy();
-    expect(await screen.findByText("今天第一次笑出了声")).toBeTruthy();
-    const measurement = screen.getByText("身长").closest("article")!;
+    const side = await screen.findByRole("complementary", { name: "小米粒的资料" });
+    expect(within(side).getByRole("heading", { name: /小米粒/ })).toBeTruthy();
+    expect(
+      within(side).getByText((_, node) => node?.tagName === "P" && node.textContent === "7 个月 14 天"),
+    ).toBeTruthy();
+    expect(await within(side).findByRole("button", { name: "记录百白破疫苗第 2 剂" })).toBeTruthy();
+    // The records sit in the month of life they happened in.
+    const month = await screen.findByRole("region", { name: "7 个月" });
+    expect(within(month).getByText("今天第一次笑出了声")).toBeTruthy();
+    const measurement = within(month).getByText("身长").closest("article")!;
     expect(within(measurement).getByText(/7.20/)).toBeTruthy();
+    // 66 cm at 7 months 13 days lies between the fixture's P25 and P50.
+    expect(await within(measurement).findByText("P25—P50")).toBeTruthy();
+  });
+
+  it("opens a record's comments and adds one", async () => {
+    let said = "";
+    server.use(
+      ...familyHandlers({ records: [familyRecord()] }),
+      http.post("/api/v1/family/records/{recordId}/comments", async ({ request, response }) => {
+        said = (await request.json()).text;
+        return response(201).json({
+          id: "c_1",
+          recordId: "rec_1",
+          text: said,
+          authorId: "user:mom",
+          authorName: "mom",
+          createdAt: "2026-10-29T10:00:00Z",
+        });
+      }),
+    );
+    render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
+    await screen.findByText("今天第一次笑出了声");
+    await userEvent.click(screen.getByRole("button", { name: "留言" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "留言" }), "妈，辛苦了{Enter}");
+    await waitFor(() => expect(said).toBe("妈，辛苦了"));
+    expect(await screen.findByText("妈，辛苦了")).toBeTruthy();
   });
 
   it("writes a journal entry and shows it at the top", async () => {
@@ -111,9 +142,9 @@ describe("FamilyPanel", () => {
       }),
     );
     render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
-    await screen.findByText("还没有任何记录");
-    await userEvent.click(screen.getByRole("button", { name: "记一笔" }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: "日志" }));
+    await screen.findByText("第一页还空着");
+    const side = screen.getByRole("complementary", { name: "小米粒的资料" });
+    await userEvent.click(within(side).getByRole("button", { name: "日志" }));
     const dialog = await screen.findByRole("dialog", { name: "记录日志" });
     await userEvent.type(within(dialog).getByRole("textbox", { name: "写点什么" }), "外婆来看你了");
     server.use(
@@ -130,10 +161,44 @@ describe("FamilyPanel", () => {
   it("asks a guardian to add the first baby", async () => {
     server.use(...familyHandlers({ overview: familyOverview({ babies: [] }) }));
     render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
-    expect(await screen.findByRole("heading", { name: "添加第一个宝宝" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "为宝宝建一本成长手账" })).toBeTruthy();
   });
 
-  it("lists babies in the sidebar and switches channels", async () => {
+  it("folds the vaccine ages already done in the booklet", async () => {
+    const dose = (code: string, name: string, ageLabel: string, days: number, status: "given" | "upcoming") => ({
+      code,
+      name,
+      dose: 1,
+      programme: true,
+      ageLabel,
+      dueDate: daysFromToday(days),
+      status,
+      ...(status === "given" ? { givenOn: daysFromToday(days) } : {}),
+    });
+    server.use(
+      ...familyHandlers({
+        schedule: {
+          ...emptySchedule,
+          doses: [
+            dose("hepb", "乙肝疫苗", "出生时", -220, "given"),
+            dose("bcg", "卡介苗", "出生时", -220, "given"),
+            dose("polio", "脊灰疫苗", "2月龄", -160, "given"),
+            dose("mmr", "麻腮风疫苗", "8月龄", 20, "upcoming"),
+          ],
+        },
+      }),
+    );
+    render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
+    await userEvent.click(await screen.findByRole("tab", { name: "疫苗" }));
+    const fold = await screen.findByRole("button", { name: /出生时 — 2月龄的 3 剂都已完成/ });
+    expect(screen.getByText("麻腮风疫苗")).toBeTruthy();
+    expect(screen.queryByText("卡介苗")).toBeNull();
+    await userEvent.click(fold);
+    expect(screen.getByText("卡介苗")).toBeTruthy();
+    expect(screen.getAllByText("已种")).toHaveLength(3);
+  });
+
+  it("lists babies in the rail and switches channels", async () => {
     const second = familyBaby({
       id: "baby_2",
       name: "二宝",

@@ -103,6 +103,31 @@ export const emptySchedule: FamilyVaccineSchedule = {
   records: [],
 };
 
+// familyGrowth has a few made-up points of each curve around the fixture
+// baby's age, enough to place a measurement among the percentiles.
+export const familyGrowth: FamilyGrowth = {
+  sex: "female",
+  birthDate: "2026-03-15",
+  standard: "WS/T 423—2022",
+  percentiles: ["P3", "P10", "P25", "P50", "P75", "P90", "P97"],
+  curves: {
+    height: [
+      { ageMonths: 6, values: [61, 62.5, 64, 65.5, 67, 68.5, 70] },
+      { ageMonths: 9, values: [65, 66.5, 68, 69.5, 71, 72.5, 74] },
+    ],
+    weight: [
+      { ageMonths: 6, values: [6, 6.4, 6.9, 7.4, 7.9, 8.4, 8.9] },
+      { ageMonths: 9, values: [6.8, 7.2, 7.7, 8.2, 8.7, 9.2, 9.7] },
+    ],
+    head: [
+      { ageMonths: 6, values: [40, 40.8, 41.6, 42.4, 43.2, 44, 44.8] },
+      { ageMonths: 9, values: [41.5, 42.3, 43.1, 43.9, 44.7, 45.5, 46.3] },
+    ],
+  },
+  measurements: [],
+  latest: {},
+};
+
 export interface FamilyOptions {
   overview?: FamilyOverview;
   records?: FamilyRecord[];
@@ -120,6 +145,9 @@ export function familyHandlers(options: FamilyOptions = {}) {
     ),
     http.get("/api/v1/family/babies/{babyId}/vaccines", ({ response }) =>
       response(200).json(options.schedule ?? emptySchedule),
+    ),
+    http.get("/api/v1/family/babies/{babyId}/growth", ({ response }) =>
+      response(200).json(options.growth ?? familyGrowth),
     ),
   ];
 }
