@@ -44,8 +44,8 @@ RANDOM_PIECE = 4.0
 METRICS = ("onTopic", "crossShot", "flat", "shotShare", "reversals", "length")
 
 
-def load_instructions():
-    with open(INSTRUCTIONS, encoding="utf-8") as file:
+def load_instructions(path):
+    with open(path, encoding="utf-8") as file:
         return json.load(file)["instructions"]
 
 
@@ -102,7 +102,7 @@ def random_plan(index, found, seconds, rng):
 def rules(args):
     from anas_ai import providers
 
-    instructions = load_instructions()
+    instructions = load_instructions(args.instructions)
     os.makedirs(args.weight_cache, exist_ok=True)
     provider = providers.MediaPipeProvider(args.model, MANIFEST, cache_dir=args.weight_cache)
     texts = sorted({t for i in instructions for t in [i["text"], *i["topic"], *i.get("condition", [])]})
@@ -136,7 +136,7 @@ def score(args):
         vectors = dict(zip(data["keys"].tolist(), data["vectors"], strict=True))
     rng = random.Random(SEED)  # noqa: S311  a repeatable draw, not a secret
     out = {}
-    for instruction in load_instructions():
+    for instruction in load_instructions(args.instructions):
         row = {}
         baseline = os.path.join(vm.CACHE, "montage", instruction["id"], f"{instruction['id']}.json")
         if os.path.exists(baseline):
@@ -164,6 +164,8 @@ def score(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--set", default=vm.SET, help="the videos, as video_moments --set")
+    parser.add_argument("--instructions", default=INSTRUCTIONS, help="the instructions for that set")
     steps = parser.add_subparsers(dest="step", required=True)
     step = steps.add_parser("rules", help="plan and cut each instruction by rule alone")
     step.add_argument("--model", required=True)
@@ -171,6 +173,7 @@ def main():
     step = steps.add_parser("score", help="score every version against the instructions")
     step.add_argument("--cache", required=True, help="the model's directory under the cache, with index.json")
     args = parser.parse_args()
+    vm.use_set(args.set)
     if args.step == "rules":
         rules(args)
     else:
