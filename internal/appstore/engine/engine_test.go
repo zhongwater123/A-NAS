@@ -139,9 +139,19 @@ func (f *fakeDocker) ProjectContainers(_ context.Context, project string) ([]eng
 type fakeRunner struct {
 	mu    sync.Mutex
 	calls [][]string
-	err   error
-	gate  chan struct{}
-	after func(args []string)
+	// at is when each call started; running counts the calls under way
+	// and most the largest count seen.
+	at      []time.Time
+	running int
+	most    int
+	err     error
+	gate    chan struct{}
+	after   func(args []string)
+	// quiet leaves out the 45 lines of output each call writes otherwise.
+	quiet bool
+	// say, when set, gives a line the call writes last, as Compose ends
+	// with what failed.
+	say func(args []string) string
 	// fail, when set, gives each call's error in place of err.
 	fail func(args []string) error
 	// hold makes the calls it picks report on held and then wait until
@@ -162,15 +172,30 @@ func (f *fakeRunner) ComposeVersion(context.Context) (string, error) {
 func (f *fakeRunner) Run(ctx context.Context, args []string, output io.Writer) error {
 	f.mu.Lock()
 	f.calls = append(f.calls, args)
+	f.at = append(f.at, time.Now())
+	f.running++
+	f.most = max(f.most, f.running)
 	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.running--
+		f.mu.Unlock()
+	}()
 	if f.gate != nil {
 		<-f.gate
 	}
-	for i := range 45 {
-		_, _ = fmt.Fprintf(output, "step %d\n", i)
+	if !f.quiet {
+		for i := range 45 {
+			_, _ = fmt.Fprintf(output, "step %d\n", i)
+		}
 	}
 	if f.after != nil {
 		f.after(args)
+	}
+	if f.say != nil {
+		if line := f.say(args); line != "" {
+			_, _ = fmt.Fprintln(output, line)
+		}
 	}
 	if f.hold != nil && f.hold(args) {
 		f.held <- struct{}{}
@@ -183,13 +208,19 @@ func (f *fakeRunner) Run(ctx context.Context, args []string, output io.Writer) e
 	return f.err
 }
 
+// pullsThen is what an install of plan runs: a pull for each of its
+// services, then the commands in rest.
+func pullsThen(plan appstore.Plan, rest ...string) []string {
+	return append(slices.Repeat([]string{"pull"}, len(plan.Services)), rest...)
+}
+
 // verbs lists the Compose commands the runner was given.
 func (f *fakeRunner) verbs() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var verbs []string
 	for _, call := range f.calls {
-		for _, verb := range []string{"up", "logs", "down"} {
+		for _, verb := range []string{"pull", "up", "logs", "down"} {
 			if slices.Contains(call, verb) {
 				verbs = append(verbs, verb)
 			}
@@ -219,11 +250,7 @@ func newStoreIn(t *testing.T, state string, docker *fakeDocker, runner *fakeRunn
 
 func TestInstallRunsTheConfirmedComposeFile(t *testing.T) {
 	docker := &fakeDocker{}
-	runner := &fakeRunner{after: func([]string) {
-		docker.mu.Lock()
-		docker.containers = append(docker.containers, engine.ContainerInfo{Name: "uptimekuma", AppID: "uptimekuma", Running: true, PublishedPorts: []uint16{3001}})
-		docker.mu.Unlock()
-	}}
+	runner := &fakeRunner{after: composeOn(docker, []engine.ContainerInfo{{Name: "uptimekuma", AppID: "uptimekuma", Running: true, PublishedPorts: []uint16{3001}}})}
 	store, state := newStore(t, docker, runner)
 	ctx := context.Background()
 
@@ -241,8 +268,16 @@ func TestInstallRunsTheConfirmedComposeFile(t *testing.T) {
 	if err != nil || string(written) != string(plan.Compose) {
 		t.Fatalf("compose file was not the confirmed plan: %v", err)
 	}
-	if got := strings.Join(runner.calls[0], " "); !strings.Contains(got, "-p a-nas-uptimekuma") || !strings.Contains(got, "up --detach") {
-		t.Fatalf("runner args = %s", got)
+	if verbs := runner.verbs(); !slices.Equal(verbs, pullsThen(plan, "up")) {
+		t.Fatalf("compose ran %v, want each service pulled and then up", verbs)
+	}
+	project := "-p a-nas-uptimekuma -f " + filepath.Join(state, "apps", "uptimekuma", "docker-compose.yml")
+	if got := strings.Join(runner.calls[0], " "); got != "compose --progress json "+project+" pull --policy missing "+plan.Services[0].Service {
+		t.Fatalf("pull args = %s", got)
+	}
+	// Every image is present by then; up must not reach a registry.
+	if got := strings.Join(runner.calls[1], " "); got != "compose --progress plain "+project+" up --detach --remove-orphans --pull never" {
+		t.Fatalf("up args = %s", got)
 	}
 	apps, _ := store.Apps(ctx)
 	status := find(apps, "uptimekuma")
@@ -353,8 +388,9 @@ func TestInstallRollsBackANetworkOutsideThePool(t *testing.T) {
 	}
 	store.Wait()
 
-	if len(runner.calls) != 2 || !strings.Contains(strings.Join(runner.calls[1], " "), "-p a-nas-audiobookshelf -f ") ||
-		!strings.HasSuffix(strings.Join(runner.calls[1], " "), "down --remove-orphans") {
+	last := strings.Join(runner.calls[len(runner.calls)-1], " ")
+	if verbs := runner.verbs(); !slices.Equal(verbs, pullsThen(plan, "up", "down")) || !strings.Contains(last, "-p a-nas-audiobookshelf -f ") ||
+		!strings.HasSuffix(last, "down --remove-orphans") {
 		t.Fatalf("runner calls = %v, want up then a rollback down", runner.calls)
 	}
 	apps, _ := store.Apps(ctx)
@@ -380,7 +416,7 @@ func TestInstallKeepsANetworkInsideThePool(t *testing.T) {
 	store.Wait()
 
 	apps, _ := store.Apps(ctx)
-	if job := find(apps, "audiobookshelf").Job; len(runner.calls) != 1 || job.State != appstore.JobSucceeded {
+	if job := find(apps, "audiobookshelf").Job; !slices.Equal(runner.verbs(), pullsThen(plan, "up")) || job.State != appstore.JobSucceeded {
 		t.Fatalf("calls = %v job = %+v, want one up and success", runner.calls, job)
 	}
 }
@@ -423,7 +459,7 @@ func TestInstallRollsBackAMountBeyondItsFolder(t *testing.T) {
 	}
 	store.Wait()
 
-	if len(runner.calls) != 2 || !strings.HasSuffix(strings.Join(runner.calls[1], " "), "down --remove-orphans") {
+	if !slices.Equal(runner.verbs(), pullsThen(plan, "up", "down")) || !strings.HasSuffix(strings.Join(runner.calls[len(runner.calls)-1], " "), "down --remove-orphans") {
 		t.Fatalf("runner calls = %v, want up then a rollback down", runner.calls)
 	}
 	apps, _ := store.Apps(ctx)
@@ -450,7 +486,7 @@ func TestInstallKeepsMountsOnTheirFolders(t *testing.T) {
 	store.Wait()
 
 	apps, _ := store.Apps(ctx)
-	if job := find(apps, "memos").Job; len(runner.calls) != 1 || job.State != appstore.JobSucceeded {
+	if job := find(apps, "memos").Job; !slices.Equal(runner.verbs(), pullsThen(plan, "up")) || job.State != appstore.JobSucceeded {
 		t.Fatalf("calls = %v job = %+v, want one up and success", runner.calls, job)
 	}
 }
@@ -494,7 +530,7 @@ func TestInstallRollsBackAContainerThatDoesNotRunAsPlanned(t *testing.T) {
 			store.Wait()
 			apps, _ := store.Apps(ctx)
 			job := find(apps, "navidrome").Job
-			if job.State != appstore.JobFailed || !strings.Contains(job.Error, appstore.ErrRuntimeMismatch.Error()) || len(runner.calls) != 2 {
+			if job.State != appstore.JobFailed || !strings.Contains(job.Error, appstore.ErrRuntimeMismatch.Error()) || !slices.Equal(runner.verbs(), pullsThen(plan, "up", "down")) {
 				t.Fatalf("job = %+v calls = %v, want a rolled-back install", job, runner.calls)
 			}
 		})
@@ -510,7 +546,7 @@ func TestInstallRollsBackAContainerThatDoesNotRunAsPlanned(t *testing.T) {
 	}
 	store.Wait()
 	apps, _ := store.Apps(ctx)
-	if job := find(apps, "navidrome").Job; job.State != appstore.JobSucceeded || len(runner.calls) != 1 {
+	if job := find(apps, "navidrome").Job; job.State != appstore.JobSucceeded || !slices.Equal(runner.verbs(), pullsThen(plan, "up")) {
 		t.Fatalf("job = %+v calls = %v, want success", job, runner.calls)
 	}
 }
@@ -589,8 +625,8 @@ func TestInstallFailsWhenAContainerKeepsRestarting(t *testing.T) {
 	if job.State != appstore.JobFailed || !strings.Contains(job.Error, "容器 n8n 启动后不断重启（退出码 1）") || !strings.Contains(job.Error, "安装已回滚") {
 		t.Fatalf("job = %+v", job)
 	}
-	if verbs := runner.verbs(); !slices.Equal(verbs, []string{"up", "logs", "down"}) {
-		t.Fatalf("compose ran %v, want up, logs, down", verbs)
+	if verbs := runner.verbs(); !slices.Equal(verbs, pullsThen(plan, "up", "logs", "down")) {
+		t.Fatalf("compose ran %v, want pull, up, logs, down", verbs)
 	}
 }
 
@@ -698,13 +734,14 @@ func TestInstallRollsBackWhenComposeFailsPartway(t *testing.T) {
 	store, _ := newStore(t, docker, runner)
 	ctx := context.Background()
 
-	if _, err := store.Install(ctx, "linkwarden", linkwardenPlan(t, store).Digest, identity); err != nil {
+	plan := linkwardenPlan(t, store)
+	if _, err := store.Install(ctx, "linkwarden", plan.Digest, identity); err != nil {
 		t.Fatal(err)
 	}
 	store.Wait()
 
-	if verbs := runner.verbs(); !slices.Equal(verbs, []string{"up", "logs", "down"}) {
-		t.Fatalf("compose ran %v, want up, logs, down", verbs)
+	if verbs := runner.verbs(); !slices.Equal(verbs, pullsThen(plan, "up", "logs", "down")) {
+		t.Fatalf("compose ran %v, want pulls, up, logs, down", verbs)
 	}
 	apps, _ := store.Apps(ctx)
 	status := find(apps, "linkwarden")
@@ -762,8 +799,8 @@ func TestContainersOfAFailedInstallAreNotAnInstalledApp(t *testing.T) {
 		t.Fatalf("installing again over a failed install: %v", err)
 	}
 	store.Wait()
-	if len(runner.calls) < 2 || slices.Contains(runner.calls[0], "-f") || !slices.Contains(runner.calls[0], "down") || !slices.Contains(runner.calls[1], "up") {
-		t.Fatalf("runner calls = %v, want the leftovers taken down before up", runner.calls)
+	if verbs := runner.verbs(); !slices.Equal(verbs, append([]string{"down"}, pullsThen(plan, "up")...)) || slices.Contains(runner.calls[0], "-f") {
+		t.Fatalf("runner calls = %v, want the leftovers taken down before the pulls and up", runner.calls)
 	}
 	apps, _ = store.Apps(ctx)
 	if status := find(apps, "linkwarden"); status.State != appstore.StateInstalled || status.Total != 3 || status.Job.State != appstore.JobSucceeded {
@@ -786,13 +823,14 @@ func TestStoppingTheAgentRollsBackARunningInstall(t *testing.T) {
 	}
 	store, state := newStore(t, docker, runner)
 	ctx := context.Background()
-	if _, err := store.Install(ctx, "linkwarden", linkwardenPlan(t, store).Digest, identity); err != nil {
+	plan := linkwardenPlan(t, store)
+	if _, err := store.Install(ctx, "linkwarden", plan.Digest, identity); err != nil {
 		t.Fatal(err)
 	}
 	<-runner.held
 	store.Stop()
 
-	if verbs := runner.verbs(); !slices.Equal(verbs, []string{"up", "down"}) {
+	if verbs := runner.verbs(); !slices.Equal(verbs, pullsThen(plan, "up", "down")) {
 		t.Fatalf("compose ran %v, want up cancelled and then down", verbs)
 	}
 	memos, _ := store.Plan(ctx, "memos", identity)

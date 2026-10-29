@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-10-28：镜像仓库一次限流就让应用安装失败](2026-10-28-registry-rate-limit-failed-install.md)
 - [2026-10-27：Agent空间 保留目录未受保护，链接扩大 Landlock 可写范围](2026-10-27-agent-space-policy-directories.md)
 - [2026-10-28：分享历史导致重复 IPC，最小化窗口仍下载完整对话](2026-10-28-share-history-polling.md)
 - [2026-10-27：跨空间移动丢失复制期间到达的内容与修改时间](2026-10-27-cross-space-move-lost-source-changes.md)
