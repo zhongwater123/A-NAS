@@ -762,6 +762,17 @@ dynamic_identity() { # UNIT: runs under a UID systemd allocates for it, not root
   uid=$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value "$1")/status")
   ((uid >= 61184 && uid <= 65519))
 }
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+worker_memory_beside_photos() { # where internal/photoservice/gate.go workerCgroup reads it
+  local photos root worker held
+  photos=$(systemctl show -p ControlGroup --value anas-photos.service)
+  root=${photos%/system.slice/*} # this container's systemd root under the host's
+  worker=$(systemctl show -p ControlGroup --value anas-ai.service)
+  # cgroup files report a size of 0, so read the value.
+  held=$(cat "/sys/fs/cgroup$root/anas.slice/anas-ai.slice/anas-ai.service/memory.current" 2>/dev/null)
+  [[ "$worker" == "$root/anas.slice/anas-ai.slice/anas-ai.service" && "$held" =~ ^[1-9][0-9]*$ ]] ||
+    { echo "the Worker is in '$worker' holding '$held', the photo service in '$photos'" >&2; return 1; }
+}
 check "the installer enables the AI socket" systemctl is-enabled --quiet anas-ai.socket
 check "only the photo service reaches the AI socket" \
   test "$(stat -c '%a %U %G' /run/a-nas-ai/ai.sock)" = "660 root a-nas-photos"
@@ -775,8 +786,12 @@ check "the release links the models and runtime kept once by content" \
 ai_cores=$(($(nproc) > 2 ? $(nproc) - 2 : 1))
 check "the Worker may use every core but two" \
   test "$(systemctl show -p CPUQuotaPerSecUSec --value anas-ai.service)" = "${ai_cores}s"
-check "the kernel reclaims the Worker's memory before its hard limit" \
-  test "$(systemctl show -p MemoryHigh --value anas-ai.service):$(systemctl show -p MemoryMax --value anas-ai.service)" = 2684354560:3221225472
+memory_kib=$(awk '$1 == "MemTotal:" { print $2 }' /proc/meminfo)
+check "the Worker's memory is capped only at all but 2.5 GiB, against a runaway" \
+  test "$(systemctl show -p MemoryHigh --value anas-ai.service):$(systemctl show -p MemoryMax --value anas-ai.service)" = \
+  "infinity:$(((memory_kib > 3670016 ? memory_kib - 2621440 : 1048576) * 1024))"
+check "the Worker's models are never swapped out, and it is the first to end when memory runs out" \
+  test "$(systemctl show -p MemorySwapMax --value anas-ai.service):$(systemctl show -p OOMScoreAdjust --value anas-ai.service)" = 0:500
 check "the Worker runs in its own slice, apart from the device's other work" \
   test "$(systemctl show -p Slice --value anas-ai.service)" = anas-ai.slice
 check "background work gives way to the device's other work where weights compare" \
@@ -785,6 +800,9 @@ check "AI work yields to the pressure of the device's other work, not its own" \
   journal_has anas-photos.service "$installed_at" "AI work yields to the pressure of"
 check "search starts the Worker through its socket" semantic_search 猫
 check "the Worker runs under its own dynamic identity" dynamic_identity anas-ai.service
+check "the Worker's memory is where the photo service's gate reads it" worker_memory_beside_photos
+check "the Worker records what it holds once started, for its models' memory" \
+  journal_has anas-ai.service "$installed_at" "started with"
 if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
   check "the Worker serves the real model in its sandbox" \
     journal_has anas-ai.service "$installed_at" "serving $(jq -r .name "$ai/model.json")@$(jq -r .sha256 "$ai/model.json" | cut -c1-12)"

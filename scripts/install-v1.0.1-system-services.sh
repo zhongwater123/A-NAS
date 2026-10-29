@@ -400,6 +400,14 @@ install -d -o root -g root -m 0755 /etc/systemd/system/anas-ai.service.d
 printf '# Written by the A-NAS installer for %s cores: all but two.\n[Service]\nCPUQuota=%s%%\n' \
   "$cores" "$((cores > 2 ? (cores - 2) * 100 : 100))" > /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
 chmod 0644 /etc/systemd/system/anas-ai.service.d/cpu-reserve.conf
+# Its memory has no budget: background work loads a model only while 1 GiB
+# stays free (anas-ai.service). The cap, all of this machine's memory but
+# 2.5 GiB and at least 1 GiB, only stops a runaway.
+memory_kib=$(awk '$1 == "MemTotal:" { print $2 }' /proc/meminfo)
+printf '# Written by the A-NAS installer for %s KiB of memory: all but 2.5 GiB.\n[Service]\nMemoryMax=%sK\n' \
+  "$memory_kib" "$((memory_kib > 3670016 ? memory_kib - 2621440 : 1048576))" \
+  > /etc/systemd/system/anas-ai.service.d/memory-reserve.conf
+chmod 0644 /etc/systemd/system/anas-ai.service.d/memory-reserve.conf
 # One vector index instance per owning service, reached only through its
 # proxy socket (ADR 0028).
 install -o root -g root -m 0644 "$source_release/anas-vectors-system.slice" /etc/systemd/system/anas-vectors.slice

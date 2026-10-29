@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-28
+更新时间：2026-10-29
 
 本页只记当前事实与下一步。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，合并与部署的经过由 Git 与 PR 保存。
 
@@ -35,7 +35,7 @@
 - 文件管理的缩略图仍加载原图，是否改用服务端缩略图。
 - 助手的模型仍会提到 Hermes 的 `/help` 与上手引导，如何处理。
 - 向量索引 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)（proposed）：引入 Qdrant 作为各服务可重建的派生索引，推翻了 #66 “不引入独立向量库”的决定。第一阶段只做同步与影子比对；相册读路径何时切换，等实机影子比对的数据再定。
-- 进行中的 PR：相册 OCR 的决定（[#141](https://github.com/zhongwater123/A-NAS/pull/141)）；局域网算力 PAIR 的隐私边界与下载（[#196](https://github.com/zhongwater123/A-NAS/pull/196)，草稿）；语音处理的云端密钥与存储桶（[#203](https://github.com/zhongwater123/A-NAS/pull/203)）。
+- 进行中的 PR：局域网算力 PAIR 的隐私边界与下载（[#196](https://github.com/zhongwater123/A-NAS/pull/196)，草稿）；语音处理的云端密钥与存储桶（[#203](https://github.com/zhongwater123/A-NAS/pull/203)）。
 
 ## 下一步
 
@@ -44,7 +44,8 @@
 3. 向量索引第一阶段部署后，按[启用向量索引](../runbooks/enable-vector-index.md)收集同步、对账与影子比对数据；视频分段（#207）与文件分块（#208）的索引设计以[检索功能实测](../research/qdrant-retrieval-features.md#特性取舍)为准。
 4. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改；#92 之后新装的应用密码按台随机生成。
 5. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
-6. 后续能力：
+6. 相册 OCR（2026-10-19 决定做，[规格](../specs/photo-library.md)、[模型评估](../research/photo-ocr-model-evaluation.md)）：先在实验 NAS 上实测 GLM-OCR 与 Qwen3.5-2B 的速度和内存（需用户同意），再写实施方案，经用户确认后实现。
+7. 后续能力：
    - 外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘），是备份中心评审中最大的缺口；
    - 账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；
    - 硬盘用途 M2（缺盘降级挂载、更换、接回后恢复冗余）与 M3（更改冗余方式、移除硬盘）；

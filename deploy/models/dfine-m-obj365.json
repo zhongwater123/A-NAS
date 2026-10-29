@@ -7,6 +7,7 @@
   "export": "tools/deployment/export_onnx.py with configs/dfine/objects365/dfine_hgnetv2_m_obj365.yml, opset 16, PyTorch 2.14.1+cpu with dynamo=False and a trace batch of 1; not simplified with onnxsim (docs/research/photo-ai-object-detection.md)",
   "file": "dfine_m_obj365.onnx",
   "sizeBytes": 78517092,
+  "memoryBytes": 285212672,
   "sha256": "cd832825f8831b5a6e315c575a36dbcad1a2f7611566b36942957f004be4531a",
   "license": "code Apache-2.0; the authors' README (revision above) says checkpoints trained or pretrained on Objects365 'may be subject to the Objects365 dataset terms and should not be assumed to be commercially cleared under the D-FINE license'. Internal testing only until confirmed before any external release (user, 2026-10-13)."
 }
