@@ -1,0 +1,140 @@
+"""A local vision model looks at the frames of a cut (#322, third version).
+
+The planning model reads text only. Here a small vision model on this machine
+(Qwen3-VL behind llama.cpp's OpenAI-compatible llama-server on the development
+machine; the AI Worker would hold it in the product) does the looking:
+
+  describe  one sentence on a card's key frame, handed to the planning model
+            with the card, so that it knows what the picture shows
+  review    before a cut is rendered, frames every STEP seconds of each
+            segment are asked one by one whether they show what the segment
+            should; the longest run that does becomes the segment's in and out
+            points, and a segment with no run of SEGMENT_MIN is sent back
+
+Frames are asked one at a time: a 2B model judging one picture is steadier
+than one comparing a dozen. Only text leaves this module; the frames go to the
+local model alone. Standard library only, besides FFmpeg on PATH.
+"""
+
+import base64
+import json
+import os
+import subprocess
+import tempfile
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+
+# Seconds between the frames a segment is reviewed on, and their short side.
+STEP = 0.5
+EDGE = 360
+# A frame that does not fit, between two that do, is taken as the model's slip.
+GAP = 1
+# A segment fits when its run covers at least this share of its frames.
+FITS = 0.8
+SEGMENT_MIN = 1.5
+TIMEOUT = 120
+WORKERS = 4
+
+DESCRIBE = "用一句中文描述这张视频截图：在哪里，有什么，人或物在做什么；是夜晚就写夜晚。只写看得到的，不要编地名，不超过 40 个字。"
+# The answer comes first: asked to describe first, or to fill a JSON verdict, a 2B
+# model says yes far more often (8 and 11 of 14 hard frames right, 13 of 14 this way).
+FIT = "这是一段视频里的一帧。问题：画面里有「{shows}」吗？请仔细看，回答“有”或“没有”，再用一句话说明画面里实际是什么。"
+
+
+class VisionError(Exception):
+    pass
+
+
+class Vision:
+    """A vision model on an OpenAI-compatible chat completions URL."""
+
+    def __init__(self, url: str, model: str = "local"):
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(f"not an HTTP URL: {url}")
+        self.url, self.model = url, model
+
+    def ask(self, prompt: str, jpeg: bytes, max_tokens: int = 120) -> str:
+        content = [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()}},
+                   {"type": "text", "text": prompt}]
+        body = {"model": self.model, "temperature": 0, "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": content}]}
+        # The URL is the operator's and checked to be HTTP above.
+        request = urllib.request.Request(self.url, json.dumps(body).encode(), {"Content-Type": "application/json"})  # noqa: S310
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:  # noqa: S310
+                answer = json.load(response)
+        except (OSError, ValueError) as error:
+            raise VisionError(f"本机视觉模型不可用：{error}") from None
+        return answer["choices"][0]["message"]["content"].strip()
+
+    def describe(self, jpeg: bytes) -> str:
+        return self.ask(DESCRIBE, jpeg, 80).splitlines()[0].strip()
+
+    def fits(self, jpeg: bytes, shows: str) -> tuple[bool, str]:
+        text = self.ask(FIT.format(shows=shows), jpeg, 60)
+        seen = text.lstrip("有没，,。.：: \n")
+        return text.startswith("有"), seen.splitlines()[0][:60] if seen else ""
+
+
+def frames(video: str, start: float, end: float, step: float = STEP) -> list[tuple[float, bytes]]:
+    """(second, JPEG) at the middle of every step of start-end, decoded with an accurate seek."""
+    count = max(1, round((end - start) / step))
+    step = (end - start) / count
+    with tempfile.TemporaryDirectory() as work:
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-ss", f"{start + step / 2:.3f}", "-i", video,  # noqa: S607  FFmpeg from PATH
+             "-vf", f"fps=1/{step:.4f},scale=-2:{EDGE}", "-frames:v", str(count), "-q:v", "4",
+             os.path.join(work, "%04d.jpg")],
+            check=True, capture_output=True, timeout=TIMEOUT)
+        names = sorted(os.listdir(work))
+        out = []
+        for k, name in enumerate(names):
+            with open(os.path.join(work, name), "rb") as file:
+                out.append((round(start + step * (k + 0.5), 3), file.read()))
+    return out
+
+
+def run(fit: list[bool]) -> tuple[int, int] | None:
+    """The first and last index of the longest run of fitting frames, a GAP of misfits allowed inside."""
+    best, a, last, misses = None, None, None, 0
+    for k, ok in enumerate([*fit, False]):
+        if ok:
+            if a is None:
+                a = k
+            last, misses = k, 0
+            continue
+        if a is not None:
+            misses += 1
+            if misses > GAP or k == len(fit):
+                if best is None or last - a > best[1] - best[0]:
+                    best = (a, last)
+                a, misses = None, 0
+    return best
+
+
+def review(vision: Vision, video: str, start: float, end: float, shows: str) -> dict:
+    """What the frames of one segment show against shows: fits (bool), the in and out points
+    of its longest fitting run (or None), how many frames fit and what the frames showed."""
+    shots = frames(video, start, end)
+    with ThreadPoolExecutor(WORKERS) as pool:
+        said = list(pool.map(lambda tj: vision.fits(tj[1], shows), shots))
+    fit = [ok for ok, _seen in said]
+    span = run(fit)
+    step = (end - start) / len(shots)
+    out = {"frames": len(shots), "fit": sum(fit), "seen": _seen(said, fit), "start": None, "end": None}
+    out["usable"] = out["fits"] = False
+    if span:
+        a, b = span
+        out["start"] = round(max(start, shots[a][0] - step / 2), 2)
+        out["end"] = round(min(end, shots[b][0] + step / 2), 2)
+        out["usable"] = out["end"] - out["start"] >= SEGMENT_MIN
+        out["fits"] = out["usable"] and b - a + 1 >= FITS * len(shots)
+    return out
+
+
+def _seen(said: list[tuple[bool, str]], fit: list[bool]) -> str:
+    """What the frames showed: the most common answer among the misfits when most miss, else among the fits."""
+    misses = [seen for (_ok, seen), ok in zip(said, fit, strict=True) if not ok and seen]
+    hits = [seen for (_ok, seen), ok in zip(said, fit, strict=True) if ok and seen]
+    pool = misses if len(misses) > len(hits) else hits or misses
+    return max(pool, key=pool.count) if pool else ""

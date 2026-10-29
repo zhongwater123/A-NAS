@@ -1,7 +1,7 @@
 """Cutting videos for the assistant (montage): FFmpeg commands, renders and plan checks.
 
-Rendering tests need ffmpeg and ffprobe, and the shot-card tests NumPy; each is
-skipped without them.
+Rendering and frame tests need ffmpeg and ffprobe, and the shot-card tests NumPy;
+each is skipped without them. The vision model is a stand-in that answers by rule.
 """
 
 import json
@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import unittest
 
-from montage import render
+from montage import look, render
 
 try:
     import numpy as np
@@ -121,12 +121,41 @@ class MomentsTest(unittest.TestCase):
         self.index = moments.Index(index, vectors)
         self.castle = basis[1]
 
-    def test_long_shots_become_parts_and_alike_parts_share_a_group(self):
+    def test_a_shot_is_cut_where_its_picture_changes_and_alike_parts_share_a_group(self):
         cards = {c["id"]: c for c in self.index.cards}
         self.assertEqual(sorted(cards), ["07-0-0", "07-1-0", "07-1-1", "07-2-0"])
+        # The castle shot turns to another side at 28 s, not at its middle.
         self.assertEqual((cards["07-1-0"]["start"], cards["07-1-0"]["end"]), (8, 28))
+        self.assertEqual((cards["07-1-1"]["start"], cards["07-1-1"]["end"]), (28, 48))
         self.assertEqual(cards["07-1-1"]["shot"], [8, 48])
         self.assertNotEqual(cards["07-1-0"]["group"], cards["07-0-0"]["group"])
+
+    def test_a_long_picture_that_holds_is_cut_into_equal_parts(self):
+        vector = np.eye(4, dtype=np.float32)[0]
+        windows = [{"start": 2 * k, "end": 2 * k + 2, "frame": 2000 * k + 1000, "flat": False, "tags": []}
+                   for k in range(25)]
+        index = moments.Index({"model": "test", "videos": {"08": {"file": "08.webm", "duration": 50.0,
+                                                                  "shots": [[0, 50]], "windows": windows}}},
+                              {f"08/{w['frame']}": vector for w in windows})
+        self.assertEqual([(c["start"], c["end"]) for c in index.cards], [(0, 16.67), (16.67, 33.33), (33.33, 50)])
+
+    def test_captions_beside_the_index_ride_on_the_cards_they_were_written_for(self):
+        work = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, work)
+        with open(os.path.join(work, "index.json"), "w", encoding="utf-8") as file:
+            json.dump({"model": "test", "videos": self.index.videos}, file)
+        keys = [f"07/{w['frame']}" for w in self.index.videos["07"]["windows"]]
+        np.savez(os.path.join(work, "frames.npz"), keys=np.array(keys), vectors=self.index.frames)
+        with open(os.path.join(work, moments.CAPTIONS), "w", encoding="utf-8") as file:
+            json.dump({"cards": {"07-1-0": {"start": 8, "end": 28, "caption": "山上的城堡"},
+                                 "07-1-1": {"start": 8, "end": 48, "caption": "cut another way"}}}, file)
+        index = moments.Index.load(os.path.join(work, "index.json"), os.path.join(work, "frames.npz"))
+        self.assertEqual(index.captions, {"07-1-0": "山上的城堡"})
+        found = {c["id"]: c for c in index.search({"城堡": self.castle})["cards"]}
+        self.assertEqual(found["07-1-0"]["caption"], "山上的城堡")
+        self.assertNotIn("caption", found["07-1-1"])
+        castle = next(c for c in index.cards if c["id"] == "07-1-0")
+        self.assertEqual(index.frame_ms[index.keyframe(castle)], 9000)  # all alike: the first
 
     def test_search_ranks_cards_and_leaves_out_flat_frames(self):
         found = self.index.search({"城堡": self.castle}, limit=10)
@@ -178,9 +207,85 @@ class MomentsTest(unittest.TestCase):
         found = self.index.search({"城堡": self.castle}, when=[(np.eye(8)[2], np.eye(8)[1] * 0.7)])
         self.assertEqual([c["id"] for c in found["cards"]], ["07-1-1"])
 
+    def test_seconds_rounded_to_two_places_stay_inside_a_cut_at_three(self):
+        index = moments.Index({"model": "test", "videos": {"09": {"file": "09.webm", "duration": 6.0,
+                                                                  "shots": [[0, 2.004], [2.004, 6.0]],
+                                                                  "windows": self.index.videos["07"]["windows"][:3]}}},
+                              {f"09/{w['frame']}": self.index.frames[i] for i, w in
+                               enumerate(self.index.videos["07"]["windows"][:3])})
+        self.assertEqual(index.check([{"card": "09-1-0", "start": 2.0, "end": 6.0}]), [("09", 2.0, 6.0)])
+        with self.assertRaises(moments.PlanError):
+            index.check([{"card": "09-1-0", "start": 1.99, "end": 6.0}])
+
     def test_a_plan_with_no_segments_is_refused(self):
         with self.assertRaises(moments.PlanError):
             self.index.check([])
+
+    def test_a_plan_to_be_looked_at_says_what_each_segment_shows(self):
+        segment = {"card": "07-1-1", "start": 30, "end": 34}
+        self.assertEqual(self.index.check([segment]), [("07", 30.0, 34.0)])
+        with self.assertRaises(moments.PlanError) as caught:
+            self.index.check([segment], shows_needed=True)
+        self.assertIn("shows", caught.exception.problems[0])
+        self.assertEqual(self.index.check([segment | {"shows": "城堡"}], shows_needed=True), [("07", 30.0, 34.0)])
+
+    def test_rules_pass_over_a_card_the_frames_refuse_and_take_the_run_that_fits(self):
+        asked = []
+
+        def looking(card, start, end, probe):
+            asked.append((card["id"], start, end, probe))
+            return None if card["id"] == "07-1-0" else (start + 1, end)
+
+        segments = self.index.plan({"城堡": self.castle}, 60, look=looking)
+        self.assertEqual(asked, [("07-1-0", 8, 14, "城堡"), ("07-1-1", 28, 34, "城堡")])
+        self.assertEqual([(s["card"], s["start"], s["end"], s["shows"]) for s in segments], [("07-1-1", 29, 34, "城堡")])
+
+
+class Seeing:
+    """A vision model that sees what the frame's bytes name."""
+
+    def __init__(self, sees):
+        self.sees = sees
+
+    def fits(self, jpeg, shows):
+        return jpeg.decode() == self.sees, jpeg.decode()
+
+
+class LookTest(unittest.TestCase):
+    def test_the_longest_run_allows_one_slip(self):
+        T, F = True, False
+        self.assertEqual(look.run([F, T, T, F, T, T, F, F, T]), (1, 5))
+        self.assertEqual(look.run([T, F, F, T, T]), (3, 4))
+        self.assertIsNone(look.run([F, F]))
+
+    def review(self, shown):
+        frames = [(10 + 0.5 * k + 0.25, word.encode()) for k, word in enumerate(shown)]
+        original = look.frames
+        look.frames = lambda *_args, **_kw: frames
+        self.addCleanup(setattr, look, "frames", original)
+        return look.review(Seeing("船"), "v.mp4", 10, 10 + 0.5 * len(shown), "湖上的小船")
+
+    def test_a_segment_is_trimmed_to_the_frames_that_show_it(self):
+        seen = self.review(["天鹅", "船", "船", "船", "船", "船", "天鹅", "天鹅"])
+        self.assertEqual((seen["start"], seen["end"], seen["fit"], seen["frames"]), (10.5, 13.0, 5, 8))
+        self.assertTrue(seen["usable"])
+        self.assertFalse(seen["fits"])
+        self.assertEqual(seen["seen"], "船")
+
+    def test_a_segment_with_no_run_long_enough_is_not_usable(self):
+        seen = self.review(["天鹅", "船", "天鹅", "天鹅", "船", "船", "天鹅", "天鹅"])
+        self.assertFalse(seen["usable"])
+        self.assertEqual(seen["seen"], "天鹅")
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_frames_are_taken_every_half_second_from_the_segment(self):
+        work = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, work)
+        path = os.path.join(work, "clip.mp4")
+        clip(path, 6)
+        frames = look.frames(path, 1, 4)
+        self.assertEqual([t for t, _jpeg in frames], [1.25, 1.75, 2.25, 2.75, 3.25, 3.75])
+        self.assertTrue(all(jpeg.startswith(b"\xff\xd8") for _t, jpeg in frames))
 
 
 if __name__ == "__main__":

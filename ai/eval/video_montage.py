@@ -17,10 +17,15 @@ Steps:
 
   rules   (needs the embedding model)  embeds the probes, plans with
           montage.moments rules alone and renders each cut; also keeps the
-          instructions' vectors for the random draw.
+          instructions' vectors for the random draw. With --vision (the third
+          version) a local vision model looks at each segment before it is
+          taken (montage.look): a card whose frames do not show its probe is
+          passed over, the others are trimmed to the run that does; the cuts go
+          to montage-rules3.
   score   reads the baseline (video_moments montage), the rule plans, the model's
           plans (anas_mcp saves one beside each cut; copy it to
-          <cache>/montage-model/<id>.json) and draws random plans from the cards a
+          <cache>/montage-model/<id>.json, or montage-model3 for the third
+          version) and draws random plans from the cards a
           search for the instruction returns, then prints the table and writes
           <cache>/montage-scores.json.
 """
@@ -35,7 +40,7 @@ import numpy as np
 
 from eval import datasets, video_moments as vm
 from eval.embed import MANIFEST
-from montage import moments, render
+from montage import look, moments, render
 
 INSTRUCTIONS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "video_montage.json")
 DRAWS = 200
@@ -43,6 +48,7 @@ SEED = 322
 # Each random segment is as long as a still one the rules would take.
 RANDOM_PIECE = 4.0
 METRICS = ("onTopic", "crossShot", "flat", "shotShare", "reversals", "length")
+VERSIONS = ("rules", "model", "rules3", "model3")
 
 
 def load_instructions(path):
@@ -79,9 +85,9 @@ def measure(index, clips, instruction):
             "reversals": reversals, "length": round(total / instruction["seconds"], 2)}
 
 
-def clips_of(index, segments):
-    cards = {c["id"]: c for c in index.cards}
-    return [(cards[s["card"]]["video"], float(s["start"]), float(s["end"])) for s in segments]
+def clips_of(segments):
+    """(video, start, end) of each segment; a card id begins with its video, whichever way the cards were cut."""
+    return [(s["card"].rsplit("-", 2)[0], float(s["start"]), float(s["end"])) for s in segments]
 
 
 def random_plan(index, found, seconds, rng):
@@ -113,19 +119,29 @@ def rules(args):
     provider.close()
     np.savez(os.path.join(directory, "montage-probes.npz"), keys=np.array(texts), vectors=np.stack(list(vectors.values())))
     index = load_index(directory)
-    out = os.path.join(directory, "montage-rules")
+    out = os.path.join(directory, "montage-rules3" if args.vision else "montage-rules")
     os.makedirs(out, exist_ok=True)
+    files = {v: os.path.join(vm.VIDEOS, meta["file"]) for v, meta in index.videos.items()}
+    vision = look.Vision(args.vision) if args.vision else None
     for instruction in instructions:
+        looked = []
+
+        def looking(card, start, end, probe, instruction=instruction, looked=looked):
+            shows = "".join(f"{a}的" for a, _b in instruction.get("when", [])) + probe
+            seen = look.review(vision, files[card["video"]], start, end, shows)
+            looked.append({"card": card["id"], "planned": [start, end], "shows": shows, **seen})
+            return (seen["start"], seen["end"]) if seen["usable"] else None
+
         videos = None
         if instruction.get("condition"):
             found = index.search({t: vectors[t] for t in instruction["condition"]}, moments.CARDS_MAX)["cards"]
             videos = sorted({c["video"] for c in found if c["score"] >= moments.THRESHOLD})
         when = [(vectors[a], vectors[b]) for a, b in instruction.get("when", [])]
-        segments = index.plan({t: vectors[t] for t in instruction["topic"]}, instruction["seconds"], videos, when)
-        plan = {"videos": videos, "segments": segments}
+        segments = index.plan({t: vectors[t] for t in instruction["topic"]}, instruction["seconds"], videos, when,
+                              looking if vision else None)
+        plan = {"videos": videos, "segments": segments} | ({"looked": looked} if vision else {})
         if segments:
             clips = index.check(segments)
-            files = {v: os.path.join(vm.VIDEOS, meta["file"]) for v, meta in index.videos.items()}
             cut = render.render_clips([(files[v], s, e) for v, s, e in clips], out)
             os.replace(cut, os.path.join(out, f"{instruction['id']}.mp4"))
         with open(os.path.join(out, f"{instruction['id']}.json"), "w", encoding="utf-8") as file:
@@ -146,11 +162,11 @@ def score(args):
             with open(baseline, encoding="utf-8") as file:
                 parts = json.load(file)["parts"]
             row["baseline"] = measure(index, [(p["video"], p["start"], p["end"]) for p in parts], instruction)
-        for version in ("rules", "model"):
+        for version in VERSIONS:
             path = os.path.join(args.cache, f"montage-{version}", f"{instruction['id']}.json")
             if os.path.exists(path):
                 with open(path, encoding="utf-8") as file:
-                    row[version] = measure(index, clips_of(index, json.load(file)["segments"]), instruction)
+                    row[version] = measure(index, clips_of(json.load(file)["segments"]), instruction)
         found = index.search({instruction["text"]: vectors[instruction["text"]]}, moments.CARDS_MAX)["cards"]
         draws = [measure(index, random_plan(index, found, instruction["seconds"], rng), instruction)
                  for _ in range(DRAWS)]
@@ -173,6 +189,7 @@ def main():
     step = steps.add_parser("rules", help="plan and cut each instruction by rule alone")
     step.add_argument("--model", required=True)
     step.add_argument("--weight-cache", default=os.path.join(datasets.ROOT, "cache", "xnnpack"))
+    step.add_argument("--vision", help="a local vision model's chat completions URL: look before taking a segment")
     step = steps.add_parser("score", help="score every version against the instructions")
     step.add_argument("--cache", required=True, help="the model's directory under the cache, with index.json")
     args = parser.parse_args()

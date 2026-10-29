@@ -22,7 +22,8 @@ the product keeps them local. Every request, minus the images, and every answer
 are saved under <cache>/judge/<model>/.
 
 The cuts are the versions eval.video_montage leaves in the model's cache
-directory: the baseline (video_moments montage), montage-rules and montage-model.
+directory: the baseline (video_moments montage), montage-rules and montage-model,
+and the third version's montage-rules3 and montage-model3.
 With --summary nothing is sent: the saved verdicts are tabled, and where the
 instructions label on-topic seconds, each segment's verdict is set against them
 (a segment counts as on topic when at least half of it is).
@@ -43,7 +44,7 @@ API = "https://api.siliconflow.cn/v1/chat/completions"
 MODEL = "Qwen/Qwen3-VL-32B-Instruct"
 FRAMES_MAX = 40
 EDGE = 360
-VERSIONS = ("baseline", "rules", "model")
+VERSIONS = ("baseline", "rules", "model", "rules3", "model3")
 
 COMMON = """你在为一个家庭相册的“一句话剪视频”功能评审成片。成员的指令是：“{text}”，目标约 {seconds} 秒（时长是上限，素材不够时剪短是允许的）。
 成片没有声音，共 {count} 段，按播放顺序：
@@ -156,10 +157,6 @@ def ask(model, prompt, images, key):
 
 
 def summary(cache, instructions, out):
-    from montage import moments
-
-    index = moments.Index.load(os.path.join(cache, "index.json"), os.path.join(cache, "frames.npz"))
-    cards = {c["id"]: c["video"] for c in index.cards}
     rows, agree, total = {}, 0, 0
     for version, instruction, _path, lengths, segments in cuts(cache, instructions):
         verdicts = {}
@@ -177,7 +174,7 @@ def summary(cache, instructions, out):
         if instruction["onTopic"]:
             hits = 0
             for n, (where, start, end) in enumerate(segments, 1):
-                video = cards.get(where, where)
+                video = where.rsplit("-", 2)[0]  # a video, or a card id that begins with one
                 inside = sum(max(0.0, min(end, b) - max(start, a)) for v, a, b in instruction["onTopic"] if v == video)
                 labelled = inside >= (end - start) / 2
                 hits += labelled == (said.get(n) == "on")

@@ -11,6 +11,13 @@ socket, which any member of a-nas-users may use, known by the caller's UID.
   POST /montage  {"segments": [...]}             the cut as video/mp4, or the
                                                  plan's problems with 422
 
+With --vision, the URL of a local vision model (montage.look), the cards carry
+what it said of their key frames (captions.json in the index) and a plan is
+looked at before it is cut: every segment says in shows what it is to show,
+and frames every half second are asked whether they do. A segment with no
+run of 1.5 s that does is sent back with what the frames showed (422); the
+others are trimmed to their run. What was seen goes back in X-Review.
+
 It runs as the photo service's identity, the only one that reaches the AI
 Worker; the assistant never reads the videos or their vectors. It runs with
 ai/ (mounted at /spike-ai) on PYTHONPATH.
@@ -31,7 +38,7 @@ from http.server import BaseHTTPRequestHandler
 
 import numpy as np
 
-from montage import moments, render
+from montage import look, moments, render
 
 PROBES_MAX = 8
 WHEN_MAX = 4
@@ -71,12 +78,15 @@ def member(uid: int) -> bool:
 class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
 
-    def __init__(self, path, index, videos, ai_socket, work):
+    def __init__(self, path, index, videos, ai_socket, work, vision=None):
         if os.path.exists(path):
             os.remove(path)
         super().__init__(path, Handler)
         os.chmod(path, 0o666)  # noqa: S103  members connect as themselves; the UID decides
         self.index, self.videos, self.ai_socket, self.work = index, videos, ai_socket, work
+        # What the vision model saw, by (video, start, end, shows): a plan sent again after a
+        # refusal is looked at only where it changed.
+        self.vision, self.seen = vision, {}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -131,10 +141,23 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(segments, list):
             return self.reply(400, {"error": "segments 要是列表"})
         try:
-            clips = self.server.index.check(segments)
+            clips = self.server.index.check(segments, shows_needed=self.server.vision is not None)
         except moments.PlanError as error:
             return self.reply(422, {"error": "剪辑计划不合规则", "problems": error.problems})
         files = {v: os.path.join(self.server.videos, meta["file"]) for v, meta in self.server.index.videos.items()}
+        review = []
+        if self.server.vision is not None:
+            try:
+                review = [self.look(files[v], v, start, end, segment["shows"])
+                          for (v, start, end), segment in zip(clips, segments, strict=True)]
+            except look.VisionError as error:
+                return self.reply(503, {"error": str(error)})
+            refused = [f"第 {n} 段（{s['card']} 的 {s['start']:g}–{s['end']:g} 秒）看画面不是“{s['shows']}”："
+                       f"{r['frames']} 帧里 {r['fit']} 帧符合，画面是{r['seen']}。换一张卡片或删掉这段"
+                       for n, (s, r) in enumerate(zip(segments, review, strict=True), 1) if not r["usable"]]
+            if refused:
+                return self.reply(422, {"error": "出片前看了画面，有的段不切题", "problems": refused, "review": review})
+            clips = [(v, r["start"], r["end"]) for (v, _s, _e), r in zip(clips, review, strict=True)]
         work = tempfile.mkdtemp(dir=self.server.work)
         try:
             path = render.render_clips([(files[v], start, end) for v, start, end in clips], work)
@@ -148,9 +171,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "video/mp4")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("X-Seconds", f"{sum(end - start for _v, start, end in clips):.2f}")
+        if review:
+            self.send_header("X-Review", base64.b64encode(json.dumps(review, ensure_ascii=False).encode()).decode())
         self.end_headers()
         self.wfile.write(data)
         return None
+
+    def look(self, path, video, start, end, shows):
+        key = (video, start, end, shows)
+        if key not in self.server.seen:
+            self.server.seen[key] = look.review(self.server.vision, path, start, end, shows)
+        return self.server.seen[key]
 
     def reply(self, status, data):
         raw = json.dumps(data, ensure_ascii=False).encode()
@@ -168,10 +199,13 @@ def main():
     parser.add_argument("--videos", required=True, help="the folder with the set's video files")
     parser.add_argument("--ai-socket", required=True)
     parser.add_argument("--work", required=True, help="a private folder for renders in progress")
+    parser.add_argument("--vision", help="a local vision model's chat completions URL, to look before a cut")
     args = parser.parse_args()
     index = moments.Index.load(os.path.join(args.index, "index.json"), os.path.join(args.index, "frames.npz"))
-    with Server(args.socket, index, args.videos, args.ai_socket, args.work) as server:
-        print(f"videos-ready {len(index.cards)} cards", flush=True)
+    vision = look.Vision(args.vision) if args.vision else None
+    with Server(args.socket, index, args.videos, args.ai_socket, args.work, vision) as server:
+        print(f"videos-ready {len(index.cards)} cards, {len(index.captions)} captions,"
+              f" {'looking' if vision else 'not looking'} before a cut", flush=True)
         server.serve_forever()
 
 

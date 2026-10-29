@@ -336,18 +336,21 @@ if slideshow:
 
 # Video moments (#322): videos_spike.py, the stand-in for the photo service's video
 # moments, holds the vectors and the videos; these tools only relay, and the model
-# gets text and numbers, never frames. Its socket is bound over an empty file like the
+# gets text and numbers, never frames: a local vision model looks at them for it. Its socket is bound over an empty file like the
 # photo service's; while the file is still empty (no SPIKE_VIDEOS) there are no such tools.
 VIDEO_MOMENTS = "/run/anas-assistant-videos/videos.sock"
 
 
-def video_moments(path: str, body: dict) -> tuple[int, str, bytes]:
-    # A cut takes a while: FFmpeg decodes and encodes every second of it.
+def video_moments(path: str, body: dict) -> tuple[int, str, bytes, list]:
+    """Status, content type, body and what the vision model saw of each segment (X-Review)."""
+    # A cut takes a while: the frames are looked at, then FFmpeg decodes and encodes every second.
     conn = UnixHTTP(VIDEO_MOMENTS, 900)
     try:
         conn.request("POST", path, json.dumps(body, ensure_ascii=False).encode(), {"Content-Type": "application/json"})
         response = conn.getresponse()
-        return response.status, response.getheader("Content-Type", ""), response.read()
+        review = response.getheader("X-Review")
+        return (response.status, response.getheader("Content-Type", ""), response.read(),
+                json.loads(base64.b64decode(review)) if review else [])
     except OSError:
         raise PhotoError("视频检索暂时连不上，请稍后再试") from None
     finally:
@@ -369,20 +372,22 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
     @server.tool(annotations=READ_ONLY, structured_output=False, description=(
         "按画面内容在测试视频里找片段，返回镜头卡片，最相关的在前。probes：1–8 条要找的画面，每条一句短描述，"
         "同一个意思可以换几种说法；地点、时间这类条件画面里看不出来，不要和画面主题写在一条里。limit：卡片数，1–40，默认 20。"
-        "每张卡片是一个镜头里最长 20 秒的一部分：id；video；start、end 是这张卡片覆盖的秒数；shot 是所在镜头的起止，"
-        "剪的时候不能越出；score 是各条探针里最高的分数，probes 给出每条探针的最高分与出现的时刻 at；tags 是词表里最接近的几个词，"
+        "每张卡片是一个镜头里画面大致不变的一段，最长 20 秒：id；video；start、end 是这张卡片覆盖的秒数；shot 是所在镜头的起止，"
+        "剪的时候不能越出；caption 是本机视觉模型看这张卡片的代表帧写的一句话，比 tags 准，但也可能看错；"
+        "score 是各条探针里最高的分数，probes 给出每条探针的最高分与出现的时刻 at；tags 是词表里最接近的几个词，"
         "只说明大致内容；group 相同的卡片画面相似，别重复用同一画面。分数低于 threshold 时与“库里没有”分不开。"
+        "选卡片先看 caption 是否就是要的画面，再看分数。"
         "videos：只在这些视频里找，可省略；指令带地点、事件这类条件时，先单独检索条件，用分数过 threshold 的卡片所在的视频，"
         "再在这些视频里检索画面主题。when：画面本身能看出、但会和主题混在一起的条件，如白天黑夜、室内室外，"
         "每条是 {is, not}，例如 {\"is\": \"夜晚\", \"not\": \"白天\"}，只留更像 is 的画面；"
         "例如“下雨天的街道”：probes 检索街道，when 要求 {\"is\": \"下雨\", \"not\": \"晴天\"}。"
-        "结果里没有画面：向成员介绍片段时只说标签和分数支持的内容，并说明没有看过画面，不要描述猜出来的细节。"))
+        "你看不到画面：向成员介绍片段时只说 caption 和出片前核对看到的内容，不要描述猜出来的细节。"))
     def search_video_moments(probes: list[str], limit: int = 20, videos: list[str] | None = None,
                              when: list[dict] | None = None):
         body = {"probes": probes, "limit": limit} | ({"videos": videos} if videos else {}) | (
             {"when": when} if when else {})
         try:
-            status, _kind, raw = video_moments("/search", body)
+            status, _kind, raw, _review = video_moments("/search", body)
         except PhotoError as error:
             return failed(error)
         if status != 200:
@@ -393,16 +398,20 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
     @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
                  structured_output=False, description=(
         "按剪辑计划把视频片段剪成一段 1920×1080、30 fps 的无声 MP4，存进助手目录的“视频”文件夹，返回文件路径与时长。"
-        "segments：按播放顺序排列，每段是 {card, start, end, reason}：card 是 search_video_moments 返回的卡片 id，"
+        "segments：按播放顺序排列，每段是 {card, start, end, shows, reason}：card 是 search_video_moments 返回的卡片 id，"
         "start、end 是秒数，必须落在这张卡片的 shot 范围内，每段至少 1.5 秒，不能含纯黑或纯色画面，各段不能用同一段画面；"
-        "总长不超过 180 秒。reason 用一句话写为什么选这段、为什么放在这个位置，随成片存档。"
-        "成员说的时长是上限：切题的片段不够就剪短并说明，不要为了换画面或凑时长放进不切题的片段；"
+        "总长不超过 180 秒。shows 写这段画面要呈现指令里的什么，只用指令里的词，如“湖上的小船”“夜晚的城市”，不超过 40 个字；"
+        "不要写这段画面的细节或别的说法（“美食”就写“美食”，不写“美食,新鲜食材”），"
+        "地点这类画面看不出的条件也不要写进去（“新加坡的美食”写“美食”）。reason 用一句话写为什么选这段、为什么放在这个位置，随成片存档。"
+        "成员说的时长是上限：切题的片段不够就剪短并说明，不要为了换画面或凑时长放进不切题的片段，开场和铺垫镜头也要切题；"
         "画面几乎不变的一段不要超过约 6 秒，画面一直在变的可以到约 8 秒。"
+        "出片前本机视觉模型每 0.5 秒看一帧，核对是否呈现 shows：没有连续 1.5 秒符合的段整次退回，说明画面实际是什么，"
+        "请换一张卡片或删掉这段；其余各段收窄到符合的那一截再剪，结果的 trimmed 列出收窄了哪些段。"
         "计划不合规则时整次拒绝并逐条说明是哪一段、哪一条，照着改了再调用。成片只在助手目录里；"
         "成员要放进个人空间时，再用 submit_changes 的 copy 提交。"))
     def make_montage(segments: list[dict]):
         try:
-            status, kind, raw = video_moments("/montage", {"segments": segments})
+            status, kind, raw, review = video_moments("/montage", {"segments": segments})
         except PhotoError as error:
             return failed(error)
         if status != 200 or kind != "video/mp4":
@@ -413,11 +422,18 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         # O_EXCL: a new file only, never one the member already has.
         with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644), "wb") as file:
             file.write(raw)
-        # The plan, reasons included, beside the cut: what the model chose and why.
+        # The plan, reasons included, beside the cut: what the model chose and why, and the
+        # seconds cut after the frames were looked at.
+        cut = [segment | {"start": r["start"], "end": r["end"]} for segment, r in zip(segments, review, strict=True)]
+        cut = cut or segments
         with os.fdopen(os.open(path[:-4] + ".json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644), "w") as file:
-            json.dump({"segments": segments}, file, ensure_ascii=False, indent=2)
-        seconds = round(sum(segment["end"] - segment["start"] for segment in segments), 2)
-        return result({"path": path, "seconds": seconds, "segments": len(segments)})
+            json.dump({"planned": segments, "segments": cut, "review": review}, file, ensure_ascii=False, indent=2)
+        trimmed = [{"segment": n, "planned": [s["start"], s["end"]], "cut": [c["start"], c["end"]], "seen": r["seen"]}
+                   for n, (s, c, r) in enumerate(zip(segments, cut, review, strict=True), 1)
+                   if (s["start"], s["end"]) != (c["start"], c["end"])]
+        seconds = round(sum(segment["end"] - segment["start"] for segment in cut), 2)
+        return result({"path": path, "seconds": seconds, "segments": len(cut), "trimmed": trimmed,
+                       "seen": [r["seen"] for r in review]})
 
 
 if os.environ.get("ANAS_SPIKE_PHOTO_PIXELS"):

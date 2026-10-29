@@ -4,9 +4,10 @@ An index (eval.video_moments index) holds, per video, the shots FFmpeg found
 and one window every 2 s with its frame vector, whether the frame is flat
 (black or one colour) and its nearest vocabulary labels. A search scores the
 windows against one or more query vectors and hands back cards: a part of a
-shot at most SEGMENT_MAX long, with its best window per probe, its labels and
-a group shared with the parts that look alike. Text and numbers only; the
-model that plans never sees the frames.
+shot where the picture holds, at most SEGMENT_MAX long, with its best window
+per probe, its labels, what a local vision model said of its key frame
+(captions.json, when written) and a group shared with the parts that look
+alike. Text and numbers only; the model that plans never sees the frames.
 
 A plan is a list of segments, each inside the shot of the card it names. The
 checks are plain rules, so a refusal says which segment broke which one. The
@@ -16,11 +17,16 @@ is compared with.
 
 import json
 import math
+import os
 
 import numpy as np
 
-# A card covers at most this much of a shot; longer shots are cut into equal parts.
+# A card is a part of a shot where the picture holds (see STILL), of at least
+# PIECE_MIN windows unless the shot is shorter; a part longer than SEGMENT_MAX
+# is cut into equal parts. A 67-minute walk in 5 shots gives 337 cards, median
+# 8 s, where cutting every 20 s gave 204 that mixed sights.
 SEGMENT_MAX = 20.0
+PIECE_MIN = 2
 # Windows at least this alike (cosine of their vectors) show the same thing.
 SAME_PICTURE = 0.97
 # The pilot's 2s1f threshold that turns away 80% of queries with no answer
@@ -28,11 +34,15 @@ SAME_PICTURE = 0.97
 # the library" cannot be told apart.
 THRESHOLD = 0.6533
 CARDS_MAX = 40
+# What a local vision model said of each card's key frame (eval.video_moments describe).
+CAPTIONS = "captions.json"
 TAGS = 5
 SEGMENT_MIN = 1.5
 SEGMENTS_MAX = 30
 TOTAL_MAX = 180.0
 REASON_CHARS = 200
+SHOWS_CHARS = 40
+ROUNDING = 0.005
 # A segment may run this long while its picture hardly changes (every two of its
 # windows at least STILL alike: a slow pan or a followed boat is 0.93-0.98, a new
 # shot 0.63-0.75), and this long while it keeps changing. Grey-level frame
@@ -54,12 +64,13 @@ class Index:
     def __init__(self, index: dict, vectors: dict):
         self.model = index["model"]
         self.videos = index["videos"]
-        rows, frames, flat, tags, shot_of = [], [], [], [], []
+        rows, frames, flat, tags, shot_of, self.frame_ms = [], [], [], [], [], []
         for video, meta in sorted(self.videos.items()):
             shots = meta["shots"]
             for window in meta["windows"]:
                 middle = (window["start"] + window["end"]) / 2
                 rows.append((video, window["start"], window["end"]))
+                self.frame_ms.append(window["frame"])
                 frames.append(vectors[f"{video}/{window['frame']}"])
                 flat.append(window["flat"])
                 tags.append(window["tags"])
@@ -67,31 +78,51 @@ class Index:
         self.rows, self.frames = rows, np.stack(frames)
         self.flat, self.tags, self.shot_of = np.array(flat), tags, shot_of
         self.cards = self._cards()
+        self.captions = {}
 
     @classmethod
     def load(cls, index_path: str, vectors_path: str) -> "Index":
+        """The index, with the cards' captions when captions.json beside it holds them for these cards."""
         with open(index_path, encoding="utf-8") as file:
             index = json.load(file)
         with np.load(vectors_path) as data:
             vectors = dict(zip(data["keys"].tolist(), data["vectors"], strict=True))
-        return cls(index, vectors)
+        loaded = cls(index, vectors)
+        captions = os.path.join(os.path.dirname(index_path), CAPTIONS)
+        if os.path.exists(captions):
+            with open(captions, encoding="utf-8") as file:
+                said = json.load(file)["cards"]
+            loaded.captions = {c["id"]: said[c["id"]]["caption"] for c in loaded.cards
+                               if c["id"] in said and [said[c["id"]]["start"], said[c["id"]]["end"]] == [c["start"], c["end"]]}
+        return loaded
+
+    def keyframe(self, card: dict) -> int:
+        """The card's window closest to its mean picture."""
+        frames = self.frames[card["windows"]]
+        return card["windows"][int(np.argmax(frames @ frames.mean(axis=0)))]
 
     def _cards(self) -> list[dict]:
-        """Every shot cut into parts of at most SEGMENT_MAX, each with its windows."""
+        """Every shot cut where its picture changes, each part of at most SEGMENT_MAX, with its windows."""
         by_shot: dict[tuple[str, int], list[int]] = {}
         for i, (video, _start, _end) in enumerate(self.rows):
             by_shot.setdefault((video, self.shot_of[i]), []).append(i)
         cards = []
         for (video, shot), members in sorted(by_shot.items()):
             start, end = self.videos[video]["shots"][shot]
-            parts = max(1, math.ceil((end - start) / SEGMENT_MAX - 1e-9))
-            for part in range(parts):
-                lo, hi = start + (end - start) * part / parts, start + (end - start) * (part + 1) / parts
-                windows = [i for i in members if lo <= (self.rows[i][1] + self.rows[i][2]) / 2 < hi]
-                if not windows:
-                    continue
-                cards.append({"id": f"{video}-{shot}-{part}", "video": video, "shot": [start, end],
-                              "start": round(lo, 2), "end": round(hi, 2), "windows": windows})
+            members.sort(key=lambda i: self.rows[i][1])
+            part = 0
+            for piece in self._pieces(members):
+                lo = start if piece[0] == members[0] else self.rows[piece[0]][1]
+                hi = end if piece[-1] == members[-1] else self.rows[piece[-1]][2]
+                parts = max(1, math.ceil((hi - lo) / SEGMENT_MAX - 1e-9))
+                for k in range(parts):
+                    a, b = lo + (hi - lo) * k / parts, lo + (hi - lo) * (k + 1) / parts
+                    windows = [i for i in piece if a <= (self.rows[i][1] + self.rows[i][2]) / 2 < b]
+                    if not windows:
+                        continue
+                    cards.append({"id": f"{video}-{shot}-{part}", "video": video, "shot": [start, end],
+                                  "start": round(a, 2), "end": round(b, 2), "windows": windows})
+                    part += 1
         # Parts whose mean pictures are SAME_PICTURE alike share a group, numbered by first appearance.
         means = np.stack([self.frames[c["windows"]].mean(axis=0) for c in cards])
         means /= np.linalg.norm(means, axis=1, keepdims=True)
@@ -105,6 +136,20 @@ class Index:
         for card, g in zip(cards, group, strict=True):
             card["group"] = firsts[g]
         return cards
+
+    def _pieces(self, members: list[int]) -> list[list[int]]:
+        """A shot's windows in runs whose picture holds: a window less than STILL alike to
+        the mean of the run so far starts the next, once the run has PIECE_MIN windows. A walk
+        or a pan that never cuts still moves from one sight to the next."""
+        pieces, mean = [[members[0]]], self.frames[members[0]].copy()
+        for i in members[1:]:
+            if len(pieces[-1]) >= PIECE_MIN and float(self.frames[i] @ mean) / np.linalg.norm(mean) < STILL:
+                pieces.append([i])
+                mean = self.frames[i].copy()
+            else:
+                pieces[-1].append(i)
+                mean += self.frames[i]
+        return pieces
 
     def search(self, probes: dict[str, np.ndarray], limit: int = CARDS_MAX, videos=None, when=()) -> dict:
         """The cards whose best window is highest for any probe, best first; only in videos
@@ -129,14 +174,16 @@ class Index:
             found.append({
                 "id": card["id"], "video": card["video"], "start": card["start"], "end": card["end"],
                 "shot": card["shot"], "group": card["group"],
+                **({"caption": self.captions[card["id"]]} if card["id"] in self.captions else {}),
                 "score": max(b["score"] for b in best.values()), "probes": best,
                 "tags": [label for label, _ in sorted(labels.items(), key=lambda kv: -kv[1])[:TAGS]],
             })
         found.sort(key=lambda c: -c["score"])
         return {"threshold": THRESHOLD, "cards": found[:limit]}
 
-    def check(self, segments: list[dict]) -> list[tuple[str, float, float]]:
-        """The plan's (video, start, end) in order, or PlanError listing what is wrong."""
+    def check(self, segments: list[dict], shows_needed: bool = False) -> list[tuple[str, float, float]]:
+        """The plan's (video, start, end) in order, or PlanError listing what is wrong. With
+        shows_needed every segment says in shows what its picture is to show, to be looked at."""
         cards = {c["id"]: c for c in self.cards}
         problems = []
         if not 1 <= len(segments) <= SEGMENTS_MAX:
@@ -152,7 +199,8 @@ class Index:
                 problems.append(f"第 {n} 段的 start、end 要是秒数")
                 continue
             lo, hi = card["shot"]
-            if start < lo or end > hi:
+            # Cards give seconds to two places and cuts to three: half a hundredth, under a frame, is let pass.
+            if start < lo - ROUNDING or end > hi + ROUNDING:
                 problems.append(f"第 {n} 段 {start:g}–{end:g} 秒越出了镜头 {lo:g}–{hi:g} 秒，片段不能跨过镜头切点")
             if end - start < SEGMENT_MIN:
                 problems.append(f"第 {n} 段只有 {end - start:.2g} 秒，每段至少 {SEGMENT_MIN:g} 秒")
@@ -161,6 +209,9 @@ class Index:
             reason = segment.get("reason", "")
             if not isinstance(reason, str) or len(reason) > REASON_CHARS:
                 problems.append(f"第 {n} 段的 reason 要是一句话，最多 {REASON_CHARS} 个字符")
+            shows = segment.get("shows", "")
+            if not isinstance(shows, str) or len(shows) > SHOWS_CHARS or (shows_needed and not shows.strip()):
+                problems.append(f"第 {n} 段的 shows 要写这段画面呈现指令里的什么，1–{SHOWS_CHARS} 个字符")
             clips.append((card["video"], float(start), float(end)))
         problems += [f"第 {a + 1} 段和第 {b + 1} 段用了同一段画面" for a in range(len(clips)) for b in range(a)
                      if clips[a][0] == clips[b][0] and min(clips[a][2], clips[b][2]) > max(clips[a][1], clips[b][1])]
@@ -171,13 +222,17 @@ class Index:
             raise PlanError(problems)
         return clips
 
-    def plan(self, probes: dict[str, np.ndarray], seconds: float, videos=None, when=()) -> list[dict]:
+    def plan(self, probes: dict[str, np.ndarray], seconds: float, videos=None, when=(), look=None) -> list[dict]:
         """A plan with no model. The target is an upper bound: only cards at or over
         THRESHOLD, best first, and when they run out the cut is shorter. Each card gives
         one segment grown from its best window over neighbours also over THRESHOLD and
         not flat, at most STILL_MAX while the picture hardly changes and MOVING_MAX while
         it does; a segment showing the same picture as one taken from the same shot is
-        left out. Then each video's segments in time order."""
+        left out. Then each video's segments in time order.
+
+        look, when given, is asked look(card, start, end, probe) with the probe the card
+        scored best on before a segment is taken: it answers the part of start-end whose
+        frames show that, or None to pass the card over for the next."""
         scores = np.max([self.frames @ vector for vector in probes.values()], axis=0)
         found = [c for c in self.search(probes, CARDS_MAX, videos, when)["cards"] if c["score"] >= THRESHOLD]
         out = self._left_out(when)
@@ -208,7 +263,13 @@ class Index:
             start, end = math.ceil(start * 100) / 100, math.floor(end * 100) / 100
             if end - start < SEGMENT_MIN:
                 continue
-            segments.append({"card": card["id"], "start": start, "end": end,
+            probe = max(card["probes"], key=lambda text: card["probes"][text]["score"])
+            if look is not None:
+                seen = look(card, start, end, probe)
+                if seen is None:
+                    continue
+                start, end = seen
+            segments.append({"card": card["id"], "start": start, "end": end, "shows": probe,
                              "reason": f"规则：分数 {card['score']}，标签 {'、'.join(card['tags'][:3])}"})
             taken.append((shot, picture))
             left -= end - start

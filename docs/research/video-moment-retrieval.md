@@ -255,6 +255,91 @@ ANAS_DATASETS=~/A-NAS-datasets ~/anas-ai/bin/python -m eval.video_moments montag
 - **评审也会被同样的画面骗**：爱丁堡 Calton Hill 的天际线，检索、规划模型和评审都当成“山丘上的城堡”。评审不能当最终裁判，要与人工核对的结果对照。
 - **按夜晚筛并不总可靠**：模型版“城市夜景”选进的清真寺和灯笼，都过了“更像夜晚”的筛选，评审看出来是白天。规则版选的三段都是夜景。
 
+### 第三版：本机视觉模型（#326，2026-10-29）
+
+第二版的模型看不到画面，会按探针名编画面。第三版让本机的小视觉模型替它看画面，云端规划模型仍然只拿到文字（[规格](../specs/photo-to-video.md)）。
+
+**模型**：Qwen3-VL-2B-Instruct，Q8_0 GGUF，Apache-2.0。由 llama.cpp 0.8.0 的 `llama-server` 在开发机（M4，16 GB）上用 Metal 运行，4 路并行；没有在 NAS 的 x86 CPU 上测。
+
+**卡片按画面变化切分**：窗口与本段平均画面的余弦低于 0.9 就切开，每段至少 4 秒、超过 20 秒的再等分。
+
+| 切法 | 爱丁堡：段数，中位长度 |
+|---|---|
+| 相邻两个窗口余弦低于 0.93 就切 | 1,025 段，中位 2 秒（散步时每 2 秒画面都在变，切得太碎） |
+| 与本段平均画面比，余弦低于 0.9 就切 | 337 段，中位 8 秒（加 20 秒上限后 396 张卡片，中位 10 秒） |
+
+试点集本来镜头就短，从 73 张变成 80 张。
+
+**描述**：每张卡片取离平均画面最近的窗口帧（512 像素），写一句不超过 40 字的描述。约 1.1 秒一张，两组共 476 张。
+
+- 描述大多准确，例如“湖上小船载着游客，船夫划桨前行”“夜晚的城市天际线，灯火辉煌”。
+- Calton Hill 那一段被单独切成一张卡片，描述是“城市街景，停车场和建筑”。
+
+**核对的问法**：在 14 张已知易错的画面上比较。易错画面包括天鹅、无船的湖、白天的清真寺与灯笼、雾中楼群、Calton Hill、菜摊，另配切题的对照。
+
+| 问法 | 对的张数 | 每帧（串行） |
+|---|---|---|
+| 先写看到什么，再给 JSON 判定 | 8/14 | 0.9 s |
+| 先给 JSON 判定，再写看到什么 | 11–12/14 | 1.0 s |
+| 只答“是/否” | 12/14 | 0.1 s |
+| 先答“有/没有”，再说一句画面是什么（采用） | 13/14 | 0.4 s |
+
+小模型先描述时，写出了“一只白鹅在湖面上游泳”，接着仍判切题。采用的问法唯一错的是 Calton Hill，第二版的 32B 评审也错在这张。
+
+**核对与精修**：每段每 0.5 秒看一帧，取最长的连续符合段，中间允许 1 帧判错。
+
+- 短于 1.5 秒的段退回给模型；
+- 其余段收窄到符合的那一截，例如“新加坡的美食”的烤串从 36 秒收窄到 37.9 秒起；
+- 一段 8 秒的片段看 16 帧，开发机上约 2–3 秒。
+
+**规划**：Claude Code（`claude-opus-4-8`）经 [`video_planner.py`](../../ai/eval/video_planner.py) 只用两个视频工具，每条指令运行一次。
+
+**切题占比**（试点集，标注同第二版）：
+
+| 指令 | baseline | 规则版 v2 | 模型版 v2 | 规则版 v3 | 模型版 v3 |
+|---|---|---|---|---|---|
+| 美食（20 s） | 0.66 | 1.00，11.2 s | 0.79 | 1.00，11.2 s | 0.92，10.7 s |
+| 新加坡的美食（20 s） | 0.12 | 1.00，7.2 s | 0.57 | 1.00，7.2 s | 0.75，12.6 s |
+| 湖上的小船（15 s） | 0.93 | 0.97 | 0.77 | 0.97 | 1.00 |
+| 北极光（15 s） | 1.00 | 1.00 | 1.00 | 1.00 | 1.00 |
+| 城市夜景（15 s） | 1.00 | 1.00 | 0.69 | 1.00 | 1.00 |
+| 冲浪（库里没有） | — | 不剪 | 不剪 | 不剪 | 不剪 |
+
+**三个评审的平均分**（画面质量 / 切题 / 剪辑自然度）：
+
+| 版本 | 试点 5 条 | 爱丁堡 2 条 |
+|---|---|---|
+| 规则版 v2 | 7.2 / 9.0 / 6.4 | 8.0 / 9.5 / 8.0 |
+| 模型版 v2 | 6.8 / 8.2 / 6.8 | 7.5 / 8.5 / 8.0 |
+| 规则版 v3 | 7.2 / 8.8 / 6.4 | 8.0 / 8.5 / 8.0 |
+| 模型版 v3 | 6.8 / 9.0 / 6.4 | 8.0 / 8.0 / 8.0 |
+
+规则版 v3 与 v2 在试点集上剪出的是同样的片段，评审却给出 8.8 和 9.0：同一成片的打分会差 1 分左右，平均分只作参考。爱丁堡的切题分偏低，主要是评审把只呈现一半指令的段（只有热闹街头、没有公交车）判为部分切题。
+
+由此看出：
+
+- **模型版的编画面基本消失**：“天鹅当小船”“白天当夜景”没有再出现。模型先看描述再选卡片，理由里引用描述，例如“caption 明确是夜晚城市天际线”。
+- **核对确实拦下了错误，模型会照着改**：
+  - 退回的有：“新加坡的美食”里的菜摊（9 帧里 0 帧符合，“蔬菜摊位”）、“城市夜景”里含黑场的一段、爱丁堡“城堡”里的普通建筑（16 帧里 0 帧符合）。
+  - 都在一到三次重写内改好。
+  - 爱丁堡“城堡”的第一次成片里有一段核对只放行了 4.5 秒，`seen` 写着“圣吉尔斯大教堂”；模型读到后主动剔掉这段，最后只用 1 段城堡加 3 段石板老街，并在回复里说明城堡素材只有这一处。
+- **模型不再凑时长**：两条美食都剪短了（10.7 s、12.6 s）。“新加坡的美食”剩下不切题的是小贩中心柜台约 2 秒，按标注不算美食，视觉模型认为算。
+- **`shows` 不能由模型随意改写**：模型一度把菜摊那段的 `shows` 写成“美食,新鲜食材”，核对按“新鲜食材”放行了。工具说明改为“只用指令里的词”后，重跑的切题占比从 0.73 升到 0.92。这一条只靠说明约束，没有在代码里强制。
+- **规则版 v3 在试点集上与 v2 相同**：v2 本来就全部切题，核对没有退回任何段，只是在“美食”里容许了 1 帧误判。爱丁堡的规则版换成了按画面切的卡片。
+- **带城垛的建筑仍会被当成城堡**：
+  - 规则版“城堡”的 3192–3198 秒是 Calton Hill；
+  - 模型版“城堡”第 1 段是城堡山脚下的 Camera Obscura 塔楼。
+  - 2B 模型和 32B 评审都认作城堡，人工看帧才看出来。
+  - 要么换更大的本机模型（4B 已下载，未测），要么接受这类误差、交给成员预览后替换。
+- **第二版就有的秒数精度问题**：卡片起止取两位小数、镜头切点三位小数，模型照着卡片写就被判为越出镜头。现在允许 0.005 秒误差。
+
+**成本**：
+
+- 每条指令 Claude Code 花 0.04–0.46 美元、57–343 秒。
+- 本机视觉模型写描述约 1.1 秒一张；核对按每段帧数计，一条指令约十几秒到半分钟。
+
+成片与逐段说明在开发机的 `~/A-NAS-datasets/剪辑对比/第三版/`。
+
 ### 算力
 
 | 项目 | 每帧 | 每小时视频（`2s1f`，1,800 帧） |
@@ -278,9 +363,9 @@ ANAS_DATASETS=~/A-NAS-datasets ~/anas-ai/bin/python -m eval.video_moments montag
 
 ## 关联
 
-- 代码：[`ai/eval/video_moments.py`](../../ai/eval/video_moments.py)、[`ai/eval/video_moments.json`](../../ai/eval/video_moments.json)、[`ai/eval/embed.py`](../../ai/eval/embed.py)（`render` 与缓存）、[`ai/anas_ai/providers.py`](../../ai/anas_ai/providers.py)（`MediaPipeProvider`）
+- 代码：[`ai/eval/video_moments.py`](../../ai/eval/video_moments.py)、[`ai/montage/look.py`](../../ai/montage/look.py)（本机视觉核对）、[`ai/eval/video_planner.py`](../../ai/eval/video_planner.py)、[`ai/eval/video_moments.json`](../../ai/eval/video_moments.json)、[`ai/eval/embed.py`](../../ai/eval/embed.py)（`render` 与缓存）、[`ai/anas_ai/providers.py`](../../ai/anas_ai/providers.py)（`MediaPipeProvider`）
 - 产品现状：[`internal/photos/video.go`](../../internal/photos/video.go)（封面时刻与 `renderVideoFrame`）、[相册视频规格](../specs/photo-video.md)（视频暂不参与 AI）、[M2 实施方案](../architecture/photo-ai.md)、[向量索引](../architecture/vector-index.md)
 - 研究：[Qdrant 检索特性试验](qdrant-retrieval-features.md)（视频片段按视频存多向量）、[标签校准报告](photo-ai-label-calibration.md)
 - 外部：[google-ai-edge/gallery@8f5f2a0](https://github.com/google-ai-edge/gallery/tree/8f5f2a0bdb7c81693384dbdecbabec9b1e8d7f4e) 的 `videomomentfinder` 与 `services/semanticretrieval`；[MediaPipe](https://github.com/google-ai-edge/mediapipe) 的 `mediapipe/tasks/{python,c,cc}/retrieval/universal_embedder`
-- Issue：[#287](https://github.com/zhongwater123/A-NAS/issues/287)、[#295](https://github.com/zhongwater123/A-NAS/issues/295)、[#207](https://github.com/zhongwater123/A-NAS/issues/207)、[#283](https://github.com/zhongwater123/A-NAS/issues/283)
+- Issue：[#287](https://github.com/zhongwater123/A-NAS/issues/287)、[#322](https://github.com/zhongwater123/A-NAS/issues/322)、[#326](https://github.com/zhongwater123/A-NAS/issues/326)、[#295](https://github.com/zhongwater123/A-NAS/issues/295)、[#207](https://github.com/zhongwater123/A-NAS/issues/207)、[#283](https://github.com/zhongwater123/A-NAS/issues/283)
 - 报告：开发机 `~/A-NAS-datasets/cache/video-moments/embeddinggemma-2-740m@e7a8a2204b91+mediapipe-1.1.0+tok70+l2/`：`report.json`（汇总）、`queries.json`（每条查询在各方式下的前 5 个窗口与分数）、`cost.json`（编码耗时与内存）；`../montage/<名称>/`：基线成片的 MP4 与所用片段（`<名称>.json`）

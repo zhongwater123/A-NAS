@@ -115,6 +115,8 @@ Group=a-nas-photos
 Environment=PYTHONPATH=/spike-ai PYTHONDONTWRITEBYTECODE=1
 ExecStart=/opt/photos-spike-ai/bin/python /spike/videos_spike.py --socket /run/a-nas-videos-assistant/videos.sock --index /spike-video-index --videos /spike-video-files --ai-socket /run/photos-spike-ai/ai.sock --work /var/lib/videos-spike
 UNIT
+    # SPIKE_VISION (run.sh): a local vision model's URL, to look at the frames before a cut.
+    [[ -z "${SPIKE_VISION:-}" ]] || sed -i "s|^ExecStart=.*|& --vision $SPIKE_VISION|" /etc/systemd/system/videos-spike.service
     # Like the photo socket, it reaches a sandbox only bound over an empty file; a drop-in,
     # so the assistant's own unit stays as the trials install it.
     install -d -m 0755 /run/anas-assistant-videos && : > /run/anas-assistant-videos/videos.sock

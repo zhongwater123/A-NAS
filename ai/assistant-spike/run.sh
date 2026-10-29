@@ -22,7 +22,9 @@
 # scenarios-photos.txt" and photos-vision.sh.
 # SPIKE_PHOTO_MODELS=~/A-NAS-models (and SPIKE_PHOTO_IMPORT=<photo dir>) with SPIKE_PHOTOS=1
 # searches with the real EmbeddingGemma 2; the photo tests expect the stand-in.
-# SPIKE_VIDEOS and SPIKE_VIDEO_FILES with those also give anas_mcp.py the video moment tools (#322).
+# SPIKE_VIDEOS and SPIKE_VIDEO_FILES with those also give anas_mcp.py the video moment tools (#322);
+# SPIKE_VISION=<chat completions URL of a local vision model, as the container reaches it> has
+# them look at the frames before a cut (montage/look.py).
 # SPIKE_CHANNEL=api_server with sandbox installs the earlier API Server channel instead
 # (api-server-channel/), for api-basic.sh, api-tools.sh, api-after.sh, api-managed.sh,
 # boundary.sh and the UI prototype; scenarios works on either channel.
@@ -121,7 +123,7 @@ case "${1:-}" in
     done
     # SPIKE_APPROVAL_TIMEOUT=<seconds> shortens Hermes's wait for the member's approval.
     docker exec -e SPIKE_MODEL="${SPIKE_MODEL:-}" -e SPIKE_UPSTREAM="${SPIKE_UPSTREAM:-}" -e SPIKE_CHANNEL="${SPIKE_CHANNEL:-}" \
-      -e SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" -e SPIKE_APPROVAL_TIMEOUT="${SPIKE_APPROVAL_TIMEOUT:-}" \
+      -e SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" -e SPIKE_APPROVAL_TIMEOUT="${SPIKE_APPROVAL_TIMEOUT:-}" -e SPIKE_VISION="${SPIKE_VISION:-}" \
       "$name" bash /spike/setup.sh 2>&1 | tail -3
     docker exec "$name" systemctl start anas-assistant-probe@alice.service
     docker exec "$name" journalctl -u anas-assistant-probe@alice.service -o cat --no-pager | grep -E '^(PASS|FAIL|INFO)'

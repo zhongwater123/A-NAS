@@ -553,6 +553,31 @@ def build_index(args):
         json.dump(out, file, ensure_ascii=False)
 
 
+def describe(args):
+    """One sentence from the local vision model on each card's key frame (montage.look),
+    written to captions.json beside index.json; cards already described are kept."""
+    from montage import look, moments
+
+    index = moments.Index.load(os.path.join(args.cache, "index.json"), os.path.join(args.cache, "frames.npz"))
+    path = os.path.join(args.cache, moments.CAPTIONS)
+    said = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as file:
+            said = json.load(file)["cards"]
+    vision = look.Vision(args.vision)
+    todo = [c for c in index.cards if [said.get(c["id"], {}).get(k) for k in ("start", "end")] != [c["start"], c["end"]]]
+    began = time.monotonic()
+    for n, card in enumerate(todo, 1):
+        frame = index.frame_ms[index.keyframe(card)]
+        with open(frame_path(card["video"], frame), "rb") as file:
+            caption = vision.describe(file.read())
+        said[card["id"]] = {"start": card["start"], "end": card["end"], "frame": frame, "caption": caption}
+        if n % 20 == 0 or n == len(todo):
+            with open(path, "w", encoding="utf-8") as file:
+                json.dump({"vision": args.name, "cards": said}, file, ensure_ascii=False, indent=1)
+            print(f"{n}/{len(todo)} {(time.monotonic() - began) / n:.2f} s each  {card['id']}: {caption}", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--set", default=SET, help="the videos and queries, with a cache of its own")
@@ -565,6 +590,11 @@ def main():
     step = steps.add_parser("index", help="find the shots, flat frames and labels the montage tools read")
     step.add_argument("--model", required=True)
     step.add_argument("--weight-cache", default=os.path.join(datasets.ROOT, "cache", "xnnpack"))
+    step = steps.add_parser("describe", help="caption each montage card's key frame with a local vision model")
+    step.add_argument("--cache", required=True, help="the model's directory under the cache, with index.json")
+    step.add_argument("--vision", default="http://127.0.0.1:8090/v1/chat/completions",
+                      help="the local vision model's chat completions URL (llama-server)")
+    step.add_argument("--name", default="Qwen3-VL-2B-Instruct Q8_0", help="the vision model, as recorded")
     step = steps.add_parser("evaluate", help="score the layouts and methods")
     step.add_argument("--cache", required=True, help="the model's directory under the cache, as embed printed it")
     step = steps.add_parser("montage", help="cut the baseline clip for one query")
@@ -584,6 +614,8 @@ def main():
         montage(args)
     elif args.step == "index":
         build_index(args)
+    elif args.step == "describe":
+        describe(args)
     else:
         evaluate(args)
 
