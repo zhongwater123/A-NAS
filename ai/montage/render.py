@@ -1,5 +1,6 @@
-"""Stills to an H.264 MP4 with FFmpeg: 1920×1080, 30 fps, letterboxed, no audio."""
+"""Stills or video clips to an H.264 MP4 with FFmpeg: 1920×1080, 30 fps, letterboxed, no audio."""
 
+import contextlib
 import os
 import secrets
 import subprocess
@@ -8,6 +9,8 @@ import time
 WIDTH, HEIGHT, FPS = 1920, 1080, 30
 CROSSFADE = 0.5
 TIMEOUT = 600
+FIT = (f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
+       f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p")
 
 
 class RenderError(Exception):
@@ -23,15 +26,13 @@ def ffmpeg_args(images: list[str], seconds: float, crossfade: bool, output: str)
     """
     fade = crossfade and len(images) > 1
     args = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-n"]
-    fit = (f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
-           f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p")
     graph = []
     for i, image in enumerate(images):
         length = seconds + CROSSFADE if fade and i < len(images) - 1 else seconds
         args += ["-framerate", str(FPS), "-i", image]
         # Each still is decoded once and its frame repeated: an image that does
         # not decode ends the input at once, where -loop 1 would retry forever.
-        graph.append(f"[{i}:v]{fit},tpad=stop_mode=clone:stop_duration={length:g},fps={FPS},"
+        graph.append(f"[{i}:v]{FIT},tpad=stop_mode=clone:stop_duration={length:g},fps={FPS},"
                      f"trim=duration={length:g}[v{i}]")
     if fade:
         last = "v0"
@@ -42,20 +43,46 @@ def ffmpeg_args(images: list[str], seconds: float, crossfade: bool, output: str)
         graph.append("".join(f"[v{i}]" for i in range(len(images))) + f"concat=n={len(images)}:v=1:a=0[x]")
         last = "x"
     total = len(images) * seconds
-    return args + ["-filter_complex", ";".join(graph), "-map", f"[{last}]", "-t", f"{total:g}",
-                   "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(FPS), "-an",
-                   "-movflags", "+faststart", "-f", "mp4", output]
+    return [*args, "-filter_complex", ";".join(graph), "-map", f"[{last}]", "-t", f"{total:g}", *_encode(output)]
+
+
+def clip_args(clips: list[tuple[str, float, float]], output: str) -> list[str]:
+    """The FFmpeg command for (video, start, end) clips in order, each cut with an accurate seek.
+
+    Every clip is brought to one size and rate before the concat filter, so
+    sources of different sizes and codecs join; the total is the clips' sum.
+    """
+    args = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-n"]
+    graph = []
+    for i, (video, start, end) in enumerate(clips):
+        args += ["-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", video]
+        graph.append(f"[{i}:v]{FIT},fps={FPS},trim=duration={end - start:.3f},setpts=PTS-STARTPTS[v{i}]")
+    graph.append("".join(f"[v{i}]" for i in range(len(clips))) + f"concat=n={len(clips)}:v=1:a=0[x]")
+    return [*args, "-filter_complex", ";".join(graph), "-map", "[x]", *_encode(output)]
 
 
 def render(images: list[str], seconds: float, crossfade: bool, output_dir: str) -> str:
     """Writes a new file in output_dir and returns its path; nothing is left behind on failure."""
+    return _write(lambda partial: ffmpeg_args(images, seconds, crossfade, partial), output_dir, "slideshow")
+
+
+def render_clips(clips: list[tuple[str, float, float]], output_dir: str) -> str:
+    """Like render, for video clips."""
+    return _write(lambda partial: clip_args(clips, partial), output_dir, "montage")
+
+
+def _encode(output: str) -> list[str]:
+    return ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(FPS), "-an",
+            "-movflags", "+faststart", "-f", "mp4", output]
+
+
+def _write(command, output_dir: str, prefix: str) -> str:
     os.makedirs(output_dir, exist_ok=True)
-    name = time.strftime("slideshow-%Y%m%d-%H%M%S-") + secrets.token_hex(3) + ".mp4"
+    name = time.strftime(f"{prefix}-%Y%m%d-%H%M%S-") + secrets.token_hex(3) + ".mp4"
     final = os.path.join(output_dir, name)
     partial = final + ".partial"
     try:
-        done = subprocess.run(ffmpeg_args(images, seconds, crossfade, partial),
-                              capture_output=True, text=True, timeout=TIMEOUT, check=False)
+        done = subprocess.run(command(partial), capture_output=True, text=True, timeout=TIMEOUT, check=False)
     except FileNotFoundError:
         raise RenderError("找不到 ffmpeg，请先安装") from None
     except subprocess.TimeoutExpired:
@@ -73,7 +100,5 @@ def render(images: list[str], seconds: float, crossfade: bool, output_dir: str) 
 
 
 def _remove(path: str) -> None:
-    try:
+    with contextlib.suppress(FileNotFoundError):
         os.remove(path)
-    except FileNotFoundError:
-        pass

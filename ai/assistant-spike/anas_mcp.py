@@ -20,9 +20,12 @@ import http.client
 import io
 import json
 import os
+import secrets
 import socket
+import stat
 import sys
 import tempfile
+import time
 import urllib.parse
 
 from mcp.server import MCPServer
@@ -38,13 +41,13 @@ server = MCPServer("anas", instructions=(
 
 
 class UnixHTTP(http.client.HTTPConnection):
-    def __init__(self, path: str):
+    def __init__(self, path: str, seconds: float = 120):
         super().__init__("localhost")
-        self.path = path
+        self.path, self.seconds = path, seconds
 
     def connect(self):
         self.sock = socket.socket(socket.AF_UNIX)
-        self.sock.settimeout(120)
+        self.sock.settimeout(self.seconds)
         self.sock.connect(self.path)
 
 
@@ -274,11 +277,11 @@ def look_at_photo(photo_id: str):
     ])
 
 
-# Photo-to-video (docs/specs/photo-to-video.md) with the demo's renderer, which run.sh
+# Photo-to-video (docs/specs/photo-to-video.md) with ai/montage's renderer, which run.sh
 # mounts at /spike-ai with SPIKE_PHOTOS; without it (the trial bundle) there is no such tool.
 sys.path.append("/spike-ai")
 try:
-    from photo_video_demo import render as slideshow
+    from montage import render as slideshow
 except ImportError:
     slideshow = None
 VIDEOS = "/nas/助手/视频"
@@ -329,6 +332,78 @@ if slideshow:
         except slideshow.RenderError as error:
             return CallToolResult(content=[TextContent(type="text", text=f"拼接失败：{error}")], is_error=True)
         return result({"path": path, "seconds": len(photo_ids) * seconds_per_photo, "photos": len(photo_ids)})
+
+
+# Video moments (#322): videos_spike.py, the stand-in for the photo service's video
+# moments, holds the vectors and the videos; these tools only relay, and the model
+# gets text and numbers, never frames. Its socket is bound over an empty file like the
+# photo service's; while the file is still empty (no SPIKE_VIDEOS) there are no such tools.
+VIDEO_MOMENTS = "/run/anas-assistant-videos/videos.sock"
+
+
+def video_moments(path: str, body: dict) -> tuple[int, str, bytes]:
+    # A cut takes a while: FFmpeg decodes and encodes every second of it.
+    conn = UnixHTTP(VIDEO_MOMENTS, 900)
+    try:
+        conn.request("POST", path, json.dumps(body, ensure_ascii=False).encode(), {"Content-Type": "application/json"})
+        response = conn.getresponse()
+        return response.status, response.getheader("Content-Type", ""), response.read()
+    except OSError:
+        raise PhotoError("视频检索暂时连不上，请稍后再试") from None
+    finally:
+        conn.close()
+
+
+def video_failed(status: int, raw: bytes) -> CallToolResult:
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        body = {"error": f"视频检索返回 {status}"}
+    text = body.get("error", f"视频检索返回 {status}")
+    if body.get("problems"):
+        text += "：\n" + "\n".join(f"- {problem}" for problem in body["problems"])
+    return CallToolResult(content=[TextContent(type="text", text=text)], is_error=True)
+
+
+if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mode):
+    @server.tool(annotations=READ_ONLY, structured_output=False, description=(
+        "按画面内容在测试视频里找片段，返回镜头卡片，最相关的在前。probes：1–8 条要找的画面，每条一句短描述，"
+        "同一个意思可以换几种说法；地点、时间这类条件画面里看不出来，不要和画面主题写在一条里。limit：卡片数，1–40，默认 20。"
+        "每张卡片是一个镜头里最长 20 秒的一部分：id；video；start、end 是这张卡片覆盖的秒数；shot 是所在镜头的起止，"
+        "剪的时候不能越出；score 是各条探针里最高的分数，probes 给出每条探针的最高分与出现的时刻 at；tags 是词表里最接近的几个词，"
+        "只说明大致内容；group 相同的卡片画面相似，成片里别都用。分数低于 threshold 时与“库里没有”分不开。结果里没有画面。"))
+    def search_video_moments(probes: list[str], limit: int = 20):
+        try:
+            status, _kind, raw = video_moments("/search", {"probes": probes, "limit": limit})
+        except PhotoError as error:
+            return failed(error)
+        if status != 200:
+            return video_failed(status, raw)
+        return result(json.loads(raw))
+
+    # Not read-only: it adds a file, though only a new one in the assistant's own folder.
+    @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
+                 structured_output=False, description=(
+        "按剪辑计划把视频片段剪成一段 1920×1080、30 fps 的无声 MP4，存进助手目录的“视频”文件夹，返回文件路径与时长。"
+        "segments：按播放顺序排列，每段是 {card, start, end}：card 是 search_video_moments 返回的卡片 id，"
+        "start、end 是秒数，必须落在这张卡片的 shot 范围内，每段至少 1.5 秒，各段不能用同一段画面；总长不超过 180 秒。"
+        "计划不合规则时整次拒绝并逐条说明是哪一段、哪一条，照着改了再调用。成片只在助手目录里；"
+        "成员要放进个人空间时，再用 submit_changes 的 copy 提交。"))
+    def make_montage(segments: list[dict]):
+        try:
+            status, kind, raw = video_moments("/montage", {"segments": segments})
+        except PhotoError as error:
+            return failed(error)
+        if status != 200 or kind != "video/mp4":
+            return video_failed(status, raw)
+        os.makedirs(VIDEOS, exist_ok=True)
+        name = time.strftime("montage-%Y%m%d-%H%M%S-") + secrets.token_hex(3) + ".mp4"
+        path = os.path.join(VIDEOS, name)
+        # O_EXCL: a new file only, never one the member already has.
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644), "wb") as file:
+            file.write(raw)
+        seconds = round(sum(segment["end"] - segment["start"] for segment in segments), 2)
+        return result({"path": path, "seconds": seconds, "segments": len(segments)})
 
 
 if os.environ.get("ANAS_SPIKE_PHOTO_PIXELS"):

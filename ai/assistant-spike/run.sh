@@ -22,6 +22,7 @@
 # scenarios-photos.txt" and photos-vision.sh.
 # SPIKE_PHOTO_MODELS=~/A-NAS-models (and SPIKE_PHOTO_IMPORT=<photo dir>) with SPIKE_PHOTOS=1
 # searches with the real EmbeddingGemma 2; the photo tests expect the stand-in.
+# SPIKE_VIDEOS and SPIKE_VIDEO_FILES with those also give anas_mcp.py the video moment tools (#322).
 # SPIKE_CHANNEL=api_server with sandbox installs the earlier API Server channel instead
 # (api-server-channel/), for api-basic.sh, api-tools.sh, api-after.sh, api-managed.sh,
 # boundary.sh and the UI prototype; scenarios works on either channel.
@@ -102,6 +103,12 @@ case "${1:-}" in
         key_mount+=(-v "$(cd "$SPIKE_PHOTO_MODELS" && pwd):/spike-models:ro"
           -v "$here/../../deploy/models:/spike-manifests:ro" -v "$work/pip-cache:/root/.cache/pip")
         [[ -z "${SPIKE_PHOTO_IMPORT:-}" ]] || key_mount+=(-v "$(cd "$SPIKE_PHOTO_IMPORT" && pwd):/spike-import:ro")
+        # SPIKE_VIDEOS=<the model's directory of an eval.video_moments set, after its index step>
+        # with SPIKE_VIDEO_FILES=<the set's videos> adds the video moment tools (#322).
+        if [[ -n "${SPIKE_VIDEOS:-}" ]]; then
+          key_mount+=(-v "$(cd "$SPIKE_VIDEOS" && pwd):/spike-video-index:ro"
+            -v "$(cd "${SPIKE_VIDEO_FILES:?set SPIKE_VIDEO_FILES}" && pwd):/spike-video-files:ro")
+        fi
       fi
     fi
     docker rm -f "$name" >/dev/null 2>&1 || true

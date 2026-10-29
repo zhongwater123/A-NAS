@@ -1,4 +1,4 @@
-# The AI Worker's runtime for the photo-to-video demo stack on arm64 (Debian 13,
+# The AI Worker's runtime for the prototype sandbox on arm64 (Debian 13,
 # CPython 3.13, aarch64): the versions of ai/requirements.lock, which pins
 # x86_64, with the arm64 wheels' hashes. Made the way
 # `scripts/build-ai-runtime.sh --lock` makes the x86_64 hashes, by downloading the

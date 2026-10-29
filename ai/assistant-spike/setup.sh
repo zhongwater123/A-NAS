@@ -46,9 +46,9 @@ if [[ -x /spike-photos/photos-spike ]]; then
   env=()
   if [[ -d /spike-models ]]; then
     # The real AI Worker under the photo service's identity, started by its socket as in
-    # A-NAS, with the runtime pinned as in the photo-to-video demo (ai/photo_video_demo/stack.sh).
+    # A-NAS, with the runtime pinned by hash; Apple-silicon VMs are arm64 (ai-runtime-arm64.lock).
     lock=/spike-ai/requirements.lock
-    [[ $(uname -m) == aarch64 ]] && lock=/spike-ai/photo_video_demo/ai-runtime-arm64.lock
+    [[ $(uname -m) == aarch64 ]] && lock=/spike/ai-runtime-arm64.lock
     apt-get update -qq && apt-get install -y -qq --no-install-recommends python3-venv libegl1 libgles2 >/dev/null
     python3 -m venv /opt/photos-spike-ai
     /opt/photos-spike-ai/bin/pip install --quiet --resume-retries 20 --timeout 60 --no-deps --require-hashes \
@@ -101,6 +101,34 @@ UNIT
     systemctl is-active -q photos-spike || { journalctl -u photos-spike -o cat --no-pager | tail -5; exit 1; }
     sleep 1
   done
+  if [[ -d /spike-models && -d /spike-video-index ]]; then
+    # Video moments (#322): videos_spike.py stands in for the photo service's video moments,
+    # under its identity so that it reaches the AI Worker, with the set's index and videos
+    # (run.sh SPIKE_VIDEOS); FFmpeg cuts the clips.
+    command -v ffmpeg >/dev/null || apt-get install -y -qq --no-install-recommends ffmpeg >/dev/null 2>&1 ||
+      { apt-get update -qq && apt-get install -y -qq --no-install-recommends ffmpeg >/dev/null; }
+    install -d -o a-nas-photos -g a-nas-photos -m 0700 /var/lib/videos-spike /run/a-nas-videos-assistant
+    cat >/etc/systemd/system/videos-spike.service <<'UNIT'
+[Service]
+User=a-nas-photos
+Group=a-nas-photos
+Environment=PYTHONPATH=/spike-ai PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/photos-spike-ai/bin/python /spike/videos_spike.py --socket /run/a-nas-videos-assistant/videos.sock --index /spike-video-index --videos /spike-video-files --ai-socket /run/photos-spike-ai/ai.sock --work /var/lib/videos-spike
+UNIT
+    # Like the photo socket, it reaches a sandbox only bound over an empty file; a drop-in,
+    # so the assistant's own unit stays as the trials install it.
+    install -d -m 0755 /run/anas-assistant-videos && : > /run/anas-assistant-videos/videos.sock
+    mkdir -p /etc/systemd/system/anas-assistant@.service.d
+    printf '[Service]\nBindReadOnlyPaths=-/run/a-nas-videos-assistant/videos.sock:/run/anas-assistant-videos/videos.sock\n' \
+      >/etc/systemd/system/anas-assistant@.service.d/videos.conf
+    systemctl daemon-reload
+    systemctl start videos-spike.service
+    for _ in $(seq 1 120); do
+      journalctl -u videos-spike -o cat --no-pager | grep -q videos-ready && break
+      systemctl is-active -q videos-spike || { journalctl -u videos-spike -o cat --no-pager | tail -5; exit 1; }
+      sleep 1
+    done
+  fi
 fi
 env "${product[@]}" bash /spike/assistant-install.sh alice bob
 bash /spike/seed.sh "$d"

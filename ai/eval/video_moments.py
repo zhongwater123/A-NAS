@@ -33,6 +33,7 @@ long edge, JPEG 82).
 import argparse
 import hashlib
 import io
+import itertools
 import json
 import os
 import resource
@@ -120,7 +121,7 @@ def decode(path, ms, duration_ms):
     # The last frame starts before the end; a seek to the very end finds none.
     at = min(ms, max(duration_ms - 100, 0)) / 1000
     result = subprocess.run(
-        ["ffmpeg", "-v", "error", "-ss", f"{at:.3f}", "-i", path, "-frames:v", "1",
+        ["ffmpeg", "-v", "error", "-ss", f"{at:.3f}", "-i", path, "-frames:v", "1",  # noqa: S607  FFmpeg from PATH on a development machine
          "-f", "image2pipe", "-vcodec", "png", "-"],
         capture_output=True, check=True)
     with Image.open(io.BytesIO(result.stdout)) as image:
@@ -311,7 +312,7 @@ def run(data, queries, index, method):
         ranked = np.argsort(-scores, kind="stable")
         row = judge(query, ranked, index)
         row.update(id=query["id"], category=query["category"], top=float(scores[ranked[0]]),
-                   best=[list(index.rows[i]) + [round(float(scores[i]), 4)] for i in ranked[:TOP_K]])
+                   best=[[*index.rows[i], round(float(scores[i]), 4)] for i in ranked[:TOP_K]])
         results.append(row)
     return results
 
@@ -471,7 +472,7 @@ def montage(args):
         left -= length
         part = os.path.join(directory, f"part{number:02d}.mp4")
         subprocess.run(
-            ["ffmpeg", "-v", "error", "-y", "-ss", f"{start / 1000:.3f}",
+            ["ffmpeg", "-v", "error", "-y", "-ss", f"{start / 1000:.3f}",  # noqa: S607  FFmpeg from PATH
              "-i", os.path.join(VIDEOS, data["videos"][video]["file"]), "-t", f"{length / 1000:.3f}",
              "-an", "-vf", MONTAGE_FILTER, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", part],
             check=True)
@@ -483,7 +484,7 @@ def montage(args):
     output = os.path.join(directory, f"{args.name}.mp4")
     inputs = [arg for part in parts for arg in ("-i", os.path.join(directory, part["file"]))]
     joined = "".join(f"[{i}:v]" for i in range(len(parts))) + f"concat=n={len(parts)}:v=1:a=0"
-    subprocess.run(["ffmpeg", "-v", "error", "-y", *inputs, "-filter_complex", joined,
+    subprocess.run(["ffmpeg", "-v", "error", "-y", *inputs, "-filter_complex", joined,  # noqa: S607  FFmpeg from PATH
                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", output], check=True)
     with open(os.path.join(directory, f"{args.name}.json"), "w", encoding="utf-8") as file:
         json.dump({"query": args.query, "seconds": args.seconds, "model": provider.model, "parts": parts},
@@ -491,6 +492,65 @@ def montage(args):
     print(output)
     for part in parts:
         print(f"  {part['video']} {part['start']:.1f}-{part['end']:.1f} s  score {part['score']}")
+
+
+# The index for the montage tools (montage.moments): shots, flat frames and labels.
+# A cut is a frame whose scene score (FFmpeg's select filter) exceeds SCENE;
+# cuts closer than SHOT_MIN to the last are flashes and dropped. A frame whose
+# grey levels spread less than FLAT is black or one colour.
+SCENE = 0.25
+SHOT_MIN = 1.0
+FLAT = 8.0
+TAGS_PER_WINDOW = 3
+LABELS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                      "internal", "photos", "labels", "v1.json")
+
+
+def cuts(path):
+    found = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-nostats", "-i", path, "-an", "-vf", f"select='gt(scene,{SCENE})',showinfo",  # noqa: S607  FFmpeg from PATH
+         "-f", "null", "-"], capture_output=True, text=True, check=True).stderr
+    times = []
+    for line in found.splitlines():
+        if "pts_time:" in line:
+            t = float(line.split("pts_time:", 1)[1].split()[0])
+            if t - (times[-1] if times else 0) >= SHOT_MIN:
+                times.append(t)
+    return times
+
+
+def build_index(args):
+    from anas_ai import providers
+
+    data = load_set()
+    os.makedirs(args.weight_cache, exist_ok=True)
+    provider = providers.MediaPipeProvider(args.model, MANIFEST, cache_dir=args.weight_cache)
+    with open(LABELS, encoding="utf-8") as file:
+        vocabulary = json.load(file)["labels"]
+    rows = []
+    for label in vocabulary:
+        mean = np.mean([provider.embed_query(word) for word in [label["name"], *label.get("synonyms", [])]], axis=0)
+        rows.append(mean / np.linalg.norm(mean))
+    labels = np.stack(rows).astype(np.float32)
+    provider.close()
+    directory = os.path.join(CACHE, provider.model)
+    frames = Cache(os.path.join(directory, "frames.npz")).vectors
+    out = {"model": provider.model, "layout": MONTAGE_LAYOUT, "scene": SCENE, "videos": {}}
+    for video, meta in sorted(data["videos"].items()):
+        duration = meta["duration"]
+        bounds = [0.0, *cuts(os.path.join(VIDEOS, meta["file"])), duration]
+        windows_out = []
+        for start, end, (frame,) in windows(round(duration * 1000), *LAYOUTS[MONTAGE_LAYOUT]):
+            with Image.open(frame_path(video, frame)) as image:
+                flat = float(np.asarray(image.convert("L"), dtype=np.float32).std()) < FLAT
+            nearest = np.argsort(-(labels @ frames[f"{video}/{frame}"]))[:TAGS_PER_WINDOW]
+            windows_out.append({"start": start / 1000, "end": end / 1000, "frame": frame, "flat": flat,
+                                "tags": [vocabulary[i]["name"] for i in nearest]})
+        out["videos"][video] = {"file": meta["file"], "duration": duration,
+                                "shots": [list(pair) for pair in itertools.pairwise(bounds)], "windows": windows_out}
+        print(f"{video}: {len(bounds) - 1} shots, {sum(w['flat'] for w in windows_out)} flat windows", flush=True)
+    with open(os.path.join(directory, "index.json"), "w", encoding="utf-8") as file:
+        json.dump(out, file, ensure_ascii=False)
 
 
 def main():
@@ -501,6 +561,9 @@ def main():
     step = steps.add_parser("embed", help="embed the frames and the queries")
     step.add_argument("--model", required=True)
     step.add_argument("--tokens", type=int, default=70)
+    step.add_argument("--weight-cache", default=os.path.join(datasets.ROOT, "cache", "xnnpack"))
+    step = steps.add_parser("index", help="find the shots, flat frames and labels the montage tools read")
+    step.add_argument("--model", required=True)
     step.add_argument("--weight-cache", default=os.path.join(datasets.ROOT, "cache", "xnnpack"))
     step = steps.add_parser("evaluate", help="score the layouts and methods")
     step.add_argument("--cache", required=True, help="the model's directory under the cache, as embed printed it")
@@ -519,6 +582,8 @@ def main():
         embed(args)
     elif args.step == "montage":
         montage(args)
+    elif args.step == "index":
+        build_index(args)
     else:
         evaluate(args)
 
