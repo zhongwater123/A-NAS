@@ -21,6 +21,7 @@
 /api/v1/system-logs:
   get:
     operationId: listSystemLogs
+    x-anas-posture: admin
     summary: Read A-NAS service logs from the systemd journal through the Host Agent, newest first
     description: >-
       Administrators only. The Host Agent reads only the allowlisted A-NAS services (ADR 0020); levels, messages

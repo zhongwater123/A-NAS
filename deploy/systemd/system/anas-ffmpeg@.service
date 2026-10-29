@@ -1,5 +1,5 @@
 [Unit]
-Description=A-NAS media worker (FFmpeg and libheif)
+Description=A-NAS FFmpeg worker (FFmpeg and libheif)
 Documentation=https://github.com/zhongwater123/A-NAS
 
 [Service]
@@ -9,7 +9,7 @@ Type=simple
 # data volume nor the Product Service's state (ADR 0017); the system test
 # proves both. The connection is standard input; logs go to the journal so
 # they never mix with the protocol.
-ExecStart=/opt/a-nas/current/anas-api media-worker
+ExecStart=/opt/a-nas/current/anas-api ffmpeg-worker
 StandardInput=socket
 StandardOutput=journal
 StandardError=journal
@@ -42,5 +42,5 @@ SystemCallErrorNumber=EPERM
 # their slice's memory, and yield the CPU and disk to the rest of the device
 # there: weights compare only siblings, which instances are to each other.
 MemoryMax=2G
-Slice=system-anasmedia.slice
+Slice=system-anasffmpeg.slice
 RuntimeMaxSec=8h

@@ -82,7 +82,7 @@
 ### 按服务、级别、时间和关键词筛选系统日志
 
 - Given：系统日志已显示。
-- When：选择服务（全部服务、产品服务、Host Agent、相册服务、分享服务、容器代理、本地 AI、媒体 Worker、本机屏幕、文件共享 Samba、局域网入口 Caddy）、级别（全部、警告及以上、仅错误）、时间范围，或输入关键词。
+- When：选择服务（全部服务、产品服务、Host Agent、相册服务、分享服务、容器代理、本地 AI、FFmpeg Worker、本机屏幕、文件共享 Samba、局域网入口 Caddy）、级别（全部、警告及以上、仅错误）、时间范围，或输入关键词。
 - Then：从最新重新读取。产品服务等 A-NAS 进程以 JSON 写日志，级别、消息和字段取自日志本身；systemd 自身与其他程序的行使用 journald 优先级。一次读取最多检查 20,000 行；在此之前没有凑满一页时，页尾说明“已检查到某时间”，可以继续加载更早的日志。
 
 ### 实时跟随
@@ -111,7 +111,7 @@
 
 - Go：[活动记录合并与游标](../../internal/activity/activity_test.go)、[账号与登录记录](../../internal/accounts/activity_test.go)、[文件记录的空间与隐藏](../../internal/files/activity_test.go)、[相册活动](../../internal/photosapi/handler_test.go)、[活动记录 API](../../internal/httpapi/activity_test.go)、[系统日志 API](../../internal/httpapi/systemlogs_test.go)、[服务白名单与日志行解析](../../internal/systemlog/systemlog_test.go)、[journal 读取](../../internal/systemlog/journal/journal_test.go)、[Host Agent 系统日志接口](../../internal/hoststate/agent/rootagent/logs_test.go)。
 - React：[日志分区测试](../../web/src/settings/logs/LogsSection.test.tsx)、[描述与合并](../../web/src/settings/logs/describe.test.ts)、[导出中的公式单元格](../../web/src/settings/logs/common.test.ts)，以及[桌面测试](../../web/src/App.test.tsx)中桌面不再有“日志”图标。
-- 系统测试：在 Debian 13 systemd 容器中以真实 Host Agent 单元读取产品服务日志，见[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)。
+- 系统测试：在 Debian 13 systemd 容器中以真实 Host Agent 单元读取产品服务日志，见[系统测试](../development/testing.md#系统测试)。
 - 本地门禁：`make check`。
 
 ## 关联

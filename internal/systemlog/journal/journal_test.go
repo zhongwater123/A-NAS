@@ -32,7 +32,7 @@ func (r *recorder) open(_ context.Context, args []string) (journal.Stream, error
 func TestArgumentsUseOnlyAllowlistedUnitsAndValidatedValues(t *testing.T) {
 	args := strings.Join(journal.Arguments(systemlog.Query{Services: []string{"media"}, Before: "s=ab;i=1f",
 		Since: time.Unix(1760227200, 0)}), " ")
-	for _, want := range []string{"--output=json", "--unit=anas-media@*.service", "--unit=anas-media.socket", "--reverse", "--after-cursor=s=ab;i=1f", "--since=@1760227200"} {
+	for _, want := range []string{"--output=json", "--unit=anas-ffmpeg@*.service", "--unit=anas-ffmpeg.socket", "--reverse", "--after-cursor=s=ab;i=1f", "--since=@1760227200"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("arguments %q lack %q", args, want)
 		}

@@ -23,7 +23,7 @@ func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 		NewID: func() string { return "plan-01" },
 	})
 
-	plan, err := service.PlanVolume(context.Background(), []string{"disk:fake-data-01"}, "")
+	plan, err := service.PlanVolume(context.Background(), storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatalf("PlanVolume() error = %v", err)
 	}
@@ -40,7 +40,7 @@ func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 		t.Fatal("plan has no explicit actions")
 	}
 
-	confirmed, err := service.ConfirmPlan(context.Background(), plan.ID, plan.ConfirmationPhrase)
+	confirmed, err := service.ConfirmPlan(context.Background(), storageAdministrator, plan.ID, plan.ConfirmationPhrase)
 	if err != nil {
 		t.Fatalf("ConfirmPlan() error = %v", err)
 	}
@@ -48,7 +48,7 @@ func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 		t.Fatalf("confirmed state = %q, want %q", got, want)
 	}
 
-	completed, err := service.ExecutePlan(context.Background(), plan.ID)
+	completed, err := service.ExecutePlan(context.Background(), storageAdministrator, plan.ID)
 	if err != nil {
 		t.Fatalf("ExecutePlan() error = %v", err)
 	}
@@ -59,7 +59,7 @@ func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 		t.Fatalf("executed disk = %q, want %q", got, want)
 	}
 	// The fake host never mounts the volume, so nothing can join it.
-	if _, err := service.PlanVolume(context.Background(), []string{"disk:fake-data-01"}, storage.LayoutMirror); !errors.Is(err, storage.ErrVolumeUnavailable) {
+	if _, err := service.PlanVolume(context.Background(), storageAdministrator, []string{"disk:fake-data-01"}, storage.LayoutMirror); !errors.Is(err, storage.ErrVolumeUnavailable) {
 		t.Fatalf("plan for an offline volume error = %v, want ErrVolumeUnavailable", err)
 	}
 }
@@ -70,7 +70,7 @@ func TestPlanForBlankDiskSerializesEmptySignaturesArray(t *testing.T) {
 		NewID: func() string { return "plan-blank-disk" },
 	})
 
-	plan, err := service.PlanVolume(context.Background(), []string{"disk:fake-data-01"}, "")
+	plan, err := service.PlanVolume(context.Background(), storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatalf("PlanVolume() error = %v", err)
 	}
@@ -100,11 +100,11 @@ func TestExecutionPlanSurvivesServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, "")
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
@@ -121,7 +121,7 @@ func TestExecutionPlanSurvivesServiceRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, err := restarted.ExecutePlan(ctx, plan.ID)
+	completed, err := restarted.ExecutePlan(ctx, storageAdministrator, plan.ID)
 	if err != nil {
 		t.Fatalf("ExecutePlan() after restart error = %v", err)
 	}
@@ -158,14 +158,14 @@ func TestListVolumesRefreshesFilesystemUsageFromHostState(t *testing.T) {
 	}
 	reader := &stateReader{state: state}
 	service := storage.NewService(reader, &recordingExecutor{}, storage.Options{NewID: func() string { return "plan-usage" }})
-	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, "")
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ExecutePlan(ctx, plan.ID); err != nil {
+	if _, err := service.ExecutePlan(ctx, storageAdministrator, plan.ID); err != nil {
 		t.Fatal(err)
 	}
 	total, available := uint64(500_107_862_016), uint64(482_000_000_000)
@@ -199,14 +199,14 @@ func TestDataVolumeFilesystemUUIDNeedsNoHostRead(t *testing.T) {
 	if got := service.DataVolumeFilesystemUUID(); got != "" {
 		t.Fatalf("UUID before any volume = %q, want empty", got)
 	}
-	plan, err := service.PlanVolume(ctx, []string{"disk:fake-data-01"}, "")
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConfirmPlan(ctx, plan.ID, plan.ConfirmationPhrase); err != nil {
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ExecutePlan(ctx, plan.ID); err != nil {
+	if _, err := service.ExecutePlan(ctx, storageAdministrator, plan.ID); err != nil {
 		t.Fatal(err)
 	}
 	reader.reads = 0
@@ -244,11 +244,11 @@ func TestUnusableDiskObservationsCannotBePlanned(t *testing.T) {
 		if len(disk.ObservationIssues) == 0 {
 			continue
 		}
-		if _, err := service.PlanVolume(t.Context(), []string{disk.ID.String()}, ""); !errors.Is(err, storage.ErrDiskNotEligible) {
+		if _, err := service.PlanVolume(t.Context(), storageAdministrator, []string{disk.ID.String()}, ""); !errors.Is(err, storage.ErrDiskNotEligible) {
 			t.Fatalf("plan for %s = %v, want ErrDiskNotEligible", disk.ID, err)
 		}
 	}
-	if _, err := service.PlanVolume(t.Context(), []string{"disk:fake-data-01"}, ""); err != nil {
+	if _, err := service.PlanVolume(t.Context(), storageAdministrator, []string{"disk:fake-data-01"}, ""); err != nil {
 		t.Fatalf("unusable devices blocked healthy disk plan: %v", err)
 	}
 }

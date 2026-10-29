@@ -8,14 +8,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 )
 
 // WorkerProcessor is the media center's Processor on the shared FFmpeg
 // worker. The worker only runs typed operations; what a probe means for a
 // film or an episode is decided here.
 type WorkerProcessor struct {
-	Worker mediaworker.Worker
+	Worker ffmpegworker.Worker
 }
 
 var _ Processor = WorkerProcessor{}
@@ -34,12 +34,12 @@ func (p WorkerProcessor) Frame(ctx context.Context, file *os.File, at float64, w
 }
 
 func (p WorkerProcessor) Subtitle(ctx context.Context, file *os.File, source SubtitleSource) ([]byte, error) {
-	subtitle, err := p.Worker.Subtitle(ctx, file, mediaworker.SubtitleRequest{Format: source.Format, Charset: source.Charset, Stream: source.Stream})
+	subtitle, err := p.Worker.Subtitle(ctx, file, ffmpegworker.SubtitleRequest{Format: source.Format, Charset: source.Charset, Stream: source.Stream})
 	return subtitle, workerError(err)
 }
 
 func (p WorkerProcessor) Stream(ctx context.Context, file *os.File, options StreamOptions) (io.ReadCloser, error) {
-	stream, err := p.Worker.Stream(ctx, file, mediaworker.StreamRequest{
+	stream, err := p.Worker.Stream(ctx, file, ffmpegworker.StreamRequest{
 		Start: options.Start, CopyVideo: options.CopyVideo, HEVC: options.HEVC, Height: options.Height,
 		MaxBitrate: options.MaxBitrate, AudioTrack: options.AudioTrack, CopyAudio: options.CopyAudio,
 	})
@@ -51,11 +51,11 @@ func workerError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, mediaworker.ErrUnavailable):
+	case errors.Is(err, ffmpegworker.ErrUnavailable):
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
-	case errors.Is(err, mediaworker.ErrUnreadable):
+	case errors.Is(err, ffmpegworker.ErrUnreadable):
 		return fmt.Errorf("%w: %w", ErrUnreadable, err)
-	case errors.Is(err, mediaworker.ErrInvalid):
+	case errors.Is(err, ffmpegworker.ErrInvalid):
 		return fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	return err
@@ -63,7 +63,7 @@ func workerError(err error) error {
 
 // mediaInfo keeps the first real video stream (not cover art), every audio
 // stream and every subtitle stream.
-func mediaInfo(probe mediaworker.Probe) MediaInfo {
+func mediaInfo(probe ffmpegworker.Probe) MediaInfo {
 	info := MediaInfo{Container: probe.Format.Name, Duration: probe.Format.Duration, Bitrate: probe.Format.Bitrate}
 	for _, stream := range probe.Streams {
 		language := stream.Tags["language"]

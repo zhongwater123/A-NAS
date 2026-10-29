@@ -9,7 +9,7 @@
 - 已移除 Debian 安装 U 盘；用户已确认实际实验盘型号、500 GB 标称容量、序列号和 WWN，并且产品已显示其稳定 `disk:*` ID。
 - 用户已核对磁盘型号、容量、序列身份和计划列出的待清除签名。
 - 若候选盘显示为系统盘、USB、removable、in-use、swap/md/dm 成员，或稳定 ID 与预期不一致，立即停止。
-- 已在开发机运行 `make check` 与 [`make system-test`](../development/LOCAL_ENVIRONMENT.md#系统测试)，并以 `deploy-dev.ps1 -StageOnly` 把同一制品上传到不可变的 `/home/anas-dev/apps/a-nas/releases/<12 位提交 SHA>`；不要把尚未安装的 stage 目录误记为 `current`。
+- 已在开发机运行 `make check` 与 [`make system-test`](../development/testing.md#系统测试)，并以 `deploy-dev.ps1 -StageOnly` 把同一制品上传到不可变的 `/home/anas-dev/apps/a-nas/releases/<12 位提交 SHA>`；不要把尚未安装的 stage 目录误记为 `current`。
 - 明确选择仅面向可信局域网的接口名，例如 `enp2s0`；不得使用空值、`0.0.0.0` 或未经核对的无线/公网接口。
 
 ## 安装系统服务
@@ -90,9 +90,9 @@ ip -brief link
   "$source_release" "$release_id" "$smb_interface"
 ```
 
-影视中心的媒体 Worker 使用 Debian 的 FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)），安装器在缺少 `ffmpeg`、`ffprobe` 或 `heif-thumbnailer` 时以退出码 3 结束而不改变系统；已部署过的设备升级前以 root 执行一次 `apt-get install --no-install-recommends ffmpeg heif-thumbnailer libheif-plugin-libde265`。文件管理的 HEIC/HEIF 预览使用 libheif；编码工具不属于产品运行依赖。
+影视中心的 FFmpeg Worker 使用 Debian 的 FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)），安装器在缺少 `ffmpeg`、`ffprobe` 或 `heif-thumbnailer` 时以退出码 3 结束而不改变系统；已部署过的设备升级前以 root 执行一次 `apt-get install --no-install-recommends ffmpeg heif-thumbnailer libheif-plugin-libde265`。文件管理的 HEIC/HEIF 预览使用 libheif；编码工具不属于产品运行依赖。
 
-完成标准：`/opt/a-nas/current` 指向 root 所有的目标 release；`anas-host-agent`、`anas-photos` 与 `anas-api` 均 active，`anas-media.socket` 已启用且 `/run/a-nas-media/media.sock` 为 `root:a-nas 0660`，安装器没有以退出码 5 结束；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
+完成标准：`/opt/a-nas/current` 指向 root 所有的目标 release；`anas-host-agent`、`anas-photos` 与 `anas-api` 均 active，`anas-ffmpeg.socket` 已启用且 `/run/a-nas-ffmpeg/ffmpeg.sock` 为 `root:a-nas-photos 0660`，安装器没有以退出码 5 结束；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
 
 ### 移入 Host Agent 的记录
 
@@ -176,8 +176,17 @@ journalctl -u anas-host-agent | grep -E 'repaired drifted|file worker'
 ```bash
 previous=<上一 release 的 12 位提交 SHA>
 stage=/home/anas-dev/apps/a-nas/releases/$previous
+worker_installer=/opt/a-nas/current/install-ffmpeg-units.sh
+worker=ffmpeg
+if [[ ! -f "$stage/anas-ffmpeg-system.socket" ]]; then worker=media; fi
 test -d "/opt/a-nas/releases/$previous"
-for unit in anas-host-agent anas-api anas-photos; do
+test -x "$worker_installer"
+for suffix in .socket @.service .slice; do
+  test -f "$stage/anas-$worker-system$suffix"
+done
+systemctl stop anas-api.service anas-photos.service anas-shares.service
+"$worker_installer" "$stage"
+for unit in anas-host-agent anas-api anas-photos anas-shares; do
   install -o root -g root -m 0644 "$stage/$unit-system.service" "/etc/systemd/system/$unit.service"
 done
 if [[ -f "$stage/anas-ai-system.service" ]]; then
@@ -203,7 +212,8 @@ ln -sfn -- "/opt/a-nas/releases/$previous" /opt/a-nas/current
 runuser -u anas-dev -- ln -sfn "$stage" /home/anas-dev/apps/a-nas/current.next
 runuser -u anas-dev -- mv -Tf /home/anas-dev/apps/a-nas/current.next /home/anas-dev/apps/a-nas/current
 systemctl daemon-reload
-systemctl restart anas-host-agent anas-photos anas-api anas-kiosk@tty1
+systemctl enable --now "anas-$worker.socket"
+systemctl restart anas-host-agent anas-photos anas-shares anas-api anas-kiosk@tty1
 ```
 
 回滚到 issue #174 之前的 release 时，kiosk 回到 `anas-dev`，Chromium 用的是该账号下的旧配置文件：迁移后删掉了它的话，要在本机屏幕上重新登录。
@@ -212,12 +222,19 @@ AI Worker 的单元写明 release 的模型参数，旧 Worker 不认识新单�
 
 Host Agent 的记录（空间、身份、查看授权、应用身份与数据卷操作）在 `/var/lib/a-nas-host`，只有 root 能打开（[issue #176](https://github.com/zhongwater123/A-NAS/issues/176)）。新版本启动时把旧版本留在 `/var/lib/a-nas` 的记录移过来：先写入并刷盘新副本，再删除原件；不移动符号链接、硬链接或不归 root 所有的文件，安装器遇到它们会先停下（见[移入 Host Agent 的记录](#移入-host-agent-的记录)）。旧版本只在 `/var/lib/a-nas` 读这些记录，所以回滚到它之前时，上面的脚本先停止 Host Agent，再把记录移回去。漏掉这一步时，旧二进制以空记录启动：不修复任何空间的目录与 ACL，快照与管理员查看找不到空间，应用身份从空表分配、与已有账号冲突而报错，新版本发出的查看授权到期也不撤销（再次升级后由新版本撤销）；它写下的新记录留在 `/var/lib/a-nas`。再次升级时，新版本只用 `/var/lib/a-nas-host` 中已有的记录，删除与之相同的旧副本，并在日志中报告内容不同的旧记录（`differs from the one in use`），由管理员核对。按脚本移回的记录会在再次升级时重新移入。
 
-`/etc/a-nas/*.env` 由安装器按固定内容生成，旧版本忽略新增的变量，不需要恢复。回滚也不改变屏保视频池：环境文件仍把独立于 release 的 `/var/lib/a-nas/screensavers/current` 交给产品服务；回滚媒体按[本地控制台运行手册](operate-local-kiosk.md#回滚)。另外：
+FFmpeg Worker 改名后的升级与回滚会停止正在播放、解码或扫描的请求，维护完成后重新打开播放。回滚使用切换前版本的 `install-ffmpeg-units.sh`，按目标暂存目录选择新名称或旧 `anas-media` 名称，移除另一套单元与套接字，恢复相应准入目录和环境变量。核对 `systemctl is-active "anas-$worker.socket"`、`systemctl show -p ExecStart "anas-$worker@probe.service"`，并分别播放影视与音乐、打开相册预览；另一套 socket 不应存在。其他 `/etc/a-nas/*.env` 配置不因这次改名恢复。回滚也不改变屏保视频池：环境文件仍把独立于 release 的 `/var/lib/a-nas/screensavers/current` 交给产品服务；回滚媒体按[本地控制台运行手册](operate-local-kiosk.md#回滚)。另外：
 
 - 不支持回滚到 ADR 0008 之前（rc.5 及更早）：旧账号已删除重建，旧版本的启动修复还会重新授予 `a-nas` 访问空间的 ACL。
 - 回滚到 ADR 0011 之前的版本时，先 `systemctl disable --now anas-photos.service`：旧二进制没有 `photo-service` 子命令。
 
 执行格式化后，回滚程序不会恢复旧分区或签名；保留磁盘现状并按 `needs_attention` 调查。绝不对不确定的 `/dev/sdX` 运行手工擦除命令。
+
+## 开发机暂存注意事项
+
+- 先按[测试与验证](../development/testing.md)验证候选提交，再用 `scripts/deploy-dev.ps1 -NasHost a-nas-dev -StageOnly -WslDistribution Ubuntu -WslUser <WSL 用户>` 暂存（开发机 B）；开发机 A 使用脚本默认的 WSL 发行版与用户。SSH 配置见[连接手册](bootstrap-experimental-nas-ssh.md)。
+- `deploy-dev.ps1` 仅在 `build/.validated-build` 与提交、产品版本和二进制哈希一致时复用门禁结果；该清单由 Makefile 的 `check` 目标生成。无 Git 的 ext4 副本运行 `check-steps` 只提供测试证据，不生成部署清单。
+- 屏保视频不随 release 暂存，更换时使用[本地控制台手册](operate-local-kiosk.md#更换屏保视频)中的独立上传流程。早于 [ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md) 的旧安装器分支应先合入主干，再部署。
+- 在 PowerShell 5.1 中运行 `deploy-dev.ps1` 不要加 `2>&1`：Windows OpenSSH 的 `close - IO is still pending` 会变成错误记录，使脚本在 `ErrorActionPreference = 'Stop'` 下中止。
 
 ## 关联
 

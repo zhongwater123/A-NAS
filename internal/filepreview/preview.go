@@ -1,4 +1,4 @@
-// Package filepreview renders ordinary files through the isolated media worker.
+// Package filepreview renders ordinary files through the isolated FFmpeg worker.
 // Every request opens the source as its caller, including cache hits.
 package filepreview
 
@@ -20,9 +20,9 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/mediatype"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 )
 
 var ErrUnsupported = errors.New("file has no rendered preview")
@@ -52,7 +52,7 @@ type cached struct {
 
 type Service struct {
 	source Source
-	worker mediaworker.Worker
+	worker ffmpegworker.Worker
 	mu     sync.Mutex
 	disk   *diskCache
 	gate   chan struct{}
@@ -61,7 +61,7 @@ type Service struct {
 	clock  uint64
 }
 
-func New(source Source, worker mediaworker.Worker) *Service {
+func New(source Source, worker ffmpegworker.Worker) *Service {
 	return &Service{source: source, worker: worker, gate: make(chan struct{}, 1), cache: make(map[string]cached)}
 }
 
@@ -76,7 +76,7 @@ func kind(name string) string {
 }
 
 // NewWithCache adds a disposable, bounded cache in the product state directory.
-func NewWithCache(source Source, worker mediaworker.Worker, directory string) (*Service, error) {
+func NewWithCache(source Source, worker ffmpegworker.Worker, directory string) (*Service, error) {
 	disk, err := openDiskCache(directory)
 	if err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func NewWithCache(source Source, worker mediaworker.Worker, directory string) (*
 // the decoder; the decode timeout starts after the cancellable queue wait.
 func (s *Service) Render(ctx context.Context, actor accounts.User, id string, size int) (Image, error) {
 	if size != 320 && size != 1600 {
-		return Image{}, mediaworker.ErrInvalid
+		return Image{}, ffmpegworker.ErrInvalid
 	}
 	if err := ctx.Err(); err != nil {
 		return Image{}, err
@@ -122,7 +122,7 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 		return hit, nil
 	}
 	if s.worker == nil {
-		return Image{}, mediaworker.ErrUnavailable
+		return Image{}, ffmpegworker.ErrUnavailable
 	}
 	var result Image
 	if format == "heif" {
@@ -135,7 +135,7 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 		}
 	} else {
 		result.ContentType = "image/jpeg"
-		var probe mediaworker.Probe
+		var probe ffmpegworker.Probe
 		probe, err = s.worker.Probe(ctx, content.Reader)
 		if err == nil {
 			at := math.Min(probe.Format.Duration/10, 10)
@@ -149,7 +149,7 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 		return Image{}, err
 	}
 	if !validImage(result) {
-		return Image{}, mediaworker.ErrUnreadable
+		return Image{}, ffmpegworker.ErrUnreadable
 	}
 	// A writer can edit an open source while the worker is decoding. Do not
 	// associate that result with either revision; the next request retries.
@@ -158,7 +158,7 @@ func (s *Service) Render(ctx context.Context, actor accounts.User, id string, si
 		return Image{}, err
 	}
 	if revisionKey(actor.ID, id, format, size, after) != key {
-		return Image{}, mediaworker.ErrUnreadable
+		return Image{}, ffmpegworker.ErrUnreadable
 	}
 	result.ETag = imageTag(key, result.Data)
 	s.remember(key, result)
@@ -215,7 +215,7 @@ func IsHEIF(name string) bool {
 
 // RenderHEIF renders a HEIC or HEIF picture of sizeBytes as a PNG of at most
 // size pixels a side, for the file manager's previews and for shares'.
-func RenderHEIF(ctx context.Context, worker mediaworker.Worker, source *os.File, sizeBytes int64, size int) ([]byte, error) {
+func RenderHEIF(ctx context.Context, worker ffmpegworker.Worker, source *os.File, sizeBytes int64, size int) ([]byte, error) {
 	if sizeBytes > MaxHEIFSource {
 		return nil, ErrTooLarge
 	}
@@ -224,7 +224,7 @@ func RenderHEIF(ctx context.Context, worker mediaworker.Worker, source *os.File,
 		return nil, err
 	}
 	if !validImage(Image{Data: data, ContentType: "image/png"}) {
-		return nil, mediaworker.ErrUnreadable
+		return nil, ffmpegworker.ErrUnreadable
 	}
 	return data, nil
 }

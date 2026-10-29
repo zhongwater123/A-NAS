@@ -3,7 +3,7 @@
 # release with the real installer and systemd units into a disposable Debian
 # 13 container where systemd is PID 1, then checks every entry point that
 # touches the data volume: Web files (File Broker workers), SMB, the photo API,
-# the FFmpeg media worker shared by the media center and music, the
+# the FFmpeg worker shared by the media center and music, the
 # administrator terminal, and the LAN Web entry that Caddy serves on
 # port 80. Unlike tests that start
 # the daemons by hand, it runs them under the production sandboxes, so it
@@ -131,16 +131,16 @@ printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/
 # stage DIR: a release as scripts/deploy-dev.ps1 stages it.
 stage() {
   install -d "$1"
-  install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh "$1/"
+  install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh /src/scripts/install-ffmpeg-units.sh "$1/"
   for unit in anas-api anas-host-agent anas-photos anas-shares; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
   done
   install -m 0644 /src/deploy/systemd/system/anas.slice "$1/anas-system.slice"
   install -m 0644 /src/deploy/systemd/system/anas-ai.socket "$1/anas-ai-system.socket"
   install -m 0644 /src/deploy/systemd/system/anas-ai.service "$1/anas-ai-system.service"
-  install -m 0644 /src/deploy/systemd/system/anas-media.socket "$1/anas-media-system.socket"
-  install -m 0644 "/src/deploy/systemd/system/anas-media@.service" "$1/anas-media-system@.service"
-  install -m 0644 /src/deploy/systemd/system/system-anasmedia.slice "$1/anas-media-system.slice"
+  install -m 0644 /src/deploy/systemd/system/anas-ffmpeg.socket "$1/anas-ffmpeg-system.socket"
+  install -m 0644 "/src/deploy/systemd/system/anas-ffmpeg@.service" "$1/anas-ffmpeg-system@.service"
+  install -m 0644 /src/deploy/systemd/system/system-anasffmpeg.slice "$1/anas-ffmpeg-system.slice"
   install -m 0644 /src/deploy/systemd/system/anas-vectors.slice "$1/anas-vectors-system.slice"
   install -m 0644 "/src/deploy/systemd/system/anas-vectors@.service" "$1/anas-vectors-system@.service"
   install -m 0644 "/src/deploy/systemd/system/anas-vectors-proxy@.socket" "$1/anas-vectors-proxy-system@.socket"
@@ -1067,9 +1067,9 @@ check "the refused Qdrant changes nothing" \
 # --- Media center (ADR 0017): files are read as the user through the File
 # Broker; FFmpeg runs in a per-connection worker without network, data volume
 # or Product Service state.
-check "the installer enables the media worker socket" systemctl is-enabled --quiet anas-media.socket
-check "the Product and Photo Services reach the media worker socket" \
-  test "$(stat -c '%a %U %G' /run/a-nas-media/media.sock)" = "660 root a-nas-photos"
+check "the installer enables the FFmpeg worker socket" systemctl is-enabled --quiet anas-ffmpeg.socket
+check "the Product and Photo Services reach the FFmpeg worker socket" \
+  test "$(stat -c '%a %U %G' /run/a-nas-ffmpeg/ffmpeg.sock)" = "660 root a-nas-photos"
 # Photo Service also uses the same descriptor-only worker socket.
 ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=160x120:rate=12:duration=1 -c:v libx264 /tmp/photo.mov
 live_photo=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
@@ -1094,7 +1094,7 @@ curl -fsS -b /tmp/alice.jar -D /tmp/video-preview.headers "$api/api/v1/files/$vi
 preview_etag=$(sed -n 's/^[Ee][Tt][Aa][Gg]: //p' /tmp/video-preview.headers | tr -d '\r')
 check "file previews return an ETag" test -n "$preview_etag"
 check "file preview cache is private to Product Service" test "$(stat -c '%a %U' /var/lib/a-nas/file-previews)" = "700 a-nas"
-systemctl stop anas-media.socket
+systemctl stop anas-ffmpeg.socket
 systemctl restart anas-api
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 check "video preview survives restart without the decoder" \
@@ -1102,7 +1102,7 @@ check "video preview survives restart without the decoder" \
 check "persisted video preview is unchanged" cmp /tmp/video-preview.jpg /tmp/video-preview-restarted.jpg
 check "unchanged video preview revalidates with 304" \
   test "$(status_of -b /tmp/alice.jar -H "If-None-Match: $preview_etag" "$api/api/v1/files/$video_file/preview?size=thumbnail")" = 304
-systemctl start anas-media.socket
+systemctl start anas-ffmpeg.socket
 ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=orange:s=640x480 -frames:v 1 /tmp/preview.png
 heif-enc -o /tmp/preview.heic /tmp/preview.png >/tmp/heif-encode.log 2>&1
 heif_file=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F 'parentId=' \
@@ -1118,22 +1118,22 @@ check "Product Service cannot open the HEIC source itself" denied as a-nas cat "
 
 # The services take turns from shared slots before they connect (issue #168):
 # with every slot held elsewhere, a preview waits for one instead of failing.
-check "the media worker's slots are open to its callers only" \
-  test "$(stat -c '%a %U %G' /run/a-nas-media/slots):$(find /run/a-nas-media/slots -type f -perm 0440 | wc -l)" = "750 root a-nas-photos:8"
+check "the FFmpeg worker's slots are open to its callers only" \
+  test "$(stat -c '%a %U %G' /run/a-nas-ffmpeg/slots):$(find /run/a-nas-ffmpeg/slots -type f -perm 0440 | wc -l)" = "750 root a-nas-photos:8"
 # Each account with the groups its unit gives it.
 for account in a-nas:a-nas-photos,a-nas-shares a-nas-photos:a-nas-photos a-nas-shares:a-nas-photos; do
-  check "${account%%:*} can take a media worker slot" \
-    setpriv --reuid="${account%%:*}" --regid="${account%%:*}" --groups="${account#*:}" flock -n /run/a-nas-media/slots/7 true
+  check "${account%%:*} can take a FFmpeg worker slot" \
+    setpriv --reuid="${account%%:*}" --regid="${account%%:*}" --groups="${account#*:}" flock -n /run/a-nas-ffmpeg/slots/7 true
 done
-check "all media workers share one memory limit" test \
-  "$(systemctl show -p Slice --value anas-media@slot-check.service):$(systemctl show -p MemoryMax --value system-anasmedia.slice)" = "system-anasmedia.slice:3221225472"
+check "all FFmpeg workers share one memory limit" test \
+  "$(systemctl show -p Slice --value anas-ffmpeg@slot-check.service):$(systemctl show -p MemoryMax --value system-anasffmpeg.slice)" = "system-anasffmpeg.slice:3221225472"
 ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=teal:s=320x240 -frames:v 1 /tmp/slots.png
 heif-enc -o /tmp/slots.heic /tmp/slots.png >/tmp/heif-encode.log 2>&1
 slots_file=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F 'parentId=' \
   -F 'file=@/tmp/slots.heic;filename=slots.HEIC' "$api/api/v1/spaces/$shared/uploads" | jq -r .id)
 slot_holders=()
 for slot in 0 1 2 3 4 5 6 7; do
-  flock -n -o "/run/a-nas-media/slots/$slot" sleep 60 &
+  flock -n -o "/run/a-nas-ffmpeg/slots/$slot" sleep 60 &
   slot_holders+=("$!")
 done
 sleep 0.5
@@ -1163,17 +1163,17 @@ for _ in $(seq 1 60); do
 done
 film=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/media/titles?category=movie" | jq -r '.items[0].id' || true)
 check "the member sees the scanned film" test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/media/videos/$film" | jq -r .title)" = Heat
-check "the media worker reads the film's duration in its sandbox" test "${film_duration%.*}" -ge 5
+check "the FFmpeg worker reads the film's duration in its sandbox" test "${film_duration%.*}" -ge 5
 check "the member plays the original with range requests" \
   test "$(status_of -b /tmp/alice.jar -H 'Range: bytes=0-99' "$api/api/v1/media/videos/$film/file")" = 206
-check "the media worker converts the film to fragmented MP4" bash -c \
+check "the FFmpeg worker converts the film to fragmented MP4" bash -c \
   "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/media/videos/$film/stream?mode=transcode&start=1&audio=0&quality=original' | head -c 64 | grep -aq ftyp"
-check "the media worker takes a frame of the film" bash -c \
+check "the FFmpeg worker takes a frame of the film" bash -c \
   "for _ in \$(seq 1 30); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/media/artwork/$film/thumb') == 200 ]] && exit 0; sleep 1; done; exit 1"
 check "Product Service account cannot read the film itself" denied as a-nas cat "$data/spaces/shared/Movies/Heat (1995).mkv"
 
 # --- Music (ADR 0018) indexes the same files in place and has the shared
-# media worker probe and decode the formats browsers cannot play.
+# FFmpeg worker probe and decode the formats browsers cannot play.
 ffmpeg -hide_banner -loglevel error -f lavfi -i sine=frequency=440:duration=5 -c:a wavpack \
   -metadata title=Aria -metadata artist=Quartet /tmp/aria.wv
 curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -F "parentId=" \
@@ -1186,11 +1186,11 @@ done
 song=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/music/tracks" | jq -c '.items[] | select(.title == "Aria")' || true)
 check "the member's music library holds the WavPack song with its tags" \
   test "$(jq -r '.artist + " " + (.transcode | tostring)' <<<"${song:-null}" 2>/dev/null)" = "Quartet true"
-check "the media worker reads the song's duration in its sandbox" test "$(jq -r '.durationMs // 0' <<<"${song:-null}" 2>/dev/null)" -ge 4900
-check "the media worker decodes the song to FLAC from a start position" bash -c \
+check "the FFmpeg worker reads the song's duration in its sandbox" test "$(jq -r '.durationMs // 0' <<<"${song:-null}" 2>/dev/null)" -ge 4900
+check "the FFmpeg worker decodes the song to FLAC from a start position" bash -c \
   "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/music/tracks/$(jq -r .id <<<"${song:-null}" 2>/dev/null)/stream?start=1' | head -c 4 | grep -aq fLaC"
-# A probe in the media worker's own unit, in place of the worker.
-cat > /usr/local/lib/anas-media-probe.py <<'PY'
+# A probe in the FFmpeg worker's own unit, in place of the worker.
+cat > /usr/local/lib/anas-ffmpeg-probe.py <<'PY'
 import os, socket, sys
 leaks = []
 for family, kind in ((socket.AF_INET, socket.SOCK_STREAM), (socket.AF_INET6, socket.SOCK_STREAM), (socket.AF_NETLINK, socket.SOCK_DGRAM)):
@@ -1210,13 +1210,82 @@ if not 61184 <= os.getuid() <= 65519:
 print("; ".join(leaks) or "contained")
 sys.exit(1 if leaks else 0)
 PY
-sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-media-probe.py|' -e 's|^Type=.*|Type=oneshot|' \
-  -e '/^StandardInput=/d' /etc/systemd/system/anas-media@.service > /etc/systemd/system/anas-media-probe.service
+sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-ffmpeg-probe.py|' -e 's|^Type=.*|Type=oneshot|' \
+  -e '/^StandardInput=/d' /etc/systemd/system/anas-ffmpeg@.service > /etc/systemd/system/anas-ffmpeg-probe.service
 systemctl daemon-reload
-check "the media probe finds the network and data volume outside the sandbox" denied python3 /usr/local/lib/anas-media-probe.py
-check "the media worker's sandbox has no network, data volume or Product Service state" \
-  systemctl start anas-media-probe.service
-journalctl -u anas-media-probe.service -o cat --no-pager | grep -E 'contained|opened|listed|ran as' | tail -n 1 || true
+check "the media probe finds the network and data volume outside the sandbox" denied python3 /usr/local/lib/anas-ffmpeg-probe.py
+check "the FFmpeg worker's sandbox has no network, data volume or Product Service state" \
+  systemctl start anas-ffmpeg-probe.service
+journalctl -u anas-ffmpeg-probe.service -o cat --no-pager | grep -E 'contained|opened|listed|ran as' | tail -n 1 || true
+
+# The rollback helper restores the legacy worker layout before the real
+# installer upgrades it again. An optional locally built pre-rename binary
+# proves the old subcommand too; CI always tests both unit layouts.
+worker_installer=/opt/a-nas/current/install-ffmpeg-units.sh
+install -d /tmp/worker-legacy /opt/a-nas/releases/worker-legacy
+for suffix in .socket @.service .slice; do
+  sed -e 's/anas-ffmpeg/anas-media/g' -e 's/a-nas-ffmpeg/a-nas-media/g' \
+    -e 's/anasffmpeg/anasmedia/g' -e 's/ffmpeg.sock/media.sock/g' \
+    "$release/anas-ffmpeg-system$suffix" > "/tmp/worker-legacy/anas-media-system$suffix"
+done
+if [[ -x /src/build/legacy-anas-api ]]; then
+  install -m 0755 /src/build/legacy-anas-api /opt/a-nas/releases/worker-legacy/anas-api
+  sed -i 's/ ffmpeg-worker$/ media-worker/' /tmp/worker-legacy/anas-media-system@.service
+  echo 'legacy worker validation: pre-rename binary'
+else
+  install -m 0755 /src/build/anas-api /opt/a-nas/releases/worker-legacy/anas-api
+  echo 'legacy worker validation: old unit layout, current decoder binary'
+fi
+# Match the Product Service unit's SupplementaryGroups, not the account's
+# login groups: a-nas deliberately has no permanent photo-store membership.
+cat > /tmp/probe-worker.py <<'PY'
+import array, json, socket, struct, sys
+
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+    conn.settimeout(15)
+    conn.connect(sys.argv[1])
+    with open('/tmp/heat.mkv', 'rb') as source:
+        body = json.dumps({'op': 'probe', 'stream': 0, 'audioTrack': 0}).encode()
+        assert conn.sendmsg([struct.pack('>I', len(body))],
+                            [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [source.fileno()]))]) == 4
+        conn.sendall(body)
+        with conn.makefile('rb') as reply:
+            size = struct.unpack('>I', reply.read(4))[0]
+            assert json.loads(reply.read(size))['ok']
+            assert json.load(reply)['streams']
+PY
+check "incomplete rollback stage is rejected before stopping the active socket" \
+  denied "$worker_installer" /tmp/nonexistent-worker-release
+check "failed rollback preflight leaves the new worker working" \
+  setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
+systemctl stop anas-api anas-photos anas-shares
+"$worker_installer" /tmp/worker-legacy
+ln -sfn /opt/a-nas/releases/worker-legacy /opt/a-nas/current
+systemctl enable --now anas-media.socket
+check "rollback restores a working worker through the legacy unit and release link" \
+  setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-media/media.sock
+check "rollback removes the new worker units, socket and tmpfiles configuration" \
+  test ! -e /etc/systemd/system/anas-ffmpeg.socket -a ! -e /etc/systemd/system/anas-ffmpeg@.service \
+  -a ! -e /etc/systemd/system/system-anasffmpeg.slice -a ! -e /run/a-nas-ffmpeg/ffmpeg.sock \
+  -a ! -e /etc/tmpfiles.d/a-nas-ffmpeg.conf
+check "rollback restores legacy client environment and eight admission slots" \
+  test "$(grep -c '^ANAS_MEDIA_' /etc/a-nas/anas-api.env):$(grep -c '^ANAS_FFMPEG_' /etc/a-nas/anas-api.env):$(find /run/a-nas-media/slots -type f | wc -l)" = 2:0:8
+stage /tmp/worker-upgrade
+if ! bash /src/scripts/install-v1.0.1-system-services.sh /tmp/worker-upgrade worker-upgrade "$iface" >/tmp/worker-upgrade.log 2>&1; then
+  cat /tmp/worker-upgrade.log
+  exit 1
+fi
+for _ in $(seq 1 150); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "upgrade restores a working worker through the new unit and release link" \
+  setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
+check "upgrade removes legacy worker units, socket and tmpfiles configuration" \
+  test ! -e /etc/systemd/system/anas-media.socket -a ! -e /etc/systemd/system/anas-media@.service \
+  -a ! -e /etc/systemd/system/system-anasmedia.slice -a ! -e /run/a-nas-media/media.sock \
+  -a ! -e /etc/tmpfiles.d/a-nas-media.conf
+check "upgrade restores new client environment and eight admission slots" \
+  test "$(grep -c '^ANAS_FFMPEG_' /etc/a-nas/anas-api.env):$(grep -c '^ANAS_MEDIA_' /etc/a-nas/anas-api.env):$(find /run/a-nas-ffmpeg/slots -type f | wc -l)" = 2:0:8
+check "music decodes through the new worker after upgrading the old layout" bash -c \
+  "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/music/tracks/$(jq -r .id <<<"${song:-null}" 2>/dev/null)/stream?start=1' | head -c 4 | grep -aq fLaC"
 
 # --- One password for Web and SMB.
 new_password=$(secret)

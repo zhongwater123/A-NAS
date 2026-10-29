@@ -19,6 +19,10 @@
 - Docker 会改写 iptables/nftables 规则并在 `/var/lib/docker` 写入镜像与容器状态；它新建的网络会改变宿主机路由，所以必须先配置地址池。安装失败、Compose 低于 2.30 或 Engine API 低于 1.45（应用中心会拒绝安装，见[应用中心规格](../specs/app-center.md)）、cgroup 不是 v2、代理单元无法以 `anas-container` 启动，或身份/组不符合预期时立即停止。
 - 升级前备份 `/etc/a-nas/anas-api.env`；回滚只停用能力，不自动删除 `/var/lib/docker`、应用数据、镜像或容器。
 
+## 安装预留协议的升级顺序
+
+应用中心先接受安装再准备账号/目录的流程，需要产品服务与容器代理都支持 `install-reserve`、`install-commit`、`install-cancel`。升级时先更新容器代理，再更新产品服务；新代理保留旧 `install` 协议供旧产品服务使用。新产品服务连接旧代理时会在预留步骤失败，不会退回先创建目录的旧流程。回滚时一起恢复两者，操作仍按下文进行。协议边界与验证见[安装准备顺序调查](../investigations/2026-10-27-app-install-preparation-order.md)。
+
 ## 安装
 
 ### 1. 预检并安装 Docker

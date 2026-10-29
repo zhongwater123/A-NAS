@@ -10,11 +10,12 @@
 
 ## 实验 NAS 上运行什么
 
-- 已部署：`80b602275b86`（主干上 PR #250 的合并提交，2026-10-26 安装，日志在 NAS 的 `/var/tmp/a-nas-deploy-80b602275b86.log`），包含此前合并的全部 PR；容器代理与 AI 助手试用包同版本。Host Agent 的记录已移入 root 专属的 `/var/lib/a-nas-host`（#249）。
+- 已部署：`4ec62e17c3b1`（主干上 PR #298 的合并提交，2026-10-28 安装，日志在 NAS 的 `/var/tmp/a-nas-deploy-4ec62e17c3b1.log`），包含此前合并的全部 PR；容器代理与 AI 助手试用包同版本。相册服务的向量索引已启用（Qdrant 1.20.0，相册 Catalog 为 14，[#266](https://github.com/zhongwater123/A-NAS/pull/266)），AI 运行环境为 `842b388a0f1987f5`。Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`（#249）。
 - AI 助手按[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)为全部成员开启，用云端模型，仅供开发测试。
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1（2026-10-20 在 #149 的早期构建上加入第二块盘）。
 - 已合并、尚未部署的 PR 不在本页列出：`git fetch` 后运行 `bash scripts/undeployed.sh`，由 Git 列出“已部署”之后合入 main 的 PR。
-- 本地控制台仍以暂存账号 `anas-dev` 运行。下一次安装会把它换成专用账号 `a-nas-kiosk`（[#174](https://github.com/zhongwater123/A-NAS/issues/174)），安装前要先在本机屏幕上退出登录，见[实机配置手册的安装第 2 步](../runbooks/provision-v1.0.1-experimental-storage.md#安装系统服务)。同一次部署还会上传新的 AI 运行环境（约 190 MB，锁文件改由 uv 生成并升级了 Pillow）。
+- 本地控制台自 2026-10-28 以专用账号 `a-nas-kiosk` 运行（[#174](https://github.com/zhongwater123/A-NAS/issues/174)）。`anas-dev` 名下的旧 Chromium 配置文件还在，kiosk 至少重启过一次后按[迁移后的验证](../runbooks/operate-local-kiosk.md#迁移后的验证)删除。
+- 应用中心里的 Immich、OpenList 与思源笔记装于 [#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前，容器没有日志上限，卸载后重新安装才有；它们的数据可以丢弃。
 
 ## 阻塞与外部条件
 
@@ -28,7 +29,7 @@
 
 - ADR [0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[0018](../adr/0018-index-music-in-place-through-the-file-broker.md)、[0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)、[0020](../adr/0020-read-service-logs-through-the-host-agent.md)、[0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)、[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 仍为 proposed，代码已合并并部署。
 - 审计记录的保留期限（规格为永久保存，#167）。
-- 媒体 Worker 的槽位数、分层与 3G 共享内存上限，目前是估计值（#168）。
+- FFmpeg Worker 的槽位数、分层与 3G 共享内存上限，目前是估计值（#168）。
 - 相册视频实现时定下的默认值：格式、4 GiB 上限、封面帧、单独 MOV 的处理、幻灯片跳过视频、AI 助手看不到视频（[规格](../specs/photo-video.md)）。
 - 文件管理的缩略图仍加载原图，是否改用服务端缩略图。
 - 助手的模型仍会提到 Hermes 的 `/help` 与上手引导，如何处理。

@@ -1859,7 +1859,7 @@ export interface paths {
         put?: never;
         /**
          * Import one photo or video original; returns once the original is durable
-         * @description A photo (JPEG, PNG, HEIC; at most 256 MiB) or a video (MP4, MOV, M4V, 3GP, MKV, WebM, AVI, MTS/M2TS; at most 4 GiB) that the Media Worker can read. A Live Photo's MOV, short and carrying Apple's content identifier, whose stills in the library are still waiting for it completes them instead and answers 200; without such stills it is imported as a video. 503 media_unavailable when a video cannot be read because the Media Worker is unavailable.
+         * @description A photo (JPEG, PNG, HEIC; at most 256 MiB) or a video (MP4, MOV, M4V, 3GP, MKV, WebM, AVI, MTS/M2TS; at most 4 GiB) that the FFmpeg Worker can read. A Live Photo's MOV, short and carrying Apple's content identifier, whose stills in the library are still waiting for it completes them instead and answers 200; without such stills it is imported as a video. 503 media_unavailable when a video cannot be read because the FFmpeg Worker is unavailable.
          */
         post: operations["uploadPhoto"];
         delete?: never;

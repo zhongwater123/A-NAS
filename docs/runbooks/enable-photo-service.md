@@ -33,7 +33,7 @@
 
 ## 步骤
 
-1. 在开发机对候选提交完整运行门禁、[系统测试](../development/LOCAL_ENVIRONMENT.md#系统测试)和[相册服务冒烟](../development/LOCAL_ENVIRONMENT.md#root-集成测试)，并只暂存、不激活：`scripts/deploy-dev.ps1 -NasHost <NAS_HOST> -StageOnly`。
+1. 在开发机对候选提交完整运行门禁、[系统测试](../development/testing.md#系统测试)和[相册服务冒烟](../development/testing.md#root-集成测试)，并只暂存、不激活：`scripts/deploy-dev.ps1 -NasHost <NAS_HOST> -StageOnly`。
    - 预期：输出 API 与 Host Agent 的 SHA-256。发布目录包含 `anas-photos-system.service` 与新的安装器。
    - 完成标准：在 NAS 上用 `sha256sum --check` 核对两个二进制，与门禁输出一致。
 2. 核对固定身份未被占用。

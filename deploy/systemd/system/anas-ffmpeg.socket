@@ -1,14 +1,14 @@
 [Unit]
-Description=A-NAS media worker socket
+Description=A-NAS FFmpeg worker socket
 Documentation=https://github.com/zhongwater123/A-NAS
 
 [Socket]
-# Every connection starts its own anas-media@.service with the connection as
+# Every connection starts its own anas-ffmpeg@.service with the connection as
 # standard input, so each video or song is handled by a fresh, isolated
 # FFmpeg (ADR 0017, ADR 0018). The Product and Photo Services reach it via a-nas-photos.
-ListenStream=/run/a-nas-media/media.sock
+ListenStream=/run/a-nas-ffmpeg/ffmpeg.sock
 Accept=yes
-# The services take turns from 8 shared slots (/run/a-nas-media/slots, see
+# The services take turns from 8 shared slots (/run/a-nas-ffmpeg/slots, see
 # the installer's tmpfiles entry) before they connect, so the worker's real
 # limit is there. systemd drops connections past this one; the room above 8
 # is for workers still exiting after their callers let go of a slot.
