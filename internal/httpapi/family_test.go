@@ -72,32 +72,10 @@ func TestFamilyCenterKeepsToTheContract(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = photoService.Close() })
 	photoAPI := localPhotos(t, photoService, sessionDirectory(t, controlDB))
-	familyDir := filepath.Join(dir, "family")
-	if err := os.Mkdir(familyDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	familyStore, err := family.Open(familyDir, family.Options{
-		Accounts: familyservice.Accounts(func(ctx context.Context) ([]accounts.Profile, error) {
-			active, err := users.ActiveUsers(ctx)
-			if err != nil {
-				return nil, err
-			}
-			profiles := []accounts.Profile{}
-			for _, user := range active {
-				profiles = append(profiles, accounts.Profile{ID: user.ID, Username: user.Username})
-			}
-			return profiles, nil
-		}),
-		Photos: familyservice.Photos{API: photoAPI},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = familyStore.Close() })
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: users,
-		Photos: photoAPI, Family: familyapi.New(familyStore, logger, nil), Logger: logger,
+		Photos: photoAPI, Family: familyAPI(t, dir, users, photoAPI), Logger: logger,
 	})
 	f := &activityFixture{t: t, handler: handler, client: &contractClient{t: t, handler: handler}}
 
@@ -224,4 +202,33 @@ func TestFamilyCenterKeepsToTheContract(t *testing.T) {
 	owner.do(http.MethodDelete, babyPath+"?name=%E5%B0%8F%E7%B1%B3%E7%B2%92", "", nil, http.StatusNoContent)
 	owner.do(http.MethodGet, babyPath, "", nil, http.StatusNotFound)
 	owner.do(http.MethodPost, babyPath+"/restore", "", nil, http.StatusOK)
+}
+
+// familyAPI serves 家庭中心 from a store in dir, as development does: the
+// accounts in use come from users and channel photos from photoAPI.
+func familyAPI(t *testing.T, dir string, users *accounts.Service, photoAPI http.Handler) http.Handler {
+	t.Helper()
+	root := filepath.Join(dir, "family")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := family.Open(root, family.Options{
+		Accounts: familyservice.Accounts(func(ctx context.Context) ([]accounts.Profile, error) {
+			active, err := users.ActiveUsers(ctx)
+			if err != nil {
+				return nil, err
+			}
+			profiles := []accounts.Profile{}
+			for _, user := range active {
+				profiles = append(profiles, accounts.Profile{ID: user.ID, Username: user.Username})
+			}
+			return profiles, nil
+		}),
+		Photos: familyservice.Photos{API: photoAPI},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return familyapi.New(store, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 }

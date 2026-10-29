@@ -505,6 +505,8 @@ func TestHintsAreToldOnce(t *testing.T) {
 			joins++
 		} else if hint.BabyID != baby.ID || hint.Vaccine == "" {
 			t.Fatalf("hint = %+v", hint)
+		} else if hint.DueDate < "2026-08-30" {
+			t.Fatalf("a dose due long ago is backlog, not news: %+v", hint)
 		}
 	}
 	if joins != 1 || len(hints) < 5 {

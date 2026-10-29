@@ -49,6 +49,8 @@ export function shellHandlers(options: ShellOptions = {}) {
     http.get("/api/v1/shares/notifications", ({ response }) => response(200).json({ items: [] })),
     http.get("/api/v1/transfers", ({ response }) => response(200).json({ items: [] })),
     http.get("/api/v1/feedback", ({ response }) => response(200).json({ items: [] })),
+    // 家庭中心's hints after signing in.
+    http.get("/api/v1/family/hints", ({ response }) => response(200).json({ items: [] })),
   ];
 }
 

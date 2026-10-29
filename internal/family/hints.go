@@ -9,8 +9,8 @@ import (
 )
 
 // Hint is something the desktop tells a member once after they sign in: a
-// vaccine dose that is due or comes up within soonDays, or, for guardians,
-// someone asking to join.
+// vaccine dose that came due in the last hintBacklogDays or comes up within
+// soonDays, or, for guardians, someone asking to join.
 type Hint struct {
 	Key       string `json:"key"`
 	Kind      string `json:"kind"`
@@ -29,6 +29,10 @@ const (
 	HintJoinRequest = "join_request"
 	maxHintKeys     = 200
 	maxHintKeyBytes = 200
+	// hintBacklogDays bounds how long ago a due dose is still news: a dose due
+	// earlier was most likely given and not recorded, as for a child added
+	// at three. The board lists it; the desktop does not.
+	hintBacklogDays = 60
 )
 
 // Hints lists what the caller has not been told yet. Accounts outside the
@@ -68,6 +72,9 @@ func (s *Store) Hints(ctx context.Context, actor Actor) ([]Hint, error) {
 		birth, _ := parseDate(baby.BirthDate)
 		for _, dose := range schedule(birth, baby.Sex, today, plan, records) {
 			if dose.Status != DoseAvailable && dose.Status != DoseSoon {
+				continue
+			}
+			if due, _ := parseDate(dose.DueDate); due.Before(today.AddDate(0, 0, -hintBacklogDays)) {
 				continue
 			}
 			key := fmt.Sprintf("vaccine:%s:%s:%d", baby.ID, dose.Code, dose.Dose)
