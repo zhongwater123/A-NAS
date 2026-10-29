@@ -178,21 +178,8 @@ func (s *Store) Purge(ctx context.Context) error {
 	cutoff := s.trashCutoff()
 	var recordings []string
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT r.id FROM records r JOIN babies b ON b.id = r.baby_id
-WHERE r.kind = 'recording' AND ((r.deleted_at IS NOT NULL AND r.deleted_at <= ?) OR (b.deleted_at IS NOT NULL AND b.deleted_at <= ?))`,
-			cutoff, cutoff)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			recordings = append(recordings, id)
-		}
-		if err := rows.Close(); err != nil {
+		var err error
+		if recordings, err = expiredRecordings(ctx, tx, cutoff); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM records WHERE deleted_at IS NOT NULL AND deleted_at <= ?", cutoff); err != nil {
@@ -210,6 +197,27 @@ WHERE r.kind = 'recording' AND ((r.deleted_at IS NOT NULL AND r.deleted_at <= ?)
 		}
 	}
 	return s.removeStrayUploads()
+}
+
+// expiredRecordings lists the recordings whose record, or whose baby, has
+// been in the trash longer than TrashDays.
+func expiredRecordings(ctx context.Context, tx *sql.Tx, cutoff string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT r.id FROM records r JOIN babies b ON b.id = r.baby_id
+WHERE r.kind = 'recording' AND ((r.deleted_at IS NOT NULL AND r.deleted_at <= ?) OR (b.deleted_at IS NOT NULL AND b.deleted_at <= ?))`,
+		cutoff, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // removeStrayUploads deletes uploads a crash left half-written.

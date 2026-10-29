@@ -176,13 +176,13 @@ func scanRecord(scanner interface{ Scan(...any) error }) (*row, error) {
 	case KindMeasurement:
 		m := &Measurement{}
 		if r.heightMM.Valid {
-			m.HeightCm = ptr(float64(r.heightMM.Int64) / 10)
+			m.HeightCm = new(float64(r.heightMM.Int64) / 10)
 		}
 		if r.weightG.Valid {
-			m.WeightKg = ptr(float64(r.weightG.Int64) / 1000)
+			m.WeightKg = new(float64(r.weightG.Int64) / 1000)
 		}
 		if r.headMM.Valid {
-			m.HeadCm = ptr(float64(r.headMM.Int64) / 10)
+			m.HeadCm = new(float64(r.headMM.Int64) / 10)
 		}
 		rec.Measurement = m
 	case KindVaccine:
@@ -195,8 +195,6 @@ func scanRecord(scanner interface{ Scan(...any) error }) (*row, error) {
 	}
 	return r, nil
 }
-
-func ptr[T any](value T) *T { return &value }
 
 // loadPhotos fills each row's stored photos.
 func loadPhotos(ctx context.Context, q queryer, rows []*row) error {

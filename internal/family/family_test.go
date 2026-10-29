@@ -352,13 +352,13 @@ func TestAuthorsEditAndGuardiansDelete(t *testing.T) {
 	baby := f.family(t)
 	weight := 7.4
 	record := must(f.store.AddRecord(ctx, grandma, baby.ID, RecordInput{Kind: KindMeasurement, OccurredOn: "2026-09-15",
-		Measurement: &Measurement{HeightCm: ptr(66.0), WeightKg: &weight}}))
+		Measurement: &Measurement{HeightCm: new(66.0), WeightKg: &weight}}))
 	fixed := 7.2
 	_, err := f.store.UpdateRecord(ctx, mom, record.ID, RecordInput{OccurredOn: "2026-09-15", Version: record.Version,
-		Measurement: &Measurement{HeightCm: ptr(66.0), WeightKg: &fixed}})
+		Measurement: &Measurement{HeightCm: new(66.0), WeightKg: &fixed}})
 	wantErr(t, err, ErrForbidden)
 	updated := must(f.store.UpdateRecord(ctx, grandma, record.ID, RecordInput{OccurredOn: "2026-09-15", Version: record.Version,
-		Measurement: &Measurement{HeightCm: ptr(66.0), WeightKg: &fixed}}))
+		Measurement: &Measurement{HeightCm: new(66.0), WeightKg: &fixed}}))
 	if *updated.Measurement.WeightKg != 7.2 || updated.Version != 2 {
 		t.Fatalf("updated = %+v", updated.Measurement)
 	}
@@ -369,7 +369,7 @@ func TestAuthorsEditAndGuardiansDelete(t *testing.T) {
 	for _, input := range []RecordInput{
 		{Kind: KindMeasurement, OccurredOn: "2026-03-01", Measurement: &Measurement{WeightKg: &fixed}},
 		{Kind: KindMeasurement, OccurredOn: "2026-11-01", Measurement: &Measurement{WeightKg: &fixed}},
-		{Kind: KindMeasurement, OccurredOn: "2026-09-01", Measurement: &Measurement{HeadCm: ptr(90.0)}},
+		{Kind: KindMeasurement, OccurredOn: "2026-09-01", Measurement: &Measurement{HeadCm: new(90.0)}},
 		{Kind: KindMeasurement, OccurredOn: "2026-09-01", Measurement: &Measurement{}},
 	} {
 		_, err := f.store.AddRecord(ctx, grandma, baby.ID, input)
@@ -404,7 +404,7 @@ func TestGrowthUsesTheChineseStandard(t *testing.T) {
 	// WS/T 423—2022, girls' weight-for-age at birth: P25 3.1, P50 3.3.
 	girls := must(f.store.AddBaby(ctx, mom, BabyFields{Name: "新生", Sex: "female", BirthDate: "2026-10-29"}))
 	must(f.store.AddRecord(ctx, mom, girls.ID, RecordInput{Kind: KindMeasurement, OccurredOn: "2026-10-29",
-		Measurement: &Measurement{WeightKg: ptr(3.2), HeadCm: ptr(29.0)}}))
+		Measurement: &Measurement{WeightKg: new(3.2), HeadCm: new(29.0)}}))
 	growth := must(f.store.Growth(ctx, mom, girls.ID))
 	if w := growth.Latest.Weight; w == nil || w.Lower != "P25" || w.Upper != "P50" {
 		t.Fatalf("weight at birth = %+v", w)
@@ -424,7 +424,7 @@ func TestGrowthUsesTheChineseStandard(t *testing.T) {
 		t.Fatal("head circumference has no reference after 36 months")
 	}
 	must(f.store.AddRecord(ctx, mom, baby.ID, RecordInput{Kind: KindMeasurement, OccurredOn: "2026-09-15",
-		Measurement: &Measurement{HeightCm: ptr(66.0)}}))
+		Measurement: &Measurement{HeightCm: new(66.0)}}))
 	if growth := must(f.store.Growth(ctx, mom, baby.ID)); len(growth.Measurements) != 1 || growth.Measurements[0].AgeMonths != 6 {
 		t.Fatalf("measurements = %+v", growth.Measurements)
 	}

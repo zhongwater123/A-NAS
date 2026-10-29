@@ -3,6 +3,7 @@ package family
 import (
 	"context"
 	"errors"
+	"maps"
 	"time"
 )
 
@@ -43,9 +44,7 @@ func (s *Store) lookup(ctx context.Context, actor Actor, ids []string) (map[stri
 		if err != nil {
 			return nil, ErrPhotosUnavailable
 		}
-		for id, photo := range batch {
-			found[id] = photo
-		}
+		maps.Copy(found, batch)
 	}
 	return found, nil
 }
