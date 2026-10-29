@@ -1,7 +1,7 @@
 # 系统健康
 
 状态：implemented
-更新时间：2026-10-27
+更新时间：2026-10-29
 
 ## 目标
 
@@ -27,6 +27,7 @@
 | `disk_warning` | 任一磁盘报告了次于失败的问题 | 注意 |
 | `disk_health_unknown` | 系统盘或数据盘读不到 SMART 结论；未分配的磁盘不计 | 注意 |
 | `disk_hot` | 机械硬盘达到 55 °C，或固态存储达到 70 °C | 注意 |
+| `cpu_hot` | 处理器达到偏高界限：传感器报告的临界温度减 10 °C，不报告时 85 °C（[设备温度](device-temperatures.md#偏高的界限)） | 注意 |
 | `volume_nearly_full` | 数据卷已用 90% 以上 | 注意 |
 | `volume_errors` | Btrfs 自数据卷创建以来累计记录到读、写、刷新、校验或代际错误 | 注意 |
 | `volume_reconcile_failed` | Host Agent 最近一次对账数据卷失败：没能修复空间权限、把身份清单写到数据卷或刷新 Samba 配置（[#166](https://github.com/zhongwater123/A-NAS/issues/166)）；数据卷只读时不报，由 `volume_read_only` 说明 | 注意 |
@@ -43,7 +44,7 @@
 
 - Given：系统盘与数据盘的 SMART 都通过，温度正常，数据卷已挂载、可写、已用 40%，没有错误计数。
 - When：打开设置的“概览”。
-- Then：健康显示“运行正常”；“健康检查”只有一行“未发现问题”，说明检查了硬盘健康（SMART）与温度，以及数据卷的挂载、读写、剩余空间和错误记录。
+- Then：健康显示“运行正常”；“健康检查”只有一行“未发现问题”，说明检查了硬盘健康（SMART）、处理器与硬盘的温度，以及数据卷的挂载、读写、剩余空间和错误记录。
 
 ### 有问题时写明原因
 
@@ -72,7 +73,7 @@
 ## 边界与失败
 
 - 概览单独显示系统盘空间：已用百分比、可用空间与总容量来自 Host Agent 对 `/var/lib` 所在文件系统的 `statfs` 观测；可用空间使用非特权进程能使用的 `Bavail`。它与硬盘标称容量、数据卷容量分别显示。未观测到时（包括旧 Host Agent）显示“暂时无法读取”，不推算为 0% 或 100%。`system.storage` 在 `/api/v1/system` 与 `/api/v1/host-state` 中均为可选对象，包含 `totalBytes` 和 `availableBytes`。
-- 接口：`/api/v1/system` 与 `/api/v1/host-state` 的 `system` 增加 `healthFindings`。Host Agent 的状态文档在对账失败时带 `reconcileFailed: true`，否则不带这个字段，旧版产品服务读取正常的 Host Agent 不受影响。每项包含 `code`、`severity`（`warning` 或 `critical`），以及可选的 `diskId` 和 `value`（`disk_hot` 为摄氏度，`volume_full`、`volume_nearly_full` 为已用百分比，`volume_errors` 为错误次数）。Host Agent 的状态文档为数据盘增加 `filesystemReadOnly` 与 `filesystemErrors`，其他磁盘带上它们时，产品服务拒绝这份文档。
+- 接口：`/api/v1/system` 与 `/api/v1/host-state` 的 `system` 增加 `healthFindings`。Host Agent 的状态文档在对账失败时带 `reconcileFailed: true`，否则不带这个字段，旧版产品服务读取正常的 Host Agent 不受影响。每项包含 `code`、`severity`（`warning` 或 `critical`），以及可选的 `diskId` 和 `value`（`disk_hot` 与 `cpu_hot` 为摄氏度，`volume_full`、`volume_nearly_full` 为已用百分比，`volume_errors` 为错误次数）。Host Agent 的状态文档为数据盘增加 `filesystemReadOnly` 与 `filesystemErrors`，其他磁盘带上它们时，产品服务拒绝这份文档。
 - 评估在产品服务中完成，Host Agent 只报告观测，因为只有产品服务知道是否创建过数据卷。Fake 读取器同样经过评估，模拟数据的健康由其中的磁盘状态决定。
 - 成员与管理员看到相同的健康与原因，不涉及个人数据。
 - 前端遇到不认识的 `code` 时显示通用说明；缺少 `healthFindings` 的旧响应按没有原因处理。
