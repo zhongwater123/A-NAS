@@ -21,9 +21,13 @@ clip is long enough, with no editing plan at all.
     python -m eval.video_moments montage --model ... --query 新加坡的美食 --seconds 20
 
 The videos are listed with their SHA-256 in video_moments.json and read from
-$ANAS_DATASETS/videos. Frames are decoded with an accurate seek, where Gallery
-takes the nearest key frame, and rendered like the photo service's AI input
-(eval.embed.render: 512 px long edge, JPEG 82).
+$ANAS_DATASETS/videos. Another set (--set, before the step) keeps its own
+cache, named after its file: video_moments_edinburgh.json caches under
+video-moments-edinburgh; a set without queries only takes the frames and
+embed steps, and its "layouts" limits the frames it samples. Frames are
+decoded with an accurate seek, where Gallery takes the nearest key frame,
+and rendered like the photo service's AI input (eval.embed.render: 512 px
+long edge, JPEG 82).
 """
 
 import argparse
@@ -60,9 +64,21 @@ STATIC_THRESHOLDS = (2, 4, 8, 12)
 STATIC_LAYOUT = "2s1f"
 
 
+def use_set(path):
+    """Points SET and CACHE at another set of videos."""
+    global SET, CACHE
+    SET = os.path.abspath(path)
+    name = os.path.splitext(os.path.basename(SET))[0].replace("_", "-")
+    CACHE = os.path.join(datasets.ROOT, "cache", name)
+
+
 def load_set():
     with open(SET, encoding="utf-8") as file:
         return json.load(file)
+
+
+def set_layouts(data):
+    return {name: LAYOUTS[name] for name in data.get("layouts", LAYOUTS)}
 
 
 def windows(duration_ms, seconds, frames):
@@ -88,9 +104,9 @@ def cover_ms(duration_ms):
     return int(min(duration_ms / 10, 1000))
 
 
-def frame_times(duration_ms):
+def frame_times(duration_ms, layouts=LAYOUTS):
     times = {cover_ms(duration_ms)}
-    for seconds, frames in LAYOUTS.values():
+    for seconds, frames in layouts.values():
         for _start, _end, sampled in windows(duration_ms, seconds, frames):
             times.update(sampled)
     return sorted(times)
@@ -121,13 +137,14 @@ def sha256(path):
 
 def extract_frames():
     data = load_set()
+    layouts = set_layouts(data)
     timings = []
     for video, meta in sorted(data["videos"].items()):
         path = os.path.join(VIDEOS, meta["file"])
         if sha256(path) != meta["sha256"]:
             raise SystemExit(f"{path} does not match the SHA-256 in {SET}")
         duration_ms = round(meta["duration"] * 1000)
-        todo = [ms for ms in frame_times(duration_ms) if not os.path.exists(frame_path(video, ms))]
+        todo = [ms for ms in frame_times(duration_ms, layouts) if not os.path.exists(frame_path(video, ms))]
         os.makedirs(os.path.dirname(frame_path(video, 0)), exist_ok=True)
         for ms in todo:
             started = time.perf_counter()
@@ -137,7 +154,7 @@ def extract_frames():
             with open(partial, "wb") as file:
                 file.write(data_bytes)
             os.replace(partial, frame_path(video, ms))
-        print(f"{video}: {len(frame_times(duration_ms))} frames, {len(todo)} decoded", flush=True)
+        print(f"{video}: {len(frame_times(duration_ms, layouts))} frames, {len(todo)} decoded", flush=True)
     if timings:
         print(f"decode: median {np.median(timings) * 1000:.0f} ms per frame", flush=True)
 
@@ -152,6 +169,7 @@ def embed(args):
     directory = os.path.join(CACHE, provider.model)
     os.makedirs(directory, exist_ok=True)
     data = load_set()
+    layouts = set_layouts(data)
 
     queries = Cache(os.path.join(directory, "queries.npz"))
     todo = [q["text"] for q in data["queries"] if q["text"] not in queries.vectors]
@@ -164,7 +182,7 @@ def embed(args):
     wall, cpu = [], []
     for video, meta in sorted(data["videos"].items()):
         duration_ms = round(meta["duration"] * 1000)
-        todo = [ms for ms in frame_times(duration_ms) if f"{video}/{ms}" not in frames.vectors]
+        todo = [ms for ms in frame_times(duration_ms, layouts) if f"{video}/{ms}" not in frames.vectors]
         for ms in todo:
             with open(frame_path(video, ms), "rb") as file:
                 image = file.read()
@@ -477,6 +495,7 @@ def montage(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--set", default=SET, help="the videos and queries, with a cache of its own")
     steps = parser.add_subparsers(dest="step", required=True)
     steps.add_parser("frames", help="decode and render every frame the layouts sample")
     step = steps.add_parser("embed", help="embed the frames and the queries")
@@ -493,6 +512,7 @@ def main():
     step.add_argument("--min-score", type=float, default=0.0, help="leave out windows scoring below this")
     step.add_argument("--name", required=True, help="the clip's folder and file name")
     args = parser.parse_args()
+    use_set(args.set)
     if args.step == "frames":
         extract_frames()
     elif args.step == "embed":
