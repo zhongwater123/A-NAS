@@ -69,3 +69,8 @@ if (!Element.prototype.setPointerCapture) {
     document.addEventListener("pointercancel", end, true);
   };
 }
+
+// jsdom has no canvas and logs every getContext call as an error. Answer like
+// a browser without one, quietly, so the sign-in screen's decorative canvases
+// do not flood every test that passes through it. Tests that draw still spy.
+HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext;
