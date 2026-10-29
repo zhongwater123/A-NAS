@@ -33,6 +33,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/feedback"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/filebroker"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -43,7 +44,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpidle"
 	"github.com/zhongwater123/A-NAS/internal/media"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -64,11 +64,11 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	// The photo service runs from the same binary as its own process and
 	// identity (ADR 0011), so releases keep two hashed binaries.
-	// systemd starts a media worker per connection, with the connection as
+	// systemd starts a FFmpeg worker per connection, with the connection as
 	// standard input (ADR 0017).
-	if len(os.Args) == 2 && os.Args[1] == mediaWorkerCommand {
-		if err := runMediaWorker(); err != nil {
-			logger.Error("A-NAS media worker failed", "error", err)
+	if len(os.Args) == 2 && os.Args[1] == ffmpegWorkerCommand {
+		if err := runFFmpegWorker(); err != nil {
+			logger.Error("A-NAS FFmpeg worker failed", "error", err)
 			os.Exit(1)
 		}
 		return
@@ -97,16 +97,16 @@ func main() {
 
 const (
 	photoServiceCommand = "photo-service"
-	mediaWorkerCommand  = "media-worker"
+	ffmpegWorkerCommand = "ffmpeg-worker"
 )
 
-func runMediaWorker() error {
+func runFFmpegWorker() error {
 	if os.Geteuid() == 0 {
-		return errors.New("the media worker must run under its own dynamic identity, never root")
+		return errors.New("the FFmpeg worker must run under its own dynamic identity, never root")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return mediaworker.ServeStandardInput(ctx, mediaworker.Tools{FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe", HEIFThumbnailer: "/usr/bin/heif-thumbnailer"})
+	return ffmpegworker.ServeStandardInput(ctx, ffmpegworker.Tools{FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe", HEIFThumbnailer: "/usr/bin/heif-thumbnailer"})
 }
 
 func runPhotoService(logger *slog.Logger) error {
@@ -211,7 +211,7 @@ func run(logger *slog.Logger) error {
 	}
 	// The media center and the music library share one FFmpeg boundary and
 	// adapt its operations to their own needs (ADR 0017, ADR 0018).
-	mediaWorker := configuredMediaWorker(config)
+	mediaWorker := configuredFFmpegWorker(config)
 	musicStore, err := music.OpenSQLite(filepath.Join(stateDirectory, "music.db"))
 	if err != nil {
 		return err
@@ -444,16 +444,16 @@ func (g sandboxedVolumeGuard) Check(ctx context.Context, volumeRoot string, _ bo
 	return g.VolumeGuard.Check(ctx, volumeRoot, false)
 }
 
-// configuredMediaWorker picks where FFmpeg runs. Production uses the
+// configuredFFmpegWorker picks where FFmpeg runs. Production uses the
 // sandboxed worker socket; development runs FFmpeg in this process when it
 // is installed, and otherwise the media center and music work without it.
-func configuredMediaWorker(config Config) mediaworker.Worker {
+func configuredFFmpegWorker(config Config) ffmpegworker.Worker {
 	switch config.MediaWorker {
 	case mediaWorkerSocket:
 		return config.Media.client()
 	case mediaWorkerLocal:
-		if tools, ok := mediaworker.LocalTools(); ok {
-			return mediaworker.Local{Tools: tools}
+		if tools, ok := ffmpegworker.LocalTools(); ok {
+			return ffmpegworker.Local{Tools: tools}
 		}
 	}
 	return nil

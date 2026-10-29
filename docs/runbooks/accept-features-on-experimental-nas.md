@@ -16,12 +16,12 @@
 
 ## 步骤
 
-### Host Agent、应用安装与媒体 Worker
+### Host Agent、应用安装与 FFmpeg Worker
 
 - Host Agent（#166）：核对 `CapBnd`、`systemd-cgls` 中文件 Worker 与终端 Shell 各自的 scope、裸机上 `/sys` 是否只读，以及加盘后 udev 重新探测是否仍正常；运行一周后查看 `MemoryPeak` 与 `TasksCurrent`，确认上限合适（[调查](../investigations/2026-10-21-host-agent-single-failures-stop-everything.md)）。
 - 应用安装（#169）：安装过程中重启容器代理，确认显示安装被中断且没有留下容器（[调查](../investigations/2026-10-21-failed-app-install-shown-as-installed.md)）。
 - 应用身份由容器代理自己解析（#249）：在应用中心打开一个已安装应用的安装计划，运行身份与 NAS 上 `id app-<id>` 的 UID、GID 一致。
-- 媒体 Worker（#168）：相册服务日志出现 `photo jobs recovered`，此前失败的 HEIC 照片得到缩略图（[调查](../investigations/2026-10-21-media-worker-shared-budget.md)）。
+- FFmpeg Worker（#168）：相册服务日志出现 `photo jobs recovered`，此前失败的 HEIC 照片得到缩略图（[调查](../investigations/2026-10-21-media-worker-shared-budget.md)）。
 
 ### 文件管理、登录与账号
 
@@ -78,6 +78,8 @@
 经局域网 Web 入口在 Wi-Fi 上：概况与批次的上下行速度、影视中心一次上传整季剧集时的完整列表与状态栏文件名、几 GB 文件的上传速度、断开 Wi-Fi 后续传、重启产品服务后从头上传与临时文件回收，以及成员向他人个人空间上传被 ACL 拒绝。Caddy 默认不缓冲请求体，分片应直接流入产品服务。
 
 ### 应用中心与 Docker
+
+- 系统盘保护（#186）：更新产品服务、Host Agent 和容器代理后，在设置概览核对系统盘用量；选定可丢弃应用，备份需要保留的数据，按[容器代理手册](install-container-agent.md)验证新容器的日志轮转与卸载后的资源/数据保留。不要用真实应用或全局 prune 做破坏性压力测试，见[调查](../investigations/2026-10-27-app-system-disk-growth.md)。
 
 - 安装一个新应用，确认 [ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md) 的版本与挂载检查放行正常安装；目录新增的 11 个应用逐个实机安装。
 - 应用身份（[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）：重新安装此前以 root 运行的 Immich，确认它以应用身份运行、手机备份可上传；安装 Navidrome 与 qBittorrent，核对只读与可写共享空间（[调查](../investigations/2026-10-14-app-containers-and-the-shared-acl.md)）。

@@ -40,18 +40,20 @@ func (a *API) Routes() []apiroute.Route {
 	}
 }
 
-// available answers storage_unavailable without a storage service.
-func (a *API) available(next func(http.ResponseWriter, *http.Request)) apiroute.Handler {
-	return func(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
+// available answers storage_unavailable without a storage service. The
+// session's user goes on to the service, which checks the administrator
+// itself on everything that plans or changes the volume (#270).
+func (a *API) available(next apiroute.Handler) apiroute.Handler {
+	return func(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 		if a.storage == nil {
 			httpjson.WriteError(w, http.StatusServiceUnavailable, "storage_unavailable", "storage service is unavailable")
 			return
 		}
-		next(w, r)
+		next(w, r, session)
 	}
 }
 
-func (a *API) createPlan(w http.ResponseWriter, r *http.Request) {
+func (a *API) createPlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
 		DiskIDs []string       `json:"diskIds"`
 		Layout  storage.Layout `json:"layout"`
@@ -59,7 +61,7 @@ func (a *API) createPlan(w http.ResponseWriter, r *http.Request) {
 	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
-	plan, err := a.storage.PlanVolume(r.Context(), request.DiskIDs, request.Layout)
+	plan, err := a.storage.PlanVolume(r.Context(), session.User, request.DiskIDs, request.Layout)
 	if err != nil {
 		WriteError(w, r, a.logger, err)
 		return
@@ -67,7 +69,7 @@ func (a *API) createPlan(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusCreated, plan)
 }
 
-func (a *API) volumes(w http.ResponseWriter, r *http.Request) {
+func (a *API) volumes(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
 	volumes, err := a.storage.ListVolumes(r.Context())
 	if err != nil {
 		httpjson.WriteInternal(w, r, a.logger, err)
@@ -81,7 +83,7 @@ func (a *API) volumes(w http.ResponseWriter, r *http.Request) {
 
 // continueConversion starts converting the data volume to its layout now,
 // after a shutdown or an error stopped the conversion.
-func (a *API) continueConversion(w http.ResponseWriter, r *http.Request) {
+func (a *API) continueConversion(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	volumes, err := a.storage.ListVolumes(r.Context())
 	if err != nil {
 		httpjson.WriteInternal(w, r, a.logger, err)
@@ -91,21 +93,21 @@ func (a *API) continueConversion(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "storage resource was not found")
 		return
 	}
-	if err := a.storage.ContinueConversion(r.Context()); err != nil {
+	if err := a.storage.ContinueConversion(r.Context(), session.User); err != nil {
 		WriteError(w, r, a.logger, err)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
 }
 
-func (a *API) confirmPlan(w http.ResponseWriter, r *http.Request) {
+func (a *API) confirmPlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	var request struct {
 		ConfirmationPhrase string `json:"confirmationPhrase"`
 	}
 	if !httpjson.Read(w, r, httpjson.Limit, &request) {
 		return
 	}
-	plan, err := a.storage.ConfirmPlan(r.Context(), r.PathValue("planID"), request.ConfirmationPhrase)
+	plan, err := a.storage.ConfirmPlan(r.Context(), session.User, r.PathValue("planID"), request.ConfirmationPhrase)
 	if err != nil {
 		WriteError(w, r, a.logger, err)
 		return
@@ -113,8 +115,8 @@ func (a *API) confirmPlan(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusOK, plan)
 }
 
-func (a *API) executePlan(w http.ResponseWriter, r *http.Request) {
-	plan, err := a.storage.ExecutePlan(r.Context(), r.PathValue("planID"))
+func (a *API) executePlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	plan, err := a.storage.ExecutePlan(r.Context(), session.User, r.PathValue("planID"))
 	if err != nil {
 		WriteError(w, r, a.logger, err)
 		return
@@ -130,12 +132,12 @@ func (a *API) executePlan(w http.ResponseWriter, r *http.Request) {
 
 // unfinishedPlans lists the plans that still need the administrator, so
 // that the settings page finds them again after a reload.
-func (a *API) unfinishedPlans(w http.ResponseWriter, _ *http.Request) {
+func (a *API) unfinishedPlans(w http.ResponseWriter, _ *http.Request, _ accounts.Session) {
 	httpjson.Write(w, http.StatusOK, map[string]any{"items": a.storage.UnfinishedPlans()})
 }
 
-func (a *API) cancelPlan(w http.ResponseWriter, r *http.Request) {
-	plan, err := a.storage.CancelPlan(r.Context(), r.PathValue("planID"))
+func (a *API) cancelPlan(w http.ResponseWriter, r *http.Request, session accounts.Session) {
+	plan, err := a.storage.CancelPlan(r.Context(), session.User, r.PathValue("planID"))
 	if err != nil {
 		WriteError(w, r, a.logger, err)
 		return
@@ -143,7 +145,7 @@ func (a *API) cancelPlan(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusOK, plan)
 }
 
-func (a *API) operation(w http.ResponseWriter, r *http.Request) {
+func (a *API) operation(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
 	plan, err := a.storage.GetPlan(r.PathValue("operationID"))
 	if err != nil {
 		WriteError(w, r, a.logger, err)
@@ -155,6 +157,8 @@ func (a *API) operation(w http.ResponseWriter, r *http.Request) {
 // WriteError answers an error of the storage service.
 func WriteError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
 	switch {
+	case errors.Is(err, accounts.ErrForbidden):
+		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "administrator permission is required")
 	case errors.Is(err, storage.ErrDiskNotFound), errors.Is(err, storage.ErrPlanNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "storage resource was not found")
 	case errors.Is(err, storage.ErrDiskNotEligible):

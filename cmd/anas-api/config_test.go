@@ -36,7 +36,7 @@ func TestConfigResolvesEachModesAdaptersAndRefusesDevelopmentOnesOnANAS(t *testi
 				HostAgentSocket: "/run/a-nas/host-agent.sock", FileBrokerSocket: "/run/a-nas/file-broker.sock",
 				PhotosSocket: "/run/a-nas-photos/photos.sock", SharesSocket: "/run/a-nas-shares/shares.sock",
 				ShareFilesSocket: "/run/a-nas-share-files/files.sock", MediaWorker: mediaWorkerSocket,
-				Media:      MediaConfig{Socket: "/run/a-nas-media/media.sock", Slots: "/run/a-nas-media/slots"},
+				Media:      MediaConfig{Socket: "/run/a-nas-ffmpeg/ffmpeg.sock", Slots: "/run/a-nas-ffmpeg/slots"},
 				Containers: containersDisabled, Terminal: "disabled", ScreensaverDirectory: "/var/lib/a-nas/screensavers/current",
 			}
 			if c != want {
@@ -88,18 +88,18 @@ func TestConfigResolvesEachModesAdaptersAndRefusesDevelopmentOnesOnANAS(t *testi
 		{name: "relative sockets", environment: with(agent, "ANAS_FILE_BROKER_SOCKET", "file-broker.sock", "ANAS_PHOTOS_SOCKET", "photos.sock"), wantError: []string{
 			"ANAS_FILE_BROKER_SOCKET must be an absolute path", "ANAS_PHOTOS_SOCKET must be an absolute path",
 		}},
-		{name: "FFmpeg in the Product Service on a NAS", environment: with(agent, "ANAS_MEDIA_WORKER", "local"), wantError: []string{"ANAS_MEDIA_WORKER=local"}},
-		{name: "FFmpeg in development", environment: with(fake, "ANAS_MEDIA_WORKER", "socket"), check: func(t *testing.T, c Config) {
+		{name: "FFmpeg in the Product Service on a NAS", environment: with(agent, "ANAS_FFMPEG_WORKER", "local"), wantError: []string{"ANAS_FFMPEG_WORKER=local"}},
+		{name: "FFmpeg in development", environment: with(fake, "ANAS_FFMPEG_WORKER", "socket"), check: func(t *testing.T, c Config) {
 			if c.MediaWorker != mediaWorkerSocket {
-				t.Fatalf("media worker = %q", c.MediaWorker)
+				t.Fatalf("FFmpeg worker = %q", c.MediaWorker)
 			}
 		}},
-		{name: "media worker off on a NAS", environment: with(agent, "ANAS_MEDIA_WORKER", "disabled"), check: func(t *testing.T, c Config) {
+		{name: "FFmpeg worker off on a NAS", environment: with(agent, "ANAS_FFMPEG_WORKER", "disabled"), check: func(t *testing.T, c Config) {
 			if c.MediaWorker != mediaWorkerDisabled {
-				t.Fatalf("media worker = %q", c.MediaWorker)
+				t.Fatalf("FFmpeg worker = %q", c.MediaWorker)
 			}
 		}},
-		{name: "unknown media worker", environment: with(fake, "ANAS_MEDIA_WORKER", "remote"), wantError: []string{"ANAS_MEDIA_WORKER must be socket, local or disabled"}},
+		{name: "unknown FFmpeg worker", environment: with(fake, "ANAS_FFMPEG_WORKER", "remote"), wantError: []string{"ANAS_FFMPEG_WORKER must be socket, local or disabled"}},
 		{name: "Fake containers on a NAS", environment: with(agent, "ANAS_CONTAINERS_MODE", "fake"), wantError: []string{"ANAS_CONTAINERS_MODE=fake"}},
 		{name: "container agent", environment: with(agent, "ANAS_CONTAINERS_MODE", "agent"), check: func(t *testing.T, c Config) {
 			if c.Containers != containersAgent || c.ContainerAgentSocket != "/run/a-nas-container/agent.sock" {
@@ -124,8 +124,8 @@ func TestConfigResolvesEachModesAdaptersAndRefusesDevelopmentOnesOnANAS(t *testi
 			}
 		}},
 		{name: "the Host Agent's changes socket", environment: with(fake, "ANAS_ASSISTANT_CHANGES_SOCKET", "/run/a-nas/assistant-changes.sock"), wantError: []string{"ANAS_ASSISTANT_CHANGES_SOCKET is the Host Agent's"}},
-		{name: "every problem at once", environment: with(agent, "ANAS_HTTP_ADDR", "0.0.0.0:8080", "ANAS_MEDIA_WORKER", "local", "ANAS_CONTAINERS_MODE", "fake"), wantError: []string{
-			"ANAS_HTTP_ADDR", "ANAS_MEDIA_WORKER=local", "ANAS_CONTAINERS_MODE=fake",
+		{name: "every problem at once", environment: with(agent, "ANAS_HTTP_ADDR", "0.0.0.0:8080", "ANAS_FFMPEG_WORKER", "local", "ANAS_CONTAINERS_MODE", "fake"), wantError: []string{
+			"ANAS_HTTP_ADDR", "ANAS_FFMPEG_WORKER=local", "ANAS_CONTAINERS_MODE=fake",
 		}},
 	}
 	for _, test := range tests {
@@ -157,7 +157,7 @@ func TestConfigNamesEveryProblemInTheSameOrder(t *testing.T) {
 	t.Setenv("HOME", "")
 	environment := map[string]string{
 		"ANAS_HOSTSTATE_MODE": "agent", "ANAS_HOST_AGENT_SOCKET": "/run/a-nas/host-agent.sock", "ANAS_STATE_DIR": "state",
-		"ANAS_PHOTOS_SOCKET": "photos.sock", "ANAS_SHARES_SOCKET": "shares.sock", "ANAS_MEDIA_SOCKET": "media.sock",
+		"ANAS_PHOTOS_SOCKET": "photos.sock", "ANAS_SHARES_SOCKET": "shares.sock", "ANAS_FFMPEG_SOCKET": "media.sock",
 		"ANAS_AI_SOCKET": "/run/a-nas-ai/ai.sock", "ANAS_ASSISTANT_TOKEN_DIR": "/etc/a-nas-assistant/tokens",
 	}
 	_, err := loadConfig(environment)
@@ -203,7 +203,7 @@ func TestTheInstallersEnvironmentIsAValidNASConfiguration(t *testing.T) {
 
 func TestPhotoServiceConfigNeedsAPositiveQuietPeriod(t *testing.T) {
 	config, err := loadPhotoServiceConfig(map[string]string{"ANAS_PHOTOS_AI_QUIET_PERIOD": "2s"})
-	if err != nil || config.Quiet.Seconds() != 2 || config.AISocket != "/run/a-nas-ai/ai.sock" || config.Media.client().Socket != "/run/a-nas-media/media.sock" {
+	if err != nil || config.Quiet.Seconds() != 2 || config.AISocket != "/run/a-nas-ai/ai.sock" || config.Media.client().Socket != "/run/a-nas-ffmpeg/ffmpeg.sock" {
 		t.Fatalf("loadPhotoServiceConfig() = %+v, %v", config, err)
 	}
 	for _, value := range []string{"0s", "-1s", "soon"} {
@@ -223,8 +223,8 @@ func TestServiceConfigsNameEveryRelativePath(t *testing.T) {
 		want string
 	}{
 		{"photos", func(e map[string]string) error { _, err := loadPhotoServiceConfig(e); return err },
-			map[string]string{"ANAS_PHOTOS_ROOT": "photos", "ANAS_MEDIA_SLOTS": "slots", "ANAS_PHOTOS_AI_QUIET_PERIOD": "soon"},
-			"ANAS_MEDIA_SLOTS must be an absolute path\nANAS_PHOTOS_ROOT must be an absolute path\nANAS_PHOTOS_AI_QUIET_PERIOD must be a positive duration such as 5s"},
+			map[string]string{"ANAS_PHOTOS_ROOT": "photos", "ANAS_FFMPEG_SLOTS": "slots", "ANAS_PHOTOS_AI_QUIET_PERIOD": "soon"},
+			"ANAS_FFMPEG_SLOTS must be an absolute path\nANAS_PHOTOS_ROOT must be an absolute path\nANAS_PHOTOS_AI_QUIET_PERIOD must be a positive duration such as 5s"},
 		{"shares", func(e map[string]string) error { _, err := loadShareServiceConfig(e); return err },
 			map[string]string{"ANAS_SHARES_ROOT": "shares", "ANAS_SHARE_SESSION_SOCKET": "sessions.sock"},
 			"ANAS_SHARES_ROOT must be an absolute path\nANAS_SHARE_SESSION_SOCKET must be an absolute path"},

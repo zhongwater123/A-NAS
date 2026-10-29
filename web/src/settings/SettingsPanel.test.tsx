@@ -530,6 +530,28 @@ describe("Settings", () => {
     expect(screen.queryByRole("button", { name: "在存储中查看磁盘与数据卷" })).toBeNull();
   });
 
+  it.each([true, false])("shows system storage separately, observed=%s", async (observed) => {
+    serve({
+      hostState: {
+        ...healthyState,
+        system: {
+          ...healthyState.system,
+          storage: observed ? { totalBytes: 100 * 1024 ** 3, availableBytes: 25 * 1024 ** 3 } : undefined,
+        },
+      },
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "概览");
+    expect(await screen.findByText("系统盘空间")).toBeTruthy();
+    if (observed) {
+      expect(screen.getByText("75%")).toBeTruthy();
+      expect(screen.queryByText("暂时无法读取")).toBeNull();
+    } else {
+      expect(screen.getByText("暂时无法读取")).toBeTruthy();
+    }
+  });
+
   it("reports unknown data volume usage instead of a full volume", async () => {
     serve({ volumes: [volume({ capacityBytes: 500_107_862_016, filesystemUuid: "09e275fe-794a" })] });
     const user = userEvent.setup();

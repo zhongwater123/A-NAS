@@ -1,6 +1,7 @@
 /api/v1/terminal:
   get:
     operationId: getTerminalStatus
+    x-anas-posture: admin
     summary: Report whether interactive terminal sessions are enabled
     responses:
       "200":
@@ -18,6 +19,7 @@
 /api/v1/terminal/session:
   get:
     operationId: openTerminalSession
+    x-anas-posture: admin
     summary: Upgrade to a WebSocket bridged to a login shell on a new PTY
     description: >-
       Only loopback peers (the local console, or the LAN entry proxying a LAN browser) whose Host names this

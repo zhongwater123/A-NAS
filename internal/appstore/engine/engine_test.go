@@ -19,16 +19,71 @@ import (
 )
 
 type fakeDocker struct {
-	mu         sync.Mutex
-	containers []engine.ContainerInfo
-	pools      []netip.Prefix
-	networks   []engine.NetworkInfo
-	mounts     []engine.MountInfo
-	runtimes   []engine.RuntimeInfo
+	cleanupErr       error
+	inspectImagesErr error
+	imageErr         error
+	cleanedImages    []string
+	storageErr       error
+	mu               sync.Mutex
+	containers       []engine.ContainerInfo
+	pools            []netip.Prefix
+	networks         []engine.NetworkInfo
+	mounts           []engine.MountInfo
+	runtimes         []engine.RuntimeInfo
 	// states overrides what ProjectContainers reports.
 	states []engine.ContainerState
 	// apiVersion defaults to an engine that supports volume subpaths.
 	apiVersion string
+}
+
+func (f *fakeDocker) CheckStorage(context.Context) error { return f.storageErr }
+
+func (f *fakeDocker) CleanupImages(_ context.Context, project string, references []string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.inspectImagesErr != nil {
+		return nil, f.inspectImagesErr
+	}
+	if slices.ContainsFunc(f.containers, func(item engine.ContainerInfo) bool { return appstore.ProjectName(item.AppID) == project }) {
+		return []string{"sha256:installed"}, nil
+	}
+	return slices.Clone(references), nil
+}
+
+func (f *fakeDocker) RemoveProjectContainers(_ context.Context, project string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cleanupErr != nil {
+		return f.cleanupErr
+	}
+	f.containers = slices.DeleteFunc(f.containers, func(item engine.ContainerInfo) bool { return appstore.ProjectName(item.AppID) == project })
+	return nil
+}
+
+func (f *fakeDocker) RemoveUnusedImages(_ context.Context, images []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cleanedImages = slices.Clone(images)
+	return f.imageErr
+}
+
+func TestInstallRechecksSystemSpaceBeforeRunningCompose(t *testing.T) {
+	docker, runner := &fakeDocker{}, &fakeRunner{}
+	store, _ := newStore(t, docker, runner)
+	plan, err := store.Plan(context.Background(), "memos", identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	docker.storageErr = appstore.ErrSystemSpace
+	if _, err := store.Plan(context.Background(), "memos", identity); !errors.Is(err, appstore.ErrSystemSpace) {
+		t.Fatalf("plan error = %v", err)
+	}
+	if _, err := store.Install(context.Background(), "memos", plan.Digest, identity); !errors.Is(err, appstore.ErrSystemSpace) {
+		t.Fatalf("install error = %v", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("Compose ran with insufficient storage: %v", runner.calls)
+	}
 }
 
 func (f *fakeDocker) Containers(context.Context) ([]engine.ContainerInfo, error) {
@@ -667,6 +722,7 @@ func TestInstallRollsBackWhenComposeFailsPartway(t *testing.T) {
 // they never block it.
 func TestContainersOfAFailedInstallAreNotAnInstalledApp(t *testing.T) {
 	docker := &fakeDocker{pools: []netip.Prefix{netip.MustParsePrefix("10.96.64.0/19")}}
+	docker.cleanupErr = errors.New("cannot connect to Docker")
 	broken := true
 	runner := &fakeRunner{after: func(args []string) {
 		if !broken || !slices.Contains(args, "down") {
@@ -700,6 +756,7 @@ func TestContainersOfAFailedInstallAreNotAnInstalledApp(t *testing.T) {
 	}
 
 	broken = false
+	docker.cleanupErr = nil
 	runner.calls = nil
 	if _, err := store.Install(ctx, "linkwarden", plan.Digest, identity); err != nil {
 		t.Fatalf("installing again over a failed install: %v", err)

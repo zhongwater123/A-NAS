@@ -6,7 +6,7 @@
 
 ## 决定
 
-1. **白名单按键名**：产品服务只能传服务键名（如 `api`、`photos`），由 `internal/systemlog` 中的固定表映射到单元名或模板（如 `anas-media@*.service`）。白名单包含 A-NAS 自己的服务、本机屏幕会话，以及 A-NAS 托管配置的 `smbd` 与 `caddy`；不含内核、SSH、sudo、Docker 或应用容器。
+1. **白名单按键名**：产品服务只能传服务键名（如 `api`、`photos`），由 `internal/systemlog` 中的固定表映射到单元名或模板（如 `anas-ffmpeg@*.service`）。白名单包含 A-NAS 自己的服务、本机屏幕会话，以及 A-NAS 托管配置的 `smbd` 与 `caddy`；不含内核、SSH、sudo、Docker 或应用容器。
 2. **固定命令**：Host Agent 以 `journalctl --output=json --all --quiet --no-pager` 加按键名生成的 `--unit` 运行，时间范围用 `--since=@<秒>`/`--until=@<秒>`，翻页用经格式校验的 `--after-cursor`；不经 Shell，不接受任意 match、`--grep` 表达式或文件路径。关键词与级别在 Host Agent 中逐行按纯文本过滤。
 3. **有界输出**：每次最多返回 500 行、检查 20,000 行、运行 10 秒，单行消息截断到 16 KiB；超出时返回已读部分和继续翻页的游标。
 4. **只对管理员开放**：产品 API `/api/v1/system-logs` 只接受管理员会话；开发模式使用 Fake 读取器，与 Linux 实现遵循同一契约。

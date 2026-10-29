@@ -24,6 +24,14 @@ import (
 // the guard never lets a request reach, and an administrator's session.
 func routedProduct(t *testing.T) (http.Handler, *http.Cookie) {
 	t.Helper()
+	product, owner, _ := routedSessions(t)
+	return product, &http.Cookie{Name: "anas_session", Value: owner.Token}
+}
+
+// routedSessions is routedProduct with the sessions of an administrator and
+// of a member.
+func routedSessions(t *testing.T) (http.Handler, accounts.Session, accounts.Session) {
+	t.Helper()
 	ctx := context.Background()
 	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
 	if err != nil {
@@ -34,7 +42,14 @@ func routedProduct(t *testing.T) (http.Handler, *http.Cookie) {
 	if _, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple"); err != nil {
 		t.Fatal(err)
 	}
-	session, err := service.Authenticate(signedInDirectly(ctx), "owner", "correct horse battery staple")
+	owner, err := service.Authenticate(signedInDirectly(ctx), "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateMember(ctx, owner.User, "member", "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	member, err := service.Authenticate(signedInDirectly(ctx), "member", "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +63,7 @@ func routedProduct(t *testing.T) (http.Handler, *http.Cookie) {
 		Shares: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
-	return product, &http.Cookie{Name: "anas_session", Value: session.Token}
+	return product, owner, member
 }
 
 var pathParameter = regexp.MustCompile(`\{[^}]+\}`)
@@ -107,8 +122,9 @@ func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 }
 
 // Every route the product registers is in the specification, also each
-// operation a mounted API serves (#273), and the routes that need no session
-// are exactly the operations without security.
+// operation a mounted API serves (#273); the routes that need no session are
+// exactly the operations without security, and the administrator's routes
+// exactly those marked x-anas-posture: admin (#270).
 func TestEveryRouteIsSpecifiedWithItsPosture(t *testing.T) {
 	product, _ := routedProduct(t)
 	document := openapitest.Document(t)
@@ -132,5 +148,38 @@ func TestEveryRouteIsSpecifiedWithItsPosture(t *testing.T) {
 		if public != (route.Posture == apiroute.Public) {
 			t.Errorf("route %s %s is %s, but the specification says public = %v", route.Method, route.Pattern, route.Posture, public)
 		}
+		marker, marked := operation.Extensions["x-anas-posture"]
+		if marked && marker != "admin" {
+			t.Errorf("operation %s %s has x-anas-posture %v; the only value is admin", route.Method, route.Pattern, marker)
+		}
+		if marked != (route.Posture == apiroute.Admin) {
+			t.Errorf("route %s %s is %s, but the specification says admin = %v", route.Method, route.Pattern, route.Posture, marked)
+		}
+	}
+}
+
+// A member is refused every administrator route before its handler runs,
+// even with a valid CSRF token: one posture changed by mistake fails here,
+// whatever the service behind it checks (#270).
+func TestMembersAreRefusedEveryAdministratorRoute(t *testing.T) {
+	product, _, member := routedSessions(t)
+	checked := 0
+	for _, route := range httpapi.Routes(product) {
+		if route.Posture != apiroute.Admin {
+			continue
+		}
+		checked++
+		request := httptest.NewRequest(route.Method, "http://127.0.0.1:8080"+pathParameter.ReplaceAllString(route.Pattern, "x"), strings.NewReader("{}"))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-CSRF-Token", member.CSRFToken)
+		request.AddCookie(&http.Cookie{Name: "anas_session", Value: member.Token})
+		recorder := httptest.NewRecorder()
+		product.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusForbidden || answerCode(recorder) != "forbidden" {
+			t.Errorf("member %s %s = %d %s, want 403 forbidden", route.Method, route.Pattern, recorder.Code, recorder.Body.String())
+		}
+	}
+	if checked < 20 {
+		t.Fatalf("checked only %d administrator routes", checked)
 	}
 }

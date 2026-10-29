@@ -1,6 +1,6 @@
 # 运行实验 NAS 本地控制台
 
-状态：implemented, display and pointer verified; confinement and VT recovery pending; dedicated account and hardware video decoding not yet verified on hardware
+状态：implemented, display and pointer verified; dedicated account verified on the Experimental NAS (2026-10-28); confinement and VT recovery pending; hardware video decoding not yet verified on hardware
 更新时间：2026-10-28
 
 ## 目的
@@ -106,8 +106,8 @@ journalctl -u anas-kiosk@tty1.service -b --no-pager -n 100
 
 ```bash
 systemctl show -p User --value anas-kiosk@tty1.service      # a-nas-kiosk
-ps -o user=,args= -C cage                                   # a-nas-kiosk … /opt/a-nas/current/kiosk-launcher
-ps -o user= -C chromium | sort -u                           # 只有 a-nas-kiosk
+ps -o user:20=,args= -C cage                                # a-nas-kiosk … /opt/a-nas/current/kiosk-launcher
+ps -o user:20= -C chromium | sort -u                        # 只有 a-nas-kiosk
 getent passwd a-nas-kiosk                                   # 以 :/nonexistent:/usr/sbin/nologin 结尾
 passwd -S a-nas-kiosk                                       # 第二列是 L：没有可用的口令
 stat -c '%U %a %n' /var/lib/a-nas-kiosk /var/lib/a-nas-kiosk/chromium
@@ -117,6 +117,7 @@ systemctl is-active "user@$(id -u a-nas-kiosk).service"     # active
 systemd-analyze verify --recursive-errors=no anas-kiosk@tty1.service; echo "exit=$?"
 ```
 
+- `ps` 默认把超过 8 个字符的用户名截成 `a-nas-k+`，所以用 `user:20` 指定列宽；
 - 两个目录都属于 `a-nas-kiosk`，权限为 `700`；
 - 带 `!` 的两行不输出任何内容，即命令失败：kiosk 账号写不了暂存目录，SSH 拒绝它登录；
 - 本机会话还会启动这个账号的用户服务管理器 `user@<UID>.service`。账号没有家目录，它仍应为 `active`：2026-10-28 在 Debian 13 容器中试过，与有家目录的账号相同；

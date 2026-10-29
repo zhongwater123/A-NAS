@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -9,8 +10,44 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 )
+
+type systemStorageReader struct{ *fake.Reader }
+
+func (r systemStorageReader) Read(ctx context.Context) (hoststate.State, error) {
+	state, err := r.Reader.Read(ctx)
+	state.System.Storage = &hoststate.StorageUsage{TotalBytes: 100 << 30, AvailableBytes: 25 << 30}
+	return state, err
+}
+
+func TestSystemStorageReachesBothStateEndpoints(t *testing.T) {
+	handler := newStateHandler(systemStorageReader{fake.NewHealthy()}, DataSourceSimulated, "test-version", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for _, path := range []string{"/api/v1/system", "/api/v1/host-state"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s: %s", path, recorder.Body.String())
+		}
+		var response struct {
+			Storage *systemStorageResponse `json:"storage"`
+			System  struct {
+				Storage *systemStorageResponse `json:"storage"`
+			} `json:"system"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		usage := response.Storage
+		if path == "/api/v1/host-state" {
+			usage = response.System.Storage
+		}
+		if usage == nil || usage.TotalBytes != 100<<30 || usage.AvailableBytes != 25<<30 {
+			t.Fatalf("%s usage = %+v", path, usage)
+		}
+	}
+}
 
 func readSystemHealth(t *testing.T, handler http.Handler) (string, []healthFindingResponse) {
 	t.Helper()

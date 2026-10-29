@@ -95,7 +95,7 @@ func (*heifIrot) GetType() mp4.BoxType { return boxTypeIrot }
 // go-mp4 allocates a few KiB for each box it visits and each ipma entry it
 // decodes, so the walk is bounded by box count and by the bytes it reads. Both
 // limits sit far above real files and above libheif's default security limits
-// (100 children per box, 1000 items), beyond which the Media Worker could not
+// (100 children per box, 1000 items), beyond which the FFmpeg Worker could not
 // decode the file anyway.
 const (
 	maxHEIFBoxes    = 4096

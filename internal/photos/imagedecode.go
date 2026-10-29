@@ -46,7 +46,7 @@ func checkImageDecodeBudget(config image.Config) error {
 }
 
 // withDecodedImage bounds both new and already-stored images before Decode.
-// The callback must finish using the pixels before it returns. Media Worker
+// The callback must finish using the pixels before it returns. FFmpeg Worker
 // calls happen outside this slot; their small JPEG results enter it here.
 func withDecodedImage(ctx context.Context, r io.ReadSeeker, use func(image.Image) error) error {
 	if err := imageDecodeSlot.Acquire(ctx, 1); err != nil {

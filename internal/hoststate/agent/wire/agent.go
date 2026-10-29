@@ -187,6 +187,19 @@ type systemDocument struct {
 	Architecture    string                  `json:"architecture"`
 	UptimeSeconds   uint64                  `json:"uptimeSeconds"`
 	Health          hoststate.Health        `json:"health"`
+	Storage         *StorageUsageDocument   `json:"storage,omitempty"`
+}
+
+type StorageUsageDocument struct {
+	TotalBytes     uint64 `json:"totalBytes"`
+	AvailableBytes uint64 `json:"availableBytes"`
+}
+
+func storageFromDomain(usage *hoststate.StorageUsage) *StorageUsageDocument {
+	if usage == nil {
+		return nil
+	}
+	return &StorageUsageDocument{TotalBytes: usage.TotalBytes, AvailableBytes: usage.AvailableBytes}
 }
 
 type operatingSystemDocument struct {
@@ -264,6 +277,7 @@ func DocumentFromDomain(state hoststate.State) StateDocument {
 			Architecture:  state.System.Architecture,
 			UptimeSeconds: state.System.UptimeSeconds,
 			Health:        state.System.Health,
+			Storage:       storageFromDomain(state.System.Storage),
 		},
 		Disks:           disks,
 		DataVolume:      dataVolume,
@@ -280,6 +294,13 @@ func usageDocuments(usage []hoststate.ProfileUsage) []profileUsageDocument {
 }
 
 func (document StateDocument) ToDomain() (hoststate.State, error) {
+	var storage *hoststate.StorageUsage
+	if usage := document.System.Storage; usage != nil {
+		if usage.TotalBytes == 0 || usage.AvailableBytes > usage.TotalBytes {
+			return hoststate.State{}, errors.New("invalid system storage usage")
+		}
+		storage = &hoststate.StorageUsage{TotalBytes: usage.TotalBytes, AvailableBytes: usage.AvailableBytes}
+	}
 	observedAt, err := time.Parse(time.RFC3339, document.ObservedAt)
 	if err != nil {
 		return hoststate.State{}, errors.New("invalid observed time")
@@ -380,6 +401,7 @@ func (document StateDocument) ToDomain() (hoststate.State, error) {
 			Architecture:  document.System.Architecture,
 			UptimeSeconds: document.System.UptimeSeconds,
 			Health:        document.System.Health,
+			Storage:       storage,
 		},
 		Disks:           disks,
 		DataVolume:      dataVolume,

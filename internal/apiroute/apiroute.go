@@ -22,9 +22,11 @@ import (
 type Posture int
 
 const (
+	// Unset is invalid: every route must explicitly declare its posture.
+	Unset Posture = iota
 	// Public routes need no session: the health check, setting up the
 	// device, signing in, and what the local screen's sign-in page reads.
-	Public Posture = iota
+	Public
 	// Session routes need a signed-in user. A route with a method only
 	// reads; a route mounted for every method needs the CSRF token for
 	// anything but GET and HEAD.

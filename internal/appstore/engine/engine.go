@@ -77,6 +77,14 @@ type RuntimeInfo struct {
 }
 
 type Inspector interface {
+	// CleanupImages inspects this project's containers and saved immutable
+	// image IDs before any container is removed; mutable tags are rejected.
+	CleanupImages(ctx context.Context, project string, references []string) ([]string, error)
+	RemoveProjectContainers(ctx context.Context, project string) error
+	RemoveUnusedImages(ctx context.Context, images []string) error
+	// CheckStorage refuses installs when the system state or Docker storage
+	// filesystem is below the installation reserve, or cannot be observed.
+	CheckStorage(ctx context.Context) error
 	Containers(ctx context.Context) ([]ContainerInfo, error)
 	// AddressPools are the daemon's default-address-pools; empty when Docker
 	// uses its built-in pools.
@@ -117,24 +125,27 @@ type Store struct {
 	// secretsMu serialises generating and storing app secrets.
 	secretsMu sync.Mutex
 
-	mu     sync.Mutex
-	active string
+	mu       sync.Mutex
+	active   string
+	jobEpoch uint64
 	// cancel ends the context of the active job; stopped refuses new jobs.
-	cancel  context.CancelCauseFunc
-	stopped bool
-	jobs    map[string]*appstore.Job
-	wait    sync.WaitGroup
+	cancel       context.CancelCauseFunc
+	stopped      bool
+	jobs         map[string]*appstore.Job
+	preparations map[string]*installPreparation
+	wait         sync.WaitGroup
 }
 
 func New(entries []appstore.Entry, policy appstore.Policy, stateDir string, docker Inspector, runner Runner) *Store {
 	store := &Store{
-		entries:  make(map[string]appstore.Entry, len(entries)),
-		policy:   policy,
-		stateDir: stateDir,
-		docker:   docker,
-		runner:   runner,
-		now:      time.Now,
-		jobs:     map[string]*appstore.Job{},
+		entries:      make(map[string]appstore.Entry, len(entries)),
+		policy:       policy,
+		stateDir:     stateDir,
+		docker:       docker,
+		runner:       runner,
+		now:          time.Now,
+		jobs:         map[string]*appstore.Job{},
+		preparations: map[string]*installPreparation{},
 
 		startupWindow: defaultStartupWindow,
 		startupPoll:   defaultStartupPoll,
@@ -191,6 +202,16 @@ func (s *Store) Apps(ctx context.Context) ([]appstore.AppStatus, error) {
 				status.Credentials = appstore.Credentials(id, secrets)
 			}
 		}
+		if s.jobs[id] != nil && s.jobs[id].State == appstore.JobFailed {
+			pending, err := s.hasImages(id)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+			}
+			if pending {
+				status.State = appstore.StateFailed
+				status.Credentials = nil
+			}
+		}
 		if job := s.jobs[id]; job != nil {
 			copied := copyJob(job)
 			status.Job = &copied
@@ -217,6 +238,9 @@ func (s *Store) Plan(ctx context.Context, id string, identity appstore.Identity)
 	entry, ok := s.entries[id]
 	if !ok {
 		return appstore.Plan{}, appstore.ErrNotFound
+	}
+	if err := s.docker.CheckStorage(ctx); err != nil {
+		return appstore.Plan{}, err
 	}
 	secrets, err := s.appSecrets(id)
 	if err != nil {
@@ -247,6 +271,10 @@ func (s *Store) Plan(ctx context.Context, id string, identity appstore.Identity)
 }
 
 func (s *Store) Install(ctx context.Context, id, digest string, identity appstore.Identity) (appstore.Job, error) {
+	return s.install(ctx, id, digest, identity, nil)
+}
+
+func (s *Store) install(ctx context.Context, id, digest string, identity appstore.Identity, prepare func(context.Context) error) (appstore.Job, error) {
 	plan, err := s.Plan(ctx, id, identity)
 	if err != nil {
 		return appstore.Job{}, err
@@ -256,26 +284,37 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 	if plan.Digest != digest {
 		return appstore.Job{}, appstore.ErrPlanChanged
 	}
-	containers, err := s.docker.Containers(ctx)
-	if err != nil {
-		return appstore.Job{}, fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+	var leftovers bool
+	check := func(previous *appstore.Job) error {
+		containers, err := s.docker.Containers(ctx)
+		if err != nil {
+			return fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+		}
+		if err := conflicts(id, plan, containers, failedInstall(previous)); err != nil {
+			return err
+		}
+		leftovers = slices.ContainsFunc(containers, func(container ContainerInfo) bool { return container.AppID == id })
+		pending, err := s.hasImages(id)
+		if err != nil {
+			return fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+		}
+		leftovers = leftovers || pending
+		return nil
 	}
-	s.mu.Lock()
-	replace := failedInstall(s.jobs[id])
-	s.mu.Unlock()
-	if err := conflicts(id, plan, containers, replace); err != nil {
-		return appstore.Job{}, err
-	}
-	leftovers := slices.ContainsFunc(containers, func(container ContainerInfo) bool { return container.AppID == id })
 
 	directory := filepath.Join(s.stateDir, "apps", id)
 	composeFile := filepath.Join(directory, "docker-compose.yml")
 	compose := []string{"compose", "--progress", "plain", "-p", plan.Project, "-f", composeFile}
-	return s.start(id, appstore.JobInstall, installTimeout, func(ctx context.Context, output io.Writer) error {
+	return s.startChecked(id, appstore.JobInstall, installTimeout, check, func(ctx context.Context, output io.Writer) error {
+		if prepare != nil {
+			if err := prepare(ctx); err != nil {
+				return err
+			}
+		}
 		// What a failed install left behind goes first, so that the checks
 		// below see only this install's containers.
 		if leftovers {
-			if err := s.runner.Run(ctx, takeDown(id), output); err != nil {
+			if err := s.cleanup(ctx, id, takeDown(id), output); err != nil {
 				return fmt.Errorf("remove the containers of the failed install: %w", err)
 			}
 		}
@@ -284,6 +323,12 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 		}
 		//nolint:gosec // G306: as its directory, readable by the agent's own group only; app secrets are kept apart.
 		if err := os.WriteFile(composeFile, plan.Compose, 0o640); err != nil {
+			return err
+		}
+		// Mark cleanup as pending without granting deletion authority to
+		// mutable tags. Recovery discovers IDs from actual containers; a
+		// download that never created a container has no proven ownership.
+		if err := s.saveImages(id, nil); err != nil {
 			return err
 		}
 		// Compose can fail after creating some of the containers, for
@@ -306,6 +351,18 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 			failure = s.startupProblem(ctx, plan.Project)
 		}
 		if failure == nil {
+			// Tags can be moved by later pulls or administrators. Remember the
+			// images that actually ran, so uninstall cannot follow a changed tag.
+			images, err := s.docker.CleanupImages(ctx, plan.Project, nil)
+			if err == nil {
+				err = s.saveImages(id, images)
+			}
+			if err == nil {
+				return nil
+			}
+			// The app passed all runtime checks. Keep it running; the pending
+			// record survives and cleanup rediscovers IDs from its containers.
+			_, _ = fmt.Fprintf(output, "app is running; image bookkeeping deferred until cleanup: %v\n", err)
 			return nil
 		}
 		if errors.Is(context.Cause(ctx), errStopping) {
@@ -319,7 +376,7 @@ func (s *Store) Install(ctx context.Context, id, digest string, identity appstor
 		// install was cancelled or ran out of time.
 		rollback, cancel := context.WithTimeout(context.WithoutCancel(ctx), uninstallTimeout)
 		defer cancel()
-		if err := s.runner.Run(rollback, append(compose, "down", "--remove-orphans"), output); err != nil {
+		if err := s.cleanup(rollback, id, append(compose, "down", "--remove-orphans"), output); err != nil {
 			return fmt.Errorf("%w; the install could not be rolled back: %v", failure, err)
 		}
 		switch {
@@ -512,10 +569,16 @@ func (s *Store) Uninstall(ctx context.Context, id string) (appstore.Job, error) 
 		installed = installed || container.AppID == id
 	}
 	if !installed {
-		return appstore.Job{}, appstore.ErrNotInstalled
+		pending, err := s.hasImages(id)
+		if err != nil {
+			return appstore.Job{}, fmt.Errorf("%w: %v", appstore.ErrUnavailable, err)
+		}
+		if !pending {
+			return appstore.Job{}, appstore.ErrNotInstalled
+		}
 	}
 	return s.start(id, appstore.JobUninstall, uninstallTimeout, func(ctx context.Context, output io.Writer) error {
-		return s.runner.Run(ctx, takeDown(id), output)
+		return s.cleanup(ctx, id, takeDown(id), output)
 	})
 }
 
@@ -529,6 +592,12 @@ func takeDown(id string) []string {
 // output, of which the job keeps the tail. The job is recorded before it
 // runs, so that a restart of the agent finds it (Recover).
 func (s *Store) start(id string, action appstore.JobAction, timeout time.Duration, run func(context.Context, io.Writer) error) (appstore.Job, error) {
+	return s.startChecked(id, action, timeout, nil, run)
+}
+
+// Docker inspection runs outside the job lock. An intervening job invalidates
+// the snapshot even if it has already finished before inspection returns.
+func (s *Store) startChecked(id string, action appstore.JobAction, timeout time.Duration, check func(*appstore.Job) error, run func(context.Context, io.Writer) error) (appstore.Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopped {
@@ -537,12 +606,33 @@ func (s *Store) start(id string, action appstore.JobAction, timeout time.Duratio
 	if s.active != "" {
 		return appstore.Job{}, appstore.ErrBusy
 	}
+	if check != nil {
+		epoch := s.jobEpoch
+		var previous *appstore.Job
+		if existing := s.jobs[id]; existing != nil {
+			copied := copyJob(existing)
+			previous = &copied
+		}
+		s.mu.Unlock()
+		err := check(previous)
+		s.mu.Lock()
+		if s.stopped {
+			return appstore.Job{}, appstore.ErrUnavailable
+		}
+		if s.active != "" || s.jobEpoch != epoch {
+			return appstore.Job{}, appstore.ErrBusy
+		}
+		if err != nil {
+			return appstore.Job{}, err
+		}
+	}
 	job := &appstore.Job{AppID: id, Action: action, State: appstore.JobRunning, StartedAt: s.now().UTC()}
 	if err := s.saveJob(job); err != nil {
 		return appstore.Job{}, fmt.Errorf("%w: record the job: %v", appstore.ErrUnavailable, err)
 	}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	s.active, s.cancel = id, cancel
+	s.jobEpoch++
 	s.jobs[id] = job
 
 	s.wait.Go(func() {

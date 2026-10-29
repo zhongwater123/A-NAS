@@ -136,12 +136,15 @@ func (h *productHandler) register(routes []apiroute.Route) {
 	})
 }
 
-// checkPosture refuses a route whose posture contradicts its method: a read
-// is never a Mutation, a change never only a Session, and a mounted API is a
-// Session or Admin one, whose writes then need the CSRF token. A mounted
-// route lists the operations it serves.
+// checkPosture refuses a route whose posture is missing or contradicts its
+// method: a route left at the zero posture is not public by accident (#270),
+// a read is never a Mutation, a change never only a Session, and a mounted
+// API is a Session or Admin one, whose writes then need the CSRF token. A
+// mounted route lists the operations it serves.
 func checkPosture(route apiroute.Route) error {
 	switch {
+	case route.Posture < apiroute.Public || route.Posture > apiroute.Admin:
+		return fmt.Errorf("route %s %s has no valid posture (%d)", route.Method, route.Pattern, route.Posture)
 	case route.Method == "" && (route.Posture == apiroute.Public || route.Posture == apiroute.Mutation):
 		return fmt.Errorf("route %s is mounted for every method as %s; mount it as session or admin", route.Pattern, route.Posture)
 	case route.Method == "" && len(route.Endpoints) == 0:
@@ -186,7 +189,7 @@ func (h *productHandler) guard(route apiroute.Route) http.HandlerFunc {
 				return
 			}
 		}
-		if route.Posture == apiroute.Admin && session.User.Role != accounts.RoleAdmin {
+		if route.Posture == apiroute.Admin && !session.User.ActiveAdministrator() {
 			httpjson.WriteError(w, http.StatusForbidden, "forbidden", "administrator permission is required")
 			return
 		}

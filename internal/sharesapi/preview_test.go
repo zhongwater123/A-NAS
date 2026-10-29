@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/shares"
 )
 
@@ -28,14 +28,14 @@ func (heicBackend) Capture(ctx context.Context, u shares.User, ids []string, vis
 }
 
 type imageWorker struct {
-	mediaworker.Worker
+	ffmpegworker.Worker
 	image func(context.Context, *os.File, int) ([]byte, error)
 }
 
 func (w imageWorker) Image(ctx context.Context, file *os.File, size int) ([]byte, error) {
 	return w.image(ctx, file, size)
 }
-func previewFixture(t *testing.T, worker mediaworker.Worker) (*shares.Store, http.Handler, shares.Share) {
+func previewFixture(t *testing.T, worker ffmpegworker.Worker) (*shares.Store, http.Handler, shares.Share) {
 	dir := t.TempDir()
 	s, err := shares.Open(filepath.Join(dir, "db"), filepath.Join(dir, "content"), shares.Options{Backend: heicBackend{}, Active: func(context.Context, string) (bool, error) { return true, nil }})
 	if err != nil {

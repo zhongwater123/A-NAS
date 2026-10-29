@@ -13,26 +13,26 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/mediaworker"
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
 
-type motionDecoder struct{ probe mediaworker.Probe }
+type motionDecoder struct{ probe ffmpegworker.Probe }
 
-func (m motionDecoder) Probe(context.Context, *os.File) (mediaworker.Probe, error) {
+func (m motionDecoder) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
 	return m.probe, nil
 }
 func (m motionDecoder) Image(context.Context, *os.File, int) ([]byte, error) {
-	return nil, mediaworker.ErrUnreadable
+	return nil, ffmpegworker.ErrUnreadable
 }
 func (m motionDecoder) Frame(context.Context, *os.File, float64, int) ([]byte, error) {
-	return nil, mediaworker.ErrUnreadable
+	return nil, ffmpegworker.ErrUnreadable
 }
-func (m motionDecoder) Stream(context.Context, *os.File, mediaworker.StreamRequest) (io.ReadCloser, error) {
+func (m motionDecoder) Stream(context.Context, *os.File, ffmpegworker.StreamRequest) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader([]byte("compatible movie"))), nil
 }
-func motionProbe() mediaworker.Probe {
-	return mediaworker.Probe{Format: mediaworker.ProbeFormat{Name: "mov,mp4", Duration: 3}, Streams: []mediaworker.ProbeStream{{Type: "video", Width: 320, Height: 240}}}
+func motionProbe() ffmpegworker.Probe {
+	return ffmpegworker.Probe{Format: ffmpegworker.ProbeFormat{Name: "mov,mp4", Duration: 3}, Streams: []ffmpegworker.ProbeStream{{Type: "video", Width: 320, Height: 240}}}
 }
 func movieBytes() []byte {
 	b := make([]byte, 64)
@@ -40,7 +40,7 @@ func movieBytes() []byte {
 	copy(b[4:], "ftypqt  ")
 	return b
 }
-func motionService(t *testing.T, probe mediaworker.Probe) (*photos.Service, string) {
+func motionService(t *testing.T, probe ffmpegworker.Probe) (*photos.Service, string) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "photos")
 	s, err := photos.Open(root, photos.Options{Media: motionDecoder{probe}, DisableCapacityReserve: true})

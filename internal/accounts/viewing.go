@@ -188,7 +188,7 @@ func (s *Service) recordViewingStarted(ctx context.Context, tx *sql.Tx, actor Us
 // prepareViewing checks what every Administrative Viewing grant requires and
 // returns the trimmed reason and the owner's private space.
 func (s *Service) prepareViewing(ctx context.Context, actor User, ownerUserID, password, reason string) (string, string, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return "", "", ErrForbidden
 	}
 	reason = strings.TrimSpace(reason)
@@ -213,7 +213,7 @@ func (s *Service) prepareViewing(ctx context.Context, actor User, ownerUserID, p
 // LibraryViewings lists the actor's unexpired, unended grants to view
 // members' private photo libraries.
 func (s *Service) LibraryViewings(ctx context.Context, actor User) ([]LibraryViewing, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return nil, nil
 	}
 	return sessiondir.LibraryViewings(ctx, s.store.db, actor.ID, s.now().UTC())
@@ -221,7 +221,7 @@ func (s *Service) LibraryViewings(ctx context.Context, actor User) ([]LibraryVie
 
 // EndViewing revokes an administrator's viewing grant before it expires.
 func (s *Service) EndViewing(ctx context.Context, actor User, grantID string) error {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return ErrForbidden
 	}
 	var spaceID, ownerUserID string
@@ -256,7 +256,7 @@ WHERE id = ? AND admin_user_id = ? AND ended_at IS NULL`, grantID, actor.ID).Sca
 // activeGrant returns the actor's unexpired, unended grant on spaceID, or a
 // zero grant.
 func (s *Service) activeGrant(ctx context.Context, actor User, spaceID string) (ViewingGrant, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return ViewingGrant{}, nil
 	}
 	var grant ViewingGrant
@@ -278,7 +278,7 @@ ORDER BY expires_at DESC LIMIT 1`, actor.ID, spaceID, formatTime(s.now().UTC()))
 
 // viewedSpaces lists the private spaces the actor currently views.
 func (s *Service) viewedSpaces(ctx context.Context, actor User) ([]Space, error) {
-	if actor.Role != RoleAdmin || actor.Status != UserStatusActive {
+	if !actor.ActiveAdministrator() {
 		return nil, nil
 	}
 	rows, err := s.store.db.QueryContext(ctx, `SELECT sp.id, sp.kind, sp.name, COALESCE(sp.owner_user_id, ''), sp.created_at, g.id, g.expires_at

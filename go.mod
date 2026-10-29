@@ -14,6 +14,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/disintegration/imaging v1.6.2
+	github.com/docker/go-connections v0.8.2
 	github.com/evanoberholster/imagemeta v1.1.0
 	github.com/getkin/kin-openapi v0.152.0
 	github.com/go-audio/wav v1.1.0
@@ -26,6 +27,7 @@ require (
 	github.com/mewkiz/flac v1.0.14
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.2
+	github.com/opencontainers/go-digest v1.0.0
 	github.com/prometheus/procfs v0.23.0
 	github.com/qdrant/go-client v1.20.1
 	github.com/razsteinmetz/go-ptn v1.0.0
@@ -46,7 +48,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/go-connections v0.8.2 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/go-audio/audio v1.0.0 // indirect
@@ -64,7 +65,6 @@ require (
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/oasdiff/yaml v0.1.1 // indirect
 	github.com/oasdiff/yaml3 v0.0.14 // indirect
-	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
