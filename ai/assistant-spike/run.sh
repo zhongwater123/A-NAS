@@ -20,6 +20,8 @@
 # Read-only photos (#113), with SPIKE_PHOTOS=1 given to sandbox: photos-socket.sh,
 # "scenarios calls-photos.txt", photos-vision.sh; with a real model, "scenarios
 # scenarios-photos.txt" and photos-vision.sh.
+# SPIKE_PHOTO_MODELS=~/A-NAS-models (and SPIKE_PHOTO_IMPORT=<photo dir>) with SPIKE_PHOTOS=1
+# searches with the real EmbeddingGemma 2; the photo tests expect the stand-in.
 # SPIKE_CHANNEL=api_server with sandbox installs the earlier API Server channel instead
 # (api-server-channel/), for api-basic.sh, api-tools.sh, api-after.sh, api-managed.sh,
 # boundary.sh and the UI prototype; scenarios works on either channel.
@@ -91,7 +93,16 @@ case "${1:-}" in
       mkdir -p "$bin"
       (cd "$here/../.." && CGO_ENABLED=1 go build -trimpath -tags osusergo,netgo,sqlite_omit_load_extension \
         -ldflags '-linkmode external -extldflags -static' -o "$bin/photos-spike" ./ai/assistant-spike/photos-spike)
-      key_mount+=(-v "$bin:/spike-photos:ro")
+      key_mount+=(-v "$bin:/spike-photos:ro" -v "$here/..:/spike-ai:ro")
+      # SPIKE_PHOTO_MODELS=<dir>, laid out like the development machines' model directory,
+      # gives the photo service the real AI Worker with EmbeddingGemma 2 instead of the colour
+      # stand-in; SPIKE_PHOTO_IMPORT=<dir> then also uploads that directory's photos for alice.
+      if [[ -n "${SPIKE_PHOTO_MODELS:-}" ]]; then
+        mkdir -p "$work/pip-cache"
+        key_mount+=(-v "$(cd "$SPIKE_PHOTO_MODELS" && pwd):/spike-models:ro"
+          -v "$here/../../deploy/models:/spike-manifests:ro" -v "$work/pip-cache:/root/.cache/pip")
+        [[ -z "${SPIKE_PHOTO_IMPORT:-}" ]] || key_mount+=(-v "$(cd "$SPIKE_PHOTO_IMPORT" && pwd):/spike-import:ro")
+      fi
     fi
     docker rm -f "$name" >/dev/null 2>&1 || true
     docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \

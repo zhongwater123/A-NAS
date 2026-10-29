@@ -6,7 +6,10 @@
 //	photos-spike STATE_DIR PHOTO_SOCKET ASSISTANT_SOCKET
 //
 // It seeds the library through the session socket, waits until every photo
-// has its vector, prints "photos-ready" and keeps serving. Accounts come from
+// has its vector, prints "photos-ready" and keeps serving. With
+// PHOTOS_SPIKE_AI_SOCKET it asks the real AI Worker there instead of the
+// stand-in; with PHOTOS_SPIKE_IMPORT it then also uploads that directory's
+// JPEG and PNG photos into alice's library, once. Accounts come from
 // the container's passwd and group files: a member of a-nas-users is
 // "user:<name>", where A-NAS asks the Host Agent.
 package main
@@ -38,6 +41,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/aiworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
@@ -192,6 +196,10 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var ai photos.Embedder = colours{}
+	if socket := os.Getenv("PHOTOS_SPIKE_AI_SOCKET"); socket != "" {
+		ai = aiworker.Client{SocketPath: socket}
+	}
 	done := make(chan error, 1)
 	go func() {
 		done <- photoservice.Run(ctx, photoservice.Config{
@@ -200,15 +208,25 @@ func main() {
 			// The spike's store is a plain directory, not the Btrfs data volume.
 			CheckStore: func(string) error { return nil },
 			Photos:     photos.Options{DisableCapacityReserve: true},
-			AI:         colours{}, AIQuietPeriod: 500 * time.Millisecond,
+			AI:         ai, AIQuietPeriod: 500 * time.Millisecond,
 			AIPressure: func(string) (float64, error) { return 0, nil },
 		})
 	}()
-	if err := seed(ctx, photoSocket); err != nil {
+	a := api{client: &http.Client{Timeout: 2 * time.Minute, Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", photoSocket)
+		},
+	}}}
+	if err := seed(ctx, a); err != nil {
 		logger.Error("seeding failed", "error", err)
 		os.Exit(1)
 	}
 	fmt.Println("photos-ready")
+	if dir := os.Getenv("PHOTOS_SPIKE_IMPORT"); dir != "" {
+		if err := importDir(ctx, a, filepath.Join(state, "imported"), dir); err != nil {
+			logger.Error("import failed", "error", err)
+		}
+	}
 	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
 		logger.Error("photo service stopped", "error", err)
 		os.Exit(1)
@@ -251,14 +269,72 @@ func (a api) jsonCall(ctx context.Context, member, method, path string, body, ou
 	return a.call(ctx, member, method, path, bytes.NewReader(encoded), "application/json", out)
 }
 
+// upload adds one file to a library.
+func (a api) upload(ctx context.Context, member, library, name string, content io.Reader) (photos.Asset, error) {
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	part, err := form.CreateFormFile("file", name)
+	if err != nil {
+		return photos.Asset{}, err
+	}
+	if _, err := io.Copy(part, content); err != nil {
+		return photos.Asset{}, err
+	}
+	if err := form.Close(); err != nil {
+		return photos.Asset{}, err
+	}
+	var asset photos.Asset
+	err = a.call(ctx, member, http.MethodPost, "/libraries/"+library+"/uploads", &body, form.FormDataContentType(), &asset)
+	return asset, err
+}
+
+// importDir uploads dir's photos into alice's private library and then
+// creates marker, so a restarted service does not upload them again. A file
+// the library refuses (too large, say) is logged and skipped; the vectors
+// follow in the background.
+func importDir(ctx context.Context, a api, marker, dir string) error {
+	if _, err := os.Stat(marker); err == nil {
+		return nil
+	}
+	var list struct{ Items []photos.Library }
+	if err := a.call(ctx, "alice", http.MethodGet, "/libraries", nil, "", &list); err != nil {
+		return err
+	}
+	i := slices.IndexFunc(list.Items, func(lib photos.Library) bool { return lib.Kind == photos.LibraryKindPrivate })
+	if i < 0 {
+		return errors.New("alice has no private library")
+	}
+	uploaded, refused := 0, 0
+	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		if !slices.Contains([]string{".jpg", ".jpeg", ".png"}, strings.ToLower(filepath.Ext(path))) {
+			return nil
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		if _, err := a.upload(ctx, "alice", list.Items[i].ID, entry.Name(), file); err != nil {
+			refused++
+			slog.Warn("upload refused", "file", path, "error", err)
+			return nil
+		}
+		uploaded++
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("photos-imported %d (%d refused)\n", uploaded, refused)
+	return os.WriteFile(marker, nil, 0o600)
+}
+
 // seed fills an empty library and waits for every vector; a library seeded
 // before is left as it is.
-func seed(ctx context.Context, socket string) error {
-	a := api{client: &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-		},
-	}}}
+func seed(ctx context.Context, a api) error {
 	libraries := map[string]map[string]string{}
 	for _, member := range []string{"alice", "bob"} {
 		var list struct{ Items []photos.Library }
@@ -284,21 +360,9 @@ func seed(ctx context.Context, socket string) error {
 	if len(existing.Items) == 0 {
 		albums := map[string]string{}
 		for _, f := range fixtures {
-			var body bytes.Buffer
-			form := multipart.NewWriter(&body)
-			part, err := form.CreateFormFile("file", f.name)
-			if err != nil {
-				return err
-			}
-			if _, err := part.Write(photo(concepts[f.shows].colour, f.taken)); err != nil {
-				return err
-			}
-			if err := form.Close(); err != nil {
-				return err
-			}
-			var asset photos.Asset
 			library := libraries[f.owner][f.library]
-			if err := a.call(ctx, f.owner, http.MethodPost, "/libraries/"+library+"/uploads", &body, form.FormDataContentType(), &asset); err != nil {
+			asset, err := a.upload(ctx, f.owner, library, f.name, bytes.NewReader(photo(concepts[f.shows].colour, f.taken)))
+			if err != nil {
 				return err
 			}
 			for _, tag := range f.tags {

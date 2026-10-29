@@ -21,6 +21,8 @@ import io
 import json
 import os
 import socket
+import sys
+import tempfile
 import urllib.parse
 
 from mcp.server import MCPServer
@@ -270,6 +272,63 @@ def look_at_photo(photo_id: str):
         TextContent(type="text", text=f"照片 {photo_id} 的画面如下；用 vision_analyze 看它。"),
         ImageContent(type="image", data=base64.b64encode(data).decode(), mime_type="image/jpeg"),
     ])
+
+
+# Photo-to-video (docs/specs/photo-to-video.md) with the demo's renderer, which run.sh
+# mounts at /spike-ai with SPIKE_PHOTOS; without it (the trial bundle) there is no such tool.
+sys.path.append("/spike-ai")
+try:
+    from photo_video_demo import render as slideshow
+except ImportError:
+    slideshow = None
+VIDEOS = "/nas/助手/视频"
+SLIDESHOW_MAX = 60
+SECONDS_MIN, SECONDS_MAX = 1, 10
+
+
+def slideshow_photos(photo_ids: list[str]) -> None:
+    """Refuses the whole call when any ID is missing, out of reach or a video."""
+    problems: dict[str, list[str]] = {}
+    for photo_id in dict.fromkeys(photo_ids):
+        try:
+            asset = photos(f"/assets/{urllib.parse.quote(photo_id, safe='')}")
+        except PhotoError:
+            problems.setdefault("不存在或看不到", []).append(photo_id)
+            continue
+        if not asset.get("mediaType", "").startswith("image/"):
+            problems.setdefault("是视频，只能拼接照片", []).append(photo_id)
+    if problems:
+        raise PhotoError("；".join(f"{', '.join(ids)} {reason}" for reason, ids in problems.items()))
+
+
+if slideshow:
+    # Not read-only: it adds a file, though only a new one in the assistant's own folder.
+    @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
+                 structured_output=False, description=(
+        "把照片按给出的顺序拼成一段 1920×1080 的无声 MP4，存进助手目录的“视频”文件夹，返回文件路径与时长。"
+        f"photo_ids：照片的 id（search_photos 等的结果），1–{SLIDESHOW_MAX} 个，按出现顺序；"
+        f"seconds_per_photo：每张的秒数，{SECONDS_MIN}–{SECONDS_MAX}，可带小数，默认 3；总时长 = 张数 × seconds_per_photo，"
+        "要凑出指定总时长时据此选张数与每张秒数。crossfade：相邻两张淡入淡出，默认否，不改变总时长。"
+        "有视频、不存在或看不到的 id 时整次拒绝。成片只在助手目录里；成员要放进个人空间时，再用 submit_changes 的 copy 提交。"))
+    def make_slideshow(photo_ids: list[str], seconds_per_photo: float = 3, crossfade: bool = False):
+        if not 1 <= len(photo_ids) <= SLIDESHOW_MAX:
+            return failed(PhotoError(f"photo_ids 要有 1–{SLIDESHOW_MAX} 个，收到 {len(photo_ids)} 个"))
+        if isinstance(seconds_per_photo, bool) or not SECONDS_MIN <= seconds_per_photo <= SECONDS_MAX:
+            return failed(PhotoError(f"seconds_per_photo 要在 {SECONDS_MIN}–{SECONDS_MAX} 秒之间，收到 {seconds_per_photo}"))
+        try:
+            slideshow_photos(photo_ids)
+            with tempfile.TemporaryDirectory(prefix="slideshow-") as work:
+                images = []
+                for i, photo_id in enumerate(photo_ids):
+                    images.append(os.path.join(work, f"{i:03d}.jpg"))
+                    with open(images[-1], "wb") as file:
+                        file.write(photo_view(photo_id))
+                path = slideshow.render(images, seconds_per_photo, crossfade, VIDEOS)
+        except PhotoError as error:
+            return failed(error)
+        except slideshow.RenderError as error:
+            return CallToolResult(content=[TextContent(type="text", text=f"拼接失败：{error}")], is_error=True)
+        return result({"path": path, "seconds": len(photo_ids) * seconds_per_photo, "photos": len(photo_ids)})
 
 
 if os.environ.get("ANAS_SPIKE_PHOTO_PIXELS"):

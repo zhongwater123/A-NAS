@@ -43,6 +43,37 @@ if [[ -x /spike-photos/photos-spike ]]; then
   # copies bound into running sandboxes keep working.
   useradd -r -u 31000 -U -M -d /nonexistent -s /usr/sbin/nologin a-nas-photos
   install -d -o a-nas-photos -g a-nas-photos -m 0700 /var/lib/photos-spike /run/a-nas-photos /run/a-nas-photos-assistant
+  env=()
+  if [[ -d /spike-models ]]; then
+    # The real AI Worker under the photo service's identity, started by its socket as in
+    # A-NAS, with the runtime pinned as in the photo-to-video demo (ai/photo_video_demo/stack.sh).
+    lock=/spike-ai/requirements.lock
+    [[ $(uname -m) == aarch64 ]] && lock=/spike-ai/photo_video_demo/ai-runtime-arm64.lock
+    apt-get update -qq && apt-get install -y -qq --no-install-recommends python3-venv libegl1 libgles2 >/dev/null
+    python3 -m venv /opt/photos-spike-ai
+    /opt/photos-spike-ai/bin/pip install --quiet --resume-retries 20 --timeout 60 --no-deps --require-hashes \
+      --only-binary=:all: -r "$lock"
+    install -d -o a-nas-photos -g a-nas-photos -m 0700 /var/lib/photos-spike-ai
+    cat >/etc/systemd/system/photos-spike-ai.socket <<'UNIT'
+[Socket]
+ListenStream=/run/photos-spike-ai/ai.sock
+SocketUser=a-nas-photos
+SocketGroup=a-nas-photos
+SocketMode=0600
+UNIT
+    cat >/etc/systemd/system/photos-spike-ai.service <<'UNIT'
+[Service]
+User=a-nas-photos
+Group=a-nas-photos
+WorkingDirectory=/spike-ai
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/photos-spike-ai/bin/python -m anas_ai.worker --cache-dir /var/lib/photos-spike-ai --model /spike-models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm --manifest /spike-manifests/embeddinggemma-2-740m.json
+UNIT
+    systemctl daemon-reload
+    systemctl start photos-spike-ai.socket
+    env=(Environment=PHOTOS_SPIKE_AI_SOCKET=/run/photos-spike-ai/ai.sock)
+    if [[ -d /spike-import ]]; then env+=(Environment=PHOTOS_SPIKE_IMPORT=/spike-import); fi
+  fi
   cat >/etc/systemd/system/photos-spike-assistant.socket <<'UNIT'
 [Socket]
 ListenStream=/run/a-nas-photos-assistant/assistant.sock
@@ -62,6 +93,7 @@ Group=a-nas-photos
 Sockets=photos-spike-assistant.socket
 ExecStart=/spike-photos/photos-spike /var/lib/photos-spike /run/a-nas-photos/photos.sock /run/a-nas-photos-assistant/assistant.sock
 UNIT
+  printf '%s\n' "${env[@]}" >>/etc/systemd/system/photos-spike.service
   systemctl daemon-reload
   systemctl start photos-spike-assistant.socket photos-spike.service
   for _ in $(seq 1 240); do

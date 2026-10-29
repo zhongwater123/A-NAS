@@ -1,7 +1,7 @@
 # 照片剪辑成视频
 
 状态：draft（第一阶段的 MCP 演示已在开发机实现，用法见[运行演示](#运行演示)；[#283](https://github.com/zhongwater123/A-NAS/issues/283)）
-更新时间：2026-10-27
+更新时间：2026-10-29
 
 ## 目标
 
@@ -95,27 +95,37 @@
 - **FFmpeg 缺失或拼接失败**：返回失败原因；未写完的输出文件删除。
 - **输出位置**：只写入配置的输出目录，文件名由服务器生成，不覆盖已有文件。
 - **隐私**：Claude Code 使用云端模型，工具返回的名称、拍摄时间、标签与相册名会发给模型服务商；照片画面只交给本机的 FFmpeg，不发给模型。演示只用可丢弃的测试照片，不连接保存真实家庭数据的设备，与 [AI 助手](ai-assistant.md)对云端模型的限制一致。
-- **Fake 预览栈**：默认没有本地 AI，搜索只按名称与用户标签匹配。演示用的 [`stack.sh`](../../ai/photo_video_demo/stack.sh) 另起 `python3 -m anas_ai.worker --fake`，并用 `ANAS_AI_SOCKET` 接给产品服务；相册在无人使用 5 分钟后才计算向量，在此之前搜索仍只按名称匹配。Fake Provider 的向量由输入哈希得到，检索结果与查询内容无关，只能用来验证链路是否接通，检索效果要在带真实模型的环境中看。HEIC 照片的视图还需要媒体工具，见 [fake-preview 技能](../../.claude/skills/fake-preview/SKILL.md)。
+- **演示栈的 AI**：产品服务默认没有本地 AI，搜索只按名称与用户标签匹配。演示用的 [`stack.sh`](../../ai/photo_video_demo/stack.sh) 另起 AI Worker，并用 `ANAS_AI_SOCKET` 接给产品服务：默认是 Fake Provider，它的向量由输入哈希得到，检索结果与查询内容无关，只能验证链路是否接通；给出模型目录时加载真实的 EmbeddingGemma 2，检索效果才有意义。相册在无人使用 5 分钟后才计算向量，在此之前搜索仍只按名称匹配；真实模型在 `anas` 虚拟机中约每秒处理 2 张（2026-10-27，717 张约 5 分钟）。HEIC 照片的视图还需要媒体工具，见 [fake-preview 技能](../../.claude/skills/fake-preview/SKILL.md)。
 
 ## 待决定
 
-- 后续阶段的入口：把 `make_slideshow` 加进 A-NAS 的 MCP 工具，让 VNAS 直接使用。要决定拼接在哪里运行（助手沙箱内，或交给媒体 Worker）、成片写到哪里（助手目录可写，图库不可写），以及剪视频片段时怎样授权：助手身份目前看不到视频资产。
+- 后续阶段的入口：把 `make_slideshow` 加进 A-NAS 的 MCP 工具，让 VNAS 直接使用。要决定拼接在哪里运行（助手沙箱内，或交给媒体 Worker）、成片写到哪里（助手目录可写，图库不可写），以及剪视频片段时怎样授权：助手身份目前看不到视频资产。助手原型先试了一种做法（2026-10-29）：[`anas_mcp.py`](../../ai/assistant-spike/anas_mcp.py) 在沙箱内经助手套接字取照片视图，用演示的 [`render.py`](../../ai/photo_video_demo/render.py) 拼接，成片写进 `/nas/助手/视频`；工具不标只读，所以 Hermes 每次调用前都要成员同意。用 `SPIKE_PHOTO_MODELS` 启动原型沙箱时，相册服务改用真实的 EmbeddingGemma 2（[`run.sh`](../../ai/assistant-spike/run.sh)）。Claude 经这套工具检索并做出 20 秒和 15 秒（淡入淡出）的成片；要放进个人空间还需 `submit_changes` 的 `copy`，原型的更改代理不支持它，产品的执行方支持。
 - 演示代码是否随后演变为产品代码。
 - 检索效果用哪个环境验收：Experimental NAS 上的测试账号，或开发机上带真实模型的本地环境。
 
 ## 运行演示
 
-演示只在开发机上运行，不碰实验 NAS。需要 Docker、Python 3.13 与 FFmpeg（macOS 上 `brew install ffmpeg`）。`anas-api` 只能在 Linux 上编译，所以 [`stack.sh`](../../ai/photo_video_demo/stack.sh) 在一次性的 Debian 13 容器（`golang:1.27.3-trixie`）里编译并运行 Fake 产品服务和假 AI Worker，产品服务只监听本机的 `127.0.0.1:18091`。在 Mac 上容器跑在 `anas` 虚拟机中（命令前加 `DOCKER_CONTEXT=colima-anas`），见[本地环境](../development/LOCAL_ENVIRONMENT.md)的“开发机 C：macOS”一节。
+演示只在开发机上运行，不碰实验 NAS。需要 Docker、Python 3.13 与 FFmpeg（macOS 上 `brew install ffmpeg`）。`anas-api` 只能在 Linux 上编译，所以 [`stack.sh`](../../ai/photo_video_demo/stack.sh) 在一次性的 Debian 13 容器（`golang:1.27.3-trixie`）里编译并运行 Fake 产品服务和 AI Worker，产品服务只监听本机的 `127.0.0.1:18091`。在 Mac 上容器跑在 `anas` 虚拟机中（命令前加 `DOCKER_CONTEXT=colima-anas`），见[本地环境](../development/LOCAL_ENVIRONMENT.md)的“开发机 C：macOS”一节。
 
 ```bash
 export ANAS_DEMO_USER=tester ANAS_DEMO_PASSWORD=<12 个字符以上的测试密码>
+make web-build                        # anas-api 内嵌桌面，没有构建产物时拒绝启动
 ai/photo_video_demo/stack.sh start
 ai/photo_video_demo/stack.sh seed     # 测试账号、6 张照片、1 段视频、1 张已删除的照片
 python3 -m venv ~/.venvs/anas-demo
 ~/.venvs/anas-demo/bin/pip install --require-hashes -r ai/photo_video_demo/requirements.lock
 ```
 
-第一次启动要在容器里下载 Go 模块并编译，约 8 分钟；模块与编译缓存存在 Docker 卷 `anas-demo-gomod`、`anas-demo-gocache` 中，之后会快很多。`start` 会先删除旧容器，测试账号与照片随之清空，要重新 `seed`。
+用真实模型和真实照片时，`start` 前设 `ANAS_DEMO_MODELS` 为模型目录（目录结构与开发机的模型目录相同，Worker 按 [`deploy/models/embeddinggemma-2-740m.json`](../../deploy/models/embeddinggemma-2-740m.json) 核对模型），再用 `import` 代替 `seed`：
+
+```bash
+ANAS_DEMO_MODELS=~/A-NAS-models ai/photo_video_demo/stack.sh start
+ai/photo_video_demo/stack.sh import <照片目录>   # 按扩展名上传 JPEG、PNG、HEIC、MP4 与 MOV
+```
+
+Worker 的运行环境按哈希固定：x86_64 用 AI Worker 自己的 [`requirements.lock`](../../ai/requirements.lock)，arm64（Apple 芯片上的虚拟机）用演示的 [`ai-runtime-arm64.lock`](../../ai/photo_video_demo/ai-runtime-arm64.lock)，两者版本相同，后者按 `scripts/build-ai-runtime.sh --lock` 的做法在 arm64 容器中下载同版本的轮子后计算哈希。
+
+第一次启动要在容器里下载 Go 模块并编译，约 8 分钟；模块与编译缓存存在 Docker 卷 `anas-demo-gomod`、`anas-demo-gocache` 中，之后会快很多。`start` 会先删除旧容器，测试账号与照片随之清空，要重新 `seed` 或 `import`。
 
 在 Claude Code 中以 stdio 方式登记服务器（只存入本机的 Claude Code 配置，不进仓库），然后在新会话里用中文提要求：
 
