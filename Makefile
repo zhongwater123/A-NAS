@@ -177,7 +177,14 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'Environment=GOMEMLIMIT=1GiB' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search' deploy/systemd/system/anas-api.service
+	grep -Fqx 'User=a-nas-search' deploy/systemd/system/anas-search.service
+	grep -Fqx 'RuntimeDirectoryMode=0750' deploy/systemd/system/anas-search.service
+	grep -Fqx 'ConditionPathExists=!/var/lib/a-nas-host/web-search-disabled' deploy/systemd/system/anas-search.service
+	grep -Fqx 'IPAddressDeny=localhost link-local multicast' deploy/systemd/system/anas-search.service
+	grep -Fq 'IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12' deploy/systemd/system/anas-search.service
+	grep -Eqx 'u a-nas-search - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-search.conf
+	grep -Fq 'a-nas-search.sysusers.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectory=a-nas-host' deploy/systemd/system/anas-host-agent.service
@@ -272,13 +279,15 @@ go-lint:
 
 # Fails on known vulnerabilities in what ships: Go code the product can reach
 # (govulncheck, pinned by the tool directive in go.mod, with the database from
-# vuln.go.dev), the AI runtime's packages (pip-audit, pinned by
-# ai/requirements-dev.txt, with PyPI's advisories) and the Web UI's runtime
-# packages (npm audit, with the registry's advisories). A new advisory fails it
-# without a change; fix that first (AGENTS.md).
+# vuln.go.dev), the packages of the AI and web search runtimes (pip-audit,
+# pinned by ai/requirements-dev.txt, with PyPI's advisories; web search follows
+# SearXNG's pins, so an advisory there moves its commit) and the Web UI's
+# runtime packages (npm audit, with the registry's advisories). A new advisory
+# fails it without a change; fix that first (AGENTS.md).
 vuln-check:
 	$(GO) tool govulncheck ./...
 	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r ai/requirements.txt
+	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r deploy/search/requirements.txt
 	cd web && $(NPM) audit --omit=dev
 
 test:

@@ -44,6 +44,10 @@ if [[ "${1:-}" != --inside ]]; then
     real_ai=(-e ANAS_SYSTEM_TEST_AI=real -v "$(dirname "$ANAS_AI_MODEL"):/ai-model:ro" -v "$(dirname "$ANAS_AI_DETECTOR"):/ai-detector:ro"
       -v "$ANAS_AI_FACES:/ai-faces:ro" -v "$ANAS_AI_PETS:/ai-pets:ro")
   fi
+  if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" == real ]]; then
+    [[ -f "$repo/build/search-runtime.json" ]] || { echo "missing build/search-runtime.json: run scripts/build-search-runtime.sh" >&2; exit 2; }
+    real_ai+=(-e ANAS_SYSTEM_TEST_SEARCH=real)
+  fi
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
     [[ -f "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME" ]] || { echo "ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME must name runtime.tar.gz" >&2; exit 2; }
@@ -128,6 +132,31 @@ models_kept=$(for role in model detector face-detector face-embedder animal-embe
 install -d /etc/systemd/system/anas-photos.service.d
 printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/system/anas-photos.service.d/system-test.conf
 
+# Web search (ADR 0030) runs a stand-in for SearXNG under the real unit and its
+# sandbox (scripts/system-test-search.py), in a runtime around Debian's Python.
+# With ANAS_SYSTEM_TEST_SEARCH=real, after scripts/build-search-runtime.sh, it
+# installs the real runtime, which starts SearXNG without reaching any engine.
+search=/tmp/search-staged
+install -d "$search"
+if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" == real ]]; then
+  cp /src/build/search-runtime.json "$search/runtime.json"
+  ln -s "/src/build/search-runtime/$(jq -r .file "$search/runtime.json")" "$search/runtime.tar.gz"
+else
+  install -d "$search/venv/bin"
+  ln -s /usr/bin/python3 "$search/venv/bin/python"
+  printf 'home = /usr/bin\ninclude-system-site-packages = false\nversion = %s\n' \
+    "$(python3 -c 'import platform; print(platform.python_version())')" > "$search/venv/pyvenv.cfg"
+  install -m 0644 /src/scripts/system-test-search.py "$search/venv/stand-in.py"
+  tar -C "$search/venv" -czf "$search/runtime.tar.gz" .
+  search_runtime_sha=$(sha256sum "$search/runtime.tar.gz" | cut -d ' ' -f 1)
+  printf '{"id":"%s","python":"%s","file":"runtime.tar.gz","sizeBytes":%s,"sha256":"%s"}\n' "${search_runtime_sha:0:16}" \
+    "$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" "$(stat -c %s "$search/runtime.tar.gz")" \
+    "$search_runtime_sha" > "$search/runtime.json"
+  install -d /etc/systemd/system/anas-search.service.d
+  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/search/runtime/bin/python /opt/a-nas/current/search/runtime/stand-in.py /run/a-nas-search/search.sock\n' \
+    > /etc/systemd/system/anas-search.service.d/system-test.conf
+fi
+
 # stage DIR: a release as scripts/deploy-dev.ps1 stages it.
 stage() {
   install -d "$1"
@@ -160,6 +189,14 @@ stage() {
   ln -s "$ai/face-embedder.onnx" "$1/ai/face-embedder.onnx"
   ln -s "$ai/animal-embedder.onnx" "$1/ai/animal-embedder.onnx"
   ln -s "$ai/runtime.tar.gz" "$1/ai/runtime.tar.gz"
+  for unit in anas-search.service anas-search-dns.service anas-search-dns.path; do
+    install -m 0644 "/src/deploy/systemd/system/$unit" "$1/${unit%%.*}-system.${unit#*.}"
+  done
+  install -m 0644 /src/deploy/sysusers.d/a-nas-search.conf "$1/a-nas-search.sysusers"
+  install -d "$1/search"
+  install -m 0644 /src/deploy/search/settings.yml /src/deploy/search/searxng.json "$search/runtime.json" "$1/search/"
+  install -m 0755 /src/deploy/search/allow-dns.sh "$1/search/"
+  ln -s "$search/runtime.tar.gz" "$1/search/runtime.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
   install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
   install -m 0750 /src/scripts/run-kiosk.sh "$1/kiosk-launcher"
@@ -283,7 +320,8 @@ data=/srv/a-nas/data
 # starts, is a stand-in that only has to exist.
 [[ -x /usr/bin/cage ]] || install -m 0755 /dev/null /usr/bin/cage
 check "systemd accepts every installed A-NAS unit" \
-  verified /etc/systemd/system/anas*.service /etc/systemd/system/anas*.socket /etc/systemd/system/*anas*.slice
+  verified /etc/systemd/system/anas*.service /etc/systemd/system/anas*.socket /etc/systemd/system/anas*.path \
+  /etc/systemd/system/*anas*.slice
 
 # --- Every service runs under its production unit (issue #38).
 check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares anas-family smbd
@@ -1073,6 +1111,121 @@ check "the refused Qdrant changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
   -a "$(find /opt/a-nas/qdrant -mindepth 1 -maxdepth 1 | wc -l)" = "$qdrant_kept"
 
+# --- Web search (ADR 0030): SearXNG under its own account, reached only by the
+# Product Service through its socket, and able to reach public addresses only.
+search_socket=/run/a-nas-search/search.sock
+# The Product Service holds a-nas-search through its unit's SupplementaryGroups,
+# not as a login group of a-nas.
+as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-family,a-nas-search "$@"; }
+check "web search runs under its own account" \
+  test "$(systemctl is-active anas-search):$(systemctl show -p User --value anas-search)" = active:a-nas-search
+check "web search's runtime is the one the release pins" \
+  test "$(readlink /opt/a-nas/current/search/runtime)" = "/opt/a-nas/search-runtimes/$(jq -r .id "$search/runtime.json")"
+check "web search's socket is only its group's" \
+  test "$(stat -c '%a %U %G' /run/a-nas-search):$(stat -c '%a %U %G' "$search_socket")" = \
+  "750 a-nas-search a-nas-search:660 a-nas-search a-nas-search"
+check "the Product Service's groups reach web search" \
+  quiet as_product curl -fsS --unix-socket "$search_socket" http://localhost/healthz
+check "a member does not reach web search" \
+  denied as alice curl -fsS --unix-socket "$search_socket" http://localhost/healthz
+check "web search reads no data volume or Host Agent record" \
+  denied nsenter -t "$(systemctl show -p MainPID --value anas-search)" -m ls /srv/a-nas/data /var/lib/a-nas-host
+if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" != real ]]; then
+  # search_probe HOST PORT: what the stand-in, in web search's sandbox, got
+  # when it connected there; direct_probe the same from outside any sandbox.
+  # systemd drops the filtered packets, so a denied address times out.
+  cat > /tmp/connect-probe.py <<'PY'
+import errno, socket, sys
+try:
+    socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=2).close()
+    print("connected")
+except TimeoutError:
+    print("timeout")
+except OSError as error:
+    print("denied" if error.errno == errno.EPERM else errno.errorcode.get(error.errno or 0, "error"))
+PY
+  search_probe() {
+    as_product curl -fsS --unix-socket "$search_socket" "http://localhost/probe?host=$1&port=$2" | jq -r .result
+  }
+  direct_probe() { python3 /tmp/connect-probe.py "$1" "$2"; }
+  # An address of each range the service must not reach, on this machine,
+  # with something listening there, so that only the filter keeps it out.
+  # 93.184.216.34 stands for a public address, which the filter lets through.
+  for address in 10.99.0.1 172.16.99.1 192.168.99.1 100.64.99.1 169.254.99.1 192.168.77.53 93.184.216.34; do
+    ip address add "$address/32" dev lo
+  done
+  ip -6 address add fd00::99/128 dev lo
+  python3 -c '
+import socket, threading
+def serve(family, address):
+    listener = socket.socket(family, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if family == socket.AF_INET6:
+        listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+    listener.bind((address, 7777))
+    listener.listen()
+    while True:
+        listener.accept()[0].close()
+threading.Thread(target=serve, args=(socket.AF_INET6, "::"), daemon=True).start()
+serve(socket.AF_INET, "0.0.0.0")' &
+  search_listener=$!
+  container_address=$(hostname -I | cut -d ' ' -f 1)
+  # shellcheck disable=SC2317,SC2329 # invoked through check
+  kept_out() { # HOST PORT: reachable directly, not from web search's sandbox
+    [[ "$(direct_probe "$1" "$2")" == connected ]] && [[ "$(search_probe "$1" "$2")" =~ ^(timeout|denied)$ ]]
+  }
+  for target in 127.0.0.1:8080 "[::1]:7777" "$container_address:7777" 10.99.0.1:7777 172.16.99.1:7777 \
+    192.168.99.1:7777 100.64.99.1:7777 169.254.99.1:7777 "[fd00::99]:7777"; do
+    host=${target%:*}
+    host=${host//[\[\]]/}
+    check "web search cannot reach $target" kept_out "$host" "${target##*:}"
+  done
+  check "web search may reach a public address" test "$(search_probe 93.184.216.34 7777)" = connected
+  dns_server=$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf)
+  # shellcheck disable=SC2317,SC2329 # invoked through check
+  dns_allowed() { systemctl show -p IPAddressAllow --value anas-search | grep -Fqw "$1"; }
+  check "web search may reach this machine's DNS server $dns_server" dns_allowed "$dns_server"
+  # dhcpcd rewrites /etc/resolv.conf when the lease changes.
+  check "web search cannot reach 192.168.77.53 before it is a DNS server" kept_out 192.168.77.53 7777
+  cp /etc/resolv.conf /tmp/resolv.conf.before-search
+  printf 'nameserver 192.168.77.53\n' >> /etc/resolv.conf
+  for _ in $(seq 1 20); do
+    systemctl show -p IPAddressAllow --value anas-search | grep -Fq 192.168.77.53 && break
+    sleep 0.5
+  done
+  check "web search follows a new DNS server" test "$(search_probe 192.168.77.53 7777)" = connected
+  cat /tmp/resolv.conf.before-search > /etc/resolv.conf
+  kill "$search_listener"
+  for address in 10.99.0.1 172.16.99.1 192.168.99.1 100.64.99.1 169.254.99.1 192.168.77.53 93.184.216.34; do
+    ip address del "$address/32" dev lo
+  done
+  ip -6 address del fd00::99/128 dev lo
+  # The running Product Service, with its own groups and SearXNG's secret.
+  # shellcheck disable=SC2317,SC2329 # invoked through check
+  product_search() {
+    curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+      -d '{"q":"system test","category":"web"}' "$api/api/v1/web-search/query" |
+      jq -e '.results[0].title == "System test: system test" and .unresponsive == ["百度"]' >/dev/null
+  }
+  check "a search reaches the stand-in through the Product Service" product_search
+fi
+# The administrator's switch: the Host Agent writes its file and stops the
+# service, and the unit's condition keeps it stopped across restarts and
+# reinstalls (checked again after the upgrade below).
+# shellcheck disable=SC2317,SC2329 # invoked through check
+web_search_switch() {
+  curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+    -X PUT -d "{\"enabled\":$1,\"torrents\":false}" "$api/api/v1/web-search"
+}
+check "an administrator turns web search off" web_search_switch false
+check "turning it off stops the service and leaves the Host Agent's file" \
+  test "$(systemctl is-active anas-search || true)" = inactive -a -f /var/lib/a-nas-host/web-search-disabled
+systemctl restart anas-search
+check "web search stays stopped while turned off" test "$(systemctl is-active anas-search || true)" = inactive
+check "an administrator turns web search on" web_search_switch true
+for _ in $(seq 1 40); do systemctl is-active --quiet anas-search && break; sleep 0.5; done
+check "turning it on starts the service" systemctl is-active --quiet anas-search
+
 # --- Media center (ADR 0017): files are read as the user through the File
 # Broker; FFmpeg runs in a per-connection worker without network, data volume
 # or Product Service state.
@@ -1279,12 +1432,18 @@ check "rollback removes the new worker units, socket and tmpfiles configuration"
   -a ! -e /etc/tmpfiles.d/a-nas-ffmpeg.conf
 check "rollback restores legacy client environment and eight admission slots" \
   test "$(grep -c '^ANAS_MEDIA_' /etc/a-nas/anas-api.env):$(grep -c '^ANAS_FFMPEG_' /etc/a-nas/anas-api.env):$(find /run/a-nas-media/slots -type f | wc -l)" = 2:0:8
+# Web search turned off before an upgrade stays off after it.
+touch /var/lib/a-nas-host/web-search-disabled
+systemctl stop anas-search
 stage /tmp/worker-upgrade
 if ! bash /src/scripts/install-v1.0.1-system-services.sh /tmp/worker-upgrade worker-upgrade "$iface" >/tmp/worker-upgrade.log 2>&1; then
   cat /tmp/worker-upgrade.log
   exit 1
 fi
 for _ in $(seq 1 150); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "web search turned off stays off across an upgrade" test "$(systemctl is-active anas-search || true)" = inactive
+rm -f /var/lib/a-nas-host/web-search-disabled
+systemctl start anas-search
 check "upgrade restores a working worker through the new unit and release link" \
   setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
 check "upgrade removes legacy worker units, socket and tmpfiles configuration" \

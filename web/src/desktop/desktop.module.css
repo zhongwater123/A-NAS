@@ -934,6 +934,9 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 .icon-music {
   background: linear-gradient(155deg, #ff506d, #d92471);
 }
+.icon-websearch {
+  background: linear-gradient(155deg, #3d6bff, #1b2a8c);
+}
 /* 家庭中心: a warm coral tile behind a cream house, in its title bar too. */
 .icon-family,
 .app-window-family .window-app-icon {

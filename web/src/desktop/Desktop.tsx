@@ -27,6 +27,7 @@ import { SharesProvider, useShares } from "../shares/SharesProvider";
 import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
 import { lazyCode } from "../ui/lazyCode";
+import { useWebSearch } from "../websearch/status";
 import { AppWindow } from "./AppWindow";
 import type { AssistantTaskNotice } from "./api";
 import { shortcutApp, useAppShortcuts } from "./appShortcuts";
@@ -156,6 +157,8 @@ export function Desktop({
       .then((status) => setAssistantReady(status.available))
       .catch(() => setAssistantReady(false));
   }, [session.user.id]);
+  // Only the switch reaches the windows' context, not every minute's read.
+  const webSearchEnabled = useWebSearch()?.enabled ?? false;
   const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
   const showTaskRun = (run: AssistantTaskNotice) =>
@@ -165,8 +168,18 @@ export function Desktop({
   // window is dragged, resized or brought to the front, nor when the host's
   // state is polled: that reaches the settings window alone.
   const context = useMemo<WindowContext>(
-    () => ({ session, isAdmin, assistantReady, open, intents, intentHandled, changeUser, logout: onLogout }),
-    [session, isAdmin, assistantReady, open, intents, intentHandled, changeUser, onLogout],
+    () => ({
+      session,
+      isAdmin,
+      assistantReady,
+      webSearchEnabled,
+      open,
+      intents,
+      intentHandled,
+      changeUser,
+      logout: onLogout,
+    }),
+    [session, isAdmin, assistantReady, webSearchEnabled, open, intents, intentHandled, changeUser, onLogout],
   );
   const settingsState = useMemo<SettingsState>(
     () => ({ host, section: settingsSection, setSection: setSettingsSection, storagePlan }),

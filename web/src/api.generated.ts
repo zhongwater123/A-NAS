@@ -982,6 +982,124 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/web-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether web search is on, and which tabs the window shows (docs/specs/web-search.md)
+         * @description Every signed-in account reads it: the desktop shows web search only while it is enabled, and the torrent tab only while an administrator has turned it on.
+         */
+        get: operations["getWebSearch"];
+        /**
+         * Turn web search and its torrent tab on or off (设置 → 网页搜索)
+         * @description Administrators only. Turning web search off stops its service through the Host Agent, so the NAS reaches no engine; the choice outlasts restarts and upgrades (ADR 0030).
+         */
+        put: operations["updateWebSearch"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/web-search/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search one tab's engines through the built-in SearXNG
+         * @description The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off.
+         */
+        post: operations["searchWeb"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/web-search/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A result's thumbnail, fetched through SearXNG's image proxy
+         * @description Results name their thumbnails by this path, signed with SearXNG's secret, so the browser loads no image from another host. 404 when the remote site has no image there.
+         */
+        get: operations["getWebSearchThumbnail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/web-search/license": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * SearXNG's version and license, and every package of its runtime
+         * @description 404 in a release that carries no web search runtime, such as development.
+         */
+        get: operations["getWebSearchLicense"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/web-search/license/text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** SearXNG's LICENSE, the GNU Affero General Public License */
+        get: operations["getWebSearchLicenseText"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/web-search/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The archive of SearXNG's source this release was built from (AGPL-3.0) */
+        get: operations["getWebSearchSource"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/transfers": {
         parameters: {
             query?: never;
@@ -4930,6 +5048,115 @@ export interface components {
             overflow?: boolean;
             dataSource: components["schemas"]["DataSource"];
         };
+        /**
+         * @description A tab of the window; torrents only while an administrator has turned it on.
+         * @enum {string}
+         */
+        WebSearchCategory: "web" | "images" | "videos" | "news" | "torrents";
+        WebSearchStatus: {
+            /** @description The administrator's switch; off stops the service. */
+            enabled: boolean;
+            /**
+             * @description What systemd reports of the service.
+             * @enum {string}
+             */
+            running: "running" | "starting" | "stopped" | "failed";
+            /** @description The torrent tab's switch. */
+            torrents: boolean;
+            /** @description The tabs the window shows, in order; empty while web search is off. */
+            categories: components["schemas"]["WebSearchCategory"][];
+            /** @description Every tab's engines as the window names them, fixed by the release. */
+            engines: {
+                web: string[];
+                images: string[];
+                videos: string[];
+                news: string[];
+                torrents: string[];
+            };
+        };
+        WebSearchSettings: {
+            enabled: boolean;
+            torrents: boolean;
+        };
+        WebSearchQuery: {
+            /** @description The search text, at most 400 characters. */
+            q: string;
+            category: components["schemas"]["WebSearchCategory"];
+            /** @default 1 */
+            page: number;
+            /**
+             * @description Only results this recent.
+             * @enum {string}
+             */
+            timeRange?: "day" | "week" | "month" | "year";
+        };
+        WebSearchResult: {
+            /**
+             * Format: uri
+             * @description An http or https address.
+             */
+            url: string;
+            title: string;
+            content?: string;
+            domain: string;
+            /** @description The names the window shows of the engines that found it. */
+            engines: string[];
+            /** Format: date-time */
+            publishedAt?: string;
+            /** @description A path of this API (getWebSearchThumbnail), never another host. */
+            thumbnail?: string;
+            /** @description A video's site. */
+            platform?: string;
+            author?: string;
+            durationSeconds?: number;
+            /** @description An image's width. */
+            width?: number;
+            height?: number;
+            /** @description Where an image appears. */
+            source?: string;
+            /** @description A torrent's magnet link (magnet:?…). */
+            magnet?: string;
+            sizeBytes?: number;
+            seeders?: number;
+            leechers?: number;
+        };
+        WebSearchAnswer: {
+            text: string;
+            /** Format: uri */
+            url?: string;
+        };
+        WebSearchInfobox: {
+            title: string;
+            content?: string;
+            /** Format: uri */
+            url?: string;
+            thumbnail?: string;
+        };
+        WebSearchPage: {
+            results: components["schemas"]["WebSearchResult"][];
+            answers: components["schemas"]["WebSearchAnswer"][];
+            infobox?: components["schemas"]["WebSearchInfobox"];
+            suggestions: string[];
+            /** @description The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA). */
+            unresponsive: string[];
+        };
+        WebSearchPackage: {
+            name: string;
+            version: string;
+            /** @description The package's license as its metadata names it; empty when it names none. */
+            license: string;
+        };
+        WebSearchLicense: {
+            name: string;
+            /** @description SearXNG's own version, the commit's date and short hash. */
+            version: string;
+            commit: string;
+            /** @description An SPDX expression. */
+            license: string;
+            packages: components["schemas"]["WebSearchPackage"][];
+            /** @description This release can hand out SearXNG's source (getWebSearchSource). */
+            source: boolean;
+        };
         Transfer: {
             id: string;
             /** @enum {string} */
@@ -6686,6 +6913,16 @@ export type ActivityPage = components['schemas']['ActivityPage'];
 export type SystemLogService = components['schemas']['SystemLogService'];
 export type SystemLogEntry = components['schemas']['SystemLogEntry'];
 export type SystemLogPage = components['schemas']['SystemLogPage'];
+export type WebSearchCategory = components['schemas']['WebSearchCategory'];
+export type WebSearchStatus = components['schemas']['WebSearchStatus'];
+export type WebSearchSettings = components['schemas']['WebSearchSettings'];
+export type WebSearchQuery = components['schemas']['WebSearchQuery'];
+export type WebSearchResult = components['schemas']['WebSearchResult'];
+export type WebSearchAnswer = components['schemas']['WebSearchAnswer'];
+export type WebSearchInfobox = components['schemas']['WebSearchInfobox'];
+export type WebSearchPage = components['schemas']['WebSearchPage'];
+export type WebSearchPackage = components['schemas']['WebSearchPackage'];
+export type WebSearchLicense = components['schemas']['WebSearchLicense'];
 export type Transfer = components['schemas']['Transfer'];
 export type TransferLocation = components['schemas']['TransferLocation'];
 export type TransferFailure = components['schemas']['TransferFailure'];
@@ -8790,6 +9027,184 @@ export interface operations {
             401: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
+        };
+    };
+    getWebSearch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The switches and the service's state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSearchStatus"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    updateWebSearch: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebSearchSettings"];
+            };
+        };
+        responses: {
+            /** @description The switches after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSearchStatus"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    searchWeb: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebSearchQuery"];
+            };
+        };
+        responses: {
+            /** @description One page of results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSearchPage"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getWebSearchThumbnail: {
+        parameters: {
+            query: {
+                url: string;
+                /** @description The signature results carry. */
+                h: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/*": string;
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getWebSearchLicense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The open source notice */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSearchLicense"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getWebSearchLicenseText: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The license */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            401: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getWebSearchSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The archive, as SearXNG's repository publishes it for the pinned commit */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/gzip": string;
+                };
+            };
+            401: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
         };
     };
     listTransfers: {

@@ -144,6 +144,19 @@ try {
             throw "Local AI file does not match its manifest: $($content.Path)"
         }
     }
+    # Web search's runtime travels the same way (ADR 0030).
+    $searchRuntimeManifestPath = Join-Path $repoRoot 'build\search-runtime.json'
+    if (-not (Test-Path -LiteralPath $searchRuntimeManifestPath -PathType Leaf)) {
+        throw 'Missing build\search-runtime.json: run scripts/build-search-runtime.sh in WSL first.'
+    }
+    $searchRuntimeManifest = Get-Content -LiteralPath $searchRuntimeManifestPath -Raw | ConvertFrom-Json
+    $searchRuntimePath = Join-Path $repoRoot "build\search-runtime\$($searchRuntimeManifest.file)"
+    if (-not (Test-Path -LiteralPath $searchRuntimePath -PathType Leaf)) {
+        throw "Missing the web search runtime: $searchRuntimePath"
+    }
+    if ((Get-FileHash -LiteralPath $searchRuntimePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $searchRuntimeManifest.sha256) {
+        throw "The web search runtime does not match its manifest: $searchRuntimePath"
+    }
     # The vector index's Qdrant travels the same way (ADR 0028):
     # scripts/fetch-qdrant.sh keeps the tarball its manifest pins.
     $qdrantManifestPath = Join-Path $repoRoot 'deploy\qdrant\qdrant.json'
@@ -191,6 +204,7 @@ try {
         Send-StagedContent $model.Path "apps/a-nas/models/$($model.Pinned.sha256)" $model.Pinned.file $model.Pinned.sha256
     }
     Send-StagedContent $runtimePath 'apps/a-nas/ai-runtimes' $runtimeManifest.file $runtimeManifest.sha256
+    Send-StagedContent $searchRuntimePath 'apps/a-nas/search-runtimes' $searchRuntimeManifest.file $searchRuntimeManifest.sha256
     Send-StagedContent $qdrantPath "apps/a-nas/qdrant/$($qdrant.sha256)" $qdrant.file $qdrant.sha256
 
     $uploads = @(
@@ -224,6 +238,14 @@ try {
         @{ Source = $faceEmbedderManifestPath; Destination = "${target}:$release/ai-face-embedder.json.incoming" },
         @{ Source = $animalEmbedderManifestPath; Destination = "${target}:$release/ai-animal-embedder.json.incoming" },
         @{ Source = $runtimeManifestPath; Destination = "${target}:$release/ai-runtime.json.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-search.service'); Destination = "${target}:$release/anas-search-system.service.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-search-dns.service'); Destination = "${target}:$release/anas-search-dns-system.service.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-search-dns.path'); Destination = "${target}:$release/anas-search-dns-system.path.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\sysusers.d\a-nas-search.conf'); Destination = "${target}:$release/a-nas-search.sysusers.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\search\settings.yml'); Destination = "${target}:$release/search-settings.yml.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\search\searxng.json'); Destination = "${target}:$release/search-searxng.json.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\search\allow-dns.sh'); Destination = "${target}:$release/search-allow-dns.sh.incoming" },
+        @{ Source = $searchRuntimeManifestPath; Destination = "${target}:$release/search-runtime.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-v1.0.1-system-services.sh'); Destination = "${target}:$release/install-v1.0.1-system-services.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\provision-v1.0.1-rc.sh'); Destination = "${target}:$release/provision-v1.0.1-rc.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-screensavers.sh'); Destination = "${target}:$release/install-screensavers.sh.incoming" },

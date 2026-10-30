@@ -4306,3 +4306,70 @@ button.health-go svg {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* 网页搜索: its switches (Radix's switch) and the runtime's packages. */
+.set-switch {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: #cdd5de;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.set-switch[data-state="checked"] {
+  background: var(--set-accent);
+}
+.set-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.set-switch:focus-visible {
+  outline: 2px solid var(--set-accent);
+  outline-offset: 2px;
+}
+.set-switch > span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s ease;
+}
+.set-switch > span[data-state="checked"] {
+  transform: translateX(18px);
+}
+.set-packages {
+  border-top: 1px solid var(--set-line);
+}
+.set-packages summary {
+  padding: 10px 14px;
+  color: var(--set-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.set-packages table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.set-packages th,
+.set-packages td {
+  padding: 6px 14px;
+  border-top: 1px solid var(--set-line);
+  text-align: left;
+}
+.set-packages th {
+  color: var(--set-muted);
+  font-weight: 500;
+}
+a.set-btn {
+  text-decoration: none;
+}
