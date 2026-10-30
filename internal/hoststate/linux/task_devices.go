@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 )
 
@@ -107,7 +108,8 @@ func (r *Reader) sampleTaskDevice(ctx context.Context) (*deviceTaskSample, error
 		return nil, err
 	}
 	at := r.dependencies.now()
-	result := taskmanager.DeviceSnapshot{ObservedAt: at.UTC(), CPU: taskmanager.CPU{LogicalCores: cpu.logicalCores, Model: model}, Memory: taskmanager.Memory{TotalBytes: memory.TotalBytes, UsedBytes: memory.UsedBytes}, Network: networks, Disks: disks, GPU: gpu, NPU: npu}
+	result := taskmanager.DeviceSnapshot{ObservedAt: at.UTC(), CPU: taskmanager.CPU{LogicalCores: cpu.logicalCores, Model: model, Temperature: taskTemperature(readCPUTemperature(root))}, Memory: taskmanager.Memory{TotalBytes: memory.TotalBytes, UsedBytes: memory.UsedBytes}, Network: networks, Disks: disks, GPU: gpu, NPU: npu}
+	result.Fans = r.taskFans()
 	return &deviceTaskSample{at: at, cpu: cpu, snapshot: result, disks: counters}, nil
 }
 func readTaskCPUModel(root fs.FS) string {
@@ -204,7 +206,10 @@ func (r *Reader) readTaskDisks(ctx context.Context) (taskmanager.DiskGroup, map[
 			continue
 		}
 		seen[id.String()] = true
-		d := taskmanager.Disk{ID: id.String(), Model: strings.TrimSpace(device.Model), CapacityBytes: device.Size}
+		d := taskmanager.Disk{ID: id.String(), Model: strings.TrimSpace(device.Model), CapacityBytes: device.Size, Rotational: device.Rotational}
+		if _, celsius := r.diskReadings(identity, device); celsius != nil {
+			d.Temperature = &taskmanager.Temperature{Celsius: *celsius, HotCelsius: hoststate.DiskHotCelsius(device.Rotational)}
+		}
 		result.Items = append(result.Items, d)
 		stat, err := readTaskFile(r.dependencies.root, "sys/class/block/"+device.Name+"/stat")
 		if err != nil {
@@ -272,6 +277,10 @@ func readTaskAccelerators(root fs.FS, class, prefix string) taskmanager.Accelera
 				item.ID = id.String()
 			}
 		}
+		if class == "drm" {
+			item.Integrated = gpuIntegrated(slot, pciID)
+			item.Temperature = taskTemperature(readDeviceTemperature(root, strings.TrimSuffix(path, "/"), gpuTemperatureLabels...))
+		}
 		if class == "drm" && item.Driver == "amdgpu" {
 			usage, usageStatus := readAcceleratorMetric(root, path+"gpu_busy_percent")
 			item.UsageStatus = usageStatus
@@ -308,6 +317,28 @@ func readTaskAccelerators(root fs.FS, class, prefix string) taskmanager.Accelera
 	}
 	return result
 }
+
+func (r *Reader) taskFans() taskmanager.FanGroup {
+	fans, found := r.fans()
+	group := taskmanager.FanGroup{Status: taskmanager.Available, Items: make([]taskmanager.Fan, len(fans))}
+	if !found {
+		group.Status = taskmanager.Absent
+	}
+	for i, fan := range fans {
+		group.Items[i] = taskmanager.Fan{ID: fan.ID.String(), Number: fan.Number, Label: fan.Label, RPM: fan.RPM, Stopped: fan.Stopped}
+	}
+	return group
+}
+
+func taskTemperature(temperature *hoststate.Temperature) *taskmanager.Temperature {
+	if temperature == nil {
+		return nil
+	}
+	return &taskmanager.Temperature{Celsius: temperature.Celsius, HotCelsius: temperature.HotCelsius}
+}
+
+// gpuTemperatureLabels name a GPU's own reading: amdgpu's edge, xe's pkg.
+var gpuTemperatureLabels = []string{"edge", "pkg"}
 
 // Each counter keeps its own reason for being absent. A working VRAM counter
 // must not hide whether usage is unsupported or temporarily unreadable.

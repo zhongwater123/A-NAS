@@ -68,6 +68,78 @@ type System struct {
 	// Storage observes the filesystem holding system state, independently of
 	// the hardware disk size and the data volume. Nil means not observed.
 	Storage *StorageUsage
+	// Thermal is what the CPU and GPU sensors read; disks carry their own
+	// temperatures. Nil means not observed, as from an older Host Agent.
+	Thermal *Thermal
+}
+
+// Thermal is what the host's temperature sensors outside the disks read,
+// and the speeds of its fans.
+type Thermal struct {
+	// CPU is the hottest CPU package; nil when no sensor reports one.
+	CPU  *Temperature
+	GPUs []GPU
+	// Fans are the fans the board's sensor chip counts: those turning now
+	// and those that turned since the Host Agent started.
+	Fans []Fan
+}
+
+// Fan is a fan whose speed a sensor chip counts.
+type Fan struct {
+	ID ResourceID
+	// Number is the chip's fan input, from 1; Label its name for it, which
+	// most chips leave empty.
+	Number int
+	Label  string
+	RPM    int
+	// Stopped is a fan that turned since the Host Agent started and now
+	// reads 0 RPM.
+	Stopped bool
+}
+
+// MaxFanRPM bounds plausible fan speeds; faster readings are misreadings.
+const MaxFanRPM = 50000
+
+// Valid reports whether the fan reading is plausible.
+func (f Fan) Valid() bool {
+	return f.Number > 0 && f.RPM >= 0 && f.RPM <= MaxFanRPM && (!f.Stopped || f.RPM == 0)
+}
+
+// GPU is a graphics device and the temperature its driver reports.
+type GPU struct {
+	ID   ResourceID
+	Name string
+	// Integrated is a GPU inside the CPU package, which has no sensor of its
+	// own: the CPU's temperature is its temperature.
+	Integrated bool
+	// Temperature is nil when the driver reports none.
+	Temperature *Temperature
+}
+
+// Temperature is a sensor reading in whole degrees Celsius.
+type Temperature struct {
+	Celsius int
+	// HotCelsius is where the reading counts as running hot, some way below
+	// where the chip throttles (docs/specs/device-temperatures.md).
+	HotCelsius int
+}
+
+// Valid reports whether the reading is a plausible temperature.
+func (t Temperature) Valid() bool {
+	return PlausibleCelsius(t.Celsius) && t.HotCelsius > 0 && PlausibleCelsius(t.HotCelsius)
+}
+
+// Sensors outside this range are misreporting, such as an unconnected
+// thermistor reading -128 °C.
+const (
+	minCelsius = -40
+	maxCelsius = 150
+)
+
+// PlausibleCelsius reports whether a sensor reading can be a real
+// temperature of the hardware A-NAS runs on.
+func PlausibleCelsius(celsius int) bool {
+	return celsius >= minCelsius && celsius <= maxCelsius
 }
 
 type StorageUsage struct {
