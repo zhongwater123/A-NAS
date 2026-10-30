@@ -23,7 +23,7 @@ are saved under <cache>/judge/<model>/.
 
 The cuts are the versions eval.video_montage leaves in the model's cache
 directory: the baseline (video_moments montage), montage-rules and montage-model,
-and the third version's montage-rules3 and montage-model3.
+the third version's montage-rules3 and montage-model3, and its later rounds.
 With --summary nothing is sent: the saved verdicts are tabled, and where the
 instructions label on-topic seconds, each segment's verdict is set against them
 (a segment counts as on topic when at least half of it is).
@@ -44,7 +44,11 @@ API = "https://api.siliconflow.cn/v1/chat/completions"
 MODEL = "Qwen/Qwen3-VL-32B-Instruct"
 FRAMES_MAX = 40
 EDGE = 360
-VERSIONS = ("baseline", "rules", "model", "rules3", "model3")
+# model3-each: every probe keeps its own best cards; model3-looks: cards also carry light,
+# highlight, camera motion and flaws; model3-pictures: the planner sees each card's key frames
+# in place of its caption, against model3-captions on the same code (#326).
+VERSIONS = ("baseline", "rules", "model", "rules3", "model3", "model3-each", "model3-looks",
+            "model3-pictures", "model3-captions")
 
 COMMON = """你在为一个家庭相册的“一句话剪视频”功能评审成片。成员的指令是：“{text}”，目标约 {seconds} 秒（时长是上限，素材不够时剪短是允许的）。
 成片没有声音，共 {count} 段，按播放顺序：
