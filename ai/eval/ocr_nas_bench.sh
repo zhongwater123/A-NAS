@@ -4,8 +4,9 @@
 # Development only: it runs as an unprivileged account and changes nothing on
 # the device but its own directory.
 #
-# Every second it records the NAS's MemAvailable, the scope's memory and peak,
-# the load and the hottest thermal zone. Below 700 MiB available it stops the
+# Every second it records the NAS's MemAvailable, the scope's memory and peak
+# with its anonymous and file-backed parts, the load and the hottest thermal
+# zone. Below 700 MiB available it stops the
 # model, and the kernel ends the bench before any service (oom_score_adj 1000).
 #
 # The directory beside this script holds what eval.ocr reads: llama/ (the
@@ -19,15 +20,17 @@
 #     -E THREADS=6 bash "$HOME/ocr-bench/ocr_nas_bench.sh"
 #
 # THREADS (default 6, every core but two), COUNT (items per model, default 12)
-# and MODELS (default "glm-ocr qwen3.5-2b") select the run; results go to
-# runs/t<THREADS>/ beside the script.
+# and MODELS (default "glm-ocr qwen3.5-2b") select the run, and
+# ANAS_OCR_SERVER_ARGS adds llama-server flags such as --no-mmap; results go to
+# runs/t<THREADS><flags>/ beside the script.
 set -uo pipefail
 root=$(dirname "$(readlink -f "$0")")
 threads=${THREADS:-6}
 count=${COUNT:-12}
 models=${MODELS:-glm-ocr qwen3.5-2b}
 python=/opt/a-nas/current/ai/runtime/bin/python
-out="$root/runs/t$threads"
+flags=$(printf '%s' "${ANAS_OCR_SERVER_ARGS:-}" | tr -s ' -' '-')
+out="$root/runs/t$threads$flags"
 mkdir -p "$out"
 export ANAS_OCR_MODELS="$root/models" ANAS_OCR_DATA="$root/data" ANAS_OCR_RUNS="$out" ANAS_OCR_LLAMA="$root/llama"
 export LD_LIBRARY_PATH="$root/llama" PYTHONDONTWRITEBYTECODE=1
@@ -37,14 +40,15 @@ cd "$root/ai" || exit 1
 available() { awk '$1 == "MemAvailable:" { print int($2 / 1024) }' /proc/meminfo; }
 hottest() { cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -n | tail -1; }
 mib() { local value; value=$(cat "$1" 2>/dev/null) || value=0; echo $((value >> 20)); }
+stat_mib() { awk -v key="$2" '$1 == key { print int($2 / 1048576) }' "$1/memory.stat" 2>/dev/null || echo 0; }
 
 sample() { # SCOPE LOG: one line a second while the scope exists
   local scope=$1 log=$2 free
-  echo "time,mem_available_mib,scope_current_mib,scope_peak_mib,load1,temp_mc" > "$log"
+  echo "time,mem_available_mib,scope_current_mib,scope_peak_mib,scope_anon_mib,scope_file_mib,load1,temp_mc" > "$log"
   for _ in $(seq 1 100); do [ -d "$scope" ] && break; sleep 0.1; done
   while [ -d "$scope" ]; do
     free=$(available)
-    echo "$(date +%s),$free,$(mib "$scope/memory.current"),$(mib "$scope/memory.peak"),$(cut -d' ' -f1 /proc/loadavg),$(hottest)" >> "$log"
+    echo "$(date +%s),$free,$(mib "$scope/memory.current"),$(mib "$scope/memory.peak"),$(stat_mib "$scope" anon),$(stat_mib "$scope" file),$(cut -d' ' -f1 /proc/loadavg),$(hottest)" >> "$log"
     if [ "$free" -lt 700 ]; then
       echo "$(date +%s),watchdog: MemAvailable $free MiB, stopping $scope" >> "$log"
       xargs -r kill < "$scope/cgroup.procs"

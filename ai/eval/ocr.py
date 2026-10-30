@@ -14,7 +14,8 @@ they would see on the NAS.
     python -m eval.ocr --bench 12 --threads 4    # speed and memory, one model at a time
 
 Paths inside the evaluation container: /models (GGUF files), /data (CC-OCR),
-/runs (answers), /llama (llama.cpp build/bin).
+/runs (answers), /llama (llama.cpp build/bin); ANAS_OCR_SERVER_ARGS adds
+llama-server flags.
 """
 
 import argparse
@@ -37,6 +38,8 @@ MODELS_DIR = os.environ.get("ANAS_OCR_MODELS", "/models")
 DATA_DIR = os.environ.get("ANAS_OCR_DATA", "/data")
 RUNS_DIR = os.environ.get("ANAS_OCR_RUNS", "/runs")
 LLAMA_DIR = os.environ.get("ANAS_OCR_LLAMA", "/llama")
+# More llama-server flags, such as --no-mmap to compare how the weights are held.
+SERVER_ARGS = os.environ.get("ANAS_OCR_SERVER_ARGS", "").split()
 LONG_SIDE = 1600
 # Visual tokens per image. Without a cap GLM-OCR makes ~2,460 tokens of a 1600x1200 photo
 # and needs ~700 s on the development machine; at 1024 it needs ~110 s (2026-10-15).
@@ -96,6 +99,13 @@ MODELS = {
     "qwen3.5-2b": {
         "model": "qwen3.5-2b/Qwen3.5-2B-Q8_0.gguf",
         "mmproj": "qwen3.5-2b/mmproj-Qwen3.5-2B-f16.gguf",
+        "prompts": {"text": CC_OCR_TEXT, "doc": CC_OCR_TEXT, "kie": lambda item: item["question"]},
+        "sampling": {"chat_template_kwargs": {"enable_thinking": False}},
+    },
+    # The model the product reads text with (docs/architecture/photo-ocr.md): Q4_K_M, as #323 measured it.
+    "qwen3.5-4b": {
+        "model": "qwen3.5-4b/Qwen3.5-4B-Q4_K_M.gguf",
+        "mmproj": "qwen3.5-4b/mmproj-Qwen3.5-4B-f16.gguf",
         "prompts": {"text": CC_OCR_TEXT, "doc": CC_OCR_TEXT, "kie": lambda item: item["question"]},
         "sampling": {"chat_template_kwargs": {"enable_thinking": False}},
     },
@@ -160,6 +170,7 @@ class Server:
         ]
         if image_tokens:
             self.args += ["--image-max-tokens", str(image_tokens)]
+        self.args += SERVER_ARGS
         self.log_path = log_path
         self.process = None
         self.log = None
@@ -359,12 +370,13 @@ def bench(models, count, threads, image_tokens):
     per_kind = max(1, count // 3)
     for subset in ("zh_doc", "doc_photo_chn", "cold_sibr"):
         picks += load_subset(subset)[:per_kind]
-    out = os.path.join(RUNS_DIR, f"bench-t{threads}-img{image_tokens}")
+    flags = "".join("-" + arg.strip("-") for arg in SERVER_ARGS)
+    out = os.path.join(RUNS_DIR, f"bench-t{threads}-img{image_tokens}{flags}")
     os.makedirs(out, exist_ok=True)
     for model in models:
         with Server(model, threads, image_tokens, os.path.join(out, model + ".server.log")) as server:
             records = [answer(server, model, item) for item in picks if prompt_for_kind(model, item["kind"])]
-            summary = {"model": model, "threads": threads, "image_tokens": image_tokens,
+            summary = {"model": model, "threads": threads, "image_tokens": image_tokens, "server_args": SERVER_ARGS,
                        "load_seconds": round(server.load_seconds, 1), "peak_rss_mib": round(server.peak_mib),
                        "restarts": server.restarts, "items": len(records)}
         with open(os.path.join(out, model + ".jsonl"), "w", encoding="utf-8") as file:
