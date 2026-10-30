@@ -109,6 +109,7 @@ func (r *Reader) sampleTaskDevice(ctx context.Context) (*deviceTaskSample, error
 	}
 	at := r.dependencies.now()
 	result := taskmanager.DeviceSnapshot{ObservedAt: at.UTC(), CPU: taskmanager.CPU{LogicalCores: cpu.logicalCores, Model: model, Temperature: taskTemperature(readCPUTemperature(root))}, Memory: taskmanager.Memory{TotalBytes: memory.TotalBytes, UsedBytes: memory.UsedBytes}, Network: networks, Disks: disks, GPU: gpu, NPU: npu}
+	result.Fans = r.taskFans()
 	return &deviceTaskSample{at: at, cpu: cpu, snapshot: result, disks: counters}, nil
 }
 func readTaskCPUModel(root fs.FS) string {
@@ -315,6 +316,18 @@ func readTaskAccelerators(root fs.FS, class, prefix string) taskmanager.Accelera
 		result.Status = taskmanager.Partial
 	}
 	return result
+}
+
+func (r *Reader) taskFans() taskmanager.FanGroup {
+	fans, found := r.fans()
+	group := taskmanager.FanGroup{Status: taskmanager.Available, Items: make([]taskmanager.Fan, len(fans))}
+	if !found {
+		group.Status = taskmanager.Absent
+	}
+	for i, fan := range fans {
+		group.Items[i] = taskmanager.Fan{ID: fan.ID.String(), Number: fan.Number, Label: fan.Label, RPM: fan.RPM, Stopped: fan.Stopped}
+	}
+	return group
 }
 
 func taskTemperature(temperature *hoststate.Temperature) *taskmanager.Temperature {

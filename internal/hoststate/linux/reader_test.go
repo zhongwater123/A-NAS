@@ -71,7 +71,7 @@ func TestReaderReturnsOneDebianObservation(t *testing.T) {
 			UptimeSeconds:   12345,
 			Health:          hoststate.HealthUnknown,
 			// Observed, with no sensor in the fixture.
-			Thermal: &hoststate.Thermal{GPUs: []hoststate.GPU{}},
+			Thermal: &hoststate.Thermal{GPUs: []hoststate.GPU{}, Fans: []hoststate.Fan{}},
 		},
 		Disks: []hoststate.Disk{
 			{

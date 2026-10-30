@@ -42,6 +42,7 @@ export const healthyState: HostStateResponse = {
     thermal: {
       cpu: { celsius: 48, hotCelsius: 90 },
       gpus: [{ id: "gpu:fake-01", name: "GPU 0 (8086:4692)", integrated: true }],
+      fans: [{ id: "fan:fake-01", number: 1, rpm: 1912, stopped: false }],
     },
   },
   disks: [
@@ -129,6 +130,7 @@ export const taskManagerDevice: TaskManagerDeviceResponse = {
     ],
   },
   npu: { status: "absent", items: [] },
+  fans: { status: "available", items: [{ id: "fan:2", number: 2, label: "", rpm: 2700, stopped: false }] },
 };
 const taskManagerTask = (name: string, pid: number, cpu: number | null, memory: number | null) => ({
   id: `pid:${pid}`,

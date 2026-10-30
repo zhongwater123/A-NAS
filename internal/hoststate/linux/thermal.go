@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 )
@@ -252,7 +253,8 @@ func (r *Reader) thermal() *hoststate.Thermal {
 	if root == nil {
 		return nil
 	}
-	thermal := &hoststate.Thermal{CPU: readCPUTemperature(root), GPUs: []hoststate.GPU{}}
+	fans, _ := r.fans()
+	thermal := &hoststate.Thermal{CPU: readCPUTemperature(root), GPUs: []hoststate.GPU{}, Fans: fans}
 	for _, item := range readTaskAccelerators(root, "drm", "card").Items {
 		id, err := hoststate.NewResourceID(item.ID)
 		if err != nil {
@@ -265,4 +267,104 @@ func (r *Reader) thermal() *hoststate.Thermal {
 		thermal.GPUs = append(thermal.GPUs, gpu)
 	}
 	return thermal
+}
+
+// gpuHwmons are the hwmon drivers of graphics cards. Their fans are the
+// card's own, not the board's, and are left out of the fan list.
+var gpuHwmons = map[string]bool{"amdgpu": true, "radeon": true, "nouveau": true, "i915": true, "xe": true}
+
+// fanMemory keeps the fans that turned since the Host Agent started. A fan
+// input reads 0 both when nothing is plugged in and when its fan stopped;
+// only the second is worth showing.
+type fanMemory struct {
+	mu   sync.Mutex
+	spun map[string]bool
+}
+
+type fanReading struct {
+	id     string
+	number int
+	label  string
+	rpm    int
+}
+
+// readFanSensors reads every fan<N>_input of the hwmon devices other than
+// GPUs, and says whether there was any; none means no sensor chip driver.
+func readFanSensors(root fs.FS) ([]fanReading, bool) {
+	entries, _, err := taskDirectories(root, "sys/class/hwmon", hwmonLimit)
+	if err != nil {
+		return nil, false
+	}
+	var readings []fanReading
+	found := false
+	for _, entry := range entries {
+		directory := "sys/class/hwmon/" + entry.Name()
+		name, err := readTaskFile(root, directory+"/name")
+		if err != nil || gpuHwmons[strings.TrimSpace(string(name))] {
+			continue
+		}
+		files, _, err := taskDirectories(root, directory, hwmonLimit)
+		if err != nil {
+			continue
+		}
+		for _, file := range files {
+			number, ok := strings.CutPrefix(file.Name(), "fan")
+			if !ok {
+				continue
+			}
+			number, ok = strings.CutSuffix(number, "_input")
+			index, err := strconv.Atoi(number)
+			if !ok || !isDecimal(number) || err != nil || index < 1 {
+				continue
+			}
+			found = true
+			rpm, err := taskUint(root, directory+"/"+file.Name())
+			if err != nil || *rpm > hoststate.MaxFanRPM {
+				continue
+			}
+			id, err := derivedResourceID("fan", "a-nas:fan:v1", entry.Name()+"\x00"+strings.TrimSpace(string(name))+"\x00"+number)
+			if err != nil {
+				continue
+			}
+			reading := fanReading{id: id.String(), number: index, rpm: int(*rpm)}
+			if label, err := readTaskFile(root, directory+"/fan"+number+"_label"); err == nil {
+				reading.label = strings.TrimSpace(string(label))
+			}
+			readings = append(readings, reading)
+		}
+	}
+	sort.Slice(readings, func(i, j int) bool {
+		if readings[i].number != readings[j].number {
+			return readings[i].number < readings[j].number
+		}
+		return readings[i].id < readings[j].id
+	})
+	return readings, found
+}
+
+// fans returns the fans turning now or since the Host Agent started, and
+// whether the host has any fan sensor at all.
+func (r *Reader) fans() ([]hoststate.Fan, bool) {
+	readings, found := readFanSensors(r.dependencies.root)
+	memory := &r.fanMemory
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+	if memory.spun == nil {
+		memory.spun = map[string]bool{}
+	}
+	fans := []hoststate.Fan{}
+	for _, reading := range readings {
+		if reading.rpm > 0 {
+			memory.spun[reading.id] = true
+		}
+		if !memory.spun[reading.id] {
+			continue
+		}
+		id, err := hoststate.NewResourceID(reading.id)
+		if err != nil {
+			continue
+		}
+		fans = append(fans, hoststate.Fan{ID: id, Number: reading.number, Label: reading.label, RPM: reading.rpm, Stopped: reading.rpm == 0})
+	}
+	return fans, found
 }

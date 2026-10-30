@@ -26,10 +26,19 @@ func (r *Reader) ReadDeviceStatus(ctx context.Context) (taskmanager.DeviceSnapsh
 		disks = append(disks, item)
 	}
 	var cpuTemperature *taskmanager.Temperature
-	if thermal := r.state.System.Thermal; thermal != nil && thermal.CPU != nil {
-		cpuTemperature = &taskmanager.Temperature{Celsius: thermal.CPU.Celsius, HotCelsius: thermal.CPU.HotCelsius}
+	fans := taskmanager.FanGroup{Status: taskmanager.Absent, Items: []taskmanager.Fan{}}
+	if thermal := r.state.System.Thermal; thermal != nil {
+		if thermal.CPU != nil {
+			cpuTemperature = &taskmanager.Temperature{Celsius: thermal.CPU.Celsius, HotCelsius: thermal.CPU.HotCelsius}
+		}
+		if len(thermal.Fans) > 0 {
+			fans.Status = taskmanager.Available
+		}
+		for _, fan := range thermal.Fans {
+			fans.Items = append(fans.Items, taskmanager.Fan{ID: fan.ID.String(), Number: fan.Number, Label: fan.Label, RPM: fan.RPM, Stopped: fan.Stopped})
+		}
 	}
-	return taskmanager.DeviceSnapshot{ObservedAt: time.Now().UTC(), SampleSeconds: 2, CPU: taskmanager.CPU{Model: "A-NAS Fake CPU", LogicalCores: metrics.CPU.LogicalCores, UsagePercent: new(metrics.CPU.UsagePercent), Temperature: cpuTemperature}, Memory: taskmanager.Memory{TotalBytes: metrics.Memory.TotalBytes, UsedBytes: metrics.Memory.UsedBytes}, Network: taskmanager.NetworkGroup{Status: taskmanager.Available, Items: []taskmanager.Network{{ID: "fake-eth0", Name: "eth0", Physical: true, ReceiveBytes: 100 << 30, TransmitBytes: 20 << 30, ReceiveBytesPerSecond: new(float64(metrics.Network.ReceiveBytesPerSecond)), TransmitBytesPerSecond: new(float64(metrics.Network.TransmitBytesPerSecond))}}}, Disks: taskmanager.DiskGroup{Status: taskmanager.Available, Items: disks}, GPU: taskmanager.AcceleratorGroup{Status: taskmanager.Unsupported, Items: []taskmanager.Accelerator{{ID: "gpu:fake-01", Name: "A-NAS Fake GPU", Driver: "fake", Integrated: true, Status: taskmanager.Unsupported, UsageStatus: taskmanager.Unsupported, MemoryUsedStatus: taskmanager.Unsupported, MemoryTotalStatus: taskmanager.Unsupported}}}, NPU: taskmanager.AcceleratorGroup{Status: taskmanager.Absent, Items: []taskmanager.Accelerator{}}}, nil
+	return taskmanager.DeviceSnapshot{ObservedAt: time.Now().UTC(), SampleSeconds: 2, CPU: taskmanager.CPU{Model: "A-NAS Fake CPU", LogicalCores: metrics.CPU.LogicalCores, UsagePercent: new(metrics.CPU.UsagePercent), Temperature: cpuTemperature}, Memory: taskmanager.Memory{TotalBytes: metrics.Memory.TotalBytes, UsedBytes: metrics.Memory.UsedBytes}, Network: taskmanager.NetworkGroup{Status: taskmanager.Available, Items: []taskmanager.Network{{ID: "fake-eth0", Name: "eth0", Physical: true, ReceiveBytes: 100 << 30, TransmitBytes: 20 << 30, ReceiveBytesPerSecond: new(float64(metrics.Network.ReceiveBytesPerSecond)), TransmitBytesPerSecond: new(float64(metrics.Network.TransmitBytesPerSecond))}}}, Disks: taskmanager.DiskGroup{Status: taskmanager.Available, Items: disks}, GPU: taskmanager.AcceleratorGroup{Status: taskmanager.Unsupported, Items: []taskmanager.Accelerator{{ID: "gpu:fake-01", Name: "A-NAS Fake GPU", Driver: "fake", Integrated: true, Status: taskmanager.Unsupported, UsageStatus: taskmanager.Unsupported, MemoryUsedStatus: taskmanager.Unsupported, MemoryTotalStatus: taskmanager.Unsupported}}}, NPU: taskmanager.AcceleratorGroup{Status: taskmanager.Absent, Items: []taskmanager.Accelerator{}}, Fans: fans}, nil
 }
 func (r *Reader) ReadTasks(ctx context.Context) (taskmanager.TaskSnapshot, error) {
 	if err := ctx.Err(); err != nil {

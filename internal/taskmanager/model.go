@@ -32,6 +32,24 @@ type DeviceSnapshot struct {
 	Disks         DiskGroup        `json:"disks"`
 	GPU           AcceleratorGroup `json:"gpu"`
 	NPU           AcceleratorGroup `json:"npu"`
+	Fans          FanGroup         `json:"fans"`
+}
+
+// FanGroup is absent without a fan sensor, such as before the board's
+// sensor chip driver is loaded.
+type FanGroup struct {
+	Status Status `json:"status"`
+	Items  []Fan  `json:"items"`
+}
+
+// Fan is one fan input of a sensor chip that turned since the Host Agent
+// started; Stopped when it reads 0 RPM now.
+type Fan struct {
+	ID      string `json:"id"`
+	Number  int    `json:"number"`
+	Label   string `json:"label"`
+	RPM     int    `json:"rpm"`
+	Stopped bool   `json:"stopped"`
 }
 
 type CPU struct {

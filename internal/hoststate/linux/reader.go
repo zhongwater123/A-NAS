@@ -55,6 +55,7 @@ type Reader struct {
 	deviceTasks   deviceTaskSampler
 	workloadTasks workloadTaskSampler
 	smart         smartCache
+	fanMemory     fanMemory
 }
 
 type ResolvedDevice struct {

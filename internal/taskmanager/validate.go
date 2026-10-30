@@ -45,7 +45,20 @@ func (s DeviceSnapshot) Valid() bool {
 			return false
 		}
 	}
-	return s.GPU.valid() && s.NPU.valid()
+	return s.GPU.valid() && s.NPU.valid() && s.Fans.valid()
+}
+
+func (g FanGroup) valid() bool {
+	if !g.Status.valid() || g.Items == nil || len(g.Items) > 256 {
+		return false
+	}
+	seen := make(map[string]bool)
+	for _, f := range g.Items {
+		if !identityValid(f.ID, seen) || f.Number < 1 || f.RPM < 0 || f.RPM > 50000 || (f.Stopped && f.RPM != 0) {
+			return false
+		}
+	}
+	return true
 }
 
 func (g AcceleratorGroup) valid() bool {

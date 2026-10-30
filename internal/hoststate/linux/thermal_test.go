@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 )
 
 // debianRoot is the least a Debian host needs for a state read.
@@ -198,5 +199,53 @@ func TestTaskDeviceStatusCarriesTemperatures(t *testing.T) {
 	}
 	if !got.Valid() {
 		t.Fatalf("snapshot with temperatures is invalid: %+v", got)
+	}
+}
+
+// The board's fans are those its sensor chip counts turning; an input that
+// never turned has nothing plugged in. A fan that stops afterwards stays
+// listed as stopped, and a GPU's own fan is the card's, not the board's.
+func TestReaderListsTheFansThatTurned(t *testing.T) {
+	root := debianRoot()
+	sensorFiles(root, "sys/class/hwmon/hwmon3", map[string]string{
+		"name":        "nct6798",
+		"fan1_input":  "1912",
+		"fan2_input":  "2700",
+		"fan3_input":  "0",
+		"fan7_input":  "0",
+		"pwm1":        "220",
+		"temp1_input": "36000", "temp1_label": "SYSTIN",
+	})
+	sensorFiles(root, "sys/class/hwmon/hwmon5", map[string]string{"name": "amdgpu", "fan1_input": "1500"})
+	reader := newTestReader(root, nil)
+	fans, found := reader.fans()
+	if !found || len(fans) != 2 || fans[0].Number != 1 || fans[0].RPM != 1912 || fans[1].Number != 2 || fans[1].RPM != 2700 || fans[0].Stopped || fans[1].Stopped {
+		t.Fatalf("fans() = %+v, %v; want fans 1 and 2 turning", fans, found)
+	}
+
+	root["sys/class/hwmon/hwmon3/fan2_input"].Data = []byte("0\n")
+	state, err := reader.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := state.System.Thermal.Fans
+	if len(got) != 2 || got[1].Number != 2 || !got[1].Stopped || got[1].RPM != 0 || got[0].Stopped {
+		t.Fatalf("fans after fan 2 stopped = %+v", got)
+	}
+	if group := reader.taskFans(); group.Status != taskmanager.Available || len(group.Items) != 2 || !group.Items[1].Stopped {
+		t.Fatalf("task manager fans = %+v", group)
+	}
+}
+
+// Before the sensor chip's driver is loaded there is no fan sensor at all.
+func TestReaderHasNoFansWithoutASensorChip(t *testing.T) {
+	r, root, _ := taskFixture(t)
+	sensorFiles(root, "sys/class/hwmon/hwmon2", map[string]string{"name": "coretemp", "temp1_input": "60000", "temp1_label": "Package id 0"})
+	got, err := r.ReadDeviceStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Fans.Status != taskmanager.Absent || len(got.Fans.Items) != 0 || !got.Valid() {
+		t.Fatalf("fans = %+v, want absent", got.Fans)
 	}
 }

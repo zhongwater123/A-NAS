@@ -7053,6 +7053,7 @@ components:
         - disks
         - gpu
         - npu
+        - fans
       properties:
         observedAt:
           type: string
@@ -7075,6 +7076,8 @@ components:
           $ref: '#/components/schemas/TaskManagerAcceleratorGroup'
         npu:
           $ref: '#/components/schemas/TaskManagerAcceleratorGroup'
+        fans:
+          $ref: '#/components/schemas/TaskManagerFanGroup'
     TaskManagerTasksResponse:
       type: object
       additionalProperties: false
@@ -11608,12 +11611,39 @@ components:
         temperature:
           $ref: '#/components/schemas/Temperature'
           description: Absent when the driver reports none.
+    Fan:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - number
+        - rpm
+        - stopped
+      description: 'A fan the board''s sensor chip counts, other than a GPU''s: one turning now or since the Host Agent started. Inputs that never turned, with nothing plugged in, are left out.'
+      properties:
+        id:
+          $ref: '#/components/schemas/StableResourceID'
+        number:
+          type: integer
+          minimum: 1
+          description: The chip's fan input.
+        label:
+          type: string
+          description: The chip's name for the input; most chips have none.
+        rpm:
+          type: integer
+          minimum: 0
+          maximum: 50000
+        stopped:
+          type: boolean
+          description: Turned since the Host Agent started and reads 0 RPM now.
     SystemThermal:
       type: object
       description: What the CPU and GPU temperature sensors read; disks carry their own temperatures. Absent when not observed, as from an older Host Agent (docs/specs/device-temperatures.md).
       additionalProperties: false
       required:
         - gpus
+        - fans
       properties:
         cpu:
           $ref: '#/components/schemas/Temperature'
@@ -11623,6 +11653,11 @@ components:
           maxItems: 256
           items:
             $ref: '#/components/schemas/GPU'
+        fans:
+          type: array
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/Fan'
     TaskManagerTemperature:
       type:
         - object
@@ -11641,3 +11676,42 @@ components:
           type: integer
           minimum: 1
           maximum: 150
+    TaskManagerFan:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - number
+        - label
+        - rpm
+        - stopped
+      description: Same as Fan.
+      properties:
+        id:
+          $ref: '#/components/schemas/TaskManagerID'
+        number:
+          type: integer
+          minimum: 1
+        label:
+          type: string
+        rpm:
+          type: integer
+          minimum: 0
+          maximum: 50000
+        stopped:
+          type: boolean
+    TaskManagerFanGroup:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - items
+      description: Absent without any fan sensor, such as before the board's sensor chip driver is loaded.
+      properties:
+        status:
+          $ref: '#/components/schemas/TaskManagerStatus'
+        items:
+          type: array
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/TaskManagerFan'

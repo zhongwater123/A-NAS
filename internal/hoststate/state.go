@@ -73,11 +73,36 @@ type System struct {
 	Thermal *Thermal
 }
 
-// Thermal is what the host's temperature sensors outside the disks read.
+// Thermal is what the host's temperature sensors outside the disks read,
+// and the speeds of its fans.
 type Thermal struct {
 	// CPU is the hottest CPU package; nil when no sensor reports one.
 	CPU  *Temperature
 	GPUs []GPU
+	// Fans are the fans the board's sensor chip counts: those turning now
+	// and those that turned since the Host Agent started.
+	Fans []Fan
+}
+
+// Fan is a fan whose speed a sensor chip counts.
+type Fan struct {
+	ID ResourceID
+	// Number is the chip's fan input, from 1; Label its name for it, which
+	// most chips leave empty.
+	Number int
+	Label  string
+	RPM    int
+	// Stopped is a fan that turned since the Host Agent started and now
+	// reads 0 RPM.
+	Stopped bool
+}
+
+// MaxFanRPM bounds plausible fan speeds; faster readings are misreadings.
+const MaxFanRPM = 50000
+
+// Valid reports whether the fan reading is plausible.
+func (f Fan) Valid() bool {
+	return f.Number > 0 && f.RPM >= 0 && f.RPM <= MaxFanRPM && (!f.Stopped || f.RPM == 0)
 }
 
 // GPU is a graphics device and the temperature its driver reports.

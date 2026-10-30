@@ -156,8 +156,9 @@ func TestClientRejectsADataVolumeOnADiskThatIsNotADataDisk(t *testing.T) {
 	}
 }
 
-// CPU and GPU temperatures cross the Host Agent socket with their limits;
-// an implausible reading is refused rather than shown.
+// CPU and GPU temperatures cross the Host Agent socket with their limits,
+// and fan speeds with them; an implausible reading is refused rather than
+// shown.
 func TestClientReadsTheThermalState(t *testing.T) {
 	state, err := fake.NewHealthy().Read(context.Background())
 	if err != nil {
@@ -177,5 +178,11 @@ func TestClientReadsTheThermalState(t *testing.T) {
 	state.System.Thermal.CPU = &hoststate.Temperature{Celsius: 400, HotCelsius: 90}
 	if _, err := agent.NewClient(serve(t, rootagent.NewHandler(observedState{state}, discardLogger()))).Read(context.Background()); err == nil {
 		t.Fatal("Read() accepted a CPU at 400 °C")
+	}
+
+	state.System.Thermal.CPU = nil
+	state.System.Thermal.Fans[0].Stopped = true
+	if _, err := agent.NewClient(serve(t, rootagent.NewHandler(observedState{state}, discardLogger()))).Read(context.Background()); err == nil {
+		t.Fatal("Read() accepted a stopped fan turning at 1240 RPM")
 	}
 }

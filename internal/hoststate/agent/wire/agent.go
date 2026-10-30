@@ -194,6 +194,15 @@ type systemDocument struct {
 type thermalDocument struct {
 	CPU  *temperatureDocument `json:"cpu,omitempty"`
 	GPUs []gpuDocument        `json:"gpus"`
+	Fans []fanDocument        `json:"fans,omitempty"`
+}
+
+type fanDocument struct {
+	ID      string `json:"id"`
+	Number  int    `json:"number"`
+	Label   string `json:"label,omitempty"`
+	RPM     int    `json:"rpm"`
+	Stopped bool   `json:"stopped,omitempty"`
 }
 
 type gpuDocument struct {
@@ -215,6 +224,9 @@ func thermalFromDomain(thermal *hoststate.Thermal) *thermalDocument {
 	document := &thermalDocument{CPU: temperatureFromDomain(thermal.CPU), GPUs: make([]gpuDocument, len(thermal.GPUs))}
 	for i, gpu := range thermal.GPUs {
 		document.GPUs[i] = gpuDocument{ID: gpu.ID.String(), Name: gpu.Name, Integrated: gpu.Integrated, Temperature: temperatureFromDomain(gpu.Temperature)}
+	}
+	for _, fan := range thermal.Fans {
+		document.Fans = append(document.Fans, fanDocument{ID: fan.ID.String(), Number: fan.Number, Label: fan.Label, RPM: fan.RPM, Stopped: fan.Stopped})
 	}
 	return document
 }
@@ -247,6 +259,15 @@ func (document *thermalDocument) toDomain() (*hoststate.Thermal, error) {
 			return nil, err
 		}
 		thermal.GPUs[i] = hoststate.GPU{ID: id, Name: gpu.Name, Integrated: gpu.Integrated, Temperature: temperature}
+	}
+	for _, item := range document.Fans {
+		id, err := hoststate.NewResourceID(item.ID)
+		fan := hoststate.Fan{ID: id, Number: item.Number, Label: item.Label, RPM: item.RPM, Stopped: item.Stopped}
+		if err != nil || seen[id.String()] || !fan.Valid() {
+			return nil, errors.New("invalid fan")
+		}
+		seen[id.String()] = true
+		thermal.Fans = append(thermal.Fans, fan)
 	}
 	return thermal, nil
 }

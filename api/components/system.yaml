@@ -179,7 +179,7 @@ schemas:
   TaskManagerDeviceResponse:
     type: object
     additionalProperties: false
-    required: [observedAt, sampleSeconds, dataSource, cpu, memory, network, disks, gpu, npu]
+    required: [observedAt, sampleSeconds, dataSource, cpu, memory, network, disks, gpu, npu, fans]
     properties:
       observedAt: { type: string, format: date-time }
       sampleSeconds:
@@ -193,6 +193,29 @@ schemas:
       disks: { $ref: "#/schemas/TaskManagerDiskGroup" }
       gpu: { $ref: "#/schemas/TaskManagerAcceleratorGroup" }
       npu: { $ref: "#/schemas/TaskManagerAcceleratorGroup" }
+      fans: { $ref: "#/schemas/TaskManagerFanGroup" }
+  TaskManagerFan:
+    type: object
+    additionalProperties: false
+    required: [id, number, label, rpm, stopped]
+    description: Same as Fan.
+    properties:
+      id: { $ref: "#/schemas/TaskManagerID" }
+      number: { type: integer, minimum: 1 }
+      label: { type: string }
+      rpm: { type: integer, minimum: 0, maximum: 50000 }
+      stopped: { type: boolean }
+  TaskManagerFanGroup:
+    type: object
+    additionalProperties: false
+    required: [status, items]
+    description: Absent without any fan sensor, such as before the board's sensor chip driver is loaded.
+    properties:
+      status: { $ref: "#/schemas/TaskManagerStatus" }
+      items:
+        type: array
+        maxItems: 256
+        items: { $ref: "#/schemas/TaskManagerFan" }
   TaskManagerTasksResponse:
     type: object
     additionalProperties: false
@@ -320,7 +343,7 @@ schemas:
     type: object
     description: "What the CPU and GPU temperature sensors read; disks carry their own temperatures. Absent when not observed, as from an older Host Agent (docs/specs/device-temperatures.md)."
     additionalProperties: false
-    required: [gpus]
+    required: [gpus, fans]
     properties:
       cpu:
         $ref: "#/schemas/Temperature"
@@ -330,6 +353,33 @@ schemas:
         maxItems: 256
         items:
           $ref: "#/schemas/GPU"
+      fans:
+        type: array
+        maxItems: 256
+        items:
+          $ref: "#/schemas/Fan"
+  Fan:
+    type: object
+    additionalProperties: false
+    required: [id, number, rpm, stopped]
+    description: "A fan the board's sensor chip counts, other than a GPU's: one turning now or since the Host Agent started. Inputs that never turned, with nothing plugged in, are left out."
+    properties:
+      id:
+        $ref: "common.yaml#/schemas/StableResourceID"
+      number:
+        type: integer
+        minimum: 1
+        description: The chip's fan input.
+      label:
+        type: string
+        description: The chip's name for the input; most chips have none.
+      rpm:
+        type: integer
+        minimum: 0
+        maximum: 50000
+      stopped:
+        type: boolean
+        description: Turned since the Host Agent started and reads 0 RPM now.
   GPU:
     type: object
     additionalProperties: false

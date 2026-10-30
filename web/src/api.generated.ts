@@ -3729,6 +3729,7 @@ export interface components {
             disks: components["schemas"]["TaskManagerDiskGroup"];
             gpu: components["schemas"]["TaskManagerAcceleratorGroup"];
             npu: components["schemas"]["TaskManagerAcceleratorGroup"];
+            fans: components["schemas"]["TaskManagerFanGroup"];
         };
         TaskManagerTasksResponse: {
             /** @description Deduplicated installed artwork; bounded to 1 MiB total. No host paths or remote URLs. */
@@ -5541,17 +5542,42 @@ export interface components {
             /** @description Absent when the driver reports none. */
             temperature?: components["schemas"]["Temperature"];
         };
+        /** @description A fan the board's sensor chip counts, other than a GPU's: one turning now or since the Host Agent started. Inputs that never turned, with nothing plugged in, are left out. */
+        Fan: {
+            id: components["schemas"]["StableResourceID"];
+            /** @description The chip's fan input. */
+            number: number;
+            /** @description The chip's name for the input; most chips have none. */
+            label?: string;
+            rpm: number;
+            /** @description Turned since the Host Agent started and reads 0 RPM now. */
+            stopped: boolean;
+        };
         /** @description What the CPU and GPU temperature sensors read; disks carry their own temperatures. Absent when not observed, as from an older Host Agent (docs/specs/device-temperatures.md). */
         SystemThermal: {
             /** @description The hottest CPU package; absent without a sensor. */
             cpu?: components["schemas"]["Temperature"];
             gpus: components["schemas"]["GPU"][];
+            fans: components["schemas"]["Fan"][];
         };
         /** @description Same as Temperature; null when no sensor reports one. */
         TaskManagerTemperature: {
             celsius: number;
             hotCelsius: number;
         } | null;
+        /** @description Same as Fan. */
+        TaskManagerFan: {
+            id: components["schemas"]["TaskManagerID"];
+            number: number;
+            label: string;
+            rpm: number;
+            stopped: boolean;
+        };
+        /** @description Absent without any fan sensor, such as before the board's sensor chip driver is loaded. */
+        TaskManagerFanGroup: {
+            status: components["schemas"]["TaskManagerStatus"];
+            items: components["schemas"]["TaskManagerFan"][];
+        };
     };
     responses: {
         /** @description Product operation error. */
@@ -5861,8 +5887,11 @@ export type AssistantChange = components['schemas']['AssistantChange'];
 export type SystemStorage = components['schemas']['SystemStorage'];
 export type Temperature = components['schemas']['Temperature'];
 export type Gpu = components['schemas']['GPU'];
+export type Fan = components['schemas']['Fan'];
 export type SystemThermal = components['schemas']['SystemThermal'];
 export type TaskManagerTemperature = components['schemas']['TaskManagerTemperature'];
+export type TaskManagerFan = components['schemas']['TaskManagerFan'];
+export type TaskManagerFanGroup = components['schemas']['TaskManagerFanGroup'];
 export type ResponseProductError = components['responses']['ProductError'];
 export type ResponseMethodNotAllowed = components['responses']['MethodNotAllowed'];
 export type ResponseStateUnavailable = components['responses']['StateUnavailable'];

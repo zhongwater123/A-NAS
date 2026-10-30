@@ -198,6 +198,15 @@ type systemStateResponse struct {
 type thermalResponse struct {
 	CPU  *temperatureResponse `json:"cpu,omitempty"`
 	GPUs []gpuResponse        `json:"gpus"`
+	Fans []fanResponse        `json:"fans"`
+}
+
+type fanResponse struct {
+	ID      string `json:"id"`
+	Number  int    `json:"number"`
+	Label   string `json:"label,omitempty"`
+	RPM     int    `json:"rpm"`
+	Stopped bool   `json:"stopped"`
 }
 
 type gpuResponse struct {
@@ -216,9 +225,12 @@ func mapThermal(thermal *hoststate.Thermal) *thermalResponse {
 	if thermal == nil {
 		return nil
 	}
-	response := &thermalResponse{CPU: mapTemperature(thermal.CPU), GPUs: make([]gpuResponse, len(thermal.GPUs))}
+	response := &thermalResponse{CPU: mapTemperature(thermal.CPU), GPUs: make([]gpuResponse, len(thermal.GPUs)), Fans: make([]fanResponse, len(thermal.Fans))}
 	for i, gpu := range thermal.GPUs {
 		response.GPUs[i] = gpuResponse{ID: gpu.ID.String(), Name: gpu.Name, Integrated: gpu.Integrated, Temperature: mapTemperature(gpu.Temperature)}
+	}
+	for i, fan := range thermal.Fans {
+		response.Fans[i] = fanResponse{ID: fan.ID.String(), Number: fan.Number, Label: fan.Label, RPM: fan.RPM, Stopped: fan.Stopped}
 	}
 	return response
 }
