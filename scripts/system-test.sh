@@ -568,11 +568,11 @@ check "nor in the Host Agent's log in Settings" \
 
 # --- A data volume the Host Agent cannot reconcile leaves it serving (issue
 # #166). Btrfs turns a volume read-only when it finds errors; a remount stands
-# in. The photo and share services hold databases open for writing on it,
-# which a read-only remount refuses.
+# in. The photo, share and family services hold databases open for writing
+# on it, which a read-only remount refuses.
 entries /tmp/alice.jar "$alice_private" >/dev/null || true
 scopes_before=$(systemctl list-units --plain --no-legend 'anas-files-*' 'anas-terminal-*' | awk '{print $1}')
-systemctl stop anas-photos anas-shares
+systemctl stop anas-photos anas-shares anas-family
 check "the data volume remounts read-only" mount -o remount,ro "$data"
 readonly_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent
@@ -592,7 +592,7 @@ check "the health check names the read-only data volume" \
 mount -o remount,rw "$data"
 writable_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent
-systemctl start anas-photos anas-shares
+systemctl start anas-photos anas-shares anas-family
 check "once the volume is writable, the Host Agent reconciles it" \
   bash -c "for _ in \$(seq 1 50); do journalctl -u anas-host-agent --since '$writable_at' -o cat --no-pager | grep -Fq 'data volume reconciled' && exit 0; sleep 0.2; done; exit 1"
 check "and reports nothing wrong" \
