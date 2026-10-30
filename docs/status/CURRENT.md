@@ -15,7 +15,8 @@
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1（2026-10-20 在 #149 的早期构建上加入第二块盘）。
 - 已合并、尚未部署的 PR 不在本页列出：`git fetch` 后运行 `bash scripts/undeployed.sh`，由 Git 列出“已部署”之后合入 main 的 PR。
 - 本地控制台自 2026-10-28 以专用账号 `a-nas-kiosk` 运行（[#174](https://github.com/zhongwater123/A-NAS/issues/174)）。`anas-dev` 名下的旧 Chromium 配置文件还在，kiosk 至少重启过一次后按[迁移后的验证](../runbooks/operate-local-kiosk.md#迁移后的验证)删除。
-- 应用中心里的 Immich、OpenList 与思源笔记装于 [#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前，容器没有日志上限，卸载后重新安装才有；它们的数据可以丢弃。
+- 应用中心里的 Immich、OpenList 与思源笔记装于 [#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前，容器没有日志上限，卸载后重新安装才有；它们的数据可以丢弃。2026-10-28 重装 Immich 时 GHCR 的一次限流（429）让安装失败；拉取重试部署前，重装仍可能这样失败（[调查](../investigations/2026-10-28-registry-rate-limit-failed-install.md)）。
+- 本机屏幕 2026-10-29 装上 VA-API 驱动 `intel-media-va-driver`，屏保改由 GPU 解码，播放时 kiosk 会话从约 0.87 个核降到约 0.53 个核（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。剩下的开销与黑屏时约 0.27 个核的开销，大部分来自覆盖层下仍在渲染的桌面，要等 [#315](https://github.com/zhongwater123/A-NAS/pull/315) 部署后复测。
 
 ## 阻塞与外部条件
 

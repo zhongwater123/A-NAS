@@ -731,6 +731,9 @@ export function lockupTime(elapsed: number): number {
 }
 
 export interface IdentLockup {
+  // pause stops drawing until resume, while nothing on the page shows the lockup.
+  pause(): void;
+  resume(): void;
   stop(): void;
 }
 
@@ -751,6 +754,7 @@ export function startIdentLockup(canvas: HTMLCanvasElement, held: () => boolean)
   let origin = performance.now(),
     frame = 0,
     running = true,
+    paused = false,
     drawn = "";
 
   const paint = (t: number, now: number) => {
@@ -784,7 +788,7 @@ export function startIdentLockup(canvas: HTMLCanvasElement, held: () => boolean)
     }
   };
   const tick = (ms: number) => {
-    if (!running) return;
+    if (!running || paused) return;
     if (held()) origin = ms;
     if (!attempt(() => paint(lockupTime((ms - origin) / 1000), ms / 1000))) return;
     frame = requestAnimationFrame(tick);
@@ -798,5 +802,16 @@ export function startIdentLockup(canvas: HTMLCanvasElement, held: () => boolean)
   window.addEventListener("resize", resize);
   if (!resize()) return null;
   if (!still) frame = requestAnimationFrame(tick);
-  return { stop };
+  return {
+    stop,
+    pause() {
+      paused = true;
+      cancelAnimationFrame(frame);
+    },
+    resume() {
+      if (!running || !paused) return;
+      paused = false;
+      if (!still) frame = requestAnimationFrame(tick);
+    },
+  };
 }
