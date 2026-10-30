@@ -554,8 +554,9 @@ def build_index(args):
 
 
 def describe(args):
-    """One sentence from the local vision model on each card's key frame (montage.look),
-    written to captions.json beside index.json; cards already described are kept."""
+    """One sentence from the local vision model on a few frames of each card (montage.look),
+    written to captions.json beside index.json; cards already described from the same
+    frames are kept."""
     from montage import look, moments
 
     index = moments.Index.load(os.path.join(args.cache, "index.json"), os.path.join(args.cache, "frames.npz"))
@@ -565,13 +566,20 @@ def describe(args):
         with open(path, encoding="utf-8") as file:
             said = json.load(file)["cards"]
     vision = look.Vision(args.vision)
-    todo = [c for c in index.cards if [said.get(c["id"], {}).get(k) for k in ("start", "end")] != [c["start"], c["end"]]]
+    def chosen(card):
+        return [index.frame_ms[i] for i in index.keyframes(card, look.KEYFRAMES)]
+
+    todo = [c for c in index.cards
+            if [said.get(c["id"], {}).get(k) for k in ("start", "end", "frames")] != [c["start"], c["end"], chosen(c)]]
     began = time.monotonic()
     for n, card in enumerate(todo, 1):
-        frame = index.frame_ms[index.keyframe(card)]
-        with open(frame_path(card["video"], frame), "rb") as file:
-            caption = vision.describe(file.read())
-        said[card["id"]] = {"start": card["start"], "end": card["end"], "frame": frame, "caption": caption}
+        frames = chosen(card)
+        jpegs = []
+        for frame in frames:
+            with open(frame_path(card["video"], frame), "rb") as file:
+                jpegs.append(file.read())
+        caption = vision.describe(jpegs)
+        said[card["id"]] = {"start": card["start"], "end": card["end"], "frames": frames, "caption": caption}
         if n % 20 == 0 or n == len(todo):
             with open(path, "w", encoding="utf-8") as file:
                 json.dump({"vision": args.name, "cards": said}, file, ensure_ascii=False, indent=1)

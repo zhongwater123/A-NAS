@@ -4,8 +4,9 @@ The planning model reads text only. Here a small vision model on this machine
 (Qwen3-VL behind llama.cpp's OpenAI-compatible llama-server on the development
 machine; the AI Worker would hold it in the product) does the looking:
 
-  describe  one sentence on a card's key frame, handed to the planning model
-            with the card, so that it knows what the picture shows
+  describe  one sentence on a few frames of a card (KEYFRAMES, spread over
+            it), handed to the planning model with the card, so that it knows
+            what the picture shows; one frame alone misread a cathedral as a castle
   review    before a cut is rendered, frames every STEP seconds of each
             segment are asked one by one whether they show what the segment
             should; the longest run that does becomes the segment's in and out
@@ -34,8 +35,15 @@ FITS = 0.8
 SEGMENT_MIN = 1.5
 TIMEOUT = 120
 WORKERS = 4
+# Frames a card is described from.
+KEYFRAMES = 3
 
-DESCRIBE = "用一句中文描述这张视频截图：在哪里，有什么，人或物在做什么；是夜晚就写夜晚。只写看得到的，不要编地名，不超过 40 个字。"
+# Opening with a statement ("these are frames of one clip") had a 2B model repeat it as
+# its answer for 59 of 396 cards; asked directly, it answers.
+DESCRIBE = ("用一句中文描述上面几张图（同一段视频按时间先后的几帧）：在哪里，有什么，人或物在做什么；"
+            "是夜晚就写夜晚。只写几帧里都看得到的，认不准的建筑就说建筑，不要编地名，不超过 40 个字。"
+            "直接写描述，不要复述题目。")
+
 # The answer comes first: asked to describe first, or to fill a JSON verdict, a 2B
 # model says yes far more often (8 and 11 of 14 hard frames right, 13 of 14 this way).
 FIT = "这是一段视频里的一帧。问题：画面里有「{shows}」吗？请仔细看，回答“有”或“没有”，再用一句话说明画面里实际是什么。"
@@ -53,9 +61,11 @@ class Vision:
             raise ValueError(f"not an HTTP URL: {url}")
         self.url, self.model = url, model
 
-    def ask(self, prompt: str, jpeg: bytes, max_tokens: int = 120) -> str:
-        content = [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()}},
-                   {"type": "text", "text": prompt}]
+    def ask(self, prompt: str, jpeg: bytes | list[bytes], max_tokens: int = 120) -> str:
+        """The model's answer to prompt about one picture or several, in order."""
+        jpegs = jpeg if isinstance(jpeg, list) else [jpeg]
+        content = [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(j).decode()}}
+                   for j in jpegs] + [{"type": "text", "text": prompt}]
         body = {"model": self.model, "temperature": 0, "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": content}]}
         # The URL is the operator's and checked to be HTTP above.
@@ -67,8 +77,8 @@ class Vision:
             raise VisionError(f"本机视觉模型不可用：{error}") from None
         return answer["choices"][0]["message"]["content"].strip()
 
-    def describe(self, jpeg: bytes) -> str:
-        return self.ask(DESCRIBE, jpeg, 80).splitlines()[0].strip()
+    def describe(self, jpegs: list[bytes]) -> str:
+        return self.ask(DESCRIBE, jpegs, 80).splitlines()[0].strip()
 
     def fits(self, jpeg: bytes, shows: str) -> tuple[bool, str]:
         text = self.ask(FIT.format(shows=shows), jpeg, 60)

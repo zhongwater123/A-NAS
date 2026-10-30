@@ -96,10 +96,12 @@ class Index:
                                if c["id"] in said and [said[c["id"]]["start"], said[c["id"]]["end"]] == [c["start"], c["end"]]}
         return loaded
 
-    def keyframe(self, card: dict) -> int:
-        """The card's window closest to its mean picture."""
-        frames = self.frames[card["windows"]]
-        return card["windows"][int(np.argmax(frames @ frames.mean(axis=0)))]
+    def keyframes(self, card: dict, count: int) -> list[int]:
+        """count of the card's windows spread evenly from its first to its last, in time order."""
+        windows = sorted(card["windows"], key=lambda i: self.rows[i][1])
+        if len(windows) <= count:
+            return windows
+        return [windows[round(k * (len(windows) - 1) / (count - 1))] for k in range(count)]
 
     def _cards(self) -> list[dict]:
         """Every shot cut where its picture changes, each part of at most SEGMENT_MAX, with its windows."""

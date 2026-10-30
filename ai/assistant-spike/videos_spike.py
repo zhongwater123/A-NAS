@@ -153,7 +153,7 @@ class Handler(BaseHTTPRequestHandler):
             except look.VisionError as error:
                 return self.reply(503, {"error": str(error)})
             refused = [f"第 {n} 段（{s['card']} 的 {s['start']:g}–{s['end']:g} 秒）看画面不是“{s['shows']}”："
-                       f"{r['frames']} 帧里 {r['fit']} 帧符合，画面是{r['seen']}。换一张卡片或删掉这段"
+                       f"{r['frames']} 帧里 {r['fit']} 帧符合，画面是{r['seen']}。换一张卡片或删掉这段；画面若符合指令的另一部分，可以改 shows 换个位置用"
                        for n, (s, r) in enumerate(zip(segments, review, strict=True), 1) if not r["usable"]]
             if refused:
                 return self.reply(422, {"error": "出片前看了画面，有的段不切题", "problems": refused, "review": review})
