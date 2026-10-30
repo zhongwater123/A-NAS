@@ -39,6 +39,11 @@ export const healthyState: HostStateResponse = {
     uptimeSeconds: 3661,
     health: "healthy",
     healthFindings: [],
+    thermal: {
+      cpu: { celsius: 48, hotCelsius: 90 },
+      gpus: [{ id: "gpu:fake-01", name: "GPU 0 (8086:4692)", integrated: true }],
+      fans: [{ id: "fan:fake-01", number: 1, rpm: 1912, stopped: false }],
+    },
   },
   disks: [
     {
@@ -56,6 +61,7 @@ export const healthyState: HostStateResponse = {
       eligibleForDataVolume: true,
       ineligibleReasons: [],
       temperatureCelsius: 31,
+      temperatureHotCelsius: 55,
     },
   ],
 };
@@ -74,7 +80,7 @@ export const taskManagerDevice: TaskManagerDeviceResponse = {
   dataSource: "simulated",
   observedAt: "2026-10-15T10:00:00Z",
   sampleSeconds: 2,
-  cpu: { model: "Test CPU", logicalCores: 8, usagePercent: 25 },
+  cpu: { model: "Test CPU", logicalCores: 8, usagePercent: 25, temperature: { celsius: 52, hotCelsius: 90 } },
   memory: { totalBytes: 8192, usedBytes: 2048 },
   network: {
     status: "available",
@@ -93,7 +99,15 @@ export const taskManagerDevice: TaskManagerDeviceResponse = {
   disks: {
     status: "available",
     items: [
-      { id: "disk:1", model: "Test SSD", capacityBytes: 8192, readBytesPerSecond: 2048, writeBytesPerSecond: 1024 },
+      {
+        id: "disk:1",
+        model: "Test SSD",
+        capacityBytes: 8192,
+        rotational: false,
+        readBytesPerSecond: 2048,
+        writeBytesPerSecond: 1024,
+        temperature: { celsius: 41, hotCelsius: 70 },
+      },
     ],
   },
   gpu: {
@@ -110,10 +124,13 @@ export const taskManagerDevice: TaskManagerDeviceResponse = {
         usagePercent: null,
         memoryUsedBytes: null,
         memoryTotalBytes: null,
+        integrated: false,
+        temperature: null,
       },
     ],
   },
   npu: { status: "absent", items: [] },
+  fans: { status: "available", items: [{ id: "fan:2", number: 2, label: "", rpm: 2700, stopped: false }] },
 };
 const taskManagerTask = (name: string, pid: number, cpu: number | null, memory: number | null) => ({
   id: `pid:${pid}`,

@@ -49,3 +49,16 @@ func TestSimulatedStorageChecksAPlanThatAsksAgain(t *testing.T) {
 		t.Fatalf("a second volume = %v, want ErrVolumeExists", err)
 	}
 }
+
+// Fake mode keeps the task manager: the simulated storage passes its reads
+// on to the Fake Adapter, temperatures included.
+func TestSimulatedStorageServesTheTaskManager(t *testing.T) {
+	simulated := newSimulatedStorage(fake.NewWithSpareDisk())
+	device, err := simulated.ReadDeviceStatus(context.Background())
+	if err != nil || !device.Valid() || device.CPU.Temperature == nil {
+		t.Fatalf("ReadDeviceStatus() = %+v, %v; want a valid snapshot with the CPU temperature", device, err)
+	}
+	if tasks, err := simulated.ReadTasks(context.Background()); err != nil || !tasks.Valid() {
+		t.Fatalf("ReadTasks() = %+v, %v", tasks, err)
+	}
+}

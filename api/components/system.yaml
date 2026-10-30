@@ -28,14 +28,25 @@ schemas:
     type: [integer, "null"]
     minimum: 0
     description: Bytes, or null when the observation is unavailable.
+  TaskManagerTemperature:
+    type: [object, "null"]
+    additionalProperties: false
+    required: [celsius, hotCelsius]
+    description: Same as Temperature; null when no sensor reports one.
+    properties:
+      celsius: { type: integer, minimum: -40, maximum: 150 }
+      hotCelsius: { type: integer, minimum: 1, maximum: 150 }
   TaskManagerCPU:
     type: object
     additionalProperties: false
-    required: [model, logicalCores, usagePercent]
+    required: [model, logicalCores, usagePercent, temperature]
     properties:
       model: { type: string }
       logicalCores: { type: integer, minimum: 1 }
       usagePercent: { $ref: "#/schemas/TaskManagerPercent" }
+      temperature:
+        $ref: "#/schemas/TaskManagerTemperature"
+        description: The hottest CPU package.
   TaskManagerMemory:
     type: object
     additionalProperties: false
@@ -61,13 +72,17 @@ schemas:
   TaskManagerDisk:
     type: object
     additionalProperties: false
-    required: [id, model, capacityBytes, readBytesPerSecond, writeBytesPerSecond]
+    required: [id, model, capacityBytes, rotational, readBytesPerSecond, writeBytesPerSecond, temperature]
     properties:
       id: { $ref: "#/schemas/TaskManagerID" }
       model: { type: string }
       capacityBytes: { type: integer, minimum: 0 }
+      rotational: { type: boolean }
       readBytesPerSecond: { $ref: "#/schemas/TaskManagerRate" }
       writeBytesPerSecond: { $ref: "#/schemas/TaskManagerRate" }
+      temperature:
+        $ref: "#/schemas/TaskManagerTemperature"
+        description: Read live from an NVMe drive; the last SMART reading of any other disk, at most ten minutes old unless the disk is in standby.
   TaskManagerMetricStatus:
     type: string
     enum: [available, unsupported, unavailable]
@@ -75,7 +90,7 @@ schemas:
   TaskManagerAccelerator:
     type: object
     additionalProperties: false
-    required: [id, name, driver, status, usageStatus, memoryUsedStatus, memoryTotalStatus, usagePercent, memoryUsedBytes, memoryTotalBytes]
+    required: [id, name, driver, status, usageStatus, memoryUsedStatus, memoryTotalStatus, usagePercent, memoryUsedBytes, memoryTotalBytes, integrated, temperature]
     properties:
       id: { $ref: "#/schemas/TaskManagerID" }
       name: { type: string, minLength: 1 }
@@ -87,6 +102,10 @@ schemas:
       usagePercent: { $ref: "#/schemas/TaskManagerPercent" }
       memoryUsedBytes: { $ref: "#/schemas/TaskManagerBytes" }
       memoryTotalBytes: { $ref: "#/schemas/TaskManagerBytes" }
+      integrated:
+        type: boolean
+        description: A GPU inside the CPU package, which shares the CPU's temperature.
+      temperature: { $ref: "#/schemas/TaskManagerTemperature" }
   TaskManagerTask:
     type: object
     additionalProperties: false
@@ -160,7 +179,7 @@ schemas:
   TaskManagerDeviceResponse:
     type: object
     additionalProperties: false
-    required: [observedAt, sampleSeconds, dataSource, cpu, memory, network, disks, gpu, npu]
+    required: [observedAt, sampleSeconds, dataSource, cpu, memory, network, disks, gpu, npu, fans]
     properties:
       observedAt: { type: string, format: date-time }
       sampleSeconds:
@@ -174,6 +193,29 @@ schemas:
       disks: { $ref: "#/schemas/TaskManagerDiskGroup" }
       gpu: { $ref: "#/schemas/TaskManagerAcceleratorGroup" }
       npu: { $ref: "#/schemas/TaskManagerAcceleratorGroup" }
+      fans: { $ref: "#/schemas/TaskManagerFanGroup" }
+  TaskManagerFan:
+    type: object
+    additionalProperties: false
+    required: [id, number, label, rpm, stopped]
+    description: Same as Fan.
+    properties:
+      id: { $ref: "#/schemas/TaskManagerID" }
+      number: { type: integer, minimum: 1 }
+      label: { type: string }
+      rpm: { type: integer, minimum: 0, maximum: 50000 }
+      stopped: { type: boolean }
+  TaskManagerFanGroup:
+    type: object
+    additionalProperties: false
+    required: [status, items]
+    description: Absent without any fan sensor, such as before the board's sensor chip driver is loaded.
+    properties:
+      status: { $ref: "#/schemas/TaskManagerStatus" }
+      items:
+        type: array
+        maxItems: 256
+        items: { $ref: "#/schemas/TaskManagerFan" }
   TaskManagerTasksResponse:
     type: object
     additionalProperties: false
@@ -255,6 +297,8 @@ schemas:
         $ref: "#/schemas/HealthFindings"
       storage:
         $ref: "#/schemas/SystemStorage"
+      thermal:
+        $ref: "#/schemas/SystemThermal"
       productVersion:
         type: string
         minLength: 1
@@ -293,6 +337,80 @@ schemas:
         $ref: "#/schemas/HealthFindings"
       storage:
         $ref: "#/schemas/SystemStorage"
+      thermal:
+        $ref: "#/schemas/SystemThermal"
+  SystemThermal:
+    type: object
+    description: "What the CPU and GPU temperature sensors read; disks carry their own temperatures. Absent when not observed, as from an older Host Agent (docs/specs/device-temperatures.md)."
+    additionalProperties: false
+    required: [gpus, fans]
+    properties:
+      cpu:
+        $ref: "#/schemas/Temperature"
+        description: The hottest CPU package; absent without a sensor.
+      gpus:
+        type: array
+        maxItems: 256
+        items:
+          $ref: "#/schemas/GPU"
+      fans:
+        type: array
+        maxItems: 256
+        items:
+          $ref: "#/schemas/Fan"
+  Fan:
+    type: object
+    additionalProperties: false
+    required: [id, number, rpm, stopped]
+    description: "A fan the board's sensor chip counts, other than a GPU's: one turning now or since the Host Agent started. Inputs that never turned, with nothing plugged in, are left out."
+    properties:
+      id:
+        $ref: "common.yaml#/schemas/StableResourceID"
+      number:
+        type: integer
+        minimum: 1
+        description: The chip's fan input.
+      label:
+        type: string
+        description: The chip's name for the input; most chips have none.
+      rpm:
+        type: integer
+        minimum: 0
+        maximum: 50000
+      stopped:
+        type: boolean
+        description: Turned since the Host Agent started and reads 0 RPM now.
+  GPU:
+    type: object
+    additionalProperties: false
+    required: [id, name, integrated]
+    properties:
+      id:
+        $ref: "common.yaml#/schemas/StableResourceID"
+      name:
+        type: string
+        minLength: 1
+      integrated:
+        type: boolean
+        description: A GPU inside the CPU package, which has no sensor of its own and shares the CPU's temperature.
+      temperature:
+        $ref: "#/schemas/Temperature"
+        description: Absent when the driver reports none.
+  Temperature:
+    type: object
+    description: A sensor reading in whole degrees Celsius and the reading from which it counts as running hot.
+    additionalProperties: false
+    required: [celsius, hotCelsius]
+    properties:
+      celsius:
+        type: integer
+        minimum: -40
+        maximum: 150
+      hotCelsius:
+        type: integer
+        minimum: 1
+        maximum: 150
+        description: For a CPU or GPU 10 °C below the critical temperature its sensor reports (85 °C without one); the system health reports a CPU from here.
   SystemStorage:
     type: object
     description: "Observed capacity and available space on the filesystem at /var/lib, where system state is stored; absent when unavailable."
@@ -319,7 +437,7 @@ schemas:
     properties:
       code:
         type: string
-        enum: [disk_failing, disk_warning, disk_health_unknown, disk_hot, volume_offline, volume_read_only, volume_full, volume_nearly_full, volume_errors, volume_reconcile_failed]
+        enum: [disk_failing, disk_warning, disk_health_unknown, disk_hot, cpu_hot, volume_offline, volume_read_only, volume_full, volume_nearly_full, volume_errors, volume_reconcile_failed]
       severity:
         type: string
         enum: [warning, critical]
@@ -328,7 +446,7 @@ schemas:
       value:
         type: integer
         format: int64
-        description: "disk_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted."
+        description: "disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted."
   Disk:
     type: object
     additionalProperties: false
@@ -385,6 +503,10 @@ schemas:
       temperatureCelsius:
         type: integer
         minimum: -273
+      temperatureHotCelsius:
+        type: integer
+        minimum: 1
+        description: "Present with temperatureCelsius: where the disk counts as running hot and the system health reports disk_hot, 55 °C for a hard disk and 70 °C for an SSD."
   DisksResponse:
     type: object
     additionalProperties: false

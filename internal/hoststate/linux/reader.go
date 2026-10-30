@@ -55,6 +55,7 @@ type Reader struct {
 	deviceTasks   deviceTaskSampler
 	workloadTasks workloadTaskSampler
 	smart         smartCache
+	fanMemory     fanMemory
 }
 
 type ResolvedDevice struct {
@@ -145,7 +146,7 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 		return hoststate.State{}, fmt.Errorf("read block devices: %w", err)
 	}
 	btrfs := btrfsDevices(r.dependencies.root)
-	disks, smartTargets, err := parseDisks(blockDevices, r.smartFor, btrfs)
+	disks, smartTargets, err := parseDisks(blockDevices, r.diskReadings, btrfs)
 	if err != nil {
 		return hoststate.State{}, fmt.Errorf("read block devices: %w", err)
 	}
@@ -174,6 +175,7 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 			UptimeSeconds:   uptime,
 			Health:          hoststate.HealthUnknown,
 			Storage:         r.systemStorage(),
+			Thermal:         r.thermal(),
 		},
 		Disks:      disks,
 		DataVolume: dataVolume,
@@ -311,7 +313,7 @@ func (r *Reader) ResolveDevice(ctx context.Context, diskID string) (ResolvedDevi
 	if err := json.Unmarshal(contents, &document); err != nil {
 		return ResolvedDevice{}, err
 	}
-	disks, _, err := parseDisks(contents, r.smartFor, btrfsDevices(r.dependencies.root))
+	disks, _, err := parseDisks(contents, r.diskReadings, btrfsDevices(r.dependencies.root))
 	if err != nil {
 		return ResolvedDevice{}, err
 	}
@@ -444,12 +446,13 @@ type blockDevice struct {
 	Children    []blockDevice `json:"children"`
 }
 
-// parseDisks maps lsblk's disks to public disks with the SMART readings smart
-// has for them, and lists the disks SMART can be read from. smart may be nil.
+// parseDisks maps lsblk's disks to public disks with the SMART verdicts and
+// temperatures readings has for them, and lists the disks SMART can be read
+// from. readings may be nil.
 // btrfs maps devices of mounted Btrfs filesystems to their UUIDs (see
 // btrfsDevices); such a device is in use, and those of the data volume make
 // their disks data disks, whatever the udev database says.
-func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, *int), btrfs map[string]string) ([]hoststate.Disk, []smartTarget, error) {
+func parseDisks(contents []byte, readings func(identity string, device blockDevice) (hoststate.Health, *int), btrfs map[string]string) ([]hoststate.Disk, []smartTarget, error) {
 	var document blockDeviceDocument
 	if err := json.Unmarshal(contents, &document); err != nil {
 		return nil, nil, err
@@ -511,8 +514,8 @@ func parseDisks(contents []byte, smart func(identity string) (hoststate.Health, 
 		}
 		smartStatus := hoststate.HealthUnknown
 		var temperature *int
-		if smart != nil && len(issues) == 0 {
-			smartStatus, temperature = smart(identity)
+		if readings != nil && len(issues) == 0 {
+			smartStatus, temperature = readings(identity, device)
 		}
 		if len(issues) == 0 {
 			targets = append(targets, smartTarget{identity: identity, name: device.Name})

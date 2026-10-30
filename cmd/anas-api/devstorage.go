@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/storage"
+	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 )
 
 // simulatedConversion is how long a simulated conversion takes.
@@ -47,6 +49,24 @@ func newSimulatedStorage(base hoststate.Observer) *simulatedStorage {
 
 func (s *simulatedStorage) ReadMetrics(ctx context.Context) (hoststate.Metrics, error) {
 	return s.base.ReadMetrics(ctx)
+}
+
+// The task manager observes the simulated host as the Fake Adapter does;
+// without these the wrapper hid it and the page was always unavailable.
+func (s *simulatedStorage) ReadDeviceStatus(ctx context.Context) (taskmanager.DeviceSnapshot, error) {
+	tasks, ok := s.base.(taskmanager.Reader)
+	if !ok {
+		return taskmanager.DeviceSnapshot{}, errors.ErrUnsupported
+	}
+	return tasks.ReadDeviceStatus(ctx)
+}
+
+func (s *simulatedStorage) ReadTasks(ctx context.Context) (taskmanager.TaskSnapshot, error) {
+	tasks, ok := s.base.(taskmanager.Reader)
+	if !ok {
+		return taskmanager.TaskSnapshot{}, errors.ErrUnsupported
+	}
+	return tasks.ReadTasks(ctx)
 }
 
 func (s *simulatedStorage) Read(ctx context.Context) (hoststate.State, error) {
