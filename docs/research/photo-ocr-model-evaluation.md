@@ -1,6 +1,6 @@
 # 相册证件与票据 OCR 模型评估
 
-> 状态：开发机评估完成（公开数据集）；2026-10-29 在实验 NAS 上实测了 GLM-OCR 与 Qwen3.5-2B 的速度与内存；2026-10-30 定为 Qwen3.5-4B 的 Q4_K_M（4B 级候选的准确率见 #323，NAS 完整测速未做）；真实证件与银行回单未测（#128）；[实施方案](../architecture/photo-ocr.md)已起草  
+> 状态：开发机评估完成（公开数据集）；2026-10-29 在实验 NAS 上实测了 GLM-OCR 与 Qwen3.5-2B 的速度与内存；2026-10-30 定为 Qwen3.5-4B 的 Q4_K_M（4B 级候选的准确率见 #323），同日在 NAS 上实测了它的速度、内存与挂断；真实证件与银行回单未测（#128）；[实施方案](../architecture/photo-ocr.md)的步骤 1 已完成  
 > 更新日期：2026-10-30  
 > 适用范围：GLM-OCR、Qwen3.5-2B、HunyuanOCR-1.5、PaddleOCR-VL-1.6，llama.cpp `e36df60`（0.6.0-dev）CPU 推理，语言部分 Q8_0，每张图最多 1024 个视觉 token（GLM-OCR 与 Qwen3.5-2B 另以 2048 复测票据与卡证）  
 > 关联：[相册规格](../specs/photo-library.md)（2026-10-19 决定做 OCR）、[M2 实施方案](../architecture/photo-ai.md)、[模型与 Runtime 选型](photo-ai-model-runtime-selection.md)
@@ -160,13 +160,51 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
   - 数字字段完全正确数相同。每集只有 25 张，几个点以内的差距不显著。
 - **单字概率**：阈值 0.99 时，Qwen3.5-4B 拦下票据 86%、卡证 90% 的数字错误，与 2B 相当（93%、89%）；但只需标记 65 / 45 个字段（2B 为 86 / 56），人工核对的量更少。
 - **决定**：用户 2026-10-30 确定以 **Qwen3.5-4B** 为 OCR 模型（[实施方案](../architecture/photo-ocr.md)）。量化交由 Claude 判断，选了测过的 **Q4_K_M**：Qwen3.5-4B 的 Q4_0 没有人测过，两者体积相近。
-- **待测**：
-  - Qwen3.5-4B 的准确率是在开发机上测的（4 个小核，每张中位 179 秒），与 NAS 的速度不可比；NAS 上的完整测速还没做，在实施的步骤 1 做。
-  - NAS 冒烟测试中进程峰值约 5.0 GB，可用内存最多下降 3.8 GiB。这是开源 llama.cpp 默认部署下的数字，用户计划之后继续优化内存，并把加载前的余量从 1 GiB 调整为 500 MB。
+- **NAS 上的速度与内存**：见下一节。回复中 NAS 冒烟测试的进程峰值约 5.0 GB、可用内存最多下降 3.8 GiB，与下一节的完整测试相符：进程峰值里有约 2.3 GiB 是映射进来、可以回收的模型文件页。
+
+### Qwen3.5-4B 在实验 NAS 上（2026-10-30，实施步骤 1）
+
+- **条件**：
+  - 与 2026-10-29 的 NAS 测试相同：同一批 12 张，6 个线程，每张最多 1024 个视觉 token，`--cache-ram 0 --ctx-checkpoints 0`，一次只测一项，测试账号的 cgroup 中运行，`oom_score_adj` 1000，可用内存低于 700 MiB 即停（没有触发）。
+  - 用产品交付的文件：上游 llama.cpp b11655 构建（[`deploy/llama/llama.json`](../../deploy/llama/llama.json)），[`scripts/convert-ocr-model.sh`](../../scripts/convert-ocr-model.sh) 转换的 Q4_K_M（`11f3d20f…`）与视觉 F16（`e74dce40…`）。与 #323 用的文件哈希不同：转换所用的 llama.cpp 不同。
+  - 三种载入方式各测一次：映射（默认）、读入内存（`--load-mode none`，即旧版的 `--no-mmap`）、Direct I/O（`--load-mode dio`，不经页缓存）。
+  - 开始时 NAS 空闲，可用内存 5.4–5.9 GiB。
+- **脚本**：[`ai/eval/ocr_nas_bench.sh`](../../ai/eval/ocr_nas_bench.sh)（每秒另记 cgroup 的匿名内存与文件页）、[`ai/eval/ocr_cancel.py`](../../ai/eval/ocr_cancel.py)、[`ai/eval/worker_memory.py`](../../ai/eval/worker_memory.py)。
+
+| 载入方式 | 每张中位（p90） | 首字前 | 生成速度 | 加载 | cgroup 峰值 | 其中匿名内存峰值 | NAS 可用内存最多下降 |
+|---|---|---|---|---|---|---|---|
+| 映射（`mmap`） | 105 s（135 s） | 34.5 s | 5.9 token/s | 5.5 s | 5,597 MiB | 3,494 MiB | 3,319 MiB |
+| 读入内存（`none`） | 99 s（127 s） | 34.0 s | 6.0 token/s | 5.0 s | 5,029 MiB | 4,555 MiB | 4,562 MiB |
+| Direct I/O（`dio`） | 99 s（127 s） | 34.2 s | 6.0 token/s | 6.5 s | 4,833 MiB | 4,531 MiB | 4,584 MiB |
+
+- **速度**：
+  - 比 Qwen3.5-2B（67 s）慢约 1.6 倍：首字前 25→34.5 s，生成 8.8→5.9 token/s。
+  - 每张输出中位 404 个 token，最多 852 个，12 张都正常结束。最慢一张 185 s，远低于 Worker 给一次读取的 10 分钟。
+  - 满负荷时每小时约 34 张。
+  - 三种方式的输出逐字相同，速度差在测量波动内。
+- **内存**：
+  - 映射时，llama.cpp 把大部分权重重排（repack）进匿名内存，映射的文件页仍留在页缓存并计入 cgroup。这部分约 2.3 GiB，内核可以回收，所以可用内存只下降 3.3 GiB，与匿名内存一致。
+  - 读入内存或用 Direct I/O 时，匿名内存多出约 1 GiB，可用内存随之多降约 1.2 GiB；Direct I/O 只是省掉了页缓存。
+  - 所以产品用映射，并显式写明 `--load-mode mmap`，不依赖上游默认值。模型清单的 `memoryBytes` 取读文字阶段匿名内存的增量，用 `worker_memory.py` 在 Worker 中测：读一页时比释放检测类模型后的 Worker 多 2,957 MiB（比 Worker 刚启动时多 3,267 MiB）；上表 12 张中最多 3,494 MiB（含测试脚本自身）。两份清单合计取 3.5 GiB：语言部分 2,816 MiB、视觉部分 768 MiB。llama-server 不分开报告两部分，这个拆分是按视觉部分的 F16 权重加计算缓冲估的。
+  - 映射的文件页让 Worker 的 cgroup 一度超过 5 GB，高于上限（总内存减 2.5 GiB，NAS 上约 5.2 GiB）。到上限时内核先回收这些页，不会结束 Worker。真实模型的系统测试中，Worker 的 cgroup 峰值也是 5.0 GB。
+- **温度与负载**：温度最高 81–83 °C，负载约 7.7。
+- **挂断**（一页 1600×1200 的中文文档，整张读完 96–98 s，其中提示阶段约 35 s；用 Worker 的读取代码在请求开始后不同时刻挂断）：
+
+  | 挂断时刻 | 改前：结束 llama-server 用 SIGTERM | 现在：没收到 token 就 SIGKILL |
+  |---|---|---|
+  | 3 s、12 s（编码图像） | 10.1 s 后才空闲：SIGTERM 等满 10 秒宽限，再被强杀 | 0.2 s |
+  | 30 s（计算提示词） | 5.1 s | 0.2 s |
+  | 60 s（生成中） | 0.3 s，服务保留 | 0.3 s，服务保留 |
+
+  - 被杀之后下次读取重新加载，约 3.5–4 s。
+  - 改前的版本里，`read()` 在挂断后立即返回，但 llama-server 会把提示阶段算完：开发机上又占了约 2.5 分钟（见“测试中发现的问题”）。
 
 ## 测试中发现的问题
 
 - **视觉 token 数决定速度**：GLM-OCR 不设上限时一张 1600×1200 的照片约 2,460 个视觉 token，开发机 4–6 线程需要约 700 秒，生成也慢到 2–4 token/s；限制到 1024 后约 110 秒、11 token/s，输出开头一致。把上限提到 2048 并没有让数字字段更准（见上节）。
+- **llama-server 只在生成的 token 之间处理取消**（b11655）：挂断时若还在编码图像或计算提示词，它照样算完整段提示词；这期间 SIGTERM 也要等 5–10 秒才生效。开发机上（Qwen3.5-2B，4 线程）挂断后它又忙了约 2.5 分钟。产品因此在没有收到 token 时直接结束它（上节“挂断”）。
+- **Worker 被 SIGTERM 结束时曾留下 llama-server**：Python 默认直接退出，负责结束子进程的 `finally` 没有执行。systemd 停止单元时会结束整个 cgroup，所以产品中不会遗留；但 NAS 上用 `worker_memory.py` 连跑两次时，第一次遗留的进程加上第二次的，让可用内存一度只剩 300 MiB，随即手动停掉，服务没有受影响。Worker 现在把 SIGTERM 当作正常退出。
+- **b11655 去掉了 `--no-mmap`**：改为 `--load-mode none`；旧参数报“invalid argument”，llama-server 不启动。
 - **llama-server 默认缓存提示词**：`--cache-ram` 默认 8 GiB，每张图的视觉 token 都被留在内存里。GLM-OCR 跑到第 52 张时进程涨到 5.5 GB 被内核 OOM 杀掉（2026-10-15 20:22）。关闭缓存与上下文检查点（`--cache-ram 0 --ctx-checkpoints 0`）后峰值稳定在约 3 GB。部署时必须同样设置。
 - **PaddleOCR-VL 不宜整页直接识别**：它的官方流程是先用版面模型切块再逐块识别；整页加 `OCR:` 时常在表格或重复条目处循环输出，直到写满上限。
 - **HunyuanOCR 的抽取提示词表达不了嵌套**：只给字段名时，明细表被写成一串字符串，空字段写成 `"None"`；官方口径下 F1 因此只有 35%–37%，顶层字段才与其他模型相当。用 JSON 模板提问可能更好，但那不是官方写法，未测。
@@ -188,11 +226,11 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
 1. 视觉 token 上限 2048 的复测已完成（见“结果”），保留 1024。
 2. 设计并评估核对层：PP-OCRv6 原文交叉核对、校验位与格式规则、低概率字段标记、可疑字段裁切放大后重读，衡量“自动通过的字段中错误的比例”。
 3. 已决定（2026-10-19）：做 OCR，文字与字段进入搜索，可见范围与照片相同。实施方案待写，需定模型、核对层、哪些照片读字段、界面呈现，以及 OCR 模型如何在 1 GiB 余量的规则下运行。
-4. 实验 NAS 上的速度与内存已实测（2026-10-29，见“结果”）。有人使用时对前台的影响尚未测。
+4. 实验 NAS 上的速度与内存已实测（GLM-OCR 与 Qwen3.5-2B 2026-10-29，Qwen3.5-4B 2026-10-30，见“结果”）。有人使用时对前台的影响尚未测。
 
 ## 关联
 
 - 代码：[`ai/eval/ocr.py`](../../ai/eval/ocr.py)、[`ai/eval/ocr_score.py`](../../ai/eval/ocr_score.py)、[`ai/eval/ocr_models.sh`](../../ai/eval/ocr_models.sh)、[`ai/eval/ocr_nas_bench.sh`](../../ai/eval/ocr_nas_bench.sh)、[`ai/ocr-eval.Dockerfile`](../../ai/ocr-eval.Dockerfile)
-- 原始答案与报告：开发机 `D:\A-NAS-datasets\runs\ocr-2026-10-15\`（`report-all.json`、各模型的 JSON lines、`bench-t4-img1024/`）；被缓存问题污染的第一次速度测试保留在 `superseded-cache-ram-on/`；实验 NAS 的实测在 `nas-2026-10-29/t6/`（答案、服务日志、逐秒内存记录）
+- 原始答案与报告：开发机 `D:\A-NAS-datasets\runs\ocr-2026-10-15\`（`report-all.json`、各模型的 JSON lines、`bench-t4-img1024/`）；被缓存问题污染的第一次速度测试保留在 `superseded-cache-ram-on/`；实验 NAS 的实测在 `nas-2026-10-29/t6/` 与 `nas-2026-10-30-qwen3.5-4b/`（答案、服务日志、逐秒内存记录、挂断与 Worker 内存的输出）
 - 数据与评分代码：CC-OCR 数据集 revision `c64517e9`，评测代码 AdvancedLiterateMachinery `fb6187eb`
 - [模型与 Runtime 选型](photo-ai-model-runtime-selection.md)（2026-10-07 的 PP-OCRv6 候选）、[M2 实施方案](../architecture/photo-ai.md)
