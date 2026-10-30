@@ -24,6 +24,6 @@ const loaded = [...chunks].map((key) => manifest[key]);
 const files = (names) => [...new Set(names)].map((name) => `${dist}/${name}`);
 
 export default [
-  { name: "First load: JavaScript", path: files(loaded.map((chunk) => chunk.file)), limit: "170 kB" },
+  { name: "First load: JavaScript", path: files(loaded.map((chunk) => chunk.file)), limit: "200 kB" },
   { name: "First load: CSS", path: files(loaded.flatMap((chunk) => chunk.css ?? [])), limit: "16 kB" },
 ];

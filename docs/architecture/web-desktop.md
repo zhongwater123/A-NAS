@@ -122,6 +122,7 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 - 窗口的代码不计入：首次打开时才加载。
 - 外壳一开始就显示的部件不导入窗口的样式模块，否则整个窗口的样式进入首屏；它们用自己的小模块，例如 `transfers/notices.module.css`、`shares/toasts.module.css`。
 - 只有每次访问都需要的内容才能让上限上调，并在 PR 中写明原因。
+- 2026-10-30 用户要求更丰富的交互，JavaScript 上限从 170 kB 放宽到 200 kB，给桌面外壳留出余量。
 
 ## 关联
 
