@@ -51,6 +51,8 @@ SEGMENT_MIN = 1.5
 SEGMENTS_MAX = 30
 REASON_CHARS = 200
 SHOWS_CHARS = 40
+# Why a card the search gave was not used, kept with the cut for review.
+WHY_CHARS = 80
 ROUNDING = 0.005
 # Windows at least this alike to the part so far show the same picture (a slow pan or a
 # followed boat is 0.93-0.98, a new shot 0.63-0.75). Grey-level frame differences
@@ -58,6 +60,25 @@ ROUNDING = 0.005
 STILL = 0.9
 # The longest a segment may run, changing or not: one picture for 8 s tires the eye.
 CLIP_MAX = 6.0
+
+
+def screened(found: dict, verdicts: dict, each: int) -> dict:
+    """An experiment (#326): a search with each narrowed to the cards a vision model said show
+    their probe (verdicts by (card id, probe), as look.screened gives them), its best scores
+    first and the search's order between equals, at most each a probe. Every card kept says
+    what it scored for each probe it is kept for; refused counts each probe's cards that failed."""
+    cards = {card["id"]: card for card in found["cards"]}
+    chosen, kept, refused = {}, {}, {}
+    for probe, ids in found["each"].items():
+        passed = [i for i in ids if verdicts[(i, probe)]["passes"]]
+        refused[probe] = len(ids) - len(passed)
+        passed.sort(key=lambda i: -(verdicts[(i, probe)]["score"] or 0))
+        chosen[probe] = passed[:each]
+        for i in chosen[probe]:
+            verdict = verdicts[(i, probe)]
+            kept.setdefault(i, cards[i] | {"screen": {}})["screen"][probe] = {
+                "score": verdict["score"], "seen": verdict["seen"]}
+    return {"threshold": found["threshold"], "each": chosen, "refused": refused, "cards": list(kept.values())}
 
 
 class PlanError(Exception):
@@ -174,13 +195,36 @@ class Index:
                 mean += self.frames[i]
         return pieces
 
-    def search(self, probes: dict[str, np.ndarray], limit: int = CARDS_MAX, videos=None, when=(), each=None) -> dict:
+    def catalog(self, videos=None) -> dict:
+        """What the library holds, for writing probes from (#326): every card of every video (or
+        of videos), in time order, as one line of its seconds, light and caption, with its
+        highlight. Cards with no caption say so; a vector alone cannot be read."""
+        out = {}
+        for card in self.cards:
+            if videos is not None and card["video"] not in videos:
+                continue
+            notes = self.notes.get(card["id"], {})
+            line = f"{card['id']} {card['start']:g}–{card['end']:g} 秒"
+            if notes.get("light"):
+                line += f" {notes['light']}"
+            line += " " + self.captions.get(card["id"], "（没有描述）")
+            if notes.get("highlight"):
+                line += f"（亮点：{notes['highlight']}）"
+            entry = out.setdefault(card["video"], {"seconds": round(self.videos[card["video"]]["duration"], 1), "cards": []})
+            entry["cards"].append(line)
+        return {"videos": out}
+
+    def search(self, probes: dict[str, np.ndarray], limit: int = CARDS_MAX, videos=None, when=(), each=None,
+               lights=None, words=None) -> dict:
         """The cards whose best window is highest for any probe, best first; only in videos
         when given, and only over windows that meet every condition in when. With each, every
         probe keeps its own best cards instead, each of them from another group, so that a
-        part of an instruction no card scores high for is not crowded out by the others."""
+        part of an instruction no card scores high for is not crowded out by the others.
+        lights and words narrow the cards before they are ranked: only those whose light the
+        vision model gave is one of lights, and only those whose caption or highlight holds
+        one of words, so that a condition is met first and the probe ranks only what meets it."""
         if each is not None:
-            found = self.search(probes, len(self.cards), videos, when)["cards"]
+            found = self.search(probes, len(self.cards), videos, when, lights=lights, words=words)["cards"]
             picked, chosen = {}, {}
             for text in probes:
                 groups = set()
@@ -197,6 +241,12 @@ class Index:
         found = []
         for card in self.cards:
             if videos is not None and card["video"] not in videos:
+                continue
+            notes = self.notes.get(card["id"], {})
+            if lights is not None and notes.get("light") not in lights:
+                continue
+            if words is not None and not any(
+                    w in self.captions.get(card["id"], "") or w in notes.get("highlight", "") for w in words):
                 continue
             windows = [i for i in card["windows"] if not out[i]]
             if not windows:
@@ -230,9 +280,10 @@ class Index:
             ("过暗", measured["bright"] < DARK), ("过曝", measured["clipped"] > BLOWN)) if bad]
         return {"motion": measured["motion"], "flaws": flaws}
 
-    def check(self, segments: list[dict], shows_needed: bool = False) -> list[tuple[str, float, float]]:
+    def check(self, segments: list[dict], shows_needed: bool = False, skipped=None) -> list[tuple[str, float, float]]:
         """The plan's (video, start, end) in order, or PlanError listing what is wrong. With
-        shows_needed every segment says in shows what its picture is to show, to be looked at."""
+        shows_needed every segment says in shows what its picture is to show, to be looked at;
+        skipped, when given, lists cards left out, each once and with why in a sentence."""
         cards = {c["id"]: c for c in self.cards}
         problems = []
         if not 1 <= len(segments) <= SEGMENTS_MAX:
@@ -266,9 +317,30 @@ class Index:
             clips.append((card["video"], float(start), float(end)))
         problems += [f"第 {a + 1} 段和第 {b + 1} 段用了同一段画面" for a in range(len(clips)) for b in range(a)
                      if clips[a][0] == clips[b][0] and min(clips[a][2], clips[b][2]) > max(clips[a][1], clips[b][1])]
+        if skipped is not None:
+            problems += self._skipped_problems(skipped, {s.get("card") for s in segments if isinstance(s, dict)}, cards)
         if problems:
             raise PlanError(problems)
         return clips
+
+    @staticmethod
+    def _skipped_problems(skipped, used: set, cards: dict) -> list[str]:
+        if not isinstance(skipped, list) or len(skipped) > CARDS_MAX:
+            return [f"skipped 要是最多 {CARDS_MAX} 项的列表"]
+        problems, seen = [], set()
+        for n, entry in enumerate(skipped, 1):
+            card = entry.get("card") if isinstance(entry, dict) else None
+            why = entry.get("why") if isinstance(entry, dict) else None
+            if card not in cards:
+                problems.append(f"skipped 第 {n} 项的 card 不是检索结果里的镜头卡片")
+            elif card in used:
+                problems.append(f"skipped 第 {n} 项的 {card} 已经用在计划里")
+            elif card in seen:
+                problems.append(f"skipped 里 {card} 出现了不止一次")
+            if not isinstance(why, str) or not 1 <= len(why.strip()) <= WHY_CHARS:
+                problems.append(f"skipped 第 {n} 项的 why 要用一句话写为什么不用，1–{WHY_CHARS} 个字符")
+            seen.add(card)
+        return problems
 
     def plan(self, probes: dict[str, np.ndarray], seconds: float, videos=None, when=(), look=None) -> list[dict]:
         """A plan with no model. The target is an upper bound: only cards at or over

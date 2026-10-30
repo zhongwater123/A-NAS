@@ -185,6 +185,29 @@ class MomentsTest(unittest.TestCase):
         self.assertEqual(castle["flaws"], ["抖动", "过曝"])
         self.assertNotIn("motion", found["07-1-1"])  # measured over other seconds
 
+    def test_a_condition_narrows_the_cards_before_the_probe_ranks_them(self):
+        self.index.captions = {"07-0-0": "雨中的市场", "07-1-0": "山上的城堡", "07-1-1": "城堡的另一面"}
+        self.index.notes = {"07-0-0": {"light": "夜晚", "highlight": "摊位"},
+                            "07-1-0": {"light": "晴天", "highlight": "塔楼"},
+                            "07-1-1": {"light": "夜晚", "highlight": "雨中的城墙"}}
+        def ids(**kw):
+            return [c["id"] for c in self.index.search({"城堡": self.castle}, **kw)["cards"]]
+
+        # The castle by night is its other side, though the sunny one scores higher.
+        self.assertEqual(ids(lights=["夜晚"]), ["07-1-1", "07-0-0"])
+        # A word in the caption or in the highlight.
+        self.assertEqual(ids(words=["雨"]), ["07-1-1", "07-0-0"])
+        self.assertEqual(ids(lights=["晴天"], words=["雨"]), [])
+        self.assertEqual(self.index.search({"城堡": self.castle}, each=1, lights=["夜晚"])["each"], {"城堡": ["07-1-1"]})
+
+    def test_the_catalog_lists_every_card_in_time_order_as_a_line(self):
+        self.index.captions = {"07-1-0": "山上的城堡"}
+        self.index.notes = {"07-1-0": {"light": "晴天", "highlight": "塔楼"}}
+        catalog = self.index.catalog()["videos"]["07"]
+        self.assertEqual(catalog["seconds"], 50.0)
+        self.assertEqual(catalog["cards"][:2], ["07-0-0 0–8 秒 （没有描述）", "07-1-0 8–28 秒 晴天 山上的城堡（亮点：塔楼）"])
+        self.assertEqual(self.index.catalog(["08"]), {"videos": {}})
+
     def test_search_ranks_cards_and_leaves_out_flat_frames(self):
         found = self.index.search({"城堡": self.castle}, limit=10)
         ids = [c["id"] for c in found["cards"]]
@@ -208,6 +231,17 @@ class MomentsTest(unittest.TestCase):
         problems = caught.exception.problems
         self.assertEqual(len(problems), 4)
         for words in ("跨过镜头切点", "至少 1.5 秒", "同一段画面", "不是检索结果里的镜头卡片"):
+            self.assertTrue(any(words in p for p in problems), words)
+
+    def test_cards_left_out_each_say_why_once(self):
+        plan = [{"card": "07-1-0", "start": 10, "end": 14}]
+        self.assertEqual(self.index.check(plan, skipped=[{"card": "07-0-0", "why": "市场，不是城堡"}]), [("07", 10.0, 14.0)])
+        self.assertEqual(self.index.check(plan, skipped=[]), [("07", 10.0, 14.0)])
+        with self.assertRaises(moments.PlanError) as caught:
+            self.index.check(plan, skipped=[{"card": "07-1-0", "why": "用过了"}, {"card": "nope", "why": "x"},
+                                            {"card": "07-0-0", "why": ""}, {"card": "07-0-0", "why": "又一次"}])
+        problems = caught.exception.problems
+        for words in ("已经用在计划里", "不是检索结果里的镜头卡片", "why 要用一句话", "出现了不止一次"):
             self.assertTrue(any(words in p for p in problems), words)
 
     def test_a_segment_over_six_seconds_is_refused_changing_or_not(self):
@@ -236,6 +270,21 @@ class MomentsTest(unittest.TestCase):
             if card["id"] == "07-1-1":
                 card["group"] = next(c["group"] for c in self.index.cards if c["id"] == "07-1-0")
         self.assertEqual(self.index.search({"城堡": self.castle}, each=2)["each"]["城堡"], ["07-1-0", "07-0-0"])
+
+    def test_screening_keeps_what_the_vision_model_passed_its_best_first(self):
+        probes = {"城堡": self.castle, "市场": (np.eye(8)[0] + np.eye(8)[4]) / np.sqrt(2)}
+        found = self.index.search(probes, each=3)
+        verdicts = {(i, probe): {"passes": True, "score": 6, "seen": probe}
+                    for probe, ids in found["each"].items() for i in ids}
+        verdicts[("07-1-0", "城堡")] = {"passes": False, "score": 2, "seen": "台阶"}
+        verdicts[("07-0-0", "城堡")] = {"passes": True, "score": 9, "seen": "城堡"}
+        kept = moments.screened(found, verdicts, 2)
+        self.assertEqual(kept["each"]["城堡"], ["07-0-0", *[i for i in found["each"]["城堡"] if i not in ("07-1-0", "07-0-0")][:1]])
+        self.assertEqual(kept["refused"]["城堡"], 1)
+        self.assertNotIn("07-1-0", kept["each"]["城堡"])
+        card = next(c for c in kept["cards"] if c["id"] == "07-0-0")
+        self.assertEqual(card["screen"]["城堡"], {"score": 9, "seen": "城堡"})
+        self.assertNotIn("screen", next(c for c in found["cards"] if c["id"] == "07-0-0"))
 
     def test_search_keeps_to_the_videos_given(self):
         self.assertEqual(self.index.search({"城堡": self.castle}, videos=["08"])["cards"], [])
@@ -305,6 +354,14 @@ class LookTest(unittest.TestCase):
         self.assertEqual(look.run([F, T, T, F, T, T, F, F, T]), (1, 5))
         self.assertEqual(look.run([T, F, F, T, T]), (3, 4))
         self.assertIsNone(look.run([F, F]))
+
+    def test_a_screening_answer_passes_when_it_is_there_and_scores_enough(self):
+        self.assertEqual(look.screened("有，8 分，城堡立在山上。"),
+                         {"fits": True, "score": 8, "seen": "城堡立在山上。", "passes": True})
+        self.assertFalse(look.screened("有，3分，远处有一点城墙")["passes"])
+        self.assertFalse(look.screened("没有，0 分，是一条街道")["passes"])
+        unscored = look.screened("有。画面里是城堡")
+        self.assertEqual((unscored["score"], unscored["passes"], unscored["seen"]), (None, True, "画面里是城堡"))
 
     def review(self, shown):
         frames = [(10 + 0.5 * k + 0.25, word.encode()) for k, word in enumerate(shown)]

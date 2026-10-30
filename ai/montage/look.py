@@ -20,6 +20,7 @@ local model alone. Standard library only, besides FFmpeg on PATH.
 import base64
 import json
 import os
+import re
 import subprocess
 import tempfile
 import urllib.request
@@ -54,6 +55,15 @@ HIGHLIGHT_CHARS = 12
 # The answer comes first: asked to describe first, or to fill a JSON verdict, a 2B
 # model says yes far more often (8 and 11 of 14 hard frames right, 13 of 14 this way).
 FIT = "这是一段视频里的一帧。问题：画面里有「{shows}」吗？请仔细看，回答“有”或“没有”，再用一句话说明画面里实际是什么。"
+
+# An experiment (#326): the cards a search recalls are judged one by one on their key frames
+# before the planner sees them, and only those that pass go on. The answer comes first, as in
+# FIT; the score asks how clearly and how well the frames show it, and a card passes when it
+# is there and scores SCREEN_PASS or more (or gave no score).
+SCREEN = ("上面是同一段视频按时间先后的几帧。问题：画面里有「{shows}」吗？请仔细看，先回答“有”或“没有”；"
+          "再给 0–10 分，10 分是清楚、好看地拍到了它；最后用一句话说明画面里实际是什么。格式：有，8 分，……")
+SCREEN_PASS = 5
+SCORE = re.compile(r"(\d{1,2})\s*分")
 
 
 class VisionError(Exception):
@@ -99,6 +109,21 @@ class Vision:
         text = self.ask(FIT.format(shows=shows), jpeg, 60)
         seen = text.lstrip("有没，,。.：: \n")
         return text.startswith("有"), seen.splitlines()[0][:60] if seen else ""
+
+    def screen(self, jpegs: list[bytes], shows: str) -> dict:
+        return screened(self.ask(SCREEN.format(shows=shows), jpegs, 80))
+
+
+def screened(text: str) -> dict:
+    """The verdict in an answer to SCREEN: whether the frames show it, the score (None when
+    the answer gave none), what they showed, and whether the card passes."""
+    fits = text.startswith("有")
+    score = SCORE.search(text)
+    points = min(int(score.group(1)), 10) if score else None
+    rest = text[score.end():] if score else text.lstrip("有没")
+    seen = rest.lstrip("有没，,。.：: \n").splitlines()
+    return {"fits": fits, "score": points, "seen": seen[0][:60] if seen else "",
+            "passes": fits and (points is None or points >= SCREEN_PASS)}
 
 
 def frames(video: str, start: float, end: float, step: float = STEP) -> list[tuple[float, bytes]]:

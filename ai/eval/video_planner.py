@@ -1,7 +1,7 @@
 """The model's montage for each instruction of #322: Claude Code plans with the assistant's tools.
 
-Each instruction is one `claude -p` turn, as a member would ask, with only the two
-video tools of anas_mcp.py (search_video_moments, make_montage), which
+Each instruction is one `claude -p` turn, as a member would ask, with only the
+video tools of anas_mcp.py (list_video_contents, search_video_moments, make_montage), which
 mcp-as-member.sh runs as alice inside the prototype sandbox (docs/specs/
 photo-to-video.md, "运行"). The turn's events are kept as <id>.jsonl, and the cut
 with its plan (anas_mcp saves the plan beside the cut) is copied out of the
@@ -27,7 +27,7 @@ from eval import video_moments as vm
 
 # No length is asked for: the cut is as long as the material that fits (#326).
 ASK = "用测试视频剪一段视频：{text}。"
-TOOLS = ("mcp__anas__search_video_moments", "mcp__anas__make_montage")
+TOOLS = ("mcp__anas__list_video_contents", "mcp__anas__search_video_moments", "mcp__anas__make_montage")
 OTHER_TOOLS = ("browse_photos", "look_at_photo", "make_slideshow", "photo_details", "recent_changes", "search_photos",
                "similar_photos", "submit_changes")
 CUT = re.compile(r"/nas/助手/视频/(montage-[0-9]{8}-[0-9]{6}-[0-9a-f]{6})\.mp4")
@@ -35,12 +35,13 @@ CUT = re.compile(r"/nas/助手/视频/(montage-[0-9]{8}-[0-9]{6}-[0-9a-f]{6})\.m
 MEMBER_VIDEOS = "/srv/a-nas/data/assistant/alice/files/视频"
 
 
-def turn(instruction, container, model, log):
+def turn(instruction, container, model, log, pictures=False, screen=False):
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     config = {"mcpServers": {"anas": {
         "command": os.path.join(here, "assistant-spike", "mcp-as-member.sh"), "args": ["alice"],
         "env": {"HERMES_SPIKE_NAME": container, "DOCKER_CONTEXT": os.environ.get("DOCKER_CONTEXT", "colima-anas"),
-                "PATH": os.environ["PATH"]}}}}
+                "PATH": os.environ["PATH"]} | ({"ANAS_SPIKE_CARD_PICTURES": "1"} if pictures else {})
+                | ({"ANAS_SPIKE_CARD_SCREEN": "1"} if screen else {})}}}
     command = ["claude", "-p", ASK.format(**instruction), "--mcp-config", json.dumps(config), "--strict-mcp-config",
                "--tools", "", "--allowedTools", *TOOLS, "--disallowedTools", *(f"mcp__anas__{t}" for t in OTHER_TOOLS),
                "--output-format", "stream-json", "--verbose",
@@ -93,6 +94,10 @@ def main():
     parser.add_argument("--container", default=os.environ.get("HERMES_SPIKE_NAME", "video-montage-sbx"))
     parser.add_argument("--model", help="the Claude model that plans, Claude Code's default otherwise")
     parser.add_argument("--only", nargs="*", help="instruction ids, all by default")
+    parser.add_argument("--pictures", action="store_true",
+                        help="show the planner each card's key frames in place of its caption (an experiment)")
+    parser.add_argument("--screen", action="store_true",
+                        help="hand the planner only the recalled cards the vision model passes (an experiment)")
     args = parser.parse_args()
     vm.use_set(args.set)
     with open(args.instructions, encoding="utf-8") as file:
@@ -108,7 +113,7 @@ def main():
         if args.only and instruction["id"] not in args.only:
             continue
         target = os.path.join(out, instruction["id"])
-        done = turn(instruction, args.container, args.model, target + ".jsonl")
+        done = turn(instruction, args.container, args.model, target + ".jsonl", args.pictures, args.screen)
         if done["cut"]:
             copy_out(args.container, done["cut"], target)
         else:

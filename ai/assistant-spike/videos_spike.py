@@ -7,9 +7,21 @@ socket, which any member of a-nas-users may use, known by the caller's UID.
 
   POST /search   {"probes": [...], "limit": n,   shot cards (montage.moments), or
                   "each": n,                      every probe's own best n
+                  "pictures": true,               an experiment (#326): each card's three
+                                                  frames side by side as JPEG in place of
+                                                  its caption, for a planner that sees
+                  "screen": true}                 another (#326, needs --vision): every probe
+                                                  recalls RECALL cards, the vision model
+                                                  judges each on its key frames, and each
+                                                  is then how many that pass a probe keeps
                   "videos": [...],                only in those videos if given,
+                  "lights": [...],                only cards of these lights (look.LIGHTS),
+                  "words": [...],                 only cards whose caption or highlight holds one,
                   "when": [{"is", "not"}]}        only over windows closer to is than to not
-  POST /montage  {"segments": [...]}             the cut as video/mp4, or the
+  POST /catalog  {"videos": [...]}               every card as a line of seconds, light,
+                                                  caption and highlight, to write probes from
+  POST /montage  {"segments": [...],             the cut as video/mp4, or the
+                  "skipped": [{card, why}]}       (cards left out, checked when given)
                                                  plan's problems with 422
 
 With --vision, the URL of a local vision model (montage.look), the cards carry
@@ -34,7 +46,9 @@ import shutil
 import socket
 import socketserver
 import struct
+import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler
 
 import numpy as np
@@ -42,9 +56,16 @@ import numpy as np
 from montage import look, moments, render
 
 PROBES_MAX = 8
+WORDS_MAX = 8
+WORD_CHARS = 20
 WHEN_MAX = 4
 PROBE_CHARS = 200
 BODY_MAX = 1 << 16
+# Each frame of a card's picture: this wide, and the JPEG quality FFmpeg's scale gives (2-31).
+PICTURE_WIDTH = 480
+PICTURE_QUALITY = 5
+# Cards every probe recalls for the vision model to screen.
+RECALL = 20
 MEMBERS = "a-nas-users"
 
 
@@ -88,6 +109,7 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         # What the vision model saw, by (video, start, end, shows): a plan sent again after a
         # refusal is looked at only where it changed.
         self.vision, self.seen = vision, {}
+        self.pictures, self.keyframes, self.verdicts = {}, {}, {}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -109,6 +131,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(400, {"error": "请求体不是 JSON"})
         if self.path == "/search":
             return self.search(body)
+        if self.path == "/catalog":
+            videos = body.get("videos")
+            if videos is not None and (not isinstance(videos, list) or not videos
+                                       or not all(v in self.server.index.videos for v in videos)):
+                return self.reply(400, {"error": "videos 要是库里的视频编号列表"})
+            return self.reply(200, self.server.index.catalog(videos))
         if self.path == "/montage":
             return self.montage(body)
         return self.reply(404, {"error": "没有这个接口"})
@@ -117,6 +145,13 @@ class Handler(BaseHTTPRequestHandler):
         probes, limit, videos = body.get("probes"), body.get("limit", 20), body.get("videos")
         each = body.get("each")
         when = body.get("when", [])
+        lights, words = body.get("lights"), body.get("words")
+        if lights is not None and (not isinstance(lights, list) or not lights
+                                   or not all(light in look.LIGHTS for light in lights)):
+            return self.reply(400, {"error": f"lights 要是 {'、'.join(look.LIGHTS)} 里的几个"})
+        if words is not None and (not isinstance(words, list) or not 1 <= len(words) <= WORDS_MAX
+                                  or not all(isinstance(w, str) and 1 <= len(w.strip()) <= WORD_CHARS for w in words)):
+            return self.reply(400, {"error": f"words 要有 1–{WORDS_MAX} 个词，每个 1–{WORD_CHARS} 个字"})
         if (not isinstance(probes, list) or not 1 <= len(probes) <= PROBES_MAX
                 or not all(isinstance(p, str) and 1 <= len(p.strip()) <= PROBE_CHARS for p in probes)):
             return self.reply(400, {"error": f"probes 要有 1–{PROBES_MAX} 条，每条 1–{PROBE_CHARS} 个字符"})
@@ -139,14 +174,69 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as error:
             return self.reply(503, {"error": f"设备上的 AI 暂时不可用：{error}"})
         pairs = [(vectors[w["is"]], vectors[w["not"]]) for w in when]
-        return self.reply(200, self.server.index.search({p: vectors[p] for p in probes}, limit, videos, pairs, each))
+        screen = body.get("screen") is True
+        if screen and self.server.vision is None:
+            return self.reply(400, {"error": "没有本机视觉模型，不能筛卡片"})
+        found = self.server.index.search({p: vectors[p] for p in probes}, limit, videos, pairs,
+                                         RECALL if screen else each, lights, [w.strip() for w in words] if words else None)
+        if screen:
+            asks = list(dict.fromkeys((i, probe) for probe, ids in found["each"].items() for i in ids))
+            cards = {card["id"]: card for card in found["cards"]}
+            try:
+                with ThreadPoolExecutor(look.WORKERS) as pool:
+                    said = list(pool.map(lambda ask: self.verdict(cards[ask[0]], ask[1]), asks))
+            except look.VisionError as error:
+                return self.reply(503, {"error": str(error)})
+            found = moments.screened(found, dict(zip(asks, said, strict=True)), each or 5)
+        if body.get("pictures") is True:
+            with ThreadPoolExecutor(4) as pool:
+                pictures = list(pool.map(self.picture, found["cards"]))
+            for card, picture in zip(found["cards"], pictures, strict=True):
+                card.pop("caption", None)
+                card["picture"] = base64.b64encode(picture).decode()
+        return self.reply(200, found)
+
+    def verdict(self, card, probe):
+        """What the vision model said of the card's key frames against probe (look.screened)."""
+        key = (card["id"], probe)
+        if key not in self.server.verdicts:
+            if card["id"] not in self.server.keyframes:
+                video, seconds = self.seconds(card)
+                self.server.keyframes[card["id"]] = [subprocess.run(
+                    ["ffmpeg", "-nostdin", "-v", "error", "-ss", f"{t:.3f}", "-i", video,  # noqa: S607
+                     "-frames:v", "1", "-vf", f"scale=-2:{look.EDGE}", "-q:v", "4", "-f", "image2", "-c:v", "mjpeg", "-"],
+                    check=True, capture_output=True, timeout=120).stdout for t in seconds]
+            self.server.verdicts[key] = self.server.vision.screen(self.server.keyframes[card["id"]], probe)
+        return self.server.verdicts[key]
+
+    def seconds(self, card):
+        """The card's video file and the seconds of its key frames, the ones its caption is written from."""
+        index = self.server.index
+        full = next(c for c in index.cards if c["id"] == card["id"])
+        return (os.path.join(self.server.videos, index.videos[card["video"]]["file"]),
+                [index.frame_ms[i] / 1000 for i in index.keyframes(full, look.KEYFRAMES)])
+
+    def picture(self, card):
+        """The card's three key frames side by side."""
+        if card["id"] not in self.server.pictures:
+            video, seconds = self.seconds(card)
+            inputs = [a for t in seconds for a in ("-ss", f"{t:.3f}", "-i", video)]
+            scaled = ";".join(f"[{k}:v]scale={PICTURE_WIDTH}:-2[f{k}]" for k in range(len(seconds)))
+            joined = "".join(f"[f{k}]" for k in range(len(seconds)))
+            graph = scaled + (f";{joined}hstack=inputs={len(seconds)}[out]" if len(seconds) > 1 else ";[f0]null[out]")
+            self.server.pictures[card["id"]] = subprocess.run(
+                ["ffmpeg", "-nostdin", "-v", "error", *inputs, "-filter_complex", graph, "-map", "[out]",  # noqa: S607
+                 "-frames:v", "1", "-q:v", str(PICTURE_QUALITY), "-f", "image2", "-c:v", "mjpeg", "-"],
+                check=True, capture_output=True, timeout=120).stdout
+        return self.server.pictures[card["id"]]
 
     def montage(self, body):
         segments = body.get("segments")
         if not isinstance(segments, list):
             return self.reply(400, {"error": "segments 要是列表"})
         try:
-            clips = self.server.index.check(segments, shows_needed=self.server.vision is not None)
+            clips = self.server.index.check(segments, shows_needed=self.server.vision is not None,
+                                            skipped=body.get("skipped"))
         except moments.PlanError as error:
             return self.reply(422, {"error": "剪辑计划不合规则", "problems": error.problems})
         files = {v: os.path.join(self.server.videos, meta["file"]) for v, meta in self.server.index.videos.items()}
