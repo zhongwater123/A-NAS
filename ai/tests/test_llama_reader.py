@@ -22,7 +22,8 @@ class LlamaReaderTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.directory, True)
         self.record = os.path.join(self.directory, "request.json")
         self.environ = {"FAKE_LLAMA_RECORD": self.record}
-        for name in ("FAKE_LLAMA_DELAY", "FAKE_LLAMA_STATUS", "FAKE_LLAMA_REPEAT", "FAKE_LLAMA_EXIT"):
+        for name in ("FAKE_LLAMA_DELAY", "FAKE_LLAMA_STATUS", "FAKE_LLAMA_REPEAT", "FAKE_LLAMA_PIECE_DELAY",
+                     "FAKE_LLAMA_EXIT"):
             self.environ[name] = None
 
     def reader(self, sha=None):
@@ -93,15 +94,33 @@ class LlamaReaderTest(unittest.TestCase):
         # The next reading starts it again.
         self.assertEqual(reader.read(b"jpeg", "text", None, reader.run_options())["finish"], "stop")
 
-    def test_hanging_up_stops_the_reading_while_the_image_is_encoded(self):
+    def test_hanging_up_while_the_image_is_encoded_stops_the_server(self):
+        # llama-server would evaluate the whole prompt before it noticed.
         self.environ["FAKE_LLAMA_DELAY"] = "30"
         reader = self.reader()
+        reader._start()
+        process = reader._process
         run = reader.run_options()
         threading.Timer(0.5, setattr, (run, "terminate", True)).start()
         started = time.monotonic()
         with self.assertRaises(providers.Cancelled):
             reader.read(b"jpeg", "text", None, run)
-        self.assertLess(time.monotonic() - started, 10)
+        self.assertLess(time.monotonic() - started, 15)
+        self.assertIsNotNone(process.poll())
+        self.assertIsNone(reader._process)
+
+    def test_hanging_up_while_generating_keeps_the_server(self):
+        # llama-server stops generating when it next writes a token.
+        self.environ["FAKE_LLAMA_REPEAT"] = "200"
+        self.environ["FAKE_LLAMA_PIECE_DELAY"] = "0.05"
+        reader = self.reader()
+        run = reader.run_options()
+        threading.Timer(1, setattr, (run, "terminate", True)).start()
+        started = time.monotonic()
+        with self.assertRaises(providers.Cancelled):
+            reader.read(b"jpeg", "text", None, run)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertIsNone(reader._process.poll())
 
     def test_a_loop_ends_the_reading(self):
         self.environ["FAKE_LLAMA_REPEAT"] = "2000"

@@ -5,8 +5,9 @@ hanging up when the gate closes, and asks how long llama-server keeps the CPU
 busy after that, above all while it encodes the image. This drives the
 Worker's own LlamaReader: one reading to the end, whose server log gives the
 encoding and generation times, then for each delay a reading that is
-cancelled after it. For each it prints when read() returned and when the
-server's CPU use fell below a third of a core, sampled every 0.1 s.
+cancelled after it. For each it prints when read() returned, whether the
+reader stopped the server (it does when no token has come yet) and when the
+server exited or its CPU use fell below a third of a core, sampled every 0.1 s.
 
     python -I ai/eval/ocr_cancel.py --server llama/llama-server --model M.gguf --model-manifest M.json \\
         --mmproj P.gguf --mmproj-manifest P.json --runtime-manifest deploy/llama/llama.json \\
@@ -33,13 +34,20 @@ def cpu_seconds(pid):
 
 
 def idle_after(pid, since, limit=600):
-    """Seconds from since until the process uses less than a third of a core over half a second."""
-    window = []
+    """Seconds from since until the process exits, or uses less than a third of a core over half a second."""
+    samples = []
     while time.monotonic() - since < limit:
-        window.append((time.monotonic(), cpu_seconds(pid)))
-        window = [sample for sample in window if sample[0] >= window[-1][0] - 0.5]
-        if window[-1][0] - window[0][0] >= 0.45 and (window[-1][1] - window[0][1]) / (window[-1][0] - window[0][0]) < 1 / 3:
-            return window[0][0] - since
+        now = time.monotonic()
+        try:
+            samples.append((now, cpu_seconds(pid)))
+        except FileNotFoundError:
+            return now - since
+        older = [sample for sample in samples if sample[0] <= now - 0.5]
+        if older:
+            start, used = older[-1]
+            if (samples[-1][1] - used) / (now - start) < 1 / 3:
+                return start - since
+            samples = samples[samples.index(older[-1]):]
         time.sleep(0.1)
     return None
 
@@ -69,6 +77,13 @@ def main():
                 if "encoded in" in line or "decoded in" in line or "eval time" in line:
                     print("  " + line.strip(), flush=True)
         for at in (float(value) for value in args.at.split(",")):
+            # A reading cancelled before its first token stops the server;
+            # start it again first, so that its loading is not counted.
+            began = time.monotonic()
+            reader._start()
+            if time.monotonic() - began > 1:
+                print(f"server started again in {time.monotonic() - began:.1f} s", flush=True)
+            pid = reader._process.pid
             run = reader.run_options()
             outcome = {}
 
@@ -86,10 +101,11 @@ def main():
             time.sleep(at)
             hung_up = time.monotonic()
             run.terminate = True
-            idle = idle_after(reader._process.pid, hung_up)
+            idle = idle_after(pid, hung_up)
             worker.join()
             print(f"hang up at {at:.0f} s: read() {outcome['result']} after {outcome['returned'] - hung_up:.1f} s, "
-                  f"server idle after {idle if idle is None else round(idle, 1)} s "
+                  f"server {'stopped' if reader._process is None else 'kept'}, "
+                  f"idle after {idle if idle is None else round(idle, 1)} s "
                   f"(request began {hung_up - started:.1f} s before)", flush=True)
     finally:
         reader.release()

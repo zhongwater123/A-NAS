@@ -882,6 +882,12 @@ class LlamaReader:
         finally:
             connection.close()
         if run.terminate:
+            if not text and not tokens:
+                # llama-server notices a closed connection only between
+                # generated tokens: it would encode the image and evaluate
+                # the whole prompt first, minutes of CPU on the NAS. Stopping
+                # it frees the CPU at once; the next reading starts it again.
+                self.release()
             raise Cancelled()
         if refused is not None:
             # The server checks the image; one it cannot decode fails again.

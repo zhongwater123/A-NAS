@@ -8,6 +8,7 @@ token's log probability. Environment variables shape it:
 - FAKE_LLAMA_DELAY: seconds to wait before answering, as the image's encoding does;
 - FAKE_LLAMA_STATUS: answer with this HTTP status instead;
 - FAKE_LLAMA_REPEAT: answer the same piece this many times;
+- FAKE_LLAMA_PIECE_DELAY: seconds between the answer's pieces;
 - FAKE_LLAMA_EXIT: exit at once with this code, as on a model that does not load.
 """
 
@@ -53,12 +54,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         repeat = int(os.environ.get("FAKE_LLAMA_REPEAT", "0"))
+        pause = float(os.environ.get("FAKE_LLAMA_PIECE_DELAY", "0"))
         pieces = ["回单"] * repeat if repeat else ANSWER
-        for piece in pieces:
-            event = {"choices": [{"delta": {"content": piece}, "finish_reason": None,
-                                  "logprobs": {"content": [{"token": piece, "logprob": -0.01}]}}]}
-            self.wfile.write(b"data: " + json.dumps(event, ensure_ascii=False).encode() + b"\n\n")
-        self.wfile.write(b'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n')
+        try:
+            for piece in pieces:
+                event = {"choices": [{"delta": {"content": piece}, "finish_reason": None,
+                                      "logprobs": {"content": [{"token": piece, "logprob": -0.01}]}}]}
+                self.wfile.write(b"data: " + json.dumps(event, ensure_ascii=False).encode() + b"\n\n")
+                self.wfile.flush()
+                time.sleep(pause)
+            self.wfile.write(b'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\ndata: [DONE]\n\n')
+        except BrokenPipeError:
+            pass  # the client hung up, which llama-server notices between tokens
 
 
 class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
