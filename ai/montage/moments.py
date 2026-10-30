@@ -39,7 +39,6 @@ CAPTIONS = "captions.json"
 TAGS = 5
 SEGMENT_MIN = 1.5
 SEGMENTS_MAX = 30
-TOTAL_MAX = 180.0
 REASON_CHARS = 200
 SHOWS_CHARS = 40
 ROUNDING = 0.005
@@ -217,9 +216,6 @@ class Index:
             clips.append((card["video"], float(start), float(end)))
         problems += [f"第 {a + 1} 段和第 {b + 1} 段用了同一段画面" for a in range(len(clips)) for b in range(a)
                      if clips[a][0] == clips[b][0] and min(clips[a][2], clips[b][2]) > max(clips[a][1], clips[b][1])]
-        total = sum(end - start for _video, start, end in clips)
-        if total > TOTAL_MAX:
-            problems.append(f"总长 {total:.1f} 秒，超过上限 {TOTAL_MAX:g} 秒")
         if problems:
             raise PlanError(problems)
         return clips

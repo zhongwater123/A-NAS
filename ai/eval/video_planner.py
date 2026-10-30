@@ -25,7 +25,8 @@ import time
 
 from eval import video_moments as vm
 
-ASK = "用测试视频剪一段 {seconds} 秒的视频：{text}。"
+# No length is asked for: the cut is as long as the material that fits (#326).
+ASK = "用测试视频剪一段视频：{text}。"
 TOOLS = ("mcp__anas__search_video_moments", "mcp__anas__make_montage")
 OTHER_TOOLS = ("browse_photos", "look_at_photo", "make_slideshow", "photo_details", "recent_changes", "search_photos",
                "similar_photos", "submit_changes")
