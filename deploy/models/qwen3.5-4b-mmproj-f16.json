@@ -1,0 +1,16 @@
+{
+  "name": "qwen3.5-4b-mmproj-f16",
+  "source": "https://huggingface.co/Qwen/Qwen3.5-4B",
+  "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+  "weightsSha256": {
+    "model.safetensors-00001-of-00002.safetensors": "26a93f066e1916adb13453dae5a0c707c0fbc71299ed98779571a907b8e74c61",
+    "model.safetensors-00002-of-00002.safetensors": "cb544bd9bfae93dc59b0f22b292f5933573854a7f9b97835c67060d7d910e188"
+  },
+  "conversion": "scripts/convert-ocr-model.sh in anas-ocr-eval:trixie with llama.cpp e36df604703dec1b6ce82f214698725475a57035 (b11655, which the Worker runs, adds only a Vulkan fix): convert_hf_to_gguf.py --mmproj --outtype f16. Converted twice, byte-identical.",
+  "file": "mmproj-Qwen3.5-4B-f16.gguf",
+  "sizeBytes": 672423392,
+  "memoryBytes": 805306368,
+  "memoryNote": "Its F16 weights and compute buffer, a share set by hand: llama-server does not report them apart. With the language model's 2,816 MiB, 3.5 GiB, which qwen3.5-4b-q4_k_m.json's memoryNote derives.",
+  "sha256": "e74dce404239f1f9d7e7bd63dd734b8b230a0a00eefa208f332a6b44258a2e13",
+  "license": "Apache-2.0: deploy/models/qwen3.5-4b.LICENSE is the LICENSE of the source at the revision above (https://huggingface.co/Qwen/Qwen3.5-4B/blob/851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a/LICENSE)."
+}
