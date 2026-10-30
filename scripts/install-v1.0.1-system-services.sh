@@ -92,9 +92,12 @@ if [[ ! -x /usr/lib/systemd/systemd-socket-proxyd ]]; then
   exit 3
 fi
 # MediaPipe links these even on the CPU (Debian packages libegl1 and libgles2),
-# and llama-server these (libgomp1, libssl3t64).
+# and llama-server these (libgomp1, libssl3t64). The cache is read once: with
+# pipefail, grep -q leaving early can end ldconfig with SIGPIPE, which then
+# reads as a missing library.
+host_libraries=$(ldconfig -p)
 for library in libEGL.so.1 libGLESv2.so.2 libgomp.so.1 libssl.so.3 libcrypto.so.3; do
-  if ! ldconfig -p | grep -Fq "$library ("; then
+  if ! grep -Fq "$library (" <<<"$host_libraries"; then
     echo "missing required host library: $library" >&2
     exit 3
   fi
