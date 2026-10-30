@@ -5,12 +5,16 @@ the photo service's gate weighs before background work loads the model
 (docs/architecture/photo-objects.md#资源策略). Starts the Worker with the given
 arguments and sends one request per model in the order a scan loads them,
 printing after each the Worker's resident memory and its cgroup's memory and
-peak, page cache included, as the gate counts it.
+peak, page cache included, as the gate counts it. With --text-photo it then
+releases those models and reads that photo's text, as the reading phase does
+(docs/architecture/photo-ocr.md#资源策略): the cgroup then holds the
+llama-server child too, which the Worker's own resident memory leaves out.
 
-Run it as the only process in a fresh cgroup, with the model files already in
-the page cache as they stay on the device, and the XNNPack cache kept between
-runs as CacheDirectory keeps it: one container per run, the second and later
-runs being the ones that count.
+Run it as the only process in a fresh cgroup (a container, or a scope of its
+own: the cgroup is the one this process is in), with the model files already
+in the page cache as they stay on the device, and the XNNPack cache kept
+between runs as CacheDirectory keeps it: one container per run, the second and
+later runs being the ones that count.
 
     docker run --rm --network none -v anas-xnnpack:/cache -v "$PWD/ai:/src/ai:ro" \\
         -v "$PWD/deploy/models:/manifests:ro" -v /mnt/d/A-NAS-models:/models:ro -v PHOTOS:/photos:ro \\
@@ -30,6 +34,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 AI = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -67,15 +72,38 @@ def resident(pid):
     return values["VmRSS"], values["VmHWM"]
 
 
+def own_cgroup():
+    """This process's cgroup v2 directory."""
+    with open("/proc/self/cgroup", encoding="ascii") as file:
+        for line in file:
+            if line.startswith("0::"):
+                return "/sys/fs/cgroup" + line[3:].strip().rstrip("/")
+    return "/sys/fs/cgroup"
+
+
+CGROUP = own_cgroup()
+
+
 def cgroup(name):
-    with open(f"/sys/fs/cgroup/memory.{name}", encoding="ascii") as file:
+    with open(f"{CGROUP}/memory.{name}", encoding="ascii") as file:
         return int(file.read())
+
+
+def anonymous():
+    """The cgroup's anonymous memory: what the kernel cannot reclaim without swap."""
+    with open(f"{CGROUP}/memory.stat", encoding="ascii") as file:
+        for line in file:
+            key, _, value = line.partition(" ")
+            if key == "anon":
+                return int(value)
+    return 0
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--photo", required=True, help="a photo with one animal and no face")
     parser.add_argument("--faces-photo", required=True, help="a photo with several faces")
+    parser.add_argument("--text-photo", help="a photo with text, read after the other models are released")
     parser.add_argument("worker", nargs=argparse.REMAINDER, help="-- and the Worker's arguments")
     args = parser.parse_args()
     worker_args = args.worker[1:] if args.worker[:1] == ["--"] else args.worker
@@ -104,13 +132,54 @@ def main():
 
     step("started", None)
     info = step("info", {"op": "info"})
-    print(f"  info says memoryBytes = {info.get('memoryBytes', 0) >> 20} MiB")
+    print(f"  info says memoryBytes = {info.get('memoryBytes', 0) >> 20} MiB, "
+          f"ocrMemoryBytes = {info.get('ocrMemoryBytes', 0) >> 20} MiB")
+    started, started_anonymous = cgroup("current"), anonymous()
     step("embed_image", {"op": "embed_image"}, args.photo)
     detected = step("detect_objects", {"op": "detect_objects"}, args.photo)
     step("detect_faces (none)", {"op": "detect_faces"}, args.photo)
     step("detect_faces", {"op": "detect_faces"}, args.faces_photo)
     boxes = [box[2:] for box in detected["boxes"][:1]] or [[0.1, 0.1, 0.9, 0.9]]
     step("embed_animals", {"op": "embed_animals", "boxes": boxes}, args.photo)
+    if args.text_photo:
+        step("release detector", {"op": "release", "what": "detector"})
+        before, before_anonymous = cgroup("current"), anonymous()
+        # The cgroup also counts the page cache llama-server maps the model
+        # from, which the kernel can reclaim; the gate weighs what it cannot,
+        # the anonymous memory, sampled while the reading runs.
+        highest = [before_anonymous]
+        reading_done = threading.Event()
+
+        def sample():
+            while not reading_done.wait(0.2):
+                highest[0] = max(highest[0], anonymous())
+
+        sampler = threading.Thread(target=sample)
+        sampler.start()
+        # Since Linux 6.12 a write resets the peak for reads through the same
+        # descriptor: the reading phase's own peak. Older kernels keep the
+        # peak since the start.
+        with open(f"{CGROUP}/memory.peak", "r+", encoding="ascii") as peak_file:
+            try:
+                peak_file.write("reset")
+                peak_file.flush()
+                since = "the release"
+            except OSError:
+                since = "the start (this kernel cannot reset the peak)"
+            began = time.monotonic()
+            try:
+                reading = step("read_text", {"op": "read_text", "kind": "text"}, args.text_photo)
+            finally:
+                reading_done.set()
+                sampler.join()
+            peak_file.seek(0)
+            peak = int(peak_file.read())
+        print(f"  read in {time.monotonic() - began:.1f} s, {len(reading['reading']['text'])} characters, "
+              f"finish {reading['reading']['finish']}")
+        print(f"  cgroup peak since {since}: {(peak - before) >> 20} MiB over the released Worker, "
+              f"{(peak - started) >> 20} MiB over its start")
+        print(f"  anonymous peak: {(highest[0] - before_anonymous) >> 20} MiB over the released Worker, "
+              f"{(highest[0] - started_anonymous) >> 20} MiB over its start")
     worker.terminate()
     worker.wait()
 

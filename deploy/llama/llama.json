@@ -1,0 +1,21 @@
+{
+  "name": "llama.cpp",
+  "version": "b11655",
+  "commit": "47f5a64ae12833b9092c6c47b54aa9f310c4f6f1",
+  "source": "https://github.com/ggml-org/llama.cpp/releases/download/b11655/llama-b11655-bin-ubuntu-x64.tar.gz",
+  "file": "llama-b11655-bin-ubuntu-x64.tar.gz",
+  "sizeBytes": 17834204,
+  "sha256": "0e3f2cb057d2f4439ddacc281761b370a47b74f2d9f6d74f29c5b6546a459a0c",
+  "directory": "llama-b11655",
+  "binary": "llama-server",
+  "members": [
+    "llama-server",
+    "libllama-server-impl.so",
+    "libllama-common.so*",
+    "libllama.so*",
+    "libmtmd.so*",
+    "libggml*.so*",
+    "LICENSE"
+  ],
+  "license": "MIT (LICENSE in the archive, https://github.com/ggml-org/llama.cpp/blob/b11655/LICENSE). Upstream's Ubuntu x64 CPU build: it picks the CPU variant at run time (libggml-cpu-*.so), needs glibc 2.34, libstdc++, libgomp and OpenSSL 3, and finds its libraries through RUNPATH $ORIGIN. GitHub publishes the same SHA-256 as the asset's digest. b11655 is e36df60, the commit the OCR evaluation built, plus a Vulkan-only fix (docs/architecture/photo-ocr.md)."
+}
