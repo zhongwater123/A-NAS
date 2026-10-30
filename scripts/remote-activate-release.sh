@@ -112,7 +112,7 @@ install -d -m 0750 ai
 tar -C ai --strip-components=1 -xf ai-worker.tar.incoming
 install -m 0644 ai-runtime.json.incoming ai/runtime.json
 manifest_field() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' "$1" "$2"; }
-for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx; do
+for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf; do
   name=${role%%:*}
   install -m 0644 "ai-$name.json.incoming" "ai/$name.json"
   sha=$(manifest_field "ai/$name.json" sha256)
@@ -128,6 +128,14 @@ runtime_file=$(manifest_field ai/runtime.json file)
 staged_runtime="$HOME/apps/a-nas/ai-runtimes/$runtime_file"
 printf '%s  %s\n' "$runtime_sha" "$staged_runtime" | sha256sum --check --quiet -
 ln -s "$staged_runtime" ai/runtime.tar.gz
+# The text reader's llama.cpp travels once per content like Qdrant.
+install -m 0644 ai-llama.json.incoming ai/llama.json
+llama_sha=$(manifest_field ai/llama.json sha256)
+llama_file=$(manifest_field ai/llama.json file)
+[[ "$llama_sha" =~ ^[0-9a-f]{64}$ && "$llama_file" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "invalid llama.cpp manifest" >&2; exit 2; }
+staged_llama="$HOME/apps/a-nas/llama/$llama_sha/$llama_file"
+printf '%s  %s\n' "$llama_sha" "$staged_llama" | sha256sum --check --quiet -
+ln -s "$staged_llama" ai/llama.tar.gz
 # The vector index (ADR 0028): Qdrant travels once per content like the
 # models; the release carries its manifest, settings and scripts.
 rm -rf vectors
@@ -163,7 +171,10 @@ rm -f \
   ai-face-detector.json.incoming \
   ai-face-embedder.json.incoming \
   ai-animal-embedder.json.incoming \
+  ai-ocr-model.json.incoming \
+  ai-ocr-mmproj.json.incoming \
   ai-runtime.json.incoming \
+  ai-llama.json.incoming \
   anas-api.incoming \
   anas-host-agent.incoming \
   kiosk-launcher.incoming \
