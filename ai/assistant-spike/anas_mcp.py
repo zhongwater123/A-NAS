@@ -370,8 +370,11 @@ def video_failed(status: int, raw: bytes) -> CallToolResult:
 
 if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mode):
     @server.tool(annotations=READ_ONLY, structured_output=False, description=(
-        "按画面内容在测试视频里找片段，返回镜头卡片，最相关的在前。probes：1–8 条要找的画面，每条一句短描述，"
-        "同一个意思可以换几种说法；地点、时间这类条件画面里看不出来，不要和画面主题写在一条里。limit：卡片数，1–40，默认 20。"
+        "按画面内容在测试视频里找片段，返回镜头卡片。probes：1–8 条要找的画面，每条一句短描述；"
+        "指令里要出现的每个画面主题各写一条，例如“城堡和老城的石头街道”写“城堡”“老城的石头街道”两条；"
+        "同一主题的近义说法找回的多是同一批卡片，不必多写；地点、时间这类条件画面里看不出来，不要和画面主题写在一条里。"
+        "each：每条探针各取它分数最高的几张卡片，彼此 group 不同，默认 5，条数乘 each 不超过 40；"
+        "这样一个主题的卡片不会被另一个主题的高分挤掉。结果里的 each 按探针列出各自取到的卡片 id，最相关的在前。"
         "每张卡片是一个镜头里画面大致不变的一段，最长 20 秒：id；video；start、end 是这张卡片覆盖的秒数；shot 是所在镜头的起止，"
         "剪的时候不能越出；caption 是本机视觉模型看这张卡片的代表帧写的一句话，比 tags 准，但也可能看错；"
         "score 是各条探针里最高的分数，probes 给出每条探针的最高分与出现的时刻 at；tags 是词表里最接近的几个词，"
@@ -382,9 +385,9 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         "每条是 {is, not}，例如 {\"is\": \"夜晚\", \"not\": \"白天\"}，只留更像 is 的画面；"
         "例如“下雨天的街道”：probes 检索街道，when 要求 {\"is\": \"下雨\", \"not\": \"晴天\"}。"
         "你看不到画面：向成员介绍片段时只说 caption 和出片前核对看到的内容，不要描述猜出来的细节。"))
-    def search_video_moments(probes: list[str], limit: int = 20, videos: list[str] | None = None,
+    def search_video_moments(probes: list[str], each: int = 5, videos: list[str] | None = None,
                              when: list[dict] | None = None):
-        body = {"probes": probes, "limit": limit} | ({"videos": videos} if videos else {}) | (
+        body = {"probes": probes, "each": each} | ({"videos": videos} if videos else {}) | (
             {"when": when} if when else {})
         try:
             status, _kind, raw, _review = video_moments("/search", body)

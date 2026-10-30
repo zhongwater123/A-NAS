@@ -190,6 +190,20 @@ class MomentsTest(unittest.TestCase):
         self.assertEqual(len(caught.exception.problems), 2)
         self.assertIn("纯黑或纯色", caught.exception.problems[0])
 
+    def test_search_each_keeps_every_probe_its_own_best_groups(self):
+        # The market scores below both castle parts, so the best two overall leave it out;
+        # each probe's own best keeps it.
+        probes = {"城堡": self.castle, "市场": (np.eye(8)[0] + np.eye(8)[4]) / np.sqrt(2)}
+        self.assertEqual([c["id"] for c in self.index.search(probes, limit=2)["cards"]], ["07-1-0", "07-1-1"])
+        found = self.index.search(probes, each=1)
+        self.assertEqual(found["each"], {"城堡": ["07-1-0"], "市场": ["07-0-0"]})
+        self.assertEqual([c["id"] for c in found["cards"]], ["07-1-0", "07-0-0"])
+        # A part that looks like one already kept gives its place to the next picture.
+        for card in self.index.cards:
+            if card["id"] == "07-1-1":
+                card["group"] = next(c["group"] for c in self.index.cards if c["id"] == "07-1-0")
+        self.assertEqual(self.index.search({"城堡": self.castle}, each=2)["each"]["城堡"], ["07-1-0", "07-0-0"])
+
     def test_search_keeps_to_the_videos_given(self):
         self.assertEqual(self.index.search({"城堡": self.castle}, videos=["08"])["cards"], [])
 

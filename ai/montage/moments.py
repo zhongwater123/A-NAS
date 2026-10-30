@@ -152,9 +152,24 @@ class Index:
                 mean += self.frames[i]
         return pieces
 
-    def search(self, probes: dict[str, np.ndarray], limit: int = CARDS_MAX, videos=None, when=()) -> dict:
+    def search(self, probes: dict[str, np.ndarray], limit: int = CARDS_MAX, videos=None, when=(), each=None) -> dict:
         """The cards whose best window is highest for any probe, best first; only in videos
-        when given, and only over windows that meet every condition in when."""
+        when given, and only over windows that meet every condition in when. With each, every
+        probe keeps its own best cards instead, each of them from another group, so that a
+        part of an instruction no card scores high for is not crowded out by the others."""
+        if each is not None:
+            found = self.search(probes, len(self.cards), videos, when)["cards"]
+            picked, chosen = {}, {}
+            for text in probes:
+                groups = set()
+                for card in sorted(found, key=lambda c: -c["probes"][text]["score"]):
+                    if len(chosen.setdefault(text, [])) == each:
+                        break
+                    if card["group"] not in groups:
+                        groups.add(card["group"])
+                        chosen[text].append(card["id"])
+                        picked.setdefault(card["id"], card)
+            return {"threshold": THRESHOLD, "each": chosen, "cards": list(picked.values())}
         scores = {text: self.frames @ vector for text, vector in probes.items()}
         out = self._left_out(when)
         found = []
