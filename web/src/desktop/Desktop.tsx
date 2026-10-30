@@ -26,6 +26,7 @@ import { useStoragePlan } from "../settings/storagePlan";
 import { SharesProvider, useShares } from "../shares/SharesProvider";
 import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
+import { lazyCode } from "../ui/lazyCode";
 import { useWebSearch } from "../websearch/status";
 import { AppWindow } from "./AppWindow";
 import type { AssistantTaskNotice } from "./api";
@@ -51,6 +52,10 @@ import { DesktopView, SystemRail } from "./SystemRail";
 import { useHostState } from "./useHostState";
 import { useWallpaper, wallpaperBackground } from "./wallpaper";
 import { closedWindow, windowReducer } from "./windows";
+
+// 家庭中心's hint loads after the desktop, so its code and styles stay out of
+// the first load.
+const FamilyNotices = lazyCode(() => import("../family/FamilyNotices").then((module) => module.FamilyNotices));
 
 // SharesRail is the system rail with the count of shares that have something
 // new, which only the shares provider knows.
@@ -316,6 +321,11 @@ export function Desktop({
         </ShellPart>
         <ShellPart name="task toasts">
           <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
+        </ShellPart>
+        <ShellPart name="family hints">
+          <Suspense fallback={null}>
+            <FamilyNotices onOpen={() => open("family")} />
+          </Suspense>
         </ShellPart>
         <ShellPart name="feedback">
           <FeedbackChannel />

@@ -52,6 +52,7 @@ const VALIDATED = [
   "listApps",
   "getAppInstallPlan",
   "getContainerSnapshot",
+  "listFamilyHints",
 ];
 
 const [bundlePath, outPath] = process.argv.slice(2);

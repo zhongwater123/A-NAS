@@ -18,6 +18,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   ├── Music（原地索引个人空间与 Shared 中的音频，经 Files 以成员身份读取；浏览器不能播放的格式经同一 FFmpeg Worker 探测与解码；ADR 0018）
   ├── /api/v1/web-search ── 只经 Unix 套接字 ──► 网页搜索服务（SearXNG，a-nas-search；只能访问公网地址；ADR 0030）
   ├── /api/v1/assistant ── 按白名单转发 ──► 成员自己的 Hermes 实例（hermes serve，沙箱；连接经 File Broker 的会话闸门；ADR 0024）
+  ├── /api/v1/family 转发 ──► 家庭服务（a-nas-family，独占数据卷 family 子卷；以读者会话向相册服务查询频道照片；ADR 0029）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
   │                              ├── 助手套接字 ◄── 成员的 AI 助手（对端 UID 即成员，只读；ADR 0024）
@@ -59,7 +60,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 3. Host Agent 接收经过校验的高层意图，不提供任意 Shell 执行接口；唯一例外是管理员的 Web 终端，Shell 在该管理员本人的 Linux 账号（UID 20100–29999）下运行，从不以 root 运行；容器代理同样只提供类型化容器操作，不透传 Docker Engine API，产品服务用户永不加入 `docker` 组。
 4. 磁盘和文件使用稳定资源 ID；临时路径和 `/dev/sdX` 不是身份。
 5. 修改宿主机状态的操作遵循“规划、确认、执行”三阶段。
-6. 个人空间和共享空间的文件数据由 POSIX ACL 授权（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)），Web 与 SMB 都以登录者本人身份访问；照片资产由相册 Catalog Policy 授权；独立分享副本由分享服务按参与者、有效期与任务授权（[ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)）。搜索与 AI 检索在返回前按同一 Policy 过滤。
+6. 个人空间和共享空间的文件数据由 POSIX ACL 授权（[ADR 0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)），Web 与 SMB 都以登录者本人身份访问；照片资产由相册 Catalog Policy 授权；独立分享副本由分享服务按参与者、有效期与任务授权（[ADR 0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)）；家庭中心的记录与录音由家庭服务按家人、家长与作者授权，频道里的照片仍由相册 Policy 授权（[ADR 0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)）。搜索与 AI 检索在返回前按同一 Policy 过滤。
 7. AI 派生数据可重建、可清除，原文件只读进入 AI Pipeline。
 8. Fake 与 Linux Adapter 遵循同一契约，差异由契约测试暴露。
 9. 本地控制台、隧道与局域网浏览器使用同一 Web UI 和产品 API；产品服务只监听回环，局域网只经 Caddy 入口进入并带转发头（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。Kiosk 只多一个不过期的本机会话，不获得额外宿主机权限。会话只在登录时的客户端上有效，桌面页面不允许其他来源嵌入：已安装应用与桌面同站，会收到会话 Cookie（ADR 0012 决定 7）。
@@ -165,6 +166,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [`internal/httpapi/routes_test.go`](../../internal/httpapi/routes_test.go)：管理员规格与路由对照、成员拒绝测试（[#270](https://github.com/zhongwater123/A-NAS/issues/270)）
 - [`internal/storage/authorization_test.go`](../../internal/storage/authorization_test.go)：服务层授权及被拒绝后不改变计划、不执行磁盘操作
 - [成员分享技术设计](member-sharing.md)
+- [家庭中心技术设计](family-center.md)
 - [领域语言](../../CONTEXT.md)
 - [当前状态](../status/CURRENT.md)
 - [ADR 索引](../adr/README.md)

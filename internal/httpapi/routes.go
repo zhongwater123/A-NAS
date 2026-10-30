@@ -14,6 +14,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
+	"github.com/zhongwater123/A-NAS/internal/familyapi"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
 	"github.com/zhongwater123/A-NAS/internal/filepreviewapi"
 	"github.com/zhongwater123/A-NAS/internal/filesapi"
@@ -100,6 +101,9 @@ func (h *productHandler) mounts() []apiroute.Route {
 	}
 	if h.Shares != nil {
 		mount(sharesapi.PathPrefix, apiroute.Session, withUser(h.Shares), sharesapi.Endpoints())
+	}
+	if h.Family != nil {
+		mount(familyapi.PathPrefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
 	}
 	if h.Photos != nil {
 		mount(photosapi.PathPrefix, apiroute.Session, serve(h.Photos), photosapi.Endpoints())

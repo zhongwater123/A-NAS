@@ -266,7 +266,7 @@ function AccountSection({
     setRemoving(true);
     setProfileNotice("");
     try {
-      profileSaved(await removeAvatar(), "已移除头像，现在显示名字的第一个字。");
+      profileSaved(await removeAvatar(), "已移除头像，现在显示文字头像。");
     } catch (caught) {
       setProfileError(messageOf(caught));
     } finally {
@@ -357,7 +357,7 @@ function AccountSection({
         <Row
           icon={<Avatar who={user} />}
           label="头像"
-          detail={user.avatarVersion ? "保存时已裁成圆形并压缩为小图" : "未设置，显示名字的第一个字"}
+          detail={user.avatarVersion ? "保存时已裁成圆形并压缩为小图" : "未设置，显示文字头像"}
         >
           {user.avatarVersion && (
             <button className={styles.setBtn} disabled={removing} onClick={() => void dropAvatar()}>

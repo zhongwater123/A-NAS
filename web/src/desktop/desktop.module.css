@@ -937,6 +937,11 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 .icon-websearch {
   background: linear-gradient(155deg, #3d6bff, #1b2a8c);
 }
+/* 家庭中心: a warm coral tile behind a cream house, in its title bar too. */
+.icon-family,
+.app-window-family .window-app-icon {
+  background: linear-gradient(155deg, #ffad7a, #e8573a);
+}
 /* AI 助手 is the user's ink portrait on white: it fills its white tile edge to
    edge and takes the tile's corners, with no gloss over the drawing. */
 .icon-ai {
@@ -1445,6 +1450,11 @@ button.net-rates {
   overflow: hidden;
   background: #f7f7f9;
   container: musicwindow / inline-size;
+}
+/* 家庭中心 */
+.window-content-family {
+  overflow: hidden;
+  background: #fbf7f2;
 }
 /* 分享 */
 .app-window-shares .window-app-icon {

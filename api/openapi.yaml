@@ -11,7 +11,7 @@ info:
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots,
     the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
     container agent, and each member's AI assistant (proposed in ADR 0024). Every operation that takes a JSON body
-    bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, 65 KiB for
+    bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares and the family center, 65 KiB for
     assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking
     feedback resolved.
 servers:
@@ -102,6 +102,35 @@ paths:
   /api/v1/shares/{shareId}/revoke: { $ref: "paths/shares.yaml#/~1api~1v1~1shares~1{shareId}~1revoke" }
   /api/v1/shares/{shareId}/entries/{entryId}/content: { $ref: "paths/shares.yaml#/~1api~1v1~1shares~1{shareId}~1entries~1{entryId}~1content" }
   /api/v1/shares/{shareId}/entries/{entryId}/preview: { $ref: "paths/shares.yaml#/~1api~1v1~1shares~1{shareId}~1entries~1{entryId}~1preview" }
+  /api/v1/family: { $ref: "paths/family.yaml#/~1api~1v1~1family" }
+  /api/v1/family/catalog: { $ref: "paths/family.yaml#/~1api~1v1~1family~1catalog" }
+  /api/v1/family/join: { $ref: "paths/family.yaml#/~1api~1v1~1family~1join" }
+  /api/v1/family/leave: { $ref: "paths/family.yaml#/~1api~1v1~1family~1leave" }
+  /api/v1/family/me: { $ref: "paths/family.yaml#/~1api~1v1~1family~1me" }
+  /api/v1/family/requests/{accountId}/approve: { $ref: "paths/family.yaml#/~1api~1v1~1family~1requests~1{accountId}~1approve" }
+  /api/v1/family/requests/{accountId}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1requests~1{accountId}" }
+  /api/v1/family/members/{accountId}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1members~1{accountId}" }
+  /api/v1/family/hints: { $ref: "paths/family.yaml#/~1api~1v1~1family~1hints" }
+  /api/v1/family/hints/seen: { $ref: "paths/family.yaml#/~1api~1v1~1family~1hints~1seen" }
+  /api/v1/family/babies: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies" }
+  /api/v1/family/babies/{babyId}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}" }
+  /api/v1/family/babies/{babyId}/restore: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1restore" }
+  /api/v1/family/babies/{babyId}/avatar: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1avatar" }
+  /api/v1/family/babies/{babyId}/records: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1records" }
+  /api/v1/family/babies/{babyId}/recordings: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1recordings" }
+  /api/v1/family/babies/{babyId}/trash: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1trash" }
+  /api/v1/family/babies/{babyId}/album: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1album" }
+  /api/v1/family/babies/{babyId}/growth: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1growth" }
+  /api/v1/family/babies/{babyId}/vaccines: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1vaccines" }
+  /api/v1/family/babies/{babyId}/vaccine-plan: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1vaccine-plan" }
+  /api/v1/family/babies/{babyId}/milestones: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1milestones" }
+  /api/v1/family/babies/{babyId}/wall: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1wall" }
+  /api/v1/family/records/{recordId}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}" }
+  /api/v1/family/records/{recordId}/restore: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1restore" }
+  /api/v1/family/records/{recordId}/audio: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1audio" }
+  /api/v1/family/records/{recordId}/comments: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1comments" }
+  /api/v1/family/records/{recordId}/reactions/{reaction}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1reactions~1{reaction}" }
+  /api/v1/family/comments/{commentId}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1comments~1{commentId}" }
   /api/v1/photos/libraries: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1libraries" }
   /api/v1/photos/ai: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1ai" }
   /api/v1/photos/search: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1search" }
@@ -255,6 +284,11 @@ components:
     AppId: { $ref: "components/apps.yaml#/parameters/AppId" }
     ContainerId: { $ref: "components/containers.yaml#/parameters/ContainerId" }
     FeedbackID: { $ref: "components/feedback.yaml#/parameters/FeedbackID" }
+    FamilyAccountID: { $ref: "components/family.yaml#/parameters/FamilyAccountID" }
+    FamilyBabyID: { $ref: "components/family.yaml#/parameters/FamilyBabyID" }
+    FamilyRecordID: { $ref: "components/family.yaml#/parameters/FamilyRecordID" }
+    FamilyCommentID: { $ref: "components/family.yaml#/parameters/FamilyCommentID" }
+    FamilyCursor: { $ref: "components/family.yaml#/parameters/FamilyCursor" }
     AssistantSessionID: { $ref: "components/assistant.yaml#/parameters/AssistantSessionID" }
     AssistantTaskID: { $ref: "components/assistant.yaml#/parameters/AssistantTaskID" }
     AssistantMemoryID: { $ref: "components/assistant.yaml#/parameters/AssistantMemoryID" }
@@ -377,6 +411,37 @@ components:
     MemberShareNotification: { $ref: "components/shares.yaml#/schemas/MemberShareNotification" }
     CreateMemberShare: { $ref: "components/shares.yaml#/schemas/CreateMemberShare" }
     SaveMemberShare: { $ref: "components/shares.yaml#/schemas/SaveMemberShare" }
+    FamilyDate: { $ref: "components/family.yaml#/schemas/FamilyDate" }
+    FamilyMe: { $ref: "components/family.yaml#/schemas/FamilyMe" }
+    FamilyMember: { $ref: "components/family.yaml#/schemas/FamilyMember" }
+    FamilyJoinRequest: { $ref: "components/family.yaml#/schemas/FamilyJoinRequest" }
+    FamilyAge: { $ref: "components/family.yaml#/schemas/FamilyAge" }
+    FamilyBaby: { $ref: "components/family.yaml#/schemas/FamilyBaby" }
+    FamilyBabyFields: { $ref: "components/family.yaml#/schemas/FamilyBabyFields" }
+    FamilyOverview: { $ref: "components/family.yaml#/schemas/FamilyOverview" }
+    FamilyMeasurement: { $ref: "components/family.yaml#/schemas/FamilyMeasurement" }
+    FamilyVaccineDose: { $ref: "components/family.yaml#/schemas/FamilyVaccineDose" }
+    FamilyMilestone: { $ref: "components/family.yaml#/schemas/FamilyMilestone" }
+    FamilyRecording: { $ref: "components/family.yaml#/schemas/FamilyRecording" }
+    FamilyRecordPhoto: { $ref: "components/family.yaml#/schemas/FamilyRecordPhoto" }
+    FamilyComment: { $ref: "components/family.yaml#/schemas/FamilyComment" }
+    FamilyCommentInput: { $ref: "components/family.yaml#/schemas/FamilyCommentInput" }
+    FamilyRecord: { $ref: "components/family.yaml#/schemas/FamilyRecord" }
+    FamilyRecordInput: { $ref: "components/family.yaml#/schemas/FamilyRecordInput" }
+    FamilyRecordPage: { $ref: "components/family.yaml#/schemas/FamilyRecordPage" }
+    FamilyAlbumPhoto: { $ref: "components/family.yaml#/schemas/FamilyAlbumPhoto" }
+    FamilyAlbumPage: { $ref: "components/family.yaml#/schemas/FamilyAlbumPage" }
+    FamilyGrowthPoint: { $ref: "components/family.yaml#/schemas/FamilyGrowthPoint" }
+    FamilyAssessment: { $ref: "components/family.yaml#/schemas/FamilyAssessment" }
+    FamilyGrowth: { $ref: "components/family.yaml#/schemas/FamilyGrowth" }
+    FamilyCatalogDose: { $ref: "components/family.yaml#/schemas/FamilyCatalogDose" }
+    FamilyCatalogVaccine: { $ref: "components/family.yaml#/schemas/FamilyCatalogVaccine" }
+    FamilyVaccineCatalog: { $ref: "components/family.yaml#/schemas/FamilyVaccineCatalog" }
+    FamilyScheduledDose: { $ref: "components/family.yaml#/schemas/FamilyScheduledDose" }
+    FamilyVaccineSchedule: { $ref: "components/family.yaml#/schemas/FamilyVaccineSchedule" }
+    FamilyTimelineEntry: { $ref: "components/family.yaml#/schemas/FamilyTimelineEntry" }
+    FamilyHint: { $ref: "components/family.yaml#/schemas/FamilyHint" }
+    FamilyCatalog: { $ref: "components/family.yaml#/schemas/FamilyCatalog" }
     PhotoLibrary: { $ref: "components/photos.yaml#/schemas/PhotoLibrary" }
     PhotoDirectory: { $ref: "components/photos.yaml#/schemas/PhotoDirectory" }
     PhotoAsset: { $ref: "components/photos.yaml#/schemas/PhotoAsset" }

@@ -91,6 +91,8 @@ type config struct {
 	PhotoAssistantLookup string `env:"ANAS_PHOTO_ASSISTANT_LOOKUP"`
 	ShareSessionGroup    string `env:"ANAS_SHARE_SESSION_GROUP"`
 	ShareSessionSocket   string `env:"ANAS_SHARE_SESSION_SOCKET" envDefault:"/run/a-nas-share-sessions/shares.sock"`
+	FamilySessionGroup   string `env:"ANAS_FAMILY_SESSION_GROUP"`
+	FamilySessionSocket  string `env:"ANAS_FAMILY_SESSION_SOCKET" envDefault:"/run/a-nas-family-sessions/family.sock"`
 }
 
 func loadConfig(environment map[string]string) (config, error) {
@@ -115,6 +117,9 @@ func loadConfig(environment map[string]string) (config, error) {
 	}
 	if c.ShareSessionGroup == "" {
 		c.ShareSessionGroup = accountid.ShareServiceUser
+	}
+	if c.FamilySessionGroup == "" {
+		c.FamilySessionGroup = accountid.FamilyServiceUser
 	}
 	return c, nil
 }
@@ -226,11 +231,16 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer stopSessionLookup()
-	stopShareLookup, err := serveShareSessionLookup(config, sessions, logger)
+	stopShareLookup, err := serveServiceSessionLookup("share", config.ShareSessionGroup, config.ShareSessionSocket, sessions, logger)
 	if err != nil {
 		return err
 	}
 	defer stopShareLookup()
+	stopFamilyLookup, err := serveServiceSessionLookup("family", config.FamilySessionGroup, config.FamilySessionSocket, sessions, logger)
+	if err != nil {
+		return err
+	}
+	defer stopFamilyLookup()
 	// Serving waits for nothing on the data volume: one that cannot be
 	// reconciled, or a long walk over a large space, leaves Web files, the
 	// terminal and the logs working (#166).
@@ -384,6 +394,11 @@ func ensureManagedStores(ctx context.Context, executor *linuxhostops.Executor, l
 		logger.ErrorContext(ctx, "share store repair failed", "error", shareErr)
 	}
 	logRepairs(logger, shareRepairs)
+	familyRepairs, familyErr := executor.EnsureFamilyStore(ctx)
+	if familyErr != nil {
+		logger.ErrorContext(ctx, "family store repair failed", "error", familyErr)
+	}
+	logRepairs(logger, familyRepairs)
 	repaired, err := executor.EnsurePhotosStore(ctx)
 	if err != nil {
 		logger.ErrorContext(ctx, "photo store repair failed", "error", err)
@@ -484,13 +499,15 @@ func listen(socketPath, groupName string) (net.Listener, error) {
 	return listener, nil
 }
 
-func serveShareSessionLookup(config config, sessions *sessiondir.Directory, logger *slog.Logger) (func(), error) {
-	group := config.ShareSessionGroup
+// serveServiceSessionLookup confirms sessions for a service that runs as its
+// own identity, such as the share or family service, on socket, which only
+// that service's group reaches. Each service has its own directory, for
+// listen hands the directory to the group.
+func serveServiceSessionLookup(service, group, socket string, sessions *sessiondir.Directory, logger *slog.Logger) (func(), error) {
 	if _, err := user.LookupGroup(group); err != nil {
-		logger.Info("share service is not installed; lookup is off")
+		logger.Info(service + " service is not installed; lookup is off")
 		return func() {}, nil
 	}
-	socket := config.ShareSessionSocket
 	listener, err := listen(socket, group)
 	if err != nil {
 		return nil, err
@@ -498,7 +515,7 @@ func serveShareSessionLookup(config config, sessions *sessiondir.Directory, logg
 	server := &http.Server{Handler: sessionlookup.NewHandler(sessions, nil, logger), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	go func() {
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("share session lookup stopped", "error", err)
+			logger.Error(service+" session lookup stopped", "error", err)
 		}
 	}()
 	return func() { _ = server.Close(); _ = os.Remove(socket) }, nil

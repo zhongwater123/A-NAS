@@ -3,7 +3,7 @@ openapi: 3.1.0
 info:
   title: A-NAS Product API
   version: 1.0.1-rc.1
-  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (proposed in ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved.'
+  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (proposed in ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares and the family center, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved.'
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 servers:
   - url: http://127.0.0.1:8080
@@ -2563,6 +2563,933 @@ paths:
                 type: string
                 format: binary
         default:
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family:
+    get:
+      operationId: getFamily
+      summary: 'The caller''s standing in the family and, for members, the family: members, babies and, for guardians, join requests and babies they can restore'
+      responses:
+        '200':
+          description: The family as the caller sees it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyOverview'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/catalog:
+    get:
+      operationId: getFamilyCatalog
+      summary: 'What pages offer when adding: preset family roles, suggested milestones, the vaccine catalog and the growth standard''s name'
+      responses:
+        '200':
+          description: The catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyCatalog'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/join:
+    post:
+      operationId: joinFamily
+      summary: Ask to join with a family role; the first account, or the first after everyone has gone, founds the family as its guardian
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - role
+              properties:
+                role:
+                  type: string
+                  minLength: 1
+                  maxLength: 8
+      responses:
+        '200':
+          description: The caller's standing now
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyMe'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: cancelFamilyJoin
+      summary: Withdraw the caller's own join request
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Withdrawn
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/leave:
+    post:
+      operationId: leaveFamily
+      summary: Leave the family; what the caller added stays. The last guardian must name another first (last_guardian)
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Left
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/me:
+    patch:
+      operationId: setFamilyRole
+      summary: Change the caller's own family role
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - role
+              properties:
+                role:
+                  type: string
+                  minLength: 1
+                  maxLength: 8
+      responses:
+        '200':
+          description: The caller as a member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyMember'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/requests/{accountId}/approve:
+    post:
+      operationId: approveFamilyJoin
+      summary: A guardian admits a requester; 爸爸 and 妈妈 become guardians
+      parameters:
+        - $ref: '#/components/parameters/FamilyAccountID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The new member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyMember'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/requests/{accountId}:
+    delete:
+      operationId: rejectFamilyJoin
+      summary: A guardian turns a join request down; the account may ask again
+      parameters:
+        - $ref: '#/components/parameters/FamilyAccountID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Rejected
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/members/{accountId}:
+    parameters:
+      - $ref: '#/components/parameters/FamilyAccountID'
+    patch:
+      operationId: setFamilyGuardian
+      summary: A guardian makes a member a guardian or a relative; the family keeps at least one guardian (last_guardian)
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - guardian
+              properties:
+                guardian:
+                  type: boolean
+      responses:
+        '200':
+          description: The member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyMember'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: removeFamilyMember
+      summary: A guardian takes another member out of the family; what they added stays
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Removed
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/hints:
+    get:
+      operationId: listFamilyHints
+      summary: 'What the desktop has not told the caller yet: vaccine doses due or due within 30 days and, for guardians, join requests. Empty outside the family'
+      responses:
+        '200':
+          description: Hints
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FamilyHint'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/hints/seen:
+    post:
+      operationId: markFamilyHintsSeen
+      summary: Record that the caller was told, so the desktop does not tell them again
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - keys
+              properties:
+                keys:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: string
+                    minLength: 1
+                    maxLength: 200
+      responses:
+        '204':
+          description: Recorded
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies:
+    post:
+      operationId: addFamilyBaby
+      summary: A guardian adds a baby and so a new channel
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FamilyBabyFields'
+      responses:
+        '201':
+          description: The baby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyBaby'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}:
+    parameters:
+      - $ref: '#/components/parameters/FamilyBabyID'
+    get:
+      operationId: getFamilyBaby
+      summary: A baby's profile
+      responses:
+        '200':
+          description: The baby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyBaby'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+    patch:
+      operationId: updateFamilyBaby
+      summary: A guardian edits a baby's profile; changed when someone saved first, conflict when records would fall before the new birth date
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FamilyBabyFields'
+      responses:
+        '200':
+          description: The baby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyBaby'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: deleteFamilyBaby
+      summary: A guardian moves a baby and the channel into the trash for 15 days; name repeats the baby's name
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 20
+      responses:
+        '204':
+          description: Deleted
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/restore:
+    post:
+      operationId: restoreFamilyBaby
+      summary: A guardian brings a deleted baby and the channel back
+      parameters:
+        - $ref: '#/components/parameters/FamilyBabyID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The baby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyBaby'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/avatar:
+    parameters:
+      - $ref: '#/components/parameters/FamilyBabyID'
+    get:
+      operationId: getFamilyBabyAvatar
+      summary: The baby's avatar, a square JPEG; cache it by the baby's avatarVersion
+      responses:
+        '200':
+          description: The avatar
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+    put:
+      operationId: setFamilyBabyAvatar
+      summary: A guardian sets the avatar from a picture, cropped to a square and shrunk like an account avatar
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: JPEG, PNG, GIF or WebP; at most 12 MiB.
+      responses:
+        '200':
+          description: The baby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyBaby'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '413':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: removeFamilyBabyAvatar
+      summary: A guardian removes the avatar
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The baby
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyBaby'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/records:
+    parameters:
+      - $ref: '#/components/parameters/FamilyBabyID'
+    get:
+      operationId: listFamilyRecords
+      summary: 'A channel''s records as a timeline: by the day each happened, newest first, 30 a page; only photos the reader can see, and photo records with none left are skipped'
+      parameters:
+        - $ref: '#/components/parameters/FamilyCursor'
+        - name: kind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - photos
+              - recording
+              - journal
+              - measurement
+              - vaccine
+              - milestone
+      responses:
+        '200':
+          description: A page of records
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyRecordPage'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    post:
+      operationId: addFamilyRecord
+      summary: Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FamilyRecordInput'
+      responses:
+        '201':
+          description: The record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyRecord'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '413':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/recordings:
+    post:
+      operationId: addFamilyRecording
+      summary: Add a recording; the text fields come before the file, which is streamed to the store
+      parameters:
+        - $ref: '#/components/parameters/FamilyBabyID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                requestKey:
+                  type: string
+                  maxLength: 128
+                title:
+                  type: string
+                  maxLength: 60
+                occurredOn:
+                  $ref: '#/components/schemas/FamilyDate'
+                file:
+                  type: string
+                  format: binary
+                  description: MP3, M4A/AAC, WAV, Ogg, WebM, FLAC, AMR or 3GPP audio; at most 200 MiB.
+      responses:
+        '201':
+          description: The record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyRecord'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '413':
+          $ref: '#/components/responses/ProductError'
+        '415':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/trash:
+    get:
+      operationId: listFamilyTrash
+      summary: 'A channel''s recently deleted records the caller may restore: their own, or everyone''s for a guardian'
+      parameters:
+        - $ref: '#/components/parameters/FamilyBabyID'
+      responses:
+        '200':
+          description: Deleted records
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FamilyRecord'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/album:
+    get:
+      operationId: getFamilyAlbum
+      summary: 'The cloud album: a channel''s photos and videos the reader can see, newest taken first, with the month of life each was taken in'
+      parameters:
+        - $ref: '#/components/parameters/FamilyBabyID'
+        - $ref: '#/components/parameters/FamilyCursor'
+      responses:
+        '200':
+          description: A page of the album
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyAlbumPage'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/growth:
+    get:
+      operationId: getFamilyGrowth
+      summary: '成长记录: the measurements, the growth standard''s curves for the baby''s sex, and where the latest values lie'
+      parameters:
+        - $ref: '#/components/parameters/FamilyBabyID'
+      responses:
+        '200':
+          description: Growth
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyGrowth'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/vaccines:
+    get:
+      operationId: getFamilyVaccines
+      summary: 'The baby''s vaccination schedule: the programme''s doses and the planned ones, each with its status, and every dose recorded'
+      parameters:
+        - $ref: '#/components/parameters/FamilyBabyID'
+      responses:
+        '200':
+          description: The schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyVaccineSchedule'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/vaccine-plan:
+    put:
+      operationId: setFamilyVaccinePlan
+      summary: Choose the non-programme vaccines whose doses the schedule lists
+      parameters:
+        - $ref: '#/components/parameters/FamilyBabyID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - codes
+              properties:
+                codes:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: The schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyVaccineSchedule'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/milestones:
+    get:
+      operationId: listFamilyMilestones
+      summary: '大事记: milestones oldest first, the automatic ones (birth, 满月, 百天, birthdays) among them and the next one at the end'
+      parameters:
+        - $ref: '#/components/parameters/FamilyBabyID'
+      responses:
+        '200':
+          description: The timeline
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FamilyTimelineEntry'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/wall:
+    parameters:
+      - $ref: '#/components/parameters/FamilyBabyID'
+    get:
+      operationId: listFamilyWall
+      summary: The channel's message wall in 亲友团, newest first
+      responses:
+        '200':
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FamilyComment'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+    post:
+      operationId: addFamilyWallMessage
+      summary: Leave a message on the wall
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FamilyCommentInput'
+      responses:
+        '201':
+          description: The message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyComment'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/records/{recordId}:
+    parameters:
+      - $ref: '#/components/parameters/FamilyRecordID'
+    get:
+      operationId: getFamilyRecord
+      summary: One record that is not in the trash
+      responses:
+        '200':
+          description: The record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyRecord'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    patch:
+      operationId: updateFamilyRecord
+      summary: The author edits their record; changed when they edited it elsewhere first
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FamilyRecordInput'
+      responses:
+        '200':
+          description: The record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyRecord'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: deleteFamilyRecord
+      summary: Move a record into the channel's recent deletions for 15 days; authors delete their own, guardians anyone's. Photos stay in the shared library
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Deleted
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/records/{recordId}/restore:
+    post:
+      operationId: restoreFamilyRecord
+      summary: Bring a deleted record back with its comments
+      parameters:
+        - $ref: '#/components/parameters/FamilyRecordID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyRecord'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/records/{recordId}/audio:
+    get:
+      operationId: getFamilyRecordingAudio
+      summary: 'Play a recording: as stored with Range, or converted to FLAC by the media worker for AMR and 3GPP, which cannot seek'
+      parameters:
+        - $ref: '#/components/parameters/FamilyRecordID'
+      responses:
+        '200':
+          description: The audio
+          content:
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Part of the audio
+          content:
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '416':
+          description: The requested range is outside the recording
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/records/{recordId}/comments:
+    post:
+      operationId: addFamilyComment
+      summary: Comment under a record
+      parameters:
+        - $ref: '#/components/parameters/FamilyRecordID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FamilyCommentInput'
+      responses:
+        '201':
+          description: The comment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyComment'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/records/{recordId}/reactions/{reaction}:
+    put:
+      operationId: addFamilyReaction
+      summary: Leave the caller's reaction on a record; leaving it again changes nothing
+      parameters:
+        - $ref: '#/components/parameters/FamilyRecordID'
+        - $ref: '#/components/parameters/FamilyReactionName'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          $ref: '#/components/responses/FamilyReactions'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: removeFamilyReaction
+      summary: Take back the caller's reaction on a record; taking back one never left changes nothing
+      parameters:
+        - $ref: '#/components/parameters/FamilyRecordID'
+        - $ref: '#/components/parameters/FamilyReactionName'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          $ref: '#/components/responses/FamilyReactions'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/comments/{commentId}:
+    delete:
+      operationId: deleteFamilyComment
+      summary: Delete a comment or wall message for good; authors delete their own, guardians anyone's
+      parameters:
+        - $ref: '#/components/parameters/FamilyCommentID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Deleted
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
           $ref: '#/components/responses/ProductError'
   /api/v1/photos/libraries:
     get:
@@ -6782,6 +7709,41 @@ components:
       required: true
       schema:
         type: string
+    FamilyAccountID:
+      name: accountId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    FamilyBabyID:
+      name: babyId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    FamilyRecordID:
+      name: recordId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    FamilyCommentID:
+      name: commentId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    FamilyCursor:
+      name: cursor
+      in: query
+      required: false
+      description: The `next` of the previous page.
+      schema:
+        type: string
     AssistantSessionID:
       name: sessionId
       in: path
@@ -6814,6 +7776,12 @@ components:
       schema:
         type: string
         pattern: ^[A-Za-z0-9_.:-]{1,64}$
+    FamilyReactionName:
+      name: reaction
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/FamilyReactionName'
   responses:
     ProductError:
       description: Product operation error.
@@ -6886,6 +7854,20 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    FamilyReactions:
+      description: The record's reactions
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - items
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FamilyReaction'
   schemas:
     DataSource:
       type: string
@@ -8772,6 +9754,7 @@ components:
         - host-agent
         - photos
         - shares
+        - family
         - containers
         - ai
         - media
@@ -9495,6 +10478,858 @@ components:
         - requestId
         - entryIds
         - target
+    FamilyDate:
+      type: string
+      format: date
+      description: A calendar date without time of day or zone.
+    FamilyMe:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - guardian
+      properties:
+        status:
+          type: string
+          enum:
+            - none
+            - pending
+            - member
+          description: 'none: not in the family; pending: waiting for a guardian''s approval.'
+        role:
+          type: string
+          maxLength: 8
+        guardian:
+          type: boolean
+    FamilyMember:
+      type: object
+      additionalProperties: false
+      required:
+        - accountId
+        - username
+        - role
+        - guardian
+        - joinedAt
+        - active
+      properties:
+        accountId:
+          type: string
+        username:
+          type: string
+        role:
+          type: string
+          maxLength: 8
+          description: The member's family role, a name for them as seen from the babies, such as 外婆.
+        guardian:
+          type: boolean
+          description: Guardians add babies, edit their profiles, approve joining and delete anyone's content.
+        joinedAt:
+          type: string
+          format: date-time
+        active:
+          type: boolean
+          description: False once the account is disabled or gone; such members keep their content but no place in the family.
+    FamilyJoinRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - accountId
+        - username
+        - role
+        - requestedAt
+      properties:
+        accountId:
+          type: string
+        username:
+          type: string
+        role:
+          type: string
+          maxLength: 8
+        requestedAt:
+          type: string
+          format: date-time
+    FamilyAge:
+      type: object
+      additionalProperties: false
+      required:
+        - years
+        - months
+        - days
+        - totalMonths
+      properties:
+        years:
+          type: integer
+          minimum: 0
+        months:
+          type: integer
+          minimum: 0
+          maximum: 11
+        days:
+          type: integer
+          minimum: 0
+          maximum: 30
+        totalMonths:
+          type: integer
+          minimum: 0
+          description: The month of life, from 0 for the first month.
+    FamilyBaby:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - nickname
+        - sex
+        - birthDate
+        - age
+        - avatarVersion
+        - version
+        - createdAt
+        - createdBy
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          minLength: 1
+          maxLength: 20
+        nickname:
+          type: string
+          maxLength: 20
+        sex:
+          type: string
+          enum:
+            - female
+            - male
+        birthDate:
+          $ref: '#/components/schemas/FamilyDate'
+        age:
+          $ref: '#/components/schemas/FamilyAge'
+        avatarVersion:
+          type: integer
+          minimum: 0
+          description: Changes with each new avatar; 0 means there is none.
+        version:
+          type: integer
+          minimum: 1
+          description: Counts edits to the profile.
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          description: Account ID of the guardian who added the baby.
+        deletedAt:
+          type: string
+          format: date-time
+          description: Set while the baby is in the trash; restorable for 15 days.
+    FamilyBabyFields:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - sex
+        - birthDate
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 20
+        nickname:
+          type: string
+          maxLength: 20
+        sex:
+          type: string
+          enum:
+            - female
+            - male
+        birthDate:
+          $ref: '#/components/schemas/FamilyDate'
+        version:
+          type: integer
+          minimum: 0
+          description: When editing, the version the edit was made from.
+    FamilyOverview:
+      type: object
+      additionalProperties: false
+      required:
+        - exists
+        - me
+        - members
+        - requests
+        - babies
+        - deletedBabies
+      properties:
+        exists:
+          type: boolean
+          description: Whether anyone has founded the family yet.
+        me:
+          $ref: '#/components/schemas/FamilyMe'
+        members:
+          type: array
+          description: Empty unless the caller is a member.
+          items:
+            $ref: '#/components/schemas/FamilyMember'
+        requests:
+          type: array
+          description: Join requests; empty unless the caller is a guardian.
+          items:
+            $ref: '#/components/schemas/FamilyJoinRequest'
+        babies:
+          type: array
+          description: Oldest first; empty unless the caller is a member.
+          items:
+            $ref: '#/components/schemas/FamilyBaby'
+        deletedBabies:
+          type: array
+          description: Babies a guardian can still restore.
+          items:
+            $ref: '#/components/schemas/FamilyBaby'
+    FamilyMeasurement:
+      type: object
+      additionalProperties: false
+      properties:
+        heightCm:
+          type: number
+          minimum: 30
+          maximum: 200
+          description: Recumbent length or standing height, one decimal.
+        weightKg:
+          type: number
+          minimum: 0.5
+          maximum: 100
+          description: Two decimals.
+        headCm:
+          type: number
+          minimum: 20
+          maximum: 70
+          description: Head circumference, one decimal.
+    FamilyVaccineDose:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - dose
+      properties:
+        code:
+          type: string
+          description: A vaccine of the catalog, or custom with name.
+        name:
+          type: string
+          maxLength: 30
+          description: The vaccine's name when code is custom.
+        dose:
+          type: integer
+          minimum: 1
+          maximum: 10
+        clinic:
+          type: string
+          maxLength: 50
+        batch:
+          type: string
+          maxLength: 50
+    FamilyMilestone:
+      type: object
+      additionalProperties: false
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          maxLength: 30
+        autoKey:
+          type: string
+          description: 'The automatic milestone the record annotates: birth, month-1, day-100, year-1 or birthday-N.'
+    FamilyRecording:
+      type: object
+      additionalProperties: false
+      required:
+        - contentType
+        - sizeBytes
+        - fileName
+      properties:
+        contentType:
+          type: string
+        sizeBytes:
+          type: integer
+          minimum: 1
+        fileName:
+          type: string
+    FamilyRecordPhoto:
+      type: object
+      additionalProperties: false
+      required:
+        - assetId
+        - video
+        - role
+      properties:
+        assetId:
+          type: string
+          description: A photo asset of the shared photo library.
+        takenAt:
+          type: string
+          format: date-time
+        video:
+          type: boolean
+        role:
+          type: string
+          enum:
+            - album
+            - certificate
+          description: Certificates prove a vaccination and stay out of the cloud album.
+    FamilyComment:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - text
+        - authorId
+        - authorName
+        - createdAt
+      properties:
+        id:
+          type: string
+        recordId:
+          type: string
+          description: The record the comment is under; absent on the message wall.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        authorId:
+          type: string
+        authorName:
+          type: string
+          description: Username of the author when they wrote it.
+        createdAt:
+          type: string
+          format: date-time
+    FamilyCommentInput:
+      type: object
+      additionalProperties: false
+      required:
+        - text
+      properties:
+        requestKey:
+          type: string
+          maxLength: 128
+          description: Repeating a request with the same key returns the first comment.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    FamilyRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - babyId
+        - kind
+        - occurredOn
+        - text
+        - photos
+        - authorId
+        - authorName
+        - createdAt
+        - version
+        - comments
+        - reactions
+      properties:
+        id:
+          type: string
+        babyId:
+          type: string
+        kind:
+          type: string
+          enum:
+            - photos
+            - recording
+            - journal
+            - measurement
+            - vaccine
+            - milestone
+        occurredOn:
+          $ref: '#/components/schemas/FamilyDate'
+        age:
+          $ref: '#/components/schemas/FamilyAge'
+        text:
+          type: string
+          maxLength: 5000
+        photos:
+          type: array
+          description: Only the photos the reader can see now.
+          items:
+            $ref: '#/components/schemas/FamilyRecordPhoto'
+        measurement:
+          $ref: '#/components/schemas/FamilyMeasurement'
+        vaccine:
+          $ref: '#/components/schemas/FamilyVaccineDose'
+        milestone:
+          $ref: '#/components/schemas/FamilyMilestone'
+        recording:
+          $ref: '#/components/schemas/FamilyRecording'
+        authorId:
+          type: string
+        authorName:
+          type: string
+          description: Username of the author when they added it.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          minimum: 1
+        deletedAt:
+          type: string
+          format: date-time
+        comments:
+          type: array
+          description: Oldest first.
+          items:
+            $ref: '#/components/schemas/FamilyComment'
+        reactions:
+          type: array
+          description: In the order the window shows them; only those someone left.
+          items:
+            $ref: '#/components/schemas/FamilyReaction'
+    FamilyRecordInput:
+      type: object
+      additionalProperties: false
+      properties:
+        requestKey:
+          type: string
+          maxLength: 128
+          description: Repeating a request with the same key returns the first record.
+        kind:
+          type: string
+          enum:
+            - photos
+            - journal
+            - measurement
+            - vaccine
+            - milestone
+          description: Required when adding; an edit keeps the kind.
+        occurredOn:
+          $ref: '#/components/schemas/FamilyDate'
+        text:
+          type: string
+          maxLength: 5000
+        photos:
+          type: array
+          maxItems: 200
+          description: Photo asset IDs of the shared library, in order; on an edit, replaces the photos.
+          items:
+            type: string
+        certificates:
+          type: array
+          maxItems: 200
+          description: A vaccination's proof photos.
+          items:
+            type: string
+        alsoBabies:
+          type: array
+          description: A photo record goes into these babies' channels too.
+          items:
+            type: string
+        measurement:
+          $ref: '#/components/schemas/FamilyMeasurement'
+        vaccine:
+          $ref: '#/components/schemas/FamilyVaccineDose'
+        milestone:
+          $ref: '#/components/schemas/FamilyMilestone'
+        version:
+          type: integer
+          minimum: 0
+          description: When editing, the version the edit was made from.
+    FamilyRecordPage:
+      type: object
+      additionalProperties: false
+      required:
+        - records
+      properties:
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/FamilyRecord'
+        next:
+          type: string
+    FamilyAlbumPhoto:
+      type: object
+      additionalProperties: false
+      required:
+        - assetId
+        - recordId
+        - video
+        - monthOfLife
+      properties:
+        assetId:
+          type: string
+        recordId:
+          type: string
+        takenAt:
+          type: string
+          format: date-time
+        video:
+          type: boolean
+        monthOfLife:
+          type: integer
+          minimum: -1
+          description: The month of life the photo was taken in, from 0; -1 before birth.
+    FamilyAlbumPage:
+      type: object
+      additionalProperties: false
+      required:
+        - photos
+      properties:
+        photos:
+          type: array
+          description: Newest taken first.
+          items:
+            $ref: '#/components/schemas/FamilyAlbumPhoto'
+        next:
+          type: string
+    FamilyGrowthPoint:
+      type: object
+      additionalProperties: false
+      required:
+        - ageMonths
+        - values
+      properties:
+        ageMonths:
+          type: number
+          minimum: 0
+        values:
+          type: array
+          description: One value per percentile, lowest first.
+          items:
+            type: number
+    FamilyAssessment:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+        - date
+        - ageMonths
+      properties:
+        value:
+          type: number
+        date:
+          $ref: '#/components/schemas/FamilyDate'
+        ageMonths:
+          type: number
+          minimum: 0
+        lower:
+          type: string
+          description: The percentile below the value; absent below the lowest or outside the standard's ages.
+        upper:
+          type: string
+          description: The percentile above the value; absent above the highest or outside the standard's ages.
+    FamilyGrowth:
+      type: object
+      additionalProperties: false
+      required:
+        - sex
+        - birthDate
+        - standard
+        - percentiles
+        - curves
+        - measurements
+        - latest
+      properties:
+        sex:
+          type: string
+          enum:
+            - female
+            - male
+        birthDate:
+          $ref: '#/components/schemas/FamilyDate'
+        standard:
+          type: string
+        percentiles:
+          type: array
+          items:
+            type: string
+        curves:
+          type: object
+          additionalProperties: false
+          required:
+            - height
+            - weight
+            - head
+          properties:
+            height:
+              type: array
+              items:
+                $ref: '#/components/schemas/FamilyGrowthPoint'
+            weight:
+              type: array
+              items:
+                $ref: '#/components/schemas/FamilyGrowthPoint'
+            head:
+              type: array
+              items:
+                $ref: '#/components/schemas/FamilyGrowthPoint'
+        measurements:
+          type: array
+          description: Oldest first.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - recordId
+              - date
+              - ageMonths
+            properties:
+              recordId:
+                type: string
+              date:
+                $ref: '#/components/schemas/FamilyDate'
+              ageMonths:
+                type: number
+                minimum: 0
+              heightCm:
+                type: number
+              weightKg:
+                type: number
+              headCm:
+                type: number
+        latest:
+          type: object
+          additionalProperties: false
+          properties:
+            height:
+              $ref: '#/components/schemas/FamilyAssessment'
+            weight:
+              $ref: '#/components/schemas/FamilyAssessment'
+            head:
+              $ref: '#/components/schemas/FamilyAssessment'
+    FamilyCatalogDose:
+      type: object
+      additionalProperties: false
+      required:
+        - dose
+        - ageMonths
+        - ageLabel
+      properties:
+        dose:
+          type: integer
+          minimum: 1
+        ageMonths:
+          type: integer
+          minimum: 0
+          description: The recommended age; 0 is at birth.
+        ageLabel:
+          type: string
+        sex:
+          type: string
+          enum:
+            - female
+            - male
+    FamilyCatalogVaccine:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - name
+        - programme
+        - doses
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        programme:
+          type: boolean
+          description: A vaccine of the national immunization programme; the others are non-programme vaccines a family chooses.
+        covers:
+          type: array
+          description: Programme vaccines whose doses this one stands in for, dose by dose.
+          items:
+            type: string
+        coversUpTo:
+          type: integer
+          minimum: 1
+          description: Only the covered vaccines' first doses, up to this one.
+        group:
+          type: string
+          description: Alternative programme vaccines of which a region uses one; the first is the default.
+        doses:
+          type: array
+          description: Empty for vaccines only recorded, such as influenza.
+          items:
+            $ref: '#/components/schemas/FamilyCatalogDose'
+        note:
+          type: string
+    FamilyVaccineCatalog:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - title
+        - source
+        - vaccines
+      properties:
+        version:
+          type: string
+        title:
+          type: string
+        source:
+          type: string
+        vaccines:
+          type: array
+          items:
+            $ref: '#/components/schemas/FamilyCatalogVaccine'
+    FamilyScheduledDose:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - name
+        - dose
+        - programme
+        - ageLabel
+        - dueDate
+        - status
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        dose:
+          type: integer
+          minimum: 1
+        programme:
+          type: boolean
+        ageLabel:
+          type: string
+        dueDate:
+          $ref: '#/components/schemas/FamilyDate'
+        status:
+          type: string
+          enum:
+            - given
+            - replaced
+            - available
+            - soon
+            - upcoming
+          description: 'available: the recommended age has come; soon: within 30 days.'
+        givenOn:
+          $ref: '#/components/schemas/FamilyDate'
+        recordId:
+          type: string
+        replacedBy:
+          type: string
+          description: The non-programme vaccine whose dose stood in.
+    FamilyVaccineSchedule:
+      type: object
+      additionalProperties: false
+      required:
+        - version
+        - title
+        - source
+        - doses
+        - plan
+        - records
+      properties:
+        version:
+          type: string
+        title:
+          type: string
+        source:
+          type: string
+        doses:
+          type: array
+          description: By due date.
+          items:
+            $ref: '#/components/schemas/FamilyScheduledDose'
+        plan:
+          type: array
+          description: The non-programme vaccines the family plans.
+          items:
+            type: string
+        records:
+          type: array
+          description: Every dose recorded, oldest first.
+          items:
+            $ref: '#/components/schemas/FamilyRecord'
+    FamilyTimelineEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - date
+        - age
+        - title
+        - upcoming
+      properties:
+        date:
+          $ref: '#/components/schemas/FamilyDate'
+        age:
+          $ref: '#/components/schemas/FamilyAge'
+        auto:
+          type: string
+          description: The automatic milestone's key, when the entry is one.
+        title:
+          type: string
+        upcoming:
+          type: boolean
+          description: The next automatic milestone, still to come.
+        record:
+          $ref: '#/components/schemas/FamilyRecord'
+    FamilyHint:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - kind
+      properties:
+        key:
+          type: string
+        kind:
+          type: string
+          enum:
+            - vaccine
+            - join_request
+        babyId:
+          type: string
+        babyName:
+          type: string
+        vaccine:
+          type: string
+        dose:
+          type: integer
+          minimum: 1
+        dueDate:
+          $ref: '#/components/schemas/FamilyDate'
+        accountId:
+          type: string
+        username:
+          type: string
+        role:
+          type: string
+    FamilyCatalog:
+      type: object
+      additionalProperties: false
+      required:
+        - roles
+        - milestones
+        - vaccines
+        - growthStandard
+      properties:
+        roles:
+          type: array
+          items:
+            type: string
+        milestones:
+          type: array
+          items:
+            type: string
+        vaccines:
+          $ref: '#/components/schemas/FamilyVaccineCatalog'
+        growthStandard:
+          type: string
     PhotoLibrary:
       type: object
       additionalProperties: false
@@ -12137,3 +13972,27 @@ components:
           maxItems: 256
           items:
             $ref: '#/components/schemas/TaskManagerFan'
+    FamilyReactionName:
+      type: string
+      enum:
+        - heart
+        - like
+        - laugh
+        - adore
+        - clap
+      description: A one-tap reaction, shown as ❤️ 👍 😂 🥰 👏.
+    FamilyReaction:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - accountIds
+      properties:
+        name:
+          $ref: '#/components/schemas/FamilyReactionName'
+        accountIds:
+          type: array
+          minItems: 1
+          description: The members who left it, earliest first.
+          items:
+            type: string

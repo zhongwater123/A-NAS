@@ -62,7 +62,7 @@ func routedSessions(t *testing.T) (http.Handler, accounts.Session, accounts.Sess
 	product := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: service,
 		Terminal: unreached, Containers: unreached, Apps: unreached, AppShortcuts: unreached, Photos: unreached,
-		Shares: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
+		Shares: unreached, Family: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
 		WebSearch: websearchapi.New(nil, websearch.Release{}, nil),
 		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})

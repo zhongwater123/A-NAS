@@ -10,7 +10,7 @@ User=a-nas
 Group=a-nas
 # Reaches the photo service's API socket; the photo store itself stays
 # private to a-nas-photos (ADR 0011). Web search's socket likewise (ADR 0030).
-SupplementaryGroups=a-nas-photos a-nas-shares a-nas-search
+SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search
 EnvironmentFile=/etc/a-nas/anas-api.env
 ExecStart=/opt/a-nas/current/anas-api
 Restart=on-failure
