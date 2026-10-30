@@ -48,6 +48,7 @@ import { formatBytes } from "../lib/bytes";
 import { displayName, fullName, usePeople } from "../people/people";
 import { AvatarDialog } from "./AvatarDialog";
 import { createMember, disableMember, listUsers, resetMember, startViewing, ViewingScope } from "./api";
+import { DeviceTemperatures } from "./DeviceTemperatures";
 import { describeFinding } from "./health";
 import { HostStateBanner, HostStatePending } from "./hostState";
 import { type LogsPreset, LogsSection } from "./logs/LogsSection";
@@ -688,6 +689,7 @@ function OverviewSection({
         </button>
       </div>
       <HealthChecks snapshot={snapshot} onOpenStorage={onOpenStorage} />
+      <DeviceTemperatures snapshot={snapshot} />
       <Group title="系统盘空间">
         {systemStorage ? (
           <>
@@ -742,7 +744,7 @@ function HealthChecks({ snapshot, onOpenStorage }: { snapshot: HostState; onOpen
             <span>
               <strong>未发现问题</strong>
             </span>
-            <small>已检查硬盘健康（SMART）与温度，以及数据卷的挂载、读写、剩余空间和错误记录。</small>
+            <small>已检查硬盘健康（SMART）、处理器与硬盘的温度，以及数据卷的挂载、读写、剩余空间和错误记录。</small>
           </div>
         </div>
       ) : (

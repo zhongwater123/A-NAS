@@ -435,6 +435,27 @@ if [[ "$lan_entry" == true ]]; then
   install -d -o root -g root -m 0755 /etc/caddy
   install -o root -g root -m 0644 "$source_release/Caddyfile" /etc/caddy/Caddyfile
 fi
+# Fan speeds come from the board's sensor chip, whose driver Linux does not
+# load by itself (docs/specs/device-temperatures.md). The in-kernel drivers of
+# the common chips find no device on a board without one; those that find a
+# chip are loaded again at every boot. Loading only reads the chip and changes
+# no fan setting, and no driver is forced onto a chip it does not know.
+sensor_modules=()
+for module in nct6775 it87; do
+  if modprobe "$module" 2>/dev/null; then
+    sensor_modules+=("$module")
+  fi
+done
+install -d -o root -g root -m 0755 /etc/modules-load.d
+if ((${#sensor_modules[@]} > 0)); then
+  {
+    echo '# Written by the A-NAS installer: the drivers that found a sensor chip.'
+    printf '%s\n' "${sensor_modules[@]}"
+  } > /etc/modules-load.d/a-nas-sensors.conf
+  chmod 0644 /etc/modules-load.d/a-nas-sensors.conf
+else
+  rm -f /etc/modules-load.d/a-nas-sensors.conf
+fi
 ln -sfn -- "$target" /opt/a-nas/current
 systemctl daemon-reload
 systemctl enable --now smbd.service

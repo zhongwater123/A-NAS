@@ -124,3 +124,28 @@ func TestAssessReportsAFailedReconciliation(t *testing.T) {
 		t.Fatalf("Assess(read-only) = %q, %+v; want critical, %+v", health, summarize(findings), want)
 	}
 }
+
+// A CPU at its hot limit, 10 °C below where it throttles hard, needs
+// attention; below it, the system is healthy.
+func TestAssessReportsAHotCPU(t *testing.T) {
+	disks := []hoststate.Disk{{ID: mustDiskID(t, "disk:system"), Model: "NVMe", Role: hoststate.DiskRoleSystem, Health: hoststate.HealthHealthy}}
+	for _, test := range []struct {
+		name     string
+		thermal  *hoststate.Thermal
+		health   hoststate.Health
+		findings []found
+	}{
+		{"not observed", nil, hoststate.HealthHealthy, nil},
+		{"no CPU sensor", &hoststate.Thermal{}, hoststate.HealthHealthy, nil},
+		{"below the limit", &hoststate.Thermal{CPU: &hoststate.Temperature{Celsius: 89, HotCelsius: 90}}, hoststate.HealthHealthy, nil},
+		{"at the limit", &hoststate.Thermal{CPU: &hoststate.Temperature{Celsius: 90, HotCelsius: 90}}, hoststate.HealthWarning, []found{{code: hoststate.FindingCPUHot, severity: hoststate.HealthWarning, value: 90}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			state := hoststate.State{System: hoststate.System{Thermal: test.thermal}, Disks: disks}
+			health, findings := hoststate.Assess(state, hoststate.Expectations{})
+			if health != test.health || !reflect.DeepEqual(summarize(findings), test.findings) {
+				t.Fatalf("Assess() = %s %+v, want %s %+v", health, summarize(findings), test.health, test.findings)
+			}
+		})
+	}
+}

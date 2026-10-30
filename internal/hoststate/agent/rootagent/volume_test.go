@@ -155,3 +155,34 @@ func TestClientRejectsADataVolumeOnADiskThatIsNotADataDisk(t *testing.T) {
 		t.Fatal("Read() error = nil, want a data volume on the system disk refused")
 	}
 }
+
+// CPU and GPU temperatures cross the Host Agent socket with their limits,
+// and fan speeds with them; an implausible reading is refused rather than
+// shown.
+func TestClientReadsTheThermalState(t *testing.T) {
+	state, err := fake.NewHealthy().Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.System.Thermal.GPUs = append(state.System.Thermal.GPUs, hoststate.GPU{
+		ID: state.System.ID, Name: "GPU 1", Temperature: &hoststate.Temperature{Celsius: 52, HotCelsius: 90},
+	})
+	got, err := agent.NewClient(serve(t, rootagent.NewHandler(observedState{state}, discardLogger()))).Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if !reflect.DeepEqual(got.System.Thermal, state.System.Thermal) {
+		t.Fatalf("thermal = %+v, want %+v", got.System.Thermal, state.System.Thermal)
+	}
+
+	state.System.Thermal.CPU = &hoststate.Temperature{Celsius: 400, HotCelsius: 90}
+	if _, err := agent.NewClient(serve(t, rootagent.NewHandler(observedState{state}, discardLogger()))).Read(context.Background()); err == nil {
+		t.Fatal("Read() accepted a CPU at 400 °C")
+	}
+
+	state.System.Thermal.CPU = nil
+	state.System.Thermal.Fans[0].Stopped = true
+	if _, err := agent.NewClient(serve(t, rootagent.NewHandler(observedState{state}, discardLogger()))).Read(context.Background()); err == nil {
+		t.Fatal("Read() accepted a stopped fan turning at 1240 RPM")
+	}
+}

@@ -880,6 +880,9 @@
 .tm-tone-amber {
   --tm-color: #c39452;
 }
+.tm-tone-rose {
+  --tm-color: #dc6b5f;
+}
 .tm-metric header {
   display: flex;
   align-items: center;
@@ -1029,9 +1032,16 @@
   font-size: 10px;
 }
 .tm-resource-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 3px 0;
+}
+.tm-resource-title > div {
+  min-width: 0;
   display: grid;
   gap: 6px;
-  padding: 3px 0;
 }
 .tm-resource-title h3 {
   color: #354157;
@@ -1075,6 +1085,76 @@
   gap: 8px;
   color: #8792a3;
   font-size: 11px;
+}
+/* 温度: one tile per sensor under the overview's charts. */
+.tm-thermal {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+.tm-thermal > h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #626e80;
+  font-size: 11px;
+  font-weight: 500;
+}
+.tm-thermal > h3 svg {
+  width: 14px;
+  height: 14px;
+  color: #dc6b5f;
+}
+.tm-thermal > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  gap: 12px;
+}
+.tm-thermal-tile {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 14px 16px 16px;
+  border: 1px solid #e7ebf1;
+  border-radius: 11px;
+  background: #fff;
+}
+.tm-thermal-tile > span:first-child {
+  overflow: hidden;
+  color: #354157;
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tm-thermal-tile > small {
+  margin-bottom: 12px;
+  color: #99a2af;
+  font-size: 10px;
+}
+.tm-thermal-tile .temp-gauge {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+}
+.tm-thermal-tile .temp-gauge strong {
+  min-width: 0;
+  text-align: left;
+  font-size: 24px;
+  font-weight: 550;
+  letter-spacing: -0.03em;
+}
+.tm-thermal-tile .temp-missing {
+  padding: 6px 0 2px;
+}
+.tm-thermal-tile .fan-speed {
+  min-width: 0;
+  justify-content: flex-start;
+}
+.tm-thermal-tile .fan-speed strong {
+  font-size: 24px;
+  font-weight: 550;
+  letter-spacing: -0.03em;
 }
 .tm-workload-summary {
   display: flex;
@@ -3029,6 +3109,120 @@ button.health-go svg {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #22b3a4, #2f6fe4);
+}
+
+/* 设备温度: a reading and a bar up to just past its hot limit, which a tick
+   marks. The colour turns amber within 10 °C of the limit, red at it. */
+.set-tile.cpu {
+  background: linear-gradient(160deg, #ff9b73, #e15d43);
+}
+.set-tile.gpu {
+  background: linear-gradient(160deg, #c08cff, #8656e3);
+}
+.set-tile.fan {
+  background: linear-gradient(160deg, #55cfe6, #1c8fb3);
+}
+/* A fan's speed sits where a temperature's gauge would. */
+.fan-speed {
+  flex: none;
+  min-width: 96px;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 3px;
+  color: var(--set-text, #29354a);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fan-speed strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+.fan-speed small {
+  color: var(--set-faint, #99a2af);
+  font-size: 10px;
+  font-weight: 500;
+}
+.fan-speed.fan-stopped strong,
+.fan-stopped-note {
+  color: #c9372f;
+}
+.temp-row .set-row-text > small {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  display: block;
+}
+.temp-gauge {
+  --temp-color: #23a58f;
+  --temp-text: var(--set-text, #29354a);
+  flex: none;
+  display: inline-grid;
+  grid-template-columns: auto 96px;
+  align-items: center;
+  gap: 12px;
+}
+.temp-gauge strong {
+  min-width: 3.4em;
+  color: var(--temp-text);
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.temp-gauge strong small {
+  margin-left: 2px;
+  color: var(--set-faint, #99a2af);
+  font-size: 0.62em;
+  font-weight: 500;
+}
+.temp-track {
+  position: relative;
+  height: 6px;
+  border-radius: var(--radius-pill, 999px);
+  background: #edf0f5;
+}
+.temp-track i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--temp-color);
+  transition: width 0.4s ease;
+}
+.temp-track b {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: rgba(41, 53, 74, 0.28);
+}
+.temp-gauge.temp-warm {
+  --temp-color: #e9a23b;
+  --temp-text: #b06f12;
+}
+.temp-gauge.temp-hot {
+  --temp-color: #e5534b;
+  --temp-text: #c9372f;
+}
+.temp-missing {
+  flex: none;
+  color: var(--set-faint, #99a2af);
+  font-size: 12px;
+  white-space: nowrap;
+}
+@container settingswindow (max-width: 480px) {
+  .temp-gauge {
+    grid-template-columns: auto 56px;
+    gap: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .temp-track i {
+    transition: none;
+  }
 }
 
 /* Storage */
