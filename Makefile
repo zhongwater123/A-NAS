@@ -170,7 +170,14 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'Environment=GOMEMLIMIT=1GiB' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-search' deploy/systemd/system/anas-api.service
+	grep -Fqx 'User=a-nas-search' deploy/systemd/system/anas-search.service
+	grep -Fqx 'RuntimeDirectoryMode=0750' deploy/systemd/system/anas-search.service
+	grep -Fqx 'ConditionPathExists=!/var/lib/a-nas-host/web-search-disabled' deploy/systemd/system/anas-search.service
+	grep -Fqx 'IPAddressDeny=localhost link-local multicast' deploy/systemd/system/anas-search.service
+	grep -Fq 'IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12' deploy/systemd/system/anas-search.service
+	grep -Eqx 'u a-nas-search - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-search.conf
+	grep -Fq 'a-nas-search.sysusers.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectory=a-nas-host' deploy/systemd/system/anas-host-agent.service
