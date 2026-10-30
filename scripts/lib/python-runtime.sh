@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Helpers for the scripts that build a Python runtime for the NAS on the
 # development machine: scripts/build-ai-runtime.sh (ADR 0016) and
 # scripts/build-search-runtime.sh (ADR 0030). Each runtime is a virtual
