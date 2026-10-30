@@ -27,7 +27,7 @@
 | `disk_warning` | 任一磁盘报告了次于失败的问题 | 注意 |
 | `disk_health_unknown` | 系统盘或数据盘读不到 SMART 结论；未分配的磁盘不计 | 注意 |
 | `disk_hot` | 机械硬盘达到 55 °C，或固态存储达到 70 °C | 注意 |
-| `cpu_hot` | 处理器达到偏高界限：传感器报告的临界温度减 10 °C，不报告时 85 °C（[设备温度](device-temperatures.md#偏高的界限)） | 注意 |
+| `cpu_hot` | 处理器达到偏高界限：传感器报告的临界温度减 10 °C，不报告时 85 °C（[设备温度与风扇](device-temperatures.md#偏高的界限)） | 注意 |
 | `volume_nearly_full` | 数据卷已用 90% 以上 | 注意 |
 | `volume_errors` | Btrfs 自数据卷创建以来累计记录到读、写、刷新、校验或代际错误 | 注意 |
 | `volume_reconcile_failed` | Host Agent 最近一次对账数据卷失败：没能修复空间权限、把身份清单写到数据卷或刷新 Samba 配置（[#166](https://github.com/zhongwater123/A-NAS/issues/166)）；数据卷只读时不报，由 `volume_read_only` 说明 | 注意 |

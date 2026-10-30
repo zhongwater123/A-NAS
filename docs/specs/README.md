@@ -26,7 +26,7 @@
 - [个性化](personalization.md)（implemented）
 - [任务管理器](task-manager.md)（implemented）
 - [系统健康](system-health.md)（implemented）
-- [设备温度](device-temperatures.md)（implemented）
+- [设备温度与风扇](device-temperatures.md)（implemented）
 - [头像与昵称](account-profile.md)（implemented）
 - [系统快捷栏](system-rail.md)（implemented）
 - [影视中心](media-center.md)（implemented）
