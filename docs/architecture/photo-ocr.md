@@ -59,14 +59,13 @@
 - [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B)，阿里，Apache-2.0。官方没有发布 GGUF，从固定 revision 的官方权重自己转换：
   - 语言部分转成 Q4_K_M，与 #323 实测的相同；
   - 视觉部分转成 F16，与评估中的 Qwen3.5-2B 相同。
-  - 转换脚本由 `ai/eval/ocr_models.sh` 移到发布用的脚本中。
-  - 同一工具版本的转换结果应当逐字节相同；实现时转换两次核对。
-- 两个模型文件各有一份清单（`deploy/models/qwen3.5-4b-q4_0.json`、`deploy/models/qwen3.5-4b-mmproj-f16.json`），记录：来源、revision、转换命令、llama.cpp 版本、大小、SHA-256、`memoryBytes`，并附许可全文。
+  - 转换用 [`scripts/convert-ocr-model.sh`](../../scripts/convert-ocr-model.sh)：同一工具版本转换两次，逐字节相同才输出，再与清单核对。
+- 两个模型文件各有一份清单（[`deploy/models/qwen3.5-4b-q4_k_m.json`](../../deploy/models/qwen3.5-4b-q4_k_m.json)、[`deploy/models/qwen3.5-4b-mmproj-f16.json`](../../deploy/models/qwen3.5-4b-mmproj-f16.json)），记录：来源、revision、转换命令、llama.cpp 版本、大小、SHA-256、`memoryBytes`；许可全文是 [`deploy/models/qwen3.5-4b.LICENSE`](../../deploy/models/qwen3.5-4b.LICENSE)。
 - 推理设置沿用评估：
   - 非思考模式（`enable_thinking: false`），贪心解码；
   - 输入是相册服务已经为检测渲染的 1600 px 图，每张最多 1024 个视觉 token；
   - `--cache-ram 0 --ctx-checkpoints 0`，否则内存会一直涨，直到被内核结束；
-  - 上下文按“视觉 token + 提示词 + 最长输出”定，先用 8192，实测后再调。
+  - 上下文按“视觉 token + 提示词 + 最长输出”定，先用 8192，实测后再调；输出最多 2048 个 token。
 
 ### llama.cpp
 
@@ -74,8 +73,9 @@
   - llama-cpp-python 的多模态支持落后于上游；
   - 评估依赖 llama-server 的两项能力：逐字概率（`logprobs`）、断开连接即停止生成。
 - 版本像 Qdrant 一样用清单固定（`deploy/llama/llama.json`，参照 [`deploy/qdrant/qdrant.json`](../../deploy/qdrant/qdrant.json)）：
-  - 优先用上游发布的 Linux x64 CPU 构建。它按 CPU 能力在运行时选择实现，换一台 NAS 也能用。
-  - 上游构建若不能在 Debian 13 上运行、不支持 Qwen3.5 的视觉部分或 UNIX 套接字，再改为从固定提交在 Debian 13 容器中构建，与 AI 运行环境一样随发布交付，并写明原因。
+  - 用上游发布的 Linux x64 CPU 构建 b11655：它是评估所用的 e36df60 加一个只改 Vulkan 的提交，CPU 部分相同。它按 CPU 能力在运行时选择实现，换一台 NAS 也能用。
+  - 它在 Debian 13 上运行，支持 Qwen3.5 的视觉部分与 UNIX 套接字；依赖 glibc 2.34 以上、libgomp1 与 libssl3t64，安装器先检查这两个库。
+  - 清单的 `members` 列出从压缩包中取的文件：llama-server、它加载的库与各 CPU 变体、许可，其他工具的库不取。开发机与 CI 用 [`scripts/fetch-llama.sh`](../../scripts/fetch-llama.sh) 取到 `build/llama/<sha256>/`；安装器核对压缩包后把这些文件放在 `/opt/a-nas/llama/<sha256>/`，release 以 `ai/llama` 链接过去，与 Qdrant 相同。
   - 换版本后先在开发机上用同一批样本核对输出，再在 NAS 上测速度。
 
 ### 在 Worker 中运行
@@ -85,11 +85,14 @@
   - 线程数为可用核数减 2。
   - 子进程继承 Worker 的沙箱：只能用 UNIX 套接字、没有网络、看不到数据卷；内存计入 Worker 的 cgroup。
   - Worker 用标准库 `http.client` 通过这个套接字发请求，只需让连接改用 UNIX 套接字。
+  - 第一次启动前按清单核对两个模型文件的 SHA-256，之后不再核对：每次 Worker 启动都算 3 GB 的哈希要花几秒。
+  - llama-server 的日志写在同一个私有目录；300 秒内没就绪，或启动后退出，`read_text` 答“不可用”并附日志末尾。
 - **新操作 `read_text`**：输入一张图的描述符和读法：
   - “全文”；
   - 或“字段”，附带文档类型的 JSON 模板。
 
-  返回模型 ID、文字或字段，以及每个字段的最低单字概率。相册服务挂断连接时，Worker 关闭到 llama-server 的连接，生成随即停止。
+  返回模型 ID、文字（字段是 JSON 文本）、每个 token 的对数概率，以及结束原因：正常结束、达到长度上限，或出现循环（Worker 发现输出在重复时自己停下）。每个字段的最低单字概率由相册服务按 token 算（步骤 3）。llama-server 拒收的图片答“输入无效”，不再重试。相册服务挂断连接时，Worker 关闭到 llama-server 的连接，生成随即停止。
+  - 模型 ID 包含两个模型文件的哈希、llama.cpp 版本与视觉 token 上限，例如 `qwen3.5-4b-q4_k_m@<12 位>+qwen3.5-4b-mmproj-f16@<12 位>+llama.cpp-b11655+img1024`：其中任何一项变了，读出的文字都可能不同。
 - **释放与退出**：`release` 时结束子进程；Worker 空闲退出时子进程一起结束。
 - **内存**：
   - OCR 模型的 `memoryBytes` 用扩展后的 [`ai/eval/worker_memory.py`](../../ai/eval/worker_memory.py) 测量。
@@ -233,9 +236,9 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
 - **单独阶段**：读文字只在向量、检测、人脸与宠物的队列都清空后进行。开始前释放检测类模型，读文字期间 Worker 只持有向量模型的常驻部分和 OCR 模型。
 - **加载前判断**：读文字阶段的需要 = Worker 自身启动占用 + OCR 模型的 `memoryBytes`，不与检测类模型相加。门控沿用“加载后仍留出余量”的规则（`Gate.Open(ctx, need)`），只是相册服务按阶段传入不同的需要。
 - **释放**：OCR 队列清空、有人使用相册、内存不足或内存压力时，结束 llama-server 子进程。
-- **取消**：门控关闭时挂断连接，生成随即停止，这张照片退回队列、不计尝试次数，与检测相同。
-  - 图像编码阶段（NAS 上约 20–25 秒）能否中途停下，要实测“挂断到空闲”的时间。
-  - 停不下就把图像编码视为一个不可中断的单元，与向量推理相同处理。
+- **取消**：门控关闭时挂断连接，这张照片退回队列、不计尝试次数，与检测相同。
+  - 生成阶段：llama-server 在写下一个 token 时发现连接已断，随即停止。
+  - 图像编码与提示阶段：llama-server 要把整段提示算完才处理取消。开发机上（Qwen3.5-2B，4 线程）挂断后它又忙了约 2.5 分钟。所以还没收到第一个 token 就被取消时，Worker 直接结束 llama-server，CPU 立即空出；下次读取重新加载模型，文件不再核对哈希。
 - **CPU**：线程数为可用核数减 2，在 `anas.slice` 中低权重运行，与现有 AI 相同。
 - **内存口径**：
   - 映射进来的模型文件页计入可用内存，所以进程常驻峰值高于可用内存的实际下降（Qwen3.5-2B 在 NAS 上分别为 3.3 GiB 与 1.5 GiB）。
