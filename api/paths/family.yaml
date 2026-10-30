@@ -394,6 +394,25 @@
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/family/records/{recordId}/reactions/{reaction}:
+  put:
+    operationId: addFamilyReaction
+    summary: "Leave the caller's reaction on a record; leaving it again changes nothing"
+    parameters: [{ $ref: "../components/family.yaml#/parameters/FamilyRecordID" }, { $ref: "../components/family.yaml#/parameters/FamilyReactionName" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { $ref: "../components/family.yaml#/responses/FamilyReactions" }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: removeFamilyReaction
+    summary: "Take back the caller's reaction on a record; taking back one never left changes nothing"
+    parameters: [{ $ref: "../components/family.yaml#/parameters/FamilyRecordID" }, { $ref: "../components/family.yaml#/parameters/FamilyReactionName" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { $ref: "../components/family.yaml#/responses/FamilyReactions" }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/family/comments/{commentId}:
   delete:
     operationId: deleteFamilyComment

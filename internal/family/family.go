@@ -224,6 +224,14 @@ CREATE TABLE audit_events (
     detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX audit_events_actor ON audit_events(actor_user_id, occurred_at DESC, id DESC);
+`, `
+CREATE TABLE reactions (
+    record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,
+    account_id TEXT NOT NULL,
+    reaction TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (record_id, account_id, reaction)
+);
 `}
 
 func (s *Store) migrate(ctx context.Context) error {

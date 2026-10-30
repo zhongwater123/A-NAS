@@ -46,44 +46,46 @@ func New(store *family.Store, logger *slog.Logger, media ffmpegworker.Worker) ht
 	}
 	h := &handler{store: store, logger: logger, media: media, mux: apiroute.NewMux()}
 	routes := map[string]route{
-		"GET ":                               h.overview,
-		"GET /catalog":                       h.catalog,
-		"POST /join":                         h.join,
-		"DELETE /join":                       h.cancelJoin,
-		"POST /leave":                        h.leave,
-		"PATCH /me":                          h.setRole,
-		"POST /requests/{accountID}/approve": h.approve,
-		"DELETE /requests/{accountID}":       h.reject,
-		"PATCH /members/{accountID}":         h.setGuardian,
-		"DELETE /members/{accountID}":        h.remove,
-		"GET /hints":                         h.hints,
-		"POST /hints/seen":                   h.hintsSeen,
-		"POST /babies":                       h.addBaby,
-		"GET /babies/{babyID}":               h.baby,
-		"PATCH /babies/{babyID}":             h.updateBaby,
-		"DELETE /babies/{babyID}":            h.deleteBaby,
-		"POST /babies/{babyID}/restore":      h.restoreBaby,
-		"GET /babies/{babyID}/avatar":        h.avatar,
-		"PUT /babies/{babyID}/avatar":        h.setAvatar,
-		"DELETE /babies/{babyID}/avatar":     h.removeAvatar,
-		"GET /babies/{babyID}/records":       h.records,
-		"POST /babies/{babyID}/records":      h.addRecord,
-		"POST /babies/{babyID}/recordings":   h.addRecording,
-		"GET /babies/{babyID}/trash":         h.trash,
-		"GET /babies/{babyID}/album":         h.album,
-		"GET /babies/{babyID}/growth":        h.growth,
-		"GET /babies/{babyID}/vaccines":      h.vaccines,
-		"PUT /babies/{babyID}/vaccine-plan":  h.vaccinePlan,
-		"GET /babies/{babyID}/milestones":    h.milestones,
-		"GET /babies/{babyID}/wall":          h.wall,
-		"POST /babies/{babyID}/wall":         h.addWallComment,
-		"GET /records/{recordID}":            h.record,
-		"PATCH /records/{recordID}":          h.updateRecord,
-		"DELETE /records/{recordID}":         h.deleteRecord,
-		"POST /records/{recordID}/restore":   h.restoreRecord,
-		"GET /records/{recordID}/audio":      h.audio,
-		"POST /records/{recordID}/comments":  h.addComment,
-		"DELETE /comments/{commentID}":       h.deleteComment,
+		"GET ":                                            h.overview,
+		"GET /catalog":                                    h.catalog,
+		"POST /join":                                      h.join,
+		"DELETE /join":                                    h.cancelJoin,
+		"POST /leave":                                     h.leave,
+		"PATCH /me":                                       h.setRole,
+		"POST /requests/{accountID}/approve":              h.approve,
+		"DELETE /requests/{accountID}":                    h.reject,
+		"PATCH /members/{accountID}":                      h.setGuardian,
+		"DELETE /members/{accountID}":                     h.remove,
+		"GET /hints":                                      h.hints,
+		"POST /hints/seen":                                h.hintsSeen,
+		"POST /babies":                                    h.addBaby,
+		"GET /babies/{babyID}":                            h.baby,
+		"PATCH /babies/{babyID}":                          h.updateBaby,
+		"DELETE /babies/{babyID}":                         h.deleteBaby,
+		"POST /babies/{babyID}/restore":                   h.restoreBaby,
+		"GET /babies/{babyID}/avatar":                     h.avatar,
+		"PUT /babies/{babyID}/avatar":                     h.setAvatar,
+		"DELETE /babies/{babyID}/avatar":                  h.removeAvatar,
+		"GET /babies/{babyID}/records":                    h.records,
+		"POST /babies/{babyID}/records":                   h.addRecord,
+		"POST /babies/{babyID}/recordings":                h.addRecording,
+		"GET /babies/{babyID}/trash":                      h.trash,
+		"GET /babies/{babyID}/album":                      h.album,
+		"GET /babies/{babyID}/growth":                     h.growth,
+		"GET /babies/{babyID}/vaccines":                   h.vaccines,
+		"PUT /babies/{babyID}/vaccine-plan":               h.vaccinePlan,
+		"GET /babies/{babyID}/milestones":                 h.milestones,
+		"GET /babies/{babyID}/wall":                       h.wall,
+		"POST /babies/{babyID}/wall":                      h.addWallComment,
+		"GET /records/{recordID}":                         h.record,
+		"PATCH /records/{recordID}":                       h.updateRecord,
+		"DELETE /records/{recordID}":                      h.deleteRecord,
+		"POST /records/{recordID}/restore":                h.restoreRecord,
+		"GET /records/{recordID}/audio":                   h.audio,
+		"POST /records/{recordID}/comments":               h.addComment,
+		"DELETE /comments/{commentID}":                    h.deleteComment,
+		"PUT /records/{recordID}/reactions/{reaction}":    h.react,
+		"DELETE /records/{recordID}/reactions/{reaction}": h.unreact,
 	}
 	for pattern, serve := range routes {
 		method, path, _ := strings.Cut(pattern, " ")
@@ -522,4 +524,14 @@ func (h *handler) addComment(w http.ResponseWriter, r *http.Request, actor famil
 
 func (h *handler) deleteComment(w http.ResponseWriter, r *http.Request, actor family.Actor) {
 	h.reply(w, r, http.StatusNoContent, nil, h.store.DeleteComment(r.Context(), actor, r.PathValue("commentID")))
+}
+
+func (h *handler) react(w http.ResponseWriter, r *http.Request, actor family.Actor) {
+	reactions, err := h.store.React(r.Context(), actor, r.PathValue("recordID"), r.PathValue("reaction"), true)
+	h.reply(w, r, http.StatusOK, items[family.Reaction]{Items: reactions}, err)
+}
+
+func (h *handler) unreact(w http.ResponseWriter, r *http.Request, actor family.Actor) {
+	reactions, err := h.store.React(r.Context(), actor, r.PathValue("recordID"), r.PathValue("reaction"), false)
+	h.reply(w, r, http.StatusOK, items[family.Reaction]{Items: reactions}, err)
 }

@@ -3,7 +3,14 @@ parameters:
   FamilyBabyID: { name: babyId, in: path, required: true, schema: { type: string, minLength: 1 } }
   FamilyRecordID: { name: recordId, in: path, required: true, schema: { type: string, minLength: 1 } }
   FamilyCommentID: { name: commentId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  FamilyReactionName: { name: reaction, in: path, required: true, schema: { $ref: "#/schemas/FamilyReactionName" } }
   FamilyCursor: { name: cursor, in: query, required: false, description: The `next` of the previous page., schema: { type: string } }
+responses:
+  FamilyReactions:
+    description: The record's reactions
+    content:
+      application/json:
+        schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/schemas/FamilyReaction" } } } }
 schemas:
   FamilyDate: { type: string, format: date, description: A calendar date without time of day or zone. }
   FamilyMe:
@@ -132,6 +139,17 @@ schemas:
       authorId: { type: string }
       authorName: { type: string, description: Username of the author when they wrote it. }
       createdAt: { type: string, format: date-time }
+  FamilyReactionName:
+    type: string
+    enum: [heart, like, laugh, adore, clap]
+    description: "A one-tap reaction, shown as ❤️ 👍 😂 🥰 👏."
+  FamilyReaction:
+    type: object
+    additionalProperties: false
+    required: [name, accountIds]
+    properties:
+      name: { $ref: "#/schemas/FamilyReactionName" }
+      accountIds: { type: array, minItems: 1, description: "The members who left it, earliest first.", items: { type: string } }
   FamilyCommentInput:
     type: object
     additionalProperties: false
@@ -142,7 +160,7 @@ schemas:
   FamilyRecord:
     type: object
     additionalProperties: false
-    required: [id, babyId, kind, occurredOn, text, photos, authorId, authorName, createdAt, version, comments]
+    required: [id, babyId, kind, occurredOn, text, photos, authorId, authorName, createdAt, version, comments, reactions]
     properties:
       id: { type: string }
       babyId: { type: string }
@@ -162,6 +180,7 @@ schemas:
       version: { type: integer, minimum: 1 }
       deletedAt: { type: string, format: date-time }
       comments: { type: array, description: Oldest first., items: { $ref: "#/schemas/FamilyComment" } }
+      reactions: { type: array, description: "In the order the window shows them; only those someone left.", items: { $ref: "#/schemas/FamilyReaction" } }
   FamilyRecordInput:
     type: object
     additionalProperties: false

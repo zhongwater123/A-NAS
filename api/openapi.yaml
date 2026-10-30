@@ -123,6 +123,7 @@ paths:
   /api/v1/family/records/{recordId}/restore: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1restore" }
   /api/v1/family/records/{recordId}/audio: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1audio" }
   /api/v1/family/records/{recordId}/comments: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1comments" }
+  /api/v1/family/records/{recordId}/reactions/{reaction}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1reactions~1{reaction}" }
   /api/v1/family/comments/{commentId}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1comments~1{commentId}" }
   /api/v1/photos/libraries: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1libraries" }
   /api/v1/photos/ai: { $ref: "paths/photos.yaml#/~1api~1v1~1photos~1ai" }

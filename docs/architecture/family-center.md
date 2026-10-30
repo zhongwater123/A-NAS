@@ -43,7 +43,7 @@ Web 家庭中心窗口 / 桌面提示
 
 - `family`、`members`、`join_requests`：一台 NAS 一个家庭。成员的账号停用或删除后不再算家人，但内容保留；家长全部不在时，最早加入的在用成员自动成为家长。
 - `babies`：宝宝档案，头像是裁好的小 JPEG，删除后保留 15 天。
-- `records`：六种记录共用一张表，测量值以毫米和克存整数；`record_photos` 记照片资产 ID、角色（云相册或接种凭证）与拍摄时间；`comments` 是记录下的留言与频道留言墙。
+- `records`：六种记录共用一张表，测量值以毫米和克存整数；`record_photos` 记照片资产 ID、角色（云相册或接种凭证）与拍摄时间；`comments` 是记录下的留言与频道留言墙；`reactions` 记每位家人在一条记录上留下的表情回应，一种一行，随记录永久删除而删除。
 - `vaccine_plans`、`hints_seen`、`audit_events`（与其他模块同样的列，供活动记录读取）。
 
 录音存在 `recordings/<记录 ID>`：先写成同目录的隐藏临时文件、`fsync` 后改名，再提交数据库行；失败或崩溃留下的临时文件在清理时删除。
@@ -57,7 +57,7 @@ Web 家庭中心窗口 / 桌面提示
 
 ## 验证
 
-- [`internal/family/family_test.go`](../../internal/family/family_test.go)：加入与家长、宝宝档案的并发修改与删除、照片可见性与回收站、云相册的月龄分组、作者与家长的权限、生长标准查值与插值、2026 年版程序与替代、桌面提示、年龄计算、大事记与录音。
+- [`internal/family/family_test.go`](../../internal/family/family_test.go)：加入与家长、宝宝档案的并发修改与删除、照片可见性与回收站、云相册的月龄分组、作者与家长的权限、生长标准查值与插值、2026 年版程序与替代、桌面提示、年龄计算、大事记、录音与表情回应。
 - [`internal/httpapi/family_test.go`](../../internal/httpapi/family_test.go)：经产品服务、按 OpenAPI 契约走通全部接口，照片由进程内的相册服务以读者会话回答。
 - [`web/src/family/FamilyPanel.test.tsx`](../../web/src/family/FamilyPanel.test.tsx)：加入、频道、写日志、添加宝宝与切换。
 - 实机：家庭服务的单元、身份与 `family/` 子卷由安装器与 Host Agent 建立，尚未在实验 NAS 上部署验证。

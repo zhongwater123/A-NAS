@@ -3287,6 +3287,39 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+  /api/v1/family/records/{recordId}/reactions/{reaction}:
+    put:
+      operationId: addFamilyReaction
+      summary: Leave the caller's reaction on a record; leaving it again changes nothing
+      parameters:
+        - $ref: '#/components/parameters/FamilyRecordID'
+        - $ref: '#/components/parameters/FamilyReactionName'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          $ref: '#/components/responses/FamilyReactions'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: removeFamilyReaction
+      summary: Take back the caller's reaction on a record; taking back one never left changes nothing
+      parameters:
+        - $ref: '#/components/parameters/FamilyRecordID'
+        - $ref: '#/components/parameters/FamilyReactionName'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          $ref: '#/components/responses/FamilyReactions'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
   /api/v1/family/comments/{commentId}:
     delete:
       operationId: deleteFamilyComment
@@ -7586,6 +7619,12 @@ components:
       schema:
         type: string
         pattern: ^[A-Za-z0-9_.:-]{1,64}$
+    FamilyReactionName:
+      name: reaction
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/FamilyReactionName'
   responses:
     ProductError:
       description: Product operation error.
@@ -7658,6 +7697,20 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    FamilyReactions:
+      description: The record's reactions
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - items
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FamilyReaction'
   schemas:
     DataSource:
       type: string
@@ -10328,6 +10381,7 @@ components:
         - createdAt
         - version
         - comments
+        - reactions
       properties:
         id:
           type: string
@@ -10384,6 +10438,11 @@ components:
           description: Oldest first.
           items:
             $ref: '#/components/schemas/FamilyComment'
+        reactions:
+          type: array
+          description: In the order the window shows them; only those someone left.
+          items:
+            $ref: '#/components/schemas/FamilyReaction'
     FamilyRecordInput:
       type: object
       additionalProperties: false
@@ -13321,3 +13380,27 @@ components:
           type: integer
           format: int64
           minimum: 0
+    FamilyReactionName:
+      type: string
+      enum:
+        - heart
+        - like
+        - laugh
+        - adore
+        - clap
+      description: A one-tap reaction, shown as ❤️ 👍 😂 🥰 👏.
+    FamilyReaction:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - accountIds
+      properties:
+        name:
+          $ref: '#/components/schemas/FamilyReactionName'
+        accountIds:
+          type: array
+          minItems: 1
+          description: The members who left it, earliest first.
+          items:
+            type: string

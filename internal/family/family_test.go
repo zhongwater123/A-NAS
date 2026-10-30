@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -702,4 +703,34 @@ func TestTheTimelineRunsByWhenThingsHappened(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("timeline dates = %v\nwant           %v", got, want)
 	}
+}
+
+func TestMembersReactWithOneTap(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	baby := f.family(t)
+	record := must(f.store.AddRecord(ctx, grandma, baby.ID, RecordInput{Kind: KindJournal, OccurredOn: "2026-10-27", Text: "去菜市场"}))
+	must(f.store.React(ctx, dad, record.ID, "laugh", true))
+	f.now = f.now.Add(time.Minute)
+	must(f.store.React(ctx, mom, record.ID, "heart", true))
+	f.now = f.now.Add(time.Minute)
+	must(f.store.React(ctx, dad, record.ID, "heart", true))
+	// Leaving one twice changes nothing; taking one back removes only it.
+	must(f.store.React(ctx, dad, record.ID, "heart", true))
+	reactions := must(f.store.React(ctx, dad, record.ID, "laugh", false))
+	want := []Reaction{{Name: "heart", AccountIDs: []string{mom.AccountID, dad.AccountID}}}
+	if !reflect.DeepEqual(reactions, want) {
+		t.Fatalf("reactions = %+v, want %+v", reactions, want)
+	}
+	shown := must(f.store.Record(ctx, grandma, record.ID))
+	if !reflect.DeepEqual(shown.Reactions, want) {
+		t.Fatalf("record reactions = %+v", shown.Reactions)
+	}
+	_, err := f.store.React(ctx, dad, record.ID, "fire", true)
+	wantErr(t, err, ErrInvalid)
+	_, err = f.store.React(ctx, tenant, record.ID, "heart", true)
+	wantErr(t, err, ErrNotMember)
+	wantErr(t, f.store.DeleteRecord(ctx, grandma, record.ID), nil)
+	_, err = f.store.React(ctx, dad, record.ID, "heart", true)
+	wantErr(t, err, ErrNotFound)
 }

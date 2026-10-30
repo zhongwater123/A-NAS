@@ -94,6 +94,7 @@ type Record struct {
 	Version      int64            `json:"version"`
 	DeletedAt    *time.Time       `json:"deletedAt,omitempty"`
 	Comments     []Comment        `json:"comments"`
+	Reactions    []Reaction       `json:"reactions"`
 	HiddenPhotos int              `json:"-"`
 }
 
@@ -253,6 +254,10 @@ func (s *Store) present(ctx context.Context, q queryer, actor Actor, baby Baby, 
 	if err != nil {
 		return nil, err
 	}
+	reactions, err := s.reactionsFor(ctx, q, rows)
+	if err != nil {
+		return nil, err
+	}
 	birth, _ := parseDate(baby.BirthDate)
 	records := make([]Record, 0, len(rows))
 	for _, r := range rows {
@@ -284,6 +289,10 @@ func (s *Store) present(ctx context.Context, q queryer, actor Actor, baby Baby, 
 		rec.Comments = comments[rec.ID]
 		if rec.Comments == nil {
 			rec.Comments = []Comment{}
+		}
+		rec.Reactions = reactions[rec.ID]
+		if rec.Reactions == nil {
+			rec.Reactions = []Reaction{}
 		}
 		records = append(records, rec)
 	}

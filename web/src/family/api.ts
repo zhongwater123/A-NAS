@@ -14,6 +14,8 @@ import type {
   FamilyMe,
   FamilyMember,
   FamilyOverview,
+  FamilyReaction,
+  FamilyReactionName,
   FamilyRecord,
   FamilyRecordInput,
   FamilyRecordPage,
@@ -32,6 +34,8 @@ export type {
   FamilyMe,
   FamilyMember,
   FamilyOverview,
+  FamilyReaction,
+  FamilyReactionName,
   FamilyRecord,
   FamilyRecordInput,
   FamilyRecordPage,
@@ -104,6 +108,13 @@ export const addComment = (recordId: string, text: string, requestKey: string) =
   call(client.POST("/api/v1/family/records/{recordId}/comments", { ...record(recordId), body: { text, requestKey } }));
 export const deleteComment = (commentId: string) =>
   call(client.DELETE("/api/v1/family/comments/{commentId}", { params: { path: { commentId } } }));
+// react leaves the caller's reaction on a record, or takes it back, and
+// returns the record's reactions.
+export async function react(recordId: string, reaction: FamilyReactionName, on: boolean) {
+  const where = { params: { path: { recordId, reaction } } };
+  const path = "/api/v1/family/records/{recordId}/reactions/{reaction}" as const;
+  return (await call(on ? client.PUT(path, where) : client.DELETE(path, where))).items;
+}
 export const listWall = async (babyId: string) =>
   (await call(client.GET("/api/v1/family/babies/{babyId}/wall", baby(babyId)))).items;
 export const addWallMessage = (babyId: string, text: string, requestKey: string) =>

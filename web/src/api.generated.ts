@@ -1867,6 +1867,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/family/records/{recordId}/reactions/{reaction}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Leave the caller's reaction on a record; leaving it again changes nothing */
+        put: operations["addFamilyReaction"];
+        post?: never;
+        /** Take back the caller's reaction on a record; taking back one never left changes nothing */
+        delete: operations["removeFamilyReaction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/family/comments/{commentId}": {
         parameters: {
             query?: never;
@@ -5211,6 +5229,8 @@ export interface components {
             deletedAt?: string;
             /** @description Oldest first. */
             comments: components["schemas"]["FamilyComment"][];
+            /** @description In the order the window shows them; only those someone left. */
+            reactions: components["schemas"]["FamilyReaction"][];
         };
         FamilyRecordInput: {
             /** @description Repeating a request with the same key returns the first record. */
@@ -6345,6 +6365,16 @@ export interface components {
             /** Format: int64 */
             availableBytes: number;
         };
+        /**
+         * @description A one-tap reaction, shown as ❤️ 👍 😂 🥰 👏.
+         * @enum {string}
+         */
+        FamilyReactionName: "heart" | "like" | "laugh" | "adore" | "clap";
+        FamilyReaction: {
+            name: components["schemas"]["FamilyReactionName"];
+            /** @description The members who left it, earliest first. */
+            accountIds: string[];
+        };
     };
     responses: {
         /** @description Product operation error. */
@@ -6448,6 +6478,17 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description The record's reactions */
+        FamilyReactions: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    items: components["schemas"]["FamilyReaction"][];
+                };
+            };
+        };
     };
     parameters: {
         CSRFToken: string;
@@ -6492,6 +6533,7 @@ export interface components {
         AssistantMemoryID: string;
         /** @description The approval's request id from Hermes. */
         AssistantRequestID: string;
+        FamilyReactionName: components["schemas"]["FamilyReactionName"];
     };
     requestBodies: never;
     headers: never;
@@ -6689,6 +6731,8 @@ export type AssistantApprovalEnvelope = components['schemas']['AssistantApproval
 export type AssistantApproval = components['schemas']['AssistantApproval'];
 export type AssistantChange = components['schemas']['AssistantChange'];
 export type SystemStorage = components['schemas']['SystemStorage'];
+export type FamilyReactionName = components['schemas']['FamilyReactionName'];
+export type FamilyReaction = components['schemas']['FamilyReaction'];
 export type ResponseProductError = components['responses']['ProductError'];
 export type ResponseMethodNotAllowed = components['responses']['MethodNotAllowed'];
 export type ResponseStateUnavailable = components['responses']['StateUnavailable'];
@@ -6700,6 +6744,7 @@ export type ResponseContainersUnavailable = components['responses']['ContainersU
 export type ResponseContainerRequestInvalid = components['responses']['ContainerRequestInvalid'];
 export type ResponseContainerNotFound = components['responses']['ContainerNotFound'];
 export type ResponseContainerEngineError = components['responses']['ContainerEngineError'];
+export type ResponseFamilyReactions = components['responses']['FamilyReactions'];
 export type ParameterCsrfToken = components['parameters']['CSRFToken'];
 export type ParameterUserId = components['parameters']['UserID'];
 export type ParameterPlanId = components['parameters']['PlanID'];
@@ -6733,6 +6778,7 @@ export type ParameterAssistantSessionId = components['parameters']['AssistantSes
 export type ParameterAssistantTaskId = components['parameters']['AssistantTaskID'];
 export type ParameterAssistantMemoryId = components['parameters']['AssistantMemoryID'];
 export type ParameterAssistantRequestId = components['parameters']['AssistantRequestID'];
+export type ParameterFamilyReactionName = components['parameters']['FamilyReactionName'];
 export type $defs = Record<string, never>;
 export interface operations {
     getHealth: {
@@ -10481,6 +10527,46 @@ export interface operations {
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+        };
+    };
+    addFamilyReaction: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                recordId: components["parameters"]["FamilyRecordID"];
+                reaction: components["parameters"]["FamilyReactionName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["FamilyReactions"];
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    removeFamilyReaction: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                recordId: components["parameters"]["FamilyRecordID"];
+                reaction: components["parameters"]["FamilyReactionName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["FamilyReactions"];
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
         };
     };
     deleteFamilyComment: {

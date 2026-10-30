@@ -90,6 +90,7 @@ export function familyRecord(overrides: Partial<FamilyRecord> = {}): FamilyRecor
     createdAt: "2026-10-28T10:00:00Z",
     version: 1,
     comments: [],
+    reactions: [],
     ...overrides,
   };
 }
