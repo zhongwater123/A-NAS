@@ -1,0 +1,63 @@
+[Unit]
+Description=A-NAS web search (SearXNG)
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/specs/web-search.md
+# The administrator turns web search off in Settings: the Host Agent writes
+# this file and stops the service, and the installer's restart leaves it off.
+ConditionPathExists=!/var/lib/a-nas-host/web-search-disabled
+# The DNS servers join the address allow list before the service starts.
+After=network-online.target anas-search-dns.service
+Wants=network-online.target anas-search-dns.service
+
+[Service]
+Type=simple
+User=a-nas-search
+Group=a-nas-search
+# SEARXNG_SECRET, generated once by the installer.
+EnvironmentFile=/etc/a-nas/search.env
+Environment=SEARXNG_SETTINGS_PATH=/opt/a-nas/current/search/settings.yml
+Environment=PYTHONPATH=/opt/a-nas/current/search/runtime/lib/searxng
+# Granian serves SearXNG over HTTP on a socket only the Product Service, a
+# member of the a-nas-search group, reaches; there is no TCP port. Its access
+# log is off by default, and SearXNG logs no queries below debug level.
+ExecStart=/opt/a-nas/current/search/runtime/bin/granian --interface wsgi --uds /run/a-nas-search/search.sock \
+  --uds-permissions 0o660 --workers 1 --blocking-threads 4 --no-ws --log-level warning searx.webapp:app
+RuntimeDirectory=a-nas-search
+RuntimeDirectoryMode=0750
+UMask=0077
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=10s
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectProc=invisible
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+InaccessiblePaths=-/srv/a-nas -/var/lib/a-nas -/var/lib/a-nas-host
+# Public addresses only (ADR 0030): result pages name the addresses the
+# thumbnail proxy fetches, so the service must not reach this machine, the
+# LAN, the Docker networks or any other reserved range. anas-search-dns adds
+# the DNS servers, which DHCP may hand out from a private range.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=localhost link-local multicast
+IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24 192.88.99.0/24
+IPAddressDeny=192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 240.0.0.0/4
+IPAddressDeny=::/128 ::ffff:0:0/96 64:ff9b::/96 100::/64 2001::/23 2001:db8::/32 2002::/16 fc00::/7
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

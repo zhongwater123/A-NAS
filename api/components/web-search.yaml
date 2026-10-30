@@ -1,0 +1,103 @@
+schemas:
+  WebSearchCategory:
+    type: string
+    description: A tab of the window; torrents only while an administrator has turned it on.
+    enum: [web, images, videos, news, torrents]
+  WebSearchStatus:
+    type: object
+    additionalProperties: false
+    required: [enabled, running, torrents, categories]
+    properties:
+      enabled: { type: boolean, description: "The administrator's switch; off stops the service." }
+      running: { type: string, enum: [running, starting, stopped, failed], description: What systemd reports of the service. }
+      torrents: { type: boolean, description: The torrent tab's switch. }
+      categories:
+        type: array
+        description: The tabs the window shows, in order; empty while web search is off.
+        items: { $ref: "#/schemas/WebSearchCategory" }
+  WebSearchSettings:
+    type: object
+    additionalProperties: false
+    required: [enabled, torrents]
+    properties:
+      enabled: { type: boolean }
+      torrents: { type: boolean }
+  WebSearchQuery:
+    type: object
+    additionalProperties: false
+    required: [q, category]
+    properties:
+      q: { type: string, minLength: 1, maxLength: 400, description: "The search text, at most 400 characters." }
+      category: { $ref: "#/schemas/WebSearchCategory" }
+      page: { type: integer, minimum: 1, maximum: 20, default: 1 }
+      timeRange: { type: string, enum: [day, week, month, year], description: Only results this recent. }
+  WebSearchResult:
+    type: object
+    additionalProperties: false
+    required: [url, title, domain, engines]
+    properties:
+      url: { type: string, format: uri, description: An http or https address. }
+      title: { type: string }
+      content: { type: string }
+      domain: { type: string }
+      engines: { type: array, items: { type: string }, description: The names the window shows of the engines that found it. }
+      publishedAt: { type: string, format: date-time }
+      thumbnail: { type: string, description: "A path of this API (getWebSearchThumbnail), never another host." }
+      platform: { type: string, description: A video's site. }
+      author: { type: string }
+      durationSeconds: { type: integer, minimum: 1 }
+      width: { type: integer, minimum: 1, description: An image's width. }
+      height: { type: integer, minimum: 1 }
+      source: { type: string, description: Where an image appears. }
+      magnet: { type: string, description: "A torrent's magnet link (magnet:?…)." }
+      sizeBytes: { type: integer, minimum: 1 }
+      seeders: { type: integer, minimum: 0 }
+      leechers: { type: integer, minimum: 0 }
+  WebSearchAnswer:
+    type: object
+    additionalProperties: false
+    required: [text]
+    properties:
+      text: { type: string }
+      url: { type: string, format: uri }
+  WebSearchInfobox:
+    type: object
+    additionalProperties: false
+    required: [title]
+    properties:
+      title: { type: string }
+      content: { type: string }
+      url: { type: string, format: uri }
+      thumbnail: { type: string }
+  WebSearchPage:
+    type: object
+    additionalProperties: false
+    required: [results, answers, suggestions, unresponsive]
+    properties:
+      results: { type: array, items: { $ref: "#/schemas/WebSearchResult" } }
+      answers: { type: array, items: { $ref: "#/schemas/WebSearchAnswer" } }
+      infobox: { $ref: "#/schemas/WebSearchInfobox" }
+      suggestions: { type: array, items: { type: string } }
+      unresponsive:
+        type: array
+        description: The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA).
+        items: { type: string }
+  WebSearchPackage:
+    type: object
+    additionalProperties: false
+    required: [name, version, license]
+    properties:
+      name: { type: string }
+      version: { type: string }
+      license: { type: string, description: "The package's license as its metadata names it; empty when it names none." }
+  WebSearchLicense:
+    type: object
+    additionalProperties: false
+    required: [name, version, commit, license, packages, source]
+    properties:
+      name: { type: string }
+      version: { type: string, description: "SearXNG's own version, the commit's date and short hash." }
+      commit: { type: string, pattern: "^[0-9a-f]{40}$" }
+      license: { type: string, description: An SPDX expression. }
+      packages: { type: array, items: { $ref: "#/schemas/WebSearchPackage" } }
+      source: { type: boolean, description: This release can hand out SearXNG's source (getWebSearchSource). }

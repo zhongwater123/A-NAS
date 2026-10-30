@@ -75,6 +75,9 @@ func (h *productHandler) table() []apiroute.Route {
 	} {
 		routes = append(routes, domain.Routes()...)
 	}
+	if h.WebSearch != nil {
+		routes = append(routes, h.WebSearch.Routes()...)
+	}
 	return append(routes, h.mounts()...)
 }
 

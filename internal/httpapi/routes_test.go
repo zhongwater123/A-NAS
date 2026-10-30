@@ -18,6 +18,8 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/openapitest"
+	"github.com/zhongwater123/A-NAS/internal/websearch"
+	"github.com/zhongwater123/A-NAS/internal/websearchapi"
 )
 
 // routedProduct is a product with every API mounted, behind stand-ins that
@@ -61,7 +63,8 @@ func routedSessions(t *testing.T) (http.Handler, accounts.Session, accounts.Sess
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: service,
 		Terminal: unreached, Containers: unreached, Apps: unreached, AppShortcuts: unreached, Photos: unreached,
 		Shares: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		WebSearch: websearchapi.New(nil, websearch.Release{}, nil),
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	return product, owner, member
 }

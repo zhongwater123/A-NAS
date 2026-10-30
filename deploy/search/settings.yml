@@ -1,0 +1,100 @@
+# SearXNG's settings for A-NAS web search (ADR 0030, docs/specs/web-search.md).
+# The installer copies this file into the release, read-only; nothing on the
+# NAS changes it. Only the Product Service reaches the service, through its
+# Unix socket, and it asks for each tab's engines by name.
+use_default_settings:
+  engines:
+    # Engines that are only disabled are still loaded and initialised, and
+    # some of them reach the network as they start; load only these.
+    keep_only:
+      - baidu
+      - bing
+      - sogou
+      - 360search
+      - quark
+      - yandex
+      - baidu images
+      - bing images
+      - sogou images
+      - quark images
+      - yandex images
+      - bilibili
+      - iqiyi
+      - acfun
+      - sogou videos
+      - 360search videos
+      - bing videos
+      - youtube
+      - dailymotion
+      - bing news
+      - sogou wechat
+      - piratebay
+      - 1337x
+      - nyaa
+      - bt4g
+      - btdigg
+      - solidtorrents
+      - kickass
+      - tokyotoshokan
+
+general:
+  instance_name: "A-NAS"
+
+search:
+  # Moderate, where an engine supports it.
+  safe_search: 1
+  autocomplete: ""
+  # The Product Service reads JSON; SearXNG's own pages are not offered.
+  formats:
+    - json
+
+server:
+  # The secret comes from SEARXNG_SECRET, which the installer generates once
+  # and keeps in /etc/a-nas/search.env; it also signs thumbnail addresses.
+  limiter: false
+  public_instance: false
+  image_proxy: true
+  method: "POST"
+
+valkey:
+  url: false
+
+outgoing:
+  request_timeout: 5.0
+  max_request_timeout: 10.0
+
+plugins:
+  # Downloads its rules from a CDN at startup.
+  searx.plugins.tracker_url_remover.SXNGPlugin:
+    active: false
+
+engines:
+  - {name: baidu, disabled: false, inactive: false}
+  - {name: bing, disabled: false, inactive: false}
+  - {name: sogou, disabled: false, inactive: false}
+  - {name: 360search, disabled: false, inactive: false}
+  - {name: quark, disabled: false, inactive: false}
+  - {name: yandex, disabled: false, inactive: false}
+  - {name: baidu images, disabled: false, inactive: false}
+  - {name: bing images, disabled: false, inactive: false}
+  - {name: sogou images, disabled: false, inactive: false}
+  - {name: quark images, disabled: false, inactive: false}
+  - {name: yandex images, disabled: false, inactive: false}
+  - {name: bilibili, disabled: false, inactive: false}
+  - {name: iqiyi, disabled: false, inactive: false}
+  - {name: acfun, disabled: false, inactive: false}
+  - {name: sogou videos, disabled: false, inactive: false}
+  - {name: 360search videos, disabled: false, inactive: false}
+  - {name: bing videos, disabled: false, inactive: false}
+  - {name: youtube, disabled: false, inactive: false}
+  - {name: dailymotion, disabled: false, inactive: false}
+  - {name: bing news, disabled: false, inactive: false}
+  - {name: sogou wechat, disabled: false, inactive: false}
+  - {name: piratebay, disabled: false, inactive: false}
+  - {name: 1337x, disabled: false, inactive: false}
+  - {name: nyaa, disabled: false, inactive: false}
+  - {name: bt4g, disabled: false, inactive: false}
+  - {name: btdigg, disabled: false, inactive: false}
+  - {name: solidtorrents, disabled: false, inactive: false}
+  - {name: kickass, disabled: false, inactive: false}
+  - {name: tokyotoshokan, disabled: false, inactive: false}

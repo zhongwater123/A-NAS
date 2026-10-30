@@ -19,22 +19,15 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
-want=$(sed -n 's/^uv==\([0-9.]*\).*/\1/p' "$repo/ai/requirements-dev.txt")
-have=$(uv --version 2>/dev/null | cut -d ' ' -f 2 || true)
-if [[ "$have" != "$want" ]]; then
-  echo "ai/requirements-dev.txt pins uv $want; found: ${have:-none}" >&2
-  exit 2
-fi
+# shellcheck source=lib/python-runtime.sh
+. "$repo/scripts/lib/python-runtime.sh"
+require_uv "$repo"
 
 if [[ "${1:-}" == --lock ]]; then
   shift
   cd "$repo/ai"
-  # The runtime for the NAS alone: Debian 13 has glibc 2.41, and
-  # manylinux_2_40 is the newest tag uv names. The development tools for
-  # every platform.
-  uv pip compile requirements.in --quiet --generate-hashes --python-version 3.13 \
-    --python-platform x86_64-manylinux_2_40 --only-binary :all: --excludes requirements.excludes \
-    --output-file requirements.txt "$@"
+  # The runtime for the NAS alone; the development tools for every platform.
+  lock_runtime requirements.in requirements.txt --excludes requirements.excludes "$@"
   uv pip compile requirements-dev.in --quiet --universal --generate-hashes --python-version 3.13 \
     --only-binary :all: --output-file requirements-dev.txt "$@"
   echo "updated ai/requirements.txt and ai/requirements-dev.txt"
@@ -46,7 +39,7 @@ lock=$repo/ai/requirements.txt
 # pip check knows nothing of requirements.excludes, so it reports the
 # dependencies left out there as missing; it may report nothing else.
 excluded=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$repo/ai/requirements.excludes" | paste -sd '|')
-python=$(docker run --rm "$image" python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+python=$(image_python "$image")
 id=$( { cat "$lock"; printf 'python=%s\n' "$python"; } | sha256sum | cut -c1-16)
 out=$repo/build/ai-runtime
 tarball=$out/$id.tar.gz
@@ -73,8 +66,4 @@ if [[ ! -f "$tarball" ]]; then
     chown $(id -u):$(id -g) /out/$id.tar.gz.partial"
   mv "$tarball.partial" "$tarball"
 fi
-read -r sha _ < <(sha256sum "$tarball")
-jq -cn --arg id "$id" --arg python "$python" --arg file "$id.tar.gz" \
-  --argjson sizeBytes "$(stat -c %s "$tarball")" --arg sha256 "$sha" \
-  '{$id, $python, $file, $sizeBytes, $sha256}' > "$repo/build/ai-runtime.json"
-cat "$repo/build/ai-runtime.json"
+write_runtime_manifest "$tarball" "$id" "$python" "$repo/build/ai-runtime.json"

@@ -24,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
+	"github.com/zhongwater123/A-NAS/internal/websearch"
 )
 
 type handler struct {
@@ -35,6 +36,7 @@ type handler struct {
 	apps        appid.Host
 	snapshots   filesystem.SnapshotBackend
 	systemLogs  systemlog.Reader
+	webSearch   websearch.Switch
 	// reconcileFailed reports the last reconciliation of the data volume.
 	reconcileFailed func() bool
 	logger          *slog.Logger
@@ -50,6 +52,8 @@ type Services struct {
 	Snapshots   filesystem.SnapshotBackend
 	// SystemLogs reads the allowlisted service logs (ADR 0020).
 	SystemLogs systemlog.Reader
+	// WebSearch is the administrator's switch of web search (ADR 0030).
+	WebSearch websearch.Switch
 	// ReconcileFailed reports whether the Host Agent's last reconciliation of
 	// the data volume failed; the host state carries it (#166).
 	ReconcileFailed func() bool
@@ -66,7 +70,7 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	return &handler{
 		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
 		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots,
-		systemLogs: services.SystemLogs, reconcileFailed: services.ReconcileFailed, logger: logger,
+		systemLogs: services.SystemLogs, webSearch: services.WebSearch, reconcileFailed: services.ReconcileFailed, logger: logger,
 	}
 }
 
@@ -109,6 +113,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/v1/accounts/credential/") {
 		h.handleDisableCredential(w, r)
+		return
+	}
+	if r.URL.Path == wire.WebSearchPath {
+		h.handleWebSearch(w, r)
 		return
 	}
 	if r.URL.Path == wire.SystemLogsPath {

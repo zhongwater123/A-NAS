@@ -1,0 +1,92 @@
+/api/v1/web-search:
+  get:
+    operationId: getWebSearch
+    summary: Whether web search is on, and which tabs the window shows (docs/specs/web-search.md)
+    description: >-
+      Every signed-in account reads it: the desktop shows web search only while it is enabled, and the torrent tab
+      only while an administrator has turned it on.
+    responses:
+      "200": { description: The switches and the service's state, content: { application/json: { schema: { $ref: "../components/web-search.yaml#/schemas/WebSearchStatus" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  put:
+    operationId: updateWebSearch
+    x-anas-posture: admin
+    summary: Turn web search and its torrent tab on or off (设置 → 网页搜索)
+    description: >-
+      Administrators only. Turning web search off stops its service through the Host Agent, so the NAS reaches no
+      engine; the choice outlasts restarts and upgrades (ADR 0030).
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/web-search.yaml#/schemas/WebSearchSettings" } } } }
+    responses:
+      "200": { description: The switches after the change, content: { application/json: { schema: { $ref: "../components/web-search.yaml#/schemas/WebSearchStatus" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/web-search/query:
+  post:
+    operationId: searchWeb
+    summary: Search one tab's engines through the built-in SearXNG
+    description: >-
+      The search text travels only in the body, so no access log records it, and it is not logged. Each account
+      may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled
+      while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is
+      off.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/web-search.yaml#/schemas/WebSearchQuery" } } } }
+    responses:
+      "200": { description: One page of results, content: { application/json: { schema: { $ref: "../components/web-search.yaml#/schemas/WebSearchPage" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "429": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/web-search/thumbnail:
+  get:
+    operationId: getWebSearchThumbnail
+    summary: A result's thumbnail, fetched through SearXNG's image proxy
+    description: >-
+      Results name their thumbnails by this path, signed with SearXNG's secret, so the browser loads no image from
+      another host. 404 when the remote site has no image there.
+    parameters:
+      - { name: url, in: query, required: true, schema: { type: string, format: uri } }
+      - { name: h, in: query, required: true, description: The signature results carry., schema: { type: string } }
+    responses:
+      "200":
+        description: The image
+        content:
+          image/*: { schema: { type: string, format: binary } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/web-search/license:
+  get:
+    operationId: getWebSearchLicense
+    summary: SearXNG's version and license, and every package of its runtime
+    description: 404 in a release that carries no web search runtime, such as development.
+    responses:
+      "200": { description: The open source notice, content: { application/json: { schema: { $ref: "../components/web-search.yaml#/schemas/WebSearchLicense" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/web-search/license/text:
+  get:
+    operationId: getWebSearchLicenseText
+    summary: SearXNG's LICENSE, the GNU Affero General Public License
+    responses:
+      "200": { description: The license, content: { text/plain: { schema: { type: string } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/web-search/source:
+  get:
+    operationId: getWebSearchSource
+    summary: The archive of SearXNG's source this release was built from (AGPL-3.0)
+    responses:
+      "200":
+        description: The archive, as SearXNG's repository publishes it for the pinned commit
+        content:
+          application/gzip: { schema: { type: string, format: binary } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }

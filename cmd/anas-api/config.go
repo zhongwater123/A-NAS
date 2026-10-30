@@ -92,6 +92,7 @@ type Config struct {
 	// directory is the pool.
 	ScreensaverVideo string `env:"ANAS_SCREENSAVER_VIDEO"`
 	Assistant        AssistantConfig
+	WebSearch        WebSearchConfig
 	// HostAgentChangesSocket is the Host Agent's socket for the assistants'
 	// changes. The Product Service once read the same name for the spike's
 	// change broker; it refuses it now, so that neither meaning is taken for
@@ -124,6 +125,19 @@ type AssistantConfig struct {
 	// (ai/assistant-spike/change_broker.py), which executes the assistant's
 	// changes in development; a NAS uses the File Broker.
 	SpikeBrokerSocket string `env:"ANAS_ASSISTANT_SPIKE_BROKER_SOCKET"`
+}
+
+// WebSearchConfig reaches the built-in SearXNG service (ADR 0030); the
+// installer writes all three on a NAS. Without a socket, development answers
+// with a fake that reaches no engine.
+type WebSearchConfig struct {
+	Socket string `env:"ANAS_WEB_SEARCH_SOCKET"`
+	// Release is the release's search directory, with SearXNG's pin,
+	// license and source.
+	Release string `env:"ANAS_WEB_SEARCH_RELEASE"`
+	// SecretFile is SearXNG's environment file, whose secret also signs
+	// thumbnail addresses.
+	SecretFile string `env:"ANAS_WEB_SEARCH_SECRET_FILE"`
 }
 
 // Live says the Product Service runs on a NAS through the Host Agent.
@@ -179,7 +193,8 @@ func loadConfig(environment map[string]string) (Config, error) {
 		{"ANAS_PHOTOS_SOCKET", &c.PhotosSocket}, {"ANAS_SHARES_SOCKET", &c.SharesSocket},
 		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
 		{"ANAS_FFMPEG_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
-		{"ANAS_ASSISTANT_SOCKET_DIR", &c.Assistant.SocketDir},
+		{"ANAS_ASSISTANT_SOCKET_DIR", &c.Assistant.SocketDir}, {"ANAS_WEB_SEARCH_SOCKET", &c.WebSearch.Socket},
+		{"ANAS_WEB_SEARCH_RELEASE", &c.WebSearch.Release}, {"ANAS_WEB_SEARCH_SECRET_FILE", &c.WebSearch.SecretFile},
 	} {
 		path(variable.name, variable.value)
 	}

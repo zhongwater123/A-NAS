@@ -142,6 +142,25 @@ qdrant_file=$(manifest_field vectors/qdrant.json file)
 staged_qdrant="$HOME/apps/a-nas/qdrant/$qdrant_sha/$qdrant_file"
 printf '%s  %s\n' "$qdrant_sha" "$staged_qdrant" | sha256sum --check --quiet -
 ln -s "$staged_qdrant" vectors/qdrant.tar.gz
+# Web search (ADR 0030): SearXNG's settings, pin and DNS helper, its units,
+# and its runtime, staged once per content like the AI Worker's.
+install -m 0644 anas-search-system.service.incoming anas-search-system.service
+install -m 0644 anas-search-dns-system.service.incoming anas-search-dns-system.service
+install -m 0644 anas-search-dns-system.path.incoming anas-search-dns-system.path
+install -m 0644 a-nas-search.sysusers.incoming a-nas-search.sysusers
+rm -rf search
+install -d -m 0750 search
+install -m 0644 search-settings.yml.incoming search/settings.yml
+install -m 0644 search-searxng.json.incoming search/searxng.json
+install -m 0750 search-allow-dns.sh.incoming search/allow-dns.sh
+install -m 0644 search-runtime.json.incoming search/runtime.json
+search_runtime_sha=$(manifest_field search/runtime.json sha256)
+search_runtime_file=$(manifest_field search/runtime.json file)
+[[ "$search_runtime_sha" =~ ^[0-9a-f]{64}$ && "$search_runtime_file" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] ||
+  { echo "invalid web search runtime manifest" >&2; exit 2; }
+staged_search_runtime="$HOME/apps/a-nas/search-runtimes/$search_runtime_file"
+printf '%s  %s\n' "$search_runtime_sha" "$staged_search_runtime" | sha256sum --check --quiet -
+ln -s "$staged_search_runtime" search/runtime.tar.gz
 rm -f \
   anas-system.slice.incoming \
   anas-ai-system.socket.incoming \
@@ -164,6 +183,14 @@ rm -f \
   ai-face-embedder.json.incoming \
   ai-animal-embedder.json.incoming \
   ai-runtime.json.incoming \
+  anas-search-system.service.incoming \
+  anas-search-dns-system.service.incoming \
+  anas-search-dns-system.path.incoming \
+  a-nas-search.sysusers.incoming \
+  search-settings.yml.incoming \
+  search-searxng.json.incoming \
+  search-allow-dns.sh.incoming \
+  search-runtime.json.incoming \
   anas-api.incoming \
   anas-host-agent.incoming \
   kiosk-launcher.incoming \

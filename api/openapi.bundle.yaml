@@ -1679,6 +1679,163 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/web-search:
+    get:
+      operationId: getWebSearch
+      summary: Whether web search is on, and which tabs the window shows (docs/specs/web-search.md)
+      description: 'Every signed-in account reads it: the desktop shows web search only while it is enabled, and the torrent tab only while an administrator has turned it on.'
+      responses:
+        '200':
+          description: The switches and the service's state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSearchStatus'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    put:
+      operationId: updateWebSearch
+      x-anas-posture: admin
+      summary: Turn web search and its torrent tab on or off (设置 → 网页搜索)
+      description: Administrators only. Turning web search off stops its service through the Host Agent, so the NAS reaches no engine; the choice outlasts restarts and upgrades (ADR 0030).
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebSearchSettings'
+      responses:
+        '200':
+          description: The switches after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSearchStatus'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/web-search/query:
+    post:
+      operationId: searchWeb
+      summary: Search one tab's engines through the built-in SearXNG
+      description: The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off.
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebSearchQuery'
+      responses:
+        '200':
+          description: One page of results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSearchPage'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '429':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/web-search/thumbnail:
+    get:
+      operationId: getWebSearchThumbnail
+      summary: A result's thumbnail, fetched through SearXNG's image proxy
+      description: Results name their thumbnails by this path, signed with SearXNG's secret, so the browser loads no image from another host. 404 when the remote site has no image there.
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+        - name: h
+          in: query
+          required: true
+          description: The signature results carry.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The image
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/web-search/license:
+    get:
+      operationId: getWebSearchLicense
+      summary: SearXNG's version and license, and every package of its runtime
+      description: 404 in a release that carries no web search runtime, such as development.
+      responses:
+        '200':
+          description: The open source notice
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSearchLicense'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/web-search/license/text:
+    get:
+      operationId: getWebSearchLicenseText
+      summary: SearXNG's LICENSE, the GNU Affero General Public License
+      responses:
+        '200':
+          description: The license
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/web-search/source:
+    get:
+      operationId: getWebSearchSource
+      summary: The archive of SearXNG's source this release was built from (AGPL-3.0)
+      responses:
+        '200':
+          description: The archive, as SearXNG's repository publishes it for the pinned commit
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
   /api/v1/transfers:
     get:
       operationId: listTransfers
@@ -8681,6 +8838,239 @@ components:
           description: An after query found more new lines than one page holds.
         dataSource:
           $ref: '#/components/schemas/DataSource'
+    WebSearchCategory:
+      type: string
+      description: A tab of the window; torrents only while an administrator has turned it on.
+      enum:
+        - web
+        - images
+        - videos
+        - news
+        - torrents
+    WebSearchStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - running
+        - torrents
+        - categories
+      properties:
+        enabled:
+          type: boolean
+          description: The administrator's switch; off stops the service.
+        running:
+          type: string
+          enum:
+            - running
+            - starting
+            - stopped
+            - failed
+          description: What systemd reports of the service.
+        torrents:
+          type: boolean
+          description: The torrent tab's switch.
+        categories:
+          type: array
+          description: The tabs the window shows, in order; empty while web search is off.
+          items:
+            $ref: '#/components/schemas/WebSearchCategory'
+    WebSearchSettings:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - torrents
+      properties:
+        enabled:
+          type: boolean
+        torrents:
+          type: boolean
+    WebSearchQuery:
+      type: object
+      additionalProperties: false
+      required:
+        - q
+        - category
+      properties:
+        q:
+          type: string
+          minLength: 1
+          maxLength: 400
+          description: The search text, at most 400 characters.
+        category:
+          $ref: '#/components/schemas/WebSearchCategory'
+        page:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 1
+        timeRange:
+          type: string
+          enum:
+            - day
+            - week
+            - month
+            - year
+          description: Only results this recent.
+    WebSearchResult:
+      type: object
+      additionalProperties: false
+      required:
+        - url
+        - title
+        - domain
+        - engines
+      properties:
+        url:
+          type: string
+          format: uri
+          description: An http or https address.
+        title:
+          type: string
+        content:
+          type: string
+        domain:
+          type: string
+        engines:
+          type: array
+          items:
+            type: string
+          description: The names the window shows of the engines that found it.
+        publishedAt:
+          type: string
+          format: date-time
+        thumbnail:
+          type: string
+          description: A path of this API (getWebSearchThumbnail), never another host.
+        platform:
+          type: string
+          description: A video's site.
+        author:
+          type: string
+        durationSeconds:
+          type: integer
+          minimum: 1
+        width:
+          type: integer
+          minimum: 1
+          description: An image's width.
+        height:
+          type: integer
+          minimum: 1
+        source:
+          type: string
+          description: Where an image appears.
+        magnet:
+          type: string
+          description: A torrent's magnet link (magnet:?…).
+        sizeBytes:
+          type: integer
+          minimum: 1
+        seeders:
+          type: integer
+          minimum: 0
+        leechers:
+          type: integer
+          minimum: 0
+    WebSearchAnswer:
+      type: object
+      additionalProperties: false
+      required:
+        - text
+      properties:
+        text:
+          type: string
+        url:
+          type: string
+          format: uri
+    WebSearchInfobox:
+      type: object
+      additionalProperties: false
+      required:
+        - title
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+        url:
+          type: string
+          format: uri
+        thumbnail:
+          type: string
+    WebSearchPage:
+      type: object
+      additionalProperties: false
+      required:
+        - results
+        - answers
+        - suggestions
+        - unresponsive
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebSearchResult'
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebSearchAnswer'
+        infobox:
+          $ref: '#/components/schemas/WebSearchInfobox'
+        suggestions:
+          type: array
+          items:
+            type: string
+        unresponsive:
+          type: array
+          description: The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA).
+          items:
+            type: string
+    WebSearchPackage:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - version
+        - license
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        license:
+          type: string
+          description: The package's license as its metadata names it; empty when it names none.
+    WebSearchLicense:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - version
+        - commit
+        - license
+        - packages
+        - source
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+          description: SearXNG's own version, the commit's date and short hash.
+        commit:
+          type: string
+          pattern: ^[0-9a-f]{40}$
+        license:
+          type: string
+          description: An SPDX expression.
+        packages:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebSearchPackage'
+        source:
+          type: boolean
+          description: This release can hand out SearXNG's source (getWebSearchSource).
     Transfer:
       type: object
       additionalProperties: false

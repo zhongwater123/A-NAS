@@ -265,13 +265,15 @@ go-lint:
 
 # Fails on known vulnerabilities in what ships: Go code the product can reach
 # (govulncheck, pinned by the tool directive in go.mod, with the database from
-# vuln.go.dev), the AI runtime's packages (pip-audit, pinned by
-# ai/requirements-dev.txt, with PyPI's advisories) and the Web UI's runtime
-# packages (npm audit, with the registry's advisories). A new advisory fails it
-# without a change; fix that first (AGENTS.md).
+# vuln.go.dev), the packages of the AI and web search runtimes (pip-audit,
+# pinned by ai/requirements-dev.txt, with PyPI's advisories; web search follows
+# SearXNG's pins, so an advisory there moves its commit) and the Web UI's
+# runtime packages (npm audit, with the registry's advisories). A new advisory
+# fails it without a change; fix that first (AGENTS.md).
 vuln-check:
 	$(GO) tool govulncheck ./...
 	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r ai/requirements.txt
+	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r deploy/search/requirements.txt
 	cd web && $(NPM) audit --omit=dev
 
 test:

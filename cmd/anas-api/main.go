@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,6 +56,8 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/transfers"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
 	"github.com/zhongwater123/A-NAS/internal/vectorindex"
+	"github.com/zhongwater123/A-NAS/internal/websearch"
+	"github.com/zhongwater123/A-NAS/internal/websearchapi"
 	"github.com/zhongwater123/A-NAS/internal/webui"
 )
 
@@ -279,6 +282,15 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeAtExit(logger, "personalization.db", personalizationStore)
+	webSearchStore, err := websearch.OpenStore(filepath.Join(stateDirectory, "web-search.db"))
+	if err != nil {
+		return err
+	}
+	defer closeAtExit(logger, "web-search.db", webSearchStore)
+	webSearch, err := configuredWebSearch(config, webSearchStore, operations, logger)
+	if err != nil {
+		return err
+	}
 	transferService, err := transfers.Open(filepath.Join(stateDirectory, "transfers.db"), fileService, accountService, transfers.Options{
 		Sessions: accountService.RememberedSessions, FilesChanged: mediaService.SpaceChanged, Logger: logger,
 	})
@@ -331,6 +343,7 @@ func run(logger *slog.Logger) error {
 		// Signing in keeps the member's assistant running (ADR 0024).
 		AssistantKeeper: assistant,
 		SystemLogs:      systemLogs,
+		WebSearch:       websearchapi.New(webSearch, websearch.NewRelease(config.WebSearch.Release), logger),
 		// Web uploads and other changes rescan the media libraries of their
 		// space a few seconds later.
 		FilesChanged: mediaService.SpaceChanged,
@@ -519,6 +532,33 @@ type productOperations interface {
 	accounts.CredentialProvisioner
 	storage.VolumeExecutor
 	files.SnapshotBackend
+}
+
+// configuredWebSearch reaches SearXNG and the Host Agent's switch on a NAS
+// (ADR 0030). A NAS whose environment names no socket has web search
+// unavailable rather than invented; development searches a fake that
+// reaches no engine, behind a switch in memory.
+func configuredWebSearch(config Config, store *websearch.Store, operations productOperations, logger *slog.Logger) (*websearch.Service, error) {
+	options := websearch.Options{Settings: store, ThumbnailPath: websearchapi.ThumbnailPath}
+	if config.Live() {
+		power, ok := operations.(websearch.Switch)
+		if !ok {
+			return nil, errors.New("host agent client cannot switch web search")
+		}
+		options.Switch = power
+	} else {
+		options.Backend, options.Switch, options.Secret = websearch.Fake{}, websearch.NewMemorySwitch(true), []byte(rand.Text())
+	}
+	if config.WebSearch.Socket != "" {
+		options.Backend = websearch.NewSearXNG(config.WebSearch.Socket)
+		// Without the secret, searches still work; results only lack thumbnails.
+		secret, err := websearch.ReadSecret(config.WebSearch.SecretFile)
+		if err != nil {
+			logger.Error("web search shows no thumbnails: SearXNG's secret cannot be read", "error", err)
+		}
+		options.Secret = secret
+	}
+	return websearch.New(options), nil
 }
 
 // configuredServices reaches the host through the Host Agent on a NAS, and
