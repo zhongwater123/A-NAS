@@ -4,7 +4,7 @@ It listens where --host says, a UNIX socket, answers /health, and streams a
 fixed answer to /v1/chat/completions the way llama-server does, with each
 token's log probability. Environment variables shape it:
 
-- FAKE_LLAMA_RECORD: a file for the command line and the last request's body;
+- FAKE_LLAMA_RECORD: a file for the command line, the last request's body and the process ID;
 - FAKE_LLAMA_DELAY: seconds to wait before answering, as the image's encoding does;
 - FAKE_LLAMA_STATUS: answer with this HTTP status instead;
 - FAKE_LLAMA_REPEAT: answer the same piece this many times;
@@ -44,7 +44,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         record = os.environ.get("FAKE_LLAMA_RECORD")
         if record:
             with open(record, "w", encoding="utf-8") as file:
-                json.dump({"argv": sys.argv[1:], "body": body}, file, ensure_ascii=False)
+                json.dump({"argv": sys.argv[1:], "body": body, "pid": os.getpid()}, file, ensure_ascii=False)
         status = int(os.environ.get("FAKE_LLAMA_STATUS", "200"))
         if status != 200:
             self.send_error(status, "image could not be decoded")

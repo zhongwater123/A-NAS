@@ -26,6 +26,7 @@ import logging
 import os
 import resource
 import select
+import signal
 import socket
 import sys
 import threading
@@ -432,11 +433,16 @@ def main(argv=None):
         log.info("reading text with %s", reader.provider.model)
     started = started_memory()
     log.info("started with %d MiB", started >> 20)
+    # systemd stops the Worker with SIGTERM, and so may whatever else runs it;
+    # exiting through the finally below stops llama-server too, which would
+    # otherwise outlive the Worker outside systemd (it held 3 GiB on the NAS).
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     with listening_socket(args.socket) as listener:
         try:
             serve(listener, provider, reason, args.idle_seconds, detector, faces, animals, started, reader)
+        except SystemExit:
+            pass
         finally:
-            # llama-server would outlive the Worker otherwise.
             if reader.provider is not None:
                 reader.provider.release()
     # Hand the memory back at once. Tearing the models down object by object

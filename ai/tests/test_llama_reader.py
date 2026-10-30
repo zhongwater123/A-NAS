@@ -5,6 +5,9 @@ import hashlib
 import json
 import os
 import shutil
+import socket
+import struct
+import subprocess
 import sys
 import tempfile
 import threading
@@ -14,6 +17,7 @@ import unittest
 from anas_ai import providers
 
 STAND_IN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_llama_server.py")
+AI = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class LlamaReaderTest(unittest.TestCase):
@@ -141,6 +145,43 @@ class LlamaReaderTest(unittest.TestCase):
             reader.read(b"jpeg", "text", None, reader.run_options())
         self.assertIsNone(reader._process)
         self.assertFalse(os.path.exists(self.record))
+
+    def test_a_stopped_worker_stops_its_server(self):
+        # Outside systemd nothing else would end llama-server.
+        self.reader()  # writes the stand-in model files and manifests
+        server = os.path.join(self.directory, "llama-server")
+        with open(server, "w", encoding="utf-8") as file:
+            file.write(f'#!/bin/sh\nexec "{sys.executable}" "{STAND_IN}" "$@"\n')
+        os.chmod(server, 0o700)
+        path = os.path.join(self.directory, "ai.sock")
+        files = {name: os.path.join(self.directory, name) for name in ("model.gguf", "mmproj.gguf", "llama.json")}
+        worker = subprocess.Popen(
+            [sys.executable, "-m", "anas_ai.worker", "--fake", "--socket", path, "--ocr-server", server,
+             "--ocr-runtime-manifest", files["llama.json"], "--ocr-model", files["model.gguf"],
+             "--ocr-model-manifest", files["model.gguf"] + ".json", "--ocr-mmproj", files["mmproj.gguf"],
+             "--ocr-mmproj-manifest", files["mmproj.gguf"] + ".json"],
+            cwd=AI, env={**os.environ, "PYTHONPATH": AI}, stderr=subprocess.DEVNULL)
+        self.addCleanup(worker.kill)
+        deadline = time.monotonic() + 30
+        while not os.path.exists(path):
+            self.assertLess(time.monotonic(), deadline, "the Worker did not start")
+            time.sleep(0.1)
+        image = os.path.join(self.directory, "page.jpg")
+        with open(image, "wb") as file:
+            file.write(b"jpeg")
+        with socket.socket(socket.AF_UNIX) as conn, open(image, "rb") as file:
+            conn.connect(path)
+            payload = json.dumps({"op": "read_text", "kind": "text"}).encode()
+            socket.send_fds(conn, [struct.pack(">I", len(payload)) + payload], [file.fileno()])
+            with conn.makefile("rb") as reply:
+                (length,) = struct.unpack(">I", reply.read(4))
+                self.assertTrue(json.loads(reply.read(length))["ok"])
+        with open(self.record, encoding="utf-8") as file:
+            pid = json.load(file)["pid"]
+        worker.terminate()
+        self.assertEqual(worker.wait(30), 0)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
 
     def test_a_server_that_does_not_start_is_unavailable(self):
         self.environ["FAKE_LLAMA_EXIT"] = "1"
