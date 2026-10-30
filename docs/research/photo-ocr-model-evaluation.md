@@ -1,7 +1,7 @@
 # 相册证件与票据 OCR 模型评估
 
-> 状态：开发机评估完成（公开数据集）；真实证件与银行回单未测（#128）；2026-10-19 用户决定做 OCR，实施方案待写  
-> 更新日期：2026-10-29  
+> 状态：开发机评估完成（公开数据集）；2026-10-29 在实验 NAS 上实测了 GLM-OCR 与 Qwen3.5-2B 的速度与内存；2026-10-30 用户定为 Qwen3.5-4B 的 Q4_0（4B 级候选的数据待补，#323）；真实证件与银行回单未测（#128）；[实施方案](../architecture/photo-ocr.md)已起草  
+> 更新日期：2026-10-30  
 > 适用范围：GLM-OCR、Qwen3.5-2B、HunyuanOCR-1.5、PaddleOCR-VL-1.6，llama.cpp `e36df60`（0.6.0-dev）CPU 推理，语言部分 Q8_0，每张图最多 1024 个视觉 token（GLM-OCR 与 Qwen3.5-2B 另以 2048 复测票据与卡证）  
 > 关联：[相册规格](../specs/photo-library.md)（2026-10-19 决定做 OCR）、[M2 实施方案](../architecture/photo-ai.md)、[模型与 Runtime 选型](photo-ai-model-runtime-selection.md)
 
@@ -81,9 +81,33 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
 | HunyuanOCR-1.5 | 122 s（185 s） | 103 s | 17.1 token/s | 4,093 MiB | 7.7 s |
 | PaddleOCR-VL-1.6 | 76 s（82 s） | 65 s | 35.1 token/s | 2,219 MiB | 4.0 s |
 
-这是开发机的数字（笔记本大小核混合），i3-12100 上要实测。按每张 1–2 分钟估计，家庭图库里几百张证件与票据照片在空闲时一两天能处理完，不适合全库逐张运行。
+这是开发机的数字（笔记本大小核混合），实验 NAS 上的实测见下一节。
 
-内存：2026-10-29 起 AI 模型不再有固定的内存预算，后台任务只在加载后仍有 1 GiB 可用时才加载模型（[#321](https://github.com/zhongwater123/A-NAS/pull/321)，[资源策略](../architecture/photo-objects.md#资源策略)），OCR 模型也按这条规则加载。按 2026-10-28 实验 NAS 空闲时约 4.4 GiB 的可用内存估算，GLM-OCR（峰值 2.9 GiB）加载后约余 1.5 GiB；Qwen3.5-2B（3.6 GiB）约余 0.8 GiB，达不到 1 GiB。两者都不能与相册 AI Worker（全部加载约 1 GiB）同时加载。上表是开发机的峰值，以 NAS 实测为准。
+### 实验 NAS 实测（2026-10-29）
+
+- **条件**：
+  - 硬件：i3-12100，4 核 8 线程，7.7 GiB 内存。
+  - 线程：6 个，与正式运行一样留出 2 个核。
+  - 其余与上表相同：同一批 12 张、同一个 llama.cpp 构建，每张最多 1024 个视觉 token，`--cache-ram 0 --ctx-checkpoints 0`。
+  - 一次只测一个模型，每个模型在测试账号自己的 cgroup 中运行。
+  - 开始时 NAS 空闲：负载约 1，可用内存 5.7 GiB。
+- **脚本**：[`ai/eval/ocr_nas_bench.sh`](../../ai/eval/ocr_nas_bench.sh)。它每秒记录 NAS 的可用内存、cgroup 内存、负载与温度；可用内存低于 700 MiB 时立即停止测试（本次没有触发）。测试进程的 `oom_score_adj` 设为 1000，内存耗尽时内核先结束它。
+
+| 模型 | 每张中位（p90） | 首字前 | 生成速度 | 加载 | 进程常驻峰值 | NAS 可用内存最多下降 | 最低可用 |
+|---|---|---|---|---|---|---|---|
+| GLM-OCR | 40 s（49 s） | 23 s | 23.1 token/s | 2.0 s | 2,792 MiB | 2,155 MiB | 3,613 MiB |
+| Qwen3.5-2B | 67 s（89 s） | 25 s | 8.8 token/s | 5.0 s | 3,420 MiB | 1,542 MiB | 4,218 MiB |
+
+- **速度**：
+  - 比开发机 4 线程快 1.4–1.8 倍。快在图像编码与提示：首字前 53→23 s、63→25 s。生成速度与开发机相当，Qwen3.5-2B 还略慢（10.2→8.8 token/s）。
+  - 满负荷时每小时约 90 张（GLM-OCR）或 54 张（Qwen3.5-2B）。处理几百张证件与票据要几个小时；整个 2 万张的图库则要 9 天和 15 天的 CPU 时间，所以仍然只适合处理有字的照片。
+- **内存**：
+  - 进程常驻峰值 2.7 / 3.3 GiB，其中包括映射进来的模型文件（1.4 / 2.7 GB）。这些文件页在页缓存中，也计入可用内存，所以 NAS 的可用内存只下降了 2.1 / 1.5 GiB。GLM-OCR 降得更多，是因为它的上下文缓存更大。
+  - 按“加载后仍有 1 GiB 可用”的规则（[#321](https://github.com/zhongwater123/A-NAS/pull/321)，[资源策略](../architecture/photo-objects.md#资源策略)），两者在当时都能加载。2026-10-28 的可用内存较少，约 4.4 GiB，按常驻峰值保守计算，加载后也各剩约 1.7 / 1.1 GiB。
+  - 两者都不应与相册 AI Worker（全部加载约 1 GiB）同时加载。
+  - 映射的模型文件页一旦被回收，推理就要反复从磁盘读。实施方案要决定：模型的内存需要按常驻峰值（保守）计，还是按可用内存的实际下降计；或者改用 `--no-mmap`，让两者一致。
+- **温度与负载**：温度最高 74 / 77 °C，负载约 7。没有在有人使用 NAS 时测对前台的影响。
+- **输出**：两个模型各有 10/12 张与开发机逐字相同，另外 2 张只有少量差异：线程数不同会改变浮点累加顺序，贪心解码随之分叉。准确率没有重新评分。
 
 ### 视觉 token 上限 2048 复测（2026-10-16）
 
@@ -99,6 +123,13 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
 提高上限没有实质改善数字字段：两个模型合计由错变对 14 个、由对变错 16 个，都在每集 25 张的波动范围内。确实来自分辨率的改善有：数量 `3482`→`2482`、社保号补上漏掉的一位、入住时间补上“23:31”、挂号费 `000`→`30.00`、年份 `2011`→`2021`。退步则多为与分辨率无关的随机变化：业务流水号填成人名、日期填成正文；GLM-OCR 还有一张采购单在 2048 下陷入重复输出，被截停后整张单的字段全部丢失。代价是每张耗时增加 1.1–2.8 倍，Qwen3.5-2B 在长票据上最明显。
 
 结论：保留 1024 的上限。小字确实会因此读错，更划算的做法是只对核对层标出的可疑字段，按其所在区域裁切、放大后再读一遍，而不是整张图都用高分辨率（未测）。
+
+### 4B 级候选（2026-10-30）
+
+[#323](https://github.com/zhongwater123/A-NAS/issues/323) 列出了两个 4B 级候选：Google Gemma 4 E4B 与阿里 Qwen3.5-4B。候选的事实、下载清单和测法都在 #323 中。
+
+- **决定**：其他开发按 #323 的方向实测后，用户 2026-10-30 确定：效果最好的是 **Qwen3.5-4B**，语言部分量化为 **Q4_0**（不是 Q4_K_M）。产品以它为 OCR 模型（[实施方案](../architecture/photo-ocr.md)）。
+- **数据待补**：准确率（同一批 85 张，口径同上表）、实验 NAS 上的速度与内存（口径同上一节）、是否关闭思考模式，待测试的开发贴到 #323 后写进本节。在此之前，实施方案中的耗时与内存按 Qwen3.5-2B 的实测估算。
 
 ## 测试中发现的问题
 
@@ -124,11 +155,11 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
 1. 视觉 token 上限 2048 的复测已完成（见“结果”），保留 1024。
 2. 设计并评估核对层：PP-OCRv6 原文交叉核对、校验位与格式规则、低概率字段标记、可疑字段裁切放大后重读，衡量“自动通过的字段中错误的比例”。
 3. 已决定（2026-10-19）：做 OCR，文字与字段进入搜索，可见范围与照片相同。实施方案待写，需定模型、核对层、哪些照片读字段、界面呈现，以及 OCR 模型如何在 1 GiB 余量的规则下运行。
-4. 写实施方案前，在实验 NAS（i3-12100）上实测 GLM-OCR 与 Qwen3.5-2B 的速度、内存与对前台的影响。
+4. 实验 NAS 上的速度与内存已实测（2026-10-29，见“结果”）。有人使用时对前台的影响尚未测。
 
 ## 关联
 
-- 代码：[`ai/eval/ocr.py`](../../ai/eval/ocr.py)、[`ai/eval/ocr_score.py`](../../ai/eval/ocr_score.py)、[`ai/eval/ocr_models.sh`](../../ai/eval/ocr_models.sh)、[`ai/ocr-eval.Dockerfile`](../../ai/ocr-eval.Dockerfile)
-- 原始答案与报告：开发机 `D:\A-NAS-datasets\runs\ocr-2026-10-15\`（`report-all.json`、各模型的 JSON lines、`bench-t4-img1024/`）；被缓存问题污染的第一次速度测试保留在 `superseded-cache-ram-on/`
+- 代码：[`ai/eval/ocr.py`](../../ai/eval/ocr.py)、[`ai/eval/ocr_score.py`](../../ai/eval/ocr_score.py)、[`ai/eval/ocr_models.sh`](../../ai/eval/ocr_models.sh)、[`ai/eval/ocr_nas_bench.sh`](../../ai/eval/ocr_nas_bench.sh)、[`ai/ocr-eval.Dockerfile`](../../ai/ocr-eval.Dockerfile)
+- 原始答案与报告：开发机 `D:\A-NAS-datasets\runs\ocr-2026-10-15\`（`report-all.json`、各模型的 JSON lines、`bench-t4-img1024/`）；被缓存问题污染的第一次速度测试保留在 `superseded-cache-ram-on/`；实验 NAS 的实测在 `nas-2026-10-29/t6/`（答案、服务日志、逐秒内存记录）
 - 数据与评分代码：CC-OCR 数据集 revision `c64517e9`，评测代码 AdvancedLiterateMachinery `fb6187eb`
 - [模型与 Runtime 选型](photo-ai-model-runtime-selection.md)（2026-10-07 的 PP-OCRv6 候选）、[M2 实施方案](../architecture/photo-ai.md)
