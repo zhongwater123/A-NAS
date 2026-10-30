@@ -52,13 +52,12 @@ SEGMENTS_MAX = 30
 REASON_CHARS = 200
 SHOWS_CHARS = 40
 ROUNDING = 0.005
-# A segment may run this long while its picture hardly changes (every two of its
-# windows at least STILL alike: a slow pan or a followed boat is 0.93-0.98, a new
-# shot 0.63-0.75), and this long while it keeps changing. Grey-level frame
-# differences cannot tell: a moving camera changes the pixels, not the picture.
+# Windows at least this alike to the part so far show the same picture (a slow pan or a
+# followed boat is 0.93-0.98, a new shot 0.63-0.75). Grey-level frame differences
+# cannot tell: a moving camera changes the pixels, not the picture.
 STILL = 0.9
-STILL_MAX = 6.0
-MOVING_MAX = 8.0
+# The longest a segment may run, changing or not: one picture for 8 s tires the eye.
+CLIP_MAX = 6.0
 
 
 class PlanError(Exception):
@@ -254,6 +253,8 @@ class Index:
                 problems.append(f"第 {n} 段 {start:g}–{end:g} 秒越出了镜头 {lo:g}–{hi:g} 秒，片段不能跨过镜头切点")
             if end - start < SEGMENT_MIN:
                 problems.append(f"第 {n} 段只有 {end - start:.2g} 秒，每段至少 {SEGMENT_MIN:g} 秒")
+            if end - start > CLIP_MAX + ROUNDING:
+                problems.append(f"第 {n} 段有 {end - start:.3g} 秒，每段最多 {CLIP_MAX:g} 秒")
             if any(self.flat[i] and self.rows[i][1] < end and start < self.rows[i][2] for i in self._shot_windows(card)):
                 problems.append(f"第 {n} 段 {start:g}–{end:g} 秒里有纯黑或纯色的画面")
             reason = segment.get("reason", "")
@@ -273,8 +274,7 @@ class Index:
         """A plan with no model. The target is an upper bound: only cards at or over
         THRESHOLD, best first, and when they run out the cut is shorter. Each card gives
         one segment grown from its best window over neighbours also over THRESHOLD and
-        not flat, at most STILL_MAX while the picture hardly changes and MOVING_MAX while
-        it does; a segment showing the same picture as one taken from the same shot is
+        not flat, at most CLIP_MAX; a segment showing the same picture as one taken from the same shot is
         left out. Then each video's segments in time order.
 
         look, when given, is asked look(card, start, end, probe) with the probe the card
@@ -296,7 +296,7 @@ class Index:
             start, end = max(lo, self.rows[run[0]][1]), min(hi, self.rows[run[-1]][2])
             if end - start < SEGMENT_MIN + 0.02:  # a short shot: the whole of it
                 start, end = max(lo, min(start, card["start"])), min(hi, max(end, card["end"]))
-            cap = min(left, STILL_MAX if self._still(run) else MOVING_MAX)
+            cap = min(left, CLIP_MAX)
             if end - start > cap:  # trimmed around the best window
                 middle = (self.rows[best][1] + self.rows[best][2]) / 2
                 start = min(max(start, middle - cap / 2), end - cap)
@@ -323,10 +323,6 @@ class Index:
         order = {video: n for n, video in enumerate(dict.fromkeys(c["video"] for c in found))}
         return sorted(segments, key=lambda s: (order[s["card"].rsplit("-", 2)[0]], s["start"]))
 
-    def _still(self, run: list[int]) -> bool:
-        frames = self.frames[run]
-        return bool((frames @ frames.T).min() >= STILL)
-
     def _left_out(self, when) -> np.ndarray:
         """Flat windows, and those failing a condition: a picture that is (is, isnt) is
         closer to is than to isnt, as night to 夜晚 rather than 白天."""
@@ -350,7 +346,7 @@ class Index:
             na, nb = min(a, k), max(b, k)
             run = windows[na:nb + 1]
             length = min(shot[1], self.rows[run[-1]][2]) - max(shot[0], self.rows[run[0]][1])
-            if length > min(left, STILL_MAX if self._still(run) else MOVING_MAX) + 2:
+            if length > min(left, CLIP_MAX) + 2:
                 return windows[a:b + 1]
             a, b = na, nb
 

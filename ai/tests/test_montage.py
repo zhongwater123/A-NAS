@@ -210,6 +210,12 @@ class MomentsTest(unittest.TestCase):
         for words in ("跨过镜头切点", "至少 1.5 秒", "同一段画面", "不是检索结果里的镜头卡片"):
             self.assertTrue(any(words in p for p in problems), words)
 
+    def test_a_segment_over_six_seconds_is_refused_changing_or_not(self):
+        with self.assertRaises(moments.PlanError) as caught:
+            self.index.check([{"card": "07-1-1", "start": 30, "end": 38}])
+        self.assertIn("最多 6 秒", caught.exception.problems[0])
+        self.assertEqual(self.index.check([{"card": "07-1-1", "start": 30, "end": 36.004}]), [("07", 30.0, 36.004)])
+
     def test_a_plan_over_a_flat_frame_or_with_a_long_reason_is_refused(self):
         with self.assertRaises(moments.PlanError) as caught:
             self.index.check([{"card": "07-2-0", "start": 48, "end": 50},
@@ -237,7 +243,7 @@ class MomentsTest(unittest.TestCase):
     def test_rules_take_a_still_picture_briefly_and_never_fill_the_target(self):
         segments = self.index.plan({"城堡": self.castle}, 60)
         # Two pictures of the castle shot pass the threshold, each the same for 20 s:
-        # STILL_MAX of each from its best window, and nothing more however long the target.
+        # CLIP_MAX of each from its best window, and nothing more however long the target.
         self.assertEqual([(s["card"], s["start"], s["end"]) for s in segments],
                          [("07-1-0", 8, 14), ("07-1-1", 28, 34)])
         self.assertEqual(self.index.check(segments), [("07", 8.0, 14.0), ("07", 28.0, 34.0)])
