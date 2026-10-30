@@ -1,6 +1,7 @@
 import { Camera, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 
+import { initial } from "../people/PersonAvatar";
 import {
   addBaby,
   babyAvatarURL,
@@ -16,8 +17,8 @@ import styles from "./family.module.css";
 import { today } from "./format";
 import { Field, Modal } from "./parts";
 
-// BabyAvatar shows a baby's picture, or the first character of the name on
-// a warm disc.
+// BabyAvatar shows a baby's picture, or on a warm disc the character a text
+// avatar shows for the nickname or name (陈小禾 → 禾).
 export function BabyAvatar({ baby, className }: { baby: FamilyBaby; className: string }) {
   const [failed, setFailed] = useState(0);
   const pictured = baby.avatarVersion > 0 && failed !== baby.avatarVersion;
@@ -26,7 +27,7 @@ export function BabyAvatar({ baby, className }: { baby: FamilyBaby; className: s
       {pictured ? (
         <img src={babyAvatarURL(baby)} alt="" draggable={false} onError={() => setFailed(baby.avatarVersion)} />
       ) : (
-        [...(baby.nickname || baby.name)][0]
+        initial(baby.nickname || baby.name)
       )}
     </span>
   );
