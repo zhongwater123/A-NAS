@@ -29,7 +29,7 @@ for binary in anas-api anas-host-agent install-screensavers.sh install-ffmpeg-un
     exit 2
   fi
 done
-for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-shares-system.service anas-ffmpeg-system.socket anas-ffmpeg-system@.service anas-ffmpeg-system.slice; do
+for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-shares-system.service anas-family-system.service anas-ffmpeg-system.socket anas-ffmpeg-system@.service anas-ffmpeg-system.slice; do
   if [[ ! -f "$source_release/$unit" ]]; then
     echo "missing system unit: $source_release/$unit" >&2
     exit 2
@@ -216,6 +216,23 @@ elif getent passwd "$shares_id" >/dev/null; then
 else
   useradd --system --uid "$shares_id" --gid "$shares_id" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin a-nas-shares
 fi
+# The family service owns the family store, the family center's records and
+# recordings, under a fixed UID/GID like the photo service (ADR 0029).
+family_id=31002
+if getent group a-nas-family >/dev/null; then
+  [[ "$(getent group a-nas-family | cut -d: -f3)" == "$family_id" ]] || { echo "group a-nas-family exists with another GID" >&2; exit 3; }
+elif getent group "$family_id" >/dev/null; then
+  echo "GID $family_id is taken by another group" >&2; exit 3
+else
+  groupadd --system --gid "$family_id" a-nas-family
+fi
+if getent passwd a-nas-family >/dev/null; then
+  [[ "$(id -u a-nas-family):$(id -g a-nas-family)" == "$family_id:$family_id" ]] || { echo "user a-nas-family exists with another UID or GID" >&2; exit 3; }
+elif getent passwd "$family_id" >/dev/null; then
+  echo "UID $family_id is taken by another user" >&2; exit 3
+else
+  useradd --system --uid "$family_id" --gid "$family_id" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin a-nas-family
+fi
 # The local console's account owns no data, so its ID may differ between
 # installs; it must not be able to log in.
 install -d -o root -g root -m 0755 /etc/sysusers.d
@@ -380,6 +397,8 @@ printf '%s\n' \
   'ANAS_PHOTO_SESSION_GROUP=a-nas-photos' \
   'ANAS_SHARE_SESSION_SOCKET=/run/a-nas-share-sessions/shares.sock' \
   'ANAS_SHARE_SESSION_GROUP=a-nas-shares' \
+  'ANAS_FAMILY_SESSION_SOCKET=/run/a-nas-family-sessions/family.sock' \
+  'ANAS_FAMILY_SESSION_GROUP=a-nas-family' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' \
   "ANAS_SMB_INTERFACE=$smb_interface" > /etc/a-nas/host-agent.env
 chown root:root /etc/a-nas/host-agent.env
@@ -389,6 +408,7 @@ install -o root -g root -m 0644 "$source_release/anas-host-agent-system.service"
 install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/systemd/system/anas-api.service
 install -o root -g root -m 0644 "$source_release/anas-photos-system.service" /etc/systemd/system/anas-photos.service
 install -o root -g root -m 0644 "$source_release/anas-shares-system.service" /etc/systemd/system/anas-shares.service
+install -o root -g root -m 0644 "$source_release/anas-family-system.service" /etc/systemd/system/anas-family.service
 # Background work gives way to the device's other work (anas.slice).
 install -o root -g root -m 0644 "$source_release/anas-system.slice" /etc/systemd/system/anas.slice
 install -o root -g root -m 0644 "$source_release/anas-ai-system.socket" /etc/systemd/system/anas-ai.socket
@@ -416,7 +436,7 @@ install -o root -g root -m 0644 "$source_release/anas-vectors-proxy-system@.sock
 install -o root -g root -m 0644 "$source_release/anas-vectors-proxy-system@.service" /etc/systemd/system/anas-vectors-proxy@.service
 # A renamed worker must not coexist with old clients using a separate slot
 # directory. Stop clients before replacing units; restart after the switch.
-for service in anas-api anas-photos anas-shares; do
+for service in anas-api anas-photos anas-shares anas-family; do
   if [[ $(systemctl show -p LoadState --value "$service.service") != not-found ]]; then
     systemctl stop "$service.service"
   fi
@@ -472,9 +492,9 @@ systemctl restart anas-ffmpeg.socket
 systemctl stop 'anas-vectors-proxy@*.service' 'anas-vectors@*.service'
 systemctl enable anas-vectors-proxy@a-nas-photos.socket
 systemctl restart anas-vectors-proxy@a-nas-photos.socket
-systemctl enable anas-host-agent.service anas-photos.service anas-api.service anas-shares.service
+systemctl enable anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service
 restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
-systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service
+systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service
 if systemctl is-active --quiet anas-kiosk@tty1.service; then
   systemctl restart anas-kiosk@tty1.service
 fi
@@ -483,7 +503,7 @@ if [[ "$lan_entry" == true ]]; then
   systemctl reload-or-restart caddy.service
 fi
 
-systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket
+systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must
 # keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at startup

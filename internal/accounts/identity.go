@@ -47,6 +47,8 @@ const (
 	PhotoServiceUID     = accountid.PhotoServiceUID
 	ShareServiceUser    = accountid.ShareServiceUser
 	ShareServiceUID     = accountid.ShareServiceUID
+	FamilyServiceUser   = accountid.FamilyServiceUser
+	FamilyServiceUID    = accountid.FamilyServiceUID
 )
 
 var (

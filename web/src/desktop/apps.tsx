@@ -6,6 +6,7 @@ import { AssistantGlyph } from "../assistant/AssistantGlyph";
 import { BackupCenterGlyph } from "../backup/BackupCenterGlyph";
 import { DockerGlyph } from "../docker/DockerGlyph";
 import { appProject } from "../docker/model";
+import { FamilyGlyph } from "../family/FamilyGlyph";
 import { type AppGlyph, MediaCenterGlyph } from "../media/MediaCenterGlyph";
 import { displayName } from "../people/people";
 import { PhotosGlyph } from "../photos/PhotosGlyph";
@@ -21,6 +22,7 @@ import type { HostStateView } from "./useHostState";
 const AppCenterPanel = lazyCode(() => import("../appcenter/AppCenterPanel").then((module) => module.AppCenterPanel));
 const AssistantPanel = lazyCode(() => import("../assistant/AssistantPanel").then((module) => module.AssistantPanel));
 const BackupCenter = lazyCode(() => import("../backup/BackupCenter").then((module) => module.BackupCenter));
+const FamilyPanel = lazyCode(() => import("../family/FamilyPanel").then((module) => module.FamilyPanel));
 const DockerPanel = lazyCode(() => import("../docker/DockerPanel").then((module) => module.DockerPanel));
 const FilePanel = lazyCode(() => import("../files/FilePanel").then((module) => module.FilePanel));
 const MediaCenter = lazyCode(() => import("../media/MediaCenter").then((module) => module.MediaCenter));
@@ -252,6 +254,16 @@ const definitions = {
     bounds: { x: 240, y: 56, width: 1080, height: 700 },
     launcher: { id: "music", keywords: "歌曲 专辑 歌手 歌单 播放 music" },
     render: ({ session, open }) => <MusicPanel userId={session.user.id} onOpenFiles={() => open("files")} />,
+  },
+  family: {
+    title: "家庭中心",
+    icon: FamilyGlyph,
+    tone: "family",
+    bounds: { x: 200, y: 44, width: 1120, height: 730 },
+    launcher: { id: "family", keywords: "家庭 宝宝 成长 疫苗 身高 体重 大事记 亲友 family baby" },
+    render: ({ session, open }) => (
+      <FamilyPanel userId={session.user.id} onShowPhoto={(assetId) => open("photos", { assetId })} />
+    ),
   },
   assistant: {
     title: "VNAS",

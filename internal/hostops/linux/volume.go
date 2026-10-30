@@ -199,6 +199,7 @@ func (e *Executor) prepareVolume(ctx context.Context, operation *volumeOperation
 	// periodic repair, which logs it.
 	_, _ = e.EnsurePhotosStore(ctx)
 	_, _ = e.EnsureSharesStore(ctx)
+	_, _ = e.EnsureFamilyStore(ctx)
 	volume := datavolume.Volume{ID: "volume:data", FilesystemUUID: uuid, Layout: operation.Layout, State: datavolume.VolumeStateAvailable}
 	sizes := make([]uint64, 0, len(operation.Disks))
 	for _, disk := range operation.Disks {

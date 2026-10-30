@@ -30,6 +30,7 @@
     "lrc-kit": "1.2.1",
     "lucide-react": "1.61.0",
     "modern-screenshot": "4.7.0",
+    "motion": "14.3.0",
     "openapi-fetch": "0.17.0",
     "pinyin-pro": "3.29.5",
     "radix-ui": "1.8.1",
@@ -42,7 +43,8 @@
     "remark-breaks": "4.0.0",
     "remark-gfm": "4.0.1",
     "streamdown": "2.7.1",
-    "tus-js-client": "4.3.1"
+    "tus-js-client": "4.3.1",
+    "wavesurfer.js": "8.0.2"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.3",

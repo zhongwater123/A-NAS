@@ -51,6 +51,10 @@ type ProductDependencies struct {
 	Photos http.Handler
 	// Shares serves member shares; production independently confirms sessions.
 	Shares http.Handler
+	// Family serves /api/v1/family, 家庭中心, and receives the user through
+	// accounts.WithUser with the session token; on a NAS the family service
+	// confirms the session itself (ADR 0029).
+	Family http.Handler
 	// Media serves /api/v1/media to every signed-in user and receives the
 	// user through accounts.WithUser; the session token stays in the context
 	// for the File Broker.
