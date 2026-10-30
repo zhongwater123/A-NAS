@@ -12,19 +12,24 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/prometheus/procfs"
 )
 
-// startTimeout bounds how long the server may take to accept connections.
+// startTimeout bounds how long the server may take to listen on its ports.
 const startTimeout = 60 * time.Second
 
 // Instance is a running server.
@@ -55,8 +60,42 @@ func Start(t testing.TB) Instance {
 		t.Skipf("Qdrant is missing (%v); run scripts/fetch-qdrant.sh or set ANAS_QDRANT_BINARY", err)
 	}
 
+	for attempt := 1; ; attempt++ {
+		instance, err := start(t, binary, root)
+		if err == nil {
+			return instance
+		}
+		if !errors.Is(err, errPortTaken) || attempt == startAttempts {
+			t.Fatal(err)
+		}
+		t.Logf("starting Qdrant again on other ports: %v", err)
+	}
+}
+
+// startAttempts bounds how often Start picks new ports for the server.
+const startAttempts = 5
+
+// errPortTaken means that another process listened on a port picked for the
+// server before the server could. freePort releases a port before the server
+// binds it, and tests running in parallel open ports all the time.
+var errPortTaken = errors.New("another process took a port picked for Qdrant")
+
+// pickPort picks a port for the server; a test replaces it.
+var pickPort = freePort
+
+// start runs a server on newly picked ports and waits until it listens on
+// both. Reaching a port does not show that: the server only logs an error
+// when another process took its gRPC port, and runs on without it, so a test
+// would talk to whatever took the port, another test's server included.
+// Only the server's own listening sockets count.
+func start(t testing.TB, binary, root string) (Instance, error) {
+	t.Helper()
 	work := t.TempDir()
-	httpPort, grpcPort := freePort(t), freePort(t)
+	httpPort := pickPort(t)
+	grpcPort := pickPort(t)
+	for grpcPort == httpPort {
+		grpcPort = pickPort(t)
+	}
 	//nolint:gosec // G702: the pinned binary, fetched by hash or named by the developer for tests.
 	command := exec.Command(binary, "--config-path", filepath.Join(root, "deploy", "qdrant", "config.yaml"), "--disable-telemetry")
 	command.Dir = work
@@ -68,41 +107,115 @@ func Start(t testing.TB) Instance {
 		"QDRANT__SERVICE__HTTP_PORT="+strconv.Itoa(httpPort),
 		"QDRANT__SERVICE__GRPC_PORT="+strconv.Itoa(grpcPort),
 	)
-	var output bytes.Buffer
-	command.Stdout, command.Stderr = &output, &output
+	output := &lockedBuffer{}
+	command.Stdout, command.Stderr = output, output
 	if err := command.Start(); err != nil {
-		t.Fatal(err)
+		return Instance{}, err
 	}
 	exited := make(chan struct{})
 	go func() {
 		_ = command.Wait()
 		close(exited)
 	}()
-	t.Cleanup(func() {
+	stop := func() {
 		_ = command.Process.Kill()
 		<-exited
-	})
+	}
 
-	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(grpcPort))
+	ended := func() error {
+		return fmt.Errorf("%w: the server ended before listening:\n%s", errPortTaken, output)
+	}
 	deadline := time.Now().Add(startTimeout)
 	for {
-		conn, err := net.DialTimeout("tcp", address, time.Second)
-		if err == nil {
-			_ = conn.Close()
-			break
-		}
 		select {
 		case <-exited:
-			t.Fatalf("Qdrant exited before accepting connections:\n%s", output.String())
+			// Binding a taken HTTP port ends the server.
+			return Instance{}, ended()
 		default:
 		}
+		ownsHTTP, err := listensOn(command.Process.Pid, httpPort)
+		if err == nil && ownsHTTP {
+			var ownsGRPC bool
+			ownsGRPC, err = listensOn(command.Process.Pid, grpcPort)
+			if err == nil && ownsGRPC {
+				break
+			}
+		}
+		if err != nil {
+			// The process can end while its sockets are being read.
+			select {
+			case <-exited:
+				return Instance{}, ended()
+			default:
+			}
+			stop()
+			return Instance{}, err
+		}
+		// A taken gRPC port only shows in the log; waiting would last until
+		// the deadline.
+		if strings.Contains(output.String(), "Error while starting") {
+			stop()
+			return Instance{}, fmt.Errorf("%w:\n%s", errPortTaken, output)
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf("Qdrant did not accept connections within %s:\n%s", startTimeout, output.String())
+			stop()
+			return Instance{}, fmt.Errorf("the server did not listen on its ports within %s:\n%s", startTimeout, output)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	socket, connections := forward(t, address)
-	return Instance{Socket: socket, Storage: filepath.Join(work, "storage"), Connections: connections}
+	t.Cleanup(stop)
+	socket, connections := forward(t, net.JoinHostPort("127.0.0.1", strconv.Itoa(grpcPort)))
+	return Instance{Socket: socket, Storage: filepath.Join(work, "storage"), Connections: connections}, nil
+}
+
+// tcpListen is the state of a listening socket in /proc/net/tcp.
+const tcpListen = 0x0A
+
+// listensOn reports whether process pid holds the socket listening on
+// 127.0.0.1:port.
+func listensOn(pid, port int) (bool, error) {
+	fs, err := procfs.NewDefaultFS()
+	if err != nil {
+		return false, err
+	}
+	//nolint:staticcheck // SA1019: /proc/net/tcp is all this needs; netlink would add a dependency for a test helper.
+	sockets, err := fs.NetTCP()
+	if err != nil {
+		return false, err
+	}
+	proc, err := fs.Proc(pid)
+	if err != nil {
+		return false, err
+	}
+	targets, err := proc.FileDescriptorTargets()
+	if err != nil {
+		return false, err
+	}
+	for _, socket := range sockets {
+		if socket.St == tcpListen && socket.LocalPort == uint64(port) && socket.LocalAddr.Equal(net.IPv4(127, 0, 0, 1)) &&
+			slices.Contains(targets, fmt.Sprintf("socket:[%d]", socket.Inode)) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// lockedBuffer collects the server's output while it is read.
+type lockedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
 }
 
 // forward listens on a Unix socket until the test ends and connects each
