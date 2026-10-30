@@ -8855,6 +8855,7 @@ components:
         - running
         - torrents
         - categories
+        - engines
       properties:
         enabled:
           type: boolean
@@ -8875,6 +8876,37 @@ components:
           description: The tabs the window shows, in order; empty while web search is off.
           items:
             $ref: '#/components/schemas/WebSearchCategory'
+        engines:
+          type: object
+          description: Every tab's engines as the window names them, fixed by the release.
+          additionalProperties: false
+          required:
+            - web
+            - images
+            - videos
+            - news
+            - torrents
+          properties:
+            web:
+              type: array
+              items:
+                type: string
+            images:
+              type: array
+              items:
+                type: string
+            videos:
+              type: array
+              items:
+                type: string
+            news:
+              type: array
+              items:
+                type: string
+            torrents:
+              type: array
+              items:
+                type: string
     WebSearchSettings:
       type: object
       additionalProperties: false

@@ -4549,6 +4549,14 @@ export interface components {
             torrents: boolean;
             /** @description The tabs the window shows, in order; empty while web search is off. */
             categories: components["schemas"]["WebSearchCategory"][];
+            /** @description Every tab's engines as the window names them, fixed by the release. */
+            engines: {
+                web: string[];
+                images: string[];
+                videos: string[];
+                news: string[];
+                torrents: string[];
+            };
         };
         WebSearchSettings: {
             enabled: boolean;

@@ -6,7 +6,7 @@ schemas:
   WebSearchStatus:
     type: object
     additionalProperties: false
-    required: [enabled, running, torrents, categories]
+    required: [enabled, running, torrents, categories, engines]
     properties:
       enabled: { type: boolean, description: "The administrator's switch; off stops the service." }
       running: { type: string, enum: [running, starting, stopped, failed], description: What systemd reports of the service. }
@@ -15,6 +15,17 @@ schemas:
         type: array
         description: The tabs the window shows, in order; empty while web search is off.
         items: { $ref: "#/schemas/WebSearchCategory" }
+      engines:
+        type: object
+        description: Every tab's engines as the window names them, fixed by the release.
+        additionalProperties: false
+        required: [web, images, videos, news, torrents]
+        properties:
+          web: { type: array, items: { type: string } }
+          images: { type: array, items: { type: string } }
+          videos: { type: array, items: { type: string } }
+          news: { type: array, items: { type: string } }
+          torrents: { type: array, items: { type: string } }
   WebSearchSettings:
     type: object
     additionalProperties: false

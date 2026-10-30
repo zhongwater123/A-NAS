@@ -101,6 +101,13 @@ const domains = {
     apps_unavailable: "无法连接容器代理",
   },
   music: { not_found: "内容已不存在" },
+  webSearch: {
+    web_search_disabled: "管理员已关闭网页搜索",
+    torrent_search_disabled: "管理员已关闭种子搜索",
+    too_many_searches: "搜索太频繁，请稍后再试",
+    web_search_unavailable: "网页搜索暂时不可用，请稍后再试",
+    invalid_query: "搜索内容为空或太长",
+  },
   storage: {
     volume_busy: "数据卷正在转换，完成后才能加入新硬盘。",
     invalid_layout: "这个冗余方式与硬盘数量不符。",

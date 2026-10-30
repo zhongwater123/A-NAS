@@ -249,6 +249,8 @@ type Status struct {
 	ServiceState
 	Torrents   bool       `json:"torrents"`
 	Categories []Category `json:"categories"`
+	// Engines are every tab's engines, as the window names them.
+	Engines map[Category][]string `json:"engines"`
 }
 
 func (s *Service) Status(ctx context.Context) (Status, error) {
@@ -260,7 +262,10 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	status := Status{ServiceState: state, Torrents: torrents, Categories: []Category{}}
+	status := Status{ServiceState: state, Torrents: torrents, Categories: []Category{}, Engines: map[Category][]string{}}
+	for _, category := range Categories {
+		status.Engines[category] = Engines(category)
+	}
 	if state.Enabled {
 		for _, category := range Categories {
 			if category != Torrents || torrents {

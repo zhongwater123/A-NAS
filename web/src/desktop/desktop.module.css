@@ -934,6 +934,9 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 .icon-music {
   background: linear-gradient(155deg, #ff506d, #d92471);
 }
+.icon-websearch {
+  background: linear-gradient(155deg, #3d6bff, #1b2a8c);
+}
 /* AI 助手 is the user's ink portrait on white: it fills its white tile edge to
    edge and takes the tile's corners, with no gloss over the drawing. */
 .icon-ai {

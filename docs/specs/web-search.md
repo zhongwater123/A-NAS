@@ -40,13 +40,13 @@
 - Given：网页搜索已开启，成员或管理员已登录。
 - When：从桌面、程序坞或“全部应用”打开“网页搜索”，在搜索框中输入关键词并回车。
 - Then：窗口顶部是搜索框，打开时光标在框内；下面是“网页”“图片”“视频”“资讯”四个分类（管理员打开种子搜索后多一个“种子”），默认“网页”。每条网页结果显示标题、网址的域名、摘要、发布日期（引擎给出时）和提供结果的引擎；点击标题或域名在新标签页打开原网页（`rel="noopener noreferrer"`）。
-- And：引擎给出的答案或信息框（如百科简介）显示在结果上方，相关搜索显示在结果末尾，点击即用它重新搜索。结果末尾有“下一页”。
+- And：引擎给出的答案或信息框（如百科简介）显示在结果上方，相关搜索显示在结果末尾，点击即用它重新搜索。结果末尾的“更多结果”把下一页接在后面，最多 20 页。
 
 ### 图片、视频与资讯
 
 - Given：已有一次搜索。
 - When：切换到“图片”“视频”或“资讯”。
-- Then：用同一关键词在该分类中搜索。“图片”是缩略图网格，悬停显示尺寸和来源域名，点击在新标签页打开来源页面；“视频”每条显示封面、标题、时长与来源；“资讯”按发布时间排列，可以限定“一天内”“一周内”“一月内”“一年内”。
+- Then：用搜索框中当前的关键词（未按回车也算）在该分类中搜索。“图片”是缩略图网格，悬停显示尺寸和来源域名，点击在新标签页打开来源页面；“视频”每条显示封面、标题、时长与来源；“资讯”按发布时间排列，可以限定“一天内”“一周内”“一月内”“一年内”。
 - And：缩略图与封面经 NAS 代取，浏览器只向 A-NAS 自己请求图片；代取失败的位置显示占位图。
 
 ### 种子
@@ -121,5 +121,6 @@
 
 - 架构：[架构总览](../architecture/OVERVIEW.md)
 - ADR：[ADR 0030：网页搜索以内置的 SearXNG 服务提供](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)、[ADR 0016：相册 AI 随系统内置安装](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)
-- 代码：待实现
-- 测试：待实现
+- 代码：[`internal/websearch`](../../internal/websearch/websearch.go)、[`internal/websearchapi`](../../internal/websearchapi/websearchapi.go)、[Host Agent 的开关](../../internal/hostops/linux/websearch.go)、[搜索窗口](../../web/src/websearch/WebSearchPanel.tsx)、[设置分区](../../web/src/settings/WebSearchSection.tsx)、[SearXNG 的设置](../../deploy/search/settings.yml)、[服务单元](../../deploy/systemd/system/anas-search.service)
+- 测试：[领域测试](../../internal/websearch/websearch_test.go)、[接口契约测试](../../internal/httpapi/websearch_test.go)、[开关](../../internal/hostops/linux/websearch_test.go)、[窗口](../../web/src/websearch/WebSearchPanel.test.tsx)、[设置分区](../../web/src/settings/WebSearchSection.test.tsx)、[系统测试](../../scripts/system-test.sh)
+- 运行手册与研究：[启用网页搜索](../runbooks/enable-web-search.md)、[引擎实测](../research/web-search-engines.md)

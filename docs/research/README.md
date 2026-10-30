@@ -11,4 +11,5 @@
 - [Hermes Agent 作为 AI 助手运行时的可行性](hermes-agent-runtime.md)（按主题整理的当前结论，2026-10-14 至 10-21 的按日记录见其中的“历史”；实验 NAS 实测待做）
 - [备份中心 C 端功能评审（2026-10）](backup-center-review-2026-10.md)（完成；快照侧缺口已补齐，外部备份待 #27 决定）
 - [相册证件与票据 OCR 模型评估](photo-ocr-model-evaluation.md)（开发机完成；Qwen3.5-2B 字段抽取最好、GLM-OCR 为轻量备选，均需核对层；真实证件与回单未测）
+- [网页搜索的引擎实测](web-search-engines.md)（开发机完成；百度与夸克受第一次错误测量影响，必应在国内没有结果，种子站多数不可达；实验 NAS 待测）
 - [Qdrant 检索特性试验（1.20.0）](qdrant-retrieval-features.md)（完成；开发机试验，视频片段、文件块与照片各用哪些特性，照片何时可切换）

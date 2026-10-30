@@ -16,6 +16,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   ├── Transfers（/api/v1/uploads 的 tus 分片写入文件代理以用户身份创建的临时文件；下载按发送字节跟踪；ADR 0019）
   ├── /api/v1/media ── 影视中心：经文件代理以用户身份读取 ──► FFmpeg Worker（按连接启动，无网络、无数据卷）
   ├── Music（原地索引个人空间与 Shared 中的音频，经 Files 以成员身份读取；浏览器不能播放的格式经同一 FFmpeg Worker 探测与解码；ADR 0018）
+  ├── /api/v1/web-search ── 只经 Unix 套接字 ──► 网页搜索服务（SearXNG，a-nas-search；只能访问公网地址；ADR 0030）
   ├── /api/v1/assistant ── 按白名单转发 ──► 成员自己的 Hermes 实例（hermes serve，沙箱；连接经 File Broker 的会话闸门；ADR 0024）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
@@ -73,6 +74,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 18. 在服务进程内解码用户文件或宿主机图片时（音乐封面、影视海报、头像、壁纸、任务图标、相册缩略图与搜图），先读头部限制像素数，并把解码器 panic 当作无法解码处理；后台扫描和 Host Agent 不能因一张图片退出或反复出错。恢复的 panic 经 [`internal/decodepanic`](../../internal/decodepanic/decodepanic.go) 记一条错误日志，只含解码点名称、panic 值的类型（运行时错误另记其消息，它只说长度与类型）与不带源码路径的栈；解码器自己的 panic 消息可能引用正在读的内容，所以不记，文件名也不记，因为管理员能读系统日志（[日志规格](../specs/logs.md)）。同一种 panic 沿同一个栈每 10 分钟只记一条，附上其间的重复次数，反复请求同一个坏文件不会刷屏。这样解码器缺陷、有人试探缺陷与我们自己代码的缺陷不会被当成一张坏图片。新增解码点同样处理，并用 `internal/imagetest` 的测试图片与日志记录覆盖。
 19. 产品服务的配置在启动时从环境一次解析并校验（[`cmd/anas-api/config.go`](../../cmd/anas-api/config.go)，各二进制经 [`internal/envconfig`](../../internal/envconfig/envconfig.go) 读取环境）。`ANAS_HOSTSTATE_MODE` 没有默认值，开发写 `fake`，NAS 写 `agent`；`agent` 拒绝任何开发用的 Adapter：进程内 FFmpeg、Fake 容器、开发用 AI、直连助手套接字与 spike 的更改代理。监听地址只能是回环地址。文件服务必须由调用方给出文件系统：生产是文件代理，进程内的本地文件系统只能经 `files.NewLocalService` 显式选择（[#192](https://github.com/zhongwater123/A-NAS/issues/192)）。
 20. 向量索引是派生数据（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)）：每个持有向量的服务有自己的 Qdrant 实例，只有它能连；索引只由它从自己的 Catalog 经事务内的 outbox 同步与重建，随时可以清空。点上只有内容 ID 与范围键，索引命中不构成授权，结果返回前仍按 Policy 复核。人脸与宠物向量不进索引。
+21. 网页搜索服务是唯一代成员访问外网的内置服务（[ADR 0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)）：只有产品服务能连接它的套接字，它看不到数据卷，单元的 IP 访问控制只放行公网地址与本机的 DNS 服务器；搜索词只在请求体中，不进日志。
 
 ## HTTP 接口约定
 
@@ -134,6 +136,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/photos` | 相册 Module：数据卷上的 Catalog、内容寻址原图、Policy、虚拟目录、回收站与崩溃对账（[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） | JPEG/PNG 库、EXIF 元数据、缩略图持久任务与测试完成；开发模式由产品服务进程内运行，生产由相册服务进程运行 |
 | `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话或助手 UID 的查询接口；由会话得到相册 `Principal` 只有 `photoservice.Authenticate` 一处，开发模式经 `photoservice.Local` 在产品进程内使用同一实现 | 已实现，root 集成测试、相册冒烟与系统测试覆盖 |
 | `internal/music` | 音乐库：经 `files.Service` 以成员身份扫描个人空间与 Shared 的音频、读取标签/封面/时长与歌词，保存歌曲索引、封面缩略图和每名成员的收藏、播放记录、歌单与音乐文件夹（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)） | 已实现，`internal/musicapi` 提供 `/api/v1/music`，见[音乐规格](../specs/music.md) |
+| `internal/websearch` / `internal/websearchapi` | 网页搜索：经 Unix 套接字调用 SearXNG 的 JSON 接口，按分类只问该分类的引擎，映射结果，用 SearXNG 的密钥为缩略图地址签名，按账号限流；管理员的开关由 Host Agent 持有（标记文件加 `systemctl`，`internal/hostops/linux/websearch.go`），种子分类的开关在产品服务的 `web-search.db`（[规格](../specs/web-search.md)） | 单元测试、OpenAPI 契约测试与系统测试（替身）覆盖；开发模式用不访问任何引擎的 Fake |
 | `internal/vectorindex` | 服务与自己的向量索引之间的客户端：经 Unix 套接字连接所属的 Qdrant 实例（官方 Go 客户端，只有一个连接，空闲即断开，让实例能停止），只提供类型化的建集合、写入、删除、按范围搜索与扫描；`vectorindextest` 运行固定版本的二进制（[向量索引技术设计](vector-index.md)） | 已实现，用真实二进制的单元测试与系统测试覆盖；相册服务用于同步与影子比对 |
 | `internal/aiworker` | 相册服务调用 AI Worker 的客户端：每次请求连接 systemd 按需激活的 Unix 套接字，一帧是 4 字节长度加 JSON；图片作为只读描述符随控制消息传递，从不传路径，Worker 因此不需要访问数据卷（[本地 AI 实施方案](photo-ai.md)） | 已实现，单元测试与针对 `ai/` 中 Python Worker（替身 Provider）的协议测试覆盖 |
 | `internal/photosapi` | `/api/v1/photos`：只接受上游确认的 `photos.Principal`，不自行认证；`/internal/photos/activity` 只供产品服务合并活动记录 | 已实现；部分路由在 `httpapi` 的 OpenAPI 契约测试中；生产中由产品服务转发到相册服务，相册服务不可用时返回 `photos_unavailable` |
