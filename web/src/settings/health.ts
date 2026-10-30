@@ -40,7 +40,7 @@ export function describeFinding(
         icon: Thermometer,
         title: `处理器温度 ${value} °C，偏高`,
         detail:
-          "处理器已接近降频的温度。请检查散热器和机箱风扇是否在转、进出风口是否被挡住；长时间的 AI 识别或视频转码也会让温度升高。",
+          "处理器快到降频的温度了。请检查散热器和风扇是否在转、风口有没有被挡住。长时间的 AI 识别或视频转码也会让温度升高。",
       };
     case "volume_offline":
       return {

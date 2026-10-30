@@ -271,11 +271,7 @@ function DeviceDetails({
           max={100}
           scale="0–100 °C"
           icon={<Thermometer />}
-          detail={
-            data.cpu.temperature
-              ? `最热的处理器封装 · ${data.cpu.temperature.hotCelsius} °C 起为偏高`
-              : "未检测到 CPU 温度传感器"
-          }
+          detail={data.cpu.temperature ? `${data.cpu.temperature.hotCelsius} °C 以上偏高` : "未检测到 CPU 温度传感器"}
         />
       </>
     );
@@ -399,9 +395,9 @@ function Temperatures({ data }: { data: DeviceSnapshot }) {
     ...data.gpu.items.map((gpu) => ({
       id: gpu.id,
       name: gpu.integrated ? "核显" : gpu.name,
-      kind: gpu.integrated ? "集成在处理器中" : "GPU",
+      kind: gpu.integrated ? "集成显卡" : "GPU",
       temperature: gpu.integrated ? null : gpu.temperature,
-      missing: gpu.integrated ? "同 CPU" : "驱动不提供",
+      missing: gpu.integrated ? "与 CPU 相同" : "驱动不提供",
     })),
     ...data.disks.items.map((disk) => ({
       id: disk.id,
@@ -434,9 +430,7 @@ function Temperatures({ data }: { data: DeviceSnapshot }) {
         {fans.map((fan) => (
           <div key={fan.id} className={styles.tmThermalTile}>
             <span>{fanName(fan)}</span>
-            <small className={fan.stopped ? styles.fanStoppedNote : undefined}>
-              {fan.stopped ? "已停转" : "风扇转速"}
-            </small>
+            <small className={fan.stopped ? styles.fanStoppedNote : undefined}>{fan.stopped ? "已停转" : "转速"}</small>
             <FanSpeed fan={fan} />
           </div>
         ))}
@@ -487,7 +481,7 @@ function Accelerators({
                 label="温度"
                 value={
                   item.integrated
-                    ? `同 CPU${data.cpu.temperature ? `（${celsius(data.cpu.temperature)}）` : ""}`
+                    ? `与 CPU 相同${data.cpu.temperature ? `（${celsius(data.cpu.temperature)}）` : ""}`
                     : item.temperature
                       ? celsius(item.temperature)
                       : "当前驱动不提供温度"

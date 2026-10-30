@@ -229,10 +229,10 @@ it("shows every temperature with its limit, and the CPU temperature over time", 
   );
   expect(within(temperatures).getByText("驱动不提供")).toBeTruthy();
   const fan = within(temperatures).getByText("风扇 2").parentElement!;
-  expect(fan.textContent).toBe("风扇 2风扇转速2,700RPM");
+  expect(fan.textContent).toBe("风扇 2转速2,700RPM");
   fireEvent.click(screen.getByRole("button", { name: "CPU" }));
   expect(screen.getByRole("img", { name: /CPU 温度，最近/ })).toBeTruthy();
-  expect(screen.getByText("最热的处理器封装 · 90 °C 起为偏高")).toBeTruthy();
+  expect(screen.getByText("90 °C 以上偏高")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "GPU" }));
   expect(screen.getByText("当前驱动不提供温度")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "硬盘" }));
@@ -255,12 +255,12 @@ it("gives an integrated GPU the CPU's temperature and says when there is none", 
   // Without a fan sensor the section is about temperatures alone.
   const temperatures = screen.getByRole("region", { name: "温度" });
   expect(within(temperatures).getByText("未检测到传感器")).toBeTruthy();
-  expect(within(temperatures).getByText("同 CPU")).toBeTruthy();
+  expect(within(temperatures).getByText("与 CPU 相同")).toBeTruthy();
   expect(within(temperatures).getByText("暂无读数")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "CPU" }));
   expect(screen.getByText("未检测到 CPU 温度传感器")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "GPU" }));
-  expect(screen.getByText("同 CPU")).toBeTruthy();
+  expect(screen.getByText("与 CPU 相同")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "硬盘" }));
   expect(screen.getByText("暂无温度读数")).toBeTruthy();
 });

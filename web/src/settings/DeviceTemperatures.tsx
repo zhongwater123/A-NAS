@@ -38,13 +38,13 @@ export function DeviceTemperatures({ snapshot }: { snapshot: HostState }) {
     <Group
       title="温度与风扇"
       aside={attention || undefined}
-      footnote={`NVMe 固态硬盘的温度随时读取；其他硬盘的温度来自 SMART，每 10 分钟读取一次，不会唤醒待机的硬盘。${fans.length ? "风扇转速来自主板的传感器芯片，没接风扇的接口不显示。" : ""}`}
+      footnote="机械硬盘和 SATA 固态硬盘的温度每 10 分钟更新一次，硬盘待机时不会被唤醒。"
     >
       <TemperatureRow
         icon={Cpu}
         tone="cpu"
         title="处理器"
-        detail={cpuHot ? "接近降频的温度，请检查散热器和机箱风扇" : "处理器封装"}
+        detail={cpuHot ? "温度偏高，请检查散热器和风扇" : undefined}
         temperature={thermal?.cpu}
         missing={thermal ? "未检测到温度传感器" : "暂时无法读取"}
       />
@@ -55,8 +55,8 @@ export function DeviceTemperatures({ snapshot }: { snapshot: HostState }) {
             icon={CircuitBoard}
             tone="gpu"
             title="核显"
-            detail="集成在处理器中，没有单独的温度传感器"
-            missing="同处理器"
+            detail="集成显卡"
+            missing="与处理器相同"
           />
         ) : (
           <TemperatureRow
@@ -87,7 +87,7 @@ export function DeviceTemperatures({ snapshot }: { snapshot: HostState }) {
           icon={Fan}
           tone="fan"
           title={fanName(fan)}
-          detail={fan.stopped ? "之前在转，现在读数为 0，请检查风扇和接线" : "主板风扇接口"}
+          detail={fan.stopped ? "风扇停了，请检查风扇和接线" : undefined}
           flag={fan.stopped ? "已停转" : undefined}
           end={<FanSpeed fan={fan} />}
         />
@@ -104,7 +104,7 @@ function TemperatureRow({
   icon: LucideIcon;
   tone: string;
   title: string;
-  detail: string;
+  detail?: string;
   temperature?: Temperature;
   missing: string;
 }) {
@@ -134,7 +134,7 @@ function Row({
   icon: LucideIcon;
   tone: string;
   title: string;
-  detail: string;
+  detail?: string;
   flag?: string;
   end: ReactNode;
 }) {
@@ -146,7 +146,7 @@ function Row({
           <strong>{title}</strong>
           {flag && <Pill tone="warning">{flag}</Pill>}
         </span>
-        <small>{detail}</small>
+        {detail && <small>{detail}</small>}
       </div>
       {end}
     </div>

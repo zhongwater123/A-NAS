@@ -58,7 +58,7 @@ export function TemperatureGauge({ temperature, label }: { temperature: Temperat
       aria-valuemin={gaugeFloor}
       aria-valuemax={ceiling}
       aria-valuetext={`${celsius} °C${level === "hot" ? "，偏高" : ""}`}
-      title={`${hotCelsius} °C 起为偏高`}
+      title={`${hotCelsius} °C 以上偏高`}
     >
       <strong>
         {celsius}

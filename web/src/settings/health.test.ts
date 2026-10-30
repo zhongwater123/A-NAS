@@ -24,7 +24,7 @@ describe("describeFinding", () => {
   it("says the CPU runs hot and what to check", () => {
     expect(describeFinding({ code: "cpu_hot", severity: "warning", value: 93 }, disks)).toMatchObject({
       title: "处理器温度 93 °C，偏高",
-      detail: expect.stringContaining("散热器和机箱风扇"),
+      detail: expect.stringContaining("散热器和风扇"),
     });
   });
 
