@@ -34,6 +34,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 AI = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -88,6 +89,16 @@ def cgroup(name):
         return int(file.read())
 
 
+def anonymous():
+    """The cgroup's anonymous memory: what the kernel cannot reclaim without swap."""
+    with open(f"{CGROUP}/memory.stat", encoding="ascii") as file:
+        for line in file:
+            key, _, value = line.partition(" ")
+            if key == "anon":
+                return int(value)
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--photo", required=True, help="a photo with one animal and no face")
@@ -123,7 +134,7 @@ def main():
     info = step("info", {"op": "info"})
     print(f"  info says memoryBytes = {info.get('memoryBytes', 0) >> 20} MiB, "
           f"ocrMemoryBytes = {info.get('ocrMemoryBytes', 0) >> 20} MiB")
-    started = cgroup("current")
+    started, started_anonymous = cgroup("current"), anonymous()
     step("embed_image", {"op": "embed_image"}, args.photo)
     detected = step("detect_objects", {"op": "detect_objects"}, args.photo)
     step("detect_faces (none)", {"op": "detect_faces"}, args.photo)
@@ -132,7 +143,19 @@ def main():
     step("embed_animals", {"op": "embed_animals", "boxes": boxes}, args.photo)
     if args.text_photo:
         step("release detector", {"op": "release", "what": "detector"})
-        before = cgroup("current")
+        before, before_anonymous = cgroup("current"), anonymous()
+        # The cgroup also counts the page cache llama-server maps the model
+        # from, which the kernel can reclaim; the gate weighs what it cannot,
+        # the anonymous memory, sampled while the reading runs.
+        highest = [before_anonymous]
+        reading_done = threading.Event()
+
+        def sample():
+            while not reading_done.wait(0.2):
+                highest[0] = max(highest[0], anonymous())
+
+        sampler = threading.Thread(target=sample)
+        sampler.start()
         # Since Linux 6.12 a write resets the peak for reads through the same
         # descriptor: the reading phase's own peak. Older kernels keep the
         # peak since the start.
@@ -144,12 +167,19 @@ def main():
             except OSError:
                 since = "the start (this kernel cannot reset the peak)"
             began = time.monotonic()
-            reading = step("read_text", {"op": "read_text", "kind": "text"}, args.text_photo)
+            try:
+                reading = step("read_text", {"op": "read_text", "kind": "text"}, args.text_photo)
+            finally:
+                reading_done.set()
+                sampler.join()
             peak_file.seek(0)
             peak = int(peak_file.read())
         print(f"  read in {time.monotonic() - began:.1f} s, {len(reading['reading']['text'])} characters, "
-              f"finish {reading['reading']['finish']}; peak since {since}: {(peak - before) >> 20} MiB over the "
-              f"released Worker, {(peak - started) >> 20} MiB over its start")
+              f"finish {reading['reading']['finish']}")
+        print(f"  cgroup peak since {since}: {(peak - before) >> 20} MiB over the released Worker, "
+              f"{(peak - started) >> 20} MiB over its start")
+        print(f"  anonymous peak: {(highest[0] - before_anonymous) >> 20} MiB over the released Worker, "
+              f"{(highest[0] - started_anonymous) >> 20} MiB over its start")
     worker.terminate()
     worker.wait()
 

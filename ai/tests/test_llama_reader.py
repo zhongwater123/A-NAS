@@ -68,7 +68,7 @@ class LlamaReaderTest(unittest.TestCase):
         # A UNIX socket, no prompt cache, the evaluated image token cap.
         self.assertTrue(argv[argv.index("--host") + 1].endswith(".sock"))
         for flag, value in (("--cache-ram", "0"), ("--ctx-checkpoints", "0"), ("--image-max-tokens", "1024"),
-                            ("-t", "2"), ("-np", "1")):
+                            ("--load-mode", "mmap"), ("-t", "2"), ("-np", "1")):
             self.assertEqual(argv[argv.index(flag) + 1], value, flag)
         image, prompt = body["messages"][0]["content"]
         self.assertEqual(image["image_url"]["url"], "data:image/jpeg;base64," + base64.b64encode(b"jpeg bytes").decode())

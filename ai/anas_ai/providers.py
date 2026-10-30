@@ -931,7 +931,12 @@ class LlamaReader:
             [*self._server, "-m", model, "--mmproj", mmproj, "--host", self._socket(),
              "-c", str(OCR_CONTEXT), "-np", "1", "-t", str(self.threads), "-tb", str(self.threads),
              "--jinja", "--no-webui", "--cache-ram", "0", "--ctx-checkpoints", "0",
-             "--image-max-tokens", str(OCR_IMAGE_TOKENS)],
+             "--image-max-tokens", str(OCR_IMAGE_TOKENS),
+             # Mapped, llama.cpp repacks most weights into anonymous memory
+             # and the page cache it maps from can be reclaimed; read into
+             # memory instead (none, dio) they held 1 GiB more on the NAS
+             # (docs/research/photo-ocr-model-evaluation.md).
+             "--load-mode", "mmap"],
             stdin=subprocess.DEVNULL, stdout=self._log, stderr=subprocess.STDOUT,
         )
         deadline = time.monotonic() + OCR_START_SECONDS
