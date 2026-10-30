@@ -1,4 +1,5 @@
 import { Ellipsis, Play, X } from "lucide-react";
+import { motion } from "motion/react";
 import { Dialog, DropdownMenu } from "radix-ui";
 import { type ReactNode, useState } from "react";
 
@@ -9,6 +10,7 @@ import type { FamilyRecord } from "./api";
 import { memberOf, useFamily } from "./context";
 import styles from "./family.module.css";
 import { monthLabel } from "./format";
+import { Lightbox, photoLayout } from "./Lightbox";
 
 // Modal is a dialog inside the family window. It stays in the window, as the
 // desktop's other in-window dialogs do, so the rest of the desktop keeps
@@ -76,35 +78,80 @@ export function MonthTitle({ month }: { month: number }) {
   );
 }
 
+// scrollerOf finds the board's scrolling area around an element.
+export function scrollerOf(element: Element | null): HTMLElement | null {
+  return element?.closest<HTMLElement>(`.${styles.fcScroll}`) ?? null;
+}
+
+// scrollWithin scrolls the board so an element sits near the top of the
+// view, or at a share `at` of its height, without scrolling the window or
+// the desktop around it as scrollIntoView would.
+export function scrollWithin(element: HTMLElement, smooth: boolean, at = 0) {
+  const container = scrollerOf(element);
+  if (!container?.scrollTo) return;
+  const offset = element.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  container.scrollTo({
+    top: container.scrollTop + offset - 16 - at * container.clientHeight,
+    behavior: smooth ? "smooth" : "auto",
+  });
+}
+
 // Mosaic lays a record's photos out as one picture: a single photo large,
 // a few side by side, more as a large first photo beside a grid that ends in
-// +N. A photo opens in 相册.
-export function Mosaic({ photos, limit = 5 }: { photos: FamilyRecord["photos"]; limit?: number }) {
-  const { onShowPhoto } = useFamily();
+// +N. A photo opens in the window's viewer, growing out of its tile; scope
+// keeps the tiles of one record apart from the same photo elsewhere.
+export function Mosaic({
+  photos,
+  scope,
+  limit = 5,
+}: {
+  photos: FamilyRecord["photos"];
+  scope: string;
+  limit?: number;
+}) {
+  const [opened, setOpened] = useState<{ index: number; aspect?: number }>();
   if (photos.length === 0) return null;
   const shown = photos.slice(0, Math.min(limit, 5));
   const more = photos.length - shown.length;
   return (
-    <div className={styles.fcMosaic} data-count={shown.length}>
-      {shown.map((photo, index) => (
-        <button
-          key={photo.assetId}
-          type="button"
-          className={styles.fcTile}
-          onClick={() => onShowPhoto(photo.assetId)}
-          aria-label={`在相册中打开第 ${index + 1} ${photo.video ? "段视频" : "张照片"}`}
-        >
-          <Thumb assetId={photo.assetId} />
-          {photo.video && (
-            <span className={styles.fcVideoMark} aria-hidden="true">
-              <Play size={12} fill="currentColor" />
-            </span>
-          )}
-          {more > 0 && index === shown.length - 1 && <span className={styles.fcMore}>+{more}</span>}
-        </button>
-      ))}
-    </div>
+    <>
+      <div className={styles.fcMosaic} data-count={shown.length}>
+        {shown.map((photo, index) => (
+          <motion.button
+            key={photo.assetId}
+            layoutId={photoLayout(scope, photo.assetId)}
+            type="button"
+            className={styles.fcTile}
+            onClick={(event) => setOpened({ index, aspect: aspectOf(event.currentTarget) })}
+            aria-label={`查看第 ${index + 1} ${photo.video ? "段视频" : "张照片"}`}
+            transition={{ type: "spring", stiffness: 320, damping: 34 }}
+          >
+            <Thumb assetId={photo.assetId} />
+            {photo.video && (
+              <span className={styles.fcVideoMark} aria-hidden="true">
+                <Play size={12} fill="currentColor" />
+              </span>
+            )}
+            {more > 0 && index === shown.length - 1 && <span className={styles.fcMore}>+{more}</span>}
+          </motion.button>
+        ))}
+      </div>
+      <Lightbox
+        scope={scope}
+        photos={photos}
+        opened={opened?.index}
+        aspect={opened?.aspect}
+        onClose={() => setOpened(undefined)}
+      />
+    </>
   );
+}
+
+// aspectOf reads a tile's photo shape from its thumbnail, which keeps the
+// photo's proportions, so the viewer knows its size before the details come.
+export function aspectOf(tile: HTMLElement): number | undefined {
+  const image = tile.querySelector("img");
+  return image?.naturalWidth && image.naturalHeight ? image.naturalWidth / image.naturalHeight : undefined;
 }
 
 // Thumb shows a photo's thumbnail, or a quiet placeholder while the photo

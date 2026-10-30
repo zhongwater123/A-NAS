@@ -22,12 +22,17 @@ import { decimal, kindLabels, today } from "./format";
 import { Field, Modal, Thumb } from "./parts";
 
 // Draft is what the composer opens with: a kind to add, a record to edit, a
-// scheduled dose to record or an automatic milestone to annotate.
+// scheduled dose to record, an automatic milestone to annotate, or what was
+// already chosen: files dropped or pasted on the window, a recording file,
+// a journal begun in the timeline.
 export interface Draft {
   kind: FamilyKind;
   record?: FamilyRecord;
   vaccine?: { code: string; dose: number };
   milestone?: { autoKey: string; title: string; date: string };
+  files?: File[];
+  audio?: File;
+  text?: string;
 }
 
 // A file chosen to upload, and how far it got.
@@ -55,16 +60,17 @@ export function Composer({
   baby: FamilyBaby;
   draft: Draft;
   onClose: () => void;
-  onSaved: () => void;
+  // onSaved names the record saved, for the timeline to show it.
+  onSaved: (record: FamilyRecord) => void;
 }) {
   const family = useFamily();
   const editing = draft.record;
   const kind = draft.kind;
   const key = useMemo(() => requestKey(), []);
   const [occurredOn, setOccurredOn] = useState(editing?.occurredOn ?? draft.milestone?.date ?? today());
-  const [text, setText] = useState(editing?.text ?? "");
+  const [text, setText] = useState(editing?.text ?? draft.text ?? "");
   const [kept, setKept] = useState(editing?.photos ?? []);
-  const [files, setFiles] = useState<Pending[]>([]);
+  const [files, setFiles] = useState<Pending[]>(() => pendingOf(draft.files ?? []));
   const [also, setAlso] = useState<string[]>([]);
   const [height, setHeight] = useState(numberText(editing?.measurement?.heightCm, 1));
   const [weight, setWeight] = useState(numberText(editing?.measurement?.weightKg, 2));
@@ -76,7 +82,9 @@ export function Composer({
   const [batch, setBatch] = useState(editing?.vaccine?.batch ?? "");
   const [title, setTitle] = useState(editing?.milestone?.title ?? "");
   const autoKey = editing?.milestone?.autoKey || draft.milestone?.autoKey || "";
-  const [audio, setAudio] = useState<{ blob: Blob; name: string }>();
+  const [audio, setAudio] = useState<{ blob: Blob; name: string } | undefined>(
+    draft.audio && { blob: draft.audio, name: draft.audio.name },
+  );
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<number>();
   const [problem, setProblem] = useState("");
@@ -105,7 +113,13 @@ export function Composer({
     };
   }, [kind, baby.id, editing?.id, occurredOn]);
 
-  useEffect(() => () => files.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)), [files]);
+  // Previews are let go when the composer closes; a file removed before that
+  // keeps its few bytes until then.
+  const previews = useRef<Pending[]>([]);
+  useEffect(() => {
+    previews.current = files;
+  }, [files]);
+  useEffect(() => () => previews.current.forEach((item) => item.preview && URL.revokeObjectURL(item.preview)), []);
 
   const others = family.overview.babies.filter((item) => item.id !== baby.id);
   const heading = editing
@@ -114,15 +128,7 @@ export function Composer({
       ? draft.milestone.title
       : `记录${kindLabels[kind]}`;
 
-  const addFiles = (list: FileList | File[]) => {
-    const next = [...list].map((file) => ({
-      key: `${file.name}-${file.size}-${file.lastModified}-${Math.random()}`,
-      file,
-      preview: file.type.startsWith("image/") && !/hei[cf]$/i.test(file.name) ? URL.createObjectURL(file) : undefined,
-      progress: 0,
-    }));
-    setFiles((current) => [...current, ...next]);
-  };
+  const addFiles = (list: FileList | File[]) => setFiles((current) => [...current, ...pendingOf(list)]);
 
   // upload sends the chosen files that are not in the shared library yet.
   const upload = async (): Promise<string[] | undefined> => {
@@ -184,18 +190,20 @@ export function Composer({
     setProblem("");
     try {
       if (kind === "recording") {
-        if (editing) await updateRecord(editing.id, { text: text.trim(), occurredOn, version: editing.version });
-        else {
-          if (!audio) throw new Problem("请先录音或选择录音文件。");
+        if (editing) {
+          onSaved(await updateRecord(editing.id, { text: text.trim(), occurredOn, version: editing.version }));
+          return;
+        }
+        if (!audio) throw new Problem("请先录音或选择录音文件。");
+        onSaved(
           await addRecording(
             baby.id,
             audio.blob,
             audio.name,
             { title: text.trim(), occurredOn, requestKey: key },
             setProgress,
-          );
-        }
-        onSaved();
+          ),
+        );
         return;
       }
       const uploaded = await upload();
@@ -232,11 +240,16 @@ export function Composer({
       }
       if (editing) {
         delete input.requestKey;
-        await updateRecord(editing.id, { ...input, version: editing.version });
+        onSaved(await updateRecord(editing.id, { ...input, version: editing.version }));
       } else {
-        await addRecord(baby.id, { ...input, kind, ...(kind === "photos" && also.length ? { alsoBabies: also } : {}) });
+        onSaved(
+          await addRecord(baby.id, {
+            ...input,
+            kind,
+            ...(kind === "photos" && also.length ? { alsoBabies: also } : {}),
+          }),
+        );
       }
-      onSaved();
     } catch (caught) {
       setProblem(caught instanceof Problem ? caught.message : familyError(caught));
       setBusy(false);
@@ -460,6 +473,17 @@ export function Composer({
       {problem && <p className={styles.fcProblem}>{problem}</p>}
     </Modal>
   );
+}
+
+// pendingOf lists chosen files to upload, with a preview for the images a
+// browser shows.
+function pendingOf(list: FileList | File[]): Pending[] {
+  return [...list].map((file) => ({
+    key: `${file.name}-${file.size}-${file.lastModified}-${Math.random()}`,
+    file,
+    preview: file.type.startsWith("image/") && !/hei[cf]$/i.test(file.name) ? URL.createObjectURL(file) : undefined,
+    progress: 0,
+  }));
 }
 
 // Problem is a reason the composer explains itself.

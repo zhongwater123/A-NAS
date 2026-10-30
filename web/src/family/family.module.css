@@ -12,6 +12,7 @@
   --fc-line-strong: rgba(60, 40, 25, 0.2);
   --fc-hover: rgba(60, 40, 25, 0.05);
   --fc-tile: #e9e1d7;
+  --fc-wave: #cfc5bc;
   --fc-accent: #c4553a;
   --fc-accent-soft: #f6e4dc;
   --fc-sage: #6d8a6e;
@@ -436,6 +437,7 @@
   scrollbar-width: none;
 }
 .fc-tab {
+  position: relative;
   flex: none;
   padding: 0 0 12px;
   border: 0;
@@ -450,13 +452,23 @@
 .fc-tab[data-state="active"] {
   color: var(--fc-ink);
   font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--fc-ink);
+}
+.fc-tab-line {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--fc-ink);
 }
 .fc-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  /* The month ruler is as tall as this view (cqh). */
+  container: boardscroll / size;
 }
 .fc-board {
   padding: 0 40px 56px;
@@ -536,8 +548,15 @@
 
 /* The timeline. */
 .fc-timeline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  column-gap: 12px;
+  margin-right: -28px;
+}
+.fc-timeline-body {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 .fc-entries {
   display: flex;
@@ -546,10 +565,32 @@
   min-width: 0;
 }
 .fc-entry {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
   max-width: 560px;
+}
+/* A record just saved is marked for a moment at its left. */
+.fc-entry.fresh::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: -16px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--fc-accent);
+  animation: fc-fresh 2.8s ease-out forwards;
+}
+@keyframes fc-fresh {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 .fc-by {
   display: flex;
@@ -563,8 +604,13 @@
   color: var(--fc-ink-2);
   font-weight: 600;
 }
-.fc-by-action {
+.fc-by-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   margin-left: auto;
+}
+.fc-by-action {
   padding: 2px 8px;
   border: 0;
   border-radius: 6px;
@@ -582,8 +628,14 @@
   background: var(--fc-hover);
 }
 .fc-entry:hover .fc-by-action,
-.fc-by-action:focus-visible {
+.fc-by-action:focus-visible,
+.fc-entry:hover .fc-by-icon,
+.fc-by-icon:focus-visible,
+.fc-by-icon[data-state="open"] {
   opacity: 1;
+}
+.fc-by-icon {
+  opacity: 0;
 }
 .fc-dot {
   color: var(--fc-line-strong);
@@ -837,13 +889,19 @@
   max-width: none;
 }
 .fc-fact-tabs > button {
+  position: relative;
   transition: background 0.15s;
 }
 .fc-fact-tabs > button:hover {
   background: var(--fc-hover);
 }
-.fc-fact-tabs > button.active {
-  box-shadow: inset 0 -2px 0 var(--fc-ink);
+.fc-fact-line {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--fc-ink);
 }
 .fc-fact-tabs > button.active span {
   color: var(--fc-ink);
@@ -939,6 +997,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow: hidden;
   max-width: 560px;
   padding: 12px 14px;
   border-radius: 12px;
@@ -1114,8 +1173,10 @@
   text-align: left;
   transition: border-color 0.15s;
 }
-.fc-due + .fc-due {
-  margin-top: 8px;
+.fc-due-slot {
+  width: 100%;
+  padding-bottom: 8px;
+  overflow: hidden;
 }
 .fc-due:hover {
   border-color: var(--fc-line-strong);
@@ -1905,6 +1966,492 @@
   }
 }
 
+/* Reactions under a record, and the picker in its by-line. */
+.fc-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fc-reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--fc-line);
+  border-radius: 999px;
+  color: var(--fc-ink-2);
+  background: var(--fc-card);
+  font-size: 14px;
+  line-height: 1;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.fc-reaction:hover {
+  border-color: var(--fc-line-strong);
+}
+.fc-reaction.mine {
+  border-color: rgba(196, 85, 58, 0.35);
+  background: var(--fc-accent-soft);
+}
+.fc-reaction > span:first-child {
+  display: inline-block;
+}
+.fc-reaction-count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.fc-reaction.mine .fc-reaction-count {
+  color: var(--fc-accent);
+  font-weight: 600;
+}
+.fc-picker {
+  z-index: 10000;
+  display: flex;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 999px;
+  background: #fffdfa;
+  box-shadow:
+    0 0 0 1px rgba(60, 40, 25, 0.08),
+    0 12px 32px rgba(35, 20, 10, 0.18);
+  animation: fc-fade 0.12s ease-out;
+}
+.fc-picker button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.fc-picker button:hover {
+  background: rgba(60, 40, 25, 0.06);
+}
+
+/* The recording waveform: drawn bars until the decoded one arrives. */
+.fc-wave-box {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+}
+.fc-wave-box .fc-wave {
+  height: 100%;
+  cursor: pointer;
+}
+.fc-wave-drawn {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.fc-wave-drawn.shown {
+  opacity: 1;
+  cursor: pointer;
+}
+.fc-voice.playing .fc-play {
+  box-shadow: 0 0 0 4px var(--fc-accent-soft);
+}
+
+/* The month ruler beside the timeline. */
+.fc-scrubber {
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  height: calc(100cqh - 32px);
+  padding: 8px 0;
+  outline: none;
+  cursor: pointer;
+  touch-action: none;
+}
+.fc-scrubber:focus-visible .fc-scrubber-track {
+  border-radius: 4px;
+  outline: 2px solid var(--fc-accent);
+  outline-offset: 6px;
+}
+.fc-scrubber-track {
+  position: relative;
+  height: 100%;
+  margin-left: 26px;
+}
+.fc-scrubber-track::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-left: 1px solid var(--fc-line);
+}
+.fc-scrubber-track i {
+  position: absolute;
+  left: -2px;
+  width: 5px;
+  height: 1px;
+  background: var(--fc-line-strong);
+  transform: translateY(-0.5px);
+}
+.fc-scrubber-track i.year {
+  left: -4px;
+  width: 9px;
+}
+.fc-scrubber-track i.filled {
+  left: -2.5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fc-muted);
+  transform: translateY(-3px);
+}
+.fc-scrubber-track small {
+  position: absolute;
+  right: 10px;
+  color: var(--fc-muted);
+  font-size: 10px;
+  white-space: nowrap;
+  transform: translateY(-50%);
+}
+.fc-scrubber-thumb {
+  position: absolute;
+  left: -5px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--fc-paper);
+  border-radius: 50%;
+  background: var(--fc-accent);
+  box-shadow: 0 0 0 1px var(--fc-accent);
+  transform: translateY(-50%);
+}
+.fc-scrubber-hint {
+  position: absolute;
+  right: 14px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: #fff;
+  background: var(--fc-ink);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+/* The journal line at the top of the timeline. */
+.fc-quick-journal {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 560px;
+  margin: 26px 0 0 124px;
+  padding: 10px 12px;
+  border: 1px solid var(--fc-line);
+  border-radius: 14px;
+  background: var(--fc-card);
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.fc-quick-journal.open {
+  border-color: var(--fc-line-strong);
+  box-shadow: 0 8px 24px rgba(60, 40, 25, 0.08);
+}
+.fc-quick-journal .fc-face {
+  width: 30px;
+  height: 30px;
+  margin-top: 2px;
+  font-size: 12px;
+}
+.fc-quick-journal-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.fc-quick-journal-field {
+  width: 100%;
+  padding: 5px 0;
+  border: 0;
+  outline: none;
+  background: none;
+  font: 15px / 1.8 var(--fc-serif);
+  resize: none;
+  user-select: text;
+}
+.fc-quick-journal-field::placeholder {
+  color: var(--fc-muted);
+}
+.fc-quick-journal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fc-quick-journal-actions small {
+  color: var(--fc-muted);
+  font-size: 11px;
+}
+.fc-quick-journal-actions .fc-primary,
+.fc-quick-journal-actions .fc-secondary {
+  height: 30px;
+  padding: 0 14px;
+  font-size: 12.5px;
+}
+
+/* Files dragged over the channel. */
+.fc-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(246, 242, 236, 0.86);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+}
+.fc-drop-overlay > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: min(420px, 100%);
+  padding: 36px 24px;
+  border: 2px dashed var(--fc-accent);
+  border-radius: 20px;
+  color: var(--fc-accent);
+  font: 600 16px / 1.5 var(--fc-serif);
+  text-align: center;
+}
+
+/* The growth chart: ranges, crosshair and readout. */
+.fc-chart-frame {
+  position: relative;
+}
+.fc-ranges {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 1;
+  display: flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(60, 40, 25, 0.05);
+}
+.fc-ranges button {
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--fc-muted);
+  background: none;
+  font-size: 11.5px;
+}
+.fc-ranges button.active {
+  color: var(--fc-ink);
+  font-weight: 600;
+  background: var(--fc-card);
+  box-shadow: 0 1px 2px rgba(60, 40, 25, 0.12);
+}
+.fc-chart-box {
+  position: relative;
+  margin-top: 18px;
+}
+.fc-crosshair {
+  stroke: var(--fc-ink-2);
+  stroke-width: 1;
+  opacity: 0.35;
+  pointer-events: none;
+}
+.fc-baby-point.near {
+  fill: var(--fc-accent);
+}
+.fc-chart-tip {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 120px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: #fff;
+  background: rgba(35, 30, 26, 0.92);
+  box-shadow: 0 8px 20px rgba(35, 20, 10, 0.2);
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 14px));
+}
+.fc-chart-tip small {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 11px;
+}
+.fc-chart-tip strong {
+  font: 600 18px / 1.3 var(--fc-serif);
+}
+.fc-chart-tip strong span {
+  color: rgba(255, 255, 255, 0.7);
+  font:
+    400 11px system-ui,
+    sans-serif;
+}
+.fc-chart-tip em {
+  color: #b9d1b9;
+  font-size: 11px;
+  font-style: normal;
+}
+
+/* The window's photo viewer. */
+.fc-lightbox-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: rgba(18, 14, 11, 0.97);
+}
+.fc-lightbox {
+  position: absolute;
+  inset: 0;
+  z-index: 41;
+  outline: none;
+}
+.fc-lightbox-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  color: #fff;
+}
+.fc-lightbox-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px 4px 20px;
+}
+.fc-lightbox-count {
+  flex: 1;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.fc-lightbox-button,
+.fc-lightbox-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 12.5px;
+  transition: background 0.15s;
+}
+.fc-lightbox-icon {
+  justify-content: center;
+  width: 32px;
+  padding: 0;
+}
+.fc-lightbox-button:hover,
+.fc-lightbox-icon:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.fc-lightbox-stage {
+  position: relative;
+  display: grid;
+  flex: 1;
+  place-items: center;
+  min-height: 0;
+  overflow: hidden;
+}
+.fc-lightbox-photo {
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  touch-action: pan-y;
+  cursor: grab;
+}
+.fc-lightbox-photo:active {
+  cursor: grabbing;
+}
+.fc-lightbox-thumb,
+.fc-lightbox-full {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  pointer-events: none;
+}
+.fc-lightbox-thumb {
+  filter: blur(6px);
+  transform: scale(1.04);
+}
+.fc-lightbox-step {
+  position: absolute;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-50%);
+  transition: background 0.15s;
+}
+.fc-lightbox-step:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.fc-lightbox-step.back {
+  left: 16px;
+}
+.fc-lightbox-step.forth {
+  right: 16px;
+}
+.fc-lightbox-strip {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 16px 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.fc-lightbox-strip button {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  opacity: 0.5;
+  transition:
+    opacity 0.15s,
+    border-color 0.15s;
+}
+.fc-lightbox-strip button:hover {
+  opacity: 0.85;
+}
+.fc-lightbox-strip button.active {
+  border-color: #fff;
+  opacity: 1;
+}
+.fc-lightbox-strip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 /* The window's own dialogs. */
 .fc-backdrop {
   position: absolute;
@@ -2043,7 +2590,15 @@
   .fc-month-head {
     position: static;
   }
-  .fc-timeline-end {
+  .fc-timeline-end,
+  .fc-quick-journal {
     margin-left: 0;
+  }
+  .fc-timeline {
+    grid-template-columns: minmax(0, 1fr);
+    margin-right: 0;
+  }
+  .fc-scrubber {
+    display: none;
   }
 }

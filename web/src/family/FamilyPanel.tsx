@@ -1,4 +1,5 @@
 import { Check, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { MotionConfig } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { relativeTime } from "../lib/time";
@@ -132,88 +133,91 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
   const baby = overview.babies.find((item) => item.id === selected);
   return (
     <FamilyContext value={context}>
-      <div className={`${styles.fcApp} ${styles.fcLayout}`} ref={root}>
-        <nav className={styles.fcRail} aria-label="宝宝">
-          {overview.babies.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`${styles.fcRailBaby} ${item.id === selected ? styles.active : ""}`}
-              aria-current={item.id === selected ? "page" : undefined}
-              onClick={() => setSelected(item.id)}
-            >
-              <BabyAvatar baby={item} className={styles.fcRailFace} />
-              <span>{item.nickname || item.name}</span>
-            </button>
-          ))}
-          {overview.me.guardian && (
-            <button type="button" className={styles.fcRailAdd} onClick={() => setAdding(true)} aria-label="添加宝宝">
-              <Plus size={18} />
-            </button>
+      {/* Motion follows the system: with reduced motion, things change in place. */}
+      <MotionConfig reducedMotion="user">
+        <div className={`${styles.fcApp} ${styles.fcLayout}`} ref={root}>
+          <nav className={styles.fcRail} aria-label="宝宝">
+            {overview.babies.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`${styles.fcRailBaby} ${item.id === selected ? styles.active : ""}`}
+                aria-current={item.id === selected ? "page" : undefined}
+                onClick={() => setSelected(item.id)}
+              >
+                <BabyAvatar baby={item} className={styles.fcRailFace} />
+                <span>{item.nickname || item.name}</span>
+              </button>
+            ))}
+            {overview.me.guardian && (
+              <button type="button" className={styles.fcRailAdd} onClick={() => setAdding(true)} aria-label="添加宝宝">
+                <Plus size={18} />
+              </button>
+            )}
+            {overview.deletedBabies.length > 0 && (
+              <button
+                type="button"
+                className={styles.fcRailTrash}
+                onClick={() => setRestoring(true)}
+                aria-label="最近删除的宝宝"
+                title="最近删除的宝宝"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+          </nav>
+          {baby ? (
+            <Channel key={baby.id} baby={baby} />
+          ) : (
+            <NoBabies guardian={overview.me.guardian} onAdd={() => setAdding(true)} />
           )}
-          {overview.deletedBabies.length > 0 && (
-            <button
-              type="button"
-              className={styles.fcRailTrash}
-              onClick={() => setRestoring(true)}
-              aria-label="最近删除的宝宝"
-              title="最近删除的宝宝"
-            >
-              <Trash2 size={16} />
-            </button>
+          {adding && (
+            <BabyDialog
+              onClose={() => setAdding(false)}
+              onSaved={async (saved) => {
+                setAdding(false);
+                await reload();
+                setSelected(saved.id);
+              }}
+            />
           )}
-        </nav>
-        {baby ? (
-          <Channel key={baby.id} baby={baby} />
-        ) : (
-          <NoBabies guardian={overview.me.guardian} onAdd={() => setAdding(true)} />
-        )}
-        {adding && (
-          <BabyDialog
-            onClose={() => setAdding(false)}
-            onSaved={async (saved) => {
-              setAdding(false);
-              await reload();
-              setSelected(saved.id);
-            }}
-          />
-        )}
-        {restoring && (
-          <Modal title="最近删除的宝宝" onClose={() => setRestoring(false)}>
-            <p className={styles.fcNote}>删除的频道保留 15 天，恢复后记录、录音和留言都会回来。</p>
-            <ul className={styles.fcRows}>
-              {overview.deletedBabies.map((deleted) => (
-                <li key={deleted.id}>
-                  <BabyAvatar baby={deleted} className={styles.fcFace} />
-                  <span className={styles.fcRowMain}>
-                    {deleted.name}
-                    <small>{deleted.deletedAt ? `删除于${relativeTime(deleted.deletedAt)}` : ""}</small>
-                  </span>
-                  <button
-                    type="button"
-                    className={styles.fcSecondary}
-                    onClick={async () => {
-                      try {
-                        await restoreBaby(deleted.id);
-                        await reload();
-                        setSelected(deleted.id);
-                        setRestoring(false);
-                        toast({ text: `已恢复${deleted.name}的频道`, tone: "done" });
-                      } catch (caught) {
-                        toast({ text: familyError(caught), tone: "error" });
-                      }
-                    }}
-                  >
-                    <RotateCcw size={13} /> 恢复
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </Modal>
-        )}
-        {dialog}
-        {toasts}
-      </div>
+          {restoring && (
+            <Modal title="最近删除的宝宝" onClose={() => setRestoring(false)}>
+              <p className={styles.fcNote}>删除的频道保留 15 天，恢复后记录、录音和留言都会回来。</p>
+              <ul className={styles.fcRows}>
+                {overview.deletedBabies.map((deleted) => (
+                  <li key={deleted.id}>
+                    <BabyAvatar baby={deleted} className={styles.fcFace} />
+                    <span className={styles.fcRowMain}>
+                      {deleted.name}
+                      <small>{deleted.deletedAt ? `删除于${relativeTime(deleted.deletedAt)}` : ""}</small>
+                    </span>
+                    <button
+                      type="button"
+                      className={styles.fcSecondary}
+                      onClick={async () => {
+                        try {
+                          await restoreBaby(deleted.id);
+                          await reload();
+                          setSelected(deleted.id);
+                          setRestoring(false);
+                          toast({ text: `已恢复${deleted.name}的频道`, tone: "done" });
+                        } catch (caught) {
+                          toast({ text: familyError(caught), tone: "error" });
+                        }
+                      }}
+                    >
+                      <RotateCcw size={13} /> 恢复
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Modal>
+          )}
+          {dialog}
+          {toasts}
+        </div>
+      </MotionConfig>
     </FamilyContext>
   );
 }

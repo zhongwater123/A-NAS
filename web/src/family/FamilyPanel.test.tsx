@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,6 +6,7 @@ import { setSession } from "../api/client";
 import type { FamilyRecordInput } from "../api.generated";
 import { session } from "../test/fixtures";
 import { emptySchedule, familyBaby, familyHandlers, familyOverview, familyRecord } from "../test/handlers/family";
+import { asset } from "../test/handlers/photos";
 import { http, server } from "../test/server";
 import { summarize } from "./FamilyNotices";
 import { FamilyPanel } from "./FamilyPanel";
@@ -18,13 +19,27 @@ const daysFromToday = (days: number) => {
   return isoDate(date);
 };
 
-// Radix places its menus with ResizeObserver and pointer capture, which jsdom
-// does not have.
+// Radix places its menus with ResizeObserver and pointer capture, and motion
+// raises records as they scroll into view with IntersectionObserver; jsdom
+// has none of them. Nothing here ever scrolls into view, so recordings keep
+// their drawn bars and never decode.
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}
     disconnect() {}
+  };
+  globalThis.IntersectionObserver ??= class {
+    readonly root = null;
+    readonly rootMargin = "";
+    readonly thresholds = [];
+    readonly scrollMargin = "";
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
   };
   Element.prototype.hasPointerCapture ??= () => false;
   Element.prototype.releasePointerCapture ??= () => undefined;
@@ -156,6 +171,97 @@ describe("FamilyPanel", () => {
     expect(added?.requestKey).toBeTruthy();
     expect(await screen.findByText("外婆来看你了")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("leaves and takes back a reaction with one tap", async () => {
+    const calls: string[] = [];
+    server.use(
+      ...familyHandlers({ records: [familyRecord()] }),
+      http.put("/api/v1/family/records/{recordId}/reactions/{reaction}", ({ params, response }) => {
+        calls.push(`put ${params.reaction}`);
+        return response(200).json({ items: [{ name: "heart", accountIds: ["user:grandma", "user:mom"] }] });
+      }),
+      http.delete("/api/v1/family/records/{recordId}/reactions/{reaction}", ({ params, response }) => {
+        calls.push(`delete ${params.reaction}`);
+        return response(200).json({ items: [{ name: "heart", accountIds: ["user:grandma"] }] });
+      }),
+    );
+    render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
+    await screen.findByText("今天第一次笑出了声");
+    await userEvent.click(screen.getByRole("button", { name: "表情回应" }));
+    await userEvent.click(await screen.findByRole("button", { name: "回应 ❤️" }));
+    const mine = await screen.findByRole("button", { name: /^❤️ 2/, pressed: true });
+    await waitFor(() => expect(calls).toEqual(["put heart"]));
+    await userEvent.click(mine);
+    expect(await screen.findByRole("button", { name: /^❤️ 1/, pressed: false })).toBeTruthy();
+    expect(calls).toEqual(["put heart", "delete heart"]);
+  });
+
+  it("opens a record's photos in the window's viewer", async () => {
+    const onShowPhoto = vi.fn();
+    server.use(
+      ...familyHandlers({
+        records: [
+          familyRecord({
+            kind: "photos",
+            text: "公园散步",
+            photos: [
+              { assetId: "asset:1", video: false, role: "album" },
+              { assetId: "asset:2", video: false, role: "album" },
+            ],
+          }),
+        ],
+      }),
+      http.get("/api/v1/photos/assets/{assetId}", ({ params, response }) =>
+        response(200).json(asset(String(params.assetId))),
+      ),
+    );
+    render(<FamilyPanel userId="user:mom" onShowPhoto={onShowPhoto} />);
+    await userEvent.click(await screen.findByRole("button", { name: "查看第 1 张照片" }));
+    const viewer = await screen.findByRole("dialog", { name: "1 / 2" });
+    await userEvent.keyboard("{ArrowRight}");
+    expect(await within(viewer).findByRole("heading", { name: "2 / 2" })).toBeTruthy();
+    await userEvent.click(within(viewer).getByRole("button", { name: "在相册中打开" }));
+    expect(onShowPhoto).toHaveBeenCalledWith("asset:2");
+    await userEvent.click(within(viewer).getByRole("button", { name: "关闭" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("writes today's journal from the line at the top of the timeline", async () => {
+    let added: FamilyRecordInput | undefined;
+    const written = familyRecord({ id: "rec_quick", text: "第一次自己翻身", authorId: "user:mom", authorName: "mom" });
+    server.use(
+      ...familyHandlers(),
+      http.post("/api/v1/family/babies/{babyId}/records", async ({ request, response }) => {
+        added = await request.json();
+        return response(201).json(written);
+      }),
+    );
+    render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
+    const line = await screen.findByRole("textbox", { name: "写日志" });
+    await userEvent.type(line, "第一次自己翻身");
+    server.use(
+      http.get("/api/v1/family/babies/{babyId}/records", ({ response }) => response(200).json({ records: [written] })),
+    );
+    await userEvent.keyboard("{Control>}{Enter}{/Control}");
+    await waitFor(() =>
+      expect(added).toMatchObject({ kind: "journal", text: "第一次自己翻身", occurredOn: isoDate(new Date()) }),
+    );
+    expect(await screen.findByText("第一次自己翻身", { selector: "blockquote" })).toBeTruthy();
+  });
+
+  it("starts a photo record from files dropped on the channel", async () => {
+    server.use(...familyHandlers());
+    render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
+    const side = await screen.findByRole("complementary", { name: "小米粒的资料" });
+    const channel = side.parentElement!;
+    const clip = new File(["clip"], "clip.mp4", { type: "video/mp4" });
+    const dataTransfer = { files: [clip], types: ["Files"] };
+    fireEvent.dragEnter(channel, { dataTransfer });
+    expect(await screen.findByText(/松开以添加到米米的时间线/)).toBeTruthy();
+    fireEvent.drop(channel, { dataTransfer });
+    const dialog = await screen.findByRole("dialog", { name: "记录照片视频" });
+    expect(within(dialog).getByText("clip.mp4")).toBeTruthy();
   });
 
   it("asks a guardian to add the first baby", async () => {

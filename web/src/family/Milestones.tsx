@@ -74,7 +74,7 @@ export function Milestones({
                 </small>
                 <h3>{entry.title}</h3>
                 {entry.record?.text && <p>{entry.record.text}</p>}
-                <Mosaic photos={photos} />
+                <Mosaic photos={photos} scope={`milestone-${entry.record?.id ?? entry.auto}`} />
                 {entry.auto && !entry.upcoming && !entry.record && (
                   <button
                     type="button"

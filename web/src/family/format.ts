@@ -108,14 +108,11 @@ export interface Band {
   upper?: string;
 }
 
-// assess places a value among a growth standard's percentile curves at an
-// age in months, as the server does; undefined outside the standard's ages.
-export function assess(
-  curve: Array<{ ageMonths: number; values: number[] }>,
-  percentiles: string[],
-  ageMonths: number,
-  value: number,
-): Band | undefined {
+type Curve = Array<{ ageMonths: number; values: number[] }>;
+
+// valuesAt reads a growth standard's percentile values at an age in months,
+// between the table's rows as the server does; undefined outside its ages.
+export function valuesAt(curve: Curve, ageMonths: number): number[] | undefined {
   if (curve.length === 0 || ageMonths < curve[0].ageMonths || ageMonths > curve[curve.length - 1].ageMonths)
     return undefined;
   const after = curve.findIndex((point) => point.ageMonths >= ageMonths);
@@ -123,7 +120,14 @@ export function assess(
   const left = curve[Math.max(0, after - 1)];
   const share =
     right.ageMonths === left.ageMonths ? 0 : (ageMonths - left.ageMonths) / (right.ageMonths - left.ageMonths);
-  const values = left.values.map((low, index) => low + share * (right.values[index] - low));
+  return left.values.map((low, index) => low + share * (right.values[index] - low));
+}
+
+// assess places a value among a growth standard's percentile curves at an
+// age in months, as the server does; undefined outside the standard's ages.
+export function assess(curve: Curve, percentiles: string[], ageMonths: number, value: number): Band | undefined {
+  const values = valuesAt(curve, ageMonths);
+  if (!values) return undefined;
   const above = values.findIndex((reference) => value < reference);
   if (above === -1) return { lower: percentiles[percentiles.length - 1] };
   return { lower: above > 0 ? percentiles[above - 1] : undefined, upper: percentiles[above] };

@@ -1,10 +1,10 @@
-import { Flag, Pause, Play, RotateCcw, Syringe } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Flag, RotateCcw, Syringe } from "lucide-react";
+import { motion } from "motion/react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { relativeTime } from "../lib/time";
 import {
   addComment,
-  audioURL,
   deleteComment,
   deleteRecord,
   type FamilyBaby,
@@ -21,22 +21,33 @@ import type { Draft } from "./Composer";
 import { canDelete, useFamily } from "./context";
 import styles from "./family.module.css";
 import { assess, bandShort, decimal, kindLabels, monthLabel, monthRange, sealText, shortDate, verbs } from "./format";
-import { ItemMenu, MemberFace, Modal, MonthTitle, Mosaic, useMemberName } from "./parts";
+import { ItemMenu, MemberFace, Modal, MonthTitle, Mosaic, scrollerOf, scrollWithin, useMemberName } from "./parts";
+import { QuickJournal } from "./QuickJournal";
+import { ReactionPicker, Reactions, useReact } from "./Reactions";
+import { Scrubber } from "./Scrubber";
+import { Voice } from "./Voice";
 
 // Timeline is the channel's 时间线: every record by the day it happened,
-// grouped by the baby's month of life, the content first.
+// grouped by the baby's month of life, the content first. A journal line
+// at the top writes today's entry; a month ruler beside it jumps through
+// the baby's life; a record just saved is scrolled to and marked.
 export function Timeline({
   baby,
   version,
   growth,
+  fresh,
   onChanged,
+  onAdded,
   onEdit,
   onRecord,
 }: {
   baby: FamilyBaby;
   version: number;
   growth?: FamilyGrowth | null;
+  // fresh is the record just saved, if any.
+  fresh?: string;
   onChanged: () => void;
+  onAdded: (record: FamilyRecord) => void;
   onEdit: (draft: Draft) => void;
   onRecord: (kind: FamilyKind) => void;
 }) {
@@ -46,6 +57,10 @@ export function Timeline({
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState("");
   const [trashOpen, setTrashOpen] = useState(false);
+  const [active, setActive] = useState<number>();
+  const body = useRef<HTMLDivElement>(null);
+  // wanted is a month a jump is still reading older pages for.
+  const wanted = useRef<{ month: number; smooth: boolean } | undefined>(undefined);
 
   useEffect(() => {
     let live = true;
@@ -73,6 +88,7 @@ export function Timeline({
       setRecords((current) => [...(current ?? []), ...page.records]);
       setNext(page.next ?? "");
     } catch (caught) {
+      wanted.current = undefined;
       family.toast({ text: familyError(caught), tone: "error" });
     }
     setLoading(false);
@@ -112,56 +128,118 @@ export function Timeline({
     }
     return groups;
   }, [records]);
+  const filled = useMemo(() => new Set(months.map((group) => group.month)), [months]);
+
+  // The ruler follows the month at the top of the view.
+  useEffect(() => {
+    const container = scrollerOf(body.current);
+    if (!container) return;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const top = container.getBoundingClientRect().top + 48;
+      for (const section of body.current?.querySelectorAll<HTMLElement>("[data-month]") ?? []) {
+        if (section.getBoundingClientRect().bottom > top) {
+          setActive(Number(section.dataset.month));
+          return;
+        }
+      }
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    update();
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(frame);
+    };
+  }, [months]);
+
+  // jump scrolls to a month, or the nearest older one with records,
+  // reading older pages until it has arrived.
+  const jump = (month: number, smooth: boolean) => {
+    const sections = [...(body.current?.querySelectorAll<HTMLElement>("[data-month]") ?? [])];
+    const target = sections.find((section) => Number(section.dataset.month) <= month);
+    if (target) {
+      scrollWithin(target, smooth);
+    } else if (next) {
+      wanted.current = { month, smooth };
+      void more();
+    } else if (sections.length > 0) {
+      scrollWithin(sections[sections.length - 1], smooth);
+    }
+  };
+  const resume = useEffectEvent(() => {
+    const jumpTo = wanted.current;
+    if (!jumpTo || loading) return;
+    wanted.current = undefined;
+    jump(jumpTo.month, jumpTo.smooth);
+  });
+  useEffect(() => {
+    resume();
+  }, [months, loading]);
 
   if (failure) return <p className={styles.fcFailure}>{failure}</p>;
   if (!records) return <span className="loader" aria-label="正在读取时间线" />;
+  const quick = <QuickJournal baby={baby} onAdded={onAdded} onMore={(text) => onEdit({ kind: "journal", text })} />;
   if (records.length === 0)
     return (
-      <div className={styles.fcBlank}>
-        <h2>还没有记录</h2>
-        <button type="button" className={styles.fcPrimary} onClick={() => onRecord("photos")}>
-          上传照片视频
-        </button>
+      <div className={styles.fcTimelineBody}>
+        {quick}
+        <div className={styles.fcBlank}>
+          <h2>还没有记录</h2>
+          <button type="button" className={styles.fcPrimary} onClick={() => onRecord("photos")}>
+            上传照片视频
+          </button>
+        </div>
       </div>
     );
+  const now = baby.age.totalMonths;
   return (
     <div className={styles.fcTimeline}>
-      {months.map((group) => (
-        <section
-          key={`${group.month}-${group.records[0].id}`}
-          className={styles.fcMonth}
-          aria-label={monthLabel(group.month)}
-        >
-          <header className={styles.fcMonthHead}>
-            <h2>
-              <MonthTitle month={group.month} />
-            </h2>
-            {group.month >= 0 && <DayRange days={monthRange(baby.birthDate, group.month)} />}
-          </header>
-          <div className={styles.fcEntries}>
-            {group.records.map((record) => (
-              <Entry
-                key={record.id}
-                record={record}
-                growth={growth}
-                onChanged={replace}
-                onEdit={() => onEdit({ kind: record.kind, record })}
-                onDelete={() => void remove(record)}
-              />
-            ))}
-          </div>
-        </section>
-      ))}
-      <footer className={styles.fcTimelineEnd}>
-        {next && (
-          <button type="button" className={styles.fcSecondary} onClick={() => void more()} disabled={loading}>
-            {loading ? "正在读取…" : "更早的记录"}
+      <div className={styles.fcTimelineBody} ref={body}>
+        {quick}
+        {months.map((group) => (
+          <section
+            key={`${group.month}-${group.records[0].id}`}
+            className={styles.fcMonth}
+            aria-label={monthLabel(group.month)}
+            data-month={group.month}
+          >
+            <header className={styles.fcMonthHead}>
+              <h2>
+                <MonthTitle month={group.month} />
+              </h2>
+              {group.month >= 0 && <DayRange days={monthRange(baby.birthDate, group.month)} />}
+            </header>
+            <div className={styles.fcEntries}>
+              {group.records.map((record) => (
+                <Entry
+                  key={record.id}
+                  record={record}
+                  growth={growth}
+                  fresh={record.id === fresh}
+                  onChanged={replace}
+                  onEdit={() => onEdit({ kind: record.kind, record })}
+                  onDelete={() => void remove(record)}
+                />
+              ))}
+            </div>
+          </section>
+        ))}
+        <footer className={styles.fcTimelineEnd}>
+          {next && (
+            <button type="button" className={styles.fcSecondary} onClick={() => void more()} disabled={loading}>
+              {loading ? "正在读取…" : "更早的记录"}
+            </button>
+          )}
+          <button type="button" className={styles.fcLink} onClick={() => setTrashOpen(true)}>
+            最近删除
           </button>
-        )}
-        <button type="button" className={styles.fcLink} onClick={() => setTrashOpen(true)}>
-          最近删除
-        </button>
-      </footer>
+        </footer>
+      </div>
+      {now >= 2 && <Scrubber now={now} filled={filled} active={active} onJump={jump} />}
       {trashOpen && <TrashDialog baby={baby} onClose={() => setTrashOpen(false)} onRestored={onChanged} />}
     </div>
   );
@@ -177,16 +255,20 @@ function DayRange({ days: [start, end] }: { days: [string, string] }) {
 }
 
 // Entry is one record in the timeline: who and when in a quiet line, then
-// what they recorded, then the comments folded into one line.
+// what they recorded, the reactions, and the comments folded into one line.
+// It rises into place as it scrolls into view; one just saved is scrolled
+// to and marked for a moment.
 function Entry({
   record,
   growth,
+  fresh,
   onChanged,
   onEdit,
   onDelete,
 }: {
   record: FamilyRecord;
   growth?: FamilyGrowth | null;
+  fresh: boolean;
   onChanged: (record: FamilyRecord) => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -194,6 +276,8 @@ function Entry({
   const family = useFamily();
   const nameOf = useMemberName();
   const [talking, setTalking] = useState(false);
+  const element = useRef<HTMLElement>(null);
+  const reactTo = useReact(record, onChanged);
   const author = nameOf(record.authorId, record.authorName);
   const items = [
     ...(record.authorId === family.userId ? [{ label: "编辑", run: onEdit }] : []),
@@ -204,22 +288,38 @@ function Entry({
     record.kind === "photos"
       ? `添加了 ${photos.length} ${photos.every((photo) => photo.video) ? "段视频" : "张照片"}`
       : verbs[record.kind];
+
+  useEffect(() => {
+    if (fresh && element.current) scrollWithin(element.current, true, 0.3);
+  }, [fresh]);
+
   return (
-    <article className={styles.fcEntry}>
+    <motion.article
+      ref={element}
+      className={`${styles.fcEntry} ${fresh ? styles.fresh : ""}`}
+      initial={{ opacity: 0, y: 16 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "0px 0px -24px 0px" }}
+      transition={{ duration: 0.45, ease: [0.2, 0.8, 0.2, 1] }}
+    >
       <div className={styles.fcBy}>
         <MemberFace accountId={record.authorId} username={record.authorName} className={styles.fcFaceTiny} />
         <b>{author.role || author.name}</b>
         <span>{verb}</span>
         <span className={styles.fcDot}>·</span>
         <span>{shortDate(record.occurredOn)}</span>
-        <button type="button" className={styles.fcByAction} onClick={() => setTalking(true)}>
-          留言
-        </button>
-        <ItemMenu label="更多操作" items={items} />
+        <span className={styles.fcByActions}>
+          <ReactionPicker onReact={(name) => void reactTo(name)} />
+          <button type="button" className={styles.fcByAction} onClick={() => setTalking(true)}>
+            留言
+          </button>
+          <ItemMenu label="更多操作" items={items} />
+        </span>
       </div>
       <Body record={record} growth={growth} />
+      <Reactions record={record} onReact={(name) => void reactTo(name)} />
       <Comments record={record} open={talking} onOpen={() => setTalking(true)} onChanged={onChanged} />
-    </article>
+    </motion.article>
   );
 }
 
@@ -230,13 +330,13 @@ function Body({ record, growth }: { record: FamilyRecord; growth?: FamilyGrowth 
       return (
         <>
           <blockquote className={styles.fcQuote}>{record.text}</blockquote>
-          <Mosaic photos={album} />
+          <Mosaic photos={album} scope={record.id} />
         </>
       );
     case "photos":
       return (
         <>
-          <Mosaic photos={album} />
+          <Mosaic photos={album} scope={record.id} />
           {record.text && <p className={styles.fcCaption}>{record.text}</p>}
         </>
       );
@@ -258,7 +358,7 @@ function Body({ record, growth }: { record: FamilyRecord; growth?: FamilyGrowth 
               {record.text && <p>{record.text}</p>}
             </div>
           </div>
-          <Mosaic photos={album} />
+          <Mosaic photos={album} scope={record.id} />
         </>
       );
   }
@@ -323,79 +423,9 @@ function VaccineLine({ record }: { record: FamilyRecord }) {
         </div>
       </div>
       {record.text && <p className={styles.fcCaption}>{record.text}</p>}
-      <Mosaic photos={certificates} limit={3} />
+      <Mosaic photos={certificates} scope={record.id} limit={3} />
     </>
   );
-}
-
-// Voice plays a recording from a quiet pill with a play button and a
-// waveform drawn from the record, which only decorates.
-function Voice({ record }: { record: FamilyRecord }) {
-  const audio = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState(false);
-  const [duration, setDuration] = useState<number>();
-  const [progress, setProgress] = useState(0);
-  const bars = useMemo(() => waveform(record.id), [record.id]);
-  const toggle = () => {
-    const element = audio.current;
-    if (!element) return;
-    if (element.paused) void element.play().catch(() => setPlaying(false));
-    else element.pause();
-  };
-  const time = (seconds?: number) =>
-    seconds === undefined || !Number.isFinite(seconds)
-      ? ""
-      : `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
-  return (
-    <div className={styles.fcVoice}>
-      <button type="button" className={styles.fcPlay} onClick={toggle} aria-label={playing ? "暂停" : "播放录音"}>
-        {playing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
-      </button>
-      <span className={styles.fcWave} aria-hidden="true">
-        {bars.map((height, index) => (
-          <i
-            // biome-ignore lint/suspicious/noArrayIndexKey: the bars are a fixed decoration
-            key={index}
-            style={{ height: `${height}%` }}
-            className={index / bars.length < progress ? styles.played : undefined}
-          />
-        ))}
-      </span>
-      <span className={styles.fcVoiceTitle}>
-        <b>{record.text || record.recording?.fileName || "录音"}</b>
-        <small>{time(duration)}</small>
-      </span>
-      {/* oxlint-disable-next-line jsx-a11y/media-has-caption -- a family's own voice recording has no captions */}
-      <audio
-        ref={audio}
-        preload="metadata"
-        src={audioURL(record.id)}
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => {
-          setPlaying(false);
-          setProgress(0);
-        }}
-        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
-        onTimeUpdate={(event) => {
-          const element = event.currentTarget;
-          if (element.duration) setProgress(element.currentTime / element.duration);
-        }}
-      />
-    </div>
-  );
-}
-
-// waveform draws a recording's bars from its ID, the same each time; they
-// decorate and do not follow the sound.
-function waveform(id: string): number[] {
-  let seed = [...id].reduce((sum, character) => (sum * 31 + character.charCodeAt(0)) >>> 0, 7);
-  const bars: number[] = [];
-  for (let index = 0; index < 28; index++) {
-    seed = (seed * 1103515245 + 12345) >>> 0;
-    bars.push(25 + (seed % 70));
-  }
-  return bars;
 }
 
 // Comments shows the latest two comments in one line, or nothing when there
@@ -450,7 +480,12 @@ function Comments({
     );
   }
   return (
-    <div className={styles.fcThread}>
+    <motion.div
+      className={styles.fcThread}
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+      transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
+    >
       {record.comments.map((comment) => {
         const who = nameOf(comment.authorId, comment.authorName);
         return (
@@ -493,7 +528,7 @@ function Comments({
           发送
         </button>
       </form>
-    </div>
+    </motion.div>
   );
 }
 

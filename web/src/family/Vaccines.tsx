@@ -1,4 +1,5 @@
 import { ChevronDown, ListChecks, Plus } from "lucide-react";
+import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 
 import {
@@ -15,6 +16,7 @@ import { daysUntil, shortDate } from "./format";
 import { Modal } from "./parts";
 
 const done = (dose: FamilyScheduledDose) => dose.status === "given" || dose.status === "replaced";
+const doseKey = (dose: FamilyScheduledDose) => `${dose.code}-${dose.dose}`;
 
 // Vaccines is the channel's 接种本: the national programme's doses and the
 // planned non-programme ones by recommended age, a stamp on each given dose.
@@ -23,11 +25,14 @@ const done = (dose: FamilyScheduledDose) => dose.status === "given" || dose.stat
 export function Vaccines({
   baby,
   schedule,
+  fresh,
   onPlanned,
   onRecord,
 }: {
   baby: FamilyBaby;
   schedule?: FamilyVaccineSchedule | null;
+  // fresh is the record just saved: a dose it gave has its stamp pressed.
+  fresh?: string;
   onPlanned: (schedule: FamilyVaccineSchedule) => void;
   onRecord: (draft: Draft) => void;
 }) {
@@ -98,8 +103,9 @@ export function Vaccines({
             <ul className={styles.fcDoses}>
               {group.doses.map((dose) => (
                 <DoseRow
-                  key={`${dose.code}-${dose.dose}`}
+                  key={doseKey(dose)}
                   dose={dose}
+                  pressed={fresh !== undefined && dose.recordId === fresh}
                   onRecord={() => onRecord({ kind: "vaccine", vaccine: { code: dose.code, dose: dose.dose } })}
                 />
               ))}
@@ -159,19 +165,26 @@ function Tally({ value, label, tone }: { value: number; label: string; tone?: st
   );
 }
 
-// Stamp marks a given dose the way a clinic stamps the paper booklet.
-function Stamp({ date, by }: { date?: string; by?: string }) {
+// Stamp marks a given dose the way a clinic stamps the paper booklet; a
+// pressed one comes down onto the page.
+function Stamp({ date, by, pressed }: { date?: string; by?: string; pressed?: boolean }) {
   return (
     <span className={`${styles.fcStamp} ${by ? styles.replaced : ""}`}>
-      <span className={styles.fcStampSeal} aria-hidden="true">
+      <motion.span
+        className={styles.fcStampSeal}
+        aria-hidden="true"
+        initial={pressed ? { scale: 2.4, opacity: 0, rotate: -40 } : false}
+        animate={{ scale: 1, opacity: 0.85, rotate: -12 }}
+        transition={{ type: "spring", stiffness: 380, damping: 16, delay: pressed ? 0.25 : 0 }}
+      >
         {by ? "替代" : "已种"}
-      </span>
+      </motion.span>
       <small>{by ? `已由${by}完成` : date ? `${shortDate(date)}接种` : "已接种"}</small>
     </span>
   );
 }
 
-function DoseRow({ dose, onRecord }: { dose: FamilyScheduledDose; onRecord: () => void }) {
+function DoseRow({ dose, pressed, onRecord }: { dose: FamilyScheduledDose; pressed: boolean; onRecord: () => void }) {
   const days = daysUntil(dose.dueDate);
   return (
     <li className={`${styles.fcDose} ${styles[dose.status] ?? ""}`}>
@@ -182,9 +195,9 @@ function DoseRow({ dose, onRecord }: { dose: FamilyScheduledDose; onRecord: () =
         </small>
       </span>
       {dose.status === "given" ? (
-        <Stamp date={dose.givenOn} />
+        <Stamp date={dose.givenOn} pressed={pressed} />
       ) : dose.status === "replaced" ? (
-        <Stamp by={dose.replacedBy} />
+        <Stamp by={dose.replacedBy} pressed={pressed} />
       ) : (
         <>
           <span className={styles.fcDoseStatus}>
