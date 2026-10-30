@@ -1105,6 +1105,9 @@ check "the refused Qdrant changes nothing" \
 # --- Web search (ADR 0030): SearXNG under its own account, reached only by the
 # Product Service through its socket, and able to reach public addresses only.
 search_socket=/run/a-nas-search/search.sock
+# The Product Service holds a-nas-search through its unit's SupplementaryGroups,
+# not as a login group of a-nas.
+as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-search "$@"; }
 check "web search runs under its own account" \
   test "$(systemctl is-active anas-search):$(systemctl show -p User --value anas-search)" = active:a-nas-search
 check "web search's runtime is the one the release pins" \
@@ -1112,8 +1115,8 @@ check "web search's runtime is the one the release pins" \
 check "web search's socket is only its group's" \
   test "$(stat -c '%a %U %G' /run/a-nas-search):$(stat -c '%a %U %G' "$search_socket")" = \
   "750 a-nas-search a-nas-search:660 a-nas-search a-nas-search"
-check "the Product Service reaches web search" \
-  quiet as a-nas curl -fsS --unix-socket "$search_socket" http://localhost/healthz
+check "the Product Service's groups reach web search" \
+  quiet as_product curl -fsS --unix-socket "$search_socket" http://localhost/healthz
 check "a member does not reach web search" \
   denied as alice curl -fsS --unix-socket "$search_socket" http://localhost/healthz
 check "web search reads no data volume or Host Agent record" \
@@ -1122,7 +1125,7 @@ if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" != real ]]; then
   # search_probe HOST PORT: what the stand-in, in web search's sandbox, got
   # when it connected there.
   search_probe() {
-    as a-nas curl -fsS --unix-socket "$search_socket" "http://localhost/probe?host=$1&port=$2" | jq -r .result
+    as_product curl -fsS --unix-socket "$search_socket" "http://localhost/probe?host=$1&port=$2" | jq -r .result
   }
   container_address=$(hostname -I | cut -d ' ' -f 1)
   dns_server=$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf)
@@ -1142,14 +1145,31 @@ if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" != real ]]; then
   done
   check "web search follows a new DNS server" test "$(search_probe 192.168.77.53 53)" != denied
   cat /tmp/resolv.conf.before-search > /etc/resolv.conf
+  # The running Product Service, with its own groups and SearXNG's secret.
+  # shellcheck disable=SC2317,SC2329 # invoked through check
+  product_search() {
+    curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+      -d '{"q":"system test","category":"web"}' "$api/api/v1/web-search/query" |
+      jq -e '.results[0].title == "System test: system test" and .unresponsive == ["百度"]' >/dev/null
+  }
+  check "a search reaches the stand-in through the Product Service" product_search
 fi
-# The administrator's switch is this file, which the Host Agent writes; the
-# unit's condition keeps the service stopped across restarts and reinstalls.
-touch /var/lib/a-nas-host/web-search-disabled
+# The administrator's switch: the Host Agent writes its file and stops the
+# service, and the unit's condition keeps it stopped across restarts and
+# reinstalls (checked again after the upgrade below).
+# shellcheck disable=SC2317,SC2329 # invoked through check
+web_search_switch() {
+  curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+    -X PUT -d "{\"enabled\":$1,\"torrents\":false}" "$api/api/v1/web-search"
+}
+check "an administrator turns web search off" web_search_switch false
+check "turning it off stops the service and leaves the Host Agent's file" \
+  test "$(systemctl is-active anas-search || true)" = inactive -a -f /var/lib/a-nas-host/web-search-disabled
 systemctl restart anas-search
 check "web search stays stopped while turned off" test "$(systemctl is-active anas-search || true)" = inactive
-rm -f /var/lib/a-nas-host/web-search-disabled
-systemctl start anas-search
+check "an administrator turns web search on" web_search_switch true
+for _ in $(seq 1 40); do systemctl is-active --quiet anas-search && break; sleep 0.5; done
+check "turning it on starts the service" systemctl is-active --quiet anas-search
 
 # --- Media center (ADR 0017): files are read as the user through the File
 # Broker; FFmpeg runs in a per-connection worker without network, data volume
@@ -1357,12 +1377,18 @@ check "rollback removes the new worker units, socket and tmpfiles configuration"
   -a ! -e /etc/tmpfiles.d/a-nas-ffmpeg.conf
 check "rollback restores legacy client environment and eight admission slots" \
   test "$(grep -c '^ANAS_MEDIA_' /etc/a-nas/anas-api.env):$(grep -c '^ANAS_FFMPEG_' /etc/a-nas/anas-api.env):$(find /run/a-nas-media/slots -type f | wc -l)" = 2:0:8
+# Web search turned off before an upgrade stays off after it.
+touch /var/lib/a-nas-host/web-search-disabled
+systemctl stop anas-search
 stage /tmp/worker-upgrade
 if ! bash /src/scripts/install-v1.0.1-system-services.sh /tmp/worker-upgrade worker-upgrade "$iface" >/tmp/worker-upgrade.log 2>&1; then
   cat /tmp/worker-upgrade.log
   exit 1
 fi
 for _ in $(seq 1 150); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "web search turned off stays off across an upgrade" test "$(systemctl is-active anas-search || true)" = inactive
+rm -f /var/lib/a-nas-host/web-search-disabled
+systemctl start anas-search
 check "upgrade restores a working worker through the new unit and release link" \
   setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
 check "upgrade removes legacy worker units, socket and tmpfiles configuration" \
