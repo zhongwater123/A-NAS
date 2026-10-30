@@ -151,7 +151,7 @@ printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/
 stage() {
   install -d "$1"
   install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh /src/scripts/install-ffmpeg-units.sh "$1/"
-  for unit in anas-api anas-host-agent anas-photos anas-shares; do
+  for unit in anas-api anas-host-agent anas-photos anas-shares anas-family; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
   done
   install -m 0644 /src/deploy/systemd/system/anas.slice "$1/anas-system.slice"
@@ -309,7 +309,7 @@ check "systemd accepts every installed A-NAS unit" \
   verified /etc/systemd/system/anas*.service /etc/systemd/system/anas*.socket /etc/systemd/system/*anas*.slice
 
 # --- Every service runs under its production unit (issue #38).
-check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares smbd
+check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares anas-family smbd
 check "Host Agent keeps CAP_SETUID and CAP_SETGID" has_capabilities anas-host-agent
 check "Host Agent proved it can start workers as users" \
   journal_has anas-host-agent "$installed_at" 'file broker identity switch verified'
@@ -591,11 +591,11 @@ check "nor in the Host Agent's log in Settings" \
 
 # --- A data volume the Host Agent cannot reconcile leaves it serving (issue
 # #166). Btrfs turns a volume read-only when it finds errors; a remount stands
-# in. The photo and share services hold databases open for writing on it,
-# which a read-only remount refuses.
+# in. The photo, share and family services hold databases open for writing
+# on it, which a read-only remount refuses.
 entries /tmp/alice.jar "$alice_private" >/dev/null || true
 scopes_before=$(systemctl list-units --plain --no-legend 'anas-files-*' 'anas-terminal-*' | awk '{print $1}')
-systemctl stop anas-photos anas-shares
+systemctl stop anas-photos anas-shares anas-family
 check "the data volume remounts read-only" mount -o remount,ro "$data"
 readonly_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent
@@ -615,7 +615,7 @@ check "the health check names the read-only data volume" \
 mount -o remount,rw "$data"
 writable_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent
-systemctl start anas-photos anas-shares
+systemctl start anas-photos anas-shares anas-family
 check "once the volume is writable, the Host Agent reconciles it" \
   bash -c "for _ in \$(seq 1 50); do journalctl -u anas-host-agent --since '$writable_at' -o cat --no-pager | grep -Fq 'data volume reconciled' && exit 0; sleep 0.2; done; exit 1"
 check "and reports nothing wrong" \
@@ -774,6 +774,15 @@ check "administrator does not see the member's photo library" \
 check "photo store belongs to the photo service alone" \
   test "$(stat -c '%a %U' "$data/photos")" = "700 a-nas-photos"
 check "Product Service account cannot list the photo store" denied as a-nas ls "$data/photos"
+
+# --- Family center (ADR 0029): its own identity and store; it asks the photo
+# service about a channel's photos with the reader's session.
+check "family store belongs to the family service alone" \
+  test "$(stat -c '%a %U' "$data/family")" = "700 a-nas-family"
+check "Product Service account cannot list the family store" denied as a-nas ls "$data/family"
+check "member founds the family through the family service" \
+  test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+    -d '{"role":"妈妈"}' "$api/api/v1/family/join")" = 200
 
 # --- Local AI is built in (ADR 0016): started on demand, without network or
 # data volume.
@@ -1347,7 +1356,7 @@ check "incomplete rollback stage is rejected before stopping the active socket" 
   denied "$worker_installer" /tmp/nonexistent-worker-release
 check "failed rollback preflight leaves the new worker working" \
   setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
-systemctl stop anas-api anas-photos anas-shares
+systemctl stop anas-api anas-photos anas-shares anas-family
 "$worker_installer" /tmp/worker-legacy
 ln -sfn /opt/a-nas/releases/worker-legacy /opt/a-nas/current
 systemctl enable --now anas-media.socket

@@ -992,7 +992,7 @@ describe("Settings on the desktop", () => {
     );
 
     await user.click(within(settings).getByRole("button", { name: "移除" }));
-    expect(await within(settings).findByText("已移除头像，现在显示名字的第一个字。")).toBeTruthy();
+    expect(await within(settings).findByText("已移除头像，现在显示文字头像。")).toBeTruthy();
     expect(account.querySelector("img")).toBeNull();
     expect(account.textContent).toContain("A");
   });

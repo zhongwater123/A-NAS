@@ -122,3 +122,18 @@ func (e *Executor) ensureOwnedStore(ctx context.Context, directoryName, serviceU
 	}
 	return !created, nil
 }
+
+// EnsureFamilyStore owns the family center's records and recordings
+// (ADR 0029), outside member spaces, like the share store.
+func (e *Executor) EnsureFamilyStore(ctx context.Context) ([]string, error) {
+	if !e.dataVolumeReady() {
+		return nil, nil
+	}
+	e.materializeMu.Lock()
+	defer e.materializeMu.Unlock()
+	drifted, err := e.ensureOwnedStore(ctx, "family", accountid.FamilyServiceUser, accountid.FamilyServiceUID)
+	if drifted {
+		return []string{filepath.Join(e.mountPoint, "family")}, err
+	}
+	return nil, err
+}

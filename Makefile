@@ -163,6 +163,13 @@ ops-check:
 	grep -Fqx 'User=a-nas-shares' deploy/systemd/system/anas-shares.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api share-service' deploy/systemd/system/anas-shares.service
 	grep -Fq 'anas-shares-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fqx 'User=a-nas-family' deploy/systemd/system/anas-family.service
+	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api family-service' deploy/systemd/system/anas-family.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-family.service
+	grep -Fqx 'RuntimeDirectory=a-nas-family' deploy/systemd/system/anas-family.service
+	grep -Fq 'anas-family-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'ANAS_FAMILY_SESSION_GROUP=a-nas-family' scripts/install-v1.0.1-system-services.sh
+	grep -Fq '"/run/a-nas-family/family.sock"' cmd/anas-api/config.go
 	grep -Fqx 'User=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api photo-service' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ReadWritePaths=/srv/a-nas/data' deploy/systemd/system/anas-photos.service
@@ -170,9 +177,9 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'Environment=GOMEMLIMIT=1GiB' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family' deploy/systemd/system/anas-api.service
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectory=a-nas-host' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectoryMode=0700' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'install -d -o root -g root -m 0700 /var/lib/a-nas-host' scripts/install-v1.0.1-system-services.sh

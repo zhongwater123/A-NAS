@@ -39,4 +39,5 @@ func TestShellResponsesKeepToTheContract(t *testing.T) {
 	alice.do(http.MethodGet, "/api/v1/profiles", "", nil, http.StatusOK)
 	alice.do(http.MethodGet, "/api/v1/wallpaper", "", nil, http.StatusOK)
 	alice.do(http.MethodGet, "/api/v1/local-display", "", nil, http.StatusOK)
+	alice.do(http.MethodGet, "/api/v1/family/hints", "", nil, http.StatusOK)
 }

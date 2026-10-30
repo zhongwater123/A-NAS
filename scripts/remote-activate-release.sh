@@ -89,6 +89,7 @@ install -m 0644 anas-api-system.service.incoming anas-api-system.service
 install -m 0644 anas-host-agent-system.service.incoming anas-host-agent-system.service
 install -m 0644 anas-photos-system.service.incoming anas-photos-system.service
 install -m 0644 anas-shares-system.service.incoming anas-shares-system.service
+install -m 0644 anas-family-system.service.incoming anas-family-system.service
 install -m 0750 install-v1.0.1-system-services.sh.incoming install-v1.0.1-system-services.sh
 install -m 0750 provision-v1.0.1-rc.sh.incoming provision-v1.0.1-rc.sh
 install -m 0750 install-screensavers.sh.incoming install-screensavers.sh
@@ -188,6 +189,7 @@ rm -f \
   anas-host-agent-system.service.incoming \
   anas-photos-system.service.incoming \
   anas-shares-system.service.incoming \
+  anas-family-system.service.incoming \
   install-v1.0.1-system-services.sh.incoming \
   provision-v1.0.1-rc.sh.incoming \
   install-screensavers.sh.incoming \

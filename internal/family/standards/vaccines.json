@@ -1,0 +1,200 @@
+{
+  "version": "2026",
+  "title": "国家免疫规划疫苗儿童免疫程序及说明（2026年版）",
+  "source": "国家疾控局、国家卫生健康委《国家免疫规划疫苗儿童免疫程序及说明（2026年版）》（国疾控卫免发〔2026〕16号）；非免疫规划疫苗的程序参考《贵州省非免疫规划疫苗接种方案（2024年版）》，各产品以说明书为准。实际接种以当地接种门诊的安排为准。",
+  "vaccines": [
+    {
+      "code": "hepb", "name": "乙肝疫苗", "programme": true,
+      "doses": [
+        { "dose": 1, "ageMonths": 0, "ageLabel": "出生时" },
+        { "dose": 2, "ageMonths": 1, "ageLabel": "1月龄" },
+        { "dose": 3, "ageMonths": 6, "ageLabel": "6月龄" }
+      ]
+    },
+    {
+      "code": "bcg", "name": "卡介苗", "programme": true,
+      "doses": [{ "dose": 1, "ageMonths": 0, "ageLabel": "出生时" }]
+    },
+    {
+      "code": "polio", "name": "脊灰疫苗", "programme": true,
+      "note": "第 1、2 剂为脊灰灭活疫苗（IPV），第 3、4 剂为二价脊灰减毒活疫苗（bOPV）；已按程序完成 4 剂含 IPV 成分疫苗的，无需再接种 bOPV。",
+      "doses": [
+        { "dose": 1, "ageMonths": 2, "ageLabel": "2月龄" },
+        { "dose": 2, "ageMonths": 3, "ageLabel": "3月龄" },
+        { "dose": 3, "ageMonths": 4, "ageLabel": "4月龄" },
+        { "dose": 4, "ageMonths": 48, "ageLabel": "4周岁" }
+      ]
+    },
+    {
+      "code": "dtap", "name": "百白破疫苗", "programme": true,
+      "note": "2025 年 1 月起改为 2、4、6、18 月龄和 6 周岁各 1 剂；6 周岁不再接种白破疫苗。",
+      "doses": [
+        { "dose": 1, "ageMonths": 2, "ageLabel": "2月龄" },
+        { "dose": 2, "ageMonths": 4, "ageLabel": "4月龄" },
+        { "dose": 3, "ageMonths": 6, "ageLabel": "6月龄" },
+        { "dose": 4, "ageMonths": 18, "ageLabel": "18月龄" },
+        { "dose": 5, "ageMonths": 72, "ageLabel": "6周岁" }
+      ]
+    },
+    {
+      "code": "mmr", "name": "麻腮风疫苗", "programme": true,
+      "doses": [
+        { "dose": 1, "ageMonths": 8, "ageLabel": "8月龄" },
+        { "dose": 2, "ageMonths": 18, "ageLabel": "18月龄" }
+      ]
+    },
+    {
+      "code": "je-l", "name": "乙脑减毒活疫苗", "programme": true, "group": "je",
+      "note": "各地选用乙脑减毒活疫苗（2 剂）或乙脑灭活疫苗（4 剂）其中一种程序。",
+      "doses": [
+        { "dose": 1, "ageMonths": 8, "ageLabel": "8月龄" },
+        { "dose": 2, "ageMonths": 24, "ageLabel": "2周岁" }
+      ]
+    },
+    {
+      "code": "je-i", "name": "乙脑灭活疫苗", "programme": true, "group": "je",
+      "note": "各地选用乙脑减毒活疫苗（2 剂）或乙脑灭活疫苗（4 剂）其中一种程序；8 月龄的 2 剂间隔 7—10 天。",
+      "doses": [
+        { "dose": 1, "ageMonths": 8, "ageLabel": "8月龄" },
+        { "dose": 2, "ageMonths": 8, "ageLabel": "8月龄（第1剂后7—10天）" },
+        { "dose": 3, "ageMonths": 24, "ageLabel": "2周岁" },
+        { "dose": 4, "ageMonths": 72, "ageLabel": "6周岁" }
+      ]
+    },
+    {
+      "code": "men", "name": "流脑疫苗", "programme": true,
+      "note": "第 1、2 剂为 A 群流脑多糖疫苗（MPSV-A），第 3、4 剂为 A 群 C 群流脑多糖疫苗（MPSV-AC）。",
+      "doses": [
+        { "dose": 1, "ageMonths": 6, "ageLabel": "6月龄" },
+        { "dose": 2, "ageMonths": 9, "ageLabel": "9月龄" },
+        { "dose": 3, "ageMonths": 36, "ageLabel": "3周岁" },
+        { "dose": 4, "ageMonths": 72, "ageLabel": "6周岁" }
+      ]
+    },
+    {
+      "code": "hepa-l", "name": "甲肝减毒活疫苗", "programme": true, "group": "hepa",
+      "note": "各地选用甲肝减毒活疫苗（1 剂）或甲肝灭活疫苗（2 剂）其中一种程序。",
+      "doses": [{ "dose": 1, "ageMonths": 18, "ageLabel": "18月龄" }]
+    },
+    {
+      "code": "hepa-i", "name": "甲肝灭活疫苗", "programme": true, "group": "hepa",
+      "note": "各地选用甲肝减毒活疫苗（1 剂）或甲肝灭活疫苗（2 剂）其中一种程序。",
+      "doses": [
+        { "dose": 1, "ageMonths": 18, "ageLabel": "18月龄" },
+        { "dose": 2, "ageMonths": 24, "ageLabel": "2周岁" }
+      ]
+    },
+    {
+      "code": "hpv", "name": "双价HPV疫苗", "programme": true,
+      "note": "仅 13 周岁女孩，2 剂间隔 6 个月；已按说明书完成任何价次 HPV 疫苗全程接种的无需再接种。",
+      "doses": [
+        { "dose": 1, "ageMonths": 156, "ageLabel": "13周岁", "sex": "female" },
+        { "dose": 2, "ageMonths": 162, "ageLabel": "第1剂后6个月", "sex": "female" }
+      ]
+    },
+    {
+      "code": "dtap-ipv-hib", "name": "五联疫苗（百白破-脊灰-Hib）", "programme": false, "covers": ["dtap", "polio"],
+      "note": "按说明书接种可视为完成百白破、脊灰疫苗的相应剂次；6 周岁的第 5 剂百白破仍按免疫规划接种。",
+      "doses": [
+        { "dose": 1, "ageMonths": 2, "ageLabel": "2月龄" },
+        { "dose": 2, "ageMonths": 3, "ageLabel": "3月龄" },
+        { "dose": 3, "ageMonths": 4, "ageLabel": "4月龄" },
+        { "dose": 4, "ageMonths": 18, "ageLabel": "18月龄" }
+      ]
+    },
+    {
+      "code": "dtap-hib", "name": "四联疫苗（百白破-Hib）", "programme": false, "covers": ["dtap"],
+      "note": "按说明书接种可视为完成百白破疫苗的相应剂次；6 周岁的第 5 剂百白破仍按免疫规划接种。",
+      "doses": [
+        { "dose": 1, "ageMonths": 3, "ageLabel": "3月龄" },
+        { "dose": 2, "ageMonths": 4, "ageLabel": "4月龄" },
+        { "dose": 3, "ageMonths": 5, "ageLabel": "5月龄" },
+        { "dose": 4, "ageMonths": 18, "ageLabel": "18月龄" }
+      ]
+    },
+    {
+      "code": "ipv-paid", "name": "脊灰灭活疫苗（自费）", "programme": false, "covers": ["polio"],
+      "note": "按说明书接种可视为完成脊灰疫苗的相应剂次；完成 4 剂后 4 周岁无需再接种 bOPV。",
+      "doses": [
+        { "dose": 1, "ageMonths": 2, "ageLabel": "2月龄" },
+        { "dose": 2, "ageMonths": 3, "ageLabel": "3月龄" },
+        { "dose": 3, "ageMonths": 4, "ageLabel": "4月龄" },
+        { "dose": 4, "ageMonths": 18, "ageLabel": "18月龄" }
+      ]
+    },
+    {
+      "code": "hib", "name": "Hib疫苗", "programme": false,
+      "note": "程序因起始月龄和产品而异，以说明书为准。",
+      "doses": [
+        { "dose": 1, "ageMonths": 2, "ageLabel": "2月龄" },
+        { "dose": 2, "ageMonths": 3, "ageLabel": "3月龄" },
+        { "dose": 3, "ageMonths": 4, "ageLabel": "4月龄" },
+        { "dose": 4, "ageMonths": 18, "ageLabel": "18月龄" }
+      ]
+    },
+    {
+      "code": "pcv13", "name": "13价肺炎疫苗", "programme": false,
+      "note": "6 周龄至 6 月龄起始为 3 剂基础免疫、12—15 月龄加强 1 剂；不同产品程序不同，以说明书为准。",
+      "doses": [
+        { "dose": 1, "ageMonths": 2, "ageLabel": "2月龄" },
+        { "dose": 2, "ageMonths": 4, "ageLabel": "4月龄" },
+        { "dose": 3, "ageMonths": 6, "ageLabel": "6月龄" },
+        { "dose": 4, "ageMonths": 12, "ageLabel": "12月龄" }
+      ]
+    },
+    {
+      "code": "men-ac-conj", "name": "A群C群流脑结合疫苗", "programme": false, "covers": ["men"], "coversUpTo": 2,
+      "note": "小于 24 月龄按说明书完成全程的，可视为完成 2 剂 A 群流脑多糖疫苗；剂次因起始月龄和产品而异。",
+      "doses": [
+        { "dose": 1, "ageMonths": 3, "ageLabel": "3月龄" },
+        { "dose": 2, "ageMonths": 4, "ageLabel": "4月龄" },
+        { "dose": 3, "ageMonths": 5, "ageLabel": "5月龄" }
+      ]
+    },
+    {
+      "code": "men-acyw-conj", "name": "ACYW135流脑结合疫苗", "programme": false, "covers": ["men"], "coversUpTo": 2,
+      "note": "小于 24 月龄按说明书完成全程的，可视为完成 2 剂 A 群流脑多糖疫苗；3—5 月龄起始为 3 剂基础免疫、12 月龄加强 1 剂。",
+      "doses": [
+        { "dose": 1, "ageMonths": 3, "ageLabel": "3月龄" },
+        { "dose": 2, "ageMonths": 4, "ageLabel": "4月龄" },
+        { "dose": 3, "ageMonths": 5, "ageLabel": "5月龄" },
+        { "dose": 4, "ageMonths": 12, "ageLabel": "12月龄" }
+      ]
+    },
+    {
+      "code": "rotavirus", "name": "五价轮状病毒疫苗", "programme": false,
+      "note": "口服 3 剂，6—12 周龄服第 1 剂，各剂间隔 4—10 周，第 3 剂不晚于 32 周龄。",
+      "doses": [
+        { "dose": 1, "ageMonths": 2, "ageLabel": "2月龄" },
+        { "dose": 2, "ageMonths": 3, "ageLabel": "3月龄" },
+        { "dose": 3, "ageMonths": 4, "ageLabel": "4月龄" }
+      ]
+    },
+    {
+      "code": "varicella", "name": "水痘疫苗", "programme": false,
+      "note": "12 月龄至 3 周岁接种第 1 剂，4—6 周岁接种第 2 剂；部分省份已纳入地方免疫规划。",
+      "doses": [
+        { "dose": 1, "ageMonths": 12, "ageLabel": "12月龄" },
+        { "dose": 2, "ageMonths": 48, "ageLabel": "4周岁" }
+      ]
+    },
+    {
+      "code": "ev71", "name": "EV71疫苗（手足口）", "programme": false,
+      "note": "6—71 月龄接种 2 剂，间隔 1 个月；只预防 EV71 引起的手足口病。",
+      "doses": [
+        { "dose": 1, "ageMonths": 6, "ageLabel": "6月龄" },
+        { "dose": 2, "ageMonths": 7, "ageLabel": "7月龄" }
+      ]
+    },
+    {
+      "code": "influenza", "name": "流感疫苗", "programme": false,
+      "note": "6 月龄以上每年流行季前接种；首次接种的 6 月龄至 8 岁儿童需 2 剂，间隔至少 4 周。",
+      "doses": []
+    },
+    {
+      "code": "rabies", "name": "狂犬病疫苗", "programme": false,
+      "note": "暴露后按医生的处置接种。",
+      "doses": []
+    }
+  ]
+}
