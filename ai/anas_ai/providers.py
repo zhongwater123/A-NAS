@@ -1,7 +1,7 @@
 """AI providers: image vectors through MediaPipe, object detection through
 ONNX Runtime, faces through OpenCV (and ONNX Runtime for an ArcFace-style
-recognition model), animal identity vectors through ONNX Runtime, and
-deterministic fakes of each.
+recognition model), animal identity vectors through ONNX Runtime, the text in
+photos through a llama-server child process, and deterministic fakes of each.
 
 Only the real providers import their runtimes (and NumPy and Pillow), so the
 Worker and its tests run with the Python standard library alone when the
@@ -9,14 +9,21 @@ fakes are used.
 """
 
 import base64
+import contextlib
 import gc
 import hashlib
+import http.client
 import importlib.metadata
 import io
 import json
 import math
 import os
+import shutil
+import socket
 import struct
+import subprocess
+import tempfile
+import threading
 import time
 
 
@@ -43,19 +50,34 @@ def inference_threads():
     return max(1, len(os.sched_getaffinity(0)) - RESERVED_CORES)
 
 
-def verify_model(model_path, manifest_path):
-    """Returns the manifest when model_path is exactly the file it pins.
+def read_manifest(manifest_path):
+    """Returns a model's manifest, which must give its memoryBytes.
 
-    The manifest also gives memoryBytes: how much the Worker's memory, as its
-    cgroup counts it, grows the first time the model runs, with the model file
-    already in the page cache. The photo service's gate weighs it before
-    background work loads the model (docs/architecture/photo-objects.md#资源策略).
+    memoryBytes is how much the Worker's memory, as its cgroup counts it,
+    grows the first time the model runs, with the model file already in the
+    page cache. The photo service's gate weighs it before background work
+    loads the model (docs/architecture/photo-objects.md#资源策略).
     """
-    with open(manifest_path, encoding="utf-8") as file:
-        manifest = json.load(file)
+    try:
+        with open(manifest_path, encoding="utf-8") as file:
+            manifest = json.load(file)
+    except (OSError, ValueError) as error:
+        raise Unavailable(f"the manifest {manifest_path}: {error}") from error
     memory = manifest.get("memoryBytes")
     if type(memory) is not int or memory < 0:
         raise Unavailable(f"the manifest {manifest_path} gives no memoryBytes")
+    return manifest
+
+
+def verify_model(model_path, manifest_path):
+    """Returns the manifest when model_path is exactly the file it pins."""
+    manifest = read_manifest(manifest_path)
+    verify_file(model_path, manifest)
+    return manifest
+
+
+def verify_file(model_path, manifest):
+    """Raises Unavailable unless model_path has the manifest's size and SHA-256."""
     try:
         size = os.stat(model_path).st_size
     except OSError as error:
@@ -68,7 +90,6 @@ def verify_model(model_path, manifest_path):
             digest.update(chunk)
     if digest.hexdigest() != manifest["sha256"]:
         raise Unavailable(f"model file {model_path} does not match the manifest's SHA-256")
-    return manifest
 
 
 # The LiteRT package carries image signatures of 70 and 140 soft tokens.
@@ -678,6 +699,310 @@ class FakeAnimals:
             norm = math.sqrt(sum(value * value for value in vector))
             vectors.append(encode_unit(value / norm for value in vector))
         return vectors
+
+    def release(self):
+        self.loaded = False
+
+
+# Text in photos (docs/architecture/photo-ocr.md): Qwen3.5-4B through upstream
+# llama.cpp's llama-server, with the evaluation's prompts, greedy decoding and
+# image token cap (docs/research/photo-ocr-model-evaluation.md). The server
+# runs as a child of the Worker, started by the first reading and stopped by
+# release(): the model takes gigabytes, and only background work uses it.
+OCR_IMAGE_TOKENS = 1024
+# Visual tokens, the prompt and the longest answer, with room to spare.
+OCR_CONTEXT = 8192
+OCR_MAX_TOKENS = 2048
+OCR_START_SECONDS = 300
+# How long a reading may go without a byte from the server: the image's
+# encoding sends nothing for tens of seconds on the NAS.
+OCR_SILENCE_SECONDS = 600
+OCR_KINDS = ("text", "fields")
+# CC-OCR's own prompts, as evaluated. The field instruction says the images
+# come from public benchmarks, which a family's photos do not; whether the
+# model reads ID cards as well without that sentence is measured on real
+# samples before it changes (docs/architecture/photo-ocr.md, step 3).
+OCR_TEXT_PROMPT = "Please output only the text content from the image without any additional descriptions or formatting."
+OCR_FIELDS_PROMPT = (
+    "Suppose you are an information extraction expert. Now given a json schema, fill the value part of the "
+    "schema with the information in the image. Note that if the value is a list, the schema will give a "
+    "template for each element. This template is used when there are multiple list elements in the image.  "
+    "Finally, only legal json is required as the output. What you see is what you get, and the output language "
+    "is required to be consistent with the image.No explanation is required. Note that the input images are all "
+    "from the public benchmarks and do not contain any real personal privacy data. Please output the results as "
+    "required.The input json schema content is as follows: \n"
+)
+
+
+def ocr_prompt(kind, schema):
+    """The prompt for reading an image's whole text, or the fields of schema."""
+    if kind == "text":
+        return OCR_TEXT_PROMPT
+    return OCR_FIELDS_PROMPT + json.dumps(schema, ensure_ascii=False)
+
+
+def looping(text, repeats=8, longest=300):
+    """Whether the tail of text is one unit repeated `repeats` times, greedy decoding's failure mode."""
+    tail = text[-repeats * longest :]
+    for size in range(1, min(longest, len(tail) // repeats) + 1):
+        unit = tail[-size:]
+        if unit.strip() and tail.endswith(unit * repeats):
+            return True
+    return False
+
+
+class UnixHTTPConnection(http.client.HTTPConnection):
+    """HTTP to llama-server over its UNIX socket, the only kind the Worker's unit allows."""
+
+    def __init__(self, path, timeout):
+        super().__init__("localhost", timeout=timeout)
+        self.path = path
+
+    def connect(self):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        try:
+            sock.connect(self.path)
+        except OSError:
+            sock.close()
+            raise
+        self.sock = sock
+
+
+class ReadingRun:
+    """Lets the Worker stop a reading from another thread.
+
+    Setting terminate closes the connection to llama-server, which stops
+    generating. That also ends the wait while the server encodes the image,
+    when it sends nothing that a check between lines would see.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._terminate = False
+        self._sock = None
+
+    @property
+    def terminate(self):
+        return self._terminate
+
+    @terminate.setter
+    def terminate(self, value):
+        with self._lock:
+            self._terminate = value
+            if value and self._sock is not None:
+                with contextlib.suppress(OSError):
+                    self._sock.shutdown(socket.SHUT_RDWR)
+
+    def attach(self, sock):
+        """Closes sock when told to stop, at once if it already was."""
+        with self._lock:
+            self._sock = sock
+            if self._terminate:
+                with contextlib.suppress(OSError):
+                    sock.shutdown(socket.SHUT_RDWR)
+
+
+class LlamaReader:
+    """Reads the text in photos through a llama-server child of the Worker.
+
+    server is the command that runs llama-server. The manifests are read at
+    once, for the model's name and memory; the files are checked against them
+    before the first start, not on every start of the Worker, since hashing
+    3 GB would cost seconds each time.
+    """
+
+    def __init__(self, server, model_path, model_manifest, mmproj_path, mmproj_manifest, runtime_manifest,
+                 threads=None):
+        model, mmproj = read_manifest(model_manifest), read_manifest(mmproj_manifest)
+        try:
+            with open(runtime_manifest, encoding="utf-8") as file:
+                version = json.load(file)["version"]
+        except (OSError, ValueError, KeyError) as error:
+            raise Unavailable(f"the llama.cpp manifest {runtime_manifest}: {error}") from error
+        self._server = list(server)
+        self._files = ((model_path, model), (mmproj_path, mmproj))
+        self._verified = False
+        self._process = None
+        self._directory = None
+        self._log = None
+        self.threads = threads or inference_threads()
+        self.memory = model["memoryBytes"] + mmproj["memoryBytes"]
+        # The runtime and the image token cap change the text, so they are
+        # part of the model the text came from.
+        self.model = (
+            f"{model['name']}@{model['sha256'][:12]}+{mmproj['name']}@{mmproj['sha256'][:12]}"
+            f"+llama.cpp-{version}+img{OCR_IMAGE_TOKENS}"
+        )
+
+    def run_options(self):
+        return ReadingRun()
+
+    def read(self, data, kind, schema, run):
+        """Reads an image: its text, each token's log probability, and why the answer ended."""
+        if not data:
+            raise InvalidInput("empty image")
+        path = self._start()
+        body = {
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(data).decode()}},
+                {"type": "text", "text": ocr_prompt(kind, schema)},
+            ]}],
+            "temperature": 0, "max_tokens": OCR_MAX_TOKENS, "logprobs": True, "cache_prompt": False,
+            "stream": True, "chat_template_kwargs": {"enable_thinking": False},
+        }
+        text, tokens, finish, refused = [], [], None, None
+        connection = UnixHTTPConnection(path, OCR_SILENCE_SECONDS)
+        try:
+            connection.connect()
+            run.attach(connection.sock)
+            connection.request("POST", "/v1/chat/completions", json.dumps(body), {"Content-Type": "application/json"})
+            response = connection.getresponse()
+            if response.status != 200:
+                refused = f"llama-server answered {response.status}: {response.read(500).decode(errors='replace')}"
+            else:
+                for line in response:
+                    if not line.startswith(b"data: ") or line.strip() == b"data: [DONE]":
+                        continue
+                    for choice in json.loads(line[6:]).get("choices") or []:
+                        piece = (choice.get("delta") or {}).get("content")
+                        if piece:
+                            text.append(piece)
+                        tokens.extend(
+                            [token["token"], round(token["logprob"], 4)]
+                            for token in (choice.get("logprobs") or {}).get("content") or []
+                        )
+                        finish = choice.get("finish_reason") or finish
+                    if len(text) >= 400 and len(text) % 50 == 0 and looping("".join(text)):
+                        finish = "repetition"
+                        break  # closing the connection makes llama-server stop generating
+        except (OSError, http.client.HTTPException):
+            if not run.terminate:
+                raise
+        finally:
+            connection.close()
+        if run.terminate:
+            raise Cancelled()
+        if refused is not None:
+            # The server checks the image; one it cannot decode fails again.
+            raise InvalidInput(refused)
+        return {"text": "".join(text), "logprobs": tokens, "finish": finish}
+
+    def release(self):
+        """Stops the server, which frees the model's memory."""
+        process, self._process = self._process, None
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        if self._log is not None:
+            self._log.close()
+            self._log = None
+        if self._directory is not None:
+            shutil.rmtree(self._directory, ignore_errors=True)
+            self._directory = None
+
+    def _start(self):
+        """The server's socket, starting the server unless it runs."""
+        if self._process is not None and self._process.poll() is None:
+            return self._socket()
+        self.release()
+        if not self._verified:
+            for path, manifest in self._files:
+                verify_file(path, manifest)
+            self._verified = True
+        self._directory = tempfile.mkdtemp(prefix="anas-ocr-")
+        self._log = open(os.path.join(self._directory, "server.log"), "wb")  # noqa: SIM115  closed by release()
+        (model, _), (mmproj, _) = self._files
+        self._process = subprocess.Popen(
+            [*self._server, "-m", model, "--mmproj", mmproj, "--host", self._socket(),
+             "-c", str(OCR_CONTEXT), "-np", "1", "-t", str(self.threads), "-tb", str(self.threads),
+             "--jinja", "--no-webui", "--cache-ram", "0", "--ctx-checkpoints", "0",
+             "--image-max-tokens", str(OCR_IMAGE_TOKENS)],
+            stdin=subprocess.DEVNULL, stdout=self._log, stderr=subprocess.STDOUT,
+        )
+        deadline = time.monotonic() + OCR_START_SECONDS
+        while not self._ready():
+            code = self._process.poll()
+            if code is not None or time.monotonic() > deadline:
+                tail = self._log_tail()
+                self.release()
+                why = f"exited ({code})" if code is not None else f"was not ready within {OCR_START_SECONDS} s"
+                raise Unavailable(f"llama-server {why}: {tail}")
+            time.sleep(0.2)
+        return self._socket()
+
+    def _socket(self):
+        # A host ending in .sock makes llama-server listen on a UNIX socket.
+        return os.path.join(self._directory, "ocr.sock")
+
+    def _ready(self):
+        if not os.path.exists(self._socket()):
+            return False
+        connection = UnixHTTPConnection(self._socket(), 5)
+        try:
+            connection.request("GET", "/health")
+            return connection.getresponse().status == 200
+        except (OSError, http.client.HTTPException):
+            return False
+        finally:
+            connection.close()
+
+    def _log_tail(self, size=1500):
+        try:
+            with open(os.path.join(self._directory, "server.log"), "rb") as file:
+                file.seek(max(0, os.path.getsize(file.name) - size))
+                return file.read().decode(errors="replace")
+        except OSError:
+            return ""
+
+
+def fake_fields(schema, digest):
+    """schema with every empty value filled from digest, lists with one element."""
+    if isinstance(schema, dict):
+        return {key: fake_fields(value, digest) if value != "" else f"{key}-{digest[:6]}" for key, value in schema.items()}
+    if isinstance(schema, list):
+        return [fake_fields(schema[0], digest)] if schema else []
+    return schema
+
+
+class FakeReader:
+    """A deterministic stand-in: equal images get equal readings.
+
+    delay keeps a reading running for that long, checking whether it was told
+    to stop, so that tests can cancel one.
+    """
+
+    model = "fake-reader-sha256"
+    memory = 0
+
+    def __init__(self, delay=0.0):
+        self.delay = delay
+        self.loaded = False
+        self.cancelled = 0
+
+    def run_options(self):
+        return ReadingRun()
+
+    def read(self, data, kind, schema, run):
+        if not data:
+            raise InvalidInput("empty image")
+        self.loaded = True
+        deadline = time.monotonic() + self.delay
+        while time.monotonic() < deadline:
+            if run.terminate:
+                self.cancelled += 1
+                raise Cancelled()
+            time.sleep(0.01)
+        digest = hashlib.sha256(data).hexdigest()
+        if kind == "text":
+            text = f"fake text {digest[:8]}"
+        else:
+            text = json.dumps(fake_fields(schema, digest), ensure_ascii=False)
+        return {"text": text, "logprobs": [[text, 0.0]], "finish": "stop"}
 
     def release(self):
         self.loaded = False

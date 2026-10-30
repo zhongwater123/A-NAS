@@ -2,8 +2,10 @@
 
     python3 -m anas_ai.worker --model FILE --manifest FILE [--detector FILE --detector-manifest FILE]
         [--face-detector FILE --face-detector-manifest FILE --face-embedder FILE --face-embedder-manifest FILE]
-        [--animal-embedder FILE --animal-embedder-manifest FILE] [--socket PATH]
-    python3 -m anas_ai.worker --fake [--fake-detector] [--fake-faces] [--fake-animals] [--socket PATH]
+        [--animal-embedder FILE --animal-embedder-manifest FILE]
+        [--ocr-server FILE --ocr-runtime-manifest FILE --ocr-model FILE --ocr-model-manifest FILE
+         --ocr-mmproj FILE --ocr-mmproj-manifest FILE] [--socket PATH]
+    python3 -m anas_ai.worker --fake [--fake-detector] [--fake-faces] [--fake-animals] [--fake-reader] [--socket PATH]
 
 Under systemd socket activation the listener arrives as descriptor 3 and
 --socket is not needed. The Worker serves one connection at a time and exits
@@ -11,9 +13,10 @@ after IDLE_SECONDS without one, or when told to release everything, releasing
 the models' memory; systemd starts it again on the next connection.
 
 The image vector model is needed for search, so without it the Worker answers
-"unavailable" to everything. The object detector, the face models and the
-animal model only serve background work: without one, only its operation is
-unavailable.
+"unavailable" to everything. The object detector, the face models, the animal
+model and the text reader only serve background work: without one, only its
+operation is unavailable. The text reader runs llama-server as a child, which
+release and the Worker's exit stop.
 """
 
 import argparse
@@ -43,7 +46,7 @@ log = logging.getLogger("anas-ai")
 
 
 class Detector:
-    """A background model (the object detector, the face or the animal models), or why there is none."""
+    """A background model (the object detector, the face or animal models, the text reader), or why there is none."""
 
     def __init__(self, provider=None, reason=None):
         self.provider = provider
@@ -79,7 +82,7 @@ def started_memory():
 
 
 def serve(listener, provider, unavailable_reason=None, idle_seconds=IDLE_SECONDS, detector=None, faces=None,
-          animals=None, started=0):
+          animals=None, started=0, reader=None):
     """Answers connections until none arrives for idle_seconds or one asks it to release everything.
 
     started is what the Worker held before serving, which info adds to its models' memory.
@@ -87,6 +90,7 @@ def serve(listener, provider, unavailable_reason=None, idle_seconds=IDLE_SECONDS
     detector = detector or Detector(reason="no object detector")
     faces = faces or Detector(reason="no face models")
     animals = animals or Detector(reason="no animal model")
+    reader = reader or Detector(reason="no text reader")
     listener.settimeout(idle_seconds)
     while True:
         try:
@@ -96,12 +100,12 @@ def serve(listener, provider, unavailable_reason=None, idle_seconds=IDLE_SECONDS
             return
         with conn:
             conn.settimeout(None)
-            if handle(conn, provider, unavailable_reason, detector, faces, animals, started):
+            if handle(conn, provider, unavailable_reason, detector, faces, animals, started, reader):
                 log.info("released everything; exiting")
                 return
 
 
-def handle(conn, provider, unavailable_reason, detector, faces=None, animals=None, started=0):
+def handle(conn, provider, unavailable_reason, detector, faces=None, animals=None, started=0, reader=None):
     """Answers one request; returns whether the Worker should exit."""
     try:
         request, fds = protocol.read_request(conn)
@@ -109,7 +113,7 @@ def handle(conn, provider, unavailable_reason, detector, faces=None, animals=Non
         log.warning("dropped a malformed request: %s", error)
         return False
     try:
-        response = respond(request, fds, provider, unavailable_reason, detector, conn, faces, animals, started)
+        response = respond(request, fds, provider, unavailable_reason, detector, conn, faces, animals, started, reader)
     finally:
         for fd in fds:
             os.close(fd)
@@ -122,10 +126,12 @@ def handle(conn, provider, unavailable_reason, detector, faces=None, animals=Non
     return request.get("op") == protocol.OP_RELEASE and request.get("what") == "all" and response["ok"]
 
 
-def respond(request, fds, provider, unavailable_reason, detector, conn=None, faces=None, animals=None, started=0):
+def respond(request, fds, provider, unavailable_reason, detector, conn=None, faces=None, animals=None, started=0,
+            reader=None):
     """The response to request, or None when the caller hung up before it was ready."""
     faces = faces or Detector(reason="no face models")
     animals = animals or Detector(reason="no animal model")
+    reader = reader or Detector(reason="no text reader")
     if unavailable_reason is not None:
         return protocol.failure(protocol.CODE_UNAVAILABLE, unavailable_reason)
     op = request.get("op")
@@ -139,6 +145,12 @@ def respond(request, fds, provider, unavailable_reason, detector, conn=None, fac
             fields["faceModel"] = faces.provider.model
         if animals.provider is not None:
             fields["animalModel"] = animals.provider.model
+        if reader.provider is not None:
+            # Reading text is a phase of its own, after the other models are
+            # released, so its memory is not added to theirs
+            # (docs/architecture/photo-ocr.md#资源策略).
+            fields["ocrModel"] = reader.provider.model
+            fields["ocrMemoryBytes"] = started + reader.provider.memory
         return protocol.ok(**fields)
     if op == protocol.OP_EMBED_IMAGE:
         if len(fds) != 1:
@@ -169,11 +181,21 @@ def respond(request, fds, provider, unavailable_reason, detector, conn=None, fac
             return protocol.failure(protocol.CODE_INVALID_INPUT, "embed_animals needs one image descriptor and "
                                     f"1 to {providers.MAX_ANIMALS} boxes of fractions")
         return detected(Boxed(animals.provider, boxes), fds[0], conn, "vectors")
+    if op == protocol.OP_READ_TEXT:
+        if reader.provider is None:
+            return protocol.failure(protocol.CODE_UNAVAILABLE, reader.reason)
+        kind, schema = request.get("kind"), request.get("schema")
+        wants_schema = kind == "fields"
+        has_schema = isinstance(schema, dict) and bool(schema)
+        if len(fds) != 1 or kind not in providers.OCR_KINDS or wants_schema != has_schema or (schema and not wants_schema):
+            return protocol.failure(protocol.CODE_INVALID_INPUT, 'read_text needs one image descriptor and "kind": '
+                                    '"text", or "fields" with a non-empty "schema" object')
+        return detected(Reading(reader.provider, kind, schema), fds[0], conn, "reading")
     if op == protocol.OP_RELEASE:
         what = request.get("what")
         if what not in ("detector", "all"):
             return protocol.failure(protocol.CODE_INVALID_INPUT, 'release needs "what": "detector" or "all"')
-        for background in (detector, faces, animals):
+        for background in (detector, faces, animals, reader):
             if background.provider is not None:
                 background.provider.release()
         return protocol.ok()
@@ -225,6 +247,20 @@ class Boxed:
 
     def detect(self, data, run):
         return self.provider.embed(data, self.boxes, run)
+
+
+class Reading:
+    """A text reader bound to one request's kind and schema, run the way detections run."""
+
+    def __init__(self, provider, kind, schema):
+        self.provider, self.kind, self.schema = provider, kind, schema
+        self.model = provider.model
+
+    def run_options(self):
+        return self.provider.run_options()
+
+    def detect(self, data, run):
+        return self.provider.read(data, self.kind, self.schema, run)
 
 
 def detected(detector, fd, conn, key):
@@ -313,11 +349,18 @@ def main(argv=None):
     parser.add_argument("--face-embedder-manifest", help="the face recognition model's manifest")
     parser.add_argument("--animal-embedder", help="the animal identity model's .onnx file")
     parser.add_argument("--animal-embedder-manifest", help="the animal identity model's manifest")
+    parser.add_argument("--ocr-server", help="llama-server, which reads the text in photos")
+    parser.add_argument("--ocr-runtime-manifest", help="the llama.cpp manifest that names its version")
+    parser.add_argument("--ocr-model", help="the text reader's language model, a .gguf file")
+    parser.add_argument("--ocr-model-manifest", help="its manifest")
+    parser.add_argument("--ocr-mmproj", help="the text reader's vision encoder, a .gguf file")
+    parser.add_argument("--ocr-mmproj-manifest", help="its manifest")
     parser.add_argument("--threads", type=int, help="detector threads (default: the cores less the reserve)")
     parser.add_argument("--fake", action="store_true", help="serve deterministic fake vectors")
     parser.add_argument("--fake-detector", action="store_true", help="serve deterministic fake boxes")
     parser.add_argument("--fake-faces", action="store_true", help="serve deterministic fake faces")
     parser.add_argument("--fake-animals", action="store_true", help="serve deterministic fake animal vectors")
+    parser.add_argument("--fake-reader", action="store_true", help="serve deterministic fake readings")
     parser.add_argument("--idle-seconds", type=int, default=IDLE_SECONDS)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", stream=sys.stderr)
@@ -364,6 +407,19 @@ def main(argv=None):
         except providers.Unavailable as error:
             animals = Detector(reason=str(error))
             log.error("animal model unavailable: %s", error)
+    reader = Detector(reason="no text reader")
+    ocr = (args.ocr_server, args.ocr_runtime_manifest, args.ocr_model, args.ocr_model_manifest, args.ocr_mmproj,
+           args.ocr_mmproj_manifest)
+    if args.fake_reader:
+        reader = Detector(providers.FakeReader())
+    elif all(ocr):
+        try:
+            reader = Detector(providers.LlamaReader([args.ocr_server], args.ocr_model, args.ocr_model_manifest,
+                                                    args.ocr_mmproj, args.ocr_mmproj_manifest,
+                                                    args.ocr_runtime_manifest, args.threads))
+        except providers.Unavailable as error:
+            reader = Detector(reason=str(error))
+            log.error("text reader unavailable: %s", error)
     if provider is not None:
         log.info("serving %s (%d dimensions)", provider.model, provider.dimensions)
     if detector.provider is not None:
@@ -372,10 +428,17 @@ def main(argv=None):
         log.info("finding faces with %s", faces.provider.model)
     if animals.provider is not None:
         log.info("telling pets apart with %s", animals.provider.model)
+    if reader.provider is not None:
+        log.info("reading text with %s", reader.provider.model)
     started = started_memory()
     log.info("started with %d MiB", started >> 20)
     with listening_socket(args.socket) as listener:
-        serve(listener, provider, reason, args.idle_seconds, detector, faces, animals, started)
+        try:
+            serve(listener, provider, reason, args.idle_seconds, detector, faces, animals, started, reader)
+        finally:
+            # llama-server would outlive the Worker otherwise.
+            if reader.provider is not None:
+                reader.provider.release()
     # Hand the memory back at once. Tearing the models down object by object
     # took 40 seconds under memory pressure on the local stack, and until the
     # process ends systemd cannot start the Worker the next search needs.
