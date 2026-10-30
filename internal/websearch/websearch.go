@@ -21,6 +21,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/time/rate"
+
+	"github.com/zhongwater123/A-NAS/internal/websearchswitch"
 )
 
 // Category is a tab of the web search window.
@@ -176,26 +178,19 @@ type Image struct {
 }
 
 // ServiceState is the administrator's switch and what systemd reports of
-// the service.
-type ServiceState struct {
-	Enabled bool `json:"enabled"`
-	// Running is running, starting, stopped or failed.
-	Running string `json:"running"`
-}
-
-// The states Running takes.
-const (
-	StateRunning  = "running"
-	StateStarting = "starting"
-	StateStopped  = "stopped"
-	StateFailed   = "failed"
+// the service; Switch turns it on and off, and the Host Agent holds it.
+type (
+	ServiceState = websearchswitch.State
+	Switch       = websearchswitch.Switch
 )
 
-// Switch turns the service on and off; the Host Agent holds it.
-type Switch interface {
-	WebSearch(ctx context.Context) (ServiceState, error)
-	SetWebSearch(ctx context.Context, enabled bool) (ServiceState, error)
-}
+// The states ServiceState.Running takes.
+const (
+	StateRunning  = websearchswitch.Running
+	StateStarting = websearchswitch.Starting
+	StateStopped  = websearchswitch.Stopped
+	StateFailed   = websearchswitch.Failed
+)
 
 // Errors the API answers with their own codes.
 var (

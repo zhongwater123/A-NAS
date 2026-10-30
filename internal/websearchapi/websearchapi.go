@@ -133,7 +133,7 @@ func (a *API) source(w http.ResponseWriter, r *http.Request, _ accounts.Session)
 		a.writeError(w, r, err)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
 		httpjson.WriteInternal(w, r, a.logger, err)

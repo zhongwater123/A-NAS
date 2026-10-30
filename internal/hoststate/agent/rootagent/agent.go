@@ -24,7 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
-	"github.com/zhongwater123/A-NAS/internal/websearch"
+	"github.com/zhongwater123/A-NAS/internal/websearchswitch"
 )
 
 type handler struct {
@@ -36,7 +36,7 @@ type handler struct {
 	apps        appid.Host
 	snapshots   filesystem.SnapshotBackend
 	systemLogs  systemlog.Reader
-	webSearch   websearch.Switch
+	webSearch   websearchswitch.Switch
 	// reconcileFailed reports the last reconciliation of the data volume.
 	reconcileFailed func() bool
 	logger          *slog.Logger
@@ -53,7 +53,7 @@ type Services struct {
 	// SystemLogs reads the allowlisted service logs (ADR 0020).
 	SystemLogs systemlog.Reader
 	// WebSearch is the administrator's switch of web search (ADR 0030).
-	WebSearch websearch.Switch
+	WebSearch websearchswitch.Switch
 	// ReconcileFailed reports whether the Host Agent's last reconciliation of
 	// the data volume failed; the host state carries it (#166).
 	ReconcileFailed func() bool

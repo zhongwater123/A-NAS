@@ -5,7 +5,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent/wire"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
-	"github.com/zhongwater123/A-NAS/internal/websearch"
+	"github.com/zhongwater123/A-NAS/internal/websearchswitch"
 )
 
 // handleWebSearch reads and sets the administrator's switch of web search
@@ -22,7 +22,7 @@ func (h *handler) handleWebSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var (
-		state websearch.ServiceState
+		state websearchswitch.State
 		err   error
 	)
 	if r.Method == http.MethodGet {

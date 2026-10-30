@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/hostops/linux"
-	"github.com/zhongwater123/A-NAS/internal/websearch"
+	"github.com/zhongwater123/A-NAS/internal/websearchswitch"
 )
 
 // systemdRunner answers systemctl show with the unit's state and records
@@ -41,12 +41,12 @@ func TestTheWebSearchSwitchIsAFileTheUnitWaitsOn(t *testing.T) {
 	ctx := context.Background()
 
 	state, err := executor.WebSearch(ctx)
-	if err != nil || state != (websearch.ServiceState{Enabled: true, Running: websearch.StateRunning}) {
+	if err != nil || state != (websearchswitch.State{Enabled: true, Running: websearchswitch.Running}) {
 		t.Fatalf("state = %+v, %v; want on and running", state, err)
 	}
 	runner.activeState = "inactive"
 	state, err = executor.SetWebSearch(ctx, false)
-	if err != nil || state != (websearch.ServiceState{Enabled: false, Running: websearch.StateStopped}) {
+	if err != nil || state != (websearchswitch.State{Enabled: false, Running: websearchswitch.Stopped}) {
 		t.Fatalf("after turning off = %+v, %v", state, err)
 	}
 	if info, err := os.Stat(marker); err != nil || info.Mode().Perm() != 0o600 {
@@ -54,7 +54,7 @@ func TestTheWebSearchSwitchIsAFileTheUnitWaitsOn(t *testing.T) {
 	}
 	runner.activeState = "activating"
 	state, err = executor.SetWebSearch(ctx, true)
-	if err != nil || state != (websearch.ServiceState{Enabled: true, Running: websearch.StateStarting}) {
+	if err != nil || state != (websearchswitch.State{Enabled: true, Running: websearchswitch.Starting}) {
 		t.Fatalf("after turning on = %+v, %v", state, err)
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
