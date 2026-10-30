@@ -1123,28 +1123,74 @@ check "web search reads no data volume or Host Agent record" \
   denied nsenter -t "$(systemctl show -p MainPID --value anas-search)" -m ls /srv/a-nas/data /var/lib/a-nas-host
 if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" != real ]]; then
   # search_probe HOST PORT: what the stand-in, in web search's sandbox, got
-  # when it connected there.
+  # when it connected there; direct_probe the same from outside any sandbox.
+  # systemd drops the filtered packets, so a denied address times out.
+  cat > /tmp/connect-probe.py <<'PY'
+import errno, socket, sys
+try:
+    socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=2).close()
+    print("connected")
+except TimeoutError:
+    print("timeout")
+except OSError as error:
+    print("denied" if error.errno == errno.EPERM else errno.errorcode.get(error.errno or 0, "error"))
+PY
   search_probe() {
     as_product curl -fsS --unix-socket "$search_socket" "http://localhost/probe?host=$1&port=$2" | jq -r .result
   }
-  container_address=$(hostname -I | cut -d ' ' -f 1)
-  dns_server=$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf)
-  for target in 127.0.0.1:8080 "[::1]:8080" "$container_address:80" 10.0.0.1:80 172.17.0.1:80 192.168.1.1:80 \
-    169.254.169.254:80 100.64.0.1:80 "[fd00::1]:80"; do
-    host=${target%:*}
-    check "web search cannot reach $target" test "$(search_probe "${host//[\[\]]/}" "${target##*:}")" = denied
+  direct_probe() { python3 /tmp/connect-probe.py "$1" "$2"; }
+  # An address of each range the service must not reach, on this machine,
+  # with something listening there, so that only the filter keeps it out.
+  # 93.184.216.34 stands for a public address, which the filter lets through.
+  for address in 10.99.0.1 172.16.99.1 192.168.99.1 100.64.99.1 169.254.99.1 192.168.77.53 93.184.216.34; do
+    ip address add "$address/32" dev lo
   done
-  check "web search may reach a public address" test "$(search_probe 1.1.1.1 443)" != denied
-  check "web search may reach this machine's DNS server $dns_server" test "$(search_probe "$dns_server" 53)" != denied
+  ip -6 address add fd00::99/128 dev lo
+  python3 -c '
+import socket, threading
+def serve(family, address):
+    listener = socket.socket(family, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if family == socket.AF_INET6:
+        listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+    listener.bind((address, 7777))
+    listener.listen()
+    while True:
+        listener.accept()[0].close()
+threading.Thread(target=serve, args=(socket.AF_INET6, "::"), daemon=True).start()
+serve(socket.AF_INET, "0.0.0.0")' &
+  search_listener=$!
+  container_address=$(hostname -I | cut -d ' ' -f 1)
+  # shellcheck disable=SC2317,SC2329 # invoked through check
+  kept_out() { # HOST PORT: reachable directly, not from web search's sandbox
+    [[ "$(direct_probe "$1" "$2")" == connected ]] && [[ "$(search_probe "$1" "$2")" =~ ^(timeout|denied)$ ]]
+  }
+  for target in 127.0.0.1:8080 "[::1]:7777" "$container_address:7777" 10.99.0.1:7777 172.16.99.1:7777 \
+    192.168.99.1:7777 100.64.99.1:7777 169.254.99.1:7777 "[fd00::99]:7777"; do
+    host=${target%:*}
+    host=${host//[\[\]]/}
+    check "web search cannot reach $target" kept_out "$host" "${target##*:}"
+  done
+  check "web search may reach a public address" test "$(search_probe 93.184.216.34 7777)" = connected
+  dns_server=$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf)
+  # shellcheck disable=SC2317,SC2329 # invoked through check
+  dns_allowed() { systemctl show -p IPAddressAllow --value anas-search | grep -Fqw "$1"; }
+  check "web search may reach this machine's DNS server $dns_server" dns_allowed "$dns_server"
   # dhcpcd rewrites /etc/resolv.conf when the lease changes.
+  check "web search cannot reach 192.168.77.53 before it is a DNS server" kept_out 192.168.77.53 7777
   cp /etc/resolv.conf /tmp/resolv.conf.before-search
   printf 'nameserver 192.168.77.53\n' >> /etc/resolv.conf
   for _ in $(seq 1 20); do
     systemctl show -p IPAddressAllow --value anas-search | grep -Fq 192.168.77.53 && break
     sleep 0.5
   done
-  check "web search follows a new DNS server" test "$(search_probe 192.168.77.53 53)" != denied
+  check "web search follows a new DNS server" test "$(search_probe 192.168.77.53 7777)" = connected
   cat /tmp/resolv.conf.before-search > /etc/resolv.conf
+  kill "$search_listener"
+  for address in 10.99.0.1 172.16.99.1 192.168.99.1 100.64.99.1 169.254.99.1 192.168.77.53 93.184.216.34; do
+    ip address del "$address/32" dev lo
+  done
+  ip -6 address del fd00::99/128 dev lo
   # The running Product Service, with its own groups and SearXNG's secret.
   # shellcheck disable=SC2317,SC2329 # invoked through check
   product_search() {
