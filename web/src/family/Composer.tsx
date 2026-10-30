@@ -399,17 +399,7 @@ export function Composer({
       {/* A photo record leads with its photos; the others with their text. */}
       {kind === "photos" && photoPicker}
       {kind !== "measurement" && (
-        <Field
-          label={
-            kind === "recording"
-              ? "标题"
-              : kind === "journal"
-                ? "写点什么"
-                : kind === "photos"
-                  ? "说一句（可选）"
-                  : "说明（可选）"
-          }
-        >
+        <Field label={kind === "recording" ? "标题" : kind === "journal" ? "内容" : "说明（可选）"}>
           {kind === "journal" || kind === "milestone" ? (
             <textarea
               className={`${styles.fcTextarea} ${kind === "journal" ? styles.writing : ""}`}

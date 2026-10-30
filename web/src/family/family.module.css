@@ -356,12 +356,6 @@
 .fc-join-card .fc-note {
   font-size: 12px;
 }
-.fc-eyebrow {
-  color: var(--fc-accent);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-}
 .fc-roles {
   display: flex;
   flex-wrap: wrap;
@@ -631,8 +625,9 @@
   margin: 40px 0 0 124px;
   padding-top: 18px;
   border-top: 1px solid var(--fc-line);
-  color: var(--fc-muted);
-  font-family: var(--fc-serif);
+}
+.fc-timeline-end .fc-link {
+  margin-left: auto;
 }
 
 /* A record's photos as one picture. */

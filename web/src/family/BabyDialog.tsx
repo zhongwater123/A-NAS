@@ -223,7 +223,7 @@ export function BabyDialog({
           </div>
         </div>
       </div>
-      <p className={styles.fcFootnote}>性别和出生日用于成长曲线与疫苗程序。孩子长大后可以用自己的账号认领这份档案。</p>
+      <p className={styles.fcFootnote}>性别和出生日用于成长曲线与疫苗程序。</p>
       {problem && <p className={styles.fcProblem}>{problem}</p>}
     </Modal>
   );

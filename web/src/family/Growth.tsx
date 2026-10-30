@@ -78,9 +78,6 @@ export function Growth({
       <header className={styles.fcBoardHead}>
         <div>
           <h2>成长曲线</h2>
-          <p>
-            参考 {growth.standard}（{growth.sex === "female" ? "女孩" : "男孩"}），仅供参考，以儿童保健医生的评估为准。
-          </p>
         </div>
         <button type="button" className={styles.fcSecondary} onClick={onAdd}>
           <Plus size={14} /> 记录身高体重
@@ -143,7 +140,7 @@ export function Growth({
       <section className={styles.fcBoardSection}>
         <h3>全部测量</h3>
         {newestFirst.length === 0 ? (
-          <p className={styles.fcNote}>还没有测量记录。体检时量了身长、体重和头围，记在这里就能画出曲线。</p>
+          <p className={styles.fcNote}>还没有测量记录。</p>
         ) : (
           <table className={styles.fcTable}>
             <thead>
@@ -179,6 +176,9 @@ export function Growth({
           </table>
         )}
       </section>
+      <p className={styles.fcSource}>
+        参考 {growth.standard}（{growth.sex === "female" ? "女孩" : "男孩"}），仅供参考，以儿童保健医生的评估为准。
+      </p>
     </div>
   );
 }

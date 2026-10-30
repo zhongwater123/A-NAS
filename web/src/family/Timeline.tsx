@@ -118,8 +118,7 @@ export function Timeline({
   if (records.length === 0)
     return (
       <div className={styles.fcBlank}>
-        <h2>第一页还空着</h2>
-        <p>把{baby.nickname || baby.name}的照片、声音和每一个“第一次”记在这里，按月龄排好，全家都能看到。</p>
+        <h2>还没有记录</h2>
         <button type="button" className={styles.fcPrimary} onClick={() => onRecord("photos")}>
           上传照片视频
         </button>
@@ -154,12 +153,10 @@ export function Timeline({
         </section>
       ))}
       <footer className={styles.fcTimelineEnd}>
-        {next ? (
+        {next && (
           <button type="button" className={styles.fcSecondary} onClick={() => void more()} disabled={loading}>
             {loading ? "正在读取…" : "更早的记录"}
           </button>
-        ) : (
-          <span>{`${baby.nickname || baby.name}的故事从这里开始`}</span>
         )}
         <button type="button" className={styles.fcLink} onClick={() => setTrashOpen(true)}>
           最近删除

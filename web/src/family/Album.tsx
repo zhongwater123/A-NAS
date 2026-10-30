@@ -74,8 +74,7 @@ export function Album({ baby, version, onAdd }: { baby: FamilyBaby; version: num
   if (photos.length === 0)
     return (
       <div className={styles.fcBlank}>
-        <h2>相册还是空的</h2>
-        <p>在频道里上传的照片视频都会放在这里，按{baby.nickname || baby.name}的月龄排好。</p>
+        <h2>还没有照片视频</h2>
         <button type="button" className={styles.fcPrimary} onClick={onAdd}>
           <ImagePlus size={15} /> 上传照片视频
         </button>

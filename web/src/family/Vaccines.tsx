@@ -61,7 +61,6 @@ export function Vaccines({
       <header className={styles.fcBoardHead}>
         <div>
           <h2>接种本</h2>
-          <p>依据{schedule.title}。到了月龄会在这里和桌面上提醒，接种时间以当地接种门诊的安排为准。</p>
         </div>
         <button type="button" className={styles.fcSecondary} onClick={() => setPlanning(true)}>
           <ListChecks size={14} /> 自费疫苗
@@ -126,7 +125,9 @@ export function Vaccines({
           </ul>
         </section>
       )}
-      <p className={styles.fcSource}>{schedule.source}</p>
+      <p className={styles.fcSource}>
+        依据{schedule.title}（{schedule.source}），以当地接种门诊的安排为准。
+      </p>
 
       {planning && (
         <PlanDialog

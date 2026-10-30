@@ -91,7 +91,6 @@ export function Members({ baby }: { baby: FamilyBaby }) {
       <header className={styles.fcBoardHead}>
         <div>
           <h2>家人</h2>
-          <p>家长可以添加宝宝、修改宝宝资料、同意加入、删除任何人的内容；亲友可以记录和留言，修改自己添加的内容。</p>
         </div>
       </header>
 
@@ -194,7 +193,7 @@ function Letters({ baby }: { baby: FamilyBaby }) {
 
   return (
     <section className={styles.fcBoardSection}>
-      <h3>写给{name}的话</h3>
+      <h3>留言墙</h3>
       <form
         className={styles.fcLetterForm}
         onSubmit={(event) => {
@@ -206,7 +205,7 @@ function Letters({ baby }: { baby: FamilyBaby }) {
           className={styles.fcTextarea}
           rows={3}
           maxLength={1000}
-          placeholder={`写给${name}的话，等TA长大了看`}
+          placeholder={`给${name}留言`}
           value={text}
           onChange={(event) => setText(event.target.value)}
           aria-label="留言"

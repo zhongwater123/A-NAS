@@ -46,7 +46,6 @@ export function Milestones({
       <header className={styles.fcBoardHead}>
         <div>
           <h2>大事记</h2>
-          <p>出生、满月、百天和生日会自动出现，可以给它们配上照片和说明；第一次翻身、长牙、迈步也记在这里。</p>
         </div>
         <button type="button" className={styles.fcSecondary} onClick={() => onAdd({ kind: "milestone" })}>
           <Plus size={14} /> 添加大事记

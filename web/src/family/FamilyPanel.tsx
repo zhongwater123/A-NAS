@@ -221,12 +221,8 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
 function NoBabies({ guardian, onAdd }: { guardian: boolean; onAdd: () => void }) {
   return (
     <div className={styles.fcBlank}>
-      <h2>{guardian ? "为宝宝建一本成长手账" : "还没有宝宝"}</h2>
-      <p>
-        {guardian
-          ? "每个宝宝一本：照片视频、录音、日志、身高体重、疫苗和大事记都按月龄记在里面，全家一起看、一起写。"
-          : "家长添加宝宝后，这里会出现宝宝的成长手账。"}
-      </p>
+      <h2>还没有宝宝</h2>
+      {!guardian && <p>家长添加宝宝后会显示在这里。</p>}
       {guardian && (
         <button type="button" className={styles.fcPrimary} onClick={onAdd}>
           添加宝宝
@@ -261,11 +257,10 @@ function JoinScreen({
   return (
     <div className={styles.fcJoin}>
       <div className={styles.fcJoinCard}>
-        <span className={styles.fcEyebrow}>家庭中心</span>
         {pending ? (
           <>
             <h1>已申请加入</h1>
-            <p>你申请以“{overview.me.role}”的身份加入。家长同意后，就能看到宝宝的成长手账，和家人一起记录。</p>
+            <p>你申请以“{overview.me.role}”的身份加入家庭中心。</p>
             <p className={styles.fcWaiting}>等待家长批准</p>
             <button type="button" className={styles.fcLink} onClick={() => void onCancel()}>
               撤回申请
@@ -276,8 +271,8 @@ function JoinScreen({
             <h1>{overview.exists ? "加入家庭中心" : "创建家庭中心"}</h1>
             <p>
               {overview.exists
-                ? "选择你在家里的称呼。家长同意后，你就能看到宝宝的成长手账，上传照片、写日志、留言。"
-                : "你是第一位家人。选择你的称呼来创建家庭，你会成为家长，可以添加宝宝、同意其他家人加入。"}
+                ? "选择你在家里的称呼，家长同意后加入。"
+                : "选择你在家里的称呼。创建家庭的人成为家长，可以添加宝宝、审批其他家人加入。"}
             </p>
             <div className={styles.fcRoles} role="radiogroup" aria-label="我在家里是">
               {[...roles, "其他"].map((item) => (

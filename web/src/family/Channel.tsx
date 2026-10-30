@@ -274,7 +274,6 @@ function DueDoses({
           {backlog > 0 ? `另有 ${backlog} 剂没有记录，打过的可以补记` : `还有 ${recent.length - 3} 剂，查看接种本`}
         </button>
       )}
-      <p className={styles.fcNote}>以当地接种门诊的安排为准</p>
     </section>
   );
 }

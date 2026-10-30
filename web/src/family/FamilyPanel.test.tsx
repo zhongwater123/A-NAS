@@ -142,11 +142,11 @@ describe("FamilyPanel", () => {
       }),
     );
     render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
-    await screen.findByText("第一页还空着");
+    await screen.findByText("还没有记录");
     const side = screen.getByRole("complementary", { name: "小米粒的资料" });
     await userEvent.click(within(side).getByRole("button", { name: "日志" }));
     const dialog = await screen.findByRole("dialog", { name: "记录日志" });
-    await userEvent.type(within(dialog).getByRole("textbox", { name: "写点什么" }), "外婆来看你了");
+    await userEvent.type(within(dialog).getByRole("textbox", { name: "内容" }), "外婆来看你了");
     server.use(
       http.get("/api/v1/family/babies/{babyId}/records", ({ response }) => response(200).json({ records: [written] })),
     );
@@ -161,7 +161,7 @@ describe("FamilyPanel", () => {
   it("asks a guardian to add the first baby", async () => {
     server.use(...familyHandlers({ overview: familyOverview({ babies: [] }) }));
     render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
-    expect(await screen.findByRole("heading", { name: "为宝宝建一本成长手账" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "还没有宝宝" })).toBeTruthy();
   });
 
   it("folds the vaccine ages already done in the booklet", async () => {
