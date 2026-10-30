@@ -1147,6 +1147,15 @@
 .tm-thermal-tile .temp-missing {
   padding: 6px 0 2px;
 }
+.tm-thermal-tile .fan-speed {
+  min-width: 0;
+  justify-content: flex-start;
+}
+.tm-thermal-tile .fan-speed strong {
+  font-size: 24px;
+  font-weight: 550;
+  letter-spacing: -0.03em;
+}
 .tm-workload-summary {
   display: flex;
   align-items: center;
@@ -3109,6 +3118,34 @@ button.health-go svg {
 }
 .set-tile.gpu {
   background: linear-gradient(160deg, #c08cff, #8656e3);
+}
+.set-tile.fan {
+  background: linear-gradient(160deg, #55cfe6, #1c8fb3);
+}
+/* A fan's speed sits where a temperature's gauge would. */
+.fan-speed {
+  flex: none;
+  min-width: 96px;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 3px;
+  color: var(--set-text, #29354a);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fan-speed strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+.fan-speed small {
+  color: var(--set-faint, #99a2af);
+  font-size: 10px;
+  font-weight: 500;
+}
+.fan-speed.fan-stopped strong,
+.fan-stopped-note {
+  color: #c9372f;
 }
 .temp-row .set-row-text > small {
   overflow: hidden;

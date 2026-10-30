@@ -24,14 +24,32 @@ it("lists the CPU, the GPU and every disk with its reading", () => {
   expect(within(disk).getByText("未使用 · 机械硬盘")).toBeTruthy();
   expect(within(disk).getByRole("meter").getAttribute("aria-valuetext")).toBe("31 °C");
   expect(screen.queryByText("偏高")).toBeNull();
-  expect(screen.getByText(/每 10 分钟读取一次，不会唤醒待机的硬盘/)).toBeTruthy();
+  expect(row("风扇 1").textContent).toContain("1,912RPM");
+  expect(screen.getByText(/每 10 分钟读取一次，不会唤醒待机的硬盘。风扇转速来自主板的传感器芯片/)).toBeTruthy();
+});
+
+it("says when a fan that turned has stopped", () => {
+  render(
+    <DeviceTemperatures
+      snapshot={state((copy) => {
+        copy.system.thermal!.fans = [
+          { id: "fan:1", number: 1, rpm: 0, stopped: true },
+          { id: "fan:2", number: 2, label: "CPU_FAN", rpm: 1450, stopped: false },
+        ];
+      })}
+    />,
+  );
+  expect(screen.getByText("1 个风扇停转")).toBeTruthy();
+  expect(within(row("风扇 1")).getByText("已停转")).toBeTruthy();
+  expect(within(row("风扇 1")).getByText("之前在转，现在读数为 0，请检查风扇和接线")).toBeTruthy();
+  expect(row("CPU_FAN").textContent).toContain("1,450RPM");
 });
 
 it("marks what runs hot, with the limit the system health uses", () => {
   render(
     <DeviceTemperatures
       snapshot={state((copy) => {
-        copy.system.thermal = { cpu: { celsius: 92, hotCelsius: 90 }, gpus: [] };
+        copy.system.thermal = { cpu: { celsius: 92, hotCelsius: 90 }, gpus: [], fans: [] };
         copy.disks[0].temperatureCelsius = 57;
       })}
     />,
@@ -49,6 +67,7 @@ it("says why a reading is missing instead of showing zero", () => {
       snapshot={state((copy) => {
         copy.system.thermal = {
           gpus: [{ id: "gpu:discrete", name: "GPU 1 (10de:2204)", integrated: false }],
+          fans: [],
         };
         delete copy.disks[0].temperatureCelsius;
         delete copy.disks[0].temperatureHotCelsius;

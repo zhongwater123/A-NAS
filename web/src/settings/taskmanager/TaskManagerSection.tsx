@@ -16,7 +16,7 @@ import { type CSSProperties, type ReactNode, useId, useState } from "react";
 import { formatBytes, formatRate } from "../../lib/bytes";
 import { Banner } from "../parts";
 import styles from "../settings.module.css";
-import { TemperatureGauge } from "../Temperature";
+import { FanSpeed, fanName, TemperatureGauge } from "../Temperature";
 import {
   type Availability,
   type DeviceSnapshot,
@@ -385,8 +385,8 @@ function ResourceTitle({ title, detail, aside }: { title: string; detail: string
     </header>
   );
 }
-// Temperatures shows every sensor at a glance: the CPU, each GPU and each
-// disk (docs/specs/device-temperatures.md).
+// Temperatures shows every sensor at a glance: the CPU, each GPU, each disk
+// and each fan (docs/specs/device-temperatures.md).
 function Temperatures({ data }: { data: DeviceSnapshot }) {
   const tiles: Array<{ id: string; name: string; kind: string; temperature: Temperature | null; missing: string }> = [
     {
@@ -411,11 +411,13 @@ function Temperatures({ data }: { data: DeviceSnapshot }) {
       missing: "暂无读数",
     })),
   ];
+  const fans = data.fans.items;
+  const title = fans.length ? "温度与风扇" : "温度";
   return (
-    <section className={styles.tmThermal} aria-label="温度">
+    <section className={styles.tmThermal} aria-label={title}>
       <h3>
         <Thermometer />
-        温度
+        {title}
       </h3>
       <div>
         {tiles.map((tile) => (
@@ -427,6 +429,15 @@ function Temperatures({ data }: { data: DeviceSnapshot }) {
             ) : (
               <span className={styles.tempMissing}>{tile.missing}</span>
             )}
+          </div>
+        ))}
+        {fans.map((fan) => (
+          <div key={fan.id} className={styles.tmThermalTile}>
+            <span>{fanName(fan)}</span>
+            <small className={fan.stopped ? styles.fanStoppedNote : undefined}>
+              {fan.stopped ? "已停转" : "风扇转速"}
+            </small>
+            <FanSpeed fan={fan} />
           </div>
         ))}
       </div>

@@ -24,6 +24,24 @@ const levelClass: Record<TemperatureLevel, string | undefined> = {
   hot: styles.tempHot,
 };
 
+const rpm = new Intl.NumberFormat("zh-CN");
+
+// fanName is the chip's label for a fan input, else its number.
+export function fanName(fan: { number: number; label?: string }): string {
+  return fan.label || `风扇 ${fan.number}`;
+}
+
+// FanSpeed shows a fan's speed; one that turned before and reads 0 now has
+// stopped (docs/specs/device-temperatures.md).
+export function FanSpeed({ fan }: { fan: { rpm: number; stopped: boolean } }) {
+  return (
+    <span className={`${styles.fanSpeed} ${fan.stopped ? styles.fanStopped : ""}`}>
+      <strong>{rpm.format(fan.rpm)}</strong>
+      <small>RPM</small>
+    </span>
+  );
+}
+
 // TemperatureGauge shows a reading with a bar from 20 °C to just past its
 // hot limit, the limit marked on the track.
 export function TemperatureGauge({ temperature, label }: { temperature: Temperature; label: string }) {

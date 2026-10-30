@@ -222,12 +222,14 @@ it("shows every temperature with its limit, and the CPU temperature over time", 
   render(<Panel />);
   fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
   await screen.findByRole("img", { name: /CPU 使用率，最近/ });
-  const temperatures = screen.getByRole("region", { name: "温度" });
+  const temperatures = screen.getByRole("region", { name: "温度与风扇" });
   expect(within(temperatures).getByRole("meter", { name: "CPU温度" }).getAttribute("aria-valuenow")).toBe("52");
   expect(within(temperatures).getByRole("meter", { name: "Test SSD温度" }).getAttribute("aria-valuetext")).toBe(
     "41 °C",
   );
   expect(within(temperatures).getByText("驱动不提供")).toBeTruthy();
+  const fan = within(temperatures).getByText("风扇 2").parentElement!;
+  expect(fan.textContent).toBe("风扇 2风扇转速2,700RPM");
   fireEvent.click(screen.getByRole("button", { name: "CPU" }));
   expect(screen.getByRole("img", { name: /CPU 温度，最近/ })).toBeTruthy();
   expect(screen.getByText("最热的处理器封装 · 90 °C 起为偏高")).toBeTruthy();
@@ -244,11 +246,13 @@ it("gives an integrated GPU the CPU's temperature and says when there is none", 
       cpu: { ...device.cpu, temperature: null },
       gpu: { status: "partial", items: [{ ...device.gpu.items[0], integrated: true }] },
       disks: { status: "available", items: [{ ...device.disks.items[0], temperature: null }] },
+      fans: { status: "absent", items: [] },
     },
   });
   render(<Panel />);
   fireEvent.click(screen.getByRole("button", { name: "任务管理器" }));
   await screen.findByRole("img", { name: /CPU 使用率，最近/ });
+  // Without a fan sensor the section is about temperatures alone.
   const temperatures = screen.getByRole("region", { name: "温度" });
   expect(within(temperatures).getByText("未检测到传感器")).toBeTruthy();
   expect(within(temperatures).getByText("同 CPU")).toBeTruthy();
