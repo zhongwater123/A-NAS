@@ -33,7 +33,8 @@ anas_mcp.py ── 只做转接
 - **MCP 服务器只做转接**：照片的检索、授权与排序在相册服务；视频的向量、索引与原件只在视频检索服务里，助手读不到。
 - **视频检索服务是替身**：[`videos_spike.py`](../../ai/assistant-spike/videos_spike.py) 以相册服务的身份运行（ADR 0011），是唯一能连到 AI Worker 的身份；它在自己的助手套接字上按调用方 UID 认人，只服务 `a-nas-users` 的成员。产品中这部分由相册服务提供，等视频有了向量再定接口。
 - **索引离线建好**：[`eval.video_moments index`](../../ai/eval/video_moments.py) 为一组测试视频写出镜头切点（FFmpeg 场景检测，阈值 0.25，短于 1 秒的切换丢弃）、纯色帧标记和每个窗口最接近的 3 个词表标签（[`v1.json`](../../internal/photos/labels/v1.json)，不设阈值）。窗口每 2 秒一个，向量取窗口中点的帧（[视频剪辑 baseline](../research/video-moment-retrieval.md) 的 `2s1f`）。
-- **本机视觉模型**（第三版）：Qwen3-VL-2B-Instruct（Q8_0 GGUF，Apache-2.0，[模型选型](../research/photo-ai-model-runtime-selection.md)里的本地 VLM 候选），由 llama.cpp 的 `llama-server` 提供 OpenAI 兼容接口。开发机上它在 Mac 本机用 Metal 运行，沙箱里的视频检索替身经 HTTP 调用；产品里应由 AI Worker 按需加载。它给每张卡片的代表帧（离卡片平均向量最近的窗口）写一句描述（[`eval.video_moments describe`](../../ai/eval/video_moments.py)，存为索引旁的 `captions.json`），并在出片前核对画面（[`look.py`](../../ai/montage/look.py)）。云端规划模型只拿到它写的文字。
+- **本机视觉模型**（第三版）：Qwen3-VL-2B-Instruct（Q8_0 GGUF，Apache-2.0，[模型选型](../research/photo-ai-model-runtime-selection.md)里的本地 VLM 候选），由 llama.cpp 的 `llama-server` 提供 OpenAI 兼容接口。开发机上它在 Mac 本机用 Metal 运行，沙箱里的视频检索替身经 HTTP 调用；产品里应由 AI Worker 按需加载。它给每张卡片的几帧写一句描述，再答光线和画面里最吸引人的一样东西（[`eval.video_moments describe`](../../ai/eval/video_moments.py)，存为索引旁的 `captions.json`），并在出片前核对画面（[`look.py`](../../ai/montage/look.py)）。云端规划模型只拿到它写的文字。
+- **运镜与画面毛病**（[`picture.py`](../../ai/montage/picture.py)）：不交给视觉模型，用 OpenCV（AI Worker 已有的依赖）每 0.2 秒跟踪相邻两帧的角点，算出画面的平移与缩放：平移是转头，放大是往前走，平移去掉 1 秒滑动平均后剩下的是抖动；同样的帧再算清晰度（拉普拉斯方差）、亮度和过白像素占比（[`eval.video_moments measure`](../../ai/eval/video_moments.py)，存为 `pictures.json`）。
 - **共享代码**：[`ai/montage/`](../../ai/montage/__init__.py)。`render.py` 与 `look.py` 只用标准库，助手的 MCP 服务器在沙箱里直接导入 `render.py`；`moments.py` 用 NumPy，在有向量的进程里运行。
 - **身份与同意**：两个拼接工具不标只读，Hermes 每次调用前都要成员同意。
 
@@ -43,7 +44,7 @@ anas_mcp.py ── 只做转接
 |---|---|---|
 | `search_photos` | `query`、`page` | 照片 ID、名称、图库、拍摄时间、标签、相册（[AI 助手](ai-assistant.md)的相册工具） |
 | `make_slideshow` | `photo_ids`（1–60 个，按出现顺序）、`seconds_per_photo`（1–10 秒，默认 3）、`crossfade`（默认否） | 成片路径、总时长、照片数 |
-| `search_video_moments` | `probes`（1–8 条画面描述，指令里每个画面主题一条）、`each`（每条探针各取分数最高的几张，彼此不同组，默认 5，条数乘 `each` 不超过 40）、`videos`（只在这些视频里找，可省略）、`when`（最多 4 条 `{is, not}`，只留更像 `is` 的窗口，如夜晚而不是白天） | 镜头卡片，`each` 按探针列出各自取到的卡片，一个主题的卡片不会被另一个主题的高分挤掉；每张带本机视觉模型的描述 `caption`，以及分数参照 `threshold` |
+| `search_video_moments` | `probes`（1–8 条画面描述，指令里每个画面主题一条）、`each`（每条探针各取分数最高的几张，彼此不同组，默认 5，条数乘 `each` 不超过 40）、`videos`（只在这些视频里找，可省略）、`when`（最多 4 条 `{is, not}`，只留更像 `is` 的窗口，如夜晚而不是白天） | 镜头卡片，`each` 按探针列出各自取到的卡片，一个主题的卡片不会被另一个主题的高分挤掉；每张带本机视觉模型的描述 `caption`、光线 `light`、亮点 `highlight`，量出来的运镜 `motion` 与画面毛病 `flaws`，以及分数参照 `threshold` |
 | `make_montage` | `segments`：按播放顺序的 `{card, start, end, shows, reason}`；`shows` 是这段要呈现指令里的什么，只用指令里的词，`reason` 是一句理由 | 成片路径、总时长、段数、按画面收窄的段（`trimmed`）与每段看到的画面（`seen`）；计划、实际剪的秒数与核对结果存在成片旁的同名 JSON 里；计划不合规则或核对不过时逐条说明 |
 
 - 成片都是 1920×1080、30 fps 的 H.264 MP4，没有音轨，画面等比缩放并补黑边。照片的总时长是张数 × 每张秒数；视频的总时长是各段之和。
@@ -51,7 +52,7 @@ anas_mcp.py ── 只做转接
 
 ### 镜头卡片与剪辑计划
 
-- **卡片**：一个镜头里画面大致不变的一段：窗口与这段的平均画面余弦低于 0.9 就切开，每段至少 2 个窗口（4 秒），超过 20 秒的再等分。67 分钟、5 个镜头的爱丁堡散步得到 396 张，中位 10 秒；第二版按 20 秒硬切是 204 张，一张里常混着几处景。卡片有 `id`、`video`、这张卡片覆盖的 `start`–`end`、所在镜头的 `shot` 起止、各探针的最高分及出现时刻、出现最多的 5 个标签，本机视觉模型的描述 `caption`，以及 `group`：卡片的平均向量余弦不低于 0.97 时同组，表示画面相似。纯色帧的窗口不参与打分。
+- **卡片**：一个镜头里画面大致不变的一段：窗口与这段的平均画面余弦低于 0.9 就切开，每段至少 2 个窗口（4 秒），超过 20 秒的再等分。67 分钟、5 个镜头的爱丁堡散步得到 396 张，中位 10 秒；第二版按 20 秒硬切是 204 张，一张里常混着几处景。卡片有 `id`、`video`、这张卡片覆盖的 `start`–`end`、所在镜头的 `shot` 起止、各探针的最高分及出现时刻、出现最多的 5 个标签，本机视觉模型的描述 `caption`、光线 `light`（晴天、阴天、逆光、黄昏、夜晚、室内）与亮点 `highlight`（不超过 12 个字），运镜 `motion`（固定、向前走、向后退、向左转、向右转、抬头、低头：中位平移每秒超过画宽的 6% 是转头，中位缩放每秒超过 1.5% 是走动）与画面毛病 `flaws`（清晰度低于 20 为模糊、抖动高于画宽的 1% 为抖动、平均亮度低于 25 为过暗、过白像素超过 30% 为过曝，阈值按试点集的极端画面定），以及 `group`：卡片的平均向量余弦不低于 0.97 时同组，表示画面相似。纯色帧的窗口不参与打分。
 - **分数参照**：`threshold` 是试点集上 `2s1f` 拒掉 80% 无匹配查询的阈值 0.6533；低于它的卡片与“库里没有”分不开，模型应当少用或不用。
 - **计划的规则**（[`moments.py`](../../ai/montage/moments.py) 的 `check`，不合规则时整次拒绝，列出每一条）：
   1. 1–30 段，每段的 `card` 是检索结果里的卡片；
@@ -133,6 +134,12 @@ llama-server -m ~/A-NAS-models/qwen3-vl-2b-instruct/Qwen3VL-2B-Instruct-Q8_0.ggu
 ANAS_DATASETS=~/A-NAS-datasets python3 -m eval.video_moments --set eval/video_moments_edinburgh.json describe --cache <这组视频的模型目录>
 ```
 
+运镜与画面毛病用装了 OpenCV 的 Python 测量（版本与 `ai/requirements.in` 相同；开发机上可另建虚拟环境装 `opencv-contrib-python-headless`、NumPy、Pillow），每张约 1 秒：
+
+```bash
+ANAS_DATASETS=~/A-NAS-datasets <装了 OpenCV 的 python> -m eval.video_moments --set eval/video_moments_edinburgh.json measure --cache <这组视频的模型目录>
+```
+
 再带着相册的真实模型与这组视频的索引启动原型沙箱（`SPIKE_VISION` 是容器里看到的视觉模型地址，Colima 里 Mac 本机是 `192.168.5.2`；不给时不核对，`shows` 也不必填）：
 
 ```bash
@@ -151,11 +158,11 @@ claude mcp add anas -e HERMES_SPIKE_NAME=video-montage-sbx -e DOCKER_CONTEXT=col
 
 评测（只在开发机上）：[`eval.video_planner`](../../ai/eval/video_planner.py) 让 Claude Code 只用两个视频工具为每条指令规划一次，记下调用过程与费用，并把成片与计划拷到缓存的 `montage-model3/`；[`eval.video_montage`](../../ai/eval/video_montage.py) 用 `rules` 剪规则版（加 `--vision` 是第三版，存到 `montage-rules3/`）、`score` 按 `video_montage.json` 的切题标注算各版本的指标；[`eval.video_judge`](../../ai/eval/video_judge.py) 让三个视觉模型评审（画面质量、切题、剪辑自然度，0–10 分）看每段每秒 1 帧打分，密钥从 `SILICONFLOW_API_KEY` 读。评审只用于公开的测试视频，产品里画面不出本机。
 
-测试随 `make ai-test` 运行：渲染测试需要 `ffmpeg` 与 `ffprobe`，镜头卡片与计划校验的测试需要 NumPy，没有时跳过。
+测试随 `make ai-test` 运行：渲染测试需要 `ffmpeg` 与 `ffprobe`，镜头卡片与计划校验的测试需要 NumPy，运镜与画面毛病的测试需要 OpenCV，没有时跳过。
 
 ## 验收证据
 
-- 单元测试 [`ai/tests/test_montage.py`](../../ai/tests/test_montage.py)：淡入淡出不改变总长；规则版只取过阈值的卡片、画面不变时取得短、从不凑满目标；按视频与按 `when` 条件筛选；视频片段逐个精确定位；横竖照片与不同尺寸的视频片段都渲染成 1920×1080、时长正确；FFmpeg 失败时不留文件；镜头在画面变化处切成卡片、长时间不变的画面等分、相似的卡片同组、纯色帧不参与；描述只挂在为它写的卡片上；合规的计划得到片段，不合规的计划列出每一条问题，两位小数的秒数不被三位小数的切点挡住；要核对时每段要有 `shows`；规则版跳过核对不过的卡片、按核对收窄；核对取最长的连续符合段并容许 1 帧判错，太短的段不可用；每 0.5 秒取一帧。
+- 单元测试 [`ai/tests/test_montage.py`](../../ai/tests/test_montage.py)：淡入淡出不改变总长；规则版只取过阈值的卡片、画面不变时取得短、从不凑满目标；按视频与按 `when` 条件筛选；视频片段逐个精确定位；横竖照片与不同尺寸的视频片段都渲染成 1920×1080、时长正确；FFmpeg 失败时不留文件；镜头在画面变化处切成卡片、长时间不变的画面等分、相似的卡片同组、纯色帧不参与；描述、光线、亮点、运镜与画面毛病只挂在为它写的卡片上；画面右移是向左转、画面放大是向前走、静止画面固定且不抖、绕着不动的路径抖是抖动、模糊画面清晰度低、全白画面全部过白；合规的计划得到片段，不合规的计划列出每一条问题，两位小数的秒数不被三位小数的切点挡住；要核对时每段要有 `shows`；规则版跳过核对不过的卡片、按核对收窄；核对取最长的连续符合段并容许 1 帧判错，太短的段不可用；每 0.5 秒取一帧。
 - 照片：#283 中 Claude 经助手工具检索 717 张真实照片，做出 20 秒与 15 秒（淡入淡出）的成片（2026-10-29）。
 - 视频（2026-10-29，67 分钟的爱丁堡散步，Claude Code 经 `mcp-as-member.sh` 只用两个视频工具）：“城堡和老城石头街道 30 秒”与“公交车和热闹街头 20 秒”各一次检索、一次剪辑就得到成片，逐秒看帧分别有 5/6 与 10/10 段切题；“海边冲浪”时模型说明库里没有、不剪。模型看不到画面，会按探针名描述没看过的细节，工具说明要求它只说标签与分数支持的内容；检索选错的片段只有看画面才能发现。细节见[研究文档](../research/video-moment-retrieval.md#模型规划3222026-10-29)。
 - 试点集 5 条指令（2026-10-29，规则版与模型版对比 baseline，见[研究文档](../research/video-moment-retrieval.md#三版对比3222026-10-29)）：规则版全部切题，跨镜头残帧、黑屏都是 0；模型版的切题占比 0.57–1.0，素材少时仍会加铺垫镜头。三个视觉评审逐段判断与人工标注 66 段里一致 60 段。
@@ -169,5 +176,5 @@ claude mcp add anas -e HERMES_SPIKE_NAME=video-montage-sbx -e DOCKER_CONTEXT=col
 - ADR：[0011 相册服务的专用身份](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[0024 每个成员一个沙箱化的 Hermes 智能体](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
 - 规格：[相册与本地智能检索](photo-library.md)、[相册视频](photo-video.md)、[AI 助手](ai-assistant.md)
 - 研究：[视频剪辑 baseline](../research/video-moment-retrieval.md)、[CutClaw 调研](../research/video-editing-cutclaw.md)、[FilmAgent 调研](../research/video-editing-filmagent.md)
-- 代码：[助手的 MCP 工具](../../ai/assistant-spike/anas_mcp.py)、[视频检索替身](../../ai/assistant-spike/videos_spike.py)、[原型沙箱](../../ai/assistant-spike/run.sh)、[以成员身份运行 MCP](../../ai/assistant-spike/mcp-as-member.sh)、[渲染](../../ai/montage/render.py)、[镜头卡片与计划校验](../../ai/montage/moments.py)、[本机视觉核对](../../ai/montage/look.py)、[模型版评测](../../ai/eval/video_planner.py)、[索引](../../ai/eval/video_moments.py)
+- 代码：[助手的 MCP 工具](../../ai/assistant-spike/anas_mcp.py)、[视频检索替身](../../ai/assistant-spike/videos_spike.py)、[原型沙箱](../../ai/assistant-spike/run.sh)、[以成员身份运行 MCP](../../ai/assistant-spike/mcp-as-member.sh)、[渲染](../../ai/montage/render.py)、[镜头卡片与计划校验](../../ai/montage/moments.py)、[本机视觉核对](../../ai/montage/look.py)、[运镜与画面毛病](../../ai/montage/picture.py)、[模型版评测](../../ai/eval/video_planner.py)、[索引](../../ai/eval/video_moments.py)
 - 测试：[`ai/tests/test_montage.py`](../../ai/tests/test_montage.py)

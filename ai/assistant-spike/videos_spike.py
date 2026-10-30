@@ -209,7 +209,7 @@ def main():
     index = moments.Index.load(os.path.join(args.index, "index.json"), os.path.join(args.index, "frames.npz"))
     vision = look.Vision(args.vision) if args.vision else None
     with Server(args.socket, index, args.videos, args.ai_socket, args.work, vision) as server:
-        print(f"videos-ready {len(index.cards)} cards, {len(index.captions)} captions,"
+        print(f"videos-ready {len(index.cards)} cards, {len(index.captions)} captions, {len(index.pictures)} measured,"
               f" {'looking' if vision else 'not looking'} before a cut", flush=True)
         server.serve_forever()
 

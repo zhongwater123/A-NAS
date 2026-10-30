@@ -44,6 +44,13 @@ DESCRIBE = ("用一句中文描述上面几张图（同一段视频按时间先�
             "是夜晚就写夜晚。只写几帧里都看得到的，认不准的建筑就说建筑，不要编地名，不超过 40 个字。"
             "直接写描述，不要复述题目。")
 
+# Two more facts of a card a 2B model gets right on the same frames; shot size, camera
+# motion, landmarks and looks it does not (docs/research/video-moment-retrieval.md).
+LIGHTS = ("晴天", "阴天", "逆光", "黄昏", "夜晚", "室内")
+LIGHT = "上面是同一段视频的几帧。光线是哪一种：" + "、".join(LIGHTS) + "？只回答一个词。"
+HIGHLIGHT = "上面是同一段视频的几帧。画面里最吸引人的一样东西是什么？不超过 8 个字，直接回答。"
+HIGHLIGHT_CHARS = 12
+
 # The answer comes first: asked to describe first, or to fill a JSON verdict, a 2B
 # model says yes far more often (8 and 11 of 14 hard frames right, 13 of 14 this way).
 FIT = "这是一段视频里的一帧。问题：画面里有「{shows}」吗？请仔细看，回答“有”或“没有”，再用一句话说明画面里实际是什么。"
@@ -79,6 +86,14 @@ class Vision:
 
     def describe(self, jpegs: list[bytes]) -> str:
         return self.ask(DESCRIBE, jpegs, 80).splitlines()[0].strip()
+
+    def light(self, jpegs: list[bytes]) -> str:
+        """One of LIGHTS, or 不确定 when the answer is none of them."""
+        text = self.ask(LIGHT, jpegs, 8)
+        return next((name for name in LIGHTS if text.startswith(name)), "不确定")
+
+    def highlight(self, jpegs: list[bytes]) -> str:
+        return self.ask(HIGHLIGHT, jpegs, 20).splitlines()[0].strip(" 。.")[:HIGHLIGHT_CHARS]
 
     def fits(self, jpeg: bytes, shows: str) -> tuple[bool, str]:
         text = self.ask(FIT.format(shows=shows), jpeg, 60)

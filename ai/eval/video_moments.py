@@ -569,8 +569,10 @@ def describe(args):
     def chosen(card):
         return [index.frame_ms[i] for i in index.keyframes(card, look.KEYFRAMES)]
 
-    todo = [c for c in index.cards
-            if [said.get(c["id"], {}).get(k) for k in ("start", "end", "frames")] != [c["start"], c["end"], chosen(c)]]
+    def kept(card):
+        return [said.get(card["id"], {}).get(k) for k in ("start", "end", "frames")] == [card["start"], card["end"], chosen(card)]
+
+    todo = [c for c in index.cards if not kept(c) or not all(k in said[c["id"]] for k in ("light", "highlight"))]
     began = time.monotonic()
     for n, card in enumerate(todo, 1):
         frames = chosen(card)
@@ -578,12 +580,47 @@ def describe(args):
         for frame in frames:
             with open(frame_path(card["video"], frame), "rb") as file:
                 jpegs.append(file.read())
-        caption = vision.describe(jpegs)
-        said[card["id"]] = {"start": card["start"], "end": card["end"], "frames": frames, "caption": caption}
+        caption = said[card["id"]]["caption"] if kept(card) else vision.describe(jpegs)
+        said[card["id"]] = {"start": card["start"], "end": card["end"], "frames": frames, "caption": caption,
+                            "light": vision.light(jpegs), "highlight": vision.highlight(jpegs)}
         if n % 20 == 0 or n == len(todo):
             with open(path, "w", encoding="utf-8") as file:
                 json.dump({"vision": args.name, "cards": said}, file, ensure_ascii=False, indent=1)
             print(f"{n}/{len(todo)} {(time.monotonic() - began) / n:.2f} s each  {card['id']}: {caption}", flush=True)
+
+
+def measure(args):
+    """How the camera moves in each card and how its picture looks (montage.picture), written to
+    pictures.json beside index.json; cards measured over the same seconds are kept."""
+    from concurrent.futures import ProcessPoolExecutor
+
+    from montage import moments, picture
+
+    index = moments.Index.load(os.path.join(args.cache, "index.json"), os.path.join(args.cache, "frames.npz"))
+    path = os.path.join(args.cache, moments.PICTURES)
+    measured = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as file:
+            measured = json.load(file)["cards"]
+    todo = [c for c in index.cards
+            if [measured.get(c["id"], {}).get(k) for k in ("start", "end")] != [c["start"], c["end"]]]
+    files = {video: os.path.join(VIDEOS, meta["file"]) for video, meta in index.videos.items()}
+    shapes = {video: picture.size(file) for video, file in files.items()}
+    began = time.monotonic()
+    with ProcessPoolExecutor(args.workers) as pool:
+        jobs = [(c, pool.submit(_measure, files[c["video"]], c["start"], c["end"], shapes[c["video"]])) for c in todo]
+        for n, (card, job) in enumerate(jobs, 1):
+            measured[card["id"]] = {"start": card["start"], "end": card["end"], **job.result()}
+            if n % 50 == 0 or n == len(jobs):
+                with open(path, "w", encoding="utf-8") as file:
+                    json.dump({"step": picture.STEP, "cards": measured}, file, ensure_ascii=False, indent=1)
+                print(f"{n}/{len(jobs)} {(time.monotonic() - began) / n:.2f} s each", flush=True)
+
+
+def _measure(video, start, end, shape):
+    from montage import picture
+
+    return picture.measure(picture.frames(video, start, end, shape))
 
 
 def main():
@@ -603,6 +640,9 @@ def main():
     step.add_argument("--vision", default="http://127.0.0.1:8090/v1/chat/completions",
                       help="the local vision model's chat completions URL (llama-server)")
     step.add_argument("--name", default="Qwen3-VL-2B-Instruct Q8_0", help="the vision model, as recorded")
+    step = steps.add_parser("measure", help="measure camera motion, sharpness and exposure of each montage card")
+    step.add_argument("--cache", required=True, help="the model's directory under the cache, with index.json")
+    step.add_argument("--workers", type=int, default=4)
     step = steps.add_parser("evaluate", help="score the layouts and methods")
     step.add_argument("--cache", required=True, help="the model's directory under the cache, as embed printed it")
     step = steps.add_parser("montage", help="cut the baseline clip for one query")
@@ -624,6 +664,8 @@ def main():
         build_index(args)
     elif args.step == "describe":
         describe(args)
+    elif args.step == "measure":
+        measure(args)
     else:
         evaluate(args)
 

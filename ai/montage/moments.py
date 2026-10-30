@@ -36,6 +36,16 @@ THRESHOLD = 0.6533
 CARDS_MAX = 40
 # What a local vision model said of each card's key frame (eval.video_moments describe).
 CAPTIONS = "captions.json"
+# How the camera moves in each card and how its picture looks (eval.video_moments measure),
+# and the measures a picture is called blurred, shaky, dark or blown out past (montage.picture),
+# set on the pilot set's extremes. Sharpness is mostly how much texture a picture has: aurora,
+# fog and a close-up with a soft background score low too, so only the softest are blurred.
+# Shake also catches a cut the shot detection missed. A sky is a tenth to a fifth blown out.
+PICTURES = "pictures.json"
+BLURRED = 20.0
+SHAKY = 0.01
+DARK = 25.0
+BLOWN = 0.3
 TAGS = 5
 SEGMENT_MIN = 1.5
 SEGMENTS_MAX = 30
@@ -59,6 +69,12 @@ class PlanError(Exception):
         self.problems = problems
 
 
+def _for_cards(entries: dict, cards: list[dict]) -> dict:
+    """The entries written for these cards, over the same seconds."""
+    return {c["id"]: entries[c["id"]] for c in cards
+            if c["id"] in entries and [entries[c["id"]]["start"], entries[c["id"]]["end"]] == [c["start"], c["end"]]}
+
+
 class Index:
     def __init__(self, index: dict, vectors: dict):
         self.model = index["model"]
@@ -77,11 +93,12 @@ class Index:
         self.rows, self.frames = rows, np.stack(frames)
         self.flat, self.tags, self.shot_of = np.array(flat), tags, shot_of
         self.cards = self._cards()
-        self.captions = {}
+        self.captions, self.notes, self.pictures = {}, {}, {}
 
     @classmethod
     def load(cls, index_path: str, vectors_path: str) -> "Index":
-        """The index, with the cards' captions when captions.json beside it holds them for these cards."""
+        """The index, with the cards' captions (captions.json) and their camera motion and looks
+        (pictures.json) when the files beside it hold them for these cards."""
         with open(index_path, encoding="utf-8") as file:
             index = json.load(file)
         with np.load(vectors_path) as data:
@@ -91,8 +108,14 @@ class Index:
         if os.path.exists(captions):
             with open(captions, encoding="utf-8") as file:
                 said = json.load(file)["cards"]
-            loaded.captions = {c["id"]: said[c["id"]]["caption"] for c in loaded.cards
-                               if c["id"] in said and [said[c["id"]]["start"], said[c["id"]]["end"]] == [c["start"], c["end"]]}
+            said = _for_cards(said, loaded.cards)
+            loaded.captions = {i: entry["caption"] for i, entry in said.items()}
+            loaded.notes = {i: {k: entry[k] for k in ("light", "highlight")} for i, entry in said.items()
+                            if all(k in entry for k in ("light", "highlight"))}
+        pictures = os.path.join(os.path.dirname(index_path), PICTURES)
+        if os.path.exists(pictures):
+            with open(pictures, encoding="utf-8") as file:
+                loaded.pictures = _for_cards(json.load(file)["cards"], loaded.cards)
         return loaded
 
     def keyframes(self, card: dict, count: int) -> list[int]:
@@ -191,11 +214,22 @@ class Index:
                 "id": card["id"], "video": card["video"], "start": card["start"], "end": card["end"],
                 "shot": card["shot"], "group": card["group"],
                 **({"caption": self.captions[card["id"]]} if card["id"] in self.captions else {}),
+                **self.notes.get(card["id"], {}), **self._looks(card["id"]),
                 "score": max(b["score"] for b in best.values()), "probes": best,
                 "tags": [label for label, _ in sorted(labels.items(), key=lambda kv: -kv[1])[:TAGS]],
             })
         found.sort(key=lambda c: -c["score"])
         return {"threshold": THRESHOLD, "cards": found[:limit]}
+
+    def _looks(self, card_id: str) -> dict:
+        """The camera's motion and what is wrong with the picture, when the card was measured."""
+        measured = self.pictures.get(card_id)
+        if measured is None:
+            return {}
+        flaws = [word for word, bad in (
+            ("模糊", measured["sharp"] < BLURRED), ("抖动", measured["shake"] > SHAKY),
+            ("过暗", measured["bright"] < DARK), ("过曝", measured["clipped"] > BLOWN)) if bad]
+        return {"motion": measured["motion"], "flaws": flaws}
 
     def check(self, segments: list[dict], shows_needed: bool = False) -> list[tuple[str, float, float]]:
         """The plan's (video, start, end) in order, or PlanError listing what is wrong. With

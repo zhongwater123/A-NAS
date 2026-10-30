@@ -1,7 +1,7 @@
 """Cutting videos for the assistant (montage): FFmpeg commands, renders and plan checks.
 
-Rendering and frame tests need ffmpeg and ffprobe, and the shot-card tests NumPy;
-each is skipped without them. The vision model is a stand-in that answers by rule.
+Rendering and frame tests need ffmpeg and ffprobe, the shot-card tests NumPy and the
+picture measures OpenCV; each is skipped without them. The vision model is a stand-in that answers by rule.
 """
 
 import json
@@ -19,6 +19,13 @@ try:
     from montage import moments
 except ImportError:
     np = moments = None
+
+try:
+    import cv2
+
+    from montage import picture
+except ImportError:
+    cv2 = picture = None
 
 HAS_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 
@@ -139,13 +146,16 @@ class MomentsTest(unittest.TestCase):
                               {f"08/{w['frame']}": vector for w in windows})
         self.assertEqual([(c["start"], c["end"]) for c in index.cards], [(0, 16.67), (16.67, 33.33), (33.33, 50)])
 
-    def test_captions_beside_the_index_ride_on_the_cards_they_were_written_for(self):
-        work = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, work)
+    def write_index(self, work):
         with open(os.path.join(work, "index.json"), "w", encoding="utf-8") as file:
             json.dump({"model": "test", "videos": self.index.videos}, file)
         keys = [f"07/{w['frame']}" for w in self.index.videos["07"]["windows"]]
         np.savez(os.path.join(work, "frames.npz"), keys=np.array(keys), vectors=self.index.frames)
+
+    def test_captions_beside_the_index_ride_on_the_cards_they_were_written_for(self):
+        work = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, work)
+        self.write_index(work)
         with open(os.path.join(work, moments.CAPTIONS), "w", encoding="utf-8") as file:
             json.dump({"cards": {"07-1-0": {"start": 8, "end": 28, "caption": "山上的城堡"},
                                  "07-1-1": {"start": 8, "end": 48, "caption": "cut another way"}}}, file)
@@ -157,6 +167,23 @@ class MomentsTest(unittest.TestCase):
         castle = next(c for c in index.cards if c["id"] == "07-1-0")
         # Three frames spread over its ten windows (8-28 s): the first, the fifth, the last.
         self.assertEqual([index.frame_ms[i] for i in index.keyframes(castle, 3)], [9000, 17000, 27000])
+
+    def test_cards_carry_light_highlight_motion_and_flaws_when_written(self):
+        with tempfile.TemporaryDirectory() as work:
+            self.write_index(work)
+            with open(os.path.join(work, moments.CAPTIONS), "w", encoding="utf-8") as file:
+                json.dump({"cards": {"07-1-0": {"start": 8, "end": 28, "caption": "山上的城堡",
+                                                "light": "晴天", "highlight": "城堡塔楼"}}}, file)
+            looks = {"motion": "向前走", "sharp": 900.0, "shake": 0.02, "bright": 120.0, "clipped": 0.4}
+            with open(os.path.join(work, moments.PICTURES), "w", encoding="utf-8") as file:
+                json.dump({"cards": {"07-1-0": {"start": 8, "end": 28, **looks},
+                                     "07-1-1": {"start": 8, "end": 48, **looks}}}, file)
+            index = moments.Index.load(os.path.join(work, "index.json"), os.path.join(work, "frames.npz"))
+        found = {c["id"]: c for c in index.search({"城堡": self.castle})["cards"]}
+        castle = found["07-1-0"]
+        self.assertEqual((castle["light"], castle["highlight"], castle["motion"]), ("晴天", "城堡塔楼", "向前走"))
+        self.assertEqual(castle["flaws"], ["抖动", "过曝"])
+        self.assertNotIn("motion", found["07-1-1"])  # measured over other seconds
 
     def test_search_ranks_cards_and_leaves_out_flat_frames(self):
         found = self.index.search({"城堡": self.castle}, limit=10)
@@ -305,3 +332,61 @@ class LookTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(cv2 is None, "needs OpenCV")
+class PictureTest(unittest.TestCase):
+    """Frames cut out of one textured picture, as a camera would see it."""
+
+    def setUp(self):
+        noise = np.random.default_rng(7).integers(0, 256, (600, 900), dtype=np.uint8)
+        self.scene = cv2.GaussianBlur(noise, (0, 0), 2)
+
+    def crops(self, offsets, scales=None):
+        frames = []
+        for k, (x, y) in enumerate(offsets):
+            scale = scales[k] if scales else 1.0
+            w, h = round(480 / scale), round(270 / scale)
+            cx, cy = 450 + x, 300 + y
+            crop = self.scene[cy - h // 2:cy - h // 2 + h, cx - w // 2:cx - w // 2 + w]
+            frames.append(cv2.resize(crop, (480, 270), interpolation=cv2.INTER_LINEAR))
+        return np.stack(frames)
+
+    def test_a_still_camera_is_fixed_and_steady(self):
+        measured = picture.measure(self.crops([(0, 0)] * 10))
+        self.assertEqual(measured["motion"], "固定")
+        self.assertLess(measured["shake"], 0.0005)
+
+    def test_the_picture_moving_right_is_the_camera_turning_left(self):
+        # 10 px of 480 every 0.2 s is a fifth of the width a second.
+        self.assertEqual(picture.measure(self.crops([(-10 * k, 0) for k in range(10)]))["motion"], "向左转")
+        self.assertEqual(picture.measure(self.crops([(10 * k, 0) for k in range(10)]))["motion"], "向右转")
+
+    def test_a_growing_picture_is_the_camera_walking_on(self):
+        measured = picture.measure(self.crops([(0, 0)] * 10, [1.02**k for k in range(10)]))
+        self.assertEqual(measured["motion"], "向前走")
+        self.assertAlmostEqual(measured["zoom"], np.log(1.02) / picture.STEP, delta=0.02)
+
+    def test_jitter_about_a_steady_path_is_shake(self):
+        jitter = np.random.default_rng(3).integers(-4, 5, (20, 2))
+        shaky = picture.measure(self.crops([tuple(j) for j in jitter]))
+        self.assertEqual(shaky["motion"], "固定")
+        self.assertGreater(shaky["shake"], 0.003)
+
+    def test_blur_and_exposure(self):
+        sharp = picture.measure(self.crops([(0, 0)] * 3))
+        blurred = picture.measure(np.stack([cv2.GaussianBlur(f, (0, 0), 3) for f in self.crops([(0, 0)] * 3)]))
+        self.assertLess(blurred["sharp"], sharp["sharp"] / 4)
+        white = picture.measure(np.full((3, 270, 480), 255, np.uint8))
+        self.assertEqual((white["bright"], white["clipped"]), (255.0, 1.0))
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg")
+    def test_frames_are_decoded_grey_at_the_step(self):
+        with tempfile.TemporaryDirectory() as work:
+            video = os.path.join(work, "pan.mp4")
+            subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i",  # noqa: S607  test tool from PATH
+                            "testsrc2=s=640x360:r=25:d=3", "-pix_fmt", "yuv420p", video], check=True)
+            shape = picture.size(video)
+            self.assertEqual(shape, (480, 270))
+            grey = picture.frames(video, 1.0, 2.0, shape)
+            self.assertEqual(grey.shape, (5, 270, 480))
