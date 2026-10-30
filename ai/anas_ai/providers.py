@@ -885,20 +885,24 @@ class LlamaReader:
             if not text and not tokens:
                 # llama-server notices a closed connection only between
                 # generated tokens: it would encode the image and evaluate
-                # the whole prompt first, minutes of CPU on the NAS. Stopping
-                # it frees the CPU at once; the next reading starts it again.
-                self.release()
+                # the whole prompt first, about 35 s of six cores on the NAS,
+                # and it lets SIGTERM wait as long. Killing it frees the CPU
+                # at once; it keeps nothing, and the next reading starts it.
+                self.release(kill=True)
             raise Cancelled()
         if refused is not None:
             # The server checks the image; one it cannot decode fails again.
             raise InvalidInput(refused)
         return {"text": "".join(text), "logprobs": tokens, "finish": finish}
 
-    def release(self):
-        """Stops the server, which frees the model's memory."""
+    def release(self, kill=False):
+        """Stops the server, which frees the model's memory; kill does not wait for it to finish its work."""
         process, self._process = self._process, None
         if process is not None and process.poll() is None:
-            process.terminate()
+            if kill:
+                process.kill()
+            else:
+                process.terminate()
             try:
                 process.wait(10)
             except subprocess.TimeoutExpired:
