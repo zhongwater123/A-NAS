@@ -5871,6 +5871,8 @@ export interface components {
              * @enum {string}
              */
             clusters?: "ready" | "preparing";
+            /** @description Originals whose vector sends them to have their text read (documents, receipts, cards, screenshots), queued or read. Absent while the text route does not apply to the Worker's model or its queries wait for the Worker. */
+            textPhotos?: number;
         };
         PhotoDirectoryListing: {
             /** @description Every subdirectory on the first page; empty on later pages. */

@@ -22,6 +22,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/mediaplay"
 	"github.com/zhongwater123/A-NAS/internal/photos/labels"
 	"github.com/zhongwater123/A-NAS/internal/photos/objects"
+	"github.com/zhongwater123/A-NAS/internal/photos/textroute"
 )
 
 var (
@@ -205,6 +206,9 @@ type Options struct {
 	Labels *labels.Set
 	// Objects defaults to the built-in calibration of the object detector.
 	Objects *objects.Calibration
+	// TextRoute defaults to the built-in route that picks the photos whose
+	// text local AI reads.
+	TextRoute *textroute.Route
 	// People defaults to the built-in calibration of the face models.
 	People []PeopleCalibration
 }
@@ -243,6 +247,10 @@ type Service struct {
 	detected   objectIndex
 	labels     labels.Set
 	labelIndex labelIndex
+	// textRoute picks the photos whose text local AI reads, and routeIndex
+	// holds its queries' vectors (textrouting.go).
+	textRoute  textroute.Route
+	routeIndex routeIndex
 	// objectCalibration says how search uses detections, and matcher finds
 	// the detector classes a query names.
 	objectCalibration objects.Calibration
@@ -315,6 +323,12 @@ func Open(root string, options Options) (*Service, error) {
 	if options.Labels != nil {
 		service.labels = *options.Labels
 	} else if service.labels, err = labels.V1(); err != nil {
+		_ = service.Close()
+		return nil, err
+	}
+	if options.TextRoute != nil {
+		service.textRoute = *options.TextRoute
+	} else if service.textRoute, err = textroute.V1(); err != nil {
 		_ = service.Close()
 		return nil, err
 	}
