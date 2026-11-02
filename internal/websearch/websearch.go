@@ -48,30 +48,23 @@ type engine struct {
 }
 
 // engines are each tab's engines, which deploy/search/settings.yml keeps
-// loaded; the list follows the measurements on the Experimental NAS
-// (docs/research/web-search-engines.md).
+// loaded. SearXNG waits for the slowest engine of a search, so engines that
+// never answered in the measurements are left out until the Experimental NAS
+// shows otherwise (docs/research/web-search-engines.md).
 var engines = map[Category][]engine{
 	Web: {
-		{name: "baidu", label: "百度"}, {name: "bing", label: "必应"}, {name: "sogou", label: "搜狗"},
-		{name: "360search", label: "360 搜索"}, {name: "quark", label: "夸克"}, {name: "yandex", label: "Yandex"},
+		{name: "baidu", label: "百度"}, {name: "sogou", label: "搜狗"}, {name: "360search", label: "360 搜索"},
+		{name: "quark", label: "夸克"}, {name: "yandex", label: "Yandex"},
 	},
-	Images: {
-		{name: "baidu images", label: "百度图片"}, {name: "bing images", label: "必应图片"},
-		{name: "sogou images", label: "搜狗图片"}, {name: "quark images", label: "夸克图片"},
-		{name: "yandex images", label: "Yandex 图片"},
-	},
+	Images: {{name: "baidu images", label: "百度图片"}, {name: "quark images", label: "夸克图片"}},
 	Videos: {
 		{name: "bilibili", label: "哔哩哔哩", platform: true}, {name: "iqiyi", label: "爱奇艺", platform: true},
 		{name: "acfun", label: "AcFun", platform: true}, {name: "sogou videos", label: "搜狗视频"},
-		{name: "360search videos", label: "360 视频"}, {name: "bing videos", label: "必应视频"},
-		{name: "youtube", label: "YouTube", platform: true}, {name: "dailymotion", label: "Dailymotion", platform: true},
+		{name: "360search videos", label: "360 视频"}, {name: "youtube", label: "YouTube", platform: true},
+		{name: "dailymotion", label: "Dailymotion", platform: true},
 	},
-	News: {{name: "bing news", label: "必应资讯"}, {name: "sogou wechat", label: "搜狗微信"}},
-	Torrents: {
-		{name: "piratebay", label: "海盗湾"}, {name: "1337x", label: "1337x"}, {name: "nyaa", label: "nyaa"},
-		{name: "bt4g", label: "BT4G"}, {name: "btdigg", label: "BTDigg"}, {name: "solidtorrents", label: "SolidTorrents"},
-		{name: "kickass", label: "Kickass"}, {name: "tokyotoshokan", label: "TokyoToshokan"},
-	},
+	News:     {{name: "sogou wechat", label: "搜狗微信"}},
+	Torrents: {{name: "piratebay", label: "海盗湾"}},
 }
 
 // Engines are the names the window shows for a tab's engines, in order.
@@ -209,6 +202,11 @@ const (
 	searchBurst    = 10
 )
 
+// switchMaxAge is how long thumbnails trust the last read of the switch: a
+// page of results loads dozens at once, and each read is a Host Agent call
+// that runs systemctl.
+const switchMaxAge = 5 * time.Second
+
 // Options configures a Service.
 type Options struct {
 	Backend  Backend
@@ -229,12 +227,18 @@ type Service struct {
 	thumbnailPath string
 	limitersMu    sync.Mutex
 	limiters      map[string]*rate.Limiter
+	// The switch as last read, which thumbnails reuse for switchMaxAge.
+	stateMu   sync.Mutex
+	lastState ServiceState
+	readAt    time.Time
+	now       func() time.Time
 }
 
 func New(options Options) *Service {
 	return &Service{
 		backend: options.Backend, power: options.Switch, settings: options.Settings,
 		secret: options.Secret, thumbnailPath: options.ThumbnailPath, limiters: map[string]*rate.Limiter{},
+		now: time.Now,
 	}
 }
 
@@ -279,7 +283,25 @@ func (s *Service) state(ctx context.Context) (ServiceState, error) {
 	if err != nil {
 		return ServiceState{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
+	s.remember(state)
 	return state, nil
+}
+
+func (s *Service) remember(state ServiceState) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.lastState, s.readAt = state, s.now()
+}
+
+// recentState is the switch as read within switchMaxAge, or read again.
+func (s *Service) recentState(ctx context.Context) (ServiceState, error) {
+	s.stateMu.Lock()
+	state, fresh := s.lastState, !s.readAt.IsZero() && s.now().Sub(s.readAt) < switchMaxAge
+	s.stateMu.Unlock()
+	if fresh {
+		return state, nil
+	}
+	return s.state(ctx)
 }
 
 func (s *Service) torrents(ctx context.Context) (bool, error) {
@@ -295,19 +317,19 @@ type Settings struct {
 	Torrents bool `json:"torrents"`
 }
 
-// SetSettings turns web search and its torrent tab on or off.
+// SetSettings turns web search and its torrent tab on or off. The Host
+// Agent's switch goes first: when it cannot be reached, nothing changes.
 func (s *Service) SetSettings(ctx context.Context, settings Settings) (Status, error) {
-	if s.settings == nil {
+	if s.settings == nil || s.power == nil {
 		return Status{}, ErrUnavailable
 	}
+	state, err := s.power.SetWebSearch(ctx, settings.Enabled)
+	if err != nil {
+		return Status{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	s.remember(state)
 	if err := s.settings.SetTorrents(ctx, settings.Torrents); err != nil {
 		return Status{}, err
-	}
-	if s.power == nil {
-		return Status{}, ErrUnavailable
-	}
-	if _, err := s.power.SetWebSearch(ctx, settings.Enabled); err != nil {
-		return Status{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	return s.Status(ctx)
 }
@@ -348,8 +370,12 @@ func (s *Service) Thumbnail(ctx context.Context, imageURL, signature string) (Im
 	if len(s.secret) == 0 || !hmac.Equal([]byte(signature), []byte(s.sign(imageURL))) {
 		return Image{}, ErrNotSigned
 	}
-	if err := s.enabled(ctx); err != nil {
+	state, err := s.recentState(ctx)
+	if err != nil {
 		return Image{}, err
+	}
+	if !state.Enabled {
+		return Image{}, ErrDisabled
 	}
 	if s.backend == nil {
 		return Image{}, ErrUnavailable

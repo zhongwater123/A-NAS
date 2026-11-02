@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // recordingBackend answers with response and remembers what it was asked.
@@ -43,7 +44,7 @@ func TestSearchAsksOnlyTheTabsEnginesInTheBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	form := backend.forms[0]
-	if form.Get("q") != "台风" || form.Get("engines") != "bing news,sogou wechat" || form.Has("categories") ||
+	if form.Get("q") != "台风" || form.Get("engines") != "sogou wechat" || form.Has("categories") ||
 		form.Get("pageno") != "2" || form.Get("time_range") != "week" || form.Get("format") != "json" || form.Get("safesearch") != "1" {
 		t.Fatalf("form = %v", form)
 	}
@@ -55,7 +56,7 @@ func TestResultsAreMappedForEachTab(t *testing.T) {
 		Results: []RawResult{
 			{URL: "http://www.bilibili.com/video/av1", Title: "流浪地球3", Content: "-", Engine: "bilibili", Engines: []string{"bilibili"},
 				PublishedDate: &published, Thumbnail: "//i1.hdslb.com/a.jpg", Length: "233.0", Author: "笙筌"},
-			{URL: "https://www.youtube.com/watch?v=x", Title: "The Wandering Earth", Engines: []string{"youtube", "bing videos"},
+			{URL: "https://www.youtube.com/watch?v=x", Title: "The Wandering Earth", Engines: []string{"youtube", "sogou videos"},
 				Thumbnail: "https://i.ytimg.com/vi/x/hq.jpg", Length: "2:16:29"},
 			{URL: "https://v.sogou.com/vc/np?link=1", Title: "资讯", Engines: []string{"sogou videos"}, Length: 20.0},
 			{URL: "javascript:alert(1)", Title: "dropped", Engines: []string{"acfun"}},
@@ -77,7 +78,7 @@ func TestResultsAreMappedForEachTab(t *testing.T) {
 		!strings.Contains(bilibili.Thumbnail, url.QueryEscape("https://i1.hdslb.com/a.jpg")) {
 		t.Fatalf("bilibili = %+v", bilibili)
 	}
-	if youtube.Platform != "YouTube" || *youtube.DurationSeconds != 8189 || strings.Join(youtube.Engines, ",") != "YouTube,必应视频" {
+	if youtube.Platform != "YouTube" || *youtube.DurationSeconds != 8189 || strings.Join(youtube.Engines, ",") != "YouTube,搜狗视频" {
 		t.Fatalf("youtube = %+v", youtube)
 	}
 	if sogou.Platform != "v.sogou.com" || *sogou.DurationSeconds != 20 || sogou.Thumbnail != "" {
@@ -93,7 +94,7 @@ func TestTorrentsNeedTheirSwitchAndKeepTheirLinks(t *testing.T) {
 		URL: "https://thepiratebay.org/description.php?id=5421757", Title: "Big.Buck.Bunny.1080p", Engines: []string{"piratebay"},
 		MagnetLink: "magnet:?xt=urn:btih:9EE3&dn=Big.Buck.Bunny", Filesize: "885.68 MB", Seed: "1", Leech: 0.0,
 	}, {
-		URL: "https://example.org/t", Title: "no magnet", Engines: []string{"nyaa"}, MagnetLink: "javascript:x", Filesize: 1024.0,
+		URL: "https://example.org/t", Title: "no magnet", Engines: []string{"piratebay"}, MagnetLink: "javascript:x", Filesize: 1024.0,
 	}}}}
 	service := newTestService(t, backend, NewMemorySwitch(true))
 	ctx := context.Background()
@@ -189,6 +190,99 @@ func TestQueriesTheWindowWouldNotSendAreRefused(t *testing.T) {
 	} {
 		if _, err := service.Search(context.Background(), "u1", query); !errors.Is(err, ErrInvalidQuery) {
 			t.Errorf("%+v = %v, want ErrInvalidQuery", query, err)
+		}
+	}
+}
+
+// countingSwitch counts the reads of the switch and can refuse to change it.
+type countingSwitch struct {
+	*MemorySwitch
+	reads   int
+	refuses bool
+}
+
+func (c *countingSwitch) WebSearch(ctx context.Context) (ServiceState, error) {
+	c.reads++
+	return c.MemorySwitch.WebSearch(ctx)
+}
+
+func (c *countingSwitch) SetWebSearch(ctx context.Context, enabled bool) (ServiceState, error) {
+	if c.refuses {
+		return ServiceState{}, errors.New("the Host Agent is restarting")
+	}
+	return c.MemorySwitch.SetWebSearch(ctx, enabled)
+}
+
+func TestThumbnailsReuseARecentReadOfTheSwitch(t *testing.T) {
+	power := &countingSwitch{MemorySwitch: NewMemorySwitch(true)}
+	service := newTestService(t, &recordingBackend{}, power)
+	clock := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return clock }
+	ctx := context.Background()
+	address := "https://example.org/a.png"
+	for range 30 {
+		if _, err := service.Thumbnail(ctx, address, service.sign(address)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if power.reads != 1 {
+		t.Fatalf("a page of thumbnails read the switch %d times, want once", power.reads)
+	}
+	clock = clock.Add(switchMaxAge)
+	if _, err := service.Thumbnail(ctx, address, service.sign(address)); err != nil || power.reads != 2 {
+		t.Fatalf("after %v: %v, %d reads", switchMaxAge, err, power.reads)
+	}
+	// A search reads the switch afresh, and turning it off is seen at once.
+	if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); err != nil || power.reads != 3 {
+		t.Fatalf("search: %v, %d reads", err, power.reads)
+	}
+	if _, err := service.SetSettings(ctx, Settings{Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Thumbnail(ctx, address, service.sign(address)); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("thumbnail after turning off = %v, want ErrDisabled", err)
+	}
+}
+
+func TestNothingChangesWhenTheSwitchCannotBeSet(t *testing.T) {
+	power := &countingSwitch{MemorySwitch: NewMemorySwitch(true), refuses: true}
+	service := newTestService(t, &recordingBackend{}, power)
+	ctx := context.Background()
+	if _, err := service.SetSettings(ctx, Settings{Enabled: false, Torrents: true}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("SetSettings = %v, want ErrUnavailable", err)
+	}
+	if torrents, err := service.settings.Torrents(ctx); err != nil || torrents {
+		t.Fatalf("torrent tab = %v, %v; want it left off", torrents, err)
+	}
+}
+
+func TestDatesWithoutAZoneAreThisMachinesTime(t *testing.T) {
+	evening := "2026-10-30T20:00:00"
+	if got := publishedAt(&evening); got == nil || !got.Equal(time.Date(2026, 10, 30, 20, 0, 0, 0, time.Local)) {
+		t.Fatalf("naive date = %v, want 20:00 local time", got)
+	}
+	zoned := "2026-10-30T20:00:00+00:00"
+	if got := publishedAt(&zoned); got == nil || !got.Equal(time.Date(2026, 10, 30, 20, 0, 0, 0, time.UTC)) {
+		t.Fatalf("zoned date = %v", got)
+	}
+	for _, text := range []string{"None", "", "1970-01-01T00:00:00"} {
+		if got := publishedAt(&text); got != nil {
+			t.Errorf("%q = %v, want no date", text, got)
+		}
+	}
+}
+
+func TestSizesAreReadInPowersOf1024(t *testing.T) {
+	for text, want := range map[string]int64{
+		"885.68 MB": 928702791, "1.5GiB": 1610612736, "700 KB": 716800, "12 B": 12, "3 tb": 3 << 40, "42": 42,
+	} {
+		if got := size(text); got == nil || *got != want {
+			t.Errorf("%q = %v, want %d", text, got, want)
+		}
+	}
+	for _, text := range []string{"", "MB", "1,5 GB", "2 PB", "-3 MB"} {
+		if got := size(text); got != nil {
+			t.Errorf("%q = %d, want no size", text, *got)
 		}
 	}
 }

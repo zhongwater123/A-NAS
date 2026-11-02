@@ -81,11 +81,12 @@ func (s *SearXNG) Thumbnail(ctx context.Context, imageURL, signature string) (Im
 		return Image{}, err
 	}
 	defer response.Body.Close()
-	if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusBadRequest {
-		return Image{}, ErrNotFound
-	}
+	// SearXNG answered, so it runs: any other status is the remote host's,
+	// which it passes on (403 from hotlink protection, 5xx), or 400 for an
+	// address it could not fetch. The window shows its placeholder either way.
 	if response.StatusCode != http.StatusOK {
-		return Image{}, fmt.Errorf("SearXNG's image proxy answered %d", response.StatusCode)
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return Image{}, ErrNotFound
 	}
 	// The proxy also passes binary/octet-stream on; the window shows images only.
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))

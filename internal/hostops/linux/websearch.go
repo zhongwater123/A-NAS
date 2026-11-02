@@ -49,6 +49,8 @@ func (e *Executor) WebSearch(ctx context.Context) (websearchswitch.State, error)
 
 // SetWebSearch turns web search on or off and starts or stops the service.
 func (e *Executor) SetWebSearch(ctx context.Context, enabled bool) (websearchswitch.State, error) {
+	e.webSearchMu.Lock()
+	defer e.webSearchMu.Unlock()
 	marker := e.webSearchMarker()
 	action := "start"
 	if enabled {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -239,14 +240,21 @@ func absoluteImage(address string) string {
 	return address
 }
 
-var publishedLayouts = []string{time.RFC3339Nano, "2006-01-02T15:04:05", "2006-01-02 15:04:05", "2006-01-02"}
+// localLayouts are the dates SearXNG writes without a zone: its engines make
+// them from Chinese sites' times or from timestamps in SearXNG's own zone,
+// which is this machine's, as the Product Service's is.
+var localLayouts = []string{"2006-01-02T15:04:05", "2006-01-02T15:04:05.999999", "2006-01-02 15:04:05", "2006-01-02"}
 
 func publishedAt(value *string) *time.Time {
 	if value == nil {
 		return nil
 	}
-	for _, layout := range publishedLayouts {
-		if t, err := time.Parse(layout, strings.TrimSpace(*value)); err == nil && t.Year() > 1970 {
+	text := strings.TrimSpace(*value)
+	if t, err := time.Parse(time.RFC3339Nano, text); err == nil && t.Year() > 1970 {
+		return &t
+	}
+	for _, layout := range localLayouts {
+		if t, err := time.ParseInLocation(layout, text, time.Local); err == nil && t.Year() > 1970 {
 			return &t
 		}
 	}
@@ -302,27 +310,30 @@ func seconds(value float64) *int {
 	return &n
 }
 
-// size reads bytes or a size such as "885.68 MB"; the window shows it in its
-// own units, so binary and decimal prefixes count the same.
+// sizeText is a size as SearXNG's engines write it: a number, perhaps a
+// space, and a unit.
+var sizeText = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)\s*(?:([KMGT])I?)?B?$`)
+
+// size reads bytes or a size such as "885.68 MB". SearXNG writes sizes with
+// searx.utils.humanize_bytes, which counts in powers of 1024 but labels them
+// KB, MB and GB, so every prefix here is binary; a parser of decimal units
+// (go-humanize's ParseBytes) would read these 5 % short.
 func size(value any) *int64 {
 	var bytes float64
 	switch v := value.(type) {
 	case float64:
 		bytes = v
 	case string:
-		number, unit, _ := strings.Cut(strings.TrimSpace(v), " ")
-		n, err := strconv.ParseFloat(number, 64)
+		match := sizeText.FindStringSubmatch(strings.ToUpper(strings.TrimSpace(v)))
+		if match == nil {
+			return nil
+		}
+		n, err := strconv.ParseFloat(match[1], 64)
 		if err != nil {
 			return nil
 		}
-		multiplier := map[string]float64{
-			"": 1, "B": 1, "KB": 1 << 10, "KIB": 1 << 10, "MB": 1 << 20, "MIB": 1 << 20,
-			"GB": 1 << 30, "GIB": 1 << 30, "TB": 1 << 40, "TIB": 1 << 40,
-		}[strings.ToUpper(strings.TrimSpace(unit))]
-		if multiplier == 0 {
-			return nil
-		}
-		bytes = n * multiplier
+		shift := map[string]int{"": 0, "K": 10, "M": 20, "G": 30, "T": 40}[match[2]]
+		bytes = n * float64(int64(1)<<shift)
 	default:
 		return nil
 	}
