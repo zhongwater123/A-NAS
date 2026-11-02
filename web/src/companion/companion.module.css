@@ -314,6 +314,12 @@
   height: 112px;
   opacity: 0.55;
 }
+.empty .naiwaSprite {
+  width: 112px;
+  height: 121.333px;
+  flex: none;
+  opacity: 0.55;
+}
 .empty p {
   margin: 0 0 8px;
 }
