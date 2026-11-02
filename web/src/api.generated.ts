@@ -1016,8 +1016,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Search one tab's engines through the built-in SearXNG
-         * @description The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off.
+         * Search one tab's engines through the built-in SearXNG, sending results as the engines answer
+         * @description The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off. The answer is a stream: nothing is sent before the first update, so these errors keep their status.
          */
         post: operations["searchWeb"];
         delete?: never;
@@ -5137,14 +5137,24 @@ export interface components {
             url?: string;
             thumbnail?: string;
         };
-        WebSearchPage: {
-            /** @description In the order to show them, the tab's engines taking turns, each with its own results in its own order. */
+        /** @description Part of a page, sent as the tab's engines answer; each field holds only what is new since the update before. */
+        WebSearchUpdate: {
+            /** @description To show after the results of the updates before: the engines that answered since take turns in the tab's order, each with its own results in its own order. */
             results: components["schemas"]["WebSearchResult"][];
+            /** @description Results sent before that more engines have found since, with every engine that found them. */
+            found: components["schemas"]["WebSearchFound"][];
             answers: components["schemas"]["WebSearchAnswer"][];
             infobox?: components["schemas"]["WebSearchInfobox"];
             suggestions: string[];
             /** @description The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA). */
             unresponsive: string[];
+            /** @description The tab's engines still searching; 0 in the last update. */
+            pending: number;
+        };
+        WebSearchFound: {
+            /** Format: uri */
+            url: string;
+            engines: string[];
         };
         WebSearchPackage: {
             name: string;
@@ -6926,7 +6936,8 @@ export type WebSearchQuery = components['schemas']['WebSearchQuery'];
 export type WebSearchResult = components['schemas']['WebSearchResult'];
 export type WebSearchAnswer = components['schemas']['WebSearchAnswer'];
 export type WebSearchInfobox = components['schemas']['WebSearchInfobox'];
-export type WebSearchPage = components['schemas']['WebSearchPage'];
+export type WebSearchUpdate = components['schemas']['WebSearchUpdate'];
+export type WebSearchFound = components['schemas']['WebSearchFound'];
 export type WebSearchPackage = components['schemas']['WebSearchPackage'];
 export type WebSearchLicense = components['schemas']['WebSearchLicense'];
 export type Transfer = components['schemas']['Transfer'];
@@ -9102,13 +9113,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description One page of results */
+            /** @description One page of results as the tab's engines answer, one WebSearchUpdate a line (newline-delimited JSON): the first about a second after the search starts, the last with pending 0. A connection that ends before that last update ended the search early. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WebSearchPage"];
+                    "application/x-ndjson": components["schemas"]["WebSearchUpdate"][];
                 };
             };
             400: components["responses"]["ProductError"];

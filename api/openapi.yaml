@@ -397,7 +397,8 @@ components:
     WebSearchResult: { $ref: "components/web-search.yaml#/schemas/WebSearchResult" }
     WebSearchAnswer: { $ref: "components/web-search.yaml#/schemas/WebSearchAnswer" }
     WebSearchInfobox: { $ref: "components/web-search.yaml#/schemas/WebSearchInfobox" }
-    WebSearchPage: { $ref: "components/web-search.yaml#/schemas/WebSearchPage" }
+    WebSearchUpdate: { $ref: "components/web-search.yaml#/schemas/WebSearchUpdate" }
+    WebSearchFound: { $ref: "components/web-search.yaml#/schemas/WebSearchFound" }
     WebSearchPackage: { $ref: "components/web-search.yaml#/schemas/WebSearchPackage" }
     WebSearchLicense: { $ref: "components/web-search.yaml#/schemas/WebSearchLicense" }
     Transfer: { $ref: "components/transfers.yaml#/schemas/Transfer" }

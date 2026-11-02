@@ -1333,7 +1333,8 @@ serve(socket.AF_INET, "0.0.0.0")' &
   product_search() {
     curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
       -d '{"q":"system test","category":"web"}' "$api/api/v1/web-search/query" |
-      jq -e '.results[0].title == "System test: system test" and .unresponsive == ["百度"]' >/dev/null
+      jq -se '[.[].results[].title] == ["System test: system test"]
+        and [.[].unresponsive[]] == ["百度"] and .[-1].pending == 0' >/dev/null
   }
   check "a search reaches the stand-in through the Product Service" product_search
 fi

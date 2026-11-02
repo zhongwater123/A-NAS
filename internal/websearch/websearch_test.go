@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -24,11 +26,17 @@ var testEngines = []EngineInfo{
 	{Name: "sogou wechat", Categories: []string{"news"}}, {Name: "piratebay", Categories: []string{"files"}},
 }
 
-// recordingBackend answers with response and remembers what it was asked.
+// recordingBackend answers each engine as told and remembers what it was
+// asked; the Service asks the engines of a search at once.
 type recordingBackend struct {
-	response Response
-	forms    []url.Values
-	images   []string
+	mu sync.Mutex
+	// responses answer each engine; one without finds nothing. failures fail
+	// an engine's request, and hold keeps its answer until the channel closes.
+	responses map[string]Response
+	failures  map[string]error
+	hold      map[string]chan struct{}
+	forms     []url.Values
+	images    []string
 	// engines answers /config, testEngines when nil; failing makes it fail.
 	engines     []EngineInfo
 	failing     bool
@@ -46,14 +54,37 @@ func (r *recordingBackend) Engines(context.Context) ([]EngineInfo, error) {
 	return testEngines, nil
 }
 
-func (r *recordingBackend) Search(_ context.Context, form url.Values) (Response, error) {
+func (r *recordingBackend) Search(ctx context.Context, form url.Values) (Response, error) {
+	name := form.Get("engines")
+	r.mu.Lock()
 	r.forms = append(r.forms, form)
-	return r.response, nil
+	hold, response, err := r.hold[name], r.responses[name], r.failures[name]
+	r.mu.Unlock()
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-ctx.Done():
+			return Response{}, ctx.Err()
+		}
+	}
+	return response, err
 }
 
 func (r *recordingBackend) Thumbnail(_ context.Context, imageURL, signature string) (Image, error) {
 	r.images = append(r.images, imageURL+" "+signature)
 	return Image{ContentType: "image/jpeg", Body: []byte("jpeg")}, nil
+}
+
+// asked are the engines the searches asked, one a request, by name.
+func (r *recordingBackend) asked() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var names []string
+	for _, form := range r.forms {
+		names = append(names, form.Get("engines"))
+	}
+	slices.Sort(names)
+	return names
 }
 
 func newTestService(t *testing.T, backend Backend, power Switch) *Service {
@@ -66,10 +97,37 @@ func newTestService(t *testing.T, backend Backend, power Switch) *Service {
 	return New(Options{Backend: backend, Switch: power, Settings: store, Secret: []byte("test secret"), ThumbnailPath: "/thumb"})
 }
 
-func TestSearchAsksOnlyTheTabsEnginesInTheBody(t *testing.T) {
+// shown is what the window shows once a search's updates have all come.
+type shown struct {
+	updates      []Update
+	Results      []Result
+	Unresponsive []string
+	Suggestions  []string
+}
+
+func search(service *Service, account string, query Query) (shown, error) {
+	var page shown
+	err := service.Search(context.Background(), account, query, func(update Update) error {
+		page.updates = append(page.updates, update)
+		page.Results = append(page.Results, update.Results...)
+		for _, found := range update.Found {
+			for i := range page.Results {
+				if page.Results[i].URL == found.URL {
+					page.Results[i].Engines = found.Engines
+				}
+			}
+		}
+		page.Unresponsive = append(page.Unresponsive, update.Unresponsive...)
+		page.Suggestions = append(page.Suggestions, update.Suggestions...)
+		return nil
+	})
+	return page, err
+}
+
+func TestSearchAsksEachEngineOfTheTabInTheBody(t *testing.T) {
 	backend := &recordingBackend{}
 	service := newTestService(t, backend, NewMemorySwitch(true))
-	if _, err := service.Search(context.Background(), "u1", Query{Text: "  台风  ", Category: News, Page: 2, TimeRange: Week}); err != nil {
+	if _, err := search(service, "u1", Query{Text: "  台风  ", Category: News, Page: 2, TimeRange: Week}); err != nil {
 		t.Fatal(err)
 	}
 	form := backend.forms[0]
@@ -77,40 +135,47 @@ func TestSearchAsksOnlyTheTabsEnginesInTheBody(t *testing.T) {
 		form.Get("pageno") != "2" || form.Get("time_range") != "week" || form.Get("format") != "json" || form.Get("safesearch") != "1" {
 		t.Fatalf("form = %v", form)
 	}
+	if _, err := search(service, "u1", Query{Text: "台风", Category: Web}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(backend.asked(), ","); got != "360search,baidu,quark,sogou,sogou wechat,yandex" {
+		t.Fatalf("asked %s, want each web engine on its own", got)
+	}
 }
 
 func TestResultsAreMappedForEachTab(t *testing.T) {
 	published := "2026-10-25T06:59:20"
-	backend := &recordingBackend{response: Response{
-		Results: []RawResult{
-			{URL: "http://www.bilibili.com/video/av1", Title: "流浪地球3", Content: "-", Engine: "bilibili", Engines: []string{"bilibili"},
-				PublishedDate: &published, Thumbnail: "//i1.hdslb.com/a.jpg", Length: "233.0", Author: "笙筌"},
-			// SearXNG lists a result's engines in no particular order.
-			{URL: "https://www.youtube.com/watch?v=x", Title: "The Wandering Earth", Engine: "youtube", Engines: []string{"sogou videos", "youtube"},
-				Thumbnail: "https://i.ytimg.com/vi/x/hq.jpg", Length: "2:16:29"},
-			{URL: "https://v.sogou.com/vc/np?link=1", Title: "资讯", Engines: []string{"sogou videos"}, Length: 20.0},
-			{URL: "javascript:alert(1)", Title: "dropped", Engines: []string{"acfun"}},
-		},
-		Unresponsive: [][]string{{"iqiyi", "unexpected crash"}, {"iqiyi", "timeout"}, {"unknown", "x"}},
-		Suggestions:  []string{" 流浪地球 2 ", ""},
+	youtube := RawResult{URL: "https://www.youtube.com/watch?v=x", Title: "The Wandering Earth", Engine: "youtube",
+		Thumbnail: "https://i.ytimg.com/vi/x/hq.jpg", Length: "2:16:29", Positions: []int{1}}
+	backend := &recordingBackend{responses: map[string]Response{
+		"bilibili": {Results: []RawResult{{URL: "http://www.bilibili.com/video/av1", Title: "流浪地球3", Content: "-",
+			Engine: "bilibili", PublishedDate: &published, Thumbnail: "//i1.hdslb.com/a.jpg", Length: "233.0", Author: "笙筌"}}},
+		// 搜狗视频 finds YouTube's video as well, after one of its own.
+		"sogou videos": {Results: []RawResult{
+			{URL: "https://v.sogou.com/vc/np?link=1", Title: "资讯", Engine: "sogou videos", Length: 20.0, Positions: []int{1}},
+			{URL: "https://youtube.com/watch?v=x", Engine: "sogou videos", Positions: []int{2}},
+		}},
+		"youtube": {Results: []RawResult{youtube}, Suggestions: []string{" 流浪地球 2 ", ""}},
+		"acfun":   {Results: []RawResult{{URL: "javascript:alert(1)", Title: "dropped", Engine: "acfun"}}},
+		"iqiyi":   {Unresponsive: [][]string{{"iqiyi", "unexpected crash"}, {"iqiyi", "timeout"}, {"unknown", "x"}}},
 	}}
 	service := newTestService(t, backend, NewMemorySwitch(true))
-	page, err := service.Search(context.Background(), "u1", Query{Text: "流浪地球", Category: Videos})
+	page, err := search(service, "u1", Query{Text: "流浪地球", Category: Videos})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(page.Results) != 3 {
-		t.Fatalf("results = %+v, want the javascript: address dropped", page.Results)
+		t.Fatalf("results = %+v, want the javascript: address dropped and YouTube's video once", page.Results)
 	}
 	// The engines take turns in the tab's order: 哔哩哔哩, then 搜狗视频, then YouTube.
-	bilibili, sogou, youtube := page.Results[0], page.Results[1], page.Results[2]
+	bilibili, sogou, video := page.Results[0], page.Results[1], page.Results[2]
 	if bilibili.Platform != "哔哩哔哩" || bilibili.Content != "" || bilibili.Domain != "bilibili.com" || *bilibili.DurationSeconds != 233 ||
 		bilibili.PublishedAt == nil || bilibili.PublishedAt.Day() != 25 ||
 		!strings.Contains(bilibili.Thumbnail, url.QueryEscape("https://i1.hdslb.com/a.jpg")) {
 		t.Fatalf("bilibili = %+v", bilibili)
 	}
-	if youtube.Platform != "YouTube" || *youtube.DurationSeconds != 8189 || strings.Join(youtube.Engines, ",") != "YouTube,搜狗视频" {
-		t.Fatalf("youtube = %+v", youtube)
+	if video.Platform != "YouTube" || *video.DurationSeconds != 8189 || strings.Join(video.Engines, ",") != "YouTube,搜狗视频" {
+		t.Fatalf("youtube = %+v", video)
 	}
 	if sogou.Platform != "v.sogou.com" || *sogou.DurationSeconds != 20 || sogou.Thumbnail != "" {
 		t.Fatalf("sogou = %+v", sogou)
@@ -121,22 +186,22 @@ func TestResultsAreMappedForEachTab(t *testing.T) {
 }
 
 func TestTorrentsNeedTheirSwitchAndKeepTheirLinks(t *testing.T) {
-	backend := &recordingBackend{response: Response{Results: []RawResult{{
+	backend := &recordingBackend{responses: map[string]Response{"piratebay": {Results: []RawResult{{
 		URL: "https://thepiratebay.org/description.php?id=5421757", Title: "Big.Buck.Bunny.1080p", Engines: []string{"piratebay"},
 		MagnetLink: "magnet:?xt=urn:btih:9EE3&dn=Big.Buck.Bunny", Filesize: "885.68 MB", Seed: "1", Leech: 0.0,
 	}, {
 		URL: "https://example.org/t", Title: "no magnet", Engines: []string{"piratebay"}, MagnetLink: "javascript:x", Filesize: 1024.0,
-	}}}}
+	}}}}}
 	service := newTestService(t, backend, NewMemorySwitch(true))
 	ctx := context.Background()
 	query := Query{Text: "big buck bunny", Category: Torrents}
-	if _, err := service.Search(ctx, "u1", query); !errors.Is(err, ErrTorrentsDisabled) {
+	if _, err := search(service, "u1", query); !errors.Is(err, ErrTorrentsDisabled) {
 		t.Fatalf("search with the tab off = %v", err)
 	}
 	if _, err := service.SetSettings(ctx, Settings{Enabled: true, Torrents: true}); err != nil {
 		t.Fatal(err)
 	}
-	page, err := service.Search(ctx, "u1", query)
+	page, err := search(service, "u1", query)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,12 +214,112 @@ func TestTorrentsNeedTheirSwitchAndKeepTheirLinks(t *testing.T) {
 	}
 }
 
+func TestResultsComeAsTheEnginesAnswer(t *testing.T) {
+	result := func(engine string, n int) RawResult {
+		return RawResult{URL: fmt.Sprintf("https://example.org/%s/%d", engine, n), Title: engine, Engine: engine, Positions: []int{n}}
+	}
+	quark, yandex := make(chan struct{}), make(chan struct{})
+	backend := &recordingBackend{
+		responses: map[string]Response{
+			"baidu":     {Results: []RawResult{result("baidu", 1), result("baidu", 2)}},
+			"sogou":     {Results: []RawResult{result("sogou", 1)}, Suggestions: []string{"天气预报"}},
+			"360search": {Unresponsive: [][]string{{"360search", "CAPTCHA"}}},
+			// 夸克 also finds 百度's first result, by another spelling.
+			"quark": {Results: []RawResult{
+				{URL: "http://www.example.org/baidu/1/", Engine: "quark", Positions: []int{1}}, result("quark", 2),
+			}, Suggestions: []string{"天气预报", "天气"}},
+		},
+		failures: map[string]error{"yandex": errors.New("connection reset")},
+		hold:     map[string]chan struct{}{"quark": quark, "yandex": yandex},
+	}
+	service := newTestService(t, backend, NewMemorySwitch(true))
+	service.firstUpdate, service.updateGap = 50*time.Millisecond, 10*time.Millisecond
+	var got []string
+	err := service.Search(context.Background(), "u1", Query{Text: "天气", Category: Web}, func(update Update) error {
+		var results, found []string
+		for _, r := range update.Results {
+			results = append(results, strings.TrimPrefix(r.URL, "https://example.org/"))
+		}
+		for _, f := range update.Found {
+			found = append(found, strings.TrimPrefix(f.URL, "https://example.org/")+":"+strings.Join(f.Engines, "、"))
+		}
+		got = append(got, fmt.Sprintf("results=%s found=%s unresponsive=%s suggestions=%s pending=%d",
+			strings.Join(results, " "), strings.Join(found, " "), strings.Join(update.Unresponsive, "、"),
+			strings.Join(update.Suggestions, "、"), update.Pending))
+		// The slow engines answer only after the window has shown the others.
+		switch len(got) {
+		case 1:
+			close(quark)
+		case 2:
+			close(yandex)
+		}
+		return nil
+	})
+	want := []string{
+		"results=baidu/1 sogou/1 baidu/2 found= unresponsive=360 搜索 suggestions=天气预报 pending=2",
+		"results=quark/2 found=baidu/1:百度、夸克 unresponsive= suggestions=天气 pending=1",
+		"results= found= unresponsive=Yandex suggestions= pending=0",
+	}
+	if err != nil || !slices.Equal(got, want) {
+		t.Fatalf("updates: %v\n%s\nwant\n%s", err, strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestAServiceThatDoesNotAnswerIsUnavailable(t *testing.T) {
+	down := errors.New("connection refused")
+	backend := &recordingBackend{failures: map[string]error{}}
+	for _, name := range []string{"baidu", "sogou", "360search", "quark", "yandex"} {
+		backend.failures[name] = down
+	}
+	service := newTestService(t, backend, NewMemorySwitch(true))
+	page, err := search(service, "u1", Query{Text: "天气", Category: Web})
+	if !errors.Is(err, ErrUnavailable) || len(page.updates) != 0 {
+		t.Fatalf("search = %v with %d updates, want ErrUnavailable and none", err, len(page.updates))
+	}
+	// One engine that fails is only unresponsive.
+	delete(backend.failures, "baidu")
+	page, err = search(service, "u1", Query{Text: "天气", Category: Web})
+	if err != nil || strings.Join(page.Unresponsive, "、") != "搜狗、360 搜索、夸克、Yandex" {
+		t.Fatalf("search = %v, unresponsive %v", err, page.Unresponsive)
+	}
+}
+
+func TestALeavingWindowStopsTheSearch(t *testing.T) {
+	hold := make(chan struct{})
+	defer close(hold)
+	backend := &recordingBackend{hold: map[string]chan struct{}{}}
+	for _, name := range []string{"baidu", "sogou", "360search", "quark", "yandex"} {
+		backend.hold[name] = hold
+	}
+	service := newTestService(t, backend, NewMemorySwitch(true))
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}, func(Update) error { return nil })
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("search = %v, want it to end with the request", err)
+	}
+}
+
+func TestEnginesFindTheSameResultBySpelling(t *testing.T) {
+	same := resultKey("https://www.example.org/a/b/?x=1#top")
+	for _, address := range []string{"http://example.org/a/b?x=1", "https://EXAMPLE.org/a/b/?x=1"} {
+		if resultKey(address) != same {
+			t.Errorf("%s is another result than %s", address, same)
+		}
+	}
+	for _, address := range []string{"https://example.org/a/b?x=2", "https://example.org/a/c?x=1", "https://example.com/a/b?x=1"} {
+		if resultKey(address) == same {
+			t.Errorf("%s is the same result as %s", address, same)
+		}
+	}
+}
+
 func TestTheSwitchKeepsSearchesFromTheService(t *testing.T) {
 	backend := &recordingBackend{}
 	power := NewMemorySwitch(false)
 	service := newTestService(t, backend, power)
 	ctx := context.Background()
-	if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); !errors.Is(err, ErrDisabled) {
+	if _, err := search(service, "u1", Query{Text: "天气", Category: Web}); !errors.Is(err, ErrDisabled) {
 		t.Fatalf("search = %v, want ErrDisabled", err)
 	}
 	signature := service.sign("https://example.org/a.png")
@@ -196,16 +361,15 @@ func TestThumbnailsCarrySearXNGsOwnSignature(t *testing.T) {
 
 func TestEachAccountSearchesAtItsOwnPace(t *testing.T) {
 	service := newTestService(t, &recordingBackend{}, NewMemorySwitch(true))
-	ctx := context.Background()
 	for i := range searchBurst {
-		if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); err != nil {
+		if _, err := search(service, "u1", Query{Text: "天气", Category: Web}); err != nil {
 			t.Fatalf("search %d = %v", i+1, err)
 		}
 	}
-	if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); !errors.Is(err, ErrTooFrequent) {
+	if _, err := search(service, "u1", Query{Text: "天气", Category: Web}); !errors.Is(err, ErrTooFrequent) {
 		t.Fatalf("search %d = %v, want ErrTooFrequent", searchBurst+1, err)
 	}
-	if _, err := service.Search(ctx, "u2", Query{Text: "天气", Category: Web}); err != nil {
+	if _, err := search(service, "u2", Query{Text: "天气", Category: Web}); err != nil {
 		t.Fatalf("another account = %v", err)
 	}
 }
@@ -219,7 +383,7 @@ func TestQueriesTheWindowWouldNotSendAreRefused(t *testing.T) {
 		{Text: "x", Category: Web, Page: MaxPage + 1},
 		{Text: "x", Category: News, TimeRange: "decade"},
 	} {
-		if _, err := service.Search(context.Background(), "u1", query); !errors.Is(err, ErrInvalidQuery) {
+		if _, err := search(service, "u1", query); !errors.Is(err, ErrInvalidQuery) {
 			t.Errorf("%+v = %v, want ErrInvalidQuery", query, err)
 		}
 	}
@@ -264,7 +428,7 @@ func TestThumbnailsReuseARecentReadOfTheSwitch(t *testing.T) {
 		t.Fatalf("after %v: %v, %d reads", switchMaxAge, err, power.reads)
 	}
 	// A search reads the switch afresh, and turning it off is seen at once.
-	if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); err != nil || power.reads != 3 {
+	if _, err := search(service, "u1", Query{Text: "天气", Category: Web}); err != nil || power.reads != 3 {
 		t.Fatalf("search: %v, %d reads", err, power.reads)
 	}
 	if _, err := service.SetSettings(ctx, Settings{Enabled: false}); err != nil {
@@ -374,7 +538,7 @@ func TestTheEnginesAreReadFromSearXNGAndKept(t *testing.T) {
 		t.Fatalf("status = %+v, %v", status.Engines, err)
 	}
 	for range 3 {
-		if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); err != nil {
+		if _, err := search(service, "u1", Query{Text: "天气", Category: Web}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -384,15 +548,15 @@ func TestTheEnginesAreReadFromSearXNGAndKept(t *testing.T) {
 	// After ten minutes it is read again; a failed read keeps the engines it had.
 	clock = clock.Add(catalogMaxAge)
 	backend.failing = true
-	if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); err != nil || backend.engineReads != 2 {
+	if _, err := search(service, "u1", Query{Text: "天气", Category: Web}); err != nil || backend.engineReads != 2 {
 		t.Fatalf("search while SearXNG restarts: %v, %d reads", err, backend.engineReads)
 	}
-	if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); err != nil || backend.engineReads != 2 {
+	if _, err := search(service, "u1", Query{Text: "天气", Category: Web}); err != nil || backend.engineReads != 2 {
 		t.Fatalf("right after a failed read: %v, %d reads", err, backend.engineReads)
 	}
 	clock = clock.Add(catalogRetry)
 	backend.failing = false
-	if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); err != nil || backend.engineReads != 3 {
+	if _, err := search(service, "u1", Query{Text: "天气", Category: Web}); err != nil || backend.engineReads != 3 {
 		t.Fatalf("after %v: %v, %d reads", catalogRetry, err, backend.engineReads)
 	}
 }
@@ -401,7 +565,7 @@ func TestNothingIsSearchedWithoutTheEngines(t *testing.T) {
 	backend := &recordingBackend{failing: true}
 	service := newTestService(t, backend, NewMemorySwitch(true))
 	ctx := context.Background()
-	if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); !errors.Is(err, ErrUnavailable) {
+	if _, err := search(service, "u1", Query{Text: "天气", Category: Web}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("search = %v, want ErrUnavailable", err)
 	}
 	if status, err := service.Status(ctx); err != nil || len(status.Engines[Web]) != 0 || len(status.Categories) == 0 {
@@ -409,8 +573,8 @@ func TestNothingIsSearchedWithoutTheEngines(t *testing.T) {
 	}
 	// A tab SearXNG loaded no engine for has no results, and asks nothing.
 	backend.failing = false
-	page, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Map})
-	if err != nil || len(page.Results) != 0 || len(backend.forms) != 0 {
+	page, err := search(service, "u1", Query{Text: "天气", Category: Map})
+	if err != nil || len(page.updates) != 1 || page.updates[0].Pending != 0 || len(page.Results) != 0 || len(backend.forms) != 0 {
 		t.Fatalf("map tab: %+v, %v, asked %v", page, err, backend.forms)
 	}
 }

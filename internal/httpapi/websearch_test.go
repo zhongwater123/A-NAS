@@ -24,15 +24,20 @@ type webSearchStatus struct {
 	Categories []string `json:"categories"`
 }
 
+type webSearchResult struct {
+	URL       string `json:"url"`
+	Thumbnail string `json:"thumbnail"`
+	Magnet    string `json:"magnet"`
+	SizeBytes int64  `json:"sizeBytes"`
+	Seeders   int    `json:"seeders"`
+}
+
+// webSearchPage gathers a search's updates, one JSON object a line.
 type webSearchPage struct {
-	Results []struct {
-		URL       string `json:"url"`
-		Thumbnail string `json:"thumbnail"`
-		Magnet    string `json:"magnet"`
-		SizeBytes int64  `json:"sizeBytes"`
-		Seeders   int    `json:"seeders"`
-	} `json:"results"`
-	Unresponsive []string `json:"unresponsive"`
+	Results      []webSearchResult
+	Unresponsive []string
+	Updates      int
+	Pending      int
 }
 
 func TestWebSearchFollowsTheContractAndItsSwitches(t *testing.T) {
@@ -81,10 +86,28 @@ func TestWebSearchFollowsTheContractAndItsSwitches(t *testing.T) {
 		t.Helper()
 		var page webSearchPage
 		response := client.do(http.MethodPost, "/api/v1/web-search/query", body, nil, want)
-		if want == http.StatusOK {
-			if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
+		if want != http.StatusOK {
+			return page
+		}
+		if got := response.Header().Get("Content-Type"); got != "application/x-ndjson" {
+			t.Fatalf("Content-Type = %q", got)
+		}
+		decoder := json.NewDecoder(response.Body)
+		for decoder.More() {
+			var update struct {
+				Results      []webSearchResult `json:"results"`
+				Unresponsive []string          `json:"unresponsive"`
+				Pending      int               `json:"pending"`
+			}
+			if err := decoder.Decode(&update); err != nil {
 				t.Fatal(err)
 			}
+			page.Results = append(page.Results, update.Results...)
+			page.Unresponsive = append(page.Unresponsive, update.Unresponsive...)
+			page.Updates, page.Pending = page.Updates+1, update.Pending
+		}
+		if page.Updates == 0 || page.Pending != 0 {
+			t.Fatalf("%s: %d updates, the last with %d engines pending", body, page.Updates, page.Pending)
 		}
 		return page
 	}
@@ -94,8 +117,12 @@ func TestWebSearchFollowsTheContractAndItsSwitches(t *testing.T) {
 	}
 	page := search(asAlice, `{"q":"流浪地球","category":"videos"}`, http.StatusOK)
 	search(asAlice, `{"q":"swing","category":"music"}`, http.StatusOK)
-	if len(page.Results) == 0 || !strings.HasPrefix(page.Results[0].Thumbnail, websearchapi.ThumbnailPath+"?") || len(page.Unresponsive) != 1 {
+	if len(page.Results) == 0 || !strings.HasPrefix(page.Results[0].Thumbnail, websearchapi.ThumbnailPath+"?") {
 		t.Fatalf("videos = %+v", page)
+	}
+	// The fake's Bing engines do not answer.
+	if web := search(asAlice, `{"q":"流浪地球","category":"web"}`, http.StatusOK); strings.Join(web.Unresponsive, ",") != "必应" {
+		t.Fatalf("web = %+v", web)
 	}
 	thumbnail := asAlice.do(http.MethodGet, page.Results[0].Thumbnail, "", nil, http.StatusOK)
 	if thumbnail.Header().Get("Content-Type") != "image/png" || thumbnail.Header().Get("X-Content-Type-Options") != "nosniff" {

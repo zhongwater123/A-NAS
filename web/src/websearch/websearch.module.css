@@ -222,6 +222,24 @@
   width: 14px;
   height: 14px;
 }
+.ws-pending {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: var(--space-3) 0;
+  color: var(--ws-faint);
+  font-size: 12.5px;
+}
+.ws-pending svg {
+  width: 14px;
+  height: 14px;
+  animation: ws-spin 1s linear infinite;
+}
+@keyframes ws-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .ws-silent-many {
   margin: 0 0 var(--space-3);
   color: var(--ws-faint);
@@ -710,6 +728,7 @@ a.ws-title:hover {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .ws-pending svg,
   .ws-skeleton-list span,
   .ws-skeleton-tiles span,
   .ws-images img {

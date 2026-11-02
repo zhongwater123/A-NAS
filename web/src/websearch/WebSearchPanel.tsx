@@ -1,4 +1,4 @@
-import { ArrowDown, CircleAlert, Copy, Magnet, RotateCw, Search, X } from "lucide-react";
+import { ArrowDown, CircleAlert, Copy, LoaderCircle, Magnet, RotateCw, Search, X } from "lucide-react";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { APIError } from "../api/client";
@@ -10,10 +10,12 @@ import { useToasts } from "../ui/feedback";
 import {
   categoryLabels,
   searchWeb,
+  type WebSearchAnswer,
   type WebSearchCategory,
-  type WebSearchPage,
+  type WebSearchInfobox,
   type WebSearchQuery,
   type WebSearchResult,
+  type WebSearchUpdate,
 } from "./api";
 import { useWebSearch } from "./status";
 import { WebSearchGlyph } from "./WebSearchGlyph";
@@ -31,15 +33,48 @@ const timeRanges: Array<{ value: TimeRange | ""; label: string }> = [
 
 const maxPage = 20;
 
+// A page of results as its updates have come: engines still searching add
+// theirs below.
+interface Page {
+  results: WebSearchResult[];
+  answers: WebSearchAnswer[];
+  infobox?: WebSearchInfobox;
+  suggestions: string[];
+  unresponsive: string[];
+  pending: number;
+}
+
+const emptyPage: Page = { results: [], answers: [], suggestions: [], unresponsive: [], pending: 0 };
+
+// withUpdate adds an update to its page: new results after the others, and
+// the engines of results that more engines have found since.
+export function withUpdate(page: Page, update: WebSearchUpdate): Page {
+  const found = new Map(update.found.map((item) => [item.url, item.engines]));
+  const results = [...page.results, ...update.results].map((result) => {
+    const engines = found.get(result.url);
+    return engines ? { ...result, engines } : result;
+  });
+  return {
+    results,
+    answers: [...page.answers, ...update.answers],
+    infobox: page.infobox ?? update.infobox,
+    suggestions: [...page.suggestions, ...update.suggestions],
+    unresponsive: [...page.unresponsive, ...update.unresponsive],
+    pending: update.pending,
+  };
+}
+
 // What the window shows for one search of one tab.
 interface Shown {
   query: string;
   category: WebSearchCategory;
   timeRange: TimeRange | "";
-  pages: WebSearchPage[];
-  // loading is the page being fetched; error is why the last fetch failed.
+  pages: Page[];
+  // loading is the page asked for until its first update comes; error is why
+  // the search of page failed, which keeps what came before the failure.
   loading?: number;
   error?: APIError | Error;
+  failed?: number;
 }
 
 // WebSearchPanel is the 网页搜索 window (docs/specs/web-search.md): a search
@@ -68,8 +103,10 @@ export function WebSearchPanel() {
     const controller = new AbortController();
     pending.current = controller;
     const same = shown && shown.query === query && shown.category === nextCategory && shown.timeRange === nextRange;
-    const pages = page > 1 && same ? shown.pages : [];
+    // A page asked for again replaces what came of it before.
+    const pages = page > 1 && same ? shown.pages.slice(0, page - 1) : [];
     setShown({ query, category: nextCategory, timeRange: nextRange, pages, loading: page });
+    let current: Page | undefined;
     searchWeb(
       {
         q: query,
@@ -78,21 +115,23 @@ export function WebSearchPanel() {
         ...(nextRange && nextCategory === "news" ? { timeRange: nextRange } : {}),
       },
       controller.signal,
-    )
-      .then((result) => {
+      (update) => {
         if (controller.signal.aborted) return;
-        setShown({ query, category: nextCategory, timeRange: nextRange, pages: [...pages, result] });
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setShown({
-          query,
-          category: nextCategory,
-          timeRange: nextRange,
-          pages,
-          error: error instanceof Error ? error : new Error(String(error)),
-        });
+        current = withUpdate(current ?? emptyPage, update);
+        setShown({ query, category: nextCategory, timeRange: nextRange, pages: [...pages, current] });
+      },
+    ).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      // What came before the failure stays.
+      setShown({
+        query,
+        category: nextCategory,
+        timeRange: nextRange,
+        pages: current ? [...pages, { ...current, pending: 0 }] : pages,
+        error: error instanceof Error ? error : new Error(String(error)),
+        failed: page,
       });
+    });
   };
 
   const submit = (event?: FormEvent) => {
@@ -223,7 +262,10 @@ export function WebSearchPanel() {
           shown={shown}
           engines={status?.engines[shown.category] ?? []}
           onMore={() => run(shown.query, shown.category, shown.timeRange, shown.pages.length + 1)}
-          onRetry={() => run(shown.query, shown.category, shown.timeRange, shown.pages.length + 1)}
+          // Again the page that failed, or the last when no engine answered.
+          onRetry={() =>
+            run(shown.query, shown.category, shown.timeRange, shown.failed ?? Math.max(shown.pages.length, 1))
+          }
           onSearch={searchFor}
           onCopied={(ok) =>
             toast(ok ? { text: "已复制磁力链接", tone: "done" } : { text: "无法复制，请手动复制", tone: "error" })
@@ -256,12 +298,13 @@ function Results({
   const first = pages[0];
   const last = pages.at(-1);
   const unresponsive = last?.unresponsive ?? [];
+  const pending = last?.pending ?? 0;
   const allSilent =
     last !== undefined && last.results.length === 0 && engines.length > 0 && unresponsive.length >= engines.length;
 
   if (loading === 1) return <Skeleton category={category} />;
   if (error && pages.length === 0) return <Failure error={error} onRetry={onRetry} />;
-  if (first && results.length === 0) {
+  if (first && results.length === 0 && pending === 0) {
     return allSilent ? (
       <Failure message="搜索引擎都没有响应，请稍后再试" onRetry={onRetry} />
     ) : (
@@ -299,13 +342,24 @@ function Results({
       )}
       <ResultList category={category} results={results} onCopied={onCopied} />
       {loading !== undefined && <div className={styles.wsMoreLoading}>正在加载…</div>}
-      {error && pages.length > 0 && <Failure error={error} onRetry={onRetry} inline />}
-      {loading === undefined && !error && last && last.results.length > 0 && pages.length < maxPage && (
-        <button type="button" className={styles.wsMore} onClick={onMore}>
-          <ArrowDown />
-          更多结果
-        </button>
+      {loading === undefined && pending > 0 && (
+        <p className={styles.wsPending} role="status">
+          <LoaderCircle aria-hidden />
+          还有 {pending} 个引擎在搜索
+        </p>
       )}
+      {error && pages.length > 0 && <Failure error={error} onRetry={onRetry} inline />}
+      {loading === undefined &&
+        pending === 0 &&
+        !error &&
+        last &&
+        last.results.length > 0 &&
+        pages.length < maxPage && (
+          <button type="button" className={styles.wsMore} onClick={onMore}>
+            <ArrowDown />
+            更多结果
+          </button>
+        )}
       {first && first.suggestions.length > 0 && (
         <nav className={styles.wsSuggestions} aria-label="相关搜索">
           <span>相关搜索</span>
@@ -445,7 +499,7 @@ function ResultList({
   }
 }
 
-function Infobox({ infobox }: { infobox: NonNullable<WebSearchPage["infobox"]> }) {
+function Infobox({ infobox }: { infobox: WebSearchInfobox }) {
   return (
     <aside className={styles.wsInfobox} aria-label={infobox.title}>
       {infobox.thumbnail && (

@@ -27,16 +27,22 @@
 /api/v1/web-search/query:
   post:
     operationId: searchWeb
-    summary: Search one tab's engines through the built-in SearXNG
+    summary: Search one tab's engines through the built-in SearXNG, sending results as the engines answer
     description: >-
       The search text travels only in the body, so no access log records it, and it is not logged. Each account
       may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled
       while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is
-      off.
+      off. The answer is a stream: nothing is sent before the first update, so these errors keep their status.
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/web-search.yaml#/schemas/WebSearchQuery" } } } }
     responses:
-      "200": { description: One page of results, content: { application/json: { schema: { $ref: "../components/web-search.yaml#/schemas/WebSearchPage" } } } }
+      "200":
+        description: >-
+          One page of results as the tab's engines answer, one WebSearchUpdate a line (newline-delimited JSON):
+          the first about a second after the search starts, the last with pending 0. A connection that ends before
+          that last update ended the search early.
+        content:
+          application/x-ndjson: { schema: { type: array, items: { $ref: "../components/web-search.yaml#/schemas/WebSearchUpdate" } } }
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "401": { $ref: "../components/common.yaml#/responses/ProductError" }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }

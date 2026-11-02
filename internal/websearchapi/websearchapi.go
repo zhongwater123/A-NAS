@@ -6,6 +6,8 @@ package websearchapi
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -84,13 +86,42 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, session accounts.Se
 	if !httpjson.Read(w, r, 4<<10, &query) {
 		return
 	}
-	page, err := a.service.Search(r.Context(), session.User.ID, query)
-	if err != nil {
+	stream := &updates{w: w, controller: http.NewResponseController(w)}
+	err := a.service.Search(r.Context(), session.User.ID, query, stream.send)
+	switch {
+	case err == nil:
+	case !stream.started:
 		a.writeError(w, r, err)
-		return
+	case !errors.Is(err, context.Canceled):
+		// The window keeps the results it has and offers to try again.
+		a.logger.WarnContext(r.Context(), "web search ended early", "error", err)
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	httpjson.Write(w, http.StatusOK, page)
+}
+
+// updates sends a search's updates as the engines answer, one JSON object a
+// line, each flushed at once; nothing is written before the first, so an
+// error until then still answers with its status.
+type updates struct {
+	w          http.ResponseWriter
+	controller *http.ResponseController
+	encoder    *json.Encoder
+	started    bool
+}
+
+func (u *updates) send(update websearch.Update) error {
+	if !u.started {
+		u.started = true
+		header := u.w.Header()
+		header.Set("Content-Type", "application/x-ndjson")
+		header.Set("Cache-Control", "no-store")
+		header.Set("X-Content-Type-Options", "nosniff")
+		u.w.WriteHeader(http.StatusOK)
+		u.encoder = json.NewEncoder(u.w)
+	}
+	if err := u.encoder.Encode(update); err != nil {
+		return err
+	}
+	return u.controller.Flush()
 }
 
 func (a *API) thumbnail(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
