@@ -16,7 +16,8 @@ MAX_FRAME = 1 << 20
 # Describes the Worker: "model" and "dimensions" of its image vectors, the
 # "detector", "faceModel" and "animalModel" it can use, and "memoryBytes", what
 # it holds once all of them have run, its own start included, as its cgroup
-# counts memory.
+# counts memory. With a text reader, also "ocrModel" and "ocrMemoryBytes":
+# reading runs as a phase of its own, after the others are released.
 OP_INFO = "info"
 OP_EMBED_IMAGE = "embed_image"
 # Encodes "text" as a search query; the provider adds the model's prompt.
@@ -35,9 +36,15 @@ OP_DETECT_FACES = "detect_faces"
 # answers "model" and "vectors", one per box in order, each as base64
 # little-endian float32, L2-normalised. Hanging up cancels it too.
 OP_EMBED_ANIMALS = "embed_animals"
+# Reads the text in the image (docs/architecture/photo-ocr.md): "kind" is
+# "text" for the whole text, or "fields" with "schema", a JSON object whose
+# empty values the model fills. Answers "model" and "reading": {"text", the
+# answer; "logprobs", [token, log probability] for each token; "finish", why
+# the answer ended: "stop", "length" or "repetition"}. Hanging up cancels it.
+OP_READ_TEXT = "read_text"
 # Frees memory: "what" is "detector" to drop the background models (the
-# object detector, the face models and the animal model), or "all" to exit
-# after answering; systemd starts the Worker again when needed.
+# object detector, the face models, the animal model and the text reader), or
+# "all" to exit after answering; systemd starts the Worker again when needed.
 OP_RELEASE = "release"
 
 # The input cannot be processed; the same input would fail again.
