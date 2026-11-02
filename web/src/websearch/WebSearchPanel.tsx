@@ -272,11 +272,20 @@ function Results({
   }
   return (
     <>
-      {unresponsive.length > 0 && (
+      {unresponsive.length > 0 && unresponsive.length <= 3 && (
         <p className={styles.wsSilent}>
           <CircleAlert aria-hidden />
           {unresponsive.join("、")}未响应
         </p>
+      )}
+      {unresponsive.length > 3 && (
+        <details className={styles.wsSilentMany}>
+          <summary>
+            <CircleAlert aria-hidden />
+            {unresponsive.length} 个引擎未响应
+          </summary>
+          <p>{unresponsive.join("、")}</p>
+        </details>
       )}
       {first?.infobox && <Infobox infobox={first.infobox} />}
       {first && first.answers.length > 0 && (

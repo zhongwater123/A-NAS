@@ -17,6 +17,7 @@ import (
 // search after 10 (deploy/search/settings.yml); the image proxy follows
 // redirects to remote hosts.
 const (
+	configTimeout    = 5 * time.Second
 	searchTimeout    = 12 * time.Second
 	thumbnailTimeout = 15 * time.Second
 	// MaxThumbnailBytes is the most SearXNG's image proxy passes on.
@@ -42,6 +43,34 @@ func NewSearXNG(socketPath string) *SearXNG {
 		// SearXNG follows the remote site's redirects itself.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}}
+}
+
+func (s *SearXNG) Engines(ctx context.Context) ([]EngineInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, configTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://searxng/config", nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := s.client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return nil, fmt.Errorf("SearXNG's /config answered %d", response.StatusCode)
+	}
+	var config struct {
+		Engines []EngineInfo `json:"engines"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, maxResponseBytes)).Decode(&config); err != nil {
+		return nil, fmt.Errorf("decode SearXNG's /config: %w", err)
+	}
+	if len(config.Engines) == 0 {
+		return nil, fmt.Errorf("SearXNG loaded no engines")
+	}
+	return config.Engines, nil
 }
 
 func (s *SearXNG) Search(ctx context.Context, form url.Values) (Response, error) {

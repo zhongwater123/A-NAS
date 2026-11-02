@@ -19,6 +19,22 @@ import (
 // engine of each tab reported as unresponsive.
 type Fake struct{}
 
+// fakeEngines are a few of SearXNG's engines for every tab.
+var fakeEngines = []EngineInfo{
+	{Name: "baidu", Categories: []string{"general"}}, {Name: "bing", Categories: []string{"general", "web"}},
+	{Name: "sogou", Categories: []string{"general"}}, {Name: "steam"},
+	{Name: "baidu images", Categories: []string{"images"}}, {Name: "bing images", Categories: []string{"images", "web"}},
+	{Name: "bilibili", Categories: []string{"videos"}}, {Name: "youtube", Categories: []string{"videos", "music"}},
+	{Name: "sogou wechat", Categories: []string{"news"}}, {Name: "bing news", Categories: []string{"news", "web"}},
+	{Name: "soundcloud", Categories: []string{"music"}}, {Name: "openstreetmap", Categories: []string{"map"}},
+	{Name: "arxiv", Categories: []string{"science", "scientific publications"}},
+	{Name: "github", Categories: []string{"it", "repos"}}, {Name: "stackoverflow", Categories: []string{"it", "q&a"}},
+	{Name: "mastodon users", Categories: []string{"social media"}},
+	{Name: "piratebay", Categories: []string{"files"}}, {Name: "nyaa", Categories: []string{"files"}},
+}
+
+func (Fake) Engines(context.Context) ([]EngineInfo, error) { return fakeEngines, nil }
+
 func (Fake) Search(_ context.Context, form url.Values) (Response, error) {
 	query := form.Get("q")
 	page, _ := strconv.Atoi(form.Get("pageno"))
@@ -34,6 +50,7 @@ func (Fake) Search(_ context.Context, form url.Values) (Response, error) {
 		result := RawResult{
 			URL: fmt.Sprintf("https://example.org/%s/%d", url.PathEscape(query), n), Engines: []string{name},
 			Title: fmt.Sprintf("%s：第 %d 条结果", query, n), Content: "这是开发模式的示例结果，没有访问任何搜索引擎。",
+			Positions:     []int{n},
 			PublishedDate: &published, Thumbnail: fmt.Sprintf("https://images.example.org/%d.png", n),
 		}
 		switch {

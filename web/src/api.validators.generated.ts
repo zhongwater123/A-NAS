@@ -3320,8 +3320,8 @@ validate126.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false}
 
 export const validate10 = validate131;
 const schema59 = {"$ref":"openapi.json#/paths/~1api~1v1~1web-search/get/responses/200/content/application~1json/schema"};
-const schema60 = {"type":"object","additionalProperties":false,"required":["enabled","running","torrents","categories","engines"],"properties":{"enabled":{"type":"boolean","description":"The administrator's switch; off stops the service."},"running":{"type":"string","enum":["running","starting","stopped","failed"],"description":"What systemd reports of the service."},"torrents":{"type":"boolean","description":"The torrent tab's switch."},"categories":{"type":"array","description":"The tabs the window shows, in order; empty while web search is off.","items":{"$ref":"#/components/schemas/WebSearchCategory"}},"engines":{"type":"object","description":"Every tab's engines as the window names them, fixed by the release.","additionalProperties":false,"required":["web","images","videos","news","torrents"],"properties":{"web":{"type":"array","items":{"type":"string"}},"images":{"type":"array","items":{"type":"string"}},"videos":{"type":"array","items":{"type":"string"}},"news":{"type":"array","items":{"type":"string"}},"torrents":{"type":"array","items":{"type":"string"}}}}}};
-const schema61 = {"type":"string","description":"A tab of the window; torrents only while an administrator has turned it on.","enum":["web","images","videos","news","torrents"]};
+const schema60 = {"type":"object","additionalProperties":false,"required":["enabled","running","torrents","categories","engines"],"properties":{"enabled":{"type":"boolean","description":"The administrator's switch; off stops the service."},"running":{"type":"string","enum":["running","starting","stopped","failed"],"description":"What systemd reports of the service."},"torrents":{"type":"boolean","description":"The torrent tab's switch."},"categories":{"type":"array","description":"The tabs the window shows, in order; empty while web search is off.","items":{"$ref":"#/components/schemas/WebSearchCategory"}},"engines":{"type":"object","description":"Every tab's engines as the window names them, in the order their results take turns: those SearXNG loaded, which the release fixes. Empty until SearXNG has been read while it ran.","additionalProperties":false,"required":["web","images","videos","news","music","map","science","it","social","torrents"],"properties":{"web":{"type":"array","items":{"type":"string"}},"images":{"type":"array","items":{"type":"string"}},"videos":{"type":"array","items":{"type":"string"}},"news":{"type":"array","items":{"type":"string"}},"music":{"type":"array","items":{"type":"string"}},"map":{"type":"array","items":{"type":"string"}},"science":{"type":"array","items":{"type":"string"}},"it":{"type":"array","items":{"type":"string"}},"social":{"type":"array","items":{"type":"string"}},"torrents":{"type":"array","items":{"type":"string"}}}}}};
+const schema61 = {"type":"string","description":"A tab of the window; torrents only while an administrator has turned it on.","enum":["web","images","videos","news","music","map","science","it","social","torrents"]};
 
 function validate133(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -3337,7 +3337,7 @@ if(typeof data !== "string"){
 validate133.errors = [{instancePath,schemaPath:"#/type",keyword:"type",params:{type: "string"}}];
 return false;
 }
-if(!(((((data === "web") || (data === "images")) || (data === "videos")) || (data === "news")) || (data === "torrents"))){
+if(!((((((((((data === "web") || (data === "images")) || (data === "videos")) || (data === "news")) || (data === "music")) || (data === "map")) || (data === "science")) || (data === "it")) || (data === "social")) || (data === "torrents"))){
 validate133.errors = [{instancePath,schemaPath:"#/enum",keyword:"enum",params:{allowedValues: schema61.enum}}];
 return false;
 }
@@ -3451,14 +3451,14 @@ const _errs11 = errors;
 if(errors === _errs11){
 if(data5 && typeof data5 == "object" && !Array.isArray(data5)){
 let missing1;
-if((((((data5.web === undefined) && (missing1 = "web")) || ((data5.images === undefined) && (missing1 = "images"))) || ((data5.videos === undefined) && (missing1 = "videos"))) || ((data5.news === undefined) && (missing1 = "news"))) || ((data5.torrents === undefined) && (missing1 = "torrents"))){
+if(((((((((((data5.web === undefined) && (missing1 = "web")) || ((data5.images === undefined) && (missing1 = "images"))) || ((data5.videos === undefined) && (missing1 = "videos"))) || ((data5.news === undefined) && (missing1 = "news"))) || ((data5.music === undefined) && (missing1 = "music"))) || ((data5.map === undefined) && (missing1 = "map"))) || ((data5.science === undefined) && (missing1 = "science"))) || ((data5.it === undefined) && (missing1 = "it"))) || ((data5.social === undefined) && (missing1 = "social"))) || ((data5.torrents === undefined) && (missing1 = "torrents"))){
 validate132.errors = [{instancePath:instancePath+"/engines",schemaPath:"#/properties/engines/required",keyword:"required",params:{missingProperty: missing1}}];
 return false;
 }
 else {
 const _errs13 = errors;
 for(const key1 in data5){
-if(!(((((key1 === "web") || (key1 === "images")) || (key1 === "videos")) || (key1 === "news")) || (key1 === "torrents"))){
+if(!(func1.call(schema60.properties.engines.properties, key1))){
 validate132.errors = [{instancePath:instancePath+"/engines",schemaPath:"#/properties/engines/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1}}];
 return false;
 break;
@@ -3585,8 +3585,8 @@ else {
 var valid2 = true;
 }
 if(valid2){
-if(data5.torrents !== undefined){
-let data14 = data5.torrents;
+if(data5.music !== undefined){
+let data14 = data5.music;
 const _errs30 = errors;
 if(errors === _errs30){
 if(Array.isArray(data14)){
@@ -3595,7 +3595,7 @@ const len5 = data14.length;
 for(let i5=0; i5<len5; i5++){
 const _errs32 = errors;
 if(typeof data14[i5] !== "string"){
-validate132.errors = [{instancePath:instancePath+"/engines/torrents/" + i5,schemaPath:"#/properties/engines/properties/torrents/items/type",keyword:"type",params:{type: "string"}}];
+validate132.errors = [{instancePath:instancePath+"/engines/music/" + i5,schemaPath:"#/properties/engines/properties/music/items/type",keyword:"type",params:{type: "string"}}];
 return false;
 }
 var valid7 = _errs32 === errors;
@@ -3605,7 +3605,7 @@ break;
 }
 }
 else {
-validate132.errors = [{instancePath:instancePath+"/engines/torrents",schemaPath:"#/properties/engines/properties/torrents/type",keyword:"type",params:{type: "array"}}];
+validate132.errors = [{instancePath:instancePath+"/engines/music",schemaPath:"#/properties/engines/properties/music/type",keyword:"type",params:{type: "array"}}];
 return false;
 }
 }
@@ -3613,6 +3613,161 @@ var valid2 = _errs30 === errors;
 }
 else {
 var valid2 = true;
+}
+if(valid2){
+if(data5.map !== undefined){
+let data16 = data5.map;
+const _errs34 = errors;
+if(errors === _errs34){
+if(Array.isArray(data16)){
+var valid8 = true;
+const len6 = data16.length;
+for(let i6=0; i6<len6; i6++){
+const _errs36 = errors;
+if(typeof data16[i6] !== "string"){
+validate132.errors = [{instancePath:instancePath+"/engines/map/" + i6,schemaPath:"#/properties/engines/properties/map/items/type",keyword:"type",params:{type: "string"}}];
+return false;
+}
+var valid8 = _errs36 === errors;
+if(!valid8){
+break;
+}
+}
+}
+else {
+validate132.errors = [{instancePath:instancePath+"/engines/map",schemaPath:"#/properties/engines/properties/map/type",keyword:"type",params:{type: "array"}}];
+return false;
+}
+}
+var valid2 = _errs34 === errors;
+}
+else {
+var valid2 = true;
+}
+if(valid2){
+if(data5.science !== undefined){
+let data18 = data5.science;
+const _errs38 = errors;
+if(errors === _errs38){
+if(Array.isArray(data18)){
+var valid9 = true;
+const len7 = data18.length;
+for(let i7=0; i7<len7; i7++){
+const _errs40 = errors;
+if(typeof data18[i7] !== "string"){
+validate132.errors = [{instancePath:instancePath+"/engines/science/" + i7,schemaPath:"#/properties/engines/properties/science/items/type",keyword:"type",params:{type: "string"}}];
+return false;
+}
+var valid9 = _errs40 === errors;
+if(!valid9){
+break;
+}
+}
+}
+else {
+validate132.errors = [{instancePath:instancePath+"/engines/science",schemaPath:"#/properties/engines/properties/science/type",keyword:"type",params:{type: "array"}}];
+return false;
+}
+}
+var valid2 = _errs38 === errors;
+}
+else {
+var valid2 = true;
+}
+if(valid2){
+if(data5.it !== undefined){
+let data20 = data5.it;
+const _errs42 = errors;
+if(errors === _errs42){
+if(Array.isArray(data20)){
+var valid10 = true;
+const len8 = data20.length;
+for(let i8=0; i8<len8; i8++){
+const _errs44 = errors;
+if(typeof data20[i8] !== "string"){
+validate132.errors = [{instancePath:instancePath+"/engines/it/" + i8,schemaPath:"#/properties/engines/properties/it/items/type",keyword:"type",params:{type: "string"}}];
+return false;
+}
+var valid10 = _errs44 === errors;
+if(!valid10){
+break;
+}
+}
+}
+else {
+validate132.errors = [{instancePath:instancePath+"/engines/it",schemaPath:"#/properties/engines/properties/it/type",keyword:"type",params:{type: "array"}}];
+return false;
+}
+}
+var valid2 = _errs42 === errors;
+}
+else {
+var valid2 = true;
+}
+if(valid2){
+if(data5.social !== undefined){
+let data22 = data5.social;
+const _errs46 = errors;
+if(errors === _errs46){
+if(Array.isArray(data22)){
+var valid11 = true;
+const len9 = data22.length;
+for(let i9=0; i9<len9; i9++){
+const _errs48 = errors;
+if(typeof data22[i9] !== "string"){
+validate132.errors = [{instancePath:instancePath+"/engines/social/" + i9,schemaPath:"#/properties/engines/properties/social/items/type",keyword:"type",params:{type: "string"}}];
+return false;
+}
+var valid11 = _errs48 === errors;
+if(!valid11){
+break;
+}
+}
+}
+else {
+validate132.errors = [{instancePath:instancePath+"/engines/social",schemaPath:"#/properties/engines/properties/social/type",keyword:"type",params:{type: "array"}}];
+return false;
+}
+}
+var valid2 = _errs46 === errors;
+}
+else {
+var valid2 = true;
+}
+if(valid2){
+if(data5.torrents !== undefined){
+let data24 = data5.torrents;
+const _errs50 = errors;
+if(errors === _errs50){
+if(Array.isArray(data24)){
+var valid12 = true;
+const len10 = data24.length;
+for(let i10=0; i10<len10; i10++){
+const _errs52 = errors;
+if(typeof data24[i10] !== "string"){
+validate132.errors = [{instancePath:instancePath+"/engines/torrents/" + i10,schemaPath:"#/properties/engines/properties/torrents/items/type",keyword:"type",params:{type: "string"}}];
+return false;
+}
+var valid12 = _errs52 === errors;
+if(!valid12){
+break;
+}
+}
+}
+else {
+validate132.errors = [{instancePath:instancePath+"/engines/torrents",schemaPath:"#/properties/engines/properties/torrents/type",keyword:"type",params:{type: "array"}}];
+return false;
+}
+}
+var valid2 = _errs50 === errors;
+}
+else {
+var valid2 = true;
+}
+}
+}
+}
+}
 }
 }
 }

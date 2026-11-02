@@ -9,10 +9,11 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
-// The release's SearXNG settings load exactly the engines of the table, and
-// turn each on: an engine missing there answers nothing, and one missing here
-// is loaded for no tab.
-func TestTheReleaseLoadsEveryEngineOfTheTable(t *testing.T) {
+// The release's SearXNG settings load every engine SearXNG ships except
+// those that cannot answer without what A-NAS does not have: an API key or
+// token, Tor, or a search service of one's own (docs/specs/web-search.md).
+// The system test checks the engines SearXNG itself loads.
+func TestTheReleaseLoadsEveryEngineThatCanAnswer(t *testing.T) {
 	contents, err := os.ReadFile(filepath.Join("..", "..", "deploy", "search", "settings.yml"))
 	if err != nil {
 		t.Fatal(err)
@@ -20,37 +21,33 @@ func TestTheReleaseLoadsEveryEngineOfTheTable(t *testing.T) {
 	var settings struct {
 		UseDefaultSettings struct {
 			Engines struct {
+				Remove   []string `yaml:"remove"`
 				KeepOnly []string `yaml:"keep_only"`
 			} `yaml:"engines"`
 		} `yaml:"use_default_settings"`
 		Engines []struct {
 			Name     string `yaml:"name"`
-			Disabled bool   `yaml:"disabled"`
+			Inactive *bool  `yaml:"inactive"`
 		} `yaml:"engines"`
 		Plugins map[string]any `yaml:"plugins"`
 	}
 	if err := yaml.Unmarshal(contents, &settings); err != nil {
 		t.Fatal(err)
 	}
-	var table []string
-	for _, category := range Categories {
-		for _, e := range engines[category] {
-			table = append(table, e.name)
+	removed := slices.Sorted(slices.Values(settings.UseDefaultSettings.Engines.Remove))
+	want := []string{
+		"Torznab EZTV", "ahmia", "astrophysics data system", "azure", "braveapi", "cloudflareai", "core.ac.uk", "deepl",
+		"elasticsearch", "exaapi", "flickr_api", "freesound", "github code", "jina", "marginalia", "springer nature",
+		"torch", "wolframalpha_api", "yandex api", "youtube_api",
+	}
+	if !slices.Equal(removed, want) || settings.UseDefaultSettings.Engines.KeepOnly != nil {
+		t.Fatalf("removed = %v, keep_only = %v", removed, settings.UseDefaultSettings.Engines.KeepOnly)
+	}
+	// SearXNG ships some engines inactive: the settings turn them on.
+	for _, engine := range settings.Engines {
+		if engine.Inactive == nil || *engine.Inactive || slices.Contains(removed, engine.Name) {
+			t.Errorf("engine %q is not turned on", engine.Name)
 		}
-	}
-	slices.Sort(table)
-	kept := slices.Sorted(slices.Values(settings.UseDefaultSettings.Engines.KeepOnly))
-	if !slices.Equal(kept, table) {
-		t.Fatalf("keep_only = %v, the table has %v", kept, table)
-	}
-	var enabled []string
-	for _, e := range settings.Engines {
-		if !e.Disabled {
-			enabled = append(enabled, e.Name)
-		}
-	}
-	if slices.Sort(enabled); !slices.Equal(enabled, table) {
-		t.Fatalf("turned on = %v, the table has %v", enabled, table)
 	}
 	// The plugins listed replace SearXNG's own; this one downloads its rules
 	// at every start.

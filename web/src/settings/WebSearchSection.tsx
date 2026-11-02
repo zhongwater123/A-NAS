@@ -1,16 +1,16 @@
-import { Download, FileText, Globe, Magnet, Scale } from "lucide-react";
+import { ChevronRight, Download, FileText, Globe, Magnet, Scale } from "lucide-react";
 import { Switch } from "radix-ui";
 import { useEffect, useState } from "react";
 
 import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
 import {
+  allCategories,
   categoryLabels,
   licenseTextURL,
   readWebSearchLicense,
   sourceURL,
   updateWebSearch,
-  type WebSearchCategory,
   type WebSearchLicense,
   type WebSearchStatus,
 } from "../websearch/api";
@@ -24,8 +24,6 @@ const runningText: Record<WebSearchStatus["running"], { text: string; tone: Tone
   stopped: { text: "已停止", tone: "neutral" },
   failed: { text: "出错", tone: "danger" },
 };
-
-const engineCategories: WebSearchCategory[] = ["web", "images", "videos", "news", "torrents"];
 
 // WebSearchSection is Settings → 网页搜索, shown to administrators only
 // (docs/specs/web-search.md): the switches of web search and its torrent tab,
@@ -78,7 +76,7 @@ export function WebSearchSection() {
           <IconTile tone="warning" icon={Magnet} />
           <div className={styles.setRowText}>
             <span>种子搜索</span>
-            <small>种子站的结果多为未经授权的影视内容。</small>
+            <small>种子与文件站的结果多为未经授权的内容。</small>
           </div>
           <Switch.Root
             className={styles.setSwitch}
@@ -93,14 +91,19 @@ export function WebSearchSection() {
       </Group>
       {status && (
         <Group title="搜索引擎">
-          {engineCategories.map((category) => (
-            <div key={category} className={styles.setRow}>
-              <div className={styles.setRowText}>
-                <span>{categoryLabels[category]}</span>
-                <small>{status.engines[category].join("、")}</small>
-              </div>
-            </div>
-          ))}
+          {allCategories.map((category) => {
+            const names = status.engines[category];
+            return (
+              <details key={category} className={styles.setEngines}>
+                <summary>
+                  <span>{categoryLabels[category]}</span>
+                  <small>{names.length > 0 ? `${names.length} 个` : "服务运行后显示"}</small>
+                  {names.length > 0 && <ChevronRight aria-hidden />}
+                </summary>
+                {names.length > 0 && <p>{names.join("、")}</p>}
+              </details>
+            );
+          })}
         </Group>
       )}
       <LicenseGroup />

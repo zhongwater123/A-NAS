@@ -1,10 +1,11 @@
 """A stand-in for SearXNG in the system test (scripts/system-test.sh).
 
 It runs under anas-search.service in place of Granian, so the unit's own
-sandbox applies, and answers on the same socket: /healthz, POST /search with
-one fixed result, /image with a small PNG, and /probe?host=&port=, which
-reports whether the sandbox let it open a TCP connection there ("connected",
-"refused", "denied" for EPERM, "timeout" or another errno name).
+sandbox applies, and answers on the same socket: /healthz, /config with two
+engines, POST /search with one fixed result, /image with a small PNG, and
+/probe?host=&port=, which reports whether the sandbox let it open a TCP
+connection there ("connected", "refused", "denied" for EPERM, "timeout" or
+another errno name).
 
 Usage: system-test-search.py SOCKET
 """
@@ -54,6 +55,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif url.path == "/probe":
             result = probe(query["host"][0], int(query["port"][0]))
             self.reply(200, json.dumps({"result": result}).encode(), "application/json")
+        elif url.path == "/config":
+            engines = [{"name": "sogou", "categories": ["general"]}, {"name": "baidu", "categories": ["general"]}]
+            self.reply(200, json.dumps({"engines": engines, "plugins": []}).encode(), "application/json")
         elif url.path == "/image":
             self.reply(200, PNG, "image/png")
         else:

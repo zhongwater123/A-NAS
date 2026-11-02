@@ -5052,7 +5052,7 @@ export interface components {
          * @description A tab of the window; torrents only while an administrator has turned it on.
          * @enum {string}
          */
-        WebSearchCategory: "web" | "images" | "videos" | "news" | "torrents";
+        WebSearchCategory: "web" | "images" | "videos" | "news" | "music" | "map" | "science" | "it" | "social" | "torrents";
         WebSearchStatus: {
             /** @description The administrator's switch; off stops the service. */
             enabled: boolean;
@@ -5065,12 +5065,17 @@ export interface components {
             torrents: boolean;
             /** @description The tabs the window shows, in order; empty while web search is off. */
             categories: components["schemas"]["WebSearchCategory"][];
-            /** @description Every tab's engines as the window names them, fixed by the release. */
+            /** @description Every tab's engines as the window names them, in the order their results take turns: those SearXNG loaded, which the release fixes. Empty until SearXNG has been read while it ran. */
             engines: {
                 web: string[];
                 images: string[];
                 videos: string[];
                 news: string[];
+                music: string[];
+                map: string[];
+                science: string[];
+                it: string[];
+                social: string[];
                 torrents: string[];
             };
         };
@@ -5133,6 +5138,7 @@ export interface components {
             thumbnail?: string;
         };
         WebSearchPage: {
+            /** @description In the order to show them, the tab's engines taking turns, each with its own results in its own order. */
             results: components["schemas"]["WebSearchResult"][];
             answers: components["schemas"]["WebSearchAnswer"][];
             infobox?: components["schemas"]["WebSearchInfobox"];

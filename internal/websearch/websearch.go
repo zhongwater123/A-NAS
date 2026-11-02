@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,68 +25,6 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/websearchswitch"
 )
-
-// Category is a tab of the web search window.
-type Category string
-
-const (
-	Web      Category = "web"
-	Images   Category = "images"
-	Videos   Category = "videos"
-	News     Category = "news"
-	Torrents Category = "torrents"
-)
-
-// Categories are the tabs in the order the window shows them.
-var Categories = []Category{Web, Images, Videos, News, Torrents}
-
-// engine is one SearXNG engine: its name in deploy/search/settings.yml and
-// the name the window shows. A platform's engine names the site a result
-// plays on; an aggregator's results are named by their address.
-type engine struct {
-	name, label string
-	platform    bool
-}
-
-// engines are each tab's engines, which deploy/search/settings.yml keeps
-// loaded. SearXNG waits for the slowest engine of a search, so engines that
-// never answered in the measurements are left out until the Experimental NAS
-// shows otherwise (docs/research/web-search-engines.md).
-var engines = map[Category][]engine{
-	Web: {
-		{name: "baidu", label: "百度"}, {name: "sogou", label: "搜狗"}, {name: "360search", label: "360 搜索"},
-		{name: "quark", label: "夸克"}, {name: "yandex", label: "Yandex"},
-	},
-	Images: {{name: "baidu images", label: "百度图片"}, {name: "quark images", label: "夸克图片"}},
-	Videos: {
-		{name: "bilibili", label: "哔哩哔哩", platform: true}, {name: "iqiyi", label: "爱奇艺", platform: true},
-		{name: "acfun", label: "AcFun", platform: true}, {name: "sogou videos", label: "搜狗视频"},
-		{name: "360search videos", label: "360 视频"}, {name: "youtube", label: "YouTube", platform: true},
-		{name: "dailymotion", label: "Dailymotion", platform: true},
-	},
-	News:     {{name: "sogou wechat", label: "搜狗微信"}},
-	Torrents: {{name: "piratebay", label: "海盗湾"}},
-}
-
-// Engines are the names the window shows for a tab's engines, in order.
-func Engines(category Category) []string {
-	labels := make([]string, 0, len(engines[category]))
-	for _, e := range engines[category] {
-		labels = append(labels, e.label)
-	}
-	return labels
-}
-
-func lookupEngine(name string) (engine, bool) {
-	for _, list := range engines {
-		for _, e := range list {
-			if e.name == name {
-				return e, true
-			}
-		}
-	}
-	return engine{}, false
-}
 
 // TimeRange limits the news tab to recent results.
 type TimeRange string
@@ -120,7 +59,7 @@ func (q *Query) validate() error {
 	if q.Page == 0 {
 		q.Page = 1
 	}
-	_, known := engines[q.Category]
+	known := slices.Contains(Categories, q.Category)
 	switch {
 	case q.Text == "" || utf8.RuneCountInString(q.Text) > MaxQueryLength || !utf8.ValidString(q.Text):
 		return fmt.Errorf("%w: the text is empty or too long", ErrInvalidQuery)
@@ -137,13 +76,10 @@ func (q *Query) validate() error {
 	return nil
 }
 
-// form is the POST body SearXNG receives: only this tab's engines, since
-// naming the category as well would ask every engine of it.
-func (q Query) form() url.Values {
-	names := make([]string, 0, len(engines[q.Category]))
-	for _, e := range engines[q.Category] {
-		names = append(names, e.name)
-	}
+// form is the POST body SearXNG receives: the tab's engines by name, which
+// SearXNG asks whether or not they are among its defaults, and never a
+// category, which would ask only those.
+func (q Query) form(names []string) url.Values {
 	form := url.Values{
 		"q": {q.Text}, "format": {"json"}, "engines": {strings.Join(names, ",")},
 		"pageno": {strconv.Itoa(q.Page)}, "language": {"zh-CN"}, "safesearch": {"1"},
@@ -157,6 +93,8 @@ func (q Query) form() url.Values {
 // Backend is the SearXNG service: SearXNG over its socket in production, a
 // fake in development.
 type Backend interface {
+	// Engines lists the engines SearXNG loaded, from its /config.
+	Engines(ctx context.Context) ([]EngineInfo, error)
 	// Search posts form to SearXNG's /search and decodes its JSON answer.
 	Search(ctx context.Context, form url.Values) (Response, error)
 	// Thumbnail fetches an image through SearXNG's image proxy, which
@@ -207,6 +145,13 @@ const (
 // that runs systemctl.
 const switchMaxAge = 5 * time.Second
 
+// The engines SearXNG loaded change only with a release, so they are read
+// again every ten minutes, or half a minute after a read failed.
+const (
+	catalogMaxAge = 10 * time.Minute
+	catalogRetry  = 30 * time.Second
+)
+
 // Options configures a Service.
 type Options struct {
 	Backend  Backend
@@ -232,6 +177,10 @@ type Service struct {
 	lastState ServiceState
 	readAt    time.Time
 	now       func() time.Time
+	// The engines as last read from SearXNG.
+	catalogMu sync.Mutex
+	engines   catalog
+	enginesAt time.Time
 }
 
 func New(options Options) *Service {
@@ -248,7 +197,8 @@ type Status struct {
 	ServiceState
 	Torrents   bool       `json:"torrents"`
 	Categories []Category `json:"categories"`
-	// Engines are every tab's engines, as the window names them.
+	// Engines are every tab's engines, as the window names them; empty until
+	// SearXNG has been read while it ran.
 	Engines map[Category][]string `json:"engines"`
 }
 
@@ -262,8 +212,15 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 		return Status{}, err
 	}
 	status := Status{ServiceState: state, Torrents: torrents, Categories: []Category{}, Engines: map[Category][]string{}}
+	// A stopped service has no engines to list; the last read stands.
+	engines := s.cachedCatalog()
+	if state.Enabled {
+		if read, err := s.catalog(ctx); err == nil {
+			engines = read
+		}
+	}
 	for _, category := range Categories {
-		status.Engines[category] = Engines(category)
+		status.Engines[category] = engines.labels(category)
 	}
 	if state.Enabled {
 		for _, category := range Categories {
@@ -355,14 +312,49 @@ func (s *Service) Search(ctx context.Context, account string, query Query) (Page
 	if !s.limiter(account).Allow() {
 		return Page{}, ErrTooFrequent
 	}
-	if s.backend == nil {
-		return Page{}, ErrUnavailable
+	engines, err := s.catalog(ctx)
+	if err != nil {
+		return Page{}, err
 	}
-	response, err := s.backend.Search(ctx, query.form())
+	names := engines[query.Category]
+	if len(names) == 0 {
+		return emptyPage(), nil
+	}
+	response, err := s.backend.Search(ctx, query.form(names))
 	if err != nil {
 		return Page{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	return s.page(query.Category, response), nil
+	return s.page(names, query.Category, response), nil
+}
+
+// catalog is the engines SearXNG loaded, read again once catalogMaxAge has
+// passed. A failed read keeps the last one and tries again after
+// catalogRetry; with none to keep, the service is unavailable.
+func (s *Service) catalog(ctx context.Context) (catalog, error) {
+	s.catalogMu.Lock()
+	defer s.catalogMu.Unlock()
+	if s.engines != nil && s.now().Sub(s.enginesAt) < catalogMaxAge {
+		return s.engines, nil
+	}
+	if s.backend == nil {
+		return nil, ErrUnavailable
+	}
+	infos, err := s.backend.Engines(ctx)
+	if err != nil {
+		if s.engines != nil {
+			s.enginesAt = s.now().Add(catalogRetry - catalogMaxAge)
+			return s.engines, nil
+		}
+		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	s.engines, s.enginesAt = newCatalog(infos), s.now()
+	return s.engines, nil
+}
+
+func (s *Service) cachedCatalog() catalog {
+	s.catalogMu.Lock()
+	defer s.catalogMu.Unlock()
+	return s.engines
 }
 
 // Thumbnail fetches a thumbnail this service signed.

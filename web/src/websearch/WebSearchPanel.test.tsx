@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
 import { session } from "../test/fixtures";
-import { type WebSearchOptions, webSearchHandlers, webSearchStatus } from "../test/handlers/websearch";
+import { pageFor, type WebSearchOptions, webSearchHandlers, webSearchStatus } from "../test/handlers/websearch";
 import { server } from "../test/server";
 import { resetWebSearch } from "./status";
 import { durationText, WebSearchPanel } from "./WebSearchPanel";
@@ -125,6 +125,17 @@ describe("网页搜索", () => {
 
     await user.click(screen.getByRole("tab", { name: "图片" }));
     expect(await screen.findByText("没有找到与“天气”相关的结果")).toBeInTheDocument();
+  });
+
+  it("counts many engines that did not answer instead of naming them all", async () => {
+    const silent = ["Google", "DuckDuckGo", "Brave", "Startpage", "Qwant"];
+    serve({ answer: (query) => ({ ...pageFor(query), unresponsive: silent }) });
+    render(<WebSearchPanel />);
+    await search("天气");
+    const notice = await screen.findByText("5 个引擎未响应");
+    expect(notice.closest("details")).not.toHaveAttribute("open");
+    await userEvent.setup().click(notice);
+    expect(screen.getByText("Google、DuckDuckGo、Brave、Startpage、Qwant")).toBeVisible();
   });
 
   it("says when an administrator has turned web search off", async () => {

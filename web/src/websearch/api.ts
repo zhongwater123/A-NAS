@@ -36,5 +36,13 @@ export const categoryLabels: Record<WebSearchCategory, string> = {
   images: "图片",
   videos: "视频",
   news: "资讯",
+  music: "音乐",
+  map: "地图",
+  science: "学术",
+  it: "IT",
+  social: "社交",
   torrents: "种子",
 };
+
+// Every tab, in the window's order.
+export const allCategories = Object.keys(categoryLabels) as WebSearchCategory[];

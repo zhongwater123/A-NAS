@@ -3,6 +3,7 @@ package websearch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -10,11 +11,39 @@ import (
 	"time"
 )
 
+// testEngines are the engines the first release loaded, as SearXNG lists them.
+var testEngines = []EngineInfo{
+	{Name: "baidu", Categories: []string{"general"}}, {Name: "sogou", Categories: []string{"general"}},
+	{Name: "360search", Categories: []string{"general"}}, {Name: "quark", Categories: []string{"general"}},
+	{Name: "yandex", Categories: []string{"general"}},
+	{Name: "baidu images", Categories: []string{"images"}}, {Name: "quark images", Categories: []string{"images"}},
+	{Name: "bilibili", Categories: []string{"videos"}}, {Name: "iqiyi", Categories: []string{"videos"}},
+	{Name: "acfun", Categories: []string{"videos"}}, {Name: "sogou videos", Categories: []string{"videos"}},
+	{Name: "360search videos", Categories: []string{"videos"}}, {Name: "youtube", Categories: []string{"videos", "music"}},
+	{Name: "dailymotion", Categories: []string{"videos"}},
+	{Name: "sogou wechat", Categories: []string{"news"}}, {Name: "piratebay", Categories: []string{"files"}},
+}
+
 // recordingBackend answers with response and remembers what it was asked.
 type recordingBackend struct {
 	response Response
 	forms    []url.Values
 	images   []string
+	// engines answers /config, testEngines when nil; failing makes it fail.
+	engines     []EngineInfo
+	failing     bool
+	engineReads int
+}
+
+func (r *recordingBackend) Engines(context.Context) ([]EngineInfo, error) {
+	r.engineReads++
+	if r.failing {
+		return nil, errors.New("SearXNG is restarting")
+	}
+	if r.engines != nil {
+		return r.engines, nil
+	}
+	return testEngines, nil
 }
 
 func (r *recordingBackend) Search(_ context.Context, form url.Values) (Response, error) {
@@ -56,7 +85,8 @@ func TestResultsAreMappedForEachTab(t *testing.T) {
 		Results: []RawResult{
 			{URL: "http://www.bilibili.com/video/av1", Title: "流浪地球3", Content: "-", Engine: "bilibili", Engines: []string{"bilibili"},
 				PublishedDate: &published, Thumbnail: "//i1.hdslb.com/a.jpg", Length: "233.0", Author: "笙筌"},
-			{URL: "https://www.youtube.com/watch?v=x", Title: "The Wandering Earth", Engines: []string{"youtube", "sogou videos"},
+			// SearXNG lists a result's engines in no particular order.
+			{URL: "https://www.youtube.com/watch?v=x", Title: "The Wandering Earth", Engine: "youtube", Engines: []string{"sogou videos", "youtube"},
 				Thumbnail: "https://i.ytimg.com/vi/x/hq.jpg", Length: "2:16:29"},
 			{URL: "https://v.sogou.com/vc/np?link=1", Title: "资讯", Engines: []string{"sogou videos"}, Length: 20.0},
 			{URL: "javascript:alert(1)", Title: "dropped", Engines: []string{"acfun"}},
@@ -72,7 +102,8 @@ func TestResultsAreMappedForEachTab(t *testing.T) {
 	if len(page.Results) != 3 {
 		t.Fatalf("results = %+v, want the javascript: address dropped", page.Results)
 	}
-	bilibili, youtube, sogou := page.Results[0], page.Results[1], page.Results[2]
+	// The engines take turns in the tab's order: 哔哩哔哩, then 搜狗视频, then YouTube.
+	bilibili, sogou, youtube := page.Results[0], page.Results[1], page.Results[2]
 	if bilibili.Platform != "哔哩哔哩" || bilibili.Content != "" || bilibili.Domain != "bilibili.com" || *bilibili.DurationSeconds != 233 ||
 		bilibili.PublishedAt == nil || bilibili.PublishedAt.Day() != 25 ||
 		!strings.Contains(bilibili.Thumbnail, url.QueryEscape("https://i1.hdslb.com/a.jpg")) {
@@ -84,7 +115,7 @@ func TestResultsAreMappedForEachTab(t *testing.T) {
 	if sogou.Platform != "v.sogou.com" || *sogou.DurationSeconds != 20 || sogou.Thumbnail != "" {
 		t.Fatalf("sogou = %+v", sogou)
 	}
-	if strings.Join(page.Unresponsive, ",") != "爱奇艺" || strings.Join(page.Suggestions, ",") != "流浪地球 2" {
+	if strings.Join(page.Unresponsive, ",") != "爱奇艺,unknown" || strings.Join(page.Suggestions, ",") != "流浪地球 2" {
 		t.Fatalf("unresponsive %v, suggestions %v", page.Unresponsive, page.Suggestions)
 	}
 }
@@ -284,5 +315,102 @@ func TestSizesAreReadInPowersOf1024(t *testing.T) {
 		if got := size(text); got != nil {
 			t.Errorf("%q = %d, want no size", text, *got)
 		}
+	}
+}
+
+func TestTabsFollowSearXNGsCategories(t *testing.T) {
+	tabs := newCatalog([]EngineInfo{
+		{Name: "wikipedia", Categories: []string{"general"}}, {Name: "baidu", Categories: []string{"general"}},
+		{Name: "startpage images", Categories: []string{"images", "web"}},
+		{Name: "youtube", Categories: []string{"videos", "music"}},
+		{Name: "chefkoch"}, {Name: "kickass", Categories: []string{"files"}},
+		{Name: "wikinews", Categories: []string{"news", "wikimedia"}},
+		{Name: "arxiv", Categories: []string{"science", "scientific publications"}},
+		{Name: "crates.io", Categories: []string{"it", "packages", "cargo"}},
+		{Name: "alpha", Categories: []string{"general", "blogs"}}, {Name: "bing", Categories: []string{"general", "web"}},
+	})
+	for category, want := range map[Category]string{
+		// 百度 and 必应 first, 维基百科 after the large engines, then by name.
+		Web: "baidu,bing,wikipedia,alpha,chefkoch", Images: "startpage images", Videos: "youtube", Music: "youtube",
+		News: "wikinews", Science: "arxiv", IT: "crates.io", Torrents: "kickass", Map: "", Social: "",
+	} {
+		if got := strings.Join(tabs[category], ","); got != want {
+			t.Errorf("%s = %q, want %q", category, got, want)
+		}
+	}
+	if got := strings.Join(tabs.labels(Web), "、"); got != "百度、必应、维基百科、alpha、chefkoch" {
+		t.Errorf("labels = %s", got)
+	}
+}
+
+func TestEnginesTakeTurns(t *testing.T) {
+	result := func(engine string, positions ...int) RawResult {
+		return RawResult{URL: "https://example.org/" + engine, Engine: engine, Positions: positions}
+	}
+	// As SearXNG grouped them: all of AcFun's first.
+	results := []RawResult{
+		result("acfun", 1), result("acfun", 3), result("acfun", 2), result("acfun", 4),
+		result("bilibili", 1, 2), result("bilibili", 2), result("youtube", 1), result("odd"),
+	}
+	var got []string
+	for _, raw := range interleave(results, []string{"bilibili", "iqiyi", "acfun", "youtube"}) {
+		got = append(got, fmt.Sprint(raw.Engine, raw.Positions))
+	}
+	want := "bilibili[1 2] acfun[1] youtube[1] odd[] bilibili[2] acfun[2] acfun[3] acfun[4]"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("order = %s\nwant    %s", strings.Join(got, " "), want)
+	}
+}
+
+func TestTheEnginesAreReadFromSearXNGAndKept(t *testing.T) {
+	backend := &recordingBackend{}
+	service := newTestService(t, backend, NewMemorySwitch(true))
+	clock := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return clock }
+	ctx := context.Background()
+	status, err := service.Status(ctx)
+	if err != nil || strings.Join(status.Engines[Videos], "、") != "哔哩哔哩、爱奇艺、AcFun、搜狗视频、360 视频、YouTube、Dailymotion" ||
+		strings.Join(status.Engines[Music], "、") != "YouTube" || len(status.Engines[Map]) != 0 {
+		t.Fatalf("status = %+v, %v", status.Engines, err)
+	}
+	for range 3 {
+		if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if backend.engineReads != 1 {
+		t.Fatalf("read /config %d times, want once", backend.engineReads)
+	}
+	// After ten minutes it is read again; a failed read keeps the engines it had.
+	clock = clock.Add(catalogMaxAge)
+	backend.failing = true
+	if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); err != nil || backend.engineReads != 2 {
+		t.Fatalf("search while SearXNG restarts: %v, %d reads", err, backend.engineReads)
+	}
+	if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); err != nil || backend.engineReads != 2 {
+		t.Fatalf("right after a failed read: %v, %d reads", err, backend.engineReads)
+	}
+	clock = clock.Add(catalogRetry)
+	backend.failing = false
+	if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); err != nil || backend.engineReads != 3 {
+		t.Fatalf("after %v: %v, %d reads", catalogRetry, err, backend.engineReads)
+	}
+}
+
+func TestNothingIsSearchedWithoutTheEngines(t *testing.T) {
+	backend := &recordingBackend{failing: true}
+	service := newTestService(t, backend, NewMemorySwitch(true))
+	ctx := context.Background()
+	if _, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Web}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("search = %v, want ErrUnavailable", err)
+	}
+	if status, err := service.Status(ctx); err != nil || len(status.Engines[Web]) != 0 || len(status.Categories) == 0 {
+		t.Fatalf("status = %+v, %v", status, err)
+	}
+	// A tab SearXNG loaded no engine for has no results, and asks nothing.
+	backend.failing = false
+	page, err := service.Search(ctx, "u1", Query{Text: "天气", Category: Map})
+	if err != nil || len(page.Results) != 0 || len(backend.forms) != 0 {
+		t.Fatalf("map tab: %+v, %v, asked %v", page, err, backend.forms)
 	}
 }

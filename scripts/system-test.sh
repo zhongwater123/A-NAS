@@ -1231,20 +1231,27 @@ restart_web_search() {
 }
 if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" == real ]]; then
   # SearXNG itself in its unit's sandbox: the release's engines and plugins
-  # loaded behind the WSGI entry, no IP traffic as it starts and idles, and no
-  # error logged while it answered.
+  # loaded behind the WSGI entry, no IP traffic while it idles, and no error
+  # logged while it answered. Every engine is loaded but those that need an
+  # API key, Tor or a service of one's own, including those SearXNG ships
+  # inactive.
   restart_web_search
   # shellcheck disable=SC2317,SC2329 # invoked through check
   searxng_config() {
     as_product curl -fsS --unix-socket "$search_socket" http://localhost/config |
-      jq -e '([.engines[].name] | sort) == (["360search", "360search videos", "acfun", "baidu", "baidu images", "bilibili", "dailymotion",
-        "iqiyi", "piratebay", "quark", "quark images", "sogou", "sogou videos", "sogou wechat", "youtube", "yandex"] | sort)
+      jq -e '[.engines[].name] as $names | ($names | length) > 300
+        and ([("baidu", "bing", "startpage", "mojeek", "piped.music", "z-library")] - $names) == []
+        and ([("youtube_api", "braveapi", "ahmia", "elasticsearch")] - $names | length) == 4
         and ([.plugins[].name] | index("tracker_url_remover") == null)' >/dev/null
   }
   check "SearXNG answers in its sandbox with the release's engines and plugins" searxng_config
-  sleep 10
+  # Radio Browser looks its servers up in DNS as SearXNG starts; after that
+  # nothing goes out until someone searches.
+  sleep 15
+  started=$(systemctl show -p IPEgressPackets --value anas-search)
+  sleep 15
   check "SearXNG sends nothing while nobody searches" \
-    test "$(systemctl show -p IPEgressPackets --value anas-search)" = 0
+    test "$(systemctl show -p IPEgressPackets --value anas-search)" = "$started"
   check "SearXNG logs no error for the Product Service's requests" \
     test "$(journalctl -u anas-search -b -o cat --no-pager | grep -c 'ERROR' || true)" = 0
 fi

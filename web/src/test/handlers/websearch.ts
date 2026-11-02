@@ -14,6 +14,11 @@ const engines: WebSearchStatus["engines"] = {
   images: ["百度图片"],
   videos: ["哔哩哔哩", "YouTube"],
   news: ["搜狗微信"],
+  music: ["YouTube", "soundcloud"],
+  map: ["OpenStreetMap"],
+  science: ["arxiv"],
+  it: ["GitHub"],
+  social: ["mastodon users"],
   torrents: ["海盗湾"],
 };
 
@@ -24,6 +29,11 @@ export function webSearchStatus(enabled = true, torrents = false): WebSearchStat
     "images",
     "videos",
     "news",
+    "music",
+    "map",
+    "science",
+    "it",
+    "social",
     ...(torrents ? ["torrents" as const] : []),
   ];
   return {

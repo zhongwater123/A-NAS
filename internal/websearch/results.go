@@ -1,6 +1,7 @@
 package websearch
 
 import (
+	"cmp"
 	"encoding/json"
 	"math"
 	"net/url"
@@ -25,23 +26,26 @@ type Response struct {
 
 // RawResult is one SearXNG result as the engine filled it.
 type RawResult struct {
-	URL           string   `json:"url"`
-	Title         string   `json:"title"`
-	Content       string   `json:"content"`
-	Engine        string   `json:"engine"`
-	Engines       []string `json:"engines"`
-	PublishedDate *string  `json:"publishedDate"`
-	Thumbnail     string   `json:"thumbnail"`
-	ThumbnailSrc  string   `json:"thumbnail_src"`
-	ImgSrc        string   `json:"img_src"`
-	Resolution    string   `json:"resolution"`
-	Source        string   `json:"source"`
-	Author        string   `json:"author"`
-	Length        any      `json:"length"`
-	Seed          any      `json:"seed"`
-	Leech         any      `json:"leech"`
-	Filesize      any      `json:"filesize"`
-	MagnetLink    string   `json:"magnetlink"`
+	URL     string   `json:"url"`
+	Title   string   `json:"title"`
+	Content string   `json:"content"`
+	Engine  string   `json:"engine"`
+	Engines []string `json:"engines"`
+	// Positions are the result's ranks in the engines that found it, the
+	// first in Engine's.
+	Positions     []int   `json:"positions"`
+	PublishedDate *string `json:"publishedDate"`
+	Thumbnail     string  `json:"thumbnail"`
+	ThumbnailSrc  string  `json:"thumbnail_src"`
+	ImgSrc        string  `json:"img_src"`
+	Resolution    string  `json:"resolution"`
+	Source        string  `json:"source"`
+	Author        string  `json:"author"`
+	Length        any     `json:"length"`
+	Seed          any     `json:"seed"`
+	Leech         any     `json:"leech"`
+	Filesize      any     `json:"filesize"`
+	MagnetLink    string  `json:"magnetlink"`
 }
 
 // RawInfobox is a SearXNG infobox, such as an encyclopedia's summary.
@@ -105,9 +109,14 @@ type Infobox struct {
 	Thumbnail string `json:"thumbnail,omitempty"`
 }
 
-func (s *Service) page(category Category, response Response) Page {
-	page := Page{Results: []Result{}, Answers: []Answer{}, Suggestions: []string{}, Unresponsive: []string{}}
-	for _, raw := range response.Results {
+func emptyPage() Page {
+	return Page{Results: []Result{}, Answers: []Answer{}, Suggestions: []string{}, Unresponsive: []string{}}
+}
+
+// page maps SearXNG's answer for a tab whose engines take turns in order.
+func (s *Service) page(order []string, category Category, response Response) Page {
+	page := emptyPage()
+	for _, raw := range interleave(response.Results, order) {
 		if result, ok := s.result(category, raw); ok {
 			page.Results = append(page.Results, result)
 		}
@@ -141,8 +150,8 @@ func (s *Service) page(category Category, response Response) Page {
 		if len(pair) == 0 {
 			continue
 		}
-		if e, ok := lookupEngine(pair[0]); ok && !slices.Contains(page.Unresponsive, e.label) {
-			page.Unresponsive = append(page.Unresponsive, e.label)
+		if l := label(pair[0]); !slices.Contains(page.Unresponsive, l) {
+			page.Unresponsive = append(page.Unresponsive, l)
 		}
 	}
 	return page
@@ -165,15 +174,17 @@ func (s *Service) result(category Category, raw RawResult) (Result, bool) {
 	if result.Content == "-" {
 		result.Content = ""
 	}
+	// The engine whose turn the result takes comes first; SearXNG lists the
+	// others in no particular order.
 	names := raw.Engines
-	if len(names) == 0 && raw.Engine != "" {
-		names = []string{raw.Engine}
+	if raw.Engine != "" {
+		names = append([]string{raw.Engine}, slices.DeleteFunc(slices.Clone(raw.Engines), func(n string) bool { return n == raw.Engine })...)
 	}
 	for _, name := range names {
-		if e, ok := lookupEngine(name); ok && !slices.Contains(result.Engines, e.label) {
-			result.Engines = append(result.Engines, e.label)
-			if e.platform && result.Platform == "" {
-				result.Platform = e.label
+		if l := label(name); !slices.Contains(result.Engines, l) {
+			result.Engines = append(result.Engines, l)
+			if platforms[name] && result.Platform == "" {
+				result.Platform = l
 			}
 		}
 	}
@@ -198,6 +209,47 @@ func (s *Service) result(category Category, raw RawResult) (Result, bool) {
 		result.Thumbnail = s.thumbnail(firstNonEmpty(raw.Thumbnail, raw.ImgSrc))
 	}
 	return result, true
+}
+
+// interleave lets the tab's engines take turns, A→B→C→A, each with its own
+// results in its own order. SearXNG ranks a result by its place in each
+// engine and then groups results that share a layout, which put one engine's
+// results ahead of all the others'. A result several engines found takes its
+// first engine's turn; an engine missing from order goes after the others.
+func interleave(results []RawResult, order []string) []RawResult {
+	byEngine := map[string][]RawResult{}
+	turns := slices.Clone(order)
+	for _, raw := range results {
+		name := raw.Engine
+		if name == "" && len(raw.Engines) > 0 {
+			name = raw.Engines[0]
+		}
+		if !slices.Contains(turns, name) {
+			turns = append(turns, name)
+		}
+		byEngine[name] = append(byEngine[name], raw)
+	}
+	for _, list := range byEngine {
+		slices.SortStableFunc(list, func(a, b RawResult) int { return cmp.Compare(place(a), place(b)) })
+	}
+	ordered := make([]RawResult, 0, len(results))
+	for len(ordered) < len(results) {
+		for _, name := range turns {
+			if list := byEngine[name]; len(list) > 0 {
+				ordered = append(ordered, list[0])
+				byEngine[name] = list[1:]
+			}
+		}
+	}
+	return ordered
+}
+
+// place is a result's rank in its first engine; one without goes last.
+func place(raw RawResult) int {
+	if len(raw.Positions) > 0 && raw.Positions[0] > 0 {
+		return raw.Positions[0]
+	}
+	return math.MaxInt
 }
 
 func decodeAnswer(raw json.RawMessage) (Answer, bool) {

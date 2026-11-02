@@ -9829,6 +9829,11 @@ components:
         - images
         - videos
         - news
+        - music
+        - map
+        - science
+        - it
+        - social
         - torrents
     WebSearchStatus:
       type: object
@@ -9861,13 +9866,18 @@ components:
             $ref: '#/components/schemas/WebSearchCategory'
         engines:
           type: object
-          description: Every tab's engines as the window names them, fixed by the release.
+          description: 'Every tab''s engines as the window names them, in the order their results take turns: those SearXNG loaded, which the release fixes. Empty until SearXNG has been read while it ran.'
           additionalProperties: false
           required:
             - web
             - images
             - videos
             - news
+            - music
+            - map
+            - science
+            - it
+            - social
             - torrents
           properties:
             web:
@@ -9883,6 +9893,26 @@ components:
               items:
                 type: string
             news:
+              type: array
+              items:
+                type: string
+            music:
+              type: array
+              items:
+                type: string
+            map:
+              type: array
+              items:
+                type: string
+            science:
+              type: array
+              items:
+                type: string
+            it:
+              type: array
+              items:
+                type: string
+            social:
               type: array
               items:
                 type: string
@@ -10025,6 +10055,7 @@ components:
       properties:
         results:
           type: array
+          description: In the order to show them, the tab's engines taking turns, each with its own results in its own order.
           items:
             $ref: '#/components/schemas/WebSearchResult'
         answers:

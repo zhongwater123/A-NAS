@@ -4373,3 +4373,35 @@ button.health-go svg {
 a.set-btn {
   text-decoration: none;
 }
+.set-engines + .set-engines {
+  border-top: 1px solid var(--set-line);
+}
+.set-engines summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.set-engines summary span {
+  flex: 1;
+}
+.set-engines summary svg {
+  width: 16px;
+  height: 16px;
+  color: var(--set-muted);
+  transition: transform 0.15s ease;
+}
+.set-engines[open] summary svg {
+  transform: rotate(90deg);
+}
+.set-engines summary small,
+.set-engines p {
+  color: var(--set-muted);
+  font-size: 12.5px;
+}
+.set-engines p {
+  margin: 0;
+  padding: 0 14px 12px;
+  line-height: 1.7;
+}

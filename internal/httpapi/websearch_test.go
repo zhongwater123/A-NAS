@@ -89,10 +89,11 @@ func TestWebSearchFollowsTheContractAndItsSwitches(t *testing.T) {
 		return page
 	}
 
-	if got := status(asAlice); !got.Enabled || strings.Join(got.Categories, ",") != "web,images,videos,news" {
+	if got := status(asAlice); !got.Enabled || strings.Join(got.Categories, ",") != "web,images,videos,news,music,map,science,it,social" {
 		t.Fatalf("status = %+v, want web search on without the torrent tab", got)
 	}
 	page := search(asAlice, `{"q":"流浪地球","category":"videos"}`, http.StatusOK)
+	search(asAlice, `{"q":"swing","category":"music"}`, http.StatusOK)
 	if len(page.Results) == 0 || !strings.HasPrefix(page.Results[0].Thumbnail, websearchapi.ThumbnailPath+"?") || len(page.Unresponsive) != 1 {
 		t.Fatalf("videos = %+v", page)
 	}
