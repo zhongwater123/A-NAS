@@ -8,6 +8,8 @@
 #     anas-ocr-eval:trixie bash /ai/eval/ocr_models.sh
 # Every language model ends up as Q8_0; vision encoders stay as published (GLM-OCR's
 # Q8_0) or are converted to F16. A model whose download is not complete is skipped.
+# Qwen3.5-4B, the model the product reads text with, is converted by
+# scripts/convert-ocr-model.sh into ~/ocr-eval/models/qwen3.5-4b, where eval.ocr finds it.
 set -euo pipefail
 convert=/src/convert_hf_to_gguf.py
 quantize=/src/build/bin/llama-quantize
