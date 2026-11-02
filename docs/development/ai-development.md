@@ -78,10 +78,45 @@ $DET -m eval.hybrid_search --vectors "/datasets/cache/<模型 ID>-e512" --detect
   --embedder /models-eg/embeddinggemma-2-740m.litertlm --weight-cache /xnnpack --report /datasets/runs/detector/report.json
 ```
 
+## 视频剪辑方案测评
+
+两套视频自动剪辑方案按[测评规格](../specs/video-edit-evaluation.md)的统一口径运行。测评管线是 `eval.video_edit`，只用标准库，依赖 Docker；需要第三方包的步骤在测评镜像里运行。
+
+**运行前提**：
+
+- x86_64 的 Linux 或 WSL2，至少 8 个 CPU，Docker 使用 cgroup v2；
+- 一个干净的仓库提交；
+- 能访问 snapshot.debian.org、PyPI 与 GitHub Release。
+
+每台设备先构建镜像，再跑对照方案和自己的方案，结果写进同一个结果目录。在 `ai/` 下运行：
+
+```bash
+python3 -m eval.video_edit image
+python3 -m eval.video_edit fetch --manifest eval/video_edit/testset-v1.json --dest ~/video-edit/testset
+for plan in eval/video_edit/baseline <方案目录>; do
+  name=$(basename "$plan")
+  python3 -m eval.video_edit setup --plan "$plan" --env ~/video-edit/env-"$name"
+  python3 -m eval.video_edit run --plan "$plan" --env ~/video-edit/env-"$name" --testset ~/video-edit/testset \
+    --manifest eval/video_edit/testset-v1.json --out ~/video-edit/runs
+done
+python3 -m eval.video_edit pack --runs ~/video-edit/runs --out ~/video-edit/<方案名>.tar
+```
+
+- **长时间运行**：`run` 可能要跑几个小时，放在后台运行（例如 `nohup … &`）。中断后用同样的参数再运行一次，已有结果的用例会跳过。
+- **测试集清单**：正式清单在素材冻结后提交到 `ai/eval/video_edit/testset-v1.json`。在此之前可以用 `manifest --dir <目录> --out <清单>` 生成本地清单，加 `--dev` 试跑。
+- **核对与盲评**：结果包由 Claude 开发机统一核对，生成报告和盲评材料：
+
+```bash
+python3 -m eval.video_edit report --a A.tar --b B.tar --out ~/video-edit/report
+python3 -m eval.video_edit blind --a A.tar --b B.tar --out ~/video-edit/review --key ~/video-edit/key.json
+python3 -m eval.video_edit unblind --key ~/video-edit/key.json --review ~/video-edit/review/review.csv --out ~/video-edit/result
+```
+
 
 ## 关联
 
 - [开发环境入口](LOCAL_ENVIRONMENT.md)
 - [AI 评估代码](../../ai/eval/)
+- [视频剪辑方案测评规格](../specs/video-edit-evaluation.md)
 - [标签校准报告](../research/photo-ai-label-calibration.md)
 - [AI 架构](../architecture/photo-ai.md)
