@@ -64,6 +64,7 @@ IPAddressDeny=192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 240.0.
 IPAddressDeny=::/128 ::ffff:0:0/96 64:ff9b::/96 100::/64 2001::/23 2001:db8::/32 2002::/16 fc00::/7
 # `systemctl show -p IPEgressBytes anas-search` tells what it sent; nothing
 # while nobody searches, which the system test checks with SearXNG itself.
+# systemd 257 shows [no data] after a daemon-reload until the next restart.
 IPAccounting=yes
 MemoryMax=512M
 

@@ -65,7 +65,8 @@
 - 不打开测量中从未返回结果的引擎：必应的四个引擎、搜狗图片、Yandex 图片，以及海盗湾以外的七个种子站。SearXNG 等最慢的引擎回答后才返回结果，所以打开 1337x 等不可达的站点会让每次种子搜索都等满 5 秒。它们不在 `keep_only` 中，也就不加载。百度与夸克的失败是测量方法造成的，保留。
 - SearXNG 设置中的 `plugins` 列表替换而不是合并它自带的列表（`searx/settings_loader.py`），所以设置只列出计算器、单位换算、时区与哈希四个插件，不再加载跟踪参数清除插件。
 - 用改过的设置重测启动：给 Python 的 `socket.connect` 与 `getaddrinfo` 加钩子，导入 `searx.webapp`（加载引擎与插件）后再空闲 15 秒，没有任何连接或域名解析。系统测试的 `ANAS_SYSTEM_TEST_SEARCH=real` 模式用单元的 IP 计数（`IPAccounting=yes`）检查同一件事。
-- 经 Unix 套接字到达的请求没有对端地址，SearXNG 的机器人检测为每个请求记一条 `ERROR`。release 中的 WSGI 入口（[`deploy/search/anas_search.py`](../../deploy/search/anas_search.py)）为这类请求填上 `127.0.0.1`；SearXNG 的限流本来就关闭，这个地址不参与任何判断。
+- SearXNG 假定前面有一个在可信地址（默认 127.0.0.0/8）上的反向代理，用 `X-Real-IP` 或 `X-Forwarded-For` 告诉它客户端地址。经 Unix 套接字到达的请求两者都没有，连对端地址也没有，于是机器人检测为每个请求记一条 `ERROR`。release 中的 WSGI 入口（[`deploy/search/anas_search.py`](../../deploy/search/anas_search.py)）充当这个代理：对端地址与客户端地址都填 `127.0.0.1`，唯一的客户端就是本机的产品服务。SearXNG 的限流本来就关闭，这个地址不参与任何判断。
+- systemd 257 的 IP 计数在每次 `daemon-reload` 后对运行中的服务显示 `[no data]`，重启服务后恢复（在系统测试的容器中复现）。所以系统测试和运行手册都先重启服务再读计数。
 
 ## 下一步
 

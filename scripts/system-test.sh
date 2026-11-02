@@ -1220,10 +1220,20 @@ check "a member does not reach web search" \
   denied as alice curl -fsS --unix-socket "$search_socket" http://localhost/healthz
 check "web search reads no data volume or Host Agent record" \
   denied nsenter -t "$(systemctl show -p MainPID --value anas-search)" -m ls /srv/a-nas/data /var/lib/a-nas-host
+# systemd 257 loses a running unit's IP counts at every daemon-reload, which
+# the installs above ran, so the checks that read them restart web search.
+restart_web_search() {
+  systemctl restart anas-search
+  for _ in $(seq 1 60); do
+    as_product curl -fsS --unix-socket "$search_socket" http://localhost/healthz >/dev/null 2>&1 && return
+    sleep 0.5
+  done
+}
 if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" == real ]]; then
   # SearXNG itself in its unit's sandbox: the release's engines and plugins
-  # loaded behind the WSGI entry, no IP traffic while nobody searched, and no
+  # loaded behind the WSGI entry, no IP traffic as it starts and idles, and no
   # error logged while it answered.
+  restart_web_search
   # shellcheck disable=SC2317,SC2329 # invoked through check
   searxng_config() {
     as_product curl -fsS --unix-socket "$search_socket" http://localhost/config |
@@ -1232,6 +1242,7 @@ if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" == real ]]; then
         and ([.plugins[].name] | index("tracker_url_remover") == null)' >/dev/null
   }
   check "SearXNG answers in its sandbox with the release's engines and plugins" searxng_config
+  sleep 10
   check "SearXNG sends nothing while nobody searches" \
     test "$(systemctl show -p IPEgressPackets --value anas-search)" = 0
   check "SearXNG logs no error for the Product Service's requests" \
@@ -1287,6 +1298,7 @@ serve(socket.AF_INET, "0.0.0.0")' &
     host=${host//[\[\]]/}
     check "web search cannot reach $target" kept_out "$host" "${target##*:}"
   done
+  restart_web_search
   check "web search may reach a public address" test "$(search_probe 93.184.216.34 7777)" = connected
   # The count the real mode expects to stay at zero sees that connection.
   check "web search's IP traffic is counted" test "$(systemctl show -p IPEgressPackets --value anas-search)" -gt 0
@@ -1327,6 +1339,8 @@ web_search_switch() {
     -X PUT -d "{\"enabled\":$1,\"torrents\":false}" "$api/api/v1/web-search"
 }
 check "an administrator turns web search off" web_search_switch false
+# The Host Agent does not wait for the stop; SearXNG takes a moment.
+for _ in $(seq 1 40); do [[ "$(systemctl is-active anas-search || true)" == inactive ]] && break; sleep 0.5; done
 check "turning it off stops the service and leaves the Host Agent's file" \
   test "$(systemctl is-active anas-search || true)" = inactive -a -f /var/lib/a-nas-host/web-search-disabled
 systemctl restart anas-search

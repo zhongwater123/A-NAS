@@ -45,8 +45,8 @@
    - 预期：列出 `/etc/resolv.conf` 中的 DNS 服务器（实验 NAS 当前为 `172.18.254.101` 与 `172.16.200.200`）。
    - 命令：`stat -c '%a %U %G' /etc/a-nas/search.env`。
    - 预期：`640 root a-nas`。
-   - 命令（还没有人搜索时）：`systemctl show -p IPEgressPackets --value anas-search`。
-   - 预期：`0`，服务启动后不访问外网。
+   - 命令（还没有人搜索时）：`systemctl restart anas-search`，等 30 秒后执行 `systemctl show -p IPEgressPackets --value anas-search`。
+   - 预期：`0`，服务启动与空闲时不访问外网。先重启是因为 systemd 257 在每次 `daemon-reload` 后把运行中服务的计数显示为 `[no data]`，直到服务重启。
 4. 在桌面上搜索一次，确认能访问公网。
    - 操作：打开“网页搜索”，搜索一个常见词，再切到“视频”。
    - 预期：有结果，视频有封面；结果上方的“未响应”只列出个别引擎。
