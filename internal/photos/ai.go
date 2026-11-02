@@ -185,6 +185,11 @@ type AIStatus struct {
 	// ClustersPreparing while label texts wait for the Worker. It is empty
 	// when the Worker's model has no calibrated clusters.
 	Clusters string `json:"clusters,omitempty"`
+	// TextPhotos counts the originals whose vector sends them to have their
+	// text read (textrouting.go), queued or read. It is absent while the
+	// text route does not apply to the Worker's model or its queries wait for
+	// the Worker.
+	TextPhotos *int `json:"textPhotos,omitempty"`
 }
 
 const (
@@ -255,8 +260,13 @@ func (s *Service) returnJob(ctx context.Context, job claimedJob) error {
 }
 
 func (s *Service) completeEmbedding(ctx context.Context, job claimedJob, model string, vector []float32) error {
+	// The route's query vectors come from the Catalog before the transaction.
+	queries, err := s.textQueries(ctx, model)
+	if err != nil {
+		return err
+	}
 	stored := false
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		var exists bool
 		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE object_id = ? AND derivation = ?)",
 			job.objectID, job.derivation).Scan(&exists); err != nil || !exists {
@@ -268,6 +278,11 @@ INSERT INTO embeddings(object_id, derivation, model, vector, created_at) VALUES(
 ON CONFLICT(object_id, derivation) DO UPDATE SET model = excluded.model, vector = excluded.vector, created_at = excluded.created_at`,
 			job.objectID, job.derivation, model, encodeVector(vector), formatTime(s.now())); err != nil {
 			return err
+		}
+		if queries != nil && s.hasText(vector, queries) {
+			if err := enqueueText(ctx, tx, job.objectID, formatTime(s.now())); err != nil {
+				return err
+			}
 		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
 		stored = err == nil
@@ -305,6 +320,9 @@ func (s *Service) AIStatus(ctx context.Context, p Principal) (AIStatus, error) {
 	status := AIStatus{State: state, Reason: reason, Model: model, ObjectModel: detector, FaceModel: faces,
 		AnimalModel: animals}
 	if status.Clusters, err = s.clusterState(ctx, model); err != nil {
+		return AIStatus{}, err
+	}
+	if status.TextPhotos, err = s.textPhotos(ctx, model, libraries); err != nil {
 		return AIStatus{}, err
 	}
 	if len(libraries) == 0 {
