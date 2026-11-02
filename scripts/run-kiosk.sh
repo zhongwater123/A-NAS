@@ -61,6 +61,13 @@ done
   exit 1
 }
 
+# Chromium decodes video through VA-API when a driver for the GPU is
+# installed, and on the CPU otherwise: the screen saver then costs most of a
+# core (operate-local-kiosk.md, 硬件视频解码).
+if ! compgen -G '/usr/lib/*/dri/*_drv_video.so' >/dev/null; then
+  echo "no VA-API driver is installed: Chromium will decode video on the CPU" >&2
+fi
+
 exec /usr/bin/chromium \
   --ozone-platform=wayland \
   --kiosk \

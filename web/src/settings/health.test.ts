@@ -21,6 +21,13 @@ const disk = (id: string, model: string, rotational: boolean): HostState["disks"
 const disks = [disk("disk:hdd", "ST500DM002-1BD142", true), disk("disk:ssd", "Acer SSD N3500CN", false)];
 
 describe("describeFinding", () => {
+  it("says the CPU runs hot and what to check", () => {
+    expect(describeFinding({ code: "cpu_hot", severity: "warning", value: 93 }, disks)).toMatchObject({
+      title: "处理器温度 93 °C，偏高",
+      detail: expect.stringContaining("散热器和风扇"),
+    });
+  });
+
   it("names the disk and the limit for its kind", () => {
     expect(
       describeFinding({ code: "disk_hot", severity: "warning", diskId: "disk:hdd", value: 57 }, disks),

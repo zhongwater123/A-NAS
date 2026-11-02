@@ -31,6 +31,7 @@ const VALIDATED = [
   "getLocalDisplay",
   "listAppShortcuts",
   "getAssistantStatus",
+  "getWebSearch",
   "listShareNotifications",
   "listMemberShares",
   "getMemberShare",
@@ -51,6 +52,7 @@ const VALIDATED = [
   "listApps",
   "getAppInstallPlan",
   "getContainerSnapshot",
+  "listFamilyHints",
 ];
 
 const [bundlePath, outPath] = process.argv.slice(2);

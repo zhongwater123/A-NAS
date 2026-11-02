@@ -128,7 +128,7 @@ func (s *Store) Recover() error {
 			s.active = job.AppID
 			s.mu.Unlock()
 			ctx, cancel := context.WithTimeout(context.Background(), uninstallTimeout)
-			result := s.resume(ctx, job, &jobWriter{store: s, job: job})
+			result := s.resume(ctx, job, newJobWriter(s, job))
 			cancel()
 			s.mu.Lock()
 			s.end(job, result)

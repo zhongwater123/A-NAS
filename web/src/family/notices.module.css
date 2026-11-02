@@ -1,0 +1,98 @@
+/* 家庭中心's hint on the desktop, under the status bar, in the window's warm
+   coral. Kept apart from the window's styles, which load with the window. */
+.fn-holder {
+  position: absolute;
+  z-index: 77;
+  top: 78px;
+  right: 22px;
+  width: min(340px, calc(100% - 140px));
+}
+.fn-toast {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 14px 38px 12px 14px;
+  border-radius: var(--radius-xl);
+  color: #2a221d;
+  background: rgba(255, 251, 247, 0.97);
+  box-shadow:
+    0 0 0 1px rgba(70, 45, 30, 0.08),
+    0 18px 48px rgba(40, 20, 10, 0.25);
+  backdrop-filter: blur(18px);
+  animation: fn-in 0.38s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.fn-mark {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: var(--radius-md);
+  color: #fff;
+  background: linear-gradient(155deg, #ffad7a, #e8573a);
+}
+.fn-mark svg {
+  width: 17px;
+  height: 17px;
+}
+.fn-copy {
+  min-width: 0;
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+}
+.fn-copy small {
+  color: #998b81;
+  font-size: 11px;
+  font-weight: 550;
+}
+.fn-copy strong {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.fn-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  color: #cf5a35;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fn-open svg {
+  width: 14px;
+  height: 14px;
+}
+.fn-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: #998b81;
+  background: none;
+  cursor: pointer;
+}
+.fn-close:hover {
+  background: rgba(70, 45, 30, 0.06);
+}
+.fn-close svg {
+  width: 15px;
+  height: 15px;
+}
+@keyframes fn-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}

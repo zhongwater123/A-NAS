@@ -1,7 +1,7 @@
 # 开机动画
 
 状态：implemented
-更新时间：2026-10-28
+更新时间：2026-10-29
 
 ## 目标
 
@@ -53,6 +53,7 @@ Web 桌面加载时先播放约 7 秒的 A-NAS 开机动画：80 年代电视台
 - WebGL 上下文丢失或绘制抛出异常时立即结束动画，不阻塞桌面。
 - 动画只依赖前端代码：字标和标语为矢量绘制，不加载网络字体、图片或音频，离线控制台也能完整播放。
 - 时间按时钟而不是帧数推进：标签页在后台暂停绘制，恢复后会直接跳到对应时刻，不会补播。
+- 登录画面没有显示出来时，流星与字标也停止绘制，例如本机屏幕的黑屏盖住它、页面停止渲染时（[本地控制台屏保](local-console-screensaver.md#覆盖期间下层页面不渲染)）；画面重新显示后从当前时刻继续。
 - 覆盖层位于所有桌面窗口之上，结束后从 DOM 移除；它对辅助技术隐藏，不影响下方页面的读屏结构。登录页通过覆盖层的 `data-boot-splash` 属性判断它是否还在。
 - 绘制缓冲宽度上限为 1600 像素；Experimental NAS 显卡上的帧率与 WebGL 可用性尚未实测。
 - 登录页的流星和字标只是装饰：浏览器不能绘制 2D Canvas 或绘制抛出异常时停在纯黑背景上，标题和表单照常可用。它们同样只用前端代码绘制，不加载字体或图片。
@@ -62,7 +63,7 @@ Web 桌面加载时先播放约 7 秒的 A-NAS 开机动画：80 年代电视台
 - [时间线与降级测试](../../web/src/boot/bootIdent.test.ts)：开机光线、稳定画面、关机收线和光点，以及无法绘制时不启动。
 - [覆盖层测试](../../web/src/boot/BootSplash.test.tsx)：每个标签页只播放一次、淡出后交给桌面、指针和按键跳过且按键不泄漏、无法启动时直接进入、减少动态效果时不播放。
 - 2026-10-08 在本机 Chromium 打开 `make web-build` 产物，确认完整播放后进入登录页、空格跳到关机收线、刷新不重播。
-- [字标时间线与降级测试](../../web/src/boot/bootIdent.test.ts)、[流星降级测试](../../web/src/auth/meteorShower.test.ts)：锁定一次后停在定格并周期扫光，无法绘制或绘制失败时不启动。
+- [字标时间线与降级测试](../../web/src/boot/bootIdent.test.ts)、[流星降级测试](../../web/src/auth/meteorShower.test.ts)：锁定一次后停在定格并周期扫光，无法绘制或绘制失败时不启动，暂停期间不绘制、恢复后继续。[登录画面测试](../../web/src/auth/AuthStage.test.tsx)：画面不再可见时两块画布都暂停。
 - 待完成：在 Experimental NAS 的 Kiosk 直连屏幕上确认帧率和 CRT 效果。
 
 ## 关联
@@ -70,4 +71,4 @@ Web 桌面加载时先播放约 7 秒的 A-NAS 开机动画：80 年代电视台
 - 架构：不涉及
 - ADR：[本地控制台 Kiosk](../adr/0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)
 - 代码：[覆盖层](../../web/src/boot/BootSplash.tsx)、[画面与时间线](../../web/src/boot/bootIdent.ts)、[CRT 渲染](../../web/src/boot/crtRenderer.ts)、[挂载入口](../../web/src/main.tsx)、[登录画面](../../web/src/auth/AuthStage.tsx)、[流星雨](../../web/src/auth/meteorShower.ts)
-- 测试：[bootIdent.test.ts](../../web/src/boot/bootIdent.test.ts)、[BootSplash.test.tsx](../../web/src/boot/BootSplash.test.tsx)、[meteorShower.test.ts](../../web/src/auth/meteorShower.test.ts)
+- 测试：[bootIdent.test.ts](../../web/src/boot/bootIdent.test.ts)、[BootSplash.test.tsx](../../web/src/boot/BootSplash.test.tsx)、[meteorShower.test.ts](../../web/src/auth/meteorShower.test.ts)、[AuthStage.test.tsx](../../web/src/auth/AuthStage.test.tsx)

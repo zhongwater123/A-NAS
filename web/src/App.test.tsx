@@ -20,8 +20,10 @@ import { storagePlan } from "./test/handlers/storage";
 import { taskManagerHandlers } from "./test/handlers/taskmanager";
 import { trashHandlers } from "./test/handlers/trash";
 import { accountHandlers, alice } from "./test/handlers/users";
+import { webSearchStatus } from "./test/handlers/websearch";
 import { apiError, http, server } from "./test/server";
 import { transferStore } from "./transfers/store";
+import { resetWebSearch } from "./websearch/status";
 
 // The trash and the transfer center count how often the desktop renders and
 // mounts them, and the trash can be made to fail, for the tests of window
@@ -137,6 +139,7 @@ beforeEach(() => {
 
 afterEach(() => {
   transferStore.reset();
+  resetWebSearch();
   tus.uploads.length = 0;
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -668,6 +671,20 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(openWindows()).toEqual([]);
   });
 
+  it("shows web search only while an administrator leaves it on", async () => {
+    serveDesktop({ webSearch: webSearchStatus(true) });
+    serveWindows();
+    const { unmount } = render(<App />);
+    expect((await screen.findAllByRole("button", { name: "打开网页搜索" })).length).toBeGreaterThan(0);
+    unmount();
+    resetWebSearch();
+
+    serveDesktop({ webSearch: webSearchStatus(false) });
+    render(<App />);
+    await screen.findAllByRole("button", { name: "打开相册" });
+    expect(screen.queryByRole("button", { name: "打开网页搜索" })).not.toBeInTheDocument();
+  });
+
   it("finds an app in the launcher by what it does and opens it with Enter", async () => {
     serveDesktop();
     serveWindows();
@@ -992,7 +1009,7 @@ describe("Settings on the desktop", () => {
     );
 
     await user.click(within(settings).getByRole("button", { name: "移除" }));
-    expect(await within(settings).findByText("已移除头像，现在显示名字的第一个字。")).toBeTruthy();
+    expect(await within(settings).findByText("已移除头像，现在显示文字头像。")).toBeTruthy();
     expect(account.querySelector("img")).toBeNull();
     expect(account.textContent).toContain("A");
   });

@@ -23,6 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
+	"github.com/zhongwater123/A-NAS/internal/websearchapi"
 )
 
 const sessionCookieName = "anas_session"
@@ -51,6 +52,10 @@ type ProductDependencies struct {
 	Photos http.Handler
 	// Shares serves member shares; production independently confirms sessions.
 	Shares http.Handler
+	// Family serves /api/v1/family, 家庭中心, and receives the user through
+	// accounts.WithUser with the session token; on a NAS the family service
+	// confirms the session itself (ADR 0029).
+	Family http.Handler
 	// Media serves /api/v1/media to every signed-in user and receives the
 	// user through accounts.WithUser; the session token stays in the context
 	// for the File Broker.
@@ -75,6 +80,9 @@ type ProductDependencies struct {
 	// SystemLogs reads the allowlisted service logs for administrators; nil
 	// answers logs_unavailable.
 	SystemLogs systemlog.Reader
+	// WebSearch serves the built-in web search (ADR 0030); nil leaves its
+	// routes out.
+	WebSearch *websearchapi.API
 	// Personalization keeps the device-wide 个性化 settings and wallpaper;
 	// nil answers personalization_unavailable.
 	Personalization *personalization.Store

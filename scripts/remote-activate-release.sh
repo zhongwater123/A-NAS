@@ -89,6 +89,7 @@ install -m 0644 anas-api-system.service.incoming anas-api-system.service
 install -m 0644 anas-host-agent-system.service.incoming anas-host-agent-system.service
 install -m 0644 anas-photos-system.service.incoming anas-photos-system.service
 install -m 0644 anas-shares-system.service.incoming anas-shares-system.service
+install -m 0644 anas-family-system.service.incoming anas-family-system.service
 install -m 0750 install-v1.0.1-system-services.sh.incoming install-v1.0.1-system-services.sh
 install -m 0750 provision-v1.0.1-rc.sh.incoming provision-v1.0.1-rc.sh
 install -m 0750 install-screensavers.sh.incoming install-screensavers.sh
@@ -112,7 +113,7 @@ install -d -m 0750 ai
 tar -C ai --strip-components=1 -xf ai-worker.tar.incoming
 install -m 0644 ai-runtime.json.incoming ai/runtime.json
 manifest_field() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])' "$1" "$2"; }
-for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx; do
+for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf; do
   name=${role%%:*}
   install -m 0644 "ai-$name.json.incoming" "ai/$name.json"
   sha=$(manifest_field "ai/$name.json" sha256)
@@ -128,6 +129,14 @@ runtime_file=$(manifest_field ai/runtime.json file)
 staged_runtime="$HOME/apps/a-nas/ai-runtimes/$runtime_file"
 printf '%s  %s\n' "$runtime_sha" "$staged_runtime" | sha256sum --check --quiet -
 ln -s "$staged_runtime" ai/runtime.tar.gz
+# The text reader's llama.cpp travels once per content like Qdrant.
+install -m 0644 ai-llama.json.incoming ai/llama.json
+llama_sha=$(manifest_field ai/llama.json sha256)
+llama_file=$(manifest_field ai/llama.json file)
+[[ "$llama_sha" =~ ^[0-9a-f]{64}$ && "$llama_file" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "invalid llama.cpp manifest" >&2; exit 2; }
+staged_llama="$HOME/apps/a-nas/llama/$llama_sha/$llama_file"
+printf '%s  %s\n' "$llama_sha" "$staged_llama" | sha256sum --check --quiet -
+ln -s "$staged_llama" ai/llama.tar.gz
 # The vector index (ADR 0028): Qdrant travels once per content like the
 # models; the release carries its manifest, settings and scripts.
 rm -rf vectors
@@ -142,6 +151,26 @@ qdrant_file=$(manifest_field vectors/qdrant.json file)
 staged_qdrant="$HOME/apps/a-nas/qdrant/$qdrant_sha/$qdrant_file"
 printf '%s  %s\n' "$qdrant_sha" "$staged_qdrant" | sha256sum --check --quiet -
 ln -s "$staged_qdrant" vectors/qdrant.tar.gz
+# Web search (ADR 0030): SearXNG's settings, pin and DNS helper, its units,
+# and its runtime, staged once per content like the AI Worker's.
+install -m 0644 anas-search-system.service.incoming anas-search-system.service
+install -m 0644 anas-search-dns-system.service.incoming anas-search-dns-system.service
+install -m 0644 anas-search-dns-system.path.incoming anas-search-dns-system.path
+install -m 0644 a-nas-search.sysusers.incoming a-nas-search.sysusers
+rm -rf search
+install -d -m 0750 search
+install -m 0644 search-settings.yml.incoming search/settings.yml
+install -m 0644 search-searxng.json.incoming search/searxng.json
+install -m 0750 search-allow-dns.sh.incoming search/allow-dns.sh
+install -m 0644 search-anas_search.py.incoming search/anas_search.py
+install -m 0644 search-runtime.json.incoming search/runtime.json
+search_runtime_sha=$(manifest_field search/runtime.json sha256)
+search_runtime_file=$(manifest_field search/runtime.json file)
+[[ "$search_runtime_sha" =~ ^[0-9a-f]{64}$ && "$search_runtime_file" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] ||
+  { echo "invalid web search runtime manifest" >&2; exit 2; }
+staged_search_runtime="$HOME/apps/a-nas/search-runtimes/$search_runtime_file"
+printf '%s  %s\n' "$search_runtime_sha" "$staged_search_runtime" | sha256sum --check --quiet -
+ln -s "$staged_search_runtime" search/runtime.tar.gz
 rm -f \
   anas-system.slice.incoming \
   anas-ai-system.socket.incoming \
@@ -163,7 +192,19 @@ rm -f \
   ai-face-detector.json.incoming \
   ai-face-embedder.json.incoming \
   ai-animal-embedder.json.incoming \
+  ai-ocr-model.json.incoming \
+  ai-ocr-mmproj.json.incoming \
   ai-runtime.json.incoming \
+  ai-llama.json.incoming \
+  anas-search-system.service.incoming \
+  anas-search-dns-system.service.incoming \
+  anas-search-dns-system.path.incoming \
+  a-nas-search.sysusers.incoming \
+  search-settings.yml.incoming \
+  search-searxng.json.incoming \
+  search-allow-dns.sh.incoming \
+  search-anas_search.py.incoming \
+  search-runtime.json.incoming \
   anas-api.incoming \
   anas-host-agent.incoming \
   kiosk-launcher.incoming \
@@ -177,6 +218,7 @@ rm -f \
   anas-host-agent-system.service.incoming \
   anas-photos-system.service.incoming \
   anas-shares-system.service.incoming \
+  anas-family-system.service.incoming \
   install-v1.0.1-system-services.sh.incoming \
   provision-v1.0.1-rc.sh.incoming \
   install-screensavers.sh.incoming \

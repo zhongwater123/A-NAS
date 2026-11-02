@@ -811,6 +811,18 @@
     animation: none;
   }
 }
+/* While either cover is up, everything else on the page, portals included,
+   skips rendering. Under an opaque cover the desktop would otherwise go on
+   drawing its gauges' transitions and any running animation every frame; the
+   kiosk spent about a quarter of a core on that behind the black screen
+   (docs/investigations/2026-10-28-screensaver-video-cpu.md). The page keeps
+   its DOM and layout, so the first input brings it back as it was. The switch
+   waits until the screen saver has faded in. */
+body:has(> .local-console-screensaver, > .local-console-sleep)
+  > :not(.local-console-screensaver, .local-console-sleep) {
+  content-visibility: hidden;
+  transition: content-visibility 0s 0.3s allow-discrete;
+}
 /* 息屏: plain black over everything, the photo slideshow and sign-in page included, until the first input. */
 .local-console-sleep {
   position: fixed;
@@ -921,6 +933,14 @@
 }
 .icon-music {
   background: linear-gradient(155deg, #ff506d, #d92471);
+}
+.icon-websearch {
+  background: linear-gradient(155deg, #3d6bff, #1b2a8c);
+}
+/* 家庭中心: a warm coral tile behind a cream house, in its title bar too. */
+.icon-family,
+.app-window-family .window-app-icon {
+  background: linear-gradient(155deg, #ffad7a, #e8573a);
 }
 /* AI 助手 is the user's ink portrait on white: it fills its white tile edge to
    edge and takes the tile's corners, with no gloss over the drawing. */
@@ -1430,6 +1450,11 @@ button.net-rates {
   overflow: hidden;
   background: #f7f7f9;
   container: musicwindow / inline-size;
+}
+/* 家庭中心 */
+.window-content-family {
+  overflow: hidden;
+  background: #fbf7f2;
 }
 /* 分享 */
 .app-window-shares .window-app-icon {

@@ -170,7 +170,11 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 			}
 			if err == nil {
 				r.releaseModels(ctx, detector, "")
-				// People cluster in the photo service, without the Worker.
+				// Stored vectors are routed, and people cluster, in the photo
+				// service without the Worker.
+				if routed, err := r.lib.routeStoredVectors(ctx, model); routed || err != nil {
+					return routed, err
+				}
 				clustered, err := r.lib.clusterPeople(ctx)
 				return clustered, err
 			}
@@ -206,12 +210,17 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	if err := r.requeueStale(ctx, info); err != nil {
 		return false, err
 	}
-	// Label texts are few and short; they come before photos.
-	if fetched, err := r.lib.embedLabelText(ctx, embedder, info); fetched || err != nil {
+	// Query texts, the labels' and the text route's, are few and short; they
+	// come before photos. Then the vectors stored before the route's queries
+	// had theirs are routed, once.
+	if fetched, err := r.lib.embedQueryText(ctx, embedder, info); fetched || err != nil {
 		if fetched {
 			r.progress.set(AIWorking, "", info.Model)
 		}
 		return fetched, err
+	}
+	if routed, err := r.lib.routeStoredVectors(ctx, info.Model); routed || err != nil {
+		return routed, err
 	}
 	job, err := r.lib.claimJob(ctx, embeddingDerivation)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -632,11 +641,12 @@ func (r *aiRunner) noticeModel(model string) {
 // models.
 func (r *aiRunner) workWaiting(ctx context.Context, model string) (bool, error) {
 	lib := r.lib
-	if model == lib.labels.Model {
+	// Query texts, the labels' or the text route's, still to fetch.
+	if len(lib.queryTexts(model)) > 0 {
 		lib.labelIndex.mu.Lock()
-		pending := lib.labelIndex.vectors == nil && !lib.now().Before(lib.labelIndex.retryAt)
+		retrying := lib.now().Before(lib.labelIndex.retryAt)
 		lib.labelIndex.mu.Unlock()
-		if pending {
+		if !retrying && !lib.queryTextsReady(model) {
 			return true, nil
 		}
 	}

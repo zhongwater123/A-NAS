@@ -107,6 +107,8 @@ func (h *handler) routes() {
 	h.mux.HandleFunc("GET "+AIStatusPath, h.aiStatus)
 	// Only the Product Service asks for this; browsers never reach it.
 	h.mux.ServeMux.HandleFunc("GET "+ActivityPath, h.activity)
+	// Only the family service asks for this, with the reader's session.
+	h.mux.ServeMux.HandleFunc("POST "+LookupPath, h.lookup)
 	h.mux.HandleFunc("GET "+p+"/search", h.search)
 	h.mux.HandleFunc("POST "+p+"/image-searches", h.searchByImage)
 	h.mux.HandleFunc("GET "+p+"/image-searches/{searchID}/assets", h.imageSearchResults)

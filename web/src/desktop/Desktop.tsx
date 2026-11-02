@@ -26,6 +26,8 @@ import { useStoragePlan } from "../settings/storagePlan";
 import { SharesProvider, useShares } from "../shares/SharesProvider";
 import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
+import { lazyCode } from "../ui/lazyCode";
+import { useWebSearch } from "../websearch/status";
 import { AppWindow } from "./AppWindow";
 import type { AssistantTaskNotice } from "./api";
 import { shortcutApp, useAppShortcuts } from "./appShortcuts";
@@ -50,6 +52,10 @@ import { DesktopView, SystemRail } from "./SystemRail";
 import { useHostState } from "./useHostState";
 import { useWallpaper, wallpaperBackground } from "./wallpaper";
 import { closedWindow, windowReducer } from "./windows";
+
+// 家庭中心's hint loads after the desktop, so its code and styles stay out of
+// the first load.
+const FamilyNotices = lazyCode(() => import("../family/FamilyNotices").then((module) => module.FamilyNotices));
 
 // SharesRail is the system rail with the count of shares that have something
 // new, which only the shares provider knows.
@@ -151,6 +157,8 @@ export function Desktop({
       .then((status) => setAssistantReady(status.available))
       .catch(() => setAssistantReady(false));
   }, [session.user.id]);
+  // Only the switch reaches the windows' context, not every minute's read.
+  const webSearchEnabled = useWebSearch()?.enabled ?? false;
   const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
   const showTaskRun = (run: AssistantTaskNotice) =>
@@ -160,8 +168,18 @@ export function Desktop({
   // window is dragged, resized or brought to the front, nor when the host's
   // state is polled: that reaches the settings window alone.
   const context = useMemo<WindowContext>(
-    () => ({ session, isAdmin, assistantReady, open, intents, intentHandled, changeUser, logout: onLogout }),
-    [session, isAdmin, assistantReady, open, intents, intentHandled, changeUser, onLogout],
+    () => ({
+      session,
+      isAdmin,
+      assistantReady,
+      webSearchEnabled,
+      open,
+      intents,
+      intentHandled,
+      changeUser,
+      logout: onLogout,
+    }),
+    [session, isAdmin, assistantReady, webSearchEnabled, open, intents, intentHandled, changeUser, onLogout],
   );
   const settingsState = useMemo<SettingsState>(
     () => ({ host, section: settingsSection, setSection: setSettingsSection, storagePlan }),
@@ -303,6 +321,11 @@ export function Desktop({
         </ShellPart>
         <ShellPart name="task toasts">
           <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
+        </ShellPart>
+        <ShellPart name="family hints">
+          <Suspense fallback={null}>
+            <FamilyNotices onOpen={() => open("family")} />
+          </Suspense>
         </ShellPart>
         <ShellPart name="feedback">
           <FeedbackChannel />

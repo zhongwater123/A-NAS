@@ -8,6 +8,7 @@ export type {
   TaskManagerNetwork as Network,
   TaskManagerTask as Task,
   TaskManagerTasksResponse as TaskSnapshot,
+  Temperature,
 } from "../../api.generated";
 export type Availability = TaskManagerStatus;
 // Every group of the device and task snapshots: a status and its items.

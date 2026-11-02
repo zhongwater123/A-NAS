@@ -1015,7 +1015,7 @@ describe("Avatars and nicknames", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "移除" }));
-    expect(await screen.findByText("已移除头像，现在显示名字的第一个字。")).toBeTruthy();
+    expect(await screen.findByText("已移除头像，现在显示文字头像。")).toBeTruthy();
     expect(account.sent.avatarRemovals).toBe(1);
     expect(myAccount().querySelector("img")).toBeNull();
     expect(myAccount().textContent).toContain("A");

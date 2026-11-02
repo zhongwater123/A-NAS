@@ -117,7 +117,7 @@ func readRunningServiceProperties(ctx context.Context) ([]byte, error) {
 	return runTaskCommand(ctx, "systemctl", "show", "--all", "--no-pager", "--property=Id,ActiveState,SubState,ControlGroup,InvocationID,MainPID", "*.service")
 }
 func readTaskBlockDevices(ctx context.Context) ([]byte, error) {
-	return runTaskCommand(ctx, "lsblk", "--json", "--bytes", "--tree", "--exclude", "7", "--output", "NAME,TYPE,SIZE,MODEL,WWN,SERIAL")
+	return runTaskCommand(ctx, "lsblk", "--json", "--bytes", "--tree", "--exclude", "7", "--output", "NAME,TYPE,SIZE,MODEL,TRAN,ROTA,WWN,SERIAL")
 }
 func taskUint(root fs.FS, path string) (*uint64, error) {
 	b, err := readTaskFile(root, path)

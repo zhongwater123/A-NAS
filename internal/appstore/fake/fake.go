@@ -9,6 +9,7 @@ package fake
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -40,7 +41,8 @@ var Policy = appstore.Policy{
 // addressPool is the Experimental NAS's pool for app networks.
 var addressPool = netip.MustParsePrefix("10.96.64.0/19")
 
-// New returns a store whose installs take about step*4 to finish.
+// New returns a store whose Compose commands take about step per line of
+// output: an install takes a few steps per service of the app.
 func New(step time.Duration) (*engine.Store, error) {
 	entries, err := appstore.Catalog()
 	if err != nil {
@@ -233,13 +235,23 @@ func (r *runner) Run(ctx context.Context, args []string, output io.Writer) error
 			name = args[i+1]
 		case arg == "-f" && i+1 < len(args):
 			file = args[i+1]
-		case arg == "up" || arg == "down" || arg == "logs":
+		case arg == "up" || arg == "down" || arg == "logs" || arg == "pull":
 			action = arg
 		}
 	}
 	var lines []string
 	var rendered *types.Project
 	switch action {
+	case "pull":
+		// Compose's JSON progress, as the engine asks for it.
+		service := args[len(args)-1]
+		for _, text := range []string{"Pulling (simulated)", "Pulled"} {
+			event, err := json.Marshal(map[string]string{"id": service, "text": text})
+			if err != nil {
+				return err
+			}
+			lines = append(lines, string(event))
+		}
 	case "up":
 		compose, err := os.ReadFile(file)
 		if err != nil {
@@ -253,7 +265,6 @@ func (r *runner) Run(ctx context.Context, args []string, output io.Writer) error
 		}); err != nil {
 			return fmt.Errorf("compose file: %w", err)
 		}
-		lines = []string{"Pulling images (simulated)"}
 		for _, network := range slices.Sorted(maps.Keys(rendered.Networks)) {
 			lines = append(lines, "Network "+cmp.Or(rendered.Networks[network].Name, name+"_"+network)+" Created")
 		}

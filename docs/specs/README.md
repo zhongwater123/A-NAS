@@ -26,6 +26,7 @@
 - [个性化](personalization.md)（implemented）
 - [任务管理器](task-manager.md)（implemented）
 - [系统健康](system-health.md)（implemented）
+- [设备温度与风扇](device-temperatures.md)（implemented）
 - [头像与昵称](account-profile.md)（implemented）
 - [系统快捷栏](system-rail.md)（implemented）
 - [影视中心](media-center.md)（implemented）
@@ -37,6 +38,8 @@
 - [容量与大小的显示单位](size-units.md)（implemented）
 - [AI 助手](ai-assistant.md)（draft）
 - [照片与视频剪辑成片](photo-to-video.md)（draft；助手 MCP 工具：照片拼接与视频片段剪辑，原型沙箱中验收）
+- [网页搜索](web-search.md)（draft）
+- [家庭中心：宝宝频道](family-center.md)（M1 implemented；M2 draft）
 - [硬盘用途与数据卷冗余](disk-roles-and-redundancy.md)（M1 implemented；M2、M3 draft）
 
 状态只表示规格的实现阶段。哪些功能已部署到 Experimental NAS、哪些实机验收未完成，统一记录在[当前状态](../status/CURRENT.md)，规格中不再重复。

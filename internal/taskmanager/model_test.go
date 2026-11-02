@@ -11,7 +11,8 @@ func validDevice() DeviceSnapshot {
 	return DeviceSnapshot{ObservedAt: time.Now(), SampleSeconds: 0.5,
 		CPU: CPU{Model: "Test CPU", LogicalCores: 4, UsagePercent: &value}, Memory: Memory{TotalBytes: 100, UsedBytes: 25},
 		Network: NetworkGroup{Status: Available, Items: []Network{}}, Disks: DiskGroup{Status: Available, Items: []Disk{}},
-		GPU: AcceleratorGroup{Status: Absent, Items: []Accelerator{}}, NPU: AcceleratorGroup{Status: Absent, Items: []Accelerator{}}}
+		GPU: AcceleratorGroup{Status: Absent, Items: []Accelerator{}}, NPU: AcceleratorGroup{Status: Absent, Items: []Accelerator{}},
+		Fans: FanGroup{Status: Available, Items: []Fan{{ID: "fan:1", Number: 1, RPM: 1912}}}}
 }
 
 func TestDeviceValidation(t *testing.T) {
@@ -27,6 +28,10 @@ func TestDeviceValidation(t *testing.T) {
 		func(d *DeviceSnapshot) { v := 101.0; d.CPU.UsagePercent = &v },
 		func(d *DeviceSnapshot) { d.Network.Status = "invalid" },
 		func(d *DeviceSnapshot) { d.GPU.Items = nil },
+		func(d *DeviceSnapshot) { d.Fans.Items = nil },
+		func(d *DeviceSnapshot) { d.Fans.Items[0].Stopped = true },
+		func(d *DeviceSnapshot) { d.Fans.Items[0].RPM = 60000 },
+		func(d *DeviceSnapshot) { d.CPU.Temperature = &Temperature{Celsius: 400, HotCelsius: 90} },
 		func(d *DeviceSnapshot) { d.Disks.Items = []Disk{{ID: "x"}, {ID: "x"}} },
 		func(d *DeviceSnapshot) { v := -1.0; d.Disks.Items = []Disk{{ID: "x", ReadBytesPerSecond: &v}} },
 	} {

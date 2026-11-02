@@ -21,9 +21,12 @@
 # fake providers. With ANAS_SYSTEM_TEST_AI=real, after
 # scripts/build-ai-runtime.sh and with ANAS_AI_MODEL and ANAS_AI_DETECTOR
 # naming the model and detector files, ANAS_AI_FACES the directory holding
-# the face models (yunet/, sface/ and auraface/, as D:\A-NAS-models\faces) and
+# the face models (yunet/, sface/ and auraface/, as D:\A-NAS-models\faces),
 # ANAS_AI_PETS the one holding the animal model (dinov2-small/, as
-# D:\A-NAS-models\pets), it installs the real runtime and models instead.
+# D:\A-NAS-models\pets) and ANAS_AI_OCR the one holding the text reader's two
+# GGUF files (as D:\A-NAS-models\ocr\qwen3.5-4b), it installs the real
+# runtime and models instead. The text reader's llama-server is always the
+# one scripts/fetch-llama.sh fetches.
 set -euo pipefail
 
 if [[ "${1:-}" != --inside ]]; then
@@ -34,6 +37,8 @@ if [[ "${1:-}" != --inside ]]; then
   done
   qdrant_tarball="$repo/build/qdrant/$(jq -r .sha256 "$repo/deploy/qdrant/qdrant.json")/$(jq -r .file "$repo/deploy/qdrant/qdrant.json")"
   [[ -f "$qdrant_tarball" ]] || { echo "missing $qdrant_tarball: run scripts/fetch-qdrant.sh" >&2; exit 2; }
+  llama_tarball="$repo/build/llama/$(jq -r .sha256 "$repo/deploy/llama/llama.json")/$(jq -r .file "$repo/deploy/llama/llama.json")"
+  [[ -f "$llama_tarball" ]] || { echo "missing $llama_tarball: run scripts/fetch-llama.sh" >&2; exit 2; }
   real_ai=()
   if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
     [[ -f "$repo/build/ai-runtime.json" ]] || { echo "missing build/ai-runtime.json: run scripts/build-ai-runtime.sh" >&2; exit 2; }
@@ -41,8 +46,13 @@ if [[ "${1:-}" != --inside ]]; then
     [[ -f "${ANAS_AI_DETECTOR:-}" ]] || { echo "ANAS_AI_DETECTOR must name the detector file" >&2; exit 2; }
     [[ -d "${ANAS_AI_FACES:-}" ]] || { echo "ANAS_AI_FACES must name the face models' directory" >&2; exit 2; }
     [[ -d "${ANAS_AI_PETS:-}" ]] || { echo "ANAS_AI_PETS must name the animal model's directory" >&2; exit 2; }
+    [[ -d "${ANAS_AI_OCR:-}" ]] || { echo "ANAS_AI_OCR must name the text reader's directory" >&2; exit 2; }
     real_ai=(-e ANAS_SYSTEM_TEST_AI=real -v "$(dirname "$ANAS_AI_MODEL"):/ai-model:ro" -v "$(dirname "$ANAS_AI_DETECTOR"):/ai-detector:ro"
-      -v "$ANAS_AI_FACES:/ai-faces:ro" -v "$ANAS_AI_PETS:/ai-pets:ro")
+      -v "$ANAS_AI_FACES:/ai-faces:ro" -v "$ANAS_AI_PETS:/ai-pets:ro" -v "$ANAS_AI_OCR:/ai-ocr:ro")
+  fi
+  if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" == real ]]; then
+    [[ -f "$repo/build/search-runtime.json" ]] || { echo "missing build/search-runtime.json: run scripts/build-search-runtime.sh" >&2; exit 2; }
+    real_ai+=(-e ANAS_SYSTEM_TEST_SEARCH=real)
   fi
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
@@ -88,11 +98,16 @@ if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
   ln -s "/ai-faces/$(jq -r .name "$ai/face-embedder.json" | cut -d - -f 1)/$(jq -r .file "$ai/face-embedder.json")" "$ai/face-embedder.onnx"
   cp /src/deploy/models/dinov2-small.json "$ai/animal-embedder.json"
   ln -s "/ai-pets/dinov2-small/$(jq -r .file "$ai/animal-embedder.json")" "$ai/animal-embedder.onnx"
+  cp /src/deploy/models/qwen3.5-4b-q4_k_m.json "$ai/ocr-model.json"
+  ln -s "/ai-ocr/$(jq -r .file "$ai/ocr-model.json")" "$ai/ocr-model.gguf"
+  cp /src/deploy/models/qwen3.5-4b-mmproj-f16.json "$ai/ocr-mmproj.json"
+  ln -s "/ai-ocr/$(jq -r .file "$ai/ocr-mmproj.json")" "$ai/ocr-mmproj.gguf"
   cp /src/build/ai-runtime.json "$ai/runtime.json"
   ln -s "/src/build/ai-runtime/$(jq -r .file "$ai/runtime.json")" "$ai/runtime.tar.gz"
   detector_model="$(jq -r .name "$ai/detector.json")@$(jq -r .sha256 "$ai/detector.json" | cut -c1-12)+"
   face_model="$(jq -r .name "$ai/face-detector.json")@$(jq -r .sha256 "$ai/face-detector.json" | cut -c1-12)+"
   animal_model="$(jq -r .name "$ai/animal-embedder.json")@$(jq -r .sha256 "$ai/animal-embedder.json" | cut -c1-12)+"
+  ocr_model="$(jq -r .name "$ai/ocr-model.json")@$(jq -r .sha256 "$ai/ocr-model.json" | cut -c1-12)+"
 else
   head -c 65536 /dev/urandom > "$ai/model.litertlm"
   printf '{"name":"system-test","file":"system-test.litertlm","sizeBytes":%s,"sha256":"%s"}\n' \
@@ -108,6 +123,12 @@ else
   done
   face_model=fake-faces
   animal_model=fake-animals
+  for role in ocr-model ocr-mmproj; do
+    head -c 2048 /dev/urandom > "$ai/$role.gguf"
+    printf '{"name":"system-test-%s","file":"system-test.gguf","sizeBytes":%s,"memoryBytes":1048576,"sha256":"%s"}\n' "$role" \
+      "$(stat -c %s "$ai/$role.gguf")" "$(sha256sum "$ai/$role.gguf" | cut -d ' ' -f 1)" > "$ai/$role.json"
+  done
+  ocr_model=fake-reader
   install -d "$ai/venv/bin"
   ln -s /usr/bin/python3 "$ai/venv/bin/python"
   printf 'home = /usr/bin\ninclude-system-site-packages = false\nversion = %s\n' \
@@ -118,21 +139,48 @@ else
     "$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" "$(stat -c %s "$ai/runtime.tar.gz")" \
     "$runtime_sha" > "$ai/runtime.json"
   install -d /etc/systemd/system/anas-ai.service.d
-  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --fake --fake-detector --fake-faces --fake-animals\n' \
+  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --fake --fake-detector --fake-faces --fake-animals --fake-reader\n' \
     > /etc/systemd/system/anas-ai.service.d/system-test.conf
 fi
 # Each model role's file is kept once by content: as many as distinct pins.
-models_kept=$(for role in model detector face-detector face-embedder animal-embedder; do jq -r .sha256 "$ai/$role.json"; done | sort -u | wc -l)
+models_kept=$(for role in model detector face-detector face-embedder animal-embedder ocr-model ocr-mmproj; do
+  jq -r .sha256 "$ai/$role.json"
+done | sort -u | wc -l)
 # AI starts once the photo library has gone unused for this long, so that the
 # test sees a photo organised in the Worker's sandbox.
 install -d /etc/systemd/system/anas-photos.service.d
 printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/system/anas-photos.service.d/system-test.conf
 
+# Web search (ADR 0030) runs a stand-in for SearXNG under the real unit and its
+# sandbox (scripts/system-test-search.py), in a runtime around Debian's Python.
+# With ANAS_SYSTEM_TEST_SEARCH=real, after scripts/build-search-runtime.sh, it
+# installs the real runtime, which starts SearXNG without reaching any engine.
+search=/tmp/search-staged
+install -d "$search"
+if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" == real ]]; then
+  cp /src/build/search-runtime.json "$search/runtime.json"
+  ln -s "/src/build/search-runtime/$(jq -r .file "$search/runtime.json")" "$search/runtime.tar.gz"
+else
+  install -d "$search/venv/bin"
+  ln -s /usr/bin/python3 "$search/venv/bin/python"
+  printf 'home = /usr/bin\ninclude-system-site-packages = false\nversion = %s\n' \
+    "$(python3 -c 'import platform; print(platform.python_version())')" > "$search/venv/pyvenv.cfg"
+  install -m 0644 /src/scripts/system-test-search.py "$search/venv/stand-in.py"
+  tar -C "$search/venv" -czf "$search/runtime.tar.gz" .
+  search_runtime_sha=$(sha256sum "$search/runtime.tar.gz" | cut -d ' ' -f 1)
+  printf '{"id":"%s","python":"%s","file":"runtime.tar.gz","sizeBytes":%s,"sha256":"%s"}\n' "${search_runtime_sha:0:16}" \
+    "$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" "$(stat -c %s "$search/runtime.tar.gz")" \
+    "$search_runtime_sha" > "$search/runtime.json"
+  install -d /etc/systemd/system/anas-search.service.d
+  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/search/runtime/bin/python /opt/a-nas/current/search/runtime/stand-in.py /run/a-nas-search/search.sock\n' \
+    > /etc/systemd/system/anas-search.service.d/system-test.conf
+fi
+
 # stage DIR: a release as scripts/deploy-dev.ps1 stages it.
 stage() {
   install -d "$1"
   install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh /src/scripts/install-ffmpeg-units.sh "$1/"
-  for unit in anas-api anas-host-agent anas-photos anas-shares; do
+  for unit in anas-api anas-host-agent anas-photos anas-shares anas-family; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
   done
   install -m 0644 /src/deploy/systemd/system/anas.slice "$1/anas-system.slice"
@@ -153,13 +201,26 @@ stage() {
   install -d "$1/ai/anas_ai"
   install -m 0644 /src/ai/anas_ai/*.py "$1/ai/anas_ai/"
   install -m 0644 "$ai/model.json" "$ai/detector.json" "$ai/face-detector.json" "$ai/face-embedder.json" \
-    "$ai/animal-embedder.json" "$ai/runtime.json" "$1/ai/"
+    "$ai/animal-embedder.json" "$ai/ocr-model.json" "$ai/ocr-mmproj.json" "$ai/runtime.json" /src/deploy/llama/llama.json "$1/ai/"
   ln -s "$ai/model.litertlm" "$1/ai/model.litertlm"
   ln -s "$ai/detector.onnx" "$1/ai/detector.onnx"
   ln -s "$ai/face-detector.onnx" "$1/ai/face-detector.onnx"
   ln -s "$ai/face-embedder.onnx" "$1/ai/face-embedder.onnx"
   ln -s "$ai/animal-embedder.onnx" "$1/ai/animal-embedder.onnx"
+  ln -s "$ai/ocr-model.gguf" "$1/ai/ocr-model.gguf"
+  ln -s "$ai/ocr-mmproj.gguf" "$1/ai/ocr-mmproj.gguf"
   ln -s "$ai/runtime.tar.gz" "$1/ai/runtime.tar.gz"
+  ln -s "/src/build/llama/$(jq -r .sha256 /src/deploy/llama/llama.json)/$(jq -r .file /src/deploy/llama/llama.json)" \
+    "$1/ai/llama.tar.gz"
+  for unit in anas-search.service anas-search-dns.service anas-search-dns.path; do
+    install -m 0644 "/src/deploy/systemd/system/$unit" "$1/${unit%%.*}-system.${unit#*.}"
+  done
+  install -m 0644 /src/deploy/sysusers.d/a-nas-search.conf "$1/a-nas-search.sysusers"
+  install -d "$1/search"
+  install -m 0644 /src/deploy/search/settings.yml /src/deploy/search/searxng.json /src/deploy/search/anas_search.py \
+    "$search/runtime.json" "$1/search/"
+  install -m 0755 /src/deploy/search/allow-dns.sh "$1/search/"
+  ln -s "$search/runtime.tar.gz" "$1/search/runtime.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
   install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
   install -m 0750 /src/scripts/run-kiosk.sh "$1/kiosk-launcher"
@@ -283,10 +344,11 @@ data=/srv/a-nas/data
 # starts, is a stand-in that only has to exist.
 [[ -x /usr/bin/cage ]] || install -m 0755 /dev/null /usr/bin/cage
 check "systemd accepts every installed A-NAS unit" \
-  verified /etc/systemd/system/anas*.service /etc/systemd/system/anas*.socket /etc/systemd/system/*anas*.slice
+  verified /etc/systemd/system/anas*.service /etc/systemd/system/anas*.socket /etc/systemd/system/anas*.path \
+  /etc/systemd/system/*anas*.slice
 
 # --- Every service runs under its production unit (issue #38).
-check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares smbd
+check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares anas-family smbd
 check "Host Agent keeps CAP_SETUID and CAP_SETGID" has_capabilities anas-host-agent
 check "Host Agent proved it can start workers as users" \
   journal_has anas-host-agent "$installed_at" 'file broker identity switch verified'
@@ -568,11 +630,11 @@ check "nor in the Host Agent's log in Settings" \
 
 # --- A data volume the Host Agent cannot reconcile leaves it serving (issue
 # #166). Btrfs turns a volume read-only when it finds errors; a remount stands
-# in. The photo and share services hold databases open for writing on it,
-# which a read-only remount refuses.
+# in. The photo, share and family services hold databases open for writing
+# on it, which a read-only remount refuses.
 entries /tmp/alice.jar "$alice_private" >/dev/null || true
 scopes_before=$(systemctl list-units --plain --no-legend 'anas-files-*' 'anas-terminal-*' | awk '{print $1}')
-systemctl stop anas-photos anas-shares
+systemctl stop anas-photos anas-shares anas-family
 check "the data volume remounts read-only" mount -o remount,ro "$data"
 readonly_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent
@@ -592,7 +654,7 @@ check "the health check names the read-only data volume" \
 mount -o remount,rw "$data"
 writable_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent
-systemctl start anas-photos anas-shares
+systemctl start anas-photos anas-shares anas-family
 check "once the volume is writable, the Host Agent reconciles it" \
   bash -c "for _ in \$(seq 1 50); do journalctl -u anas-host-agent --since '$writable_at' -o cat --no-pager | grep -Fq 'data volume reconciled' && exit 0; sleep 0.2; done; exit 1"
 check "and reports nothing wrong" \
@@ -752,6 +814,15 @@ check "photo store belongs to the photo service alone" \
   test "$(stat -c '%a %U' "$data/photos")" = "700 a-nas-photos"
 check "Product Service account cannot list the photo store" denied as a-nas ls "$data/photos"
 
+# --- Family center (ADR 0029): its own identity and store; it asks the photo
+# service about a channel's photos with the reader's session.
+check "family store belongs to the family service alone" \
+  test "$(stat -c '%a %U' "$data/family")" = "700 a-nas-family"
+check "Product Service account cannot list the family store" denied as a-nas ls "$data/family"
+check "member founds the family through the family service" \
+  test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
+    -d '{"role":"妈妈"}' "$api/api/v1/family/join")" = 200
+
 # --- Local AI is built in (ADR 0016): started on demand, without network or
 # data volume.
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
@@ -782,7 +853,14 @@ check "the release links the models and runtime kept once by content" \
   -a "$(readlink /opt/a-nas/current/ai/face-detector.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-detector.json")/$(jq -r .file "$ai/face-detector.json")" \
   -a "$(readlink /opt/a-nas/current/ai/face-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-embedder.json")/$(jq -r .file "$ai/face-embedder.json")" \
   -a "$(readlink /opt/a-nas/current/ai/animal-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/animal-embedder.json")/$(jq -r .file "$ai/animal-embedder.json")" \
+  -a "$(readlink /opt/a-nas/current/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(jq -r .file "$ai/ocr-model.json")" \
+  -a "$(readlink /opt/a-nas/current/ai/ocr-mmproj.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-mmproj.json")/$(jq -r .file "$ai/ocr-mmproj.json")" \
   -a "$(readlink /opt/a-nas/current/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(jq -r .id "$ai/runtime.json")"
+llama_sha=$(jq -r .sha256 /src/deploy/llama/llama.json)
+check "the release links llama.cpp kept once by content, only the members its manifest names" \
+  test "$(readlink /opt/a-nas/current/ai/llama)" = "/opt/a-nas/llama/$llama_sha" \
+  -a -x "/opt/a-nas/llama/$llama_sha/llama-server" -a ! -e "/opt/a-nas/llama/$llama_sha/llama-cli" \
+  -a "$(stat -c '%U %a' "/opt/a-nas/llama/$llama_sha")" = "root 755"
 ai_cores=$(($(nproc) > 2 ? $(nproc) - 2 : 1))
 check "the Worker may use every core but two" \
   test "$(systemctl show -p CPUQuotaPerSecUSec --value anas-ai.service)" = "${ai_cores}s"
@@ -822,6 +900,44 @@ organised() { # the member's photo has its vector, its detection and its face sc
 }
 check "the Worker organises the photo with its vector, detector, face and animal models in its sandbox" organised
 echo "INFO the Worker's memory peak: $(systemctl show -p MemoryPeak --value anas-ai.service) bytes"
+# read-text.py SOCKET IMAGE MODEL [WORD]: the Worker names its text reader,
+# releases its other background models and reads IMAGE with the model named
+# MODEL..., finding WORD in it.
+cat > /usr/local/lib/read-text.py <<'PY'
+import array, json, socket, struct, sys
+
+def call(request, image=None):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+        conn.settimeout(600)
+        conn.connect(sys.argv[1])
+        body = json.dumps(request).encode()
+        fds = [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [image.fileno()]))] if image else []
+        assert conn.sendmsg([struct.pack('>I', len(body))], fds) == 4
+        conn.sendall(body)
+        with conn.makefile('rb') as reply:
+            size = struct.unpack('>I', reply.read(4))[0]
+            return json.loads(reply.read(size))
+
+info = call({'op': 'info'})
+assert info['ok'] and info['ocrModel'].startswith(sys.argv[3]), info
+# Reading is a phase of its own: the other background models go first.
+assert call({'op': 'release', 'what': 'detector'})['ok']
+with open(sys.argv[2], 'rb') as image:
+    answer = call({'op': 'read_text', 'kind': 'text'}, image)
+print(json.dumps(answer, ensure_ascii=False)[:400])
+reading = answer['reading']
+assert answer['ok'] and answer['model'] == info['ocrModel'] and reading['finish'] == 'stop' and reading['logprobs'], answer
+assert len(sys.argv) < 5 or sys.argv[4] in reading['text'], reading['text']
+PY
+if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
+  ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=white:s=640x200 -frames:v 1 \
+    -vf "drawtext=text='A-NAS 2026':fontsize=72:fontcolor=black:x=40:y=60" /tmp/text.png
+  check "llama-server reads the text in a photo in the Worker's sandbox" \
+    python3 /usr/local/lib/read-text.py /run/a-nas-ai/ai.sock /tmp/text.png "$ocr_model" 2026
+  echo "INFO the Worker's memory peak after reading: $(systemctl show -p MemoryPeak --value anas-ai.service) bytes"
+else
+  check "the Worker reads the text in a photo" python3 /usr/local/lib/read-text.py /run/a-nas-ai/ai.sock /tmp/photo.png "$ocr_model"
+fi
 # A probe in the Worker's own unit, in place of the Worker.
 cat > /usr/local/lib/anas-ai-probe.py <<'PY'
 import os, socket, sys
@@ -848,6 +964,15 @@ check "the probe finds the network and data volume outside the sandbox" denied p
 check "the Worker's sandbox opens no network socket and cannot read the data volume" \
   systemctl start anas-ai-probe.service
 journalctl -u anas-ai-probe.service -o cat --no-pager | grep -E 'contained|opened|listed' | tail -n 1 || true
+# The text reader's llama-server, in the Worker's unit, finds the libraries
+# it links; reading with the real model (ANAS_SYSTEM_TEST_AI=real) also loads
+# its CPU backend.
+sed -e 's|^ExecStart=.*|ExecStart=/opt/a-nas/current/ai/llama/llama-server --version|' \
+  -e 's|^Type=.*|Type=oneshot|' -e '/^Requires=/d' -e '/^After=/d' \
+  /etc/systemd/system/anas-ai.service > /etc/systemd/system/anas-ai-llama-probe.service
+systemctl daemon-reload
+check "llama-server runs in the Worker's sandbox" systemctl start anas-ai-llama-probe.service
+journalctl -u anas-ai-llama-probe.service -o cat --no-pager | grep -E '^version|error' | tail -n 1 || true
 staged_tampered=/tmp/tampered
 stage "$staged_tampered"
 rm "$staged_tampered/ai/model.litertlm"
@@ -1063,6 +1188,187 @@ check "a staged Qdrant that does not match its manifest is refused" \
 check "the refused Qdrant changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
   -a "$(find /opt/a-nas/qdrant -mindepth 1 -maxdepth 1 | wc -l)" = "$qdrant_kept"
+llama_kept=$(find /opt/a-nas/llama -mindepth 1 -maxdepth 1 | wc -l)
+staged_tampered=/tmp/tampered-llama
+stage "$staged_tampered"
+rm "$staged_tampered/ai/llama.tar.gz"
+head -c 1024 /dev/urandom > "$staged_tampered/ai/llama.tar.gz"
+jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
+  /src/deploy/llama/llama.json > "$staged_tampered/ai/llama.json"
+check "a staged llama.cpp that does not match its manifest is refused" \
+  denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
+check "the refused llama.cpp changes nothing" \
+  test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
+  -a "$(find /opt/a-nas/llama -mindepth 1 -maxdepth 1 | wc -l)" = "$llama_kept"
+
+# --- Web search (ADR 0030): SearXNG under its own account, reached only by the
+# Product Service through its socket, and able to reach public addresses only.
+search_socket=/run/a-nas-search/search.sock
+# The Product Service holds a-nas-search through its unit's SupplementaryGroups,
+# not as a login group of a-nas.
+as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-family,a-nas-search "$@"; }
+check "web search runs under its own account" \
+  test "$(systemctl is-active anas-search):$(systemctl show -p User --value anas-search)" = active:a-nas-search
+check "web search's runtime is the one the release pins" \
+  test "$(readlink /opt/a-nas/current/search/runtime)" = "/opt/a-nas/search-runtimes/$(jq -r .id "$search/runtime.json")"
+check "web search's socket is only its group's" \
+  test "$(stat -c '%a %U %G' /run/a-nas-search):$(stat -c '%a %U %G' "$search_socket")" = \
+  "750 a-nas-search a-nas-search:660 a-nas-search a-nas-search"
+check "the Product Service's groups reach web search" \
+  quiet as_product curl -fsS --unix-socket "$search_socket" http://localhost/healthz
+check "a member does not reach web search" \
+  denied as alice curl -fsS --unix-socket "$search_socket" http://localhost/healthz
+check "web search reads no data volume or Host Agent record" \
+  denied nsenter -t "$(systemctl show -p MainPID --value anas-search)" -m ls /srv/a-nas/data /var/lib/a-nas-host
+# systemd 257 loses a running unit's IP counts at every daemon-reload, which
+# the installs above ran, so the checks that read them restart web search.
+restart_web_search() {
+  systemctl restart anas-search
+  for _ in $(seq 1 60); do
+    as_product curl -fsS --unix-socket "$search_socket" http://localhost/healthz >/dev/null 2>&1 && return
+    sleep 0.5
+  done
+}
+if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" == real ]]; then
+  # SearXNG itself in its unit's sandbox: the release's engines and plugins
+  # loaded behind the WSGI entry, no IP traffic while it idles, and no error
+  # logged while it answered. Every engine is loaded but those that need an
+  # API key, Tor or a service of one's own, including those SearXNG ships
+  # inactive.
+  restart_web_search
+  # shellcheck disable=SC2317,SC2329 # invoked through check
+  searxng_config() {
+    as_product curl -fsS --unix-socket "$search_socket" http://localhost/config |
+      jq -e '[.engines[].name] as $names | ($names | length) > 300
+        and ([("baidu", "bing", "startpage", "mojeek", "piped.music", "z-library")] - $names) == []
+        and ([("youtube_api", "braveapi", "ahmia", "elasticsearch")] - $names | length) == 4
+        and ([.plugins[].name] | index("tracker_url_remover") == null)' >/dev/null
+  }
+  check "SearXNG answers in its sandbox with the release's engines and plugins" searxng_config
+  # Radio Browser looks its servers up in DNS as SearXNG starts; after that
+  # nothing goes out until someone searches.
+  sleep 15
+  started=$(systemctl show -p IPEgressPackets --value anas-search)
+  sleep 15
+  check "SearXNG sends nothing while nobody searches" \
+    test "$(systemctl show -p IPEgressPackets --value anas-search)" = "$started"
+  check "SearXNG logs no error for the Product Service's requests" \
+    test "$(journalctl -u anas-search -b -o cat --no-pager | grep -c 'ERROR' || true)" = 0
+fi
+if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" != real ]]; then
+  # search_probe HOST PORT: what the stand-in, in web search's sandbox, got
+  # when it connected there; direct_probe the same from outside any sandbox.
+  # systemd drops the filtered packets, so a denied address times out.
+  cat > /tmp/connect-probe.py <<'PY'
+import errno, socket, sys
+try:
+    socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=2).close()
+    print("connected")
+except TimeoutError:
+    print("timeout")
+except OSError as error:
+    print("denied" if error.errno == errno.EPERM else errno.errorcode.get(error.errno or 0, "error"))
+PY
+  search_probe() {
+    as_product curl -fsS --unix-socket "$search_socket" "http://localhost/probe?host=$1&port=$2" | jq -r .result
+  }
+  direct_probe() { python3 /tmp/connect-probe.py "$1" "$2"; }
+  # An address of each range the service must not reach, on this machine,
+  # with something listening there, so that only the filter keeps it out.
+  # 93.184.216.34 stands for a public address, which the filter lets through.
+  for address in 10.99.0.1 172.16.99.1 192.168.99.1 100.64.99.1 169.254.99.1 192.168.77.53 93.184.216.34; do
+    ip address add "$address/32" dev lo
+  done
+  ip -6 address add fd00::99/128 dev lo
+  python3 -c '
+import socket, threading
+def serve(family, address):
+    listener = socket.socket(family, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if family == socket.AF_INET6:
+        listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+    listener.bind((address, 7777))
+    listener.listen()
+    while True:
+        listener.accept()[0].close()
+threading.Thread(target=serve, args=(socket.AF_INET6, "::"), daemon=True).start()
+serve(socket.AF_INET, "0.0.0.0")' &
+  search_listener=$!
+  container_address=$(hostname -I | cut -d ' ' -f 1)
+  # shellcheck disable=SC2317,SC2329 # invoked through check
+  kept_out() { # HOST PORT: reachable directly, not from web search's sandbox
+    [[ "$(direct_probe "$1" "$2")" == connected ]] && [[ "$(search_probe "$1" "$2")" =~ ^(timeout|denied)$ ]]
+  }
+  for target in 127.0.0.1:8080 "[::1]:7777" "$container_address:7777" 10.99.0.1:7777 172.16.99.1:7777 \
+    192.168.99.1:7777 100.64.99.1:7777 169.254.99.1:7777 "[fd00::99]:7777"; do
+    host=${target%:*}
+    host=${host//[\[\]]/}
+    check "web search cannot reach $target" kept_out "$host" "${target##*:}"
+  done
+  restart_web_search
+  check "web search may reach a public address" test "$(search_probe 93.184.216.34 7777)" = connected
+  # The count the real mode expects to stay at zero sees that connection.
+  check "web search's IP traffic is counted" test "$(systemctl show -p IPEgressPackets --value anas-search)" -gt 0
+  dns_server=$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf)
+  # shellcheck disable=SC2317,SC2329 # invoked through check
+  dns_allowed() { systemctl show -p IPAddressAllow --value anas-search | grep -Fqw "$1"; }
+  check "web search may reach this machine's DNS server $dns_server" dns_allowed "$dns_server"
+  # dhcpcd rewrites /etc/resolv.conf when the lease changes.
+  check "web search cannot reach 192.168.77.53 before it is a DNS server" kept_out 192.168.77.53 7777
+  cp /etc/resolv.conf /tmp/resolv.conf.before-search
+  printf 'nameserver 192.168.77.53\n' >> /etc/resolv.conf
+  for _ in $(seq 1 20); do
+    systemctl show -p IPAddressAllow --value anas-search | grep -Fq 192.168.77.53 && break
+    sleep 0.5
+  done
+  check "web search follows a new DNS server" test "$(search_probe 192.168.77.53 7777)" = connected
+  cat /tmp/resolv.conf.before-search > /etc/resolv.conf
+  kill "$search_listener"
+  for address in 10.99.0.1 172.16.99.1 192.168.99.1 100.64.99.1 169.254.99.1 192.168.77.53 93.184.216.34; do
+    ip address del "$address/32" dev lo
+  done
+  ip -6 address del fd00::99/128 dev lo
+  # The running Product Service, with its own groups and SearXNG's secret.
+  # shellcheck disable=SC2317,SC2329 # invoked through check
+  product_search() {
+    curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+      -d '{"q":"system test","category":"web"}' "$api/api/v1/web-search/query" |
+      jq -se '[.[].results[].title] == ["System test: system test"]
+        and [.[].unresponsive[]] == ["百度"] and .[-1].pending == 0' >/dev/null
+  }
+  check "a search reaches the stand-in through the Product Service" product_search
+fi
+# The administrator's switch: the Host Agent writes its file and stops the
+# service, and the unit's condition keeps it stopped across restarts and
+# reinstalls (checked again after the upgrade below).
+# shellcheck disable=SC2317,SC2329 # invoked through check
+web_search_switch() {
+  curl -fsS -o /dev/null -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+    -X PUT -d "{\"enabled\":$1,\"torrents\":false}" "$api/api/v1/web-search"
+}
+check "an administrator turns web search off" web_search_switch false
+# The Host Agent does not wait for the stop; SearXNG takes a moment.
+for _ in $(seq 1 40); do [[ "$(systemctl is-active anas-search || true)" == inactive ]] && break; sleep 0.5; done
+check "turning it off stops the service and leaves the Host Agent's file" \
+  test "$(systemctl is-active anas-search || true)" = inactive -a -f /var/lib/a-nas-host/web-search-disabled
+systemctl restart anas-search
+check "web search stays stopped while turned off" test "$(systemctl is-active anas-search || true)" = inactive
+check "an administrator turns web search on" web_search_switch true
+for _ in $(seq 1 40); do systemctl is-active --quiet anas-search && break; sleep 0.5; done
+check "turning it on starts the service" systemctl is-active --quiet anas-search
+# Web search that cannot start fails no upgrade: here its DNS helper fails,
+# the installer warns, and the product's own services run.
+stage /tmp/search-broken
+printf '#!/bin/sh\nexit 1\n' > /tmp/search-broken/search/allow-dns.sh
+# shellcheck disable=SC2317,SC2329 # invoked through check
+search_broken_install() {
+  bash /src/scripts/install-v1.0.1-system-services.sh /tmp/search-broken search-broken "$iface" >/tmp/search-broken.log 2>&1 &&
+    grep -Fq 'web search did not start' /tmp/search-broken.log
+}
+check "an upgrade finishes and warns when web search cannot start" search_broken_install
+for _ in $(seq 1 150); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "the product's services run after that upgrade" \
+  systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares
 
 # --- Media center (ADR 0017): files are read as the user through the File
 # Broker; FFmpeg runs in a per-connection worker without network, data volume
@@ -1258,7 +1564,7 @@ check "incomplete rollback stage is rejected before stopping the active socket" 
   denied "$worker_installer" /tmp/nonexistent-worker-release
 check "failed rollback preflight leaves the new worker working" \
   setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
-systemctl stop anas-api anas-photos anas-shares
+systemctl stop anas-api anas-photos anas-shares anas-family
 "$worker_installer" /tmp/worker-legacy
 ln -sfn /opt/a-nas/releases/worker-legacy /opt/a-nas/current
 systemctl enable --now anas-media.socket
@@ -1270,12 +1576,18 @@ check "rollback removes the new worker units, socket and tmpfiles configuration"
   -a ! -e /etc/tmpfiles.d/a-nas-ffmpeg.conf
 check "rollback restores legacy client environment and eight admission slots" \
   test "$(grep -c '^ANAS_MEDIA_' /etc/a-nas/anas-api.env):$(grep -c '^ANAS_FFMPEG_' /etc/a-nas/anas-api.env):$(find /run/a-nas-media/slots -type f | wc -l)" = 2:0:8
+# Web search turned off before an upgrade stays off after it.
+touch /var/lib/a-nas-host/web-search-disabled
+systemctl stop anas-search
 stage /tmp/worker-upgrade
 if ! bash /src/scripts/install-v1.0.1-system-services.sh /tmp/worker-upgrade worker-upgrade "$iface" >/tmp/worker-upgrade.log 2>&1; then
   cat /tmp/worker-upgrade.log
   exit 1
 fi
 for _ in $(seq 1 150); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "web search turned off stays off across an upgrade" test "$(systemctl is-active anas-search || true)" = inactive
+rm -f /var/lib/a-nas-host/web-search-disabled
+systemctl start anas-search
 check "upgrade restores a working worker through the new unit and release link" \
   setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
 check "upgrade removes legacy worker units, socket and tmpfiles configuration" \

@@ -1,0 +1,43 @@
+[Unit]
+Description=A-NAS family center service
+Documentation=https://github.com/zhongwater123/A-NAS
+After=anas-host-agent.service anas-api.service anas-photos.service
+Wants=anas-host-agent.service anas-api.service
+
+[Service]
+Type=simple
+User=a-nas-family
+Group=a-nas-family
+# Reaches the photo service's API, which answers each request by the
+# reader's own session, and the media worker for recordings browsers cannot
+# play; the photo store stays private to a-nas-photos (ADR 0029).
+SupplementaryGroups=a-nas-photos
+ExecStart=/opt/a-nas/current/anas-api family-service
+Environment=ANAS_FAMILY_ROOT=/srv/a-nas/data/family
+Environment=ANAS_FAMILY_SOCKET=/run/a-nas-family/family.sock
+Environment=ANAS_FAMILY_SESSION_SOCKET=/run/a-nas-family-sessions/family.sock
+Environment=ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock
+RuntimeDirectory=a-nas-family
+RuntimeDirectoryMode=0750
+UMask=0077
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+# Mounts can appear after startup; only family/ grants this UID access.
+ReadWritePaths=/srv/a-nas/data
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=512M
+CPUWeight=20
+IOWeight=20
+
+[Install]
+WantedBy=multi-user.target

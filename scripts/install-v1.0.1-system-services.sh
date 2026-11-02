@@ -29,7 +29,7 @@ for binary in anas-api anas-host-agent install-screensavers.sh install-ffmpeg-un
     exit 2
   fi
 done
-for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-shares-system.service anas-ffmpeg-system.socket anas-ffmpeg-system@.service anas-ffmpeg-system.slice; do
+for unit in anas-api-system.service anas-host-agent-system.service anas-photos-system.service anas-shares-system.service anas-family-system.service anas-ffmpeg-system.socket anas-ffmpeg-system@.service anas-ffmpeg-system.slice; do
   if [[ ! -f "$source_release/$unit" ]]; then
     echo "missing system unit: $source_release/$unit" >&2
     exit 2
@@ -55,8 +55,10 @@ done
 # and manifests that pin its models and Python runtime by content. Each model
 # has a role: its manifest is ai/ROLE.json and the release links its file as
 # ai/ROLE.EXTENSION, where the Worker's unit looks for it.
-ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx)
-for file in anas-system.slice anas-ai-system.socket anas-ai-system.service ai/anas_ai/worker.py ai/runtime.json; do
+ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf)
+# The text reader's llama-server (docs/architecture/photo-ocr.md) is pinned
+# by ai/llama.json and kept like Qdrant below.
+for file in anas-system.slice anas-ai-system.socket anas-ai-system.service ai/anas_ai/worker.py ai/runtime.json ai/llama.json; do
   if [[ ! -f "$source_release/$file" ]]; then
     echo "missing local AI file: $source_release/$file" >&2
     exit 2
@@ -77,6 +79,15 @@ for file in anas-vectors-system@.service anas-vectors-proxy-system@.socket anas-
     exit 2
   fi
 done
+# Web search (ADR 0030): SearXNG's settings and pin, its runtime's manifest,
+# the DNS helper its units run, the units and the service's account.
+for file in anas-search-system.service anas-search-dns-system.service anas-search-dns-system.path a-nas-search.sysusers \
+  search/settings.yml search/searxng.json search/runtime.json search/allow-dns.sh search/anas_search.py; do
+  if [[ ! -f "$source_release/$file" ]]; then
+    echo "missing web search file: $source_release/$file" >&2
+    exit 2
+  fi
+done
 # Media and file previews run Debian's FFmpeg / libheif in the worker sandbox.
 for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 systemd-sysusers ffmpeg ffprobe heif-thumbnailer; do
   if ! command -v "$command" >/dev/null; then
@@ -89,9 +100,13 @@ if [[ ! -x /usr/lib/systemd/systemd-socket-proxyd ]]; then
   echo "missing required host command: /usr/lib/systemd/systemd-socket-proxyd" >&2
   exit 3
 fi
-# MediaPipe links these even on the CPU (Debian packages libegl1 and libgles2).
-for library in libEGL.so.1 libGLESv2.so.2; do
-  if ! ldconfig -p | grep -Fq "$library ("; then
+# MediaPipe links these even on the CPU (Debian packages libegl1 and libgles2),
+# and llama-server these (libgomp1, libssl3t64). The cache is read once: with
+# pipefail, grep -q leaving early can end ldconfig with SIGPIPE, which then
+# reads as a missing library.
+host_libraries=$(ldconfig -p)
+for library in libEGL.so.1 libGLESv2.so.2 libgomp.so.1 libssl.so.3 libcrypto.so.3; do
+  if ! grep -Fq "$library (" <<<"$host_libraries"; then
     echo "missing required host library: $library" >&2
     exit 3
   fi
@@ -111,18 +126,33 @@ for role in "${ai_roles[@]}"; do
     exit 2
   fi
 done
-runtime_id=$(manifest_field "$source_release/ai/runtime.json" id)
-runtime_sha=$(manifest_field "$source_release/ai/runtime.json" sha256)
-runtime_python=$(manifest_field "$source_release/ai/runtime.json" python)
-if [[ ! "$runtime_id" =~ ^[0-9a-f]{16}$ || ! "$runtime_sha" =~ ^[0-9a-f]{64}$ ]]; then
-  echo "invalid AI runtime manifest: $source_release/ai/runtime.json" >&2
-  exit 2
-fi
+# Each Python runtime (ADR 0016, ADR 0030) is the release's NAME/runtime.json
+# and NAME/runtime.tar.gz, kept once by content in /opt/a-nas/NAME-runtimes/ID.
 system_python=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
-if [[ "$system_python" != "$runtime_python" ]]; then
-  echo "the AI runtime needs Python $runtime_python; this system has $system_python" >&2
-  exit 3
-fi
+declare -A runtime_sha runtime_path
+# check_runtime NAME LABEL: the manifest is valid, the runtime fits this
+# system's Python, and it is installed or staged.
+check_runtime() {
+  local name=$1 label=$2 manifest=$source_release/$1/runtime.json id python
+  id=$(manifest_field "$manifest" id)
+  runtime_sha[$name]=$(manifest_field "$manifest" sha256)
+  python=$(manifest_field "$manifest" python)
+  if [[ ! "$id" =~ ^[0-9a-f]{16}$ || ! "${runtime_sha[$name]}" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "invalid $label runtime manifest: $manifest" >&2
+    exit 2
+  fi
+  if [[ "$system_python" != "$python" ]]; then
+    echo "the $label runtime needs Python $python; this system has $system_python" >&2
+    exit 3
+  fi
+  runtime_path[$name]=/opt/a-nas/$name-runtimes/$id
+  if [[ ! -d "${runtime_path[$name]}" && ! -f "$source_release/$name/runtime.tar.gz" ]]; then
+    echo "missing $label runtime: neither ${runtime_path[$name]} nor $source_release/$name/runtime.tar.gz" >&2
+    exit 2
+  fi
+}
+check_runtime ai AI
+check_runtime search 'web search'
 # Each model and runtime is kept once by content and linked from every release
 # that pins it, so an upgrade or rollback copies neither again.
 for role in "${ai_roles[@]}"; do
@@ -133,11 +163,6 @@ for role in "${ai_roles[@]}"; do
     exit 2
   fi
 done
-runtime_path=/opt/a-nas/ai-runtimes/$runtime_id
-if [[ ! -d "$runtime_path" && ! -f "$source_release/ai/runtime.tar.gz" ]]; then
-  echo "missing AI runtime: neither $runtime_path nor $source_release/ai/runtime.tar.gz" >&2
-  exit 2
-fi
 # Qdrant, like the models, is kept once by content: the official tarball is
 # checked, and only its binary is kept, under the tarball's SHA-256.
 qdrant_sha=$(manifest_field "$source_release/vectors/qdrant.json" sha256)
@@ -151,6 +176,31 @@ fi
 qdrant_path=/opt/a-nas/qdrant/$qdrant_sha/qdrant
 if [[ ! -f "$qdrant_path" && ! -f "$source_release/vectors/qdrant.tar.gz" ]]; then
   echo "missing Qdrant: neither $qdrant_path nor $source_release/vectors/qdrant.tar.gz" >&2
+  exit 2
+fi
+# So is llama.cpp: only the members its manifest names, llama-server with
+# its libraries and licence, are kept, together under the tarball's SHA-256.
+llama_sha=$(manifest_field "$source_release/ai/llama.json" sha256)
+llama_size=$(manifest_field "$source_release/ai/llama.json" sizeBytes)
+llama_directory=$(manifest_field "$source_release/ai/llama.json" directory)
+llama_binary=$(manifest_field "$source_release/ai/llama.json" binary)
+mapfile -t llama_members < <(python3 -c 'import json, sys; print("\n".join(json.load(open(sys.argv[1], encoding="utf-8"))["members"]))' \
+  "$source_release/ai/llama.json")
+if [[ ! "$llama_sha" =~ ^[0-9a-f]{64}$ || ! "$llama_size" =~ ^[0-9]+$ ||
+  ! "$llama_directory" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ || ! "$llama_binary" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ||
+  ${#llama_members[@]} -eq 0 ]]; then
+  echo "invalid llama.cpp manifest: $source_release/ai/llama.json" >&2
+  exit 2
+fi
+for member in "${llama_members[@]}"; do
+  if [[ ! "$member" =~ ^[A-Za-z0-9][A-Za-z0-9._*-]*$ ]]; then
+    echo "invalid llama.cpp manifest: $source_release/ai/llama.json" >&2
+    exit 2
+  fi
+done
+llama_path=/opt/a-nas/llama/$llama_sha
+if [[ ! -f "$llama_path/$llama_binary" && ! -f "$source_release/ai/llama.tar.gz" ]]; then
+  echo "missing llama.cpp: neither $llama_path nor $source_release/ai/llama.tar.gz" >&2
   exit 2
 fi
 # The LAN Web entry is optional: installing Caddy enables it (ADR 0012).
@@ -216,6 +266,23 @@ elif getent passwd "$shares_id" >/dev/null; then
 else
   useradd --system --uid "$shares_id" --gid "$shares_id" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin a-nas-shares
 fi
+# The family service owns the family store, the family center's records and
+# recordings, under a fixed UID/GID like the photo service (ADR 0029).
+family_id=31002
+if getent group a-nas-family >/dev/null; then
+  [[ "$(getent group a-nas-family | cut -d: -f3)" == "$family_id" ]] || { echo "group a-nas-family exists with another GID" >&2; exit 3; }
+elif getent group "$family_id" >/dev/null; then
+  echo "GID $family_id is taken by another group" >&2; exit 3
+else
+  groupadd --system --gid "$family_id" a-nas-family
+fi
+if getent passwd a-nas-family >/dev/null; then
+  [[ "$(id -u a-nas-family):$(id -g a-nas-family)" == "$family_id:$family_id" ]] || { echo "user a-nas-family exists with another UID or GID" >&2; exit 3; }
+elif getent passwd "$family_id" >/dev/null; then
+  echo "UID $family_id is taken by another user" >&2; exit 3
+else
+  useradd --system --uid "$family_id" --gid "$family_id" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin a-nas-family
+fi
 # The local console's account owns no data, so its ID may differ between
 # installs; it must not be able to log in.
 install -d -o root -g root -m 0755 /etc/sysusers.d
@@ -223,6 +290,14 @@ install -o root -g root -m 0644 "$source_release/a-nas-kiosk.sysusers" /etc/sysu
 systemd-sysusers /etc/sysusers.d/a-nas-kiosk.conf
 if [[ "$(getent passwd a-nas-kiosk | cut -d: -f6-7)" != /nonexistent:/usr/sbin/nologin ]]; then
   echo "user a-nas-kiosk exists with a home or shell A-NAS did not give it" >&2
+  exit 3
+fi
+# The web search service's account owns no data either; the Product Service
+# joins its group to reach the service's socket.
+install -o root -g root -m 0644 "$source_release/a-nas-search.sysusers" /etc/sysusers.d/a-nas-search.conf
+systemd-sysusers /etc/sysusers.d/a-nas-search.conf
+if [[ "$(getent passwd a-nas-search | cut -d: -f6-7)" != /nonexistent:/usr/sbin/nologin ]]; then
+  echo "user a-nas-search exists with a home or shell A-NAS did not give it" >&2
   exit 3
 fi
 # setgid makes the Product-owned bridge socket inherit the shares-only group.
@@ -241,7 +316,7 @@ install -d -o root -g a-nas -m 0750 /etc/a-nas
 install -d -o root -g root -m 0755 /etc/samba
 install -d -o root -g root -m 0755 /etc/chromium /etc/chromium/policies /etc/chromium/policies/managed
 install -d -o root -g root -m 0755 /var/lib/samba /run/samba
-install -d -o root -g root -m 0755 /opt/a-nas/models /opt/a-nas/ai-runtimes /opt/a-nas/qdrant
+install -d -o root -g root -m 0755 /opt/a-nas/models /opt/a-nas/ai-runtimes /opt/a-nas/search-runtimes /opt/a-nas/qdrant /opt/a-nas/llama
 
 # Staged content is copied before it is checked, so the staging account cannot
 # change it after the check.
@@ -263,19 +338,24 @@ for role in "${ai_roles[@]}"; do
   mv -T -- "$incoming" "/opt/a-nas/models/${model_sha[$name]}"
   incoming=
 done
-if [[ ! -d "$runtime_path" ]]; then
-  incoming=$(mktemp -d /opt/a-nas/ai-runtimes/.incoming-XXXXXX)
-  cp -- "$source_release/ai/runtime.tar.gz" "$incoming.tar.gz"
-  if ! printf '%s  %s\n' "$runtime_sha" "$incoming.tar.gz" | sha256sum --check --quiet - >/dev/null 2>&1; then
-    echo "the staged AI runtime does not match its manifest: $source_release/ai/runtime.tar.gz" >&2
+# install_runtime NAME LABEL: unpack the staged runtime unless it is installed.
+install_runtime() {
+  local name=$1 label=$2
+  [[ -d "${runtime_path[$name]}" ]] && return
+  incoming=$(mktemp -d "/opt/a-nas/$name-runtimes/.incoming-XXXXXX")
+  cp -- "$source_release/$name/runtime.tar.gz" "$incoming.tar.gz"
+  if ! printf '%s  %s\n' "${runtime_sha[$name]}" "$incoming.tar.gz" | sha256sum --check --quiet - >/dev/null 2>&1; then
+    echo "the staged $label runtime does not match its manifest: $source_release/$name/runtime.tar.gz" >&2
     exit 4
   fi
   tar -C "$incoming" --no-same-owner -xzf "$incoming.tar.gz"
   rm -f -- "$incoming.tar.gz"
   chmod 0755 "$incoming"
-  mv -T -- "$incoming" "$runtime_path"
+  mv -T -- "$incoming" "${runtime_path[$name]}"
   incoming=
-fi
+}
+install_runtime ai AI
+install_runtime search 'web search'
 if [[ ! -f "$qdrant_path" ]]; then
   incoming=$(mktemp -d /opt/a-nas/qdrant/.incoming-XXXXXX)
   cp -- "$source_release/vectors/qdrant.tar.gz" "$incoming.tar.gz"
@@ -291,6 +371,22 @@ if [[ ! -f "$qdrant_path" ]]; then
   rm -rf -- "$incoming/unpacked"
   chmod 0755 "$incoming"
   mv -T -- "$incoming" "/opt/a-nas/qdrant/$qdrant_sha"
+  incoming=
+fi
+if [[ ! -f "$llama_path/$llama_binary" ]]; then
+  incoming=$(mktemp -d /opt/a-nas/llama/.incoming-XXXXXX)
+  cp -- "$source_release/ai/llama.tar.gz" "$incoming.tar.gz"
+  if [[ "$(stat -c %s "$incoming.tar.gz")" != "$llama_size" ]] ||
+    ! printf '%s  %s\n' "$llama_sha" "$incoming.tar.gz" | sha256sum --check --quiet - >/dev/null 2>&1; then
+    echo "the staged llama.cpp does not match its manifest: $source_release/ai/llama.tar.gz" >&2
+    exit 4
+  fi
+  tar -C "$incoming" --no-same-owner --strip-components=1 -xzf "$incoming.tar.gz" --wildcards \
+    "${llama_members[@]/#/$llama_directory/}"
+  rm -f -- "$incoming.tar.gz"
+  chmod -R u=rwX,go=rX "$incoming"
+  chmod 0755 "$incoming/$llama_binary"
+  mv -T -- "$incoming" "$llama_path"
   incoming=
 fi
 trap - EXIT
@@ -316,7 +412,16 @@ for role in "${ai_roles[@]}"; do
   install -o root -g root -m 0644 "$source_release/ai/$name.json" "$temporary/ai/"
   ln -s -- "${model_path[$name]}" "$temporary/ai/$name.${role#*:}"
 done
-ln -s -- "$runtime_path" "$temporary/ai/runtime"
+ln -s -- "${runtime_path[ai]}" "$temporary/ai/runtime"
+install -o root -g root -m 0644 "$source_release/ai/llama.json" "$temporary/ai/"
+ln -s -- "$llama_path" "$temporary/ai/llama"
+# Web search (ADR 0030): SearXNG's settings and pin, the DNS helper its units
+# run, and its runtime.
+install -d -o root -g root -m 0755 "$temporary/search"
+install -o root -g root -m 0644 "$source_release/search/settings.yml" "$source_release/search/searxng.json" \
+  "$source_release/search/runtime.json" "$source_release/search/anas_search.py" "$temporary/search/"
+install -o root -g root -m 0755 "$source_release/search/allow-dns.sh" "$temporary/search/"
+ln -s -- "${runtime_path[search]}" "$temporary/search/runtime"
 install -d -o root -g root -m 0755 "$temporary/vectors"
 install -o root -g root -m 0644 "$source_release/vectors/qdrant.json" "$source_release/vectors/config.yaml" "$temporary/vectors/"
 install -o root -g root -m 0755 "$source_release/vectors/start.sh" "$source_release/vectors/wait-ready.sh" "$temporary/vectors/"
@@ -349,6 +454,16 @@ terminal_enabled=
 if grep -qx 'ANAS_TERMINAL=enabled' /etc/a-nas/anas-api.env 2>/dev/null; then
   terminal_enabled=1
 fi
+# SearXNG's secret signs its thumbnail addresses, and the Product Service, in
+# group a-nas, reads it to sign them as well (ADR 0030). It is generated once,
+# so upgrades keep it.
+if ! grep -Eqx 'SEARXNG_SECRET=[0-9a-f]{64}' /etc/a-nas/search.env 2>/dev/null; then
+  printf 'SEARXNG_SECRET=%s\n' "$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" > /etc/a-nas/search.env.incoming
+  chmod 0600 /etc/a-nas/search.env.incoming
+  mv -f -- /etc/a-nas/search.env.incoming /etc/a-nas/search.env
+fi
+chown root:a-nas /etc/a-nas/search.env
+chmod 0640 /etc/a-nas/search.env
 printf '%s\n' \
   'ANAS_HTTP_ADDR=127.0.0.1:8080' \
   'ANAS_HOSTSTATE_MODE=agent' \
@@ -358,7 +473,10 @@ printf '%s\n' \
   'ANAS_FFMPEG_SOCKET=/run/a-nas-ffmpeg/ffmpeg.sock' \
   'ANAS_STATE_DIR=/var/lib/a-nas' \
   'ANAS_SCREENSAVER_DIRECTORY=/var/lib/a-nas/screensavers/current' \
-  'ANAS_DATA_MOUNT=/srv/a-nas/data' > /etc/a-nas/anas-api.env
+  'ANAS_DATA_MOUNT=/srv/a-nas/data' \
+  'ANAS_WEB_SEARCH_SOCKET=/run/a-nas-search/search.sock' \
+  'ANAS_WEB_SEARCH_RELEASE=/opt/a-nas/current/search' \
+  'ANAS_WEB_SEARCH_SECRET_FILE=/etc/a-nas/search.env' > /etc/a-nas/anas-api.env
 # Container management is an optional root-installed capability. Preserve it
 # across system-service upgrades only when the typed agent socket is present;
 # never grant the Product Service direct access to docker.sock.
@@ -380,6 +498,8 @@ printf '%s\n' \
   'ANAS_PHOTO_SESSION_GROUP=a-nas-photos' \
   'ANAS_SHARE_SESSION_SOCKET=/run/a-nas-share-sessions/shares.sock' \
   'ANAS_SHARE_SESSION_GROUP=a-nas-shares' \
+  'ANAS_FAMILY_SESSION_SOCKET=/run/a-nas-family-sessions/family.sock' \
+  'ANAS_FAMILY_SESSION_GROUP=a-nas-family' \
   'ANAS_DATA_MOUNT=/srv/a-nas/data' \
   "ANAS_SMB_INTERFACE=$smb_interface" > /etc/a-nas/host-agent.env
 chown root:root /etc/a-nas/host-agent.env
@@ -389,6 +509,7 @@ install -o root -g root -m 0644 "$source_release/anas-host-agent-system.service"
 install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/systemd/system/anas-api.service
 install -o root -g root -m 0644 "$source_release/anas-photos-system.service" /etc/systemd/system/anas-photos.service
 install -o root -g root -m 0644 "$source_release/anas-shares-system.service" /etc/systemd/system/anas-shares.service
+install -o root -g root -m 0644 "$source_release/anas-family-system.service" /etc/systemd/system/anas-family.service
 # Background work gives way to the device's other work (anas.slice).
 install -o root -g root -m 0644 "$source_release/anas-system.slice" /etc/systemd/system/anas.slice
 install -o root -g root -m 0644 "$source_release/anas-ai-system.socket" /etc/systemd/system/anas-ai.socket
@@ -414,9 +535,13 @@ install -o root -g root -m 0644 "$source_release/anas-vectors-system.slice" /etc
 install -o root -g root -m 0644 "$source_release/anas-vectors-system@.service" /etc/systemd/system/anas-vectors@.service
 install -o root -g root -m 0644 "$source_release/anas-vectors-proxy-system@.socket" /etc/systemd/system/anas-vectors-proxy@.socket
 install -o root -g root -m 0644 "$source_release/anas-vectors-proxy-system@.service" /etc/systemd/system/anas-vectors-proxy@.service
+# Web search, and what lets it reach the DNS servers (ADR 0030).
+install -o root -g root -m 0644 "$source_release/anas-search-system.service" /etc/systemd/system/anas-search.service
+install -o root -g root -m 0644 "$source_release/anas-search-dns-system.service" /etc/systemd/system/anas-search-dns.service
+install -o root -g root -m 0644 "$source_release/anas-search-dns-system.path" /etc/systemd/system/anas-search-dns.path
 # A renamed worker must not coexist with old clients using a separate slot
 # directory. Stop clients before replacing units; restart after the switch.
-for service in anas-api anas-photos anas-shares; do
+for service in anas-api anas-photos anas-shares anas-family; do
   if [[ $(systemctl show -p LoadState --value "$service.service") != not-found ]]; then
     systemctl stop "$service.service"
   fi
@@ -435,6 +560,27 @@ if [[ "$lan_entry" == true ]]; then
   install -d -o root -g root -m 0755 /etc/caddy
   install -o root -g root -m 0644 "$source_release/Caddyfile" /etc/caddy/Caddyfile
 fi
+# Fan speeds come from the board's sensor chip, whose driver Linux does not
+# load by itself (docs/specs/device-temperatures.md). The in-kernel drivers of
+# the common chips find no device on a board without one; those that find a
+# chip are loaded again at every boot. Loading only reads the chip and changes
+# no fan setting, and no driver is forced onto a chip it does not know.
+sensor_modules=()
+for module in nct6775 it87; do
+  if modprobe "$module" 2>/dev/null; then
+    sensor_modules+=("$module")
+  fi
+done
+install -d -o root -g root -m 0755 /etc/modules-load.d
+if ((${#sensor_modules[@]} > 0)); then
+  {
+    echo '# Written by the A-NAS installer: the drivers that found a sensor chip.'
+    printf '%s\n' "${sensor_modules[@]}"
+  } > /etc/modules-load.d/a-nas-sensors.conf
+  chmod 0644 /etc/modules-load.d/a-nas-sensors.conf
+else
+  rm -f /etc/modules-load.d/a-nas-sensors.conf
+fi
 ln -sfn -- "$target" /opt/a-nas/current
 systemctl daemon-reload
 systemctl enable --now smbd.service
@@ -451,9 +597,9 @@ systemctl restart anas-ffmpeg.socket
 systemctl stop 'anas-vectors-proxy@*.service' 'anas-vectors@*.service'
 systemctl enable anas-vectors-proxy@a-nas-photos.socket
 systemctl restart anas-vectors-proxy@a-nas-photos.socket
-systemctl enable anas-host-agent.service anas-photos.service anas-api.service anas-shares.service
+systemctl enable anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service
 restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
-systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service
+systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service
 if systemctl is-active --quiet anas-kiosk@tty1.service; then
   systemctl restart anas-kiosk@tty1.service
 fi
@@ -461,8 +607,22 @@ if [[ "$lan_entry" == true ]]; then
   systemctl enable caddy.service
   systemctl reload-or-restart caddy.service
 fi
+# Web search follows this release's runtime; its unit's condition keeps it
+# stopped while the administrator has turned it off. It comes after the
+# product's own services and cannot fail the installation: the desktop
+# answers web_search_unavailable while it is down.
+web_search_failed=
+systemctl enable anas-search-dns.path anas-search.service || web_search_failed=1
+systemctl restart anas-search-dns.path || web_search_failed=1
+systemctl start anas-search-dns.service || web_search_failed=1
+systemctl restart anas-search.service || web_search_failed=1
 
-systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket
+systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket
+# Stopped is a valid state for web search, which status would report as a failure.
+echo "web search: $(systemctl is-active anas-search.service || true)"
+if [[ -n "$web_search_failed" ]]; then
+  echo "web search did not start; see journalctl -u anas-search-dns -u anas-search -b (docs/runbooks/enable-web-search.md)" >&2
+fi
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must
 # keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at startup

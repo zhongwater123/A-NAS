@@ -48,6 +48,7 @@ import { formatBytes } from "../lib/bytes";
 import { displayName, fullName, usePeople } from "../people/people";
 import { AvatarDialog } from "./AvatarDialog";
 import { createMember, disableMember, listUsers, resetMember, startViewing, ViewingScope } from "./api";
+import { DeviceTemperatures } from "./DeviceTemperatures";
 import { describeFinding } from "./health";
 import { HostStateBanner, HostStatePending } from "./hostState";
 import { type LogsPreset, LogsSection } from "./logs/LogsSection";
@@ -60,6 +61,7 @@ import type { StoragePlanFlow } from "./storagePlan";
 import { TerminalSection } from "./TerminalSection";
 import { TaskManagerSection } from "./taskmanager/TaskManagerSection";
 import type { SessionStatus } from "./terminal";
+import { WebSearchSection } from "./WebSearchSection";
 
 export { type StoragePlanFlow, useStoragePlan } from "./storagePlan";
 
@@ -71,7 +73,8 @@ export type SettingsSection =
   | "users"
   | "logs"
   | "terminal"
-  | "task-manager";
+  | "task-manager"
+  | "web-search";
 
 const systemSections: Array<{
   id: SettingsSection;
@@ -85,6 +88,7 @@ const systemSections: Array<{
   { id: "storage", label: "存储", icon: HardDrive, tone: "storage" },
   { id: "personalization", label: "个性化", icon: Palette, tone: "personalize", adminOnly: true },
   { id: "users", label: "用户与权限", icon: UsersRound, tone: "users", adminOnly: true },
+  { id: "web-search", label: "网页搜索", icon: Globe, tone: "accent", adminOnly: true },
   { id: "logs", label: "日志", icon: ScrollText, tone: "logs" },
   { id: "terminal", label: "终端", icon: SquareTerminal, tone: "terminal", adminOnly: true },
 ];
@@ -198,6 +202,7 @@ export function SettingsPanel({
               <StorageSection host={host} volumes={volumes} isAdmin={isAdmin} flow={storagePlan} />
             )}
             {current === "personalization" && <PersonalizationSection />}
+            {current === "web-search" && <WebSearchSection />}
             {current === "users" && (
               <UsersSection
                 currentUser={user}
@@ -261,7 +266,7 @@ function AccountSection({
     setRemoving(true);
     setProfileNotice("");
     try {
-      profileSaved(await removeAvatar(), "已移除头像，现在显示名字的第一个字。");
+      profileSaved(await removeAvatar(), "已移除头像，现在显示文字头像。");
     } catch (caught) {
       setProfileError(messageOf(caught));
     } finally {
@@ -352,7 +357,7 @@ function AccountSection({
         <Row
           icon={<Avatar who={user} />}
           label="头像"
-          detail={user.avatarVersion ? "保存时已裁成圆形并压缩为小图" : "未设置，显示名字的第一个字"}
+          detail={user.avatarVersion ? "保存时已裁成圆形并压缩为小图" : "未设置，显示文字头像"}
         >
           {user.avatarVersion && (
             <button className={styles.setBtn} disabled={removing} onClick={() => void dropAvatar()}>
@@ -688,6 +693,7 @@ function OverviewSection({
         </button>
       </div>
       <HealthChecks snapshot={snapshot} onOpenStorage={onOpenStorage} />
+      <DeviceTemperatures snapshot={snapshot} />
       <Group title="系统盘空间">
         {systemStorage ? (
           <>
@@ -742,7 +748,7 @@ function HealthChecks({ snapshot, onOpenStorage }: { snapshot: HostState; onOpen
             <span>
               <strong>未发现问题</strong>
             </span>
-            <small>已检查硬盘健康（SMART）与温度，以及数据卷的挂载、读写、剩余空间和错误记录。</small>
+            <small>已检查硬盘健康（SMART）、处理器与硬盘的温度，以及数据卷的挂载、读写、剩余空间和错误记录。</small>
           </div>
         </div>
       ) : (

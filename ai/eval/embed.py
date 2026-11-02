@@ -29,7 +29,7 @@ import numpy as np
 from PIL import Image, ImageOps
 
 from anas_ai import providers
-from eval import datasets
+from eval import datasets, text_sets
 
 MANIFEST = os.path.join(datasets.REPO, "deploy", "models", "embeddinggemma-2-740m.json")
 
@@ -126,6 +126,10 @@ def image_jobs(sets, test_only=False):
         for split in ("test",) if test_only else ("test", "val"):
             images, _captions = datasets.coco_cn(split)
             jobs += [(f"coco-cn:{name}", path) for name, path in images]
+    # The OCR routing evaluation's documents, scene text and family photos (eval.ocr_route).
+    extra = [name for name in ("cc-ocr", "gallagher") if name in sets]
+    if extra:
+        jobs += [(sample.key, sample.path) for sample in text_sets.samples(extra)]
     return jobs
 
 

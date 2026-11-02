@@ -28,29 +28,32 @@ import (
 type labelIndex struct {
 	mu      sync.Mutex
 	vectors map[string][]float32
-	// retryAt delays fetching label texts after the Worker failed one.
+	// retryAt delays fetching query texts, the labels' and the text route's,
+	// after the Worker failed one.
 	retryAt time.Time
 }
 
-// embedLabelText fetches the vector of one label text that the calibrated
-// model still lacks and reports whether it did. With another model, or once
-// all texts are present, it does nothing; a text the Worker fails on is tried
-// again a minute later while photos go on.
-func (s *Service) embedLabelText(ctx context.Context, embedder Embedder, info EmbedderInfo) (bool, error) {
-	if info.Model != s.labels.Model {
+// embedQueryText fetches the vector of one query text that the model still
+// lacks, a label's or the text route's (textrouting.go), and reports whether
+// it did. With a model neither is calibrated for, or once all texts are
+// present, it does nothing; a text the Worker fails on is tried again a
+// minute later while photos go on.
+func (s *Service) embedQueryText(ctx context.Context, embedder Embedder, info EmbedderInfo) (bool, error) {
+	texts := s.queryTexts(info.Model)
+	if len(texts) == 0 {
 		return false, nil
 	}
 	s.labelIndex.mu.Lock()
-	waiting := s.labelIndex.vectors != nil || s.now().Before(s.labelIndex.retryAt)
+	waiting := s.now().Before(s.labelIndex.retryAt)
 	s.labelIndex.mu.Unlock()
-	if waiting {
+	if waiting || s.queryTextsReady(info.Model) {
 		return false, nil
 	}
 	have, err := s.queryVectors(ctx, info.Model)
 	if err != nil {
 		return false, err
 	}
-	for _, text := range labelTexts(s.labels) {
+	for _, text := range texts {
 		if _, ok := have[text]; ok {
 			continue
 		}
@@ -69,9 +72,45 @@ func (s *Service) embedLabelText(ctx context.Context, embedder Embedder, info Em
 			info.Model, text, encodeVector(vector), formatTime(s.now()))
 		return err == nil, err
 	}
-	// All texts are present: build the labels now, so later rounds return early.
-	_, err = s.labelVectors(ctx)
-	return false, err
+	// All texts are present: build the labels and the route now, so later
+	// rounds return early.
+	if info.Model == s.labels.Model {
+		if _, err := s.labelVectors(ctx); err != nil {
+			return false, err
+		}
+	}
+	if info.Model == s.textRoute.Model {
+		if _, err := s.routeVectors(ctx); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+// queryTexts are the texts whose vectors model needs: the shown labels' when
+// the labels are calibrated for it, and the text route's queries when the
+// route is.
+func (s *Service) queryTexts(model string) []string {
+	var texts []string
+	if model == s.labels.Model {
+		texts = labelTexts(s.labels)
+	}
+	if model == s.textRoute.Model {
+		texts = append(texts, s.textRoute.Queries...)
+	}
+	return texts
+}
+
+// queryTextsReady reports whether the labels and the route that model needs
+// are built from their texts' vectors.
+func (s *Service) queryTextsReady(model string) bool {
+	s.labelIndex.mu.Lock()
+	labelsReady := model != s.labels.Model || s.labelIndex.vectors != nil
+	s.labelIndex.mu.Unlock()
+	s.routeIndex.mu.Lock()
+	routeReady := model != s.textRoute.Model || s.routeIndex.vectors != nil
+	s.routeIndex.mu.Unlock()
+	return labelsReady && routeReady
 }
 
 // clusterState is AIStatus.Clusters for the Worker's model, which is empty

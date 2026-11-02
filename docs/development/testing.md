@@ -129,6 +129,7 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - 重启 Host Agent 后以上行为保持；
 - 屏保视频的独立通道（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)）：暂存只上传缺少的视频并复用旧 release 暂存过的视频；安装后的池成为当前池，release 升级保留它；共有的视频只存一份；重复安装同一个池不产生变化；切回已安装的池不需要暂存区；视频哈希不符或池 ID 与清单不符时拒绝且不留改动；从旧安装器首次升级时以硬链接导入它留下的池；
 - 本地 AI 随系统安装（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）：套接字只对相册服务的组开放，搜索经套接字按需启动 Worker，Worker 以动态分配的身份运行；单元的 CPU 上限是本机逻辑核数减 2（安装器写入的 drop-in），内存先回收后上限；上传的照片在 Worker 沙箱中得到向量与检测结果（相册服务的空闲期经 drop-in 缩短为 2 秒）；放在 Worker 自己单元中的探针打不开网络套接字、列不出数据卷，而同一探针在沙箱外可以；暂存的模型或检测器与清单不符时拒绝安装且不留改动；升级不重复复制模型、检测器与运行环境，并启动新 release 的 Worker。CI 使用替身模型与检测器、只含 Debian Python 的运行环境与 Worker 的假 Provider；
+- 照片文字识别（[实施方案](../architecture/photo-ocr.md)）：release 链接按内容保存一次的 llama.cpp，只含清单列出的文件；llama-server 在 Worker 自己的单元中能运行；Worker 经套接字读出照片中的文字；压缩包与清单不符时拒绝安装且不留改动。替身下读文字用假 Provider，真实模型时由 llama-server 读出合成图片上的字。运行前需要 `scripts/fetch-llama.sh` 取得的压缩包；
 - 向量索引（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)）：
   - 套接字只属于相册服务的账号，产品服务的账号连不上；
   - 连接时拉起实例，实例与代理同在一个只有 `lo` 的网络命名空间，以每个实例自己的动态身份运行；

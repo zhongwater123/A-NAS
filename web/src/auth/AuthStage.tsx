@@ -10,20 +10,35 @@ import { startMeteorShower } from "./meteorShower";
 // AuthStage is the late-night broadcast behind sign-in, setup and password
 // reset: meteor rain, the boot ident's lockup on one side and the screen's own
 // content on the other, under CRT scanlines and on-screen display text. The
-// canvases keep running while the screens inside it change.
+// canvases keep running while the screens inside it change, and pause while
+// the stage is not rendered: the local console's screen saver and black
+// screen stop the page beneath them from rendering, but not its animation
+// frames.
 export function AuthStage({ children }: { children: ReactNode }) {
+  const stageRef = useRef<HTMLElement>(null);
   const skyRef = useRef<HTMLCanvasElement>(null);
   const lockupRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const sky = skyRef.current && startMeteorShower(skyRef.current);
     const lockup = lockupRef.current && startIdentLockup(lockupRef.current, bootSplashShowing);
+    const shown =
+      stageRef.current && typeof IntersectionObserver !== "undefined"
+        ? new IntersectionObserver(([entry]) => {
+            for (const loop of [sky, lockup]) {
+              if (entry?.isIntersecting) loop?.resume();
+              else loop?.pause();
+            }
+          })
+        : undefined;
+    if (stageRef.current) shown?.observe(stageRef.current);
     return () => {
+      shown?.disconnect();
       sky?.stop();
       lockup?.stop();
     };
   }, []);
   return (
-    <main className={styles.authShell}>
+    <main ref={stageRef} className={styles.authShell}>
       <canvas ref={skyRef} className={styles.authBackdrop} aria-hidden="true" />
       <div className={styles.authLayout}>
         <div className={styles.authBrand}>

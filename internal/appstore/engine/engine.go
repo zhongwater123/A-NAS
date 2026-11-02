@@ -3,7 +3,6 @@
 package engine
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/mod/semver"
 
@@ -23,13 +23,18 @@ import (
 )
 
 const (
-	// Image pulls on a slow link can take a long time; uninstall is quick.
+	// Image pulls on a slow link, and their retries (pull.go), can take a
+	// long time; uninstall is quick.
 	installTimeout   = 30 * time.Minute
 	uninstallTimeout = 5 * time.Minute
 	outputTailLines  = 40
+	// outputLineRunes bounds each line a job keeps; Compose can pass on an
+	// app's own log lines.
+	outputLineRunes = 2000
 
 	// Compose before 2.30 sends volume subpaths through the legacy bind API,
 	// which drops them; the engine API gained subpaths in 1.45 (ADR 0015).
+	// Pulls also read the JSON progress that Compose 2.29 added (pull.go).
 	minComposeVersion = "v2.30.0"
 	minEngineAPI      = "v1.45"
 )
@@ -121,6 +126,10 @@ type Store struct {
 	// counts as a success, checking every startupPoll.
 	startupWindow time.Duration
 	startupPoll   time.Duration
+	// pullDelay is the wait before a failed pull's first retry; pullLimit
+	// bounds every wait (pull.go).
+	pullDelay time.Duration
+	pullLimit time.Duration
 
 	// secretsMu serialises generating and storing app secrets.
 	secretsMu sync.Mutex
@@ -149,6 +158,8 @@ func New(entries []appstore.Entry, policy appstore.Policy, stateDir string, dock
 
 		startupWindow: defaultStartupWindow,
 		startupPoll:   defaultStartupPoll,
+		pullDelay:     defaultPullDelay,
+		pullLimit:     defaultPullLimit,
 	}
 	for _, entry := range entries {
 		store.entries[entry.App.ID] = entry
@@ -325,6 +336,21 @@ func (s *Store) install(ctx context.Context, id, digest string, identity appstor
 		if err := os.WriteFile(composeFile, plan.Compose, 0o640); err != nil {
 			return err
 		}
+		services := make([]string, 0, len(plan.Services))
+		for _, service := range plan.Services {
+			services = append(services, service.Service)
+		}
+		if err := s.pullImages(ctx, plan.Project, composeFile, services, output); err != nil {
+			// A pull creates no container, so there is nothing to roll back;
+			// the images that finished downloading stay for the next install.
+			switch cause := context.Cause(ctx); {
+			case errors.Is(cause, errStopping):
+				return fmt.Errorf("%w，还没有创建容器，请重新安装", errStopping)
+			case errors.Is(cause, context.DeadlineExceeded):
+				err = fmt.Errorf("%w：超过了 %d 分钟的安装时限", errPull, int(installTimeout/time.Minute))
+			}
+			return fmt.Errorf("%w；没有创建容器，已下载完成的镜像已保留，重新安装时不会重复下载", err)
+		}
 		// Mark cleanup as pending without granting deletion authority to
 		// mutable tags. Recovery discovers IDs from actual containers; a
 		// download that never created a container has no proven ownership.
@@ -333,8 +359,10 @@ func (s *Store) install(ctx context.Context, id, digest string, identity appstor
 		}
 		// Compose can fail after creating some of the containers, for
 		// example on a port a host process holds or a dependency that is
-		// slow to turn healthy: those are rolled back like any other.
-		failure := s.runner.Run(ctx, append(compose, "up", "--detach", "--remove-orphans"), output)
+		// slow to turn healthy: those are rolled back like any other. The
+		// images are all present, and up must not reach a registry, where
+		// a failure would not be retried.
+		failure := s.runner.Run(ctx, append(compose, "up", "--detach", "--remove-orphans", "--pull", "never"), output)
 		if failure != nil {
 			failure = &StartupError{Problem: "Docker Compose 没有完成启动（" + failure.Error() + "）"}
 		}
@@ -637,7 +665,7 @@ func (s *Store) startChecked(id string, action appstore.JobAction, timeout time.
 
 	s.wait.Go(func() {
 		timed, stop := context.WithTimeout(ctx, timeout)
-		err := run(timed, &jobWriter{store: s, job: job})
+		err := run(timed, newJobWriter(s, job))
 		stop()
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -681,34 +709,36 @@ func conflicts(id string, plan appstore.Plan, containers []ContainerInfo, replac
 
 // jobWriter keeps the last lines of Compose output on the job.
 type jobWriter struct {
-	store   *Store
-	job     *appstore.Job
-	partial string
+	store *Store
+	job   *appstore.Job
+	lines lineWriter
+}
+
+func newJobWriter(store *Store, job *appstore.Job) *jobWriter {
+	w := &jobWriter{store: store, job: job}
+	w.lines.each = w.add
+	return w
 }
 
 func (w *jobWriter) Write(data []byte) (int, error) {
 	w.store.mu.Lock()
 	defer w.store.mu.Unlock()
-	scanner := bufio.NewScanner(strings.NewReader(w.partial + string(data)))
-	w.partial = ""
-	complete := strings.HasSuffix(string(data), "\n")
-	var lines []string
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if !complete && len(lines) > 0 {
-		w.partial = lines[len(lines)-1]
-		lines = lines[:len(lines)-1]
-	}
-	for _, line := range lines {
-		if line = strings.TrimSpace(line); line != "" {
-			w.job.Output = append(w.job.Output, line)
-		}
-	}
+	written, err := w.lines.Write(data)
 	if extra := len(w.job.Output) - outputTailLines; extra > 0 {
 		w.job.Output = append([]string(nil), w.job.Output[extra:]...)
 	}
-	return len(data), nil
+	return written, err
+}
+
+// add keeps a line, cut to outputLineRunes; s.mu is held.
+func (w *jobWriter) add(line string) {
+	if line = strings.TrimSpace(line); line == "" {
+		return
+	}
+	if utf8.RuneCountInString(line) > outputLineRunes {
+		line = string([]rune(line)[:outputLineRunes]) + "…"
+	}
+	w.job.Output = append(w.job.Output, line)
 }
 
 func copyJob(job *appstore.Job) appstore.Job {

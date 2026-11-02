@@ -171,6 +171,25 @@ describe("local console screen saver", () => {
     expect(saver()).toBeTruthy();
   });
 
+  it("puts both covers next to the page so the page can stop rendering beneath them", async () => {
+    const { container } = render(
+      <LocalConsoleScreenSaver
+        enabled
+        loadVideos={async () => videos}
+        loadSleepAfter={async () => 10}
+        random={() => 0}
+      />,
+    );
+    await act(async () => undefined);
+    await idle();
+    expect(saver()?.parentElement).toBe(document.body);
+    expect(container.contains(saver())).toBe(false);
+
+    act(() => vi.advanceTimersByTime(10 * minute));
+    expect(asleep()?.parentElement).toBe(document.body);
+    expect(container.contains(asleep())).toBe(false);
+  });
+
   it("goes black without a screen saver when the pool is empty", async () => {
     render(<LocalConsoleScreenSaver enabled loadVideos={async () => []} loadSleepAfter={async () => 30} />);
     await act(async () => undefined);

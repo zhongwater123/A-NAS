@@ -163,6 +163,13 @@ ops-check:
 	grep -Fqx 'User=a-nas-shares' deploy/systemd/system/anas-shares.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api share-service' deploy/systemd/system/anas-shares.service
 	grep -Fq 'anas-shares-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fqx 'User=a-nas-family' deploy/systemd/system/anas-family.service
+	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api family-service' deploy/systemd/system/anas-family.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-family.service
+	grep -Fqx 'RuntimeDirectory=a-nas-family' deploy/systemd/system/anas-family.service
+	grep -Fq 'anas-family-system.service.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'ANAS_FAMILY_SESSION_GROUP=a-nas-family' scripts/install-v1.0.1-system-services.sh
+	grep -Fq '"/run/a-nas-family/family.sock"' cmd/anas-api/config.go
 	grep -Fqx 'User=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ExecStart=/opt/a-nas/current/anas-api photo-service' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ReadWritePaths=/srv/a-nas/data' deploy/systemd/system/anas-photos.service
@@ -170,9 +177,16 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'Environment=GOMEMLIMIT=1GiB' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search' deploy/systemd/system/anas-api.service
+	grep -Fqx 'User=a-nas-search' deploy/systemd/system/anas-search.service
+	grep -Fqx 'RuntimeDirectoryMode=0750' deploy/systemd/system/anas-search.service
+	grep -Fqx 'ConditionPathExists=!/var/lib/a-nas-host/web-search-disabled' deploy/systemd/system/anas-search.service
+	grep -Fqx 'IPAddressDeny=localhost link-local multicast' deploy/systemd/system/anas-search.service
+	grep -Fq 'IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12' deploy/systemd/system/anas-search.service
+	grep -Eqx 'u a-nas-search - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-search.conf
+	grep -Fq 'a-nas-search.sysusers.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectory=a-nas-host' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectoryMode=0700' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'install -d -o root -g root -m 0700 /var/lib/a-nas-host' scripts/install-v1.0.1-system-services.sh
@@ -195,7 +209,11 @@ ops-check:
 	grep -Fq -- '--detector /opt/a-nas/current/ai/detector.onnx --detector-manifest /opt/a-nas/current/ai/detector.json' deploy/systemd/system/anas-ai.service
 	grep -Fq -- '--face-detector /opt/a-nas/current/ai/face-detector.onnx --face-detector-manifest /opt/a-nas/current/ai/face-detector.json --face-embedder /opt/a-nas/current/ai/face-embedder.onnx --face-embedder-manifest /opt/a-nas/current/ai/face-embedder.json' deploy/systemd/system/anas-ai.service
 	grep -Fq -- '--animal-embedder /opt/a-nas/current/ai/animal-embedder.onnx --animal-embedder-manifest /opt/a-nas/current/ai/animal-embedder.json' deploy/systemd/system/anas-ai.service
-	grep -Fq 'ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx)' scripts/install-v1.0.1-system-services.sh
+	grep -Fq 'ai-ocr-model.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'ai-ocr-mmproj.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq 'ai-llama.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq -- '--ocr-server /opt/a-nas/current/ai/llama/llama-server --ocr-runtime-manifest /opt/a-nas/current/ai/llama.json --ocr-model /opt/a-nas/current/ai/ocr-model.gguf --ocr-model-manifest /opt/a-nas/current/ai/ocr-model.json --ocr-mmproj /opt/a-nas/current/ai/ocr-mmproj.gguf --ocr-mmproj-manifest /opt/a-nas/current/ai/ocr-mmproj.json' deploy/systemd/system/anas-ai.service
+	grep -Fq 'ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf)' scripts/install-v1.0.1-system-services.sh
 	! grep -q '^CPUQuota=' deploy/systemd/system/anas-ai.service
 	grep -Fq 'anas-ai.service.d/cpu-reserve.conf' scripts/install-v1.0.1-system-services.sh
 	! grep -Eq '^Memory(High|Max)=' deploy/systemd/system/anas-ai.service
@@ -265,13 +283,15 @@ go-lint:
 
 # Fails on known vulnerabilities in what ships: Go code the product can reach
 # (govulncheck, pinned by the tool directive in go.mod, with the database from
-# vuln.go.dev), the AI runtime's packages (pip-audit, pinned by
-# ai/requirements-dev.txt, with PyPI's advisories) and the Web UI's runtime
-# packages (npm audit, with the registry's advisories). A new advisory fails it
-# without a change; fix that first (AGENTS.md).
+# vuln.go.dev), the packages of the AI and web search runtimes (pip-audit,
+# pinned by ai/requirements-dev.txt, with PyPI's advisories; web search follows
+# SearXNG's pins, so an advisory there moves its commit) and the Web UI's
+# runtime packages (npm audit, with the registry's advisories). A new advisory
+# fails it without a change; fix that first (AGENTS.md).
 vuln-check:
 	$(GO) tool govulncheck ./...
 	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r ai/requirements.txt
+	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r deploy/search/requirements.txt
 	cd web && $(NPM) audit --omit=dev
 
 test:

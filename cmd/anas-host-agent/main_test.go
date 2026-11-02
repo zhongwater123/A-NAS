@@ -12,7 +12,8 @@ func TestConfigPlacesTheBrokerAndTheAssistantsChangesBesideTheirDefaults(t *test
 		t.Fatal(err)
 	}
 	if c.FileBrokerSocket != "/run/a-nas/file-broker.sock" || c.StateDir != "/var/lib/a-nas" || c.AssistantChanges != "" ||
-		c.PhotoSessionGroup != accountid.PhotoServiceUser || c.ShareSessionGroup != accountid.ShareServiceUser {
+		c.PhotoSessionGroup != accountid.PhotoServiceUser || c.ShareSessionGroup != accountid.ShareServiceUser ||
+		c.FamilySessionGroup != accountid.FamilyServiceUser || c.FamilySessionSocket != "/run/a-nas-family-sessions/family.sock" {
 		t.Fatalf("config = %+v", c)
 	}
 	// The assistant brings the executor of its changes, on the data volume.

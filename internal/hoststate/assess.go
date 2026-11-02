@@ -23,6 +23,9 @@ const (
 	// FindingDiskHot: a disk is at or above its temperature limit; Value is
 	// the temperature in °C.
 	FindingDiskHot FindingCode = "disk_hot"
+	// FindingCPUHot: the CPU is at or above its hot limit, close to where it
+	// throttles; Value is the temperature in °C.
+	FindingCPUHot FindingCode = "cpu_hot"
 	// FindingVolumeOffline: a data volume was created but no data disk is
 	// mounted.
 	FindingVolumeOffline FindingCode = "volume_offline"
@@ -52,6 +55,14 @@ const (
 	// nearlyFullPercent is where the data volume needs the owner's attention.
 	nearlyFullPercent = 90
 )
+
+// DiskHotCelsius is the temperature at which a disk counts as running hot.
+func DiskHotCelsius(rotational bool) int {
+	if rotational {
+		return hotRotationalCelsius
+	}
+	return hotSolidStateCelsius
+}
 
 // Finding is one fact that keeps a system from being plainly healthy.
 type Finding struct {
@@ -94,11 +105,7 @@ func Assess(state State, expected Expectations) (Health, []Finding) {
 				add(FindingDiskHealthUnknown, HealthWarning, disk.ID, nil)
 			}
 		}
-		limit := hotSolidStateCelsius
-		if disk.Rotational {
-			limit = hotRotationalCelsius
-		}
-		if disk.TemperatureCelsius != nil && *disk.TemperatureCelsius >= limit {
+		if disk.TemperatureCelsius != nil && *disk.TemperatureCelsius >= DiskHotCelsius(disk.Rotational) {
 			add(FindingDiskHot, HealthWarning, disk.ID, new(int64(*disk.TemperatureCelsius)))
 		}
 		if disk.Role != DiskRoleData {
@@ -123,6 +130,9 @@ func Assess(state State, expected Expectations) (Health, []Finding) {
 		if disk.FilesystemErrors != nil && *disk.FilesystemErrors > 0 {
 			add(FindingVolumeErrors, HealthWarning, disk.ID, new(int64(*disk.FilesystemErrors)))
 		}
+	}
+	if thermal := state.System.Thermal; thermal != nil && thermal.CPU != nil && thermal.CPU.Celsius >= thermal.CPU.HotCelsius {
+		add(FindingCPUHot, HealthWarning, ResourceID{}, new(int64(thermal.CPU.Celsius)))
 	}
 	if expected.DataVolume && !dataDisk {
 		add(FindingVolumeOffline, HealthCritical, ResourceID{}, nil)

@@ -38,9 +38,16 @@ export function avatarTone(username: string): string {
 const graphemes =
   typeof Intl.Segmenter === "function" ? new Intl.Segmenter("zh-CN", { granularity: "grapheme" }) : undefined;
 
-// initial is the first character as a reader sees it, so an emoji joined
-// from several code points stays whole.
+const han = /\p{Script=Han}/u;
+
+// initial is the character a text avatar shows: a Chinese name's last
+// character, since the first is usually the family name (陈小禾 → 禾), and
+// otherwise the first letter (mom → M). Characters are taken as a reader
+// sees them, so an emoji joined from several code points stays whole.
 export function initial(name: string): string {
-  const first = graphemes ? graphemes.segment(name)[Symbol.iterator]().next().value?.segment : [...name][0];
-  return first?.toUpperCase() ?? "?";
+  const trimmed = name.trim();
+  const characters = graphemes ? Array.from(graphemes.segment(trimmed), (part) => part.segment) : [...trimmed];
+  const last = characters.at(-1);
+  if (last && han.test(last)) return last;
+  return characters[0]?.toUpperCase() ?? "?";
 }

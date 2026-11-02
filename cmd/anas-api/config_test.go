@@ -35,7 +35,7 @@ func TestConfigResolvesEachModesAdaptersAndRefusesDevelopmentOnesOnANAS(t *testi
 				Mode: ModeAgent, HTTPAddr: "127.0.0.1:8080", StateDir: "/var/lib/a-nas", DataMount: "/srv/a-nas/data",
 				HostAgentSocket: "/run/a-nas/host-agent.sock", FileBrokerSocket: "/run/a-nas/file-broker.sock",
 				PhotosSocket: "/run/a-nas-photos/photos.sock", SharesSocket: "/run/a-nas-shares/shares.sock",
-				ShareFilesSocket: "/run/a-nas-share-files/files.sock", MediaWorker: mediaWorkerSocket,
+				ShareFilesSocket: "/run/a-nas-share-files/files.sock", FamilySocket: "/run/a-nas-family/family.sock", MediaWorker: mediaWorkerSocket,
 				Media:      MediaConfig{Socket: "/run/a-nas-ffmpeg/ffmpeg.sock", Slots: "/run/a-nas-ffmpeg/slots"},
 				Containers: containersDisabled, Terminal: "disabled", ScreensaverDirectory: "/var/lib/a-nas/screensavers/current",
 			}

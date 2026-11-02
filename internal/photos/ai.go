@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"math"
 	"os"
@@ -45,6 +46,14 @@ type EmbedderInfo struct {
 	// loaded, its own start included, or 0 when it does not say. Background
 	// work loads models only while memory allows (Gate).
 	MemoryBytes uint64
+	// OCR names the text reader in the same way, or is empty when the
+	// Worker has none it can use.
+	OCR string
+	// OCRMemoryBytes is what the Worker holds while it reads text, its own
+	// start included. Reading is a phase of its own, after the other models
+	// are released, so this is not added to MemoryBytes
+	// (docs/architecture/photo-ocr.md#资源策略).
+	OCRMemoryBytes uint64
 }
 
 // Detector is the AI Worker's object detector
@@ -56,6 +65,35 @@ type Detector interface {
 	DetectObjects(ctx context.Context, image *os.File) (string, []Box, error)
 	// Release frees the detector's memory, or with all, the Worker's.
 	Release(ctx context.Context, all bool) error
+}
+
+// TextReader is the AI Worker's text reader (docs/architecture/photo-ocr.md).
+// An Embedder that is also a TextReader reads the text in photos while its
+// Info names a text reader.
+type TextReader interface {
+	// ReadText reads an upright image: its whole text, or with schema, a
+	// JSON object whose empty values the model fills, its fields. It returns
+	// the reader's model and the reading. Cancelling ctx stops the reading
+	// in the Worker.
+	ReadText(ctx context.Context, image *os.File, schema json.RawMessage) (string, Reading, error)
+}
+
+// Reading is what the text reader answered.
+type Reading struct {
+	// Text is the answer: the text, or the fields as JSON.
+	Text string
+	// Tokens are the answer's tokens with their log probabilities, which
+	// show where the model was unsure.
+	Tokens []TokenProb
+	// Finish says why the answer ended: "stop", "length" when it reached the
+	// length limit, or "repetition" when it fell into a loop.
+	Finish string
+}
+
+// TokenProb is one token of an answer and its log probability.
+type TokenProb struct {
+	Token   string
+	LogProb float64
 }
 
 // FaceDetector is the AI Worker's face models
@@ -147,6 +185,11 @@ type AIStatus struct {
 	// ClustersPreparing while label texts wait for the Worker. It is empty
 	// when the Worker's model has no calibrated clusters.
 	Clusters string `json:"clusters,omitempty"`
+	// TextPhotos counts the originals whose vector sends them to have their
+	// text read (textrouting.go), queued or read. It is absent while the
+	// text route does not apply to the Worker's model or its queries wait for
+	// the Worker.
+	TextPhotos *int `json:"textPhotos,omitempty"`
 }
 
 const (
@@ -217,8 +260,13 @@ func (s *Service) returnJob(ctx context.Context, job claimedJob) error {
 }
 
 func (s *Service) completeEmbedding(ctx context.Context, job claimedJob, model string, vector []float32) error {
+	// The route's query vectors come from the Catalog before the transaction.
+	queries, err := s.textQueries(ctx, model)
+	if err != nil {
+		return err
+	}
 	stored := false
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		var exists bool
 		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE object_id = ? AND derivation = ?)",
 			job.objectID, job.derivation).Scan(&exists); err != nil || !exists {
@@ -230,6 +278,11 @@ INSERT INTO embeddings(object_id, derivation, model, vector, created_at) VALUES(
 ON CONFLICT(object_id, derivation) DO UPDATE SET model = excluded.model, vector = excluded.vector, created_at = excluded.created_at`,
 			job.objectID, job.derivation, model, encodeVector(vector), formatTime(s.now())); err != nil {
 			return err
+		}
+		if queries != nil && s.hasText(vector, queries) {
+			if err := enqueueText(ctx, tx, job.objectID, formatTime(s.now())); err != nil {
+				return err
+			}
 		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
 		stored = err == nil
@@ -267,6 +320,9 @@ func (s *Service) AIStatus(ctx context.Context, p Principal) (AIStatus, error) {
 	status := AIStatus{State: state, Reason: reason, Model: model, ObjectModel: detector, FaceModel: faces,
 		AnimalModel: animals}
 	if status.Clusters, err = s.clusterState(ctx, model); err != nil {
+		return AIStatus{}, err
+	}
+	if status.TextPhotos, err = s.textPhotos(ctx, model, libraries); err != nil {
 		return AIStatus{}, err
 	}
 	if len(libraries) == 0 {

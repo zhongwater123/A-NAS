@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-29
+更新时间：2026-10-30
 
 本页只记当前事实与下一步。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，合并与部署的经过由 Git 与 PR 保存。
 
@@ -15,7 +15,8 @@
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1（2026-10-20 在 #149 的早期构建上加入第二块盘）。
 - 已合并、尚未部署的 PR 不在本页列出：`git fetch` 后运行 `bash scripts/undeployed.sh`，由 Git 列出“已部署”之后合入 main 的 PR。
 - 本地控制台自 2026-10-28 以专用账号 `a-nas-kiosk` 运行（[#174](https://github.com/zhongwater123/A-NAS/issues/174)）。`anas-dev` 名下的旧 Chromium 配置文件还在，kiosk 至少重启过一次后按[迁移后的验证](../runbooks/operate-local-kiosk.md#迁移后的验证)删除。
-- 应用中心里的 Immich、OpenList 与思源笔记装于 [#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前，容器没有日志上限，卸载后重新安装才有；它们的数据可以丢弃。
+- 应用中心里的 Immich、OpenList 与思源笔记装于 [#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前，容器没有日志上限，卸载后重新安装才有；它们的数据可以丢弃。2026-10-28 重装 Immich 时 GHCR 的一次限流（429）让安装失败；拉取重试部署前，重装仍可能这样失败（[调查](../investigations/2026-10-28-registry-rate-limit-failed-install.md)）。
+- 本机屏幕 2026-10-29 装上 VA-API 驱动 `intel-media-va-driver`，屏保改由 GPU 解码，播放时 kiosk 会话从约 0.87 个核降到约 0.53 个核（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。剩下的开销与黑屏时约 0.27 个核的开销，大部分来自覆盖层下仍在渲染的桌面，要等 [#315](https://github.com/zhongwater123/A-NAS/pull/315) 部署后复测。
 
 ## 阻塞与外部条件
 
@@ -34,6 +35,8 @@
 - 文件管理的缩略图仍加载原图，是否改用服务端缩略图。
 - 助手的模型仍会提到 Hermes 的 `/help` 与上手引导，如何处理。
 - 向量索引 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)（proposed）：引入 Qdrant 作为各服务可重建的派生索引，推翻了 #66 “不引入独立向量库”的决定。第一阶段只做同步与影子比对；相册读路径何时切换，等实机影子比对的数据再定。
+- 网页搜索（[规格](../specs/web-search.md)、[ADR 0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)，proposed）：内置 SearXNG，默认开启并由管理员开关，种子分类单独开关、默认关闭，版本随 release 固定（用户 2026-10-30 决定）。实现在 [PR #333](https://github.com/zhongwater123/A-NAS/pull/333)（ADR 编号占位 [PR #334](https://github.com/zhongwater123/A-NAS/pull/334)）；接入 SearXNG 不需要密钥、Tor 或自建服务的全部 332 个引擎，分十个分类，结果按引擎轮流排列（用户 2026-11-02 决定）；结果随引擎回答陆续显示，约 1 秒出现第一批。夸克的解析错误记在 [#340](https://github.com/zhongwater123/A-NAS/issues/340)。部署前要用 `ANAS_SYSTEM_TEST_SEARCH=real` 跑一次系统测试，再按[启用手册](../runbooks/enable-web-search.md)在实验 NAS 上实测后调整。
+- 家庭中心（宝宝频道）：M1 在 [PR #329](https://github.com/zhongwater123/A-NAS/pull/329) 中，尚未合并、部署（[规格](../specs/family-center.md)、[技术设计](../architecture/family-center.md)）；[ADR 0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md) 为 proposed。部署要运行安装器，以新建 `a-nas-family` 身份与 `anas-family` 服务；系统测试中新增的家庭服务检查尚未运行。M2（认领、隐藏、从图库加入频道）待做。
 - 进行中的 PR：局域网算力 PAIR 的隐私边界与下载（[#196](https://github.com/zhongwater123/A-NAS/pull/196)，草稿）；语音处理的云端密钥与存储桶（[#203](https://github.com/zhongwater123/A-NAS/pull/203)）。
 
 ## 下一步
@@ -43,7 +46,7 @@
 3. 向量索引第一阶段部署后，按[启用向量索引](../runbooks/enable-vector-index.md)收集同步、对账与影子比对数据；视频分段（#207）与文件分块（#208）的索引设计以[检索功能实测](../research/qdrant-retrieval-features.md#特性取舍)为准。视频剪辑 baseline（[#287](https://github.com/zhongwater123/A-NAS/issues/287)，总 issue [#295](https://github.com/zhongwater123/A-NAS/issues/295)）的试点与基线成片已完成（[研究](../research/video-moment-retrieval.md)）；第二版 [#322](https://github.com/zhongwater123/A-NAS/issues/322) 已完成：助手原型里接通“模型读镜头卡片、写剪辑计划、规则校验后渲染”（[规格](../specs/photo-to-video.md)），并在试点集上对比 baseline、规则版、模型版，加了三个视觉评审打分。规则版全部切题；模型看不到画面，素材少时仍会加不切题的铺垫。第三版 [#326](https://github.com/zhongwater123/A-NAS/issues/326) 在开发机上完成：本机 Qwen3-VL-2B 给卡片写描述、出片前逐帧核对并收窄入点出点、卡片按画面变化切分，模型版的“天鹅当小船”“白天当夜景”不再出现（[研究](../research/video-moment-retrieval.md#第三版本机视觉模型3262026-10-29)）；带城垛的建筑仍会被当成城堡。现阶段定版是：模型先读整份卡片目录、写故事线，再按体裁（预告片、旅行、回顾）排段；[`eval.video_pipeline`](../../ai/eval/video_pipeline.py) 把预处理与剪辑串成一条，并分别计时。下一步把计时用的库凑满十条视频（现有四条），统一统计预处理与剪辑时间，再与逐帧描述加标签匹配的做法对比；之后按 #207 的构成采集正式评估集，门槛在采集前写定。
 4. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改；#92 之后新装的应用密码按台随机生成。
 5. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
-6. 相册 OCR（2026-10-19 决定做，[规格](../specs/photo-library.md)、[模型评估](../research/photo-ocr-model-evaluation.md)）：先在实验 NAS 上实测 GLM-OCR 与 Qwen3.5-2B 的速度和内存（需用户同意），再写实施方案，经用户确认后实现。
+6. 相册 OCR（2026-10-19 决定做，[规格](../specs/photo-library.md)、[模型评估](../research/photo-ocr-model-evaluation.md)）：模型是 Qwen3.5-4B 的 Q4_K_M。[实施方案](../architecture/photo-ocr.md)的步骤 1（交付与运行）已合并；步骤 2（分流）用照片已有的向量选出要读的照片（[分流评估](../research/photo-ocr-routing.md)），目标召回 99%（用户 2026-11-02 确认）。下一步是步骤 3：读取、判型与核对。
 7. 后续能力：
    - 外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘），是备份中心评审中最大的缺口；
    - 账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；

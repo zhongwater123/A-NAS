@@ -9,6 +9,7 @@ package aiworker
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -40,11 +41,19 @@ const (
 	// OpEmbedAnimals embeds the animals at Boxes in an image, to tell one
 	// pet from another; hanging up cancels it too.
 	OpEmbedAnimals = "embed_animals"
+	// OpReadText reads the text in an image: Kind "text" for the whole text,
+	// or "fields" with Schema, a JSON object whose empty values the model
+	// fills (docs/architecture/photo-ocr.md). Hanging up cancels it too.
+	OpReadText = "read_text"
 	// OpRelease frees memory: What is "detector" to drop the background
-	// models (the detector, the face models and the animal model), or "all"
-	// for the Worker to exit after answering.
+	// models (the detector, the face models, the animal model and the text
+	// reader), or "all" for the Worker to exit after answering.
 	OpRelease = "release"
 )
+
+// readTimeout bounds a reading: the first one checks and loads gigabytes of
+// model, and the model then writes a few tokens a second on the NAS.
+const readTimeout = 10 * time.Minute
 
 // Error codes the Worker answers with.
 const (
@@ -62,6 +71,10 @@ type Request struct {
 	What string `json:"what,omitempty"`
 	// Boxes are the animals to embed, [x0, y0, x1, y1] as fractions.
 	Boxes [][4]float64 `json:"boxes,omitempty"`
+	// Kind is what read_text reads: "text" or "fields".
+	Kind string `json:"kind,omitempty"`
+	// Schema is the JSON object whose empty values read_text fills.
+	Schema json.RawMessage `json:"schema,omitempty"`
 }
 
 type Response struct {
@@ -83,6 +96,12 @@ type Response struct {
 	// MemoryBytes is what the Worker holds with every model it serves
 	// loaded, its own start included, in answer to info.
 	MemoryBytes uint64 `json:"memoryBytes,omitempty"`
+	// OCRModel names the text reader, and OCRMemoryBytes is what the Worker
+	// holds while it reads, in answer to info.
+	OCRModel       string `json:"ocrModel,omitempty"`
+	OCRMemoryBytes uint64 `json:"ocrMemoryBytes,omitempty"`
+	// Reading answers read_text.
+	Reading *WireReading `json:"reading,omitempty"`
 	// Vectors answer embed_animals, one per box, each as Vector is.
 	Vectors [][]byte   `json:"vectors,omitempty"`
 	Error   *WireError `json:"error,omitempty"`
@@ -97,13 +116,45 @@ type WireFace struct {
 	Vector    []byte    `json:"vector"`
 }
 
+// WireReading is a reading as read_text answers it.
+type WireReading struct {
+	Text string `json:"text"`
+	// Logprobs are [token, log probability] pairs.
+	Logprobs []WireTokenProb `json:"logprobs"`
+	Finish   string          `json:"finish"`
+}
+
+// WireTokenProb is a [token, log probability] pair.
+type WireTokenProb struct {
+	Token   string
+	LogProb float64
+}
+
+func (p WireTokenProb) MarshalJSON() ([]byte, error) {
+	return json.Marshal([2]any{p.Token, p.LogProb})
+}
+
+func (p *WireTokenProb) UnmarshalJSON(data []byte) error {
+	var pair []json.RawMessage
+	if err := json.Unmarshal(data, &pair); err != nil {
+		return err
+	}
+	if len(pair) != 2 {
+		return fmt.Errorf("a token's log probability has %d parts, want 2", len(pair))
+	}
+	if err := json.Unmarshal(pair[0], &p.Token); err != nil {
+		return err
+	}
+	return json.Unmarshal(pair[1], &p.LogProb)
+}
+
 type WireError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
 
-// Client implements photos.Embedder, photos.Detector, photos.FaceDetector and
-// photos.AnimalEmbedder.
+// Client implements photos.Embedder, photos.Detector, photos.FaceDetector,
+// photos.AnimalEmbedder and photos.TextReader.
 type Client struct {
 	SocketPath string
 	// Timeout bounds one call, including loading the model after the Worker
@@ -116,6 +167,7 @@ var (
 	_ photos.Detector       = Client{}
 	_ photos.FaceDetector   = Client{}
 	_ photos.AnimalEmbedder = Client{}
+	_ photos.TextReader     = Client{}
 )
 
 func (c Client) Info(ctx context.Context) (photos.EmbedderInfo, error) {
@@ -127,7 +179,29 @@ func (c Client) Info(ctx context.Context) (photos.EmbedderInfo, error) {
 		return photos.EmbedderInfo{}, errors.New("AI worker described no model")
 	}
 	return photos.EmbedderInfo{Model: response.Model, Dimensions: response.Dimensions, Detector: response.Detector,
-		Faces: response.FaceModel, Animals: response.AnimalModel, MemoryBytes: response.MemoryBytes}, nil
+		Faces: response.FaceModel, Animals: response.AnimalModel, MemoryBytes: response.MemoryBytes,
+		OCR: response.OCRModel, OCRMemoryBytes: response.OCRMemoryBytes}, nil
+}
+
+// ReadText reads an upright image's whole text, or with schema, its fields.
+func (c Client) ReadText(ctx context.Context, image *os.File, schema json.RawMessage) (string, photos.Reading, error) {
+	request := Request{Op: OpReadText, Kind: "text"}
+	if schema != nil {
+		request.Kind, request.Schema = "fields", schema
+	}
+	c.Timeout = max(c.Timeout, readTimeout)
+	response, err := c.call(ctx, request, image)
+	if err != nil {
+		return "", photos.Reading{}, err
+	}
+	if response.Model == "" || response.Reading == nil {
+		return "", photos.Reading{}, errors.New("AI worker returned no reading")
+	}
+	tokens := make([]photos.TokenProb, len(response.Reading.Logprobs))
+	for i, token := range response.Reading.Logprobs {
+		tokens[i] = photos.TokenProb{Token: token.Token, LogProb: token.LogProb}
+	}
+	return response.Model, photos.Reading{Text: response.Reading.Text, Tokens: tokens, Finish: response.Reading.Finish}, nil
 }
 
 func (c Client) EmbedImage(ctx context.Context, image *os.File) ([]float32, error) {

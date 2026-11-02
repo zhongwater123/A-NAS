@@ -1,0 +1,369 @@
+parameters:
+  FamilyAccountID: { name: accountId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  FamilyBabyID: { name: babyId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  FamilyRecordID: { name: recordId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  FamilyCommentID: { name: commentId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  FamilyReactionName: { name: reaction, in: path, required: true, schema: { $ref: "#/schemas/FamilyReactionName" } }
+  FamilyCursor: { name: cursor, in: query, required: false, description: The `next` of the previous page., schema: { type: string } }
+responses:
+  FamilyReactions:
+    description: The record's reactions
+    content:
+      application/json:
+        schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "#/schemas/FamilyReaction" } } } }
+schemas:
+  FamilyDate: { type: string, format: date, description: A calendar date without time of day or zone. }
+  FamilyMe:
+    type: object
+    additionalProperties: false
+    required: [status, guardian]
+    properties:
+      status: { type: string, enum: [none, pending, member], description: "none: not in the family; pending: waiting for a guardian's approval." }
+      role: { type: string, maxLength: 8 }
+      guardian: { type: boolean }
+  FamilyMember:
+    type: object
+    additionalProperties: false
+    required: [accountId, username, role, guardian, joinedAt, active]
+    properties:
+      accountId: { type: string }
+      username: { type: string }
+      role: { type: string, maxLength: 8, description: "The member's family role, a name for them as seen from the babies, such as 外婆." }
+      guardian: { type: boolean, description: "Guardians add babies, edit their profiles, approve joining and delete anyone's content." }
+      joinedAt: { type: string, format: date-time }
+      active: { type: boolean, description: "False once the account is disabled or gone; such members keep their content but no place in the family." }
+  FamilyJoinRequest:
+    type: object
+    additionalProperties: false
+    required: [accountId, username, role, requestedAt]
+    properties:
+      accountId: { type: string }
+      username: { type: string }
+      role: { type: string, maxLength: 8 }
+      requestedAt: { type: string, format: date-time }
+  FamilyAge:
+    type: object
+    additionalProperties: false
+    required: [years, months, days, totalMonths]
+    properties:
+      years: { type: integer, minimum: 0 }
+      months: { type: integer, minimum: 0, maximum: 11 }
+      days: { type: integer, minimum: 0, maximum: 30 }
+      totalMonths: { type: integer, minimum: 0, description: "The month of life, from 0 for the first month." }
+  FamilyBaby:
+    type: object
+    additionalProperties: false
+    required: [id, name, nickname, sex, birthDate, age, avatarVersion, version, createdAt, createdBy]
+    properties:
+      id: { type: string }
+      name: { type: string, minLength: 1, maxLength: 20 }
+      nickname: { type: string, maxLength: 20 }
+      sex: { type: string, enum: [female, male] }
+      birthDate: { $ref: "#/schemas/FamilyDate" }
+      age: { $ref: "#/schemas/FamilyAge" }
+      avatarVersion: { type: integer, minimum: 0, description: "Changes with each new avatar; 0 means there is none." }
+      version: { type: integer, minimum: 1, description: Counts edits to the profile. }
+      createdAt: { type: string, format: date-time }
+      createdBy: { type: string, description: Account ID of the guardian who added the baby. }
+      deletedAt: { type: string, format: date-time, description: "Set while the baby is in the trash; restorable for 15 days." }
+  FamilyBabyFields:
+    type: object
+    additionalProperties: false
+    required: [name, sex, birthDate]
+    properties:
+      name: { type: string, minLength: 1, maxLength: 20 }
+      nickname: { type: string, maxLength: 20 }
+      sex: { type: string, enum: [female, male] }
+      birthDate: { $ref: "#/schemas/FamilyDate" }
+      version: { type: integer, minimum: 0, description: "When editing, the version the edit was made from." }
+  FamilyOverview:
+    type: object
+    additionalProperties: false
+    required: [exists, me, members, requests, babies, deletedBabies]
+    properties:
+      exists: { type: boolean, description: Whether anyone has founded the family yet. }
+      me: { $ref: "#/schemas/FamilyMe" }
+      members: { type: array, description: "Empty unless the caller is a member.", items: { $ref: "#/schemas/FamilyMember" } }
+      requests: { type: array, description: "Join requests; empty unless the caller is a guardian.", items: { $ref: "#/schemas/FamilyJoinRequest" } }
+      babies: { type: array, description: "Oldest first; empty unless the caller is a member.", items: { $ref: "#/schemas/FamilyBaby" } }
+      deletedBabies: { type: array, description: "Babies a guardian can still restore.", items: { $ref: "#/schemas/FamilyBaby" } }
+  FamilyMeasurement:
+    type: object
+    additionalProperties: false
+    properties:
+      heightCm: { type: number, minimum: 30, maximum: 200, description: "Recumbent length or standing height, one decimal." }
+      weightKg: { type: number, minimum: 0.5, maximum: 100, description: Two decimals. }
+      headCm: { type: number, minimum: 20, maximum: 70, description: "Head circumference, one decimal." }
+  FamilyVaccineDose:
+    type: object
+    additionalProperties: false
+    required: [code, dose]
+    properties:
+      code: { type: string, description: "A vaccine of the catalog, or custom with name." }
+      name: { type: string, maxLength: 30, description: "The vaccine's name when code is custom." }
+      dose: { type: integer, minimum: 1, maximum: 10 }
+      clinic: { type: string, maxLength: 50 }
+      batch: { type: string, maxLength: 50 }
+  FamilyMilestone:
+    type: object
+    additionalProperties: false
+    required: [title]
+    properties:
+      title: { type: string, maxLength: 30 }
+      autoKey: { type: string, description: "The automatic milestone the record annotates: birth, month-1, day-100, year-1 or birthday-N." }
+  FamilyRecording:
+    type: object
+    additionalProperties: false
+    required: [contentType, sizeBytes, fileName]
+    properties:
+      contentType: { type: string }
+      sizeBytes: { type: integer, minimum: 1 }
+      fileName: { type: string }
+  FamilyRecordPhoto:
+    type: object
+    additionalProperties: false
+    required: [assetId, video, role]
+    properties:
+      assetId: { type: string, description: A photo asset of the shared photo library. }
+      takenAt: { type: string, format: date-time }
+      video: { type: boolean }
+      role: { type: string, enum: [album, certificate], description: "Certificates prove a vaccination and stay out of the cloud album." }
+  FamilyComment:
+    type: object
+    additionalProperties: false
+    required: [id, text, authorId, authorName, createdAt]
+    properties:
+      id: { type: string }
+      recordId: { type: string, description: "The record the comment is under; absent on the message wall." }
+      text: { type: string, minLength: 1, maxLength: 1000 }
+      authorId: { type: string }
+      authorName: { type: string, description: Username of the author when they wrote it. }
+      createdAt: { type: string, format: date-time }
+  FamilyReactionName:
+    type: string
+    enum: [heart, like, laugh, adore, clap]
+    description: "A one-tap reaction, shown as ❤️ 👍 😂 🥰 👏."
+  FamilyReaction:
+    type: object
+    additionalProperties: false
+    required: [name, accountIds]
+    properties:
+      name: { $ref: "#/schemas/FamilyReactionName" }
+      accountIds: { type: array, minItems: 1, description: "The members who left it, earliest first.", items: { type: string } }
+  FamilyCommentInput:
+    type: object
+    additionalProperties: false
+    required: [text]
+    properties:
+      requestKey: { type: string, maxLength: 128, description: "Repeating a request with the same key returns the first comment." }
+      text: { type: string, minLength: 1, maxLength: 1000 }
+  FamilyRecord:
+    type: object
+    additionalProperties: false
+    required: [id, babyId, kind, occurredOn, text, photos, authorId, authorName, createdAt, version, comments, reactions]
+    properties:
+      id: { type: string }
+      babyId: { type: string }
+      kind: { type: string, enum: [photos, recording, journal, measurement, vaccine, milestone] }
+      occurredOn: { $ref: "#/schemas/FamilyDate" }
+      age: { $ref: "#/schemas/FamilyAge" }
+      text: { type: string, maxLength: 5000 }
+      photos: { type: array, description: "Only the photos the reader can see now.", items: { $ref: "#/schemas/FamilyRecordPhoto" } }
+      measurement: { $ref: "#/schemas/FamilyMeasurement" }
+      vaccine: { $ref: "#/schemas/FamilyVaccineDose" }
+      milestone: { $ref: "#/schemas/FamilyMilestone" }
+      recording: { $ref: "#/schemas/FamilyRecording" }
+      authorId: { type: string }
+      authorName: { type: string, description: Username of the author when they added it. }
+      createdAt: { type: string, format: date-time }
+      updatedAt: { type: string, format: date-time }
+      version: { type: integer, minimum: 1 }
+      deletedAt: { type: string, format: date-time }
+      comments: { type: array, description: Oldest first., items: { $ref: "#/schemas/FamilyComment" } }
+      reactions: { type: array, description: "In the order the window shows them; only those someone left.", items: { $ref: "#/schemas/FamilyReaction" } }
+  FamilyRecordInput:
+    type: object
+    additionalProperties: false
+    properties:
+      requestKey: { type: string, maxLength: 128, description: "Repeating a request with the same key returns the first record." }
+      kind: { type: string, enum: [photos, journal, measurement, vaccine, milestone], description: "Required when adding; an edit keeps the kind." }
+      occurredOn: { $ref: "#/schemas/FamilyDate" }
+      text: { type: string, maxLength: 5000 }
+      photos: { type: array, maxItems: 200, description: "Photo asset IDs of the shared library, in order; on an edit, replaces the photos.", items: { type: string } }
+      certificates: { type: array, maxItems: 200, description: "A vaccination's proof photos.", items: { type: string } }
+      alsoBabies: { type: array, description: "A photo record goes into these babies' channels too.", items: { type: string } }
+      measurement: { $ref: "#/schemas/FamilyMeasurement" }
+      vaccine: { $ref: "#/schemas/FamilyVaccineDose" }
+      milestone: { $ref: "#/schemas/FamilyMilestone" }
+      version: { type: integer, minimum: 0, description: "When editing, the version the edit was made from." }
+  FamilyRecordPage:
+    type: object
+    additionalProperties: false
+    required: [records]
+    properties:
+      records: { type: array, items: { $ref: "#/schemas/FamilyRecord" } }
+      next: { type: string }
+  FamilyAlbumPhoto:
+    type: object
+    additionalProperties: false
+    required: [assetId, recordId, video, monthOfLife]
+    properties:
+      assetId: { type: string }
+      recordId: { type: string }
+      takenAt: { type: string, format: date-time }
+      video: { type: boolean }
+      monthOfLife: { type: integer, minimum: -1, description: "The month of life the photo was taken in, from 0; -1 before birth." }
+  FamilyAlbumPage:
+    type: object
+    additionalProperties: false
+    required: [photos]
+    properties:
+      photos: { type: array, description: "Newest taken first.", items: { $ref: "#/schemas/FamilyAlbumPhoto" } }
+      next: { type: string }
+  FamilyGrowthPoint:
+    type: object
+    additionalProperties: false
+    required: [ageMonths, values]
+    properties:
+      ageMonths: { type: number, minimum: 0 }
+      values: { type: array, description: "One value per percentile, lowest first.", items: { type: number } }
+  FamilyAssessment:
+    type: object
+    additionalProperties: false
+    required: [value, date, ageMonths]
+    properties:
+      value: { type: number }
+      date: { $ref: "#/schemas/FamilyDate" }
+      ageMonths: { type: number, minimum: 0 }
+      lower: { type: string, description: "The percentile below the value; absent below the lowest or outside the standard's ages." }
+      upper: { type: string, description: "The percentile above the value; absent above the highest or outside the standard's ages." }
+  FamilyGrowth:
+    type: object
+    additionalProperties: false
+    required: [sex, birthDate, standard, percentiles, curves, measurements, latest]
+    properties:
+      sex: { type: string, enum: [female, male] }
+      birthDate: { $ref: "#/schemas/FamilyDate" }
+      standard: { type: string }
+      percentiles: { type: array, items: { type: string } }
+      curves:
+        type: object
+        additionalProperties: false
+        required: [height, weight, head]
+        properties:
+          height: { type: array, items: { $ref: "#/schemas/FamilyGrowthPoint" } }
+          weight: { type: array, items: { $ref: "#/schemas/FamilyGrowthPoint" } }
+          head: { type: array, items: { $ref: "#/schemas/FamilyGrowthPoint" } }
+      measurements:
+        type: array
+        description: Oldest first.
+        items:
+          type: object
+          additionalProperties: false
+          required: [recordId, date, ageMonths]
+          properties:
+            recordId: { type: string }
+            date: { $ref: "#/schemas/FamilyDate" }
+            ageMonths: { type: number, minimum: 0 }
+            heightCm: { type: number }
+            weightKg: { type: number }
+            headCm: { type: number }
+      latest:
+        type: object
+        additionalProperties: false
+        properties:
+          height: { $ref: "#/schemas/FamilyAssessment" }
+          weight: { $ref: "#/schemas/FamilyAssessment" }
+          head: { $ref: "#/schemas/FamilyAssessment" }
+  FamilyCatalogDose:
+    type: object
+    additionalProperties: false
+    required: [dose, ageMonths, ageLabel]
+    properties:
+      dose: { type: integer, minimum: 1 }
+      ageMonths: { type: integer, minimum: 0, description: "The recommended age; 0 is at birth." }
+      ageLabel: { type: string }
+      sex: { type: string, enum: [female, male] }
+  FamilyCatalogVaccine:
+    type: object
+    additionalProperties: false
+    required: [code, name, programme, doses]
+    properties:
+      code: { type: string }
+      name: { type: string }
+      programme: { type: boolean, description: "A vaccine of the national immunization programme; the others are non-programme vaccines a family chooses." }
+      covers: { type: array, description: "Programme vaccines whose doses this one stands in for, dose by dose.", items: { type: string } }
+      coversUpTo: { type: integer, minimum: 1, description: "Only the covered vaccines' first doses, up to this one." }
+      group: { type: string, description: "Alternative programme vaccines of which a region uses one; the first is the default." }
+      doses: { type: array, description: "Empty for vaccines only recorded, such as influenza.", items: { $ref: "#/schemas/FamilyCatalogDose" } }
+      note: { type: string }
+  FamilyVaccineCatalog:
+    type: object
+    additionalProperties: false
+    required: [version, title, source, vaccines]
+    properties:
+      version: { type: string }
+      title: { type: string }
+      source: { type: string }
+      vaccines: { type: array, items: { $ref: "#/schemas/FamilyCatalogVaccine" } }
+  FamilyScheduledDose:
+    type: object
+    additionalProperties: false
+    required: [code, name, dose, programme, ageLabel, dueDate, status]
+    properties:
+      code: { type: string }
+      name: { type: string }
+      dose: { type: integer, minimum: 1 }
+      programme: { type: boolean }
+      ageLabel: { type: string }
+      dueDate: { $ref: "#/schemas/FamilyDate" }
+      status: { type: string, enum: [given, replaced, available, soon, upcoming], description: "available: the recommended age has come; soon: within 30 days." }
+      givenOn: { $ref: "#/schemas/FamilyDate" }
+      recordId: { type: string }
+      replacedBy: { type: string, description: The non-programme vaccine whose dose stood in. }
+  FamilyVaccineSchedule:
+    type: object
+    additionalProperties: false
+    required: [version, title, source, doses, plan, records]
+    properties:
+      version: { type: string }
+      title: { type: string }
+      source: { type: string }
+      doses: { type: array, description: By due date., items: { $ref: "#/schemas/FamilyScheduledDose" } }
+      plan: { type: array, description: The non-programme vaccines the family plans., items: { type: string } }
+      records: { type: array, description: "Every dose recorded, oldest first.", items: { $ref: "#/schemas/FamilyRecord" } }
+  FamilyTimelineEntry:
+    type: object
+    additionalProperties: false
+    required: [date, age, title, upcoming]
+    properties:
+      date: { $ref: "#/schemas/FamilyDate" }
+      age: { $ref: "#/schemas/FamilyAge" }
+      auto: { type: string, description: "The automatic milestone's key, when the entry is one." }
+      title: { type: string }
+      upcoming: { type: boolean, description: "The next automatic milestone, still to come." }
+      record: { $ref: "#/schemas/FamilyRecord" }
+  FamilyHint:
+    type: object
+    additionalProperties: false
+    required: [key, kind]
+    properties:
+      key: { type: string }
+      kind: { type: string, enum: [vaccine, join_request] }
+      babyId: { type: string }
+      babyName: { type: string }
+      vaccine: { type: string }
+      dose: { type: integer, minimum: 1 }
+      dueDate: { $ref: "#/schemas/FamilyDate" }
+      accountId: { type: string }
+      username: { type: string }
+      role: { type: string }
+  FamilyCatalog:
+    type: object
+    additionalProperties: false
+    required: [roles, milestones, vaccines, growthStandard]
+    properties:
+      roles: { type: array, items: { type: string } }
+      milestones: { type: array, items: { type: string } }
+      vaccines: { $ref: "#/schemas/FamilyVaccineCatalog" }
+      growthStandard: { type: string }

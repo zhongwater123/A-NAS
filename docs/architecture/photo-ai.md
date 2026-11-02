@@ -19,7 +19,7 @@ M2 交付后，成员可以：
 ## 已确认的决定
 
 - **模型包**：使用全模态 740M 官方包（约 485 MB，2026-10-09 决定）。相册只调用文本与图片编码；包内的音频编码器保留，不为相册单独裁剪。
-- **OCR**：2026-10-09 决定不做；2026-10-19 用户决定做，识别出的文字与字段进入搜索，可见范围与照片相同（[规格](../specs/photo-library.md)）。另写实施方案，候选与开销见[模型评估](../research/photo-ocr-model-evaluation.md)。
+- **OCR**：2026-10-09 决定不做；2026-10-19 用户决定做，识别出的文字与字段进入搜索，可见范围与照片相同（[规格](../specs/photo-library.md)）。模型 2026-10-30 定为 Qwen3.5-4B 的 Q4_K_M，见 [OCR 实施方案](photo-ocr.md)（proposed）与[模型评估](../research/photo-ocr-model-evaluation.md)。
 - **内置**：AI 随系统安装和升级、默认开启，模型与运行环境由开发机经 SSH 传到设备，设备不联网获取（2026-10-10 决定，[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
 
 ## 已核实的 Runtime 事实（2026-10-08）
@@ -82,7 +82,7 @@ M2 交付后，成员可以：
 客户端见 [`internal/aiworker`](../../internal/aiworker/client.go)，测试用的假 Worker 见 [`aiworkertest`](../../internal/aiworker/aiworkertest/aiworkertest.go)。
 
 - 相册服务是客户端，Worker 是串行服务端（并发 1）。每次调用新建一个连接，发一帧请求、读一帧响应；帧为 4 字节大端长度加 JSON，上限 1 MiB。图片随请求以 `SCM_RIGHTS` 传入只读文件描述符（Go 侧用 `golang.org/x/sys/unix`，Python 侧用 `socket.recv_fds`），Worker 不接受路径。
-- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`，检测器可用时另有 `detector`，以及 `memoryBytes`：Worker 启动后的内存加上各可用模型清单的 `memoryBytes`，供门控在加载前核对（[资源策略](photo-objects.md#资源策略)）；`detect_objects` 返回检测器的模型与框，`release` 卸载检测会话或全部模型（[物体检测方案](photo-objects.md#worker)）；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）；`embed_query` 把 `text`（至多 1,000 字符）当作搜索查询编码，由 Worker 加上模型自己的检索前缀（EmbeddingGemma 为 `task: search result | query: …`），向量与图片向量可直接比较。前缀属于模型的使用约定，随 Worker 与模型一起更换。
+- 请求 `{"op": ...}`：`info` 返回 `model`（含权重哈希与预处理版本）与 `dimensions`，检测器可用时另有 `detector`，以及 `memoryBytes`：Worker 启动后的内存加上各可用模型清单的 `memoryBytes`，供门控在加载前核对（[资源策略](photo-objects.md#资源策略)）；`detect_objects` 返回检测器的模型与框，`release` 卸载检测会话或全部模型（[物体检测方案](photo-objects.md#worker)）；`embed_image` 返回 `vector`（小端 float32，JSON 中为 base64）；`embed_query` 把 `text`（至多 1,000 字符）当作搜索查询编码，由 Worker 加上模型自己的检索前缀（EmbeddingGemma 为 `task: search result | query: …`），向量与图片向量可直接比较。前缀属于模型的使用约定，随 Worker 与模型一起更换。`read_text` 读出图片中的文字或字段，`info` 另以 `ocrModel` 与 `ocrMemoryBytes` 报告它，单独计算内存（[照片文字识别](photo-ocr.md#在-worker-中运行)）。
 - 失败响应为 `{"ok": false, "error": {"code", "message"}}`：`invalid_input` 表示这张图片无法处理，任务记为失败；`unavailable` 表示 Worker 在运行但不能服务（例如模型文件缺失或校验不符），任务等待。
 - 连不上 Worker 时任务等待，不消耗尝试次数；Worker 收到图片后才失败或退出（崩溃、超时、乱码响应）则消耗一次尝试，三次后记为失败，避免反复拖垮 Worker 的图片无限重试。每次调用默认最长 2 分钟，覆盖按需启动后的模型加载。
 
