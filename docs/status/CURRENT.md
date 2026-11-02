@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-29
+更新时间：2026-10-30
 
 本页只记当前事实与下一步。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，合并与部署的经过由 Git 与 PR 保存。
 
@@ -35,6 +35,7 @@
 - 文件管理的缩略图仍加载原图，是否改用服务端缩略图。
 - 助手的模型仍会提到 Hermes 的 `/help` 与上手引导，如何处理。
 - 向量索引 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)（proposed）：引入 Qdrant 作为各服务可重建的派生索引，推翻了 #66 “不引入独立向量库”的决定。第一阶段只做同步与影子比对；相册读路径何时切换，等实机影子比对的数据再定。
+- 网页搜索（[规格](../specs/web-search.md)、[ADR 0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)，proposed）：内置 SearXNG，默认开启并由管理员开关，种子分类单独开关、默认关闭，版本随 release 固定（用户 2026-10-30 决定）。实现在 [PR #333](https://github.com/zhongwater123/A-NAS/pull/333)（ADR 编号占位 [PR #334](https://github.com/zhongwater123/A-NAS/pull/334)）；接入 SearXNG 不需要密钥、Tor 或自建服务的全部 332 个引擎，分十个分类，结果按引擎轮流排列（用户 2026-11-02 决定）；结果随引擎回答陆续显示，约 1 秒出现第一批。夸克的解析错误记在 [#340](https://github.com/zhongwater123/A-NAS/issues/340)。部署前要用 `ANAS_SYSTEM_TEST_SEARCH=real` 跑一次系统测试，再按[启用手册](../runbooks/enable-web-search.md)在实验 NAS 上实测后调整。
 - 家庭中心（宝宝频道）：M1 在 [PR #329](https://github.com/zhongwater123/A-NAS/pull/329) 中，尚未合并、部署（[规格](../specs/family-center.md)、[技术设计](../architecture/family-center.md)）；[ADR 0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md) 为 proposed。部署要运行安装器，以新建 `a-nas-family` 身份与 `anas-family` 服务；系统测试中新增的家庭服务检查尚未运行。M2（认领、隐藏、从图库加入频道）待做。
 - 进行中的 PR：局域网算力 PAIR 的隐私边界与下载（[#196](https://github.com/zhongwater123/A-NAS/pull/196)，草稿）；语音处理的云端密钥与存储桶（[#203](https://github.com/zhongwater123/A-NAS/pull/203)）。
 

@@ -37,6 +37,7 @@
 - [日志](logs.md)（implemented）
 - [容量与大小的显示单位](size-units.md)（implemented）
 - [AI 助手](ai-assistant.md)（draft）
+- [网页搜索](web-search.md)（draft）
 - [家庭中心：宝宝频道](family-center.md)（M1 implemented；M2 draft）
 - [硬盘用途与数据卷冗余](disk-roles-and-redundancy.md)（M1 implemented；M2、M3 draft）
 

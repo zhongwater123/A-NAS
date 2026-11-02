@@ -14,6 +14,7 @@ import type { SettingsSection } from "../settings/SettingsPanel";
 import type { StoragePlanFlow } from "../settings/storagePlan";
 import type { TransferLocation } from "../transfers/api";
 import { lazyCode } from "../ui/lazyCode";
+import { WebSearchGlyph } from "../websearch/WebSearchGlyph";
 import { DesktopApp } from "./DesktopGrid";
 import type { HostStateView } from "./useHostState";
 
@@ -32,6 +33,7 @@ const SettingsPanel = lazyCode(() => import("../settings/SettingsPanel").then((m
 const SharesPanel = lazyCode(() => import("../shares/SharesPanel").then((module) => module.SharesPanel));
 const TransferCenter = lazyCode(() => import("../transfers/TransferCenter").then((module) => module.TransferCenter));
 const TrashPanel = lazyCode(() => import("../trash/TrashPanel").then((module) => module.TrashPanel));
+const WebSearchPanel = lazyCode(() => import("../websearch/WebSearchPanel").then((module) => module.WebSearchPanel));
 
 // What another window can ask an app to show when it opens it.
 export interface WindowIntentPayloads {
@@ -62,6 +64,8 @@ export interface WindowContext {
   isAdmin: boolean;
   // The assistant opens only when this device runs one for this account (ADR 0024).
   assistantReady: boolean;
+  // Web search shows only while an administrator leaves it on (ADR 0030).
+  webSearchEnabled: boolean;
   open: OpenWindow;
   intents: WindowIntents;
   intentHandled: <ID extends keyof WindowIntentPayloads>(id: ID, handled: WindowIntentPayloads[ID]) => void;
@@ -117,6 +121,8 @@ interface AppDefinition {
     adminOnly?: boolean;
     // An app that is not ready shows a disabled icon marked 规划中.
     ready?: (context: WindowContext) => boolean;
+    // An app an administrator turned off has no icon at all.
+    visible?: (context: WindowContext) => boolean;
   };
   // The window's content.
   render: (context: WindowContext) => ReactNode;
@@ -167,7 +173,7 @@ const definitions = {
       id: "settings",
       // The administrator terminal lives in Settings → 终端, so searching for it in the launcher finds 设置.
       keywords: ({ isAdmin }) =>
-        `账号 密码 smb 用户 成员 权限 存储 磁盘 数据卷 系统 日志 审计 登录记录 活动 log${isAdmin ? " 终端 shell 命令行 bash" : ""}`,
+        `账号 密码 smb 用户 成员 权限 存储 磁盘 数据卷 系统 日志 审计 登录记录 活动 log${isAdmin ? " 终端 shell 命令行 bash 网页搜索开关" : ""}`,
     },
     render: ({ session, changeUser, logout }) => (
       <SettingsWindow session={session} changeUser={changeUser} logout={logout} />
@@ -255,6 +261,18 @@ const definitions = {
     launcher: { id: "music", keywords: "歌曲 专辑 歌手 歌单 播放 music" },
     render: ({ session, open }) => <MusicPanel userId={session.user.id} onOpenFiles={() => open("files")} />,
   },
+  websearch: {
+    title: "网页搜索",
+    icon: WebSearchGlyph,
+    tone: "websearch",
+    bounds: { x: 240, y: 50, width: 1040, height: 700 },
+    launcher: {
+      id: "websearch",
+      keywords: "搜索 搜索引擎 网页 百度 必应 搜狗 图片 视频 资讯 新闻 种子 search web",
+      visible: ({ webSearchEnabled }) => webSearchEnabled,
+    },
+    render: () => <WebSearchPanel />,
+  },
   family: {
     title: "家庭中心",
     icon: FamilyGlyph,
@@ -297,7 +315,8 @@ export const windowIDs = Object.keys(apps) as WindowID[];
 export function desktopApps(context: WindowContext, isOpen: (id: WindowID) => boolean): DesktopApp[] {
   return windowIDs.flatMap((id): DesktopApp[] => {
     const { title, icon: Icon, tone, launcher } = apps[id];
-    if (!launcher || (launcher.adminOnly && !context.isAdmin)) return [];
+    if (!launcher || (launcher.adminOnly && !context.isAdmin) || (launcher.visible && !launcher.visible(context)))
+      return [];
     if (launcher.ready && !launcher.ready(context))
       return [{ id: launcher.id, label: title, ariaLabel: `${title}，规划中`, tone, icon: <Icon />, disabled: true }];
     return [

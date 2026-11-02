@@ -1,0 +1,9 @@
+{
+  "name": "searxng",
+  "version": "2026.10.30+1cd13d98d",
+  "commit": "1cd13d98d65a58f1126fa5bb5c77e42c0ea625f3",
+  "source": "https://codeload.github.com/searxng/searxng/tar.gz/1cd13d98d65a58f1126fa5bb5c77e42c0ea625f3",
+  "sizeBytes": 6629672,
+  "sha256": "0a83fe2872a0b346f1e7b5195e18e1d6e0961e0e4fc303c002208952a22f8873",
+  "license": "AGPL-3.0-or-later (https://github.com/searxng/searxng/blob/1cd13d98d65a58f1126fa5bb5c77e42c0ea625f3/LICENSE). SearXNG publishes no releases: the commit is pinned, and its version is the one SearXNG derives from the commit date and short hash. The archive is GitHub's tarball of that commit."
+}

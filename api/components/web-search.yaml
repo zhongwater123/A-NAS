@@ -1,0 +1,140 @@
+schemas:
+  WebSearchCategory:
+    type: string
+    description: A tab of the window; torrents only while an administrator has turned it on.
+    enum: [web, images, videos, news, music, map, science, it, social, torrents]
+  WebSearchStatus:
+    type: object
+    additionalProperties: false
+    required: [enabled, running, torrents, categories, engines]
+    properties:
+      enabled: { type: boolean, description: "The administrator's switch; off stops the service." }
+      running: { type: string, enum: [running, starting, stopped, failed], description: What systemd reports of the service. }
+      torrents: { type: boolean, description: The torrent tab's switch. }
+      categories:
+        type: array
+        description: The tabs the window shows, in order; empty while web search is off.
+        items: { $ref: "#/schemas/WebSearchCategory" }
+      engines:
+        type: object
+        description: >-
+          Every tab's engines as the window names them, in the order their results take turns: those
+          SearXNG loaded, which the release fixes. Empty until SearXNG has been read while it ran.
+        additionalProperties: false
+        required: [web, images, videos, news, music, map, science, it, social, torrents]
+        properties:
+          web: { type: array, items: { type: string } }
+          images: { type: array, items: { type: string } }
+          videos: { type: array, items: { type: string } }
+          news: { type: array, items: { type: string } }
+          music: { type: array, items: { type: string } }
+          map: { type: array, items: { type: string } }
+          science: { type: array, items: { type: string } }
+          it: { type: array, items: { type: string } }
+          social: { type: array, items: { type: string } }
+          torrents: { type: array, items: { type: string } }
+  WebSearchSettings:
+    type: object
+    additionalProperties: false
+    required: [enabled, torrents]
+    properties:
+      enabled: { type: boolean }
+      torrents: { type: boolean }
+  WebSearchQuery:
+    type: object
+    additionalProperties: false
+    required: [q, category]
+    properties:
+      q: { type: string, minLength: 1, maxLength: 400, description: "The search text, at most 400 characters." }
+      category: { $ref: "#/schemas/WebSearchCategory" }
+      page: { type: integer, minimum: 1, maximum: 20, default: 1 }
+      timeRange: { type: string, enum: [day, week, month, year], description: Only results this recent. }
+  WebSearchResult:
+    type: object
+    additionalProperties: false
+    required: [url, title, domain, engines]
+    properties:
+      url: { type: string, format: uri, description: An http or https address. }
+      title: { type: string }
+      content: { type: string }
+      domain: { type: string }
+      engines: { type: array, items: { type: string }, description: The names the window shows of the engines that found it. }
+      publishedAt: { type: string, format: date-time }
+      thumbnail: { type: string, description: "A path of this API (getWebSearchThumbnail), never another host." }
+      platform: { type: string, description: A video's site. }
+      author: { type: string }
+      durationSeconds: { type: integer, minimum: 1 }
+      width: { type: integer, minimum: 1, description: An image's width. }
+      height: { type: integer, minimum: 1 }
+      source: { type: string, description: Where an image appears. }
+      magnet: { type: string, description: "A torrent's magnet link (magnet:?…)." }
+      sizeBytes: { type: integer, minimum: 1 }
+      seeders: { type: integer, minimum: 0 }
+      leechers: { type: integer, minimum: 0 }
+  WebSearchAnswer:
+    type: object
+    additionalProperties: false
+    required: [text]
+    properties:
+      text: { type: string }
+      url: { type: string, format: uri }
+  WebSearchInfobox:
+    type: object
+    additionalProperties: false
+    required: [title]
+    properties:
+      title: { type: string }
+      content: { type: string }
+      url: { type: string, format: uri }
+      thumbnail: { type: string }
+  WebSearchUpdate:
+    type: object
+    additionalProperties: false
+    description: >-
+      Part of a page, sent as the tab's engines answer; each field holds only what is new since the update before.
+    required: [results, found, answers, suggestions, unresponsive, pending]
+    properties:
+      results:
+        type: array
+        description: >-
+          To show after the results of the updates before: the engines that answered since take turns in the
+          tab's order, each with its own results in its own order.
+        items: { $ref: "#/schemas/WebSearchResult" }
+      found:
+        type: array
+        description: Results sent before that more engines have found since, with every engine that found them.
+        items: { $ref: "#/schemas/WebSearchFound" }
+      answers: { type: array, items: { $ref: "#/schemas/WebSearchAnswer" } }
+      infobox: { $ref: "#/schemas/WebSearchInfobox" }
+      suggestions: { type: array, items: { type: string } }
+      unresponsive:
+        type: array
+        description: The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA).
+        items: { type: string }
+      pending: { type: integer, minimum: 0, description: "The tab's engines still searching; 0 in the last update." }
+  WebSearchFound:
+    type: object
+    additionalProperties: false
+    required: [url, engines]
+    properties:
+      url: { type: string, format: uri }
+      engines: { type: array, items: { type: string } }
+  WebSearchPackage:
+    type: object
+    additionalProperties: false
+    required: [name, version, license]
+    properties:
+      name: { type: string }
+      version: { type: string }
+      license: { type: string, description: "The package's license as its metadata names it; empty when it names none." }
+  WebSearchLicense:
+    type: object
+    additionalProperties: false
+    required: [name, version, commit, license, packages, source]
+    properties:
+      name: { type: string }
+      version: { type: string, description: "SearXNG's own version, the commit's date and short hash." }
+      commit: { type: string, pattern: "^[0-9a-f]{40}$" }
+      license: { type: string, description: An SPDX expression. }
+      packages: { type: array, items: { $ref: "#/schemas/WebSearchPackage" } }
+      source: { type: boolean, description: This release can hand out SearXNG's source (getWebSearchSource). }
