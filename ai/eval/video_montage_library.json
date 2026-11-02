@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "about": "#326: ten instructions over video_moments_library.json, as a member might ask with that library, for timing the montage end to end (eval.video_pipeline cut) and looking at the cuts, not scoring them, so unlabelled. Some name one video, some span several (夜晚的城市, 大海, 这一年的旅行回顾).",
+  "instructions": [
+    {
+      "id": "noir",
+      "text": "这部侦探片的预告片"
+    },
+    {
+      "id": "edinburgh-day",
+      "text": "在爱丁堡逛一天"
+    },
+    {
+      "id": "castle",
+      "text": "城堡和老城的石头街道"
+    },
+    {
+      "id": "paris-landmarks",
+      "text": "巴黎的地标建筑"
+    },
+    {
+      "id": "eiffel-night",
+      "text": "夜晚的埃菲尔铁塔"
+    },
+    {
+      "id": "ships",
+      "text": "大帆船出海"
+    },
+    {
+      "id": "night-city",
+      "text": "夜晚的城市"
+    },
+    {
+      "id": "sea",
+      "text": "大海"
+    },
+    {
+      "id": "trip",
+      "text": "这一年的旅行回顾"
+    }
+  ]
+}

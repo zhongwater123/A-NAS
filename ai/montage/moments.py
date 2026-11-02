@@ -196,20 +196,25 @@ class Index:
         return pieces
 
     def catalog(self, videos=None) -> dict:
-        """What the library holds, for writing probes from (#326): every card of every video (or
-        of videos), in time order, as one line of its seconds, light and caption, with its
-        highlight. Cards with no caption say so; a vector alone cannot be read."""
+        """What the library holds, for writing a story and probes from (#326): every card of every
+        video (or of videos), in time order, as one line of its seconds and its shot's, light,
+        caption, highlight and flaws, enough to cut it without searching for it. Cards with no
+        caption say so; a vector alone cannot be read."""
         out = {}
         for card in self.cards:
             if videos is not None and card["video"] not in videos:
                 continue
             notes = self.notes.get(card["id"], {})
-            line = f"{card['id']} {card['start']:g}–{card['end']:g} 秒"
+            a, b = card["shot"]
+            line = f"{card['id']} {card['start']:g}–{card['end']:g} 秒（镜头 {round(a, 2):g}–{round(b, 2):g}）"
             if notes.get("light"):
                 line += f" {notes['light']}"
             line += " " + self.captions.get(card["id"], "（没有描述）")
             if notes.get("highlight"):
                 line += f"（亮点：{notes['highlight']}）"
+            flaws = self._looks(card["id"]).get("flaws")
+            if flaws:
+                line += f" 毛病：{'、'.join(flaws)}"
             entry = out.setdefault(card["video"], {"seconds": round(self.videos[card["video"]]["duration"], 1), "cards": []})
             entry["cards"].append(line)
         return {"videos": out}

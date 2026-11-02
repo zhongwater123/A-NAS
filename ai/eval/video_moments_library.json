@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "about": "#326: a member's library for timing the montage end to end (eval.video_pipeline) with one catalog across its videos: Edinburgh on foot, Paris, a noir short and tall ships at sea so far, the first four of ten; no queries, and only the layout the pilot recommends.",
+  "layouts": [
+    "2s1f"
+  ],
+  "videos": {
+    "07": {
+      "file": "07_edinburgh_walk.webm",
+      "sha256": "b0f6010d8cdbbc6758706ac6f3a12d767d5a603e4c839d7878944f94fac040a3",
+      "duration": 4020.321
+    },
+    "08": {
+      "file": "08_paris_city_of_lights.webm",
+      "sha256": "6b105bdece8ef36b78f3001427d2ea0aa1c5e58cba8c22f8706affa360ab6be6",
+      "duration": 1099.661
+    },
+    "11": {
+      "file": "11_meridian_4k_hdr.mp4",
+      "sha256": "e14ff5ab8ce4cc90269e8ed45babcf6e25d7a073b71438b3e7ffee5901a7177e",
+      "duration": 718.935
+    },
+    "12": {
+      "file": "12_sailing_ships_4k.webm",
+      "sha256": "fe6d54be10a4f75512cd2ef22c4576ea65c7f457cd5d20ea1c62cbd67d282a29",
+      "duration": 1607.861
+    }
+  },
+  "queries": []
+}

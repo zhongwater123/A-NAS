@@ -205,7 +205,11 @@ class MomentsTest(unittest.TestCase):
         self.index.notes = {"07-1-0": {"light": "晴天", "highlight": "塔楼"}}
         catalog = self.index.catalog()["videos"]["07"]
         self.assertEqual(catalog["seconds"], 50.0)
-        self.assertEqual(catalog["cards"][:2], ["07-0-0 0–8 秒 （没有描述）", "07-1-0 8–28 秒 晴天 山上的城堡（亮点：塔楼）"])
+        self.index.pictures = {"07-1-0": {"start": 8, "end": 28, "motion": "固定", "sharp": 900.0, "shake": 0.02,
+                                          "bright": 120.0, "clipped": 0.0}}
+        self.assertEqual(catalog["cards"][:1], ["07-0-0 0–8 秒（镜头 0–8） （没有描述）"])
+        self.assertEqual(self.index.catalog()["videos"]["07"]["cards"][1],
+                         "07-1-0 8–28 秒（镜头 8–48） 晴天 山上的城堡（亮点：塔楼） 毛病：抖动")
         self.assertEqual(self.index.catalog(["08"]), {"videos": {}})
 
     def test_search_ranks_cards_and_leaves_out_flat_frames(self):

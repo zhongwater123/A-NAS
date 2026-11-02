@@ -26,7 +26,7 @@ Claude Code 或 Hermes（云端模型）
 anas_mcp.py ── 只做转接
    ├─ search_photos、make_slideshow ──► 相册服务的助手套接字（按 UID 认人）
    │                                     → 照片视图 → FFmpeg（ai/montage/render.py）→ /nas/助手/视频
-   ├─ list_video_contents ──► videos_spike.py：库里每张卡片一行（秒数、光线、描述、亮点）
+   ├─ list_video_contents ──► videos_spike.py：库里每张卡片一行（秒数、镜头起止、光线、描述、亮点、毛病）
    ├─ search_video_moments ──► videos_spike.py：AI Worker 编码探针 → 窗口打分 → 镜头卡片（带本机视觉模型的描述）
    └─ make_montage ─────────► videos_spike.py：校验计划 → 本机视觉模型逐帧核对、收窄 → FFmpeg 剪切 → MP4 → /nas/助手/视频
 ```
@@ -45,9 +45,9 @@ anas_mcp.py ── 只做转接
 |---|---|---|
 | `search_photos` | `query`、`page` | 照片 ID、名称、图库、拍摄时间、标签、相册（[AI 助手](ai-assistant.md)的相册工具） |
 | `make_slideshow` | `photo_ids`（1–60 个，按出现顺序）、`seconds_per_photo`（1–10 秒，默认 3）、`crossfade`（默认否） | 成片路径、总时长、照片数 |
-| `list_video_contents` | `videos`（只列这些视频，可省略） | 每条视频的每张卡片按时间一行：卡片 id、起止秒数、光线、描述与亮点，供模型先看库里有什么再写检索词 |
+| `list_video_contents` | `videos`（只列这些视频，可省略）、`style`（体裁：预告片、旅行、回顾，可省略） | 每条视频的每张卡片按时间一行：卡片 id、起止秒数、所在镜头的起止、光线、描述、亮点与画面毛病，供模型先看库里有什么、写故事线和检索词；计划可以直接用目录里的卡片。给了 `style` 时附上这个体裁的剪法 `style_rules` |
 | `search_video_moments` | `probes`（1–8 条画面描述，指令里每个画面主题一条）、`each`（每条探针各取分数最高的几张，彼此不同组，默认 5，条数乘 `each` 不超过 40）、`videos`（只在这些视频里找，可省略）、`lights`（只要这些光线的卡片）、`words`（只要描述或亮点含其中一个词的卡片）、`when`（最多 4 条 `{is, not}`，只留更像 `is` 的窗口，如夜晚而不是白天） | 镜头卡片，`each` 按探针列出各自取到的卡片，一个主题的卡片不会被另一个主题的高分挤掉；每张带本机视觉模型的描述 `caption`、光线 `light`、亮点 `highlight`，量出来的运镜 `motion` 与画面毛病 `flaws`，以及分数参照 `threshold` |
-| `make_montage` | `segments`：按播放顺序的 `{card, start, end, shows, reason}`；`shows` 是这段要呈现指令里的什么，只用指令里的词，`reason` 是一句理由；`skipped`：检索到但没用上的每张卡片各一项 `{card, why}`，`why` 一句话写为什么不用，供复盘（2026-10-30 用户要求） | 成片路径、总时长、段数、按画面收窄的段（`trimmed`）与每段看到的画面（`seen`）；计划、落选理由、实际剪的秒数与核对结果存在成片旁的同名 JSON 里；计划不合规则或核对不过时逐条说明 |
+| `make_montage` | `segments`：按播放顺序的 `{card, start, end, shows, reason}`；`shows` 是这段要呈现指令里的什么，只用指令里的词，`reason` 是一句理由；`skipped`：检索到但没用上的每张卡片各一项 `{card, why}`，`why` 一句话写为什么不用，供复盘（2026-10-30 用户要求）；`style`：按哪个体裁剪的，随成片存档 | 成片路径、总时长、段数、按画面收窄的段（`trimmed`）与每段看到的画面（`seen`）；计划、落选理由、实际剪的秒数与核对结果存在成片旁的同名 JSON 里；计划不合规则或核对不过时逐条说明 |
 
 - 成片都是 1920×1080、30 fps 的 H.264 MP4，没有音轨，画面等比缩放并补黑边。照片的总时长是张数 × 每张秒数；视频的总时长是各段之和。
 - 文件名由工具生成，不覆盖已有文件；拼接失败时不留下半截文件。
@@ -68,7 +68,9 @@ anas_mcp.py ── 只做转接
   9. `skipped` 里每项是检索结果里的卡片、不在计划里、不重复，`why` 为 1–80 个字符。规则不检查是否列全了没用的卡片。
 - **出片前看画面**（[`look.py`](../../ai/montage/look.py)）：规则通过后，每段每 0.5 秒取一帧（短边 360 像素），逐帧问本机视觉模型“画面里有没有 shows”，先答有或没有再说一句画面是什么。小模型先描述再判断、或填 JSON 判定时更容易答“有”（14 张易错画面上分别对 8 张和 11 张，这种问法对 13 张）。取最长的连续符合段，中间允许 1 帧判错：短于 1.5 秒的段整次退回，说明画面实际是什么，请模型换卡片或删掉；其余段收窄到这一截再剪（入点出点精修）。同一段同一个 `shows` 只看一次，退回后重交的计划只看改了的段。
 - 选哪几段、每段多长、什么顺序由模型决定；规则只管能不能剪。工具说明另外要求（不强制）：成员说的时长是上限，切题的片段不够就剪短并说明，不为换画面或凑时长放进不切题的片段。
-- **先看目录再检索**：模型先用 `list_video_contents` 读库里每张卡片的描述，只为库里确实有的画面写检索词。只凭对指令的想象写检索词时，侦探片里 3 分钟的警局戏一张都没进候选（[#326](https://github.com/zhongwater123/A-NAS/issues/326)）。
+- **先看目录、写故事线，再检索**：模型先用 `list_video_contents` 读库里每张卡片的描述，在同一轮里先写一条故事线（成片的段落按播放顺序、每段一句内容和对应的大致秒数），再按故事线每段要的画面写检索词，不为故事线另调一次模型。只凭对指令的想象写检索词时，侦探片里 3 分钟的警局戏一张都没进候选（[#326](https://github.com/zhongwater123/A-NAS/issues/326)）。
+- **体裁**：不同体裁剪法差别大，成员可以先选体裁（预告片、旅行、回顾），不选时模型按指令判断，判断不出就不定。每个体裁只写通用的结构、收尾和节奏，例如预告片后半段不按时间顺序、用最有悬念的画面收尾、不交代结局；旅行按路线走、结尾落在安静的画面。只把选中的那一种剪法随目录交给模型，不为体裁多调一次模型。按时间顺序写的故事线会让预告片停在最后一个场景，木偶、手电筒、红发女子这些最有悬念的画面反而用不上（[#326](https://github.com/zhongwater123/A-NAS/issues/326)）。
+- **按故事线排段**：故事线是骨架，每段挑最有看点的画面，不必把每一步都交代；不要求每个检索主题都用上，搭不上故事线的整个不用；同一场景相邻的卡片可以连用，只有同组才算重复画面；`reason` 写这段属于故事线哪一段、为什么选它。早先要求“每处画面用一两段”时，模型把每个主题当成要填的格子，同场景的过渡镜头都按“同主题重复”删掉，成片在场景之间硬跳；改成要求逐段写怎么接上一段时，模型又偏向挑过渡镜头，丢了木偶、手电筒、红发女子这些最有悬念的画面。
 - **条件先筛、主题再排**：条件不和主题写进同一条检索词，否则向量只匹配其中一半，“夜晚的城市”找回的是白天的城市。光线用 `lights` 按本机视觉模型给的光线筛，描述里写得出的东西（雨、办公室）用 `words` 按描述筛，筛完再按探针排序；筛完没有卡片就是库里没有。“雨”这类素材少的主题只靠向量会混进分数相近的无关画面（太空镜头 0.66–0.67，真的雨 0.69）。地点、事件这类画面看不出的条件先确定视频，作 `videos`；`lights`、`words` 表达不了的才用 `when`。
 - **不用模型的规则版**：`moments.plan` 用同样的卡片做对照——过 `threshold` 的卡片按分数取，从最高分的窗口往两边扩，每段最多 6 秒，同一镜头里同一画面（余弦 ≥ 0.97）不重复，目标时长是上限，同一视频按时间排。给了 `look` 时每段先按得分最高的探针（有 `when` 时加上条件，如“夜晚的城市”）看画面：核对不过的卡片跳过、换下一张，其余收窄。
 
@@ -160,6 +162,16 @@ claude mcp add anas -e HERMES_SPIKE_NAME=video-montage-sbx -e DOCKER_CONTEXT=col
 
 重启视频检索替身（例如写了新描述）后，也要停掉成员的助手（`systemctl stop anas-assistant@alice`），它的命名空间里绑定的还是旧套接字。
 
+端到端并计时：[`eval.video_pipeline`](../../ai/eval/video_pipeline.py) 把上面的步骤串成两段，就是成员遇到的两段等待。`prepare` 依次抽帧、编码、建索引，再同时写描述、测运镜；`cut` 从收到一句指令开始计时，到成片拷出来为止，并分出规划模型与工具（出片前核对加渲染）各用了多久；把 `--instruction` 换成 `--instructions <指令文件>`，就逐条剪。`run` 两段连着做。每次的耗时追加到这组视频模型目录里的 `pipeline.json`。各步从缓存续跑，要测完整的预处理时间，就给这组视频另起一个集合文件，让它用新的缓存目录。`cut` 开始前会核对沙箱服务的是不是这组视频的索引。[`video_moments_library.json`](../../ai/eval/video_moments_library.json) 是计时用的库，要凑满十条视频，现在放了爱丁堡、巴黎、侦探短片和大帆船四条（共 124 分钟）；[`video_montage_library.json`](../../ai/eval/video_montage_library.json) 是它的九条指令，其中有的跨几条视频。在 Mac 上，AI Worker 的 Python 在 `anas` 虚拟机里：
+
+```bash
+cd ai
+python3 -m eval.video_pipeline --set eval/video_moments_earth_meridian.json run \
+  --python "colima ssh -p anas -- env ANAS_DATASETS=$HOME/A-NAS-datasets /home/$USER.guest/anas-ai/bin/python" \
+  --model ~/A-NAS-models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm \
+  --vision http://192.168.5.2:8090/v1/chat/completions --instruction 这部侦探片的预告片
+```
+
 评测（只在开发机上）：[`eval.video_planner`](../../ai/eval/video_planner.py) 让 Claude Code 只用两个视频工具为每条指令规划一次，记下调用过程与费用，并把成片与计划拷到缓存的 `montage-model3/`；[`eval.video_montage`](../../ai/eval/video_montage.py) 用 `rules` 剪规则版（加 `--vision` 是第三版，存到 `montage-rules3/`）、`score` 按 `video_montage.json` 的切题标注算各版本的指标；[`eval.video_judge`](../../ai/eval/video_judge.py) 让三个视觉模型评审（画面质量、切题、剪辑自然度，0–10 分）看每段每秒 1 帧打分，密钥从 `SILICONFLOW_API_KEY` 读。评审只用于公开的测试视频，产品里画面不出本机。
 
 测试随 `make ai-test` 运行：渲染测试需要 `ffmpeg` 与 `ffprobe`，镜头卡片与计划校验的测试需要 NumPy，运镜与画面毛病的测试需要 OpenCV，没有时跳过。
@@ -180,5 +192,5 @@ claude mcp add anas -e HERMES_SPIKE_NAME=video-montage-sbx -e DOCKER_CONTEXT=col
 - ADR：[0011 相册服务的专用身份](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[0024 每个成员一个沙箱化的 Hermes 智能体](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
 - 规格：[相册与本地智能检索](photo-library.md)、[相册视频](photo-video.md)、[AI 助手](ai-assistant.md)
 - 研究：[视频剪辑 baseline](../research/video-moment-retrieval.md)、[CutClaw 调研](../research/video-editing-cutclaw.md)、[FilmAgent 调研](../research/video-editing-filmagent.md)
-- 代码：[助手的 MCP 工具](../../ai/assistant-spike/anas_mcp.py)、[视频检索替身](../../ai/assistant-spike/videos_spike.py)、[原型沙箱](../../ai/assistant-spike/run.sh)、[以成员身份运行 MCP](../../ai/assistant-spike/mcp-as-member.sh)、[渲染](../../ai/montage/render.py)、[镜头卡片与计划校验](../../ai/montage/moments.py)、[本机视觉核对](../../ai/montage/look.py)、[运镜与画面毛病](../../ai/montage/picture.py)、[模型版评测](../../ai/eval/video_planner.py)、[索引](../../ai/eval/video_moments.py)
+- 代码：[助手的 MCP 工具](../../ai/assistant-spike/anas_mcp.py)、[视频检索替身](../../ai/assistant-spike/videos_spike.py)、[原型沙箱](../../ai/assistant-spike/run.sh)、[以成员身份运行 MCP](../../ai/assistant-spike/mcp-as-member.sh)、[渲染](../../ai/montage/render.py)、[镜头卡片与计划校验](../../ai/montage/moments.py)、[本机视觉核对](../../ai/montage/look.py)、[运镜与画面毛病](../../ai/montage/picture.py)、[模型版评测](../../ai/eval/video_planner.py)、[端到端计时](../../ai/eval/video_pipeline.py)、[索引](../../ai/eval/video_moments.py)
 - 测试：[`ai/tests/test_montage.py`](../../ai/tests/test_montage.py)

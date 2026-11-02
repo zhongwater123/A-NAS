@@ -27,6 +27,8 @@ from eval import video_moments as vm
 
 # No length is asked for: the cut is as long as the material that fits (#326).
 ASK = "用测试视频剪一段视频：{text}。"
+# The style a member picks before asking (anas_mcp.STYLES), said the way the app would say it.
+STYLE = "体裁：{}。"
 TOOLS = ("mcp__anas__list_video_contents", "mcp__anas__search_video_moments", "mcp__anas__make_montage")
 OTHER_TOOLS = ("browse_photos", "look_at_photo", "make_slideshow", "photo_details", "recent_changes", "search_photos",
                "similar_photos", "submit_changes")
@@ -42,7 +44,8 @@ def turn(instruction, container, model, log, pictures=False, screen=False):
         "env": {"HERMES_SPIKE_NAME": container, "DOCKER_CONTEXT": os.environ.get("DOCKER_CONTEXT", "colima-anas"),
                 "PATH": os.environ["PATH"]} | ({"ANAS_SPIKE_CARD_PICTURES": "1"} if pictures else {})
                 | ({"ANAS_SPIKE_CARD_SCREEN": "1"} if screen else {})}}}
-    command = ["claude", "-p", ASK.format(**instruction), "--mcp-config", json.dumps(config), "--strict-mcp-config",
+    ask = ASK.format(**instruction) + (STYLE.format(instruction["style"]) if instruction.get("style") else "")
+    command = ["claude", "-p", ask, "--mcp-config", json.dumps(config), "--strict-mcp-config",
                "--tools", "", "--allowedTools", *TOOLS, "--disallowedTools", *(f"mcp__anas__{t}" for t in OTHER_TOOLS),
                "--output-format", "stream-json", "--verbose",
                "--no-session-persistence", "--setting-sources", ""]
@@ -73,7 +76,8 @@ def turn(instruction, container, model, log, pictures=False, screen=False):
                 if made and not part.get("is_error"):
                     cut = made.group(1)
     final = next((e for e in reversed(events) if e.get("type") == "result"), {})
-    return {"seconds": round(time.monotonic() - began), "cost": final.get("total_cost_usd"), "calls": calls,
+    return {"seconds": round(time.monotonic() - began), "modelSeconds": round(final.get("duration_api_ms", 0) / 1000),
+            "cost": final.get("total_cost_usd"), "calls": calls,
             "refused": errors, "cut": cut, "answer": final.get("result", "")}
 
 
@@ -96,6 +100,7 @@ def main():
     parser.add_argument("--only", nargs="*", help="instruction ids, all by default")
     parser.add_argument("--pictures", action="store_true",
                         help="show the planner each card's key frames in place of its caption (an experiment)")
+    parser.add_argument("--style", help="the style the member picked for every instruction, the instructions' own otherwise")
     parser.add_argument("--screen", action="store_true",
                         help="hand the planner only the recalled cards the vision model passes (an experiment)")
     args = parser.parse_args()
@@ -112,6 +117,8 @@ def main():
     for instruction in instructions:
         if args.only and instruction["id"] not in args.only:
             continue
+        if args.style:
+            instruction = instruction | {"style": args.style}
         target = os.path.join(out, instruction["id"])
         done = turn(instruction, args.container, args.model, target + ".jsonl", args.pictures, args.screen)
         if done["cut"]:

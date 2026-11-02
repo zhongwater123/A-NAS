@@ -388,25 +388,44 @@ SCREENING = (
 TELLING = ("向成员介绍片段时只说你在图里和出片前核对看到的内容。" if CARD_PICTURES else
            "你看不到画面：向成员介绍片段时只说 caption 和出片前核对看到的内容，不要描述猜出来的细节。")
 
+# How each kind of cut is told (#326): structure, ending and pace, never a picture of one video.
+# The member picks one, or the model judges it from the instruction; only that one goes to the model.
+STYLES = {
+    "预告片": "前半段交代人物、地点和处境，按故事线走；后半段不必按时间顺序，挑最有悬念、最有冲击力的画面，越往后越紧；"
+              "最后一段用整支片子里最有悬念或最有冲击力的画面收尾，不交代结局；片头片尾字幕、演职员表不用。",
+    "旅行": "按时间或路线走；开头用一个能交代地点的全景；中间每处地方挑最有代表性的画面，远景、人和细节穿插；"
+            "结尾落在一个安静、有余味的画面上，如日落、远景、离开的背影。",
+    "回顾": "按主题或时间分成几组，每组挑最好的几个画面，同一组里由远到近或由静到动；"
+            "不必交代来龙去脉；结尾用最有情绪的一个画面。",
+}
+
 if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mode):
     @server.tool(annotations=READ_ONLY, structured_output=False, description=(
         "列出测试视频库里有什么，剪辑前先调用一次。按视频列出每张镜头卡片，按时间先后，每行是"
-        "“卡片 id 起止秒数 光线 描述（亮点：…）”；描述、光线和亮点是本机视觉模型看卡片的三帧写的，可能看错。"
-        "读完再写 search_video_moments 的检索词：只写库里确实有的画面，指令里每个能在库里找到的主题各写一条，"
-        "例如“这部侦探片的预告片”读到有警局办公室、海边、雨夜车里，就分别检索；库里没有的不要硬找。"
-        "videos：只列这些视频，可省略。"))
-    def list_video_contents(videos: list[str] | None = None):
+        "“卡片 id 起止秒数（所在镜头的起止）光线 描述（亮点：…）毛病：…”；描述、光线和亮点是本机视觉模型看卡片的三帧写的，可能看错；"
+        "镜头起止是剪这张卡片时不能越出的范围，毛病是量出来的（模糊、抖动、过暗、过曝），没有就不写。"
+        "读完先在回复里写一条故事线，再检索：按指令要的效果，把成片要有的段落按播放顺序列出来，每段一句内容、对应视频里的大致秒数，"
+        "例如侦探片预告写“1947 年洛杉矶街景开场（0–30 秒）→ 警局里交代案子（30–200 秒）→ 开车出发 → 雨夜车里出现神秘女人 → …”；"
+        "只放能讲进这条故事线的内容，和它搭不上的不用放。然后按故事线写 search_video_moments 的检索词，"
+        "每段要的画面各写一条，段落之间的过渡画面也算；库里没有的不要硬找。剪辑计划可以直接用目录里的卡片，不必为拿资料再检索。"
+        "videos：只列这些视频，可省略。"
+        "style：成片的体裁，" + "、".join(STYLES) + "之一；成员说了体裁就照说的传，没说就按指令判断，判断不出就不传。"
+        "结果的 style_rules 是这个体裁的剪法（结构、怎么收尾、节奏），写故事线和排段时照着做，并在 make_montage 里传同一个 style。"))
+    def list_video_contents(videos: list[str] | None = None, style: str | None = None):
+        if style is not None and style not in STYLES:
+            return CallToolResult(content=[TextContent(type="text", text=f"style 要是{'、'.join(STYLES)}之一，或不传")],
+                                  is_error=True)
         try:
             status, _kind, raw, _review = video_moments("/catalog", {"videos": videos} if videos else {})
         except PhotoError as error:
             return failed(error)
         if status != 200:
             return video_failed(status, raw)
-        return result(json.loads(raw))
+        return result(json.loads(raw) | ({"style": style, "style_rules": STYLES[style]} if style else {}))
 
     @server.tool(annotations=READ_ONLY, structured_output=False, description=(
         "按画面内容在测试视频里找片段，返回镜头卡片。先用 list_video_contents 看过库里有什么再检索。"
-        "probes：1–8 条要找的画面主题，每条一个主题、一句短描述，例如“城堡和老城的石头街道”写“城堡”“老城的石头街道”两条；"
+        "probes：1–8 条要找的画面，按你写的故事线每段要的画面各写一条，每条一个主题、一句短描述，例如“城堡和老城的石头街道”写“城堡”“老城的石头街道”两条；"
         "同一主题的近义说法找回的多是同一批卡片，不必多写。"
         "条件不要和主题写进同一条检索词：向量检索会只匹配其中一半，“夜晚的城市”会找回白天的城市。条件按下面分层，先筛再排："
         "lights：只要这些光线的卡片（晴天、阴天、逆光、黄昏、夜晚、室内），例如“夜晚的城市”写 probes [\"城市\"]、lights [\"夜晚\"]；"
@@ -422,7 +441,7 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         "light 是光线，highlight 是画面里最吸引人的一样东西，也是本机视觉模型看出来的；"
         "motion 是量出来的镜头运动（固定、向前走、向后退、向左转、向右转、抬头、低头）；"
         "flaws 是量出来的画面毛病（模糊、抖动、过暗、过曝），空表示没有。" +
-        CHOOSING + "同样切题时优先 flaws 为空的，"
+        CHOOSING + "同样切题时优先 flaws 为空的，但夜景、黑色电影这类本来就暗的画面，过暗和随之而来的抖动多半是有意的，看描述是不是要的画面再定，"
         "不选 highlight 是垃圾桶、遮挡物这类不好看的东西的，再看分数。"
         "when：lights 和 words 都表达不了、画面本身能看出的条件，每条是 {is, not}，只留更像 is 的画面，"
         "例如 {\"is\": \"人很多\", \"not\": \"空无一人\"}；比 lights、words 粗，能用它们时不用 when。" +
@@ -454,22 +473,25 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
     @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
                  structured_output=False, description=(
         "按剪辑计划把视频片段剪成一段 1920×1080、30 fps 的无声 MP4，存进助手目录的“视频”文件夹，返回文件路径与时长。"
-        "segments：按播放顺序排列，每段是 {card, start, end, shows, reason}：card 是 search_video_moments 返回的卡片 id，"
+        "segments：按播放顺序排列，每段是 {card, start, end, shows, reason}：card 是 list_video_contents 或 search_video_moments 里的卡片 id，"
         "start、end 是秒数，必须落在这张卡片的 shot 范围内，每段 1.5–6 秒，不能含纯黑或纯色画面，各段不能用同一段画面；"
         "成片总长不设上限。shows 写这段画面要呈现指令里的什么，只用指令里的词，如“湖上的小船”“夜晚的城市”，不超过 40 个字；"
         "不要写这段画面的细节或别的说法（“美食”就写“美食”，不写“美食,新鲜食材”），"
-        "地点这类画面看不出的条件也不要写进去（“新加坡的美食”写“美食”）。reason 用一句话写为什么选这段、为什么放在这个位置，随成片存档。"
-        "skipped：检索结果里每一张没用上的卡片各一项 {card, why}，why 用一句话写为什么不用"
+        "地点这类画面看不出的条件也不要写进去（“新加坡的美食”写“美食”）。reason 用一句话写这段属于故事线的哪一段、为什么选它，随成片存档。"
+        "skipped：检索结果里每一张没用上的卡片各一项 {card, why}，why 用一句话写为什么不用；直接从目录取卡片时只列考虑过但没用的卡片，"
+        "card 写具体的卡片 id，不写通配或整条视频"
         "（例如“描述是城市俯瞰，没有城堡”“flaws 有抖动”“和第 2 段同组”），不超过 80 个字，随成片存档供复盘；没有就给空列表。"
-        "成片多长由切题的素材决定：切题、不重复、好看的片段都可以用上，素材少就短；素材多时可以剪到一分钟左右，每处画面用一两段，不要只挑三五段就停；不为凑时长放进不切题的片段，"
+        "按故事线排段：故事线是骨架，每段挑最有看点的画面，不必把每一步都交代；不必每个检索主题都用上，和故事线搭不上的整个不用；"
+        "同一场景相邻的几张卡片可以连着用，只有 group 相同才算重复画面。成片多长由故事线和切题的素材决定，素材少就短，不为凑时长放进不切题的片段，"
         "开场和铺垫镜头也要切题；成员明确说了时长时才按成员说的剪；"
         "出片前本机视觉模型每 0.5 秒看一帧，核对是否呈现 shows：没有连续 1.5 秒符合的段整次退回，说明画面实际是什么，"
         "请换一张卡片或删掉这段；其余各段收窄到符合的那一截再剪，结果的 trimmed 列出收窄了哪些段。"
         "被退回或收窄的段，看到的画面若符合指令的另一部分（例如找城堡时退回的一段其实是老街），"
         "可以把它的 shows 改成那一部分、换到合适的位置再用，不必扔掉。"
         "计划不合规则时整次拒绝并逐条说明是哪一段、哪一条，照着改了再调用。成片只在助手目录里；"
-        "成员要放进个人空间时，再用 submit_changes 的 copy 提交。"))
-    def make_montage(segments: list[dict], skipped: list[dict]):
+        "成员要放进个人空间时，再用 submit_changes 的 copy 提交。"
+        "style：按哪个体裁剪的，和 list_video_contents 传的一样，随成片存档；没定体裁就不传。"))
+    def make_montage(segments: list[dict], skipped: list[dict], style: str | None = None):
         try:
             status, kind, raw, review = video_moments("/montage", {"segments": segments, "skipped": skipped})
         except PhotoError as error:
@@ -487,7 +509,7 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         cut = [segment | {"start": r["start"], "end": r["end"]} for segment, r in zip(segments, review, strict=True)]
         cut = cut or segments
         with os.fdopen(os.open(path[:-4] + ".json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644), "w") as file:
-            json.dump({"planned": segments, "segments": cut, "review": review, "skipped": skipped}, file,
+            json.dump({"style": style, "planned": segments, "segments": cut, "review": review, "skipped": skipped}, file,
                       ensure_ascii=False, indent=2)
         trimmed = [{"segment": n, "planned": [s["start"], s["end"]], "cut": [c["start"], c["end"]], "seen": r["seen"]}
                    for n, (s, c, r) in enumerate(zip(segments, cut, review, strict=True), 1)
