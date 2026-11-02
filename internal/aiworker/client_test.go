@@ -2,6 +2,7 @@ package aiworker_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -277,5 +278,75 @@ func TestCancellingADetectionHangsUp(t *testing.T) {
 	case <-hungUp:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the Worker never saw the client hang up")
+	}
+}
+
+func TestReadingTextCrossesTheSocket(t *testing.T) {
+	var mu sync.Mutex
+	var requests []aiworker.Request
+	socket := aiworkertest.Serve(t, func(request aiworker.Request, file *os.File) *aiworker.Response {
+		switch request.Op {
+		case aiworker.OpInfo:
+			return &aiworker.Response{OK: true, Model: "fake-1", Dimensions: 2, MemoryBytes: 1 << 30,
+				OCRModel: "reader-1", OCRMemoryBytes: 4 << 30}
+		case aiworker.OpReadText:
+			if file == nil {
+				return nil
+			}
+			mu.Lock()
+			requests = append(requests, request)
+			mu.Unlock()
+			content, _ := io.ReadAll(file)
+			return &aiworker.Response{OK: true, Model: "reader-1", Reading: &aiworker.WireReading{
+				Text: string(content), Finish: "stop",
+				Logprobs: []aiworker.WireTokenProb{{Token: "回", LogProb: -0.25}, {Token: "单", LogProb: 0}},
+			}}
+		}
+		return nil
+	})
+	client := aiworker.Client{SocketPath: socket}
+	info, err := client.Info(context.Background())
+	if err != nil || info.OCR != "reader-1" || info.OCRMemoryBytes != 4<<30 || info.MemoryBytes != 1<<30 {
+		t.Fatalf("Info() = %+v, %v; want the reader and its memory apart from the other models'", info, err)
+	}
+	path := filepath.Join(t.TempDir(), "receipt.jpg")
+	if err := os.WriteFile(path, []byte("回单"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, schema := range []json.RawMessage{nil, json.RawMessage(`{"金额":""}`)} {
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		model, reading, err := client.ReadText(context.Background(), file, schema)
+		_ = file.Close()
+		want := photos.Reading{Text: "回单", Finish: "stop", Tokens: []photos.TokenProb{{Token: "回", LogProb: -0.25}, {Token: "单"}}}
+		if err != nil || model != "reader-1" || reading.Text != want.Text || reading.Finish != want.Finish ||
+			!slices.Equal(reading.Tokens, want.Tokens) {
+			t.Fatalf("ReadText(%s) = %q, %+v, %v; want %+v", schema, model, reading, err, want)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) != 2 || requests[0].Kind != "text" || requests[0].Schema != nil ||
+		requests[1].Kind != "fields" || string(requests[1].Schema) != `{"金额":""}` {
+		t.Fatalf("the Worker received %+v; want a text reading, then the fields of the schema", requests)
+	}
+}
+
+func TestATokenIsATokenAndItsLogProbability(t *testing.T) {
+	var reading aiworker.WireReading
+	if err := json.Unmarshal([]byte(`{"text":"回","logprobs":[["回",-0.5]],"finish":"stop"}`), &reading); err != nil ||
+		len(reading.Logprobs) != 1 || reading.Logprobs[0] != (aiworker.WireTokenProb{Token: "回", LogProb: -0.5}) {
+		t.Fatalf("Unmarshal() = %+v, %v", reading, err)
+	}
+	encoded, err := json.Marshal(reading.Logprobs)
+	if err != nil || string(encoded) != `[["回",-0.5]]` {
+		t.Fatalf("Marshal() = %s, %v", encoded, err)
+	}
+	for _, bad := range []string{`[["回"]]`, `[["回",-0.5,1]]`, `[[-0.5,"回"]]`, `[{"token":"回"}]`} {
+		if err := json.Unmarshal([]byte(bad), &reading.Logprobs); err == nil {
+			t.Errorf("Unmarshal(%s) succeeded", bad)
+		}
 	}
 }

@@ -55,8 +55,10 @@ done
 # and manifests that pin its models and Python runtime by content. Each model
 # has a role: its manifest is ai/ROLE.json and the release links its file as
 # ai/ROLE.EXTENSION, where the Worker's unit looks for it.
-ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx)
-for file in anas-system.slice anas-ai-system.socket anas-ai-system.service ai/anas_ai/worker.py ai/runtime.json; do
+ai_roles=(model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf)
+# The text reader's llama-server (docs/architecture/photo-ocr.md) is pinned
+# by ai/llama.json and kept like Qdrant below.
+for file in anas-system.slice anas-ai-system.socket anas-ai-system.service ai/anas_ai/worker.py ai/runtime.json ai/llama.json; do
   if [[ ! -f "$source_release/$file" ]]; then
     echo "missing local AI file: $source_release/$file" >&2
     exit 2
@@ -89,9 +91,13 @@ if [[ ! -x /usr/lib/systemd/systemd-socket-proxyd ]]; then
   echo "missing required host command: /usr/lib/systemd/systemd-socket-proxyd" >&2
   exit 3
 fi
-# MediaPipe links these even on the CPU (Debian packages libegl1 and libgles2).
-for library in libEGL.so.1 libGLESv2.so.2; do
-  if ! ldconfig -p | grep -Fq "$library ("; then
+# MediaPipe links these even on the CPU (Debian packages libegl1 and libgles2),
+# and llama-server these (libgomp1, libssl3t64). The cache is read once: with
+# pipefail, grep -q leaving early can end ldconfig with SIGPIPE, which then
+# reads as a missing library.
+host_libraries=$(ldconfig -p)
+for library in libEGL.so.1 libGLESv2.so.2 libgomp.so.1 libssl.so.3 libcrypto.so.3; do
+  if ! grep -Fq "$library (" <<<"$host_libraries"; then
     echo "missing required host library: $library" >&2
     exit 3
   fi
@@ -151,6 +157,31 @@ fi
 qdrant_path=/opt/a-nas/qdrant/$qdrant_sha/qdrant
 if [[ ! -f "$qdrant_path" && ! -f "$source_release/vectors/qdrant.tar.gz" ]]; then
   echo "missing Qdrant: neither $qdrant_path nor $source_release/vectors/qdrant.tar.gz" >&2
+  exit 2
+fi
+# So is llama.cpp: only the members its manifest names, llama-server with
+# its libraries and licence, are kept, together under the tarball's SHA-256.
+llama_sha=$(manifest_field "$source_release/ai/llama.json" sha256)
+llama_size=$(manifest_field "$source_release/ai/llama.json" sizeBytes)
+llama_directory=$(manifest_field "$source_release/ai/llama.json" directory)
+llama_binary=$(manifest_field "$source_release/ai/llama.json" binary)
+mapfile -t llama_members < <(python3 -c 'import json, sys; print("\n".join(json.load(open(sys.argv[1], encoding="utf-8"))["members"]))' \
+  "$source_release/ai/llama.json")
+if [[ ! "$llama_sha" =~ ^[0-9a-f]{64}$ || ! "$llama_size" =~ ^[0-9]+$ ||
+  ! "$llama_directory" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ || ! "$llama_binary" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ||
+  ${#llama_members[@]} -eq 0 ]]; then
+  echo "invalid llama.cpp manifest: $source_release/ai/llama.json" >&2
+  exit 2
+fi
+for member in "${llama_members[@]}"; do
+  if [[ ! "$member" =~ ^[A-Za-z0-9][A-Za-z0-9._*-]*$ ]]; then
+    echo "invalid llama.cpp manifest: $source_release/ai/llama.json" >&2
+    exit 2
+  fi
+done
+llama_path=/opt/a-nas/llama/$llama_sha
+if [[ ! -f "$llama_path/$llama_binary" && ! -f "$source_release/ai/llama.tar.gz" ]]; then
+  echo "missing llama.cpp: neither $llama_path nor $source_release/ai/llama.tar.gz" >&2
   exit 2
 fi
 # The LAN Web entry is optional: installing Caddy enables it (ADR 0012).
@@ -258,7 +289,7 @@ install -d -o root -g a-nas -m 0750 /etc/a-nas
 install -d -o root -g root -m 0755 /etc/samba
 install -d -o root -g root -m 0755 /etc/chromium /etc/chromium/policies /etc/chromium/policies/managed
 install -d -o root -g root -m 0755 /var/lib/samba /run/samba
-install -d -o root -g root -m 0755 /opt/a-nas/models /opt/a-nas/ai-runtimes /opt/a-nas/qdrant
+install -d -o root -g root -m 0755 /opt/a-nas/models /opt/a-nas/ai-runtimes /opt/a-nas/qdrant /opt/a-nas/llama
 
 # Staged content is copied before it is checked, so the staging account cannot
 # change it after the check.
@@ -310,6 +341,22 @@ if [[ ! -f "$qdrant_path" ]]; then
   mv -T -- "$incoming" "/opt/a-nas/qdrant/$qdrant_sha"
   incoming=
 fi
+if [[ ! -f "$llama_path/$llama_binary" ]]; then
+  incoming=$(mktemp -d /opt/a-nas/llama/.incoming-XXXXXX)
+  cp -- "$source_release/ai/llama.tar.gz" "$incoming.tar.gz"
+  if [[ "$(stat -c %s "$incoming.tar.gz")" != "$llama_size" ]] ||
+    ! printf '%s  %s\n' "$llama_sha" "$incoming.tar.gz" | sha256sum --check --quiet - >/dev/null 2>&1; then
+    echo "the staged llama.cpp does not match its manifest: $source_release/ai/llama.tar.gz" >&2
+    exit 4
+  fi
+  tar -C "$incoming" --no-same-owner --strip-components=1 -xzf "$incoming.tar.gz" --wildcards \
+    "${llama_members[@]/#/$llama_directory/}"
+  rm -f -- "$incoming.tar.gz"
+  chmod -R u=rwX,go=rX "$incoming"
+  chmod 0755 "$incoming/$llama_binary"
+  mv -T -- "$incoming" "$llama_path"
+  incoming=
+fi
 trap - EXIT
 
 target="/opt/a-nas/releases/$release_id"
@@ -334,6 +381,8 @@ for role in "${ai_roles[@]}"; do
   ln -s -- "${model_path[$name]}" "$temporary/ai/$name.${role#*:}"
 done
 ln -s -- "$runtime_path" "$temporary/ai/runtime"
+install -o root -g root -m 0644 "$source_release/ai/llama.json" "$temporary/ai/"
+ln -s -- "$llama_path" "$temporary/ai/llama"
 install -d -o root -g root -m 0755 "$temporary/vectors"
 install -o root -g root -m 0644 "$source_release/vectors/qdrant.json" "$source_release/vectors/config.yaml" "$temporary/vectors/"
 install -o root -g root -m 0755 "$source_release/vectors/start.sh" "$source_release/vectors/wait-ready.sh" "$temporary/vectors/"

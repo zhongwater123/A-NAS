@@ -7,16 +7,17 @@ After=anas-ai.socket
 [Service]
 Type=simple
 # Turns thumbnails the photo service passes as descriptors, and search text,
-# into vectors, and finds the things and faces in photos. It has no network and no data
+# into vectors, finds the things and faces in photos, and reads their text
+# through a llama-server child on a UNIX socket. It has no network and no data
 # volume, so photos cannot leave the device through it (ADR 0011, ADR 0016);
 # the system test proves both.
 User=a-nas-ai
 DynamicUser=true
-# The installer links the release's runtime and models to the copies it keeps
-# once per content under /opt/a-nas.
+# The installer links the release's runtime, models and llama.cpp to the
+# copies it keeps once per content under /opt/a-nas.
 Environment=PYTHONPATH=/opt/a-nas/current/ai
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --model /opt/a-nas/current/ai/model.litertlm --manifest /opt/a-nas/current/ai/model.json --cache-dir /var/cache/a-nas-ai --detector /opt/a-nas/current/ai/detector.onnx --detector-manifest /opt/a-nas/current/ai/detector.json --face-detector /opt/a-nas/current/ai/face-detector.onnx --face-detector-manifest /opt/a-nas/current/ai/face-detector.json --face-embedder /opt/a-nas/current/ai/face-embedder.onnx --face-embedder-manifest /opt/a-nas/current/ai/face-embedder.json --animal-embedder /opt/a-nas/current/ai/animal-embedder.onnx --animal-embedder-manifest /opt/a-nas/current/ai/animal-embedder.json
+ExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --model /opt/a-nas/current/ai/model.litertlm --manifest /opt/a-nas/current/ai/model.json --cache-dir /var/cache/a-nas-ai --detector /opt/a-nas/current/ai/detector.onnx --detector-manifest /opt/a-nas/current/ai/detector.json --face-detector /opt/a-nas/current/ai/face-detector.onnx --face-detector-manifest /opt/a-nas/current/ai/face-detector.json --face-embedder /opt/a-nas/current/ai/face-embedder.onnx --face-embedder-manifest /opt/a-nas/current/ai/face-embedder.json --animal-embedder /opt/a-nas/current/ai/animal-embedder.onnx --animal-embedder-manifest /opt/a-nas/current/ai/animal-embedder.json --ocr-server /opt/a-nas/current/ai/llama/llama-server --ocr-runtime-manifest /opt/a-nas/current/ai/llama.json --ocr-model /opt/a-nas/current/ai/ocr-model.gguf --ocr-model-manifest /opt/a-nas/current/ai/ocr-model.json --ocr-mmproj /opt/a-nas/current/ai/ocr-mmproj.gguf --ocr-mmproj-manifest /opt/a-nas/current/ai/ocr-mmproj.json
 # XNNPack keeps repacked weights here so later starts load faster.
 CacheDirectory=a-nas-ai
 CacheDirectoryMode=0700
