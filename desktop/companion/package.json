@@ -8,8 +8,8 @@
     "start": "electron .",
     "test": "node --test policy.test.cjs",
     "smoke": "node smoke.cjs",
-    "package:mac": "electron-packager . A-NAS-Companion --platform=darwin --arch=arm64 --out=build --overwrite --ignore='build|node_modules/.cache'",
-    "package:win": "electron-packager . A-NAS-Companion --platform=win32 --arch=x64 --out=build --overwrite --ignore='build|node_modules/.cache'",
+    "package:mac": "electron-packager . A-NAS-Companion --platform=darwin --arch=arm64 --out=build --overwrite --ignore=\"build|node_modules/.cache\"",
+    "package:win": "electron-packager . A-NAS-Companion --platform=win32 --arch=x64 --out=build --overwrite --ignore=\"build|node_modules/.cache\"",
     "smoke:handoff": "node handoff-smoke.cjs",
     "smoke:tasks": "node task-smoke.cjs"
   },
