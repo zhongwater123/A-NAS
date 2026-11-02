@@ -153,6 +153,10 @@ func TestVectorIndexMigrationCanBeUndone(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		// Migration 15 first, as docs/architecture/photo-ocr.md#交付 says.
+		"DROP TABLE text_corrections",
+		"DROP TABLE texts",
+		"ALTER TABLE libraries DROP COLUMN texts",
 		"DROP TRIGGER embeddings_vector_outbox_insert",
 		"DROP TRIGGER embeddings_vector_outbox_update",
 		"DROP TRIGGER embeddings_vector_outbox_delete",

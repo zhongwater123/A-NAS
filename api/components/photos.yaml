@@ -17,7 +17,8 @@ schemas:
       ownerName: { type: string }
       createdAt: { type: string, format: date-time }
       people: { type: boolean, description: Whether the library recognises people and pets. }
-      canSetPeople: { type: boolean, description: "Whether the caller may turn people and pets on or off: the owner of a private library, an administrator for the shared library." }
+      texts: { type: boolean, description: Whether the library reads the text in photos (documents, receipts, cards, screenshots). }
+      canSetPeople: { type: boolean, description: "Whether the caller may turn people and pets, and reading text, on or off: the owner of a private library, an administrator for the shared library." }
       viewing:
         description: Present when the caller sees this member library only through Administrative Viewing Mode; access is read-only.
         type: object

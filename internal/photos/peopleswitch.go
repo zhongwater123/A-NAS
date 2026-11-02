@@ -100,9 +100,7 @@ func (s *Service) SetPeople(ctx context.Context, p Principal, libraryID string, 
 		}
 		s.ai.wakeUp()
 	}
-	public := publicLibrary(p, lib, s.now())
-	public.People, public.CanSetPeople = on, true
-	return public, nil
+	return s.publicSwitches(ctx, p, lib)
 }
 
 // enqueueLibraryFaces queues the face scan of every photo of a library that
@@ -156,7 +154,8 @@ func (s *Service) clearPeople(ctx context.Context, tx *sql.Tx, libraryID string)
 		`UPDATE occurrences SET vector = X'', landmarks = NULL WHERE object_id IN (` + gone + `) AND (
   id IN (SELECT occurrence_id FROM person_occurrences) OR id IN (SELECT occurrence_id FROM occurrence_rejections))`,
 		"DELETE FROM occurrences WHERE length(vector) > 0 AND object_id IN (" + gone + ")",
-		"DELETE FROM scans WHERE object_id IN (" + gone + ")",
+		// Only the face and pet scans: a text reading is no person's.
+		"DELETE FROM scans WHERE derivation IN ('" + facesDerivation + "', '" + petsDerivation + "') AND object_id IN (" + gone + ")",
 		"DELETE FROM jobs WHERE derivation IN ('" + facesDerivation + "', '" + petsDerivation + "') AND object_id IN (" + gone + ")",
 		"DELETE FROM derived_files WHERE derivation IN ('" + facesDerivation + "', '" + petsDerivation + "') AND object_id IN (" + gone + ")",
 		// Nameless people nobody confirmed or hid were only ever derived.

@@ -56,14 +56,18 @@ func (s *Service) Libraries(ctx context.Context, p Principal) ([]Library, error)
 	return s.withPeople(ctx, p, libraries, read)
 }
 
-// withPeople fills in each library's people switch and whether p may set it.
+// withPeople fills in each library's AI switches and whether p may set them.
 func (s *Service) withPeople(ctx context.Context, p Principal, libraries []Library, read map[string]library) ([]Library, error) {
 	for i := range libraries {
 		on, err := peopleOn(ctx, s.db, libraries[i].ID)
 		if err != nil {
 			return nil, err
 		}
-		libraries[i].People, libraries[i].CanSetPeople = on, canSetPeople(p, read[libraries[i].ID])
+		texts, err := textsOn(ctx, s.db, libraries[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		libraries[i].People, libraries[i].Texts, libraries[i].CanSetPeople = on, texts, canSetPeople(p, read[libraries[i].ID])
 	}
 	return libraries, nil
 }

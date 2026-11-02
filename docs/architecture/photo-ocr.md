@@ -280,6 +280,16 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
   - 挂断后子进程停止生成；
   - `release` 后子进程退出。
   - 真实模型的运行由环境变量指定模型文件，与现有模型相同。
+- **回退**：目录库的第 15 号迁移加了读文字的表与图库开关。没有这一迁移的旧版本拒绝打开更新的目录库，所以退回步骤 3 之前的版本时，先停相册服务，在目录库上执行下面的语句，再按[启用向量索引的回退](../runbooks/enable-vector-index.md#回退)继续（如还要退到向量索引之前）。已读的文字与用户更正一并删除。
+
+  ```sql
+  DROP TABLE text_corrections;
+  DROP TABLE texts;
+  ALTER TABLE libraries DROP COLUMN texts;
+  DELETE FROM jobs WHERE derivation = 'ocr/v1';
+  DELETE FROM scans WHERE derivation = 'ocr/v1';
+  PRAGMA user_version = 14;
+  ```
 
 ## 步骤
 

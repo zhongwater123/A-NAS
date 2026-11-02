@@ -89,9 +89,11 @@ type Library struct {
 	// Viewing is set when the caller sees another member's private library
 	// only through Administrative Viewing Mode; access is read-only.
 	Viewing *LibraryViewing `json:"viewing,omitempty"`
-	// People says whether the library recognises people and pets, and
-	// CanSetPeople whether the caller may turn that on or off.
+	// People says whether the library recognises people and pets, Texts
+	// whether it reads the text in photos, and CanSetPeople whether the
+	// caller may turn either on or off.
 	People       bool `json:"people"`
+	Texts        bool `json:"texts"`
 	CanSetPeople bool `json:"canSetPeople"`
 }
 

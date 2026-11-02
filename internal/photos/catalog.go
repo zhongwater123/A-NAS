@@ -358,6 +358,35 @@ BEGIN
     ON CONFLICT(object_id) DO UPDATE SET version = version + 1;
 END;
 `,
+	// 15: the text read from photos (docs/architecture/photo-ocr.md). A
+	// reading is derived, one per content object that copies share: its
+	// document type, its whole text, and its fields with their checks as
+	// JSON. What members correct is user data per library and object; it
+	// stays when the library turns reading off and when a new model reads
+	// again. Each library can turn reading off, as with people.
+	`
+ALTER TABLE libraries ADD COLUMN texts INTEGER NOT NULL DEFAULT 1;
+
+CREATE TABLE texts (
+    object_id TEXT PRIMARY KEY REFERENCES objects(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    text TEXT NOT NULL,
+    fields TEXT NOT NULL,
+    checks TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE text_corrections (
+    library_id TEXT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    field TEXT NOT NULL,
+    value TEXT NOT NULL,
+    account TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (library_id, object_id, field)
+);
+`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {
