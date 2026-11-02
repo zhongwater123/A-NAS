@@ -31,6 +31,11 @@ param(
     # (docs/architecture/photo-people.md#宠物).
     [string]$AnimalEmbedderDirectory = 'D:\A-NAS-models\pets\dinov2-small',
 
+    # Where the text reader's language model and vision encoder, which
+    # deploy\models\qwen3.5-4b-q4_k_m.json and qwen3.5-4b-mmproj-f16.json pin,
+    # live as converted by ai\eval\ocr_models.sh (docs/architecture/photo-ocr.md).
+    [string]$OcrDirectory = 'D:\A-NAS-models\ocr\qwen3.5-4b',
+
     [switch]$StageOnly
 )
 
@@ -118,12 +123,16 @@ try {
     $faceDetectorManifestPath = Join-Path $repoRoot 'deploy\models\yunet-2026may.json'
     $faceEmbedderManifestPath = Join-Path $repoRoot 'deploy\models\auraface-v1.json'
     $animalEmbedderManifestPath = Join-Path $repoRoot 'deploy\models\dinov2-small.json'
+    $ocrModelManifestPath = Join-Path $repoRoot 'deploy\models\qwen3.5-4b-q4_k_m.json'
+    $ocrMmprojManifestPath = Join-Path $repoRoot 'deploy\models\qwen3.5-4b-mmproj-f16.json'
     $models = @(
         @{ Manifest = $modelManifestPath; Directory = $ModelDirectory },
         @{ Manifest = $detectorManifestPath; Directory = $DetectorDirectory },
         @{ Manifest = $faceDetectorManifestPath; Directory = $FaceDetectorDirectory },
         @{ Manifest = $faceEmbedderManifestPath; Directory = $FaceEmbedderDirectory },
-        @{ Manifest = $animalEmbedderManifestPath; Directory = $AnimalEmbedderDirectory }
+        @{ Manifest = $animalEmbedderManifestPath; Directory = $AnimalEmbedderDirectory },
+        @{ Manifest = $ocrModelManifestPath; Directory = $OcrDirectory },
+        @{ Manifest = $ocrMmprojManifestPath; Directory = $OcrDirectory }
     )
     foreach ($model in $models) {
         $model.Pinned = Get-Content -LiteralPath $model.Manifest -Raw | ConvertFrom-Json
@@ -154,6 +163,17 @@ try {
     }
     if ((Get-FileHash -LiteralPath $qdrantPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $qdrant.sha256) {
         throw "Qdrant does not match its manifest: $qdrantPath"
+    }
+    # So does the text reader's llama.cpp: scripts/fetch-llama.sh keeps the
+    # tarball its manifest pins.
+    $llamaManifestPath = Join-Path $repoRoot 'deploy\llama\llama.json'
+    $llama = Get-Content -LiteralPath $llamaManifestPath -Raw | ConvertFrom-Json
+    $llamaPath = Join-Path $repoRoot "build\llama\$($llama.sha256)\$($llama.file)"
+    if (-not (Test-Path -LiteralPath $llamaPath -PathType Leaf)) {
+        throw 'Missing the pinned llama.cpp: run scripts/fetch-llama.sh in WSL first.'
+    }
+    if ((Get-FileHash -LiteralPath $llamaPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $llama.sha256) {
+        throw "llama.cpp does not match its manifest: $llamaPath"
     }
     $workerArchive = Join-Path $repoRoot 'build\ai-worker.tar'
     & git -c $gitSafeDirectory archive --format=tar -o $workerArchive HEAD ai/anas_ai
@@ -192,6 +212,7 @@ try {
     }
     Send-StagedContent $runtimePath 'apps/a-nas/ai-runtimes' $runtimeManifest.file $runtimeManifest.sha256
     Send-StagedContent $qdrantPath "apps/a-nas/qdrant/$($qdrant.sha256)" $qdrant.file $qdrant.sha256
+    Send-StagedContent $llamaPath "apps/a-nas/llama/$($llama.sha256)" $llama.file $llama.sha256
 
     $uploads = @(
         @{ Source = $apiBinary; Destination = "${target}:$release/anas-api.incoming" },
@@ -223,7 +244,10 @@ try {
         @{ Source = $faceDetectorManifestPath; Destination = "${target}:$release/ai-face-detector.json.incoming" },
         @{ Source = $faceEmbedderManifestPath; Destination = "${target}:$release/ai-face-embedder.json.incoming" },
         @{ Source = $animalEmbedderManifestPath; Destination = "${target}:$release/ai-animal-embedder.json.incoming" },
+        @{ Source = $ocrModelManifestPath; Destination = "${target}:$release/ai-ocr-model.json.incoming" },
+        @{ Source = $ocrMmprojManifestPath; Destination = "${target}:$release/ai-ocr-mmproj.json.incoming" },
         @{ Source = $runtimeManifestPath; Destination = "${target}:$release/ai-runtime.json.incoming" },
+        @{ Source = $llamaManifestPath; Destination = "${target}:$release/ai-llama.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-v1.0.1-system-services.sh'); Destination = "${target}:$release/install-v1.0.1-system-services.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\provision-v1.0.1-rc.sh'); Destination = "${target}:$release/provision-v1.0.1-rc.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-screensavers.sh'); Destination = "${target}:$release/install-screensavers.sh.incoming" },

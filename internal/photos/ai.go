@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"math"
 	"os"
@@ -45,6 +46,14 @@ type EmbedderInfo struct {
 	// loaded, its own start included, or 0 when it does not say. Background
 	// work loads models only while memory allows (Gate).
 	MemoryBytes uint64
+	// OCR names the text reader in the same way, or is empty when the
+	// Worker has none it can use.
+	OCR string
+	// OCRMemoryBytes is what the Worker holds while it reads text, its own
+	// start included. Reading is a phase of its own, after the other models
+	// are released, so this is not added to MemoryBytes
+	// (docs/architecture/photo-ocr.md#资源策略).
+	OCRMemoryBytes uint64
 }
 
 // Detector is the AI Worker's object detector
@@ -56,6 +65,35 @@ type Detector interface {
 	DetectObjects(ctx context.Context, image *os.File) (string, []Box, error)
 	// Release frees the detector's memory, or with all, the Worker's.
 	Release(ctx context.Context, all bool) error
+}
+
+// TextReader is the AI Worker's text reader (docs/architecture/photo-ocr.md).
+// An Embedder that is also a TextReader reads the text in photos while its
+// Info names a text reader.
+type TextReader interface {
+	// ReadText reads an upright image: its whole text, or with schema, a
+	// JSON object whose empty values the model fills, its fields. It returns
+	// the reader's model and the reading. Cancelling ctx stops the reading
+	// in the Worker.
+	ReadText(ctx context.Context, image *os.File, schema json.RawMessage) (string, Reading, error)
+}
+
+// Reading is what the text reader answered.
+type Reading struct {
+	// Text is the answer: the text, or the fields as JSON.
+	Text string
+	// Tokens are the answer's tokens with their log probabilities, which
+	// show where the model was unsure.
+	Tokens []TokenProb
+	// Finish says why the answer ended: "stop", "length" when it reached the
+	// length limit, or "repetition" when it fell into a loop.
+	Finish string
+}
+
+// TokenProb is one token of an answer and its log probability.
+type TokenProb struct {
+	Token   string
+	LogProb float64
 }
 
 // FaceDetector is the AI Worker's face models

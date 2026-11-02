@@ -21,9 +21,12 @@
 # fake providers. With ANAS_SYSTEM_TEST_AI=real, after
 # scripts/build-ai-runtime.sh and with ANAS_AI_MODEL and ANAS_AI_DETECTOR
 # naming the model and detector files, ANAS_AI_FACES the directory holding
-# the face models (yunet/, sface/ and auraface/, as D:\A-NAS-models\faces) and
+# the face models (yunet/, sface/ and auraface/, as D:\A-NAS-models\faces),
 # ANAS_AI_PETS the one holding the animal model (dinov2-small/, as
-# D:\A-NAS-models\pets), it installs the real runtime and models instead.
+# D:\A-NAS-models\pets) and ANAS_AI_OCR the one holding the text reader's two
+# GGUF files (as D:\A-NAS-models\ocr\qwen3.5-4b), it installs the real
+# runtime and models instead. The text reader's llama-server is always the
+# one scripts/fetch-llama.sh fetches.
 set -euo pipefail
 
 if [[ "${1:-}" != --inside ]]; then
@@ -34,6 +37,8 @@ if [[ "${1:-}" != --inside ]]; then
   done
   qdrant_tarball="$repo/build/qdrant/$(jq -r .sha256 "$repo/deploy/qdrant/qdrant.json")/$(jq -r .file "$repo/deploy/qdrant/qdrant.json")"
   [[ -f "$qdrant_tarball" ]] || { echo "missing $qdrant_tarball: run scripts/fetch-qdrant.sh" >&2; exit 2; }
+  llama_tarball="$repo/build/llama/$(jq -r .sha256 "$repo/deploy/llama/llama.json")/$(jq -r .file "$repo/deploy/llama/llama.json")"
+  [[ -f "$llama_tarball" ]] || { echo "missing $llama_tarball: run scripts/fetch-llama.sh" >&2; exit 2; }
   real_ai=()
   if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
     [[ -f "$repo/build/ai-runtime.json" ]] || { echo "missing build/ai-runtime.json: run scripts/build-ai-runtime.sh" >&2; exit 2; }
@@ -41,8 +46,9 @@ if [[ "${1:-}" != --inside ]]; then
     [[ -f "${ANAS_AI_DETECTOR:-}" ]] || { echo "ANAS_AI_DETECTOR must name the detector file" >&2; exit 2; }
     [[ -d "${ANAS_AI_FACES:-}" ]] || { echo "ANAS_AI_FACES must name the face models' directory" >&2; exit 2; }
     [[ -d "${ANAS_AI_PETS:-}" ]] || { echo "ANAS_AI_PETS must name the animal model's directory" >&2; exit 2; }
+    [[ -d "${ANAS_AI_OCR:-}" ]] || { echo "ANAS_AI_OCR must name the text reader's directory" >&2; exit 2; }
     real_ai=(-e ANAS_SYSTEM_TEST_AI=real -v "$(dirname "$ANAS_AI_MODEL"):/ai-model:ro" -v "$(dirname "$ANAS_AI_DETECTOR"):/ai-detector:ro"
-      -v "$ANAS_AI_FACES:/ai-faces:ro" -v "$ANAS_AI_PETS:/ai-pets:ro")
+      -v "$ANAS_AI_FACES:/ai-faces:ro" -v "$ANAS_AI_PETS:/ai-pets:ro" -v "$ANAS_AI_OCR:/ai-ocr:ro")
   fi
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
@@ -88,11 +94,16 @@ if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
   ln -s "/ai-faces/$(jq -r .name "$ai/face-embedder.json" | cut -d - -f 1)/$(jq -r .file "$ai/face-embedder.json")" "$ai/face-embedder.onnx"
   cp /src/deploy/models/dinov2-small.json "$ai/animal-embedder.json"
   ln -s "/ai-pets/dinov2-small/$(jq -r .file "$ai/animal-embedder.json")" "$ai/animal-embedder.onnx"
+  cp /src/deploy/models/qwen3.5-4b-q4_k_m.json "$ai/ocr-model.json"
+  ln -s "/ai-ocr/$(jq -r .file "$ai/ocr-model.json")" "$ai/ocr-model.gguf"
+  cp /src/deploy/models/qwen3.5-4b-mmproj-f16.json "$ai/ocr-mmproj.json"
+  ln -s "/ai-ocr/$(jq -r .file "$ai/ocr-mmproj.json")" "$ai/ocr-mmproj.gguf"
   cp /src/build/ai-runtime.json "$ai/runtime.json"
   ln -s "/src/build/ai-runtime/$(jq -r .file "$ai/runtime.json")" "$ai/runtime.tar.gz"
   detector_model="$(jq -r .name "$ai/detector.json")@$(jq -r .sha256 "$ai/detector.json" | cut -c1-12)+"
   face_model="$(jq -r .name "$ai/face-detector.json")@$(jq -r .sha256 "$ai/face-detector.json" | cut -c1-12)+"
   animal_model="$(jq -r .name "$ai/animal-embedder.json")@$(jq -r .sha256 "$ai/animal-embedder.json" | cut -c1-12)+"
+  ocr_model="$(jq -r .name "$ai/ocr-model.json")@$(jq -r .sha256 "$ai/ocr-model.json" | cut -c1-12)+"
 else
   head -c 65536 /dev/urandom > "$ai/model.litertlm"
   printf '{"name":"system-test","file":"system-test.litertlm","sizeBytes":%s,"sha256":"%s"}\n' \
@@ -108,6 +119,12 @@ else
   done
   face_model=fake-faces
   animal_model=fake-animals
+  for role in ocr-model ocr-mmproj; do
+    head -c 2048 /dev/urandom > "$ai/$role.gguf"
+    printf '{"name":"system-test-%s","file":"system-test.gguf","sizeBytes":%s,"memoryBytes":1048576,"sha256":"%s"}\n' "$role" \
+      "$(stat -c %s "$ai/$role.gguf")" "$(sha256sum "$ai/$role.gguf" | cut -d ' ' -f 1)" > "$ai/$role.json"
+  done
+  ocr_model=fake-reader
   install -d "$ai/venv/bin"
   ln -s /usr/bin/python3 "$ai/venv/bin/python"
   printf 'home = /usr/bin\ninclude-system-site-packages = false\nversion = %s\n' \
@@ -118,11 +135,13 @@ else
     "$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')" "$(stat -c %s "$ai/runtime.tar.gz")" \
     "$runtime_sha" > "$ai/runtime.json"
   install -d /etc/systemd/system/anas-ai.service.d
-  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --fake --fake-detector --fake-faces --fake-animals\n' \
+  printf '[Service]\nExecStart=\nExecStart=/opt/a-nas/current/ai/runtime/bin/python -m anas_ai.worker --fake --fake-detector --fake-faces --fake-animals --fake-reader\n' \
     > /etc/systemd/system/anas-ai.service.d/system-test.conf
 fi
 # Each model role's file is kept once by content: as many as distinct pins.
-models_kept=$(for role in model detector face-detector face-embedder animal-embedder; do jq -r .sha256 "$ai/$role.json"; done | sort -u | wc -l)
+models_kept=$(for role in model detector face-detector face-embedder animal-embedder ocr-model ocr-mmproj; do
+  jq -r .sha256 "$ai/$role.json"
+done | sort -u | wc -l)
 # AI starts once the photo library has gone unused for this long, so that the
 # test sees a photo organised in the Worker's sandbox.
 install -d /etc/systemd/system/anas-photos.service.d
@@ -153,13 +172,17 @@ stage() {
   install -d "$1/ai/anas_ai"
   install -m 0644 /src/ai/anas_ai/*.py "$1/ai/anas_ai/"
   install -m 0644 "$ai/model.json" "$ai/detector.json" "$ai/face-detector.json" "$ai/face-embedder.json" \
-    "$ai/animal-embedder.json" "$ai/runtime.json" "$1/ai/"
+    "$ai/animal-embedder.json" "$ai/ocr-model.json" "$ai/ocr-mmproj.json" "$ai/runtime.json" /src/deploy/llama/llama.json "$1/ai/"
   ln -s "$ai/model.litertlm" "$1/ai/model.litertlm"
   ln -s "$ai/detector.onnx" "$1/ai/detector.onnx"
   ln -s "$ai/face-detector.onnx" "$1/ai/face-detector.onnx"
   ln -s "$ai/face-embedder.onnx" "$1/ai/face-embedder.onnx"
   ln -s "$ai/animal-embedder.onnx" "$1/ai/animal-embedder.onnx"
+  ln -s "$ai/ocr-model.gguf" "$1/ai/ocr-model.gguf"
+  ln -s "$ai/ocr-mmproj.gguf" "$1/ai/ocr-mmproj.gguf"
   ln -s "$ai/runtime.tar.gz" "$1/ai/runtime.tar.gz"
+  ln -s "/src/build/llama/$(jq -r .sha256 /src/deploy/llama/llama.json)/$(jq -r .file /src/deploy/llama/llama.json)" \
+    "$1/ai/llama.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
   install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
   install -m 0750 /src/scripts/run-kiosk.sh "$1/kiosk-launcher"
@@ -791,7 +814,14 @@ check "the release links the models and runtime kept once by content" \
   -a "$(readlink /opt/a-nas/current/ai/face-detector.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-detector.json")/$(jq -r .file "$ai/face-detector.json")" \
   -a "$(readlink /opt/a-nas/current/ai/face-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/face-embedder.json")/$(jq -r .file "$ai/face-embedder.json")" \
   -a "$(readlink /opt/a-nas/current/ai/animal-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/animal-embedder.json")/$(jq -r .file "$ai/animal-embedder.json")" \
+  -a "$(readlink /opt/a-nas/current/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(jq -r .file "$ai/ocr-model.json")" \
+  -a "$(readlink /opt/a-nas/current/ai/ocr-mmproj.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-mmproj.json")/$(jq -r .file "$ai/ocr-mmproj.json")" \
   -a "$(readlink /opt/a-nas/current/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(jq -r .id "$ai/runtime.json")"
+llama_sha=$(jq -r .sha256 /src/deploy/llama/llama.json)
+check "the release links llama.cpp kept once by content, only the members its manifest names" \
+  test "$(readlink /opt/a-nas/current/ai/llama)" = "/opt/a-nas/llama/$llama_sha" \
+  -a -x "/opt/a-nas/llama/$llama_sha/llama-server" -a ! -e "/opt/a-nas/llama/$llama_sha/llama-cli" \
+  -a "$(stat -c '%U %a' "/opt/a-nas/llama/$llama_sha")" = "root 755"
 ai_cores=$(($(nproc) > 2 ? $(nproc) - 2 : 1))
 check "the Worker may use every core but two" \
   test "$(systemctl show -p CPUQuotaPerSecUSec --value anas-ai.service)" = "${ai_cores}s"
@@ -831,6 +861,44 @@ organised() { # the member's photo has its vector, its detection and its face sc
 }
 check "the Worker organises the photo with its vector, detector, face and animal models in its sandbox" organised
 echo "INFO the Worker's memory peak: $(systemctl show -p MemoryPeak --value anas-ai.service) bytes"
+# read-text.py SOCKET IMAGE MODEL [WORD]: the Worker names its text reader,
+# releases its other background models and reads IMAGE with the model named
+# MODEL..., finding WORD in it.
+cat > /usr/local/lib/read-text.py <<'PY'
+import array, json, socket, struct, sys
+
+def call(request, image=None):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+        conn.settimeout(600)
+        conn.connect(sys.argv[1])
+        body = json.dumps(request).encode()
+        fds = [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [image.fileno()]))] if image else []
+        assert conn.sendmsg([struct.pack('>I', len(body))], fds) == 4
+        conn.sendall(body)
+        with conn.makefile('rb') as reply:
+            size = struct.unpack('>I', reply.read(4))[0]
+            return json.loads(reply.read(size))
+
+info = call({'op': 'info'})
+assert info['ok'] and info['ocrModel'].startswith(sys.argv[3]), info
+# Reading is a phase of its own: the other background models go first.
+assert call({'op': 'release', 'what': 'detector'})['ok']
+with open(sys.argv[2], 'rb') as image:
+    answer = call({'op': 'read_text', 'kind': 'text'}, image)
+print(json.dumps(answer, ensure_ascii=False)[:400])
+reading = answer['reading']
+assert answer['ok'] and answer['model'] == info['ocrModel'] and reading['finish'] == 'stop' and reading['logprobs'], answer
+assert len(sys.argv) < 5 or sys.argv[4] in reading['text'], reading['text']
+PY
+if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
+  ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=white:s=640x200 -frames:v 1 \
+    -vf "drawtext=text='A-NAS 2026':fontsize=72:fontcolor=black:x=40:y=60" /tmp/text.png
+  check "llama-server reads the text in a photo in the Worker's sandbox" \
+    python3 /usr/local/lib/read-text.py /run/a-nas-ai/ai.sock /tmp/text.png "$ocr_model" 2026
+  echo "INFO the Worker's memory peak after reading: $(systemctl show -p MemoryPeak --value anas-ai.service) bytes"
+else
+  check "the Worker reads the text in a photo" python3 /usr/local/lib/read-text.py /run/a-nas-ai/ai.sock /tmp/photo.png "$ocr_model"
+fi
 # A probe in the Worker's own unit, in place of the Worker.
 cat > /usr/local/lib/anas-ai-probe.py <<'PY'
 import os, socket, sys
@@ -857,6 +925,15 @@ check "the probe finds the network and data volume outside the sandbox" denied p
 check "the Worker's sandbox opens no network socket and cannot read the data volume" \
   systemctl start anas-ai-probe.service
 journalctl -u anas-ai-probe.service -o cat --no-pager | grep -E 'contained|opened|listed' | tail -n 1 || true
+# The text reader's llama-server, in the Worker's unit, finds the libraries
+# it links; reading with the real model (ANAS_SYSTEM_TEST_AI=real) also loads
+# its CPU backend.
+sed -e 's|^ExecStart=.*|ExecStart=/opt/a-nas/current/ai/llama/llama-server --version|' \
+  -e 's|^Type=.*|Type=oneshot|' -e '/^Requires=/d' -e '/^After=/d' \
+  /etc/systemd/system/anas-ai.service > /etc/systemd/system/anas-ai-llama-probe.service
+systemctl daemon-reload
+check "llama-server runs in the Worker's sandbox" systemctl start anas-ai-llama-probe.service
+journalctl -u anas-ai-llama-probe.service -o cat --no-pager | grep -E '^version|error' | tail -n 1 || true
 staged_tampered=/tmp/tampered
 stage "$staged_tampered"
 rm "$staged_tampered/ai/model.litertlm"
@@ -1072,6 +1149,18 @@ check "a staged Qdrant that does not match its manifest is refused" \
 check "the refused Qdrant changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
   -a "$(find /opt/a-nas/qdrant -mindepth 1 -maxdepth 1 | wc -l)" = "$qdrant_kept"
+llama_kept=$(find /opt/a-nas/llama -mindepth 1 -maxdepth 1 | wc -l)
+staged_tampered=/tmp/tampered-llama
+stage "$staged_tampered"
+rm "$staged_tampered/ai/llama.tar.gz"
+head -c 1024 /dev/urandom > "$staged_tampered/ai/llama.tar.gz"
+jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
+  /src/deploy/llama/llama.json > "$staged_tampered/ai/llama.json"
+check "a staged llama.cpp that does not match its manifest is refused" \
+  denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
+check "the refused llama.cpp changes nothing" \
+  test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
+  -a "$(find /opt/a-nas/llama -mindepth 1 -maxdepth 1 | wc -l)" = "$llama_kept"
 
 # --- Media center (ADR 0017): files are read as the user through the File
 # Broker; FFmpeg runs in a per-connection worker without network, data volume

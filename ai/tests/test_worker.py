@@ -51,14 +51,16 @@ class Failing:
 
 
 class WorkerTest(unittest.TestCase):
-    def start(self, provider, reason=None, idle_seconds=30, detector=None, faces=None, animals=None, started=0):
+    def start(self, provider, reason=None, idle_seconds=30, detector=None, faces=None, animals=None, started=0,
+              reader=None):
         directory = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, directory, True)
         path = os.path.join(directory, "ai.sock")
         listener = worker.listening_socket(path)
         self.addCleanup(listener.close)
         thread = threading.Thread(target=worker.serve,
-                                  args=(listener, provider, reason, idle_seconds, detector, faces, animals, started),
+                                  args=(listener, provider, reason, idle_seconds, detector, faces, animals, started,
+                                        reader),
                                   daemon=True)
         thread.start()
         return path, thread
@@ -269,6 +271,53 @@ class WorkerTest(unittest.TestCase):
         thread.join(timeout=5)
         self.assertFalse(thread.is_alive())
         self.assertFalse(fake.loaded)
+
+    def test_reads_text_and_fields(self):
+        fake = providers.FakeReader()
+        fake.memory = 3 << 30
+        path, _ = self.start(providers.FakeProvider(dimensions=8), reader=worker.Detector(fake), started=300 << 20)
+        info = call(path, {"op": "info"})
+        # Reading is a phase of its own: its memory is not added to the other models'.
+        self.assertEqual((info["ocrModel"], info["ocrMemoryBytes"], info["memoryBytes"]),
+                         (fake.model, (300 << 20) + (3 << 30), 300 << 20))
+        text = call(path, {"op": "read_text", "kind": "text"}, self.image(b"photo"))
+        self.assertEqual(text["model"], fake.model)
+        self.assertTrue(text["reading"]["text"].startswith("fake text "))
+        self.assertEqual(text["reading"]["finish"], "stop")
+        schema = {"金额": "", "明细": [{"名称": ""}]}
+        fields = call(path, {"op": "read_text", "kind": "fields", "schema": schema}, self.image(b"photo"))
+        self.assertEqual(set(json.loads(fields["reading"]["text"])), {"金额", "明细"})
+        for bad in ({"op": "read_text"}, {"op": "read_text", "kind": "fields"},
+                    {"op": "read_text", "kind": "fields", "schema": {}},
+                    {"op": "read_text", "kind": "fields", "schema": ["金额"]},
+                    {"op": "read_text", "kind": "text", "schema": schema},
+                    {"op": "read_text", "kind": "summary"}):
+            self.assertEqual(call(path, bad, self.image(b"photo"))["error"]["code"], protocol.CODE_INVALID_INPUT, bad)
+        self.assertEqual(call(path, {"op": "read_text", "kind": "text"})["error"]["code"], protocol.CODE_INVALID_INPUT)
+        self.assertEqual(call(path, {"op": "read_text", "kind": "text"}, self.image(b""))["error"]["code"],
+                         protocol.CODE_INVALID_INPUT)
+        self.assertTrue(fake.loaded)
+        self.assertEqual(call(path, {"op": "release", "what": "detector"}), {"ok": True})
+        self.assertFalse(fake.loaded)
+
+    def test_reading_text_is_unavailable_without_a_reader(self):
+        path, _ = self.start(providers.FakeProvider(dimensions=8), reader=worker.Detector(reason="no OCR model"))
+        self.assertNotIn("ocrModel", call(path, {"op": "info"}))
+        response = call(path, {"op": "read_text", "kind": "text"}, self.image(b"photo"))
+        self.assertEqual(response["error"], {"code": protocol.CODE_UNAVAILABLE, "message": "no OCR model"})
+
+    def test_hanging_up_stops_the_reading(self):
+        fake = providers.FakeReader(delay=30)
+        path, _ = self.start(providers.FakeProvider(), reader=worker.Detector(fake))
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.connect(path)
+            payload = json.dumps({"op": "read_text", "kind": "text"}).encode()
+            socket.send_fds(conn, [struct.pack(">I", len(payload)) + payload], [self.image(b"photo").fileno()])
+            time.sleep(0.2)
+        started = time.monotonic()
+        self.assertTrue(call(path, {"op": "info"})["ok"])
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(fake.cancelled, 1)
 
     def test_leaves_cores_for_the_user(self):
         self.assertEqual(providers.inference_threads(), max(1, len(os.sched_getaffinity(0)) - providers.RESERVED_CORES))
