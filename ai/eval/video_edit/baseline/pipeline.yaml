@@ -1,0 +1,41 @@
+# The baseline plan's pipeline (docs/specs/video-edit-evaluation.md#方案目录);
+# the structure is schemas/pipeline.schema.json.
+version: 1
+plan: baseline
+summary: 在全部素材连起来的时间轴上等间隔截取 3 秒的片段，凑够目标时长后拼接成片；不读文字要求。每台设备都跑它，作为这台设备的耗时基准。
+entry: ["/env/venv/bin/python", "baseline.py"]
+setup: setup.sh
+dependencies:
+  - {name: opentimelineio, version: "0.18.1", license: Apache-2.0}
+  - {name: opentelemetry-sdk, version: "1.45.2", license: Apache-2.0}
+  - {name: opentelemetry-exporter-otlp-proto-common, version: "1.45.2", license: Apache-2.0}
+  - {name: FFmpeg（Debian 13 软件包，含 libx264）, version: "7.1", license: GPL-2.0-or-later}
+models: []
+stages:
+  - id: probe
+    category: decode
+    does: 用 ffprobe 读出每段素材的时长、画面方向和有没有音轨
+    inputs: [case.json, 素材]
+    outputs: [素材信息]
+    uses: [ffprobe]
+    runs_on: nas-cpu
+    sends_out: []
+    on_failure: 用例失败
+  - id: select
+    category: arrange
+    does: 按目标时长算出片段数，在全部素材的时间轴上等间隔取片段，写出剪辑决策
+    inputs: [素材信息, 目标时长]
+    outputs: [timeline.otio]
+    uses: [OpenTimelineIO]
+    runs_on: nas-cpu
+    sends_out: []
+    on_failure: 用例失败
+  - id: render
+    category: render
+    does: 逐段解码，缩放补边到统一画幅（按第一段素材取横屏或竖屏），编码为 H.264 / AAC，再无损拼接
+    inputs: [timeline.otio, 素材]
+    outputs: [output.mp4]
+    uses: [FFmpeg, libx264]
+    runs_on: nas-cpu
+    sends_out: []
+    on_failure: 用例失败

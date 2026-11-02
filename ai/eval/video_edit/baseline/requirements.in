@@ -1,0 +1,8 @@
+# The baseline plan's packages: OpenTimelineIO for the timeline and the
+# OpenTelemetry SDK with its OTLP encoder for trace.json. Locked by hash for
+# Debian 13's CPython 3.13 on x86_64:
+#   uv pip compile requirements.in --generate-hashes --python-version 3.13 \
+#     --python-platform x86_64-manylinux_2_40 --only-binary :all: -o requirements.lock
+opentimelineio
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-common
