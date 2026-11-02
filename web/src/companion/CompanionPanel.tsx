@@ -14,10 +14,12 @@ export function CompanionPanel({
   userId,
   connected = false,
   onOpenConversation,
+  previewPhase,
 }: {
   userId: string;
   connected?: boolean;
   onOpenConversation?(id: string): void;
+  previewPhase?: TaskPhase;
 }) {
   const view = useCompanionView(userId, connected);
   const { value, update, character, quiet, canPlay, remote } = view;
@@ -48,7 +50,7 @@ export function CompanionPanel({
       <div className={styles.scene}>
         {value.place === "home" ? (
           <Stage
-            taskPhase={phase}
+            taskPhase={connected ? phase : previewPhase}
             key={view.stageKey}
             character={character}
             quiet={quiet || !canPlay}

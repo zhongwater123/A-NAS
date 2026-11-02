@@ -36,7 +36,15 @@ export function taskSummary(input: {
   else if (input.approvals.some((a) => a.status === "awaiting" || a.status === "deciding")) phase = "waiting";
   else if (input.running) phase = last?.parts.some((part) => part.type === "tool-call") ? "working" : "thinking";
   else if (last?.interrupted) phase = "stopped";
-  else if (answer) phase = "success";
+  else if (
+    answer &&
+    last &&
+    last === input.messages.at(-1) &&
+    last.role === "assistant" &&
+    !last.pending &&
+    !last.interim
+  )
+    phase = "success";
   const paths = [
     ...new Set(
       input.approvals

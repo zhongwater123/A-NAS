@@ -314,7 +314,7 @@
   height: 112px;
   opacity: 0.55;
 }
-.empty .naiwaSprite {
+.empty .avatar {
   width: 112px;
   height: 121.333px;
   flex: none;
@@ -333,7 +333,7 @@
   font-family: system-ui, sans-serif;
 }
 .smallStage {
-  height: 205px;
+  height: 170px;
 }
 .smallStage .pet {
   width: 128px;
@@ -514,15 +514,74 @@
     right: 0;
   }
 }
+.avatar {
+  display: block;
+  position: relative;
+  width: 92.3077%;
+  height: 100%;
+  margin: 0 auto;
+  transform-origin: 50% 90%;
+  pointer-events: none;
+}
 .naiwaSprite {
   display: inline-block;
-  width: 92.3077%;
+  position: absolute;
+  inset: 0;
+  width: 100%;
   height: 100%;
   margin: 0 auto;
   aspect-ratio: 192 / 208;
   background-size: 800% 1100%;
   background-repeat: no-repeat;
   animation: naiwa-frames 1.4s steps(6) infinite;
+}
+.playDock {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 5px 8px 10px;
+  pointer-events: auto;
+  font-family: system-ui, sans-serif;
+}
+.playDock button {
+  border: 1px solid #c7dacf;
+  border-radius: 12px;
+  background: #f7faf4f5;
+  color: #355c4e;
+  padding: 5px 9px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+.playDock button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.playDock button:focus-visible {
+  outline: 2px solid #437c78;
+  outline-offset: 2px;
+}
+.catchBall {
+  outline: 5px solid #e4c97a88;
+  box-shadow: 0 0 20px #f4d675;
+  animation: catch-invite 0.65s ease-in-out infinite alternate;
+}
+@keyframes catch-invite {
+  to {
+    scale: 1.18;
+  }
+}
+.rehearsal {
+  margin: 18px 0;
+  padding: 14px;
+  border: 1px dashed #bacac2;
+  border-radius: 14px;
+  font-size: 12px;
+}
+.rehearsal .actions {
+  margin: 10px 0;
 }
 @keyframes naiwa-frames {
   from {

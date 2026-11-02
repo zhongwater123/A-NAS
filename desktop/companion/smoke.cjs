@@ -32,7 +32,9 @@ async function run() {
     await page.getByRole("button", { name: "和伙伴打招呼，按住可拖动" }).click();
     await page.getByText("嗨，我在这儿").waitFor();
     await page.getByRole("button", { name: "把小球传给伙伴" }).click();
-    await page.getByText("接住了，再来一次？").waitFor();
+    await page.getByRole("button", { name: "接住奶蛙传回的小球" }).click();
+    await page.getByText("配合得真好！").waitFor();
+    await page.getByRole("button", { name: "先玩到这里" }).click();
     await page.getByRole("button", { name: "安静", exact: true }).click();
     await page.getByRole("button", { name: "醒来", exact: true }).waitFor();
     const homeWindow = desktop.waitForEvent("window");

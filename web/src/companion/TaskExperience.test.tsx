@@ -72,6 +72,26 @@ const emit = (type: string, payload: unknown) =>
     for (const h of handlers) h({ type, session_id: LIVE, payload });
   });
 describe("companion minutes workflow on the existing VNAS protocol", () => {
+  it("drives the pet through actual gateway events, not success words in streamed text", async () => {
+    fixtures();
+    const user = userEvent.setup();
+    const onPhase = vi.fn();
+    render(<ConnectedTask view={view()} userId="user:owner" onPhase={onPhase} />);
+    await user.click(await screen.findByRole("button", { name: "会议.md" }));
+    await user.click(screen.getByRole("button", { name: "整理这份记录" }));
+    await waitFor(() => expect(client.request).toHaveBeenCalledWith("prompt.submit", expect.anything()));
+    emit("message.start", {});
+    expect(onPhase).toHaveBeenCalledWith("thinking");
+    emit("tool.start", { name: "read_file", tool_id: "read-1", args: { path: "/nas/个人空间/会议.md" } });
+    expect(onPhase).toHaveBeenCalledWith("working");
+    emit("message.delta", { text: "全部完成啦，文件也保存好了" });
+    expect(onPhase).not.toHaveBeenCalledWith("success");
+    emit("message.complete", { status: "complete" });
+    expect(onPhase).toHaveBeenCalledWith("success");
+    emit("message.start", {});
+    emit("message.complete", { status: "error" });
+    expect(onPhase).toHaveBeenCalledWith("error");
+  });
   it("shares before submission, shows real waiting cards, and never confirms them itself", async () => {
     fixtures();
     const user = userEvent.setup();

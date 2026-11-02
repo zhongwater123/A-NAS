@@ -93,6 +93,7 @@
 
 ### AI 助手（试用）
 
+- 回答完成事件：在 VNAS 连续发送两轮带工具调用的请求，确认每轮正文在结束后仍完整，未新增空回复；在伙伴绑定的对话中，流式正文说“完成”时仍保持处理状态，协议结束才短暂开心，报错则表现受阻。刷新历史不重播庆祝（[调查](../investigations/2026-11-02-assistant-reply-completion-batching.md)）。
 - 冷启动、内存、多人同时使用与开启 simple quota 的影响（[#116](https://github.com/zhongwater123/A-NAS/issues/116)）。
 - VNAS 操作桌面（#156、#199）：删除、移动、改名、分享、复制、恢复、反馈与设置类的写入先问，新建、收藏与标签不问；终端、Docker 与应用中心每一步先问。
 - 记忆：复盘自建的 `anas-photos` 出现在该账号“记忆”的“VNAS 自己总结”中（[调查](../investigations/2026-10-20-assistant-skills-hidden-by-name.md)）。

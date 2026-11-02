@@ -157,6 +157,7 @@ export function useAssistantThread(
   const created = useRef<string | undefined>(undefined);
   const resumed = useRef<{ stored?: string; generation: number }>({ generation: -1 });
   const replyId = useRef<string | undefined>(undefined);
+  const replySerial = useRef(0);
   // The latest callbacks and connection, for events and sends.
   const notify = useRef(callbacks);
   const connected = useRef(ready);
@@ -177,13 +178,13 @@ export function useAssistantThread(
 
   // The reply being built from the turn's events, added when the first one arrives.
   const updateReply = useCallback((update: (message: ChatMessage) => ChatMessage) => {
+    // Capture the id before enqueueing the state update. message.complete clears
+    // replyId immediately; a batched updater must still finish that same reply.
+    const id = (replyId.current ??= `live-${Date.now()}-${++replySerial.current}`);
     setMessages((list) => {
-      const id = replyId.current;
-      if (id && list.some((message) => message.id === id))
+      if (list.some((message) => message.id === id))
         return list.map((message) => (message.id === id ? update(message) : message));
-      const fresh = `live-${Date.now()}`;
-      replyId.current = fresh;
-      return [...list, update({ id: fresh, role: "assistant", parts: [], pending: true, timestamp: now() })];
+      return [...list, update({ id, role: "assistant", parts: [], pending: true, timestamp: now() })];
     });
   }, []);
 

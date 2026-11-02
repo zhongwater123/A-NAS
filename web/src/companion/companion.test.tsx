@@ -69,7 +69,8 @@ describe("companion interactions", () => {
     expect(screen.getByRole("status")).toHaveTextContent("嗨，我在这儿");
     await user.tab();
     await user.keyboard("{Enter}");
-    expect(screen.getByText("一起玩了 1 次")).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent("你传过来了，我来接");
+    expect(screen.queryByText("一起玩了 1 次")).not.toBeInTheDocument();
   });
   it("quiet mode stops new play without penalizing or blocking greetings", async () => {
     const user = userEvent.setup();

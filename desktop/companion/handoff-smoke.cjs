@@ -59,7 +59,13 @@ async function run() {
     await summon.click();
     const homeBall = section.getByRole("button", { name: "把小球传给伙伴" });
     await assertEventually(async () => assert.equal(await homeBall.isEnabled(), true));
-    await homeBall.click();
+    const rally = async (scope) => {
+      await scope.getByRole("button", { name: "把小球传给伙伴" }).click();
+      await scope.getByRole("button", { name: "接住奶蛙传回的小球" }).click();
+      await scope.getByText("配合得真好！").waitFor();
+      await scope.getByRole("button", { name: "先玩到这里" }).click();
+    };
+    await rally(section);
     await section.getByText("一起玩了 1 次").waitFor();
     assert.match(await section.locator("[class*=naiwaSprite]").getAttribute("style"), /naiwa\.webp/);
     const desktop = await mount("CompanionDesktop");
@@ -68,7 +74,7 @@ async function run() {
     await assertEventually(async () => assert.equal(await desktopBall.isEnabled(), true));
     assert.equal(await homeBall.isEnabled(), false);
     assert.equal((await (await fetch(`${api}/api/v1/companion`)).json()).character, "naiwa");
-    await desktopBall.click();
+    await rally(native);
     await section.getByText("一起玩了 2 次").waitFor();
     await home.screenshot({ path: path.join(output,"home-waiting.png") });
     await desktop.screenshot({ path: path.join(output,"desktop-active.png") });
@@ -79,7 +85,7 @@ async function run() {
     await home.context().setOffline(true);
     await section.getByRole("button", { name: "先在本地玩" }).waitFor();
     await section.getByRole("button", { name: "先在本地玩" }).click();
-    await homeBall.click();
+    await rally(section);
     const state = await (await fetch(`${api}/api/v1/companion`)).json();
     assert.equal(state.playCount, 2);
     await home.context().setOffline(false);

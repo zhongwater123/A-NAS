@@ -15,11 +15,13 @@ export function CompanionFloating({
   onOpen,
   connected = false,
   onOpenConversation,
+  previewPhase,
 }: {
   userId: string;
   onOpen: () => void;
   connected?: boolean;
   onOpenConversation?(id: string): void;
+  previewPhase?: TaskPhase;
 }) {
   const [phase, setPhase] = useState<TaskPhase>("idle");
   const [local] = useCompanion(userId);
@@ -52,7 +54,7 @@ export function CompanionFloating({
         </Suspense>
       )}
       <Stage
-        taskPhase={phase}
+        taskPhase={connected ? phase : previewPhase}
         key={view.stageKey}
         character={view.character}
         quiet={quiet || !view.canPlay}

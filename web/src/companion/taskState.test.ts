@@ -41,4 +41,9 @@ describe("pet task presentation", () => {
     expect(minutesPrompt(path, "列待办")).toContain(JSON.stringify({ sourcePath: path, request: "列待办" }));
     expect(minutesPrompt(path, "")).toContain("不要保存到个人空间");
   });
+  it("does not celebrate a streaming, interim or superseded answer", () => {
+    expect(taskSummary({ ...input, messages: [{ ...answer[0], pending: true }] }).phase).toBe("idle");
+    expect(taskSummary({ ...input, messages: [{ ...answer[0], interim: true }] }).phase).toBe("idle");
+    expect(taskSummary({ ...input, messages: [...answer, { id: "b", role: "user", parts: [] }] }).phase).toBe("idle");
+  });
 });
