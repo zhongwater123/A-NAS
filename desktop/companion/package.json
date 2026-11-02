@@ -1,0 +1,21 @@
+{
+  "name": "a-nas-companion-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A-NAS companion desktop interaction prototype",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test policy.test.cjs",
+    "smoke": "node smoke.cjs",
+    "package:mac": "electron-packager . A-NAS-Companion --platform=darwin --arch=arm64 --out=build --overwrite --ignore='build|node_modules/.cache'",
+    "package:win": "electron-packager . A-NAS-Companion --platform=win32 --arch=x64 --out=build --overwrite --ignore='build|node_modules/.cache'",
+    "smoke:handoff": "node handoff-smoke.cjs",
+    "smoke:tasks": "node task-smoke.cjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "45.2.1",
+    "playwright": "1.63.0"
+  }
+}

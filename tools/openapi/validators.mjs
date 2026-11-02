@@ -52,6 +52,11 @@ const VALIDATED = [
   "getAppInstallPlan",
   "getContainerSnapshot",
   "listFamilyHints",
+  "getCompanionState",
+  "claimCompanion",
+  "renewCompanionLease",
+  "releaseCompanion",
+  "actWithCompanion",
 ];
 
 const [bundlePath, outPath] = process.argv.slice(2);

@@ -62,7 +62,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const rowOf = (title: string) => screen.getAllByRole("row").find((row) => within(row).queryByText(title))!;
+// The persistent player can show a title before the virtualized table is ready.
+const rowName = (title: string) => ({ name: (name: string) => name.includes(title) });
+const rowOf = (title: string) => screen.getByRole("row", rowName(title));
+const findRow = (title: string) => screen.findByRole("row", rowName(title));
 
 describe("MusicPanel", () => {
   it("loads the library, starts a scan and plays a song on double click", async () => {
@@ -76,7 +79,7 @@ describe("MusicPanel", () => {
       }),
     );
     render(<MusicPanel userId="user:u1" />);
-    expect(await screen.findByText("以父之名")).toBeTruthy();
+    expect(await findRow("以父之名")).toBeTruthy();
     await waitFor(() => expect(scans).toBe(1));
     expect(screen.getByText("全部歌曲 · 3 首 · 14 分钟")).toBeTruthy();
 
@@ -100,7 +103,7 @@ describe("MusicPanel", () => {
       }),
     );
     render(<MusicPanel userId="user:u1" />);
-    await screen.findByText("有歌词的歌");
+    await findRow("有歌词的歌");
     fireEvent.doubleClick(rowOf("有歌词的歌"));
     fireEvent.click(await screen.findByRole("button", { name: "歌词" }));
     const stage = await screen.findByRole("region", { name: "正在播放" });
@@ -122,7 +125,7 @@ describe("MusicPanel", () => {
     // A playing element: seeking keeps it playing from the new start.
     vi.spyOn(HTMLMediaElement.prototype, "paused", "get").mockReturnValue(false);
     render(<MusicPanel userId="user:u1" />);
-    await screen.findByText("无损的歌");
+    await findRow("无损的歌");
     expect(within(rowOf("无损的歌")).getByText("APE")).toBeTruthy();
     fireEvent.doubleClick(rowOf("无损的歌"));
     await waitFor(() => expect(played.at(-1)).toMatch(/file%3Aape\/stream$/));
@@ -137,13 +140,15 @@ describe("MusicPanel", () => {
     const favorites = musicFavorites();
     server.use(...musicHandlers({ tracks: library }), ...favorites.handlers);
     render(<MusicPanel userId="user:u1" />);
-    await screen.findByText("晴天");
+    await findRow("晴天");
     fireEvent.click(within(rowOf("晴天")).getByRole("button", { name: "收藏" }));
     await waitFor(() => expect(favorites.sent).toEqual([{ trackId: "file:a1", favorite: true }]));
     fireEvent.click(screen.getByRole("button", { name: /我的收藏/ }));
     expect(await screen.findByRole("heading", { name: "我的收藏" })).toBeTruthy();
-    expect(rowOf("晴天")).toBeTruthy();
-    expect(screen.queryByText("以父之名")).toBeNull();
+    await waitFor(() => {
+      expect(rowOf("晴天")).toBeTruthy();
+      expect(screen.queryByText("以父之名")).toBeNull();
+    });
   });
 
   it("creates a playlist from a song's context menu", async () => {
@@ -151,8 +156,8 @@ describe("MusicPanel", () => {
     const playlists = musicPlaylists();
     server.use(...musicHandlers({ tracks: library }), playlists.handler);
     render(<MusicPanel userId="user:u1" />);
-    await screen.findByText("Lantern Light");
-    fireEvent.contextMenu(rowOf("Lantern Light"));
+    const row = await findRow("Lantern Light");
+    fireEvent.contextMenu(row);
     await user.click(screen.getByRole("menuitem", { name: "添加到歌单" }));
     // Moving from the menu to its submenu must not close the submenu.
     await user.click(screen.getByRole("menuitem", { name: "新建歌单…" }));

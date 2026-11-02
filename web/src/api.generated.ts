@@ -404,6 +404,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/companion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read only the signed-in member's companion and active client
+         * @description Does not create activity or renew a lease. Other members cannot be selected through this API.
+         */
+        get: operations["getCompanionState"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/companion/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask the companion to come to this client
+         * @description Compare the current revision. If another client has an unexpired lease, this client becomes pending and must wait for its release or expiry. An existing lease is never granted to two clients at once.
+         */
+        post: operations["claimCompanion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/companion/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Renew this client's still-valid interaction lease
+         * @description Pending handoffs prevent renewal. A stale epoch or expired lease is rejected; it never silently reclaims ownership.
+         */
+        post: operations["renewCompanionLease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/companion/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop here and hand over to the pending client or return home
+         * @description The caller must stop its local interactions before sending this request. The epoch fences stale releases.
+         */
+        post: operations["releaseCompanion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/companion/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a ball return or change the active companion's preferences
+         * @description Only the unexpired current holder may act; a pending handoff also stops writes. Retrying the same eventId and command is idempotent within the most recent 256 recorded events. Reusing it with other contents fails.
+         */
+        post: operations["actWithCompanion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/wallpaper": {
         parameters: {
             query?: never;
@@ -4495,6 +4595,55 @@ export interface components {
              */
             sleepAfterMinutes: 0 | 10 | 30 | 60;
         };
+        CompanionState: {
+            revision: number;
+            /** @enum {string} */
+            character: "naiwa" | "glow" | "chestnut";
+            quiet: boolean;
+            /** @description Reference to this member's VNAS conversation, not its content. */
+            conversationId: string;
+            playCount: number;
+            active: components["schemas"]["CompanionLease"] | null;
+            pending: components["schemas"]["CompanionClient"] | null;
+        };
+        /** @enum {string} */
+        CompanionClientKind: "web" | "desktop";
+        CompanionClient: {
+            /** Format: uuid */
+            clientId: string;
+            kind: components["schemas"]["CompanionClientKind"];
+        };
+        CompanionLease: {
+            /** Format: uuid */
+            clientId: string;
+            kind: components["schemas"]["CompanionClientKind"];
+            epoch: number;
+            remainingMs: number;
+        };
+        CompanionClaim: {
+            /** Format: uuid */
+            clientId: string;
+            kind: components["schemas"]["CompanionClientKind"];
+            revision: number;
+        };
+        CompanionHolder: {
+            /** Format: uuid */
+            clientId: string;
+            epoch: number;
+        };
+        CompanionAction: {
+            /** Format: uuid */
+            clientId: string;
+            epoch: number;
+            /** Format: uuid */
+            eventId: string;
+            /** @enum {string} */
+            type: "ball" | "quiet" | "wake" | "character" | "conversation";
+            /** @enum {string} */
+            character?: "naiwa" | "glow" | "chestnut";
+            /** @description Set or clear the shared task reference. Only with type conversation. */
+            conversationId?: string;
+        };
         /**
          * @description fill covers the desktop keeping proportions; fit shows the whole picture on navy; stretch fills the width and height; center shows the picture at its own size in the middle; tile repeats it at its own size from the top left.
          * @enum {string}
@@ -6653,6 +6802,13 @@ export type ViewingRequest = components['schemas']['ViewingRequest'];
 export type ViewingGrant = components['schemas']['ViewingGrant'];
 export type Session = components['schemas']['Session'];
 export type LocalDisplay = components['schemas']['LocalDisplay'];
+export type CompanionState = components['schemas']['CompanionState'];
+export type CompanionClientKind = components['schemas']['CompanionClientKind'];
+export type CompanionClient = components['schemas']['CompanionClient'];
+export type CompanionLease = components['schemas']['CompanionLease'];
+export type CompanionClaim = components['schemas']['CompanionClaim'];
+export type CompanionHolder = components['schemas']['CompanionHolder'];
+export type CompanionAction = components['schemas']['CompanionAction'];
 export type WallpaperStyle = components['schemas']['WallpaperStyle'];
 export type Wallpaper = components['schemas']['Wallpaper'];
 export type WallpaperStyleChange = components['schemas']['WallpaperStyleChange'];
@@ -7604,6 +7760,160 @@ export interface operations {
             400: components["responses"]["ProductError"];
             401: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getCompanionState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description This signed-in member's companion state and interaction lease */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanionState"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    claimCompanion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanionClaim"];
+            };
+        };
+        responses: {
+            /** @description This signed-in member's companion state and interaction lease */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanionState"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    renewCompanionLease: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanionHolder"];
+            };
+        };
+        responses: {
+            /** @description This signed-in member's companion state and interaction lease */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanionState"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    releaseCompanion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanionHolder"];
+            };
+        };
+        responses: {
+            /** @description This signed-in member's companion state and interaction lease */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanionState"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    actWithCompanion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompanionAction"];
+            };
+        };
+        responses: {
+            /** @description This signed-in member's companion state and interaction lease */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanionState"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };

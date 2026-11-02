@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-29
+更新时间：2026-11-02
 
 本页只记当前事实与下一步。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，合并与部署的经过由 Git 与 PR 保存。
 
@@ -47,6 +47,7 @@
 5. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
 6. 相册 OCR（2026-10-19 决定做，[规格](../specs/photo-library.md)、[模型评估](../research/photo-ocr-model-evaluation.md)）：模型是 Qwen3.5-4B 的 Q4_K_M。[实施方案](../architecture/photo-ocr.md)的步骤 1（交付与运行：llama.cpp、模型、Worker 的 `read_text`）已完成，未部署；NAS 上每张中位 105 秒，可用内存最多下降 3.3 GiB。下一步是步骤 2：哪些照片读文字，筛选的验收目标等评测数据出来后定。
 7. 后续能力：
+   - 虚拟伙伴：当前分支已实现奶蛙、网页小窝/电脑桌宠接续及复用 VNAS 的文本纪要入口、任务状态、原确认卡跳转和已确认文件预览；本机领域/API、双端接续与模拟 Agent 协议流程验证通过，尚未部署；音乐测试等待条件已修复，原型快照的完整 Web 602 项通过；下一步核对 PR 的 Linux 产品鉴权、完整门禁和试玩包，再由内网同事按[联调手册](../runbooks/accept-virtual-companion.md)验收真实模型、NAS 文件保存与 Electron 登录；触屏交互因硬件不支持列为待办（[规格](../specs/virtual-companion.md)）；
    - 外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘），是备份中心评审中最大的缺口；
    - 账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；
    - 硬盘用途 M2（缺盘降级挂载、更换、接回后恢复冗余）与 M3（更改冗余方式、移除硬盘）；

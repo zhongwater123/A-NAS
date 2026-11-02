@@ -13,6 +13,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   ▼                                                       ▼
 产品服务（非特权，只监听 127.0.0.1:8080）
   ├── Auth / Files / Storage / Share / Jobs / Policy
+  ├── /api/v1/companion ── 成员活动、互动租约与 VNAS 对话引用（SQLite；该 API 无文件或模型执行能力）
   ├── Transfers（/api/v1/uploads 的 tus 分片写入文件代理以用户身份创建的临时文件；下载按发送字节跟踪；ADR 0019）
   ├── /api/v1/media ── 影视中心：经文件代理以用户身份读取 ──► FFmpeg Worker（按连接启动，无网络、无数据卷）
   ├── Music（原地索引个人空间与 Shared 中的音频，经 Files 以成员身份读取；浏览器不能播放的格式经同一 FFmpeg Worker 探测与解码；ADR 0018）
@@ -182,6 +183,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 - [向量索引技术设计](vector-index.md)与 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)
 - [存储与文件架构](storage-and-files.md)
 - [Web 桌面结构与约定](web-desktop.md)
+- [虚拟伙伴与双端接续规格](../specs/virtual-companion.md)
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [基础存储 ADR](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md)
 - [相册与本地智能检索规格](../specs/photo-library.md)

@@ -139,6 +139,21 @@ jobs:
           ANAS_QDRANT_REQUIRED: "1"
         run: make check
 
+      # These are validated build outputs, not a replacement for the system installer.
+      - name: Upload Linux build outputs for companion review
+        if: ${{ needs.scope.outputs.docs-only != 'true' && github.event_name == 'pull_request' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: companion-linux-amd64
+          path: |
+            build/anas-api
+            build/anas-host-agent
+            build/anas-container-agent
+            build/.validated-build
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   race:
     name: Go tests with the race detector
     needs: scope

@@ -1,0 +1,64 @@
+schemas:
+  CompanionClientKind:
+    type: string
+    enum: [web, desktop]
+  CompanionClient:
+    type: object
+    additionalProperties: false
+    required: [clientId, kind]
+    properties:
+      clientId: { type: string, format: uuid }
+      kind: { $ref: "#/schemas/CompanionClientKind" }
+  CompanionLease:
+    type: object
+    additionalProperties: false
+    required: [clientId, kind, epoch, remainingMs]
+    properties:
+      clientId: { type: string, format: uuid }
+      kind: { $ref: "#/schemas/CompanionClientKind" }
+      epoch: { type: integer, minimum: 1 }
+      remainingMs: { type: integer, minimum: 1, maximum: 15000 }
+  CompanionState:
+    type: object
+    additionalProperties: false
+    required: [revision, character, quiet, playCount, active, pending, conversationId]
+    properties:
+      revision: { type: integer, minimum: 0 }
+      character: { type: string, enum: [naiwa, glow, chestnut] }
+      quiet: { type: boolean }
+      conversationId: { type: string, maxLength: 22, pattern: "^$|^[0-9]{8}_[0-9]{6}_[0-9a-f]{6}$", description: "Reference to this member's VNAS conversation, not its content." }
+      playCount: { type: integer, minimum: 0, maximum: 1000000000 }
+      active:
+        oneOf:
+          - { $ref: "#/schemas/CompanionLease" }
+          - { type: "null" }
+      pending:
+        oneOf:
+          - { $ref: "#/schemas/CompanionClient" }
+          - { type: "null" }
+  CompanionClaim:
+    type: object
+    additionalProperties: false
+    required: [clientId, kind, revision]
+    properties:
+      clientId: { type: string, format: uuid }
+      kind: { $ref: "#/schemas/CompanionClientKind" }
+      revision: { type: integer, minimum: 0 }
+  CompanionHolder:
+    type: object
+    additionalProperties: false
+    required: [clientId, epoch]
+    properties:
+      clientId: { type: string, format: uuid }
+      epoch: { type: integer, minimum: 1 }
+  CompanionAction:
+    type: object
+    additionalProperties: false
+    required: [clientId, epoch, eventId, type]
+    properties:
+      clientId: { type: string, format: uuid }
+      epoch: { type: integer, minimum: 1 }
+      eventId: { type: string, format: uuid }
+      type: { type: string, enum: [ball, quiet, wake, character, conversation] }
+      character: { type: string, enum: [naiwa, glow, chestnut] }
+      conversationId: { type: string, maxLength: 22, pattern: "^$|^[0-9]{8}_[0-9]{6}_[0-9a-f]{6}$", description: "Set or clear the shared task reference. Only with type conversation." }

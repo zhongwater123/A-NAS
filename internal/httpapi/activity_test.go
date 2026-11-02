@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/companion"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
@@ -99,11 +100,17 @@ func newActivityFixture(t *testing.T, photoAPI func(*photos.Service, *accounts.S
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = settings.Close() })
+	companionStore, err := companion.Open(filepath.Join(dir, "companion.db"), companion.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = companionStore.Close() })
 	photoHandler := photoAPI(photoService, accountService)
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService, Files: fileService,
 		Photos: photoHandler, Family: familyAPI(t, dir, accountService, photoHandler), Personalization: settings,
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Companion: companionStore,
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	return &activityFixture{t: t, handler: handler, accounts: accountService, files: fileService, photos: photoService,
 		client: &contractClient{t: t, handler: handler}}

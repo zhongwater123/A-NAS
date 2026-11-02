@@ -1,4 +1,4 @@
-import { ArrowDownUp, FolderClosed, Music2, Settings, Share2, ShoppingBag, Trash2 } from "lucide-react";
+import { ArrowDownUp, FolderClosed, Music2, Settings, Share2, ShoppingBag, Sparkles, Trash2 } from "lucide-react";
 import { createContext, ReactNode, use } from "react";
 
 import type { Session, User } from "../api.generated";
@@ -21,6 +21,7 @@ import type { HostStateView } from "./useHostState";
 // needs only the apps' icons and shows a spinner in the window until then.
 const AppCenterPanel = lazyCode(() => import("../appcenter/AppCenterPanel").then((module) => module.AppCenterPanel));
 const AssistantPanel = lazyCode(() => import("../assistant/AssistantPanel").then((module) => module.AssistantPanel));
+const CompanionPanel = lazyCode(() => import("../companion/CompanionPanel").then((module) => module.CompanionPanel));
 const BackupCenter = lazyCode(() => import("../backup/BackupCenter").then((module) => module.BackupCenter));
 const FamilyPanel = lazyCode(() => import("../family/FamilyPanel").then((module) => module.FamilyPanel));
 const DockerPanel = lazyCode(() => import("../docker/DockerPanel").then((module) => module.DockerPanel));
@@ -42,7 +43,7 @@ export interface WindowIntentPayloads {
   // The App Center's 在 Docker 中查看 opens Docker on that app's containers.
   docker: { project: string };
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
-  assistant: { sessionId?: string; title?: string };
+  assistant: { sessionId?: string; title?: string; kind?: "conversation" | "task" };
 }
 // The intents waiting for their windows. Every request is a new object, so a
 // window sees a request for the place it already shows. The window hands back
@@ -282,6 +283,20 @@ const definitions = {
         onShowPhoto={(assetId) => open("photos", { assetId })}
         intent={intents.assistant}
         onIntentHandled={(handled) => intentHandled("assistant", handled)}
+      />
+    ),
+  },
+  companion: {
+    title: "伙伴小窝",
+    icon: Sparkles,
+    tone: "ai",
+    bounds: { x: 290, y: 48, width: 680, height: 760 },
+    launcher: { id: "companion", keywords: "伙伴 桌宠 小窝 陪伴 companion pet" },
+    render: ({ session, open }) => (
+      <CompanionPanel
+        userId={session.user.id}
+        connected
+        onOpenConversation={(id) => open("assistant", { sessionId: id, kind: "conversation" })}
       />
     ),
   },

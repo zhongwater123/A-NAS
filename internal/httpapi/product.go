@@ -14,6 +14,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/accountsapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
+	"github.com/zhongwater123/A-NAS/internal/companion"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
@@ -82,6 +83,8 @@ type ProductDependencies struct {
 	// Personalization keeps the device-wide 个性化 settings and wallpaper;
 	// nil answers personalization_unavailable.
 	Personalization *personalization.Store
+	// Companion stores only this member's small activity and interaction lease.
+	Companion *companion.Store
 	// FilesChanged, when set, is told after a Web upload, move, copy, delete
 	// or restore changed a space, so indexes over ordinary files (the media
 	// center) catch up without waiting for their periodic scan. The context

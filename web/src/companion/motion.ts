@@ -1,0 +1,34 @@
+export interface Point {
+  x: number;
+  y: number;
+}
+export interface Bounds {
+  width: number;
+  height: number;
+}
+
+export function inside(point: Point, bounds: Bounds): Point {
+  return {
+    x: Math.max(0, Math.min(Math.max(0, bounds.width), Number.isFinite(point.x) ? point.x : 0)),
+    y: Math.max(0, Math.min(Math.max(0, bounds.height), Number.isFinite(point.y) ? point.y : 0)),
+  };
+}
+
+export interface Flight {
+  position: Point;
+  velocity: Point;
+}
+
+// Small deterministic local flight, independent of renderer/React. Capped
+// elapsed time prevents a tab returning from suspension teleporting the pet.
+export function advanceFlight(flight: Flight, bounds: Bounds, seconds: number): Flight {
+  const dt = Math.max(0, Math.min(0.032, seconds));
+  const velocity = { x: flight.velocity.x * Math.exp(-2.4 * dt), y: flight.velocity.y + 900 * dt };
+  const next = { x: flight.position.x + velocity.x * dt, y: flight.position.y + velocity.y * dt };
+  if (next.x < 0 || next.x > bounds.width) velocity.x *= -0.55;
+  if (next.y < 0 || next.y > bounds.height) velocity.y *= -0.38;
+  const position = inside(next, bounds);
+  if (position.y === bounds.height && Math.abs(velocity.y) < 25) velocity.y = 0;
+  if (Math.abs(velocity.x) < 8) velocity.x = 0;
+  return { position, velocity };
+}

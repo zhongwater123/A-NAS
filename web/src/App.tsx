@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 import { onSessionEnded, setSession } from "./api/client";
 import type { Session } from "./api.generated";
@@ -8,8 +8,13 @@ import { PasswordChange } from "./auth/PasswordChange";
 import { Desktop } from "./desktop/Desktop";
 import { isLocalConsole, LocalConsoleScreenSaver } from "./desktop/LocalConsoleScreenSaver";
 import { transferStore } from "./transfers/store";
+import { lazyCode } from "./ui/lazyCode";
 import "./styles/index.css";
 import "./desktop/desktop.module.css";
+
+const CompanionDesktop = lazyCode(() =>
+  import("./companion/CompanionDesktop").then((module) => module.CompanionDesktop),
+);
 
 export default function App() {
   const [session, setSessionState] = useState<Session>();
@@ -63,6 +68,9 @@ export default function App() {
     });
   };
   const signedIn = Boolean(session && !session.user.mustChangePassword);
+  useEffect(() => {
+    if (!signedIn) window.companionDesktop?.expand();
+  }, [signedIn]);
   return (
     <>
       {!session ? (
@@ -72,6 +80,10 @@ export default function App() {
           onChanged={() => setSessionState({ ...session, user: { ...session.user, mustChangePassword: false } })}
           onLogout={signOut}
         />
+      ) : new URLSearchParams(window.location.search).get("companion") === "desktop" && window.companionDesktop ? (
+        <Suspense fallback={null}>
+          <CompanionDesktop key={session.user.id} userId={session.user.id} connected />
+        </Suspense>
       ) : (
         <Desktop
           session={session}

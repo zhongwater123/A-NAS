@@ -148,8 +148,8 @@ export function AssistantPanel({
   username: string;
   onShowPhoto?(assetId: string): void;
   /** What the desktop asks the window to show: a run of a scheduled task, or the tasks. */
-  intent?: { sessionId?: string; title?: string };
-  onIntentHandled?(handled: { sessionId?: string; title?: string }): void;
+  intent?: { sessionId?: string; title?: string; kind?: "conversation" | "task" };
+  onIntentHandled?(handled: { sessionId?: string; title?: string; kind?: "conversation" | "task" }): void;
 }) {
   const gateway = useAssistantGateway();
   const [sessions, setSessions] = useState<AssistantSession[]>([]);
@@ -394,13 +394,19 @@ export function AssistantPanel({
   const [intentBefore, setIntentBefore] = useState<typeof intent>();
   if (intentBefore !== intent) {
     setIntentBefore(intent);
-    if (intent?.sessionId) showRun(intent.sessionId, intent.title ?? "定时任务");
+    if (intent?.sessionId && intent.kind === "conversation") {
+      setRun(undefined);
+      setActiveId(intent.sessionId);
+      setView("chat");
+    } else if (intent?.sessionId) showRun(intent.sessionId, intent.title ?? "定时任务");
     else if (intent) setView("tasks");
   }
-  const intentHandled = useEffectEvent((handled: { sessionId?: string; title?: string }) => onIntentHandled?.(handled));
+  const intentHandled = useEffectEvent(
+    (handled: { sessionId?: string; title?: string; kind?: "conversation" | "task" }) => onIntentHandled?.(handled),
+  );
   useEffect(() => {
     if (!intent) return;
-    if (intent.sessionId) readRun(intent.sessionId);
+    if (intent.sessionId && intent.kind !== "conversation") readRun(intent.sessionId);
     intentHandled(intent);
   }, [intent]);
 

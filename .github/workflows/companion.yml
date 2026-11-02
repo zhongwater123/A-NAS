@@ -1,0 +1,116 @@
+name: Companion preview
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/companion.yml
+      - desktop/companion/**
+      - web/src/companion/**
+      - web/src/assistant/useAssistantThread*
+      - web/companion.*
+      - web/package.json
+      - web/package-lock.json
+      - internal/companion/**
+      - internal/companionapi/**
+      - api/components/companion.yaml
+      - api/paths/companion.yaml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  protocol:
+    name: Companion protocol (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: .go-version
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/companion/package-lock.json
+      - name: Install clients and the test browser
+        run: |
+          npm ci --prefix web --no-audit
+          npm ci --prefix desktop/companion --no-audit
+          cd desktop/companion
+          npx playwright install --with-deps chromium
+      - name: Check member authorization and the companion API
+        run: go test -race ./internal/companion ./internal/companionapi ./internal/httpapi -run 'TestCompanion|TestHandoff|TestDisconnected|TestMembers|TestConcurrentClaims|TestInvalidCommands|TestConversationReference|TestOriginalDatabase|TestRoutePostures|TestEveryOperation'
+      - name: Check two surfaces and the original confirmation UI
+        env:
+          ANAS_TEST_BROWSER: chromium
+        run: |
+          npm test --prefix desktop/companion
+          npm run smoke:handoff --prefix desktop/companion
+          npm run smoke:tasks --prefix desktop/companion
+      - name: Upload protocol evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: companion-protocol-evidence
+          path: |
+            desktop/companion/build/handoff
+            desktop/companion/build/tasks
+          if-no-files-found: warn
+          retention-days: 7
+
+  desktop:
+    name: Desktop package (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: macos-arm64
+            script: package:mac
+          - os: windows-latest
+            name: windows-x64
+            script: package:win
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/companion/package-lock.json
+      - name: Install, check policy and build the offline preview
+        run: |
+          npm ci --prefix web --no-audit
+          npm ci --prefix desktop/companion --no-audit
+          npm test --prefix desktop/companion
+          npm run companion:build --prefix web
+      - name: Build the desktop package
+        run: npm run ${{ matrix.script }} --prefix desktop/companion
+      # A zip inside the artifact preserves the macOS executable bits and symlinks.
+      - name: Archive the Mac app
+        if: ${{ runner.os == 'macOS' }}
+        run: ditto -c -k --sequesterRsrc --keepParent desktop/companion/build/A-NAS-Companion-darwin-arm64/A-NAS-Companion.app desktop/companion/build/companion-macos-arm64.zip
+      - name: Archive the Windows app
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: Compress-Archive -Path desktop/companion/build/A-NAS-Companion-win32-x64/* -DestinationPath desktop/companion/build/companion-windows-x64.zip
+      - name: Upload unsigned internal preview
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: companion-desktop-${{ matrix.name }}
+          path: |
+            desktop/companion/build/companion-*.zip
+            desktop/companion/README.md
+            web/src/companion/assets/NOTICE.md
+          if-no-files-found: error
+          retention-days: 7

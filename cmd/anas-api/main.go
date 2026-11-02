@@ -26,6 +26,7 @@ import (
 	fakeappstore "github.com/zhongwater123/A-NAS/internal/appstore/fake"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
+	"github.com/zhongwater123/A-NAS/internal/companion"
 	"github.com/zhongwater123/A-NAS/internal/containers"
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
@@ -286,6 +287,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeAtExit(logger, "personalization.db", personalizationStore)
+	companionStore, err := companion.Open(filepath.Join(stateDirectory, "companion.db"), companion.Options{})
+	if err != nil {
+		return err
+	}
+	defer closeAtExit(logger, "companion.db", companionStore)
 	transferService, err := transfers.Open(filepath.Join(stateDirectory, "transfers.db"), fileService, accountService, transfers.Options{
 		Sessions: accountService.RememberedSessions, FilesChanged: mediaService.SpaceChanged, Logger: logger,
 	})
@@ -328,6 +334,7 @@ func run(logger *slog.Logger) error {
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService, Personalization: personalizationStore,
+		Companion:    companionStore,
 		Terminal:     terminals,
 		Containers:   containersapi.New(containerManager, containerSource, logger),
 		Apps:         appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),

@@ -14,6 +14,7 @@ import type {
 } from "../../api.generated";
 import { healthyState, metricsState, session as sessionFixture } from "../fixtures";
 import { http, server } from "../server";
+import { companionHandlers } from "./companion";
 
 export const session = sessionFixture();
 
@@ -31,6 +32,7 @@ export interface ShellOptions {
 
 export function shellHandlers(options: ShellOptions = {}) {
   return [
+    ...companionHandlers(),
     http.get("/api/v1/setup/status", ({ response }) =>
       response(200).json({ setupRequired: false, setupAllowed: true, ...options.setup }),
     ),

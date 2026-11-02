@@ -42,6 +42,11 @@ paths:
   /api/v1/users/{userId}: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}" }
   /api/v1/users/{userId}/credential: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1credential" }
   /api/v1/local-display: { $ref: "paths/desktop.yaml#/~1api~1v1~1local-display" }
+  /api/v1/companion: { $ref: "paths/companion.yaml#/~1api~1v1~1companion" }
+  /api/v1/companion/claim: { $ref: "paths/companion.yaml#/~1api~1v1~1companion~1claim" }
+  /api/v1/companion/heartbeat: { $ref: "paths/companion.yaml#/~1api~1v1~1companion~1heartbeat" }
+  /api/v1/companion/release: { $ref: "paths/companion.yaml#/~1api~1v1~1companion~1release" }
+  /api/v1/companion/actions: { $ref: "paths/companion.yaml#/~1api~1v1~1companion~1actions" }
   /api/v1/wallpaper: { $ref: "paths/desktop.yaml#/~1api~1v1~1wallpaper" }
   /api/v1/wallpaper/image: { $ref: "paths/desktop.yaml#/~1api~1v1~1wallpaper~1image" }
   /api/v1/volumes: { $ref: "paths/storage.yaml#/~1api~1v1~1volumes" }
@@ -351,6 +356,13 @@ components:
     ViewingGrant: { $ref: "components/accounts.yaml#/schemas/ViewingGrant" }
     Session: { $ref: "components/accounts.yaml#/schemas/Session" }
     LocalDisplay: { $ref: "components/desktop.yaml#/schemas/LocalDisplay" }
+    CompanionState: { $ref: "components/companion.yaml#/schemas/CompanionState" }
+    CompanionClientKind: { $ref: "components/companion.yaml#/schemas/CompanionClientKind" }
+    CompanionClient: { $ref: "components/companion.yaml#/schemas/CompanionClient" }
+    CompanionLease: { $ref: "components/companion.yaml#/schemas/CompanionLease" }
+    CompanionClaim: { $ref: "components/companion.yaml#/schemas/CompanionClaim" }
+    CompanionHolder: { $ref: "components/companion.yaml#/schemas/CompanionHolder" }
+    CompanionAction: { $ref: "components/companion.yaml#/schemas/CompanionAction" }
     WallpaperStyle: { $ref: "components/desktop.yaml#/schemas/WallpaperStyle" }
     Wallpaper: { $ref: "components/desktop.yaml#/schemas/Wallpaper" }
     WallpaperStyleChange: { $ref: "components/desktop.yaml#/schemas/WallpaperStyleChange" }

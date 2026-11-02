@@ -55,6 +55,9 @@ import { closedWindow, windowReducer } from "./windows";
 // 家庭中心's hint loads after the desktop, so its code and styles stay out of
 // the first load.
 const FamilyNotices = lazyCode(() => import("../family/FamilyNotices").then((module) => module.FamilyNotices));
+const CompanionFloating = lazyCode(() =>
+  import("../companion/CompanionFloating").then((module) => module.CompanionFloating),
+);
 
 // SharesRail is the system rail with the count of shares that have something
 // new, which only the shares provider knows.
@@ -123,13 +126,23 @@ export function Desktop({
     },
     [onUserChange],
   );
-  const [windows, dispatch] = useReducer(windowReducer, undefined, () =>
-    windowIDs.map((id) => closedWindow(id, apps[id].bounds)),
-  );
+  const [windows, dispatch] = useReducer(windowReducer, undefined, () => {
+    const initial = windowIDs.map((id) => closedWindow(id, apps[id].bounds));
+    const target = new URLSearchParams(window.location.search).get("open");
+    return target === "companion" || target === "assistant"
+      ? windowReducer(initial, { type: "open", id: target })
+      : initial;
+  });
   const isOpen = (id: WindowID) => windows.some((window) => window.id === id && window.open);
   // Where other windows asked an app to go. Each request is a new object, so
   // asking for the same place twice shows it twice.
-  const [intents, setIntents] = useState<WindowIntents>({});
+  const [intents, setIntents] = useState<WindowIntents>(() => {
+    const query = new URLSearchParams(window.location.search);
+    const id = query.get("session");
+    return query.get("open") === "assistant" && id && /^[0-9]{8}_[0-9]{6}_[0-9a-f]{6}$/.test(id)
+      ? { assistant: { sessionId: id, kind: "conversation" } }
+      : {};
+  });
   const open = useCallback<OpenWindow>((id, intent?: object) => {
     if (intent) setIntents((current) => ({ ...current, [id]: { ...intent } }));
     dispatch({ type: "open", id });
@@ -316,6 +329,17 @@ export function Desktop({
         </ShellPart>
         <ShellPart name="feedback">
           <FeedbackChannel />
+        </ShellPart>
+        <ShellPart name="companion">
+          <Suspense fallback={null}>
+            <CompanionFloating
+              key={session.user.id}
+              userId={session.user.id}
+              onOpen={() => open("companion")}
+              onOpenConversation={(id) => open("assistant", { sessionId: id, kind: "conversation" })}
+              connected
+            />
+          </Suspense>
         </ShellPart>
       </main>
     </SharesProvider>

@@ -13,6 +13,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/appstoreapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
+	"github.com/zhongwater123/A-NAS/internal/companionapi"
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
 	"github.com/zhongwater123/A-NAS/internal/familyapi"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
@@ -69,6 +70,7 @@ func (h *productHandler) table() []apiroute.Route {
 		filesapi.New(h.Files, h.FilesChanged, logger),
 		filepreviewapi.New(h.FilePreviews, logger),
 		personalizationapi.New(h.Personalization, h.pictures, logger),
+		companionapi.New(h.Companion, logger),
 		musicapi.New(h.Music, logger),
 		activityapi.New(activityapi.Sources{Accounts: h.Accounts, Files: h.Files, Storage: h.Storage, Photos: h.photoActivitySource(), Logger: logger}),
 		systemlogapi.New(h.SystemLogs, string(h.DataSource), logger),

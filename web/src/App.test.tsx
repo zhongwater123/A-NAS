@@ -420,6 +420,23 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(screen.queryByText("登录已过期，请重新登录")).toBeNull();
   });
 
+  it("opens the companion from the authenticated desktop and recalls its page pet", async () => {
+    serveDesktop();
+    const user = userEvent.setup();
+    render(<App />);
+    const desktop = await screen.findByRole("region", { name: "桌面应用" });
+    await user.click(within(desktop).getByRole("button", { name: "打开伙伴小窝" }));
+    const home = await screen.findByRole("region", { name: "伙伴小窝" });
+    await waitFor(() => expect(within(home).getByRole("button", { name: "叫到这里" })).toBeEnabled());
+    await user.click(within(home).getByRole("button", { name: "叫到这里" }));
+    await waitFor(() => expect(within(home).getByRole("button", { name: "到网页桌面陪我" })).toBeEnabled());
+    await user.click(within(home).getByRole("button", { name: "到网页桌面陪我" }));
+    const pet = await screen.findByRole("complementary", { name: "网页桌宠" });
+    await user.click(within(pet).getByRole("button", { name: "回小窝" }));
+    expect(screen.queryByRole("complementary", { name: "网页桌宠" })).toBeNull();
+    expect(within(home).getByRole("button", { name: "和伙伴打招呼，按住可拖动" })).toBeTruthy();
+  });
+
   it("reorders desktop icons by dragging without opening the app", async () => {
     serveDesktop();
     render(<App />);

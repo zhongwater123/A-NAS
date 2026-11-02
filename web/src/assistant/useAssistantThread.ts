@@ -29,7 +29,7 @@ export interface AssistantThread {
 
 interface Callbacks {
   /** A conversation started here got its stored id. */
-  onCreated(storedId: string): void;
+  onCreated(storedId: string): void | Promise<void>;
   /** A turn ended, or the assistant renamed the conversation. */
   onChanged(): void;
   /**
@@ -125,6 +125,23 @@ export function useAssistantThread(
   callbacks: Callbacks,
 ): AssistantThread {
   const { client, generation, ready } = gateway;
+  const alive = useRef(true);
+  const submitting = useRef(false);
+  const pendingSubmission = useRef(false);
+  const sendGeneration = useRef(0);
+  const pendingWait = useRef<(() => void) | undefined>(undefined);
+  const invalidateSend = useCallback(() => {
+    sendGeneration.current++;
+  }, []);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      invalidateSend();
+      pendingWait.current?.();
+      pendingWait.current = undefined;
+    };
+  }, [invalidateSend]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // The conversation whose stored history has arrived; until it matches, the
   // thread is loading.
@@ -182,6 +199,8 @@ export function useAssistantThread(
       setLoadedFor(storedId);
       return;
     }
+    sendGeneration.current++;
+    pendingWait.current?.();
     adopt(undefined);
     replyId.current = undefined;
     setMessages([]);
@@ -209,8 +228,9 @@ export function useAssistantThread(
       .then((result) => {
         if (shown.current !== storedId) return;
         adopt(result.session_id);
+        setRunning(Boolean(result.running));
+        if (!result.running) void reload(storedId).catch(() => undefined);
         if (result.running) {
-          setRunning(true);
           updateReply((message) => message);
         }
       })
@@ -218,7 +238,7 @@ export function useAssistantThread(
         // Not resumable now; the history stays readable and sending tries again.
         resumed.current = { generation: -1 };
       });
-  }, [client, ready, generation, storedId, updateReply]);
+  }, [client, ready, generation, storedId, updateReply, reload]);
 
   const finishTurn = useCallback(
     (status: string, failure: boolean) => {
@@ -282,7 +302,13 @@ export function useAssistantThread(
 
   const send = useCallback(
     async (input: string) => {
-      if (!input.trim()) return;
+      if (!input.trim() || submitting.current || !alive.current) return;
+      submitting.current = true;
+      pendingSubmission.current = true;
+      const sentOn = ++sendGeneration.current;
+      const assertActive = () => {
+        if (!alive.current || sentOn !== sendGeneration.current) throw new DOMException("View changed", "AbortError");
+      };
       setError("");
       setMessages((list) => [
         ...list,
@@ -295,17 +321,18 @@ export function useAssistantThread(
         // A message sent while the instance still starts waits for it.
         if (!connected.current) {
           await new Promise<void>((resolve) => {
-            const off = client.on("gateway.ready", () => {
+            const done = () => {
               off();
               window.clearTimeout(timer);
+              pendingWait.current = undefined;
               resolve();
-            });
-            const timer = window.setTimeout(() => {
-              off();
-              resolve();
-            }, START_WAIT_MS);
+            };
+            const off = client.on("gateway.ready", done);
+            const timer = window.setTimeout(done, START_WAIT_MS);
+            pendingWait.current = done;
           });
         }
+        assertActive();
         let id = live.current;
         if (!id && shown.current) {
           id = (
@@ -315,31 +342,60 @@ export function useAssistantThread(
               omit_messages: true,
             })
           ).session_id;
+          assertActive();
           adopt(id);
         }
         if (!id) {
           const session = await client.request<SessionCreateResult>("session.create", { cols: COLS });
+          assertActive();
           id = session.session_id;
           adopt(id);
           created.current = session.stored_session_id;
           shown.current = session.stored_session_id;
-          notify.current.onCreated(session.stored_session_id);
+          try {
+            await notify.current.onCreated(session.stored_session_id);
+          } catch (error) {
+            // Do not reuse an unshared session on the next send.
+            if (created.current === session.stored_session_id && live.current === id) {
+              adopt(undefined);
+              created.current = undefined;
+              shown.current = storedId;
+            }
+            throw error;
+          }
         }
-        await notify.current.beforePrompt?.(id).catch(() => undefined);
+        assertActive();
+        await notify.current.beforePrompt?.(id);
+        assertActive();
+        pendingSubmission.current = false;
         await client.request("prompt.submit", { session_id: id, text: input });
       } catch {
+        if (!alive.current || sentOn !== sendGeneration.current) return;
         setError("VNAS 暂时没有响应，请稍后再试");
         updateReply((message) => ({ ...message, pending: false }));
         replyId.current = undefined;
         setRunning(false);
+      } finally {
+        submitting.current = false;
+        pendingSubmission.current = false;
       }
     },
-    [client, updateReply],
+    [client, updateReply, storedId],
   );
 
   const cancel = useCallback(() => {
-    if (live.current) void client.request("session.interrupt", { session_id: live.current }).catch(() => undefined);
-  }, [client]);
+    sendGeneration.current++;
+    pendingWait.current?.();
+    if (pendingSubmission.current || !live.current) {
+      setRunning(false);
+      updateReply((message) => ({ ...message, pending: false, interrupted: true }));
+      replyId.current = undefined;
+    }
+    if (live.current)
+      void client.request("session.interrupt", { session_id: live.current }).catch(() => {
+        if (alive.current) setError("停止请求未送达，请重连后确认任务状态");
+      });
+  }, [client, updateReply]);
 
   const loading = Boolean(storedId) && loadedFor !== storedId;
   return { messages, loading, running, error, liveId, send, cancel };

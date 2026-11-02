@@ -1,0 +1,97 @@
+/api/v1/companion:
+  get:
+    operationId: getCompanionState
+    summary: Read only the signed-in member's companion and active client
+    description: Does not create activity or renew a lease. Other members cannot be selected through this API.
+    responses:
+      "200":
+        description: This signed-in member's companion state and interaction lease
+        content:
+          application/json:
+            schema: { $ref: "../components/companion.yaml#/schemas/CompanionState" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/companion/claim:
+  post:
+    operationId: claimCompanion
+    summary: Ask the companion to come to this client
+    description: >-
+      Compare the current revision. If another client has an unexpired lease, this client becomes pending and
+      must wait for its release or expiry. An existing lease is never granted to two clients at once.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/companion.yaml#/schemas/CompanionClaim" } } } }
+    responses:
+      "200":
+        description: This signed-in member's companion state and interaction lease
+        content:
+          application/json:
+            schema: { $ref: "../components/companion.yaml#/schemas/CompanionState" }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/companion/heartbeat:
+  post:
+    operationId: renewCompanionLease
+    summary: Renew this client's still-valid interaction lease
+    description: Pending handoffs prevent renewal. A stale epoch or expired lease is rejected; it never silently reclaims ownership.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/companion.yaml#/schemas/CompanionHolder" } } } }
+    responses:
+      "200":
+        description: This signed-in member's companion state and interaction lease
+        content:
+          application/json:
+            schema: { $ref: "../components/companion.yaml#/schemas/CompanionState" }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/companion/release:
+  post:
+    operationId: releaseCompanion
+    summary: Stop here and hand over to the pending client or return home
+    description: The caller must stop its local interactions before sending this request. The epoch fences stale releases.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/companion.yaml#/schemas/CompanionHolder" } } } }
+    responses:
+      "200":
+        description: This signed-in member's companion state and interaction lease
+        content:
+          application/json:
+            schema: { $ref: "../components/companion.yaml#/schemas/CompanionState" }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/companion/actions:
+  post:
+    operationId: actWithCompanion
+    summary: Record a ball return or change the active companion's preferences
+    description: >-
+      Only the unexpired current holder may act; a pending handoff also stops writes. Retrying the same eventId
+      and command is idempotent within the most recent 256 recorded events. Reusing it with other contents fails.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/companion.yaml#/schemas/CompanionAction" } } } }
+    responses:
+      "200":
+        description: This signed-in member's companion state and interaction lease
+        content:
+          application/json:
+            schema: { $ref: "../components/companion.yaml#/schemas/CompanionState" }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
