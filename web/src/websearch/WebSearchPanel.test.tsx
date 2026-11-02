@@ -28,6 +28,8 @@ describe("网页搜索", () => {
     setSession();
     resetWebSearch();
     vi.restoreAllMocks();
+    // jsdom has no execCommand; the copy test puts one on the document.
+    Reflect.deleteProperty(document, "execCommand");
   });
 
   it("searches the web with the text in the body and links out", async () => {
@@ -110,7 +112,7 @@ describe("网页搜索", () => {
               results: [],
               answers: [],
               suggestions: [],
-              unresponsive: query.category === "web" ? ["百度", "必应", "搜狗"] : [],
+              unresponsive: query.category === "web" ? ["百度", "搜狗", "360 搜索"] : [],
             },
     });
     render(<WebSearchPanel />);

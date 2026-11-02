@@ -221,6 +221,7 @@ export function WebSearchPanel() {
       <div className={styles.wsBody} aria-busy={shown.loading !== undefined || undefined}>
         <Results
           shown={shown}
+          engines={status?.engines[shown.category] ?? []}
           onMore={() => run(shown.query, shown.category, shown.timeRange, shown.pages.length + 1)}
           onRetry={() => run(shown.query, shown.category, shown.timeRange, shown.pages.length + 1)}
           onSearch={searchFor}
@@ -236,12 +237,15 @@ export function WebSearchPanel() {
 
 function Results({
   shown,
+  engines,
   onMore,
   onRetry,
   onSearch,
   onCopied,
 }: {
   shown: Shown;
+  // The tab's engines, to tell no results from no engine answering.
+  engines: string[];
   onMore: () => void;
   onRetry: () => void;
   onSearch: (query: string) => void;
@@ -252,7 +256,6 @@ function Results({
   const first = pages[0];
   const last = pages.at(-1);
   const unresponsive = last?.unresponsive ?? [];
-  const engines = useWebSearch()?.engines[category] ?? [];
   const allSilent =
     last !== undefined && last.results.length === 0 && engines.length > 0 && unresponsive.length >= engines.length;
 

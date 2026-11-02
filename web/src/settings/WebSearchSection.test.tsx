@@ -32,7 +32,7 @@ describe("Settings → 网页搜索", () => {
     expect(webSearch).toBeChecked();
     expect(torrents).not.toBeChecked();
     expect(screen.getByText("运行中")).toBeInTheDocument();
-    expect(screen.getByText("百度、必应、搜狗")).toBeInTheDocument();
+    expect(screen.getByText("百度、搜狗、360 搜索")).toBeInTheDocument();
 
     await user.click(torrents);
     expect(await screen.findByRole("switch", { name: "种子搜索" })).toBeChecked();

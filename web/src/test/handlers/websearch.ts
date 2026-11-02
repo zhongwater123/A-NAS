@@ -10,7 +10,7 @@ import type {
 import { apiError, http } from "../server";
 
 const engines: WebSearchStatus["engines"] = {
-  web: ["百度", "必应", "搜狗"],
+  web: ["百度", "搜狗", "360 搜索"],
   images: ["百度图片"],
   videos: ["哔哩哔哩", "YouTube"],
   news: ["搜狗微信"],
