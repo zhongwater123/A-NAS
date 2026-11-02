@@ -1,7 +1,7 @@
 # 网页搜索的引擎实测
 
 状态：开发机完成（2026-10-30）；实验 NAS 上的实测待做
-更新时间：2026-10-30
+更新时间：2026-11-02
 
 ## 目的
 
@@ -58,12 +58,19 @@
 - 运行环境压缩包 57.7 MB，其中 SearXNG 源码包 6.6 MB；解开后 143 MB 左右的 Python 依赖，加上 SearXNG 本身。
 - 启动到可以回答 `/healthz` 用时 3.5–5.2 秒。
 - 内存（RSS）：空闲时 Granian 主进程约 28 MB，工作进程约 78 MB；测量的约 90 次请求之后工作进程约 126 MB。单元的上限 `MemoryMax=512M` 留有余量。
-- 启动后空闲时只建立过一个外部 TLS 连接（Cloudflare 的地址，来源待查），不随查询以外的时间增加。要在 NAS 上确认它属于哪个引擎的初始化，再决定是否需要处理。
+- 空闲时的外部连接：上面的测量中，启动后空闲时有过一个外部 TLS 连接（Cloudflare 的地址）。它来自默认启用的跟踪参数清除插件（`tracker_url_remover`）：插件初始化时从 cdn.jsdelivr.net 或 clearurls.xyz 下载 ClearURLs 规则，缓存放在 `/tmp`，而单元的 `PrivateTmp` 让每次启动都重新下载。
+
+## 据此做的调整（2026-11-02）
+
+- 不打开测量中从未返回结果的引擎：必应的四个引擎、搜狗图片、Yandex 图片，以及海盗湾以外的七个种子站。SearXNG 等最慢的引擎回答后才返回结果，所以打开 1337x 等不可达的站点会让每次种子搜索都等满 5 秒。它们不在 `keep_only` 中，也就不加载。百度与夸克的失败是测量方法造成的，保留。
+- SearXNG 设置中的 `plugins` 列表替换而不是合并它自带的列表（`searx/settings_loader.py`），所以设置只列出计算器、单位换算、时区与哈希四个插件，不再加载跟踪参数清除插件。
+- 用改过的设置重测启动：给 Python 的 `socket.connect` 与 `getaddrinfo` 加钩子，导入 `searx.webapp`（加载引擎与插件）后再空闲 15 秒，没有任何连接或域名解析。系统测试的 `ANAS_SYSTEM_TEST_SEARCH=real` 模式用单元的 IP 计数（`IPAccounting=yes`）检查同一件事。
+- 经 Unix 套接字到达的请求没有对端地址，SearXNG 的机器人检测为每个请求记一条 `ERROR`。release 中的 WSGI 入口（[`deploy/search/anas_search.py`](../../deploy/search/anas_search.py)）为这类请求填上 `127.0.0.1`；SearXNG 的限流本来就关闭，这个地址不参与任何判断。
 
 ## 下一步
 
-1. 在实验 NAS 上按真实使用的节奏（一次查询，隔几十秒）重测全部候选，尤其是百度与夸克，并确认 NAS 的出口。
-2. 按 NAS 上的结果调整 [`internal/websearch`](../../internal/websearch/websearch.go) 的引擎表与 [`deploy/search/settings.yml`](../../deploy/search/settings.yml) 的 `keep_only`。在上游修好之前，可以考虑拿掉一直没有结果的必应引擎。
+1. 在实验 NAS 上按真实使用的节奏（一次查询，隔几十秒）重测已打开的引擎，尤其是百度与夸克，并确认 NAS 的出口。暂不打开的引擎不随 release 加载，需要重新评估时在开发机按同样的方法测量。
+2. 按 NAS 上的结果调整 [`internal/websearch`](../../internal/websearch/websearch.go) 的引擎表与 [`deploy/search/settings.yml`](../../deploy/search/settings.yml) 的 `keep_only`；两者由 [`settings_test.go`](../../internal/websearch/settings_test.go) 保持一致。
 
 ## 关联
 

@@ -1,7 +1,7 @@
 # 网页搜索
 
 状态：draft
-更新时间：2026-10-30
+更新时间：2026-11-02
 
 ## 目标
 
@@ -21,15 +21,17 @@
 
 ## 默认引擎
 
-首个 release 的候选列表如下，以实验 NAS 上的实测为准，表现差的不打开。Google 在上游仍不稳定，默认不打开。
+首个 release 打开下列引擎。它们在开发机的实测中返回过结果，实验 NAS 上的实测可能再调整（[引擎实测](../research/web-search-engines.md)）。
 
 | 分类 | 引擎 |
 |---|---|
-| 网页 | 百度、必应、搜狗、360 搜索、夸克、Yandex |
-| 图片 | 百度图片、必应图片、搜狗图片、夸克图片、Yandex 图片 |
-| 视频 | 哔哩哔哩、爱奇艺、AcFun、搜狗视频、360 视频、必应视频、YouTube、Dailymotion |
-| 资讯 | 必应资讯、搜狗微信 |
-| 种子（默认关闭） | 海盗湾、1337x、nyaa、BT4G、BTDigg、SolidTorrents、Kickass、TokyoToshokan |
+| 网页 | 百度、搜狗、360 搜索、夸克、Yandex |
+| 图片 | 百度图片、夸克图片 |
+| 视频 | 哔哩哔哩、爱奇艺、AcFun、搜狗视频、360 视频、YouTube、Dailymotion |
+| 资讯 | 搜狗微信 |
+| 种子（默认关闭） | 海盗湾 |
+
+暂不打开：必应的四个引擎、搜狗图片（实测没有结果），Yandex 图片（引擎崩溃），1337x、nyaa、BT4G、BTDigg、SolidTorrents、Kickass、TokyoToshokan（站点不可达或拒绝访问），以及 Google（上游仍不稳定）。SearXNG 等最慢的引擎回答后才返回，所以不打开从不回答的引擎；它们也不加载。
 
 视频结果标明所在平台（如“哔哩哔哩”“爱奇艺”），点击在该平台打开。种子分类由管理员单独打开（用户 2026-10-30 要求支持，用于测试能力边界）。
 
@@ -101,10 +103,10 @@
 
 - 只有已登录的账号能搜索，未登录返回 401；成员与管理员的能力相同。搜索服务只经产品服务访问：它只监听一个只有产品服务能连接的 Unix 套接字，没有 TCP 端口。
 - 搜索词放在请求体中，从浏览器到产品服务、再到搜索服务都不进入 URL，因此不会出现在 Caddy、产品服务或浏览器的访问记录中。产品服务不记录搜索词，不写审计；搜索服务关闭查询日志与访问日志。
-- 没人搜索时搜索服务不访问外网：启动时就联网的插件与引擎不加载。
+- 没人搜索时搜索服务不访问外网：只加载上表的引擎，插件只加载计算器、单位换算、时区与哈希，不加载启动时下载规则的跟踪参数清除插件。
 - 每个账号最多连续搜索 10 次，之后每 2 秒一次，超过返回 429 和 `Retry-After`；被拒绝的搜索（无效、关闭、种子未开）不占次数。一次搜索在产品服务端最长等待 12 秒；单个引擎 5 秒超时，整次搜索 10 秒（SearXNG 的设置），超时的引擎计入“未响应”。
 - 搜索服务只能连接公网地址：本机、局域网、链路本地与其他保留地址都被拒绝，只放行设备当前使用的 DNS 服务器。这样它不能被结果中的地址利用来访问家里或公司内网的设备；系统测试证明这一点。
-- 缩略图代取只接受 SearXNG 为本次结果签名的地址，只返回图片类型，单张大小有上限；桌面的内容安全策略不为外部图片放开。
+- 缩略图代取只接受带 SearXNG 签名的地址，只返回图片类型，单张大小有上限；桌面的内容安全策略不为外部图片放开。签名是用安装时生成的密钥对图片地址做的 HMAC，不随搜索变化也不过期：签名只防止把代取当作任意地址的转发，不限制成员再次取一张见过的图片。远端拒绝或找不到的图片返回 404，前端显示占位图。
 - 结果中的标题、摘要与网址一律按纯文本显示；只有 `http`、`https` 地址显示为链接，“种子”分类另外允许 `magnet:` 链接。
 - 种子搜索的开关由产品服务执行并保存在产品服务的状态中：关闭时产品服务不向搜索服务请求这一分类，种子请求返回 403 和 `torrent_search_disabled`。
 - 管理员关闭后，搜索与缩略图接口都返回 403 和 `web_search_disabled`，搜索服务处于停止状态；打开开关时由 Host Agent 启动服务。
@@ -114,7 +116,7 @@
 
 - 产品服务：对 Fake SearXNG 的接口测试，覆盖结果映射（含种子的大小、做种数与磁力链接）、部分引擎未响应、全部未响应、超时、限流、两个开关的关闭状态与未登录。
 - Web：搜索、分类切换、翻页、未响应提示、空结果、种子分类的显示与消失、关闭状态与图标隐藏的组件测试。
-- 系统测试：搜索服务只有产品服务能连接；它无法连接回环、局域网与保留地址；DNS 服务器变化后允许列表随之更新；关闭开关后服务停止，升级后仍关闭。
+- 系统测试：搜索服务只有产品服务能连接；它无法连接回环、局域网与保留地址；DNS 服务器变化后允许列表随之更新；关闭开关后服务停止，升级后仍关闭；搜索服务无法启动时升级照常完成并给出提示。部署前用 `ANAS_SYSTEM_TEST_SEARCH=real` 跑一次，让真正的 SearXNG 在单元的沙箱中启动，核对加载的引擎与插件、启动后空闲时没有 IP 流量、日志中没有错误。
 - 实验 NAS：搜索服务能连接公网（门禁不访问外网，只在这里验证）；在 NAS 的实际网络下逐个测量候选引擎的成功率与耗时，结果写入研究记录，作为默认引擎列表的依据。
 
 ## 关联
@@ -122,5 +124,5 @@
 - 架构：[架构总览](../architecture/OVERVIEW.md)
 - ADR：[ADR 0030：网页搜索以内置的 SearXNG 服务提供](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)、[ADR 0016：相册 AI 随系统内置安装](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 - 代码：[`internal/websearch`](../../internal/websearch/websearch.go)、[`internal/websearchapi`](../../internal/websearchapi/websearchapi.go)、[Host Agent 的开关](../../internal/hostops/linux/websearch.go)、[搜索窗口](../../web/src/websearch/WebSearchPanel.tsx)、[设置分区](../../web/src/settings/WebSearchSection.tsx)、[SearXNG 的设置](../../deploy/search/settings.yml)、[服务单元](../../deploy/systemd/system/anas-search.service)
-- 测试：[领域测试](../../internal/websearch/websearch_test.go)、[接口契约测试](../../internal/httpapi/websearch_test.go)、[开关](../../internal/hostops/linux/websearch_test.go)、[窗口](../../web/src/websearch/WebSearchPanel.test.tsx)、[设置分区](../../web/src/settings/WebSearchSection.test.tsx)、[系统测试](../../scripts/system-test.sh)
+- 测试：[领域测试](../../internal/websearch/websearch_test.go)、[SearXNG 客户端](../../internal/websearch/searxng_test.go)、[设置与引擎表一致](../../internal/websearch/settings_test.go)、[接口契约测试](../../internal/httpapi/websearch_test.go)、[开关](../../internal/hostops/linux/websearch_test.go)、[窗口](../../web/src/websearch/WebSearchPanel.test.tsx)、[设置分区](../../web/src/settings/WebSearchSection.test.tsx)、[开关状态的读取](../../web/src/websearch/status.test.tsx)、[系统测试](../../scripts/system-test.sh)
 - 运行手册与研究：[启用网页搜索](../runbooks/enable-web-search.md)、[引擎实测](../research/web-search-engines.md)

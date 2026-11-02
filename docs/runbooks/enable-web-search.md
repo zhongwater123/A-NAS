@@ -1,7 +1,7 @@
 # 启用网页搜索
 
 状态：draft（系统测试覆盖服务边界；实验 NAS 待执行）
-更新时间：2026-10-30
+更新时间：2026-11-02
 
 ## 目的
 
@@ -18,8 +18,8 @@
 - **目标**：主机名 `a-nas-dev`，使用前按 [SSH 运行手册](bootstrap-experimental-nas-ssh.md)核对指纹。
 - **前提**：
   - 用户已同意部署本版本。
-  - 开发机已运行 `make check`，并按[本地环境](../development/testing.md#系统测试)跑过系统测试。
   - 开发机已用 `scripts/build-search-runtime.sh` 构建 [`deploy/search/searxng.json`](../../deploy/search/searxng.json) 固定的运行环境。
+  - 开发机已运行 `make check`，并按[本地环境](../development/testing.md#系统测试)跑过系统测试，其中一次带 `ANAS_SYSTEM_TEST_SEARCH=real`：默认的系统测试用替身代替 SearXNG，只有这一次让真正的 SearXNG 在单元的沙箱中启动，并核对它加载的引擎与插件、空闲时没有 IP 流量、日志中没有错误。
 - **风险**：
   - 这是第一个代成员访问外网的内置服务。实验 NAS 的出口是公司网络，公司网络能看到访问了哪些搜索引擎与种子站。
   - 测量时请求太快，引擎会对这个出口返回验证码，并在一段时间内影响所有人（[研究记录](../research/web-search-engines.md)）。测量只按下面的节奏进行。
@@ -37,6 +37,7 @@
    - 完成标准：暂存 release 中有 `search/settings.yml`、`search/searxng.json`、`search/runtime.json`、`search/allow-dns.sh`，`search/runtime.tar.gz` 链接到 `apps/a-nas/search-runtimes/`；暂存脚本已核对哈希。
 2. 以 root 按[实机配置手册的安装步骤](provision-v1.0.1-experimental-storage.md#安装系统服务)核对二进制哈希并运行安装器。
    - 预期：安装器创建 `a-nas-search` 账号，生成 `/etc/a-nas/search.env`，把运行环境解到 `/opt/a-nas/search-runtimes/<id>`，启用 `anas-search-dns.path` 与 `anas-search.service`，最后输出 `web search: active`。
+   - 网页搜索启动失败不会中止安装：产品自己的服务照常运行，安装器在最后输出 `web search did not start`。这时不继续后面的步骤，按提示用 `journalctl -u anas-search-dns -u anas-search -b` 查原因。
 3. 核对套接字、身份与网络边界。
    - 命令：`stat -c '%a %U %G' /run/a-nas-search /run/a-nas-search/search.sock`。
    - 预期：`750 a-nas-search a-nas-search` 与 `660 a-nas-search a-nas-search`。
@@ -44,6 +45,8 @@
    - 预期：列出 `/etc/resolv.conf` 中的 DNS 服务器（实验 NAS 当前为 `172.18.254.101` 与 `172.16.200.200`）。
    - 命令：`stat -c '%a %U %G' /etc/a-nas/search.env`。
    - 预期：`640 root a-nas`。
+   - 命令（还没有人搜索时）：`systemctl show -p IPEgressPackets --value anas-search`。
+   - 预期：`0`，服务启动后不访问外网。
 4. 在桌面上搜索一次，确认能访问公网。
    - 操作：打开“网页搜索”，搜索一个常见词，再切到“视频”。
    - 预期：有结果，视频有封面；结果上方的“未响应”只列出个别引擎。
