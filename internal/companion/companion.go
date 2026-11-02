@@ -125,7 +125,8 @@ type queryer interface {
 }
 
 func load(ctx context.Context, db queryer, owner string) (record, error) {
-	r := record{State: State{Character: "naiwa"}}
+	var r record
+	r.Character = "naiwa"
 	err := db.QueryRowContext(ctx, `SELECT revision, character, quiet, play_count, client, kind, epoch,
 lease_until, pending_client, pending_kind, conversation_id FROM companions WHERE owner = ?`, owner).
 		Scan(&r.Revision, &r.Character, &r.Quiet, &r.PlayCount, &r.client, &r.kind, &r.epoch,

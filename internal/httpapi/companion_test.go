@@ -54,12 +54,11 @@ func TestCompanionMemberScopeAndHandoff(t *testing.T) {
 	owner.do("POST", "/api/v1/companion/actions", string(actionJSON), nil, 200)
 	// A different member cannot mutate even if they know the active client/epoch.
 	alice.do("POST", "/api/v1/companion/actions", string(actionJSON), nil, 409)
-	other := decode(alice.do("GET", "/api/v1/companion", "", nil, 200).Body.Bytes())
 	conversation := companion.Action{ClientID: webID, Epoch: state.Active.Epoch, EventID: uuid.NewString(), Type: "conversation", ConversationID: "20261102_090000_abcdef"}
 	conversationJSON, _ := json.Marshal(conversation)
 	owner.do("POST", "/api/v1/companion/actions", string(conversationJSON), nil, 200)
 	alice.do("POST", "/api/v1/companion/actions", string(conversationJSON), nil, 409)
-	other = decode(alice.do("GET", "/api/v1/companion", "", nil, 200).Body.Bytes())
+	other := decode(alice.do("GET", "/api/v1/companion", "", nil, 200).Body.Bytes())
 	if other.ConversationID != "" || other.PlayCount != 0 || other.Active != nil {
 		t.Fatal("another member inherited progress")
 	}
