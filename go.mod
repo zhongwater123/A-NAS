@@ -32,7 +32,7 @@ require (
 	github.com/qdrant/go-client v1.20.1
 	github.com/razsteinmetz/go-ptn v1.0.0
 	github.com/tus/tusd/v2 v2.10.1
-	go.yaml.in/yaml/v4 v4.0.0-rc.4
+	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/crypto v0.58.0
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976
 	golang.org/x/image v0.47.0
