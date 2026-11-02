@@ -11417,10 +11417,7 @@ components:
           description: Whether the library recognises people and pets.
         texts:
           type: boolean
-          description: Whether the library reads the text in photos (documents
-          receipts: null
-          cards: null
-          screenshots).: null
+          description: 'Whether the library reads the text in photos: documents, receipts, cards, screenshots.'
         canSetPeople:
           type: boolean
           description: 'Whether the caller may turn people and pets, and reading text, on or off: the owner of a private library, an administrator for the shared library.'

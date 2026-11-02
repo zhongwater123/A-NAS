@@ -5664,7 +5664,7 @@ export interface components {
             createdAt: string;
             /** @description Whether the library recognises people and pets. */
             people?: boolean;
-            /** @description Whether the library reads the text in photos (documents */
+            /** @description Whether the library reads the text in photos: documents, receipts, cards, screenshots. */
             texts?: boolean;
             /** @description Whether the caller may turn people and pets, and reading text, on or off: the owner of a private library, an administrator for the shared library. */
             canSetPeople?: boolean;
