@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -62,16 +63,8 @@ var cardNumber = regexp.MustCompile(`\d[\d ]{14,22}\d`)
 // looksLikeBankCard: a card's few words, a bank's name and a number that
 // passes the Luhn check.
 func looksLikeBankCard(text string) bool {
-	if len([]rune(text)) > 300 || !(strings.Contains(text, "银行") || strings.Contains(text, "银联") ||
-		strings.Contains(strings.ToLower(text), "unionpay")) {
-		return false
-	}
-	for _, found := range cardNumber.FindAllString(text, -1) {
-		if luhn(found) {
-			return true
-		}
-	}
-	return false
+	bank := strings.Contains(text, "银行") || strings.Contains(text, "银联") || strings.Contains(text, "unionpay")
+	return bank && len([]rune(text)) <= 300 && slices.ContainsFunc(cardNumber.FindAllString(text, -1), luhn)
 }
 
 // Classify returns the document type the whole text shows, or Plain.

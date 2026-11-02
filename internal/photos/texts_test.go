@@ -97,6 +97,9 @@ func readings(t *testing.T, root string) []storedText {
 		}
 		found = append(found, text)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	return found
 }
 
