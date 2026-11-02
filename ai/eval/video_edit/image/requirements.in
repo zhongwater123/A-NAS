@@ -1,0 +1,8 @@
+# What the video edit harness reads inside its image: pipeline.yaml, the JSON
+# Schemas and the plans' OpenTimelineIO timelines. Locked by hash for Debian
+# 13's CPython 3.13 on x86_64:
+#   uv pip compile requirements.in --generate-hashes --python-version 3.13 \
+#     --python-platform x86_64-manylinux_2_40 --only-binary :all: -o requirements.lock
+pyyaml
+jsonschema
+opentimelineio
