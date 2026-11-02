@@ -13,6 +13,8 @@ def size(value):
         return "—"
     if value >= 10 * 2**30:
         return f"{value / 2**30:.1f} GiB"
+    if value < 2**20:
+        return f"{value / 2**10:,.0f} KiB"
     return f"{value / 2**20:,.0f} MiB"
 
 
@@ -171,10 +173,11 @@ def render_report(a, b, cases, header):
             peaks = [result["cases"][case]["memory_peak_bytes"] for case in chosen if case in result["cases"]]
             row.append(f"成功 {ok}/{len(chosen)}，相对耗时中位 {factor(middle)}，内存峰值最高 {size(max(peaks, default=None))}")
         providers.append(row)
+    commit = f"`{header['harness_commit'][:12]}`" if header["harness_commit"] else "无（试跑）"
     lines = [
         "# 视频剪辑方案测评报告",
         "",
-        f"口径 {header['method_version']} · 管线提交 `{header['harness_commit'][:12]}` · "
+        f"口径 {header['method_version']} · 管线提交 {commit} · "
         f"环境指纹 `{header['fingerprint'][:12]}` · 测试集清单 `{header['manifest_sha256'][:12]}`",
         "",
         "成片质量由项目人员盲评判断，本报告只有资源、耗时与链路。",

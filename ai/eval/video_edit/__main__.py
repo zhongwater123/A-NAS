@@ -118,11 +118,12 @@ def machine():
         return ""
 
     docker = executable("docker")
+    memory = field("/proc/meminfo", "MemTotal", ":").split()
     return {
         "arch": platform.machine(),
         "cpu": field("/proc/cpuinfo", "model name", ":"),
         "cpus": os.cpu_count(),
-        "memory_bytes": int(field("/proc/meminfo", "MemTotal", ":").split()[0] or 0) * 1024,
+        "memory_bytes": int(memory[0]) * 1024 if memory else 0,
         "os": field("/etc/os-release", "PRETTY_NAME", "="),
         "kernel": platform.release(),
         "docker": capture([docker, "version", "--format", "{{.Server.Version}}"]) or "",
@@ -224,7 +225,8 @@ def command_run(args):
         "method_version": METHOD_VERSION,
         "plan": pipeline["plan"],
         "harness_commit": commit or "",
-        "dev": changed,
+        # A subset of the cases or another time limit is a trial too, even from a clean commit.
+        "dev": changed or bool(args.cases or args.timeout_hours),
         "fingerprint": prepared["fingerprint"],
         "manifest_sha256": manifest_sha256,
         "manifest_release": document["release"],

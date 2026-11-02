@@ -170,16 +170,45 @@ class ManifestTest(unittest.TestCase):
 
 
 class BundleTest(unittest.TestCase):
-    def write_runs(self, runs):
-        for plan in ("A", "baseline"):
+    def write_runs(self, runs, name="A", **session):
+        for plan in (name, "baseline"):
             folder = os.path.join(runs, plan)
             os.makedirs(os.path.join(folder, "cases", "case-01", "harness"))
             host.write_json(os.path.join(folder, "session.json"), {
                 "method_version": "v1", "harness_commit": "abc", "dev": False, "fingerprint": "f", "manifest_sha256": "m",
-                "cases": ["case-01"], "machine": {"cpu": "x"}})
+                "cases": ["case-01"], "machine": {"cpu": "x"}, **session})
             host.write_json(os.path.join(folder, "prepare.json"), {"external": False})
             host.write_json(os.path.join(folder, "cases", "case-01", "harness", "run.json"), run_json())
-        os.makedirs(os.path.join(runs, "A", ".tmp"))
+        os.makedirs(os.path.join(runs, name, ".tmp"))
+
+    def pack(self, root, name, **session):
+        runs, bundle = os.path.join(root, "runs-" + name), os.path.join(root, name + ".tar")
+        self.write_runs(runs, name, **session)
+        with contextlib.redirect_stdout(io.StringIO()):
+            host.command_pack(argparse.Namespace(runs=runs, out=bundle))
+        return bundle
+
+    def test_two_bundles_must_share_their_method(self):
+        with tempfile.TemporaryDirectory() as root:
+            a = self.pack(root, "A")
+            same = self.pack(root, "B")
+            other = self.pack(root, "C", fingerprint="other")
+            trial = self.pack(root, "D", dev=True)
+
+            def pair(b, allow_dev=False):
+                work = tempfile.mkdtemp(dir=root)
+                return host.unpack_pair(argparse.Namespace(a=a, b=b, allow_dev=allow_dev), work)
+
+            (_a_dir, packed_a), (_b_dir, packed_b) = pair(same)
+            self.assertEqual((packed_a["plan"], packed_b["plan"]), ("A", "B"))
+            with self.assertRaises(SystemExit):
+                pair(other)
+            with self.assertRaises(SystemExit):
+                pair(a)
+            trial_a = self.pack(root, "E", dev=True)
+            with self.assertRaises(SystemExit):
+                host.unpack_pair(argparse.Namespace(a=trial_a, b=trial, allow_dev=False), tempfile.mkdtemp(dir=root))
+            host.unpack_pair(argparse.Namespace(a=trial_a, b=trial, allow_dev=True), tempfile.mkdtemp(dir=root))
 
     def test_a_bundle_round_trips_and_a_changed_file_fails(self):
         with tempfile.TemporaryDirectory() as root:
