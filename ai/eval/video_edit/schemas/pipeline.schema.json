@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zhongwater123/A-NAS/ai/eval/video_edit/schemas/pipeline.schema.json",
+  "title": "视频剪辑方案的链路说明（pipeline.yaml）",
+  "description": "docs/specs/video-edit-evaluation.md#方案目录。步骤按执行顺序排列，步骤 id 不能重复。",
+  "type": "object",
+  "required": ["version", "plan", "summary", "entry", "stages"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"const": 1, "description": "本结构的版本"},
+    "plan": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$", "description": "方案名：A、B 或 baseline"},
+    "summary": {"type": "string", "minLength": 1, "description": "一句话说明这套方案怎么剪"},
+    "entry": {
+      "type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1},
+      "description": "在 /plan 里运行的命令；管线在后面接 --case <case.json> --out /out"
+    },
+    "setup": {"type": "string", "minLength": 1, "description": "安装脚本，相对方案目录；只运行一次，把依赖和模型装进 /env"},
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "version", "license"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "version": {"type": "string", "minLength": 1},
+          "license": {"type": "string", "minLength": 1},
+          "source": {"type": "string"}
+        }
+      }
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "source", "sha256", "path", "license"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "source": {"type": "string", "minLength": 1, "description": "下载地址或仓库"},
+          "revision": {"type": "string"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "path": {"type": "string", "pattern": "^[^/]", "description": "安装后在 /env 里的相对路径"},
+          "license": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "stages": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "does", "inputs", "outputs", "uses", "runs_on", "sends_out", "on_failure"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "description": "trace.json 里这一步的 span 名"},
+          "category": {
+            "enum": ["decode", "segment", "understand", "arrange", "refine", "render", "check", "other"],
+            "description": "读取与解码、切分、理解、选择与编排、精修、渲染、检查、其他"
+          },
+          "does": {"type": "string", "minLength": 1},
+          "inputs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "outputs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "uses": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "工具、库或模型名"},
+          "runs_on": {"enum": ["nas-cpu", "nas-igpu", "lan-gpu", "cloud"]},
+          "sends_out": {
+            "type": "array",
+            "description": "离开宿主机的数据；没有就写 []",
+            "items": {
+              "type": "object",
+              "required": ["data", "to"],
+              "additionalProperties": false,
+              "properties": {
+                "data": {"type": "string", "minLength": 1},
+                "to": {"type": "string", "minLength": 1}
+              }
+            }
+          },
+          "on_failure": {"type": "string", "minLength": 1}
+        },
+        "if": {"properties": {"runs_on": {"enum": ["lan-gpu", "cloud"]}}},
+        "then": {"properties": {"sends_out": {"minItems": 1}}}
+      }
+    }
+  }
+}

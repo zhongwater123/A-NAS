@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zhongwater123/A-NAS/ai/eval/video_edit/schemas/case.schema.json",
+  "title": "测试用例（case-XX.json）",
+  "description": "一组素材和一份要求（#342）。素材与本文件放在同一个目录。",
+  "type": "object",
+  "required": ["id", "provider", "sources", "request", "license", "origin"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "pattern": "^case-\\d{2}$"},
+    "provider": {"enum": ["A", "B"]},
+    "sources": {
+      "type": "array", "minItems": 1,
+      "description": "一个长视频，或多段视频",
+      "items": {
+        "type": "object",
+        "required": ["file", "sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "file": {"type": "string", "pattern": "^case-\\d{2}-\\d+\\.[A-Za-z0-9]+$"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "required": ["target_seconds", "format", "instruction"],
+      "additionalProperties": false,
+      "properties": {
+        "target_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "format": {"type": "object", "description": "成片形式，例如 {\"music\": false, \"subtitles\": false}；每个用例自己定"},
+        "instruction": {"type": "string", "minLength": 1, "description": "一句话的文字要求"}
+      }
+    },
+    "license": {"type": "string", "minLength": 1},
+    "origin": {"type": "string", "minLength": 1}
+  }
+}
