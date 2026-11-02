@@ -40,7 +40,7 @@ READ = ["证件", "身份证", "银行卡", "驾驶证", "护照", "票据", "�
         "说明书", "试卷", "证书",
         # Family libraries also hold documents in English (receipts abroad,
         # forms); with Chinese queries alone, FUNSD's English forms were
-        # found 63% of the time.
+        # found 74% of the time at the 99% target.
         "document", "form", "receipt", "invoice", "ID card", "screenshot"]
 PHOTO = ["人物合影", "风景", "美食", "宠物", "街道", "建筑", "商店招牌", "商品包装", "室内", "孩子", "旅行"]
 TARGETS = (0.99, 0.98, 0.95, 0.90)
