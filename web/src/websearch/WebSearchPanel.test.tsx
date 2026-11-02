@@ -110,9 +110,11 @@ describe("网页搜索", () => {
           ? { status: 429, code: "too_many_searches" }
           : {
               results: [],
+              found: [],
               answers: [],
               suggestions: [],
               unresponsive: query.category === "web" ? ["百度", "搜狗", "360 搜索"] : [],
+              pending: 0,
             },
     });
     render(<WebSearchPanel />);
@@ -125,6 +127,59 @@ describe("网页搜索", () => {
 
     await user.click(screen.getByRole("tab", { name: "图片" }));
     expect(await screen.findByText("没有找到与“天气”相关的结果")).toBeInTheDocument();
+  });
+
+  it("shows the engines that answered first and adds the others' results below", async () => {
+    let release = () => {};
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    serve({
+      hold,
+      answer: (query) => {
+        const page = pageFor(query);
+        const [first, second] = page.results;
+        return [
+          { ...page, results: [first], unresponsive: [], pending: 2 },
+          {
+            ...page,
+            results: [second],
+            found: [{ url: first.url, engines: ["百度", "搜狗"] }],
+            suggestions: [],
+            pending: 0,
+          },
+        ];
+      },
+    });
+    render(<WebSearchPanel />);
+    await search("流浪地球");
+    const results = await screen.findByRole("list", { name: "搜索结果" });
+    expect(within(results).getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("还有 2 个引擎在搜索")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "更多结果" })).not.toBeInTheDocument();
+
+    release();
+    expect(await within(results).findByRole("link", { name: "流浪地球 第 2 条" })).toBeInTheDocument();
+    expect(within(results).getAllByRole("listitem")[0]).toHaveTextContent("百度、搜狗");
+    expect(screen.queryByText("还有 2 个引擎在搜索")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "更多结果" })).toBeInTheDocument();
+  });
+
+  it("keeps what came when a search breaks off, and searches that page again", async () => {
+    let cut = true;
+    const sent = serve({
+      answer: (query) => (cut ? { ...pageFor(query), pending: 3 } : pageFor(query)),
+    });
+    render(<WebSearchPanel />);
+    const user = await search("流浪地球");
+    expect(await screen.findByRole("alert")).toHaveTextContent("搜索中断，请重试");
+    expect(screen.getByRole("link", { name: "流浪地球 第 1 条" })).toBeInTheDocument();
+
+    cut = false;
+    await user.click(screen.getByRole("button", { name: "重试" }));
+    expect(await screen.findByRole("button", { name: "更多结果" })).toBeInTheDocument();
+    expect(sent.queries.at(-1)).toEqual({ q: "流浪地球", category: "web", page: 1 });
+    expect(screen.getAllByRole("link", { name: "流浪地球 第 1 条" })).toHaveLength(1);
   });
 
   it("counts many engines that did not answer instead of naming them all", async () => {

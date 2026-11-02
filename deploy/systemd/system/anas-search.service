@@ -21,11 +21,13 @@ Environment=PYTHONPATH=/opt/a-nas/current/search/runtime/lib/searxng:/opt/a-nas/
 Environment=PYTHONDONTWRITEBYTECODE=1
 # Granian serves SearXNG over HTTP on a socket only the Product Service, a
 # member of the a-nas-search group, reaches; there is no TCP port. Its access
-# log is off by default, and SearXNG logs no queries below debug level. A
-# page of video results proxies a few dozen thumbnails from slow hosts at
-# once, which four threads made wait about ten seconds.
+# log is off by default, and SearXNG logs no queries below debug level. The
+# Product Service asks each engine of a tab in a request of its own, about a
+# hundred for the web tab, and a page of results proxies dozens of
+# thumbnails; each request holds a thread while its engine answers, so a slow
+# engine must not keep the others waiting for one.
 ExecStart=/opt/a-nas/current/search/runtime/bin/granian --interface wsgi --uds /run/a-nas-search/search.sock \
-  --uds-permissions 0o660 --workers 1 --blocking-threads 12 --no-ws --log-level warning anas_search:application
+  --uds-permissions 0o660 --workers 1 --blocking-threads 160 --no-ws --log-level warning anas_search:application
 RuntimeDirectory=a-nas-search
 RuntimeDirectoryMode=0750
 UMask=0077

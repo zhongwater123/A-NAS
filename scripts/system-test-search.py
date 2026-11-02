@@ -70,23 +70,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.reply(403, b"", "text/plain")
             return
         query = form.get("q", [""])[0]
+        # The Product Service asks one engine a request: Sogou finds one
+        # result, Baidu times out.
+        engine = form.get("engines", [""])[0]
         result = {
             "url": "https://example.org/a-nas",
             "title": f"System test: {query}",
             "content": "A stand-in result.",
-            "engine": "sogou",
-            "engines": ["sogou"],
+            "engine": engine,
+            "engines": [engine],
+            "positions": [1],
             "category": "general",
             "template": "default.html",
         }
         body = {
             "query": query,
-            "results": [result],
+            "results": [result] if engine == "sogou" else [],
             "answers": [],
             "infoboxes": [],
             "suggestions": [],
             "corrections": [],
-            "unresponsive_engines": [["baidu", "timeout"]],
+            "unresponsive_engines": [["baidu", "timeout"]] if engine == "baidu" else [],
         }
         self.reply(200, json.dumps(body).encode(), "application/json")
 

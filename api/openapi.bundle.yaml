@@ -1726,8 +1726,8 @@ paths:
   /api/v1/web-search/query:
     post:
       operationId: searchWeb
-      summary: Search one tab's engines through the built-in SearXNG
-      description: The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off.
+      summary: Search one tab's engines through the built-in SearXNG, sending results as the engines answer
+      description: 'The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off. The answer is a stream: nothing is sent before the first update, so these errors keep their status.'
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -1738,11 +1738,13 @@ paths:
               $ref: '#/components/schemas/WebSearchQuery'
       responses:
         '200':
-          description: One page of results
+          description: 'One page of results as the tab''s engines answer, one WebSearchUpdate a line (newline-delimited JSON): the first about a second after the search starts, the last with pending 0. A connection that ends before that last update ended the search early.'
           content:
-            application/json:
+            application/x-ndjson:
               schema:
-                $ref: '#/components/schemas/WebSearchPage'
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebSearchUpdate'
         '400':
           $ref: '#/components/responses/ProductError'
         '401':
@@ -10044,20 +10046,28 @@ components:
           format: uri
         thumbnail:
           type: string
-    WebSearchPage:
+    WebSearchUpdate:
       type: object
       additionalProperties: false
+      description: Part of a page, sent as the tab's engines answer; each field holds only what is new since the update before.
       required:
         - results
+        - found
         - answers
         - suggestions
         - unresponsive
+        - pending
       properties:
         results:
           type: array
-          description: In the order to show them, the tab's engines taking turns, each with its own results in its own order.
+          description: 'To show after the results of the updates before: the engines that answered since take turns in the tab''s order, each with its own results in its own order.'
           items:
             $ref: '#/components/schemas/WebSearchResult'
+        found:
+          type: array
+          description: Results sent before that more engines have found since, with every engine that found them.
+          items:
+            $ref: '#/components/schemas/WebSearchFound'
         answers:
           type: array
           items:
@@ -10071,6 +10081,24 @@ components:
         unresponsive:
           type: array
           description: The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA).
+          items:
+            type: string
+        pending:
+          type: integer
+          minimum: 0
+          description: The tab's engines still searching; 0 in the last update.
+    WebSearchFound:
+      type: object
+      additionalProperties: false
+      required:
+        - url
+        - engines
+      properties:
+        url:
+          type: string
+          format: uri
+        engines:
+          type: array
           items:
             type: string
     WebSearchPackage:

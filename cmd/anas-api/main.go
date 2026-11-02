@@ -560,7 +560,7 @@ func configuredWebSearch(config Config, store *websearch.Store, operations produ
 		}
 		options.Switch = power
 	} else {
-		options.Backend, options.Switch, options.Secret = websearch.Fake{}, websearch.NewMemorySwitch(true), []byte(rand.Text())
+		options.Backend, options.Switch, options.Secret = websearch.Fake{Delay: websearch.FakeDelay}, websearch.NewMemorySwitch(true), []byte(rand.Text())
 	}
 	if config.WebSearch.Socket != "" {
 		options.Backend = websearch.NewSearXNG(config.WebSearch.Socket)

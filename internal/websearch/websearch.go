@@ -181,13 +181,15 @@ type Service struct {
 	catalogMu sync.Mutex
 	engines   catalog
 	enginesAt time.Time
+	// When the updates of a search go out (stream.go).
+	firstUpdate, updateGap time.Duration
 }
 
 func New(options Options) *Service {
 	return &Service{
 		backend: options.Backend, power: options.Switch, settings: options.Settings,
 		secret: options.Secret, thumbnailPath: options.ThumbnailPath, limiters: map[string]*rate.Limiter{},
-		now: time.Now,
+		now: time.Now, firstUpdate: firstUpdate, updateGap: updateGap,
 	}
 }
 
@@ -289,42 +291,6 @@ func (s *Service) SetSettings(ctx context.Context, settings Settings) (Status, e
 		return Status{}, err
 	}
 	return s.Status(ctx)
-}
-
-// Search runs one search for account. The query reaches SearXNG only in
-// the request body and is not logged.
-func (s *Service) Search(ctx context.Context, account string, query Query) (Page, error) {
-	if err := query.validate(); err != nil {
-		return Page{}, err
-	}
-	if err := s.enabled(ctx); err != nil {
-		return Page{}, err
-	}
-	if query.Category == Torrents {
-		torrents, err := s.torrents(ctx)
-		if err != nil {
-			return Page{}, err
-		}
-		if !torrents {
-			return Page{}, ErrTorrentsDisabled
-		}
-	}
-	if !s.limiter(account).Allow() {
-		return Page{}, ErrTooFrequent
-	}
-	engines, err := s.catalog(ctx)
-	if err != nil {
-		return Page{}, err
-	}
-	names := engines[query.Category]
-	if len(names) == 0 {
-		return emptyPage(), nil
-	}
-	response, err := s.backend.Search(ctx, query.form(names))
-	if err != nil {
-		return Page{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
-	}
-	return s.page(names, query.Category, response), nil
 }
 
 // catalog is the engines SearXNG loaded, read again once catalogMaxAge has

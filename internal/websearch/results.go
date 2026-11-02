@@ -59,16 +59,6 @@ type RawInfobox struct {
 	} `json:"urls"`
 }
 
-// Page is one page of a tab's results, as the window shows them.
-type Page struct {
-	Results     []Result `json:"results"`
-	Answers     []Answer `json:"answers"`
-	Infobox     *Infobox `json:"infobox,omitempty"`
-	Suggestions []string `json:"suggestions"`
-	// Unresponsive names the tab's engines that gave no results this time.
-	Unresponsive []string `json:"unresponsive"`
-}
-
 // Result is one result. Fields that do not apply to the tab are empty.
 type Result struct {
 	URL     string `json:"url"`
@@ -109,52 +99,25 @@ type Infobox struct {
 	Thumbnail string `json:"thumbnail,omitempty"`
 }
 
-func emptyPage() Page {
-	return Page{Results: []Result{}, Answers: []Answer{}, Suggestions: []string{}, Unresponsive: []string{}}
-}
-
-// page maps SearXNG's answer for a tab whose engines take turns in order.
-func (s *Service) page(order []string, category Category, response Response) Page {
-	page := emptyPage()
-	for _, raw := range interleave(response.Results, order) {
-		if result, ok := s.result(category, raw); ok {
-			page.Results = append(page.Results, result)
-		}
-	}
-	for _, raw := range response.Answers {
-		if answer, ok := decodeAnswer(raw); ok {
-			page.Answers = append(page.Answers, answer)
-		}
-	}
-	for _, raw := range response.Infoboxes {
-		if title := strings.TrimSpace(raw.Infobox); title != "" {
-			box := &Infobox{Title: title, Content: strings.TrimSpace(raw.Content), Thumbnail: s.thumbnail(raw.ImgSrc)}
-			for _, link := range append([]struct {
-				URL string `json:"url"`
-			}{{URL: raw.ID}}, raw.URLs...) {
-				if webAddress(link.URL) {
-					box.URL = link.URL
-					break
-				}
-			}
-			page.Infobox = box
-			break
-		}
-	}
-	for _, suggestion := range response.Suggestions {
-		if suggestion = strings.TrimSpace(suggestion); suggestion != "" {
-			page.Suggestions = append(page.Suggestions, suggestion)
-		}
-	}
-	for _, pair := range response.Unresponsive {
-		if len(pair) == 0 {
+// infobox is the first of SearXNG's infoboxes that has a title.
+func (s *Service) infobox(raws []RawInfobox) *Infobox {
+	for _, raw := range raws {
+		title := strings.TrimSpace(raw.Infobox)
+		if title == "" {
 			continue
 		}
-		if l := label(pair[0]); !slices.Contains(page.Unresponsive, l) {
-			page.Unresponsive = append(page.Unresponsive, l)
+		box := &Infobox{Title: title, Content: strings.TrimSpace(raw.Content), Thumbnail: s.thumbnail(raw.ImgSrc)}
+		for _, link := range append([]struct {
+			URL string `json:"url"`
+		}{{URL: raw.ID}}, raw.URLs...) {
+			if webAddress(link.URL) {
+				box.URL = link.URL
+				break
+			}
 		}
+		return box
 	}
-	return page
+	return nil
 }
 
 func (s *Service) result(category Category, raw RawResult) (Result, bool) {

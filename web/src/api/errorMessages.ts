@@ -107,6 +107,7 @@ const domains = {
     too_many_searches: "搜索太频繁，请稍后再试",
     web_search_unavailable: "网页搜索暂时不可用，请稍后再试",
     invalid_query: "搜索内容为空或太长",
+    search_interrupted: "搜索中断，请重试",
   },
   storage: {
     volume_busy: "数据卷正在转换，完成后才能加入新硬盘。",

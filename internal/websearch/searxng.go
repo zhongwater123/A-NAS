@@ -36,7 +36,8 @@ func NewSearXNG(socketPath string) *SearXNG {
 			var dialer net.Dialer
 			return dialer.DialContext(ctx, "unix", socketPath)
 		},
-		MaxIdleConns: 8, IdleConnTimeout: time.Minute,
+		// A search asks each of its tab's engines in a request of its own.
+		MaxIdleConns: 128, MaxIdleConnsPerHost: 128, IdleConnTimeout: time.Minute,
 	}
 	return &SearXNG{client: &http.Client{
 		Transport: transport,

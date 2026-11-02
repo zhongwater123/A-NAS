@@ -1,11 +1,13 @@
 // 网页搜索: the switches, a search of each tab, and SearXNG's license.
+import { HttpResponse } from "msw";
+
 import type {
   WebSearchCategory,
   WebSearchLicense,
-  WebSearchPage,
   WebSearchQuery,
   WebSearchSettings,
   WebSearchStatus,
+  WebSearchUpdate,
 } from "../../api.generated";
 import { apiError, http } from "../server";
 
@@ -45,10 +47,16 @@ export function webSearchStatus(enabled = true, torrents = false): WebSearchStat
   };
 }
 
-// pageFor answers a query of a tab with two results, or a page an option names.
-export function pageFor(query: WebSearchQuery): WebSearchPage {
+// pageFor answers a query of a tab with two results in one update.
+export function pageFor(query: WebSearchQuery): WebSearchUpdate {
   const page = query.page ?? 1;
-  const base = { answers: [], suggestions: page === 1 ? [`${query.q} 是什么`] : [], unresponsive: ["百度"] };
+  const base = {
+    found: [],
+    answers: [],
+    suggestions: page === 1 ? [`${query.q} 是什么`] : [],
+    unresponsive: ["百度"],
+    pending: 0,
+  };
   const results = [1, 2].map((n) => {
     const number = (page - 1) * 2 + n;
     const common = {
@@ -91,8 +99,10 @@ export function pageFor(query: WebSearchQuery): WebSearchPage {
 
 export interface WebSearchOptions {
   status?: WebSearchStatus;
-  // answer replaces pageFor, or returns an error code with its status.
-  answer?: (query: WebSearchQuery) => WebSearchPage | { status: 403 | 429 | 503; code: string };
+  // answer replaces pageFor with one update or several, or returns an error
+  // code with its status. With hold, the updates after the first wait for it.
+  answer?: (query: WebSearchQuery) => WebSearchUpdate | WebSearchUpdate[] | { status: 403 | 429 | 503; code: string };
+  hold?: Promise<void>;
   // license is the release's notice; null is a release without the runtime.
   license?: WebSearchLicense | null;
 }
@@ -125,7 +135,18 @@ export function webSearchHandlers(options: WebSearchOptions = {}) {
       sent.urls.push(request.url);
       const answer = options.answer?.(query) ?? pageFor(query);
       if ("code" in answer) return response(answer.status).json(apiError(answer.code));
-      return response(200).json(answer);
+      const updates = Array.isArray(answer) ? answer : [answer];
+      const encoder = new TextEncoder();
+      const body = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          for (const [index, update] of updates.entries()) {
+            if (index === 1) await options.hold;
+            controller.enqueue(encoder.encode(`${JSON.stringify(update)}\n`));
+          }
+          controller.close();
+        },
+      });
+      return response.untyped(new HttpResponse(body, { headers: { "Content-Type": "application/x-ndjson" } }));
     }),
     http.get("/api/v1/web-search/license", ({ response }) =>
       options.license === null
