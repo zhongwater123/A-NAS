@@ -80,7 +80,7 @@ done
 # Web search (ADR 0030): SearXNG's settings and pin, its runtime's manifest,
 # the DNS helper its units run, the units and the service's account.
 for file in anas-search-system.service anas-search-dns-system.service anas-search-dns-system.path a-nas-search.sysusers \
-  search/settings.yml search/searxng.json search/runtime.json search/allow-dns.sh; do
+  search/settings.yml search/searxng.json search/runtime.json search/allow-dns.sh search/anas_search.py; do
   if [[ ! -f "$source_release/$file" ]]; then
     echo "missing web search file: $source_release/$file" >&2
     exit 2
@@ -370,7 +370,7 @@ ln -s -- "${runtime_path[ai]}" "$temporary/ai/runtime"
 # run, and its runtime.
 install -d -o root -g root -m 0755 "$temporary/search"
 install -o root -g root -m 0644 "$source_release/search/settings.yml" "$source_release/search/searxng.json" \
-  "$source_release/search/runtime.json" "$temporary/search/"
+  "$source_release/search/runtime.json" "$source_release/search/anas_search.py" "$temporary/search/"
 install -o root -g root -m 0755 "$source_release/search/allow-dns.sh" "$temporary/search/"
 ln -s -- "${runtime_path[search]}" "$temporary/search/runtime"
 install -d -o root -g root -m 0755 "$temporary/vectors"
@@ -548,12 +548,6 @@ systemctl restart anas-ffmpeg.socket
 systemctl stop 'anas-vectors-proxy@*.service' 'anas-vectors@*.service'
 systemctl enable anas-vectors-proxy@a-nas-photos.socket
 systemctl restart anas-vectors-proxy@a-nas-photos.socket
-# Web search follows this release's runtime; its unit's condition keeps it
-# stopped while the administrator has turned it off.
-systemctl enable anas-search-dns.path anas-search.service
-systemctl restart anas-search-dns.path
-systemctl start anas-search-dns.service
-systemctl restart anas-search.service
 systemctl enable anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service
 restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service
@@ -564,10 +558,22 @@ if [[ "$lan_entry" == true ]]; then
   systemctl enable caddy.service
   systemctl reload-or-restart caddy.service
 fi
+# Web search follows this release's runtime; its unit's condition keeps it
+# stopped while the administrator has turned it off. It comes after the
+# product's own services and cannot fail the installation: the desktop
+# answers web_search_unavailable while it is down.
+web_search_failed=
+systemctl enable anas-search-dns.path anas-search.service || web_search_failed=1
+systemctl restart anas-search-dns.path || web_search_failed=1
+systemctl start anas-search-dns.service || web_search_failed=1
+systemctl restart anas-search.service || web_search_failed=1
 
 systemctl --no-pager --full status anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket
 # Stopped is a valid state for web search, which status would report as a failure.
 echo "web search: $(systemctl is-active anas-search.service || true)"
+if [[ -n "$web_search_failed" ]]; then
+  echo "web search did not start; see journalctl -u anas-search-dns -u anas-search -b (docs/runbooks/enable-web-search.md)" >&2
+fi
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must
 # keep CAP_SETUID and CAP_SETGID in its sandbox and prove the switch at startup

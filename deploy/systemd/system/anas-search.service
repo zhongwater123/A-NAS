@@ -15,14 +15,17 @@ Group=a-nas-search
 # SEARXNG_SECRET, generated once by the installer.
 EnvironmentFile=/etc/a-nas/search.env
 Environment=SEARXNG_SETTINGS_PATH=/opt/a-nas/current/search/settings.yml
-Environment=PYTHONPATH=/opt/a-nas/current/search/runtime/lib/searxng
+# SearXNG, and the release's WSGI entry in front of it (anas_search.py). The
+# runtime is read-only and its bytecode compiled when it was built.
+Environment=PYTHONPATH=/opt/a-nas/current/search/runtime/lib/searxng:/opt/a-nas/current/search
+Environment=PYTHONDONTWRITEBYTECODE=1
 # Granian serves SearXNG over HTTP on a socket only the Product Service, a
 # member of the a-nas-search group, reaches; there is no TCP port. Its access
 # log is off by default, and SearXNG logs no queries below debug level. A
 # page of video results proxies a few dozen thumbnails from slow hosts at
 # once, which four threads made wait about ten seconds.
 ExecStart=/opt/a-nas/current/search/runtime/bin/granian --interface wsgi --uds /run/a-nas-search/search.sock \
-  --uds-permissions 0o660 --workers 1 --blocking-threads 12 --no-ws --log-level warning searx.webapp:app
+  --uds-permissions 0o660 --workers 1 --blocking-threads 12 --no-ws --log-level warning anas_search:application
 RuntimeDirectory=a-nas-search
 RuntimeDirectoryMode=0750
 UMask=0077
@@ -59,6 +62,9 @@ IPAddressDeny=localhost link-local multicast
 IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24 192.88.99.0/24
 IPAddressDeny=192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 240.0.0.0/4
 IPAddressDeny=::/128 ::ffff:0:0/96 64:ff9b::/96 100::/64 2001::/23 2001:db8::/32 2002::/16 fc00::/7
+# `systemctl show -p IPEgressBytes anas-search` tells what it sent; nothing
+# while nobody searches, which the system test checks with SearXNG itself.
+IPAccounting=yes
 MemoryMax=512M
 
 [Install]

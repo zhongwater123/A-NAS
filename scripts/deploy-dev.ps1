@@ -245,6 +245,7 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\search\settings.yml'); Destination = "${target}:$release/search-settings.yml.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\search\searxng.json'); Destination = "${target}:$release/search-searxng.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\search\allow-dns.sh'); Destination = "${target}:$release/search-allow-dns.sh.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\search\anas_search.py'); Destination = "${target}:$release/search-anas_search.py.incoming" },
         @{ Source = $searchRuntimeManifestPath; Destination = "${target}:$release/search-runtime.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-v1.0.1-system-services.sh'); Destination = "${target}:$release/install-v1.0.1-system-services.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\provision-v1.0.1-rc.sh'); Destination = "${target}:$release/provision-v1.0.1-rc.sh.incoming" },

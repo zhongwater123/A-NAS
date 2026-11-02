@@ -194,7 +194,8 @@ stage() {
   done
   install -m 0644 /src/deploy/sysusers.d/a-nas-search.conf "$1/a-nas-search.sysusers"
   install -d "$1/search"
-  install -m 0644 /src/deploy/search/settings.yml /src/deploy/search/searxng.json "$search/runtime.json" "$1/search/"
+  install -m 0644 /src/deploy/search/settings.yml /src/deploy/search/searxng.json /src/deploy/search/anas_search.py \
+    "$search/runtime.json" "$1/search/"
   install -m 0755 /src/deploy/search/allow-dns.sh "$1/search/"
   ln -s "$search/runtime.tar.gz" "$1/search/runtime.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
@@ -1130,6 +1131,23 @@ check "a member does not reach web search" \
   denied as alice curl -fsS --unix-socket "$search_socket" http://localhost/healthz
 check "web search reads no data volume or Host Agent record" \
   denied nsenter -t "$(systemctl show -p MainPID --value anas-search)" -m ls /srv/a-nas/data /var/lib/a-nas-host
+if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" == real ]]; then
+  # SearXNG itself in its unit's sandbox: the release's engines and plugins
+  # loaded behind the WSGI entry, no IP traffic while nobody searched, and no
+  # error logged while it answered.
+  # shellcheck disable=SC2317,SC2329 # invoked through check
+  searxng_config() {
+    as_product curl -fsS --unix-socket "$search_socket" http://localhost/config |
+      jq -e '([.engines[].name] | sort) == (["360search", "360search videos", "acfun", "baidu", "baidu images", "bilibili", "dailymotion",
+        "iqiyi", "piratebay", "quark", "quark images", "sogou", "sogou videos", "sogou wechat", "youtube", "yandex"] | sort)
+        and ([.plugins[].name] | index("tracker_url_remover") == null)' >/dev/null
+  }
+  check "SearXNG answers in its sandbox with the release's engines and plugins" searxng_config
+  check "SearXNG sends nothing while nobody searches" \
+    test "$(systemctl show -p IPEgressPackets --value anas-search)" = 0
+  check "SearXNG logs no error for the Product Service's requests" \
+    test "$(journalctl -u anas-search -b -o cat --no-pager | grep -c 'ERROR' || true)" = 0
+fi
 if [[ "${ANAS_SYSTEM_TEST_SEARCH:-}" != real ]]; then
   # search_probe HOST PORT: what the stand-in, in web search's sandbox, got
   # when it connected there; direct_probe the same from outside any sandbox.
@@ -1181,6 +1199,8 @@ serve(socket.AF_INET, "0.0.0.0")' &
     check "web search cannot reach $target" kept_out "$host" "${target##*:}"
   done
   check "web search may reach a public address" test "$(search_probe 93.184.216.34 7777)" = connected
+  # The count the real mode expects to stay at zero sees that connection.
+  check "web search's IP traffic is counted" test "$(systemctl show -p IPEgressPackets --value anas-search)" -gt 0
   dns_server=$(awk '$1 == "nameserver" { print $2; exit }' /etc/resolv.conf)
   # shellcheck disable=SC2317,SC2329 # invoked through check
   dns_allowed() { systemctl show -p IPAddressAllow --value anas-search | grep -Fqw "$1"; }
@@ -1225,6 +1245,19 @@ check "web search stays stopped while turned off" test "$(systemctl is-active an
 check "an administrator turns web search on" web_search_switch true
 for _ in $(seq 1 40); do systemctl is-active --quiet anas-search && break; sleep 0.5; done
 check "turning it on starts the service" systemctl is-active --quiet anas-search
+# Web search that cannot start fails no upgrade: here its DNS helper fails,
+# the installer warns, and the product's own services run.
+stage /tmp/search-broken
+printf '#!/bin/sh\nexit 1\n' > /tmp/search-broken/search/allow-dns.sh
+# shellcheck disable=SC2317,SC2329 # invoked through check
+search_broken_install() {
+  bash /src/scripts/install-v1.0.1-system-services.sh /tmp/search-broken search-broken "$iface" >/tmp/search-broken.log 2>&1 &&
+    grep -Fq 'web search did not start' /tmp/search-broken.log
+}
+check "an upgrade finishes and warns when web search cannot start" search_broken_install
+for _ in $(seq 1 150); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
+check "the product's services run after that upgrade" \
+  systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares
 
 # --- Media center (ADR 0017): files are read as the user through the File
 # Broker; FFmpeg runs in a per-connection worker without network, data volume

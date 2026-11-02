@@ -154,6 +154,7 @@ install -d -m 0750 search
 install -m 0644 search-settings.yml.incoming search/settings.yml
 install -m 0644 search-searxng.json.incoming search/searxng.json
 install -m 0750 search-allow-dns.sh.incoming search/allow-dns.sh
+install -m 0644 search-anas_search.py.incoming search/anas_search.py
 install -m 0644 search-runtime.json.incoming search/runtime.json
 search_runtime_sha=$(manifest_field search/runtime.json sha256)
 search_runtime_file=$(manifest_field search/runtime.json file)
@@ -191,6 +192,7 @@ rm -f \
   search-settings.yml.incoming \
   search-searxng.json.incoming \
   search-allow-dns.sh.incoming \
+  search-anas_search.py.incoming \
   search-runtime.json.incoming \
   anas-api.incoming \
   anas-host-agent.incoming \
