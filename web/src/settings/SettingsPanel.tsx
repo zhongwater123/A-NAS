@@ -61,6 +61,7 @@ import type { StoragePlanFlow } from "./storagePlan";
 import { TerminalSection } from "./TerminalSection";
 import { TaskManagerSection } from "./taskmanager/TaskManagerSection";
 import type { SessionStatus } from "./terminal";
+import { WebSearchSection } from "./WebSearchSection";
 
 export { type StoragePlanFlow, useStoragePlan } from "./storagePlan";
 
@@ -72,7 +73,8 @@ export type SettingsSection =
   | "users"
   | "logs"
   | "terminal"
-  | "task-manager";
+  | "task-manager"
+  | "web-search";
 
 const systemSections: Array<{
   id: SettingsSection;
@@ -86,6 +88,7 @@ const systemSections: Array<{
   { id: "storage", label: "存储", icon: HardDrive, tone: "storage" },
   { id: "personalization", label: "个性化", icon: Palette, tone: "personalize", adminOnly: true },
   { id: "users", label: "用户与权限", icon: UsersRound, tone: "users", adminOnly: true },
+  { id: "web-search", label: "网页搜索", icon: Globe, tone: "accent", adminOnly: true },
   { id: "logs", label: "日志", icon: ScrollText, tone: "logs" },
   { id: "terminal", label: "终端", icon: SquareTerminal, tone: "terminal", adminOnly: true },
 ];
@@ -199,6 +202,7 @@ export function SettingsPanel({
               <StorageSection host={host} volumes={volumes} isAdmin={isAdmin} flow={storagePlan} />
             )}
             {current === "personalization" && <PersonalizationSection />}
+            {current === "web-search" && <WebSearchSection />}
             {current === "users" && (
               <UsersSection
                 currentUser={user}

@@ -1,0 +1,11 @@
+[Unit]
+Description=Let A-NAS web search reach this machine's DNS servers
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/adr/0030-ship-web-search-as-a-built-in-searxng-service.md
+# Runs before the search service starts and whenever /etc/resolv.conf changes
+# (anas-search-dns.path): the service may reach public addresses only, but
+# DHCP may hand out DNS servers in a private range.
+Before=anas-search.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/a-nas/current/search/allow-dns.sh

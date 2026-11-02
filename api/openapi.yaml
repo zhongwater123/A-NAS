@@ -75,6 +75,12 @@ paths:
   /api/v1/snapshots/{snapshotId}: { $ref: "paths/snapshots.yaml#/~1api~1v1~1snapshots~1{snapshotId}" }
   /api/v1/activity: { $ref: "paths/logs.yaml#/~1api~1v1~1activity" }
   /api/v1/system-logs: { $ref: "paths/logs.yaml#/~1api~1v1~1system-logs" }
+  /api/v1/web-search: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search" }
+  /api/v1/web-search/query: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1query" }
+  /api/v1/web-search/thumbnail: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1thumbnail" }
+  /api/v1/web-search/license: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1license" }
+  /api/v1/web-search/license/text: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1license~1text" }
+  /api/v1/web-search/source: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1source" }
   /api/v1/transfers: { $ref: "paths/transfers.yaml#/~1api~1v1~1transfers" }
   /api/v1/transfers/downloads: { $ref: "paths/transfers.yaml#/~1api~1v1~1transfers~1downloads" }
   /api/v1/transfers/{transferId}: { $ref: "paths/transfers.yaml#/~1api~1v1~1transfers~1{transferId}" }
@@ -384,6 +390,16 @@ components:
     SystemLogService: { $ref: "components/logs.yaml#/schemas/SystemLogService" }
     SystemLogEntry: { $ref: "components/logs.yaml#/schemas/SystemLogEntry" }
     SystemLogPage: { $ref: "components/logs.yaml#/schemas/SystemLogPage" }
+    WebSearchCategory: { $ref: "components/web-search.yaml#/schemas/WebSearchCategory" }
+    WebSearchStatus: { $ref: "components/web-search.yaml#/schemas/WebSearchStatus" }
+    WebSearchSettings: { $ref: "components/web-search.yaml#/schemas/WebSearchSettings" }
+    WebSearchQuery: { $ref: "components/web-search.yaml#/schemas/WebSearchQuery" }
+    WebSearchResult: { $ref: "components/web-search.yaml#/schemas/WebSearchResult" }
+    WebSearchAnswer: { $ref: "components/web-search.yaml#/schemas/WebSearchAnswer" }
+    WebSearchInfobox: { $ref: "components/web-search.yaml#/schemas/WebSearchInfobox" }
+    WebSearchPage: { $ref: "components/web-search.yaml#/schemas/WebSearchPage" }
+    WebSearchPackage: { $ref: "components/web-search.yaml#/schemas/WebSearchPackage" }
+    WebSearchLicense: { $ref: "components/web-search.yaml#/schemas/WebSearchLicense" }
     Transfer: { $ref: "components/transfers.yaml#/schemas/Transfer" }
     TransferLocation: { $ref: "components/transfers.yaml#/schemas/TransferLocation" }
     TransferFailure: { $ref: "components/transfers.yaml#/schemas/TransferFailure" }
