@@ -1,0 +1,154 @@
+# SearXNG's settings for A-NAS web search (ADR 0030, docs/specs/web-search.md).
+# The installer copies this file into the release, read-only; nothing on the
+# NAS changes it. Only the Product Service reaches the service, through its
+# Unix socket: it reads the loaded engines from /config and asks for each
+# tab's engines by name, which SearXNG answers whether or not an engine is
+# among its own defaults.
+use_default_settings:
+  engines:
+    # Every engine SearXNG ships is loaded, answering or not, except these
+    # (docs/research/web-search-engines.md):
+    remove:
+      # They need an API key or token, which A-NAS does not ask for (ADR 0030).
+      - "astrophysics data system"
+      - azure
+      - braveapi
+      - cloudflareai
+      - core.ac.uk
+      - deepl
+      - exaapi
+      - flickr_api
+      - freesound
+      - "github code"
+      - jina
+      - marginalia
+      - "springer nature"
+      - wolframalpha_api
+      - "yandex api"
+      - youtube_api
+      # They search .onion sites, which only Tor reaches.
+      - ahmia
+      - torch
+      # They search a service of one's own that A-NAS does not run.
+      - "Torznab EZTV"
+      - elasticsearch
+
+general:
+  instance_name: "A-NAS"
+
+search:
+  # Moderate, where an engine supports it.
+  safe_search: 1
+  autocomplete: ""
+  # The Product Service reads JSON; SearXNG's own pages are not offered.
+  formats:
+    - json
+  # SearXNG waits for the slowest engine of a search. An engine that times
+  # out or fails to connect, as many do from the NAS's network, sits out the
+  # next five minutes instead of the next five seconds.
+  ban_time_on_fail: 300
+  max_ban_time_on_fail: 300
+
+server:
+  # The secret comes from SEARXNG_SECRET, which the installer generates once
+  # and keeps in /etc/a-nas/search.env; it also signs thumbnail addresses.
+  limiter: false
+  public_instance: false
+  image_proxy: true
+  method: "POST"
+
+valkey:
+  url: false
+
+outgoing:
+  request_timeout: 5.0
+  max_request_timeout: 10.0
+
+# This list replaces SearXNG's own (searx/settings_loader.py): a plugin not
+# named here is not loaded. The tracker URL remover is left out because it
+# downloads its rules from a CDN at every start.
+plugins:
+  searx.plugins.calculator.SXNGPlugin:
+    active: true
+  searx.plugins.unit_converter.SXNGPlugin:
+    active: true
+  searx.plugins.time_zone.SXNGPlugin:
+    active: true
+  searx.plugins.hash_plugin.SXNGPlugin:
+    active: true
+
+# SearXNG ships these inactive, so they would not be loaded at all.
+engines:
+  - {name: avalw, inactive: false}
+  - {name: "chinaso news", inactive: false}
+  - {name: cl0q, inactive: false}
+  - {name: deviantart, inactive: false}
+  - {name: dogpile, inactive: false}
+  - {name: "dogpile images", inactive: false}
+  - {name: "dogpile videos", inactive: false}
+  - {name: "dogpile news", inactive: false}
+  - {name: ebay, inactive: false}
+  - {name: findborg, inactive: false}
+  - {name: "findborg images", inactive: false}
+  - {name: "findborg videos", inactive: false}
+  - {name: "findborg news", inactive: false}
+  - {name: grokipedia, inactive: false}
+  - {name: iseek, inactive: false}
+  - {name: "kavunka demo", inactive: false}
+  - {name: keenable, inactive: false}
+  - {name: kozmonavt, inactive: false}
+  - {name: kukei, inactive: false}
+  - {name: z-library, inactive: false}
+  - {name: libretranslate, inactive: false}
+  - {name: littlelayer, inactive: false}
+  - {name: luxxle, inactive: false}
+  - {name: "luxxle images", inactive: false}
+  - {name: "luxxle videos", inactive: false}
+  - {name: "luxxle news", inactive: false}
+  - {name: neocities, inactive: false}
+  - {name: openclipart, inactive: false}
+  - {name: piped, inactive: false}
+  # It shares piped's servers but not its frontend_url, without which it does
+  # not load.
+  - {name: piped.music, inactive: false, frontend_url: "https://srv.piped.video"}
+  - {name: pixiv, inactive: false}
+  - {name: rawweb, inactive: false}
+  - {name: searchrockit, inactive: false}
+  - {name: "searchrockit images", inactive: false}
+  - {name: "searchrockit news", inactive: false}
+  - {name: seekninja, inactive: false}
+  - {name: startpage, inactive: false}
+  - {name: "startpage news", inactive: false}
+  - {name: "startpage images", inactive: false}
+  - {name: tiger, inactive: false}
+  - {name: "tiger news", inactive: false}
+  - {name: tonline, inactive: false}
+  - {name: "tonline images", inactive: false}
+  - {name: "tonline videos", inactive: false}
+  - {name: "tonline news", inactive: false}
+  - {name: unobtanium, inactive: false}
+  - {name: "yahoo news", inactive: false}
+  - {name: mojeek, inactive: false}
+  - {name: "mojeek images", inactive: false}
+  - {name: "mojeek news", inactive: false}
+  - {name: neosearch, inactive: false}
+  - {name: repology, inactive: false}
+  - {name: searchzee, inactive: false}
+  - {name: "searchzee news", inactive: false}
+  - {name: startpagina, inactive: false}
+  - {name: "startpagina images", inactive: false}
+  - {name: "startpagina videos", inactive: false}
+  - {name: "startpagina news", inactive: false}
+  - {name: swisscows, inactive: false}
+  - {name: "swisscows images", inactive: false}
+  - {name: "swisscows videos", inactive: false}
+  - {name: "swisscows news", inactive: false}
+  - {name: wallhaven, inactive: false}
+  - {name: xonaly, inactive: false}
+  - {name: xprivo, inactive: false}
+  - {name: "xprivo news", inactive: false}
+  - {name: "xprivo videos", inactive: false}
+  - {name: sina, inactive: false}
+  - {name: metacrawler, inactive: false}
+  - {name: "zoo search", inactive: false}
+  - {name: s1search, inactive: false}

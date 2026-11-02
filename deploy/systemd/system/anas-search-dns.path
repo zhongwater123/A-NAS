@@ -1,0 +1,10 @@
+[Unit]
+Description=Follow the DNS servers A-NAS web search may reach
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/adr/0030-ship-web-search-as-a-built-in-searxng-service.md
+
+[Path]
+PathChanged=/etc/resolv.conf
+Unit=anas-search-dns.service
+
+[Install]
+WantedBy=paths.target
