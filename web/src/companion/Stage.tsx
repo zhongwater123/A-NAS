@@ -138,7 +138,7 @@ export function Stage({
     const width = stage.current?.clientWidth ?? 0;
     const height = stage.current?.clientHeight ?? 0;
     const size = floating ? 128 : 160;
-    return { width: Math.max(0, width - size), height: Math.max(0, height - size - 20) };
+    return { width: Math.max(0, width - size), height: Math.max(0, height - size - (floating ? 8 : 20)) };
   }, [floating]);
   const place = useCallback(
     (next: Point) => {
@@ -153,13 +153,13 @@ export function Stage({
     const reset = () => {
       stop();
       const space = bounds();
-      place({ x: space.width / 2, y: space.height - 15 });
+      place({ x: space.width / 2, y: floating ? space.height : space.height - 15 });
     };
     reset();
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(reset);
     observer?.observe(element);
     return () => observer?.disconnect();
-  }, [bounds, place, stop]);
+  }, [bounds, place, stop, floating]);
 
   const down = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0 || press.current) return;
