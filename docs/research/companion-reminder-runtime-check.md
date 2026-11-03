@@ -50,6 +50,27 @@
 
 可复核记录保存在本机被 Git 忽略的 `build/companion-review-20261102/`：`offline-reminder-raw.json`（原始预检失败）、`offline-reminder-validation.json`（明确记录纠正）、`final-state-validation.json`、`local-model-usage.jsonl` 与 Web 检查日志。模型日志只记消息数量和用量。当前 Mac 的运行时构建、配置和单次提醒测试脚本另保存在 `~/Projects/.anas-pr346-runtime/`；这些机器专用脚本不能直接拿到真实 NAS 上执行。
 
+## 主线同步与本地 Linux 门禁
+
+本地合并 main `41464cad`，解决六处冲突并由 `make api` 重新生成接口文件。主线的网页搜索、相册 OCR 分流与助手停用修复均保留；没有新建 PR。完整门禁验证提交为 `0b3f03107d58`。
+
+| 检查 | 结果 |
+| --- | --- |
+| `ANAS_QDRANT_REQUIRED=1 make check` | 通过，生成 `build/.validated-build`；包含真实 Qdrant 向量测试、完整 Go 测试、格式与静态检查、实时漏洞扫描和三个 Linux 二进制构建 |
+| `make race-test RACE_PARALLEL=1` | 通过，仍设置 `ANAS_QDRANT_REQUIRED=1`；原内存条件下已通过的包由 Go 测试缓存复用，相册服务在增加内存后实跑通过 |
+| Web | 87 个文件 / 643 项测试全部通过，typecheck、lint、生产构建及体积检查通过 |
+| Python | 72 项，15 项按原规则等待真实模型条件而跳过；Ruff 通过 |
+| 原生桌宠 | 通信策略 3 项通过，桌宠 renderer 重新构建通过 |
+| 页面回归 | 更新同一套独立 Fake 预览，登录仍有效；两条旧提醒均已完成、不再运行、运行记录各 1 条；查看结果打开原 VNAS 运行；捉迷藏和收花实际点通；没有新增模型请求 |
+
+检查在当前 Mac 的独立 Debian 13 ARM64 VM 原生 ext4 检出执行，Go 1.27.3、Node 26.9.0、ShellCheck 0.11.0、lychee 0.24.2、Ruff 0.17.1。Qdrant 使用官方同版本 ARM64 musl 发布包，归档 SHA-256 为 `bd8a458b8ef8006ce2c603c5bd6d1d973e39d787f794008dd959112e747c3bb7`，核对后验证 `qdrant 1.20.0` 可运行，并以 `ANAS_QDRANT_BINARY` 指定。没有改 x86_64 生产清单或关闭强制测试。
+
+环境初始缺 `make`、`jq`；2 GiB VM 上 Oxlint 的大块虚拟内存分配崩溃，Go 检查工具随后被内核 OOM 终止。补齐工具、增加 3 GiB 临时交换空间，并仅在门禁进程存续期间将此开发 VM 的 `vm.overcommit_memory` 从 0 调整到 1，退出已恢复 0；未修改产品单元、成员沙箱或检查规则。Oxlint 的同类限制见[上游记录](https://github.com/oxc-project/oxc/issues/20331)。完整检查还暴露两个依赖文件时间戳变化的测试准备问题；复现、修复及元数据缓存的能力边界见[原调查](../investigations/2026-10-14-file-preview-cache.md#linux-开发机的时间戳测试准备)。
+
+首次竞态检查中，相册服务两项后台 AI 用例因实际可用内存只有约 614–865 MiB、低于 1 GiB 保留量而超时；未报告数据竞争。将开发 VM 的物理内存从 2 GiB 增到 3 GiB，重启并恢复两套 Fake 预览、只读账号查询、审批代理、唤醒服务和模型通道后，重跑原竞态入口通过，相册服务实跑 1.919 秒；另以 `go test -race ./internal/photoservice -count=3` 连续三次通过。没有降低保留量、注入虚假资源读数或跳过失败用例。检查结束已清理临时交换文件，VM 保持 3 GiB 继续试玩。重启后网页登录和旧任务仍可读，模型目录返回 HTTP 200；没有追加推理调用。这不等同于真实 NAS 的安装或重启验收。
+
+本机 `build/companion-review-20261102/` 保存完整检查日志、校验清单、工具版本与归档哈希。最初的工具崩溃、OOM、测试失败及修复前后重复验证记录均保留，未用单独通过项替代完整门禁结果。
+
 ## 后续验收边界
 
 真实 NAS 继续按[内网验收手册](../runbooks/accept-virtual-companion.md#提醒与主动回报的运行时验收)检查重启、成员隔离、文件确认、跨设备已读和 Electron 登录；触屏维持硬件待办。本轮没有完成这些验收。

@@ -1,6 +1,6 @@
 # macOS 与 Colima 开发环境
 
-更新时间：2026-10-27
+更新时间：2026-11-03
 
 开发机 C 的配置与操作步骤。公共检查要求见[测试与验证](../testing.md)。
 
@@ -40,7 +40,7 @@ docker context use colima    # colima start 会把 Docker 上下文切到 colima
 
 ## 运行检查
 
-当前清单固定的是 Linux x86_64 Qdrant，不能直接作为这台 ARM64 虚拟机的原生二进制运行。这里尚无经过验证的兼容运行方案；完整门禁可交给 Windows/WSL 开发机或 CI 执行。Qdrant 的版本、路径和强制检查规则见[测试依赖](../testing.md#qdrant-测试依赖)。
+当前清单固定的是 Linux x86_64 Qdrant，不能直接作为这台 ARM64 虚拟机的原生二进制运行。2026-11-03 在当前 Mac 的另一套独立 Debian 13 ARM64 Lima VM 中，已用官方同版本 ARM64 二进制通过完整门禁，哈希与环境准备见[检查记录](../../research/companion-reminder-runtime-check.md#主线同步与本地-linux-门禁)；尚未据此验证 Colima 的系统测试容器与安装器。Qdrant 的版本、路径和强制检查规则见[测试依赖](../testing.md#qdrant-测试依赖)。
 
 下面的完整检查入口会强制要求 Qdrant，缺少时失败。只有在虚拟机中准备好同版本、确认能够运行的 Qdrant，并在 `~/.anas-env` 中导出绝对路径 `ANAS_QDRANT_BINARY` 后，才能用它验证全部目标。不要通过取消 `ANAS_QDRANT_REQUIRED` 来报告完整门禁通过。
 
