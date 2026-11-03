@@ -254,3 +254,11 @@ jobs:
 
       - name: Install the release under systemd and check every entry point
         run: make system-test
+
+      - name: Upload the failed system test's journal and logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: system-test-logs
+          path: build/system-test-logs
+          if-no-files-found: ignore

@@ -22,13 +22,12 @@ ExecStart=/bin/sleep infinity
 TimeoutStartSec=0
 EOF
 systemctl daemon-reload
-systemctl start --no-block anas-assistant-cron@bob.service || true
+check "a task for bob is queued to start" systemctl start --no-block anas-assistant-cron@bob.service
 for _ in $(seq 1 50); do
   [[ "$(systemctl show -p MainPID --value anas-assistant-cron@bob.service)" != 0 ]] && break
   sleep 0.1
 done
-check "a task is running before its owner is disabled" \
-  test "$(systemctl show -p MainPID --value anas-assistant-cron@bob.service)" -gt 0
+check "a task is running before its owner is disabled" running anas-assistant-cron@bob.service
 
 # Bob is signed in, so the Product Service keeps his instance running and starts
 # it again through his socket. A start queued while the disable stopped the units
@@ -47,7 +46,7 @@ ExecStartPost=
 ExecStop=/bin/sleep 2
 EOF
 systemctl daemon-reload
-systemctl restart anas-assistant@bob.service || true
+check "bob's assistant restarts with the test's slow stop" systemctl restart anas-assistant@bob.service
 check "bob's assistant is running before he is disabled" systemctl is-active --quiet anas-assistant@bob.service
 (
   while :; do
