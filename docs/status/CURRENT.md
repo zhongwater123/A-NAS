@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-10-30
+更新时间：2026-11-03
 
 本页只记当前事实与下一步。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，合并与部署的经过由 Git 与 PR 保存。
 
@@ -10,13 +10,16 @@
 
 ## 实验 NAS 上运行什么
 
-- 已部署：`4ec62e17c3b1`（主干上 PR #298 的合并提交，2026-10-28 安装，日志在 NAS 的 `/var/tmp/a-nas-deploy-4ec62e17c3b1.log`），包含此前合并的全部 PR；容器代理与 AI 助手试用包同版本。相册服务的向量索引已启用（Qdrant 1.20.0，相册 Catalog 为 14，[#266](https://github.com/zhongwater123/A-NAS/pull/266)），AI 运行环境为 `842b388a0f1987f5`。Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`（#249）。
+- 已部署：`771e5e30386a`（标签 [`v1.0.1-rc.6`](../releases/v1.0.1.md#rc6-状态)，主干上 PR #231 的合并提交，2026-11-03 安装，日志在 NAS 的 `/var/tmp/a-nas-deploy-771e5e30386a.log`），包含此前合并的全部 PR；容器代理与 AI 助手试用包同版本。
+  - 相册：向量索引（Qdrant 1.20.0，Catalog 14，[#266](https://github.com/zhongwater123/A-NAS/pull/266)）；读文字用 llama.cpp b11655 与 Qwen3.5-4B（#332、#348），后台只读被选出的照片。AI 运行环境 `842b388a0f1987f5`，AI Worker 的内存上限为总内存减 2.5 GiB（#321，实验 NAS 上 5150 MiB）。
+  - 家庭中心以 `a-nas-family` 运行（#329）；网页搜索已开启，SearXNG 以 `a-nas-search` 运行（#333，[启用手册](../runbooks/enable-web-search.md)）；温度与风扇转速由 `nct6775` 驱动读取（#325）。
+  - 解码沙箱改名为 FFmpeg Worker（`anas-ffmpeg.socket`，#305）。Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`（#249）。
 - AI 助手按[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)为全部成员开启，用云端模型，仅供开发测试。
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1（2026-10-20 在 #149 的早期构建上加入第二块盘）。
 - 已合并、尚未部署的 PR 不在本页列出：`git fetch` 后运行 `bash scripts/undeployed.sh`，由 Git 列出“已部署”之后合入 main 的 PR。
 - 本地控制台自 2026-10-28 以专用账号 `a-nas-kiosk` 运行（[#174](https://github.com/zhongwater123/A-NAS/issues/174)）。`anas-dev` 名下的旧 Chromium 配置文件还在，kiosk 至少重启过一次后按[迁移后的验证](../runbooks/operate-local-kiosk.md#迁移后的验证)删除。
-- 应用中心里的 Immich、OpenList 与思源笔记装于 [#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前，容器没有日志上限，卸载后重新安装才有；它们的数据可以丢弃。2026-10-28 重装 Immich 时 GHCR 的一次限流（429）让安装失败；拉取重试部署前，重装仍可能这样失败（[调查](../investigations/2026-10-28-registry-rate-limit-failed-install.md)）。
-- 本机屏幕 2026-10-29 装上 VA-API 驱动 `intel-media-va-driver`，屏保改由 GPU 解码，播放时 kiosk 会话从约 0.87 个核降到约 0.53 个核（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。剩下的开销与黑屏时约 0.27 个核的开销，大部分来自覆盖层下仍在渲染的桌面，要等 [#315](https://github.com/zhongwater123/A-NAS/pull/315) 部署后复测。
+- 应用中心 2026-11-03 只装有思源笔记。[#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前装的容器没有日志上限，卸载后重新安装才有；应用数据可以丢弃。镜像仓库限流时，安装会重试拉取（#317，[调查](../investigations/2026-10-28-registry-rate-limit-failed-install.md)），还没有在实机上遇到过。
+- 本机屏幕 2026-10-29 装上 VA-API 驱动 `intel-media-va-driver`，屏保改由 GPU 解码，播放时 kiosk 会话从约 0.87 个核降到约 0.53 个核（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。剩下的开销与黑屏时约 0.27 个核的开销，大部分来自覆盖层下仍在渲染的桌面。停止渲染下层的 [#315](https://github.com/zhongwater123/A-NAS/pull/315) 已随 rc.6 部署，待复测。
 
 ## 阻塞与外部条件
 
