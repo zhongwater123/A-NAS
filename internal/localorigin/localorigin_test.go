@@ -2,6 +2,7 @@ package localorigin_test
 
 import (
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -57,7 +58,7 @@ func TestCheckWrite(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest("POST", "/api/v1/containers/x/actions", nil)
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/containers/x/actions", nil)
 			request.Host = test.host
 			request.Header.Set("Content-Type", test.contentType)
 			if test.origin != "" {

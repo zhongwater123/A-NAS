@@ -139,7 +139,7 @@ func TestPrivateThreadsViewedStateAndRangeExpiry(t *testing.T) {
 		t.Fatalf("message %d %s", w.Code, w.Body.String())
 	}
 	url := base + "/entries/" + v.Entries[0].ID + "/content"
-	r := httptest.NewRequest("GET", url, nil)
+	r := httptest.NewRequest(http.MethodGet, url, nil)
 	r.Header.Set("Range", "bytes=1-3")
 	r = r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: "b"}))
 	w = httptest.NewRecorder()
