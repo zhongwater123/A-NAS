@@ -76,7 +76,23 @@
 - Given：一次搜索中，有的引擎超时、出错或要求验证码。
 - When：其他引擎返回了结果。
 - Then：结果照常显示，结果上方用一行灰字写出未响应的引擎，例如“百度、夸克未响应”；超过三个时只写“12 个引擎未响应”，点开列出名单。
-- And：引擎要求验证码时，SearXNG 暂停该引擎一段时间，A-NAS 不尝试绕过；暂停期间它也计入“未响应”。
+- And：引擎要求验证码时，A-NAS 不尝试绕过，而是暂停这个引擎（见“像人一样搜索”）。
+
+### 像人一样搜索
+
+全家共用一个公网地址。搜索网站发现这个地址搜得比人快，或者被拦下后还在搜，就会封它，家里手机、电脑直接上这些网站时也会遇到验证码。用户 2026-11-02 要求“不希望 IP 被封，策略要更像人搜的”。所以产品服务按一个人在键盘前搜索的样子询问每个引擎：
+
+- Given：家里有人在搜索。
+- When：同一个引擎在短时间内被问到（不论是哪个账号、搜什么）。
+- Then：每个引擎可以连续被问 3 次，像人修改搜索词那样；之后每 10 秒一次，等过的请求再随机晚 0～3 秒发出。轮不到的引擎排队，结果晚几秒出现；要等 20 秒以上的，这次不问它，结果上方写“搜狗搜索太频繁，本次跳过”（多于三个时写个数，点开列出名单）。
+- And：窗口里改了搜索词或关闭窗口，还在排队的请求不再发出，把轮次让给后面的搜索。
+- When：引擎的网站要求验证码、拒绝访问、说请求过多，或者返回引擎无法识别的页面（常是它不认识的验证页）。
+- Then：产品服务暂停这个引擎 1 小时，此后连续被拦每次加倍，最长 1 天；它再次正常回答后，记录清零。暂停期间所有搜索都不问它，结果上方写“百度被网站拦截，暂停中”。暂停记在产品服务的状态中，重启后仍然有效。
+- When：点“更多结果”。
+- Then：只问上一页有结果、而且能翻页的引擎；人只会在有结果的地方翻页。
+- When：同一个账号 10 分钟内再次搜索同一页（重试、返回）。
+- Then：已经回答过的引擎直接用它的回答，只问没有回答的引擎。这些回答不在账号之间共用：结果出现的快慢会让一个人知道另一个人搜过什么。
+- And：搜索词里的“!百度”“:en”“<3”等写法按普通文字搜索，不当作 SearXNG 的指令；否则“!bd 天气”会让每个引擎的请求都变成问百度，百度一次收到约 100 个相同的请求。
 
 ### 搜索中断
 
@@ -90,12 +106,14 @@
 - Then：显示“没有找到与“<关键词>”相关的结果”。
 - When：所有引擎都未响应（例如 NAS 无法访问外网）。
 - Then：显示“搜索引擎都没有响应，请稍后再试”和“重试”，不显示为“没有结果”。
+- When：没有回答的引擎中有暂停或本次跳过的。
+- Then：显示“搜索引擎暂时不可用，请稍后再试”和“重试”。
 
 ### 搜索太频繁
 
 - Given：一个账号刚连续搜索了 10 次。
 - When：再次搜索。
-- Then：显示“搜索太频繁，请稍后再试”，不向引擎发出请求。上限按账号计算，保护全家共用的出口地址不被引擎判为机器人。
+- Then：显示“搜索太频繁，请稍后再试”，不向引擎发出请求。这个上限按账号计算，保护产品服务与搜索服务；对每个引擎的节奏另见“像人一样搜索”。
 
 ### 设置中的网页搜索
 
@@ -103,6 +121,7 @@
 - When：打开“设置 → 网页搜索”。
 - Then：显示开关“网页搜索”及其状态（运行中、已停止、启动中），一行说明“搜索请求从这台 NAS 发往下列搜索引擎”和各分类的引擎数量，点开列出名单（只读；搜索服务运行后才能读到），以及“开源许可”：SearXNG 的名称、版本、AGPL-3.0 许可证全文与这一版本的源码下载，源码由 NAS 自己提供。
 - And：下面是第二个开关“种子搜索”，默认关闭，网页搜索关闭时不可操作；旁边一行写明“种子与文件站的结果多为未经授权的内容”。
+- And：网页搜索开启时，“暂停的引擎”列出被网站拦截而暂停的引擎、拦截方式与恢复时间，例如“百度 / 要求验证码，今天 15:30 恢复”；没有时写“没有被网站拦截的引擎”。管理员由此能看出出口地址是否已被搜索网站标记。
 - And：成员的设置中没有这一分区。
 
 ### 管理员关闭网页搜索
@@ -123,7 +142,9 @@
 - 只有已登录的账号能搜索，未登录返回 401；成员与管理员的能力相同。搜索服务只经产品服务访问：它只监听一个只有产品服务能连接的 Unix 套接字，没有 TCP 端口。
 - 搜索词放在请求体中，从浏览器到产品服务、再到搜索服务都不进入 URL，因此不会出现在 Caddy、产品服务或浏览器的访问记录中。产品服务不记录搜索词，不写审计；搜索服务关闭查询日志与访问日志。
 - 没人搜索时搜索服务不访问外网。引擎中只有 Radio Browser 在启动时用 DNS 查一次它的服务器；插件只加载计算器、单位换算、时区与哈希，不加载启动时下载规则的跟踪参数清除插件。
-- 每个账号最多连续搜索 10 次，之后每 2 秒一次，超过返回 429 和 `Retry-After`；被拒绝的搜索（无效、关闭、种子未开）不占次数。单个引擎 5 秒超时，最长 10 秒（SearXNG 的设置），产品服务等一个引擎最多 12 秒，超时的引擎计入“未响应”。SearXNG 要等它被问到的全部引擎回答后才返回，所以产品服务把分类中的每个引擎各作为一个请求同时发给 SearXNG（网页约 100 个），哪个先回答就先显示哪个；超时或连不上的引擎之后 5 分钟不再询问。
+- 每个账号最多连续搜索 10 次，之后每 2 秒一次，超过返回 429 和 `Retry-After`；被拒绝的搜索（无效、关闭、种子未开）不占次数。单个引擎 5 秒超时，最长 10 秒（SearXNG 的设置），产品服务等一个引擎最多 12 秒，超时的引擎计入“未响应”。SearXNG 要等它被问到的全部引擎回答后才返回，所以产品服务把分类中的每个引擎各作为一个请求同时发给 SearXNG（网页约 100 个），哪个先回答就先显示哪个；超时或连不上的引擎之后 5 分钟不再询问（SearXNG 自己的暂停，只在内存中）。
+- 每个搜索网站只看到发给它自己的请求，所以接入全部引擎不会让任何一个网站看到异常的流量；要管的是每个网站各自收到的节奏，见“像人一样搜索”。SearXNG 发出的请求在加密握手和请求头上模仿 Chrome（curl_cffi），不保留 cookie；它对发出的请求不限速，所以节奏由产品服务控制。产品服务按 SearXNG 用英文给出的未响应原因判断拦截（`settings.yml` 固定 SearXNG 的界面语言为英文）。
+- 引擎的暂停记录在 `web-search.db`；搜索结果只在产品服务内存中按账号保留 10 分钟、最多 32 次搜索，不写磁盘。
 - 搜索服务只能连接公网地址：本机、局域网、链路本地与其他保留地址都被拒绝，只放行设备当前使用的 DNS 服务器。这样它不能被结果中的地址利用来访问家里或公司内网的设备；系统测试证明这一点。
 - 缩略图代取只接受带 SearXNG 签名的地址，只返回图片类型，单张大小有上限；桌面的内容安全策略不为外部图片放开。签名是用安装时生成的密钥对图片地址做的 HMAC，不随搜索变化也不过期：签名只防止把代取当作任意地址的转发，不限制成员再次取一张见过的图片。远端拒绝或找不到的图片返回 404，前端显示占位图。
 - 结果中的标题、摘要与网址一律按纯文本显示；只有 `http`、`https` 地址显示为链接，“种子”分类另外允许 `magnet:` 链接。
@@ -137,12 +158,13 @@
 - Web：搜索、分类切换、翻页、未响应提示、空结果、种子分类的显示与消失、关闭状态与图标隐藏的组件测试。
 - 系统测试：搜索服务只有产品服务能连接；它无法连接回环、局域网与保留地址；DNS 服务器变化后允许列表随之更新；关闭开关后服务停止，升级后仍关闭；搜索服务无法启动时升级照常完成并给出提示。部署前用 `ANAS_SYSTEM_TEST_SEARCH=real` 跑一次，让真正的 SearXNG 在单元的沙箱中启动，核对加载的引擎与插件、启动后空闲时没有 IP 流量、日志中没有错误。
 - 产品服务：分类与 SearXNG 分类的对应、引擎读取与失败后的保留、结果的轮流排列，见领域测试。
+- 产品服务：搜索词中的 SearXNG 指令按文字搜索；每个引擎的节奏（不论账号）、等不到轮次的跳过、离开的搜索让出轮次；同一页再搜只问没回答的引擎、不跨账号；翻页只问上一页有结果的引擎；被拦截的暂停、加倍、重启后保留与回答后清零，见[节奏测试](../../internal/websearch/pace_test.go)。
 - 实验 NAS：搜索服务能连接公网（门禁不访问外网，只在这里验证）；在 NAS 的实际网络下逐个测量候选引擎的成功率与耗时，结果写入研究记录，作为默认引擎列表的依据。
 
 ## 关联
 
 - 架构：[架构总览](../architecture/OVERVIEW.md)
 - ADR：[ADR 0030：网页搜索以内置的 SearXNG 服务提供](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)、[ADR 0016：相册 AI 随系统内置安装](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)
-- 代码：[`internal/websearch`](../../internal/websearch/websearch.go)、[分类与引擎](../../internal/websearch/engines.go)、[`internal/websearchapi`](../../internal/websearchapi/websearchapi.go)、[Host Agent 的开关](../../internal/hostops/linux/websearch.go)、[搜索窗口](../../web/src/websearch/WebSearchPanel.tsx)、[设置分区](../../web/src/settings/WebSearchSection.tsx)、[SearXNG 的设置](../../deploy/search/settings.yml)、[服务单元](../../deploy/systemd/system/anas-search.service)
-- 测试：[领域测试](../../internal/websearch/websearch_test.go)、[SearXNG 客户端](../../internal/websearch/searxng_test.go)、[设置与引擎表一致](../../internal/websearch/settings_test.go)、[接口契约测试](../../internal/httpapi/websearch_test.go)、[开关](../../internal/hostops/linux/websearch_test.go)、[窗口](../../web/src/websearch/WebSearchPanel.test.tsx)、[设置分区](../../web/src/settings/WebSearchSection.test.tsx)、[开关状态的读取](../../web/src/websearch/status.test.tsx)、[系统测试](../../scripts/system-test.sh)
+- 代码：[`internal/websearch`](../../internal/websearch/websearch.go)、[分类与引擎](../../internal/websearch/engines.go)、[节奏、暂停与结果保留](../../internal/websearch/pace.go)、[`internal/websearchapi`](../../internal/websearchapi/websearchapi.go)、[Host Agent 的开关](../../internal/hostops/linux/websearch.go)、[搜索窗口](../../web/src/websearch/WebSearchPanel.tsx)、[设置分区](../../web/src/settings/WebSearchSection.tsx)、[SearXNG 的设置](../../deploy/search/settings.yml)、[服务单元](../../deploy/systemd/system/anas-search.service)
+- 测试：[领域测试](../../internal/websearch/websearch_test.go)、[节奏测试](../../internal/websearch/pace_test.go)、[SearXNG 客户端](../../internal/websearch/searxng_test.go)、[设置与引擎表一致](../../internal/websearch/settings_test.go)、[接口契约测试](../../internal/httpapi/websearch_test.go)、[开关](../../internal/hostops/linux/websearch_test.go)、[窗口](../../web/src/websearch/WebSearchPanel.test.tsx)、[设置分区](../../web/src/settings/WebSearchSection.test.tsx)、[开关状态的读取](../../web/src/websearch/status.test.tsx)、[系统测试](../../scripts/system-test.sh)
 - 运行手册与研究：[启用网页搜索](../runbooks/enable-web-search.md)、[引擎实测](../research/web-search-engines.md)
