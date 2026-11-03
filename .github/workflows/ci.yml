@@ -232,6 +232,11 @@ jobs:
       - name: Load the Btrfs module for the test's data volume
         run: sudo modprobe btrfs
 
+      # Real accounts, ACLs, Samba and loop-mounted Btrfs as root: the
+      # permission matrix, mirror conversion and the share ACL matrix (#190).
+      - name: Run the root integration tests in disposable containers
+        run: scripts/root-integration-test.sh anas-systemd:trixie
+
       # The release stages the pinned Qdrant tarball as deploy-dev.ps1 does.
       - name: Restore the pinned Qdrant server
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
