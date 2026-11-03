@@ -10,8 +10,15 @@ import (
 )
 
 // disableAssistant stops every way an assistant can run for a disabled member.
-// Masks also reject a start queued by the waker just before the disable; disabling
-// alone only removes boot/timer links and would still allow that start.
+//
+// Starts keep arriving while it runs: the Product Service keeps a signed-in
+// member's instance (its socket starts the instance again), and the waker
+// starts due tasks. In systemd a start queued after a stop job replaces it,
+// and systemctl then fails with "Job for … canceled" while the unit runs on.
+// So the units are masked before anything is stopped: from then on systemd
+// refuses those starts, and the stop jobs complete. Disabling, which starts no
+// jobs, comes first: systemctl leaves the boot and timer links of a unit that
+// is already masked.
 func (e *Executor) disableAssistant(ctx context.Context, username string) error {
 	templates := []string{
 		"anas-assistant@.service", "anas-assistant-api@.service", "anas-assistant-api@.socket",
@@ -31,9 +38,9 @@ func (e *Executor) disableAssistant(ctx context.Context, username string) error 
 		return nil
 	}
 	var failures []error
-	for _, action := range []string{"disable", "mask"} {
-		if output, err := e.runner.Run(ctx, "systemctl", append([]string{action, "--now"}, units...), ""); err != nil {
-			failures = append(failures, commandError(action+" assistant units", err, output))
+	for _, args := range [][]string{{"disable"}, {"mask", "--now"}} {
+		if output, err := e.runner.Run(ctx, "systemctl", append(args, units...), ""); err != nil {
+			failures = append(failures, commandError(args[0]+" assistant units", err, output))
 		}
 	}
 	return errors.Join(failures...)
