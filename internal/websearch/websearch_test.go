@@ -1,6 +1,7 @@
 package websearch
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -195,6 +196,28 @@ func TestResultsAreMappedForEachTab(t *testing.T) {
 	}
 	if strings.Join(page.Unresponsive, ",") != "爱奇艺,unknown" || strings.Join(page.Suggestions, ",") != "流浪地球 2" {
 		t.Fatalf("unresponsive %v, suggestions %v", page.Unresponsive, page.Suggestions)
+	}
+}
+
+func TestAnInfoboxShowsTheWordsOfItsContent(t *testing.T) {
+	// Jisho's infobox, as SearXNG answers it.
+	content := `<p><i>Other forms:</i> 猫</p>
+        <small><a href="https://www.edrdg.org/wiki/">JMdict</a>
+        and <a href="https://www.edrdg.org/enamdict/">JMnedict</a> by EDRDG, CC BY-SA 3.0.</small>
+        <ul><li><i>Noun</i>: cat</li><li><i>Noun</i>: shamisen &amp; geisha</li></ul><script>alert(1)</script>`
+	backend := &recordingBackend{responses: map[string]Response{"baidu": {Infoboxes: []RawInfobox{{Infobox: "ねこ", Content: content}}}}}
+	service := newTestService(t, backend, NewMemorySwitch(true))
+	page, err := search(service, "u1", Query{Text: "ねこ", Category: Web})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var box *Infobox
+	for _, update := range page.updates {
+		box = cmp.Or(box, update.Infobox)
+	}
+	want := "Other forms: 猫\nJMdict and JMnedict by EDRDG, CC BY-SA 3.0.\nNoun: cat\nNoun: shamisen & geisha"
+	if box == nil || box.Title != "ねこ" || box.Content != want {
+		t.Fatalf("infobox = %+v, want its content %q", box, want)
 	}
 }
 

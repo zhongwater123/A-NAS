@@ -10,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 // Response is the part of SearXNG's JSON answer A-NAS reads
@@ -106,7 +109,7 @@ func (s *Service) infobox(raws []RawInfobox) *Infobox {
 		if title == "" {
 			continue
 		}
-		box := &Infobox{Title: title, Content: strings.TrimSpace(raw.Content), Thumbnail: s.thumbnail(raw.ImgSrc)}
+		box := &Infobox{Title: title, Content: htmlText(raw.Content), Thumbnail: s.thumbnail(raw.ImgSrc)}
 		for _, link := range append([]struct {
 			URL string `json:"url"`
 		}{{URL: raw.ID}}, raw.URLs...) {
@@ -118,6 +121,50 @@ func (s *Service) infobox(raws []RawInfobox) *Infobox {
 		return box
 	}
 	return nil
+}
+
+// htmlText is an infobox's content as the window shows it: its words, a line
+// for each paragraph or item. SearXNG's page shows an infobox's content as
+// HTML (simple/elements/infobox.html), and dictionary engines such as Jisho
+// write paragraphs, lists and links in it.
+func htmlText(content string) string {
+	var lines []string
+	var line strings.Builder
+	end := func() {
+		if text := strings.Join(strings.Fields(line.String()), " "); text != "" {
+			lines = append(lines, text)
+		}
+		line.Reset()
+	}
+	tokens := html.NewTokenizer(strings.NewReader(content))
+	hidden := false
+	for {
+		kind := tokens.Next()
+		switch kind {
+		case html.ErrorToken:
+			end()
+			return strings.Join(lines, "\n")
+		case html.TextToken:
+			if !hidden {
+				line.Write(tokens.Text())
+			}
+		case html.StartTagToken, html.EndTagToken, html.SelfClosingTagToken:
+			name, _ := tokens.TagName()
+			tag := atom.Lookup(name)
+			if tag == atom.Script || tag == atom.Style {
+				hidden = kind == html.StartTagToken
+			}
+			if lineTags[tag] {
+				end()
+			}
+		}
+	}
+}
+
+// lineTags start or end a line of an infobox's content.
+var lineTags = map[atom.Atom]bool{
+	atom.P: true, atom.Br: true, atom.Div: true, atom.Li: true, atom.Ul: true, atom.Ol: true, atom.Dt: true, atom.Dd: true,
+	atom.Tr: true, atom.H1: true, atom.H2: true, atom.H3: true, atom.H4: true, atom.H5: true, atom.H6: true, atom.Hr: true,
 }
 
 func (s *Service) result(category Category, raw RawResult) (Result, bool) {
