@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -44,13 +44,18 @@ describe("网页搜索", () => {
     expect(first).toHaveAttribute("rel", "noopener noreferrer");
     expect(sent.queries).toEqual([{ q: "流浪地球", category: "web", page: 1 }]);
     expect(sent.urls[0]).not.toContain("%E6%B5%81");
-    expect(screen.getByText("百度未响应")).toBeInTheDocument();
+    expect(screen.getByText("2 条结果")).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "流浪地球" })).toHaveTextContent("百科摘要");
+    expect(screen.getByRole("link", { name: "example.org" })).toHaveAttribute("href", "https://example.org/wiki");
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "更多结果" }));
-    expect(await within(results).findByRole("link", { name: "流浪地球 第 3 条" })).toBeInTheDocument();
+    const next = await screen.findByRole("link", { name: "流浪地球 第 3 条" });
     expect(sent.queries.at(-1)).toEqual({ q: "流浪地球", category: "web", page: 2 });
+    // Each page after the first starts under its number.
+    expect(screen.getByRole("separator")).toHaveTextContent("第 2 页");
+    expect(next.closest("ol")).not.toBe(results);
+    expect(screen.getByText("4 条结果")).toBeInTheDocument();
   });
 
   it("searches the same text in another tab", async () => {
@@ -157,13 +162,13 @@ describe("网页搜索", () => {
     await search("流浪地球");
     const results = await screen.findByRole("list", { name: "搜索结果" });
     expect(within(results).getAllByRole("listitem")).toHaveLength(1);
-    expect(screen.getByText("还有 2 个引擎在搜索")).toBeInTheDocument();
+    expect(screen.getByText("1 条结果 · 还有 2 个引擎在搜索")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "更多结果" })).not.toBeInTheDocument();
 
     release();
     expect(await within(results).findByRole("link", { name: "流浪地球 第 2 条" })).toBeInTheDocument();
     expect(within(results).getAllByRole("listitem")[0]).toHaveTextContent("百度、搜狗");
-    expect(screen.queryByText("还有 2 个引擎在搜索")).not.toBeInTheDocument();
+    expect(screen.queryByText(/还有 2 个引擎在搜索/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "更多结果" })).toBeInTheDocument();
   });
 
@@ -184,45 +189,112 @@ describe("网页搜索", () => {
     expect(screen.getAllByRole("link", { name: "流浪地球 第 1 条" })).toHaveLength(1);
   });
 
-  it("counts many engines that did not answer instead of naming them all", async () => {
-    const silent = ["Google", "DuckDuckGo", "Brave", "Startpage", "Qwant"];
-    serve({ answer: (query) => ({ ...pageFor(query), unresponsive: silent }) });
-    render(<WebSearchPanel />);
-    await search("天气");
-    const notice = await screen.findByText("5 个引擎未响应");
-    expect(notice.closest("details")).not.toHaveAttribute("open");
-    await userEvent.setup().click(notice);
-    expect(screen.getByText("Google、DuckDuckGo、Brave、Startpage、Qwant")).toBeVisible();
-  });
-
-  it("names the engines a search left out and why", async () => {
-    const until = "2026-11-02T08:30:00Z";
+  it("names the engines that gave no answer, by reason, when asked", async () => {
     serve({
       answer: (query) =>
         query.q === "天气"
           ? {
               ...pageFor(query),
-              unresponsive: [],
-              paused: [{ engine: "百度", reason: "captcha", until }],
+              unresponsive: ["Google", "DuckDuckGo"],
+              paused: [{ engine: "百度", reason: "captcha", until: "2026-11-02T08:30:00Z" }],
               busy: ["搜狗"],
             }
           : {
               ...pageFor(query),
               results: [],
               unresponsive: ["360 搜索"],
-              paused: [{ engine: "百度", reason: "captcha", until }],
+              paused: [{ engine: "百度", reason: "captcha", until: "2026-11-02T08:30:00Z" }],
               busy: ["搜狗"],
             },
     });
     render(<WebSearchPanel />);
     const user = await search("天气");
-    expect(await screen.findByText("百度被网站拦截，暂停中")).toBeInTheDocument();
-    expect(screen.getByText("搜狗搜索太频繁，本次跳过")).toBeInTheDocument();
+    const silent = await screen.findByRole("button", { name: "4 个引擎没有回答" });
+    expect(screen.queryByText("Google、DuckDuckGo")).not.toBeInTheDocument();
+    await user.click(silent);
+    const panel = await screen.findByRole("dialog", { name: "没有回答的引擎" });
+    expect(within(panel).getByRole("heading", { name: "未响应 2" })).toBeInTheDocument();
+    expect(within(panel).getByText("Google、DuckDuckGo")).toBeInTheDocument();
+    expect(within(panel).getByRole("heading", { name: "被网站拦截，暂停中 1" })).toBeInTheDocument();
+    expect(within(panel).getByText(/^百度（.+ 恢复）$/)).toBeInTheDocument();
+    expect(within(panel).getByRole("heading", { name: "搜索太频繁，本次跳过 1" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
 
     const box = screen.getByRole("searchbox");
     await user.clear(box);
     await user.type(box, "台风{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("搜索引擎暂时不可用，请稍后再试");
+  });
+
+  it("offers a retry when nothing was found while engines gave no answer", async () => {
+    const sent = serve({
+      answer: (query) => ({ ...pageFor(query), results: [], suggestions: [], unresponsive: ["百度", "搜狗"] }),
+    });
+    render(<WebSearchPanel />);
+    const user = await search("天气");
+    expect(await screen.findByText("没有找到与“天气”相关的结果")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "2 个引擎没有回答" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "重试" }));
+    expect(sent.queries).toHaveLength(2);
+  });
+
+  it("shows papers, packages, places and tracks with their own details", async () => {
+    serve();
+    render(<WebSearchPanel />);
+    const user = await search("sqlite");
+    await screen.findByRole("list", { name: "搜索结果" });
+
+    await user.click(screen.getByRole("tab", { name: "学术" }));
+    const paper = (await screen.findByRole("link", { name: "sqlite 第 1 条" })).closest("li") as HTMLElement;
+    expect(paper).toHaveTextContent("Renxi Wang、Haonan Li、Xudong Han 等 4 人 · Scientific Reports · 2024年2月18日");
+    expect(within(paper).getByRole("link", { name: "PDF" })).toHaveAttribute("href", "https://example.org/paper-1.pdf");
+    expect(within(paper).getByRole("link", { name: "DOI 10.1038/example.1" })).toHaveAttribute(
+      "href",
+      "https://doi.org/10.1038/example.1",
+    );
+
+    await user.click(screen.getByRole("tab", { name: "IT" }));
+    const repository = (await screen.findByRole("link", { name: "sqlite 第 1 条 4.1.1" })).closest("li") as HTMLElement;
+    expect(repository).toHaveTextContent("Kriasoft · MIT License · 热度 65,414");
+    expect(within(repository).getByRole("link", { name: "源代码" })).toHaveAttribute(
+      "href",
+      "https://example.org/source",
+    );
+
+    await user.click(screen.getByRole("tab", { name: "地图" }));
+    const place = (await screen.findByRole("link", { name: "sqlite 第 1 条" })).closest("li") as HTMLElement;
+    expect(place).toHaveTextContent("北山街, 杭州市, 中国 · 30.2431, 120.1459");
+
+    await user.click(screen.getByRole("tab", { name: "音乐" }));
+    const tracks = await screen.findByRole("list", { name: "音乐结果" });
+    expect(within(tracks).getAllByRole("link")[0]).toHaveTextContent("sqlite 第 1 条周杰倫 · YouTube4:30");
+  });
+
+  it("moves between tabs with the arrow keys and searches only the one chosen", async () => {
+    const sent = serve();
+    render(<WebSearchPanel />);
+    const user = await search("天气");
+    await screen.findByRole("list", { name: "搜索结果" });
+    screen.getByRole("tab", { name: "网页" }).focus();
+    await user.keyboard("{ArrowRight}{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "视频" })).toHaveFocus();
+    expect(sent.queries).toHaveLength(1);
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("list", { name: "视频结果" })).toBeInTheDocument();
+    expect(sent.queries.at(-1)).toEqual({ q: "天气", category: "videos", page: 1 });
+  });
+
+  it("leaves no gap for a picture that does not load", async () => {
+    serve();
+    render(<WebSearchPanel />);
+    const user = await search("猫");
+    await screen.findByRole("list", { name: "搜索结果" });
+    await user.click(screen.getByRole("tab", { name: "图片" }));
+    const images = await screen.findByRole("list", { name: "图片结果" });
+    expect(within(images).getAllByRole("listitem")).toHaveLength(2);
+    const [broken] = images.querySelectorAll("img");
+    fireEvent.error(broken);
+    expect(within(images).getAllByRole("listitem")).toHaveLength(1);
   });
 
   it("says when an administrator has turned web search off", async () => {
