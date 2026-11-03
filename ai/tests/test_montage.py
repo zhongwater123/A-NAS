@@ -348,6 +348,28 @@ class MomentsTest(unittest.TestCase):
         self.assertEqual(self.index.check(segments), [("07", 8.0, 14.0), ("07", 28.0, 34.0)])
         self.assertEqual(self.index.plan({"城堡": -self.castle}, 10), [])
 
+    def test_a_span_grows_from_the_best_window_while_the_probe_holds(self):
+        other_side = np.eye(8, dtype=np.float32)[2] * 0.6 + self.castle * 0.8
+        # 26-28 s, before the card, is the first side of the castle: 0.8 against its 1.0.
+        self.assertEqual(self.index.span("07-1-1", other_side, "probe"), (28, 34))
+        # The windows already in the plan are left out, the best of the card's own included.
+        self.assertEqual(self.index.span("07-1-1", other_side, "probe", [("07", 27.5, 32)]), (32, 38))
+        self.assertIsNone(self.index.span("07-0-0", self.castle, "frame", [("07", 0, 8)]))
+        self.assertIsNone(self.index.span("07-2-0", self.castle, "probe"))  # its only window is flat
+
+    def test_a_span_by_the_picture_holds_where_the_probe_score_falls(self):
+        # A pan: each window turns 0.3 rad further from the first, 0.955 alike to the one before.
+        basis = np.eye(4, dtype=np.float32)
+        windows, vectors = [], {}
+        for k in range(5):
+            windows.append({"start": 2 * k, "end": 2 * k + 2, "frame": 2000 * k + 1000, "flat": False, "tags": []})
+            vectors[f"10/{2000 * k + 1000}"] = basis[0] * np.cos(0.3 * k) + basis[1] * np.sin(0.3 * k)
+        index = moments.Index({"model": "test", "videos": {"10": {"file": "10.webm", "duration": 10.0,
+                                                                  "shots": [[0, 10]], "windows": windows}}}, vectors)
+        card = index.cards[0]["id"]
+        self.assertEqual(index.span(card, basis[0], "probe"), (0, 2))
+        self.assertEqual(index.span(card, basis[0], "frame"), (0, 4))
+
     def test_search_keeps_to_windows_meeting_a_condition(self):
         # The castle seen from the other side (28-48 s) leans to basis 2; asking for that
         # rather than basis 1 leaves out the first castle part.

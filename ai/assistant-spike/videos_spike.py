@@ -21,7 +21,10 @@ socket, which any member of a-nas-users may use, known by the caller's UID.
   POST /catalog  {"videos": [...]}               every card as a line of seconds, light,
                                                   caption and highlight, to write probes from
   POST /montage  {"segments": [...],             the cut as video/mp4, or the
-                  "skipped": [{card, why}]}       (cards left out, checked when given)
+                  "skipped": [{card, why}],       (cards left out, checked when given)
+                  "span": "probe" | "frame"}      an experiment (#350): no start or end, but
+                                                  each segment's probe; the seconds grow from
+                                                  the window it matched (moments.Index.span)
                                                  plan's problems with 422
 
 With --vision, the URL of a local vision model (montage.look), the cards carry
@@ -110,6 +113,8 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         # refusal is looked at only where it changed.
         self.vision, self.seen = vision, {}
         self.pictures, self.keyframes, self.verdicts = {}, {}, {}
+        # The probes' vectors, by text, for segments whose seconds are set from them.
+        self.probes = {}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -234,6 +239,16 @@ class Handler(BaseHTTPRequestHandler):
         segments = body.get("segments")
         if not isinstance(segments, list):
             return self.reply(400, {"error": "segments 要是列表"})
+        spans = body.get("span")
+        if spans is not None:
+            if spans not in moments.SPANS:
+                return self.reply(400, {"error": f"span 要是 {'、'.join(moments.SPANS)} 之一"})
+            try:
+                segments, problems = self.spanned(segments, spans)
+            except OSError as error:
+                return self.reply(503, {"error": f"设备上的 AI 暂时不可用：{error}"})
+            if problems:
+                return self.reply(422, {"error": "剪辑计划不合规则", "problems": problems})
         try:
             clips = self.server.index.check(segments, shows_needed=self.server.vision is not None,
                                             skipped=body.get("skipped"))
@@ -253,6 +268,8 @@ class Handler(BaseHTTPRequestHandler):
             if refused:
                 return self.reply(422, {"error": "出片前看了画面，有的段不切题", "problems": refused, "review": review})
             clips = [(v, r["start"], r["end"]) for (v, _s, _e), r in zip(clips, review, strict=True)]
+            if spans is not None:
+                review = [r | {"planned": [s["start"], s["end"]]} for s, r in zip(segments, review, strict=True)]
         work = tempfile.mkdtemp(dir=self.server.work)
         try:
             path = render.render_clips([(files[v], start, end) for v, start, end in clips], work)
@@ -271,6 +288,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
         return None
+
+    def spanned(self, segments, mode):
+        """The segments with start and end set from the window their probe matched (Index.span),
+        in order, none over another; and the problems of those it cannot set."""
+        index, cards = self.server.index, {c["id"] for c in self.server.index.cards}
+        out, problems, taken = [], [], []
+        for n, segment in enumerate(segments, 1):
+            card = segment.get("card") if isinstance(segment, dict) else None
+            probe = segment.get("probe") if isinstance(segment, dict) else None
+            if card not in cards or not isinstance(probe, str) or not 1 <= len(probe.strip()) <= PROBE_CHARS:
+                problems.append(f"第 {n} 段要有检索结果里的 card 和找到它的 probe")
+                continue
+            if probe not in self.server.probes:
+                self.server.probes[probe] = embed_query(self.server.ai_socket, probe)
+            span = index.span(card, self.server.probes[probe], mode, taken)
+            if span is None:
+                problems.append(f"第 {n} 段的 {card} 已没有可用的画面：前面的段用了它，或只剩纯色画面")
+                continue
+            taken.append((card.split("-", 1)[0], *span))
+            out.append(segment | {"start": span[0], "end": span[1]})
+        return out, problems
 
     def look(self, path, video, start, end, shows):
         key = (video, start, end, shows)

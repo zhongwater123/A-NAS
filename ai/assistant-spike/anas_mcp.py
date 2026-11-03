@@ -385,6 +385,26 @@ SCREENING = (
     "只返回判为有的，按它的分数排在前面；each 是每条探针最多返回几张通过的，想剪长一些就调大。"
     "卡片的 screen 按探针给出这个分数 score 和它看到的 seen；refused 是每条探针被判为没有的张数。"
     if CARD_SCREEN else "")
+# The fourth version's ablation (#350). ANAS_SPIKE_RETRIEVED_ONLY=1: the catalog is as before,
+# but a plan may use only cards search_video_moments returned. ANAS_SPIKE_SPAN=probe or frame
+# as well: the plan gives no seconds, the video service grows each segment from the window
+# the card's probe matched (moments.Index.span).
+SPAN = os.environ.get("ANAS_SPIKE_SPAN") or None
+RETRIEVED_ONLY = os.environ.get("ANAS_SPIKE_RETRIEVED_ONLY") == "1" or SPAN is not None
+# The cards search_video_moments returned this session, each with the probe it scored best on.
+RETRIEVED: dict[str, dict] = {}
+FROM_CATALOG = ("剪辑计划只能用 search_video_moments 返回过的卡片：目录只用来了解库里有什么、写故事线和检索词，"
+                "目录里看中的卡片要先检索到才能用。" if RETRIEVED_ONLY else
+                "剪辑计划可以直接用目录里的卡片，不必为拿资料再检索。")
+SEGMENT = (
+    "每段是 {card, shows, reason}，不写 start、end：card 是 search_video_moments 返回过的卡片 id，"
+    "入点出点由程序定，从这张卡片最符合找到它的那条检索词的 2 秒往两边扩展，"
+    + ("后面的秒数与检索词的分数相差不到 0.02 才扩展" if SPAN == "probe" else "后面的画面与那 2 秒相似才扩展") +
+    "，最长 6 秒，不越出镜头，不和前面的段重叠，所以每段 2–6 秒；"
+    if SPAN else
+    "每段是 {card, start, end, shows, reason}：card 是 "
+    + ("search_video_moments 返回过的" if RETRIEVED_ONLY else "list_video_contents 或 search_video_moments 里的") +
+    "卡片 id，start、end 是秒数，必须落在这张卡片的 shot 范围内，每段 1.5–6 秒，不能含纯黑或纯色画面，各段不能用同一段画面；")
 TELLING = ("向成员介绍片段时只说你在图里和出片前核对看到的内容。" if CARD_PICTURES else
            "你看不到画面：向成员介绍片段时只说 caption 和出片前核对看到的内容，不要描述猜出来的细节。")
 
@@ -407,7 +427,7 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         "读完先在回复里写一条故事线，再检索：按指令要的效果，把成片要有的段落按播放顺序列出来，每段一句内容、对应视频里的大致秒数，"
         "例如侦探片预告写“1947 年洛杉矶街景开场（0–30 秒）→ 警局里交代案子（30–200 秒）→ 开车出发 → 雨夜车里出现神秘女人 → …”；"
         "只放能讲进这条故事线的内容，和它搭不上的不用放。然后按故事线写 search_video_moments 的检索词，"
-        "每段要的画面各写一条，段落之间的过渡画面也算；库里没有的不要硬找。剪辑计划可以直接用目录里的卡片，不必为拿资料再检索。"
+        "每段要的画面各写一条，段落之间的过渡画面也算；库里没有的不要硬找。" + FROM_CATALOG +
         "videos：只列这些视频，可省略。"
         "style：成片的体裁，" + "、".join(STYLES) + "之一；成员说了体裁就照说的传，没说就按指令判断，判断不出就不传。"
         "结果的 style_rules 是这个体裁的剪法（结构、怎么收尾、节奏），写故事线和排段时照着做，并在 make_montage 里传同一个 style。"))
@@ -460,6 +480,11 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         if status != 200:
             return video_failed(status, raw)
         found = json.loads(raw)
+        for card in found["cards"]:
+            for probe, best in card.get("probes", {}).items():
+                if card["id"] in found.get("each", {}).get(probe, [card["id"]]) and best["score"] > RETRIEVED.get(
+                        card["id"], {}).get("score", -2):
+                    RETRIEVED[card["id"]] = {"probe": probe, "score": best["score"]}
         if not CARD_PICTURES:
             return result(found)
         pictures = [(card["id"], card.pop("picture")) for card in found["cards"]]
@@ -473,8 +498,7 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
     @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
                  structured_output=False, description=(
         "按剪辑计划把视频片段剪成一段 1920×1080、30 fps 的无声 MP4，存进助手目录的“视频”文件夹，返回文件路径与时长。"
-        "segments：按播放顺序排列，每段是 {card, start, end, shows, reason}：card 是 list_video_contents 或 search_video_moments 里的卡片 id，"
-        "start、end 是秒数，必须落在这张卡片的 shot 范围内，每段 1.5–6 秒，不能含纯黑或纯色画面，各段不能用同一段画面；"
+        "segments：按播放顺序排列，" + SEGMENT +
         "成片总长不设上限。shows 写这段画面要呈现指令里的什么，只用指令里的词，如“湖上的小船”“夜晚的城市”，不超过 40 个字；"
         "不要写这段画面的细节或别的说法（“美食”就写“美食”，不写“美食,新鲜食材”），"
         "地点这类画面看不出的条件也不要写进去（“新加坡的美食”写“美食”）。reason 用一句话写这段属于故事线的哪一段、为什么选它，随成片存档。"
@@ -492,8 +516,19 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         "成员要放进个人空间时，再用 submit_changes 的 copy 提交。"
         "style：按哪个体裁剪的，和 list_video_contents 传的一样，随成片存档；没定体裁就不传。"))
     def make_montage(segments: list[dict], skipped: list[dict], style: str | None = None):
+        if RETRIEVED_ONLY:
+            unseen = [f"第 {n} 段的 {s.get('card')} 不是 search_video_moments 返回过的卡片，先检索到它再用"
+                      for n, s in enumerate(segments, 1) if not isinstance(s, dict) or s.get("card") not in RETRIEVED]
+            if unseen:
+                return CallToolResult(content=[TextContent(type="text", text="剪辑计划不合规则：\n" + "\n".join(
+                    f"- {problem}" for problem in unseen))], is_error=True)
+        body = {"segments": segments, "skipped": skipped}
+        if SPAN:
+            body = {"segments": [{k: v for k, v in s.items() if k not in ("start", "end")}
+                                 | {"probe": RETRIEVED[s["card"]]["probe"]} for s in segments],
+                    "skipped": skipped, "span": SPAN}
         try:
-            status, kind, raw, review = video_moments("/montage", {"segments": segments, "skipped": skipped})
+            status, kind, raw, review = video_moments("/montage", body)
         except PhotoError as error:
             return failed(error)
         if status != 200 or kind != "video/mp4":
@@ -506,6 +541,9 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
             file.write(raw)
         # The plan, reasons included, beside the cut: what the model chose and why, what it
         # left out and why, and the seconds cut after the frames were looked at.
+        if SPAN:  # planned with the seconds the service set
+            segments = [s | {"start": r["planned"][0], "end": r["planned"][1]}
+                        for s, r in zip(body["segments"], review, strict=True)]
         cut = [segment | {"start": r["start"], "end": r["end"]} for segment, r in zip(segments, review, strict=True)]
         cut = cut or segments
         with os.fdopen(os.open(path[:-4] + ".json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644), "w") as file:

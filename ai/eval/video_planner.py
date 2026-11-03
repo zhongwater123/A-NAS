@@ -27,6 +27,8 @@ from eval import video_moments as vm
 
 # No length is asked for: the cut is as long as the material that fits (#326).
 ASK = "用测试视频剪一段视频：{text}。"
+# With --about: the instruction's seconds as a member would say them, not a hard target (#350).
+ASK_ABOUT = "用测试视频剪一段约 {seconds:g} 秒的视频：{text}。"
 # The style a member picks before asking (anas_mcp.STYLES), said the way the app would say it.
 STYLE = "体裁：{}。"
 TOOLS = ("mcp__anas__list_video_contents", "mcp__anas__search_video_moments", "mcp__anas__make_montage")
@@ -37,14 +39,17 @@ CUT = re.compile(r"/nas/助手/视频/(montage-[0-9]{8}-[0-9]{6}-[0-9a-f]{6})\.m
 MEMBER_VIDEOS = "/srv/a-nas/data/assistant/alice/files/视频"
 
 
-def turn(instruction, container, model, log, pictures=False, screen=False):
+def turn(instruction, container, model, log, pictures=False, screen=False, about=False, retrieved=False, span=None):
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     config = {"mcpServers": {"anas": {
         "command": os.path.join(here, "assistant-spike", "mcp-as-member.sh"), "args": ["alice"],
         "env": {"HERMES_SPIKE_NAME": container, "DOCKER_CONTEXT": os.environ.get("DOCKER_CONTEXT", "colima-anas"),
                 "PATH": os.environ["PATH"]} | ({"ANAS_SPIKE_CARD_PICTURES": "1"} if pictures else {})
-                | ({"ANAS_SPIKE_CARD_SCREEN": "1"} if screen else {})}}}
-    ask = ASK.format(**instruction) + (STYLE.format(instruction["style"]) if instruction.get("style") else "")
+                | ({"ANAS_SPIKE_CARD_SCREEN": "1"} if screen else {})
+                | ({"ANAS_SPIKE_RETRIEVED_ONLY": "1"} if retrieved else {})
+                | ({"ANAS_SPIKE_SPAN": span} if span else {})}}}
+    ask = ((ASK_ABOUT if about else ASK).format(**instruction)
+           + (STYLE.format(instruction["style"]) if instruction.get("style") else ""))
     command = ["claude", "-p", ask, "--mcp-config", json.dumps(config), "--strict-mcp-config",
                "--tools", "", "--allowedTools", *TOOLS, "--disallowedTools", *(f"mcp__anas__{t}" for t in OTHER_TOOLS),
                "--output-format", "stream-json", "--verbose",
@@ -103,6 +108,13 @@ def main():
     parser.add_argument("--style", help="the style the member picked for every instruction, the instructions' own otherwise")
     parser.add_argument("--screen", action="store_true",
                         help="hand the planner only the recalled cards the vision model passes (an experiment)")
+    parser.add_argument("--about", action="store_true",
+                        help="ask for about the instruction's seconds, as a member would (#350)")
+    parser.add_argument("--retrieved-only", action="store_true",
+                        help="the catalog as before, but a plan of retrieved cards only (an experiment, #350)")
+    parser.add_argument("--span", choices=("probe", "frame"),
+                        help="with --retrieved-only implied: no seconds in the plan, each segment grown from the "
+                             "window its probe matched, while the score holds or the picture does (an experiment, #350)")
     args = parser.parse_args()
     vm.use_set(args.set)
     with open(args.instructions, encoding="utf-8") as file:
@@ -120,7 +132,8 @@ def main():
         if args.style:
             instruction = instruction | {"style": args.style}
         target = os.path.join(out, instruction["id"])
-        done = turn(instruction, args.container, args.model, target + ".jsonl", args.pictures, args.screen)
+        done = turn(instruction, args.container, args.model, target + ".jsonl", args.pictures, args.screen,
+                    args.about, args.retrieved_only, args.span)
         if done["cut"]:
             copy_out(args.container, done["cut"], target)
         else:

@@ -60,6 +60,10 @@ ROUNDING = 0.005
 STILL = 0.9
 # The longest a segment may run, changing or not: one picture for 8 s tires the eye.
 CLIP_MAX = 6.0
+# Index.span's two ways to grow a segment from the window a probe matched (#350): over
+# neighbours this close to its probe score, or over those STILL alike to its picture.
+SPANS = ("probe", "frame")
+SPAN_DROP = 0.02
 
 
 def screened(found: dict, verdicts: dict, each: int) -> dict:
@@ -426,6 +430,41 @@ class Index:
             if length > min(left, CLIP_MAX) + 2:
                 return windows[a:b + 1]
             a, b = na, nb
+
+    def span(self, card_id: str, probe: np.ndarray, mode: str, taken=()) -> tuple[float, float] | None:
+        """A segment of the card set by the program rather than the planner (#350): the card's
+        window probe scores best, grown over the neighbours in its shot, the closer side first,
+        while each scores within SPAN_DROP of that window ("probe") or its picture is STILL alike
+        to that window's ("frame"), up to CLIP_MAX. Flat windows and those of taken, the
+        (video, start, end) already in the plan, are left out; None when no window is left."""
+        if mode not in SPANS:
+            raise ValueError(f"mode 要是 {'、'.join(SPANS)} 之一")
+        card = next(c for c in self.cards if c["id"] == card_id)
+        video, shot_index = card["video"], int(card_id.rsplit("-", 2)[1])
+        lo, hi = card["shot"]
+        shot = sorted((i for i, row in enumerate(self.rows) if row[0] == video and self.shot_of[i] == shot_index),
+                      key=lambda i: self.rows[i][1])
+        free = {i for i in shot if not self.flat[i] and not any(
+            v == video and self.rows[i][1] < e and s < self.rows[i][2] for v, s, e in taken)}
+        scores = self.frames @ probe
+        mine = [i for i in card["windows"] if i in free]
+        if not mine:
+            return None
+        best = max(mine, key=lambda i: scores[i])
+        near, floor = (scores, scores[best] - SPAN_DROP) if mode == "probe" else (self.frames @ self.frames[best], STILL)
+        a = b = shot.index(best)
+        while True:
+            sides = [k for k in (a - 1, b + 1) if 0 <= k < len(shot) and shot[k] in free and near[shot[k]] >= floor]
+            if not sides:
+                break
+            k = max(sides, key=lambda k: near[shot[k]])
+            na, nb = min(a, k), max(b, k)
+            if min(hi, self.rows[shot[nb]][2]) - max(lo, self.rows[shot[na]][1]) > CLIP_MAX + ROUNDING:
+                break
+            a, b = na, nb
+        start, end = max(lo, self.rows[shot[a]][1]), min(hi, self.rows[shot[b]][2])
+        # Rounded inward, so that the segment stays inside its shot.
+        return math.ceil(start * 100) / 100, math.floor(end * 100) / 100
 
     def _shot_windows(self, card: dict) -> list[int]:
         lo, hi = card["shot"]
