@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
+import { calendarMoment } from "../lib/time";
 import {
   allCategories,
   categoryLabels,
@@ -12,6 +13,7 @@ import {
   sourceURL,
   updateWebSearch,
   type WebSearchLicense,
+  type WebSearchPausedEngine,
   type WebSearchStatus,
 } from "../websearch/api";
 import { publishWebSearch, useWebSearch } from "../websearch/status";
@@ -25,9 +27,17 @@ const runningText: Record<WebSearchStatus["running"], { text: string; tone: Tone
   failed: { text: "出错", tone: "danger" },
 };
 
+const pauseReasons: Record<WebSearchPausedEngine["reason"], string> = {
+  captcha: "要求验证码",
+  denied: "拒绝访问",
+  too_many: "请求过多",
+  unreadable: "返回无法识别的页面",
+};
+
 // WebSearchSection is Settings → 网页搜索, shown to administrators only
 // (docs/specs/web-search.md): the switches of web search and its torrent tab,
-// the engines it asks, and SearXNG's license and source (ADR 0030).
+// the engines it asks and those paused since their site blocked them, and
+// SearXNG's license and source (ADR 0030).
 export function WebSearchSection() {
   const status = useWebSearch();
   const [busy, setBusy] = useState(false);
@@ -104,6 +114,21 @@ export function WebSearchSection() {
               </details>
             );
           })}
+        </Group>
+      )}
+      {status?.enabled && (
+        <Group title="暂停的引擎" footnote="引擎被网站拦截后暂停 1 小时，连续被拦每次加倍，最长 1 天。">
+          {status.paused.length === 0 && <div className={styles.setRow}>没有被网站拦截的引擎</div>}
+          {status.paused.map((paused) => (
+            <div key={paused.engine} className={styles.setRow}>
+              <div className={styles.setRowText}>
+                <span>{paused.engine}</span>
+                <small>
+                  {pauseReasons[paused.reason]}，{calendarMoment(paused.until)} 恢复
+                </small>
+              </div>
+            </div>
+          ))}
         </Group>
       )}
       <LicenseGroup />

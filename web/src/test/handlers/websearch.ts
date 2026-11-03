@@ -44,6 +44,7 @@ export function webSearchStatus(enabled = true, torrents = false): WebSearchStat
     torrents,
     categories: enabled ? categories : [],
     engines,
+    paused: [],
   };
 }
 
@@ -55,6 +56,8 @@ export function pageFor(query: WebSearchQuery): WebSearchUpdate {
     answers: [],
     suggestions: page === 1 ? [`${query.q} 是什么`] : [],
     unresponsive: ["百度"],
+    paused: [],
+    busy: [],
     pending: 0,
   };
   const results = [1, 2].map((n) => {

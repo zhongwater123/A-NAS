@@ -114,6 +114,8 @@ describe("网页搜索", () => {
               answers: [],
               suggestions: [],
               unresponsive: query.category === "web" ? ["百度", "搜狗", "360 搜索"] : [],
+              paused: [],
+              busy: [],
               pending: 0,
             },
     });
@@ -191,6 +193,36 @@ describe("网页搜索", () => {
     expect(notice.closest("details")).not.toHaveAttribute("open");
     await userEvent.setup().click(notice);
     expect(screen.getByText("Google、DuckDuckGo、Brave、Startpage、Qwant")).toBeVisible();
+  });
+
+  it("names the engines a search left out and why", async () => {
+    const until = "2026-11-02T08:30:00Z";
+    serve({
+      answer: (query) =>
+        query.q === "天气"
+          ? {
+              ...pageFor(query),
+              unresponsive: [],
+              paused: [{ engine: "百度", reason: "captcha", until }],
+              busy: ["搜狗"],
+            }
+          : {
+              ...pageFor(query),
+              results: [],
+              unresponsive: ["360 搜索"],
+              paused: [{ engine: "百度", reason: "captcha", until }],
+              busy: ["搜狗"],
+            },
+    });
+    render(<WebSearchPanel />);
+    const user = await search("天气");
+    expect(await screen.findByText("百度被网站拦截，暂停中")).toBeInTheDocument();
+    expect(screen.getByText("搜狗搜索太频繁，本次跳过")).toBeInTheDocument();
+
+    const box = screen.getByRole("searchbox");
+    await user.clear(box);
+    await user.type(box, "台风{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("搜索引擎暂时不可用，请稍后再试");
   });
 
   it("says when an administrator has turned web search off", async () => {
