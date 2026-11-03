@@ -168,9 +168,12 @@ func (s *Service) publicSwitches(ctx context.Context, p Principal, lib library) 
 }
 
 // textMinConfidence is the token probability every token of a field's value
-// must reach to pass; 0 leaves the check out until the evaluation shows it
-// helps the reader in use (docs/architecture/photo-ocr.md#核对层).
-const textMinConfidence = 0
+// must reach to pass (docs/architecture/photo-ocr.md#核对层). Measured with
+// Qwen3.5-4B on 50 CC-OCR receipts and cards, the other checks passed 91% of
+// the fields with 12% wrong; at 0.99, 45% pass with 4.7% wrong, most of them
+// differing only in format, while 0.9 let a serial number one digit off pass
+// (docs/research/photo-ocr-model-evaluation.md, 核对层实测).
+const textMinConfidence = 0.99
 
 // errReaderChanged: the Worker answered the two reads of one photo with
 // different models.
