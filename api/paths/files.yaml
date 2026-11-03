@@ -2,13 +2,13 @@
   get:
     operationId: listSpaces
     responses:
-      "200": { description: Visible spaces only, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/files.yaml#/schemas/Space" } } } } } } }
+      "200": { description: Visible spaces only, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/files.yaml#/schemas/Space" } } } } } } }
 /api/v1/spaces/{spaceId}/entries:
   get:
     operationId: listEntries
     parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }, { name: parentId, in: query, schema: { type: string } }]
     responses:
-      "200": { description: Directory entries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } } } } }
+      "200": { description: Directory entries, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/files.yaml#/schemas/FileEntry" } } } } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "423": { $ref: "../components/common.yaml#/responses/ProductError" }
@@ -128,7 +128,7 @@
   get:
     operationId: listTrash
     responses:
-      "200": { description: Visible recycle-bin items, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/files.yaml#/schemas/TrashItem" } } } } } } }
+      "200": { description: Visible recycle-bin items, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/files.yaml#/schemas/TrashItem" } } } } } } }
 /api/v1/trash/{trashId}/restore:
   post:
     operationId: restoreTrash

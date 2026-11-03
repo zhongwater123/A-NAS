@@ -3,7 +3,7 @@
     operationId: listPhotoLibraries
     summary: List the caller's private library, the shared library and any member library being viewed
     responses:
-      "200": { description: Visible photo libraries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoLibrary" } } } } } } }
+      "200": { description: Visible photo libraries, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoLibrary" } } } } } } }
       "503": { description: The photo library is not available on this device (photos_unavailable), content: { application/json: { schema: { $ref: "../components/common.yaml#/schemas/ErrorResponse" } } } }
 /api/v1/photos/ai:
   get:
@@ -385,7 +385,7 @@
     summary: List trashed photo assets the caller may restore or purge
     parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }]
     responses:
-      "200": { description: Trashed photo assets, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } } } } }
+      "200": { description: Trashed photo assets, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoAsset" } } } } } } }
   delete:
     operationId: emptyPhotoTrash
     summary: Permanently delete every trashed photo asset the caller may purge
@@ -557,9 +557,11 @@
           application/json:
             schema:
               type: object
+              additionalProperties: false
               properties:
                 location:
                   type: object
+                  additionalProperties: false
                   required: [latitude, longitude]
                   properties:
                     latitude: { type: number }
