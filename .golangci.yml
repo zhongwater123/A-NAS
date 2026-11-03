@@ -215,9 +215,6 @@ linters:
 
   exclusions:
     generated: strict
-    paths:
-      # npm packages can carry Go code (flatted), which `./...` then includes.
-      - web/node_modules
     rules:
       # Tests start throwaway servers, write fixtures and spawn tools.
       - path: _test\.go
