@@ -85,7 +85,7 @@ export ANAS_NAS_URL
 
 ## 提醒与主动回报的运行时验收
 
-本机前端协议测试不包含 Hermes 运行时；当前 Mac 的 Linux 虚拟机未安装助手运行环境。以下用例需要按[助手试用手册](try-ai-assistant-on-experimental-nas.md#qwen-云端联调与后续本地接入)配置真实运行时后执行。云端阶段只使用合成资料；Qwen 直连检查不替代这里的验收。
+前端协议测试不替代 Hermes 运行时。当前 Mac 独立 Linux 环境的实际任务、离线唤醒和重新登录结果检查见[运行时联调记录](../research/companion-reminder-runtime-check.md)；真实 NAS 仍需按[助手试用手册](try-ai-assistant-on-experimental-nas.md#qwen-云端联调与后续本地接入)配置后执行下列用例。云端阶段只使用合成资料；本机 Fake 宿主机与 Qwen 直连检查都不替代实机验收。
 
 | 检查 | 操作 | 通过标准 |
 | --- | --- | --- |

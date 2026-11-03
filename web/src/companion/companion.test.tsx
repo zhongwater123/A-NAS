@@ -82,6 +82,33 @@ describe("speech follows the pet without leaving the scene", () => {
 });
 
 describe("companion interactions", () => {
+  it.each([
+    ["success", "结果已经在小窝里了。接下来做什么，听你的。"],
+    ["error", "先歇一下也好。想继续时，我们再看看这件事。"],
+  ] as const)("does not animate a %s outcome restored after connecting", (phase, words) => {
+    const page = render(<Stage character="naiwa" quiet={false} taskPhase="connecting" />);
+    page.rerender(<Stage character="naiwa" quiet={false} taskPhase={phase} />);
+    expect(screen.getByText(words)).toBeVisible();
+  });
+  it.each([
+    ["success", "结果已经在小窝里了。接下来做什么，听你的。"],
+    ["error", "先歇一下也好。想继续时，我们再看看这件事。"],
+  ] as const)("settles the previous %s after a notification instead of replaying its emotion", (phase, words) => {
+    const page = render(<Stage character="naiwa" quiet={false} taskPhase={phase} />);
+    page.rerender(
+      <Stage
+        character="naiwa"
+        quiet={false}
+        taskPhase="success"
+        taskEvent="server-notice-1"
+        taskMessage="有新结果啦 · 合成提醒"
+      />,
+    );
+    expect(screen.getByText("有新结果啦 · 合成提醒")).toBeVisible();
+    page.rerender(<Stage character="naiwa" quiet={false} taskPhase={phase} />);
+    expect(screen.getByText(words)).toBeVisible();
+    expect(screen.queryByText("开心 · 这轮回答完成啦！一起看看结果？")).toBeNull();
+  });
   it("can greet and invite using only the keyboard", async () => {
     const user = userEvent.setup();
     render(<Stage character="glow" quiet={false} />);

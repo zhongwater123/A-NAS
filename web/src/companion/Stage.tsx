@@ -71,9 +71,20 @@ export function Stage({
 
   useEffect(() => {
     if (previousTask.current.phase === taskPhase && previousTask.current.event === taskEvent) return;
+    const noticeEnded = previousTask.current.event !== undefined && taskEvent === undefined;
+    const restoredOutcome =
+      previousTask.current.phase === "connecting" &&
+      taskEvent === undefined &&
+      (taskPhase === "success" || taskPhase === "error");
     previousTask.current = { phase: taskPhase, event: taskEvent };
-    setSettled(false);
     setReaction("");
+    // Restoring the underlying conversation after a notice is not another
+    // completed turn. Keep its old outcome settled instead of celebrating it.
+    if (noticeEnded || restoredOutcome) {
+      setSettled(true);
+      return;
+    }
+    setSettled(false);
     if (["success", "error", "waiting", "connecting", "stopped"].includes(taskPhase)) dispatch({ type: "stop" });
     if (taskPhase !== "success" && taskPhase !== "error") return;
     const timer = window.setTimeout(() => setSettled(true), 6500);
