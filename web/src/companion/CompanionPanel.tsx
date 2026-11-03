@@ -45,7 +45,7 @@ export function CompanionPanel({
         </div>
         <span className={styles.badge}>{connected ? "NAS 接续" : "玩法试验"}</span>
       </header>
-      <p className={styles.intro}>忙你的，也可以过来逗我一下。</p>
+      <p className={styles.intro}>你忙你的，它会自己来找你。点点它，就能回应。</p>
       <ConnectionStatus view={view} />
       <div className={styles.scene}>
         {value.place === "home" ? (
@@ -55,8 +55,6 @@ export function CompanionPanel({
             character={character}
             quiet={quiet || !canPlay}
             interactive={canPlay}
-            playCount={view.playCount}
-            onPlay={view.play}
           />
         ) : (
           <div className={styles.empty}>

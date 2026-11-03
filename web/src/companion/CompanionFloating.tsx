@@ -60,8 +60,6 @@ export function CompanionFloating({
         quiet={quiet || !view.canPlay}
         interactive={view.canPlay}
         floating
-        playCount={view.playCount}
-        onPlay={view.play}
       />
       <div className={styles.miniActions}>
         <button

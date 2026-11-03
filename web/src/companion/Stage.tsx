@@ -4,7 +4,7 @@ import { type PetAction, taskPose } from "./behaviour";
 import { Character } from "./Character";
 import styles from "./companion.module.css";
 import { advanceFlight, type Flight, inside, type Point } from "./motion";
-import { type Beat, beatWords, playWords, usePlaySession } from "./playSession";
+import { playWords, usePlaySession } from "./playSession";
 import type { Character as CharacterKind } from "./preferences";
 import "./native";
 
@@ -24,8 +24,6 @@ export function Stage({
   native = false,
   floating = false,
   interactive = true,
-  playCount,
-  onPlay,
   taskPhase = "idle",
 }: {
   character: CharacterKind;
@@ -33,41 +31,31 @@ export function Stage({
   native?: boolean;
   floating?: boolean;
   interactive?: boolean;
-  playCount?: number;
-  onPlay?: () => void;
   taskPhase?: import("./taskState").TaskPhase;
 }) {
   const stage = useRef<HTMLDivElement>(null);
   const pet = useRef<HTMLButtonElement>(null);
-  const ball = useRef<HTMLButtonElement>(null);
   const press = useRef<Press | undefined>(undefined);
   const flight = useRef<Flight | undefined>(undefined);
   const position = useRef<Point>({ x: 0, y: 0 });
-  const animation = useRef<Animation | undefined>(undefined);
   const frame = useRef(0);
   const ignoreClick = useRef(false);
   const [dragging, setDragging] = useState(false);
   const [reaction, setReaction] = useState("");
-  const [returns, setReturns] = useState(0);
   const [active, setActive] = useState(() => !document.hidden);
   const [reduced, setReduced] = useState(false);
   const [settled, setSettled] = useState(true);
   const previousTask = useRef(taskPhase);
-  const [visits, setVisits] = useState(0);
-  const [invited, setInvited] = useState(false);
-  const [declined, setDeclined] = useState(false);
   const greeting = useRef({ at: 0, count: 0 });
   const quietNow = quiet || !active;
-  const { session, dispatch } = usePlaySession(quietNow || !interactive, reduced, () => {
-    setReturns((value) => value + 1);
-    onPlay?.();
-  });
+  const taskBusy = ["connecting", "thinking", "working", "waiting"].includes(taskPhase);
+  const { session, dispatch } = usePlaySession(
+    quietNow || !interactive || taskBusy || dragging,
+    taskPhase === "idle" || (taskPhase === "success" && settled),
+  );
   const feeling = taskPose(taskPhase, settled);
-  const playing = session.kind !== "none";
-  const rememberVisit = () => {
-    setVisits((value) => value + 1);
-    setInvited(false);
-  };
+  const playing = session.phase !== "idle";
+  const beforePeek = useRef<Point | undefined>(undefined);
 
   useEffect(() => {
     if (previousTask.current === taskPhase) return;
@@ -80,17 +68,10 @@ export function Stage({
     return () => window.clearTimeout(timer);
   }, [taskPhase, dispatch]);
 
-  useEffect(() => {
-    if (quietNow || !interactive || playing || taskPhase !== "idle" || declined) return;
-    const timer = window.setTimeout(() => setInvited(true), 45000);
-    return () => window.clearTimeout(timer);
-  }, [quietNow, interactive, playing, taskPhase, visits, declined]);
-
   const stop = useCallback(() => {
     cancelAnimationFrame(frame.current);
     frame.current = 0;
     flight.current = undefined;
-    animation.current?.cancel();
   }, []);
   useEffect(() => {
     const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
@@ -115,24 +96,6 @@ export function Stage({
     const timer = window.setTimeout(() => setReaction(""), 1800);
     return () => window.clearTimeout(timer);
   }, [reaction]);
-
-  useEffect(() => {
-    const target = ball.current;
-    if (!target || quietNow || reduced || !target.animate || session.kind !== "ball") return;
-    animation.current?.cancel();
-    const distance = position.current.x + (floating ? 20 : 38);
-    if (session.phase !== "throw" && session.phase !== "return") return;
-    const outward = session.phase === "throw";
-    animation.current = target.animate(
-      [
-        { transform: outward ? "translate(0, 0) rotate(0deg)" : `translate(${distance}px, -60px) rotate(180deg)` },
-        { transform: `translate(${distance * 0.5}px, -115px) rotate(100deg)`, offset: 0.5 },
-        { transform: outward ? `translate(${distance}px, -60px) rotate(180deg)` : "translate(0, 0) rotate(360deg)" },
-      ],
-      { duration: outward ? 850 : 750, easing: "ease-in-out", fill: "forwards" },
-    );
-    return () => animation.current?.cancel();
-  }, [session.kind, session.phase, quietNow, reduced, floating]);
 
   const bounds = useCallback(() => {
     const width = stage.current?.clientWidth ?? 0;
@@ -161,9 +124,24 @@ export function Stage({
     return () => observer?.disconnect();
   }, [bounds, place, stop, floating]);
 
+  useEffect(() => {
+    if (session.phase === "hiding") {
+      stop();
+      ignoreClick.current = false;
+      beforePeek.current ??= position.current;
+      const space = bounds();
+      place({
+        x: session.side === "left" ? Math.min(16, space.width) : Math.max(0, space.width - 16),
+        y: floating ? space.height : space.height - 15,
+      });
+    } else if (session.phase === "idle" && beforePeek.current) {
+      place(beforePeek.current);
+      beforePeek.current = undefined;
+    }
+  }, [session.phase, session.side, bounds, floating, place, stop]);
+
   const down = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0 || press.current) return;
-    rememberVisit();
+    if (event.button !== 0 || press.current || playing) return;
     stop();
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = { x: native ? event.screenX : event.clientX, y: native ? event.screenY : event.clientY };
@@ -229,46 +207,41 @@ export function Stage({
     };
     frame.current = requestAnimationFrame(tick);
   };
-  const play = () => {
-    if (!interactive || quiet || !active) {
-      setReaction("先安静待一会儿");
-      return;
-    }
-    rememberVisit();
+  const invite = () => {
+    if (quietNow || !interactive || taskBusy) return;
     setReaction("");
-    if (session.kind === "ball" && session.phase !== "done") dispatch({ type: "catch" });
-    else dispatch({ type: "start", kind: "ball" });
+    dispatch({ type: "invite", side: session.side === "left" ? "right" : "left" });
   };
-
   let action: PetAction = feeling.action;
-  if (session.kind === "ball")
-    action = session.phase === "return" || session.phase === "caught" || session.phase === "done" ? "happy" : "waiting";
-  if (session.kind === "memory")
-    action =
-      session.phase === "show"
-        ? session.pattern[session.step]
-        : session.phase === "round" || (session.phase === "done" && session.score === 3)
-          ? "happy"
-          : "waiting";
-  if (session.kind === "breathe") action = session.phase === "done" ? "wave" : "breathe";
-  if (reaction && !playing) action = "wave";
+  if (session.phase === "hiding") action = session.side;
+  if (session.phase === "peek") action = "wave";
+  if (session.phase === "found" || session.phase === "gifted") action = "happy";
+  if (reaction && !playing) action = reaction.startsWith("开心") ? "happy" : "wave";
   if (dragging) action = "waiting";
-  const words =
-    reaction ||
-    (quiet
-      ? "我在，安静陪你"
-      : playing
-        ? playWords(session)
-        : invited
-          ? "无聊吗？要不要一起玩三回合？"
+  const words = quiet
+    ? "我在，安静陪你"
+    : reaction ||
+      (playing
+        ? playWords(session.phase)
+        : taskPhase === "idle" && session.offered
+          ? "我在旁边安静陪你，想我时点一下就好。"
           : feeling.words);
+  const emotion = quiet
+    ? "安静"
+    : session.phase === "found" || session.phase === "gifted" || reaction.startsWith("开心")
+      ? "开心"
+      : playing
+        ? "想逗你玩"
+        : reaction
+          ? "亲近"
+          : feeling.label;
 
   return (
     <>
       <div
         ref={stage}
         className={`${styles.stage} ${floating ? styles.smallStage : ""} ${quietNow ? styles.paused : ""}`}
-        data-emotion={quiet ? "安静" : feeling.label}
+        data-emotion={emotion}
         data-play-phase={session.phase}
       >
         {!floating && (
@@ -282,9 +255,9 @@ export function Stage({
           ref={pet}
           type="button"
           data-pet-interactive="true"
-          className={`${styles.pet} ${dragging ? styles.dragging : ""} ${reaction ? styles.greeting : ""}`}
-          aria-label="和伙伴打招呼，按住可拖动"
-          disabled={!interactive}
+          className={`${styles.pet} ${dragging ? styles.dragging : ""} ${reaction ? styles.greeting : ""} ${playing ? styles.peekPet : ""}`}
+          aria-label={session.phase === "peek" ? "找到躲起来的奶蛙" : "和伙伴打招呼，按住可拖动"}
+          disabled={!interactive || session.phase === "hiding"}
           onPointerDown={down}
           onPointerMove={move}
           onPointerUp={(event) => up(event)}
@@ -297,124 +270,67 @@ export function Stage({
               ignoreClick.current = false;
               return;
             }
-            rememberVisit();
+            if (session.phase === "peek") {
+              dispatch({ type: "find" });
+              return;
+            }
+            if (playing) return;
+            if (taskPhase === "error") setSettled(true);
             const now = performance.now();
             greeting.current = { at: now, count: now - greeting.current.at < 1400 ? greeting.current.count + 1 : 1 };
             setReaction(
               quiet
                 ? "我在，安静陪你"
                 : taskPhase === "error"
-                  ? "谢谢你摸摸我。我们慢慢来。"
+                  ? "谢谢你安慰我，缓过来啦。我们慢慢来。"
                   : taskPhase === "success"
-                    ? "击掌！一起看看这次的结果。"
+                    ? "开心 · 你也来击掌啦！一起看看结果。"
                     : greeting.current.count >= 3
-                      ? "哈哈，有点痒！再摸摸头就好。"
+                      ? "开心 · 哈哈，有点痒！"
                       : "嗨，我在这儿",
             );
           }}
         >
-          <Character kind={character} asleep={quietNow} action={action} inhale={session.phase === "inhale"} />
+          <span className={styles.peekFigure}>
+            <Character kind={character} asleep={quietNow} action={action} />
+          </span>
+          {playing && (
+            <span className={styles.peekCover} aria-hidden="true">
+              ✦
+            </span>
+          )}
         </button>
-        <button
-          ref={ball}
-          type="button"
-          data-pet-interactive="true"
-          className={`${styles.ball} ${session.phase === "catch" ? styles.catchBall : ""}`}
-          aria-label={session.phase === "catch" ? "接住奶蛙传回的小球" : "把小球传给伙伴"}
-          disabled={!interactive}
-          onClick={play}
-        >
-          ✦
-        </button>
+        {(session.phase === "found" || session.phase === "gifted") && (
+          <button
+            type="button"
+            data-pet-interactive="true"
+            className={styles.flower}
+            aria-label="收下奶蛙送的小花"
+            disabled={session.phase === "gifted" || !interactive}
+            onClick={() => dispatch({ type: "gift" })}
+          >
+            ❀
+          </button>
+        )}
         <p className={styles.reaction} role="status" aria-live="polite">
           {words}
         </p>
-        {!floating && (
-          <span className={styles.playCount}>
-            {playing
-              ? `${session.kind === "ball" ? "来回抛接" : session.kind === "memory" ? "默契跟拍" : "一起放松"} · 第 ${session.round} 轮`
-              : (playCount ?? returns)
-                ? `一起玩了 ${playCount ?? returns} 次`
-                : `${feeling.label} · 轻点打招呼，或者选一个小玩法`}
-          </span>
-        )}
       </div>
-      <div className={styles.playDock} data-pet-interactive="true" aria-label="陪伴小玩法">
-        {playing && session.phase !== "done" ? (
-          <>
-            {session.kind === "memory" &&
-              (["left", "wave", "right"] as Beat[]).map((beat) => (
-                <button
-                  type="button"
-                  key={beat}
-                  disabled={session.phase !== "input" || quietNow || !interactive}
-                  onClick={() => {
-                    rememberVisit();
-                    dispatch({ type: "beat", beat });
-                  }}
-                >
-                  {beatWords[beat]}
-                </button>
-              ))}
-            <button
-              type="button"
-              onClick={() => {
-                dispatch({ type: "stop" });
-                rememberVisit();
-              }}
-            >
-              先玩到这里
-            </button>
-          </>
+      <div className={styles.playDock} data-pet-interactive="true" aria-label="陪伴互动">
+        {session.phase === "hiding" || session.phase === "peek" || session.phase === "found" ? (
+          <button
+            type="button"
+            onClick={() => {
+              dispatch({ type: "stop" });
+              setReaction("好，你先忙。我在旁边待着。");
+            }}
+          >
+            我先忙啦
+          </button>
         ) : (
-          <>
-            <button type="button" disabled={quietNow || !interactive} onClick={play}>
-              抛接球
-            </button>
-            <button
-              type="button"
-              disabled={quietNow || !interactive}
-              onClick={() => {
-                rememberVisit();
-                setReaction("");
-                const beats: Beat[] = ["left", "wave", "right"];
-                dispatch({
-                  type: "start",
-                  kind: "memory",
-                  pattern: Array.from({ length: 4 }, () => beats[Math.floor(Math.random() * beats.length)]),
-                });
-              }}
-            >
-              跟我做
-            </button>
-            <button
-              type="button"
-              disabled={quietNow || !interactive}
-              onClick={() => {
-                rememberVisit();
-                setReaction("");
-                dispatch({ type: "start", kind: "breathe" });
-              }}
-            >
-              一起放松
-            </button>
-            {session.phase === "done" && (
-              <button type="button" onClick={() => dispatch({ type: "stop" })}>
-                收好
-              </button>
-            )}
-            {invited && (
-              <button
-                type="button"
-                onClick={() => {
-                  setDeclined(true);
-                  setInvited(false);
-                }}
-              >
-                下次再玩
-              </button>
-            )}
-          </>
+          <button type="button" disabled={quietNow || !interactive || taskBusy} onClick={invite}>
+            陪我一下
+          </button>
         )}
       </div>
     </>

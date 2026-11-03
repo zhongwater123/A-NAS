@@ -61,7 +61,7 @@ describe("flight boundaries", () => {
 });
 
 describe("companion interactions", () => {
-  it("can greet and play using only the keyboard", async () => {
+  it("can greet and invite using only the keyboard", async () => {
     const user = userEvent.setup();
     render(<Stage character="glow" quiet={false} />);
     screen.getByRole("button", { name: "和伙伴打招呼，按住可拖动" }).focus();
@@ -69,14 +69,12 @@ describe("companion interactions", () => {
     expect(screen.getByRole("status")).toHaveTextContent("嗨，我在这儿");
     await user.tab();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("status")).toHaveTextContent("你传过来了，我来接");
-    expect(screen.queryByText("一起玩了 1 次")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("我有个小惊喜");
   });
   it("quiet mode stops new play without penalizing or blocking greetings", async () => {
     const user = userEvent.setup();
     render(<Stage character="chestnut" quiet />);
-    await user.click(screen.getByRole("button", { name: "把小球传给伙伴" }));
-    expect(screen.getByRole("status")).toHaveTextContent("先安静待一会儿");
+    expect(screen.getByRole("button", { name: "陪我一下" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "和伙伴打招呼，按住可拖动" }));
     expect(screen.getByRole("status")).toHaveTextContent("我在，安静陪你");
   });

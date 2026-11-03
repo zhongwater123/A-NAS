@@ -14,13 +14,11 @@ export function Character({
   asleep = false,
   phase = "idle",
   action,
-  inhale = false,
 }: {
   kind: CharacterKind;
   asleep?: boolean;
   phase?: TaskPhase;
   action?: PetAction;
-  inhale?: boolean;
 }) {
   if (kind === "naiwa") {
     const rows: Record<PetAction, [number, number]> = {
@@ -33,7 +31,6 @@ export function Character({
       waiting: [7, 6],
       left: [2, 8],
       right: [1, 8],
-      breathe: [0, 7],
     };
     const pose = asleep ? "idle" : (action ?? taskFeeling[phase].action);
     const [row, count] = rows[pose];
@@ -48,11 +45,8 @@ export function Character({
             x: pose === "left" ? -20 : pose === "right" ? 20 : 0,
             y: pose === "happy" ? -7 : 0,
             rotate: pose === "wave" ? -3 : 0,
-            scale: pose === "breathe" && inhale ? 1.08 : 1,
           }}
-          transition={
-            pose === "breathe" ? { duration: 3, ease: "easeInOut" } : { type: "spring", stiffness: 170, damping: 18 }
-          }
+          transition={{ type: "spring", stiffness: 170, damping: 18 }}
         >
           <AnimatePresence initial={false}>
             <motion.span

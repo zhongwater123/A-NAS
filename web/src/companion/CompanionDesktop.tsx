@@ -58,8 +58,6 @@ export function CompanionDesktop({ userId, connected = false }: { userId: string
         interactive={view.canPlay}
         native
         floating
-        playCount={view.playCount}
-        onPlay={view.play}
       />
       <div className={styles.miniActions} data-pet-interactive="true">
         <button type="button" onClick={() => window.companionDesktop?.home()}>
