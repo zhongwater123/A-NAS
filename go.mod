@@ -21,6 +21,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.4
 	github.com/google/uuid v1.6.0
 	github.com/hajimehoshi/go-mp3 v0.3.4
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/landlock-lsm/go-landlock v0.11.0
 	github.com/mattn/go-sqlite3 v1.14.52

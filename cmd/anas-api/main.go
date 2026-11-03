@@ -552,7 +552,7 @@ type productOperations interface {
 // unavailable rather than invented; development searches a fake that
 // reaches no engine, behind a switch in memory.
 func configuredWebSearch(config Config, store *websearch.Store, operations productOperations, logger *slog.Logger) (*websearch.Service, error) {
-	options := websearch.Options{Settings: store, ThumbnailPath: websearchapi.ThumbnailPath}
+	options := websearch.Options{Settings: store, ThumbnailPath: websearchapi.ThumbnailPath, Logger: logger}
 	if config.Live() {
 		power, ok := operations.(websearch.Switch)
 		if !ok {

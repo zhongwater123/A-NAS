@@ -392,6 +392,7 @@ components:
     SystemLogPage: { $ref: "components/logs.yaml#/schemas/SystemLogPage" }
     WebSearchCategory: { $ref: "components/web-search.yaml#/schemas/WebSearchCategory" }
     WebSearchStatus: { $ref: "components/web-search.yaml#/schemas/WebSearchStatus" }
+    WebSearchPausedEngine: { $ref: "components/web-search.yaml#/schemas/WebSearchPausedEngine" }
     WebSearchSettings: { $ref: "components/web-search.yaml#/schemas/WebSearchSettings" }
     WebSearchQuery: { $ref: "components/web-search.yaml#/schemas/WebSearchQuery" }
     WebSearchResult: { $ref: "components/web-search.yaml#/schemas/WebSearchResult" }

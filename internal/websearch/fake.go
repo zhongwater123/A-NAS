@@ -18,7 +18,8 @@ import (
 
 // Fake answers like SearXNG without reaching any engine, for development and
 // the Fake host state: a few results per engine, built from the query, with
-// Bing's engines reported as unresponsive.
+// Bing's engines reported as unresponsive. 搜狗 answers a search that contains
+// 验证码 with a CAPTCHA, which pauses it.
 type Fake struct {
 	// Delay is how long an engine takes to answer, so that the window can be
 	// seen filling in; none when nil.
@@ -45,7 +46,14 @@ var fakeEngines = []EngineInfo{
 	{Name: "piratebay", Categories: []string{"files"}}, {Name: "nyaa", Categories: []string{"files"}},
 }
 
-func (Fake) Engines(context.Context) ([]EngineInfo, error) { return fakeEngines, nil }
+// Engines are fakeEngines, each with more than one page.
+func (Fake) Engines(context.Context) ([]EngineInfo, error) {
+	engines := slices.Clone(fakeEngines)
+	for i := range engines {
+		engines[i].Paging = true
+	}
+	return engines, nil
+}
 
 // Search answers for the one engine the Service asks at a time.
 func (f Fake) Search(ctx context.Context, form url.Values) (Response, error) {
@@ -62,6 +70,10 @@ func (f Fake) Search(ctx context.Context, form url.Values) (Response, error) {
 	response := Response{Suggestions: []string{query + " 是什么", query + " 教程"}}
 	if strings.HasPrefix(name, "bing") {
 		response.Unresponsive = [][]string{{name, "timeout"}}
+		return response, nil
+	}
+	if name == "sogou" && strings.Contains(query, "验证码") {
+		response.Unresponsive = [][]string{{name, "CAPTCHA"}}
 		return response, nil
 	}
 	var categories []string

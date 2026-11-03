@@ -3,6 +3,7 @@ package websearch
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -24,8 +25,13 @@ type Update struct {
 	Infobox      *Infobox `json:"infobox,omitempty"`
 	Suggestions  []string `json:"suggestions"`
 	Unresponsive []string `json:"unresponsive"`
-	// Pending counts the tab's engines still searching; none in the last
-	// update.
+	// Paused are the engines the search left out because their site blocked
+	// them, all in the first update; Busy those it left out because they had
+	// been asked too often just before (pace.go).
+	Paused []PausedEngine `json:"paused"`
+	Busy   []string       `json:"busy"`
+	// Pending counts the engines still searching or waiting for their turn;
+	// none in the last update.
 	Pending int `json:"pending"`
 }
 
@@ -43,16 +49,19 @@ const (
 	updateGap   = 300 * time.Millisecond
 )
 
-// answer is one engine's SearXNG answer.
+// answer is one engine's SearXNG answer; busy is an engine that was not
+// asked, its turn too far off.
 type answer struct {
 	engine   string
 	response Response
+	busy     bool
 	err      error
 }
 
 // Search runs one search for account and sends its results as the tab's
 // engines answer, asking SearXNG for each engine on its own: SearXNG answers
-// only once all the engines it was asked have. The query reaches SearXNG
+// only once all the engines it was asked have. Each engine is asked at its
+// own pace, and not while it is paused (pace.go). The query reaches SearXNG
 // only in request bodies and is not logged. An error before anything was
 // sent leaves the answer to the caller.
 func (s *Service) Search(ctx context.Context, account string, query Query, send func(Update) error) error {
@@ -78,19 +87,43 @@ func (s *Service) Search(ctx context.Context, account string, query Query, send 
 	if err != nil {
 		return err
 	}
-	names := engines[query.Category]
-	merge := newMerger(s, query.Category, names)
-	if len(names) == 0 {
+	pauses, err := s.pausedEngines(ctx)
+	if err != nil {
+		return err
+	}
+	record := s.record(account, query)
+	kept, found := record.begin(query.Page)
+	names := engines.tabs[query.Category]
+	answers := make(chan answer, len(names))
+	var (
+		ask    []string
+		paused []PausedEngine
+		total  int
+	)
+	for _, name := range names {
+		pause, isPaused := pauses[name]
+		response, isKept := kept[name]
+		switch {
+		case query.Page > 1 && (!engines.paging[name] || found != nil && !found[name]):
+			// Only engines that found something on the page before turn it.
+		case isKept:
+			answers <- answer{engine: name, response: response}
+			total++
+		case isPaused:
+			paused = append(paused, pause.shown(name))
+		default:
+			ask = append(ask, name)
+			total++
+		}
+	}
+	merge := newMerger(s, query.Category, names, paused)
+	if total == 0 {
 		return send(merge.update(nil, 0))
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	answers := make(chan answer, len(names))
-	for _, name := range names {
-		go func() {
-			response, err := s.backend.Search(ctx, query.form([]string{name}))
-			answers <- answer{engine: name, response: response, err: err}
-		}()
+	for _, name := range ask {
+		go func() { answers <- s.ask(ctx, record, query, name) }()
 	}
 	start := time.Now()
 	var (
@@ -99,7 +132,7 @@ func (s *Service) Search(ctx context.Context, account string, query Query, send 
 		sent   bool
 		failed []error
 	)
-	for pending := len(names); pending > 0; {
+	for pending := total; pending > 0; {
 		select {
 		case a := <-answers:
 			pending--
@@ -120,10 +153,31 @@ func (s *Service) Search(ctx context.Context, account string, query Query, send 
 		}
 	}
 	// SearXNG itself did not answer: the service is down, not the engines.
-	if !sent && len(failed) == len(names) {
+	if !sent && len(failed) == total {
 		return fmt.Errorf("%w: %v", ErrUnavailable, failed[0])
 	}
 	return send(merge.update(wave, 0))
+}
+
+// ask asks SearXNG for engine's answer once it is the engine's turn, keeps
+// the answer for the same page again, and pauses the engine if its site
+// blocked it.
+func (s *Service) ask(ctx context.Context, record *record, query Query, engine string) answer {
+	if err := s.turn(ctx, engine); err != nil {
+		if errors.Is(err, errBusy) {
+			return answer{engine: engine, busy: true}
+		}
+		return answer{engine: engine, err: err}
+	}
+	response, err := s.backend.Search(ctx, query.form([]string{engine}))
+	if err != nil {
+		return answer{engine: engine, err: err}
+	}
+	if _, failed := failure(engine, response); !failed {
+		record.keep(query.Page, engine, response)
+	}
+	s.judge(ctx, engine, response)
+	return answer{engine: engine, response: response}
 }
 
 // merger turns the engines' answers into updates. It remembers what it sent:
@@ -133,20 +187,27 @@ type merger struct {
 	category     Category
 	order        []string
 	sent         map[string]*Found
+	paused       []PausedEngine
+	started      bool
 	answers      []string
 	infobox      bool
 	suggestions  []string
 	unresponsive []string
+	busy         []string
 }
 
-func newMerger(s *Service, category Category, order []string) *merger {
-	return &merger{service: s, category: category, order: order, sent: map[string]*Found{}}
+func newMerger(s *Service, category Category, order []string, paused []PausedEngine) *merger {
+	return &merger{service: s, category: category, order: order, sent: map[string]*Found{}, paused: paused}
 }
 
 func (m *merger) update(wave []answer, pending int) Update {
 	update := Update{
 		Results: []Result{}, Found: []Found{}, Answers: []Answer{}, Suggestions: []string{}, Unresponsive: []string{},
-		Pending: pending,
+		Paused: []PausedEngine{}, Busy: []string{}, Pending: pending,
+	}
+	if !m.started {
+		m.started = true
+		update.Paused = append(update.Paused, m.paused...)
 	}
 	// The engines of a wave in the tab's order, whenever each answered.
 	slices.SortStableFunc(wave, func(a, b answer) int {
@@ -154,6 +215,13 @@ func (m *merger) update(wave []answer, pending int) Update {
 	})
 	var raws []RawResult
 	for _, a := range wave {
+		if a.busy {
+			if l := label(a.engine); !slices.Contains(m.busy, l) {
+				m.busy = append(m.busy, l)
+				update.Busy = append(update.Busy, l)
+			}
+			continue
+		}
 		if a.err != nil {
 			m.unresponsiveEngine(&update, a.engine)
 			continue

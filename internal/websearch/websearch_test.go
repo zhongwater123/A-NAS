@@ -13,17 +13,22 @@ import (
 	"time"
 )
 
-// testEngines are the engines the first release loaded, as SearXNG lists them.
+// testEngines are the engines the first release loaded, as SearXNG lists them;
+// all but 夸克 have more than one page.
 var testEngines = []EngineInfo{
-	{Name: "baidu", Categories: []string{"general"}}, {Name: "sogou", Categories: []string{"general"}},
-	{Name: "360search", Categories: []string{"general"}}, {Name: "quark", Categories: []string{"general"}},
-	{Name: "yandex", Categories: []string{"general"}},
-	{Name: "baidu images", Categories: []string{"images"}}, {Name: "quark images", Categories: []string{"images"}},
-	{Name: "bilibili", Categories: []string{"videos"}}, {Name: "iqiyi", Categories: []string{"videos"}},
-	{Name: "acfun", Categories: []string{"videos"}}, {Name: "sogou videos", Categories: []string{"videos"}},
-	{Name: "360search videos", Categories: []string{"videos"}}, {Name: "youtube", Categories: []string{"videos", "music"}},
-	{Name: "dailymotion", Categories: []string{"videos"}},
-	{Name: "sogou wechat", Categories: []string{"news"}}, {Name: "piratebay", Categories: []string{"files"}},
+	{Name: "baidu", Categories: []string{"general"}, Paging: true}, {Name: "sogou", Categories: []string{"general"}, Paging: true},
+	{Name: "360search", Categories: []string{"general"}, Paging: true}, {Name: "quark", Categories: []string{"general"}},
+	{Name: "yandex", Categories: []string{"general"}, Paging: true},
+	{Name: "baidu images", Categories: []string{"images"}, Paging: true},
+	{Name: "quark images", Categories: []string{"images"}, Paging: true},
+	{Name: "bilibili", Categories: []string{"videos"}, Paging: true}, {Name: "iqiyi", Categories: []string{"videos"}, Paging: true},
+	{Name: "acfun", Categories: []string{"videos"}, Paging: true},
+	{Name: "sogou videos", Categories: []string{"videos"}, Paging: true},
+	{Name: "360search videos", Categories: []string{"videos"}, Paging: true},
+	{Name: "youtube", Categories: []string{"videos", "music"}, Paging: true},
+	{Name: "dailymotion", Categories: []string{"videos"}, Paging: true},
+	{Name: "sogou wechat", Categories: []string{"news"}, Paging: true},
+	{Name: "piratebay", Categories: []string{"files"}, Paging: true},
 }
 
 // recordingBackend answers each engine as told and remembers what it was
@@ -94,7 +99,9 @@ func newTestService(t *testing.T, backend Backend, power Switch) *Service {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	return New(Options{Backend: backend, Switch: power, Settings: store, Secret: []byte("test secret"), ThumbnailPath: "/thumb"})
+	// Tests search faster than a person; those of the pace set their own.
+	return New(Options{Backend: backend, Switch: power, Settings: store, Secret: []byte("test secret"), ThumbnailPath: "/thumb",
+		Unpaced: true})
 }
 
 // shown is what the window shows once a search's updates have all come.
@@ -103,6 +110,8 @@ type shown struct {
 	Results      []Result
 	Unresponsive []string
 	Suggestions  []string
+	Paused       []string
+	Busy         []string
 }
 
 func search(service *Service, account string, query Query) (shown, error) {
@@ -119,6 +128,10 @@ func search(service *Service, account string, query Query) (shown, error) {
 		}
 		page.Unresponsive = append(page.Unresponsive, update.Unresponsive...)
 		page.Suggestions = append(page.Suggestions, update.Suggestions...)
+		for _, paused := range update.Paused {
+			page.Paused = append(page.Paused, paused.Engine)
+		}
+		page.Busy = append(page.Busy, update.Busy...)
 		return nil
 	})
 	return page, err
@@ -498,7 +511,7 @@ func TestTabsFollowSearXNGsCategories(t *testing.T) {
 		Web: "baidu,bing,wikipedia,alpha,chefkoch", Images: "startpage images", Videos: "youtube", Music: "youtube",
 		News: "wikinews", Science: "arxiv", IT: "crates.io", Torrents: "kickass", Map: "", Social: "",
 	} {
-		if got := strings.Join(tabs[category], ","); got != want {
+		if got := strings.Join(tabs.tabs[category], ","); got != want {
 			t.Errorf("%s = %q, want %q", category, got, want)
 		}
 	}

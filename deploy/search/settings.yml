@@ -36,6 +36,11 @@ use_default_settings:
 general:
   instance_name: "A-NAS"
 
+ui:
+  # The Product Service reads why an engine gave no results, such as
+  # "CAPTCHA" or "access denied", in English (internal/websearch/pace.go).
+  default_locale: "en"
+
 search:
   # Moderate, where an engine supports it.
   safe_search: 1
