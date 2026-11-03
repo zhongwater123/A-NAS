@@ -18,7 +18,7 @@ import (
 func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 	now := time.Date(2026, time.October, 7, 9, 0, 0, 0, time.UTC)
 	executor := &recordingExecutor{}
-	service := storage.NewService(fake.NewHealthy(), executor, storage.Options{
+	service := newService(t, fake.NewHealthy(), executor, storage.Options{
 		Now:   func() time.Time { return now },
 		NewID: func() string { return "plan-01" },
 	})
@@ -65,7 +65,7 @@ func TestAdministratorCanPlanConfirmAndExecuteDataVolumeCreation(t *testing.T) {
 }
 
 func TestPlanForBlankDiskSerializesEmptySignaturesArray(t *testing.T) {
-	service := storage.NewService(fake.NewHealthy(), &recordingExecutor{}, storage.Options{
+	service := newService(t, fake.NewHealthy(), &recordingExecutor{}, storage.Options{
 		Now:   func() time.Time { return time.Date(2026, time.October, 7, 9, 0, 0, 0, time.UTC) },
 		NewID: func() string { return "plan-blank-disk" },
 	})
@@ -157,7 +157,7 @@ func TestListVolumesRefreshesFilesystemUsageFromHostState(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := &stateReader{state: state}
-	service := storage.NewService(reader, &recordingExecutor{}, storage.Options{NewID: func() string { return "plan-usage" }})
+	service := newService(t, reader, &recordingExecutor{}, storage.Options{NewID: func() string { return "plan-usage" }})
 	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestDataVolumeFilesystemUUIDNeedsNoHostRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := &stateReader{state: state}
-	service := storage.NewService(reader, &recordingExecutor{}, storage.Options{NewID: func() string { return "plan-uuid" }})
+	service := newService(t, reader, &recordingExecutor{}, storage.Options{NewID: func() string { return "plan-uuid" }})
 	if got := service.DataVolumeFilesystemUUID(); got != "" {
 		t.Fatalf("UUID before any volume = %q, want empty", got)
 	}
@@ -239,7 +239,7 @@ func TestUnusableDiskObservationsCannotBePlanned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := storage.NewService(reader, &recordingExecutor{}, storage.Options{})
+	service := newService(t, reader, &recordingExecutor{}, storage.Options{})
 	for _, disk := range state.Disks {
 		if len(disk.ObservationIssues) == 0 {
 			continue
@@ -287,4 +287,14 @@ func (e *recordingExecutor) VolumeOperation(context.Context, string) (storage.Vo
 func (e *recordingExecutor) ContinueConversion(context.Context) error {
 	e.continued++
 	return nil
+}
+
+// newService is a service that keeps its plans in memory only.
+func newService(t *testing.T, reader hoststate.Reader, executor storage.VolumeExecutor, options storage.Options) *storage.Service {
+	t.Helper()
+	service, err := storage.OpenService(reader, executor, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
 }
