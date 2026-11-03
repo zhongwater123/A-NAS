@@ -119,11 +119,17 @@ def frame_path(video, ms):
 
 def decode(path, ms, duration_ms):
     # The last frame starts before the end; a seek to the very end finds none.
+    # A picture can also end before the file's duration (case-08's by 0.13 s): a seek past
+    # its last frame finds none, and steps back a second at a time.
     at = min(ms, max(duration_ms - 100, 0)) / 1000
-    result = subprocess.run(
-        ["ffmpeg", "-v", "error", "-ss", f"{at:.3f}", "-i", path, "-frames:v", "1",  # noqa: S607  FFmpeg from PATH on a development machine
-         "-f", "image2pipe", "-vcodec", "png", "-"],
-        capture_output=True, check=True)
+    while True:
+        result = subprocess.run(
+            ["ffmpeg", "-v", "error", "-ss", f"{at:.3f}", "-i", path, "-frames:v", "1",  # noqa: S607  FFmpeg from PATH on a development machine
+             "-f", "image2pipe", "-vcodec", "png", "-"],
+            capture_output=True, check=True)
+        if result.stdout or at <= 0:
+            break
+        at = max(at - 1, 0)
     with Image.open(io.BytesIO(result.stdout)) as image:
         return render(image, EDGE)
 

@@ -435,8 +435,9 @@ class Index:
         """A segment of the card set by the program rather than the planner (#350): the card's
         window probe scores best, grown over the neighbours in its shot, the closer side first,
         while each scores within SPAN_DROP of that window ("probe") or its picture is STILL alike
-        to that window's ("frame"), up to CLIP_MAX. Flat windows and those of taken, the
-        (video, start, end) already in the plan, are left out; None when no window is left."""
+        to that window's ("frame"), up to CLIP_MAX, and at least SEGMENT_MIN. Flat windows and
+        those of taken, the (video, start, end) already in the plan, are left out; None when
+        too few are left."""
         if mode not in SPANS:
             raise ValueError(f"mode 要是 {'、'.join(SPANS)} 之一")
         card = next(c for c in self.cards if c["id"] == card_id)
@@ -462,9 +463,21 @@ class Index:
             if min(hi, self.rows[shot[nb]][2]) - max(lo, self.rows[shot[na]][1]) > CLIP_MAX + ROUNDING:
                 break
             a, b = na, nb
-        start, end = max(lo, self.rows[shot[a]][1]), min(hi, self.rows[shot[b]][2])
-        # Rounded inward, so that the segment stays inside its shot.
-        return math.ceil(start * 100) / 100, math.floor(end * 100) / 100
+
+        def seconds(a, b):
+            # Rounded inward, so that the segment stays inside its shot.
+            return (math.ceil(max(lo, self.rows[shot[a]][1]) * 100) / 100,
+                    math.floor(min(hi, self.rows[shot[b]][2]) * 100) / 100)
+
+        # A window cut short by its shot's edge is under SEGMENT_MIN: free neighbours join
+        # however they score, the closer first; a shot too short for that has no segment.
+        while seconds(a, b)[1] - seconds(a, b)[0] < SEGMENT_MIN:
+            sides = [k for k in (a - 1, b + 1) if 0 <= k < len(shot) and shot[k] in free]
+            if not sides:
+                return None
+            k = max(sides, key=lambda k: near[shot[k]])
+            a, b = min(a, k), max(b, k)
+        return seconds(a, b)
 
     def _shot_windows(self, card: dict) -> list[int]:
         lo, hi = card["shot"]

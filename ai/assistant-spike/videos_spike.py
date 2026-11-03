@@ -304,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.probes[probe] = embed_query(self.server.ai_socket, probe)
             span = index.span(card, self.server.probes[probe], mode, taken)
             if span is None:
-                problems.append(f"第 {n} 段的 {card} 已没有可用的画面：前面的段用了它，或只剩纯色画面")
+                problems.append(f"第 {n} 段的 {card} 剪不出 1.5 秒：镜头太短、前面的段用了它，或只剩纯色画面")
                 continue
             taken.append((card.split("-", 1)[0], *span))
             out.append(segment | {"start": span[0], "end": span[1]})

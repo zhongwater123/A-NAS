@@ -370,6 +370,17 @@ class MomentsTest(unittest.TestCase):
         self.assertEqual(index.span(card, basis[0], "probe"), (0, 2))
         self.assertEqual(index.span(card, basis[0], "frame"), (0, 4))
 
+    def test_a_span_cut_short_by_its_shot_takes_its_neighbours_or_none(self):
+        basis = np.eye(8, dtype=np.float32)
+        windows = [{"start": 2 * k, "end": 2 * k + 2, "frame": 2000 * k + 1000, "flat": False, "tags": []}
+                   for k in range(5)]
+        index = moments.Index({"model": "test", "videos": {"10": {
+            "file": "10.webm", "duration": 10.0, "shots": [[0, 1.2], [1.2, 6.8], [6.8, 10]], "windows": windows}}},
+            {f"10/{w['frame']}": basis[k] for k, w in enumerate(windows)})
+        # 6.8-8 is all the matched window has in its shot; the next joins though it scores 0.
+        self.assertEqual(index.span("10-2-0", basis[3], "probe"), (6.8, 10))
+        self.assertIsNone(index.span("10-0-0", basis[0], "frame"))  # a shot of 1.2 s
+
     def test_search_keeps_to_windows_meeting_a_condition(self):
         # The castle seen from the other side (28-48 s) leans to basis 2; asking for that
         # rather than basis 1 leaves out the first castle part.
