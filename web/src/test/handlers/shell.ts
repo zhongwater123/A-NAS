@@ -11,10 +11,12 @@ import type {
   Session,
   SetupStatus,
   Wallpaper,
+  WebSearchStatus,
 } from "../../api.generated";
 import { healthyState, metricsState, session as sessionFixture } from "../fixtures";
 import { http, server } from "../server";
 import { companionHandlers } from "./companion";
+import { webSearchStatus } from "./websearch";
 
 export const session = sessionFixture();
 
@@ -28,6 +30,8 @@ export interface ShellOptions {
   profiles?: Profile[];
   wallpaper?: Wallpaper;
   assistant?: AssistantStatus;
+  // Web search is off unless a test turns it on, so its icon is in no other test's way.
+  webSearch?: WebSearchStatus;
 }
 
 export function shellHandlers(options: ShellOptions = {}) {
@@ -46,6 +50,7 @@ export function shellHandlers(options: ShellOptions = {}) {
     http.get("/api/v1/assistant/status", ({ response }) =>
       response(200).json(options.assistant ?? { available: false }),
     ),
+    http.get("/api/v1/web-search", ({ response }) => response(200).json(options.webSearch ?? webSearchStatus(false))),
     // The rail's count of new shares, the transfer indicator and 问题反馈.
     http.get("/api/v1/shares", ({ response }) => response(200).json({ items: [] })),
     http.get("/api/v1/shares/notifications", ({ response }) => response(200).json({ items: [] })),

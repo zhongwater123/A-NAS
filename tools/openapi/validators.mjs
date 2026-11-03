@@ -31,6 +31,7 @@ const VALIDATED = [
   "getLocalDisplay",
   "listAppShortcuts",
   "getAssistantStatus",
+  "getWebSearch",
   "listShareNotifications",
   "listMemberShares",
   "getMemberShare",

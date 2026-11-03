@@ -58,6 +58,7 @@ linters:
             - "**/internal/systemlog/journal/*.go"
             - "**/internal/taskmanager/*.go"
             - "**/internal/unixmsg/*.go"
+            - "**/internal/websearchswitch/*.go"
             - "!$test"
           allow:
             - "$gostd"
@@ -95,6 +96,7 @@ linters:
             - "github.com/zhongwater123/A-NAS/internal/systemlog/journal$"
             - "github.com/zhongwater123/A-NAS/internal/taskmanager$"
             - "github.com/zhongwater123/A-NAS/internal/unixmsg$"
+            - "github.com/zhongwater123/A-NAS/internal/websearchswitch$"
         container-agent:
           list-mode: strict
           files:

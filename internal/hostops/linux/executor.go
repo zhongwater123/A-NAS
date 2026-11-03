@@ -122,6 +122,9 @@ type Executor struct {
 	converting    bool
 	// markerMu orders changes to the data-volume marker.
 	markerMu sync.Mutex
+	// webSearchMu orders changes to the web search switch, so its file and
+	// the service's start or stop always match the last request.
+	webSearchMu sync.Mutex
 	// operations is the journal of data-volume operations by plan ID.
 	operationsMu    sync.Mutex
 	operations      map[string]*volumeOperation

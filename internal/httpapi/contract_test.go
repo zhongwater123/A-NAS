@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"maps"
 	"net/http"
@@ -11,14 +12,33 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/openapitest"
 )
 
-// Subtitles are WebVTT, which kin-openapi does not decode by itself.
-func init() { openapi3filter.RegisterBodyDecoder("text/vtt", openapi3filter.FileBodyDecoder) }
+// Subtitles are WebVTT, which kin-openapi does not decode by itself, and
+// web search sends newline-delimited JSON, checked as an array of its lines.
+func init() {
+	openapi3filter.RegisterBodyDecoder("text/vtt", openapi3filter.FileBodyDecoder)
+	openapi3filter.RegisterBodyDecoder("application/x-ndjson", decodeLines)
+}
+
+func decodeLines(body io.Reader, _ http.Header, _ *openapi3.SchemaRef, _ openapi3filter.EncodingFn) (any, error) {
+	lines := []any{}
+	decoder := json.NewDecoder(body)
+	for {
+		var line any
+		if err := decoder.Decode(&line); errors.Is(err, io.EOF) {
+			return lines, nil
+		} else if err != nil {
+			return nil, err
+		}
+		lines = append(lines, line)
+	}
+}
 
 // checkedProduct is the product API whose every exchange is checked against
 // the specification.

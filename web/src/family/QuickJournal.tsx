@@ -25,7 +25,8 @@ export function QuickJournal({
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const key = useRef(requestKey());
+  // One key per entry, made once rather than on every render.
+  const [key, setKey] = useState(requestKey);
   const field = useRef<HTMLTextAreaElement>(null);
 
   const close = () => {
@@ -41,9 +42,9 @@ export function QuickJournal({
         kind: "journal",
         text: value,
         occurredOn: today(),
-        requestKey: key.current,
+        requestKey: key,
       });
-      key.current = requestKey();
+      setKey(requestKey());
       setText("");
       close();
       onAdded(record);

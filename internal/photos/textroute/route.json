@@ -1,0 +1,56 @@
+{
+  "model": "embeddinggemma-2-740m@e7a8a2204b91+mediapipe-1.1.0+tok70+l2",
+  "queries": [
+    "证件",
+    "身份证",
+    "银行卡",
+    "驾驶证",
+    "护照",
+    "票据",
+    "发票",
+    "小票",
+    "收据",
+    "银行回单",
+    "转账记录",
+    "截图",
+    "手机截图",
+    "文档",
+    "文件",
+    "合同",
+    "表格",
+    "书页",
+    "手写笔记",
+    "名片",
+    "快递单",
+    "病历",
+    "说明书",
+    "试卷",
+    "证书",
+    "document",
+    "form",
+    "receipt",
+    "invoice",
+    "ID card",
+    "screenshot"
+  ],
+  "threshold": 0.6926,
+  "target": 0.99,
+  "measured": {
+    "read": {
+      "photos": 683,
+      "chosen": 0.9927
+    },
+    "photo": {
+      "photos": 7016,
+      "chosen": 0.0144
+    },
+    "scene": {
+      "photos": 646,
+      "chosen": 0.0232
+    },
+    "web": {
+      "photos": 237,
+      "chosen": 0.0464
+    }
+  }
+}

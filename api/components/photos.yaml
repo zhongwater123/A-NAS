@@ -248,6 +248,7 @@ schemas:
       pending: { type: integer, minimum: 0 }
       failed: { type: integer, minimum: 0 }
       clusters: { type: string, enum: [ready, preparing], description: "Whether AI 聚合 can list its groups; preparing while label texts wait for the Worker, which runs only once the photo library has been idle for a while. Absent when the Worker's model has no calibrated clusters." }
+      textPhotos: { type: integer, minimum: 0, description: "Originals whose vector sends them to have their text read (documents, receipts, cards, screenshots), queued or read. Absent while the text route does not apply to the Worker's model or its queries wait for the Worker." }
   PhotoDirectoryListing:
     type: object
     additionalProperties: false
