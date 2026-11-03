@@ -497,7 +497,7 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
     # Not read-only: it adds a file, though only a new one in the assistant's own folder.
     @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
                  structured_output=False, description=(
-        "按剪辑计划把视频片段剪成一段 1920×1080、30 fps 的无声 MP4，存进助手目录的“视频”文件夹，返回文件路径与时长。"
+        "按剪辑计划把视频片段剪成一段 1920×1080、30 fps 的 MP4，每段带原片同一区间的原声（不加配乐和字幕），存进助手目录的“视频”文件夹，返回文件路径与时长。"
         "segments：按播放顺序排列，" + SEGMENT +
         "成片总长不设上限。shows 写这段画面要呈现指令里的什么，只用指令里的词，如“湖上的小船”“夜晚的城市”，不超过 40 个字；"
         "不要写这段画面的细节或别的说法（“美食”就写“美食”，不写“美食,新鲜食材”），"
