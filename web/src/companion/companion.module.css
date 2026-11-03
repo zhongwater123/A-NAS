@@ -93,6 +93,15 @@
   border-radius: 2px;
   box-shadow: none;
 }
+.petAnchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 160px;
+  height: 160px;
+  pointer-events: none;
+  z-index: 2;
+}
 .pet {
   position: absolute;
   left: 0;
@@ -104,6 +113,7 @@
   border: 0;
   border-radius: 45%;
   cursor: grab;
+  pointer-events: auto;
   touch-action: none;
   user-select: none;
   z-index: 2;
@@ -148,9 +158,15 @@
 }
 .reaction {
   position: absolute;
-  top: 12px;
-  left: 10%;
-  width: 80%;
+  top: 0;
+  left: 0;
+  width: 240px;
+  box-sizing: border-box;
+  padding: 6px 9px;
+  border-radius: 12px;
+  background: #fffffff0;
+  box-shadow: 0 2px 10px #314f4810;
+  z-index: 4;
   text-align: center;
   pointer-events: none;
   font-size: 12px;
@@ -270,7 +286,7 @@
   background: #fffffff2;
 }
 .native:has(.syncStatus) .smallStage {
-  height: 180px;
+  height: 220px;
 }
 .empty {
   height: 300px;
@@ -306,7 +322,11 @@
   font-family: system-ui, sans-serif;
 }
 .smallStage {
-  height: 170px;
+  height: 220px;
+}
+.smallStage .petAnchor {
+  width: 128px;
+  height: 128px;
 }
 .smallStage .pet {
   width: 128px;
@@ -642,15 +662,8 @@
   font-size: 11px;
 }
 .native:has(.taskCompact) .smallStage {
-  height: 135px;
+  height: 220px;
   flex-shrink: 0;
-}
-
-.native:has(.taskCompact) .reaction {
-  left: 8px;
-  right: auto;
-  top: 5px;
-  max-width: 92px;
 }
 
 .peekFigure {
@@ -663,6 +676,8 @@
 }
 .peekPet {
   cursor: pointer;
+}
+.peekActor {
   transition: transform 0.55s ease-in-out;
 }
 .peekCover {
@@ -720,7 +735,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .peekFigure,
-  .peekPet,
+  .peekActor,
   .peekCover {
     transition: none;
   }

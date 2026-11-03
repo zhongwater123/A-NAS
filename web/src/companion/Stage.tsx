@@ -1,9 +1,16 @@
-import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { type PetAction, taskPose } from "./behaviour";
 import { Character } from "./Character";
 import styles from "./companion.module.css";
-import { advanceFlight, type Flight, inside, type Point } from "./motion";
+import { advanceFlight, type Flight, inside, type Point, speechOffset } from "./motion";
 import { playWords, usePlaySession } from "./playSession";
 import type { Character as CharacterKind } from "./preferences";
 import "./native";
@@ -34,7 +41,8 @@ export function Stage({
   taskPhase?: import("./taskState").TaskPhase;
 }) {
   const stage = useRef<HTMLDivElement>(null);
-  const pet = useRef<HTMLButtonElement>(null);
+  const actor = useRef<HTMLDivElement>(null);
+  const speech = useRef<HTMLParagraphElement>(null);
   const press = useRef<Press | undefined>(undefined);
   const flight = useRef<Flight | undefined>(undefined);
   const position = useRef<Point>({ x: 0, y: 0 });
@@ -103,12 +111,27 @@ export function Stage({
     const size = floating ? 128 : 160;
     return { width: Math.max(0, width - size), height: Math.max(0, height - size - (floating ? 8 : 20)) };
   }, [floating]);
+  const positionSpeech = useCallback(() => {
+    const element = stage.current;
+    const bubble = speech.current;
+    if (!element || !bubble) return;
+    const width = element.clientWidth || 320;
+    bubble.style.width = `${Math.min(240, Math.max(0, width - 12))}px`;
+    const offset = speechOffset(
+      position.current,
+      floating ? 128 : 160,
+      { width, height: element.clientHeight || 300 },
+      { width: bubble.offsetWidth, height: bubble.offsetHeight },
+    );
+    bubble.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
+  }, [floating]);
   const place = useCallback(
     (next: Point) => {
       position.current = inside(next, bounds());
-      if (pet.current) pet.current.style.transform = `translate(${position.current.x}px, ${position.current.y}px)`;
+      if (actor.current) actor.current.style.transform = `translate(${position.current.x}px, ${position.current.y}px)`;
+      positionSpeech();
     },
-    [bounds],
+    [bounds, positionSpeech],
   );
   useEffect(() => {
     const element = stage.current;
@@ -119,7 +142,13 @@ export function Stage({
       place({ x: space.width / 2, y: floating ? space.height : space.height - 15 });
     };
     reset();
-    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(reset);
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(() => {
+            stop();
+            place(position.current);
+          });
     observer?.observe(element);
     return () => observer?.disconnect();
   }, [bounds, place, stop, floating]);
@@ -236,6 +265,13 @@ export function Stage({
           ? "亲近"
           : feeling.label;
 
+  useLayoutEffect(() => {
+    positionSpeech();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(positionSpeech);
+    if (speech.current) observer?.observe(speech.current);
+    return () => observer?.disconnect();
+  }, [words, positionSpeech]);
+
   return (
     <>
       <div
@@ -251,55 +287,59 @@ export function Stage({
             <span />
           </div>
         )}
-        <button
-          ref={pet}
-          type="button"
-          data-pet-interactive="true"
-          className={`${styles.pet} ${dragging ? styles.dragging : ""} ${reaction ? styles.greeting : ""} ${playing ? styles.peekPet : ""}`}
-          aria-label={session.phase === "peek" ? "找到躲起来的奶蛙" : "和伙伴打招呼，按住可拖动"}
-          disabled={!interactive || session.phase === "hiding"}
-          onPointerDown={down}
-          onPointerMove={move}
-          onPointerUp={(event) => up(event)}
-          onPointerCancel={(event) => up(event, true)}
-          onLostPointerCapture={(event) => {
-            if (press.current) up(event, true);
-          }}
-          onClick={() => {
-            if (ignoreClick.current) {
-              ignoreClick.current = false;
-              return;
-            }
-            if (session.phase === "peek") {
-              dispatch({ type: "find" });
-              return;
-            }
-            if (playing) return;
-            if (taskPhase === "error") setSettled(true);
-            const now = performance.now();
-            greeting.current = { at: now, count: now - greeting.current.at < 1400 ? greeting.current.count + 1 : 1 };
-            setReaction(
-              quiet
-                ? "我在，安静陪你"
-                : taskPhase === "error"
-                  ? "谢谢你安慰我，缓过来啦。我们慢慢来。"
-                  : taskPhase === "success"
-                    ? "开心 · 你也来击掌啦！一起看看结果。"
-                    : greeting.current.count >= 3
-                      ? "开心 · 哈哈，有点痒！"
-                      : "嗨，我在这儿",
-            );
-          }}
-        >
-          <span className={styles.peekFigure}>
-            <Character kind={character} asleep={quietNow} action={action} />
-          </span>
-          {playing && (
-            <span className={styles.peekCover} aria-hidden="true">
-              ✦
+        <div ref={actor} className={`${styles.petAnchor} ${playing ? styles.peekActor : ""}`}>
+          <button
+            type="button"
+            data-pet-interactive="true"
+            className={`${styles.pet} ${dragging ? styles.dragging : ""} ${reaction ? styles.greeting : ""} ${playing ? styles.peekPet : ""}`}
+            aria-label={session.phase === "peek" ? "找到躲起来的奶蛙" : "和伙伴打招呼，按住可拖动"}
+            disabled={!interactive || session.phase === "hiding"}
+            onPointerDown={down}
+            onPointerMove={move}
+            onPointerUp={(event) => up(event)}
+            onPointerCancel={(event) => up(event, true)}
+            onLostPointerCapture={(event) => {
+              if (press.current) up(event, true);
+            }}
+            onClick={() => {
+              if (ignoreClick.current) {
+                ignoreClick.current = false;
+                return;
+              }
+              if (session.phase === "peek") {
+                dispatch({ type: "find" });
+                return;
+              }
+              if (playing) return;
+              if (taskPhase === "error") setSettled(true);
+              const now = performance.now();
+              greeting.current = { at: now, count: now - greeting.current.at < 1400 ? greeting.current.count + 1 : 1 };
+              setReaction(
+                quiet
+                  ? "我在，安静陪你"
+                  : taskPhase === "error"
+                    ? "谢谢你安慰我，缓过来啦。我们慢慢来。"
+                    : taskPhase === "success"
+                      ? "开心 · 你也来击掌啦！一起看看结果。"
+                      : greeting.current.count >= 3
+                        ? "开心 · 哈哈，有点痒！"
+                        : "嗨，我在这儿",
+              );
+            }}
+          >
+            <span className={styles.peekFigure}>
+              <Character kind={character} asleep={quietNow} action={action} />
             </span>
-          )}
-        </button>
+            {playing && (
+              <span className={styles.peekCover} aria-hidden="true">
+                ✦
+              </span>
+            )}
+          </button>
+          <p ref={speech} className={styles.reaction} role="status" aria-live="polite">
+            {words}
+          </p>
+        </div>
         {(session.phase === "found" || session.phase === "gifted") && (
           <button
             type="button"
@@ -312,9 +352,6 @@ export function Stage({
             ❀
           </button>
         )}
-        <p className={styles.reaction} role="status" aria-live="polite">
-          {words}
-        </p>
       </div>
       <div className={styles.playDock} data-pet-interactive="true" aria-label="陪伴互动">
         {session.phase === "hiding" || session.phase === "peek" || session.phase === "found" ? (

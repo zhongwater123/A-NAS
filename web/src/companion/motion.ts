@@ -19,6 +19,17 @@ export interface Flight {
   velocity: Point;
 }
 
+// Relative to the actor: above the head, below it near the top edge, bounded
+// by the scene. Both actor and speech share the same moving parent.
+export function speechOffset(pet: Point, size: number, scene: Bounds, bubble: Bounds): Point {
+  const x = pet.x + size / 2 - bubble.width / 2;
+  const above = pet.y - bubble.height - 8;
+  const below = pet.y + size + 8;
+  const y = above >= 6 ? above : below + bubble.height <= scene.height - 6 ? below : 6;
+  const fitted = inside({ x, y }, { width: scene.width - bubble.width - 6, height: scene.height - bubble.height - 6 });
+  return { x: Math.max(6, fitted.x) - pet.x, y: Math.max(6, fitted.y) - pet.y };
+}
+
 // Small deterministic local flight, independent of renderer/React. Capped
 // elapsed time prevents a tab returning from suspension teleporting the pet.
 export function advanceFlight(flight: Flight, bounds: Bounds, seconds: number): Flight {

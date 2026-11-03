@@ -76,7 +76,7 @@ app.whenReady().then(() => {
   try { origin = nasOrigin(process.env.ANAS_NAS_URL); }
   catch (error) { console.error(error.message); app.quit(); return; }
   app.setName("A-NAS Companion");
-  pet = new BrowserWindow({ width: origin ? 760 : 350, height: origin ? 720 : 280, show: false,
+  pet = new BrowserWindow({ width: origin ? 760 : 350, height: origin ? 720 : 400, show: false,
     frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true, resizable: false,
     backgroundColor: "#00000000", hasShadow: false,
     webPreferences: { preload: path.join(__dirname, "preload.cjs"), nodeIntegration: false,
@@ -125,7 +125,7 @@ app.whenReady().then(() => {
   ipcMain.on("companion:home", (event) => { if (senderIsPet(event)) showHome(); });
   ipcMain.on("companion:compact", (event) => {
     if (!senderIsPet(event)) return;
-    pet.setSize(350, 280);
+    pet.setSize(350, 400);
     restorePosition();
   });
   ipcMain.on("companion:expand", (event) => {

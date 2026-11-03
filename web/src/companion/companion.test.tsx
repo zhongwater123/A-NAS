@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { CompanionFloating } from "./CompanionFloating";
 import { CompanionPanel } from "./CompanionPanel";
-import { advanceFlight, inside } from "./motion";
+import { advanceFlight, inside, speechOffset } from "./motion";
 import { initialPreferences, preferenceKey, readPreferences, writePreferences } from "./preferences";
 import { Stage } from "./Stage";
 
@@ -57,6 +57,27 @@ describe("flight boundaries", () => {
       advanceFlight(flight, { width: 100, height: 80 }, 0.032),
     );
     expect(inside({ x: Infinity, y: 100 }, { width: -20, height: 0 })).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe("speech follows the pet without leaving the scene", () => {
+  it("stays centered above a pet with room overhead", () => {
+    const pet = { x: 150, y: 100 };
+    const offset = speechOffset(pet, 160, { width: 600, height: 300 }, { width: 240, height: 36 });
+    expect(pet.x + offset.x + 120).toBe(pet.x + 80);
+    expect(pet.y + offset.y + 36).toBeLessThan(pet.y);
+  });
+  it("keeps both left and right edge speech inside the scene", () => {
+    for (const x of [0, 440]) {
+      const offset = speechOffset({ x, y: 100 }, 160, { width: 600, height: 300 }, { width: 240, height: 36 });
+      expect(x + offset.x).toBeGreaterThanOrEqual(6);
+      expect(x + offset.x + 240).toBeLessThanOrEqual(594);
+    }
+  });
+  it("moves speech below the pet at the top and fits taller text", () => {
+    const offset = speechOffset({ x: 100, y: 0 }, 160, { width: 600, height: 300 }, { width: 240, height: 70 });
+    expect(offset.y).toBeGreaterThanOrEqual(168);
+    expect(offset.y + 70).toBeLessThanOrEqual(294);
   });
 });
 
