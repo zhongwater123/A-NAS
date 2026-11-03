@@ -22,6 +22,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 )
@@ -98,7 +100,7 @@ func New() *Reader {
 			return filesystemUsage{
 				total:     uint64(stats.Blocks) * blockSize,
 				available: uint64(stats.Bavail) * blockSize,
-				readOnly:  stats.Flags&stRDOnly != 0,
+				readOnly:  stats.Flags&unix.ST_RDONLY != 0,
 			}, nil
 		},
 	})
@@ -194,9 +196,6 @@ func (r *Reader) systemStorage() *hoststate.StorageUsage {
 	}
 	return &hoststate.StorageUsage{TotalBytes: usage.total, AvailableBytes: usage.available}
 }
-
-// stRDOnly is ST_RDONLY in statfs flags: the filesystem is mounted read-only.
-const stRDOnly = 0x1
 
 type filesystemUsage struct {
 	total, available uint64

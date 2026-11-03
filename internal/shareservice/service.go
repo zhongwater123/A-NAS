@@ -56,7 +56,7 @@ func RequireOwnedStore(root string) error {
 		return ErrStoreUnavailable
 	}
 	var fs syscall.Statfs_t
-	if err = syscall.Statfs(root, &fs); err != nil || uint64(fs.Type) != 0x9123683e || fs.Flags&unix.ST_RDONLY != 0 {
+	if err = syscall.Statfs(root, &fs); err != nil || uint64(fs.Type) != unix.BTRFS_SUPER_MAGIC || fs.Flags&unix.ST_RDONLY != 0 {
 		return ErrStoreUnavailable
 	}
 	if _, err = os.Stat(filepath.Join(filepath.Dir(root), ".a-nas-volume.json")); err != nil {

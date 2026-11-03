@@ -20,6 +20,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/sys/unix"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
@@ -95,11 +96,10 @@ func (g BtrfsVolumeGuard) Check(ctx context.Context, volumeRoot string, write bo
 		return ErrVolumeUnavailable
 	}
 	var stats syscall.Statfs_t
-	if err := syscall.Statfs(volumeRoot, &stats); err != nil || uint64(stats.Type) != 0x9123683e {
+	if err := syscall.Statfs(volumeRoot, &stats); err != nil || uint64(stats.Type) != unix.BTRFS_SUPER_MAGIC {
 		return ErrVolumeUnavailable
 	}
-	const readOnlyMountFlag = 1
-	if write && stats.Flags&readOnlyMountFlag != 0 {
+	if write && stats.Flags&unix.ST_RDONLY != 0 {
 		return ErrVolumeUnavailable
 	}
 	contents, err := os.ReadFile(filepath.Join(volumeRoot, ".a-nas-volume.json"))

@@ -15,6 +15,7 @@ import (
 	"golang.org/x/text/language"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 type videoRow struct {
@@ -90,10 +91,6 @@ func scanVideo(row interface{ Scan(...any) error }) (*videoRow, error) {
 	return &video, nil
 }
 
-func placeholders(count int) string {
-	return strings.TrimSuffix(strings.Repeat("?,", count), ",")
-}
-
 func (s *Service) loadCatalog(ctx context.Context, actor accounts.User) (*catalog, error) {
 	libraries, err := s.visibleLibraries(ctx, actor)
 	if err != nil {
@@ -111,7 +108,7 @@ func (s *Service) loadCatalog(ctx context.Context, actor accounts.User) (*catalo
 		c.libraries[library.ID] = library
 		ids = append(ids, library.ID)
 	}
-	in := placeholders(len(ids))
+	in := sqlitedb.Placeholders(len(ids))
 	showRows, err := s.store.db.QueryContext(ctx, `SELECT id, library_id, title, original_title, year, plot, genres, rating, poster_entry, backdrop_entry, added_at
 FROM shows WHERE library_id IN (`+in+`)`, ids...)
 	if err != nil {

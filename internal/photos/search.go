@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/photos/objects"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // Search finds photos by meaning and by name in the caller's private library
@@ -191,7 +192,7 @@ func (s *Service) searchCandidates(ctx context.Context, p Principal, scope []any
 	rows, err := s.db.QueryContext(ctx, `SELECT a.id, a.object_id, a.library_id, a.name, IFNULL(group_concat(t.name, char(31)), ''),
   IFNULL(a.taken_at, a.imported_at), NOT `+notVideo("a.object_id")+`
 FROM assets a LEFT JOIN user_tags t ON t.asset_id = a.id
-WHERE `+listedAssets(p, "a")+` AND a.library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",")+`)
+WHERE `+listedAssets(p, "a")+` AND a.library_id IN (`+sqlitedb.Placeholders(len(scope))+`)
 GROUP BY a.id`, scope...)
 	if err != nil {
 		return nil, err
@@ -236,7 +237,7 @@ func (s *Service) hitPage(ctx context.Context, p Principal, scope []any, hits []
 		ids[i] = hit.id
 	}
 	records, err := s.queryAssets(ctx, s.db,
-		"WHERE "+listedAssets(p, "a")+" AND a.library_id IN ("+placeholders(len(scope))+") AND a.id IN ("+placeholders(len(ids))+")",
+		"WHERE "+listedAssets(p, "a")+" AND a.library_id IN ("+sqlitedb.Placeholders(len(scope))+") AND a.id IN ("+sqlitedb.Placeholders(len(ids))+")",
 		append(slices.Clone(scope), ids...)...)
 	if err != nil {
 		return nil, "", err
@@ -350,7 +351,7 @@ func (s *Service) peopleInQuery(ctx context.Context, query string, scope []any) 
 SELECT pe.name, po.library_id || char(0) || o.object_id FROM people pe
 JOIN person_occurrences po ON po.person_id = pe.id AND po.library_id = pe.library_id
 JOIN occurrences o ON o.id = po.occurrence_id
-WHERE pe.name <> '' AND pe.library_id IN (`+placeholders(len(scope))+`)
+WHERE pe.name <> '' AND pe.library_id IN (`+sqlitedb.Placeholders(len(scope))+`)
   AND pe.library_id IN (SELECT id FROM libraries WHERE people = 1)`, scope...)
 	if err != nil {
 		return "", nil, nil, err
