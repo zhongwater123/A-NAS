@@ -41,10 +41,22 @@ interface Page {
   infobox?: WebSearchInfobox;
   suggestions: string[];
   unresponsive: string[];
+  // Engines the search left out: their site blocked them, or they had just
+  // been asked too often.
+  paused: string[];
+  busy: string[];
   pending: number;
 }
 
-const emptyPage: Page = { results: [], answers: [], suggestions: [], unresponsive: [], pending: 0 };
+const emptyPage: Page = {
+  results: [],
+  answers: [],
+  suggestions: [],
+  unresponsive: [],
+  paused: [],
+  busy: [],
+  pending: 0,
+};
 
 // withUpdate adds an update to its page: new results after the others, and
 // the engines of results that more engines have found since.
@@ -60,6 +72,8 @@ export function withUpdate(page: Page, update: WebSearchUpdate): Page {
     infobox: page.infobox ?? update.infobox,
     suggestions: [...page.suggestions, ...update.suggestions],
     unresponsive: [...page.unresponsive, ...update.unresponsive],
+    paused: [...page.paused, ...update.paused.map((paused) => paused.engine)],
+    busy: [...page.busy, ...update.busy],
     pending: update.pending,
   };
 }
@@ -298,15 +312,24 @@ function Results({
   const first = pages[0];
   const last = pages.at(-1);
   const unresponsive = last?.unresponsive ?? [];
+  const paused = last?.paused ?? [];
+  const busy = last?.busy ?? [];
   const pending = last?.pending ?? 0;
+  const left = paused.length + busy.length;
   const allSilent =
-    last !== undefined && last.results.length === 0 && engines.length > 0 && unresponsive.length >= engines.length;
+    last !== undefined &&
+    last.results.length === 0 &&
+    engines.length > 0 &&
+    unresponsive.length + left >= engines.length;
 
   if (loading === 1) return <Skeleton category={category} />;
   if (error && pages.length === 0) return <Failure error={error} onRetry={onRetry} />;
   if (first && results.length === 0 && pending === 0) {
     return allSilent ? (
-      <Failure message="搜索引擎都没有响应，请稍后再试" onRetry={onRetry} />
+      <Failure
+        message={left > 0 ? "搜索引擎暂时不可用，请稍后再试" : "搜索引擎都没有响应，请稍后再试"}
+        onRetry={onRetry}
+      />
     ) : (
       <div className={styles.wsEmpty} role="status">
         没有找到与“{shown.query}”相关的结果
@@ -315,21 +338,9 @@ function Results({
   }
   return (
     <>
-      {unresponsive.length > 0 && unresponsive.length <= 3 && (
-        <p className={styles.wsSilent}>
-          <CircleAlert aria-hidden />
-          {unresponsive.join("、")}未响应
-        </p>
-      )}
-      {unresponsive.length > 3 && (
-        <details className={styles.wsSilentMany}>
-          <summary>
-            <CircleAlert aria-hidden />
-            {unresponsive.length} 个引擎未响应
-          </summary>
-          <p>{unresponsive.join("、")}</p>
-        </details>
-      )}
+      <Silent engines={unresponsive} reason="未响应" />
+      <Silent engines={paused} reason="被网站拦截，暂停中" />
+      <Silent engines={busy} reason="搜索太频繁，本次跳过" />
       {first?.infobox && <Infobox infobox={first.infobox} />}
       {first && first.answers.length > 0 && (
         <div className={styles.wsAnswers}>
@@ -371,6 +382,30 @@ function Results({
         </nav>
       )}
     </>
+  );
+}
+
+// Silent names the engines that gave no results for one reason: up to three
+// by name, more as a count that opens to the names.
+function Silent({ engines, reason }: { engines: string[]; reason: string }) {
+  if (engines.length === 0) return null;
+  if (engines.length <= 3) {
+    return (
+      <p className={styles.wsSilent}>
+        <CircleAlert aria-hidden />
+        {engines.join("、")}
+        {reason}
+      </p>
+    );
+  }
+  return (
+    <details className={styles.wsSilentMany}>
+      <summary>
+        <CircleAlert aria-hidden />
+        {engines.length} 个引擎{reason}
+      </summary>
+      <p>{engines.join("、")}</p>
+    </details>
   );
 }
 

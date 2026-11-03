@@ -45,6 +45,9 @@ var tabOf = map[string]Category{
 type EngineInfo struct {
 	Name       string   `json:"name"`
 	Categories []string `json:"categories"`
+	// Paging is whether the engine has more than one page; SearXNG leaves out
+	// the others after the first.
+	Paging bool `json:"paging"`
 }
 
 // labels are the names the window shows for engines it has a name for in
@@ -94,12 +97,17 @@ func label(name string) string {
 	return name
 }
 
-// catalog is each tab's engines, in the order they take turns.
-type catalog map[Category][]string
+// catalog is each tab's engines, in the order they take turns, and which of
+// them have more pages.
+type catalog struct {
+	tabs   map[Category][]string
+	paging map[string]bool
+}
 
 func newCatalog(infos []EngineInfo) catalog {
-	tabs := catalog{}
+	tabs, paging := map[Category][]string{}, map[string]bool{}
 	for _, info := range infos {
+		paging[info.Name] = info.Paging
 		joined := false
 		for _, category := range info.Categories {
 			if tab, ok := tabOf[category]; ok && !slices.Contains(tabs[tab], info.Name) {
@@ -120,7 +128,7 @@ func newCatalog(infos []EngineInfo) catalog {
 			return cmp.Compare(a, b)
 		})
 	}
-	return tabs
+	return catalog{tabs: tabs, paging: paging}
 }
 
 func rank(name string) int {
@@ -132,8 +140,8 @@ func rank(name string) int {
 
 // labels are the names the window shows for a tab's engines.
 func (c catalog) labels(category Category) []string {
-	names := make([]string, 0, len(c[category]))
-	for _, name := range c[category] {
+	names := make([]string, 0, len(c.tabs[category]))
+	for _, name := range c.tabs[category] {
 		if l := label(name); !slices.Contains(names, l) {
 			names = append(names, l)
 		}
