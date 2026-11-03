@@ -13,6 +13,7 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 SOURCE = Path(__file__).resolve().parents[1] / "assistant-spike" / "gateway.py"
 SPEC = importlib.util.spec_from_file_location("model_gateway", SOURCE)
@@ -21,6 +22,26 @@ SPEC.loader.exec_module(gateway)
 
 
 class BaseURLTests(unittest.TestCase):
+    def test_connect_proxy_keeps_credentials_out_of_url_and_connect_headers(self):
+        proxy = gateway.https_proxy("http://127.0.0.1:7897")
+        with patch.object(http.client, "HTTPSConnection") as connection:
+            gateway.model_connection(gateway.upstream_base("https://models.example:8443/v1"), proxy)
+            connection.assert_called_once_with("127.0.0.1", 7897, timeout=300)
+            connection.return_value.set_tunnel.assert_called_once_with("models.example", 8443)
+        for value in ["https://proxy.example", "http://user:secret@proxy.example", "http://proxy.example/path", "http://proxy.example?key=secret", "http://proxy.example#key", "http://proxy.example:99999", "http://proxy.example\n"]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                gateway.https_proxy(value)
+
+    def test_local_models_bypass_the_explicit_cloud_proxy(self):
+        proxy = gateway.https_proxy("http://127.0.0.1:7897")
+        for url in ["http://127.0.0.1:8000/v1", "https://localhost/v1"]:
+            base = gateway.upstream_base(url)
+            factory = "HTTPConnection" if base.scheme == "http" else "HTTPSConnection"
+            with self.subTest(url=url), patch.object(http.client, factory) as connection:
+                gateway.model_connection(base, proxy)
+                connection.assert_called_once_with(base.netloc, timeout=300)
+                connection.return_value.set_tunnel.assert_not_called()
+
     def test_existing_deepseek_host_is_unchanged(self):
         base = gateway.upstream_base("api.deepseek.com")
         self.assertEqual((base.scheme, base.netloc), ("https", "api.deepseek.com"))
@@ -85,7 +106,9 @@ class WireTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.folder = Path(self.temporary.name)
         self.requests = []
+        self.agents = []
         records = self.requests
+        agents = self.agents
 
         class Model(BaseHTTPRequestHandler):
             def log_message(self, *_args):
@@ -94,6 +117,7 @@ class WireTests(unittest.TestCase):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 records.append((self.path, self.headers.get("Authorization"), body))
+                agents.append(self.headers.get("User-Agent"))
                 if body.get("stream"):
                     data = b'data: {"choices":[],"usage":{"total_tokens":3}}\n\ndata: [DONE]\n\n'
                     content_type = "text/event-stream"
@@ -141,7 +165,7 @@ class WireTests(unittest.TestCase):
     def call(self, body, path="/v1/chat/completions"):
         connection = UnixHTTPConnection(self.sock)
         self.addCleanup(connection.close)
-        connection.request("POST", path, json.dumps(body), {"Content-Type": "application/json", "Authorization": "Bearer sandbox-dummy"})
+        connection.request("POST", path, json.dumps(body), {"Content-Type": "application/json", "Authorization": "Bearer sandbox-dummy", "User-Agent": "fixture-sdk/1.0"})
         response = connection.getresponse()
         return response.status, response.read()
 
@@ -165,6 +189,7 @@ class WireTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"data: [DONE]", data)
         self.assertEqual(self.requests[0][0], "/compatible-mode/v1/chat/completions")
+        self.assertEqual(self.agents, ["fixture-sdk/1.0"])
 
     def test_unknown_path_does_not_reach_the_model(self):
         status, _data = self.call({}, "/api/config")

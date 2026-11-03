@@ -5,6 +5,7 @@ import { ConnectionStatus } from "./ConnectionStatus";
 import styles from "./companion.module.css";
 import { Stage } from "./Stage";
 import { useCompanion } from "./store";
+import type { TaskSignal } from "./TaskInbox";
 import type { TaskPhase } from "./taskState";
 import { useCompanionView } from "./useCompanionView";
 
@@ -24,6 +25,7 @@ export function CompanionFloating({
   previewPhase?: TaskPhase;
 }) {
   const [phase, setPhase] = useState<TaskPhase>("idle");
+  const [speech, setSpeech] = useState<TaskSignal>();
   const [local] = useCompanion(userId);
   const view = useCompanionView(userId, connected && local.place === "desk");
   const { value, update, quiet } = view;
@@ -49,12 +51,15 @@ export function CompanionFloating({
             compact
             onOpenHome={onOpen}
             onPhase={setPhase}
+            onSpeech={setSpeech}
             onOpenConversation={onOpenConversation}
           />
         </Suspense>
       )}
       <Stage
         taskPhase={connected ? phase : previewPhase}
+        taskMessage={speech?.message}
+        taskEvent={speech?.id}
         key={view.stageKey}
         character={view.character}
         quiet={quiet || !view.canPlay}

@@ -47,9 +47,11 @@ const IDEAS = [
 export function TasksView({
   onOpenRun,
   onPlan,
+  refreshToken,
 }: {
   onOpenRun(id: string, title: string): void;
   onPlan(text?: string): void;
+  refreshToken?: boolean;
 }) {
   const [tasks, setTasks] = useState<AssistantTask[]>();
   const [error, setError] = useState("");
@@ -67,7 +69,7 @@ export function TasksView({
   const unread = new Set(useTaskNotices().map((item) => item.task?.taskId));
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshToken]);
   // A task runs on its own while the page is open; a running one is followed closely.
   const running = Boolean(tasks?.some((task) => task.running));
   useEffect(() => {
@@ -269,7 +271,7 @@ function TaskCard({
       : done
         ? "不再运行"
         : task.nextRunAt
-          ? whenText(task.nextRunAt)
+          ? new Intl.DateTimeFormat("zh-CN", { dateStyle: "full", timeStyle: "long" }).format(task.nextRunAt * 1000)
           : "—";
 
   return (

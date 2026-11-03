@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AssistantApproval } from "../api.generated";
-import { assistantHandlers } from "../test/handlers/assistant";
+import { assistantHandlers, noticesHandlers, tasksHandlers } from "../test/handlers/assistant";
 import { entry, filesHandlers, ownSpace, sharedSpace, space } from "../test/handlers/files";
 import { server } from "../test/server";
 import { ConnectedTask } from "./TaskExperience";
@@ -56,6 +56,8 @@ function view() {
 function fixtures() {
   server.use(
     ...assistantHandlers(),
+    ...tasksHandlers([]),
+    ...noticesHandlers().handlers,
     ...filesHandlers({
       spaces: [ownSpace, sharedSpace, space("other", { kind: "private", name: "另一个成员", ownerUserId: "other" })],
       entries: [
@@ -72,11 +74,36 @@ const emit = (type: string, payload: unknown) =>
     for (const h of handlers) h({ type, session_id: LIVE, payload });
   });
 describe("companion minutes workflow on the existing VNAS protocol", () => {
+  it("hands a natural-language reminder to VNAS and never treats the model's words as a saved schedule", async () => {
+    fixtures();
+    const user = userEvent.setup();
+    render(<ConnectedTask view={view()} userId="user:owner" onPhase={() => undefined} />);
+    await user.click(screen.getByRole("button", { name: "试试提醒" }));
+    expect(client.request.mock.calls.some(([method]) => method === "prompt.submit")).toBe(false);
+    expect(screen.getByRole("textbox", { name: "交代一件事" })).toHaveValue("明早十点提醒我交材料");
+    await user.click(await screen.findByRole("button", { name: "交给奶蛙" }));
+    await waitFor(() =>
+      expect(client.request).toHaveBeenCalledWith(
+        "prompt.submit",
+        expect.objectContaining({
+          text: expect.stringContaining('"request":"明早十点提醒我交材料"'),
+        }),
+      ),
+    );
+    emit("message.start", {});
+    emit("message.delta", { text: "已安排好了，明早提醒你" });
+    emit("message.complete", { status: "complete" });
+    await user.click(screen.getByText("我的提醒与后台任务"));
+    expect(await screen.findByText("还没有定时任务")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "保存到个人空间" })).toBeNull();
+    expect(client.request.mock.calls.filter(([method]) => method === "prompt.submit")).toHaveLength(1);
+  });
   it("drives the pet through actual gateway events, not success words in streamed text", async () => {
     fixtures();
     const user = userEvent.setup();
     const onPhase = vi.fn();
     render(<ConnectedTask view={view()} userId="user:owner" onPhase={onPhase} />);
+    await user.click(screen.getByText("整理 NAS 里的会议记录"));
     await user.click(await screen.findByRole("button", { name: "会议.md" }));
     await user.click(screen.getByRole("button", { name: "整理这份记录" }));
     await waitFor(() => expect(client.request).toHaveBeenCalledWith("prompt.submit", expect.anything()));
@@ -100,6 +127,7 @@ describe("companion minutes workflow on the existing VNAS protocol", () => {
     const rendered = render(
       <ConnectedTask view={current} userId="user:owner" onPhase={() => undefined} onOpenConversation={open} />,
     );
+    await user.click(screen.getByText("整理 NAS 里的会议记录"));
     await user.click(await screen.findByRole("button", { name: "会议.md" }));
     expect(screen.getByRole("button", { name: "很大.md" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "照片.png" })).toBeDisabled();
@@ -151,6 +179,7 @@ describe("companion minutes workflow on the existing VNAS protocol", () => {
     const current = view();
     vi.mocked(current.remote.sync!.bindConversation).mockRejectedValue(new Error("lease lost"));
     render(<ConnectedTask view={current} userId="user:owner" onPhase={() => undefined} />);
+    await user.click(screen.getByText("整理 NAS 里的会议记录"));
     await user.click(await screen.findByRole("button", { name: "会议.md" }));
     await user.click(screen.getByRole("button", { name: "整理这份记录" }));
     await screen.findByText("VNAS 暂时没有响应，请稍后再试");

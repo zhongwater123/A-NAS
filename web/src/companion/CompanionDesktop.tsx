@@ -4,6 +4,7 @@ import { lazyCode } from "../ui/lazyCode";
 import { ConnectionStatus } from "./ConnectionStatus";
 import styles from "./companion.module.css";
 import { Stage } from "./Stage";
+import type { TaskSignal } from "./TaskInbox";
 import type { TaskPhase } from "./taskState";
 import { useCompanionView } from "./useCompanionView";
 
@@ -13,6 +14,7 @@ const TaskExperience = lazyCode(() => import("./TaskExperience").then((m) => m.T
 export function CompanionDesktop({ userId, connected = false }: { userId: string; connected?: boolean }) {
   const view = useCompanionView(userId, connected, "desktop");
   const [phase, setPhase] = useState<TaskPhase>("idle");
+  const [speech, setSpeech] = useState<TaskSignal>();
   const requested = useRef(false);
   useEffect(() => {
     if (connected && view.remote.connection === "online" && !requested.current) {
@@ -46,12 +48,15 @@ export function CompanionDesktop({ userId, connected = false }: { userId: string
             view={view}
             compact
             onPhase={setPhase}
+            onSpeech={setSpeech}
             onOpenConversation={(id) => window.companionDesktop?.conversation(id)}
           />
         </Suspense>
       )}
       <Stage
         taskPhase={phase}
+        taskMessage={speech?.message}
+        taskEvent={speech?.id}
         key={view.stageKey}
         character={view.character}
         quiet={view.quiet || !view.canPlay}

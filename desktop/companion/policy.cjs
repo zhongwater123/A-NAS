@@ -23,5 +23,5 @@ function clampWindow(point, workArea, size) {
     y: Math.round(Math.max(workArea.y, Math.min(workArea.y + Math.max(0, workArea.height - size.height), point.y))),
   };
 }
-function validConversation(value) { return typeof value === "string" && /^[0-9]{8}_[0-9]{6}_[0-9a-f]{6}$/.test(value); }
+function validConversation(value) { return typeof value === "string" && /^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6})$/.test(value); }
 module.exports = { nasOrigin, safeDelta, clampWindow, validConversation };

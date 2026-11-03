@@ -3,6 +3,7 @@ import { createContext, ReactNode, use } from "react";
 
 import type { Session, User } from "../api.generated";
 import { AssistantGlyph } from "../assistant/AssistantGlyph";
+import { taskOfRun } from "../assistant/taskNotices";
 import { BackupCenterGlyph } from "../backup/BackupCenterGlyph";
 import { DockerGlyph } from "../docker/DockerGlyph";
 import { appProject } from "../docker/model";
@@ -296,7 +297,7 @@ const definitions = {
       <CompanionPanel
         userId={session.user.id}
         connected
-        onOpenConversation={(id) => open("assistant", { sessionId: id, kind: "conversation" })}
+        onOpenConversation={(id) => open("assistant", { sessionId: id, kind: taskOfRun(id) ? "task" : "conversation" })}
       />
     ),
   },

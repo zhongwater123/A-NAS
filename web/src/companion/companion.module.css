@@ -602,6 +602,47 @@
   color: inherit;
   background: white;
 }
+.inbox {
+  padding: 10px;
+  margin: 8px 0;
+  border: 1px solid #bed7c1;
+  border-radius: 10px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+.inbox small {
+  display: block;
+  margin: 4px 0;
+  opacity: 0.7;
+}
+.inbox section + section {
+  border-top: 1px solid #d6e3d6;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+.task summary {
+  cursor: pointer;
+  padding: 12px 0;
+  font-weight: 600;
+}
+.taskLedger {
+  max-height: 420px;
+  overflow: auto;
+}
+.taskCompact .inbox {
+  max-height: 96px;
+  overflow: auto;
+  padding: 5px;
+}
+.native .taskCompact {
+  min-height: 0;
+  max-height: 130px;
+  overflow: auto;
+}
+.floating .taskCompact {
+  max-height: 160px;
+  overflow: auto;
+}
 .task button:disabled {
   opacity: 0.5;
   cursor: default;

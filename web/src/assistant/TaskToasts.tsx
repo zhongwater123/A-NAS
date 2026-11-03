@@ -16,8 +16,16 @@ const POLL_MS = 60_000;
 const SHOWN = 3;
 const HIDE_MS = 12_000;
 
-export function TaskToasts({ enabled, onOpen }: { enabled: boolean; onOpen(notice: AssistantTaskNotice): void }) {
-  const notices = useTaskNotices();
+export function TaskToasts({
+  enabled,
+  onOpen,
+  memberId,
+}: {
+  enabled: boolean;
+  memberId?: string;
+  onOpen(notice: AssistantTaskNotice): void;
+}) {
+  const notices = useTaskNotices(memberId);
   // Toasts that hid themselves stay hidden on this page; the notices stay unread.
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const [held, setHeld] = useState(false);
@@ -34,7 +42,7 @@ export function TaskToasts({ enabled, onOpen }: { enabled: boolean; onOpen(notic
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", back);
     };
-  }, [enabled]);
+  }, [enabled, memberId]);
 
   const showing = enabled ? notices.filter((item) => !hidden.has(item.id)) : [];
   const key = showing.map((item) => item.id).join(" ");

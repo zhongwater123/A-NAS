@@ -16,7 +16,8 @@ test("native movement stays bounded on displays with a negative origin", () => {
   assert.deepEqual(clampWindow({ x: -9000, y: 8000 }, { x: -1920, y: 0, width: 1920, height: 1080 }, { width: 350, height: 280 }), { x: -1920, y: 800 });
 });
 
-test("conversation IPC accepts only normal stored conversation IDs", () => {
+test("conversation IPC accepts stored conversations and scheduled task runs only", () => {
  assert.equal(validConversation("20261102_090000_abcdef"),true);
- for (const value of [null,42,"../foo","https://evil.example","cron_abc","20261102_090000_ABCDEF","20261102_090000_abcdef?open=files"]) assert.equal(validConversation(value),false);
+ assert.equal(validConversation("cron_aaaaaaaaaaaa_20261103_100000"),true);
+ for (const value of [null,42,"../foo","https://evil.example","cron_abc","cron_aaaaaaaaaaaa_20261103_100000?open=files","cron_aaaaaaaaaaaa_20261103_100000/../foo","20261102_090000_ABCDEF","20261102_090000_abcdef?open=files"]) assert.equal(validConversation(value),false);
 });

@@ -5,6 +5,7 @@ import { Character } from "./Character";
 import { ConnectionStatus } from "./ConnectionStatus";
 import styles from "./companion.module.css";
 import { Stage } from "./Stage";
+import type { TaskSignal } from "./TaskInbox";
 import type { TaskPhase } from "./taskState";
 import { useCompanionView } from "./useCompanionView";
 
@@ -24,6 +25,7 @@ export function CompanionPanel({
   const view = useCompanionView(userId, connected);
   const { value, update, character, quiet, canPlay, remote } = view;
   const [phase, setPhase] = useState<TaskPhase>("idle");
+  const [speech, setSpeech] = useState<TaskSignal>();
   const summoned = useRef(false);
   useEffect(() => {
     if (
@@ -51,6 +53,8 @@ export function CompanionPanel({
         {value.place === "home" ? (
           <Stage
             taskPhase={connected ? phase : previewPhase}
+            taskMessage={speech?.message}
+            taskEvent={speech?.id}
             key={view.stageKey}
             character={character}
             quiet={quiet || !canPlay}
@@ -90,7 +94,13 @@ export function CompanionPanel({
       </div>
       {connected && (
         <Suspense fallback={<p>正在准备任务…</p>}>
-          <TaskExperience userId={userId} view={view} onPhase={setPhase} onOpenConversation={onOpenConversation} />
+          <TaskExperience
+            userId={userId}
+            view={view}
+            onPhase={setPhase}
+            onSpeech={setSpeech}
+            onOpenConversation={onOpenConversation}
+          />
         </Suspense>
       )}
       <p className={styles.note}>

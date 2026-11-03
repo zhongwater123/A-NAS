@@ -17,6 +17,7 @@ import { ErrorBoundary } from "react-error-boundary";
 import type { Session, User } from "../api.generated";
 import { assistantStatus } from "../assistant/api";
 import { TaskToasts } from "../assistant/TaskToasts";
+import { taskOfRun } from "../assistant/taskNotices";
 import { whenText } from "../assistant/taskTime";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
@@ -139,8 +140,10 @@ export function Desktop({
   const [intents, setIntents] = useState<WindowIntents>(() => {
     const query = new URLSearchParams(window.location.search);
     const id = query.get("session");
-    return query.get("open") === "assistant" && id && /^[0-9]{8}_[0-9]{6}_[0-9a-f]{6}$/.test(id)
-      ? { assistant: { sessionId: id, kind: "conversation" } }
+    return query.get("open") === "assistant" &&
+      id &&
+      /^(?:[0-9]{8}_[0-9]{6}_[0-9a-f]{6}|cron_[0-9a-f]{12}_[0-9]{8}_[0-9]{6})$/.test(id)
+      ? { assistant: { sessionId: id, kind: taskOfRun(id) ? "task" : "conversation" } }
       : {};
   });
   const open = useCallback<OpenWindow>((id, intent?: object) => {
@@ -320,7 +323,7 @@ export function Desktop({
           <TransferToasts hidden={focusedID === "transfers"} onOpen={() => open("transfers")} />
         </ShellPart>
         <ShellPart name="task toasts">
-          <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
+          <TaskToasts memberId={session.user.id} enabled={assistantReady} onOpen={showTaskRun} />
         </ShellPart>
         <ShellPart name="family hints">
           <Suspense fallback={null}>
@@ -336,7 +339,9 @@ export function Desktop({
               key={session.user.id}
               userId={session.user.id}
               onOpen={() => open("companion")}
-              onOpenConversation={(id) => open("assistant", { sessionId: id, kind: "conversation" })}
+              onOpenConversation={(id) =>
+                open("assistant", { sessionId: id, kind: taskOfRun(id) ? "task" : "conversation" })
+              }
               connected
             />
           </Suspense>

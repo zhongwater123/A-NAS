@@ -32,6 +32,8 @@ export function Stage({
   floating = false,
   interactive = true,
   taskPhase = "idle",
+  taskMessage,
+  taskEvent,
 }: {
   character: CharacterKind;
   quiet: boolean;
@@ -39,6 +41,8 @@ export function Stage({
   floating?: boolean;
   interactive?: boolean;
   taskPhase?: import("./taskState").TaskPhase;
+  taskMessage?: string;
+  taskEvent?: string;
 }) {
   const stage = useRef<HTMLDivElement>(null);
   const actor = useRef<HTMLDivElement>(null);
@@ -53,7 +57,7 @@ export function Stage({
   const [active, setActive] = useState(() => !document.hidden);
   const [reduced, setReduced] = useState(false);
   const [settled, setSettled] = useState(true);
-  const previousTask = useRef(taskPhase);
+  const previousTask = useRef({ phase: taskPhase, event: taskEvent });
   const greeting = useRef({ at: 0, count: 0 });
   const quietNow = quiet || !active;
   const taskBusy = ["connecting", "thinking", "working", "waiting"].includes(taskPhase);
@@ -66,15 +70,15 @@ export function Stage({
   const beforePeek = useRef<Point | undefined>(undefined);
 
   useEffect(() => {
-    if (previousTask.current === taskPhase) return;
-    previousTask.current = taskPhase;
+    if (previousTask.current.phase === taskPhase && previousTask.current.event === taskEvent) return;
+    previousTask.current = { phase: taskPhase, event: taskEvent };
     setSettled(false);
     setReaction("");
     if (["success", "error", "waiting", "connecting", "stopped"].includes(taskPhase)) dispatch({ type: "stop" });
     if (taskPhase !== "success" && taskPhase !== "error") return;
     const timer = window.setTimeout(() => setSettled(true), 6500);
     return () => window.clearTimeout(timer);
-  }, [taskPhase, dispatch]);
+  }, [taskPhase, taskEvent, dispatch]);
 
   const stop = useCallback(() => {
     cancelAnimationFrame(frame.current);
@@ -254,7 +258,7 @@ export function Stage({
         ? playWords(session.phase)
         : taskPhase === "idle" && session.offered
           ? "我在旁边安静陪你，想我时点一下就好。"
-          : feeling.words);
+          : taskMessage || feeling.words);
   const emotion = quiet
     ? "安静"
     : session.phase === "found" || session.phase === "gifted" || reaction.startsWith("开心")
