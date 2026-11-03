@@ -16,6 +16,6 @@ describe("requestKey", () => {
 
   it("says so when the browser has no random source", () => {
     vi.stubGlobal("crypto", {});
-    expect(() => requestKey()).toThrow();
+    expect(() => requestKey()).toThrow("request_id_unavailable");
   });
 });
