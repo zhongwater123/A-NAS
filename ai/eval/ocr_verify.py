@@ -14,8 +14,8 @@ under each check:
 - format: the value is well formed where its key says what it is: a date
   that exists, an amount, an ID number with its GB 11643 check digit, a card
   number with its Luhn digit; fields without a known format pass;
-- confidence: every token that spells the value had at least the given
-  probability.
+- confidence: every token that spells the value, found after its key, had
+  at least the given probability; a value not found there fails.
 
     python -m eval.ocr_verify run --server /llama/llama-server --model M.gguf --model-manifest M.json \\
         --mmproj P.gguf --mmproj-manifest P.json --runtime-manifest /src/deploy/llama/llama.json --threads 12
@@ -150,7 +150,7 @@ def fields(run_dir, subset, normalize, kie):
                     "correct": normalize(answered).strip() == expected,
                     "text": squeeze(answered) in text,
                     "format": format_ok(key, answered),
-                    "confidence": ocr_score.field_confidence(tokens, answered),
+                    "confidence": ocr_score.field_confidence(tokens, answered, key),
                 })
     return found
 
