@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
 import type { FamilyRecordInput } from "../api.generated";
@@ -46,13 +46,21 @@ beforeAll(() => {
   Element.prototype.scrollIntoView ??= () => undefined;
 });
 
+// The NAS LAN entry is HTTP: getRandomValues exists, randomUUID does not.
+// Every case runs as there; the window once failed on LAN HTTP alone.
+const getRandomValues = crypto.getRandomValues.bind(crypto);
 beforeEach(() => {
+  vi.stubGlobal("crypto", { getRandomValues });
   setSession(
     session(
       { id: "user:mom", username: "mom", role: "member" },
       { csrfToken: "csrf", expiresAt: "2026-11-01T00:00:00Z" },
     ),
   );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("FamilyPanel", () => {

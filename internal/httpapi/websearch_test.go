@@ -57,7 +57,7 @@ func TestWebSearchFollowsTheContractAndItsSwitches(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	service := websearch.New(websearch.Options{
 		Backend: websearch.Fake{}, Switch: websearch.NewMemorySwitch(true), Settings: settings,
-		Secret: []byte("test secret"), ThumbnailPath: websearchapi.ThumbnailPath,
+		Secret: []byte("test secret"), ThumbnailPath: websearchapi.ThumbnailPath, Unpaced: true,
 	})
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService,
