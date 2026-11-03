@@ -805,12 +805,12 @@ func (s *Service) savePlanLocked(ctx context.Context, plan ExecutionPlan) error 
 	_, err = s.store.db.ExecContext(ctx, `
 INSERT INTO storage_plans(id, document_json, updated_at) VALUES(?,?,?)
 ON CONFLICT(id) DO UPDATE SET document_json=excluded.document_json, updated_at=excluded.updated_at`,
-		plan.ID, string(document), s.now().UTC().Format(time.RFC3339Nano))
+		plan.ID, string(document), sqlitedb.FormatTime(s.now()))
 	if err == nil {
 		_, err = s.store.db.ExecContext(ctx, `INSERT INTO audit_events
 (id, actor_user_id, action, resource_type, resource_id, occurred_at, detail) VALUES(?,?,?,?,?,?,?)`,
 			"audit:"+strings.TrimPrefix(randomID(), "plan:"), "system", "storage.plan."+string(plan.State), "storage_plan", plan.ID,
-			s.now().UTC().Format(time.RFC3339Nano), plan.Failure)
+			sqlitedb.FormatTime(s.now()), plan.Failure)
 	}
 	return err
 }

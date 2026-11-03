@@ -20,6 +20,7 @@ import (
 	_ "golang.org/x/image/webp"
 
 	"github.com/zhongwater123/A-NAS/internal/decodepanic"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // The ways the desktop can draw the wallpaper.
@@ -161,7 +162,7 @@ func (s *Store) SetWallpaperImage(ctx context.Context, data []byte, width, heigh
 	_, err := s.db.ExecContext(ctx, `INSERT INTO wallpaper(id, style, image, version, width, height, updated_at) VALUES(1, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET image = excluded.image, version = excluded.version, width = excluded.width,
     height = excluded.height, updated_at = excluded.updated_at`,
-		StyleFill, data, version, width, height, time.Now().UTC().Format(time.RFC3339Nano))
+		StyleFill, data, version, width, height, sqlitedb.FormatTime(time.Now()))
 	if err != nil {
 		return Wallpaper{}, err
 	}
