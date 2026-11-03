@@ -17,3 +17,5 @@
 - [视频剪辑 baseline：时间窗抽帧与 EmbeddingGemma 2](video-moment-retrieval.md)（试点完成；MediaPipe Python 不能多帧一次编码，试点建议每 2 秒 1 帧；基线成片已逐段排查；正式评估集待采集）
 - [CutClaw：音乐同步的长视频智能剪辑](video-editing-cutclaw.md)（论文与代码精读；指令驱动剪辑的抽帧与片段定位）
 - [FilmAgent：多智能体协作的虚拟影片制作](video-editing-filmagent.md)（论文与代码精读；剪辑计划的生成与审校）
+- [自动剪辑前沿调研（2026-11）](video-editing-frontier-2026.md)（完成；25 项论文与项目，按评测约束筛选，CPU 耗时与许可证多项待核）
+- [剪辑第四版消融实验与优化方向](video-montage-ablation-v4.md)（开发机完成；三个测试用例、四种剪法的成片与程序指标，以及按成片问题排的优化方向）
