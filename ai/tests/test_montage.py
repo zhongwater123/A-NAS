@@ -83,20 +83,24 @@ class RenderTest(unittest.TestCase):
         self.assertIn("xfade=transition=fade:duration=0.5:offset=2[x1]", graph)
         self.assertIn("xfade=transition=fade:duration=0.5:offset=4[x2]", graph)
 
-    def test_clips_seek_each_input(self):
-        args = render.clip_args([("a.webm", 10, 12.5), ("b.mp4", 0, 3)], "out.mp4")
+    def test_a_part_seeks_its_clip_and_keeps_its_sound_as_pcm(self):
+        args = render.part_args("a.webm", 10, 12.5, True, "out.mkv")
         self.assertEqual(args[args.index("a.webm") - 5:args.index("a.webm")], ["-ss", "10.000", "-t", "2.500", "-i"])
         graph = args[args.index("-filter_complex") + 1]
-        self.assertIn("[v0][a0][v1][a1]concat=n=2:v=1:a=1[x][s]", graph)
-        self.assertNotIn("-an", args)
+        self.assertIn("[0:a]aresample=48000", graph)
+        self.assertIn("afade=t=out:st=2.470:d=0.030", graph)
+        self.assertEqual(args[args.index("-c:a") + 1], "pcm_s16le")
 
-    def test_a_clip_without_sound_gets_silence_of_its_length(self):
-        args = render.clip_args([("a.webm", 10, 12.5), ("b.mp4", 0, 3)], "out.mp4", [False, True])
-        first, second = args[args.index("-filter_complex") + 1].split(";")[1:4:2]
-        self.assertTrue(first.startswith("anullsrc=r=48000:cl=stereo,"))
-        self.assertIn("atrim=duration=2.500", first)
-        self.assertTrue(second.startswith("[1:a]aresample=48000"))
-        self.assertIn("afade=t=out:st=2.970:d=0.030", second)
+    def test_a_part_without_sound_gets_silence_of_its_length(self):
+        graph = render.part_args("b.mp4", 0, 3, False, "out.mkv")
+        graph = graph[graph.index("-filter_complex") + 1].split(";")[1]
+        self.assertTrue(graph.startswith("anullsrc=r=48000:cl=stereo,"))
+        self.assertIn("atrim=duration=3.000", graph)
+
+    def test_parts_are_joined_with_the_picture_copied(self):
+        args = render.join_args("parts.txt", "out.mp4")
+        self.assertEqual(args[args.index("-c:v") + 1], "copy")
+        self.assertEqual(args[args.index("-c:a") + 1], "aac")
 
     @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
     def test_stills_render_landscape_and_portrait(self):

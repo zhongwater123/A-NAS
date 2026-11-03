@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import subprocess
+import tempfile
 import time
 
 WIDTH, HEIGHT, FPS = 1920, 1080, 30
@@ -18,6 +19,7 @@ RATE = 48000
 SOUND_FADE = 0.03
 FIT = (f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
        f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p")
+VIDEO = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(FPS)]
 
 
 class RenderError(Exception):
@@ -53,31 +55,34 @@ def ffmpeg_args(images: list[str], seconds: float, crossfade: bool, output: str)
     return [*args, "-filter_complex", ";".join(graph), "-map", f"[{last}]", "-t", f"{total:g}", *_encode(output)]
 
 
-def clip_args(clips: list[tuple[str, float, float]], output: str, sound: list[bool] | None = None) -> list[str]:
-    """The FFmpeg command for (video, start, end) clips in order, each cut with an accurate seek.
+def part_args(video: str, start: float, end: float, heard: bool, output: str) -> list[str]:
+    """The FFmpeg command for one (video, start, end) clip, cut with an accurate seek, as a part to join.
 
-    Every clip is brought to one size and rate before the concat filter, so
-    sources of different sizes and codecs join; the total is the clips' sum.
-    Each clip carries the sound of its own span, or silence where sound[i] says
-    its source has none: brought to one rate and stereo, padded or cut to the
-    clip's length so that picture and sound stay aligned, and faded at both ends.
+    The picture is brought to one size and rate, so that parts from sources of
+    different sizes and codecs join, and encoded as the final cut is. The clip
+    carries the sound of its own span, or silence where heard says its source has
+    none: brought to one rate and stereo, padded or cut to the clip's length so
+    that picture and sound stay aligned, faded at both ends, and kept as PCM, so
+    that joining adds no encoder delay between parts.
     """
-    sound = sound if sound is not None else [True] * len(clips)
-    args = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-n"]
-    graph = []
-    for i, ((video, start, end), heard) in enumerate(zip(clips, sound, strict=True)):
-        length = end - start
-        args += ["-ss", f"{start:.3f}", "-t", f"{length:.3f}", "-i", video]
-        graph.append(f"[{i}:v]{FIT},fps={FPS},trim=duration={length:.3f},setpts=PTS-STARTPTS[v{i}]")
-        # first_pts=0 keeps sound that starts late after the seek where it was, instead of pulling it forward.
-        source = (f"[{i}:a]aresample={RATE}:async=1:first_pts=0," if heard
-                  else f"anullsrc=r={RATE}:cl=stereo,")
-        fade = min(SOUND_FADE, length / 4)
-        graph.append(f"{source}aformat=sample_fmts=fltp:sample_rates={RATE}:channel_layouts=stereo,apad,"
-                     f"atrim=duration={length:.3f},afade=t=in:d={fade:.3f},"
-                     f"afade=t=out:st={length - fade:.3f}:d={fade:.3f},asetpts=PTS-STARTPTS[a{i}]")
-    graph.append("".join(f"[v{i}][a{i}]" for i in range(len(clips))) + f"concat=n={len(clips)}:v=1:a=1[x][s]")
-    return [*args, "-filter_complex", ";".join(graph), "-map", "[x]", "-map", "[s]", *_encode(output, sound=True)]
+    length = end - start
+    # first_pts=0 keeps sound that starts late after the seek where it was, instead of pulling it forward.
+    source = f"[0:a]aresample={RATE}:async=1:first_pts=0," if heard else f"anullsrc=r={RATE}:cl=stereo,"
+    fade = min(SOUND_FADE, length / 4)
+    graph = (f"[0:v]{FIT},fps={FPS},trim=duration={length:.3f},setpts=PTS-STARTPTS[x];"
+             f"{source}aformat=sample_fmts=fltp:sample_rates={RATE}:channel_layouts=stereo,apad,"
+             f"atrim=duration={length:.3f},afade=t=in:d={fade:.3f},"
+             f"afade=t=out:st={length - fade:.3f}:d={fade:.3f},asetpts=PTS-STARTPTS[s]")
+    return ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-n",
+            "-ss", f"{start:.3f}", "-t", f"{length:.3f}", "-i", video, "-filter_complex", graph,
+            "-map", "[x]", "-map", "[s]", *VIDEO, "-c:a", "pcm_s16le", "-f", "matroska", output]
+
+
+def join_args(listing: str, output: str) -> list[str]:
+    """The FFmpeg command that joins the parts listed (concat demuxer): the picture copied, the sound encoded once."""
+    return ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-n", "-f", "concat", "-safe", "0",
+            "-i", listing, "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ar", str(RATE), "-ac", "2",
+            "-movflags", "+faststart", "-f", "mp4", output]
 
 
 def has_sound(video: str) -> bool:
@@ -95,38 +100,56 @@ def has_sound(video: str) -> bool:
 
 def render(images: list[str], seconds: float, crossfade: bool, output_dir: str) -> str:
     """Writes a new file in output_dir and returns its path; nothing is left behind on failure."""
-    return _write(lambda partial: ffmpeg_args(images, seconds, crossfade, partial), output_dir, "slideshow")
+    return _write(lambda partial: _run(ffmpeg_args(images, seconds, crossfade, partial)), output_dir, "slideshow")
 
 
 def render_clips(clips: list[tuple[str, float, float]], output_dir: str) -> str:
-    """Like render, for video clips."""
+    """Like render, for video clips: each is encoded on its own, then the parts are joined.
+
+    One clip at a time keeps one decoder in memory: a 4K source opened once per
+    clip in a single command held a decoder for every clip and passed 3.4 GiB
+    (#350, twelve clips of a 4K film).
+    """
     heard = {video: has_sound(video) for video, _s, _e in clips}
-    return _write(lambda partial: clip_args(clips, partial, [heard[video] for video, _s, _e in clips]),
-                  output_dir, "montage")
+
+    def make(partial):
+        with tempfile.TemporaryDirectory(dir=output_dir) as work:
+            listing = os.path.join(work, "parts.txt")
+            with open(listing, "w", encoding="utf-8") as file:
+                for i, (video, start, end) in enumerate(clips):
+                    part = os.path.join(work, f"{i:03d}.mkv")
+                    _run(part_args(video, start, end, heard[video], part))
+                    file.write("file '" + part.replace("'", "'\\''") + "'\n")
+            _run(join_args(listing, partial))
+
+    return _write(make, output_dir, "montage")
 
 
-def _encode(output: str, sound: bool = False) -> list[str]:
-    audio = ["-c:a", "aac", "-b:a", "160k", "-ar", str(RATE), "-ac", "2"] if sound else ["-an"]
-    return ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(FPS), *audio,
-            "-movflags", "+faststart", "-f", "mp4", output]
+def _encode(output: str) -> list[str]:
+    return [*VIDEO, "-an", "-movflags", "+faststart", "-f", "mp4", output]
 
 
-def _write(command, output_dir: str, prefix: str) -> str:
+def _run(command: list[str]) -> None:
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT, check=False)
+    except FileNotFoundError:
+        raise RenderError("找不到 ffmpeg，请先安装") from None
+    except subprocess.TimeoutExpired:
+        raise RenderError(f"拼接超过 {TIMEOUT} 秒，已放弃") from None
+    if done.returncode < 0:
+        raise RenderError(f"ffmpeg 被信号 {-done.returncode} 终止，多半是内存不够")
+    if done.returncode != 0:
+        raise RenderError("ffmpeg 失败：" + (done.stderr.strip().splitlines() or ["没有输出"])[-1])
+
+
+def _write(make, output_dir: str, prefix: str) -> str:
+    """Has make write the file at the path it is given, then gives it its final name."""
     os.makedirs(output_dir, exist_ok=True)
     name = time.strftime(f"{prefix}-%Y%m%d-%H%M%S-") + secrets.token_hex(3) + ".mp4"
     final = os.path.join(output_dir, name)
     partial = final + ".partial"
     try:
-        done = subprocess.run(command(partial), capture_output=True, text=True, timeout=TIMEOUT, check=False)
-    except FileNotFoundError:
-        raise RenderError("找不到 ffmpeg，请先安装") from None
-    except subprocess.TimeoutExpired:
-        _remove(partial)
-        raise RenderError(f"拼接超过 {TIMEOUT} 秒，已放弃") from None
-    if done.returncode != 0:
-        _remove(partial)
-        raise RenderError("ffmpeg 失败：" + (done.stderr.strip().splitlines() or ["没有输出"])[-1])
-    try:
+        make(partial)
         # A link never replaces an existing file, unlike a rename.
         os.link(partial, final)
     finally:

@@ -7,7 +7,9 @@ puts it all in pipeline.json beside the cut:
     seconds:     the wall time from the start of the run
     steps:       each step's id, category, start, seconds, and the container's
                  memory peak when it ended (where a cgroup gives one); a step
-                 that raised says so under "failed"
+                 that raised says so under "failed". Work of another category
+                 done inside a step (a check made while planning) is timed
+                 with Run.inner and kept under the step's "inner"
     categories:  the seconds per category; steps that ran side by side are each
                  counted whole, so the sum can pass the wall time
     uncovered:   the wall time no step covers, so that nothing goes unaccounted
@@ -58,6 +60,14 @@ class Run:
             with self.lock:
                 self.steps.append(entry)
 
+    def inner(self, entry: dict, category: str, seconds: float) -> None:
+        """Counts seconds of the step entry (the dict step yields) as another category."""
+        if category not in CATEGORIES:
+            raise ValueError(f"类别要是 {'、'.join(CATEGORIES)} 之一：{category}")
+        with self.lock:
+            inner = entry.setdefault("inner", {})
+            inner[category] = round(inner.get(category, 0) + seconds, 3)
+
     def call(self, step_id: str, provider: str, model: str, *, input_tokens: int, output_tokens: int,
              upload_bytes: int, cost: float, cache_read_tokens: int = 0, cache_write_tokens: int = 0,
              seconds: float = 0.0) -> None:
@@ -75,7 +85,9 @@ class Run:
             calls = list(self.calls)
         categories = {}
         for step in steps:
-            categories[step["category"]] = round(categories.get(step["category"], 0) + step["seconds"], 3)
+            inner = step.get("inner", {})
+            for category, seconds in [(step["category"], step["seconds"] - sum(inner.values())), *inner.items()]:
+                categories[category] = round(categories.get(category, 0) + seconds, 3)
         covered, reach = 0.0, 0.0
         for step in steps:
             end = step["start"] + step["seconds"]
@@ -93,9 +105,9 @@ class Run:
             result["memoryPeakMiB"] = peak
         return result
 
-    def write(self, path: str) -> dict:
-        """Writes the summary to path, replacing it whole, and returns it."""
-        summary = self.summary()
+    def write(self, path: str, about: dict | None = None) -> dict:
+        """Writes the summary to path, with about's keys first, replacing the file whole; returns it."""
+        summary = (about or {}) | self.summary()
         partial = path + ".partial"
         with open(partial, "w", encoding="utf-8") as file:
             json.dump(summary, file, ensure_ascii=False, indent=2)

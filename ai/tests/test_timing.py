@@ -57,6 +57,15 @@ class TimingTest(unittest.TestCase):
         self.assertEqual(summary["categories"], {"理解": 10})
         self.assertEqual(summary["uncovered"], 0)
 
+    def test_work_of_another_category_inside_a_step_counts_there(self):
+        with self.run.step("plan", "选择与编排") as step:
+            self.clock.now += 10
+            self.run.inner(step, "检查", 3)
+            self.run.inner(step, "检查", 1.5)
+        summary = self.run.summary()
+        self.assertEqual(summary["steps"][0]["inner"], {"检查": 4.5})
+        self.assertEqual(summary["categories"], {"选择与编排": 5.5, "检查": 4.5})
+
     def test_a_step_that_raises_is_kept_and_the_error_goes_on(self):
         with self.assertRaises(RuntimeError), self.run.step("render", "渲染"):
             self.clock.now += 2
@@ -103,9 +112,10 @@ class TimingTest(unittest.TestCase):
         path = os.path.join(self.work, "pipeline.json")
         with self.run.step("render", "渲染"):
             self.clock.now += 1
-        written = self.run.write(path)
+        written = self.run.write(path, {"case": "case-01"})
         with open(path, encoding="utf-8") as file:
             self.assertEqual(json.load(file), written)
+        self.assertEqual(list(written)[:2], ["case", "seconds"])
         self.assertEqual(os.listdir(self.work), ["pipeline.json"])
 
 
