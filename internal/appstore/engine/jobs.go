@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/appstore"
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 )
 
 // Each app's latest job is kept in the agent's state directory, written when
@@ -56,11 +57,9 @@ func (s *Store) saveJob(job *appstore.Job) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	temporary := path + ".tmp"
-	if err := os.WriteFile(temporary, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(temporary, path)
+	// After a power cut, the record is what rolls back an install that never
+	// finished.
+	return atomicfile.Write(path, data, 0o600)
 }
 
 // readJobs returns the recorded jobs, skipping records it cannot read and

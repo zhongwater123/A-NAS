@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 )
 
 // The Host Agent keeps its records on the system disk in a directory only
@@ -98,7 +100,7 @@ func (e *Executor) moveStateFile(legacy, path string) (bool, error) {
 	// the next start.
 	if err := os.Remove(legacy); err != nil {
 		e.logger.Warn("remove a moved Host Agent record", "file", legacy, "error", err)
-	} else if err := syncDirectory(filepath.Dir(legacy)); err != nil {
+	} else if err := atomicfile.SyncDir(filepath.Dir(legacy)); err != nil {
 		e.logger.Warn("flush the removal of a moved Host Agent record", "file", legacy, "error", err)
 	}
 	return true, nil
@@ -166,13 +168,4 @@ func readStateFile(path string, owner int) ([]byte, error) {
 		return nil, fmt.Errorf("%s is larger than %d bytes", path, maxStateFileBytes)
 	}
 	return contents, nil
-}
-
-func syncDirectory(path string) error {
-	directory, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = directory.Close() }()
-	return directory.Sync()
 }

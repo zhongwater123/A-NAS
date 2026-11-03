@@ -21,6 +21,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/appid"
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
@@ -354,6 +355,9 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
 	if err := os.Rename(candidatePath, configurationPath); err != nil {
 		return err
 	}
+	if err := atomicfile.SyncDir(filepath.Dir(configurationPath)); err != nil {
+		return err
+	}
 	if output, err := e.runner.Run(ctx, "smbcontrol", []string{"all", "reload-config"}, ""); err != nil {
 		if previousErr == nil {
 			_ = writeAtomic(configurationPath, previous, 0o644)
@@ -482,37 +486,9 @@ func writeAtomic(path string, contents []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".a-nas-unit-")
-	if err != nil {
-		return err
-	}
-	temporaryPath := temporary.Name()
-	committed := false
-	defer func() {
-		_ = temporary.Close()
-		if !committed {
-			_ = os.Remove(temporaryPath)
-		}
-	}()
-	if _, err := temporary.Write(contents); err != nil {
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		return err
-	}
-	if err := temporary.Chmod(mode); err != nil {
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return err
-	}
-	committed = true
-	// The rename is on disk only once the directory is: records such as the
-	// operation journal must survive a power cut right after they are written.
-	return syncDirectory(filepath.Dir(path))
+	// Records such as the operation journal must survive a power cut right
+	// after they are written.
+	return atomicfile.Write(path, contents, mode)
 }
 
 type execCommandRunner struct{}
