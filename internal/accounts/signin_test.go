@@ -83,6 +83,24 @@ func TestAClientThatKeepsFailingWaitsBeforeTryingAgain(t *testing.T) {
 	}
 }
 
+func TestFailuresAreForgottenADayAfterTheLastOne(t *testing.T) {
+	now := time.Date(2026, time.November, 3, 12, 0, 0, 0, time.UTC)
+	service, _ := newSignInService(t, func() time.Time { return now })
+	laptop := fromLAN("192.0.2.10")
+	for range 4 {
+		if _, err := service.Authenticate(laptop, "alice", "not alice's password"); !errors.Is(err, accounts.ErrInvalidCredentials) {
+			t.Fatalf("wrong password: %v", err)
+		}
+	}
+	now = now.Add(25 * time.Hour)
+	if _, err := service.Authenticate(laptop, "alice", "not alice's password"); !errors.Is(err, accounts.ErrInvalidCredentials) {
+		t.Fatalf("a day later: %v", err)
+	}
+	if _, err := service.Authenticate(laptop, "alice", signInPassword); err != nil {
+		t.Fatalf("one failure after a day made the client wait: %v", err)
+	}
+}
+
 func TestAWaitDoublesUpToFifteenMinutes(t *testing.T) {
 	now := time.Date(2026, time.November, 3, 12, 0, 0, 0, time.UTC)
 	service, _ := newSignInService(t, func() time.Time { return now })

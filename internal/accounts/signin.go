@@ -102,6 +102,8 @@ func (f *signInFailures) failed(now time.Time, client, username string) {
 			f.makeRoom(now)
 			record = &failureRecord{}
 			f.records[key] = record
+		} else if now.Sub(record.last) > forgetAfter {
+			*record = failureRecord{}
 		}
 		record.count++
 		record.last = now
