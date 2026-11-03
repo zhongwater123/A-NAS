@@ -47,13 +47,26 @@ func peopleOn(ctx context.Context, q queryer, libraryID string) (bool, error) {
 	return on, err
 }
 
-// SetPeople turns people and pets on or off for a library, clearing what was
-// derived when it goes off and scanning the library's photos again when it
-// comes back on.
-func (s *Service) SetPeople(ctx context.Context, p Principal, libraryID string, on bool) (Library, error) {
+// LibrarySwitches are the AI switches of a library to set; a nil one stays as
+// it is.
+type LibrarySwitches struct {
+	People, Texts *bool
+}
+
+// switched is what turning switches leaves for after the commit.
+type switched struct {
+	// sheets are the face sheets of the faces cleared, to remove.
+	sheets [][2]string
+	// peopleOn and textsOn say a switch came on, so its work is queued.
+	peopleOn, textsOn bool
+}
+
+// SetSwitches turns a library's AI switches on or off in one transaction:
+// people and pets (switchPeople), and the text in photos (switchTexts). Only
+// the owner of a private library and an administrator for the shared one may.
+func (s *Service) SetSwitches(ctx context.Context, p Principal, libraryID string, set LibrarySwitches) (Library, error) {
 	var lib library
-	var sheets [][2]string
-	changed := false
+	var done switched
 	s.commitMu.Lock()
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -63,27 +76,18 @@ func (s *Service) SetPeople(ctx context.Context, p Principal, libraryID string, 
 		if !canSetPeople(p, lib) {
 			return ErrForbidden
 		}
-		if was, err := peopleOn(ctx, tx, lib.id); err != nil || was == on {
-			return err
+		if set.People != nil {
+			if err := s.switchPeople(ctx, tx, p, lib, *set.People, &done); err != nil {
+				return err
+			}
 		}
-		changed = true
-		if _, err := tx.ExecContext(ctx, "UPDATE libraries SET people = ? WHERE id = ?", on, lib.id); err != nil {
-			return err
+		if set.Texts != nil {
+			return s.switchTexts(ctx, tx, p, lib, *set.Texts, &done)
 		}
-		action := "library.people_off"
-		if on {
-			action = "library.people_on"
-			err = s.enqueueLibraryFaces(ctx, tx, lib.id)
-		} else {
-			sheets, err = s.clearPeople(ctx, tx, lib.id)
-		}
-		if err != nil {
-			return err
-		}
-		return s.audit(ctx, tx, p.UserID, action, lib.id, "")
+		return nil
 	})
 	if err == nil {
-		for _, sheet := range sheets {
+		for _, sheet := range done.sheets {
 			if removeErr := s.root.Remove(derivedPath(sheet[1], sheet[0])); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
 				// Reconcile removes a sheet without its row.
 				err = removeErr
@@ -94,13 +98,52 @@ func (s *Service) SetPeople(ctx context.Context, p Principal, libraryID string, 
 	if err != nil {
 		return Library{}, err
 	}
-	if changed && on {
+	if done.peopleOn {
 		if err := s.enqueueMissingPets(ctx, s.objectCalibration.Model); err != nil {
 			return Library{}, err
 		}
+	}
+	if done.textsOn {
+		// The stored vectors are routed again; those of libraries still off
+		// stay out.
+		s.routeIndex.mu.Lock()
+		s.routeIndex.routed = false
+		s.routeIndex.mu.Unlock()
+	}
+	if done.peopleOn || done.textsOn {
 		s.ai.wakeUp()
 	}
 	return s.publicSwitches(ctx, p, lib)
+}
+
+// SetPeople turns people and pets on or off for a library.
+func (s *Service) SetPeople(ctx context.Context, p Principal, libraryID string, on bool) (Library, error) {
+	return s.SetSwitches(ctx, p, libraryID, LibrarySwitches{People: &on})
+}
+
+// switchPeople turns people and pets on or off, clearing what was derived
+// when it goes off and scanning the library's photos again when it comes back
+// on.
+func (s *Service) switchPeople(ctx context.Context, tx *sql.Tx, p Principal, lib library, on bool, done *switched) error {
+	if was, err := peopleOn(ctx, tx, lib.id); err != nil || was == on {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE libraries SET people = ? WHERE id = ?", on, lib.id); err != nil {
+		return err
+	}
+	action := "library.people_off"
+	var err error
+	if on {
+		action = "library.people_on"
+		done.peopleOn = true
+		err = s.enqueueLibraryFaces(ctx, tx, lib.id)
+	} else {
+		done.sheets, err = s.clearPeople(ctx, tx, lib.id)
+	}
+	if err != nil {
+		return err
+	}
+	return s.audit(ctx, tx, p.UserID, action, lib.id, "")
 }
 
 // enqueueLibraryFaces queues the face scan of every photo of a library that

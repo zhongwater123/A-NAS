@@ -360,10 +360,11 @@ END;
 `,
 	// 15: the text read from photos (docs/architecture/photo-ocr.md). A
 	// reading is derived, one per content object that copies share: its
-	// document type, its whole text, and its fields with their checks as
-	// JSON. What members correct is user data per library and object; it
-	// stays when the library turns reading off and when a new model reads
-	// again. Each library can turn reading off, as with people.
+	// document type, its whole text and how that ended (finish: stop, or
+	// length or repetition for a text cut off), and its fields with their
+	// checks as JSON. What members correct is user data per library and
+	// object; it stays when the library turns reading off and when a new
+	// model reads again. Each library can turn reading off, as with people.
 	`
 ALTER TABLE libraries ADD COLUMN texts INTEGER NOT NULL DEFAULT 1;
 
@@ -372,6 +373,7 @@ CREATE TABLE texts (
     model TEXT NOT NULL,
     kind TEXT NOT NULL,
     text TEXT NOT NULL,
+    finish TEXT NOT NULL,
     fields TEXT NOT NULL,
     checks TEXT NOT NULL,
     created_at TEXT NOT NULL

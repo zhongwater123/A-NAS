@@ -3,17 +3,25 @@ package textread
 import (
 	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// The patterns are how Chinese documents print these values, 2024年5月6日 or
+// 2024.05.06, ¥1,234.50元; no library reads them. Whether a date exists is
+// time.Parse's to say.
+const datePattern = `\d{4}\s*[-/.年]\s*\d{1,2}\s*[-/.月]\s*\d{1,2}日?|\d{8}`
 
 var (
 	idNumber = regexp.MustCompile(`^\d{17}[\dXx]$`)
 	// A date as documents write it, a time of day may follow.
 	dateValue = regexp.MustCompile(`^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})日?`)
 	compact   = regexp.MustCompile(`^(\d{4})(\d{2})(\d{2})$`)
-	validity  = regexp.MustCompile(`^(.+?)\s*[-—–至~]\s*(.+)$`)
+	// The dates are spelled out, so that a dash within one is not taken for
+	// the one between them.
+	validity  = regexp.MustCompile(`^(` + datePattern + `)\s*[-—–至~]\s*(` + datePattern + `|长期)$`)
 	amount    = regexp.MustCompile(`^[-+]?[¥￥]?\s*(\d{1,3}(,\d{3})+|\d+)(\.\d{1,2})?\s*元?$`)
 	invoiceNo = regexp.MustCompile(`^(\d{8}|\d{20})$`)
 )
@@ -49,7 +57,7 @@ func disagreeing(kind Kind, fields map[string]string) []string {
 	var keys []string
 	switch kind {
 	case IDCardFront:
-		number := strings.ToUpper(fields["公民身份号码"])
+		number := strings.ToUpper(strings.ReplaceAll(fields["公民身份号码"], " ", ""))
 		if !idNumberValid(number) {
 			break
 		}
@@ -69,7 +77,9 @@ func disagreeing(kind Kind, fields map[string]string) []string {
 			keys = append(keys, "金额", "税额", "价税合计")
 		}
 	}
-	return keys
+	// An ID number can disagree with both its birth date and its sex.
+	slices.Sort(keys)
+	return slices.Compact(keys)
 }
 
 // idNumberValid checks a resident ID number's GB 11643 check digit and the
@@ -123,12 +133,9 @@ func parseDate(value string) (time.Time, bool) {
 	if parts == nil {
 		return time.Time{}, false
 	}
-	year, _ := strconv.Atoi(parts[1])
-	month, _ := strconv.Atoi(parts[2])
-	day, _ := strconv.Atoi(parts[3])
-	date := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
-	// time.Date normalises 2月30日 to 3月2日: such a date does not exist.
-	if date.Year() != year || int(date.Month()) != month || date.Day() != day || year < 1900 || year > 2200 {
+	// time.Parse refuses a day the month does not have, such as 2月30日.
+	date, err := time.Parse("2006-1-2", parts[1]+"-"+parts[2]+"-"+parts[3])
+	if err != nil || date.Year() < 1900 || date.Year() > 2200 {
 		return time.Time{}, false
 	}
 	return date, true

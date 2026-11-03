@@ -44,11 +44,40 @@ func (s *Service) claimTextJob(ctx context.Context) (claimedJob, error) {
 
 // textReading is what one round read from a photo.
 type textReading struct {
-	model  string
-	kind   textread.Kind
-	text   string
+	model string
+	kind  textread.Kind
+	text  string
+	// finish is how the whole text ended (Reading.Finish): "stop", or
+	// "length" and "repetition" for a text cut off or stopped looping, which
+	// is kept as read.
+	finish string
 	fields map[string]string
 	checks map[string]textread.Check
+}
+
+// enqueueTextReading queues the reading of a photo newly in a library that
+// reads text: a copy or an import of an original that so far only libraries
+// with reading off held, whose stored vector found it then but did not queue
+// it. Until the route's query vectors are loaded, the stored vectors are
+// routed later anyway (routeStoredVectors).
+func (s *Service) enqueueTextReading(ctx context.Context, tx *sql.Tx, objectID string) error {
+	s.routeIndex.mu.Lock()
+	queries := s.routeIndex.vectors
+	s.routeIndex.mu.Unlock()
+	if queries == nil {
+		return nil
+	}
+	var encoded []byte
+	err := tx.QueryRowContext(ctx, "SELECT vector FROM embeddings WHERE object_id = ? AND derivation = ? AND model = ?",
+		objectID, embeddingDerivation, s.textRoute.Model).Scan(&encoded)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Not embedded yet: routed when its vector is stored.
+		return nil
+	}
+	if err != nil || !s.hasText(decodeVector(encoded), queries) {
+		return err
+	}
+	return enqueueText(ctx, tx, objectID, formatTime(s.now()))
 }
 
 // completeText stores a reading and retires its job.
@@ -70,10 +99,11 @@ func (s *Service) completeText(ctx context.Context, job claimedJob, reading text
 		}
 		now := formatTime(s.now())
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO texts(object_id, model, kind, text, fields, checks, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)
+INSERT INTO texts(object_id, model, kind, text, finish, fields, checks, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(object_id) DO UPDATE SET model = excluded.model, kind = excluded.kind, text = excluded.text,
-  fields = excluded.fields, checks = excluded.checks, created_at = excluded.created_at`,
-			job.objectID, reading.model, string(reading.kind), reading.text, string(fields), string(checks), now); err != nil {
+  finish = excluded.finish, fields = excluded.fields, checks = excluded.checks, created_at = excluded.created_at`,
+			job.objectID, reading.model, string(reading.kind), reading.text, reading.finish, string(fields), string(checks),
+			now); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -99,58 +129,39 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, textDerivation, model)
 	return err
 }
 
-// SetTexts turns reading the text in photos on or off for a library. Off
-// clears the readings of the photos no library that reads still holds and
-// keeps what members corrected; on routes the library's photos again.
+// SetTexts turns reading the text in photos on or off for a library.
 func (s *Service) SetTexts(ctx context.Context, p Principal, libraryID string, on bool) (Library, error) {
-	var lib library
-	changed := false
-	s.commitMu.Lock()
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
-		var err error
-		if lib, err = s.visibleLibrary(ctx, tx, p, libraryID); err != nil {
-			return err
-		}
-		if !canSetPeople(p, lib) {
-			return ErrForbidden
-		}
-		if was, err := textsOn(ctx, tx, lib.id); err != nil || was == on {
-			return err
-		}
-		changed = true
-		if _, err := tx.ExecContext(ctx, "UPDATE libraries SET texts = ? WHERE id = ?", on, lib.id); err != nil {
-			return err
-		}
-		action := "library.texts_on"
-		if !on {
-			action = "library.texts_off"
-			// The photos of the library that no library reading text still holds.
-			gone := "SELECT a.object_id FROM assets a WHERE a.library_id = ? AND NOT " + inTextLibrary("a.object_id")
-			for _, statement := range []string{
-				"DELETE FROM texts WHERE object_id IN (" + gone + ")",
-				"DELETE FROM scans WHERE derivation = '" + textDerivation + "' AND object_id IN (" + gone + ")",
-				"DELETE FROM jobs WHERE derivation = '" + textDerivation + "' AND object_id IN (" + gone + ")",
-			} {
-				if _, err := tx.ExecContext(ctx, statement, lib.id); err != nil {
-					return err
-				}
+	return s.SetSwitches(ctx, p, libraryID, LibrarySwitches{Texts: &on})
+}
+
+// switchTexts turns reading the text in photos on or off. Off clears the
+// readings of the photos no library that reads still holds and keeps what
+// members corrected; on routes the stored vectors again (SetSwitches).
+func (s *Service) switchTexts(ctx context.Context, tx *sql.Tx, p Principal, lib library, on bool, done *switched) error {
+	if was, err := textsOn(ctx, tx, lib.id); err != nil || was == on {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE libraries SET texts = ? WHERE id = ?", on, lib.id); err != nil {
+		return err
+	}
+	action := "library.texts_on"
+	if on {
+		done.textsOn = true
+	} else {
+		action = "library.texts_off"
+		// The photos of the library that no library reading text still holds.
+		gone := "SELECT a.object_id FROM assets a WHERE a.library_id = ? AND NOT " + inTextLibrary("a.object_id")
+		for _, statement := range []string{
+			"DELETE FROM texts WHERE object_id IN (" + gone + ")",
+			"DELETE FROM scans WHERE derivation = '" + textDerivation + "' AND object_id IN (" + gone + ")",
+			"DELETE FROM jobs WHERE derivation = '" + textDerivation + "' AND object_id IN (" + gone + ")",
+		} {
+			if _, err := tx.ExecContext(ctx, statement, lib.id); err != nil {
+				return err
 			}
 		}
-		return s.audit(ctx, tx, p.UserID, action, lib.id, "")
-	})
-	s.commitMu.Unlock()
-	if err != nil {
-		return Library{}, err
 	}
-	if changed && on {
-		// The stored vectors are routed again; those of libraries still off
-		// stay out.
-		s.routeIndex.mu.Lock()
-		s.routeIndex.routed = false
-		s.routeIndex.mu.Unlock()
-		s.ai.wakeUp()
-	}
-	return s.publicSwitches(ctx, p, lib)
+	return s.audit(ctx, tx, p.UserID, action, lib.id, "")
 }
 
 // publicSwitches is the library as p sees it, with its AI switches.
@@ -170,7 +181,7 @@ func (s *Service) publicSwitches(ctx context.Context, p Principal, lib library) 
 // textMinConfidence is the token probability every token of a field's value
 // must reach to pass (docs/architecture/photo-ocr.md#核对层). Measured with
 // Qwen3.5-4B on 50 CC-OCR receipts and cards, the other checks passed 91% of
-// the fields with 12% wrong; at 0.99, 45% pass with 4.7% wrong, most of them
+// the fields with 12% wrong; at 0.99, 48% pass with 2.7% wrong, most of them
 // differing only in format, while 0.9 let a serial number one digit off pass
 // (docs/research/photo-ocr-model-evaluation.md, 核对层实测).
 const textMinConfidence = 0.99
@@ -185,29 +196,33 @@ var errReaderChanged = errors.New("the text reader changed between the reads of 
 // The reader needs memory of its own, so the detection models go first and
 // the gate weighs the reader's need. When gate closes meanwhile, the Worker
 // is hung up on and the job goes back without spending its attempt.
-func (r *aiRunner) readText(ctx context.Context, m models, gate Gate, info EmbedderInfo) (bool, error) {
+//
+// claimed is false only when no photo waits to be read, and the caller goes
+// on to idle; a photo claimed ends the round, read or not, as a detection
+// does: a closed gate's pause stands, and the models stay as it left them.
+func (r *aiRunner) readText(ctx context.Context, m models, gate Gate, info EmbedderInfo) (claimed, processed bool, err error) {
 	job, err := r.lib.claimTextJob(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return false, false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	r.switchPhase(ctx, m.detector, true)
 	if open, reason := gate.Open(ctx, info.OCRMemoryBytes); !open {
 		r.progress.set(AIPaused, reason, "")
 		r.releaseModels(ctx, m.detector, reason)
-		return false, r.lib.returnJob(ctx, job)
+		return true, false, r.lib.returnJob(ctx, job)
 	}
 	r.progress.set(AIWorking, "", info.Model)
 	file, class, err := r.lib.openAIInput(ctx, job)
 	switch {
 	case err != nil:
-		return false, errors.Join(err, r.lib.releaseJob(ctx, job))
+		return true, false, errors.Join(err, r.lib.releaseJob(ctx, job))
 	case class == jobWaiting:
-		return false, r.lib.releaseJob(ctx, job)
+		return true, false, r.lib.releaseJob(ctx, job)
 	case class != "":
-		return true, r.lib.failJob(ctx, job, class)
+		return true, true, r.lib.failJob(ctx, job, class)
 	}
 	defer func() { _ = file.Close() }()
 	r.markReaderLoaded()
@@ -215,7 +230,7 @@ func (r *aiRunner) readText(ctx context.Context, m models, gate Gate, info Embed
 	readCtx, cancel := context.WithCancel(ctx)
 	stopWatching := watchGate(readCtx, gate, info.OCRMemoryBytes, cancel)
 	model, whole, err := m.reader.ReadText(readCtx, file, nil)
-	reading := textReading{model: model, kind: textread.Plain, text: whole.Text}
+	reading := textReading{model: model, kind: textread.Plain, text: whole.Text, finish: whole.Finish}
 	if err == nil {
 		reading.kind = textread.Classify(whole.Text)
 		if template := textread.Template(reading.kind); template != nil {
@@ -226,22 +241,22 @@ func (r *aiRunner) readText(ctx context.Context, m models, gate Gate, info Embed
 	cancel()
 	switch {
 	case ctx.Err() != nil:
-		return false, r.lib.returnJob(context.WithoutCancel(ctx), job)
+		return true, false, r.lib.returnJob(context.WithoutCancel(ctx), job)
 	case paused != "":
 		r.progress.set(AIPaused, paused, "")
 		err := r.lib.returnJob(ctx, job)
 		r.releaseModels(ctx, m.detector, paused)
-		return false, err
+		return true, false, err
 	case errors.Is(err, ErrAIUnavailable) || errors.Is(err, errReaderChanged) || (err == nil && model != info.OCR):
 		// Look again next round: the Worker may have lost or changed its reader.
 		r.forgetModels()
-		return false, r.lib.releaseJob(ctx, job)
+		return true, false, r.lib.releaseJob(ctx, job)
 	case errors.Is(err, ErrAIRejected):
-		return true, r.lib.failJob(ctx, job, jobErrorUndecodable)
+		return true, true, r.lib.failJob(ctx, job, jobErrorUndecodable)
 	case err != nil:
-		return true, r.lib.failJob(ctx, job, jobErrorIO)
+		return true, true, r.lib.failJob(ctx, job, jobErrorIO)
 	}
-	return true, r.lib.completeText(ctx, job, reading)
+	return true, true, r.lib.completeText(ctx, job, reading)
 }
 
 // readFields reads a typed photo's fields with its type's template and
@@ -264,5 +279,6 @@ func (r *aiRunner) readFields(ctx context.Context, reader TextReader, file *os.F
 		tokens[i] = textread.Token{Text: token.Token, LogProb: token.LogProb}
 	}
 	fields := textread.Fields(kind, answer.Text)
-	return fields, textread.Verify(kind, fields, whole, tokens, textread.Options{MinConfidence: textMinConfidence}), nil
+	options := textread.Options{MinConfidence: textMinConfidence, Unfinished: answer.Finish != "stop"}
+	return fields, textread.Verify(kind, fields, whole, tokens, options), nil
 }

@@ -232,13 +232,16 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	job, err := r.lib.claimJob(ctx, embeddingDerivation)
 	if errors.Is(err, sql.ErrNoRows) {
 		if info.Detector == "" && info.Faces == "" && info.Animals == "" {
-			// Nothing to detect with: the text of routed photos is read.
+			// Nothing to detect with: the text of routed photos is read. The
+			// Worker's release, which frees the reader too, is the Detector's.
 			if reader != nil && info.OCR != "" {
-				if read, err := r.readText(ctx, models{reader: reader}, gate, info); read || err != nil {
+				m := models{detector: detector, reader: reader}
+				if claimed, read, err := r.readText(ctx, m, gate, info); claimed || err != nil {
 					return read, err
 				}
 			}
 			r.progress.set(AIIdle, "", info.Model)
+			r.releaseModels(ctx, detector, "")
 			return false, nil
 		}
 		// A long run of photos clusters as it goes, not only at its end.
@@ -309,7 +312,7 @@ func (r *aiRunner) detect(ctx context.Context, m models, gate Gate, info Embedde
 		if errors.Is(err, sql.ErrNoRows) {
 			// With nothing to detect, the text of routed photos is read.
 			if m.reader != nil && info.OCR != "" {
-				if read, err := r.readText(ctx, m, gate, info); read || err != nil {
+				if claimed, read, err := r.readText(ctx, m, gate, info); claimed || err != nil {
 					return read, err
 				}
 			}

@@ -49,16 +49,26 @@ func TestATypeHasATemplateAndPlainTextNone(t *testing.T) {
 	if textread.Template(textread.Plain) != nil {
 		t.Fatal("plain text has a template")
 	}
+	// The model fills the fields in the order the card shows them.
+	if got, want := string(textread.Template(textread.IDCardFront)),
+		`{"姓名": "", "性别": "", "民族": "", "出生": "", "住址": "", "公民身份号码": ""}`; got != want {
+		t.Fatalf("ID card template = %s, want %s", got, want)
+	}
 }
 
 func TestFieldsKeepTheTemplatesFilledValues(t *testing.T) {
-	answer := "```json\n{\"商户\": \"某某超市\", \"日期\": \"无\", \"合计\": 35.5, \"店员\": \"李四\"}\n```"
+	answer := "```json\n{\"商户\": \"某某超市\", \"日期\": \"无\", \"合计\": 35.50, \"店员\": \"李四\"}\n```"
 	got := textread.Fields(textread.Receipt, answer)
-	if want := map[string]string{"商户": "某某超市", "合计": "35.5"}; !maps.Equal(got, want) {
+	if want := map[string]string{"商户": "某某超市", "合计": "35.50"}; !maps.Equal(got, want) {
 		t.Fatalf("Fields() = %v, want %v", got, want)
 	}
 	if got := textread.Fields(textread.Receipt, "not json"); len(got) != 0 {
 		t.Fatalf("Fields(not json) = %v", got)
+	}
+	// A number written without quotes keeps its digits: as a float, a card
+	// number would be rounded.
+	if got := textread.Fields(textread.BankCard, `{"卡号": `+card+`}`); got["卡号"] != card {
+		t.Fatalf("an unquoted card number = %v, want %s", got, card)
 	}
 }
 
@@ -93,8 +103,37 @@ func TestFieldsPassOnlyWhenEveryCheckHolds(t *testing.T) {
 	fields = map[string]string{"公民身份号码": femaleID, "性别": "男", "出生": "1949年12月30日"}
 	checks = textread.Verify(textread.IDCardFront, fields, femaleID+" 男 1949年12月30日", nil, textread.Options{})
 	for _, key := range []string{"公民身份号码", "性别", "出生"} {
-		if got := reasons(checks, key); !slices.Contains(got, "mismatch") {
+		// The number disagrees with both, and says so once.
+		if got := reasons(checks, key); !slices.Equal(got, []string{"mismatch"}) {
 			t.Errorf("%s reasons = %v, want mismatch", key, got)
+		}
+	}
+
+	// A number read with spaces agrees with its birth date and sex all the same.
+	spaced := maleID[:6] + " " + maleID[6:14] + " " + maleID[14:]
+	fields = map[string]string{"公民身份号码": spaced, "性别": "男", "出生": "1990年1月1日"}
+	checks = textread.Verify(textread.IDCardFront, fields, spaced+" 男 1990年1月1日", nil, textread.Options{})
+	for key, check := range checks {
+		if !check.Passed {
+			t.Errorf("%s with a spaced ID number: reasons = %v", key, check.Reasons)
+		}
+	}
+}
+
+func TestAnIDCardsTermIsTwoDatesOrAStartAndLongTerm(t *testing.T) {
+	for value, want := range map[string]bool{
+		"2010.01.01-2030.01.01":     true,
+		"2015-03-01至2035-03-01":     true,
+		"2015-03-01-2035-03-01":     true,
+		"20150301-20350301":         true,
+		"2015.03.01-长期":             true,
+		"2030.01.01-2010.01.01":     false,
+		"2015.02.30-2035.02.28":     false,
+		"有效期 2010.01.01-2030.01.01": false,
+	} {
+		checks := textread.Verify(textread.IDCardBack, map[string]string{"有效期限": value}, value, nil, textread.Options{})
+		if got := checks["有效期限"].Passed; got != want {
+			t.Errorf("有效期限 %q passed = %v, want %v: %v", value, got, want, checks["有效期限"].Reasons)
 		}
 	}
 }
@@ -130,5 +169,55 @@ func TestLowConfidenceIsCheckedOnlyWhenAsked(t *testing.T) {
 	checks := textread.Verify(textread.Receipt, fields, "合计 35.5", tokens, textread.Options{MinConfidence: 0.99})
 	if got := reasons(checks, "合计"); !slices.Equal(got, []string{"low_confidence"}) {
 		t.Fatalf("with 0.99: reasons = %v", got)
+	}
+}
+
+// sure and unsure are the log probabilities of a token read as 0.999 and 0.5.
+var sure, unsure = math.Log(0.999), math.Log(0.5)
+
+func TestAValueIsJudgedByTheTokensAfterItsKey(t *testing.T) {
+	// 13.00 also sits inside 113.00, which comes first; the tax itself was a
+	// guess.
+	tokens := []textread.Token{
+		{`{"价税合计": "`, 0}, {"1", sure}, {"1", sure}, {"3", sure}, {".00", sure},
+		{`", "税额": "`, 0}, {"1", sure}, {"3", unsure}, {".00", sure}, {`"}`, 0},
+	}
+	fields := map[string]string{"价税合计": "113.00", "税额": "13.00"}
+	checks := textread.Verify(textread.Invoice, fields, "价税合计 113.00 税额 13.00", tokens, textread.Options{MinConfidence: 0.99})
+	if !checks["价税合计"].Passed {
+		t.Errorf("价税合计 reasons = %v", checks["价税合计"].Reasons)
+	}
+	if got := reasons(checks, "税额"); !slices.Equal(got, []string{"low_confidence"}) {
+		t.Errorf("税额 reasons = %v, want its own unsure token", got)
+	}
+
+	// A value written escaped in its JSON string is still found.
+	tokens = []textread.Token{{`{"住址": "某路`, sure}, {`\"`, unsure}, {`1\"号"}`, sure}}
+	checks = textread.Verify(textread.IDCardFront, map[string]string{"住址": `某路"1"号`}, `住址 某路"1"号`, tokens,
+		textread.Options{MinConfidence: 0.99})
+	if got := reasons(checks, "住址"); !slices.Equal(got, []string{"low_confidence"}) {
+		t.Errorf("escaped 住址 reasons = %v", got)
+	}
+}
+
+func TestAValueNoTokenSpellsDoesNotPass(t *testing.T) {
+	fields := map[string]string{"合计": "35.50"}
+	for name, tokens := range map[string][]textread.Token{
+		"no tokens":         nil,
+		"not in the tokens": {{`{"合计": "35.80"}`, 0}},
+		"no key":            {{`35.50`, 0}},
+	} {
+		checks := textread.Verify(textread.Receipt, fields, "合计 35.50", tokens, textread.Options{MinConfidence: 0.99})
+		if got := reasons(checks, "合计"); !slices.Equal(got, []string{"low_confidence"}) {
+			t.Errorf("%s: reasons = %v", name, got)
+		}
+	}
+}
+
+func TestAnAnswerCutOffPassesNoField(t *testing.T) {
+	checks := textread.Verify(textread.Receipt, map[string]string{"合计": "35.50"}, "合计 35.50", nil,
+		textread.Options{Unfinished: true})
+	if got := reasons(checks, "合计"); !slices.Equal(got, []string{"unfinished"}) {
+		t.Fatalf("reasons = %v", got)
 	}
 }

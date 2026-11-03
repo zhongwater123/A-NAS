@@ -60,14 +60,8 @@ func (h *handler) changeLibrary(w http.ResponseWriter, r *http.Request) {
 			"say whether the library recognises people and pets, or reads the text in photos")
 		return
 	}
-	var library photos.Library
-	var err error
-	if request.People != nil {
-		library, err = h.service.SetPeople(r.Context(), principal, r.PathValue("libraryID"), *request.People)
-	}
-	if err == nil && request.Texts != nil {
-		library, err = h.service.SetTexts(r.Context(), principal, r.PathValue("libraryID"), *request.Texts)
-	}
+	library, err := h.service.SetSwitches(r.Context(), principal, r.PathValue("libraryID"),
+		photos.LibrarySwitches{People: request.People, Texts: request.Texts})
 	if err != nil {
 		h.fail(w, r, err)
 		return
