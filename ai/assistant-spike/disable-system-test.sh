@@ -1,8 +1,9 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2154 # sourced by scripts/system-test.sh after the assistant checks.
 # A real systemd regression for #178, without needing the Hermes runtime.
-# Keep a harmless process in the installed cron sandbox, then disable its owner
-# through the Product Service and verify every activation path is closed.
+# Keep a harmless process in the installed cron sandbox and the owner's instance
+# running, then disable the owner through the Product Service while the instance
+# keeps being started, and verify every activation path is closed.
 # The preceding layout test removed Bob's assistant, while leaving his
 # product account active. Restore its sandbox before starting a real task.
 check "an active member's assistant can be prepared again" \
@@ -28,7 +29,41 @@ for _ in $(seq 1 50); do
 done
 check "a task is running before its owner is disabled" \
   test "$(systemctl show -p MainPID --value anas-assistant-cron@bob.service)" -gt 0
+
+# Bob is signed in, so the Product Service keeps his instance running and starts
+# it again through his socket. A start queued while the disable stopped the units
+# replaced their stop jobs, and the disable failed (docs/investigations/
+# 2026-11-03-assistant-disable-start-race.md). His instance stops in two seconds
+# here, and starts keep coming during the disable, through the socket as the
+# keeper does and directly, so one always lands while its stop job runs.
+install -d /etc/systemd/system/anas-assistant@bob.service.d
+cat > /etc/systemd/system/anas-assistant@bob.service.d/disable-test.conf <<'EOF'
+[Unit]
+StopWhenUnneeded=no
+[Service]
+ExecStart=
+ExecStart=/bin/sleep infinity
+ExecStartPost=
+ExecStop=/bin/sleep 2
+EOF
+systemctl daemon-reload
+systemctl restart anas-assistant@bob.service || true
+check "bob's assistant is running before he is disabled" systemctl is-active --quiet anas-assistant@bob.service
+(
+  while :; do
+    curl -s -o /dev/null -m 1 --unix-socket /run/a-nas-assistant/bob.sock http://assistant/ || true
+    systemctl start --no-block anas-assistant@bob.service 2>/dev/null || true
+    sleep 0.1
+  done
+) &
+restarts=$!
 check "disabling a task owner succeeds through the product API" \
+  test "$(status_of -X DELETE -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$bob_user")" = 204
+kill "$restarts"
+wait "$restarts" 2>/dev/null || true
+check "disabling stops his assistant although it kept being started" \
+  test "$(systemctl show -p MainPID --value anas-assistant@bob.service)" = 0
+check "disabling him again only retries and succeeds" \
   test "$(status_of -X DELETE -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$bob_user")" = 204
 check "the Host Agent rejects the disabled scheduled-task owner" \
   test "$(status_of --unix-socket "$host_socket" -H 'Content-Type: application/json' \

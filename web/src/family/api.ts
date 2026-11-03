@@ -152,8 +152,7 @@ export function addRecording(
 }
 export const audioURL = (recordId: string) => `/api/v1/family/records/${id(recordId)}/audio`;
 
-// requestKey names one attempt, so a retried request does not add twice.
-export const requestKey = () => crypto.randomUUID();
+export { requestKey } from "../api/requestKey";
 
 // CustomVaccineCode records a dose of a vaccine the catalog does not list.
 export const CustomVaccineCode = "custom";

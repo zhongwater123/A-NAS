@@ -1727,7 +1727,7 @@ paths:
     post:
       operationId: searchWeb
       summary: Search one tab's engines through the built-in SearXNG, sending results as the engines answer
-      description: 'The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off. The answer is a stream: nothing is sent before the first update, so these errors keep their status.'
+      description: 'The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off. The answer is a stream: nothing is sent before the first update, so these errors keep their status. Each engine is asked as a person would search: at its own pace whoever searches, not while its site has blocked it, and for a page after the first only if it found something on the page before. The same page again within ten minutes comes from what the engines answered, for this account only. A word that SearXNG would read as a command of its own ("!name", ":xx", "<n") is searched as text.'
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -9847,6 +9847,7 @@ components:
         - torrents
         - categories
         - engines
+        - paused
       properties:
         enabled:
           type: boolean
@@ -9923,6 +9924,34 @@ components:
               type: array
               items:
                 type: string
+        paused:
+          type: array
+          description: The engines searches leave out since their site blocked them, the first to return first.
+          items:
+            $ref: '#/components/schemas/WebSearchPausedEngine'
+    WebSearchPausedEngine:
+      type: object
+      additionalProperties: false
+      description: 'An engine left out of searches after its site blocked it: for an hour, doubled with each block in a row up to a day, until it answers again.'
+      required:
+        - engine
+        - reason
+        - until
+      properties:
+        engine:
+          type: string
+          description: The name the window shows.
+        reason:
+          type: string
+          enum:
+            - captcha
+            - denied
+            - too_many
+            - unreadable
+          description: 'How the site blocked it: a CAPTCHA, access denied, too many requests, or a page the engine could not read, often a challenge it does not recognize.'
+        until:
+          type: string
+          format: date-time
     WebSearchSettings:
       type: object
       additionalProperties: false
@@ -10057,6 +10086,8 @@ components:
         - answers
         - suggestions
         - unresponsive
+        - paused
+        - busy
         - pending
       properties:
         results:
@@ -10084,10 +10115,20 @@ components:
           description: The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA).
           items:
             type: string
+        paused:
+          type: array
+          description: The engines this search left out because their site blocked them; all in the first update.
+          items:
+            $ref: '#/components/schemas/WebSearchPausedEngine'
+        busy:
+          type: array
+          description: 'The engines this search left out because they had been asked too often just before: each engine is asked a few times in a row, then every ten seconds, whoever searches.'
+          items:
+            type: string
         pending:
           type: integer
           minimum: 0
-          description: The tab's engines still searching; 0 in the last update.
+          description: The engines still searching or waiting for their turn; 0 in the last update.
     WebSearchFound:
       type: object
       additionalProperties: false
