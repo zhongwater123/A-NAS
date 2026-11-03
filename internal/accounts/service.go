@@ -334,6 +334,8 @@ type Service struct {
 	random      io.Reader
 	// passwordCost is the work spent on each password set.
 	passwordCost PasswordCost
+	passwords    *passwordWork
+	signIns      signInFailures
 	sessions     sessionMemory
 }
 
@@ -356,7 +358,9 @@ func NewService(store *Store, credentials CredentialProvisioner, options Options
 	if cost.Parallelism == 0 {
 		cost.Parallelism = DefaultPasswordCost.Parallelism
 	}
-	return &Service{store: store, credentials: credentials, now: now, random: random, passwordCost: cost}
+	// The decoy draws from crypto/rand, leaving Random's sequence to tokens.
+	decoy := func() (string, error) { return hashPassword(rand.Text(), rand.Reader, cost) }
+	return &Service{store: store, credentials: credentials, now: now, random: random, passwordCost: cost, passwords: newPasswordWork(decoy)}
 }
 
 func (s *Service) SetupAdministrator(ctx context.Context, username, password string) (User, error) {
@@ -382,7 +386,7 @@ FROM users u JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private'`).Sc
 	if err := checkPassword(password); err != nil {
 		return User{}, err
 	}
-	passwordHash, err := hashPassword(password, s.random, s.passwordCost)
+	passwordHash, err := s.newPasswordHash(ctx, password)
 	if err != nil {
 		return User{}, err
 	}
@@ -433,7 +437,7 @@ func (s *Service) createUser(ctx context.Context, username, password string, rol
 	if err := checkPassword(password); err != nil {
 		return User{}, err
 	}
-	passwordHash, err := hashPassword(password, s.random, s.passwordCost)
+	passwordHash, err := s.newPasswordHash(ctx, password)
 	if err != nil {
 		return User{}, err
 	}
@@ -551,27 +555,44 @@ func (s *Service) AuthenticateLocalConsole(ctx context.Context, username, passwo
 
 func (s *Service) authenticate(ctx context.Context, username, password string, localConsole bool) (Session, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
+	client := originFrom(ctx).client()
+	if wait := s.signIns.wait(s.now(), client, username); wait > 0 {
+		return Session{}, &ThrottledError{RetryAfter: wait}
+	}
 	var user User
 	var encodedHash, createdAt string
 	err := s.store.db.QueryRowContext(ctx,
 		"SELECT id, username, role, status, password_hash, created_at, must_change_password, nickname, avatar_version FROM users WHERE username = ?", username,
 	).Scan(&user.ID, &user.Username, &user.Role, &user.Status, &encodedHash, &createdAt, &user.MustChangePassword, &user.Nickname, &user.AvatarVersion)
+	failure := ""
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		s.recordSignInFailure(ctx, "", username, SignInUnknownUser)
-		return Session{}, ErrInvalidCredentials
+		failure = SignInUnknownUser
 	case err != nil:
 		return Session{}, ErrInvalidCredentials
 	case user.Status == UserStatusDisabled:
-		s.recordSignInFailure(ctx, user.ID, username, SignInDisabled)
-		return Session{}, ErrInvalidCredentials
+		failure = SignInDisabled
 	case user.Status != UserStatusActive:
-		s.recordSignInFailure(ctx, user.ID, username, SignInUnavailable)
-		return Session{}, ErrInvalidCredentials
-	case !verifyPassword(password, encodedHash):
-		s.recordSignInFailure(ctx, user.ID, username, SignInInvalidPassword)
+		failure = SignInUnavailable
+	}
+	if failure != "" {
+		// Checked against the decoy, so that an attempt takes as long
+		// whether or not the account can sign in.
+		encodedHash = ""
+	}
+	matches, err := s.passwords.matches(ctx, password, encodedHash)
+	if err != nil {
+		return Session{}, err
+	}
+	if failure == "" && !matches {
+		failure = SignInInvalidPassword
+	}
+	if failure != "" {
+		s.signIns.failed(s.now(), client, username)
+		s.recordSignInFailure(ctx, user.ID, username, failure)
 		return Session{}, ErrInvalidCredentials
 	}
+	s.signIns.succeeded(client, username)
 	user.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
 	token := s.randomToken(32)
 	csrf := s.randomToken(24)
@@ -882,7 +903,7 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 	if err != nil {
 		return err
 	}
-	passwordHash, err := hashPassword(password, s.random, s.passwordCost)
+	passwordHash, err := s.newPasswordHash(ctx, password)
 	if err != nil {
 		return err
 	}
@@ -1062,6 +1083,12 @@ type PasswordCost struct {
 
 // DefaultPasswordCost is 64 MiB, three passes and two lanes.
 var DefaultPasswordCost = PasswordCost{MemoryKiB: 64 * 1024, Iterations: 3, Parallelism: 2}
+
+// newPasswordHash hashes a password being set, as one of the argon2id
+// computations passwordWork bounds.
+func (s *Service) newPasswordHash(ctx context.Context, password string) (string, error) {
+	return s.passwords.hash(ctx, func() (string, error) { return hashPassword(password, s.random, s.passwordCost) })
+}
 
 func hashPassword(password string, random io.Reader, cost PasswordCost) (string, error) {
 	salt := make([]byte, 16)

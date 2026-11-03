@@ -1,7 +1,7 @@
 # 局域网 Web 访问
 
 状态：implemented（NAS 安装 Caddy 后启用）
-更新时间：2026-10-21
+更新时间：2026-11-03
 
 ## 目标
 
@@ -11,7 +11,7 @@
 
 - 不提供 HTTPS、证书管理、公网或跨互联网的远程访问。
 - 不提供固定域名或局域网自动发现，用户按 IP 访问。
-- 不提供与本地控制台不同的功能或权限，也不限制登录失败次数。
+- 不提供与本地控制台不同的功能或权限。
 
 ## 场景
 
@@ -56,6 +56,8 @@
 - Caddy 监听所有地址的 TCP 80，以明文 HTTP 转发到只监听回环的 `127.0.0.1:8080`，并为每个请求设置 `X-Forwarded-For`；配置见 [`deploy/caddy/Caddyfile`](../../deploy/caddy/Caddyfile)。
 - 应用中心与 Docker 的写请求、终端握手接受 `localhost`、回环地址和任意 IP 字面量作为 `Host`，其他域名返回 403 以阻止 DNS 重绑定；浏览器 `Origin` 必须与 `Host` 同源。产品接口的写请求另需会话的 CSRF 令牌。
 - 经 Caddy 的登录即使申请本机会话，也只得到 12 小时会话（[会话规则](basic-storage-and-sharing.md#角色与可见性)）。
+- 登录失败有次数限制（[#175](https://github.com/zhongwater123/A-NAS/issues/175)），按会话绑定的客户端计数：同一客户端对同一账号名连续失败 5 次，或对所有账号名合计连续失败 20 次后，每次再尝试都要先等待，等待从 30 秒起随每次失败翻倍，最长 15 分钟；等待期间登录返回 `429 too_many_attempts` 与 `Retry-After`，页面提示“登录失败次数过多，请稍后再试”，即使密码正确也不登录，也不记审计。登录成功清除该客户端的失败计数，其他客户端不受影响。计数只在内存中，产品服务重启后清零。
+- 同时进行的密码校验最多 2 个（默认参数下每个 64 MiB），其余排队。账号不存在、已禁用或不可用时也校验一次诱饵哈希，响应时间不因账号是否存在而不同。
 - 会话绑定登录时的客户端：经 Caddy 登录的只接受同一 `X-Forwarded-For` 地址（IPv6 为同一 /64，链路本地地址须完全相同），直接回环登录的（本机屏幕、SSH 隧道）只接受没有转发头的回环连接；其他来源带着它请求返回 `401`，并在产品服务日志中记一条警告。这一规则生效前签发的局域网会话一律失效，本机会话视为直接回环签发。
 - 同一请求带有多个 `anas_session` Cookie 时，产品服务依次尝试前 4 个，取第一个属于本客户端的。
 - 桌面页面与静态资源返回 `X-Frame-Options: DENY` 与 CSP：`default-src 'self'`、`script-src 'self'`、`style-src 'self' 'unsafe-inline'`、`img-src 'self' data: blob:`、`media-src 'self' blob:`、`connect-src 'self' data: blob:`、`frame-src 'self'`、`object-src 'none'`、`base-uri 'none'`、`form-action 'self'`、`frame-ancestors 'none'`。`/api/` 与 `/healthz` 返回 `X-Frame-Options: SAMEORIGIN`，桌面仍可嵌入自己的 PDF 预览。
@@ -69,6 +71,7 @@
 
 - Host 校验：[`localorigin` 测试](../../internal/localorigin/localorigin_test.go)覆盖 IP 字面量放行与域名拒绝；[终端测试](../../internal/terminal/terminal_test.go)覆盖经入口以 IP 访问时可建立会话、以域名访问时被拒绝。
 - 会话：[`TestProductAPIKeepsLocalConsoleSessionsUntilSignOut`](../../internal/httpapi/product_test.go)覆盖带转发头的登录只得到 12 小时会话。
+- 登录限制：[`TestProductAPIMakesAClientThatKeepsFailingToSignInWait`](../../internal/httpapi/product_test.go)覆盖第 6 次返回 `429` 与 `Retry-After: 30`、其他客户端照常登录；[登录测试](../../internal/accounts/signin_test.go)覆盖等待翻倍到 15 分钟、换账号名的客户端在 20 次后等待且不再写审计、每次尝试恰好一次密码校验、同时至多 2 个校验。
 - 会话绑定：[`TestProductAPIAcceptsSessionsOnlyFromTheClientThatSignedIn`](../../internal/httpapi/product_test.go)覆盖应用容器经 Caddy 重放、其他局域网地址、回环与局域网互用、本机会话经 Caddy 均返回 `401`，以及应用加的同名 Cookie 排在前面时仍用本人的会话；[账号测试](../../internal/accounts/session_client_test.go)覆盖 IPv6 /64、IPv4 映射地址与规则生效前的旧会话。
 - 嵌入与 CSP：[`TestHandlerKeepsOtherOriginsFromFramingTheDesktop`](../../internal/webui/handler_test.go)覆盖桌面页面与接口的响应头；[助手 Markdown 测试](../../web/src/assistant/markdown.test.tsx)覆盖回答中的外部图片只显示为链接。
 - 入口端口：[渲染测试](../../internal/appstore/render_test.go)的 `low port` 用例覆盖应用不能占用 80。
