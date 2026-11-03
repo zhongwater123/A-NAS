@@ -1017,7 +1017,7 @@ export interface paths {
         put?: never;
         /**
          * Search one tab's engines through the built-in SearXNG, sending results as the engines answer
-         * @description The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off. The answer is a stream: nothing is sent before the first update, so these errors keep their status.
+         * @description The search text travels only in the body, so no access log records it, and it is not logged. Each account may search ten times in a row, then once every two seconds (429 too_many_searches). 403 web_search_disabled while an administrator has turned web search off, torrent_search_disabled for the torrent tab while it is off. The answer is a stream: nothing is sent before the first update, so these errors keep their status. Each engine is asked as a person would search: at its own pace whoever searches, not while its site has blocked it, and for a page after the first only if it found something on the page before. The same page again within ten minutes comes from what the engines answered, for this account only. A word that SearXNG would read as a command of its own ("!name", ":xx", "<n") is searched as text.
          */
         post: operations["searchWeb"];
         delete?: never;
@@ -5078,6 +5078,20 @@ export interface components {
                 social: string[];
                 torrents: string[];
             };
+            /** @description The engines searches leave out since their site blocked them, the first to return first. */
+            paused: components["schemas"]["WebSearchPausedEngine"][];
+        };
+        /** @description An engine left out of searches after its site blocked it: for an hour, doubled with each block in a row up to a day, until it answers again. */
+        WebSearchPausedEngine: {
+            /** @description The name the window shows. */
+            engine: string;
+            /**
+             * @description How the site blocked it: a CAPTCHA, access denied, too many requests, or a page the engine could not read, often a challenge it does not recognize.
+             * @enum {string}
+             */
+            reason: "captcha" | "denied" | "too_many" | "unreadable";
+            /** Format: date-time */
+            until: string;
         };
         WebSearchSettings: {
             enabled: boolean;
@@ -5148,7 +5162,11 @@ export interface components {
             suggestions: string[];
             /** @description The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA). */
             unresponsive: string[];
-            /** @description The tab's engines still searching; 0 in the last update. */
+            /** @description The engines this search left out because their site blocked them; all in the first update. */
+            paused: components["schemas"]["WebSearchPausedEngine"][];
+            /** @description The engines this search left out because they had been asked too often just before: each engine is asked a few times in a row, then every ten seconds, whoever searches. */
+            busy: string[];
+            /** @description The engines still searching or waiting for their turn; 0 in the last update. */
             pending: number;
         };
         WebSearchFound: {
@@ -6933,6 +6951,7 @@ export type SystemLogEntry = components['schemas']['SystemLogEntry'];
 export type SystemLogPage = components['schemas']['SystemLogPage'];
 export type WebSearchCategory = components['schemas']['WebSearchCategory'];
 export type WebSearchStatus = components['schemas']['WebSearchStatus'];
+export type WebSearchPausedEngine = components['schemas']['WebSearchPausedEngine'];
 export type WebSearchSettings = components['schemas']['WebSearchSettings'];
 export type WebSearchQuery = components['schemas']['WebSearchQuery'];
 export type WebSearchResult = components['schemas']['WebSearchResult'];

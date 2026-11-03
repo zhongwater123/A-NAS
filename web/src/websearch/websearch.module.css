@@ -279,6 +279,7 @@
   color: var(--ws-muted);
   font-size: 13px;
   line-height: 1.6;
+  white-space: pre-line;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
 }
