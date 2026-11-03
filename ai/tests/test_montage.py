@@ -40,6 +40,26 @@ def clip(path, seconds, size="640x360"):
                     f"testsrc=duration={seconds}:size={size}:rate=25", "-c:v", "libx264", path], check=True)
 
 
+def sounding(path, seconds, start):
+    """A clip with mono 44.1 kHz sound that is silent until start, then a tone."""
+    subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i",  # noqa: S607  test tool from PATH
+                    f"testsrc=duration={seconds}:size=640x360:rate=25", "-f", "lavfi", "-i",
+                    f"aevalsrc='if(gte(t,{start}),0.5*sin(2*PI*440*t),0)':s=44100:d={seconds}",
+                    "-c:v", "libx264", "-c:a", "aac", "-shortest", path], check=True)
+
+
+def sound_of(path):
+    """The audio stream's rate, channels and duration, and where its first silence ends."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",  # noqa: S607  test tool from PATH
+                          "stream=sample_rate,channels,duration", "-of", "json", path],
+                         capture_output=True, text=True, check=True).stdout
+    stream = json.loads(out)["streams"][0]
+    found = subprocess.run(["ffmpeg", "-nostdin", "-i", path, "-af", "silencedetect=noise=-40dB:d=0.1",  # noqa: S607  test tool from PATH
+                            "-f", "null", "-"], capture_output=True, text=True, check=True).stderr
+    ends = [float(line.split("silence_end: ")[1].split()[0]) for line in found.splitlines() if "silence_end" in line]
+    return int(stream["sample_rate"]), stream["channels"], float(stream["duration"]), ends
+
+
 def probe(path):
     out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",  # noqa: S607  test tool from PATH
                           "stream=width,height,codec_name:format=duration", "-of", "json", path],
@@ -66,7 +86,17 @@ class RenderTest(unittest.TestCase):
     def test_clips_seek_each_input(self):
         args = render.clip_args([("a.webm", 10, 12.5), ("b.mp4", 0, 3)], "out.mp4")
         self.assertEqual(args[args.index("a.webm") - 5:args.index("a.webm")], ["-ss", "10.000", "-t", "2.500", "-i"])
-        self.assertIn("concat=n=2:v=1:a=0[x]", args[args.index("-filter_complex") + 1])
+        graph = args[args.index("-filter_complex") + 1]
+        self.assertIn("[v0][a0][v1][a1]concat=n=2:v=1:a=1[x][s]", graph)
+        self.assertNotIn("-an", args)
+
+    def test_a_clip_without_sound_gets_silence_of_its_length(self):
+        args = render.clip_args([("a.webm", 10, 12.5), ("b.mp4", 0, 3)], "out.mp4", [False, True])
+        first, second = args[args.index("-filter_complex") + 1].split(";")[1:4:2]
+        self.assertTrue(first.startswith("anullsrc=r=48000:cl=stereo,"))
+        self.assertIn("atrim=duration=2.500", first)
+        self.assertTrue(second.startswith("[1:a]aresample=48000"))
+        self.assertIn("afade=t=out:st=2.970:d=0.030", second)
 
     @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
     def test_stills_render_landscape_and_portrait(self):
@@ -88,6 +118,18 @@ class RenderTest(unittest.TestCase):
         stream, duration = probe(render.render_clips([(wide, 1, 3.5), (tall, 0.5, 2.5), (wide, 4, 5.5)], self.out))
         self.assertEqual((stream["width"], stream["height"]), (1920, 1080))
         self.assertAlmostEqual(duration, 6.0, delta=0.15)
+
+    @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
+    def test_clips_keep_their_own_sound_aligned_and_silence_where_there_is_none(self):
+        quiet, tone = os.path.join(self.work, "quiet.mp4"), os.path.join(self.work, "tone.mp4")
+        clip(quiet, 3)
+        sounding(tone, 6, 2)
+        # The tone starts 2 s into its source: 0.5 s into the second clip, 1.5 s into the cut.
+        cut = render.render_clips([(quiet, 0, 1), (tone, 1.5, 3.5)], self.out)
+        rate, channels, seconds, ends = sound_of(cut)
+        self.assertEqual((rate, channels), (48000, 2))
+        self.assertAlmostEqual(seconds, probe(cut)[1], delta=0.1)
+        self.assertAlmostEqual(ends[0], 1.5, delta=0.05)
 
     @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
     def test_a_failed_render_leaves_nothing(self):
