@@ -63,6 +63,7 @@ leftovers() {
 }
 
 preflight() {
+  python3 "$here/gateway.py" --check-upstream "$upstream" || fail "invalid model upstream configuration"
   [[ $EUID -eq 0 ]] || fail "run as root"
   [[ "$(findmnt -n -o FSTYPE --target "$data" 2>/dev/null)" == btrfs ]] || fail "$data is not the mounted Btrfs data volume"
   grep -q ANAS_ASSISTANT_SOCKET_DIR /opt/a-nas/current/anas-host-agent ||
@@ -119,7 +120,15 @@ install_files() {
   chown -R root:root "$runtimes/spike"
   install -m 0644 "$trial/spike/anas-assistant-trial.tmpfiles" /etc/tmpfiles.d/anas-assistant-trial.conf
   systemd-tmpfiles --create /etc/tmpfiles.d/anas-assistant-trial.conf
-  sed "s/@UPSTREAM@/$upstream/" "$trial/spike/anas-assistant-trial-gateway.service" > /etc/systemd/system/anas-assistant-trial-gateway.service
+  # A full base URL can contain slashes; quote one systemd argument rather
+  # than treating it as a sed replacement or expanding unit/env specifiers.
+  python3 - "$trial/spike/anas-assistant-trial-gateway.service" "$upstream" > /etc/systemd/system/anas-assistant-trial-gateway.service <<'PY'
+import json
+import sys
+from pathlib import Path
+argument = json.dumps(sys.argv[2].replace("%", "%%").replace("$", "$$"), ensure_ascii=False)
+print(Path(sys.argv[1]).read_text().replace("@UPSTREAM@", argument), end="")
+PY
 }
 
 install_trial() {

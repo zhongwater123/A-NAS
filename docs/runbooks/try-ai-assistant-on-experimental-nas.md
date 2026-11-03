@@ -1,7 +1,7 @@
 # 在实验 NAS 上试用 AI 助手（云端模型）
 
 状态：draft
-更新时间：2026-10-27
+更新时间：2026-11-03
 
 ## 目的
 
@@ -10,6 +10,42 @@
 成功结果：成员在桌面打开“VNAS”（AI 助手），能对话、读取本人个人空间与 Shared，在自己的目录里运行命令与代码；请它改文件或复制图片时出现确认卡片，确认后由文件代理执行，旧版本进回收站；有风险的命令与每段代码先出命令卡片。
 
 正式产品中这些由 Host Agent 的类型化操作与安装器完成（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)），尚未实现；本手册用 spike 的脚本代替，限制见下。
+
+## Qwen 云端联调与后续本地接入
+
+网关接受原来的 HTTPS 主机名，也接受完整的 OpenAI 兼容 Base URL。Hermes 仍使用沙箱内的回环 `/v1` 接口和占位凭据；真实密钥只由沙箱外的网关加载。前端、定时任务、确认卡和奶蛙的情绪状态不选择模型服务商。
+
+| 配置 | Qwen 云端联调 | 本地推理服务 |
+| --- | --- | --- |
+| `SPIKE_UPSTREAM` / `ANAS_TRIAL_UPSTREAM` | 控制台提供的完整 Base URL，可含 `/compatible-mode/v1` 或代理前缀 | 网关所在网络命名空间可达的 `/v1` URL |
+| `SPIKE_MODEL` / `ANAS_TRIAL_MODEL` | 该账号实际可用的模型 ID | 本地服务实际注册的模型 ID |
+| 凭据 | 服务端私密文件；不能写进 URL、命令参数或前端 | 独立的本地服务凭据；无鉴权服务可用下述回环模式 |
+| `context_length` 等能力参数 | 按所选模型和账号验证 | 按实际模型、KV 缓存和服务配置验证，不沿用云端上限 |
+
+`SPIKE_*` 是可丢弃开发容器的参数，`ANAS_TRIAL_*` 是本手册 NAS 试用参数，两者不混用。完整 URL 中的路径前缀会替换内部 `/v1` 前缀。NAS 单元生成时将 URL 作为一个完整参数引用，不由 shell 执行，也不让 systemd 展开 URL 里的占位符。
+
+在开发机上可先检查 URL 结构，不读取密钥、不联网、不调用模型：
+
+```bash
+python3 ai/assistant-spike/gateway.py --check-upstream 'https://example.test/compatible-mode/v1'
+python3 ai/assistant-spike/gateway.py --check-upstream 'http://127.0.0.1:8000/v1'
+```
+
+上面的域名仅为离线示例。Qwen 的地域、业务空间、API 类型和模型名必须以实际控制台或代理文档为准；代理平台的密钥与模型目录也由该平台决定，不能根据模型家族猜测。禁止在 Base URL 中放用户名、密码、query 密钥或 fragment。
+
+本地服务未启用鉴权时，可以仅为**网关进程**设置 `GATEWAY_LOCAL_NO_AUTH=1`：只允许回环地址，此时不读取密钥文件，也不转发客户端的认证头；网关命令末尾的 key-file 参数可以用 `-` 占位。公网和局域网远端 HTTP 都不会因这个开关放行。这里的 `127.0.0.1` 是网关进程所在的网络命名空间；可丢弃容器内的回环不等于宿主 Mac。切回云端必须关闭该开关并配置该云端独立的密钥文件。产品不因本地推理失败而自动把数据转发云端。
+
+同协议只解决连接与传输。对每个实际模型依次验证：普通回复、单工具调用、多步工具结果回传、流式组合、时间与时区提取、无效参数拒绝、取消和重连不重复执行。先通过合成提醒与合成会议文本；原文件保存仍走已有确认卡。4B 模型可以先测试短对话、意图提取与简单任务，复杂任务的可靠性以相同用例的实测为准。
+
+离线协议检查：
+
+```bash
+python3 -m unittest discover -s ai/tests -p test_model_gateway.py -v
+```
+
+这些用例只连接本机合成服务，覆盖旧配置、Qwen 路径前缀、工具调用数据、流式响应、隐藏认证头和本地无密钥模式，不创建真实提醒，也不代表真实 Qwen 或本地模型已通过验收。需要真实调用时，先记录正确的 Base URL、模型 ID 和密钥文件位置，保持 `GATEWAY_LOG_MESSAGES=0`，仅使用合成数据；API 调通后，再按本手册原有目标核验与权限步骤开展 NAS 集成。
+
+参考：[Qwen OpenAI 兼容接口](https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope)、[vLLM 本地 OpenAI 兼容服务](https://docs.vllm.ai/en/latest/serving/online_serving/)。
 
 ## 前提与风险
 
