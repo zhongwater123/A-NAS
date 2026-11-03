@@ -20,17 +20,17 @@
 1. 在干净的开发检出中获取分支。先运行 `git status --short`，有自己的改动时先保留，不执行切换。
 
    ```sh
-   git fetch origin codex/companion-review-20261102
-   git switch --detach origin/codex/companion-review-20261102
+   git fetch origin codex/companion-personal-agent-runtime-20261103
+   git switch --detach origin/codex/companion-personal-agent-runtime-20261103
    git rev-parse HEAD
    ```
 
-2. 在该 PR 的 Checks 查看同一提交的 `Project checks`、`Go tests with the race detector`、`System test (Debian 13, systemd)` 和 `Companion protocol (Linux)`。全部通过后再进入 NAS 更新。CI 不会连接公司 NAS，也不运行真实云端模型。
-3. CI 的 `Companion preview` 页面提供以下 artifacts，保留 7 天：
+2. 当前通过 [Issue #354](https://github.com/zhongwater123/A-NAS/issues/354) 交接，暂不新建 PR。先核对 Issue 最新交接记录中的提交与本地 `git rev-parse HEAD` 一致；旧分支、旧截图和旧制品不能代替该提交的验证。现有 CI 由 PR 或 main 推送触发，单独更新测试分支和 Issue 不会运行 CI。开发机可先运行 `ANAS_QDRANT_REQUIRED=1 make check`、`make race-test` 与桌宠协议检查，保留日志；进入 NAS 更新前仍须在可丢弃的 Linux 环境完成系统测试。缺少这一项时只在独立 Fake 预览中试玩，不替换 NAS 在线服务。
+3. 目前没有本轮 PR 的自动制品。后续若创建 PR，须查看同一提交的 `Project checks`、`Go tests with the race detector`、`System test (Debian 13, systemd)` 和 `Companion protocol (Linux)`；全部通过后才进入 NAS 更新。`Companion preview` 的 artifacts 保留 7 天：
    - `companion-desktop-windows-x64`：Windows 桌宠 ZIP；
    - `companion-desktop-macos-arm64`：Apple 芯片 Mac 桌宠 ZIP；
    - `companion-protocol-evidence`：两个入口、原确认卡和保存预览的模拟协议证据。
-   主 CI 的 `companion-linux-amd64` 包含嵌入 Web 的产品二进制和构建校验记录，只供核对候选制品；它不是包含模型、运行环境和 systemd 单元的完整安装包，不能手工替换在线服务。
+   主 CI 的 `companion-linux-amd64` 包含嵌入 Web 的产品二进制和构建校验记录，只供核对候选制品；它不是包含模型、运行环境和 systemd 单元的完整安装包，不能手工替换在线服务。已关闭的 PR #346 的制品仅对应旧提交。CI 不会连接公司 NAS，也不运行真实云端模型。
 4. NAS 更新使用 `scripts/deploy-dev.ps1 -StageOnly` 暂存该提交，再按[实验存储主手册](provision-v1.0.1-experimental-storage.md#安装系统服务)安装、核对与回滚。不要省略 `-StageOnly`，也不要复用旧的用户级预览激活路径。核对新版本包含 `/api/v1/companion` 和“伙伴小窝”；保留上一 release 的标识与制品校验记录。
 
 没有桌宠 artifact 时，可以在开发机使用仓库指定的 Node/npm 从源码构建：

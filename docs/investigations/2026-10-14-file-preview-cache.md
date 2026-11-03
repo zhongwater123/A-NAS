@@ -1,7 +1,7 @@
 # 视频缩略图重访重复解码与队列阻塞
 
 状态：fixed，待实机验收
-更新时间：2026-10-27
+更新时间：2026-11-03
 
 ## 症状与最小复现
 
@@ -35,6 +35,14 @@ go test ./internal/filepreview -run 'TestDirectoryRevisit|TestCachedPreview' -co
 - HTTP 回归验证 304 无正文、旧 ETag 返回 200、无会话和无权用户携带 ETag 仍被拒绝、删除后携带 ETag 返回 404。
 - 验证结果：`make check` 完整通过（前端 34 个文件 / 300 项测试）；上述竞态回归通过；一次性 Debian 13 systemd 容器系统测试 144 项 PASS、`failures=0`。新增系统用例在生成视频缩略图后停止 FFmpeg Worker socket、重启产品服务，验证缓存仍返回相同图片及 304。首次系统测试在安装器身份探针处未获取到启动日志，尚未执行预览用例；未修改安装器或服务配置，原配置重跑通过。本次未操作实验 NAS。
 - 可复现：`go test -race ./internal/filepreview ./internal/httpapi -run 'Preview|DirectoryRevisit|DiskCache' -count=1`；完整门禁 `make check`。
+
+## Linux 开发机的时间戳测试准备
+
+2026-11-03 在独立 Debian 13 ARM64 开发虚拟机中运行完整门禁，两个 SMB 修改回归失败：`same-size SMB edit with restored mtime reused stale preview` 和 `SMB revision: calls=2`。单独重复 20 次，两项共失败 40 次；同一文件系统的独立写入探针中，100 次快速同尺寸修改并恢复 mtime，ctime 均未变化。文件时间以纳秒表示，不代表每次连续写入都能得到不同的时间戳。
+
+两项测试要验证的是 ctime 变化后的缓存失效。准备过程现在重复相同的同尺寸写入并恢复原 mtime，直到实际观察到 ctime 变化，最多等待两秒；同时检查 inode、大小和 mtime 均未改变，未达到条件就明确失败。修改后两项各重复 100 次通过。生产缓存键及原解码次数、ETag、成员隔离、撤权与删除断言保持原有含义。
+
+这一检查仍受[规格](../specs/basic-storage-and-sharing.md)定义的文件元数据版本边界约束；它没有增加每次请求对原文件全文哈希的承诺，所有版本元数据均未变化的修改不能靠该缓存键区分。
 
 ## 关联
 
