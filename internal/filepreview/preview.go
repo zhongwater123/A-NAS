@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
+
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
@@ -45,10 +47,11 @@ type Image struct {
 	ETag        string
 }
 
-type cached struct {
-	image Image
-	used  uint64
-}
+// The previews kept in memory, on top of the disk cache.
+const (
+	memoryMaxEntries = 64
+	memoryMaxBytes   = 32 << 20
+)
 
 type Service struct {
 	source Source
@@ -56,13 +59,17 @@ type Service struct {
 	mu     sync.Mutex
 	disk   *diskCache
 	gate   chan struct{}
-	cache  map[string]cached
-	bytes  int
-	clock  uint64
+	// cache holds recent previews, least recently used first; bytes counts
+	// their data.
+	cache *simplelru.LRU[string, Image]
+	bytes int
 }
 
 func New(source Source, worker ffmpegworker.Worker) *Service {
-	return &Service{source: source, worker: worker, gate: make(chan struct{}, 1), cache: make(map[string]cached)}
+	s := &Service{source: source, worker: worker, gate: make(chan struct{}, 1)}
+	// NewLRU fails only for a size that is not positive.
+	s.cache, _ = simplelru.NewLRU(memoryMaxEntries, func(_ string, image Image) { s.bytes -= len(image.Data) })
+	return s
 }
 
 func kind(name string) string {
@@ -236,12 +243,9 @@ func validImage(result Image) bool {
 
 func (s *Service) lookup(key string) (Image, bool) {
 	s.mu.Lock()
-	s.clock++
-	if hit, ok := s.cache[key]; ok {
-		hit.used = s.clock
-		s.cache[key] = hit
+	if hit, ok := s.cache.Get(key); ok {
 		s.mu.Unlock()
-		return hit.image, true
+		return hit, true
 	}
 	s.mu.Unlock()
 	if s.disk != nil {
@@ -260,22 +264,12 @@ func (s *Service) lookup(key string) (Image, bool) {
 func (s *Service) remember(key string, result Image) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.clock++
-	if old, ok := s.cache[key]; ok {
-		s.bytes -= len(old.image.Data)
-		delete(s.cache, key)
-	}
-	for len(s.cache) >= 64 || s.bytes+len(result.Data) > 32<<20 {
-		oldestKey := ""
-		oldest := s.clock
-		for key, item := range s.cache {
-			if item.used < oldest {
-				oldestKey, oldest = key, item.used
-			}
+	s.cache.Remove(key)
+	for s.cache.Len() >= memoryMaxEntries || s.bytes+len(result.Data) > memoryMaxBytes {
+		if _, _, ok := s.cache.RemoveOldest(); !ok {
+			break
 		}
-		s.bytes -= len(s.cache[oldestKey].image.Data)
-		delete(s.cache, oldestKey)
 	}
-	s.cache[key] = cached{image: result, used: s.clock}
+	s.cache.Add(key, result)
 	s.bytes += len(result.Data)
 }
