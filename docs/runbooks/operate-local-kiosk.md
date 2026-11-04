@@ -1,7 +1,7 @@
 # 运行实验 NAS 本地控制台
 
 状态：implemented, display and pointer verified; dedicated account verified on the Experimental NAS (2026-10-28); hardware video decoding verified on the Experimental NAS (2026-10-29); confinement and VT recovery pending
-更新时间：2026-10-29
+更新时间：2026-11-04
 
 ## 目的
 
@@ -31,11 +31,11 @@
 
 屏保视频不在 release 中，见[屏保视频](#屏保视频)。
 
-本地控制台用到的 Debian 软件包（cage、Chromium、中文字体、VA-API 驱动等）由 release 中的 `a-nas-console` 包声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）；它依赖同一版本的 `a-nas-host`。有本机屏幕的设备在运行安装器之前一并安装，安装器发现装着的 `a-nas-console` 不是本 release 的版本时停止：
+本地控制台用到的 Debian 软件包（cage、Chromium、中文字体、VA-API 驱动等）由 release 中的 `a-nas-console` 包声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）；它依赖同一版本的 `a-nas-host`。有本机屏幕的设备在运行安装器之前一并安装，安装器发现装着的 `a-nas-console` 不是本 release 的版本时停止（带 `--allow-downgrades` 的原因见[实机配置手册](provision-v1.0.1-experimental-storage.md#安装系统服务)）：
 
 ```bash
 source_release=/home/anas-dev/apps/a-nas/releases/<release ID>
-apt install --no-install-recommends "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
+apt install --no-install-recommends --allow-downgrades "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
 dpkg-query -W a-nas-host a-nas-console
 systemctl status display-manager.service --no-pager || true
 ```
