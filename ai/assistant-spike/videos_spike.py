@@ -28,7 +28,8 @@ socket, which any member of a-nas-users may use, known by the caller's UID.
                   "seconds": n, "style": s,       or, with seconds, add up to them, frames
                                                   every half second setting the ends
                                                   (moments.Index.fill)
-                  "edges": true}                  and a cut at either end trims it (EDGE)
+                  "edges": true,                  and a cut at either end trims it (EDGE)
+                  "look": false}                  no review by the vision model
                                                  plan's problems with 422
 
 With --vision, the URL of a local vision model (montage.look), the cards carry
@@ -331,7 +332,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(422, {"error": "剪辑计划不合规则", "problems": error.problems})
         files = {v: os.path.join(self.server.videos, meta["file"]) for v, meta in self.server.index.videos.items()}
         review = []
-        if self.server.vision is not None:
+        # An experiment (#350): "look": false cuts the plan without the vision model's review.
+        if self.server.vision is not None and body.get("look") is not False:
             try:
                 review = [self.look(files[v], v, start, end, segment["shows"])
                           for (v, start, end), segment in zip(clips, segments, strict=True)]
@@ -343,10 +345,14 @@ class Handler(BaseHTTPRequestHandler):
             if refused:
                 return self.reply(422, {"error": "出片前看了画面，有的段不切题", "problems": refused, "review": review})
             clips = [(v, r["start"], r["end"]) for (v, _s, _e), r in zip(clips, review, strict=True)]
-            if spans is not None:
-                review = [r | {"planned": [s["start"], s["end"]]} for s, r in zip(segments, review, strict=True)]
-            if edged:
-                review = [r | {"edged": e} for r, e in zip(review, edged, strict=True)]
+        elif spans is not None:
+            # Not looked at: each segment as cut, so that the plan kept beside the cut has its seconds.
+            review = [{"start": start, "end": end, "frames": 0, "fit": 0, "seen": "", "usable": True}
+                      for _v, start, end in clips]
+        if review and spans is not None:
+            review = [r | {"planned": [s["start"], s["end"]]} for s, r in zip(segments, review, strict=True)]
+        if review and edged:
+            review = [r | {"edged": e} for r, e in zip(review, edged, strict=True)]
         work = tempfile.mkdtemp(dir=self.server.work)
         try:
             path = render.render_clips([(files[v], start, end) for v, start, end in clips], work)

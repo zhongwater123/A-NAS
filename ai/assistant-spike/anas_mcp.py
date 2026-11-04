@@ -397,6 +397,8 @@ FILL = LOCATE is not None and os.environ.get("ANAS_SPIKE_FILL") == "1"
 # ANAS_SPIKE_EDGES=1: before the frames are looked at, a cut near either end of a segment,
 # found at the source's frame rate, trims it (videos_spike.edges).
 EDGES = os.environ.get("ANAS_SPIKE_EDGES") == "1"
+# ANAS_SPIKE_NO_LOOK=1: the cut is made without the vision model looking at its frames first.
+NO_LOOK = os.environ.get("ANAS_SPIKE_NO_LOOK") == "1"
 SPAN = LOCATE or os.environ.get("ANAS_SPIKE_SPAN") or None
 RETRIEVED_ONLY = os.environ.get("ANAS_SPIKE_RETRIEVED_ONLY") == "1" or (SPAN is not None and not LOCATE)
 # The cards search_video_moments returned this session, each with the probe it scored best on.
@@ -554,6 +556,8 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
                 body |= {"seconds": seconds, "style": style}
         if EDGES:
             body["edges"] = True
+        if NO_LOOK:
+            body["look"] = False
         try:
             status, kind, raw, review = video_moments("/montage", body)
         except PhotoError as error:
