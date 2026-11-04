@@ -85,6 +85,25 @@ if [[ $EUID -ne 0 || "$(cat /proc/1/comm)" != systemd || ! -f /.dockerenv ]]; th
   exit 2
 fi
 
+# Register before initialization so setup and first-install failures leave logs too.
+failures=0
+# A failed run's container is removed with it, so this prints what systemd
+# reported and keeps the whole journal, the unit list and the installers' and
+# services' logs for the outer script to copy out. They go to /var/tmp:
+# /tmp is a tmpfs here, which docker cp does not see.
+diagnose() {
+  local status=$? logs=/var/tmp/system-test-logs
+  ((status != 0 || failures != 0)) || return 0
+  echo "=== the run failed: exit status $status, $failures failed checks"
+  systemctl --failed --no-pager || true
+  journalctl -b --no-pager -p warning -n 60 || true
+  mkdir -p "$logs"
+  journalctl -b --no-pager >"$logs/journal.txt" 2>&1 || true
+  systemctl list-units --all --no-pager >"$logs/units.txt" 2>&1 || true
+  cp /tmp/*.log "$logs/" 2>/dev/null || true
+}
+trap diagnose EXIT
+
 # A Debian host's mounts are shared, so mounting or unmounting the data volume
 # reaches the services' private mount namespaces; the container starts with
 # private mounts, which would hide that.
@@ -307,7 +326,6 @@ db.commit()
 PY
 systemctl start anas-api
 
-failures=0
 # What quiet and denied keep out of the output, shown when their check fails.
 hidden=/tmp/system-test-hidden.log
 # check NAME COMMAND...: runs the command and records the outcome. A failure
@@ -334,26 +352,13 @@ quiet() { "$@" >>"$hidden" 2>&1; }
 # running UNIT: the unit has a main process; otherwise prints its status.
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 running() {
-  [[ "$(systemctl show -p MainPID --value "$1")" != 0 ]] && return
+  local pid
+  if pid=$(systemctl show -p MainPID --value "$1") && [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+    return 0
+  fi
   systemctl status --no-pager --lines=10 "$1"
   return 1
 }
-# A failed run's container is removed with it, so this prints what systemd
-# reported and keeps the whole journal, the unit list and the installers' and
-# services' logs for the outer script to copy out. They go to /var/tmp:
-# /tmp is a tmpfs here, which docker cp does not see.
-diagnose() {
-  local status=$? logs=/var/tmp/system-test-logs
-  ((status != 0 || failures != 0)) || return 0
-  echo "=== the run failed: exit status $status, $failures failed checks"
-  systemctl --failed --no-pager || true
-  journalctl -b --no-pager -p warning -n 60 || true
-  mkdir -p "$logs"
-  journalctl -b --no-pager >"$logs/journal.txt" 2>&1 || true
-  systemctl list-units --all --no-pager >"$logs/units.txt" 2>&1 || true
-  cp /tmp/*.log "$logs/" 2>/dev/null || true
-}
-trap diagnose EXIT
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 journal_has() { journalctl -u "$1" --since "$2" -o cat --no-pager | grep -Fq "$3"; }
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
