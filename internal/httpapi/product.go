@@ -182,6 +182,11 @@ func (h *productHandler) handleCreateSession(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	session, err := h.authenticate(r, request.Username, request.Password, request.LocalConsole)
+	if throttled, ok := errors.AsType[*accounts.ThrottledError](err); ok {
+		w.Header().Set("Retry-After", throttled.RetryAfterSeconds())
+		httpjson.WriteError(w, http.StatusTooManyRequests, "too_many_attempts", "too many failed sign-ins from this client; retry later")
+		return
+	}
 	if err != nil {
 		httpjson.WriteError(w, http.StatusUnauthorized, "invalid_credentials", "username or password is invalid")
 		return

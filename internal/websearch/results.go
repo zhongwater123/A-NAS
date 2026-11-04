@@ -49,6 +49,27 @@ type RawResult struct {
 	Leech         any     `json:"leech"`
 	Filesize      any     `json:"filesize"`
 	MagnetLink    string  `json:"magnetlink"`
+	// Template is the layout SearXNG's own page would give the result, which
+	// names a paper, a package or a place.
+	Template string `json:"template"`
+	// A paper's (searx/result_types/paper.py): authors are a list.
+	Authors   any    `json:"authors"`
+	Journal   string `json:"journal"`
+	Publisher string `json:"publisher"`
+	DOI       string `json:"doi"`
+	PDFURL    string `json:"pdf_url"`
+	// A package's: engines write the version and popularity as text or as a
+	// number.
+	Version       any    `json:"version"`
+	Maintainer    string `json:"maintainer"`
+	LicenseName   string `json:"license_name"`
+	Popularity    any    `json:"popularity"`
+	Homepage      string `json:"homepage"`
+	SourceCodeURL string `json:"source_code_url"`
+	// A place's: coordinates as text or numbers, and the parts of its address.
+	Latitude  any            `json:"latitude"`
+	Longitude any            `json:"longitude"`
+	Address   map[string]any `json:"address"`
 }
 
 // RawInfobox is a SearXNG infobox, such as an encyclopedia's summary.
@@ -86,7 +107,38 @@ type Result struct {
 	SizeBytes *int64 `json:"sizeBytes,omitempty"`
 	Seeders   *int   `json:"seeders,omitempty"`
 	Leechers  *int   `json:"leechers,omitempty"`
+	// Kind is a paper, a package or a place, which the window lays out with
+	// their own details; other results have none and follow their tab.
+	Kind Kind `json:"kind,omitempty"`
+	// A paper's authors, journal (or else publisher), DOI and PDF.
+	Authors []string `json:"authors,omitempty"`
+	Journal string   `json:"journal,omitempty"`
+	DOI     string   `json:"doi,omitempty"`
+	PDF     string   `json:"pdf,omitempty"`
+	// A package's version, license and popularity as its site writes it, its
+	// homepage and source; its maintainer is Author.
+	Version    string `json:"version,omitempty"`
+	License    string `json:"license,omitempty"`
+	Popularity string `json:"popularity,omitempty"`
+	Homepage   string `json:"homepage,omitempty"`
+	SourceCode string `json:"sourceCode,omitempty"`
+	// A place's address and coordinates.
+	Address   string   `json:"address,omitempty"`
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
 }
+
+// Kind is a result with details of its own.
+type Kind string
+
+const (
+	KindPaper   Kind = "paper"
+	KindPackage Kind = "package"
+	KindPlace   Kind = "place"
+)
+
+// kinds are the SearXNG templates of the results with details of their own.
+var kinds = map[string]Kind{"paper.html": KindPaper, "packages.html": KindPackage, "map.html": KindPlace}
 
 // Answer is a direct answer, such as a calculation.
 type Answer struct {
@@ -215,10 +267,120 @@ func (s *Service) result(category Category, raw RawResult) (Result, bool) {
 		}
 		result.SizeBytes = size(raw.Filesize)
 		result.Seeders, result.Leechers = count(raw.Seed), count(raw.Leech)
+	case Music:
+		// A track plays where its first engine found it.
+		result.Thumbnail = s.thumbnail(firstNonEmpty(raw.Thumbnail, raw.ImgSrc))
+		result.DurationSeconds = duration(raw.Length)
+		if len(result.Engines) > 0 {
+			result.Platform = result.Engines[0]
+		}
 	default:
 		result.Thumbnail = s.thumbnail(firstNonEmpty(raw.Thumbnail, raw.ImgSrc))
 	}
+	result.details(raw)
 	return result, true
+}
+
+// details fills in a paper's, a package's or a place's own details.
+func (result *Result) details(raw RawResult) {
+	result.Kind = kinds[raw.Template]
+	switch result.Kind {
+	case KindPaper:
+		for _, author := range texts(raw.Authors) {
+			if author = strings.TrimSpace(author); author != "" {
+				result.Authors = append(result.Authors, author)
+			}
+		}
+		result.Journal = strings.TrimSpace(firstNonEmpty(raw.Journal, raw.Publisher))
+		result.DOI = strings.TrimSpace(raw.DOI)
+		if webAddress(raw.PDFURL) {
+			result.PDF = raw.PDFURL
+		}
+		// Crossref writes abstracts in JATS markup.
+		result.Content = htmlText(raw.Content)
+	case KindPackage:
+		result.Version, result.Popularity = text(raw.Version), text(raw.Popularity)
+		result.License = strings.TrimSpace(raw.LicenseName)
+		if result.Author == "" {
+			result.Author = strings.TrimSpace(raw.Maintainer)
+		}
+		if webAddress(raw.Homepage) {
+			result.Homepage = raw.Homepage
+		}
+		if webAddress(raw.SourceCodeURL) {
+			result.SourceCode = raw.SourceCodeURL
+		}
+	case KindPlace:
+		result.Address = address(raw.Address)
+		latitude, longitude := number(raw.Latitude), number(raw.Longitude)
+		if latitude != nil && longitude != nil && math.Abs(*latitude) <= 90 && math.Abs(*longitude) <= 180 {
+			result.Latitude, result.Longitude = latitude, longitude
+		}
+	}
+}
+
+// addressParts are the parts of a place's address SearXNG's map results
+// carry, in the order its own page writes them.
+var addressParts = []string{"road", "house_number", "locality", "postcode", "country"}
+
+func address(parts map[string]any) string {
+	var written []string
+	for _, part := range addressParts {
+		if value := text(parts[part]); value != "" {
+			written = append(written, value)
+		}
+	}
+	return strings.Join(written, ", ")
+}
+
+// text reads a value an engine writes as text or as a number.
+func text(value any) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	}
+	return ""
+}
+
+// texts reads a list of texts, or one text.
+func texts(value any) []string {
+	switch v := value.(type) {
+	case []any:
+		var list []string
+		for _, item := range v {
+			if t := text(item); t != "" {
+				list = append(list, t)
+			}
+		}
+		return list
+	case string:
+		if t := strings.TrimSpace(v); t != "" {
+			return []string{t}
+		}
+	}
+	return nil
+}
+
+func number(value any) *float64 {
+	var n float64
+	switch v := value.(type) {
+	case float64:
+		n = v
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil {
+			return nil
+		}
+		n = parsed
+	default:
+		return nil
+	}
+	if math.IsNaN(n) || math.IsInf(n, 0) {
+		return nil
+	}
+	return &n
 }
 
 // interleave lets the tab's engines take turns, A→B→C→A, each with its own

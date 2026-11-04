@@ -180,6 +180,7 @@ fi
 stage() {
   install -d "$1"
   install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh /src/scripts/install-ffmpeg-units.sh "$1/"
+  install -m 0644 /src/build/a-nas-host.deb /src/build/a-nas-console.deb "$1/"
   for unit in anas-api anas-host-agent anas-photos anas-shares anas-family; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
   done
@@ -273,6 +274,38 @@ cp -p /var/lib/a-nas/app-identities.json /tmp/legacy-app-identities.json
 
 iface=$(ip -o -4 route show to default | awk '{print $5; exit}')
 ip=$(ip -o -4 addr show dev "$iface" | awk '{split($4, a, "/"); print a[1]; exit}')
+# The installer runs only on the release's own a-nas-host (ADR 0031): without
+# it, or with another version, it stops before changing anything.
+refused_without_host_package() {
+  local status=0
+  bash /src/scripts/install-v1.0.1-system-services.sh "$release" system-test "$iface" >/tmp/refused.log 2>&1 || status=$?
+  [[ $status -eq 3 && ! -e /opt/a-nas/current ]] && grep -Fq "apt install $release/a-nas-host.deb" /tmp/refused.log
+}
+if ! refused_without_host_package; then
+  tail -n 5 /tmp/refused.log
+  echo "FAIL the installer refuses a release without its host package"
+  exit 1
+fi
+echo "PASS the installer refuses a release without its host package"
+# dpkg, not apt: it fails instead of downloading a dependency the image lacks,
+# and apt 3's --no-download cannot install a local package at all.
+other=/tmp/other-host-package
+dpkg-deb --raw-extract "$release/a-nas-host.deb" "$other"
+sed -i 's/^Version: .*/Version: 0~other/' "$other/DEBIAN/control"
+dpkg-deb --root-owner-group --build "$other" "$other.deb" >/dev/null
+if ! dpkg -i "$other.deb" >/tmp/host-package.log 2>&1 || ! refused_without_host_package; then
+  tail -n 5 /tmp/host-package.log /tmp/refused.log
+  echo "FAIL the installer refuses another version of its host package"
+  exit 1
+fi
+echo "PASS the installer refuses another version of its host package"
+if ! dpkg -i "$release/a-nas-host.deb" >/tmp/host-package.log 2>&1; then
+  tail -n 20 /tmp/host-package.log
+  echo "FAIL the release's host package installs"
+  exit 1
+fi
+echo "PASS the release's host package installs"
+
 installed_at=$(date '+%Y-%m-%d %H:%M:%S')
 if ! bash /src/scripts/install-v1.0.1-system-services.sh "$release" system-test "$iface" >/tmp/install.log 2>&1; then
   tail -30 /tmp/install.log
@@ -282,9 +315,12 @@ fi
 
 # Record the volume as storage initialization would have, so the Product
 # Service's volume guard accepts it, then restart it to load the record. It
-# creates its databases before it answers, so wait for that first.
+# creates its databases before it answers, so wait for that first. The share
+# service restarts after it, as the installer orders them: a restarted Product
+# Service gives the share bridge a new generation, and until the share
+# service's next check notices, every new share fails as withdrawn.
 for _ in $(seq 1 100); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break; sleep 0.2; done
-systemctl stop anas-api
+systemctl stop anas-shares anas-api
 setpriv --reuid=a-nas --regid=a-nas --init-groups python3 - "$data_disk" "$volume_uuid" <<'PY'
 import json, sqlite3, sys
 disk, uuid = sys.argv[1], sys.argv[2]
@@ -297,7 +333,7 @@ db = sqlite3.connect("/var/lib/a-nas/storage.db")
 db.execute("INSERT INTO storage_plans(id, document_json, updated_at) VALUES(?, ?, ?)", (plan["id"], json.dumps(plan), now))
 db.commit()
 PY
-systemctl start anas-api
+systemctl start anas-api anas-shares
 
 failures=0
 # check NAME COMMAND...: runs the command and records the outcome.

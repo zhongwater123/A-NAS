@@ -43,7 +43,7 @@ func TestStorageMutationsRejectUnauthorizedActorsBeforeAccessingState(t *testing
 
 func TestMemberCannotChangeAnAdministratorsStoragePlan(t *testing.T) {
 	executor := &recordingExecutor{}
-	service := storage.NewService(fake.NewHealthy(), executor, storage.Options{})
+	service := newService(t, fake.NewHealthy(), executor, storage.Options{})
 	t.Cleanup(service.Close)
 	member := accounts.User{ID: "member", Role: accounts.RoleMember, Status: accounts.UserStatusActive}
 	plan, err := service.PlanVolume(t.Context(), storageAdministrator, []string{"disk:fake-data-01"}, "")

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Builds the Debian 13 image for scripts/system-test.sh: systemd as PID 1 plus
-# the host commands the installer and Host Agent need. It is assembled with
+# what the a-nas-host package depends on (ADR 0031). The system test installs
+# the release's a-nas-host on it with dpkg, which fails when a dependency the
+# package lists is missing. It is assembled with
 # debootstrap from deb.debian.org, so it works where Docker Hub is not
 # reachable; BUILDER is any local Debian image that can install debootstrap.
 #
@@ -9,13 +11,16 @@ set -euo pipefail
 
 image=${1:-anas-systemd:trixie}
 builder=${2:-debian:bookworm}
-packages=systemd,systemd-sysv,dbus,udev,acl,btrfs-progs,parted,smartmontools,samba,smbclient,
-packages+=curl,ca-certificates,procps,util-linux,passwd,iproute2,jq,python3,caddy,libegl1,libgles2,ffmpeg,heif-thumbnailer,libheif-plugin-libde265,libheif-examples,libheif-plugin-x265,
-# The text reader's llama-server links these (docs/architecture/photo-ocr.md).
-packages+=libgomp1,libssl3t64,
-# The AI assistant sandbox (ai/assistant-spike): PID 1 in its PID namespace, the
-# model socket bridge, the file search Hermes runs, and YAML edits in its tests.
-packages+=tini,socat,ripgrep,yq
+repo=$(cd "$(dirname "$0")/.." && pwd)
+packages=systemd,systemd-sysv,dbus,
+packages+=$(sed -n 's/^Depends: //p' "$repo/deploy/debian/a-nas-host/DEBIAN/control" | tr -d ' '),
+# What a-nas-host suggests and the system test turns on: the LAN entry (Caddy)
+# and the AI assistant sandbox (ai/assistant-spike): PID 1 in its PID
+# namespace, the model socket bridge and the file search Hermes runs.
+packages+=caddy,tini,socat,ripgrep,
+# Only for the tests: SMB and HTTP clients, JSON and YAML edits, HEIC encoding
+# for fixtures, and chattr, which scripts/root-integration-test.sh needs.
+packages+=smbclient,curl,ca-certificates,procps,util-linux,passwd,iproute2,jq,yq,libheif-examples,libheif-plugin-x265,e2fsprogs
 
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT

@@ -190,8 +190,8 @@ func TestPreviewCacheIsBounded(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(service.cache) != 64 || service.bytes > 32<<20 {
-		t.Fatalf("cache=%d bytes=%d", len(service.cache), service.bytes)
+	if service.cache.Len() != 64 || service.bytes > 32<<20 {
+		t.Fatalf("cache=%d bytes=%d", service.cache.Len(), service.bytes)
 	}
 	calls := worker.calls
 	if _, err := service.Render(context.Background(), accounts.User{}, "69", 320); err != nil {

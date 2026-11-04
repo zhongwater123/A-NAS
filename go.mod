@@ -4,6 +4,10 @@ go 1.27.0
 
 toolchain go1.27.3
 
+// npm packages can carry Go code (flatted does), which ./... would otherwise
+// build, vet, lint and test as part of this module.
+ignore node_modules
+
 require (
 	github.com/abema/go-mp4 v1.7.4
 	github.com/caarlos0/env/v11 v11.4.1

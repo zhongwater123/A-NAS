@@ -1,0 +1,11 @@
+Package: a-nas-console
+Version: @VERSION@
+Architecture: all
+Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
+Section: admin
+Priority: optional
+Depends: a-nas-host (= @VERSION@), cage, chromium, chromium-sandbox, chromium-l10n, fonts-noto-cjk, wlr-randr, libinput-tools, intel-media-va-driver | mesa-va-drivers, vainfo
+Description: the local console of an A-NAS device
+ The Wayland kiosk that shows the Web desktop on the device's own screen
+ (docs/adr/0005), and a VA-API driver for Chromium's hardware video decoding:
+ Intel's unless AMD's (mesa-va-drivers) is installed already.

@@ -17,6 +17,16 @@ import (
 // rename gives one file or folder a new name inside its folder.
 type rename struct{ id, parent, from, to string }
 
+// Why the media center refuses a rename. Each wraps the error the callers
+// already test for, and the media API answers each with a code of its own,
+// which the Web words (#222).
+var (
+	ErrInvalidName       = fmt.Errorf("%w: the name is empty or starts with a dot", ErrInvalid)
+	ErrVideoExtension    = fmt.Errorf("%w: a video's file name must keep a video extension", ErrInvalid)
+	ErrShowWithoutFolder = fmt.Errorf("%w: the show has no folder of its own and no episode file carries its title", ErrInvalid)
+	ErrShowTitleTaken    = fmt.Errorf("%w: another show in the library has this title", files.ErrConflict)
+)
+
 // validName accepts a name the media center may give a file or folder.
 // Every rename goes through files.Service.Move, which applies the file
 // manager's rules for new names (#222); the media center only adds that a
@@ -86,10 +96,10 @@ func (s *Service) RenameVideo(ctx context.Context, actor accounts.User, videoID,
 	}
 	name = strings.TrimSpace(name)
 	if !validName(name) {
-		return VideoDetail{}, fmt.Errorf("%w: 文件名无效", ErrInvalid)
+		return VideoDetail{}, ErrInvalidName
 	}
 	if !isVideo(name) {
-		return VideoDetail{}, fmt.Errorf("%w: 文件名需要保留视频扩展名", ErrInvalid)
+		return VideoDetail{}, ErrVideoExtension
 	}
 	if name == video.FileName {
 		return s.Video(ctx, actor, videoID)
@@ -214,7 +224,7 @@ func (s *Service) RenameShow(ctx context.Context, actor accounts.User, showID, n
 	}
 	name = strings.TrimSpace(name)
 	if !validName(name) {
-		return ShowDetail{}, fmt.Errorf("%w: 名称无效", ErrInvalid)
+		return ShowDetail{}, ErrInvalidName
 	}
 	folder, own, err := s.showFolder(ctx, actor, show)
 	if err != nil {
@@ -226,7 +236,7 @@ func (s *Service) RenameShow(ctx context.Context, actor accounts.User, showID, n
 		newTitle, _ = folderTitle(name)
 	}
 	if newTitle == "" {
-		return ShowDetail{}, fmt.Errorf("%w: 名称无效", ErrInvalid)
+		return ShowDetail{}, ErrInvalidName
 	}
 	// The scan finds shows by their normalized title. Another show holding
 	// it is a conflict whatever the files say, so it is checked before any
@@ -240,7 +250,7 @@ func (s *Service) RenameShow(ctx context.Context, actor accounts.User, showID, n
 	err = s.store.db.QueryRowContext(ctx, "SELECT id FROM shows WHERE library_id = ? AND key = ? AND id <> ?", show.LibraryID, key, showID).Scan(&holder)
 	switch {
 	case err == nil:
-		return ShowDetail{}, fmt.Errorf("%w: 媒体库里已有同名的剧", files.ErrConflict)
+		return ShowDetail{}, ErrShowTitleTaken
 	case !errors.Is(err, sql.ErrNoRows):
 		return ShowDetail{}, err
 	}
@@ -284,7 +294,7 @@ func (s *Service) RenameShow(ctx context.Context, actor accounts.User, showID, n
 	}
 	if len(renames) == 0 {
 		if !own {
-			return ShowDetail{}, fmt.Errorf("%w: 这部剧没有自己的文件夹，文件名里也没有剧名，请分别重命名各集的片源", ErrInvalid)
+			return ShowDetail{}, ErrShowWithoutFolder
 		}
 		return s.Show(ctx, actor, showID)
 	}

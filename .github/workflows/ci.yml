@@ -202,7 +202,7 @@ jobs:
       # week every run tests against the same packages.
       - name: Name the cached Debian 13 systemd image
         id: image
-        run: echo "key=system-test-image-$(date -u +%G-W%V)-${{ hashFiles('scripts/build-system-test-image.sh') }}" >> "$GITHUB_OUTPUT"
+        run: echo "key=system-test-image-$(date -u +%G-W%V)-${{ hashFiles('scripts/build-system-test-image.sh', 'deploy/debian/a-nas-host/DEBIAN/control') }}" >> "$GITHUB_OUTPUT"
 
       - name: Restore the Debian 13 systemd image
         id: image-cache
@@ -231,6 +231,11 @@ jobs:
 
       - name: Load the Btrfs module for the test's data volume
         run: sudo modprobe btrfs
+
+      # Real accounts, ACLs, Samba and loop-mounted Btrfs as root: the
+      # permission matrix, mirror conversion and the share ACL matrix (#190).
+      - name: Run the root integration tests in disposable containers
+        run: scripts/root-integration-test.sh anas-systemd:trixie
 
       # The release stages the pinned Qdrant tarball as deploy-dev.ps1 does.
       - name: Restore the pinned Qdrant server

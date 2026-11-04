@@ -29,7 +29,7 @@ func TestShareRoutesRequireSessionAndCSRFPreserveOriginalIdentity(t *testing.T) 
 		if !ok || actor.ID != owner.ID || accounts.SessionToken(r.Context()) == "" {
 			t.Errorf("lost original caller: %+v", actor)
 		}
-		w.WriteHeader(204)
+		w.WriteHeader(http.StatusNoContent)
 	})
 	// The probe stands in for the share API, so the exchanges are not the
 	// specified ones.
@@ -37,11 +37,11 @@ func TestShareRoutesRequireSessionAndCSRFPreserveOriginalIdentity(t *testing.T) 
 	account := signIn(t, handler, "owner", "correct horse battery staple")
 	for _, path := range []string{"/api/v1/shares", "/api/v1/shares/id/messages", "/api/v1/shares/id/save", "/api/v1/shares/id/revoke"} {
 		anonymous := httptest.NewRecorder()
-		handler.ServeHTTP(anonymous, httptest.NewRequest("POST", path, nil))
+		handler.ServeHTTP(anonymous, httptest.NewRequest(http.MethodPost, path, nil))
 		if anonymous.Code != 401 {
 			t.Fatalf("anonymous %s: %d", path, anonymous.Code)
 		}
-		request := httptest.NewRequest("POST", path, nil)
+		request := httptest.NewRequest(http.MethodPost, path, nil)
 		request.AddCookie(account.cookie)
 		forged := httptest.NewRecorder()
 		handler.ServeHTTP(forged, request)

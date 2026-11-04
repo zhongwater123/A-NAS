@@ -68,7 +68,7 @@ func TestLivePhotoAPIExportRangeAndPolicy(t *testing.T) {
 			t.Fatalf("%s leaked: %d", path, got.Code)
 		}
 	}
-	request := httptest.NewRequest("GET", base+"/motion", nil)
+	request := httptest.NewRequest(http.MethodGet, base+"/motion", nil)
 	request.Header.Set("Range", "bytes=8-15")
 	request = request.WithContext(photosapi.WithPrincipal(request.Context(), alice))
 	response := httptest.NewRecorder()

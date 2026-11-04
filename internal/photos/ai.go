@@ -8,8 +8,9 @@ import (
 	"errors"
 	"math"
 	"os"
-	"strings"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // Local AI turns each original's upright thumbnail into a vector through the
@@ -344,7 +345,7 @@ FROM (
          IFNULL(j.state = 'failed' OR t.state = 'failed' OR (? AND k.state = 'failed') OR (? AND g.state = 'failed')
            OR (? AND p.state = 'failed'), 0) AS failed
   FROM (SELECT v.object_id, `+inPeopleLibrary("v.object_id")+` AS people FROM (SELECT DISTINCT object_id FROM assets
-        WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(libraries)), ",")+`)
+        WHERE trashed_at IS NULL AND library_id IN (`+sqlitedb.Placeholders(len(libraries))+`)
           AND `+inLocalAI("assets.object_id")+`) v) a
   LEFT JOIN embeddings e ON e.object_id = a.object_id AND e.derivation = ?
   LEFT JOIN detections d ON d.object_id = a.object_id AND d.derivation = ?

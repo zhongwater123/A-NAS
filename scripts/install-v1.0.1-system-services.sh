@@ -88,26 +88,24 @@ for file in anas-search-system.service anas-search-dns-system.service anas-searc
     exit 2
   fi
 done
-# Media and file previews run Debian's FFmpeg / libheif in the worker sandbox.
-for command in btrfs mkfs.btrfs wipefs parted partprobe udevadm smartctl smbpasswd testparm smbcontrol setfacl getfacl python3 systemd-sysusers ffmpeg ffprobe heif-thumbnailer; do
-  if ! command -v "$command" >/dev/null; then
-    echo "missing required host command: $command" >&2
-    exit 3
+# The Debian packages the release runs on come with its a-nas-host (ADR 0031),
+# which dpkg keeps whole: the release only checks that this one is installed,
+# and that a local console's a-nas-console, when installed, is this release's.
+for package in a-nas-host a-nas-console; do
+  if [[ ! -f "$source_release/$package.deb" ]]; then
+    echo "missing host package: $source_release/$package.deb" >&2
+    exit 2
   fi
 done
-# Each vector index is reached through systemd's socket proxy.
-if [[ ! -x /usr/lib/systemd/systemd-socket-proxyd ]]; then
-  echo "missing required host command: /usr/lib/systemd/systemd-socket-proxyd" >&2
-  exit 3
-fi
-# MediaPipe links these even on the CPU (Debian packages libegl1 and libgles2),
-# and llama-server these (libgomp1, libssl3t64). The cache is read once: with
-# pipefail, grep -q leaving early can end ldconfig with SIGPIPE, which then
-# reads as a missing library.
-host_libraries=$(ldconfig -p)
-for library in libEGL.so.1 libGLESv2.so.2 libgomp.so.1 libssl.so.3 libcrypto.so.3; do
-  if ! grep -Fq "$library (" <<<"$host_libraries"; then
-    echo "missing required host library: $library" >&2
+host_package_version=$(dpkg-deb --field "$source_release/a-nas-host.deb" Version)
+for package in a-nas-host a-nas-console; do
+  installed=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' "$package" 2>/dev/null || true)
+  # A device without a screen has no a-nas-console, or only its configuration.
+  if [[ "$package" == a-nas-console ]]; then
+    case "${installed%% *}" in '' | not-installed | config-files) continue ;; esac
+  fi
+  if [[ "$installed" != "installed $host_package_version" ]]; then
+    echo "this release needs $package $host_package_version; install it first: apt install $source_release/$package.deb" >&2
     exit 3
   fi
 done
@@ -404,6 +402,8 @@ install -o root -g root -m 0755 "$source_release/anas-host-agent" "$temporary/an
 install -o root -g root -m 0755 "$source_release/install-screensavers.sh" "$temporary/install-screensavers.sh"
 install -o root -g root -m 0755 "$source_release/install-ffmpeg-units.sh" "$temporary/install-ffmpeg-units.sh"
 install -o root -g root -m 0755 "$source_release/kiosk-launcher" "$temporary/kiosk-launcher"
+# A rollback to this release installs its host packages again.
+install -o root -g root -m 0644 "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb" "$temporary/"
 install -d -o root -g root -m 0755 "$temporary/ai" "$temporary/ai/anas_ai"
 install -o root -g root -m 0644 "$source_release"/ai/anas_ai/*.py "$temporary/ai/anas_ai/"
 install -o root -g root -m 0644 "$source_release/ai/runtime.json" "$temporary/ai/"
