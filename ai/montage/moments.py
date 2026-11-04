@@ -86,8 +86,12 @@ FLOOR = 0.8
 # film shows twice five minutes apart.
 SCENES = "scenes.json"
 SCENE_ALIKE = 0.92
-# A scene gives a plan at most this many segments, and a plan does not go back to one.
+# A scene gives a plan at most this many segments, and a plan does not go back to one;
+# segments paced 快 count apart, up to FAST_SEGMENTS, so that a fight can be a run of cuts.
 SCENE_SEGMENTS = 3
+FAST_SEGMENTS = 6
+# A segment's pace, as the planner gives it: (shortest, aimed at, longest) seconds (#350).
+PACES = {"慢": (4.0, 5.0, 6.0), "中": (3.0, 3.5, 4.5), "快": (1.5, 2.0, 2.5)}
 # The cards a plan picks can run at least this share of its target, so that the program has
 # room to set each segment's seconds (#350).
 MARGIN = 1.1
@@ -401,12 +405,13 @@ class Index:
         return clips
 
     def _scene_problems(self, segments: list[dict]) -> list[str]:
-        problems, left, seen, count = [], set(), None, {}
+        problems, left, seen, count, fast = [], set(), None, {}, {}
         for n, segment in enumerate(segments, 1):
             scene = self.scene_of.get(segment.get("card")) if isinstance(segment, dict) else None
             if scene is None:
                 continue
-            count[scene] = count.get(scene, 0) + 1
+            tally = fast if segment.get("pace") == "快" else count
+            tally[scene] = tally.get(scene, 0) + 1
             if scene != seen:
                 if scene in left:
                     problems.append(f"第 {n} 段回到了已经离开的场景{scene}：同一场景的段要连在一起")
@@ -415,6 +420,8 @@ class Index:
                 seen = scene
         problems += [f"场景{scene}用了 {k} 段，一个场景最多 {SCENE_SEGMENTS} 段" for scene, k in count.items()
                      if k > SCENE_SEGMENTS]
+        problems += [f"场景{scene}用了 {k} 段快节奏，一个场景最多 {FAST_SEGMENTS} 段快节奏" for scene, k in fast.items()
+                     if k > FAST_SEGMENTS]
         return problems
 
     def scene_groups(self, vectors: dict) -> tuple[dict, dict]:
@@ -592,12 +599,14 @@ class Index:
             a, b = min(a, k), max(b, k)
         return seconds(a, b)
 
-    def fill(self, segments: list, mode: str, target: float, at, caps=None, mins=None) -> tuple[list, list[str]]:
+    def fill(self, segments: list, mode: str, target: float, at, caps=None, mins=None,
+             shares=None) -> tuple[list, list[str]]:
         """Seconds for segments, each (card id, probe vector), set by the program to add up to
         target (#350). A segment starts as the window of its card the probe matches best, clear
         of flat windows and of the segments before it. Then, STEP at a time, the segment end whose
-        next step is best grows, first among the segments short of an even share of target and
-        then among all, until the cut reaches target; over it, the worst end steps go.
+        next step is best grows, first among the segments short of their share of target
+        (shares[n], an even share by default) and then among all, until the cut reaches target;
+        over it, the worst end steps go.
         A step is judged on its middle frame, at(video, seconds) as a unit vector, against the
         segment's own peak frame: by how little its probe score falls from the peak's ("probe"),
         or by its likeness to the peak picture ("frame"), so that segments whose probes score on
@@ -664,10 +673,10 @@ class Index:
         # Each segment first grows towards an even share of the target, its best end first, so
         # that a still picture, whose score hardly falls, does not take the others' time; what
         # is left of the target then goes to the best steps of any.
-        share = target / max(1, sum(1 for s in spans if s))
+        shares = shares or [target / max(1, sum(1 for s in spans if s))] * len(segments)
         for even in (True, False):
             while sum(map(length, range(len(spans)))) < target - STEP / 2:
-                steps = [step for n in range(len(spans)) if spans[n] and (not even or length(n) < share - STEP / 2)
+                steps = [step for n in range(len(spans)) if spans[n] and (not even or length(n) < shares[n] - STEP / 2)
                          for step in grown(n)]
                 if not steps:
                     break

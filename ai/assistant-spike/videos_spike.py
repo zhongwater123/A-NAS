@@ -85,6 +85,10 @@ RECALL = 20
 # a dark film keeps low: 0.12 for a cut 0.25 misses) trims the segment to its side of it.
 EDGE = 0.6
 EDGE_CUT = 0.08
+# A cut this close outside an end is scanned for too, and an end is kept this far from a cut:
+# from 24 frames a second to 30, an end 3 ms before a cut took one frame of the next shot.
+GUARD = 0.1
+CLEAR = 0.05
 MEMBERS = "a-nas-users"
 
 
@@ -127,15 +131,17 @@ def _embedded(ai_socket: str, request: dict, fd: int | None = None) -> np.ndarra
 
 
 def edges(path: str, start, end):
-    """start and end, each moved inside a cut found within EDGE of it, at the source's frame rate."""
+    """start and end, each moved inside a cut found within EDGE inside it or GUARD outside it,
+    at the source's frame rate, and kept CLEAR of it."""
     if not all(isinstance(t, (int, float)) and not isinstance(t, bool) for t in (start, end)) or end - start <= 2 * EDGE:
         return start, end
-    cuts = [start + t for t in scene_cuts(path, start, EDGE)]
+    at = max(0.0, start - GUARD)
+    cuts = [at + t for t in scene_cuts(path, at, start + EDGE - at)]
     if cuts:
-        start = math.ceil(max(cuts) * 100) / 100
-    cuts = [end - EDGE + t for t in scene_cuts(path, end - EDGE, EDGE)]
+        start = max(start, math.ceil((max(cuts) + CLEAR) * 100) / 100)
+    cuts = [end - EDGE + t for t in scene_cuts(path, end - EDGE, EDGE + GUARD)]
     if cuts:
-        end = math.floor(min(cuts) * 100) / 100
+        end = min(end, math.floor((min(cuts) - CLEAR) * 100) / 100)
     return start, end
 
 
@@ -404,7 +410,9 @@ class Handler(BaseHTTPRequestHandler):
     def filled(self, segments, mode, target, style, margin=False):
         """The segments with start and end set to add up to target (Index.fill): frames every
         half second, embedded as they are needed, set the ends; a trailer's last quarter is
-        held to moments.TAIL_MIN-TAIL_MAX a segment. With margin, the cards must be able to run
+        held to moments.TAIL_MIN-TAIL_MAX a segment; or, when the segments say their pace
+        (moments.PACES), each is held to its pace's range and aims at its pace's seconds, all
+        scaled to target. With margin, the cards must be able to run
         moments.MARGIN times target first. And the problems of those it cannot set."""
         index, cards = self.server.index, {c["id"] for c in self.server.index.cards}
         problems = [f"第 {n} 段要有检索结果里的 card 和找到它的 probe" for n, s in enumerate(segments, 1)
@@ -415,10 +423,25 @@ class Handler(BaseHTTPRequestHandler):
         for segment in segments:
             if segment["probe"] not in self.server.probes:
                 self.server.probes[segment["probe"]] = embed_query(self.server.ai_socket, segment["probe"])
-        tail = len(segments) - max(1, round(len(segments) / 4))
-        trailer = [style == "预告片" and n >= tail for n in range(len(segments))]
-        caps = [moments.TAIL_MAX if t else moments.CLIP_MAX for t in trailer]
-        mins = [moments.TAIL_MIN if t else moments.SEGMENT_MIN for t in trailer]
+        paces = [s.get("pace") for s in segments]
+        shares = None
+        if any(paces):
+            wrong = [f"第 {n} 段的 pace 要是{'、'.join(moments.PACES)}之一" for n, p in enumerate(paces, 1)
+                     if p not in moments.PACES]
+            if wrong:
+                return [], wrong
+            mins, aims, caps = (list(column) for column in zip(*(moments.PACES[p] for p in paces), strict=True))
+            if sum(caps) < target - 1 or sum(mins) > target + 1:
+                return [], [f"按这些段的 pace，成片在 {sum(mins):g}–{sum(caps):g} 秒之间，目标是 {target:g} 秒："
+                            + ("加几段，或把几段改慢" if sum(caps) < target - 1 else "删几段，或把几段改快")]
+            # Each segment's share: its pace's aim, all scaled to the target and kept to the pace.
+            scale = target / sum(aims)
+            shares = [min(cap, max(low, aim * scale)) for low, aim, cap in zip(mins, aims, caps, strict=True)]
+        else:
+            tail = len(segments) - max(1, round(len(segments) / 4))
+            trailer = [style == "预告片" and n >= tail for n in range(len(segments))]
+            caps = [moments.TAIL_MAX if t else moments.CLIP_MAX for t in trailer]
+            mins = [moments.TAIL_MIN if t else moments.SEGMENT_MIN for t in trailer]
         if margin:
             cards = {c["id"]: c for c in index.cards}
             most = sum(min(index.usable(cards[s["card"]]), cap) for s, cap in zip(segments, caps, strict=True))
@@ -426,7 +449,7 @@ class Handler(BaseHTTPRequestHandler):
                 return [], [f"所选卡片最多只能剪 {most:g} 秒，要有目标 {target:g} 秒的 {moments.MARGIN:g} 倍"
                             f"（{moments.MARGIN * target:g} 秒）程序才有余量定每段的长短：再加几段，或换可剪更长的卡片"]
         spans, problems = index.fill([(s["card"], self.server.probes[s["probe"]]) for s in segments], mode, target,
-                                     self.frame, caps, mins)
+                                     self.frame, caps, mins, shares)
         return [s | {"start": span[0], "end": span[1]} for s, span in zip(segments, spans, strict=True) if span], problems
 
     def frame(self, video, seconds):

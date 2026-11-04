@@ -416,14 +416,28 @@ FLOWING = ("排段时注意前后衔接：相邻两段尽量是同一场景或�
 SCENES = FLOW and os.environ.get("ANAS_SPIKE_SCENES") == "1"
 SCENE_LINE = ("每行的“场景N”是这张卡片所在的场景，结果的 scenes 写每个场景是什么地方、有几张卡片：同一场景是同一个地方，"
               "片头片尾的字幕、标志和演职员表也各自成一个场景；" if SCENES else "")
-SCENE_RULES = ("同一场景的段必须连在一起，离开一个场景后不再回去；一个场景最多 3 段，用其余的段交代别的场景；"
+SCENE_RULES = ("同一场景的段必须连在一起，离开一个场景后不再回去；一个场景最多 3 段，pace 为快的段另算，最多 6 段；"
                "字幕、标志和演职员表的场景不用，除非成员要。" if SCENES else "")
 # ANAS_SPIKE_LENGTHS=1 with FILL: each catalog line says the most seconds its card can run, and
 # a plan's cards must be able to run moments.MARGIN times the cut's seconds.
 LENGTHS = FILL and os.environ.get("ANAS_SPIKE_LENGTHS") == "1"
 LENGTH_LINE = "“可剪 X 秒”是这张卡片一段最多能剪多长；" if LENGTHS else ""
-LENGTH_RULE = ("选卡片时把各卡的“可剪”秒数加起来，至少要到 seconds 的 1.1 倍，程序才有余量定每段的长短，不够会被退回；"
-               "预告片最后四分之一的段每段最多按 4 秒算。" if LENGTHS else "")
+LENGTH_RULE = ("选卡片时把各卡的“可剪”秒数加起来（超过这段 pace 上限的按上限算），至少要到 seconds 的 1.1 倍，"
+               "程序才有余量定每段的长短，不够会被退回；可剪秒数比这段 pace 的下限还短的卡片，换一个慢一点的 pace 或换卡片。"
+               if LENGTHS else "")
+# What the tools say that no longer holds once the program sets the seconds (FILL), no search is
+# needed (LOCATE) or no frames are looked at (NO_LOOK), left out in those modes (#350).
+CATALOG_STEPS = ("读完先在回复里写一条故事线：按指令要的效果，把成片要有的段落按播放顺序列出来，"
+                 if LOCATE else "读完先在回复里写一条故事线，再检索：按指令要的效果，把成片要有的段落按播放顺序列出来，")
+SEARCH_STEP = ("" if LOCATE else "然后按故事线写 search_video_moments 的检索词，每段要的画面各写一条，段落之间的过渡画面也算；"
+               "库里没有的不要硬找。")
+SKIPPING = ("skipped：考虑过但没用的卡片，想说明的列几张 {card, why}，why 一句话，不超过 80 个字；不列就给空列表。" if LOCATE else
+            "skipped：检索结果里每一张没用上的卡片各一项 {card, why}，why 用一句话写为什么不用；直接从目录取卡片时只列考虑过但没用的卡片，"
+            "card 写具体的卡片 id，不写通配或整条视频"
+            "（例如“描述是城市俯瞰，没有城堡”“flaws 有抖动”“和第 2 段同组”），不超过 80 个字，随成片存档供复盘；没有就给空列表。")
+LENGTH_SAYS = ("不为凑时长放进不切题的片段，开场和铺垫镜头也要切题；" if FILL else
+               "成片多长由故事线和切题的素材决定，素材少就短，不为凑时长放进不切题的片段，"
+               "开场和铺垫镜头也要切题；成员明确说了时长时才按成员说的剪；")
 # ANAS_SPIKE_NO_LOOK=1: the cut is made without the vision model looking at its frames first.
 NO_LOOK = os.environ.get("ANAS_SPIKE_NO_LOOK") == "1"
 SPAN = LOCATE or os.environ.get("ANAS_SPIKE_SPAN") or None
@@ -434,12 +448,16 @@ FROM_CATALOG = ("剪辑计划只能用 search_video_moments 返回过的卡片�
                 "目录里看中的卡片要先检索到才能用。" if RETRIEVED_ONLY else
                 "剪辑计划可以直接用目录里的卡片，不必为拿资料再检索。")
 SEGMENT = (
+    "每段是 {card, shows, pace, reason}，不写 start、end：card 是目录里的卡片 id；入点出点由程序定：从这张卡片里最符合 shows 的 2 秒开始，"
+    "在这张卡片和画面相同的相邻部分里扩展，不越出镜头，不和别的段重叠。pace 是这段的节奏，定这段大约多长："
+    "慢 4–6 秒（交代地点、铺垫情绪、悬念收尾），中 3–4.5 秒（交代人物和情节），快 1.5–2.5 秒（冲突、打斗、追逐，可以几段连着快切）；"
+    "程序按各段的 pace 分配长短，再一起缩放到 seconds。段数和节奏由你定：过渡场景 1–2 段就够，不必每个场景都用满；"
+    "按你定的节奏凑不到 seconds 时会退回，说明差多少。"
+    if FILL else
     "每段是 {card, shows, reason}，不写 start、end：card 是 list_video_contents 或 search_video_moments 里的卡片 id，"
     "入点出点由程序定，从这张卡片里最符合 shows 的 2 秒往两边扩展，"
     + ("后面的秒数与 shows 的分数相差不到 0.02 才扩展" if LOCATE == "probe" else "后面的画面与那 2 秒相似才扩展") +
     "，最长 6 秒，不越出镜头，不和前面的段重叠，所以每段 2–6 秒；"
-    + ("每段多长由程序按 seconds 分配：先取每段最符合的 2 秒，再每次把最符合的一端扩 0.5 秒，直到总长到 seconds，"
-       "所以段数决定节奏，不必为凑时长加段；" if FILL else "")
     if LOCATE else
     "每段是 {card, shows, reason}，不写 start、end：card 是 search_video_moments 返回过的卡片 id，"
     "入点出点由程序定，从这张卡片最符合找到它的那条检索词的 2 秒往两边扩展，"
@@ -463,7 +481,7 @@ TELLING = ("向成员介绍片段时只说你在图里和出片前核对看到�
 # The member picks one, or the model judges it from the instruction; only that one goes to the model.
 STYLES = {
     "预告片": "前半段交代人物、地点和处境，按故事线走；后半段不必按时间顺序，挑最有悬念、最有冲击力的画面，越往后越紧；"
-              "最后一段用整支片子里最有悬念或最有冲击力的画面收尾，不交代结局；片头片尾字幕、演职员表不用。",
+              "最后一段用整支片子里最有悬念或最有冲击力的画面收尾；片头片尾字幕、演职员表不用。",
     "旅行": "按时间或路线走；开头用一个能交代地点的全景；中间每处地方挑最有代表性的画面，远景、人和细节穿插；"
             "结尾落在一个安静、有余味的画面上，如日落、远景、离开的背影。",
     "回顾": "按主题或时间分成几组，每组挑最好的几个画面，同一组里由远到近或由静到动；"
@@ -474,9 +492,8 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
     @server.tool(annotations=READ_ONLY, structured_output=False, description=(
         "列出测试视频库里有什么，剪辑前先调用一次。按视频列出每张镜头卡片，按时间先后，" + CATALOG_LINE +
         "描述、光线和亮点是本机视觉模型看卡片的三帧写的，可能看错；" + CATALOG_SPAN + SCENE_LINE + LENGTH_LINE +
-        "读完先在回复里写一条故事线，再检索：按指令要的效果，把成片要有的段落按播放顺序列出来，" + STORY +
-        "只放能讲进这条故事线的内容，和它搭不上的不用放。然后按故事线写 search_video_moments 的检索词，"
-        "每段要的画面各写一条，段落之间的过渡画面也算；库里没有的不要硬找。" + FROM_CATALOG +
+        CATALOG_STEPS + STORY +
+        "只放能讲进这条故事线的内容，和它搭不上的不用放。" + SEARCH_STEP + FROM_CATALOG +
         "videos：只列这些视频，可省略。"
         "style：成片的体裁，" + "、".join(STYLES) + "之一；成员说了体裁就照说的传，没说就按指令判断，判断不出就不传。"
         "结果的 style_rules 是这个体裁的剪法（结构、怎么收尾、节奏），写故事线和排段时照着做，并在 make_montage 里传同一个 style。"))
@@ -551,18 +568,15 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
                  structured_output=False, description=(
         "按剪辑计划把视频片段剪成一段 1920×1080、30 fps 的 MP4，每段带原片同一区间的原声（不加配乐和字幕），存进助手目录的“视频”文件夹，返回文件路径与时长。"
         "segments：按播放顺序排列，" + SEGMENT +
-        "成片总长不设上限。" + SHOWS + "reason 用一句话写这段属于故事线的哪一段、为什么选它，随成片存档。"
-        "skipped：检索结果里每一张没用上的卡片各一项 {card, why}，why 用一句话写为什么不用；直接从目录取卡片时只列考虑过但没用的卡片，"
-        "card 写具体的卡片 id，不写通配或整条视频"
-        "（例如“描述是城市俯瞰，没有城堡”“flaws 有抖动”“和第 2 段同组”），不超过 80 个字，随成片存档供复盘；没有就给空列表。"
+        + ("" if FILL else "成片总长不设上限。") + SHOWS + "reason 用一句话写这段属于故事线的哪一段、为什么选它，随成片存档。"
+        + SKIPPING +
         "按故事线排段：故事线是骨架，每段挑最有看点的画面，不必把每一步都交代；不必每个检索主题都用上，和故事线搭不上的整个不用；"
         + FLOWING + SCENE_RULES + LENGTH_RULE +
-        "同一场景相邻的几张卡片可以连着用，只有 group 相同才算重复画面。成片多长由故事线和切题的素材决定，素材少就短，不为凑时长放进不切题的片段，"
-        "开场和铺垫镜头也要切题；成员明确说了时长时才按成员说的剪；"
+        "同一场景相邻的几张卡片可以连着用，只有 group 相同才算重复画面。" + LENGTH_SAYS + ("" if NO_LOOK else
         "出片前本机视觉模型每 0.5 秒看一帧，核对是否呈现 shows：没有连续 1.5 秒符合的段整次退回，说明画面实际是什么，"
         "请换一张卡片或删掉这段；其余各段收窄到符合的那一截再剪，结果的 trimmed 列出收窄了哪些段。"
         "被退回或收窄的段，看到的画面若符合指令的另一部分（例如找城堡时退回的一段其实是老街），"
-        "可以把它的 shows 改成那一部分、换到合适的位置再用，不必扔掉。"
+        "可以把它的 shows 改成那一部分、换到合适的位置再用，不必扔掉。") +
         "计划不合规则时整次拒绝并逐条说明是哪一段、哪一条，照着改了再调用。成片只在助手目录里；"
         "成员要放进个人空间时，再用 submit_changes 的 copy 提交。"
         "style：按哪个体裁剪的，和 list_video_contents 传的一样，随成片存档；没定体裁就不传。"

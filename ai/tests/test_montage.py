@@ -467,6 +467,23 @@ class MomentsTest(unittest.TestCase):
         self.assertEqual(self.index.usable(cards["07-2-0"]), 0)  # its only window is flat
         self.assertIn("07-1-0 可剪6秒", self.index.catalog(times=False, lengths=True)["videos"]["07"]["cards"][1])
 
+    def test_fill_grows_each_segment_to_its_own_share_first(self):
+        # Paced slow and fast: the slow one takes 6 s first, though both score alike all along.
+        market, other_side = np.eye(8, dtype=np.float32)[0], np.eye(8, dtype=np.float32)[2] * 0.6 + self.castle * 0.8
+        spans, _problems = self.index.fill([("07-0-0", market), ("07-1-1", other_side)], "probe", 8, self.at,
+                                           caps=[6, 2.5], mins=[4, 1.5], shares=[6, 2])
+        self.assertEqual([e - s for s, e in spans], [6, 2])
+
+    def test_fast_segments_of_a_scene_count_apart(self):
+        self.index.scene_of = {"07-0-0": 1, "07-1-0": 2, "07-1-1": 2}
+        fast = [{"card": "07-1-0", "start": 8 + 2 * k, "end": 10 + 2 * k, "pace": "快"} for k in range(5)]
+        self.index.check([{"card": "07-0-0", "start": 0, "end": 4, "pace": "慢"}, *fast,
+                          {"card": "07-1-1", "start": 30, "end": 34, "pace": "中"}], scenes=True)
+        with self.assertRaises(moments.PlanError) as refused:
+            self.index.check([{"card": "07-1-1", "start": 28 + 3 * k, "end": 31 + 3 * k, "pace": "中"} for k in range(4)],
+                             scenes=True)
+        self.assertEqual(refused.exception.problems, ["场景2用了 4 段，一个场景最多 3 段"])
+
     def test_fill_keeps_each_segment_to_its_minimum(self):
         market = np.eye(8, dtype=np.float32)[0]
         spans, _problems = self.index.fill([("07-0-0", market), ("07-1-0", self.castle)], "probe", 3, self.at,
