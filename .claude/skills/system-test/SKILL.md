@@ -40,4 +40,5 @@ echo "PASS: $(grep -c '^PASS' "$dst.system-test.log" || true)"; grep '^FAIL' "$d
 ## 结果
 
 - 脚本逐项打印 `PASS <名称>` 或 `FAIL <名称>`，有任何失败即以非零退出。在报告或 PR 中写明 PASS 的项数与每一条 FAIL。
+- `FAIL` 下一行的 `ran:` 是展开参数后执行的命令，`test` 比较的实际值就在其中；`quiet` 与 `denied` 隐藏的输出，失败时以 `|` 开头打印最后 20 行。有失败时，脚本最后打印失败的单元与日志中的警告，并把整个 journal、单元列表、安装器与各服务的日志放进检出中的 `build/system-test-logs/`。CI 失败时这个目录作为 `system-test-logs` 制品上传。
 - 测试被强行中断时，用 `docker ps -a --filter name=anas-system-test-` 找出残留的容器，只删除这些。
