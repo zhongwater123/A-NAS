@@ -18,8 +18,9 @@ socket, which any member of a-nas-users may use, known by the caller's UID.
                   "lights": [...],                only cards of these lights (look.LIGHTS),
                   "words": [...],                 only cards whose caption or highlight holds one,
                   "when": [{"is", "not"}]}        only over windows closer to is than to not
-  POST /catalog  {"videos": [...]}               every card as a line of seconds, light,
-                                                  caption and highlight, to write probes from
+  POST /catalog  {"videos": [...],               every card as a line of seconds, light,
+                  "times": false}                 caption and highlight, to write probes from;
+                                                  without times, no seconds (#350)
   POST /montage  {"segments": [...],             the cut as video/mp4, or the
                   "skipped": [{card, why}],       (cards left out, checked when given)
                   "span": "probe" | "frame",      an experiment (#350): no start or end, but
@@ -201,7 +202,7 @@ class Handler(BaseHTTPRequestHandler):
             if videos is not None and (not isinstance(videos, list) or not videos
                                        or not all(v in self.server.index.videos for v in videos)):
                 return self.reply(400, {"error": "videos 要是库里的视频编号列表"})
-            return self.reply(200, self.server.index.catalog(videos))
+            return self.reply(200, self.server.index.catalog(videos, times=body.get("times") is not False))
         if self.path == "/montage":
             return self.montage(body)
         return self.reply(404, {"error": "没有这个接口"})
@@ -395,8 +396,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def filled(self, segments, mode, target, style):
         """The segments with start and end set to add up to target (Index.fill): frames every
-        half second, embedded as they are needed, set the ends; a trailer's last third is
-        held to moments.TAIL_MAX a segment. And the problems of those it cannot set."""
+        half second, embedded as they are needed, set the ends; a trailer's last quarter is
+        held to moments.TAIL_MIN-TAIL_MAX a segment. And the problems of those it cannot set."""
         index, cards = self.server.index, {c["id"] for c in self.server.index.cards}
         problems = [f"第 {n} 段要有检索结果里的 card 和找到它的 probe" for n, s in enumerate(segments, 1)
                     if not isinstance(s, dict) or s.get("card") not in cards or not isinstance(s.get("probe"), str)
@@ -406,10 +407,12 @@ class Handler(BaseHTTPRequestHandler):
         for segment in segments:
             if segment["probe"] not in self.server.probes:
                 self.server.probes[segment["probe"]] = embed_query(self.server.ai_socket, segment["probe"])
-        tail = len(segments) - len(segments) // 3
-        caps = [moments.TAIL_MAX if style == "预告片" and n >= tail else moments.CLIP_MAX for n in range(len(segments))]
+        tail = len(segments) - max(1, round(len(segments) / 4))
+        trailer = [style == "预告片" and n >= tail for n in range(len(segments))]
+        caps = [moments.TAIL_MAX if t else moments.CLIP_MAX for t in trailer]
+        mins = [moments.TAIL_MIN if t else moments.SEGMENT_MIN for t in trailer]
         spans, problems = index.fill([(s["card"], self.server.probes[s["probe"]]) for s in segments], mode, target,
-                                     self.frame, caps)
+                                     self.frame, caps, mins)
         return [s | {"start": span[0], "end": span[1]} for s, span in zip(segments, spans, strict=True) if span], problems
 
     def frame(self, video, seconds):

@@ -257,6 +257,8 @@ class MomentsTest(unittest.TestCase):
         self.assertEqual(self.index.catalog()["videos"]["07"]["cards"][1],
                          "07-1-0 8–28 秒（镜头 8–48） 晴天 山上的城堡（亮点：塔楼） 毛病：抖动")
         self.assertEqual(self.index.catalog(["08"]), {"videos": {}})
+        self.assertEqual(self.index.catalog(times=False)["videos"]["07"]["cards"][1],
+                         "07-1-0 晴天 山上的城堡（亮点：塔楼） 毛病：抖动")
 
     def test_search_ranks_cards_and_leaves_out_flat_frames(self):
         found = self.index.search({"城堡": self.castle}, limit=10)
@@ -407,10 +409,19 @@ class MomentsTest(unittest.TestCase):
         spans, _problems = self.index.fill([("07-1-1", other_side)], "frame", 30, self.at)
         self.assertEqual(spans, [(28, 34)])
 
-    def test_fill_moves_an_end_inside_speech_to_the_next_pause(self):
+    def test_fill_moves_an_end_inside_speech_to_the_nearest_pause(self):
         self.index.words = {"07": [(9.0, 9.6), (9.7, 10.4)]}
         spans, _problems = self.index.fill([("07-1-0", self.castle)], "probe", 2, self.at)
-        self.assertEqual(spans, [(8, 10.55)])
+        self.assertEqual(spans, [(8, 10.55)])  # after the line: no pause inside it
+        self.index.words = {"07": [(9.0, 9.4), (9.8, 10.5)]}
+        spans, _problems = self.index.fill([("07-1-0", self.castle)], "probe", 2, self.at)
+        self.assertEqual(spans, [(8, 9.6)])  # the pause in the line is closer than its end
+
+    def test_fill_keeps_each_segment_to_its_minimum(self):
+        market = np.eye(8, dtype=np.float32)[0]
+        spans, _problems = self.index.fill([("07-0-0", market), ("07-1-0", self.castle)], "probe", 3, self.at,
+                                           mins=[1.5, 2.5])
+        self.assertEqual([e - s for s, e in spans], [1.5, 2.5])
 
     def test_search_keeps_to_windows_meeting_a_condition(self):
         # The castle seen from the other side (28-48 s) leans to basis 2; asking for that

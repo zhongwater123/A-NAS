@@ -14,10 +14,11 @@
 # ANAS_SPIKE_SPAN=probe|frame too: a plan of retrieved cards only, its seconds set by the service;
 # ANAS_SPIKE_LOCATE=probe|frame: the seconds set from each segment's shows, no retrieval needed;
 # ANAS_SPIKE_FILL=1 too: to add up to the seconds the plan asks for; ANAS_SPIKE_EDGES=1: segments
-# trimmed to a cut near either end; ANAS_SPIKE_NO_LOOK=1: no review by the vision model (anas_mcp.py).
+# trimmed to a cut near either end; ANAS_SPIKE_NO_LOOK=1: no review by the vision model;
+# ANAS_SPIKE_FLOW=1: a catalog without seconds and a plan kept to one scene at a time (anas_mcp.py).
 set -euo pipefail
 member=${1:-alice}
-exec docker exec -i -e ANAS_SPIKE_CARD_PICTURES -e ANAS_SPIKE_CARD_SCREEN -e ANAS_SPIKE_RETRIEVED_ONLY -e ANAS_SPIKE_SPAN -e ANAS_SPIKE_LOCATE -e ANAS_SPIKE_FILL -e ANAS_SPIKE_EDGES -e ANAS_SPIKE_NO_LOOK "${HERMES_SPIKE_NAME:-hermes-spike-sbx}" bash -c '
+exec docker exec -i -e ANAS_SPIKE_CARD_PICTURES -e ANAS_SPIKE_CARD_SCREEN -e ANAS_SPIKE_RETRIEVED_ONLY -e ANAS_SPIKE_SPAN -e ANAS_SPIKE_LOCATE -e ANAS_SPIKE_FILL -e ANAS_SPIKE_EDGES -e ANAS_SPIKE_NO_LOOK -e ANAS_SPIKE_FLOW "${HERMES_SPIKE_NAME:-hermes-spike-sbx}" bash -c '
   member=$1 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
   "$py" /spike/serve_client.py "$member" ready >/dev/null
   setsid "$py" /spike/serve_client.py "$member" chat "SLEEP 600" >/dev/null 2>&1 </dev/null &

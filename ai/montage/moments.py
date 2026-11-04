@@ -68,8 +68,10 @@ SPANS = ("probe", "frame")
 SPAN_DROP = 0.02
 # Index.fill grows and shrinks segments by this much, each step judged on the frame at its middle.
 STEP = 0.5
-# A trailer's last third moves faster: its segments are at most this long.
-TAIL_MAX = 3.0
+# A trailer's last quarter moves faster: its segments run TAIL_MIN to TAIL_MAX, so that it
+# tightens without a string of two-second jumps.
+TAIL_MAX = 4.0
+TAIL_MIN = 2.5
 # A pause between words at least this long is a place to cut; an end inside speech moves
 # at most SNAP to reach one.
 PAUSE = 0.3
@@ -216,18 +218,20 @@ class Index:
                 mean += self.frames[i]
         return pieces
 
-    def catalog(self, videos=None) -> dict:
+    def catalog(self, videos=None, times=True) -> dict:
         """What the library holds, for writing a story and probes from (#326): every card of every
         video (or of videos), in time order, as one line of its seconds and its shot's, light,
         caption, highlight and flaws, enough to cut it without searching for it. Cards with no
-        caption say so; a vector alone cannot be read."""
+        caption say so; a vector alone cannot be read. Without times, the line leaves out the
+        seconds, for a planner that does not set them (#350)."""
         out = {}
         for card in self.cards:
             if videos is not None and card["video"] not in videos:
                 continue
             notes = self.notes.get(card["id"], {})
             a, b = card["shot"]
-            line = f"{card['id']} {card['start']:g}–{card['end']:g} 秒（镜头 {round(a, 2):g}–{round(b, 2):g}）"
+            line = card["id"] + (f" {card['start']:g}–{card['end']:g} 秒（镜头 {round(a, 2):g}–{round(b, 2):g}）"
+                                 if times else "")
             if notes.get("light"):
                 line += f" {notes['light']}"
             line += " " + self.captions.get(card["id"], "（没有描述）")
@@ -496,7 +500,7 @@ class Index:
             a, b = min(a, k), max(b, k)
         return seconds(a, b)
 
-    def fill(self, segments: list, mode: str, target: float, at, caps=None) -> tuple[list, list[str]]:
+    def fill(self, segments: list, mode: str, target: float, at, caps=None, mins=None) -> tuple[list, list[str]]:
         """Seconds for segments, each (card id, probe vector), set by the program to add up to
         target (#350). A segment starts as the window of its card the probe matches best, clear
         of flat windows and of the segments before it. Then, STEP at a time, the segment end whose
@@ -505,14 +509,16 @@ class Index:
         segment's own peak frame: by how little its probe score falls from the peak's ("probe"),
         or by its likeness to the peak picture ("frame"), so that segments whose probes score on
         other scales are compared fairly. Steps stay in their shot, off flat windows and the
-        other segments, and within caps[n] (CLIP_MAX by default); a segment keeps SEGMENT_MIN.
+        other segments, and within caps[n] (CLIP_MAX by default); a segment keeps mins[n]
+        (SEGMENT_MIN by default).
         An end inside speech (self.words) then moves to the nearest pause within SNAP that
-        keeps those rules, out before in; a line may take a segment SNAP past its cap, never
-        past CLIP_MAX. Returns [(start, end) or None] and the problems."""
+        keeps those rules, in or out, whichever is closer; a line may take a segment SNAP past
+        its cap, never past CLIP_MAX. Returns [(start, end) or None] and the problems."""
         if mode not in SPANS:
             raise ValueError(f"mode 要是 {'、'.join(SPANS)} 之一")
         cards = {c["id"]: c for c in self.cards}
         caps = caps or [CLIP_MAX] * len(segments)
+        mins = mins or [SEGMENT_MIN] * len(segments)
         spans, problems, peaks = [], [], []
         for n, (card_id, probe) in enumerate(segments):
             card = cards[card_id]
@@ -550,12 +556,12 @@ class Index:
         def length(n):
             return spans[n][2] - spans[n][1] if spans[n] else 0.0
 
-        # A window cut short by its shot's edge first grows to SEGMENT_MIN, however it scores.
+        # A window cut short by its shot's edge first grows to its minimum, however it scores.
         for n in range(len(spans)):
-            while spans[n] and length(n) < SEGMENT_MIN:
+            while spans[n] and length(n) < mins[n]:
                 steps = grown(n)
                 if not steps:
-                    problems.append(f"第 {n + 1} 段的 {segments[n][0]} 剪不出 {SEGMENT_MIN:g} 秒：镜头太短或被前后的段挡住")
+                    problems.append(f"第 {n + 1} 段的 {segments[n][0]} 剪不出 {mins[n]:g} 秒：镜头太短或被前后的段挡住")
                     spans[n] = None
                     break
                 _score, _n, _side, spans[n][1], spans[n][2] = max(steps)
@@ -568,7 +574,7 @@ class Index:
         while sum(map(length, range(len(spans)))) > target + STEP / 2:
             ends = []
             for n in range(len(spans)):
-                if not spans[n] or length(n) - STEP < SEGMENT_MIN:
+                if not spans[n] or length(n) - STEP < mins[n]:
                     continue
                 video, start, end = spans[n]
                 ends += [(judged(n, start + STEP / 2), n, start + STEP, end),
@@ -586,19 +592,18 @@ class Index:
             lo, hi = cards[segments[n][0]]["shot"]
             # A line may take a segment past its cap, never past CLIP_MAX.
             longest = min(caps[n] + SNAP, CLIP_MAX)
-            fits = functools.partial(self._fits, video, (lo, hi), longest, spans, n)
-            start = self._snapped(video, start, (start - SNAP, start + SNAP), lambda t, e=end, ok=fits: ok(t, e),
-                                  outward=-1)
-            end = self._snapped(video, end, (end - SNAP, end + SNAP), lambda t, s=start, ok=fits: ok(s, t), outward=1)
+            fits = functools.partial(self._fits, video, (lo, hi), (mins[n], longest), spans, n)
+            start = self._snapped(video, start, (start - SNAP, start + SNAP), lambda t, e=end, ok=fits: ok(t, e))
+            end = self._snapped(video, end, (end - SNAP, end + SNAP), lambda t, s=start, ok=fits: ok(s, t))
             spans[n] = [video, start, end]
             # Rounded inward, so that the segment stays inside its shot.
             out.append((math.ceil(start * 100) / 100, math.floor(end * 100) / 100))
         return out, problems
 
-    def _fits(self, video, shot, longest, spans, n, a, b) -> bool:
-        """Whether segment n may run a-b: inside its shot, SEGMENT_MIN to longest, clear of flat
-        windows and of the other segments."""
-        return (shot[0] <= a and b <= shot[1] and SEGMENT_MIN <= b - a <= longest
+    def _fits(self, video, shot, length, spans, n, a, b) -> bool:
+        """Whether segment n may run a-b: inside its shot, length[0] to length[1] long, clear of
+        flat windows and of the other segments."""
+        return (shot[0] <= a and b <= shot[1] and length[0] <= b - a <= length[1]
                 and not self._flat_in(video, a, b) and not self._taken(video, a, b, spans, n))
 
     def _taken(self, video, a, b, spans, skip=None) -> bool:
@@ -609,9 +614,8 @@ class Index:
     def _flat_in(self, video, a, b) -> bool:
         return any(self.flat[i] and row[0] == video and row[1] < b and a < row[2] for i, row in enumerate(self.rows))
 
-    def _snapped(self, video, t, reach, allowed, outward) -> float:
-        """t, or when it falls inside speech the nearest pause in reach that allowed(pause)
-        passes, those outward (-1 earlier, 1 later) first."""
+    def _snapped(self, video, t, reach, allowed) -> float:
+        """t, or when it falls inside speech the nearest pause in reach that allowed(pause) passes."""
         words = sorted(self.words.get(video, []))
         if not any(a + 0.05 < t < b - 0.05 for a, b in words) and not any(
                 b <= t <= words[k + 1][0] and words[k + 1][0] - b < PAUSE for k, (_a, b) in enumerate(words[:-1])):
@@ -620,7 +624,7 @@ class Index:
         if words:
             pauses += [words[0][0] - PAUSE / 2, words[-1][1] + PAUSE / 2]
         near = sorted((p for p in pauses if reach[0] <= p <= reach[1] and allowed(p)),
-                      key=lambda p: ((p - t) * outward < 0, abs(p - t)))
+                      key=lambda p: abs(p - t))
         return near[0] if near else t
 
     def _shot_windows(self, card: dict) -> list[int]:

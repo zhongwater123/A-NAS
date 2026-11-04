@@ -40,7 +40,7 @@ MEMBER_VIDEOS = "/srv/a-nas/data/assistant/alice/files/视频"
 
 
 def turn(instruction, container, model, log, pictures=False, screen=False, about=False, retrieved=False, span=None,
-         locate=None, fill=False, edges=False, no_look=False):
+         locate=None, fill=False, edges=False, no_look=False, flow=False):
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     config = {"mcpServers": {"anas": {
         "command": os.path.join(here, "assistant-spike", "mcp-as-member.sh"), "args": ["alice"],
@@ -52,7 +52,8 @@ def turn(instruction, container, model, log, pictures=False, screen=False, about
                 | ({"ANAS_SPIKE_LOCATE": locate} if locate else {})
                 | ({"ANAS_SPIKE_FILL": "1"} if fill else {})
                 | ({"ANAS_SPIKE_EDGES": "1"} if edges else {})
-                | ({"ANAS_SPIKE_NO_LOOK": "1"} if no_look else {})}}}
+                | ({"ANAS_SPIKE_NO_LOOK": "1"} if no_look else {})
+                | ({"ANAS_SPIKE_FLOW": "1"} if flow else {})}}}
     ask = ((ASK_ABOUT if about else ASK).format(**instruction)
            + (STYLE.format(instruction["style"]) if instruction.get("style") else ""))
     command = ["claude", "-p", ask, "--mcp-config", json.dumps(config), "--strict-mcp-config",
@@ -125,6 +126,9 @@ def main():
                              "grown from the window of its card its shows matches (an experiment, #350)")
     parser.add_argument("--edges", action="store_true",
                         help="trim each segment to a cut found near either end at the source's frame rate (#350)")
+    parser.add_argument("--flow", action="store_true",
+                        help="with --locate: a catalog without seconds, and neighbouring segments kept to one scene or "
+                             "person (an experiment, #350)")
     parser.add_argument("--no-look", action="store_true",
                         help="cut without the vision model reviewing the frames first (an experiment, #350)")
     parser.add_argument("--fill", action="store_true",
@@ -149,7 +153,7 @@ def main():
         target = os.path.join(out, instruction["id"])
         done = turn(instruction, args.container, args.model, target + ".jsonl", args.pictures, args.screen,
                     args.about, args.retrieved_only, args.span, args.locate, args.fill, args.edges,
-                    args.no_look)
+                    args.no_look, args.flow)
         if done["cut"]:
             copy_out(args.container, done["cut"], target)
         else:
