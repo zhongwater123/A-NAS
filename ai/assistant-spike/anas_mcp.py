@@ -567,7 +567,7 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
     @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False),
                  structured_output=False, description=(
         "按剪辑计划把视频片段剪成一段 1920×1080、30 fps 的 MP4，每段带原片同一区间的原声（不加配乐和字幕），存进助手目录的“视频”文件夹，返回文件路径与时长。"
-        "segments：按播放顺序排列，" + SEGMENT +
+        "segments：按播放顺序排列，" + SEGMENT
         + ("" if FILL else "成片总长不设上限。") + SHOWS + "reason 用一句话写这段属于故事线的哪一段、为什么选它，随成片存档。"
         + SKIPPING +
         "按故事线排段：故事线是骨架，每段挑最有看点的画面，不必把每一步都交代；不必每个检索主题都用上，和故事线搭不上的整个不用；"
