@@ -104,6 +104,9 @@ install -m 0644 anas-vectors-system.slice.incoming anas-vectors-system.slice
 install -m 0644 anas-vectors-system@.service.incoming anas-vectors-system@.service
 install -m 0644 anas-vectors-proxy-system@.socket.incoming anas-vectors-proxy-system@.socket
 install -m 0644 anas-vectors-proxy-system@.service.incoming anas-vectors-proxy-system@.service
+# The host packages root installs before the release (ADR 0031).
+install -m 0644 a-nas-host.deb.incoming a-nas-host.deb
+install -m 0644 a-nas-console.deb.incoming a-nas-console.deb
 # Local AI (ADR 0016): the Worker's code and the manifests of the models and
 # runtime it pins. deploy-dev.ps1 uploads the models and runtime once per
 # content; link the staged copies the root installer copies and checks. Each
@@ -207,6 +210,8 @@ rm -f \
   search-runtime.json.incoming \
   anas-api.incoming \
   anas-host-agent.incoming \
+  a-nas-host.deb.incoming \
+  a-nas-console.deb.incoming \
   kiosk-launcher.incoming \
   anas-kiosk@.service.incoming \
   a-nas-kiosk.pam.incoming \
