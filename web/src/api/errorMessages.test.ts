@@ -37,6 +37,7 @@ describe("product error copy", () => {
   });
   it("keeps known domain guidance and treats cancellation as silent", () => {
     expect(photoError(new APIError(404, "not_found"))).toBe("照片或相册已不存在");
+    expect(errorText(new APIError(409, "show_title_taken", "another show"), "media")).toBe("媒体库里已有同名的剧。");
     expect(errorText(new APIError(413, "too_large", "private"), "imageSearch")).toBe("图片太大，换一张小一些的试试");
     expect(shareError(new APIError(404, "share_not_found"))).toContain("分享");
     expect(errorText(new DOMException("aborted", "AbortError"))).toBe("");

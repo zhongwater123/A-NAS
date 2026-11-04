@@ -90,7 +90,7 @@
   - 执行 `systemctl stop anas-vectors-proxy@a-nas-photos.service anas-vectors@a-nas-photos.service`。
   - 执行 `rm -rf /var/lib/private/a-nas-vectors/a-nas-photos`。
   - 下一次对账发现集合缺失，会新建集合并重新同步全部向量；对账在相册服务启动后的第一次空闲时和此后每天进行。
-- **回到 migration 14 之前的版本**：较早的版本拒绝打开更新过的 Catalog，所以先撤销 migration 14，再按实机配置手册切回旧 release。
+- **回到 migration 14 之前的版本**：较早的版本拒绝打开更新过的 Catalog，所以先撤销 migration 14，再按实机配置手册切回旧 release。Catalog 已到 migration 15（照片文字识别）时，先按[照片文字识别的回退](../architecture/photo-ocr.md#交付)撤销 15，并把下面最后一句的版本号照常设为 13。
   1. 执行 `systemctl stop anas-photos`。
   2. 以相册服务的身份执行下面的语句。
      ```sh

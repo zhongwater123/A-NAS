@@ -7,11 +7,11 @@ import (
 	"math"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/photos/labels"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // AI clusters (docs/architecture/photo-ai.md): a photo belongs to a label's
@@ -297,7 +297,7 @@ func (s *Service) LabelPhotos(ctx context.Context, p Principal, label, viewing, 
 	// A photo trashed since the candidates were read drops out here, and so
 	// would one outside the scope or hidden from p.
 	records, err := s.queryAssets(ctx, s.db,
-		"WHERE "+listedAssets(p, "a")+" AND a.library_id IN ("+placeholders(len(scope))+") AND a.id IN ("+placeholders(len(ids))+")",
+		"WHERE "+listedAssets(p, "a")+" AND a.library_id IN ("+sqlitedb.Placeholders(len(scope))+") AND a.id IN ("+sqlitedb.Placeholders(len(ids))+")",
 		append(slices.Clone(scope), ids...)...)
 	if err != nil {
 		return Page{}, err
@@ -317,7 +317,7 @@ func (s *Service) LabelPhotos(ctx context.Context, p Principal, label, viewing, 
 // unit separator; only those of label, when one is given. Videos take no
 // part in AI, so none is a candidate even with a vector.
 func (s *Service) clusterCandidates(ctx context.Context, p Principal, scope []any, label string) ([]candidate, map[string]bool, error) {
-	in := "(" + strings.TrimSuffix(strings.Repeat("?,", len(scope)), ",") + ")"
+	in := "(" + sqlitedb.Placeholders(len(scope)) + ")"
 	rows, err := s.db.QueryContext(ctx, "SELECT id, object_id FROM assets WHERE "+listedAssets(p, "assets")+" AND "+inLocalAI("assets.object_id")+
 		" AND library_id IN "+in+" ORDER BY id", scope...)
 	if err != nil {

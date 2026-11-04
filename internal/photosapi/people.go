@@ -25,6 +25,7 @@ type mergeRequest struct {
 
 type librarySettingsRequest struct {
 	People *bool `json:"people"`
+	Texts  *bool `json:"texts"`
 }
 
 type assignRequest struct {
@@ -45,19 +46,22 @@ func (h *handler) peopleRoutes() {
 	h.mux.HandleFunc("PATCH "+p+"/libraries/{libraryID}", h.changeLibrary)
 }
 
-// changeLibrary turns a library's people and pets on or off; off clears
-// what was recognised there and keeps the names.
+// changeLibrary turns a library's people and pets, or its reading of the text
+// in photos, on or off; off clears what was found there and keeps what
+// members named or corrected.
 func (h *handler) changeLibrary(w http.ResponseWriter, r *http.Request) {
 	principal, _ := principalFrom(r)
 	var request librarySettingsRequest
 	if !decodeJSON(w, r, &request) {
 		return
 	}
-	if request.People == nil {
-		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "say whether the library recognises people and pets")
+	if request.People == nil && request.Texts == nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request",
+			"say whether the library recognises people and pets, or reads the text in photos")
 		return
 	}
-	library, err := h.service.SetPeople(r.Context(), principal, r.PathValue("libraryID"), *request.People)
+	library, err := h.service.SetSwitches(r.Context(), principal, r.PathValue("libraryID"),
+		photos.LibrarySwitches{People: request.People, Texts: request.Texts})
 	if err != nil {
 		h.fail(w, r, err)
 		return

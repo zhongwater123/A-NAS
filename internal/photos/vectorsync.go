@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/vectorindex"
 )
 
@@ -264,7 +265,7 @@ func (s *Service) vectorPoints(ctx context.Context, objects []string, model stri
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT e.object_id, e.vector, a.library_id FROM embeddings e
 JOIN assets a ON a.object_id = e.object_id AND a.trashed_at IS NULL
-WHERE e.derivation = ? AND e.model = ? AND `+inLocalAI("e.object_id")+` AND e.object_id IN (`+placeholders(len(objects))+`)
+WHERE e.derivation = ? AND e.model = ? AND `+inLocalAI("e.object_id")+` AND e.object_id IN (`+sqlitedb.Placeholders(len(objects))+`)
 ORDER BY e.object_id, a.library_id`, args...)
 	if err != nil {
 		return nil, err

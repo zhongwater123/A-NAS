@@ -219,6 +219,11 @@ func TestMediaAPIUsesTheSessionUserAndRequiresCSRFForWrites(t *testing.T) {
 		!strings.Contains(renamed.Body.String(), `"name_not_portable"`) {
 		t.Fatalf("rename to a name Windows cannot hold = %d %s", renamed.Code, renamed.Body.String())
 	}
+	// The media center's own refusals have codes of their own, which the Web words.
+	if renamed := send(http.MethodPatch, "/api/v1/media/videos/"+fixture.film, `{"fileName":"Heat.txt"}`, session.CSRFToken); renamed.Code != http.StatusBadRequest ||
+		!strings.Contains(renamed.Body.String(), `"video_extension_required"`) {
+		t.Fatalf("rename without a video extension = %d %s", renamed.Code, renamed.Body.String())
+	}
 }
 
 // signedInMediaHandler serves the product API with the media center told

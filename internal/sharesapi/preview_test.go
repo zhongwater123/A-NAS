@@ -80,7 +80,7 @@ func TestRevokeCancelsHEICConversionAndWithholdsResult(t *testing.T) {
 	s, h, v := previewFixture(t, worker)
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
-		r := httptest.NewRequest("GET", PathPrefix+"/"+v.ID+"/entries/"+v.Entries[0].ID+"/preview", nil)
+		r := httptest.NewRequest(http.MethodGet, PathPrefix+"/"+v.ID+"/entries/"+v.Entries[0].ID+"/preview", nil)
 		r = r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: "b"}))
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)

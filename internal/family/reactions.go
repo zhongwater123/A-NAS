@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"slices"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // ReactionNames are the reactions a member leaves on a record with one tap,
@@ -29,7 +31,7 @@ func (s *Store) reactionsFor(ctx context.Context, q queryer, rows []*row) (map[s
 		ids = append(ids, r.record.ID)
 	}
 	result, err := q.QueryContext(ctx, "SELECT record_id, reaction, account_id FROM reactions WHERE record_id IN ("+
-		placeholders(len(ids))+") ORDER BY created_at, account_id", ids...)
+		sqlitedb.Placeholders(len(ids))+") ORDER BY created_at, account_id", ids...)
 	if err != nil {
 		return nil, err
 	}

@@ -3,7 +3,8 @@ package photos
 import (
 	"context"
 	"errors"
-	"strings"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // MaxLookup bounds the IDs one Lookup answers about.
@@ -43,7 +44,7 @@ func (s *Service) Lookup(ctx context.Context, p Principal, ids []string) ([]Look
 	if len(args) == 0 {
 		return found, nil
 	}
-	marks := strings.TrimSuffix(strings.Repeat("?, ", len(args)), ", ")
+	marks := sqlitedb.Placeholders(len(args))
 	records, err := s.queryAssets(ctx, s.db, "WHERE "+listedAssets(p, "a")+" AND a.id IN ("+marks+")", args...)
 	if err != nil {
 		return nil, err

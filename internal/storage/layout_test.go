@@ -38,7 +38,7 @@ func TestUsableBytesFollowsTheLayout(t *testing.T) {
 func TestTwoDisksBecomeAMirrorUnlessAnotherLayoutIsChosen(t *testing.T) {
 	ctx := context.Background()
 	executor := &recordingExecutor{}
-	service := storage.NewService(fake.NewWithSpareDisk(), executor, storage.Options{NewID: func() string { return "plan-two" }})
+	service := newService(t, fake.NewWithSpareDisk(), executor, storage.Options{NewID: func() string { return "plan-two" }})
 
 	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, storage.LayoutMirror); !errors.Is(err, storage.ErrInvalidLayout) {
 		t.Fatalf("mirror on one disk error = %v, want ErrInvalidLayout", err)
@@ -80,7 +80,7 @@ func TestAddingADiskConvertsTheVolumeAndReportsTheProgress(t *testing.T) {
 	ctx := context.Background()
 	reader := spareDiskReader(t)
 	executor := &recordingExecutor{}
-	service := storage.NewService(reader, executor, storage.Options{
+	service := newService(t, reader, executor, storage.Options{
 		Now:   clocktest.Ticking(time.Date(2026, time.October, 20, 9, 0, 0, 0, time.UTC), time.Second).Now,
 		NewID: planIDs(),
 	})
@@ -164,7 +164,7 @@ func TestAMirrorMustHoldTheFilesAlreadyThere(t *testing.T) {
 	ctx := context.Background()
 	reader := spareDiskReader(t)
 	reader.state.Disks[0].CapacityBytes = 1_000_000_000_000
-	service := storage.NewService(reader, &recordingExecutor{}, storage.Options{})
+	service := newService(t, reader, &recordingExecutor{}, storage.Options{})
 	createSingleVolume(t, service)
 	mountVolume(reader, []string{"disk:fake-data-01"}, 600_000_000_000,
 		[]hoststate.ProfileUsage{{Profile: hoststate.ProfileSingle, UsedBytes: 600_000_000_000}}, nil)
@@ -181,7 +181,7 @@ func TestAMirrorMustHoldTheFilesAlreadyThere(t *testing.T) {
 func TestAnOfflineMemberOfTheVolumeIsNeverErased(t *testing.T) {
 	ctx := context.Background()
 	reader := spareDiskReader(t)
-	service := storage.NewService(reader, &recordingExecutor{}, storage.Options{})
+	service := newService(t, reader, &recordingExecutor{}, storage.Options{})
 	createSingleVolume(t, service)
 	mountVolume(reader, []string{"disk:fake-data-01"}, 1, nil, nil)
 	for index := range reader.state.Disks {
@@ -200,7 +200,7 @@ func TestAnOfflineMemberOfTheVolumeIsNeverErased(t *testing.T) {
 func TestAPlanThatHasNotRunCanBeCancelled(t *testing.T) {
 	ctx := context.Background()
 	executor := &recordingExecutor{}
-	service := storage.NewService(fake.NewWithSpareDisk(), executor, storage.Options{NewID: planIDs()})
+	service := newService(t, fake.NewWithSpareDisk(), executor, storage.Options{NewID: planIDs()})
 	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01"}, "")
 	if err != nil {
 		t.Fatal(err)

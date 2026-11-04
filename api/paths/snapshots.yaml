@@ -3,11 +3,11 @@
     operationId: listSnapshots
     parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }]
     responses:
-      "200": { description: Snapshots, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/snapshots.yaml#/schemas/Snapshot" } } } } } } }
+      "200": { description: Snapshots, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/snapshots.yaml#/schemas/Snapshot" } } } } } } }
   post:
     operationId: createSnapshot
     parameters: [{ $ref: "../components/files.yaml#/parameters/SpaceID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
-    requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } } }
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string } } } } } }
     responses:
       "201": { description: Snapshot created, content: { application/json: { schema: { $ref: "../components/snapshots.yaml#/schemas/Snapshot" } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
@@ -91,7 +91,7 @@
     description: Each entry is compared with the space as it is now; opening the top level reconciles the space first.
     parameters: [{ $ref: "../components/snapshots.yaml#/parameters/SnapshotID" }, { name: parentId, in: query, schema: { type: string } }]
     responses:
-      "200": { description: Snapshot entries, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/snapshots.yaml#/schemas/SnapshotEntry" } } } } } } }
+      "200": { description: Snapshot entries, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/snapshots.yaml#/schemas/SnapshotEntry" } } } } } } }
 /api/v1/snapshots/{snapshotId}/entries/{entryId}/restore:
   post:
     operationId: restoreSnapshotEntry

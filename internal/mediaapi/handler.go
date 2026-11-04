@@ -117,6 +117,14 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	case errors.Is(err, media.ErrForbidden):
 		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "you cannot do this")
+	case errors.Is(err, media.ErrInvalidName):
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_name", "the name is empty or starts with a dot")
+	case errors.Is(err, media.ErrVideoExtension):
+		httpjson.WriteError(w, http.StatusBadRequest, "video_extension_required", "a video's file name must keep a video extension")
+	case errors.Is(err, media.ErrShowWithoutFolder):
+		httpjson.WriteError(w, http.StatusBadRequest, "show_without_folder", "the show has no folder of its own and no episode file carries its title")
+	case errors.Is(err, media.ErrShowTitleTaken):
+		httpjson.WriteError(w, http.StatusConflict, "show_title_taken", "another show in the library has this title")
 	case errors.Is(err, media.ErrInvalid):
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", strings.TrimPrefix(err.Error(), media.ErrInvalid.Error()+": "))
 	case errors.Is(err, media.ErrConflict):

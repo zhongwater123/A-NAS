@@ -850,12 +850,12 @@ func TestRenamingAVideoRenamesItsFilesAndKeepsItsProgress(t *testing.T) {
 	if _, err := env.media.RenameVideo(env.ctx, env.alice, id, "Heat (1995).mkv"); !errors.Is(err, files.ErrConflict) {
 		t.Fatalf("renaming onto another film error = %v, want files.ErrConflict", err)
 	}
-	if _, err := env.media.RenameVideo(env.ctx, env.alice, id, "超凡蜘蛛侠2.txt"); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("renaming without a video extension error = %v, want ErrInvalid", err)
+	if _, err := env.media.RenameVideo(env.ctx, env.alice, id, "超凡蜘蛛侠2.txt"); !errors.Is(err, ErrVideoExtension) || !errors.Is(err, ErrInvalid) {
+		t.Fatalf("renaming without a video extension error = %v, want ErrVideoExtension", err)
 	}
 	// The file manager's rules for new names apply, also to the files
 	// renamed with it (#222).
-	for name, want := range map[string]error{"超凡蜘蛛侠2: 决战.mkv": files.ErrNameNotPortable, "a/b.mkv": files.ErrInvalidName, ".hidden.mkv": ErrInvalid} {
+	for name, want := range map[string]error{"超凡蜘蛛侠2: 决战.mkv": files.ErrNameNotPortable, "a/b.mkv": files.ErrInvalidName, ".hidden.mkv": ErrInvalidName} {
 		if _, err := env.media.RenameVideo(env.ctx, env.alice, id, name); !errors.Is(err, want) {
 			t.Fatalf("renaming to %q error = %v, want %v", name, err, want)
 		}
@@ -1015,8 +1015,8 @@ func TestRenamingAShowOntoAnotherIsAConflictEvenBeforeTheScanCatchesUp(t *testin
 			}
 		}
 	}
-	if _, err := env.media.RenameShow(env.ctx, env.admin, blossoms.ID, "漫长的季节"); !errors.Is(err, files.ErrConflict) {
-		t.Fatalf("RenameShow() error = %v, want files.ErrConflict", err)
+	if _, err := env.media.RenameShow(env.ctx, env.admin, blossoms.ID, "漫长的季节"); !errors.Is(err, ErrShowTitleTaken) || !errors.Is(err, files.ErrConflict) {
+		t.Fatalf("RenameShow() error = %v, want ErrShowTitleTaken", err)
 	}
 }
 
@@ -1113,12 +1113,12 @@ func TestRenamingAShowRenamesItsFolderAndEpisodesAndKeepsItsID(t *testing.T) {
 	if waitForShow("Blossoms").ID != blossoms.ID {
 		t.Fatal("繁花 lost its ID")
 	}
-	if _, err := env.media.RenameShow(env.ctx, env.admin, blossoms.ID, "The Long Season"); !errors.Is(err, files.ErrConflict) {
-		t.Fatalf("renaming onto another show: %v, want files.ErrConflict", err)
+	if _, err := env.media.RenameShow(env.ctx, env.admin, blossoms.ID, "The Long Season"); !errors.Is(err, ErrShowTitleTaken) {
+		t.Fatalf("renaming onto another show: %v, want ErrShowTitleTaken", err)
 	}
 	loose := waitForShow("影视")
-	if _, err := env.media.RenameShow(env.ctx, env.admin, loose.ID, "某部剧"); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("renaming a show with nothing to rename: %v, want ErrInvalid", err)
+	if _, err := env.media.RenameShow(env.ctx, env.admin, loose.ID, "某部剧"); !errors.Is(err, ErrShowWithoutFolder) {
+		t.Fatalf("renaming a show with nothing to rename: %v, want ErrShowWithoutFolder", err)
 	}
 }
 

@@ -61,6 +61,9 @@ describe("account rules", () => {
     expect(accountErrorText(new APIError(401, "invalid_credentials", "username or password is invalid"))).toBe(
       "账号或密码不正确",
     );
+    expect(accountErrorText(new APIError(429, "too_many_attempts", "too many failed sign-ins"))).toBe(
+      "登录失败次数过多，请稍后再试",
+    );
     expect(accountErrorText(new APIError(409, "conflict", "x"))).toBeUndefined();
     expect(accountErrorText(new Error("other"))).toBeUndefined();
   });

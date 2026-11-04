@@ -68,14 +68,16 @@ func (s *Service) textQueries(ctx context.Context, model string) ([][]float32, e
 	return s.routeVectors(ctx)
 }
 
-// enqueueText queues the reading of an object's text, unless it was read.
+// enqueueText queues the reading of an object's text, unless it was read or
+// no library that reads text holds it.
 func enqueueText(ctx context.Context, tx *sql.Tx, objectID, now string) error {
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT ?, ?, 'pending', ?, ?
 WHERE NOT EXISTS (SELECT 1 FROM scans WHERE object_id = ? AND derivation = ?) AND `+inLocalAI("?")+`
+  AND `+inTextLibrary("?")+`
 ON CONFLICT(object_id, derivation) DO NOTHING`,
-		objectID, textDerivation, now, now, objectID, textDerivation, objectID)
+		objectID, textDerivation, now, now, objectID, textDerivation, objectID, objectID)
 	return err
 }
 
