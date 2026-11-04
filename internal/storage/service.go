@@ -179,12 +179,6 @@ type Service struct {
 	store     *Store
 }
 
-func NewService(reader hoststate.Reader, executor VolumeExecutor, options Options) *Service {
-	options.Store = nil
-	service, _ := OpenService(reader, executor, options)
-	return service
-}
-
 func OpenService(reader hoststate.Reader, executor VolumeExecutor, options Options) (*Service, error) {
 	now := options.Now
 	if now == nil {

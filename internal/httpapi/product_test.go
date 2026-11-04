@@ -35,7 +35,10 @@ func TestProductAPIRequiresLoginAndExposesOnlyVisibleSpaces(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = fileStore.Close() })
 	fileService := files.NewLocalService(fileStore, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{DisableCapacityReserve: true, AllowUnverifiedVolume: true})
-	storageService := storage.NewService(fake.NewHealthy(), apiVolumeExecutor{}, storage.Options{})
+	storageService, err := storage.OpenService(fake.NewHealthy(), apiVolumeExecutor{}, storage.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	terminalCalls := 0
 	terminalHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		terminalCalls++
