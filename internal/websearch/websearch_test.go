@@ -199,6 +199,65 @@ func TestResultsAreMappedForEachTab(t *testing.T) {
 	}
 }
 
+func TestPapersPackagesPlacesAndTracksKeepTheirDetails(t *testing.T) {
+	backend := &recordingBackend{
+		engines: []EngineInfo{
+			{Name: "crossref", Categories: []string{"science"}}, {Name: "github", Categories: []string{"it"}},
+			{Name: "photon", Categories: []string{"map"}}, {Name: "piped.music", Categories: []string{"music"}},
+		},
+		// As SearXNG answered on 2026-11-03.
+		responses: map[string]Response{
+			"crossref": {Results: []RawResult{{
+				URL: "https://www.nature.com/articles/s41598-026-39296-8", Title: "Use large language model", Engine: "crossref",
+				Template: "paper.html", Content: "<jats:p>Large language models &amp; reasoning</jats:p>",
+				Authors: []any{"Yiqiao Yin", " "}, Publisher: "Springer", Journal: "Scientific Reports", DOI: "10.1038/s41598-026-39296-8",
+				PDFURL: "javascript:alert(1)",
+			}}},
+			"github": {Results: []RawResult{{
+				URL: "https://github.com/nocodb/nocodb", Title: "nocodb/nocodb", Engine: "github", Template: "packages.html",
+				Maintainer: "nocodb", Popularity: 65414.0, Version: "0.263.1", LicenseName: "Other",
+				Homepage: "https://nocodb.com", SourceCodeURL: "https://github.com/nocodb/nocodb.git",
+			}}},
+			"photon": {Results: []RawResult{{
+				URL: "https://openstreetmap.org/way/546474656", Title: "杭州西湖", Engine: "photon", Template: "map.html",
+				Latitude: "30.2431", Longitude: 120.1459,
+				Address: map[string]any{"road": "北山街", "house_number": 1.0, "locality": "杭州市", "country": "中国"},
+			}}},
+			"piped.music": {Results: []RawResult{{
+				URL: "https://srv.piped.video/watch?v=SJKoWAd5ySo", Title: "晴天", Content: "周杰倫", Engine: "piped.music",
+				Template: "default.html", Length: "270.0",
+			}}},
+		},
+	}
+	service := newTestService(t, backend, NewMemorySwitch(true))
+	only := func(category Category, q string) Result {
+		t.Helper()
+		page, err := search(service, "u1", Query{Text: q, Category: category})
+		if err != nil || len(page.Results) != 1 {
+			t.Fatalf("%s: results %+v, error %v", category, page.Results, err)
+		}
+		return page.Results[0]
+	}
+	paper := only(Science, "large language model")
+	if paper.Kind != KindPaper || strings.Join(paper.Authors, ",") != "Yiqiao Yin" || paper.Journal != "Scientific Reports" ||
+		paper.DOI != "10.1038/s41598-026-39296-8" || paper.PDF != "" || paper.Content != "Large language models & reasoning" {
+		t.Fatalf("paper = %+v", paper)
+	}
+	repository := only(IT, "nocodb")
+	if repository.Kind != KindPackage || repository.Author != "nocodb" || repository.Popularity != "65414" ||
+		repository.Version != "0.263.1" || repository.License != "Other" || repository.SourceCode == "" || repository.Homepage == "" {
+		t.Fatalf("package = %+v", repository)
+	}
+	place := only(Map, "西湖")
+	if place.Kind != KindPlace || place.Address != "北山街, 1, 杭州市, 中国" || *place.Latitude != 30.2431 || *place.Longitude != 120.1459 {
+		t.Fatalf("place = %+v", place)
+	}
+	track := only(Music, "晴天")
+	if track.Kind != "" || *track.DurationSeconds != 270 || track.Platform != "piped.music" || track.Content != "周杰倫" {
+		t.Fatalf("track = %+v", track)
+	}
+}
+
 func TestAnInfoboxShowsTheWordsOfItsContent(t *testing.T) {
 	// Jisho's infobox, as SearXNG answers it.
 	content := `<p><i>Other forms:</i> 猫</p>

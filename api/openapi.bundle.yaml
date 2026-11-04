@@ -10050,6 +10050,52 @@ components:
         leechers:
           type: integer
           minimum: 0
+        kind:
+          type: string
+          enum:
+            - paper
+            - package
+            - place
+          description: A result with details of its own, from the layout SearXNG gives it; others follow their tab.
+        authors:
+          type: array
+          items:
+            type: string
+          description: A paper's authors.
+        journal:
+          type: string
+          description: A paper's journal, or else its publisher.
+        doi:
+          type: string
+        pdf:
+          type: string
+          format: uri
+          description: A paper's PDF.
+        version:
+          type: string
+          description: A package's version.
+        license:
+          type: string
+        popularity:
+          type: string
+          description: 'A package''s popularity as its site counts it: stars, downloads or pulls.'
+        homepage:
+          type: string
+          format: uri
+        sourceCode:
+          type: string
+          format: uri
+        address:
+          type: string
+          description: A place's address.
+        latitude:
+          type: number
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: number
+          minimum: -180
+          maximum: 180
     WebSearchAnswer:
       type: object
       additionalProperties: false
