@@ -417,6 +417,13 @@ class MomentsTest(unittest.TestCase):
         spans, _problems = self.index.fill([("07-1-0", self.castle)], "probe", 2, self.at)
         self.assertEqual(spans, [(8, 9.6)])  # the pause in the line is closer than its end
 
+    def test_fill_gives_each_segment_an_even_share_before_the_best_steps(self):
+        # The market (0-8 s) is one still picture: every step scores as its peak. The castle's
+        # other side (28-48 s) is still too, but its first side, before 28 s, falls to 0.8.
+        market, other_side = np.eye(8, dtype=np.float32)[0], np.eye(8, dtype=np.float32)[2] * 0.6 + self.castle * 0.8
+        spans, _problems = self.index.fill([("07-0-0", market), ("07-1-1", other_side)], "probe", 8, self.at)
+        self.assertEqual([e - s for s, e in spans], [4, 4])
+
     def test_fill_keeps_each_segment_to_its_minimum(self):
         market = np.eye(8, dtype=np.float32)[0]
         spans, _problems = self.index.fill([("07-0-0", market), ("07-1-0", self.castle)], "probe", 3, self.at,

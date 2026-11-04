@@ -504,16 +504,17 @@ class Index:
         """Seconds for segments, each (card id, probe vector), set by the program to add up to
         target (#350). A segment starts as the window of its card the probe matches best, clear
         of flat windows and of the segments before it. Then, STEP at a time, the segment end whose
-        next step is best grows, until the cut reaches target; over it, the worst end steps go.
+        next step is best grows, first among the segments short of an even share of target and
+        then among all, until the cut reaches target; over it, the worst end steps go.
         A step is judged on its middle frame, at(video, seconds) as a unit vector, against the
         segment's own peak frame: by how little its probe score falls from the peak's ("probe"),
         or by its likeness to the peak picture ("frame"), so that segments whose probes score on
         other scales are compared fairly. Steps stay in their shot, off flat windows and the
         other segments, and within caps[n] (CLIP_MAX by default); a segment keeps mins[n]
         (SEGMENT_MIN by default).
-        An end inside speech (self.words) then moves to the nearest pause within SNAP that
-        keeps those rules, in or out, whichever is closer; a line may take a segment SNAP past
-        its cap, never past CLIP_MAX. Returns [(start, end) or None] and the problems."""
+        An end inside speech (self.words) then moves to the nearest pause that keeps those rules,
+        in or out: out by at most SNAP, and a line may take a segment SNAP past its cap, never
+        past CLIP_MAX; in as far as the segment's minimum allows. Returns [(start, end) or None] and the problems."""
         if mode not in SPANS:
             raise ValueError(f"mode 要是 {'、'.join(SPANS)} 之一")
         cards = {c["id"]: c for c in self.cards}
@@ -565,12 +566,18 @@ class Index:
                     spans[n] = None
                     break
                 _score, _n, _side, spans[n][1], spans[n][2] = max(steps)
-        while sum(map(length, range(len(spans)))) < target - STEP / 2:
-            steps = [step for n in range(len(spans)) if spans[n] for step in grown(n)]
-            if not steps:
-                break
-            _score, n, _side, start, end = max(steps)
-            spans[n][1:] = [start, end]
+        # Each segment first grows towards an even share of the target, its best end first, so
+        # that a still picture, whose score hardly falls, does not take the others' time; what
+        # is left of the target then goes to the best steps of any.
+        share = target / max(1, sum(1 for s in spans if s))
+        for even in (True, False):
+            while sum(map(length, range(len(spans)))) < target - STEP / 2:
+                steps = [step for n in range(len(spans)) if spans[n] and (not even or length(n) < share - STEP / 2)
+                         for step in grown(n)]
+                if not steps:
+                    break
+                _score, n, _side, start, end = max(steps)
+                spans[n][1:] = [start, end]
         while sum(map(length, range(len(spans)))) > target + STEP / 2:
             ends = []
             for n in range(len(spans)):
@@ -593,8 +600,8 @@ class Index:
             # A line may take a segment past its cap, never past CLIP_MAX.
             longest = min(caps[n] + SNAP, CLIP_MAX)
             fits = functools.partial(self._fits, video, (lo, hi), (mins[n], longest), spans, n)
-            start = self._snapped(video, start, (start - SNAP, start + SNAP), lambda t, e=end, ok=fits: ok(t, e))
-            end = self._snapped(video, end, (end - SNAP, end + SNAP), lambda t, s=start, ok=fits: ok(s, t))
+            start = self._snapped(video, start, (start - SNAP, end - mins[n]), lambda t, e=end, ok=fits: ok(t, e))
+            end = self._snapped(video, end, (start + mins[n], end + SNAP), lambda t, s=start, ok=fits: ok(s, t))
             spans[n] = [video, start, end]
             # Rounded inward, so that the segment stays inside its shot.
             out.append((math.ceil(start * 100) / 100, math.floor(end * 100) / 100))
