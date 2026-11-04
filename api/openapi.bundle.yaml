@@ -345,6 +345,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -385,6 +386,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -465,6 +467,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -527,6 +530,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required:
                 - password
               properties:
@@ -732,6 +736,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -831,6 +836,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required:
                 - confirmationPhrase
               properties:
@@ -916,6 +922,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -939,6 +946,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -1231,6 +1239,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -1299,6 +1308,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -1317,6 +1327,7 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required:
                 - name
               properties:
@@ -1474,6 +1485,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -3504,6 +3516,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -4466,6 +4479,7 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 required:
                   - items
                 properties:
@@ -4864,9 +4878,11 @@ paths:
             application/json:
               schema:
                 type: object
+                additionalProperties: false
                 properties:
                   location:
                     type: object
+                    additionalProperties: false
                     required:
                       - latitude
                       - longitude

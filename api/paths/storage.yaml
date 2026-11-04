@@ -2,7 +2,7 @@
   get:
     operationId: listVolumes
     responses:
-      "200": { description: Data volumes, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/storage.yaml#/schemas/Volume" } } } } } } }
+      "200": { description: Data volumes, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/storage.yaml#/schemas/Volume" } } } } } } }
 /api/v1/volumes/{volumeId}/conversion:
   post:
     operationId: continueVolumeConversion
@@ -59,7 +59,7 @@
     operationId: confirmStoragePlan
     x-anas-posture: admin
     parameters: [{ $ref: "../components/storage.yaml#/parameters/PlanID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
-    requestBody: { required: true, content: { application/json: { schema: { type: object, required: [confirmationPhrase], properties: { confirmationPhrase: { type: string } } } } } }
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [confirmationPhrase], properties: { confirmationPhrase: { type: string } } } } } }
     responses:
       "200": { description: Confirmed plan, content: { application/json: { schema: { $ref: "../components/storage.yaml#/schemas/StoragePlan" } } } }
       "410": { $ref: "../components/common.yaml#/responses/ProductError" }

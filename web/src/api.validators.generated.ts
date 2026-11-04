@@ -2559,7 +2559,7 @@ validate109.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false}
 
 export const validate6 = validate113;
 const schema48 = {"$ref":"openapi.json#/paths/~1api~1v1~1profiles/get/responses/200/content/application~1json/schema"};
-const schema49 = {"type":"object","required":["items"],"properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/Profile"}}}};
+const schema49 = {"type":"object","additionalProperties":false,"required":["items"],"properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/Profile"}}}};
 const schema50 = {"type":"object","additionalProperties":false,"required":["id","username"],"properties":{"id":{"type":"string"},"username":{"type":"string"},"nickname":{"type":"string"},"avatarVersion":{"type":"string"}}};
 
 function validate115(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -2671,20 +2671,29 @@ validate114.errors = [{instancePath,schemaPath:"#/required",keyword:"required",p
 return false;
 }
 else {
+const _errs1 = errors;
+for(const key0 in data){
+if(!(key0 === "items")){
+validate114.errors = [{instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0}}];
+return false;
+break;
+}
+}
+if(_errs1 === errors){
 if(data.items !== undefined){
 let data0 = data.items;
-const _errs1 = errors;
-if(errors === _errs1){
+const _errs2 = errors;
+if(errors === _errs2){
 if(Array.isArray(data0)){
 var valid1 = true;
 const len0 = data0.length;
 for(let i0=0; i0<len0; i0++){
-const _errs3 = errors;
+const _errs4 = errors;
 if(!(validate115(data0[i0], {instancePath:instancePath+"/items/" + i0,parentData:data0,parentDataProperty:i0,rootData,dynamicAnchors}))){
 vErrors = vErrors === null ? validate115.errors : vErrors.concat(validate115.errors);
 errors = vErrors.length;
 }
-var valid1 = _errs3 === errors;
+var valid1 = _errs4 === errors;
 if(!valid1){
 break;
 }
@@ -2698,6 +2707,7 @@ return false;
 }
 }
 }
+}
 else {
 validate114.errors = [{instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"}}];
 return false;
@@ -2706,7 +2716,7 @@ return false;
 validate114.errors = vErrors;
 return errors === 0;
 }
-validate114.evaluated = {"props":{"items":true},"dynamicProps":false,"dynamicItems":false};
+validate114.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
 function validate113(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -2726,11 +2736,11 @@ errors = vErrors.length;
 validate113.errors = vErrors;
 return errors === 0;
 }
-validate113.evaluated = {"props":{"items":true},"dynamicProps":false,"dynamicItems":false};
+validate113.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validate7 = validate118;
 const schema51 = {"$ref":"openapi.json#/paths/~1api~1v1~1notifications/get/responses/200/content/application~1json/schema"};
-const schema52 = {"type":"object","required":["items"],"properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/Notification"}}}};
+const schema52 = {"type":"object","additionalProperties":false,"required":["items"],"properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/Notification"}}}};
 const schema53 = {"type":"object","additionalProperties":false,"required":["id","kind","actorUsername","createdAt"],"properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["admin_viewing","admin_library_viewing","credential_reset","assistant_task"]},"actorUsername":{"type":"string"},"reason":{"type":"string"},"expiresAt":{"type":"string","format":"date-time"},"task":{"type":"object","description":"The run an assistant_task notification tells of: one of the member's scheduled tasks ran. At most one waits per task; a run that answered only Hermes's silence marker is not shown.","additionalProperties":false,"required":["taskId","name","status","ranAt"],"properties":{"taskId":{"type":"string"},"name":{"type":"string"},"status":{"type":"string","description":"ok, or what went wrong."},"ranAt":{"type":"string","format":"date-time"},"sessionId":{"type":"string","description":"The run's conversation."},"summary":{"type":"string","description":"The start of the run's answer, or of its error."}}},"createdAt":{"type":"string","format":"date-time"}}};
 
 function validate120(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -2996,20 +3006,29 @@ validate119.errors = [{instancePath,schemaPath:"#/required",keyword:"required",p
 return false;
 }
 else {
+const _errs1 = errors;
+for(const key0 in data){
+if(!(key0 === "items")){
+validate119.errors = [{instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0}}];
+return false;
+break;
+}
+}
+if(_errs1 === errors){
 if(data.items !== undefined){
 let data0 = data.items;
-const _errs1 = errors;
-if(errors === _errs1){
+const _errs2 = errors;
+if(errors === _errs2){
 if(Array.isArray(data0)){
 var valid1 = true;
 const len0 = data0.length;
 for(let i0=0; i0<len0; i0++){
-const _errs3 = errors;
+const _errs4 = errors;
 if(!(validate120(data0[i0], {instancePath:instancePath+"/items/" + i0,parentData:data0,parentDataProperty:i0,rootData,dynamicAnchors}))){
 vErrors = vErrors === null ? validate120.errors : vErrors.concat(validate120.errors);
 errors = vErrors.length;
 }
-var valid1 = _errs3 === errors;
+var valid1 = _errs4 === errors;
 if(!valid1){
 break;
 }
@@ -3023,6 +3042,7 @@ return false;
 }
 }
 }
+}
 else {
 validate119.errors = [{instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"}}];
 return false;
@@ -3031,7 +3051,7 @@ return false;
 validate119.errors = vErrors;
 return errors === 0;
 }
-validate119.evaluated = {"props":{"items":true},"dynamicProps":false,"dynamicItems":false};
+validate119.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
 function validate118(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -3051,7 +3071,7 @@ errors = vErrors.length;
 validate118.errors = vErrors;
 return errors === 0;
 }
-validate118.evaluated = {"props":{"items":true},"dynamicProps":false,"dynamicItems":false};
+validate118.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validate8 = validate123;
 const schema54 = {"$ref":"openapi.json#/paths/~1api~1v1~1local-display/get/responses/200/content/application~1json/schema"};

@@ -90,7 +90,7 @@
       How every account appears, disabled ones included, for any signed-in user: the name to show and the avatar.
       Role and status stay with listUsers, which only administrators may call.
     responses:
-      "200": { description: Profiles, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/accounts.yaml#/schemas/Profile" } } } } } } }
+      "200": { description: Profiles, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/accounts.yaml#/schemas/Profile" } } } } } } }
 /api/v1/users/{userId}/avatar:
   get:
     operationId: getAvatar
@@ -109,7 +109,7 @@
     operationId: listNotifications
     description: Unacknowledged notices such as an administrator viewing the user's private space or resetting the password.
     responses:
-      "200": { description: Notifications, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/accounts.yaml#/schemas/Notification" } } } } } } }
+      "200": { description: Notifications, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/accounts.yaml#/schemas/Notification" } } } } } } }
 /api/v1/notifications/{notificationId}/acknowledge:
   post:
     operationId: acknowledgeNotification
@@ -144,7 +144,7 @@
     operationId: listUsers
     x-anas-posture: admin
     responses:
-      "200": { description: Users, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: "../components/accounts.yaml#/schemas/User" } } } } } } }
+      "200": { description: Users, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/accounts.yaml#/schemas/User" } } } } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
   post:
     operationId: createUser
@@ -172,7 +172,7 @@
     x-anas-posture: admin
     parameters: [{ $ref: "../components/accounts.yaml#/parameters/UserID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     description: Choose a temporary password for another account; administrators change their own with changePassword.
-    requestBody: { required: true, content: { application/json: { schema: { type: object, required: [password], properties: { password: { $ref: "../components/accounts.yaml#/schemas/NewPassword" } } } } } }
+    requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [password], properties: { password: { $ref: "../components/accounts.yaml#/schemas/NewPassword" } } } } } }
     responses:
       "204": { description: Credential reset }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
