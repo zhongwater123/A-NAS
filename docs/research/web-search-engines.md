@@ -1,7 +1,7 @@
 # 网页搜索的引擎实测
 
 状态：开发机完成（2026-10-30；全部引擎与渐进显示 2026-11-02）；实验 NAS 上的实测待做
-更新时间：2026-11-02
+更新时间：2026-11-04
 
 ## 目的
 
@@ -75,7 +75,7 @@
 - 固定的提交共定义 352 个引擎。去掉需要 API 密钥或令牌的 16 个、只能经 Tor 访问的 2 个、要搜索自建服务的 2 个，加载 332 个，其中 71 个是 SearXNG 默认不加载（inactive）的。`piped.music` 与 `piped` 共用服务器，却没有 `frontend_url`，不补上就加载失败。
 - 按名称请求的引擎，不论是否在 SearXNG 的默认启用之列，SearXNG 都会询问（`searx/webadapter.py` 的 `parse_generic` 只对按分类选出的引擎检查停用）。所以设置只需列出去掉的和要打开的，产品服务从 `/config` 读取其余一切。
 - 启动：加载全部引擎后，只有 Radio Browser 在初始化时用 DNS 查一次它的服务器（`all.api.radio-browser.info`），没有任何连接；SearXNG 空闲内存 78 MiB。
-- SearXNG 对超时或连接失败的引擎只暂停 `min(max_ban_time_on_fail, ban_time_on_fail)` 秒，默认 5 秒，而且不随连续失败增长。设置改为 300 秒，让连不上的引擎之后 5 分钟不再拖慢搜索。
+- SearXNG 对超时或连接失败的引擎只暂停 `min(max_ban_time_on_fail, ban_time_on_fail)` 秒，默认 5 秒，而且不随连续失败增长。设置改为 300 秒，让连不上的引擎之后 5 分钟不再拖慢搜索。2026-11-04 改回 5 秒：SearXNG 一时忙不过来或断网，会让所有引擎同时失败，300 秒的暂停让网页分类 5 分钟没有引擎（[调查](../investigations/2026-11-04-web-engines-suspended-after-one-bad-moment.md)）。
 
 开发机上每个分类搜一次的结果。这是第二轮，第一轮失败的引擎已在暂停中；SearXNG 自己的统计里，有记录的 319 个引擎中有 140 个从未成功过：
 
