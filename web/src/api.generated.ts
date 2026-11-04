@@ -2305,7 +2305,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Turn a library's people and pets on or off; the owner of a private library and an administrator for the shared library may. Off clears the faces, pets and automatic people found there and keeps names and what members decided; on scans the library again */
+        /** Turn a library's people and pets, or its reading of the text in photos, on or off; the owner of a private library and an administrator for the shared library may. People off clears the faces, pets and automatic people found there and keeps names and what members decided; texts off clears the text read from photos no library that reads holds and keeps what members corrected; on scans or routes the library again */
         patch: operations["changePhotoLibrary"];
         trace?: never;
     };
@@ -5710,7 +5710,9 @@ export interface components {
             createdAt: string;
             /** @description Whether the library recognises people and pets. */
             people?: boolean;
-            /** @description Whether the caller may turn people and pets on or off: the owner of a private library, an administrator for the shared library. */
+            /** @description Whether the library reads the text in photos: documents, receipts, cards, screenshots. */
+            texts?: boolean;
+            /** @description Whether the caller may turn people and pets, and reading text, on or off: the owner of a private library, an administrator for the shared library. */
             canSetPeople?: boolean;
             /** @description Present when the caller sees this member library only through Administrative Viewing Mode; access is read-only. */
             viewing?: {
@@ -11719,7 +11721,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    people: boolean;
+                    people?: boolean;
+                    texts?: boolean;
                 };
             };
         };

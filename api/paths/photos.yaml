@@ -204,7 +204,7 @@
 /api/v1/photos/libraries/{libraryId}:
   patch:
     operationId: changePhotoLibrary
-    summary: Turn a library's people and pets on or off; the owner of a private library and an administrator for the shared library may. Off clears the faces, pets and automatic people found there and keeps names and what members decided; on scans the library again
+    summary: Turn a library's people and pets, or its reading of the text in photos, on or off; the owner of a private library and an administrator for the shared library may. People off clears the faces, pets and automatic people found there and keeps names and what members decided; texts off clears the text read from photos no library that reads holds and keeps what members corrected; on scans or routes the library again
     parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoLibraryID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody:
       required: true
@@ -213,9 +213,10 @@
           schema:
             type: object
             additionalProperties: false
-            required: [people]
+            minProperties: 1
             properties:
               people: { type: boolean }
+              texts: { type: boolean }
     responses:
       "200": { description: The library, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoLibrary" } } } }
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }

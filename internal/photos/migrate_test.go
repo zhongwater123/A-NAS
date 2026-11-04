@@ -143,8 +143,9 @@ func TestStoredBoxesRoundTrip(t *testing.T) {
 }
 
 // Going back to a build before the vector index takes the statements of
-// docs/runbooks/enable-vector-index.md#回退: the Catalog is then the older
-// build's, and a later build adds the outbox again.
+// docs/runbooks/enable-vector-index.md#回滚或恢复, after those that undo
+// migration 15: the Catalog is then the older build's, and a later build
+// adds the outbox and the text tables again.
 func TestVectorIndexMigrationCanBeUndone(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "photos")
@@ -153,6 +154,10 @@ func TestVectorIndexMigrationCanBeUndone(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		// Migration 15 first, as docs/architecture/photo-ocr.md#交付 says.
+		"DROP TABLE text_corrections",
+		"DROP TABLE texts",
+		"ALTER TABLE libraries DROP COLUMN texts",
 		"DROP TRIGGER embeddings_vector_outbox_insert",
 		"DROP TRIGGER embeddings_vector_outbox_update",
 		"DROP TRIGGER embeddings_vector_outbox_delete",

@@ -210,6 +210,10 @@ func (s *Service) searchObjects(ctx context.Context, info EmbedderInfo, input []
 		return nil
 	}
 	defer func() { _ = file.Close() }()
+	// The text reader goes first, as before any detection: the two are not
+	// loaded together. The Worker answers one request at a time, so the
+	// release waits for a reading the closed gate is stopping.
+	s.ai.switchPhase(ctx, detector, false)
 	model, boxes, err := detector.DetectObjects(ctx, file)
 	// A Worker that took the request keeps the detector loaded; the AI
 	// runner releases it on its next round, since this request kept the gate
