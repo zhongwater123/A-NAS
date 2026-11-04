@@ -131,8 +131,12 @@ publish() {
     printf '%s\n' "$fence"
   } >"$outgoing/notes.md"
   # gh uploads into a draft and publishes it once every asset is in.
-  gh release create "$tag" --repo "$assets" --latest=false --title "$1 ($2)" \
-    --notes-file "$outgoing/notes.md" "${files[@]}"
+  if ! gh release create "$tag" --repo "$assets" --latest=false --title "$1 ($2)" \
+    --notes-file "$outgoing/notes.md" "${files[@]}"; then
+    rm -rf -- "$outgoing"
+    echo "cannot publish $1 to $assets" >&2
+    exit 4
+  fi
   rm -rf -- "$outgoing"
   echo "$1 published: $tag"
 }
