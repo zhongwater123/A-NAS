@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 )
 
 // MaxRecordingBytes bounds one recording: two hours of phone-quality audio
@@ -116,6 +118,12 @@ func (s *Store) AddRecording(ctx context.Context, actor Actor, babyID string, in
 	}
 	final := s.recordingPath(id)
 	if err := os.Rename(temporary.Name(), final); err != nil {
+		return Record{}, err
+	}
+	// The record added below names the file, so the rename must be on disk
+	// first: a power cut must not leave a record without its recording.
+	if err := atomicfile.SyncDir(s.recordings); err != nil {
+		_ = os.Remove(final)
 		return Record{}, err
 	}
 	err = s.inTx(ctx, func(tx *sql.Tx) error {

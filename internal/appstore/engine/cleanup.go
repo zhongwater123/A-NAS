@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/zhongwater123/A-NAS/internal/appstore"
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 )
 
 func (s *Store) imagesPath(id string) string {
@@ -36,24 +37,7 @@ func (s *Store) saveImages(id string, images []string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".images-*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(file.Name()) }()
-	_, writeErr := file.Write(data)
-	if err := errors.Join(writeErr, file.Sync(), file.Close()); err != nil {
-		return err
-	}
-	if err := os.Rename(file.Name(), path); err != nil {
-		return err
-	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dir.Close() }()
-	return dir.Sync()
+	return atomicfile.Write(path, data, 0o600)
 }
 
 // cleanup is shared by uninstall, failed-install rollback, retry and restart
