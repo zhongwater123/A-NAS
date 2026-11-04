@@ -196,7 +196,10 @@ func (s *Service) prepareViewing(ctx context.Context, actor User, ownerUserID, p
 		return "", "", ErrReasonRequired
 	}
 	var encodedHash string
-	if err := s.store.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id = ?", actor.ID).Scan(&encodedHash); err != nil || !verifyPassword(password, encodedHash) {
+	if err := s.store.db.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id = ?", actor.ID).Scan(&encodedHash); err != nil || encodedHash == "" {
+		return "", "", ErrInvalidCredentials
+	}
+	if matches, err := s.passwords.matches(ctx, password, encodedHash); err != nil || !matches {
 		return "", "", ErrInvalidCredentials
 	}
 	if ownerUserID == actor.ID {
@@ -374,7 +377,10 @@ func (s *Service) ChangePassword(ctx context.Context, actor User, currentPasswor
 	var mustChange bool
 	err := s.store.db.QueryRowContext(ctx, `SELECT u.password_hash, u.must_change_password, s.id FROM users u
 JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private' WHERE u.id = ?`, actor.ID).Scan(&encodedHash, &mustChange, &privateSpaceID)
-	if err != nil || !verifyPassword(currentPassword, encodedHash) {
+	if err != nil || encodedHash == "" {
+		return ErrInvalidCredentials
+	}
+	if matches, err := s.passwords.matches(ctx, currentPassword, encodedHash); err != nil || !matches {
 		return ErrInvalidCredentials
 	}
 	if err := checkPassword(newPassword); err != nil {
@@ -383,7 +389,7 @@ JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private' WHERE u.id = ?`, 
 	if newPassword == currentPassword {
 		return ErrPasswordUnchanged
 	}
-	passwordHash, err := hashPassword(newPassword, s.random, s.passwordCost)
+	passwordHash, err := s.newPasswordHash(ctx, newPassword)
 	if err != nil {
 		return err
 	}

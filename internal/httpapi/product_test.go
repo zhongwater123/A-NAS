@@ -527,6 +527,49 @@ func TestProductAPIAcceptsSessionsOnlyFromTheClientThatSignedIn(t *testing.T) {
 	}
 }
 
+func TestProductAPIMakesAClientThatKeepsFailingToSignInWait(t *testing.T) {
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service := accounts.NewService(store, apiCredentials{}, accounts.Options{
+		PasswordCost: accounts.PasswordCost{MemoryKiB: 64, Iterations: 1, Parallelism: 1},
+	})
+	if _, err := service.SetupAdministrator(context.Background(), "owner", "correct horse battery staple"); err != nil {
+		t.Fatal(err)
+	}
+	handler := checkedProduct(t, httpapi.ProductDependencies{
+		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: service,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	signIn := func(password, from string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/session",
+			bytes.NewBufferString(`{"username":"owner","password":"`+password+`"}`))
+		request.RemoteAddr, request.Host = "127.0.0.1:41234", "127.0.0.1:8080"
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Forwarded-For", from)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+
+	for range 5 {
+		if got := signIn("not the password", "192.0.2.10").Code; got != http.StatusUnauthorized {
+			t.Fatalf("wrong password = %d, want 401", got)
+		}
+	}
+	waiting := signIn("correct horse battery staple", "192.0.2.10")
+	if waiting.Code != http.StatusTooManyRequests || waiting.Header().Get("Retry-After") != "30" ||
+		!strings.Contains(waiting.Body.String(), `"too_many_attempts"`) {
+		t.Fatalf("sign-in while waiting = %d %q %s", waiting.Code, waiting.Header().Get("Retry-After"), waiting.Body.String())
+	}
+	if got := signIn("correct horse battery staple", "192.0.2.11").Code; got != http.StatusOK {
+		t.Fatalf("sign-in from another client = %d, want 200", got)
+	}
+}
+
 // signedInDirectly signs in as a direct loopback connection, which a plain
 // httptest request is; a session works only from where it signed in.
 func signedInDirectly(ctx context.Context) context.Context {
