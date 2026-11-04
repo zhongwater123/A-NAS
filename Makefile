@@ -88,11 +88,14 @@ web-test: web-install
 web-build: web-install
 	cd web && $(NPM) run build
 
+# Go files under node_modules belong to npm packages, which go.mod ignores.
+GO_FILES = find . -name '*.go' -type f -not -path './.git/*' -not -path '*/node_modules/*'
+
 fmt:
-	gofmt -w $$(find . -name '*.go' -type f -not -path './.git/*')
+	gofmt -w $$($(GO_FILES))
 
 fmt-check:
-	@files="$$(gofmt -l $$(find . -name '*.go' -type f -not -path './.git/*'))"; \
+	@files="$$(gofmt -l $$($(GO_FILES)))"; \
 	if [ -n "$$files" ]; then echo "The following files need gofmt:"; echo "$$files"; exit 1; fi
 
 # lychee checks the links in every tracked Markdown file (in a copy without

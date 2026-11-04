@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // Kind is what a record holds.
@@ -210,7 +212,7 @@ func loadPhotos(ctx context.Context, q queryer, rows []*row) error {
 		ids = append(ids, r.record.ID)
 	}
 	result, err := q.QueryContext(ctx, "SELECT record_id, asset_id, role, taken_at, video FROM record_photos WHERE record_id IN ("+
-		placeholders(len(ids))+") ORDER BY record_id, position", ids...)
+		sqlitedb.Placeholders(len(ids))+") ORDER BY record_id, position", ids...)
 	if err != nil {
 		return err
 	}
@@ -229,10 +231,6 @@ func loadPhotos(ctx context.Context, q queryer, rows []*row) error {
 		r.photoVideo[assetID] = video
 	}
 	return result.Err()
-}
-
-func placeholders(n int) string {
-	return strings.TrimSuffix(strings.Repeat("?, ", n), ", ")
 }
 
 // present turns stored rows into what actor may read: only the photos actor

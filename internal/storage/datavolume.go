@@ -62,10 +62,5 @@ var (
 // UsableBytes is datavolume.UsableBytes.
 func UsableBytes(layout Layout, sizes []uint64) uint64 { return datavolume.UsableBytes(layout, sizes) }
 
-// OutsideLayout is datavolume.OutsideLayout.
-func OutsideLayout(data, metadata []hoststate.ProfileUsage, layout Layout) (convertData, convertMetadata bool) {
-	return datavolume.OutsideLayout(data, metadata, layout)
-}
-
 // FingerprintDisk is datavolume.FingerprintDisk.
 func FingerprintDisk(disk hoststate.Disk) string { return datavolume.FingerprintDisk(disk) }

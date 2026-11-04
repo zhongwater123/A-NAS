@@ -89,7 +89,10 @@ func storageAdmin(t *testing.T, executor storage.VolumeExecutor) *contractClient
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	accountService := accounts.NewService(store, apiCredentials{}, accounts.Options{})
-	storageService := storage.NewService(fake.NewWithSpareDisk(), executor, storage.Options{})
+	storageService, err := storage.OpenService(fake.NewWithSpareDisk(), executor, storage.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(storageService.Close)
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewWithSpareDisk(), DataSource: httpapi.DataSourceSimulated, Accounts: accountService,

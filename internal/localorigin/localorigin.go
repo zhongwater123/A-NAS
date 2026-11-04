@@ -10,7 +10,6 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 )
 
@@ -47,10 +46,14 @@ func hostName(hostHeader string) string {
 	return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
 }
 
+// crossOrigin is the standard library's check (#272): a browser's
+// Sec-Fetch-Site must say same-origin, and without it the Origin, when there
+// is one, must name the request's host.
+var crossOrigin = http.NewCrossOriginProtection()
+
 // CheckWrite accepts a state-changing request only when it names this device
 // (DeviceHost), carries a JSON body (which forces a CORS preflight that the
-// API never grants) and, when the browser sends an Origin, that origin is the
-// same host.
+// API never grants) and, from a browser, comes from the same origin.
 func CheckWrite(r *http.Request) error {
 	if !DeviceHost(r.Host) {
 		return ErrHost
@@ -58,11 +61,8 @@ func CheckWrite(r *http.Request) error {
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
 		return ErrContentType
 	}
-	if origin := r.Header.Get("Origin"); origin != "" {
-		parsed, err := url.Parse(origin)
-		if err != nil || !strings.EqualFold(parsed.Host, r.Host) {
-			return ErrOrigin
-		}
+	if crossOrigin.Check(r) != nil {
+		return ErrOrigin
 	}
 	return nil
 }

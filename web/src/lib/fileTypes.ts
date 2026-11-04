@@ -60,6 +60,8 @@ export function isPreviewableImage(name: string): boolean {
   return isBrowserPreviewableImage(name) || isHEIFImage(name);
 }
 
+// isVideoFile follows the server's video types (internal/mediatype), which
+// it shows a frame of. All but .ts: here that is TypeScript, shown as text.
 export function isVideoFile(name: string): boolean {
-  return /\.(mp4|mov|mkv|webm|avi|m4v|mpg|mpeg|mts|m2ts|flv|f4v|wmv|3gp)$/i.test(name);
+  return /\.(mp4|mov|mkv|webm|avi|m4v|mpg|mpeg|mts|m2ts|flv|f4v|wmv|3gp|rmvb|rm|vob|ogv|asf|divx)$/i.test(name);
 }

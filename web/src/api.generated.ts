@@ -174,6 +174,7 @@ export interface paths {
         };
         get: operations["getSession"];
         put?: never;
+        /** @description Sign in. A client whose sign-ins keep failing waits before it may try again: after 5 failures in a row for one username, or 20 for all usernames together, each further attempt answers 429 too_many_attempts with Retry-After until a wait of 30 seconds, doubling with each failure up to 15 minutes, has passed. Clients are what sessions are bound to (the LAN address, an IPv6 client's /64, or direct loopback). Signing in clears the client's failures. */
         post: operations["createSession"];
         delete: operations["deleteSession"];
         options?: never;
@@ -2305,7 +2306,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Turn a library's people and pets on or off; the owner of a private library and an administrator for the shared library may. Off clears the faces, pets and automatic people found there and keeps names and what members decided; on scans the library again */
+        /** Turn a library's people and pets, or its reading of the text in photos, on or off; the owner of a private library and an administrator for the shared library may. People off clears the faces, pets and automatic people found there and keeps names and what members decided; texts off clears the text read from photos no library that reads holds and keeps what members corrected; on scans or routes the library again */
         patch: operations["changePhotoLibrary"];
         trace?: never;
     };
@@ -2981,7 +2982,7 @@ export interface paths {
         head?: never;
         /**
          * Rename a show as the caller, its own folder and the episode files that carry its title
-         * @description A show without a folder of its own keeps its folders; only the episode files whose names carry its title are renamed. The show keeps its ID, and the library is rescanned under the new name.
+         * @description A show without a folder of its own keeps its folders; only the episode files whose names carry its title are renamed. The show keeps its ID, and the library is rescanned under the new name. Refused with 400 invalid_name for a name that is empty or starts with a dot, 400 show_without_folder when the show has no folder of its own and no episode file carries its title, and 409 show_title_taken when another show in the library has the title.
          */
         patch: operations["renameMediaShow"];
         trace?: never;
@@ -3002,7 +3003,7 @@ export interface paths {
         head?: never;
         /**
          * Rename the video's file, with the subtitles, NFO and artwork named after it, as the caller
-         * @description The new name must keep a video extension. Files keep their IDs, so progress and favorites stay; the library is rescanned to read the title from the new name.
+         * @description The new name must keep a video extension. Files keep their IDs, so progress and favorites stay; the library is rescanned to read the title from the new name. Refused with 400 invalid_name for a name that is empty or starts with a dot and 400 video_extension_required without a video extension.
          */
         patch: operations["renameMediaVideoFile"];
         trace?: never;
@@ -5138,6 +5139,34 @@ export interface components {
             sizeBytes?: number;
             seeders?: number;
             leechers?: number;
+            /**
+             * @description A result with details of its own, from the layout SearXNG gives it; others follow their tab.
+             * @enum {string}
+             */
+            kind?: "paper" | "package" | "place";
+            /** @description A paper's authors. */
+            authors?: string[];
+            /** @description A paper's journal, or else its publisher. */
+            journal?: string;
+            doi?: string;
+            /**
+             * Format: uri
+             * @description A paper's PDF.
+             */
+            pdf?: string;
+            /** @description A package's version. */
+            version?: string;
+            license?: string;
+            /** @description A package's popularity as its site counts it: stars, downloads or pulls. */
+            popularity?: string;
+            /** Format: uri */
+            homepage?: string;
+            /** Format: uri */
+            sourceCode?: string;
+            /** @description A place's address. */
+            address?: string;
+            latitude?: number;
+            longitude?: number;
         };
         WebSearchAnswer: {
             text: string;
@@ -5682,7 +5711,9 @@ export interface components {
             createdAt: string;
             /** @description Whether the library recognises people and pets. */
             people?: boolean;
-            /** @description Whether the caller may turn people and pets on or off: the owner of a private library, an administrator for the shared library. */
+            /** @description Whether the library reads the text in photos: documents, receipts, cards, screenshots. */
+            texts?: boolean;
+            /** @description Whether the caller may turn people and pets, and reading text, on or off: the owner of a private library, an administrator for the shared library. */
             canSetPeople?: boolean;
             /** @description Present when the caller sees this member library only through Administrative Viewing Mode; access is read-only. */
             viewing?: {
@@ -7424,6 +7455,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
         };
     };
     deleteSession: {
@@ -11691,7 +11723,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    people: boolean;
+                    people?: boolean;
+                    texts?: boolean;
                 };
             };
         };
