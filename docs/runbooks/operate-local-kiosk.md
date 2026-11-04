@@ -31,22 +31,12 @@
 
 屏保视频不在 release 中，见[屏保视频](#屏保视频)。
 
-2026-10-06 已在实机确认这些图形包和 Chromium 154 安装完成；最后两个包是 Chromium 硬件解码视频要用的 VA-API 驱动与它的检查工具，2026-10-29 按[硬件视频解码](#硬件视频解码)补装。重装或新设备由管理员执行：
+本地控制台用到的 Debian 软件包（cage、Chromium、中文字体、VA-API 驱动等）由 release 中的 `a-nas-console` 包声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）；它依赖同一版本的 `a-nas-host`。有本机屏幕的设备在运行安装器之前一并安装，安装器发现装着的 `a-nas-console` 不是本 release 的版本时停止：
 
 ```bash
-apt update
-apt install --no-install-recommends \
-  cage \
-  chromium \
-  chromium-sandbox \
-  chromium-l10n \
-  fonts-noto-cjk \
-  wlr-randr \
-  libinput-tools \
-  intel-media-va-driver \
-  vainfo
-
-dpkg-query -W cage chromium chromium-sandbox chromium-l10n fonts-noto-cjk wlr-randr libinput-tools intel-media-va-driver vainfo
+source_release=/home/anas-dev/apps/a-nas/releases/<release ID>
+apt install --no-install-recommends "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
+dpkg-query -W a-nas-host a-nas-console
 systemctl status display-manager.service --no-pager || true
 ```
 
@@ -216,12 +206,11 @@ find "$pools" -mindepth 1 -maxdepth 1 -type d ! -name objects ! -name pools
 
 Debian 13 的 Chromium 154 默认通过 VA-API 用 GPU 解码视频，不需要额外的启动参数：`AcceleratedVideoDecoder`、`AcceleratedVideoDecodeLinuxGL` 与 `AcceleratedVideoDecodeLinuxZeroCopyGL` 都是默认开启的特性，Debian 的 amd64 构建也带着 VA-API。它缺的只是 GPU 的 VA-API 驱动。没有驱动时，Chromium 在 CPU 上解码，再把每一帧上传给 GPU。Experimental NAS 装驱动前，播放 1080p 屏保时 kiosk 会话约占 0.87 个核，装上后约 0.53 个核，其中解码本身从约 0.33 核降到 0.03 核（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。不要往启动器里加 `--enable-features=…`：这些已是默认值，特性改名后旧名字只会被静默忽略。
 
-驱动按 GPU 选择：Intel 核显（Broadwell 及以后，Experimental NAS 的 UHD 730 属于此列）用 `intel-media-va-driver`，AMD 用 `mesa-va-drivers`；Chromium 不支持 NVIDIA 的 VA-API 驱动。启动器在找不到任何 VA-API 驱动时向 kiosk 的 journal 写一行 `no VA-API driver is installed`。
+驱动按 GPU 选择：Intel 核显（Broadwell 及以后，Experimental NAS 的 UHD 730 属于此列）用 `intel-media-va-driver`，AMD 用 `mesa-va-drivers`；Chromium 不支持 NVIDIA 的 VA-API 驱动。`a-nas-console` 依赖其中之一，默认装 Intel 的；AMD 显卡的设备先装 `mesa-va-drivers`，再装 `a-nas-console`。启动器在找不到任何 VA-API 驱动时向 kiosk 的 journal 写一行 `no VA-API driver is installed`。
 
-以 root 安装并重启 kiosk：
+装好 `a-nas-console` 后，以 root 核对驱动并重启 kiosk：
 
 ```bash
-apt install --no-install-recommends intel-media-va-driver vainfo
 vainfo --display drm --device /dev/dri/renderD128 2>&1 | grep -E 'Driver version|VAProfileH264High'
 systemctl restart anas-kiosk@tty1.service
 ```
