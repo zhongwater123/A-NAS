@@ -2,7 +2,8 @@ package photos
 
 import (
 	"context"
-	"strings"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // hintBatch bounds the SQLite parameters of one hint query.
@@ -56,7 +57,7 @@ func duplicateHints(ctx context.Context, q queryer, userID string, objects []str
 SELECT DISTINCT d.object_id, l.owner_name
 FROM assets d JOIN libraries l ON l.id = d.library_id
 WHERE l.kind = 'private' AND l.owner_user_id <> ? AND l.owner_name <> '' AND d.trashed_at IS NULL
-  AND d.object_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(objects)), ",")+`)
+  AND d.object_id IN (`+sqlitedb.Placeholders(len(objects))+`)
 ORDER BY l.owner_name`, args...)
 	if err != nil {
 		return nil, err

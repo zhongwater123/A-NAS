@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 const maxCommentRunes = 1000
@@ -51,7 +53,7 @@ func (s *Store) commentsFor(ctx context.Context, q queryer, rows []*row) (map[st
 	for _, r := range rows {
 		ids = append(ids, r.record.ID)
 	}
-	result, err := q.QueryContext(ctx, "SELECT "+commentColumns+" FROM comments WHERE record_id IN ("+placeholders(len(ids))+
+	result, err := q.QueryContext(ctx, "SELECT "+commentColumns+" FROM comments WHERE record_id IN ("+sqlitedb.Placeholders(len(ids))+
 		") ORDER BY created_at, id", ids...)
 	if err != nil {
 		return nil, err

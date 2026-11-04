@@ -19,6 +19,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/zhongwater123/A-NAS/internal/accountid"
 	"github.com/zhongwater123/A-NAS/internal/appid"
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
@@ -244,7 +246,7 @@ func (e *Executor) DataVolumeReady() bool { return e.dataVolumeReady() }
 
 func (e *Executor) dataVolumeReady() bool {
 	var stats syscall.Statfs_t
-	if err := syscall.Statfs(e.mountPoint, &stats); err != nil || uint64(stats.Type) != 0x9123683e {
+	if err := syscall.Statfs(e.mountPoint, &stats); err != nil || uint64(stats.Type) != unix.BTRFS_SUPER_MAGIC {
 		return false
 	}
 	contents, err := os.ReadFile(filepath.Join(e.mountPoint, ".a-nas-volume.json"))

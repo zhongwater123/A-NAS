@@ -86,7 +86,7 @@ func RequireOwnedStore(root string) error {
 		return fmt.Errorf("%w: %s must be a private directory of this service", ErrStoreUnavailable, root)
 	}
 	var fs syscall.Statfs_t
-	if err := syscall.Statfs(root, &fs); err != nil || uint64(fs.Type) != 0x9123683e {
+	if err := syscall.Statfs(root, &fs); err != nil || uint64(fs.Type) != unix.BTRFS_SUPER_MAGIC {
 		return fmt.Errorf("%w: %s is not on the Btrfs data volume", ErrStoreUnavailable, root)
 	}
 	if fs.Flags&unix.ST_RDONLY != 0 {
