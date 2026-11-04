@@ -19,8 +19,9 @@ socket, which any member of a-nas-users may use, known by the caller's UID.
                   "words": [...],                 only cards whose caption or highlight holds one,
                   "when": [{"is", "not"}]}        only over windows closer to is than to not
   POST /catalog  {"videos": [...],               every card as a line of seconds, light,
-                  "times": false}                 caption and highlight, to write probes from;
-                                                  without times, no seconds (#350)
+                  "times": false,                 caption and highlight, to write probes from;
+                  "scenes": true}                 without times, no seconds; with scenes, each
+                                                  card's scene and a table of scenes (#350)
   POST /montage  {"segments": [...],             the cut as video/mp4, or the
                   "skipped": [{card, why}],       (cards left out, checked when given)
                   "span": "probe" | "frame",      an experiment (#350): no start or end, but
@@ -30,7 +31,8 @@ socket, which any member of a-nas-users may use, known by the caller's UID.
                                                   every half second setting the ends
                                                   (moments.Index.fill)
                   "edges": true,                  and a cut at either end trims it (EDGE)
-                  "look": false}                  no review by the vision model
+                  "look": false,                  no review by the vision model
+                  "scenes": true}                 a scene's segments together, at most 3
                                                  plan's problems with 422
 
 With --vision, the URL of a local vision model (montage.look), the cards carry
@@ -202,7 +204,8 @@ class Handler(BaseHTTPRequestHandler):
             if videos is not None and (not isinstance(videos, list) or not videos
                                        or not all(v in self.server.index.videos for v in videos)):
                 return self.reply(400, {"error": "videos 要是库里的视频编号列表"})
-            return self.reply(200, self.server.index.catalog(videos, times=body.get("times") is not False))
+            return self.reply(200, self.server.index.catalog(videos, times=body.get("times") is not False,
+                                                             scenes=body.get("scenes") is True))
         if self.path == "/montage":
             return self.montage(body)
         return self.reply(404, {"error": "没有这个接口"})
@@ -328,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
                     segment["start"], segment["end"] = start, end
         try:
             clips = self.server.index.check(segments, shows_needed=self.server.vision is not None,
-                                            skipped=body.get("skipped"))
+                                            skipped=body.get("skipped"), scenes=body.get("scenes") is True)
         except moments.PlanError as error:
             return self.reply(422, {"error": "剪辑计划不合规则", "problems": error.problems})
         files = {v: os.path.join(self.server.videos, meta["file"]) for v, meta in self.server.index.videos.items()}

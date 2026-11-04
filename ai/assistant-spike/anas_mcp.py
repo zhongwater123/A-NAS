@@ -411,6 +411,13 @@ STORY = ("每段一句内容、对应的卡片范围，例如侦探片预告写�
          "→ 开车出发 → 雨夜车里出现神秘女人 → …”；")
 FLOWING = ("排段时注意前后衔接：相邻两段尽量是同一场景或同一个人物，同一场戏的几段放在一起；换场景时先放一段交代新地点的画面，"
            "不要在不相干的场景、人物之间来回跳。" if FLOW else "")
+# ANAS_SPIKE_SCENES=1 with FLOW: each catalog line says its card's scene, the catalog names the
+# scenes, and a plan keeps a scene's segments together, at most moments.SCENE_SEGMENTS of them.
+SCENES = FLOW and os.environ.get("ANAS_SPIKE_SCENES") == "1"
+SCENE_LINE = ("每行的“场景N”是这张卡片所在的场景，结果的 scenes 写每个场景是什么地方、有几张卡片：同一场景是同一个地方，"
+              "片头片尾的字幕、标志和演职员表也各自成一个场景；" if SCENES else "")
+SCENE_RULES = ("同一场景的段必须连在一起，离开一个场景后不再回去；一个场景最多 3 段，用其余的段交代别的场景；"
+               "字幕、标志和演职员表的场景不用，除非成员要。" if SCENES else "")
 # ANAS_SPIKE_NO_LOOK=1: the cut is made without the vision model looking at its frames first.
 NO_LOOK = os.environ.get("ANAS_SPIKE_NO_LOOK") == "1"
 SPAN = LOCATE or os.environ.get("ANAS_SPIKE_SPAN") or None
@@ -460,7 +467,7 @@ STYLES = {
 if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mode):
     @server.tool(annotations=READ_ONLY, structured_output=False, description=(
         "列出测试视频库里有什么，剪辑前先调用一次。按视频列出每张镜头卡片，按时间先后，" + CATALOG_LINE +
-        "描述、光线和亮点是本机视觉模型看卡片的三帧写的，可能看错；" + CATALOG_SPAN +
+        "描述、光线和亮点是本机视觉模型看卡片的三帧写的，可能看错；" + CATALOG_SPAN + SCENE_LINE +
         "读完先在回复里写一条故事线，再检索：按指令要的效果，把成片要有的段落按播放顺序列出来，" + STORY +
         "只放能讲进这条故事线的内容，和它搭不上的不用放。然后按故事线写 search_video_moments 的检索词，"
         "每段要的画面各写一条，段落之间的过渡画面也算；库里没有的不要硬找。" + FROM_CATALOG +
@@ -473,7 +480,8 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
                                   is_error=True)
         try:
             status, _kind, raw, _review = video_moments("/catalog", ({"videos": videos} if videos else {})
-                                                        | ({"times": False} if FLOW else {}))
+                                                        | ({"times": False} if FLOW else {})
+                                                        | ({"scenes": True} if SCENES else {}))
         except PhotoError as error:
             return failed(error)
         if status != 200:
@@ -541,7 +549,7 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         "card 写具体的卡片 id，不写通配或整条视频"
         "（例如“描述是城市俯瞰，没有城堡”“flaws 有抖动”“和第 2 段同组”），不超过 80 个字，随成片存档供复盘；没有就给空列表。"
         "按故事线排段：故事线是骨架，每段挑最有看点的画面，不必把每一步都交代；不必每个检索主题都用上，和故事线搭不上的整个不用；"
-        + FLOWING +
+        + FLOWING + SCENE_RULES +
         "同一场景相邻的几张卡片可以连着用，只有 group 相同才算重复画面。成片多长由故事线和切题的素材决定，素材少就短，不为凑时长放进不切题的片段，"
         "开场和铺垫镜头也要切题；成员明确说了时长时才按成员说的剪；"
         "出片前本机视觉模型每 0.5 秒看一帧，核对是否呈现 shows：没有连续 1.5 秒符合的段整次退回，说明画面实际是什么，"
@@ -572,6 +580,8 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
             body["edges"] = True
         if NO_LOOK:
             body["look"] = False
+        if SCENES:
+            body["scenes"] = True
         try:
             status, kind, raw, review = video_moments("/montage", body)
         except PhotoError as error:

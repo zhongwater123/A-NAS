@@ -58,6 +58,8 @@ METHODS = ("mean", "maxsim")
 TOP_K = 5
 # Gallery merges results whose gap is at most this into one time range.
 MERGE_MS = 500
+# EmbeddingGemma's prompt for text to be clustered, used for the cards' place descriptions.
+CLUSTERING = "task: clustering | query: {}"
 # A frame this close to the previous kept frame (mean absolute difference of
 # 32 x 18 grey thumbnails, 0-255) reuses its vector in the skip simulation,
 # run on the layout the pilot recommends.
@@ -595,6 +597,64 @@ def describe(args):
             print(f"{n}/{len(todo)} {(time.monotonic() - began) / n:.2f} s each  {card['id']}: {caption}", flush=True)
 
 
+def scenes(args):
+    """The place alone of each card, from the local vision model on its key frames (look.SCENE,
+    #350), written to scenes.json beside index.json; cards already done for the same seconds are kept."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from montage import look, moments
+
+    index = moments.Index.load(os.path.join(args.cache, "index.json"), os.path.join(args.cache, "frames.npz"))
+    path = os.path.join(args.cache, moments.SCENES)
+    said = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as file:
+            said = json.load(file)["cards"]
+    vision = look.Vision(args.vision)
+    todo = [c for c in index.cards if [said.get(c["id"], {}).get(k) for k in ("start", "end")] != [c["start"], c["end"]]]
+
+    def scene(card):
+        jpegs = []
+        for frame in (index.frame_ms[i] for i in index.keyframes(card, look.KEYFRAMES)):
+            with open(frame_path(card["video"], frame), "rb") as file:
+                jpegs.append(file.read())
+        return card, vision.scene(jpegs)
+
+    began = time.monotonic()
+    with ThreadPoolExecutor(look.WORKERS) as pool:
+        for n, (card, text) in enumerate(pool.map(scene, todo), 1):
+            said[card["id"]] = {"start": card["start"], "end": card["end"], "scene": text}
+            if n % 20 == 0 or n == len(todo):
+                with open(path, "w", encoding="utf-8") as file:
+                    json.dump({"vision": args.name, "cards": said}, file, ensure_ascii=False, indent=1)
+                print(f"{n}/{len(todo)} {(time.monotonic() - began) / n:.2f} s each  {card['id']}: {text}", flush=True)
+
+
+def scene_groups(args):
+    """The scenes the cards' place descriptions make (moments.Index.scene_groups): each
+    description embedded with EmbeddingGemma's clustering prompt, each card's scene number and
+    each scene's name written back into scenes.json (#350)."""
+    from anas_ai import providers
+    from montage import moments
+
+    index = moments.Index.load(os.path.join(args.cache, "index.json"), os.path.join(args.cache, "frames.npz"))
+    provider = providers.MediaPipeProvider(args.model, MANIFEST, cache_dir=args.weight_cache)
+    try:
+        vectors = {i: provider.embed_text(CLUSTERING.format(text)) for i, text in index.scenes.items()}
+    finally:
+        provider.close()
+    scene_of, names = index.scene_groups(vectors)
+    path = os.path.join(args.cache, moments.SCENES)
+    with open(path, encoding="utf-8") as file:
+        said = json.load(file)
+    for card_id, scene in scene_of.items():
+        said["cards"][card_id]["group"] = scene
+    said["groups"] = {str(n): name for n, name in names.items()}
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(said, file, ensure_ascii=False, indent=1)
+    print(f"{len(scene_of)} cards in {len(names)} scenes", flush=True)
+
+
 def measure(args):
     """How the camera moves in each card and how its picture looks (montage.picture), written to
     pictures.json beside index.json; cards measured over the same seconds are kept."""
@@ -646,6 +706,15 @@ def main():
     step.add_argument("--vision", default="http://127.0.0.1:8090/v1/chat/completions",
                       help="the local vision model's chat completions URL (llama-server)")
     step.add_argument("--name", default="Qwen3-VL-2B-Instruct Q8_0", help="the vision model, as recorded")
+    step = steps.add_parser("scenes", help="describe the place alone of each montage card with a local vision model")
+    step.add_argument("--cache", required=True, help="the model's directory under the cache, with index.json")
+    step.add_argument("--vision", default="http://127.0.0.1:8090/v1/chat/completions",
+                      help="the local vision model's chat completions URL (llama-server)")
+    step.add_argument("--name", default="Qwen3-VL-2B-Instruct Q8_0", help="the vision model, as recorded")
+    step = steps.add_parser("scene-groups", help="group the cards into scenes by their place descriptions")
+    step.add_argument("--cache", required=True, help="the model's directory under the cache, with scenes.json")
+    step.add_argument("--model", required=True)
+    step.add_argument("--weight-cache", default=os.path.join(datasets.ROOT, "cache", "xnnpack"))
     step = steps.add_parser("measure", help="measure camera motion, sharpness and exposure of each montage card")
     step.add_argument("--cache", required=True, help="the model's directory under the cache, with index.json")
     step.add_argument("--workers", type=int, default=4)
@@ -670,6 +739,10 @@ def main():
         build_index(args)
     elif args.step == "describe":
         describe(args)
+    elif args.step == "scenes":
+        scenes(args)
+    elif args.step == "scene-groups":
+        scene_groups(args)
     elif args.step == "measure":
         measure(args)
     else:

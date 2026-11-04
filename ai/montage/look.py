@@ -45,6 +45,12 @@ DESCRIBE = ("用一句中文描述上面几张图（同一段视频按时间先�
             "是夜晚就写夜晚。只写几帧里都看得到的，认不准的建筑就说建筑，不要编地名，不超过 40 个字。"
             "直接写描述，不要复述题目。")
 
+# The place alone, for telling a card's scene apart from the people in it (#350): a film shot
+# in one look, men in suits in the dark, reads alike in pictures and in captions, while an
+# office, a car and a beach are different places.
+SCENE = ("上面是同一段视频按时间先后的几帧。只描述场景，不写人物在做什么、什么表情：在什么地方（室内还是室外、什么场所），"
+         "有哪些环境和陈设，什么时间、天气和光线。认不准的地方就说是什么样的建筑或房间，不要编地名，不超过 40 个字。直接写描述。")
+
 # Two more facts of a card a 2B model gets right on the same frames; shot size, camera
 # motion, landmarks and looks it does not (docs/research/video-moment-retrieval.md).
 LIGHTS = ("晴天", "阴天", "逆光", "黄昏", "夜晚", "室内")
@@ -96,6 +102,9 @@ class Vision:
 
     def describe(self, jpegs: list[bytes]) -> str:
         return self.ask(DESCRIBE, jpegs, 80).splitlines()[0].strip()
+
+    def scene(self, jpegs: list[bytes]) -> str:
+        return self.ask(SCENE, jpegs, 80).splitlines()[0].strip()
 
     def light(self, jpegs: list[bytes]) -> str:
         """One of LIGHTS, or 不确定 when the answer is none of them."""

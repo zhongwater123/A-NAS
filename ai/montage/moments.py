@@ -79,6 +79,17 @@ SNAP = 1.5
 # A step whose frame is less alike than this to its segment's peak frame shows another shot
 # (one the cut detection missed), and the segment does not take it.
 FLOOR = 0.8
+# What the vision model said of each card's place alone (eval.video_moments scenes, #350),
+# and the scenes they make: cards whose place descriptions' vectors are on average this alike
+# (EmbeddingGemma's clustering prompt) are one scene. 0.92 told apart case-01's office, car,
+# beach and dark rooms, which pictures alone do not, and joined case-08's park, which the
+# film shows twice five minutes apart.
+SCENES = "scenes.json"
+SCENE_ALIKE = 0.92
+# A scene gives a plan at most this many segments, and a plan does not go back to one.
+SCENE_SEGMENTS = 3
+# A scene's name is cut to this many characters: a 2B model sometimes repeats itself.
+SCENE_CHARS = 40
 # Words with their seconds by video, beside the index, from speech recognition.
 SPEECH = "speech.json"
 
@@ -136,6 +147,10 @@ class Index:
         self.cards = self._cards()
         self.captions, self.notes, self.pictures = {}, {}, {}
         self.words: dict[str, list] = {}
+        self.scenes: dict[str, str] = {}
+        # Each card's scene number, from 1 in order of first appearance, and each scene's name.
+        self.scene_of: dict[str, int] = {}
+        self.scene_names: dict[int, str] = {}
 
     @classmethod
     def load(cls, index_path: str, vectors_path: str) -> "Index":
@@ -158,6 +173,14 @@ class Index:
         if os.path.exists(pictures):
             with open(pictures, encoding="utf-8") as file:
                 loaded.pictures = _for_cards(json.load(file)["cards"], loaded.cards)
+        scenes = os.path.join(os.path.dirname(index_path), SCENES)
+        if os.path.exists(scenes):
+            with open(scenes, encoding="utf-8") as file:
+                said = json.load(file)
+            kept = _for_cards(said["cards"], loaded.cards)
+            loaded.scenes = {i: e["scene"] for i, e in kept.items()}
+            loaded.scene_of = {i: e["group"] for i, e in kept.items() if "group" in e}
+            loaded.scene_names = {int(n): name for n, name in said.get("groups", {}).items()}
         speech = os.path.join(os.path.dirname(index_path), SPEECH)
         if os.path.exists(speech):
             with open(speech, encoding="utf-8") as file:
@@ -221,12 +244,13 @@ class Index:
                 mean += self.frames[i]
         return pieces
 
-    def catalog(self, videos=None, times=True) -> dict:
+    def catalog(self, videos=None, times=True, scenes=False) -> dict:
         """What the library holds, for writing a story and probes from (#326): every card of every
         video (or of videos), in time order, as one line of its seconds and its shot's, light,
         caption, highlight and flaws, enough to cut it without searching for it. Cards with no
         caption say so; a vector alone cannot be read. Without times, the line leaves out the
-        seconds, for a planner that does not set them (#350)."""
+        seconds, for a planner that does not set them (#350). With scenes, each line says its
+        card's scene number, and "scenes" names each scene once with its number of cards."""
         out = {}
         for card in self.cards:
             if videos is not None and card["video"] not in videos:
@@ -235,6 +259,8 @@ class Index:
             a, b = card["shot"]
             line = card["id"] + (f" {card['start']:g}–{card['end']:g} 秒（镜头 {round(a, 2):g}–{round(b, 2):g}）"
                                  if times else "")
+            if scenes and card["id"] in self.scene_of:
+                line += f" 场景{self.scene_of[card['id']]}"
             if notes.get("light"):
                 line += f" {notes['light']}"
             line += " " + self.captions.get(card["id"], "（没有描述）")
@@ -245,7 +271,15 @@ class Index:
                 line += f" 毛病：{'、'.join(flaws)}"
             entry = out.setdefault(card["video"], {"seconds": round(self.videos[card["video"]]["duration"], 1), "cards": []})
             entry["cards"].append(line)
-        return {"videos": out}
+        if not scenes or not self.scene_of:
+            return {"videos": out}
+        listed = [c["id"] for c in self.cards if videos is None or c["video"] in videos]
+        counts = {}
+        for card_id in listed:
+            if card_id in self.scene_of:
+                counts[self.scene_of[card_id]] = counts.get(self.scene_of[card_id], 0) + 1
+        return {"scenes": {str(n): f"{self.scene_names.get(n, '')}（{k} 张卡片）" for n, k in sorted(counts.items())},
+                "videos": out}
 
     def search(self, probes: dict[str, np.ndarray], limit: int = CARDS_MAX, videos=None, when=(), each=None,
                lights=None, words=None) -> dict:
@@ -313,10 +347,12 @@ class Index:
             ("过暗", measured["bright"] < DARK), ("过曝", measured["clipped"] > BLOWN)) if bad]
         return {"motion": measured["motion"], "flaws": flaws}
 
-    def check(self, segments: list[dict], shows_needed: bool = False, skipped=None) -> list[tuple[str, float, float]]:
+    def check(self, segments: list[dict], shows_needed: bool = False, skipped=None,
+              scenes=False) -> list[tuple[str, float, float]]:
         """The plan's (video, start, end) in order, or PlanError listing what is wrong. With
         shows_needed every segment says in shows what its picture is to show, to be looked at;
-        skipped, when given, lists cards left out, each once and with why in a sentence."""
+        skipped, when given, lists cards left out, each once and with why in a sentence. With
+        scenes, a scene's segments run together, and at most SCENE_SEGMENTS of them."""
         cards = {c["id"]: c for c in self.cards}
         problems = []
         if not 1 <= len(segments) <= SEGMENTS_MAX:
@@ -348,6 +384,8 @@ class Index:
             if not isinstance(shows, str) or len(shows) > SHOWS_CHARS or (shows_needed and not shows.strip()):
                 problems.append(f"第 {n} 段的 shows 要写这段画面呈现指令里的什么，1–{SHOWS_CHARS} 个字符")
             clips.append((card["video"], float(start), float(end)))
+        if scenes:
+            problems += self._scene_problems(segments)
         problems += [f"第 {a + 1} 段和第 {b + 1} 段用了同一段画面" for a in range(len(clips)) for b in range(a)
                      if clips[a][0] == clips[b][0] and min(clips[a][2], clips[b][2]) > max(clips[a][1], clips[b][1])]
         if skipped is not None:
@@ -355,6 +393,51 @@ class Index:
         if problems:
             raise PlanError(problems)
         return clips
+
+    def _scene_problems(self, segments: list[dict]) -> list[str]:
+        problems, left, seen, count = [], set(), None, {}
+        for n, segment in enumerate(segments, 1):
+            scene = self.scene_of.get(segment.get("card")) if isinstance(segment, dict) else None
+            if scene is None:
+                continue
+            count[scene] = count.get(scene, 0) + 1
+            if scene != seen:
+                if scene in left:
+                    problems.append(f"第 {n} 段回到了已经离开的场景{scene}：同一场景的段要连在一起")
+                if seen is not None:
+                    left.add(seen)
+                seen = scene
+        problems += [f"场景{scene}用了 {k} 段，一个场景最多 {SCENE_SEGMENTS} 段" for scene, k in count.items()
+                     if k > SCENE_SEGMENTS]
+        return problems
+
+    def scene_groups(self, vectors: dict) -> tuple[dict, dict]:
+        """Scenes from the place descriptions' vectors, by card id: average linkage of cards while
+        the two most alike groups are SCENE_ALIKE alike on average. Each card's scene number,
+        from 1 in time order, and each scene's name, the description nearest its mean."""
+        ids = [c["id"] for c in self.cards if c["id"] in vectors and c["id"] in self.scenes]
+        unit = np.stack([vectors[i] / np.linalg.norm(vectors[i]) for i in ids])
+        alike = unit @ unit.T
+        groups = [[k] for k in range(len(ids))]
+        while len(groups) > 1:
+            best, pair = -1.0, None
+            for a in range(len(groups)):
+                for b in range(a):
+                    s = float(alike[np.ix_(groups[a], groups[b])].mean())
+                    if s > best:
+                        best, pair = s, (a, b)
+            if best < SCENE_ALIKE:
+                break
+            a, b = pair
+            groups[b] += groups.pop(a)
+        groups.sort(key=min)
+        scene_of, names = {}, {}
+        for n, members in enumerate(groups, 1):
+            mean = unit[members].mean(axis=0)
+            names[n] = self.scenes[ids[max(members, key=lambda k: float(unit[k] @ mean))]][:SCENE_CHARS]
+            for k in members:
+                scene_of[ids[k]] = n
+        return scene_of, names
 
     @staticmethod
     def _skipped_problems(skipped, used: set, cards: dict) -> list[str]:

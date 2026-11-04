@@ -438,6 +438,29 @@ class MomentsTest(unittest.TestCase):
         spans, _problems = self.index.fill([("07-1-1", self.castle)], "frame", 6, at)
         self.assertEqual(spans, [(28, 31)])
 
+    def test_scenes_group_cards_by_their_places_and_bind_the_plan(self):
+        self.index.scenes = {"07-0-0": "室外，集市", "07-1-0": "室外，城堡", "07-1-1": "室外，城堡的另一面"}
+        basis = np.eye(4, dtype=np.float32)
+        vectors = {"07-0-0": basis[0], "07-1-0": basis[1], "07-1-1": basis[1] * 0.95 + basis[2] * 0.31}
+        scene_of, names = self.index.scene_groups(vectors)
+        self.assertEqual(scene_of, {"07-0-0": 1, "07-1-0": 2, "07-1-1": 2})
+        self.assertEqual(names[1], "室外，集市")
+        self.index.scene_of, self.index.scene_names = scene_of, names
+        catalog = self.index.catalog(times=False, scenes=True)
+        self.assertTrue(catalog["scenes"]["2"].endswith("（2 张卡片）"))
+        self.assertIn("场景2", catalog["videos"]["07"]["cards"][1])
+
+        def plan(*cards):
+            return [{"card": c, "start": s, "end": s + 2} for c, s in cards]
+
+        self.index.check(plan(("07-1-0", 10), ("07-1-1", 30), ("07-0-0", 2)), scenes=True)
+        with self.assertRaises(moments.PlanError) as refused:
+            self.index.check(plan(("07-1-0", 10), ("07-0-0", 2), ("07-1-1", 30)), scenes=True)
+        self.assertIn("回到了已经离开的场景2", refused.exception.problems[0])
+        with self.assertRaises(moments.PlanError) as refused:
+            self.index.check(plan(("07-1-0", 8), ("07-1-0", 12), ("07-1-1", 30), ("07-1-1", 36)), scenes=True)
+        self.assertEqual(refused.exception.problems, ["场景2用了 4 段，一个场景最多 3 段"])
+
     def test_fill_keeps_each_segment_to_its_minimum(self):
         market = np.eye(8, dtype=np.float32)[0]
         spans, _problems = self.index.fill([("07-0-0", market), ("07-1-0", self.castle)], "probe", 3, self.at,
