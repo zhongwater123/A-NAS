@@ -1,8 +1,26 @@
 # AI 开发与评估
 
-更新时间：2026-10-27
+更新时间：2026-11-04
 
-本文记录相册 AI 的模型测试、运行环境打包、数据集与评估命令。以下路径示例以开发机 B 为准；macOS 的模型位置和导出限制见[开发机 C](environments/macos.md)。普通门禁与服务隔离检查见[测试与验证](testing.md)，实验 NAS 上启用 AI 使用[运行手册](../runbooks/enable-photo-ai.md)。
+本文记录相册 AI 的模型拉取、模型测试、运行环境打包、数据集与评估命令。以下路径示例以开发机 B 为准；macOS 的模型位置和导出限制见[开发机 C](environments/macos.md)。普通门禁与服务隔离检查见[测试与验证](testing.md)，实验 NAS 上启用 AI 使用[运行手册](../runbooks/enable-photo-ai.md)。
+
+## 拉取模型
+
+`deploy/models/*.json` 固定的模型文件存放在私有仓库 [zhongwater123/A-NAS-assets](https://github.com/zhongwater123/A-NAS-assets) 的 Release 中：每个文件一个 Release，标签为 `sha256-<文件的 SHA-256>`。D-FINE 的 ONNX 和文字识别的两个 GGUF 是我们自己导出、转换的，上游没有；在 arm64 上重新导出的 D-FINE 哈希也不同（见[开发机 C](environments/macos.md)）。新开发机直接拉取：
+
+```bash
+scripts/fetch-models.sh /mnt/d/A-NAS-models     # Windows 在 WSL 中运行；macOS 用 ~/A-NAS-models
+```
+
+脚本需要 jq 和已登录 GitHub 的 gh，账号要能读这个仓库（请仓库所有者加为协作者）。文件放进 `deploy-dev.ps1` 默认目录与系统测试使用的结构，逐个核对清单中的大小与 SHA-256；已就位且校验通过的文件跳过。只拉部分模型时，在目录后列出它们的清单。2 GiB 以上的文件超过 GitHub 单个附件的上限，按 1 GiB 分段存放，下载后拼回；中断后重跑，已下完的分段不再下载。2026-11-04 共 8 个文件，约 4.4 GB。
+
+新增或更换模型时，按清单在本机放好文件，再上传：
+
+```bash
+scripts/fetch-models.sh --publish /mnt/d/A-NAS-models deploy/models/<名称>.json
+```
+
+上传前同样核对哈希。新模型的目录先加进脚本里的 `layout`。仓库开启了不可变 Release，发布后不能改动，换文件就是新的 SHA-256 和新的 Release。上传中断会留下草稿 Release，在 GitHub 上删除后重跑。
 
 ## 模型测试与运行环境
 
