@@ -39,8 +39,6 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0029：宝宝是档案而不是账号，频道照片存入共享图库，记录由家庭服务持有](0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)（proposed）
 
 - [0030：网页搜索由随系统安装的 SearXNG 服务提供](0030-ship-web-search-as-a-built-in-searxng-service.md)（proposed）
-- 0031：宿主机依赖由 A-NAS 自己的 Debian 软件包声明（draft，[PR #381](https://github.com/zhongwater123/A-NAS/pull/381)）
-
 - [0031：宿主机依赖由 A-NAS 自己的 Debian 软件包声明](0031-declare-host-dependencies-in-debian-packages.md)（proposed）
 
 ## 格式

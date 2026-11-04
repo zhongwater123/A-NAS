@@ -40,8 +40,8 @@ A-NAS 在 Debian 13 上运行，依赖 Samba、Btrfs 工具、FFmpeg、Chromium 
 一个 PR，按步骤分提交；之后由负责部署的会话在 Experimental NAS 上安装。第 1–3 步在 [PR #381](https://github.com/zhongwater123/A-NAS/pull/381) 中，第 4 步随下一个 release。
 
 1. **包定义与构建**：`deploy/debian/a-nas-host/`、`deploy/debian/a-nas-console/` 的 `DEBIAN/control` 与 `postinst`，由 `scripts/build-host-packages.sh` 构建；Makefile 的 `host-packages` 在 `build-binaries` 之后构建，属于 `make check`；`deploy-dev.ps1` 把包与二进制一起暂存并输出哈希；`make ops-check` 用 ShellCheck 检查 `postinst`。
-2. **系统测试镜像**：`build-system-test-image.sh` 从 `a-nas-host` 的 `Depends` 取产品依赖，测试工具单独列出；系统测试检查安装器在没有包、以及包版本不符时以退出码 3 结束、不改变系统，再以 apt 装上 release 的包。容器中的网络不由 ifupdown 管理，`postinst` 的判断在单独的容器中验证（装上 ifupdown 并写入一个 `allow-hotplug` 接口），网络等待的效果只能在第 4 步的实机重启中核对。
-3. **安装器、向导与手册**：安装器改为核对包版本；向导、实验存储手册、本地控制台手册与容器代理手册改为安装这两个包；`CURRENT.md` 删去 smbd 的阻塞。
+2. **系统测试镜像**：`build-system-test-image.sh` 从 `a-nas-host` 的 `Depends` 取产品依赖，测试工具单独列出；系统测试检查安装器在没有包、以及包版本不符时以退出码 3 结束、不改变系统，再以 `dpkg -i` 装上 release 的包。容器中的网络不由 ifupdown 管理，`postinst` 的判断在单独的容器中验证（装上 ifupdown 并写入一个 `allow-hotplug` 接口），网络等待的效果只能在第 4 步的实机重启中核对。
+3. **安装器、向导与手册**：安装器改为核对包版本；向导、实验存储手册与本地控制台手册改为安装这两个包；Docker、Caddy 与助手工具是 `Suggests`，各自的启用手册不变；`CURRENT.md` 写明 smbd 的修复所在，第 4 步实机核对后再删去这项阻塞。
 4. **Experimental NAS**：随下一个 release 安装两个包，再运行安装器。之后正常重启一次，核对 smbd 监听 `172.18.45.48:445`，这同时是 v1.0.1 验收的第 6 步。
 
 ## 后果
