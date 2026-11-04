@@ -50,6 +50,9 @@ DARK = 25.0
 BLOWN = 0.3
 TAGS = 5
 SEGMENT_MIN = 1.5
+# A segment the program's own trim off a cut at its ends shortened may run down to this (#350):
+# a 1.5 s segment kept 0.05 s clear of a cut is not refused for it.
+TRIMMED_MIN = 1.2
 SEGMENTS_MAX = 30
 REASON_CHARS = 200
 SHOWS_CHARS = 40
@@ -97,6 +100,12 @@ SCENE_SEGMENTS = 3
 FAST_SEGMENTS = 6
 # A segment's pace, as the planner gives it: (shortest, aimed at, longest) seconds (#350).
 PACES = {"慢": (4.0, 5.0, 6.0), "中": (3.0, 3.5, 4.5), "快": (1.5, 2.0, 2.5)}
+
+
+def slowest(seconds: float) -> str:
+    """The slowest pace whose shortest segment is no longer than seconds (快 for any less)."""
+    return next((name for name, (low, _aim, _high) in PACES.items() if low <= seconds + ROUNDING), "快")
+
 # The cards a plan picks can run at least this share of its target, so that the program has
 # room to set each segment's seconds (#350).
 MARGIN = 1.1
@@ -177,6 +186,8 @@ class Index:
         self.captions, self.notes, self.pictures = {}, {}, {}
         self.words: dict[str, list] = {}
         self.scenes: dict[str, str] = {}
+        # The title, credits or caption over a card's picture ("kind：words", montage.look.TITLES).
+        self.texts: dict[str, str] = {}
         # Each card's scene number, from 1 in order of first appearance, and each scene's name.
         self.scene_of: dict[str, int] = {}
         self.scene_names: dict[int, str] = {}
@@ -208,6 +219,7 @@ class Index:
                 said = json.load(file)
             kept = _for_cards(said["cards"], loaded.cards)
             loaded.scenes = {i: e["scene"] for i, e in kept.items()}
+            loaded.texts = {i: e["text"] for i, e in kept.items() if e.get("text")}
             loaded.scene_of = {i: e["group"] for i, e in kept.items() if "group" in e}
             loaded.scene_names = {int(n): name for n, name in said.get("groups", {}).items()}
         speech = os.path.join(os.path.dirname(index_path), SPEECH)
@@ -273,18 +285,19 @@ class Index:
                 mean += self.frames[i]
         return pieces
 
-    def catalog(self, videos=None, times=True, scenes=False, lengths=False) -> dict:
+    def catalog(self, videos=None, times=True, scenes=False, lengths=False, titles=True) -> dict:
         """What the library holds, for writing a story and probes from (#326): every card of every
         video (or of videos), in time order, as one line of its seconds and its shot's, light,
         caption, highlight and flaws, enough to cut it without searching for it. Cards with no
         caption say so; a vector alone cannot be read. Without times, the line leaves out the
         seconds, for a planner that does not set them (#350). With scenes, each line says its
         card's scene number, and "scenes" names each scene once with its number of cards. With
-        lengths, each line says the most seconds a segment of its card can run (usable)."""
+        lengths, each line says the most seconds a segment of its card can run (usable). Without
+        titles, cards with a title, credits, a logo or a caption over them (self.texts) are left out."""
         out = {}
-        for card in self.cards:
-            if videos is not None and card["video"] not in videos:
-                continue
+        listed = [c for c in self.cards if (videos is None or c["video"] in videos)
+                  and (titles or c["id"] not in self.texts)]
+        for card in listed:
             notes = self.notes.get(card["id"], {})
             a, b = card["shot"]
             line = card["id"] + (f" {card['start']:g}–{card['end']:g} 秒（镜头 {round(a, 2):g}–{round(b, 2):g}）"
@@ -305,11 +318,10 @@ class Index:
             entry["cards"].append(line)
         if not scenes or not self.scene_of:
             return {"videos": out}
-        listed = [c["id"] for c in self.cards if videos is None or c["video"] in videos]
         counts = {}
-        for card_id in listed:
-            if card_id in self.scene_of:
-                counts[self.scene_of[card_id]] = counts.get(self.scene_of[card_id], 0) + 1
+        for card in listed:
+            if card["id"] in self.scene_of:
+                counts[self.scene_of[card["id"]]] = counts.get(self.scene_of[card["id"]], 0) + 1
         return {"scenes": {str(n): f"{self.scene_names.get(n, '')}（{k} 张卡片）" for n, k in sorted(counts.items())},
                 "videos": out}
 
@@ -380,11 +392,12 @@ class Index:
         return {"motion": measured["motion"], "flaws": flaws}
 
     def check(self, segments: list[dict], shows_needed: bool = False, skipped=None,
-              scenes=False) -> list[tuple[str, float, float]]:
+              scenes=False, shortest=SEGMENT_MIN) -> list[tuple[str, float, float]]:
         """The plan's (video, start, end) in order, or PlanError listing what is wrong. With
         shows_needed every segment says in shows what its picture is to show, to be looked at;
         skipped, when given, lists cards left out, each once and with why in a sentence. With
-        scenes, a scene's segments run together, and at most SCENE_SEGMENTS of them."""
+        scenes, a scene's segments run together, and at most SCENE_SEGMENTS of them. Segments run
+        shortest seconds at least (TRIMMED_MIN after the program's trims)."""
         cards = {c["id"]: c for c in self.cards}
         problems = []
         if not 1 <= len(segments) <= SEGMENTS_MAX:
@@ -403,8 +416,8 @@ class Index:
             # Cards give seconds to two places and cuts to three: half a hundredth, under a frame, is let pass.
             if start < lo - ROUNDING or end > hi + ROUNDING:
                 problems.append(f"第 {n} 段 {start:g}–{end:g} 秒越出了镜头 {lo:g}–{hi:g} 秒，片段不能跨过镜头切点")
-            if end - start < SEGMENT_MIN:
-                problems.append(f"第 {n} 段只有 {end - start:.2g} 秒，每段至少 {SEGMENT_MIN:g} 秒")
+            if end - start < shortest:
+                problems.append(f"第 {n} 段只有 {end - start:.2g} 秒，每段至少 {shortest:g} 秒")
             if end - start > CLIP_MAX + ROUNDING:
                 problems.append(f"第 {n} 段有 {end - start:.3g} 秒，每段最多 {CLIP_MAX:g} 秒")
             if any(self.flat[i] and self.rows[i][1] < end and start < self.rows[i][2] for i in self._shot_windows(card)):
@@ -615,7 +628,7 @@ class Index:
         return seconds(a, b)
 
     def fill(self, segments: list, mode: str, target: float, at, caps=None, mins=None,
-             shares=None) -> tuple[list, list[str]]:
+             shares=None, floor=None) -> tuple[list, list[str]]:
         """Seconds for segments, each (card id, probe vector), set by the program to add up to
         target (#350). A segment starts as the window of its card the probe matches best, clear
         of flat windows and of the segments before it. Then, STEP at a time, the segment end whose
@@ -628,20 +641,22 @@ class Index:
         other scales are compared fairly. Steps stay in their shot, off flat windows and the
         other segments, and within caps[n] (CLIP_MAX by default); a segment keeps mins[n]
         (SEGMENT_MIN by default). A segment also keeps to its card, and to the windows next to it
-        in its shot that are STILL alike to the card (_region), and takes no step whose frame
+        in its shot that are STILL alike to the card (region), and takes no step whose frame
         is less than FLOOR alike to its peak frame: the time it cannot take goes to the others.
         An end inside speech (self.words) then moves to the nearest pause that keeps those rules,
         in or out: out by at most SNAP, and a line may take a segment SNAP past its cap, never
-        past CLIP_MAX; in as far as the segment's minimum allows. Returns [(start, end) or None] and the problems."""
+        past CLIP_MAX; in as far as the segment's minimum allows. With floor, a segment that cannot
+        reach mins[n] keeps what it reaches when that is floor or more, and that is its minimum.
+        Returns [(start, end) or None] and the problems."""
         if mode not in SPANS:
             raise ValueError(f"mode 要是 {'、'.join(SPANS)} 之一")
         cards = {c["id"]: c for c in self.cards}
         caps = caps or [CLIP_MAX] * len(segments)
-        mins = mins or [SEGMENT_MIN] * len(segments)
+        mins = list(mins or [SEGMENT_MIN] * len(segments))
         spans, problems, peaks, regions = [], [], [], []
         for n, (card_id, probe) in enumerate(segments):
             card = cards[card_id]
-            lo, hi = self._region(card)
+            lo, hi = self.region(card)
             regions.append((lo, hi))
             free = [i for i in card["windows"] if not self.flat[i] and not self._taken(
                 card["video"], max(lo, self.rows[i][1]), min(hi, self.rows[i][2]), spans)]
@@ -680,6 +695,9 @@ class Index:
         for n in range(len(spans)):
             while spans[n] and length(n) < mins[n]:
                 steps = grown(n)
+                if not steps and floor is not None and length(n) >= floor - ROUNDING:
+                    mins[n] = length(n)
+                    break
                 if not steps:
                     problems.append(f"第 {n + 1} 段的 {segments[n][0]} 剪不出 {mins[n]:g} 秒：镜头太短或被前后的段挡住")
                     spans[n] = None
@@ -729,12 +747,12 @@ class Index:
     def usable(self, card: dict) -> float:
         """The most seconds a segment of card can run (Index.fill): its region less its flat
         windows, at most CLIP_MAX, down to the half second."""
-        lo, hi = self._region(card)
+        lo, hi = self.region(card)
         flat = sum(max(0.0, min(hi, row[2]) - max(lo, row[1])) for i, row in enumerate(self.rows)
                    if self.flat[i] and row[0] == card["video"])
         return math.floor(min(CLIP_MAX, hi - lo - flat) * 2) / 2
 
-    def _region(self, card: dict) -> tuple[float, float]:
+    def region(self, card: dict) -> tuple[float, float]:
         """The seconds a segment of card may run: the card, and the windows next to it in its
         shot whose pictures are STILL alike to the card's mean, up to a window that is not."""
         lo, hi = card["shot"]

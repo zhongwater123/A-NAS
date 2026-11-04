@@ -599,35 +599,44 @@ def describe(args):
 
 def scenes(args):
     """The place alone of each card, from the local vision model on its key frames (look.SCENE,
-    #350), written to scenes.json beside index.json; cards already done for the same seconds are kept."""
+    #350), and any title, credits or caption over them (look.TITLES), written to
+    scenes.json beside index.json; what is already there for the same seconds is kept."""
     from concurrent.futures import ThreadPoolExecutor
 
     from montage import look, moments
 
     index = moments.Index.load(os.path.join(args.cache, "index.json"), os.path.join(args.cache, "frames.npz"))
     path = os.path.join(args.cache, moments.SCENES)
-    said = {}
+    data = {"cards": {}}
     if os.path.exists(path):
         with open(path, encoding="utf-8") as file:
-            said = json.load(file)["cards"]
+            data = json.load(file)
+    said = data["cards"]
     vision = look.Vision(args.vision)
-    todo = [c for c in index.cards if [said.get(c["id"], {}).get(k) for k in ("start", "end")] != [c["start"], c["end"]]]
+
+    def same(card):
+        return [said.get(card["id"], {}).get(k) for k in ("start", "end")] == [card["start"], card["end"]]
+
+    todo = [c for c in index.cards if not same(c) or "text" not in said[c["id"]]]
 
     def scene(card):
         jpegs = []
         for frame in (index.frame_ms[i] for i in index.keyframes(card, look.KEYFRAMES)):
             with open(frame_path(card["video"], frame), "rb") as file:
                 jpegs.append(file.read())
-        return card, vision.scene(jpegs)
+        kept = said[card["id"]] if same(card) else {"start": card["start"], "end": card["end"]}
+        place = kept["scene"] if "scene" in kept else vision.scene(jpegs)
+        return card, kept | {"scene": place, "text": vision.text(jpegs)}
 
     began = time.monotonic()
     with ThreadPoolExecutor(look.WORKERS) as pool:
-        for n, (card, text) in enumerate(pool.map(scene, todo), 1):
-            said[card["id"]] = {"start": card["start"], "end": card["end"], "scene": text}
+        for n, (card, entry) in enumerate(pool.map(scene, todo), 1):
+            said[card["id"]] = entry
             if n % 20 == 0 or n == len(todo):
                 with open(path, "w", encoding="utf-8") as file:
-                    json.dump({"vision": args.name, "cards": said}, file, ensure_ascii=False, indent=1)
-                print(f"{n}/{len(todo)} {(time.monotonic() - began) / n:.2f} s each  {card['id']}: {text}", flush=True)
+                    json.dump(data | {"vision": args.name, "cards": said}, file, ensure_ascii=False, indent=1)
+                print(f"{n}/{len(todo)} {(time.monotonic() - began) / n:.2f} s each  {card['id']}: "
+                      f"{entry['scene']} {entry['text'] or '无叠加文字'}", flush=True)
 
 
 def scene_groups(args):
@@ -706,7 +715,7 @@ def main():
     step.add_argument("--vision", default="http://127.0.0.1:8090/v1/chat/completions",
                       help="the local vision model's chat completions URL (llama-server)")
     step.add_argument("--name", default="Qwen3-VL-2B-Instruct Q8_0", help="the vision model, as recorded")
-    step = steps.add_parser("scenes", help="describe the place alone of each montage card with a local vision model")
+    step = steps.add_parser("scenes", help="describe the place alone of each montage card, and any text over it, with a local vision model")
     step.add_argument("--cache", required=True, help="the model's directory under the cache, with index.json")
     step.add_argument("--vision", default="http://127.0.0.1:8090/v1/chat/completions",
                       help="the local vision model's chat completions URL (llama-server)")

@@ -2,10 +2,11 @@
 
 One request carries all the model needs, and nothing else: a system prompt of the rules, and a
 message of the instruction, the cut's seconds, its style and the catalog of cards (moments.Index
-catalog with scenes and the seconds each card can run). The model answers with one JSON object,
-a story line and the segments, each a card with what it shows, its pace and why; the program
-sets every segment's seconds from that (moments.Index.fill). A plan the video service refuses
-goes back with its problems, in the same conversation, for the whole plan again.
+catalog with scenes and the seconds each card can run, without the cards text is laid over).
+The model answers with one JSON object, a story line and the segments, each a card with what
+it shows, its pace and why; the program sets every segment's seconds from that
+(moments.Index.fill). A plan the video service refuses goes back with its problems, in the
+same conversation, for the whole plan again.
 """
 
 import json
@@ -40,7 +41,7 @@ SYSTEM = (
 
 def message(index: moments.Index, instruction: str, seconds: float, style: str | None) -> str:
     """The request's one message: the instruction, the seconds, the style's rules and the catalog."""
-    catalog = index.catalog(times=False, scenes=True, lengths=True)
+    catalog = index.catalog(times=False, scenes=True, lengths=True, titles=False)
     lines = [f"指令：{instruction}", f"目标时长：约 {seconds:g} 秒"]
     if style:
         lines.append(f"体裁：{style}。剪法：{STYLES[style]}")

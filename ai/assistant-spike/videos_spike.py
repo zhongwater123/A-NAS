@@ -341,7 +341,8 @@ class Handler(BaseHTTPRequestHandler):
                     segment["start"], segment["end"] = start, end
         try:
             clips = self.server.index.check(segments, shows_needed=self.server.vision is not None,
-                                            skipped=body.get("skipped"), scenes=body.get("scenes") is True)
+                                            skipped=body.get("skipped"), scenes=body.get("scenes") is True,
+                                            shortest=moments.TRIMMED_MIN if edged else moments.SEGMENT_MIN)
         except moments.PlanError as error:
             return self.reply(422, {"error": "剪辑计划不合规则", "problems": error.problems})
         files = {v: os.path.join(self.server.videos, meta["file"]) for v, meta in self.server.index.videos.items()}
@@ -365,6 +366,8 @@ class Handler(BaseHTTPRequestHandler):
                       for _v, start, end in clips]
         if review and spans is not None:
             review = [r | {"planned": [s["start"], s["end"]]} for s, r in zip(segments, review, strict=True)]
+        if review and spans is not None:
+            review = [r | {k: s[k] for k in ("pace", "asked") if s.get(k)} for s, r in zip(segments, review, strict=True)]
         if review and edged:
             review = [r | {"edged": e} for r, e in zip(review, edged, strict=True)]
         work = tempfile.mkdtemp(dir=self.server.work)
@@ -449,8 +452,14 @@ class Handler(BaseHTTPRequestHandler):
                 return [], [f"所选卡片最多只能剪 {most:g} 秒，要有目标 {target:g} 秒的 {moments.MARGIN:g} 倍"
                             f"（{moments.MARGIN * target:g} 秒）程序才有余量定每段的长短：再加几段，或换可剪更长的卡片"]
         spans, problems = index.fill([(s["card"], self.server.probes[s["probe"]]) for s in segments], mode, target,
-                                     self.frame, caps, mins, shares)
-        return [s | {"start": span[0], "end": span[1]} for s, span in zip(segments, spans, strict=True) if span], problems
+                                     self.frame, caps, mins, shares, moments.SEGMENT_MIN if shares else None)
+        out = [s | {"start": span[0], "end": span[1]} for s, span in zip(segments, spans, strict=True) if span]
+        # A card too short for its segment's pace gives a faster pace instead of a refusal.
+        for segment in out if shares else []:
+            pace = moments.slowest(segment["end"] - segment["start"])
+            if moments.PACES[pace][0] < moments.PACES[segment["pace"]][0]:
+                segment |= {"asked": segment["pace"], "pace": pace}
+        return out, problems
 
     def frame(self, video, seconds):
         """The vector of the frame at seconds, rendered like the index's frames (512 px long edge)."""

@@ -51,6 +51,20 @@ DESCRIBE = ("用一句中文描述上面几张图（同一段视频按时间先�
 SCENE = ("上面是同一段视频按时间先后的几帧。只描述场景，不写人物在做什么、什么表情：在什么地方（室内还是室外、什么场所），"
          "有哪些环境和陈设，什么时间、天气和光线。认不准的地方就说是什么样的建筑或房间，不要编地名，不超过 40 个字。直接写描述。")
 
+# Text over the picture marks a title, credits or a caption card, which a montage leaves out
+# unless asked (#350); a place description seldom mentions it. Asked straight whether a frame
+# has such text, a 2B model said no to a cast list; it reads the text well. Told what it read,
+# it tells text laid over the picture from a sign or a clock it was filmed on (OVERLAY), and
+# credits from a line of dialogue or a screen in the story (KIND); asked only the kind, it
+# called a police sign a logo. TITLES are the kinds a montage leaves out.
+READ = "把画面上能看到的文字原样写出来，只写文字；没有文字就回答“无”。"
+READ_CHARS = 40
+OVERLAY = ("画面上有文字「{}」。这些字是后期叠加在画面上的（片名、字幕、演职员表、标志），"
+           "还是拍到的实物上的（招牌、门牌、钟表、屏幕、纸张）？只回答“叠加”或“实物”。")
+TITLES = ("片名", "演职员表", "出品或资助说明", "品牌标志", "时间地点说明")
+KINDS = (*TITLES, "台词", "仪器屏幕或界面上的字", "招牌或实物上的字")
+KIND = "画面上有文字「{}」。它是哪一种：" + "、".join(KINDS) + "？只回答一种。"
+
 # Two more facts of a card a 2B model gets right on the same frames; shot size, camera
 # motion, landmarks and looks it does not (docs/research/video-moment-retrieval.md).
 LIGHTS = ("晴天", "阴天", "逆光", "黄昏", "夜晚", "室内")
@@ -106,6 +120,17 @@ class Vision:
     def scene(self, jpegs: list[bytes]) -> str:
         return self.ask(SCENE, jpegs, 80).splitlines()[0].strip()
 
+    def text(self, jpegs: list[bytes]) -> str:
+        """The kind and words of the first of TITLES laid over any of the frames ("片名：…"), or ""."""
+        for jpeg in jpegs:
+            read = " ".join(self.ask(READ, jpeg, READ_CHARS).split())[:READ_CHARS]
+            if not read or read.startswith(("无", "没有")) or not self.ask(OVERLAY.format(read), jpeg, 6).startswith("叠加"):
+                continue
+            kind = kind_of(self.ask(KIND.format(read), jpeg, 10))
+            if kind in TITLES:
+                return f"{kind}：{read}"
+        return ""
+
     def light(self, jpegs: list[bytes]) -> str:
         """One of LIGHTS, or 不确定 when the answer is none of them."""
         text = self.ask(LIGHT, jpegs, 8)
@@ -121,6 +146,12 @@ class Vision:
 
     def screen(self, jpegs: list[bytes], shows: str) -> dict:
         return screened(self.ask(SCREEN.format(shows=shows), jpegs, 80))
+
+
+def kind_of(answer: str) -> str:
+    """The one of KINDS an answer to KIND names, in part or whole, or ""."""
+    answer = answer.strip(" 。.“”\"")
+    return next((k for k in KINDS if answer and (k in answer or answer in k)), "")
 
 
 def screened(text: str) -> dict:

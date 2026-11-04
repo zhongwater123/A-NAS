@@ -427,8 +427,8 @@ class MomentsTest(unittest.TestCase):
     def test_a_segment_keeps_to_its_card_and_to_frames_like_its_peak(self):
         cards = {c["id"]: c for c in self.index.cards}
         # The castle's two sides are 0.8 alike: each card is its own region of the shot.
-        self.assertEqual(self.index._region(cards["07-1-0"]), (8, 28))
-        self.assertEqual(self.index._region(cards["07-1-1"]), (28, 48))
+        self.assertEqual(self.index.region(cards["07-1-0"]), (8, 28))
+        self.assertEqual(self.index.region(cards["07-1-1"]), (28, 48))
         # A cut the detection missed at 31 s: what follows is another picture, never taken.
         other = np.eye(8, dtype=np.float32)[5]
 
@@ -489,6 +489,25 @@ class MomentsTest(unittest.TestCase):
         spans, _problems = self.index.fill([("07-0-0", market), ("07-1-0", self.castle)], "probe", 3, self.at,
                                            mins=[1.5, 2.5])
         self.assertEqual([e - s for s, e in spans], [1.5, 2.5])
+
+    def test_fill_with_a_floor_keeps_a_segment_its_card_cannot_take_to_its_minimum(self):
+        market = np.eye(8, dtype=np.float32)[0]
+        lo, hi = self.index.region(next(c for c in self.index.cards if c["id"] == "07-0-0"))
+        longer = hi - lo + 1
+        spans, problems = self.index.fill([("07-0-0", market)], "probe", 5, self.at, caps=[longer], mins=[longer])
+        self.assertEqual((spans, len(problems)), ([None], 1))
+        spans, problems = self.index.fill([("07-0-0", market)], "probe", 5, self.at, caps=[longer], mins=[longer],
+                                          floor=moments.SEGMENT_MIN)
+        self.assertEqual((problems, spans), ([], [(lo, hi)]))
+
+    def test_the_slowest_pace_a_length_allows(self):
+        self.assertEqual([moments.slowest(t) for t in (5, 4, 3.9, 3, 2, 1)], ["慢", "慢", "中", "中", "快", "快"])
+
+    def test_a_trimmed_plan_may_run_shorter_than_the_planned_minimum(self):
+        segment = {"card": "07-1-1", "start": 30, "end": 31.3}
+        with self.assertRaises(moments.PlanError):
+            self.index.check([segment])
+        self.assertEqual(self.index.check([segment], shortest=moments.TRIMMED_MIN), [("07", 30.0, 31.3)])
 
     def test_search_keeps_to_windows_meeting_a_condition(self):
         # The castle seen from the other side (28-48 s) leans to basis 2; asking for that
@@ -573,6 +592,24 @@ class LookTest(unittest.TestCase):
         seen = self.review(["天鹅", "船", "天鹅", "天鹅", "船", "船", "天鹅", "天鹅"])
         self.assertFalse(seen["usable"])
         self.assertEqual(seen["seen"], "天鹅")
+
+    def test_titles_are_text_laid_over_the_picture_of_a_title_kind(self):
+        answers = {
+            "招牌": ("LAPD", "实物", "品牌标志"),
+            "片尾": ("Cast Old Thom", "叠加", "演职员表"),
+            "界面": ("SIMULATION READY", "叠加", "仪器屏幕或界面上的字"),
+            "空": ("无", "", ""),
+        }
+
+        class Reading(look.Vision):
+            def ask(self, prompt, jpeg, max_tokens=120):
+                read, laid, kind = answers[jpeg.decode()]
+                return read if prompt == look.READ else laid if prompt.endswith("“实物”。") else kind
+
+        vision = Reading("http://127.0.0.1:1/v1")
+        self.assertEqual(vision.text(["空".encode(), "招牌".encode(), "片尾".encode()]), "演职员表：Cast Old Thom")
+        self.assertEqual(vision.text(["界面".encode(), "招牌".encode()]), "")
+        self.assertEqual([look.kind_of(a) for a in ("资助说明", "“片名”。", "不知道")], ["出品或资助说明", "片名", ""])
 
     @unittest.skipUnless(HAS_FFMPEG, "needs ffmpeg and ffprobe")
     def test_frames_are_taken_every_half_second_from_the_segment(self):

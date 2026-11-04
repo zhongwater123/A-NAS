@@ -30,6 +30,13 @@ class PlanTest(unittest.TestCase):
         self.assertIn("01-1-0 场景2 可剪6秒 办公室里的男子", text)
         self.assertNotIn("秒（镜头", text)  # no card seconds: the program sets them
 
+    def test_cards_with_a_title_over_them_are_left_out(self):
+        self.index.texts = {"01-0-0": "片名：MERIDIAN"}
+        text = plan.message(self.index, "剪成预告片", 60, "预告片")
+        self.assertNotIn("01-0-0", text)
+        self.assertNotIn("场景1", text)
+        self.assertIn("01-1-0", text)
+
     def test_the_answer_is_one_json_object_fenced_or_not(self):
         answer = '故事线如下。\n```json\n{"story": "s", "segments": [{"card": "01-0-0", "shows": "街道", "pace": "慢"}]}\n```'
         self.assertEqual(plan.parsed(answer)["segments"][0]["card"], "01-0-0")
