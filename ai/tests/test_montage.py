@@ -461,6 +461,12 @@ class MomentsTest(unittest.TestCase):
             self.index.check(plan(("07-1-0", 8), ("07-1-0", 12), ("07-1-1", 30), ("07-1-1", 36)), scenes=True)
         self.assertEqual(refused.exception.problems, ["场景2用了 4 段，一个场景最多 3 段"])
 
+    def test_a_card_says_the_most_seconds_a_segment_of_it_can_run(self):
+        cards = {c["id"]: c for c in self.index.cards}
+        self.assertEqual(self.index.usable(cards["07-1-0"]), 6)  # 20 s of one picture, held to CLIP_MAX
+        self.assertEqual(self.index.usable(cards["07-2-0"]), 0)  # its only window is flat
+        self.assertIn("07-1-0 可剪6秒", self.index.catalog(times=False, lengths=True)["videos"]["07"]["cards"][1])
+
     def test_fill_keeps_each_segment_to_its_minimum(self):
         market = np.eye(8, dtype=np.float32)[0]
         spans, _problems = self.index.fill([("07-0-0", market), ("07-1-0", self.castle)], "probe", 3, self.at,

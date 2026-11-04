@@ -40,7 +40,7 @@ MEMBER_VIDEOS = "/srv/a-nas/data/assistant/alice/files/视频"
 
 
 def turn(instruction, container, model, log, pictures=False, screen=False, about=False, retrieved=False, span=None,
-         locate=None, fill=False, edges=False, no_look=False, flow=False, scenes=False):
+         locate=None, fill=False, edges=False, no_look=False, flow=False, scenes=False, lengths=False):
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     config = {"mcpServers": {"anas": {
         "command": os.path.join(here, "assistant-spike", "mcp-as-member.sh"), "args": ["alice"],
@@ -54,7 +54,8 @@ def turn(instruction, container, model, log, pictures=False, screen=False, about
                 | ({"ANAS_SPIKE_EDGES": "1"} if edges else {})
                 | ({"ANAS_SPIKE_NO_LOOK": "1"} if no_look else {})
                 | ({"ANAS_SPIKE_FLOW": "1"} if flow else {})
-                | ({"ANAS_SPIKE_SCENES": "1"} if scenes else {})}}}
+                | ({"ANAS_SPIKE_SCENES": "1"} if scenes else {})
+                | ({"ANAS_SPIKE_LENGTHS": "1"} if lengths else {})}}}
     ask = ((ASK_ABOUT if about else ASK).format(**instruction)
            + (STYLE.format(instruction["style"]) if instruction.get("style") else ""))
     command = ["claude", "-p", ask, "--mcp-config", json.dumps(config), "--strict-mcp-config",
@@ -133,6 +134,9 @@ def main():
     parser.add_argument("--scenes", action="store_true",
                         help="with --flow: the cards' scenes (scenes.json) in the catalog, and a plan keeping a "
                              "scene's segments together, at most 3 (an experiment, #350)")
+    parser.add_argument("--lengths", action="store_true",
+                        help="with --fill: the seconds each card can run in the catalog, and cards able to run 1.1 "
+                             "times the cut (an experiment, #350)")
     parser.add_argument("--no-look", action="store_true",
                         help="cut without the vision model reviewing the frames first (an experiment, #350)")
     parser.add_argument("--fill", action="store_true",
@@ -157,7 +161,7 @@ def main():
         target = os.path.join(out, instruction["id"])
         done = turn(instruction, args.container, args.model, target + ".jsonl", args.pictures, args.screen,
                     args.about, args.retrieved_only, args.span, args.locate, args.fill, args.edges,
-                    args.no_look, args.flow, args.scenes)
+                    args.no_look, args.flow, args.scenes, args.lengths)
         if done["cut"]:
             copy_out(args.container, done["cut"], target)
         else:

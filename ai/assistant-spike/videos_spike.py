@@ -20,8 +20,9 @@ socket, which any member of a-nas-users may use, known by the caller's UID.
                   "when": [{"is", "not"}]}        only over windows closer to is than to not
   POST /catalog  {"videos": [...],               every card as a line of seconds, light,
                   "times": false,                 caption and highlight, to write probes from;
-                  "scenes": true}                 without times, no seconds; with scenes, each
-                                                  card's scene and a table of scenes (#350)
+                  "scenes": true,                 without times, no seconds; with scenes, each
+                  "lengths": true}                card's scene and a table of scenes; with
+                                                  lengths, the seconds each card can run (#350)
   POST /montage  {"segments": [...],             the cut as video/mp4, or the
                   "skipped": [{card, why}],       (cards left out, checked when given)
                   "span": "probe" | "frame",      an experiment (#350): no start or end, but
@@ -32,7 +33,8 @@ socket, which any member of a-nas-users may use, known by the caller's UID.
                                                   (moments.Index.fill)
                   "edges": true,                  and a cut at either end trims it (EDGE)
                   "look": false,                  no review by the vision model
-                  "scenes": true}                 a scene's segments together, at most 3
+                  "scenes": true,                 a scene's segments together, at most 3
+                  "margin": true}                 cards able to run 1.1 times the seconds
                                                  plan's problems with 422
 
 With --vision, the URL of a local vision model (montage.look), the cards carry
@@ -205,7 +207,8 @@ class Handler(BaseHTTPRequestHandler):
                                        or not all(v in self.server.index.videos for v in videos)):
                 return self.reply(400, {"error": "videos 要是库里的视频编号列表"})
             return self.reply(200, self.server.index.catalog(videos, times=body.get("times") is not False,
-                                                             scenes=body.get("scenes") is True))
+                                                             scenes=body.get("scenes") is True,
+                                                             lengths=body.get("lengths") is True))
         if self.path == "/montage":
             return self.montage(body)
         return self.reply(404, {"error": "没有这个接口"})
@@ -315,7 +318,8 @@ class Handler(BaseHTTPRequestHandler):
                 if target is None:
                     segments, problems = self.spanned(segments, spans)
                 else:
-                    segments, problems = self.filled(segments, spans, target, body.get("style"))
+                    segments, problems = self.filled(segments, spans, target, body.get("style"),
+                                                     body.get("margin") is True)
             except OSError as error:
                 return self.reply(503, {"error": f"设备上的 AI 暂时不可用：{error}"})
             if problems:
@@ -397,10 +401,11 @@ class Handler(BaseHTTPRequestHandler):
             out.append(segment | {"start": span[0], "end": span[1]})
         return out, problems
 
-    def filled(self, segments, mode, target, style):
+    def filled(self, segments, mode, target, style, margin=False):
         """The segments with start and end set to add up to target (Index.fill): frames every
         half second, embedded as they are needed, set the ends; a trailer's last quarter is
-        held to moments.TAIL_MIN-TAIL_MAX a segment. And the problems of those it cannot set."""
+        held to moments.TAIL_MIN-TAIL_MAX a segment. With margin, the cards must be able to run
+        moments.MARGIN times target first. And the problems of those it cannot set."""
         index, cards = self.server.index, {c["id"] for c in self.server.index.cards}
         problems = [f"第 {n} 段要有检索结果里的 card 和找到它的 probe" for n, s in enumerate(segments, 1)
                     if not isinstance(s, dict) or s.get("card") not in cards or not isinstance(s.get("probe"), str)
@@ -414,6 +419,12 @@ class Handler(BaseHTTPRequestHandler):
         trailer = [style == "预告片" and n >= tail for n in range(len(segments))]
         caps = [moments.TAIL_MAX if t else moments.CLIP_MAX for t in trailer]
         mins = [moments.TAIL_MIN if t else moments.SEGMENT_MIN for t in trailer]
+        if margin:
+            cards = {c["id"]: c for c in index.cards}
+            most = sum(min(index.usable(cards[s["card"]]), cap) for s, cap in zip(segments, caps, strict=True))
+            if most < moments.MARGIN * target:
+                return [], [f"所选卡片最多只能剪 {most:g} 秒，要有目标 {target:g} 秒的 {moments.MARGIN:g} 倍"
+                            f"（{moments.MARGIN * target:g} 秒）程序才有余量定每段的长短：再加几段，或换可剪更长的卡片"]
         spans, problems = index.fill([(s["card"], self.server.probes[s["probe"]]) for s in segments], mode, target,
                                      self.frame, caps, mins)
         return [s | {"start": span[0], "end": span[1]} for s, span in zip(segments, spans, strict=True) if span], problems

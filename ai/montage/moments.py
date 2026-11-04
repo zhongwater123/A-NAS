@@ -88,6 +88,9 @@ SCENES = "scenes.json"
 SCENE_ALIKE = 0.92
 # A scene gives a plan at most this many segments, and a plan does not go back to one.
 SCENE_SEGMENTS = 3
+# The cards a plan picks can run at least this share of its target, so that the program has
+# room to set each segment's seconds (#350).
+MARGIN = 1.1
 # A scene's name is cut to this many characters: a 2B model sometimes repeats itself.
 SCENE_CHARS = 40
 # Words with their seconds by video, beside the index, from speech recognition.
@@ -244,13 +247,14 @@ class Index:
                 mean += self.frames[i]
         return pieces
 
-    def catalog(self, videos=None, times=True, scenes=False) -> dict:
+    def catalog(self, videos=None, times=True, scenes=False, lengths=False) -> dict:
         """What the library holds, for writing a story and probes from (#326): every card of every
         video (or of videos), in time order, as one line of its seconds and its shot's, light,
         caption, highlight and flaws, enough to cut it without searching for it. Cards with no
         caption say so; a vector alone cannot be read. Without times, the line leaves out the
         seconds, for a planner that does not set them (#350). With scenes, each line says its
-        card's scene number, and "scenes" names each scene once with its number of cards."""
+        card's scene number, and "scenes" names each scene once with its number of cards. With
+        lengths, each line says the most seconds a segment of its card can run (usable)."""
         out = {}
         for card in self.cards:
             if videos is not None and card["video"] not in videos:
@@ -261,6 +265,8 @@ class Index:
                                  if times else "")
             if scenes and card["id"] in self.scene_of:
                 line += f" 场景{self.scene_of[card['id']]}"
+            if lengths:
+                line += f" 可剪{self.usable(card):g}秒"
             if notes.get("light"):
                 line += f" {notes['light']}"
             line += " " + self.captions.get(card["id"], "（没有描述）")
@@ -695,6 +701,14 @@ class Index:
             # Rounded inward, so that the segment stays inside its shot.
             out.append((math.ceil(start * 100) / 100, math.floor(end * 100) / 100))
         return out, problems
+
+    def usable(self, card: dict) -> float:
+        """The most seconds a segment of card can run (Index.fill): its region less its flat
+        windows, at most CLIP_MAX, down to the half second."""
+        lo, hi = self._region(card)
+        flat = sum(max(0.0, min(hi, row[2]) - max(lo, row[1])) for i, row in enumerate(self.rows)
+                   if self.flat[i] and row[0] == card["video"])
+        return math.floor(min(CLIP_MAX, hi - lo - flat) * 2) / 2
 
     def _region(self, card: dict) -> tuple[float, float]:
         """The seconds a segment of card may run: the card, and the windows next to it in its
