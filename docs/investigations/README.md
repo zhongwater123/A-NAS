@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-11-04：重启后 smbd 早于 DHCP 地址启动，只监听回环](2026-11-04-smbd-starts-before-dhcp-address.md)
 - [2026-11-04：一次失败让网页分类的引擎全部暂停 5 分钟](2026-11-04-web-engines-suspended-after-one-bad-moment.md)
 - [2026-11-04：产品服务重启后两秒内新建的分享显示“已撤回”](2026-11-04-share-bridge-generation-window.md)
 - [2026-11-04：并发登录绕过退避与密码计算内存边界](2026-11-04-sign-in-admission-and-memory.md)
