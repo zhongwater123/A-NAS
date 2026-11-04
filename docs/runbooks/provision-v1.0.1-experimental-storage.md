@@ -43,7 +43,7 @@
    ip -brief link show dev "$smb_interface"
 
    # 有本机屏幕的设备连同 a-nas-console 一起装；没有屏幕的只装 a-nas-host。
-   apt install --no-install-recommends "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
+   apt install --no-install-recommends --allow-downgrades "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
    "$source_release/install-v1.0.1-system-services.sh" \
      "$source_release" "$release_id" "$smb_interface"
    ```
@@ -54,6 +54,8 @@
    test -x /opt/a-nas/current/kiosk-launcher
    systemctl show -p User --value anas-kiosk@tty1.service   # a-nas-kiosk
    ```
+
+两个包的版本只用来标明 release，不表示先后：未打标签的提交按哈希排序，打过标签之后的提交也都排在该标签之前，所以 apt 可能把升级列为 `DOWNGRADED`。安装器只核对版本是否等于本 release 的版本，因此安装时一律带 `--allow-downgrades`；不带它时，交互式的 `apt install` 要再确认一次，带 `-y` 的则直接失败。
 
 安装器会切换系统服务并由 Host Agent 幂等修复现有卷的目录和 ACL；它不会重新分区或格式化已经挂载的数据盘。已安装 Caddy 时，安装器同时校验并更新局域网 Web 入口，见[启用局域网 Web 访问](enable-lan-web-access.md)。如果哈希、挂载或网卡核对失败，立即停止。
 
@@ -85,7 +87,7 @@ smb_interface=enp2s0
 
 # 若 apt 失败，停止，不进入格式化流程。
 apt-get update
-apt-get install --no-install-recommends "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
+apt-get install --no-install-recommends --allow-downgrades "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
 
 readlink -f /opt/a-nas/current
 ip -brief link

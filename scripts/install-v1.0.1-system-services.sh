@@ -105,7 +105,7 @@ for package in a-nas-host a-nas-console; do
     case "${installed%% *}" in '' | not-installed | config-files) continue ;; esac
   fi
   if [[ "$installed" != "installed $host_package_version" ]]; then
-    echo "this release needs $package $host_package_version; install it first: apt install $source_release/$package.deb" >&2
+    echo "this release needs $package $host_package_version; install it first: apt install --no-install-recommends --allow-downgrades $source_release/$package.deb" >&2
     exit 3
   fi
 done
