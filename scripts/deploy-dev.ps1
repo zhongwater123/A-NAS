@@ -188,6 +188,12 @@ try {
     if ((Get-FileHash -LiteralPath $llamaPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $llama.sha256) {
         throw "llama.cpp does not match its manifest: $llamaPath"
     }
+    # The host packages the release needs (ADR 0031), which make check builds.
+    $hostPackage = Join-Path $repoRoot 'build\a-nas-host.deb'
+    $consolePackage = Join-Path $repoRoot 'build\a-nas-console.deb'
+    foreach ($package in @($hostPackage, $consolePackage)) {
+        if (-not (Test-Path -LiteralPath $package -PathType Leaf)) { throw "Missing ${package}: run make check first." }
+    }
     $workerArchive = Join-Path $repoRoot 'build\ai-worker.tar'
     & git -c $gitSafeDirectory archive --format=tar -o $workerArchive HEAD ai/anas_ai
     if ($LASTEXITCODE -ne 0) { throw 'Cannot archive the AI Worker.' }
@@ -231,6 +237,8 @@ try {
     $uploads = @(
         @{ Source = $apiBinary; Destination = "${target}:$release/anas-api.incoming" },
         @{ Source = $agentBinary; Destination = "${target}:$release/anas-host-agent.incoming" },
+        @{ Source = $hostPackage; Destination = "${target}:$release/a-nas-host.deb.incoming" },
+        @{ Source = $consolePackage; Destination = "${target}:$release/a-nas-console.deb.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\user\anas-api.service'); Destination = "${target}:$release/anas-api.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\user\anas-host-agent.service'); Destination = "${target}:$release/anas-host-agent.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-api.service'); Destination = "${target}:$release/anas-api-system.service.incoming" },
@@ -302,6 +310,9 @@ try {
     }
     Write-Host "API SHA-256:        $apiHash"
     Write-Host "Host Agent SHA-256: $agentHash"
+    # Root checks these too before apt runs the packages' scripts (ADR 0031).
+    Write-Host "a-nas-host SHA-256:    $((Get-FileHash -LiteralPath $hostPackage -Algorithm SHA256).Hash.ToLowerInvariant())"
+    Write-Host "a-nas-console SHA-256: $((Get-FileHash -LiteralPath $consolePackage -Algorithm SHA256).Hash.ToLowerInvariant())"
 } finally {
     Pop-Location
 }

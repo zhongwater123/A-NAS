@@ -117,3 +117,38 @@ func TestLibraryViewingIsGrantedApartFromSpaceViewing(t *testing.T) {
 		t.Fatalf("audit actions = %v", actions)
 	}
 }
+
+// Grants keep their expiry at the stored layout's fixed width, so the time
+// they are compared with must have that width too: in RFC 3339 a whole
+// second sorts after every fraction of it, which ended a grant early.
+func TestLibraryViewingLastsUntilItsExpiryWithinTheLastSecond(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, time.October, 8, 12, 0, 0, 500_000_000, time.UTC)
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service := accounts.NewService(store, &viewingRecorder{}, accounts.Options{PasswordCost: cheapPasswords, Now: func() time.Time { return now }})
+	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alice, err := service.CreateMember(ctx, admin, "alice", "alice password for testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := service.StartLibraryViewing(ctx, admin, alice.ID, "correct horse battery staple", "find the wedding photos")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now = grant.ExpiresAt.Add(-500 * time.Millisecond)
+	if viewings, err := service.LibraryViewings(ctx, admin); err != nil || len(viewings) != 1 {
+		t.Fatalf("half a second before expiry: LibraryViewings() = %+v, %v", viewings, err)
+	}
+	now = grant.ExpiresAt
+	if viewings, err := service.LibraryViewings(ctx, admin); err != nil || len(viewings) != 0 {
+		t.Fatalf("at expiry: LibraryViewings() = %+v, %v", viewings, err)
+	}
+}
