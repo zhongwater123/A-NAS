@@ -11,10 +11,11 @@
 # with it the namespace, up meanwhile, as photos-socket.sh does; it stops when idle.
 # ANAS_SPIKE_CARD_PICTURES=1 and ANAS_SPIKE_CARD_SCREEN=1 pass through: video cards come with
 # their frames, or screened by the vision model; ANAS_SPIKE_RETRIEVED_ONLY=1 and
-# ANAS_SPIKE_SPAN=probe|frame too: a plan of retrieved cards only, its seconds set by the service (anas_mcp.py).
+# ANAS_SPIKE_SPAN=probe|frame too: a plan of retrieved cards only, its seconds set by the service;
+# ANAS_SPIKE_LOCATE=probe|frame: the seconds set from each segment's shows, no retrieval needed (anas_mcp.py).
 set -euo pipefail
 member=${1:-alice}
-exec docker exec -i -e ANAS_SPIKE_CARD_PICTURES -e ANAS_SPIKE_CARD_SCREEN -e ANAS_SPIKE_RETRIEVED_ONLY -e ANAS_SPIKE_SPAN "${HERMES_SPIKE_NAME:-hermes-spike-sbx}" bash -c '
+exec docker exec -i -e ANAS_SPIKE_CARD_PICTURES -e ANAS_SPIKE_CARD_SCREEN -e ANAS_SPIKE_RETRIEVED_ONLY -e ANAS_SPIKE_SPAN -e ANAS_SPIKE_LOCATE "${HERMES_SPIKE_NAME:-hermes-spike-sbx}" bash -c '
   member=$1 py=/opt/a-nas/assistant-runtimes/spike/venv/bin/python
   "$py" /spike/serve_client.py "$member" ready >/dev/null
   setsid "$py" /spike/serve_client.py "$member" chat "SLEEP 600" >/dev/null 2>&1 </dev/null &

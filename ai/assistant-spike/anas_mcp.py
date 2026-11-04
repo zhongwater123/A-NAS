@@ -388,15 +388,22 @@ SCREENING = (
 # The fourth version's ablation (#350). ANAS_SPIKE_RETRIEVED_ONLY=1: the catalog is as before,
 # but a plan may use only cards search_video_moments returned. ANAS_SPIKE_SPAN=probe or frame
 # as well: the plan gives no seconds, the video service grows each segment from the window
-# the card's probe matched (moments.Index.span).
-SPAN = os.environ.get("ANAS_SPIKE_SPAN") or None
-RETRIEVED_ONLY = os.environ.get("ANAS_SPIKE_RETRIEVED_ONLY") == "1" or SPAN is not None
+# the card's probe matched (moments.Index.span). ANAS_SPIKE_LOCATE=probe or frame instead: no
+# retrieval needed, each segment grows from the window of its card its shows matches.
+LOCATE = os.environ.get("ANAS_SPIKE_LOCATE") or None
+SPAN = LOCATE or os.environ.get("ANAS_SPIKE_SPAN") or None
+RETRIEVED_ONLY = os.environ.get("ANAS_SPIKE_RETRIEVED_ONLY") == "1" or (SPAN is not None and not LOCATE)
 # The cards search_video_moments returned this session, each with the probe it scored best on.
 RETRIEVED: dict[str, dict] = {}
 FROM_CATALOG = ("剪辑计划只能用 search_video_moments 返回过的卡片：目录只用来了解库里有什么、写故事线和检索词，"
                 "目录里看中的卡片要先检索到才能用。" if RETRIEVED_ONLY else
                 "剪辑计划可以直接用目录里的卡片，不必为拿资料再检索。")
 SEGMENT = (
+    "每段是 {card, shows, reason}，不写 start、end：card 是 list_video_contents 或 search_video_moments 里的卡片 id，"
+    "入点出点由程序定，从这张卡片里最符合 shows 的 2 秒往两边扩展，"
+    + ("后面的秒数与 shows 的分数相差不到 0.02 才扩展" if LOCATE == "probe" else "后面的画面与那 2 秒相似才扩展") +
+    "，最长 6 秒，不越出镜头，不和前面的段重叠，所以每段 2–6 秒；"
+    if LOCATE else
     "每段是 {card, shows, reason}，不写 start、end：card 是 search_video_moments 返回过的卡片 id，"
     "入点出点由程序定，从这张卡片最符合找到它的那条检索词的 2 秒往两边扩展，"
     + ("后面的秒数与检索词的分数相差不到 0.02 才扩展" if SPAN == "probe" else "后面的画面与那 2 秒相似才扩展") +
@@ -405,6 +412,13 @@ SEGMENT = (
     "每段是 {card, start, end, shows, reason}：card 是 "
     + ("search_video_moments 返回过的" if RETRIEVED_ONLY else "list_video_contents 或 search_video_moments 里的") +
     "卡片 id，start、end 是秒数，必须落在这张卡片的 shot 范围内，每段 1.5–6 秒，不能含纯黑或纯色画面，各段不能用同一段画面；")
+SHOWS = (
+    "shows 用一句短描述写这段要呈现的画面，例如“雨夜车里后视镜中的女人”“铁塔下的人群”，不超过 40 个字："
+    "程序按它在卡片里定位入点出点，出片前也按它核对；写画面里看得见的东西，不写画面看不出的条件（地点名、年代、情绪）。"
+    if LOCATE else
+    "shows 写这段画面要呈现指令里的什么，只用指令里的词，如“湖上的小船”“夜晚的城市”，不超过 40 个字；"
+    "不要写这段画面的细节或别的说法（“美食”就写“美食”，不写“美食,新鲜食材”），"
+    "地点这类画面看不出的条件也不要写进去（“新加坡的美食”写“美食”）。")
 TELLING = ("向成员介绍片段时只说你在图里和出片前核对看到的内容。" if CARD_PICTURES else
            "你看不到画面：向成员介绍片段时只说 caption 和出片前核对看到的内容，不要描述猜出来的细节。")
 
@@ -499,9 +513,7 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
                  structured_output=False, description=(
         "按剪辑计划把视频片段剪成一段 1920×1080、30 fps 的 MP4，每段带原片同一区间的原声（不加配乐和字幕），存进助手目录的“视频”文件夹，返回文件路径与时长。"
         "segments：按播放顺序排列，" + SEGMENT +
-        "成片总长不设上限。shows 写这段画面要呈现指令里的什么，只用指令里的词，如“湖上的小船”“夜晚的城市”，不超过 40 个字；"
-        "不要写这段画面的细节或别的说法（“美食”就写“美食”，不写“美食,新鲜食材”），"
-        "地点这类画面看不出的条件也不要写进去（“新加坡的美食”写“美食”）。reason 用一句话写这段属于故事线的哪一段、为什么选它，随成片存档。"
+        "成片总长不设上限。" + SHOWS + "reason 用一句话写这段属于故事线的哪一段、为什么选它，随成片存档。"
         "skipped：检索结果里每一张没用上的卡片各一项 {card, why}，why 用一句话写为什么不用；直接从目录取卡片时只列考虑过但没用的卡片，"
         "card 写具体的卡片 id，不写通配或整条视频"
         "（例如“描述是城市俯瞰，没有城堡”“flaws 有抖动”“和第 2 段同组”），不超过 80 个字，随成片存档供复盘；没有就给空列表。"
@@ -525,7 +537,8 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         body = {"segments": segments, "skipped": skipped}
         if SPAN:
             body = {"segments": [{k: v for k, v in s.items() if k not in ("start", "end")}
-                                 | {"probe": RETRIEVED[s["card"]]["probe"]} for s in segments],
+                                 | {"probe": s.get("shows", "") if LOCATE else RETRIEVED[s["card"]]["probe"]}
+                                 for s in segments],
                     "skipped": skipped, "span": SPAN}
         try:
             status, kind, raw, review = video_moments("/montage", body)
