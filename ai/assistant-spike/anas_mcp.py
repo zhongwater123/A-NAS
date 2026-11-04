@@ -394,6 +394,9 @@ LOCATE = os.environ.get("ANAS_SPIKE_LOCATE") or None
 # ANAS_SPIKE_FILL=1 as well: the plan says the cut's seconds, and the service sets each
 # segment's to add up to them, its ends from frames every half second (moments.Index.fill).
 FILL = LOCATE is not None and os.environ.get("ANAS_SPIKE_FILL") == "1"
+# ANAS_SPIKE_EDGES=1: before the frames are looked at, a cut near either end of a segment,
+# found at the source's frame rate, trims it (videos_spike.edges).
+EDGES = os.environ.get("ANAS_SPIKE_EDGES") == "1"
 SPAN = LOCATE or os.environ.get("ANAS_SPIKE_SPAN") or None
 RETRIEVED_ONLY = os.environ.get("ANAS_SPIKE_RETRIEVED_ONLY") == "1" or (SPAN is not None and not LOCATE)
 # The cards search_video_moments returned this session, each with the probe it scored best on.
@@ -549,6 +552,8 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
                     "skipped": skipped, "span": SPAN}
             if FILL and seconds:
                 body |= {"seconds": seconds, "style": style}
+        if EDGES:
+            body["edges"] = True
         try:
             status, kind, raw, review = video_moments("/montage", body)
         except PhotoError as error:

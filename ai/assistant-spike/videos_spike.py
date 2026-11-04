@@ -25,9 +25,10 @@ socket, which any member of a-nas-users may use, known by the caller's UID.
                   "span": "probe" | "frame",      an experiment (#350): no start or end, but
                                                   each segment's probe; the seconds grow from
                                                   the window it matched (moments.Index.span),
-                  "seconds": n, "style": s}       or, with seconds, add up to them, frames
+                  "seconds": n, "style": s,       or, with seconds, add up to them, frames
                                                   every half second setting the ends
                                                   (moments.Index.fill)
+                  "edges": true}                  and a cut at either end trims it (EDGE)
                                                  plan's problems with 422
 
 With --vision, the URL of a local vision model (montage.look), the cards carry
@@ -46,6 +47,7 @@ import argparse
 import base64
 import grp
 import json
+import math
 import os
 import pwd
 import shutil
@@ -72,6 +74,11 @@ PICTURE_WIDTH = 480
 PICTURE_QUALITY = 5
 # Cards every probe recalls for the vision model to screen.
 RECALL = 20
+# An experiment (#350): the first and last EDGE seconds of each segment are scanned at the
+# source's frame rate, and a cut scoring EDGE_CUT or more there (FFmpeg's scene score, which
+# a dark film keeps low: 0.12 for a cut 0.25 misses) trims the segment to its side of it.
+EDGE = 0.6
+EDGE_CUT = 0.08
 MEMBERS = "a-nas-users"
 
 
@@ -111,6 +118,35 @@ def _embedded(ai_socket: str, request: dict, fd: int | None = None) -> np.ndarra
     if not answer.get("ok"):
         raise OSError(answer.get("error", {}).get("message", "the AI Worker failed"))
     return np.frombuffer(base64.b64decode(answer["vector"]), dtype="<f4")
+
+
+def edges(path: str, start, end):
+    """start and end, each moved inside a cut found within EDGE of it, at the source's frame rate."""
+    if not all(isinstance(t, (int, float)) and not isinstance(t, bool) for t in (start, end)) or end - start <= 2 * EDGE:
+        return start, end
+    cuts = [start + t for t in scene_cuts(path, start, EDGE)]
+    if cuts:
+        start = math.ceil(max(cuts) * 100) / 100
+    cuts = [end - EDGE + t for t in scene_cuts(path, end - EDGE, EDGE)]
+    if cuts:
+        end = math.floor(min(cuts) * 100) / 100
+    return start, end
+
+
+def scene_cuts(path: str, at: float, seconds: float) -> list[float]:
+    """The seconds after at, within seconds, of frames FFmpeg scores EDGE_CUT or more as a new scene."""
+    log = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "info", "-ss", f"{at:.3f}", "-i", path, "-t", f"{seconds:.3f}",  # noqa: S607
+         "-vf", "scale=640:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score", "-an", "-f", "null", "-"],
+        capture_output=True, text=True, timeout=120, check=False).stderr
+    times, out = [], []
+    for line in log.splitlines():
+        if "pts_time:" in line:
+            times.append(float(line.split("pts_time:")[1].split()[0]))
+        # The first frame has nothing before it to differ from.
+        elif "lavfi.scene_score=" in line and len(times) > 1 and float(line.split("=")[1]) >= EDGE_CUT:
+            out.append(times[-1])
+    return out
 
 
 def member(uid: int) -> bool:
@@ -279,6 +315,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(503, {"error": f"设备上的 AI 暂时不可用：{error}"})
             if problems:
                 return self.reply(422, {"error": "剪辑计划不合规则", "problems": problems})
+        edged = []
+        if body.get("edges") is True:
+            files = {v: os.path.join(self.server.videos, meta["file"]) for v, meta in self.server.index.videos.items()}
+            cards = {c["id"]: c["video"] for c in self.server.index.cards}
+            for segment in segments:
+                if isinstance(segment, dict) and segment.get("card") in cards:
+                    start, end = edges(files[cards[segment["card"]]], segment.get("start"), segment.get("end"))
+                    edged.append([start, end] != [segment.get("start"), segment.get("end")])
+                    segment["start"], segment["end"] = start, end
         try:
             clips = self.server.index.check(segments, shows_needed=self.server.vision is not None,
                                             skipped=body.get("skipped"))
@@ -300,6 +345,8 @@ class Handler(BaseHTTPRequestHandler):
             clips = [(v, r["start"], r["end"]) for (v, _s, _e), r in zip(clips, review, strict=True)]
             if spans is not None:
                 review = [r | {"planned": [s["start"], s["end"]]} for s, r in zip(segments, review, strict=True)]
+            if edged:
+                review = [r | {"edged": e} for r, e in zip(review, edged, strict=True)]
         work = tempfile.mkdtemp(dir=self.server.work)
         try:
             path = render.render_clips([(files[v], start, end) for v, start, end in clips], work)
