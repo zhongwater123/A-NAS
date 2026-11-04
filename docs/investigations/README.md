@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-11-04：建卷测试结束后旧执行器仍写操作日志，竞态检测作业偶发失败](2026-11-04-volume-test-writes-after-cleanup.md)
 - [2026-11-04：产品服务重启后两秒内新建的分享显示“已撤回”](2026-11-04-share-bridge-generation-window.md)
 - [2026-11-04：并发登录绕过退避与密码计算内存边界](2026-11-04-sign-in-admission-and-memory.md)
 - [2026-11-03：停用助手被保活的成员时返回 503](2026-11-03-assistant-disable-start-race.md)
