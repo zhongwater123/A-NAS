@@ -310,6 +310,9 @@ try {
     }
     Write-Host "API SHA-256:        $apiHash"
     Write-Host "Host Agent SHA-256: $agentHash"
+    # Root checks these too before apt runs the packages' scripts (ADR 0031).
+    Write-Host "a-nas-host SHA-256:    $((Get-FileHash -LiteralPath $hostPackage -Algorithm SHA256).Hash.ToLowerInvariant())"
+    Write-Host "a-nas-console SHA-256: $((Get-FileHash -LiteralPath $consolePackage -Algorithm SHA256).Hash.ToLowerInvariant())"
 } finally {
     Pop-Location
 }

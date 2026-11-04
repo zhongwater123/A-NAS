@@ -80,7 +80,7 @@ python3 -m venv ~/.local/opt/ai-tools
 
 Web 代码由 Biome 格式化并排列导入（`web/biome.json`：先 Node 与 npm 包，空一行，再相对路径）：提交前运行 `cd web && npm run format`。2026-10-22 对全部 Web 代码的一次格式化提交列在 `.git-blame-ignore-revs`，GitHub 的 blame 跳过它，本地运行 `git config blame.ignoreRevsFile .git-blame-ignore-revs`。在它之前分出的分支先合并它的父提交，在分支上运行 `npm run format` 并提交，再合并 `main`，这样只剩真正的冲突。
 
-各作业的 Go 版本取自 `.go-version`，Node.js 版本取自 `.nvmrc`；`package.json` 的 `engines` 只是允许的范围。竞态作业不装 Node.js：`make race-test` 不跑只服务前端构建产物的 `internal/webui`，它由 `make check` 覆盖。系统测试的 Debian 13 镜像按构建脚本的哈希与所在的周缓存，构建脚本改了或过了一周才重新组装。
+各作业的 Go 版本取自 `.go-version`，Node.js 版本取自 `.nvmrc`；`package.json` 的 `engines` 只是允许的范围。竞态作业不装 Node.js：`make race-test` 不跑只服务前端构建产物的 `internal/webui`，它由 `make check` 覆盖。系统测试的 Debian 13 镜像按构建脚本与 `a-nas-host` 包定义的哈希及所在的周缓存，二者改了或过了一周才重新组装。
 
 另有两个每周定时、不在规则集中的工作流：`vuln.yml` 运行 `make vuln-check`，报告此后新发布的公告；`fuzz.yml` 从代码中找出全部 `func Fuzz…`，每个目标跑 5 分钟，失败时上传触发失败的输入，把它放进该包的 `testdata/fuzz/<目标>/` 就成为回归用例。
 
@@ -152,7 +152,8 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 
 镜像准备、运行命令和结果读取统一见 [system-test](../../.claude/skills/system-test/SKILL.md)。以下流程按 Windows/WSL 的 Linux x86_64 环境验证；macOS/ARM64 的限制见[环境说明](environments/macos.md#运行检查)。
 
-- 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。
+- 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。镜像中的产品依赖取自 `a-nas-host` 包定义的 `Depends`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），另加系统测试打开的可选功能（Caddy、助手沙箱的工具）与只供测试用的工具。
+- 系统测试按部署的顺序安装：安装器先在没有 `a-nas-host`、以及装着另一个版本时拒绝安装且不改变系统，然后以 `apt-get install --no-download` 装上 release 的 `a-nas-host`。包列出了镜像中没有的依赖时，这一步失败。
 - 容器没有真实磁盘，脚本在 `lsblk` 边界把 loop 卷呈现为 SATA 数据盘，并写入与存储初始化相同的卷记录；`lsblk` 之上的 Host Agent、存储状态和卷校验均为正式代码。
 - CI 的 `System test (Debian 13, systemd)` 作业运行同一流程。
 - 部署前按 [system-test 的真实模型变体](../../.claude/skills/system-test/SKILL.md#变体)复测；模型准备见[AI 开发与评估](ai-development.md)。
