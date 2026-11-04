@@ -381,6 +381,37 @@ class MomentsTest(unittest.TestCase):
         self.assertEqual(index.span("10-2-0", basis[3], "probe"), (6.8, 10))
         self.assertIsNone(index.span("10-0-0", basis[0], "frame"))  # a shot of 1.2 s
 
+    def at(self, _video, seconds):
+        """The frame at seconds, as the index has it every 2 s."""
+        return self.index.frames[int(seconds // 2)]
+
+    def test_fill_grows_the_best_ends_to_the_target_within_each_cap(self):
+        market = np.eye(8, dtype=np.float32)[0]
+        spans, problems = self.index.fill([("07-0-0", market), ("07-1-0", self.castle)], "probe", 8, self.at,
+                                          caps=[6, 3])
+        self.assertEqual(problems, [])
+        self.assertEqual(spans[1][1] - spans[1][0], 3)  # its cap
+        self.assertEqual(spans[0], (0, 5))  # from its best window, 0-2 s, to the target
+        # Short of the target when every segment is at its cap.
+        spans, _problems = self.index.fill([("07-0-0", market), ("07-1-0", self.castle)], "probe", 20, self.at,
+                                           caps=[6, 3])
+        self.assertEqual(sum(e - s for s, e in spans), 9)
+        # Over the target, the worst end steps go, down to 1.5 s a segment.
+        spans, _problems = self.index.fill([("07-0-0", market), ("07-1-0", self.castle)], "probe", 3, self.at)
+        self.assertEqual([e - s for s, e in spans], [1.5, 1.5])
+
+    def test_fill_by_picture_keeps_to_the_peak_picture(self):
+        other_side = np.eye(8, dtype=np.float32)[2] * 0.6 + self.castle * 0.8
+        # 26-28 s is the first side of the castle, 0.8 alike to the peak at 28-30 s: the end that
+        # grows is the later one, up to CLIP_MAX.
+        spans, _problems = self.index.fill([("07-1-1", other_side)], "frame", 30, self.at)
+        self.assertEqual(spans, [(28, 34)])
+
+    def test_fill_moves_an_end_inside_speech_to_the_next_pause(self):
+        self.index.words = {"07": [(9.0, 9.6), (9.7, 10.4)]}
+        spans, _problems = self.index.fill([("07-1-0", self.castle)], "probe", 2, self.at)
+        self.assertEqual(spans, [(8, 10.55)])
+
     def test_search_keeps_to_windows_meeting_a_condition(self):
         # The castle seen from the other side (28-48 s) leans to basis 2; asking for that
         # rather than basis 1 leaves out the first castle part.

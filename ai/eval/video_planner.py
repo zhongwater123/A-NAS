@@ -40,7 +40,7 @@ MEMBER_VIDEOS = "/srv/a-nas/data/assistant/alice/files/视频"
 
 
 def turn(instruction, container, model, log, pictures=False, screen=False, about=False, retrieved=False, span=None,
-         locate=None):
+         locate=None, fill=False):
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     config = {"mcpServers": {"anas": {
         "command": os.path.join(here, "assistant-spike", "mcp-as-member.sh"), "args": ["alice"],
@@ -49,7 +49,8 @@ def turn(instruction, container, model, log, pictures=False, screen=False, about
                 | ({"ANAS_SPIKE_CARD_SCREEN": "1"} if screen else {})
                 | ({"ANAS_SPIKE_RETRIEVED_ONLY": "1"} if retrieved else {})
                 | ({"ANAS_SPIKE_SPAN": span} if span else {})
-                | ({"ANAS_SPIKE_LOCATE": locate} if locate else {})}}}
+                | ({"ANAS_SPIKE_LOCATE": locate} if locate else {})
+                | ({"ANAS_SPIKE_FILL": "1"} if fill else {})}}}
     ask = ((ASK_ABOUT if about else ASK).format(**instruction)
            + (STYLE.format(instruction["style"]) if instruction.get("style") else ""))
     command = ["claude", "-p", ask, "--mcp-config", json.dumps(config), "--strict-mcp-config",
@@ -120,6 +121,9 @@ def main():
     parser.add_argument("--locate", choices=("probe", "frame"),
                         help="the catalog as before and no retrieval needed, but no seconds in the plan: each segment "
                              "grown from the window of its card its shows matches (an experiment, #350)")
+    parser.add_argument("--fill", action="store_true",
+                        help="with --locate: the segments' seconds set to add up to the cut's, their ends from "
+                             "frames every half second (an experiment, #350)")
     args = parser.parse_args()
     vm.use_set(args.set)
     with open(args.instructions, encoding="utf-8") as file:
@@ -138,7 +142,7 @@ def main():
             instruction = instruction | {"style": args.style}
         target = os.path.join(out, instruction["id"])
         done = turn(instruction, args.container, args.model, target + ".jsonl", args.pictures, args.screen,
-                    args.about, args.retrieved_only, args.span, args.locate)
+                    args.about, args.retrieved_only, args.span, args.locate, args.fill)
         if done["cut"]:
             copy_out(args.container, done["cut"], target)
         else:

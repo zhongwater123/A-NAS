@@ -22,9 +22,12 @@ socket, which any member of a-nas-users may use, known by the caller's UID.
                                                   caption and highlight, to write probes from
   POST /montage  {"segments": [...],             the cut as video/mp4, or the
                   "skipped": [{card, why}],       (cards left out, checked when given)
-                  "span": "probe" | "frame"}      an experiment (#350): no start or end, but
+                  "span": "probe" | "frame",      an experiment (#350): no start or end, but
                                                   each segment's probe; the seconds grow from
-                                                  the window it matched (moments.Index.span)
+                                                  the window it matched (moments.Index.span),
+                  "seconds": n, "style": s}       or, with seconds, add up to them, frames
+                                                  every half second setting the ends
+                                                  (moments.Index.fill)
                                                  plan's problems with 422
 
 With --vision, the URL of a local vision model (montage.look), the cards carry
@@ -74,11 +77,30 @@ MEMBERS = "a-nas-users"
 
 def embed_query(ai_socket: str, text: str) -> np.ndarray:
     """One embed_query on the AI Worker (anas_ai.protocol): a length-prefixed JSON frame each way."""
+    return _embedded(ai_socket, {"op": "embed_query", "text": text})
+
+
+def embed_image(ai_socket: str, jpeg: bytes) -> np.ndarray:
+    """One embed_image on the AI Worker: the image travels as a descriptor beside the frame."""
+    fd = os.memfd_create("frame")
+    try:
+        os.write(fd, jpeg)
+        os.lseek(fd, 0, os.SEEK_SET)
+        return _embedded(ai_socket, {"op": "embed_image"}, fd)
+    finally:
+        os.close(fd)
+
+
+def _embedded(ai_socket: str, request: dict, fd: int | None = None) -> np.ndarray:
     with socket.socket(socket.AF_UNIX) as conn:
         conn.settimeout(120)
         conn.connect(ai_socket)
-        payload = json.dumps({"op": "embed_query", "text": text}).encode()
-        conn.sendall(struct.pack(">I", len(payload)) + payload)
+        payload = json.dumps(request).encode()
+        frame = struct.pack(">I", len(payload)) + payload
+        if fd is None:
+            conn.sendall(frame)
+        else:
+            socket.send_fds(conn, [frame], [fd])
         data = b""
         while len(data) < 4 or len(data) < 4 + struct.unpack(">I", data[:4])[0]:
             more = conn.recv(1 << 16)
@@ -113,8 +135,9 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         # refusal is looked at only where it changed.
         self.vision, self.seen = vision, {}
         self.pictures, self.keyframes, self.verdicts = {}, {}, {}
-        # The probes' vectors, by text, for segments whose seconds are set from them.
-        self.probes = {}
+        # The probes' vectors, by text, for segments whose seconds are set from them, and the
+        # frames embedded to set them, by (video, seconds).
+        self.probes, self.frames = {}, {}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -243,8 +266,15 @@ class Handler(BaseHTTPRequestHandler):
         if spans is not None:
             if spans not in moments.SPANS:
                 return self.reply(400, {"error": f"span 要是 {'、'.join(moments.SPANS)} 之一"})
+            target = body.get("seconds")
+            if target is not None and (isinstance(target, bool) or not isinstance(target, (int, float))
+                                       or not 5 <= target <= 600):
+                return self.reply(400, {"error": "seconds 要是 5–600 的秒数"})
             try:
-                segments, problems = self.spanned(segments, spans)
+                if target is None:
+                    segments, problems = self.spanned(segments, spans)
+                else:
+                    segments, problems = self.filled(segments, spans, target, body.get("style"))
             except OSError as error:
                 return self.reply(503, {"error": f"设备上的 AI 暂时不可用：{error}"})
             if problems:
@@ -309,6 +339,37 @@ class Handler(BaseHTTPRequestHandler):
             taken.append((card.split("-", 1)[0], *span))
             out.append(segment | {"start": span[0], "end": span[1]})
         return out, problems
+
+    def filled(self, segments, mode, target, style):
+        """The segments with start and end set to add up to target (Index.fill): frames every
+        half second, embedded as they are needed, set the ends; a trailer's last third is
+        held to moments.TAIL_MAX a segment. And the problems of those it cannot set."""
+        index, cards = self.server.index, {c["id"] for c in self.server.index.cards}
+        problems = [f"第 {n} 段要有检索结果里的 card 和找到它的 probe" for n, s in enumerate(segments, 1)
+                    if not isinstance(s, dict) or s.get("card") not in cards or not isinstance(s.get("probe"), str)
+                    or not 1 <= len(s["probe"].strip()) <= PROBE_CHARS]
+        if problems:
+            return [], problems
+        for segment in segments:
+            if segment["probe"] not in self.server.probes:
+                self.server.probes[segment["probe"]] = embed_query(self.server.ai_socket, segment["probe"])
+        tail = len(segments) - len(segments) // 3
+        caps = [moments.TAIL_MAX if style == "预告片" and n >= tail else moments.CLIP_MAX for n in range(len(segments))]
+        spans, problems = index.fill([(s["card"], self.server.probes[s["probe"]]) for s in segments], mode, target,
+                                     self.frame, caps)
+        return [s | {"start": span[0], "end": span[1]} for s, span in zip(segments, spans, strict=True) if span], problems
+
+    def frame(self, video, seconds):
+        """The vector of the frame at seconds, rendered like the index's frames (512 px long edge)."""
+        key = (video, round(seconds, 2))
+        if key not in self.server.frames:
+            path = os.path.join(self.server.videos, self.server.index.videos[video]["file"])
+            jpeg = subprocess.run(
+                ["ffmpeg", "-nostdin", "-v", "error", "-ss", f"{seconds:.3f}", "-i", path, "-frames:v", "1",  # noqa: S607
+                 "-vf", "scale='if(gt(iw,ih),512,-2)':'if(gt(iw,ih),-2,512)':flags=lanczos", "-q:v", "3",
+                 "-f", "image2", "-c:v", "mjpeg", "-"], check=True, capture_output=True, timeout=120).stdout
+            self.server.frames[key] = embed_image(self.server.ai_socket, jpeg)
+        return self.server.frames[key]
 
     def look(self, path, video, start, end, shows):
         key = (video, start, end, shows)

@@ -391,6 +391,9 @@ SCREENING = (
 # the card's probe matched (moments.Index.span). ANAS_SPIKE_LOCATE=probe or frame instead: no
 # retrieval needed, each segment grows from the window of its card its shows matches.
 LOCATE = os.environ.get("ANAS_SPIKE_LOCATE") or None
+# ANAS_SPIKE_FILL=1 as well: the plan says the cut's seconds, and the service sets each
+# segment's to add up to them, its ends from frames every half second (moments.Index.fill).
+FILL = LOCATE is not None and os.environ.get("ANAS_SPIKE_FILL") == "1"
 SPAN = LOCATE or os.environ.get("ANAS_SPIKE_SPAN") or None
 RETRIEVED_ONLY = os.environ.get("ANAS_SPIKE_RETRIEVED_ONLY") == "1" or (SPAN is not None and not LOCATE)
 # The cards search_video_moments returned this session, each with the probe it scored best on.
@@ -403,6 +406,8 @@ SEGMENT = (
     "入点出点由程序定，从这张卡片里最符合 shows 的 2 秒往两边扩展，"
     + ("后面的秒数与 shows 的分数相差不到 0.02 才扩展" if LOCATE == "probe" else "后面的画面与那 2 秒相似才扩展") +
     "，最长 6 秒，不越出镜头，不和前面的段重叠，所以每段 2–6 秒；"
+    + ("每段多长由程序按 seconds 分配：先取每段最符合的 2 秒，再每次把最符合的一端扩 0.5 秒，直到总长到 seconds，"
+       "所以段数决定节奏，不必为凑时长加段；" if FILL else "")
     if LOCATE else
     "每段是 {card, shows, reason}，不写 start、end：card 是 search_video_moments 返回过的卡片 id，"
     "入点出点由程序定，从这张卡片最符合找到它的那条检索词的 2 秒往两边扩展，"
@@ -526,8 +531,10 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
         "可以把它的 shows 改成那一部分、换到合适的位置再用，不必扔掉。"
         "计划不合规则时整次拒绝并逐条说明是哪一段、哪一条，照着改了再调用。成片只在助手目录里；"
         "成员要放进个人空间时，再用 submit_changes 的 copy 提交。"
-        "style：按哪个体裁剪的，和 list_video_contents 传的一样，随成片存档；没定体裁就不传。"))
-    def make_montage(segments: list[dict], skipped: list[dict], style: str | None = None):
+        "style：按哪个体裁剪的，和 list_video_contents 传的一样，随成片存档；没定体裁就不传。"
+        + ("seconds：成员说的成片时长（秒），程序按它分配各段长短；成员没说时长就按故事线估一个。" if FILL else "")))
+    def make_montage(segments: list[dict], skipped: list[dict], style: str | None = None,
+                     seconds: float | None = None):
         if RETRIEVED_ONLY:
             unseen = [f"第 {n} 段的 {s.get('card')} 不是 search_video_moments 返回过的卡片，先检索到它再用"
                       for n, s in enumerate(segments, 1) if not isinstance(s, dict) or s.get("card") not in RETRIEVED]
@@ -540,6 +547,8 @@ if os.path.exists(VIDEO_MOMENTS) and stat.S_ISSOCK(os.stat(VIDEO_MOMENTS).st_mod
                                  | {"probe": s.get("shows", "") if LOCATE else RETRIEVED[s["card"]]["probe"]}
                                  for s in segments],
                     "skipped": skipped, "span": SPAN}
+            if FILL and seconds:
+                body |= {"seconds": seconds, "style": style}
         try:
             status, kind, raw, review = video_moments("/montage", body)
         except PhotoError as error:
