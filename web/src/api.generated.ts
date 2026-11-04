@@ -5138,6 +5138,34 @@ export interface components {
             sizeBytes?: number;
             seeders?: number;
             leechers?: number;
+            /**
+             * @description A result with details of its own, from the layout SearXNG gives it; others follow their tab.
+             * @enum {string}
+             */
+            kind?: "paper" | "package" | "place";
+            /** @description A paper's authors. */
+            authors?: string[];
+            /** @description A paper's journal, or else its publisher. */
+            journal?: string;
+            doi?: string;
+            /**
+             * Format: uri
+             * @description A paper's PDF.
+             */
+            pdf?: string;
+            /** @description A package's version. */
+            version?: string;
+            license?: string;
+            /** @description A package's popularity as its site counts it: stars, downloads or pulls. */
+            popularity?: string;
+            /** Format: uri */
+            homepage?: string;
+            /** Format: uri */
+            sourceCode?: string;
+            /** @description A place's address. */
+            address?: string;
+            latitude?: number;
+            longitude?: number;
         };
         WebSearchAnswer: {
             text: string;
