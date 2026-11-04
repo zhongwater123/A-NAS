@@ -86,6 +86,11 @@ FLOOR = 0.8
 # film shows twice five minutes apart.
 SCENES = "scenes.json"
 SCENE_ALIKE = 0.92
+# Within one such group, cards whose mean pictures are on average less alike than this are
+# other places: a description as broad as "室内，光线昏暗" took case-08's wooden room and its
+# foggy colonnade together, which the pictures tell apart. 0.80 split case-08's 17 groups into
+# 28 and case-01's 11 into 16, its beach from its cliff top.
+SCENE_PICTURE = 0.80
 # A scene gives a plan at most this many segments, and a plan does not go back to one;
 # segments paced 快 count apart, up to FAST_SEGMENTS, so that a fight can be a run of cuts.
 SCENE_SEGMENTS = 3
@@ -132,6 +137,23 @@ def _for_cards(entries: dict, cards: list[dict]) -> dict:
     """The entries written for these cards, over the same seconds."""
     return {c["id"]: entries[c["id"]] for c in cards
             if c["id"] in entries and [entries[c["id"]]["start"], entries[c["id"]]["end"]] == [c["start"], c["end"]]}
+
+
+def _linked(alike: np.ndarray, members: list[int], threshold: float) -> list[list[int]]:
+    """members grouped by average linkage on alike while the two closest groups are threshold alike."""
+    groups = [[k] for k in members]
+    while len(groups) > 1:
+        best, pair = -1.0, None
+        for a in range(len(groups)):
+            for b in range(a):
+                s = float(alike[np.ix_(groups[a], groups[b])].mean())
+                if s > best:
+                    best, pair = s, (a, b)
+        if best < threshold:
+            break
+        a, b = pair
+        groups[b] += groups.pop(a)
+    return groups
 
 
 class Index:
@@ -425,24 +447,17 @@ class Index:
         return problems
 
     def scene_groups(self, vectors: dict) -> tuple[dict, dict]:
-        """Scenes from the place descriptions' vectors, by card id: average linkage of cards while
-        the two most alike groups are SCENE_ALIKE alike on average. Each card's scene number,
-        from 1 in time order, and each scene's name, the description nearest its mean."""
+        """Scenes from the place descriptions' vectors, by card id: cards whose descriptions are
+        SCENE_ALIKE alike on average, then within each such group those whose mean pictures are
+        SCENE_PICTURE alike (average linkage both times). Each card's scene number, from 1 in
+        time order, and each scene's name, the description nearest its mean."""
+        cards = {c["id"]: c for c in self.cards}
         ids = [c["id"] for c in self.cards if c["id"] in vectors and c["id"] in self.scenes]
         unit = np.stack([vectors[i] / np.linalg.norm(vectors[i]) for i in ids])
-        alike = unit @ unit.T
-        groups = [[k] for k in range(len(ids))]
-        while len(groups) > 1:
-            best, pair = -1.0, None
-            for a in range(len(groups)):
-                for b in range(a):
-                    s = float(alike[np.ix_(groups[a], groups[b])].mean())
-                    if s > best:
-                        best, pair = s, (a, b)
-            if best < SCENE_ALIKE:
-                break
-            a, b = pair
-            groups[b] += groups.pop(a)
+        pictures = np.stack([self.frames[cards[i]["windows"]].mean(axis=0) for i in ids])
+        pictures /= np.linalg.norm(pictures, axis=1, keepdims=True)
+        groups = [part for group in _linked(unit @ unit.T, list(range(len(ids))), SCENE_ALIKE)
+                  for part in _linked(pictures @ pictures.T, group, SCENE_PICTURE)]
         groups.sort(key=min)
         scene_of, names = {}, {}
         for n, members in enumerate(groups, 1):
