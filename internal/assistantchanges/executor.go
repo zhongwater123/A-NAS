@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/accountid"
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 )
 
@@ -963,9 +964,7 @@ func (e *Executor) save(l *ledger, account string, changes []change) error {
 	if err != nil {
 		return err
 	}
-	temp := filepath.Join(dir, ".changes.json.tmp")
-	if err := os.WriteFile(temp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(temp, filepath.Join(dir, "changes.json"))
+	// A power cut must not empty the record of which changes a member
+	// approved and which were applied.
+	return atomicfile.Write(filepath.Join(dir, "changes.json"), data, 0o600)
 }

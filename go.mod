@@ -23,6 +23,7 @@ require (
 	github.com/getkin/kin-openapi v0.152.0
 	github.com/go-audio/wav v1.1.0
 	github.com/godbus/dbus/v5 v5.2.4
+	github.com/google/renameio/v2 v2.0.2
 	github.com/google/uuid v1.6.0
 	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/hashicorp/golang-lru/v2 v2.0.7

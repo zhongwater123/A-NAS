@@ -216,8 +216,10 @@ systemctl restart anas-host-agent
 # path above is now a deleted file, and a unit started later cannot mount its
 # own over it (226/NAMESPACE). Bind the new socket there again.
 for _ in $(seq 1 50); do [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
+# The old bind may be gone already; a new one would sit on top of it anyway.
 umount /run/anas-change-agent/agent.sock 2>/dev/null || true
-mount --bind /run/a-nas/assistant-changes.sock /run/anas-change-agent/agent.sock || true
+check "the restarted Host Agent's change socket is bound into the sandbox again" \
+  mount --bind /run/a-nas/assistant-changes.sock /run/anas-change-agent/agent.sock
 for _ in $(seq 1 50); do
   [[ "$(stat -c %U "$agent_space/alice" 2>/dev/null)" == root ]] && break
   sleep 0.2

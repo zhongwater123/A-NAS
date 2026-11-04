@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/zhongwater123/A-NAS/internal/appstore"
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 )
 
 // Generated app secrets live in the agent's state directory, one file per
@@ -55,11 +56,10 @@ func (s *Store) appSecrets(id string) (appstore.Secrets, error) {
 	if err := os.MkdirAll(filepath.Dir(s.secretsPath(id)), 0o700); err != nil {
 		return nil, err
 	}
-	temporary := s.secretsPath(id) + ".tmp"
-	if err := os.WriteFile(temporary, data, 0o600); err != nil {
-		return nil, err
-	}
-	if err := os.Rename(temporary, s.secretsPath(id)); err != nil {
+	// The app initialises its logins with these: a file a power cut left
+	// empty would fail every later operation, and one it lost would make
+	// passwords the app does not know.
+	if err := atomicfile.Write(s.secretsPath(id), data, 0o600); err != nil {
 		return nil, err
 	}
 	return secrets, nil
