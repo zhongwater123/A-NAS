@@ -86,7 +86,15 @@ Web 代码由 Biome 格式化并排列导入（`web/biome.json`：先 Node 与 n
 
 ## Root 集成测试
 
-账号、ACL 与 Samba 行为需要真实 root 工具验证。`internal/hostops/linux/root_integration_test.go` 使用 `rootintegration` 构建标签，只在 root 且 `ANAS_ROOT_INTEGRATION=1` 时运行，并会创建账号、组和 Samba 配置。只在可丢弃的特权 Debian 容器中运行，绝不在开发机或实验 NAS 上直接执行：
+账号、ACL 与 Samba 行为需要真实 root 工具验证。`internal/hostops/linux/root_integration_test.go` 使用 `rootintegration` 构建标签，只在 root 且 `ANAS_ROOT_INTEGRATION=1` 时运行，并会创建账号、组和 Samba 配置。只在可丢弃的特权 Debian 容器中运行，绝不在开发机或实验 NAS 上直接执行。
+
+CI 的系统测试作业用 [`scripts/root-integration-test.sh`](../../scripts/root-integration-test.sh) 运行它们（[#190](https://github.com/zhongwater123/A-NAS/issues/190)）：在作业中编译测试程序，以 root 在系统测试的 Debian 13 镜像中运行，镜像不需要 Go；同一脚本还运行分享的 Btrfs 捕获与 ACL 矩阵（`internal/sharefiles/testdata/btrfs.sh`）。两组测试创建同样的账号，所以各用一个容器。本地有 Docker 与这个镜像时同样运行：
+
+```bash
+scripts/build-system-test-image.sh && scripts/root-integration-test.sh
+```
+
+也可以在装有 Go 与 gcc 的容器中直接运行：
 
 ```bash
 docker run --rm --privileged -e ANAS_ROOT_INTEGRATION=1 -e CGO_ENABLED=1 \

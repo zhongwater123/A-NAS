@@ -15,7 +15,9 @@ packages+=curl,ca-certificates,procps,util-linux,passwd,iproute2,jq,python3,cadd
 packages+=libgomp1,libssl3t64,
 # The AI assistant sandbox (ai/assistant-spike): PID 1 in its PID namespace, the
 # model socket bridge, the file search Hermes runs, and YAML edits in its tests.
-packages+=tini,socat,ripgrep,yq
+packages+=tini,socat,ripgrep,yq,
+# chattr, which scripts/root-integration-test.sh needs: minbase leaves it out.
+packages+=e2fsprogs
 
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
