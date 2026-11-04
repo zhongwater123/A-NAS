@@ -70,12 +70,21 @@ pinned() {
 
 # fetch NAME FILE SIZE SHA256 DIRECTORY
 fetch() {
-  local target=$5/$2 incoming=$root/.incoming/$4 parts
+  local target=$5/$2 incoming=$root/.incoming/$4 listing bytes asset parts
   if pinned "$target" "$3" "$4"; then
     echo "$target"
     return
   fi
   mkdir -p -- "$incoming"
+  # gh writes an asset under its own name as it downloads, so a part an
+  # interruption cut short goes before --skip-existing would keep it.
+  if listing=$(gh release view "sha256-$4" --repo "$assets" --json assets --jq '.assets[] | "\(.size) \(.name)"'); then
+    while read -r bytes asset; do
+      if [[ -f "$incoming/$asset" && "$(wc -c <"$incoming/$asset" | tr -d ' ')" != "$bytes" ]]; then
+        rm -f -- "$incoming/$asset"
+      fi
+    done <<<"$listing"
+  fi
   if ! gh release download "sha256-$4" --repo "$assets" --dir "$incoming" --skip-existing; then
     rmdir -- "$incoming" "$root/.incoming" 2>/dev/null || true
     echo "cannot download $1 (release sha256-$4) from $assets" >&2
