@@ -72,7 +72,7 @@ func TestFilePreviewRequiresSessionAndSourceAccess(t *testing.T) {
 	memberLogin := signIn(t, handler, "member", "member horse battery staple")
 	path := "/api/v1/files/" + entry.ID + "/preview"
 	request := func(path string, cookie *http.Cookie, etag ...string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("GET", path, nil)
+		r := httptest.NewRequest(http.MethodGet, path, nil)
 		if len(etag) > 0 {
 			r.Header.Set("If-None-Match", etag[0])
 		}

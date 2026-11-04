@@ -7,9 +7,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/zhongwater123/A-NAS/internal/accounts"
-	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
-	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 	"io"
 	"net"
 	"net/http"
@@ -19,6 +16,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
+	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 )
 
 // bridgePeer is a tiny wire peer of the file bridge, which isolates the
@@ -100,14 +101,14 @@ func TestSupervisorRehandshakesWhenBridgeGenerationChanges(t *testing.T) {
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: time.Second}
 	ready := func() bool {
-		req, _ := http.NewRequest("GET", "http://shares"+sharesapi.PathPrefix, nil)
+		req, _ := http.NewRequest(http.MethodGet, "http://shares"+sharesapi.PathPrefix, nil)
 		req.Header.Set(serviceproxy.SessionHeader, "bob-session")
 		resp, err := client.Do(req)
 		if err != nil {
 			return false
 		}
 		resp.Body.Close()
-		return resp.StatusCode == 200
+		return resp.StatusCode == http.StatusOK
 	}
 	wait := func(condition func() bool) {
 		t.Helper()
@@ -181,7 +182,7 @@ func TestStoppingServesRequestsInProgressBeforeClosingTheStore(t *testing.T) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}}
 	list := func(token string) (int, error) {
-		req, _ := http.NewRequest("GET", "http://shares"+sharesapi.PathPrefix, nil)
+		req, _ := http.NewRequest(http.MethodGet, "http://shares"+sharesapi.PathPrefix, nil)
 		req.Header.Set(serviceproxy.SessionHeader, token)
 		resp, err := client.Do(req)
 		if err != nil {

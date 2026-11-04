@@ -41,14 +41,14 @@ func TestAuthenticationIgnoresProductClaimsAndPreservesVerifiedToken(t *testing.
 		if !ok || user.ID != "bob" || accounts.SessionToken(r.Context()) != "bob-session" {
 			t.Errorf("unverified user or token %+v", user)
 		}
-		w.WriteHeader(204)
+		w.WriteHeader(http.StatusNoContent)
 	})
 	handler := authenticate(sessions{}, nil, next)
 	for _, test := range []struct {
 		token  string
 		status int
 	}{{"forged", 401}, {"reset", 403}, {"bob-session", 204}} {
-		r := httptest.NewRequest("GET", sharesapi.PathPrefix, nil)
+		r := httptest.NewRequest(http.MethodGet, sharesapi.PathPrefix, nil)
 		r.Header.Set(serviceproxy.SessionHeader, test.token)
 		r = r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: "admin"}))
 		w := httptest.NewRecorder()
@@ -79,7 +79,7 @@ func TestUnavailableVolumeNeverCreatesFallbackStore(t *testing.T) {
 	var response *http.Response
 	var err error
 	for range 100 {
-		req, _ := http.NewRequest("GET", "http://shares"+sharesapi.PathPrefix, nil)
+		req, _ := http.NewRequest(http.MethodGet, "http://shares"+sharesapi.PathPrefix, nil)
 		req.Header.Set(serviceproxy.SessionHeader, "bob-session")
 		response, err = client.Do(req)
 		if err == nil {
@@ -91,7 +91,7 @@ func TestUnavailableVolumeNeverCreatesFallbackStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode != 503 {
+	if response.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("offline status %d", response.StatusCode)
 	}
 	if _, err = os.Stat(root); !os.IsNotExist(err) {

@@ -20,6 +20,8 @@ linters:
     - sqlclosecheck
     - staticcheck
     - unused
+    # http.StatusNotFound and http.MethodGet rather than 404 and "GET" (#222).
+    - usestdlibvars
 
   settings:
     depguard:

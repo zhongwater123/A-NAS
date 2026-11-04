@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/moby/moby/client"
+
 	"github.com/zhongwater123/A-NAS/internal/appstore"
 	"github.com/zhongwater123/A-NAS/internal/appstore/engine"
 )
@@ -64,13 +65,13 @@ func TestDockerInspectorRangeAndDisappearingContainer(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/containers/json"):
 			_, _ = fmt.Fprint(w, `[{"Id":"gone","State":"exited"},{"Id":"range","State":"created"},{"Id":"live","State":"running","Ports":[{"PublicPort":9000}]}]`)
 		case strings.HasSuffix(r.URL.Path, "/containers/gone/json"):
-			w.WriteHeader(404)
+			w.WriteHeader(http.StatusNotFound)
 			_, _ = fmt.Fprint(w, `{"message":"No such container"}`)
 		case strings.HasSuffix(r.URL.Path, "/containers/range/json"):
 			_, _ = fmt.Fprint(w, `{"HostConfig":{"PortBindings":{"80/tcp":[{"HostPort":"8000-8010"}]}}}`)
 		default:
 			t.Errorf("unexpected inspect (running containers use List): %s", r.URL.Path)
-			w.WriteHeader(500)
+			w.WriteHeader(http.StatusInternalServerError)
 		}
 	}))
 	defer server.Close()
