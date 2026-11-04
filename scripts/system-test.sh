@@ -180,6 +180,7 @@ fi
 stage() {
   install -d "$1"
   install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh /src/scripts/install-ffmpeg-units.sh "$1/"
+  install -m 0644 /src/build/a-nas-host.deb /src/build/a-nas-console.deb "$1/"
   for unit in anas-api anas-host-agent anas-photos anas-shares anas-family; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
   done
@@ -273,6 +274,38 @@ cp -p /var/lib/a-nas/app-identities.json /tmp/legacy-app-identities.json
 
 iface=$(ip -o -4 route show to default | awk '{print $5; exit}')
 ip=$(ip -o -4 addr show dev "$iface" | awk '{split($4, a, "/"); print a[1]; exit}')
+# The installer runs only on the release's own a-nas-host (ADR 0031): without
+# it, or with another version, it stops before changing anything.
+refused_without_host_package() {
+  local status=0
+  bash /src/scripts/install-v1.0.1-system-services.sh "$release" system-test "$iface" >/tmp/refused.log 2>&1 || status=$?
+  [[ $status -eq 3 && ! -e /opt/a-nas/current ]] && grep -Fq "apt install $release/a-nas-host.deb" /tmp/refused.log
+}
+if ! refused_without_host_package; then
+  tail -5 /tmp/refused.log
+  echo "FAIL the installer refuses a release without its host package"
+  exit 1
+fi
+echo "PASS the installer refuses a release without its host package"
+other=/tmp/other-host-package
+dpkg-deb --raw-extract "$release/a-nas-host.deb" "$other"
+sed -i 's/^Version: .*/Version: 0~other/' "$other/DEBIAN/control"
+dpkg-deb --root-owner-group --build "$other" "$other.deb" >/dev/null
+if ! apt-get install -y -q --no-download "$other.deb" >/tmp/host-package.log 2>&1 || ! refused_without_host_package; then
+  tail -5 /tmp/host-package.log /tmp/refused.log
+  echo "FAIL the installer refuses another version of its host package"
+  exit 1
+fi
+echo "PASS the installer refuses another version of its host package"
+# Installed as an administrator does: the image has every dependency, so apt
+# needs nothing from the network.
+if ! apt-get install -y -q --no-download --allow-downgrades "$release/a-nas-host.deb" >/tmp/host-package.log 2>&1; then
+  tail -20 /tmp/host-package.log
+  echo "FAIL the release's host package installs"
+  exit 1
+fi
+echo "PASS the release's host package installs"
+
 installed_at=$(date '+%Y-%m-%d %H:%M:%S')
 if ! bash /src/scripts/install-v1.0.1-system-services.sh "$release" system-test "$iface" >/tmp/install.log 2>&1; then
   tail -30 /tmp/install.log

@@ -202,7 +202,7 @@ jobs:
       # week every run tests against the same packages.
       - name: Name the cached Debian 13 systemd image
         id: image
-        run: echo "key=system-test-image-$(date -u +%G-W%V)-${{ hashFiles('scripts/build-system-test-image.sh') }}" >> "$GITHUB_OUTPUT"
+        run: echo "key=system-test-image-$(date -u +%G-W%V)-${{ hashFiles('scripts/build-system-test-image.sh', 'deploy/debian/a-nas-host/DEBIAN/control') }}" >> "$GITHUB_OUTPUT"
 
       - name: Restore the Debian 13 systemd image
         id: image-cache

@@ -10,7 +10,7 @@ description: 运行 A-NAS 的 systemd 系统测试（scripts/system-test.sh）�
 ## 前提
 
 - WSL 中的 Docker；测试只启动并删除自己命名为 `anas-system-test-<PID>` 的容器。本机还运行着与 A-NAS 无关的容器，不要清理它们。
-- 镜像 `anas-systemd:trixie`。缺少时，或比构建脚本旧时，重新构建。比较两个时间：`docker image inspect -f '{{.Created}}' anas-systemd:trixie`，以及在检出中运行 `git log -1 --format=%cI -- scripts/build-system-test-image.sh`。旧镜像会让后来加进脚本的检查失败，例如助手沙箱报 `rg: not found`。构建命令：
+- 镜像 `anas-systemd:trixie`。缺少时，或比构建脚本旧时，重新构建。比较两个时间：`docker image inspect -f '{{.Created}}' anas-systemd:trixie`，以及在检出中运行 `git log -1 --format=%cI -- scripts/build-system-test-image.sh deploy/debian/a-nas-host/DEBIAN/control`（镜像装的是这个包的依赖）。旧镜像会让后来加进脚本的检查失败，例如助手沙箱报 `rg: not found`。构建命令：
 
   ```bash
   scripts/build-system-test-image.sh anas-systemd:trixie <本地任一 Debian 镜像>
