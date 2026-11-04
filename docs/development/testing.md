@@ -153,7 +153,7 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 镜像准备、运行命令和结果读取统一见 [system-test](../../.claude/skills/system-test/SKILL.md)。以下流程按 Windows/WSL 的 Linux x86_64 环境验证；macOS/ARM64 的限制见[环境说明](environments/macos.md#运行检查)。
 
 - 镜像用 debootstrap 从 `deb.debian.org` 组装，因此不依赖 Docker Hub；镜像内 systemd 版本与实验 NAS 一致。镜像中的产品依赖取自 `a-nas-host` 包定义的 `Depends`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），另加系统测试打开的可选功能（Caddy、助手沙箱的工具）与只供测试用的工具。
-- 系统测试按部署的顺序安装：安装器先在没有 `a-nas-host`、以及装着另一个版本时拒绝安装且不改变系统，然后以 `apt-get install --no-download` 装上 release 的 `a-nas-host`。包列出了镜像中没有的依赖时，这一步失败。
+- 系统测试按部署的顺序安装：安装器先在没有 `a-nas-host`、以及装着另一个版本时拒绝安装且不改变系统，然后以 `dpkg -i` 装上 release 的 `a-nas-host`。dpkg 不下载依赖，包列出了镜像中没有的依赖时，这一步失败。
 - 容器没有真实磁盘，脚本在 `lsblk` 边界把 loop 卷呈现为 SATA 数据盘，并写入与存储初始化相同的卷记录；`lsblk` 之上的 Host Agent、存储状态和卷校验均为正式代码。
 - CI 的 `System test (Debian 13, systemd)` 作业运行同一流程。
 - 部署前按 [system-test 的真实模型变体](../../.claude/skills/system-test/SKILL.md#变体)复测；模型准备见[AI 开发与评估](ai-development.md)。

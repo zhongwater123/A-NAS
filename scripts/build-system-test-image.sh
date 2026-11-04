@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Builds the Debian 13 image for scripts/system-test.sh: systemd as PID 1 plus
 # what the a-nas-host package depends on (ADR 0031). The system test installs
-# the release's a-nas-host on it with apt, which needs nothing more and fails
-# when a dependency the package lists is missing. It is assembled with
+# the release's a-nas-host on it with dpkg, which fails when a dependency the
+# package lists is missing. It is assembled with
 # debootstrap from deb.debian.org, so it works where Docker Hub is not
 # reachable; BUILDER is any local Debian image that can install debootstrap.
 #

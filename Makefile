@@ -145,8 +145,9 @@ ops-check:
 	grep -Fq '[[ -S /run/a-nas-container/agent.sock ]]' scripts/install-v1.0.1-system-services.sh
 	grep -Fq "printf 'ANAS_CONTAINERS_MODE=agent\\n' >> /etc/a-nas/anas-api.env" scripts/install-v1.0.1-system-services.sh
 	grep -Fqx 'ReadWritePaths=/var/lib/a-nas /run/a-nas-share-files' deploy/systemd/system/anas-api.service
-	grep -Fq 'setfacl getfacl' scripts/install-v1.0.1-system-services.sh
-	grep -Fq 'acl btrfs-progs' scripts/provision-v1.0.1-rc.sh
+	grep -Eq '^Depends: (.*, )?acl(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
+	grep -Fq 'dpkg-deb --field "$$source_release/a-nas-host.deb" Version' scripts/install-v1.0.1-system-services.sh
+	grep -Fq '"$$SOURCE_RELEASE/a-nas-host.deb"' scripts/provision-v1.0.1-rc.sh
 	jq -e '.PasswordManagerEnabled == false and .PasswordManagerPasskeysEnabled == false and .SyncDisabled == true' deploy/chromium/policies/managed/a-nas.json >/dev/null
 	grep -Fq '/etc/chromium/policies/managed/a-nas.json' scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'a-nas-chromium-policy.json.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
@@ -273,7 +274,7 @@ ops-check:
 	grep -Fq '"/run/a-nas-ffmpeg/slots"' cmd/anas-api/config.go
 	grep -Fqx 'const Slots = 8' internal/ffmpegworker/admission.go
 	grep -Fq 'for slot in 0 1 2 3 4 5 6 7; do' scripts/install-ffmpeg-units.sh
-	grep -Fq 'ffmpeg ffprobe heif-thumbnailer; do' scripts/install-v1.0.1-system-services.sh
+	grep -Eq '^Depends: (.*, )?ffmpeg, heif-thumbnailer(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
 	awk '/^[A-Za-z0-9]/ { if (pin && !hashed) bad = bad " " pin; pin = $$1; hashed = 0 } /--hash=sha256:[0-9a-f]{64}/ { hashed = 1 } \
 		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt
 	! grep -E "^($$(sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' ai/requirements.excludes | paste -sd '|'))==" ai/requirements.txt
