@@ -8,13 +8,93 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 )
 
 const signInPassword = "alice password for testing"
+
+func TestConcurrentFailuresCannotBypassSignInBackoff(t *testing.T) {
+	for _, cycling := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cycling=%t", cycling), func(t *testing.T) {
+			clock := clocktest.New(time.Date(2026, time.November, 3, 12, 0, 0, 0, time.UTC))
+			service, admin := newSignInService(t, clock.Now)
+			client := fromLAN("192.0.2.10")
+			limit := 5
+			name := func(i int) string {
+				if cycling {
+					return fmt.Sprintf("nobody%d", i)
+				}
+				return "alice"
+			}
+			if cycling {
+				limit = 20
+			}
+			for i := range limit - 1 {
+				if _, err := service.Authenticate(client, name(i), "wrong"); !errors.Is(err, accounts.ErrInvalidCredentials) {
+					t.Fatal(err)
+				}
+			}
+			var checks atomic.Int32
+			for batch := range 2 {
+				if batch > 0 {
+					clock.Advance(30 * time.Second)
+				}
+				synctest.Test(t, func(t *testing.T) {
+					release := make(chan struct{})
+					accounts.SetPasswordVerifier(service, func(_, _ string) bool {
+						checks.Add(1)
+						<-release
+						return false
+					})
+					results := make(chan error, 10)
+					for i := range 10 {
+						go func() {
+							_, err := service.Authenticate(client, name(limit+i), "wrong")
+							results <- err
+						}()
+					}
+					synctest.Wait()
+					close(release)
+					failures, throttled := 0, 0
+					for range 10 {
+						switch err := <-results; {
+						case errors.Is(err, accounts.ErrInvalidCredentials):
+							failures++
+						case errors.Is(err, accounts.ErrSignInThrottled):
+							throttled++
+						default:
+							t.Fatalf("unexpected result: %v", err)
+						}
+					}
+					if failures != 1 || throttled != 9 {
+						t.Fatalf("failures=%d throttled=%d, want 1 and 9", failures, throttled)
+					}
+				})
+			}
+			if got := checks.Load(); got != 2 {
+				t.Fatalf("password checks=%d, want 2", got)
+			}
+			events, err := service.Activity(context.Background(), admin, activity.Query{Limit: activity.MaxLimit})
+			if err != nil {
+				t.Fatal(err)
+			}
+			failures := 0
+			for _, event := range events {
+				if event.Action == "session.sign_in_failed" {
+					failures++
+				}
+			}
+			if failures != limit+1 {
+				t.Fatalf("audit failures=%d, want %d", failures, limit+1)
+			}
+		})
+	}
+}
 
 // newSignInService has an administrator and a member, alice.
 func newSignInService(t *testing.T, now func() time.Time) (*accounts.Service, accounts.User) {

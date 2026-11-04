@@ -2,6 +2,7 @@ package accounts
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"strconv"
 	"sync"
@@ -61,6 +62,43 @@ const (
 type signInFailures struct {
 	mu      sync.Mutex
 	records map[string]*failureRecord
+	clients map[string]*signInClient
+}
+
+// Keep one admission through its outcome per client. Waiting for the client
+// does not occupy a password slot, so a burst cannot crowd out other clients.
+// Entries exist only while requests hold or wait for them.
+type signInClient struct {
+	gate *semaphore.Weighted
+	refs int
+}
+
+func (f *signInFailures) acquire(ctx context.Context, client string) (func(), error) {
+	f.mu.Lock()
+	if f.clients == nil {
+		f.clients = make(map[string]*signInClient)
+	}
+	entry := f.clients[client]
+	if entry == nil {
+		entry = &signInClient{gate: semaphore.NewWeighted(1)}
+		f.clients[client] = entry
+	}
+	entry.refs++
+	f.mu.Unlock()
+
+	drop := func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(f.clients, client)
+		}
+	}
+	if err := entry.gate.Acquire(ctx, 1); err != nil {
+		drop()
+		return nil, err
+	}
+	return func() { entry.gate.Release(1); drop() }, nil
 }
 
 type failureRecord struct {
@@ -70,7 +108,10 @@ type failureRecord struct {
 }
 
 func failureKeys(client, username string) (byName, byClient string) {
-	return client + "\x00" + username, client
+	// Invalid usernames can fill the entire request body. Never retain them in
+	// the failure table; hashing preserves distinct names at a fixed cost.
+	digest := sha256.Sum256([]byte(username))
+	return client + "\x00" + string(digest[:]), client
 }
 
 // wait returns how long the client must still wait before it may try the
@@ -164,6 +205,10 @@ func newPasswordWork(random func() (string, error)) *passwordWork {
 // matches reports whether password is the one encoded hashes. An empty
 // encoded checks the decoy instead, which never matches.
 func (w *passwordWork) matches(ctx context.Context, password, encoded string) (bool, error) {
+	if err := w.gate.Acquire(ctx, 1); err != nil {
+		return false, err
+	}
+	defer w.gate.Release(1)
 	decoy := encoded == ""
 	if decoy {
 		var err error
@@ -171,10 +216,6 @@ func (w *passwordWork) matches(ctx context.Context, password, encoded string) (b
 			return false, err
 		}
 	}
-	if err := w.gate.Acquire(ctx, 1); err != nil {
-		return false, err
-	}
-	defer w.gate.Release(1)
 	return w.verify(password, encoded) && !decoy, nil
 }
 

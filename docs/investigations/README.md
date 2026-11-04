@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-11-04：并发登录绕过退避与密码计算内存边界](2026-11-04-sign-in-admission-and-memory.md)
 - [2026-11-03：停用助手被保活的成员时返回 503](2026-11-03-assistant-disable-start-race.md)
 - [2026-11-03：经局域网 HTTP 打开时，家庭中心添加宝宝后窗口无法显示](2026-11-03-family-window-fails-over-lan-http.md)
 - [2026-10-28：镜像仓库一次限流就让应用安装失败](2026-10-28-registry-rate-limit-failed-install.md)

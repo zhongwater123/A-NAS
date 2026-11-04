@@ -556,12 +556,19 @@ func (s *Service) AuthenticateLocalConsole(ctx context.Context, username, passwo
 func (s *Service) authenticate(ctx context.Context, username, password string, localConsole bool) (Session, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	client := originFrom(ctx).client()
+	release, err := s.signIns.acquire(ctx, client)
+	if err != nil {
+		return Session{}, err
+	}
+	defer release()
+	// Recheck after this client's queue, and keep admission until its outcome
+	// is counted. No same-client failure can race the password-slot queue.
 	if wait := s.signIns.wait(s.now(), client, username); wait > 0 {
 		return Session{}, &ThrottledError{RetryAfter: wait}
 	}
 	var user User
 	var encodedHash, createdAt string
-	err := s.store.db.QueryRowContext(ctx,
+	err = s.store.db.QueryRowContext(ctx,
 		"SELECT id, username, role, status, password_hash, created_at, must_change_password, nickname, avatar_version FROM users WHERE username = ?", username,
 	).Scan(&user.ID, &user.Username, &user.Role, &user.Status, &encodedHash, &createdAt, &user.MustChangePassword, &user.Nickname, &user.AvatarVersion)
 	failure := ""
