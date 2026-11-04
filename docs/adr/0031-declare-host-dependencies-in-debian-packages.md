@@ -32,7 +32,7 @@ A-NAS 在 Debian 13 上运行，依赖 Samba、Btrfs 工具、FFmpeg、Chromium 
 2. **与 release 无关的宿主机配置随 `a-nas-host` 安装。** 第一项是启用网络等待：宿主机用 ifupdown 管理局域网接口时，`postinst` 启用 `ifupdown-wait-online.service`。它对 `allow-hotplug` 接口也等到 `ifup` 完成，smbd 因此在拿到地址之后才启动。与 release 有关的配置（单元、环境文件、Chromium 策略、传感器模块）仍由安装器按 release 写入。
 3. **release 带上这两个包，安装前先装包。** 暂存的 release 目录含 `a-nas-host.deb` 与 `a-nas-console.deb`，版本写在包内。`deploy-dev.ps1` 与二进制一起输出它们的 SHA-256，root 先与二进制一起核对：包的维护脚本以 root 运行，暂存账号能改动暂存目录，这与 root 运行暂存目录中的安装器是同一层信任（[#171](https://github.com/zhongwater123/A-NAS/issues/171)）。然后 root 执行 `apt install --no-install-recommends <release>/a-nas-host.deb`（有屏幕时连同控制台包），再运行安装器。依赖没有变化时 apt 不需要联网。安装器把两个包复制进 `/opt/a-nas/releases/<ID>`，回滚时从那里装回旧版本。
 4. **安装器只核对包的版本。** 安装器不再逐个检查命令与库，改为核对 `a-nas-host` 已安装且版本等于本 release 的版本；不满足时以退出码 3 结束并打印要执行的 `apt install` 命令。依赖是否齐全由 dpkg 保证。
-5. **一处声明，其余引用。** 首次安装向导与各本手册改为安装这两个包，删除各自的清单。系统测试镜像的产品依赖取自 `a-nas-host` 的 `Depends`，只另列系统测试打开的可选功能与测试用的工具，镜像缓存的键包含包的定义；系统测试再以 `apt-get install --no-download` 装上 release 的 `a-nas-host`。这样系统测试每次都在验证这份清单：包与镜像对不上时，测试就会失败。
+5. **一处声明，其余引用。** 首次安装向导与各本手册改为安装这两个包，删除各自的清单。系统测试镜像的产品依赖取自 `a-nas-host` 的 `Depends`，只另列系统测试打开的可选功能与测试用的工具，镜像缓存的键包含包的定义；系统测试再以 `dpkg -i` 装上 release 的 `a-nas-host`，它不下载缺少的依赖而是失败。这样系统测试每次都在验证这份清单：包与镜像对不上时，测试就会失败。
 6. **产品本身暂不打包。** 二进制、单元、系统账号、ACL 修复与各项迁移仍由安装器完成。把产品也做成软件包，交由 dpkg 记录文件、校验（`dpkg --verify`）、升级与回滚，是 #189 的下一步，另立 ADR。
 
 ## 实施计划

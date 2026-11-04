@@ -282,25 +282,25 @@ refused_without_host_package() {
   [[ $status -eq 3 && ! -e /opt/a-nas/current ]] && grep -Fq "apt install $release/a-nas-host.deb" /tmp/refused.log
 }
 if ! refused_without_host_package; then
-  tail -5 /tmp/refused.log
+  tail -n 5 /tmp/refused.log
   echo "FAIL the installer refuses a release without its host package"
   exit 1
 fi
 echo "PASS the installer refuses a release without its host package"
+# dpkg, not apt: it fails instead of downloading a dependency the image lacks,
+# and apt 3's --no-download cannot install a local package at all.
 other=/tmp/other-host-package
 dpkg-deb --raw-extract "$release/a-nas-host.deb" "$other"
 sed -i 's/^Version: .*/Version: 0~other/' "$other/DEBIAN/control"
 dpkg-deb --root-owner-group --build "$other" "$other.deb" >/dev/null
-if ! apt-get install -y -q --no-download "$other.deb" >/tmp/host-package.log 2>&1 || ! refused_without_host_package; then
-  tail -5 /tmp/host-package.log /tmp/refused.log
+if ! dpkg -i "$other.deb" >/tmp/host-package.log 2>&1 || ! refused_without_host_package; then
+  tail -n 5 /tmp/host-package.log /tmp/refused.log
   echo "FAIL the installer refuses another version of its host package"
   exit 1
 fi
 echo "PASS the installer refuses another version of its host package"
-# Installed as an administrator does: the image has every dependency, so apt
-# needs nothing from the network.
-if ! apt-get install -y -q --no-download --allow-downgrades "$release/a-nas-host.deb" >/tmp/host-package.log 2>&1; then
-  tail -20 /tmp/host-package.log
+if ! dpkg -i "$release/a-nas-host.deb" >/tmp/host-package.log 2>&1; then
+  tail -n 20 /tmp/host-package.log
   echo "FAIL the release's host package installs"
   exit 1
 fi
