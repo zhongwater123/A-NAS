@@ -236,11 +236,11 @@ wipefs --no-act "$resolved_disk" || true
 confirm "Do these values match the intended RC and disposable experimental disk?" || exit 1
 
 stage "Install host dependencies"
-warn "This installs Btrfs, partitioning, SMART, Samba, SQLite, local AI runtime and FFmpeg packages."
+warn "This installs the release's a-nas-host and a-nas-console packages (ADR 0031) and what they depend on: Btrfs, partitioning, SMART, Samba, FFmpeg, local AI libraries and the local console's Chromium."
 confirm "Install the required Debian packages now?" || exit 1
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends \
-  acl btrfs-progs parted smartmontools samba libsqlite3-0 python3 libegl1 libgles2 ffmpeg heif-thumbnailer libheif-plugin-libde265
+  "$SOURCE_RELEASE/a-nas-host.deb" "$SOURCE_RELEASE/a-nas-console.deb"
 
 stage "Install root-owned A-NAS system services"
 anas_uid=$(id -u anas-dev)
