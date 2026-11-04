@@ -29,7 +29,7 @@ ACTIONLINT ?= $(GO) tool -modfile=tools/actionlint/go.mod actionlint
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vet go-lint vuln-check test race-test ai-lint ai-test root-integration-test system-test build build-binaries check check-steps clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vet go-lint vuln-check test race-test ai-lint ai-test root-integration-test system-test build build-binaries host-packages check check-steps clean
 
 all: check
 
@@ -120,7 +120,7 @@ docs-check:
 ops-check:
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
-	shellcheck $(SHELL_SCRIPTS)
+	shellcheck $(SHELL_SCRIPTS) deploy/debian/a-nas-host/DEBIAN/postinst
 	$(ACTIONLINT) .github/workflows/*.yml
 	@for script in $(SHELL_SCRIPTS); do bash -n "$$script" || exit 1; done
 	$(GO) run ./tools/depcheck
@@ -326,7 +326,7 @@ root-integration-test:
 
 # Installs the release into a disposable Debian 13 systemd container; needs
 # Docker and the image from scripts/build-system-test-image.sh.
-system-test: build-binaries
+system-test: build-binaries host-packages
 	scripts/system-test.sh $(SYSTEM_TEST_IMAGE)
 
 build: web-build build-binaries
@@ -337,6 +337,11 @@ build-binaries: web-build
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-host-agent ./cmd/anas-host-agent
 	$(GO) build -trimpath -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/anas-container-agent ./cmd/anas-container-agent
 
+# The Debian packages a host installs before the release (ADR 0031), at the
+# product version; needs dpkg-deb.
+host-packages:
+	scripts/build-host-packages.sh $(BUILD_DIR) $(VERSION)
+
 check:
 	@rm -f $(VALIDATION_MANIFEST)
 	@$(MAKE) --no-print-directory check-steps VERSION="$(VERSION)"
@@ -346,8 +351,8 @@ check:
 	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
-check-steps: api-check web-typecheck web-lint web-test web-build fmt-check docs-check ops-check vet go-lint vuln-check test ai-lint ai-test build-binaries
+check-steps: api-check web-typecheck web-lint web-test web-build fmt-check docs-check ops-check vet go-lint vuln-check test ai-lint ai-test build-binaries host-packages
 
 clean:
-	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)
+	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(BUILD_DIR)/a-nas-host.deb $(BUILD_DIR)/a-nas-console.deb $(VALIDATION_MANIFEST)
 	find internal/webui/dist -mindepth 1 ! -name '.keep' -delete
