@@ -68,14 +68,41 @@ if [[ "${1:-}" != --inside ]]; then
     [[ "$state" == running || "$state" == degraded ]] && break
     sleep 1
   done
-  docker exec "$name" bash /src/scripts/system-test.sh --inside
-  exit
+  status=0
+  docker exec "$name" bash /src/scripts/system-test.sh --inside || status=$?
+  # The container goes with this script, so the logs a failed run gathered
+  # come out first; CI uploads them (#318).
+  if ((status != 0)); then
+    rm -rf "$repo/build/system-test-logs"
+    docker cp "$name:/var/tmp/system-test-logs" "$repo/build/system-test-logs" >/dev/null 2>&1 &&
+      echo "the failed run's journal and logs are in build/system-test-logs" >&2
+  fi
+  exit "$status"
 fi
 
 if [[ $EUID -ne 0 || "$(cat /proc/1/comm)" != systemd || ! -f /.dockerenv ]]; then
   echo "run through scripts/system-test.sh, inside its disposable systemd container" >&2
   exit 2
 fi
+
+# Register before initialization so setup and first-install failures leave logs too.
+failures=0
+# A failed run's container is removed with it, so this prints what systemd
+# reported and keeps the whole journal, the unit list and the installers' and
+# services' logs for the outer script to copy out. They go to /var/tmp:
+# /tmp is a tmpfs here, which docker cp does not see.
+diagnose() {
+  local status=$? logs=/var/tmp/system-test-logs
+  ((status != 0 || failures != 0)) || return 0
+  echo "=== the run failed: exit status $status, $failures failed checks"
+  systemctl --failed --no-pager || true
+  journalctl -b --no-pager -p warning -n 60 || true
+  mkdir -p "$logs"
+  journalctl -b --no-pager >"$logs/journal.txt" 2>&1 || true
+  systemctl list-units --all --no-pager >"$logs/units.txt" 2>&1 || true
+  cp /tmp/*.log "$logs/" 2>/dev/null || true
+}
+trap diagnose EXIT
 
 # A Debian host's mounts are shared, so mounting or unmounting the data volume
 # reaches the services' private mount namespaces; the container starts with
@@ -335,17 +362,39 @@ db.commit()
 PY
 systemctl start anas-api anas-shares
 
-failures=0
-# check NAME COMMAND...: runs the command and records the outcome.
+# What quiet and denied keep out of the output, shown when their check fails.
+hidden=/tmp/system-test-hidden.log
+# check NAME COMMAND...: runs the command and records the outcome. A failure
+# also prints the command as it ran, which shows the values a test compared,
+# and the end of what quiet or denied hid (#318).
 check() {
-  local name=$1
+  local name=$1 ran
   shift
-  if "$@"; then echo "PASS $name"; else echo "FAIL $name"; failures=$((failures + 1)); fi
+  : >"$hidden"
+  if "$@"; then
+    echo "PASS $name"
+  else
+    echo "FAIL $name"
+    failures=$((failures + 1))
+    ran=$(printf ' %q' "$@")
+    echo "  ran:${ran:0:600}"
+    if [[ -s "$hidden" ]]; then tail -n 20 "$hidden" | sed 's/^/  | /'; fi
+  fi
 }
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-denied() { ! "$@" >/dev/null 2>&1; }
+denied() { ! "$@" >>"$hidden" 2>&1; }
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-quiet() { "$@" >/dev/null 2>&1; }
+quiet() { "$@" >>"$hidden" 2>&1; }
+# running UNIT: the unit has a main process; otherwise prints its status.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+running() {
+  local pid
+  if pid=$(systemctl show -p MainPID --value "$1") && [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+    return 0
+  fi
+  systemctl status --no-pager --lines=10 "$1"
+  return 1
+}
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 journal_has() { journalctl -u "$1" --since "$2" -o cat --no-pager | grep -Fq "$3"; }
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
@@ -1700,12 +1749,19 @@ uploads=0
 install_release() {
   local since
   since=$(date '+%Y-%m-%d %H:%M:%S')
-  bash /src/scripts/install-v1.0.1-system-services.sh "/tmp/$1" "$1" "$iface" >"/tmp/$1.log" 2>&1 || return
+  if ! bash /src/scripts/install-v1.0.1-system-services.sh "/tmp/$1" "$1" "$iface" >"/tmp/$1.log" 2>&1; then
+    echo "  the installer failed; the end of /tmp/$1.log:"
+    tail -n 30 "/tmp/$1.log" | sed 's/^/  | /'
+    return 1
+  fi
   for _ in $(seq 1 150); do
     curl -fsS "$api/healthz" >/dev/null 2>&1 &&
       journalctl -u anas-photos --since "$since" -o cat --no-pager | grep -Fq 'photo service ready' && return
     sleep 0.2
   done
+  echo "  the installer finished, but the services were not ready within 30 seconds:"
+  curl -sS -o /dev/null -w '  healthz answered %{http_code}\n' "$api/healthz" || true
+  systemctl status --no-pager --lines=10 anas-api anas-photos | sed 's/^/  | /'
   return 1
 }
 pool_size() { curl -fsS "$api/local-console/screensavers" | jq '.videos | length'; }

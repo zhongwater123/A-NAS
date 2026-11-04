@@ -1,7 +1,7 @@
 # 相册本地 AI（M2）实施方案
 
 状态：步骤 1–7 已实现；步骤 7 按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 随系统内置安装（[#58](https://github.com/zhongwater123/A-NAS/pull/58)）；2026-10-10 起搜索改为纯向量排序与两段式结果（[#66](https://github.com/zhongwater123/A-NAS/issues/66)），AI 标签只在 AI 聚合中展示、不参与搜索。2026-10-13 起同一个 Worker 还运行物体检测器，用于文搜图融合、“检测到”分段与以图搜图（[物体检测方案](photo-objects.md)）。Experimental NAS 首次安装带 AI 的版本按[启用相册本地 AI](../runbooks/enable-photo-ai.md)进行，实机资源数字见其中的[首次实机部署证据](../runbooks/enable-photo-ai.md#首次实机部署证据)
-更新时间：2026-10-29
+更新时间：2026-11-04
 
 本文把[相册技术设计](photo-library.md)中 M2 的切片 8–12 细化为可实现的方案：用 Google EmbeddingGemma 2 的全模态 740M 官方包为照片生成向量，在此基础上提供中文自然语言搜索。产品行为以[相册规格](../specs/photo-library.md)为准，模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
 
@@ -52,7 +52,7 @@ M2 交付后，成员可以：
 
 - **模型文件**：官方仓库 `litert-community/embeddinggemma-2-740m-litert-lm`（revision `24d962e9…`）中的通用 CPU/GPU 文件 `embeddinggemma-2-740m.litertlm`，484,622,336 字节，SHA-256 `e7a8a2204b91e0f96e92960e84a09a89212e1633dcb7575a9bf3378b4df77f4c`。同一仓库中带厂商后缀的文件（Qualcomm、MediaTek、Tensor、Intel PTL）是特定 NPU 的编译版本，不适用于 i3-12100。
 - **运行环境**：[`ai/requirements.txt`](../../ai/requirements.txt) 以版本与哈希固定 MediaPipe、检测器所用的 ONNX Runtime 及其运行所需的依赖：导入 MediaPipe 会加载其绘图工具，所以 OpenCV（headless 版）与 Matplotlib 保留；只服务音频任务的 `sounddevice` 与开发期的评估依赖不装。锁文件由 [`ai/requirements.in`](../../ai/requirements.in) 经 `uv pip compile` 解析生成，GUI 版 OpenCV 与 `sounddevice` 由 [`ai/requirements.excludes`](../../ai/requirements.excludes) 排除。[`scripts/build-ai-runtime.sh`](../../scripts/build-ai-runtime.sh) 在开发机的 Debian 13 容器中按锁文件安装成虚拟环境并打包，运行环境 ID 取锁文件与 Python 版本的 SHA-256 前 16 位十六进制。2026-10-10 的运行环境解开约 460 MB（原开发环境 664 MB），压缩包 163 MB；2026-10-13 加入 ONNX Runtime 后解开约 542 MB，压缩包 189 MB。NAS 不运行 pip、不访问 PyPI，也不需要 `python3-venv`（Experimental NAS 没有安装）：虚拟环境只引用系统的 `/usr/bin/python3`，安装器核对系统 Python 与构建时的版本一致。
-- **开发机**：模型位于 `D:\A-NAS-models\embeddinggemma-2-740m\embeddinggemma-2-740m.litertlm`（WSL 中为 `/mnt/d/A-NAS-models/embeddinggemma-2-740m/`），在仓库之外，以只读方式挂载进测试容器；使用真实模型的可选测试从 `ANAS_AI_MODEL` 读取路径。
+- **开发机**：模型位于 `D:\A-NAS-models\embeddinggemma-2-740m\embeddinggemma-2-740m.litertlm`（WSL 中为 `/mnt/d/A-NAS-models/embeddinggemma-2-740m/`），在仓库之外，以只读方式挂载进测试容器；使用真实模型的可选测试从 `ANAS_AI_MODEL` 读取路径。各清单固定的模型存放在私有仓库的 Release 中，开发机用 `scripts/fetch-models.sh` 拉取并核对（[拉取模型](../development/ai-development.md#拉取模型)）。
 - **暂存**：[`deploy-dev.ps1`](../../scripts/deploy-dev.ps1) 以 `anas-dev` 经 SSH 暂存 release 时，先核对 NAS 暂存区的 `apps/a-nas/models/<SHA-256>/<文件名>` 与 `apps/a-nas/ai-runtimes/<ID>.tar.gz`，缺少或哈希不符时才上传；release 只携带 Worker 代码、各模型与运行环境的清单与单元，暂存脚本把模型与运行环境按角色链接进 release 的 `ai/` 目录。检测器的开发机位置由 `-DetectorDirectory` 指定，默认是官方权重导出的目录 `D:\A-NAS-models\dfine-obj365\official`。Experimental NAS 上 2026-10-09 按名称暂存的模型已于 2026-10-10 核对哈希后移到按哈希的位置。
 - **安装**：root 执行的安装器先把暂存的模型与运行环境复制到自己的临时目录再核对大小与 SHA-256，暂存账号因此无法改动已校验的内容；通过后放入 `/opt/a-nas/models/<SHA-256>/<文件名>`（`root:root 0644`）与 `/opt/a-nas/ai-runtimes/<ID>/`，已经安装的直接复用。release 的 `ai/` 目录包含 Worker 代码、清单，以及按角色指向这两处的链接（`model.litertlm`、`detector.onnx`、`runtime`）；单元经 `/opt/a-nas/current/ai/` 引用它们。安装器还要求 `python3`、`libEGL.so.1` 与 `libGLESv2.so.2`（Debian 包 `libegl1`、`libgles2`），缺少时以退出码 3 停止。
 - **校验**：Worker 加载前核对文件大小与 SHA-256，不符时拒绝加载并报告 AI 不可用。
