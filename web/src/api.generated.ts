@@ -2981,7 +2981,7 @@ export interface paths {
         head?: never;
         /**
          * Rename a show as the caller, its own folder and the episode files that carry its title
-         * @description A show without a folder of its own keeps its folders; only the episode files whose names carry its title are renamed. The show keeps its ID, and the library is rescanned under the new name.
+         * @description A show without a folder of its own keeps its folders; only the episode files whose names carry its title are renamed. The show keeps its ID, and the library is rescanned under the new name. Refused with 400 invalid_name for a name that is empty or starts with a dot, 400 show_without_folder when the show has no folder of its own and no episode file carries its title, and 409 show_title_taken when another show in the library has the title.
          */
         patch: operations["renameMediaShow"];
         trace?: never;
@@ -3002,7 +3002,7 @@ export interface paths {
         head?: never;
         /**
          * Rename the video's file, with the subtitles, NFO and artwork named after it, as the caller
-         * @description The new name must keep a video extension. Files keep their IDs, so progress and favorites stay; the library is rescanned to read the title from the new name.
+         * @description The new name must keep a video extension. Files keep their IDs, so progress and favorites stay; the library is rescanned to read the title from the new name. Refused with 400 invalid_name for a name that is empty or starts with a dot and 400 video_extension_required without a video extension.
          */
         patch: operations["renameMediaVideoFile"];
         trace?: never;
