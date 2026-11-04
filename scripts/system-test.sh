@@ -282,9 +282,12 @@ fi
 
 # Record the volume as storage initialization would have, so the Product
 # Service's volume guard accepts it, then restart it to load the record. It
-# creates its databases before it answers, so wait for that first.
+# creates its databases before it answers, so wait for that first. The share
+# service restarts after it, as the installer orders them: a restarted Product
+# Service gives the share bridge a new generation, and until the share
+# service's next check notices, every new share fails as withdrawn.
 for _ in $(seq 1 100); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break; sleep 0.2; done
-systemctl stop anas-api
+systemctl stop anas-shares anas-api
 setpriv --reuid=a-nas --regid=a-nas --init-groups python3 - "$data_disk" "$volume_uuid" <<'PY'
 import json, sqlite3, sys
 disk, uuid = sys.argv[1], sys.argv[2]
@@ -297,7 +300,7 @@ db = sqlite3.connect("/var/lib/a-nas/storage.db")
 db.execute("INSERT INTO storage_plans(id, document_json, updated_at) VALUES(?, ?, ?)", (plan["id"], json.dumps(plan), now))
 db.commit()
 PY
-systemctl start anas-api
+systemctl start anas-api anas-shares
 
 failures=0
 # check NAME COMMAND...: runs the command and records the outcome.
