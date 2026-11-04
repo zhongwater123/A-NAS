@@ -194,7 +194,7 @@ func (d *Directory) ActiveProfiles(ctx context.Context) ([]accountid.Profile, er
 func LibraryViewings(ctx context.Context, db *sql.DB, adminUserID string, now time.Time) ([]accountid.LibraryViewing, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id, owner_user_id, expires_at FROM viewing_grants
 WHERE admin_user_id = ? AND scope = ? AND ended_at IS NULL AND expires_at > ? ORDER BY expires_at`,
-		adminUserID, accountid.ViewingScopeLibrary, now.UTC().Format(time.RFC3339Nano))
+		adminUserID, accountid.ViewingScopeLibrary, sqlitedb.FormatTime(now))
 	if err != nil {
 		return nil, err
 	}

@@ -30,10 +30,6 @@ type Options struct {
 	ScreensaverDirectory string
 }
 
-func New(api http.Handler) (http.Handler, error) {
-	return NewWithOptions(api, Options{})
-}
-
 func NewWithOptions(api http.Handler, options Options) (http.Handler, error) {
 	if options.ScreensaverDirectory != "" && !filepath.IsAbs(options.ScreensaverDirectory) {
 		return nil, errors.New("screen saver directory must be absolute")

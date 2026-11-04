@@ -174,6 +174,7 @@ export interface paths {
         };
         get: operations["getSession"];
         put?: never;
+        /** @description Sign in. A client whose sign-ins keep failing waits before it may try again: after 5 failures in a row for one username, or 20 for all usernames together, each further attempt answers 429 too_many_attempts with Retry-After until a wait of 30 seconds, doubling with each failure up to 15 minutes, has passed. Clients are what sessions are bound to (the LAN address, an IPv6 client's /64, or direct loopback). Signing in clears the client's failures. */
         post: operations["createSession"];
         delete: operations["deleteSession"];
         options?: never;
@@ -7454,6 +7455,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
         };
     };
     deleteSession: {

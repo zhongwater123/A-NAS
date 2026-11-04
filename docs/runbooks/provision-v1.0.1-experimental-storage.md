@@ -16,7 +16,7 @@
 
 已初始化数据卷的设备升级时，不要重新执行磁盘初始化或首次配置向导，只核对暂存制品并运行系统服务安装器：
 
-1. 在开发机对候选提交运行门禁，再只暂存不激活：`scripts/deploy-dev.ps1 -NasHost <NAS_HOST> -StageOnly`。release 目录以 12 位提交 SHA 命名，脚本会输出 API 与 Host Agent 的 SHA-256。不要省略 `-StageOnly`：没有它时脚本会安装 ADR 0008 之前的用户级服务，见[旧部署手册](deploy-web-preview-to-experimental-nas.md)。
+1. 在开发机对候选提交运行门禁，再只暂存不激活：`scripts/deploy-dev.ps1 -NasHost <NAS_HOST> -StageOnly`。release 目录以 12 位提交 SHA 命名，脚本会输出 API、Host Agent 与两个宿主机软件包（`a-nas-host`、`a-nas-console`，[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）的 SHA-256。不要省略 `-StageOnly`：没有它时脚本会安装 ADR 0008 之前的用户级服务，见[旧部署手册](deploy-web-preview-to-experimental-nas.md)。
 2. 以 root 查看本地控制台以哪个账号运行：
 
    ```bash
@@ -34,12 +34,16 @@
    cat "$source_release/RELEASE"
    printf '%s  %s\n' \
      <API SHA-256> "$source_release/anas-api" \
-     <Host Agent SHA-256> "$source_release/anas-host-agent" |
+     <Host Agent SHA-256> "$source_release/anas-host-agent" \
+     <a-nas-host SHA-256> "$source_release/a-nas-host.deb" \
+     <a-nas-console SHA-256> "$source_release/a-nas-console.deb" |
      sha256sum --check
 
    findmnt -T /srv/a-nas/data -o TARGET,SOURCE,FSTYPE,OPTIONS
    ip -brief link show dev "$smb_interface"
 
+   # 有本机屏幕的设备连同 a-nas-console 一起装；没有屏幕的只装 a-nas-host。
+   apt install --no-install-recommends "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
    "$source_release/install-v1.0.1-system-services.sh" \
      "$source_release" "$release_id" "$smb_interface"
    ```
@@ -75,13 +79,13 @@ EXPECTED_DISK_SERIAL=Z2AYDZPB \
 若必须逐步排障，可不用向导而执行以下等价安装步骤；把示例值替换为本次 RC：
 
 ```bash
-# 仅在仓库源可达时安装一次；若 apt 失败，停止，不进入格式化流程。
-apt-get update
-apt-get install --no-install-recommends acl btrfs-progs parted smartmontools samba libsqlite3-0 python3 libegl1 libgles2 ffmpeg heif-thumbnailer libheif-plugin-libde265
-
 source_release=/home/anas-dev/apps/a-nas/releases/<GIT_SHA>
 release_id=<GIT_SHA>
 smb_interface=enp2s0
+
+# 若 apt 失败，停止，不进入格式化流程。
+apt-get update
+apt-get install --no-install-recommends "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
 
 readlink -f /opt/a-nas/current
 ip -brief link
@@ -90,9 +94,9 @@ ip -brief link
   "$source_release" "$release_id" "$smb_interface"
 ```
 
-影视中心的 FFmpeg Worker 使用 Debian 的 FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)），安装器在缺少 `ffmpeg`、`ffprobe` 或 `heif-thumbnailer` 时以退出码 3 结束而不改变系统；已部署过的设备升级前以 root 执行一次 `apt-get install --no-install-recommends ffmpeg heif-thumbnailer libheif-plugin-libde265`。文件管理的 HEIC/HEIF 预览使用 libheif；编码工具不属于产品运行依赖。
+宿主机需要的 Debian 软件包由 release 中的 `a-nas-host` 声明，本地控制台的由 `a-nas-console` 声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），例如影视中心 FFmpeg Worker 用的 Debian FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）与文件管理 HEIC/HEIF 预览用的 libheif。安装器在 `a-nas-host` 没有安装或不是本 release 的版本，或者已安装的 `a-nas-console` 不是本 release 的版本时，以退出码 3 结束而不改变系统，并打印要执行的 `apt install` 命令。安装 `a-nas-host` 时，若局域网接口由 ifupdown 管理，它会启用 `ifupdown-wait-online.service`，smbd 因此在接口拿到 DHCP 地址之后才启动，重启后不再只监听回环。
 
-完成标准：`/opt/a-nas/current` 指向 root 所有的目标 release；`anas-host-agent`、`anas-photos` 与 `anas-api` 均 active，`anas-ffmpeg.socket` 已启用且 `/run/a-nas-ffmpeg/ffmpeg.sock` 为 `root:a-nas-photos 0660`，安装器没有以退出码 5 结束；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
+完成标准：`dpkg-query -W a-nas-host` 显示本 release 的版本；`/opt/a-nas/current` 指向 root 所有的目标 release；`anas-host-agent`、`anas-photos` 与 `anas-api` 均 active，`anas-ffmpeg.socket` 已启用且 `/run/a-nas-ffmpeg/ffmpeg.sock` 为 `root:a-nas-photos 0660`，安装器没有以退出码 5 结束；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
 
 ### 移入 Host Agent 的记录
 
@@ -215,6 +219,8 @@ systemctl daemon-reload
 systemctl enable --now "anas-$worker.socket"
 systemctl restart anas-host-agent anas-photos anas-shares anas-api anas-kiosk@tty1
 ```
+
+目标 release 带有宿主机软件包（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）时，在执行上面的脚本之前先装回它的版本：`apt install --no-install-recommends --allow-downgrades "/opt/a-nas/releases/$previous/a-nas-host.deb"`，有本机屏幕时连同同一目录的 `a-nas-console.deb`。新版本多装的软件包留在系统上，不影响旧版本运行。更早的 release 没有这两个包，由它们的安装器自己检查依赖，这一步跳过。
 
 回滚到 issue #174 之前的 release 时，kiosk 回到 `anas-dev`，Chromium 用的是该账号下的旧配置文件：迁移后删掉了它的话，要在本机屏幕上重新登录。
 

@@ -18,16 +18,13 @@ const ScanPage = 2048
 // ErrTooLarge reports a message over MaxMessage.
 var ErrTooLarge = unixmsg.ErrTooLarge
 
-// EncodeMessage encodes value, refusing a message over the limit.
-func EncodeMessage(value any) ([]byte, error) { return unixmsg.Encode(value, MaxMessage) }
-
 // WriteMessage sends a message (internal/unixmsg). A file, when given,
 // travels with it.
 func WriteMessage(conn *net.UnixConn, value any, file *os.File) error {
 	return unixmsg.Write(conn, value, file, MaxMessage)
 }
 
-// WriteEncoded sends a message that EncodeMessage returned.
+// WriteEncoded sends a message that unixmsg.Encode returned.
 func WriteEncoded(conn *net.UnixConn, body []byte, file *os.File) error {
 	return unixmsg.WriteBody(conn, body, file)
 }

@@ -152,5 +152,3 @@ func writeFrame(conn *net.UnixConn, value any, file *os.File) error {
 func readFrame(conn *net.UnixConn, value any) (*os.File, error) {
 	return unixmsg.Read(conn, value, maxFrame)
 }
-
-func closeFile(file *os.File) { unixmsg.CloseFile(file) }
