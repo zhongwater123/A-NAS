@@ -40,6 +40,8 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 
 - [0030：网页搜索由随系统安装的 SearXNG 服务提供](0030-ship-web-search-as-a-built-in-searxng-service.md)（proposed）
 
+- [0031：宿主机依赖由 A-NAS 自己的 Debian 软件包声明](0031-declare-host-dependencies-in-debian-packages.md)（proposed）
+
 ## 格式
 
 文件名使用 `NNNN-short-title.md`。正文首先用一至三句话说明背景、决定和原因；只有确有价值时再增加状态、备选项或后果。状态行紧接标题、写在正文之前，以 proposed、accepted 或 superseded 开头；`make docs-check` 读这一行与索引的标记核对，状态行写在第一个小节之前的其他位置时报错。
