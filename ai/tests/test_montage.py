@@ -424,6 +424,20 @@ class MomentsTest(unittest.TestCase):
         spans, _problems = self.index.fill([("07-0-0", market), ("07-1-1", other_side)], "probe", 8, self.at)
         self.assertEqual([e - s for s, e in spans], [4, 4])
 
+    def test_a_segment_keeps_to_its_card_and_to_frames_like_its_peak(self):
+        cards = {c["id"]: c for c in self.index.cards}
+        # The castle's two sides are 0.8 alike: each card is its own region of the shot.
+        self.assertEqual(self.index._region(cards["07-1-0"]), (8, 28))
+        self.assertEqual(self.index._region(cards["07-1-1"]), (28, 48))
+        # A cut the detection missed at 31 s: what follows is another picture, never taken.
+        other = np.eye(8, dtype=np.float32)[5]
+
+        def at(video, seconds):
+            return other if seconds > 31 else self.at(video, seconds)
+
+        spans, _problems = self.index.fill([("07-1-1", self.castle)], "frame", 6, at)
+        self.assertEqual(spans, [(28, 31)])
+
     def test_fill_keeps_each_segment_to_its_minimum(self):
         market = np.eye(8, dtype=np.float32)[0]
         spans, _problems = self.index.fill([("07-0-0", market), ("07-1-0", self.castle)], "probe", 3, self.at,

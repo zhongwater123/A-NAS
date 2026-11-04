@@ -76,6 +76,9 @@ TAIL_MIN = 2.5
 # at most SNAP to reach one.
 PAUSE = 0.3
 SNAP = 1.5
+# A step whose frame is less alike than this to its segment's peak frame shows another shot
+# (one the cut detection missed), and the segment does not take it.
+FLOOR = 0.8
 # Words with their seconds by video, beside the index, from speech recognition.
 SPEECH = "speech.json"
 
@@ -511,7 +514,9 @@ class Index:
         or by its likeness to the peak picture ("frame"), so that segments whose probes score on
         other scales are compared fairly. Steps stay in their shot, off flat windows and the
         other segments, and within caps[n] (CLIP_MAX by default); a segment keeps mins[n]
-        (SEGMENT_MIN by default).
+        (SEGMENT_MIN by default). A segment also keeps to its card, and to the windows next to it
+        in its shot that are STILL alike to the card (_region), and takes no step whose frame
+        is less than FLOOR alike to its peak frame: the time it cannot take goes to the others.
         An end inside speech (self.words) then moves to the nearest pause that keeps those rules,
         in or out: out by at most SNAP, and a line may take a segment SNAP past its cap, never
         past CLIP_MAX; in as far as the segment's minimum allows. Returns [(start, end) or None] and the problems."""
@@ -520,10 +525,11 @@ class Index:
         cards = {c["id"]: c for c in self.cards}
         caps = caps or [CLIP_MAX] * len(segments)
         mins = mins or [SEGMENT_MIN] * len(segments)
-        spans, problems, peaks = [], [], []
+        spans, problems, peaks, regions = [], [], [], []
         for n, (card_id, probe) in enumerate(segments):
             card = cards[card_id]
-            lo, hi = card["shot"]
+            lo, hi = self._region(card)
+            regions.append((lo, hi))
             free = [i for i in card["windows"] if not self.flat[i] and not self._taken(
                 card["video"], max(lo, self.rows[i][1]), min(hi, self.rows[i][2]), spans)]
             if not free:
@@ -544,11 +550,11 @@ class Index:
         def grown(n):
             """Each step that may join segment n: (score, n, side, new start, new end)."""
             video, start, end = spans[n]
-            lo, hi = cards[segments[n][0]]["shot"]
+            lo, hi = regions[n]
             out = []
             for side, a, b in (("start", max(lo, start - STEP), start), ("end", end, min(hi, end + STEP))):
                 if b - a < 0.01 or (end - start) + (b - a) > caps[n] + ROUNDING or self._flat_in(video, a, b) \
-                        or self._taken(video, a, b, spans, n):
+                        or self._taken(video, a, b, spans, n) or float(at(video, (a + b) / 2) @ peaks[n]) < FLOOR:
                     continue
                 out.append((judged(n, (a + b) / 2), n, side, a if side == "start" else start,
                             end if side == "start" else b))
@@ -596,7 +602,7 @@ class Index:
                 out.append(None)
                 continue
             video, start, end = span
-            lo, hi = cards[segments[n][0]]["shot"]
+            lo, hi = regions[n]
             # A line may take a segment past its cap, never past CLIP_MAX.
             longest = min(caps[n] + SNAP, CLIP_MAX)
             fits = functools.partial(self._fits, video, (lo, hi), (mins[n], longest), spans, n)
@@ -607,9 +613,27 @@ class Index:
             out.append((math.ceil(start * 100) / 100, math.floor(end * 100) / 100))
         return out, problems
 
+    def _region(self, card: dict) -> tuple[float, float]:
+        """The seconds a segment of card may run: the card, and the windows next to it in its
+        shot whose pictures are STILL alike to the card's mean, up to a window that is not."""
+        lo, hi = card["shot"]
+        mean = self.frames[card["windows"]].mean(axis=0)
+        mean /= np.linalg.norm(mean)
+        shot = sorted((i for i, row in enumerate(self.rows) if row[0] == card["video"]
+                       and self.shot_of[i] == int(card["id"].rsplit("-", 2)[1])), key=lambda i: self.rows[i][1])
+        mine = [shot.index(i) for i in card["windows"]]
+        a, b = min(mine), max(mine)
+        while a > 0 and float(self.frames[shot[a - 1]] @ mean) >= STILL:
+            a -= 1
+        while b + 1 < len(shot) and float(self.frames[shot[b + 1]] @ mean) >= STILL:
+            b += 1
+        start = lo if a == 0 else max(lo, min(card["start"], self.rows[shot[a]][1]))
+        end = hi if b == len(shot) - 1 else min(hi, max(card["end"], self.rows[shot[b]][2]))
+        return start, end
+
     def _fits(self, video, shot, length, spans, n, a, b) -> bool:
-        """Whether segment n may run a-b: inside its shot, length[0] to length[1] long, clear of
-        flat windows and of the other segments."""
+        """Whether segment n may run a-b: inside its region (shot), length[0] to length[1] long,
+        clear of flat windows and of the other segments."""
         return (shot[0] <= a and b <= shot[1] and length[0] <= b - a <= length[1]
                 and not self._flat_in(video, a, b) and not self._taken(video, a, b, spans, n))
 
