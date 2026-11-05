@@ -4,9 +4,9 @@ One request carries all the model needs, and nothing else: a system prompt of th
 message of the instruction, the cut's seconds, its style and the catalog of cards (moments.Index
 catalog with scenes and the seconds each card can run, without the cards text is laid over).
 The model answers with one JSON object, a story line and the segments, each a card with its
-scene, what it shows, its pace, why it was chosen and how it follows the one before; the
-program sets every segment's seconds from that (moments.Index.fill). A plan the video service refuses goes back with its problems, in the
-same conversation, for the whole plan again.
+scene, what it shows, its pace and why it was chosen; the program sets every segment's seconds
+from that (moments.Index.fill). A plan the video service refuses goes back with its problems, in
+the same conversation, for the whole plan again.
 """
 
 import json
@@ -20,30 +20,27 @@ _PACES = "，".join(f"{name} {low:g}–{high:g} 秒" for name, (low, _aim, high)
 SYSTEM = (
     "你是剪辑规划。按成员的指令，从素材卡片里选段、排顺序，交一份剪辑计划；画面由程序按计划剪出，带原声，不加配乐和字幕。\n"
     "素材目录每行一张卡片：“卡片 id 场景N 可剪X秒 光线 描述（亮点）毛病”。卡片 id 是“视频-镜头序号-段”，序号相邻的多半是同一场戏；"
-    "描述由本机小模型看三帧写成，可能看错。scenes 写每个场景是什么地方、有几张卡片；片头片尾的字幕、标志和演职员表各自成一个场景。\n"
+    "描述由本机小模型看三帧写成，可能看错。scenes 写每个场景是什么地方、有几张卡片，“可接”是色调明暗和地点都相近、可以直接切过去的场景。\n"
     "先写故事线：按指令要的效果，把成片的段落按播放顺序列出来，每段一句内容和对应的场景、卡片。只放讲得进故事线的内容。\n"
     "排段的规则：\n"
-    "1. 每段写 card、scene、shows、pace、reason、transition。scene 是这张卡片在目录里的场景号，照目录写；"
+    "1. 每段写 card、scene、shows、pace、reason。scene 是这张卡片在目录里的场景号，照目录写；"
     "shows 用一句话写这段要呈现的、画面里看得见的东西，不写地名、年代、情绪，程序按它在卡片里定入出点；"
-    "reason 是选镜理由：为什么选这张卡片，它在故事线里起什么作用；"
-    "transition 是转场理由：上一段怎么接到这一段，靠的是动作接续、视线或运动方向、相似的形状或构图、"
-    "声音或台词、因果、对比中的哪一种，写出两段画面里具体接上的东西；第一段写怎么开场。\n"
+    "reason 是选镜理由：为什么选这张卡片，它在故事线里起什么作用。\n"
     f"2. pace 是节奏：{_PACES}。慢用来交代地点、铺垫情绪、收尾，中用来交代人物和情节，快用来冲突、打斗、追逐，可以几段连着快切。"
     "程序按 pace 给每段分配长短，再一起缩放到目标时长。\n"
-    f"3. 同一场景的段连在一起，离开一个场景后不再回去；一个场景最多 {moments.SCENE_SEGMENTS} 段，"
+    f"3. 同一场景的段连在一起，离开一个场景后不再回去；换场景只能换到上一个场景“可接”里的场景。一个场景最多 {moments.SCENE_SEGMENTS} 段，"
     f"快节奏的段另算，最多 {moments.FAST_SEGMENTS} 段。过渡场景 1–2 段就够，不必每个场景都用满。\n"
     "4. 前半段按场景在原片里的先后排，只有最后的高潮部分可以打乱。\n"
-    "5. 换场景的地方最要紧：transition 要说清前后两个场景靠什么接上；说不出来就调整顺序或换卡片，不要硬切。\n"
-    f"6. 各段卡片的“可剪”秒数加起来（超过这段 pace 上限的按上限算）至少要到目标时长的 {moments.MARGIN:g} 倍；"
+    f"5. 各段卡片的“可剪”秒数加起来（超过这段 pace 上限的按上限算）至少要到目标时长的 {moments.MARGIN:g} 倍；"
     "可剪秒数比这段 pace 的下限还短的卡片，换慢一点的 pace 或换卡片。\n"
-    "7. 字幕、标志和演职员表的场景不用，除非成员要。\n"
+    "6. 字幕、标志和演职员表的场景不用，除非成员要。\n"
     "只输出一个 JSON 对象，不要别的文字："
-    '{"story": "故事线", "segments": [{"card": "卡片 id", "scene": 场景号, "shows": "画面", "pace": "慢|中|快", "reason": "选镜理由", "transition": "转场理由"}]}。'
+    '{"story": "故事线", "segments": [{"card": "卡片 id", "scene": 场景号, "shows": "画面", "pace": "慢|中|快", "reason": "选镜理由"}]}。'
     "计划不合规则会被退回并说明原因，照着改好后再输出完整的新计划。"
 )
 
 
-FIELDS = ("card", "scene", "shows", "pace", "reason", "transition")
+FIELDS = ("card", "scene", "shows", "pace", "reason")
 
 
 def message(index: moments.Index, instruction: str, seconds: float, style: str | None) -> str:

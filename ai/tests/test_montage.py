@@ -461,6 +461,43 @@ class MomentsTest(unittest.TestCase):
             self.index.check(plan(("07-1-0", 8), ("07-1-0", 12), ("07-1-1", 30), ("07-1-1", 36)), scenes=True)
         self.assertEqual(refused.exception.problems, ["场景2用了 4 段，一个场景最多 3 段"])
 
+    def test_colours_count_a_picture_s_colour_and_light(self):
+        red, blue = np.tile([250, 10, 10], (40, 1)), np.tile([10, 10, 250], (40, 1))
+        self.assertAlmostEqual(float(moments.colours(red) @ moments.colours(red)), 1, places=5)
+        self.assertAlmostEqual(float(moments.colours(red) @ moments.colours(blue)), 0, places=5)
+        half = moments.colours(np.concatenate([red, blue]))
+        self.assertAlmostEqual(float(half @ moments.colours(red)), 0.5 ** 0.5, places=5)
+
+    def test_a_plan_changes_scene_only_to_one_alike_enough(self):
+        basis = np.eye(4, dtype=np.float32)
+        self.index.scene_of = {"07-0-0": 1, "07-1-0": 2, "07-1-1": 3}
+        self.index.scene_names = {1: "集市", 2: "城堡", 3: "地牢"}
+        red, blue = moments.colours(np.tile([250, 10, 10], (4, 1))), moments.colours(np.tile([10, 10, 250], (4, 1)))
+        alike = self.index.scene_likeness({"07-0-0": basis[0], "07-1-0": basis[0] + basis[1] * 0.5, "07-1-1": basis[2]},
+                                          {"07-0-0": red, "07-1-0": red, "07-1-1": blue})
+        self.assertEqual(alike, {1: {2: 1.0, 3: 0.25}, 2: {1: 1.0, 3: 0.25}, 3: {1: 0.25, 2: 0.25}})
+        self.index.scene_alike = alike
+        scenes = self.index.catalog(times=False, scenes=True)["scenes"]
+        self.assertTrue(scenes["1"].endswith("可接：2"))
+        self.assertTrue(scenes["3"].endswith("可接：无（只能放开头或结尾）"))
+
+        def plan(*cards):
+            return [{"card": c, "start": s, "end": s + 2} for c, s in cards]
+
+        self.index.check(plan(("07-0-0", 2), ("07-1-0", 10)), scenes=True)
+        with self.assertRaises(moments.PlanError) as refused:
+            self.index.check(plan(("07-0-0", 2), ("07-1-1", 30)), scenes=True)
+        self.assertEqual(refused.exception.problems, [
+            "第 2 段从场景1切到场景3，两个场景的色调明暗和描述差得太远：场景1可接的是场景2；换个顺序，或在中间加一个两边都可接的场景"])
+
+    def test_title_scenes_are_left_out_of_the_likeness(self):
+        self.index.scene_of = {"07-0-0": 1, "07-1-0": 2, "07-1-1": 3}
+        self.index.texts = {"07-1-1": "片名：MERIDIAN"}
+        colour = moments.colours(np.tile([250, 10, 10], (4, 1)))
+        vectors = {i: np.eye(4, dtype=np.float32)[0] for i in self.index.scene_of}
+        self.assertEqual(self.index.scene_likeness(vectors, dict.fromkeys(self.index.scene_of, colour)),
+                         {1: {2: 1.0}, 2: {1: 1.0}})
+
     def test_a_card_says_the_most_seconds_a_segment_of_it_can_run(self):
         cards = {c["id"]: c for c in self.index.cards}
         self.assertEqual(self.index.usable(cards["07-1-0"]), 6)  # 20 s of one picture, held to CLIP_MAX

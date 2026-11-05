@@ -98,6 +98,16 @@ SCENE_PICTURE = 0.80
 # segments paced 快 count apart, up to FAST_SEGMENTS, so that a fight can be a run of cuts.
 SCENE_SEGMENTS = 3
 FAST_SEGMENTS = 6
+# How alike two scenes are, for a plan's scene changes (#350): the mean of two ranks among the
+# film's pairs of scenes, by their place descriptions' vectors and by their colour and light
+# (colours), each 0 for the least alike pair and 1 for the most. Ranks, for each measure runs
+# over a span of its own (case-08's descriptions 0.86–0.95, its colours 0.5–0.9). Pictures'
+# vectors are left out: case-08's put its brain model and its sniper's scope, the plan's
+# harshest cut, near the middle. A plan changes scene only to one at least this alike, as
+# alike as half the film's pairs; at that, every case-08 scene can still be reached.
+SCENE_NEAR = 0.5
+# A picture's colour and light: its pixels in BINS × BINS × BINS bins of red, green and blue.
+BINS = 4
 # A segment's pace, as the planner gives it: (shortest, aimed at, longest) seconds (#350).
 PACES = {"慢": (4.0, 5.0, 6.0), "中": (3.0, 3.5, 4.5), "快": (1.5, 2.0, 2.5)}
 
@@ -148,6 +158,23 @@ def _for_cards(entries: dict, cards: list[dict]) -> dict:
             if c["id"] in entries and [entries[c["id"]]["start"], entries[c["id"]]["end"]] == [c["start"], c["end"]]}
 
 
+def colours(pixels: np.ndarray) -> np.ndarray:
+    """A picture's colour and light, from its RGB pixels: the square root of the share of them in
+    each bin (BINS), so that the dot product of two is their Bhattacharyya coefficient, 1 alike."""
+    bins = (np.asarray(pixels, dtype=np.uint8).reshape(-1, 3) // (256 // BINS)).astype(np.int64)
+    counts = np.bincount((bins[:, 0] * BINS + bins[:, 1]) * BINS + bins[:, 2], minlength=BINS ** 3)
+    return np.sqrt(counts / max(counts.sum(), 1)).astype(np.float32)
+
+
+def _ranks(values: np.ndarray) -> np.ndarray:
+    """Each value's rank among values from 0 (the least) to 1 (the most), ties sharing theirs."""
+    if len(values) < 2:
+        return np.ones(len(values))
+    below = (values[:, None] > values[None, :]).sum(axis=1)
+    tied = (values[:, None] == values[None, :]).sum(axis=1) - 1
+    return (below + tied / 2) / (len(values) - 1)
+
+
 def _linked(alike: np.ndarray, members: list[int], threshold: float) -> list[list[int]]:
     """members grouped by average linkage on alike while the two closest groups are threshold alike."""
     groups = [[k] for k in members]
@@ -191,6 +218,8 @@ class Index:
         # Each card's scene number, from 1 in order of first appearance, and each scene's name.
         self.scene_of: dict[str, int] = {}
         self.scene_names: dict[int, str] = {}
+        # How alike each two scenes are (SCENE_NEAR), by scene number.
+        self.scene_alike: dict[int, dict[int, float]] = {}
 
     @classmethod
     def load(cls, index_path: str, vectors_path: str) -> "Index":
@@ -222,6 +251,7 @@ class Index:
             loaded.texts = {i: e["text"] for i, e in kept.items() if e.get("text")}
             loaded.scene_of = {i: e["group"] for i, e in kept.items() if "group" in e}
             loaded.scene_names = {int(n): name for n, name in said.get("groups", {}).items()}
+            loaded.scene_alike = {int(a): {int(b): v for b, v in row.items()} for a, row in said.get("alike", {}).items()}
         speech = os.path.join(os.path.dirname(index_path), SPEECH)
         if os.path.exists(speech):
             with open(speech, encoding="utf-8") as file:
@@ -322,8 +352,19 @@ class Index:
         for card in listed:
             if card["id"] in self.scene_of:
                 counts[self.scene_of[card["id"]]] = counts.get(self.scene_of[card["id"]], 0) + 1
-        return {"scenes": {str(n): f"{self.scene_names.get(n, '')}（{k} 张卡片）" for n, k in sorted(counts.items())},
-                "videos": out}
+        return {"scenes": {str(n): f"{self.scene_names.get(n, '')}（{k} 张卡片）{self._joins(n, counts)}"
+                           for n, k in sorted(counts.items())}, "videos": out}
+
+    def near(self, scene: int, among=None) -> list[int]:
+        """The scenes a plan may change to from scene (SCENE_NEAR), among those given if any."""
+        row = self.scene_alike.get(scene, {})
+        return sorted(n for n, v in row.items() if v >= SCENE_NEAR and (among is None or n in among))
+
+    def _joins(self, scene: int, listed) -> str:
+        if not self.scene_alike:
+            return ""
+        near = self.near(scene, listed)
+        return f" 可接：{'、'.join(map(str, near))}" if near else " 可接：无（只能放开头或结尾）"
 
     def search(self, probes: dict[str, np.ndarray], limit: int = CARDS_MAX, videos=None, when=(), each=None,
                lights=None, words=None) -> dict:
@@ -450,6 +491,13 @@ class Index:
             if scene != seen:
                 if scene in left:
                     problems.append(f"第 {n} 段回到了已经离开的场景{scene}：同一场景的段要连在一起")
+                alike = self.scene_alike.get(seen, {}).get(scene)
+                if alike is not None and alike < SCENE_NEAR:
+                    near = self.near(seen)
+                    problems.append(f"第 {n} 段从场景{seen}切到场景{scene}，两个场景的色调明暗和描述差得太远："
+                                    + (f"场景{seen}可接的是场景{'、'.join(map(str, near))}" if near
+                                       else f"场景{seen}没有可接的场景，只能放开头或结尾")
+                                    + "；换个顺序，或在中间加一个两边都可接的场景")
                 if seen is not None:
                     left.add(seen)
                 seen = scene
@@ -479,6 +527,30 @@ class Index:
             for k in members:
                 scene_of[ids[k]] = n
         return scene_of, names
+
+    def scene_likeness(self, vectors: dict, colours: dict) -> dict[int, dict[int, float]]:
+        """How alike each two scenes are (SCENE_NEAR), from their cards' place descriptions'
+        vectors and colours (average linkage of each), each ranked among the pairs of scenes
+        not all of titles (self.texts), and the two ranks averaged; rounded to two places."""
+        members: dict[int, list[str]] = {}
+        for card, scene in sorted(self.scene_of.items()):
+            if card not in self.texts and card in vectors and card in colours:
+                members.setdefault(scene, []).append(card)
+        scenes = sorted(members)
+        pairs = list(itertools.combinations(scenes, 2))
+        if not pairs:
+            return {}
+        unit = {i: vectors[i] / np.linalg.norm(vectors[i]) for cards in members.values() for i in cards}
+
+        def linked(feature):
+            return np.array([np.mean([float(feature[a] @ feature[b]) for a in members[s] for b in members[t]])
+                             for s, t in pairs])
+
+        scores = (_ranks(linked(unit)) + _ranks(linked(colours))) / 2
+        out: dict[int, dict[int, float]] = {}
+        for (s, t), v in zip(pairs, scores, strict=True):
+            out.setdefault(s, {})[t] = out.setdefault(t, {})[s] = round(float(v), 2)
+        return out
 
     @staticmethod
     def _skipped_problems(skipped, used: set, cards: dict) -> list[str]:

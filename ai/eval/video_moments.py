@@ -60,6 +60,8 @@ TOP_K = 5
 MERGE_MS = 500
 # EmbeddingGemma's prompt for text to be clustered, used for the cards' place descriptions.
 CLUSTERING = "task: clustering | query: {}"
+# The size each key frame is made before its colours are counted (#350): colour and light, not detail.
+COLOUR_SIZE = (64, 28)
 # A frame this close to the previous kept frame (mean absolute difference of
 # 32 x 18 grey thumbnails, 0-255) reuses its vector in the skip simulation,
 # run on the layout the pilot recommends.
@@ -639,10 +641,22 @@ def scenes(args):
                       f"{entry['scene']} {entry['text'] or '无叠加文字'}", flush=True)
 
 
+def card_colours(index, card) -> np.ndarray:
+    """A card's colour and light (moments.colours) over its key frames, each made small."""
+    from montage import look, moments
+
+    pixels = []
+    for frame in (index.frame_ms[i] for i in index.keyframes(card, look.KEYFRAMES)):
+        with Image.open(frame_path(card["video"], frame)) as image:
+            pixels.append(np.asarray(image.convert("RGB").resize(COLOUR_SIZE)).reshape(-1, 3))
+    return moments.colours(np.concatenate(pixels))
+
+
 def scene_groups(args):
     """The scenes the cards' place descriptions make (moments.Index.scene_groups): each
     description embedded with EmbeddingGemma's clustering prompt, each card's scene number and
-    each scene's name written back into scenes.json (#350)."""
+    each scene's name written back into scenes.json, and how alike each two scenes are by
+    their descriptions and their colour and light (moments.Index.scene_likeness, #350)."""
     from anas_ai import providers
     from montage import moments
 
@@ -653,12 +667,16 @@ def scene_groups(args):
     finally:
         provider.close()
     scene_of, names = index.scene_groups(vectors)
+    index.scene_of = scene_of
+    cards = {c["id"]: c for c in index.cards}
+    alike = index.scene_likeness(vectors, {i: card_colours(index, cards[i]) for i in scene_of})
     path = os.path.join(args.cache, moments.SCENES)
     with open(path, encoding="utf-8") as file:
         said = json.load(file)
     for card_id, scene in scene_of.items():
         said["cards"][card_id]["group"] = scene
     said["groups"] = {str(n): name for n, name in names.items()}
+    said["alike"] = {str(a): {str(b): v for b, v in row.items()} for a, row in alike.items()}
     with open(path, "w", encoding="utf-8") as file:
         json.dump(said, file, ensure_ascii=False, indent=1)
     print(f"{len(scene_of)} cards in {len(names)} scenes", flush=True)

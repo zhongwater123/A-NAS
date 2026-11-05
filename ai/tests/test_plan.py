@@ -45,8 +45,7 @@ class PlanTest(unittest.TestCase):
                 plan.parsed(bad)
 
     def test_the_request_locates_each_segment_by_what_it_shows(self):
-        segment = {"card": "01-0-0", "scene": 1, "shows": "街道", "pace": "慢", "reason": "交代地点",
-                   "transition": "从黑场开场"}
+        segment = {"card": "01-0-0", "scene": 1, "shows": "街道", "pace": "慢", "reason": "交代地点"}
         body = plan.request({"segments": [segment | {"extra": "不传"}]}, 60, "预告片")
         self.assertEqual(body["segments"], [segment | {"probe": "街道"}])
         self.assertEqual({k: body[k] for k in ("seconds", "margin", "edges", "look", "scenes")},
@@ -56,7 +55,7 @@ class PlanTest(unittest.TestCase):
         planned = {"segments": [{"card": "01-0-0", "scene": 1}, {"card": "01-1-0", "scene": "1"}]}
         self.assertEqual(plan.misplaced(planned, self.index), ["第 2 段 01-1-0 写的是场景1，目录里是场景2"])
 
-    def test_the_system_prompt_asks_for_scene_and_transition(self):
+    def test_the_system_prompt_asks_for_every_field(self):
         for field in plan.FIELDS:
             self.assertIn(f'"{field}"', plan.SYSTEM)
 
