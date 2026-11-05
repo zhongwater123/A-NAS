@@ -353,10 +353,12 @@ class Index:
                                  if times else "")
             if scenes and card["id"] in self.scene_of:
                 line += f" 场景{self.scene_of[card['id']]}"
+            pace = self.pace_of(card["id"]) if paces else None
             if lengths:
-                line += f" 可剪{self.usable(card):g}秒"
-            if paces and self.pace_of(card["id"]):
-                line += f" 节奏{self.pace_of(card['id'])}"
+                # A paced card runs at most its pace's longest.
+                line += f" 可剪{min(self.usable(card), PACES[pace][2]) if pace else self.usable(card):g}秒"
+            if pace:
+                line += f" 节奏{pace}"
             if notes.get("light"):
                 line += f" {notes['light']}"
             line += " " + self.captions.get(card["id"], "（没有描述）")
@@ -377,12 +379,16 @@ class Index:
                            for n, k in sorted(counts.items())}, "videos": out}
 
     def pace_of(self, card_id: str) -> str | None:
-        """The card's pace from how much its picture changes (PACE_CHANGE), None unmeasured."""
+        """The card's pace from how much its picture changes (PACE_CHANGE), or the slowest its
+        usable seconds can take when they are fewer than that pace's least; None unmeasured."""
         change = self.pictures.get(card_id, {}).get("change")
-        if change is None:
+        card = next((c for c in self.cards if c["id"] == card_id), None)
+        if change is None or card is None:
             return None
         slow, fast = PACE_CHANGE
-        return "慢" if change < slow else "快" if change >= fast else "中"
+        pace = "慢" if change < slow else "快" if change >= fast else "中"
+        usable = self.usable(card)
+        return slowest(usable) if usable < PACES[pace][0] - ROUNDING else pace
 
     def near(self, scene: int, among=None) -> list[int]:
         """The scenes a plan may change to from scene (SCENE_NEAR), among those given if any."""
@@ -486,7 +492,7 @@ class Index:
             # Cards give seconds to two places and cuts to three: half a hundredth, under a frame, is let pass.
             if start < lo - ROUNDING or end > hi + ROUNDING:
                 problems.append(f"第 {n} 段 {start:g}–{end:g} 秒越出了镜头 {lo:g}–{hi:g} 秒，片段不能跨过镜头切点")
-            if end - start < shortest:
+            if end - start < shortest - ROUNDING:
                 problems.append(f"第 {n} 段只有 {end - start:.2g} 秒，每段至少 {shortest:g} 秒")
             if end - start > CLIP_MAX + ROUNDING:
                 problems.append(f"第 {n} 段有 {end - start:.3g} 秒，每段最多 {CLIP_MAX:g} 秒")

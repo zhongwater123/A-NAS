@@ -444,7 +444,7 @@ class Handler(BaseHTTPRequestHandler):
             mins, aims, caps = (list(column) for column in zip(*(moments.PACES[p] for p in paces), strict=True))
             if sum(caps) < target - 1 or sum(mins) > target + 1:
                 return [], [f"按这些段的 pace，成片在 {sum(mins):g}–{sum(caps):g} 秒之间，目标是 {target:g} 秒："
-                            + ("加几段，或把几段改慢" if sum(caps) < target - 1 else "删几段，或把几段改快")]
+                            + ("加几段，或换节奏更慢的段" if sum(caps) < target - 1 else "删几段，或换节奏更快的段")]
             # Each segment's share: its pace's aim, all scaled to the target and kept to the pace.
             scale = target / sum(aims)
             shares = [min(cap, max(low, aim * scale)) for low, aim, cap in zip(mins, aims, caps, strict=True)]

@@ -475,6 +475,8 @@ class MomentsTest(unittest.TestCase):
         self.index.pictures = {"07-0-0": {"change": 0.004}, "07-1-0": {"change": 0.03}, "07-1-1": {"change": 0.1}}
         self.assertEqual([self.index.pace_of(i) for i in ("07-0-0", "07-1-0", "07-1-1", "07-2-0")],
                          ["慢", "中", "快", None])
+        self.index.pictures["07-2-0"] = {"change": 0.0}  # still, but its one window is flat
+        self.assertEqual(self.index.pace_of("07-2-0"), "快")
 
     def test_a_cut_ends_on_a_segment_paced_middle_at_the_fastest(self):
         fast, slow = {"card": "07-0-0", "pace": "快"}, {"card": "07-1-0", "pace": "慢"}
