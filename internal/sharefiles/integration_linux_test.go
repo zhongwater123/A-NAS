@@ -344,7 +344,7 @@ func TestStaleBridgeDuringPreparationIsNotWithdrawal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	// Invalidate the bridge after opening the store, as when the Product
 	// Service restarts after admission but before background capture.
 	if _, err := NewRemote(context.Background(), f.socket); err != nil {
