@@ -148,7 +148,7 @@ Hermes 只从成员自己的 `config.yaml` 读的几项，由 root 为每个成�
 
 ### 管理员的助手
 
-owner 的沙箱内 `id` 为 `owner, a-nas-users, a-nas-admins`：systemd 设了 `User=` 就按 `/etc/group` 加上全部附加组（`initgroups`），`SupplementaryGroups=` 只能加、不能去。目前这个组不授予任何东西：数据卷上没有 ACL 用到它；Samba 按 `@a-nas-users` 授权；文件代理给管理员工作进程的附加组是它显式设定的（`internal/filebroker/server.go`）。用户决定照旧：ADR 0024 决定 2 改为“沙箱能接触到的东西都不授予 `a-nas-admins`”，由探针持续检查。
+owner 的沙箱内 `id` 为 `owner, a-nas-users, a-nas-admins`：systemd 设了 `User=` 就按 `/etc/group` 加上全部附加组（`initgroups`），`SupplementaryGroups=` 只能加、不能去。目前这个组不授予任何东西：数据卷上没有 ACL 用到它；Samba 按 `@a-nas-users` 授权；文件代理给管理员工作进程的附加组是它显式设定的（`internal/filebroker/rootbroker/server.go`）。用户决定照旧：ADR 0024 决定 2 改为“沙箱能接触到的东西都不授予 `a-nas-admins`”，由探针持续检查。
 
 ### Agent空间
 

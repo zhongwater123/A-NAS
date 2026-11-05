@@ -1,7 +1,7 @@
 # AI 助手
 
-状态：draft（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 已在开发机 spike 中验证；窗口经产品服务与会话闸门使用 `hermes serve`，对话、回合内审批卡片与多窗口已在开发机原型上跑通；待评审）
-更新时间：2026-10-27
+状态：implemented
+更新时间：2026-11-05
 
 ## 目标
 
