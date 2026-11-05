@@ -85,6 +85,9 @@ install -m 0644 a-nas-kiosk.sysusers.incoming a-nas-kiosk.sysusers
 install -m 0644 kiosk.env.incoming kiosk.env
 install -m 0644 a-nas-chromium-policy.json.incoming a-nas-chromium-policy.json
 install -m 0644 Caddyfile.incoming Caddyfile
+install -m 0644 Caddyfile.internet.incoming Caddyfile.internet
+install -m 0644 anas-internet.nft.incoming anas-internet.nft
+install -m 0644 anas-internet-firewall-system.service.incoming anas-internet-firewall-system.service
 install -m 0644 anas-api-system.service.incoming anas-api-system.service
 install -m 0644 anas-host-agent-system.service.incoming anas-host-agent-system.service
 install -m 0644 anas-photos-system.service.incoming anas-photos-system.service
@@ -218,7 +221,7 @@ rm -f \
   a-nas-kiosk.sysusers.incoming \
   kiosk.env.incoming \
   a-nas-chromium-policy.json.incoming \
-  Caddyfile.incoming \
+  Caddyfile.incoming   Caddyfile.internet.incoming   anas-internet.nft.incoming   anas-internet-firewall-system.service.incoming \
   anas-api-system.service.incoming \
   anas-host-agent-system.service.incoming \
   anas-photos-system.service.incoming \
