@@ -45,12 +45,20 @@ class PlanTest(unittest.TestCase):
                 plan.parsed(bad)
 
     def test_the_request_locates_each_segment_by_what_it_shows(self):
-        body = plan.request({"segments": [{"card": "01-0-0", "shows": "街道", "pace": "慢", "reason": "开场"}]},
-                            60, "预告片")
-        self.assertEqual(body["segments"], [{"card": "01-0-0", "shows": "街道", "pace": "慢", "reason": "开场",
-                                             "probe": "街道"}])
+        segment = {"card": "01-0-0", "scene": 1, "shows": "街道", "pace": "慢", "reason": "交代地点",
+                   "transition": "从黑场开场"}
+        body = plan.request({"segments": [segment | {"extra": "不传"}]}, 60, "预告片")
+        self.assertEqual(body["segments"], [segment | {"probe": "街道"}])
         self.assertEqual({k: body[k] for k in ("seconds", "margin", "edges", "look", "scenes")},
                          {"seconds": 60, "margin": True, "edges": True, "look": False, "scenes": True})
+
+    def test_a_scene_the_model_misread_is_named(self):
+        planned = {"segments": [{"card": "01-0-0", "scene": 1}, {"card": "01-1-0", "scene": "1"}]}
+        self.assertEqual(plan.misplaced(planned, self.index), ["第 2 段 01-1-0 写的是场景1，目录里是场景2"])
+
+    def test_the_system_prompt_asks_for_scene_and_transition(self):
+        for field in plan.FIELDS:
+            self.assertIn(f'"{field}"', plan.SYSTEM)
 
 
 if __name__ == "__main__":
