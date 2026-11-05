@@ -51,6 +51,7 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
   - 一个排在 smbd 之后、`Wants=` 它的单元（与 Host Agent 相同）在第一次失败后启动，不等以后的重试；
   - smbd 没有运行时，`smbcontrol all reload-config` 退出码为 0。
 - 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh) 检查安装器写入的等待与重试，并在一个暂时没有地址的接口上走一遍上面的过程。部署后要在 Experimental NAS 上正常重启一次，确认 `172.18.45.48:445` 在监听。
+  - smbd 先告诉 systemd 已就绪，再打开监听套接字（Samba 4.22 的 `source3/smbd/server.c`：先 `daemon_ready("smbd")`，后 `open_sockets_smbd()`），所以 `systemctl restart smbd` 返回时 445 可能还没在监听。2026-11-05 CI 中“smbd listens on the SMB interface's address”两次失败（`fff0c2b0` 推送后与 #397），就是重启后立即检查；测试改为最多等 10 秒再检查（#397）。
 
 ## 后续工作
 

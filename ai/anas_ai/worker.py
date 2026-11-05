@@ -417,7 +417,7 @@ def main(argv=None):
         try:
             reader = Detector(providers.LlamaReader([args.ocr_server], args.ocr_model, args.ocr_model_manifest,
                                                     args.ocr_mmproj, args.ocr_mmproj_manifest,
-                                                    args.ocr_runtime_manifest, args.threads))
+                                                    args.ocr_runtime_manifest, args.threads, args.cache_dir))
         except providers.Unavailable as error:
             reader = Detector(reason=str(error))
             log.error("text reader unavailable: %s", error)

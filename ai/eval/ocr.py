@@ -34,6 +34,8 @@ import urllib.request
 
 from PIL import Image, ImageOps
 
+from anas_ai.providers import looping
+
 MODELS_DIR = os.environ.get("ANAS_OCR_MODELS", "/models")
 DATA_DIR = os.environ.get("ANAS_OCR_DATA", "/data")
 RUNS_DIR = os.environ.get("ANAS_OCR_RUNS", "/runs")
@@ -274,16 +276,6 @@ class Server:
                     break  # closing the connection makes llama-server stop generating
         return {"output": "".join(text), "tokens": tokens, "finish": finish, "timings": timings,
                 "first_token_seconds": round(first, 3) if first is not None else None}
-
-
-def looping(text, repeats=8, longest=300):
-    """Whether the tail of text is one unit repeated `repeats` times (greedy decoding's failure mode)."""
-    tail = text[-repeats * longest:]
-    for size in range(1, min(longest, len(tail) // repeats) + 1):
-        unit = tail[-size:]
-        if unit.strip() and tail.endswith(unit * repeats):
-            return True
-    return False
 
 
 def answer_record(model, item, prompt, size, reply, seconds):

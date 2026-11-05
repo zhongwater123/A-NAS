@@ -33,7 +33,8 @@ flags=$(printf '%s' "${ANAS_OCR_SERVER_ARGS:-}" | tr -s ' -' '-')
 out="$root/runs/t$threads$flags"
 mkdir -p "$out"
 export ANAS_OCR_MODELS="$root/models" ANAS_OCR_DATA="$root/data" ANAS_OCR_RUNS="$out" ANAS_OCR_LLAMA="$root/llama"
-export LD_LIBRARY_PATH="$root/llama" PYTHONDONTWRITEBYTECODE=1
+# eval.ocr takes its loop check from the Worker's anas_ai, as installed.
+export LD_LIBRARY_PATH="$root/llama" PYTHONPATH=/opt/a-nas/current/ai PYTHONDONTWRITEBYTECODE=1
 echo 1000 > /proc/self/oom_score_adj
 cd "$root/ai" || exit 1
 

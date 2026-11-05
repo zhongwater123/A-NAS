@@ -190,6 +190,16 @@ const textMinConfidence = 0.99
 // different models.
 var errReaderChanged = errors.New("the text reader changed between the reads of one photo")
 
+// errNoEnd: the Worker gave a reading without one of the ways a reading ends
+// (Reading.Finish), so its text cannot be taken as read (#365).
+var errNoEnd = errors.New("the text reader gave a reading without saying how it ended")
+
+// ended reports whether finish is one of the ways a reading ends: by itself,
+// at the length limit, or stopped looping.
+func ended(finish string) bool {
+	return finish == "stop" || finish == "length" || finish == "repetition"
+}
+
 // readText reads the next routed photo, the newest first, once there is
 // nothing to detect (docs/architecture/photo-ocr.md#资源策略): its whole
 // text, and for a known document type its fields, which are then checked.
@@ -230,6 +240,9 @@ func (r *aiRunner) readText(ctx context.Context, m models, gate Gate, info Embed
 	readCtx, cancel := context.WithCancel(ctx)
 	stopWatching := watchGate(readCtx, gate, info.OCRMemoryBytes, cancel)
 	model, whole, err := m.reader.ReadText(readCtx, file, nil)
+	if err == nil && !ended(whole.Finish) {
+		err = errNoEnd
+	}
 	reading := textReading{model: model, kind: textread.Plain, text: whole.Text, finish: whole.Finish}
 	if err == nil {
 		reading.kind = textread.Classify(whole.Text)
@@ -251,6 +264,8 @@ func (r *aiRunner) readText(ctx context.Context, m models, gate Gate, info Embed
 		// Look again next round: the Worker may have lost or changed its reader.
 		r.forgetModels()
 		return true, false, r.lib.releaseJob(ctx, job)
+	case errors.Is(err, errNoEnd):
+		return true, true, r.lib.failJob(ctx, job, jobErrorInvalidResult)
 	case errors.Is(err, ErrAIRejected):
 		return true, true, r.lib.failJob(ctx, job, jobErrorUndecodable)
 	case err != nil:
@@ -273,6 +288,9 @@ func (r *aiRunner) readFields(ctx context.Context, reader TextReader, file *os.F
 	}
 	if fieldsModel != model {
 		return nil, nil, errReaderChanged
+	}
+	if !ended(answer.Finish) {
+		return nil, nil, errNoEnd
 	}
 	tokens := make([]textread.Token, len(answer.Tokens))
 	for i, token := range answer.Tokens {
