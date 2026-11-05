@@ -227,7 +227,9 @@
 .popover {
   width: 310px;
   max-width: calc(100vw - 20px);
-  max-height: min(390px, calc(100vh - 28px));
+  /* The room Radix measures above the dock: in the 400 px desktop window that is far
+     less than 390 px, and without it the header and close button were cut off. */
+  max-height: min(390px, var(--radix-popover-content-available-height, calc(100vh - 28px)));
   overflow: auto;
   background: var(--color-surface, white);
   color: #304a3e;
