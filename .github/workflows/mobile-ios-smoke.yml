@@ -51,7 +51,21 @@ jobs:
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
           xcrun simctl install "$device" artifacts/app/ANAS.app
-          xcrun simctl launch "$device" com.anas.mobile
+          # A freshly booted hosted simulator can briefly reject launches.
+          launched=false
+          for attempt in 1 2 3; do
+            if xcrun simctl launch "$device" com.anas.mobile; then
+              launched=true
+              break
+            fi
+            sleep 10
+          done
+          if [ "$launched" != true ]; then
+            xcrun simctl spawn "$device" log show --last 3m --style compact \
+              --predicate 'eventMessage CONTAINS "com.anas.mobile" OR process == "ANAS"' \
+              > artifacts/launch-diagnostics.txt
+            exit 1
+          fi
           sleep 5
           xcrun simctl io "$device" screenshot artifacts/ios-login-signed.png
           swift scripts/mobile-assert-login.swift artifacts/ios-login-signed.png | tee artifacts/signed-ocr.txt
@@ -62,6 +76,7 @@ jobs:
           name: ios-startup-comparison
           path: |
             artifacts/*ocr.txt
+            artifacts/launch-diagnostics.txt
             artifacts/ios-login-signed.png
             artifacts/ios-simulator-signed.zip
           retention-days: 7
