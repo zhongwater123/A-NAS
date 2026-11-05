@@ -12,6 +12,7 @@ interface Options {
   dialogs: ReturnType<typeof useDialogs>;
   picker?: PhotoAsset[];
   photoPicker?: PhotoAlbum;
+  channelPicker?: PhotoAsset[];
   selection: ReturnType<typeof useSelection>;
   place?: Place;
   viewAssets: PhotoAsset[];
@@ -28,6 +29,7 @@ export function usePanelInput({
   dialogs,
   picker,
   photoPicker,
+  channelPicker,
   selection,
   place,
   viewAssets,
@@ -42,7 +44,7 @@ export function usePanelInput({
   const dragDepth = useRef(0);
 
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (viewer || dialogs.open || picker || photoPicker) return;
+    if (viewer || dialogs.open || picker || photoPicker || channelPicker) return;
     const typing = (event.target as HTMLElement).closest("input, textarea");
     if (event.key === "Escape" && selection.selected.size && !typing) {
       event.preventDefault();

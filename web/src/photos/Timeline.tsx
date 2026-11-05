@@ -19,6 +19,7 @@ interface Props extends GridProps {
   onCount: (photos: number | undefined, videos?: number) => void;
   onError: (message: string) => void;
   empty: ReactNode;
+  badge?: (asset: PhotoAsset) => ReactNode;
 }
 
 async function loadMonth(libraryId: string, month: string) {
@@ -145,7 +146,7 @@ export function Timeline(props: Props) {
   const reportCount = useEffectEvent(onCount);
   useEffect(() => reportCount(total, videos), [total, videos]);
 
-  const renderTile = useTileRenderer(props);
+  const renderTile = useTileRenderer(props, props.badge);
   const renderEntry = (entry: Entry): ReactNode => {
     switch (entry.kind) {
       case "month":

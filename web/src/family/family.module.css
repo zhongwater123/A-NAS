@@ -2481,6 +2481,16 @@
 .fc-modal.wide {
   width: min(600px, calc(100% - 32px));
 }
+.fc-modal.large {
+  width: min(940px, calc(100% - 32px));
+  height: min(700px, calc(100% - 32px));
+}
+.fc-modal.large .fc-modal-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
 .fc-modal-head {
   display: flex;
   align-items: center;
@@ -2516,6 +2526,79 @@
     opacity: 0;
     transform: translate(-50%, calc(-50% + 8px)) scale(0.98);
   }
+}
+
+/* 从相册选择: the photo library's own grid, in the window's colours. */
+.fc-library {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fc-library-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 2px 24px 12px;
+}
+.fc-library-tab {
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 99px;
+  color: var(--fc-ink-2);
+  background: transparent;
+  font-weight: 500;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.fc-library-tab:hover {
+  background: var(--fc-hover);
+}
+.fc-library-tab[data-state="active"] {
+  color: var(--fc-card);
+  background: var(--fc-ink);
+}
+.fc-library-grid {
+  --ph-bg: var(--fc-paper);
+  --ph-side: var(--fc-side);
+  --ph-line: var(--fc-line);
+  --ph-tile: var(--fc-tile);
+  --ph-accent-ink: #a8432b;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  border-top: 1px solid var(--fc-line);
+  background: var(--ph-bg);
+  outline: none;
+}
+/* Radix keeps the other library's panel, hidden. */
+.fc-library-grid[hidden] {
+  display: none;
+}
+.fc-library-blocked {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 8px;
+  background: rgba(246, 242, 236, 0.6);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: default;
+}
+.fc-library-blocked span {
+  padding: 2px 9px;
+  border-radius: 99px;
+  color: #fff;
+  background: rgba(35, 30, 26, 0.72);
+}
+.fc-library-note {
+  min-width: 0;
+  color: var(--fc-ink-2);
+  font-size: 12px;
 }
 
 /* Menus open outside the window, above every window. */

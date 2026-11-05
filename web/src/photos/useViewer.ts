@@ -56,7 +56,7 @@ export function useViewer({
   setRefreshKey,
   root,
 }: Options) {
-  const { trash, download, copyTo, setPicker } = actions;
+  const { trash, download, copyTo, setPicker, babies, setChannelPicker } = actions;
   const [viewer, setViewer] = useState<{ id: string; origin?: DOMRect }>();
   // One photo another window asked to show, viewed on its own over the current place.
   const [focused, setFocused] = useState<PhotoAsset>();
@@ -114,6 +114,7 @@ export function useViewer({
       void trash([asset]);
     },
     addToAlbum: (assets) => setPicker(assets),
+    addToChannel: babies.length ? (assets) => setChannelPicker(assets) : undefined,
     download: (assets) => void download(assets),
     rename: renameOne,
     copy: (asset, library) => void copyTo(library, [asset]),

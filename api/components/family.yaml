@@ -220,6 +220,12 @@ schemas:
     properties:
       photos: { type: array, description: "Newest taken first.", items: { $ref: "#/schemas/FamilyAlbumPhoto" } }
       next: { type: string }
+  FamilyAssetIDs:
+    type: object
+    additionalProperties: false
+    required: [assetIds]
+    properties:
+      assetIds: { type: array, maxItems: 500, items: { type: string } }
   FamilyGrowthPoint:
     type: object
     additionalProperties: false

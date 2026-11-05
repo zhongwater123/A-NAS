@@ -19,6 +19,7 @@ export function Modal({
   title,
   busy,
   wide,
+  large,
   onClose,
   children,
   footer,
@@ -26,6 +27,8 @@ export function Modal({
   title: string;
   busy?: boolean;
   wide?: boolean;
+  // large holds a grid of photos, which scrolls on its own.
+  large?: boolean;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
@@ -48,7 +51,7 @@ export function Modal({
           }}
         />
         <Dialog.Content
-          className={`${styles.fcModal} ${wide ? styles.wide : ""}`}
+          className={`${styles.fcModal} ${wide ? styles.wide : ""} ${large ? styles.large : ""}`}
           aria-describedby={undefined}
           onInteractOutside={(event) => event.preventDefault()}
         >
