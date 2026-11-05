@@ -523,7 +523,7 @@ func TestWaitingForMemoryKeepsTheModelsAlreadyLoaded(t *testing.T) {
 }
 
 func TestTheModelsWaitForRoomBeforeTheirFirstLoad(t *testing.T) {
-	service, _, root := newService(t)
+	service, clock, root := newService(t)
 	private, _ := libraries(t, service, alice)
 	worker, gate := newDetectingEmbedder(), &roomGate{room: 1 << 30}
 	worker.memory = 1536 << 20
@@ -537,6 +537,29 @@ func TestTheModelsWaitForRoomBeforeTheirFirstLoad(t *testing.T) {
 	if state, attempts, _ := jobState(t, root, "embedding/v1"); state != "pending" || attempts != 0 {
 		t.Fatalf("vector job = %s after %d attempts; want it waiting at no cost", state, attempts)
 	}
+	// Its call started the Worker, which is told to exit rather than hold
+	// its memory idle.
+	if releases := worker.releases(); !slices.Equal(releases, []bool{true}) {
+		t.Fatalf("releases = %v, want the whole Worker released once", releases)
+	}
+
+	// Started again, the photo service weighs what the models took before
+	// it calls the Worker at all (#365).
+	_ = service.Close()
+	service = openService(t, root, clock.Now)
+	worker.fakeEmbedder.mu.Lock()
+	infos := worker.infos
+	worker.fakeEmbedder.mu.Unlock()
+	if ok, err := service.ProcessAIJob(context.Background(), worker, gate); ok || err != nil {
+		t.Fatalf("ProcessAIJob() after a restart without room = %v, %v", ok, err)
+	}
+	worker.fakeEmbedder.mu.Lock()
+	called := worker.infos != infos
+	worker.fakeEmbedder.mu.Unlock()
+	if called {
+		t.Fatal("the first round after a restart called the Worker without room for its models")
+	}
+
 	gate.mu.Lock()
 	gate.room = 4 << 30
 	gate.mu.Unlock()

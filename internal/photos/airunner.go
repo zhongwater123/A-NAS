@@ -3,6 +3,7 @@ package photos
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -46,7 +47,40 @@ type aiRunner struct {
 }
 
 func newAIRunner(lib *Service) *aiRunner {
-	return &aiRunner{lib: lib, wake: make(chan struct{}, 1)}
+	return &aiRunner{lib: lib, wake: make(chan struct{}, 1), need: lib.storedMemoryNeed()}
+}
+
+// workerFile keeps what the AI Worker last said its models take
+// (EmbedderInfo.MemoryBytes). The first round after the photo service starts
+// weighs it before the round's first call, which starts the Worker through
+// its socket; without it that call would start the Worker before any memory
+// check (#365).
+const workerFile = "ai-worker.json"
+
+type workerRecord struct {
+	MemoryBytes uint64 `json:"memoryBytes"`
+}
+
+// storedMemoryNeed is the need workerFile keeps, or 0 before the Worker first
+// answered.
+func (s *Service) storedMemoryNeed() uint64 {
+	content, err := fs.ReadFile(s.root.FS(), workerFile)
+	if err != nil {
+		return 0
+	}
+	var record workerRecord
+	if json.Unmarshal(content, &record) != nil {
+		return 0
+	}
+	return record.MemoryBytes
+}
+
+func (s *Service) storeMemoryNeed(need uint64) error {
+	content, err := json.Marshal(workerRecord{MemoryBytes: need})
+	if err != nil {
+		return err
+	}
+	return s.writeDerived(workerFile, content)
 }
 
 // aiProgress is what the AI runner last observed.
@@ -194,11 +228,21 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 		return false, err
 	}
 	// The first answer, or a new release, tells what the models take, which
-	// the gate weighs before any of them loads.
+	// the gate weighs before any of them loads, and which the next start of
+	// the photo service weighs before it calls the Worker.
 	if r.setMemoryNeed(info.MemoryBytes) {
+		if err := r.lib.storeMemoryNeed(info.MemoryBytes); err != nil {
+			return false, err
+		}
 		if open, reason := gate.Open(ctx, info.MemoryBytes); !open {
 			r.progress.set(AIPaused, reason, "")
-			r.releaseModels(ctx, detector, reason)
+			if reason == "memory_for_models" || reason == "memory_low" || reason == "memory_pressure" {
+				// This round's call may have started the Worker, which would
+				// hold its memory idle until it exits by itself.
+				r.endWorker(ctx, detector)
+			} else {
+				r.releaseModels(ctx, detector, reason)
+			}
 			return false, nil
 		}
 	}
@@ -557,6 +601,17 @@ func (r *aiRunner) switchPhase(ctx context.Context, detector Detector, reading b
 	if other {
 		_ = detector.Release(ctx, false)
 	}
+}
+
+// endWorker tells a Worker known to run to release everything and exit.
+func (r *aiRunner) endWorker(ctx context.Context, detector Detector) {
+	if detector == nil {
+		return
+	}
+	r.mu.Lock()
+	r.detectorLoaded, r.readerLoaded = false, false
+	r.mu.Unlock()
+	_ = detector.Release(ctx, true)
 }
 
 // markReaderLoaded records that the Worker loaded its text reader, which it

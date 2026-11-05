@@ -494,6 +494,10 @@ rm -f "$late_dropin"
 ip link delete anas-late0
 systemctl daemon-reload
 systemctl restart smbd
+# smbd tells systemd it is ready before it opens its listening sockets
+# (source3/smbd/server.c: daemon_ready, then open_sockets_smbd), so the restart
+# can return a moment before port 445 listens.
+for _ in $(seq 1 10); do [[ -n "$(ss -ltnH "src $ip and sport = :445")" ]] && break; sleep 1; done
 check "smbd listens on the SMB interface's address" grep -q . <<<"$(ss -ltnH "src $ip and sport = :445")"
 
 # --- The local console (issue #174): an account of its own that cannot log

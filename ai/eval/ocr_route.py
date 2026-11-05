@@ -28,6 +28,7 @@ are not tuned to the photos they describe.
 import argparse
 import hashlib
 import json
+import math
 import os
 
 import numpy as np
@@ -130,18 +131,20 @@ def main():
     with open(args.report, "w", encoding="utf-8") as file:
         json.dump(report, file, ensure_ascii=False, indent=1)
     if args.write:
-        result = report["methods"]["embedding"].get(str(args.target))
-        if result is None:
-            threshold = threshold_for(scores["embedding"][calibration & is_read], args.target)
-            chosen = scores["embedding"] >= threshold
-            result = {"threshold": threshold,
-                      "test": rates([s for s, c in zip(samples, calibration, strict=True) if not c], chosen[~calibration])}
+        # The threshold is a calibration document's own score: published
+        # rounded down to four places, so that the photo service, which keeps
+        # a photo at or above it, keeps that document too, and measured with
+        # the value published (#365).
+        calibrated = threshold_for(scores["embedding"][calibration & is_read], args.target)
+        threshold = math.floor(calibrated * 10_000) / 10_000
+        chosen = scores["embedding"] >= threshold
+        test = rates([s for s, c in zip(samples, calibration, strict=True) if not c], chosen[~calibration])
         route = {
             "model": model,
             "queries": READ,
-            "threshold": round(result["threshold"], 4),
+            "threshold": threshold,
             "target": args.target,
-            "measured": {kind: result["test"][f"kind:{kind}"] for kind in ("read", "photo", "scene", "web")},
+            "measured": {kind: test[f"kind:{kind}"] for kind in ("read", "photo", "scene", "web")},
         }
         with open(args.write, "w", encoding="utf-8", newline="\n") as file:
             file.write(json.dumps(route, ensure_ascii=False, indent=2) + "\n")
