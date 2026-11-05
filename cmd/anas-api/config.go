@@ -9,7 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
+
+	"golang.org/x/net/idna"
 
 	containeragent "github.com/zhongwater123/A-NAS/internal/containers/agent"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
@@ -56,6 +59,11 @@ type Config struct {
 	// through Caddy (invariant 9), and the loopback checks for setup, the
 	// local console and the terminal rely on it.
 	HTTPAddr string `env:"ANAS_HTTP_ADDR" envDefault:"127.0.0.1:8080"`
+	// InternetHTTPAddr is the internet entry's own loopback listener, which
+	// Caddy's HTTPS site for InternetHost proxies to (ADR 0032). Both are set
+	// or neither; without them the device has no internet entry.
+	InternetHTTPAddr string `env:"ANAS_INTERNET_HTTP_ADDR"`
+	InternetHost     string `env:"ANAS_INTERNET_HOST"`
 	// StateDir holds the SQLite stores and caches; it defaults to the user's
 	// configuration directory.
 	StateDir string `env:"ANAS_STATE_DIR"`
@@ -170,7 +178,20 @@ func loadConfig(environment map[string]string) (Config, error) {
 		return Config{}, errors.New("ANAS_HOSTSTATE_MODE must be agent or fake")
 	}
 	live := c.Live()
-	problem(loopbackAddress(c.HTTPAddr))
+	problem(loopbackAddress("ANAS_HTTP_ADDR", c.HTTPAddr))
+	switch {
+	case c.InternetHTTPAddr == "" && c.InternetHost == "":
+	case c.InternetHTTPAddr == "" || c.InternetHost == "":
+		problem(errors.New("ANAS_INTERNET_HTTP_ADDR and ANAS_INTERNET_HOST turn the internet entry on together; set both or neither"))
+	default:
+		problem(loopbackAddress("ANAS_INTERNET_HTTP_ADDR", c.InternetHTTPAddr))
+		if c.InternetHTTPAddr == c.HTTPAddr {
+			problem(errors.New("ANAS_INTERNET_HTTP_ADDR must differ from ANAS_HTTP_ADDR: requests are told apart by the listener they arrive on"))
+		}
+		host, err := domainName(c.InternetHost)
+		problem(err)
+		c.InternetHost = host
+	}
 
 	if c.StateDir != "" {
 		path("ANAS_STATE_DIR", &c.StateDir)
@@ -281,7 +302,7 @@ func loadConfig(environment map[string]string) (Config, error) {
 }
 
 // loopbackAddress accepts only a loopback IP and a port.
-func loopbackAddress(address string) error {
+func loopbackAddress(name, address string) error {
 	host, _, err := net.SplitHostPort(address)
 	if err == nil {
 		var ip netip.Addr
@@ -290,9 +311,25 @@ func loopbackAddress(address string) error {
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("ANAS_HTTP_ADDR must be a loopback address and port such as 127.0.0.1:8080; the LAN reaches the API only through Caddy: %w", err)
+		return fmt.Errorf("%s must be a loopback address and port such as 127.0.0.1:8080; browsers reach the API only through Caddy: %w", name, err)
 	}
 	return nil
+}
+
+// domainName accepts the internet entry's domain as it can be registered: at
+// least two labels, the last not all digits so that an IP address is not
+// taken for one. It returns the name as browsers send it in Host: in lower
+// case, an internationalized name in its ASCII form.
+func domainName(name string) (string, error) {
+	host, err := idna.Registration.ToASCII(strings.ToLower(name))
+	labels := strings.Split(host, ".")
+	if err == nil && (len(labels) < 2 || strings.Trim(labels[len(labels)-1], "0123456789") == "") {
+		err = errors.New("not a domain name")
+	}
+	if err != nil {
+		return "", fmt.Errorf("ANAS_INTERNET_HOST must be the domain the internet entry serves, such as nas.example.com: %w", err)
+	}
+	return host, nil
 }
 
 // photoServiceConfig configures the photo service (ADR 0011), which runs

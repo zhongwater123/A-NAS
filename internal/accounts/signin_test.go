@@ -120,6 +120,72 @@ func fromLAN(address string) context.Context {
 	return accounts.WithClientOrigin(context.Background(), accounts.ClientOrigin{Via: accounts.ViaLAN, Address: address})
 }
 
+func fromInternet(address string) context.Context {
+	return accounts.WithClientOrigin(context.Background(), accounts.ClientOrigin{Via: accounts.ViaInternet, Address: address})
+}
+
+// Internet sessions are bound to no address, but failed sign-ins still count
+// per address: one guesser does not make every phone wait.
+func TestInternetClientsWaitEachForTheirOwnFailures(t *testing.T) {
+	now := time.Date(2026, time.November, 5, 12, 0, 0, 0, time.UTC)
+	service, _ := newSignInService(t, func() time.Time { return now })
+	guesser, phone := fromInternet("198.51.100.7"), fromInternet("203.0.113.40")
+	for range 5 {
+		if _, err := service.Authenticate(guesser, "alice", "not alice's password"); !errors.Is(err, accounts.ErrInvalidCredentials) {
+			t.Fatalf("wrong password: %v", err)
+		}
+	}
+	if _, err := service.Authenticate(guesser, "alice", signInPassword); !errors.Is(err, accounts.ErrSignInThrottled) {
+		t.Fatalf("the guesser's next attempt: %v, want a wait", err)
+	}
+	if _, err := service.Authenticate(fromInternet("198.51.100.8"), "owner", "not the owner's password"); !errors.Is(err, accounts.ErrInvalidCredentials) {
+		t.Fatalf("another address: %v", err)
+	}
+	if _, err := service.Authenticate(phone, "alice", signInPassword); err != nil {
+		t.Fatalf("a phone on another address waited for the guesser: %v", err)
+	}
+}
+
+// Guesses spread over many internet addresses make the account wait on the
+// internet entry, never on the LAN or the local console (ADR 0032).
+func TestAnAccountGuessedFromManyInternetAddressesWaitsOnlyThere(t *testing.T) {
+	now := time.Date(2026, time.November, 5, 12, 0, 0, 0, time.UTC)
+	service, _ := newSignInService(t, func() time.Time { return now })
+	for i := range 10 {
+		if _, err := service.Authenticate(fromInternet(fmt.Sprintf("198.51.100.%d", i+1)), "alice", "not alice's password"); !errors.Is(err, accounts.ErrInvalidCredentials) {
+			t.Fatalf("guess %d: %v", i, err)
+		}
+	}
+	_, err := service.Authenticate(fromInternet("203.0.113.40"), "alice", signInPassword)
+	if throttled, ok := errors.AsType[*accounts.ThrottledError](err); !ok || throttled.RetryAfter != 30*time.Second {
+		t.Fatalf("alice from a new internet address: %v, want a wait of 30s", err)
+	}
+	if _, err := service.Authenticate(fromInternet("203.0.113.40"), "owner", "correct horse battery staple"); err != nil {
+		t.Fatalf("another account from the internet: %v", err)
+	}
+	if _, err := service.Authenticate(fromLAN("192.0.2.10"), "alice", signInPassword); err != nil {
+		t.Fatalf("alice on the LAN: %v", err)
+	}
+	console := accounts.WithClientOrigin(context.Background(), accounts.ClientOrigin{Via: accounts.ViaLoopback})
+	if _, err := service.AuthenticateLocalConsole(console, "alice", signInPassword); err != nil {
+		t.Fatalf("alice on the local console: %v", err)
+	}
+	// Signing in elsewhere does not reset the internet count: the next guess
+	// waits longer.
+	now = now.Add(30 * time.Second)
+	if _, err := service.Authenticate(fromInternet("198.51.100.99"), "alice", "not alice's password"); !errors.Is(err, accounts.ErrInvalidCredentials) {
+		t.Fatalf("guess after the wait: %v", err)
+	}
+	_, err = service.Authenticate(fromInternet("203.0.113.40"), "alice", signInPassword)
+	if throttled, ok := errors.AsType[*accounts.ThrottledError](err); !ok || throttled.RetryAfter != time.Minute {
+		t.Fatalf("alice after one more guess: %v, want a wait of 1m", err)
+	}
+	now = now.Add(25 * time.Hour)
+	if _, err := service.Authenticate(fromInternet("203.0.113.40"), "alice", signInPassword); err != nil {
+		t.Fatalf("a day after the last guess: %v", err)
+	}
+}
+
 func TestAClientThatKeepsFailingWaitsBeforeTryingAgain(t *testing.T) {
 	now := time.Date(2026, time.November, 3, 12, 0, 0, 0, time.UTC)
 	service, _ := newSignInService(t, func() time.Time { return now })

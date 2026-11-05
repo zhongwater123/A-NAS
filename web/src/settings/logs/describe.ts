@@ -50,6 +50,7 @@ export function originLabel(detail?: string): string | undefined {
   const { via, address } = parseDetail(detail);
   if (via === "local-console") return "本机屏幕";
   if (via === "lan") return address ? `局域网 · ${address}` : "局域网";
+  if (via === "internet") return address ? `外网 · ${address}` : "外网";
   if (via === "loopback") return "本机回环（SSH 隧道或设备上的浏览器）";
   return undefined;
 }

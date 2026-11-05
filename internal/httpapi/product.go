@@ -23,6 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
+	"github.com/zhongwater123/A-NAS/internal/webentry"
 	"github.com/zhongwater123/A-NAS/internal/websearchapi"
 )
 
@@ -167,7 +168,7 @@ func (h *productHandler) handleSetupAdministrator(w http.ResponseWriter, r *http
 		h.internalError(w, r, err)
 		return
 	}
-	h.setSessionCookie(w, session)
+	h.setSessionCookie(w, r, session)
 	h.keepAssistant(session.User, session.Token)
 	httpjson.Write(w, http.StatusCreated, h.publicSession(r.Context(), session))
 }
@@ -191,7 +192,7 @@ func (h *productHandler) handleCreateSession(w http.ResponseWriter, r *http.Requ
 		httpjson.WriteError(w, http.StatusUnauthorized, "invalid_credentials", "username or password is invalid")
 		return
 	}
-	h.setSessionCookie(w, session)
+	h.setSessionCookie(w, r, session)
 	h.keepAssistant(session.User, session.Token)
 	httpjson.Write(w, http.StatusOK, h.publicSession(r.Context(), session))
 }
@@ -202,7 +203,7 @@ func (h *productHandler) handleCurrentSession(w http.ResponseWriter, r *http.Req
 	token := accounts.SessionToken(r.Context())
 	if session.LocalConsole() {
 		session.Token = token
-		h.setSessionCookie(w, session)
+		h.setSessionCookie(w, r, session)
 	}
 	// Also after the Product Service restarted, which forgets kept instances.
 	h.keepAssistant(session.User, token)
@@ -221,7 +222,8 @@ func (h *productHandler) keepAssistant(user accounts.User, sessionToken string) 
 // authenticate grants a local console session, which never expires on its
 // own, only to a direct loopback connection that asked for one. The Kiosk and
 // SSH tunnels connect directly; the LAN entry (Caddy, ADR 0012) always adds
-// X-Forwarded-For, so LAN browsers get ordinary sessions.
+// X-Forwarded-For, so LAN browsers get ordinary sessions, and so do internet
+// browsers, which arrive on a listener of their own (ADR 0032).
 func (h *productHandler) authenticate(r *http.Request, username, password string, localConsole bool) (accounts.Session, error) {
 	ctx := withClientOrigin(r)
 	if localConsole && directLoopback(r) {
@@ -231,6 +233,9 @@ func (h *productHandler) authenticate(r *http.Request, username, password string
 }
 
 func directLoopback(r *http.Request) bool {
+	if _, internet := webentry.Internet(r); internet {
+		return false
+	}
 	if r.Header.Get("Forwarded") != "" || r.Header.Get("X-Forwarded-For") != "" || !localorigin.LoopbackHost(r.Host) {
 		return false
 	}
@@ -245,8 +250,8 @@ func (h *productHandler) handleDeleteSession(w http.ResponseWriter, r *http.Requ
 	if h.AssistantKeeper != nil {
 		h.AssistantKeeper.Forget(token)
 	}
-	//nolint:gosec // G124: the LAN entry is plain HTTP (ADR 0012), where a Secure cookie would not be sent.
-	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	//nolint:gosec // G124: Secure only through the internet entry; the LAN entry is plain HTTP (ADR 0012).
+	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: overHTTPS(r)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -283,16 +288,24 @@ func (h *productHandler) clientSession(r *http.Request) (accounts.Session, strin
 // maxCookieLifetime is the longest cookie lifetime Chromium honours.
 const maxCookieLifetime = 400 * 24 * time.Hour
 
-func (h *productHandler) setSessionCookie(w http.ResponseWriter, session accounts.Session) {
+func (h *productHandler) setSessionCookie(w http.ResponseWriter, r *http.Request, session accounts.Session) {
 	expires := session.ExpiresAt
 	if session.LocalConsole() {
 		expires = time.Now().Add(maxCookieLifetime)
 	}
-	//nolint:gosec // G124: the LAN entry is plain HTTP (ADR 0012), where a Secure cookie would not be sent.
+	//nolint:gosec // G124: Secure only through the internet entry; the LAN entry is plain HTTP (ADR 0012).
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Value: session.Token, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteStrictMode, Expires: expires,
+		SameSite: http.SameSiteStrictMode, Expires: expires, Secure: overHTTPS(r),
 	})
+}
+
+// overHTTPS reports whether the browser reached the device over HTTPS, which
+// only the internet entry serves (ADR 0032); a Secure cookie would not come
+// back over the LAN entry's plain HTTP.
+func overHTTPS(r *http.Request) bool {
+	_, internet := webentry.Internet(r)
+	return internet
 }
 
 type sessionResponse struct {

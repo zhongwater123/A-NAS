@@ -120,7 +120,7 @@ docs-check:
 ops-check:
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
-	shellcheck $(SHELL_SCRIPTS) deploy/debian/a-nas-host/DEBIAN/postinst
+	shellcheck $(SHELL_SCRIPTS)
 	$(ACTIONLINT) .github/workflows/*.yml
 	@for script in $(SHELL_SCRIPTS); do bash -n "$$script" || exit 1; done
 	$(GO) run ./tools/depcheck

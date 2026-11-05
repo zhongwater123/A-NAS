@@ -320,6 +320,18 @@ describe("Settings terminal", () => {
     await user.click(screen.getByRole("button", { name: "重新检查" }));
     await waitFor(() => expect(terminal.sent.checks).toBe(2));
   });
+
+  it("says the terminal opens only on the LAN or the device's screen when reached from the internet", async () => {
+    serve();
+    server.use(...terminalHandlers(true, true).handlers);
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "终端");
+
+    expect(await screen.findByRole("heading", { name: "外网访问时不能使用终端" })).toBeTruthy();
+    expect(screen.queryByTestId("xterm-session")).toBeNull();
+    expect(xterm.mounts).toBe(0);
+  });
 });
 
 describe("ADR 0008 account safeguards", () => {

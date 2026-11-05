@@ -43,7 +43,7 @@
    ip -brief link show dev "$smb_interface"
 
    # 有本机屏幕的设备连同 a-nas-console 一起装；没有屏幕的只装 a-nas-host。
-   apt install --no-install-recommends "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
+   apt install --no-install-recommends --allow-downgrades "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
    "$source_release/install-v1.0.1-system-services.sh" \
      "$source_release" "$release_id" "$smb_interface"
    ```
@@ -54,6 +54,8 @@
    test -x /opt/a-nas/current/kiosk-launcher
    systemctl show -p User --value anas-kiosk@tty1.service   # a-nas-kiosk
    ```
+
+两个包的版本只用来标明 release，不表示先后：未打标签的提交按哈希排序，打过标签之后的提交也都排在该标签之前，所以 apt 可能把升级列为 `DOWNGRADED`。安装器只核对版本是否等于本 release 的版本，因此安装时一律带 `--allow-downgrades`；不带它时，交互式的 `apt install` 要再确认一次，带 `-y` 的则直接失败。
 
 安装器会切换系统服务并由 Host Agent 幂等修复现有卷的目录和 ACL；它不会重新分区或格式化已经挂载的数据盘。已安装 Caddy 时，安装器同时校验并更新局域网 Web 入口，见[启用局域网 Web 访问](enable-lan-web-access.md)。如果哈希、挂载或网卡核对失败，立即停止。
 
@@ -85,7 +87,7 @@ smb_interface=enp2s0
 
 # 若 apt 失败，停止，不进入格式化流程。
 apt-get update
-apt-get install --no-install-recommends "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
+apt-get install --no-install-recommends --allow-downgrades "$source_release/a-nas-host.deb" "$source_release/a-nas-console.deb"
 
 readlink -f /opt/a-nas/current
 ip -brief link
@@ -94,7 +96,7 @@ ip -brief link
   "$source_release" "$release_id" "$smb_interface"
 ```
 
-宿主机需要的 Debian 软件包由 release 中的 `a-nas-host` 声明，本地控制台的由 `a-nas-console` 声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），例如影视中心 FFmpeg Worker 用的 Debian FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）与文件管理 HEIC/HEIF 预览用的 libheif。安装器在 `a-nas-host` 没有安装或不是本 release 的版本，或者已安装的 `a-nas-console` 不是本 release 的版本时，以退出码 3 结束而不改变系统，并打印要执行的 `apt install` 命令。安装 `a-nas-host` 时，若局域网接口由 ifupdown 管理，它会启用 `ifupdown-wait-online.service`，smbd 因此在接口拿到 DHCP 地址之后才启动，重启后不再只监听回环。
+宿主机需要的 Debian 软件包由 release 中的 `a-nas-host` 声明，本地控制台的由 `a-nas-console` 声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），例如影视中心 FFmpeg Worker 用的 Debian FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）与文件管理 HEIC/HEIF 预览用的 libheif。安装器在 `a-nas-host` 没有安装或不是本 release 的版本，或者已安装的 `a-nas-console` 不是本 release 的版本时，以退出码 3 结束而不改变系统，并打印要执行的 `apt install` 命令。smbd 只监听启动时已有的地址，所以安装器为它写入 `/etc/systemd/system/smbd.service.d/a-nas-lan-address.conf`：smbd 等 `$smb_interface` 有了 IPv4 地址才启动，每次最多等 20 秒，等不到就 5 秒后再试；重启后它不再只监听回环（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。安装时 smbd 若已在运行，这项配置在它下次启动时生效；没有运行且接口还没有地址时，安装器照常完成，最后提示 smbd 尚未启动。
 
 完成标准：`dpkg-query -W a-nas-host` 显示本 release 的版本；`/opt/a-nas/current` 指向 root 所有的目标 release；`anas-host-agent`、`anas-photos` 与 `anas-api` 均 active，`anas-ffmpeg.socket` 已启用且 `/run/a-nas-ffmpeg/ffmpeg.sock` 为 `root:a-nas-photos 0660`，安装器没有以退出码 5 结束；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
 

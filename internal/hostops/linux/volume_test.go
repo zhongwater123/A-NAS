@@ -114,6 +114,10 @@ func TestCreatingTheVolumeContinuesAfterTheHostAgentStopsInAnyStep(t *testing.T)
 				t.Fatalf("operation after the restart = %+v, %v; want interrupted in %s", operation, err, test.step)
 			}
 			host.abandon()
+			// Unlike a stopped process, the first executor still records the
+			// kill in the journal. Waiting for it keeps that write out of the
+			// retry and out of the test's directories while they are removed.
+			host.finish(t, first, "plan:cut")
 			if (host.mounted != nil) != test.mounted {
 				t.Fatalf("mounted = %+v, want mounted %v", host.mounted, test.mounted)
 			}
