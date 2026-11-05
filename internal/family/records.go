@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -530,16 +531,9 @@ func (s *Store) check(ctx context.Context, actor Actor, baby Baby, input RecordI
 	if input.Kind == KindPhotos {
 		date = ""
 		for _, photo := range c.photos {
-			if photo.TakenAt != nil {
-				local := photo.TakenAt.In(time.Local)
-				day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC).Format(dateLayout)
-				if date == "" || day < date {
-					date = day
-				}
+			if day := photoDay(photo, today); date == "" || day < date {
+				date = day
 			}
-		}
-		if date == "" {
-			date = today.Format(dateLayout)
 		}
 	}
 	day, ok := parseDate(date)
@@ -553,6 +547,45 @@ func (s *Store) check(ctx context.Context, actor Actor, baby Baby, input RecordI
 	return c, nil
 }
 
+// photoDay is the day a photo was taken, in the device's time zone, or the
+// day it was uploaded when it does not say. A camera whose clock runs ahead
+// files its photos under today.
+func photoDay(photo Photo, today time.Time) string {
+	at := photo.TakenAt
+	if at == nil && !photo.ImportedAt.IsZero() {
+		at = &photo.ImportedAt
+	}
+	day := today.Format(dateLayout)
+	if at != nil {
+		day = min(day, at.In(time.Local).Format(dateLayout))
+	}
+	return day
+}
+
+// byDay splits a checked photo record into one record per day its photos
+// were taken, the latest day first, leaving out the photos in skip. Each
+// record keeps the text.
+func (s *Store) byDay(c checked, skip map[string]bool) []checked {
+	today := s.today()
+	days := map[string]*checked{}
+	for i, photo := range c.photos {
+		if skip[photo.ID] {
+			continue
+		}
+		day := photoDay(photo, today)
+		if days[day] == nil {
+			days[day] = &checked{input: c.input, occurredOn: day}
+		}
+		days[day].photos = append(days[day].photos, photo)
+		days[day].roles = append(days[day].roles, c.roles[i])
+	}
+	records := make([]checked, 0, len(days))
+	for _, day := range slices.Backward(slices.Sorted(maps.Keys(days))) {
+		records = append(records, *days[day])
+	}
+	return records
+}
+
 func roundTo(value *float64, scale float64) sql.NullInt64 {
 	if value == nil {
 		return sql.NullInt64{}
@@ -560,9 +593,11 @@ func roundTo(value *float64, scale float64) sql.NullInt64 {
 	return sql.NullInt64{Int64: int64(math.Round(*value * scale)), Valid: true}
 }
 
-// AddRecord adds a record to a baby's channel. A photo record may also go
-// into the channels of other babies, as a record of its own in each. A
-// request repeated with the same RequestKey returns the first record.
+// AddRecord adds a record to a baby's channel. A photo record leaves out
+// photos already in the cloud album and becomes one record per day its
+// photos were taken; it may also go into the channels of other babies, the
+// same way. The result is the latest record in babyID's channel, which a
+// request repeated with the same RequestKey returns again.
 func (s *Store) AddRecord(ctx context.Context, actor Actor, babyID string, input RecordInput) (Record, error) {
 	if _, _, err := s.requireMember(ctx, s.db, actor); err != nil {
 		return Record{}, err
@@ -599,13 +634,27 @@ func (s *Store) AddRecord(ctx context.Context, actor Actor, babyID string, input
 			targets = append(targets, other)
 		}
 		for i, target := range targets {
-			key := sql.NullString{String: input.RequestKey, Valid: input.RequestKey != "" && i == 0}
-			recordID, err := s.insertRecord(ctx, tx, actor, target, c, key)
-			if err != nil {
-				return err
+			records := []checked{c}
+			if input.Kind == KindPhotos {
+				in, err := inAlbum(ctx, tx, target, input.Photos)
+				if err != nil {
+					return err
+				}
+				records = s.byDay(c, in)
 			}
-			if i == 0 {
-				id = recordID
+			if len(records) == 0 && i == 0 {
+				return ErrInChannel
+			}
+			for j, record := range records {
+				first := i == 0 && j == 0
+				key := sql.NullString{String: input.RequestKey, Valid: input.RequestKey != "" && first}
+				recordID, err := s.insertRecord(ctx, tx, actor, target, record, key)
+				if err != nil {
+					return err
+				}
+				if first {
+					id = recordID
+				}
 			}
 		}
 		return nil

@@ -41,6 +41,8 @@ export interface WindowIntentPayloads {
   files: TransferLocation;
   // A photo another window names, such as one the assistant found.
   photos: { assetId: string };
+  // A baby's channel that photos from 相册 joined.
+  family: { babyId: string };
   // The App Center's 在 Docker 中查看 opens Docker on that app's containers.
   docker: { project: string };
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
@@ -243,13 +245,14 @@ const definitions = {
     lightTitle: true,
     bounds: { x: 250, y: 64, width: 960, height: 660 },
     launcher: { id: "photos", keywords: "照片 图片 图库 photo" },
-    render: ({ session, isAdmin, intents, intentHandled }) => (
+    render: ({ session, isAdmin, intents, intentHandled, open }) => (
       <PhotosPanel
         userId={session.user.id}
         userName={displayName(session.user)}
         isAdmin={isAdmin}
         intent={intents.photos}
         onIntentHandled={(handled) => intentHandled("photos", handled)}
+        onOpenFamily={(babyId) => open("family", { babyId })}
       />
     ),
   },
@@ -279,8 +282,13 @@ const definitions = {
     tone: "family",
     bounds: { x: 200, y: 44, width: 1120, height: 730 },
     launcher: { id: "family", keywords: "家庭 宝宝 成长 疫苗 身高 体重 大事记 亲友 family baby" },
-    render: ({ session, open }) => (
-      <FamilyPanel userId={session.user.id} onShowPhoto={(assetId) => open("photos", { assetId })} />
+    render: ({ session, open, intents, intentHandled }) => (
+      <FamilyPanel
+        userId={session.user.id}
+        onShowPhoto={(assetId) => open("photos", { assetId })}
+        intent={intents.family}
+        onIntentHandled={(handled) => intentHandled("family", handled)}
+      />
     ),
   },
   assistant: {

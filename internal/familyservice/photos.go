@@ -48,7 +48,8 @@ func (p Photos) Lookup(ctx context.Context, actor family.Actor, ids []string) (m
 	}
 	found := make(map[string]family.Photo, len(items))
 	for _, item := range items {
-		found[item.Asset.ID] = family.Photo{ID: item.Asset.ID, TakenAt: item.Asset.TakenAt, Video: item.Asset.Video != nil, Shared: item.Shared}
+		found[item.Asset.ID] = family.Photo{ID: item.Asset.ID, TakenAt: item.Asset.TakenAt, ImportedAt: item.Asset.ImportedAt,
+			Video: item.Asset.Video != nil, Shared: item.Shared}
 	}
 	return found, nil
 }

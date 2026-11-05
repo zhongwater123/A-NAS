@@ -126,6 +126,10 @@ export const getAlbum = (babyId: string, cursor = "") =>
       params: { path: { babyId }, query: cursor ? { cursor } : {} },
     }),
   );
+// albumContains says which of up to 500 photos a baby's album has already.
+export const albumContains = async (babyId: string, assetIds: string[]) =>
+  (await call(client.POST("/api/v1/family/babies/{babyId}/album/contains", { ...baby(babyId), body: { assetIds } })))
+    .assetIds;
 export const getGrowth = (babyId: string) => call(client.GET("/api/v1/family/babies/{babyId}/growth", baby(babyId)));
 export const getVaccines = (babyId: string) =>
   call(client.GET("/api/v1/family/babies/{babyId}/vaccines", baby(babyId)));
@@ -163,6 +167,7 @@ const familyMessages: Record<string, string> = {
   not_family_member: "加入家庭后才能看到这里",
   forbidden: "只有家长或添加它的人可以这样做",
   last_guardian: "家庭里至少要有一位家长，请先把另一位家人设为家长",
+  already_in_channel: "这些照片都已在频道中",
   changed: "已经有人先保存了修改，请关闭后重新打开再改",
   conflict: "这和现有的内容冲突，例如这个大事记已经配过说明，或有记录早于新的出生日",
   validation_failed: "填写的内容不符合要求，请检查日期和数值",

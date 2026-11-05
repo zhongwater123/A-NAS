@@ -120,6 +120,7 @@ paths:
   /api/v1/family/babies/{babyId}/recordings: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1recordings" }
   /api/v1/family/babies/{babyId}/trash: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1trash" }
   /api/v1/family/babies/{babyId}/album: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1album" }
+  /api/v1/family/babies/{babyId}/album/contains: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1album~1contains" }
   /api/v1/family/babies/{babyId}/growth: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1growth" }
   /api/v1/family/babies/{babyId}/vaccines: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1vaccines" }
   /api/v1/family/babies/{babyId}/vaccine-plan: { $ref: "paths/family.yaml#/~1api~1v1~1family~1babies~1{babyId}~1vaccine-plan" }

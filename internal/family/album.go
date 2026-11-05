@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
 // cursorKey continues a listing after an item: its sort time and ID.
@@ -167,4 +169,61 @@ func monthOfLife(birth time.Time, taken *time.Time, added time.Time) int {
 		return -1
 	}
 	return age.TotalMonths
+}
+
+// MaxAlbumContains bounds the photos one AlbumContains asks about.
+const MaxAlbumContains = 500
+
+// AlbumContains returns, in the order asked, those of assetIDs that are in a
+// baby's cloud album, so a picker can mark them: a photo record leaves them
+// out.
+func (s *Store) AlbumContains(ctx context.Context, actor Actor, babyID string, assetIDs []string) ([]string, error) {
+	if _, _, err := s.requireMember(ctx, s.db, actor); err != nil {
+		return nil, err
+	}
+	if _, err := s.baby(ctx, s.db, babyID); err != nil {
+		return nil, err
+	}
+	if len(assetIDs) > MaxAlbumContains {
+		return nil, ErrInvalid
+	}
+	in, err := inAlbum(ctx, s.db, babyID, assetIDs)
+	if err != nil {
+		return nil, err
+	}
+	found := []string{}
+	for _, id := range assetIDs {
+		if in[id] {
+			found = append(found, id)
+			delete(in, id)
+		}
+	}
+	return found, nil
+}
+
+// inAlbum is the set of ids in a baby's cloud album: photos of its records
+// outside the trash, other than vaccination certificates.
+func inAlbum(ctx context.Context, q queryer, babyID string, ids []string) (map[string]bool, error) {
+	in := map[string]bool{}
+	if len(ids) == 0 {
+		return in, nil
+	}
+	args := []any{babyID}
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := q.QueryContext(ctx, `SELECT DISTINCT p.asset_id FROM record_photos p JOIN records r ON r.id = p.record_id
+WHERE r.baby_id = ? AND r.deleted_at IS NULL AND p.role = 'album' AND p.asset_id IN (`+sqlitedb.Placeholders(len(ids))+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		in[id] = true
+	}
+	return in, rows.Err()
 }

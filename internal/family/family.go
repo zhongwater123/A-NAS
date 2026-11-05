@@ -36,6 +36,9 @@ var (
 	ErrConflict = errors.New("conflicts with the current state")
 	// ErrLastGuardian refuses to leave the family without a guardian.
 	ErrLastGuardian = errors.New("the family needs at least one guardian")
+	// ErrInChannel refuses a photo record whose photos are all in the
+	// channel already.
+	ErrInChannel = errors.New("the photos are in the channel already")
 	// ErrPhotosUnavailable means the photo service could not answer, so
 	// nothing that depends on photos is written.
 	ErrPhotosUnavailable = errors.New("photos are unavailable")
