@@ -276,6 +276,14 @@ _Avoid_：桌面环境、无头预览、特权 UI
 NAS 上由 Caddy 在 80 端口以 HTTP 提供、转发到只监听回环的产品服务的局域网访问点；未安装 Caddy 时不存在。
 _Avoid_：公网访问、远程访问、直接开放产品服务
 
+**互联网入口（Internet Entry）**：
+从互联网以 `https://<域名>` 访问 Web 桌面的入口：公网的 443 经边缘服务器原样转发到 NAS 主动建立的 WireGuard 隧道，由 NAS 上的 Caddy 终止 HTTPS，再交给产品服务专用的回环端口。经它的会话只在它上面有效，不能打开终端（[ADR 0032](docs/adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)）。设备上没有 `/etc/a-nas/internet.env` 时不存在。
+_Avoid_：内网穿透、端口映射、远程访问（不区分入口时）
+
+**边缘服务器（Edge Relay）**：
+IT 映射公网 IP、NAS 主动连接的中转主机。它只按域名转发 TLS 连接并附加客户端地址，不持有证书、数据或账号，可以随时重建。
+_Avoid_：跳板机（那是堡垒机）、代理服务器、云主机（它在公司机房）
+
 **设备启用（Device Activation）**：
 尚无有效管理员时，由本地控制台收集首个账号和密码并创建 A-NAS 产品管理员的首次使用流程；它不要求用户取得初始化码，也不把产品管理员等同于 Linux root。
 _Avoid_：管理员初始化、setup code、root 登录
