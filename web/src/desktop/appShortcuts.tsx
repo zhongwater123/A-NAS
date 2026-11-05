@@ -45,26 +45,27 @@ export function useAppShortcuts(): AppShortcut[] {
 
 // shortcutApp is an installed app on the desktop and in the launcher. It
 // opens the app's own web interface in a new window; a stopped app says so,
-// and onStopped (Docker, for administrators) shows why.
+// and onStopped (Docker, for administrators) shows why. Through the internet
+// entry the app's port cannot be reached, so the app says it opens only on
+// the LAN (ADR 0032).
 export function shortcutApp(shortcut: AppShortcut, onStopped?: () => void): DesktopApp {
   const stopped = shortcut.running === 0;
+  const url = appURL(shortcut);
+  const lanOnly = !stopped && !url;
   return {
     id: `app:${shortcut.id}`,
     label: shortcut.title,
     ariaLabel: stopped
       ? `${shortcut.title}，没有在运行${onStopped ? "，在 Docker 中查看" : ""}`
-      : `打开 ${shortcut.title}（新窗口）`,
+      : lanOnly
+        ? `${shortcut.title}，只能在局域网中打开`
+        : `打开 ${shortcut.title}（新窗口）`,
     keywords: `应用 第三方 ${shortcut.id} ${shortcut.webPort}`,
     tone: "app",
     icon: <ShortcutIcon shortcut={shortcut} />,
-    unavailable: stopped,
-    note: stopped ? "未运行" : undefined,
-    onClick: stopped
-      ? onStopped
-      : () => {
-          const url = appURL(shortcut);
-          if (url) window.open(url, "_blank", "noopener,noreferrer");
-        },
+    unavailable: stopped || lanOnly,
+    note: stopped ? "未运行" : lanOnly ? "仅局域网" : undefined,
+    onClick: stopped ? onStopped : url ? () => window.open(url, "_blank", "noopener,noreferrer") : undefined,
   };
 }
 

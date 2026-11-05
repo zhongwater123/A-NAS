@@ -3758,7 +3758,7 @@ export interface paths {
         };
         /**
          * Upgrade to a WebSocket bridged to a login shell on a new PTY
-         * @description Only loopback peers (the local console, or the LAN entry proxying a LAN browser) whose Host names this device by localhost or IP address and whose browser Origin is the same origin are accepted. Binary frames carry raw terminal input and output. The only client text frame is `{"type":"resize","cols":N,"rows":N}` with both values between 1 and 1000. When the shell exits the server closes with status 1000 and reason `exit <code>`; other endings use 1001.
+         * @description Only loopback peers (the local console, or the LAN entry proxying a LAN browser) whose Host names this device by localhost or IP address and whose browser Origin is the same origin are accepted; the internet entry is refused with `terminal_internet`. Binary frames carry raw terminal input and output. The only client text frame is `{"type":"resize","cols":N,"rows":N}` with both values between 1 and 1000. When the shell exits the server closes with status 1000 and reason `exit <code>`; other endings use 1001.
          */
         get: operations["openTerminalSession"];
         put?: never;
@@ -6454,6 +6454,8 @@ export interface components {
         };
         TerminalStatusResponse: {
             enabled: boolean;
+            /** @description Present and true when the request came through the internet entry (ADR 0032), which never opens terminal sessions. */
+            internet?: boolean;
         };
         FeedbackItem: {
             id: string;
@@ -14754,7 +14756,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["ProductError"];
-            /** @description The terminal is disabled or the request did not come through this device's Web entry. */
+            /** @description The terminal is disabled, the request came through the internet entry, or it did not come through this device's Web entry. */
             403: {
                 headers: {
                     [name: string]: unknown;

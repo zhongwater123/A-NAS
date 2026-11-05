@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,7 +14,9 @@ import (
 
 // Signing in is bounded in three ways (#175). A client that keeps failing
 // waits before each further attempt, so it can neither guess passwords
-// without limit nor fill the audit log with failures. At most
+// without limit nor fill the audit log with failures. Through the internet
+// entry an account that keeps failing makes every internet client wait for
+// it, so guesses spread over many addresses are bounded too (ADR 0032). At most
 // passwordChecks argon2id computations run at once, each holding its
 // PasswordCost in memory. And an attempt for an account that cannot sign in
 // spends one password check all the same, so its timing does not tell
@@ -48,8 +51,11 @@ const (
 	// doubling up to maxWait.
 	freeNameFailures   = 5
 	freeClientFailures = 20
-	firstWait          = 30 * time.Second
-	maxWait            = 15 * time.Minute
+	// An account may fail freeInternetFailures times in a row through the
+	// internet entry, from all its clients together.
+	freeInternetFailures = 10
+	firstWait            = 30 * time.Second
+	maxWait              = 15 * time.Minute
 	// A client's failures are forgotten forgetAfter after its last one, and
 	// at most maxTrackedFailures are kept.
 	forgetAfter        = 24 * time.Hour
@@ -57,8 +63,9 @@ const (
 )
 
 // signInFailures counts consecutive failed sign-ins per client and per
-// client and account name. Clients are what sessions are bound to: the
-// direct loopback connection, or the LAN address (an IPv6 client's /64).
+// client and account name, and per account name through the internet entry.
+// Clients are the direct loopback connection, a LAN address or an internet
+// address (an IPv6 client's /64; ClientOrigin.throttleClient).
 type signInFailures struct {
 	mu      sync.Mutex
 	records map[string]*failureRecord
@@ -114,14 +121,27 @@ func failureKeys(client, username string) (byName, byClient string) {
 	return client + "\x00" + string(digest[:]), client
 }
 
+// failureCounters are the counters an attempt by client for username counts
+// in, each with the failures it allows before waits begin. Internet clients
+// also count in their name's internet counter, which the local console and
+// LAN clients never wait for, so a guesser cannot lock an account there.
+func failureCounters(client, username string) map[string]int {
+	byName, byClient := failureKeys(client, username)
+	counters := map[string]int{byName: freeNameFailures, byClient: freeClientFailures}
+	if strings.HasPrefix(client, ViaInternet+":") {
+		byInternetName, _ := failureKeys(ViaInternet, username)
+		counters[byInternetName] = freeInternetFailures
+	}
+	return counters
+}
+
 // wait returns how long the client must still wait before it may try the
 // name, or zero.
 func (f *signInFailures) wait(now time.Time, client, username string) time.Duration {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var wait time.Duration
-	byName, byClient := failureKeys(client, username)
-	for _, key := range []string{byName, byClient} {
+	for key := range failureCounters(client, username) {
 		if record := f.records[key]; record != nil {
 			wait = max(wait, record.until.Sub(now))
 		}
@@ -136,8 +156,7 @@ func (f *signInFailures) failed(now time.Time, client, username string) {
 	if f.records == nil {
 		f.records = map[string]*failureRecord{}
 	}
-	byName, byClient := failureKeys(client, username)
-	for key, free := range map[string]int{byName: freeNameFailures, byClient: freeClientFailures} {
+	for key, free := range failureCounters(client, username) {
 		record := f.records[key]
 		if record == nil {
 			f.makeRoom(now)
@@ -158,7 +177,9 @@ func (f *signInFailures) failed(now time.Time, client, username string) {
 	}
 }
 
-// succeeded forgets the failures that a successful sign-in ends.
+// succeeded forgets the failures that a successful sign-in ends. A name's
+// internet counter is left to be forgotten a day after its last failure:
+// the owner signing in must not give a guesser elsewhere a fresh start.
 func (f *signInFailures) succeeded(client, username string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

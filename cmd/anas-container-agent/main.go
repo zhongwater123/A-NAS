@@ -142,10 +142,12 @@ func configuredAppStore(config config) (*engine.Store, error) {
 	}
 	stateDir := config.StateDir
 	policy := appstore.Policy{
-		AppDataRoot:   config.AppDataRoot,
-		DataRoot:      config.SharedDataRoot,
-		TZ:            config.TZ,
-		ReservedPorts: []uint16{8080},
+		AppDataRoot: config.AppDataRoot,
+		DataRoot:    config.SharedDataRoot,
+		TZ:          config.TZ,
+		// The Product Service's listeners: the main one and the internet
+		// entry's (ADR 0032), reserved whether or not that entry is on.
+		ReservedPorts: []uint16{8080, 8081},
 	}
 	for _, root := range []string{policy.AppDataRoot, policy.DataRoot, stateDir} {
 		if !filepath.IsAbs(root) {

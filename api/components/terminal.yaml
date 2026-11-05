@@ -6,3 +6,8 @@ schemas:
     properties:
       enabled:
         type: boolean
+      internet:
+        type: boolean
+        description: >-
+          Present and true when the request came through the internet entry (ADR 0032), which never opens
+          terminal sessions.

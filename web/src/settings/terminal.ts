@@ -5,10 +5,13 @@ export const terminalSessionPath = "/api/v1/terminal/session";
 
 export type SessionStatus = { state: "connecting" } | { state: "connected" } | { state: "ended"; exitCode?: number };
 
-export async function readTerminalEnabled(signal?: AbortSignal): Promise<boolean> {
+// readTerminalAvailability says whether the terminal can be opened from here:
+// it may be turned off, and the internet entry never offers it (ADR 0032).
+export async function readTerminalAvailability(signal?: AbortSignal): Promise<"enabled" | "disabled" | "internet"> {
   const data = await call(client.GET("/api/v1/terminal", { signal }));
   if (!data) throw new APIError(200, "malformed_response");
-  return data.enabled;
+  if (data.internet) return "internet";
+  return data.enabled ? "enabled" : "disabled";
 }
 
 export function terminalSessionURL(location: Pick<Location, "protocol" | "host"> = window.location): string {

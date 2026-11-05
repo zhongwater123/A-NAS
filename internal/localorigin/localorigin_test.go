@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
+	"github.com/zhongwater123/A-NAS/internal/webentry"
 )
 
 func TestLoopbackHost(t *testing.T) {
@@ -76,5 +77,33 @@ func TestCheckWrite(t *testing.T) {
 				t.Fatalf("CheckWrite() = %v, want %v", err, test.want)
 			}
 		})
+	}
+}
+
+func TestCheckWriteAcceptsTheInternetDomainOnlyOnTheInternetEntry(t *testing.T) {
+	write := func(host, origin string, entry bool) error {
+		var err error
+		check := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { err = localorigin.CheckWrite(r) })
+		handler := http.Handler(check)
+		if entry {
+			handler = webentry.InternetHandler("nas.example.com", check)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/containers/x/actions", nil)
+		request.Host = host
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Origin", origin)
+		handler.ServeHTTP(httptest.NewRecorder(), request)
+		return err
+	}
+	if err := write("nas.example.com", "https://nas.example.com", true); err != nil {
+		t.Fatalf("internet entry, its domain: %v", err)
+	}
+	if err := write("nas.example.com", "https://attacker.example", true); !errors.Is(err, localorigin.ErrOrigin) {
+		t.Fatalf("internet entry, another origin: %v, want ErrOrigin", err)
+	}
+	// On the main listener the domain is just another name, as a rebound page
+	// would send.
+	if err := write("nas.example.com", "http://nas.example.com", false); !errors.Is(err, localorigin.ErrHost) {
+		t.Fatalf("main listener, the domain: %v, want ErrHost", err)
 	}
 }

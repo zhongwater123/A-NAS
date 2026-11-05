@@ -84,6 +84,29 @@ func TestConfigResolvesEachModesAdaptersAndRefusesDevelopmentOnesOnANAS(t *testi
 		{name: "LAN address", environment: with(agent, "ANAS_HTTP_ADDR", "192.168.1.20:8080"), wantError: []string{"ANAS_HTTP_ADDR must be a loopback address"}},
 		{name: "host name", environment: with(fake, "ANAS_HTTP_ADDR", "localhost:8080"), wantError: []string{"ANAS_HTTP_ADDR must be a loopback address"}},
 		{name: "no port", environment: with(fake, "ANAS_HTTP_ADDR", "127.0.0.1"), wantError: []string{"ANAS_HTTP_ADDR must be a loopback address"}},
+		{name: "no internet entry", environment: agent, check: func(t *testing.T, c Config) {
+			if c.InternetHTTPAddr != "" || c.InternetHost != "" {
+				t.Fatalf("internet entry = %q for %q", c.InternetHTTPAddr, c.InternetHost)
+			}
+		}},
+		{name: "internet entry", environment: with(agent, "ANAS_INTERNET_HTTP_ADDR", "127.0.0.1:8081", "ANAS_INTERNET_HOST", " NAS.Example.com "), check: func(t *testing.T, c Config) {
+			if c.InternetHTTPAddr != "127.0.0.1:8081" || c.InternetHost != "nas.example.com" {
+				t.Fatalf("internet entry = %q for %q", c.InternetHTTPAddr, c.InternetHost)
+			}
+		}},
+		{name: "internationalized internet domain", environment: with(agent, "ANAS_INTERNET_HTTP_ADDR", "127.0.0.1:8081", "ANAS_INTERNET_HOST", "云盘.例子.cn"), check: func(t *testing.T, c Config) {
+			if c.InternetHost != "xn--9kqv59g.xn--fsqu00a.cn" {
+				t.Fatalf("internet host = %q", c.InternetHost)
+			}
+		}},
+		{name: "internet listener without a domain", environment: with(agent, "ANAS_INTERNET_HTTP_ADDR", "127.0.0.1:8081"), wantError: []string{"set both or neither"}},
+		{name: "internet domain without a listener", environment: with(agent, "ANAS_INTERNET_HOST", "nas.example.com"), wantError: []string{"set both or neither"}},
+		{name: "internet listener on every interface", environment: with(agent, "ANAS_INTERNET_HTTP_ADDR", "0.0.0.0:8081", "ANAS_INTERNET_HOST", "nas.example.com"), wantError: []string{"ANAS_INTERNET_HTTP_ADDR must be a loopback address"}},
+		{name: "internet listener shared with the LAN", environment: with(agent, "ANAS_INTERNET_HTTP_ADDR", "127.0.0.1:8080", "ANAS_INTERNET_HOST", "nas.example.com"), wantError: []string{"must differ from ANAS_HTTP_ADDR"}},
+		{name: "internet entry named by address", environment: with(agent, "ANAS_INTERNET_HTTP_ADDR", "127.0.0.1:8081", "ANAS_INTERNET_HOST", "203.0.113.40"), wantError: []string{"ANAS_INTERNET_HOST must be the domain"}},
+		{name: "internet entry named by a single label", environment: with(agent, "ANAS_INTERNET_HTTP_ADDR", "127.0.0.1:8081", "ANAS_INTERNET_HOST", "localhost"), wantError: []string{"ANAS_INTERNET_HOST must be the domain"}},
+		{name: "internet entry named with an invalid label", environment: with(agent, "ANAS_INTERNET_HTTP_ADDR", "127.0.0.1:8081", "ANAS_INTERNET_HOST", "nas_box.example.com"), wantError: []string{"ANAS_INTERNET_HOST must be the domain"}},
+		{name: "internet entry named with a port", environment: with(agent, "ANAS_INTERNET_HTTP_ADDR", "127.0.0.1:8081", "ANAS_INTERNET_HOST", "nas.example.com:443"), wantError: []string{"ANAS_INTERNET_HOST must be the domain"}},
 		{name: "relative state directory", environment: with(fake, "ANAS_STATE_DIR", "state"), wantError: []string{"ANAS_STATE_DIR must be an absolute path"}},
 		{name: "relative sockets", environment: with(agent, "ANAS_FILE_BROKER_SOCKET", "file-broker.sock", "ANAS_PHOTOS_SOCKET", "photos.sock"), wantError: []string{
 			"ANAS_FILE_BROKER_SOCKET must be an absolute path", "ANAS_PHOTOS_SOCKET must be an absolute path",
