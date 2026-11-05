@@ -85,12 +85,13 @@ SCREEN = ("上面是同一段视频按时间先后的几帧。问题：画面里
 # A part of the film for the planner's catalog, summed up from its cards' lines (#398): what
 # happens in it in order, the same said once, every different thing kept. Asked without a
 # penalty on repeats, a 2B model said one sentence over and over for case-01's dark rooms.
-PART = ("下面是一部影片里连续一段时间的 {n} 个镜头，按原片先后排列，每行一个：光线、画面描述、亮点。\n"
+PART = ("下面是一部影片里连续一段时间的 {n} 个镜头，按原片先后排列，每行一个：光线、画面描述、最突出的东西。\n"
         "{lines}\n\n"
         "写这一段的概述，给剪辑规划用：按先后写出现的地点、人物、物体、动作和事件，意思相同的合并成一条，意思不同的都要留下，"
         "尤其是只出现一次的特别画面；只写镜头里有的，不要编，不要加括号注释。不超过 {chars} 个字，直接写概述。")
-# What a 2B copies from its input into a summary all the same: highlight notes and card ids.
-COPIED = re.compile(r"[（(](?:亮点[:：][^）)]*|\d+-\d+-\d+[^）)]*)[）)]")
+# What a 2B copies from its input or its habits into a summary all the same: highlight notes,
+# card ids, and "these three pictures show".
+COPIED = re.compile(r"[（(](?:亮点[:：][^）)]*|\d+-\d+-\d+[^）)]*)[）)]|[，,]?\s*亮点(?:为|是|[:：])[^，。；,;]*|三张(?:连续)?(?:图|画面)(?:展示|显示)?(?:了)?")
 PART_REPEAT = 1.15
 
 
@@ -143,7 +144,14 @@ class Vision:
         model went round in circles (looping), so that the part keeps its lines."""
         text = " ".join(self.ask(PART.format(n=len(lines), lines="\n".join(lines), chars=chars), [],
                                  int(chars * 1.6), repeat_penalty=PART_REPEAT).split())
-        return "" if looping(text) else COPIED.sub("", text)
+        if looping(text):
+            return ""
+        text = COPIED.sub("", text)
+        # Past chars by a fifth, cut at the last full stop before it: a 2B runs long.
+        if len(text) > chars * 1.2:
+            cut = max(text.rfind(p, 0, int(chars * 1.2)) for p in "。；")
+            text = text[:cut + 1] if cut > chars // 2 else text[:int(chars * 1.2)]
+        return text
 
     def describe(self, jpegs: list[bytes]) -> str:
         return self.ask(DESCRIBE, jpegs, 80).splitlines()[0].strip()

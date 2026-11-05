@@ -475,6 +475,7 @@ class MomentsTest(unittest.TestCase):
         self.assertFalse(look.looping("巨兽在废墟中移动" + named))
         self.assertTrue(look.looping("一名戴帽男子在黑暗中，手持手电筒，神情专注，" * 3))
         self.assertEqual(look.COPIED.sub("", "老人触摸机械（亮点：机器人与老人）。船舱（01-14-0、01-15-0）"), "老人触摸机械。船舱")
+        self.assertEqual(look.COPIED.sub("", "火箭喷射火焰，亮点为喷射火焰；三张图展示男子做手势"), "火箭喷射火焰；男子做手势")
 
     def test_parts_open_where_colour_and_light_change_most_near_each_minute(self):
         starts = [0, 20, 40, 52, 58, 63, 70, 90, 110, 118, 125, 140]

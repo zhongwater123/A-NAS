@@ -707,8 +707,7 @@ def parts(args):
     def told(card_id):
         """The card as the summary is asked about it: its light, caption and highlight, no id."""
         notes = index.notes.get(card_id, {})
-        return "，".join(x for x in (notes.get("light"), index.captions.get(card_id, ""),
-                                     f"亮点：{notes['highlight']}" if notes.get("highlight") else "") if x)
+        return "，".join(x for x in (notes.get("light"), index.captions.get(card_id, ""), notes.get("highlight")) if x)
 
     out = []
     for video in sorted(index.videos):
