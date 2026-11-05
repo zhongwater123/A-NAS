@@ -12,6 +12,26 @@
 
 ## 索引
 
+按主题列出，同一主题内按日期排列。
+
+### 文件与存储
+
+- [2026-10-13：文件管理的图片缩略图是否改用服务端生成](2026-10-13-file-manager-image-thumbnails.md)
+- [2026-10-21：FFmpeg Worker 的槽位、分层与内存上限](2026-10-21-ffmpeg-worker-slots-and-memory.md)
+
+### 相册
+
+- [2026-10-19：相册放视频，视频不参与 AI](2026-10-19-videos-in-the-photo-library.md)
+- [2026-10-20：相册视频实现时选的默认做法](2026-10-20-photo-video-defaults.md)
+
+### AI 助手
+
+- [2026-10-15：助手的回答提到 Hermes 的 `/help` 与上手引导怎么处理](2026-10-15-assistant-help-and-onboarding.md)
+
+### 设置与日志
+
+- [2026-10-22：活动记录保留多久](2026-10-22-activity-record-retention.md)
+
 ## 状态
 
 每篇的状态只写在标题下的“状态：”一行，索引不重复。状态以下列词开头：

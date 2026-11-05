@@ -28,11 +28,13 @@ const (
 
 	// Every session that continues earlier work reads CURRENT.md first
 	// (AGENTS.md). It had grown to 67 KB of merge and deploy history before
-	// #227 cut it to about 6 KB of current facts (#191). 12 KiB is twice
-	// that: room for a crowded week of open work, but it fails long before
-	// the page turns back into a journal that every session must read and
-	// every parallel branch conflicts on.
-	currentMaxBytes = 12 << 10
+	// #227 cut it to about 6 KB of current facts (#191), then grew back to
+	// 12 KB, mostly the story of decisions already made. Those moved to
+	// decision records, and the page became an index of about 8 KB. 10 KiB
+	// leaves room for a crowded week of open work, but fails long before the
+	// page turns back into a journal that every session must read and every
+	// parallel branch conflicts on.
+	currentMaxBytes = 10 << 10
 )
 
 var (
