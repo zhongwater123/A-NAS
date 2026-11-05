@@ -92,6 +92,10 @@
 
 在局域网 HTTP 浏览器上（不是 localhost）验收发送、接收、私聊与保存（[调查](../investigations/2026-10-16-member-sharing-http-send.md)），以及 #157 的并排窗口、接收者状态、按讨论合并的提醒和自己的消息不计未读；分别重启产品服务与 Host Agent 后分享重新可用（[调查](../investigations/2026-10-15-member-sharing-service-startup.md)）。
 
+### 网页搜索
+
+- 网站节奏与暂停（#364）：部署对应产品服务与搜索设置后，按[多账号节奏与资源验收](enable-web-search.md#多账号节奏与资源验收364)核对跨分类暂停、两名成员同时搜索、取消后的请求容量与缩略图加载，记录 512 MiB 下的内存峰值、压力和延迟（[调查](../investigations/2026-11-05-web-search-website-pacing.md)）。
+
 ### AI 助手（试用）
 
 - 冷启动、内存、多人同时使用与开启 simple quota 的影响（[#116](https://github.com/zhongwater123/A-NAS/issues/116)）。

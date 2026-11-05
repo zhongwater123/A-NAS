@@ -5096,12 +5096,12 @@ export interface components {
                 social: string[];
                 torrents: string[];
             };
-            /** @description The engines searches leave out since their site blocked them, the first to return first. */
+            /** @description The websites searches leave out after a block, the first to return first; sibling engines share a pause. */
             paused: components["schemas"]["WebSearchPausedEngine"][];
         };
-        /** @description An engine left out of searches after its site blocked it: for an hour, doubled with each block in a row up to a day, until it answers again. */
+        /** @description A website left out of searches after a block: for an hour, doubled on the next block after expiry up to a day. Concurrent answers do not extend or clear an active pause. */
         WebSearchPausedEngine: {
-            /** @description The name the window shows. */
+            /** @description The website name the window shows; the legacy field name is retained. */
             engine: string;
             /**
              * @description How the site blocked it: a CAPTCHA, access denied, too many requests, or a page the engine could not read, often a challenge it does not recognize.
@@ -5206,11 +5206,11 @@ export interface components {
             answers: components["schemas"]["WebSearchAnswer"][];
             infobox?: components["schemas"]["WebSearchInfobox"];
             suggestions: string[];
-            /** @description The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA). */
+            /** @description The tab's engines that did not answer; website blocks are reported under paused. */
             unresponsive: string[];
-            /** @description The engines this search left out because their site blocked them; all in the first update. */
+            /** @description Websites paused before or during this search, each reported once as the block becomes known. */
             paused: components["schemas"]["WebSearchPausedEngine"][];
-            /** @description The engines this search left out because they had been asked too often just before: each engine is asked a few times in a row, then every ten seconds, whoever searches. */
+            /** @description The engines this search left out because their website had been asked too often just before: each website is asked a few times in a row, then every ten seconds, whoever searches. */
             busy: string[];
             /** @description The engines still searching or waiting for their turn; 0 in the last update. */
             pending: number;

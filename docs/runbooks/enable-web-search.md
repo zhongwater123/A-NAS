@@ -61,6 +61,16 @@
    - 操作：重新运行一次安装器（同一 release 也可以），再执行 `systemctl is-active anas-search`。
    - 预期：仍为 `inactive`。重新打开开关后为 `active`。
 
+## 多账号节奏与资源验收（#364）
+
+前提：按本手册安装包含 #364 修复的 release；同时更新产品服务和 SearXNG 设置并重启，才能清掉 SearXNG 内存里的旧隐藏暂停。确认当前 release 与待验收提交一致。不要为了测试主动触发公网网站的验证码。
+
+1. 用 `systemctl show anas-search -p MemoryMax -p MemoryCurrent -p MemoryPeak -p NRestarts` 记录基线，确认 `MemoryMax=536870912`（512 MiB）。记录 `systemctl show -p ControlGroup --value anas-search` 对应 cgroup 中的 `memory.events` 和 `memory.pressure`；不修改资源上限。
+2. 两个成员分别登录。第一个成员开两个网页搜索窗口，先连搜三次，再改词、切图片分类并关闭旧窗口；第二个成员在其间搜索一个常见词。确认第二个成员能得到结果，第一人的排队请求取消后不再占未来轮次。每组之间至少间隔 30 秒，记录首批结果与完成时间。
+3. 同时打开有缩略图的结果页。确认缩略图能陆续加载；一轮结束后再次记录内存、压力、重启次数及 `journalctl -u anas-search -b -o cat` 的超时或 OOM 信息。不得把 Go 替身测试当成真实内存验收。
+4. 若自然遇到验证码或拒绝访问，确认结果和设置都显示网站名与恢复时间，切换该网站的其他分类仍显示同一个暂停；首次应为 1 小时，多个在途回答不延长它。升级前已有暂停时，核对其最晚恢复时间被保留。
+5. 完成标准：两个成员均能取得可用引擎的结果，缩略图能加载，取消旧搜索不导致新搜索连续超时，`oom`/`oom_kill` 与重启次数无增长；把实际内存峰值、压力增量和延迟写入 #364 的 PR。失败时保存这些证据，按下方回滚步骤处理，暂停关闭 issue。
+
 ## 验证
 
 - 服务连不上局域网：`nsenter -t "$(systemctl show -p MainPID --value anas-search)" -n` 不能用来验证，因为它不在私有网络命名空间中；改用系统测试中的替身（[`scripts/system-test-search.py`](../../scripts/system-test-search.py)），它在同一个单元的沙箱中报告每个地址是否被拒绝。
