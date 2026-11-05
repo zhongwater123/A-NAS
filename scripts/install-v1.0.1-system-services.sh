@@ -267,7 +267,9 @@ PY
     exit 2
   fi
   read -r relay_address tunnel_address <<<"$tunnel"
-  if [[ "$lan_entry" != true ]] || ! caddy list-modules 2>/dev/null | grep -qx 'caddy.listeners.proxy_protocol'; then
+  # grep reads the whole list: stopping at the match would leave caddy
+  # writing to a closed pipe, which pipefail reports as a failure.
+  if [[ "$lan_entry" != true ]] || ! caddy list-modules 2>/dev/null | grep -x 'caddy.listeners.proxy_protocol' >/dev/null; then
     echo "the internet entry needs Caddy 2.7 or newer from Caddy's own repository; install it first (docs/runbooks/enable-lan-web-access.md)" >&2
     exit 3
   fi

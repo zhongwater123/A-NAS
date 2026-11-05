@@ -1947,7 +1947,7 @@ through() {
 }
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 asks_for_https() {
-  through -f -D - -o /dev/null "$internet/healthz" | tr -d '\r' | grep -qix 'strict-transport-security: max-age=31536000'
+  through -f -D - -o /dev/null "$internet/healthz" | tr -d '\r' | grep -ix 'strict-transport-security: max-age=31536000' >/dev/null
 }
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 from_loopback() { # CURL_ARGUMENTS...: a request on the tunnel address that does not come from the relay

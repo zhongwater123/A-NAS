@@ -41,7 +41,9 @@ docker run --rm --privileged -v "$work:/out" -e PACKAGES="$packages" "$builder" 
   chroot /rootfs apt-get update -qq
   chroot /rootfs apt-get install -y -qq --no-install-recommends caddy >/out/caddy.log 2>&1 ||
     { tail -20 /out/caddy.log >&2; exit 1; }
-  chroot /rootfs caddy list-modules | grep -qx caddy.listeners.proxy_protocol
+  # Not grep -q: stopping at the match would leave caddy writing to a closed
+  # pipe, which pipefail reports as a failure (exit 141).
+  chroot /rootfs caddy list-modules | grep -x caddy.listeners.proxy_protocol >/dev/null
   rm -rf /rootfs/var/cache/apt/archives/*.deb
   tar -C /rootfs -czf /out/rootfs.tar.gz .
   chmod 0644 /out/rootfs.tar.gz'
