@@ -14,6 +14,7 @@ and dafeiyu.source.json.
 
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -100,9 +101,10 @@ def main(source, commit):
         "license": LICENSE_TERMS,
         "scope": "Non-commercial experiment only. Not MIT: dsh-pet's art is non-commercial with attribution and the character is CC BY-NC-SA 4.0. Do not ship in a commercial product without the rights holders' permission.",
     }
-    (OUT / "dafeiyu.source.json").write_text(
-        json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n"
-    )
+    text = json.dumps(record, indent=2, ensure_ascii=False)
+    # Number lists on one line, as the Web formatter (Biome) writes them.
+    text = re.sub(r"\[\s+(-?\d+(?:,\s+-?\d+)*)\s+\]", lambda m: "[" + re.sub(r",\s+", ", ", m.group(1)) + "]", text)
+    (OUT / "dafeiyu.source.json").write_text(text + "\n", encoding="utf-8", newline="\n")
 
 
 if __name__ == "__main__":

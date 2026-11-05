@@ -107,7 +107,7 @@ describe("a member's focus and todos on this device", () => {
     fireEvent.click(screen.getByRole("button", { name: "完成这条待办" }));
     fireEvent.mouseDown(screen.getByRole("tab", { name: "简单待办" }), { button: 0, ctrlKey: false });
     expect(screen.getByRole("checkbox", { name: "整理今天的笔记" })).toBeChecked();
-    expect(screen.queryByRole("button", { name: "找到躲起来的奶蛙" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "找到躲起来的大肥鱼" })).not.toBeInTheDocument();
   });
   it("still opens when the browser blocks access to localStorage itself", () => {
     vi.spyOn(window, "localStorage", "get").mockImplementation(() => {

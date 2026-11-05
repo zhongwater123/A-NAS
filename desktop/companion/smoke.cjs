@@ -17,7 +17,7 @@ async function run() {
     const page = await desktop.firstWindow();
     const errors = [];
     page.on("pageerror", (error) => errors.push(String(error)));
-    await page.getByRole("button", { name: "奶蛙更多操作" }).waitFor();
+    await page.getByRole("button", { name: "大肥鱼更多操作" }).waitFor();
     const preferences = await desktop.evaluate(({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows()[0];
       const prefs = window.webContents.getLastWebPreferences();
@@ -29,15 +29,15 @@ async function run() {
     assert.equal(preferences.sandbox, true);
     assert.equal(preferences.isolation, true);
     assert.equal(preferences.bounds.width, 350);
-    await page.getByRole("button", { name: "和奶蛙聊聊，按住可拖动" }).click();
-    await page.getByRole("textbox", { name: "跟奶蛙说句话" }).fill("专注25分钟");
-    await page.getByRole("button", { name: "发送给奶蛙" }).click();
+    await page.getByRole("button", { name: "和大肥鱼聊聊，按住可拖动" }).click();
+    await page.getByRole("textbox", { name: "跟大肥鱼说句话" }).fill("专注25分钟");
+    await page.getByRole("button", { name: "发送给大肥鱼" }).click();
     await page.getByText("开始专注 25 分钟。我帮你看时间，到点提醒你休息。", { exact:true }).waitFor();
     await page.getByRole("button", { name:"收起聊天" }).click();
-    assert.equal(await page.getByRole("button", { name: "找到躲起来的奶蛙" }).count(), 0);
-    await page.getByRole("button", { name: "奶蛙更多操作" }).click();
+    assert.equal(await page.getByRole("button", { name: "找到躲起来的大肥鱼" }).count(), 0);
+    await page.getByRole("button", { name: "大肥鱼更多操作" }).click();
     await page.getByRole("menuitem", { name: "安静陪我", exact: true }).click();
-    await page.getByRole("button", { name: "奶蛙更多操作" }).click();
+    await page.getByRole("button", { name: "大肥鱼更多操作" }).click();
     await page.getByRole("menuitem", { name: "醒来", exact: true }).waitFor();
     const homeWindow = desktop.waitForEvent("window");
     await page.getByRole("menuitem", { name: "回小窝", exact: true }).click();
@@ -46,8 +46,8 @@ async function run() {
     assert.match(await home.locator("[class*=petSprite]").getAttribute("style"), /dafeiyu-idle/);
     await page.screenshot({ path: path.join(output, "desktop.png") });
     await home.screenshot({ path: path.join(output, "home.png") });
-    await page.getByRole("button", { name: "奶蛙更多操作" }).click();
-    await page.getByRole("menuitem", { name: "收起奶蛙", exact: true }).click();
+    await page.getByRole("button", { name: "大肥鱼更多操作" }).click();
+    await page.getByRole("menuitem", { name: "收起大肥鱼", exact: true }).click();
     const hidden = await desktop.evaluate(({ BrowserWindow }) =>
       !BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes("desktop=1")).isVisible());
     assert.equal(hidden, true);

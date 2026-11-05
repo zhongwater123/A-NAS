@@ -100,7 +100,7 @@ export function ConnectedTask({
           return {
             accepted: false,
             message: !view.remote.here
-              ? "奶蛙现在不在这一端。先点“叫到这里”，再交代 NAS 工作；本机计时和待办不受影响。"
+              ? "大肥鱼现在不在这一端。先点“叫到这里”，再交代 NAS 工作；本机计时和待办不受影响。"
               : task.waiting
                 ? "先处理 NAS 中的确认卡，再交代下一件事。"
                 : "NAS 正在连接或处理上一件事，稍后再试。",
@@ -129,7 +129,11 @@ export function ConnectedTask({
       onChatState?.({ phase: task.phase, answer: chatAnswer, running: task.thread.running, message: task.message });
   }, [chatActive, onChatState, task.phase, task.thread.running, task.message, chatAnswer]);
   return (
-    <section className={compact ? styles.taskCompact : styles.task} aria-label="奶蛙的任务" data-pet-interactive="true">
+    <section
+      className={compact ? styles.taskCompact : styles.task}
+      aria-label="大肥鱼的任务"
+      data-pet-interactive="true"
+    >
       <p role="status" data-task-phase={task.phase}>
         {task.message}
       </p>
@@ -146,7 +150,7 @@ export function ConnectedTask({
             : (text) => {
                 setInstruction(text);
                 setMinutes(false);
-                setDraftNotice("已填好交代，点“交给奶蛙”后安排新提醒；当前结果仍未读，原任务不会重跑。");
+                setDraftNotice("已填好交代，点“交给大肥鱼”后安排新提醒；当前结果仍未读，原任务不会重跑。");
               }
         }
       />
@@ -185,7 +189,7 @@ export function ConnectedTask({
             </label>
             <div className={styles.actions}>
               <button type="submit" disabled={!instruction.trim() || !task.canSend}>
-                交给奶蛙
+                交给大肥鱼
               </button>
               <button type="button" disabled={!task.canSend} onClick={() => setInstruction("明早十点提醒我交材料")}>
                 试试提醒

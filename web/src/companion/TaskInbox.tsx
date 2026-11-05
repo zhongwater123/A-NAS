@@ -81,7 +81,7 @@ function MemberTaskInbox({ userId, enabled, announce, compact, onSignal, onOpen,
   }, [visibleSignal, onSignal]);
   if (!enabled || !loaded || !notices.length) return null;
   return (
-    <div className={styles.inbox} aria-label="奶蛙带来的任务结果" aria-live="polite">
+    <div className={styles.inbox} aria-label="大肥鱼带来的任务结果" aria-live="polite">
       {(compact ? notices.slice(-1) : notices.slice(-3)).reverse().map((item) => {
         const run = item.task!;
         return (

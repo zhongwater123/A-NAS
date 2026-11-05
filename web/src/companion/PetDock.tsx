@@ -65,10 +65,10 @@ export function PetDock({
           </Suspense>
         )}
       </div>
-      <div className={styles.petDock} data-pet-interactive="true" aria-label="奶蛙操作">
+      <div className={styles.petDock} data-pet-interactive="true" aria-label="大肥鱼操作">
         <Popover.Root open={open} onOpenChange={onOpenChange}>
           <Popover.Trigger asChild>
-            <button type="button" className={styles.talk} aria-label="和奶蛙聊聊">
+            <button type="button" className={styles.talk} aria-label="和大肥鱼聊聊">
               <MessageCircle size={14} />
               聊聊{due ? " ·" : ""}
             </button>
@@ -84,7 +84,7 @@ export function PetDock({
               onOpenAutoFocus={(event) => event.preventDefault()}
             >
               <div className={styles.popoverHeader}>
-                <strong>奶蛙</strong>
+                <strong>大肥鱼</strong>
                 <Popover.Close asChild>
                   <button type="button" aria-label="收起聊天">
                     <X size={15} />
@@ -124,7 +124,7 @@ export function PetDock({
         )}
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
-            <button type="button" className={styles.more} aria-label="奶蛙更多操作">
+            <button type="button" className={styles.more} aria-label="大肥鱼更多操作">
               <Ellipsis size={16} />
             </button>
           </DropdownMenu.Trigger>
@@ -170,7 +170,7 @@ export function PetDock({
                   onHide();
                 }}
               >
-                收起奶蛙
+                收起大肥鱼
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>

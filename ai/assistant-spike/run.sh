@@ -27,7 +27,8 @@
 # With a real OpenAI-compatible model (the key stays in gateway.py outside the sandbox):
 #   SPIKE_MODEL=deepseek-flash SPIKE_KEY_FILE=~/model.key ai/assistant-spike/run.sh sandbox
 #   ai/assistant-spike/run.sh scenarios FILE [--answer ANSWER]   how the member answers: scenarios.py
-#     FILE: scenarios-approval.txt, scenarios.txt, scenarios-publish.txt or scenarios-boundary.txt
+#     FILE: scenarios-approval.txt, scenarios.txt, scenarios-publish.txt, scenarios-boundary.txt
+#           or scenarios-persona.txt (graded by hand: docs/specs/companion-persona.md)
 #   ai/assistant-spike/run.sh test boundary-after.sh   what persisted in memory and skills
 #
 # setup.sh makes accounts and spaces by hand (assistant-layout.sh spaces), then installs the

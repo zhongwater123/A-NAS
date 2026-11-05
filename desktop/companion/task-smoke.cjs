@@ -91,7 +91,7 @@ createRoot(document.getElementById("root")).render(<Preview/>);
   await pet.getByRole("button",{name:"去 VNAS 处理确认卡"}).waitFor();assert.equal(saved,false);assert.equal(prompts,2);
   await home.screenshot({path:path.join(output,"home-awaiting.png"),fullPage:true});
   const desktop=await mount(true);await desktop.locator('[data-task-phase="waiting"]').waitFor({state:"attached"});
-  await desktop.getByRole("button",{name:"奶蛙更多操作"}).click();await desktop.getByText("正在这里陪你",{exact:true}).waitFor();await desktop.keyboard.press("Escape");
+  await desktop.getByRole("button",{name:"大肥鱼更多操作"}).click();await desktop.getByText("正在这里陪你",{exact:true}).waitFor();await desktop.keyboard.press("Escape");
   await desktop.screenshot({path:path.join(output,"desktop-awaiting.png")});
   // Return to the same original VNAS thread and click its real approval UI.
   await pet.getByRole("button",{name:"去 VNAS 处理确认卡"}).click();const original=home.locator("[data-vnas-original]");await original.getByRole("button",{name:"确认更改",exact:true}).click();

@@ -29,7 +29,8 @@ chat() { "$py" /spike/serve_client.py "$user" chat "$@" | grep -E '^(session|<)'
 q() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"; }
 memories() { for f in "$home"/memories/*.md; do [ -e "$f" ] && echo "  [$(basename "$f")] $(tr '\n' ' ' < "$f")"; done; }
 mentions() {  # what the last system prompt carries of the learned items
-  for word in 团子 简短 family-trip; do printf '  system prompt mentions %s: %s\n' "$word" "$(grep -c -- "$word" "$system")"; done
+  # The whole sentence: SOUL.md itself says 简短.
+  for word in 团子 喜欢简短的回答 family-trip; do printf '  system prompt mentions %s: %s\n' "$word" "$(grep -c -- "$word" "$system")"; done
 }
 # Stored id of the newest conversation whose list entry (title, preview of the first message) contains $1.
 stored() { body GET '/api/sessions?limit=50' | python3 -c '

@@ -17,7 +17,8 @@ const setup = (owner: string) => {
 };
 describe("explicit chat commands and real local effects", () => {
   it("accepts Chinese minutes, bounds durations, and leaves questions or compound requests to AI", () => {
-    expect(localCommand("奶蛙，专注二十五分钟！")).toEqual({ kind: "focus", minutes: 25, invalid: false });
+    expect(localCommand("大肥鱼，专注二十五分钟！")).toEqual({ kind: "focus", minutes: 25, invalid: false });
+    expect(localCommand("奶蛙，暂停")).toEqual({ kind: "pause" });
     expect(localCommand("我想专注25分钟吧")).toEqual({ kind: "focus", minutes: 25, invalid: false });
     for (const text of ["专注0分钟", "专注91分钟", "专注2.5分钟", "专注-1分钟"])
       expect(localCommand(text)).toMatchObject({ invalid: true });
@@ -101,7 +102,7 @@ describe("chat and tool UI share one member's desk", () => {
   it("runs a focus from chat, asks before saving a bare todo, and reveals the saved item", async () => {
     const user = userEvent.setup();
     render(<CompanionPanel userId="chat-ui" />);
-    const input = screen.getByRole("textbox", { name: "跟奶蛙说句话" });
+    const input = screen.getByRole("textbox", { name: "跟大肥鱼说句话" });
     await user.type(input, "专注25分钟{Enter}");
     expect(screen.getByText(/开始专注 25 分钟/)).toBeVisible();
     await user.click(screen.getByRole("button", { name: "记一件事" }));
@@ -119,11 +120,11 @@ describe("chat and tool UI share one member's desk", () => {
         <CompanionFloating userId="pet-chat-ui" onOpen={() => {}} />
       </>,
     );
-    fireEvent.change(screen.getByRole("textbox", { name: "跟奶蛙说句话" }), { target: { value: "专注1分钟" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送给奶蛙" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "跟大肥鱼说句话" }), { target: { value: "专注1分钟" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送给大肥鱼" }));
     fireEvent.click(screen.getByRole("button", { name: "到网页桌面陪我" }));
     expect(screen.getAllByRole("status")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "和奶蛙聊聊，按住可拖动" }));
+    fireEvent.click(screen.getByRole("button", { name: "和大肥鱼聊聊，按住可拖动" }));
     expect(screen.getByRole("button", { name: "收起聊天" })).toBeVisible();
     expect(screen.queryByText("正在这里陪你")).not.toBeInTheDocument();
     act(() => vi.advanceTimersByTime(61000));

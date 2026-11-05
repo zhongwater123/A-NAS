@@ -97,15 +97,15 @@
 .content[data-state="inactive"] {
   display: none;
 }
-.content section[aria-label="奶蛙的任务"] {
+.content section[aria-label="大肥鱼的任务"] {
   margin: 0;
   padding: 0;
   background: none;
 }
-.content section[aria-label="奶蛙的任务"] h2 {
+.content section[aria-label="大肥鱼的任务"] h2 {
   display: none;
 }
-.content section[aria-label="奶蛙的任务"] p {
+.content section[aria-label="大肥鱼的任务"] p {
   margin: 8px 0;
   font-size: 11px;
 }

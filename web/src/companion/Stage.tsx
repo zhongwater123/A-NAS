@@ -278,7 +278,7 @@ export function Stage({
             type="button"
             data-pet-interactive="true"
             className={`${styles.pet} ${dragging ? styles.dragging : ""} ${reaction ? styles.greeting : ""}`}
-            aria-label={onInteract ? "和奶蛙聊聊，按住可拖动" : "和伙伴打招呼，按住可拖动"}
+            aria-label={onInteract ? "和大肥鱼聊聊，按住可拖动" : "和伙伴打招呼，按住可拖动"}
             disabled={!interactive}
             onPointerDown={down}
             onPointerMove={move}

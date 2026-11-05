@@ -48,14 +48,14 @@ export function CompanionChat({
   return (
     <section
       className={`${styles.chat} ${compact ? styles.compactChat : ""}`}
-      aria-label="和奶蛙聊天"
+      aria-label="和大肥鱼聊天"
       data-pet-interactive="true"
     >
       <div
         ref={log}
         className={styles.log}
         role="log"
-        aria-label="和奶蛙的对话"
+        aria-label="和大肥鱼的对话"
         aria-live="polite"
         aria-relevant="additions"
       >
@@ -68,7 +68,7 @@ export function CompanionChat({
         )}
         {state.lines.map((line) => (
           <div key={line.id} className={line.role === "user" ? styles.userLine : styles.assistantLine}>
-            <small>{line.role === "user" ? "你" : "奶蛙"}</small>
+            <small>{line.role === "user" ? "你" : "大肥鱼"}</small>
             <p>{line.text}</p>
             {line.id === newest && line.role === "assistant" && line.kind === "focus" && (
               <button type="button" onClick={() => onTool("focus")}>
@@ -144,8 +144,8 @@ export function CompanionChat({
       >
         <textarea
           ref={inputRef}
-          aria-label="跟奶蛙说句话"
-          placeholder={state.awaiting === "todo" ? "要记下什么事？" : state.awaiting ? "例如25分钟" : "跟奶蛙说句话…"}
+          aria-label="跟大肥鱼说句话"
+          placeholder={state.awaiting === "todo" ? "要记下什么事？" : state.awaiting ? "例如25分钟" : "跟大肥鱼说句话…"}
           rows={1}
           maxLength={1000}
           value={input}
@@ -157,7 +157,7 @@ export function CompanionChat({
             }
           }}
         />
-        <button type="submit" aria-label="发送给奶蛙" disabled={!input.trim()}>
+        <button type="submit" aria-label="发送给大肥鱼" disabled={!input.trim()}>
           发送
         </button>
       </form>

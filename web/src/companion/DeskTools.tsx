@@ -122,7 +122,7 @@ export function TodoDesk({ desk, onFocus }: { desk: PersonalDeskState; onFocus()
           添加
         </button>
       </form>
-      {!value.todos.length && <p className={styles.empty}>还没有待办。先写下一件小事，奶蛙陪你开始。</p>}
+      {!value.todos.length && <p className={styles.empty}>还没有待办。先写下一件小事，大肥鱼陪你开始。</p>}
       <ul>
         {[...value.todos.filter((t) => !t.done), ...value.todos.filter((t) => t.done)].map((todo) => (
           <li key={todo.id}>

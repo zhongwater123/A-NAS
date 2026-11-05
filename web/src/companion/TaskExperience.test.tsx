@@ -117,7 +117,7 @@ describe("companion minutes workflow on the existing VNAS protocol", () => {
     await user.click(screen.getByRole("button", { name: "试试提醒" }));
     expect(client.request.mock.calls.some(([method]) => method === "prompt.submit")).toBe(false);
     expect(screen.getByRole("textbox", { name: "交代一件事" })).toHaveValue("明早十点提醒我交材料");
-    await user.click(await screen.findByRole("button", { name: "交给奶蛙" }));
+    await user.click(await screen.findByRole("button", { name: "交给大肥鱼" }));
     await waitFor(() =>
       expect(client.request).toHaveBeenCalledWith(
         "prompt.submit",

@@ -18,7 +18,6 @@
 # the model and the broker.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-runtime=/opt/a-nas/assistant-runtimes/spike
 product_user=${PRODUCT_USER:-}
 if [[ -n "$product_user" ]] && ! getent passwd "$product_user" >/dev/null; then
   echo "no account $product_user" >&2
@@ -30,11 +29,8 @@ install -d -m 0755 /etc/hermes /run/anas-assistant-gw /run/a-nas-assistant
 # System skills live in a root-owned directory, like the runtime.
 install -d -m 0755 /opt/a-nas/assistant-skills /etc/a-nas-assistant /etc/a-nas-assistant/empty
 : > /etc/a-nas-assistant/empty.env && chmod 0644 /etc/a-nas-assistant/empty.env
-if [[ -f "$runtime/src/SOUL.md" ]]; then
-  install -m 0644 "$runtime/src/SOUL.md" /etc/a-nas-assistant/SOUL.md
-else
-  install -m 0644 /dev/null /etc/a-nas-assistant/SOUL.md  # no runtime: only the probe runs
-fi
+# A-NAS's own persona (大肥鱼) instead of Hermes's default (docs/specs/companion-persona.md).
+install -m 0644 "$here/SOUL.md" /etc/a-nas-assistant/SOUL.md
 cp -r "$here/skills/." /opt/a-nas/assistant-skills/ && chown -R root:root /opt/a-nas/assistant-skills && chmod -R u=rwX,go=rX /opt/a-nas/assistant-skills
 sed -e "s/spike-model/${SPIKE_MODEL:-spike-model}/" -e "s/^  timeout: 86400$/  timeout: ${SPIKE_APPROVAL_TIMEOUT:-86400}/" \
   "$here/managed-config.yaml" > /etc/hermes/config.yaml

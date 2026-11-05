@@ -51,7 +51,7 @@ export function CompanionPanel({
           <button
             type="button"
             className={chatStyles.avatar}
-            aria-label="和奶蛙聊聊"
+            aria-label="和大肥鱼聊聊"
             onClick={() => conversation.chat.selectView("chat")}
           >
             <Character

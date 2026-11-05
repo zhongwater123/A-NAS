@@ -19,7 +19,7 @@
 - [开启管理员终端](enable-admin-terminal.md)（draft；系统测试已验证，实验 NAS 待执行）
 - [启用网页搜索](enable-web-search.md)（draft；系统测试覆盖服务边界，实验 NAS 待执行）
 - [验收相册 M1](accept-photo-library-m1.md)（draft；切片 7 实机闸门）
-- [在公司内网试玩奶蛙桌宠与文本纪要](accept-virtual-companion.md)（draft；实机验证交给内网测试人员）
+- [在公司内网试玩大肥鱼桌宠与文本纪要](accept-virtual-companion.md)（draft；实机验证交给内网测试人员）
 - [在实验 NAS 上试用 AI 助手](try-ai-assistant-on-experimental-nas.md)（draft；云端模型，仅开发测试）
 - [把硬盘加入数据卷](add-a-disk-to-the-data-volume.md)（draft；实验 NAS 待执行）
 - [在实验 NAS 上验收已部署的功能](accept-features-on-experimental-nas.md)（draft；按模块分节，验收完成的节随即删去）

@@ -7,24 +7,11 @@
     "commit": "549fff2ea33c2acfb16612c76912c6137da4a758",
     "directory": "dsh-pet/assets/webm",
     "fps": 24,
-    "crop": [
-      100,
-      0,
-      412,
-      344
-    ],
+    "crop": [100, 0, 412, 344],
     "webpQuality": 68
   },
-  "crop": [
-    56,
-    6,
-    376,
-    336
-  ],
-  "frameSize": [
-    224,
-    231
-  ],
+  "crop": [56, 6, 376, 336],
+  "frameSize": [224, 231],
   "webpQuality": 72,
   "matteAlphaCutoff": 8,
   "poses": {
@@ -33,11 +20,7 @@
       "frames": 60,
       "seconds": 10,
       "loop": true,
-      "sourceFrames": [
-        0,
-        240,
-        4
-      ],
+      "sourceFrames": [0, 240, 4],
       "sourceSHA256": "deb965d05a85dacf5ff4a20faa757846f0d11679598c3ec578a5571487660395",
       "bytes": 569840,
       "sha256": "d8e19c830f72e13b27294d4f3ef4da8fea770223b1dbd4f277767b33054339a2"
@@ -47,11 +30,7 @@
       "frames": 60,
       "seconds": 10,
       "loop": true,
-      "sourceFrames": [
-        0,
-        240,
-        4
-      ],
+      "sourceFrames": [0, 240, 4],
       "sourceSHA256": "b4a36cfa28ea5d7089e362a01972c6e880297c6dcd0d39f1994efd889a3c1be5",
       "bytes": 632542,
       "sha256": "3e4330b82042d71d9f92bcf92f76693c76a8e32316cddf424e934cc167a1b847"
@@ -61,11 +40,7 @@
       "frames": 60,
       "seconds": 10,
       "loop": true,
-      "sourceFrames": [
-        0,
-        240,
-        4
-      ],
+      "sourceFrames": [0, 240, 4],
       "sourceSHA256": "b5d702e0c04adb7b255ac702001c24da36c8bf95efc891f693f4976986ab2435",
       "bytes": 651852,
       "sha256": "a3298fcc23fa1d3298e985a54867bd1ca32400116a5aa8ba74bb9422de412d42"
@@ -75,11 +50,7 @@
       "frames": 60,
       "seconds": 10,
       "loop": true,
-      "sourceFrames": [
-        0,
-        240,
-        4
-      ],
+      "sourceFrames": [0, 240, 4],
       "sourceSHA256": "a56c17ef901fa531324a46a04def2381f65922d319ec83dadde34d2a4669e411",
       "bytes": 624610,
       "sha256": "ab3496dc5a3731be7a5c2dfeff20a9e5ed3a1f7594e4dd0c6a9ccb2dbfe56d13"
@@ -89,11 +60,7 @@
       "frames": 42,
       "seconds": 7,
       "loop": false,
-      "sourceFrames": [
-        48,
-        216,
-        4
-      ],
+      "sourceFrames": [48, 216, 4],
       "sourceSHA256": "3ff681051a0bb4f152d7535d64b7f3194c30298bf56d41e521216a278f135d3e",
       "bytes": 462328,
       "sha256": "2119560837be5aa7c6c263a9ddf3c7eab9fc1f2b4d0829dd05b2bc8c6b5fcd5e"
@@ -103,11 +70,7 @@
       "frames": 30,
       "seconds": 5,
       "loop": false,
-      "sourceFrames": [
-        0,
-        118,
-        4
-      ],
+      "sourceFrames": [0, 118, 4],
       "sourceSHA256": "ab00c844e62221905574b4c070e0d7b6fa14fb2afa1064c27a160f10e25f7196",
       "bytes": 303992,
       "sha256": "e8be31942e16bb0ce451339148244a403256ea18ad961c0c9b876f95ce01c9ad"
@@ -117,11 +80,7 @@
       "frames": 24,
       "seconds": 2,
       "loop": false,
-      "sourceFrames": [
-        60,
-        180,
-        5
-      ],
+      "sourceFrames": [60, 180, 5],
       "sourceSHA256": "48cd729ccdcf746369942ea954d242e9afdd5643e1dac3827fa5e67450eb8776",
       "bytes": 233628,
       "sha256": "1a9f531050f61d279f9479c7a0a33702734240434c3e6300b1c8a617ea211cc0"

@@ -9,7 +9,7 @@ export function localCommand(input: string): LocalCommand | undefined {
   const text = input
     .trim()
     .replace(/[。！!]+$/u, "")
-    .replace(/^奶蛙[，,\s]*/u, "")
+    .replace(/^(大肥鱼|奶蛙)[，,\s]*/u, "")
     .replace(/^请/u, "");
   if (/^(取消|算了|先不记了|不记了)$/u.test(text)) return { kind: "cancel" };
   if (/^(暂停|暂停专注|暂停计时|暂停番茄钟)$/u.test(text)) return { kind: "pause" };

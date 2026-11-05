@@ -179,17 +179,17 @@ describe("companion interactions", () => {
     await user.click(screen.getByRole("button", { name: "到网页桌面陪我" }));
     const floating = screen.getByRole("complementary", { name: "网页桌宠" });
     expect(floating).toBeVisible();
-    await user.click(within(floating).getByRole("button", { name: "奶蛙更多操作" }));
-    await user.click(screen.getByRole("menuitem", { name: "收起奶蛙" }));
+    await user.click(within(floating).getByRole("button", { name: "大肥鱼更多操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "收起大肥鱼" }));
     expect(screen.queryByRole("complementary", { name: "网页桌宠" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "叫回小窝" }));
-    expect(screen.getByRole("button", { name: "和奶蛙聊聊" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "和大肥鱼聊聊" })).toBeVisible();
   });
   it("a second member does not inherit the first member's visible pet", async () => {
     const user = userEvent.setup();
     const view = render(<CompanionPanel key="member-a" userId="member-a" />);
     await user.click(screen.getByRole("button", { name: "到网页桌面陪我" }));
     view.rerender(<CompanionPanel key="member-b" userId="member-b" />);
-    expect(screen.getByRole("button", { name: "和奶蛙聊聊" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "和大肥鱼聊聊" })).toBeVisible();
   });
 });

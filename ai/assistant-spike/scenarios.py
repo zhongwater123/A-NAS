@@ -11,10 +11,13 @@ prepare that change from the call's arguments, and answers as the scenario
 says the member does. Approving registers the member's grant with the broker
 before Hermes hears "once"; the MCP tool can apply nothing without it.
 
-  scenarios.py FILE [--answer ANSWER] [--user alice]
+  scenarios.py FILE [--answer ANSWER] [--user alice] [--full] [--fresh-memory]
 
 Each line of FILE starts a new conversation, and a line starting with "+"
-continues the one before; the staging area is emptied before each conversation.
+continues the one before; the staging area is emptied before each conversation,
+and with --fresh-memory the member's memory too, so one conversation's memories
+cannot change the next. "\\n" in a message is a line break. --full prints whole
+answers and tool arguments and every tool's result, for grading by hand.
 A line is "<answers> | <message>" or just "<message>" (answers from --answer,
 default deny). The answers are what the member does with each approval request
 of the turn, in order, the last one repeating:
@@ -41,6 +44,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("file")
 parser.add_argument("--answer", default="deny")
 parser.add_argument("--user", default="alice")
+parser.add_argument("--full", action="store_true")
+parser.add_argument("--fresh-memory", action="store_true")
 opts = parser.parse_args()
 
 USER = opts.user
@@ -90,8 +95,15 @@ def broker(method, path, body=None):
 
 def short(value, n=160):
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    if opts.full:
+        return text
     text = text.replace("\n", "⏎")
     return text if len(text) <= n else text[:n] + "…"
+
+
+def shown(tool):
+    """Whether a tool's result is printed: the A-NAS tools always, every tool with --full."""
+    return opts.full or str(tool or "").startswith("mcp__anas__")
 
 
 def card(change):
@@ -196,7 +208,7 @@ async def serve_turn(gw, sid, turn):
             continue
         if kind == "tool.start":
             turn.started(sid, payload.get("name"), payload.get("args"))
-        elif kind == "tool.complete" and str(payload.get("name", "")).startswith("mcp__anas__"):
+        elif kind == "tool.complete" and shown(payload.get("name")):
             print(f"  ⇠ {payload['name']}: {short(payload.get('result') or payload.get('result_text') or payload.get('error'), 300)}")
         elif kind == "message.complete":
             if payload.get("text"):
@@ -272,7 +284,7 @@ async def api_turn(session, turn):
     rows = page.get("data", []) if isinstance(page, dict) else []
     start = max((i for i, r in enumerate(rows) if r.get("role") == "user" and turn.said in str(r.get("content"))), default=-1)
     for row in rows[start + 1:]:
-        if row.get("role") == "tool" and row.get("tool_name", "").startswith("mcp__anas__"):
+        if row.get("role") == "tool" and shown(row.get("tool_name")):
             print(f"  ⇠ {row['tool_name']}: {short(row.get('content'), 300)}")
         elif row.get("role") == "assistant" and row.get("content"):
             print(f"  answer: {short(row['content'], 400)}")
@@ -287,10 +299,14 @@ async def api_conversation(lines):
 
 async def converse(paragraph):
     shutil.rmtree(HOME / "待确认", ignore_errors=True)
+    if opts.fresh_memory:
+        status, reply = hermes("POST", "/api/memory/reset", {"target": "all"})
+        if status != 200:
+            print(f"memory not cleared: {status} {short(reply)}")
     lines = []
     for line in paragraph:
         answers, said = line.split("|", 1) if "|" in line else (opts.answer, line)
-        lines.append(([a.strip() for a in answers.split(",")], said.strip()))
+        lines.append(([a.strip() for a in answers.split(",")], said.strip().replace("\\n", "\n")))
     session = None
     # session is read after the loop: the last turn's.
     async for session, turn, run in (serve_conversation if CHANNEL == "serve" else api_conversation)(lines):  # noqa: B007

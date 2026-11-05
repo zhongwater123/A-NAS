@@ -60,9 +60,9 @@ async function run() {
     const homeInvite = section.getByRole("button", { name: /^(安静陪我|醒来)$/ });
     await assertEventually(async () => assert.equal(await homeInvite.isEnabled(), true));
     const greet = async (page, isDesktop = false) => {
-      await page.getByRole("button", { name: isDesktop ? "和奶蛙聊聊，按住可拖动" : "和奶蛙聊聊", exact:true }).click();
-      await page.getByRole("textbox", { name: "跟奶蛙说句话" }).waitFor();
-      assert.equal(await page.getByRole("button", { name: "找到躲起来的奶蛙" }).count(), 0);
+      await page.getByRole("button", { name: isDesktop ? "和大肥鱼聊聊，按住可拖动" : "和大肥鱼聊聊", exact:true }).click();
+      await page.getByRole("textbox", { name: "跟大肥鱼说句话" }).waitFor();
+      assert.equal(await page.getByRole("button", { name: "找到躲起来的大肥鱼" }).count(), 0);
       if (isDesktop) await page.getByRole("button", { name: "收起聊天" }).click();
     };
     await greet(home);
@@ -71,9 +71,9 @@ async function run() {
     assert.match(await section.locator("[class*=petSprite]").first().getAttribute("style"), /dafeiyu-[a-z]+.*\.webp/);
     const desktop = await mount("CompanionDesktop");
     const native = desktop.locator("main");
-    const desktopInvite = native.getByRole("button", { name: "和奶蛙聊聊，按住可拖动" });
+    const desktopInvite = native.getByRole("button", { name: "和大肥鱼聊聊，按住可拖动" });
     await assertEventually(async () => assert.equal(await desktopInvite.isEnabled(), true));
-    await native.getByRole("button", { name: "奶蛙更多操作" }).click();
+    await native.getByRole("button", { name: "大肥鱼更多操作" }).click();
     const wake = desktop.getByRole("menuitem", { name: "醒来", exact: true });
     await assertEventually(async () => assert.equal(await wake.isEnabled(), true));
     await wake.click();
