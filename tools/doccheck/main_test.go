@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -49,7 +50,7 @@ func TestValidateDocumentationCapsCurrentSize(t *testing.T) {
 
 		var want []string
 		if wantProblem {
-			want = []string{currentDocument + " is 12289 bytes, over the 12288-byte cap"}
+			want = []string{fmt.Sprintf("%s is %d bytes, over the %d-byte cap", currentDocument, currentMaxBytes+1, currentMaxBytes)}
 		}
 		assertProblems(t, validateDocumentationProblems(root), want)
 	}
@@ -59,7 +60,7 @@ func TestValidateDocumentationKeepsMergeAndDeployStatusInCurrent(t *testing.T) {
 	root := t.TempDir()
 	writeRequiredDocuments(t, root)
 	writeDocuments(t, root, map[string]string{
-		currentDocument:                 "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 已合并尚未部署\n\n运行 scripts/undeployed.sh。\n",
+		currentDocument:                 "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 已合并尚未部署\n\n运行 scripts/undeployed.sh。\n\n## 待用户决定\n\n- [ADR 0023](../adr/0023-share-copies.md)\n",
 		acceptanceRunbook:               "# 验收\n\n待合并的修复部署后再验收：[快照](../investigations/2026-10-21-snapshots.md)。\n",
 		investigationIndex:              "- [2026-10-21：快照](2026-10-21-snapshots.md)\n",
 		"docs/specs/music.md":           "# 音乐\n\n状态：implemented（尚未合并）\n",
@@ -144,6 +145,9 @@ func TestValidateDocumentationMatchesADRStatusWithIndex(t *testing.T) {
 		"docs/adr/0016-bold-status.md":       "# 0016\n\n**状态**：proposed\n",
 		"docs/adr/0017-body-status.md":       "# 0017\n\n背景与决定。\n\n## 后果\n\n状态：accepted 的 ADR 不再改写。\n",
 		"docs/adr/0018-late-status.md":       "# 0018\n\n背景与决定。\n\n状态：accepted\n\n## 后果\n",
+		currentDocument: "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 待用户决定\n\n" +
+			"- ADR [0002](../adr/0002-proposed.md)、[0003](../adr/0003-unmarked.md)、[0009](../adr/0009-english-status.md)、" +
+			"[0010](../adr/0010-dot.md)、[0012](../adr/0012-angle.md)、[0013](../adr/0013-prose-marker.md)、[0016](../adr/0016-bold-status.md)\n",
 		"docs/adr/README.md": "# ADR\n\n" +
 			"- [0001：已接受](0001-accepted.md)（修订 0007）\n" +
 			"- [0002：提议](0002-proposed.md)（proposed）\n" +
@@ -184,6 +188,7 @@ func TestValidateDocumentationKeepsADRNumbersApart(t *testing.T) {
 		"docs/adr/0002-second.md":  "# 0002\n\n状态：accepted\n",
 		"docs/adr/0002-clash.md":   "# 0002\n\n状态：accepted\n",
 		"docs/adr/0003-arrived.md": "# 0003\n\n状态：proposed\n",
+		currentDocument:            "# 当前状态\n\n更新时间：2026-10-23\n\n- 已部署：`80b602275b86`\n\n## 待用户决定\n\n- [ADR 0003](../adr/0003-arrived.md)\n",
 		"docs/adr/README.md": "# ADR\n\n" +
 			"- [0001：第一](0001-first.md)\n" +
 			"- [0002：第二](0002-second.md)\n" +
@@ -239,6 +244,53 @@ func TestValidateDocumentationKeepsInvestigationStatusInOnePlace(t *testing.T) {
 		"docs/investigations/2026-10-08-no-status.md: start the 状态 line",
 		"docs/investigations/2026-10-09-unlisted.md is not listed in " + investigationIndex,
 		investigationIndex + " gives 2026-10-10-index-status.md a status",
+	})
+}
+
+func TestValidateDocumentationKeepsDecisionsInOnePlace(t *testing.T) {
+	root := t.TempDir()
+	writeRequiredDocuments(t, root)
+	writeDocuments(t, root, map[string]string{
+		"docs/decisions/2026-10-01-waiting.md":       "# 待定\n\n状态：pending\n更新时间：2026-10-01\n",
+		"docs/decisions/2026-10-02-unlinked.md":      "# 没列出的待定\n\n状态：pending\n",
+		"docs/decisions/2026-10-03-decided.md":       "# 已定\n\n状态：decided（2026-10-05，用户）\n",
+		"docs/decisions/2026-10-04-undated.md":       "# 没有日期\n\n状态：decided（用户）\n",
+		"docs/decisions/2026-10-05-still-waiting.md": "# 定了仍列着\n\n状态：decided（2026-10-06，用户）\n",
+		"docs/decisions/2026-10-06-superseded.md":    "# 被取代\n\n状态：superseded by [新的](2026-10-03-decided.md)\n",
+		"docs/decisions/2026-10-07-chinese.md":       "# 中文状态\n\n状态：已定\n",
+		"docs/decisions/2026-10-08-unlisted.md":      "# 漏列\n\n状态：decided（2026-10-08，用户）\n",
+		"docs/decisions/2026-10-09-index-status.md":  "# 索引带状态\n\n状态：decided（2026-10-09，用户）\n",
+		"docs/decisions/_TEMPLATE.md":                "# <要定的事>\n\n状态：pending\n",
+		"docs/adr/0001-proposed.md":                  "# 0001\n\n状态：proposed\n",
+		"docs/adr/0002-unlinked.md":                  "# 0002\n\n状态：proposed（2026-10-12）\n",
+		"docs/adr/0003-accepted.md":                  "# 0003\n\n状态：accepted\n",
+		"docs/adr/README.md":                         "- [0001：提议](0001-proposed.md)（proposed）\n- [0002：没列出](0002-unlinked.md)（proposed）\n- [0003：已接受](0003-accepted.md)\n",
+		decisionIndex: "# 决定记录\n\n## 索引\n\n### 相册\n\n" +
+			"- [待定](2026-10-01-waiting.md)\n" +
+			"- [没列出的待定](2026-10-02-unlinked.md)\n" +
+			"- [已定](2026-10-03-decided.md#决定)\n" +
+			"- [没有日期](2026-10-04-undated.md)\n" +
+			"- [定了仍列着](2026-10-05-still-waiting.md)\n" +
+			"- [被取代](2026-10-06-superseded.md)\n" +
+			"- [中文状态](2026-10-07-chinese.md)\n" +
+			"- [索引带状态](2026-10-09-index-status.md)（decided）\n" +
+			"\n从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建。\n",
+		currentDocument: "# 当前状态\n\n更新时间：2026-10-10\n\n- 已部署：`80b602275b86`\n\n## 待用户决定\n\n" +
+			"- [待定](../decisions/2026-10-01-waiting.md#选项)\n" +
+			"- [定了仍列着](../decisions/2026-10-05-still-waiting.md)\n" +
+			"- [ADR 0001](../adr/0001-proposed.md)，背景见 [ADR 0003](../adr/0003-accepted.md) 与 [上游](https://example.com/docs/adr/0002-unlinked.md)\n" +
+			"\n## 下一步\n\n" +
+			"- 落实[已定的决定](../decisions/2026-10-03-decided.md)，另见[待定](../decisions/2026-10-02-unlinked.md)与 [ADR 0002](../adr/0002-unlinked.md)。\n",
+	})
+
+	assertProblems(t, validateDocumentationProblems(root), []string{
+		"docs/decisions/2026-10-02-unlinked.md is pending, but " + currentDocument + " does not link it",
+		"docs/decisions/2026-10-04-undated.md: give the day it was decided",
+		"docs/decisions/2026-10-05-still-waiting.md is decided, but " + currentDocument + " still links it",
+		"docs/decisions/2026-10-07-chinese.md: start the 状态 line under the title with pending, decided or superseded",
+		"docs/decisions/2026-10-08-unlisted.md is not listed in " + decisionIndex,
+		decisionIndex + " gives 2026-10-09-index-status.md a status",
+		"docs/adr/0002-unlinked.md is proposed, but " + currentDocument + " does not link it",
 	})
 }
 

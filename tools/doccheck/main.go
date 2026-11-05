@@ -20,6 +20,12 @@ const (
 	investigationIndex     = "docs/investigations/README.md"
 	acceptanceRunbook      = "docs/runbooks/accept-features-on-experimental-nas.md"
 
+	decisionDirectory = "docs/decisions"
+	decisionIndex     = "docs/decisions/README.md"
+	// The section of the current state that lists what waits for the user:
+	// links to pending decision records and proposed ADRs.
+	waitingHeading = "## 待用户决定"
+
 	// Every session that continues earlier work reads CURRENT.md first
 	// (AGENTS.md). It had grown to 67 KB of merge and deploy history before
 	// #227 cut it to about 6 KB of current facts (#191). 12 KiB is twice
@@ -42,6 +48,8 @@ var (
 		"docs/specs/_TEMPLATE.md",
 		"docs/investigations/README.md",
 		"docs/investigations/_TEMPLATE.md",
+		decisionIndex,
+		"docs/decisions/_TEMPLATE.md",
 		"docs/runbooks/README.md",
 		"docs/runbooks/_TEMPLATE.md",
 	}
@@ -57,13 +65,14 @@ var (
 	// line, or in parentheses such as an index entry's (……，未部署).
 	labelPhrases        = []string{"未部署"}
 	statusPhraseKeepers = map[string]bool{currentDocument: true, acceptanceRunbook: true}
-	// A document's 状态 line; the group is the English status word it starts
-	// with, if any.
-	statusLine = regexp.MustCompile(`^\**(?:状态|Status)\**[：:][ \t]*([A-Za-z]*)`)
+	// A document's 状态 line; the first group is the English status word it
+	// starts with, if any, and the second the rest of the line.
+	statusLine = regexp.MustCompile(`^\**(?:状态|Status)\**[：:][ \t]*([A-Za-z]*)(.*)$`)
 	// A line that uses a phrase in its ordinary sense, such as merging two
 	// people in the photo library, carries this comment.
 	statusPhraseAllowed = "<!-- doccheck: not a status -->"
 	linkDestination     = regexp.MustCompile(`\]\([^)]*\)`)
+	linkTarget          = regexp.MustCompile(`\]\(([^)]+)\)`)
 
 	// The current state names the commit the Experimental NAS runs on one
 	// line, which the deploy rewrites. A hand-kept list of what merged since
@@ -89,10 +98,21 @@ var (
 	// once kept a second copy that drifted from it (#191). fixed means the
 	// fix has merged and waits for the acceptance runbook's check on the
 	// Experimental NAS, so that runbook must link the investigation.
-	investigationFileName    = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-.+\.md$`)
+	datedFileName            = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-.+\.md$`)
 	investigationStatuses    = map[string]bool{"open": true, "fixed": true, "resolved": true, "superseded": true}
 	indexEntry               = regexp.MustCompile(`^\s*[-*]\s+\[[^\]]*\]\(([^)]+)\)(.*)$`)
 	investigationIndexStatus = regexp.MustCompile(`^\s*[（(]\s*(?i:open|fixed|resolved|superseded)\b`)
+
+	// A decision the user made, or one that waits for the user, lives in one
+	// decision record unless it is hard to reverse, which makes it an ADR.
+	// Its status lives only on its own 状态 line, as an investigation's
+	// does. A decided record names the day, so that looking back finds when
+	// it changed. The current state's 待用户决定 links every pending record
+	// and every proposed ADR, so that nothing waits for the user unseen, as
+	// proposed ADRs did for weeks.
+	decisionStatuses    = map[string]bool{"pending": true, "decided": true, "superseded": true}
+	decisionIndexStatus = regexp.MustCompile(`^\s*[（(]\s*(?i:pending|decided|superseded)\b`)
+	isoDate             = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
 )
 
 func main() {
@@ -155,7 +175,7 @@ func validateDocumentation(root string) ([]string, int) {
 	}
 
 	files := 0
-	adrDocuments, investigations, runbook := map[string]string{}, map[string]string{}, ""
+	adrDocuments, investigations, decisions, runbook := map[string]string{}, map[string]string{}, map[string]string{}, ""
 	err = filepath.WalkDir(root, func(filePath string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -187,6 +207,8 @@ func validateDocumentation(root string) ([]string, int) {
 			adrDocuments[relativePath] = string(data)
 		case path.Dir(relativePath) == investigationDirectory:
 			investigations[relativePath] = string(data)
+		case path.Dir(relativePath) == decisionDirectory:
+			decisions[relativePath] = string(data)
 		case relativePath == acceptanceRunbook:
 			runbook = string(data)
 		}
@@ -199,7 +221,95 @@ func validateDocumentation(root string) ([]string, int) {
 	problems = append(problems, validateADRIndex(adrDocuments)...)
 	problems = append(problems, validateADRNumbers(adrDocuments)...)
 	problems = append(problems, validateInvestigations(investigations, runbook)...)
+	problems = append(problems, validateDecisions(decisions, adrDocuments, string(current))...)
 	return problems, files
+}
+
+// validateDecisions checks that the index lists every decision record without
+// a status, that each 状态 line starts with pending, decided (with its date)
+// or superseded, and that the current state's 待用户决定 links every pending
+// decision and every proposed ADR but no settled decision. decisions and adrs
+// map the slash-separated paths of the Markdown files in docs/decisions and
+// docs/adr to their contents; current is the current state's.
+func validateDecisions(decisions, adrs map[string]string, current string) []string {
+	var problems []string
+	index, indexed := decisions[decisionIndex]
+	listed := map[string]bool{}
+	for line := range strings.SplitSeq(index, "\n") {
+		match := indexEntry.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		name := path.Clean(normalizeLinkTarget(match[1]))
+		if !datedFileName.MatchString(name) {
+			continue
+		}
+		listed[name] = true
+		if decisionIndexStatus.MatchString(match[2]) {
+			problems = append(problems, fmt.Sprintf("%s gives %s a status: keep it only on the decision's 状态 line", decisionIndex, name))
+		}
+	}
+
+	waiting := waitingLinks(current)
+	for _, name := range slices.Sorted(maps.Keys(decisions)) {
+		base := path.Base(name)
+		if !datedFileName.MatchString(base) {
+			continue
+		}
+		if indexed && !listed[base] {
+			problems = append(problems, fmt.Sprintf("%s is not listed in %s", name, decisionIndex))
+		}
+		match, _ := headerStatus(decisions[name])
+		status := ""
+		if match != nil {
+			status = strings.ToLower(match[1])
+		}
+		switch {
+		case !decisionStatuses[status]:
+			problems = append(problems, fmt.Sprintf("%s: start the 状态 line under the title with pending, decided or superseded", name))
+		case status == "decided" && !isoDate.MatchString(match[2]):
+			problems = append(problems, fmt.Sprintf("%s: give the day it was decided on the 状态 line, as in decided（2026-11-03，用户）", name))
+		case status == "pending" && !waiting[name]:
+			problems = append(problems, fmt.Sprintf("%s is pending, but %s does not link it under %s", name, currentDocument, waitingHeading))
+		case status != "pending" && waiting[name]:
+			problems = append(problems, fmt.Sprintf("%s is %s, but %s still links it under %s", name, status, currentDocument, waitingHeading))
+		}
+	}
+
+	for _, name := range slices.Sorted(maps.Keys(adrs)) {
+		if !adrFileName.MatchString(path.Base(name)) {
+			continue
+		}
+		if match, _ := headerStatus(adrs[name]); match != nil && strings.EqualFold(match[1], "proposed") && !waiting[name] {
+			problems = append(problems, fmt.Sprintf("%s is proposed, but %s does not link it under %s", name, currentDocument, waitingHeading))
+		}
+	}
+	return problems
+}
+
+// waitingLinks returns the repository paths of the documents that the current
+// state links under its 待用户决定 heading.
+func waitingLinks(current string) map[string]bool {
+	links := map[string]bool{}
+	inside := false
+	for line := range strings.SplitSeq(current, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "## ") {
+			inside = line == waitingHeading
+			continue
+		}
+		if !inside {
+			continue
+		}
+		for _, match := range linkTarget.FindAllStringSubmatch(line, -1) {
+			target := normalizeLinkTarget(match[1])
+			if target == "" || strings.Contains(target, "://") {
+				continue
+			}
+			links[path.Join(path.Dir(currentDocument), target)] = true
+		}
+	}
+	return links
 }
 
 // validateInvestigations checks that the index lists every investigation
@@ -217,7 +327,7 @@ func validateInvestigations(documents map[string]string, runbook string) []strin
 			continue
 		}
 		name := path.Clean(normalizeLinkTarget(match[1]))
-		if !investigationFileName.MatchString(name) {
+		if !datedFileName.MatchString(name) {
 			continue
 		}
 		listed[name] = true
@@ -228,7 +338,7 @@ func validateInvestigations(documents map[string]string, runbook string) []strin
 
 	for _, name := range slices.Sorted(maps.Keys(documents)) {
 		base := path.Base(name)
-		if !investigationFileName.MatchString(base) {
+		if !datedFileName.MatchString(base) {
 			continue
 		}
 		if indexed && !listed[base] {
