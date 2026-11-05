@@ -8,7 +8,7 @@ import styles from "./companion.module.css";
 import { type AgentBridge, useConversation } from "./conversation";
 import chatStyles from "./conversation.module.css";
 import { FocusDesk, TodoDesk } from "./DeskTools";
-import { usePersonalDesk } from "./deskStore";
+import { focusDue, usePersonalDesk } from "./deskStore";
 import deskStyles from "./personalDesk.module.css";
 import type { TaskPhase } from "./taskState";
 import { useCompanionView } from "./useCompanionView";
@@ -43,7 +43,7 @@ export function CompanionPanel({
       void remote.sync?.claim();
     }
   }, [connected, remote.connection, remote.sync]);
-  const due = desk.value.focus.status === "done" && (desk.value.focus.completedAt ?? 0) > desk.value.focusAck;
+  const due = focusDue(desk.value);
   return (
     <section className={styles.panel} aria-label="伙伴小窝">
       <div className={`${deskStyles.workspace} ${chatStyles.home}`}>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import type { PersonalDeskState } from "./deskStore";
+import { focusDue, type PersonalDeskState } from "./deskStore";
 import { localCommand } from "./localCommands";
 import type { TaskPhase } from "./taskState";
 
@@ -220,14 +220,15 @@ export function useConversation(owner: string, desk: PersonalDeskState) {
   }, [owner]);
   const state = useSyncExternalStore(chat.subscribe, chat.get);
   const completedAt = desk.value.focus.completedAt;
+  const due = focusDue(desk.value);
   useEffect(() => {
-    if (completedAt && desk.value.focus.status === "done" && completedAt > desk.value.focusAck)
+    if (due && completedAt !== undefined)
       chat.notifyFocus(
         completedAt,
         desk.value.focus.mode === "break"
           ? "休息到点了，要开始下一件小事吗？"
           : "这一轮专注完成啦！起来活动一下，或者休息5分钟吧。",
       );
-  }, [chat, completedAt, desk.value.focus.status, desk.value.focus.mode, desk.value.focusAck]);
+  }, [chat, due, completedAt, desk.value.focus.mode]);
   return { chat, state };
 }

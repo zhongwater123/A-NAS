@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CompanionFloating } from "./CompanionFloating";
 import { CompanionPanel } from "./CompanionPanel";
-import { createDesk, deskKey, usePersonalDesk } from "./deskStore";
+import { createDesk, deskKey, focusDue, usePersonalDesk } from "./deskStore";
 import { Stage } from "./Stage";
 
 afterEach(() => {
@@ -23,6 +23,90 @@ describe("a member's focus and todos on this device", () => {
     expect(restored.get().focus.status).toBe("done");
     expect(restored.get().rounds).toBe(1);
     expect(createDesk("deadline-owner", localStorage).get().rounds).toBe(1);
+  });
+  it("keeps what is valid when stored data is partly bad, and keeps unreadable data aside", () => {
+    localStorage.setItem(
+      deskKey("partly-bad"),
+      JSON.stringify({
+        todos: [{ id: "a", text: "留下", done: false }, { id: 1, text: "坏的" }, null],
+        focus: { status: "bogus" },
+        rounds: 3,
+      }),
+    );
+    const desk = createDesk("partly-bad", localStorage);
+    expect(desk.get().todos.map((t) => t.text)).toEqual(["留下"]);
+    expect(desk.get().focus.status).toBe("idle");
+    expect(desk.get().rounds).toBe(3);
+    expect(desk.get().persistent).toBe(true);
+    localStorage.setItem(deskKey("unreadable"), "{not json");
+    expect(createDesk("unreadable", localStorage).get().persistent).toBe(true);
+    expect(localStorage.getItem(`${deskKey("unreadable")}:unreadable`)).toBe("{not json");
+  });
+  it("does not drop a change that could not be saved when the desk is shown again", () => {
+    let stored: string | null = null;
+    let full = false;
+    const storage = {
+      getItem: () => stored,
+      setItem: (_key: string, text: string) => {
+        if (full) throw new Error("quota");
+        stored = text;
+      },
+    };
+    const desk = createDesk("quota-owner", storage);
+    desk.add("存得下");
+    full = true;
+    desk.add("存不下");
+    expect(desk.get().persistent).toBe(false);
+    const stop = desk.subscribe(() => {});
+    expect(desk.get().todos.map((t) => t.text)).toEqual(["存得下", "存不下"]);
+    stop();
+  });
+  it("keeps counting down when the system clock goes back", () => {
+    const start = 5_000_000;
+    const back = start - 60 * 60000;
+    const desk = createDesk("clock-back", localStorage);
+    desk.start(10, "focus", null, start);
+    desk.tick(start + 3 * 60000);
+    desk.tick(back);
+    expect(desk.get().focus.status).toBe("running");
+    expect((desk.get().focus.deadline ?? 0) - back).toBe(10 * 60000);
+    desk.tick(back + 10 * 60000 - 1);
+    expect(desk.get().focus.status).toBe("running");
+    desk.tick(back + 10 * 60000);
+    expect(desk.get().focus.status).toBe("done");
+  });
+  it("lets the custom minutes be typed freely and rounds them only when done", () => {
+    render(<CompanionPanel userId="minutes-owner" />);
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "专注计时" }), { button: 0, ctrlKey: false });
+    const field = screen.getByRole("spinbutton", { name: "专注时长（分钟）" });
+    fireEvent.change(field, { target: { value: "" } });
+    expect(field).toHaveValue(null);
+    expect(screen.getByRole("timer")).toHaveTextContent("25:00");
+    fireEvent.change(field, { target: { value: "4" } });
+    fireEvent.change(field, { target: { value: "40" } });
+    expect(field).toHaveValue(40);
+    expect(screen.getByRole("timer")).toHaveTextContent("40:00");
+    fireEvent.change(field, { target: { value: "120" } });
+    expect(screen.getByRole("timer")).toHaveTextContent("90:00");
+    fireEvent.blur(field);
+    expect(field).toHaveValue(90);
+    // An empty field starts the minutes shown, not one minute.
+    fireEvent.change(field, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始专注" }));
+    expect(screen.getByRole("timer")).toHaveTextContent("90:00");
+  });
+  it("still reminds about a round that finished after the clock went back", () => {
+    const start = 50_000_000;
+    const desk = createDesk("ack-back", localStorage);
+    desk.start(1, "focus", null, start);
+    desk.tick(start + 60000);
+    desk.acknowledgeFocus();
+    expect(focusDue(desk.get())).toBe(false);
+    desk.reset();
+    const back = start - 8 * 3600000;
+    desk.start(1, "focus", null, back);
+    desk.tick(back + 60000);
+    expect(focusDue(desk.get())).toBe(true);
   });
   it("redraws every second only while a focus is running", () => {
     vi.useFakeTimers();

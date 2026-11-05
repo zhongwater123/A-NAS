@@ -5,6 +5,18 @@ import styles from "./personalDesk.module.css";
 
 export function FocusDesk({ desk }: { desk: PersonalDeskState }) {
   const [minutes, setMinutes] = useState(25);
+  // The field keeps what is typed; clamping on every key turned "40" into 14, then 90.
+  // The clock already shows the minutes a start would use; an empty or unreadable field
+  // keeps the minutes chosen before. The field itself is tidied when it is left.
+  const [typed, setTyped] = useState("25");
+  const clamp = (n: number) => Math.min(90, Math.max(1, Math.round(n)));
+  const readable = (text: string) => text.trim() !== "" && Number.isFinite(Number(text));
+  const choose = (n: number) => {
+    setMinutes(n);
+    setTyped(String(n));
+    return n;
+  };
+  const settle = () => choose(readable(typed) ? clamp(Number(typed)) : minutes);
   const { value, store, clock, remaining } = desk;
   const f = value.focus;
   const active = f.status === "running" || f.status === "paused";
@@ -41,7 +53,7 @@ export function FocusDesk({ desk }: { desk: PersonalDeskState }) {
       {!active && (
         <div className={styles.durations}>
           {[25, 45].map((n) => (
-            <button type="button" key={n} aria-pressed={minutes === n} onClick={() => setMinutes(n)}>
+            <button type="button" key={n} aria-pressed={minutes === n} onClick={() => choose(n)}>
               {n} 分钟
             </button>
           ))}
@@ -51,8 +63,12 @@ export function FocusDesk({ desk }: { desk: PersonalDeskState }) {
               type="number"
               min={1}
               max={90}
-              value={minutes}
-              onChange={(e) => setMinutes(Math.min(90, Math.max(1, Math.round(Number(e.target.value)) || 1)))}
+              value={typed}
+              onChange={(e) => {
+                setTyped(e.target.value);
+                if (readable(e.target.value)) setMinutes(clamp(Number(e.target.value)));
+              }}
+              onBlur={settle}
             />
             分钟
           </label>
@@ -68,7 +84,7 @@ export function FocusDesk({ desk }: { desk: PersonalDeskState }) {
             继续专注
           </button>
         ) : (
-          <button type="button" className={styles.primary} onClick={() => store.start(minutes)}>
+          <button type="button" className={styles.primary} onClick={() => store.start(settle())}>
             {" "}
             {f.status === "done" ? "再专注一轮" : "开始专注"}
           </button>

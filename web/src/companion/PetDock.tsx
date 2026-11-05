@@ -6,7 +6,7 @@ import { lazyCode } from "../ui/lazyCode";
 import { CompanionChat } from "./CompanionChat";
 import type { AgentBridge, useConversation } from "./conversation";
 import styles from "./conversation.module.css";
-import type { PersonalDeskState } from "./deskStore";
+import { focusDue, type PersonalDeskState } from "./deskStore";
 import type { TaskSignal } from "./TaskInbox";
 import type { TaskPhase } from "./taskState";
 import type { CompanionView } from "./useCompanionView";
@@ -40,7 +40,7 @@ export function PetDock({
 }) {
   const bridge = useRef<AgentBridge | undefined>(undefined);
   const focus = desk.value.focus;
-  const due = focus.status === "done" && (focus.completedAt ?? 0) > desk.value.focusAck;
+  const due = focusDue(desk.value);
   const goHome = (tab: "chat" | "focus" | "todos" = "chat") => {
     conversation.chat.selectView(tab);
     onOpenChange(false);
@@ -181,8 +181,7 @@ export function PetDock({
 }
 
 export function companionWords(desk: PersonalDeskState, conversation: ReturnType<typeof useConversation>) {
-  const focus = desk.value.focus;
-  if (focus.status === "done" && (focus.completedAt ?? 0) > desk.value.focusAck) return desk.message;
+  if (focusDue(desk.value)) return desk.message;
   if (conversation.state.pending) return "NAS 正在处理。你可以继续和我说计时或待办。";
   const last = conversation.state.lines.findLast((line) => line.role === "assistant");
   if (last) return last.text.length > 85 ? `${last.text.slice(0, 82)}…点我看看。` : last.text;

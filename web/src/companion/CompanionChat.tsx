@@ -3,7 +3,7 @@ import { type MutableRefObject, useEffect, useRef, useState } from "react";
 import { acknowledgeTaskNotice, useTaskNotices } from "../assistant/taskNotices";
 import type { AgentBridge, useConversation } from "./conversation";
 import styles from "./conversation.module.css";
-import type { PersonalDeskState } from "./deskStore";
+import { focusDue, type PersonalDeskState } from "./deskStore";
 
 export function CompanionChat({
   desk,
@@ -36,7 +36,7 @@ export function CompanionChat({
   }, [focusInput]);
   const { chat, state } = conversation;
   const newest = state.lines.at(-1)?.id;
-  const focusAlert = desk.value.focus.status === "done" && (desk.value.focus.completedAt ?? 0) > desk.value.focusAck;
+  const focusAlert = focusDue(desk.value);
   useEffect(() => {
     if (log.current) log.current.scrollTop = log.current.scrollHeight;
   }, [state.lines]);

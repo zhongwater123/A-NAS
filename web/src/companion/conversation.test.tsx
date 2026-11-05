@@ -25,6 +25,37 @@ describe("explicit chat commands and real local effects", () => {
     for (const text of ["专注25分钟有什么好处？", "他说‘专注25分钟’", "专注25分钟然后删文件"])
       expect(localCommand(text)).toBeUndefined();
   });
+  it("saves neither questions nor particles as todos, and lists for questions about the list", () => {
+    for (const text of [
+      "待办有哪些？",
+      "待办清单",
+      "有哪些待办",
+      "待办呢？",
+      "看看待办",
+      "待办有什么",
+      "我的待办呢？",
+      "有什么待办？",
+    ])
+      expect(localCommand(text)).toEqual({ kind: "list" });
+    for (const text of [
+      "记下了吗？",
+      "专注25分钟好吗",
+      "暂停？",
+      "帮我记一下好吗",
+      "帮我记一下，可以吗？",
+      "完成待办了吗",
+    ])
+      expect(localCommand(text)).toBeUndefined();
+    // After a separator the content is kept as said, even when it ends like a question.
+    expect(localCommand("帮我记一下：周末去哪呢？")).toEqual({ kind: "todo", text: "周末去哪呢" });
+    expect(localCommand("帮我记一下：问老王周五能来吗")).toEqual({ kind: "todo", text: "问老王周五能来吗" });
+    for (const text of ["帮我记一下吧", "帮我记一下嘛", "帮我记一下吧~"])
+      expect(localCommand(text)).toEqual({ kind: "todo", text: "" });
+    expect(localCommand("待办：买牛奶")).toEqual({ kind: "todo", text: "买牛奶" });
+    expect(localCommand("待办 买牛奶")).toEqual({ kind: "todo", text: "买牛奶" });
+    expect(localCommand("帮我记一下写周报")).toEqual({ kind: "todo", text: "写周报" });
+    expect(localCommand("待办完成：买牛奶")).toEqual({ kind: "complete", text: "买牛奶" });
+  });
   it("asks for todo content, supports cancellation, and completes only one exact matching item", () => {
     const { store, chat, send } = setup("chat-todo");
     send("帮我记一件事");

@@ -14,6 +14,10 @@ type Focus = {
   completedAt?: number;
 };
 export type Desk = { todos: Todo[]; focus: Focus; rounds: number; persistent: boolean; focusAck: number };
+// A finished round waits for 知道了 until that very round is acknowledged. Compared by
+// identity, not by size: after the clock went back a new round can finish "before" the last.
+export const focusDue = (desk: Desk) =>
+  desk.focus.status === "done" && desk.focus.completedAt !== undefined && desk.focus.completedAt !== desk.focusAck;
 const blankFocus = (): Focus => ({
   status: "idle",
   mode: "focus",
@@ -27,50 +31,56 @@ const initial = (): Desk => ({ todos: [], focus: blankFocus(), rounds: 0, persis
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 export const deskKey = (owner: string) => `anas:companion:desk:v1:${encodeURIComponent(owner)}`;
 
-function read(storage: Pick<Storage, "getItem">, key: string): Desk {
+const validTodo = (t: Todo) =>
+  typeof t?.id === "string" &&
+  t.id.length <= 100 &&
+  typeof t.text === "string" &&
+  t.text.length <= 160 &&
+  typeof t.done === "boolean";
+const validFocus = (f: Focus | undefined): f is Focus =>
+  !!f &&
+  ["idle", "running", "paused", "done"].includes(f.status) &&
+  ["focus", "break"].includes(f.mode) &&
+  finite(f.duration) &&
+  f.duration >= 60000 &&
+  f.duration <= 90 * 60000 &&
+  finite(f.remaining) &&
+  f.remaining >= 0 &&
+  f.remaining <= f.duration &&
+  (f.status === "running" ? finite(f.deadline) && f.deadline > 0 : f.deadline === null) &&
+  (f.todoId === null || typeof f.todoId === "string") &&
+  typeof f.title === "string" &&
+  f.title.length <= 160;
+
+function read(storage: Pick<Storage, "getItem" | "setItem">, key: string): Desk {
+  let raw: string | null;
   try {
-    const raw = storage.getItem(key);
-    if (!raw) return initial();
-    const data = JSON.parse(raw);
-    const f = data.focus;
-    if (
-      !Array.isArray(data.todos) ||
-      data.todos.length > 100 ||
-      !data.todos.every(
-        (t: Todo) =>
-          typeof t?.id === "string" &&
-          t.id.length <= 100 &&
-          typeof t.text === "string" &&
-          t.text.length <= 160 &&
-          typeof t.done === "boolean",
-      ) ||
-      !f ||
-      !["idle", "running", "paused", "done"].includes(f.status) ||
-      !["focus", "break"].includes(f.mode) ||
-      !finite(f.duration) ||
-      f.duration < 60000 ||
-      f.duration > 90 * 60000 ||
-      !finite(f.remaining) ||
-      f.remaining < 0 ||
-      f.remaining > f.duration ||
-      (f.status === "running" ? !finite(f.deadline) || f.deadline <= 0 : f.deadline !== null) ||
-      !(f.todoId === null || typeof f.todoId === "string") ||
-      typeof f.title !== "string" ||
-      f.title.length > 160 ||
-      !Number.isSafeInteger(data.rounds) ||
-      data.rounds < 0
-    )
-      return initial();
-    return {
-      todos: data.todos,
-      focus: { ...f, completedAt: finite(f.completedAt) ? f.completedAt : undefined },
-      rounds: data.rounds,
-      persistent: true,
-      focusAck: finite(data.focusAck) ? data.focusAck : 0,
-    };
+    raw = storage.getItem(key);
   } catch {
     return { ...initial(), persistent: false };
   }
+  if (!raw) return initial();
+  let data: { todos?: unknown; focus?: Focus; rounds?: unknown; focusAck?: unknown } | null;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    // Unreadable, not unsavable: keep the text beside the key and start afresh on this device.
+    try {
+      storage.setItem(`${key}:unreadable`, raw);
+    } catch {
+      /* Keeping a copy is best effort. */
+    }
+    return initial();
+  }
+  // Each part stands on its own: one bad todo or a bad clock no longer clears everything else.
+  const { todos, focus: f, rounds, focusAck } = data ?? {};
+  return {
+    todos: Array.isArray(todos) ? (todos as Todo[]).filter(validTodo).slice(0, 100) : [],
+    focus: validFocus(f) ? { ...f, completedAt: finite(f.completedAt) ? f.completedAt : undefined } : blankFocus(),
+    rounds: finite(rounds) && Number.isSafeInteger(rounds) && rounds >= 0 ? rounds : 0,
+    persistent: true,
+    focusAck: finite(focusAck) ? focusAck : 0,
+  };
 }
 
 // One device, scoped to a signed-in member. These are not NAS scheduled tasks.
@@ -92,11 +102,20 @@ export function createDesk(owner: string, storage: Pick<Storage, "getItem" | "se
     notify();
   };
   const tick = (now = Date.now()) => {
-    if (value.focus.status !== "running" || value.focus.deadline === null || now < value.focus.deadline) return;
+    const f = value.focus;
+    if (f.status !== "running" || f.deadline === null) return;
+    // The system clock went back: the deadline is further away than the time that was left
+    // and the countdown would stand still, so it never counts more than was left. A clock
+    // moved forward cannot be told from sleep, after which the focus rightly ends.
+    if (f.deadline - now > f.remaining) {
+      save({ ...value, focus: { ...f, deadline: now + f.remaining } });
+      return;
+    }
+    if (now < f.deadline) return;
     save({
       ...value,
-      rounds: value.rounds + (value.focus.mode === "focus" ? 1 : 0),
-      focus: { ...value.focus, status: "done", remaining: 0, completedAt: value.focus.deadline, deadline: null },
+      rounds: value.rounds + (f.mode === "focus" ? 1 : 0),
+      focus: { ...f, status: "done", remaining: 0, completedAt: f.deadline, deadline: null },
     });
   };
   const refresh = (event: StorageEvent) => {
@@ -110,7 +129,9 @@ export function createDesk(owner: string, storage: Pick<Storage, "getItem" | "se
     tick,
     subscribe: (listener: () => void) => {
       if (!listeners.size) {
-        value = read(storage, key);
+        // Only when this device's copy is saved: after a failed write, storage holds the
+        // older desk, and reading it would drop the change that could not be saved.
+        if (value.persistent) value = read(storage, key);
         window.addEventListener("storage", refresh);
       }
       listeners.add(listener);
