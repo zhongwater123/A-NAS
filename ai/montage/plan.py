@@ -45,7 +45,7 @@ def message(index: moments.Index, instruction: str, seconds: float, style: str |
     catalog = index.catalog(times=False, scenes=True, lengths=True, titles=False, paces=True)
     lines = [f"指令：{instruction}", f"目标时长：约 {seconds:g} 秒"]
     if style:
-        lines.append(f"体裁：{style}。剪法：{STYLES[style]}")
+        lines.append(f"体裁：{style}" + (f"。剪法：{STYLES[style]}" if STYLES.get(style) else ""))
     lines.append("素材：" + "，".join(f"视频 {v}（{e['seconds']:g} 秒）" for v, e in catalog["videos"].items()))
     under: dict[str, list[str]] = {}
     for entry in catalog["videos"].values():

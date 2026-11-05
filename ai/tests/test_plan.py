@@ -25,7 +25,8 @@ class PlanTest(unittest.TestCase):
     def test_the_message_holds_the_instruction_seconds_style_scenes_and_cards(self):
         text = plan.message(self.index, "剪成预告片", 60, "预告片")
         self.assertEqual(text.splitlines()[:2], ["指令：剪成预告片", "目标时长：约 60 秒"])
-        self.assertIn(plan.STYLES["预告片"], text)
+        self.assertIn("体裁：预告片", text)
+        self.assertNotIn("剪法", text)  # a trailer is given no rules of its own
         lines = text.splitlines()
         self.assertEqual(lines[lines.index("场景2：室内，办公室（1 张卡片）") + 1], "01-1-0 可剪6秒 办公室里的男子")
         self.assertNotIn("秒（镜头", text)  # no card seconds: the program sets them
