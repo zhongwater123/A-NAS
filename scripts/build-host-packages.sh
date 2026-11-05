@@ -39,9 +39,6 @@ for package in a-nas-host a-nas-console; do
   install -d -m 0755 "$work/$package/DEBIAN"
   sed "s/@VERSION@/$debian_version/g" "$source/DEBIAN/control" >"$work/$package/DEBIAN/control"
   chmod 0644 "$work/$package/DEBIAN/control"
-  if [[ -f "$source/DEBIAN/postinst" ]]; then
-    install -m 0755 "$source/DEBIAN/postinst" "$work/$package/DEBIAN/postinst"
-  fi
   dpkg-deb --root-owner-group -Zxz --build "$work/$package" "$out/$package.deb" >/dev/null
   printf '%s %s\n' "$(dpkg-deb --field "$out/$package.deb" Package)" "$(dpkg-deb --field "$out/$package.deb" Version)"
 done

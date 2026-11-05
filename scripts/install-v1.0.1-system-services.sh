@@ -504,6 +504,22 @@ printf '%s\n' \
   "ANAS_SMB_INTERFACE=$smb_interface" > /etc/a-nas/host-agent.env
 chown root:root /etc/a-nas/host-agent.env
 chmod 0600 /etc/a-nas/host-agent.env
+# smbd listens only on the addresses its interfaces have when it starts (bind
+# interfaces only), and at boot a DHCP address can arrive after smbd's turn.
+# So smbd waits up to 20 s for the SMB interface's IPv4 address; without one,
+# the start fails and systemd tries again 5 s later, until it has one. Units
+# ordered after smbd, the Host Agent among them, start after the first try.
+# Restart= also brings smbd back after a crash
+# (docs/investigations/2026-11-04-smbd-starts-before-dhcp-address.md).
+install -d -o root -g root -m 0755 /etc/systemd/system/smbd.service.d
+cat > /etc/systemd/system/smbd.service.d/a-nas-lan-address.conf <<EOF
+# Written by the A-NAS installer for the SMB interface $smb_interface.
+[Service]
+ExecStartPre=/bin/sh -c 'timeout 20 sh -c "until ip -4 -o address show dev $smb_interface scope global 2>/dev/null | grep -q inet; do sleep 1; done" || { echo "$smb_interface has no IPv4 address after 20 s; smbd waits for one because it listens only on the addresses present when it starts" >&2; exit 1; }'
+Restart=on-failure
+RestartSec=5s
+EOF
+chmod 0644 /etc/systemd/system/smbd.service.d/a-nas-lan-address.conf
 
 install -o root -g root -m 0644 "$source_release/anas-host-agent-system.service" /etc/systemd/system/anas-host-agent.service
 install -o root -g root -m 0644 "$source_release/anas-api-system.service" /etc/systemd/system/anas-api.service
@@ -583,7 +599,12 @@ else
 fi
 ln -sfn -- "$target" /opt/a-nas/current
 systemctl daemon-reload
-systemctl enable --now smbd.service
+# A running smbd keeps its listeners. One that is not running waits for the
+# SMB interface's address and keeps trying without it, which must not stop
+# the installation halfway; the end of the output says so.
+systemctl enable smbd.service
+smb_started=true
+systemctl start smbd.service || smb_started=false
 # A running Worker belongs to the previous release; the next connection starts
 # this release's.
 systemctl stop anas-ai.service
@@ -622,6 +643,9 @@ systemctl --no-pager --full status anas-host-agent.service anas-photos.service a
 echo "web search: $(systemctl is-active anas-search.service || true)"
 if [[ -n "$web_search_failed" ]]; then
   echo "web search did not start; see journalctl -u anas-search-dns -u anas-search -b (docs/runbooks/enable-web-search.md)" >&2
+fi
+if [[ "$smb_started" == false ]]; then
+  echo "smbd has not started; systemd tries again every 5 s. If $smb_interface has no IPv4 address, SMB starts once it has one; otherwise see journalctl -u smbd -b" >&2
 fi
 
 # Web files and the terminal run as the signed-in user, so the Host Agent must
