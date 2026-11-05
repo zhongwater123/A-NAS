@@ -254,7 +254,7 @@ func TestPhotoRecordsShowOnlyWhatTheReaderCanSee(t *testing.T) {
 	ctx := context.Background()
 	baby := f.family(t)
 	f.photos.add("p-park-1", at("2026-09-20 10:00"), true)
-	f.photos.add("p-park-2", at("2026-09-21 10:00"), true)
+	f.photos.add("p-park-2", at("2026-09-20 16:00"), true)
 	f.photos.add("p-old", nil, true)
 	f.photos.add("p-private", at("2026-09-20 10:00"), false)
 	_, err := f.store.AddRecord(ctx, grandma, baby.ID, RecordInput{Kind: KindPhotos, Photos: []string{"p-private"}})

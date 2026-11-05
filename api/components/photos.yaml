@@ -75,6 +75,7 @@ schemas:
         description: Names of other members whose private libraries hold the same original; only the owner of a private library sees it.
         type: array
         items: { type: string }
+      sharedCopy: { type: string, description: "For an asset of the caller's own private library: the earliest asset of the shared library with the same original. Adding the photo to a family channel uses it instead of copying again." }
       trash:
         type: object
         additionalProperties: false

@@ -178,6 +178,62 @@ func TestCrossMemberDuplicateHintRevealsOnlyTheOtherMembersName(t *testing.T) {
 	}
 }
 
+func TestSharedCopyNamesTheEarliestSharedAssetWithTheSameOriginal(t *testing.T) {
+	ctx := context.Background()
+	service, c, _ := newService(t)
+	alicePrivate, shared := libraries(t, service, namedAlice)
+	same := encodePNG(60)
+
+	mine := importPhoto(t, service, namedAlice, alicePrivate.ID, "", "baby.png", same)
+	other := importPhoto(t, service, namedAlice, alicePrivate.ID, "", "other.png", encodePNG(61))
+	if mine.SharedCopy != "" {
+		t.Fatalf("a photo only in the private library names shared copy %q", mine.SharedCopy)
+	}
+	c.Advance(time.Minute)
+	copied, err := service.Copy(ctx, namedAlice, mine.ID, shared.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Advance(time.Minute)
+	later := importPhoto(t, service, namedBob, shared.ID, "", "IMG_2.png", same)
+
+	sharedCopyOf := func(p photos.Principal) map[string]string {
+		t.Helper()
+		page, err := service.Timeline(ctx, p, alicePrivate.ID, "", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := map[string]string{}
+		for _, asset := range page.Assets {
+			found[asset.ID] = asset.SharedCopy
+		}
+		return found
+	}
+	if got := sharedCopyOf(namedAlice); got[mine.ID] != copied.ID || got[other.ID] != "" {
+		t.Fatalf("shared copies = %v; want %s for the copied photo only", got, copied.ID)
+	}
+	if got, err := service.Get(ctx, namedAlice, mine.ID); err != nil || got.SharedCopy != copied.ID {
+		t.Fatalf("Get shared copy = %q, %v; want %s", got.SharedCopy, err, copied.ID)
+	}
+	if got, err := service.Get(ctx, namedAlice, copied.ID); err != nil || got.SharedCopy != "" {
+		t.Fatalf("a shared photo names shared copy %q, %v", got.SharedCopy, err)
+	}
+	viewer := photos.Principal{UserID: "user:admin", Username: "admin", Admin: true, Viewing: []photos.ViewingGrant{
+		{GrantID: "viewing:1", OwnerUserID: namedAlice.UserID, ExpiresAt: c.Now().Add(time.Hour)},
+	}}
+	if got := sharedCopyOf(viewer); got[mine.ID] != "" {
+		t.Fatalf("viewing administrator sees shared copy %q", got[mine.ID])
+	}
+
+	// A trashed copy no longer counts; the next one does.
+	if _, err := service.Trash(ctx, namedAlice, copied.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := sharedCopyOf(namedAlice); got[mine.ID] != later.ID {
+		t.Fatalf("after trashing the copy, shared copy = %q; want %s", got[mine.ID], later.ID)
+	}
+}
+
 func TestViewedLibraryCarriesItsGrant(t *testing.T) {
 	ctx := context.Background()
 	service, c, _ := newService(t)

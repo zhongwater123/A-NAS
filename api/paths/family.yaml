@@ -208,7 +208,7 @@
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
   post:
     operationId: addFamilyRecord
-    summary: "Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID"
+    summary: "Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID. A photo record leaves out photos already in the cloud album (409 already_in_channel when none are left) and becomes one record per day its photos were taken; the response is the latest of them"
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/family.yaml#/schemas/FamilyRecordInput" } } } }
     responses:
@@ -266,6 +266,17 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/family/babies/{babyId}/album/contains:
+  post:
+    operationId: familyAlbumContains
+    summary: "Which of up to 500 photos are in a baby's cloud album already, in the order asked, so a picker can mark them"
+    parameters: [{ $ref: "../components/family.yaml#/parameters/FamilyBabyID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/family.yaml#/schemas/FamilyAssetIDs" } } } }
+    responses:
+      "200": { description: The named photos that are in the album, content: { application/json: { schema: { $ref: "../components/family.yaml#/schemas/FamilyAssetIDs" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/family/babies/{babyId}/growth:
   get:
     operationId: getFamilyGrowth

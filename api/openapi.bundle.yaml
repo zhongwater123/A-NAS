@@ -3043,7 +3043,7 @@ paths:
           $ref: '#/components/responses/ProductError'
     post:
       operationId: addFamilyRecord
-      summary: Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID
+      summary: Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID. A photo record leaves out photos already in the cloud album (409 already_in_channel when none are left) and becomes one record per day its photos were taken; the response is the latest of them
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -3168,6 +3168,32 @@ paths:
         '422':
           $ref: '#/components/responses/ProductError'
         '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/family/babies/{babyId}/album/contains:
+    post:
+      operationId: familyAlbumContains
+      summary: Which of up to 500 photos are in a baby's cloud album already, in the order asked, so a picker can mark them
+      parameters:
+        - $ref: '#/components/parameters/FamilyBabyID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FamilyAssetIDs'
+      responses:
+        '200':
+          description: The named photos that are in the album
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FamilyAssetIDs'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
           $ref: '#/components/responses/ProductError'
   /api/v1/family/babies/{babyId}/growth:
     get:
@@ -11667,6 +11693,9 @@ components:
           type: array
           items:
             type: string
+        sharedCopy:
+          type: string
+          description: 'For an asset of the caller''s own private library: the earliest asset of the shared library with the same original. Adding the photo to a family channel uses it instead of copying again.'
         trash:
           type: object
           additionalProperties: false
@@ -14167,5 +14196,16 @@ components:
           type: array
           minItems: 1
           description: The members who left it, earliest first.
+          items:
+            type: string
+    FamilyAssetIDs:
+      type: object
+      additionalProperties: false
+      required:
+        - assetIds
+      properties:
+        assetIds:
+          type: array
+          maxItems: 500
           items:
             type: string

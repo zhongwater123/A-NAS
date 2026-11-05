@@ -71,6 +71,7 @@ func New(store *family.Store, logger *slog.Logger, media ffmpegworker.Worker) ht
 		"POST /babies/{babyID}/recordings":                h.addRecording,
 		"GET /babies/{babyID}/trash":                      h.trash,
 		"GET /babies/{babyID}/album":                      h.album,
+		"POST /babies/{babyID}/album/contains":            h.albumContains,
 		"GET /babies/{babyID}/growth":                     h.growth,
 		"GET /babies/{babyID}/vaccines":                   h.vaccines,
 		"PUT /babies/{babyID}/vaccine-plan":               h.vaccinePlan,
@@ -142,6 +143,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusConflict, "conflict", "the request conflicts with the current state")
 	case errors.Is(err, family.ErrLastGuardian):
 		httpjson.WriteError(w, http.StatusConflict, "last_guardian", "the family needs at least one guardian")
+	case errors.Is(err, family.ErrInChannel):
+		httpjson.WriteError(w, http.StatusConflict, "already_in_channel", "the photos are in the channel already")
 	case errors.Is(err, family.ErrPhotosUnavailable):
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available")
 	default:
@@ -413,6 +416,19 @@ func (h *handler) trash(w http.ResponseWriter, r *http.Request, actor family.Act
 func (h *handler) album(w http.ResponseWriter, r *http.Request, actor family.Actor) {
 	page, err := h.store.Album(r.Context(), actor, r.PathValue("babyID"), r.URL.Query().Get("cursor"))
 	h.reply(w, r, http.StatusOK, page, err)
+}
+
+func (h *handler) albumContains(w http.ResponseWriter, r *http.Request, actor family.Actor) {
+	var request struct {
+		AssetIDs []string `json:"assetIds"`
+	}
+	if !httpjson.Read(w, r, maxJSONBytes, &request) {
+		return
+	}
+	found, err := h.store.AlbumContains(r.Context(), actor, r.PathValue("babyID"), request.AssetIDs)
+	h.reply(w, r, http.StatusOK, struct {
+		AssetIDs []string `json:"assetIds"`
+	}{found}, err)
 }
 
 func (h *handler) growth(w http.ResponseWriter, r *http.Request, actor family.Actor) {
