@@ -27,7 +27,8 @@
 - Samba 凭据在 ADR 0008 升级时已删除，本人在“设置 → 我的账号”改密后重建。2026-11-04 核对（`pdbedit -L`）：16 个账号中 15 个已有凭据，只差 `admin`。
 - 办公网段到 NAS 的 TCP 445 不通，而 80 端口正常：Wi-Fi 网段如此，2026-11-04 从有线的 10.24.x 网段复测也如此；拦截发生在公司网络或电脑的安全策略。SMB 要从 NAS 所在的 172.18.45.0/24 网段测试，或请 IT 放行。
 - 重启后 smbd 仍只监听回环，v1.0.1 验收第 6 步不能通过。2026-11-04 装上 `a-nas-host`、启用 `ifupdown-wait-online.service` 后重启复测：网络等待只看 ifupdown 的接口记录，比 `enp2s0` 拿到 DHCP 地址早约 10 秒结束，smbd 随即按 `bind interfaces only` 启动（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。修法待定；在此之前，每次重启后由 root 执行 `systemctl restart smbd`。
-- Caddy 官方的 Cloudsmith 源对软件包索引返回 `402`（[caddyserver/caddy#8184](https://github.com/caddyserver/caddy/issues/8184)），实验 NAS 暂用 Debian 的 Caddy 2.6.2，并已删除该源。
+- 实验 NAS 仍是 Debian 的 Caddy 2.6.2：Caddy 官方的 Cloudsmith 源曾对软件包索引返回 `402`（[caddyserver/caddy#8184](https://github.com/caddyserver/caddy/issues/8184)），当时删除了该源。2026-11-05 核对，索引已恢复（2.11.9）。启用互联网访问前要按手册换回官方源。
+- 互联网访问（[ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)）等外部条件：IT 把公网 IP 的 TCP 443 与 80 映射到机房的边缘服务器 `172.25.4.8`，确认公司线路上域名的备案；用户提供域名并添加 A 记录。边缘服务器已于 2026-11-05 准备好隧道与防火墙，HAProxy 关闭。
 - Kiosk 的 URL、网络、快捷键、profile 生命周期与 VT 恢复尚未做产品级验收（[调查](../investigations/2026-10-06-kiosk-browser-confinement.md)）；运行中热插拔硬盘尚未实现。
 
 ## 待用户决定
@@ -52,7 +53,8 @@
 4. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改；#92 之后新装的应用密码按台随机生成。
 5. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
 6. 相册 OCR（2026-10-19 决定做，[规格](../specs/photo-library.md)、[模型评估](../research/photo-ocr-model-evaluation.md)）：模型是 Qwen3.5-4B 的 Q4_K_M。[实施方案](../architecture/photo-ocr.md)的步骤 1（交付与运行）与步骤 2（分流，目标召回 99%）已合并。步骤 3（读取、判型、核对、存储与开关）已实现，2026-11-04 随 `70853075ca40` 部署：单字概率取 0.99（用户 2026-11-03 确认），约一半字段自动通过，其中真正读错约 0.3%。下一步是步骤 4：搜索与接口。
-7. 后续能力：
+7. 互联网访问：外部条件满足后，按[启用互联网访问](../runbooks/enable-internet-access.md)从第 3 步继续：在 NAS 上换装官方源的 Caddy，装上 `wireguard-tools` 与 `nftables`，写入 `/etc/a-nas/internet.env`，安装包含本功能的发布，再开放边缘服务器。
+8. 后续能力：
    - 外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘），是备份中心评审中最大的缺口；
    - 账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；
    - 硬盘用途 M2（缺盘降级挂载、更换、接回后恢复冗余）与 M3（更改冗余方式、移除硬盘）；
