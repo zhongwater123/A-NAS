@@ -34,7 +34,7 @@
 
 2026-11-05，[首轮 GitHub 云构建](https://github.com/zhongwater123/A-NAS/actions/runs/41961148652)的前置检查、Android APK 构建、iOS 模拟器编译与启动步骤通过。Android 包为 `com.anas.mobile` 0.1.0、ARM64、Android 7 起，内置 JS 与 NAS 地址 `172.18.45.48`；APK v2 签名校验通过，SHA-256 为 `7eb54f37a79e341dab7cbf8417b4fe4d10efbeae36979bee317f11c5e8ee5646`。根项目的完整 `make check` 检查集合在 WSL 隔离副本通过（`make check-steps`）。
 
-首次 iOS 截图出现未登录时的连接错误，启动步骤返回成功不等于首次启动正常，见[调查记录](../investigations/2026-11-05-mobile-ios-first-launch.md)。
+首次 iOS 截图出现未登录时的连接错误；改用 Xcode 正常的模拟器签名流程后，[复查构建](https://github.com/zhongwater123/A-NAS/actions/runs/41966920493)的 Android、iOS 与协议检查全部通过，模拟器登录页无错误的断言通过，见[调查记录](../investigations/2026-11-05-mobile-ios-first-launch.md)。iOS 编译和模拟器启动没有使用 Apple 开发者账号或证书。合并主干 `fff0c2b0` 后的移动端类型检查、21 项协议测试、双端打包，以及根项目完整检查集合均通过。
 
 尚未完成真实账号、VNAS 与双向传输验收：电脑未识别到 Android 的 ADB 设备。iOS 本轮按用户决定先验证云端编译；真机安装等待后续 Apple 签名配置。
 

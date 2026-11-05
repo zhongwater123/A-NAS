@@ -1,6 +1,6 @@
 # iOS 模拟器首次启动显示连接错误
 
-状态：open，云端编译通过，首次启动的错误仍在定位。
+状态：resolved，2026-11-05 在云端 iOS 模拟器证实正常首次启动，回归断言通过。
 
 ## 现象与边界
 
@@ -24,7 +24,9 @@ swift scripts/mobile-assert-login.swift ios-login.png
 
 [首次对照](https://github.com/zhongwater123/A-NAS/actions/runs/41965504967)在启动应用时被模拟器的 `SBMainWorkspace` 拒绝，尚未执行到登录页断言，不能据此确认或排除 Keychain 假设。[重试对照](https://github.com/zhongwater123/A-NAS/actions/runs/41966228127)仍被拒绝；日志记录 `NSPOSIXErrorDomain code 162`，安装器同时认为可执行文件没有 entitlement。
 
-模拟器的 entitlement 需要进入 Mach-O 段，不能仅按真机方式写进代码签名（[构建工具的说明](https://github.com/bazelbuild/rules_apple/blob/main/doc/common_info.md#codesign-bundles-for-the-simulator-appleskip_codesign_simulator_bundles)）。移除手工补签名的实验脚本，改由 Xcode 正常生成模拟器 entitlement 与 ad-hoc 签名；保留登录页断言作为回归检查。应用源码不变，修正的云端构建与启动结果待验证。
+模拟器的 entitlement 需要进入 Mach-O 段，不能仅按真机方式写进代码签名（[构建工具的说明](https://github.com/bazelbuild/rules_apple/blob/main/doc/common_info.md#codesign-bundles-for-the-simulator-appleskip_codesign_simulator_bundles)）。移除手工补签名的实验脚本，改由 Xcode 正常生成模拟器 entitlement 与 ad-hoc 签名；保留登录页断言作为回归检查。
+
+[修正后的构建](https://github.com/zhongwater123/A-NAS/actions/runs/41966920493)在应用运行代码不变的情况下通过编译、模拟器安装、启动及登录页断言。截图与 OCR 输出显示 NAS 地址和空白账号、密码输入，没有连接错误。因此问题在云端禁用模拟器签名与 entitlement 生成的构建方式，而非 NAS 网络；没有取得原始 Keychain 错误码，不推断具体系统错误码。Android 构建和协议检查也通过。
 
 ## 关联
 
