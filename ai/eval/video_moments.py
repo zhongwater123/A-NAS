@@ -701,8 +701,15 @@ def parts(args):
 
     index = moments.Index.load(os.path.join(args.cache, "index.json"), os.path.join(args.cache, "frames.npz"))
     vision = look.Vision(args.vision)
-    catalog = index.catalog(times=False, lengths=True, titles=False, paces=True)
+    catalog = index.catalog(times=False, lengths=True, titles=False)
     listed = {line.split(" ", 1)[0]: line for entry in catalog["videos"].values() for line in entry["cards"]}
+
+    def told(card_id):
+        """The card as the summary is asked about it: its light, caption and highlight, no id."""
+        notes = index.notes.get(card_id, {})
+        return "，".join(x for x in (notes.get("light"), index.captions.get(card_id, ""),
+                                     f"亮点：{notes['highlight']}" if notes.get("highlight") else "") if x)
+
     out = []
     for video in sorted(index.videos):
         cards = sorted((c for c in index.cards if c["video"] == video), key=lambda c: c["start"])
@@ -712,7 +719,8 @@ def parts(args):
         for k, (a, b) in enumerate(itertools.pairwise([*opens, len(cards)]), 1):
             ids = [c["id"] for c in cards[a:b]]
             lines = [listed[i] for i in ids if i in listed]
-            summary = vision.summary(lines, moments.PART_CHARS) if sum(map(len, lines)) > moments.PART_CHARS else ""
+            summary = (vision.summary([told(i) for i in ids if i in listed], moments.PART_CHARS)
+                       if sum(map(len, lines)) > moments.PART_CHARS else "")
             out.append({"video": video, "cards": ids, "summary": summary})
             print(f"{video} part {k}: {cards[a]['start']:.0f}–{cards[b - 1]['end']:.0f} s, {len(ids)} cards"
                   f"{', summed up' if summary else ''}", flush=True)

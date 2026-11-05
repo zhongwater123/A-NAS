@@ -17,14 +17,11 @@ import re
 from montage import moments
 from montage.styles import STYLES
 
-_PACES = "，".join(f"{name}约 {low:g}–{high:g} 秒" for name, (low, high) in moments.PACE_RANGES.items())
-
 SYSTEM = (
     "你是剪辑规划。按成员的指令，从素材卡片里选段、排顺序，交一份剪辑计划；画面由程序按计划剪出，带原声，不加配乐和字幕，末尾淡出到黑。\n"
-    "素材目录按原片时间分成片段：每个片段先一行写它在原片里的时间、有几张卡片、各节奏几张。"
-    "卡片少的片段，下面每行一张卡片：“卡片 id 可剪X秒 节奏Y 光线 描述（亮点）毛病”，卡片 id 是“视频-镜头序号-段”；"
+    "素材目录按原片时间分成片段：每个片段先一行写它在原片里的时间、有几张卡片。"
+    "卡片少的片段，下面每行一张卡片：“卡片 id 可剪X秒 光线 描述（亮点）毛病”，卡片 id 是“视频-镜头序号-段”；"
     "卡片多的片段只给一段概述，是本机小模型按这些卡片写的。"
-    f"节奏是程序按画面变化幅度定的：画面几乎不动的慢，变化大的快，其余中；定每段秒数时可以参考（{_PACES}）。"
     "描述由本机小模型看三帧写成，可能看错。\n"
     "先写故事线：按指令要的效果，把成片的段落按播放顺序列出来，每段一句内容和对应的卡片。只放讲得进故事线的内容。\n"
     "排段的规则：\n"
@@ -53,7 +50,7 @@ def message(index: moments.Index, instruction: str, seconds: float, style: str |
     """The request's one message: the instruction, the seconds, the style's rules and the catalog
     in the film's parts (index.parts, one a video without them), each part's line and then its
     cards' lines, or its summary when they run past moments.PART_CHARS."""
-    catalog = index.catalog(times=False, lengths=True, titles=False, paces=True)
+    catalog = index.catalog(times=False, lengths=True, titles=False)
     lines = [f"指令：{instruction}", f"目标时长：约 {seconds:g} 秒"]
     if style:
         lines.append(f"体裁：{style}" + (f"。剪法：{STYLES[style]}" if STYLES.get(style) else ""))
@@ -67,11 +64,9 @@ def message(index: moments.Index, instruction: str, seconds: float, style: str |
         ids = [i for i in part["cards"] if i in listed and index.usable(cards[i]) >= moments.SEGMENT_MIN]
         if not ids:
             continue
-        paces = [index.pace_of(i) for i in ids]
-        counted = "、".join(f"{p} {paces.count(p)}" for p in moments.PACES if paces.count(p))
         where = f"视频 {part['video']} " if len(index.videos) > 1 else ""
         lines.append(f"片段{n}（{where}{_clock(cards[part['cards'][0]]['start'])}–{_clock(cards[part['cards'][-1]]['end'])}，"
-                     f"{len(ids)} 张卡片{'：' + counted if counted else ''}）")
+                     f"{len(ids)} 张卡片）")
         body = [listed[i] for i in ids]
         if part.get("summary") and sum(len(line) for line in body) > moments.PART_CHARS:
             lines.append("概述：" + part["summary"])

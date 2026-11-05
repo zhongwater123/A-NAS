@@ -468,6 +468,14 @@ class MomentsTest(unittest.TestCase):
         self.index.check(plan(("07-1-0", 10), ("07-0-0", 2), ("07-1-1", 30)))
         self.index.check(plan(("07-1-0", 8), ("07-1-0", 12), ("07-1-1", 30), ("07-1-1", 36)))
 
+    def test_a_summary_that_loops_is_told_from_one_that_names_a_thing_thrice(self):
+        from montage import look
+
+        named = "（亮点：机械巨兽）" * 3
+        self.assertFalse(look.looping("巨兽在废墟中移动" + named))
+        self.assertTrue(look.looping("一名戴帽男子在黑暗中，手持手电筒，神情专注，" * 3))
+        self.assertEqual(look.COPIED.sub("", "老人触摸机械（亮点：机器人与老人）。船舱（01-14-0、01-15-0）"), "老人触摸机械。船舱")
+
     def test_parts_open_where_colour_and_light_change_most_near_each_minute(self):
         starts = [0, 20, 40, 52, 58, 63, 70, 90, 110, 118, 125, 140]
         changes = [0, 0.1, 0.1, 0.2, 0.9, 0.3, 0.1, 0.1, 0.1, 0.8, 0.2, 0.1]

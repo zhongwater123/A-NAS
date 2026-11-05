@@ -114,10 +114,10 @@ PACE_CHANGE = (0.01, 0.06)
 SCENE_NEAR = 0.45
 # A picture's colour and light: its pixels in BINS × BINS × BINS bins of red, green and blue.
 BINS = 4
-# The seconds a segment of each pace runs, as the planner is told them to weigh (#350): a
-# trailer's shots run one and a half to four seconds, a still one read as soon as a moving one
-# (剪法18). The planner sets each segment's seconds itself; without them, each aims at the middle
-# of its pace's range, all scaled to the cut's target.
+# The seconds a segment of each pace runs when the plan does not say (#350): a trailer's shots
+# run one and a half to four seconds, a still one read as soon as a moving one. The planner sets
+# each segment's seconds itself (剪法18) and is told no paces; without seconds, each segment
+# aims at the middle of its pace's range, all scaled to the cut's target.
 PACE_RANGES = {"慢": (3.0, 4.0), "中": (2.0, 3.0), "快": (1.5, 2.0)}
 PACES = {name: (low + high) / 2 for name, (low, high) in PACE_RANGES.items()}
 

@@ -85,16 +85,23 @@ SCREEN = ("上面是同一段视频按时间先后的几帧。问题：画面里
 # A part of the film for the planner's catalog, summed up from its cards' lines (#398): what
 # happens in it in order, the same said once, every different thing kept. Asked without a
 # penalty on repeats, a 2B model said one sentence over and over for case-01's dark rooms.
-PART = ("下面是一部影片里连续一段时间的 {n} 张素材卡片，按原片先后排列，每行一张：卡片 id、可剪秒数、节奏、光线、画面描述（亮点）。\n"
+PART = ("下面是一部影片里连续一段时间的 {n} 个镜头，按原片先后排列，每行一个：光线、画面描述、亮点。\n"
         "{lines}\n\n"
         "写这一段的概述，给剪辑规划用：按先后写出现的地点、人物、物体、动作和事件，意思相同的合并成一条，意思不同的都要留下，"
-        "尤其是只出现一次的特别画面；只写卡片里有的，不要编，不写卡片 id。不超过 {chars} 个字，直接写概述。")
+        "尤其是只出现一次的特别画面；只写镜头里有的，不要编，不要加括号注释。不超过 {chars} 个字，直接写概述。")
+# What a 2B copies from its input into a summary all the same: highlight notes and card ids.
+COPIED = re.compile(r"[（(](?:亮点[:：][^）)]*|\d+-\d+-\d+[^）)]*)[）)]")
 PART_REPEAT = 1.15
 
 
+# A model going round in circles repeats a whole clause; a summary that names one thing three
+# times ("机械巨兽" in case-08's battle) repeats fewer characters than this.
+LOOP_CHARS = 16
+
+
 def looping(text: str) -> bool:
-    """A model stuck repeating itself: some eight characters come back three times or more."""
-    return any(text.count(text[i:i + 8]) >= 3 for i in range(max(len(text) - 8, 0)))
+    """A model stuck repeating itself: some LOOP_CHARS characters come back three times or more."""
+    return any(text.count(text[i:i + LOOP_CHARS]) >= 3 for i in range(max(len(text) - LOOP_CHARS, 0)))
 
 
 SCREEN_PASS = 5
@@ -136,7 +143,7 @@ class Vision:
         model went round in circles (looping), so that the part keeps its lines."""
         text = " ".join(self.ask(PART.format(n=len(lines), lines="\n".join(lines), chars=chars), [],
                                  int(chars * 1.6), repeat_penalty=PART_REPEAT).split())
-        return "" if looping(text) else text
+        return "" if looping(text) else COPIED.sub("", text)
 
     def describe(self, jpegs: list[bytes]) -> str:
         return self.ask(DESCRIBE, jpegs, 80).splitlines()[0].strip()

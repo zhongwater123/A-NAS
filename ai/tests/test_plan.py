@@ -35,9 +35,9 @@ class PlanTest(unittest.TestCase):
         looks = {"motion": "固定", "sharp": 500.0, "shake": 0.0, "bright": 100.0, "clipped": 0.0}
         self.index.pictures = {"01-0-0": looks | {"change": 0.002}, "01-1-0": looks | {"change": 0.08}}
         text = plan.message(self.index, "剪成预告片", 60, "预告片")
-        self.assertIn("片段1（0:00–0:12，2 张卡片：慢 1、快 1）", text)
-        self.assertIn("01-0-0 可剪6秒 节奏慢", text)
-        self.assertIn("01-1-0 可剪6秒 节奏快", text)  # a fast card's seconds are not cut to its pace
+        self.assertIn("片段1（0:00–0:12，2 张卡片）", text)  # the planner sets seconds: no paces told
+        self.assertNotIn("节奏", text)
+        self.assertIn("01-1-0 可剪6秒 办公室里的男子", text)
 
     def test_a_part_of_long_card_lines_gives_its_summary(self):
         self.index.parts = [{"video": "01", "cards": ["01-0-0"], "summary": "雨夜街头"},
