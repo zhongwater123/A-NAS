@@ -51,16 +51,11 @@ class PlanTest(unittest.TestCase):
                 plan.parsed(bad)
 
     def test_the_request_locates_each_segment_by_what_it_shows(self):
-        segment = {"card": "01-0-0", "scene": 1, "shows": "街道", "reason": "交代地点"}
+        segment = {"card": "01-0-0", "shows": "街道", "reason": "交代地点"}
         body = plan.request({"segments": [segment | {"pace": "快", "extra": "不传"}]}, 60, "预告片")
         self.assertEqual(body["segments"], [segment | {"probe": "街道"}])  # the program paces it
-        self.assertEqual({k: body[k] for k in ("seconds", "margin", "edges", "look", "scenes", "pace")},
-                         {"seconds": 60, "margin": True, "edges": True, "look": False, "scenes": True,
-                          "pace": "picture"})
-
-    def test_a_scene_the_model_misread_is_named(self):
-        planned = {"segments": [{"card": "01-0-0", "scene": 1}, {"card": "01-1-0", "scene": "1"}]}
-        self.assertEqual(plan.misplaced(planned, self.index), ["第 2 段 01-1-0 写的是场景1，目录里是场景2"])
+        self.assertEqual({k: body[k] for k in ("seconds", "margin", "edges", "look", "pace")},
+                         {"seconds": 60, "margin": True, "edges": True, "look": False, "pace": "picture"})
 
     def test_the_system_prompt_asks_for_every_field(self):
         for field in plan.FIELDS:

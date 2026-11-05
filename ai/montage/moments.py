@@ -94,10 +94,6 @@ SCENE_ALIKE = 0.92
 # foggy colonnade together, which the pictures tell apart. 0.80 split case-08's 17 groups into
 # 28 and case-01's 11 into 16, its beach from its cliff top.
 SCENE_PICTURE = 0.80
-# A plan does not go back to a scene it left, and takes at most FAST_SEGMENTS segments paced 快
-# from one scene. It may take as many others as it likes: a film of few scenes may be rich in
-# pictures, so the plan is asked for varied pictures instead of held to a count (#350).
-FAST_SEGMENTS = 6
 # A cut ends on a segment it can settle on: its last one aims at this pace's seconds at the least (#350).
 ENDING_PACE = "中"
 # A card's pace from how much its picture changes (montage.picture.change, #350), not from
@@ -474,12 +470,13 @@ class Index:
         return {"motion": measured["motion"], "flaws": flaws}
 
     def check(self, segments: list[dict], shows_needed: bool = False, skipped=None,
-              scenes=False, shortest=SEGMENT_MIN) -> list[tuple[str, float, float]]:
+              shortest=SEGMENT_MIN) -> list[tuple[str, float, float]]:
         """The plan's (video, start, end) in order, or PlanError listing what is wrong. With
         shows_needed every segment says in shows what its picture is to show, to be looked at;
-        skipped, when given, lists cards left out, each once and with why in a sentence. With
-        scenes, a scene's segments run together, at most FAST_SEGMENTS of them fast. Segments run
-        shortest seconds at least (TRIMMED_MIN after the program's trims)."""
+        skipped, when given, lists cards left out, each once and with why in a sentence. Segments run
+        shortest seconds at least (TRIMMED_MIN after the program's trims). Which scene follows
+        which, and how many segments a scene gives, are the plan's (#350): rules on them kept the
+        plan from cutting between places, and case-08's battle spans five of them."""
         cards = {c["id"]: c for c in self.cards}
         problems = []
         if not 1 <= len(segments) <= SEGMENTS_MAX:
@@ -511,8 +508,6 @@ class Index:
             if not isinstance(shows, str) or len(shows) > SHOWS_CHARS or (shows_needed and not shows.strip()):
                 problems.append(f"第 {n} 段的 shows 要写这段画面呈现指令里的什么，1–{SHOWS_CHARS} 个字符")
             clips.append((card["video"], float(start), float(end)))
-        if scenes:
-            problems += self._scene_problems(segments)
         problems += [f"第 {a + 1} 段和第 {b + 1} 段用了同一段画面" for a in range(len(clips)) for b in range(a)
                      if clips[a][0] == clips[b][0] and min(clips[a][2], clips[b][2]) > max(clips[a][1], clips[b][1])]
         if skipped is not None:
@@ -520,27 +515,6 @@ class Index:
         if problems:
             raise PlanError(problems)
         return clips
-
-    def _scene_problems(self, segments: list[dict]) -> list[str]:
-        """A scene left and come back to, and a scene with more than FAST_SEGMENTS fast segments.
-        Which scene follows which is the plan's: how alike two scenes are (scene_alike) is no
-        longer checked (#350), the model judging from the scenes' places and the cards' light."""
-        problems, left, seen, fast = [], set(), None, {}
-        for n, segment in enumerate(segments, 1):
-            scene = self.scene_of.get(segment.get("card")) if isinstance(segment, dict) else None
-            if scene is None:
-                continue
-            if segment.get("pace") == "快":
-                fast[scene] = fast.get(scene, 0) + 1
-            if scene != seen:
-                if scene in left:
-                    problems.append(f"第 {n} 段回到了已经离开的场景{scene}：同一场景的段要连在一起")
-                if seen is not None:
-                    left.add(seen)
-                seen = scene
-        problems += [f"场景{scene}用了 {k} 段快节奏，一个场景最多 {FAST_SEGMENTS} 段快节奏" for scene, k in fast.items()
-                     if k > FAST_SEGMENTS]
-        return problems
 
     def scene_groups(self, vectors: dict) -> tuple[dict, dict]:
         """Scenes from the place descriptions' vectors, by card id: cards whose descriptions are

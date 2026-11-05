@@ -90,7 +90,7 @@ def run(instruction: dict, index: moments.Index, container: str, model: str | No
                 done = [s | {"start": r["start"], "end": r["end"]} for s, r in zip(body["segments"], review, strict=True)]
                 with open(target + ".json", "w", encoding="utf-8") as file:
                     json.dump({"style": style, "story": planned.get("story"), "planned": segments, "segments": done,
-                               "review": review, "skipped": [], "misplaced": plan.misplaced(planned, index)},
+                               "review": review, "skipped": []},
                               file, ensure_ascii=False, indent=1)
                 made = target + ".mp4"
                 talk.append({"role": "service", "text": f"出片 {head.get('X-Seconds')} 秒"})

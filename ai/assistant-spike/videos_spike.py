@@ -346,7 +346,7 @@ class Handler(BaseHTTPRequestHandler):
                     segment["start"], segment["end"] = start, end
         try:
             clips = self.server.index.check(segments, shows_needed=self.server.vision is not None,
-                                            skipped=body.get("skipped"), scenes=body.get("scenes") is True,
+                                            skipped=body.get("skipped"),
                                             shortest=moments.TRIMMED_MIN if edged else moments.SEGMENT_MIN)
         except moments.PlanError as error:
             return self.reply(422, {"error": "剪辑计划不合规则", "problems": error.problems})

@@ -412,11 +412,11 @@ STORY = ("每段一句内容、对应的卡片范围，例如侦探片预告写�
 FLOWING = ("排段时注意前后衔接：相邻两段尽量是同一场景或同一个人物，同一场戏的几段放在一起；换场景时先放一段交代新地点的画面，"
            "不要在不相干的场景、人物之间来回跳。" if FLOW else "")
 # ANAS_SPIKE_SCENES=1 with FLOW: each catalog line says its card's scene, the catalog names the
-# scenes, and a plan keeps a scene's segments together, at most moments.FAST_SEGMENTS of them fast.
+# scenes, and a plan takes varied pictures from a scene.
 SCENES = FLOW and os.environ.get("ANAS_SPIKE_SCENES") == "1"
 SCENE_LINE = ("每行的“场景N”是这张卡片所在的场景，结果的 scenes 写每个场景是什么地方、有几张卡片：同一场景是同一个地方，"
               "片头片尾的字幕、标志和演职员表也各自成一个场景；" if SCENES else "")
-SCENE_RULES = ("同一场景的段必须连在一起，离开一个场景后不再回去；同一场景可以用多段，但画面要有变化，pace 为快的段最多 6 段；"
+SCENE_RULES = ("同一场景可以用多段，但画面要有变化；"
                "字幕、标志和演职员表的场景不用，除非成员要。" if SCENES else "")
 # ANAS_SPIKE_LENGTHS=1 with FILL: each catalog line says the most seconds its card can run, and
 # a plan's cards must be able to run moments.MARGIN times the cut's seconds.
