@@ -493,6 +493,11 @@ class MomentsTest(unittest.TestCase):
         self.index.parts.append({"video": "07", "cards": ["07-2-0"], "summary": ""})
         self.assertIsNone(self.index.pick(2, self.castle))  # its one window is flat: nothing to cut
 
+    def test_planned_seconds_are_scaled_down_past_the_target_never_up(self):
+        self.assertEqual(moments.planned_seconds([3, 4, 2], 60), [3, 4, 2])  # short: as planned
+        self.assertEqual(moments.planned_seconds([30, 30, 30, 30], 12), [3, 3, 3, 3])  # held to 6 s, then scaled down
+        self.assertEqual(moments.planned_seconds([1, 9], 60), [moments.SEGMENT_MIN, moments.CLIP_MAX])
+
     def test_a_paragraph_runs_on_in_film_order_from_its_card(self):
         cards = [c["id"] for c in sorted(self.index.cards, key=lambda c: c["start"])]
         self.assertEqual(cards, ["07-0-0", "07-1-0", "07-1-1", "07-2-0"])

@@ -24,7 +24,7 @@ class PlanTest(unittest.TestCase):
 
     def test_the_message_holds_the_instruction_seconds_style_and_cards_by_part(self):
         text = plan.message(self.index, "剪成预告片", 60, "预告片")
-        self.assertEqual(text.splitlines()[:2], ["指令：剪成预告片", "目标时长：约 60 秒"])
+        self.assertEqual(text.splitlines()[:2], ["指令：剪成预告片", "目标时长：60 秒以内"])
         self.assertIn("体裁：预告片", text)
         self.assertNotIn("剪法", text)  # a trailer is given no rules of its own
         # Without parts written, the video is one part.
@@ -75,7 +75,7 @@ class PlanTest(unittest.TestCase):
         by_part = {"part": 2, "seconds": 2.5, "shows": "办公室", "reason": "交代处境"}
         self.assertEqual(plan.request({"segments": [by_part]}, 60, None)["segments"], [by_part | {"probe": "办公室"}])
         self.assertEqual({k: body[k] for k in ("seconds", "margin", "edges", "look", "pace")},
-                         {"seconds": 60, "margin": True, "edges": True, "look": False, "pace": "picture"})
+                         {"seconds": 60, "margin": False, "edges": True, "look": False, "pace": "picture"})
 
     def test_the_system_prompt_asks_for_every_field(self):
         for field in plan.FIELDS:

@@ -32,7 +32,9 @@ SYSTEM = (
     f"2. shots：取几个连续镜头，1–{moments.SHOTS_MAX} 个，一般 2–4 个；连续快切的高潮可以多取；"
     "1 个就是单独插一个镜头，比如一张报纸。\n"
     f"3. seconds：这个段落一共剪几秒，按故事需要定：要交代清楚、要停留的长一点，冲击、紧张的短一点；"
-    f"每个镜头至少 {moments.SEGMENT_MIN:g} 秒，各段落加起来约等于目标时长，程序会按比例微调，再分给段落里的镜头。\n"
+    f"每个镜头至少 {moments.SEGMENT_MIN:g} 秒，程序按这个秒数分给段落里的镜头，不会把它拉长。"
+    "目标时长是上限：各段落加起来不要超过它，宁短勿凑，不为凑时长加段落、加镜头或把段落写长；"
+    f"比目标短了一成以上会被退回，那时在故事需要的地方加段落或给段落多取镜头。\n"
     "4. shows：一句话写这个段落要呈现的、画面里看得见的东西，不写地名、年代、情绪，程序按它找起点、定入出点。\n"
     "5. reason：这个段落在故事线里起什么作用。\n"
     "按故事需要选，不按片段长短或卡片多少分配：很长的片段可能只用一个段落，很短的片段也可以用。\n"
@@ -55,7 +57,7 @@ def message(index: moments.Index, instruction: str, seconds: float, style: str |
     in the film's parts (index.parts, one a video without them), each part's line and then its
     cards' lines, or its summary when they run past moments.PART_CHARS."""
     catalog = index.catalog(times=False, lengths=True, titles=False)
-    lines = [f"指令：{instruction}", f"目标时长：约 {seconds:g} 秒"]
+    lines = [f"指令：{instruction}", f"目标时长：{seconds:g} 秒以内"]
     if style:
         lines.append(f"体裁：{style}" + (f"。剪法：{STYLES[style]}" if STYLES.get(style) else ""))
     lines.append("素材：" + "，".join(f"视频 {v}（{e['seconds']:g} 秒）" for v, e in catalog["videos"].items()))
@@ -104,4 +106,4 @@ def request(plan: dict, seconds: float, style: str | None) -> dict:
     segments = [{k: s[k] for k in FIELDS if s.get(k) is not None} | {"probe": s.get("shows", "")}
                 for s in plan["segments"]]
     return {"segments": segments, "skipped": [], "span": "probe", "seconds": seconds, "style": style,
-            "margin": True, "edges": True, "look": False, "pace": "picture"}
+            "margin": False, "edges": True, "look": False, "pace": "picture"}

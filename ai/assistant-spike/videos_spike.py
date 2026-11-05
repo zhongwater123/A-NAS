@@ -494,9 +494,10 @@ class Handler(BaseHTTPRequestHandler):
         """The segments with start and end set to add up to target (Index.fill): frames every
         half second, embedded as they are needed, set the ends; a trailer's last quarter is
         held to moments.TAIL_MIN-TAIL_MAX a segment; or, when the segments say their pace
-        (moments.PACES), each aims at its pace's seconds (moments.aims), all scaled to target,
-        and runs SEGMENT_MIN-CLIP_MAX like any other. With margin, the cards must be able to run
-        moments.MARGIN times target first. And the problems of those it cannot set."""
+        (moments.PACES), each runs the seconds the plan gave it (moments.planned_seconds: scaled
+        down past target, never up, a cut short by more than moments.SHORT sent back) or else
+        aims at its pace's seconds, all scaled to target. With margin, the cards must be able to
+        run moments.MARGIN times target first. And the problems of those it cannot set."""
         index, cards = self.server.index, {c["id"] for c in self.server.index.cards}
         problems = [f"第 {n} 段要有目录或检索结果里的 card，和要找的画面（shows）" for n, s in enumerate(segments, 1)
                     if not isinstance(s, dict) or s.get("card") not in cards or not isinstance(s.get("probe"), str)
@@ -513,19 +514,24 @@ class Handler(BaseHTTPRequestHandler):
                      if p not in moments.PACES]
             if wrong:
                 return [], wrong
-            caps, mins = [moments.CLIP_MAX] * len(segments), [moments.SEGMENT_MIN] * len(segments)
-            if sum(caps) < target - 1 or sum(mins) > target + 1:
-                return [], [f"{len(segments)} 段的成片在 {sum(mins):g}–{sum(caps):g} 秒之间，目标是 {target:g} 秒："
-                            + ("加几段" if sum(caps) < target - 1 else "删几段")]
-            # Each segment's share: the seconds the planner gave it (剪法18), or else its pace's
-            # aim, all scaled to the target.
+            mins = [moments.SEGMENT_MIN] * len(segments)
+            if sum(mins) > target + 1:
+                return [], [f"{len(segments)} 段至少要 {sum(mins):g} 秒，超过了目标 {target:g} 秒：删几段"]
             asked = [s.get("seconds") for s in segments]
-            if all(isinstance(x, (int, float)) and not isinstance(x, bool) and x > 0 for x in asked):
-                aims = [min(moments.CLIP_MAX, max(moments.SEGMENT_MIN, float(x))) for x in asked]
+            planned = all(isinstance(x, (int, float)) and not isinstance(x, bool) and x > 0 for x in asked)
+            if planned:
+                # The seconds the planner gave each segment (剪法18), scaled down to target when
+                # they run past it, never up, and no segment run past them (剪法20).
+                shares = moments.planned_seconds(asked, target)
+                caps = shares
             else:
+                # Each segment's pace's aim, all scaled to the target.
                 aims = moments.aims(paces)
-            scale = target / sum(aims)
-            shares = [min(moments.CLIP_MAX, max(moments.SEGMENT_MIN, aim * scale)) for aim in aims]
+                scale = target / sum(aims)
+                shares = [min(moments.CLIP_MAX, max(moments.SEGMENT_MIN, aim * scale)) for aim in aims]
+                caps = [moments.CLIP_MAX] * len(segments)
+                if sum(caps) < target - 1:
+                    return [], [f"{len(segments)} 段的成片最多 {sum(caps):g} 秒，目标是 {target:g} 秒：加几段"]
         else:
             tail = len(segments) - max(1, round(len(segments) / 4))
             trailer = [style == "预告片" and n >= tail for n in range(len(segments))]
@@ -537,9 +543,18 @@ class Handler(BaseHTTPRequestHandler):
             if most < moments.MARGIN * target:
                 return [], [f"所选卡片最多只能剪 {most:g} 秒，要有目标 {target:g} 秒的 {moments.MARGIN:g} 倍"
                             f"（{moments.MARGIN * target:g} 秒）程序才有余量定每段的长短：再加几段，或换可剪更长的卡片"]
-        spans, problems = index.fill([(s["card"], self.server.probes[s["probe"]]) for s in segments], mode, target,
+        planned = shares is not None and caps is shares
+        goal = sum(shares) if planned else target
+        spans, problems = index.fill([(s["card"], self.server.probes[s["probe"]]) for s in segments], mode, goal,
                                      self.frame, caps, mins, shares, moments.SEGMENT_MIN if shares else None)
-        return [s | {"start": span[0], "end": span[1]} for s, span in zip(segments, spans, strict=True) if span], problems
+        out = [s | {"start": span[0], "end": span[1]} for s, span in zip(segments, spans, strict=True) if span]
+        cut = sum(s["end"] - s["start"] for s in out)
+        if planned and not problems and cut < target * (1 - moments.SHORT):
+            # Short by more than SHORT: the planner adds where the story needs it (剪法20), the
+            # program does not stretch what is there.
+            problems = [f"成片只有 {cut:.0f} 秒，比目标 {target:g} 秒短了 {target - cut:.0f} 秒：在故事需要的地方加段落，"
+                        "或给段落多取一个镜头；不要只把已有段落的 seconds 写长"]
+        return out, problems
 
     def frame(self, video, seconds):
         """The vector of the frame at seconds, rendered like the index's frames (512 px long edge)."""

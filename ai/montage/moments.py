@@ -120,6 +120,18 @@ BINS = 4
 # aims at the middle of its pace's range, all scaled to the cut's target.
 PACE_RANGES = {"慢": (3.0, 4.0), "中": (2.0, 3.0), "快": (1.5, 2.0)}
 PACES = {name: (low + high) / 2 for name, (low, high) in PACE_RANGES.items()}
+# The cut's seconds are a ceiling (#398, 剪法20): a plan past them is scaled down, one short of
+# them is cut as it is, and one short by more than this share goes back to the planner to add
+# paragraphs or shots. Stretching every segment to the target had padded case-01's talk.
+SHORT = 0.1
+
+
+def planned_seconds(asked: list[float], target: float) -> list[float]:
+    """Each segment's seconds as the plan gave them, held to SEGMENT_MIN-CLIP_MAX, all scaled
+    down to target when they run past it and never up (剪法20)."""
+    held = [min(CLIP_MAX, max(SEGMENT_MIN, float(x))) for x in asked]
+    scale = min(1.0, target / sum(held)) if held else 1.0
+    return [max(SEGMENT_MIN, x * scale) for x in held]
 
 # The cards a plan picks can run at least this share of its target, so that the program has
 # room to set each segment's seconds (#350).
