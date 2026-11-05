@@ -420,8 +420,8 @@ class Handler(BaseHTTPRequestHandler):
         """The segments with start and end set to add up to target (Index.fill): frames every
         half second, embedded as they are needed, set the ends; a trailer's last quarter is
         held to moments.TAIL_MIN-TAIL_MAX a segment; or, when the segments say their pace
-        (moments.PACES), each is held to its pace's range and aims at its pace's seconds, all
-        scaled to target. With margin, the cards must be able to run
+        (moments.PACES), each aims at its pace's seconds (moments.aims), all scaled to target,
+        and runs SEGMENT_MIN-CLIP_MAX like any other. With margin, the cards must be able to run
         moments.MARGIN times target first. And the problems of those it cannot set."""
         index, cards = self.server.index, {c["id"] for c in self.server.index.cards}
         problems = [f"第 {n} 段要有目录或检索结果里的 card，和要找的画面（shows）" for n, s in enumerate(segments, 1)
@@ -439,15 +439,14 @@ class Handler(BaseHTTPRequestHandler):
                      if p not in moments.PACES]
             if wrong:
                 return [], wrong
-            segments = moments.settled(segments)
-            paces = [s["pace"] for s in segments]
-            mins, aims, caps = (list(column) for column in zip(*(moments.PACES[p] for p in paces), strict=True))
+            caps, mins = [moments.CLIP_MAX] * len(segments), [moments.SEGMENT_MIN] * len(segments)
             if sum(caps) < target - 1 or sum(mins) > target + 1:
-                return [], [f"按这些段的 pace，成片在 {sum(mins):g}–{sum(caps):g} 秒之间，目标是 {target:g} 秒："
-                            + ("加几段，或换节奏更慢的段" if sum(caps) < target - 1 else "删几段，或换节奏更快的段")]
-            # Each segment's share: its pace's aim, all scaled to the target and kept to the pace.
+                return [], [f"{len(segments)} 段的成片在 {sum(mins):g}–{sum(caps):g} 秒之间，目标是 {target:g} 秒："
+                            + ("加几段" if sum(caps) < target - 1 else "删几段")]
+            # Each segment's share: its pace's aim, all scaled to the target.
+            aims = moments.aims(paces)
             scale = target / sum(aims)
-            shares = [min(cap, max(low, aim * scale)) for low, aim, cap in zip(mins, aims, caps, strict=True)]
+            shares = [min(moments.CLIP_MAX, max(moments.SEGMENT_MIN, aim * scale)) for aim in aims]
         else:
             tail = len(segments) - max(1, round(len(segments) / 4))
             trailer = [style == "预告片" and n >= tail for n in range(len(segments))]
@@ -461,13 +460,7 @@ class Handler(BaseHTTPRequestHandler):
                             f"（{moments.MARGIN * target:g} 秒）程序才有余量定每段的长短：再加几段，或换可剪更长的卡片"]
         spans, problems = index.fill([(s["card"], self.server.probes[s["probe"]]) for s in segments], mode, target,
                                      self.frame, caps, mins, shares, moments.SEGMENT_MIN if shares else None)
-        out = [s | {"start": span[0], "end": span[1]} for s, span in zip(segments, spans, strict=True) if span]
-        # A card too short for its segment's pace gives a faster pace instead of a refusal.
-        for segment in out if shares else []:
-            pace = moments.slowest(segment["end"] - segment["start"])
-            if moments.PACES[pace][0] < moments.PACES[segment["pace"]][0]:
-                segment |= {"asked": segment.get("asked", segment["pace"]), "pace": pace}
-        return out, problems
+        return [s | {"start": span[0], "end": span[1]} for s, span in zip(segments, spans, strict=True) if span], problems
 
     def frame(self, video, seconds):
         """The vector of the frame at seconds, rendered like the index's frames (512 px long edge)."""

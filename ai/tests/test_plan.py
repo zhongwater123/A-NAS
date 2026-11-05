@@ -33,7 +33,7 @@ class PlanTest(unittest.TestCase):
         self.index.pictures = {"01-0-0": looks | {"change": 0.002}, "01-1-0": looks | {"change": 0.08}}
         text = plan.message(self.index, "剪成预告片", 60, "预告片")
         self.assertIn("01-0-0 场景1 可剪6秒 节奏慢", text)
-        self.assertIn("01-1-0 场景2 可剪2.5秒 节奏快", text)  # a fast segment runs 2.5 s at most
+        self.assertIn("01-1-0 场景2 可剪6秒 节奏快", text)  # a fast card's seconds are not cut to its pace
 
     def test_cards_with_a_title_over_them_are_left_out(self):
         self.index.texts = {"01-0-0": "片名：MERIDIAN"}

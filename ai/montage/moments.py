@@ -98,7 +98,7 @@ SCENE_PICTURE = 0.80
 # segments paced 快 count apart, up to FAST_SEGMENTS, so that a fight can be a run of cuts.
 SCENE_SEGMENTS = 3
 FAST_SEGMENTS = 6
-# A cut ends on a segment it can settle on: its last one is paced this at the fastest (#350).
+# A cut ends on a segment it can settle on: its last one aims at this pace's seconds at the least (#350).
 ENDING_PACE = "中"
 # A card's pace from how much its picture changes (montage.picture.change, #350), not from
 # what a model reads into its description, which called case-08's still snipers fast: under
@@ -117,13 +117,10 @@ PACE_CHANGE = (0.01, 0.06)
 SCENE_NEAR = 0.45
 # A picture's colour and light: its pixels in BINS × BINS × BINS bins of red, green and blue.
 BINS = 4
-# A segment's pace, as the planner gives it: (shortest, aimed at, longest) seconds (#350).
-PACES = {"慢": (4.0, 5.0, 6.0), "中": (3.0, 3.5, 4.5), "快": (1.5, 2.0, 2.5)}
-
-
-def slowest(seconds: float) -> str:
-    """The slowest pace whose shortest segment is no longer than seconds (快 for any less)."""
-    return next((name for name, (low, _aim, _high) in PACES.items() if low <= seconds + ROUNDING), "快")
+# The seconds a segment of each pace aims at (#350), all scaled to the cut's target. Only an aim:
+# a segment runs SEGMENT_MIN–CLIP_MAX like any other, and its card's pace stays what its picture
+# says however few seconds the card has, so that a still card cut short is not called fast.
+PACES = {"慢": 5.0, "中": 3.5, "快": 2.0}
 
 # The cards a plan picks can run at least this share of its target, so that the program has
 # room to set each segment's seconds (#350).
@@ -167,13 +164,12 @@ def _for_cards(entries: dict, cards: list[dict]) -> dict:
             if c["id"] in entries and [entries[c["id"]]["start"], entries[c["id"]]["end"]] == [c["start"], c["end"]]}
 
 
-def settled(segments: list[dict]) -> list[dict]:
-    """The paced segments with the last one paced ENDING_PACE when it asked for a faster pace,
-    what it asked kept as asked."""
-    fastest = PACES[ENDING_PACE][0]
-    if not segments or PACES[segments[-1]["pace"]][0] >= fastest:
-        return segments
-    return [*segments[:-1], segments[-1] | {"pace": ENDING_PACE, "asked": segments[-1]["pace"]}]
+def aims(paces: list[str]) -> list[float]:
+    """The seconds each paced segment aims at, the last one at least ENDING_PACE's."""
+    out = [PACES[p] for p in paces]
+    if out:
+        out[-1] = max(out[-1], PACES[ENDING_PACE])
+    return out
 
 
 def colours(pixels: np.ndarray) -> np.ndarray:
@@ -355,8 +351,7 @@ class Index:
                 line += f" 场景{self.scene_of[card['id']]}"
             pace = self.pace_of(card["id"]) if paces else None
             if lengths:
-                # A paced card runs at most its pace's longest.
-                line += f" 可剪{min(self.usable(card), PACES[pace][2]) if pace else self.usable(card):g}秒"
+                line += f" 可剪{self.usable(card):g}秒"
             if pace:
                 line += f" 节奏{pace}"
             if notes.get("light"):
@@ -379,16 +374,14 @@ class Index:
                            for n, k in sorted(counts.items())}, "videos": out}
 
     def pace_of(self, card_id: str) -> str | None:
-        """The card's pace from how much its picture changes (PACE_CHANGE), or the slowest its
-        usable seconds can take when they are fewer than that pace's least; None unmeasured."""
+        """The card's pace from how much its picture changes (PACE_CHANGE), however many seconds
+        it has; None unmeasured."""
         change = self.pictures.get(card_id, {}).get("change")
         card = next((c for c in self.cards if c["id"] == card_id), None)
         if change is None or card is None:
             return None
         slow, fast = PACE_CHANGE
-        pace = "慢" if change < slow else "快" if change >= fast else "中"
-        usable = self.usable(card)
-        return slowest(usable) if usable < PACES[pace][0] - ROUNDING else pace
+        return "慢" if change < slow else "快" if change >= fast else "中"
 
     def near(self, scene: int, among=None) -> list[int]:
         """The scenes a plan may change to from scene (SCENE_NEAR), among those given if any."""

@@ -475,14 +475,13 @@ class MomentsTest(unittest.TestCase):
         self.index.pictures = {"07-0-0": {"change": 0.004}, "07-1-0": {"change": 0.03}, "07-1-1": {"change": 0.1}}
         self.assertEqual([self.index.pace_of(i) for i in ("07-0-0", "07-1-0", "07-1-1", "07-2-0")],
                          ["慢", "中", "快", None])
-        self.index.pictures["07-2-0"] = {"change": 0.0}  # still, but its one window is flat
-        self.assertEqual(self.index.pace_of("07-2-0"), "快")
+        self.index.pictures["07-2-0"] = {"change": 0.0}  # still, with its one window flat: slow however short
+        self.assertEqual(self.index.pace_of("07-2-0"), "慢")
 
-    def test_a_cut_ends_on_a_segment_paced_middle_at_the_fastest(self):
-        fast, slow = {"card": "07-0-0", "pace": "快"}, {"card": "07-1-0", "pace": "慢"}
-        self.assertEqual(moments.settled([slow, fast]), [slow, fast | {"pace": "中", "asked": "快"}])
-        self.assertEqual(moments.settled([fast, slow]), [fast, slow])
-        self.assertEqual(moments.settled([]), [])
+    def test_a_cut_ends_on_a_segment_aiming_at_middle_seconds_at_the_least(self):
+        self.assertEqual(moments.aims(["慢", "快"]), [moments.PACES["慢"], moments.PACES["中"]])
+        self.assertEqual(moments.aims(["快", "慢"]), [moments.PACES["快"], moments.PACES["慢"]])
+        self.assertEqual(moments.aims([]), [])
 
     def test_colours_count_a_picture_s_colour_and_light(self):
         red, blue = np.tile([250, 10, 10], (40, 1)), np.tile([10, 10, 250], (40, 1))
@@ -559,9 +558,6 @@ class MomentsTest(unittest.TestCase):
         spans, problems = self.index.fill([("07-0-0", market)], "probe", 5, self.at, caps=[longer], mins=[longer],
                                           floor=moments.SEGMENT_MIN)
         self.assertEqual((problems, spans), ([], [(lo, hi)]))
-
-    def test_the_slowest_pace_a_length_allows(self):
-        self.assertEqual([moments.slowest(t) for t in (5, 4, 3.9, 3, 2, 1)], ["慢", "慢", "中", "中", "快", "快"])
 
     def test_a_trimmed_plan_may_run_shorter_than_the_planned_minimum(self):
         segment = {"card": "07-1-1", "start": 30, "end": 31.3}
