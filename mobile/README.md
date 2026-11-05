@@ -22,7 +22,7 @@ Android 与 iPhone 的 React Native / Expo 客户端。底部只有聊天、传�
 
 [Mobile builds](../.github/workflows/mobile.yml) 在开发分支推送移动端改动时运行，也可手动指定 NAS IP。先检查协议、类型、代码和两端资源包，再分别构建 Android ARM64 测试 APK 与 iPhone 模拟器应用，并保留 7 天构建产物。云构建不会连接实际 NAS。
 
-iOS 任务使用 GitHub 的 macOS/Xcode 环境，无需本地 Mac；启动模拟器后保存登录页截图。模拟器应用不能安装到真实 iPhone。真机 IPA 需要另行配置 Apple 开发证书和匹配的描述文件，目前工作流没有签名或发布步骤。
+iOS 任务使用 GitHub 的 macOS/Xcode 环境，无需本地 Mac；由 Xcode 生成模拟器临时签名，无需 Apple 开发者账号。启动后保存登录页截图，并检查页面没有首次启动错误。模拟器应用不能安装到真实 iPhone。真机 IPA 需要另行配置 Apple 开发证书和匹配的描述文件，目前工作流没有真机签名或发布步骤。
 
 ## 验证记录
 

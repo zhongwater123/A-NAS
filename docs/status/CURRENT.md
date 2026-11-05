@@ -8,7 +8,7 @@
 
 主线是 [v1.0.1“实验 NAS 基础存储与共享闭环”](../releases/v1.0.1.md)。Experimental NAS 跟随主干部署，只用可丢弃测试数据；Web/SMB 闭环的实机验收完成前不创建 `v1.0.1` 标签。相册、影视、音乐、应用中心与 AI 助手已随主干部署，但不在 v1.0.1 的验收范围内。
 
-移动端正在实现[局域网聊天与双向传输](../specs/mobile-app.md)，Android/iPhone 共用 React Native + Expo 客户端。代码与本地协议检查见[移动端工程](../../mobile/README.md)，原生结果见[构建与真机状态](../specs/mobile-app.md#原生构建与真机状态)；下一步是 Android 真机连接 NAS 验收，iPhone 真机等待签名配置，未作为可发布版本交付。
+移动端采用 React Native + Expo，先做局域网聊天和双向传输；原生构建结果及剩余验收见[移动端规格](../specs/mobile-app.md#原生构建与真机状态)。
 
 ## 实验 NAS 上运行什么
 
