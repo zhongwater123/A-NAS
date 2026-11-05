@@ -147,7 +147,7 @@ func runPhotoService(logger *slog.Logger) error {
 		Logger:              logger,
 		AI:                  aiworker.Client{SocketPath: config.AISocket},
 		AIQuietPeriod:       config.Quiet,
-		Photos:              photos.Options{Media: config.Media.client()},
+		Photos:              photos.Options{Media: config.Media.client(), Release: version},
 		Vectors:             vectors,
 	})
 }

@@ -24,7 +24,9 @@ type readingEmbedder struct {
 	reads []string
 	// fieldsFinish is how the fields' answer ends; "stop" when empty.
 	fieldsFinish string
-	released     []bool
+	// failure, when set, is what every reading fails with.
+	failure  error
+	released []bool
 	// block makes a reading wait until it is cancelled, and say so.
 	block   bool
 	started chan struct{}
@@ -63,13 +65,16 @@ const receiptText = "某某超市\n2024年05月06日\n合计 ¥35.50\n实收 50.
 
 func (r *readingEmbedder) ReadText(ctx context.Context, _ *os.File, schema json.RawMessage) (string, photos.Reading, error) {
 	r.mu.Lock()
-	model, block, started, finish := r.model, r.block, r.started, r.fieldsFinish
+	model, block, started, finish, failure := r.model, r.block, r.started, r.fieldsFinish, r.failure
 	kind := "text"
 	if schema != nil {
 		kind = "fields:" + string(schema)
 	}
 	r.reads = append(r.reads, kind)
 	r.mu.Unlock()
+	if failure != nil {
+		return "", photos.Reading{}, failure
+	}
 	if block {
 		close(started)
 		<-ctx.Done()
@@ -288,6 +293,50 @@ func TestAReadingThatDoesNotSayHowItEndedIsNotKept(t *testing.T) {
 	}
 	if state, _, class := jobState(t, root, "ocr/v1"); state != "failed" || class != "invalid_result" {
 		t.Fatalf("reading job = %s (%s), want failed as an invalid result", state, class)
+	}
+}
+
+func TestAFailedReadingWaitsForANewReader(t *testing.T) {
+	// A reading that failed is not tried again on every start: it fails where
+	// the reader fails on that photo, and each try takes minutes. A reader the
+	// photo service has not seen before tries it again.
+	embedder := newReadingEmbedder()
+	embedder.failure = errors.New("llama-server failed mid-answer")
+	root := filepath.Join(t.TempDir(), "photos")
+	service := routeService(t, root, embedder, redRoute(t, "colour-1"))
+	private, _ := libraries(t, service, namedAlice)
+	importPhoto(t, service, namedAlice, private.ID, "", "receipt.png", red)
+	index(t, service, embedder)
+	// Its attempts used up.
+	result, err := catalogDB(t, root).Exec("UPDATE jobs SET state = 'failed' WHERE derivation = 'ocr/v1' AND error_class = 'io'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed, _ := result.RowsAffected(); failed != 1 {
+		t.Fatalf("failed readings = %d, want the photo's", failed)
+	}
+	embedder.mu.Lock()
+	embedder.failure = nil
+	embedder.mu.Unlock()
+	restart := func() {
+		_ = service.Close()
+		service = routeService(t, root, embedder, redRoute(t, "colour-1"))
+		if _, err := service.RecoverJobs(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		index(t, service, embedder)
+	}
+
+	restart()
+	if state, _, class := jobState(t, root, "ocr/v1"); state != "failed" || class != "io" {
+		t.Fatalf("after a restart the reading is %s (%s), want still failed", state, class)
+	}
+	embedder.mu.Lock()
+	embedder.model = "reader-2"
+	embedder.mu.Unlock()
+	restart()
+	if found := readings(t, root); len(found) != 1 || found[0].model != "reader-2" {
+		t.Fatalf("readings with a new reader = %+v", found)
 	}
 }
 
