@@ -126,7 +126,7 @@ anas-photos ──UDS + 只读 fd──► anas-ai（一个进程）
   - 相册服务启动时在日志中写明读的是哪些 cgroup；不在 systemd 服务中（如开发时直接运行）时退回全系统的压力。
   - 本地栈实测（2026-10-13，开发机 14 个逻辑核，Worker 12 个线程，其他负载空闲）：整理 40 张新照片约 2 分钟，没有一次暂停或取消；`system.slice` 的压力最高 2.0%，整机最高 7.4%。
   - 实机首次运行（2026-10-13）没有达到目标：检测被取消 17 次，每次之后空等至少 1 分钟，Worker 平均只用了约 1 个核（[调查](../investigations/2026-10-13-idle-detection-used-one-core.md)）。[#88](https://github.com/zhongwater123/A-NAS/pull/88) 改为上面的做法（5 秒复查、`anas.slice` 的权重、渲染与推理重叠、线程不自旋），实机复测待部署。
-- **内存**（2026-10-28 用户确定：和 CPU 一样不设固定预算，闲时有多少用多少，始终留出 1 GiB）：
+- **内存**（[决定](../decisions/2026-10-28-ai-memory-headroom.md)：和 CPU 一样不设固定预算，闲时有多少用多少，始终留出 1 GiB）：
   - 检测器只在有检测任务时加载；检测队列清空或有人使用设备时，相册服务发 `release` 卸载检测会话。CPU 或 I/O 压力只取消正在进行的检测、不卸载：取消已经让出处理器，卸载后压力一过又要重新加载，压力反复时大部分工作都花在加载上。向量模型因为搜索要用，保留到现有的 10 分钟空闲超时。
   - **加载前判断**：后台任务开始前，门控核对“系统 MemAvailable − 还要加载的部分 ≥ 1 GiB”；不满足就以 `memory_for_models` 暂停，每分钟复查，已加载的模型不卸载（卸载并不能让其余模型更早加载）。还要加载的部分是 Worker 报告的总需要减去它的 cgroup 已占用的内存（`anas-ai.service` 的 `memory.current`，没在运行时为 0）。总需要由 Worker 在 `info` 中报告：它启动后（模型已校验、文本编码已加载）自己 cgroup 的内存，加上各模型清单里的 `memoryBytes`。相册服务第一次问 `info` 之前不知道总需要，这一次只按余量判断。
   - **释放**：MemAvailable 低于 1 GiB 或 PSI memory 超过阈值时，门控以 `memory_low` 或 `memory_pressure` 关闭并请求卸载全部模型，Worker 随即直接退出，不逐个析构模型（[调查](../investigations/2026-10-13-ai-worker-kept-cancelled-detector-sessions.md)），之后的搜索重新加载、多等几秒。
