@@ -4,8 +4,8 @@
 # 13 container where systemd is PID 1, then checks every entry point that
 # touches the data volume: Web files (File Broker workers), SMB, the photo API,
 # the FFmpeg worker shared by the media center and music, the
-# administrator terminal, and the LAN Web entry that Caddy serves on
-# port 80. Unlike tests that start
+# administrator terminal, the LAN Web entry that Caddy serves on port 80,
+# and the internet entry's HTTPS site. Unlike tests that start
 # the daemons by hand, it runs them under the production sandboxes, so it
 # catches a unit that takes the Host Agent's CAP_SETUID (issue #38).
 #
@@ -251,6 +251,8 @@ stage() {
   ln -s "$search/runtime.tar.gz" "$1/search/runtime.tar.gz"
   install -m 0644 /src/deploy/chromium/policies/managed/a-nas.json "$1/a-nas-chromium-policy.json"
   install -m 0644 /src/deploy/caddy/Caddyfile "$1/Caddyfile"
+  install -m 0644 /src/deploy/caddy/Caddyfile.internet /src/deploy/internet/anas-internet.nft "$1/"
+  install -m 0644 /src/deploy/systemd/system/anas-internet-firewall.service "$1/anas-internet-firewall-system.service"
   install -m 0750 /src/scripts/run-kiosk.sh "$1/kiosk-launcher"
   install -m 0644 "/src/deploy/systemd/system/anas-kiosk@.service" "$1/anas-kiosk@.service"
   install -m 0644 /src/deploy/pam/a-nas-kiosk "$1/a-nas-kiosk.pam"
@@ -1888,6 +1890,123 @@ check "the Product Service reads the current pool" \
   grep -Fqx "ANAS_SCREENSAVER_DIRECTORY=$pools/current" /etc/a-nas/anas-api.env
 video=$(curl -fsS "$api/local-console/screensavers" | jq -r '.videos[0]' || true)
 check "a current pool video answers a byte range" test "$(status_of -r 0-1023 "$api$video")" = 206
+
+# --- Internet entry (ADR 0032): /etc/a-nas/internet.env turns it on. Caddy
+# serves the domain over HTTPS on the NAS's tunnel address, taking the client's
+# address from the PROXY header that only the edge relay may send. There is no
+# relay here: its tunnel address sits on a dummy interface and curl speaks for
+# it, and Caddy's own CA stands in for ACME, which needs the real domain.
+internet_host=nas.example.com
+internet=https://$internet_host
+relay_tunnel=fd78:1295:a3fe:1::1
+nas_tunnel=fd78:1295:a3fe:1::2
+printf '%s\n' '# The internet entry (docs/runbooks/enable-internet-access.md).' \
+  "ANAS_INTERNET_HOST=$internet_host" 'ANAS_INTERNET_RELAY_ENDPOINT=192.0.2.1:51820' \
+  "ANAS_INTERNET_RELAY_PUBLIC_KEY=$(wg genkey | wg pubkey)" 'ANAS_INTERNET_TUNNEL_PREFIX=fd78:1295:a3fe:1::/64' \
+  > /etc/a-nas/internet.env
+stage /tmp/internet-on
+check "the installer turns the internet entry on" install_release internet-on
+check "the Product Service has a loopback listener for the internet entry" \
+  bash -c "grep -Fqx 'ANAS_INTERNET_HTTP_ADDR=127.0.0.1:8081' /etc/a-nas/anas-api.env && ss -Hltn 'sport = :8081' | grep -Fq 127.0.0.1:8081"
+check "Caddy serves the domain on the NAS's tunnel address only" \
+  bash -c "grep -Fqx '$internet_host {' /etc/caddy/Caddyfile && grep -Fqx '	bind $nas_tunnel' /etc/caddy/Caddyfile"
+check "Caddy takes PROXY headers only from the relay" grep -Fqx "				allow $relay_tunnel/128" /etc/caddy/Caddyfile
+check "the tunnel's only peer is the relay, at one address" \
+  bash -c "grep -Fqx 'AllowedIPs = $relay_tunnel/128' /etc/wireguard/wg-anas.conf && grep -Fqx 'Address = $nas_tunnel/64' /etc/wireguard/wg-anas.conf"
+check "the tunnel's key is root's alone" test "$(stat -c '%U %a' /etc/wireguard/wg-anas.key)" = 'root 600'
+check "the installer prints this NAS's tunnel public key" \
+  grep -Fq "this NAS's tunnel public key: $(wg pubkey < /etc/wireguard/wg-anas.key)" /tmp/internet-on.log
+check "the tunnel's firewall unit is accepted by systemd" verified /etc/systemd/system/anas-internet-firewall.service
+check "the tunnel's firewall table is loaded" quiet nft list table inet anas_internet
+check "Caddy may bind the tunnel address before the tunnel is up" test "$(sysctl -n net.ipv6.ip_nonlocal_bind)" = 1
+check "the LAN entry still serves plain HTTP" test "$(curl -fsS "$lan/healthz" | jq -r .status)" = ok
+
+ip link add anas-relay type dummy 2>/dev/null || true
+ip link set anas-relay up
+ip -6 addr replace "$relay_tunnel/128" dev anas-relay nodad
+ip -6 addr replace "$nas_tunnel/128" dev anas-relay nodad
+python3 - <<'PY'
+import pathlib
+import re
+
+caddyfile = pathlib.Path("/etc/caddy/Caddyfile")
+caddyfile.write_text(re.sub(r"\ttls \{\n.*?\n\t\}\n", "\ttls internal\n", caddyfile.read_text(), flags=re.S))
+PY
+systemctl reload caddy
+caddy_root=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+# through [FROM] CURL_ARGUMENTS...: a request to the internet entry as the
+# relay forwards it for a client at FROM, 2001:db8:7::7 unless given. curl
+# writes its PROXY header in the family of its own connection, IPv6 here, so
+# the clients it speaks for are IPv6 too; HAProxy writes the IPv4 client of
+# the public connection.
+through() {
+  local from=2001:db8:7::7
+  if [[ "$1" != -* ]]; then from=$1; shift; fi
+  curl -sS --cacert "$caddy_root" --resolve "$internet_host:443:[$nas_tunnel]" --interface "$relay_tunnel" \
+    --haproxy-protocol --haproxy-clientip "$from" "$@"
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+asks_for_https() {
+  through -f -D - -o /dev/null "$internet/healthz" | tr -d '\r' | grep -ix 'strict-transport-security: max-age=31536000' >/dev/null
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+from_loopback() { # CURL_ARGUMENTS...: a request on the tunnel address that does not come from the relay
+  curl -fsS --cacert "$caddy_root" --resolve "$internet_host:443:[$nas_tunnel]" --interface ::1 "$@" "$internet/healthz"
+}
+for _ in $(seq 1 50); do
+  [[ -s "$caddy_root" ]] && through -f -o /dev/null "$internet/healthz" 2>/dev/null && break
+  sleep 0.2
+done
+check "the internet entry reaches the Product Service over HTTPS" test "$(through -f "$internet/healthz" | jq -r .status)" = ok
+check "the internet entry asks browsers to keep to HTTPS" asks_for_https
+check "a connection without a PROXY header is served as it comes" quiet from_loopback
+check "a PROXY header from anywhere but the relay is refused" denied from_loopback --haproxy-protocol --haproxy-clientip 2001:db8:7::7
+check "the internet listener answers only for its domain" \
+  test "$(status_of -H 'Host: 127.0.0.1' http://127.0.0.1:8081/healthz)" = 421
+
+phone_login=$(through -f -D /tmp/phone.headers -c /tmp/phone.jar -H 'Content-Type: application/json' \
+  -d "{\"username\":\"owner\",\"password\":\"$owner_password\",\"localConsole\":true}" "$internet/api/v1/session" || true)
+phone_expiry=$(jq -r .expiresAt <<<"$phone_login" 2>/dev/null || true)
+check "an internet login is an ordinary session even when it asks to last" \
+  test -n "$phone_expiry" -a "$phone_expiry" != null -a "$phone_expiry" != 9999-12-31T23:59:59Z
+check "an internet session's cookie is Secure" \
+  bash -c "tr -d '\r' < /tmp/phone.headers | grep -i '^set-cookie: anas_session=' | grep -qi '; secure'"
+cookie_of() { printf 'anas_session=%s' "$(awk '$6 == "anas_session" {print $7}' "$1")"; }
+phone_cookie=$(cookie_of /tmp/phone.jar)
+check "an internet session keeps working after the phone changes networks" \
+  test "$(through 2001:db8:40::40 -o /dev/null -w '%{http_code}' -H "Cookie: $phone_cookie" "$internet/api/v1/session")" = 200
+check "an internet session is refused through the LAN entry" \
+  test "$(status_of -H "Cookie: $phone_cookie" "$lan/api/v1/session")" = 401
+check "a LAN session is refused through the internet entry" \
+  test "$(through -o /dev/null -w '%{http_code}' -H "Cookie: $(cookie_of /tmp/owner-lan.jar)" "$internet/api/v1/session")" = 401
+check "the activity log records the internet sign-in with the client's address" \
+  bash -c "curl -fsS -b /tmp/owner.jar '$api/api/v1/activity?category=session&q=owner' | jq -e 'any(.items[];
+    .action == \"session.signed_in\" and (.detail | fromjson | .via == \"internet\" and .address == \"2001:db8:7::7\"))' >/dev/null"
+phone_csrf=$(jq -r .csrfToken <<<"$phone_login" 2>/dev/null || true)
+internet_upload=$(through -f -D - -o /dev/null -H "Cookie: $phone_cookie" -H "X-CSRF-Token: $phone_csrf" -H 'Tus-Resumable: 1.0.0' \
+  -H 'Upload-Length: 1' -H "Upload-Metadata: $(tus_meta filename internet.bin spaceId "$owner_private")" \
+  -X POST "$internet/api/v1/uploads" | header_of Location || true)
+check "an internet upload address points back at the internet entry over HTTPS" grep -q "^$internet/api/v1/uploads/" <<<"$internet_upload"
+[[ -z "$internet_upload" ]] || through -f -o /dev/null -H "Cookie: $phone_cookie" -H "X-CSRF-Token: $phone_csrf" \
+  -H 'Tus-Resumable: 1.0.0' -X DELETE "$internet_upload" || true
+check "the terminal says it is not offered through the internet entry" \
+  test "$(through -f -H "Cookie: $phone_cookie" "$internet/api/v1/terminal" | jq -c .)" = '{"enabled":true,"internet":true}'
+check "the internet entry opens no terminal" \
+  test "$(through -H "Cookie: $phone_cookie" "$internet/api/v1/terminal/session" | jq -r .error.code)" = terminal_internet
+
+# Removing the file turns the entry off again; the tunnel's key stays.
+tunnel_key=$(wg pubkey < /etc/wireguard/wg-anas.key)
+rm /etc/a-nas/internet.env
+stage /tmp/internet-off
+check "the installer turns the internet entry off" install_release internet-off
+check "the Product Service no longer listens for the internet" \
+  bash -c "! grep -q '^ANAS_INTERNET_' /etc/a-nas/anas-api.env && ! ss -Hltn 'sport = :8081' | grep -q ."
+check "Caddy serves the LAN entry alone again" cmp -s /src/deploy/caddy/Caddyfile /etc/caddy/Caddyfile
+check "the tunnel and its firewall are gone" \
+  bash -c "! test -e /etc/wireguard/wg-anas.conf && ! nft list table inet anas_internet >/dev/null 2>&1"
+check "the tunnel's key stays for the next time" test "$(wg pubkey < /etc/wireguard/wg-anas.key)" = "$tunnel_key"
+check "the LAN entry still serves after the internet entry is gone" test "$(curl -fsS "$lan/healthz" | jq -r .status)" = ok
+ip link del anas-relay
 
 # --- The AI assistant's sandbox on this installer's accounts, spaces and ACLs (#115).
 # shellcheck disable=SC1091 # sourced from the mounted checkout

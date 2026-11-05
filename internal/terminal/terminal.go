@@ -7,7 +7,8 @@
 // refused unless the feature is enabled, the peer is a loopback address (the
 // local console, or the LAN entry proxying for a LAN browser, ADR 0012), the
 // Host names this device (localorigin.DeviceHost) and the browser Origin
-// matches that Host.
+// matches that Host. They are never offered through the internet entry
+// (ADR 0032).
 package terminal
 
 import (
@@ -26,6 +27,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
+	"github.com/zhongwater123/A-NAS/internal/webentry"
 )
 
 const (
@@ -109,7 +111,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path == StatusPath {
-		httpjson.Write(w, http.StatusOK, statusResponse{Enabled: h.config.Enabled})
+		_, internet := webentry.Internet(r)
+		httpjson.Write(w, http.StatusOK, statusResponse{Enabled: h.config.Enabled, Internet: internet})
 		return
 	}
 	h.serveSession(w, r)
@@ -118,6 +121,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) serveSession(w http.ResponseWriter, r *http.Request) {
 	if !h.config.Enabled {
 		httpjson.WriteError(w, http.StatusForbidden, "terminal_disabled", "terminal is disabled")
+		return
+	}
+	if _, internet := webentry.Internet(r); internet {
+		httpjson.WriteError(w, http.StatusForbidden, "terminal_internet", "terminal is not available through the internet entry")
 		return
 	}
 	if !isLoopbackPeer(r.RemoteAddr) || !localorigin.DeviceHost(r.Host) {
@@ -249,4 +256,7 @@ func valueOr(value, fallback string) string {
 
 type statusResponse struct {
 	Enabled bool `json:"enabled"`
+	// Internet says the request came through the internet entry, where
+	// sessions are refused.
+	Internet bool `json:"internet,omitempty"`
 }

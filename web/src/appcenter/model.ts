@@ -119,12 +119,15 @@ export function stateText(app: CatalogApp): string {
   }
 }
 
-// The app's web interface on the address this desktop was opened from.
+// The app's web interface on the address this desktop was opened from. It
+// exists only when the desktop was opened by the device's own address: through
+// the internet entry the desktop has a domain name, and the app's port is not
+// reachable there (ADR 0032).
 export function appURL(
   app: Pick<CatalogApp, "webPort" | "scheme" | "path">,
   location: Location = window.location,
 ): string | undefined {
-  if (!app.webPort) return undefined;
+  if (!app.webPort || !namesDeviceByAddress(location.hostname)) return undefined;
   const url = new URL(location.href);
   url.protocol = `${app.scheme || "http"}:`;
   url.port = String(app.webPort);
@@ -132,6 +135,13 @@ export function appURL(
   url.search = "";
   url.hash = "";
   return url.toString();
+}
+
+// namesDeviceByAddress mirrors the server's own test (localorigin.DeviceHost):
+// localhost on the local console, an IP address on the LAN.
+function namesDeviceByAddress(hostname: string): boolean {
+  if (hostname === "localhost" || hostname.startsWith("[")) return true;
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
 }
 
 export function openApp(app: Pick<CatalogApp, "webPort" | "scheme" | "path">) {

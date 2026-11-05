@@ -15,6 +15,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/zhongwater123/A-NAS/internal/terminal"
+	"github.com/zhongwater123/A-NAS/internal/webentry"
 )
 
 func TestStatusReportsConfiguration(t *testing.T) {
@@ -22,13 +23,40 @@ func TestStatusReportsConfiguration(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		terminal.New(terminal.Config{Enabled: enabled}, nil).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, terminal.StatusPath, nil))
 
-		var body struct{ Enabled bool }
+		var body struct{ Enabled, Internet bool }
 		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 			t.Fatalf("decode status: %v", err)
 		}
-		if recorder.Code != http.StatusOK || body.Enabled != enabled {
+		if recorder.Code != http.StatusOK || body.Enabled != enabled || body.Internet {
 			t.Fatalf("status = %d enabled = %v, want 200 and %v", recorder.Code, body.Enabled, enabled)
 		}
+	}
+}
+
+func TestTheInternetEntryOffersNoSessions(t *testing.T) {
+	handler := webentry.InternetHandler("nas.example.com", terminal.New(terminal.Config{Enabled: true, Shell: "/bin/sh"}, nil))
+
+	status := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, terminal.StatusPath, nil)
+	request.Host = "nas.example.com"
+	handler.ServeHTTP(status, request)
+	var reported struct{ Enabled, Internet bool }
+	if err := json.Unmarshal(status.Body.Bytes(), &reported); err != nil || !reported.Enabled || !reported.Internet {
+		t.Fatalf("status = %s (%v), want enabled and internet", status.Body, err)
+	}
+
+	session := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, terminal.SessionPath, nil)
+	request.RemoteAddr = "127.0.0.1:40000"
+	request.Host = "nas.example.com"
+	request.Header.Set("Origin", "https://nas.example.com")
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	handler.ServeHTTP(session, request)
+	var body struct{ Error struct{ Code string } }
+	_ = json.Unmarshal(session.Body.Bytes(), &body)
+	if session.Code != http.StatusForbidden || body.Error.Code != "terminal_internet" {
+		t.Fatalf("session = %d %q, want 403 terminal_internet", session.Code, body.Error.Code)
 	}
 }
 

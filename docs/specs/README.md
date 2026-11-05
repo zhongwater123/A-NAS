@@ -22,6 +22,7 @@
 - [本地控制台屏幕保护程序](local-console-screensaver.md)（implemented）
 - [开机动画](boot-ident.md)（implemented）
 - [局域网 Web 访问](lan-web-access.md)（implemented）
+- [互联网访问](internet-access.md)（draft；实现与系统测试完成，实机待启用）
 - [设置](settings.md)（implemented）
 - [个性化](personalization.md)（implemented）
 - [任务管理器](task-manager.md)（implemented）

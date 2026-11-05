@@ -1,0 +1,42 @@
+# Managed by A-NAS.
+# The LAN Web entry (ADR 0012) and the internet entry (ADR 0032). The
+# installer writes this file instead of Caddyfile when
+# /etc/a-nas/internet.env exists, filling in the @...@ values from it; the
+# LAN site below is Caddyfile's.
+#
+# The internet entry listens only on the NAS's address in the WireGuard
+# tunnel that the NAS dials to the edge relay. The relay passes public TLS
+# through untouched and puts a PROXY header in front, so the certificate and
+# the decryption stay here and Caddy learns the client's address. Port 80 is
+# answered by the relay itself and never reaches this site, so certificates
+# are validated over TLS-ALPN on 443 only.
+{
+	auto_https disable_redirects
+	servers [@TUNNEL_ADDRESS@]:443 {
+		listener_wrappers {
+			proxy_protocol {
+				timeout 5s
+				allow @RELAY_ADDRESS@/128
+				fallback_policy reject
+			}
+			tls
+		}
+	}
+}
+
+:80 {
+	reverse_proxy 127.0.0.1:8080
+}
+
+@INTERNET_HOST@ {
+	bind @TUNNEL_ADDRESS@
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
+	header Strict-Transport-Security "max-age=31536000"
+	# The Product Service's internet listener: requests there are the
+	# internet's by the socket they arrive on.
+	reverse_proxy 127.0.0.1:8081
+}

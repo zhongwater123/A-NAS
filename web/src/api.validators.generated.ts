@@ -10671,7 +10671,7 @@ validate217.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false}
 
 export const validate25 = validate225;
 const schema107 = {"$ref":"openapi.json#/paths/~1api~1v1~1terminal/get/responses/200/content/application~1json/schema"};
-const schema108 = {"type":"object","additionalProperties":false,"required":["enabled"],"properties":{"enabled":{"type":"boolean"}}};
+const schema108 = {"type":"object","additionalProperties":false,"required":["enabled"],"properties":{"enabled":{"type":"boolean"},"internet":{"type":"boolean","description":"Present and true when the request came through the internet entry (ADR 0032), which never opens terminal sessions."}}};
 
 function validate226(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -10693,7 +10693,7 @@ return false;
 else {
 const _errs1 = errors;
 for(const key0 in data){
-if(!(key0 === "enabled")){
+if(!((key0 === "enabled") || (key0 === "internet"))){
 validate226.errors = [{instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0}}];
 return false;
 break;
@@ -10701,9 +10701,27 @@ break;
 }
 if(_errs1 === errors){
 if(data.enabled !== undefined){
+const _errs2 = errors;
 if(typeof data.enabled !== "boolean"){
 validate226.errors = [{instancePath:instancePath+"/enabled",schemaPath:"#/properties/enabled/type",keyword:"type",params:{type: "boolean"}}];
 return false;
+}
+var valid0 = _errs2 === errors;
+}
+else {
+var valid0 = true;
+}
+if(valid0){
+if(data.internet !== undefined){
+const _errs4 = errors;
+if(typeof data.internet !== "boolean"){
+validate226.errors = [{instancePath:instancePath+"/internet",schemaPath:"#/properties/internet/type",keyword:"type",params:{type: "boolean"}}];
+return false;
+}
+var valid0 = _errs4 === errors;
+}
+else {
+var valid0 = true;
 }
 }
 }

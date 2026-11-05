@@ -290,6 +290,9 @@ try {
         @{ Source = (Join-Path $repoRoot 'deploy\config\experimental-nas-kiosk.env'); Destination = "${target}:$release/kiosk.env.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\chromium\policies\managed\a-nas.json'); Destination = "${target}:$release/a-nas-chromium-policy.json.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\caddy\Caddyfile'); Destination = "${target}:$release/Caddyfile.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\caddy\Caddyfile.internet'); Destination = "${target}:$release/Caddyfile.internet.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\internetnas-internet.nft'); Destination = "${target}:$release/anas-internet.nft.incoming" },
+        @{ Source = (Join-Path $repoRoot 'deploy\systemd\systemnas-internet-firewall.service'); Destination = "${target}:$release/anas-internet-firewall-system.service.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\remote-activate-release.sh'); Destination = "${target}:$release/activate.incoming" }
     )
     foreach ($upload in $uploads) {

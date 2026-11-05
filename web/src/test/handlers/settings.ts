@@ -23,12 +23,14 @@ export function settingsHandlers(options: SettingsOptions = {}) {
 
 // terminalHandlers answers 终端 with whether the device's root turned the
 // terminal on, and counts the checks.
-export function terminalHandlers(enabled: boolean) {
+// terminalHandlers answers the terminal's status; internet answers as the
+// internet entry does, where sessions are never offered (ADR 0032).
+export function terminalHandlers(enabled: boolean, internet = false) {
   const sent = { checks: 0 };
   const handlers = [
     http.get("/api/v1/terminal", ({ response }) => {
       sent.checks += 1;
-      return response(200).json({ enabled });
+      return response(200).json(internet ? { enabled, internet } : { enabled });
     }),
   ];
   return { sent, handlers };

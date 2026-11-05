@@ -35,7 +35,7 @@ var Policy = appstore.Policy{
 	AppDataRoot:   "/srv/a-nas/data/apps",
 	DataRoot:      "/srv/a-nas/data/spaces/shared",
 	TZ:            "Asia/Shanghai",
-	ReservedPorts: []uint16{8080},
+	ReservedPorts: []uint16{8080, 8081},
 }
 
 // addressPool is the Experimental NAS's pool for app networks.
