@@ -1907,9 +1907,12 @@ PY
 systemctl reload caddy
 caddy_root=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
 # through [FROM] CURL_ARGUMENTS...: a request to the internet entry as the
-# relay forwards it for a client at FROM, 198.51.100.7 unless given.
+# relay forwards it for a client at FROM, 2001:db8:7::7 unless given. curl
+# writes its PROXY header in the family of its own connection, IPv6 here, so
+# the clients it speaks for are IPv6 too; HAProxy writes the IPv4 client of
+# the public connection.
 through() {
-  local from=198.51.100.7
+  local from=2001:db8:7::7
   if [[ "$1" != -* ]]; then from=$1; shift; fi
   curl -sS --cacert "$caddy_root" --resolve "$internet_host:443:[$nas_tunnel]" --interface "$relay_tunnel" \
     --haproxy-protocol --haproxy-clientip "$from" "$@"
@@ -1929,7 +1932,7 @@ done
 check "the internet entry reaches the Product Service over HTTPS" test "$(through -f "$internet/healthz" | jq -r .status)" = ok
 check "the internet entry asks browsers to keep to HTTPS" asks_for_https
 check "a connection without a PROXY header is served as it comes" quiet from_loopback
-check "a PROXY header from anywhere but the relay is refused" denied from_loopback --haproxy-protocol --haproxy-clientip 198.51.100.7
+check "a PROXY header from anywhere but the relay is refused" denied from_loopback --haproxy-protocol --haproxy-clientip 2001:db8:7::7
 check "the internet listener answers only for its domain" \
   test "$(status_of -H 'Host: 127.0.0.1' http://127.0.0.1:8081/healthz)" = 421
 
@@ -1943,14 +1946,14 @@ check "an internet session's cookie is Secure" \
 cookie_of() { printf 'anas_session=%s' "$(awk '$6 == "anas_session" {print $7}' "$1")"; }
 phone_cookie=$(cookie_of /tmp/phone.jar)
 check "an internet session keeps working after the phone changes networks" \
-  test "$(through 203.0.113.40 -o /dev/null -w '%{http_code}' -H "Cookie: $phone_cookie" "$internet/api/v1/session")" = 200
+  test "$(through 2001:db8:40::40 -o /dev/null -w '%{http_code}' -H "Cookie: $phone_cookie" "$internet/api/v1/session")" = 200
 check "an internet session is refused through the LAN entry" \
   test "$(status_of -H "Cookie: $phone_cookie" "$lan/api/v1/session")" = 401
 check "a LAN session is refused through the internet entry" \
-  test "$(through "$ip" -o /dev/null -w '%{http_code}' -H "Cookie: $(cookie_of /tmp/owner-lan.jar)" "$internet/api/v1/session")" = 401
+  test "$(through -o /dev/null -w '%{http_code}' -H "Cookie: $(cookie_of /tmp/owner-lan.jar)" "$internet/api/v1/session")" = 401
 check "the activity log records the internet sign-in with the client's address" \
   bash -c "curl -fsS -b /tmp/owner.jar '$api/api/v1/activity?category=session&q=owner' | jq -e 'any(.items[];
-    .action == \"session.signed_in\" and (.detail | fromjson | .via == \"internet\" and .address == \"198.51.100.7\"))' >/dev/null"
+    .action == \"session.signed_in\" and (.detail | fromjson | .via == \"internet\" and .address == \"2001:db8:7::7\"))' >/dev/null"
 phone_csrf=$(jq -r .csrfToken <<<"$phone_login" 2>/dev/null || true)
 internet_upload=$(through -f -D - -o /dev/null -H "Cookie: $phone_cookie" -H "X-CSRF-Token: $phone_csrf" -H 'Tus-Resumable: 1.0.0' \
   -H 'Upload-Length: 1' -H "Upload-Metadata: $(tus_meta filename internet.bin spaceId "$owner_private")" \
