@@ -28,7 +28,15 @@
 5. 大文件传输中暂停、断网、重新打开应用，再恢复；核对最终字节与内容。
 6. 登录另一账号或切换 NAS，不能看到或继续上一账号的传输、会话或本地下载。
 
-本地自动化与 JS 打包不能代替上述原生设备验收。结果和运行方法记录在移动端 README。
+本地自动化与 JS 打包不能代替上述原生设备验收。本地检查与运行方法见移动端 README；原生构建及真机状态记录如下。
+
+## 原生构建与真机状态
+
+2026-11-05，[首轮 GitHub 云构建](https://github.com/zhongwater123/A-NAS/actions/runs/41961148652)的前置检查、Android APK 构建、iOS 模拟器编译与启动步骤通过。Android 包为 `com.anas.mobile` 0.1.0、ARM64、Android 7 起，内置 JS 与 NAS 地址 `172.18.45.48`；APK v2 签名校验通过，SHA-256 为 `7eb54f37a79e341dab7cbf8417b4fe4d10efbeae36979bee317f11c5e8ee5646`。根项目的完整 `make check` 检查集合在 WSL 隔离副本通过（`make check-steps`）。
+
+首次 iOS 截图出现未登录时的连接错误，启动步骤返回成功不等于首次启动正常，见[调查记录](../investigations/2026-11-05-mobile-ios-first-launch.md)。
+
+尚未完成真实账号、VNAS 与双向传输验收：电脑未识别到 Android 的 ADB 设备。iOS 本轮按用户决定先验证云端编译；真机安装等待后续 Apple 签名配置。
 
 ## 关联
 
