@@ -692,6 +692,35 @@ def scene_groups(args):
     print(f"{len(scene_of)} cards in {len(names)} scenes", flush=True)
 
 
+def parts(args):
+    """The film in parts for the planner's catalog (moments.part_starts, #398): cards in film order
+    cut about every moments.PART_SECONDS where colour and light change most (card_colours), and a
+    part whose catalog lines run past moments.PART_CHARS summed up by the local vision model,
+    text alone (look.Vision.summary); written to parts.json beside index.json."""
+    from montage import look, moments
+
+    index = moments.Index.load(os.path.join(args.cache, "index.json"), os.path.join(args.cache, "frames.npz"))
+    vision = look.Vision(args.vision)
+    catalog = index.catalog(times=False, lengths=True, titles=False, paces=True)
+    listed = {line.split(" ", 1)[0]: line for entry in catalog["videos"].values() for line in entry["cards"]}
+    out = []
+    for video in sorted(index.videos):
+        cards = sorted((c for c in index.cards if c["video"] == video), key=lambda c: c["start"])
+        tones = [card_colours(index, c) for c in cards]
+        changes = [0.0] + [1 - float(a @ b) for a, b in itertools.pairwise(tones)]
+        opens = moments.part_starts([c["start"] for c in cards], changes)
+        for k, (a, b) in enumerate(itertools.pairwise([*opens, len(cards)]), 1):
+            ids = [c["id"] for c in cards[a:b]]
+            lines = [listed[i] for i in ids if i in listed]
+            summary = vision.summary(lines, moments.PART_CHARS) if sum(map(len, lines)) > moments.PART_CHARS else ""
+            out.append({"video": video, "cards": ids, "summary": summary})
+            print(f"{video} part {k}: {cards[a]['start']:.0f}–{cards[b - 1]['end']:.0f} s, {len(ids)} cards"
+                  f"{', summed up' if summary else ''}", flush=True)
+    with open(os.path.join(args.cache, moments.PARTS), "w", encoding="utf-8") as file:
+        json.dump({"vision": args.name, "cards": {c["id"]: [c["start"], c["end"]] for c in index.cards}, "parts": out},
+                  file, ensure_ascii=False, indent=1)
+
+
 def measure(args):
     """How the camera moves in each card and how its picture looks (montage.picture), written to
     pictures.json beside index.json; cards measured over the same seconds are kept."""
@@ -753,6 +782,11 @@ def main():
     step.add_argument("--cache", required=True, help="the model's directory under the cache, with scenes.json")
     step.add_argument("--model", required=True)
     step.add_argument("--weight-cache", default=os.path.join(datasets.ROOT, "cache", "xnnpack"))
+    step = steps.add_parser("parts", help="cut the film into parts for the planner's catalog and sum up the long ones")
+    step.add_argument("--cache", required=True, help="the model's directory under the cache, with index.json")
+    step.add_argument("--vision", default="http://127.0.0.1:8090/v1/chat/completions",
+                      help="an OpenAI-compatible chat completions URL")
+    step.add_argument("--name", default="Qwen3-VL-2B-Instruct Q8_0", help="the vision model, as recorded")
     step = steps.add_parser("measure", help="measure camera motion, sharpness and exposure of each montage card")
     step.add_argument("--cache", required=True, help="the model's directory under the cache, with index.json")
     step.add_argument("--workers", type=int, default=4)
@@ -781,6 +815,8 @@ def main():
         scenes(args)
     elif args.step == "scene-groups":
         scene_groups(args)
+    elif args.step == "parts":
+        parts(args)
     elif args.step == "measure":
         measure(args)
     else:

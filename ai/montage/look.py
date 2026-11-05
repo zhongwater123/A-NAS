@@ -82,6 +82,21 @@ FIT = "这是一段视频里的一帧。问题：画面里有「{shows}」吗？
 # is there and scores SCREEN_PASS or more (or gave no score).
 SCREEN = ("上面是同一段视频按时间先后的几帧。问题：画面里有「{shows}」吗？请仔细看，先回答“有”或“没有”；"
           "再给 0–10 分，10 分是清楚、好看地拍到了它；最后用一句话说明画面里实际是什么。格式：有，8 分，……")
+# A part of the film for the planner's catalog, summed up from its cards' lines (#398): what
+# happens in it in order, the same said once, every different thing kept. Asked without a
+# penalty on repeats, a 2B model said one sentence over and over for case-01's dark rooms.
+PART = ("下面是一部影片里连续一段时间的 {n} 张素材卡片，按原片先后排列，每行一张：卡片 id、可剪秒数、节奏、光线、画面描述（亮点）。\n"
+        "{lines}\n\n"
+        "写这一段的概述，给剪辑规划用：按先后写出现的地点、人物、物体、动作和事件，意思相同的合并成一条，意思不同的都要留下，"
+        "尤其是只出现一次的特别画面；只写卡片里有的，不要编，不写卡片 id。不超过 {chars} 个字，直接写概述。")
+PART_REPEAT = 1.15
+
+
+def looping(text: str) -> bool:
+    """A model stuck repeating itself: some eight characters come back three times or more."""
+    return any(text.count(text[i:i + 8]) >= 3 for i in range(max(len(text) - 8, 0)))
+
+
 SCREEN_PASS = 5
 SCORE = re.compile(r"(\d{1,2})\s*分")
 
@@ -98,13 +113,15 @@ class Vision:
             raise ValueError(f"not an HTTP URL: {url}")
         self.url, self.model = url, model
 
-    def ask(self, prompt: str, jpeg: bytes | list[bytes], max_tokens: int = 120) -> str:
-        """The model's answer to prompt about one picture or several, in order."""
+    def ask(self, prompt: str, jpeg: bytes | list[bytes], max_tokens: int = 120, repeat_penalty: float | None = None) -> str:
+        """The model's answer to prompt about one picture or several (none: text alone), in order."""
         jpegs = jpeg if isinstance(jpeg, list) else [jpeg]
         content = [{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(j).decode()}}
                    for j in jpegs] + [{"type": "text", "text": prompt}]
         body = {"model": self.model, "temperature": 0, "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": content}]}
+        if repeat_penalty is not None:
+            body["repeat_penalty"] = repeat_penalty
         # The URL is the operator's and checked to be HTTP above.
         request = urllib.request.Request(self.url, json.dumps(body).encode(), {"Content-Type": "application/json"})  # noqa: S310
         try:
@@ -113,6 +130,13 @@ class Vision:
         except (OSError, ValueError) as error:
             raise VisionError(f"本机视觉模型不可用：{error}") from None
         return answer["choices"][0]["message"]["content"].strip()
+
+    def summary(self, lines: list[str], chars: int) -> str:
+        """A part's card lines summed up in at most about chars characters (PART), or "" when the
+        model went round in circles (looping), so that the part keeps its lines."""
+        text = " ".join(self.ask(PART.format(n=len(lines), lines="\n".join(lines), chars=chars), [],
+                                 int(chars * 1.6), repeat_penalty=PART_REPEAT).split())
+        return "" if looping(text) else text
 
     def describe(self, jpegs: list[bytes]) -> str:
         return self.ask(DESCRIBE, jpegs, 80).splitlines()[0].strip()

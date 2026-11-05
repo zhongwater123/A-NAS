@@ -320,6 +320,14 @@ class Handler(BaseHTTPRequestHandler):
             if target is not None and (isinstance(target, bool) or not isinstance(target, (int, float))
                                        or not 5 <= target <= 600):
                 return self.reply(400, {"error": "seconds 要是 5–600 的秒数"})
+            # A segment may name a part of the film instead of a card (#398, 剪法17): it takes
+            # the part's card whose picture its probe matches best (moments.Index.pick).
+            try:
+                segments, problems = self.picked(segments)
+            except OSError as error:
+                return self.reply(503, {"error": f"设备上的 AI 暂时不可用：{error}"})
+            if problems:
+                return self.reply(422, {"error": "剪辑计划不合规则", "problems": problems})
             # "pace": "picture": each segment takes its card's pace from how much its picture
             # changes (moments.Index.pace_of), not one the planner wrote (#350).
             if body.get("pace") == "picture":
@@ -372,7 +380,7 @@ class Handler(BaseHTTPRequestHandler):
         if review and spans is not None:
             review = [r | {"planned": [s["start"], s["end"]]} for s, r in zip(segments, review, strict=True)]
         if review and spans is not None:
-            review = [r | {k: s[k] for k in ("pace", "asked") if s.get(k)} for s, r in zip(segments, review, strict=True)]
+            review = [r | {k: s[k] for k in ("pace", "asked", "card") if s.get(k)} for s, r in zip(segments, review, strict=True)]
         if review and edged:
             review = [r | {"edged": e} for r, e in zip(review, edged, strict=True)]
         work = tempfile.mkdtemp(dir=self.server.work)
@@ -394,6 +402,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
         return None
+
+    def picked(self, segments):
+        """The segments with a card for each that names a part and no card (Index.pick), cards
+        another segment names left to it while the part has others; and the problems."""
+        index, out, problems = self.server.index, [], []
+        taken = {s.get("card") for s in segments if isinstance(s, dict) and s.get("card")}
+        for n, segment in enumerate(segments, 1):
+            if not isinstance(segment, dict) or segment.get("card") or segment.get("part") is None:
+                out.append(segment)
+                continue
+            probe = segment.get("probe")
+            if not isinstance(probe, str) or not 1 <= len(probe.strip()) <= PROBE_CHARS:
+                problems.append(f"第 {n} 段写了 part，还要写要找的画面（shows）")
+                continue
+            if probe not in self.server.probes:
+                self.server.probes[probe] = embed_query(self.server.ai_socket, probe)
+            card = index.pick(segment["part"], self.server.probes[probe], taken)
+            if card is None:
+                problems.append(f"第 {n} 段的 part 不是目录里的片段号")
+                continue
+            taken.add(card)
+            out.append(segment | {"card": card})
+        return out, problems
 
     def spanned(self, segments, mode):
         """The segments with start and end set from the window their probe matched (Index.span),

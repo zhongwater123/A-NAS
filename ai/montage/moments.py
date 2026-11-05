@@ -126,6 +126,31 @@ MARGIN = 1.1
 SCENE_CHARS = 40
 # Words with their seconds by video, beside the index, from speech recognition.
 SPEECH = "speech.json"
+# The film cut into parts for the planner's catalog (#398, 剪法17), in place of scenes: about
+# PART_SECONDS each, each cut moved to the card boundary within PART_SNAP of it where colour and
+# light change most, so that a part seldom ends inside a scene, without judging what a scene is.
+# A part whose card lines run past PART_CHARS is listed by a summary the local model writes
+# (look.Vision.summary, eval.video_moments parts), and the planner names the part, not a card.
+PARTS = "parts.json"
+PART_SECONDS = 60.0
+PART_SNAP = 10.0
+PART_CHARS = 300
+
+
+def part_starts(starts: list[float], changes: list[float], every: float = PART_SECONDS,
+                snap: float = PART_SNAP) -> list[int]:
+    """The indices of the cards that open a part, the first card always: cards in film order by
+    their starts in seconds, changes[k] how much colour and light change from card k - 1 to card
+    k. A part runs about every seconds: the card within snap of its end with the most change
+    opens the next part, or with none within snap the card starting nearest that end."""
+    out = [0]
+    while True:
+        due = starts[out[-1]] + every
+        later = range(out[-1] + 1, len(starts))
+        if not later or starts[-1] < due - snap:
+            return out
+        near = [k for k in later if abs(starts[k] - due) <= snap]
+        out.append(max(near, key=lambda k: (changes[k], -k)) if near else min(later, key=lambda k: abs(starts[k] - due)))
 
 
 def screened(found: dict, verdicts: dict, each: int) -> dict:
@@ -231,6 +256,8 @@ class Index:
         self.scene_names: dict[int, str] = {}
         # How alike each two scenes are (SCENE_NEAR), by scene number.
         self.scene_alike: dict[int, dict[int, float]] = {}
+        # The film's parts for the catalog (PARTS), in order: each its video, cards and summary.
+        self.parts: list[dict] = []
 
     @classmethod
     def load(cls, index_path: str, vectors_path: str) -> "Index":
@@ -263,6 +290,14 @@ class Index:
             loaded.scene_of = {i: e["group"] for i, e in kept.items() if "group" in e}
             loaded.scene_names = {int(n): name for n, name in said.get("groups", {}).items()}
             loaded.scene_alike = {int(a): {int(b): v for b, v in row.items()} for a, row in said.get("alike", {}).items()}
+        parts = os.path.join(os.path.dirname(index_path), PARTS)
+        if os.path.exists(parts):
+            with open(parts, encoding="utf-8") as file:
+                said = json.load(file)
+            # Kept only when written for these cards over the same seconds.
+            spans = {c["id"]: [c["start"], c["end"]] for c in loaded.cards}
+            if said.get("cards") == spans:
+                loaded.parts = said["parts"]
         speech = os.path.join(os.path.dirname(index_path), SPEECH)
         if os.path.exists(speech):
             with open(speech, encoding="utf-8") as file:
@@ -381,6 +416,19 @@ class Index:
     @staticmethod
     def _paces(paced: dict | None) -> str:
         return "：" + "、".join(f"{p} {k}" for p, k in paced.items() if k) if paced else ""
+
+    def pick(self, part: int, probe: np.ndarray, taken=()) -> str | None:
+        """The card of part (from 1) whose best window shows probe most, of those not taken if
+        any are left and not under a title, for a segment that names a part (#398); None for
+        no such part."""
+        if not isinstance(part, int) or isinstance(part, bool) or not 1 <= part <= len(self.parts):
+            return None
+        cards = {c["id"]: c for c in self.cards}
+        ids = [i for i in self.parts[part - 1]["cards"] if i in cards and i not in self.texts]
+        free = [i for i in ids if i not in taken] or ids
+        scored = [(max((float(self.frames[w] @ probe) for w in cards[i]["windows"] if not self.flat[w]), default=-1.0), i)
+                  for i in free]
+        return max(scored)[1] if scored else None
 
     def pace_of(self, card_id: str) -> str | None:
         """The card's pace from how much its picture changes (PACE_CHANGE), however many seconds

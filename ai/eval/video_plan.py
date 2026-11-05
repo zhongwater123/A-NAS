@@ -85,9 +85,11 @@ def run(instruction: dict, index: moments.Index, container: str, model: str | No
             calls.append("make_montage")
             if head["status"] == 200:
                 review = json.loads(base64.b64decode(head["X-Review"])) if head.get("X-Review") else []
-                segments = [s | {"start": r["planned"][0], "end": r["planned"][1]}
+                # The card the service picked for a segment that named a part (#398).
+                segments = [s | {"card": r.get("card", s.get("card")), "start": r["planned"][0], "end": r["planned"][1]}
                             for s, r in zip(body["segments"], review, strict=True)]
-                done = [s | {"start": r["start"], "end": r["end"]} for s, r in zip(body["segments"], review, strict=True)]
+                done = [s | {"card": r.get("card", s.get("card")), "start": r["start"], "end": r["end"]}
+                        for s, r in zip(body["segments"], review, strict=True)]
                 with open(target + ".json", "w", encoding="utf-8") as file:
                     json.dump({"style": style, "story": planned.get("story"), "planned": segments, "segments": done,
                                "review": review, "skipped": []},

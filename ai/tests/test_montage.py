@@ -468,6 +468,20 @@ class MomentsTest(unittest.TestCase):
         self.index.check(plan(("07-1-0", 10), ("07-0-0", 2), ("07-1-1", 30)))
         self.index.check(plan(("07-1-0", 8), ("07-1-0", 12), ("07-1-1", 30), ("07-1-1", 36)))
 
+    def test_parts_open_where_colour_and_light_change_most_near_each_minute(self):
+        starts = [0, 20, 40, 52, 58, 63, 70, 90, 110, 118, 125, 140]
+        changes = [0, 0.1, 0.1, 0.2, 0.9, 0.3, 0.1, 0.1, 0.1, 0.8, 0.2, 0.1]
+        # Near 60 s the card at 58 s changes most; near 118 s, the one at 118 s; then the film ends.
+        self.assertEqual(moments.part_starts(starts, changes), [0, 4, 9])
+        self.assertEqual(moments.part_starts([0, 25, 90], [0, 0.5, 0.5]), [0, 2])  # none near 60 s: the nearest
+        self.assertEqual(moments.part_starts([0, 10], [0, 0.9]), [0])  # shorter than a part
+
+    def test_a_part_gives_the_card_whose_picture_its_probe_matches_best(self):
+        self.index.parts = [{"video": "07", "cards": ["07-0-0", "07-1-0", "07-1-1"], "summary": ""}]
+        self.assertEqual(self.index.pick(1, self.castle), "07-1-0")
+        self.assertEqual(self.index.pick(1, self.castle, {"07-1-0"}), "07-1-1")  # taken: the next best
+        self.assertIsNone(self.index.pick(2, self.castle))
+
     def test_a_card_is_paced_by_how_much_its_picture_changes(self):
         self.index.pictures = {"07-0-0": {"change": 0.004}, "07-1-0": {"change": 0.03}, "07-1-1": {"change": 0.1}}
         self.assertEqual([self.index.pace_of(i) for i in ("07-0-0", "07-1-0", "07-1-1", "07-2-0")],

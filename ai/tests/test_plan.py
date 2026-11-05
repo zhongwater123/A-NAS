@@ -22,26 +22,36 @@ class PlanTest(unittest.TestCase):
         self.index.captions = {"01-0-0": "雨中的街道", "01-1-0": "办公室里的男子"}
         self.index.scene_of, self.index.scene_names = {"01-0-0": 1, "01-1-0": 2}, {1: "室外，街道", 2: "室内，办公室"}
 
-    def test_the_message_holds_the_instruction_seconds_style_scenes_and_cards(self):
+    def test_the_message_holds_the_instruction_seconds_style_and_cards_by_part(self):
         text = plan.message(self.index, "剪成预告片", 60, "预告片")
         self.assertEqual(text.splitlines()[:2], ["指令：剪成预告片", "目标时长：约 60 秒"])
         self.assertIn("体裁：预告片", text)
         self.assertNotIn("剪法", text)  # a trailer is given no rules of its own
-        lines = text.splitlines()
-        self.assertEqual(lines[lines.index("场景2：室内，办公室（1 张卡片）") + 1], "01-1-0 可剪6秒 办公室里的男子")
+        # Without parts written, the video is one part.
+        self.assertEqual(text.splitlines()[-3:], ["片段1（0:00–0:12，2 张卡片）", "01-0-0 可剪6秒 雨中的街道",
+                                                  "01-1-0 可剪6秒 办公室里的男子"])
+        self.assertNotIn("场景", text)
         self.assertNotIn("秒（镜头", text)  # no card seconds: the program sets them
         looks = {"motion": "固定", "sharp": 500.0, "shake": 0.0, "bright": 100.0, "clipped": 0.0}
         self.index.pictures = {"01-0-0": looks | {"change": 0.002}, "01-1-0": looks | {"change": 0.08}}
         text = plan.message(self.index, "剪成预告片", 60, "预告片")
-        self.assertIn("场景1：室外，街道（1 张卡片：慢 1）", text)
+        self.assertIn("片段1（0:00–0:12，2 张卡片：慢 1、快 1）", text)
         self.assertIn("01-0-0 可剪6秒 节奏慢", text)
         self.assertIn("01-1-0 可剪6秒 节奏快", text)  # a fast card's seconds are not cut to its pace
+
+    def test_a_part_of_long_card_lines_gives_its_summary(self):
+        self.index.parts = [{"video": "01", "cards": ["01-0-0"], "summary": "雨夜街头"},
+                            {"video": "01", "cards": ["01-1-0"], "summary": "办公室"}]
+        self.index.captions["01-1-0"] = "办公室里的男子" * 60  # past moments.PART_CHARS
+        lines = plan.message(self.index, "剪成预告片", 60, "预告片").splitlines()
+        self.assertEqual(lines[-4:], ["片段1（0:00–0:06，1 张卡片）", "01-0-0 可剪6秒 雨中的街道",
+                                      "片段2（0:06–0:12，1 张卡片）", "概述：办公室"])
 
     def test_cards_with_a_title_over_them_are_left_out(self):
         self.index.texts = {"01-0-0": "片名：MERIDIAN"}
         text = plan.message(self.index, "剪成预告片", 60, "预告片")
         self.assertNotIn("01-0-0", text)
-        self.assertNotIn("场景1", text)
+        self.assertIn("片段1（0:00–0:12，1 张卡片）", text)
         self.assertIn("01-1-0", text)
 
     def test_the_answer_is_one_json_object_fenced_or_not(self):
@@ -55,6 +65,8 @@ class PlanTest(unittest.TestCase):
         segment = {"card": "01-0-0", "shows": "街道", "reason": "交代地点"}
         body = plan.request({"segments": [segment | {"pace": "快", "extra": "不传"}]}, 60, "预告片")
         self.assertEqual(body["segments"], [segment | {"probe": "街道"}])  # the program paces it
+        by_part = {"part": 2, "shows": "办公室", "reason": "交代处境"}
+        self.assertEqual(plan.request({"segments": [by_part]}, 60, None)["segments"], [by_part | {"probe": "办公室"}])
         self.assertEqual({k: body[k] for k in ("seconds", "margin", "edges", "look", "pace")},
                          {"seconds": 60, "margin": True, "edges": True, "look": False, "pace": "picture"})
 
