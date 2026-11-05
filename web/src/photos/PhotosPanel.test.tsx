@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setSession } from "../api/client";
 import type { PhotoAsset, PhotoLibrary, PhotoSearchResults } from "../api.generated";
 import { session } from "../test/fixtures";
+import { familyBaby, familyOverview, familyRecord } from "../test/handlers/family";
 import {
   album,
   asset,
@@ -712,6 +713,71 @@ describe("PhotosPanel selection", () => {
     await user.type(screen.getByRole("textbox", { name: "新相册名称" }), "春天{Enter}");
     expect(await screen.findByText("已加入相册“春天”")).toBeTruthy();
     expect(added.map(({ albumId }) => albumId)).toContain("album:new");
+  });
+});
+
+describe("PhotosPanel 加入宝宝频道", () => {
+  it("adds photos to babies' channels, copying the caller's own once and leaving out what a channel has", async () => {
+    const copied: string[] = [];
+    const records: Array<{ babyId: string; photos: string[]; text?: string }> = [];
+    const opened = vi.fn();
+    serve(
+      {
+        timelines: mine(() => [
+          asset("photo:1", { sharedCopy: "photo:s1" }),
+          asset("photo:2"),
+          asset("photo:3", { sharedCopy: "photo:s3" }),
+        ]),
+        family: () =>
+          familyOverview({ babies: [familyBaby(), familyBaby({ id: "baby_2", name: "二宝", nickname: "" })] }),
+      },
+      http.post("/api/v1/family/babies/{babyId}/album/contains", async ({ params, request, response }) => {
+        const { assetIds } = await request.json();
+        return response(200).json({
+          assetIds: params.babyId === "baby_1" ? assetIds.filter((id) => id === "photo:s3") : [],
+        });
+      }),
+      http.post("/api/v1/photos/assets/{assetId}/copies", ({ params, response }) => {
+        copied.push(params.assetId);
+        return response(201).json(asset("photo:c2", { libraryId: sharedLibrary.id }));
+      }),
+      http.post("/api/v1/family/babies/{babyId}/records", async ({ params, request, response }) => {
+        const body = await request.json();
+        records.push({ babyId: params.babyId, photos: body.photos ?? [], text: body.text });
+        return response(201).json(familyRecord({ babyId: params.babyId, kind: "photos" }));
+      }),
+    );
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} onOpenFamily={opened} />);
+    for (const name of ["photo:1.jpg", "photo:2.jpg", "photo:3.jpg"])
+      await user.click(await screen.findByRole("checkbox", { name: `选择 ${name}` }));
+    await user.click(await screen.findByRole("button", { name: "加入宝宝频道" }));
+    const dialog = await screen.findByRole("dialog", { name: "加入宝宝频道" });
+    expect(await within(dialog).findByText("1 张已在频道中，会跳过")).toBeTruthy();
+    expect(within(dialog).getByText(/其中 1 张在我的图库，会先复制到共享图库/)).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "加入" })).toHaveProperty("disabled", true);
+    await user.click(within(dialog).getByRole("checkbox", { name: /米米/ }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /二宝/ }));
+    await user.type(within(dialog).getByRole("textbox", { name: "说明（可选）" }), "公园");
+    await user.click(within(dialog).getByRole("button", { name: "加入" }));
+
+    expect(await screen.findByText("已加入米米、二宝的频道")).toBeTruthy();
+    expect(copied).toEqual(["photo:2"]);
+    expect(records.map((record) => ({ ...record, photos: [...record.photos].sort() }))).toEqual([
+      { babyId: "baby_1", photos: ["photo:c2", "photo:s1"], text: "公园" },
+      { babyId: "baby_2", photos: ["photo:c2", "photo:s1", "photo:s3"], text: "公园" },
+    ]);
+    await user.click(screen.getByRole("button", { name: "查看" }));
+    expect(opened).toHaveBeenCalledWith("baby_1");
+  });
+
+  it("offers no channel to an account outside 家庭中心", async () => {
+    serve({ timelines: mine(() => [asset("photo:1")]) });
+    const user = userEvent.setup();
+    render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+    await user.click(await screen.findByRole("checkbox", { name: "选择 photo:1.jpg" }));
+    expect(screen.getByRole("button", { name: "加入相册" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "加入宝宝频道" })).toBeNull();
   });
 });
 

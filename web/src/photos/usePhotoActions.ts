@@ -1,5 +1,6 @@
 import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
 
+import type { FamilyBaby } from "../family/api";
 import { endViewing } from "../settings/api";
 import type { useDialogs, useToasts } from "../ui/feedback";
 import {
@@ -50,6 +51,9 @@ interface Options {
   dialogs: ReturnType<typeof useDialogs>;
   toast: ReturnType<typeof useToasts>["toast"];
   reportError: (message: string) => void;
+  // The babies of 家庭中心 whose channels photos can join, and how to open one.
+  babies: FamilyBaby[];
+  onOpenFamily?: (babyId: string) => void;
 }
 
 // usePhotoActions is what the window does to photos and to the album, person,
@@ -75,8 +79,11 @@ export function usePhotoActions({
   dialogs,
   toast,
   reportError,
+  babies,
+  onOpenFamily,
 }: Options) {
   const [picker, setPicker] = useState<PhotoAsset[]>();
+  const [channelPicker, setChannelPicker] = useState<PhotoAsset[]>();
   const [photoPicker, setPhotoPicker] = useState<PhotoAlbum>();
   const [busy, setBusy] = useState<{ label: string; done: number; total: number }>();
   const byId = useMemo(() => new Map(viewAssets.map((asset) => [asset.id, asset])), [viewAssets]);
@@ -139,6 +146,19 @@ export function usePhotoActions({
       setPicker(undefined);
       reportError(messageOf(caught));
     }
+  };
+  // addedToChannel says which channels photos joined, and opens the first.
+  const addedToChannel = (added: FamilyBaby[]) => {
+    setChannelPicker(undefined);
+    selection.clear();
+    if (!added.length) {
+      toast({ text: "这些照片都已在频道中" });
+      return;
+    }
+    toast({
+      text: `已加入${added.map((baby) => baby.nickname || baby.name).join("、")}的频道`,
+      action: onOpenFamily ? { label: "查看", run: () => onOpenFamily(added[0].id) } : undefined,
+    });
   };
   const copyTo = async (library: PhotoLibrary, assets: PhotoAsset[]) => {
     const result = await batch(`正在复制到${libraryName(caller, library)}`, assets, (asset) =>
@@ -408,6 +428,10 @@ export function usePhotoActions({
     busy,
     picker,
     setPicker,
+    babies,
+    channelPicker,
+    setChannelPicker,
+    addedToChannel,
     photoPicker,
     setPhotoPicker,
     merging,
