@@ -105,9 +105,10 @@ ENDING_PACE = "中"
 # (colours), each 0 for the least alike pair and 1 for the most. Ranks, for each measure runs
 # over a span of its own (case-08's descriptions 0.86–0.95, its colours 0.5–0.9). Pictures'
 # vectors are left out: case-08's put its brain model and its sniper's scope, the plan's
-# harshest cut, near the middle. A plan changes scene only to one at least this alike, as
-# alike as half the film's pairs; at that, every case-08 scene can still be reached.
-SCENE_NEAR = 0.5
+# harshest cut, near the middle. A plan changes scene only to one at least this alike. 0.45
+# still keeps that cut out (0.30) and lets case-01's street lead into its office (0.49), which
+# 0.5 kept apart and had the plan put a building's front between them.
+SCENE_NEAR = 0.45
 # A picture's colour and light: its pixels in BINS × BINS × BINS bins of red, green and blue.
 BINS = 4
 # A segment's pace, as the planner gives it: (shortest, aimed at, longest) seconds (#350).
