@@ -1,6 +1,6 @@
 import { Check, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { MotionConfig } from "motion/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { relativeTime } from "../lib/time";
 import { useDialogs, useToasts } from "../ui/feedback";
@@ -23,17 +23,22 @@ import { Modal } from "./parts";
 interface Props {
   userId: string;
   onShowPhoto: (assetId: string) => void;
+  /** A baby's channel another window asks to show, read afresh; onIntentHandled hands it back. */
+  intent?: { babyId: string };
+  onIntentHandled?(handled: { babyId: string }): void;
 }
 
 // FamilyPanel is the 家庭中心 window. Accounts outside the family see how to
 // join; members pick a baby in the narrow rail and read the channel beside it.
-export function FamilyPanel({ userId, onShowPhoto }: Props) {
+export function FamilyPanel({ userId, onShowPhoto, intent, onIntentHandled }: Props) {
   const [overview, setOverview] = useState<FamilyOverview>();
   const [catalog, setCatalog] = useState<FamilyCatalog>();
   const [failure, setFailure] = useState("");
   const [selected, setSelected] = useState<string>();
   const [adding, setAdding] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  // Each request to show a channel reads it again, as photos may have joined it.
+  const [opened, setOpened] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const { prompt, confirm, dialog } = useDialogs();
   const { toast, element: toasts } = useToasts();
@@ -70,7 +75,8 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
         if (!live) return;
         setOverview(family);
         setCatalog(shipped);
-        setSelected(family.babies[0]?.id);
+        // A channel another window asked for may have been chosen already.
+        setSelected((current) => current ?? family.babies[0]?.id);
       },
       (caught: unknown) => {
         if (live) setFailure(familyError(caught));
@@ -80,6 +86,32 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
       live = false;
     };
   }, []);
+
+  // A channel asked for from another window shows once the family is read
+  // again. An intent replaced before then is left to its successor.
+  const intentHandled = useEffectEvent((handled: { babyId: string }) => onIntentHandled?.(handled));
+  useEffect(() => {
+    if (!intent) return;
+    let current = true;
+    getFamily()
+      .then(
+        (next) => {
+          if (!current) return;
+          setOverview(next);
+          if (next.babies.some((baby) => baby.id === intent.babyId)) {
+            setSelected(intent.babyId);
+            setOpened((value) => value + 1);
+          }
+        },
+        () => undefined,
+      )
+      .finally(() => {
+        if (current) intentHandled(intent);
+      });
+    return () => {
+      current = false;
+    };
+  }, [intent]);
 
   if (failure && !overview) {
     return (
@@ -167,7 +199,7 @@ export function FamilyPanel({ userId, onShowPhoto }: Props) {
             )}
           </nav>
           {baby ? (
-            <Channel key={baby.id} baby={baby} />
+            <Channel key={`${baby.id}:${opened}`} baby={baby} />
           ) : (
             <NoBabies guardian={overview.me.guardian} onAdd={() => setAdding(true)} />
           )}

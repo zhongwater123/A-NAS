@@ -157,7 +157,10 @@ type Asset struct {
 	// AlsoKeptBy names other members whose private libraries hold the same
 	// original. Only the owner of a private library sees it, and it reveals
 	// nothing else about those libraries.
-	AlsoKeptBy []string    `json:"alsoKeptBy,omitempty"`
+	AlsoKeptBy []string `json:"alsoKeptBy,omitempty"`
+	// SharedCopy is, for an asset of the caller's own private library, the
+	// shared library's asset with the same original, when there is one.
+	SharedCopy string      `json:"sharedCopy,omitempty"`
 	Trash      *TrashState `json:"trash,omitempty"`
 	// Tags and Albums belong to a single photo's details; lists leave them
 	// out. AI clusters are never part of a photo's details.

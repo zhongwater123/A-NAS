@@ -1767,7 +1767,7 @@ export interface paths {
         /** A channel's records as a timeline: by the day each happened, newest first, 30 a page; only photos the reader can see, and photo records with none left are skipped */
         get: operations["listFamilyRecords"];
         put?: never;
-        /** Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID */
+        /** Add a record. Photos and videos are uploaded to the shared library first and named here by asset ID. A photo record leaves out photos already in the cloud album (409 already_in_channel when none are left) and becomes one record per day its photos were taken; the response is the latest of them */
         post: operations["addFamilyRecord"];
         delete?: never;
         options?: never;
@@ -1820,6 +1820,23 @@ export interface paths {
         get: operations["getFamilyAlbum"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/family/babies/{babyId}/album/contains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Which of up to 500 photos are in a baby's cloud album already, in the order asked, so a picker can mark them */
+        post: operations["familyAlbumContains"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5773,6 +5790,8 @@ export interface components {
             duplicate?: "first" | "duplicate";
             /** @description Names of other members whose private libraries hold the same original; only the owner of a private library sees it. */
             alsoKeptBy?: string[];
+            /** @description For an asset of the caller's own private library: the earliest asset of the shared library with the same original. Adding the photo to a family channel uses it instead of copying again. */
+            sharedCopy?: string;
             trash?: {
                 /** Format: date-time */
                 trashedAt: string;
@@ -6734,6 +6753,9 @@ export interface components {
             /** @description The members who left it, earliest first. */
             accountIds: string[];
         };
+        FamilyAssetIDs: {
+            assetIds: string[];
+        };
     };
     responses: {
         /** @description Product operation error. */
@@ -7111,6 +7133,7 @@ export type TaskManagerFan = components['schemas']['TaskManagerFan'];
 export type TaskManagerFanGroup = components['schemas']['TaskManagerFanGroup'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
+export type FamilyAssetIDs = components['schemas']['FamilyAssetIDs'];
 export type ResponseProductError = components['responses']['ProductError'];
 export type ResponseMethodNotAllowed = components['responses']['MethodNotAllowed'];
 export type ResponseStateUnavailable = components['responses']['StateUnavailable'];
@@ -10731,6 +10754,37 @@ export interface operations {
             404: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
+        };
+    };
+    familyAlbumContains: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                babyId: components["parameters"]["FamilyBabyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FamilyAssetIDs"];
+            };
+        };
+        responses: {
+            /** @description The named photos that are in the album */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FamilyAssetIDs"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
         };
     };
     getFamilyGrowth: {

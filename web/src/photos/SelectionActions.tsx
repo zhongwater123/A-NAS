@@ -1,4 +1,4 @@
-import { CircleMinus, Copy, Download, FolderMinus, FolderPlus, RotateCcw, Trash2 } from "lucide-react";
+import { Baby, CircleMinus, Copy, Download, FolderMinus, FolderPlus, RotateCcw, Trash2 } from "lucide-react";
 
 import { type Caller, canChange, canEditAlbum, libraryOf, ownLibrary, type Place, sharedLibrary } from "./model";
 import styles from "./photos.module.css";
@@ -22,6 +22,8 @@ export function SelectionActions({
     chosen,
     busy,
     setPicker,
+    babies,
+    setChannelPicker,
     restore,
     purge,
     copyTo,
@@ -44,6 +46,11 @@ export function SelectionActions({
       : chosen.every((asset) => asset.libraryId === shared?.id)
         ? mine
         : undefined;
+  // A baby's channel takes shared photos and copies of the caller's own.
+  const toChannel =
+    babies.length > 0 &&
+    allWritable &&
+    chosen.every((asset) => asset.libraryId === mine?.id || asset.libraryId === shared?.id);
 
   return busy ? (
     <span className={styles.phSelectionBusy}>
@@ -67,6 +74,12 @@ export function SelectionActions({
         <button type="button" onClick={() => setPicker(chosen)}>
           <FolderPlus />
           <span>加入相册</span>
+        </button>
+      )}
+      {toChannel && (
+        <button type="button" onClick={() => setChannelPicker(chosen)}>
+          <Baby />
+          <span>加入宝宝频道</span>
         </button>
       )}
       {copyTarget && (

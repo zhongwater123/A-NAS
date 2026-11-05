@@ -130,10 +130,12 @@ func TestFamilyCenterKeepsToTheContract(t *testing.T) {
 		Items []photos.Library `json:"items"`
 	}
 	decode(t, alice.do(http.MethodGet, "/api/v1/photos/libraries", "", nil, http.StatusOK).Body, &libraries)
-	var shared string
+	var shared, own string
 	for _, library := range libraries.Items {
 		if library.Kind == photos.LibraryKindShared {
 			shared = library.ID
+		} else {
+			own = library.ID
 		}
 	}
 	body, contentType = multipartFile(t, "park.png", tinyPNG(t))
@@ -145,6 +147,23 @@ func TestFamilyCenterKeepsToTheContract(t *testing.T) {
 		t.Fatalf("photo record = %+v", record)
 	}
 	alice.do(http.MethodPost, babyPath+"/records", `{"kind":"photos","photos":["missing"]}`, nil, http.StatusUnprocessableEntity)
+	// A picker learns what the album has; a photo record of nothing new is refused.
+	var contains struct {
+		AssetIDs []string `json:"assetIds"`
+	}
+	decode(t, owner.do(http.MethodPost, babyPath+"/album/contains", `{"assetIds":["other","`+asset.ID+`"]}`, nil, http.StatusOK).Body, &contains)
+	if len(contains.AssetIDs) != 1 || contains.AssetIDs[0] != asset.ID {
+		t.Fatalf("album contains = %v, want %s", contains.AssetIDs, asset.ID)
+	}
+	alice.do(http.MethodPost, babyPath+"/records", `{"kind":"photos","photos":["`+asset.ID+`"]}`, nil, http.StatusConflict)
+	// The same photo in alice's own library names its shared copy.
+	body, contentType = multipartFile(t, "park.png", tinyPNG(t))
+	var kept photos.Asset
+	decode(t, alice.do(http.MethodPost, "/api/v1/photos/libraries/"+own+"/uploads", body, map[string]string{"Content-Type": contentType}, http.StatusCreated).Body, &kept)
+	decode(t, alice.do(http.MethodGet, "/api/v1/photos/assets/"+kept.ID, "", nil, http.StatusOK).Body, &kept)
+	if kept.SharedCopy != asset.ID {
+		t.Fatalf("shared copy of alice's own photo = %q, want %s", kept.SharedCopy, asset.ID)
+	}
 	recordPath := "/api/v1/family/records/" + record.ID
 	owner.do(http.MethodGet, babyPath+"/records", "", nil, http.StatusOK)
 	owner.do(http.MethodGet, babyPath+"/records?kind=photos", "", nil, http.StatusOK)

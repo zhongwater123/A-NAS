@@ -29,7 +29,7 @@ anas-host-agent: file worker unavailable username=admin error="start file worker
 ## 观察事实
 
 - NAS 上 Host Agent 进程：`CapPrm`/`CapEff` 为 `000001ffffffff7f`，恰好缺少 bit 7（`CAP_SETUID`）；`CapBnd` 完整；`NoNewPrivs: 1`、`Seccomp: 2`。其余服务（`anas-api`、`anas-photos`、`anas-container-agent`）本就以非 root 运行，不受影响。
-- 需要切换身份的代码只有两处：File Broker 的文件 Worker 与 Web 终端（`internal/filebroker/server.go`、`terminal.go`），均使用 `syscall.Credential`。
+- 需要切换身份的代码只有两处：File Broker 的文件 Worker 与 Web 终端（当时的 `internal/filebroker/server.go`、`terminal.go`，[PR #221](https://github.com/zhongwater123/A-NAS/pull/221) 起在 `internal/filebroker/rootbroker/`），均使用 `syscall.Credential`。
 - 既有测试都由测试进程直接以 root 启动 Host Agent 或 File Broker，从未在正式 unit 的沙箱下运行。
 
 ## 假设
