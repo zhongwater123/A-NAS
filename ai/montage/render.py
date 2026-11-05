@@ -17,6 +17,8 @@ TIMEOUT = 600
 RATE = 48000
 # Each clip's sound fades in and out this long, so that a cut between two clips does not pop.
 SOUND_FADE = 0.03
+# A montage's last clip fades to black, picture and sound, this long (#350): it ends, not stops.
+ENDING_FADE = 1.0
 FIT = (f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
        f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p")
 VIDEO = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(FPS)]
@@ -55,7 +57,7 @@ def ffmpeg_args(images: list[str], seconds: float, crossfade: bool, output: str)
     return [*args, "-filter_complex", ";".join(graph), "-map", f"[{last}]", "-t", f"{total:g}", *_encode(output)]
 
 
-def part_args(video: str, start: float, end: float, heard: bool, output: str) -> list[str]:
+def part_args(video: str, start: float, end: float, heard: bool, output: str, ending: float = 0.0) -> list[str]:
     """The FFmpeg command for one (video, start, end) clip, cut with an accurate seek, as a part to join.
 
     The picture is brought to one size and rate, so that parts from sources of
@@ -63,16 +65,19 @@ def part_args(video: str, start: float, end: float, heard: bool, output: str) ->
     carries the sound of its own span, or silence where heard says its source has
     none: brought to one rate and stereo, padded or cut to the clip's length so
     that picture and sound stay aligned, faded at both ends, and kept as PCM, so
-    that joining adds no encoder delay between parts.
+    that joining adds no encoder delay between parts. With ending, picture and sound fade
+    out over that many last seconds (at most half the clip).
     """
     length = end - start
     # first_pts=0 keeps sound that starts late after the seek where it was, instead of pulling it forward.
     source = f"[0:a]aresample={RATE}:async=1:first_pts=0," if heard else f"anullsrc=r={RATE}:cl=stereo,"
     fade = min(SOUND_FADE, length / 4)
-    graph = (f"[0:v]{FIT},fps={FPS},trim=duration={length:.3f},setpts=PTS-STARTPTS[x];"
+    out = min(ending, length / 2) if ending else fade
+    picture = f",fade=t=out:st={length - out:.3f}:d={out:.3f}" if ending else ""
+    graph = (f"[0:v]{FIT},fps={FPS},trim=duration={length:.3f},setpts=PTS-STARTPTS{picture}[x];"
              f"{source}aformat=sample_fmts=fltp:sample_rates={RATE}:channel_layouts=stereo,apad,"
              f"atrim=duration={length:.3f},afade=t=in:d={fade:.3f},"
-             f"afade=t=out:st={length - fade:.3f}:d={fade:.3f},asetpts=PTS-STARTPTS[s]")
+             f"afade=t=out:st={length - out:.3f}:d={out:.3f},asetpts=PTS-STARTPTS[s]")
     return ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-n",
             "-ss", f"{start:.3f}", "-t", f"{length:.3f}", "-i", video, "-filter_complex", graph,
             "-map", "[x]", "-map", "[s]", *VIDEO, "-c:a", "pcm_s16le", "-f", "matroska", output]
@@ -103,8 +108,9 @@ def render(images: list[str], seconds: float, crossfade: bool, output_dir: str) 
     return _write(lambda partial: _run(ffmpeg_args(images, seconds, crossfade, partial)), output_dir, "slideshow")
 
 
-def render_clips(clips: list[tuple[str, float, float]], output_dir: str) -> str:
+def render_clips(clips: list[tuple[str, float, float]], output_dir: str, ending: bool = False) -> str:
     """Like render, for video clips: each is encoded on its own, then the parts are joined.
+    With ending, the last clip fades to black (ENDING_FADE).
 
     One clip at a time keeps one decoder in memory: a 4K source opened once per
     clip in a single command held a decoder for every clip and passed 3.4 GiB
@@ -118,7 +124,8 @@ def render_clips(clips: list[tuple[str, float, float]], output_dir: str) -> str:
             with open(listing, "w", encoding="utf-8") as file:
                 for i, (video, start, end) in enumerate(clips):
                     part = os.path.join(work, f"{i:03d}.mkv")
-                    _run(part_args(video, start, end, heard[video], part))
+                    _run(part_args(video, start, end, heard[video], part,
+                                   ENDING_FADE if ending and i == len(clips) - 1 else 0.0))
                     file.write("file '" + part.replace("'", "'\\''") + "'\n")
             _run(join_args(listing, partial))
 

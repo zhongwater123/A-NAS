@@ -91,6 +91,16 @@ class RenderTest(unittest.TestCase):
         self.assertIn("afade=t=out:st=2.470:d=0.030", graph)
         self.assertEqual(args[args.index("-c:a") + 1], "pcm_s16le")
 
+    def test_the_last_part_of_a_montage_fades_to_black(self):
+        graph = render.part_args("a.webm", 10, 13, True, "out.mkv", render.ENDING_FADE)
+        graph = graph[graph.index("-filter_complex") + 1]
+        self.assertIn("setpts=PTS-STARTPTS,fade=t=out:st=2.000:d=1.000[x]", graph)
+        self.assertIn("afade=t=out:st=2.000:d=1.000", graph)
+        short = render.part_args("a.webm", 10, 11.2, True, "out.mkv", render.ENDING_FADE)
+        self.assertIn("fade=t=out:st=0.600:d=0.600[x]", short[short.index("-filter_complex") + 1])
+        plain = render.part_args("a.webm", 10, 13, True, "out.mkv")
+        self.assertNotIn("fade=t=out:st", plain[plain.index("-filter_complex") + 1].split(";")[0])
+
     def test_a_part_without_sound_gets_silence_of_its_length(self):
         graph = render.part_args("b.mp4", 0, 3, False, "out.mkv")
         graph = graph[graph.index("-filter_complex") + 1].split(";")[1]
@@ -282,7 +292,7 @@ class MomentsTest(unittest.TestCase):
             ])
         problems = caught.exception.problems
         self.assertEqual(len(problems), 4)
-        for words in ("跨过镜头切点", "至少 1.5 秒", "同一段画面", "不是检索结果里的镜头卡片"):
+        for words in ("跨过镜头切点", "至少 1.5 秒", "同一段画面", "不是目录或检索结果里的卡片"):
             self.assertTrue(any(words in p for p in problems), words)
 
     def test_cards_left_out_each_say_why_once(self):
@@ -460,6 +470,12 @@ class MomentsTest(unittest.TestCase):
         with self.assertRaises(moments.PlanError) as refused:
             self.index.check(plan(("07-1-0", 8), ("07-1-0", 12), ("07-1-1", 30), ("07-1-1", 36)), scenes=True)
         self.assertEqual(refused.exception.problems, ["场景2用了 4 段，一个场景最多 3 段"])
+
+    def test_a_cut_ends_on_a_segment_paced_middle_at_the_fastest(self):
+        fast, slow = {"card": "07-0-0", "pace": "快"}, {"card": "07-1-0", "pace": "慢"}
+        self.assertEqual(moments.settled([slow, fast]), [slow, fast | {"pace": "中", "asked": "快"}])
+        self.assertEqual(moments.settled([fast, slow]), [fast, slow])
+        self.assertEqual(moments.settled([]), [])
 
     def test_colours_count_a_picture_s_colour_and_light(self):
         red, blue = np.tile([250, 10, 10], (40, 1)), np.tile([10, 10, 250], (40, 1))

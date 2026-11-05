@@ -98,6 +98,8 @@ SCENE_PICTURE = 0.80
 # segments paced 快 count apart, up to FAST_SEGMENTS, so that a fight can be a run of cuts.
 SCENE_SEGMENTS = 3
 FAST_SEGMENTS = 6
+# A cut ends on a segment it can settle on: its last one is paced this at the fastest (#350).
+ENDING_PACE = "中"
 # How alike two scenes are, for a plan's scene changes (#350): the mean of two ranks among the
 # film's pairs of scenes, by their place descriptions' vectors and by their colour and light
 # (colours), each 0 for the least alike pair and 1 for the most. Ranks, for each measure runs
@@ -156,6 +158,15 @@ def _for_cards(entries: dict, cards: list[dict]) -> dict:
     """The entries written for these cards, over the same seconds."""
     return {c["id"]: entries[c["id"]] for c in cards
             if c["id"] in entries and [entries[c["id"]]["start"], entries[c["id"]]["end"]] == [c["start"], c["end"]]}
+
+
+def settled(segments: list[dict]) -> list[dict]:
+    """The paced segments with the last one paced ENDING_PACE when it asked for a faster pace,
+    what it asked kept as asked."""
+    fastest = PACES[ENDING_PACE][0]
+    if not segments or PACES[segments[-1]["pace"]][0] >= fastest:
+        return segments
+    return [*segments[:-1], segments[-1] | {"pace": ENDING_PACE, "asked": segments[-1]["pace"]}]
 
 
 def colours(pixels: np.ndarray) -> np.ndarray:
@@ -447,7 +458,7 @@ class Index:
         for n, segment in enumerate(segments, 1):
             card = cards.get(segment.get("card")) if isinstance(segment, dict) else None
             if card is None:
-                problems.append(f"第 {n} 段的 card 不是检索结果里的镜头卡片")
+                problems.append(f"第 {n} 段的 card 不是目录或检索结果里的卡片")
                 continue
             start, end = segment.get("start"), segment.get("end")
             if not all(isinstance(t, (int, float)) and not isinstance(t, bool) for t in (start, end)):

@@ -372,7 +372,8 @@ class Handler(BaseHTTPRequestHandler):
             review = [r | {"edged": e} for r, e in zip(review, edged, strict=True)]
         work = tempfile.mkdtemp(dir=self.server.work)
         try:
-            path = render.render_clips([(files[v], start, end) for v, start, end in clips], work)
+            path = render.render_clips([(files[v], start, end) for v, start, end in clips], work,
+                                       ending=spans is not None)
             with open(path, "rb") as file:
                 data = file.read()
         except render.RenderError as error:
@@ -398,7 +399,7 @@ class Handler(BaseHTTPRequestHandler):
             card = segment.get("card") if isinstance(segment, dict) else None
             probe = segment.get("probe") if isinstance(segment, dict) else None
             if card not in cards or not isinstance(probe, str) or not 1 <= len(probe.strip()) <= PROBE_CHARS:
-                problems.append(f"第 {n} 段要有检索结果里的 card 和找到它的 probe")
+                problems.append(f"第 {n} 段要有目录或检索结果里的 card，和要找的画面（shows）")
                 continue
             if probe not in self.server.probes:
                 self.server.probes[probe] = embed_query(self.server.ai_socket, probe)
@@ -418,7 +419,7 @@ class Handler(BaseHTTPRequestHandler):
         scaled to target. With margin, the cards must be able to run
         moments.MARGIN times target first. And the problems of those it cannot set."""
         index, cards = self.server.index, {c["id"] for c in self.server.index.cards}
-        problems = [f"第 {n} 段要有检索结果里的 card 和找到它的 probe" for n, s in enumerate(segments, 1)
+        problems = [f"第 {n} 段要有目录或检索结果里的 card，和要找的画面（shows）" for n, s in enumerate(segments, 1)
                     if not isinstance(s, dict) or s.get("card") not in cards or not isinstance(s.get("probe"), str)
                     or not 1 <= len(s["probe"].strip()) <= PROBE_CHARS]
         if problems:
@@ -433,6 +434,8 @@ class Handler(BaseHTTPRequestHandler):
                      if p not in moments.PACES]
             if wrong:
                 return [], wrong
+            segments = moments.settled(segments)
+            paces = [s["pace"] for s in segments]
             mins, aims, caps = (list(column) for column in zip(*(moments.PACES[p] for p in paces), strict=True))
             if sum(caps) < target - 1 or sum(mins) > target + 1:
                 return [], [f"按这些段的 pace，成片在 {sum(mins):g}–{sum(caps):g} 秒之间，目标是 {target:g} 秒："
@@ -458,7 +461,7 @@ class Handler(BaseHTTPRequestHandler):
         for segment in out if shares else []:
             pace = moments.slowest(segment["end"] - segment["start"])
             if moments.PACES[pace][0] < moments.PACES[segment["pace"]][0]:
-                segment |= {"asked": segment["pace"], "pace": pace}
+                segment |= {"asked": segment.get("asked", segment["pace"]), "pace": pace}
         return out, problems
 
     def frame(self, video, seconds):
