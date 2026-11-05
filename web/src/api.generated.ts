@@ -2741,6 +2741,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/photos/assets/{assetId}/text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The text read from a photo and its document's fields, as the caller sees them (docs/architecture/photo-ocr.md)
+         * @description A library that does not read text shows none (status off), even of a photo another library holds. A member's AI assistant gets every sensitive value, in the fields and in the whole text, as a handle of its own such as ⟦身份证号·6d48a8⟧ (ADR 0033).
+         */
+        get: operations["getPhotoText"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/photos/assets/{assetId}/text/fields/{field}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Correct a field of the photo's text, for every library that holds the photo; the last correction stands
+         * @description Anyone who sees the photo may, except through Administrative Viewing Mode and as an assistant. The photo must have been read as a document type with this field, in a library that reads text, and not be in the trash. Setting a field never corrected to the value read confirms it. The change is kept in the photo's change log, not in the activity record.
+         */
+        put: operations["correctPhotoTextField"];
+        post?: never;
+        /** Take a field's correction back, so that it shows what was read again */
+        delete: operations["restorePhotoTextField"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/photos/assets/{assetId}/text/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every change to the photo's fields, newest first, with who made it from which library
+         * @description For everyone who sees the photo in a library that reads text; an assistant gets none, as they hold the values it may not know.
+         */
+        get: operations["listPhotoTextChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/photos/assets/{assetId}/motion": {
         parameters: {
             query?: never;
@@ -5891,8 +5952,10 @@ export interface components {
             next?: string;
             /** @description False when local AI could not encode the query and only names and user tags were matched. */
             semantic: boolean;
-            /** @description How many results, counted over all pages, make up the closest group: the name and user tag matches, then the photos the object detector found the query's things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count. */
+            /** @description How many results, counted over all pages, make up the closest group: the name and user tag matches, the photos whose text holds the query, then the photos the object detector found the query's things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count. */
             closest: number;
+            /** @description How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. An assistant matches the text with every sensitive value masked. */
+            texts: number;
             /** @description Present when the query is about things the object detector finds reliably, such as 手机: the closest group is then the photos it found them in, and detected 0 means none was found. */
             objects?: {
                 /** @description The query's class words. */
@@ -5904,6 +5967,67 @@ export interface components {
             };
             /** @description Full names of people in the search's scope that the query contains, such as 小明 in 小明 海边: the results keep to their photos and the rest of the query ranks them; a name alone lists them newest first. */
             people?: string[];
+        };
+        PhotoText: {
+            /**
+             * @description read: the text below; queued: waiting to be read; failed: reading failed; none: not a photo whose text is read; off: this library does not read text.
+             * @enum {string}
+             */
+            status: "read" | "queued" | "failed" | "none" | "off";
+            /**
+             * @description The document type read.
+             * @enum {string}
+             */
+            kind?: "plain" | "id_card" | "id_card_back" | "bank_card" | "bank_slip" | "invoice" | "receipt";
+            /** @description The whole text as machine reading gave it, which may be wrong. */
+            text?: string;
+            /** @description False when the reading was cut off at its length limit or stopped looping. */
+            complete: boolean;
+            /** @description The text reader that read it. */
+            model?: string;
+            /** @description The document type's fields in the order the document shows them. */
+            fields: {
+                name: string;
+                /** @description What the field holds: the correction, else what was read. */
+                value: string;
+                /** @description What was read; empty when nothing was. */
+                read: string;
+                /** @description Whether the reading passed every check; a person should look at one that did not. */
+                passed: boolean;
+                reasons?: ("not_in_text" | "format" | "mismatch" | "low_confidence" | "unfinished")[];
+                /** @description Shown masked until the viewer opens it. */
+                sensitive: boolean;
+                /** @description Who last corrected the field, and when. */
+                correction?: {
+                    userId: string;
+                    username: string;
+                    /** Format: date-time */
+                    at: string;
+                };
+            }[];
+        };
+        PhotoTextCorrectionRequest: {
+            /** @description What the field holds; spaces around it are dropped, and it may be empty. */
+            value: string;
+        };
+        PhotoTextChange: {
+            field: string;
+            old: string;
+            new: string;
+            /** @description True when a correction was taken back, so that the field shows what was read. */
+            restored: boolean;
+            userId: string;
+            /** @description The member's name when making the change. */
+            username: string;
+            /** @description The library the change was made from; only its ID once it is gone. */
+            library: {
+                id: string;
+                /** @enum {string} */
+                kind?: "private" | "shared";
+                ownerName?: string;
+            };
+            /** Format: date-time */
+            at: string;
         };
         PhotoSimilarResults: {
             items: components["schemas"]["PhotoAsset"][];
@@ -6887,6 +7011,8 @@ export interface components {
         PhotoAlbumID: string;
         PhotoPersonID: string;
         PhotoOccurrenceID: string;
+        /** @description A field of the photo's document type, such as 合计 */
+        PhotoTextField: string;
         MediaLibraryID: string;
         MediaVideoID: string;
         /** @description A video or show ID. */
@@ -7070,6 +7196,9 @@ export type PhotoTagCounts = components['schemas']['PhotoTagCounts'];
 export type PhotoAlbum = components['schemas']['PhotoAlbum'];
 export type PhotoNameRequest = components['schemas']['PhotoNameRequest'];
 export type PhotoSearchResults = components['schemas']['PhotoSearchResults'];
+export type PhotoText = components['schemas']['PhotoText'];
+export type PhotoTextCorrectionRequest = components['schemas']['PhotoTextCorrectionRequest'];
+export type PhotoTextChange = components['schemas']['PhotoTextChange'];
 export type PhotoSimilarResults = components['schemas']['PhotoSimilarResults'];
 export type PhotoImageSearch = components['schemas']['PhotoImageSearch'];
 export type PhotoAiStatus = components['schemas']['PhotoAIStatus'];
@@ -7161,6 +7290,7 @@ export type ParameterPhotoAssetId = components['parameters']['PhotoAssetID'];
 export type ParameterPhotoAlbumId = components['parameters']['PhotoAlbumID'];
 export type ParameterPhotoPersonId = components['parameters']['PhotoPersonID'];
 export type ParameterPhotoOccurrenceId = components['parameters']['PhotoOccurrenceID'];
+export type ParameterPhotoTextField = components['parameters']['PhotoTextField'];
 export type ParameterMediaLibraryId = components['parameters']['MediaLibraryID'];
 export type ParameterMediaVideoId = components['parameters']['MediaVideoID'];
 export type ParameterMediaTitleId = components['parameters']['MediaTitleID'];
@@ -12720,6 +12850,119 @@ export interface operations {
             404: components["responses"]["ProductError"];
             415: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
+        };
+    };
+    getPhotoText: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: components["parameters"]["PhotoAssetID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The photo's text */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoText"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    correctPhotoTextField: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                assetId: components["parameters"]["PhotoAssetID"];
+                /** @description A field of the photo's document type, such as 合计 */
+                field: components["parameters"]["PhotoTextField"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhotoTextCorrectionRequest"];
+            };
+        };
+        responses: {
+            /** @description The photo's text */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoText"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    restorePhotoTextField: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                assetId: components["parameters"]["PhotoAssetID"];
+                /** @description A field of the photo's document type, such as 合计 */
+                field: components["parameters"]["PhotoTextField"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The photo's text */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoText"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    listPhotoTextChanges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: components["parameters"]["PhotoAssetID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The changes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["PhotoTextChange"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
         };
     };
     openPhotoMotion: {

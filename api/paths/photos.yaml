@@ -572,6 +572,57 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "415": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/text:
+  get:
+    operationId: getPhotoText
+    summary: The text read from a photo and its document's fields, as the caller sees them (docs/architecture/photo-ocr.md)
+    description: "A library that does not read text shows none (status off), even of a photo another library holds. A member's AI assistant gets every sensitive value, in the fields and in the whole text, as a handle of its own such as ⟦身份证号·6d48a8⟧ (ADR 0033)."
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200": { description: The photo's text, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoText" } } } }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/text/fields/{field}:
+  put:
+    operationId: correctPhotoTextField
+    summary: Correct a field of the photo's text, for every library that holds the photo; the last correction stands
+    description: "Anyone who sees the photo may, except through Administrative Viewing Mode and as an assistant. The photo must have been read as a document type with this field, in a library that reads text, and not be in the trash. Setting a field never corrected to the value read confirms it. The change is kept in the photo's change log, not in the activity record."
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/photos.yaml#/parameters/PhotoTextField" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoTextCorrectionRequest" } } } }
+    responses:
+      "200": { description: The photo's text, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoText" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: restorePhotoTextField
+    summary: Take a field's correction back, so that it shows what was read again
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }, { $ref: "../components/photos.yaml#/parameters/PhotoTextField" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The photo's text, content: { application/json: { schema: { $ref: "../components/photos.yaml#/schemas/PhotoText" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/photos/assets/{assetId}/text/changes:
+  get:
+    operationId: listPhotoTextChanges
+    summary: Every change to the photo's fields, newest first, with who made it from which library
+    description: For everyone who sees the photo in a library that reads text; an assistant gets none, as they hold the values it may not know.
+    parameters: [{ $ref: "../components/photos.yaml#/parameters/PhotoAssetID" }]
+    responses:
+      "200":
+        description: The changes
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [items]
+              properties:
+                items: { type: array, items: { $ref: "../components/photos.yaml#/schemas/PhotoTextChange" } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/photos/assets/{assetId}/motion:
   get:
     operationId: openPhotoMotion

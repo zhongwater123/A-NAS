@@ -935,7 +935,7 @@ describe("PhotosPanel albums, trash and AI 聚合", () => {
       }),
       http.get("/api/v1/photos/search", ({ request, response }) => {
         searches.push(pathOf(request));
-        return response(200).json({ items: [asset("photo:sea")], semantic: true, closest: 1 });
+        return response(200).json({ items: [asset("photo:sea")], semantic: true, closest: 1, texts: 0 });
       }),
     );
     window.localStorage.setItem("a-nas.photos.recentSearches", JSON.stringify(["海边的日落"]));
@@ -1273,13 +1273,14 @@ describe("PhotosPanel search and viewing", () => {
   it("searches from any page into AI search and divides the closest results from the less related", async () => {
     const sea = asset("photo:sea", { libraryId: sharedLibrary.id, uploadedBy: "user:bob" });
     const results: Record<string, PhotoSearchResults> = {
-      海边的猫: { items: [sea], semantic: true, closest: 1 },
+      海边的猫: { items: [sea], semantic: true, closest: 1, texts: 0 },
       电动车: {
         items: [asset("photo:bike"), asset("photo:scooter"), asset("photo:garden")],
         semantic: true,
         closest: 2,
+        texts: 0,
       },
-      黄昏: { items: [], semantic: false, closest: 0 },
+      黄昏: { items: [], semantic: false, closest: 0, texts: 0 },
     };
     const searches: string[] = [];
     serve(
@@ -1332,18 +1333,21 @@ describe("PhotosPanel search and viewing", () => {
         items: [asset("photo:phone"), asset("photo:desk-phone"), asset("photo:desk")],
         semantic: true,
         closest: 2,
+        texts: 0,
         objects: { words: ["手机"], detected: 2, undetected: 5 },
       },
       长颈鹿: {
         items: [asset("photo:zoo"), asset("photo:park")],
         semantic: true,
         closest: 1,
+        texts: 0,
         objects: { words: ["长颈鹿"], detected: 0, undetected: 0 },
       },
       猫和狗: {
         items: [],
         semantic: true,
         closest: 0,
+        texts: 0,
         objects: { words: ["猫", "狗"], detected: 0, undetected: 3 },
       },
     };
@@ -1403,7 +1407,7 @@ describe("PhotosPanel search and viewing", () => {
           : response(200).json({ items: [], ready: false });
       }),
       http.get("/api/v1/photos/search", ({ response }) =>
-        response(200).json({ items: [asset("photo:sea")], semantic: true, closest: 1 }),
+        response(200).json({ items: [asset("photo:sea")], semantic: true, closest: 1, texts: 0 }),
       ),
     );
     const user = userEvent.setup();
@@ -1538,7 +1542,7 @@ describe("PhotosPanel search and viewing", () => {
         searches.push(pathOf(request));
         const library = query.get("library");
         const items = [sea, beach].filter((photo) => !library || photo.libraryId === library);
-        return response(200).json({ items, semantic: true, closest: items.length });
+        return response(200).json({ items, semantic: true, closest: items.length, texts: 0 });
       }),
     );
     const user = userEvent.setup();
@@ -1595,7 +1599,7 @@ describe("PhotosPanel search and viewing", () => {
       }),
       http.get("/api/v1/photos/search", ({ request, response }) => {
         searches.push(pathOf(request));
-        return response(200).json({ items: [], semantic: true, closest: 0 });
+        return response(200).json({ items: [], semantic: true, closest: 0, texts: 0 });
       }),
     );
     const user = userEvent.setup();

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -142,10 +143,64 @@ func TestStoredBoxesRoundTrip(t *testing.T) {
 	}
 }
 
+// undoTextCorrections are the statements of docs/architecture/photo-ocr.md#交付
+// that take the Catalog back to migration 15, before corrections belonged to
+// the content object.
+var undoTextCorrections = []string{
+	"DROP TABLE text_handles",
+	"DROP TABLE text_changes",
+	"DROP TABLE text_corrections",
+	`CREATE TABLE text_corrections (
+    library_id TEXT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    field TEXT NOT NULL,
+    value TEXT NOT NULL,
+    account TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (library_id, object_id, field)
+)`,
+	"PRAGMA user_version = 15",
+}
+
+// Going back to a build before corrections belonged to the content object
+// takes undoTextCorrections; a later build makes them so again.
+func TestTextCorrectionsMigrationCanBeUndone(t *testing.T) {
+	ctx := context.Background()
+	root := filepath.Join(t.TempDir(), "photos")
+	service, err := Open(root, Options{DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range undoTextCorrections {
+		if _, err := service.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	_ = service.Close()
+	service, err = Open(root, Options{DisableCapacityReserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+	var version, columns int
+	if err := service.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
+		t.Fatalf("user_version = %d, %v", version, err)
+	}
+	if err := service.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM pragma_table_info('text_corrections') WHERE name = 'library_id'").Scan(&columns); err != nil || columns != 0 {
+		t.Fatalf("text_corrections still keyed by library: %d, %v", columns, err)
+	}
+	for _, table := range []string{"text_changes", "text_handles"} {
+		if _, err := service.db.ExecContext(ctx, "SELECT COUNT(*) FROM "+table); err != nil {
+			t.Fatalf("%s after migrating again: %v", table, err)
+		}
+	}
+}
+
 // Going back to a build before the vector index takes the statements of
 // docs/runbooks/enable-vector-index.md#回滚或恢复, after those that undo
-// migration 15: the Catalog is then the older build's, and a later build
-// adds the outbox and the text tables again.
+// migrations 16 and 15: the Catalog is then the older build's, and a later
+// build adds the outbox and the text tables again.
 func TestVectorIndexMigrationCanBeUndone(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "photos")
@@ -153,8 +208,8 @@ func TestVectorIndexMigrationCanBeUndone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range []string{
-		// Migration 15 first, as docs/architecture/photo-ocr.md#交付 says.
+	for _, statement := range append(slices.Clone(undoTextCorrections),
+		// Migrations 16 and 15 first, as docs/architecture/photo-ocr.md#交付 says.
 		"DROP TABLE text_corrections",
 		"DROP TABLE texts",
 		"ALTER TABLE libraries DROP COLUMN texts",
@@ -168,7 +223,7 @@ func TestVectorIndexMigrationCanBeUndone(t *testing.T) {
 		"DROP TABLE vector_index_state",
 		"DROP INDEX embeddings_by_age",
 		"PRAGMA user_version = 13",
-	} {
+	) {
 		if _, err := service.db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
