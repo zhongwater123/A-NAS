@@ -239,7 +239,7 @@ stage "Install host dependencies"
 warn "This installs the release's a-nas-host and a-nas-console packages (ADR 0031) and what they depend on: Btrfs, partitioning, SMART, Samba, FFmpeg, local AI libraries and the local console's Chromium."
 confirm "Install the required Debian packages now?" || exit 1
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends \
+DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --allow-downgrades \
   "$SOURCE_RELEASE/a-nas-host.deb" "$SOURCE_RELEASE/a-nas-console.deb"
 
 stage "Install root-owned A-NAS system services"

@@ -306,7 +306,7 @@ ip=$(ip -o -4 addr show dev "$iface" | awk '{split($4, a, "/"); print a[1]; exit
 refused_without_host_package() {
   local status=0
   bash /src/scripts/install-v1.0.1-system-services.sh "$release" system-test "$iface" >/tmp/refused.log 2>&1 || status=$?
-  [[ $status -eq 3 && ! -e /opt/a-nas/current ]] && grep -Fq "apt install $release/a-nas-host.deb" /tmp/refused.log
+  [[ $status -eq 3 && ! -e /opt/a-nas/current ]] && grep -Fq "apt install --no-install-recommends --allow-downgrades $release/a-nas-host.deb" /tmp/refused.log
 }
 if ! refused_without_host_package; then
   tail -n 5 /tmp/refused.log
@@ -332,6 +332,21 @@ if ! dpkg -i "$release/a-nas-host.deb" >/tmp/host-package.log 2>&1; then
   exit 1
 fi
 echo "PASS the release's host package installs"
+# The runbooks install with apt, which refuses a version that sorts lower
+# unless allowed: commits sort by their hashes, and every commit after a tag
+# sorts before it. Its dependencies are installed now, so apt fetches nothing.
+later=/tmp/later-host-package
+dpkg-deb --raw-extract "$release/a-nas-host.deb" "$later"
+sed -i 's/^Version: .*/Version: 999/' "$later/DEBIAN/control"
+dpkg-deb --root-owner-group --build "$later" "$later.deb" >/dev/null
+if ! dpkg -i "$later.deb" >/tmp/host-package.log 2>&1 ||
+  ! apt-get install -y --no-install-recommends --allow-downgrades "$release/a-nas-host.deb" >>/tmp/host-package.log 2>&1 ||
+  [[ "$(dpkg-query -W -f='${Version}' a-nas-host)" != "$(dpkg-deb --field "$release/a-nas-host.deb" Version)" ]]; then
+  tail -n 20 /tmp/host-package.log
+  echo "FAIL the runbooks' apt command installs the release's host package over one that sorts after it"
+  exit 1
+fi
+echo "PASS the runbooks' apt command installs the release's host package over one that sorts after it"
 
 installed_at=$(date '+%Y-%m-%d %H:%M:%S')
 if ! bash /src/scripts/install-v1.0.1-system-services.sh "$release" system-test "$iface" >/tmp/install.log 2>&1; then
