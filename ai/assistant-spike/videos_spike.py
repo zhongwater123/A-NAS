@@ -132,17 +132,23 @@ def _embedded(ai_socket: str, request: dict, fd: int | None = None) -> np.ndarra
 
 def edges(path: str, start, end):
     """start and end, each moved inside a cut found within EDGE inside it or GUARD outside it,
-    at the source's frame rate, and kept CLEAR of it."""
+    at the source's frame rate, and kept CLEAR of it; but never to fewer than
+    moments.TRIMMED_MIN seconds (#398): one end moved instead, the one that leaves more, or
+    neither. Refused for a span the program set, the planner could only send it again."""
     if not all(isinstance(t, (int, float)) and not isinstance(t, bool) for t in (start, end)) or end - start <= 2 * EDGE:
         return start, end
+    moved_start, moved_end = start, end
     at = max(0.0, start - GUARD)
     cuts = [at + t for t in scene_cuts(path, at, start + EDGE - at)]
     if cuts:
-        start = max(start, math.ceil((max(cuts) + CLEAR) * 100) / 100)
+        moved_start = max(start, math.ceil((max(cuts) + CLEAR) * 100) / 100)
     cuts = [end - EDGE + t for t in scene_cuts(path, end - EDGE, EDGE + GUARD)]
     if cuts:
-        end = min(end, math.floor((min(cuts) - CLEAR) * 100) / 100)
-    return start, end
+        moved_end = min(end, math.floor((min(cuts) - CLEAR) * 100) / 100)
+    if moved_end - moved_start >= moments.TRIMMED_MIN - moments.ROUNDING:
+        return moved_start, moved_end
+    one = max([(moved_start, end), (start, moved_end)], key=lambda span: span[1] - span[0])
+    return one if one[1] - one[0] >= moments.TRIMMED_MIN - moments.ROUNDING else (start, end)
 
 
 def scene_cuts(path: str, at: float, seconds: float) -> list[float]:

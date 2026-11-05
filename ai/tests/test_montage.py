@@ -481,6 +481,8 @@ class MomentsTest(unittest.TestCase):
         self.assertEqual(self.index.pick(1, self.castle), "07-1-0")
         self.assertEqual(self.index.pick(1, self.castle, {"07-1-0"}), "07-1-1")  # taken: the next best
         self.assertIsNone(self.index.pick(2, self.castle))
+        self.index.parts.append({"video": "07", "cards": ["07-2-0"], "summary": ""})
+        self.assertIsNone(self.index.pick(2, self.castle))  # its one window is flat: nothing to cut
 
     def test_a_card_is_paced_by_how_much_its_picture_changes(self):
         self.index.pictures = {"07-0-0": {"change": 0.004}, "07-1-0": {"change": 0.03}, "07-1-1": {"change": 0.1}}

@@ -135,6 +135,9 @@ PARTS = "parts.json"
 PART_SECONDS = 60.0
 PART_SNAP = 10.0
 PART_CHARS = 300
+# Cards of a part scoring within this of its best for a segment's probe count as about as good
+# (Index.pick): case-08's best windows for one probe differ by a few hundredths.
+PICK_NEAR = 0.03
 
 
 def part_starts(starts: list[float], changes: list[float], every: float = PART_SECONDS,
@@ -424,11 +427,18 @@ class Index:
         if not isinstance(part, int) or isinstance(part, bool) or not 1 <= part <= len(self.parts):
             return None
         cards = {c["id"]: c for c in self.cards}
-        ids = [i for i in self.parts[part - 1]["cards"] if i in cards and i not in self.texts]
+        # Only cards a segment can be cut from (#398: case-01's last part gave a black card).
+        ids = [i for i in self.parts[part - 1]["cards"]
+               if i in cards and i not in self.texts and self.usable(cards[i]) >= SEGMENT_MIN]
         free = [i for i in ids if i not in taken] or ids
-        scored = [(max((float(self.frames[w] @ probe) for w in cards[i]["windows"] if not self.flat[w]), default=-1.0), i)
-                  for i in free]
-        return max(scored)[1] if scored else None
+        scored = {i: max((float(self.frames[w] @ probe) for w in cards[i]["windows"] if not self.flat[w]), default=-1.0)
+                  for i in free}
+        if not scored:
+            return None
+        # Of the cards about as good as the best, the one that can run longest: the planner
+        # cannot see how long a part's cards are, and the cut needs room to set its seconds.
+        best = max(scored.values())
+        return max((i for i, s in scored.items() if s >= best - PICK_NEAR), key=lambda i: (self.usable(cards[i]), scored[i]))
 
     def pace_of(self, card_id: str) -> str | None:
         """The card's pace from how much its picture changes (PACE_CHANGE), however many seconds

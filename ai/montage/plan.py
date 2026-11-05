@@ -61,7 +61,8 @@ def message(index: moments.Index, instruction: str, seconds: float, style: str |
     parts = index.parts or [{"video": v, "cards": [c["id"] for c in index.cards if c["video"] == v], "summary": ""}
                             for v in index.videos]
     for n, part in enumerate(parts, 1):
-        ids = [i for i in part["cards"] if i in listed]
+        # Cards no segment can be cut from (fewer than SEGMENT_MIN usable seconds) are left out.
+        ids = [i for i in part["cards"] if i in listed and index.usable(cards[i]) >= moments.SEGMENT_MIN]
         if not ids:
             continue
         paces = [index.pace_of(i) for i in ids]
