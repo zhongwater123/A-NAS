@@ -696,7 +696,8 @@ def measure(args):
         with open(path, encoding="utf-8") as file:
             measured = json.load(file)["cards"]
     todo = [c for c in index.cards
-            if [measured.get(c["id"], {}).get(k) for k in ("start", "end")] != [c["start"], c["end"]]]
+            if [measured.get(c["id"], {}).get(k) for k in ("start", "end")] != [c["start"], c["end"]]
+            or "change" not in measured[c["id"]]]
     files = {video: os.path.join(VIDEOS, meta["file"]) for video, meta in index.videos.items()}
     shapes = {video: picture.size(file) for video, file in files.items()}
     began = time.monotonic()

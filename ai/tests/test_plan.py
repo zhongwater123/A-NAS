@@ -29,6 +29,11 @@ class PlanTest(unittest.TestCase):
         self.assertIn("场景2：室内，办公室（1 张卡片）", text)
         self.assertIn("01-1-0 场景2 可剪6秒 办公室里的男子", text)
         self.assertNotIn("秒（镜头", text)  # no card seconds: the program sets them
+        looks = {"motion": "固定", "sharp": 500.0, "shake": 0.0, "bright": 100.0, "clipped": 0.0}
+        self.index.pictures = {"01-0-0": looks | {"change": 0.002}, "01-1-0": looks | {"change": 0.08}}
+        text = plan.message(self.index, "剪成预告片", 60, "预告片")
+        self.assertIn("01-0-0 场景1 可剪6秒 节奏慢", text)
+        self.assertIn("01-1-0 场景2 可剪6秒 节奏快", text)
 
     def test_cards_with_a_title_over_them_are_left_out(self):
         self.index.texts = {"01-0-0": "片名：MERIDIAN"}
@@ -45,11 +50,12 @@ class PlanTest(unittest.TestCase):
                 plan.parsed(bad)
 
     def test_the_request_locates_each_segment_by_what_it_shows(self):
-        segment = {"card": "01-0-0", "scene": 1, "shows": "街道", "pace": "慢", "reason": "交代地点"}
-        body = plan.request({"segments": [segment | {"extra": "不传"}]}, 60, "预告片")
-        self.assertEqual(body["segments"], [segment | {"probe": "街道"}])
-        self.assertEqual({k: body[k] for k in ("seconds", "margin", "edges", "look", "scenes")},
-                         {"seconds": 60, "margin": True, "edges": True, "look": False, "scenes": True})
+        segment = {"card": "01-0-0", "scene": 1, "shows": "街道", "reason": "交代地点"}
+        body = plan.request({"segments": [segment | {"pace": "快", "extra": "不传"}]}, 60, "预告片")
+        self.assertEqual(body["segments"], [segment | {"probe": "街道"}])  # the program paces it
+        self.assertEqual({k: body[k] for k in ("seconds", "margin", "edges", "look", "scenes", "pace")},
+                         {"seconds": 60, "margin": True, "edges": True, "look": False, "scenes": True,
+                          "pace": "picture"})
 
     def test_a_scene_the_model_misread_is_named(self):
         planned = {"segments": [{"card": "01-0-0", "scene": 1}, {"card": "01-1-0", "scene": "1"}]}

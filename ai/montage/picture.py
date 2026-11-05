@@ -7,7 +7,9 @@ here it is measured. Corners tracked from one frame to the next, STEP apart
 the centre of the picture: its shift is the camera turning, its scale the
 camera walking on, and what is left of the shift once its moving average is
 taken away is shake. The same frames give sharpness (the variance of the
-Laplacian), brightness and the share of blown highlights.
+Laplacian), brightness, the share of blown highlights, and how much the picture
+changes from one frame to the next, whether the camera or what it films moves
+(#350: a segment's pace).
 
 OpenCV is the AI Worker's own dependency (requirements.in); FFmpeg decodes.
 """
@@ -26,6 +28,9 @@ CORNERS = 300
 CORNERS_MIN = 20
 # Steps in the moving average that shake is measured against: one second.
 SMOOTH = 5
+
+# Frames are made this wide before their change is measured.
+CHANGE_WIDTH = 60
 
 # What the camera does, from the median step scaled to a second: a shift of
 # PAN of the width turns, a scale of ZOOM walks on.
@@ -103,4 +108,18 @@ def measure(grey: np.ndarray, step: float = STEP) -> dict:
         "sharp": round(float(np.median(sharp)), 1) if sharp else 0.0,
         "bright": round(float(np.median([frame.mean() for frame in grey])), 1) if len(grey) else 0.0,
         "clipped": round(float(np.median([(frame >= 250).mean() for frame in grey])), 4) if len(grey) else 0.0,
+        "change": change(grey),
     }
+
+
+def change(grey: np.ndarray) -> float:
+    """How much the picture changes per step: the median over steps of the mean absolute
+    difference of one frame from the next, as a share of full scale, on frames made
+    CHANGE_WIDTH wide first so that film grain does not count (case-08's still sniper
+    0.016 at 480 wide, 0.007 at 60)."""
+    if len(grey) < 2:
+        return 0.0
+    height = max(1, round(CHANGE_WIDTH * grey.shape[1] / grey.shape[2]))
+    small = np.stack([cv2.resize(frame, (CHANGE_WIDTH, height), interpolation=cv2.INTER_AREA) for frame in grey])
+    steps_ = np.abs(np.diff(small.astype(np.int16), axis=0)).mean(axis=(1, 2)) / 255
+    return round(float(np.median(steps_)), 4)

@@ -471,6 +471,11 @@ class MomentsTest(unittest.TestCase):
             self.index.check(plan(("07-1-0", 8), ("07-1-0", 12), ("07-1-1", 30), ("07-1-1", 36)), scenes=True)
         self.assertEqual(refused.exception.problems, ["场景2用了 4 段，一个场景最多 3 段"])
 
+    def test_a_card_is_paced_by_how_much_its_picture_changes(self):
+        self.index.pictures = {"07-0-0": {"change": 0.004}, "07-1-0": {"change": 0.03}, "07-1-1": {"change": 0.1}}
+        self.assertEqual([self.index.pace_of(i) for i in ("07-0-0", "07-1-0", "07-1-1", "07-2-0")],
+                         ["慢", "中", "快", None])
+
     def test_a_cut_ends_on_a_segment_paced_middle_at_the_fastest(self):
         fast, slow = {"card": "07-0-0", "pace": "快"}, {"card": "07-1-0", "pace": "慢"}
         self.assertEqual(moments.settled([slow, fast]), [slow, fast | {"pace": "中", "asked": "快"}])
@@ -701,6 +706,13 @@ class PictureTest(unittest.TestCase):
         measured = picture.measure(self.crops([(0, 0)] * 10))
         self.assertEqual(measured["motion"], "固定")
         self.assertLess(measured["shake"], 0.0005)
+        self.assertEqual(measured["change"], 0)
+
+    def test_the_picture_changes_more_the_faster_it_moves(self):
+        slow = picture.measure(self.crops([(2 * k, 0) for k in range(10)]))["change"]
+        fast = picture.measure(self.crops([(20 * k, 0) for k in range(10)]))["change"]
+        self.assertGreater(slow, 0)
+        self.assertGreater(fast, 2 * slow)
 
     def test_the_picture_moving_right_is_the_camera_turning_left(self):
         # 10 px of 480 every 0.2 s is a fifth of the width a second.

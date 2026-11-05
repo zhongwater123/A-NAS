@@ -100,6 +100,12 @@ SCENE_SEGMENTS = 3
 FAST_SEGMENTS = 6
 # A cut ends on a segment it can settle on: its last one is paced this at the fastest (#350).
 ENDING_PACE = "中"
+# A card's pace from how much its picture changes (montage.picture.change, #350), not from
+# what a model reads into its description, which called case-08's still snipers fast: under
+# the first share slow, from the second fast. Case-01 then has no fast card and 64 slow of
+# 78; case-08 17 slow, 91 middle and 27 fast of 135, its snipers slow or middle, its
+# machines fighting fast.
+PACE_CHANGE = (0.01, 0.06)
 # How alike two scenes are, for a plan's scene changes (#350): the mean of two ranks among the
 # film's pairs of scenes, by their place descriptions' vectors and by their colour and light
 # (colours), each 0 for the least alike pair and 1 for the most. Ranks, for each measure runs
@@ -327,15 +333,16 @@ class Index:
                 mean += self.frames[i]
         return pieces
 
-    def catalog(self, videos=None, times=True, scenes=False, lengths=False, titles=True) -> dict:
+    def catalog(self, videos=None, times=True, scenes=False, lengths=False, titles=True, paces=False) -> dict:
         """What the library holds, for writing a story and probes from (#326): every card of every
         video (or of videos), in time order, as one line of its seconds and its shot's, light,
         caption, highlight and flaws, enough to cut it without searching for it. Cards with no
         caption say so; a vector alone cannot be read. Without times, the line leaves out the
         seconds, for a planner that does not set them (#350). With scenes, each line says its
         card's scene number, and "scenes" names each scene once with its number of cards. With
-        lengths, each line says the most seconds a segment of its card can run (usable). Without
-        titles, cards with a title, credits, a logo or a caption over them (self.texts) are left out."""
+        lengths, each line says the most seconds a segment of its card can run (usable); with
+        paces, its pace from its picture's change (pace_of). Without titles, cards with a title,
+        credits, a logo or a caption over them (self.texts) are left out."""
         out = {}
         listed = [c for c in self.cards if (videos is None or c["video"] in videos)
                   and (titles or c["id"] not in self.texts)]
@@ -348,6 +355,8 @@ class Index:
                 line += f" 场景{self.scene_of[card['id']]}"
             if lengths:
                 line += f" 可剪{self.usable(card):g}秒"
+            if paces and self.pace_of(card["id"]):
+                line += f" 节奏{self.pace_of(card['id'])}"
             if notes.get("light"):
                 line += f" {notes['light']}"
             line += " " + self.captions.get(card["id"], "（没有描述）")
@@ -366,6 +375,14 @@ class Index:
                 counts[self.scene_of[card["id"]]] = counts.get(self.scene_of[card["id"]], 0) + 1
         return {"scenes": {str(n): f"{self.scene_names.get(n, '')}（{k} 张卡片）{self._joins(n, counts)}"
                            for n, k in sorted(counts.items())}, "videos": out}
+
+    def pace_of(self, card_id: str) -> str | None:
+        """The card's pace from how much its picture changes (PACE_CHANGE), None unmeasured."""
+        change = self.pictures.get(card_id, {}).get("change")
+        if change is None:
+            return None
+        slow, fast = PACE_CHANGE
+        return "慢" if change < slow else "快" if change >= fast else "中"
 
     def near(self, scene: int, among=None) -> list[int]:
         """The scenes a plan may change to from scene (SCENE_NEAR), among those given if any."""

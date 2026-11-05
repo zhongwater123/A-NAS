@@ -320,6 +320,11 @@ class Handler(BaseHTTPRequestHandler):
             if target is not None and (isinstance(target, bool) or not isinstance(target, (int, float))
                                        or not 5 <= target <= 600):
                 return self.reply(400, {"error": "seconds 要是 5–600 的秒数"})
+            # "pace": "picture": each segment takes its card's pace from how much its picture
+            # changes (moments.Index.pace_of), not one the planner wrote (#350).
+            if body.get("pace") == "picture":
+                segments = [s | {"pace": self.server.index.pace_of(s.get("card")) or "中"} if isinstance(s, dict) else s
+                            for s in segments]
             try:
                 if target is None:
                     segments, problems = self.spanned(segments, spans)
