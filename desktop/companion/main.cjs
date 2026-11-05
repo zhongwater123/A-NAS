@@ -8,6 +8,9 @@ let home;
 let tray;
 let origin;
 let interactive = true;
+// Whether the pet window is the small character (350x400) rather than the NAS sign-in page.
+// Kept here: Windows rounds a scaled window's width (352 at 150%), so the width cannot tell.
+let compact = false;
 let positionTimer;
 
 // The smoke runner gives the app its own disposable profile, so verification
@@ -58,7 +61,7 @@ function restorePosition() {
 function rememberPosition() {
   clearTimeout(positionTimer);
   positionTimer = setTimeout(() => {
-    if (!pet || pet.isDestroyed() || pet.getBounds().width !== 350) return;
+    if (!pet || pet.isDestroyed() || !compact) return;
     const { x, y } = pet.getBounds();
     try {
       fs.mkdirSync(app.getPath("userData"), { recursive: true });
@@ -76,6 +79,7 @@ app.whenReady().then(() => {
   try { origin = nasOrigin(process.env.ANAS_NAS_URL); }
   catch (error) { console.error(error.message); app.quit(); return; }
   app.setName("A-NAS Companion");
+  compact = !origin;
   pet = new BrowserWindow({ width: origin ? 760 : 350, height: origin ? 720 : 400, show: false,
     frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true, resizable: false,
     backgroundColor: "#00000000", hasShadow: false,
@@ -126,12 +130,14 @@ app.whenReady().then(() => {
   ipcMain.on("companion:compact", (event) => {
     if (!senderIsPet(event)) return;
     pet.setSize(350, 400);
+    compact = true;
     restorePosition();
   });
   ipcMain.on("companion:expand", (event) => {
     if (!senderIsPet(event)) return;
     pet.setIgnoreMouseEvents(false);
     interactive = true;
+    compact = false;
     pet.setSize(760, 720);
     placePet();
   });

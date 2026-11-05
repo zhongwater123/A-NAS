@@ -9,6 +9,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { once } = require("node:events");
+const { pathToFileURL } = require("node:url");
 const root = path.resolve(__dirname, "../..");
 const stored = "20261102_090000_abcdef", live = "abcdef12";
 const source = { id:"source",spaceId:"private",name:"团队会议.md",kind:"file",sizeBytes:100,modifiedAt:"2026-11-02T00:00:00Z" };
@@ -19,8 +20,10 @@ async function run() {
  const output=path.join(__dirname,"build/tasks");await fs.mkdir(output,{recursive:true});
  let apiProcess,vite,browser,pageDirectory;
  try {
-  const binary=path.join(temp,"fixture");await promisify(execFile)(process.env.GO||"go",["build","-o",binary,"./internal/companionapi/testdata/server"],{cwd:root});
-  apiProcess=spawn(binary,[temp],{stdio:["ignore","pipe","inherit"]});const api=(await once(apiProcess.stdout,"data"))[0].toString().trim();
+  // ANAS_COMPANION_API: a fresh fixture server started elsewhere (handoff-smoke.cjs says why).
+  let api=process.env.ANAS_COMPANION_API;
+  if(!api){const binary=path.join(temp,process.platform==="win32"?"fixture.exe":"fixture");await promisify(execFile)(process.env.GO||"go",["build","-o",binary,"./internal/companionapi/testdata/server"],{cwd:root});
+  apiProcess=spawn(binary,[temp],{stdio:["ignore","pipe","inherit"]});api=(await once(apiProcess.stdout,"data"))[0].toString().trim();}
   assert.match(api,/^http:\/\/127\.0\.0\.1:\d+$/);
   await fs.mkdir(path.join(root,"web/.tmp"),{recursive:true});pageDirectory=await fs.mkdtemp(path.join(root,"web/.tmp/task-"));
   const pagePath=path.relative(path.join(root,"web"),pageDirectory).split(path.sep).join("/");
@@ -34,8 +37,8 @@ import { AssistantPanel } from "/src/assistant/AssistantPanel.tsx";
 function Preview(){const [intent,setIntent]=useState();const Component=new URLSearchParams(location.search).has("desktop")?CompanionDesktop:CompanionPanel;return <><Component userId="browser-test-member" connected onOpenConversation={(id)=>setIntent({kind:"conversation",sessionId:id})}/>{intent&&<div data-vnas-original><AssistantPanel username="fixture" intent={intent}/></div>}</>}
 createRoot(document.getElementById("root")).render(<Preview/>);
 `);
-  await promisify(execFile)(path.join(root,"web/node_modules/.bin/biome"),["check","--write",pageDirectory],{cwd:path.join(root,"web")});
-  const {createServer}=await import(path.join(root,"web/node_modules/vite/dist/node/index.js"));
+  await promisify(execFile)(process.execPath,[path.join(root,"web/node_modules/@biomejs/biome/bin/biome"),"check","--write",pageDirectory],{cwd:path.join(root,"web")});
+  const {createServer}=await import(pathToFileURL(path.join(root,"web/node_modules/vite/dist/node/index.js")).href);
   vite=await createServer({root:path.join(root,"web"),configFile:path.join(root,"web/companion.vite.config.ts"),optimizeDeps:{include:["react","react-dom/client","openapi-fetch","@assistant-ui/react-streamdown","@assistant-ui/react","cronstrue","cronstrue/locales/zh_CN","diff","dom-accessibility-api","lucide-react","modern-screenshot","react-error-boundary"]},server:{host:"127.0.0.1",port:0,hmr:false,open:false,proxy:{"/api/v1/companion":api}}});await vite.listen();
   const origin=vite.resolvedUrls.local[0];browser=await chromium.launch({headless:true,channel:process.env.ANAS_TEST_BROWSER||"chrome"});
   const sockets=new Set();const errors=[];const rpc=[];const http=[];let messages=[],cards=[],running=false,saved=false,prompts=0;
@@ -105,6 +108,6 @@ createRoot(document.getElementById("root")).render(<Preview/>);
  }catch(error){
   if(browser){for(const context of browser.contexts()){for(const page of context.pages()){console.error("UI:", (await page.locator("body").innerText()).slice(0,1500));await page.screenshot({path:path.join(output,"failure.png"),fullPage:true});}}}
   throw error;
- }finally{if(browser)await browser.close();if(vite)await vite.close();if(apiProcess)apiProcess.kill("SIGINT");if(pageDirectory)await fs.rm(pageDirectory,{recursive:true,force:true});await fs.rm(temp,{recursive:true,force:true});}
+ }finally{if(browser)await browser.close();if(vite)await vite.close();if(apiProcess&&apiProcess.exitCode===null){apiProcess.kill("SIGINT");await once(apiProcess,"exit");}if(pageDirectory)await fs.rm(pageDirectory,{recursive:true,force:true});await fs.rm(temp,{recursive:true,force:true});}
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});

@@ -9,6 +9,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { once } = require("node:events");
+const { pathToFileURL } = require("node:url");
 const root = path.resolve(__dirname, "../..");
 
 async function run() {
@@ -17,10 +18,15 @@ async function run() {
   await fs.mkdir(output, { recursive: true });
   let processAPI, vite, browser, pageDirectory;
   try {
-    const binary = path.join(temporary, process.platform === "win32" ? "fixture.exe" : "fixture");
-    await promisify(execFile)(process.env.GO || "go", ["build", "-o", binary, "./internal/companionapi/testdata/server"], { cwd: root });
-    processAPI = spawn(binary, [temporary], { stdio: ["ignore", "pipe", "inherit"] });
-    const api = (await once(processAPI.stdout, "data"))[0].toString().trim();
+    // ANAS_COMPANION_API names a fixture server started elsewhere, e.g. in WSL when this
+    // Windows machine has no Go and C compiler for the SQLite driver; start a fresh one per run.
+    let api = process.env.ANAS_COMPANION_API;
+    if (!api) {
+      const binary = path.join(temporary, process.platform === "win32" ? "fixture.exe" : "fixture");
+      await promisify(execFile)(process.env.GO || "go", ["build", "-o", binary, "./internal/companionapi/testdata/server"], { cwd: root });
+      processAPI = spawn(binary, [temporary], { stdio: ["ignore", "pipe", "inherit"] });
+      api = (await once(processAPI.stdout, "data"))[0].toString().trim();
+    }
     assert.match(api, /^http:\/\/127\.0\.0\.1:\d+$/);
     await fs.mkdir(path.join(root, "web/.tmp"), { recursive: true });
     pageDirectory = await fs.mkdtemp(path.join(root, "web/.tmp/handoff-"));
@@ -34,8 +40,8 @@ async function run() {
       const Component = new URLSearchParams(location.search).has("desktop") ? CompanionDesktop : CompanionPanel;
       createRoot(document.getElementById("root")).render(React.createElement(Component, { userId:"browser-test-member", connected:true }));
     `);
-    await promisify(execFile)(path.join(root, "web/node_modules/.bin/biome"), ["check", "--write", pageDirectory], { cwd: path.join(root, "web") });
-    const { createServer } = await import(path.join(root, "web/node_modules/vite/dist/node/index.js"));
+    await promisify(execFile)(process.execPath, [path.join(root, "web/node_modules/@biomejs/biome/bin/biome"), "check", "--write", pageDirectory], { cwd: path.join(root, "web") });
+    const { createServer } = await import(pathToFileURL(path.join(root, "web/node_modules/vite/dist/node/index.js")).href);
     vite = await createServer({ root: path.join(root, "web"), configFile: path.join(root, "web/companion.vite.config.ts"),
       optimizeDeps: { include: ["react", "react-dom/client", "openapi-fetch"] },
       server: { host: "127.0.0.1", port: 0, hmr: false, open: false, proxy: { "/api/v1/companion": api } } });
@@ -100,6 +106,12 @@ async function run() {
     assert.deepEqual(errors, []);
     await fs.writeFile(path.join(output,"result.json"), JSON.stringify({ result:"passed", scope:"loopback test fixture; real SQLite and domain API; two browser components; synthetic member; no product auth or NAS", scenarios:["home summon", "persisted quiet/character", "web to desktop", "desktop to web", "disconnect pauses", "explicit local play never syncs/replays"], state, errors }, null, 2));
     console.log(`Handoff smoke passed; evidence: ${output}`);
+  } catch (error) {
+    // Evidence of where it stopped: every open page as it looked.
+    const pages = browser ? browser.contexts().flatMap((context) => context.pages()) : [];
+    for (const [index, page] of pages.entries())
+      await page.screenshot({ path: path.join(output, `failure-${index}.png`), fullPage: true }).catch(() => {});
+    throw error;
   } finally {
     if (browser) await browser.close();
     if (vite) await vite.close();

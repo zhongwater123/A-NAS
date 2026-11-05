@@ -28,7 +28,8 @@ async function run() {
     assert.equal(preferences.node, false);
     assert.equal(preferences.sandbox, true);
     assert.equal(preferences.isolation, true);
-    assert.equal(preferences.bounds.width, 350);
+    // Windows rounds a scaled window's size (350 becomes 352 at 150%).
+    assert.ok(Math.abs(preferences.bounds.width - 350) <= 4, `pet width ${preferences.bounds.width}`);
     await page.getByRole("button", { name: "和大肥鱼聊聊，按住可拖动" }).click();
     await page.getByRole("textbox", { name: "跟大肥鱼说句话" }).fill("专注25分钟");
     await page.getByRole("button", { name: "发送给大肥鱼" }).click();
@@ -55,6 +56,11 @@ async function run() {
     await fs.writeFile(path.join(output, "result.json"), JSON.stringify({ result: "passed", scope: executable ? "packaged app; offline only" : "source Electron; offline only", preferences,
       scenarios: ["chat focus command", "quiet", "home", "dafeiyu asset", "hide"], errors }, null, 2));
     console.log(`Desktop smoke passed; evidence: ${output}`);
+  } catch (error) {
+    // Evidence of where it stopped: every open window as it looked.
+    for (const [index, window] of (desktop?.windows() ?? []).entries())
+      await window.screenshot({ path: path.join(output, `failure-${index}.png`) }).catch(() => {});
+    throw error;
   } finally {
     if (desktop) await desktop.close();
     await fs.rm(profile, { recursive: true, force: true });
