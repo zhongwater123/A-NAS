@@ -1,0 +1,67 @@
+name: Mobile iOS simulator check
+on:
+  push:
+    branches: [codex/mobile-lan-client]
+    paths:
+      - .github/workflows/mobile-ios-smoke.yml
+      - scripts/mobile-assert-login.swift
+      - scripts/mobile-sign-simulator.sh
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Successful Mobile builds run containing ios-simulator-build
+        required: true
+        type: string
+        default: '41961148652'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  simulator:
+    runs-on: macos-26
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: ios-simulator-build
+          run-id: ${{ inputs.build_run || '41961148652' }}
+          github-token: ${{ github.token }}
+          path: artifacts
+      - name: Verify that the assertion catches the original failure
+        run: |
+          set +e
+          swift scripts/mobile-assert-login.swift artifacts/ios-login.png > artifacts/baseline-ocr.txt 2>&1
+          result=$?
+          set -e
+          cat artifacts/baseline-ocr.txt
+          test "$result" = 1
+      - name: Apply simulator-only ad-hoc signing
+        run: |
+          ditto -x -k artifacts/ios-simulator-app.zip artifacts/app
+          bash scripts/mobile-sign-simulator.sh artifacts/app/ANAS.app
+      - name: Verify fresh startup after signing
+        timeout-minutes: 10
+        run: |
+          device=$(xcrun simctl list devices available --json | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')
+          test "$device" != null
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl install "$device" artifacts/app/ANAS.app
+          xcrun simctl launch "$device" com.anas.mobile
+          sleep 5
+          xcrun simctl io "$device" screenshot artifacts/ios-login-signed.png
+          swift scripts/mobile-assert-login.swift artifacts/ios-login-signed.png | tee artifacts/signed-ocr.txt
+          ditto -c -k --sequesterRsrc --keepParent artifacts/app/ANAS.app artifacts/ios-simulator-signed.zip
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: ios-startup-comparison
+          path: |
+            artifacts/*ocr.txt
+            artifacts/ios-login-signed.png
+            artifacts/ios-simulator-signed.zip
+          retention-days: 7
