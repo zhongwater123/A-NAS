@@ -190,6 +190,7 @@ export function usePersonalDesk(owner: string) {
   }, [owner]);
   const value = useSyncExternalStore(store.subscribe, store.get);
   const [now, setNow] = useState(Date.now);
+  const running = value.focus.status === "running";
   useEffect(() => {
     const update = () => {
       const current = Date.now();
@@ -197,13 +198,15 @@ export function usePersonalDesk(owner: string) {
       setNow(current);
     };
     update();
-    const timer = window.setInterval(update, 1000);
+    // Only a running clock needs a tick every second. Otherwise checking again when the
+    // page comes back is enough, and the pet and home are not redrawn every second.
+    const timer = running ? window.setInterval(update, 1000) : undefined;
     document.addEventListener("visibilitychange", update);
     return () => {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", update);
     };
-  }, [store]);
+  }, [store, running]);
   const remaining =
     value.focus.status === "running"
       ? Math.min(value.focus.remaining, Math.max(0, value.focus.deadline! - now))

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CompanionFloating } from "./CompanionFloating";
 import { CompanionPanel } from "./CompanionPanel";
-import { createDesk, deskKey } from "./deskStore";
+import { createDesk, deskKey, usePersonalDesk } from "./deskStore";
 import { Stage } from "./Stage";
 
 afterEach(() => {
@@ -23,6 +23,43 @@ describe("a member's focus and todos on this device", () => {
     expect(restored.get().focus.status).toBe("done");
     expect(restored.get().rounds).toBe(1);
     expect(createDesk("deadline-owner", localStorage).get().rounds).toBe(1);
+  });
+  it("redraws every second only while a focus is running", () => {
+    vi.useFakeTimers();
+    const rendered = vi.fn();
+    function Probe() {
+      rendered();
+      const desk = usePersonalDesk("tick-owner");
+      return (
+        <>
+          <span>{desk.clock}</span>
+          <button type="button" onClick={() => desk.store.start(1, "focus", null, Date.now())}>
+            start
+          </button>
+          <button type="button" onClick={() => desk.store.pause(Date.now())}>
+            pause
+          </button>
+        </>
+      );
+    }
+    const renders = () => rendered.mock.calls.length;
+    // One second per act: updates inside a single act are batched into one render.
+    const seconds = (count: number) => {
+      for (let i = 0; i < count; i++) act(() => vi.advanceTimersByTime(1000));
+    };
+    render(<Probe />);
+    const idle = renders();
+    seconds(5);
+    expect(renders()).toBe(idle);
+    fireEvent.click(screen.getByRole("button", { name: "start" }));
+    const started = renders();
+    seconds(3);
+    expect(renders()).toBe(started + 3);
+    expect(screen.getByText("00:57")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "pause" }));
+    const paused = renders();
+    seconds(5);
+    expect(renders()).toBe(paused);
   });
   it("pauses without consuming time, resumes and refuses to replace an active focus", () => {
     const desk = createDesk("pause-owner", localStorage);

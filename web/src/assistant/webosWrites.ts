@@ -49,6 +49,11 @@ const RULES: Rule[] = [
   route("POST", "music/library/scan"),
   route("(PUT|DELETE)", `music/favorites/${ID}`),
   route("POST", "music/plays"),
+  // Which of the member's clients the companion is on: its heartbeat and the hand-over
+  // between clients run on the companion's own timer. A VNAS click on 叫到这里 or 收起
+  // passes too; it only moves the companion between the member's own clients. Its
+  // actions (quiet, the task conversation) are only sent on clicks and are still asked.
+  route("POST", "companion/(claim|heartbeat|release)"),
   route("POST", "music/playlists"),
   route("POST", `music/playlists/${ID}/tracks`),
   // Asked, with what the member is told.

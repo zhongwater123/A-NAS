@@ -31,19 +31,18 @@ export function CompanionFloating({
   const [local] = useCompanion(userId);
   const view = useCompanionView(userId, connected && local.place === "desk");
   const { value, update, quiet } = view;
+  // A fullscreen page (a video) moves the pet out of the way only while it lasts:
+  // nothing is saved, and the pet is hidden rather than unmounted, so its chat, NAS
+  // connection and position are all still there when the page leaves fullscreen.
+  const [fullscreen, setFullscreen] = useState(() => Boolean(document.fullscreenElement));
   useEffect(() => {
-    const hide = () => {
-      if (document.fullscreenElement) {
-        view.rest();
-        update({ place: "hidden" });
-      }
-    };
-    document.addEventListener("fullscreenchange", hide);
-    return () => document.removeEventListener("fullscreenchange", hide);
-  }, [update, view]);
+    const change = () => setFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", change);
+    return () => document.removeEventListener("fullscreenchange", change);
+  }, []);
   if (value.place !== "desk") return null;
   return (
-    <aside className={styles.floating} aria-label="网页桌宠">
+    <aside className={styles.floating} aria-label="网页桌宠" hidden={fullscreen}>
       <Stage
         taskPhase={connected ? phase : previewPhase}
         taskMessage={speech?.message}

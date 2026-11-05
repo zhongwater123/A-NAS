@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -184,6 +184,36 @@ describe("companion interactions", () => {
     expect(screen.queryByRole("complementary", { name: "网页桌宠" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "叫回小窝" }));
     expect(screen.getByRole("button", { name: "和大肥鱼聊聊" })).toBeVisible();
+  });
+  it("steps aside only while a page is fullscreen and is not stashed by it", async () => {
+    const user = userEvent.setup();
+    const fullscreen = (element: Element | null) =>
+      act(() => {
+        Object.defineProperty(document, "fullscreenElement", { configurable: true, value: element });
+        document.dispatchEvent(new Event("fullscreenchange"));
+      });
+    try {
+      render(
+        <>
+          <CompanionPanel userId="fullscreen-member" />
+          <CompanionFloating userId="fullscreen-member" onOpen={() => {}} />
+        </>,
+      );
+      fullscreen(document.body);
+      fullscreen(null);
+      expect(readPreferences("fullscreen-member", localStorage).place).toBe("home");
+      await user.click(screen.getByRole("button", { name: "到网页桌面陪我" }));
+      const pet = screen.getByRole("complementary", { name: "网页桌宠" });
+      fullscreen(document.body);
+      expect(screen.queryByRole("complementary", { name: "网页桌宠" })).toBeNull();
+      expect(readPreferences("fullscreen-member", localStorage).place).toBe("desk");
+      fullscreen(null);
+      // The same element: hidden while fullscreen, not unmounted, so its chat and position stay.
+      expect(screen.getByRole("complementary", { name: "网页桌宠" })).toBe(pet);
+      expect(pet).toBeVisible();
+    } finally {
+      delete (document as { fullscreenElement?: Element | null }).fullscreenElement;
+    }
   });
   it("a second member does not inherit the first member's visible pet", async () => {
     const user = userEvent.setup();
