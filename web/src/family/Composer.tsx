@@ -258,6 +258,10 @@ export function Composer({
       }
       if (editing) {
         delete input.requestKey;
+        if (photos.length === editing.photos.length && photos.every((id, i) => id === editing.photos[i].assetId)) {
+          delete input.photos;
+          delete input.certificates;
+        }
         onSaved(await updateRecord(editing.id, { ...input, version: editing.version }));
       } else {
         onSaved(

@@ -430,3 +430,61 @@ describe("summarize", () => {
     ]);
   });
 });
+
+it("omits unchanged photo references when editing the text of a record", async () => {
+  const original = familyRecord({
+    authorId: "user:mom",
+    authorName: "mom",
+    photos: [{ assetId: "visible", video: false, role: "album" }],
+  });
+  let patched: FamilyRecordInput | undefined;
+  server.use(
+    ...familyHandlers({ records: [original] }),
+    http.patch("/api/v1/family/records/{recordId}", async ({ request, response }) => {
+      patched = await request.json();
+      return response(200).json({ ...original, text: patched.text ?? "", version: 2 });
+    }),
+  );
+  render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
+  await userEvent.click(await screen.findByRole("button", { name: "更多操作" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name: "编辑" }));
+  const dialog = await screen.findByRole("dialog", { name: "编辑日志" });
+  const field = within(dialog).getByRole("textbox", { name: "内容" });
+  await userEvent.clear(field);
+  await userEvent.type(field, "修改文字");
+  await userEvent.click(within(dialog).getByRole("button", { name: "保存" }));
+  await waitFor(() => expect(patched?.text).toBe("修改文字"));
+  expect(patched).not.toHaveProperty("photos");
+  expect(patched).not.toHaveProperty("certificates");
+});
+
+it("loads older letters using the wall cursor", async () => {
+  const cursors: string[] = [];
+  const message = (id: string, text: string) => ({
+    id,
+    text,
+    authorId: "user:mom",
+    authorName: "mom",
+    createdAt: "2026-10-28T10:00:00Z",
+  });
+  server.use(
+    ...familyHandlers(),
+    http.get("/api/v1/family/babies/{babyId}/wall", ({ request, response }) => {
+      const cursor = new URL(request.url).searchParams.get("cursor") ?? "";
+      cursors.push(cursor);
+      return response(200).json(
+        cursor
+          ? { items: [message("old", "最早的一封信")] }
+          : { items: [message("new", "最近的一封信")], next: "older" },
+      );
+    }),
+  );
+  render(<FamilyPanel userId="user:mom" onShowPhoto={vi.fn()} />);
+  await userEvent.click(await screen.findByRole("tab", { name: "家人" }));
+  expect(await screen.findByText("最近的一封信")).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "读取更早的留言" }));
+  expect(await screen.findByText("最早的一封信")).toBeTruthy();
+  expect(screen.getByText("最近的一封信")).toBeTruthy();
+  expect(cursors).toEqual(["", "older"]);
+  expect(screen.queryByRole("button", { name: "读取更早的留言" })).toBeNull();
+});

@@ -15,8 +15,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/mattn/go-sqlite3"
+	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/capacity"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
@@ -72,14 +76,19 @@ type Options struct {
 	// Photos answers which photo assets a caller can see. Without it,
 	// photo records cannot be created and none are shown.
 	Photos Photos
+	// Admits checks the data-volume reserve; nil uses capacity.Admits.
+	Admits func(string, int64) (bool, error)
 }
 
 type Store struct {
-	db         *sql.DB
-	recordings string
-	now        func() time.Time
-	accounts   func(context.Context) (map[string]Account, error)
-	photos     Photos
+	db            *sql.DB
+	recordings    string
+	now           func() time.Time
+	accounts      func(context.Context) (map[string]Account, error)
+	photos        Photos
+	admits        func(string, int64) (bool, error)
+	uploadsMu     sync.Mutex
+	activeUploads map[string]bool
 }
 
 // Open opens the family store in directory, which holds family.db and the
@@ -107,7 +116,10 @@ func Open(directory string, options Options) (*Store, error) {
 	if options.Accounts == nil {
 		return nil, errors.New("family store needs an account lookup")
 	}
-	store := &Store{db: db, recordings: recordings, now: options.Now, accounts: options.Accounts, photos: options.Photos}
+	if options.Admits == nil {
+		options.Admits = capacity.Admits
+	}
+	store := &Store{db: db, recordings: recordings, now: options.Now, accounts: options.Accounts, photos: options.Photos, admits: options.Admits, activeUploads: map[string]bool{}}
 	if err := store.migrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -235,7 +247,7 @@ CREATE TABLE reactions (
     created_at TEXT NOT NULL,
     PRIMARY KEY (record_id, account_id, reaction)
 );
-`}
+`, activity.IndexStatement}
 
 func (s *Store) migrate(ctx context.Context) error {
 	var version int
@@ -307,4 +319,9 @@ func (s *Store) audit(ctx context.Context, q queryer, actor Actor, action, resou
 // trashCutoff is the deletion time before which trashed items are gone.
 func (s *Store) trashCutoff() string {
 	return formatTime(s.now().AddDate(0, 0, -TrashDays))
+}
+
+func isUniqueConstraint(err error) bool {
+	var sqliteErr sqlite3.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique
 }

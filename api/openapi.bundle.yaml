@@ -3120,6 +3120,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '507':
+          $ref: '#/components/responses/ProductError'
   /api/v1/family/babies/{babyId}/trash:
     get:
       operationId: listFamilyTrash
@@ -3302,6 +3304,11 @@ paths:
     get:
       operationId: listFamilyWall
       summary: The channel's message wall in 亲友团, newest first
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
       responses:
         '200':
           description: Messages
@@ -3317,9 +3324,13 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/FamilyComment'
+                  next:
+                    type: string
         '403':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '422':
           $ref: '#/components/responses/ProductError'
     post:
       operationId: addFamilyWallMessage
@@ -9697,6 +9708,7 @@ components:
         - file
         - storage
         - photo
+        - family
     ActivityAccount:
       type: object
       additionalProperties: false
@@ -9734,6 +9746,7 @@ components:
             - file
             - storage
             - photo
+            - family
             - other
         action:
           type: string
@@ -11112,13 +11125,13 @@ components:
         photos:
           type: array
           maxItems: 200
-          description: Photo asset IDs of the shared library, in order; on an edit, replaces the photos.
+          description: Photo asset IDs of the shared library, in order; on an edit, replaces only currently visible references. Omission preserves all stored references.
           items:
             type: string
         certificates:
           type: array
           maxItems: 200
-          description: A vaccination's proof photos.
+          description: A vaccination's proof photos; on an edit, replaces only currently visible references. Omission preserves all stored references.
           items:
             type: string
         alsoBabies:

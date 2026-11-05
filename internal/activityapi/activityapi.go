@@ -26,6 +26,7 @@ type Sources struct {
 	// Photos reads the caller's photo events through the photo API, so it
 	// works whether the library runs in this process or in the photo service.
 	Photos func(r *http.Request, q activity.Query) ([]activity.Event, error)
+	Family func(r *http.Request, q activity.Query) ([]activity.Event, error)
 	Logger *slog.Logger
 }
 
@@ -35,11 +36,12 @@ type API struct {
 	files    *files.Service
 	storage  *storage.Service
 	photos   func(*http.Request, activity.Query) ([]activity.Event, error)
+	family   func(*http.Request, activity.Query) ([]activity.Event, error)
 	logger   *slog.Logger
 }
 
 func New(sources Sources) *API {
-	return &API{accounts: sources.Accounts, files: sources.Files, storage: sources.Storage, photos: sources.Photos, logger: sources.Logger}
+	return &API{accounts: sources.Accounts, files: sources.Files, storage: sources.Storage, photos: sources.Photos, family: sources.Family, logger: sources.Logger}
 }
 
 func (a *API) Routes() []apiroute.Route {
@@ -170,6 +172,9 @@ func (a *API) activity(w http.ResponseWriter, r *http.Request, session accounts.
 		read(storage.ActivityCategories, func() ([]activity.Event, error) { return a.storage.Activity(ctx, actorsOnly) })
 	}
 	// Photo events are only ever shown to the account that made them.
+	if a.family != nil && (actorFilter == "" || actorFilter == viewer.ID) {
+		read([]activity.Category{activity.CategoryFamily}, func() ([]activity.Event, error) { return a.family(r, q) })
+	}
 	if a.photos != nil && (actorFilter == "" || actorFilter == viewer.ID) {
 		read([]activity.Category{activity.CategoryPhoto}, func() ([]activity.Event, error) { return a.photos(r, q) })
 	}

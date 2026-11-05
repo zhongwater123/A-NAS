@@ -115,8 +115,8 @@ export async function react(recordId: string, reaction: FamilyReactionName, on: 
   const path = "/api/v1/family/records/{recordId}/reactions/{reaction}" as const;
   return (await call(on ? client.PUT(path, where) : client.DELETE(path, where))).items;
 }
-export const listWall = async (babyId: string) =>
-  (await call(client.GET("/api/v1/family/babies/{babyId}/wall", baby(babyId)))).items;
+export const listWall = (babyId: string, cursor = "") =>
+  call(client.GET("/api/v1/family/babies/{babyId}/wall", { params: { path: { babyId }, query: { cursor } } }));
 export const addWallMessage = (babyId: string, text: string, requestKey: string) =>
   call(client.POST("/api/v1/family/babies/{babyId}/wall", { ...baby(babyId), body: { text, requestKey } }));
 
@@ -174,6 +174,7 @@ const familyMessages: Record<string, string> = {
   photos_unavailable: "相册暂时不可用，请稍后再试照片相关的内容",
   family_unavailable: "家庭中心暂时不可用，请稍后再试",
   too_large: "文件太大了",
+  insufficient_storage: "空间不足，请清理一些内容后再试",
   unsupported_image: "请选择 JPEG、PNG、GIF 或 WebP 图片",
   media_unavailable: "这段录音暂时不能播放",
   not_found: "内容已不存在",

@@ -102,7 +102,7 @@ type Record struct {
 }
 
 // RecordInput is what a member writes. On update, Version is the version
-// they read; Photos, when not nil, replaces the record's photos.
+// they read; non-nil photo lists replace only photos visible to the caller.
 type RecordInput struct {
 	RequestKey   string           `json:"requestKey"`
 	Kind         Kind             `json:"kind"`
@@ -424,6 +424,11 @@ type checked struct {
 // check validates input for baby and looks its photos up as actor. Photos
 // must be visible to actor and in the shared library.
 func (s *Store) check(ctx context.Context, actor Actor, baby Baby, input RecordInput) (checked, error) {
+	return s.checkWithRetained(ctx, actor, baby, input, nil)
+}
+
+// retained contains only references already stored on this record, never client data.
+func (s *Store) checkWithRetained(ctx context.Context, actor Actor, baby Baby, input RecordInput, retained map[string]Photo) (checked, error) {
 	c := checked{input: input}
 	var ok bool
 	limit := MaxTextRunes
@@ -511,10 +516,12 @@ func (s *Store) check(ctx context.Context, actor Actor, baby Baby, input RecordI
 		}
 		seen[id] = true
 	}
-	found, err := s.lookup(ctx, actor, ids)
+	lookupIDs := slices.DeleteFunc(slices.Clone(ids), func(id string) bool { _, ok := retained[id]; return ok })
+	found, err := s.lookup(ctx, actor, lookupIDs)
 	if err != nil {
 		return c, err
 	}
+	maps.Copy(found, retained)
 	for _, id := range ids {
 		photo, ok := found[id]
 		if !ok || !photo.Shared {
@@ -623,6 +630,15 @@ func (s *Store) AddRecord(ctx context.Context, actor Actor, babyID string, input
 		if _, _, err := s.requireMember(ctx, tx, actor); err != nil {
 			return err
 		}
+		if input.RequestKey != "" {
+			err := tx.QueryRowContext(ctx, "SELECT id FROM records WHERE author_id = ? AND request_key = ?", actor.AccountID, input.RequestKey).Scan(&id)
+			if err == nil {
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
 		targets := []string{babyID}
 		for _, other := range input.AlsoBabies {
 			if other == babyID || slices.Contains(targets, other) {
@@ -660,6 +676,11 @@ func (s *Store) AddRecord(ctx context.Context, actor Actor, babyID string, input
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, ErrConflict) && input.RequestKey != "" {
+			if existing, lookupErr := s.byRequest(ctx, actor, input.RequestKey); lookupErr == nil {
+				return existing, nil
+			}
+		}
 		return Record{}, err
 	}
 	return s.readRecord(ctx, s.db, actor, id, false)
@@ -693,7 +714,7 @@ VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, babyID, input.Kind, c.occurredOn, input.Text, actor.AccountID, actor.Username, formatTime(s.now()),
 		key, c.heightMM, c.weightG, c.headMM, code, vaccineName, dose, clinic, batch, title, autoKey)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if isUniqueConstraint(err) {
 			return "", ErrConflict
 		}
 		return "", err
@@ -752,21 +773,43 @@ func (s *Store) UpdateRecord(ctx context.Context, actor Actor, id string, input 
 		}
 		c = checked{input: RecordInput{Kind: KindRecording, Text: text}, occurredOn: input.OccurredOn}
 	} else {
-		if input.Photos == nil && input.Certificates == nil {
-			if err := loadPhotos(ctx, s.db, []*row{current}); err != nil {
+		if err := loadPhotos(ctx, s.db, []*row{current}); err != nil {
+			return Record{}, err
+		}
+		// Omitted lists keep their references without requiring the photo service.
+		// Explicit lists may only remove references the caller can currently see.
+		visible := map[string]Photo{}
+		if input.Photos != nil || input.Certificates != nil {
+			visible, err = s.lookup(ctx, actor, current.photoIDs)
+			if err != nil {
 				return Record{}, err
 			}
-			for _, assetID := range current.photoIDs {
-				if current.photoRoles[assetID] == "certificate" {
-					input.Certificates = append(input.Certificates, assetID)
-				} else {
-					input.Photos = append(input.Photos, assetID)
+		}
+		omitPhotos, omitCertificates := input.Photos == nil, input.Certificates == nil
+		retained := map[string]Photo{}
+		recordDate, _ := parseDate(current.record.OccurredOn)
+		for _, assetID := range current.photoIDs {
+			_, seen := visible[assetID]
+			certificate := current.photoRoles[assetID] == "certificate"
+			omitted := (!certificate && omitPhotos) || (certificate && omitCertificates)
+			if omitted || !seen {
+				retained[assetID] = Photo{ID: assetID, Shared: true, TakenAt: current.photoTaken[assetID], ImportedAt: recordDate, Video: current.photoVideo[assetID]}
+				list := &input.Photos
+				if certificate {
+					list = &input.Certificates
+				}
+				if !slices.Contains(*list, assetID) {
+					*list = append(*list, assetID)
 				}
 			}
 		}
-		if c, err = s.check(ctx, actor, baby, input); err != nil {
+		if c, err = s.checkWithRetained(ctx, actor, baby, input, retained); err != nil {
 			return Record{}, err
 		}
+		if input.Kind == KindPhotos && omitPhotos {
+			c.occurredOn = current.record.OccurredOn
+		}
+
 	}
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		var version int64
@@ -797,7 +840,7 @@ func (s *Store) UpdateRecord(ctx context.Context, actor Actor, id string, input 
 height_mm = ?, weight_g = ?, head_mm = ?, vaccine_code = ?, vaccine_name = ?, dose = ?, clinic = ?, batch = ?, title = ?, auto_key = ?
 WHERE id = ?`, c.occurredOn, in.Text, formatTime(s.now()), c.heightMM, c.weightG, c.headMM,
 			code, vaccineName, dose, clinic, batch, title, autoKey, id); err != nil {
-			if strings.Contains(err.Error(), "UNIQUE") {
+			if isUniqueConstraint(err) {
 				return ErrConflict
 			}
 			return err
@@ -872,7 +915,7 @@ func (s *Store) RestoreRecord(ctx context.Context, actor Actor, id string) (Reco
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE records SET deleted_at = NULL, deleted_by = '' WHERE id = ?", id); err != nil {
-			if strings.Contains(err.Error(), "UNIQUE") {
+			if isUniqueConstraint(err) {
 				return ErrConflict
 			}
 			return err

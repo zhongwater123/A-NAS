@@ -244,6 +244,7 @@ func familyAPI(t *testing.T, dir string, users *accounts.Service, photoAPI http.
 			return profiles, nil
 		}),
 		Photos: familyservice.Photos{API: photoAPI},
+		Admits: func(string, int64) (bool, error) { return true, nil },
 	})
 	if err != nil {
 		t.Fatal(err)
