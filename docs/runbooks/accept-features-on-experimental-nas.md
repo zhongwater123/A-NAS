@@ -39,6 +39,7 @@
 - 会话只在登录时的客户端上有效（#205）：局域网浏览器重新登录一次、本机屏幕保持登录；打开一个应用的网页后桌面仍登录；CSP 下 PDF 预览、终端、VNAS、影视与音乐播放正常。
 - 账号规则（#101）：按管理员、成员与被禁用账号核对登录、禁用、重置与改密。
 - 身份同步（#261）：按[调查的后续工作](../investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md#后续工作)核对产品服务启动后的身份同步日志、已禁用账号的登记，以及被禁用成员没有 SMB 会话。
+- smbd 等局域网地址：部署后正常重启一次，`ss -ltn` 中 445 监听 `172.18.45.48`，`journalctl -u smbd -b` 中没有等待超时的记录；若有，说明 DHCP 超过 20 秒，smbd 应在拿到地址后自动启动（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。
 - SMART 改为后台读取（#126）：日志中 smartctl 被杀与超时的条数、大文件夹的加载耗时、数据盘能否待机（[调查](../investigations/2026-10-15-host-agent-smart-on-every-request.md)）。
 
 ### 备份中心与存储

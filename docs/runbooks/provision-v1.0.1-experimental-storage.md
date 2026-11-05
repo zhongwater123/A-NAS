@@ -96,7 +96,7 @@ ip -brief link
   "$source_release" "$release_id" "$smb_interface"
 ```
 
-宿主机需要的 Debian 软件包由 release 中的 `a-nas-host` 声明，本地控制台的由 `a-nas-console` 声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），例如影视中心 FFmpeg Worker 用的 Debian FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）与文件管理 HEIC/HEIF 预览用的 libheif。安装器在 `a-nas-host` 没有安装或不是本 release 的版本，或者已安装的 `a-nas-console` 不是本 release 的版本时，以退出码 3 结束而不改变系统，并打印要执行的 `apt install` 命令。安装 `a-nas-host` 时，若局域网接口由 ifupdown 管理，它会启用 `ifupdown-wait-online.service`，smbd 因此在接口拿到 DHCP 地址之后才启动，重启后不再只监听回环。
+宿主机需要的 Debian 软件包由 release 中的 `a-nas-host` 声明，本地控制台的由 `a-nas-console` 声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)），例如影视中心 FFmpeg Worker 用的 Debian FFmpeg（[ADR 0017](../adr/0017-run-the-media-center-through-the-file-broker.md)）与文件管理 HEIC/HEIF 预览用的 libheif。安装器在 `a-nas-host` 没有安装或不是本 release 的版本，或者已安装的 `a-nas-console` 不是本 release 的版本时，以退出码 3 结束而不改变系统，并打印要执行的 `apt install` 命令。smbd 只监听启动时已有的地址，所以安装器为它写入 `/etc/systemd/system/smbd.service.d/a-nas-lan-address.conf`：smbd 等 `$smb_interface` 有了 IPv4 地址才启动，每次最多等 20 秒，等不到就 5 秒后再试；重启后它不再只监听回环（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。安装时 smbd 若已在运行，这项配置在它下次启动时生效；没有运行且接口还没有地址时，安装器照常完成，最后提示 smbd 尚未启动。
 
 完成标准：`dpkg-query -W a-nas-host` 显示本 release 的版本；`/opt/a-nas/current` 指向 root 所有的目标 release；`anas-host-agent`、`anas-photos` 与 `anas-api` 均 active，`anas-ffmpeg.socket` 已启用且 `/run/a-nas-ffmpeg/ffmpeg.sock` 为 `root:a-nas-photos 0660`，安装器没有以退出码 5 结束；`/run/a-nas/host-agent.sock` 为 `root:a-nas 0660`；API 仅监听 `127.0.0.1:8080`；`/etc/chromium/policies/managed/a-nas.json` 为 root 所有并关闭密码管理器。在本地控制台只输入账号和密码完成设备启用；首个账号成为 A-NAS 产品管理员，不是 Linux root。
 
