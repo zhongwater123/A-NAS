@@ -65,7 +65,7 @@ class PlanTest(unittest.TestCase):
         segment = {"card": "01-0-0", "shows": "街道", "reason": "交代地点"}
         body = plan.request({"segments": [segment | {"pace": "快", "extra": "不传"}]}, 60, "预告片")
         self.assertEqual(body["segments"], [segment | {"probe": "街道"}])  # the program paces it
-        by_part = {"part": 2, "shows": "办公室", "reason": "交代处境"}
+        by_part = {"part": 2, "seconds": 2.5, "shows": "办公室", "reason": "交代处境"}
         self.assertEqual(plan.request({"segments": [by_part]}, 60, None)["segments"], [by_part | {"probe": "办公室"}])
         self.assertEqual({k: body[k] for k in ("seconds", "margin", "edges", "look", "pace")},
                          {"seconds": 60, "margin": True, "edges": True, "look": False, "pace": "picture"})

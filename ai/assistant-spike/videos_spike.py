@@ -480,8 +480,13 @@ class Handler(BaseHTTPRequestHandler):
             if sum(caps) < target - 1 or sum(mins) > target + 1:
                 return [], [f"{len(segments)} 段的成片在 {sum(mins):g}–{sum(caps):g} 秒之间，目标是 {target:g} 秒："
                             + ("加几段" if sum(caps) < target - 1 else "删几段")]
-            # Each segment's share: its pace's aim, all scaled to the target.
-            aims = moments.aims(paces)
+            # Each segment's share: the seconds the planner gave it (剪法18), or else its pace's
+            # aim, all scaled to the target.
+            asked = [s.get("seconds") for s in segments]
+            if all(isinstance(x, (int, float)) and not isinstance(x, bool) and x > 0 for x in asked):
+                aims = [min(moments.CLIP_MAX, max(moments.SEGMENT_MIN, float(x))) for x in asked]
+            else:
+                aims = moments.aims(paces)
             scale = target / sum(aims)
             shares = [min(moments.CLIP_MAX, max(moments.SEGMENT_MIN, aim * scale)) for aim in aims]
         else:

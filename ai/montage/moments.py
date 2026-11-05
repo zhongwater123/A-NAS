@@ -114,10 +114,12 @@ PACE_CHANGE = (0.01, 0.06)
 SCENE_NEAR = 0.45
 # A picture's colour and light: its pixels in BINS × BINS × BINS bins of red, green and blue.
 BINS = 4
-# The seconds a segment of each pace aims at (#350), all scaled to the cut's target. Only an aim:
-# a segment runs SEGMENT_MIN–CLIP_MAX like any other, and its card's pace stays what its picture
-# says however few seconds the card has, so that a still card cut short is not called fast.
-PACES = {"慢": 5.0, "中": 3.5, "快": 2.0}
+# The seconds a segment of each pace runs, as the planner is told them to weigh (#350): a
+# trailer's shots run one and a half to four seconds, a still one read as soon as a moving one
+# (剪法18). The planner sets each segment's seconds itself; without them, each aims at the middle
+# of its pace's range, all scaled to the cut's target.
+PACE_RANGES = {"慢": (3.0, 4.0), "中": (2.0, 3.0), "快": (1.5, 2.0)}
+PACES = {name: (low + high) / 2 for name, (low, high) in PACE_RANGES.items()}
 
 # The cards a plan picks can run at least this share of its target, so that the program has
 # room to set each segment's seconds (#350).
