@@ -10,7 +10,9 @@ do {
   let text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
   print(text)
   let compact = text.filter { !$0.isWhitespace }
-  guard compact.contains("连接你的NAS"), compact.contains("172.18.45.48") else {
+  let address = CommandLine.arguments.count > 2
+    ? String(CommandLine.arguments[2].split(separator: ",")[0]) : "172.18.45.48"
+  guard compact.contains("连接你的NAS"), compact.contains(address) else {
     fputs("Login screen or configured NAS address is missing\n", stderr)
     exit(2)
   }

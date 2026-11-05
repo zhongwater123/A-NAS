@@ -9,6 +9,7 @@ on:
       - web/src/assistant/hermes/shared/**
       - web/src/assets/assistant-logo.webp
       - .github/workflows/mobile.yml
+      - scripts/mobile-assert-login.swift
   workflow_dispatch:
     inputs:
       lan_hosts:
@@ -97,9 +98,11 @@ jobs:
           xcodebuild -workspace ios/ANAS.xcworkspace -scheme ANAS \
             -configuration Release -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build/ios-simulator CODE_SIGNING_ALLOWED=NO build \
+            -derivedDataPath build/ios-simulator CODE_SIGN_IDENTITY=- build \
             > ios-build.log 2>&1
+          ditto -c -k --sequesterRsrc --keepParent build/ios-simulator/Build/Products/Release-iphonesimulator/ANAS.app ios-simulator-app.zip
       - name: Launch and capture the login screen
+        timeout-minutes: 10
         run: |
           device=$(xcrun simctl list devices available --json | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')
           test "$device" != null
@@ -109,7 +112,7 @@ jobs:
           xcrun simctl launch "$device" com.anas.mobile
           sleep 5
           xcrun simctl io "$device" screenshot ios-login.png
-          ditto -c -k --sequesterRsrc --keepParent build/ios-simulator/Build/Products/Release-iphonesimulator/ANAS.app ios-simulator-app.zip
+          swift ../scripts/mobile-assert-login.swift ios-login.png "$ANAS_LAN_HOSTS" | tee ios-login-check.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
         with:
@@ -118,5 +121,6 @@ jobs:
             mobile/ios-simulator-app.zip
             mobile/ios-login.png
             mobile/ios-build.log
+            mobile/ios-login-check.txt
           if-no-files-found: warn
           retention-days: 7
