@@ -1,11 +1,43 @@
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
-import { type CSSProperties, useId } from "react";
+import { useEffect, useId, useState } from "react";
 
-import naiwa from "./assets/naiwa.webp";
+import concerned from "./assets/dafeiyu-concerned.webp";
+import happy from "./assets/dafeiyu-happy.webp";
+import idle from "./assets/dafeiyu-idle.webp";
+import thinking from "./assets/dafeiyu-thinking.webp";
+import waiting from "./assets/dafeiyu-waiting.webp";
+import wave from "./assets/dafeiyu-wave.webp";
+import working from "./assets/dafeiyu-working.webp";
 import { type PetAction, taskFeeling } from "./behaviour";
 import styles from "./companion.module.css";
 import type { Character as CharacterKind } from "./preferences";
 import type { TaskPhase } from "./taskState";
+
+// One horizontal strip per pose, built by scripts/import-companion-art.py
+// (frame counts and timing are recorded in assets/dafeiyu.source.json). Loops
+// start and end at rest; a one-shot pose plays once, then the character idles
+// until another pose is asked for.
+const strips: Record<PetAction, { sheet: string; frames: number; seconds: number; loop: boolean }> = {
+  idle: { sheet: idle, frames: 60, seconds: 10, loop: true },
+  thinking: { sheet: thinking, frames: 60, seconds: 10, loop: true },
+  working: { sheet: working, frames: 60, seconds: 10, loop: true },
+  waiting: { sheet: waiting, frames: 60, seconds: 10, loop: true },
+  happy: { sheet: happy, frames: 42, seconds: 7, loop: false },
+  concerned: { sheet: concerned, frames: 30, seconds: 5, loop: false },
+  wave: { sheet: wave, frames: 24, seconds: 2, loop: false },
+  // The set has no walking clips yet.
+  left: { sheet: idle, frames: 60, seconds: 10, loop: true },
+  right: { sheet: idle, frames: 60, seconds: 10, loop: true },
+};
+
+// Each strip is its own image: fetch them soon after the character first
+// shows, so a pose's first appearance does not fade into an empty frame.
+let preloaded = false;
+function preloadStrips() {
+  if (preloaded) return;
+  preloaded = true;
+  for (const strip of Object.values(strips)) new Image().src = strip.sheet;
+}
 
 // Code-native experimental artwork, intentionally separate from behaviour.
 // The earlier generated concept sheets are not animation-ready assets.
@@ -20,20 +52,17 @@ export function Character({
   phase?: TaskPhase;
   action?: PetAction;
 }) {
+  const requested = asleep ? "idle" : (action ?? taskFeeling[phase].action);
+  const [shown, setShown] = useState({ requested, finished: false });
+  if (shown.requested !== requested) setShown({ requested, finished: false });
+  useEffect(() => {
+    if (kind !== "naiwa") return;
+    const timer = window.setTimeout(preloadStrips, 1500);
+    return () => window.clearTimeout(timer);
+  }, [kind]);
   if (kind === "naiwa") {
-    const rows: Record<PetAction, [number, number]> = {
-      idle: [0, 7],
-      wave: [3, 4],
-      happy: [4, 5],
-      concerned: [5, 8],
-      thinking: [6, 6],
-      working: [8, 6],
-      waiting: [7, 6],
-      left: [2, 8],
-      right: [1, 8],
-    };
-    const pose = asleep ? "idle" : (action ?? taskFeeling[phase].action);
-    const [row, count] = rows[pose];
+    const pose = shown.requested === requested && shown.finished ? "idle" : requested;
+    const strip = strips[pose];
     return (
       <MotionConfig reducedMotion="user">
         <motion.span
@@ -51,20 +80,22 @@ export function Character({
           <AnimatePresence initial={false}>
             <motion.span
               key={pose}
-              className={styles.naiwaSprite}
+              className={styles.petSprite}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.18 }}
-              style={
-                {
-                  backgroundImage: `url(${naiwa})`,
-                  backgroundPositionY: `${row * 10}%`,
-                  animationTimingFunction: `steps(${count})`,
-                  animationPlayState: asleep ? "paused" : "running",
-                  "--naiwa-end": `${(count / 7) * 100}%`,
-                } as CSSProperties
-              }
+              style={{
+                backgroundImage: `url(${strip.sheet})`,
+                backgroundSize: `${strip.frames * 100}% 100%`,
+                animationDuration: `${strip.seconds}s`,
+                animationTimingFunction: `steps(${strip.frames}, jump-none)`,
+                animationIterationCount: strip.loop ? "infinite" : 1,
+                animationPlayState: asleep ? "paused" : "running",
+              }}
+              onAnimationEnd={(event) => {
+                if (event.target === event.currentTarget && !strip.loop) setShown({ requested, finished: true });
+              }}
             />
           </AnimatePresence>
         </motion.span>

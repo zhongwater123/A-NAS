@@ -1,6 +1,6 @@
 # A-NAS 电脑伙伴原型
 
-与 NAS 网页共用 `web/src/companion/` 的角色、动作和玩法，支持点击、拖动、主动捉迷藏送花、安静陪伴、隐藏与叫回。当前固定使用社区奶蛙精灵图，功能与形象层独立；[素材来源与使用边界](../../web/src/companion/assets/NOTICE.md)已记录。
+与 NAS 网页共用 `web/src/companion/` 的角色、动作和玩法，支持点击、拖动、主动捉迷藏送花、安静陪伴、隐藏与叫回。当前固定使用社区二创「大肥鱼」（dsh-pet 鲸尾女仆）精灵图，只能用于非商业试验，功能与形象层独立；[素材来源与使用边界](../../web/src/companion/assets/NOTICE.md)已记录。
 
 ## 网页先试玩
 
@@ -86,6 +86,6 @@ npm run smoke:tasks
 
 ## 社区参考
 
-参考 [dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的共享物理与动作分层、[pet registry](https://github.com/zhu1090093659/dsh-pet) 的素材包隔离、[Live2D 桌面版](https://github.com/A8Chann/dsh-pet-live2d) 的宿主与页面分离。交互与接续控制器没有复制上述 dsh-pet 分支代码。任务链复用 A-NAS 已有的 Hermes JS 网关、会话和确认卡，避免重造 Agent。形象使用 [timerring/codex-pet-naiwa](https://github.com/timerring/codex-pet-naiwa) 的社区精灵图，原文件摘要与署名见素材说明。
+参考 [dsh-pet](https://github.com/PC2005-cloud/dsh-pet) 的共享物理与动作分层、[pet registry](https://github.com/zhu1090093659/dsh-pet) 的素材包隔离、[Live2D 桌面版](https://github.com/A8Chann/dsh-pet-live2d) 的宿主与页面分离。交互与接续控制器没有复制上述 dsh-pet 分支代码。任务链复用 A-NAS 已有的 Hermes JS 网关、会话和确认卡，避免重造 Agent。形象使用 [QCYTSN/dsh-dafeiyu](https://github.com/QCYTSN/dsh-dafeiyu) 中来自 dsh-pet 的鲸尾女仆帧，由 `scripts/import-companion-art.py` 转成精灵图；素材禁止商用，摘要、署名与许可见素材说明。
 
 行为规格见[虚拟伙伴](../../docs/specs/virtual-companion.md)。

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
+import { Character } from "./Character";
 import { CompanionFloating } from "./CompanionFloating";
 import { CompanionPanel } from "./CompanionPanel";
 import { advanceFlight, inside, speechOffset } from "./motion";
@@ -78,6 +79,38 @@ describe("speech follows the pet without leaving the scene", () => {
     const offset = speechOffset({ x: 100, y: 0 }, 160, { width: 600, height: 300 }, { width: 240, height: 70 });
     expect(offset.y).toBeGreaterThanOrEqual(168);
     expect(offset.y + 70).toBeLessThanOrEqual(294);
+  });
+});
+
+describe("character art", () => {
+  it.each([
+    [{ phase: "working" }, "working", /dafeiyu-working/, "infinite"],
+    [{ phase: "success" }, "happy", /dafeiyu-happy/, "1"],
+    [{ action: "wave" }, "wave", /dafeiyu-wave/, "1"],
+    [{ action: "left" }, "left", /dafeiyu-idle/, "infinite"],
+    [{ phase: "working", asleep: true }, "idle", /dafeiyu-idle/, "infinite"],
+  ] as const)("draws %o from its own strip", (props, pose, sheet, count) => {
+    const { container } = render(<Character kind="naiwa" {...props} />);
+    const avatar = container.querySelector<HTMLElement>("[data-action]");
+    const sprite = avatar?.querySelector<HTMLElement>("span");
+    expect(avatar?.dataset.action).toBe(pose);
+    expect(sprite?.style.backgroundImage).toMatch(sheet);
+    expect(sprite?.style.animationIterationCount).toBe(count);
+    expect(sprite?.style.animationPlayState).toBe("asleep" in props ? "paused" : "running");
+  });
+  it("idles after a one-shot pose ends and plays it again when asked anew", () => {
+    const page = render(<Character kind="naiwa" action="happy" />);
+    const pose = () => page.container.querySelector<HTMLElement>("[data-action]")?.dataset.action;
+    const sprite = page.container.querySelector<HTMLElement>("[data-action] > span");
+    if (!sprite) throw new Error("no sprite");
+    // jsdom has no AnimationEvent, so React listens for the prefixed name there.
+    fireEvent(sprite, new Event("webkitAnimationEnd", { bubbles: true }));
+    expect(pose()).toBe("idle");
+    page.rerender(<Character kind="naiwa" action="happy" />);
+    expect(pose()).toBe("idle");
+    page.rerender(<Character kind="naiwa" />);
+    page.rerender(<Character kind="naiwa" action="happy" />);
+    expect(pose()).toBe("happy");
   });
 });
 

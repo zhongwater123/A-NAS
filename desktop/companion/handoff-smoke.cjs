@@ -68,7 +68,7 @@ async function run() {
     await greet(home);
     await section.getByRole("button", { name: "安静陪我", exact: true }).click();
     await assertEventually(async () => assert.equal((await (await fetch(`${api}/api/v1/companion`)).json()).quiet, true));
-    assert.match(await section.locator("[class*=naiwaSprite]").first().getAttribute("style"), /naiwa\.webp/);
+    assert.match(await section.locator("[class*=petSprite]").first().getAttribute("style"), /dafeiyu-[a-z]+.*\.webp/);
     const desktop = await mount("CompanionDesktop");
     const native = desktop.locator("main");
     const desktopInvite = native.getByRole("button", { name: "和奶蛙聊聊，按住可拖动" });

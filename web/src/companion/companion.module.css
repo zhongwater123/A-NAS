@@ -304,7 +304,7 @@
 }
 .empty .avatar {
   width: 112px;
-  height: 121.333px;
+  height: 115.5px;
   flex: none;
   opacity: 0.55;
 }
@@ -508,23 +508,22 @@
 .avatar {
   display: block;
   position: relative;
-  width: 92.3077%;
+  width: 96.97%;
   height: 100%;
   margin: 0 auto;
   transform-origin: 50% 90%;
   pointer-events: none;
 }
-.naiwaSprite {
+.petSprite {
   display: inline-block;
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   margin: 0 auto;
-  aspect-ratio: 192 / 208;
-  background-size: 800% 1100%;
+  aspect-ratio: 224 / 231;
   background-repeat: no-repeat;
-  animation: naiwa-frames 1.4s steps(6) infinite;
+  animation: pet-frames 10s steps(60, jump-none) infinite both;
 }
 .playDock {
   display: flex;
@@ -564,16 +563,16 @@
 .rehearsal .actions {
   margin: 10px 0;
 }
-@keyframes naiwa-frames {
+@keyframes pet-frames {
   from {
     background-position-x: 0%;
   }
   to {
-    background-position-x: var(--naiwa-end);
+    background-position-x: 100%;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .naiwaSprite {
+  .petSprite {
     animation: none;
   }
 }

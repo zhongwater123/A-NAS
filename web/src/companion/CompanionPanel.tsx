@@ -162,6 +162,13 @@ export function CompanionPanel({
             浏览器暂时无法保存，这次的计时和待办仅在当前页面保留。
           </p>
         )}
+        <p className={deskStyles.hint}>
+          形象：社区二创「大肥鱼」，动画来自{" "}
+          <a href="https://github.com/PC2005-cloud/dsh-pet" target="_blank" rel="noreferrer">
+            github.com/PC2005-cloud/dsh-pet
+          </a>
+          ，按 CC BY-NC-SA 4.0 仅作非商业试验。
+        </p>
       </div>
     </section>
   );
