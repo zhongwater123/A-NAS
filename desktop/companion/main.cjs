@@ -21,6 +21,15 @@ let loadFailed = false;
 // cannot change a member's preferences or reuse a live NAS session.
 if (process.env.ANAS_COMPANION_DATA_DIR) app.setPath("userData", process.env.ANAS_COMPANION_DATA_DIR);
 
+// Each pose the pet has shown keeps its decoded strip (up to 12 MB) in the GPU
+// process's image cache long after it is back to idle; the default cache is far
+// larger than the pet ever needs. Past this cap the GPU process drops the strips
+// nothing is drawing (one being drawn is never dropped; a pose shown again is
+// decoded again). It must stay above the strips drawn at once: the pet's and the
+// home window's, plus a pose fading into the next.
+// See docs/investigations/2026-11-05-companion-gpu-memory.md.
+app.commandLine.appendSwitch("force-gpu-mem-discardable-limit-mb", "32");
+
 if (!app.requestSingleInstanceLock()) app.quit();
 
 const GRANTED = new Set(["fullscreen", "clipboard-sanitized-write"]);

@@ -88,7 +88,7 @@ describe("character art", () => {
     [{ phase: "success" }, "happy", /dafeiyu-happy/, "1"],
     [{ action: "wave" }, "wave", /dafeiyu-wave/, "1"],
     [{ action: "left" }, "left", /dafeiyu-idle/, "infinite"],
-    [{ phase: "working", asleep: true }, "idle", /dafeiyu-idle/, "infinite"],
+    [{ phase: "working", asleep: true }, "idle", /dafeiyu-idle/, "6"],
   ] as const)("draws %o from its own strip", (props, pose, sheet, count) => {
     const { container } = render(<Character kind="naiwa" {...props} />);
     const avatar = container.querySelector<HTMLElement>("[data-action]");
@@ -111,6 +111,29 @@ describe("character art", () => {
     page.rerender(<Character kind="naiwa" />);
     page.rerender(<Character kind="naiwa" action="happy" />);
     expect(pose()).toBe("happy");
+  });
+  it("rests on a still frame after a minute of idling and moves again when asked", () => {
+    const page = render(<Character kind="naiwa" action="happy" />);
+    // The pose that faded out may still be leaving, so find each strip by its sheet.
+    const strip = (sheet: RegExp) =>
+      [...page.container.querySelectorAll<HTMLElement>("[data-action] > span")].find((span) =>
+        sheet.test(span.style.backgroundImage),
+      );
+    const end = (span?: HTMLElement) => {
+      if (!span) throw new Error("no sprite");
+      fireEvent(span, new Event("webkitAnimationEnd", { bubbles: true }));
+    };
+    end(strip(/dafeiyu-happy/));
+    const idling = strip(/dafeiyu-idle/);
+    expect(idling?.style.animationName).toBe("");
+    end(idling);
+    expect(strip(/dafeiyu-idle/)?.style.animationName).toBe("none");
+    page.rerender(<Character kind="naiwa" action="happy" />);
+    expect(strip(/dafeiyu-idle/)?.style.animationName).toBe("none");
+    page.rerender(<Character kind="naiwa" />);
+    expect(strip(/dafeiyu-idle/)?.style.animationName).toBe("");
+    page.rerender(<Character kind="naiwa" phase="working" />);
+    expect(strip(/dafeiyu-working/)?.style.animationName).toBe("");
   });
 });
 

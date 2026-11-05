@@ -17,6 +17,12 @@ import type { TaskPhase } from "./taskState";
 // (frame counts and timing are recorded in assets/dafeiyu.source.json). Loops
 // start and end at rest; a one-shot pose plays once, then the character idles
 // until another pose is asked for.
+//
+// Idle itself plays this many loops (a minute), then rests on its first frame
+// until another pose is asked for: a running strip repaints every frame, which
+// kept about 30 MB on the GPU and took nearly all of the pet's idle CPU
+// (docs/investigations/2026-11-05-companion-gpu-memory.md).
+const IDLE_LOOPS = 6;
 const strips: Record<PetAction, { sheet: string; frames: number; seconds: number; loop: boolean }> = {
   idle: { sheet: idle, frames: 60, seconds: 10, loop: true },
   thinking: { sheet: thinking, frames: 60, seconds: 10, loop: true },
@@ -53,15 +59,20 @@ export function Character({
   action?: PetAction;
 }) {
   const requested = asleep ? "idle" : (action ?? taskFeeling[phase].action);
-  const [shown, setShown] = useState({ requested, finished: false });
-  if (shown.requested !== requested) setShown({ requested, finished: false });
+  // `finished`: a one-shot pose has played and handed back to idle.
+  // `resting`: idle has played its loops and holds still.
+  const [shown, setShown] = useState({ requested, finished: false, resting: false });
+  if (shown.requested !== requested) setShown({ requested, finished: false, resting: false });
   useEffect(() => {
     if (kind !== "naiwa") return;
     const timer = window.setTimeout(preloadStrips, 1500);
     return () => window.clearTimeout(timer);
   }, [kind]);
   if (kind === "naiwa") {
-    const pose = shown.requested === requested && shown.finished ? "idle" : requested;
+    const current = shown.requested === requested;
+    const finished = current && shown.finished;
+    const pose = finished ? "idle" : requested;
+    const resting = pose === "idle" && current && shown.resting;
     const strip = strips[pose];
     return (
       <MotionConfig reducedMotion="user">
@@ -88,13 +99,16 @@ export function Character({
               style={{
                 backgroundImage: `url(${strip.sheet})`,
                 backgroundSize: `${strip.frames * 100}% 100%`,
+                animationName: resting ? "none" : undefined,
                 animationDuration: `${strip.seconds}s`,
                 animationTimingFunction: `steps(${strip.frames}, jump-none)`,
-                animationIterationCount: strip.loop ? "infinite" : 1,
+                animationIterationCount: pose === "idle" ? IDLE_LOOPS : strip.loop ? "infinite" : 1,
                 animationPlayState: asleep ? "paused" : "running",
               }}
               onAnimationEnd={(event) => {
-                if (event.target === event.currentTarget && !strip.loop) setShown({ requested, finished: true });
+                if (event.target !== event.currentTarget) return;
+                if (pose === "idle") setShown({ requested, finished, resting: true });
+                else if (!strip.loop) setShown({ requested, finished: true, resting: false });
               }}
             />
           </AnimatePresence>
