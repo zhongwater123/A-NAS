@@ -43,7 +43,7 @@
 
 - 部署：只改产品服务，随下一次产品版本部署生效，试用包不需要 `update`。部署后打开该账号的“记忆”，应看到 `anas-photos`（“VNAS 自己总结”）。
 - 名字冲突：Hermes 查找技能时先找主目录、再找 `skills.external_dirs`。成员已有同名自建技能时，A-NAS 以后新增的同名系统技能会被它遮住；新增系统技能前要考虑这一点（例如以后真要做 `anas-photos`）。
-- “整理一下存起来”写成 `/nas/助手` 中的文件：不进入记忆，新对话也不会读，但助手会承诺“下次从笔记接着聊”。是否调整 [`anas-files`](../../ai/assistant-spike/skills/anas-files/SKILL.md) 的措辞待用户决定。
+- “整理一下存起来”写成 `/nas/助手` 中的文件：不进入记忆，新对话也不会读，但助手会承诺“下次从笔记接着聊”。是否调整 [`anas-files`](../../ai/assistant-spike/skills/anas-files/SKILL.md) 的措辞见[决定记录](../decisions/2026-10-20-assistant-notes-wording.md)。
 
 ## 关联
 

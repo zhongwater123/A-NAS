@@ -19,7 +19,7 @@ M2 交付后，成员可以：
 ## 已确认的决定
 
 - **模型包**：使用全模态 740M 官方包（约 485 MB，2026-10-09 决定）。相册只调用文本与图片编码；包内的音频编码器保留，不为相册单独裁剪。
-- **OCR**：2026-10-09 决定不做；2026-10-19 用户决定做，识别出的文字与字段进入搜索，可见范围与照片相同（[规格](../specs/photo-library.md)）。模型 2026-10-30 定为 Qwen3.5-4B 的 Q4_K_M，见 [OCR 实施方案](photo-ocr.md)（proposed）与[模型评估](../research/photo-ocr-model-evaluation.md)。
+- **OCR**：做（[决定](../decisions/2026-10-19-photo-ocr.md)，推翻了 2026-10-09 的“不做”），识别出的文字与字段进入搜索，可见范围与照片相同（[规格](../specs/photo-library.md)）。模型为 Qwen3.5-4B 的 Q4_K_M（[决定](../decisions/2026-10-30-ocr-model.md)），见 [OCR 实施方案](photo-ocr.md)（proposed）与[模型评估](../research/photo-ocr-model-evaluation.md)。
 - **内置**：AI 随系统安装和升级、默认开启，模型与运行环境由开发机经 SSH 传到设备，设备不联网获取（2026-10-10 决定，[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
 
 ## 已核实的 Runtime 事实（2026-10-08）
@@ -73,7 +73,7 @@ M2 交付后，成员可以：
 ### AI Worker（`anas-ai`）
 
 - 一个小型 Python 进程，内部有两个 Provider：MediaPipe Universal Embedder 加载全模态 740M `.litertlm` 产生向量；ONNX Runtime 加载 D-FINE 检测器，只在有检测任务时才创建会话（[物体检测方案](photo-objects.md#worker)）。全模态包会占用多少内存、能否只初始化文本与图片编码器，官方没有数字，由步骤 3 实测。测试用的 Fake Provider 实现同一协议，返回由输入哈希得到的确定性向量与框。
-- 单元见 [`anas-ai.service`](../../deploy/systemd/system/anas-ai.service)：以 systemd 动态分配的身份 `a-nas-ai` 运行，不在系统中常驻账号；`PrivateNetwork=yes` 与 `RestrictAddressFamilies=AF_UNIX` 使它既没有网络也打不开网络套接字，`InaccessiblePaths=/srv/a-nas` 挡住数据卷。内存不设固定预算（2026-10-28 用户确定）：后台任务加载模型前确认加载后仍余 1 GiB，安装器写入的 `MemoryMax`（总内存减 2.5 GiB）只防失控，模型不换出（`MemorySwapMax=0`），内存耗尽时内核先结束 Worker（`OOMScoreAdjust=500`，[资源策略](photo-objects.md#资源策略)）。Worker 在 `anas-ai.slice` 中运行，上一层 `anas.slice` 的 `CPUWeight=10` 让设备上的其他工作在争用时先拿到核。CPU 不再固定为 2 核（2026-10-13 用户原则：闲时有多少用多少，始终留出余量）：检测推理用可用逻辑核数减 2 个线程，安装器按本机核数写入 `anas-ai.service.d/cpu-reserve.conf`，以 `CPUQuota=(N−2)×100%` 兜底（[资源策略](photo-objects.md#资源策略)）。XNNPack 的权重缓存放在 `CacheDirectory`。系统测试把探针放进 Worker 自己的单元，确认它打不开 IPv4、IPv6 与 netlink 套接字、列不出数据卷；界面的隐私说明以此为依据（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
+- 单元见 [`anas-ai.service`](../../deploy/systemd/system/anas-ai.service)：以 systemd 动态分配的身份 `a-nas-ai` 运行，不在系统中常驻账号；`PrivateNetwork=yes` 与 `RestrictAddressFamilies=AF_UNIX` 使它既没有网络也打不开网络套接字，`InaccessiblePaths=/srv/a-nas` 挡住数据卷。内存不设固定预算（[决定](../decisions/2026-10-28-ai-memory-headroom.md)）：后台任务加载模型前确认加载后仍余 1 GiB，安装器写入的 `MemoryMax`（总内存减 2.5 GiB）只防失控，模型不换出（`MemorySwapMax=0`），内存耗尽时内核先结束 Worker（`OOMScoreAdjust=500`，[资源策略](photo-objects.md#资源策略)）。Worker 在 `anas-ai.slice` 中运行，上一层 `anas.slice` 的 `CPUWeight=10` 让设备上的其他工作在争用时先拿到核。CPU 不再固定为 2 核（[决定](../decisions/2026-10-13-ai-uses-idle-capacity.md)：闲时有多少用多少，始终留出余量）：检测推理用可用逻辑核数减 2 个线程，安装器按本机核数写入 `anas-ai.service.d/cpu-reserve.conf`，以 `CPUQuota=(N−2)×100%` 兜底（[资源策略](photo-objects.md#资源策略)）。XNNPack 的权重缓存放在 `CacheDirectory`。系统测试把探针放进 Worker 自己的单元，确认它打不开 IPv4、IPv6 与 netlink 套接字、列不出数据卷；界面的隐私说明以此为依据（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
 - 按需启动：[`anas-ai.socket`](../../deploy/systemd/system/anas-ai.socket) 监听 `/run/a-nas-ai/ai.sock`（`root:a-nas-photos 0660`），第一次请求时由 systemd 拉起 Worker，空闲 10 分钟后自行退出并释放模型内存。任何一次连接都会拉起 Worker 并重新计时，所以相册服务在得知模型 ID 之后，只在有到期的向量任务时才联系它；模型 ID 在服务启动后的第一轮得知，更换模型随 release 而来（安装器重启相册服务），搜索遇到新模型时也会让后台重新核对。安装器启用套接字；升级时停止仍在运行的旧 Worker，下一次请求启动新 release 的。运行环境缺少 MediaPipe 时 Worker 回答“不可用”而不是退出，避免每次连接都重启它直至 systemd 停用套接字。搜索因此可能承担一次模型加载时间，由切片 9 实测决定是否改为常驻文本编码器。
 - 模型与运行环境的来源、位置与校验见“模型与运行环境的交付”。安装器随系统启用套接字，没有“未安装”状态；Worker 启动中、崩溃或模型校验失败时相册照常可用，搜索退回按名称与用户标签匹配。设备低于最低硬件（待实机测量）时不启动 Worker。这些情况下界面都不说 AI 不可用（[相册界面规格](../specs/photo-gallery-ui.md)）。
 
@@ -120,7 +120,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 
 #66 因此关闭了全部标签。之后用户希望把按内容分组的呈现找回来，并定下两条规则（2026-10-10）：
 - **红线**：由向量模型产生的标签不参与搜索。
-- **宁缺毋滥**：宁可少标，不能错标。2026-10-12 用户确认每组 80% 以上正确可以接受。
+- **宁缺毋滥**：宁可少标，不能错标（[决定](../decisions/2026-10-10-ai-labels-as-groups.md)）；每组 80% 以上正确可以接受（[决定](../decisions/2026-10-12-ai-group-precision.md)）。
 
 **行为**：
 - 标签只以 AI 聚合呈现：照片向量与某个标签文本向量的相似度达到阈值、且这张照片没有被移出，就归入该标签的一组。
@@ -136,13 +136,13 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 - 每组在校准半上收入的照片要“可信地”至少 80% 正确（单侧 95% Wilson 置信下限），且至少收入 10 张才启用。只看测出来的比例不够：样本只有十几张时，“桥”在校准半 13 张对 11 张，到测试半只有 44%。
 - 场景标签的真值来自 COCO-Stuff。场景太常见，统一的误报率上限只能留下不到一成的真实照片，所以场景标签改为取仍然可信地达到 80% 的最宽阈值。
 - 校准半除 COCO val 的一半外，还有 COCO 2017 train 中按哈希固定选出的 20,000 张（2026-10-12 加入）：只用 val 时稀有标签和多数场景只有十几张照片，看不出一组对不对。测试半仍只来自 val，不参与任何选择。
-- 校准给出 59 组。其中 7 组在测试半上不足 10 张、无法独立核对，沙发在测试半上只有 71% 正确，这 8 组按用户决定（2026-10-12）手动留下，名单记在阈值文件的 `heldBack` 中。
+- 校准给出 59 组。其中 7 组在测试半上不足 10 张、无法独立核对，沙发在测试半上只有 71% 正确，这 8 组按[决定](../decisions/2026-10-12-ai-group-precision.md)手动留下，名单记在阈值文件的 `heldBack` 中。
 - v1 阈值启用 51 组：动物 11、自然 5（雪、大海、草地、天空、树）、食物 7、交通工具 7、运动 3、物品 18。在测试半上，各组收入的照片 93.0% 正确（2,436 张）；最低的是草地 82%、天空 82%、树 83%。留下 8 组是看过测试半才定的，不受影响的数字是留下之前 59 组的 92.8%。
 - 场景标签的正确率与这类场景在照片中有多常见有关：COCO 里天空约占四分之一的照片，家庭照片里室内照片更多，天空这一组的实际正确率可能低于测得的数字。
 - 山、沙子、河、花、建筑、道路在这一标准下仍然不启用。
 
 **之后**：
-- 固定类别的目标检测已在开发机评估（用户 2026-10-10 选定 D-FINE Objects365，[检测与混合检索研究](../research/photo-ai-object-detection.md)）：小物体召回翻倍，融合后句子类查询不受影响，COCO 之外的类别需按类启用。[实施方案](photo-objects.md)于 2026-10-13 确认，实现进行中：检测器的类别不由向量模型产生，不受上面的红线约束，参与文搜图的融合与“检测到”分段；本期不组成 AI 聚合。
+- 固定类别的目标检测已在开发机评估（[决定](../decisions/2026-10-10-object-detector-d-fine.md)选定 D-FINE Objects365，[检测与混合检索研究](../research/photo-ai-object-detection.md)）：小物体召回翻倍，融合后句子类查询不受影响，COCO 之外的类别需按类启用。[实施方案](photo-objects.md)于 2026-10-13 确认，实现进行中：检测器的类别不由向量模型产生，不受上面的红线约束，参与文搜图的融合与“检测到”分段；本期不组成 AI 聚合。
 - 小物体也在开发机评估过“分块向量”：每张照片除整图外再按网格切块，各算一个向量，搜索取整图与各块的较高分（[`eval.tile_search`](../../ai/eval/tile_search.py)）。在同一测试上 2×2 分块只把不到画面 1% 的物体的召回从 36.0% 提到 38.0%，向量计算却是 5 倍，不进入产品。
 
 ### 语义搜索
