@@ -56,6 +56,13 @@ function loadPet() {
   load(pet, true);
   pet.webContents.once("did-finish-load", () => { if (!loadFailed) showPet(); });
 }
+// A window made with resizable: false keeps its size as both its minimum and maximum, so
+// setSize alone cannot change it (seen on Windows: the pet stayed 760x720 offline).
+function resizePet(width, height) {
+  pet.setResizable(true);
+  pet.setSize(width, height);
+  pet.setResizable(false);
+}
 // A page that did not load leaves a transparent window over the desktop: hide it
 // and let the member retry, keep the pet company offline, or quit.
 function petFailed(message, reason) {
@@ -71,7 +78,7 @@ function petFailed(message, reason) {
     if (response === 1 && origin) {
       origin = undefined;
       compact = true;
-      pet.setSize(350, 400);
+      resizePet(350, 400);
       restorePosition();
     }
     loadPet();
@@ -189,7 +196,7 @@ app.whenReady().then(() => {
   ipcMain.on("companion:home", (event) => { if (senderIsPet(event)) showHome(); });
   ipcMain.on("companion:compact", (event) => {
     if (!senderIsPet(event)) return;
-    pet.setSize(350, 400);
+    resizePet(350, 400);
     compact = true;
     restorePosition();
   });
@@ -198,7 +205,7 @@ app.whenReady().then(() => {
     pet.setIgnoreMouseEvents(false);
     interactive = true;
     compact = false;
-    pet.setSize(760, 720);
+    resizePet(760, 720);
     placePet();
   });
   screen.on("display-removed", () => placePet());
