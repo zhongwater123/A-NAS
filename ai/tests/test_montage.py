@@ -467,9 +467,7 @@ class MomentsTest(unittest.TestCase):
         with self.assertRaises(moments.PlanError) as refused:
             self.index.check(plan(("07-1-0", 10), ("07-0-0", 2), ("07-1-1", 30)), scenes=True)
         self.assertIn("回到了已经离开的场景2", refused.exception.problems[0])
-        with self.assertRaises(moments.PlanError) as refused:
-            self.index.check(plan(("07-1-0", 8), ("07-1-0", 12), ("07-1-1", 30), ("07-1-1", 36)), scenes=True)
-        self.assertEqual(refused.exception.problems, ["场景2用了 4 段，一个场景最多 3 段"])
+        self.index.check(plan(("07-1-0", 8), ("07-1-0", 12), ("07-1-1", 30), ("07-1-1", 36)), scenes=True)
 
     def test_a_card_is_paced_by_how_much_its_picture_changes(self):
         self.index.pictures = {"07-0-0": {"change": 0.004}, "07-1-0": {"change": 0.03}, "07-1-1": {"change": 0.1}}
@@ -508,10 +506,7 @@ class MomentsTest(unittest.TestCase):
             return [{"card": c, "start": s, "end": s + 2} for c, s in cards]
 
         self.index.check(plan(("07-0-0", 2), ("07-1-0", 10)), scenes=True)
-        with self.assertRaises(moments.PlanError) as refused:
-            self.index.check(plan(("07-0-0", 2), ("07-1-1", 30)), scenes=True)
-        self.assertEqual(refused.exception.problems, [
-            "第 2 段从场景1切到场景3，两个场景的色调明暗和描述差得太远：场景1可接的是场景2；换个顺序，或在中间加一个两边都可接的场景"])
+        self.index.check(plan(("07-0-0", 2), ("07-1-1", 30)), scenes=True)  # unlike scenes: the plan's call
 
     def test_title_scenes_are_left_out_of_the_likeness(self):
         self.index.scene_of = {"07-0-0": 1, "07-1-0": 2, "07-1-1": 3}
@@ -539,10 +534,13 @@ class MomentsTest(unittest.TestCase):
         fast = [{"card": "07-1-0", "start": 8 + 2 * k, "end": 10 + 2 * k, "pace": "快"} for k in range(5)]
         self.index.check([{"card": "07-0-0", "start": 0, "end": 4, "pace": "慢"}, *fast,
                           {"card": "07-1-1", "start": 30, "end": 34, "pace": "中"}], scenes=True)
+        # Any number of segments not fast: a scene of rich pictures may give many.
+        self.index.check([{"card": "07-1-1", "start": 28 + 3 * k, "end": 31 + 3 * k, "pace": "中"} for k in range(4)],
+                         scenes=True)
         with self.assertRaises(moments.PlanError) as refused:
-            self.index.check([{"card": "07-1-1", "start": 28 + 3 * k, "end": 31 + 3 * k, "pace": "中"} for k in range(4)],
+            self.index.check([{"card": "07-1-0", "start": 8 + 2 * k, "end": 10 + 2 * k, "pace": "快"} for k in range(7)],
                              scenes=True)
-        self.assertEqual(refused.exception.problems, ["场景2用了 4 段，一个场景最多 3 段"])
+        self.assertEqual(refused.exception.problems, ["场景2用了 7 段快节奏，一个场景最多 6 段快节奏"])
 
     def test_fill_keeps_each_segment_to_its_minimum(self):
         market = np.eye(8, dtype=np.float32)[0]

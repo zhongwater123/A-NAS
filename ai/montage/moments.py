@@ -94,9 +94,9 @@ SCENE_ALIKE = 0.92
 # foggy colonnade together, which the pictures tell apart. 0.80 split case-08's 17 groups into
 # 28 and case-01's 11 into 16, its beach from its cliff top.
 SCENE_PICTURE = 0.80
-# A scene gives a plan at most this many segments, and a plan does not go back to one;
-# segments paced 快 count apart, up to FAST_SEGMENTS, so that a fight can be a run of cuts.
-SCENE_SEGMENTS = 3
+# A plan does not go back to a scene it left, and takes at most FAST_SEGMENTS segments paced 快
+# from one scene. It may take as many others as it likes: a film of few scenes may be rich in
+# pictures, so the plan is asked for varied pictures instead of held to a count (#350).
 FAST_SEGMENTS = 6
 # A cut ends on a segment it can settle on: its last one aims at this pace's seconds at the least (#350).
 ENDING_PACE = "中"
@@ -111,9 +111,10 @@ PACE_CHANGE = (0.01, 0.06)
 # (colours), each 0 for the least alike pair and 1 for the most. Ranks, for each measure runs
 # over a span of its own (case-08's descriptions 0.86–0.95, its colours 0.5–0.9). Pictures'
 # vectors are left out: case-08's put its brain model and its sniper's scope, the plan's
-# harshest cut, near the middle. A plan changes scene only to one at least this alike. 0.45
-# still keeps that cut out (0.30) and lets case-01's street lead into its office (0.49), which
-# 0.5 kept apart and had the plan put a building's front between them.
+# harshest cut, near the middle. Scenes at least this alike are the ones a scene may change to
+# (near; listed only with catalog joins): 0.45 keeps that cut out (0.30) and lets case-01's
+# street lead into its office (0.49). Plans are no longer held to it: the list was more than the
+# model could weigh, and the check cost case-01 its car scene (#350).
 SCENE_NEAR = 0.45
 # A picture's colour and light: its pixels in BINS × BINS × BINS bins of red, green and blue.
 BINS = 4
@@ -475,7 +476,7 @@ class Index:
         """The plan's (video, start, end) in order, or PlanError listing what is wrong. With
         shows_needed every segment says in shows what its picture is to show, to be looked at;
         skipped, when given, lists cards left out, each once and with why in a sentence. With
-        scenes, a scene's segments run together, and at most SCENE_SEGMENTS of them. Segments run
+        scenes, a scene's segments run together, at most FAST_SEGMENTS of them fast. Segments run
         shortest seconds at least (TRIMMED_MIN after the program's trims)."""
         cards = {c["id"]: c for c in self.cards}
         problems = []
@@ -519,28 +520,22 @@ class Index:
         return clips
 
     def _scene_problems(self, segments: list[dict]) -> list[str]:
-        problems, left, seen, count, fast = [], set(), None, {}, {}
+        """A scene left and come back to, and a scene with more than FAST_SEGMENTS fast segments.
+        Which scene follows which is the plan's: how alike two scenes are (scene_alike) is no
+        longer checked (#350), the model judging from the scenes' places and the cards' light."""
+        problems, left, seen, fast = [], set(), None, {}
         for n, segment in enumerate(segments, 1):
             scene = self.scene_of.get(segment.get("card")) if isinstance(segment, dict) else None
             if scene is None:
                 continue
-            tally = fast if segment.get("pace") == "快" else count
-            tally[scene] = tally.get(scene, 0) + 1
+            if segment.get("pace") == "快":
+                fast[scene] = fast.get(scene, 0) + 1
             if scene != seen:
                 if scene in left:
                     problems.append(f"第 {n} 段回到了已经离开的场景{scene}：同一场景的段要连在一起")
-                alike = self.scene_alike.get(seen, {}).get(scene)
-                if alike is not None and alike < SCENE_NEAR:
-                    near = self.near(seen)
-                    problems.append(f"第 {n} 段从场景{seen}切到场景{scene}，两个场景的色调明暗和描述差得太远："
-                                    + (f"场景{seen}可接的是场景{'、'.join(map(str, near))}" if near
-                                       else f"场景{seen}没有可接的场景，只能放开头或结尾")
-                                    + "；换个顺序，或在中间加一个两边都可接的场景")
                 if seen is not None:
                     left.add(seen)
                 seen = scene
-        problems += [f"场景{scene}用了 {k} 段，一个场景最多 {SCENE_SEGMENTS} 段" for scene, k in count.items()
-                     if k > SCENE_SEGMENTS]
         problems += [f"场景{scene}用了 {k} 段快节奏，一个场景最多 {FAST_SEGMENTS} 段快节奏" for scene, k in fast.items()
                      if k > FAST_SEGMENTS]
         return problems
