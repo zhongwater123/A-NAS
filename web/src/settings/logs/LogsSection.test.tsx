@@ -7,6 +7,7 @@ import { type LogsOptions, logsHandlers } from "../../test/handlers/logs";
 import { server } from "../../test/server";
 import type { ActivityEvent, SystemLogEntry } from "./api";
 import { forgetRememberedFilters } from "./common";
+import { dayLabel } from "./describe";
 import { LogsSection } from "./LogsSection";
 
 const admin: Session = {
@@ -203,7 +204,9 @@ describe("activity log", () => {
     await user.click(screen.getByRole("button", { name: "加载更早的记录" }));
     expect(await screen.findByText("没有更早的记录了")).toBeTruthy();
     expect(sent.activity.at(-1)?.get("before")).toBe("cursor-1");
-    expect(screen.getByRole("region", { name: /1月5日/ }).textContent).toContain("添加了成员");
+    expect(screen.getByRole("region", { name: dayLabel(new Date(older.occurredAt)) }).textContent).toContain(
+      "添加了成员",
+    );
 
     await user.click(screen.getByRole("radio", { name: "登录" }));
     await waitFor(() => expect(sent.activity.at(-1)?.get("category")).toBe("session"));
