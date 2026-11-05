@@ -16,6 +16,8 @@ const (
 	ViaLocalConsole = "local-console"
 	ViaLAN          = "lan"
 	ViaLoopback     = "loopback"
+	// ViaInternet is the internet entry (ADR 0032).
+	ViaInternet = "internet"
 )
 
 // Why a sign-in failed, as recorded in the activity log.
@@ -46,26 +48,49 @@ func originFrom(ctx context.Context) ClientOrigin {
 }
 
 // client is what a session signed in from this origin is bound to: direct
-// loopback (the local console or an SSH tunnel), or the LAN address. An IPv6
-// client is bound to its /64, since its temporary addresses rotate; link-local
-// addresses all share one /64 and are bound exactly. An origin without an
-// address binds to nothing, and its sessions are refused.
+// loopback (the local console or an SSH tunnel), the LAN address, or the
+// internet entry as a whole. A LAN client's address is taken as addressKey
+// gives it; a LAN origin without an address binds to nothing, and its
+// sessions are refused. Internet sessions are bound to no address: phones
+// change networks, and installed apps, the reason LAN sessions are bound
+// (issue #161), cannot be reached on the entry's domain (ADR 0032).
 func (o ClientOrigin) client() string {
 	switch o.Via {
 	case ViaLoopback:
 		return ViaLoopback
 	case ViaLAN:
-		address, err := netip.ParseAddr(o.Address)
-		if err != nil {
-			return ""
+		if key := addressKey(o.Address); key != "" {
+			return ViaLAN + ":" + key
 		}
-		if address = address.Unmap(); address.Is6() && !address.IsLinkLocalUnicast() {
-			prefix, _ := address.Prefix(64)
-			return ViaLAN + ":" + prefix.String()
-		}
-		return ViaLAN + ":" + address.String()
+	case ViaInternet:
+		return ViaInternet
 	}
 	return ""
+}
+
+// throttleClient is the client whose failed sign-ins an attempt from this
+// origin counts with: the one its session would be bound to, except that the
+// internet entry counts each address on its own.
+func (o ClientOrigin) throttleClient() string {
+	if o.Via == ViaInternet {
+		return ViaInternet + ":" + addressKey(o.Address)
+	}
+	return o.client()
+}
+
+// addressKey is how a client's address identifies it: an IPv6 client by its
+// /64, since its temporary addresses rotate, except link-local addresses,
+// which all share one /64 and count exactly. It is empty for no address.
+func addressKey(text string) string {
+	address, err := netip.ParseAddr(text)
+	if err != nil {
+		return ""
+	}
+	if address = address.Unmap(); address.Is6() && !address.IsLinkLocalUnicast() {
+		prefix, _ := address.Prefix(64)
+		return prefix.String()
+	}
+	return address.String()
 }
 
 // sessionDetail is the JSON detail of session.* events.

@@ -6,7 +6,7 @@ A-NAS 是一套基于 Debian 的 AI 智能家庭 NAS。项目首先保证存储�
 
 ## 功能
 
-用户通过浏览器中的 Web 桌面使用 A-NAS：局域网电脑与手机访问 NAS 的地址，NAS 直连屏幕运行同一个桌面。下面每项链接到它的规格，规格描述行为与边界，实现阶段见[规格索引](docs/specs/README.md)。
+用户通过浏览器中的 Web 桌面使用 A-NAS：局域网电脑与手机访问 NAS 的地址，在外面经设备的域名以 HTTPS 访问，NAS 直连屏幕运行同一个桌面。下面每项链接到它的规格，规格描述行为与边界，实现阶段见[规格索引](docs/specs/README.md)。
 
 - **文件与共享**：每位成员有自己的个人空间，全家共用一个 Shared；Web 文件管理与 Windows SMB 都以登录者本人的 Linux 身份读写，由内核 ACL 授权，删除先进回收站（[基础存储与共享](docs/specs/basic-storage-and-sharing.md)、[统一身份与文件授权](docs/specs/unified-identity-and-file-acl.md)）。
 - **传输与分享**：可续传的分片上传与打包下载（[传输中心](docs/specs/transfer-center.md)）；成员之间分享固定副本并逐人私聊（[成员文件分享](docs/specs/member-sharing.md)）。
@@ -16,7 +16,7 @@ A-NAS 是一套基于 Debian 的 AI 智能家庭 NAS。项目首先保证存储�
 - **应用**：从应用中心安装第三方应用，在 Docker 应用中管理容器（[应用中心](docs/specs/app-center.md)、[容器管理](docs/specs/container-management.md)）。
 - **设置**：账号与头像昵称、存储、系统健康、任务管理器、活动与服务日志，以及管理员可选开启的终端（[设置](docs/specs/settings.md)、[系统健康](docs/specs/system-health.md)、[任务管理器](docs/specs/task-manager.md)、[日志](docs/specs/logs.md)、[终端](docs/specs/web-terminal.md)、[头像与昵称](docs/specs/account-profile.md)）。
 - **AI 助手 VNAS**：每位成员一个沙箱中的 Hermes Agent，只读本人能读的位置，写入前由成员本人确认（[规格](docs/specs/ai-assistant.md)，草案；[ADR 0024](docs/adr/0024-run-a-sandboxed-hermes-agent-per-member.md)）。正式产品尚未包含，实验 NAS 上按[试用手册](docs/runbooks/try-ai-assistant-on-experimental-nas.md)以云端模型开启。
-- **其他**：[问题反馈](docs/specs/feedback.md)、[局域网 Web 访问](docs/specs/lan-web-access.md)、直连屏幕的[开机动画](docs/specs/boot-ident.md)与[屏保](docs/specs/local-console-screensaver.md)。
+- **其他**：[问题反馈](docs/specs/feedback.md)、[局域网 Web 访问](docs/specs/lan-web-access.md)、[互联网访问](docs/specs/internet-access.md)、直连屏幕的[开机动画](docs/specs/boot-ident.md)与[屏保](docs/specs/local-console-screensaver.md)。
 
 ## 设备上的组件
 
@@ -32,7 +32,7 @@ A-NAS 是一套基于 Debian 的 AI 智能家庭 NAS。项目首先保证存储�
 | `anas-ai` | 动态身份 | 相册的本地 AI Worker，按需启动，无网络、看不到数据卷（[ADR 0016](docs/adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)） |
 | `anas-ffmpeg@` | 动态身份 | FFmpeg FFmpeg Worker，按连接启动，无网络、看不到数据卷 |
 | `anas-container-agent` | `anas-container` | Docker 的类型化代理（[ADR 0009](docs/adr/0009-use-docker-engine-through-a-dedicated-container-agent.md)） |
-| `caddy`、`smbd` | — | 局域网 Web 入口（[ADR 0012](docs/adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）与 SMB3 |
+| `caddy`、`smbd` | — | 局域网 Web 入口（[ADR 0012](docs/adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）、启用时的互联网入口（[ADR 0032](docs/adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)）与 SMB3 |
 | `anas-kiosk@tty1` | `anas-dev` | 直连屏幕上的 Cage + Chromium |
 
 ## 本地开发入口

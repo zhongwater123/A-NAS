@@ -33,7 +33,9 @@ func TestStoppingCutsOffAStreamThatOutlastsTheGrace(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx, stop := context.WithCancel(context.Background())
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, server, listener, terminal.New(terminal.Config{}, logger), logger) }()
+	go func() {
+		served <- serve(ctx, []listening{{server, listener}}, terminal.New(terminal.Config{}, logger), logger)
+	}()
 
 	response, err := http.Get("http://" + listener.Addr().String() + "/stream")
 	if err != nil {

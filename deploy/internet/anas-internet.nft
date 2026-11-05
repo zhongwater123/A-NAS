@@ -1,0 +1,19 @@
+# Managed by A-NAS: the internet entry's tunnel (ADR 0032).
+# The edge relay may reach only Caddy's HTTPS port through the tunnel, never
+# SSH, SMB or an app's port, and nothing is routed onward through it. Only
+# this table is replaced; Docker's and other rules are left alone.
+table inet anas_internet
+delete table inet anas_internet
+table inet anas_internet {
+	chain input {
+		type filter hook input priority filter; policy accept;
+		iifname "wg-anas" ct state established,related accept
+		iifname "wg-anas" tcp dport 443 accept
+		iifname "wg-anas" counter drop
+	}
+	chain forward {
+		type filter hook forward priority filter; policy accept;
+		iifname "wg-anas" counter drop
+		oifname "wg-anas" counter drop
+	}
+}

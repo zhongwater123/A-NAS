@@ -40,6 +40,7 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 
 - [0030：网页搜索由随系统安装的 SearXNG 服务提供](0030-ship-web-search-as-a-built-in-searxng-service.md)（proposed）
 - [0031：宿主机依赖由 A-NAS 自己的 Debian 软件包声明](0031-declare-host-dependencies-in-debian-packages.md)（proposed）
+- [0032：经机房边缘服务器与 NAS 主动建立的隧道，从互联网开放 Web 桌面](0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)（proposed；修订 0012 的“只适用于可信内网”）
 
 ## 格式
 

@@ -3,11 +3,11 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { Banner, IconTile, PageHeader, Pill } from "./parts";
 import styles from "./settings.module.css";
-import { readTerminalEnabled, type SessionStatus } from "./terminal";
+import { readTerminalAvailability, type SessionStatus } from "./terminal";
 
 const XtermSession = lazy(() => import("./XtermSession"));
 
-type Availability = "checking" | "enabled" | "disabled" | "unreachable";
+type Availability = "checking" | "enabled" | "disabled" | "internet" | "unreachable";
 
 // TerminalSection is Settings → 终端. Settings keeps it mounted, hidden, while
 // another section is shown, so the shell keeps running until the settings
@@ -31,8 +31,8 @@ export function TerminalSection({
 
   useEffect(() => {
     const controller = new AbortController();
-    readTerminalEnabled(controller.signal)
-      .then((enabled) => setAvailability(enabled ? "enabled" : "disabled"))
+    readTerminalAvailability(controller.signal)
+      .then(setAvailability)
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === "AbortError")) setAvailability("unreachable");
       });
@@ -75,6 +75,13 @@ export function TerminalSection({
               重试
             </button>
           </Banner>
+        )}
+        {availability === "internet" && (
+          <div className={`${styles.setCard} ${styles.tmNotice}`}>
+            <IconTile tone="terminal" icon={SquareTerminal} size="lg" />
+            <h3>外网访问时不能使用终端</h3>
+            <p>请在局域网或{device}的屏幕上打开终端。</p>
+          </div>
         )}
         {availability === "disabled" && (
           <div className={`${styles.setCard} ${styles.tmNotice}`}>

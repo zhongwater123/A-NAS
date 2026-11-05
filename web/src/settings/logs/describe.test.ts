@@ -33,6 +33,7 @@ describe("activity sentences", () => {
     expect(sentence(signedIn, alice.id)).toBe("你 登录了");
     expect(originLabel('{"via":"local-console"}')).toBe("本机屏幕");
     expect(originLabel('{"via":"loopback"}')).toContain("SSH 隧道");
+    expect(originLabel('{"via":"internet","address":"198.51.100.7"}')).toBe("外网 · 198.51.100.7");
   });
 
   it("flags failed sign-ins, naming an unknown account that was tried", () => {

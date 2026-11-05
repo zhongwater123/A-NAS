@@ -50,7 +50,7 @@
 ## 边界与失败
 
 - `GET /api/v1/terminal` 报告是否启用；`GET /api/v1/terminal/session` 升级为 WebSocket，两个端点都要求有效的管理员产品会话，协议见 [OpenAPI](../../api/openapi.yaml)。
-- 建立会话前依次拒绝：未登录（401）、不是管理员或未启用（403）、对端不是回环地址（本机屏幕或局域网入口 Caddy）或 `Host` 不是 `localhost`/IP 地址（403，防止绕过入口直连和 DNS rebinding）、非 WebSocket 请求（426）、超过 4 个并发会话（429）、服务正在关闭（503）；浏览器 `Origin` 与 `Host` 不一致时握手被拒绝。
+- 建立会话前依次拒绝：未登录（401）、不是管理员或未启用（403）、经互联网入口（403 `terminal_internet`，状态接口另报 `internet: true`，页面说明只能在局域网或本机屏幕上使用；[ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)）、对端不是回环地址（本机屏幕或局域网入口 Caddy）或 `Host` 不是 `localhost`/IP 地址（403，防止绕过入口直连和 DNS rebinding）、非 WebSocket 请求（426）、超过 4 个并发会话（429）、服务正在关闭（503）；浏览器 `Origin` 与 `Host` 不一致时握手被拒绝。
 - Shell 由 Host Agent 内的文件代理启动：代理自行校验会话令牌且只为管理员启动，以该账号的 UID/组运行并把 PTY 从设备属主改为该账号（`tty` 组 `0620`），只把 PTY 主端描述符交给产品服务转发数据。产品服务账号不再持有 Shell。
 - 同机其他本地进程不受 Origin 约束，但必须持有有效的管理员会话令牌才能获得该管理员的 Shell；功能仍默认关闭，只应在受信任的设备上启用。经局域网 HTTP 使用时，管理员会话与终端输入输出明文传输（[ADR 0012](../adr/0012-serve-the-web-desktop-on-the-lan-over-http-through-caddy.md)）。
 - Shell 继承 Host Agent 的 systemd 沙箱：`ProtectSystem=strict` 只允许写入数据卷等少数路径，`PrivateTmp`、`ProtectHome` 与 `NoNewPrivileges` 生效；`RestrictAddressFamilies=AF_UNIX` 使 Shell 不能创建 IPv4/IPv6 或 netlink 套接字（“Address family not supported by protocol”），所以 `ping`、`curl`、`ip`、`ss` 等网络诊断不可用，经 D-Bus 的 `systemctl status` 可用（2026-10-13 系统测试中实测）；`RestrictNamespaces` 使 `unshare` 与需要新命名空间的容器工具不可用（[#166](https://github.com/zhongwater123/A-NAS/issues/166)）。

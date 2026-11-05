@@ -555,7 +555,7 @@ func (s *Service) AuthenticateLocalConsole(ctx context.Context, username, passwo
 
 func (s *Service) authenticate(ctx context.Context, username, password string, localConsole bool) (Session, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
-	client := originFrom(ctx).client()
+	client := originFrom(ctx).throttleClient()
 	release, err := s.signIns.acquire(ctx, client)
 	if err != nil {
 		return Session{}, err

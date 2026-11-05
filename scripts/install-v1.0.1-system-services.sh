@@ -43,6 +43,12 @@ if [[ ! -f "$source_release/Caddyfile" ]]; then
   echo "missing LAN Web entry configuration: $source_release/Caddyfile" >&2
   exit 2
 fi
+for file in Caddyfile.internet anas-internet.nft anas-internet-firewall-system.service; do
+  if [[ ! -f "$source_release/$file" ]]; then
+    echo "missing internet entry file: $source_release/$file" >&2
+    exit 2
+  fi
+done
 # The local console runs as an account of its own from the installed release
 # (issue #174); enabling it stays a runbook step (operate-local-kiosk.md).
 for file in kiosk-launcher anas-kiosk@.service a-nas-kiosk.pam a-nas-kiosk.sysusers; do
@@ -208,6 +214,80 @@ if command -v caddy >/dev/null; then
   caddy validate --adapter caddyfile --config "$source_release/Caddyfile" >/dev/null 2>&1 ||
     { echo "LAN Web entry configuration does not validate: $source_release/Caddyfile" >&2; exit 2; }
   lan_entry=true
+fi
+# The internet entry is optional too (ADR 0032): /etc/a-nas/internet.env turns
+# it on. Read the file without running it, check each value and what the entry
+# needs from the host, and validate Caddy's configuration, all before
+# changing anything. Removing the file turns the entry off again.
+internet_env=/etc/a-nas/internet.env
+internet_entry=false
+if [[ -e "$internet_env" ]]; then
+  declare -A internet=()
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in '' | '#'*) continue ;; esac
+    case "${line%%=*}" in
+      ANAS_INTERNET_HOST | ANAS_INTERNET_RELAY_ENDPOINT | ANAS_INTERNET_RELAY_PUBLIC_KEY | ANAS_INTERNET_TUNNEL_PREFIX)
+        internet[${line%%=*}]=${line#*=} ;;
+      *) echo "$internet_env: unknown line: ${line%%=*}" >&2; exit 2 ;;
+    esac
+  done < "$internet_env"
+  internet_host=${internet[ANAS_INTERNET_HOST]:-}
+  relay_endpoint=${internet[ANAS_INTERNET_RELAY_ENDPOINT]:-}
+  relay_key=${internet[ANAS_INTERNET_RELAY_PUBLIC_KEY]:-}
+  # A domain in lower-case ASCII, as browsers send it; an internationalized
+  # name is written in its xn-- form.
+  if [[ ! "$internet_host" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+    echo "$internet_env: ANAS_INTERNET_HOST must be the entry's domain in lower case, such as nas.example.com" >&2
+    exit 2
+  fi
+  if [[ ! "$relay_key" =~ ^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$ ]]; then
+    echo "$internet_env: ANAS_INTERNET_RELAY_PUBLIC_KEY must be the relay's WireGuard public key" >&2
+    exit 2
+  fi
+  # The tunnel's addresses come from a unique local /64: the relay is ::1,
+  # this NAS ::2.
+  if ! tunnel=$(python3 -I - "${internet[ANAS_INTERNET_TUNNEL_PREFIX]:-}" "$relay_endpoint" <<'PY'
+import ipaddress
+import sys
+
+try:
+    prefix = ipaddress.IPv6Network(sys.argv[1])
+    host, colon, port = sys.argv[2].rpartition(":")
+    ipaddress.ip_address(host.removeprefix("[").removesuffix("]"))
+except ValueError:
+    sys.exit(1)
+if prefix.prefixlen != 64 or not prefix.subnet_of(ipaddress.IPv6Network("fd00::/8")):
+    sys.exit(1)
+if not colon or not port.isdigit() or not 1 <= int(port) <= 65535:
+    sys.exit(1)
+print(prefix[1], prefix[2])
+PY
+  ); then
+    echo "$internet_env: ANAS_INTERNET_TUNNEL_PREFIX must be a unique local /64 (fdXX:XXXX:XXXX:XXXX::/64) and ANAS_INTERNET_RELAY_ENDPOINT the relay's address:port" >&2
+    exit 2
+  fi
+  read -r relay_address tunnel_address <<<"$tunnel"
+  # grep reads the whole list: stopping at the match would leave caddy
+  # writing to a closed pipe, which pipefail reports as a failure.
+  if [[ "$lan_entry" != true ]] || ! caddy list-modules 2>/dev/null | grep -x 'caddy.listeners.proxy_protocol' >/dev/null; then
+    echo "the internet entry needs Caddy 2.7 or newer from Caddy's own repository; install it first (docs/runbooks/enable-lan-web-access.md)" >&2
+    exit 3
+  fi
+  for command in wg wg-quick nft; do
+    if ! command -v "$command" >/dev/null; then
+      echo "the internet entry needs $command; install it first: apt install --no-install-recommends wireguard-tools nftables" >&2
+      exit 3
+    fi
+  done
+  internet_caddyfile() {
+    sed -e "s|@INTERNET_HOST@|$internet_host|g" -e "s|@TUNNEL_ADDRESS@|$tunnel_address|g" \
+      -e "s|@RELAY_ADDRESS@|$relay_address|g" "$source_release/Caddyfile.internet"
+  }
+  caddy validate --adapter caddyfile --config <(internet_caddyfile) >/dev/null 2>&1 ||
+    { echo "internet entry configuration does not validate: $source_release/Caddyfile.internet with $internet_env" >&2; exit 2; }
+  nft --check --file "$source_release/anas-internet.nft" ||
+    { echo "internet entry firewall table does not load: $source_release/anas-internet.nft" >&2; exit 2; }
+  internet_entry=true
 fi
 # The Host Agent moves each of its records out of /var/lib/a-nas when it
 # starts, but only a regular file with one link that root owns (issue #176):
@@ -486,6 +566,10 @@ fi
 if [[ -n "$terminal_enabled" ]]; then
   printf 'ANAS_TERMINAL=enabled\n' >> /etc/a-nas/anas-api.env
 fi
+# The internet entry's own listener, which Caddy's HTTPS site proxies to.
+if [[ "$internet_entry" == true ]]; then
+  printf 'ANAS_INTERNET_HTTP_ADDR=127.0.0.1:8081\nANAS_INTERNET_HOST=%s\n' "$internet_host" >> /etc/a-nas/anas-api.env
+fi
 chown root:a-nas /etc/a-nas/anas-api.env
 chmod 0640 /etc/a-nas/anas-api.env
 
@@ -574,7 +658,55 @@ if [[ "$lan_entry" == true ]]; then
     cp -p /etc/caddy/Caddyfile /etc/caddy/Caddyfile.before-a-nas
   fi
   install -d -o root -g root -m 0755 /etc/caddy
-  install -o root -g root -m 0644 "$source_release/Caddyfile" /etc/caddy/Caddyfile
+  if [[ "$internet_entry" == true ]]; then
+    internet_caddyfile > /etc/caddy/Caddyfile.incoming
+    chmod 0644 /etc/caddy/Caddyfile.incoming
+    mv -f -- /etc/caddy/Caddyfile.incoming /etc/caddy/Caddyfile
+  else
+    install -o root -g root -m 0644 "$source_release/Caddyfile" /etc/caddy/Caddyfile
+  fi
+fi
+tunnel_changed=
+if [[ "$internet_entry" == true ]]; then
+  # Caddy binds the tunnel's address even while the tunnel is down, so it
+  # starts, LAN entry included, whatever the tunnel does.
+  printf '%s\n' '# Written by the A-NAS installer: the internet entry binds its tunnel address' \
+    '# before the tunnel is up (ADR 0032).' 'net.ipv6.ip_nonlocal_bind = 1' > /etc/sysctl.d/60-anas-internet.conf
+  chmod 0644 /etc/sysctl.d/60-anas-internet.conf
+  sysctl --quiet --load=/etc/sysctl.d/60-anas-internet.conf
+  install -o root -g root -m 0644 "$source_release/anas-internet.nft" /etc/a-nas/anas-internet.nft
+  install -o root -g root -m 0644 "$source_release/anas-internet-firewall-system.service" /etc/systemd/system/anas-internet-firewall.service
+  # The tunnel's key is made once and kept, also when the entry is turned off.
+  install -d -o root -g root -m 0700 /etc/wireguard
+  if [[ ! -s /etc/wireguard/wg-anas.key ]]; then
+    (umask 077 && wg genkey > /etc/wireguard/wg-anas.key.incoming)
+    mv -f -- /etc/wireguard/wg-anas.key.incoming /etc/wireguard/wg-anas.key
+  fi
+  printf '%s\n' \
+    "# Managed by A-NAS: the internet entry's tunnel to the edge relay (ADR 0032)," \
+    "# written from $internet_env. This NAS dials the relay." \
+    '[Interface]' \
+    "Address = $tunnel_address/64" \
+    'PostUp = wg set %i private-key /etc/wireguard/%i.key' \
+    '' \
+    '[Peer]' \
+    "PublicKey = $relay_key" \
+    "Endpoint = $relay_endpoint" \
+    "AllowedIPs = $relay_address/128" \
+    'PersistentKeepalive = 25' > /etc/wireguard/wg-anas.conf.incoming
+  chmod 0600 /etc/wireguard/wg-anas.conf.incoming
+  if cmp -s /etc/wireguard/wg-anas.conf.incoming /etc/wireguard/wg-anas.conf; then
+    rm -f -- /etc/wireguard/wg-anas.conf.incoming
+  else
+    mv -f -- /etc/wireguard/wg-anas.conf.incoming /etc/wireguard/wg-anas.conf
+    tunnel_changed=1
+  fi
+elif [[ -e /etc/systemd/system/anas-internet-firewall.service || -e /etc/wireguard/wg-anas.conf ]]; then
+  # Turned off: undo what an earlier installation set up, keeping the key.
+  systemctl disable --now wg-quick@wg-anas.service anas-internet-firewall.service 2>/dev/null || true
+  rm -f -- /etc/wireguard/wg-anas.conf /etc/systemd/system/anas-internet-firewall.service \
+    /etc/a-nas/anas-internet.nft /etc/sysctl.d/60-anas-internet.conf
+  echo "internet entry turned off; the tunnel key stays in /etc/wireguard/wg-anas.key"
 fi
 # Fan speeds come from the board's sensor chip, whose driver Linux does not
 # load by itself (docs/specs/device-temperatures.md). The in-kernel drivers of
@@ -624,9 +756,21 @@ systemctl restart anas-host-agent.service anas-photos.service anas-api.service a
 if systemctl is-active --quiet anas-kiosk@tty1.service; then
   systemctl restart anas-kiosk@tty1.service
 fi
+if [[ "$internet_entry" == true ]]; then
+  systemctl enable anas-internet-firewall.service wg-quick@wg-anas.service
+  systemctl restart anas-internet-firewall.service
+  # A tunnel that does not come up leaves only the internet entry unreachable.
+  if [[ -n "$tunnel_changed" ]] || ! systemctl is-active --quiet wg-quick@wg-anas.service; then
+    systemctl restart wg-quick@wg-anas.service ||
+      echo "the internet entry's tunnel did not start; see journalctl -u wg-quick@wg-anas (docs/runbooks/enable-internet-access.md)" >&2
+  fi
+fi
 if [[ "$lan_entry" == true ]]; then
   systemctl enable caddy.service
   systemctl reload-or-restart caddy.service
+fi
+if [[ "$internet_entry" == true ]]; then
+  echo "internet entry: https://$internet_host through $relay_endpoint; this NAS's tunnel public key: $(wg pubkey < /etc/wireguard/wg-anas.key)"
 fi
 # Web search follows this release's runtime; its unit's condition keeps it
 # stopped while the administrator has turned it off. It comes after the
