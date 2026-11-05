@@ -39,6 +39,9 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0029：宝宝是档案而不是账号，频道照片存入共享图库，记录由家庭服务持有](0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)（proposed）
 
 - [0030：网页搜索由随系统安装的 SearXNG 服务提供](0030-ship-web-search-as-a-built-in-searxng-service.md)（proposed）
+- 0031：宿主机依赖由 A-NAS 自己的 Debian 软件包声明（draft，已在上游 main，快照之后合入，本克隆未同步；编号保留）
+- 0032：经机房边缘服务器与 NAS 主动建立的隧道，从互联网开放 Web 桌面（draft，已在上游 main，快照之后合入，本克隆未同步；编号保留）
+- [0033：电脑桌宠使用 Electron 外壳](0033-run-the-desktop-companion-in-an-electron-shell.md)（proposed）
 
 ## 格式
 

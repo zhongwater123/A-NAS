@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-11-05：电脑桌宠静置时 GPU 进程占内存的来源](2026-11-05-companion-gpu-memory.md)
 - [2026-11-02：回答结束时更新到空回复，伙伴没有收到完成状态](2026-11-02-assistant-reply-completion-batching.md)
 - [2026-11-03：停用助手被保活的成员时返回 503](2026-11-03-assistant-disable-start-race.md)
 - [2026-11-03：经局域网 HTTP 打开时，家庭中心添加宝宝后窗口无法显示](2026-11-03-family-window-fails-over-lan-http.md)
