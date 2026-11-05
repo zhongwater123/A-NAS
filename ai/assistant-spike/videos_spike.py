@@ -292,7 +292,7 @@ class Handler(BaseHTTPRequestHandler):
         index = self.server.index
         full = next(c for c in index.cards if c["id"] == card["id"])
         return (os.path.join(self.server.videos, index.videos[card["video"]]["file"]),
-                [index.frame_ms[i] / 1000 for i in index.keyframes(full, look.KEYFRAMES)])
+                [ms / 1000 for ms in index.keyframes(full, look.KEYFRAMES)])
 
     def picture(self, card):
         """The card's three key frames side by side."""

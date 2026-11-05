@@ -121,6 +121,20 @@ def frame_path(video, ms):
     return os.path.join(CACHE, "frames", video, f"{ms:07d}.jpg")
 
 
+def keyframe(index, card, ms):
+    """The JPEG of a card's key frame (moments.Index.keyframes), decoded and kept beside the
+    window frames the first time it is asked for."""
+    path = frame_path(card["video"], ms)
+    if not os.path.exists(path):
+        meta = index.videos[card["video"]]
+        data = decode(os.path.join(VIDEOS, meta["file"]), ms, round(meta["duration"] * 1000))
+        with open(path + ".partial", "wb") as file:
+            file.write(data)
+        os.replace(path + ".partial", path)
+    with open(path, "rb") as file:
+        return file.read()
+
+
 def decode(path, ms, duration_ms):
     # The last frame starts before the end; a seek to the very end finds none.
     # A picture can also end before the file's duration (case-08's by 0.13 s): a seek past
@@ -577,7 +591,7 @@ def describe(args):
             said = json.load(file)["cards"]
     vision = look.Vision(args.vision)
     def chosen(card):
-        return [index.frame_ms[i] for i in index.keyframes(card, look.KEYFRAMES)]
+        return index.keyframes(card, look.KEYFRAMES)
 
     def kept(card):
         return [said.get(card["id"], {}).get(k) for k in ("start", "end", "frames")] == [card["start"], card["end"], chosen(card)]
@@ -586,10 +600,7 @@ def describe(args):
     began = time.monotonic()
     for n, card in enumerate(todo, 1):
         frames = chosen(card)
-        jpegs = []
-        for frame in frames:
-            with open(frame_path(card["video"], frame), "rb") as file:
-                jpegs.append(file.read())
+        jpegs = [keyframe(index, card, frame) for frame in frames]
         caption = said[card["id"]]["caption"] if kept(card) else vision.describe(jpegs)
         said[card["id"]] = {"start": card["start"], "end": card["end"], "frames": frames, "caption": caption,
                             "light": vision.light(jpegs), "highlight": vision.highlight(jpegs)}
@@ -617,16 +628,15 @@ def scenes(args):
     vision = look.Vision(args.vision)
 
     def same(card):
-        return [said.get(card["id"], {}).get(k) for k in ("start", "end")] == [card["start"], card["end"]]
+        return ([said.get(card["id"], {}).get(k) for k in ("start", "end", "frames")]
+                == [card["start"], card["end"], index.keyframes(card, look.KEYFRAMES)])
 
     todo = [c for c in index.cards if not same(c) or "text" not in said[c["id"]]]
 
     def scene(card):
-        jpegs = []
-        for frame in (index.frame_ms[i] for i in index.keyframes(card, look.KEYFRAMES)):
-            with open(frame_path(card["video"], frame), "rb") as file:
-                jpegs.append(file.read())
-        kept = said[card["id"]] if same(card) else {"start": card["start"], "end": card["end"]}
+        frames = index.keyframes(card, look.KEYFRAMES)
+        jpegs = [keyframe(index, card, frame) for frame in frames]
+        kept = said[card["id"]] if same(card) else {"start": card["start"], "end": card["end"], "frames": frames}
         place = kept["scene"] if "scene" in kept else vision.scene(jpegs)
         return card, kept | {"scene": place, "text": vision.text(jpegs)}
 
@@ -646,8 +656,8 @@ def card_colours(index, card) -> np.ndarray:
     from montage import look, moments
 
     pixels = []
-    for frame in (index.frame_ms[i] for i in index.keyframes(card, look.KEYFRAMES)):
-        with Image.open(frame_path(card["video"], frame)) as image:
+    for frame in index.keyframes(card, look.KEYFRAMES):
+        with Image.open(io.BytesIO(keyframe(index, card, frame))) as image:
             pixels.append(np.asarray(image.convert("RGB").resize(COLOUR_SIZE)).reshape(-1, 3))
     return moments.colours(np.concatenate(pixels))
 

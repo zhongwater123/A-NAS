@@ -273,12 +273,14 @@ class Index:
                 loaded.words = {v: [(a, b) for a, b, *_ in words] for v, words in json.load(file)["videos"].items()}
         return loaded
 
-    def keyframes(self, card: dict, count: int) -> list[int]:
-        """count of the card's windows spread evenly from its first to its last, in time order."""
-        windows = sorted(card["windows"], key=lambda i: self.rows[i][1])
-        if len(windows) <= count:
-            return windows
-        return [windows[round(k * (len(windows) - 1) / (count - 1))] for k in range(count)]
+    @staticmethod
+    def keyframes(card: dict, count: int) -> list[int]:
+        """The milliseconds of count frames spread evenly over the card's own seconds, each in the
+        middle of its equal share of them (#394). Not its windows' frames: a window's frame is
+        every 2 seconds, so that a short card had one or two of them, and a frame on its end,
+        which shows the next shot (case-08: 56 cards of 156 one frame, 5 the next shot)."""
+        span = card["end"] - card["start"]
+        return [round((card["start"] + span * (k + 0.5) / count) * 1000) for k in range(count)]
 
     def _cards(self) -> list[dict]:
         """Every shot cut where its picture changes, each part of at most SEGMENT_MAX, with its windows."""

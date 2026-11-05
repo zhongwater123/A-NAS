@@ -221,8 +221,9 @@ class MomentsTest(unittest.TestCase):
         self.assertEqual(found["07-1-0"]["caption"], "山上的城堡")
         self.assertNotIn("caption", found["07-1-1"])
         castle = next(c for c in index.cards if c["id"] == "07-1-0")
-        # Three frames spread over its ten windows (8-28 s): the first, the fifth, the last.
-        self.assertEqual([index.frame_ms[i] for i in index.keyframes(castle, 3)], [9000, 17000, 27000])
+        # Three frames in the middles of its thirds (8-28 s), not on its windows' frames.
+        self.assertEqual(index.keyframes(castle, 3), [11333, 18000, 24667])
+        self.assertEqual(index.keyframes({"start": 24.0, "end": 25.0}, 3), [24167, 24500, 24833])  # a short card
 
     def test_cards_carry_light_highlight_motion_and_flaws_when_written(self):
         with tempfile.TemporaryDirectory() as work:
