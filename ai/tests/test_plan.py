@@ -54,6 +54,13 @@ class PlanTest(unittest.TestCase):
         self.assertIn("片段1（0:00–0:12，1 张卡片）", text)
         self.assertIn("01-1-0", text)
 
+    def test_a_plan_of_paragraphs_is_sent_as_its_segments(self):
+        answer = '{"story": "s", "paragraphs": [{"part": 2, "shots": 3, "seconds": 7, "shows": "打斗", "reason": "高潮"}]}'
+        planned = plan.parsed(answer)
+        self.assertEqual(planned["segments"], planned["paragraphs"])
+        body = plan.request(planned, 60, None)
+        self.assertEqual(body["segments"], [{"part": 2, "shots": 3, "seconds": 7, "shows": "打斗", "reason": "高潮", "probe": "打斗"}])
+
     def test_the_answer_is_one_json_object_fenced_or_not(self):
         answer = '故事线如下。\n```json\n{"story": "s", "segments": [{"card": "01-0-0", "shows": "街道", "pace": "慢"}]}\n```'
         self.assertEqual(plan.parsed(answer)["segments"][0]["card"], "01-0-0")

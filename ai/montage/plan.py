@@ -23,23 +23,27 @@ SYSTEM = (
     "卡片少的片段，下面每行一张卡片：“卡片 id 可剪X秒 光线 描述（亮点）毛病”，卡片 id 是“视频-镜头序号-段”；"
     "卡片多的片段只给一段概述，是本机小模型按这些卡片写的。"
     "描述由本机小模型看三帧写成，可能看错。\n"
-    "先写故事线：按指令要的效果，把成片的段落按播放顺序列出来，每段一句内容和对应的卡片。只放讲得进故事线的内容。\n"
-    "排段的规则：\n"
-    "1. 每段写 card 或 part，再写 seconds、shows、reason。用目录里列出的卡片，就写 card（卡片 id）；"
-    "用只给了概述的片段，就写 part（片段号），程序按 shows 在这个片段里找最合适的卡片。"
-    "shows 用一句话写这段要呈现的、画面里看得见的东西，不写地名、年代、情绪，程序按它找画面、定入出点；"
-    "reason 是选镜理由：为什么选这张卡片，它在故事线里起什么作用。\n"
-    f"2. seconds 是这段剪几秒，{moments.SEGMENT_MIN:g}–{moments.CLIP_MAX:g} 秒，按故事需要定：要交代清楚、要停留的长一点，"
-    "冲击、紧张、一闪而过的短一点；各段加起来约等于目标时长，程序会按比例微调，再在卡片里定入出点。\n"
-    "3. 按故事需要选段，不按片段长短或卡片多少分配：很长的片段可能只用一小段，很短的片段也可以用好几段。\n"
+    "先写故事线：按指令要的效果，把成片按播放顺序分成几个段落，每个段落一句内容和对应的片段或卡片。只放讲得进故事线的内容。\n"
+    "成片由段落组成。每个段落是原片同一时刻里连续的几个镜头：你指定从哪里开始，取几个镜头，"
+    "程序从这里按原片顺序往后连续取，段落内部怎么接，沿用原片的剪辑；只有段落之间才换时刻、换地点，要想好段落之间怎么过渡。\n"
+    "每个段落写：\n"
+    "1. card 或 part：从哪里开始。用目录里列出的卡片，就写 card（卡片 id）；用只给了概述的片段，就写 part（片段号），"
+    "程序按 shows 在这个片段里找起点。\n"
+    f"2. shots：取几个连续镜头，1–{moments.SHOTS_MAX} 个，一般 2–4 个；连续快切的高潮可以多取；"
+    "1 个就是单独插一个镜头，比如一张报纸。\n"
+    f"3. seconds：这个段落一共剪几秒，按故事需要定：要交代清楚、要停留的长一点，冲击、紧张的短一点；"
+    f"每个镜头至少 {moments.SEGMENT_MIN:g} 秒，各段落加起来约等于目标时长，程序会按比例微调，再分给段落里的镜头。\n"
+    "4. shows：一句话写这个段落要呈现的、画面里看得见的东西，不写地名、年代、情绪，程序按它找起点、定入出点。\n"
+    "5. reason：这个段落在故事线里起什么作用。\n"
+    "按故事需要选，不按片段长短或卡片多少分配：很长的片段可能只用一个段落，很短的片段也可以用。\n"
     "只输出一个 JSON 对象，不要别的文字："
-    '{"story": "故事线", "segments": [{"card": "卡片 id", "part": 片段号, "seconds": 秒数, "shows": "画面", "reason": "选镜理由"}]}，'
+    '{"story": "故事线", "paragraphs": [{"card": "卡片 id", "part": 片段号, "shots": 镜头数, "seconds": 秒数, "shows": "画面", "reason": "作用"}]}，'
     "card 和 part 写一个即可。"
     "计划不合规则会被退回并说明原因，照着改好后再输出完整的新计划。"
 )
 
 
-FIELDS = ("card", "part", "seconds", "shows", "reason")
+FIELDS = ("card", "part", "shots", "seconds", "shows", "reason")
 
 
 def _clock(seconds: float) -> str:
@@ -86,8 +90,11 @@ def parsed(text: str) -> dict:
     if not found:
         raise ValueError("回答里没有 JSON 对象")
     plan = json.loads(found.group(0))
+    # A plan of paragraphs (剪法19) is sent as its segments, each one paragraph.
+    if isinstance(plan.get("paragraphs"), list) and "segments" not in plan:
+        plan["segments"] = plan["paragraphs"]
     if not isinstance(plan.get("segments"), list) or not plan["segments"]:
-        raise ValueError("计划里没有 segments")
+        raise ValueError("计划里没有 paragraphs")
     return plan
 
 

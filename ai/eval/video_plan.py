@@ -85,11 +85,14 @@ def run(instruction: dict, index: moments.Index, container: str, model: str | No
             calls.append("make_montage")
             if head["status"] == 200:
                 review = json.loads(base64.b64decode(head["X-Review"])) if head.get("X-Review") else []
-                # The card the service picked for a segment that named a part (#398).
-                segments = [s | {"card": r.get("card", s.get("card")), "start": r["planned"][0], "end": r["planned"][1]}
-                            for s, r in zip(body["segments"], review, strict=True)]
-                done = [s | {"card": r.get("card", s.get("card")), "start": r["start"], "end": r["end"]}
-                        for s, r in zip(body["segments"], review, strict=True)]
+                # Each shot as cut, with the paragraph it came from (#398, 剪法19) and the card the
+                # service picked for it; a plan of single segments has one shot each.
+                asked = [body["segments"][r.get("paragraph", n + 1) - 1] for n, r in enumerate(review)]
+                shot = [{"card": r.get("card", s.get("card")), "paragraph": r.get("paragraph", n + 1)}
+                        | ({"seconds": r["seconds"]} if "seconds" in r else {})
+                        for n, (s, r) in enumerate(zip(asked, review, strict=True))]
+                segments = [s | x | {"start": r["planned"][0], "end": r["planned"][1]} for s, x, r in zip(asked, shot, review, strict=True)]
+                done = [s | x | {"start": r["start"], "end": r["end"]} for s, x, r in zip(asked, shot, review, strict=True)]
                 with open(target + ".json", "w", encoding="utf-8") as file:
                     json.dump({"style": style, "story": planned.get("story"), "planned": segments, "segments": done,
                                "review": review, "skipped": []},

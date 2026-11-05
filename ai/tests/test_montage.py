@@ -493,6 +493,17 @@ class MomentsTest(unittest.TestCase):
         self.index.parts.append({"video": "07", "cards": ["07-2-0"], "summary": ""})
         self.assertIsNone(self.index.pick(2, self.castle))  # its one window is flat: nothing to cut
 
+    def test_a_paragraph_runs_on_in_film_order_from_its_card(self):
+        cards = [c["id"] for c in sorted(self.index.cards, key=lambda c: c["start"])]
+        self.assertEqual(cards, ["07-0-0", "07-1-0", "07-1-1", "07-2-0"])
+        self.assertEqual(self.index.run("07-0-0", 2), ["07-0-0", "07-1-0"])
+        self.assertEqual(self.index.run("07-0-0", 2, {"07-1-0"}), ["07-0-0", "07-1-1"])  # taken: the next one
+        # 07-2-0 has nothing to cut: the film ends first, and the paragraph reaches back.
+        self.assertEqual(self.index.run("07-1-1", 2), ["07-1-0", "07-1-1"])
+        self.index.parts = [{"video": "07", "cards": ["07-0-0", "07-1-0"], "summary": ""},
+                            {"video": "07", "cards": ["07-1-1", "07-2-0"], "summary": ""}]
+        self.assertEqual(self.index.run("07-1-0", 3), ["07-0-0", "07-1-0"])  # it keeps to its part
+
     def test_a_card_is_paced_by_how_much_its_picture_changes(self):
         self.index.pictures = {"07-0-0": {"change": 0.004}, "07-1-0": {"change": 0.03}, "07-1-1": {"change": 0.1}}
         self.assertEqual([self.index.pace_of(i) for i in ("07-0-0", "07-1-0", "07-1-1", "07-2-0")],

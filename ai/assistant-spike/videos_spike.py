@@ -56,6 +56,7 @@ import json
 import math
 import os
 import pwd
+import re
 import shutil
 import socket
 import socketserver
@@ -149,6 +150,22 @@ def edges(path: str, start, end):
         return moved_start, moved_end
     one = max([(moved_start, end), (start, moved_end)], key=lambda span: span[1] - span[0])
     return one if one[1] - one[0] >= moments.TRIMMED_MIN - moments.ROUNDING else (start, end)
+
+
+def relabelled(problems: list[str], origin) -> list[str]:
+    """problems that name a segment ("第 n 段") named by its paragraph and shot instead, when
+    the plan's paragraphs were taken apart into shots (origin, from Handler.expanded)."""
+    if not origin:
+        return problems
+
+    def name(found):
+        n = int(found.group(1))
+        if not 1 <= n <= len(origin):
+            return found.group(0)
+        paragraph, shot = origin[n - 1]
+        return f"第 {paragraph} 个段落（其中第 {shot} 个镜头）"
+
+    return [re.sub(r"第 (\d+) 段", name, p) for p in problems]
 
 
 def scene_cuts(path: str, at: float, seconds: float) -> list[float]:
@@ -326,10 +343,10 @@ class Handler(BaseHTTPRequestHandler):
             if target is not None and (isinstance(target, bool) or not isinstance(target, (int, float))
                                        or not 5 <= target <= 600):
                 return self.reply(400, {"error": "seconds 要是 5–600 的秒数"})
-            # A segment may name a part of the film instead of a card (#398, 剪法17): it takes
-            # the part's card whose picture its probe matches best (moments.Index.pick).
+            # A segment is a paragraph (#398, 剪法19): from a card, or from the card of a part its
+            # probe matches best (剪法17, moments.Index.pick), shots cards in film order.
             try:
-                segments, problems = self.picked(segments)
+                segments, origin, problems = self.expanded(segments)
             except OSError as error:
                 return self.reply(503, {"error": f"设备上的 AI 暂时不可用：{error}"})
             if problems:
@@ -348,7 +365,7 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as error:
                 return self.reply(503, {"error": f"设备上的 AI 暂时不可用：{error}"})
             if problems:
-                return self.reply(422, {"error": "剪辑计划不合规则", "problems": problems})
+                return self.reply(422, {"error": "剪辑计划不合规则", "problems": relabelled(problems, origin)})
         edged = []
         if body.get("edges") is True:
             files = {v: os.path.join(self.server.videos, meta["file"]) for v, meta in self.server.index.videos.items()}
@@ -363,7 +380,8 @@ class Handler(BaseHTTPRequestHandler):
                                             skipped=body.get("skipped"),
                                             shortest=moments.TRIMMED_MIN if edged else moments.SEGMENT_MIN)
         except moments.PlanError as error:
-            return self.reply(422, {"error": "剪辑计划不合规则", "problems": error.problems})
+            return self.reply(422, {"error": "剪辑计划不合规则",
+                                    "problems": relabelled(error.problems, origin if spans is not None else None)})
         files = {v: os.path.join(self.server.videos, meta["file"]) for v, meta in self.server.index.videos.items()}
         review = []
         # An experiment (#350): "look": false cuts the plan without the vision model's review.
@@ -386,7 +404,8 @@ class Handler(BaseHTTPRequestHandler):
         if review and spans is not None:
             review = [r | {"planned": [s["start"], s["end"]]} for s, r in zip(segments, review, strict=True)]
         if review and spans is not None:
-            review = [r | {k: s[k] for k in ("pace", "asked", "card") if s.get(k)} for s, r in zip(segments, review, strict=True)]
+            review = [r | {k: s[k] for k in ("pace", "asked", "card", "paragraph", "seconds") if s.get(k) is not None}
+                      for s, r in zip(segments, review, strict=True)]
         if review and edged:
             review = [r | {"edged": e} for r, e in zip(review, edged, strict=True)]
         work = tempfile.mkdtemp(dir=self.server.work)
@@ -409,28 +428,46 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
         return None
 
-    def picked(self, segments):
-        """The segments with a card for each that names a part and no card (Index.pick), cards
-        another segment names left to it while the part has others; and the problems."""
-        index, out, problems = self.server.index, [], []
+    def expanded(self, segments):
+        """Each segment as its paragraph's shots (剪法19): from its card, or the card of its part
+        its probe matches best (Index.pick), shots cards in film order (Index.run), none another
+        paragraph names or took, its seconds shared among them by their paces (moments.PACES).
+        And where each shot came from, (paragraph, shot) from 1, and the problems."""
+        index, out, origin, problems = self.server.index, [], [], []
+        cards = {c["id"] for c in index.cards}
         taken = {s.get("card") for s in segments if isinstance(s, dict) and s.get("card")}
         for n, segment in enumerate(segments, 1):
-            if not isinstance(segment, dict) or segment.get("card") or segment.get("part") is None:
-                out.append(segment)
+            shots = segment.get("shots", 1) if isinstance(segment, dict) else 1
+            if isinstance(shots, bool) or not isinstance(shots, int) or not 1 <= shots <= moments.SHOTS_MAX:
+                problems.append(f"第 {n} 个段落的 shots 要是 1–{moments.SHOTS_MAX} 的整数")
                 continue
-            probe = segment.get("probe")
-            if not isinstance(probe, str) or not 1 <= len(probe.strip()) <= PROBE_CHARS:
-                problems.append(f"第 {n} 段写了 part，还要写要找的画面（shows）")
+            card = segment.get("card") if isinstance(segment, dict) else None
+            if not card and isinstance(segment, dict) and segment.get("part") is not None:
+                probe = segment.get("probe")
+                if not isinstance(probe, str) or not 1 <= len(probe.strip()) <= PROBE_CHARS:
+                    problems.append(f"第 {n} 个段落写了 part，还要写要找的画面（shows）")
+                    continue
+                if probe not in self.server.probes:
+                    self.server.probes[probe] = embed_query(self.server.ai_socket, probe)
+                card = index.pick(segment["part"], self.server.probes[probe], taken)
+                if card is None:
+                    problems.append(f"第 {n} 个段落的 part 不是目录里的片段号")
+                    continue
+            if card not in cards:
+                out.append(segment)  # the checks to come say what is wrong with it
+                origin.append((n, 1))
                 continue
-            if probe not in self.server.probes:
-                self.server.probes[probe] = embed_query(self.server.ai_socket, probe)
-            card = index.pick(segment["part"], self.server.probes[probe], taken)
-            if card is None:
-                problems.append(f"第 {n} 段的 part 不是目录里的片段号")
-                continue
-            taken.add(card)
-            out.append(segment | {"card": card})
-        return out, problems
+            ids = index.run(card, shots, taken - {card})
+            taken.update(ids)
+            weights = [moments.PACES[index.pace_of(i) or "中"] for i in ids]
+            total = segment.get("seconds")
+            for j, (i, weight) in enumerate(zip(ids, weights, strict=True), 1):
+                shot = {k: v for k, v in segment.items() if k != "shots"} | {"card": i, "paragraph": n}
+                if isinstance(total, (int, float)) and not isinstance(total, bool) and total > 0:
+                    shot["seconds"] = round(total * weight / sum(weights), 2)
+                out.append(shot)
+                origin.append((n, j))
+        return out, origin, problems
 
     def spanned(self, segments, mode):
         """The segments with start and end set from the window their probe matched (Index.span),

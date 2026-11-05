@@ -137,6 +137,8 @@ PARTS = "parts.json"
 PART_SECONDS = 60.0
 PART_SNAP = 10.0
 PART_CHARS = 300
+# A plan's paragraph (剪法19) takes at most this many shots in a row from the film.
+SHOTS_MAX = 6
 # Cards of a part scoring within this of its best for a segment's probe count as about as good
 # (Index.pick): case-08's best windows for one probe differ by a few hundredths.
 PICK_NEAR = 0.03
@@ -441,6 +443,23 @@ class Index:
         # cannot see how long a part's cards are, and the cut needs room to set its seconds.
         best = max(scored.values())
         return max((i for i, s in scored.items() if s >= best - PICK_NEAR), key=lambda i: (self.usable(cards[i]), scored[i]))
+
+    def run(self, anchor: str, count: int, taken=()) -> list[str]:
+        """anchor and the cards after it in film order, count in all (#398, 剪法19): of its video
+        and, with parts, of its part, none under a title, taken or too short to cut (SEGMENT_MIN);
+        those just before it when the part or the video ends first. The film's own editing joins
+        them."""
+        cards = {c["id"]: c for c in self.cards}
+        video = cards[anchor]["video"]
+        part = next((p["cards"] for p in self.parts if anchor in p["cards"]), None)
+        order = [c["id"] for c in sorted(self.cards, key=lambda c: c["start"])
+                 if c["video"] == video and (part is None or c["id"] in part)]
+        def fit(i):
+            return i not in self.texts and i not in taken and self.usable(cards[i]) >= SEGMENT_MIN
+        k = order.index(anchor)
+        after = [i for i in order[k + 1:] if fit(i)][:count - 1]
+        before = [i for i in reversed(order[:k]) if fit(i)][:count - 1 - len(after)]
+        return [*reversed(before), anchor, *after]
 
     def pace_of(self, card_id: str) -> str | None:
         """The card's pace from how much its picture changes (PACE_CHANGE), however many seconds
