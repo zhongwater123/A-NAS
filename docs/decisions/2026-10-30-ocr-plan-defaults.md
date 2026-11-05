@@ -18,7 +18,7 @@
 - 首批文档类型与字段按[方案中的表](../architecture/photo-ocr.md#首批文档类型与字段2026-10-30-确认)；
 - 敏感号码默认遮挡；
 - “照片中的文字”开关默认开启，关闭即清除、保留更正；
-- 共享图库所有成员都可以更正，记入活动记录；
+- 共享图库所有成员都可以更正，记入活动记录（2026-11-03 由用户改为按内容对象存、修改记录对能看到照片的人公开，见 [ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）；
 - 手动“读取这张照片的文字”放到后续版本。
 
 AI 助手的可见性按用户的方向另定（[决定](2026-10-30-ocr-assistant-handles.md)）。分流与核对的验收目标在数据出来后定下（[分流](2026-11-02-ocr-routing-recall.md)、[单字概率](2026-11-03-ocr-character-confidence.md)）。还有两项待定：[点开完整号码是否记入活动记录](2026-10-30-ocr-full-number-reveal-logging.md)、[敏感字段的清单](2026-10-30-ocr-sensitive-fields.md)。
