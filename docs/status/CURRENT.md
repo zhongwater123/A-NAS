@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-11-04
+更新时间：2026-11-05
 
 本页只记当前事实与下一步。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，合并与部署的经过由 Git 与 PR 保存。
 
@@ -26,7 +26,7 @@
 
 - Samba 凭据在 ADR 0008 升级时已删除，本人在“设置 → 我的账号”改密后重建。2026-11-04 核对（`pdbedit -L`）：16 个账号中 15 个已有凭据，只差 `admin`。
 - 办公网段到 NAS 的 TCP 445 不通，而 80 端口正常：Wi-Fi 网段如此，2026-11-04 从有线的 10.24.x 网段复测也如此；拦截发生在公司网络或电脑的安全策略。SMB 要从 NAS 所在的 172.18.45.0/24 网段测试，或请 IT 放行。
-- 重启后 smbd 仍只监听回环，v1.0.1 验收第 6 步不能通过。2026-11-04 装上 `a-nas-host`、启用 `ifupdown-wait-online.service` 后重启复测：网络等待只看 ifupdown 的接口记录，比 `enp2s0` 拿到 DHCP 地址早约 10 秒结束，smbd 随即按 `bind interfaces only` 启动（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。修法待定；在此之前，每次重启后由 root 执行 `systemctl restart smbd`。
+- 重启后 smbd 仍只监听回环，v1.0.1 验收第 6 步不能通过。2026-11-04 装上 `a-nas-host`、启用 `ifupdown-wait-online.service` 后重启复测：网络等待只看 ifupdown 的接口记录，比 `enp2s0` 拿到 DHCP 地址早约 10 秒结束，smbd 随即按 `bind interfaces only` 启动（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。修复在 [PR #390](https://github.com/zhongwater123/A-NAS/pull/390) 中（用户 2026-11-05 选定）：安装器为 smbd 写入附加配置，等 SMB 接口有了 IPv4 地址再启动，等不到就再试；部署后正常重启一次复测。在此之前，每次重启后由 root 执行 `systemctl restart smbd`。
 - 实验 NAS 仍是 Debian 的 Caddy 2.6.2：Caddy 官方的 Cloudsmith 源曾对软件包索引返回 `402`（[caddyserver/caddy#8184](https://github.com/caddyserver/caddy/issues/8184)），当时删除了该源。2026-11-05 核对，索引已恢复（2.11.9）。启用互联网访问前要按手册换回官方源。
 - 互联网访问（[ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)）等外部条件：IT 把公网 IP 的 TCP 443 与 80 映射到机房的边缘服务器 `172.25.4.8`，确认公司线路上域名的备案；用户提供域名并添加 A 记录。边缘服务器已于 2026-11-05 准备好隧道与防火墙，HAProxy 关闭。
 - Kiosk 的 URL、网络、快捷键、profile 生命周期与 VT 恢复尚未做产品级验收（[调查](../investigations/2026-10-06-kiosk-browser-confinement.md)）；运行中热插拔硬盘尚未实现。
@@ -42,7 +42,7 @@
 - 向量索引 [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)（proposed）：引入 Qdrant 作为各服务可重建的派生索引，推翻了 #66 “不引入独立向量库”的决定。第一阶段只做同步与影子比对；相册读路径何时切换，等实机影子比对的数据再定。
 - 网页搜索（[规格](../specs/web-search.md)、[ADR 0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)，proposed）：内置 SearXNG，默认开启并由管理员开关，种子分类单独开关、默认关闭，版本随 release 固定（用户 2026-10-30 决定）。已合并（ADR 编号占位 [PR #334](https://github.com/zhongwater123/A-NAS/pull/334)）；接入 SearXNG 不需要密钥、Tor 或自建服务的全部 332 个引擎，分十个分类，结果按引擎轮流排列（用户 2026-11-02 决定）；结果随引擎回答陆续显示，约 1 秒出现第一批。为了不让出口地址被搜索网站封，每个引擎按人的节奏询问，被网站拦截后暂停 1 小时起、最长 1 天（用户 2026-11-02 要求）。夸克的解析错误记在 [#340](https://github.com/zhongwater123/A-NAS/issues/340)。部署前要用 `ANAS_SYSTEM_TEST_SEARCH=real` 跑一次系统测试，再按[启用手册](../runbooks/enable-web-search.md)在实验 NAS 上实测后调整。
 - 家庭中心（宝宝频道）：M1 已合并（[PR #329](https://github.com/zhongwater123/A-NAS/pull/329)）并随 rc.6 部署（[规格](../specs/family-center.md)、[技术设计](../architecture/family-center.md)）；[ADR 0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md) 仍为 proposed。M2（认领、隐藏、从图库加入频道）待做。
-- 宿主机依赖（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)，proposed）：依赖散在向导、安装器、测试镜像与几本手册中，已经不一致；改由 `a-nas-host` 与 `a-nas-console` 两个 Debian 包声明。ADR 与实现已合并（[PR #381](https://github.com/zhongwater123/A-NAS/pull/381)、[PR #385](https://github.com/zhongwater123/A-NAS/pull/385)），两个包已随 `70853075ca40` 装上。ADR 中启用网络等待来修 smbd 的部分在实机上没有生效，smbd 的修法待定（见[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)中的可选做法）。
+- 宿主机依赖（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)，proposed）：依赖散在向导、安装器、测试镜像与几本手册中，已经不一致；改由 `a-nas-host` 与 `a-nas-console` 两个 Debian 包声明。ADR 与实现已合并（[PR #381](https://github.com/zhongwater123/A-NAS/pull/381)、[PR #385](https://github.com/zhongwater123/A-NAS/pull/385)），两个包已随 `70853075ca40` 装上。ADR 中启用网络等待来修 smbd 的部分在实机上没有生效，决定 2 已改为由安装器为 smbd 写入等地址的附加配置（见上面的阻塞）。
 - 进行中的 PR：局域网算力 PAIR 的隐私边界与下载（[#196](https://github.com/zhongwater123/A-NAS/pull/196)，草稿）；语音处理的云端密钥与存储桶（[#203](https://github.com/zhongwater123/A-NAS/pull/203)）。
 
 ## 下一步

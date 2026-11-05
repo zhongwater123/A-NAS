@@ -1,7 +1,7 @@
 # 重启后 smbd 早于 DHCP 地址启动，只监听回环
 
-状态：open
-更新时间：2026-11-04
+状态：fixed，待实机验收
+更新时间：2026-11-05
 
 ## 症状与影响
 
@@ -45,20 +45,23 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
 
 ## 修复与回归证据
 
-- 修复：待定。可选的做法：
-  - 安装器按它写入 `smb.conf` 的接口，为 smbd 写一个 drop-in，启动前等这个接口有 IPv4 地址（有上限）。它直接表达 smbd 的依赖，与 ifupdown、dhcpcd 无关；
-  - 在 `/etc/default/networking` 设 `WAIT_ONLINE_METHOD=route`，让网络等待等到默认路由。这个文件是 ifupdown 的配置文件，由别的包改它会在 ifupdown 升级时冲突，而且只对 ifupdown 管理的主机有效；
-  - 在拿到地址时重启 smbd 的 dhcpcd 或 ifupdown 钩子。它也能处理以后的地址变化，但会断开已有会话（ADR 0031 已列为补充做法）。
-- 测试：未修复。修复后要在 Experimental NAS 上正常重启一次，用 `after-reboot` 检查确认 `172.18.45.48:445` 在监听、smbd `NRestarts=0`。
+- 修复（用户 2026-11-05 选定）：安装器按它写入 `smb.conf` 的接口，为 smbd 写入 `/etc/systemd/system/smbd.service.d/a-nas-lan-address.conf`。smbd 启动前最多等 20 秒，等这个接口有 IPv4 地址；等不到时这次启动失败，systemd 5 秒后再试，直到有地址。`a-nas-host` 不再启用 `ifupdown-wait-online.service`，也不再有 `postinst`。做法与没有选的方案见 [ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md) 的决定 2 与“未选择”。
+- 验证前的实验（2026-11-05，系统测试镜像，systemd 257.13、Samba 4.22.11，与 NAS 相同）：
+  - 在没有地址的 veth 上，smbd 停在 `activating`；等待超时后 systemd 按 `Restart=on-failure` 再试；加上地址后约 1 秒启动，并监听这个地址的 445；
+  - 一个排在 smbd 之后、`Wants=` 它的单元（与 Host Agent 相同）在第一次失败后启动，不等以后的重试；
+  - smbd 没有运行时，`smbcontrol all reload-config` 退出码为 0。
+- 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh) 检查安装器写入的等待与重试，并在一个暂时没有地址的接口上走一遍上面的过程。部署后要在 Experimental NAS 上正常重启一次，确认 `172.18.45.48:445` 在监听。
 
 ## 后续工作
 
-- 修复前，每次重启后由 root 执行 `systemctl restart smbd`。
-- 修复时更正 ADR 0031 中启用网络等待的理由，并决定是否保留 `postinst` 中的启用。
+- 部署修复之前，每次重启后由 root 执行 `systemctl restart smbd`。
+- Experimental NAS 上由 `0~70853075ca40` 启用的 `ifupdown-wait-online.service`，在部署修复时停用，与新装的宿主机一致。
+- DHCP 续租换了地址时 smbd 仍不会跟随；需要时再加 ADR 0031 中列出的钩子。
 
 ## 关联
 
 - 规格：不涉及
 - ADR：[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)
 - 运行手册：[实验存储配置与验收](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)（第 6 步）
-- 实现：[PR #385](https://github.com/zhongwater123/A-NAS/pull/385)（[`deploy/debian/a-nas-host/DEBIAN/postinst`](../../deploy/debian/a-nas-host/DEBIAN/postinst)）
+- 实现：[`scripts/install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)（写入 smbd 的附加配置，[PR #390](https://github.com/zhongwater123/A-NAS/pull/390)）；没有修好问题的网络等待在 [PR #385](https://github.com/zhongwater123/A-NAS/pull/385) 中
+- 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh)
