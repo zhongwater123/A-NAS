@@ -7,7 +7,8 @@ import time
 import urllib.error
 import urllib.request
 
-api, sender_jar, recipient_jar, sender_csrf, recipient_csrf, source_id, target_space = sys.argv[1:]
+api, sender_jar, recipient_jar, sender_csrf, recipient_csrf, source_id, target_space = sys.argv[1:8]
+run_id = sys.argv[8] if len(sys.argv) > 8 else "initial"
 
 def client(jar_path, csrf):
     jar = http.cookiejar.MozillaCookieJar(jar_path)
@@ -39,7 +40,7 @@ for attempt in range(60):
         if attempt == 59:
             raise
         time.sleep(0.25)
-share = sender("POST", "/api/v1/shares", {"requestId": "system-create", "sourceIds": [source_id],
+share = sender("POST", "/api/v1/shares", {"requestId": "system-create-" + run_id, "sourceIds": [source_id],
     "recipientIds": [recipient_id], "message": "独立副本 👩🏽‍💻"}, 202)
 base = "/api/v1/shares/" + share["id"]
 for _ in range(100):
@@ -54,7 +55,7 @@ assert recipient("GET", base + "/entries/" + entry["id"] + "/content") == origin
 recipient("POST", base + "/messages", {"recipientId": recipient_id, "requestId": "system-reply", "text": "收到 👍"}, 201)
 messages = sender("GET", base + "/messages?recipientId=" + recipient_id)["items"]
 assert messages[-1]["text"] == "收到 👍", messages
-folder = recipient("POST", "/api/v1/spaces/" + target_space + "/directories", {"name": "分享系统测试"}, 201)
+folder = recipient("POST", "/api/v1/spaces/" + target_space + "/directories", {"name": "分享系统测试-" + run_id}, 201)
 job = recipient("POST", base + "/save", {"requestId": "system-save", "entryIds": [entry["id"]],
     "target": {"rootId": target_space, "parentId": folder["id"]}}, 202)
 for _ in range(100):

@@ -326,13 +326,47 @@ func TestOldGenerationCannotPublishAfterReset(t *testing.T) {
 	if _, e = NewRemote(context.Background(), f.socket); e != nil {
 		t.Fatal(e)
 	}
-	if e = f.remote.Check(context.Background()); !errors.Is(e, shares.ErrInactive) {
+	if e = f.remote.Check(context.Background()); !errors.Is(e, shares.ErrBridgeChanged) {
 		t.Fatalf("stale bridge health: %v", e)
 	}
-	if e = f.remote.Commit(f.bc, user(f.bob), id); !errors.Is(e, shares.ErrInactive) {
+	if e = f.remote.Commit(f.bc, user(f.bob), id); !errors.Is(e, shares.ErrBridgeChanged) {
 		t.Fatalf("late commit %v", e)
 	}
 	f.local.cleanup.Wait()
+}
+
+func TestStaleBridgeDuringPreparationIsNotWithdrawal(t *testing.T) {
+	f := setup(t)
+	dir := t.TempDir()
+	store, err := shares.Open(filepath.Join(dir, "catalog.db"), filepath.Join(dir, "content"), shares.Options{
+		Backend: NewBackend(f.remote), Active: func(context.Context, string) (bool, error) { return true, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	// Invalidate the bridge after opening the store, as when the Product
+	// Service restarts after admission but before background capture.
+	if _, err := NewRemote(context.Background(), f.socket); err != nil {
+		t.Fatal(err)
+	}
+	share, err := store.Create(f.ac, user(f.alice), shares.CreateRequest{RequestID: "restart", SourceIDs: []string{"source"}, RecipientIDs: []string{f.bob.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 200 {
+		share, err = store.Get(f.ac, user(f.alice), share.ID, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if share.Status != "preparing" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if share.Status != "failed" || share.Error != "Unable to prepare share: file service restarted; retry the operation" {
+		t.Fatalf("stale generation must not report withdrawal: %+v", share)
+	}
 }
 
 type delayedPublication struct {
