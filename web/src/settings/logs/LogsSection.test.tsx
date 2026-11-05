@@ -203,8 +203,8 @@ describe("activity log", () => {
     await user.click(screen.getByRole("button", { name: "加载更早的记录" }));
     expect(await screen.findByText("没有更早的记录了")).toBeTruthy();
     expect(sent.activity.at(-1)?.get("before")).toBe("cursor-1");
-    // Anchored: on 11月5日 today's group, "今天 · 11月5日…", would match too.
-    expect(screen.getByRole("region", { name: /^1月5日/ }).textContent).toContain("添加了成员");
+    // Anchored: today's heading "今天 · 11月5日" contains "1月5日" too.
+    expect(screen.getByRole("region", { name: /^(2026年)?1月5日/ }).textContent).toContain("添加了成员");
 
     await user.click(screen.getByRole("radio", { name: "登录" }));
     await waitFor(() => expect(sent.activity.at(-1)?.get("category")).toBe("session"));
