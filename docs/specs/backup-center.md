@@ -9,7 +9,7 @@
 
 ## 非目标
 
-- 不备份到 USB 外接盘、第二块硬盘或远程目标；必备备份集、介质与恢复流程见 [issue #27](https://github.com/zhongwater123/A-NAS/issues/27)，USB 存储见 [issue #25](https://github.com/zhongwater123/A-NAS/issues/25)。“外部备份”页只说明规划，不提供任何可点击的备份操作。
+- 不备份到 USB 外接盘、第二块硬盘或远程目标；必备备份集、介质与恢复流程见 [issue #27](https://github.com/zhongwater123/A-NAS/issues/27)，USB 存储见 [issue #25](https://github.com/zhongwater123/A-NAS/issues/25)。“外部备份”页只说明规划，不提供任何可点击的备份操作（[决定](../decisions/2026-10-12-backup-center-snapshots-only.md)）。
 - 不提供整卷回滚；恢复要么复制出新的条目，要么在“还原此版本”时把被替换的文件移入回收站，从不直接覆盖。
 - 不统计快照独占的磁盘空间（需要 Btrfs qgroup）；快照显示的大小是其中文件的总大小。
 - 不经 SMB 提供 Windows“以前的版本”，不提供锁定（不可删除）的快照，也不发送失败通知。
