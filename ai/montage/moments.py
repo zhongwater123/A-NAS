@@ -329,7 +329,8 @@ class Index:
                 mean += self.frames[i]
         return pieces
 
-    def catalog(self, videos=None, times=True, scenes=False, lengths=False, titles=True, paces=False) -> dict:
+    def catalog(self, videos=None, times=True, scenes=False, lengths=False, titles=True, paces=False,
+                joins=False) -> dict:
         """What the library holds, for writing a story and probes from (#326): every card of every
         video (or of videos), in time order, as one line of its seconds and its shot's, light,
         caption, highlight and flaws, enough to cut it without searching for it. Cards with no
@@ -338,7 +339,7 @@ class Index:
         card's scene number, and "scenes" names each scene once with its number of cards. With
         lengths, each line says the most seconds a segment of its card can run (usable); with
         paces, its pace from its picture's change (pace_of), and each scene how many cards of each
-        pace it has. Without titles, cards with a title,
+        pace it has; with joins, the scenes it may change to (near). Without titles, cards with a title,
         credits, a logo or a caption over them (self.texts) are left out."""
         out = {}
         listed = [c for c in self.cards if (videos is None or c["video"] in videos)
@@ -375,7 +376,7 @@ class Index:
                 pace = self.pace_of(card["id"]) if paces else None
                 if pace:
                     paced.setdefault(n, dict.fromkeys(PACES, 0))[pace] += 1
-        return {"scenes": {str(n): f"{self.scene_names.get(n, '')}（{k} 张卡片{self._paces(paced.get(n))}）{self._joins(n, counts)}"
+        return {"scenes": {str(n): f"{self.scene_names.get(n, '')}（{k} 张卡片{self._paces(paced.get(n))}）{self._joins(n, counts) if joins else ''}"
                            for n, k in sorted(counts.items())}, "videos": out}
 
     @staticmethod

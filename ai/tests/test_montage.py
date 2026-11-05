@@ -499,7 +499,8 @@ class MomentsTest(unittest.TestCase):
                                           {"07-0-0": red, "07-1-0": red, "07-1-1": blue})
         self.assertEqual(alike, {1: {2: 1.0, 3: 0.25}, 2: {1: 1.0, 3: 0.25}, 3: {1: 0.25, 2: 0.25}})
         self.index.scene_alike = alike
-        scenes = self.index.catalog(times=False, scenes=True)["scenes"]
+        self.assertNotIn("可接", self.index.catalog(times=False, scenes=True)["scenes"]["1"])
+        scenes = self.index.catalog(times=False, scenes=True, joins=True)["scenes"]
         self.assertTrue(scenes["1"].endswith("可接：2"))
         self.assertTrue(scenes["3"].endswith("可接：无（只能放开头或结尾）"))
 
