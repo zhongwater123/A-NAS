@@ -26,14 +26,15 @@ class PlanTest(unittest.TestCase):
         text = plan.message(self.index, "剪成预告片", 60, "预告片")
         self.assertEqual(text.splitlines()[:2], ["指令：剪成预告片", "目标时长：约 60 秒"])
         self.assertIn(plan.STYLES["预告片"], text)
-        self.assertIn("场景2：室内，办公室（1 张卡片）", text)
-        self.assertIn("01-1-0 场景2 可剪6秒 办公室里的男子", text)
+        lines = text.splitlines()
+        self.assertEqual(lines[lines.index("场景2：室内，办公室（1 张卡片）") + 1], "01-1-0 可剪6秒 办公室里的男子")
         self.assertNotIn("秒（镜头", text)  # no card seconds: the program sets them
         looks = {"motion": "固定", "sharp": 500.0, "shake": 0.0, "bright": 100.0, "clipped": 0.0}
         self.index.pictures = {"01-0-0": looks | {"change": 0.002}, "01-1-0": looks | {"change": 0.08}}
         text = plan.message(self.index, "剪成预告片", 60, "预告片")
-        self.assertIn("01-0-0 场景1 可剪6秒 节奏慢", text)
-        self.assertIn("01-1-0 场景2 可剪6秒 节奏快", text)  # a fast card's seconds are not cut to its pace
+        self.assertIn("场景1：室外，街道（1 张卡片：慢 1）", text)
+        self.assertIn("01-0-0 可剪6秒 节奏慢", text)
+        self.assertIn("01-1-0 可剪6秒 节奏快", text)  # a fast card's seconds are not cut to its pace
 
     def test_cards_with_a_title_over_them_are_left_out(self):
         self.index.texts = {"01-0-0": "片名：MERIDIAN"}

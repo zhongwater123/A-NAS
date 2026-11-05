@@ -337,7 +337,8 @@ class Index:
         seconds, for a planner that does not set them (#350). With scenes, each line says its
         card's scene number, and "scenes" names each scene once with its number of cards. With
         lengths, each line says the most seconds a segment of its card can run (usable); with
-        paces, its pace from its picture's change (pace_of). Without titles, cards with a title,
+        paces, its pace from its picture's change (pace_of), and each scene how many cards of each
+        pace it has. Without titles, cards with a title,
         credits, a logo or a caption over them (self.texts) are left out."""
         out = {}
         listed = [c for c in self.cards if (videos is None or c["video"] in videos)
@@ -366,12 +367,20 @@ class Index:
             entry["cards"].append(line)
         if not scenes or not self.scene_of:
             return {"videos": out}
-        counts = {}
+        counts, paced = {}, {}
         for card in listed:
             if card["id"] in self.scene_of:
-                counts[self.scene_of[card["id"]]] = counts.get(self.scene_of[card["id"]], 0) + 1
-        return {"scenes": {str(n): f"{self.scene_names.get(n, '')}（{k} 张卡片）{self._joins(n, counts)}"
+                n = self.scene_of[card["id"]]
+                counts[n] = counts.get(n, 0) + 1
+                pace = self.pace_of(card["id"]) if paces else None
+                if pace:
+                    paced.setdefault(n, dict.fromkeys(PACES, 0))[pace] += 1
+        return {"scenes": {str(n): f"{self.scene_names.get(n, '')}（{k} 张卡片{self._paces(paced.get(n))}）{self._joins(n, counts)}"
                            for n, k in sorted(counts.items())}, "videos": out}
+
+    @staticmethod
+    def _paces(paced: dict | None) -> str:
+        return "：" + "、".join(f"{p} {k}" for p, k in paced.items() if k) if paced else ""
 
     def pace_of(self, card_id: str) -> str | None:
         """The card's pace from how much its picture changes (PACE_CHANGE), however many seconds
