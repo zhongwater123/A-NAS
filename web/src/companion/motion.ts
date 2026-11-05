@@ -30,6 +30,32 @@ export function speechOffset(pet: Point, size: number, scene: Bounds, bubble: Bo
   return { x: Math.max(6, fitted.x) - pet.x, y: Math.max(6, fitted.y) - pet.y };
 }
 
+// The part of a scene that is on screen, in scene coordinates.
+export interface View {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+// Where the desktop pet's speech bubble goes within the part of its window on screen: above
+// the pet, else below it, else undefined when only the room beside it is left.
+export function speechSpot(pet: Point, size: number, view: View, bubble: Bounds): Point | undefined {
+  const x = Math.max(view.left + 6, Math.min(view.right - bubble.width - 6, pet.x + size / 2 - bubble.width / 2));
+  const above = pet.y - bubble.height - 8;
+  if (above >= view.top + 6) return { x, y: above };
+  const below = pet.y + size + 8;
+  if (below + bubble.height <= view.bottom - 6) return { x, y: below };
+  return undefined;
+}
+
+// The side of the pet with more room on screen, and how wide a bubble fits there.
+export function speechSide(pet: Point, size: number, view: View): { side: "left" | "right"; width: number } {
+  const right = view.right - (pet.x + size) - 14;
+  const left = pet.x - view.left - 14;
+  return right >= left ? { side: "right", width: right } : { side: "left", width: left };
+}
+
 // Small deterministic local flight, independent of renderer/React. Capped
 // elapsed time prevents a tab returning from suspension teleporting the pet.
 export function advanceFlight(flight: Flight, bounds: Bounds, seconds: number): Flight {

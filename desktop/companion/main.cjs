@@ -1,7 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, Tray, nativeImage, screen, powerMonitor, shell } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
-const { nasOrigin, safeDelta, clampWindow, validConversation } = require("./policy.cjs");
+const { nasOrigin, safeDelta, clampWindow, clampBody, validBody, validConversation } = require("./policy.cjs");
 
 let pet;
 let home;
@@ -16,6 +16,11 @@ let positionTimer;
 let hiddenForSleep = false;
 // The pet's page did not load; the member is being asked what to do.
 let loadFailed = false;
+// Where the character and its buttons sit in the compact window, as the page reports it.
+// Until then the whole window is kept on screen.
+let body;
+// A chat or menu is open, so the whole window is on screen; `from` is where the pet was.
+let revealed;
 
 // The smoke runner gives the app its own disposable profile, so verification
 // cannot change a member's preferences or reuse a live NAS session.
@@ -57,6 +62,7 @@ function protect(window, allowedOrigin, onBlockedRedirect) {
     granted(permission, requestingOrigin));
 }
 function load(window, desktop) {
+  if (window === pet) body = undefined;
   if (origin) window.loadURL(`${origin}/?${desktop ? "companion=desktop" : "open=companion&summon=1"}`);
   else window.loadFile(path.join(__dirname, "dist", "companion.html"), { query: desktop ? { desktop: "1" } : {} });
 }
@@ -106,11 +112,34 @@ function showHome(storedId) {
   show(home);
 }
 function showPet() { if (pet && !pet.isDestroyed()) pet.showInactive(); }
+// Windows at a fractional scale grows a window a few pixels each time it is moved partly off
+// the screen (seen at 150%: 352x400 became 388x434), so the compact pet moves with its size pinned.
+function movePet(x, y) {
+  if (compact) pet.setBounds({ x, y, width: 350, height: 400 });
+  else pet.setPosition(x, y);
+}
+// The compact pet keeps only its body on screen, unless a chat or menu needs the whole window.
+function fit(point, work, bounds) {
+  return compact && body && !revealed ? clampBody(point, work, body) : clampWindow(point, work, bounds);
+}
 function placePet() {
+  revealed = undefined;
   const work = screen.getPrimaryDisplay().workArea;
   const bounds = pet.getBounds();
-  const point = clampWindow({ x: work.x + work.width - bounds.width - 24, y: work.y + work.height - bounds.height - 18 }, work, bounds);
-  pet.setPosition(point.x, point.y);
+  const point = fit({ x: work.x + work.width - bounds.width - 24, y: work.y + work.height - bounds.height - 18 }, work, bounds);
+  movePet(point.x, point.y);
+}
+// Tells the page how much of the window is off the work area, so the speech bubble stays visible.
+function sendClip() {
+  if (!pet || pet.isDestroyed() || !compact) return;
+  const bounds = pet.getBounds();
+  const work = screen.getDisplayMatching(bounds).workArea;
+  pet.webContents.send("companion:clip", {
+    top: Math.max(0, work.y - bounds.y),
+    left: Math.max(0, work.x - bounds.x),
+    right: Math.max(0, bounds.x + bounds.width - work.x - work.width),
+    bottom: Math.max(0, bounds.y + bounds.height - work.y - work.height),
+  });
 }
 function restorePosition() {
   try {
@@ -118,8 +147,8 @@ function restorePosition() {
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) { placePet(); return; }
     const bounds = pet.getBounds();
     const work = screen.getDisplayNearestPoint({ x: Math.round(point.x), y: Math.round(point.y) }).workArea;
-    const fitted = clampWindow(point, work, bounds);
-    pet.setPosition(fitted.x, fitted.y);
+    const fitted = fit(point, work, bounds);
+    movePet(fitted.x, fitted.y);
   } catch { placePet(); }
 }
 function rememberPosition() {
@@ -161,7 +190,7 @@ app.whenReady().then(() => {
   protect(pet, origin, (url) => petFailed("连不上 NAS", `跳转到了另一个地址 ${new URL(url).origin}`));
   pet.on("close", (event) => { if (!app.isQuitting) { event.preventDefault(); pet.hide(); } });
   pet.once("ready-to-show", () => { restorePosition(); if (!loadFailed) showPet(); });
-  pet.on("move", rememberPosition);
+  pet.on("move", () => { rememberPosition(); sendClip(); });
   pet.webContents.on("did-fail-load", (_event, code, description, _url, isMainFrame) => {
     if (isMainFrame && code !== -3) petFailed("连不上 NAS", description);
   });
@@ -197,8 +226,43 @@ app.whenReady().then(() => {
     if (!senderIsPet(event)) return;
     const current = pet.getBounds();
     const work = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-    const point = clampWindow({ x: current.x + safeDelta(dx), y: current.y + safeDelta(dy) }, work, current);
-    pet.setPosition(point.x, point.y);
+    const point = fit({ x: current.x + safeDelta(dx), y: current.y + safeDelta(dy) }, work, current);
+    movePet(point.x, point.y);
+  });
+  ipcMain.on("companion:body", (event, rect) => {
+    if (!senderIsPet(event) || !compact) return;
+    const bounds = pet.getBounds();
+    const next = validBody(rect, bounds);
+    if (!next) return;
+    const first = !body;
+    body = next;
+    // The saved position may have the character at an edge, which needs the body to restore.
+    if (first) restorePosition();
+    else if (!revealed) {
+      const work = screen.getDisplayMatching(bounds).workArea;
+      const point = fit(bounds, work, bounds);
+      if (point.x !== bounds.x || point.y !== bounds.y) movePet(point.x, point.y);
+    }
+    sendClip();
+  });
+  ipcMain.on("companion:reveal", (event, open) => {
+    if (!senderIsPet(event) || typeof open !== "boolean" || !compact) return;
+    if (open) {
+      if (revealed) return;
+      const bounds = pet.getBounds();
+      const point = clampWindow(bounds, screen.getDisplayMatching(bounds).workArea, bounds);
+      if (point.x === bounds.x && point.y === bounds.y) return;
+      movePet(point.x, point.y);
+      // Read back: Windows rounds a scaled window's position.
+      revealed = { from: { x: bounds.x, y: bounds.y }, to: pet.getBounds() };
+      return;
+    }
+    if (!revealed) return;
+    const { from, to } = revealed;
+    revealed = undefined;
+    // Back to the edge it came from, unless the member moved it while the chat was open.
+    const now = pet.getBounds();
+    if (now.x === to.x && now.y === to.y) movePet(from.x, from.y);
   });
   ipcMain.on("companion:hide", (event) => { if (senderIsPet(event)) pet.hide(); });
   ipcMain.on("companion:conversation", (event, id) => { if (senderIsPet(event) && origin && validConversation(id)) showHome(id); });
@@ -207,6 +271,7 @@ app.whenReady().then(() => {
     if (!senderIsPet(event)) return;
     resizePet(350, 400);
     compact = true;
+    revealed = undefined;
     restorePosition();
   });
   ipcMain.on("companion:expand", (event) => {

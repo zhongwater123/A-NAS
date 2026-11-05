@@ -10,7 +10,8 @@ import {
 import { type PetAction, taskPose } from "./behaviour";
 import { Character } from "./Character";
 import styles from "./companion.module.css";
-import { advanceFlight, type Flight, inside, type Point, speechOffset } from "./motion";
+import { advanceFlight, type Flight, inside, type Point, speechOffset, speechSide, speechSpot } from "./motion";
+import type { Clip } from "./native";
 import type { Character as CharacterKind } from "./preferences";
 import "./native";
 
@@ -37,6 +38,7 @@ export function Stage({
   companionAction,
   onInteract,
   hideSpeech = false,
+  clip,
 }: {
   character: CharacterKind;
   quiet: boolean;
@@ -50,6 +52,8 @@ export function Stage({
   companionAction?: PetAction;
   onInteract?(): void;
   hideSpeech?: boolean;
+  // Desktop only: how much of the window is off screen, so the speech bubble stays on it.
+  clip?: Clip;
 }) {
   const stage = useRef<HTMLDivElement>(null);
   const actor = useRef<HTMLDivElement>(null);
@@ -59,6 +63,7 @@ export function Stage({
   const position = useRef<Point>({ x: 0, y: 0 });
   const frame = useRef(0);
   const ignoreClick = useRef(false);
+  const clipped = useRef(clip);
   const [dragging, setDragging] = useState(false);
   const [reaction, setReaction] = useState("");
   const [active, setActive] = useState(() => !document.hidden);
@@ -131,6 +136,31 @@ export function Stage({
     const bubble = speech.current;
     if (!element || !bubble) return;
     const width = element.clientWidth || 320;
+    const edges = clipped.current;
+    if (edges) {
+      const box = element.getBoundingClientRect();
+      // The stage on screen; below it is the button row, which the bubble must not cover.
+      const view = {
+        left: Math.max(0, edges.left - box.left),
+        top: Math.max(0, edges.top - box.top),
+        right: Math.min(width, window.innerWidth - edges.right - box.left),
+        bottom: Math.min(element.clientHeight, window.innerHeight - edges.bottom - box.top),
+      };
+      const pet = position.current;
+      bubble.style.width = `${Math.min(240, Math.max(0, view.right - view.left - 12))}px`;
+      let spot = speechSpot(pet, 128, view, { width: bubble.offsetWidth, height: bubble.offsetHeight });
+      if (!spot) {
+        // At the top of the screen there is no room above: speak from beside the pet instead.
+        const side = speechSide(pet, 128, view);
+        bubble.style.width = `${Math.min(240, Math.max(72, side.width))}px`;
+        spot = {
+          x: side.side === "right" ? pet.x + 128 + 6 : pet.x - 6 - bubble.offsetWidth,
+          y: Math.max(view.top + 6, pet.y + 8),
+        };
+      }
+      bubble.style.transform = `translate(${spot.x - pet.x}px, ${spot.y - pet.y}px)`;
+      return;
+    }
     bubble.style.width = `${Math.min(240, Math.max(0, width - 12))}px`;
     const offset = speechOffset(
       position.current,
@@ -252,6 +282,10 @@ export function Stage({
           ? "专注"
           : feeling.label;
 
+  useLayoutEffect(() => {
+    clipped.current = clip;
+    positionSpeech();
+  }, [clip, positionSpeech]);
   useLayoutEffect(() => {
     positionSpeech();
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(positionSpeech);

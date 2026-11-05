@@ -20,6 +20,7 @@ export function PetDock({
   conversation,
   open,
   onOpenChange,
+  onMenuOpenChange,
   onHome,
   onHide,
   onPhase,
@@ -32,6 +33,7 @@ export function PetDock({
   conversation: ReturnType<typeof useConversation>;
   open: boolean;
   onOpenChange(open: boolean): void;
+  onMenuOpenChange?(open: boolean): void;
   onHome(): void;
   onHide(): void;
   onPhase(phase: TaskPhase): void;
@@ -122,7 +124,7 @@ export function PetDock({
             {view.remote.waiting ? "过来中" : "叫到这里"}
           </button>
         )}
-        <DropdownMenu.Root>
+        <DropdownMenu.Root onOpenChange={onMenuOpenChange}>
           <DropdownMenu.Trigger asChild>
             <button type="button" className={styles.more} aria-label="大肥鱼更多操作">
               <Ellipsis size={16} />
