@@ -63,5 +63,5 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
 - 规格：不涉及
 - ADR：[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)
 - 运行手册：[实验存储配置与验收](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)（第 6 步）
-- 实现：[`scripts/install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)（写入 smbd 的附加配置）；没有修好问题的网络等待在 [PR #385](https://github.com/zhongwater123/A-NAS/pull/385) 中
+- 实现：[`scripts/install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)（写入 smbd 的附加配置，[PR #390](https://github.com/zhongwater123/A-NAS/pull/390)）；没有修好问题的网络等待在 [PR #385](https://github.com/zhongwater123/A-NAS/pull/385) 中
 - 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh)

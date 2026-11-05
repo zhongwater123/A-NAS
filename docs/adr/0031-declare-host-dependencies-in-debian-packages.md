@@ -43,7 +43,7 @@ A-NAS 在 Debian 13 上运行，依赖 Samba、Btrfs 工具、FFmpeg、Chromium 
 
 ## 实施计划
 
-实现放在一个 PR 中，按步骤分提交；之后由负责部署的会话在 Experimental NAS 上安装。ADR 在 [PR #381](https://github.com/zhongwater123/A-NAS/pull/381) 中合并，第 1–3 步在 [PR #385](https://github.com/zhongwater123/A-NAS/pull/385) 中，第 4 步随下一个 release。决定 2 原为由 `a-nas-host` 的 `postinst` 启用 `ifupdown-wait-online.service`；2026-11-04 的实机重启证明它修不好 smbd（见“未选择”），2026-11-05 改为安装器写入的附加配置。
+实现放在一个 PR 中，按步骤分提交；之后由负责部署的会话在 Experimental NAS 上安装。ADR 在 [PR #381](https://github.com/zhongwater123/A-NAS/pull/381) 中合并，第 1–3 步在 [PR #385](https://github.com/zhongwater123/A-NAS/pull/385) 中，第 4 步随下一个 release。决定 2 原为由 `a-nas-host` 的 `postinst` 启用 `ifupdown-wait-online.service`；2026-11-04 的实机重启证明它修不好 smbd（见“未选择”），2026-11-05 在 [PR #390](https://github.com/zhongwater123/A-NAS/pull/390) 中改为安装器写入的附加配置。
 
 1. **包定义与构建**：`deploy/debian/a-nas-host/`、`deploy/debian/a-nas-console/` 的 `DEBIAN/control`，由 `scripts/build-host-packages.sh` 构建；Makefile 的 `host-packages` 在 `build-binaries` 之后构建，属于 `make check`；`deploy-dev.ps1` 把包与二进制一起暂存并输出哈希。
 2. **系统测试镜像**：`build-system-test-image.sh` 从 `a-nas-host` 的 `Depends` 取产品依赖，测试工具单独列出；系统测试检查安装器在没有包、以及包版本不符时以退出码 3 结束、不改变系统，再以 `dpkg -i` 装上 release 的包。系统测试还在一个暂时没有地址的接口上检查 smbd 的附加配置：smbd 不启动，到时再试，接口有了地址就启动；DHCP 下的效果在第 4 步的实机重启中核对。

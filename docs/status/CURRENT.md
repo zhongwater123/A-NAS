@@ -26,7 +26,7 @@
 
 - Samba 凭据在 ADR 0008 升级时已删除，本人在“设置 → 我的账号”改密后重建。2026-11-04 核对（`pdbedit -L`）：16 个账号中 15 个已有凭据，只差 `admin`。
 - 办公网段到 NAS 的 TCP 445 不通，而 80 端口正常：Wi-Fi 网段如此，2026-11-04 从有线的 10.24.x 网段复测也如此；拦截发生在公司网络或电脑的安全策略。SMB 要从 NAS 所在的 172.18.45.0/24 网段测试，或请 IT 放行。
-- 重启后 smbd 仍只监听回环，v1.0.1 验收第 6 步不能通过。2026-11-04 装上 `a-nas-host`、启用 `ifupdown-wait-online.service` 后重启复测：网络等待只看 ifupdown 的接口记录，比 `enp2s0` 拿到 DHCP 地址早约 10 秒结束，smbd 随即按 `bind interfaces only` 启动（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。修复在 PR 中（用户 2026-11-05 选定）：安装器为 smbd 写入附加配置，等 SMB 接口有了 IPv4 地址再启动，等不到就再试；部署后正常重启一次复测。在此之前，每次重启后由 root 执行 `systemctl restart smbd`。
+- 重启后 smbd 仍只监听回环，v1.0.1 验收第 6 步不能通过。2026-11-04 装上 `a-nas-host`、启用 `ifupdown-wait-online.service` 后重启复测：网络等待只看 ifupdown 的接口记录，比 `enp2s0` 拿到 DHCP 地址早约 10 秒结束，smbd 随即按 `bind interfaces only` 启动（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。修复在 [PR #390](https://github.com/zhongwater123/A-NAS/pull/390) 中（用户 2026-11-05 选定）：安装器为 smbd 写入附加配置，等 SMB 接口有了 IPv4 地址再启动，等不到就再试；部署后正常重启一次复测。在此之前，每次重启后由 root 执行 `systemctl restart smbd`。
 - Caddy 官方的 Cloudsmith 源对软件包索引返回 `402`（[caddyserver/caddy#8184](https://github.com/caddyserver/caddy/issues/8184)），实验 NAS 暂用 Debian 的 Caddy 2.6.2，并已删除该源。
 - Kiosk 的 URL、网络、快捷键、profile 生命周期与 VT 恢复尚未做产品级验收（[调查](../investigations/2026-10-06-kiosk-browser-confinement.md)）；运行中热插拔硬盘尚未实现。
 
