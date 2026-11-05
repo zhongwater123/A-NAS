@@ -1951,6 +1951,13 @@ check "a LAN session is refused through the internet entry" \
 check "the activity log records the internet sign-in with the client's address" \
   bash -c "curl -fsS -b /tmp/owner.jar '$api/api/v1/activity?category=session&q=owner' | jq -e 'any(.items[];
     .action == \"session.signed_in\" and (.detail | fromjson | .via == \"internet\" and .address == \"198.51.100.7\"))' >/dev/null"
+phone_csrf=$(jq -r .csrfToken <<<"$phone_login" 2>/dev/null || true)
+internet_upload=$(through -f -D - -o /dev/null -H "Cookie: $phone_cookie" -H "X-CSRF-Token: $phone_csrf" -H 'Tus-Resumable: 1.0.0' \
+  -H 'Upload-Length: 1' -H "Upload-Metadata: $(tus_meta filename internet.bin spaceId "$owner_private")" \
+  -X POST "$internet/api/v1/uploads" | header_of Location || true)
+check "an internet upload address points back at the internet entry over HTTPS" grep -q "^$internet/api/v1/uploads/" <<<"$internet_upload"
+[[ -z "$internet_upload" ]] || through -f -o /dev/null -H "Cookie: $phone_cookie" -H "X-CSRF-Token: $phone_csrf" \
+  -H 'Tus-Resumable: 1.0.0' -X DELETE "$internet_upload" || true
 check "the terminal says it is not offered through the internet entry" \
   test "$(through -f -H "Cookie: $phone_cookie" "$internet/api/v1/terminal" | jq -c .)" = '{"enabled":true,"internet":true}'
 check "the internet entry opens no terminal" \
