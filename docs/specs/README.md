@@ -22,7 +22,7 @@
 - [本地控制台屏幕保护程序](local-console-screensaver.md)（implemented）
 - [开机动画](boot-ident.md)（implemented）
 - [局域网 Web 访问](lan-web-access.md)（implemented）
-- [互联网访问](internet-access.md)（draft；实现与系统测试完成，实机待启用）
+- [互联网访问](internet-access.md)（implemented）
 - [设置](settings.md)（implemented）
 - [个性化](personalization.md)（implemented）
 - [任务管理器](task-manager.md)（implemented）
@@ -37,8 +37,8 @@
 - [备份中心](backup-center.md)（implemented）
 - [日志](logs.md)（implemented）
 - [容量与大小的显示单位](size-units.md)（implemented）
-- [AI 助手](ai-assistant.md)（draft）
-- [网页搜索](web-search.md)（draft）
+- [AI 助手](ai-assistant.md)（implemented）
+- [网页搜索](web-search.md)（implemented）
 - [家庭中心：宝宝频道](family-center.md)（M1 implemented；M2 draft）
 - [硬盘用途与数据卷冗余](disk-roles-and-redundancy.md)（M1 implemented；M2、M3 draft）
 

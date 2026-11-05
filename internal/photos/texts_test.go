@@ -272,6 +272,25 @@ func TestAFieldsAnswerCutOffPassesNoField(t *testing.T) {
 	}
 }
 
+func TestAReadingThatDoesNotSayHowItEndedIsNotKept(t *testing.T) {
+	// A Worker that cannot tell a whole answer from one cut short gives no
+	// reading to keep (#365).
+	embedder := newReadingEmbedder()
+	embedder.fieldsFinish = "unknown"
+	root := filepath.Join(t.TempDir(), "photos")
+	service := routeService(t, root, embedder, redRoute(t, "colour-1"))
+	private, _ := libraries(t, service, namedAlice)
+	importPhoto(t, service, namedAlice, private.ID, "", "receipt.png", red)
+	index(t, service, embedder)
+
+	if found := readings(t, root); len(found) != 0 {
+		t.Fatalf("readings = %+v", found)
+	}
+	if state, _, class := jobState(t, root, "ocr/v1"); state != "failed" || class != "invalid_result" {
+		t.Fatalf("reading job = %s (%s), want failed as an invalid result", state, class)
+	}
+}
+
 func TestACopyIntoALibraryThatReadsIsRead(t *testing.T) {
 	embedder := newReadingEmbedder()
 	root := filepath.Join(t.TempDir(), "photos")

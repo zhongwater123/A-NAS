@@ -1,7 +1,7 @@
 # 在实验 NAS 上验收已部署的功能
 
 状态：draft
-更新时间：2026-10-27
+更新时间：2026-11-05
 
 ## 目的
 
@@ -87,6 +87,7 @@
 
 - 系统盘保护（#186）：更新产品服务、Host Agent 和容器代理后，在设置概览核对系统盘用量；选定可丢弃应用，备份需要保留的数据，按[容器代理手册](install-container-agent.md)验证新容器的日志轮转与卸载后的资源/数据保留。不要用真实应用或全局 prune 做破坏性压力测试，见[调查](../investigations/2026-10-27-app-system-disk-growth.md)。
 
+- 安装前置检查（#185）：按[容器代理手册](install-container-agent.md#安装预留协议的升级顺序)先更新容器代理、再更新产品服务，然后正常安装一个可丢弃应用。再选两个端口相同的可丢弃应用（例如目录中的 FileDrop 与 pyLoad 都用 8000），装上一个并停止它，然后安装另一个：安装在接受前被拒绝，NAS 上没有新的 `app-<id>` 账号（`id app-<id>` 报错），也没有新建它的共享目录（[调查](../investigations/2026-10-27-app-install-preparation-order.md)）。
 - 安装一个新应用，确认 [ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md) 的版本与挂载检查放行正常安装；目录新增的 11 个应用逐个实机安装。
 - 镜像下载重试：更新容器代理后重新安装 Immich。镜像仓库限流时，输出逐行出现“<服务>：镜像仓库限流，N 秒后重试（第 k 次）”，安装随后成功；5 次仍失败时，任务说明原因并保留已下载完成的镜像，再次安装不重新下载它们（`docker image ls` 核对），见[调查](../investigations/2026-10-28-registry-rate-limit-failed-install.md)。
 - 应用身份（[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）：重新安装此前以 root 运行的 Immich，确认它以应用身份运行、手机备份可上传；安装 Navidrome 与 qBittorrent，核对只读与可写共享空间（[调查](../investigations/2026-10-14-app-containers-and-the-shared-acl.md)）。
@@ -96,6 +97,8 @@
 ### 成员分享
 
 在局域网 HTTP 浏览器上（不是 localhost）验收发送、接收、私聊与保存（[调查](../investigations/2026-10-16-member-sharing-http-send.md)），以及 #157 的并排窗口、接收者状态、按讨论合并的提醒和自己的消息不计未读；分别重启产品服务与 Host Agent 后分享重新可用（[调查](../investigations/2026-10-15-member-sharing-service-startup.md)）。
+
+最小化与历史（#182）：打开与另一账号的私聊后最小化分享窗口，浏览器开发者工具的网络面板中不再有对话内容的请求，桌面的未读徽标仍约每 30 秒同步；另一账号此时发来的消息在恢复窗口后接着出现，没有重复或缺失（[调查](../investigations/2026-10-28-share-history-polling.md)）。
 
 ### AI 助手（试用）
 
