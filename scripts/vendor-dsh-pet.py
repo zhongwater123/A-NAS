@@ -2,10 +2,11 @@
 createPetCard and the runtime that wires it), the self-playing animation chain
 (src/client/pet/animation), dragging, throwing, walking and following a position
 (src/client/pet/motion), the physics they share (src/shared/physics), the host's work status
-store, the bridge that publishes it and the page state it writes (FILES), and the plain
+store, the bridge that publishes it and the page state it writes, the host's decisions on the
+commands VNAS sends with the lock, sleep and playback stores they use (FILES), and the plain
 modules those import. Nothing that talks to DeepSeek Harness, a model, a voice or the network
-is copied: what the card reaches of the balance, the menu, todos, settings, chat and voice is
-cut by patches (CUT_IMPORTS). The script stops if an import reaches outside the plain modules,
+is copied: what the card reaches of the balance, the menu, todos, settings, chat and voice, and
+what the host's decisions read from disk, is cut by patches (CUT_IMPORTS). The script stops if an import reaches outside the plain modules,
 or if a vendored file imports a package at run time (type-only imports, which the build
 erases, are fine).
 
@@ -40,7 +41,12 @@ ROOTS = ["client/pet/card", "client/pet/animation", "client/pet/motion", "shared
 # (self-contained), the bridge that publishes them (a working->result flip within 5 s merged,
 # nothing published when the shown status is unchanged) and PollStateStore, the GET /state
 # store the card reads. And the card's styles, which dsh-pet's page entry injects, not the card.
-FILES = ["host/work-status.ts", "host/plugin/work-status-bridge.ts", "host/state.ts", "client/pet/css.ts"]
+# For VNAS's commands, the host's decision layers and the stores behind them, so that what the
+# page accepts and writes is what dsh-pet's routes would: /anim, /position and /throw, /broadcast
+# and /bubble/clear, the sleep and the lock (with its gate), and the playback receipts.
+FILES = ["host/work-status.ts", "host/plugin/work-status-bridge.ts", "host/state.ts", "client/pet/css.ts",
+         "host/anim.ts", "host/motion-cue.ts", "host/broadcast.ts", "host/sleep.ts", "host/lock.ts",
+         "host/playback/status.ts", "host/playback/store.ts", "host/playback/parse.ts"]
 # The card's right-click menu, chat dialog, hotkeys and the chat handles they register: A-NAS
 # has none of them (the patched runtime keeps the hover tooltip the menu entry also placed).
 SKIP = {"client/pet/card/entry.ts", "client/pet/card/open-chat.ts", "client/pet/card/registry.ts",
@@ -72,6 +78,11 @@ CUT_IMPORTS = {
     "client/pet/css.ts": {"../../shared/menu.ts"},
     # 0010: the score popup.
     "client/pet/motion/drag.ts": {"../../../shared/score-popup.ts"},
+    # 0021: the configuration on disk; the page's one pet is resolved from animations.json.
+    "host/anim.ts": {"./config.ts"},
+    "host/motion-cue.ts": {"./config.ts"},
+    # 0021 and 0023: the configuration on disk, and the meme pictures on disk.
+    "host/broadcast.ts": {"./config.ts", "./memes.ts"},
 }
 STATEMENT = re.compile(r"""(?m)^\s*(?:import|export)\s+(type\s+)?[^;]*?\bfrom\s*(['"])([^'"]+)\2""")
 
