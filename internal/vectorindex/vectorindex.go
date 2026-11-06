@@ -54,6 +54,10 @@ var idleTimeout = time.Minute
 // the connection busy and the instance running.
 var callTimeout = 2 * time.Minute
 
+// maxReply bounds a reply: a search with a floor returns every point above
+// it, which in a large library is more than gRPC's default 4 MiB.
+const maxReply = 256 << 20
+
 // bounded is ctx with the call timeout.
 func bounded(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, callTimeout)
@@ -140,6 +144,7 @@ func (c *Client) connection(ctx context.Context) (*qdrant.Client, error) {
 				return dialer.DialContext(ctx, "unix", socket)
 			}),
 			grpc.WithIdleTimeout(idleTimeout),
+			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxReply)),
 		},
 	})
 	if err != nil {
@@ -155,6 +160,21 @@ func (c *Client) connection(ctx context.Context) (*qdrant.Client, error) {
 	}
 	c.client.Store(client)
 	return client, nil
+}
+
+// Prepare opens the connection, starting the instance when it is not
+// running, and keeps an open one from going idle: the owner calls it while
+// someone is about to search, so that the search does not wait for the
+// instance to start.
+func (c *Client) Prepare(ctx context.Context) error {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
+	if client := c.client.Load(); client != nil {
+		_, err := client.HealthCheck(ctx)
+		return err
+	}
+	_, err := c.connection(ctx)
+	return err
 }
 
 func compatible(version string) bool {
@@ -330,6 +350,8 @@ type Query struct {
 	// Exact scans every point in scope even where a graph would answer
 	// approximately.
 	Exact bool
+	// Floor, when set, leaves out the points less similar than it.
+	Floor *float32
 }
 
 // Hit is a point a search found, with its similarity to the query.
@@ -341,36 +363,62 @@ type Hit struct {
 // Search returns the points query asks for, most similar first. A scope
 // without values finds nothing: every search is scoped by its owner.
 func (c *Client) Search(ctx context.Context, collection string, query Query) ([]Hit, error) {
+	found, err := c.SearchBatch(ctx, collection, []Query{query})
+	if err != nil {
+		return nil, err
+	}
+	return found[0], nil
+}
+
+// SearchBatch answers several queries in one request, each as Search would.
+func (c *Client) SearchBatch(ctx context.Context, collection string, queries []Query) ([][]Hit, error) {
 	ctx, cancel := bounded(ctx)
 	defer cancel()
-	if query.Scope.Field == "" || query.Scope.Field == keyField || query.Limit <= 0 {
-		return nil, ErrInvalid
+	found := make([][]Hit, len(queries))
+	var requests []*qdrant.QueryPoints
+	var asked []int
+	for i, query := range queries {
+		if query.Scope.Field == "" || query.Scope.Field == keyField || query.Limit <= 0 {
+			return nil, ErrInvalid
+		}
+		if len(query.Scope.Values) == 0 {
+			continue
+		}
+		size := uint64(query.Limit)
+		exact := query.Exact
+		requests = append(requests, &qdrant.QueryPoints{
+			CollectionName: collection,
+			Query:          qdrant.NewQueryDense(query.Vector),
+			Filter:         &qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewMatchKeywords(query.Scope.Field, query.Scope.Values...)}},
+			Limit:          &size,
+			Params:         &qdrant.SearchParams{Exact: &exact},
+			ScoreThreshold: query.Floor,
+			WithPayload:    qdrant.NewWithPayloadInclude(keyField),
+		})
+		asked = append(asked, i)
 	}
-	if len(query.Scope.Values) == 0 {
-		return nil, nil
+	if len(requests) == 0 {
+		return found, nil
 	}
 	client, err := c.connection(ctx)
 	if err != nil {
 		return nil, err
 	}
-	size := uint64(query.Limit)
-	exact := query.Exact
-	points, err := client.Query(ctx, &qdrant.QueryPoints{
-		CollectionName: collection,
-		Query:          qdrant.NewQueryDense(query.Vector),
-		Filter:         &qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewMatchKeywords(query.Scope.Field, query.Scope.Values...)}},
-		Limit:          &size,
-		Params:         &qdrant.SearchParams{Exact: &exact},
-		WithPayload:    qdrant.NewWithPayloadInclude(keyField),
-	})
+	results, err := client.QueryBatch(ctx, &qdrant.QueryBatchPoints{CollectionName: collection, QueryPoints: requests})
 	if err != nil {
 		return nil, err
 	}
-	hits := make([]Hit, 0, len(points))
-	for _, point := range points {
-		hits = append(hits, Hit{Key: point.GetPayload()[keyField].GetStringValue(), Score: point.GetScore()})
+	if len(results) != len(requests) {
+		return nil, fmt.Errorf("the vector index answered %d of %d queries", len(results), len(requests))
 	}
-	return hits, nil
+	for n, result := range results {
+		hits := make([]Hit, 0, len(result.GetResult()))
+		for _, point := range result.GetResult() {
+			hits = append(hits, Hit{Key: point.GetPayload()[keyField].GetStringValue(), Score: point.GetScore()})
+		}
+		found[asked[n]] = hits
+	}
+	return found, nil
 }
 
 // Entry is a point as a scan reads it: its key and the keyword fields asked

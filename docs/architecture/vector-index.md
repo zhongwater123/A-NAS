@@ -1,6 +1,6 @@
 # 向量索引技术设计
 
-状态：第一阶段（基础设施、相册向量同步与影子比对）已在 Experimental NAS 运行；2026-11-06 决定相册读路径改用索引，实施方案待确认（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)，proposed）
+状态：相册的向量同步进索引，排序也从索引读（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)，accepted）；Experimental NAS 上同步与影子比对已运行，读路径的部署见[当前状态](../status/CURRENT.md)
 更新时间：2026-11-06
 
 本页说明向量索引如何运行、交付、同步与验证。决定与权衡见 ADR 0028；相册的检索语义仍以[相册本地 AI](photo-ai.md#语义搜索)为准。
@@ -10,7 +10,7 @@
 ```text
 所属服务（例如相册，a-nas-photos；PrivateNetwork，只许 AF_UNIX）
   │ Catalog（SQLite，事实源）── 触发器 ──► vector_outbox
-  │ 后台同步 / 对账 / 影子查询
+  │ 排序查询 / 预热 / 后台同步 / 对账 / 核对
   │ gRPC over Unix socket：/run/a-nas-vectors/<账号>.sock（0600，属于该账号）
   ▼
 anas-vectors-proxy@<账号>.socket / .service（systemd-socket-proxyd，按连接拉起，空闲退出）
@@ -92,11 +92,12 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
   - `KeepAliveTime: -1`，空闲时不 ping；
   - `grpc.WithIdleTimeout`，空闲约一分钟后断开连接。
 
-  否则连接一直开着，代理不会空闲，实例也就永远不退出。实例因此在最后一次请求后约一分钟停止。代理只等 2 秒，所以客户端没有连接时，实例几乎都已经停了：影子比对记录的 `warm=false` 基本就是冷启动；只有连接刚断开的两三秒里（代理退出、实例停止的过程中）到来的查询会被这样记录，实际只需重连。
+  否则连接一直开着，代理不会空闲，实例也就永远不退出。实例因此在最后一次请求后约一分钟停止。代理只等 2 秒，所以客户端没有连接时，实例几乎都已经停了：核对记录的 `warm=false` 基本就是冷启动；只有连接刚断开的两三秒里（代理退出、实例停止的过程中）到来的查询会被这样记录，实际只需重连。
 - **`Warm()` 不等待**：连接放在 `atomic.Pointer` 里，正在建立连接时 `Warm()` 也立刻返回 false，不会排在拉起实例的那次连接后面，把冷启动记成热的。
 - **不在构造时联系实例**：设 `SkipCompatibilityCheck`，所属服务启动时不会把实例拉起来。第一次使用时调用 `HealthCheck`，major.minor 与固定版本不符就拒绝工作。
-- **没事不连**：outbox 为空时，同步循环不联系实例；只有对账（启动后第一次空闲时与每天）和影子比对会联系。所以相册不变时，实例会停下来。
-- **只提供类型化的操作**：建集合与 keyword 索引、批量 upsert/delete（`wait=true`，确认写入 WAL 后才返回）、scroll、按范围过滤的查询。不接受调用方拼的过滤条件，避免出现“不认识的条件被当成满足”这类问题（#152 审查 S3）。
+- **没事不连**：outbox 为空时，同步循环不联系实例；只有对账（启动后第一次空闲时与每天）、有人使用相册（[预热](#预热)与排序）和核对会联系。所以没人用相册、相册也不变时，实例会停下来。
+- **只提供类型化的操作**：建集合与 keyword 索引、批量 upsert/delete（`wait=true`，确认写入 WAL 后才返回）、scroll、按范围过滤的查询（可以带分数下限，可以一次发多条）、`Prepare`（连接或 `HealthCheck`，让实例运行）。不接受调用方拼的过滤条件，避免出现“不认识的条件被当成满足”这类问题（#152 审查 S3）。
+- **回复上限 256 MiB**：带分数下限的查询返回下限以上的全部点，一批标签查询更是每个标签一份；图库大了会超过 gRPC 默认的 4 MiB，所以放宽到 256 MiB。
 - **点 ID**：键的基于名称的 UUID（`github.com/google/uuid` 的 `NewSHA1`，固定命名空间），同一个键总是同一个点。
 - **超时**：每次调用最多 2 分钟，覆盖实例冷启动（单元允许 90 秒）。卡住的实例不会一直拖住所属服务，也不会让连接一直忙、实例停不下来。
 - **被拒的写入**：索引拒收的写入（例如向量长度与集合不符，gRPC `InvalidArgument`）返回 `ErrRejected`，与连接故障区分开。
@@ -141,31 +142,88 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - 它覆盖 outbox 看不到的偏差：实例因换版本清空了存储、Catalog 被恢复到旧快照、Qdrant 掉电丢失已确认的写入。它也把“同步偏差”与“近似检索的召回”分开统计。
 - 它只比较点的有无与 `libraries`，不比较向量：内容对象按内容寻址，同一对象在同一模型下的向量总是相同，换模型则换集合。
 
-### 影子比对
+## 读路径
 
-- 文搜图满足以下条件时，才把查询交给后台的影子 worker：
-  - 是第一页；
-  - 查询中没有人物名；
-  - 拿到了查询向量；
-  - 查询向量的模型与集合一致。
-- 请求路径只做一次非阻塞发送，channel 容量为 1，忙时丢弃这次比对；请求路径不访问 Catalog，也不等待 Qdrant。交过去的是搜索自己的结果：查询向量与范围、这次排序过的内容对象，以及它在相册服务里排序用的时间（`exact_ms`）。worker 因此不必在唯一的 Catalog 连接上重读候选。
-- worker 让索引在同一范围内精确取前 500（`exact`），再用内存中的向量给搜索交来的对象算点积、按对象去重排序，两边比较；分数与第 k 名相差 10⁻⁵ 以内的并列照片都算命中。两边都是精确结果，所以 overlap 应为 1，低于 1 就说明索引与 Catalog 不一致，而不是近似误差。
-- 日志记录 overlap@10/100/500、索引耗时（`index_ms`）、精确排序耗时（`exact_ms`，worker 用内存中的向量给同一批对象算点积并排序的时间，与索引的精确检索做的是同一件事，口径一致），以及调用前有没有连接（`warm`，见上文“让实例能空闲退出”）。不记录查询文本与名称。
-- 比对失败（例如实例坏了）后，接下来一段时间不再比对，间隔逐次加倍、最长 30 分钟，免得每次搜索都去拉起一个坏掉的实例。
-- outbox 不为空（例如刚导入、回收或首次同步还在进行）时不比对，所以不是每次搜索都有一行日志。
-- Experimental NAS 结果（2026-10-28 至 11-06，候选 720–778 张）：
-  - 共 53 次比对，overlap@10/100/500 全部为 1。
-  - 实例已有连接时 45 次，`index_ms` 中位 3、p90 4、最大 46；需先启动实例时 8 次（占 15%），298–592 ms。
-  - 同一批对象在相册服务里精确排序（`exact_ms`）都不超过 2 ms。
-  - 用户据此于 2026-11-06 决定读路径改用索引（ADR 0028 第 7 条的修订）。
-- 这些日志是决定是否切换读路径的依据。检索功能实测给出的切换条件是：真实图库上影子比对持续为 1，同一批查询的 p95 不高于现行扫描加套接字代理的往返。10 万张以内切换的理由只会是内存与重建边界，不会是速度。切换时还要重新评估：
-  - slice：`anas.slice` 的 `CPUWeight=10` 会拉长前台查询；
-  - 按需与常驻实例的冷启动差别：开发机上从启动到第一次查询完成为 0.2–1.0 秒。
-- 单个成员可见的照片超过约 10 万张、精确检索又超出延迟预算时，才考虑建图；取前 500 时 `hnsw_ef` 要不低于 2000。
+### 哪些查询读索引
 
-### 关闭与回退
+| 功能 | 怎么读 |
+|---|---|
+| 文搜图 | 索引在搜索的图库范围内精确取前 500，再按 Catalog 的向量精确打分；检测器的加分照旧 |
+| 以图搜图、找相似 | 同上，加分是物体重合（最多 0.1） |
+| AI 聚合的计数与照片列表 | 每个标签一条带分数下限的查询，一次发出；下限附近与最相似的照片按 Catalog 重算，列表全部重算 |
+| 文字识别的路由 | 不排序，按内容 ID 分页读 Catalog（每页 500） |
+| 人物与宠物聚类 | 不变，不进索引（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md) 第 4 条） |
 
-- 关闭：在 `anas-photos.service` 的 drop-in 中把 `ANAS_PHOTOS_VECTOR_SOCKET` 设为空，相册就不再同步与比对，其他行为不变。
+切换前，相册服务在第一次搜索时把全部图片向量读进内存并一直留着；现在内存里不留向量，一次排序只读它要精确打分的几百条。
+
+### 结果与精确扫描相同
+
+索引只负责选出“可能排进前面的对象”，排序用的分数仍来自 Catalog，所以结果与切换前的精确扫描逐位相同（[`vectorsearch.go`](../../internal/photos/vectorsearch.go)）：
+
+1. **候选由 Policy 给出。** 只有参与本地 AI 的候选对象可以排序。索引里多出来的点（Catalog 已经没有的，或不在这次候选里的）一律忽略：索引命中不构成授权。
+2. **排队中的对象从 Catalog 打分。** outbox 里的对象在索引里可能是旧版本或者不存在，直接读 Catalog 的向量打分，与索引的答案合并。
+3. **截线留出余量。** 索引用 float32 打分，Catalog 用 float64。先用索引的分数加上加分排出第 k 名作为截线（k 是要排的数目加上按名称匹配的照片数）；凡是相似度不低于“截线 − 加分上限 − 10⁻⁴”的对象都可能排进前 k。第一次取得不够深时，带这个分数下限再取一次，直到取尽。这样一个相似度稍低、靠加分进前 k 的对象也不会漏掉。
+4. **截线附近以上全部重算。** 分数在截线 10⁻⁴ 以内及以上的对象，以及按名称匹配的照片，都从 Catalog 读向量、用 float64 重新打分；之后的分档与排序与切换前相同。
+5. **标签同理。** 用“下限 − 10⁻⁴”取出，下限 10⁻⁴ 以内的与最相似的（相差 2 × 10⁻⁴ 以内）按 Catalog 重算，是否计入以 Catalog 的分数为准；照片列表的分数全部重算。
+
+[`TestTheIndexRanksAsTheCatalogDoes`](../../internal/photos/vectorsearch_test.go) 用 620 张照片，在三个阶段比较两条路径的全部结果：全部同步、有新照片排队（另有一张进了回收站）、集合丢失。每个阶段还把第一次的超取设为 0 再比一次，让“带下限再取”真的发生。
+
+### 读 Catalog 的回退
+
+以下情况一次排序改为按批读 Catalog 的向量，结果相同，只是更慢：
+
+- 索引里没有这个模型的集合：首次同步前，或换模型后新集合还没建好；
+- outbox 排队超过 2000 个对象，例如大批导入时；
+- 索引出错，例如实例起不来或超时。
+
+候选不超过 2000 个时按 ID 读，否则按内容 ID 分页读全部向量；每读完一批就释放 Catalog 唯一的连接。日志记 `photo search reads the Catalog's vectors`，带 `reason`：
+
+| reason | 级别 |
+|---|---|
+| `the vector index has no collection for the model` | info |
+| `too many photos wait for the vector index` | info |
+| `the vector index failed` | warn，带 `error` |
+
+同一原因 10 分钟内只记一次。关闭索引（见下文）时不记。
+
+### 预热
+
+- 相册 API 的每个请求都调用 `PrepareVectors`，读 AI 状态的请求除外（窗口开着时会轮询它）。
+- 它至多每 20 秒一次，不等待：没有连接时建立连接（拉起实例），有连接时发一次 `HealthCheck`。客户端空闲约一分钟才断开，所以有人在用相册时实例一直运行，最后一个请求约一分钟后停止。
+- 冷启动（Experimental NAS 上 0.3–0.6 秒）因此多数落在打开相册时，而不是第一次搜索。
+- 没有本地 AI 时不预热。
+
+### 核对
+
+取代影子比对，确认索引与 Catalog 一致（[`vectorcheck.go`](../../internal/photos/vectorcheck.go)）：
+
+- 文搜图的第一页、查询中没有人物名、这次排序读的是索引时，请求路径把查询向量、范围与候选对象非阻塞地交给后台 worker；忙时丢弃。
+- worker 至多每 10 分钟核对一次：让索引按同样的范围取前 500（不加分），再从 Catalog 读全部候选的向量精确排序，比较前 10、100、500；分数与第 k 名相差 10⁻⁵ 以内的并列照片都算命中。
+- 两边都是精确结果，overlap 应为 1。低于 1 说明索引选错或漏了对象，日志级别为 warn。
+- 日志 `photo vector index check`：`collection`、`candidates`、`overlap10`、`overlap100`、`overlap500`、`index_ms`（索引选对象的时间）、`exact_ms`（从 Catalog 读全部候选并排序的时间）、`warm`。不记录查询文本与名称。失败时记 `photo vector index check failed`。
+- 它要读全部候选的向量，所以间隔放宽到 10 分钟（`photoservice.VectorCheckInterval`）。
+
+### 换模型
+
+- 现在：目标模型变了，同步就新建集合、删掉旧集合、把全部向量排队。新集合写满之前，查询向量的模型与集合不符，排序读 Catalog；结果照旧，只是更慢。
+- 后续集合的前提：视频分段与文件分块的规模大得多，换模型期间不能都回退到 Catalog。它们接入前要先改为集合别名：新集合建好并写满后一次切换别名，回滚时切回。相册的集合到时一起改。
+
+### 切换前的影子比对
+
+切换前（2026-10-26 至 11-06），索引只做影子比对：文搜图的第一页在后台再用索引精确取前 500，与相册服务内存中的精确扫描比较，用户看到的结果仍来自扫描。
+
+Experimental NAS 结果（2026-10-28 至 11-06，候选 720–778 张）：
+
+- 共 53 次比对，overlap@10/100/500 全部为 1。
+- 实例已有连接时 45 次，索引耗时中位 3 ms、p90 4 ms、最大 46 ms；需先启动实例时 8 次（占 15%），298–592 ms。
+- 同一批对象在相册服务里精确排序都不超过 2 ms。
+- 用户据此于 2026-11-06 决定读路径改用索引（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md) 第 7 条）。理由是内存与重建边界，不是速度：10 万张以内，索引里的精确检索不比进程内扫描快。
+
+单个成员可见的照片超过约 10 万张、精确检索又超出延迟预算时，才考虑建图；取前 500 时 `hnsw_ef` 要不低于 2000。
+
+## 关闭与回退
+
+- 关闭：在 `anas-photos.service` 的 drop-in 中把 `ANAS_PHOTOS_VECTOR_SOCKET` 设为空，相册就不再同步与核对，排序全部读 Catalog（结果相同，更慢），其他行为不变。
 - 删除索引：停止实例后删掉它的 StateDirectory，下一次同步会重建。
 - 回到 migration 13 之前的版本：删除触发器与两张表，把 `user_version` 改回 13（以 `a-nas-photos` 执行）。步骤见[手册](../runbooks/enable-vector-index.md)。
 
@@ -173,7 +231,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 | 所属服务 | 集合 | 内容 | 状态 |
 |---|---|---|---|
-| 相册（`a-nas-photos`） | `images_*` | 每个内容对象一个整图向量 | 同步与影子比对；读路径改用索引已决定（2026-11-06），实施方案待确认 |
+| 相册（`a-nas-photos`） | `images_*` | 每个内容对象一个整图向量 | 同步；排序从索引读（2026-11-06） |
 | 相册（`a-nas-photos`） | 视频分段 | 每个视频多个分段向量，按最佳片段打分 | 计划中（#207） |
 | 文件索引（另一个实例） | 文件分块 | 中文全文与语义融合，按文件归并 | 计划中（#208） |
 
@@ -183,9 +241,10 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 后续使用方的读路径会以索引为主，还要考虑：
 
-- **冷启动**：实例按需启动、空闲约一分钟后停止，隔一会儿的第一次搜索要等 0.2–1 秒（带全文索引 0.4–0.9 秒）。可以在成员会话活跃时保持常驻，或在打开搜索框时预热。
+- **冷启动**：实例按需启动、空闲约一分钟后停止，隔一会儿的第一次搜索要等 0.2–1 秒（带全文索引 0.4–0.9 秒）。相册的做法是有人使用时[预热](#预热)。
 - **内存账按使用方算**：每个实例用自己的 drop-in，`anas-vectors.slice` 给总上限；各单元的上限不是预留，后台建索引、AI 整理与多人对话同时发生时的总内存，在实机维护窗口里压测。
-- **换模型不中断搜索**：读路径已切到索引的使用方，用集合别名：先建好新集合、写满，再一次切换别名，回滚时切回。
+- **换模型不中断搜索**：先改为集合别名（[换模型](#换模型)）。
+- **同一个模型的向量**：以后的视频、音频与文本由同一个 embedding 模型输出向量（2026-11-06 用户），处在同一个向量空间，跨类型搜索可以用一个查询向量分别问各集合再合并。集合仍按使用方与内容分开，各自有范围键、重建与内存账。
 
 两份实测给后续集合的选项：
 
@@ -207,12 +266,15 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
   - 连接时拉起实例，空闲后退出；
   - 版本戳变化时清空存储；
   - 篡改过的压缩包被拒绝；
-  - 导入照片后，点出现在集合中。
+  - 导入照片后，点出现在集合中；
+  - 相册服务重启后的一次搜索读索引，后台核对与 Catalog 一致（overlap 全部为 1），没有回退到 Catalog。
+- `TestTheIndexRanksAsTheCatalogDoes` 比较两条路径的全部结果（见[结果与精确扫描相同](#结果与精确扫描相同)）；`TestChecksCompareSearchesWithTheCatalog` 验证核对能发现索引缺点、对账后恢复为 1，以及索引里多出的点不会出现在结果中。
 
 ## 关联
 
 - [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)、[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)、[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - [相册本地 AI](photo-ai.md)、[相册技术设计](photo-library.md)、[人物与宠物](photo-people.md)
 - [启用向量索引手册](../runbooks/enable-vector-index.md)
+- 代码：[客户端](../../internal/vectorindex/vectorindex.go)、[同步与对账](../../internal/photos/vectorsync.go)、[读路径](../../internal/photos/vectorsearch.go)、[核对](../../internal/photos/vectorcheck.go)、[预热与日志](../../internal/photoservice/photoservice.go)
 - [Qdrant 检索特性试验](../research/qdrant-retrieval-features.md)
 - [#66](https://github.com/zhongwater123/A-NAS/issues/66)、[#152](https://github.com/zhongwater123/A-NAS/issues/152)、[#207](https://github.com/zhongwater123/A-NAS/issues/207)、[#208](https://github.com/zhongwater123/A-NAS/issues/208)、[#262](https://github.com/zhongwater123/A-NAS/issues/262)（嵌入式、图 + 向量方案与 Qdrant 的选型横比）

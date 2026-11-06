@@ -21,9 +21,8 @@ import (
 // libraries hold an untrashed photo of an object, queues the object in
 // vector_outbox in the same transaction (migration 14's triggers), and the
 // sync loop below brings the index in line. Losing the index loses nothing;
-// the loop builds a new one from the Catalog. In this first stage search
-// still ranks with the exact scan (search.go); the index answers only shadow
-// queries that measure how far it agrees.
+// the loop builds a new one from the Catalog. Ranking by similarity reads
+// the index (vectorsearch.go).
 
 // VectorIndex is the photo service's own vector index; *vectorindex.Client
 // implements it.
@@ -34,6 +33,7 @@ type VectorIndex interface {
 	Upsert(ctx context.Context, collection string, points []vectorindex.Point) error
 	Delete(ctx context.Context, collection string, keys []string) error
 	Search(ctx context.Context, collection string, query vectorindex.Query) ([]vectorindex.Hit, error)
+	SearchBatch(ctx context.Context, collection string, queries []vectorindex.Query) ([][]vectorindex.Hit, error)
 	Scan(ctx context.Context, collection string, fields []string, visit func(vectorindex.Entry) error) error
 }
 

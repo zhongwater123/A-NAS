@@ -64,8 +64,9 @@ func (s *Service) Similar(ctx context.Context, p Principal, assetID string, requ
 	}
 	page := SimilarPage{Assets: []Asset{}}
 	var model string
-	err = s.db.QueryRowContext(ctx, "SELECT model FROM embeddings WHERE object_id = ? AND derivation = ?",
-		source.objectID, embeddingDerivation).Scan(&model)
+	var encoded []byte
+	err = s.db.QueryRowContext(ctx, "SELECT model, vector FROM embeddings WHERE object_id = ? AND derivation = ?",
+		source.objectID, embeddingDerivation).Scan(&model, &encoded)
 	if errors.Is(err, sql.ErrNoRows) {
 		return page, nil
 	}
@@ -76,19 +77,15 @@ func (s *Service) Similar(ctx context.Context, p Principal, assetID string, requ
 	if err != nil {
 		return SimilarPage{}, err
 	}
-	var hits []searchHit
-	var vectorErr error
-	err = s.detected.read(ctx, s, s.objectCalibration.Model, func(found map[string][]classScore) {
-		vectorErr = s.index.read(ctx, s, model, func(vectors map[string][]float32) {
-			vector, ok := vectors[source.objectID]
-			if !ok {
-				return
-			}
-			page.Ready = true
-			hits = likeHits(candidates, vectors, found, vector, found[source.objectID], source.objectID)
-		})
-	})
-	if err = errors.Join(err, vectorErr); err != nil {
+	var objects []classScore
+	if err := s.detected.read(ctx, s, s.objectCalibration.Model, func(found map[string][]classScore) {
+		objects = found[source.objectID]
+	}); err != nil {
+		return SimilarPage{}, err
+	}
+	page.Ready = true
+	hits, err := s.likeHits(ctx, scopeIDs(scope), candidates, model, decodeVector(encoded), objects, source.objectID)
+	if err != nil {
 		return SimilarPage{}, err
 	}
 	page.Assets, page.Next, err = s.hitPage(ctx, p, scope, hits, after, request.Limit)
@@ -98,24 +95,39 @@ func (s *Service) Similar(ctx context.Context, p Principal, assetID string, requ
 	return page, nil
 }
 
-// likeHits ranks the candidates with a vector by how much they look like an
-// image with this vector and these objects, closest first and at most
-// maxSemanticResults of them. Photos of the content object exclude, the
+// likeHits ranks the candidates with a vector of model by how much they look
+// like an image with this vector and these objects, closest first and at
+// most maxSemanticResults of them. Photos of the content object exclude, the
 // image's own, are left out, and so are videos, which take no part in AI
 // even with a vector.
-func likeHits(candidates []candidate, vectors map[string][]float32, found map[string][]classScore,
-	vector []float32, objects []classScore, exclude string) []searchHit {
+func (s *Service) likeHits(ctx context.Context, scope []string, candidates []candidate, model string, vector []float32,
+	objects []classScore, exclude string) ([]searchHit, error) {
+	overlap := make(map[string]float64)
+	if err := s.detected.read(ctx, s, s.objectCalibration.Model, func(found map[string][]classScore) {
+		for _, c := range candidates {
+			if c.inLocalAI() && c.objectID != exclude {
+				overlap[c.objectID] = similarObjectWeight * objectOverlap(objects, found[c.objectID])
+			}
+		}
+	}); err != nil {
+		return nil, err
+	}
+	sims, _, err := s.similarities(ctx, similarityQuery{model: model, vector: vector, scope: scope,
+		objects: aiObjects(candidates, exclude), keep: maxSemanticResults,
+		bonus: func(object string) float64 { return overlap[object] }, maxBonus: similarObjectWeight})
+	if err != nil {
+		return nil, err
+	}
 	var hits []searchHit
 	for _, c := range candidates {
-		other, ok := vectors[c.objectID]
+		sim, ok := sims[c.objectID]
 		if !ok || !c.inLocalAI() || c.objectID == exclude {
 			continue
 		}
-		score := dot(vector, other) + similarObjectWeight*objectOverlap(objects, found[c.objectID])
-		hits = append(hits, searchHit{c.id, score})
+		hits = append(hits, searchHit{c.id, sim + overlap[c.objectID]})
 	}
 	sortHits(hits)
-	return hits[:min(len(hits), maxSemanticResults)]
+	return hits[:min(len(hits), maxSemanticResults)], nil
 }
 
 // objectOverlap is the weighted Jaccard index of the objects two photos
