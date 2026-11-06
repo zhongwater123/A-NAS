@@ -1,7 +1,7 @@
 # 启用向量索引
 
-状态：draft（系统测试已验证；2026-10-28 在 Experimental NAS 完成第 1–4 步与第 6 步，影子比对的数据待收集）
-更新时间：2026-10-28
+状态：draft（系统测试已验证；2026-10-28 在 Experimental NAS 完成第 1–4 步与第 6 步，2026-11-06 完成第 5 步）
+更新时间：2026-11-06
 
 ## 目的
 
@@ -69,10 +69,17 @@
      所以不是每条查询都有日志，没有日志不说明出了问题。
    - `overlap*` 应为 1，低于 1 说明索引与 Catalog 不一致，记下来查。`warm=false` 的那一行包含实例的启动时间。
    - 完成标准：把至少 20 条比对的数字整理进[当前状态](../status/CURRENT.md)或对应 issue，作为是否切换读路径的依据。
+   - 2026-11-06 实机：
+     - 10-28 至 11-06 共 53 条比对，`overlap*` 全部为 1；实例已连接时 `index_ms` 中位 3，冷启动时 298–592 ms（[技术设计](../architecture/vector-index.md#影子比对)）。
+     - 新增照片已同步：11-05 写入 11 张，11-06 写入 43 张。
+     - 对账 10 次全部为 `queued=0`，包括部署与重启之后。
+     - 新上传的照片在向量算出前就进了 outbox，这一轮同步记为 `deleted`（删除不存在的点，无害），向量算出后再记为 `upserted`。所以一批上传会先后出现等量的 `deleted` 与 `upserted`。
+     - 数据来自 root 只读导出的 journal（`journalctl -u anas-photos`），普通账号看不到。
 6. 看实例空闲退出。
    - 命令：在最后一次搜索或同步约 2 分钟后（相册服务空闲 1 分钟断开连接，代理再等 2 秒），执行 `systemctl is-active anas-vectors@a-nas-photos.service`。
    - 预期：`inactive`。
    - 记录：执行 `systemctl show -p MemoryPeak anas-vectors@a-nas-photos.service`，把内存峰值写进[技术设计](../architecture/vector-index.md#配置)。
+   - 2026-11-06 实机：24 次运行的峰值为 123–323 MiB（中位 264 MiB），每次约一分钟后空闲退出。
 
 ## 验证
 
