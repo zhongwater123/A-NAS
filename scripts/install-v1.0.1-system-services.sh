@@ -731,7 +731,9 @@ else
 fi
 ln -sfn -- "$target" /opt/a-nas/current
 systemctl daemon-reload
-# A running smbd keeps its listeners. One that is not running waits for the
+# A running smbd keeps its listeners here; the Host Agent restarts it when the
+# Samba configuration it writes listens elsewhere, as on a new install whose
+# smbd runs under Debian's configuration. One that is not running waits for the
 # SMB interface's address and keeps trying without it, which must not stop
 # the installation halfway; the end of the output says so.
 systemctl enable smbd.service
