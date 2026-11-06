@@ -23,7 +23,7 @@ if [[ ! -d "$source_release" ]]; then
   echo "source release is not a directory: $source_release" >&2
   exit 2
 fi
-for binary in anas-api anas-host-agent install-screensavers.sh install-ffmpeg-units.sh; do
+for binary in anas-api anas-host-agent install-screensavers.sh install-companion-animations.sh install-ffmpeg-units.sh; do
   if [[ ! -f "$source_release/$binary" || ! -x "$source_release/$binary" ]]; then
     echo "missing executable: $source_release/$binary" >&2
     exit 2
@@ -480,6 +480,7 @@ install -d -o root -g root -m 0755 "$temporary"
 install -o root -g root -m 0755 "$source_release/anas-api" "$temporary/anas-api"
 install -o root -g root -m 0755 "$source_release/anas-host-agent" "$temporary/anas-host-agent"
 install -o root -g root -m 0755 "$source_release/install-screensavers.sh" "$temporary/install-screensavers.sh"
+install -o root -g root -m 0755 "$source_release/install-companion-animations.sh" "$temporary/install-companion-animations.sh"
 install -o root -g root -m 0755 "$source_release/install-ffmpeg-units.sh" "$temporary/install-ffmpeg-units.sh"
 install -o root -g root -m 0755 "$source_release/kiosk-launcher" "$temporary/kiosk-launcher"
 # A rollback to this release installs its host packages again.

@@ -101,5 +101,5 @@
       }
     }
   ],
-  "ignorePatterns": ["src/assistant/hermes/**", "src/*.generated.ts"]
+  "ignorePatterns": ["src/assistant/hermes/**", "src/companion/dsh-pet/**", "src/*.generated.ts"]
 }

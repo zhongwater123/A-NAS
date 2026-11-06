@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -24,15 +25,23 @@ type handler struct {
 	assets               fs.FS
 	index                []byte
 	screensaverDirectory string
+	companionDirectory   string
 }
 
 type Options struct {
 	ScreensaverDirectory string
+	// CompanionDirectory holds the companion's animations, which
+	// install-companion-animations.sh keeps outside releases like the screen
+	// saver videos (ADR 0014).
+	CompanionDirectory string
 }
 
 func NewWithOptions(api http.Handler, options Options) (http.Handler, error) {
 	if options.ScreensaverDirectory != "" && !filepath.IsAbs(options.ScreensaverDirectory) {
 		return nil, errors.New("screen saver directory must be absolute")
+	}
+	if options.CompanionDirectory != "" && !filepath.IsAbs(options.CompanionDirectory) {
+		return nil, errors.New("companion directory must be absolute")
 	}
 	assets, err := fs.Sub(embedded, "dist")
 	if err != nil {
@@ -42,7 +51,10 @@ func NewWithOptions(api http.Handler, options Options) (http.Handler, error) {
 	if err != nil {
 		return nil, errors.New("embedded web UI is not built")
 	}
-	return &handler{api: api, assets: assets, index: index, screensaverDirectory: options.ScreensaverDirectory}, nil
+	return &handler{
+		api: api, assets: assets, index: index,
+		screensaverDirectory: options.ScreensaverDirectory, companionDirectory: options.CompanionDirectory,
+	}, nil
 }
 
 // desktopPolicy is the desktop's Content Security Policy. Installed apps are
@@ -85,6 +97,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveScreensaverVideo(w, r)
 	case r.URL.Path == "/local-console/screensaver.mp4":
 		h.serveLegacyScreensaverVideo(w, r)
+	case r.URL.Path == companionAnimationsPath:
+		h.serveCompanionManifest(w, r)
+	case strings.HasPrefix(r.URL.Path, companionAnimationsPath+"/"):
+		h.serveCompanionAnimation(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -192,6 +208,105 @@ func (h *handler) screensaverVideos() ([]screensaverVideo, error) {
 		videos = append(videos, screensaverVideo{id: hex.EncodeToString(digest[:]), name: entry.Name()})
 	}
 	return videos, nil
+}
+
+const companionAnimationsPath = "/companion/animations"
+
+// companionAnimationTypes are the formats dsh-pet ships: VP9 with alpha for
+// Chromium and Firefox, and HEVC with alpha for Safari.
+var companionAnimationTypes = map[string]string{".webm": "video/webm", ".mov": "video/quicktime"}
+
+type companionManifest struct {
+	// Animations maps each animation's name to its URL per format.
+	Animations map[string]map[string]string `json:"animations"`
+}
+
+// serveCompanionManifest lists the animations installed in the current pool,
+// so the page plays only those and shows no companion when none are.
+func (h *handler) serveCompanionManifest(w http.ResponseWriter, r *http.Request) {
+	manifest := companionManifest{Animations: map[string]map[string]string{}}
+	for _, name := range h.companionAnimations() {
+		extension := filepath.Ext(name)
+		animation := strings.TrimSuffix(name, extension)
+		if manifest.Animations[animation] == nil {
+			manifest.Animations[animation] = map[string]string{}
+		}
+		manifest.Animations[animation][strings.TrimPrefix(extension, ".")] = companionAnimationsPath + "/" + url.PathEscape(name)
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if err := json.NewEncoder(w).Encode(manifest); err != nil {
+		return
+	}
+}
+
+func (h *handler) serveCompanionAnimation(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, companionAnimationsPath+"/")
+	contentType, ok := companionAnimationTypes[filepath.Ext(name)]
+	if !ok || !companionAnimationName(name) || h.companionDirectory == "" {
+		http.NotFound(w, r)
+		return
+	}
+	// The pool is a directory of hard links; nothing may lead out of it.
+	root, err := os.OpenRoot(h.companionDirectory)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = root.Close() }()
+	animation, err := root.Open(name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = animation.Close() }()
+	info, err := animation.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+	// A new pool brings new files, so revalidating by modification time is enough.
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Type", contentType)
+	http.ServeContent(w, r, info.Name(), info.ModTime(), animation)
+}
+
+// companionAnimationName accepts a plain file name in the pool: no directory,
+// no hidden file and no control characters.
+func companionAnimationName(name string) bool {
+	if name == "" || strings.HasPrefix(name, ".") || strings.ContainsAny(name, `/\`) {
+		return false
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	_, ok := companionAnimationTypes[filepath.Ext(name)]
+	return ok
+}
+
+func (h *handler) companionAnimations() []string {
+	if h.companionDirectory == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(h.companionDirectory)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() || !companionAnimationName(entry.Name()) {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	return names
 }
 
 func (h *handler) serveAsset(w http.ResponseWriter, r *http.Request) {

@@ -1,7 +1,14 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "files": {
-    "includes": ["**", "!src/assistant/hermes", "!src/*.generated.ts", "!package.json", "!package-lock.json"]
+    "includes": [
+      "**",
+      "!src/assistant/hermes",
+      "!src/companion/dsh-pet",
+      "!src/*.generated.ts",
+      "!package.json",
+      "!package-lock.json"
+    ]
   },
   "formatter": {
     "enabled": true,

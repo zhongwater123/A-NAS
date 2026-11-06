@@ -155,6 +155,30 @@ describe("TaskToasts", () => {
     await waitFor(() => expect(notices.acknowledged).toEqual(["n2"]));
   });
 
+  it("tells only that a result came on the family's shared screen", async () => {
+    const notices = noticesHandlers([
+      taskNotice("n3", {
+        taskId: "aaaaaaaaaaaa",
+        name: "提醒我下午三点吃药",
+        status: "ok",
+        ranAt: today(15).toISOString(),
+        sessionId: "cron_aaaaaaaaaaaa_20261020_150000",
+        summary: "该吃药了：降压药一片",
+      }),
+    ]);
+    server.use(...notices.handlers);
+    const onOpen = vi.fn();
+    const user = userEvent.setup();
+    render(<TaskToasts enabled shared onOpen={onOpen} />);
+    const toast = await screen.findByRole("status", { name: "定时任务的新结果" });
+    expect(within(toast).getByText(/VNAS 定时任务 · 今天 15:00/)).toBeTruthy();
+    expect(within(toast).getByText("有新结果")).toBeTruthy();
+    expect(screen.queryByText(/吃药/)).toBeNull();
+    // The member who means to read it still can, in VNAS.
+    await user.click(within(toast).getByRole("button", { name: /查看结果/ }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "cron_aaaaaaaaaaaa_20261020_150000" }));
+  });
+
   it("asks nothing when the member has no assistant", async () => {
     const asked = vi.fn();
     server.use(

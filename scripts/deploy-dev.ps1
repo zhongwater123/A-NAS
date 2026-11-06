@@ -282,6 +282,7 @@ try {
         @{ Source = (Join-Path $repoRoot 'scripts\install-v1.0.1-system-services.sh'); Destination = "${target}:$release/install-v1.0.1-system-services.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\provision-v1.0.1-rc.sh'); Destination = "${target}:$release/provision-v1.0.1-rc.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-screensavers.sh'); Destination = "${target}:$release/install-screensavers.sh.incoming" },
+        @{ Source = (Join-Path $repoRoot 'scripts\install-companion-animations.sh'); Destination = "${target}:$release/install-companion-animations.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\install-ffmpeg-units.sh'); Destination = "${target}:$release/install-ffmpeg-units.sh.incoming" },
         @{ Source = (Join-Path $repoRoot 'scripts\run-kiosk.sh'); Destination = "${target}:$release/kiosk-launcher.incoming" },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-kiosk@.service'); Destination = "${target}:$release/anas-kiosk@.service.incoming" },

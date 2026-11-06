@@ -366,6 +366,7 @@ func run(logger *slog.Logger) error {
 	})
 	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
 		ScreensaverDirectory: config.ScreensaverDirectory,
+		CompanionDirectory:   config.CompanionDirectory,
 	})
 	if err != nil {
 		return err

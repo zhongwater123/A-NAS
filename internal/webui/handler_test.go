@@ -245,6 +245,96 @@ func TestHandlerReturnsAnEmptyManifestWhenScreenSaverPoolIsMissing(t *testing.T)
 	}
 }
 
+// The companion's animations are listed by name, one URL per format, and
+// served from the current pool only (install-companion-animations.sh).
+func TestHandlerListsCompanionAnimationsAndServesByteRanges(t *testing.T) {
+	root := t.TempDir()
+	pool := filepath.Join(root, "pool")
+	if err := os.Mkdir(pool, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"东张西望.webm": "0123456789", "东张西望.mov": "quicktime", "待机.webm": "idle",
+		"notes.txt": "not an animation", ".hidden.webm": "hidden",
+	} {
+		if err := os.WriteFile(filepath.Join(pool, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "outside.webm"), []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../outside.webm", filepath.Join(pool, "escape.webm")); err != nil {
+		t.Fatal(err)
+	}
+	handler := newHandlerWithOptions(t, webui.Options{CompanionDirectory: pool})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/companion/animations", nil))
+
+	if got, want := recorder.Code, http.StatusOK; got != want {
+		t.Fatalf("manifest status = %d, want %d; body = %s", got, want, recorder.Body.String())
+	}
+	var manifest struct {
+		Animations map[string]map[string]string `json:"animations"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(manifest.Animations), 2; got != want {
+		t.Fatalf("animations = %v, want %d", manifest.Animations, want)
+	}
+	look := manifest.Animations["东张西望"]
+	if look["webm"] != "/companion/animations/%E4%B8%9C%E5%BC%A0%E8%A5%BF%E6%9C%9B.webm" || look["mov"] == "" {
+		t.Fatalf("东张西望 = %v", look)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, look["webm"], nil)
+	request.Header.Set("Range", "bytes=2-5")
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if got, want := recorder.Code, http.StatusPartialContent; got != want {
+		t.Fatalf("status = %d, want %d; body = %s", got, want, recorder.Body.String())
+	}
+	if got, want := recorder.Body.String(), "2345"; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "video/webm" {
+		t.Fatalf("Content-Type = %q, want video/webm", got)
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, look["mov"], nil))
+	if got := recorder.Header().Get("Content-Type"); recorder.Code != http.StatusOK || got != "video/quicktime" {
+		t.Fatalf("mov status = %d, Content-Type = %q", recorder.Code, got)
+	}
+
+	for _, path := range []string{
+		"/companion/animations/notes.txt", "/companion/animations/.hidden.webm", "/companion/animations/escape.webm",
+		"/companion/animations/../outside.webm", "/companion/animations/%2E%2E%2Foutside.webm",
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want %d", path, recorder.Code, http.StatusNotFound)
+		}
+	}
+}
+
+func TestHandlerShowsNoCompanionAnimationsUntilTheyAreInstalled(t *testing.T) {
+	handler := newHandlerWithOptions(t, webui.Options{CompanionDirectory: filepath.Join(t.TempDir(), "missing")})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/companion/animations", nil))
+	if got, want := recorder.Body.String(), "{\"animations\":{}}\n"; recorder.Code != http.StatusOK || got != want {
+		t.Fatalf("status = %d, body = %q, want %q", recorder.Code, got, want)
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/companion/animations/待机.webm", nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("animation status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
+	if _, err := webui.NewWithOptions(http.NotFoundHandler(), webui.Options{CompanionDirectory: "relative"}); err == nil {
+		t.Fatal("NewWithOptions() accepted a relative companion directory")
+	}
+}
 func newHandler(t *testing.T) http.Handler {
 	return newHandlerWithOptions(t, webui.Options{})
 }

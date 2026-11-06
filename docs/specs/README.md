@@ -20,6 +20,7 @@
 - [容器管理（Docker MVP）](container-management.md)（implemented）
 - [应用中心](app-center.md)（implemented）
 - [本地控制台屏幕保护程序](local-console-screensaver.md)（implemented）
+- [虚拟伙伴（大肥鱼）](virtual-companion.md)（draft；V1 实现中）
 - [开机动画](boot-ident.md)（implemented）
 - [局域网 Web 访问](lan-web-access.md)（implemented）
 - [互联网访问](internet-access.md)（implemented）

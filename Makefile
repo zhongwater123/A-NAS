@@ -156,6 +156,9 @@ ops-check:
 	grep -Fq 'install-screensavers.sh.incoming' scripts/deploy-dev.ps1
 	grep -Fq 'install-screensavers.sh.incoming' scripts/remote-activate-release.sh
 	grep -Fq '"$$source_release/install-screensavers.sh" "$$temporary/install-screensavers.sh"' scripts/install-v1.0.1-system-services.sh
+	grep -Fq '"/var/lib/a-nas/companion/current"' cmd/anas-api/config.go
+	grep -Fq 'install-companion-animations.sh.incoming' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh
+	grep -Fq '"$$source_release/install-companion-animations.sh" "$$temporary/install-companion-animations.sh"' scripts/install-v1.0.1-system-services.sh
 	! grep -Eq 'screensaver_[0-9a-z]*_sha256|ScreensaverVideo' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'EXPECTED_DISK_WWN' scripts/provision-v1.0.1-rc.sh
 	! grep -Eq 'setup.?code|setup_code' scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh
