@@ -1,0 +1,126 @@
+name: Mobile builds
+
+on:
+  push:
+    branches: [codex/mobile-lan-client]
+    paths:
+      - mobile/**
+      - web/src/api.generated.ts
+      - web/src/assistant/hermes/shared/**
+      - web/src/assets/assistant-logo.webp
+      - .github/workflows/mobile.yml
+      - scripts/mobile-assert-login.swift
+  workflow_dispatch:
+    inputs:
+      lan_hosts:
+        description: Comma-separated NAS LAN IP addresses (no credentials)
+        default: '172.18.45.48'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANAS_LAN_HOSTS: ${{ inputs.lan_hosts || '172.18.45.48' }}
+  CI: '1'
+
+defaults:
+  run:
+    shell: bash
+    working-directory: mobile
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run bundle
+
+  android:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci
+      - run: npx expo prebuild --platform android --no-install
+      - name: Build standalone test APK (debug signing key)
+        working-directory: mobile/android
+        run: ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --console=plain
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-lan-test-apk
+          path: mobile/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  ios:
+    needs: verify
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: xcodebuild -version
+      - run: npm ci
+      - run: npx expo prebuild --platform ios --no-install
+      - run: pod install --project-directory=ios
+      - name: Build iPhone simulator app (no Apple signing needed)
+        run: |
+          xcodebuild -workspace ios/ANAS.xcworkspace -scheme ANAS \
+            -configuration Release -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/ios-simulator CODE_SIGN_IDENTITY=- build \
+            > ios-build.log 2>&1
+          ditto -c -k --sequesterRsrc --keepParent build/ios-simulator/Build/Products/Release-iphonesimulator/ANAS.app ios-simulator-app.zip
+      - name: Launch and capture the login screen
+        timeout-minutes: 10
+        run: |
+          device=$(xcrun simctl list devices available --json | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')
+          test "$device" != null
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl install "$device" build/ios-simulator/Build/Products/Release-iphonesimulator/ANAS.app
+          xcrun simctl launch "$device" com.anas.mobile
+          sleep 5
+          xcrun simctl io "$device" screenshot ios-login.png
+          swift ../scripts/mobile-assert-login.swift ios-login.png "$ANAS_LAN_HOSTS" | tee ios-login-check.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: ios-simulator-build
+          path: |
+            mobile/ios-simulator-app.zip
+            mobile/ios-login.png
+            mobile/ios-build.log
+            mobile/ios-login-check.txt
+          if-no-files-found: warn
+          retention-days: 7

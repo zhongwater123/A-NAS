@@ -8,6 +8,8 @@
 
 主线是 [v1.0.1“实验 NAS 基础存储与共享闭环”](../releases/v1.0.1.md)。Experimental NAS 跟随主干部署，只用可丢弃测试数据；Web/SMB 闭环的实机验收完成前不创建 `v1.0.1` 标签。相册、影视、音乐、应用中心与 AI 助手已随主干部署，但不在 v1.0.1 的验收范围内。
 
+移动端采用 React Native + Expo，先做局域网聊天和双向传输；原生构建结果及剩余验收见[移动端规格](../specs/mobile-app.md#原生构建与真机状态)。
+
 ## 实验 NAS 上运行什么
 
 - 已部署：`70853075ca40`（主干上 PR #383 的合并提交，未打标签，2026-11-04 安装，日志在 NAS 的 `/var/tmp/a-nas-deploy-70853075ca40.log`），包含此前合并的全部 PR；容器代理与 AI 助手试用包同版本。最近的 RC 标签仍是 [`v1.0.1-rc.6`](../releases/v1.0.1.md#rc6-状态)。之后合入 main 的 PR：`git fetch` 后运行 `bash scripts/undeployed.sh`。
