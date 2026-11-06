@@ -11,3 +11,6 @@ ruff==0.17.1
 pip-audit==2.10.1
 # Resolves the lock files and installs the runtime (scripts/build-ai-runtime.sh).
 uv==0.13.1
+# Reads dsh-pet's config.jsonc for scripts/vendor-dsh-pet.py: comments,
+# trailing commas and strings that contain either.
+json5==0.17.3
