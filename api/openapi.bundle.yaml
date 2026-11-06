@@ -4883,7 +4883,7 @@ paths:
     get:
       operationId: viewPhoto
       summary: The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
-      description: An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none.
+      description: 'An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original''s metadata. Videos have none. An assistant gets none of a photo whose text holds a sensitive value (403 sensitive_photo): it knows such a value only as a handle in the photo''s text.'
       parameters:
         - $ref: '#/components/parameters/PhotoAssetID'
       responses:
@@ -4896,6 +4896,8 @@ paths:
                 format: binary
         '304':
           description: ETag still matches after authorization
+        '403':
+          $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
         '413':
@@ -4941,6 +4943,100 @@ paths:
         '415':
           $ref: '#/components/responses/ProductError'
         '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/photos/assets/{assetId}/text:
+    get:
+      operationId: getPhotoText
+      summary: The text read from a photo and its document's fields, as the caller sees them (docs/architecture/photo-ocr.md)
+      description: 'A library that does not read text shows none (status off), even of a photo another library holds. A member''s AI assistant gets every sensitive value as a handle of its own such as ⟦身份证号·6d48a8⟧: what the sensitive fields hold and what was read for them, and the ID, card, phone and other long numbers in the whole text and in every other field (docs/architecture/photo-ocr.md).'
+      parameters:
+        - $ref: '#/components/parameters/PhotoAssetID'
+      responses:
+        '200':
+          description: The photo's text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoText'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/photos/assets/{assetId}/text/fields/{field}:
+    put:
+      operationId: correctPhotoTextField
+      summary: Correct a field of the photo's text, for every library that holds the photo; the last correction stands
+      description: Anyone who sees the photo may, except through Administrative Viewing Mode and as an assistant. The photo must have been read as a document type with this field, in a library that reads text, and not be in the trash. Setting a field never corrected to the value read confirms it. The change is kept in the photo's change log, not in the activity record.
+      parameters:
+        - $ref: '#/components/parameters/PhotoAssetID'
+        - $ref: '#/components/parameters/PhotoTextField'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhotoTextCorrectionRequest'
+      responses:
+        '200':
+          description: The photo's text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoText'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: restorePhotoTextField
+      summary: Take a field's correction back, so that it shows what was read again
+      parameters:
+        - $ref: '#/components/parameters/PhotoAssetID'
+        - $ref: '#/components/parameters/PhotoTextField'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The photo's text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoText'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/photos/assets/{assetId}/text/changes:
+    get:
+      operationId: listPhotoTextChanges
+      summary: Every change to the photo's fields, newest first, with who made it from which library
+      description: For everyone who sees the photo in a library that reads text; an assistant gets none, as they hold the values it may not know.
+      parameters:
+        - $ref: '#/components/parameters/PhotoAssetID'
+      responses:
+        '200':
+          description: The changes
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PhotoTextChange'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
           $ref: '#/components/responses/ProductError'
   /api/v1/photos/assets/{assetId}/motion:
     get:
@@ -7705,6 +7801,13 @@ components:
       name: occurrenceId
       in: path
       required: true
+      schema:
+        type: string
+    PhotoTextField:
+      name: field
+      in: path
+      required: true
+      description: A field of the photo's document type, such as 合计
       schema:
         type: string
     MediaLibraryID:
@@ -11959,6 +12062,7 @@ components:
         - items
         - semantic
         - closest
+        - texts
       properties:
         items:
           type: array
@@ -11972,7 +12076,11 @@ components:
         closest:
           type: integer
           minimum: 0
-          description: 'How many results, counted over all pages, make up the closest group: the name and user tag matches, then the photos the object detector found the query''s things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count.'
+          description: 'How many results, counted over all pages, make up the closest group: the name and user tag matches, the photos whose text holds the query, then the photos the object detector found the query''s things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count.'
+        texts:
+          type: integer
+          minimum: 0
+          description: How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A query of one character matches no text. An assistant matches the text with every sensitive value masked.
         objects:
           type: object
           additionalProperties: false
@@ -12000,6 +12108,152 @@ components:
           items:
             type: string
           description: 'Full names of people in the search''s scope that the query contains, such as 小明 in 小明 海边: the results keep to their photos and the rest of the query ranks them; a name alone lists them newest first.'
+    PhotoText:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - complete
+        - fields
+      properties:
+        status:
+          type: string
+          enum:
+            - read
+            - queued
+            - failed
+            - none
+            - 'off'
+          description: 'read: the text below; queued: waiting to be read; failed: reading failed; none: not a photo whose text is read; off: this library does not read text.'
+        kind:
+          type: string
+          enum:
+            - plain
+            - id_card
+            - id_card_back
+            - bank_card
+            - bank_slip
+            - invoice
+            - receipt
+          description: The document type read.
+        text:
+          type: string
+          description: The whole text as machine reading gave it, which may be wrong.
+        complete:
+          type: boolean
+          description: False when the reading was cut off at its length limit or stopped looping.
+        model:
+          type: string
+          description: The text reader that read it.
+        fields:
+          type: array
+          description: The document type's fields in the order the document shows them.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - name
+              - value
+              - read
+              - passed
+              - sensitive
+            properties:
+              name:
+                type: string
+              value:
+                type: string
+                description: 'What the field holds: the correction, else what was read.'
+              read:
+                type: string
+                description: What was read; empty when nothing was.
+              passed:
+                type: boolean
+                description: 'Whether the value needs no one to look at it: the reading passed every check, or a member corrected it.'
+              reasons:
+                type: array
+                items:
+                  type: string
+                  enum:
+                    - not_in_text
+                    - format
+                    - mismatch
+                    - low_confidence
+                    - unfinished
+              sensitive:
+                type: boolean
+                description: Shown masked until the viewer opens it.
+              correction:
+                type: object
+                additionalProperties: false
+                required:
+                  - userId
+                  - username
+                  - at
+                description: Who last corrected the field, and when.
+                properties:
+                  userId:
+                    type: string
+                  username:
+                    type: string
+                  at:
+                    type: string
+                    format: date-time
+    PhotoTextCorrectionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - value
+      properties:
+        value:
+          type: string
+          maxLength: 200
+          description: What the field holds; spaces around it are dropped, and it may be empty.
+    PhotoTextChange:
+      type: object
+      additionalProperties: false
+      required:
+        - field
+        - old
+        - new
+        - restored
+        - userId
+        - username
+        - library
+        - at
+      properties:
+        field:
+          type: string
+        old:
+          type: string
+        new:
+          type: string
+        restored:
+          type: boolean
+          description: True when a correction was taken back, so that the field shows what was read.
+        userId:
+          type: string
+        username:
+          type: string
+          description: The member's name when making the change.
+        library:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+          description: The library the change was made from; only its ID once it is gone.
+          properties:
+            id:
+              type: string
+            kind:
+              type: string
+              enum:
+                - private
+                - shared
+            ownerName:
+              type: string
+        at:
+          type: string
+          format: date-time
     PhotoSimilarResults:
       type: object
       additionalProperties: false

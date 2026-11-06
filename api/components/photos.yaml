@@ -5,6 +5,7 @@ parameters:
   PhotoAlbumID: { name: albumId, in: path, required: true, schema: { type: string } }
   PhotoPersonID: { name: personId, in: path, required: true, schema: { type: string } }
   PhotoOccurrenceID: { name: occurrenceId, in: path, required: true, schema: { type: string } }
+  PhotoTextField: { name: field, in: path, required: true, description: "A field of the photo's document type, such as 合计", schema: { type: string } }
 schemas:
   PhotoLibrary:
     type: object
@@ -199,7 +200,7 @@ schemas:
   PhotoSearchResults:
     type: object
     additionalProperties: false
-    required: [items, semantic, closest]
+    required: [items, semantic, closest, texts]
     properties:
       items: { type: array, items: { $ref: "#/schemas/PhotoAsset" } }
       next: { type: string }
@@ -207,7 +208,11 @@ schemas:
       closest:
         type: integer
         minimum: 0
-        description: "How many results, counted over all pages, make up the closest group: the name and user tag matches, then the photos the object detector found the query's things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count."
+        description: "How many results, counted over all pages, make up the closest group: the name and user tag matches, the photos whose text holds the query, then the photos the object detector found the query's things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count."
+      texts:
+        type: integer
+        minimum: 0
+        description: "How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A query of one character matches no text. An assistant matches the text with every sensitive value masked."
       objects:
         type: object
         additionalProperties: false
@@ -221,6 +226,69 @@ schemas:
         type: array
         items: { type: string }
         description: "Full names of people in the search's scope that the query contains, such as 小明 in 小明 海边: the results keep to their photos and the rest of the query ranks them; a name alone lists them newest first."
+  PhotoText:
+    type: object
+    additionalProperties: false
+    required: [status, complete, fields]
+    properties:
+      status:
+        type: string
+        enum: [read, queued, failed, none, "off"]
+        description: "read: the text below; queued: waiting to be read; failed: reading failed; none: not a photo whose text is read; off: this library does not read text."
+      kind: { type: string, enum: [plain, id_card, id_card_back, bank_card, bank_slip, invoice, receipt], description: The document type read. }
+      text: { type: string, description: "The whole text as machine reading gave it, which may be wrong." }
+      complete: { type: boolean, description: "False when the reading was cut off at its length limit or stopped looping." }
+      model: { type: string, description: The text reader that read it. }
+      fields:
+        type: array
+        description: "The document type's fields in the order the document shows them."
+        items:
+          type: object
+          additionalProperties: false
+          required: [name, value, read, passed, sensitive]
+          properties:
+            name: { type: string }
+            value: { type: string, description: "What the field holds: the correction, else what was read." }
+            read: { type: string, description: What was read; empty when nothing was. }
+            passed: { type: boolean, description: "Whether the value needs no one to look at it: the reading passed every check, or a member corrected it." }
+            reasons: { type: array, items: { type: string, enum: [not_in_text, format, mismatch, low_confidence, unfinished] } }
+            sensitive: { type: boolean, description: "Shown masked until the viewer opens it." }
+            correction:
+              type: object
+              additionalProperties: false
+              required: [userId, username, at]
+              description: Who last corrected the field, and when.
+              properties:
+                userId: { type: string }
+                username: { type: string }
+                at: { type: string, format: date-time }
+  PhotoTextCorrectionRequest:
+    type: object
+    additionalProperties: false
+    required: [value]
+    properties:
+      value: { type: string, maxLength: 200, description: "What the field holds; spaces around it are dropped, and it may be empty." }
+  PhotoTextChange:
+    type: object
+    additionalProperties: false
+    required: [field, old, new, restored, userId, username, library, at]
+    properties:
+      field: { type: string }
+      old: { type: string }
+      new: { type: string }
+      restored: { type: boolean, description: "True when a correction was taken back, so that the field shows what was read." }
+      userId: { type: string }
+      username: { type: string, description: The member's name when making the change. }
+      library:
+        type: object
+        additionalProperties: false
+        required: [id]
+        description: "The library the change was made from; only its ID once it is gone."
+        properties:
+          id: { type: string }
+          kind: { type: string, enum: [private, shared] }
+          ownerName: { type: string }
+      at: { type: string, format: date-time }
   PhotoSimilarResults:
     type: object
     additionalProperties: false
