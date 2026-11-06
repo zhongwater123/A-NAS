@@ -106,6 +106,10 @@ type Executor struct {
 	spaceRoots    map[string]string
 	registryPath  string
 	registryError error
+	// fixedGroupsMu orders looking up and creating the fixed groups: the
+	// data-volume reconciliation at startup and the Product Service's identity
+	// synchronization both create them, and the second groupadd failed.
+	fixedGroupsMu sync.Mutex
 	identitiesMu  sync.Mutex
 	identities    map[string]identityRecord
 	identityPath  string
@@ -354,21 +358,67 @@ func (e *Executor) applySambaConfiguration(ctx context.Context) error {
 	if previousErr != nil && !errors.Is(previousErr, os.ErrNotExist) {
 		return previousErr
 	}
+	restart := previousErr != nil
+	if !restart {
+		listening, err := e.sambaListening(ctx, configurationPath)
+		if err != nil {
+			return err
+		}
+		next, err := e.sambaListening(ctx, candidatePath)
+		if err != nil {
+			return err
+		}
+		restart = listening != next
+	}
 	if err := os.Rename(candidatePath, configurationPath); err != nil {
 		return err
 	}
 	if err := atomicfile.SyncDir(filepath.Dir(configurationPath)); err != nil {
 		return err
 	}
-	if output, err := e.runner.Run(ctx, "smbcontrol", []string{"all", "reload-config"}, ""); err != nil {
+	// smbd opens its listening sockets only when it starts, and a reload
+	// keeps them. Under Debian's configuration, before the first one A-NAS
+	// writes, it listens on every address; only a restart makes it listen on
+	// the SMB interface alone. Restarting ends the open SMB sessions, so it
+	// happens only when the addresses or ports change. A stopped smbd stays
+	// stopped, and systemd starts it as its unit says, waiting for the
+	// interface's address (docs/investigations/2026-11-04-smbd-starts-before-dhcp-address.md).
+	command, args, what := "smbcontrol", []string{"all", "reload-config"}, "reload"
+	if restart {
+		command, args, what = "systemctl", []string{"try-restart", "--no-block", "smbd.service"}, "restart smbd for"
+	}
+	if output, err := e.runner.Run(ctx, command, args, ""); err != nil {
 		if previousErr == nil {
 			_ = writeAtomic(configurationPath, previous, 0o644)
 		} else {
 			_ = os.Remove(configurationPath)
 		}
-		return fmt.Errorf("reload Samba configuration: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("%s Samba configuration: %w: %s", what, err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// sambaListeningSettings are the settings smbd reads only when it starts:
+// where it listens.
+var sambaListeningSettings = []string{"interfaces", "bind interfaces only", "smb ports"}
+
+// sambaListening returns the listening settings of the Samba configuration at
+// path, as testparm reads them with their defaults. A configuration testparm
+// cannot read, which only the previous one can be, listens unlike any other.
+func (e *Executor) sambaListening(ctx context.Context, path string) (string, error) {
+	values := make([]string, 0, len(sambaListeningSettings))
+	for _, name := range sambaListeningSettings {
+		output, err := e.runner.Output(ctx, "testparm",
+			[]string{"--suppress-prompt", "--section-name=global", "--parameter-name=" + name, path}, "")
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "unreadable", nil
+		}
+		values = append(values, name+" = "+strings.TrimSpace(string(output)))
+	}
+	return strings.Join(values, "\n"), nil
 }
 
 // sambaShareOptions keep the kernel's POSIX ACLs authoritative: Samba runs as
