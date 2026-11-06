@@ -1,7 +1,7 @@
 # 重启后 smbd 早于 DHCP 地址启动，只监听回环
 
 状态：fixed，待实机验收
-更新时间：2026-11-05
+更新时间：2026-11-06
 
 ## 症状与影响
 
@@ -51,7 +51,31 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
   - 一个排在 smbd 之后、`Wants=` 它的单元（与 Host Agent 相同）在第一次失败后启动，不等以后的重试；
   - smbd 没有运行时，`smbcontrol all reload-config` 退出码为 0。
 - 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh) 检查安装器写入的等待与重试，并在一个暂时没有地址的接口上走一遍上面的过程。部署后要在 Experimental NAS 上正常重启一次，确认 `172.18.45.48:445` 在监听。
-  - smbd 先告诉 systemd 已就绪，再打开监听套接字（Samba 4.22 的 `source3/smbd/server.c`：先 `daemon_ready("smbd")`，后 `open_sockets_smbd()`），所以 `systemctl restart smbd` 返回时 445 可能还没在监听。2026-11-05 CI 中“smbd listens on the SMB interface's address”两次失败（`fff0c2b0` 推送后与 #397），就是重启后立即检查；测试改为最多等 10 秒再检查（#397）。
+  - 2026-11-05 起，CI 中“smbd listens on the SMB interface's address”时好时坏（`fff0c2b0` 推送后，以及 #397、#400、#403、#407）。
+    - #397 认为原因是 smbd 先告诉 systemd 已就绪、再打开监听套接字（Samba 4.22 的 `source3/smbd/server.c`：先 `daemon_ready("smbd")`，后 `open_sockets_smbd()`），把检查改为最多等 10 秒。
+    - 之后 #400、#403、#407 等满 10 秒仍然失败，说明这个诊断不完整。真正的原因见下一节。
+
+## 新装后 smbd 监听所有地址（2026-11-06）
+
+- **现象**：CI 失败时，等满 10 秒 smbd 也没有监听 SMB 网卡的地址，可后面的 SMB 读写照常通过。
+- **本地探针**（2026-11-06，系统测试镜像，容器限 2 核，三轮结果相同）：
+  - smbd 检查段开始时，Host Agent 约 0.4 秒前已写好 A-NAS 的 `smb.conf`；
+  - 但 smbd 仍监听 `0.0.0.0:445` 与 `[::]:445`。
+- **根因**：
+  - 容器里的 smbd 按 Debian 的默认配置启动，新装的宿主机也一样。默认配置没有 `bind interfaces only`，smbd 监听所有地址。
+  - 安装器启动 Host Agent 后，Host Agent 第一次对账时写入 A-NAS 的配置（`interfaces = lo <网卡>`、`bind interfaces only = yes`），然后只让 smbd 重新加载配置（`smbcontrol all reload-config`）。smbd 只在启动时打开监听套接字，重新加载不改变它监听的地址，所以它一直监听所有地址，直到下次重启。
+  - 测试中途自己重启了 smbd。CI 机器慢时，这次重启早于 Host Agent 写配置，smbd 又按默认配置监听所有地址。检查只认 SMB 网卡的地址，所以失败；SMB 读写经通配地址照样成功。
+- **影响**：新装的设备在 smbd 下次重启之前（通常是第一次重启机器之前），SMB 在所有网卡上都可达，而不只是安装时选定的网卡。Experimental NAS 之后重启过，smbd 已按 A-NAS 的配置启动，不受影响。
+- **修复**：Host Agent 写入 Samba 配置时，用 `testparm` 读出新旧配置的 `interfaces`、`bind interfaces only` 与 `smb ports`。
+  - 原先没有配置，或者这三项变了，就让 systemd 重启 smbd（`systemctl try-restart --no-block smbd.service`）；否则照旧只重新加载。
+  - 重启会断开已有的 SMB 连接，所以只在监听的地址或端口变化时进行：新装，或者换了 SMB 网卡。
+  - smbd 没有运行时不去启动它，由 systemd 按单元启动，并照样等网卡的地址。
+- **回归证据**：
+  - 单元测试 [`samba_test.go`](../../internal/hostops/linux/samba_test.go)：第一次写入配置、替换 Debian 的配置、换 SMB 网卡时都重启，配置不变时只重新加载；smbd 重启或重新加载失败时，恢复原来的配置。
+  - 系统测试：
+    - 安装后先等 Host Agent 第一次写好配置，再检查 smbd 只监听回环与 SMB 网卡的地址、没有通配地址（修复前这一项失败）。后面的检查都在这次重启之后，不再与它竞争。
+    - 测试中途重启 smbd 之后的检查改用同一个函数，最多等 30 秒，失败时打印 smbd 实际监听的地址。
+  - root 集成测试自己启动的 smbd 不归 systemd 管，它的初始配置改为与 Host Agent 写入的监听设置相同，所以只会重新加载。
 
 ## 后续工作
 
@@ -64,5 +88,7 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
 - 规格：不涉及
 - ADR：[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)
 - 运行手册：[实验存储配置与验收](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)（第 6 步）
-- 实现：[`scripts/install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)（写入 smbd 的附加配置，[PR #390](https://github.com/zhongwater123/A-NAS/pull/390)）；没有修好问题的网络等待在 [PR #385](https://github.com/zhongwater123/A-NAS/pull/385) 中
-- 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh)
+- 实现：
+  - [`scripts/install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)（写入 smbd 的附加配置，[PR #390](https://github.com/zhongwater123/A-NAS/pull/390)）；没有修好问题的网络等待在 [PR #385](https://github.com/zhongwater123/A-NAS/pull/385) 中；
+  - [`internal/hostops/linux/executor.go`](../../internal/hostops/linux/executor.go) 的 `applySambaConfiguration`（监听设置变化时重启 smbd）。
+- 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh)、[`internal/hostops/linux/samba_test.go`](../../internal/hostops/linux/samba_test.go)、[`internal/hostops/linux/root_integration_test.go`](../../internal/hostops/linux/root_integration_test.go)
