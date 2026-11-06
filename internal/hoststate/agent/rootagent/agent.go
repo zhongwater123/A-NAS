@@ -39,7 +39,10 @@ type handler struct {
 	webSearch   websearchswitch.Switch
 	// reconcileFailed reports the last reconciliation of the data volume.
 	reconcileFailed func() bool
-	logger          *slog.Logger
+	// restoring reports a data volume that ran without a disk and has not
+	// had its redundancy restored.
+	restoring func() bool
+	logger    *slog.Logger
 }
 
 type Services struct {
@@ -57,6 +60,9 @@ type Services struct {
 	// ReconcileFailed reports whether the Host Agent's last reconciliation of
 	// the data volume failed; the host state carries it (#166).
 	ReconcileFailed func() bool
+	// RestoringRedundancy reports whether the data volume ran without one of
+	// its disks and has not been scrubbed since (ADR 0025).
+	RestoringRedundancy func() bool
 }
 
 func NewHandler(observer hoststate.Observer, logger *slog.Logger) http.Handler {
@@ -70,7 +76,7 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	return &handler{
 		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
 		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots,
-		systemLogs: services.SystemLogs, webSearch: services.WebSearch, reconcileFailed: services.ReconcileFailed, logger: logger,
+		systemLogs: services.SystemLogs, webSearch: services.WebSearch, reconcileFailed: services.ReconcileFailed, restoring: services.RestoringRedundancy, logger: logger,
 	}
 }
 
@@ -169,6 +175,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state.ReconcileFailed = h.reconcileFailed != nil && h.reconcileFailed()
+	if state.DataVolume != nil && h.restoring != nil {
+		state.DataVolume.Restoring = h.restoring()
+	}
 	httpjson.Write(w, http.StatusOK, wire.DocumentFromDomain(state))
 }
 

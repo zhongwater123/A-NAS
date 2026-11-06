@@ -153,7 +153,7 @@ return errors === 0;
 validate62.evaluated = {"dynamicProps":false,"dynamicItems":false};
 
 const schema27 = {"type":"array","description":"Why the system is not plainly healthy, most severe first; empty when healthy. The system's health is the severity of the first finding (docs/specs/system-health.md).","items":{"$ref":"#/components/schemas/HealthFinding"}};
-const schema28 = {"type":"object","additionalProperties":false,"required":["code","severity"],"properties":{"code":{"type":"string","enum":["disk_failing","disk_warning","disk_health_unknown","disk_hot","cpu_hot","volume_offline","volume_read_only","volume_full","volume_nearly_full","volume_errors","volume_reconcile_failed"]},"severity":{"type":"string","enum":["warning","critical"]},"diskId":{"$ref":"#/components/schemas/StableResourceID"},"value":{"type":"integer","format":"int64","description":"disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted."}}};
+const schema28 = {"type":"object","additionalProperties":false,"required":["code","severity"],"properties":{"code":{"type":"string","enum":["disk_failing","disk_warning","disk_health_unknown","disk_hot","cpu_hot","volume_offline","volume_degraded","volume_read_only","volume_full","volume_nearly_full","volume_errors","volume_reconcile_failed"]},"severity":{"type":"string","enum":["warning","critical"]},"diskId":{"$ref":"#/components/schemas/StableResourceID"},"value":{"type":"integer","format":"int64","description":"disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted; volume_degraded: disks missing."}}};
 
 function validate65(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -189,7 +189,7 @@ if(typeof data0 !== "string"){
 validate65.errors = [{instancePath:instancePath+"/code",schemaPath:"#/properties/code/type",keyword:"type",params:{type: "string"}}];
 return false;
 }
-if(!(((((((((((data0 === "disk_failing") || (data0 === "disk_warning")) || (data0 === "disk_health_unknown")) || (data0 === "disk_hot")) || (data0 === "cpu_hot")) || (data0 === "volume_offline")) || (data0 === "volume_read_only")) || (data0 === "volume_full")) || (data0 === "volume_nearly_full")) || (data0 === "volume_errors")) || (data0 === "volume_reconcile_failed"))){
+if(!((((((((((((data0 === "disk_failing") || (data0 === "disk_warning")) || (data0 === "disk_health_unknown")) || (data0 === "disk_hot")) || (data0 === "cpu_hot")) || (data0 === "volume_offline")) || (data0 === "volume_degraded")) || (data0 === "volume_read_only")) || (data0 === "volume_full")) || (data0 === "volume_nearly_full")) || (data0 === "volume_errors")) || (data0 === "volume_reconcile_failed"))){
 validate65.errors = [{instancePath:instancePath+"/code",schemaPath:"#/properties/code/enum",keyword:"enum",params:{allowedValues: schema28.properties.code.enum}}];
 return false;
 }

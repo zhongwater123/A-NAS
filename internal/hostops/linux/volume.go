@@ -124,22 +124,7 @@ func (e *Executor) createVolume(ctx context.Context, operation *volumeOperation)
 	if err := os.MkdirAll(e.mountPoint, 0o750); err != nil {
 		return datavolume.Volume{}, fmt.Errorf("create mount point: %w", err)
 	}
-	unit := fmt.Sprintf(`[Unit]
-Description=A-NAS data volume
-After=local-fs-pre.target
-Before=local-fs.target
-
-[Mount]
-What=UUID=%s
-Where=%s
-Type=btrfs
-Options=noatime,compress=zstd:3,nodev,nosuid,noexec
-TimeoutSec=30
-
-[Install]
-WantedBy=local-fs.target
-`, uuid, e.mountPoint)
-	if err := writeAtomic(e.mountUnitPath(), []byte(unit), 0o644); err != nil {
+	if err := writeAtomic(e.mountUnitPath(), []byte(mountUnit(uuid, e.mountPoint)), 0o644); err != nil {
 		return datavolume.Volume{}, fmt.Errorf("install data-volume mount unit: %w", err)
 	}
 	// A filesystem on several disks mounts once the kernel knows them all.
@@ -237,6 +222,77 @@ func (e *Executor) madeBy(operation *volumeOperation, mounted *hoststate.DataVol
 	return true
 }
 
+// mountOptions are the data volume's mount options. A device the volume was
+// mounted from may vanish while the volume keeps running, as a mirror does
+// when one disk fails, so the mount is not bound to it: without
+// x-systemd.device-bound=no, systemd unmounts the volume when the device it
+// names in the mount table goes away (ADR 0025).
+const mountOptions = "noatime,compress=zstd:3,nodev,nosuid,noexec,x-systemd.device-bound=no"
+
+// mountUnit is the data volume's mount unit. systemd waits for the
+// filesystem's UUID device, which udev marks ready once the kernel knows
+// every disk of the volume, for its device timeout (90 seconds by default);
+// the unit then fails, and the Host Agent decides whether to mount a mirror
+// without the missing disk.
+func mountUnit(uuid, mountPoint string) string {
+	return fmt.Sprintf(`[Unit]
+Description=A-NAS data volume
+After=local-fs-pre.target
+Before=local-fs.target
+
+[Mount]
+What=UUID=%s
+Where=%s
+Type=btrfs
+Options=%s
+TimeoutSec=30
+
+[Install]
+WantedBy=local-fs.target
+`, uuid, mountPoint, mountOptions)
+}
+
+// mountUnitUUID is the filesystem UUID the mount unit mounts, or "".
+func mountUnitUUID(contents []byte) string {
+	for line := range strings.SplitSeq(string(contents), "\n") {
+		if value, found := strings.CutPrefix(strings.TrimSpace(line), "What=UUID="); found {
+			if uuid := strings.TrimSpace(value); datavolume.ValidFilesystemUUID(uuid) {
+				return uuid
+			}
+		}
+	}
+	return ""
+}
+
+// EnsureMountUnit brings a mount unit written by an earlier release up to
+// date and reports whether it changed it. It changes nothing the next mount
+// would not: systemd keeps the dependencies of a volume mounted now until
+// it is mounted again.
+func (e *Executor) EnsureMountUnit(ctx context.Context) (bool, error) {
+	contents, err := os.ReadFile(e.mountUnitPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the data-volume mount unit: %w", err)
+	}
+	uuid := mountUnitUUID(contents)
+	if uuid == "" {
+		return false, errors.New("the data-volume mount unit names no filesystem UUID")
+	}
+	want := mountUnit(uuid, e.mountPoint)
+	if string(contents) == want {
+		return false, nil
+	}
+	if err := writeAtomic(e.mountUnitPath(), []byte(want), 0o644); err != nil {
+		return false, fmt.Errorf("update the data-volume mount unit: %w", err)
+	}
+	if output, err := e.runner.Run(ctx, "systemctl", []string{"daemon-reload"}, ""); err != nil {
+		return true, commandError("systemctl daemon-reload failed", err, output)
+	}
+	return true, nil
+}
+
 // checkMountUnit refuses to replace a mount unit for a filesystem the plan
 // did not make: a data volume that is offline now would otherwise never
 // mount again, and its disks would look unused (issue #165). The unit may
@@ -250,13 +306,8 @@ func (e *Executor) checkMountUnit(ctx context.Context, devices []BlockDevice) er
 	if err != nil {
 		return fmt.Errorf("read the data-volume mount unit: %w", err)
 	}
-	uuid := ""
-	for line := range strings.SplitSeq(string(contents), "\n") {
-		if value, found := strings.CutPrefix(strings.TrimSpace(line), "What=UUID="); found {
-			uuid = strings.TrimSpace(value)
-		}
-	}
-	if !datavolume.ValidFilesystemUUID(uuid) {
+	uuid := mountUnitUUID(contents)
+	if uuid == "" {
 		return datavolume.ErrVolumeExists
 	}
 	if e.formattedByUnfinishedCreation(uuid) {
@@ -434,7 +485,13 @@ func (e *Executor) ReconcileConversion(ctx context.Context) (bool, error) {
 	if !marker.Layout.Fits(2) {
 		return false, nil
 	}
-	data, metadata, operation := linuxhoststate.ReadBtrfsAllocation(os.DirFS(e.systemRoot), strings.ToLower(marker.FilesystemUUID))
+	uuid := strings.ToLower(marker.FilesystemUUID)
+	// Without one of its disks a mirror cannot hold two copies: converting
+	// would fail every time. It converts once the disk is back or replaced.
+	if linuxhoststate.ReadMissingDevices(os.DirFS(e.systemRoot), uuid) > 0 {
+		return false, nil
+	}
+	data, metadata, operation := linuxhoststate.ReadBtrfsAllocation(os.DirFS(e.systemRoot), uuid)
 	args := conversionCommand(marker.Layout, data, metadata, operation)
 	if args == nil {
 		return false, nil

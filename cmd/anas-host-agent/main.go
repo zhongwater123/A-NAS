@@ -162,7 +162,7 @@ func run(logger *slog.Logger) error {
 	defer func() { _ = sessions.Close() }()
 	operations := rootagent.NewOperationsHandler(rootagent.Services{
 		Reader: reader, Volume: executor, Credentials: executor, Identities: executor, Viewing: executor, Apps: executor, Snapshots: executor,
-		SystemLogs: journal.New(), WebSearch: executor, ReconcileFailed: reconcileFailed.Load,
+		SystemLogs: journal.New(), WebSearch: executor, ReconcileFailed: reconcileFailed.Load, RestoringRedundancy: executor.RestoringRedundancy,
 	}, logger)
 	mux := http.NewServeMux()
 	mux.Handle("/", operations)
@@ -342,7 +342,13 @@ func serveSessionLookup(config config, sessions *sessiondir.Directory, logger *s
 // state through failed, and the next round reconciles everything again; the
 // Host Agent keeps serving either way.
 func keepDataVolume(ctx context.Context, executor *linuxhostops.Executor, failed *atomic.Bool, logger *slog.Logger) {
+	if changed, err := executor.EnsureMountUnit(ctx); err != nil {
+		logger.ErrorContext(ctx, "data-volume mount unit update failed", "error", err)
+	} else if changed {
+		logger.InfoContext(ctx, "updated the data-volume mount unit; it takes effect when the volume is next mounted")
+	}
 	reconcile := func(everything bool) {
+		mountDegraded(ctx, executor, logger)
 		var repaired []string
 		var err error
 		if everything {
@@ -363,6 +369,7 @@ func keepDataVolume(ctx context.Context, executor *linuxhostops.Executor, failed
 		logRepairs(logger, repaired)
 		ensureManagedStores(ctx, executor, logger)
 		continueConversion(ctx, executor, logger)
+		restoreRedundancy(ctx, executor, logger)
 	}
 	reconcile(true)
 	ticker := time.NewTicker(15 * time.Minute)
@@ -382,6 +389,22 @@ func keepDataVolume(ctx context.Context, executor *linuxhostops.Executor, failed
 func continueConversion(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
 	if _, err := executor.ReconcileConversion(ctx); err != nil {
 		logger.ErrorContext(ctx, "data-volume conversion check failed", "error", err)
+	}
+}
+
+// mountDegraded mounts a mirror that systemd could not mount because a disk
+// is missing (ADR 0025, decision 6).
+func mountDegraded(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	if _, err := executor.MountDegraded(ctx); err != nil {
+		logger.ErrorContext(ctx, "mounting the data volume without its missing disk failed", "error", err)
+	}
+}
+
+// restoreRedundancy scrubs a volume that ran without a disk once it has all
+// its disks again.
+func restoreRedundancy(ctx context.Context, executor *linuxhostops.Executor, logger *slog.Logger) {
+	if _, err := executor.RestoreRedundancy(ctx); err != nil {
+		logger.ErrorContext(ctx, "restoring the data volume's redundancy failed", "error", err)
 	}
 }
 

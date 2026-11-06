@@ -28,7 +28,7 @@ func TestCreateVolumeResolvesStableIDAndWritesUUIDMountUnit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read mount unit: %v", err)
 	}
-	if !strings.Contains(string(unit), "What=UUID="+host.uuid(1)) || !strings.Contains(string(unit), "Options=noatime,compress=zstd:3,nodev,nosuid,noexec") {
+	if !strings.Contains(string(unit), "What=UUID="+host.uuid(1)) || !strings.Contains(string(unit), "Options=noatime,compress=zstd:3,nodev,nosuid,noexec,x-systemd.device-bound=no\n") {
 		t.Fatalf("mount unit does not bind the verified UUID and safe options:\n%s", unit)
 	}
 	if len(host.lines()) < 7 {

@@ -4502,13 +4502,13 @@ export interface components {
         HealthFindings: components["schemas"]["HealthFinding"][];
         HealthFinding: {
             /** @enum {string} */
-            code: "disk_failing" | "disk_warning" | "disk_health_unknown" | "disk_hot" | "cpu_hot" | "volume_offline" | "volume_read_only" | "volume_full" | "volume_nearly_full" | "volume_errors" | "volume_reconcile_failed";
+            code: "disk_failing" | "disk_warning" | "disk_health_unknown" | "disk_hot" | "cpu_hot" | "volume_offline" | "volume_degraded" | "volume_read_only" | "volume_full" | "volume_nearly_full" | "volume_errors" | "volume_reconcile_failed";
             /** @enum {string} */
             severity: "warning" | "critical";
             diskId?: components["schemas"]["StableResourceID"];
             /**
              * Format: int64
-             * @description disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted.
+             * @description disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted; volume_degraded: disks missing.
              */
             value?: number;
         };
@@ -4724,9 +4724,16 @@ export interface components {
             capacityBytes?: number;
             /** Format: int64 */
             availableBytes?: number;
-            /** @enum {string} */
-            state: "creating" | "available" | "unavailable" | "read_only";
+            /**
+             * @description degraded: mounted and writable without one of its disks; a mirror then keeps one copy of new data (ADR 0025).
+             * @enum {string}
+             */
+            state: "creating" | "available" | "degraded" | "unavailable" | "read_only";
             conversion?: components["schemas"]["VolumeConversion"];
+            /** @description Disks of the volume the device does not see, while it is degraded or not mounted. */
+            missingDisks?: components["schemas"]["MissingDisk"][];
+            /** @description The volume has all its disks again after running without one and is being scrubbed, so that data written meanwhile gets its second copy. */
+            restoring?: boolean;
         };
         /** @description Present while data or metadata are outside the layout's Btrfs profiles, after disks were added. */
         VolumeConversion: {
@@ -6867,6 +6874,13 @@ export interface components {
             status: components["schemas"]["TaskManagerStatus"];
             items: components["schemas"]["TaskManagerFan"][];
         };
+        /** @description A disk of the data volume that is not there, as the plan that added it recorded it. */
+        MissingDisk: {
+            id: components["schemas"]["StableResourceID"];
+            model?: string;
+            /** Format: int64 */
+            capacityBytes?: number;
+        };
         /**
          * @description A one-tap reaction, shown as ❤️ 👍 😂 🥰 👏.
          * @enum {string}
@@ -7260,6 +7274,7 @@ export type SystemThermal = components['schemas']['SystemThermal'];
 export type TaskManagerTemperature = components['schemas']['TaskManagerTemperature'];
 export type TaskManagerFan = components['schemas']['TaskManagerFan'];
 export type TaskManagerFanGroup = components['schemas']['TaskManagerFanGroup'];
+export type MissingDisk = components['schemas']['MissingDisk'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
 export type FamilyAssetIDs = components['schemas']['FamilyAssetIDs'];

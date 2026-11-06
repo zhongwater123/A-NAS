@@ -13,6 +13,7 @@ type (
 	PlanKind            = datavolume.PlanKind
 	VolumeState         = datavolume.VolumeState
 	Volume              = datavolume.Volume
+	MissingDisk         = datavolume.MissingDisk
 	ConversionState     = datavolume.ConversionState
 	Conversion          = datavolume.Conversion
 	DiskTarget          = datavolume.DiskTarget
@@ -33,6 +34,7 @@ const (
 	PlanKindAddDisks       = datavolume.PlanKindAddDisks
 	VolumeStateCreating    = datavolume.VolumeStateCreating
 	VolumeStateAvailable   = datavolume.VolumeStateAvailable
+	VolumeStateDegraded    = datavolume.VolumeStateDegraded
 	VolumeStateUnavailable = datavolume.VolumeStateUnavailable
 	VolumeStateReadOnly    = datavolume.VolumeStateReadOnly
 	ConversionRunning      = datavolume.ConversionRunning

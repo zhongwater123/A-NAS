@@ -83,7 +83,54 @@ func readDataVolume(root fs.FS, uuid string, disks []hoststate.Disk) *hoststate.
 		return volume
 	}
 	volume.Data, volume.Metadata, volume.Operation = ReadBtrfsAllocation(root, uuid)
+	volume.MissingDevices = ReadMissingDevices(root, uuid)
 	return volume
+}
+
+// ReadMissingDevices counts the devices of the mounted Btrfs filesystem with
+// the UUID that the kernel cannot write to (root is the filesystem root).
+// sysfs devinfo/<devid> lists every device the filesystem has, except a
+// replacement being written. A device absent when the volume was mounted
+// degraded is marked missing; one that comes back while it is mounted stays
+// unwritable until the next mount. A disk that vanishes while the volume is
+// mounted is marked neither way: only its entry under devices/ stops leading
+// to a block device.
+func ReadMissingDevices(root fs.FS, uuid string) int {
+	if root == nil || !datavolume.ValidFilesystemUUID(uuid) {
+		return 0
+	}
+	base := "sys/fs/btrfs/" + uuid
+	entries, err := fs.Glob(root, base+"/devinfo/*")
+	if err != nil {
+		return 0
+	}
+	devices, unwritable := 0, 0
+	for _, entry := range entries {
+		if readFlag(root, entry+"/replace_target") {
+			continue
+		}
+		devices++
+		if readFlag(root, entry+"/missing") || !readFlag(root, entry+"/writeable") {
+			unwritable++
+		}
+	}
+	links, err := fs.Glob(root, base+"/devices/*")
+	if err != nil {
+		return unwritable
+	}
+	present := 0
+	for _, link := range links {
+		if _, err := fs.Stat(root, link); err == nil {
+			present++
+		}
+	}
+	return max(unwritable, devices-present)
+}
+
+// readFlag reads a sysfs file holding 0 or 1; anything else reads as 0.
+func readFlag(root fs.FS, file string) bool {
+	contents, err := fs.ReadFile(root, file)
+	return err == nil && strings.TrimSpace(string(contents)) == "1"
 }
 
 // ReadBtrfsAllocation reads from sysfs (root is the filesystem root) the

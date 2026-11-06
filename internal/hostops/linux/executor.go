@@ -139,6 +139,13 @@ type Executor struct {
 	operationsError error
 	// operating is the plan whose operation runs now; one runs at a time.
 	operating string
+	// degradedMu orders mounting the volume without a disk, restoring its
+	// redundancy and the record of both.
+	degradedMu    sync.Mutex
+	degraded      *degradedRecord
+	degradedPath  string
+	degradedError error
+	scrubbing     bool
 }
 
 func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options) *Executor {
@@ -176,9 +183,10 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	executor.viewingPath = filepath.Join(stateDirectory, "viewing-grants.json")
 	executor.appsPath = filepath.Join(stateDirectory, "app-identities.json")
 	executor.operationsPath = filepath.Join(stateDirectory, "volume-operations.json")
+	executor.degradedPath = filepath.Join(stateDirectory, "degraded-volume.json")
 	executor.stateOwner = os.Geteuid()
 	executor.stateFailures = executor.prepareState(stateDirectory, filepath.Join(executor.systemRoot, "var", "lib", legacyStateDirectoryName), []string{
-		executor.registryPath, executor.identityPath, executor.viewingPath, executor.appsPath, executor.operationsPath,
+		executor.registryPath, executor.identityPath, executor.viewingPath, executor.appsPath, executor.operationsPath, executor.degradedPath,
 	})
 	executor.registryError = executor.loadSpaceRegistry()
 	// Viewing grants are checked against the identities, so those load first.
@@ -186,9 +194,11 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 	executor.viewingError = executor.loadViewingRegistry()
 	executor.appsError = executor.loadAppsRegistry()
 	executor.operationsError = executor.loadOperations()
+	executor.degradedError = executor.loadDegraded()
 	for path, err := range map[string]error{
 		executor.registryPath: executor.registryError, executor.identityPath: executor.identityError,
 		executor.viewingPath: executor.viewingError, executor.appsPath: executor.appsError, executor.operationsPath: executor.operationsError,
+		executor.degradedPath: executor.degradedError,
 	} {
 		if err != nil {
 			executor.logger.Error("a Host Agent record cannot be used; the operations that need it fail", "file", path, "error", err)

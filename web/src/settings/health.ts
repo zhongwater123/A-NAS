@@ -48,6 +48,12 @@ export function describeFinding(
         title: "数据卷没有挂载",
         detail: "文件、相册和应用数据暂时无法读写。请检查数据盘的连接，然后重启设备。",
       };
+    case "volume_degraded":
+      return {
+        icon: Unplug,
+        title: `数据卷缺少 ${value || 1} 块硬盘`,
+        detail: "数据卷在没有这块硬盘的情况下继续使用，新写入的文件只有一份。请尽快在“设置 → 存储”中更换硬盘。",
+      };
     case "volume_read_only":
       return {
         icon: Lock,

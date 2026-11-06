@@ -160,6 +160,61 @@ func TestAddingADiskConvertsTheVolumeAndReportsTheProgress(t *testing.T) {
 	}
 }
 
+// A mirror that runs without one disk names the disk that is gone, as the
+// plan recorded it, and takes no plan but a replacement; once the disk is
+// back it reports that its redundancy is being restored.
+func TestAMirrorMissingADiskNamesItAndTakesNoOtherPlan(t *testing.T) {
+	ctx := context.Background()
+	reader := spareDiskReader(t)
+	service := newService(t, reader, &recordingExecutor{}, storage.Options{NewID: planIDs()})
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01", "disk:fake-data-02"}, storage.LayoutMirror)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ExecutePlan(ctx, storageAdministrator, plan.ID); err != nil {
+		t.Fatal(err)
+	}
+	whole := append([]hoststate.Disk(nil), reader.state.Disks...)
+	gone := slices.IndexFunc(reader.state.Disks, func(disk hoststate.Disk) bool { return disk.ID.String() == "disk:fake-data-02" })
+	reader.state.Disks = slices.Delete(reader.state.Disks, gone, gone+1)
+	mirror := []hoststate.ProfileUsage{{Profile: hoststate.ProfileRAID1, UsedBytes: 1_000_000_000}}
+	mountVolume(reader, []string{"disk:fake-data-01"}, 1_000_000_000, mirror, mirror)
+	reader.state.DataVolume.MissingDevices = 1
+
+	volumes, err := service.ListVolumes(ctx)
+	want := []storage.MissingDisk{{ID: "disk:fake-data-02", Model: plan.Disks[1].Model, CapacityBytes: plan.Disks[1].CapacityBytes}}
+	if err != nil || volumes[0].State != storage.VolumeStateDegraded || !slices.Equal(volumes[0].MissingDisks, want) {
+		t.Fatalf("volumes = %+v, %v; want degraded without %+v", volumes, err, want)
+	}
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, storage.LayoutMirror); !errors.Is(err, storage.ErrVolumeBusy) {
+		t.Fatalf("plan while a disk is missing error = %v, want ErrVolumeBusy", err)
+	}
+
+	// Offline, the disks still there carry the filesystem; the gone one is named.
+	reader.state.DataVolume = nil
+	for index := range reader.state.Disks {
+		disk := &reader.state.Disks[index]
+		if disk.ID.String() == "disk:fake-data-01" {
+			disk.Role, disk.Signatures = hoststate.DiskRoleUnassigned, []hoststate.Signature{{Type: "btrfs", Label: "ANAS_DATA", UUID: volumeUUID}}
+		}
+	}
+	volumes, _ = service.ListVolumes(ctx)
+	if volumes[0].State != storage.VolumeStateUnavailable || !slices.Equal(volumes[0].MissingDisks, want) {
+		t.Fatalf("offline volume = %+v, want unavailable without %+v", volumes[0], want)
+	}
+
+	reader.state.Disks = whole
+	mountVolume(reader, []string{"disk:fake-data-01", "disk:fake-data-02"}, 1_000_000_000, mirror, mirror)
+	reader.state.DataVolume.Restoring = true
+	volumes, _ = service.ListVolumes(ctx)
+	if volumes[0].State != storage.VolumeStateAvailable || !volumes[0].Restoring || volumes[0].MissingDisks != nil {
+		t.Fatalf("volume with the disk back = %+v, want available and restoring", volumes[0])
+	}
+}
+
 func TestAMirrorMustHoldTheFilesAlreadyThere(t *testing.T) {
 	ctx := context.Background()
 	reader := spareDiskReader(t)

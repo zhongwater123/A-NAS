@@ -167,6 +167,10 @@ type dataVolumeDocument struct {
 	Data           []profileUsageDocument    `json:"data"`
 	Metadata       []profileUsageDocument    `json:"metadata"`
 	Operation      hoststate.VolumeOperation `json:"operation,omitempty"`
+	// MissingDevices is left out when none is missing, so a Product Service
+	// that predates it reads a whole volume as before.
+	MissingDevices int  `json:"missingDevices,omitempty"`
+	Restoring      bool `json:"restoring,omitempty"`
 }
 
 type profileUsageDocument struct {
@@ -353,6 +357,7 @@ func DocumentFromDomain(state hoststate.State) StateDocument {
 		dataVolume = &dataVolumeDocument{
 			FilesystemUUID: volume.FilesystemUUID, DiskIDs: make([]string, len(volume.DiskIDs)),
 			Data: usageDocuments(volume.Data), Metadata: usageDocuments(volume.Metadata), Operation: volume.Operation,
+			MissingDevices: volume.MissingDevices, Restoring: volume.Restoring,
 		}
 		for i, id := range volume.DiskIDs {
 			dataVolume.DiskIDs[i] = id.String()
@@ -514,14 +519,14 @@ func (document *dataVolumeDocument) ToDomain(disks []hoststate.Disk) (*hoststate
 	if document == nil {
 		return nil, nil
 	}
-	if strings.TrimSpace(document.FilesystemUUID) == "" || len(document.DiskIDs) == 0 || !document.Operation.Valid() {
+	if strings.TrimSpace(document.FilesystemUUID) == "" || len(document.DiskIDs) == 0 || !document.Operation.Valid() || document.MissingDevices < 0 {
 		return nil, errors.New("invalid data volume")
 	}
 	roles := make(map[string]hoststate.DiskRole, len(disks))
 	for _, disk := range disks {
 		roles[disk.ID.String()] = disk.Role
 	}
-	volume := &hoststate.DataVolume{FilesystemUUID: document.FilesystemUUID, Operation: document.Operation}
+	volume := &hoststate.DataVolume{FilesystemUUID: document.FilesystemUUID, Operation: document.Operation, MissingDevices: document.MissingDevices, Restoring: document.Restoring}
 	for _, value := range document.DiskIDs {
 		id, err := hoststate.NewResourceID(value)
 		if err != nil || roles[id.String()] != hoststate.DiskRoleData {

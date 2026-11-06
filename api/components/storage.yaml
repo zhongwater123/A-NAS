@@ -22,8 +22,27 @@ schemas:
       layout: { $ref: "#/schemas/VolumeLayout" }
       capacityBytes: { type: integer, format: int64, minimum: 0 }
       availableBytes: { type: integer, format: int64, minimum: 0 }
-      state: { type: string, enum: [creating, available, unavailable, read_only] }
+      state:
+        type: string
+        enum: [creating, available, degraded, unavailable, read_only]
+        description: "degraded: mounted and writable without one of its disks; a mirror then keeps one copy of new data (ADR 0025)."
       conversion: { $ref: "#/schemas/VolumeConversion" }
+      missingDisks:
+        type: array
+        items: { $ref: "#/schemas/MissingDisk" }
+        description: Disks of the volume the device does not see, while it is degraded or not mounted.
+      restoring:
+        type: boolean
+        description: The volume has all its disks again after running without one and is being scrubbed, so that data written meanwhile gets its second copy.
+  MissingDisk:
+    type: object
+    additionalProperties: false
+    required: [id]
+    description: A disk of the data volume that is not there, as the plan that added it recorded it.
+    properties:
+      id: { $ref: "common.yaml#/schemas/StableResourceID" }
+      model: { type: string }
+      capacityBytes: { type: integer, format: int64, minimum: 0 }
   VolumeConversion:
     type: object
     additionalProperties: false

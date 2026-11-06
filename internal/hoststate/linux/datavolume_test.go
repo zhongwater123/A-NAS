@@ -2,7 +2,10 @@ package linux
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -139,5 +142,69 @@ func TestNoDataVolumeWithoutABtrfsMountedThere(t *testing.T) {
 	}
 	if volume := readDataVolume(fstest.MapFS{}, "09e275fe-794a-458d-8200-b6e67c55cc22", nil); volume != nil {
 		t.Fatalf("data volume without data disks = %+v, want nil", volume)
+	}
+}
+
+// The states below are what Linux 6.12 showed in a VM (see the investigation
+// 2026-11-06-mirror-missing-a-disk): a device absent at a degraded mount is
+// marked missing, one that vanishes while mounted is not, and one that comes
+// back while mounted stays unwritable.
+func TestReadMissingDevicesCountsEveryWayADiskGoes(t *testing.T) {
+	const uuid = "22786f00-8ff1-4e26-96b4-4851f4b25fd3"
+	type device struct {
+		devid                       string
+		missing, writeable, replace string
+	}
+	cases := []struct {
+		name    string
+		devices []device
+		links   []string // block devices under devices/
+		gone    []string // links whose block device vanished
+		want    int
+	}{
+		{name: "whole", devices: []device{{"1", "0", "1", "0"}, {"2", "0", "1", "0"}}, links: []string{"sda1", "sdb1"}},
+		{name: "mounted degraded", devices: []device{{"1", "0", "1", "0"}, {"2", "1", "0", "0"}}, links: []string{"sda1"}, want: 1},
+		{name: "vanished while mounted", devices: []device{{"1", "0", "1", "0"}, {"2", "0", "1", "0"}}, links: []string{"sdb1"}, gone: []string{"sda1"}, want: 1},
+		{name: "back while mounted", devices: []device{{"1", "0", "1", "0"}, {"2", "0", "0", "0"}}, links: []string{"sda1"}, want: 1},
+		{name: "being replaced", devices: []device{{"0", "0", "1", "1"}, {"1", "0", "1", "0"}, {"2", "1", "0", "0"}}, links: []string{"sda1", "sdb1"}, want: 1},
+		{name: "replaced", devices: []device{{"1", "0", "1", "0"}, {"2", "0", "1", "0"}}, links: []string{"sda1", "sdb1"}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			base := filepath.Join(root, "sys", "fs", "btrfs", uuid)
+			write := func(path, value string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(value+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, device := range test.devices {
+				dir := filepath.Join(base, "devinfo", device.devid)
+				write(filepath.Join(dir, "missing"), device.missing)
+				write(filepath.Join(dir, "writeable"), device.writeable)
+				write(filepath.Join(dir, "replace_target"), device.replace)
+			}
+			if err := os.MkdirAll(filepath.Join(base, "devices"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range append(append([]string(nil), test.links...), test.gone...) {
+				target := filepath.Join(root, "sys", "block", name)
+				if !slices.Contains(test.gone, name) {
+					if err := os.MkdirAll(target, 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.Symlink(target, filepath.Join(base, "devices", name)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := ReadMissingDevices(os.DirFS(root), uuid); got != test.want {
+				t.Fatalf("ReadMissingDevices() = %d, want %d", got, test.want)
+			}
+		})
 	}
 }

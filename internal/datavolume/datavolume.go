@@ -45,8 +45,10 @@ const (
 type VolumeState string
 
 const (
-	VolumeStateCreating    VolumeState = "creating"
-	VolumeStateAvailable   VolumeState = "available"
+	VolumeStateCreating  VolumeState = "creating"
+	VolumeStateAvailable VolumeState = "available"
+	// VolumeStateDegraded: mounted and writable without one of its disks.
+	VolumeStateDegraded    VolumeState = "degraded"
 	VolumeStateUnavailable VolumeState = "unavailable"
 	VolumeStateReadOnly    VolumeState = "read_only"
 )
@@ -64,6 +66,21 @@ type Volume struct {
 	// Conversion is set while data or metadata are outside the layout's
 	// Btrfs profiles, after disks were added with another layout.
 	Conversion *Conversion `json:"conversion,omitempty"`
+	// MissingDisks are the volume's disks the host does not show while it is
+	// degraded or not mounted.
+	MissingDisks []MissingDisk `json:"missingDisks,omitempty"`
+	// Restoring says the volume has all its disks again after running without
+	// one, and is being checked so that what was written meanwhile has two
+	// copies again.
+	Restoring bool `json:"restoring,omitempty"`
+}
+
+// MissingDisk is a disk of the volume that is not there, as the plan that
+// added it recorded it.
+type MissingDisk struct {
+	ID            string `json:"id"`
+	Model         string `json:"model,omitempty"`
+	CapacityBytes uint64 `json:"capacityBytes,omitempty"`
 }
 
 // UnmarshalJSON also reads volumes stored when a volume had one disk.

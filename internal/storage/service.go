@@ -280,11 +280,11 @@ func (s *Service) PlanVolume(ctx context.Context, actor accounts.User, diskIDs [
 	} else {
 		plan.Kind = PlanKindAddDisks
 		volume := observeVolume(current, state)
+		if volume.State == VolumeStateDegraded || volume.Conversion != nil {
+			return ExecutionPlan{}, ErrVolumeBusy
+		}
 		if volume.State != VolumeStateAvailable || state.DataVolume == nil {
 			return ExecutionPlan{}, ErrVolumeUnavailable
-		}
-		if volume.Conversion != nil {
-			return ExecutionPlan{}, ErrVolumeBusy
 		}
 		members := diskSizes(state, volume.DiskIDs)
 		if !plan.Layout.Fits(len(members) + len(disks)) {
@@ -632,7 +632,26 @@ func (s *Service) ListVolumes(ctx context.Context) ([]Volume, error) {
 		current.State, current.AvailableBytes = VolumeStateUnavailable, nil
 		return []Volume{current}, nil
 	}
-	return []Volume{observeVolume(current, state)}, nil
+	volume := observeVolume(current, state)
+	s.mu.Lock()
+	for i, missing := range volume.MissingDisks {
+		volume.MissingDisks[i] = s.recordedDiskLocked(missing.ID)
+	}
+	s.mu.Unlock()
+	return []Volume{volume}, nil
+}
+
+// recordedDiskLocked is the disk as the latest plan that named it recorded it.
+func (s *Service) recordedDiskLocked(diskID string) MissingDisk {
+	disk, at := MissingDisk{ID: diskID}, time.Time{}
+	for _, plan := range s.plans {
+		for _, planned := range plan.Disks {
+			if planned.ID == diskID && !plan.CreatedAt.Before(at) {
+				disk.Model, disk.CapacityBytes, at = planned.Model, planned.CapacityBytes, plan.CreatedAt
+			}
+		}
+	}
+	return disk
 }
 
 // ContinueConversion asks the Host Agent to convert the data volume to its
@@ -683,7 +702,8 @@ func (s *Service) currentVolumeLocked() (Volume, bool) {
 // mounted and writable, its size and free space, its disks, and how far a
 // conversion to its layout has come.
 func observeVolume(volume Volume, state hoststate.State) Volume {
-	volume.State, volume.AvailableBytes, volume.Conversion = VolumeStateUnavailable, nil, nil
+	planned := volume.DiskIDs
+	volume.State, volume.AvailableBytes, volume.Conversion, volume.MissingDisks, volume.Restoring = VolumeStateUnavailable, nil, nil, nil, false
 	var raw []uint64
 	for _, disk := range state.Disks {
 		if slices.Contains(volume.DiskIDs, disk.ID.String()) {
@@ -711,11 +731,20 @@ func observeVolume(volume Volume, state hoststate.State) Volume {
 	}
 	mounted := state.DataVolume
 	if mounted == nil || volume.State == VolumeStateUnavailable || (volume.FilesystemUUID != "" && !strings.EqualFold(mounted.FilesystemUUID, volume.FilesystemUUID)) {
+		volume.MissingDisks = missingDisks(planned, offlineMembers(state, volume.FilesystemUUID))
 		return volume
 	}
 	volume.DiskIDs = make([]string, 0, len(mounted.DiskIDs))
 	for _, id := range mounted.DiskIDs {
 		volume.DiskIDs = append(volume.DiskIDs, id.String())
+	}
+	if mounted.MissingDevices > 0 {
+		if volume.State == VolumeStateAvailable {
+			volume.State = VolumeStateDegraded
+		}
+		volume.MissingDisks = missingDisks(planned, volume.DiskIDs)
+	} else {
+		volume.Restoring = mounted.Restoring
 	}
 	// A single disk is never converted to; its metadata is dup or single
 	// depending on the btrfs-progs that formatted it.
@@ -729,6 +758,29 @@ func observeVolume(volume Volume, state hoststate.State) Volume {
 		}
 	}
 	return volume
+}
+
+// offlineMembers are the disks that carry the filesystem while it is not
+// mounted.
+func offlineMembers(state hoststate.State, uuid string) []string {
+	var members []string
+	for _, disk := range state.Disks {
+		if uuid != "" && slices.ContainsFunc(disk.Signatures, func(signature hoststate.Signature) bool { return strings.EqualFold(signature.UUID, uuid) }) {
+			members = append(members, disk.ID.String())
+		}
+	}
+	return members
+}
+
+// missingDisks are the planned disks that are not present.
+func missingDisks(planned, present []string) []MissingDisk {
+	var missing []MissingDisk
+	for _, id := range planned {
+		if !slices.Contains(present, id) {
+			missing = append(missing, MissingDisk{ID: id})
+		}
+	}
+	return missing
 }
 
 // DataVolumeFilesystemUUID returns the filesystem UUID of the one data volume

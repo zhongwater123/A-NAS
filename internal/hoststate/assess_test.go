@@ -125,6 +125,24 @@ func TestAssessReportsAFailedReconciliation(t *testing.T) {
 	}
 }
 
+// A mirror that runs without one of its disks keeps serving, but what is
+// written now has one copy: critical, with how many disks are missing.
+func TestAssessReportsAVolumeMissingADisk(t *testing.T) {
+	disks := []hoststate.Disk{
+		{ID: mustDiskID(t, "disk:system"), Role: hoststate.DiskRoleSystem, Health: hoststate.HealthHealthy},
+		{ID: mustDiskID(t, "disk:data"), Role: hoststate.DiskRoleData, Health: hoststate.HealthHealthy},
+	}
+	volume := &hoststate.DataVolume{FilesystemUUID: "09e275fe-794a-458d-8200-b6e67c55cc22", DiskIDs: []hoststate.ResourceID{mustDiskID(t, "disk:data")}, MissingDevices: 1}
+	health, findings := hoststate.Assess(hoststate.State{Disks: disks, DataVolume: volume}, hoststate.Expectations{DataVolume: true})
+	if want := []found{{hoststate.FindingVolumeDegraded, hoststate.HealthCritical, "", 1}}; health != hoststate.HealthCritical || !reflect.DeepEqual(summarize(findings), want) {
+		t.Fatalf("Assess(missing a disk) = %q, %+v; want critical, %+v", health, summarize(findings), want)
+	}
+	volume.MissingDevices = 0
+	if health, findings := hoststate.Assess(hoststate.State{Disks: disks, DataVolume: volume}, hoststate.Expectations{DataVolume: true}); health != hoststate.HealthHealthy {
+		t.Fatalf("Assess(whole) = %q, %+v; want healthy", health, summarize(findings))
+	}
+}
+
 // A CPU at its hot limit, 10 °C below where it throttles hard, needs
 // attention; below it, the system is healthy.
 func TestAssessReportsAHotCPU(t *testing.T) {
