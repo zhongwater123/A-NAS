@@ -200,31 +200,32 @@ func (s *Service) LabelCounts(ctx context.Context, p Principal, viewing string) 
 		margin float64
 	}
 	tallies := make(map[string]*tally)
-	err = s.index.read(ctx, s, s.labels.Model, func(vectors map[string][]float32) {
-		for _, c := range candidates {
-			vector, ok := vectors[c.objectID]
-			if !ok {
-				continue
-			}
-			for _, label := range s.labels.Shown() {
-				margin := dot(vector, labelVectors[label.ID]) - s.labels.Thresholds[label.ID]
-				if margin < 0 || hidden[c.id+"\x1f"+label.ID] {
-					continue
-				}
-				t := tallies[label.ID]
-				if t == nil {
-					t = &tally{}
-					tallies[label.ID] = t
-				}
-				t.photos++
-				if t.cover == "" || margin > t.margin {
-					t.cover, t.margin = c.id, margin
-				}
-			}
-		}
-	})
+	shown := s.labels.Shown()
+	queries := make([]thresholdQuery, len(shown))
+	for i, label := range shown {
+		queries[i] = thresholdQuery{vector: labelVectors[label.ID], floor: s.labels.Thresholds[label.ID]}
+	}
+	found, err := s.above(ctx, s.labels.Model, scopeIDs(scope), aiObjects(candidates, ""), queries, false)
 	if err != nil {
 		return nil, false, err
+	}
+	for _, c := range candidates {
+		for i, label := range shown {
+			sim, ok := found[i][c.objectID]
+			if !ok || hidden[c.id+"\x1f"+label.ID] {
+				continue
+			}
+			margin := sim - s.labels.Thresholds[label.ID]
+			t := tallies[label.ID]
+			if t == nil {
+				t = &tally{}
+				tallies[label.ID] = t
+			}
+			t.photos++
+			if t.cover == "" || margin > t.margin {
+				t.cover, t.margin = c.id, margin
+			}
+		}
 	}
 	for _, label := range s.labels.Shown() {
 		if t := tallies[label.ID]; t != nil {
@@ -259,19 +260,16 @@ func (s *Service) LabelPhotos(ctx context.Context, p Principal, label, viewing, 
 	if err != nil {
 		return Page{}, err
 	}
-	threshold := s.labels.Thresholds[label]
-	var hits []searchHit
-	err = s.index.read(ctx, s, s.labels.Model, func(vectors map[string][]float32) {
-		for _, c := range candidates {
-			if vector, ok := vectors[c.objectID]; ok && !hidden[c.id+"\x1f"+label] {
-				if score := dot(vector, labelVectors[label]); score >= threshold {
-					hits = append(hits, searchHit{c.id, score})
-				}
-			}
-		}
-	})
+	found, err := s.above(ctx, s.labels.Model, scopeIDs(scope), aiObjects(candidates, ""),
+		[]thresholdQuery{{vector: labelVectors[label], floor: s.labels.Thresholds[label]}}, true)
 	if err != nil {
 		return Page{}, err
+	}
+	var hits []searchHit
+	for _, c := range candidates {
+		if score, ok := found[0][c.objectID]; ok && !hidden[c.id+"\x1f"+label] {
+			hits = append(hits, searchHit{c.id, score})
+		}
 	}
 	sortHits(hits)
 	if after != nil {

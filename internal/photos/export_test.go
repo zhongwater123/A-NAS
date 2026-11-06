@@ -17,8 +17,20 @@ func SetPressureRecheck(d time.Duration) (restore func()) {
 	return func() { pressureRecheck = previous }
 }
 
-// ShadowRunning reports whether RunVectorShadow is taking searches.
-func (s *Service) ShadowRunning() bool { return s.shadowing.Load() }
+// CheckRunning reports whether RunVectorCheck is taking searches.
+func (s *Service) CheckRunning() bool { return s.checking.Load() }
+
+// SetIndexOverfetch sets how many more objects than it needs ranking first
+// asks the index for, and returns a function that restores it.
+func SetIndexOverfetch(n int) func() {
+	previous := indexOverfetch
+	indexOverfetch = n
+	return func() { indexOverfetch = previous }
+}
+
+// UseVectorIndex makes ranking read index, or the Catalog alone when it is
+// nil, as Options.Vectors would.
+func UseVectorIndex(s *Service, index VectorIndex) { s.vectors = index }
 
 // VectorSyncBackoff is how long vector sync waits after failures in a row.
 func VectorSyncBackoff(idle time.Duration, failures int) time.Duration {

@@ -129,14 +129,8 @@ func (s *Service) ImageSearchResults(ctx context.Context, p Principal, searchID 
 	if err != nil {
 		return Page{}, err
 	}
-	var hits []searchHit
-	var vectorErr error
-	err = s.detected.read(ctx, s, s.objectCalibration.Model, func(found map[string][]classScore) {
-		vectorErr = s.index.read(ctx, s, search.model, func(vectors map[string][]float32) {
-			hits = likeHits(candidates, vectors, found, search.vector, search.objects, "")
-		})
-	})
-	if err = errors.Join(err, vectorErr); err != nil {
+	hits, err := s.likeHits(ctx, scopeIDs(scope), candidates, search.model, search.vector, search.objects, "")
+	if err != nil {
 		return Page{}, err
 	}
 	assets, next, err := s.hitPage(ctx, p, scope, hits, after, request.Limit)

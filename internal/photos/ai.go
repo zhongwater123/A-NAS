@@ -266,7 +266,6 @@ func (s *Service) completeEmbedding(ctx context.Context, job claimedJob, model s
 	if err != nil {
 		return err
 	}
-	stored := false
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		var exists bool
 		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE object_id = ? AND derivation = ?)",
@@ -286,12 +285,8 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET model = excluded.model, vector 
 			}
 		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM jobs WHERE object_id = ? AND derivation = ?", job.objectID, job.derivation)
-		stored = err == nil
 		return err
 	})
-	if err == nil && stored {
-		s.index.put(job.objectID, model, vector)
-	}
 	return err
 }
 
