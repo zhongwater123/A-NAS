@@ -567,6 +567,8 @@ func safeError(err error) string {
 		return "session or account unavailable"
 	case errors.Is(err, ErrInactive):
 		return "share withdrawn"
+	case errors.Is(err, ErrBridgeChanged):
+		return "file service restarted; retry the operation"
 	case errors.Is(err, ErrInvalid):
 		return "invalid or changed source content"
 	case errors.Is(err, os.ErrPermission):

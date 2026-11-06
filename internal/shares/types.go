@@ -16,6 +16,10 @@ const MaxPage = 100
 
 var ErrNotFound = errors.New("share not found")
 var ErrInactive = errors.New("share is no longer active")
+
+// ErrBridgeChanged rejects work from a previous file-service generation.
+// It must not be presented as a user withdrawing the share.
+var ErrBridgeChanged = errors.New("share file service generation changed")
 var ErrInvalid = errors.New("invalid share request")
 var ErrConflict = errors.New("request key reused with different content")
 var ErrBusy = errors.New("share task limit reached")
