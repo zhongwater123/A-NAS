@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadTaskNotices } from "../assistant/taskNotices";
 import { http, server } from "../test/server";
 import { Companion } from "./Companion";
+import { resetCompanionCommands, runCompanionCommand } from "./commands";
+import { companionLock, companionPlayback, companionSleep, resetCompanionHost } from "./host";
 import { companionReady, companionState, reportCards, reportEvent, resetWorkStatus, startTurn } from "./workStatus";
 
 const origin = window.location.origin;
@@ -45,6 +47,8 @@ afterEach(() => {
   // The page's state outlives the companion, and so a test: back to awake, unlocked and idle.
   act(() => {
     resetWorkStatus();
+    resetCompanionHost();
+    resetCompanionCommands();
     companionState.writePet("main", "sleep", { sleeping: false });
     companionState.writePet("main", "lock", { locked: false });
   });
@@ -239,7 +243,8 @@ describe("what VNAS asks of the companion", () => {
   it("sleeps, and wakes when it is clicked", async () => {
     serve([IDLE, "睡觉-开始", "睡觉-循环", "睡觉-起来"]);
     const { pet, videos } = await mount();
-    write("sleep", { sleeping: true, start: "睡觉-开始", loop: "睡觉-循环", end: "睡觉-起来" });
+    // As VNAS puts it to sleep: through the page's sleep store, which a click wakes it from.
+    act(() => void companionSleep.enter("main", { start: "睡觉-开始", loop: "睡觉-循环", end: "睡觉-起来" }));
     await plays("睡觉-开始");
     await ready(videos);
     act(() => fireEvent(front(videos), new Event("ended")));
@@ -267,6 +272,75 @@ describe("what VNAS asks of the companion", () => {
     write("lock", { locked: false });
     expect(play.mock.contexts).toContain(front(videos));
     await plays(IDLE);
+  });
+});
+
+describe("VNAS's commands, carried out by the card", () => {
+  const SESSION = "live0001";
+
+  it("answers an animation once the card has played it to its end", async () => {
+    serve([IDLE, "点击回应-元气挥手"]);
+    const { videos } = await mount();
+    startTurn(SESSION);
+    let outcome: Awaited<ReturnType<typeof runCompanionCommand>> | undefined;
+    void runCompanionCommand(SESSION, { action: "anim", args: { name: "点击回应-元气挥手" } }).then((answer) => {
+      outcome = answer;
+    });
+    await plays("点击回应-元气挥手");
+    await ready(videos);
+    expect(outcome).toBeUndefined();
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await waitFor(() =>
+      expect(outcome).toEqual({ ok: true, result: { status: "ended", playbackId: expect.stringMatching(/^pb-/) } }),
+    );
+  });
+
+  it("hears that the page is hidden, and that a hidden card cut an animation short", async () => {
+    serve([IDLE, "点击回应-元气挥手"]);
+    await mount();
+    startTurn(SESSION);
+    hide(true);
+    expect(await runCompanionCommand(SESSION, { action: "anim", args: { name: "点击回应-元气挥手" } })).toEqual({
+      ok: false,
+      error: { reason: "paused", message: expect.any(String) },
+    });
+    // A command written past the check (as a race would) is reported cancelled by the card.
+    const record = companionPlayback.create("main", "点击回应-元气挥手");
+    write("anim", { name: "点击回应-元气挥手", playbackId: record.playbackId });
+    await waitFor(() => expect(companionPlayback.get(record.playbackId)?.status).toBe("cancelled"));
+    expect(companionPlayback.get(record.playbackId)?.reason).toBe("frozen");
+  });
+
+  it("lets the member take it over from a lock VNAS holds", async () => {
+    serve([IDLE]);
+    const { pet } = await mount();
+    startTurn(SESSION);
+    const taken = await act(() => runCompanionCommand(SESSION, { action: "lock", args: {} }));
+    expect(taken).toMatchObject({ ok: true, result: { status: "ok", lockId: expect.any(String) } });
+    expect(companionLock.locked("main")).toBe(true);
+    // jsdom has no pointer capture, which the card's grab takes.
+    const element = Element.prototype as unknown as Record<string, unknown>;
+    const capture = { hasPointerCapture: () => false, setPointerCapture: () => {}, releasePointerCapture: () => {} };
+    const added = Object.keys(capture).filter((name) => !(name in element));
+    for (const name of added) element[name] = capture[name as keyof typeof capture];
+    try {
+      fireEvent.pointerDown(pet, { button: 0, pointerId: 1 });
+      fireEvent.pointerUp(pet, { button: 0, pointerId: 1 });
+    } finally {
+      for (const name of added) delete element[name];
+    }
+    expect(companionLock.locked("main")).toBe(false);
+    expect(companionState.read().pets.main.lock.data).toEqual({ locked: false });
+    const lockId = taken.ok ? taken.result.lockId : undefined;
+    expect(
+      await runCompanionCommand(SESSION, {
+        action: "position",
+        args: { x: 0.5, y: 0.5, mode: "instant", lock: lockId },
+      }),
+    ).toEqual({
+      ok: false,
+      error: { reason: "lock-lost", cause: "preempted", message: expect.any(String) },
+    });
   });
 });
 

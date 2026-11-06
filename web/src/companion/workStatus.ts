@@ -102,6 +102,14 @@ export function startTurn(sessionId: string): void {
   prompting.add(sessionId);
 }
 
+/**
+ * Whether the conversation's running turn is one this window started: only such a turn's commands
+ * move this device's companion (commands.ts answers any other not-controlling).
+ */
+export function isPrompting(sessionId: string): boolean {
+  return prompting.has(sessionId);
+}
+
 /** A gateway event of a conversation: counts only for a turn this window started. */
 export function reportEvent(sessionId: string, type: string, payload?: { name?: unknown; status?: unknown }): void {
   if (!prompting.has(sessionId)) return;
@@ -184,6 +192,21 @@ export function companionReady(): boolean {
 /** The card is on the page and reads companionState from now on, or has gone. */
 export function setCompanionReady(ready: boolean): void {
   cardReady = ready;
+}
+
+let cardPaused = false;
+
+/**
+ * Whether the card is paused in a way a command does not end, so that it would drop one: the page is
+ * hidden. Its pause after a minute without input does not count, as a command ends that one (petCard.tsx).
+ */
+export function companionPaused(): boolean {
+  return cardPaused;
+}
+
+/** The card's pause a command does not end has begun or ended. */
+export function setCompanionPaused(paused: boolean): void {
+  cardPaused = paused;
 }
 
 /** For tests: back to idle with nothing reported. */

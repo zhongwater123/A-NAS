@@ -79,6 +79,7 @@ import {
 } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
+import { runCompanionCommand } from "../companion/commands";
 import { forgetAll, reportCards, reportEvent, startTurn } from "../companion/workStatus";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { formatBytes } from "../lib/bytes";
@@ -368,6 +369,36 @@ export function AssistantPanel({
       }),
     [gateway.client],
   );
+  // VNAS's commands to the companion on this device (anas.companion): the product service sends
+  // them only to the conversation's browser, and the companion carries out those of a turn this
+  // window started (companion/commands.ts). Each is answered once, an animation when it has ended
+  // and at most 10 s on, within the 12 s the service waits; a window that closes stops waiting
+  // and answers nothing, which the service settles.
+  useEffect(() => {
+    const closed = new AbortController();
+    const off = gateway.client.onEvent((event) => {
+      if ((event.type as string) !== "anas.companion") return;
+      const session = typeof event.session_id === "string" ? event.session_id : "";
+      const command = (event.payload ?? {}) as { command_id?: unknown; action?: unknown; args?: unknown };
+      const { command_id: commandId, action } = command;
+      if (!session || typeof commandId !== "string" || !commandId || typeof action !== "string" || !action) return;
+      const args =
+        command.args && typeof command.args === "object" && !Array.isArray(command.args)
+          ? (command.args as Record<string, unknown>)
+          : {};
+      void runCompanionCommand(session, { action, args }, closed.signal)
+        .then((outcome) =>
+          closed.signal.aborted
+            ? undefined
+            : gateway.client.request("companion.result", { session_id: session, command_id: commandId, ...outcome }),
+        )
+        .catch(() => undefined);
+    });
+    return () => {
+      off();
+      closed.abort();
+    };
+  }, [gateway.client]);
 
   const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed, beforePrompt });
   const { send, cancel } = thread;

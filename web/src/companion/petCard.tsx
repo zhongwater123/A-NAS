@@ -12,8 +12,9 @@
 //   it a changed counter hands the leaf to the card. lock, sleep and workStatus are states,
 //   not events, so their value at the first read goes to the card as well (multi.ts does
 //   that for sleep).
-// - The page answers the card's own actions as dsh-pet's host does, by writing those leaves:
-//   a click wakes the pet when it sleeps, a grab releases its lock.
+// - The page answers the card's own actions as dsh-pet's host does, with its stores (host.ts):
+//   a click wakes the pet when it sleeps, a grab releases its lock, and the receipt of an
+//   animation a VNAS command asked for settles the command (commands.ts).
 //
 // What is A-NAS's own: the companion stops while the member is away (a pause, not sleep),
 // remembers where it was left on this device, waves at a new result of a scheduled task,
@@ -31,6 +32,7 @@ import { injectPetCss } from "./dsh-pet/client/pet/css";
 import type { Center } from "./dsh-pet/client/pet/motion/geometry";
 import { makePlaybackReporter } from "./dsh-pet/client/pet/playback-report";
 import type { RuntimePet } from "./dsh-pet/client/pet/types";
+import { parsePlaybackPath } from "./dsh-pet/host/playback/parse";
 import { ROUTE_PATH } from "./dsh-pet/shared/constants";
 import { pick } from "./dsh-pet/shared/pickers";
 import {
@@ -50,7 +52,14 @@ import {
   takeChanged,
 } from "./dsh-pet/shared/state";
 import type { Animations } from "./dsh-pet/shared/types";
-import { COMPANION_PET, companionState, setCompanionReady, subscribeCompanionState } from "./workStatus";
+import { companionLock, companionPlayback, companionSleep } from "./host";
+import {
+  COMPANION_PET,
+  companionState,
+  setCompanionPaused,
+  setCompanionReady,
+  subscribeCompanionState,
+} from "./workStatus";
 
 // As dsh-pet's own page builds its card (client/pet.ts): React handed in, the styles put in once.
 const PetCard = createPetCard({ h: jsx, useState, useEffect, useRef });
@@ -216,17 +225,22 @@ function remember(center: Center): void {
 }
 
 /**
- * The card's own actions, answered as dsh-pet's host answers them (host/sleep.ts and host/lock.ts):
- * a click on the sleeping pet wakes it, and grabbing it releases a lock. Nobody in this page waits
- * on a playback receipt yet.
+ * The card's own actions, answered as dsh-pet's host answers them (routes/playback.ts, routes/sleep.ts
+ * and routes/interaction.ts, over the stores in host.ts): a playback receipt settles the animation a
+ * command asked for, a click on the sleeping pet wakes it, and grabbing it releases a lock. As there, a
+ * receipt for no known animation, or with no status the card may report, is not delivered.
  */
-async function answer(url: string): Promise<boolean> {
+async function answer(url: string, body?: unknown): Promise<boolean> {
   const route = new URL(url, window.location.origin).pathname;
-  const own = companionState.read().pets[COMPANION_PET];
-  if (route === `${ROUTE_PATH}/wake` && own && readSleep(own.sleep)?.sleeping)
-    companionState.writePet(COMPANION_PET, "sleep", { sleeping: false });
-  if (route === `${ROUTE_PATH}/lock/release` && lockHeld(own?.lock))
-    companionState.writePet(COMPANION_PET, "lock", { locked: false });
+  const rest = route.startsWith(`${ROUTE_PATH}/`) ? route.slice(ROUTE_PATH.length + 1) : "";
+  const playback = parsePlaybackPath(rest);
+  if (playback?.isReport) {
+    const receipt = (body ?? {}) as { status?: unknown; reason?: unknown };
+    const outcome = companionPlayback.report(playback.playbackId, receipt.status, receipt.reason);
+    return outcome === "ok" || outcome === "ignored";
+  }
+  if (rest === "wake") companionSleep.wake(COMPANION_PET);
+  if (rest === "lock/release") companionLock.release({ petId: COMPANION_PET, force: true });
   return true;
 }
 
@@ -265,6 +279,8 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
     const rest = () => {
       window.clearTimeout(timer);
       pausedRef.current = true;
+      // Only a hidden page's pause is one a command does not end (VNAS hears paused, commands.ts).
+      setCompanionPaused(document.hidden);
       setPaused(true);
     };
     const wake = () => {
@@ -272,6 +288,7 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
         rest();
         return;
       }
+      setCompanionPaused(false);
       window.clearTimeout(timer);
       timer = window.setTimeout(rest, IDLE_MS);
       if (!pausedRef.current) return;
@@ -282,11 +299,13 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
       setPaused(false);
     };
     resume.current = wake;
+    setCompanionPaused(document.hidden);
     if (!document.hidden) timer = window.setTimeout(rest, IDLE_MS);
     for (const type of ACTIVITY) window.addEventListener(type, wake, { passive: true });
     document.addEventListener("visibilitychange", wake);
     return () => {
       resume.current = () => {};
+      setCompanionPaused(false);
       window.clearTimeout(timer);
       for (const type of ACTIVITY) window.removeEventListener(type, wake);
       document.removeEventListener("visibilitychange", wake);

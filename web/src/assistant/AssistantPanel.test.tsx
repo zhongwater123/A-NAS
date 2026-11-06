@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AssistantMessage } from "../api.generated";
-import { companionState, resetWorkStatus } from "../companion/workStatus";
+import { resetCompanionCommands } from "../companion/commands";
+import { companionPlayback, resetCompanionHost } from "../companion/host";
+import { companionState, resetWorkStatus, setCompanionReady, startTurn } from "../companion/workStatus";
 import { assistantHandlers, assistantSession } from "../test/handlers/assistant";
 import { server } from "../test/server";
 import type { Approval } from "./api";
@@ -43,6 +45,9 @@ Element.prototype.scrollTo ??= function scrollTo() {};
 afterEach(() => {
   handlers.clear();
   resetWorkStatus();
+  resetCompanionHost();
+  resetCompanionCommands();
+  setCompanionReady(false);
 });
 
 // What the companion would show: the page's GET /state section the VNAS window feeds.
@@ -201,5 +206,67 @@ describe("the VNAS window", () => {
 
     cleanup();
     expect(shown()).toBeNull();
+  });
+  it("carries out VNAS's commands to the companion and answers each one", async () => {
+    await open();
+    setCompanionReady(true);
+    // The window started this turn (it registers before every prompt, as the companion test above shows).
+    startTurn(LIVE);
+    const results = () => client.request.mock.calls.filter(([method]) => method === "companion.result");
+    const command = (command_id: string, action: string, args: Record<string, unknown>) => ({
+      command_id,
+      action,
+      args,
+    });
+
+    await emit("anas.companion", command("c".repeat(32), "broadcast", { text: "照片整理好了", duration: 5000 }));
+    expect(companionState.read().pets.main.say.data).toEqual({ text: "照片整理好了", duration: 5000, anim: true });
+    await waitFor(() =>
+      expect(client.request).toHaveBeenCalledWith("companion.result", {
+        session_id: LIVE,
+        command_id: "c".repeat(32),
+        ok: true,
+        result: { status: "ok" },
+      }),
+    );
+
+    // An animation is answered once it has played to its end.
+    await emit("anas.companion", command("a".repeat(32), "anim", { name: "点击回应-元气挥手" }));
+    const { playbackId } = companionState.read().pets.main.anim.data as { playbackId: string };
+    expect(results()).toHaveLength(1);
+    companionPlayback.report(playbackId, "ended");
+    await waitFor(() =>
+      expect(client.request).toHaveBeenCalledWith("companion.result", {
+        session_id: LIVE,
+        command_id: "a".repeat(32),
+        ok: true,
+        result: { status: "ended", playbackId },
+      }),
+    );
+
+    // Another conversation's command is answered, and refused; a malformed one is not answered at all.
+    await act(async () => {
+      for (const handler of handlers)
+        handler({ type: "anas.companion", session_id: "live0002", payload: command("b".repeat(32), "wake", {}) });
+    });
+    await waitFor(() =>
+      expect(client.request).toHaveBeenCalledWith("companion.result", {
+        session_id: "live0002",
+        command_id: "b".repeat(32),
+        ok: false,
+        error: { reason: "not-controlling", message: expect.any(String) },
+      }),
+    );
+    await emit("anas.companion", { action: "wake", args: {} });
+    await emit("anas.companion", { command_id: "d".repeat(32), args: {} });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(results()).toHaveLength(3);
+
+    // A window that closes stops waiting on an animation and answers nothing.
+    await emit("anas.companion", command("e".repeat(32), "anim", { name: "点击回应-元气挥手" }));
+    cleanup();
+    expect(companionPlayback.waiterCount()).toBe(0);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(results()).toHaveLength(3);
   });
 });
