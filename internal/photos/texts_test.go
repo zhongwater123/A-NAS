@@ -15,13 +15,17 @@ import (
 )
 
 // readingEmbedder is the colour Worker with a text reader and no detection
-// models: every photo it is asked to read is a receipt, whose fields it reads
-// with a template. Its release frees the reader, as the Worker's does.
+// models: every photo it is asked to read is a receipt, or the document set,
+// whose fields it reads with a template. Its release frees the reader, as the
+// Worker's does.
 type readingEmbedder struct {
 	*colorEmbedder
 	mu    sync.Mutex
 	model string
 	reads []string
+	// text and answer, when set, are the whole text and the fields' answer
+	// in place of the receipt's.
+	text, answer string
 	// fieldsFinish is how the fields' answer ends; "stop" when empty.
 	fieldsFinish string
 	// failure, when set, is what every reading fails with.
@@ -66,6 +70,7 @@ const receiptText = "某某超市\n2024年05月06日\n合计 ¥35.50\n实收 50.
 func (r *readingEmbedder) ReadText(ctx context.Context, _ *os.File, schema json.RawMessage) (string, photos.Reading, error) {
 	r.mu.Lock()
 	model, block, started, finish, failure := r.model, r.block, r.started, r.fieldsFinish, r.failure
+	text, answer := r.text, r.answer
 	kind := "text"
 	if schema != nil {
 		kind = "fields:" + string(schema)
@@ -80,13 +85,15 @@ func (r *readingEmbedder) ReadText(ctx context.Context, _ *os.File, schema json.
 		<-ctx.Done()
 		return "", photos.Reading{}, ctx.Err()
 	}
+	if text == "" {
+		text, answer = receiptText, `{"商户": "某某超市", "日期": "2024年05月06日", "合计": "¥35.80"}`
+	}
 	if schema == nil {
-		return model, photos.Reading{Text: receiptText, Finish: "stop"}, nil
+		return model, photos.Reading{Text: text, Finish: "stop"}, nil
 	}
 	if finish == "" {
 		finish = "stop"
 	}
-	answer := `{"商户": "某某超市", "日期": "2024年05月06日", "合计": "¥35.80"}`
 	return model, photos.Reading{Text: answer, Finish: finish, Tokens: []photos.TokenProb{{Token: answer}}}, nil
 }
 
@@ -371,15 +378,10 @@ func TestTurningReadingOffClearsReadingsAndKeepsCorrections(t *testing.T) {
 	service := routeService(t, root, embedder, redRoute(t, "colour-1"))
 	ctx := context.Background()
 	private, shared := libraries(t, service, namedAlice)
-	importPhoto(t, service, namedAlice, private.ID, "", "receipt.png", red)
+	asset := importPhoto(t, service, namedAlice, private.ID, "", "receipt.png", red)
 	index(t, service, embedder)
 	db := catalogDB(t, root)
-	var objectID string
-	if err := db.QueryRow("SELECT object_id FROM texts").Scan(&objectID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO text_corrections(library_id, object_id, field, value, account, updated_at)
-VALUES(?, ?, '合计', '¥35.50', 'alice', '2026-11-02T00:00:00Z')`, private.ID, objectID); err != nil {
+	if _, err := service.CorrectText(ctx, namedAlice, asset.ID, "合计", "¥35.50"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -400,10 +402,13 @@ VALUES(?, ?, '合计', '¥35.50', 'alice', '2026-11-02T00:00:00Z')`, private.ID,
 	if err := db.QueryRow("SELECT COUNT(*) FROM text_corrections").Scan(&corrections); err != nil || corrections != 1 {
 		t.Fatalf("corrections after turning off = %d, %v", corrections, err)
 	}
-	// Off, nothing is read.
+	// Off, nothing is read, and the photo shows no text there.
 	index(t, service, embedder)
 	if found := readings(t, root); len(found) != 0 {
 		t.Fatalf("readings while off = %+v", found)
+	}
+	if text, err := service.Text(ctx, namedAlice, asset.ID); err != nil || text.Status != photos.TextOff {
+		t.Fatalf("Text() while off = %+v, %v", text, err)
 	}
 
 	if _, err := service.SetTexts(ctx, namedAlice, private.ID, true); err != nil {
@@ -413,4 +418,24 @@ VALUES(?, ?, '合计', '¥35.50', 'alice', '2026-11-02T00:00:00Z')`, private.ID,
 	if found := readings(t, root); len(found) != 1 {
 		t.Fatalf("readings after turning on again = %+v", found)
 	}
+	// The correction made before still stands over the new reading.
+	text, err := service.Text(ctx, namedAlice, asset.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total := fieldNamed(t, text, "合计"); total.Value != "¥35.50" || total.Read != "¥35.80" || total.Correction == nil {
+		t.Fatalf("合计 after turning on again = %+v", total)
+	}
+}
+
+// fieldNamed returns a field of a photo's text.
+func fieldNamed(t *testing.T, text photos.PhotoText, name string) photos.TextField {
+	t.Helper()
+	for _, field := range text.Fields {
+		if field.Name == name {
+			return field
+		}
+	}
+	t.Fatalf("no field %s in %+v", name, text)
+	return photos.TextField{}
 }

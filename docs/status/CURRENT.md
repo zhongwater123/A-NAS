@@ -52,7 +52,7 @@
 4. 网页搜索：按[启用手册](../runbooks/enable-web-search.md)查明空闲时的外发流量；部署 #364 修复后，按 [#409](https://github.com/zhongwater123/A-NAS/issues/409) 观察多账号节奏与 512 MiB 资源占用（[步骤](../runbooks/enable-web-search.md#多账号节奏与资源验收364)）。
 5. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改。
 6. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
-7. 相册 OCR 步骤 4：搜索与接口（[实施方案](../architecture/photo-ocr.md)，步骤 1–3 已部署）。
+7. 相册 OCR 步骤 5：界面（[实施方案](../architecture/photo-ocr.md)）。步骤 1–3 已部署；步骤 4 的搜索、接口与更正的新存法（[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）已实现，部署时目录库升到第 16 号迁移。
 8. 家庭中心数据修复 [#363](../investigations/2026-11-05-family-data-integrity.md)待合并、部署；M2：认领、隐藏（[规格](../specs/family-center.md)）。从相册加入频道已实现（[PR #395](https://github.com/zhongwater123/A-NAS/pull/395)），部署时产品、相册与家庭服务一起更新。
 9. 互联网访问：外部条件满足后，按[启用互联网访问](../runbooks/enable-internet-access.md)从第 3 步继续。
 10. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘，备份中心评审中最大的缺口）；账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；硬盘用途 M2 与 M3（[规格](../specs/disk-roles-and-redundancy.md)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。

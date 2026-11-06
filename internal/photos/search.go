@@ -47,9 +47,12 @@ const (
 	maxSemanticResults = 500
 	// Results come in bands that never overlap, so that the score alone
 	// orders them and resumes a page: photos whose name or user tags contain
-	// the query, then the photos in which the detector found what the query
-	// names, then the rest. A score within a band lies in [-1, 1 + weight].
-	nameBand     = 6
+	// the query, then the photos whose text does
+	// (docs/architecture/photo-ocr.md#搜索), then the photos in which the
+	// detector found what the query names, then the rest. A score within a
+	// band lies in [-1, 1 + weight].
+	nameBand     = 9
+	textBand     = 6
 	detectedBand = 3
 	// closestGap ends the closest group at this similarity below the best
 	// match. On COCO about 90% of the group is right when the library holds
@@ -80,10 +83,14 @@ type SearchPage struct {
 	// results then match names and user tags only.
 	Semantic bool
 	// Closest counts the results, over all pages, in the closest group: the
-	// name and user tag matches, then the photos the detector found the
-	// thing in or, without those, the photos within closestGap of the best
-	// match. The results after them are less related.
+	// name and user tag matches, the photos whose text holds the query, then
+	// the photos the detector found the thing in or, without those, the
+	// photos within closestGap of the best match. The results after them are
+	// less related.
 	Closest int
+	// Texts counts the results, over all pages, whose text holds the query;
+	// they follow the name and user tag matches.
+	Texts int
 	// Objects is set when the query is about things the detector finds
 	// reliably.
 	Objects *ObjectsFound
@@ -168,10 +175,15 @@ func (s *Service) Search(ctx context.Context, p Principal, request SearchRequest
 		page.Closest = len(hits)
 	} else {
 		text := cmp.Or(rest, query)
+		texts, err := s.textMatches(ctx, p, text, args)
+		if err != nil {
+			return SearchPage{}, err
+		}
 		queryVector, model := s.embedQuery(ctx, text)
 		// A search kept to people's photos ranks a small part of the scope.
 		var read vectorRead
-		if hits, read, err = s.queryHits(ctx, text, queryVector, model, scopeIDs(args), candidates, len(names) > 0, &page); err != nil {
+		if hits, read, err = s.queryHits(ctx, text, queryVector, model, scopeIDs(args), candidates, texts, len(names) > 0,
+			&page); err != nil {
 			return SearchPage{}, err
 		}
 		// Only a first page without people compares like with like.
@@ -257,13 +269,14 @@ func (s *Service) hitPage(ctx context.Context, p Principal, scope []any, hits []
 }
 
 // queryHits ranks the candidates for a query, whose vector of model is
-// queryVector or nil: name or user tag matches first, then the photos the
-// detector found the thing in, then every photo with a vector by similarity,
-// at most maxSemanticResults of them. It records on the page whether the
-// query was encoded and where the closest group ends. restricted says that
-// the candidates are a small part of the libraries of scope.
+// queryVector or nil: name or user tag matches first, then the photos texts
+// finds the query in, then the photos the detector found the thing in, then
+// every photo with a vector by similarity, at most maxSemanticResults of
+// them. It records on the page whether the query was encoded and where the
+// closest group ends. restricted says that the candidates are a small part of
+// the libraries of scope.
 func (s *Service) queryHits(ctx context.Context, query string, queryVector []float32, model string, scope []string,
-	candidates []candidate, restricted bool, page *SearchPage) ([]searchHit, vectorRead, error) {
+	candidates []candidate, texts textHits, restricted bool, page *SearchPage) ([]searchHit, vectorRead, error) {
 	folded := strings.ToLower(query)
 	calibration := s.objectCalibration
 	mentions := s.matcher.Mentions(query)
@@ -275,11 +288,13 @@ func (s *Service) queryHits(ctx context.Context, query string, queryVector []flo
 	// What the detector found decides the bands and adds to the similarity;
 	// it is read first, so that the index is asked with nothing held.
 	type judged struct {
-		c             candidate
-		named, inTier bool
+		c                     candidate
+		named, texted, inTier bool
 	}
 	judgedAll := make([]judged, 0, len(candidates))
 	bonus := make(map[string]float64)
+	// The photos of the bands above similarity are scored whatever their
+	// rank.
 	var always []string
 	var waiting []candidate
 	err := s.detected.read(ctx, s, calibration.Model, func(found map[string][]classScore) {
@@ -295,8 +310,9 @@ func (s *Service) queryHits(ctx context.Context, query string, queryVector []flo
 					waiting = append(waiting, c)
 				}
 				bonus[c.objectID] = calibration.Weight * share * mentionScore(scores, enabled)
-				j.inTier = !j.named && tiered && showsAll(scores, mentions, tierScores)
-				if j.named || j.inTier {
+				j.texted = !j.named && texts.holds(c)
+				j.inTier = !j.named && !j.texted && tiered && showsAll(scores, mentions, tierScores)
+				if j.named || j.texted || j.inTier {
 					always = append(always, c.objectID)
 				}
 			}
@@ -313,7 +329,7 @@ func (s *Service) queryHits(ctx context.Context, query string, queryVector []flo
 		return nil, vectorRead{}, err
 	}
 
-	var named, detected, similar []searchHit
+	var named, texted, detected, similar []searchHit
 	for _, j := range judgedAll {
 		c := j.c
 		if !c.inLocalAI() {
@@ -330,6 +346,8 @@ func (s *Service) queryHits(ctx context.Context, query string, queryVector []flo
 		switch {
 		case j.named:
 			named = append(named, searchHit{c.id, nameBand + score})
+		case j.texted:
+			texted = append(texted, searchHit{c.id, textBand + score})
 		case j.inTier:
 			detected = append(detected, searchHit{c.id, detectedBand + score})
 		case embedded:
@@ -337,6 +355,7 @@ func (s *Service) queryHits(ctx context.Context, query string, queryVector []flo
 		}
 	}
 	sortHits(named)
+	sortHits(texted)
 	sortHits(detected)
 	sortHits(similar)
 	similar = similar[:min(len(similar), maxSemanticResults)]
@@ -348,7 +367,8 @@ func (s *Service) queryHits(ctx context.Context, query string, queryVector []flo
 		}
 	}
 	page.Semantic = queryVector != nil
-	page.Closest = len(named) + closest
+	page.Texts = len(texted)
+	page.Closest = len(named) + len(texted) + closest
 	if tiered {
 		undetected, err := s.awaitingDetection(ctx, waiting)
 		if err != nil {
@@ -360,7 +380,7 @@ func (s *Service) queryHits(ctx context.Context, query string, queryVector []flo
 		}
 		page.Objects = &ObjectsFound{Words: words, Detected: len(detected), Undetected: undetected}
 	}
-	return append(append(named, detected...), similar...), read, nil
+	return slices.Concat(named, texted, detected, similar), read, nil
 }
 
 // aiObjects lists, once each, the content objects of the candidates that

@@ -389,6 +389,49 @@ CREATE TABLE text_corrections (
     PRIMARY KEY (library_id, object_id, field)
 );
 `,
+	// 16: corrections belong to the content object, whichever library a
+	// member corrected it in, and the last one stands (ADR 0033). Each change
+	// is kept, with who made it from which library: the library is kept by
+	// its ID only, so that the change outlives it. No code wrote the
+	// per-library corrections of 15, so the table is made anew. The handles
+	// a member's assistant gets for sensitive values stand for one value of
+	// one photo for that member.
+	`
+DROP TABLE text_corrections;
+
+CREATE TABLE text_corrections (
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    field TEXT NOT NULL,
+    value TEXT NOT NULL,
+    account TEXT NOT NULL,
+    account_name TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (object_id, field)
+);
+
+CREATE TABLE text_changes (
+    id INTEGER PRIMARY KEY,
+    object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    field TEXT NOT NULL,
+    old_value TEXT NOT NULL,
+    new_value TEXT NOT NULL,
+    restored INTEGER NOT NULL,
+    account TEXT NOT NULL,
+    account_name TEXT NOT NULL,
+    library_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX text_changes_by_object ON text_changes(object_id, id);
+
+CREATE TABLE text_handles (
+    handle TEXT PRIMARY KEY,
+    account TEXT NOT NULL,
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    key TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (account, asset_id, key)
+);
+`,
 }
 
 func openCatalog(path string) (*sql.DB, error) {

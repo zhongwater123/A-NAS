@@ -92,6 +92,8 @@ func validIdentity(identity accountid.Identity) error {
 }
 
 func (e *Executor) ensureFixedGroups(ctx context.Context) error {
+	e.fixedGroupsMu.Lock()
+	defer e.fixedGroupsMu.Unlock()
 	for _, group := range fixedGroups {
 		fields, found, err := e.getent(ctx, "group", group.name)
 		if err != nil {
