@@ -175,6 +175,9 @@ func TestRoutedPhotosAreReadTypedAndChecked(t *testing.T) {
 	if got := textPhotos(t, service, namedAlice); got == nil || *got != 1 {
 		t.Fatalf("TextPhotos = %s, want the photo read", shown(got))
 	}
+	if got := textProgress(t, service, namedAlice); got != (photos.TextProgress{Read: 1}) {
+		t.Fatalf("text progress = %+v, want the photo read", got)
+	}
 
 	// A new reader, which comes with a new release and so a restart, reads
 	// the photo again.

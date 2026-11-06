@@ -194,7 +194,7 @@ func TestTheAssistantGetsHandlesInsteadOfSensitiveValues(t *testing.T) {
 	_, shared := libraries(t, service, namedAlice)
 	card := importPhoto(t, service, namedAlice, shared.ID, "", "card.png", red)
 	index(t, service, embedder)
-	if _, err := service.CorrectText(ctx, namedAlice, card.ID, "住址", "某市某路2号"); err != nil {
+	if _, err := service.CorrectText(ctx, namedAlice, card.ID, "公民身份号码", "440306199001011252"); err != nil {
 		t.Fatal(err)
 	}
 	alicesAssistant := photos.Principal{UserID: namedAlice.UserID, Username: "alice", Assistant: true}
@@ -209,33 +209,33 @@ func TestTheAssistantGetsHandlesInsteadOfSensitiveValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Not one of its sensitive values, nor any part of a number, outside the
-	// handles' random letters: the birth date and the name are no secret.
+	// handles' random letters: the birth date, the name and the address are
+	// no secret.
 	unhandled := handles.ReplaceAllString(string(encoded), "")
-	for _, secret := range []string{"440306", "1990010", "1236", "138", "1234 5678", "12345678", "某市某路1号", "某市某路2号", "某路"} {
+	for _, secret := range []string{"440306", "1990010", "1236", "1252", "138", "1234 5678", "12345678"} {
 		if strings.Contains(unhandled, secret) {
 			t.Errorf("the assistant's text holds %q: %s", secret, encoded)
 		}
 	}
+	// The ID number Alice corrected and the one read are two values with a
+	// handle each; the text holds the one read.
 	number := fieldNamed(t, text, "公民身份号码")
-	if !strings.HasPrefix(number.Value, "⟦身份证号·") || number.Read != number.Value || !strings.Contains(text.Text, number.Value) {
+	if !strings.HasPrefix(number.Value, "⟦身份证号·") || !strings.HasPrefix(number.Read, "⟦身份证号·") ||
+		number.Value == number.Read || !strings.Contains(text.Text, number.Read) || strings.Contains(text.Text, number.Value) {
 		t.Fatalf("公民身份号码 for the assistant = %+v in %q", number, text.Text)
 	}
 	if name := fieldNamed(t, text, "姓名"); name.Value != "张三" {
 		t.Fatalf("姓名 for the assistant = %+v", name)
 	}
-	// The address Alice corrected and the one read are two values with a
-	// handle each; the text holds the one read.
-	if address := fieldNamed(t, text, "住址"); !strings.HasPrefix(address.Value, "⟦住址·") ||
-		!strings.HasPrefix(address.Read, "⟦住址·") || address.Value == address.Read ||
-		!strings.Contains(text.Text, address.Read) || strings.Contains(text.Text, address.Value) {
-		t.Fatalf("住址 for the assistant = %+v in %q", address, text.Text)
+	if address := fieldNamed(t, text, "住址"); address.Value != "某市某路1号" || address.Sensitive {
+		t.Fatalf("住址 for the assistant = %+v", address)
 	}
 	if !strings.Contains(text.Text, "⟦手机号·") || !strings.Contains(text.Text, "⟦号码·") {
 		t.Fatalf("the numbers of the text for the assistant: %q", text.Text)
 	}
-	// One handle for each value: the address, the ID number, the phone
-	// number and the serial number.
-	if found := slices.Compact(slices.Sorted(slices.Values(handles.FindAllString(text.Text, -1)))); len(found) != 4 {
+	// One handle for each value: the ID number, the phone number and the
+	// serial number.
+	if found := slices.Compact(slices.Sorted(slices.Values(handles.FindAllString(text.Text, -1)))); len(found) != 3 {
 		t.Fatalf("handles in the assistant's text = %v", found)
 	}
 	// A handle stays the same for its member, and another member's
@@ -251,13 +251,15 @@ func TestTheAssistantGetsHandlesInsteadOfSensitiveValues(t *testing.T) {
 
 	// It cannot learn a number by searching for parts of it, but finds what
 	// is no secret; it changes nothing and reads no changes.
-	for _, query := range []string{"4403", "1236", "1381234", "某路", "12345678901"} {
+	for _, query := range []string{"4403", "1236", "1252", "1381234", "12345678901"} {
 		if page := search(t, service, alicesAssistant, query); page.Texts != 0 {
 			t.Errorf("the assistant's search for %q found the photo by its text", query)
 		}
 	}
-	if page := search(t, service, alicesAssistant, "张三"); page.Texts != 1 {
-		t.Errorf("the assistant's search for 张三 = %+v", page)
+	for _, query := range []string{"张三", "某路"} {
+		if page := search(t, service, alicesAssistant, query); page.Texts != 1 {
+			t.Errorf("the assistant's search for %q = %+v", query, page)
+		}
 	}
 	if _, err := service.TextChanges(ctx, alicesAssistant, card.ID); !errors.Is(err, photos.ErrForbidden) {
 		t.Fatalf("the assistant's TextChanges(): error = %v", err)
@@ -354,6 +356,34 @@ func TestTheAssistantSeesNoNumberHoweverItIsPrinted(t *testing.T) {
 	_ = member.Reader.Close()
 }
 
+// A photo whose text shows only a mobile number and an address, as a
+// screenshot or a parcel label does, the assistant may look at (user,
+// 2026-11-06); the number stays a handle in its text.
+func TestTheAssistantLooksAtAPhotoWithOnlyAPhoneNumber(t *testing.T) {
+	embedder := newReadingEmbedder()
+	embedder.text = "城南便利店 某市某路1号\n电话 138 1234 5678\n合计 ¥35.50"
+	embedder.answer = `{"商户": "城南便利店", "日期": "", "合计": "¥35.50"}`
+	service := routeService(t, filepath.Join(t.TempDir(), "photos"), embedder, redRoute(t, "colour-1"))
+	ctx := context.Background()
+	private, _ := libraries(t, service, namedAlice)
+	receipt := importPhoto(t, service, namedAlice, private.ID, "", "receipt.png", red)
+	index(t, service, embedder)
+	assistant := photos.Principal{UserID: namedAlice.UserID, Username: "alice", Assistant: true}
+
+	text, err := service.Text(ctx, assistant, receipt.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text.Text, "某市某路1号") || !strings.Contains(text.Text, "⟦手机号·") || strings.Contains(text.Text, "1381234") {
+		t.Fatalf("the assistant's text = %q", text.Text)
+	}
+	view, err := service.View(ctx, assistant, receipt.ID)
+	if err != nil {
+		t.Fatalf("the assistant's View() of the receipt: %v", err)
+	}
+	_ = view.Reader.Close()
+}
+
 func TestTextMatchesFollowNamesAndCountOnEveryPage(t *testing.T) {
 	embedder := newReadingEmbedder()
 	root := filepath.Join(t.TempDir(), "photos")
@@ -371,7 +401,7 @@ func TestTextMatchesFollowNamesAndCountOnEveryPage(t *testing.T) {
 	}
 	// The name match, the text match, then the one other photo, the
 	// closest by similarity.
-	if len(page.Assets) != 1 || page.Assets[0].Name != "超市.png" || page.Texts != 1 || page.Closest != 3 || page.Next == "" {
+	if len(page.Assets) != 1 || page.Assets[0].Name != "超市.png" || page.Names != 1 || page.Texts != 1 || page.Closest != 3 || page.Next == "" {
 		t.Fatalf("first page = %+v", page)
 	}
 	page, err = service.Search(ctx, namedAlice, photos.SearchRequest{Query: "超市", Limit: 1, Cursor: page.Next})
