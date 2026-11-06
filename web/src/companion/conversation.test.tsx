@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CompanionFloating } from "./CompanionFloating";
 import { CompanionPanel } from "./CompanionPanel";
-import { createConversation } from "./conversation";
+import { createConversation, withoutThinking } from "./conversation";
 import { createDesk, type PersonalDeskState } from "./deskStore";
 import { localCommand } from "./localCommands";
 
@@ -127,6 +127,28 @@ describe("explicit chat commands and real local effects", () => {
     chat.send("整理文件", desk, { send: () => ({ accepted: false, message: "连接尚未就绪" }), open: vi.fn() });
     expect(chat.get().pending).toBeUndefined();
     expect(chat.get().lines.at(-1)?.text).toBe("连接尚未就绪");
+  });
+  it("shows NAS work as a short status, then only the finished reply without the model's reasoning", () => {
+    const { chat, store } = setup("chat-progress");
+    const desk = { store } as PersonalDeskState;
+    chat.send("周报放在哪了", desk, { send: () => ({ accepted: true }), open: vi.fn() });
+    const shown = () => chat.get().lines.at(-1)?.text;
+    // Hermes's commentary before a tool call is not the reply.
+    chat.observe({ phase: "thinking", running: true, answer: "让我先翻翻你的文件…", message: "收到，我先想想怎么做" });
+    expect(shown()).toBe("收到，我先想想怎么做");
+    chat.observe({ phase: "working", running: true, answer: "", message: "正在处理，做好了叫你" });
+    expect(shown()).toBe("正在处理，做好了叫你");
+    chat.observe({
+      phase: "success",
+      running: false,
+      answer: "<think>用户在找周报</think>\n在个人空间的“周报”文件夹里。",
+      message: "",
+    });
+    expect(shown()).toBe("在个人空间的“周报”文件夹里。");
+    expect(chat.get().pending).toBeUndefined();
+    expect(withoutThinking("先想一想</think>答复")).toBe("答复");
+    expect(withoutThinking("答复<think>没写完")).toBe("答复");
+    expect(withoutThinking("不用想")).toBe("不用想");
   });
 });
 describe("chat and tool UI share one member's desk", () => {

@@ -14,6 +14,16 @@ type ChatState = {
   pending?: { id: number; started: boolean };
 };
 
+// Some models write their reasoning into the reply itself, inside <think> tags; some
+// start inside it and only close the tag, or never close it.
+export function withoutThinking(text: string) {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/g, "")
+    .replace(/^[\s\S]*?<\/think>/, "")
+    .replace(/<think>[\s\S]*$/, "")
+    .trim();
+}
+
 export function createConversation() {
   let serial = 0;
   let state: ChatState = { view: "chat", lines: [] };
@@ -31,6 +41,7 @@ export function createConversation() {
   const finish = (text: string, complete: boolean) => {
     if (!state.pending) return;
     const id = state.pending.id;
+    if (!complete && state.lines.some((line) => line.id === id && line.text === text)) return;
     change({
       ...state,
       lines: state.lines.map((line) => (line.id === id ? { ...line, text } : line)),
@@ -69,8 +80,12 @@ export function createConversation() {
         finish("这次回答已停下，已做的操作可以在 NAS 对话中查看。", true);
         return;
       }
-      if (snapshot.answer) finish(snapshot.answer, snapshot.phase === "success");
-      else if (snapshot.phase === "success") finish("NAS 已回复，打开完整对话查看。", true);
+      // Only the finished reply is shown here. While Hermes works the line says what
+      // stage it is at; its commentary between tool calls and its reasoning stay in
+      // the full NAS conversation.
+      if (snapshot.phase === "success")
+        finish(withoutThinking(snapshot.answer) || "NAS 已回复，打开完整对话查看。", true);
+      else if (snapshot.running && snapshot.message) finish(snapshot.message, false);
     },
     send: (input: string, desk: PersonalDeskState, bridge?: AgentBridge) => {
       const text = input.trim();

@@ -1,4 +1,4 @@
-import { type MutableRefObject, useEffect, useRef, useState } from "react";
+import { type MutableRefObject, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { acknowledgeTaskNotice, useTaskNotices } from "../assistant/taskNotices";
 import type { AgentBridge, useConversation } from "./conversation";
@@ -15,6 +15,7 @@ export function CompanionChat({
   onOpenConversation,
   compact = false,
   focusInput = false,
+  close,
 }: {
   desk: PersonalDeskState;
   conversation: ReturnType<typeof useConversation>;
@@ -23,6 +24,8 @@ export function CompanionChat({
   connected?: boolean;
   compact?: boolean;
   focusInput?: boolean;
+  // The pet's popover puts its close button in the row of quick actions.
+  close?: ReactNode;
   onTool(view: "focus" | "todos"): void;
   onOpenConversation?(id: string): void;
 }) {
@@ -45,12 +48,30 @@ export function CompanionChat({
     chat.send(text, desk, bridge.current);
     setInput("");
   };
+  const suggestions = (
+    <div className={styles.suggestions}>
+      <button type="button" onClick={() => send("专注25分钟")}>
+        开始25分钟
+      </button>
+      <button type="button" onClick={() => send("帮我记一件事")}>
+        记一件事
+      </button>
+      {state.awaiting && (
+        <button type="button" onClick={() => send("取消")}>
+          取消这次补充
+        </button>
+      )}
+      {close}
+    </div>
+  );
   return (
     <section
       className={`${styles.chat} ${compact ? styles.compactChat : ""}`}
       aria-label="和大肥鱼聊天"
       data-pet-interactive="true"
     >
+      {/* In the pet's popover the quick actions take the top row, where a title would be. */}
+      {compact && suggestions}
       <div
         ref={log}
         className={styles.log}
@@ -59,13 +80,20 @@ export function CompanionChat({
         aria-live="polite"
         aria-relevant="additions"
       >
-        {!state.lines.length && (
-          <div className={styles.welcome}>
-            <strong>有什么小事，跟我说就好。</strong>
-            <p>“专注25分钟”，或者“帮我记一件事”。</p>
-            <span>计时和待办我可以直接处理。</span>
-          </div>
-        )}
+        {!state.lines.length &&
+          (compact ? (
+            // The buttons below already offer the timer and a todo.
+            <div className={styles.welcome}>
+              <strong>有什么小事，跟我说就好。</strong>
+              <span>{connected ? "计时和待办我直接处理，其他事交给 NAS 的 AI。" : "计时和待办我可以直接处理。"}</span>
+            </div>
+          ) : (
+            <div className={styles.welcome}>
+              <strong>有什么小事，跟我说就好。</strong>
+              <p>“专注25分钟”，或者“帮我记一件事”。</p>
+              <span>计时和待办我可以直接处理。</span>
+            </div>
+          ))}
         {state.lines.map((line) => (
           <div key={line.id} className={line.role === "user" ? styles.userLine : styles.assistantLine}>
             <small>{line.role === "user" ? "你" : "大肥鱼"}</small>
@@ -122,19 +150,7 @@ export function CompanionChat({
           </div>
         ))}
       {noticeError && <p role="alert">{noticeError}</p>}
-      <div className={styles.suggestions}>
-        <button type="button" onClick={() => send("专注25分钟")}>
-          开始25分钟
-        </button>
-        <button type="button" onClick={() => send("帮我记一件事")}>
-          记一件事
-        </button>
-        {state.awaiting && (
-          <button type="button" onClick={() => send("取消")}>
-            取消这次补充
-          </button>
-        )}
-      </div>
+      {!compact && suggestions}
       <form
         className={styles.composer}
         onSubmit={(event) => {

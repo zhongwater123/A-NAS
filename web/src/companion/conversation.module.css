@@ -160,20 +160,78 @@
   font-size: 11px;
   color: #385e4d;
 }
+/* In the pet's popover the log fits its lines and gives up height first, so the
+   input stays in view however little room the desktop window leaves. */
+.compactChat {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.compactChat > * {
+  flex-shrink: 0;
+}
 .compactChat .log {
-  height: 165px;
+  height: auto;
+  max-height: 180px;
+  min-height: 40px;
+  flex: 0 1 auto;
+  padding: 0 3px 6px;
 }
 .compactChat .welcome {
-  padding: 20px 3px;
+  padding: 6px 3px 2px;
 }
 .compactChat .welcome strong {
   font-size: 14px;
 }
-.compactChat .welcome p {
-  font-size: 11px;
+.compactChat .welcome span {
+  display: block;
+  margin-top: 5px;
+}
+/* Who said what shows by side; the names stay for screen readers. */
+.compactChat .userLine small,
+.compactChat .assistantLine small {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.compactChat .userLine,
+.compactChat .assistantLine {
+  margin: 6px 0;
+}
+.compactChat .userLine p,
+.compactChat .assistantLine p {
+  padding: 6px 10px;
+  line-height: 1.55;
+}
+.compactChat .assistantLine button {
+  padding: 3px;
 }
 .compactChat .suggestions {
-  margin-top: 3px;
+  align-items: center;
+  margin: 0 0 6px;
+}
+.compactChat .composer {
+  padding: 4px;
+  border-radius: 12px;
+}
+.compactChat .composer textarea {
+  min-height: 22px;
+  padding: 5px 6px;
+}
+.compactChat .composer > button {
+  padding: 6px 11px;
+}
+.suggestions .close {
+  display: flex;
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: #657a6d;
+  padding: 3px;
 }
 .petDock {
   display: flex;
@@ -228,35 +286,22 @@
   width: 310px;
   max-width: calc(100vw - 20px);
   /* The room Radix measures above the dock: in the 400 px desktop window that is far
-     less than 390 px, and without it the header and close button were cut off. */
+     less than 390 px, and without it the close button was cut off. */
   max-height: min(390px, var(--radix-popover-content-available-height, calc(100vh - 28px)));
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--color-surface, white);
   color: #304a3e;
   border: 1px solid #dfe7df;
   border-radius: 18px;
   box-shadow: 0 12px 45px #18392526;
-  padding: 13px;
+  padding: 9px 10px 10px;
   z-index: 1100;
   outline: none;
   pointer-events: auto;
   box-sizing: border-box;
   font: 13px system-ui;
-}
-.popoverHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 2px 8px;
-  font-size: 13px;
-}
-.popoverHeader button {
-  border: 0;
-  background: none;
-  color: #657a6d;
-  cursor: pointer;
-  padding: 3px;
-  display: flex;
 }
 .menu {
   min-width: 150px;

@@ -80,19 +80,13 @@ export function PetDock({
               className={styles.popover}
               side="top"
               align="center"
-              sideOffset={150}
+              // Just clears the character's hair: the 400 px desktop window leaves the chat
+              // only the room above it.
+              sideOffset={128}
               collisionPadding={10}
               data-pet-interactive="true"
               onOpenAutoFocus={(event) => event.preventDefault()}
             >
-              <div className={styles.popoverHeader}>
-                <strong>大肥鱼</strong>
-                <Popover.Close asChild>
-                  <button type="button" aria-label="收起聊天">
-                    <X size={15} />
-                  </button>
-                </Popover.Close>
-              </div>
               <CompanionChat
                 owner={owner}
                 desk={desk}
@@ -103,6 +97,13 @@ export function PetDock({
                 onTool={goHome}
                 onOpenConversation={onOpenConversation}
                 focusInput={open}
+                close={
+                  <Popover.Close asChild>
+                    <button type="button" className={styles.close} aria-label="收起聊天">
+                      <X size={15} />
+                    </button>
+                  </Popover.Close>
+                }
               />
             </Popover.Content>
           </Popover.Portal>
