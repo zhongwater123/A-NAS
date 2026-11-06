@@ -30,11 +30,12 @@ const (
 	CategoryFile    Category = "file"
 	CategoryStorage Category = "storage"
 	CategoryPhoto   Category = "photo"
+	CategoryFamily  Category = "family"
 	CategoryOther   Category = "other"
 )
 
 // Categories lists the categories a client may filter by.
-var Categories = []Category{CategorySession, CategoryAccount, CategoryFile, CategoryStorage, CategoryPhoto}
+var Categories = []Category{CategorySession, CategoryAccount, CategoryFile, CategoryStorage, CategoryPhoto, CategoryFamily}
 
 // categoryPrefixes maps each category to the action prefixes that belong to
 // it. "photos.viewing" (an account action) must not match "photo.".
@@ -44,6 +45,7 @@ var categoryPrefixes = map[Category][]string{
 	CategoryFile:    {"file.", "snapshot."},
 	CategoryStorage: {"storage."},
 	CategoryPhoto:   {"photo."},
+	CategoryFamily:  {"family."},
 }
 
 // CategoryOf returns the category of an action.

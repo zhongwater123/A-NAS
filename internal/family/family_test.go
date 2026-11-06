@@ -81,6 +81,7 @@ func newFixture(t *testing.T) *fixture {
 		Now:      func() time.Time { return f.now },
 		Accounts: func(context.Context) (map[string]Account, error) { return f.accounts, nil },
 		Photos:   f.photos,
+		Admits:   func(string, int64) (bool, error) { return true, nil },
 	})
 	if err != nil {
 		t.Fatal(err)

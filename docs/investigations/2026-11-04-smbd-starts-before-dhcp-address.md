@@ -53,7 +53,8 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
 - 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh) 检查安装器写入的等待与重试，并在一个暂时没有地址的接口上走一遍上面的过程。部署后要在 Experimental NAS 上正常重启一次，确认 `172.18.45.48:445` 在监听。
   - 2026-11-05 起，CI 中“smbd listens on the SMB interface's address”时好时坏（`fff0c2b0` 推送后，以及 #397、#400、#403、#407）。
     - #397 认为原因是 smbd 先告诉 systemd 已就绪、再打开监听套接字（Samba 4.22 的 `source3/smbd/server.c`：先 `daemon_ready("smbd")`，后 `open_sockets_smbd()`），把检查改为最多等 10 秒。
-    - 之后 #400、#403、#407 等满 10 秒仍然失败，说明这个诊断不完整。真正的原因见下一节。
+    - 之后 #400、#403、#407 等满 10 秒仍然失败，说明这个诊断不完整。
+    - #403 在最小容器中复现：创建第一个账号之前仍是 Debian 的默认 `smb.conf`，smbd 监听 `0.0.0.0:445` 与 `[::]:445`。它把整段地址等待与监听检查移到账号创建之后，那时 `SetCredential` 一定已写入配置。真正的原因见下一节：Host Agent 安装后的第一次对账本该写入配置，只是有时失败了。
 
 ## 新装后 smbd 监听所有地址（2026-11-06）
 

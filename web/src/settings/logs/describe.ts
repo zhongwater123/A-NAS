@@ -17,6 +17,7 @@ export const categoryInfo: Record<ActivityCategory | "other", { label: string; t
   file: { label: "文件", tone: "file" },
   storage: { label: "存储", tone: "storage" },
   photo: { label: "相册", tone: "photo" },
+  family: { label: "家庭中心", tone: "account" },
   other: { label: "其他", tone: "other" },
 };
 
@@ -188,6 +189,28 @@ function verbOf(action: string): Verb | undefined {
   return fileVerbs[action] ?? photoVerbs[action];
 }
 
+const familyActions: Record<string, string> = {
+  "family.joined": "加入了家庭",
+  "family.join_requested": "申请加入家庭",
+  "family.join_approved": "批准了加入家庭的申请",
+  "family.join_rejected": "拒绝了加入家庭的申请",
+  "family.role_changed": "修改了家庭称呼",
+  "family.guardian_added": "添加了家长",
+  "family.guardian_removed": "取消了家长身份",
+  "family.member_removed": "移出了家人",
+  "family.left": "离开了家庭",
+  "family.baby_added": "添加了宝宝档案",
+  "family.baby_updated": "修改了宝宝档案",
+  "family.baby_deleted": "删除了宝宝档案",
+  "family.baby_restored": "恢复了宝宝档案",
+  "family.record_added": "添加了家庭记录",
+  "family.record_updated": "修改了家庭记录",
+  "family.record_deleted": "删除了家庭记录",
+  "family.record_restored": "恢复了家庭记录",
+  "family.comment_deleted": "删除了家庭留言",
+  "family.vaccine_plan_changed": "修改了接种计划",
+};
+
 // describeActivity turns an event into a sentence for the activity log.
 export function describeActivity(event: ActivityEvent, viewerId: string): Described {
   const actor = actorOf(event, viewerId);
@@ -199,6 +222,7 @@ export function describeActivity(event: ActivityEvent, viewerId: string): Descri
       detail.reason ? `原因：${detail.reason}` : "",
       detail.expiresAt ? `${formatDateTime(detail.expiresAt)} 自动结束` : "",
     ].filter(Boolean);
+  if (familyActions[event.action]) return { parts: [actor, familyActions[event.action]], meta: [] };
   switch (event.action) {
     case "session.signed_in":
       return { parts: [actor, "登录了"], meta: [originLabel(event.detail)].filter(Boolean) as string[] };
