@@ -6,6 +6,7 @@
 package photos
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"errors"
@@ -220,6 +221,13 @@ type Options struct {
 	// what another release's Worker said about its models is not taken for
 	// this one's.
 	Release string
+	// Vectors is the service's own vector index (ADR 0028), which ranking by
+	// similarity reads; nil, or an index that cannot answer, leaves ranking
+	// to read the Catalog's vectors.
+	Vectors VectorIndex
+	// OnVectorFallback, when set, is told why ranking read the Catalog
+	// instead of the index, once per reason every few minutes.
+	OnVectorFallback func(reason string, err error)
 }
 
 // Service is the photo library Module. It must be the only accessor of its
@@ -250,10 +258,9 @@ type Service struct {
 	mediaWake chan struct{}
 	// ai runs local AI and owns what its rounds share (airunner.go).
 	ai *aiRunner
-	// embedder encodes search queries, index holds image vectors for search
-	// and AI clusters, and detected the detector's best score per class.
+	// embedder encodes search queries, and detected holds the detector's best
+	// score per class.
 	embedder   Embedder
-	index      vectorIndex
 	detected   objectIndex
 	labels     labels.Set
 	labelIndex labelIndex
@@ -267,12 +274,25 @@ type Service struct {
 	matcher           *objects.Matcher
 	// searches keeps what image searches need for their later pages.
 	searches imageSearches
-	// shadow hands searches to RunVectorShadow while shadowing says it runs
-	// (vectorshadow.go); vectorChecked is the image collection the sync loop
-	// last found in the index (vectorsync.go).
-	shadow        chan shadowQuery
-	shadowing     atomic.Bool
-	vectorChecked atomic.Pointer[imagesCollection]
+	// vectors is the vector index ranking reads (vectorsearch.go), prepared
+	// at most every prepareVectorsEvery and left alone for a while after it
+	// fails (health); fallbacks rate the reports to onVectorFallback. check
+	// hands searches to RunVectorCheck while checking says it runs
+	// (vectorcheck.go). vectorChecked is the image collection the sync loop
+	// last found in the index, and vectorRecheck asks the sync loop to look
+	// again now (vectorsync.go).
+	vectors          VectorIndex
+	vectorsPrepared  atomic.Int64
+	health           indexHealth
+	onVectorFallback func(reason string, err error)
+	fallbacks        vectorFallbacks
+	check            chan vectorCheckQuery
+	checking         atomic.Bool
+	vectorChecked    atomic.Pointer[imagesCollection]
+	vectorRecheck    chan struct{}
+	// closed ends background work the service starts itself when it closes.
+	closed       context.Context
+	closeWorkers context.CancelFunc
 	// peopleCalibrations say how each kind of occurrence clusters.
 	peopleCalibrations []PeopleCalibration
 
@@ -324,8 +344,10 @@ func Open(root string, options Options) (*Service, error) {
 		admits: capacity.Admits, location: options.Location, embedder: options.AI,
 		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1),
 		searches: imageSearches{encoding: make(chan struct{}, 1)},
-		shadow:   make(chan shadowQuery, 1),
+		check:    make(chan vectorCheckQuery, 1), vectorRecheck: make(chan struct{}, 1),
+		vectors: options.Vectors, onVectorFallback: options.OnVectorFallback,
 	}
+	service.closed, service.closeWorkers = context.WithCancel(context.Background())
 	service.ai = newAIRunner(service)
 	if options.DisableCapacityReserve {
 		service.admits = func(string, int64) (bool, error) { return true, nil }
@@ -384,6 +406,7 @@ func Open(root string, options Options) (*Service, error) {
 }
 
 func (s *Service) Close() error {
+	s.closeWorkers()
 	return errors.Join(s.db.Close(), s.root.Close())
 }
 

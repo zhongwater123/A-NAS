@@ -95,12 +95,12 @@ func (s *Service) routeStoredVectors(ctx context.Context, model string) (bool, e
 	if err != nil || queries == nil {
 		return false, err
 	}
+	// A batch at a time from the Catalog: this runs once per process, in the
+	// background, and nothing keeps the library's vectors in memory.
 	var chosen []string
-	if err := s.index.read(ctx, s, model, func(vectors map[string][]float32) {
-		for objectID, vector := range vectors {
-			if s.hasText(vector, queries) {
-				chosen = append(chosen, objectID)
-			}
+	if err := s.eachVector(ctx, model, func(objectID string, vector []float32) {
+		if s.hasText(vector, queries) {
+			chosen = append(chosen, objectID)
 		}
 	}); err != nil {
 		return false, err

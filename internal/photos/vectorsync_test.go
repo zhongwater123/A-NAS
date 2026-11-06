@@ -564,14 +564,16 @@ func TestForgettingTheVectorIndex(t *testing.T) {
 	}
 }
 
-// A search's first page is compared with the index in the background; later
-// pages are not.
-func TestShadowComparesFirstPagesOfSearches(t *testing.T) {
+// A search's first page is checked against the Catalog in the background, at
+// most once per interval; later pages are not. A check shows the index out of
+// line with the Catalog, and in line again after reconciliation.
+func TestChecksCompareSearchesWithTheCatalog(t *testing.T) {
 	instance := vectorindextest.Start(t)
 	index := vectorindex.New(instance.Socket, nil)
 	t.Cleanup(func() { _ = index.Close() })
 	embedder := newFakeEmbedder()
-	service, err := photos.Open(t.TempDir()+"/photos", photos.Options{Now: newClock().Now, DisableCapacityReserve: true, AI: embedder})
+	service, err := photos.Open(t.TempDir()+"/photos", photos.Options{Now: newClock().Now, DisableCapacityReserve: true,
+		AI: embedder, Vectors: index})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,86 +587,143 @@ func TestShadowComparesFirstPagesOfSearches(t *testing.T) {
 	syncAll(t, service, index)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	comparisons := make(chan photos.ShadowComparison, 4)
+	checks := make(chan photos.VectorCheck, 4)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		service.RunVectorShadow(ctx, index, index.Warm, time.Minute, func(c photos.ShadowComparison) { comparisons <- c }, func(err error) { t.Error(err) })
+		service.RunVectorCheck(ctx, 0, func(c photos.VectorCheck) { checks <- c }, func(err error) { t.Error(err) })
 	}()
 	defer func() { cancel(); <-done }()
 
 	// Wait until the worker takes searches, so that exactly one is handed
-	// over: a search made before would not be compared, one too many would
-	// be compared later.
-	for deadline := time.Now().Add(10 * time.Second); !service.ShadowRunning(); time.Sleep(time.Millisecond) {
+	// over: a search made before would not be checked, one too many would be
+	// checked later.
+	for deadline := time.Now().Add(10 * time.Second); !service.CheckRunning(); time.Sleep(time.Millisecond) {
 		if time.Now().After(deadline) {
-			t.Fatal("the shadow worker did not start")
+			t.Fatal("the check worker did not start")
 		}
 	}
-	page, err := service.Search(context.Background(), alice, photos.SearchRequest{Query: "猫", Limit: 1})
-	if err != nil || !page.Semantic {
-		t.Fatalf("Search() = %+v, %v", page, err)
+	search := func(cursor string) photos.SearchPage {
+		t.Helper()
+		page, err := service.Search(context.Background(), alice, photos.SearchRequest{Query: "猫", Limit: 1, Cursor: cursor})
+		if err != nil || !page.Semantic {
+			t.Fatalf("Search() = %+v, %v", page, err)
+		}
+		return page
 	}
-	var comparison photos.ShadowComparison
+	check := func() photos.VectorCheck {
+		t.Helper()
+		select {
+		case c := <-checks:
+			return c
+		case <-time.After(30 * time.Second):
+			t.Fatal("the search was not checked")
+			return photos.VectorCheck{}
+		}
+	}
+	page := search("")
+	if c := check(); c.Candidates != 3 || c.Overlap[10] != 1 || c.Overlap[500] != 1 {
+		t.Errorf("check = %+v, want the index to agree on all three photos", c)
+	}
+	search(page.Next)
 	select {
-	case comparison = <-comparisons:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the search was not compared with the index")
-	}
-	next := page.Next
-	if comparison.Candidates != 3 || comparison.Overlap[10] != 1 || comparison.Overlap[500] != 1 {
-		t.Errorf("comparison = %+v, want the index to agree on all three photos", comparison)
-	}
-
-	if _, err := service.Search(context.Background(), alice, photos.SearchRequest{Query: "猫", Limit: 1, Cursor: next}); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case c := <-comparisons:
-		t.Errorf("a later page was compared: %+v", c)
+	case c := <-checks:
+		t.Errorf("a later page was checked: %+v", c)
 	case <-time.After(500 * time.Millisecond):
 	}
 
-	// An index out of line with the Catalog shows below 1: a point it lost,
-	// and one the Catalog does not hold, placed first.
-	compare := func() photos.ShadowComparison {
-		t.Helper()
-		if _, err := service.Search(context.Background(), alice, photos.SearchRequest{Query: "猫", Limit: 1}); err != nil {
-			t.Fatal(err)
-		}
-		select {
-		case c := <-comparisons:
-			return c
-		case <-time.After(30 * time.Second):
-			t.Fatal("the search was not compared with the index")
-			return photos.ShadowComparison{}
-		}
-	}
+	// An index that lost a point the outbox does not queue misses the photo
+	// until reconciliation; the check shows it.
 	collection := imagesCollection(t, index)
 	all := inLibraries(t, index, private.ID)
 	if err := index.Delete(context.Background(), collection, all[:1]); err != nil {
 		t.Fatal(err)
 	}
-	if c := compare(); c.Overlap[10] > 0.7 {
+	search("")
+	if c := check(); c.Overlap[10] > 0.7 {
 		t.Errorf("with a point missing, overlap@10 = %v, want 2/3", c.Overlap[10])
 	}
-	query, err := embedder.EmbedQuery(context.Background(), "猫")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Reconciliation puts the lost point back, and they agree again.
 	if err := service.ReconcileVectors(context.Background(), index, nil); err != nil {
 		t.Fatal(err)
 	}
 	syncAll(t, service, index)
-	if c := compare(); c.Overlap[10] != 1 {
+	search("")
+	if c := check(); c.Overlap[10] != 1 {
 		t.Errorf("after reconciliation, overlap@10 = %v, want 1", c.Overlap[10])
+	}
+
+	// A point the Catalog does not hold grants nothing: it is no candidate.
+	query, err := embedder.EmbedQuery(context.Background(), "猫")
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := index.Upsert(context.Background(), collection, []vectorindex.Point{{Key: "stray", Vector: query,
 		Keywords: map[string][]string{"libraries": {private.ID}}}}); err != nil {
 		t.Fatal(err)
 	}
-	if c := compare(); c.Overlap[10] > 0.7 {
-		t.Errorf("with a stray point first, overlap@10 = %v, want 2/3", c.Overlap[10])
+	found := 0
+	for cursor := ""; ; {
+		page := search(cursor)
+		found += len(page.Assets)
+		if cursor = page.Next; cursor == "" {
+			break
+		}
+	}
+	if found != 3 {
+		t.Errorf("with a stray point, search found %d photos, want the three", found)
+	}
+	if c := check(); c.Overlap[10] != 1 {
+		t.Errorf("with a stray point, overlap@10 = %v, want 1", c.Overlap[10])
+	}
+}
+
+// Checks are spaced: within the interval of the last one, searches are not
+// checked.
+func TestChecksAreSpaced(t *testing.T) {
+	instance := vectorindextest.Start(t)
+	index := vectorindex.New(instance.Socket, nil)
+	t.Cleanup(func() { _ = index.Close() })
+	embedder := newFakeEmbedder()
+	service, err := photos.Open(t.TempDir()+"/photos", photos.Options{Now: newClock().Now, DisableCapacityReserve: true,
+		AI: embedder, Vectors: index})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	private, _ := libraries(t, service, alice)
+	importPhoto(t, service, alice, private.ID, "", "p.png", encodePNG(1))
+	processAll(t, service)
+	processAI(t, service, embedder, &fakeGate{open: true})
+	syncAll(t, service, index)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	checks := make(chan photos.VectorCheck, 4)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		service.RunVectorCheck(ctx, time.Hour, func(c photos.VectorCheck) { checks <- c }, func(err error) { t.Error(err) })
+	}()
+	defer func() { cancel(); <-done }()
+	for deadline := time.Now().Add(10 * time.Second); !service.CheckRunning(); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the check worker did not start")
+		}
+	}
+	for range 2 {
+		if _, err := service.Search(context.Background(), alice, photos.SearchRequest{Query: "猫"}); err != nil {
+			t.Fatal(err)
+		}
+		// Let the worker take the search before the next one.
+		time.Sleep(200 * time.Millisecond)
+	}
+	select {
+	case <-checks:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the first search was not checked")
+	}
+	select {
+	case c := <-checks:
+		t.Errorf("a second search within the hour was checked: %+v", c)
+	case <-time.After(500 * time.Millisecond):
 	}
 }

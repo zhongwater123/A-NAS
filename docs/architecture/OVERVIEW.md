@@ -26,7 +26,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   │                              ├── Photo Library / Catalog / Search / Policy
   │                              ├── 助手套接字 ◄── 成员的 AI 助手（对端 UID 即成员，只读；ADR 0024）
   │                              ├── AI Orchestrator ──► AI Worker（systemd 套接字按需启动；只读 fd，无网络；ADR 0016）
-  │                              └── 向量同步与影子比对 ──► 自己的向量索引（Qdrant，按需启动，私有网络，可从 Catalog 重建；ADR 0028）
+  │                              └── 向量同步与排序查询 ──► 自己的向量索引（Qdrant，按需启动，私有网络，可从 Catalog 重建；ADR 0028）
   └── hoststate.Reader
           ├── Fake Adapter（当前本地开发与契约测试）
           └── Host Agent Client Adapter
@@ -143,7 +143,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/photoservice` / `internal/sessionlookup` | 以 `a-nas-photos` 运行的相册服务进程（`anas-api photo-service`），以及它经 Host Agent 确认会话或助手 UID 的查询接口；由会话得到相册 `Principal` 只有 `photoservice.Authenticate` 一处，开发模式经 `photoservice.Local` 在产品进程内使用同一实现 | 已实现，root 集成测试、相册冒烟与系统测试覆盖 |
 | `internal/music` | 音乐库：经 `files.Service` 以成员身份扫描个人空间与 Shared 的音频、读取标签/封面/时长与歌词，保存歌曲索引、封面缩略图和每名成员的收藏、播放记录、歌单与音乐文件夹（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)） | 已实现，`internal/musicapi` 提供 `/api/v1/music`，见[音乐规格](../specs/music.md) |
 | `internal/websearch` / `internal/websearchapi` | 网页搜索：经 Unix 套接字调用 SearXNG 的 JSON 接口，按分类只问该分类的引擎，映射结果，用 SearXNG 的密钥为缩略图地址签名，按账号限流；管理员的开关由 Host Agent 持有（标记文件加 `systemctl`，`internal/hostops/linux/websearch.go`），种子分类的开关在产品服务的 `web-search.db`（[规格](../specs/web-search.md)） | 单元测试、OpenAPI 契约测试与系统测试（替身）覆盖；开发模式用不访问任何引擎的 Fake |
-| `internal/vectorindex` | 服务与自己的向量索引之间的客户端：经 Unix 套接字连接所属的 Qdrant 实例（官方 Go 客户端，只有一个连接，空闲即断开，让实例能停止），只提供类型化的建集合、写入、删除、按范围搜索与扫描；`vectorindextest` 运行固定版本的二进制（[向量索引技术设计](vector-index.md)） | 已实现，用真实二进制的单元测试与系统测试覆盖；相册服务用于同步与影子比对 |
+| `internal/vectorindex` | 服务与自己的向量索引之间的客户端：经 Unix 套接字连接所属的 Qdrant 实例（官方 Go 客户端，只有一个连接，空闲即断开，让实例能停止），只提供类型化的建集合、写入、删除、按范围搜索与扫描；`vectorindextest` 运行固定版本的二进制（[向量索引技术设计](vector-index.md)） | 已实现，用真实二进制的单元测试与系统测试覆盖；相册服务用于同步与排序（[读路径](vector-index.md#读路径)） |
 | `internal/aiworker` | 相册服务调用 AI Worker 的客户端：每次请求连接 systemd 按需激活的 Unix 套接字，一帧是 4 字节长度加 JSON；图片作为只读描述符随控制消息传递，从不传路径，Worker 因此不需要访问数据卷（[本地 AI 实施方案](photo-ai.md)） | 已实现，单元测试与针对 `ai/` 中 Python Worker（替身 Provider）的协议测试覆盖 |
 | `internal/photosapi` | `/api/v1/photos`：只接受上游确认的 `photos.Principal`，不自行认证；`/internal/photos/activity` 只供产品服务合并活动记录 | 已实现；部分路由在 `httpapi` 的 OpenAPI 契约测试中；生产中由产品服务转发到相册服务，相册服务不可用时返回 `photos_unavailable` |
 | `internal/media` / `internal/mediaapi` | 影视中心：媒体库、按文件名与 NFO 识别的目录、每个用户的进度、收藏与合集，以及 `/api/v1/media` | 已实现，单元测试、OpenAPI 契约测试与系统测试覆盖，见[影视中心技术设计](media-center.md) |
