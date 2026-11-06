@@ -46,7 +46,7 @@
 
 ## 关联
 
-- 规格：待补（虚拟伙伴 V1，[#404](https://github.com/zhongwater123/A-NAS/issues/404)）
+- 规格：[虚拟伙伴（大肥鱼）](../specs/virtual-companion.md)
 - ADR：[0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
 - 代码：[`install-companion-animations.sh`](../../scripts/install-companion-animations.sh)、[`remote-stage-companion-animations.sh`](../../scripts/remote-stage-companion-animations.sh)、[`deploy-companion-animations.ps1`](../../scripts/deploy-companion-animations.ps1)、[`vendor-dsh-pet.py`](../../scripts/vendor-dsh-pet.py)、[`handler.go`](../../internal/webui/handler.go)
 - 测试：[`handler_test.go`](../../internal/webui/handler_test.go)、[`system-test.sh`](../../scripts/system-test.sh)

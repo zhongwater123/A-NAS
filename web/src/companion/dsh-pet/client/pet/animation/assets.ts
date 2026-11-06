@@ -29,6 +29,9 @@ export interface AssetSource {
  */
 export function animationAssetUrl(source: AssetSource): string {
   if (source.cueUrl) return source.cueUrl;
+  // A-NAS: an asset root that is a path is where the Product Service serves the animations
+  // (/companion/animations/<name>.webm), not a Harness route.
+  if (source.assetRoot.startsWith('/')) return source.assetRoot + '/' + encodeURIComponent(source.anim) + source.ext;
   const root = source.assetRoot === '' ? source.id : source.assetRoot;
   return ROUTE_PATH + '/thumb/' + encodeURIComponent(root) + '/' + encodeURIComponent(source.anim) + source.ext;
 }

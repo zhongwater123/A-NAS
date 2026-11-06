@@ -13,6 +13,7 @@ The animations stay out of Git; animations.sha256 pins the ones the commit ships
 install-companion-animations.sh installs (scripts/deploy-companion-animations.ps1 stages them).
 """
 import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -69,6 +70,35 @@ for patch in sorted(patches.glob("*.patch")):
     subprocess.run(["git", "apply", "--directory", target.as_posix(), str(patch)],  # noqa: S607  our own patches
                    check=True, cwd=Path.cwd())
     applied.append(patch.name)
+def jsonc(text: str) -> object:
+    """Parses dsh-pet's config.jsonc: JSON with comments and trailing commas."""
+    out, i, inside = [], 0, False
+    while i < len(text):
+        c = text[i]
+        if inside:
+            out.append(text[i:i + 2] if c == "\\" else c)
+            i += 2 if c == "\\" else 1
+            inside = c != '"'
+        elif text.startswith("//", i):
+            i = text.find("\n", i) if "\n" in text[i:] else len(text)
+        elif text.startswith("/*", i):
+            i = text.index("*/", i) + 2
+        else:
+            out.append(c)
+            inside = c == '"'
+            i += 1
+    return json.loads(re.sub(r",(\s*[}\]])", r"\1", "".join(out)))
+
+
+# The animations the companion plays and how often, from the commit's own configuration.
+# Balance, chatter, sleep and the meal game are dsh-pet features A-NAS does not have.
+config = jsonc((upstream / "dsh-pet" / "assets" / "config.jsonc").read_text(encoding="utf-8"))
+animations = {key: value for key, value in config["animations"].items() if key not in ("sleep", "baifan")}
+animations["events"] = {"workStatus": config["animations"]["events"]["workStatus"]}
+(target / "animations.json").write_text(
+    json.dumps({"animations": animations, "animationWeights": config["animationWeights"], "physics": config["physics"]},
+               ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+
 lines = []
 for path in sorted((upstream / "dsh-pet" / "assets" / "webm").glob("*.webm")):
     if not re.fullmatch(r"[^./\\\x00-\x1f\x7f][^/\\\x00-\x1f\x7f]*\.webm", path.name) or path.name != path.name.strip():
