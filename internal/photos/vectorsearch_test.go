@@ -547,7 +547,10 @@ func TestFailedChecksAreSpaced(t *testing.T) {
 
 	searchCount(t, service)
 	select {
-	case <-failures:
+	case err := <-failures:
+		if err == nil {
+			t.Fatal("the check reported a nil failure")
+		}
 	case c := <-checks:
 		t.Fatalf("the check succeeded: %+v", c)
 	case <-time.After(30 * time.Second):
