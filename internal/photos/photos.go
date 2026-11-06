@@ -275,17 +275,21 @@ type Service struct {
 	// searches keeps what image searches need for their later pages.
 	searches imageSearches
 	// vectors is the vector index ranking reads (vectorsearch.go), prepared
-	// at most every prepareVectorsEvery; fallbacks rate the reports to
-	// onVectorFallback. check hands searches to RunVectorCheck while checking
-	// says it runs (vectorcheck.go). vectorChecked is the image collection the
-	// sync loop last found in the index (vectorsync.go).
+	// at most every prepareVectorsEvery and left alone for a while after it
+	// fails (health); fallbacks rate the reports to onVectorFallback. check
+	// hands searches to RunVectorCheck while checking says it runs
+	// (vectorcheck.go). vectorChecked is the image collection the sync loop
+	// last found in the index, and vectorRecheck asks the sync loop to look
+	// again now (vectorsync.go).
 	vectors          VectorIndex
 	vectorsPrepared  atomic.Int64
+	health           indexHealth
 	onVectorFallback func(reason string, err error)
 	fallbacks        vectorFallbacks
 	check            chan vectorCheckQuery
 	checking         atomic.Bool
 	vectorChecked    atomic.Pointer[imagesCollection]
+	vectorRecheck    chan struct{}
 	// closed ends background work the service starts itself when it closes.
 	closed       context.Context
 	closeWorkers context.CancelFunc
@@ -340,8 +344,8 @@ func Open(root string, options Options) (*Service, error) {
 		admits: capacity.Admits, location: options.Location, embedder: options.AI,
 		staging: make(map[string]struct{}), mediaWake: make(chan struct{}, 1),
 		searches: imageSearches{encoding: make(chan struct{}, 1)},
-		check:    make(chan vectorCheckQuery, 1),
-		vectors:  options.Vectors, onVectorFallback: options.OnVectorFallback,
+		check:    make(chan vectorCheckQuery, 1), vectorRecheck: make(chan struct{}, 1),
+		vectors: options.Vectors, onVectorFallback: options.OnVectorFallback,
 	}
 	service.closed, service.closeWorkers = context.WithCancel(context.Background())
 	service.ai = newAIRunner(service)

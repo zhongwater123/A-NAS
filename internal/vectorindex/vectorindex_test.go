@@ -194,6 +194,11 @@ func TestIndex(t *testing.T) {
 	if collections, err := client.Collections(ctx); err != nil || len(collections) != 0 {
 		t.Errorf("after delete, Collections = %v, %v", collections, err)
 	}
+	// A search of a collection the instance no longer holds says so.
+	if _, err := client.Search(ctx, "images", vectorindex.Query{Vector: unit(1, 0, 0),
+		Scope: vectorindex.Scope{Field: "libraries", Values: []string{"bob"}}, Limit: 10}); !errors.Is(err, vectorindex.ErrNoCollection) {
+		t.Errorf("search of a deleted collection = %v, want ErrNoCollection", err)
+	}
 }
 
 // An idle client closes its connection, so that on the NAS the proxy exits

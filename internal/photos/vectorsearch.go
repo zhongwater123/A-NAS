@@ -24,7 +24,9 @@ import (
 // date in the index, so they are scored from the Catalog beside its answer.
 // When the index cannot answer for the query's model (it has no collection
 // for it yet, much is still queued, or it fails), the Catalog is read in
-// batches instead: the same results, slower.
+// batches instead: the same results, slower. After a failure the index is
+// left alone for a while, so that searches neither wait for nor keep starting
+// a broken instance, and a collection it lost is made again at once.
 
 const (
 	// similarityMargin covers the difference between the index's scores,
@@ -112,13 +114,26 @@ func (s *Service) similarities(ctx context.Context, q similarityQuery) (map[stri
 // indexSimilarities answers q with the index; ok is false when the index
 // cannot answer for the model, and the caller reads the Catalog instead.
 func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sims map[string]float64, read vectorRead, ok bool, err error) {
+	if s.indexResting() {
+		s.reportVectorFallback("the vector index failed recently", nil)
+		return nil, vectorRead{}, false, nil
+	}
 	collection, queued, usable, err := s.readableCollection(ctx, q.model)
 	if err != nil || !usable {
 		return nil, vectorRead{}, false, err
 	}
-	allowed := make(map[string]bool, len(q.objects))
+	// The always objects are scored whatever their rank, and the caller's
+	// bands take them out of the ranking by similarity: the index ranks the
+	// others.
+	always := make(map[string]bool, len(q.always))
+	for _, object := range q.always {
+		always[object] = true
+	}
+	ranks := make(map[string]bool, len(q.objects))
 	for _, object := range q.objects {
-		allowed[object] = true
+		if !always[object] {
+			ranks[object] = true
+		}
 	}
 	bonus := q.bonus
 	if bonus == nil {
@@ -129,11 +144,11 @@ func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sim
 	// older version of it, or nothing.
 	var delta []string
 	for object := range queued {
-		if allowed[object] || slices.Contains(q.always, object) {
+		if ranks[object] || always[object] {
 			delta = append(delta, object)
 		}
 	}
-	exact := make(map[string]float64, len(delta)+q.keep)
+	exact := make(map[string]float64, len(delta)+q.keep+len(always))
 	if err := s.scoreFromCatalog(ctx, q.model, q.vector, delta, exact); err != nil {
 		return nil, vectorRead{}, false, err
 	}
@@ -141,20 +156,31 @@ func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sim
 	read.warm = s.vectorsWarm()
 	started := time.Now()
 	ask := func(limit int, floor *float32) ([]vectorindex.Hit, error) {
-		return s.vectors.Search(ctx, collection, vectorindex.Query{Vector: q.vector,
+		hits, err := s.vectors.Search(ctx, collection, vectorindex.Query{Vector: q.vector,
 			Scope: vectorindex.Scope{Field: librariesField, Values: q.scope}, Limit: limit, Exact: true, Floor: floor})
+		if err != nil {
+			s.indexFailed(ctx, err)
+		}
+		return hits, err
 	}
-	// The objects the caller ranks may include always ones, which its
-	// bands take out of the similarity ranking, so it needs that many more.
-	want := q.keep + len(q.always)
-	limit := want + len(delta) + indexOverfetch
+	// No more can rank than there are to rank: when a query matches nearly
+	// every name, the index is not paged through for photos that are not
+	// there.
+	want := min(q.keep, len(ranks))
+	limit := max(want+len(delta)+indexOverfetch, 1)
+	// The queued objects ranked are placed from their exact scores.
+	placedExactly := 0
+	for _, object := range delta {
+		if _, ok := exact[object]; ok && ranks[object] {
+			placedExactly++
+		}
+	}
 	var hits []vectorindex.Hit
 	for {
 		if hits, err = ask(limit, nil); err != nil {
-			s.reportVectorFallback("the vector index failed", err)
 			return nil, vectorRead{}, false, err
 		}
-		if len(hits) < limit || countUsable(hits, allowed, queued) >= want {
+		if len(hits) < limit || countUsable(hits, ranks, queued)+placedExactly >= want {
 			break
 		}
 		limit *= 4
@@ -169,12 +195,12 @@ func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sim
 	place := func(hits []vectorindex.Hit) []placed {
 		ranked := make([]placed, 0, len(hits)+len(delta))
 		for _, hit := range hits {
-			if allowed[hit.Key] && !queued[hit.Key] {
+			if ranks[hit.Key] && !queued[hit.Key] {
 				ranked = append(ranked, placed{hit.Key, float64(hit.Score) + bonus(hit.Key)})
 			}
 		}
 		for _, object := range delta {
-			if sim, ok := exact[object]; ok && allowed[object] {
+			if sim, ok := exact[object]; ok && ranks[object] {
 				ranked = append(ranked, placed{object, sim + bonus(object)})
 			}
 		}
@@ -182,7 +208,10 @@ func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sim
 		return ranked
 	}
 	cut := func(ranked []placed) float64 {
-		if len(ranked) < want {
+		switch {
+		case want == 0:
+			return math.Inf(1)
+		case len(ranked) < want:
 			return math.Inf(-1)
 		}
 		return ranked[want-1].score
@@ -190,12 +219,11 @@ func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sim
 	ranked := place(hits)
 	// A bonus can lift an object the index ranked lower above the cut: ask
 	// again for everything that could reach it.
-	if exhausted := len(hits) < limit; !exhausted {
+	if exhausted := len(hits) < limit; !exhausted && want > 0 {
 		floor := float32(cut(ranked) - q.maxBonus - similarityMargin)
 		if lowest := hits[len(hits)-1].Score; lowest >= floor {
-			for limit = max(limit*2, 2*len(allowed)+64); ; limit *= 4 {
+			for limit = max(limit*2, 2*len(ranks)+64); ; limit *= 4 {
 				if hits, err = ask(limit, &floor); err != nil {
-					s.reportVectorFallback("the vector index failed", err)
 					return nil, vectorRead{}, false, err
 				}
 				if len(hits) < limit {
@@ -205,6 +233,7 @@ func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sim
 			ranked = place(hits)
 		}
 	}
+	s.indexAnswered()
 	read.index, read.took = true, time.Since(started)
 
 	// Exact scores for everything near enough to the cut, and for always.
@@ -218,8 +247,8 @@ func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sim
 			pick = append(pick, p.object)
 		}
 	}
-	for _, object := range q.always {
-		if _, done := exact[object]; !done && !slices.Contains(pick, object) {
+	for object := range always {
+		if _, done := exact[object]; !done {
 			pick = append(pick, object)
 		}
 	}
@@ -235,7 +264,7 @@ func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sim
 			sims[p.object] = sim
 		}
 	}
-	for _, object := range q.always {
+	for object := range always {
 		if sim, ok := exact[object]; ok {
 			sims[object] = sim
 		}
@@ -243,15 +272,65 @@ func (s *Service) indexSimilarities(ctx context.Context, q similarityQuery) (sim
 	return sims, read, true, nil
 }
 
-// countUsable counts the hits the caller may rank and that are not queued.
-func countUsable(hits []vectorindex.Hit, allowed, queued map[string]bool) int {
+// countUsable counts the hits the caller ranks that are not queued.
+func countUsable(hits []vectorindex.Hit, ranks, queued map[string]bool) int {
 	count := 0
 	for _, hit := range hits {
-		if allowed[hit.Key] && !queued[hit.Key] {
+		if ranks[hit.Key] && !queued[hit.Key] {
 			count++
 		}
 	}
 	return count
+}
+
+// vectorIndexRetry is how long ranking leaves the index alone after it
+// failed, doubling with each failure in a row up to vectorSyncMaxBackoff, so
+// that searches neither wait for nor keep starting a broken instance.
+const vectorIndexRetry = time.Minute
+
+// indexHealth remembers the index's failures in a row and until when ranking
+// reads the Catalog instead.
+type indexHealth struct {
+	mu       sync.Mutex
+	failures int
+	until    time.Time
+}
+
+// indexResting reports whether the index failed recently: until then ranking
+// reads the Catalog, and nothing starts the instance.
+func (s *Service) indexResting() bool {
+	s.health.mu.Lock()
+	defer s.health.mu.Unlock()
+	return s.now().Before(s.health.until)
+}
+
+// indexFailed records that the index did not answer: ranking leaves it alone
+// for a while, and when it has lost the collection, the sync loop makes it
+// again now rather than at the next reconciliation. A request its caller gave
+// up on says nothing about the index.
+func (s *Service) indexFailed(ctx context.Context, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+	if errors.Is(err, vectorindex.ErrNoCollection) {
+		s.vectorChecked.Store(nil)
+		select {
+		case s.vectorRecheck <- struct{}{}:
+		default:
+		}
+	}
+	s.health.mu.Lock()
+	s.health.failures++
+	s.health.until = s.now().Add(vectorSyncBackoff(vectorIndexRetry, s.health.failures))
+	s.health.mu.Unlock()
+	s.reportVectorFallback("the vector index failed", err)
+}
+
+// indexAnswered records that the index answered.
+func (s *Service) indexAnswered() {
+	s.health.mu.Lock()
+	s.health.failures, s.health.until = 0, time.Time{}
+	s.health.mu.Unlock()
 }
 
 // readableCollection returns the collection holding model's vectors and the
@@ -429,6 +508,10 @@ func (s *Service) above(ctx context.Context, model string, scope []string, objec
 // for the model.
 func (s *Service) indexAbove(ctx context.Context, model string, scope []string, objects []string, queries []thresholdQuery,
 	exactAll bool) ([]map[string]float64, bool, error) {
+	if s.indexResting() {
+		s.reportVectorFallback("the vector index failed recently", nil)
+		return nil, false, nil
+	}
 	collection, queued, usable, err := s.readableCollection(ctx, model)
 	if err != nil || !usable {
 		return nil, false, err
@@ -469,9 +552,10 @@ func (s *Service) indexAbove(ctx context.Context, model string, scope []string, 
 		}
 	}
 	if err != nil {
-		s.reportVectorFallback("the vector index failed", err)
+		s.indexFailed(ctx, err)
 		return nil, false, err
 	}
+	s.indexAnswered()
 
 	found := make([]map[string]float64, len(queries))
 	// Exact scores are needed for what the outbox queues, for what lies near
@@ -542,10 +626,11 @@ const prepareVectorsEvery = 20 * time.Second
 // PrepareVectors starts the vector index ahead of a search, without waiting:
 // the photo service calls it for every request of a signed-in person, so the
 // instance runs while someone uses the library. It does nothing more often
-// than every prepareVectorsEvery, nor without local AI.
+// than every prepareVectorsEvery, nor without local AI, nor while the index
+// rests after failing.
 func (s *Service) PrepareVectors() {
 	preparer, ok := s.vectors.(interface{ Prepare(context.Context) error })
-	if !ok || s.embedder == nil {
+	if !ok || s.embedder == nil || s.indexResting() {
 		return
 	}
 	now := time.Now().UnixNano()
@@ -554,9 +639,12 @@ func (s *Service) PrepareVectors() {
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(s.closed, time.Minute)
-		defer cancel()
-		_ = preparer.Prepare(ctx)
+		// The client bounds the call; s.closed ends it when the service closes.
+		if err := preparer.Prepare(s.closed); err != nil {
+			s.indexFailed(s.closed, err)
+			return
+		}
+		s.indexAnswered()
 	}()
 }
 

@@ -63,7 +63,7 @@
    - 预期：
      - 打开相册后实例在运行：`systemctl is-active anas-vectors@a-nas-photos.service` 为 `active`（[预热](../architecture/vector-index.md#预热)）。
      - 符合条件的搜索之后出现一行 `photo vector index check`，带 `overlap10`、`overlap100`、`overlap500`、`index_ms`、`exact_ms`、`warm`，三个 `overlap` 都是 1。日志里没有查询文本。
-     - 没有 `photo search reads the Catalog's vectors`。首次同步完成前它的 `reason` 为 `the vector index has no collection for the model`，大批导入时为 `too many photos wait for the vector index`，这两种只说明这段时间读的是 Catalog，结果不变。
+     - 没有 `photo search reads the Catalog's vectors`。首次同步完成前它的 `reason` 为 `the vector index has no collection for the model`，大批导入时为 `too many photos wait for the vector index`，这两种只说明这段时间读的是 Catalog，结果不变。`the vector index failed recently` 只跟在一次 `the vector index failed` 之后，表示出错后的等待（[技术设计](../architecture/vector-index.md#出错之后)）。
    - 只核对这样的搜索：
      - 是第一页；
      - 查询里没有人物名；

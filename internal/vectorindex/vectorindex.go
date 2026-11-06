@@ -78,6 +78,11 @@ var ErrInvalid = errors.New("invalid vector index request")
 // another size than its collection's; the same write would be refused again.
 var ErrRejected = errors.New("the vector index rejected the write")
 
+// ErrNoCollection means a search named a collection the instance does not
+// hold, as after it lost its storage; the owner makes it again from its
+// Catalog.
+var ErrNoCollection = errors.New("the vector index has no such collection")
+
 // Client talks to one vector index instance. Its zero value is not usable;
 // call New. It is safe for concurrent use.
 type Client struct {
@@ -405,6 +410,9 @@ func (c *Client) SearchBatch(ctx context.Context, collection string, queries []Q
 		return nil, err
 	}
 	results, err := client.QueryBatch(ctx, &qdrant.QueryBatchPoints{CollectionName: collection, QueryPoints: requests})
+	if status.Code(err) == codes.NotFound {
+		return nil, fmt.Errorf("%w: %v", ErrNoCollection, err)
+	}
 	if err != nil {
 		return nil, err
 	}

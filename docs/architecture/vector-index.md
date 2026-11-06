@@ -148,7 +148,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 | 功能 | 怎么读 |
 |---|---|
-| 文搜图 | 索引在搜索的图库范围内精确取前 500，再按 Catalog 的向量精确打分；检测器的加分照旧 |
+| 文搜图 | 索引在搜索的图库范围内精确取前 500，再按 Catalog 的向量精确打分；检测器的加分照旧。名称、照片中的文字或检测命中的照片排在相似度之上的分档里，直接按 Catalog 打分 |
 | 以图搜图、找相似 | 同上，加分是物体重合（最多 0.1） |
 | AI 聚合的计数与照片列表 | 每个标签一条带分数下限的查询，一次发出；下限附近与最相似的照片按 Catalog 重算，列表全部重算 |
 | 文字识别的路由 | 不排序，按内容 ID 分页读 Catalog（每页 500） |
@@ -162,11 +162,11 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 1. **候选由 Policy 给出。** 只有参与本地 AI 的候选对象可以排序。索引里多出来的点（Catalog 已经没有的，或不在这次候选里的）一律忽略：索引命中不构成授权。
 2. **排队中的对象从 Catalog 打分。** outbox 里的对象在索引里可能是旧版本或者不存在，直接读 Catalog 的向量打分，与索引的答案合并。
-3. **截线留出余量。** 索引用 float32 打分，Catalog 用 float64。先用索引的分数加上加分排出第 k 名作为截线（k 是要排的数目加上按名称匹配的照片数）；凡是相似度不低于“截线 − 加分上限 − 10⁻⁴”的对象都可能排进前 k。第一次取得不够深时，带这个分数下限再取一次，直到取尽。这样一个相似度稍低、靠加分进前 k 的对象也不会漏掉。
-4. **截线附近以上全部重算。** 分数在截线 10⁻⁴ 以内及以上的对象，以及按名称匹配的照片，都从 Catalog 读向量、用 float64 重新打分；之后的分档与排序与切换前相同。
+3. **截线留出余量。** 索引用 float32 打分，Catalog 用 float64。名称、文字或检测命中的照片不参加这一步，索引只为其余的照片排名：先用索引的分数加上加分排出第 k 名作为截线（k 是要排的数目，其余照片更少时取其余照片的数目）；凡是相似度不低于“截线 − 加分上限 − 10⁻⁴”的对象都可能排进前 k。第一次取得不够深时，带这个分数下限再取一次，直到取尽。这样一个相似度稍低、靠加分进前 k 的对象也不会漏掉。
+4. **截线附近以上全部重算。** 分数在截线 10⁻⁴ 以内及以上的对象，以及名称、文字或检测命中的照片，都从 Catalog 读向量、用 float64 重新打分；之后的分档与排序与切换前相同。查询几乎命中所有名称（例如“png”）时，索引只问一次，排序几乎全部按 Catalog 的向量做，与切换前的扫描量相当。
 5. **标签同理。** 用“下限 − 10⁻⁴”取出，下限 10⁻⁴ 以内的与最相似的（相差 2 × 10⁻⁴ 以内）按 Catalog 重算，是否计入以 Catalog 的分数为准；照片列表的分数全部重算。
 
-[`TestTheIndexRanksAsTheCatalogDoes`](../../internal/photos/vectorsearch_test.go) 用 620 张照片，在三个阶段比较两条路径的全部结果：全部同步、有新照片排队（另有一张进了回收站）、集合丢失。每个阶段还把第一次的超取设为 0 再比一次，让“带下限再取”真的发生。
+[`TestTheIndexRanksAsTheCatalogDoes`](../../internal/photos/vectorsearch_test.go) 用 620 张照片（其中 48 张读出了文字），在三个阶段比较两条路径的全部结果，包括命中全部名称、部分名称与照片文字的查询：全部同步、有新照片排队（另有一张进了回收站）、集合丢失。每个阶段还把第一次的超取设为 0 再比一次，让“带下限再取”真的发生。
 
 ### 读 Catalog 的回退
 
@@ -174,7 +174,8 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 - 索引里没有这个模型的集合：首次同步前，或换模型后新集合还没建好；
 - outbox 排队超过 2000 个对象，例如大批导入时；
-- 索引出错，例如实例起不来或超时。
+- 索引出错，例如实例起不来或超时；
+- 索引刚出过错，还在等待中（见下文）。
 
 候选不超过 2000 个时按 ID 读，否则按内容 ID 分页读全部向量；每读完一批就释放 Catalog 唯一的连接。日志记 `photo search reads the Catalog's vectors`，带 `reason`：
 
@@ -183,8 +184,15 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 | `the vector index has no collection for the model` | info |
 | `too many photos wait for the vector index` | info |
 | `the vector index failed` | warn，带 `error` |
+| `the vector index failed recently` | info |
 
 同一原因 10 分钟内只记一次。关闭索引（见下文）时不记。
+
+### 出错之后
+
+- 索引出错后，排序 1 分钟内不再问它，预热也不拉起实例；连续出错时等待加倍，最长 30 分钟。它答上一次就恢复。这样实例坏了或启动卡住时，搜索不会每次都等它（单元最长允许 90 秒启动），也不会一直把它拉起来。
+- 索引说集合不存在（实例清空了存储，例如连续两次启动失败）时，同步循环立即确认并重建集合，把全部向量排队，不等门控，也不等每天的对账；写入仍等门控。在此之前排序读 Catalog。
+- 测试：[`TestAFailingIndexIsLeftAloneForAWhile`](../../internal/photos/vectorsearch_test.go)、`TestALostCollectionIsMadeAgainAtOnce`。
 
 ### 预热
 
@@ -201,7 +209,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - worker 至多每 10 分钟核对一次：让索引按同样的范围取前 500（不加分），再从 Catalog 读全部候选的向量精确排序，比较前 10、100、500；分数与第 k 名相差 10⁻⁵ 以内的并列照片都算命中。
 - 两边都是精确结果，overlap 应为 1。低于 1 说明索引选错或漏了对象，日志级别为 warn。
 - 日志 `photo vector index check`：`collection`、`candidates`、`overlap10`、`overlap100`、`overlap500`、`index_ms`（索引选对象的时间）、`exact_ms`（从 Catalog 读全部候选并排序的时间）、`warm`。不记录查询文本与名称。失败时记 `photo vector index check failed`。
-- 它要读全部候选的向量，所以间隔放宽到 10 分钟（`photoservice.VectorCheckInterval`）。
+- 它要读全部候选的向量，所以间隔放宽到 10 分钟（`photoservice.VectorCheckInterval`）。失败的核对同样计入间隔，坏掉的索引不会在每次搜索后都被再问一次、记一次日志（`TestFailedChecksAreSpaced`）。
 
 ### 换模型
 

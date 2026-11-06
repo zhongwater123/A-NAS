@@ -81,6 +81,9 @@ func (s *Service) RunVectorCheck(ctx context.Context, every time.Duration, repor
 			}
 			check, checked, err := s.checkWithCatalog(ctx, query)
 			if err != nil {
+				// A failed check is spaced like one that succeeded, so that a
+				// broken index is not asked, nor logged, at every search.
+				last = s.now()
 				if ctx.Err() == nil && logError != nil {
 					logError(err)
 				}

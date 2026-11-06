@@ -144,6 +144,14 @@ func (s *Service) RunVectorSync(ctx context.Context, index VectorIndex, gate Gat
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.vectorRecheck:
+			// Ranking found the index without its collection, as after the
+			// instance lost its storage: make it again now, queueing every
+			// vector, rather than at the next reconciliation. Filling it waits
+			// for the gate like any other sync.
+			if _, _, err := s.imagesCollection(ctx, index, report, true); err != nil {
+				failed(err)
+			}
 		case <-time.After(wait):
 		}
 	}
