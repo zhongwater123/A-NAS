@@ -202,6 +202,18 @@ class MomentsTest(unittest.TestCase):
                               {f"08/{w['frame']}": vector for w in windows})
         self.assertEqual([(c["start"], c["end"]) for c in index.cards], [(0, 16.67), (16.67, 33.33), (33.33, 50)])
 
+    def test_a_split_near_a_cut_joined_as_the_same_place_falls_on_that_cut(self):
+        basis = np.eye(4, dtype=np.float32)
+        windows = [{"start": 2 * k, "end": 2 * k + 2, "frame": 2000 * k + 1000, "flat": False, "tags": []}
+                   for k in range(6)]
+        # The picture changes from the window at 6 s; the index joined the cut at 5.3 s as one place.
+        vectors = {f"08/{w['frame']}": basis[0] if k < 3 else basis[1] for k, w in enumerate(windows)}
+        meta = {"file": "08.webm", "duration": 12.0, "shots": [[0, 12]], "windows": windows}
+        index = moments.Index({"model": "test", "videos": {"08": meta}}, vectors)
+        self.assertEqual([(c["start"], c["end"]) for c in index.cards], [(0, 6), (6, 12)])
+        index = moments.Index({"model": "test", "videos": {"08": meta | {"same_place": [[5.3, 0.87]]}}}, vectors)
+        self.assertEqual([(c["start"], c["end"]) for c in index.cards], [(0, 5.3), (5.3, 12)])
+
     def write_index(self, work):
         with open(os.path.join(work, "index.json"), "w", encoding="utf-8") as file:
             json.dump({"model": "test", "videos": self.index.videos}, file)

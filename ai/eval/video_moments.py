@@ -524,6 +524,18 @@ def montage(args):
 # grey levels spread less than FLAT is black or one colour.
 SCENE = 0.25
 SHOT_MIN = 1.0
+# A cut whose frames SAME_PLACE_SECONDS before and after it are at least SAME_PLACE alike (cosine
+# of their vectors, embedded as the window frames are) joins its two shots: the coloured lights
+# of a restaurant, a flash, a turn of the head, or the same place from another angle, which the
+# member counts as one segment, a cut being a change of place (#416). By the member's marks on
+# cases 02 and 01 (124 changes of place, 176 cuts within one), FFmpeg alone keeps 110 cuts within
+# a place and misses 19 changes; at 0.86 it keeps 50 and misses 24, at 0.85 39 and 28. Most
+# misses are in the dark film (case 01), and the member found them acceptable on review: a cut
+# whose sides are this alike is not one a change of place was taken for. PySceneDetect's
+# AdaptiveDetector besides FFmpeg missed only 5 at 0.86, but decodes the video a second time.
+SAME_PLACE = 0.86
+SAME_PLACE_SECONDS = 0.5
+CUTS = "cuts.npz"
 FLAT = 8.0
 TAGS_PER_WINDOW = 3
 LABELS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -543,6 +555,20 @@ def cuts(path):
     return times
 
 
+def same_place(times, vector_at):
+    """times split into the cuts kept and those whose two sides show the same place (SAME_PLACE),
+    the latter with how alike their sides are; vector_at(t) is the frame vector at t seconds."""
+    kept, joined = [], []
+    for t in times:
+        before, after = (np.asarray(vector_at(t + d), dtype=np.float32) for d in (-SAME_PLACE_SECONDS, SAME_PLACE_SECONDS))
+        alike = float(before @ after / np.linalg.norm(before) / np.linalg.norm(after))
+        if alike >= SAME_PLACE:
+            joined.append([t, round(alike, 3)])
+        else:
+            kept.append(t)
+    return kept, joined
+
+
 def build_index(args):
     from anas_ai import providers
 
@@ -556,13 +582,26 @@ def build_index(args):
         mean = np.mean([provider.embed_query(word) for word in [label["name"], *label.get("synonyms", [])]], axis=0)
         rows.append(mean / np.linalg.norm(mean))
     labels = np.stack(rows).astype(np.float32)
-    provider.close()
     directory = os.path.join(CACHE, provider.model)
     frames = Cache(os.path.join(directory, "frames.npz")).vectors
-    out = {"model": provider.model, "layout": MONTAGE_LAYOUT, "scene": SCENE, "videos": {}}
+    sides = Cache(os.path.join(directory, CUTS))
+    out = {"model": provider.model, "layout": MONTAGE_LAYOUT, "scene": SCENE, "same_place": SAME_PLACE, "videos": {}}
     for video, meta in sorted(data["videos"].items()):
         duration = meta["duration"]
-        bounds = [0.0, *cuts(os.path.join(VIDEOS, meta["file"])), duration]
+        path = os.path.join(VIDEOS, meta["file"])
+        duration_ms = round(duration * 1000)
+
+        def vector_at(t, video=video, path=path, duration_ms=duration_ms):
+            ms = min(max(round(t * 1000), 0), duration_ms)
+            key = f"{video}/{ms}"
+            if key not in sides.vectors:
+                sides.vectors[key] = np.asarray(provider.embed_image(decode(path, ms, duration_ms)), dtype=np.float32)
+            return sides.vectors[key]
+
+        kept, joined = same_place(cuts(path), vector_at)
+        if sides.vectors:
+            sides.save()
+        bounds = [0.0, *kept, duration]
         windows_out = []
         for start, end, (frame,) in windows(round(duration * 1000), *LAYOUTS[MONTAGE_LAYOUT]):
             with Image.open(frame_path(video, frame)) as image:
@@ -571,8 +610,11 @@ def build_index(args):
             windows_out.append({"start": start / 1000, "end": end / 1000, "frame": frame, "flat": flat,
                                 "tags": [vocabulary[i]["name"] for i in nearest]})
         out["videos"][video] = {"file": meta["file"], "duration": duration,
-                                "shots": [list(pair) for pair in itertools.pairwise(bounds)], "windows": windows_out}
-        print(f"{video}: {len(bounds) - 1} shots, {sum(w['flat'] for w in windows_out)} flat windows", flush=True)
+                                "shots": [list(pair) for pair in itertools.pairwise(bounds)], "same_place": joined,
+                                "windows": windows_out}
+        print(f"{video}: {len(bounds) - 1} shots ({len(joined)} cuts joined as the same place), "
+              f"{sum(w['flat'] for w in windows_out)} flat windows", flush=True)
+    provider.close()
     with open(os.path.join(directory, "index.json"), "w", encoding="utf-8") as file:
         json.dump(out, file, ensure_ascii=False)
 

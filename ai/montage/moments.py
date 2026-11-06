@@ -345,9 +345,21 @@ class Index:
             start, end = self.videos[video]["shots"][shot]
             members.sort(key=lambda i: self.rows[i][1])
             part = 0
+            # A cut the index joined as the same place (eval.video_moments.same_place, #416) is
+            # where the picture changes when it changes enough to split here after all: a split
+            # within a window of it moves onto it, so no card holds the cut a window from its end.
+            joined = [t for t, _ in self.videos[video].get("same_place", []) if start < t < end]
+
+            def onto(t, window, joined=joined):
+                near = [c for c in joined if abs(c - t) <= window]
+                return min(near, key=lambda c: abs(c - t)) if near else t
+
             for piece in self._pieces(members):
-                lo = start if piece[0] == members[0] else self.rows[piece[0]][1]
-                hi = end if piece[-1] == members[-1] else self.rows[piece[-1]][2]
+                lo = start if piece[0] == members[0] else onto(self.rows[piece[0]][1], self.rows[piece[0]][2] - self.rows[piece[0]][1])
+                hi = end if piece[-1] == members[-1] else onto(self.rows[piece[-1]][2], self.rows[piece[-1]][2] - self.rows[piece[-1]][1])
+                if hi <= lo:
+                    lo = start if piece[0] == members[0] else self.rows[piece[0]][1]
+                    hi = end if piece[-1] == members[-1] else self.rows[piece[-1]][2]
                 parts = max(1, math.ceil((hi - lo) / SEGMENT_MAX - 1e-9))
                 for k in range(parts):
                     a, b = lo + (hi - lo) * k / parts, lo + (hi - lo) * (k + 1) / parts
