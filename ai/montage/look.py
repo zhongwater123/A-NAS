@@ -47,6 +47,13 @@ DESCRIBE = ("用一句中文描述上面几张图（同一段视频按时间先�
             "是夜晚就写夜晚。画面如果有变化（换了地方、主体或镜头方向），要概括全部内容，不要只写其中一张。"
             "认不准的建筑就说建筑，不要编地名，不超过 40 个字。直接写描述，不要复述题目。")
 
+# What to look at in a drama film, after DESCRIBE (#416, from 方案 B's tagging), for a member who
+# picks 剧情 for the cut: blind on 40 cards it won 8 to 1 on the detective film, while a line for
+# travel vlogs lost 3 to 4 on Shanghai and was dropped. Not wired to the style yet.
+FOCUS = {
+    "剧情": "这是剧情片：写清人物的衣着、动作和表情，和谁在一起，手里或画面里的关键物件（枪、手电、电话、照片、文件），场景是什么样的光线。",
+}
+
 # The place alone, for telling a card's scene apart from the people in it (#350): a film shot
 # in one look, men in suits in the dark, reads alike in pictures and in captions, while an
 # office, a car and a beach are different places.
@@ -155,8 +162,10 @@ class Vision:
             text = text[:cut + 1] if cut > chars // 2 else text[:int(chars * 1.2)]
         return text
 
-    def describe(self, jpegs: list[bytes]) -> str:
-        return self.ask(DESCRIBE, jpegs, 80).splitlines()[0].strip()
+    def describe(self, jpegs: list[bytes], kind: str | None = None) -> str:
+        """A card's description; with kind (剧情), what to look at in that kind of footage (FOCUS)."""
+        prompt = DESCRIBE + ("\n" + FOCUS[kind] if kind else "")
+        return self.ask(prompt, jpegs, 80).splitlines()[0].strip()
 
     def scene(self, jpegs: list[bytes]) -> str:
         return self.ask(SCENE, jpegs, 80).splitlines()[0].strip()
