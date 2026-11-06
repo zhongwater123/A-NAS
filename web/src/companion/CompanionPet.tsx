@@ -101,6 +101,8 @@ interface Companion {
   rest(): void;
   /** Carries on a flight held by rest. */
   resume(): void;
+  /** Brings the companion back within a page that has changed size. */
+  refit(): void;
 }
 
 // What plays next, after dsh-pet's card (client/pet/card/animation-flow.ts in
@@ -233,6 +235,17 @@ function createCompanion(
       const { vx, vy } = airborne;
       airborne = null;
       flight.start(box.x, box.y, vx, vy);
+    },
+    refit() {
+      // A drag follows the pointer, which stays on the page.
+      if (companion.drag.isActive()) return;
+      // A walk and a flight worked out their bounds for the old size: stop them, bring
+      // the companion back within reach, and let a flight carry on within the new bounds.
+      const speed = flight.isFlying() ? flight.velocity() : null;
+      flight.stop();
+      halt();
+      place(box);
+      if (speed) flight.start(box.x, box.y, speed.vx, speed.vy);
     },
   };
   const settle = () => {
@@ -403,6 +416,13 @@ function Pet({ animations }: { animations: Animations }) {
     const clicks = latest.current.animations.clicks;
     if (clicks.length > 0) current.play(clicks.find((name) => name.endsWith("挥手")) ?? pick(clicks), true);
   }, [unread]);
+
+  // A smaller window must not leave the companion off the page.
+  useEffect(() => {
+    const refit = () => companion.current?.refit();
+    window.addEventListener("resize", refit);
+    return () => window.removeEventListener("resize", refit);
+  }, []);
 
   // Rest while the member is away or the page is hidden; come back on their next move.
   useEffect(() => {

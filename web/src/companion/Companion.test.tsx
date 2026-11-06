@@ -209,4 +209,18 @@ describe("walking and throwing the companion", () => {
     expect(top).toBeLessThanOrEqual(window.innerHeight);
     expect(saved().rx).toBeGreaterThan(0);
   });
+
+  it("comes back within the page when the window shrinks", async () => {
+    serve(["待机呼吸休闲"]);
+    const { root } = await mount();
+    // It starts at the bottom right of a 1024 x 768 page.
+    expect(Number.parseFloat(root.style.left)).toBeGreaterThan(500);
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(500);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(400);
+    act(() => window.dispatchEvent(new Event("resize")));
+    expect(Number.parseFloat(root.style.left)).toBeLessThan(500);
+    expect(Number.parseFloat(root.style.top)).toBeLessThan(400);
+    // Kept within reach (some of it may stay past the edge), and remembered there.
+    expect(saved()).not.toBeNull();
+  });
 });
