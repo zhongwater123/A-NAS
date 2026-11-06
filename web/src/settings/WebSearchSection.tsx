@@ -13,9 +13,9 @@ import {
   sourceURL,
   updateWebSearch,
   type WebSearchLicense,
-  type WebSearchPausedEngine,
   type WebSearchStatus,
 } from "../websearch/api";
+import { pauseReasons } from "../websearch/pauses";
 import { publishWebSearch, useWebSearch } from "../websearch/status";
 import { Banner, Group, IconTile, PageHeader, Pill, type Tone } from "./parts";
 import styles from "./settings.module.css";
@@ -25,13 +25,6 @@ const runningText: Record<WebSearchStatus["running"], { text: string; tone: Tone
   starting: { text: "启动中", tone: "accent" },
   stopped: { text: "已停止", tone: "neutral" },
   failed: { text: "出错", tone: "danger" },
-};
-
-const pauseReasons: Record<WebSearchPausedEngine["reason"], string> = {
-  captcha: "要求验证码",
-  denied: "拒绝访问",
-  too_many: "请求过多",
-  unreadable: "返回无法识别的页面",
 };
 
 // WebSearchSection is Settings → 网页搜索, shown to administrators only
@@ -117,8 +110,11 @@ export function WebSearchSection() {
         </Group>
       )}
       {status?.enabled && (
-        <Group title="暂停的引擎" footnote="引擎被网站拦截后暂停 1 小时，连续被拦每次加倍，最长 1 天。">
-          {status.paused.length === 0 && <div className={styles.setRow}>没有被网站拦截的引擎</div>}
+        <Group
+          title="暂停的网站"
+          footnote="网站拦截后暂停 1 小时，恢复后再次被拦则加倍，最长 1 天；同一网站的各类搜索一起暂停。"
+        >
+          {status.paused.length === 0 && <div className={styles.setRow}>没有暂停的网站</div>}
           {status.paused.map((paused) => (
             <div key={paused.engine} className={styles.setRow}>
               <div className={styles.setRowText}>

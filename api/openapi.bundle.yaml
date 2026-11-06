@@ -9984,13 +9984,13 @@ components:
                 type: string
         paused:
           type: array
-          description: The engines searches leave out since their site blocked them, the first to return first.
+          description: The websites searches leave out after a block, the first to return first; sibling engines share a pause.
           items:
             $ref: '#/components/schemas/WebSearchPausedEngine'
     WebSearchPausedEngine:
       type: object
       additionalProperties: false
-      description: 'An engine left out of searches after its site blocked it: for an hour, doubled with each block in a row up to a day, until it answers again.'
+      description: 'A website left out of searches after a block: for an hour, doubled on the next block after expiry up to a day. Concurrent answers do not extend or clear an active pause.'
       required:
         - engine
         - reason
@@ -9998,7 +9998,7 @@ components:
       properties:
         engine:
           type: string
-          description: The name the window shows.
+          description: The website name the window shows; the legacy field name is retained.
         reason:
           type: string
           enum:
@@ -10216,17 +10216,17 @@ components:
             type: string
         unresponsive:
           type: array
-          description: The tab's engines that gave no results this time (a timeout, an error or a CAPTCHA).
+          description: The tab's engines that did not answer; website blocks are reported under paused.
           items:
             type: string
         paused:
           type: array
-          description: The engines this search left out because their site blocked them; all in the first update.
+          description: Websites paused before or during this search, each reported once as the block becomes known.
           items:
             $ref: '#/components/schemas/WebSearchPausedEngine'
         busy:
           type: array
-          description: 'The engines this search left out because they had been asked too often just before: each engine is asked a few times in a row, then every ten seconds, whoever searches.'
+          description: 'The engines this search left out because their website had been asked too often just before: each website is asked a few times in a row, then every ten seconds, whoever searches.'
           items:
             type: string
         pending:

@@ -209,14 +209,14 @@ describe("网页搜索", () => {
     });
     render(<WebSearchPanel />);
     const user = await search("天气");
-    const silent = await screen.findByRole("button", { name: "4 个引擎没有回答" });
+    const silent = await screen.findByRole("button", { name: "4 个搜索来源没有回答" });
     expect(screen.queryByText("Google、DuckDuckGo")).not.toBeInTheDocument();
     await user.click(silent);
     const panel = await screen.findByRole("dialog", { name: "没有回答的引擎" });
     expect(within(panel).getByRole("heading", { name: "未响应 2" })).toBeInTheDocument();
     expect(within(panel).getByText("Google、DuckDuckGo")).toBeInTheDocument();
     expect(within(panel).getByRole("heading", { name: "被网站拦截，暂停中 1" })).toBeInTheDocument();
-    expect(within(panel).getByText(/^百度（.+ 恢复）$/)).toBeInTheDocument();
+    expect(within(panel).getByText(/^百度（要求验证码，.+ 恢复）$/)).toBeInTheDocument();
     expect(within(panel).getByRole("heading", { name: "搜索太频繁，本次跳过 1" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
@@ -233,7 +233,7 @@ describe("网页搜索", () => {
     render(<WebSearchPanel />);
     const user = await search("天气");
     expect(await screen.findByText("没有找到与“天气”相关的结果")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "2 个引擎没有回答" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "2 个搜索来源没有回答" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "重试" }));
     expect(sent.queries).toHaveLength(2);
   });

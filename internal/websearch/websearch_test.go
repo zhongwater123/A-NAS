@@ -194,7 +194,7 @@ func TestResultsAreMappedForEachTab(t *testing.T) {
 	if sogou.Platform != "v.sogou.com" || *sogou.DurationSeconds != 20 || sogou.Thumbnail != "" {
 		t.Fatalf("sogou = %+v", sogou)
 	}
-	if strings.Join(page.Unresponsive, ",") != "爱奇艺,unknown" || strings.Join(page.Suggestions, ",") != "流浪地球 2" {
+	if strings.Join(page.Unresponsive, ",") != "unknown" || strings.Join(page.Paused, ",") != "爱奇艺" || strings.Join(page.Suggestions, ",") != "流浪地球 2" {
 		t.Fatalf("unresponsive %v, suggestions %v", page.Unresponsive, page.Suggestions)
 	}
 }
@@ -351,7 +351,7 @@ func TestResultsComeAsTheEnginesAnswer(t *testing.T) {
 		return nil
 	})
 	want := []string{
-		"results=baidu/1 sogou/1 baidu/2 found= unresponsive=360 搜索 suggestions=天气预报 pending=2",
+		"results=baidu/1 sogou/1 baidu/2 found= unresponsive= suggestions=天气预报 pending=2",
 		"results=quark/2 found=baidu/1:百度、夸克 unresponsive= suggestions=天气 pending=1",
 		"results= found= unresponsive=Yandex suggestions= pending=0",
 	}

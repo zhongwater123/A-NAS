@@ -25,8 +25,8 @@ type Update struct {
 	Infobox      *Infobox `json:"infobox,omitempty"`
 	Suggestions  []string `json:"suggestions"`
 	Unresponsive []string `json:"unresponsive"`
-	// Paused are the engines the search left out because their site blocked
-	// them, all in the first update; Busy those it left out because they had
+	// Paused are websites blocked before or during this search, reported
+	// once as they become known; Busy are engines left out because they had
 	// been asked too often just before (pace.go).
 	Paused []PausedEngine `json:"paused"`
 	Busy   []string       `json:"busy"`
@@ -47,6 +47,9 @@ type Found struct {
 const (
 	firstUpdate = time.Second
 	updateGap   = 300 * time.Millisecond
+	// Granian has 160 blocking threads. Leave capacity for thumbnails and
+	// /config, and bound searches left running after a browser disconnects.
+	maxSearchRequests = 64
 )
 
 // answer is one engine's SearXNG answer; busy is an engine that was not
@@ -55,13 +58,14 @@ type answer struct {
 	engine   string
 	response Response
 	busy     bool
+	paused   *PausedEngine
 	err      error
 }
 
 // Search runs one search for account and sends its results as the tab's
 // engines answer, asking SearXNG for each engine on its own: SearXNG answers
-// only once all the engines it was asked have. Each engine is asked at its
-// own pace, and not while it is paused (pace.go). The query reaches SearXNG
+// only once all the engines it was asked have. Engines on one website share
+// its pace and pause (pace.go). The query reaches SearXNG
 // only in request bodies and is not logged. An error before anything was
 // sent leaves the answer to the caller.
 func (s *Service) Search(ctx context.Context, account string, query Query, send func(Update) error) error {
@@ -101,7 +105,8 @@ func (s *Service) Search(ctx context.Context, account string, query Query, send 
 		total  int
 	)
 	for _, name := range names {
-		pause, isPaused := pauses[name]
+		site := website(name)
+		pause, isPaused := pauses[site]
 		response, isKept := kept[name]
 		switch {
 		case query.Page > 1 && (!engines.paging[name] || found != nil && !found[name]):
@@ -110,7 +115,9 @@ func (s *Service) Search(ctx context.Context, account string, query Query, send 
 			answers <- answer{engine: name, response: response}
 			total++
 		case isPaused:
-			paused = append(paused, pause.shown(name))
+			if shown := pause.shown(site); !slices.Contains(paused, shown) {
+				paused = append(paused, shown)
+			}
 		default:
 			ask = append(ask, name)
 			total++
@@ -123,7 +130,7 @@ func (s *Service) Search(ctx context.Context, account string, query Query, send 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	for _, name := range ask {
-		go func() { answers <- s.ask(ctx, record, query, name) }()
+		go func() { answers <- s.ask(ctx, account, record, query, name) }()
 	}
 	start := time.Now()
 	var (
@@ -162,22 +169,57 @@ func (s *Service) Search(ctx context.Context, account string, query Query, send 
 // ask asks SearXNG for engine's answer once it is the engine's turn, keeps
 // the answer for the same page again, and pauses the engine if its site
 // blocked it.
-func (s *Service) ask(ctx context.Context, record *record, query Query, engine string) answer {
-	if err := s.turn(ctx, engine); err != nil {
+func (s *Service) ask(ctx context.Context, account string, record *record, query Query, engine string) answer {
+	// Take capacity before reserving a turn, so a backlog cannot bunch
+	// several expired reservations into a new burst at the remote website.
+	select {
+	case s.requests <- struct{}{}:
+		defer func() { <-s.requests }()
+	case <-ctx.Done():
+		return answer{engine: engine, err: ctx.Err()}
+	}
+	release, err := s.turn(ctx, account, engine)
+	if err != nil {
 		if errors.Is(err, errBusy) {
 			return answer{engine: engine, busy: true}
 		}
 		return answer{engine: engine, err: err}
 	}
-	response, err := s.backend.Search(ctx, query.form([]string{engine}))
+	defer release()
+	// Cancellation or a website block can happen while waiting for a turn
+	// or capacity. Recheck both before dispatch, even if the slot was ready.
+	pauses, err := s.pausedEngines(ctx)
+	if err != nil {
+		return answer{engine: engine, err: err}
+	}
+	if pause, ok := pauses[website(engine)]; ok {
+		shown := pause.shown(website(engine))
+		return answer{engine: engine, paused: &shown}
+	}
+	if err := ctx.Err(); err != nil {
+		return answer{engine: engine, err: err}
+	}
+	// SearXNG's WSGI worker keeps running after a client disconnects. Drain
+	// this already-dispatched request, bounded by its own timeout, before
+	// giving back capacity; only queued requests follow browser cancellation.
+	requestCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), searchTimeout)
+	defer cancel()
+	response, err := s.backend.Search(requestCtx, query.form([]string{engine}))
 	if err != nil {
 		return answer{engine: engine, err: err}
 	}
 	if _, failed := failure(engine, response); !failed {
 		record.keep(query.Page, engine, response)
 	}
-	s.judge(ctx, engine, response)
-	return answer{engine: engine, response: response}
+	s.judge(requestCtx, engine, response)
+	a := answer{engine: engine, response: response}
+	if pauses, err := s.pausedEngines(requestCtx); err == nil {
+		if pause, ok := pauses[website(engine)]; ok {
+			shown := pause.shown(website(engine))
+			a.paused = &shown
+		}
+	}
+	return a
 }
 
 // merger turns the engines' answers into updates. It remembers what it sent:
@@ -215,6 +257,12 @@ func (m *merger) update(wave []answer, pending int) Update {
 	})
 	var raws []RawResult
 	for _, a := range wave {
+		if a.paused != nil {
+			if !slices.Contains(m.paused, *a.paused) {
+				m.paused = append(m.paused, *a.paused)
+				update.Paused = append(update.Paused, *a.paused)
+			}
+		}
 		if a.busy {
 			if l := label(a.engine); !slices.Contains(m.busy, l) {
 				m.busy = append(m.busy, l)
@@ -233,7 +281,7 @@ func (m *merger) update(wave []answer, pending int) Update {
 			raws = append(raws, raw)
 		}
 		for _, pair := range a.response.Unresponsive {
-			if len(pair) > 0 {
+			if len(pair) > 0 && (a.paused == nil || website(pair[0]) != website(a.engine)) {
 				m.unresponsiveEngine(&update, pair[0])
 			}
 		}
