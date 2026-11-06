@@ -74,7 +74,7 @@
      - `btrfs filesystem show /srv/a-nas/data` 列出两块盘，没有 `MISSING`；
      - 只读的 `lsblk -f` 中新盘的分区显示 `btrfs` 与数据卷 UUID。
 6. 失败时：
-   - 计划显示“需要处理”：先读 Host Agent 日志中的原因再重试；
+   - 计划显示“需要人工处理”：先读 Host Agent 日志中的原因再重试；
    - 重建停在 `replace` 一步且日志有 `-28`：剩下那块盘没有未分配空间。先清理文件、回收站或旧快照，再重试。
 
 ## 验证

@@ -50,6 +50,26 @@ func NewWithSpareDisk() *Reader {
 	return newReader(state)
 }
 
+// NewWithReplacementDisks has a second blank disk as large as the first, so
+// that the two make a mirror, a larger one that can replace either of them
+// and a smaller one that cannot.
+func NewWithReplacementDisks() *Reader {
+	state := baseState()
+	blank := func(id, model string, capacity uint64, rotational bool, temperature int) hoststate.Disk {
+		return hoststate.Disk{
+			ID: mustResourceID(id), Model: model, Transport: hoststate.TransportSATA, CapacityBytes: capacity, Rotational: rotational,
+			Role: hoststate.DiskRoleUnassigned, Health: hoststate.HealthHealthy, SMARTStatus: hoststate.HealthHealthy,
+			TemperatureCelsius: new(temperature),
+		}
+	}
+	state.Disks = append(state.Disks,
+		blank("disk:fake-data-02", "A-NAS Fake HDD", 512_000_000_000, true, 32),
+		blank("disk:fake-data-03", "A-NAS Fake HDD 1T", 1_000_000_000_000, true, 33),
+		blank("disk:fake-data-04", "A-NAS Fake SSD 256G", 256_000_000_000, false, 35),
+	)
+	return newReader(state)
+}
+
 func NewUnavailable() *Reader {
 	return &Reader{err: errUnavailable}
 }

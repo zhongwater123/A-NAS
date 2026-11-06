@@ -10,12 +10,46 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 )
 
 // simulatedConversion is how long a simulated conversion takes.
 const simulatedConversion = 90 * time.Second
+
+// simulatedRebuild is how long rebuilding a mirror onto a new disk takes,
+// and simulatedRestore how long the volume then restores its redundancy, so
+// that the settings page shows the rebuild's progress and then the volume
+// restoring.
+const (
+	simulatedRebuild = 20 * time.Second
+	simulatedRestore = time.Minute
+)
+
+// fakeStorageVariable picks the simulated host in fake mode; empty is the
+// default host with one spare disk.
+const fakeStorageVariable = "ANAS_FAKE_STORAGE"
+
+// fakeStorageDegraded is a host with disks to replace a missing one, where a
+// volume created on two disks or more loses its last disk as soon as it is
+// created: a mirror then runs without it and takes a new disk in its place,
+// a span or stripe goes offline.
+const fakeStorageDegraded = "degraded"
+
+// developmentStorage is the simulated storage of the host that mode names.
+func developmentStorage(mode string) (*simulatedStorage, error) {
+	switch mode {
+	case "":
+		return newSimulatedStorage(fake.NewWithSpareDisk()), nil
+	case fakeStorageDegraded:
+		simulated := newSimulatedStorage(fake.NewWithReplacementDisks())
+		simulated.pullDisk = true
+		return simulated, nil
+	default:
+		return nil, fmt.Errorf("%s must be empty or %s", fakeStorageVariable, fakeStorageDegraded)
+	}
+}
 
 // simulatedStorage stands in for the Host Agent's data-volume operations in
 // fake mode. Creating or growing the volume changes the simulated disks, and
@@ -25,6 +59,9 @@ const simulatedConversion = 90 * time.Second
 type simulatedStorage struct {
 	base hoststate.Observer
 	now  func() time.Time
+	// pullDisk takes the last disk out of a volume created on two disks or
+	// more, as fakeStorageDegraded describes.
+	pullDisk bool
 
 	mu         sync.Mutex
 	volume     *simulatedVolume
@@ -36,6 +73,15 @@ type simulatedVolume struct {
 	layout  storage.Layout
 	from    storage.Layout
 	started time.Time
+	// pulled is the disk that was pulled out, which stays out of the host;
+	// restored is when a new disk took its place.
+	pulled   string
+	restored time.Time
+}
+
+// missing reports whether the volume runs without its pulled disk.
+func (v *simulatedVolume) missing() bool {
+	return v.pulled != "" && v.restored.IsZero()
 }
 
 const (
@@ -79,28 +125,49 @@ func (s *simulatedStorage) Read(ctx context.Context) (hoststate.State, error) {
 	if s.volume == nil {
 		return state, nil
 	}
+	// A pulled disk is gone from the host. Without it a mirror is mounted
+	// degraded; a span or stripe is not mounted, and its other disks only
+	// carry its signature.
+	offline := s.volume.missing() && s.volume.layout != storage.LayoutMirror
 	volume := &hoststate.DataVolume{FilesystemUUID: simulatedUUID}
 	var sizes []uint64
+	disks := make([]hoststate.Disk, 0, len(state.Disks))
 	first := -1
-	for i, disk := range state.Disks {
-		if !slices.Contains(s.volume.diskIDs, disk.ID.String()) {
+	for _, disk := range state.Disks {
+		member := slices.Contains(s.volume.diskIDs, disk.ID.String())
+		if member {
+			// Btrfs counts a missing disk in the volume's size.
+			sizes = append(sizes, disk.CapacityBytes)
+		}
+		if disk.ID.String() == s.volume.pulled {
 			continue
 		}
-		state.Disks[i].Role, state.Disks[i].InUse = hoststate.DiskRoleData, true
-		state.Disks[i].Filesystems = []string{"btrfs"}
-		state.Disks[i].Signatures = []hoststate.Signature{{Type: "btrfs", Label: "ANAS_DATA", UUID: simulatedUUID}}
-		volume.DiskIDs = append(volume.DiskIDs, disk.ID)
-		sizes = append(sizes, disk.CapacityBytes)
-		if first < 0 {
-			first = i
+		if !member {
+			disks = append(disks, disk)
+			continue
 		}
+		disk.Filesystems = []string{"btrfs"}
+		disk.Signatures = []hoststate.Signature{{Type: "btrfs", Label: "ANAS_DATA", UUID: simulatedUUID}}
+		if !offline {
+			disk.Role, disk.InUse = hoststate.DiskRoleData, true
+			volume.DiskIDs = append(volume.DiskIDs, disk.ID)
+			if first < 0 {
+				first = len(disks)
+			}
+		}
+		disks = append(disks, disk)
 	}
+	state.Disks = disks
 	if first < 0 {
 		return state, nil
 	}
 	total := storage.UsableBytes(s.volume.layout, sizes) * 99 / 100
 	available := total - min(total, simulatedUsed)
 	state.Disks[first].FilesystemCapacityBytes, state.Disks[first].FilesystemAvailableBytes = &total, &available
+	if s.volume.missing() {
+		volume.MissingDevices = 1
+	}
+	volume.Restoring = !s.volume.restored.IsZero() && s.now().Sub(s.volume.restored) < simulatedRestore
 
 	done := 1.0
 	if !s.volume.started.IsZero() {
@@ -169,6 +236,9 @@ func (s *simulatedStorage) StartCreateVolume(_ context.Context, request storage.
 	}
 	return s.startLocked(request.PlanID, asked, []storage.OperationStep{storage.StepErase, storage.StepFormat, storage.StepMount, storage.StepPrepare}, func() {
 		s.volume = volume
+		if s.pullDisk && len(volume.diskIDs) > 1 {
+			volume.pulled = volume.diskIDs[len(volume.diskIDs)-1]
+		}
 	}), nil
 }
 
@@ -197,11 +267,13 @@ func (s *simulatedStorage) StartReplaceDisk(_ context.Context, request storage.R
 	if operation, known, err := s.knownLocked(request.PlanID, asked); known || err != nil {
 		return operation, err
 	}
-	if s.volume == nil || request.FilesystemUUID != simulatedUUID {
+	if s.volume == nil || request.FilesystemUUID != simulatedUUID || !s.volume.missing() {
 		return storage.VolumeOperation{}, storage.ErrVolumeChanged
 	}
 	return s.startLocked(request.PlanID, asked, []storage.OperationStep{storage.StepErase, storage.StepReplace}, func() {
-		s.volume.diskIDs = append(s.volume.diskIDs, request.Disk.DiskID)
+		pulled := s.volume.pulled
+		s.volume.diskIDs = append(slices.DeleteFunc(s.volume.diskIDs, func(id string) bool { return id == pulled }), request.Disk.DiskID)
+		s.volume.restored = s.now()
 	}), nil
 }
 
@@ -244,10 +316,20 @@ func (s *simulatedStorage) startLocked(planID string, asked simulatedRequest, st
 
 func (s *simulatedStorage) reportLocked(planID string, operation *simulatedOperation) storage.VolumeOperation {
 	report := storage.VolumeOperation{PlanID: planID, State: storage.OperationRunning}
-	step := int(s.now().Sub(operation.started) / simulatedStep)
-	if step < len(operation.steps) {
-		report.Step = operation.steps[step]
-		return report
+	elapsed := s.now().Sub(operation.started)
+	for _, step := range operation.steps {
+		length := simulatedStep
+		if step == storage.StepReplace {
+			length = simulatedRebuild
+		}
+		if elapsed < length {
+			report.Step = step
+			if step == storage.StepReplace {
+				report.Progress = int(100 * elapsed / length)
+			}
+			return report
+		}
+		elapsed -= length
 	}
 	if !operation.done {
 		operation.apply()

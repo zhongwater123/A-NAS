@@ -211,6 +211,8 @@ M2：
   - [`degraded_internal_test.go`](../../internal/hostops/linux/degraded_internal_test.go)：先只读挂上查看、卸载、记下、一次挂成读写；只有镜像、只缺一块、只在上次留下的盘上才挂载；记录读不出时不挂载；`btrfs replace status` 的解析。
 - 宿主机状态：[`datavolume_test.go`](../../internal/hoststate/linux/datavolume_test.go) 的 `TestReadMissingDevicesCountsEveryWayADiskGoes`（缺盘的三种去向、重建中的目标盘）；[`assess_test.go`](../../internal/hoststate/assess_test.go) 的 `volume_degraded`。
 - 存储服务：[`layout_test.go`](../../internal/storage/layout_test.go) 的 `TestAMirrorMissingADiskNamesItAndTakesNoOtherPlan`（缺盘时的状态与缺失硬盘、只接受更换、新盘不能更小、离线时同样列出缺失硬盘、恢复冗余中、执行更换）。
+- React（[`SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)）：缺盘的卡片与缺失硬盘、更换的完整流程（过小的盘不可选、核对、确认、执行）、重建进度到完成、`disk_too_small`、恢复冗余（有无转换）、离线的扩容列出缺失硬盘且没有更换入口。
+- Fake 模式（[`devstorage_test.go`](../../cmd/anas-api/devstorage_test.go)）：`ANAS_FAKE_STORAGE=degraded` 下镜像缺盘、更换、恢复冗余到在线，扩容离线。
 - 实机：按[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)在实验 NAS 上：
   - 部署后重启一次，确认 mount unit 不再随单块设备停止；
   - 拔掉一块盘开机，确认降级挂载与健康告警；
