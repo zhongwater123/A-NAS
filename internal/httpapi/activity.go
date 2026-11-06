@@ -11,7 +11,9 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/activityapi"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
+	"github.com/zhongwater123/A-NAS/internal/familyapi"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/webentry"
 )
@@ -84,4 +86,21 @@ func clientOrigin(r *http.Request) accounts.ClientOrigin {
 		origin.Address = address
 	}
 	return origin
+}
+
+func (h *productHandler) familyActivitySource() func(*http.Request, activity.Query) ([]activity.Event, error) {
+	if h.Family == nil {
+		return nil
+	}
+	return func(r *http.Request, q activity.Query) ([]activity.Event, error) {
+		request := r.Clone(r.Context())
+		request.Method, request.Body, request.RequestURI = http.MethodGet, http.NoBody, ""
+		request.URL = &url.URL{Path: familyapi.ActivityPath, RawQuery: q.Values().Encode()}
+		response := &bufferedResponse{header: http.Header{}}
+		h.guard(apiroute.Route{Posture: apiroute.Session, Handler: withUser(h.Family)})(response, request)
+		if response.status != http.StatusOK {
+			return nil, fmt.Errorf("family activity status %d", response.status)
+		}
+		return activityapi.DecodeServicePage(&response.body)
+	}
 }

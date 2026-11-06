@@ -367,3 +367,15 @@ func steadyClock() func() time.Time {
 		return now
 	}
 }
+
+func TestFamilyEventsReachMergedActivity(t *testing.T) {
+	f := newActivityFixture(t, func(service *photos.Service, accountService *accounts.Service) http.Handler {
+		return localPhotos(t, service, serviceSessions{accountService})
+	})
+	asAdmin := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "172.18.45.10", http.StatusCreated)
+	asAdmin.do(http.MethodPost, "/api/v1/family/join", `{"role":"妈妈"}`, nil, http.StatusOK)
+	page := asAdmin.activity("?category=family")
+	if len(page.Unavailable) != 0 || len(page.Items) != 1 || page.Items[0].Action != "family.joined" {
+		t.Fatalf("family activity missing: %+v", page)
+	}
+}

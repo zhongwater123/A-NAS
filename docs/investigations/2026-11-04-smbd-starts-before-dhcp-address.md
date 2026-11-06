@@ -1,7 +1,7 @@
 # 重启后 smbd 早于 DHCP 地址启动，只监听回环
 
 状态：fixed，待实机验收
-更新时间：2026-11-05
+更新时间：2026-11-06
 
 ## 症状与影响
 
@@ -51,7 +51,8 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
   - 一个排在 smbd 之后、`Wants=` 它的单元（与 Host Agent 相同）在第一次失败后启动，不等以后的重试；
   - smbd 没有运行时，`smbcontrol all reload-config` 退出码为 0。
 - 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh) 检查安装器写入的等待与重试，并在一个暂时没有地址的接口上走一遍上面的过程。部署后要在 Experimental NAS 上正常重启一次，确认 `172.18.45.48:445` 在监听。
-  - smbd 先告诉 systemd 已就绪，再打开监听套接字（Samba 4.22 的 `source3/smbd/server.c`：先 `daemon_ready("smbd")`，后 `open_sockets_smbd()`），所以 `systemctl restart smbd` 返回时 445 可能还没在监听。2026-11-05 CI 中“smbd listens on the SMB interface's address”两次失败（`fff0c2b0` 推送后与 #397），就是重启后立即检查；测试改为最多等 10 秒再检查（#397）。
+  - smbd 先告诉 systemd 已就绪，再打开监听套接字（Samba 4.22 的 `source3/smbd/server.c`：先 `daemon_ready("smbd")`，后 `open_sockets_smbd()`），所以 `systemctl restart smbd` 返回时 445 可能还没在监听。#397 加入最多 10 秒的等待，但 [PR #403 的 CI](https://github.com/zhongwater123/A-NAS/actions/runs/42010140944) 仍失败；先前把失败仅归因于就绪时序的判断不完整。
+  - 2026-11-06 最小容器复现：首个账号创建前仍是 Debian 默认 `smb.conf`，`ss -ltnp 'sport = :445'` 显示 `0.0.0.0:445` 与 `[::]:445`；等待 10 秒后，按网卡具体 IP 查询仍为空。写入限定接口的配置后，同一查询通过。产品配置由 Host Agent 的 `SetSMBCredential` 写入，测试却在创建账号之前检查它；现将整组地址等待与监听检查移到账号创建之后，保留启动就绪等待，不放宽监听断言。
 
 ## 后续工作
 

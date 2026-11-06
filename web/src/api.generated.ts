@@ -4994,7 +4994,7 @@ export interface components {
             inTrash?: boolean;
         };
         /** @enum {string} */
-        ActivityCategory: "session" | "account" | "file" | "storage" | "photo";
+        ActivityCategory: "session" | "account" | "file" | "storage" | "photo" | "family";
         ActivityAccount: {
             id: string;
             username: string;
@@ -5006,7 +5006,7 @@ export interface components {
             /** Format: date-time */
             occurredAt: string;
             /** @enum {string} */
-            category: "session" | "account" | "file" | "storage" | "photo" | "other";
+            category: "session" | "account" | "file" | "storage" | "photo" | "family" | "other";
             /** @description Action code such as session.signed_in, user.credential_reset, file.uploaded or storage.plan.succeeded. */
             action: string;
             actor?: components["schemas"]["ActivityAccount"];
@@ -5562,9 +5562,9 @@ export interface components {
             kind?: "photos" | "journal" | "measurement" | "vaccine" | "milestone";
             occurredOn?: components["schemas"]["FamilyDate"];
             text?: string;
-            /** @description Photo asset IDs of the shared library, in order; on an edit, replaces the photos. */
+            /** @description Photo asset IDs of the shared library, in order; on an edit, replaces only currently visible references. Omission preserves all stored references. */
             photos?: string[];
-            /** @description A vaccination's proof photos. */
+            /** @description A vaccination's proof photos; on an edit, replaces only currently visible references. Omission preserves all stored references. */
             certificates?: string[];
             /** @description A photo record goes into these babies' channels too. */
             alsoBabies?: string[];
@@ -10698,6 +10698,7 @@ export interface operations {
             413: components["responses"]["ProductError"];
             415: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     listFamilyTrash: {
@@ -10900,7 +10901,9 @@ export interface operations {
     };
     listFamilyWall: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: string;
+            };
             header?: never;
             path: {
                 babyId: components["parameters"]["FamilyBabyID"];
@@ -10917,11 +10920,13 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["FamilyComment"][];
+                        next?: string;
                     };
                 };
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
         };
     };
     addFamilyWallMessage: {

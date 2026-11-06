@@ -53,6 +53,6 @@
 5. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改。
 6. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
 7. 相册 OCR 步骤 4：搜索与接口（[实施方案](../architecture/photo-ocr.md)，步骤 1–3 已部署）。
-8. 家庭中心 M2：认领、隐藏（[规格](../specs/family-center.md)）。从相册加入频道已实现（[PR #395](https://github.com/zhongwater123/A-NAS/pull/395)），部署时产品、相册与家庭服务一起更新。
+8. 家庭中心数据修复 [#363](../investigations/2026-11-05-family-data-integrity.md)待合并、部署；M2：认领、隐藏（[规格](../specs/family-center.md)）。从相册加入频道已实现（[PR #395](https://github.com/zhongwater123/A-NAS/pull/395)），部署时产品、相册与家庭服务一起更新。
 9. 互联网访问：外部条件满足后，按[启用互联网访问](../runbooks/enable-internet-access.md)从第 3 步继续。
 10. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘，备份中心评审中最大的缺口）；账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；硬盘用途 M2 与 M3（[规格](../specs/disk-roles-and-redundancy.md)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
