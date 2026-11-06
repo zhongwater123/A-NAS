@@ -756,21 +756,29 @@ def ocr_prompt(kind, schema):
 # contents page's leader dots, a form's fill-in line; a table repeats a row a
 # few times. None of these is a loop (#365).
 LOOP_CHARACTERS = 128
+# A unit with no letter or digit, such as a blank table row `|  |  |`, must
+# repeat over this many: a form can have a few dozen blank rows, and what it
+# prints below them, totals, dates, signatures, would be lost.
+LOOP_BLANK_CHARACTERS = 512
 
 
-def looping(text, repeats=8, longest=300, shortest=LOOP_CHARACTERS):
+def looping(text, repeats=8, longest=300, shortest=LOOP_CHARACTERS, blank=LOOP_BLANK_CHARACTERS):
     """Whether text ends in one unit repeated, greedy decoding's failure mode.
 
     The unit repeats at least `repeats` times and over at least `shortest`
-    characters, so that a separator line or a few equal rows are not taken
-    for a loop.
+    characters, or `blank` for a unit without a letter or digit, so that a
+    separator line, a few equal rows or a form's blank rows are not taken for
+    a loop.
     """
     for size in range(1, longest + 1):
-        count = max(repeats, -(-shortest // size))
-        if size * count > len(text):
-            continue
+        if size > len(text):
+            break
         unit = text[-size:]
-        if unit.strip() and text.endswith(unit * count):
+        if not unit.strip():
+            continue
+        span = shortest if any(character.isalnum() for character in unit) else blank
+        count = max(repeats, -(-span // size))
+        if size * count <= len(text) and text.endswith(unit * count):
             return True
     return False
 
@@ -938,6 +946,9 @@ class LlamaReader:
         if failed is None and finish is None:
             failed = "llama-server ended the answer without saying why"
         if failed is not None:
+            # The server may be left broken, out of memory or in a bad state:
+            # the next reading starts a new one rather than fail at once.
+            self.release()
             raise Failed(failed)
         return {"text": "".join(text), "logprobs": tokens, "finish": finish}
 
@@ -1013,9 +1024,10 @@ class LlamaReader:
         changed since is hashed again. Without a cache directory, or when the
         mark cannot be kept, every start of the Worker hashes once.
         """
-        mark, identity = None, None
+        mark = identity = None
         if self._cache_dir is not None:
-            with contextlib.suppress(OSError):
+            # A mark that cannot be read, or is not text, is one more reason to hash.
+            with contextlib.suppress(OSError, ValueError):
                 info = os.stat(path)
                 identity = (f"{manifest['sha256']} {info.st_dev} {info.st_ino} {info.st_size} "
                             f"{info.st_mtime_ns} {info.st_ctime_ns}")
@@ -1024,7 +1036,7 @@ class LlamaReader:
                     if file.read() == identity:
                         return
         verify_file(path, manifest, stopped)
-        if mark is not None and identity is not None:
+        if mark is not None:
             with contextlib.suppress(OSError):
                 temporary = f"{mark}.{os.getpid()}"
                 with open(temporary, "w", encoding="utf-8") as file:
