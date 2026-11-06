@@ -1,10 +1,11 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AssistantMessage } from "../api.generated";
 import { assistantHandlers, assistantSession } from "../test/handlers/assistant";
 import { server } from "../test/server";
 import type { Approval } from "./api";
+import { readAssistantActivity, resetAssistantActivity } from "./assistantActivity";
 
 // The window against a stand-in for the member's Hermes: the gateway's events
 // are pushed by the test, REST answers come from the test server.
@@ -40,6 +41,7 @@ Element.prototype.scrollTo ??= function scrollTo() {};
 
 afterEach(() => {
   handlers.clear();
+  resetAssistantActivity();
 });
 
 const history: AssistantMessage[] = [
@@ -154,5 +156,33 @@ describe("the VNAS window", () => {
     await emit("anas.approval", card("req-3", "approved", "rm -rf 缓存"));
     expect(screen.queryByText("rm -rf 缓存")).toBeNull();
     expect(screen.queryByRole("region", { name: "本对话中等你确认或回答的事" })).toBeNull();
+  });
+
+  it("tells the desktop what VNAS is doing, and nothing once the window closes", async () => {
+    const card = (status: Approval["status"]): Approval => ({
+      requestId: "req-9",
+      sessionId: LIVE,
+      storedSessionId: STORED,
+      kind: "command",
+      status,
+      createdAt: Date.now() / 1000,
+      command: { text: "rm -rf 缓存" },
+    });
+    await open([card("awaiting")]);
+    expect(readAssistantActivity().state).toBe("waiting");
+    await emit("anas.approval", card("approved"));
+    expect(readAssistantActivity().state).toBeNull();
+
+    await emit("message.start");
+    expect(readAssistantActivity().state).toBe("thinking");
+    await emit("tool.start", { tool_id: "call_1", name: "browser_snapshot" });
+    expect(readAssistantActivity().state).toBe("working");
+    await emit("tool.complete", { tool_id: "call_1", name: "browser_snapshot", result: "" });
+    expect(readAssistantActivity().state).toBe("result");
+    await emit("message.complete", { status: "complete" });
+    expect(readAssistantActivity().state).toBe("success");
+
+    cleanup();
+    expect(readAssistantActivity().state).toBeNull();
   });
 });
