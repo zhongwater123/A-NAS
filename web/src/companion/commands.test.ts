@@ -226,7 +226,7 @@ describe("the lock", () => {
       ["position", { x: 0.5, y: 0.5, mode: "instant" }],
       ["throw", { angle: 0, power: 1 }],
     ] as const) {
-      expect(await run(action, args)).toEqual(refused("locked", { expiresAt: 1_060_000 }));
+      expect(await run(action, args)).toEqual(refused("lock-required", { expiresAt: 1_060_000 }));
       expect(await run(action, { ...args, lock: "lk-other" })).toEqual(refused("lock-lost", { cause: "unknown" }));
     }
     // The arguments come before the lock, as in dsh-pet's routes.

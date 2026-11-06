@@ -135,14 +135,14 @@ function sleepBlocked(): CompanionOutcome | null {
 
 /**
  * dsh-pet's lock gate (plugin/pet-lookup.ts lockBlocked over host/lock.ts gate): while the pet is locked
- * only the lock's id lets a command through. dsh-pet answers a caller without it lock-required; the
- * contract names that locked, with when the lock ends.
+ * only the lock's id lets a command through. A caller without it is told lock-required, as dsh-pet
+ * does, with when the lock ends (contract v1.1).
  */
 function lockBlocked(provided: unknown): CompanionOutcome | null {
   const gate = companionLock.gate(COMPANION_PET, String(provided ?? ""));
   if (gate.ok) return null;
   if (gate.reason === "lock-lost") return refuse("lock-lost", gate.message, { cause: gate.cause });
-  return refuse("locked", gate.message, { expiresAt: companionLock.current(COMPANION_PET)?.expiresAt });
+  return refuse(gate.reason, gate.message, { expiresAt: companionLock.current(COMPANION_PET)?.expiresAt });
 }
 
 /**
