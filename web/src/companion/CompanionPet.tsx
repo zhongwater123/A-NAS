@@ -1,10 +1,12 @@
 // 大肥鱼 on the desktop, played as dsh-pet plays its pet (dsh-pet/README.md):
 // its animation chain swaps two videos, picks the next animation at random
-// while VNAS is idle, follows VNAS's stage (workStatus.ts) and answers clicks
-// and drags through dsh-pet's own drag driver. A throw is not wired yet: a drag
-// ends where the member lets go. The companion freezes on its frame while the
-// member is away or the page is hidden, so an idle desktop does not keep
-// decoding video (the screen saver comes later still).
+// while VNAS is idle, walks when it rolls a move, follows VNAS's stage
+// (workStatus.ts) and answers clicks and drags through dsh-pet's own drag
+// driver; a drag let go with speed throws it, and it flies and lands with
+// dsh-pet's physics. The companion freezes on its frame while the member is
+// away or the page is hidden, so an idle desktop does not keep decoding video
+// or running a frame loop (the screen saver comes later still); a walk stops
+// where it is, and a flight carries on from there when the member is back.
 import { type Dispatch, type SetStateAction, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useTaskNotices } from "../assistant/taskNotices";
@@ -15,6 +17,7 @@ import { createOwnAnimation, type EndedCue, type OwnAnimation } from "./dsh-pet/
 import { prefersMov } from "./dsh-pet/client/pet/animation/media";
 import { decideNextAnimation } from "./dsh-pet/client/pet/animation/next-animation";
 import { createDrag, type Drag } from "./dsh-pet/client/pet/motion/drag";
+import { createFlight } from "./dsh-pet/client/pet/motion/flight";
 import {
   type BoxPoint,
   boxToRatio,
@@ -25,6 +28,8 @@ import {
   petStageStyle,
 } from "./dsh-pet/client/pet/motion/geometry";
 import { createSquashDriver } from "./dsh-pet/client/pet/motion/squash";
+import { createWalk } from "./dsh-pet/client/pet/motion/walk";
+import { landingSquash } from "./dsh-pet/shared/physics";
 import { DEFAULT_PHYSICS } from "./dsh-pet/shared/physics/constants";
 import { pick, pickSlot, poolIncludes, rollKind } from "./dsh-pet/shared/pickers";
 import type { Animations } from "./dsh-pet/shared/types";
@@ -39,6 +44,9 @@ const IDLE_MS = 60_000;
 const POSITION_KEY = "a-nas.companion.position";
 const ACTIVITY = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const;
 const metrics = derivePetMetrics(SIZE);
+const motionMetrics = { ...metrics, size: SIZE };
+// The only companion on the page: there is no other pet to bump into.
+const physics = { ...DEFAULT_PHYSICS, petCollision: false };
 const half = { w: metrics.halfW, h: metrics.halfH };
 const body = { size: SIZE, bottomPad: metrics.bottomPad };
 const viewport = () => ({ width: window.innerWidth, height: window.innerHeight });
@@ -89,10 +97,15 @@ interface Companion {
   resumeWork(): boolean;
   pickNext(): void;
   wake(): void;
+  /** Stops a walk where it is and holds a flight, so no frame loop runs while frozen. */
+  rest(): void;
+  /** Carries on a flight held by rest. */
+  resume(): void;
 }
 
 // What plays next, after dsh-pet's card (client/pet/card/animation-flow.ts in
-// dsh-pet) without the sleep, chatter and walking A-NAS does not have.
+// dsh-pet) without the sleep and chatter A-NAS does not have. Walking and
+// flying are wired as in its card/motion.ts and card/drag.ts.
 function createCompanion(
   latest: { current: Latest },
   set: Setters,
@@ -121,11 +134,64 @@ function createCompanion(
       // The position is a convenience of this device.
     }
   };
+  // A walk or a flight ends at a centre given as a share of the viewport.
+  const settleAt = (center: { rx: number; ry: number }) => place(centerToBox(center, viewport(), half));
+
+  const flight = createFlight({
+    root: elements.root,
+    metrics: () => motionMetrics,
+    viewport,
+    physics: () => physics,
+    arena: () => ({ slots: {} }),
+    petId: "dafeiyu",
+    box: () => box,
+    setBox: (next) => {
+      box = next;
+    },
+    commitLive: () => undefined,
+    commitFinal: settleAt,
+    onLanding: (impactVy) => {
+      const front = companion.chain.frontVideo();
+      if (front) squash.start(front, landingSquash(impactVy));
+    },
+  });
+  // A flight held while the companion rests, to carry on from where it stopped.
+  let airborne: { vx: number; vy: number } | null = null;
+  let walking = false;
+  const walk = createWalk({
+    root: elements.root,
+    center: () => ({ x: box.x + metrics.halfW, y: box.y + metrics.halfH }),
+    metrics: () => motionMetrics,
+    moves: () => latest.current.animations.moves,
+    facing: () => latest.current.facing,
+    viewport,
+    isFlying: () => flight.isFlying(),
+    play: (name) => {
+      show(name);
+      set.setOnce(true);
+    },
+    setBox: (next) => {
+      box = next;
+    },
+    commit: (center) => {
+      walking = false;
+      settleAt(center);
+    },
+  });
+  // Stops a walk, remembering where it got to.
+  const halt = () => {
+    walk.stop();
+    if (!walking) return;
+    walking = false;
+    place(box);
+  };
 
   const companion: Companion = {
     chain: undefined as unknown as OwnAnimation,
     drag: undefined as unknown as Drag,
     play(name, once) {
+      // Anything else that plays takes over from a walk: its frames move the companion.
+      halt();
       show(name);
       set.setOnce(once);
       bump();
@@ -140,19 +206,34 @@ function createCompanion(
     },
     pickNext() {
       if (companion.chain.isFrozen()) return;
-      // The companion does not walk yet: what dsh-pet spends on a walk goes to an action.
       const kind = rollKind(Math.random(), companionWeights);
+      // A move that cannot fit (or has no installed animation) falls back to an action.
+      const move = kind === "move" ? walk.tryMove() : undefined;
       const decision = decideNextAnimation({
-        kind: kind === "move" ? "action" : kind,
+        kind,
         animations: latest.current.animations,
         facing: latest.current.facing,
         current: latest.current.anim,
+        move,
       });
       if (decision.play && decision.anim !== null) show(decision.anim);
       set.setOnce(true);
       bump();
     },
     wake: () => undefined,
+    rest() {
+      if (flight.isFlying()) {
+        airborne = flight.velocity();
+        flight.stop();
+      }
+      halt();
+    },
+    resume() {
+      if (!airborne) return;
+      const { vx, vy } = airborne;
+      airborne = null;
+      flight.start(box.x, box.y, vx, vy);
+    },
   };
   const settle = () => {
     if (!companion.resumeWork()) companion.play(pick(latest.current.animations.idle, latest.current.anim), true);
@@ -194,6 +275,11 @@ function createCompanion(
     report: () => undefined,
     clearCuePlayback: () => undefined,
     onFrontReady: (element) => {
+      // A walk moves with its animation's frames, from when they show.
+      if (walk.hasPending()) {
+        walking = true;
+        walk.start(element);
+      }
       if (!squashNext) return;
       squashNext = false;
       squash.start(element);
@@ -219,12 +305,19 @@ function createCompanion(
       squashNext = true;
     },
     resumeWork: () => companion.resumeWork(),
-    stopAutonomy: () => undefined,
-    stopFlight: () => undefined,
-    startFlight: (x, y) => place({ x, y }),
+    stopAutonomy: halt,
+    stopFlight: () => {
+      airborne = null;
+      flight.stop();
+    },
+    startFlight: (x, y, vx, vy) => {
+      halt();
+      flight.start(x, y, vx, vy);
+    },
     isFrozen: () => companion.chain.isFrozen(),
     releaseLock: () => companion.wake(),
-    grabVelocity: () => null,
+    // Catching it in the air keeps its speed for the next throw.
+    grabVelocity: () => (flight.isFlying() ? flight.velocity() : null),
     playClickSound: () => undefined,
     tipOn: () => false,
     placeTip: () => undefined,
@@ -238,6 +331,8 @@ function createCompanion(
   }));
   const dispose = companion.chain.dispose;
   companion.chain.dispose = () => {
+    walk.stop();
+    flight.stop();
     companion.drag.dispose();
     squash.stop();
     dispose();
@@ -312,7 +407,10 @@ function Pet({ animations }: { animations: Animations }) {
   // Rest while the member is away or the page is hidden; come back on their next move.
   useEffect(() => {
     let timer = 0;
-    const rest = () => companion.current?.chain.setFrozen(true);
+    const rest = () => {
+      companion.current?.chain.setFrozen(true);
+      companion.current?.rest();
+    };
     const wake = () => {
       window.clearTimeout(timer);
       if (document.hidden) {
@@ -321,7 +419,9 @@ function Pet({ animations }: { animations: Animations }) {
       }
       timer = window.setTimeout(rest, IDLE_MS);
       const current = companion.current;
-      if (current?.chain.setFrozen(false) && !current.resumeWork()) current.pickNext();
+      if (!current?.chain.setFrozen(false)) return;
+      current.resume();
+      if (!current.resumeWork()) current.pickNext();
     };
     if (companion.current) companion.current.wake = wake;
     wake();
