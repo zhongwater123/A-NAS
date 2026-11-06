@@ -297,3 +297,137 @@ func (e *Executor) loadDegraded() error {
 	e.degraded = &record
 	return nil
 }
+
+// replaceDisk erases the new disk and rebuilds onto it, from the mirror's
+// other copy, the disk the mounted mirror runs without. Btrfs runs the
+// rebuild in the kernel: it goes on when the Host Agent stops and starts
+// again from the beginning after a reboot, so a retry of the plan waits for
+// a rebuild that runs and finishes one that is done. A disk the size of the
+// missing one or larger is required; Btrfs also needs some unallocated
+// space on the remaining disk and fails the rebuild without it.
+func (e *Executor) replaceDisk(ctx context.Context, operation *volumeOperation) (datavolume.Volume, error) {
+	mounted, err := e.resolver.MountedDataVolume(ctx)
+	if err != nil {
+		return datavolume.Volume{}, fmt.Errorf("read the mounted data volume: %w", err)
+	}
+	if mounted == nil {
+		return datavolume.Volume{}, datavolume.ErrVolumeUnavailable
+	}
+	if !strings.EqualFold(mounted.FilesystemUUID, operation.FilesystemUUID) {
+		return datavolume.Volume{}, datavolume.ErrVolumeChanged
+	}
+	uuid := strings.ToLower(mounted.FilesystemUUID)
+	root := os.DirFS(e.systemRoot)
+	target := operation.Disks[0]
+	joined := slices.ContainsFunc(mounted.DiskIDs, func(id hoststate.ResourceID) bool { return id.String() == target.DiskID })
+	if !joined && !e.replacing(root, uuid) {
+		var missing []uint64
+		for _, device := range readBtrfsDevices(root, uuid) {
+			if device.Missing {
+				missing = append(missing, device.ID)
+			}
+		}
+		if len(missing) != 1 {
+			return datavolume.Volume{}, fmt.Errorf("%w: %d disks are missing, want one", datavolume.ErrVolumeChanged, len(missing))
+		}
+		devices, err := e.resolveTargets(ctx, operation.Disks)
+		if err != nil {
+			return datavolume.Volume{}, err
+		}
+		e.enter(operation, datavolume.StepErase)
+		if err := e.prepareDisk(ctx, devices[0]); err != nil {
+			return datavolume.Volume{}, err
+		}
+		e.enter(operation, datavolume.StepReplace)
+		start := []string{"replace", "start", strconv.FormatUint(missing[0], 10), devices[0].PartitionPath, e.mountPoint}
+		if output, err := e.runner.Run(ctx, "btrfs", start, ""); err != nil {
+			return datavolume.Volume{}, commandError("btrfs replace start failed", err, output)
+		}
+	} else {
+		e.enter(operation, datavolume.StepReplace)
+	}
+	if err := e.awaitReplace(ctx, operation); err != nil {
+		return datavolume.Volume{}, err
+	}
+	// The new disk may be larger than the one it replaced.
+	for _, device := range readBtrfsDevices(root, uuid) {
+		resize := []string{"filesystem", "resize", strconv.FormatUint(device.ID, 10) + ":max", e.mountPoint}
+		if output, err := e.runner.Run(ctx, "btrfs", resize, ""); err != nil {
+			e.logger.WarnContext(ctx, "the data volume did not grow onto the whole new disk", "error", commandError("btrfs filesystem resize", err, output))
+		}
+	}
+	// udev probed the new partition while it was wiped, as after adding a
+	// disk; probe it again so lsblk shows the filesystem.
+	if device, err := e.resolver.ResolveDevice(ctx, target.DiskID); err == nil && validDevicePath(device.PartitionPath) {
+		if output, err := e.runner.Run(ctx, "udevadm", []string{"trigger", "--action=change", device.PartitionPath}, ""); err != nil {
+			e.logger.WarnContext(ctx, "udev did not re-probe the new disk", "error", commandError("udevadm trigger", err, output))
+		}
+	}
+	// What was written without the disk has one copy; the conversion check
+	// turns it back into a mirror, and the scrub that follows checks it all.
+	if _, err := e.ReconcileConversion(ctx); err != nil {
+		e.logger.WarnContext(ctx, "data-volume conversion did not start; the periodic check retries it", "error", err)
+	}
+	volume := datavolume.Volume{ID: "volume:data", FilesystemUUID: mounted.FilesystemUUID, Layout: datavolume.LayoutMirror, State: datavolume.VolumeStateAvailable}
+	for _, id := range mounted.DiskIDs {
+		volume.DiskIDs = append(volume.DiskIDs, id.String())
+	}
+	if !joined {
+		volume.DiskIDs = append(volume.DiskIDs, target.DiskID)
+	}
+	return volume, nil
+}
+
+// replacing reports whether Btrfs rebuilds a disk of the filesystem now.
+func (e *Executor) replacing(root fs.FS, uuid string) bool {
+	contents, err := fs.ReadFile(root, "sys/fs/btrfs/"+uuid+"/exclusive_operation")
+	return err == nil && strings.TrimSpace(string(contents)) == "device replace"
+}
+
+// awaitReplace follows a rebuild until it finishes, recording its progress.
+func (e *Executor) awaitReplace(ctx context.Context, operation *volumeOperation) error {
+	for {
+		output, err := e.runner.Output(ctx, "btrfs", []string{"replace", "status", "-1", e.mountPoint}, "")
+		if err != nil {
+			return commandError("btrfs replace status failed", err, output)
+		}
+		finished, percent, err := parseReplaceStatus(string(output))
+		if err != nil {
+			return err
+		}
+		if finished {
+			return nil
+		}
+		e.operationsMu.Lock()
+		operation.Progress = percent
+		e.operationsMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// parseReplaceStatus reads one line of "btrfs replace status -1": while it
+// runs "28.2% done, 0 write errs, 0 uncorr. read errs", then "Started on
+// <time>, finished on <time>, ...", or "... canceled on ..." and "Never
+// started" when there is nothing to wait for.
+func parseReplaceStatus(output string) (finished bool, percent int, err error) {
+	line := strings.TrimSpace(output)
+	switch {
+	case strings.Contains(line, "finished on"):
+		return true, 100, nil
+	case strings.Contains(line, "canceled on"), strings.HasPrefix(line, "Never started"):
+		return false, 0, fmt.Errorf("the rebuild stopped: %s", line)
+	}
+	value, _, found := strings.Cut(line, "% done")
+	if !found {
+		return false, 0, fmt.Errorf("unexpected btrfs replace status %q", line)
+	}
+	done, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || done < 0 || done > 100 {
+		return false, 0, fmt.Errorf("unexpected btrfs replace status %q", line)
+	}
+	return false, int(done), nil
+}

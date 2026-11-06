@@ -216,6 +216,10 @@ func (h *hostOperations) StartAddDisks(_ context.Context, request storage.AddDis
 	return h.start(request.PlanID)
 }
 
+func (h *hostOperations) StartReplaceDisk(_ context.Context, request storage.ReplaceDiskRequest) (storage.VolumeOperation, error) {
+	return h.start(request.PlanID)
+}
+
 func (h *hostOperations) start(planID string) (storage.VolumeOperation, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

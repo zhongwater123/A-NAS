@@ -89,6 +89,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleCreateVolume(w, r)
 		return
 	}
+	if r.URL.Path == "/v1/storage/volumes/replacement" {
+		h.handleReplaceDisk(w, r)
+		return
+	}
 	if r.URL.Path == "/v1/storage/volumes/disks" {
 		h.handleAddDisks(w, r)
 		return
@@ -372,6 +376,31 @@ func (h *handler) handleAddDisks(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.writeVolumeOperationError(w, r, "start adding disks to the data volume failed", err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, operation)
+}
+
+func (h *handler) handleReplaceDisk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.volume == nil {
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
+		return
+	}
+	var document wire.ReplaceDiskDocument
+	if err := decodeRequest(r, &document); err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	operation, err := h.volume.StartReplaceDisk(r.Context(), datavolume.ReplaceDiskRequest{
+		PlanID: document.PlanID, FilesystemUUID: document.FilesystemUUID, Disk: document.Disk,
+	})
+	if err != nil {
+		h.writeVolumeOperationError(w, r, "start replacing the data volume's missing disk failed", err)
 		return
 	}
 	httpjson.Write(w, http.StatusOK, operation)

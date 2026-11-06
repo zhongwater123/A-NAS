@@ -33,7 +33,7 @@ func (s *Service) track(planID string, operation VolumeOperation) (ExecutionPlan
 	// The step is only shown while the plan runs; saving it would write an
 	// activity record for every step.
 	if plan.State == PlanStateRunning {
-		plan.Step = operation.Step
+		plan.Step, plan.Progress = operation.Step, operation.Progress
 		s.plans[planID] = plan
 	}
 	s.mu.Unlock()

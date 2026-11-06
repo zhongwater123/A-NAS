@@ -190,6 +190,21 @@ func (s *simulatedStorage) StartAddDisks(_ context.Context, request storage.AddD
 	}), nil
 }
 
+func (s *simulatedStorage) StartReplaceDisk(_ context.Context, request storage.ReplaceDiskRequest) (storage.VolumeOperation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	asked := simulatedRequest{kind: storage.PlanKindReplaceDisk, disks: []storage.DiskTarget{request.Disk}, layout: storage.LayoutMirror, filesystemUUID: request.FilesystemUUID}
+	if operation, known, err := s.knownLocked(request.PlanID, asked); known || err != nil {
+		return operation, err
+	}
+	if s.volume == nil || request.FilesystemUUID != simulatedUUID {
+		return storage.VolumeOperation{}, storage.ErrVolumeChanged
+	}
+	return s.startLocked(request.PlanID, asked, []storage.OperationStep{storage.StepErase, storage.StepReplace}, func() {
+		s.volume.diskIDs = append(s.volume.diskIDs, request.Disk.DiskID)
+	}), nil
+}
+
 func (s *simulatedStorage) VolumeOperation(_ context.Context, planID string) (storage.VolumeOperation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

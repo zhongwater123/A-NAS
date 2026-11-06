@@ -19,6 +19,7 @@ type (
 	DiskTarget          = datavolume.DiskTarget
 	CreateVolumeRequest = datavolume.CreateVolumeRequest
 	AddDisksRequest     = datavolume.AddDisksRequest
+	ReplaceDiskRequest  = datavolume.ReplaceDiskRequest
 	VolumeExecutor      = datavolume.VolumeExecutor
 	OperationState      = datavolume.OperationState
 	OperationStep       = datavolume.OperationStep
@@ -32,6 +33,7 @@ const (
 	LayoutStripe           = datavolume.LayoutStripe
 	PlanKindCreateVolume   = datavolume.PlanKindCreateVolume
 	PlanKindAddDisks       = datavolume.PlanKindAddDisks
+	PlanKindReplaceDisk    = datavolume.PlanKindReplaceDisk
 	VolumeStateCreating    = datavolume.VolumeStateCreating
 	VolumeStateAvailable   = datavolume.VolumeStateAvailable
 	VolumeStateDegraded    = datavolume.VolumeStateDegraded
@@ -48,6 +50,7 @@ const (
 	StepMount              = datavolume.StepMount
 	StepPrepare            = datavolume.StepPrepare
 	StepAddDevices         = datavolume.StepAddDevices
+	StepReplace            = datavolume.StepReplace
 )
 
 var (

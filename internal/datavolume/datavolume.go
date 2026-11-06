@@ -40,6 +40,9 @@ const (
 	PlanKindCreateVolume PlanKind = "create_volume"
 	// PlanKindAddDisks erases the disks and adds them to the data volume.
 	PlanKindAddDisks PlanKind = "add_disks"
+	// PlanKindReplaceDisk erases a disk and rebuilds onto it the disk a
+	// mirror runs without (ADR 0025).
+	PlanKindReplaceDisk PlanKind = "replace_disk"
 )
 
 type VolumeState string
@@ -141,6 +144,14 @@ type AddDisksRequest struct {
 	Layout         Layout
 }
 
+// ReplaceDiskRequest rebuilds the missing disk of the mounted mirror with
+// the filesystem UUID onto the disk.
+type ReplaceDiskRequest struct {
+	PlanID         string
+	FilesystemUUID string
+	Disk           DiskTarget
+}
+
 // VolumeExecutor runs a plan's operation on the host. Starting reports the
 // operation without waiting for it to end; for a plan the host already has
 // an operation for, it starts nothing new: it reports one that runs or
@@ -149,6 +160,7 @@ type AddDisksRequest struct {
 type VolumeExecutor interface {
 	StartCreateVolume(context.Context, CreateVolumeRequest) (VolumeOperation, error)
 	StartAddDisks(context.Context, AddDisksRequest) (VolumeOperation, error)
+	StartReplaceDisk(context.Context, ReplaceDiskRequest) (VolumeOperation, error)
 	// VolumeOperation reports the plan's operation, or ErrOperationNotFound.
 	VolumeOperation(context.Context, string) (VolumeOperation, error)
 	// ContinueConversion starts converting the data volume to its layout
@@ -180,6 +192,8 @@ const (
 	StepMount      OperationStep = "mount"
 	StepPrepare    OperationStep = "prepare"
 	StepAddDevices OperationStep = "add_devices"
+	// StepReplace rebuilds the missing disk's data onto the new one.
+	StepReplace OperationStep = "replace"
 )
 
 // VolumeOperation is a plan's operation on the host. The Host Agent runs it
@@ -191,7 +205,9 @@ type VolumeOperation struct {
 	State   OperationState `json:"state"`
 	Step    OperationStep  `json:"step,omitempty"`
 	Failure string         `json:"failure,omitempty"`
-	Volume  *Volume        `json:"volume,omitempty"`
+	// Progress is how far a rebuild has come, in percent.
+	Progress int     `json:"progress,omitempty"`
+	Volume   *Volume `json:"volume,omitempty"`
 }
 
 func FingerprintDisk(disk hoststate.Disk) string {

@@ -30,6 +30,12 @@ type CreateVolumeDocument struct {
 	Layout datavolume.Layout       `json:"layout"`
 }
 
+type ReplaceDiskDocument struct {
+	PlanID         string                `json:"planId"`
+	FilesystemUUID string                `json:"filesystemUuid"`
+	Disk           datavolume.DiskTarget `json:"disk"`
+}
+
 type AddDisksDocument struct {
 	PlanID         string                  `json:"planId"`
 	FilesystemUUID string                  `json:"filesystemUuid"`

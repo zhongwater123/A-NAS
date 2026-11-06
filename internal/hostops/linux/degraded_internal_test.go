@@ -258,3 +258,25 @@ func TestAnUnreadableRecordKeepsTheVolumeFromRunningWithoutADisk(t *testing.T) {
 		t.Fatalf("mounts = %q, want none", got)
 	}
 }
+
+// Lines "btrfs replace status -1" printed in the VM of the investigation.
+func TestParseReplaceStatusFollowsARebuild(t *testing.T) {
+	for _, test := range []struct {
+		line     string
+		finished bool
+		percent  int
+		fails    bool
+	}{
+		{line: "28.2% done, 0 write errs, 0 uncorr. read errs\n", percent: 28},
+		{line: "0.0% done, 0 write errs, 0 uncorr. read errs", percent: 0},
+		{line: "Started on  6.Nov 13:10:52, finished on  6.Nov 13:11:50, 0 write errs, 0 uncorr. read errs\n", finished: true, percent: 100},
+		{line: "Started on  6.Nov 12:57:09, canceled on  6.Nov 12:59:41 at 0.0%, 0 write errs, 0 uncorr. read errs", fails: true},
+		{line: "Never started", fails: true},
+		{line: "something else", fails: true},
+	} {
+		finished, percent, err := parseReplaceStatus(test.line)
+		if (err != nil) != test.fails || finished != test.finished || (!test.fails && percent != test.percent) {
+			t.Errorf("parseReplaceStatus(%q) = %v, %d, %v", test.line, finished, percent, err)
+		}
+	}
+}

@@ -488,7 +488,7 @@ export interface paths {
         /** @description Administrators only. The plans that still need the administrator, newest first: the one running, and the newest one that stopped in needs_attention unless a plan made after it has run. The settings page shows them again after a reload. */
         get: operations["listUnfinishedStoragePlans"];
         put?: never;
-        /** @description Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts to the layout in the background. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict. */
+        /** @description Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts to the layout in the background. A mirror missing a disk instead takes one disk to rebuild the missing one onto (kind replace_disk; the layout is ignored), and 422 disk_too_small when it is smaller than the missing disk. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts or misses a disk; 422 invalid_layout when the layout does not fit the number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict. */
         post: operations["createStoragePlan"];
         delete?: never;
         options?: never;
@@ -4765,8 +4765,11 @@ export interface components {
         };
         StoragePlan: {
             id: string;
-            /** @enum {string} */
-            kind: "create_volume" | "add_disks";
+            /**
+             * @description replace_disk: the only plan a mirror missing a disk takes; one new disk, at least as large, rebuilt from the other copy.
+             * @enum {string}
+             */
+            kind: "create_volume" | "add_disks" | "replace_disk";
             layout: components["schemas"]["VolumeLayout"];
             disks: components["schemas"]["PlannedDisk"][];
             /**
@@ -4787,7 +4790,9 @@ export interface components {
              * @description The step the Host Agent is at while the plan runs, or the one it stopped in when the plan needs attention.
              * @enum {string}
              */
-            step?: "erase" | "format" | "mount" | "prepare" | "add_devices";
+            step?: "erase" | "format" | "mount" | "prepare" | "add_devices" | "replace";
+            /** @description How far a rebuild has come, in percent, while a replace_disk plan is at the replace step. */
+            progress?: number;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */

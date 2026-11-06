@@ -166,7 +166,8 @@ func TestAddingADiskConvertsTheVolumeAndReportsTheProgress(t *testing.T) {
 func TestAMirrorMissingADiskNamesItAndTakesNoOtherPlan(t *testing.T) {
 	ctx := context.Background()
 	reader := spareDiskReader(t)
-	service := newService(t, reader, &recordingExecutor{}, storage.Options{NewID: planIDs()})
+	executor := &recordingExecutor{}
+	service := newService(t, reader, executor, storage.Options{NewID: planIDs()})
 	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01", "disk:fake-data-02"}, storage.LayoutMirror)
 	if err != nil {
 		t.Fatal(err)
@@ -189,9 +190,21 @@ func TestAMirrorMissingADiskNamesItAndTakesNoOtherPlan(t *testing.T) {
 	if err != nil || volumes[0].State != storage.VolumeStateDegraded || !slices.Equal(volumes[0].MissingDisks, want) {
 		t.Fatalf("volumes = %+v, %v; want degraded without %+v", volumes, err, want)
 	}
-	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, storage.LayoutMirror); !errors.Is(err, storage.ErrVolumeBusy) {
-		t.Fatalf("plan while a disk is missing error = %v, want ErrVolumeBusy", err)
+	// The one plan it takes is a disk in place of the missing one.
+	replacement, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, storage.LayoutSpan)
+	if err != nil || replacement.Kind != storage.PlanKindReplaceDisk || replacement.Layout != storage.LayoutMirror ||
+		!slices.ContainsFunc(replacement.Actions, func(action storage.Action) bool { return action.Kind == "replace_disk" }) {
+		t.Fatalf("plan while a disk is missing = %+v, %v; want a replacement", replacement, err)
 	}
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03", "disk:fake-data-02"}, storage.LayoutMirror); err == nil {
+		t.Fatal("a replacement of two disks was planned")
+	}
+	small := slices.IndexFunc(reader.state.Disks, func(disk hoststate.Disk) bool { return disk.ID.String() == "disk:fake-data-03" })
+	reader.state.Disks[small].CapacityBytes = plan.Disks[1].CapacityBytes - 1
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, storage.LayoutMirror); !errors.Is(err, storage.ErrDiskTooSmall) {
+		t.Fatalf("replacement by a smaller disk error = %v, want ErrDiskTooSmall", err)
+	}
+	reader.state.Disks[small].CapacityBytes = plan.Disks[1].CapacityBytes
 
 	// Offline, the disks still there carry the filesystem; the gone one is named.
 	reader.state.DataVolume = nil
@@ -212,6 +225,24 @@ func TestAMirrorMissingADiskNamesItAndTakesNoOtherPlan(t *testing.T) {
 	volumes, _ = service.ListVolumes(ctx)
 	if volumes[0].State != storage.VolumeStateAvailable || !volumes[0].Restoring || volumes[0].MissingDisks != nil {
 		t.Fatalf("volume with the disk back = %+v, want available and restoring", volumes[0])
+	}
+
+	// Gone again for good: the replacement runs on the Host Agent.
+	reader.state.Disks = slices.Delete(reader.state.Disks, gone, gone+1)
+	mountVolume(reader, []string{"disk:fake-data-01"}, 1_000_000_000, mirror, mirror)
+	reader.state.DataVolume.MissingDevices = 1
+	replacement, err = service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, replacement.ID, replacement.ConfirmationPhrase); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ExecutePlan(ctx, storageAdministrator, replacement.ID); err != nil {
+		t.Fatalf("ExecutePlan(replacement) error = %v", err)
+	}
+	if len(executor.replaced) != 1 || executor.replaced[0].Disk.DiskID != "disk:fake-data-03" || executor.replaced[0].FilesystemUUID != volumeUUID {
+		t.Fatalf("replace requests = %+v", executor.replaced)
 	}
 }
 
