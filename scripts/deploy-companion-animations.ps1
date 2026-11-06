@@ -31,6 +31,10 @@ $movDir = Join-Path ([System.IO.Path]::GetTempPath()) ('dsh-pet-mov-' + [guid]::
 Expand-Archive -LiteralPath $MovZip -DestinationPath $movDir -WhatIf:$false
 try {
 
+# The manifest goes to the NAS as is, where a CR would end up in every name.
+if ([System.IO.File]::ReadAllText($manifestPath).Contains("`r")) {
+    throw "Manifest has CRLF line endings; check it out again so .gitattributes applies: $manifestPath"
+}
 $animations = @()
 foreach ($line in (Get-Content -LiteralPath $manifestPath -Encoding UTF8)) {
     if ($line -notmatch '^([0-9a-f]{64})  (.+)$') {

@@ -22,6 +22,8 @@ Caddyfile text eol=lf
 *.yml text eol=lf
 # git apply needs the hunks exactly as written.
 *.patch text eol=lf
+# Uploaded to the NAS as is; a CRLF checkout puts \r in every name.
+*.sha256 text eol=lf
 
 # Copied from Hermes by ai/assistant-spike/vendor-hermes-ui.py; GitHub folds it in diffs.
 web/src/assistant/hermes/** linguist-generated=true
