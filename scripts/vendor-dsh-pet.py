@@ -1,10 +1,13 @@
-"""Vendors the parts of dsh-pet the companion reuses: the self-playing animation
-chain (src/client/pet/animation), dragging, throwing and walking (src/client/pet/motion),
-the physics they share (src/shared/physics), the host's work status store, the bridge
-that publishes it and the page state it writes (FILES), and the plain modules those import.
-Nothing that talks to DeepSeek Harness, a model, a voice or the network is copied;
-the script stops if an import reaches outside the plain modules, or if a vendored file
-imports a package at run time (type-only imports, which the build erases, are fine).
+"""Vendors the parts of dsh-pet the companion reuses: the pet card (src/client/pet/card,
+createPetCard and the runtime that wires it), the self-playing animation chain
+(src/client/pet/animation), dragging, throwing, walking and following a position
+(src/client/pet/motion), the physics they share (src/shared/physics), the host's work status
+store, the bridge that publishes it and the page state it writes (FILES), and the plain
+modules those import. Nothing that talks to DeepSeek Harness, a model, a voice or the network
+is copied: what the card reaches of the balance, the menu, todos, settings, chat and voice is
+cut by patches (CUT_IMPORTS). The script stops if an import reaches outside the plain modules,
+or if a vendored file imports a package at run time (type-only imports, which the build
+erases, are fine).
 
 Run on the development machine, with a dsh-pet checkout at the pinned commit and its HEVC
 animations for Safari (the assets-mov release, MOV_ZIP below):
@@ -29,21 +32,44 @@ PINNED = "10f6c868b8110c897af33d6137a3d85e84b665ba"
 # release asset, which GitHub digests. It lacks only the meal game's, which A-NAS does not play.
 MOV_ZIP = ("https://github.com/PC2005-cloud/dsh-pet/releases/download/assets-mov/dsh-pet-mov-assets-mov.zip",
            "654e42f14b647a1e59a4c6f05694273dcf23edb063a5e49b14fc05a1fad3b467")
-ROOTS = ["client/pet/animation", "client/pet/motion", "shared/physics"]
+ROOTS = ["client/pet/card", "client/pet/animation", "client/pet/motion", "shared/physics"]
 # Single host modules the page runs as dsh-pet's host would: WorkStatusStore and pickDisplayed
 # (self-contained), the bridge that publishes them (a working->result flip within 5 s merged,
 # nothing published when the shown status is unchanged) and PollStateStore, the GET /state
-# store the card reads.
-FILES = ["host/work-status.ts", "host/plugin/work-status-bridge.ts", "host/state.ts"]
-# Moves the pet where the Harness host tells it to; A-NAS has no such host.
-SKIP = {"client/pet/motion/position-follow.ts"}
-# Code reached through imports must stay in these plain, browser-only modules.
-ALLOWED = ("client/pet/", "shared/", *FILES)
-DENIED = ("shared/chat/", "shared/balance/", "shared/todo/", "shared/menu/", "client/pet/card/")
+# store the card reads. And the card's styles, which dsh-pet's page entry injects, not the card.
+FILES = ["host/work-status.ts", "host/plugin/work-status-bridge.ts", "host/state.ts", "client/pet/css.ts"]
+# The card's right-click menu, chat dialog, hotkeys and the chat handles they register: A-NAS
+# has none of them (the patched runtime keeps the hover tooltip the menu entry also placed).
+SKIP = {"client/pet/card/entry.ts", "client/pet/card/open-chat.ts", "client/pet/card/registry.ts",
+        "client/pet/card/shortcut.ts"}
+# Code reached through imports must stay in these plain, browser-only modules: the card's own
+# directory and the shared modules, plus the three page modules it uses (the speech bubble, and
+# the pose and progress readers it registers).
+ALLOWED = ("client/pet/", "shared/", "client/bubble.ts", "client/pose.ts", "client/progress.ts", *FILES)
+# DeepSeek Harness features the card can reach but A-NAS does not have: the balance, the menu
+# and what its actions open (todos, settings, chat), and voice, which runs a TTS service.
+DENIED = ("shared/chat/", "shared/balance/", "shared/todo/", "shared/menu/", "shared/menu.ts", "shared/voice.ts",
+          "client/pet/menu-actions.ts", *SKIP)
 IMPORT = re.compile(r"""((?:from|import)\s*\(?\s*)(['"])(\.{1,2}/[^'"]+)\2""")
 # Imports a patch removes, by vendored file: not followed when collecting files, and checked to
 # be gone once the patches are applied (a patch that stopped applying would leave them).
-CUT_IMPORTS = {"host/plugin/work-status-bridge.ts": {"./setup.ts"}}
+CUT_IMPORTS = {
+    "host/plugin/work-status-bridge.ts": {"./setup.ts"},
+    # 0004: the balance.
+    "client/bubble.ts": {"../shared/balance/index.ts"},
+    "shared/state.ts": {"./balance/index.ts"},
+    # 0004 and 0005: the balance and voice.
+    "client/pet/card/cue-effects.ts": {"../../../shared/balance/index.ts", "../../../shared/voice.ts"},
+    "client/pet/card/bubble-slots.ts": {"../../../shared/balance/index.ts", "../../../shared/voice.ts"},
+    # 0004 and 0006: the balance and the menu.
+    "client/pet/card/props.ts": {"../../../shared/balance/index.ts", "../../../shared/menu.ts"},
+    # 0006: todos, settings, the menu's actions and the menu entry.
+    "client/pet/card/runtime.ts": {"../../todo-bubble.ts", "../../settings.ts", "../menu-actions.ts", "./entry.ts"},
+    # 0008: the menu's styles.
+    "client/pet/css.ts": {"../../shared/menu.ts"},
+    # 0010: the score popup.
+    "client/pet/motion/drag.ts": {"../../../shared/score-popup.ts"},
+}
 STATEMENT = re.compile(r"""(?m)^\s*(?:import|export)\s+(type\s+)?[^;]*?\bfrom\s*(['"])([^'"]+)\2""")
 
 upstream, target, mov_zip = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
@@ -123,13 +149,16 @@ def jsonc(text: str) -> object:
     return json.loads(re.sub(r",(\s*[}\]])", r"\1", "".join(out)))
 
 
-# The animations the companion plays and how often, from the commit's own configuration.
-# Balance, chatter, sleep and the meal game are dsh-pet features A-NAS does not have.
+# The animations the companion plays and how often, from the commit's own configuration, with the
+# work status bubble's lines the card picks from. The balance and the meal game are dsh-pet
+# features A-NAS does not have; sleep and the speech animations (events.whisper, which the card
+# plays when it speaks and without which it shows no bubble) are what VNAS controls.
 config = jsonc((upstream / "dsh-pet" / "assets" / "config.jsonc").read_text(encoding="utf-8"))
-animations = {key: value for key, value in config["animations"].items() if key not in ("sleep", "baifan")}
-animations["events"] = {"workStatus": config["animations"]["events"]["workStatus"]}
+animations = {key: value for key, value in config["animations"].items() if key != "baifan"}
+animations["events"] = {key: config["animations"]["events"][key] for key in ("whisper", "workStatus")}
 (target / "animations.json").write_text(
-    json.dumps({"animations": animations, "animationWeights": config["animationWeights"], "physics": config["physics"]},
+    json.dumps({"animations": animations, "animationWeights": config["animationWeights"], "physics": config["physics"],
+                "workStatusTexts": config["workStatusTexts"]},
                ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 files_by_name = {path.name: path.read_bytes() for path in (upstream / "dsh-pet" / "assets" / "webm").glob("*.webm")}
@@ -145,7 +174,7 @@ manifest = "".join(lines).encode()
 pool = hashlib.sha256(manifest).hexdigest()[:16]
 shutil.copyfile(upstream / "LICENSE", target / "LICENSE")
 (target / "README.md").write_text(
-    "# Vendored dsh-pet animation and motion\n\n"
+    "# Vendored dsh-pet pet card, animation and motion\n\n"
     f"Copied from [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) commit `{commit}` "
     "by `scripts/vendor-dsh-pet.py`. The code is MIT, see `LICENSE`. Do not edit the copied files by hand: "
     "add a patch to `../dsh-pet-patches/` or change the script, and vendor again.\n\n"

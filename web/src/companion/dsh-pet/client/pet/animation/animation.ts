@@ -45,7 +45,7 @@ export interface OwnAnimationDeps {
   /** A/B 双缓冲的 B 元素。 */
   videoB: () => HTMLVideoElement | null;
   /** 该宠物的成品配置：素材根、id 与动画池都从它取。 */
-  cfg: () => { id: string; assetRoot?: string; animations: Animations };
+  cfg: () => { id: string; assetRoot?: string; assetVersion?: string; animations: Animations };
   /** 当前动画名。 */
   currentAnim: () => string;
   /** 工作状态叶子；未启用联动时为空。 */
@@ -165,6 +165,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       id: cfg.id,
       anim: next,
       ext: thumbExt(),
+      assetVersion: cfg.assetVersion,
     });
     loader.load(assetUrl, {
       onObjectUrl: (objectUrl) => {

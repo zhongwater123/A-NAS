@@ -9,7 +9,6 @@
  */
 import { trimTrail, type DragSample } from '../../../shared/physics';
 import { pick } from '../../../shared/pickers';
-import { clickScore, mountScorePopup, SCORE_MIN_SPEED, spawnScoreBurst } from '../../../shared/score-popup';
 import { DRAG_THRESHOLD, SLINGSHOT_DOUBLE_MS } from '../../../shared/constants';
 import { createDragFollow } from './drag-follow';
 import { createTouchPress } from './touch-press';
@@ -174,12 +173,8 @@ function noteGrab(current: DragCard, x: number, y: number): boolean {
       ' |v|=' +
       Math.round(speed),
   );
-  if (speed < SCORE_MIN_SPEED) return false;
-  const score = clickScore(speed, current.size);
-  log(current.petId, 'click-score speed=' + Math.round(speed) + ' size=' + current.size + ' -> +' + score);
-  spawnScoreBurst(x, y);
-  mountScorePopup({ x, y, score, speed, size: current.size });
-  return true;
+  // A-NAS: no score popup for catching the pet in flight (review 三.5); the catch is an ordinary click.
+  return false;
 }
 
 /**

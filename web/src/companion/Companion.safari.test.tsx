@@ -33,14 +33,14 @@ describe("the companion in Safari", () => {
           },
         }),
       ),
-      http.untyped.get(`${origin}/companion/animations/:name`, ({ request }) => {
+      http.untyped.get(`${origin}/companion/thumb/main/:name`, ({ request }) => {
         fetched.push(decodeURIComponent(new URL(request.url).pathname));
         return new HttpResponse(new Blob(["mov"]));
       }),
     );
     render(<Companion />);
     expect(await screen.findByRole("button", { name: "大肥鱼" })).toBeTruthy();
-    await waitFor(() => expect(fetched).toContain("/companion/animations/待机呼吸休闲.mov"));
+    await waitFor(() => expect(fetched).toContain("/companion/thumb/main/待机呼吸休闲.mov"));
     expect(fetched.some((path) => path.endsWith(".webm"))).toBe(false);
   });
 });

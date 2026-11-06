@@ -17,7 +17,7 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, "load").mockReturnValue(undefined);
   URL.createObjectURL ??= () => "blob:animation";
   URL.revokeObjectURL ??= () => undefined;
-  server.use(http.untyped.get(`${origin}/companion/animations/:name`, () => new HttpResponse(new Blob(["webm"]))));
+  server.use(http.untyped.get(`${origin}/companion/thumb/main/:name`, () => new HttpResponse(new Blob(["webm"]))));
 });
 afterEach(() => {
   resetWorkStatus();

@@ -19,6 +19,9 @@ export interface AssetSource {
   anim: string;
   /** 扩展名（含点，如 `.webm`）。 */
   ext: string;
+  /** A-NAS: the installed animation pool, sent as ?v= so a file kept from another pool is never played
+   *  in its place: A-NAS lets the browser cache the files for good (review 三.2). */
+  assetVersion?: string;
 }
 
 /**
@@ -29,9 +32,7 @@ export interface AssetSource {
  */
 export function animationAssetUrl(source: AssetSource): string {
   if (source.cueUrl) return source.cueUrl;
-  // A-NAS: an asset root that is a path is where the Product Service serves the animations
-  // (/companion/animations/<name>.webm), not a Harness route.
-  if (source.assetRoot.startsWith('/')) return source.assetRoot + '/' + encodeURIComponent(source.anim) + source.ext;
   const root = source.assetRoot === '' ? source.id : source.assetRoot;
-  return ROUTE_PATH + '/thumb/' + encodeURIComponent(root) + '/' + encodeURIComponent(source.anim) + source.ext;
+  const url = ROUTE_PATH + '/thumb/' + encodeURIComponent(root) + '/' + encodeURIComponent(source.anim) + source.ext;
+  return source.assetVersion ? url + '?v=' + encodeURIComponent(source.assetVersion) : url;
 }

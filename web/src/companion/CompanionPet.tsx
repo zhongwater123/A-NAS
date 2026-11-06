@@ -281,7 +281,9 @@ function createCompanion(
   companion.chain = createOwnAnimation({
     videoA: elements.videoA,
     videoB: elements.videoB,
-    cfg: () => ({ id: "dafeiyu", assetRoot: "/companion/animations", animations: latest.current.animations }),
+    // dsh-pet's own address for an animation, /companion/thumb/main/<name>.<ext>: main is the
+    // configuration entry the animations belong to.
+    cfg: () => ({ id: "dafeiyu", assetRoot: "main", animations: latest.current.animations }),
     currentAnim: () => latest.current.anim,
     workStatus: () => latest.current.work,
     facing: () => latest.current.facing,

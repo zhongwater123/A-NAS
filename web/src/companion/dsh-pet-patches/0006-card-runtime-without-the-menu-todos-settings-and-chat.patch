@@ -1,0 +1,205 @@
+The card's runtime without what A-NAS does not have: todos, settings, the right-click menu with
+its actions, and the menu entry with the chat dialog and hotkeys (entry.ts, menu-actions.ts,
+todo-bubble.ts and settings.ts are not vendored). Two pieces of those files are still needed
+and are carried over as dsh-pet wrote them: the hover tooltip the menu entry places, and the
+menu actions' branch for a named animation, which is how the card plays an anim leaf. The rest
+of runtime.ts is unchanged; the props lose the third-party menu items.
+
+diff --git a/client/pet/card/props.ts b/client/pet/card/props.ts
+--- a/client/pet/card/props.ts
++++ b/client/pet/card/props.ts
+@@ -8,7 +8,6 @@
+ import type * as ReactNS from 'react';
+ import type { PetCollisionSlot } from '../../../shared/physics';
+ import type { LockState, PositionMode, SayCue, PetFacing, SleepState } from '../../../shared/state';
+-import type { MenuMoreItem } from '../../../shared/menu';
+ import type { WorkStatusSnapshot } from '../../../shared/work-status';
+ import type { RuntimePet } from '../types';
+ 
+@@ -46,8 +45,6 @@ export interface PetCardProps {
+   sleep?: SleepState;
+   /** 睡觉叶子变化次数。 */
+   sleepTick: number;
+-  /** 第三方菜单项快照；传 ref 是因为只在右键那一刻读。 */
+-  menuItemsRef: ReactNS.MutableRefObject<MenuMoreItem[]>;
+   /** 宠物间碰撞站场。 */
+   arena: ReactNS.MutableRefObject<{ slots: Record<string, PetCollisionSlot> }>;
+ }
+diff --git a/client/pet/card/runtime.ts b/client/pet/card/runtime.ts
+--- a/client/pet/card/runtime.ts
++++ b/client/pet/card/runtime.ts
+@@ -11,18 +11,15 @@ import { postAction } from '../../../shared/state';
+ import { ROUTE_PATH } from '../../../shared/constants';
+ import { resolveFontPx } from '../../../shared/fonts';
+ import { resolvePetSizePx } from '../../../shared/pet-size';
++import { TOOLTIP_GAP_RATIO, tooltipPlacement } from '../../../shared/tooltip';
+ import { makeWhisperBubble } from '../../bubble';
+-import { makeTodoBubble } from '../../todo-bubble';
+-import { petBridge } from '../../settings';
+ import { playClickSound } from '../click-sound';
+-import { createMenuActions, type MenuActions } from '../menu-actions';
+ import { derivePetMetrics, petRootStyle, petStageStyle } from '../motion/geometry';
+ import { makePlaybackReporter } from '../playback-report';
+ import { createAnimationFlow } from './animation-flow';
+ import { createBubbleSlots } from './bubble-slots';
+ import { createCardAnimation } from './animation';
+ import { createCardDrag } from './drag';
+-import { createCardEntry, type CardEntry } from './entry';
+ import { createCardMotion } from './motion';
+ import { createCardState } from './state';
+ import { createCueEffects } from './cue-effects';
+@@ -43,8 +40,8 @@ export function createCardRuntime(rt: PetRuntime) {
+   const { h, useEffect, useRef, useState } = rt;
+   /** 碎碎念气泡：文本与显隐由装配根传入。 */
+   const WhisperBubble = makeWhisperBubble({ h });
+-  /** 待办气泡：面板本体挂在自己身上，关闭按钮回调装配根。 */
+-  const TodoBubble = makeTodoBubble({ h, useEffect, useRef });
++  /** A-NAS: there are no todos. Only the menu entry opens the panel, so its slot renders nothing. */
++  const TodoBubble = () => null;
+   /** 四种气泡的单槽：显隐、停留计时与优先级都在这里。 */
+   const useBubbleSlots = createBubbleSlots(
+     { h, useState, useEffect, useRef },
+@@ -57,10 +54,9 @@ export function createCardRuntime(rt: PetRuntime) {
+   const useCardAnimation = createCardAnimation({ useEffect, useRef });
+   const useCardMotion = createCardMotion({ useEffect, useRef });
+   const useCardDrag = createCardDrag({ useRef, useEffect });
+-  const useCardEntry = createCardEntry({ useEffect, useRef });
+ 
+   return function useCardRuntime(props: PetCardProps): CardViewProps {
+-    const { arena, cfg, lock, lockTick, menuItemsRef, sleep, sleepTick, workStatus } = props;
++    const { arena, cfg, lock, lockTick, sleep, sleepTick, workStatus } = props;
+     const { onFocusSession } = props;
+ 
+     // 实际渲染宽度：百分比只在挂载与配置变更时按当次视口宽解析一次，拖窗口不跟随。
+@@ -79,8 +75,6 @@ export function createCardRuntime(rt: PetRuntime) {
+ 
+     // 驱动实例与跨关注点入口：创建顺序见模块头，填充只在本函数内。
+     const liveRef = useRef<CardLive>({} as CardLive);
+-    const menuActionsRef = useRef<MenuActions | null>(null);
+-    const entryRef = useRef<CardEntry | null>(null);
+     const pendingSquashRef = useRef(false);
+ 
+     // 成品配置与工作状态的最新值：回调晚于状态更新，只能读 ref。
+@@ -171,49 +165,51 @@ export function createCardRuntime(rt: PetRuntime) {
+       setTipOn: actions.setTipOn,
+     });
+ 
+-    // 右键菜单、对话与悬浮提示：动作派发经 ref 转发，避免与 menu-actions 构造期成环。
+-    const entry = useCardEntry({
+-      card,
+-      cfgRef,
+-      drag,
+-      live: liveRef,
+-      menuItemsRef,
+-      motion,
+-      runMenuAction: (leaf, playbackId, keepFacing) => menuActionsRef.current?.run(leaf, playbackId, keepFacing),
+-      showTodo: bubbles.showTodo,
+-      stage: () => stageRef.current,
+-      tipRef,
+-      toggleTodo: bubbles.toggleTodo,
+-    });
+-    entryRef.current = entry;
+-
+-    // 菜单动作派发：依赖运动、拖拽、提示与对话四处入口，所以放在它们之后。
+-    menuActionsRef.current ??= createMenuActions({
+-      animations: () => cfgRef.current.animations,
+-      applyMerged: (merged) => petBridge.reload(merged),
+-      faceLeft: () => actions.setFacing('left'),
+-      isFacingRight: () => card.facingRef.current === 'right',
+-      openChat: () => entryRef.current?.openChat(),
+-      openTodo: () => entryRef.current?.openTodo(),
+-      petId: cfg.id,
+-      playOnce: (anim, playbackId) => {
++    // A-NAS: the right-click menu, chat dialog and hotkeys (entry.ts) and the menu's actions
++    // (menu-actions.ts) are not vendored: they open the balance, todos, settings and chat. The two
++    // things the card still needs from them follow, as dsh-pet wrote them: the hover tooltip the
++    // menu entry places (entry.ts:111-123, 334-335 and 396-404) and the menu actions' branch for a
++    // named animation, the only one a host instruction takes (menu-actions.ts:179-198).
++    /** 把提示框摆到光标右下，放不下时翻边并夹回视口。 */
++    const placeTip = (clientX: number, clientY: number): void => {
++      const tipEl = tipRef.current;
++      if (!tipEl) return;
++      const viewport = document.documentElement;
++      const p = tooltipPlacement(
++        { x: clientX, y: clientY },
++        { w: tipEl.offsetWidth, h: tipEl.offsetHeight },
++        { x: 0, y: 0, w: viewport.clientWidth, h: viewport.clientHeight },
++        motion.metrics().size * TOOLTIP_GAP_RATIO,
++      );
++      tipEl.style.left = p.x + 'px';
++      tipEl.style.top = p.y + 'px';
++    };
++    liveRef.current.placeTip = placeTip;
++    liveRef.current.tipOn = () => card.state.tipOn;
++    /** 依据名点播：文字类朝右时强制朝左（keepFacing 时跳过），移动类走真实位移，挪不动时退化为纯播放。 */
++    const playByName = (anim: string, playbackId?: string, keepFacing = false): void => {
++      const cuePlaybackId = playbackId ?? null;
++      const anims = cfgRef.current.animations;
++      const noMirror = (anims.categories ?? []).some((c) => c.noMirror === true && c.actions.includes(anim));
++      if (!keepFacing && noMirror && card.facingRef.current === 'right') actions.setFacing('left');
++      const playOnce = (): void => {
+         actions.setOnce(true);
+         actions.setAnim(anim);
+-        actions.setCuePlayback(playbackId);
+-      },
+-      report: reportPlayback,
+-      resetPosition: () => actions.setCustomPos(null),
+-      // 睡觉：菜单在点击那一刻就要能拒绝（对话弹窗、待办面板、动作点播都是纯前端行为，宿主拦不到）
+-      say: (text) => liveRef.current.flow?.speak(text, undefined, undefined, undefined, false),
+-      locked: () => ownAnim.isFrozen(),
+-      sleepRefuseTexts: () => cfgRef.current.sleepRefuseTexts ?? [],
+-      sleeping: () => liveRef.current.flow?.sleeping() ?? false,
+-      stopMove: motion.stopMove,
+-      stopThrow: () => motion.flight.stop(),
+-      tryMove: motion.walk.tryMove,
+-      warn: (message) => console.warn(message),
+-    });
+-    const menuActions = menuActionsRef.current;
++        actions.setCuePlayback(cuePlaybackId);
++      };
++      if (anims.moves.actions.some((action) => action.name === anim)) {
++        if (motion.walk.tryMove(anim) === false) {
++          motion.stopMove();
++          playOnce();
++        } else if (cuePlaybackId !== null) {
++          // 移动系统接管，不换视频源，本段点播不会真的播起来，如实回 failed。
++          reportPlayback(cuePlaybackId, 'failed', 'busy');
++        }
++        return;
++      }
++      motion.stopMove();
++      playOnce();
++    };
+ 
+     // 占用锁：宿主靠内存持有，渲染端靠 /state 的 pets.<id>.lock 叶子感知。
+     // 冻结只挡自播行为；显式指令（say / anim / position / throw）一概不挡，那正是持锁者要保护的内容。
+@@ -251,9 +247,8 @@ export function createCardRuntime(rt: PetRuntime) {
+       cfg: () => cfgRef.current,
+       isDragging: () => drag.isActive(),
+       ownAnim,
+-      // 第四个参数 = 宿主指令：来自 pets.<id>.anim 的点播，不按「用户点击」判睡觉
+-      playByName: (anim, playbackId, keepFacing) =>
+-        menuActions.run({ anim, label: anim }, playbackId, keepFacing, true),
++      // 来自 pets.<id>.anim 的点播是宿主指令，不按「用户点击」判睡觉
++      playByName,
+       posFollow: motion.posFollow,
+       speak: (text, image, url, duration, anim) => liveRef.current.flow?.speak(text, image, url, duration, anim),
+       // 睡觉是状态不是指令：自动来源（工作状态/余额/碎碎念）读它决定要不要闭嘴
+@@ -310,10 +305,14 @@ export function createCardRuntime(rt: PetRuntime) {
+         if (phase === 'start') void postAction(ROUTE_PATH + '/wake?pet=' + encodeURIComponent(cfg.id));
+         drag.onClick();
+       },
+-      onContextMenu: entry.handleContextMenu,
++      // A-NAS: no menu of its own; a right-click is left to the page.
++      onContextMenu: () => {},
+       onPointerDown: drag.onPointerDown,
+-      onPointerEnter: entry.onPointerEnter,
+-      onPointerLeave: entry.onPointerLeave,
++      onPointerEnter: (e) => {
++        placeTip(e.clientX, e.clientY); // 先摆位再显示，否则会先在兜底坐标闪一帧。
++        actions.setTipOn(true);
++      },
++      onPointerLeave: () => actions.setTipOn(false),
+       onPointerMove: drag.onPointerMove,
+       onPointerUp: drag.onPointerUp,
+       rootRef,
