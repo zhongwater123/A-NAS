@@ -249,7 +249,10 @@ type JobRecovery struct {
 // fails as interrupted. Jobs that failed on storage or on a FFmpeg Worker that
 // ran out of time (io) start over, as the disk that was full or the device
 // that was too busy may be fine now; so do those a worker that was not there
-// failed before such failures stopped counting (issue #168).
+// failed before such failures stopped counting (issue #168). Text readings
+// that failed do not: they fail where the reader fails on that photo, which a
+// restart does not change, and each try takes minutes; a new reader tries
+// them again (requeueStaleTexts).
 func (s *Service) RecoverJobs(ctx context.Context) (JobRecovery, error) {
 	var recovery JobRecovery
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
@@ -265,7 +268,7 @@ WHERE state = 'running' AND attempts >= ?`, jobErrorInterrupted, jobMaxAttempts)
 		}
 		requeued, err := tx.ExecContext(ctx, `
 UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, not_before = ?, error_class = ''
-WHERE state = 'failed' AND error_class = ?`, now, jobErrorIO)
+WHERE state = 'failed' AND error_class = ? AND derivation <> ?`, now, jobErrorIO, textDerivation)
 		if err != nil {
 			return err
 		}

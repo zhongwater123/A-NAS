@@ -118,14 +118,27 @@ ON CONFLICT(object_id, derivation) DO UPDATE SET model = excluded.model, created
 }
 
 // requeueStaleTexts queues again the photos read by another model than the
-// Worker's reader, in libraries that still read text.
-func (s *Service) requeueStaleTexts(ctx context.Context, model string) error {
+// Worker's reader, in libraries that still read text, and with retryFailed,
+// for a reader the photo service has not seen before, the photos whose
+// reading failed.
+func (s *Service) requeueStaleTexts(ctx context.Context, model string, retryFailed bool) error {
 	now := formatTime(s.now())
-	_, err := s.db.ExecContext(ctx, `
+	if _, err := s.db.ExecContext(ctx, `
 INSERT INTO jobs(object_id, derivation, state, not_before, created_at)
 SELECT sc.object_id, sc.derivation, 'pending', ?, ? FROM scans sc
 WHERE sc.derivation = ? AND sc.model <> ? AND `+inTextLibrary("sc.object_id")+`
-ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, textDerivation, model)
+ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, textDerivation, model); err != nil {
+		return err
+	}
+	if !retryFailed {
+		return nil
+	}
+	// With retryFailed, a new reader also tries the photos the last one
+	// failed on or answered badly; a photo it cannot decode stays failed.
+	_, err := s.db.ExecContext(ctx, `
+UPDATE jobs SET state = 'pending', attempts = 0, lease_until = NULL, not_before = ?, error_class = ''
+WHERE derivation = ? AND state = 'failed' AND error_class IN (?, ?)`,
+		now, textDerivation, jobErrorIO, jobErrorInvalidResult)
 	return err
 }
 

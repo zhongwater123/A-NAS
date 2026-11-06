@@ -8,8 +8,9 @@
 # checkout is at their conversionCommit, and every weight file has its
 # weightsSha256. It converts twice and stops unless both results are
 # byte-identical, prints each file's size and SHA-256, and moves the files to
-# the output directory only when both match the manifests. Without either
-# manifest it does not start.
+# the output directory under their names only when both match the manifests;
+# otherwise with .unverified appended. Without either manifest it does not
+# start.
 #
 # Runs in anas-ocr-eval:trixie (ai/ocr-eval.Dockerfile) with a llama.cpp
 # checkout built at the commit the manifests name at /src, the download at the
@@ -44,7 +45,11 @@ done
 # The checkout every manifest names.
 commit=$(git -c safe.directory="$src" -C "$src" rev-parse HEAD)
 for manifest in "${manifest_paths[@]}"; do
-  wanted=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["conversionCommit"])' "$manifest")
+  wanted=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("conversionCommit", ""))' "$manifest")
+  if [[ -z "$wanted" ]]; then
+    echo "$manifest names no conversionCommit, the llama.cpp commit to convert with" >&2
+    exit 4
+  fi
   if [[ "$commit" != "$wanted" ]]; then
     echo "$src is at $commit; $manifest converts with llama.cpp $wanted" >&2
     exit 4
@@ -93,9 +98,14 @@ for pair in "${pairs[@]}"; do
     status=4
   fi
 done
+# Files that do not match are kept beside, marked unverified: a new model
+# version's manifests take their size and SHA-256 from them.
+suffix=
 if ((status != 0)); then
-  exit "$status"
+  suffix=.unverified
+  echo "kept as $out/<file>.unverified" >&2
 fi
 for file in "$model" "$mmproj"; do
-  mv -f -- "$work/first/$file" "$out/$file"
+  mv -f -- "$work/first/$file" "$out/$file$suffix"
 done
+exit "$status"

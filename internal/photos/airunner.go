@@ -50,37 +50,47 @@ func newAIRunner(lib *Service) *aiRunner {
 	return &aiRunner{lib: lib, wake: make(chan struct{}, 1), need: lib.storedMemoryNeed()}
 }
 
-// workerFile keeps what the AI Worker last said its models take
-// (EmbedderInfo.MemoryBytes). The first round after the photo service starts
-// weighs it before the round's first call, which starts the Worker through
-// its socket; without it that call would start the Worker before any memory
-// check (#365).
+// workerFile keeps what the AI Worker last said about itself, across starts
+// of the photo service:
+//   - what its models take (EmbedderInfo.MemoryBytes), with the release it
+//     came from. The first round after a start weighs it before the round's
+//     first call, which starts the Worker through its socket (#365). Another
+//     release's need is not taken: its models may take less, and a need
+//     too high would keep the gate shut without ever asking the Worker again;
+//   - its text reader. A new one tries again the photos the last one failed
+//     to read, which are not retried on every start (RecoverJobs).
 const workerFile = "ai-worker.json"
 
 type workerRecord struct {
+	Release     string `json:"release"`
 	MemoryBytes uint64 `json:"memoryBytes"`
+	Reader      string `json:"reader,omitempty"`
 }
 
-// storedMemoryNeed is the need workerFile keeps, or 0 before the Worker first
+// workerRecord is what workerFile keeps, or nothing before the Worker first
 // answered.
-func (s *Service) storedMemoryNeed() uint64 {
-	content, err := fs.ReadFile(s.root.FS(), workerFile)
-	if err != nil {
-		return 0
-	}
+func (s *Service) workerRecord() workerRecord {
 	var record workerRecord
-	if json.Unmarshal(content, &record) != nil {
-		return 0
+	if content, err := fs.ReadFile(s.root.FS(), workerFile); err == nil {
+		_ = json.Unmarshal(content, &record)
 	}
-	return record.MemoryBytes
+	return record
 }
 
-func (s *Service) storeMemoryNeed(need uint64) error {
-	content, err := json.Marshal(workerRecord{MemoryBytes: need})
+func (s *Service) storeWorkerRecord(record workerRecord) error {
+	content, err := json.Marshal(record)
 	if err != nil {
 		return err
 	}
 	return s.writeDerived(workerFile, content)
+}
+
+// storedMemoryNeed is the need this release's Worker last said, or 0.
+func (s *Service) storedMemoryNeed() uint64 {
+	if record := s.workerRecord(); record.Release == s.release {
+		return record.MemoryBytes
+	}
+	return 0
 }
 
 // aiProgress is what the AI runner last observed.
@@ -231,7 +241,9 @@ func (r *aiRunner) round(ctx context.Context, embedder Embedder, gate Gate) (pro
 	// the gate weighs before any of them loads, and which the next start of
 	// the photo service weighs before it calls the Worker.
 	if r.setMemoryNeed(info.MemoryBytes) {
-		if err := r.lib.storeMemoryNeed(info.MemoryBytes); err != nil {
+		record := r.lib.workerRecord()
+		record.Release, record.MemoryBytes = r.lib.release, info.MemoryBytes
+		if err := r.lib.storeWorkerRecord(record); err != nil {
 			return false, err
 		}
 		if open, reason := gate.Open(ctx, info.MemoryBytes); !open {
@@ -698,8 +710,17 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 		}
 	}
 	if info.OCR != "" && reader != info.OCR {
-		if err := lib.requeueStaleTexts(ctx, info.OCR); err != nil {
+		// A reader the photo service has not seen before also tries the
+		// photos the last one failed to read.
+		record := lib.workerRecord()
+		if err := lib.requeueStaleTexts(ctx, info.OCR, record.Reader != info.OCR); err != nil {
 			return err
+		}
+		if record.Reader != info.OCR {
+			record.Reader = info.OCR
+			if err := lib.storeWorkerRecord(record); err != nil {
+				return err
+			}
 		}
 	}
 	r.mu.Lock()
