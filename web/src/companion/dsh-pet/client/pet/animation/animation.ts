@@ -64,6 +64,8 @@ export interface OwnAnimationDeps {
   isDragging: () => boolean;
   /** 挂载那一刻是否已被锁冻住。 */
   initiallyFrozen: boolean;
+  /** A-NAS: whether the page has paused the card (see onReady below); a lock alone does not. */
+  paused?: () => boolean;
   /** 素材加载器；缺省用带超时的默认实现。 */
   loader?: AssetLoader;
 }
@@ -218,6 +220,17 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       pending = null;
       playing = cuePlaybackId;
       el.style.transform = deps.facing() === 'right' ? 'scaleX(-1)' : '';
+      // A-NAS: a switch that began before the page paused the card and finished loading during the
+      // pause goes in front without playing (autoplay included), or a looping clip would decode for the
+      // whole pause; the resume plays the frame in front (runtime.ts onResumed). A command it carried is
+      // cut short by the freeze, as setFrozen reports one. Neither the squash nor a walk starts: both run
+      // frame loops, and the freeze already stopped the walk. Under a lock alone it plays as before,
+      // since a lock lets explicit commands through.
+      if (deps.paused?.() === true) {
+        el.pause();
+        if (cuePlaybackId !== null) reportOnce(cuePlaybackId, 'cancelled', REASON_FROZEN);
+        return;
+      }
       el.play()
         .then(() => {
           // 只有 play() 兑现才代表确实开始出画，loadeddata 只代表可解码。

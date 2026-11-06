@@ -48,6 +48,8 @@ export interface CardAnimationInput {
   setCuePlayback: (id: string | null) => void;
   /** 本宠物 id：挂载期注册只读服务用它。 */
   petId: string;
+  /** A-NAS: whether the page has paused the card now. */
+  paused?: () => boolean;
 }
 
 /**
@@ -84,6 +86,7 @@ export function createCardAnimation(rt: CardAnimationRuntime) {
       onEnded: (cue) => live.current.flow?.applyEndedCue(cue),
       isDragging: () => live.current.drag.isActive(),
       initiallyFrozen: input.lock?.locked === true && input.lock.expiresAt > Date.now(),
+      ...(input.paused === undefined ? {} : { paused: input.paused }),
     });
     const ownAnim = ownAnimRef.current;
     live.current.ownAnim = ownAnim;

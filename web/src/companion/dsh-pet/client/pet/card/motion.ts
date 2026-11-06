@@ -228,6 +228,11 @@ export function createCardMotion(rt: CardMotionRuntime) {
     // 传感器订阅只建一次：两个开关与物理参数每次回调现读，避免重订阅。
     useEffect(() => {
       if (!canReadMotionSensors()) return;
+      // A-NAS: the page turns tilt and shake off for good (companionPhysics in animations.ts) and has
+      // no settings page to turn them on, so nothing would use a sample; subscribed anyway, every
+      // sensor event of a tablet or phone would still run these callbacks, during a pause too.
+      const physics = cfgRef.current.physics;
+      if (physics?.tiltGravity !== true && physics?.shakeThrow !== true) return;
       const offTilt = subscribeTilt((sample) => {
         if (cfgRef.current.physics?.tiltGravity !== true) {
           tiltSampleRef.current = null;

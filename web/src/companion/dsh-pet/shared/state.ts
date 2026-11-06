@@ -340,17 +340,9 @@ export function setActionHandler(handler: ActionHandler | null): void {
  *  动作不返回数据——数据只有 /state 一个出口。调用方收到 ok 后不需要再做别的：动作写叶子会让
  *  顶层 counter 变化，挂着的长轮询那一拍立刻返回。 */
 export async function postAction(baseUrl: string, body?: unknown): Promise<boolean> {
-  // A-NAS: the page is the host; its handler answers the action in place (see setActionHandler).
+  // A-NAS: the page is the host; its handler answers the action in place (see setActionHandler). No
+  // service behind ROUTE_PATH takes a POST (A-NAS serves only the animations there), so an action sent
+  // while no page answers, such as a receipt that arrives after the card has gone, is not delivered.
   if (actionHandler !== null) return actionHandler(baseUrl, body);
-  try {
-    const res = await fetch(baseUrl, {
-      method: 'POST',
-      ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-    });
-    if (!res.ok) return false;
-    const data = (await res.json().catch(() => null)) as { ok?: unknown } | null;
-    return data?.ok === true;
-  } catch {
-    return false;
-  }
+  return false;
 }

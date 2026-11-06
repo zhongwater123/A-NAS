@@ -49,8 +49,8 @@ export interface CardViewProps {
   tipOn: boolean;
   /** 宠物名：悬浮提示内容，同时作为命中区的无障碍名称。 */
   name: string;
-  /** 点击命中区。 */
-  onClick(e: ReactNS.MouseEvent<HTMLDivElement>): void;
+  /** 点击命中区。A-NAS: or Enter or Space on it, so the card reads no event. */
+  onClick(): void;
   /** 按下：开启指针捕获与拖拽。 */
   onPointerDown(e: ReactNS.PointerEvent<HTMLDivElement>): void;
   /** 指针移动：拖拽跟随。 */
@@ -77,6 +77,8 @@ const VIDEO_PROPS = { muted: true, playsInline: true, autoPlay: true };
 export function makeCardView(rt: { h: typeof jsx }) {
   const { h } = rt;
 
+  // A-NAS: every child of a list carries a key (jsx's third argument), or React warns about each render
+  // in development; the bubble's is the same for every slot (bubble-slots.ts), as its position was.
   return function CardView(props: CardViewProps) {
     return h('div', {
       ref: props.rootRef,
@@ -102,8 +104,8 @@ export function makeCardView(rt: { h: typeof jsx }) {
           className: 'dsh-pet-stage',
           style: props.stageStyle,
           children: [
-            h('video', Object.assign({}, VIDEO_PROPS, { ref: props.videoARef, className: 'dsh-pet-video is-front' })),
-            h('video', Object.assign({}, VIDEO_PROPS, { ref: props.videoBRef, className: 'dsh-pet-video' })),
+            h('video', Object.assign({}, VIDEO_PROPS, { ref: props.videoARef, className: 'dsh-pet-video is-front' }), 'a'),
+            h('video', Object.assign({}, VIDEO_PROPS, { ref: props.videoBRef, className: 'dsh-pet-video' }), 'b'),
             h('div', {
               className: 'dsh-pet-hit',
               style: PET_HIT_STYLE,
@@ -115,11 +117,20 @@ export function makeCardView(rt: { h: typeof jsx }) {
               onPointerEnter: props.onPointerEnter,
               onPointerLeave: props.onPointerLeave,
               onContextMenu: props.onContextMenu,
+              // A-NAS: a button the keyboard reaches and presses as it would click it, as the companion
+              // A-NAS drew before this card was; dsh-pet's hit area takes only the pointer.
+              role: 'button',
+              tabIndex: 0,
+              onKeyDown: (e: ReactNS.KeyboardEvent<HTMLDivElement>) => {
+                if ((e.key !== 'Enter' && e.key !== ' ') || e.repeat) return;
+                e.preventDefault();
+                props.onClick();
+              },
               // 原生 title 换成自绘浮层后，无障碍名称仍要保留。
               'aria-label': props.name,
-            }),
+            }, 'hit'),
           ],
-        }),
+        }, 'stage'),
         // 悬浮提示常驻只切 class，挂卸节点吃不到淡入过渡；坐标由 placeTip 直接写 style。
         // pointer-events:none 见 TOOLTIP_CSS，否则会挡住命中区导致 enter/leave 闪烁。
         h('div', {
@@ -127,7 +138,7 @@ export function makeCardView(rt: { h: typeof jsx }) {
           className: TOOLTIP_CLASS + (props.tipOn ? ' is-on' : ''),
           'aria-hidden': 'true',
           children: props.name,
-        }),
+        }, 'tip'),
       ],
     });
   };

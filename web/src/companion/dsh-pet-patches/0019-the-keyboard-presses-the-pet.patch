@@ -1,0 +1,36 @@
+dsh-pet's hit area takes only the pointer: it has an accessible name, but no button role, no
+tab stop and no keyboard handling. The companion A-NAS drew before this card had all three,
+and the desktop is used with a keyboard too. The hit area is now a button in the tab order,
+and Enter or Space on it does what a click does (a reaction, or waking the pet when it
+sleeps); the card's click handler reads no event, so its prop no longer takes one.
+
+diff --git a/client/pet/card/view.ts b/client/pet/card/view.ts
+--- a/client/pet/card/view.ts
++++ b/client/pet/card/view.ts
+@@ -49,8 +49,8 @@ export interface CardViewProps {
+   tipOn: boolean;
+   /** 宠物名：悬浮提示内容，同时作为命中区的无障碍名称。 */
+   name: string;
+-  /** 点击命中区。 */
+-  onClick(e: ReactNS.MouseEvent<HTMLDivElement>): void;
++  /** 点击命中区。A-NAS: or Enter or Space on it, so the card reads no event. */
++  onClick(): void;
+   /** 按下：开启指针捕获与拖拽。 */
+   onPointerDown(e: ReactNS.PointerEvent<HTMLDivElement>): void;
+   /** 指针移动：拖拽跟随。 */
+@@ -115,6 +115,15 @@ export function makeCardView(rt: { h: typeof jsx }) {
+               onPointerEnter: props.onPointerEnter,
+               onPointerLeave: props.onPointerLeave,
+               onContextMenu: props.onContextMenu,
++              // A-NAS: a button the keyboard reaches and presses as it would click it, as the companion
++              // A-NAS drew before this card was; dsh-pet's hit area takes only the pointer.
++              role: 'button',
++              tabIndex: 0,
++              onKeyDown: (e: ReactNS.KeyboardEvent<HTMLDivElement>) => {
++                if ((e.key !== 'Enter' && e.key !== ' ') || e.repeat) return;
++                e.preventDefault();
++                props.onClick();
++              },
+               // 原生 title 换成自绘浮层后，无障碍名称仍要保留。
+               'aria-label': props.name,
+             }),

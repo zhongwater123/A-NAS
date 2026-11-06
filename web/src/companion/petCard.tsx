@@ -21,7 +21,7 @@
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { jsx } from "react/jsx-runtime";
 
-import { useTaskNotices } from "../assistant/taskNotices";
+import { taskNoticesLoaded, useTaskNotices } from "../assistant/taskNotices";
 import { companionPhysics, companionWeights, installedAnimations, workStatusTexts } from "./animations";
 import type { InstalledAnimations } from "./Companion";
 import { prefersMov } from "./dsh-pet/client/pet/animation/media";
@@ -128,16 +128,20 @@ function withLeaf(leaves: Leaves, name: LeafName, leaf: StateLeaf): Leaves {
       return workStatus ? { ...leaves, workStatus, workStatusTick: leaves.workStatusTick + 1 } : leaves;
     }
     case "say": {
-      const say = readSay(leaf);
-      if (!say) return leaves;
+      const read = readSay(leaf);
+      if (!read) return leaves;
+      // The bubble's picture goes: A-NAS serves none of dsh-pet's meme pictures, and a picture from
+      // elsewhere is not the companion's to show.
+      const say = read.kind === "say" ? { ...read, image: undefined, url: undefined } : read;
       return { ...leaves, say: { ...say, seq: (leaves.say?.seq ?? 0) + 1 }, sayTick: leaves.sayTick + 1 };
     }
     case "anim": {
       const anim = readAnim(leaf);
-      if (!anim) return leaves;
+      // Only an animation of this NAS's pool, by its name: an address would play whatever it points at.
+      if (!anim?.name) return leaves;
       return {
         ...leaves,
-        animCue: { ...anim, seq: (leaves.animCue?.seq ?? 0) + 1 },
+        animCue: { ...anim, url: undefined, seq: (leaves.animCue?.seq ?? 0) + 1 },
         animCueTick: leaves.animCueTick + 1,
       };
     }
@@ -246,14 +250,16 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   const [leaves, setLeaves] = useState(first.leaves);
   const [paused, setPaused] = useState(() => document.hidden);
   const pausedRef = useRef(paused);
-  /** A sleep written during a pause: it starts when the pause ends, its animations being videos too. */
+  /** A sleep written while the page is hidden: it starts when the page is shown, its animations being videos too. */
   const heldSleep = useRef<StateLeaf | null>(null);
+  /** Ends a pause the member's absence started (the page is not hidden), as their next input would. */
+  const resume = useRef(() => {});
 
   // The companion stops while the member is away: after IDLE_MS without input, which is always
   // before the local console's screen saver (180 s without input) covers the page, or while the
   // page is hidden. It freezes on its frame (the card's paused prop) rather than going to sleep,
-  // whose loop is a video too, and takes no commands; the next input, or the page shown again,
-  // brings it back.
+  // whose loop is a video too. The next input, the page shown again, or a command VNAS sends
+  // while the page is shown brings it back.
   useEffect(() => {
     let timer: number | undefined;
     const rest = () => {
@@ -275,10 +281,12 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
       if (sleep) setLeaves((current) => withLeaf(current, "sleep", sleep));
       setPaused(false);
     };
+    resume.current = wake;
     if (!document.hidden) timer = window.setTimeout(rest, IDLE_MS);
     for (const type of ACTIVITY) window.addEventListener(type, wake, { passive: true });
     document.addEventListener("visibilitychange", wake);
     return () => {
+      resume.current = () => {};
       window.clearTimeout(timer);
       for (const type of ACTIVITY) window.removeEventListener(type, wake);
       document.removeEventListener("visibilitychange", wake);
@@ -288,7 +296,7 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   useEffect(() => {
     const baseline = { ...first.baseline };
     const report = makePlaybackReporter({ petId: COMPANION_PET });
-    const stop = subscribeCompanionState(() => {
+    const take = () => {
       const taken: [LeafName, StateLeaf][] = [];
       for (const { path, leaf } of takeChanged(companionState.read(), baseline)) {
         if (leaf.data === null) continue;
@@ -300,18 +308,27 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
               ? target.name
               : null;
         if (name === null) continue;
-        if (!pausedRef.current || name === "workStatus" || name === "lock") taken.push([name, leaf]);
-        else if (name === "sleep") heldSleep.current = leaf;
+        // States go to the card paused or not: it shows them when it goes on.
+        if (name === "workStatus" || name === "lock") taken.push([name, leaf]);
+        else if (!document.hidden) {
+          // A command is VNAS speaking to the member in a turn of this page, who may well be reading
+          // its reply without touching anything: it ends a pause their absence started.
+          if (pausedRef.current) resume.current();
+          taken.push([name, leaf]);
+        } else if (name === "sleep") heldSleep.current = leaf;
         else {
-          // A command the member was away for is dropped, not kept for later; a caller waiting on an
-          // animation hears that a freeze cut it short, as the card itself reports one.
+          // Nobody sees a hidden page: a command sent to it is dropped, not kept for later, and a
+          // caller waiting on an animation hears that a freeze cut it short, as the card reports one.
           const playbackId = name === "anim" ? readAnim(leaf)?.playbackId : undefined;
           if (playbackId) report(playbackId, "cancelled", "frozen");
         }
       }
       if (taken.length > 0)
         setLeaves((current) => taken.reduce((next, [name, leaf]) => withLeaf(next, name, leaf), current));
-    });
+    };
+    const stop = subscribeCompanionState(take);
+    // What was written between the first read (during the render) and now.
+    take();
     // Where the member left it on this device goes back as an instant position command, once the
     // card's own mount has put it in its corner (twice in development, under StrictMode).
     let placing = true;
@@ -336,6 +353,9 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   const notices = useTaskNotices();
   const seen = useRef<ReadonlySet<string> | null>(null);
   useEffect(() => {
+    // Until the notices are first listed, none means nothing: that first list, whether it came before
+    // or after the card, is what the member already had.
+    if (!taskNoticesLoaded()) return;
     const before = seen.current;
     seen.current = new Set(notices.map((notice) => notice.id));
     if (!before || notices.every((notice) => before.has(notice.id)) || pausedRef.current) return;

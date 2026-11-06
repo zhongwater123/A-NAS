@@ -228,17 +228,21 @@ export function createBubbleSlots(rt: BubbleSlotsRuntime, components: BubbleComp
         whisperOn,
         whisperText,
       });
-      if (slot === 'todo') return h(TodoBubble, { on: todoOn, onClose: hideTodo });
+      if (slot === 'todo') return h(TodoBubble, { on: todoOn, onClose: hideTodo }, 'bubble');
       if (slot === 'whisper') {
         return whisperText === null
           ? null
-          : h(WhisperBubble, {
-              text: whisperText,
-              image: whisperImage,
-              url: whisperUrl,
-              assetRoot: input.assetRoot,
-              on: whisperOn,
-            });
+          : h(
+              WhisperBubble,
+              {
+                text: whisperText,
+                image: whisperImage,
+                url: whisperUrl,
+                assetRoot: input.assetRoot,
+                on: whisperOn,
+              },
+              'bubble',
+            );
       }
       // 终态与非终态共用同一个组件，差别只在停留时长与优先级。
       if (slot === 'work' || slot === 'work-terminal') {
@@ -247,11 +251,15 @@ export function createBubbleSlots(rt: BubbleSlotsRuntime, components: BubbleComp
         const onFocus = input.onFocusSession;
         // 拿不到会话就别做成可点：点下去没有任何去处，比不可点更糟。
         const onClick = sessionId !== '' && onFocus !== undefined ? () => onFocus(sessionId) : undefined;
-        return h(WhisperBubble, {
-          text: workText,
-          on: workOn,
-          ...(onClick === undefined ? {} : { onClick }),
-        });
+        return h(
+          WhisperBubble,
+          {
+            text: workText,
+            on: workOn,
+            ...(onClick === undefined ? {} : { onClick }),
+          },
+          'bubble',
+        );
       }
       return null;
     };

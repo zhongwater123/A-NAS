@@ -1,0 +1,104 @@
+dsh-pet's card view passes its children to jsx as arrays without keys, so React warned in
+development on every render ('Each child in a list should have a unique "key" prop. Check the
+render method of `CardView`'). Each child now carries a key, jsx's third argument. The
+bubble is a child of the root that every slot fills with its own element, so they all take
+the same key: React reuses the bubble across slots as it did by position.
+
+diff --git a/client/pet/card/bubble-slots.ts b/client/pet/card/bubble-slots.ts
+--- a/client/pet/card/bubble-slots.ts
++++ b/client/pet/card/bubble-slots.ts
+@@ -228,17 +228,21 @@ export function createBubbleSlots(rt: BubbleSlotsRuntime, components: BubbleComp
+         whisperOn,
+         whisperText,
+       });
+-      if (slot === 'todo') return h(TodoBubble, { on: todoOn, onClose: hideTodo });
++      if (slot === 'todo') return h(TodoBubble, { on: todoOn, onClose: hideTodo }, 'bubble');
+       if (slot === 'whisper') {
+         return whisperText === null
+           ? null
+-          : h(WhisperBubble, {
+-              text: whisperText,
+-              image: whisperImage,
+-              url: whisperUrl,
+-              assetRoot: input.assetRoot,
+-              on: whisperOn,
+-            });
++          : h(
++              WhisperBubble,
++              {
++                text: whisperText,
++                image: whisperImage,
++                url: whisperUrl,
++                assetRoot: input.assetRoot,
++                on: whisperOn,
++              },
++              'bubble',
++            );
+       }
+       // 终态与非终态共用同一个组件，差别只在停留时长与优先级。
+       if (slot === 'work' || slot === 'work-terminal') {
+@@ -247,11 +251,15 @@ export function createBubbleSlots(rt: BubbleSlotsRuntime, components: BubbleComp
+         const onFocus = input.onFocusSession;
+         // 拿不到会话就别做成可点：点下去没有任何去处，比不可点更糟。
+         const onClick = sessionId !== '' && onFocus !== undefined ? () => onFocus(sessionId) : undefined;
+-        return h(WhisperBubble, {
+-          text: workText,
+-          on: workOn,
+-          ...(onClick === undefined ? {} : { onClick }),
+-        });
++        return h(
++          WhisperBubble,
++          {
++            text: workText,
++            on: workOn,
++            ...(onClick === undefined ? {} : { onClick }),
++          },
++          'bubble',
++        );
+       }
+       return null;
+     };
+diff --git a/client/pet/card/view.ts b/client/pet/card/view.ts
+--- a/client/pet/card/view.ts
++++ b/client/pet/card/view.ts
+@@ -77,6 +77,8 @@ const VIDEO_PROPS = { muted: true, playsInline: true, autoPlay: true };
+ export function makeCardView(rt: { h: typeof jsx }) {
+   const { h } = rt;
+ 
++  // A-NAS: every child of a list carries a key (jsx's third argument), or React warns about each render
++  // in development; the bubble's is the same for every slot (bubble-slots.ts), as its position was.
+   return function CardView(props: CardViewProps) {
+     return h('div', {
+       ref: props.rootRef,
+@@ -102,8 +104,8 @@ export function makeCardView(rt: { h: typeof jsx }) {
+           className: 'dsh-pet-stage',
+           style: props.stageStyle,
+           children: [
+-            h('video', Object.assign({}, VIDEO_PROPS, { ref: props.videoARef, className: 'dsh-pet-video is-front' })),
+-            h('video', Object.assign({}, VIDEO_PROPS, { ref: props.videoBRef, className: 'dsh-pet-video' })),
++            h('video', Object.assign({}, VIDEO_PROPS, { ref: props.videoARef, className: 'dsh-pet-video is-front' }), 'a'),
++            h('video', Object.assign({}, VIDEO_PROPS, { ref: props.videoBRef, className: 'dsh-pet-video' }), 'b'),
+             h('div', {
+               className: 'dsh-pet-hit',
+               style: PET_HIT_STYLE,
+@@ -126,9 +128,9 @@ export function makeCardView(rt: { h: typeof jsx }) {
+               },
+               // 原生 title 换成自绘浮层后，无障碍名称仍要保留。
+               'aria-label': props.name,
+-            }),
++            }, 'hit'),
+           ],
+-        }),
++        }, 'stage'),
+         // 悬浮提示常驻只切 class，挂卸节点吃不到淡入过渡；坐标由 placeTip 直接写 style。
+         // pointer-events:none 见 TOOLTIP_CSS，否则会挡住命中区导致 enter/leave 闪烁。
+         h('div', {
+@@ -136,7 +138,7 @@ export function makeCardView(rt: { h: typeof jsx }) {
+           className: TOOLTIP_CLASS + (props.tipOn ? ' is-on' : ''),
+           'aria-hidden': 'true',
+           children: props.name,
+-        }),
++        }, 'tip'),
+       ],
+     });
+   };

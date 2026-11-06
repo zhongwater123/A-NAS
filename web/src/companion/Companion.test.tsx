@@ -184,9 +184,10 @@ describe("the companion on the desktop", () => {
     });
     let items = [notice("n-1")];
     server.use(http.get("/api/v1/notifications", ({ response }) => response(200).json({ items })));
-    await act(() => loadTaskNotices());
     serve([IDLE, "点击回应-元气挥手"]);
     await mount();
+    // The notices are listed for the first time after the companion came: what it finds there is old.
+    await act(() => loadTaskNotices());
     await settle();
     expect(fetched).not.toContain("点击回应-元气挥手");
     // The task ran again: its notice is replaced by one with a new id, so there is still one.
@@ -207,11 +208,32 @@ describe("what VNAS asks of the companion", () => {
     await plays("碎碎念-发呆碎碎念");
   });
 
+  it("shows no picture and plays no address it is given", async () => {
+    serve([IDLE, "东张西望"]);
+    const { root } = await mount();
+    write("say", { text: "看这张", image: "doge", url: `${origin}/elsewhere.png` });
+    expect(await screen.findByText("看这张")).toBeInTheDocument();
+    expect(root.querySelector("img")).toBeNull();
+    fetched = [];
+    write("anim", { url: `${origin}/companion/thumb/main/${encodeURIComponent("东张西望")}.webm` });
+    await settle();
+    expect(fetched).toEqual([]);
+  });
+
   it("says it without an animation when none is installed to say it with", async () => {
     serve([IDLE]);
     await mount();
     write("say", { text: "照片整理好了" });
     expect(await screen.findByText("照片整理好了")).toBeInTheDocument();
+  });
+
+  it("is a button the keyboard presses", async () => {
+    serve([IDLE, "点击回应-挠痒咯咯笑"]);
+    await mount();
+    const pet = screen.getByRole("button", { name: "大肥鱼" });
+    expect(pet.tabIndex).toBe(0);
+    fireEvent.keyDown(pet, { key: "Enter" });
+    await plays("点击回应-挠痒咯咯笑");
   });
 
   it("sleeps, and wakes when it is clicked", async () => {
@@ -360,10 +382,11 @@ describe("walking, throwing and resting", () => {
     expect(fetched).not.toContain("东张西望");
   });
 
-  it("rests after a minute without input", async () => {
+  it("rests after a minute without input, and goes on when VNAS says something", async () => {
     serve([IDLE]);
     const { videos } = await mount();
     const pause = vi.mocked(HTMLMediaElement.prototype.pause);
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
     vi.useFakeTimers({ shouldClearNativeTimers: true });
     // Input starts the minute again, on the fake clock.
     fireEvent.keyDown(window, { key: "a" });
@@ -373,5 +396,28 @@ describe("walking, throwing and resting", () => {
     act(() => vi.advanceTimersByTime(1_000));
     expect(pause.mock.contexts).toContain(front(videos));
     vi.useRealTimers();
+    // The member reads VNAS's reply without touching anything: what VNAS has the companion say shows.
+    play.mockClear();
+    write("say", { text: "照片整理好了" });
+    expect(play.mock.contexts).toContain(front(videos));
+    expect(await screen.findByText("照片整理好了")).toBeInTheDocument();
+  });
+
+  it("keeps a clip that finishes loading while the page is hidden still until the page is back", async () => {
+    serve([IDLE, "东张西望"]);
+    const { videos } = await mount();
+    const pause = vi.mocked(HTMLMediaElement.prototype.pause);
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    write("anim", { name: "东张西望" });
+    await plays("东张西望");
+    hide(true);
+    play.mockClear();
+    pause.mockClear();
+    await ready(videos);
+    const loaded = front(videos);
+    expect(play.mock.contexts).not.toContain(loaded);
+    expect(pause.mock.contexts).toContain(loaded);
+    hide(false);
+    expect(play.mock.contexts).toContain(loaded);
   });
 });
