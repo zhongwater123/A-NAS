@@ -1,0 +1,324 @@
+.workspace {
+  max-width: 860px;
+  margin: 0 auto;
+}
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.heading h1 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.5px;
+}
+.heading small {
+  color: var(--color-muted);
+  font-size: 11px;
+}
+.workspace button,
+.workspace input {
+  font: inherit;
+}
+.workspace button {
+  cursor: pointer;
+}
+.workspace button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.workspace button:focus-visible,
+.workspace input:focus-visible {
+  outline: 2px solid #437c78;
+  outline-offset: 3px;
+}
+.companion {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  border-bottom: 1px solid var(--color-line-strong);
+  padding-bottom: 8px;
+}
+.portrait {
+  width: 230px;
+  flex-shrink: 0;
+}
+.portrait > div {
+  height: 175px;
+}
+.petInfo {
+  flex: 1;
+  min-width: 0;
+}
+.petInfo p {
+  font-size: 13px;
+  color: var(--color-muted);
+  line-height: 1.7;
+  margin: 0 0 12px;
+}
+.petControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.petControls button {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  padding: 7px 10px;
+  font-size: 11px;
+}
+.tabs {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid var(--color-line-strong);
+  margin-top: 12px;
+}
+.tabs button {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 13px 2px;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+.tabs button[data-state="active"] {
+  color: #294c45;
+  border-bottom-color: #294c45;
+  font-weight: 600;
+}
+.content {
+  padding-top: 16px;
+  outline: none;
+}
+.content[data-state="inactive"] {
+  display: none;
+}
+.content section[aria-label="奶蛙的任务"] {
+  margin: 0;
+  padding: 0;
+  background: none;
+}
+.content section[aria-label="奶蛙的任务"] h2 {
+  display: none;
+}
+.content section[aria-label="奶蛙的任务"] p {
+  margin: 8px 0;
+  font-size: 11px;
+}
+.focus {
+  max-width: 490px;
+  margin: 0 auto;
+  text-align: center;
+}
+.focusMeta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+.focusMeta small {
+  font-size: 11px;
+}
+.clock {
+  font-size: clamp(48px, 8vw, 64px);
+  font-weight: 500;
+  letter-spacing: -3px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  color: #294c45;
+  margin: 12px 0 4px;
+}
+.focusTitle {
+  margin: 0 auto 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.progress {
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: #e8eee9;
+  margin-bottom: 12px;
+}
+.progress span {
+  display: block;
+  height: 100%;
+  background: #639b80;
+  transition: width 1s linear;
+}
+.durations {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.durations button {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-muted);
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.durations button[aria-pressed="true"] {
+  border-color: #608b79;
+  color: #294c45;
+  background: #edf4ef;
+}
+.durations label {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+.durations input {
+  width: 46px;
+  padding: 6px 2px 6px 7px;
+  margin-right: 4px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 7px;
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.controls button,
+.todos button {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 9px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  padding: 9px 16px;
+  font-size: 12px;
+}
+.controls .primary {
+  color: white;
+  background: #294c45;
+  border-color: #294c45;
+  min-width: 120px;
+}
+.hint {
+  color: var(--color-muted);
+  font-size: 10px;
+  line-height: 1.6;
+  margin: 12px 0 0;
+}
+.todos h2 {
+  font-size: 14px;
+  margin: 0 0 16px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.todos h2 span {
+  font-weight: 400;
+  color: var(--color-muted);
+  font-size: 11px;
+}
+.todos form {
+  display: flex;
+  gap: 8px;
+}
+.todos form > input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 9px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 13px;
+}
+.todos ul {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0;
+  max-height: 280px;
+  overflow: auto;
+}
+.todos li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-line-strong);
+}
+.todos li label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.todos input[type="checkbox"] {
+  accent-color: #437c65;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.todos li button {
+  padding: 5px 8px;
+  font-size: 11px;
+}
+.todos .remove {
+  border: 0;
+  font-size: 20px;
+  color: var(--color-muted);
+  padding: 0 6px;
+}
+.done {
+  text-decoration: line-through;
+  color: var(--color-muted);
+}
+.empty {
+  color: var(--color-muted);
+  font-size: 12px;
+  padding: 20px 0;
+  line-height: 1.7;
+}
+.focusBadge {
+  pointer-events: auto;
+  align-self: center;
+  display: block;
+  margin: 4px auto;
+  border: 1px solid #cbd9cd;
+  border-radius: 12px;
+  background: #fffffff2;
+  color: #294c45;
+  font: 12px system-ui;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 520px) {
+  .portrait {
+    width: 160px;
+  }
+  .petControls {
+    gap: 5px;
+  }
+  .petControls button {
+    padding: 6px 7px;
+  }
+  .companion {
+    gap: 4px;
+  }
+  .tabs {
+    gap: 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress span {
+    transition: none;
+  }
+}

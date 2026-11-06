@@ -1,15 +1,14 @@
-import { Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
-import { lazyCode } from "../ui/lazyCode";
-import { ConnectionStatus } from "./ConnectionStatus";
 import styles from "./companion.module.css";
+import { useConversation } from "./conversation";
+import { usePersonalDesk } from "./deskStore";
+import { companionWords, PetDock } from "./PetDock";
 import { Stage } from "./Stage";
 import { useCompanion } from "./store";
 import type { TaskSignal } from "./TaskInbox";
 import type { TaskPhase } from "./taskState";
 import { useCompanionView } from "./useCompanionView";
-
-const TaskExperience = lazyCode(() => import("./TaskExperience").then((m) => m.TaskExperience));
 
 export function CompanionFloating({
   userId,
@@ -25,6 +24,9 @@ export function CompanionFloating({
   previewPhase?: TaskPhase;
 }) {
   const [phase, setPhase] = useState<TaskPhase>("idle");
+  const desk = usePersonalDesk(userId);
+  const conversation = useConversation(userId, desk);
+  const [chatOpen, setChatOpen] = useState(false);
   const [speech, setSpeech] = useState<TaskSignal>();
   const [local] = useCompanion(userId);
   const view = useCompanionView(userId, connected && local.place === "desk");
@@ -42,53 +44,45 @@ export function CompanionFloating({
   if (value.place !== "desk") return null;
   return (
     <aside className={styles.floating} aria-label="网页桌宠">
-      <ConnectionStatus view={view} />
-      {connected && (
-        <Suspense fallback={null}>
-          <TaskExperience
-            userId={userId}
-            view={view}
-            compact
-            onOpenHome={onOpen}
-            onPhase={setPhase}
-            onSpeech={setSpeech}
-            onOpenConversation={onOpenConversation}
-          />
-        </Suspense>
-      )}
       <Stage
         taskPhase={connected ? phase : previewPhase}
         taskMessage={speech?.message}
         taskEvent={speech?.id}
+        companionMessage={companionWords(desk, conversation)}
+        onInteract={() => setChatOpen(true)}
+        hideSpeech={chatOpen}
+        companionAction={
+          desk.value.focus.status === "done"
+            ? "happy"
+            : desk.value.focus.status === "running" && desk.value.focus.mode === "focus"
+              ? "thinking"
+              : undefined
+        }
         key={view.stageKey}
         character={view.character}
         quiet={quiet || !view.canPlay}
         interactive={view.canPlay}
         floating
       />
-      <div className={styles.miniActions}>
-        <button
-          type="button"
-          onClick={() => {
-            update({ place: "home" });
-            onOpen();
-          }}
-        >
-          回小窝
-        </button>
-        <button type="button" aria-pressed={quiet} disabled={!view.canPlay} onClick={view.toggleQuiet}>
-          {quiet ? "醒来" : "安静"}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            view.rest();
-            update({ place: "hidden" });
-          }}
-        >
-          休息
-        </button>
-      </div>
+      <PetDock
+        owner={userId}
+        view={view}
+        desk={desk}
+        conversation={conversation}
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+        onHome={() => {
+          update({ place: "home" });
+          onOpen();
+        }}
+        onHide={() => {
+          view.rest();
+          update({ place: "hidden" });
+        }}
+        onPhase={setPhase}
+        onSpeech={setSpeech}
+        onOpenConversation={onOpenConversation}
+      />
     </aside>
   );
 }

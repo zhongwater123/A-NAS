@@ -1,8 +1,10 @@
+import type { MutableRefObject } from "react";
 import { useEffect, useState } from "react";
 
 import { assistantStatus, failureText } from "../assistant/api";
 import { TasksView } from "../assistant/TasksView";
 import styles from "./companion.module.css";
+import type { AgentBridge, AgentSnapshot } from "./conversation";
 import { MinutesPicker, type MinutesSource } from "./MinutesPicker";
 import { SavedFile } from "./SavedFile";
 import { TaskInbox, type TaskSignal } from "./TaskInbox";
@@ -14,6 +16,9 @@ type Props = {
   view: CompanionView;
   userId: string;
   compact?: boolean;
+  bridge?: MutableRefObject<AgentBridge | undefined>;
+  onChatState?(state: AgentSnapshot): void;
+  chatActive?: boolean;
   onOpenHome?(): void;
   onPhase(phase: TaskPhase): void;
   onSpeech?(signal: TaskSignal | undefined): void;
@@ -51,7 +56,18 @@ export function TaskExperience(props: Props) {
     );
   return <ConnectedTask key={props.userId} {...props} />;
 }
-export function ConnectedTask({ view, userId, compact, onPhase, onSpeech, onOpenConversation, onOpenHome }: Props) {
+export function ConnectedTask({
+  view,
+  userId,
+  compact,
+  onPhase,
+  onSpeech,
+  onOpenConversation,
+  onOpenHome,
+  bridge: bridgeRef,
+  onChatState,
+  chatActive = true,
+}: Props) {
   const task = useCompanionTask(view);
   const [source, setSource] = useState<MinutesSource>();
   const [request, setRequest] = useState("");
@@ -76,6 +92,42 @@ export function ConnectedTask({ view, userId, compact, onPhase, onSpeech, onOpen
   const open = () => {
     if (task.storedId) onOpenConversation?.(task.storedId);
   };
+  useEffect(() => {
+    if (!bridgeRef) return;
+    const handler: AgentBridge = {
+      send: (text) => {
+        if (!task.canSend)
+          return {
+            accepted: false,
+            message: !view.remote.here
+              ? "奶蛙现在不在这一端。先点“叫到这里”，再交代 NAS 工作；本机计时和待办不受影响。"
+              : task.waiting
+                ? "先处理 NAS 中的确认卡，再交代下一件事。"
+                : "NAS 正在连接或处理上一件事，稍后再试。",
+          };
+        setMinutesResult(false);
+        void task.thread.send(personalTaskPrompt(text));
+        return { accepted: true };
+      },
+      open,
+    };
+    bridgeRef.current = handler;
+    return () => {
+      if (bridgeRef.current === handler) bridgeRef.current = undefined;
+    };
+  });
+  const latestReply = task.thread.messages.at(-1);
+  const chatAnswer =
+    latestReply?.role === "assistant" && !latestReply.interim
+      ? latestReply.parts
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("\n")
+      : "";
+  useEffect(() => {
+    if (chatActive)
+      onChatState?.({ phase: task.phase, answer: chatAnswer, running: task.thread.running, message: task.message });
+  }, [chatActive, onChatState, task.phase, task.thread.running, task.message, chatAnswer]);
   return (
     <section className={compact ? styles.taskCompact : styles.task} aria-label="奶蛙的任务" data-pet-interactive="true">
       <p role="status" data-task-phase={task.phase}>
@@ -192,10 +244,10 @@ export function ConnectedTask({ view, userId, compact, onPhase, onSpeech, onOpen
           </details>
           {!view.remote.here && <p className={styles.note}>先把伙伴叫到这里，再交代新事情。已有任务仍由 VNAS 处理。</p>}
           {task.answer && (
-            <div className={styles.result}>
-              <h3>这次的回答</h3>
+            <details className={styles.result}>
+              <summary>查看这次回答</summary>
               <pre>{task.answer}</pre>
-            </div>
+            </details>
           )}
           {minutesResult && task.phase === "success" && (
             <button type="button" disabled={!task.canSend} onClick={() => void task.thread.send(saveMinutesPrompt)}>

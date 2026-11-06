@@ -1,19 +1,22 @@
-import { Suspense, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { lazyCode } from "../ui/lazyCode";
-import { ConnectionStatus } from "./ConnectionStatus";
 import styles from "./companion.module.css";
+import { useConversation } from "./conversation";
+import { usePersonalDesk } from "./deskStore";
+import { companionWords, PetDock } from "./PetDock";
 import { Stage } from "./Stage";
 import type { TaskSignal } from "./TaskInbox";
 import type { TaskPhase } from "./taskState";
 import { useCompanionView } from "./useCompanionView";
 
 // Authenticated NAS mode and offline playground share the renderer.
-const TaskExperience = lazyCode(() => import("./TaskExperience").then((m) => m.TaskExperience));
 
 export function CompanionDesktop({ userId, connected = false }: { userId: string; connected?: boolean }) {
   const view = useCompanionView(userId, connected, "desktop");
   const [phase, setPhase] = useState<TaskPhase>("idle");
+  const desk = usePersonalDesk(userId);
+  const conversation = useConversation(userId, desk);
+  const [chatOpen, setChatOpen] = useState(false);
   const [speech, setSpeech] = useState<TaskSignal>();
   const requested = useRef(false);
   useEffect(() => {
@@ -40,23 +43,20 @@ export function CompanionDesktop({ userId, connected = false }: { userId: string
   }, []);
   return (
     <main className={styles.native}>
-      <ConnectionStatus view={view} />
-      {connected && (
-        <Suspense fallback={null}>
-          <TaskExperience
-            userId={userId}
-            view={view}
-            compact
-            onPhase={setPhase}
-            onSpeech={setSpeech}
-            onOpenConversation={(id) => window.companionDesktop?.conversation(id)}
-          />
-        </Suspense>
-      )}
       <Stage
         taskPhase={phase}
         taskMessage={speech?.message}
         taskEvent={speech?.id}
+        companionMessage={companionWords(desk, conversation)}
+        onInteract={() => setChatOpen(true)}
+        hideSpeech={chatOpen}
+        companionAction={
+          desk.value.focus.status === "done"
+            ? "happy"
+            : desk.value.focus.status === "running" && desk.value.focus.mode === "focus"
+              ? "thinking"
+              : undefined
+        }
         key={view.stageKey}
         character={view.character}
         quiet={view.quiet || !view.canPlay}
@@ -64,23 +64,22 @@ export function CompanionDesktop({ userId, connected = false }: { userId: string
         native
         floating
       />
-      <div className={styles.miniActions} data-pet-interactive="true">
-        <button type="button" onClick={() => window.companionDesktop?.home()}>
-          {connected ? "回小窝" : "小窝"}
-        </button>
-        <button type="button" aria-pressed={view.quiet} disabled={!view.canPlay} onClick={view.toggleQuiet}>
-          {view.quiet ? "醒来" : "安静"}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            view.rest();
-            window.companionDesktop?.hide();
-          }}
-        >
-          隐藏
-        </button>
-      </div>
+      <PetDock
+        owner={userId}
+        view={view}
+        desk={desk}
+        conversation={conversation}
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+        onHome={() => window.companionDesktop?.home()}
+        onHide={() => {
+          view.rest();
+          window.companionDesktop?.hide();
+        }}
+        onPhase={setPhase}
+        onSpeech={setSpeech}
+        onOpenConversation={(id) => window.companionDesktop?.conversation(id)}
+      />
     </main>
   );
 }

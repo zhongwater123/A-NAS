@@ -44,7 +44,7 @@ async function run() {
     browser = await chromium.launch({ headless: true, channel: process.env.ANAS_TEST_BROWSER || "chrome" });
     const errors = [];
     const mount = async (component) => {
-      const context = await browser.newContext({ viewport: component === "CompanionDesktop" ? { width:350, height:280 } : { width: 800, height: 900 } });
+      const context = await browser.newContext({ viewport: component === "CompanionDesktop" ? { width:350, height:400 } : { width: 800, height: 900 } });
       const page = await context.newPage();
       await page.route("**/api/v1/assistant/status", (route) => route.fulfill({ json: { available: false } }));
       page.on("pageerror", (e) => errors.push(String(e)));
@@ -57,28 +57,30 @@ async function run() {
     await summon.waitFor();
     await assertEventually(async () => assert.equal(await summon.isEnabled(), true));
     await summon.click();
-    const homeInvite = section.getByRole("button", { name: "陪我一下" });
+    const homeInvite = section.getByRole("button", { name: /^(安静陪我|醒来)$/ });
     await assertEventually(async () => assert.equal(await homeInvite.isEnabled(), true));
-    const surprise = async (scope) => {
-      await scope.getByRole("button", { name: "陪我一下" }).click();
-      await scope.getByRole("button", { name: "找到躲起来的奶蛙" }).click();
-      await scope.getByRole("button", { name: "收下奶蛙送的小花" }).click();
-      await scope.getByText("开心 · 你收下了！好啦，我在旁边陪你。").waitFor();
+    const greet = async (page, isDesktop = false) => {
+      await page.getByRole("button", { name: isDesktop ? "和奶蛙聊聊，按住可拖动" : "和奶蛙聊聊", exact:true }).click();
+      await page.getByRole("textbox", { name: "跟奶蛙说句话" }).waitFor();
+      assert.equal(await page.getByRole("button", { name: "找到躲起来的奶蛙" }).count(), 0);
+      if (isDesktop) await page.getByRole("button", { name: "收起聊天" }).click();
     };
-    await surprise(section);
+    await greet(home);
     await section.getByRole("button", { name: "安静陪我", exact: true }).click();
     await assertEventually(async () => assert.equal((await (await fetch(`${api}/api/v1/companion`)).json()).quiet, true));
     assert.match(await section.locator("[class*=naiwaSprite]").first().getAttribute("style"), /naiwa\.webp/);
     const desktop = await mount("CompanionDesktop");
     const native = desktop.locator("main");
-    const desktopInvite = native.getByRole("button", { name: "陪我一下" });
-    const wake = native.getByRole("button", { name: "醒来", exact: true });
+    const desktopInvite = native.getByRole("button", { name: "和奶蛙聊聊，按住可拖动" });
+    await assertEventually(async () => assert.equal(await desktopInvite.isEnabled(), true));
+    await native.getByRole("button", { name: "奶蛙更多操作" }).click();
+    const wake = desktop.getByRole("menuitem", { name: "醒来", exact: true });
     await assertEventually(async () => assert.equal(await wake.isEnabled(), true));
     await wake.click();
     await assertEventually(async () => assert.equal(await desktopInvite.isEnabled(), true));
     assert.equal(await homeInvite.isEnabled(), false);
     assert.equal((await (await fetch(`${api}/api/v1/companion`)).json()).character, "naiwa");
-    await surprise(native);
+    await greet(desktop, true);
     await assertEventually(async () => assert.equal((await (await fetch(`${api}/api/v1/companion`)).json()).quiet, false));
     await home.screenshot({ path: path.join(output,"home-waiting.png") });
     await desktop.screenshot({ path: path.join(output,"desktop-active.png") });
@@ -87,13 +89,13 @@ async function run() {
     assert.equal(await desktopInvite.isEnabled(), false);
     // A genuine network interruption, followed by explicit isolated local play.
     await home.context().setOffline(true);
-    await section.getByRole("button", { name: "先在本地玩" }).waitFor();
-    await section.getByRole("button", { name: "先在本地玩" }).click();
-    await surprise(section);
+    await section.getByRole("button", { name: "先在本机陪伴" }).waitFor();
+    await section.getByRole("button", { name: "先在本机陪伴" }).click();
+    await greet(home);
     const state = await (await fetch(`${api}/api/v1/companion`)).json();
     assert.equal(state.playCount, 0);
     await home.context().setOffline(false);
-    await assertEventually(async () => assert.equal(await summon.isEnabled(), true));
+    await assertEventually(async () => assert.equal(await section.getByRole("button", { name: "连接 NAS" }).isEnabled(), true));
     assert.equal((await (await fetch(`${api}/api/v1/companion`)).json()).playCount, 0);
     assert.deepEqual(errors, []);
     await fs.writeFile(path.join(output,"result.json"), JSON.stringify({ result:"passed", scope:"loopback test fixture; real SQLite and domain API; two browser components; synthetic member; no product auth or NAS", scenarios:["home summon", "persisted quiet/character", "web to desktop", "desktop to web", "disconnect pauses", "explicit local play never syncs/replays"], state, errors }, null, 2));

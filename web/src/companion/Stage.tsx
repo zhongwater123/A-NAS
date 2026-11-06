@@ -11,7 +11,6 @@ import { type PetAction, taskPose } from "./behaviour";
 import { Character } from "./Character";
 import styles from "./companion.module.css";
 import { advanceFlight, type Flight, inside, type Point, speechOffset } from "./motion";
-import { playWords, usePlaySession } from "./playSession";
 import type { Character as CharacterKind } from "./preferences";
 import "./native";
 
@@ -34,6 +33,10 @@ export function Stage({
   taskPhase = "idle",
   taskMessage,
   taskEvent,
+  companionMessage,
+  companionAction,
+  onInteract,
+  hideSpeech = false,
 }: {
   character: CharacterKind;
   quiet: boolean;
@@ -43,6 +46,10 @@ export function Stage({
   taskPhase?: import("./taskState").TaskPhase;
   taskMessage?: string;
   taskEvent?: string;
+  companionMessage?: string;
+  companionAction?: PetAction;
+  onInteract?(): void;
+  hideSpeech?: boolean;
 }) {
   const stage = useRef<HTMLDivElement>(null);
   const actor = useRef<HTMLDivElement>(null);
@@ -61,13 +68,7 @@ export function Stage({
   const greeting = useRef({ at: 0, count: 0 });
   const quietNow = quiet || !active;
   const taskBusy = ["connecting", "thinking", "working", "waiting"].includes(taskPhase);
-  const { session, dispatch } = usePlaySession(
-    quietNow || !interactive || taskBusy || dragging,
-    taskPhase === "idle" || (taskPhase === "success" && settled),
-  );
   const feeling = taskPose(taskPhase, settled);
-  const playing = session.phase !== "idle";
-  const beforePeek = useRef<Point | undefined>(undefined);
 
   useEffect(() => {
     if (previousTask.current.phase === taskPhase && previousTask.current.event === taskEvent) return;
@@ -85,11 +86,10 @@ export function Stage({
       return;
     }
     setSettled(false);
-    if (["success", "error", "waiting", "connecting", "stopped"].includes(taskPhase)) dispatch({ type: "stop" });
     if (taskPhase !== "success" && taskPhase !== "error") return;
     const timer = window.setTimeout(() => setSettled(true), 6500);
     return () => window.clearTimeout(timer);
-  }, [taskPhase, taskEvent, dispatch]);
+  }, [taskPhase, taskEvent]);
 
   const stop = useCallback(() => {
     cancelAnimationFrame(frame.current);
@@ -168,24 +168,8 @@ export function Stage({
     return () => observer?.disconnect();
   }, [bounds, place, stop, floating]);
 
-  useEffect(() => {
-    if (session.phase === "hiding") {
-      stop();
-      ignoreClick.current = false;
-      beforePeek.current ??= position.current;
-      const space = bounds();
-      place({
-        x: session.side === "left" ? Math.min(16, space.width) : Math.max(0, space.width - 16),
-        y: floating ? space.height : space.height - 15,
-      });
-    } else if (session.phase === "idle" && beforePeek.current) {
-      place(beforePeek.current);
-      beforePeek.current = undefined;
-    }
-  }, [session.phase, session.side, bounds, floating, place, stop]);
-
   const down = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0 || press.current || playing) return;
+    if (event.button !== 0 || press.current) return;
     stop();
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = { x: native ? event.screenX : event.clientX, y: native ? event.screenY : event.clientY };
@@ -251,33 +235,21 @@ export function Stage({
     };
     frame.current = requestAnimationFrame(tick);
   };
-  const invite = () => {
-    if (quietNow || !interactive || taskBusy) return;
-    setReaction("");
-    dispatch({ type: "invite", side: session.side === "left" ? "right" : "left" });
-  };
-  let action: PetAction = feeling.action;
-  if (session.phase === "hiding") action = session.side;
-  if (session.phase === "peek") action = "wave";
-  if (session.phase === "found" || session.phase === "gifted") action = "happy";
-  if (reaction && !playing) action = reaction.startsWith("开心") ? "happy" : "wave";
+  const localAllowed = !taskBusy && !taskEvent && (taskPhase === "idle" || settled);
+  let action: PetAction = localAllowed && companionAction ? companionAction : feeling.action;
+  if (reaction) action = reaction.startsWith("开心") ? "happy" : "wave";
   if (dragging) action = "waiting";
   const words = quiet
     ? "我在，安静陪你"
-    : reaction ||
-      (playing
-        ? playWords(session.phase)
-        : taskPhase === "idle" && session.offered
-          ? "我在旁边安静陪你，想我时点一下就好。"
-          : taskMessage || feeling.words);
+    : reaction || (localAllowed && companionMessage ? companionMessage : taskMessage || feeling.words);
   const emotion = quiet
     ? "安静"
-    : session.phase === "found" || session.phase === "gifted" || reaction.startsWith("开心")
+    : reaction.startsWith("开心") || (localAllowed && companionAction === "happy")
       ? "开心"
-      : playing
-        ? "想逗你玩"
-        : reaction
-          ? "亲近"
+      : reaction
+        ? "亲近"
+        : localAllowed && companionAction === "thinking"
+          ? "专注"
           : feeling.label;
 
   useLayoutEffect(() => {
@@ -285,7 +257,7 @@ export function Stage({
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(positionSpeech);
     if (speech.current) observer?.observe(speech.current);
     return () => observer?.disconnect();
-  }, [words, positionSpeech]);
+  }, [words, positionSpeech, hideSpeech]);
 
   return (
     <>
@@ -293,7 +265,6 @@ export function Stage({
         ref={stage}
         className={`${styles.stage} ${floating ? styles.smallStage : ""} ${quietNow ? styles.paused : ""}`}
         data-emotion={emotion}
-        data-play-phase={session.phase}
       >
         {!floating && (
           <div className={styles.nook} aria-hidden="true">
@@ -302,13 +273,13 @@ export function Stage({
             <span />
           </div>
         )}
-        <div ref={actor} className={`${styles.petAnchor} ${playing ? styles.peekActor : ""}`}>
+        <div ref={actor} className={styles.petAnchor}>
           <button
             type="button"
             data-pet-interactive="true"
-            className={`${styles.pet} ${dragging ? styles.dragging : ""} ${reaction ? styles.greeting : ""} ${playing ? styles.peekPet : ""}`}
-            aria-label={session.phase === "peek" ? "找到躲起来的奶蛙" : "和伙伴打招呼，按住可拖动"}
-            disabled={!interactive || session.phase === "hiding"}
+            className={`${styles.pet} ${dragging ? styles.dragging : ""} ${reaction ? styles.greeting : ""}`}
+            aria-label={onInteract ? "和奶蛙聊聊，按住可拖动" : "和伙伴打招呼，按住可拖动"}
+            disabled={!interactive}
             onPointerDown={down}
             onPointerMove={move}
             onPointerUp={(event) => up(event)}
@@ -321,11 +292,10 @@ export function Stage({
                 ignoreClick.current = false;
                 return;
               }
-              if (session.phase === "peek") {
-                dispatch({ type: "find" });
+              if (onInteract) {
+                onInteract();
                 return;
               }
-              if (playing) return;
               if (taskPhase === "error") setSettled(true);
               const now = performance.now();
               greeting.current = { at: now, count: now - greeting.current.at < 1400 ? greeting.current.count + 1 : 1 };
@@ -342,48 +312,16 @@ export function Stage({
               );
             }}
           >
-            <span className={styles.peekFigure}>
+            <span>
               <Character kind={character} asleep={quietNow} action={action} />
             </span>
-            {playing && (
-              <span className={styles.peekCover} aria-hidden="true">
-                ✦
-              </span>
-            )}
           </button>
-          <p ref={speech} className={styles.reaction} role="status" aria-live="polite">
-            {words}
-          </p>
+          {!hideSpeech && (
+            <p ref={speech} className={styles.reaction} role="status" aria-live="polite">
+              {words}
+            </p>
+          )}
         </div>
-        {(session.phase === "found" || session.phase === "gifted") && (
-          <button
-            type="button"
-            data-pet-interactive="true"
-            className={styles.flower}
-            aria-label="收下奶蛙送的小花"
-            disabled={session.phase === "gifted" || !interactive}
-            onClick={() => dispatch({ type: "gift" })}
-          >
-            ❀
-          </button>
-        )}
-      </div>
-      <div className={styles.playDock} data-pet-interactive="true" aria-label="陪伴互动">
-        {session.phase === "hiding" || session.phase === "peek" || session.phase === "found" ? (
-          <button
-            type="button"
-            onClick={() => {
-              dispatch({ type: "stop" });
-              setReaction("好，你先忙。我在旁边待着。");
-            }}
-          >
-            我先忙啦
-          </button>
-        ) : (
-          <button type="button" disabled={quietNow || !interactive || taskBusy} onClick={invite}>
-            陪我一下
-          </button>
-        )}
       </div>
     </>
   );

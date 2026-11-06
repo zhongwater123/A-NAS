@@ -309,7 +309,7 @@ const definitions = {
     title: "伙伴小窝",
     icon: Sparkles,
     tone: "ai",
-    bounds: { x: 290, y: 48, width: 680, height: 760 },
+    bounds: { x: 100, y: 32, width: 620, height: 720 },
     launcher: { id: "companion", keywords: "伙伴 桌宠 小窝 陪伴 companion pet" },
     render: ({ session, open }) => (
       <CompanionPanel

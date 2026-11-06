@@ -17,7 +17,7 @@ async function run() {
     const page = await desktop.firstWindow();
     const errors = [];
     page.on("pageerror", (error) => errors.push(String(error)));
-    await page.getByRole("button", { name: "安静", exact: true }).waitFor();
+    await page.getByRole("button", { name: "奶蛙更多操作" }).waitFor();
     const preferences = await desktop.evaluate(({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows()[0];
       const prefs = window.webContents.getLastWebPreferences();
@@ -29,28 +29,31 @@ async function run() {
     assert.equal(preferences.sandbox, true);
     assert.equal(preferences.isolation, true);
     assert.equal(preferences.bounds.width, 350);
-    await page.getByRole("button", { name: "和伙伴打招呼，按住可拖动" }).click();
-    await page.getByText("嗨，我在这儿").waitFor();
-    await page.getByRole("button", { name: "陪我一下" }).click();
-    await page.getByRole("button", { name: "找到躲起来的奶蛙" }).click();
-    await page.getByRole("button", { name: "收下奶蛙送的小花" }).click();
-    await page.getByText("开心 · 你收下了！好啦，我在旁边陪你。").waitFor();
-    await page.getByRole("button", { name: "安静", exact: true }).click();
-    await page.getByRole("button", { name: "醒来", exact: true }).waitFor();
+    await page.getByRole("button", { name: "和奶蛙聊聊，按住可拖动" }).click();
+    await page.getByRole("textbox", { name: "跟奶蛙说句话" }).fill("专注25分钟");
+    await page.getByRole("button", { name: "发送给奶蛙" }).click();
+    await page.getByText("开始专注 25 分钟。我帮你看时间，到点提醒你休息。", { exact:true }).waitFor();
+    await page.getByRole("button", { name:"收起聊天" }).click();
+    assert.equal(await page.getByRole("button", { name: "找到躲起来的奶蛙" }).count(), 0);
+    await page.getByRole("button", { name: "奶蛙更多操作" }).click();
+    await page.getByRole("menuitem", { name: "安静陪我", exact: true }).click();
+    await page.getByRole("button", { name: "奶蛙更多操作" }).click();
+    await page.getByRole("menuitem", { name: "醒来", exact: true }).waitFor();
     const homeWindow = desktop.waitForEvent("window");
-    await page.getByRole("button", { name: "小窝", exact: true }).click();
+    await page.getByRole("menuitem", { name: "回小窝", exact: true }).click();
     const home = await homeWindow;
     await home.getByRole("heading", { name: "伙伴的小窝" }).waitFor();
     assert.match(await home.locator("[class*=naiwaSprite]").getAttribute("style"), /naiwa-/);
     await page.screenshot({ path: path.join(output, "desktop.png") });
     await home.screenshot({ path: path.join(output, "home.png") });
-    await page.getByRole("button", { name: "隐藏", exact: true }).click();
+    await page.getByRole("button", { name: "奶蛙更多操作" }).click();
+    await page.getByRole("menuitem", { name: "收起奶蛙", exact: true }).click();
     const hidden = await desktop.evaluate(({ BrowserWindow }) =>
       !BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes("desktop=1")).isVisible());
     assert.equal(hidden, true);
     assert.deepEqual(errors, []);
     await fs.writeFile(path.join(output, "result.json"), JSON.stringify({ result: "passed", scope: executable ? "packaged app; offline only" : "source Electron; offline only", preferences,
-      scenarios: ["greeting", "peekaboo and gift", "quiet", "home", "naiwa asset", "hide"], errors }, null, 2));
+      scenarios: ["chat focus command", "quiet", "home", "naiwa asset", "hide"], errors }, null, 2));
     console.log(`Desktop smoke passed; evidence: ${output}`);
   } finally {
     if (desktop) await desktop.close();

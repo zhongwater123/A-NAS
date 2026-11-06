@@ -1,18 +1,19 @@
 import { useMemo, useSyncExternalStore } from "react";
 
+import { deviceStorage } from "./deviceStorage";
 import { type Preferences, preferenceKey, readPreferences, writePreferences } from "./preferences";
 
 // The panel and floating pet in one page share a store. Separate clients
 // remain independent until the NAS activity/handoff API is implemented.
 function createStore(owner: string) {
-  let value = readPreferences(owner, window.localStorage);
+  let value = readPreferences(owner, deviceStorage);
   const listeners = new Set<() => void>();
   const notify = () => {
     for (const listener of listeners) listener();
   };
   const refresh = (event: StorageEvent) => {
     if (event.key !== null && !event.key.startsWith(preferenceKey(owner))) return;
-    value = readPreferences(owner, window.localStorage);
+    value = readPreferences(owner, deviceStorage);
     notify();
   };
   return {
@@ -27,7 +28,7 @@ function createStore(owner: string) {
     },
     update: (change: Partial<Preferences>) => {
       value = { ...value, ...change };
-      writePreferences(owner, value, window.localStorage);
+      writePreferences(owner, value, deviceStorage);
       notify();
     },
   };

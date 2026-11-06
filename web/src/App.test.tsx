@@ -435,9 +435,10 @@ describe("A-NAS v1.0.1 desktop", () => {
     await waitFor(() => expect(within(home).getByRole("button", { name: "到网页桌面陪我" })).toBeEnabled());
     await user.click(within(home).getByRole("button", { name: "到网页桌面陪我" }));
     const pet = await screen.findByRole("complementary", { name: "网页桌宠" });
-    await user.click(within(pet).getByRole("button", { name: "回小窝" }));
+    await user.click(within(pet).getByRole("button", { name: "奶蛙更多操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "回小窝" }));
     expect(screen.queryByRole("complementary", { name: "网页桌宠" })).toBeNull();
-    expect(within(home).getByRole("button", { name: "和伙伴打招呼，按住可拖动" })).toBeTruthy();
+    expect(within(home).getByRole("button", { name: "和奶蛙聊聊" })).toBeTruthy();
   });
 
   it("reorders desktop icons by dragging without opening the app", async () => {

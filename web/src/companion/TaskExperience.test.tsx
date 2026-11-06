@@ -6,6 +6,8 @@ import type { AssistantApproval } from "../api.generated";
 import { assistantHandlers, noticesHandlers, tasksHandlers } from "../test/handlers/assistant";
 import { entry, filesHandlers, ownSpace, sharedSpace, space } from "../test/handlers/files";
 import { server } from "../test/server";
+import { type AgentBridge, createConversation } from "./conversation";
+import { createDesk, type PersonalDeskState } from "./deskStore";
 import { ConnectedTask } from "./TaskExperience";
 import type { CompanionView } from "./useCompanionView";
 
@@ -74,6 +76,40 @@ const emit = (type: string, payload: unknown) =>
     for (const h of handlers) h({ type, session_id: LIVE, payload });
   });
 describe("companion minutes workflow on the existing VNAS protocol", () => {
+  it("bridges the new chat to the same VNAS protocol and renders only its new turn", async () => {
+    fixtures();
+    const bridge = { current: undefined as AgentBridge | undefined };
+    const chat = createConversation();
+    const store = createDesk("chat-protocol", localStorage);
+    const desk = { store } as PersonalDeskState;
+    render(
+      <ConnectedTask
+        view={view()}
+        userId="user:owner"
+        bridge={bridge}
+        onChatState={chat.observe}
+        onPhase={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(bridge.current).toBeDefined());
+    // Cards must finish loading before a NAS prompt is accepted.
+    await waitFor(() => expect(screen.getByRole("button", { name: "试试提醒" })).toBeEnabled());
+    act(() => chat.send("明早十点提醒我交材料", desk, bridge.current ?? undefined));
+    await waitFor(() =>
+      expect(client.request).toHaveBeenCalledWith(
+        "prompt.submit",
+        expect.objectContaining({ text: expect.stringContaining('"request":"明早十点提醒我交材料"') }),
+      ),
+    );
+    emit("message.start", {});
+    emit("message.delta", { text: "请先确认明天的具体日期。" });
+    emit("message.complete", { status: "complete" });
+    await waitFor(() => expect(chat.get().pending).toBeUndefined());
+    expect(chat.get().lines.at(-1)?.text).toBe("请先确认明天的具体日期。");
+    expect(store.get().todos).toHaveLength(0);
+    expect(store.get().focus.status).toBe("idle");
+    expect(client.request.mock.calls.filter(([method]) => method === "prompt.submit")).toHaveLength(1);
+  });
   it("hands a natural-language reminder to VNAS and never treats the model's words as a saved schedule", async () => {
     fixtures();
     const user = userEvent.setup();
