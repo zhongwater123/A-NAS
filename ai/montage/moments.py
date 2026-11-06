@@ -53,7 +53,6 @@ SEGMENT_MIN = 1.5
 # A segment the program's own trim off a cut at its ends shortened may run down to this (#350):
 # a 1.5 s segment kept 0.05 s clear of a cut is not refused for it.
 TRIMMED_MIN = 1.2
-SEGMENTS_MAX = 30
 REASON_CHARS = 200
 SHOWS_CHARS = 40
 # Why a card the search gave was not used, kept with the cut for review.
@@ -79,6 +78,10 @@ TAIL_MIN = 2.5
 # at most SNAP to reach one.
 PAUSE = 0.3
 SNAP = 1.5
+# Index.topped grows a segment this much at a time back to the seconds its plan gave it (#398):
+# fill's half-second steps and the trims at cuts after it had cut the Shanghai vlog's 76 planned
+# seconds to 63.5, each segment 0.2-0.8 s short of its share with room left in its card.
+FINE = 0.1
 # A step whose frame is less alike than this to its segment's peak frame shows another shot
 # (one the cut detection missed), and the segment does not take it.
 FLOOR = 0.8
@@ -121,9 +124,9 @@ BINS = 4
 PACE_RANGES = {"慢": (3.0, 4.0), "中": (2.0, 3.0), "快": (1.5, 2.0)}
 PACES = {name: (low + high) / 2 for name, (low, high) in PACE_RANGES.items()}
 # The cut's seconds are a ceiling (#398, 剪法20): a plan past them is scaled down, one short of
-# them is cut as it is, and one short by more than this share goes back to the planner to add
-# paragraphs or shots. Stretching every segment to the target had padded case-01's talk.
-SHORT = 0.1
+# them is cut as it is. Stretching every segment to the target had padded case-01's talk; sending
+# a short plan back (10% short) and capping the segments at 30 pulled against each other on a
+# 90-second vlog, three plans sent back for a cut that came out short anyway.
 
 
 def planned_seconds(asked: list[float], target: float) -> list[float]:
@@ -570,8 +573,8 @@ class Index:
         plan from cutting between places, and case-08's battle spans five of them."""
         cards = {c["id"]: c for c in self.cards}
         problems = []
-        if not 1 <= len(segments) <= SEGMENTS_MAX:
-            raise PlanError([f"segments 要有 1–{SEGMENTS_MAX} 段，收到 {len(segments)} 段"])
+        if not segments:
+            raise PlanError(["segments 至少要有 1 段"])
         clips = []
         for n, segment in enumerate(segments, 1):
             card = cards.get(segment.get("card")) if isinstance(segment, dict) else None
@@ -915,6 +918,37 @@ class Index:
             # Rounded inward, so that the segment stays inside its shot.
             out.append((math.ceil(start * 100) / 100, math.floor(end * 100) / 100))
         return out, problems
+
+    def topped(self, video: str, start: float, end: float, want: float, region: tuple[float, float],
+               others: list) -> tuple[float, float]:
+        """start and end grown FINE at a time, the end first, until the segment runs want seconds
+        or neither end may grow: each step inside region, off flat windows and clear of others
+        ([video, start, end] or None). An end the steps left inside a word goes back towards where
+        it was, to the word's edge, so that topping up never cuts a word the segment did not."""
+        lo, hi = region
+
+        def free(a, b):
+            return (lo - ROUNDING <= a and b <= hi + ROUNDING and not self._flat_in(video, a, b)
+                    and not self._taken(video, a, b, list(others)))
+
+        was = (start, end)
+        while end - start < want - ROUNDING:
+            grow = min(FINE, want - (end - start))
+            if free(end, end + grow):
+                end += grow
+            elif free(start - grow, start):
+                start -= grow
+            else:
+                break
+        words = self.words.get(video, [])
+        inside = [(a, b) for a, b in words if a + 0.05 < end < b - 0.05]
+        if end > was[1] and inside:
+            end = max(was[1], inside[0][0])
+        inside = [(a, b) for a, b in words if a + 0.05 < start < b - 0.05]
+        if start < was[0] and inside:
+            start = min(was[0], inside[0][1])
+        # Rounded inward to the hundredth, past the tenths' float error (11.7 + 0.7 is 12.3999...).
+        return math.ceil(start * 100 - 1e-6) / 100, math.floor(end * 100 + 1e-6) / 100
 
     def usable(self, card: dict) -> float:
         """The most seconds a segment of card can run (Index.fill): its region less its flat

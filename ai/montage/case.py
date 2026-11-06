@@ -223,7 +223,7 @@ def fill(index: moments.Index, segments: list[dict], vector: np.ndarray, target:
         return max(card["windows"], key=lambda i: scores[i])
 
     for card in sorted((c for c in index.cards if c["group"] not in groups), key=lambda c: -scores[best(c)]):
-        if left < moments.SEGMENT_MIN or len(out) >= moments.SEGMENTS_MAX:
+        if left < moments.SEGMENT_MIN:
             break
         if card["group"] in groups:
             continue

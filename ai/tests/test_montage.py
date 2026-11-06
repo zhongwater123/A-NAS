@@ -428,6 +428,18 @@ class MomentsTest(unittest.TestCase):
         spans, _problems = self.index.fill([("07-1-0", self.castle)], "probe", 2, self.at)
         self.assertEqual(spans, [(8, 9.6)])  # the pause in the line is closer than its end
 
+    def test_topped_grows_a_segment_back_to_its_planned_seconds(self):
+        region = (8, 28.0)
+        # The end grows first, a tenth of a second at a time, to the seconds the plan gave it.
+        self.assertEqual(self.index.topped("07", 10, 11.7, 2.4, region, []), (10, 12.4))
+        # At the region's end the start grows instead.
+        self.assertEqual(self.index.topped("07", 26.5, 28, 2.4, region, []), (25.6, 28))
+        # Never into another segment: here neither end may grow.
+        self.assertEqual(self.index.topped("07", 26.5, 28, 2.4, region, [["07", 25, 26.5]]), (26.5, 28))
+        # An end the steps leave inside a word goes back to the word's start.
+        self.index.words = {"07": [(12.1, 12.8)]}
+        self.assertEqual(self.index.topped("07", 10, 11.7, 2.4, region, []), (10, 12.1))
+
     def test_fill_gives_each_segment_an_even_share_before_the_best_steps(self):
         # The market (0-8 s) is one still picture: every step scores as its peak. The castle's
         # other side (28-48 s) is still too, but its first side, before 28 s, falls to 0.8.

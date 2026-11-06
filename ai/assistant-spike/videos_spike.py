@@ -90,6 +90,8 @@ EDGE_CUT = 0.08
 # from 24 frames a second to 30, an end 3 ms before a cut took one frame of the next shot.
 GUARD = 0.1
 CLEAR = 0.05
+# scene_cuts decodes this many seconds before the span it looks at, and does not count them.
+LEAD = 0.3
 MEMBERS = "a-nas-users"
 
 
@@ -169,19 +171,24 @@ def relabelled(problems: list[str], origin) -> list[str]:
 
 
 def scene_cuts(path: str, at: float, seconds: float) -> list[float]:
-    """The seconds after at, within seconds, of frames FFmpeg scores EDGE_CUT or more as a new scene."""
+    """The seconds after at, within seconds, of frames FFmpeg scores EDGE_CUT or more as a new scene.
+    Decoding starts LEAD earlier and those frames are not counted: FFmpeg's score for the second
+    frame after a seek has no difference before it to compare with, so it is that frame's whole
+    difference, about 0.2 on still pictures of the Shanghai vlog; counted, it put a cut 0.05 s
+    into every span looked at, and edges() took 0.6 s off every segment's end (#398)."""
+    lead = min(LEAD, at)
     log = subprocess.run(
-        ["ffmpeg", "-nostdin", "-v", "info", "-ss", f"{at:.3f}", "-i", path, "-t", f"{seconds:.3f}",  # noqa: S607
+        ["ffmpeg", "-nostdin", "-v", "info", "-ss", f"{at - lead:.3f}", "-i", path, "-t", f"{seconds + lead:.3f}",  # noqa: S607
          "-vf", "scale=640:-2,select='gte(scene,0)',metadata=print:key=lavfi.scene_score", "-an", "-f", "null", "-"],
         capture_output=True, text=True, timeout=120, check=False).stderr
     times, out = [], []
     for line in log.splitlines():
         if "pts_time:" in line:
             times.append(float(line.split("pts_time:")[1].split()[0]))
-        # The first frame has nothing before it to differ from.
-        elif "lavfi.scene_score=" in line and len(times) > 1 and float(line.split("=")[1]) >= EDGE_CUT:
-            out.append(times[-1])
-    return out
+        # The first two frames have no difference before them to compare with.
+        elif "lavfi.scene_score=" in line and len(times) > 2 and float(line.split("=")[1]) >= EDGE_CUT:
+            out.append(times[-1] - lead)
+    return [t for t in out if t >= 0]
 
 
 def member(uid: int) -> bool:
@@ -375,6 +382,8 @@ class Handler(BaseHTTPRequestHandler):
                     start, end = edges(files[cards[segment["card"]]], segment.get("start"), segment.get("end"))
                     edged.append([start, end] != [segment.get("start"), segment.get("end")])
                     segment["start"], segment["end"] = start, end
+        if spans is not None and target is not None:
+            segments = self.topped(segments, target, body.get("edges") is True)
         try:
             clips = self.server.index.check(segments, shows_needed=self.server.vision is not None,
                                             skipped=body.get("skipped"),
@@ -495,7 +504,7 @@ class Handler(BaseHTTPRequestHandler):
         half second, embedded as they are needed, set the ends; a trailer's last quarter is
         held to moments.TAIL_MIN-TAIL_MAX a segment; or, when the segments say their pace
         (moments.PACES), each runs the seconds the plan gave it (moments.planned_seconds: scaled
-        down past target, never up, a cut short by more than moments.SHORT sent back) or else
+        down past target, never up, a plan short of target cut as it is) or else
         aims at its pace's seconds, all scaled to target. With margin, the cards must be able to
         run moments.MARGIN times target first. And the problems of those it cannot set."""
         index, cards = self.server.index, {c["id"] for c in self.server.index.cards}
@@ -548,13 +557,33 @@ class Handler(BaseHTTPRequestHandler):
         spans, problems = index.fill([(s["card"], self.server.probes[s["probe"]]) for s in segments], mode, goal,
                                      self.frame, caps, mins, shares, moments.SEGMENT_MIN if shares else None)
         out = [s | {"start": span[0], "end": span[1]} for s, span in zip(segments, spans, strict=True) if span]
-        cut = sum(s["end"] - s["start"] for s in out)
-        if planned and not problems and cut < target * (1 - moments.SHORT):
-            # Short by more than SHORT: the planner adds where the story needs it (剪法20), the
-            # program does not stretch what is there.
-            problems = [f"成片只有 {cut:.0f} 秒，比目标 {target:g} 秒短了 {target - cut:.0f} 秒：在故事需要的地方加段落，"
-                        "或给段落多取一个镜头；不要只把已有段落的 seconds 写长"]
         return out, problems
+
+    def topped(self, segments, target, edged):
+        """segments each grown back to the seconds the plan gave it (moments.planned_seconds of
+        their "seconds"), when fill's half-second steps or the trims at cuts left it short
+        (moments.Index.topped, #398); with edged, the grown ends trimmed at cuts again. Segments
+        without planned seconds are left as they are."""
+        asked = [s.get("seconds") if isinstance(s, dict) else None for s in segments]
+        if not segments or not all(isinstance(x, (int, float)) and not isinstance(x, bool) and x > 0 for x in asked):
+            return segments
+        index = self.server.index
+        cards = {c["id"]: c for c in index.cards}
+        files = {v: os.path.join(self.server.videos, meta["file"]) for v, meta in index.videos.items()}
+        spans = [[cards[s["card"]]["video"], s["start"], s["end"]] if s.get("card") in cards
+                 and isinstance(s.get("start"), (int, float)) and isinstance(s.get("end"), (int, float)) else None
+                 for s in segments]
+        for n, (segment, want) in enumerate(zip(segments, moments.planned_seconds(asked, target), strict=True)):
+            if spans[n] is None or spans[n][2] - spans[n][1] >= want - moments.FINE / 2:
+                continue
+            video, start, end = spans[n]
+            others = [span for k, span in enumerate(spans) if k != n]
+            start, end = index.topped(video, start, end, want, index.region(cards[segment["card"]]), others)
+            if edged:
+                start, end = edges(files[video], start, end)
+            spans[n] = [video, start, end]
+            segment["start"], segment["end"] = start, end
+        return segments
 
     def frame(self, video, seconds):
         """The vector of the frame at seconds, rendered like the index's frames (512 px long edge)."""
