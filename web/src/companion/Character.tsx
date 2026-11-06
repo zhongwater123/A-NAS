@@ -1,50 +1,14 @@
-import { type CSSProperties, useId } from "react";
+import { useId } from "react";
 
-import naiwa from "./assets/naiwa.webp";
 import styles from "./companion.module.css";
 import type { Character as CharacterKind } from "./preferences";
 import type { TaskPhase } from "./taskState";
 
 // Code-native experimental artwork, intentionally separate from behaviour.
 // The earlier generated concept sheets are not animation-ready assets.
-export function Character({
-  kind,
-  asleep = false,
-  phase = "idle",
-}: {
-  kind: CharacterKind;
-  asleep?: boolean;
-  phase?: TaskPhase;
-}) {
-  if (kind === "naiwa") {
-    const rows: Record<TaskPhase, [number, number]> = {
-      idle: [0, 7],
-      connecting: [6, 6],
-      thinking: [6, 6],
-      working: [8, 6],
-      waiting: [7, 6],
-      success: [4, 5],
-      error: [5, 8],
-      stopped: [0, 7],
-    };
-    const [row, count] = rows[asleep ? "idle" : phase];
-    return (
-      <span
-        aria-hidden="true"
-        className={styles.naiwaSprite}
-        style={
-          {
-            backgroundImage: `url(${naiwa})`,
-            backgroundPositionY: `${row * 10}%`,
-            animationTimingFunction: `steps(${count})`,
-            animationPlayState: asleep ? "paused" : "running",
-            "--naiwa-end": `${(count / 7) * 100}%`,
-          } as CSSProperties
-        }
-      />
-    );
-  }
-  return <LegacyCharacter kind={kind} asleep={asleep} />;
+export function Character({ kind, asleep = false }: { kind: CharacterKind; asleep?: boolean; phase?: TaskPhase }) {
+  // The third-party Naiwa sprite sheet is no longer shipped; its slot shows the code-drawn character.
+  return <LegacyCharacter kind={kind === "naiwa" ? "glow" : kind} asleep={asleep} />;
 }
 function LegacyCharacter({ kind, asleep }: { kind: CharacterKind; asleep: boolean }) {
   const id = useId().replace(/:/g, "");

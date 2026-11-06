@@ -61,7 +61,6 @@ async function run() {
     await assertEventually(async () => assert.equal(await homeBall.isEnabled(), true));
     await homeBall.click();
     await section.getByText("一起玩了 1 次").waitFor();
-    assert.match(await section.locator("[class*=naiwaSprite]").getAttribute("style"), /naiwa\.webp/);
     const desktop = await mount("CompanionDesktop");
     const native = desktop.locator("main");
     const desktopBall = native.getByRole("button", { name: "把小球传给伙伴" });
