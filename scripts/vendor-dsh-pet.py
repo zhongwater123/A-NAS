@@ -9,7 +9,10 @@ Run on the development machine, with a dsh-pet checkout at the pinned commit:
 
 Imports lose their .ts suffix (A-NAS does not import with extensions). Changes A-NAS
 needs are patches in web/src/companion/dsh-pet-patches/, applied in name order.
+The animations stay out of Git; animations.sha256 pins the ones the commit ships, which
+install-companion-animations.sh installs (scripts/deploy-companion-animations.ps1 stages them).
 """
+import hashlib
 import re
 import shutil
 import subprocess
@@ -66,6 +69,14 @@ for patch in sorted(patches.glob("*.patch")):
     subprocess.run(["git", "apply", "--directory", target.as_posix(), str(patch)],  # noqa: S607  our own patches
                    check=True, cwd=Path.cwd())
     applied.append(patch.name)
+lines = []
+for path in sorted((upstream / "dsh-pet" / "assets" / "webm").glob("*.webm")):
+    if not re.fullmatch(r"[^./\\\x00-\x1f\x7f][^/\\\x00-\x1f\x7f]*\.webm", path.name) or path.name != path.name.strip():
+        sys.exit(f"unexpected animation file name: {path.name!r}")
+    lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n")
+manifest = "".join(lines).encode()
+(target / "animations.sha256").write_bytes(manifest)
+pool = hashlib.sha256(manifest).hexdigest()[:16]
 shutil.copyfile(upstream / "LICENSE", target / "LICENSE")
 (target / "README.md").write_text(
     "# Vendored dsh-pet animation and motion\n\n"
@@ -80,6 +91,8 @@ shutil.copyfile(upstream / "LICENSE", target / "LICENSE")
     "dsh-pet's animations, prompts and source videos may not be used commercially. Anything showing the "
     "character credits <https://github.com/PC2005-cloud/dsh-pet>, and A-NAS must replace it before any "
     "commercial release.\n\n"
-    "Patches applied: " + (", ".join(f"`{name}`" for name in applied) or "none") + ".\n",
+    "Patches applied: " + (", ".join(f"`{name}`" for name in applied) or "none") + ".\n\n"
+    f"`animations.sha256` lists the {len(lines)} animations of this commit; installed, they are companion "
+    f"animation pool `{pool}`.\n",
     encoding="utf-8", newline="\n")
-print(f"vendored {len(files)} files from {commit[:12]} with {len(applied)} patches")
+print(f"vendored {len(files)} files from {commit[:12]} with {len(applied)} patches; animation pool {pool}")

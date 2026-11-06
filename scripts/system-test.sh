@@ -206,7 +206,7 @@ fi
 # stage DIR: a release as scripts/deploy-dev.ps1 stages it.
 stage() {
   install -d "$1"
-  install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh /src/scripts/install-ffmpeg-units.sh "$1/"
+  install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh /src/scripts/install-companion-animations.sh /src/scripts/install-ffmpeg-units.sh "$1/"
   install -m 0644 /src/build/a-nas-host.deb /src/build/a-nas-console.deb "$1/"
   for unit in anas-api anas-host-agent anas-photos anas-shares anas-family; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
@@ -1903,6 +1903,43 @@ check "the Product Service reads the current pool" \
 video=$(curl -fsS "$api/local-console/screensavers" | jq -r '.videos[0]' || true)
 check "a current pool video answers a byte range" test "$(status_of -r 0-1023 "$api$video")" = 206
 
+# --- The companion's animations are long-lived media like the screen saver
+# videos (ADR 0014): staged by hash, checked again and switched in by root.
+companion=/var/lib/a-nas/companion
+animations=/opt/a-nas/current/install-companion-animations.sh
+companion_staged=$stager/apps/a-nas/companion
+animation_count() { curl -fsS "$api/companion/animations" | jq '.animations | length'; }
+current_animations() { readlink "$companion/current" || true; }
+# stage_animations NAME...: stages stand-in animations under these names as
+# scripts/deploy-companion-animations.ps1 does; sets pool to its ID.
+stage_animations() {
+  local name file hash
+  install -d "$companion_staged/pools"
+  : > "$companion_staged/pools/.incoming.sums"
+  for name in "$@"; do
+    file=$(mktemp /tmp/animation.XXXXXX)
+    head -c 4096 /dev/urandom > "$file"
+    hash=$(sha256sum "$file" | cut -d ' ' -f 1)
+    printf '%s  %s\n' "$hash" "$name" >> "$companion_staged/pools/.incoming.sums"
+    mv "$file" "/tmp/$hash.animation"
+  done
+  for hash in $(HOME=$stager bash /src/scripts/remote-stage-companion-animations.sh missing); do
+    cp "/tmp/$hash.animation" "$companion_staged/objects/$hash.incoming"
+  done
+  pool=$(HOME=$stager bash /src/scripts/remote-stage-companion-animations.sh commit)
+}
+check "a first install shows no companion animations" test "$(current_animations):$(animation_count)" = :0
+stage_animations 待机.webm 东张西望.webm 待机.mov
+animations_a=$pool
+check "staged companion animations install" quiet "$animations" "$animations_a" "$companion_staged"
+check "they become the current pool" test "$(current_animations):$(animation_count)" = "pools/$animations_a:2"
+animation=$(curl -fsS "$api/companion/animations" | jq -r '.animations["东张西望"].webm' || true)
+check "an animation answers a byte range" test "$(status_of -r 0-1023 "$api$animation")" = 206
+stage_animations 待机.webm
+printf x >> "$companion_staged/objects/$(head -c 64 "$companion_staged/pools/$pool.sums")"
+check "an animation that does not match its hash is refused" denied "$animations" "$pool" "$companion_staged"
+check "the refused animations change nothing" \
+  test "$(current_animations)" = "pools/$animations_a" -a ! -e "$companion/pools/$pool"
 # --- Internet entry (ADR 0032): /etc/a-nas/internet.env turns it on. Caddy
 # serves the domain over HTTPS on the NAS's tunnel address, taking the client's
 # address from the PROXY header that only the edge relay may send. There is no
