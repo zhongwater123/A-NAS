@@ -24,6 +24,28 @@ func TestNumbersFindsWhatIsSensitiveByItsRules(t *testing.T) {
 	}
 }
 
+// Search folds widths and every space away, so a number is one however its
+// groups are printed and split; a stretch of a run that no rule names is one
+// when it holds 15 digits or more.
+func TestNumbersAreFoundHoweverTheyArePrinted(t *testing.T) {
+	for text, want := range map[string][]string{
+		"卡号 ６２２８ ４８００ １２３４ ５６７８ ９０３":             {"卡号:" + card},
+		"卡号 6228  4800\t1234\n5678\u3000903":     {"卡号:" + card},
+		"号码 4403061990\n01011238":                {"号码:440306199001011238"},
+		"公民身份号码 11010519491231002ｘ":              {"身份证号:" + femaleID},
+		"账号 6222 0200 0000 0000 001 13812345678": {"号码:6222020000000000001", "手机号:13812345678"},
+		"发票号码 12345678901234567890":              {"号码:12345678901234567890"},
+	} {
+		var found []string
+		for _, number := range textread.Numbers(text) {
+			found = append(found, number.Label+":"+number.Digits)
+		}
+		if !slices.Equal(found, want) {
+			t.Errorf("Numbers(%q) = %v, want %v", text, found, want)
+		}
+	}
+}
+
 func TestMaskingLeavesNoDigitOfASensitiveValue(t *testing.T) {
 	text := "住址 某市 某路1号\n公民身份号码 " + maleID + "\n电话 138 1234 5678"
 	masked := textread.MaskValue(text, "某市某路1号", func() string { return "[住址]" })

@@ -2710,7 +2710,7 @@ export interface paths {
         };
         /**
          * The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
-         * @description An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none.
+         * @description An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none. An assistant gets none of a photo whose text holds a sensitive value (403 sensitive_photo): it knows such a value only as a handle in the photo's text.
          */
         get: operations["viewPhoto"];
         put?: never;
@@ -2750,7 +2750,7 @@ export interface paths {
         };
         /**
          * The text read from a photo and its document's fields, as the caller sees them (docs/architecture/photo-ocr.md)
-         * @description A library that does not read text shows none (status off), even of a photo another library holds. A member's AI assistant gets every sensitive value, in the fields and in the whole text, as a handle of its own such as ⟦身份证号·6d48a8⟧ (ADR 0033).
+         * @description A library that does not read text shows none (status off), even of a photo another library holds. A member's AI assistant gets every sensitive value as a handle of its own such as ⟦身份证号·6d48a8⟧: what the sensitive fields hold and what was read for them, and the ID, card, phone and other long numbers in the whole text and in every other field (docs/architecture/photo-ocr.md).
          */
         get: operations["getPhotoText"];
         put?: never;
@@ -5954,7 +5954,7 @@ export interface components {
             semantic: boolean;
             /** @description How many results, counted over all pages, make up the closest group: the name and user tag matches, the photos whose text holds the query, then the photos the object detector found the query's things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count. */
             closest: number;
-            /** @description How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. An assistant matches the text with every sensitive value masked. */
+            /** @description How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A query of one character matches no text. An assistant matches the text with every sensitive value masked. */
             texts: number;
             /** @description Present when the query is about things the object detector finds reliably, such as 手机: the closest group is then the photos it found them in, and detected 0 means none was found. */
             objects?: {
@@ -5992,7 +5992,7 @@ export interface components {
                 value: string;
                 /** @description What was read; empty when nothing was. */
                 read: string;
-                /** @description Whether the reading passed every check; a person should look at one that did not. */
+                /** @description Whether the value needs no one to look at it: the reading passed every check, or a member corrected it. */
                 passed: boolean;
                 reasons?: ("not_in_text" | "format" | "mismatch" | "low_confidence" | "unfinished")[];
                 /** @description Shown masked until the viewer opens it. */
@@ -12812,6 +12812,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             413: components["responses"]["ProductError"];
             415: components["responses"]["ProductError"];

@@ -212,7 +212,7 @@ schemas:
       texts:
         type: integer
         minimum: 0
-        description: "How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. An assistant matches the text with every sensitive value masked."
+        description: "How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A query of one character matches no text. An assistant matches the text with every sensitive value masked."
       objects:
         type: object
         additionalProperties: false
@@ -250,7 +250,7 @@ schemas:
             name: { type: string }
             value: { type: string, description: "What the field holds: the correction, else what was read." }
             read: { type: string, description: What was read; empty when nothing was. }
-            passed: { type: boolean, description: "Whether the reading passed every check; a person should look at one that did not." }
+            passed: { type: boolean, description: "Whether the value needs no one to look at it: the reading passed every check, or a member corrected it." }
             reasons: { type: array, items: { type: string, enum: [not_in_text, format, mismatch, low_confidence, unfinished] } }
             sensitive: { type: boolean, description: "Shown masked until the viewer opens it." }
             correction:

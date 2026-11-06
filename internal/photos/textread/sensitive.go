@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Sensitive values (docs/architecture/photo-ocr.md#ai-助手能用看不到具体的值)
@@ -44,36 +46,77 @@ type Number struct {
 	Start, End int
 }
 
-// A run of digits a number may be printed as: groups split by single spaces
-// or hyphens, as cards and phone numbers are, and an ID number's final X.
-var digitRun = regexp.MustCompile(`[0-9](?:[ -]?[0-9]){10,}(?:[ -]?[Xx])?`)
+// How a number may be printed: ASCII or full-width digits, in groups split by
+// spaces of any kind, line breaks or hyphens, and an ID number's final X.
+// Search compares regardless of width and spaces (Fold), so whatever it would
+// join into one number must be one here too, or an assistant could find a
+// number it does not see a part at a time.
+const (
+	digitClass     = `0-9\x{FF10}-\x{FF19}`
+	separatorClass = `\s\x{00A0}\x{3000}\-\x{2010}-\x{2015}\x{2212}\x{FF0D}`
+	finalX         = `Xx\x{FF38}\x{FF58}`
+)
+
+var (
+	// A run of digits: at least 11, a mobile number's length.
+	digitRun = regexp.MustCompile(`[` + digitClass + `](?:[` + separatorClass + `]*[` + digitClass + `]){10,}` +
+		`(?:[` + separatorClass + `]*[` + finalX + `])?`)
+	// A group of a run: digits printed together.
+	digitGroup = regexp.MustCompile(`[` + digitClass + `]+[` + finalX + `]?`)
+)
 
 // Numbers finds the sensitive numbers in text: ID numbers whose check digit
 // holds, card numbers that pass the Luhn check and mobile numbers, and any
-// other run of 15 or more digits, which a misread ID or card number with a
-// wrong check digit still is. Numbers printed side by side, such as a phone
-// number and a date, are told apart by their groups.
+// other stretch of 15 or more digits, which a misread ID or card number with
+// a wrong check digit still is. Numbers printed side by side, such as a phone
+// number and a date, are told apart by their groups: at each group, the
+// longest run of groups that is a known number is one, and the groups between
+// such numbers are another when they hold 15 digits or more.
 func Numbers(text string) []Number {
 	var found []Number
 	for _, span := range digitRun.FindAllStringIndex(text, -1) {
-		if number, ok := known(text, span[0], span[1]); ok {
-			found = append(found, number)
-			continue
+		groups := digitGroup.FindAllStringIndex(text[span[0]:span[1]], -1)
+		sizes := make([]int, len(groups))
+		for k, group := range groups {
+			group[0] += span[0]
+			group[1] += span[0]
+			sizes[k] = len(digitsOf(text[group[0]:group[1]]))
 		}
-		var parts []Number
-		start := span[0]
-		for i := span[0]; i <= span[1]; i++ {
-			if i == span[1] || text[i] == ' ' || text[i] == '-' {
-				if number, ok := known(text, start, i); ok {
-					parts = append(parts, number)
-				}
-				start = i + 1
+		stretch := -1 // the first group of the stretch no number has taken
+		unknown := func(end int) {
+			if stretch < 0 {
+				return
 			}
+			start, stop := groups[stretch][0], groups[end-1][1]
+			if digits := digitsOf(text[start:stop]); len(digits) >= 15 {
+				found = append(found, Number{Label: "号码", Digits: digits, Start: start, End: stop})
+			}
+			stretch = -1
 		}
-		if digits := digitsOf(text[span[0]:span[1]]); len(parts) == 0 && len(digits) >= 15 {
-			parts = append(parts, Number{Label: "号码", Digits: digits, Start: span[0], End: span[1]})
+		for i := 0; i < len(groups); {
+			// No known number is longer than 19 digits.
+			j, digits := i, 0
+			for j < len(groups) && digits+sizes[j] <= 19 {
+				digits += sizes[j]
+				j++
+			}
+			for ; j > i; j-- {
+				if number, ok := known(text, groups[i][0], groups[j-1][1]); ok {
+					unknown(i)
+					found = append(found, number)
+					break
+				}
+			}
+			if j > i {
+				i = j
+				continue
+			}
+			if stretch < 0 {
+				stretch = i
+			}
+			i++
 		}
-		found = append(found, parts...)
+		unknown(len(groups))
 	}
 	return found
 }
@@ -95,9 +138,18 @@ func known(text string, start, end int) (Number, bool) {
 	return number, true
 }
 
-// digitsOf is a number as printed, without its spaces and hyphens.
+// digitsOf is a number as printed, in ASCII digits and an upper-case X,
+// without what separates its groups.
 func digitsOf(printed string) string {
-	return strings.ToUpper(strings.NewReplacer(" ", "", "-", "").Replace(printed))
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= '0' && r <= '9', r == 'X':
+			return r
+		case r == 'x':
+			return 'X'
+		}
+		return -1
+	}, norm.NFKC.String(printed))
 }
 
 // MaskValue replaces each occurrence of value in text, allowing for spaces

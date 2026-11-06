@@ -71,8 +71,9 @@ func TestCorrectionsBelongToThePhotoInEveryLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A corrected value needs no one to look at it any more.
 	if total := fieldNamed(t, text, "合计"); total.Value != "¥35.50" || total.Read != "¥35.80" ||
-		total.Correction == nil || total.Correction.Username != "bob" {
+		total.Correction == nil || total.Correction.Username != "bob" || !total.Passed || len(total.Reasons) != 0 {
 		t.Fatalf("合计 in Alice's copy = %+v", total)
 	}
 	// The same value again changes nothing; Alice takes Bob's correction
@@ -222,6 +223,13 @@ func TestTheAssistantGetsHandlesInsteadOfSensitiveValues(t *testing.T) {
 	if name := fieldNamed(t, text, "姓名"); name.Value != "张三" {
 		t.Fatalf("姓名 for the assistant = %+v", name)
 	}
+	// The address Alice corrected and the one read are two values with a
+	// handle each; the text holds the one read.
+	if address := fieldNamed(t, text, "住址"); !strings.HasPrefix(address.Value, "⟦住址·") ||
+		!strings.HasPrefix(address.Read, "⟦住址·") || address.Value == address.Read ||
+		!strings.Contains(text.Text, address.Read) || strings.Contains(text.Text, address.Value) {
+		t.Fatalf("住址 for the assistant = %+v in %q", address, text.Text)
+	}
 	if !strings.Contains(text.Text, "⟦手机号·") || !strings.Contains(text.Text, "⟦号码·") {
 		t.Fatalf("the numbers of the text for the assistant: %q", text.Text)
 	}
@@ -254,11 +262,102 @@ func TestTheAssistantGetsHandlesInsteadOfSensitiveValues(t *testing.T) {
 	if _, err := service.TextChanges(ctx, alicesAssistant, card.ID); !errors.Is(err, photos.ErrForbidden) {
 		t.Fatalf("the assistant's TextChanges(): error = %v", err)
 	}
+	// Nor does it look at the card: its model would read the numbers.
+	if _, err := service.View(ctx, alicesAssistant, card.ID); !errors.Is(err, photos.ErrSensitivePhoto) {
+		t.Fatalf("the assistant's View() of the ID card: error = %v", err)
+	}
+}
+
+// A number reaches the assistant as a handle wherever the text holds it: in
+// a field that is no secret, printed in full-width digits, or split over
+// lines, which search would join.
+func TestTheAssistantSeesNoNumberHoweverItIsPrinted(t *testing.T) {
+	embedder := newReadingEmbedder()
+	embedder.text = "城南便利店 电话13812345678\n2024年05月06日\n合计 ¥35.50\n会员 6222 0200\n0000 0000 001\n" +
+		"积分卡 ６２２８ ４８００ １２３４ ５６７８ ９０３"
+	embedder.answer = `{"商户": "城南便利店 电话13812345678", "日期": "2024年05月06日", "合计": "¥35.50"}`
+	root := filepath.Join(t.TempDir(), "photos")
+	service := routeService(t, root, embedder, redRoute(t, "colour-1"))
+	ctx := context.Background()
+	private, _ := libraries(t, service, namedAlice)
+	receipt := importPhoto(t, service, namedAlice, private.ID, "", "receipt.png", red)
+	sea := importPhoto(t, service, namedAlice, private.ID, "", "sea.png", blue)
+	index(t, service, embedder)
+	assistant := photos.Principal{UserID: namedAlice.UserID, Username: "alice", Assistant: true}
+
+	text, err := service.Text(ctx, assistant, receipt.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unhandled := handles.ReplaceAllString(string(encoded), "")
+	for _, secret := range []string{"1381234", "6222", "0200", "0000 0000", "６２２８", "6228", "903"} {
+		if strings.Contains(unhandled, secret) {
+			t.Errorf("the assistant's text holds %q: %s", secret, encoded)
+		}
+	}
+	merchant := fieldNamed(t, text, "商户")
+	phone := strings.TrimPrefix(merchant.Value, "城南便利店 电话")
+	if !strings.HasPrefix(phone, "⟦手机号·") || merchant.Read != merchant.Value || !strings.Contains(text.Text, phone) {
+		t.Fatalf("商户 for the assistant = %+v in %q", merchant, text.Text)
+	}
+	// Numbers are keyed by their order in the text, never by a digest of
+	// theirs that would tell them.
+	rows, err := catalogDB(t, root).QueryContext(ctx, "SELECT key FROM text_handles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	keyed := regexp.MustCompile(`^(field:.+|read:.+|number:[0-9]+)$`)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			t.Fatal(err)
+		}
+		if !keyed.MatchString(key) {
+			t.Errorf("a handle's key %q", key)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Its search finds no part of a number; the member's finds them however
+	// they are spaced.
+	for _, query := range []string{"1381234", "62220200", "0000 0000", "6228 4800", "６２２８"} {
+		if page := search(t, service, assistant, query); page.Texts != 0 {
+			t.Errorf("the assistant's search for %q found the photo by its text", query)
+		}
+		if page := search(t, service, namedAlice, query); page.Texts != 1 {
+			t.Errorf("Alice's search for %q = %+v", query, page)
+		}
+	}
+	if page := search(t, service, assistant, "便利店"); page.Texts != 1 {
+		t.Errorf("the assistant's search for 便利店 = %+v", page)
+	}
+	// It looks at a photo with no such number, but not at the receipt.
+	if _, err := service.View(ctx, assistant, receipt.ID); !errors.Is(err, photos.ErrSensitivePhoto) {
+		t.Fatalf("the assistant's View() of the receipt: error = %v", err)
+	}
+	view, err := service.View(ctx, assistant, sea.ID)
+	if err != nil {
+		t.Fatalf("the assistant's View() of the sea: %v", err)
+	}
+	_ = view.Reader.Close()
+	member, err := service.View(ctx, namedAlice, receipt.ID)
+	if err != nil {
+		t.Fatalf("Alice's View() of the receipt: %v", err)
+	}
+	_ = member.Reader.Close()
 }
 
 func TestTextMatchesFollowNamesAndCountOnEveryPage(t *testing.T) {
 	embedder := newReadingEmbedder()
-	service := routeService(t, filepath.Join(t.TempDir(), "photos"), embedder, redRoute(t, "colour-1"))
+	root := filepath.Join(t.TempDir(), "photos")
+	service := routeService(t, root, embedder, redRoute(t, "colour-1"))
 	ctx := context.Background()
 	private, _ := libraries(t, service, namedAlice)
 	importPhoto(t, service, namedAlice, private.ID, "", "超市.png", blue)
@@ -281,6 +380,22 @@ func TestTextMatchesFollowNamesAndCountOnEveryPage(t *testing.T) {
 	}
 	if len(page.Assets) != 1 || page.Assets[0].ID != receipt.ID || page.Texts != 1 {
 		t.Fatalf("second page = %+v", page)
+	}
+	// One character finds no text: nearly every text holds a common one.
+	if page := search(t, service, namedAlice, "超"); page.Texts != 0 {
+		t.Fatalf("search for 超 = %+v", page)
+	}
+	// A correction the text does not show, of a field another document type
+	// has, finds nothing either.
+	db := catalogDB(t, root)
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO text_corrections(object_id, field, value, account, account_name, updated_at)
+SELECT object_id, '卡号', '旧类型的更正', 'user:alice', 'alice', '2026-11-06T00:00:00.000000000Z' FROM assets WHERE id = ?`,
+		receipt.ID); err != nil {
+		t.Fatal(err)
+	}
+	if page := search(t, service, namedAlice, "旧类型的更正"); page.Texts != 0 {
+		t.Fatalf("search for a correction the text does not show = %+v", page)
 	}
 
 	// A corrected value is found too; with reading off, the library finds

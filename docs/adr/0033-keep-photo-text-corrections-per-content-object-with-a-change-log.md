@@ -39,7 +39,7 @@
   - AI 助手不能改，也看不到修改记录，因为记录里有它不该知道的值；
   - 回收站里的照片不能改。
 - **系统活动记录**不记更正：修改记录就是它的记录，一项事实只在一处。
-- **AI 助手的句柄**存在同一迁移的 `text_handles(handle, account, asset_id, key)` 中，随照片删除。句柄是随机值，绑定“本人 + 照片 + 字段或号码”（[决定](../decisions/2026-10-30-ocr-assistant-handles.md)）。
+- **AI 助手的句柄**存在同一迁移的 `text_handles(handle, account, asset_id, key)` 中，随照片删除。句柄是随机值，绑定“本人 + 照片 + 字段或号码”（[决定](../decisions/2026-10-30-ocr-assistant-handles.md)）。号码按它在读取中出现的次序作键，不存号码的摘要；字段被改成别的值时，读出的值另有一个句柄。
 
 ## 后果
 

@@ -682,6 +682,9 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_busy", "正在同时转换播放的视频太多，请稍后再试")
 	case errors.Is(err, photos.ErrThumbnailUnavailable):
 		httpjson.WriteError(w, http.StatusNotFound, "thumbnail_unavailable", "the thumbnail is not ready; use the original")
+	case errors.Is(err, photos.ErrSensitivePhoto):
+		httpjson.WriteError(w, http.StatusForbidden, "sensitive_photo",
+			"the photo shows an ID, card or phone number; its text gives the assistant each as a handle instead")
 	case errors.Is(err, photos.ErrForbidden):
 		httpjson.WriteError(w, http.StatusForbidden, "forbidden", "this photo library item cannot be changed by you")
 	case errors.Is(err, photos.ErrConflict):

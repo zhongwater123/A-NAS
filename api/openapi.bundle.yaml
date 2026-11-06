@@ -4872,7 +4872,7 @@ paths:
     get:
       operationId: viewPhoto
       summary: The photo as a model looks at it, for members' AI assistants (ADR 0024 decision 6)
-      description: An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original's metadata. Videos have none.
+      description: 'An upright JPEG at most 1600 pixels on its longer side, encoded afresh from the pixels, without the original''s metadata. Videos have none. An assistant gets none of a photo whose text holds a sensitive value (403 sensitive_photo): it knows such a value only as a handle in the photo''s text.'
       parameters:
         - $ref: '#/components/parameters/PhotoAssetID'
       responses:
@@ -4885,6 +4885,8 @@ paths:
                 format: binary
         '304':
           description: ETag still matches after authorization
+        '403':
+          $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
         '413':
@@ -4935,7 +4937,7 @@ paths:
     get:
       operationId: getPhotoText
       summary: The text read from a photo and its document's fields, as the caller sees them (docs/architecture/photo-ocr.md)
-      description: A library that does not read text shows none (status off), even of a photo another library holds. A member's AI assistant gets every sensitive value, in the fields and in the whole text, as a handle of its own such as ⟦身份证号·6d48a8⟧ (ADR 0033).
+      description: 'A library that does not read text shows none (status off), even of a photo another library holds. A member''s AI assistant gets every sensitive value as a handle of its own such as ⟦身份证号·6d48a8⟧: what the sensitive fields hold and what was read for them, and the ID, card, phone and other long numbers in the whole text and in every other field (docs/architecture/photo-ocr.md).'
       parameters:
         - $ref: '#/components/parameters/PhotoAssetID'
       responses:
@@ -12065,7 +12067,7 @@ components:
         texts:
           type: integer
           minimum: 0
-          description: How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. An assistant matches the text with every sensitive value masked.
+          description: How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A query of one character matches no text. An assistant matches the text with every sensitive value masked.
         objects:
           type: object
           additionalProperties: false
@@ -12153,7 +12155,7 @@ components:
                 description: What was read; empty when nothing was.
               passed:
                 type: boolean
-                description: Whether the reading passed every check; a person should look at one that did not.
+                description: 'Whether the value needs no one to look at it: the reading passed every check, or a member corrected it.'
               reasons:
                 type: array
                 items:

@@ -2,12 +2,11 @@ package photos
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -27,6 +26,10 @@ import (
 // ErrInvalidText refuses a correction that is too long or holds control
 // characters.
 var ErrInvalidText = errors.New("invalid text correction")
+
+// ErrSensitivePhoto refuses an assistant the view of a photo whose text holds
+// a sensitive value.
+var ErrSensitivePhoto = errors.New("the photo shows a sensitive value")
 
 // MaxCorrectionRunes bounds a corrected field's value.
 const MaxCorrectionRunes = 200
@@ -69,7 +72,8 @@ type TextField struct {
 	Value string `json:"value"`
 	// Read is what was read, empty when nothing was.
 	Read string `json:"read"`
-	// Passed says the reading passed every check; Reasons say why not.
+	// Passed says the value needs no one to look at it: the reading passed
+	// every check, or a member corrected it. Reasons say why not.
 	Passed  bool     `json:"passed"`
 	Reasons []string `json:"reasons,omitempty"`
 	// Sensitive values are shown masked until the viewer opens them.
@@ -154,7 +158,8 @@ func (s *Service) photoText(ctx context.Context, p Principal, record assetRecord
 			field.Passed, field.Reasons = check.Passed, check.Reasons
 		}
 		if corrected, ok := reading.corrections[name]; ok {
-			field.Value = corrected.value
+			// A member set the value: nothing is left to check.
+			field.Value, field.Passed, field.Reasons = corrected.value, true, nil
 			field.Correction = &TextCorrection{UserID: corrected.account, Username: corrected.username, At: corrected.at}
 		}
 		text.Fields = append(text.Fields, field)
@@ -163,6 +168,26 @@ func (s *Service) photoText(ctx context.Context, p Principal, record assetRecord
 		return s.maskForAssistant(ctx, p, record, text)
 	}
 	return text, nil
+}
+
+// showsSensitiveValue reports whether the text read from an object holds a
+// sensitive value: what a sensitive field holds or was read as, or a number
+// by textread.Numbers' rules in the whole text or any other field. A photo
+// not read yet holds none.
+func (s *Service) showsSensitiveValue(ctx context.Context, objectID string) (bool, error) {
+	reading, found, err := s.storedReading(ctx, s.db, objectID)
+	if err != nil || !found {
+		return false, err
+	}
+	values := []string{reading.text}
+	for _, name := range textread.FieldNames(textread.Kind(reading.kind)) {
+		read, corrected := reading.fields[name], reading.corrections[name].value
+		if _, sensitive := textread.Sensitive(name); sensitive && (read != "" || corrected != "") {
+			return true, nil
+		}
+		values = append(values, read, corrected)
+	}
+	return slices.ContainsFunc(values, func(value string) bool { return len(textread.Numbers(value)) > 0 }), nil
 }
 
 // textStatus says where a photo without a reading stands.
@@ -362,55 +387,96 @@ WHERE ch.object_id = ? ORDER BY ch.id DESC`, record.objectID)
 
 // maskForAssistant replaces every sensitive value of a photo's text with a
 // handle of p's for it (docs/architecture/photo-ocr.md#ai-助手能用看不到具体的值):
-// the sensitive fields, what was read and what members corrected, and the
-// numbers textread.Numbers finds in the whole text.
+// what the sensitive fields hold and what was read for them, and the numbers
+// textread.Numbers finds in the whole text and in every other field.
 func (s *Service) maskForAssistant(ctx context.Context, p Principal, record assetRecord, text PhotoText) (PhotoText, error) {
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		var handleErr error
-		handle := func(key, label string) string {
+		masker := newTextMasker(text.Fields, func(key, label string) string {
 			named, err := s.textHandle(ctx, tx, p, record.ID, key, label)
 			handleErr = errors.Join(handleErr, err)
 			return named
-		}
-		var values []fieldValue
+		})
+		text.Text = masker.mask(text.Text)
 		for i, field := range text.Fields {
+			masked := &text.Fields[i]
 			if !field.Sensitive {
+				masked.Value, masked.Read = masker.mask(field.Value), masker.mask(field.Read)
 				continue
 			}
 			label, _ := textread.Sensitive(field.Name)
-			for _, value := range []*string{&text.Fields[i].Value, &text.Fields[i].Read} {
-				if *value != "" {
-					values = append(values, fieldValue{field.Name, *value})
-					*value = handle("field:"+field.Name, label)
-				}
+			if field.Value != "" {
+				masked.Value = masker.replace(fieldKey(field.Name), label)
+			}
+			if field.Read != "" {
+				masked.Read = masker.replace(readKey(field), label)
 			}
 		}
-		text.Text = maskText(text.Text, values, handle)
 		return handleErr
 	})
 	return text, err
 }
 
-// fieldValue is a value a sensitive field holds.
-type fieldValue struct{ field, value string }
+// fieldKey keys the handle for what a sensitive field holds, and readKey
+// the one for what was read for it: the field's when nobody corrected it to
+// something else.
+func fieldKey(name string) string { return "field:" + name }
 
-// maskText replaces in text each of the sensitive fields' values, and then
-// each sensitive number, with what replace returns for the key it is told
-// by: field:<name> for a value, number:<digest> for a number.
-func maskText(text string, values []fieldValue, replace func(key, label string) string) string {
-	for _, value := range values {
-		label, _ := textread.Sensitive(value.field)
-		text = textread.MaskValue(text, value.value, func() string { return replace("field:"+value.field, label) })
+func readKey(field TextField) string {
+	if field.Read != field.Value {
+		return "read:" + field.Name
+	}
+	return fieldKey(field.Name)
+}
+
+// sensitiveValue is a value to mask, with the key of its handle.
+type sensitiveValue struct{ key, label, value string }
+
+// textMasker replaces the sensitive values of a photo's text with what
+// replace returns for their keys: field:<name> for what a sensitive field
+// holds, read:<name> for what was read for it when a member corrected it to
+// something else, and number:<n> for the nth sensitive number it found. A
+// number is keyed by its order, not by a digest, so that nothing kept beside
+// a handle tells the number.
+type textMasker struct {
+	values  []sensitiveValue
+	numbers map[string]int
+	replace func(key, label string) string
+}
+
+// newTextMasker masks the values of fields' sensitive ones.
+func newTextMasker(fields []TextField, replace func(key, label string) string) *textMasker {
+	masker := &textMasker{numbers: map[string]int{}, replace: replace}
+	for _, field := range fields {
+		if label, sensitive := textread.Sensitive(field.Name); sensitive {
+			masker.values = append(masker.values,
+				sensitiveValue{fieldKey(field.Name), label, field.Value}, sensitiveValue{readKey(field), label, field.Read})
+		}
+	}
+	// A longer value first, so that one holding another is masked whole.
+	slices.SortStableFunc(masker.values, func(a, b sensitiveValue) int { return len(b.value) - len(a.value) })
+	return masker
+}
+
+// mask replaces in text each sensitive value, and then each sensitive number.
+func (m *textMasker) mask(text string) string {
+	for _, value := range m.values {
+		text = textread.MaskValue(text, value.value, func() string { return m.replace(value.key, value.label) })
 	}
 	return textread.MaskNumbers(text, func(number textread.Number) string {
-		digest := sha256.Sum256([]byte(number.Digits))
-		return replace("number:"+hex.EncodeToString(digest[:16]), number.Label)
+		order, ok := m.numbers[number.Digits]
+		if !ok {
+			order = len(m.numbers) + 1
+			m.numbers[number.Digits] = order
+		}
+		return m.replace("number:"+strconv.Itoa(order), number.Label)
 	})
 }
 
 // textHandle returns p's handle for one sensitive value of a photo, making
 // one the first time. A handle is random, so nothing about the value can be
-// learned from it, and stands for that value for p alone.
+// learned from it, and stands for p alone for what its key names: what a
+// field of the photo holds, what was read for it, or the photo's nth number.
 func (s *Service) textHandle(ctx context.Context, tx *sql.Tx, p Principal, assetID, key, label string) (string, error) {
 	var handle string
 	err := tx.QueryRowContext(ctx, "SELECT handle FROM text_handles WHERE account = ? AND asset_id = ? AND key = ?",

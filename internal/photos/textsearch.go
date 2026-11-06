@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/photos/textread"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
@@ -19,14 +20,16 @@ type textHits struct {
 
 func (t textHits) holds(c candidate) bool { return t.libraries[c.libraryID] && t.objects[c.objectID] }
 
-// textMatches finds the content objects whose whole text, field values or
-// corrections hold query, among the photos listed to p in the libraries of
-// scope that read text (docs/architecture/photo-ocr.md#搜索). It compares
-// regardless of spaces, width and case, and a query mostly of digits also
-// regardless of hyphens, so that "6222 0200" finds 6222-0200-…. An
-// assistant matches only the text as it sees it, every sensitive value
-// masked: searching for parts of a number would otherwise tell it the number
-// a digit at a time.
+// textMatches finds the content objects whose text holds query, among the
+// photos listed to p in the libraries of scope that read text
+// (docs/architecture/photo-ocr.md#搜索): the whole text, and the fields as
+// the photo's text shows them, read and corrected. It compares regardless of
+// spaces, width and case, and a query mostly of digits also regardless of
+// hyphens, so that "6222 0200" finds 6222-0200-…. A query of one character
+// finds nothing, for nearly every text holds a common one. An assistant
+// matches only the text as it sees it, every sensitive value masked:
+// searching for parts of a number would otherwise tell it the number a digit
+// at a time.
 func (s *Service) textMatches(ctx context.Context, p Principal, query string, scope []any) (textHits, error) {
 	hits := textHits{objects: map[string]bool{}, libraries: map[string]bool{}}
 	readers, err := s.strings(ctx, "SELECT id FROM libraries WHERE texts = 1 AND id IN ("+sqlitedb.Placeholders(len(scope))+")",
@@ -42,7 +45,7 @@ func (s *Service) textMatches(ctx context.Context, p Principal, query string, sc
 		fold = textread.FoldNumber
 	}
 	needle := fold(query)
-	if needle == "" {
+	if utf8.RuneCountInString(needle) < 2 {
 		return hits, nil
 	}
 	listed := make([]any, len(readers))
@@ -51,23 +54,21 @@ func (s *Service) textMatches(ctx context.Context, p Principal, query string, sc
 	}
 	objects := "SELECT a.object_id FROM assets a WHERE " + listedAssets(p, "a") +
 		" AND a.library_id IN (" + sqlitedb.Placeholders(len(listed)) + ")"
-	haystacks := map[string][]string{}
-	sensitive := map[string][]fieldValue{}
-	err = s.eachRow(ctx, "SELECT object_id, text, fields FROM texts WHERE object_id IN ("+objects+")", listed,
+	type found struct {
+		kind, text  string
+		fields      map[string]string
+		corrections map[string]string
+	}
+	readings := map[string]*found{}
+	err = s.eachRow(ctx, "SELECT object_id, kind, text, fields FROM texts WHERE object_id IN ("+objects+")", listed,
 		func(rows *sql.Rows) error {
-			var objectID, text, encoded string
-			if err := rows.Scan(&objectID, &text, &encoded); err != nil {
+			var objectID, encoded string
+			reading := &found{corrections: map[string]string{}}
+			if err := rows.Scan(&objectID, &reading.kind, &reading.text, &encoded); err != nil {
 				return err
 			}
-			var fields map[string]string
-			if err := json.Unmarshal([]byte(encoded), &fields); err != nil {
-				return err
-			}
-			haystacks[objectID] = append(haystacks[objectID], text)
-			for field, value := range fields {
-				sensitive[objectID] = addValue(haystacks, sensitive[objectID], p, objectID, field, value)
-			}
-			return nil
+			readings[objectID] = reading
+			return json.Unmarshal([]byte(encoded), &reading.fields)
 		})
 	if err != nil {
 		return hits, err
@@ -78,18 +79,40 @@ func (s *Service) textMatches(ctx context.Context, p Principal, query string, sc
 			if err := rows.Scan(&objectID, &field, &value); err != nil {
 				return err
 			}
-			sensitive[objectID] = addValue(haystacks, sensitive[objectID], p, objectID, field, value)
+			// A photo without a reading shows no correction.
+			if reading := readings[objectID]; reading != nil {
+				reading.corrections[field] = value
+			}
 			return nil
 		})
 	if err != nil {
 		return hits, err
 	}
-	for objectID, haystack := range haystacks {
-		if p.Assistant && len(haystack) > 0 {
-			// The whole text, as the assistant sees it.
-			haystack[0] = maskText(haystack[0], sensitive[objectID], func(string, string) string { return "\x00" })
+	holds := func(text string) bool { return strings.Contains(fold(text), needle) }
+	for objectID, reading := range readings {
+		// The fields the photo's text shows, as Text gives them.
+		var fields []TextField
+		for _, name := range textread.FieldNames(textread.Kind(reading.kind)) {
+			field := TextField{Name: name, Read: reading.fields[name], Value: reading.fields[name]}
+			if corrected, ok := reading.corrections[name]; ok {
+				field.Value = corrected
+			}
+			_, field.Sensitive = textread.Sensitive(name)
+			fields = append(fields, field)
 		}
-		if slices.ContainsFunc(haystack, func(text string) bool { return strings.Contains(fold(text), needle) }) {
+		texts := []string{reading.text}
+		for _, field := range fields {
+			if !p.Assistant || !field.Sensitive {
+				texts = append(texts, field.Value, field.Read)
+			}
+		}
+		if p.Assistant {
+			masker := newTextMasker(fields, func(string, string) string { return "\x00" })
+			for i, text := range texts {
+				texts[i] = masker.mask(text)
+			}
+		}
+		if slices.ContainsFunc(texts, holds) {
 			hits.objects[objectID] = true
 		}
 	}
@@ -110,18 +133,4 @@ func (s *Service) eachRow(ctx context.Context, query string, args []any, row fun
 		}
 	}
 	return rows.Err()
-}
-
-// addValue adds a field's value to what an object's search looks in, except
-// a sensitive one for an assistant, which goes to the values to mask instead.
-func addValue(haystacks map[string][]string, sensitive []fieldValue, p Principal, objectID, field, value string) []fieldValue {
-	if _, secret := textread.Sensitive(field); secret && p.Assistant {
-		return append(sensitive, fieldValue{field, value})
-	}
-	if _, read := haystacks[objectID]; !read {
-		// A correction of a photo not read again yet: no whole text first.
-		haystacks[objectID] = []string{""}
-	}
-	haystacks[objectID] = append(haystacks[objectID], value)
-	return sensitive
 }
