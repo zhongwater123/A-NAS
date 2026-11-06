@@ -22,7 +22,8 @@ SYSTEM = (
     "素材目录按原片时间分成片段：每个片段先一行写它在原片里的时间、有几张卡片。"
     "卡片少的片段，下面每行一张卡片：“卡片 id 可剪X秒 光线 描述（亮点）毛病”，卡片 id 是“视频-镜头序号-段”；"
     "卡片多的片段只给一段概述，是本机小模型按这些卡片写的。"
-    "描述由本机小模型看三帧写成，可能看错。\n"
+    "描述由本机小模型看三帧写成，可能看错。"
+    "有人说话的卡片最后写台词：每句话在这张卡片里的起止秒数和原文（语音识别写的，可能有错字），概述的片段在概述后面按卡片列出台词。\n"
     "先写故事线：按指令要的效果，把成片按播放顺序分成几个段落，每个段落一句内容和对应的片段或卡片。只放讲得进故事线的内容。\n"
     "成片由段落组成。每个段落是原片同一时刻里连续的几个镜头：你指定从哪里开始，取几个镜头，"
     "程序从这里按原片顺序往后连续取，段落内部怎么接，沿用原片的剪辑；只有段落之间才换时刻、换地点，要想好段落之间怎么过渡。\n"
@@ -36,15 +37,18 @@ SYSTEM = (
     "目标时长是上限：各段落加起来不要超过它，宁短勿凑，不为凑时长加段落、加镜头或把段落写长。\n"
     "4. shows：一句话写这个段落要呈现的、画面里看得见的东西，不写地名、年代、情绪，程序按它找起点、定入出点。\n"
     "5. reason：这个段落在故事线里起什么作用。\n"
+    "6. said：这个段落要完整保留的台词，照目录原文抄，可以一两句；不保留台词就不写。"
+    "要保留台词，就让段落的秒数盖住整句，不要停在半句话上。\n"
+    "另外：相邻两个段落不要从同一个镜头里接着取，看起来像跳切；电影和夜景本来就暗，暗不算毛病；不要用片头片尾字幕、黑场或纯文字画面。\n"
     "按故事需要选，不按片段长短或卡片多少分配：很长的片段可能只用一个段落，很短的片段也可以用。\n"
     "只输出一个 JSON 对象，不要别的文字："
-    '{"story": "故事线", "paragraphs": [{"card": "卡片 id", "part": 片段号, "shots": 镜头数, "seconds": 秒数, "shows": "画面", "reason": "作用"}]}，'
+    '{"story": "故事线", "paragraphs": [{"card": "卡片 id", "part": 片段号, "shots": 镜头数, "seconds": 秒数, "shows": "画面", "reason": "作用", "said": "台词"}]}，'
     "card 和 part 写一个即可。"
     "计划不合规则会被退回并说明原因，照着改好后再输出完整的新计划。"
 )
 
 
-FIELDS = ("card", "part", "shots", "seconds", "shows", "reason")
+FIELDS = ("card", "part", "shots", "seconds", "shows", "reason", "said")
 
 
 def _clock(seconds: float) -> str:
@@ -55,7 +59,7 @@ def message(index: moments.Index, instruction: str, seconds: float, style: str |
     """The request's one message: the instruction, the seconds, the style's rules and the catalog
     in the film's parts (index.parts, one a video without them), each part's line and then its
     cards' lines, or its summary when they run past moments.PART_CHARS."""
-    catalog = index.catalog(times=False, lengths=True, titles=False)
+    catalog = index.catalog(times=False, lengths=True, titles=False, said=True)
     lines = [f"指令：{instruction}", f"目标时长：{seconds:g} 秒以内"]
     if style:
         lines.append(f"体裁：{style}" + (f"。剪法：{STYLES[style]}" if STYLES.get(style) else ""))
@@ -75,6 +79,8 @@ def message(index: moments.Index, instruction: str, seconds: float, style: str |
         body = [listed[i] for i in ids]
         if part.get("summary") and sum(len(line) for line in body) > moments.PART_CHARS:
             lines.append("概述：" + part["summary"])
+            # The summary leaves out the cards; their lines go after it, each with its card (#416).
+            lines += [f"{i} {index.said_line(cards[i])}" for i in ids if index.said_line(cards[i])]
         else:
             lines += body
     return "\n".join(lines)

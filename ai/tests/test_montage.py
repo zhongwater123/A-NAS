@@ -214,6 +214,15 @@ class MomentsTest(unittest.TestCase):
         index = moments.Index({"model": "test", "videos": {"08": meta | {"same_place": [[5.3, 0.87]]}}}, vectors)
         self.assertEqual([(c["start"], c["end"]) for c in index.cards], [(0, 5.3), (5.3, 12)])
 
+    def test_a_cards_lines_are_its_sentences_with_their_seconds_in_it(self):
+        card = {"id": "07-1-0", "video": "07", "start": 10.0, "end": 20.0}
+        self.index.said = {"07": [(8.0, 9.5, "Look"), (9.6, 10.4, " at"), (10.5, 11.0, " that."),
+                                  (12.0, 12.5, "这是"), (12.5, 13.0, "外滩"),
+                                  (19.0, 19.8, "And"), (19.9, 21.0, " then")]}
+        self.assertEqual(self.index.lines(card), [(0, 1.0, "…at that."), (2.0, 3.0, "这是外滩"), (9.0, 10.0, "And then…")])
+        self.assertEqual(self.index.said_line(card), "台词：0–1秒「…at that.」 2–3秒「这是外滩」 9–10秒「And then…」")
+        self.assertEqual(self.index.said_line({"id": "07-1-1", "video": "07", "start": 30.0, "end": 40.0}), "")
+
     def write_index(self, work):
         with open(os.path.join(work, "index.json"), "w", encoding="utf-8") as file:
             json.dump({"model": "test", "videos": self.index.videos}, file)

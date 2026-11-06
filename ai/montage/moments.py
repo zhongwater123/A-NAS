@@ -78,6 +78,15 @@ TAIL_MIN = 2.5
 # at most SNAP to reach one.
 PAUSE = 0.3
 SNAP = 1.5
+# Words this far apart end a sentence, for the lines a card's catalog line ends with (lines): the
+# planner sees what is said over a card and the seconds of each sentence in it, as 方案 B's review
+# sees each clip's dialogue, so that a plan can keep a line whole (#416). A sentence runs to
+# LINE_CHARS characters in the catalog at most.
+SENTENCE_GAP = 0.6
+ENDS = (".", "?", "!", "。", "？", "！")
+LINE_CHARS = 60
+# Less of a sentence than this inside a card is not listed: a word that only crosses its edge.
+LINE_MIN = 0.3
 # Index.topped grows a segment this much at a time back to the seconds its plan gave it (#398):
 # fill's half-second steps and the trims at cuts after it had cut the Shanghai vlog's 76 planned
 # seconds to 63.5, each segment 0.2-0.8 s short of its share with room left in its card.
@@ -270,6 +279,8 @@ class Index:
         self.cards = self._cards()
         self.captions, self.notes, self.pictures = {}, {}, {}
         self.words: dict[str, list] = {}
+        # The same words with what was said, for the catalog's lines (lines).
+        self.said: dict[str, list] = {}
         self.scenes: dict[str, str] = {}
         # The title, credits or caption over a card's picture ("kind：words", montage.look.TITLES).
         self.texts: dict[str, str] = {}
@@ -323,7 +334,9 @@ class Index:
         speech = os.path.join(os.path.dirname(index_path), SPEECH)
         if os.path.exists(speech):
             with open(speech, encoding="utf-8") as file:
-                loaded.words = {v: [(a, b) for a, b, *_ in words] for v, words in json.load(file)["videos"].items()}
+                spoken = json.load(file)["videos"]
+            loaded.words = {v: [(a, b) for a, b, *_ in words] for v, words in spoken.items()}
+            loaded.said = {v: [(a, b, w[0]) for a, b, *w in words if w and w[0].strip()] for v, words in spoken.items()}
         return loaded
 
     @staticmethod
@@ -398,7 +411,7 @@ class Index:
         return pieces
 
     def catalog(self, videos=None, times=True, scenes=False, lengths=False, titles=True, paces=False,
-                joins=False) -> dict:
+                joins=False, said=False) -> dict:
         """What the library holds, for writing a story and probes from (#326): every card of every
         video (or of videos), in time order, as one line of its seconds and its shot's, light,
         caption, highlight and flaws, enough to cut it without searching for it. Cards with no
@@ -407,8 +420,9 @@ class Index:
         card's scene number, and "scenes" names each scene once with its number of cards. With
         lengths, each line says the most seconds a segment of its card can run (usable); with
         paces, its pace from its picture's change (pace_of), and each scene how many cards of each
-        pace it has; with joins, the scenes it may change to (near). Without titles, cards with a title,
-        credits, a logo or a caption over them (self.texts) are left out."""
+        pace it has; with joins, the scenes it may change to (near); with said, what is said over
+        it (said_line). Without titles, cards with a title, credits, a logo or a caption over them
+        (self.texts) are left out."""
         out = {}
         listed = [c for c in self.cards if (videos is None or c["video"] in videos)
                   and (titles or c["id"] not in self.texts)]
@@ -432,6 +446,8 @@ class Index:
             flaws = self._looks(card["id"]).get("flaws")
             if flaws:
                 line += f" 毛病：{'、'.join(flaws)}"
+            if said and self.said_line(card):
+                line += " " + self.said_line(card)
             entry = out.setdefault(card["video"], {"seconds": round(self.videos[card["video"]]["duration"], 1), "cards": []})
             entry["cards"].append(line)
         if not scenes or not self.scene_of:
@@ -446,6 +462,42 @@ class Index:
                     paced.setdefault(n, dict.fromkeys(PACES, 0))[pace] += 1
         return {"scenes": {str(n): f"{self.scene_names.get(n, '')}（{k} 张卡片{self._paces(paced.get(n))}）{self._joins(n, counts) if joins else ''}"
                            for n, k in sorted(counts.items())}, "videos": out}
+
+    def lines(self, card: dict) -> list[tuple[float, float, str]]:
+        """The sentences said over card: the seconds of their words within it (0 at its start) and
+        those words, a sentence ending where the words are SENTENCE_GAP apart or one ends a
+        sentence (. ? ! 。？！); "…" marks a sentence that runs on before or after the card."""
+        runs = []
+        for a, b, word in sorted(self.said.get(card["video"], [])):
+            if runs and a - runs[-1][-1][1] < SENTENCE_GAP and not runs[-1][-1][2].rstrip().endswith(ENDS):
+                runs[-1].append((a, b, word))
+            else:
+                runs.append([(a, b, word)])
+        out = []
+        for run in runs:
+            inside = [w for w in run if w[1] > card["start"] and w[0] < card["end"]]
+            if not inside or min(inside[-1][1], card["end"]) - max(inside[0][0], card["start"]) < LINE_MIN:
+                continue
+            text = ""
+            for _a, _b, word in inside:
+                spaced = word[:1].isspace()
+                word = word.strip()
+                if text and (spaced or (text[-1].isascii() and text[-1].isalnum() and word[:1].isascii() and word[:1].isalnum())):
+                    text += " "
+                text += word
+            if len(text) > LINE_CHARS:
+                text = text[:LINE_CHARS] + "…"
+            before = inside[0] is not run[0] or inside[0][0] < card["start"]
+            after = inside[-1] is not run[-1] or inside[-1][1] > card["end"]
+            text = ("…" if before else "") + text + ("…" if after and not text.endswith("…") else "")
+            out.append((round(max(inside[0][0], card["start"]) - card["start"], 1),
+                        round(min(inside[-1][1], card["end"]) - card["start"], 1), text))
+        return out
+
+    def said_line(self, card: dict) -> str:
+        """card's lines as the catalog writes them: 台词：0.7–5.1秒「…」 for each sentence; "" for none."""
+        said = self.lines(card)
+        return "台词：" + " ".join(f"{a:g}–{b:g}秒「{t}」" for a, b, t in said) if said else ""
 
     @staticmethod
     def _paces(paced: dict | None) -> str:
