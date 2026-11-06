@@ -10,7 +10,8 @@ or if a vendored file imports a package at run time (type-only imports, which th
 erases, are fine).
 
 Run on the development machine, with a dsh-pet checkout at the pinned commit and its HEVC
-animations for Safari (the assets-mov release, MOV_ZIP below):
+animations for Safari (the assets-mov release, MOV_ZIP below), in a Python that has the
+development tools of ai/requirements-dev.txt installed (json5 reads dsh-pet's config.jsonc):
     python3 scripts/vendor-dsh-pet.py <dsh-pet checkout> web/src/companion/dsh-pet <assets-mov zip>
 
 Imports lose their .ts suffix (A-NAS does not import with extensions). Changes A-NAS
@@ -26,6 +27,8 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+
+import json5
 
 PINNED = "10f6c868b8110c897af33d6137a3d85e84b665ba"
 # Safari draws no alpha in VP9; dsh-pet publishes the same animations as HEVC with alpha in one
@@ -129,31 +132,12 @@ for path in sorted(target.rglob("*.ts")):
             sys.exit(f"{path.relative_to(target)} imports {m.group(3)} at run time")
 
 
-def jsonc(text: str) -> object:
-    """Parses dsh-pet's config.jsonc: JSON with comments and trailing commas."""
-    out, i, inside = [], 0, False
-    while i < len(text):
-        c = text[i]
-        if inside:
-            out.append(text[i:i + 2] if c == "\\" else c)
-            i += 2 if c == "\\" else 1
-            inside = c != '"'
-        elif text.startswith("//", i):
-            i = text.find("\n", i) if "\n" in text[i:] else len(text)
-        elif text.startswith("/*", i):
-            i = text.index("*/", i) + 2
-        else:
-            out.append(c)
-            inside = c == '"'
-            i += 1
-    return json.loads(re.sub(r",(\s*[}\]])", r"\1", "".join(out)))
-
-
 # The animations the companion plays and how often, from the commit's own configuration, with the
 # work status bubble's lines the card picks from. The balance and the meal game are dsh-pet
 # features A-NAS does not have; sleep and the speech animations (events.whisper, which the card
 # plays when it speaks and without which it shows no bubble) are what VNAS controls.
-config = jsonc((upstream / "dsh-pet" / "assets" / "config.jsonc").read_text(encoding="utf-8"))
+# JSON with comments and trailing commas, read with json5 rather than by hand (AGENTS.md).
+config = json5.loads((upstream / "dsh-pet" / "assets" / "config.jsonc").read_text(encoding="utf-8"))
 animations = {key: value for key, value in config["animations"].items() if key != "baifan"}
 animations["events"] = {key: config["animations"]["events"][key] for key in ("whisper", "workStatus")}
 (target / "animations.json").write_text(
