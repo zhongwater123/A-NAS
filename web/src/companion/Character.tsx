@@ -1,8 +1,6 @@
-import { AnimatePresence, MotionConfig, motion } from "motion/react";
-import { type CSSProperties, useId } from "react";
+import { useId } from "react";
 
-import naiwa from "./assets/naiwa.webp";
-import { type PetAction, taskFeeling } from "./behaviour";
+import type { PetAction } from "./behaviour";
 import styles from "./companion.module.css";
 import type { Character as CharacterKind } from "./preferences";
 import type { TaskPhase } from "./taskState";
@@ -12,66 +10,14 @@ import type { TaskPhase } from "./taskState";
 export function Character({
   kind,
   asleep = false,
-  phase = "idle",
-  action,
 }: {
   kind: CharacterKind;
   asleep?: boolean;
   phase?: TaskPhase;
   action?: PetAction;
 }) {
-  if (kind === "naiwa") {
-    const rows: Record<PetAction, [number, number]> = {
-      idle: [0, 7],
-      wave: [3, 4],
-      happy: [4, 5],
-      concerned: [5, 8],
-      thinking: [6, 6],
-      working: [8, 6],
-      waiting: [7, 6],
-      left: [2, 8],
-      right: [1, 8],
-    };
-    const pose = asleep ? "idle" : (action ?? taskFeeling[phase].action);
-    const [row, count] = rows[pose];
-    return (
-      <MotionConfig reducedMotion="user">
-        <motion.span
-          aria-hidden="true"
-          className={styles.avatar}
-          data-action={pose}
-          initial={false}
-          animate={{
-            x: pose === "left" ? -20 : pose === "right" ? 20 : 0,
-            y: pose === "happy" ? -7 : 0,
-            rotate: pose === "wave" ? -3 : 0,
-          }}
-          transition={{ type: "spring", stiffness: 170, damping: 18 }}
-        >
-          <AnimatePresence initial={false}>
-            <motion.span
-              key={pose}
-              className={styles.naiwaSprite}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.18 }}
-              style={
-                {
-                  backgroundImage: `url(${naiwa})`,
-                  backgroundPositionY: `${row * 10}%`,
-                  animationTimingFunction: `steps(${count})`,
-                  animationPlayState: asleep ? "paused" : "running",
-                  "--naiwa-end": `${(count / 7) * 100}%`,
-                } as CSSProperties
-              }
-            />
-          </AnimatePresence>
-        </motion.span>
-      </MotionConfig>
-    );
-  }
-  return <LegacyCharacter kind={kind} asleep={asleep} />;
+  // The third-party Naiwa sprite sheet is no longer shipped; its slot shows the code-drawn character.
+  return <LegacyCharacter kind={kind === "naiwa" ? "glow" : kind} asleep={asleep} />;
 }
 function LegacyCharacter({ kind, asleep }: { kind: CharacterKind; asleep: boolean }) {
   const id = useId().replace(/:/g, "");

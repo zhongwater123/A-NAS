@@ -41,7 +41,6 @@ async function run() {
     await page.getByRole("button", { name: "小窝", exact: true }).click();
     const home = await homeWindow;
     await home.getByRole("heading", { name: "伙伴的小窝" }).waitFor();
-    assert.match(await home.locator("[class*=naiwaSprite]").getAttribute("style"), /naiwa-/);
     await page.screenshot({ path: path.join(output, "desktop.png") });
     await home.screenshot({ path: path.join(output, "home.png") });
     await page.getByRole("button", { name: "隐藏", exact: true }).click();
@@ -50,7 +49,7 @@ async function run() {
     assert.equal(hidden, true);
     assert.deepEqual(errors, []);
     await fs.writeFile(path.join(output, "result.json"), JSON.stringify({ result: "passed", scope: executable ? "packaged app; offline only" : "source Electron; offline only", preferences,
-      scenarios: ["greeting", "peekaboo and gift", "quiet", "home", "naiwa asset", "hide"], errors }, null, 2));
+      scenarios: ["greeting", "peekaboo and gift", "quiet", "home", "hide"], errors }, null, 2));
     console.log(`Desktop smoke passed; evidence: ${output}`);
   } finally {
     if (desktop) await desktop.close();
