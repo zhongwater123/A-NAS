@@ -18,7 +18,7 @@
 - [启用向量索引](enable-vector-index.md)（draft；实验 NAS 已执行第 1–4 步与第 6 步，影子比对的数据待收集）
 - [启用局域网 Web 访问](enable-lan-web-access.md)（verified）
 - [启用互联网访问](enable-internet-access.md)（draft；边缘服务器已准备，NAS 一侧与开放待执行）
-- [开启管理员终端](enable-admin-terminal.md)（draft；系统测试与实验 NAS 均待执行）
+- [开启管理员终端](enable-admin-terminal.md)（draft；系统测试已验证，实验 NAS 待执行）
 - [启用网页搜索](enable-web-search.md)（draft；实验 NAS 已执行第 1–3 步，空闲外发待查明）
 - [验收相册 M1](accept-photo-library-m1.md)（draft；切片 7 实机闸门）
 - [在实验 NAS 上试用 AI 助手](try-ai-assistant-on-experimental-nas.md)（draft；云端模型，仅开发测试）
