@@ -58,6 +58,8 @@ func asInvalid(err error) error {
 
 func wireError(err error) string {
 	switch {
+	case errors.Is(err, shares.ErrBridgeChanged):
+		return "generation_changed"
 	case errors.Is(err, shares.ErrBusy):
 		return "busy"
 	case errors.Is(err, shares.ErrInvalid):
@@ -84,6 +86,8 @@ func wireError(err error) string {
 }
 func responseError(code string) error {
 	switch code {
+	case "generation_changed":
+		return shares.ErrBridgeChanged
 	case "publication_unknown":
 		return shares.ErrPublicationUnknown
 	case "busy":
@@ -204,7 +208,7 @@ func serveConnection(ctx context.Context, conn *net.UnixConn, local *Local) {
 		return
 	}
 	if !local.generationMatches(req.Generation) {
-		_ = writeWire(conn, wireResponse{Code: "inactive"}, nil)
+		_ = writeWire(conn, wireResponse{Code: "generation_changed"}, nil)
 		return
 	}
 	ctx = accounts.WithSessionToken(context.WithValue(ctx, generationKey{}, req.Generation), req.Token)

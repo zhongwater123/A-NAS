@@ -245,6 +245,7 @@
       "413": { $ref: "../components/common.yaml#/responses/ProductError" }
       "415": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "507": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/family/babies/{babyId}/trash:
   get:
     operationId: listFamilyTrash
@@ -324,10 +325,12 @@
   get:
     operationId: listFamilyWall
     summary: "The channel's message wall in 亲友团, newest first"
+    parameters: [{ name: cursor, in: query, schema: { type: string } }]
     responses:
-      "200": { description: Messages, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/family.yaml#/schemas/FamilyComment" } } } } } } }
+      "200": { description: Messages, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/family.yaml#/schemas/FamilyComment" } }, next: { type: string } } } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
   post:
     operationId: addFamilyWallMessage
     summary: Leave a message on the wall

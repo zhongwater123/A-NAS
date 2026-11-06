@@ -239,7 +239,10 @@ func (l *Local) publish(ctx context.Context, id string, fn func() error) error {
 	if e := ctx.Err(); e != nil {
 		return e
 	}
-	if id == "" || l.fenced[id] || !l.currentGeneration(ctx) {
+	if !l.currentGeneration(ctx) {
+		return shares.ErrBridgeChanged
+	}
+	if id == "" || l.fenced[id] {
 		return shares.ErrInactive
 	}
 	return fn()
@@ -268,7 +271,7 @@ func (l *Local) Directory(ctx context.Context, u shares.User, t shares.Target, n
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.currentGeneration(ctx) {
-		return "", shares.ErrInactive
+		return "", shares.ErrBridgeChanged
 	}
 	if old, ok := l.outcomes["directory/"+id]; ok {
 		return old.id, old.err
@@ -318,7 +321,12 @@ func (l *Local) Stage(ctx context.Context, u shares.User, t shares.Target, entry
 	ctx, cancel := context.WithCancel(ctx)
 	p := &pending{actor: a, ctx: ctx, cancel: cancel, shareID: t.ShareID, done: make(chan struct{})}
 	l.mu.Lock()
-	if !l.currentGeneration(ctx) || t.ShareID == "" || l.fenced[t.ShareID] {
+	if !l.currentGeneration(ctx) {
+		l.mu.Unlock()
+		cancel()
+		return "", shares.ErrBridgeChanged
+	}
+	if t.ShareID == "" || l.fenced[t.ShareID] {
 		l.mu.Unlock()
 		cancel()
 		return "", shares.ErrInactive
@@ -358,7 +366,9 @@ func (l *Local) Stage(ctx context.Context, u shares.User, t shares.Target, entry
 		}
 	}
 	l.mu.Lock()
-	if !l.currentGeneration(ctx) || l.pending[id] != p {
+	if !l.currentGeneration(ctx) {
+		err = shares.ErrBridgeChanged
+	} else if l.pending[id] != p {
 		if err == nil {
 			err = shares.ErrInactive
 		}
@@ -378,7 +388,7 @@ func (l *Local) Commit(ctx context.Context, u shares.User, id string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.currentGeneration(ctx) {
-		return shares.ErrInactive
+		return shares.ErrBridgeChanged
 	}
 	if old, ok := l.outcomes["commit/"+id]; ok {
 		return old.err
@@ -433,7 +443,7 @@ func (l *Local) Abort(ctx context.Context, u shares.User, id string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.currentGeneration(ctx) {
-		return shares.ErrInactive
+		return shares.ErrBridgeChanged
 	}
 	p := l.pending[id]
 	if p != nil && (u.ID == "" || p.actor.ID == u.ID) {
@@ -450,7 +460,7 @@ func (l *Local) Fence(ctx context.Context, id string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.currentGeneration(ctx) {
-		return shares.ErrInactive
+		return shares.ErrBridgeChanged
 	}
 	if id == "" {
 		return shares.ErrInvalid
@@ -498,7 +508,7 @@ func (l *Local) status(ctx context.Context, kind, id string) (string, error) {
 		l.mu.Lock()
 		if !l.currentGeneration(ctx) {
 			l.mu.Unlock()
-			return "", shares.ErrInactive
+			return "", shares.ErrBridgeChanged
 		}
 		if old, ok := l.outcomes[kind+"/"+id]; ok {
 			l.mu.Unlock()
@@ -527,7 +537,7 @@ func (l *Local) Check(ctx context.Context) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.currentGeneration(ctx) {
-		return shares.ErrInactive
+		return shares.ErrBridgeChanged
 	}
 	if l.broker != nil {
 		probe, cancel := context.WithTimeout(ctx, 5*time.Second)

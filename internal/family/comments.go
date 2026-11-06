@@ -149,29 +149,50 @@ VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, comment.ID, babyID, recordID, comment.Text, act
 	return comment, nil
 }
 
-// Wall lists a baby's message wall, newest first.
-func (s *Store) Wall(ctx context.Context, actor Actor, babyID string) ([]Comment, error) {
+// WallPage is a cursor page of letters, newest first.
+type WallPage struct {
+	Items []Comment `json:"items"`
+	Next  string    `json:"next,omitempty"`
+}
+
+func (s *Store) Wall(ctx context.Context, actor Actor, babyID, cursor string) (WallPage, error) {
+	page := WallPage{Items: []Comment{}}
 	if _, _, err := s.requireMember(ctx, s.db, actor); err != nil {
-		return nil, err
+		return page, err
 	}
 	if _, err := s.baby(ctx, s.db, babyID); err != nil {
-		return nil, err
+		return page, err
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT "+commentColumns+
-		" FROM comments WHERE baby_id = ? AND record_id IS NULL ORDER BY created_at DESC, id DESC LIMIT 200", babyID)
+	after, err := parseCursor(cursor)
 	if err != nil {
-		return nil, err
+		return page, ErrInvalid
+	}
+	query := "SELECT " + commentColumns + " FROM comments WHERE baby_id = ? AND record_id IS NULL"
+	args := []any{babyID}
+	if after != nil {
+		query += " AND (created_at < ? OR (created_at = ? AND id < ?))"
+		args = append(args, after.at, after.at, after.id)
+	}
+	query += " ORDER BY created_at DESC, id DESC LIMIT ?"
+	args = append(args, PageSize+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return page, err
 	}
 	defer func() { _ = rows.Close() }()
-	comments := []Comment{}
 	for rows.Next() {
 		comment, err := scanComment(rows)
 		if err != nil {
-			return nil, err
+			return page, err
 		}
-		comments = append(comments, comment)
+		page.Items = append(page.Items, comment)
 	}
-	return comments, rows.Err()
+	if len(page.Items) > PageSize {
+		page.Items = page.Items[:PageSize]
+		last := page.Items[len(page.Items)-1]
+		page.Next = (cursorKey{at: formatTime(last.CreatedAt), id: last.ID}).String()
+	}
+	return page, rows.Err()
 }
 
 // DeleteComment removes a comment for good. Authors delete their own;

@@ -5,7 +5,9 @@
 
 ## 问题
 
-[日志规格](../specs/logs.md)写明活动记录永久保存在系统盘的各模块数据库中，不提供删除。[#167](https://github.com/zhongwater123/A-NAS/issues/167) 指出文件服务的审计表没有保留策略，并列出“设定保留规则”一项；修复只给审计表建了索引，没有改保留期限，因为改变它需要产品决定（[调查](../investigations/2026-10-21-whole-space-reconcile-scale.md)）。不定的话，活动记录随使用一直增长。
+账号、文件、存储与相册的活动记录沿用既有永久保留规则，不提供删除入口（[日志规格](../specs/logs.md)）。[#167](https://github.com/zhongwater123/A-NAS/issues/167) 指出文件服务的审计表没有保留策略，并列出“设定保留规则”一项；修复只给审计表建了索引，没有改保留期限，因为改变它需要产品决定（[调查](../investigations/2026-10-21-whole-space-reconcile-scale.md)）。不定的话，活动记录随使用一直增长。
+
+家庭中心的数据完整性修复 [#363](https://github.com/zhongwater123/A-NAS/issues/363) 单独加入了审计保留期限，当前行为见[家庭中心规格](../specs/family-center.md#边界与失败)。它不决定其他模块的全局策略；本记录仍为 pending。
 
 ## 选项
 

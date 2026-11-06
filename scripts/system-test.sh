@@ -468,38 +468,6 @@ check "the moved record is root's alone" \
 check "the record left the Product Service's directory" test ! -e /var/lib/a-nas/app-identities.json
 check "Product Service cannot list the Host Agent's records" denied as a-nas ls /var/lib/a-nas-host
 
-# --- smbd listens only on the addresses present when it starts, so it waits
-# for the SMB interface's IPv4 address and tries again until it is there
-# (docs/investigations/2026-11-04-smbd-starts-before-dhcp-address.md).
-check "systemd accepts smbd with the installer's drop-in" verified /usr/lib/systemd/system/smbd.service
-check "smbd waits for the SMB interface's address" \
-  grep -Fq "show dev $iface scope global" <<<"$(systemctl show -p ExecStartPre --value smbd)"
-check "smbd starts again after a failed start" test "$(systemctl show -p Restart --value smbd)" = on-failure
-# The same wait on an interface whose address comes late, as from DHCP at boot.
-late_dropin=/etc/systemd/system/smbd.service.d/zz-system-test-late-address.conf
-ip link add anas-late0 type veth peer name anas-late1
-ip link set anas-late0 up
-sed "s/\b$iface\b/anas-late0/g" /etc/systemd/system/smbd.service.d/a-nas-lan-address.conf >"$late_dropin"
-systemctl daemon-reload
-systemctl stop smbd
-systemctl start --no-block smbd
-sleep 3
-check "smbd does not start before the interface has an address" test "$(systemctl is-active smbd)" = activating
-for _ in $(seq 1 30); do (($(systemctl show -p NRestarts --value smbd) > 0)) && break; sleep 1; done
-check "smbd tries again while the address is missing" test "$(systemctl show -p NRestarts --value smbd)" -gt 0
-ip address add 192.0.2.10/24 dev anas-late0
-for _ in $(seq 1 10); do systemctl is-active --quiet smbd && break; sleep 1; done
-check "smbd starts once the interface has an address" systemctl is-active --quiet smbd
-rm -f "$late_dropin"
-ip link delete anas-late0
-systemctl daemon-reload
-systemctl restart smbd
-# smbd tells systemd it is ready before it opens its listening sockets
-# (source3/smbd/server.c: daemon_ready, then open_sockets_smbd), so the restart
-# can return a moment before port 445 listens.
-for _ in $(seq 1 10); do [[ -n "$(ss -ltnH "src $ip and sport = :445")" ]] && break; sleep 1; done
-check "smbd listens on the SMB interface's address" grep -q . <<<"$(ss -ltnH "src $ip and sport = :445")"
-
 # --- The local console (issue #174): an account of its own that cannot log
 # in, starting the launcher of the installed release. The container has no
 # display, so the unit is installed but neither enabled nor started.
@@ -538,6 +506,40 @@ alice_csrf=$(login alice "$alice_password" /tmp/alice.jar)
 owner_id=$(id -u owner)
 alice_id=$(id -u alice)
 check "accounts have A-NAS UIDs" test "$owner_id" -ge 20100 -a "$alice_id" -ge 20100 -a "$owner_id" -ne "$alice_id"
+
+# The first account's Samba credential installs the product's interface
+# configuration. Before that, Debian's default listens on wildcard addresses.
+# --- smbd listens only on the addresses present when it starts, so it waits
+# for the SMB interface's IPv4 address and tries again until it is there
+# (docs/investigations/2026-11-04-smbd-starts-before-dhcp-address.md).
+check "systemd accepts smbd with the installer's drop-in" verified /usr/lib/systemd/system/smbd.service
+check "smbd waits for the SMB interface's address" \
+  grep -Fq "show dev $iface scope global" <<<"$(systemctl show -p ExecStartPre --value smbd)"
+check "smbd starts again after a failed start" test "$(systemctl show -p Restart --value smbd)" = on-failure
+# The same wait on an interface whose address comes late, as from DHCP at boot.
+late_dropin=/etc/systemd/system/smbd.service.d/zz-system-test-late-address.conf
+ip link add anas-late0 type veth peer name anas-late1
+ip link set anas-late0 up
+sed "s/\b$iface\b/anas-late0/g" /etc/systemd/system/smbd.service.d/a-nas-lan-address.conf >"$late_dropin"
+systemctl daemon-reload
+systemctl stop smbd
+systemctl start --no-block smbd
+sleep 3
+check "smbd does not start before the interface has an address" test "$(systemctl is-active smbd)" = activating
+for _ in $(seq 1 30); do (($(systemctl show -p NRestarts --value smbd) > 0)) && break; sleep 1; done
+check "smbd tries again while the address is missing" test "$(systemctl show -p NRestarts --value smbd)" -gt 0
+ip address add 192.0.2.10/24 dev anas-late0
+for _ in $(seq 1 10); do systemctl is-active --quiet smbd && break; sleep 1; done
+check "smbd starts once the interface has an address" systemctl is-active --quiet smbd
+rm -f "$late_dropin"
+ip link delete anas-late0
+systemctl daemon-reload
+systemctl restart smbd
+# smbd tells systemd it is ready before it opens its listening sockets
+# (source3/smbd/server.c: daemon_ready, then open_sockets_smbd), so the restart
+# can return a moment before port 445 listens.
+for _ in $(seq 1 10); do [[ -n "$(ss -ltnH "src $ip and sport = :445")" ]] && break; sleep 1; done
+check "smbd listens on the SMB interface's address" grep -q . <<<"$(ss -ltnH "src $ip and sport = :445")"
 
 space_of() { curl -fsS -b "$1" "$api/api/v1/spaces" | jq -r --arg kind "$2" '[.items[] | select(.kind == $kind)][0].id'; }
 upload() { # JAR CSRF SPACE FILE NAME -> file ID
@@ -586,9 +588,13 @@ shares_ready() {
   done
   return 1
 }
-check "member sharing works through production service sandboxes" \
+sharing_smoke() {
   python3 /src/scripts/smoke-member-sharing.py "$api" /tmp/owner.jar /tmp/alice.jar \
-    "$owner_csrf" "$alice_csrf" "$owner_file" "$alice_private"
+    "$owner_csrf" "$alice_csrf" "$owner_file" "$alice_private" "${1:-initial}" && return 0
+  journalctl -b -u anas-shares -u anas-api --no-pager -n 100 || true
+  return 1
+}
+check "member sharing works through production service sandboxes" sharing_smoke
 # --- LAN Web entry (ADR 0012): plain HTTP through Caddy on the LAN address.
 lan=http://$ip
 lasting_login() { # URL USER PASSWORD JAR -> the session JSON of a login that asks to last
@@ -737,6 +743,8 @@ printf 'ANAS_TERMINAL=enabled\n' >> /etc/a-nas/anas-api.env
 systemctl restart anas-api
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 check "sharing recovers after the Product Service restarts" shares_ready
+check "sharing can create, save and revoke after the Product Service restarts" \
+  sharing_smoke after-api-restart
 check "the operator turns the terminal on" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = true
 check "members cannot use the terminal" test "$(status_of -b /tmp/alice.jar "$api/api/v1/terminal")" = 403

@@ -146,7 +146,7 @@ export function Members({ baby }: { baby: FamilyBaby }) {
         })}
       </ul>
 
-      <Letters baby={baby} />
+      <Letters key={baby.id} baby={baby} />
     </div>
   );
 }
@@ -158,6 +158,8 @@ function Letters({ baby }: { baby: FamilyBaby }) {
   const { toast } = family;
   const nameOf = useMemberName();
   const [messages, setMessages] = useState<FamilyComment[]>();
+  const [next, setNext] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const name = baby.nickname || baby.name;
@@ -165,8 +167,11 @@ function Letters({ baby }: { baby: FamilyBaby }) {
   useEffect(() => {
     let live = true;
     listWall(baby.id).then(
-      (items) => {
-        if (live) setMessages(items);
+      (page) => {
+        if (live) {
+          setMessages(page.items);
+          setNext(page.next ?? "");
+        }
       },
       (caught: unknown) => {
         if (live) toast({ text: familyError(caught), tone: "error" });
@@ -248,6 +253,24 @@ function Letters({ baby }: { baby: FamilyBaby }) {
           );
         })}
       </ul>
+      {next && (
+        <button
+          type="button"
+          disabled={loadingMore}
+          onClick={() => {
+            setLoadingMore(true);
+            void listWall(baby.id, next)
+              .then((page) => {
+                setMessages((current) => [...(current ?? []), ...page.items]);
+                setNext(page.next ?? "");
+              })
+              .catch((caught: unknown) => toast({ text: familyError(caught), tone: "error" }))
+              .finally(() => setLoadingMore(false));
+          }}
+        >
+          读取更早的留言
+        </button>
+      )}
     </section>
   );
 }
