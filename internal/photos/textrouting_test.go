@@ -50,6 +50,19 @@ func textPhotos(t *testing.T, service *photos.Service, p photos.Principal) *int 
 	return status.TextPhotos
 }
 
+// textProgress is how far reading text has come for p.
+func textProgress(t *testing.T, service *photos.Service, p photos.Principal) photos.TextProgress {
+	t.Helper()
+	status, err := service.AIStatus(context.Background(), p)
+	if err != nil {
+		t.Fatalf("AIStatus() error = %v", err)
+	}
+	if status.Texts == nil {
+		t.Fatal("AIStatus() reports no text progress")
+	}
+	return *status.Texts
+}
+
 func TestPhotosWhoseVectorLooksLikeTextAreQueuedForReading(t *testing.T) {
 	embedder := &colorEmbedder{}
 	service := routeService(t, filepath.Join(t.TempDir(), "photos"), embedder, redRoute(t, "colour-1"))
@@ -76,6 +89,10 @@ func TestPhotosWhoseVectorLooksLikeTextAreQueuedForReading(t *testing.T) {
 	}
 	if got := textPhotos(t, service, namedBob); got == nil || *got != 2 {
 		t.Fatalf("Bob's TextPhotos = %s, want his red photo and the shared one", shown(got))
+	}
+	// This embedder reads no text: all of them wait.
+	if got := textProgress(t, service, namedAlice); got != (photos.TextProgress{Queued: 3}) {
+		t.Fatalf("Alice's text progress = %+v, want three queued", got)
 	}
 }
 

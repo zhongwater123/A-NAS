@@ -261,11 +261,26 @@ function AlbumLink({
 // run the card is simply absent.
 function AICard({ ai }: { ai?: PhotoAIStatus }) {
   if (!ai || ai.state === "unavailable") return null;
-  const total = ai.ready + ai.pending + ai.failed;
-  const share = total ? ai.ready / total : 1;
+  let total = ai.ready + ai.pending + ai.failed;
+  let share = total ? ai.ready / total : 1;
   let title: string;
   let detail: string;
-  if (!ai.pending) {
+  let failed = ai.failed ? `；${ai.failed} 张无法识别` : "";
+  // Local AI reads the text in photos once it has organised them all.
+  const texts = !ai.pending && ai.texts?.queued ? ai.texts : undefined;
+  if (texts) {
+    const read = texts.read + texts.failed;
+    total = read + texts.queued;
+    share = read / total;
+    title = `${ai.state === "working" ? "正在读取文字" : "已读取文字"} ${read} / ${total}`;
+    detail =
+      ai.state === "working"
+        ? "读完后可以搜索照片中的文字"
+        : ai.state === "paused" && ai.reason !== "foreground"
+          ? "设备正忙，稍后继续读取"
+          : "相册空闲 5 分钟后继续读取";
+    failed = texts.failed ? `；${texts.failed} 张没能读出` : "";
+  } else if (!ai.pending) {
     title = `已整理全部 ${ai.ready} 张`;
     detail = "可以用自然语言搜索照片";
   } else if (ai.state === "working") {
@@ -283,7 +298,7 @@ function AICard({ ai }: { ai?: PhotoAIStatus }) {
         <strong>{title}</strong>
         <small>
           {detail}
-          {ai.failed ? `；${ai.failed} 张无法识别` : ""}
+          {failed}
         </small>
         {total > 0 && (
           <span className={styles.phAiBar}>

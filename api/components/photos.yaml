@@ -200,7 +200,7 @@ schemas:
   PhotoSearchResults:
     type: object
     additionalProperties: false
-    required: [items, semantic, closest, texts]
+    required: [items, semantic, closest, names, texts]
     properties:
       items: { type: array, items: { $ref: "#/schemas/PhotoAsset" } }
       next: { type: string }
@@ -209,6 +209,10 @@ schemas:
         type: integer
         minimum: 0
         description: "How many results, counted over all pages, make up the closest group: the name and user tag matches, the photos whose text holds the query, then the photos the object detector found the query's things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count."
+      names:
+        type: integer
+        minimum: 0
+        description: "How many results, counted over all pages, match the query by name or user tag; they come first."
       texts:
         type: integer
         minimum: 0
@@ -252,7 +256,7 @@ schemas:
             read: { type: string, description: What was read; empty when nothing was. }
             passed: { type: boolean, description: "Whether the value needs no one to look at it: the reading passed every check, or a member corrected it." }
             reasons: { type: array, items: { type: string, enum: [not_in_text, format, mismatch, low_confidence, unfinished] } }
-            sensitive: { type: boolean, description: "Shown masked until the viewer opens it." }
+            sensitive: { type: boolean, description: "A member's AI assistant gets the value only as a handle." }
             correction:
               type: object
               additionalProperties: false
@@ -319,6 +323,15 @@ schemas:
       failed: { type: integer, minimum: 0 }
       clusters: { type: string, enum: [ready, preparing], description: "Whether AI 聚合 can list its groups; preparing while label texts wait for the Worker, which runs only once the photo library has been idle for a while. Absent when the Worker's model has no calibrated clusters." }
       textPhotos: { type: integer, minimum: 0, description: "Originals whose vector sends them to have their text read (documents, receipts, cards, screenshots), queued or read. Absent while the text route does not apply to the Worker's model or its queries wait for the Worker." }
+      texts:
+        type: object
+        additionalProperties: false
+        required: [read, queued, failed]
+        description: "textPhotos split by where reading their text stands; absent when textPhotos is."
+        properties:
+          read: { type: integer, minimum: 0 }
+          queued: { type: integer, minimum: 0, description: "Waiting to be read, also when an older reader's reading is kept meanwhile." }
+          failed: { type: integer, minimum: 0 }
   PhotoDirectoryListing:
     type: object
     additionalProperties: false

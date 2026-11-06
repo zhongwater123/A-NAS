@@ -191,6 +191,16 @@ type AIStatus struct {
 	// text route does not apply to the Worker's model or its queries wait for
 	// the Worker.
 	TextPhotos *int `json:"textPhotos,omitempty"`
+	// Texts splits TextPhotos into the photos read, waiting to be read and
+	// whose reading failed; absent when TextPhotos is.
+	Texts *TextProgress `json:"texts,omitempty"`
+}
+
+// TextProgress is how far reading the text in photos has come.
+type TextProgress struct {
+	Read   int `json:"read"`
+	Queued int `json:"queued"`
+	Failed int `json:"failed"`
 }
 
 const (
@@ -318,8 +328,12 @@ func (s *Service) AIStatus(ctx context.Context, p Principal) (AIStatus, error) {
 	if status.Clusters, err = s.clusterState(ctx, model); err != nil {
 		return AIStatus{}, err
 	}
-	if status.TextPhotos, err = s.textPhotos(ctx, model, libraries); err != nil {
+	if status.Texts, err = s.textProgress(ctx, model, libraries); err != nil {
 		return AIStatus{}, err
+	}
+	if status.Texts != nil {
+		total := status.Texts.Read + status.Texts.Queued + status.Texts.Failed
+		status.TextPhotos = &total
 	}
 	if len(libraries) == 0 {
 		return status, nil

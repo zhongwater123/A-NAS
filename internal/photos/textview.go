@@ -76,7 +76,7 @@ type TextField struct {
 	// every check, or a member corrected it. Reasons say why not.
 	Passed  bool     `json:"passed"`
 	Reasons []string `json:"reasons,omitempty"`
-	// Sensitive values are shown masked until the viewer opens them.
+	// Sensitive values reach a member's AI assistant only as handles.
 	Sensitive  bool            `json:"sensitive"`
 	Correction *TextCorrection `json:"correction,omitempty"`
 }
@@ -172,8 +172,9 @@ func (s *Service) photoText(ctx context.Context, p Principal, record assetRecord
 
 // showsSensitiveValue reports whether the text read from an object holds a
 // sensitive value: what a sensitive field holds or was read as, or a number
-// by textread.Numbers' rules in the whole text or any other field. A photo
-// not read yet holds none.
+// by textread.Numbers' rules in the whole text or any other field, except a
+// mobile number, which a screenshot often shows and the user lets an
+// assistant look at (2026-11-06). A photo not read yet holds none.
 func (s *Service) showsSensitiveValue(ctx context.Context, objectID string) (bool, error) {
 	reading, found, err := s.storedReading(ctx, s.db, objectID)
 	if err != nil || !found {
@@ -187,7 +188,9 @@ func (s *Service) showsSensitiveValue(ctx context.Context, objectID string) (boo
 		}
 		values = append(values, read, corrected)
 	}
-	return slices.ContainsFunc(values, func(value string) bool { return len(textread.Numbers(value)) > 0 }), nil
+	return slices.ContainsFunc(values, func(value string) bool {
+		return slices.ContainsFunc(textread.Numbers(value), func(number textread.Number) bool { return number.Label != "手机号" })
+	}), nil
 }
 
 // textStatus says where a photo without a reading stands.
