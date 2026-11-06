@@ -216,6 +216,10 @@ type Options struct {
 	TextRoute *textroute.Route
 	// People defaults to the built-in calibration of the face models.
 	People []PeopleCalibration
+	// Release names the product release, which ships the AI Worker too:
+	// what another release's Worker said about its models is not taken for
+	// this one's.
+	Release string
 }
 
 // Service is the photo library Module. It must be the only accessor of its
@@ -229,6 +233,7 @@ type Service struct {
 	db             *sql.DB
 	root           *os.Root
 	rootPath       string
+	release        string
 	now            func() time.Time
 	random         io.Reader
 	trashRetention time.Duration
@@ -312,7 +317,7 @@ func Open(root string, options Options) (*Service, error) {
 		return nil, err
 	}
 	service := &Service{
-		db: db, root: opened, rootPath: root, media: options.Media,
+		db: db, root: opened, rootPath: root, release: options.Release, media: options.Media,
 		streams: mediaplay.NewSlots(mediaplay.Conversions, mediaplay.ConversionWait),
 		now:     options.Now, random: options.Random,
 		trashRetention: options.TrashRetention, maxImportBytes: options.MaxImportBytes, maxVideoBytes: options.MaxVideoBytes,
