@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/activityapi"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
@@ -28,8 +29,10 @@ func (h *handler) activity(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	activity.Write(w, events)
+	activityapi.WriteServicePage(w, events)
 }
 
 // DecodeActivity reads an ActivityPath response.
-func DecodeActivity(body io.Reader) ([]activity.Event, error) { return activity.Decode(body) }
+func DecodeActivity(body io.Reader) ([]activity.Event, error) {
+	return activityapi.DecodeServicePage(body)
+}

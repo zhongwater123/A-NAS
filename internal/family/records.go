@@ -787,7 +787,10 @@ func (s *Store) UpdateRecord(ctx context.Context, actor Actor, id string, input 
 		}
 		omitPhotos, omitCertificates := input.Photos == nil, input.Certificates == nil
 		retained := map[string]Photo{}
+		// photoDay interprets timestamps in the device's timezone. Use local
+		// noon to retain the saved day even when a DST transition skips midnight.
 		recordDate, _ := parseDate(current.record.OccurredOn)
+		recordDate = time.Date(recordDate.Year(), recordDate.Month(), recordDate.Day(), 12, 0, 0, 0, time.Local)
 		for _, assetID := range current.photoIDs {
 			_, seen := visible[assetID]
 			certificate := current.photoRoles[assetID] == "certificate"

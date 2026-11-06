@@ -11,6 +11,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/activityapi"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/familyapi"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
@@ -100,6 +101,6 @@ func (h *productHandler) familyActivitySource() func(*http.Request, activity.Que
 		if response.status != http.StatusOK {
 			return nil, fmt.Errorf("family activity status %d", response.status)
 		}
-		return activity.Decode(&response.body)
+		return activityapi.DecodeServicePage(&response.body)
 	}
 }

@@ -215,17 +215,22 @@ func TestPurgeDoesNotInterruptAnOldActiveUpload(t *testing.T) {
 	baby := f.family(t)
 	ctx := context.Background()
 	reader, writer := io.Pipe()
-	defer func() { _ = reader.Close() }()
-	defer func() { _ = writer.Close() }()
 	type result struct {
 		record Record
 		err    error
 	}
 	done := make(chan result, 1)
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		record, err := f.store.AddRecording(ctx, mom, baby.ID, RecordingInput{ContentType: "audio/webm"}, reader)
 		done <- result{record, err}
 	}()
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+		<-finished
+	})
 	// A completed pipe write proves the real upload has created its temporary file.
 	if _, err := writer.Write([]byte("audio")); err != nil {
 		t.Fatal(err)
@@ -257,5 +262,47 @@ func TestPurgeDoesNotInterruptAnOldActiveUpload(t *testing.T) {
 	data, err := io.ReadAll(file)
 	if err != nil || string(data) != "audio" {
 		t.Fatalf("audio lost: %s %v", data, err)
+	}
+}
+
+func TestUpdateRetainedUndatedPhotoKeepsLocalCalendarDate(t *testing.T) {
+	saoPaulo, err := time.LoadLocation("America/Sao_Paulo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		zone *time.Location
+		day  string
+	}{
+		{name: "negative UTC offset", zone: time.FixedZone("UTC-5", -5*60*60), day: "2026-10-29"},
+		{name: "day without local midnight", zone: saoPaulo, day: "2018-11-04"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			previous := time.Local
+			time.Local = test.zone
+			t.Cleanup(func() { time.Local = previous })
+			f := newFixture(t)
+			baby := f.family(t)
+			ctx := context.Background()
+			imported, err := time.ParseInLocation("2006-01-02 15:04", test.day+" 12:00", test.zone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"visible", "hidden"} {
+				f.photos.photos[id] = Photo{ID: id, Shared: true, ImportedAt: imported}
+			}
+			record := must(f.store.AddRecord(ctx, mom, baby.ID, RecordInput{Kind: KindPhotos, Photos: []string{"visible", "hidden"}}))
+			f.photos.trash("hidden", true)
+			updated, err := f.store.UpdateRecord(ctx, mom, record.ID, RecordInput{
+				Text: "edited", Photos: []string{"visible"}, Version: record.Version,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if updated.OccurredOn != record.OccurredOn {
+				t.Fatalf("retaining a hidden photo changed the calendar date: got %s, want %s", updated.OccurredOn, record.OccurredOn)
+			}
+		})
 	}
 }

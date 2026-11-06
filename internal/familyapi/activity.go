@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/activityapi"
 	"github.com/zhongwater123/A-NAS/internal/family"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
@@ -22,5 +23,5 @@ func (h *handler) activity(w http.ResponseWriter, r *http.Request, actor family.
 		h.fail(w, r, err)
 		return
 	}
-	activity.Write(w, events)
+	activityapi.WriteServicePage(w, events)
 }
