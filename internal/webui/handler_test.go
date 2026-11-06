@@ -245,52 +245,43 @@ func TestHandlerReturnsAnEmptyManifestWhenScreenSaverPoolIsMissing(t *testing.T)
 	}
 }
 
-// The companion's animations are listed by name, one URL per format, and
-// served from the current pool only (install-companion-animations.sh).
+// The companion's animations are listed by name, one URL per format, at
+// dsh-pet's /thumb route with the pool in the query (install-companion-animations.sh).
 func TestHandlerListsCompanionAnimationsAndServesByteRanges(t *testing.T) {
-	root := t.TempDir()
-	pool := filepath.Join(root, "pool")
-	if err := os.Mkdir(pool, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	for name, body := range map[string]string{
+	store := t.TempDir()
+	const pool, previous = "0123456789abcdef", "fedcba9876543210"
+	writeCompanionPool(t, store, pool, map[string]string{
 		"东张西望.webm": "0123456789", "东张西望.mov": "quicktime", "待机.webm": "idle",
 		"notes.txt": "not an animation", ".hidden.webm": "hidden",
-	} {
-		if err := os.WriteFile(filepath.Join(pool, name), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(root, "outside.webm"), []byte("outside"), 0o600); err != nil {
+	})
+	writeCompanionPool(t, store, previous, map[string]string{"东张西望.webm": "previous"})
+	if err := os.WriteFile(filepath.Join(store, "outside.webm"), []byte("outside"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("../outside.webm", filepath.Join(pool, "escape.webm")); err != nil {
+	if err := os.Symlink("../../outside.webm", filepath.Join(store, "pools", pool, "escape.webm")); err != nil {
 		t.Fatal(err)
 	}
-	handler := newHandlerWithOptions(t, webui.Options{CompanionDirectory: pool})
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/companion/animations", nil))
+	current := filepath.Join(store, "current")
+	if err := os.Symlink("pools/"+pool, current); err != nil {
+		t.Fatal(err)
+	}
+	handler := newHandlerWithOptions(t, webui.Options{CompanionDirectory: current})
 
-	if got, want := recorder.Code, http.StatusOK; got != want {
-		t.Fatalf("manifest status = %d, want %d; body = %s", got, want, recorder.Body.String())
-	}
-	var manifest struct {
-		Animations map[string]map[string]string `json:"animations"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &manifest); err != nil {
-		t.Fatal(err)
+	manifest := companionManifest(t, handler)
+	if manifest.Pool != pool {
+		t.Fatalf("pool = %q, want %q", manifest.Pool, pool)
 	}
 	if got, want := len(manifest.Animations), 2; got != want {
 		t.Fatalf("animations = %v, want %d", manifest.Animations, want)
 	}
 	look := manifest.Animations["东张西望"]
-	if look["webm"] != "/companion/animations/%E4%B8%9C%E5%BC%A0%E8%A5%BF%E6%9C%9B.webm" || look["mov"] == "" {
+	if look["webm"] != "/companion/thumb/main/%E4%B8%9C%E5%BC%A0%E8%A5%BF%E6%9C%9B.webm?v="+pool || look["mov"] == "" {
 		t.Fatalf("东张西望 = %v", look)
 	}
 
 	request := httptest.NewRequest(http.MethodGet, look["webm"], nil)
 	request.Header.Set("Range", "bytes=2-5")
-	recorder = httptest.NewRecorder()
+	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if got, want := recorder.Code, http.StatusPartialContent; got != want {
 		t.Fatalf("status = %d, want %d; body = %s", got, want, recorder.Body.String())
@@ -301,19 +292,51 @@ func TestHandlerListsCompanionAnimationsAndServesByteRanges(t *testing.T) {
 	if got := recorder.Header().Get("Content-Type"); got != "video/webm" {
 		t.Fatalf("Content-Type = %q, want video/webm", got)
 	}
-	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, look["mov"], nil))
+	if got, want := recorder.Header().Get("Cache-Control"), "public, max-age=31536000, immutable"; got != want {
+		t.Fatalf("Cache-Control = %q, want %q", got, want)
+	}
+	recorder = getCompanion(handler, look["mov"])
 	if got := recorder.Header().Get("Content-Type"); recorder.Code != http.StatusOK || got != "video/quicktime" {
 		t.Fatalf("mov status = %d, Content-Type = %q", recorder.Code, got)
 	}
+	// Like dsh-pet, an animation without an HEVC file is served as VP9.
+	recorder = getCompanion(handler, "/companion/thumb/main/待机.mov?v="+pool)
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "idle" || recorder.Header().Get("Content-Type") != "video/webm" {
+		t.Fatalf("mov fallback status = %d, body = %q, Content-Type = %q", recorder.Code, recorder.Body.String(), recorder.Header().Get("Content-Type"))
+	}
+
+	// A rollback names the other pool; a page opened before it keeps its files.
+	if err := os.Remove(current); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("pools/"+previous, current); err != nil {
+		t.Fatal(err)
+	}
+	if recorder := getCompanion(handler, look["webm"]); recorder.Body.String() != "0123456789" {
+		t.Fatalf("pool %s after the switch = %q", pool, recorder.Body.String())
+	}
+	manifest = companionManifest(t, handler)
+	rolledBack := manifest.Animations["东张西望"]["webm"]
+	if manifest.Pool != previous || rolledBack != "/companion/thumb/main/%E4%B8%9C%E5%BC%A0%E8%A5%BF%E6%9C%9B.webm?v="+previous {
+		t.Fatalf("manifest after the switch = %+v", manifest)
+	}
+	if recorder := getCompanion(handler, rolledBack); recorder.Body.String() != "previous" {
+		t.Fatalf("pool %s = %q", previous, recorder.Body.String())
+	}
+	// Without a pool the current one is served and revalidated.
+	recorder = getCompanion(handler, "/companion/thumb/main/东张西望.webm")
+	if recorder.Body.String() != "previous" || recorder.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatalf("unversioned body = %q, Cache-Control = %q", recorder.Body.String(), recorder.Header().Get("Cache-Control"))
+	}
 
 	for _, path := range []string{
-		"/companion/animations/notes.txt", "/companion/animations/.hidden.webm", "/companion/animations/escape.webm",
-		"/companion/animations/../outside.webm", "/companion/animations/%2E%2E%2Foutside.webm",
+		"/companion/thumb/main/notes.txt?v=" + pool, "/companion/thumb/main/.hidden.webm?v=" + pool,
+		"/companion/thumb/main/escape.webm?v=" + pool, "/companion/thumb/main/../outside.webm",
+		"/companion/thumb/main/%2E%2E%2Foutside.webm", "/companion/thumb/main/东张西望.webm?v=..%2F..",
+		"/companion/thumb/main/东张西望.webm?v=aaaaaaaaaaaaaaaa", "/companion/thumb/main/东张西望.webm?v=0123456789ABCDEF",
+		"/companion/thumb/other/东张西望.webm", "/companion/animations/东张西望.webm",
 	} {
-		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
-		if recorder.Code != http.StatusNotFound {
+		if recorder := getCompanion(handler, path); recorder.Code != http.StatusNotFound {
 			t.Fatalf("%s status = %d, want %d", path, recorder.Code, http.StatusNotFound)
 		}
 	}
@@ -321,20 +344,55 @@ func TestHandlerListsCompanionAnimationsAndServesByteRanges(t *testing.T) {
 
 func TestHandlerShowsNoCompanionAnimationsUntilTheyAreInstalled(t *testing.T) {
 	handler := newHandlerWithOptions(t, webui.Options{CompanionDirectory: filepath.Join(t.TempDir(), "missing")})
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/companion/animations", nil))
-	if got, want := recorder.Body.String(), "{\"animations\":{}}\n"; recorder.Code != http.StatusOK || got != want {
+	recorder := getCompanion(handler, "/companion/animations")
+	if got, want := recorder.Body.String(), "{\"pool\":\"\",\"animations\":{}}\n"; recorder.Code != http.StatusOK || got != want {
 		t.Fatalf("status = %d, body = %q, want %q", recorder.Code, got, want)
 	}
-	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/companion/animations/待机.webm", nil))
-	if recorder.Code != http.StatusNotFound {
+	if recorder := getCompanion(handler, "/companion/thumb/main/待机.webm"); recorder.Code != http.StatusNotFound {
 		t.Fatalf("animation status = %d, want %d", recorder.Code, http.StatusNotFound)
 	}
 	if _, err := webui.NewWithOptions(http.NotFoundHandler(), webui.Options{CompanionDirectory: "relative"}); err == nil {
 		t.Fatal("NewWithOptions() accepted a relative companion directory")
 	}
 }
+
+func writeCompanionPool(t *testing.T, store, pool string, files map[string]string) {
+	t.Helper()
+	directory := filepath.Join(store, "pools", pool)
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+type servedCompanionManifest struct {
+	Pool       string                       `json:"pool"`
+	Animations map[string]map[string]string `json:"animations"`
+}
+
+func companionManifest(t *testing.T, handler http.Handler) servedCompanionManifest {
+	t.Helper()
+	recorder := getCompanion(handler, "/companion/animations")
+	if got, want := recorder.Code, http.StatusOK; got != want {
+		t.Fatalf("manifest status = %d, want %d; body = %s", got, want, recorder.Body.String())
+	}
+	var manifest servedCompanionManifest
+	if err := json.Unmarshal(recorder.Body.Bytes(), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	return manifest
+}
+
+func getCompanion(handler http.Handler, target string) *httptest.ResponseRecorder {
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+	return recorder
+}
+
 func newHandler(t *testing.T) http.Handler {
 	return newHandlerWithOptions(t, webui.Options{})
 }

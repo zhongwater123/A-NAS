@@ -99,7 +99,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveLegacyScreensaverVideo(w, r)
 	case r.URL.Path == companionAnimationsPath:
 		h.serveCompanionManifest(w, r)
-	case strings.HasPrefix(r.URL.Path, companionAnimationsPath+"/"):
+	case strings.HasPrefix(r.URL.Path, companionThumbPath):
 		h.serveCompanionAnimation(w, r)
 	default:
 		http.NotFound(w, r)
@@ -210,13 +210,22 @@ func (h *handler) screensaverVideos() ([]screensaverVideo, error) {
 	return videos, nil
 }
 
-const companionAnimationsPath = "/companion/animations"
+const (
+	companionAnimationsPath = "/companion/animations"
+	// companionThumbPath is dsh-pet's /thumb/<assetRoot>/<file> route under
+	// /companion; A-NAS's one companion keeps dsh-pet's own asset root, main.
+	companionThumbPath = "/companion/thumb/main/"
+)
 
 // companionAnimationTypes are the formats dsh-pet ships: VP9 with alpha for
 // Chromium and Firefox, and HEVC with alpha for Safari.
 var companionAnimationTypes = map[string]string{".webm": "video/webm", ".mov": "video/quicktime"}
 
 type companionManifest struct {
+	// Pool names the installed pool the URLs point into, so a browser can keep
+	// its files for good: install-companion-animations.sh never changes an
+	// installed pool. It is empty when the directory is not such a pool.
+	Pool string `json:"pool"`
 	// Animations maps each animation's name to its URL per format.
 	Animations map[string]map[string]string `json:"animations"`
 }
@@ -224,14 +233,19 @@ type companionManifest struct {
 // serveCompanionManifest lists the animations installed in the current pool,
 // so the page plays only those and shows no companion when none are.
 func (h *handler) serveCompanionManifest(w http.ResponseWriter, r *http.Request) {
-	manifest := companionManifest{Animations: map[string]map[string]string{}}
-	for _, name := range h.companionAnimations() {
+	pool := h.companionPool()
+	query := ""
+	if pool != "" {
+		query = "?v=" + pool
+	}
+	manifest := companionManifest{Pool: pool, Animations: map[string]map[string]string{}}
+	for _, name := range companionAnimations(h.companionPoolDirectory(pool)) {
 		extension := filepath.Ext(name)
 		animation := strings.TrimSuffix(name, extension)
 		if manifest.Animations[animation] == nil {
 			manifest.Animations[animation] = map[string]string{}
 		}
-		manifest.Animations[animation][strings.TrimPrefix(extension, ".")] = companionAnimationsPath + "/" + url.PathEscape(name)
+		manifest.Animations[animation][strings.TrimPrefix(extension, ".")] = companionThumbPath + url.PathEscape(name) + query
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
@@ -244,21 +258,37 @@ func (h *handler) serveCompanionManifest(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// serveCompanionAnimation serves /companion/thumb/main/<name>?v=<pool> from
+// that installed pool, so a page opened before a switch or a rollback keeps
+// playing the files it was given and a browser never mixes two pools. Without
+// v it serves the current pool and has the browser revalidate.
 func (h *handler) serveCompanionAnimation(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, companionAnimationsPath+"/")
-	contentType, ok := companionAnimationTypes[filepath.Ext(name)]
-	if !ok || !companionAnimationName(name) || h.companionDirectory == "" {
+	name := strings.TrimPrefix(r.URL.Path, companionThumbPath)
+	if !companionAnimationName(name) || h.companionDirectory == "" {
 		http.NotFound(w, r)
 		return
 	}
+	directory, cacheControl := h.companionDirectory, "no-cache"
+	if pool := r.URL.Query().Get("v"); pool != "" {
+		if !companionPoolID(pool) {
+			http.NotFound(w, r)
+			return
+		}
+		directory, cacheControl = h.companionPoolDirectory(pool), "public, max-age=31536000, immutable"
+	}
 	// The pool is a directory of hard links; nothing may lead out of it.
-	root, err := os.OpenRoot(h.companionDirectory)
+	root, err := os.OpenRoot(directory)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 	defer func() { _ = root.Close() }()
 	animation, err := root.Open(name)
+	if errors.Is(err, fs.ErrNotExist) && filepath.Ext(name) == ".mov" {
+		// dsh-pet falls back to the VP9 file when an animation has no HEVC one.
+		name = strings.TrimSuffix(name, ".mov") + ".webm"
+		animation, err = root.Open(name)
+	}
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -269,9 +299,8 @@ func (h *handler) serveCompanionAnimation(w http.ResponseWriter, r *http.Request
 		http.NotFound(w, r)
 		return
 	}
-	// A new pool brings new files, so revalidating by modification time is enough.
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", cacheControl)
+	w.Header().Set("Content-Type", companionAnimationTypes[filepath.Ext(name)])
 	http.ServeContent(w, r, info.Name(), info.ModTime(), animation)
 }
 
@@ -290,11 +319,47 @@ func companionAnimationName(name string) bool {
 	return ok
 }
 
-func (h *handler) companionAnimations() []string {
+// companionPoolID accepts the 16 hexadecimal digits install-companion-animations.sh
+// names a pool by.
+func companionPoolID(pool string) bool {
+	if len(pool) != 16 {
+		return false
+	}
+	for _, r := range pool {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// companionPool is the pool the companion directory names: "current" is a
+// symbolic link to pools/<pool>, replaced as a whole on every install.
+func (h *handler) companionPool() string {
 	if h.companionDirectory == "" {
+		return ""
+	}
+	target, err := os.Readlink(h.companionDirectory)
+	if err != nil || filepath.Dir(target) != "pools" || !companionPoolID(filepath.Base(target)) {
+		return ""
+	}
+	return filepath.Base(target)
+}
+
+// companionPoolDirectory is where an installed pool lives, next to "current";
+// without a pool it is the companion directory itself.
+func (h *handler) companionPoolDirectory(pool string) string {
+	if pool == "" {
+		return h.companionDirectory
+	}
+	return filepath.Join(filepath.Dir(h.companionDirectory), "pools", pool)
+}
+
+func companionAnimations(directory string) []string {
+	if directory == "" {
 		return nil
 	}
-	entries, err := os.ReadDir(h.companionDirectory)
+	entries, err := os.ReadDir(directory)
 	if err != nil {
 		return nil
 	}

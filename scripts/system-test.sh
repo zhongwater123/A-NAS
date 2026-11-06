@@ -1933,8 +1933,12 @@ stage_animations 待机.webm 东张西望.webm 待机.mov
 animations_a=$pool
 check "staged companion animations install" quiet "$animations" "$animations_a" "$companion_staged"
 check "they become the current pool" test "$(current_animations):$(animation_count)" = "pools/$animations_a:2"
+check "the manifest names the current pool" \
+  test "$(curl -fsS "$api/companion/animations" | jq -r .pool || true)" = "$animations_a"
 animation=$(curl -fsS "$api/companion/animations" | jq -r '.animations["东张西望"].webm' || true)
 check "an animation answers a byte range" test "$(status_of -r 0-1023 "$api$animation")" = 206
+check "a pool's animations may be kept for good" \
+  bash -c "curl -fsSI '$api$animation' | grep -Fqi 'cache-control: public, max-age=31536000, immutable'"
 stage_animations 待机.webm
 printf x >> "$companion_staged/objects/$(head -c 64 "$companion_staged/pools/$pool.sums")"
 check "an animation that does not match its hash is refused" denied "$animations" "$pool" "$companion_staged"
