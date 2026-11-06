@@ -89,6 +89,19 @@ mount unit 文件是 systemd 的 fragment，没有 `x-systemd.device-bound=` 选
   - [`degraded_internal_test.go`](../../internal/hostops/linux/degraded_internal_test.go) 覆盖挂载顺序、只允许镜像、只缺一块、只在上次留下的盘上运行；
   - [`TestEnsureMountUnitStopsBindingTheVolumeToOneDisk`](../../internal/hostops/linux/volume_test.go)。
 
+- 真实代码：在同一台虚拟机上，用 `linuxhostops.Executor` 与真实的宿主机状态读取器，以 root 运行了 `EnsureMountUnit`、`MountDegraded`、`StartReplaceDisk` 与 `RestoreRedundancy`。驱动程序只用于这次实验，未放进仓库。结果：
+  - 旧 unit 被改写一次，第二次不再改；
+  - 开机缺盘、mount unit 为 `inactive` 后：
+    - 数据卷挂成 `degraded` 读写，`StopPropagatedFrom=` 为空，记录写下留下的 devid 1；
+    - 宿主机状态 `MissingDevices=1`，健康报告 `volume_degraded`；
+  - 换上一块 SATA 盘（virtio-SCSI 盘按设计不合格）：
+    - 计划经过 `erase`、`replace`（进度 3%→28%）后成功，随即开始转换；
+    - `RestoreRedundancy` 做完 Scrub 后删除记录；
+    - `lsblk` 显示新分区为数据卷的 Btrfs；
+  - 重启后两块盘正常挂载，缺盘期间写入的文件校验和一致；
+  - 用过的计划 ID 换一块盘重试被拒绝（“the plan asked for another operation before”），与操作日志的约定一致。
+- 转换只处理有数据的块组：降级期间新建、之后为空的 `single` 元数据与系统块组仍列在 sysfs，用量为 0，由 Btrfs 自行回收。新分配按镜像进行。
+
 ## 后续工作
 
 - 实机：部署后重启一次，确认 `StopPropagatedFrom=` 为空；再按运行手册拔盘开机、接回。
