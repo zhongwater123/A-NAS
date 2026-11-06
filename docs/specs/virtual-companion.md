@@ -54,6 +54,12 @@
 - When：成员 60 秒没有键盘、鼠标、滚轮或触摸输入，或页面被隐藏。
 - Then：伙伴停在当前帧，不再解码视频；本地控制台的屏保（180 秒）出现前伙伴已停下。下一次输入或页面重新可见时恢复，有进行中的 VNAS 状态则先恢复它。
 
+### 宿主机屏幕只显示状态
+
+- Given：页面是本地控制台（`?local-console=1`），屏幕全家共用。
+- When：成员的定时任务（含提醒）有了新结果。
+- Then：伙伴照常挥手；桌面提示只写“VNAS 定时任务 · 时间 · 有新结果”，失败时加“没有完成”，不写任务名与回答的开头。成员自己点“查看结果”时，才在 VNAS 中打开这次运行。个人设备上的提示不变。
+
 ### 需要另一种格式的浏览器
 
 - Given：浏览器不支持 VP9 透明通道（iPhone 与 Mac 的 Safari）。
@@ -68,8 +74,8 @@
 
 ## 关联
 
-- 实现：[`Companion.tsx`](../../web/src/companion/Companion.tsx)、[`CompanionPet.tsx`](../../web/src/companion/CompanionPet.tsx)、[`animations.ts`](../../web/src/companion/animations.ts)、[`workStatus.ts`](../../web/src/companion/workStatus.ts)、[`assistantActivity.ts`](../../web/src/assistant/assistantActivity.ts)、[`handler.go`](../../internal/webui/handler.go)
+- 实现：[`Companion.tsx`](../../web/src/companion/Companion.tsx)、[`CompanionPet.tsx`](../../web/src/companion/CompanionPet.tsx)、[`animations.ts`](../../web/src/companion/animations.ts)、[`workStatus.ts`](../../web/src/companion/workStatus.ts)、[`assistantActivity.ts`](../../web/src/assistant/assistantActivity.ts)、[`TaskToasts.tsx`](../../web/src/assistant/TaskToasts.tsx)、[`handler.go`](../../internal/webui/handler.go)
 - 上游代码与许可：[`dsh-pet/README.md`](../../web/src/companion/dsh-pet/README.md)，复制脚本 [`vendor-dsh-pet.py`](../../scripts/vendor-dsh-pet.py)，补丁 [`dsh-pet-patches/`](../../web/src/companion/dsh-pet-patches/0001-serve-animations-from-a-nas.patch)
-- 测试：[`Companion.test.tsx`](../../web/src/companion/Companion.test.tsx)、[`assistantActivity.test.ts`](../../web/src/assistant/assistantActivity.test.ts)、[`AssistantPanel.test.tsx`](../../web/src/assistant/AssistantPanel.test.tsx)、[`handler_test.go`](../../internal/webui/handler_test.go)
+- 测试：[`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)（共用屏幕上的提示）、[`Companion.test.tsx`](../../web/src/companion/Companion.test.tsx)、[`assistantActivity.test.ts`](../../web/src/assistant/assistantActivity.test.ts)、[`AssistantPanel.test.tsx`](../../web/src/assistant/AssistantPanel.test.tsx)、[`handler_test.go`](../../internal/webui/handler_test.go)
 - 运行手册：[安装伙伴动画](../runbooks/install-companion-animations.md)
 - ADR：[0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
