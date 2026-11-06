@@ -80,6 +80,9 @@ export function createCueEffects(rt: CueEffectsRuntime) {
         console.error('[dsh-pet] work-status 档位索引越界：state=' + workStatus.state + ' idx=' + idx);
         return;
       }
+      // A-NAS: a stage whose animation this NAS has not installed is an empty slot (it keeps its index);
+      // the pet carries on with what it was doing rather than switch to no animation at all.
+      if (slot.length === 0) return;
       const name = pickSlot(slot, card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
       log('pet=' + cfg.id + ' ' + (prevWorkStateRef.current ?? 'null') + '->' + workStatus.state + '    ' + name);
       const stateChanged = prevWorkStateRef.current !== workStatus.state;

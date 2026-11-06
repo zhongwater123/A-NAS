@@ -10,6 +10,7 @@ import type { PetCollisionSlot } from '../../../shared/physics';
 import type { LockState, PositionMode, SayCue, PetFacing, SleepState } from '../../../shared/state';
 import type { WorkStatusSnapshot } from '../../../shared/work-status';
 import type { RuntimePet } from '../types';
+import type { Center } from '../motion/geometry';
 
 /** 一张宠物卡的渲染输入。 */
 export interface PetCardProps {
@@ -47,4 +48,10 @@ export interface PetCardProps {
   sleepTick: number;
   /** 宠物间碰撞站场。 */
   arena: ReactNS.MutableRefObject<{ slots: Record<string, PetCollisionSlot> }>;
+  /** A-NAS: the page is idle, hidden or under the screen saver. The card freezes as under a lock and
+   *  holds a flight too; the container sends it no commands meanwhile. */
+  paused?: boolean;
+  /** A-NAS: where the pet was left (its centre, as shares of the viewport), for the page to keep on this
+   *  device; dsh-pet keeps it for the page's life only. */
+  onPlace?: (center: Center) => void;
 }

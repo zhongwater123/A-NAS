@@ -14,7 +14,7 @@ import { resolvePetSizePx } from '../../../shared/pet-size';
 import { TOOLTIP_GAP_RATIO, tooltipPlacement } from '../../../shared/tooltip';
 import { makeWhisperBubble } from '../../bubble';
 import { playClickSound } from '../click-sound';
-import { derivePetMetrics, petRootStyle, petStageStyle } from '../motion/geometry';
+import { boxToRatio, derivePetMetrics, petRootStyle, petStageStyle } from '../motion/geometry';
 import { makePlaybackReporter } from '../playback-report';
 import { createAnimationFlow } from './animation-flow';
 import { createBubbleSlots } from './bubble-slots';
@@ -56,7 +56,7 @@ export function createCardRuntime(rt: PetRuntime) {
   const useCardDrag = createCardDrag({ useRef, useEffect });
 
   return function useCardRuntime(props: PetCardProps): CardViewProps {
-    const { arena, cfg, lock, lockTick, sleep, sleepTick, workStatus } = props;
+    const { arena, cfg, lock, lockTick, paused, sleep, sleepTick, workStatus } = props;
     const { onFocusSession } = props;
 
     // 实际渲染宽度：百分比只在挂载与配置变更时按当次视口宽解析一次，拖窗口不跟随。
@@ -216,6 +216,7 @@ export function createCardRuntime(rt: PetRuntime) {
     const lockFreeze = useLockFreeze({
       lock,
       lockTick,
+      paused,
       onFrozen: () => {
         // 光堵随机链不够：它只在动画播完时调用，不暂停会把当前这段播完才停。
         motion.stopMove();
@@ -223,6 +224,12 @@ export function createCardRuntime(rt: PetRuntime) {
         bubbles.hideWork();
       },
       onResumed: () => {
+        // A-NAS: the freeze paused the frame in front; play it on. A stage's single loop, picked again
+        // below, is the same animation and would not switch, so it stayed still; anything else picked
+        // takes over once it is ready. A pet asleep under the freeze sleeps on.
+        const front = ownAnim.frontVideo();
+        if (front?.paused && !front.ended) void front.play().catch(() => {});
+        if (liveRef.current.flow?.sleeping() ?? false) return;
         // 解冻：非终态工作状态回档位循环，否则回 idle 一次，播完由动画链接回随机链。
         if (liveRef.current.flow?.resumeWorkStatusAnim() ?? false) return;
         if (petAnims.idle.length) {
@@ -234,9 +241,33 @@ export function createCardRuntime(rt: PetRuntime) {
       setFrozen: ownAnim.setFrozen,
     });
     liveRef.current.releaseLock = () => {
+      // A-NAS: pressing a pet that only a pause froze is the member coming back, not taking it over.
+      if (!lockFreeze.locked()) return;
       lockFreeze.release();
       void postAction(ROUTE_PATH + '/lock/release?pet=' + encodeURIComponent(cfg.id), { force: true });
     };
+
+    // A-NAS: a pause also holds a flight where it is (a lock lets it fly on) and keeps where a walk the
+    // freeze stopped got to, so that nothing runs a frame loop while the member is away; the flight
+    // carries on at its speed when the pause ends.
+    const heldFlightRef = useRef<{ vx: number; vy: number } | null>(null);
+    useEffect(() => {
+      if (paused) {
+        if (motion.flight.isFlying()) {
+          heldFlightRef.current = motion.flight.velocity();
+          motion.flight.stop();
+        }
+        const box = motion.box();
+        const viewport = { width: window.innerWidth, height: window.innerHeight };
+        if (box) actions.setCustomPos(boxToRatio(box, viewport, { w: halfW, h: halfH }));
+        return;
+      }
+      const held = heldFlightRef.current;
+      const box = motion.box();
+      heldFlightRef.current = null;
+      if (held && box) motion.startThrow(box.x, box.y, held.vx, held.vy);
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- only a pause starting or ending moves anything
+    }, [paused]);
 
     // 共享运行时：状态容器、驱动与跨关注点动作拼成一份，指令处理按需取值。
     const hub: CardHub = {
@@ -269,6 +300,13 @@ export function createCardRuntime(rt: PetRuntime) {
       if (sleep) flow.applySleep(sleep);
       // eslint-disable-next-line react-hooks/exhaustive-deps -- 只按叶子变化次数触发，sleep 是当拍快照
     }, [sleepTick]);
+
+    // A-NAS: every move that ends sets the custom position (a drag, a flight, a walk, a position command,
+    // the window's new size); the page keeps the last one on this device.
+    useEffect(() => {
+      if (customPos) props.onPlace?.(customPos);
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- only a new position is news to the page
+    }, [customPos]);
 
     const stageStyle = petStageStyle(bottomPad);
     const rootStyle = petRootStyle(

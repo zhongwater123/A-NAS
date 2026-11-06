@@ -87,7 +87,8 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
       if (!pool || pool.length === 0) return false;
       const idx = WORK_STATUS_INDEX[ws.state];
       const slot = pool[idx];
-      if (slot === undefined) return false;
+      // A-NAS: or a stage left empty because its animation is not installed.
+      if (slot === undefined || slot.length === 0) return false;
       const name = pickSlot(slot, card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
       log(hub.cfg().id, '互动结束恢复状态动画: ' + name);
       // 多候选档位恢复后同样走播完轮换；单候选维持无限循环。

@@ -2,9 +2,16 @@
 // configuration at the pinned commit (scripts/vendor-dsh-pet.py writes
 // dsh-pet/animations.json), narrowed to the animations installed on this NAS.
 import config from "./dsh-pet/animations.json";
-import type { Animations, EventSlot, Weights } from "./dsh-pet/shared/types";
+import type { Animations, EventSlot, PhysicsParams, Weights } from "./dsh-pet/shared/types";
 
 export const companionWeights: Weights = config.animationWeights;
+/** The lines the companion's bubble picks from for each VNAS stage, from the same configuration. */
+export const workStatusTexts: string[][] = config.workStatusTexts;
+/**
+ * dsh-pet's physics for a throw, without falling the way a phone tilts or flying when it is shaken: the
+ * spec has neither, and a tilted tablet would keep a frame loop running for as long as it lies there.
+ */
+export const companionPhysics: PhysicsParams = { ...config.physics, tiltGravity: false, shakeThrow: false };
 
 /**
  * The animation pools with only the installed animations, so a partial install
@@ -32,6 +39,14 @@ export function installedAnimations(installed: (name: string) => boolean): Anima
     categories: all.categories
       .map((category) => ({ ...category, actions: keep(category.actions) }))
       .filter((category) => category.actions.length > 0),
-    events: { workStatus: (all.events.workStatus ?? []).map(slot) },
+    events: {
+      // What the companion plays as it says something: a pool to pick from, so only installed ones stay.
+      whisper: (all.events.whisper ?? []).map(slot).filter((value) => value.length > 0),
+      workStatus: (all.events.workStatus ?? []).map(slot),
+    },
+    // A way to sleep plays its start, loop and end together, so only a whole one stays.
+    sleep: (all.sleep ?? [])
+      .map((set) => ({ start: keep(set.start), loop: keep(set.loop), end: keep(set.end) }))
+      .filter((set) => set.start.length > 0 && set.loop.length > 0 && set.end.length > 0),
   };
 }

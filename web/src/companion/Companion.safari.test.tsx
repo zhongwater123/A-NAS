@@ -39,7 +39,7 @@ describe("the companion in Safari", () => {
       }),
     );
     render(<Companion />);
-    expect(await screen.findByRole("button", { name: "大肥鱼" })).toBeTruthy();
+    expect(await screen.findByLabelText("大肥鱼")).toBeTruthy();
     await waitFor(() => expect(fetched).toContain("/companion/thumb/main/待机呼吸休闲.mov"));
     expect(fetched.some((path) => path.endsWith(".webm"))).toBe(false);
   });

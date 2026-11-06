@@ -24,6 +24,8 @@ export interface LockFreezeInput extends FreezeHandlers {
   lock?: LockState;
   /** 锁叶子变化次数。 */
   lockTick: number;
+  /** A-NAS: the page is idle, hidden or under the screen saver: frozen as under a lock until it ends. */
+  paused?: boolean;
   /** 动画链的冻结开关；返回的就是这次翻转，null 表示本来就是这个值。 */
   setFrozen(frozen: boolean): FreezeCue | null;
 }
@@ -32,6 +34,8 @@ export interface LockFreezeInput extends FreezeHandlers {
 export interface LockFreeze {
   /** 本地立即解冻，并清掉解冻定时器；用户接管宠物时调。 */
   release(): void;
+  /** A-NAS: whether the lock leaf holds the card now; a pause alone does not. */
+  locked(): boolean;
 }
 
 /** 注入的 react 能力。 */
@@ -84,26 +88,36 @@ export function createLockFreeze(rt: LockFreezeRuntime) {
       }
     };
 
+    /** A-NAS: whether the lock leaf froze the card, as against a pause. */
+    const lockedRef = useRef(false);
+
     useEffect(() => {
       clearTimer();
       const now = Date.now();
       const expiresAt = freezeDeadline(input.lock, now);
-      dispatchCue(input.setFrozen(expiresAt > now), input);
+      // A-NAS: frozen is locked or paused, and this stays the only place that turns it on or off: a lock
+      // that ends during a pause leaves the card frozen, and so does a pause that ends under a lock.
+      const paused = input.paused === true;
+      lockedRef.current = expiresAt > now;
+      dispatchCue(input.setFrozen(lockedRef.current || paused), input);
       if (expiresAt <= now) return clearTimer;
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null;
-        dispatchCue(input.setFrozen(false), input);
+        lockedRef.current = false;
+        dispatchCue(input.setFrozen(paused), input);
       }, expiresAt - now);
       return clearTimer;
       // 回调每渲染重建，但只读 ref 与稳定 setter；进依赖会让每次渲染都清掉并重设解冻定时器，锁会永不到期。
       // eslint-disable-next-line react-hooks/exhaustive-deps -- 变化原因只有叶子与 tick
-    }, [input.lockTick, input.lock]);
+    }, [input.lockTick, input.lock, input.paused]);
 
     return {
       release: () => {
         clearTimer();
-        dispatchCue(input.setFrozen(false), input);
+        lockedRef.current = false;
+        dispatchCue(input.setFrozen(input.paused === true), input);
       },
+      locked: () => lockedRef.current,
     };
   };
 }

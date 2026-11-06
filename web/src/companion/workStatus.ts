@@ -12,12 +12,13 @@
 // conversation driven from another device does not move this device's companion. A
 // card waiting for the member in such a turn is its own waiting entry. Nothing here
 // connects to the member's instance, so watching VNAS never starts one.
-import { useSyncExternalStore } from "react";
-
+//
+// The store lives here, outside the companion's own code, which loads later and only
+// when animations are installed: the VNAS window writes to it whether or not the card
+// is there, and companionReady() tells it whether one is (petCard.tsx reads the store).
 import { createWorkStatusBridge } from "./dsh-pet/host/plugin/work-status-bridge";
-import { PollStateStore, type StateLeaf } from "./dsh-pet/host/state";
+import { PollStateStore } from "./dsh-pet/host/state";
 import { type HostWorkStatusState, WorkStatusStore } from "./dsh-pet/host/work-status";
-import type { WorkStatusSnapshot } from "./dsh-pet/shared/work-status";
 
 /** dsh-pet session-notify.ts TERMINAL_KEEP_MS: a success or error shows this long, then goes. */
 const TERMINAL_KEEP_MS = 60 * 1000;
@@ -149,17 +150,8 @@ export function forgetAll(): void {
   if (ids.size > 0) bridge.publishWorkStatus();
 }
 
-/** The status the companion shows, and the counter of its last change (a change replays the animation). */
-export interface CompanionWorkStatus {
-  workStatus: WorkStatusSnapshot;
-  tick: number;
-}
-
-function readLeaf(): StateLeaf {
-  return companionState.read().sections.workStatus;
-}
-
-function subscribe(listener: () => void): () => void {
+/** Calls the listener after every write to companionState, as dsh-pet's long poll of GET /state wakes. */
+export function subscribeCompanionState(listener: () => void): () => void {
   let cancel = () => {};
   const arm = () => {
     cancel = companionState.wait({
@@ -175,10 +167,23 @@ function subscribe(listener: () => void): () => void {
   return () => cancel();
 }
 
-export function useCompanionWorkStatus(): CompanionWorkStatus {
-  const leaf = useSyncExternalStore(subscribe, readLeaf);
-  const data = leaf.data as { state?: HostWorkStatusState | null; task?: string | null } | null;
-  return { workStatus: { state: data?.state ?? null, task: data?.task ?? null }, tick: leaf.counter };
+/** The pet companionState speaks of: dsh-pet's id for its main pet, whose animations 大肥鱼 plays. */
+export const COMPANION_PET = "main";
+
+let cardReady = false;
+
+/**
+ * Whether 大肥鱼's card is on this page and follows companionState. Until it is (no animations
+ * installed, its code not loaded yet, the desktop gone), a command written there would wait for a
+ * card that never comes, so VNAS answers that there is no companion instead.
+ */
+export function companionReady(): boolean {
+  return cardReady;
+}
+
+/** The card is on the page and reads companionState from now on, or has gone. */
+export function setCompanionReady(ready: boolean): void {
+  cardReady = ready;
 }
 
 /** For tests: back to idle with nothing reported. */
