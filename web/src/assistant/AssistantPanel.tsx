@@ -79,7 +79,7 @@ import {
 } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
-import { runCompanionCommand } from "../companion/commands";
+import { releaseCommandLocks, runCompanionCommand } from "../companion/commands";
 import { forgetAll, reportCards, reportEvent, startTurn } from "../companion/workStatus";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { formatBytes } from "../lib/bytes";
@@ -254,12 +254,21 @@ export function AssistantPanel({
     [gateway.client, keep, refreshBusy, refreshSessions],
   );
   // What the companion shows of VNAS lasts only while this window can see it: a
-  // lost connection or a closed window says nothing more about those turns or cards.
+  // lost connection or a closed window says nothing more about those turns or cards,
+  // and the product service can no longer settle the locks their commands took.
   useEffect(() => {
-    if (!gateway.ready) forgetAll();
+    if (gateway.ready) return;
+    forgetAll();
+    releaseCommandLocks();
   }, [gateway.ready, gateway.generation]);
   useEffect(() => reportCards(approvals.values()), [approvals]);
-  useEffect(() => () => forgetAll(), []);
+  useEffect(
+    () => () => {
+      forgetAll();
+      releaseCommandLocks();
+    },
+    [],
+  );
 
   const changed = useCallback(() => {
     void refreshSessions();

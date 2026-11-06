@@ -15,10 +15,16 @@
 // configuration of the pet carries none of those lines, so it says nothing.
 //
 // A-NAS's own checks come before dsh-pet's: the conversation must be one whose turn this
-// window started (not-controlling), the card must be on the page (not-ready), and the page
-// must not be hidden for a command the card would drop (paused). Then a backstop to the
-// product service's limits (Frank's D5): this window carries out at most 20 commands a
-// minute, 6 broadcasts and 6 throws among them, and a lock lasts at most 5 minutes.
+// window started (not-controlling), the card must be on the page (not-ready), and nobody must
+// be kept from seeing what a command shows, the page being hidden or under the local console's
+// screen saver (paused). Then a backstop to the product service's limits (Frank's D5): this
+// window carries out at most 20 commands a minute, 6 broadcasts and 6 throws among them, a lock
+// lasts at most 5 minutes, and what dsh-pet would let through beyond the contract's limits on
+// text, durations and power (dsh-pet allows any) is refused, after the sleep gate as the
+// arguments are. A lock a conversation took goes when the product service settles that
+// conversation's turn, and every one goes with the window (releaseCommandLocks).
+
+import { localConsoleCovered } from "../desktop/LocalConsoleScreenSaver";
 import { decideAnim } from "./dsh-pet/host/anim";
 import {
   decideBroadcast,
@@ -75,8 +81,17 @@ const LOCK_TTL_CAP_MS = 300_000;
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 20;
 const RATE_LIMITS: Readonly<Record<string, number>> = { broadcast: 6, throw: 6 };
+/** The contract's limits (§1), which dsh-pet's decision layers do not set. */
+const TEXT_MAX = 200;
+const BUBBLE_MAX_MS = 60_000;
+const LINE_MAX_MS = 5_000;
+const POWER_MAX = 3;
+/** What would not show as the bubble's plain text: control characters but a line break, and bidi overrides. */
+const NOT_PLAIN = /[^\P{Cc}\n]|[\u202A-\u202E\u2066-\u2069]/u;
 
 const carriedOut: { at: number; action: string }[] = [];
+/** The lock a command took, and the conversation that took it. */
+let holder: { lockId: string; sessionId: string } | null = null;
 
 const ok = (result: Record<string, unknown>): CompanionOutcome => ({ ok: true, result });
 const refuse = (
@@ -94,6 +109,21 @@ function rateLimited(action: string): boolean {
   if (limit !== undefined && carriedOut.filter((entry) => entry.action === action).length >= limit) return true;
   carriedOut.push({ at: now, action });
   return false;
+}
+
+/** The contract's limits on what dsh-pet's decision layers let through, as a backstop to the product service's. */
+function beyondLimits(action: string, args: Record<string, unknown>): CompanionOutcome | null {
+  const over = (value: unknown, max: number) => typeof value === "number" && value > max;
+  if (action === "broadcast") {
+    const text = typeof args.text === "string" ? args.text.trim() : "";
+    if ([...text].length > TEXT_MAX || NOT_PLAIN.test(text))
+      return refuse("bad-request", `text 最多 ${TEXT_MAX} 字，只能是纯文本`);
+    if (over(args.duration, BUBBLE_MAX_MS)) return refuse("bad-request", `duration 最多 ${BUBBLE_MAX_MS} 毫秒`);
+  }
+  if (action === "position" && over(args.duration, LINE_MAX_MS))
+    return refuse("bad-request", `duration 最多 ${LINE_MAX_MS} 毫秒`);
+  if (action === "throw" && over(args.power, POWER_MAX)) return refuse("bad-request", `power 最多 ${POWER_MAX}`);
+  return null;
 }
 
 /** dsh-pet's sleep gate (plugin/pet-lookup.ts sleepBlocked): a sleeping pet refuses, unless it is locked. */
@@ -151,9 +181,22 @@ function played(playbackId: string, signal?: AbortSignal): Promise<CompanionOutc
 /**
  * Carries out one of VNAS's commands for a conversation and answers it as the contract says: anim once
  * its animation has ended, failed or been cancelled (at most 10 s), everything else as soon as it is
- * written. Never takes longer than that, so the window answers well within the product service's 12 s.
+ * written. Never takes longer than that, so the window answers well within the product service's 12 s,
+ * and always answers: a write the page could not finish (a reader of its state threw) is not-ready.
  */
 export async function runCompanionCommand(
+  sessionId: string,
+  command: CompanionCommand,
+  signal?: AbortSignal,
+): Promise<CompanionOutcome> {
+  try {
+    return await carryOut(sessionId, command, signal);
+  } catch {
+    return refuse("not-ready", "伙伴没能执行这条命令");
+  }
+}
+
+async function carryOut(
   sessionId: string,
   { action, args }: CompanionCommand,
   signal?: AbortSignal,
@@ -161,17 +204,21 @@ export async function runCompanionCommand(
   if (!ACTIONS.has(action)) return refuse("bad-request", `没有这个命令：${action}`);
   // Only the product service sends a release with force, when it settles a turn that has ended or a
   // window that went away; that turn is no longer this window's, and a release must always succeed.
+  // It lets go of the lock that conversation took, not of one another turn holds (below).
   const settling = action === "lock_release" && args.force === true;
   if (!settling && !isPrompting(sessionId)) return refuse("not-controlling", "这段对话不是在这个窗口里进行的");
   if (action !== "lock_release") {
     if (!companionReady()) return refuse("not-ready", "这个桌面上还没有伙伴：没有安装动画，或还没有加载");
-    if (CUES.has(action) && companionPaused()) return refuse("paused", "页面在后台，伙伴暂停了");
+    if (CUES.has(action) && (companionPaused() || localConsoleCovered()))
+      return refuse("paused", "页面在后台或屏保中，伙伴暂停了");
     if (rateLimited(action)) return refuse("rate-limited", "命令太频繁，稍后再试");
   }
   if (SLEEP_GATED.has(action)) {
     const blocked = sleepBlocked();
     if (blocked) return blocked;
   }
+  const beyond = beyondLimits(action, args);
+  if (beyond) return beyond;
   const cfg = readAllConfig();
   switch (action) {
     case "anim": {
@@ -182,11 +229,16 @@ export async function runCompanionCommand(
       // The receipt is waited on before the leaf is written: a hidden or frozen card reports at once.
       const record = companionPlayback.create(d.petId, d.name ?? "");
       const outcome = played(record.playbackId, signal);
-      companionState.writePet(d.petId, "anim", {
-        name: d.name,
-        playbackId: record.playbackId,
-        ...(d.facing === undefined ? {} : { facing: d.facing }),
-      });
+      try {
+        companionState.writePet(d.petId, "anim", {
+          name: d.name,
+          playbackId: record.playbackId,
+          ...(d.facing === undefined ? {} : { facing: d.facing }),
+        });
+      } catch {
+        // The card may never hear of it: the command is answered now rather than at its 10 s.
+        companionPlayback.report(record.playbackId, "failed", "write-error");
+      }
       return outcome;
     }
     case "broadcast": {
@@ -262,20 +314,43 @@ export async function runCompanionCommand(
         if (d.reason === "lock-lost") return refuse(d.reason, d.message, { cause: d.cause });
         return refuse(d.reason, d.message);
       }
+      if (!d.renewed) holder = { lockId: d.lockId, sessionId };
       // Taking the lock wakes the pet, as dsh-pet's /lock does: it is not commanded in its sleep.
       companionSleep.wake(COMPANION_PET);
       return ok({ status: "ok", lockId: d.lockId, expiresAt: d.expiresAt });
     }
     default: {
       // lock_release: by its id, or with force (only the product service sends that).
-      const d = companionLock.release({ petId: COMPANION_PET, lockId: args.lockId, force: args.force });
+      if (settling) {
+        if (args.lockId !== undefined && args.lockId !== null)
+          return refuse("bad-request", "lockId 与 force 只能给一个");
+        // The product service settles one conversation's turn: the lock that conversation took goes as
+        // its own release would (cause released, not dsh-pet's preempted, which is the member taking
+        // the pet over), and a lock another turn of this window holds stays.
+        const held = companionLock.current(COMPANION_PET);
+        if (held && holder?.lockId === held.lockId && holder.sessionId === sessionId)
+          companionLock.release({ petId: COMPANION_PET, lockId: held.lockId });
+        return ok({ status: "ok" });
+      }
+      const d = companionLock.release({ petId: COMPANION_PET, lockId: args.lockId });
       if (!d.ok) return refuse(d.reason, d.message, d.reason === "lock-lost" ? { cause: d.cause } : undefined);
       return ok({ status: "ok" });
     }
   }
 }
 
-/** For tests: no command carried out yet this minute. */
+/**
+ * The window lost its connection or closed: the product service can no longer settle its turns here,
+ * so the locks their commands took go now (cause released) rather than holding the pet still on this
+ * screen until they run out. Only VNAS's commands take a lock on this page; the card never does.
+ */
+export function releaseCommandLocks(): void {
+  holder = null;
+  companionLock.releaseAll();
+}
+
+/** For tests: no command carried out yet this minute, and no lock taken. */
 export function resetCompanionCommands(): void {
   carriedOut.length = 0;
+  holder = null;
 }

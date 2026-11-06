@@ -295,6 +295,24 @@ describe("VNAS's commands, carried out by the card", () => {
     );
   });
 
+  it("hears at once that the card left the page in the middle of an animation", async () => {
+    serve([IDLE, "点击回应-元气挥手"]);
+    const { view } = await mount();
+    startTurn(SESSION);
+    let outcome: Awaited<ReturnType<typeof runCompanionCommand>> | undefined;
+    void runCompanionCommand(SESSION, { action: "anim", args: { name: "点击回应-元气挥手" } }).then((answer) => {
+      outcome = answer;
+    });
+    await plays("点击回应-元气挥手");
+    view.unmount();
+    await waitFor(() =>
+      expect(outcome).toEqual({
+        ok: true,
+        result: { status: "cancelled", playbackId: expect.stringMatching(/^pb-/), reason: "frozen" },
+      }),
+    );
+  });
+
   it("hears that the page is hidden, and that a hidden card cut an animation short", async () => {
     serve([IDLE, "点击回应-元气挥手"]);
     await mount();
@@ -475,6 +493,22 @@ describe("walking, throwing and resting", () => {
     write("say", { text: "照片整理好了" });
     expect(play.mock.contexts).toContain(front(videos));
     expect(await screen.findByText("照片整理好了")).toBeInTheDocument();
+  });
+
+  it("takes what VNAS says as the member's input, and rests a minute after it", async () => {
+    serve([IDLE]);
+    const { videos } = await mount();
+    const pause = vi.mocked(HTMLMediaElement.prototype.pause);
+    vi.useFakeTimers({ shouldClearNativeTimers: true });
+    fireEvent.keyDown(window, { key: "a" });
+    act(() => vi.advanceTimersByTime(50_000));
+    write("say", { text: "照片整理好了" });
+    pause.mockClear();
+    act(() => vi.advanceTimersByTime(59_000));
+    expect(pause.mock.contexts).not.toContain(front(videos));
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(pause.mock.contexts).toContain(front(videos));
+    vi.useRealTimers();
   });
 
   it("keeps a clip that finishes loading while the page is hidden still until the page is back", async () => {

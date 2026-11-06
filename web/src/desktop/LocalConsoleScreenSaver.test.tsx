@@ -8,6 +8,7 @@ import {
   isLocalConsole,
   LocalConsoleScreenSaver,
   loadScreenSaverVideos,
+  localConsoleCovered,
   localConsoleScreenSaverIdleMs,
   selectScreenSaverVideo,
 } from "./LocalConsoleScreenSaver";
@@ -150,13 +151,16 @@ describe("local console screen saver", () => {
       />,
     );
     await act(async () => undefined);
+    expect(localConsoleCovered()).toBe(false);
     await idle();
     expect(saver()?.querySelector("video")?.getAttribute("src")).toBe(videos[0]);
+    expect(localConsoleCovered()).toBe(true);
 
     act(() => vi.advanceTimersByTime(10 * minute - 1));
     expect(asleep()).toBeNull();
     act(() => vi.advanceTimersByTime(1));
     expect(asleep()).toBeTruthy();
+    expect(localConsoleCovered()).toBe(true);
     // Nothing is decoded while the screen is black.
     expect(saver()).toBeNull();
     expect(document.querySelector("video")).toBeNull();
@@ -164,6 +168,7 @@ describe("local console screen saver", () => {
     // The first input only wakes the page, back to the desktop rather than the video.
     expect(fireEvent.pointerDown(window)).toBe(false);
     expect(asleep()).toBeNull();
+    expect(localConsoleCovered()).toBe(false);
     expect(saver()).toBeNull();
     await idle(localConsoleScreenSaverIdleMs - 1);
     expect(saver()).toBeNull();

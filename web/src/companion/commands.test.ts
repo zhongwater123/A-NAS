@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { type CompanionCommand, type CompanionOutcome, resetCompanionCommands, runCompanionCommand } from "./commands";
+import {
+  type CompanionCommand,
+  type CompanionOutcome,
+  releaseCommandLocks,
+  resetCompanionCommands,
+  runCompanionCommand,
+} from "./commands";
 import { companionLock, companionPlayback, resetCompanionHost } from "./host";
 import {
   companionState,
@@ -9,7 +15,12 @@ import {
   setCompanionPaused,
   setCompanionReady,
   startTurn,
+  subscribeCompanionState,
 } from "./workStatus";
+
+// The local console's screen saver, up or not.
+const cover = vi.hoisted(() => ({ up: false }));
+vi.mock("../desktop/LocalConsoleScreenSaver", () => ({ localConsoleCovered: () => cover.up }));
 
 // The page without the card: what a command writes is read from the page's state, and the
 // card's receipts are reported to the playback store as petCard.tsx passes them on.
@@ -42,6 +53,7 @@ afterEach(() => {
   resetCompanionCommands();
   setCompanionReady(false);
   setCompanionPaused(false);
+  cover.up = false;
 });
 
 describe("an animation VNAS asks for", () => {
@@ -134,6 +146,36 @@ describe("what VNAS says and where it puts the companion", () => {
     expect(await run("throw", { angle: 60, power: 0 })).toEqual(refused("bad-request"));
   });
 
+  it("keeps to the contract's limits where dsh-pet sets none", async () => {
+    const before = writes();
+    expect(await run("broadcast", { text: "字".repeat(201) })).toEqual(refused("bad-request"));
+    expect(await run("broadcast", { text: "看\u202E反过来" })).toEqual(refused("bad-request"));
+    expect(await run("broadcast", { text: "响\u0007铃" })).toEqual(refused("bad-request"));
+    expect(await run("broadcast", { text: "嗨", duration: 60_001 })).toEqual(refused("bad-request"));
+    expect(await run("position", { x: 0.5, y: 0.5, mode: "line", duration: 5001 })).toEqual(refused("bad-request"));
+    expect(await run("throw", { angle: 0, power: 3.5 })).toEqual(refused("bad-request"));
+    expect(writes()).toBe(before);
+    expect(await run("broadcast", { text: "字".repeat(200), duration: 60_000 })).toEqual(ok());
+    expect(await run("broadcast", { text: "两行\n字" })).toEqual(ok());
+    expect(await run("throw", { angle: 0, power: 3 })).toEqual(ok());
+  });
+
+  it("is answered even when the page cannot finish writing it", async () => {
+    const stop = subscribeCompanionState(() => {
+      throw new Error("a reader of the page's state broke");
+    });
+    try {
+      expect(await run("broadcast", { text: "嗨" })).toEqual(refused("not-ready"));
+      expect(await run("anim", { name: WAVE })).toEqual({
+        ok: true,
+        result: { status: "failed", playbackId: expect.stringMatching(/^pb-/), reason: "write-error" },
+      });
+      expect(companionPlayback.waiterCount()).toBe(0);
+    } finally {
+      stop();
+    }
+  });
+
   it("does not know a tool outside the contract", async () => {
     expect(await run("whisper", { text: "嗨" })).toEqual(refused("bad-request"));
   });
@@ -222,18 +264,35 @@ describe("the lock", () => {
     expect(await run("lock", { ttl: "long" })).toEqual(refused("bad-request"));
   });
 
-  it("is released by force when the product service settles a turn, even one this window no longer runs", async () => {
+  it("is released by force when the product service settles the turn that took it, and only that one", async () => {
     const lockId = field(await run("lock"), "lockId");
     expect(await run("lock_release", { lockId: "lk-other" })).toEqual(refused("lock-lost", { cause: "unknown" }));
+    // Another conversation's turn in this window ends: the lock is not its own.
+    startTurn("live0002");
+    reportEvent("live0002", "message.complete", { status: "complete" });
+    expect(await run("lock_release", { force: true }, "live0002")).toEqual(ok());
+    expect(companionLock.locked("main")).toBe(true);
     reportEvent(SESSION, "message.complete", { status: "complete" });
     expect(await run("lock_release", { lockId })).toEqual(refused("not-controlling"));
     setCompanionReady(false);
     expect(await run("lock_release", { force: true })).toEqual(ok());
     expect(companionLock.locked("main")).toBe(false);
     expect(leaf("lock")).toEqual({ locked: false });
+    // Its turn ended: the member did not take the pet over.
+    startTurn(SESSION);
+    setCompanionReady(true);
+    expect(await run("lock", { lockId })).toEqual(refused("lock-lost", { cause: "released" }));
     // Releasing what is not there is done already.
     expect(await run("lock_release", { force: true })).toEqual(ok());
     expect(await run("lock_release", { force: true, lockId })).toEqual(refused("bad-request"));
+  });
+
+  it("goes with the window, which the product service can no longer settle", async () => {
+    const lockId = field(await run("lock"), "lockId");
+    releaseCommandLocks();
+    expect(companionLock.locked("main")).toBe(false);
+    expect(leaf("lock")).toEqual({ locked: false });
+    expect(await run("broadcast", { text: "嗨", lock: lockId })).toEqual(refused("lock-lost", { cause: "released" }));
   });
 });
 
@@ -262,6 +321,16 @@ describe("what the window checks first", () => {
     expect(await run("throw", { angle: 0, power: 1 })).toEqual(refused("paused"));
     expect(await run("sleep")).toEqual(ok({ sleeping: true, changed: true }));
     expect(await run("lock")).toMatchObject({ ok: true });
+  });
+
+  it("answers paused under the local console's screen saver", async () => {
+    cover.up = true;
+    const before = writes();
+    expect(await run("anim", { name: WAVE })).toEqual(refused("paused"));
+    expect(await run("broadcast", { text: "嗨" })).toEqual(refused("paused"));
+    expect(writes()).toBe(before);
+    cover.up = false;
+    expect(await run("broadcast", { text: "嗨" })).toEqual(ok());
   });
 
   it("carries out at most 20 commands a minute, 6 broadcasts and 6 throws among them", async () => {

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AssistantMessage } from "../api.generated";
 import { resetCompanionCommands } from "../companion/commands";
-import { companionPlayback, resetCompanionHost } from "../companion/host";
+import { companionLock, companionPlayback, resetCompanionHost } from "../companion/host";
 import { companionState, resetWorkStatus, setCompanionReady, startTurn } from "../companion/workStatus";
 import { assistantHandlers, assistantSession } from "../test/handlers/assistant";
 import { server } from "../test/server";
@@ -262,11 +262,16 @@ describe("the VNAS window", () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(results()).toHaveLength(3);
 
-    // A window that closes stops waiting on an animation and answers nothing.
+    // A window that closes stops waiting on an animation and answers nothing, and the lock VNAS
+    // took goes with it, as the product service can no longer release it.
     await emit("anas.companion", command("e".repeat(32), "anim", { name: "点击回应-元气挥手" }));
+    await emit("anas.companion", command("f".repeat(32), "lock", {}));
+    await waitFor(() => expect(results()).toHaveLength(4));
+    expect(companionLock.locked("main")).toBe(true);
     cleanup();
     expect(companionPlayback.waiterCount()).toBe(0);
+    expect(companionLock.locked("main")).toBe(false);
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
-    expect(results()).toHaveLength(3);
+    expect(results()).toHaveLength(4);
   });
 });
