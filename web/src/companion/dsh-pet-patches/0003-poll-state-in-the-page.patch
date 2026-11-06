@@ -1,0 +1,17 @@
+A-NAS runs the GET /state store in the page, where there is no process and a timer
+has no unref.
+
+diff --git a/host/state.ts b/host/state.ts
+--- a/host/state.ts
++++ b/host/state.ts
+@@ -182,7 +182,9 @@
+       Math.max(0, args.timeoutMs),
+     );
+     // 不让这个定时器把宿主进程钉住（宿主退出时不该等它；node:test 下保留保持事件循环存活）
+-    if (process.env.NODE_TEST_CONTEXT === undefined) waiter.timer.unref?.();
++    // A-NAS: the store runs in the page, where there is no process and a timer has no unref.
++    const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
++    if (env?.NODE_TEST_CONTEXT === undefined) (waiter.timer as { unref?: () => void }).unref?.();
+     return () => this.dropWaiter(waiter);
+   }
+ 

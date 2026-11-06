@@ -1,11 +1,12 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AssistantMessage } from "../api.generated";
+import { companionState, resetWorkStatus } from "../companion/workStatus";
 import { assistantHandlers, assistantSession } from "../test/handlers/assistant";
 import { server } from "../test/server";
 import type { Approval } from "./api";
-import { readAssistantActivity, resetAssistantActivity } from "./assistantActivity";
 
 // The window against a stand-in for the member's Hermes: the gateway's events
 // are pushed by the test, REST answers come from the test server.
@@ -41,8 +42,11 @@ Element.prototype.scrollTo ??= function scrollTo() {};
 
 afterEach(() => {
   handlers.clear();
-  resetAssistantActivity();
+  resetWorkStatus();
 });
+
+// What the companion would show: the page's GET /state section the VNAS window feeds.
+const shown = () => (companionState.read().sections.workStatus.data as { state?: string } | null)?.state ?? null;
 
 const history: AssistantMessage[] = [
   { id: 1, role: "user", content: "打开相册", timestamp: 1_760_000_000 },
@@ -158,7 +162,7 @@ describe("the VNAS window", () => {
     expect(screen.queryByRole("region", { name: "本对话中等你确认或回答的事" })).toBeNull();
   });
 
-  it("tells the desktop what VNAS is doing, and nothing once the window closes", async () => {
+  it("moves the companion for the turns this window starts, and stops once the window closes", async () => {
     const card = (status: Approval["status"]): Approval => ({
       requestId: "req-9",
       sessionId: LIVE,
@@ -168,21 +172,34 @@ describe("the VNAS window", () => {
       createdAt: Date.now() / 1000,
       command: { text: "rm -rf 缓存" },
     });
+    // A turn driven from another device, and its card, are not this device's companion's.
     await open([card("awaiting")]);
-    expect(readAssistantActivity().state).toBe("waiting");
-    await emit("anas.approval", card("approved"));
-    expect(readAssistantActivity().state).toBeNull();
-
     await emit("message.start");
-    expect(readAssistantActivity().state).toBe("thinking");
-    await emit("tool.start", { tool_id: "call_1", name: "browser_snapshot" });
-    expect(readAssistantActivity().state).toBe("working");
-    await emit("tool.complete", { tool_id: "call_1", name: "browser_snapshot", result: "" });
-    expect(readAssistantActivity().state).toBe("result");
+    expect(shown()).toBeNull();
     await emit("message.complete", { status: "complete" });
-    expect(readAssistantActivity().state).toBe("success");
+
+    // This window sends the next prompt: it registers as the conversation's browser first.
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("textbox"), "清理缓存");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() =>
+      expect(client.request).toHaveBeenCalledWith(
+        "browser.controller.register",
+        expect.objectContaining({ session_id: LIVE }),
+      ),
+    );
+    await emit("message.start");
+    expect(shown()).toBe("thinking");
+    await emit("tool.start", { tool_id: "call_1", name: "browser_snapshot" });
+    expect(shown()).toBe("working");
+    await emit("anas.approval", card("awaiting"));
+    expect(shown()).toBe("waiting");
+    await emit("anas.approval", card("approved"));
+    expect(shown()).toBe("working");
+    await emit("message.complete", { status: "complete" });
+    expect(shown()).toBe("success");
 
     cleanup();
-    expect(readAssistantActivity().state).toBeNull();
+    expect(shown()).toBeNull();
   });
 });

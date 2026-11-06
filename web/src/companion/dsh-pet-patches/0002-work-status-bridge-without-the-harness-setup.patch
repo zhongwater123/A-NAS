@@ -1,0 +1,25 @@
+The bridge reads three fields of the Harness host's setup, which A-NAS does not vendor;
+they are named in the bridge itself. Its behaviour is unchanged.
+
+diff --git a/host/plugin/work-status-bridge.ts b/host/plugin/work-status-bridge.ts
+--- a/host/plugin/work-status-bridge.ts
++++ b/host/plugin/work-status-bridge.ts
+@@ -6,10 +6,16 @@
+  * 依赖由 apply 显式传入（见输入类型），模块内不读全局、不建单例。
+  * @module dsh-pet/src/host/plugin/work-status-bridge
+  */
+-import type { HostSetup } from './setup';
++import type { PollStateStore } from '../state';
++import type { WorkStatusStore } from '../work-status';
+ 
+ /** 工作状态桥的输入：轮询快照、工作状态 store，以及判定「外部槽」用的哨兵会话 id。 */
+-export type WorkStatusBridgeInput = Pick<HostSetup, 'state' | 'workStatus' | 'EXTERNAL_WORK_SESSION'>;
++// A-NAS: the three fields the bridge reads, named here; the Harness host setup is not vendored.
++export type WorkStatusBridgeInput = {
++  state: PollStateStore;
++  workStatus: WorkStatusStore;
++  EXTERNAL_WORK_SESSION: string;
++};
+ 
+ /**
+  * 创建工作状态桥。

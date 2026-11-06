@@ -79,6 +79,7 @@ import {
 } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
+import { forgetAll, reportCards, reportEvent, startTurn } from "../companion/workStatus";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { formatBytes } from "../lib/bytes";
 import { copyText } from "../lib/clipboard";
@@ -98,7 +99,6 @@ import {
   renameSession,
 } from "./api";
 import styles from "./assistant.module.css";
-import { activityOf, forgetTurn, reportAwaiting, reportTurn } from "./assistantActivity";
 import { chatMessageText } from "./hermes/lib/chat-messages/parts";
 import { withUniqueToolCallIdsWithinMessage } from "./hermes/lib/chat-messages/tool-parts";
 import type { ChatMessage } from "./hermes/lib/chat-messages/types";
@@ -167,8 +167,6 @@ export function AssistantPanel({
   // What Hermes's background review of a conversation's last turn changed, in
   // its own words, by live conversation; a new turn clears it.
   const [reviews, setReviews] = useState<Map<string, string>>(new Map());
-  // The conversations whose turns this window reported to the desktop (assistantActivity).
-  const reported = useRef(new Set<string>());
 
   // A list that failed while the instance was still starting says so until a
   // later load succeeds.
@@ -249,36 +247,18 @@ export function AssistantPanel({
         }
         if (type === "sessions.changed" || type === "session.title") void refreshSessions();
         if (type === "sessions.changed" || type === "message.complete") refreshBusy();
-        const stage = session
-          ? activityOf(type, event.payload as { name?: unknown; status?: unknown } | undefined)
-          : undefined;
-        if (stage !== undefined) {
-          reported.current.add(session);
-          reportTurn(session, stage);
-        }
+        // The companion follows the turns this window started (companion/workStatus.ts).
+        if (session) reportEvent(session, type, event.payload as { name?: unknown; status?: unknown } | undefined);
       }),
     [gateway.client, keep, refreshBusy, refreshSessions],
   );
-  // What the desktop shows of VNAS lasts only while this window can see it: a
-  // lost connection or a closed window says nothing more about those turns.
+  // What the companion shows of VNAS lasts only while this window can see it: a
+  // lost connection or a closed window says nothing more about those turns or cards.
   useEffect(() => {
-    if (gateway.ready) return;
-    for (const session of reported.current) forgetTurn(session);
-    reported.current.clear();
+    if (!gateway.ready) forgetAll();
   }, [gateway.ready, gateway.generation]);
-  useEffect(() => {
-    let count = 0;
-    for (const approval of approvals.values()) if (approval.status === "awaiting") count += 1;
-    reportAwaiting(count);
-  }, [approvals]);
-  useEffect(
-    () => () => {
-      for (const session of reported.current) forgetTurn(session);
-      reported.current.clear();
-      reportAwaiting(0);
-    },
-    [],
-  );
+  useEffect(() => reportCards(approvals.values()), [approvals]);
+  useEffect(() => () => forgetAll(), []);
 
   const changed = useCallback(() => {
     void refreshSessions();
@@ -343,6 +323,7 @@ export function AssistantPanel({
         .then(
           () => {
             controlled.current.add(liveId);
+            startTurn(liveId);
           },
           () => {
             controlled.current.delete(liveId);

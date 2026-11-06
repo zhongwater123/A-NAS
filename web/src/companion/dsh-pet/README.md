@@ -4,6 +4,6 @@ Copied from [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) comm
 
 The animations this code plays are not in Git and are not MIT. The character is the community-made DeepSeek 大肥鱼, not an official DeepSeek character: the original 溟月 is by [@上善无形](https://space.bilibili.com/4456176) and the maid design by [@ZipZipPipe](https://space.bilibili.com/4168597), licensed [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) with no commercial use in any form; dsh-pet's animations, prompts and source videos may not be used commercially. Anything showing the character credits <https://github.com/PC2005-cloud/dsh-pet>, and A-NAS must replace it before any commercial release.
 
-Patches applied: `0001-serve-animations-from-a-nas.patch`.
+Patches applied: `0001-serve-animations-from-a-nas.patch`, `0002-work-status-bridge-without-the-harness-setup.patch`, `0003-poll-state-in-the-page.patch`.
 
 `animations.sha256` lists the 223 animation files of this commit and of `https://github.com/PC2005-cloud/dsh-pet/releases/download/assets-mov/dsh-pet-mov-assets-mov.zip`; installed, they are companion animation pool `efc3b4c6eebf8963`.

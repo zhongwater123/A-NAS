@@ -1,8 +1,10 @@
 """Vendors the parts of dsh-pet the companion reuses: the self-playing animation
 chain (src/client/pet/animation), dragging, throwing and walking (src/client/pet/motion),
-the physics they share (src/shared/physics), and the plain modules those import.
+the physics they share (src/shared/physics), the host's work status store, the bridge
+that publishes it and the page state it writes (FILES), and the plain modules those import.
 Nothing that talks to DeepSeek Harness, a model, a voice or the network is copied;
-the script stops if an import reaches outside the plain modules.
+the script stops if an import reaches outside the plain modules, or if a vendored file
+imports a package at run time (type-only imports, which the build erases, are fine).
 
 Run on the development machine, with a dsh-pet checkout at the pinned commit and its HEVC
 animations for Safari (the assets-mov release, MOV_ZIP below):
@@ -28,12 +30,21 @@ PINNED = "10f6c868b8110c897af33d6137a3d85e84b665ba"
 MOV_ZIP = ("https://github.com/PC2005-cloud/dsh-pet/releases/download/assets-mov/dsh-pet-mov-assets-mov.zip",
            "654e42f14b647a1e59a4c6f05694273dcf23edb063a5e49b14fc05a1fad3b467")
 ROOTS = ["client/pet/animation", "client/pet/motion", "shared/physics"]
+# Single host modules the page runs as dsh-pet's host would: WorkStatusStore and pickDisplayed
+# (self-contained), the bridge that publishes them (a working->result flip within 5 s merged,
+# nothing published when the shown status is unchanged) and PollStateStore, the GET /state
+# store the card reads.
+FILES = ["host/work-status.ts", "host/plugin/work-status-bridge.ts", "host/state.ts"]
 # Moves the pet where the Harness host tells it to; A-NAS has no such host.
 SKIP = {"client/pet/motion/position-follow.ts"}
 # Code reached through imports must stay in these plain, browser-only modules.
-ALLOWED = ("client/pet/", "shared/")
+ALLOWED = ("client/pet/", "shared/", *FILES)
 DENIED = ("shared/chat/", "shared/balance/", "shared/todo/", "shared/menu/", "client/pet/card/")
 IMPORT = re.compile(r"""((?:from|import)\s*\(?\s*)(['"])(\.{1,2}/[^'"]+)\2""")
+# Imports a patch removes, by vendored file: not followed when collecting files, and checked to
+# be gone once the patches are applied (a patch that stopped applying would leave them).
+CUT_IMPORTS = {"host/plugin/work-status-bridge.ts": {"./setup.ts"}}
+STATEMENT = re.compile(r"""(?m)^\s*(?:import|export)\s+(type\s+)?[^;]*?\bfrom\s*(['"])([^'"]+)\2""")
 
 upstream, target, mov_zip = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
 source = upstream / "dsh-pet" / "src"
@@ -47,11 +58,14 @@ if hashlib.sha256(mov_zip.read_bytes()).hexdigest() != MOV_ZIP[1]:
 
 
 def imports(path: Path) -> list[Path]:
-    return [(path.parent / m.group(3)).resolve() for m in IMPORT.finditer(path.read_text(encoding="utf-8"))]
+    cut = CUT_IMPORTS.get(path.resolve().relative_to(source.resolve()).as_posix(), set())
+    return [(path.parent / m.group(3)).resolve() for m in IMPORT.finditer(path.read_text(encoding="utf-8"))
+            if m.group(3) not in cut]
 
 
 todo = [f for root in ROOTS for f in sorted((source / root).glob("*.ts"))
         if not f.name.endswith(".test.ts") and f.relative_to(source).as_posix() not in SKIP]
+todo += [source / f for f in FILES]
 files: set[Path] = set()
 while todo:
     path = todo.pop().resolve()
@@ -78,6 +92,17 @@ for patch in sorted(patches.glob("*.patch")):
     subprocess.run(["git", "apply", "--directory", target.as_posix(), str(patch)],  # noqa: S607  our own patches
                    check=True, cwd=Path.cwd())
     applied.append(patch.name)
+for rel, specs in CUT_IMPORTS.items():
+    text = (target / rel).read_text(encoding="utf-8")
+    left = [spec for spec in specs if re.sub(r"\.ts$", "", spec) in text]
+    if left:
+        sys.exit(f"{rel} still imports {left}: a patch should have removed it")
+for path in sorted(target.rglob("*.ts")):
+    for m in STATEMENT.finditer(path.read_text(encoding="utf-8")):
+        if not m.group(3).startswith(".") and not m.group(1):
+            sys.exit(f"{path.relative_to(target)} imports {m.group(3)} at run time")
+
+
 def jsonc(text: str) -> object:
     """Parses dsh-pet's config.jsonc: JSON with comments and trailing commas."""
     out, i, inside = [], 0, False

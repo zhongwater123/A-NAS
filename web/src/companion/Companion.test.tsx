@@ -2,9 +2,9 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { reportAwaiting, reportTurn, resetAssistantActivity } from "../assistant/assistantActivity";
 import { http, server } from "../test/server";
 import { Companion } from "./Companion";
+import { reportCards, reportEvent, resetWorkStatus, startTurn } from "./workStatus";
 
 const origin = window.location.origin;
 const served = (names: string[]) =>
@@ -20,7 +20,7 @@ beforeEach(() => {
   server.use(http.untyped.get(`${origin}/companion/animations/:name`, () => new HttpResponse(new Blob(["webm"]))));
 });
 afterEach(() => {
-  resetAssistantActivity();
+  resetWorkStatus();
   localStorage.clear();
   // A test that plays Safari must not leave the next one in it.
   vi.restoreAllMocks();
@@ -62,16 +62,23 @@ describe("the companion on the desktop", () => {
     // Only installed animations play: the first is always the idle one.
     expect(root.dataset.anim).toBe("待机呼吸休闲");
 
-    act(() => reportTurn("live0001", "working"));
+    // A turn the VNAS window on this page started.
+    act(() => {
+      startTurn("live0001");
+      reportEvent("live0001", "tool.start", { name: "browser_snapshot" });
+    });
     await waitFor(() => expect(root.dataset.anim).toBe("工作状态-忙碌点按"));
     expect(root.dataset.work).toBe("working");
-    act(() => reportAwaiting(1));
+    act(() => reportCards([{ requestId: "req-1", sessionId: "live0001", status: "awaiting" }]));
     await waitFor(() => expect(root.dataset.anim).toBe("工作状态-原地踱步张望"));
-    act(() => reportAwaiting(0));
-    act(() => reportTurn("live0001", "success"));
+    act(() => reportCards([]));
+    act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
     await waitFor(() => expect(root.dataset.anim).toBe("工作状态-雀跃庆祝"));
     // A stage without its animation installed changes nothing: the companion carries on.
-    act(() => reportTurn("live0001", "error"));
+    act(() => {
+      startTurn("live0001");
+      reportEvent("live0001", "message.complete", { status: "error" });
+    });
     await waitFor(() => expect(root.dataset.work).toBe("error"));
     expect(root.dataset.anim).toBe("工作状态-雀跃庆祝");
   });
