@@ -209,11 +209,14 @@ type Service struct {
 	logger        *slog.Logger
 	limitersMu    sync.Mutex
 	limiters      map[string]*rate.Limiter
-	// Each engine's pace, whoever searches, and the engines a site blocked
+	// Each website's pace, whoever searches, and the websites that blocked us
 	// (pace.go); pauses is nil until read from the store.
-	pace     pacing
-	pacesMu  sync.Mutex
-	paces    map[string]*rate.Limiter
+	pace    pacing
+	pacesMu sync.Mutex
+	paces   map[string]*rate.Limiter
+	waiting map[turnKey]bool
+	// Search requests only; thumbnails and /config do not consume these slots.
+	requests chan struct{}
 	pausesMu sync.Mutex
 	pauses   map[string]Pause
 	// Each account's recent searches (pace.go).
@@ -243,7 +246,8 @@ func New(options Options) *Service {
 	return &Service{
 		backend: options.Backend, power: options.Switch, settings: options.Settings,
 		secret: options.Secret, thumbnailPath: options.ThumbnailPath, logger: logger, limiters: map[string]*rate.Limiter{},
-		pace: pace, paces: map[string]*rate.Limiter{},
+		pace: pace, paces: map[string]*rate.Limiter{}, waiting: map[turnKey]bool{},
+		requests: make(chan struct{}, maxSearchRequests),
 		searches: expirable.NewLRU[searchKey, *record](keptSearches, nil, searchMaxAge),
 		now:      time.Now, firstUpdate: firstUpdate, updateGap: updateGap,
 	}
@@ -258,7 +262,7 @@ type Status struct {
 	// Engines are every tab's engines, as the window names them; empty until
 	// SearXNG has been read while it ran.
 	Engines map[Category][]string `json:"engines"`
-	// Paused are the engines searches leave out since a site blocked them,
+	// Paused are the websites searches leave out after they blocked us,
 	// the first to return first.
 	Paused []PausedEngine `json:"paused"`
 }

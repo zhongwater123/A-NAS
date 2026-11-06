@@ -97,6 +97,10 @@
 
 最小化与历史（#182）：打开与另一账号的私聊后最小化分享窗口，浏览器开发者工具的网络面板中不再有对话内容的请求，桌面的未读徽标仍约每 30 秒同步；另一账号此时发来的消息在恢复窗口后接着出现，没有重复或缺失（[调查](../investigations/2026-10-28-share-history-polling.md)）。
 
+### 网页搜索
+
+- 网站节奏与暂停（#364 修复，部署后待办 [#409](https://github.com/zhongwater123/A-NAS/issues/409)）：部署对应产品服务与搜索设置后，按[多账号节奏与资源验收](enable-web-search.md#多账号节奏与资源验收364)核对跨分类暂停、两名成员同时搜索、取消后的请求容量与缩略图加载，记录 512 MiB 下的内存峰值、压力和延迟（[调查](../investigations/2026-11-05-web-search-website-pacing.md)）。
+
 ### AI 助手（试用）
 
 - 冷启动、内存、多人同时使用与开启 simple quota 的影响（[#116](https://github.com/zhongwater123/A-NAS/issues/116)）。
