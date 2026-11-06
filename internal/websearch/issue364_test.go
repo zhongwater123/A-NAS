@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/clocktest"
 	"go.yaml.in/yaml/v4"
 )
 
@@ -167,12 +168,13 @@ func TestLegacyEnginePausesMergeAndDoNotReturnAfterRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	s.now = func() time.Time { return now }
+	clock := clocktest.New(now)
+	s.now = clock.Now
 	status, err := s.Status(ctx)
 	if err != nil || len(status.Paused) != 1 || status.Paused[0].Engine != "Google" || !status.Paused[0].Until.Equal(now.Add(2*time.Hour)) {
 		t.Fatalf("migration: %+v, %v", status.Paused, err)
 	}
-	now = now.Add(2 * time.Hour)
+	clock.Advance(2 * time.Hour)
 	s.judge(ctx, "google news", Response{})
 	again := New(Options{Settings: s.settings})
 	pauses, err := again.pausedEngines(ctx)

@@ -1,7 +1,7 @@
 # 网页搜索的隐藏暂停、跨分类绕过与并发积压
 
-状态：fixed（代码与本地回归已修复；实验 NAS 的 512 MiB 多账号实测待部署后执行）
-更新时间：2026-11-05
+状态：fixed（代码与本地回归已修复；部署后验证由 #409 单独跟踪）
+更新时间：2026-11-06
 
 ## 症状与复现
 
@@ -27,7 +27,7 @@ go test ./internal/websearch -run 'TestChallengeSuspensions|TestInflightAnswers|
 
 - `go test ./internal/websearch -count=1` 通过。并发测试用 Go `testing/synctest` 推进时间，覆盖两个账号轮次、取消前后容量、排队中网站被拦与旧记录迁移；不依赖网络或真实等待十秒。
 - 新发现的暂停在本次结果中立即报告，按网站去重；成功结果仍保留。设置页显示“暂停的网站”。接口保留 `engine` 字段名以保持兼容，含义明确为网站显示名。
-- 完整门禁与竞态检测结果记录于修复 PR。实验 NAS 的真实 SearXNG 内存、首批结果时间和多账号体验，按[验收步骤](../runbooks/enable-web-search.md#多账号节奏与资源验收364)验证；本地替身不证明真实 512 MiB 下无内存压力。
+- 完整门禁与竞态检测结果记录于修复 PR。本次未执行真实 SearXNG 系统测试或实验 NAS 实测，64 个槽位的实际余量与真实 512 MiB 下的内存压力没有实机证据。部署后的内存、首批结果时间和多账号体验由 [#409](https://github.com/zhongwater123/A-NAS/issues/409) 按[验收步骤](../runbooks/enable-web-search.md#多账号节奏与资源验收364)跟踪。
 
 ## 关联
 

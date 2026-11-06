@@ -97,7 +97,7 @@
 
 ### 网页搜索
 
-- 网站节奏与暂停（#364）：部署对应产品服务与搜索设置后，按[多账号节奏与资源验收](enable-web-search.md#多账号节奏与资源验收364)核对跨分类暂停、两名成员同时搜索、取消后的请求容量与缩略图加载，记录 512 MiB 下的内存峰值、压力和延迟（[调查](../investigations/2026-11-05-web-search-website-pacing.md)）。
+- 网站节奏与暂停（#364 修复，部署后待办 [#409](https://github.com/zhongwater123/A-NAS/issues/409)）：部署对应产品服务与搜索设置后，按[多账号节奏与资源验收](enable-web-search.md#多账号节奏与资源验收364)核对跨分类暂停、两名成员同时搜索、取消后的请求容量与缩略图加载，记录 512 MiB 下的内存峰值、压力和延迟（[调查](../investigations/2026-11-05-web-search-website-pacing.md)）。
 
 ### AI 助手（试用）
 
