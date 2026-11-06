@@ -61,7 +61,12 @@ func (s *Service) succeeded(planID string, operation VolumeOperation) (Execution
 	} else {
 		current, _ := s.currentVolumeLocked()
 		volume.ID, volume.FilesystemUUID = current.ID, current.FilesystemUUID
-		volume.DiskIDs = append([]string(nil), current.DiskIDs...)
+		// A replacement leaves the missing disk out: the Host Agent reports
+		// the disks the volume has now. Without that report the recorded
+		// disks are kept, as for an addition.
+		if plan.Kind != PlanKindReplaceDisk || len(volume.DiskIDs) == 0 {
+			volume.DiskIDs = append([]string(nil), current.DiskIDs...)
+		}
 		for _, id := range diskIDsOf(plan.Disks) {
 			if !slices.Contains(volume.DiskIDs, id) {
 				volume.DiskIDs = append(volume.DiskIDs, id)

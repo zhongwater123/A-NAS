@@ -785,6 +785,10 @@ func observeVolume(volume Volume, state hoststate.State) Volume {
 	if volume.Layout == LayoutSingle {
 		return volume
 	}
+	// Without a disk a mirror cannot convert; it does once the disk is back.
+	if mounted.MissingDevices > 0 {
+		return volume
+	}
 	if converted, total := conversionProgress(mounted, volume.Layout); converted < total {
 		volume.Conversion = &Conversion{State: ConversionWaiting, ConvertedBytes: converted, TotalBytes: total}
 		if mounted.Operation == hoststate.VolumeOperationBalance {

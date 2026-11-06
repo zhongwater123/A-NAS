@@ -184,11 +184,13 @@ func TestAMirrorMissingADiskNamesItAndTakesNoOtherPlan(t *testing.T) {
 	mirror := []hoststate.ProfileUsage{{Profile: hoststate.ProfileRAID1, UsedBytes: 1_000_000_000}}
 	mountVolume(reader, []string{"disk:fake-data-01"}, 1_000_000_000, mirror, mirror)
 	reader.state.DataVolume.MissingDevices = 1
+	// Written with one copy meanwhile; nothing converts without the disk.
+	reader.state.DataVolume.Data = append(reader.state.DataVolume.Data, hoststate.ProfileUsage{Profile: hoststate.ProfileSingle, UsedBytes: 5_000_000})
 
 	volumes, err := service.ListVolumes(ctx)
 	want := []storage.MissingDisk{{ID: "disk:fake-data-02", Model: plan.Disks[1].Model, CapacityBytes: plan.Disks[1].CapacityBytes}}
-	if err != nil || volumes[0].State != storage.VolumeStateDegraded || !slices.Equal(volumes[0].MissingDisks, want) {
-		t.Fatalf("volumes = %+v, %v; want degraded without %+v", volumes, err, want)
+	if err != nil || volumes[0].State != storage.VolumeStateDegraded || !slices.Equal(volumes[0].MissingDisks, want) || volumes[0].Conversion != nil {
+		t.Fatalf("volumes = %+v, %v; want degraded without %+v and no conversion", volumes, err, want)
 	}
 	// The one plan it takes is a disk in place of the missing one.
 	replacement, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, storage.LayoutSpan)
@@ -231,6 +233,7 @@ func TestAMirrorMissingADiskNamesItAndTakesNoOtherPlan(t *testing.T) {
 	reader.state.Disks = slices.Delete(reader.state.Disks, gone, gone+1)
 	mountVolume(reader, []string{"disk:fake-data-01"}, 1_000_000_000, mirror, mirror)
 	reader.state.DataVolume.MissingDevices = 1
+	executor.remaining = []string{"disk:fake-data-01", "disk:fake-data-03"}
 	replacement, err = service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, "")
 	if err != nil {
 		t.Fatal(err)
@@ -243,6 +246,12 @@ func TestAMirrorMissingADiskNamesItAndTakesNoOtherPlan(t *testing.T) {
 	}
 	if len(executor.replaced) != 1 || executor.replaced[0].Disk.DiskID != "disk:fake-data-03" || executor.replaced[0].FilesystemUUID != volumeUUID {
 		t.Fatalf("replace requests = %+v", executor.replaced)
+	}
+	// The replaced disk is no longer the volume's.
+	reader.state.DataVolume = nil
+	volumes, _ = service.ListVolumes(ctx)
+	if !slices.Equal(volumes[0].DiskIDs, []string{"disk:fake-data-01", "disk:fake-data-03"}) {
+		t.Fatalf("disks after the replacement = %v, want the remaining and the new one", volumes[0].DiskIDs)
 	}
 }
 
