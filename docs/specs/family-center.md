@@ -237,7 +237,7 @@
 
 - Given：云相册里有 grandma 上传的一张照片。
 - When：grandma 在相册应用里把这张照片移到回收站，之后又恢复。
-- Then：照片在回收站期间不出现在云相册和时间线里，恢复后回到原处。永久删除后，它从频道中永久消失；如果那条记录只剩这一张，记录随之消失。
+- Then：照片在回收站期间不出现在云相册和时间线里，恢复后回到原处。照片不可见期间修改记录也保留它的引用；未提交照片列表时保留全部已存引用，显式列表只替换修改人当前看得见的部分。永久删除后，它从频道中永久消失；如果那条记录只剩这一张，记录随之消失。
 
 ### 录音
 
@@ -318,10 +318,12 @@
 - **测量值**：
   - 范围：身长/身高 30–200 cm，体重 0.5–100 kg，头围 20–70 cm，超出范围的值拒绝保存；
   - 与上一次测量相比体重变化超过 30%，或身长减少超过 2 cm 时，提示核对，但仍可保存。
+- **留言墙**：按创建时间与 ID 倒序，每页 30 封，以游标继续读取更早的信，不因超过 200 封而失去访问入口。
+- **录音落盘与清理**：写入前按 200 MiB 上限检查统一保留容量，完成临时文件后、重命名前再检查剩余容量；不足时返回 `507 insufficient_storage`。清理跳过活跃上传，遗留临时文件至少保留 24 小时；数据库无对应记录的录音由后续清理重试删除。
 - **上传限制**：照片视频的格式与大小上限沿用[相册](photo-library.md)与[相册视频](photo-video.md)的规定，录音的限制见上文。
 - **局域网 HTTP**：浏览器只在 HTTPS 或 localhost（本机屏幕）页面中开放麦克风，因此局域网中只能上传录好的音频文件。HTTPS 不在本期范围内（[局域网 Web 访问](lan-web-access.md)）。
-- **重复提交**：重复点击或请求重试不会生成重复的记录或留言。
-- **活动记录**：创建家庭，加入、批准、拒绝、移出、退出，权限变化，宝宝档案的增删改，删除与恢复记录，都写入[日志](logs.md)的活动记录。
+- **重复提交**：重复点击或请求重试不会生成重复的记录或留言；同一账号、同一请求键的并发创建返回第一次创建的记录。
+- **活动记录**：创建家庭，加入、批准、拒绝、移出、退出，权限变化，宝宝档案的增删改，删除与恢复记录，都写入[日志](logs.md)的“家庭中心”类别。家庭服务只返回请求账号自己的操作，设备管理员也不会隐式读到别人的家庭记录；审计保留 180 天，每小时清理过期事件。
 
 ## 验收证据
 
@@ -350,4 +352,5 @@
 - 外部标准：WS/T 423—2022《7 岁以下儿童生长标准》；国家疾控局、国家卫生健康委《国家免疫规划疫苗儿童免疫程序及说明（2026 年版）》（[新华社报道](https://www.news.cn/politics/20260707/8a1dfcdac2f942c99070a3125f3eeea4/c.html)）
 - 架构：[家庭中心技术设计](../architecture/family-center.md)
 - 代码：[`internal/family`](../../internal/family/family.go)、[`internal/familyapi`](../../internal/familyapi/handler.go)、[`internal/familyservice`](../../internal/familyservice/service.go)、[相册查询](../../internal/photos/lookup.go)、[共享副本提示](../../internal/photos/hints.go)、[Web 窗口](../../web/src/family/FamilyPanel.tsx)、[从相册加入](../../web/src/family/fromLibrary.ts)、[图库选择窗](../../web/src/family/LibraryPicker.tsx)、[加入宝宝频道](../../web/src/photos/ChannelPicker.tsx)、[接口契约](../../api/paths/family.yaml)
+- 数据一致性回归：[调查](../investigations/2026-11-05-family-data-integrity.md)、[回归测试](../../internal/family/data_regression_test.go)
 - 测试：[领域测试](../../internal/family/family_test.go)、[从相册加入的领域测试](../../internal/family/photos_test.go)、[接口契约测试](../../internal/httpapi/family_test.go)、[窗口测试](../../web/src/family/FamilyPanel.test.tsx)、[相册窗口测试](../../web/src/photos/PhotosPanel.test.tsx)

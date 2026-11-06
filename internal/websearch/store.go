@@ -59,8 +59,8 @@ ON CONFLICT(id) DO UPDATE SET torrents = excluded.torrents`, torrents)
 	return err
 }
 
-// Pauses are the engines a site blocked since they last answered, by
-// SearXNG's name, those whose pause has passed included.
+// Pauses are website pauses, including expired ones. The SQL column keeps
+// its legacy name; Service migrates older per-engine keys on first read.
 func (s *Store) Pauses(ctx context.Context) (map[string]Pause, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT engine, reason, strikes, until FROM pauses")
 	if err != nil {
@@ -94,4 +94,22 @@ ON CONFLICT(engine) DO UPDATE SET reason = excluded.reason, strikes = excluded.s
 func (s *Store) ClearPause(ctx context.Context, engine string) error {
 	_, err := s.db.ExecContext(ctx, "DELETE FROM pauses WHERE engine = ?", engine)
 	return err
+}
+
+// replacePauses migrates legacy engine keys to website keys in one commit.
+func (s *Store) replacePauses(ctx context.Context, pauses map[string]Pause) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, "DELETE FROM pauses"); err != nil {
+		return err
+	}
+	for site, pause := range pauses {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO pauses(engine, reason, strikes, until) VALUES(?, ?, ?, ?)", site, pause.Reason, pause.Strikes, pause.Until.Unix()); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

@@ -95,6 +95,7 @@ func New(store *family.Store, logger *slog.Logger, media ffmpegworker.Worker) ht
 	h.mux.HandleFunc(PathPrefix+"/", func(w http.ResponseWriter, _ *http.Request) {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
+	h.mux.ServeMux.HandleFunc("GET "+ActivityPath, h.withActor(h.activity))
 	return h
 }
 
@@ -127,6 +128,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.As(err, &bodyLimit), errors.Is(err, family.ErrTooLarge), errors.Is(err, avatar.ErrTooLarge):
 		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "too_large", "the upload is too large")
+	case errors.Is(err, family.ErrNoSpace):
+		httpjson.WriteError(w, http.StatusInsufficientStorage, "insufficient_storage", "not enough space")
 	case errors.Is(err, family.ErrNotMember):
 		httpjson.WriteError(w, http.StatusForbidden, "not_family_member", "join the family first")
 	case errors.Is(err, family.ErrForbidden):
@@ -458,8 +461,8 @@ func (h *handler) milestones(w http.ResponseWriter, r *http.Request, actor famil
 }
 
 func (h *handler) wall(w http.ResponseWriter, r *http.Request, actor family.Actor) {
-	comments, err := h.store.Wall(r.Context(), actor, r.PathValue("babyID"))
-	h.reply(w, r, http.StatusOK, items[family.Comment]{Items: comments}, err)
+	page, err := h.store.Wall(r.Context(), actor, r.PathValue("babyID"), r.URL.Query().Get("cursor"))
+	h.reply(w, r, http.StatusOK, page, err)
 }
 
 func (h *handler) addWallComment(w http.ResponseWriter, r *http.Request, actor family.Actor) {

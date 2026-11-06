@@ -2,7 +2,7 @@ package websearch
 
 // The family shares one public address. A search site that sees it search
 // faster than a person, or keep at it once challenged, blocks it, and the
-// family's own phones and computers meet the CAPTCHA too. So each engine is
+// family's own phones and computers meet the CAPTCHA too. So each website is
 // asked as one person at a keyboard would ask: a few searches in a row at
 // once, as when refining one, then one every ten seconds at uneven moments,
 // whoever in the family searches; the next page only where the last had
@@ -20,7 +20,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// pacing is how often an engine is asked.
+// pacing is how often a website is asked, across its engines and accounts.
 type pacing struct {
 	// Once burst requests have gone at once, an engine is asked every
 	// interval; a request that waited for its turn goes up to jitter later.
@@ -37,23 +37,43 @@ var humanPace = pacing{interval: 10 * time.Second, burst: 3, jitter: 3 * time.Se
 // errBusy is an engine whose turn is too far off.
 var errBusy = errors.New("the engine was asked too recently")
 
-// turn waits for engine's turn; a search that ends first gives it back.
-func (s *Service) turn(ctx context.Context, engine string) error {
+type turnKey struct{ account, site string }
+
+// turn reserves one website's turn. An account may hold only one future
+// turn on that site, leaving the next one for other members. release must
+// be called when that request completes or is abandoned.
+func (s *Service) turn(ctx context.Context, account, engine string) (release func(), err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	key := turnKey{account: account, site: website(engine)}
 	s.pacesMu.Lock()
-	limiter := s.paces[engine]
+	if s.waiting[key] {
+		s.pacesMu.Unlock()
+		return nil, errBusy
+	}
+	limiter := s.paces[key.site]
 	if limiter == nil {
 		limiter = rate.NewLimiter(rate.Every(s.pace.interval), s.pace.burst)
-		s.paces[engine] = limiter
+		s.paces[key.site] = limiter
 	}
-	s.pacesMu.Unlock()
 	reservation := limiter.Reserve()
 	delay := reservation.Delay()
 	if delay > s.pace.maxWait {
 		reservation.Cancel()
-		return errBusy
+		s.pacesMu.Unlock()
+		return nil, errBusy
 	}
 	if delay == 0 {
-		return nil
+		s.pacesMu.Unlock()
+		return func() {}, nil
+	}
+	s.waiting[key] = true
+	s.pacesMu.Unlock()
+	release = func() {
+		s.pacesMu.Lock()
+		delete(s.waiting, key)
+		s.pacesMu.Unlock()
 	}
 	if s.pace.jitter > 0 {
 		//nolint:gosec // G404: the jitter only spreads an engine's requests in time; nothing rests on guessing it.
@@ -63,10 +83,15 @@ func (s *Service) turn(ctx context.Context, engine string) error {
 	defer timer.Stop()
 	select {
 	case <-timer.C:
-		return nil
+		if err := ctx.Err(); err != nil {
+			release()
+			return nil, err
+		}
+		return release, nil
 	case <-ctx.Done():
 		reservation.Cancel()
-		return ctx.Err()
+		release()
+		return nil, ctx.Err()
 	}
 }
 
@@ -114,7 +139,7 @@ type Pause struct {
 	Until   time.Time
 }
 
-// PausedEngine is a paused engine as the window names it.
+// PausedEngine names a paused website. The JSON field keeps its legacy name.
 type PausedEngine struct {
 	Engine string      `json:"engine"`
 	Reason PauseReason `json:"reason"`
@@ -154,7 +179,27 @@ func (s *Service) readPausesLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.pauses = pauses
+	// Older releases persisted per-engine pauses. Merge siblings atomically
+	// without adding their strikes or losing a still-active restriction.
+	normalized := map[string]Pause{}
+	changed := false
+	for engine, pause := range pauses {
+		site := website(engine)
+		changed = changed || site != engine
+		previous := normalized[site]
+		strikes := max(previous.Strikes, pause.Strikes)
+		if pause.Until.After(previous.Until) {
+			previous = pause
+		}
+		previous.Strikes = strikes
+		normalized[site] = previous
+	}
+	if changed {
+		if err := s.settings.replacePauses(ctx, normalized); err != nil {
+			return err
+		}
+	}
+	s.pauses = normalized
 	return nil
 }
 
@@ -175,6 +220,7 @@ func (s *Service) judge(ctx context.Context, engine string, response Response) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	reason, failed := failure(engine, response)
+	engine = website(engine)
 	s.pausesMu.Lock()
 	defer s.pausesMu.Unlock()
 	err := s.readPausesLocked(ctx)
@@ -182,6 +228,8 @@ func (s *Service) judge(ctx context.Context, engine string, response Response) {
 	block, blocked := blocks[reason]
 	switch {
 	case err != nil:
+	case paused && pause.Until.After(s.now()):
+		// Sibling requests already in flight cannot extend or clear a pause.
 	case !failed && paused:
 		delete(s.pauses, engine)
 		if s.settings != nil {
