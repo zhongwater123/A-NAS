@@ -59,6 +59,15 @@ search:
   # its timeout.
   ban_time_on_fail: 5
   max_ban_time_on_fail: 5
+  # A-NAS owns visible, persistent website pauses (one hour to one day).
+  # Disable every challenge-specific default, including Cloudflare's 15 days.
+  suspended_times:
+    SearxEngineAccessDenied: 0
+    SearxEngineCaptcha: 0
+    SearxEngineTooManyRequests: 0
+    cf_SearxEngineCaptcha: 0
+    cf_SearxEngineAccessDenied: 0
+    recaptcha_SearxEngineCaptcha: 0
 
 server:
   # The secret comes from SEARXNG_SECRET, which the installer generates once

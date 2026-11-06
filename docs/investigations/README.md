@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-11-05：网页搜索的隐藏暂停、跨分类绕过与并发积压](2026-11-05-web-search-website-pacing.md)
 - [2026-11-04：建卷测试结束后旧执行器仍写操作日志，竞态检测作业偶发失败](2026-11-04-volume-test-writes-after-cleanup.md)
 - [2026-11-04：重启后 smbd 早于 DHCP 地址启动，只监听回环](2026-11-04-smbd-starts-before-dhcp-address.md)
 - [2026-11-04：一次失败让网页分类的引擎全部暂停 5 分钟](2026-11-04-web-engines-suspended-after-one-bad-moment.md)

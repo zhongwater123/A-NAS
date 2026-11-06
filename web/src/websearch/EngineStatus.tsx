@@ -3,6 +3,7 @@ import { Popover } from "radix-ui";
 
 import { calendarMoment } from "../lib/time";
 import type { WebSearchPausedEngine } from "./api";
+import { pauseReasons } from "./pauses";
 import styles from "./websearch.module.css";
 
 // EngineStatus counts the engines a search has no answer from and opens to
@@ -22,7 +23,7 @@ export function EngineStatus({
   return (
     <Popover.Root>
       <Popover.Trigger className={styles.wsSilentButton}>
-        {count} 个引擎没有回答
+        {count} 个搜索来源没有回答
         <ChevronDown aria-hidden />
       </Popover.Trigger>
       <Popover.Portal>
@@ -36,7 +37,9 @@ export function EngineStatus({
           <Group title="未响应" names={unresponsive} />
           <Group
             title="被网站拦截，暂停中"
-            names={paused.map((engine) => `${engine.engine}（${calendarMoment(engine.until)} 恢复）`)}
+            names={paused.map(
+              (site) => `${site.engine}（${pauseReasons[site.reason]}，${calendarMoment(site.until)} 恢复）`,
+            )}
           />
           <Group title="搜索太频繁，本次跳过" names={busy} />
         </Popover.Content>

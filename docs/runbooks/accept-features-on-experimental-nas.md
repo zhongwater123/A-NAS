@@ -93,7 +93,13 @@
 
 在局域网 HTTP 浏览器上（不是 localhost）验收发送、接收、私聊与保存（[调查](../investigations/2026-10-16-member-sharing-http-send.md)），以及 #157 的并排窗口、接收者状态、按讨论合并的提醒和自己的消息不计未读；分别重启产品服务与 Host Agent 后分享重新可用（[调查](../investigations/2026-10-15-member-sharing-service-startup.md)）。
 
+用可丢弃文件，在产品服务重启、Web 入口刚恢复时立即发起分享及保存：可以暂时提示服务不可用，稍后重试应成功，不得把未撤回的分享显示为“已撤回”。确认接收者能读取独立副本、保存内容一致，随后真正撤回仍阻止继续读取；收集分享服务和产品服务日志（[#362 调查](../investigations/2026-11-04-share-bridge-generation-window.md)）。
+
 最小化与历史（#182）：打开与另一账号的私聊后最小化分享窗口，浏览器开发者工具的网络面板中不再有对话内容的请求，桌面的未读徽标仍约每 30 秒同步；另一账号此时发来的消息在恢复窗口后接着出现，没有重复或缺失（[调查](../investigations/2026-10-28-share-history-polling.md)）。
+
+### 网页搜索
+
+- 网站节奏与暂停（#364 修复，部署后待办 [#409](https://github.com/zhongwater123/A-NAS/issues/409)）：部署对应产品服务与搜索设置后，按[多账号节奏与资源验收](enable-web-search.md#多账号节奏与资源验收364)核对跨分类暂停、两名成员同时搜索、取消后的请求容量与缩略图加载，记录 512 MiB 下的内存峰值、压力和延迟（[调查](../investigations/2026-11-05-web-search-website-pacing.md)）。
 
 ### AI 助手（试用）
 

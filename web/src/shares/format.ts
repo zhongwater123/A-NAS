@@ -113,6 +113,8 @@ const reasons: [RegExp, string][] = [
   [/invalid or changed source content/i, "准备期间源文件有变化，请停止修改后重新分享"],
   [/permission denied/i, "没有相应文件或文件夹的权限"],
   [/session or account unavailable/i, "登录已失效，任务中断"],
+  [/file service restarted/i, "文件服务已重启，请重新发起操作"],
+  [/^File service or data volume became unavailable/i, "文件服务或数据卷暂不可用，请重新发起操作"],
   [/share withdrawn/i, "分享已撤回，任务停止"],
   [/operation stopped/i, "任务已停止"],
   [/^Unable to prepare share/i, "副本准备失败"],
