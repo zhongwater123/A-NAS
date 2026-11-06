@@ -588,9 +588,13 @@ shares_ready() {
   done
   return 1
 }
-check "member sharing works through production service sandboxes" \
+sharing_smoke() {
   python3 /src/scripts/smoke-member-sharing.py "$api" /tmp/owner.jar /tmp/alice.jar \
-    "$owner_csrf" "$alice_csrf" "$owner_file" "$alice_private"
+    "$owner_csrf" "$alice_csrf" "$owner_file" "$alice_private" "${1:-initial}" && return 0
+  journalctl -b -u anas-shares -u anas-api --no-pager -n 100 || true
+  return 1
+}
+check "member sharing works through production service sandboxes" sharing_smoke
 # --- LAN Web entry (ADR 0012): plain HTTP through Caddy on the LAN address.
 lan=http://$ip
 lasting_login() { # URL USER PASSWORD JAR -> the session JSON of a login that asks to last
@@ -739,6 +743,8 @@ printf 'ANAS_TERMINAL=enabled\n' >> /etc/a-nas/anas-api.env
 systemctl restart anas-api
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 check "sharing recovers after the Product Service restarts" shares_ready
+check "sharing can create, save and revoke after the Product Service restarts" \
+  sharing_smoke after-api-restart
 check "the operator turns the terminal on" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = true
 check "members cannot use the terminal" test "$(status_of -b /tmp/alice.jar "$api/api/v1/terminal")" = 403

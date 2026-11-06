@@ -152,6 +152,8 @@ class LlamaReaderTest(unittest.TestCase):
                 reader = self.reader()
                 with self.assertRaises(providers.Failed):
                     reader.read(b"jpeg", "text", None, reader.run_options())
+                # The server may be broken: the next reading starts a new one.
+                self.assertIsNone(reader._process)
 
     def test_hanging_up_while_the_server_starts_stops_it(self):
         # The Worker answers one request at a time: a search must not wait
@@ -196,6 +198,17 @@ class LlamaReaderTest(unittest.TestCase):
             file.write(b"LANGUAGE")
         with self.assertRaises(providers.Unavailable):
             again().read(b"jpeg", "text", None, providers.ReadingRun())
+
+    def test_a_mark_that_is_not_text_is_hashed_again(self):
+        cache = os.path.join(self.directory, "cache")
+        os.mkdir(cache)
+        reader = self.reader(cache_dir=cache)
+        for name in ("model.gguf.json", "mmproj.gguf.json"):
+            with open(os.path.join(self.directory, name), encoding="utf-8") as file:
+                sha = json.load(file)["sha256"]
+            with open(os.path.join(cache, f"verified-{sha}"), "wb") as file:
+                file.write(bytes([0xFF, 0xFE]) + b" not text")
+        self.assertEqual(reader.read(b"jpeg", "text", None, reader.run_options())["finish"], "stop")
 
     def test_files_are_checked_before_the_first_start(self):
         reader = self.reader(sha="0" * 64)
@@ -252,12 +265,15 @@ class LlamaReaderTest(unittest.TestCase):
 class LoopingTest(unittest.TestCase):
     def test_documents_repeat_a_character_for_a_line_and_are_no_loop(self):
         for text in ("合计 35.50\n" + "-" * 48, "目录\n第一章 起步" + "." * 60, "姓名：" + "_" * 64,
-                     "收据\n" + "=" * 100, "单价\n" + "0.00\n" * 8):
+                     "收据\n" + "=" * 100, "单价\n" + "0.00\n" * 8, "-" * 200,
+                     # A form's blank rows, as on the evaluation page the first rule cut.
+                     "| 项目 | 金额 |\n" + "|  |  |  |  |\n" * 20):
             with self.subTest(text=text[:12]):
                 self.assertFalse(providers.looping(text))
 
     def test_a_unit_repeated_on_and_on_is_a_loop(self):
-        for text in ("开头" + "回单" * 100, "开头" + "-" * 200, "开头" + "这是一段重复的话。" * 20):
+        for text in ("开头" + "回单" * 100, "开头" + "-" * 600, "开头" + "这是一段重复的话。" * 20,
+                     "开头" + "|  |  |  |  |\n" * 40):
             with self.subTest(text=text[:12]):
                 self.assertTrue(providers.looping(text))
 
