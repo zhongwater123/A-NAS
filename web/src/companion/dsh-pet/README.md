@@ -6,4 +6,4 @@ The animations this code plays are not in Git and are not MIT. The character is 
 
 Patches applied: `0001-serve-animations-from-a-nas.patch`.
 
-`animations.sha256` lists the 114 animations of this commit; installed, they are companion animation pool `9a73ff266aba6c04`.
+`animations.sha256` lists the 223 animation files of this commit and of `https://github.com/PC2005-cloud/dsh-pet/releases/download/assets-mov/dsh-pet-mov-assets-mov.zip`; installed, they are companion animation pool `efc3b4c6eebf8963`.

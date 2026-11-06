@@ -11,16 +11,16 @@
 
 - 权限：开发机能以 `anas-dev` 用 SSH 登录 NAS；NAS 上有 root。
 - 目标：已安装含 `install-companion-animations.sh` 的 release 的 NAS（`/opt/a-nas/current/install-companion-animations.sh` 存在）。
-- 素材：本地 dsh-pet 检出位于 [`web/src/companion/dsh-pet/README.md`](../../web/src/companion/dsh-pet/README.md) 记录的提交。动画仅限非商业试验，许可与署名见同一文件。
+- 素材：本地 dsh-pet 检出位于 [`web/src/companion/dsh-pet/README.md`](../../web/src/companion/dsh-pet/README.md) 记录的提交；Safari 用的 HEVC 动画是 dsh-pet 的 `assets-mov` 发布中的 `dsh-pet-mov-assets-mov.zip`，SHA-256 为 `654e42f14b647a1e59a4c6f05694273dcf23edb063a5e49b14fc05a1fad3b467`（[`vendor-dsh-pet.py`](../../scripts/vendor-dsh-pet.py) 中的 `MOV_ZIP`）。动画仅限非商业试验，许可与署名见同一 README。
 - 风险：只写 `/var/lib/a-nas/companion` 与暂存账号的 `~/apps/a-nas/companion`，不涉及数据盘。
 - 停止条件：本地校验报告与清单不符、暂存输出的池 ID 与 README 记录的不同，或 root 安装报错。
 
 ## 步骤
 
-1. 在开发机暂存动画。脚本先按 [`animations.sha256`](../../web/src/companion/dsh-pet/animations.sha256) 逐个核对本地文件，只上传 NAS 暂存区还没有的文件；`-WhatIf` 只做本地校验，不联网：
+1. 在开发机暂存动画。脚本把 zip 解到临时目录，按 [`animations.sha256`](../../web/src/companion/dsh-pet/animations.sha256) 逐个核对 webm 与 mov，只上传 NAS 暂存区还没有的文件，结束时删除临时目录；`-WhatIf` 只做本地校验，不联网：
 
    ```powershell
-   .\scripts\deploy-companion-animations.ps1 -NasHost <NAS_HOST> -DshPet <dsh-pet 检出目录>
+   .\scripts\deploy-companion-animations.ps1 -NasHost <NAS_HOST> -DshPet <dsh-pet 检出目录> -MovZip <dsh-pet-mov-assets-mov.zip>
    ```
 
    - 预期：输出上传数量与池 ID。
@@ -36,7 +36,7 @@
 
 ## 验证
 
-- `curl -fsS http://127.0.0.1:8080/companion/animations | jq '.animations | length'` 等于清单行数。
+- `curl -fsS http://127.0.0.1:8080/companion/animations | jq '.animations | length'` 等于清单中的动画数（webm 的行数），其中除吃白饭的 5 段外都有 `mov`。
 - 取清单中任一 URL，`curl -s -o /dev/null -w '%{http_code}' -r 0-1023 http://127.0.0.1:8080<URL>` 返回 `206`。
 
 ## 回滚或恢复

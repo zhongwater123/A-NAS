@@ -4,8 +4,9 @@ the physics they share (src/shared/physics), and the plain modules those import.
 Nothing that talks to DeepSeek Harness, a model, a voice or the network is copied;
 the script stops if an import reaches outside the plain modules.
 
-Run on the development machine, with a dsh-pet checkout at the pinned commit:
-    python3 scripts/vendor-dsh-pet.py <dsh-pet checkout> web/src/companion/dsh-pet
+Run on the development machine, with a dsh-pet checkout at the pinned commit and its HEVC
+animations for Safari (the assets-mov release, MOV_ZIP below):
+    python3 scripts/vendor-dsh-pet.py <dsh-pet checkout> web/src/companion/dsh-pet <assets-mov zip>
 
 Imports lose their .ts suffix (A-NAS does not import with extensions). Changes A-NAS
 needs are patches in web/src/companion/dsh-pet-patches/, applied in name order.
@@ -18,9 +19,14 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 PINNED = "10f6c868b8110c897af33d6137a3d85e84b665ba"
+# Safari draws no alpha in VP9; dsh-pet publishes the same animations as HEVC with alpha in one
+# release asset, which GitHub digests. It lacks only the meal game's, which A-NAS does not play.
+MOV_ZIP = ("https://github.com/PC2005-cloud/dsh-pet/releases/download/assets-mov/dsh-pet-mov-assets-mov.zip",
+           "654e42f14b647a1e59a4c6f05694273dcf23edb063a5e49b14fc05a1fad3b467")
 ROOTS = ["client/pet/animation", "client/pet/motion", "shared/physics"]
 # Moves the pet where the Harness host tells it to; A-NAS has no such host.
 SKIP = {"client/pet/motion/position-follow.ts"}
@@ -29,13 +35,15 @@ ALLOWED = ("client/pet/", "shared/")
 DENIED = ("shared/chat/", "shared/balance/", "shared/todo/", "shared/menu/", "client/pet/card/")
 IMPORT = re.compile(r"""((?:from|import)\s*\(?\s*)(['"])(\.{1,2}/[^'"]+)\2""")
 
-upstream, target = Path(sys.argv[1]), Path(sys.argv[2])
+upstream, target, mov_zip = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
 source = upstream / "dsh-pet" / "src"
 patches = target.with_name("dsh-pet-patches")
 commit = subprocess.run(["git", "-C", str(upstream), "rev-parse", "HEAD"],  # noqa: S607  a development tool, git from PATH
                         capture_output=True, text=True, check=True).stdout.strip()
 if commit != PINNED:
     sys.exit(f"dsh-pet checkout is at {commit[:12]}, expected the pinned {PINNED[:12]}")
+if hashlib.sha256(mov_zip.read_bytes()).hexdigest() != MOV_ZIP[1]:
+    sys.exit(f"{mov_zip} is not the pinned {MOV_ZIP[0]}")
 
 
 def imports(path: Path) -> list[Path]:
@@ -99,11 +107,14 @@ animations["events"] = {"workStatus": config["animations"]["events"]["workStatus
     json.dumps({"animations": animations, "animationWeights": config["animationWeights"], "physics": config["physics"]},
                ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
 
+files_by_name = {path.name: path.read_bytes() for path in (upstream / "dsh-pet" / "assets" / "webm").glob("*.webm")}
+with zipfile.ZipFile(mov_zip) as archive:
+    files_by_name |= {entry.filename: archive.read(entry) for entry in archive.infolist() if not entry.is_dir()}
 lines = []
-for path in sorted((upstream / "dsh-pet" / "assets" / "webm").glob("*.webm")):
-    if not re.fullmatch(r"[^./\\\x00-\x1f\x7f][^/\\\x00-\x1f\x7f]*\.webm", path.name) or path.name != path.name.strip():
-        sys.exit(f"unexpected animation file name: {path.name!r}")
-    lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n")
+for name in sorted(files_by_name):
+    if not re.fullmatch(r"[^./\\\x00-\x1f\x7f][^/\\\x00-\x1f\x7f]*\.(webm|mov)", name) or name != name.strip():
+        sys.exit(f"unexpected animation file name: {name!r}")
+    lines.append(f"{hashlib.sha256(files_by_name[name]).hexdigest()}  {name}\n")
 manifest = "".join(lines).encode()
 (target / "animations.sha256").write_bytes(manifest)
 pool = hashlib.sha256(manifest).hexdigest()[:16]
@@ -122,7 +133,7 @@ shutil.copyfile(upstream / "LICENSE", target / "LICENSE")
     "character credits <https://github.com/PC2005-cloud/dsh-pet>, and A-NAS must replace it before any "
     "commercial release.\n\n"
     "Patches applied: " + (", ".join(f"`{name}`" for name in applied) or "none") + ".\n\n"
-    f"`animations.sha256` lists the {len(lines)} animations of this commit; installed, they are companion "
-    f"animation pool `{pool}`.\n",
+    f"`animations.sha256` lists the {len(lines)} animation files of this commit and of `{MOV_ZIP[0]}`; "
+    f"installed, they are companion animation pool `{pool}`.\n",
     encoding="utf-8", newline="\n")
 print(f"vendored {len(files)} files from {commit[:12]} with {len(applied)} patches; animation pool {pool}")

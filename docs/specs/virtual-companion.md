@@ -60,15 +60,14 @@
 - When：成员的定时任务（含提醒）有了新结果。
 - Then：伙伴照常挥手；桌面提示只写“VNAS 定时任务 · 时间 · 有新结果”，失败时加“没有完成”，不写任务名与回答的开头。成员自己点“查看结果”时，才在 VNAS 中打开这次运行。个人设备上的提示不变。
 
-### 需要另一种格式的浏览器
+### Safari 播放 HEVC 版本
 
-- Given：浏览器不支持 VP9 透明通道（iPhone 与 Mac 的 Safari）。
-- When：当前动画池中没有 `.mov` 版本。
-- Then：不显示伙伴，而不是显示黑底视频。
+- Given：浏览器不支持 VP9 透明通道（iPhone、iPad 上的所有浏览器，以及 Mac 的 Safari）。
+- Then：伙伴播放 dsh-pet 另行发布的 `.mov`（HEVC 透明）版本，透明背景与其他浏览器一致。当前动画池没有某段的 `.mov` 时不播放那一段；连待机动画都没有时不显示伙伴，而不是显示黑底视频。
 
 ## 边界
 
-- 动画只来自产品服务的 `/companion/animations`，文件名限定在当前池目录内（`os.Root`），池由 root 按固定清单核对哈希后安装。
+- 动画只来自产品服务的 `/companion/animations`，文件名限定在当前池目录内（`os.Root`），池由 root 按固定清单核对哈希后安装；清单固定 dsh-pet 提交中的 webm 与 `assets-mov` 发布中的 mov。
 - 页面不向伙伴传递对话内容；伙伴的工作状态只有阶段，任务描述恒为空。
 - 署名：伙伴的悬停提示写明社区二创形象、非商业试验与 dsh-pet 原作者地址。
 
@@ -76,6 +75,6 @@
 
 - 实现：[`Companion.tsx`](../../web/src/companion/Companion.tsx)、[`CompanionPet.tsx`](../../web/src/companion/CompanionPet.tsx)、[`animations.ts`](../../web/src/companion/animations.ts)、[`workStatus.ts`](../../web/src/companion/workStatus.ts)、[`assistantActivity.ts`](../../web/src/assistant/assistantActivity.ts)、[`TaskToasts.tsx`](../../web/src/assistant/TaskToasts.tsx)、[`handler.go`](../../internal/webui/handler.go)
 - 上游代码与许可：[`dsh-pet/README.md`](../../web/src/companion/dsh-pet/README.md)，复制脚本 [`vendor-dsh-pet.py`](../../scripts/vendor-dsh-pet.py)，补丁 [`dsh-pet-patches/`](../../web/src/companion/dsh-pet-patches/0001-serve-animations-from-a-nas.patch)
-- 测试：[`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)（共用屏幕上的提示）、[`Companion.test.tsx`](../../web/src/companion/Companion.test.tsx)、[`assistantActivity.test.ts`](../../web/src/assistant/assistantActivity.test.ts)、[`AssistantPanel.test.tsx`](../../web/src/assistant/AssistantPanel.test.tsx)、[`handler_test.go`](../../internal/webui/handler_test.go)
+- 测试：[`Companion.safari.test.tsx`](../../web/src/companion/Companion.safari.test.tsx)、[`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)（共用屏幕上的提示）、[`Companion.test.tsx`](../../web/src/companion/Companion.test.tsx)、[`assistantActivity.test.ts`](../../web/src/assistant/assistantActivity.test.ts)、[`AssistantPanel.test.tsx`](../../web/src/assistant/AssistantPanel.test.tsx)、[`handler_test.go`](../../internal/webui/handler_test.go)
 - 运行手册：[安装伙伴动画](../runbooks/install-companion-animations.md)
 - ADR：[0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
