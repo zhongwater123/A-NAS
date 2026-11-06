@@ -106,6 +106,10 @@ type Executor struct {
 	spaceRoots    map[string]string
 	registryPath  string
 	registryError error
+	// fixedGroupsMu orders looking up and creating the fixed groups: the
+	// data-volume reconciliation at startup and the Product Service's identity
+	// synchronization both create them, and the second groupadd failed.
+	fixedGroupsMu sync.Mutex
 	identitiesMu  sync.Mutex
 	identities    map[string]identityRecord
 	identityPath  string
