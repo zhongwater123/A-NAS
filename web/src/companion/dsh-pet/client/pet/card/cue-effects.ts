@@ -25,7 +25,8 @@ const stamp = (): string => new Date().toTimeString().slice(0, 8);
 
 /** 一行带时刻的日志：客户端统一前缀，便于 grep。 */
 const log = (message: string): void => {
-  console.log('[dsh-pet] ' + stamp() + ' ' + message);
+  // A-NAS: dsh-pet's trace lines only in a development build.
+  if (import.meta.env.DEV) console.log('[dsh-pet] ' + stamp() + ' ' + message);
 };
 
 /**

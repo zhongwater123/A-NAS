@@ -59,7 +59,7 @@ export function shellHandlers(options: ShellOptions = {}) {
     // 家庭中心's hints after signing in.
     http.get("/api/v1/family/hints", ({ response }) => response(200).json({ items: [] })),
     // The companion's animations, served beside the API (internal/webui): none installed.
-    http.untyped.get(`/companion/animations`, () => HttpResponse.json({ animations: {} })),
+    http.untyped.get(`/companion/animations`, () => HttpResponse.json({ pool: "", animations: {} })),
   ];
 }
 

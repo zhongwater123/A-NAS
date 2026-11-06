@@ -145,7 +145,8 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       }
       return;
     }
-    if (isEventAnim(cfg.animations.events, next)) {
+    // A-NAS: dsh-pet's trace lines only in a development build (the desktop's console stays quiet).
+    if (import.meta.env.DEV && isEventAnim(cfg.animations.events, next)) {
       console.log('[dsh-pet] ' + stamp(cfg.id) + ' switch ' + next + ' once=' + nextOnce);
     }
     const swapGen = (gen += 1);
@@ -263,7 +264,10 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       workState: deps.workStatus()?.state,
     });
     const petId = deps.cfg().id;
-    if (cue.kind === 'work-rotate') {
+    // A-NAS: dsh-pet's trace lines only in a development build.
+    if (!import.meta.env.DEV) {
+      // nothing to trace
+    } else if (cue.kind === 'work-rotate') {
       console.log('[dsh-pet] ' + stamp(petId) + ' workStatus 档内轮换: ' + deps.currentAnim() + ' -> ' + cue.anim);
     } else if (cue.kind === 'work-replay') {
       console.log('[dsh-pet] ' + stamp(petId) + ' workStatus 循环续播: ' + deps.currentAnim());

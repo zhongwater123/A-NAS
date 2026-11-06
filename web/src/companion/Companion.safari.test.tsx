@@ -27,8 +27,8 @@ describe("the companion in Safari", () => {
         HttpResponse.json({
           animations: {
             待机呼吸休闲: {
-              webm: "/companion/animations/%E5%BE%85%E6%9C%BA%E5%91%BC%E5%90%B8%E4%BC%91%E9%97%B2.webm",
-              mov: "/companion/animations/%E5%BE%85%E6%9C%BA%E5%91%BC%E5%90%B8%E4%BC%91%E9%97%B2.mov",
+              webm: "/companion/thumb/main/%E5%BE%85%E6%9C%BA%E5%91%BC%E5%90%B8%E4%BC%91%E9%97%B2.webm",
+              mov: "/companion/thumb/main/%E5%BE%85%E6%9C%BA%E5%91%BC%E5%90%B8%E4%BC%91%E9%97%B2.mov",
             },
           },
         }),

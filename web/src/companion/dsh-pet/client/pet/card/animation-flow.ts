@@ -45,7 +45,8 @@ const stamp = (): string => new Date().toTimeString().slice(0, 8);
 
 /** 一行带时刻与宠物 id 的日志。 */
 const log = (petId: string, message: string): void => {
-  console.log('[dsh-pet] ' + stamp() + ' pet=' + petId + ' ' + message);
+  // A-NAS: dsh-pet's trace lines only in a development build.
+  if (import.meta.env.DEV) console.log('[dsh-pet] ' + stamp() + ' pet=' + petId + ' ' + message);
 };
 
 /**
