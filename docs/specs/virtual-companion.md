@@ -9,7 +9,7 @@
 
 ## 非目标
 
-- V1 不做电脑端桌宠（Electron）、待办、专注计时、聊天、主动邀请与伙伴自己的数据或接口；这些属于 V2 或 VNAS（[#404](https://github.com/zhongwater123/A-NAS/issues/404) 第 3、4 节）。
+- V1 不做电脑端桌宠（Electron）、待办、专注计时、聊天、主动邀请与伙伴自己的数据或接口；这些属于 V2 或 VNAS（[#404](https://github.com/zhongwater123/A-NAS/issues/404) 第 3、4 节；待办与专注计时待定，见[决定记录](../decisions/2026-11-06-companion-v1-no-todo-focus.md)）。
 - 伙伴不连接成员的 Hermes 实例，也不因自己而启动实例。
 - 不提交动画素材，也不把素材嵌入产品二进制。
 - 不允许商用：形象为 CC BY-NC-SA 4.0 的社区二创，A-NAS 商用前必须更换形象。
