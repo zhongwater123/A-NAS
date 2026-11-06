@@ -61,19 +61,34 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
 - **本地探针**（2026-11-06，系统测试镜像，容器限 2 核，三轮结果相同）：
   - smbd 检查段开始时，Host Agent 约 0.4 秒前已写好 A-NAS 的 `smb.conf`；
   - 但 smbd 仍监听 `0.0.0.0:445` 与 `[::]:445`。
-- **根因**：
-  - 容器里的 smbd 按 Debian 的默认配置启动，新装的宿主机也一样。默认配置没有 `bind interfaces only`，smbd 监听所有地址。
-  - 安装器启动 Host Agent 后，Host Agent 第一次对账时写入 A-NAS 的配置（`interfaces = lo <网卡>`、`bind interfaces only = yes`），然后只让 smbd 重新加载配置（`smbcontrol all reload-config`）。smbd 只在启动时打开监听套接字，重新加载不改变它监听的地址，所以它一直监听所有地址，直到下次重启。
-  - 测试中途自己重启了 smbd。CI 机器慢时，这次重启早于 Host Agent 写配置，smbd 又按默认配置监听所有地址。检查只认 SMB 网卡的地址，所以失败；SMB 读写经通配地址照样成功。
-- **影响**：新装的设备在 smbd 下次重启之前（通常是第一次重启机器之前），SMB 在所有网卡上都可达，而不只是安装时选定的网卡。Experimental NAS 之后重启过，smbd 已按 A-NAS 的配置启动，不受影响。
-- **修复**：Host Agent 写入 Samba 配置时，用 `testparm` 读出新旧配置的 `interfaces`、`bind interfaces only` 与 `smb ports`。
-  - 原先没有配置，或者这三项变了，就让 systemd 重启 smbd（`systemctl try-restart --no-block smbd.service`）；否则照旧只重新加载。
-  - 重启会断开已有的 SMB 连接，所以只在监听的地址或端口变化时进行：新装，或者换了 SMB 网卡。
-  - smbd 没有运行时不去启动它，由 systemd 按单元启动，并照样等网卡的地址。
+- **CI 日志**（2026-11-06，[#410](https://github.com/zhongwater123/A-NAS/pull/410) 第一次运行，失败时收集的 `journal.txt`）：Host Agent 开始监听后约 35 毫秒，第一次对账就失败了：
+
+  ```text
+  data-volume reconciliation failed: create A-NAS group: exit status 9: groupadd: group 'a-nas-admins' already exists
+  ```
+
+  直到测试后面重启 Host Agent，对账才成功，`smb.conf` 才写入。
+- **根因**，两处：
+  1. **第一次对账可能失败**：
+     - Host Agent 启动时的数据卷对账，与 Product Service 启动时的身份同步，都会确保 `a-nas-users`、`a-nas-admins` 两个组存在：先用 `getent` 查，没有再 `groupadd`。
+     - 两者同时进来，都查到“没有”，后执行 `groupadd` 的以退出码 9 失败。失败的是对账时，它就停在写 Samba 配置之前，15 分钟后才重试。
+  2. **写了配置，smbd 也不换监听**：
+     - smbd 按 Debian 的默认配置启动，容器里和新装的宿主机都一样。默认配置没有 `bind interfaces only`，smbd 监听所有地址。
+     - Host Agent 写入 A-NAS 的配置（`interfaces = lo <网卡>`、`bind interfaces only = yes`）后，只让 smbd 重新加载（`smbcontrol all reload-config`）。smbd 只在启动时打开监听套接字，重新加载不改变它监听的地址，所以它一直监听所有地址，直到下次重启。
+- **为什么测试时好时坏**：组的竞争有时出现、有时不出现。出现时，测试自己重启 smbd 那一刻还没有 A-NAS 的配置，smbd 又按默认配置监听所有地址。检查只认 SMB 网卡的地址，所以失败；SMB 读写经通配地址照样成功。等多久都没用，因为配置要到 Host Agent 下次对账才写。
+- **影响**：新装的设备在 smbd 下次重启之前（通常是第一次重启机器之前），SMB 在所有网卡上都可达，而不只是安装时选定的网卡；碰上组的竞争时，A-NAS 的 Samba 配置还要晚到 15 分钟。Experimental NAS 之后重启过，smbd 已按 A-NAS 的配置启动，不受影响。
+- **修复**：
+  - 同一个 Host Agent 中，查组与建组由一把锁串行进行，后来的调用者会看到组已存在。
+  - Host Agent 写入 Samba 配置时，用 `testparm` 读出新旧配置的 `interfaces`、`bind interfaces only` 与 `smb ports`：
+    - 原先没有配置，或者这三项变了，就让 systemd 重启 smbd（`systemctl try-restart --no-block smbd.service`）；否则照旧只重新加载。
+    - 重启会断开已有的 SMB 连接，所以只在监听的地址或端口变化时进行：新装，或者换了 SMB 网卡。
+    - smbd 没有运行时不去启动它，由 systemd 按单元启动，并照样等网卡的地址。
 - **回归证据**：
-  - 单元测试 [`samba_test.go`](../../internal/hostops/linux/samba_test.go)：第一次写入配置、替换 Debian 的配置、换 SMB 网卡时都重启，配置不变时只重新加载；smbd 重启或重新加载失败时，恢复原来的配置。
+  - 单元测试：
+    - [`groups_test.go`](../../internal/hostops/linux/groups_test.go)：两个调用同时确保固定组存在，都成功。去掉锁时，它复现 CI 的同一错误。
+    - [`samba_test.go`](../../internal/hostops/linux/samba_test.go)：第一次写入配置、替换 Debian 的配置、换 SMB 网卡时都重启，配置不变时只重新加载；smbd 重启或重新加载失败时，恢复原来的配置。
   - 系统测试：
-    - 安装后先等 Host Agent 第一次写好配置，再检查 smbd 只监听回环与 SMB 网卡的地址、没有通配地址（修复前这一项失败）。后面的检查都在这次重启之后，不再与它竞争。
+    - 安装后先等 Host Agent 第一次对账成功，再检查 smbd 只监听回环与 SMB 网卡的地址、没有通配地址。修复前，这两项在本地因为没有重启而失败，在 CI 上还会因为组的竞争而失败。后面的检查都在这次重启之后，不再与它竞争。
     - 测试中途重启 smbd 之后的检查改用同一个函数，最多等 30 秒，失败时打印 smbd 实际监听的地址。
   - root 集成测试自己启动的 smbd 不归 systemd 管，它的初始配置改为与 Host Agent 写入的监听设置相同，所以只会重新加载。
 
@@ -90,5 +105,6 @@ ADR 0031 写的是“它对 `allow-hotplug` 接口也等到 `ifup` 完成”；�
 - 运行手册：[实验存储配置与验收](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)（第 6 步）
 - 实现：
   - [`scripts/install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)（写入 smbd 的附加配置，[PR #390](https://github.com/zhongwater123/A-NAS/pull/390)）；没有修好问题的网络等待在 [PR #385](https://github.com/zhongwater123/A-NAS/pull/385) 中；
-  - [`internal/hostops/linux/executor.go`](../../internal/hostops/linux/executor.go) 的 `applySambaConfiguration`（监听设置变化时重启 smbd）。
-- 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh)、[`internal/hostops/linux/samba_test.go`](../../internal/hostops/linux/samba_test.go)、[`internal/hostops/linux/root_integration_test.go`](../../internal/hostops/linux/root_integration_test.go)
+  - [`internal/hostops/linux/executor.go`](../../internal/hostops/linux/executor.go) 的 `applySambaConfiguration`（监听设置变化时重启 smbd）；
+  - [`internal/hostops/linux/identity.go`](../../internal/hostops/linux/identity.go) 的 `ensureFixedGroups`（查组与建组串行进行）。
+- 测试：[`scripts/system-test.sh`](../../scripts/system-test.sh)、[`internal/hostops/linux/groups_test.go`](../../internal/hostops/linux/groups_test.go)、[`internal/hostops/linux/samba_test.go`](../../internal/hostops/linux/samba_test.go)、[`internal/hostops/linux/root_integration_test.go`](../../internal/hostops/linux/root_integration_test.go)
