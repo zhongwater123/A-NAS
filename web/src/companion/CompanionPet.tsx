@@ -200,7 +200,7 @@ function createCompanion(
       const { state } = latest.current.work;
       if (companion.chain.isFrozen() || !state || state === "success" || state === "error") return false;
       const slot = latest.current.animations.events.workStatus?.[WORK_STATUS_INDEX[state]];
-      if (slot === undefined) return false;
+      if (slot === undefined || slot.length === 0) return false;
       companion.play(pickSlot(slot, latest.current.anim), Array.isArray(slot) && slot.length > 1);
       return true;
     },
@@ -388,7 +388,7 @@ function Pet({ animations }: { animations: Animations }) {
       return;
     }
     const slot = pool[WORK_STATUS_INDEX[state]];
-    if (slot === undefined) return;
+    if (slot === undefined || slot.length === 0) return;
     const finished = state === "success" || state === "error";
     current.play(pickSlot(slot, latest.current.anim), finished || (Array.isArray(slot) && slot.length > 1));
   }, [tick]);

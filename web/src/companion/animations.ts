@@ -15,11 +15,13 @@ export function installedAnimations(installed: (name: string) => boolean): Anima
   const keep = (names: readonly string[]) => names.filter(installed);
   const idle = keep(all.idle);
   if (idle.length === 0) return undefined;
-  // A work stage keeps its place in the list (dsh-pet reads it by index); without
-  // its animation the companion stays with an idle one.
+  // A work stage keeps its place in the list (dsh-pet reads it by index). Without
+  // its animation the slot is empty and the companion carries on as it was: an
+  // idle animation put there would count as the stage's, end as an event and
+  // never hand back to the random chain.
   const slot = (value: EventSlot): EventSlot => {
     const names = keep(Array.isArray(value) ? value : [value]);
-    return names.length === 0 ? idle[0] : names.length === 1 ? names[0] : names;
+    return names.length === 1 ? names[0] : names;
   };
   return {
     idle,

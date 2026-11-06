@@ -70,10 +70,10 @@ describe("the companion on the desktop", () => {
     act(() => reportAwaiting(0));
     act(() => reportTurn("live0001", "success"));
     await waitFor(() => expect(root.dataset.anim).toBe("工作状态-雀跃庆祝"));
-    // A stage without its animation installed stays with an idle one.
+    // A stage without its animation installed changes nothing: the companion carries on.
     act(() => reportTurn("live0001", "error"));
     await waitFor(() => expect(root.dataset.work).toBe("error"));
-    expect(root.dataset.anim).toBe("待机呼吸休闲");
+    expect(root.dataset.anim).toBe("工作状态-雀跃庆祝");
   });
 
   it("is not shown in a browser that needs animations this NAS does not have", async () => {
