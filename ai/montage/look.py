@@ -41,9 +41,11 @@ KEYFRAMES = 3
 
 # Opening with a statement ("these are frames of one clip") had a 2B model repeat it as
 # its answer for 59 of 396 cards; asked directly, it answers.
+# Asked to write only what every frame shows, it left out whatever changed within a card: the
+# second place of a walk, the man who came in. 方案 B's tagging asks the other way round (#416).
 DESCRIBE = ("用一句中文描述上面几张图（同一段视频按时间先后的几帧）：在哪里，有什么，人或物在做什么；"
-            "是夜晚就写夜晚。只写几帧里都看得到的，认不准的建筑就说建筑，不要编地名，不超过 40 个字。"
-            "直接写描述，不要复述题目。")
+            "是夜晚就写夜晚。画面如果有变化（换了地方、主体或镜头方向），要概括全部内容，不要只写其中一张。"
+            "认不准的建筑就说建筑，不要编地名，不超过 40 个字。直接写描述，不要复述题目。")
 
 # The place alone, for telling a card's scene apart from the people in it (#350): a film shot
 # in one look, men in suits in the dark, reads alike in pictures and in captions, while an
