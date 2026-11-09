@@ -64,9 +64,20 @@ type upstream struct {
 	ready     json.RawMessage
 	closed    chan struct{}
 	closeOnce sync.Once
-	// companionMu passes the companion's commands to the window one at a
-	// time (companion.go).
-	companionMu sync.Mutex
+	// companionTurns passes the companion's commands to the window one at a
+	// time (companion.go); companionSlot makes it.
+	companionTurns chan struct{}
+}
+
+// companionSlot is the window's one place for a companion command on its
+// way: a command takes it to be written and gives it back after.
+func (u *upstream) companionSlot() chan struct{} {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.companionTurns == nil {
+		u.companionTurns = make(chan struct{}, 1)
+	}
+	return u.companionTurns
 }
 
 type forwardedCall struct {
@@ -99,7 +110,7 @@ func (u *upstream) close() {
 		}
 		u.mu.Unlock()
 		for _, release := range releases {
-			go release.send(u.m)
+			go release.sendRelease(u.m)
 		}
 	})
 }
@@ -115,19 +126,24 @@ func (u *upstream) send(f frame) error {
 }
 
 func (u *upstream) toBrowser(f frame) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_ = u.toBrowserWithin(ctx, f)
+}
+
+// toBrowserWithin passes f to the window unless ctx ends first.
+func (u *upstream) toBrowserWithin(ctx context.Context, f frame) error {
 	u.mu.Lock()
 	browser := u.browser
 	u.mu.Unlock()
 	if browser == nil {
-		return
+		return nil
 	}
 	data, err := json.Marshal(f)
 	if err != nil {
-		return
+		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	_ = browser.Write(ctx, websocket.MessageText, data)
+	return browser.Write(ctx, websocket.MessageText, data)
 }
 
 // call makes the Product Service's own request to Hermes.

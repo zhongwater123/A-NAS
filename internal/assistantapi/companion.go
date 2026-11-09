@@ -59,6 +59,9 @@ const (
 	maxCompanionAnswer = 4 << 10
 	// maxCompanionStarts bounds the calls one turn may have waiting.
 	maxCompanionStarts = 32
+	// maxCompanionWaiting bounds a member's calls under way on the socket:
+	// Hermes's one, and a few it gave up on that are still settling.
+	maxCompanionWaiting = 4
 	// companionRate is how many commands a member's windows get a minute;
 	// companionRateEach caps some tools within it.
 	companionRate = 20
@@ -141,16 +144,33 @@ type sentCommand struct {
 // send passes the command to its window, unless it was settled first: the
 // end of the turn may settle it between command and send. Commands go to a
 // window one at a time, so the release the end of a turn sends never
-// overtakes a lock still on its way.
-func (c *companionCommand) send(m *member) {
-	c.browser.companionMu.Lock()
-	defer c.browser.companionMu.Unlock()
+// overtakes a lock still on its way. send gives up when ctx ends, whether
+// it is waiting for its turn or writing: a window that takes no frames
+// holds up no more than ctx allows.
+func (c *companionCommand) send(ctx context.Context, m *member) {
+	slot := c.browser.companionSlot()
+	select {
+	case slot <- struct{}{}:
+	case <-ctx.Done():
+		return
+	}
+	defer func() { <-slot }()
 	m.mu.Lock()
 	_, waiting := m.commands[c.id]
 	m.mu.Unlock()
 	if waiting {
-		c.browser.toBrowser(c.event)
+		_ = c.browser.toBrowserWithin(ctx, c.event)
 	}
+}
+
+// sendRelease sends the Product Service's own release of a lock, which
+// nobody waits for, giving up after companionReceipt. Its callers run it
+// on a goroutine of its own, so that a window that takes no frames holds up
+// neither Hermes's events nor the end of a connection.
+func (c *companionCommand) sendRelease(m *member) {
+	ctx, cancel := context.WithTimeout(context.Background(), companionReceipt)
+	defer cancel()
+	c.send(ctx, m)
 }
 
 // AccountResolver names the active user who owns a Linux UID.
@@ -203,6 +223,11 @@ func (h *Handler) companionCallHTTP(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "assistant_unavailable", "the companion is not available on this device")
 		return
 	}
+	if !h.companionCallBegins(uid) {
+		httpjson.Write(w, http.StatusOK, map[string]any{"status": companionBusy, "reason": "rate-limited"})
+		return
+	}
+	defer h.companionCallEnds(uid)
 	user, err := h.options.Accounts.ResolveAccountUID(r.Context(), uid)
 	switch {
 	case errors.Is(err, accounts.ErrUserNotFound):
@@ -225,6 +250,33 @@ func (h *Handler) companionCallHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpjson.Write(w, http.StatusOK, h.companionCall(r.Context(), user.Username, call.Tool, call.Args))
+}
+
+// companionCallBegins counts a call of uid's under way, or reports that uid
+// has maxCompanionWaiting already. Hermes makes one call at a time on a
+// member's companion server; more come from elsewhere in the sandbox, such
+// as its terminal, and each holds a goroutine and an account lookup of the
+// service all members share.
+func (h *Handler) companionCallBegins(uid int) bool {
+	h.companionCallsMu.Lock()
+	defer h.companionCallsMu.Unlock()
+	if h.companionCalls[uid] >= maxCompanionWaiting {
+		return false
+	}
+	if h.companionCalls == nil {
+		h.companionCalls = map[int]int{}
+	}
+	h.companionCalls[uid]++
+	return true
+}
+
+func (h *Handler) companionCallEnds(uid int) {
+	h.companionCallsMu.Lock()
+	defer h.companionCallsMu.Unlock()
+	h.companionCalls[uid]--
+	if h.companionCalls[uid] <= 0 {
+		delete(h.companionCalls, uid)
+	}
 }
 
 // companionCall carries out one call of a companion tool for account and
@@ -259,18 +311,21 @@ func (h *Handler) companionCall(ctx context.Context, account, tool string, raw j
 		return refusal
 	}
 	h.logger.Debug("companion command sent", "account", account, "session", session, "tool", tool)
-	c.send(m)
-	timer := time.NewTimer(companionReceipt)
-	defer timer.Stop()
+	// The window has companionReceipt to answer, counted from before the
+	// command waits for the window's previous ones to go out.
+	receipt, cancel := context.WithTimeout(ctx, companionReceipt)
+	defer cancel()
+	c.send(receipt, m)
 	select {
 	case result := <-c.answer:
 		return result
-	case <-timer.C:
-		m.stalled(c)
-		return <-c.answer
-	case <-ctx.Done():
-		// The companion server stopped waiting; nobody reads the result.
-		m.settle(c.id, map[string]any{"status": companionCancelled})
+	case <-receipt.Done():
+		if ctx.Err() != nil {
+			// The companion server stopped waiting; nobody reads the result.
+			m.settle(c.id, map[string]any{"status": companionCancelled})
+		} else {
+			m.stalled(c)
+		}
 		return <-c.answer
 	}
 }

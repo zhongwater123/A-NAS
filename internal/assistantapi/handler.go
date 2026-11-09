@@ -79,6 +79,10 @@ type Handler struct {
 	background sync.WaitGroup
 	membersMu  sync.Mutex
 	members    map[string]*member
+	// companionCalls counts the calls on the companion socket under way, by
+	// the caller's UID (companion.go).
+	companionCallsMu sync.Mutex
+	companionCalls   map[int]int
 	// keeps holds the instances kept running for signed-in members, by account.
 	keepsMu sync.Mutex
 	keeps   map[string]*keep

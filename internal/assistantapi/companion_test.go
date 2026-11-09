@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -697,7 +698,7 @@ func TestACommandSettledBeforeItWentOutIsNotSent(t *testing.T) {
 	if release := command(w); release.Payload.Action != "lock_release" {
 		t.Fatalf("first = %+v", release)
 	}
-	c.send(m)
+	c.send(context.Background(), m)
 	if result := <-c.answer; result["status"] != "cancelled" {
 		t.Fatalf("result = %v", result)
 	}
@@ -993,5 +994,114 @@ func TestACallOfAStoppedTurnDoesNotTakeTheNextTurns(t *testing.T) {
 	m.mu.Unlock()
 	if found {
 		t.Fatal("an abandoned call outlived its time")
+	}
+}
+
+// holdWindow takes the window's place for a companion command on its way, as
+// a command whose frame the window does not take would, until the test ends
+// or the returned function gives it back.
+func (h *harness) holdWindow() func() {
+	slot := h.windowOf().companionSlot()
+	slot <- struct{}{}
+	var once sync.Once
+	give := func() { once.Do(func() { <-slot }) }
+	h.t.Cleanup(give)
+	return give
+}
+
+func TestAWindowThatTakesNoFramesHoldsUpNothingElse(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	h.started(conn, fakeRuntime, "call-1", "lock", `{}`)
+	results := h.calls("lock", `{}`)
+	answer(w, fakeRuntime, command(w).Payload.CommandID, `"ok":true,"result":{"status":"ok","lockId":"l-1","expiresAt":1}`)
+	resultOf(t, results)
+	// A command is stuck on its way to the window. A call that waits behind it
+	// ends when its caller stops waiting, settled.
+	give := h.holdWindow()
+	h.started(conn, fakeRuntime, "call-2", "wake", `{}`)
+	ctx, cancel := context.WithTimeout(context.Background(), companionReceipt/4)
+	defer cancel()
+	began := time.Now()
+	if result := h.api.companionCall(ctx, "alice", "wake", json.RawMessage(`{}`)); result["status"] != "cancelled" || time.Since(began) >= companionReceipt {
+		t.Fatalf("result %v after %s", result, time.Since(began))
+	}
+	// The turn's end, and the events after it, still go through while the
+	// release of its lock waits.
+	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
+	h.observed(w, conn)
+	m := h.alice()
+	m.mu.Lock()
+	left := len(m.commands)
+	m.mu.Unlock()
+	if left != 1 {
+		t.Fatalf("%d commands waiting, want the release alone", left)
+	}
+	give()
+	if release := command(w); release.Payload.Action != "lock_release" {
+		t.Fatalf("release = %+v", release)
+	}
+}
+
+func TestAMembersCallsUnderWayAreBounded(t *testing.T) {
+	h := &Handler{}
+	for i := range maxCompanionWaiting {
+		if !h.companionCallBegins(1000) {
+			t.Fatalf("call %d refused", i)
+		}
+	}
+	if h.companionCallBegins(1000) {
+		t.Fatal("a call over the bound began")
+	}
+	if !h.companionCallBegins(1001) {
+		t.Fatal("another member's call was refused")
+	}
+	h.companionCallEnds(1000)
+	if !h.companionCallBegins(1000) {
+		t.Fatal("a call was refused after one ended")
+	}
+
+	// On the socket: the member's calls over the bound are busy at once.
+	uid := os.Getuid()
+	if uid == 0 {
+		t.Skip("root at the other end is a wiring fault, not a member")
+	}
+	dir, err := os.MkdirTemp("", "cs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	path := filepath.Join(dir, "c.sock")
+	api := New(Options{Accounts: uids{uid: "alice"}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := api.CompanionServer()
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = server.Close() })
+	client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", path)
+	}}}
+	post := func() map[string]any {
+		t.Helper()
+		response, err := client.Post("http://companion/call", "application/json", strings.NewReader(`{"tool":"wake","args":{}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = response.Body.Close() }()
+		var data map[string]any
+		_ = json.NewDecoder(response.Body).Decode(&data)
+		return data
+	}
+	for range maxCompanionWaiting {
+		api.companionCallBegins(uid)
+	}
+	if data := post(); data["status"] != "busy" || data["reason"] != "rate-limited" {
+		t.Fatalf("over the bound: %v", data)
+	}
+	api.companionCallEnds(uid)
+	if data := post(); data["status"] != "no_desktop" {
+		t.Fatalf("within the bound: %v", data)
 	}
 }

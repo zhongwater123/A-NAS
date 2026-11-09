@@ -353,7 +353,7 @@ func (h *Handler) observe(m *member, u *upstream, ev event) {
 		go h.refresh(m, u, completed)
 	}
 	if release != nil {
-		release.send(m)
+		go release.sendRelease(m)
 	}
 }
 
