@@ -170,6 +170,10 @@ type Asset struct {
 	// People lists the faces and pets in a single photo's details, with
 	// who each is in the photo's library.
 	People []AssetPerson `json:"people,omitempty"`
+	// Text says where reading the text in a photo stands, in a single
+	// photo's details: TextRead, TextQueued or TextFailed; empty when the
+	// photo's library does not read text or the photo is not one to read.
+	Text string `json:"text,omitempty"`
 }
 
 type TrashState struct {

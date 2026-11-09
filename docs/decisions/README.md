@@ -42,6 +42,7 @@
 - [2026-10-30：OCR 敏感字段的清单](2026-10-30-ocr-sensitive-fields.md)
 - [2026-11-02：OCR 分流的目标召回取 99%](2026-11-02-ocr-routing-recall.md)
 - [2026-11-03：OCR 字段核对的单字概率取 0.99](2026-11-03-ocr-character-confidence.md)
+- [2026-11-06：照片中的文字在界面上不遮挡](2026-11-06-ocr-no-masking-in-the-ui.md)
 
 ### AI 助手
 

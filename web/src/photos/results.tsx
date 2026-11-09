@@ -9,6 +9,17 @@ export function joinWords(words: string[]) {
   return `${words.slice(0, -1).join("、")}和${words.at(-1)}`;
 }
 
+// textQuery is what a search looked for in the text of photos: the query
+// without the names of the people it found in it, which keep the results to
+// their photos instead, in the order the search gives them.
+export function textQuery(query: string, people: string[] = []) {
+  return people
+    .reduce((rest, name) => rest.replaceAll(name, " "), query)
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ");
+}
+
 // ObjectsStatus says what the object detector made of a search: the photos it
 // found the query's things in, or that it found them in none, and how many
 // photos it has not looked at yet, without which "none" would not be true.
