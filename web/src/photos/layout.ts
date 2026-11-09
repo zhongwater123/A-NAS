@@ -37,7 +37,7 @@ export type Entry =
   | { kind: "month"; key: string; size: number; label: string; month: string; photos: number; videos: number }
   | { kind: "day"; key: string; size: number; label: string; ids: string[] }
   | { kind: "heading"; key: string; size: number; label: string; detail?: string }
-  | { kind: "divider"; key: string; size: number; label: string; title: string; text: string }
+  | { kind: "divider"; key: string; size: number; label: string; title: string; text: string; group?: "text" }
   | { kind: "row"; key: string; size: number; label: string; boxes: Box<PhotoAsset>[] }
   | { kind: "pending"; key: string; size: number; label: string; boxes: Box<PendingPhoto>[] }
   | { kind: "placeholder"; key: string; size: number; label: string; month: string; photos: number; failed: boolean }
@@ -184,39 +184,51 @@ export function timelineEntries(
   return entries;
 }
 
-// A split ends a list's first group after at photos, such as search results
-// closest to the query.
+// A split starts a group of a list after at photos, such as the search
+// results whose text holds the query, or the less related ones. group says
+// what kind of group it starts, for its divider's look.
 export interface Split {
   at: number;
   title: string;
   text: string;
+  group?: "text";
 }
 
 // flatEntries lays out a list without dates, such as an album or search
 // results; "more" asks for the next page when it scrolls into view. Photos
 // after a split follow a divider in rows of their own, labelled with its
-// title.
+// title. A split waits until a photo after it is loaded; of splits at the
+// same place, the last stands.
 export function flatEntries(
   assets: PhotoAsset[],
   width: number,
   rowHeight: number,
   more: boolean,
   end = "",
-  split?: Split,
+  splits: Split[] = [],
 ): Entry[] {
-  const at = split ? Math.min(split.at, assets.length) : assets.length;
-  const entries = rowEntries(assets.slice(0, at), width, rowHeight, "", "row");
-  if (split && at < assets.length) {
+  const shown = splits
+    .filter((split) => split.at < assets.length)
+    .toSorted((a, b) => a.at - b.at)
+    .filter((split, index, sorted) => sorted[index + 1]?.at !== split.at);
+  const entries: Entry[] = [];
+  let start = 0;
+  let label = "";
+  for (const split of shown) {
+    entries.push(...rowEntries(assets.slice(start, split.at), width, rowHeight, label, "row"));
     entries.push({
       kind: "divider",
-      key: "divider",
+      key: `divider:${split.at}`,
       size: sizes.divider,
       label: "",
       title: split.title,
       text: split.text,
+      group: split.group,
     });
-    entries.push(...rowEntries(assets.slice(at), width, rowHeight, split.title, "row"));
+    start = split.at;
+    label = split.title;
   }
+  entries.push(...rowEntries(assets.slice(start), width, rowHeight, label, "row"));
   if (more) entries.push({ kind: "more", key: "more", size: sizes.more, label: "" });
   else if (end && assets.length) entries.push({ kind: "end", key: "end", size: sizes.end, label: "", text: end });
   return entries;

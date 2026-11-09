@@ -164,7 +164,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
     photoPicker,
     setPhotoPicker,
     channelPicker,
-    setPeopleSettings,
+    setAISettings,
     newAlbum,
     dropOnAlbum,
     dropOnLibrary,
@@ -404,7 +404,7 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
           scope={scope}
           sourceBadge={sourceBadge}
           newAlbum={newAlbum}
-          setPeopleSettings={setPeopleSettings}
+          setAISettings={setAISettings}
           setPhotoPicker={setPhotoPicker}
           reportError={reportError}
           dragging={dragging}
