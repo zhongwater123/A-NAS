@@ -2426,8 +2426,10 @@
   cursor: none;
 }
 .ph-viewer-main {
+  container: ph-viewer-main / inline-size;
   position: relative;
   min-width: 0;
+  min-height: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -2471,6 +2473,12 @@
   flex: 1;
   display: grid;
 }
+.ph-viewer-title strong,
+.ph-viewer-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ph-viewer-title strong {
   font-size: 14px;
   font-weight: 650;
@@ -2483,6 +2491,32 @@
 .ph-viewer-tools {
   display: flex;
   gap: 2px;
+}
+/* A narrow photo area: smaller buttons, 动态 without its label, and the
+   buttons on a line of their own once the title would get under 140px. */
+@container ph-viewer-main (max-width: 480px) {
+  .ph-viewer-bar {
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 8px 24px;
+  }
+  .ph-viewer-bar button {
+    width: 34px;
+    height: 34px;
+  }
+  .ph-viewer-title {
+    flex: 1 1 140px;
+  }
+  .ph-viewer-tools {
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0;
+    margin-left: auto;
+  }
+  .ph-viewer-live span {
+    display: none;
+  }
 }
 .ph-viewer-stage {
   position: relative;
@@ -2977,6 +3011,25 @@ button.ph-face-name:hover {
 }
 .ph-app.narrow .ph-image-replace span {
   display: none;
+}
+/* The viewer's information goes below the photo instead of beside it, so the
+   bar and the arrows stay on the photo. */
+.ph-app.narrow .ph-viewer {
+  flex-direction: column;
+}
+.ph-app.narrow .ph-viewer-info {
+  width: auto;
+  height: 0;
+  transition: height 0.3s var(--ph-ease);
+}
+.ph-app.narrow .ph-viewer.with-info .ph-viewer-info {
+  width: auto;
+  height: 55%;
+  border-left: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ph-app.narrow .ph-details {
+  width: auto;
 }
 
 /* Slideshow: the photos over the whole screen, controls only while the
