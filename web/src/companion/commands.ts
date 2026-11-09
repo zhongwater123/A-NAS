@@ -104,15 +104,21 @@ const refuse = (
   extra?: Omit<CompanionRefusal, "reason" | "message">,
 ): CompanionOutcome => ({ ok: false, error: { reason, message, ...extra } });
 
-/** Whether this command would go over a limit; one that does not counts from now on. */
+/**
+ * Whether this command would go over a limit. Only commands carried out count (carry): one the sleep
+ * gate, the contract's limits, dsh-pet's decision layer or the lock gate refused took no turn.
+ */
 function rateLimited(action: string): boolean {
   const now = Date.now();
   while (carriedOut.length > 0 && now - carriedOut[0].at >= RATE_WINDOW_MS) carriedOut.shift();
   if (carriedOut.length >= RATE_LIMIT) return true;
   const limit = RATE_LIMITS[action];
-  if (limit !== undefined && carriedOut.filter((entry) => entry.action === action).length >= limit) return true;
-  carriedOut.push({ at: now, action });
-  return false;
+  return limit !== undefined && carriedOut.filter((entry) => entry.action === action).length >= limit;
+}
+
+/** A command passed every gate and is carried out now: it counts against the minute's limits. */
+function carry(action: string): void {
+  carriedOut.push({ at: Date.now(), action });
 }
 
 /** The contract's limits on what dsh-pet's decision layers let through, as a backstop to the product service's. */
@@ -231,6 +237,7 @@ async function carryOut(
       if (!d.ok) return refuse(d.reason, d.message);
       const blocked = lockBlocked(args.lock);
       if (blocked) return blocked;
+      carry(action);
       // The receipt is waited on before the leaf is written: a hidden or frozen card reports at once.
       const record = companionPlayback.create(d.petId, d.name ?? "");
       const outcome = played(record.playbackId, signal);
@@ -264,6 +271,7 @@ async function carryOut(
       if (!d.ok) return refuse(d.reason, d.message);
       const blocked = lockBlocked(args.lock);
       if (blocked) return blocked;
+      carry(action);
       companionState.writePet(d.petId, "say", { text: d.text, duration: d.duration, anim: d.anim });
       return ok({ status: "ok" });
     }
@@ -272,6 +280,7 @@ async function carryOut(
       if (!d.ok) return refuse(d.reason, d.message);
       const blocked = lockBlocked(args.lock);
       if (blocked) return blocked;
+      carry(action);
       companionState.writePet(d.petId, "say", { clear: true });
       return ok({ status: "ok" });
     }
@@ -287,6 +296,7 @@ async function carryOut(
       if (!d.ok) return refuse(d.reason, d.message);
       const blocked = lockBlocked(args.lock);
       if (blocked) return blocked;
+      carry(action);
       companionState.writePet(d.petId, "position", positionLeafData(d));
       return ok({ status: "ok", x: d.x, y: d.y });
     }
@@ -295,6 +305,7 @@ async function carryOut(
       if (!d.ok) return refuse(d.reason, d.message);
       const blocked = lockBlocked(args.lock);
       if (blocked) return blocked;
+      carry(action);
       companionState.writePet(d.petId, "throw", { angle: d.angle, power: d.power });
       return ok({ status: "ok" });
     }
@@ -306,10 +317,12 @@ async function carryOut(
         });
       const names = pickSleepNames(findPetInstance(cfg, COMPANION_PET)?.conf.animations);
       if (names === null) return refuse("no-sleep-animations", "这只宠物没有配置睡觉动画（animations.sleep）");
+      carry(action);
       const changed = companionSleep.enter(COMPANION_PET, names);
       return ok({ status: "ok", sleeping: true, changed });
     }
     case "wake":
+      carry(action);
       return ok({ status: "ok", sleeping: false, changed: companionSleep.wake(COMPANION_PET) });
     case "lock": {
       const ttl = typeof args.ttl === "number" && args.ttl > LOCK_TTL_CAP_MS ? LOCK_TTL_CAP_MS : args.ttl;
@@ -319,7 +332,10 @@ async function carryOut(
         if (d.reason === "lock-lost") return refuse(d.reason, d.message, { cause: d.cause });
         return refuse(d.reason, d.message);
       }
-      if (!d.renewed) holder = { lockId: d.lockId, sessionId };
+      carry(action);
+      // The conversation that took or last renewed the lock holds it: the end of its turn lets it go,
+      // whichever conversation first took it.
+      holder = { lockId: d.lockId, sessionId };
       // Taking the lock wakes the pet, as dsh-pet's /lock does: it is not commanded in its sleep.
       companionSleep.wake(COMPANION_PET);
       return ok({ status: "ok", lockId: d.lockId, expiresAt: d.expiresAt });

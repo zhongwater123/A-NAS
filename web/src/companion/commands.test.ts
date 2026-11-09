@@ -147,14 +147,15 @@ describe("what VNAS says and where it puts the companion", () => {
   });
 
   it("says only plain text, as the product service checks it", async () => {
-    // Every bidi control, not only the overrides, the separators, and either even at the text's ends
-    // (contract v1.2). Each on a fresh minute: a refused broadcast still counts against the six.
-    for (const text of ["看؜字", "看‎字", "看‏字", "看⁦字", "看 字", "看 字", "字 ", "\t字"]) {
-      resetCompanionCommands();
+    // Every bidi control, not only the overrides, the separators, a tab, and either even at the text's
+    // ends (contract v1.2). Each is refused, and a refused broadcast takes none of the minute's six.
+    const sneaky = [0x061c, 0x200e, 0x200f, 0x2066, 0x2028, 0x2029].map((code) => String.fromCodePoint(code));
+    const tab = String.fromCodePoint(9);
+    for (const text of [...sneaky.map((char) => `看${char}字`), `字${sneaky[4]}`, `${tab}字`])
       expect(await run("broadcast", { text })).toEqual(refused("bad-request"));
-    }
-    resetCompanionCommands();
+    for (let i = 0; i < 5; i++) expect(await run("broadcast", { text: `第${i}句` })).toEqual(ok());
     expect(await run("broadcast", { text: "两行\n字" })).toEqual(ok());
+    expect(await run("broadcast", { text: "第七句" })).toEqual(refused("rate-limited"));
   });
 
   it("keeps to the contract's limits where dsh-pet sets none", async () => {
@@ -296,6 +297,20 @@ describe("the lock", () => {
     // Releasing what is not there is done already.
     expect(await run("lock_release", { force: true })).toEqual(ok());
     expect(await run("lock_release", { force: true, lockId })).toEqual(refused("bad-request"));
+  });
+
+  it("goes with the turn of the conversation that last renewed it", async () => {
+    const lockId = field(await run("lock"), "lockId");
+    startTurn("live0002");
+    expect(await run("lock", { lockId }, "live0002")).toMatchObject({ ok: true });
+    // The conversation that took it ends its turn: the lock is the renewer's now, and stays.
+    reportEvent(SESSION, "message.complete", { status: "complete" });
+    expect(await run("lock_release", { force: true })).toEqual(ok());
+    expect(companionLock.locked("main")).toBe(true);
+    // The renewer's turn ends: it goes, rather than holding the pet until it runs out.
+    reportEvent("live0002", "message.complete", { status: "complete" });
+    expect(await run("lock_release", { force: true }, "live0002")).toEqual(ok());
+    expect(companionLock.locked("main")).toBe(false);
   });
 
   it("goes with the window, which the product service can no longer settle", async () => {
