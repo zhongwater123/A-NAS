@@ -7,7 +7,17 @@ import { readHostState } from "../desktop/api";
 import { readContainers } from "../docker/api";
 import { deleteFile, listSpaces } from "../files/api";
 import { apiError, http, pathOf, server } from "../test/server";
-import { APIError, csrfHeader, onSessionEnded, setSession, uploadForm } from "./client";
+import {
+  APIError,
+  apiFetch,
+  csrfHeader,
+  onSessionEnded,
+  passWriteGate,
+  setSession,
+  setWriteGate,
+  uploadForm,
+  type WriteGate,
+} from "./client";
 
 const session: Session = {
   csrfToken: "csrf-test",
@@ -25,6 +35,7 @@ const session: Session = {
 afterEach(() => {
   setSession();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("csrfHeader", () => {
@@ -86,6 +97,18 @@ describe("client", () => {
     await expect(listSpaces()).rejects.toMatchObject({ code: "malformed_response" });
   });
 
+  it("fails a response that parses but breaks the contract", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    // GET /api/v1/apps is one of the responses the generated validators check.
+    server.use(http.get("/api/v1/apps", ({ response }) => response.untyped(HttpResponse.json({ items: null }))));
+    await expect(readApps()).rejects.toMatchObject({
+      status: 200,
+      code: "malformed_response",
+      message: "服务返回的内容不完整，请稍后重试",
+    });
+    expect(console.warn).toHaveBeenCalledWith("GET /api/v1/apps: the response breaks the contract", expect.anything());
+  });
+
   it("sends the CSRF token on writes, whatever the caller passed", async () => {
     setSession(session);
     const sent: Array<{ method: string; path: string; csrf: string | null }> = [];
@@ -140,6 +163,56 @@ describe("client", () => {
   });
 });
 
+describe("the write gate", () => {
+  it("holds every write but never a read", async () => {
+    const gate = vi.fn<WriteGate>(async () => true);
+    const release = setWriteGate(gate);
+    try {
+      for (const method of ["GET", "HEAD", "OPTIONS", "get", "head", "options"])
+        await passWriteGate(method, "/api/v1/spaces");
+      expect(gate).not.toHaveBeenCalled();
+      for (const method of ["POST", "put", "PATCH", "delete"]) await passWriteGate(method, "/api/v1/files/f1?keep=1");
+      expect(gate.mock.calls).toEqual([
+        ["POST", "/api/v1/files/f1"],
+        ["PUT", "/api/v1/files/f1"],
+        ["PATCH", "/api/v1/files/f1"],
+        ["DELETE", "/api/v1/files/f1"],
+      ]);
+    } finally {
+      release();
+    }
+  });
+
+  it("lets the page read while a gate refuses every write, and shows it each write's method and path", async () => {
+    server.use(http.get("/api/v1/spaces", ({ response }) => response(200).json({ items: [] })));
+    const gate = vi.fn<WriteGate>(async () => false);
+    const release = setWriteGate(gate);
+    try {
+      await expect(listSpaces()).resolves.toEqual([]);
+      // A call without a method is a GET.
+      await expect(apiFetch("/api/v1/spaces")).resolves.toMatchObject({ status: 200 });
+      await expect(deleteFile("file:1")).rejects.toMatchObject({
+        status: 403,
+        code: "not_allowed_for_vnas",
+        message: "没有允许 VNAS 这一步，什么都没有改",
+      });
+      expect(gate.mock.calls).toEqual([["DELETE", "/api/v1/files/file%3A1"]]);
+    } finally {
+      release();
+    }
+  });
+
+  it("lets writes go once its gate is released, and keeps a newer gate", async () => {
+    const older = setWriteGate(async () => false);
+    older();
+    await expect(passWriteGate("DELETE", "/api/v1/files/f1")).resolves.toBeUndefined();
+    const newer = setWriteGate(async () => false);
+    older();
+    await expect(passWriteGate("DELETE", "/api/v1/files/f1")).rejects.toMatchObject({ code: "not_allowed_for_vnas" });
+    newer();
+  });
+});
+
 describe("multipart uploads", () => {
   class Upload {
     static last: Upload;
@@ -166,6 +239,24 @@ describe("multipart uploads", () => {
     await Promise.resolve();
     return { result, xhr: Upload.last };
   };
+
+  it("asks the write gate before it opens an upload", async () => {
+    const factory = vi.fn(function () {
+      return new Upload();
+    });
+    vi.stubGlobal("XMLHttpRequest", factory);
+    const gate = vi.fn<WriteGate>(async () => false);
+    const release = setWriteGate(gate);
+    try {
+      await expect(uploadForm("/api/v1/photos/import", new FormData(), vi.fn())).rejects.toMatchObject({
+        code: "not_allowed_for_vnas",
+      });
+    } finally {
+      release();
+    }
+    expect(gate.mock.calls).toEqual([["POST", "/api/v1/photos/import"]]);
+    expect(factory).not.toHaveBeenCalled();
+  });
 
   it("shares API errors and the session-ended notification", async () => {
     vi.stubGlobal("XMLHttpRequest", Upload);
