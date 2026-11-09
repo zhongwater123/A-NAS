@@ -8,7 +8,7 @@ key frames the card's first window, then each window under STILL 0.9 to the mean
           (today's card rule, no look-ahead); a run going GAP 12 s without one gets, every 12 s, the
           window least like the key frames taken; at least 3 (else 3 spread evenly), at most 20
           (the most alike neighbouring pair loses its later frame);
-described by Qwen3.5-4B (tag_beats.describe_groups, one beat a key frame: shot size, what is seen;
+described by Qwen3.5-4B (tag_beats.describe_v2, one beat a key frame: shot size, what is seen;
           summary, scene, indoor/outdoor, time of day, mood, landmark, tags, highlight read by its
           log-probabilities, issues), each frame 512x288 labelled with its number and second.
 

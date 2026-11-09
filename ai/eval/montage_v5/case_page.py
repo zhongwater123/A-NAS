@@ -1,5 +1,5 @@
 """上海卡片.html (or another case): every card of one video in the order the 4B wrote it
-(关键帧节拍 → 亮点 → 概括 → 其余字段), with what the two 剪法25 takes did with it.
+(关键帧节拍 → 亮点 → 过程 → 概括 → 其余字段; cut.load's description), with what the two 剪法25 takes did with it.
 
   python3 case_page.py 02
 """
@@ -8,6 +8,7 @@ import html
 import os
 import sys
 
+import cut as plan
 from paths import CARDS as HERE, CUTS as CUT, read_json
 
 NAMES = {"01": "侦探片", "02": "上海vlog", "04": "深圳冲浪"}
@@ -19,7 +20,7 @@ def clock(t):
 
 
 def main(case):
-    cards = read_json(HERE / f"cards-{case}.json")
+    cards = {c["id"]: c for c in plan.load(case)}     # the description both steps read
     titles = read_json(CUT / f"titles-{case}.json")
     takes = {}
     for n in [int(x) for x in os.environ.get("TAKES", "1,2").split(",")]:
@@ -52,7 +53,7 @@ def main(case):
             mark = "<b class=star>★亮点</b> " if k in hl else ""
             beats.append(f"<li class=beat><img src='{esc(src)}' loading=lazy><div><b>{k}.</b> {mark}<span class=dim>{esc(b['shot_size'])} · "
                          f"{clock(b['start'])}–{clock(b['end'])}</span><br>{esc(b['what'])}</div></li>")
-        line = f"{cid} {clock(c['start'])} {c['end'] - c['start']:.0f}秒 | {a.get('scene', '')} | {a['summary']}"
+        line = f"{cid} {clock(c['start'])} {c['end'] - c['start']:.0f}秒 | {a.get('scene', '')} | {' → '.join(a.get('process', [])) or a['summary']}"
         rows.append(f"<tr class='{'used' if any(cid in u for _o, u in takes.values()) else ''}'><td><a href='#{cid}'>{cid}</a></td>"
                     f"<td>{clock(c['start'])}</td><td>{c['end'] - c['start']:.0f} 秒</td><td>{len(a['beats'])}</td>"
                     f"<td>{esc(a.get('scene', ''))}</td><td>{esc(a['summary'])}</td><td>{''.join(marks)}</td></tr>")
@@ -62,7 +63,8 @@ def main(case):
                     f"{c['end'] - c['start']:.0f} 秒，{len(a['beats'])} 个关键帧</span> {''.join(marks)}</h3>"
                     f"<h4>① 逐个关键帧</h4><ol class=beats>{''.join(beats)}</ol>"
                     f"<h4>② 亮点</h4><p>{'、'.join(f'第 {k} 个' for k in hl) or '—'}</p>"
-                    f"<h4>③ 概括</h4><p class=sum>{esc(a['summary'])}</p>"
+                    f"<h4>③ 过程</h4><p>{esc(' → '.join(a.get('process', [])) or '—')}</p>"
+                    f"<h4>④ 概括</h4><p class=sum>{esc(a['summary'])}</p>"
                     f"<p class=dim>{meta}</p>"
                     f"<details><summary class=dim>规划第一步看到的目录行</summary><code>{esc(line)}</code></details></article>")
     name = NAMES[case]
@@ -84,7 +86,7 @@ td,th{{border-bottom:1px solid var(--line);padding:4px 8px;text-align:left;verti
 label{{margin-right:14px}}
 </style></head><body><main>
 <h1>{name}：{len(rows)} 张卡片（最新描述）</h1>
-<p class=dim>每张卡片一次 Qwen3.5-4B 调用，按这个顺序写：先逐个关键帧写一个节拍，再挑 1–2 个亮点（3 张以内只挑 1 个），最后写概括（旅行不超过 80 字）和其余字段。
+<p class=dim>每张卡片一次 Qwen3.5-4B 调用，按这个顺序写：先逐个关键帧写一个节拍，再挑 1–2 个亮点（3 张以内只挑 1 个），再按先后写过程，最后写概括（旅行不超过 80 字）和其余字段。
 标记：绿色是剪法25 两次成片实际用了哪些节拍；“大纲选了”是第一步选了但成片没用上；红色是报幕卡片，规划前就过滤了。</p>
 <p><label><input type=checkbox id=only> 只看两次成片用到的卡片</label></p>
 <div class=wrap><table><tr><th>卡片</th><th>开始</th><th>时长</th><th>节拍</th><th>场景</th><th>概括</th><th>两次成片</th></tr>{''.join(rows)}</table></div>

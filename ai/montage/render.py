@@ -22,6 +22,9 @@ ENDING_FADE = 1.0
 FIT = (f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
        f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,format=yuv420p")
 VIDEO = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(FPS)]
+# Sources whose rotation tag is wrong (a DJI Pocket file tagged -180 over upright pixels): turned back after
+# FFmpeg turns them by the tag. (Read with -noautorotate, the part kept the tag and played upside down.)
+TURNED_BACK: set[str] = set()
 
 
 class RenderError(Exception):
@@ -74,7 +77,8 @@ def part_args(video: str, start: float, end: float, heard: bool, output: str, en
     fade = min(SOUND_FADE, length / 4)
     out = min(ending, length / 2) if ending else fade
     picture = f",fade=t=out:st={length - out:.3f}:d={out:.3f}" if ending else ""
-    graph = (f"[0:v]{FIT},fps={FPS},trim=duration={length:.3f},setpts=PTS-STARTPTS{picture}[x];"
+    turn = "hflip,vflip," if video in TURNED_BACK else ""
+    graph = (f"[0:v]{turn}{FIT},fps={FPS},trim=duration={length:.3f},setpts=PTS-STARTPTS{picture}[x];"
              f"{source}aformat=sample_fmts=fltp:sample_rates={RATE}:channel_layouts=stereo,apad,"
              f"atrim=duration={length:.3f},afade=t=in:d={fade:.3f},"
              f"afade=t=out:st={length - out:.3f}:d={out:.3f},asetpts=PTS-STARTPTS[s]")

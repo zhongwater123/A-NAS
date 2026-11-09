@@ -11,6 +11,9 @@ CARDS = DATA / "关键帧卡片（2026-11-08）"
 CUTS = DATA / "剪法24（2026-11-08）"
 # 方案 B's prompt profiles (film, travel-vlog) and tag_split.py, whose helpers tag_beats.py uses.
 B_DIR = DATA / "模型对比-2B-4B" / "b"
+# 第五版 (2026-11-09): the user's own DJI Pocket sets (新西兰, 川西), cards described with the process
+# (describe.py there, same as cards.py) and excluded.json, the mis-shot seconds left out.
+V5 = DATA.parent / "第五版"
 VIDEOS = Path.home() / "A-NAS-datasets" / "videos"
 
 

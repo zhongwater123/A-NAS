@@ -13,7 +13,7 @@
           pictures in shooting order. The order is the model's own.
   shots   the program gives each part seconds by its weight and shares them evenly among its
           pictures (budget, 方案 B's way); 4B ranks each picture's beats from its cards, told the
-          part's link, without highlight marks (MARK_HIGHLIGHTS).
+          part's link, without highlight marks.
   cut     each picture filled from its ranked beats, each beat its own length from its key frame,
           SHORTEST to CAPS[style], a picture at most PICTURE_MOST (filled); leftovers carried on; a
           card's beats that meet joined; an end inside speech moves to the nearest pause; rendered
@@ -26,6 +26,8 @@ import difflib
 import itertools
 import json
 import math
+import os
+import statistics
 import subprocess
 import sys
 import time
@@ -34,7 +36,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # ai/, for montage
-from paths import B_DIR, CARDS, CUTS as HERE, read_json, write_json
+from paths import B_DIR, CARDS, CUTS as HERE, V5, read_json, write_json
 
 from montage import look, moments, render
 from montage.styles import STYLES
@@ -42,21 +44,22 @@ from montage.styles import STYLES
 VIDEOS = Path.home() / "A-NAS-datasets" / "videos"
 CASES = {"01": ("case01", "剪成一条悬疑感的电影预告片，保留关键对白，不剧透结局", 60, "预告片", "侦探片预告"),
          "02": ("shanghai", "按时间顺序讲完博主在上海的这一天，保留说话的关键片段", 90, "旅行", "上海vlog"),
-         "04": ("case04", "把两集合成一条深圳旅行故事，以冲浪为高潮", 60, "旅行", "深圳冲浪")}
+         "04": ("case04", "把两集合成一条深圳旅行故事，以冲浪为高潮", 60, "旅行", "深圳冲浪"),
+         "ne": ("newzealand", "按拍摄时间顺序剪一条新西兰旅行 vlog，围绕旅途中的人物展开，场景之间衔接自然", 90, "旅行", "新西兰"),
+         "ch": ("chuanxi", "按拍摄时间顺序剪一条川西旅行 vlog，围绕旅途中的人物展开，场景之间衔接自然", 90, "旅行", "川西")}
+# The user's own camera footage (第五版): its cards and exclusions live in paths.V5, and straight from the
+# camera it carries no title, credits or film name, so no card is asked about 报幕.
+RAW = {"ne": "newzealand", "ch": "chuanxi"}
 # A frame is 报幕 when a title (look.TITLES) is laid over a plain picture, one level over at least
 # PLAIN of it (credits on black: 0.84-0.99), or when the title is the film's name (片名) over
 # anything ("Meridian" over a street, 0.4). A shop sign read as a logo (全家, 0.10-0.15) and a
 # vlog's subtitles read as 时间地点说明 (0.04-0.25) are over busy pictures. Two of three frames make
 # a card 报幕.
 PLAIN = 0.6
-PER_CARD = 5.0      # about one card a 5 s of the cut (方案 B)
-PER_SHOT = 3.0      # about one shot a 3 s
 WIDEN = 3.0         # a clip widened to whole sentences runs at most this much past its share
 
 
 # Each run of a case is a take: CUT_TAG ("-1", "-2") names its files, and its seed varies the plans.
-import os  # noqa: E402
-
 TAG = os.environ.get("CUT_TAG", "")
 SEED = int(os.environ.get("CUT_SEED", "0")) or None
 
@@ -74,6 +77,37 @@ def chat(url, system, user, schema, name, max_tokens=3000):
     return json.loads(out["choices"][0]["message"]["content"]), {
         "seconds": round(time.perf_counter() - t0, 1), "input": usage.get("prompt_tokens"),
         "output": usage.get("completion_tokens")}
+
+
+# Step one on a cloud model (2026-11-09, CUT_PLANNER=claude): planning may leave the host (#341 lets each
+# plan declare its outside calls). With 152-187 cards, the 4B wrote 5 of 6 New Zealand parts from the first
+# 46 and none from the next 90. The call goes through the Claude Code CLI (as eval/video_planner.py does),
+# with no tools, settings or MCP servers: it sees the prompt alone. CUT_CLAUDE names the CLI (one recent
+# enough for the model), CUT_CLAUDE_MODEL the model. Step two stays on the local 4B.
+PLANNER = os.environ.get("CUT_PLANNER", "local")
+# Step two on the cloud model too (2026-11-09, CUT_STEP2=claude): faster than the 4B, which also listed a
+# card's beats in their own order for every picture of the second plan to Forever.
+STEP2 = os.environ.get("CUT_STEP2", "local")
+CLAUDE = os.environ.get("CUT_CLAUDE", "claude")
+CLAUDE_MODEL = os.environ.get("CUT_CLAUDE_MODEL", "claude-opus-5-5")
+
+
+def ask_claude(system, user, schema):
+    """chat() on the cloud model: (answer, cost), the cost with its US dollars."""
+    t0 = time.perf_counter()
+    run = subprocess.run([CLAUDE, "-p", "--model", CLAUDE_MODEL, "--output-format", "json", "--tools", "",
+                          "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence",
+                          "--disable-slash-commands", "--system-prompt", system,
+                          "--json-schema", json.dumps(schema, ensure_ascii=False)],
+                         input=user, capture_output=True, text=True, timeout=1800, cwd=HERE, check=False)
+    out = json.loads(run.stdout or "{}")
+    if run.returncode or out.get("is_error") or "structured_output" not in out:
+        raise RuntimeError(f"{CLAUDE_MODEL}: {out.get('result') or run.stderr[-500:]}")
+    usage = out.get("usage", {})
+    return out["structured_output"], {
+        "seconds": round(time.perf_counter() - t0, 1), "model": CLAUDE_MODEL, "usd": out.get("total_cost_usd"),
+        "input": sum(usage.get(k) or 0 for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")),
+        "output": usage.get("output_tokens")}
 
 
 def ask_picture(url, prompt, jpeg, tokens):
@@ -99,8 +133,32 @@ def title_of(url, jpeg):
 
 
 def load(case):
-    cards = [c for c in read_json(CARDS / f"cards-{case}.json").values() if "answer" in c]
-    return cards
+    """The case's cards, each with one description for both steps: proc-<case>.json's (beats, process,
+    scene, summary; same key frames) where it has one, else cards-<case>.json's. Until 2026-11-09 step 1
+    read the process from proc and step 2 the beats from cards, two separate readings of the same frames."""
+    proc_path = cards_dir(case) / f"proc-{case}.json"
+    proc = read_json(proc_path) if proc_path.exists() else {}
+    cards = [c for c in read_json(cards_dir(case) / f"cards-{case}.json").values() if "answer" in c]
+    return [c | {"answer": proc[c["id"]]["answer"]} if "answer" in proc.get(c["id"], {}) else c for c in cards]
+
+
+def described(case):
+    """The description file load() reads for the case; a take's pick and shots files name it."""
+    return f"proc-{case}.json" if (cards_dir(case) / f"proc-{case}.json").exists() else f"cards-{case}.json"
+
+
+def cards_dir(case):
+    return V5 if case in RAW else CARDS
+
+
+def reused(path, case):
+    """A take's pick or shots file, kept only when it was made from the description load() reads now:
+    a take of before 2026-11-09 (step 2 on cards-<case>.json) cut again would pair its plan with
+    beats it never saw."""
+    data = read_json(path)
+    if data.get("descriptions") != described(case):
+        sys.exit(f"{path.name} 不是按 {described(case)} 规划的：换一个 CUT_TAG 重剪")
+    return data
 
 
 def titles(case, url):
@@ -112,6 +170,9 @@ def titles(case, url):
         entry["title"] = is_report(entry["said"], entry["plain"])
     for card in load(case):
         if card["id"] in done:
+            continue
+        if case in RAW:
+            done[card["id"]] = {"frames": [], "said": [], "plain": [], "title": False, "seconds": 0}
             continue
         n = len(card["frames"])
         picks = sorted({0, n // 2, n - 1})
@@ -153,11 +214,42 @@ def clock(t):
 # plans of 2026-11-09 took 苏州 and 杭州 into a Shanghai vlog); 冲浪: episode 1 at the drive to 深圳
 # (04-014), episode 2 at the beach after the recap (04-124).
 LEFT_OUT = {("02", "01"): [(0.0, 14.0), (26.0, 38.0)], ("04", "01"): [(0.0, 82.0)], ("04", "02"): [(0.0, 84.0)]}
+# 第五版's mis-shots (a finger over the lens, black), as the user marked them in excluded.json.
+for _case, _key in RAW.items():
+    for _x in read_json(V5 / "excluded.json").get(_key, []):
+        LEFT_OUT.setdefault((_case, _x["video"]), []).append((float(_x["from"]), float(_x["to"])))
+
+
+# 第六版 (2026-11-09): the user's own footage is left without its blurred, shaking or blocked cards
+# (quality.py; 画面质量核对.html shows them, 画面质量标注.json holds the user's marks on 36 of them). Blur
+# alone does not tell: the user kept still sunsets and dusk at 8-10.8 and left out what blurred while the
+# camera moved (shake 2-4.4), so blur counts over BLUR_MOST only with shake over BLUR_MOVING. Shake marks
+# from 3 to 5.5 px went both ways; over SHAKE_MOST all were left out. Black (nothing to measure) and a
+# blocked share of BLOCKED_MOST or more go too. On the marks: none of the 22 kept is left out, 10 of the
+# 14 are; the 4 missed are bad in part of the card only (a selfie swung to the sky or a jacket, a face
+# filling the frame, a soft foreground). CUT_QUALITY=0 keeps them all.
+BLUR_MOST, BLUR_MOVING, SHAKE_MOST, BLOCKED_MOST = 8.0, 1.0, 5.6, 0.25
+QUALITY = os.environ.get("CUT_QUALITY", "1") != "0"
+
+
+def poor(case):
+    """The cards quality.py would leave out: {card: [reasons]}."""
+    path = cards_dir(case) / f"quality-{case}.json"
+    if case not in RAW or not QUALITY or not path.exists():
+        return {}
+    out = {}
+    for cid, q in read_json(path).items():
+        why = [w for w, bad in (("黑帧", math.isnan(q["blur"])), ("模糊", q["blur"] > BLUR_MOST and q["shake"] > BLUR_MOVING),
+                                ("抖动", q["shake"] > SHAKE_MOST), ("遮挡", q["blocked"] >= BLOCKED_MOST)) if bad]
+        if why:
+            out[cid] = why
+    return out
 
 
 def usable_cards(case):
     marks = read_json(HERE / f"titles-{case}.json")
-    return [c for c in load(case) if not marks[c["id"]]["title"]
+    bad = poor(case)
+    return [c for c in load(case) if not marks[c["id"]]["title"] and c["id"] not in bad
             and not any(a - 0.01 <= c["start"] < b - 0.01 for a, b in LEFT_OUT.get((case, c["video"]), []))]
 
 
@@ -170,7 +262,7 @@ PICK = """用户的剪辑要求：
 「{instruction}」
 
 下面是 {total_min:.1f} 分钟原始素材切成的 {n} 张卡片，按拍摄时间排列。卡片按画面变化切分，一张卡片是同一处、同一件事的一段连续画面；{what}由本机小模型看关键帧写成，可能看错。报幕、片头片尾字幕、黑场和纯文字画面已经去掉了。
-每行：卡片 id {where}起始时间 时长 | 场景 | {what}{what_note}
+每行：卡片 id {where}起始时间 时长 | 场景 | {what}{what_note}{said_note}
 
 {catalog}
 {position}{structure}
@@ -187,7 +279,7 @@ PICK = """用户的剪辑要求：
    - name 是这一部分的标题，summary 用一句话说明这部分讲什么；
    - link 写这一部分和上一部分怎么衔接：写清上一部分最后一个画面和这一部分第一个画面靠什么接上（同一个人、同一样东西、同一个动作或声音、到达或进入一个地方），不要只写“直接切入”；{first_link}
    - weight 是这一部分的分量（1–10 的整数）；
-   - scenes 是这一部分要的 1–4 个画面：query 用一个短语说明要的画面（如“雨夜车窗上的雨滴”“江边远眺陆家嘴”），写看得见的主体、动作和光线，不写地名（概括里的地名可能认错），所有部分的 query 互不重复；cards 写这个画面取自哪几张卡片（1–3 张）。
+   - scenes 是这一部分要的 1–4 个画面：query 用一个短语说明要的画面（如“雨夜车窗上的雨滴”“江边远眺陆家嘴”），写看得见的主体、动作和光线，不写地名（概括里的地名可能认错），所有部分的 query 互不重复；cards 写这个画面取自哪几张卡片（1–3 张），一张卡片只放进一个画面。
 只输出 JSON。"""
 
 # The category's usual structure, offered as a reference (the instruction still decides): B's words.
@@ -196,7 +288,6 @@ STRUCTURE = """
 设计时可以参考，但以用户的要求为准。
 """
 PROFILES = {"预告片": "film", "旅行": "travel-vlog"}
-PACES = ("整段", "适中", "快")
 
 
 def structure_of(style):
@@ -224,7 +315,7 @@ def structure_of(style):
 
 
 SHOTS = """你是剪辑师。大纲定好了段落和每个段落要的画面，程序定好了每个画面约几秒。你给每个画面挑节拍；程序按你排的顺序，从每个节拍开头取 {shortest:g}–{cap:g} 秒，取到凑满这个画面的秒数为止。成片约 {target:g} 秒，带原声，不加配乐和字幕。
-下面每个画面列出它可以取自的卡片（id、时间、场景、概括）和节拍（节拍 id、景别、能取几秒、画面）。
+下面每个画面列出它可以取自的卡片（id、时间、场景、概括）和节拍（节拍 id、景别、能取几秒、画面{said_note}）。
 每个画面写：
 - beats：从它的卡片里挑节拍，最合适的排前面，多列一两个备用；一个节拍只用一次；
 - shows：一句话写这个画面要呈现什么；
@@ -243,7 +334,6 @@ unmet：大纲要的、节拍里找不到的画面，没有就写空数组。"""
 # leaves over or short goes on to the next, so no short leftover becomes a shot of its own.
 SAME_TEXT = 0.85   # two beats whose descriptions match this closely show the same thing
 SHORTEST = 2.0
-MARK_HIGHLIGHTS = False
 CAPS = {"预告片": 4.0, "旅行": 6.0}     # B's film profile: shots 1.5-4 s; travel at B's 适中, 6 s
 CAP = 6.0
 # At least a part a PART_SECONDS of the cut (90 s: 6, 60 s: 4): with 3 parts for 90 s, the Shanghai
@@ -261,15 +351,117 @@ PICTURE_SECONDS = 6.0
 # planned from a run of its own cards (the Bund by day and the night market were left out) and the first
 # block, with no picture cap, gave 12 pictures to its 30 s. Off by default (0: one block).
 CHUNK_LINES = int(os.environ.get("CUT_CHUNK", "0"))
-OPEN_CLOSE = "- 开场先交代地点、时代和人物，不要跳切；结尾要有收束感；"
+# The ending (2026-11-09): what montage and travel editing close on, the user's choice of it, landscapes and
+# cities apart; asked for, not ruled out (Shanghai closes on the Bund by night, crowded, and should). The
+# Forever cut had ended on a museum's bronze tree.
+ENDING = ("结尾的最后一个画面要静下来，节奏放缓，有结束的感觉："
+          "素材以自然风景为主时，可以用远去的背影或交通工具、拉远或升高的大景、黄昏落日或星空、几乎不动的风景空镜、人物回望或静坐望远；"
+          "素材以城市为主时，可以用夜景和灯火（街道、天际线、江边）、人流或车流里慢慢走远的背影、从高处俯瞰城市、地标建筑的全景；"
+          "两种都可以呼应开头")
+OPEN_CLOSE = f"- 开场先交代地点、时代和人物，不要跳切；{ENDING}；"
+# Trial (2026-11-09, CUT_SPEECH=1): what is said, from the index's transcript (speech.json, word by word
+# with times), beside each card in step one and each beat in step two. 方案 B's review showed every
+# candidate's sentences, and its Shanghai story came from them (the 1930 restaurant, the Lamborghini's
+# owner); our planner never saw what anyone said. Lines are cut at SAID_CARD / SAID_BEAT characters.
+SPEECH = os.environ.get("CUT_SPEECH") == "1"
+SAID_CARD, SAID_BEAT = 60, 40
+_said = {}
+
+
+def said(card_id, video, a, b, most):
+    """What is said between a and b s of the video (words whose middle falls in), as one line."""
+    case = card_id.split("-")[0]
+    if case not in _said:
+        key = CASES[case][0]
+        d = next((Path.home() / "A-NAS-datasets" / "cache" / f"video-moments-{key}").glob("embeddinggemma*"))
+        _said[case] = read_json(d / "speech.json")["videos"]
+    # Words joined as moments.Index.lines joins them: a Shanghai subtitle's pieces carry no leading
+    # space ("guysWelcome to my channelI'm Jini" when joined as they come).
+    text = ""
+    for s, e, w in _said[case].get(video, []):
+        if not a <= (s + e) / 2 < b:
+            continue
+        word = w.strip()
+        if text and word and (w[:1].isspace() or (text[-1].isascii() and text[-1].isalnum()
+                                                   and word[0].isascii() and word[0].isalnum())):
+            text += " "
+        text += word
+    return text if len(text) <= most else text[:most] + "…"
+
+
+# Free planning (2026-11-09, CUT_FREE=1): step one is given no length, no number of parts and no cap on
+# pictures; each part says its own seconds instead of a weight, and the cut is as long as they add up to.
+FREE = os.environ.get("CUT_FREE") == "1"
+FREE_WEIGHT = "   - weight 是这一部分的分量（1–10 的整数）；"
+FREE_SECONDS = "   - seconds 是这一部分在成片里的秒数（整数），全片多长由你按素材和要求定；"
+FREE_SCENES = ("要的 1–4 个画面：", "要的画面（个数由你定）：")
+
+
+# 第六版 (2026-11-09, CUT_MUSIC=music-<song>.json under HERE, by music.py): the montage is cut to a song, CutClaw's
+# way. The song's parts are the cut's parts, its bar-line slots each picture's shots, and the cut carries the
+# song instead of its own sound. Step one is told each part's seconds, level and slots, and to take wide and
+# full shots first where the music peaks.
+MUSIC = os.environ.get("CUT_MUSIC", "")
+MUSIC_SYSTEM = "你是剪辑规划，按用户的剪辑要求写一份成片大纲。画面由程序按大纲剪出，配上给定的音乐，不用原声，不加字幕。"
+MUSIC_SCENES = ("要的 1–4 个画面：", "要的画面（个数不超过这一段能放的镜头数）：")
+
+
+def song():
+    return read_json(HERE / MUSIC) if MUSIC else None
+
+
+def music_note(m):
+    """The song's parts as step one reads them."""
+    lines = [f"成片配乐：{Path(m['song']).stem}，取其中 {m['seconds']:.0f} 秒，按音乐分成 {len(m['parts'])} 段，"
+             "成片的部分和音乐段一一对应；镜头由程序卡在音乐的小节上切："]
+    for n, part in enumerate(m["parts"], 1):
+        sl = [b - a for a, b in part["slots"]]
+        lines.append(f"第 {n} 段 {part['start']:.0f}–{part['end']:.0f} 秒，{part['level']}，能放 {len(sl)} 个镜头（每个约 {statistics.median(sl):.1f} 秒）")
+    # 2026-11-09: the first plan to Forever crossed five places in its 25 s chorus and, told to join scene
+    # changes, put a coach on the road between the swing and the rafting into it.
+    # 2026-11-09 (the user): the chorus opens on its first beat with a wide shot and is wide and grand
+    # throughout; it needs no person, and holds few pictures of people if any (the rest of the cut still
+    # follows its people).
+    # 2026-11-09 (the user): build and release, the cut onto the chorus's first beat is the cut's biggest.
+    # "A person moving forward" asked for a kind of picture some material has none of; the picture before
+    # the chorus is described by its state instead (not yet there, not yet seen, not yet open), in the six
+    # kinds the user chose from common montage practice.
+    lines += ["- 进入高潮段前的最后一个画面处在“还没”的状态：人正要到达某处但还没到；镜头在往前冲或往上升；"
+              "画面被挡住、被框住、很窄；人在准备或期待；动作在加速或悬在半空；从暗到亮、从小到大的前一刻。"
+              "高潮段的第一个画面紧接着放全片最开阔、最宏大的全景或远景，作为释放；",
+              "- 高潮段的第一个画面必须是全景或远景；高潮段全部用全景、远景和宏大的场面；",
+              "- 高潮段不要求出现人物；如果有，有人物的画面少一些；",
+              "- 音乐段落的交界就是换场景的地方，过渡画面放在交界处；高潮段只放最精彩的画面，不放过渡画面；",
+              "- 每部分的画面个数不超过这一段能放的镜头数。"]
+    return "\n" + "\n".join(lines) + "\n"
+
+
+def slotted(m, parts):
+    """Each picture's slots: a part's slots shared among its pictures in order, as evenly as they go (the
+    earlier pictures take the odd ones); a picture past the part's slots gets none."""
+    out = []
+    for mp, part in zip(m["parts"], parts, strict=True):
+        each, extra = divmod(len(mp["slots"]), len(part["scenes"]))
+        got, at = [], 0
+        for k in range(len(part["scenes"])):
+            take = each + (1 if k < extra else 0)
+            got.append(mp["slots"][at:at + take])
+            at += take
+        out.append(got)
+    return out
+
+
+def target_of(case, picked):
+    """The cut's seconds: the song's excerpt, or what a freely planned outline's parts add up to, else the
+    case's target."""
+    if MUSIC:
+        return round(song()["seconds"])
+    parts = picked["parts"]
+    return sum(p["seconds"] for p in parts) if parts and all("seconds" in p for p in parts) else CASES[case][2]
 
 
 def fewest_parts(target):
     return max(2, round(target / PART_SECONDS))
-
-
-def longest_picture(_target):
-    return PICTURE_MOST
 
 
 def share(total, capacity, weights=None):
@@ -301,25 +493,28 @@ def blocks(n, size):
 def pick(case, url):
     path = HERE / f"pick-{case}{TAG}.json"
     if path.exists():
-        return read_json(path)
+        return reused(path, case)
     _key, instruction, target, style, _name = CASES[case]
+    if MUSIC:
+        target = round(song()["seconds"])
     cards = usable_cards(case)
     many = len({c["video"] for c in cards}) > 1
     # #416 (2026-11-09): where the cards were described again with a process (proc-<case>.json,
     # 关键帧卡片/process_cards.py), the catalog carries it instead of the summary: a long card's summary
     # kept its most striking part and dropped the steps on the way (the car pulling up at the cliff,
     # the torch in the cave), which is what joins one picture to the next.
-    proc_path = CARDS / f"proc-{case}.json"
-    proc = read_json(proc_path) if proc_path.exists() else {}
-    what, what_note = ("过程", "（这张卡片里依次发生的事）") if proc else ("概括", "")
+    has_process = all("process" in c["answer"] for c in cards)
+    what, what_note = ("过程", "（这张卡片里依次发生的事）") if has_process else ("概括", "")
     lines = []
     for c in cards:
         a = c["answer"]
-        text = " → ".join(proc[c["id"]]["answer"]["process"]) if "answer" in proc.get(c["id"], {}) else a["summary"]
+        text = " → ".join(a["process"]) if has_process else a["summary"]
         where = f"视频{int(c['video'])} " if many else ""
         # No tags (标签盲测 4.0 against 2.7) and no highlight: it ranked the street and road cards that
         # set up the place and join scenes (3.1-3.2) under the story's (3.6-4.7), and they were left out.
-        lines.append(f"{c['id']} {where}{clock(c['start'])} {c['end'] - c['start']:.0f}秒 | {a.get('scene', '')} | {text}")
+        line = f"{c['id']} {where}{clock(c['start'])} {c['end'] - c['start']:.0f}秒 | {a.get('scene', '')} | {text}"
+        words = said(c["id"], c["video"], c["start"], c["end"], SAID_CARD) if SPEECH else ""
+        lines.append(line + (f" | 台词：「{words}」" if words else ""))
     spans = blocks(len(cards), CHUNK_LINES)
     k = len(spans)
     users, answers, costs, info, before = [], [], [], [], None
@@ -328,6 +523,8 @@ def pick(case, url):
         if k == 1:
             position, open_close = "", OPEN_CLOSE
             task, first_link = f"请按用户的要求，从这些卡片里设计一个约 {target} 秒的成片，按顺序写：", "第一部分写开场怎么进入；"
+            if FREE:
+                task = "请按用户的要求，从这些卡片里设计成片，时长、分几部分、用多少画面都由你按素材和要求决定，按顺序写："
         else:
             position = (f"\n素材较长，成片按拍摄时间先后分成 {k} 块分别规划，上面是第 {b} 块的卡片（全部 {len(cards)} 张里的第 "
                         f"{lo + 1}–{hi} 张，{clock(cards[lo]['start'])}–{clock(cards[hi - 1]['end'])}）。"
@@ -341,7 +538,7 @@ def pick(case, url):
             elif b < k:
                 open_close = "- 这一块在成片中间：第一部分接上上一块的最后一个画面，不要重新开场；结尾要能接到下一块，不用收束；"
             else:
-                open_close = "- 这一块是成片的结尾：第一部分接上上一块的最后一个画面，不要重新开场；结尾要有收束感；"
+                open_close = f"- 这一块是成片的结尾：第一部分接上上一块的最后一个画面，不要重新开场；{ENDING}；"
             task = f"请按用户的要求，从这些卡片里设计成片里约 {seconds:.0f} 秒的这一块，按顺序写："
             first_link = "第一部分写开场怎么进入；" if b == 1 else "第一部分写怎么接上上一块的最后一个画面；"
         answer, cost, user = plan_block(url, instruction, style, cards[lo:hi], lines[lo:hi], many, what, what_note,
@@ -361,8 +558,9 @@ def pick(case, url):
         cost = {key: round(sum(c[key] or 0 for c in costs), 1) for key in ("seconds", "input", "output")} | {"calls": k}
         user = "\n\n".join(f"========== 第 {n} 块 ==========\n{u}" for n, u in enumerate(users, 1))
     # The order is the model's own (the design and the parts both told to follow shooting order); no
-    # program sorting after it (in_order is kept for comparison only).
-    out = {"system": PICK_SYSTEM, "user": user, "answer": merged, "cost": cost}
+    # program sorting after it.
+    out = {"system": MUSIC_SYSTEM if MUSIC else PICK_SYSTEM, "user": user, "answer": merged, "cost": cost,
+           "descriptions": described(case), **({"music": MUSIC} if MUSIC else {})}
     write_json(out, path)
     print(case, "pick", cost, "分块", [b["cards"] for b in info], "每块段数", [b["parts"] for b in info], flush=True)
     return out
@@ -371,7 +569,6 @@ def pick(case, url):
 def plan_block(url, instruction, style, cards, lines, many, what, what_note, target, position, open_close, task,
                first_link):
     """Step one on one block of the catalog (all of it when it is short): (answer, cost, user)."""
-    most = round(target / PER_CARD)
     max_parts = max(2, min(8, int(target // 10)))     # B's part_limits: parts of 10 s at least, 2-8
     min_parts = fewest_parts(target)
     # The pictures of all parts together are held to one a PICTURE_SECONDS of the target (2026-11-09):
@@ -384,11 +581,21 @@ def plan_block(url, instruction, style, cards, lines, many, what, what_note, tar
                   else f"{min_parts}–{max_parts} 个部分（至少 {min_parts} 个，不能超过 {max_parts} 个）")
     pictures = int(os.environ.get("CUT_PICTURES", round(target / PICTURE_SECONDS)))
     pictures_rule = f"，所有部分的画面加起来不超过 {pictures} 个" if pictures else ""
+    if FREE:
+        parts_rule, pictures_rule = "若干部分（分几部分由你定）", ""
+    m = song()
+    if m:
+        parts_rule, pictures_rule = f"{len(m['parts'])} 个部分（和音乐的 {len(m['parts'])} 段一一对应）", ""
+        position += music_note(m)
     total = sum(c["end"] - c["start"] for c in cards) / 60
     user = PICK.format(instruction=instruction, total_min=total, n=len(cards), where="所在视频 " if many else "", what=what, what_note=what_note,
-                       catalog="\n".join(lines), structure=structure_of(style), target=target, most=most,
-                       parts_rule=parts_rule, pictures_rule=pictures_rule, position=position, open_close=open_close,
+                       said_note=" | 台词（这段时间里说的话，听写而来，可能有错）" if SPEECH else "",
+                       catalog="\n".join(lines), structure=structure_of(style), parts_rule=parts_rule, pictures_rule=pictures_rule, position=position, open_close=open_close,
                        task=task, first_link=first_link)
+    if FREE:
+        user = user.replace(FREE_WEIGHT, FREE_SECONDS).replace(*FREE_SCENES)
+    if m:
+        user = user.replace(FREE_WEIGHT + "\n", "").replace(*MUSIC_SCENES)
     ids = [c["id"] for c in cards]
     schema = {"type": "object", "required": ["design", "unmet", "parts"], "properties": {
         "design": {"type": "string"},
@@ -402,34 +609,24 @@ def plan_block(url, instruction, style, cards, lines, many, what, what_note, tar
                         "query": {"type": "string"},
                         "cards": {"type": "array", "minItems": 1, "maxItems": 3,
                                   "items": {"type": "string", "enum": ids}}}}}}}}}}
-    answer, cost = chat(url, PICK_SYSTEM, user, schema, "outline")
+    if FREE:
+        part = schema["properties"]["parts"]
+        del part["minItems"], part["maxItems"], part["items"]["properties"]["scenes"]["maxItems"]
+        part["items"]["properties"].pop("weight")
+        part["items"]["properties"]["seconds"] = {"type": "integer", "minimum": 1}
+        part["items"]["required"] = ["name", "summary", "link", "seconds", "scenes"]
+    if m:
+        part = schema["properties"]["parts"]
+        part["minItems"] = part["maxItems"] = len(m["parts"])
+        part["items"]["properties"]["scenes"]["maxItems"] = max(len(x["slots"]) for x in m["parts"])
+        part["items"]["properties"].pop("weight")
+        part["items"]["required"] = ["name", "summary", "link", "scenes"]
+    system = MUSIC_SYSTEM if m else PICK_SYSTEM
+    if PLANNER == "claude":
+        answer, cost = ask_claude(system, user, schema)
+    else:
+        answer, cost = chat(url, system, user, schema, "outline")
     return answer, cost, user
-
-
-def reversed_put(items, span):
-    """items with each pair put the wrong way round swapped: one before another although all of its
-    cards come after all of the other's. Pictures and parts whose times overlap keep the model's order."""
-    items = list(items)
-    moved = True
-    while moved:
-        moved = False
-        for i in range(len(items) - 1):
-            if min(span(items[i])) > max(span(items[i + 1])):
-                items[i], items[i + 1] = items[i + 1], items[i]
-                moved = True
-    return items
-
-
-def in_order(answer, at):
-    """The outline in shooting order where the model put it plainly backwards (#416: 侦探片 had the
-    puppet in the cave before the sky and the beach, and the cliff after them), and as the model wrote it
-    where times overlap (上海's last part: 南京路 17:18, then the Bund 16:14 with 陆家嘴 19:06, to end on
-    the night view; sorting by the earliest card put 南京路 last)."""
-    times = lambda sc: [at[cid] for cid in sc["cards"]]     # noqa: E731
-    for part in answer["parts"]:
-        part["scenes"] = reversed_put(part["scenes"], times)
-    answer["parts"] = reversed_put(answer["parts"], lambda part: [t for sc in part["scenes"] for t in times(sc)])
-    return answer
 
 
 def units(card, cap):
@@ -448,24 +645,14 @@ def units(card, cap):
 def budget(picked, cards, target, cap):
     """Each part's seconds by its weight, each picture at least SHORTEST, and each picture's seconds
     (the part's shared evenly, none above what its cards can run): [[seconds, ...], ...]."""
-    most = longest_picture(target)
+    most = PICTURE_MOST
     room = [[min(most, sum(u[2] for cid in dict.fromkeys(sc["cards"]) if cid in cards for u in units(cards[cid], cap)))
              for sc in p["scenes"]] for p in picked["parts"]]
     floors = [SHORTEST * len(p["scenes"]) for p in picked["parts"]]
     spare = max(0.0, target - sum(floors))
     parts = share(spare, [max(0.0, sum(r) - f) for r, f in zip(room, floors, strict=True)],
-                  [p["weight"] for p in picked["parts"]])
+                  [p.get("weight", p.get("seconds")) for p in picked["parts"]])
     return [[max(SHORTEST, x) for x in share(f + extra, r)] for f, extra, r in zip(floors, parts, room, strict=True)]
-
-
-HIGHLIGHT = """上面是同一张卡片里按时间排的 {n} 个画面（第 1 张到第 {n} 张）。挑出其中最有记忆点、最值得剪进{style}的 {most} 张：特别的人物、道具、表情或光影。只看画面本身，按编号回答。"""
-
-
-def highlights(case, url, card_ids, style):
-    """The beats of each card that stand out: marked by the description itself (tag_beats.describe_v2,
-    chosen side by side among the card's key frames, after the beats and before the summary)."""
-    cards = {c["id"]: c for c in load(case)}
-    return {cid: cards[cid]["answer"].get("highlights", []) for cid in card_ids if cid in cards}
 
 
 def shots(case, url):
@@ -474,13 +661,12 @@ def shots(case, url):
     block, each call with that block's parts and seconds only."""
     path = HERE / f"shots-{case}{TAG}.json"
     if path.exists():
-        return read_json(path)
+        return reused(path, case)
     _key, instruction, target, style, _name = CASES[case]
     cap = CAPS.get(style, CAP)
     picked = pick(case, url)["answer"]
+    target = target_of(case, picked)
     cards = {c["id"]: c for c in usable_cards(case)}
-    marks = highlights(case, url, list(dict.fromkeys(c for p in picked["parts"] for sc in p["scenes"]
-                                                     for c in sc["cards"] if c in cards)), style)
     groups, at = [], 0
     for b in picked.get("blocks", []):
         groups.append((picked["parts"][at:at + b["parts"]], b["design"], b["seconds"]))
@@ -490,8 +676,9 @@ def shots(case, url):
     seconds, raws, costs, users, system = [], [], [], [], ""
     for n, (parts, design, sec) in enumerate(groups, 1):
         extra = f"这是全片 {len(groups)} 块中的第 {n} 块，这一块约 {sec:.0f} 秒。\n" if len(groups) > 1 else ""
-        secs, raw, cost, system, user = rank_block(url, instruction, target, style, cap, parts, design, cards, marks,
-                                                   sec, extra)
+        slots = slotted(song(), parts) if MUSIC else None
+        secs, raw, cost, system, user = rank_block(url, instruction, target, style, cap, parts, design, cards, sec,
+                                                   extra, slots)
         seconds += secs
         raws.append(raw)
         costs.append(cost)
@@ -502,7 +689,8 @@ def shots(case, url):
         raw = {"parts": [r for x in raws for r in x["parts"]], "unmet": [u for x in raws for u in x.get("unmet", [])]}
         cost = {key: round(sum(c[key] or 0 for c in costs), 1) for key in ("seconds", "input", "output")} | {"calls": len(groups)}
         user = "\n\n".join(f"========== 第 {n} 块 ==========\n{u}" for n, u in enumerate(users, 1))
-    out = {"system": system, "user": user, "raw": raw, "seconds": seconds, "cap": cap, "cost": cost,
+    out = {"system": system, "user": user, "raw": raw, "seconds": seconds, "cap": cap, "cost": cost, "step2": STEP2,
+           "descriptions": described(case), **({"slots": slotted(song(), picked["parts"]), "music": MUSIC} if MUSIC else {}),
            "answer": {"parts": [{"name": p["name"], "summary": p["summary"], "pictures": r["pictures"]}
                                 for p, r in zip(picked["parts"], raw["parts"], strict=True)],
                       "unmet": raw.get("unmet", [])}}
@@ -512,9 +700,11 @@ def shots(case, url):
     return out
 
 
-def rank_block(url, instruction, target, style, cap, parts, design, cards, marks, seconds_of, extra):
-    """Step two on some parts (all of them for a plan in one block): (seconds, raw, cost, system, user)."""
-    seconds = budget({"parts": parts}, cards, seconds_of, cap)
+def rank_block(url, instruction, target, style, cap, parts, design, cards, seconds_of, extra, slots=None):
+    """Step two on some parts (all of them for a plan in one block): (seconds, raw, cost, system, user).
+    With slots (第六版), each picture's seconds are its music slots'."""
+    seconds = ([[round(sum(b - a for a, b in pic), 2) for pic in part] for part in slots] if slots
+               else budget({"parts": parts}, cards, seconds_of, cap))
     rules = f"\n剪法：{STYLES[style]}" if STYLES.get(style) else ""
     lines, part_items = [], []
     for n, (p, secs) in enumerate(zip(parts, seconds, strict=True), 1):
@@ -522,7 +712,8 @@ def rank_block(url, instruction, target, style, cap, parts, design, cards, marks
         lines.append(f"  衔接：{p['link']}")
         items = []
         for k, (sc, sec) in enumerate(zip(p["scenes"], secs, strict=True), 1):
-            lines.append(f"  画面{k}：{sc['query']}（约 {sec:.0f} 秒）")
+            shots_here = len(slots[n - 1][k - 1]) if slots else 0
+            lines.append(f"  画面{k}：{sc['query']}（约 {sec:.0f} 秒" + (f"，{shots_here} 个镜头）" if slots else "）"))
             ids = []
             for cid in dict.fromkeys(sc["cards"]):
                 if cid not in cards:
@@ -534,9 +725,9 @@ def rank_block(url, instruction, target, style, cap, parts, design, cards, marks
                     ids.append(f"{cid}/{j}")
                     # #416 (2026-11-09): no 【亮点】 marks; two marked faces in the car came before the
                     # rear-view mirror the picture asked for, and the picture had room for two beats.
-                    star = "【亮点】" if MARK_HIGHLIGHTS and j in marks.get(cid, []) else ""
-                    lines.append(f"      {cid}/{j} {b['shot_size']} {length:.0f}秒 {star}{b['what']}")
-            need = min(len(ids), math.ceil(sec / cap) + 1)
+                    words = said(cid, c["video"], _start, _start + length, SAID_BEAT) if SPEECH else ""
+                    lines.append(f"      {cid}/{j} {b['shot_size']} {length:.0f}秒 {b['what']}" + (f" 台词：「{words}」" if words else ""))
+            need = min(len(ids), (shots_here if slots else math.ceil(sec / cap)) + 1)
             items.append({"type": "object", "required": ["beats", "shows", "link"], "properties": {
                 "beats": {"type": "array", "minItems": max(1, need), "maxItems": max(1, min(len(ids), need + 4)),
                           "items": {"type": "string", "enum": ids}},
@@ -548,8 +739,32 @@ def rank_block(url, instruction, target, style, cap, parts, design, cards, marks
     schema = {"type": "object", "required": ["parts", "unmet"], "properties": {
         "parts": {"type": "array", "minItems": len(part_items), "maxItems": len(part_items), "prefixItems": part_items},
         "unmet": {"type": "array", "items": {"type": "string"}}}}
-    system = SHOTS.format(target=target, shortest=SHORTEST, cap=cap)
-    raw, cost = chat(url, system, user, schema, "shots", max_tokens=4000)
+    system = SHOTS.format(target=target, shortest=SHORTEST, cap=cap, said_note="、台词（听写而来，可能有错）" if SPEECH else "")
+    if slots:
+        system = system.replace(f"程序按你排的顺序，从每个节拍开头取 {SHORTEST:g}–{cap:g} 秒，取到凑满这个画面的秒数为止。成片约 {target:g} 秒，带原声，不加配乐和字幕。",
+                                f"程序按音乐把每个画面切成几个镜头，镜头卡在小节上；按你排的顺序，每个镜头用一个节拍，从节拍开头取。成片约 {target:g} 秒，配音乐，不用原声。"
+                                "高潮段的画面只挑全景、远景的节拍，第一个画面的第一个节拍必须是全景或远景，挑最开阔的那个；"
+                                # 2026-11-09: step one stays coarse; for "walks to the water, sits on a log, turns and
+                                # smiles" given one 5 s shot, step two put beat 1 (the walk) first and the smile
+                                # (beat 3) never came. Picking the moment is step two's work.
+                                "画面只有一两个镜头时，放不下卡片里的整个过程：不要默认挑第一个节拍，要从这张卡片的全部节拍里挑出最关键、最精彩的那一刻排在第一。"
+                                "高潮段前的最后一个画面，在符合这个画面内容的节拍里，挑最处在“还没”状态的：还没到、还没看见、还没打开、还没落地。")
+    if STEP2 == "claude":
+        # The CLI's strict schemas have no prefixItems: each part and picture becomes a named field (段落1,
+        # 画面1, ...), so each picture keeps its own beats to choose from, and the answer is turned back.
+        named = {"type": "object", "required": ["parts", "unmet"], "properties": {
+            "unmet": schema["properties"]["unmet"],
+            "parts": {"type": "object", "required": [f"段落{n}" for n in range(1, len(part_items) + 1)], "properties": {
+                f"段落{n}": {"type": "object", "required": [f"画面{k}" for k in range(1, len(pi["properties"]["pictures"]["prefixItems"]) + 1)],
+                            "properties": {f"画面{k}": item for k, item in enumerate(pi["properties"]["pictures"]["prefixItems"], 1)}}
+                for n, pi in enumerate(part_items, 1)}}}}
+        answer, cost = ask_claude(system, user, named)
+        raw = {"unmet": answer["unmet"],
+               "parts": [{"pictures": [answer["parts"][f"段落{n}"][f"画面{k}"]
+                                       for k in range(1, len(pi["properties"]["pictures"]["prefixItems"]) + 1)]}
+                         for n, pi in enumerate(part_items, 1)]}
+    else:
+        raw, cost = chat(url, system, user, schema, "shots", max_tokens=4000)
     return seconds, raw, cost, system, user
 
 
@@ -618,14 +833,20 @@ def filled(planned, picked, cards, cap, most):
 
 
 def cut(case):
+    if MUSIC:
+        return cut_to_music(case)
     key, instruction, target, style, name = CASES[case]
     cap = CAPS.get(style, CAP)
     d = next((Path.home() / "A-NAS-datasets" / "cache" / f"video-moments-{key}").glob("embeddinggemma*"))
     ix = moments.Index.load(str(d / "index.json"), str(d / "frames.npz"))
     cards = {c["id"]: c for c in load(case)}
-    planned = read_json(HERE / f"shots-{case}{TAG}.json")
-    picked = read_json(HERE / f"pick-{case}{TAG}.json")["answer"]
-    clips = filled(planned, picked, cards, cap, longest_picture(target))
+    planned = reused(HERE / f"shots-{case}{TAG}.json", case)
+    picked = reused(HERE / f"pick-{case}{TAG}.json", case)["answer"]
+    # A freely planned cut is as long as the seconds step two handed out, not the outline's own sum: the
+    # Shanghai outline asked 483 s of 28 pictures held to PICTURE_MOST, 218 s, and topping up toward 483
+    # grew a shot to 22 s.
+    target = sum(map(sum, planned["seconds"])) if target_of(case, picked) != CASES[case][2] else CASES[case][2]
+    clips = filled(planned, picked, cards, cap, PICTURE_MOST)
     # Over the target: the longest clips cut down to one level first, none under SHORTEST (B's level).
     lengths = [c["end"] - c["start"] for c in clips]
     if sum(lengths) > target + 0.5:
@@ -676,6 +897,7 @@ def cut(case):
                               "shotSize": "、".join(dict.fromkeys(beats[j - 1]["shot_size"] for j in c["beats"])),
                               "what": "；".join(beats[j - 1]["what"] for j in c["beats"])})
     topped_up(out_clips, cards, target)
+    whole_sentences(out_clips, cards, ix)
     for c in out_clips:
         cuts = c.pop("_cuts", [])
         words = sorted(ix.words.get(c["video"], []))
@@ -683,7 +905,7 @@ def cut(case):
     t0 = time.perf_counter()
     made = render.render_clips([(str(VIDEOS / ix.videos[c["video"]]["file"]), c["start"], c["end"]) for c in out_clips],
                                str(HERE), ending=True)
-    final = HERE / f"{case}-{name}-剪法25{TAG.replace('-', '-第') + '次' if TAG else ''}.mp4"
+    final = HERE / f"{case}-{name}-剪法25{TAG}.mp4"
     Path(made).replace(final)
     out = {"case": case, "instruction": instruction, "target": target, "style": style, "cap": cap,
            "seconds": round(sum(c["end"] - c["start"] for c in out_clips), 2), "clips": out_clips,
@@ -692,6 +914,118 @@ def cut(case):
     write_json(out, HERE / f"cut-{case}{TAG}.json")
     L = [c["end"] - c["start"] for c in out_clips]
     print(case, "cut", out["seconds"], "秒", len(out_clips), "个镜头，最短", round(min(L), 2), "最长", round(max(L), 2), flush=True)
+
+
+PIECE_LEAST = 1.5    # seconds: no shot of a music cut shorter, the slots' and the fills'
+ROTATION = {k: set(v) for k, v in read_json(V5 / "rotation.json").items() if k != "about"} if (V5 / "rotation.json").exists() else {}
+
+
+def cut_to_music(case):
+    """第六版: each picture's slots filled in its beats' order, one beat a slot from its key frame, the clip
+    exactly the slot's frames (moved earlier in its card when the card ends first; a card too short leaves
+    the rest of the slot to the next beat, but no piece under half a second); the song's excerpt for sound."""
+    key, instruction, _target, style, name = CASES[case]
+    m = song()
+    d = next((Path.home() / "A-NAS-datasets" / "cache" / f"video-moments-{key}").glob("embeddinggemma*"))
+    ix = moments.Index.load(str(d / "index.json"), str(d / "frames.npz"))
+    cards = {c["id"]: c for c in load(case)}
+    planned = reused(HERE / f"shots-{case}{TAG}.json", case)
+    picked = reused(HERE / f"pick-{case}{TAG}.json", case)["answer"]
+    fps = render.FPS
+    # A slot its picture's cards cannot fill (川西's opening stream, ch-001, is 2.3 s against a 3.2 s
+    # slot) is filled on from the cards next to them in shooting order, the next first: a slot short of
+    # its frames moves every later cut off the bar lines.
+    catalog = [c["id"] for c in usable_cards(case)]
+
+    def neighbours(ids):
+        at = sorted(catalog.index(i) for i in ids if i in catalog)
+        if not at:
+            return []
+        out = []
+        for d in range(1, len(catalog)):
+            for k in (at[-1] + d, at[0] - d):
+                if 0 <= k < len(catalog) and catalog[k] not in out and catalog[k] not in ids:
+                    out.append(catalog[k])
+            if len(out) >= 6:
+                break
+        return [f"{cid}/{n}" for cid in out for n in range(1, len(cards[cid]["answer"]["beats"]) + 1)]
+
+    clips, taken, short = [], [], []
+    for p, (part, step1, slots_p) in enumerate(zip(planned["answer"]["parts"], picked["parts"], planned["slots"], strict=True), 1):
+        level = m["parts"][p - 1]["level"]
+        for k, (pic, slots) in enumerate(zip(part["pictures"], slots_p, strict=True), 1):
+            listed = [b for b in dict.fromkeys(pic["beats"]) if b.rsplit("/", 1)[0] in cards]
+            pool = [f"{cid}/{n}" for cid in dict.fromkeys(b.rsplit("/", 1)[0] for b in listed)
+                    for n in range(1, len(cards[cid]["answer"]["beats"]) + 1)]
+            if listed:
+                c0, j0 = listed[0].rsplit("/", 1)
+                anchor = cards[c0]["times"][int(j0) - 1]
+                pool.sort(key=lambda b: abs(cards[b.rsplit("/", 1)[0]]["times"][int(b.rsplit("/", 1)[1]) - 1] - anchor))
+            order = listed + [b for b in pool if b not in listed]
+            order += neighbours(list(dict.fromkeys(b.rsplit("/", 1)[0] for b in order)))
+            for a, b in slots:
+                need, first = round(b * fps) - round(a * fps), True
+                for beat in order:
+                    if need <= 0:
+                        break
+                    cid, j = beat.rsplit("/", 1)
+                    c = cards[cid]
+                    # The key frame (what the description saw) a third into the shot, not at its start.
+                    key = c["times"][int(j) - 1]
+                    start = max(c["start"], key - need / fps / 3)
+                    if any(v == cid and x - 0.01 <= key < y - 0.01 for v, x, y in taken):
+                        continue
+                    start = max([start] + [y for v, _x, y in taken if v == cid and y <= key + 0.01])
+                    room = min([c["end"]] + [x for v, x, _y in taken if v == cid and x > start])
+                    frames = min(need, int((room - start) * fps))
+                    if frames < need and first:      # one beat for the whole slot: start earlier in the card
+                        earliest = max([c["start"]] + [y for v, _x, y in taken if v == cid and y <= start + 0.01])
+                        if room - earliest >= need / fps:
+                            start, frames = room - need / fps, need
+                        else:
+                            start, frames = earliest, min(need, int((room - earliest) * fps))
+                    # No piece under PIECE_LEAST (a 0.3 s flash of the next card): a piece that would leave less
+                    # than that gives some of its own seconds to the piece after it.
+                    least = round(PIECE_LEAST * fps)
+                    if frames < need and need - frames < least and frames - (least - (need - frames)) >= least:
+                        frames -= least - (need - frames)
+                    if frames < min(need, least):
+                        continue
+                    end = start + frames / fps
+                    clips.append({"card": cid, "beats": [int(j)], "start": start, "end": end, "video": c["video"],
+                                  "key": c["times"][int(j) - 1], "part": p, "partName": part["name"], "picture": k,
+                                  "level": level, "slot": [a, b], "query": step1["scenes"][k - 1]["query"],
+                                  "shows": pic["shows"], "link": pic["link"], "share": round(frames / fps, 3)})
+                    taken.append((cid, start, end))
+                    need -= frames
+                    first = False
+                if need > 0:
+                    short.append((p, k, a, b, need))
+    for c in clips:
+        beats = cards[c["card"]]["answer"]["beats"]
+        c |= {"beat": f"{c['card']}/{c['beats'][0]}", "frame": cards[c["card"]]["frames"][c["beats"][0] - 1],
+              "shotSize": beats[c["beats"][0] - 1]["shot_size"], "what": beats[c["beats"][0] - 1]["what"],
+              "weight": f"画面{c['picture']}"}
+    t0 = time.perf_counter()
+    wrong = ROTATION.get(key, set())
+    render.TURNED_BACK |= {str(VIDEOS / ix.videos[c["video"]]["file"]) for c in clips
+                             if Path(ix.videos[c["video"]]["file"]).name in wrong}
+    made = render.render_clips([(str(VIDEOS / ix.videos[c["video"]]["file"]), c["start"], c["end"]) for c in clips],
+                               str(HERE), ending=True)
+    seconds = sum(c["end"] - c["start"] for c in clips)
+    final = HERE / f"{case}-{name}-第六版{TAG}.mp4"
+    start = m["excerpt"][0]
+    subprocess.run(["ffmpeg", "-hide_banner", "-v", "error", "-y", "-i", made, "-ss", f"{start:.3f}", "-t", f"{seconds:.3f}",  # noqa: S607
+                    "-i", m["song"], "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                    "-af", f"afade=t=in:d=0.3,afade=t=out:st={max(0.0, seconds - 2.5):.3f}:d=2.5", "-shortest", str(final)],
+                   check=True)
+    Path(made).unlink()
+    out = {"case": case, "instruction": instruction, "target": round(m["seconds"]), "style": style, "music": MUSIC,
+           "seconds": round(seconds, 2), "clips": clips, "short": short,
+           "plannedShots": sum(len(s) for part in planned["slots"] for s in part),
+           "renderSeconds": round(time.perf_counter() - t0, 1), "cut": str(final)}
+    write_json(out, HERE / f"cut-{case}{TAG}.json")
+    print(case, "cut", out["seconds"], "秒", len(clips), "个镜头，槽", out["plannedShots"], "个，没填满", short, flush=True)
 
 
 # Cuts the index missed: FFmpeg's scene score finds none in the film's black-backed stretch (437-719 s)
@@ -763,6 +1097,33 @@ def off_words(a, b, words, cuts):
         return t
     a2, b2 = moved(a, True), moved(b, False)
     return (math.floor(a2 * 100) / 100, math.ceil(b2 * 100) / 100) if b2 - a2 >= FLASH else (a, b)
+
+
+SENTENCE_MORE = 4.0   # a clip may run this much past its share to take a sentence whole
+
+
+def whole_sentences(clips, cards, ix):
+    """Each end inside a sentence moved out of it (2026-11-09): out to take the sentence whole (方案 B's
+    whole_sentences, moments.Index._whole), inside the card, clear of the other clips and at most
+    SENTENCE_MORE past the clip's share; where that will not do, back to before the sentence when SHORTEST
+    stays. Pauses of a second (paused) were too rare to find: in the free cuts 9 of the film's 64 ends and
+    31 of Shanghai's 72 fell inside a sentence."""
+    for c in clips:
+        card = cards[c["card"]]
+        others = [(o["start"], o["end"]) for o in clips if o is not c and o["video"] == c["video"]]
+
+        def allowed(a, b, c=c, card=card, others=others):
+            return (card["start"] - 0.01 <= a < b <= card["end"] + 0.01 and b - a <= c["share"] + SENTENCE_MORE
+                    and all(b <= x or a >= y for x, y in others))
+
+        a, b = ix._whole(c["video"], c["start"], c["end"], allowed)
+        for run in ix.sentences(c["video"]):
+            s0, s1 = run[0][0], run[-1][1]
+            if s0 + 0.15 < b < s1 - 0.15 and s0 - a >= SHORTEST:
+                b = s0 - 0.05
+            if s0 + 0.15 < a < s1 - 0.15 and b - s1 >= SHORTEST:
+                a = s1 + 0.05
+        c["start"], c["end"] = a, b
 
 
 def topped_up(clips, cards, target):

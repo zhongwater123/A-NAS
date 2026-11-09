@@ -50,80 +50,11 @@ def schema(count):
         "required": ["summary", "beats", "scene", "place", "time_of_day", "mood", "landmark", "tags", "highlight", "issues"]}
 
 
-def describe(frames, offsets, duration, url, profile):
-    """(answer, highlight score, seconds, errors): frames are image paths, offsets their seconds into the card."""
-    content = [{"type": "text", "text": PROMPT.format(count=len(frames), duration=duration, name=profile.name,
-                                                      focus=profile.focus, rubric=profile.rubric)}]
-    for k, (f, s) in enumerate(zip(frames, offsets, strict=True), 1):
-        content += [{"type": "text", "text": f"第 {k} 张（第 {s:.0f} 秒）"}, ts.image_part(Path(f))]
-    errors, total = [], 0.0
-    for penalty in ts.REPEAT_PENALTIES:
-        body = {"messages": [{"role": "system", "content": ts.SYSTEM_PROMPT}, {"role": "user", "content": content}],
-                "temperature": 0.2, "repeat_penalty": penalty, "max_tokens": 1500, "logprobs": True,
-                "top_logprobs": ts.TOP_LOGPROBS, "chat_template_kwargs": {"enable_thinking": False},
-                "response_format": {"type": "json_schema", "json_schema": {"name": "card_beats", "schema": schema(len(frames))}}}
-        t0 = time.perf_counter()
-        resp = requests.post(f"{url}/v1/chat/completions", json=body, timeout=ts.TIMEOUT_SEC)
-        total += time.perf_counter() - t0
-        resp.raise_for_status()
-        choice = resp.json()["choices"][0]
-        try:
-            answer = json.loads(choice["message"]["content"])
-            score = ts.highlight_score(ts._highlight_top(choice["logprobs"]["content"]))
-            return answer, score, total, errors
-        except (ValueError, ts.TagError) as error:
-            errors.append(f"repeat_penalty={penalty}: {error}")
-    raise ts.TagError("; ".join(errors))
-
-
 GROUPED = (
     "这些图已经由程序按画面分成 {groups} 组，同一组的画面相近，组按时间先后排列：{layout}。"
     "beats 按组写，每组正好一项，顺序和组一致：shot_size 是这一组的景别，"
     "what 是这一组看得见的主体和动作（不超过 30 字，画面里的关键人物和物件都要写到，只有一张的组往往是一闪而过的插入画面，也要写清）。"
 )
-
-
-def describe_groups(frames, offsets, groups, duration, url, profile):
-    """As describe, but the program has grouped the frames (groups: each frame's group from 1) and the
-    model writes one beat a group: its shot size and what is seen."""
-    count = max(groups)
-    spans = [[k for k, g in enumerate(groups, 1) if g == n] for n in range(1, count + 1)]
-    layout = "；".join(f"第 {n} 组：第 {s[0]}–{s[-1]} 张" if len(s) > 1 else f"第 {n} 组：第 {s[0]} 张"
-                      for n, s in enumerate(spans, 1))
-    text = PROMPT.format(count=len(frames), duration=duration, name=profile.name, focus=profile.focus, rubric=profile.rubric)
-    text = text.replace(
-        "beats：按时间顺序把这一段分成几个节拍：主体、景别或地点明显变了就分开，同样的画面合成一个；"
-        "每个节拍写 frames（起止图片编号，如 [3, 5]，只有一张就写 [4, 4]）、shot_size（景别）、"
-        "what（看得见的主体和动作，不超过 30 字，画面里的关键人物和物件都要写到）；",
-        "beats：见下面的分组说明；") + "\n" + GROUPED.format(groups=count, layout=layout)
-    content = [{"type": "text", "text": text}]
-    for k, (f, s) in enumerate(zip(frames, offsets, strict=True), 1):
-        content += [{"type": "text", "text": f"第 {k} 张（第 {groups[k - 1]} 组，第 {s:.0f} 秒）"}, ts.image_part(Path(f))]
-    sch = schema(len(frames))
-    beat = sch["properties"]["beats"]
-    beat["minItems"] = beat["maxItems"] = count
-    beat["items"]["properties"].pop("frames")
-    beat["items"]["required"] = ["shot_size", "what"]
-    errors, total = [], 0.0
-    for penalty in ts.REPEAT_PENALTIES:
-        body = {"messages": [{"role": "system", "content": ts.SYSTEM_PROMPT}, {"role": "user", "content": content}],
-                "temperature": 0.2, "repeat_penalty": penalty, "max_tokens": 1800, "logprobs": True,
-                "top_logprobs": ts.TOP_LOGPROBS, "chat_template_kwargs": {"enable_thinking": False},
-                "response_format": {"type": "json_schema", "json_schema": {"name": "card_beats", "schema": sch}}}
-        t0 = time.perf_counter()
-        resp = requests.post(f"{url}/v1/chat/completions", json=body, timeout=ts.TIMEOUT_SEC)
-        total += time.perf_counter() - t0
-        resp.raise_for_status()
-        choice = resp.json()["choices"][0]
-        try:
-            answer = json.loads(choice["message"]["content"])
-            for n, b in enumerate(answer["beats"]):
-                b["frames"] = [spans[n][0], spans[n][-1]]
-            score = ts.highlight_score(ts._highlight_top(choice["logprobs"]["content"]))
-            return answer, score, total, errors
-        except (ValueError, IndexError, ts.TagError) as error:
-            errors.append(f"repeat_penalty={penalty}: {error}")
-    raise ts.TagError("; ".join(errors))
 
 
 # #416 (2026-11-08 evening): the summary written last. Asked first, it was written before the frames
@@ -144,7 +75,8 @@ PROCESS_AFTER = ("process：写完 highlights 再写，按 beats 的先后，用
 
 
 def describe_v2(frames, offsets, groups, duration, url, profile, process=False):
-    """As describe_groups, with the beats written first, then highlights (group numbers), then the summary.
+    """One beat a group of frames (groups: each frame's group from 1; shot size, what is seen), written
+    first, then highlights (group numbers), then the summary.
     process=True (#416, 2026-11-09): a short ordered list of what happens, between highlights and summary."""
     count = max(groups)
     chars = SUMMARY_CHARS.get(getattr(profile, "key", ""), 40)

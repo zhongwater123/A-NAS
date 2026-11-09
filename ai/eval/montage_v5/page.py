@@ -45,8 +45,11 @@ def load(name):
 def main():
     tabs, bodies, rows = [], [], []
     cards_all = {}
-    takes = [(case, base, tag) for case, base in CASES.items() for tag in ("-1", "-2")
-             if (HERE / f"cut-{case}{tag}.json").exists()] or [(case, base, "") for case, base in CASES.items()]
+    # The numbered takes (cut-02-3.json); the trials' takes have named tags (cut-02-两层节拍-1.json).
+    takes = [(case, base, tag) for case, base in CASES.items()
+             for tag in sorted((f.stem[len(f"cut-{case}"):] for f in HERE.glob(f"cut-{case}-*.json")
+                                if f.stem[len(f"cut-{case}-"):].isdigit()), key=lambda t: int(t[1:]))]
+    takes = takes or [(case, base, "") for case, base in CASES.items()]
     for case, base, tag in takes:
         name = base + (f" 第{tag[1:]}次" if tag else "")
         key = case + tag
@@ -59,9 +62,9 @@ def main():
         dropped = [i for i, t in (titles or {}).items() if t["title"]]
         title_s = sum(t["seconds"] for t in titles.values())
         rows.append(f"<tr><td>{case} {esc(name)}</td><td>{len(cards)}</td><td>{len(dropped)}</td>"
-                    f"<td>{len({c for p in pick['answer'].get('parts', []) for sc in p['scenes'] for c in sc['cards']} or [m['card'] for m in pick['answer'].get('materials', [])])}</td><td>{cut.get('plannedShots', len(cut['clips']))} → {len(cut['clips'])}</td>"
+                    f"<td>{len({c for p in pick['answer']['parts'] for sc in p['scenes'] for c in sc['cards']})}</td><td>{cut.get('plannedShots', len(cut['clips']))} → {len(cut['clips'])}</td>"
                     f"<td>{cut['target']} 秒</td><td>{cut['seconds']:.1f} 秒</td>"
-                    f"<td>{title_s / 60:.1f} 分</td><td>{pick['cost']['seconds']:.0f} 秒</td><td>{shots['cost']['seconds']:.0f} 秒（{len(shots.get('rounds', [1]))} 轮）</td>"
+                    f"<td>{title_s / 60:.1f} 分</td><td>{pick['cost']['seconds']:.0f} 秒</td><td>{shots['cost']['seconds']:.0f} 秒</td>"
                     f"<td>{cut['renderSeconds']:.0f} 秒</td></tr>")
         tabs.append(f'<button data-case="{key}">{case} {esc(name)}</button>')
         out = [f'<section id="c{key}"><h2>{case} {esc(name)}</h2>',
@@ -86,22 +89,15 @@ def main():
             out.append("</ul></details>")
         # Outline
         a = pick["answer"]
-        out.append(f"<h3>第一步：大纲（看概括）</h3><p><b>设计：</b>{esc(a['design'])}</p>"
-                   f"<p><b>节奏：</b>{esc(a.get('pace', '—'))}　<b>找不到的：</b>{esc('；'.join(a['unmet']) or '无')}</p>")
-        if a.get("parts"):
-            out.append("<p class=muted>下面是成片的播放顺序：段落和每段要的画面。</p><ol>")
-            for p in a["parts"]:
-                scenes = "；".join(f"{'【衔接】' if sc.get('use') == '衔接' else ''}{esc(sc['query'])}（{'、'.join(sc['cards'])}）" for sc in p["scenes"])
-                link = f"<br><span class=muted>衔接：{esc(p['link'])}</span>" if p.get("link") else ""
-                out.append(f"<li><b>{esc(p['name'])}</b>（分量 {p['weight']}）{esc(p['summary'])}{link}<br>"
-                           f"<span class=muted>要的画面：{scenes}</span></li>")
-            out.append("</ol>")
-        out.append("<details><summary>挑出的素材（materials，只是挑出来的清单，不是播放顺序）</summary><ol>")
-        for m in a.get("materials", []):
-            c = cards[m["card"]]
-            out.append(f"<li><b>{m['card']}</b>（{c['start']:.0f}–{c['end']:.0f} 秒）{esc(m['content'])}"
-                       f"<br><span class=muted>概括：{esc(c['answer']['summary'])}</span></li>")
-        out.append("</ol></details>")
+        out.append(f"<h3>第一步：大纲（看卡片过程）</h3><p><b>设计：</b>{esc(a['design'])}</p>"
+                   f"<p><b>找不到的：</b>{esc('；'.join(a['unmet']) or '无')}</p>")
+        out.append("<p class=muted>下面是成片的播放顺序：段落和每段要的画面。</p><ol>")
+        for p in a["parts"]:
+            scenes = "；".join(f"{esc(sc['query'])}（{'、'.join(sc['cards'])}）" for sc in p["scenes"])
+            link = f"<br><span class=muted>衔接：{esc(p['link'])}</span>" if p.get("link") else ""   # 剪法23-24 takes have none
+            out.append(f"<li><b>{esc(p['name'])}</b>（分量 {p['weight']}）{esc(p['summary'])}{link}"
+                       f"<br><span class=muted>要的画面：{scenes}</span></li>")
+        out.append("</ol>")
         # Shots
         out.append("<h3>第二步：排镜头（看节拍）</h3>")
         part = None
@@ -145,12 +141,12 @@ pre{{white-space:pre-wrap;font-size:12px;background:var(--card);padding:10px;bor
 .wrap{{overflow-x:auto}}
 </style></head><body>
 <h1>剪法25：关键帧卡片 + B 的大纲 + 按画面填秒</h1>
-<p class=muted><b>卡片描述</b>：4B 先逐个关键帧写节拍（景别、看得见的主体和动作），再在同一次调用里挑出 1–2 个亮点节拍，最后写概括。
+<p class=muted><b>卡片描述</b>：4B 先逐个关键帧写节拍（景别、看得见的主体和动作），再在同一次调用里挑出 1–2 个亮点节拍，按先后写过程，最后写概括；两步规划用的是同一份描述。
 <b>报幕</b>：叠加的片名、演职员表、出品或标志压在素净的底上，或叠加的是片名，三帧里两帧这样的卡片不进规划。
-<b>第一步（大纲）</b>：4B 看卡片概括（没有标签、没有精彩度），衔接规则和体裁结构在前，写设计、找不到的，以及段落（分量）和每段 1–4 个画面（取自哪些卡片）。
-<b>第二步</b>：程序按段落分量分秒，段里画面平分；4B 给每个画面按优先顺序列节拍（描述只是方向，【亮点】优先）。
+<b>第一步（大纲）</b>：4B 看卡片过程（没有标签、没有亮点），衔接规则和体裁结构在前，写设计、找不到的，以及段落（分量、衔接）和每段 1–4 个画面（取自哪些卡片）。
+<b>第二步</b>：程序按段落分量分秒，段里画面平分；4B 给每个画面按优先顺序列节拍（描述只是方向，不标亮点）。
 <b>取画面</b>：每个画面按顺序取节拍，每个节拍从关键帧起取自己的长度，2 秒到上限（剧情片 4 秒、旅行 6 秒），取到凑满为止，零头顺延；同一张卡片相邻的节拍接成一段；切点（索引里的，加上按亮度归一化后看出的、黑底画面里的）两边的画面都不短于 2 秒，不到 1 秒的碎片切掉，原片本来就短的镜头整段取；头尾挪到 1 秒以上的停顿。
-每个视频用不同随机种子规划、剪两次。</p>
+每个视频的编号成片（-1、-2…）各用一个随机种子规划。</p>
 <div class=wrap><table><tr><th>视频</th><th>卡片</th><th>报幕</th><th>挑中</th><th>计划镜头 → 成片段数</th><th>目标</th><th>成片</th><th>报幕过滤</th><th>第一步</th><th>第二步</th><th>出片</th></tr>
 {''.join(rows)}</table></div>
 <p class=tabs>{''.join(tabs)}</p>
