@@ -808,6 +808,97 @@ describe("Settings", () => {
     await waitFor(() => expect(storage.requests).toContain("POST /api/v1/volumes/volume%3Adata/conversion"));
   });
 
+  it("adds a disk to a mirror without changing its layout", async () => {
+    const members = ["disk:data", "disk:data-2"].map((id) =>
+      disk(id, {
+        model: "ST500DM002-1BD142",
+        capacityBytes: 500_107_862_016,
+        role: "data",
+        inUse: true,
+        eligibleForDataVolume: false,
+        ineligibleReasons: ["data_volume"],
+      }),
+    );
+    const spareDisk = disk("disk:spare", { model: "ST500DM002-1BD142", capacityBytes: 500_107_862_016 });
+    const plan = storagePlan("plan:grow", {
+      kind: "add_disks",
+      layout: "mirror",
+      capacityBeforeBytes: 500_107_862_016,
+      capacityAfterBytes: 750_161_793_024,
+      disks: [
+        {
+          id: "disk:spare",
+          model: "ST500DM002-1BD142",
+          capacityBytes: 500_107_862_016,
+          fingerprint: "spare",
+          signatures: [],
+        },
+      ],
+      confirmationPhrase: "ERASE k:spare",
+      actions: [
+        { kind: "add_devices", description: "把目标硬盘加入正在使用的数据卷，已有文件保持原样" },
+        {
+          kind: "rebalance",
+          description: "在后台把已有文件分散到全部硬盘，新增的空间才能全部用上，期间可以照常使用",
+        },
+      ],
+    });
+    const storage = serve({
+      hostState: { ...healthyState, disks: [...members, spareDisk] },
+      volumes: [
+        volume({
+          diskIds: ["disk:data", "disk:data-2"],
+          layout: "mirror",
+          capacityBytes: 465 * 1024 ** 3,
+          availableBytes: 20 * 1024 ** 3,
+        }),
+      ],
+      plan,
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "存储");
+    expect(await screen.findByText("可以加入数据卷，增加容量；数据卷仍为镜像（RAID 1）。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "设置用途…" }));
+    const wizard = screen.getByRole("region", { name: "设置硬盘用途" });
+    expect(within(wizard).getByText("选择要加入的硬盘。加入后数据卷仍为镜像（RAID 1）：")).toBeTruthy();
+    expect(within(wizard).getByText("可用容量 466 GiB → 699 GiB")).toBeTruthy();
+    expect(within(wizard).queryByText("冗余方式")).toBeNull();
+    expect(within(wizard).queryByRole("button", { name: "下一步" })).toBeNull();
+    await user.click(within(wizard).getByRole("button", { name: "生成计划" }));
+
+    expect(await within(wizard).findByRole("heading", { name: "破坏性操作计划" })).toBeTruthy();
+    expect(storage.plans).toEqual([{ diskIds: ["disk:spare"] }]);
+    expect(within(wizard).getByText(/把已有文件分散到全部硬盘/)).toBeTruthy();
+  });
+
+  it("shows the space a mirror cannot use yet and spreads its files again", async () => {
+    const disks = ["disk:data", "disk:data-2", "disk:data-3"].map((id) =>
+      disk(id, { role: "data", inUse: true, eligibleForDataVolume: false, ineligibleReasons: ["data_volume"] }),
+    );
+    const storage = serve({
+      hostState: { ...healthyState, disks },
+      volumes: [
+        volume({
+          diskIds: ["disk:data", "disk:data-2", "disk:data-3"],
+          layout: "mirror",
+          capacityBytes: 698 * 1024 ** 3,
+          availableBytes: 40 * 1024 ** 3,
+          rebalance: { state: "waiting", unusableBytes: 230 * 1024 ** 3 },
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    renderSettings();
+    await openSection(user, "存储");
+    expect(await screen.findByText("分散文件已暂停")).toBeTruthy();
+    expect(screen.getByText("还有 230 GiB 空间要等文件分散完才能使用")).toBeTruthy();
+    expect(screen.getByText("Btrfs · 镜像（RAID 1） · 3 块硬盘")).toBeTruthy();
+    expect(screen.queryByText("转换中")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "继续分散" }));
+    await waitFor(() => expect(storage.requests).toContain("POST /api/v1/volumes/volume%3Adata/conversion"));
+  });
+
   it("creates a mirror when two disks are chosen for a new data volume", async () => {
     const second = disk("disk:fake-data-02");
     const diskIds = ["disk:fake-data-01", "disk:fake-data-02"];

@@ -114,8 +114,9 @@ const domains = {
     search_interrupted: "搜索中断，请重试",
   },
   storage: {
-    volume_busy: "数据卷正在转换，完成后才能加入新硬盘。",
+    volume_busy: "数据卷正在转换或分散文件，完成后才能加入新硬盘。",
     invalid_layout: "这个冗余方式与硬盘数量不符。",
+    layout_change_unsupported: "由多块硬盘组成的数据卷加入新硬盘时，冗余方式保持不变。",
     layout_too_small: "数据卷上的文件放不进所选的冗余方式，请换一种方式。",
     disk_not_eligible: "这块硬盘不能使用：它可能已被挂载、正被其他阵列使用，或不是 SATA/NVMe 硬盘。",
     plan_state_conflict: "另一个存储计划正在执行，或这个计划已被取消、取代，请等它结束后再试。",
