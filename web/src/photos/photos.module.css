@@ -1287,13 +1287,28 @@
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.ph-people-settings {
-  width: min(420px, 100%);
+.ph-ai-settings {
+  width: min(460px, 100%);
 }
 .ph-switch-list {
   display: grid;
   border: 1px solid var(--ph-line);
   border-radius: var(--radius-lg);
+}
+.ph-switch-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 14px 0;
+  color: var(--ph-ink-2);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.ph-switch-head small {
+  color: var(--ph-muted);
+  font-size: 12px;
+  font-weight: 500;
 }
 .ph-switch-row {
   min-height: 58px;
@@ -1357,7 +1372,7 @@
   outline: none;
   box-shadow: 0 0 0 3px var(--ph-accent-soft);
 }
-.ph-people-settings-note {
+.ph-ai-settings-note {
   margin: 0;
   color: var(--ph-muted);
   font-size: 12px;
@@ -2426,8 +2441,10 @@
   cursor: none;
 }
 .ph-viewer-main {
+  container: ph-viewer-main / inline-size;
   position: relative;
   min-width: 0;
+  min-height: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -2471,6 +2488,12 @@
   flex: 1;
   display: grid;
 }
+.ph-viewer-title strong,
+.ph-viewer-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ph-viewer-title strong {
   font-size: 14px;
   font-weight: 650;
@@ -2483,6 +2506,32 @@
 .ph-viewer-tools {
   display: flex;
   gap: 2px;
+}
+/* A narrow photo area: smaller buttons, 动态 without its label, and the
+   buttons on a line of their own once the title would get under 140px. */
+@container ph-viewer-main (max-width: 480px) {
+  .ph-viewer-bar {
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 8px 24px;
+  }
+  .ph-viewer-bar button {
+    width: 34px;
+    height: 34px;
+  }
+  .ph-viewer-title {
+    flex: 1 1 140px;
+  }
+  .ph-viewer-tools {
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0;
+    margin-left: auto;
+  }
+  .ph-viewer-live span {
+    display: none;
+  }
 }
 .ph-viewer-stage {
   position: relative;
@@ -2894,6 +2943,252 @@ button.ph-face-name:hover {
   color: #8b93a0;
   font-size: 11.5px;
 }
+/* The text read from the photo, in the viewer's dark details. */
+.ph-text h4 {
+  flex-wrap: wrap;
+}
+.ph-text-kind {
+  padding: 1px 7px;
+  border-radius: 99px;
+  color: #dfe3ea;
+  background: rgba(255, 255, 255, 0.09);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.ph-text-machine {
+  margin-left: auto;
+  color: #6f7785;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.ph-text-note {
+  margin: 0;
+  color: #8b93a0;
+  font-size: 12px;
+}
+.ph-text-fields {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ph-text-fields li {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 8px;
+  padding: 7px 0;
+}
+.ph-text-fields li + li {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ph-text-name {
+  padding-top: 3px;
+  color: #7f8794;
+  font-size: 12px;
+}
+.ph-text-value {
+  padding-top: 2px;
+  color: #eef0f4;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.ph-text-fields li.unchecked .ph-text-value:not(.ph-text-empty) {
+  text-decoration: underline dotted rgba(255, 196, 92, 0.75);
+  text-underline-offset: 4px;
+}
+.ph-text-empty {
+  color: #6f7785;
+}
+.ph-text-tools {
+  display: flex;
+  gap: 2px;
+}
+.ph-text-tools button,
+.ph-text-edit button {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  padding: 0;
+  color: #9aa2ae;
+  background: transparent;
+}
+.ph-text-tools button {
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    background 0.15s;
+}
+.ph-text-fields li:hover .ph-text-tools button,
+.ph-text-tools button:focus-visible {
+  opacity: 1;
+}
+.ph-text-tools button:hover,
+.ph-text-edit button:hover {
+  color: #eef0f4;
+  background: rgba(255, 255, 255, 0.08);
+}
+.ph-text-tools svg,
+.ph-text-edit svg {
+  width: 13px;
+  height: 13px;
+}
+.ph-text-check,
+.ph-text-by {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 3px;
+  font-size: 11.5px;
+}
+.ph-text-check {
+  color: #ffc45c;
+}
+.ph-text-by {
+  color: #7f8794;
+}
+.ph-text-check button,
+.ph-text-by button {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 7px;
+  font-size: 11.5px;
+}
+.ph-text-check button {
+  color: #16191f;
+  background: #ffc45c;
+  font-weight: 600;
+}
+.ph-text-check button:hover {
+  background: #ffd27f;
+}
+.ph-text-by button {
+  color: #aab1bd;
+  background: rgba(255, 255, 255, 0.07);
+}
+.ph-text-by button:hover {
+  color: #eef0f4;
+  background: rgba(255, 255, 255, 0.12);
+}
+.ph-text-by svg {
+  width: 11px;
+  height: 11px;
+}
+.ph-text-edit {
+  grid-column: 2 / -1;
+  min-width: 0;
+  display: flex;
+  gap: 4px;
+}
+.ph-text-edit input {
+  min-width: 0;
+  flex: 1;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-sm);
+  padding: 0 8px;
+  outline: 0;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+}
+.ph-text-edit input:focus {
+  border-color: #8fb4ff;
+  box-shadow: 0 0 0 3px rgba(143, 180, 255, 0.18);
+}
+.ph-text-edit button[type="submit"] {
+  color: #fff;
+  background: #2f6fed;
+}
+.ph-text-more summary {
+  width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #aab1bd;
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.ph-text-more summary::-webkit-details-marker {
+  display: none;
+}
+.ph-text-more summary:hover {
+  color: #eef0f4;
+}
+.ph-text-more summary svg {
+  width: 13px;
+  height: 13px;
+  transition: transform 0.15s;
+}
+.ph-text-more[open] summary svg {
+  transform: rotate(90deg);
+}
+.ph-text-more[open] > :not(summary) {
+  margin-top: 8px;
+}
+.ph-text-whole {
+  max-height: 280px;
+  margin: 0;
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  color: #dfe3ea;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ph-text-changes {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.ph-text-changes li {
+  display: grid;
+  gap: 2px;
+}
+.ph-text-changes li > span:first-child {
+  color: #7f8794;
+  font-size: 11.5px;
+}
+.ph-text-change {
+  color: #dfe3ea;
+  overflow-wrap: anywhere;
+}
+.ph-text-change del {
+  color: #8b93a0;
+}
+.ph-text-change button {
+  height: 20px;
+  margin-left: 6px;
+  border: 0;
+  border-radius: 5px;
+  padding: 0 6px;
+  color: #aab1bd;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 11px;
+}
+.ph-text-change button:hover {
+  color: #eef0f4;
+  background: rgba(255, 255, 255, 0.12);
+}
 .ph-tag-form {
   height: 28px;
   display: inline-flex;
@@ -2977,6 +3272,25 @@ button.ph-face-name:hover {
 }
 .ph-app.narrow .ph-image-replace span {
   display: none;
+}
+/* The viewer's information goes below the photo instead of beside it, so the
+   bar and the arrows stay on the photo. */
+.ph-app.narrow .ph-viewer {
+  flex-direction: column;
+}
+.ph-app.narrow .ph-viewer-info {
+  width: auto;
+  height: 0;
+  transition: height 0.3s var(--ph-ease);
+}
+.ph-app.narrow .ph-viewer.with-info .ph-viewer-info {
+  width: auto;
+  height: 55%;
+  border-left: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ph-app.narrow .ph-details {
+  width: auto;
 }
 
 /* Slideshow: the photos over the whole screen, controls only while the

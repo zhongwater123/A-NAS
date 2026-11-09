@@ -177,6 +177,15 @@ type dataVolumeDocument struct {
 	// that predates it reads a whole volume as before.
 	MissingDevices int  `json:"missingDevices,omitempty"`
 	Restoring      bool `json:"restoring,omitempty"`
+	// Devices is left out when unknown, as an older Host Agent does.
+	Devices       []volumeDeviceDocument `json:"devices,omitempty"`
+	SpreadStopped bool                   `json:"spreadStopped,omitempty"`
+}
+
+type volumeDeviceDocument struct {
+	DevID          uint64 `json:"devId"`
+	SizeBytes      uint64 `json:"sizeBytes"`
+	AllocatedBytes uint64 `json:"allocatedBytes"`
 }
 
 type profileUsageDocument struct {
@@ -364,9 +373,13 @@ func DocumentFromDomain(state hoststate.State) StateDocument {
 			FilesystemUUID: volume.FilesystemUUID, DiskIDs: make([]string, len(volume.DiskIDs)),
 			Data: usageDocuments(volume.Data), Metadata: usageDocuments(volume.Metadata), Operation: volume.Operation,
 			MissingDevices: volume.MissingDevices, Restoring: volume.Restoring,
+			SpreadStopped: volume.SpreadStopped,
 		}
 		for i, id := range volume.DiskIDs {
 			dataVolume.DiskIDs[i] = id.String()
+		}
+		for _, device := range volume.Devices {
+			dataVolume.Devices = append(dataVolume.Devices, volumeDeviceDocument(device))
 		}
 	}
 	return StateDocument{
@@ -532,7 +545,7 @@ func (document *dataVolumeDocument) ToDomain(disks []hoststate.Disk) (*hoststate
 	for _, disk := range disks {
 		roles[disk.ID.String()] = disk.Role
 	}
-	volume := &hoststate.DataVolume{FilesystemUUID: document.FilesystemUUID, Operation: document.Operation, MissingDevices: document.MissingDevices, Restoring: document.Restoring}
+	volume := &hoststate.DataVolume{FilesystemUUID: document.FilesystemUUID, Operation: document.Operation, MissingDevices: document.MissingDevices, Restoring: document.Restoring, SpreadStopped: document.SpreadStopped}
 	for _, value := range document.DiskIDs {
 		id, err := hoststate.NewResourceID(value)
 		if err != nil || roles[id.String()] != hoststate.DiskRoleData {
@@ -546,6 +559,13 @@ func (document *dataVolumeDocument) ToDomain(disks []hoststate.Disk) (*hoststate
 	}
 	if volume.Metadata, err = usageFromDocuments(document.Metadata); err != nil {
 		return nil, err
+	}
+	for _, device := range document.Devices {
+		if device.DevID == 0 || device.SizeBytes == 0 || device.AllocatedBytes > device.SizeBytes ||
+			slices.ContainsFunc(volume.Devices, func(other hoststate.VolumeDevice) bool { return other.DevID == device.DevID }) {
+			return nil, errors.New("invalid data volume device")
+		}
+		volume.Devices = append(volume.Devices, hoststate.VolumeDevice(device))
 	}
 	return volume, nil
 }

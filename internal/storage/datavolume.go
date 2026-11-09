@@ -16,6 +16,8 @@ type (
 	MissingDisk         = datavolume.MissingDisk
 	ConversionState     = datavolume.ConversionState
 	Conversion          = datavolume.Conversion
+	Spread              = datavolume.Spread
+	SpreadState         = datavolume.SpreadState
 	DiskTarget          = datavolume.DiskTarget
 	CreateVolumeRequest = datavolume.CreateVolumeRequest
 	AddDisksRequest     = datavolume.AddDisksRequest
@@ -41,6 +43,9 @@ const (
 	VolumeStateReadOnly    = datavolume.VolumeStateReadOnly
 	ConversionRunning      = datavolume.ConversionRunning
 	ConversionWaiting      = datavolume.ConversionWaiting
+	SpreadRunning          = datavolume.SpreadRunning
+	SpreadWaiting          = datavolume.SpreadWaiting
+	SpreadStopped          = datavolume.SpreadStopped
 	OperationRunning       = datavolume.OperationRunning
 	OperationSucceeded     = datavolume.OperationSucceeded
 	OperationFailed        = datavolume.OperationFailed
@@ -60,6 +65,7 @@ var (
 	ErrVolumeChanged     = datavolume.ErrVolumeChanged
 	ErrVolumeUnavailable = datavolume.ErrVolumeUnavailable
 	ErrNoConversion      = datavolume.ErrNoConversion
+	ErrVolumeBusy        = datavolume.ErrVolumeBusy
 	ErrVolumeExists      = datavolume.ErrVolumeExists
 	ErrOperationNotFound = datavolume.ErrOperationNotFound
 )

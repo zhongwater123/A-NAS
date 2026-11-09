@@ -88,6 +88,9 @@ type SearchPage struct {
 	// photos within closestGap of the best match. The results after them are
 	// less related.
 	Closest int
+	// Names counts the results, over all pages, whose name or user tags hold
+	// the query; they come first.
+	Names int
 	// Texts counts the results, over all pages, whose text holds the query;
 	// they follow the name and user tag matches.
 	Texts int
@@ -367,7 +370,7 @@ func (s *Service) queryHits(ctx context.Context, query string, queryVector []flo
 		}
 	}
 	page.Semantic = queryVector != nil
-	page.Texts = len(texted)
+	page.Names, page.Texts = len(named), len(texted)
 	page.Closest = len(named) + len(texted) + closest
 	if tiered {
 		undetected, err := s.awaitingDetection(ctx, waiting)

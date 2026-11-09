@@ -13,7 +13,7 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useMemo } from "react";
 
 import { AIHome } from "./AIHome";
 import { AssetGrid } from "./AssetGrid";
@@ -34,9 +34,10 @@ import {
 import { AlbumsView, Empty } from "./Collections";
 import type { GridProps } from "./grid";
 import { ImageReading, imageSearchPage } from "./imageSearch";
+import type { Split } from "./layout";
 import { type Caller, canEditAlbum, daysLeft, type Place } from "./model";
 import styles from "./photos.module.css";
-import { joinWords } from "./results";
+import { joinWords, textQuery } from "./results";
 import type { useSelection } from "./selection";
 import { Timeline } from "./Timeline";
 import type { SearchBox } from "./Toolbar";
@@ -67,7 +68,7 @@ interface Props extends Pick<SearchBox, "dragging" | "imageOver" | "imageDrop" |
   scope: string;
   sourceBadge: (asset: PhotoAsset) => ReactNode;
   newAlbum: PhotoActions["newAlbum"];
-  setPeopleSettings: (open: boolean) => void;
+  setAISettings: (open: boolean) => void;
   setPhotoPicker: (album: PhotoAlbum) => void;
   reportError: (message: string) => void;
 }
@@ -97,7 +98,7 @@ export function PlaceView({
   scope,
   sourceBadge,
   newAlbum,
-  setPeopleSettings,
+  setAISettings,
   setPhotoPicker,
   reportError,
   dragging,
@@ -114,6 +115,8 @@ export function PlaceView({
     setAIHomeReturn,
     closest,
     setClosest,
+    textBand,
+    setTextBand,
     found,
     setFound,
     setSearchPeople,
@@ -125,6 +128,41 @@ export function PlaceView({
     setImageAttempt,
   } = view;
   const things = found ? joinWords(found.words) : "";
+  // Search results: the name matches, the photos whose text holds the query
+  // under a heading of their own, the rest of the closest group, then the
+  // less related.
+  const searchSplits = useMemo<Split[]>(
+    () => [
+      ...(textBand?.texts
+        ? [
+            {
+              at: textBand.names,
+              title: `照片中的文字包含“${textBand.query}”`,
+              text: "文字由本地 AI 识别，可能有误",
+              group: "text" as const,
+            },
+            found && found.detected > 0
+              ? { at: textBand.names + textBand.texts, title: `检测到${things}的照片`, text: "本地 AI 在画面中找到" }
+              : { at: textBand.names + textBand.texts, title: "画面相近的照片", text: "按与搜索内容的相似程度排列" },
+          ]
+        : []),
+      ...(closest === undefined
+        ? []
+        : found && found.detected > 0
+          ? [
+              {
+                at: closest,
+                title: `没有检测到${things}的照片`,
+                text:
+                  found.undetected > 0
+                    ? `按与搜索内容的相似程度排列；其中有些照片还没识别，也可能有${things}`
+                    : `按与搜索内容的相似程度排列；很小或被遮住的${things}可能没有识别出来`,
+              },
+            ]
+          : [{ at: closest, title: "相关度较低", text: "以下照片与搜索的内容差距较大，可能并不相关" }]),
+    ],
+    [textBand, found, things, closest],
+  );
   const emptyTimeline = readOnlyPlace ? (
     <Empty icon={<Images />} title="还没有照片" text="这个图库里还没有照片。" />
   ) : (
@@ -238,7 +276,7 @@ export function PlaceView({
               setPlace({ kind: "person", viewing: place.viewing, person });
               setAIHomeReturn(snapshot);
             }}
-            onPeopleSettings={() => setPeopleSettings(true)}
+            onAISettings={() => setAISettings(true)}
             onError={reportError}
           />
         );
@@ -252,6 +290,11 @@ export function PlaceView({
           onPage={(page, first) => {
             if (first && "closest" in page) {
               setClosest((page as PhotoSearchPage).closest);
+              setTextBand({
+                names: (page as PhotoSearchPage).names,
+                texts: (page as PhotoSearchPage).texts,
+                query: textQuery(place.query, (page as PhotoSearchPage).people),
+              });
               setFound((page as PhotoSearchPage).objects);
               setSearchPeople((page as PhotoSearchPage).people);
             }
@@ -259,20 +302,7 @@ export function PlaceView({
           onCount={setCount}
           onError={reportError}
           badge={scope ? undefined : sourceBadge}
-          split={
-            closest === undefined
-              ? undefined
-              : found && found.detected > 0
-                ? {
-                    at: closest,
-                    title: `没有检测到${things}的照片`,
-                    text:
-                      found.undetected > 0
-                        ? `按与搜索内容的相似程度排列；其中有些照片还没识别，也可能有${things}`
-                        : `按与搜索内容的相似程度排列；很小或被遮住的${things}可能没有识别出来`,
-                  }
-                : { at: closest, title: "相关度较低", text: "以下照片与搜索的内容差距较大，可能并不相关" }
-          }
+          splits={searchSplits}
           empty={
             found ? (
               <Empty

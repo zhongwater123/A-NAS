@@ -3,6 +3,8 @@ package linux
 import (
 	"io/fs"
 	"path"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -131,6 +133,96 @@ func ReadMissingDevices(root fs.FS, uuid string) int {
 func readFlag(root fs.FS, file string) bool {
 	contents, err := fs.ReadFile(root, file)
 	return err == nil && strings.TrimSpace(string(contents)) == "1"
+}
+
+var (
+	btrfsShowFilesystem = regexp.MustCompile(`^Label: .*\suuid: ([0-9A-Fa-f-]{36})$`)
+	btrfsShowTotal      = regexp.MustCompile(`^\s+Total devices (\d+) `)
+	btrfsShowDevice     = regexp.MustCompile(`^\s+devid\s+(\d+)\s+size\s+(\d+)\s+used\s+(\d+)\s+path\s+\S`)
+)
+
+// parseBtrfsDevices reads from `btrfs filesystem show --raw` the devices of
+// the filesystem with the UUID: each device's size and the bytes its block
+// groups take. Sysfs lists neither, and btrfs-progs prints this command, and
+// `btrfs device usage`, only as text (`--format json` is refused for both
+// in 6.14), so the lines are parsed here. It is nil unless the output lists
+// every device the filesystem has, none of them missing, since the
+// allocation of a filesystem missing a device cannot be planned.
+func parseBtrfsDevices(output []byte, uuid string) []hoststate.VolumeDevice {
+	var devices []hoststate.VolumeDevice
+	inside, total := false, 0
+	for line := range strings.Lines(string(output)) {
+		line = strings.TrimRight(line, "\r\n")
+		if match := btrfsShowFilesystem.FindStringSubmatch(line); match != nil {
+			if inside {
+				break
+			}
+			inside = strings.EqualFold(match[1], uuid)
+			continue
+		}
+		if !inside {
+			continue
+		}
+		if strings.Contains(strings.ToLower(line), "missing") {
+			return nil
+		}
+		if match := btrfsShowTotal.FindStringSubmatch(line); match != nil {
+			value, err := strconv.Atoi(match[1])
+			if err != nil || total != 0 {
+				return nil
+			}
+			total = value
+			continue
+		}
+		match := btrfsShowDevice.FindStringSubmatch(line)
+		if match == nil {
+			continue
+		}
+		var numbers [3]uint64
+		for i := range numbers {
+			value, err := strconv.ParseUint(match[i+1], 10, 64)
+			if err != nil {
+				return nil
+			}
+			numbers[i] = value
+		}
+		device := hoststate.VolumeDevice{DevID: numbers[0], SizeBytes: numbers[1], AllocatedBytes: numbers[2]}
+		if device.DevID == 0 || device.SizeBytes == 0 || device.AllocatedBytes > device.SizeBytes ||
+			slices.ContainsFunc(devices, func(other hoststate.VolumeDevice) bool { return other.DevID == device.DevID }) {
+			return nil
+		}
+		devices = append(devices, device)
+	}
+	if total == 0 || len(devices) != total {
+		return nil
+	}
+	return devices
+}
+
+// VolumeDevices reads the devices of the mounted Btrfs filesystem with the
+// UUID from the output of `btrfs filesystem show --raw`, checked against
+// sysfs (root is the filesystem root): the kernel's devinfo/<devid> lists
+// every device, a missing one included, so a device the tool does not list
+// leaves the allocation unknown (nil). The host state and the Host Agent's
+// spreading both read the devices through it.
+func VolumeDevices(root fs.FS, uuid string, output []byte) []hoststate.VolumeDevice {
+	devices := parseBtrfsDevices(output, uuid)
+	if devices == nil || root == nil {
+		return devices
+	}
+	known, err := fs.Glob(root, "sys/fs/btrfs/"+uuid+"/devinfo/*")
+	if err != nil || len(known) == 0 {
+		return devices
+	}
+	if len(known) != len(devices) {
+		return nil
+	}
+	for _, directory := range known {
+		if missing, err := fs.ReadFile(root, directory+"/missing"); err == nil && strings.TrimSpace(string(missing)) != "0" {
+			return nil
+		}
+	}
+	return devices
 }
 
 // ReadBtrfsAllocation reads from sysfs (root is the filesystem root) the

@@ -24,6 +24,9 @@ var (
 	ErrVolumeChanged     = errors.New("data volume changed after planning")
 	ErrVolumeUnavailable = errors.New("the data volume is not mounted and writable")
 	ErrNoConversion      = errors.New("the data volume is not converting")
+	// ErrVolumeBusy: Btrfs runs a balance, or the Host Agent converts or
+	// spreads the volume; btrfs device add would fail after erasing disks.
+	ErrVolumeBusy = errors.New("the data volume is converting to another layout, spreading over its disks or missing a disk")
 	// ErrVolumeExists: the host shows a data volume, or a mount unit for
 	// one, that the plan did not make.
 	ErrVolumeExists = errors.New("a data volume this plan did not make is already on the host")
@@ -76,6 +79,10 @@ type Volume struct {
 	// one, and is being checked so that what was written meanwhile has two
 	// copies again.
 	Restoring bool `json:"restoring,omitempty"`
+	// Spread is set while a mirror cannot use part of its disks' space
+	// until its files are spread over all of them (Unusable), or while Btrfs
+	// balances a volume on several disks.
+	Spread *Spread `json:"spread,omitempty"`
 }
 
 // MissingDisk is a disk of the volume that is not there, as the plan that
@@ -120,6 +127,28 @@ type Conversion struct {
 	State          ConversionState `json:"state"`
 	ConvertedBytes uint64          `json:"convertedBytes"`
 	TotalBytes     uint64          `json:"totalBytes"`
+}
+
+// SpreadState is where spreading a mirror over all of its disks stands.
+type SpreadState string
+
+const (
+	// SpreadRunning: Btrfs balances the volume now.
+	SpreadRunning SpreadState = "running"
+	// SpreadWaiting: a spread stopped, for example at shutdown; the Host
+	// Agent spreads again at its next check.
+	SpreadWaiting SpreadState = "waiting"
+	// SpreadStopped: a spread finished with space still unusable, for lack
+	// of room on the old disks; it is tried again when the disks change or
+	// the administrator asks.
+	SpreadStopped SpreadState = "stopped"
+)
+
+// Spread is how much space a mirror cannot use until its files are spread
+// over all of its disks, and where spreading them stands.
+type Spread struct {
+	State         SpreadState `json:"state"`
+	UnusableBytes uint64      `json:"unusableBytes"`
 }
 
 // DiskTarget is a disk the Host Agent erases, with the fingerprint it must

@@ -41,8 +41,9 @@ type handler struct {
 	reconcileFailed func() bool
 	// restoring reports a data volume that ran without a disk and has not
 	// had its redundancy restored.
-	restoring func() bool
-	logger    *slog.Logger
+	restoring     func() bool
+	spreadStopped func() bool
+	logger        *slog.Logger
 }
 
 type Services struct {
@@ -63,6 +64,9 @@ type Services struct {
 	// RestoringRedundancy reports whether the data volume ran without one of
 	// its disks and has not been scrubbed since (ADR 0025).
 	RestoringRedundancy func() bool
+	// SpreadStopped reports whether spreading the mirror over its disks left
+	// space unusable and waits for the disks to change or the administrator.
+	SpreadStopped func() bool
 }
 
 func NewHandler(observer hoststate.Observer, logger *slog.Logger) http.Handler {
@@ -76,7 +80,8 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	return &handler{
 		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
 		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots,
-		systemLogs: services.SystemLogs, webSearch: services.WebSearch, reconcileFailed: services.ReconcileFailed, restoring: services.RestoringRedundancy, logger: logger,
+		systemLogs: services.SystemLogs, webSearch: services.WebSearch, reconcileFailed: services.ReconcileFailed,
+		restoring: services.RestoringRedundancy, spreadStopped: services.SpreadStopped, logger: logger,
 	}
 }
 
@@ -181,6 +186,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	state.ReconcileFailed = h.reconcileFailed != nil && h.reconcileFailed()
 	if state.DataVolume != nil && h.restoring != nil {
 		state.DataVolume.Restoring = h.restoring()
+	}
+	if state.DataVolume != nil && h.spreadStopped != nil {
+		state.DataVolume.SpreadStopped = h.spreadStopped()
 	}
 	httpjson.Write(w, http.StatusOK, wire.DocumentFromDomain(state))
 }

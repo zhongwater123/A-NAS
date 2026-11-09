@@ -8,8 +8,10 @@
     operationId: continueVolumeConversion
     x-anas-posture: admin
     description: >-
-      Starts converting the data volume to its layout now, after a shutdown or an error stopped the conversion;
-      the Host Agent otherwise continues it at startup and every 15 minutes. Administrators only.
+      Starts converting the data volume to its layout, or spreading the files of a mirror that cannot use all of
+      its disks, now: after a shutdown or an error stopped it, or after a spread left space unusable. The Host Agent
+      otherwise continues at startup and every 15 minutes, a stopped spread only once the disks change. 409
+      no_conversion when neither waits. Administrators only.
     parameters: [{ name: volumeId, in: path, required: true, schema: { type: string } }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     responses:
       "202": { description: Conversion started }
@@ -31,12 +33,15 @@
     x-anas-posture: admin
     description: >-
       Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk,
-      mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts
-      to the layout in the background. A mirror missing a disk instead takes one disk to rebuild the missing one
-      onto (kind replace_disk; the layout is ignored), and 422 disk_too_small when it is smaller than the missing
-      disk. 423 volume_unavailable when the volume is not mounted and writable;
-      409 volume_busy while it converts or misses a disk; 422 invalid_layout when the layout does not fit the
-      number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host
+      mirror by default for more); otherwise it adds the disks to the mounted data volume. A volume on one disk
+      then converts to the layout (mirror by default) in the background; a volume on several disks keeps its
+      layout, and a mirror whose old disks are too full to pair with the new ones spreads its files over all disks.
+      A mirror missing a disk instead takes one disk to rebuild the missing one onto (kind replace_disk; the
+      layout is ignored), and 422 disk_too_small when it is smaller than the missing disk.
+      423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts,
+      Btrfs runs a balance, such as a spread, or the volume misses a disk; 422 invalid_layout when the layout does
+      not fit the number of disks, layout_change_unsupported when it differs from the layout of a volume on several
+      disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host
       shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan
       that has not run; while a plan runs it answers 409 plan_state_conflict.
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
