@@ -9,6 +9,7 @@ import { deleteFile, listSpaces } from "../files/api";
 import { apiError, http, pathOf, server } from "../test/server";
 import {
   APIError,
+  apiFetch,
   csrfHeader,
   onSessionEnded,
   passWriteGate,
@@ -100,7 +101,11 @@ describe("client", () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     // GET /api/v1/apps is one of the responses the generated validators check.
     server.use(http.get("/api/v1/apps", ({ response }) => response.untyped(HttpResponse.json({ items: null }))));
-    await expect(readApps()).rejects.toMatchObject({ status: 200, code: "malformed_response" });
+    await expect(readApps()).rejects.toMatchObject({
+      status: 200,
+      code: "malformed_response",
+      message: "服务返回的内容不完整，请稍后重试",
+    });
     expect(console.warn).toHaveBeenCalledWith("GET /api/v1/apps: the response breaks the contract", expect.anything());
   });
 
@@ -178,12 +183,20 @@ describe("the write gate", () => {
     }
   });
 
-  it("lets the page read while a gate refuses every write", async () => {
+  it("lets the page read while a gate refuses every write, and shows it each write's method and path", async () => {
     server.use(http.get("/api/v1/spaces", ({ response }) => response(200).json({ items: [] })));
-    const release = setWriteGate(async () => false);
+    const gate = vi.fn<WriteGate>(async () => false);
+    const release = setWriteGate(gate);
     try {
       await expect(listSpaces()).resolves.toEqual([]);
-      await expect(deleteFile("file:1")).rejects.toMatchObject({ status: 403, code: "not_allowed_for_vnas" });
+      // A call without a method is a GET.
+      await expect(apiFetch("/api/v1/spaces")).resolves.toMatchObject({ status: 200 });
+      await expect(deleteFile("file:1")).rejects.toMatchObject({
+        status: 403,
+        code: "not_allowed_for_vnas",
+        message: "没有允许 VNAS 这一步，什么都没有改",
+      });
+      expect(gate.mock.calls).toEqual([["DELETE", "/api/v1/files/file%3A1"]]);
     } finally {
       release();
     }
@@ -226,6 +239,24 @@ describe("multipart uploads", () => {
     await Promise.resolve();
     return { result, xhr: Upload.last };
   };
+
+  it("asks the write gate before it opens an upload", async () => {
+    const factory = vi.fn(function () {
+      return new Upload();
+    });
+    vi.stubGlobal("XMLHttpRequest", factory);
+    const gate = vi.fn<WriteGate>(async () => false);
+    const release = setWriteGate(gate);
+    try {
+      await expect(uploadForm("/api/v1/photos/import", new FormData(), vi.fn())).rejects.toMatchObject({
+        code: "not_allowed_for_vnas",
+      });
+    } finally {
+      release();
+    }
+    expect(gate.mock.calls).toEqual([["POST", "/api/v1/photos/import"]]);
+    expect(factory).not.toHaveBeenCalled();
+  });
 
   it("shares API errors and the session-ended notification", async () => {
     vi.stubGlobal("XMLHttpRequest", Upload);

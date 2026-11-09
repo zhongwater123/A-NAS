@@ -200,6 +200,29 @@ describe("WebosController", () => {
     expect(sent).toEqual(["DELETE /api/v1/files/f1"]);
   });
 
+  it("counts the page's writes as the step's for 15 s after it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { control, asked } = controller(false);
+    await control.run("browser_click", { ref: refOf(await look(control), "打开文件夹") });
+    vi.setSystemTime(Date.now() + 15_000);
+    await expect(apiFetch("/api/v1/files/f1", { method: "DELETE" })).rejects.toMatchObject({
+      code: "not_allowed_for_vnas",
+    });
+    vi.setSystemTime(Date.now() + 1);
+    await apiFetch("/api/v1/files/f1", { method: "DELETE" });
+    expect(asked).toHaveLength(1);
+    expect(sent).toEqual(["DELETE /api/v1/files/f1"]);
+  });
+
+  it("leaves the page's writes alone once VNAS's window lets go of the desktop", async () => {
+    const { control, asked } = controller(false);
+    await control.run("browser_click", { ref: refOf(await look(control), "打开文件夹") });
+    uninstall();
+    await apiFetch("/api/v1/files/f1", { method: "DELETE" });
+    expect(asked).toEqual([]);
+    expect(sent).toEqual(["DELETE /api/v1/files/f1"]);
+  });
+
   it("holds Enter in a form until the member allows what the form sends", async () => {
     const { control, asked } = controller(false);
     const form = document.getElementById("rename") as HTMLFormElement;
@@ -292,6 +315,18 @@ describe("WebosController", () => {
     expect(asked).toHaveLength(1);
   });
 
+  it("does not ask for a step in another settings section, or while none is shown", async () => {
+    const { control, asked } = controller(false);
+    const snapshot = await look(control);
+    const [terminal, logs] = screen.getByRole("navigation", { name: "设置分区" }).querySelectorAll("button");
+    terminal.removeAttribute("aria-current");
+    logs.setAttribute("aria-current", "page");
+    await control.run("browser_click", { ref: refOf(snapshot, "以 root 打开") });
+    logs.removeAttribute("aria-current");
+    await control.run("browser_click", { ref: refOf(snapshot, "以 root 打开") });
+    expect(asked).toEqual([]);
+  });
+
   it("asks before typing into a terminal in any window, not only in 设置's 终端", async () => {
     const { control, asked } = controller(false);
     // A shell in a window of its own, as xterm.js renders one: its input is a textarea inside .xterm.
@@ -341,6 +376,12 @@ describe("WebosController", () => {
       const event = { type, target, isTrusted: true } as unknown as Event;
       for (const [name, listener] of added.mock.calls) if (name === type) (listener as EventListener)(event);
     }
+
+    it("hears the member's input before the page's own handlers can stop it", () => {
+      controller();
+      for (const type of ["pointerdown", "keydown", "drop"])
+        expect(added).toHaveBeenCalledWith(type, expect.any(Function), true);
+    });
 
     it.each(["pointerdown", "keydown", "drop"])(
       "ends VNAS's claim on the page's writes once the member's own %s follows its step",
