@@ -86,8 +86,12 @@ const TEXT_MAX = 200;
 const BUBBLE_MAX_MS = 60_000;
 const LINE_MAX_MS = 5_000;
 const POWER_MAX = 3;
-/** What would not show as the bubble's plain text: control characters but a line break, and bidi overrides. */
-const NOT_PLAIN = /[^\P{Cc}\n]|[\u202A-\u202E\u2066-\u2069]/u;
+/**
+ * What would not show as the bubble's plain text, as the product service checks it (contract v1.2): control
+ * characters but a line break, Unicode's bidi controls (marks, embeddings, overrides and isolates) and the
+ * line and paragraph separators.
+ */
+const NOT_PLAIN = /[^\P{Cc}\n]|[\p{Bidi_Control}\u2028\u2029]/u;
 
 const carriedOut: { at: number; action: string }[] = [];
 /** The lock a command took, and the conversation that took it. */
@@ -115,7 +119,8 @@ function rateLimited(action: string): boolean {
 function beyondLimits(action: string, args: Record<string, unknown>): CompanionOutcome | null {
   const over = (value: unknown, max: number) => typeof value === "number" && value > max;
   if (action === "broadcast") {
-    const text = typeof args.text === "string" ? args.text.trim() : "";
+    // The whole text, as the product service counts and checks it: trimming would let a separator at either end through.
+    const text = typeof args.text === "string" ? args.text : "";
     if ([...text].length > TEXT_MAX || NOT_PLAIN.test(text))
       return refuse("bad-request", `text 最多 ${TEXT_MAX} 字，只能是纯文本`);
     if (over(args.duration, BUBBLE_MAX_MS)) return refuse("bad-request", `duration 最多 ${BUBBLE_MAX_MS} 毫秒`);

@@ -146,6 +146,17 @@ describe("what VNAS says and where it puts the companion", () => {
     expect(await run("throw", { angle: 60, power: 0 })).toEqual(refused("bad-request"));
   });
 
+  it("says only plain text, as the product service checks it", async () => {
+    // Every bidi control, not only the overrides, the separators, and either even at the text's ends
+    // (contract v1.2). Each on a fresh minute: a refused broadcast still counts against the six.
+    for (const text of ["看؜字", "看‎字", "看‏字", "看⁦字", "看 字", "看 字", "字 ", "\t字"]) {
+      resetCompanionCommands();
+      expect(await run("broadcast", { text })).toEqual(refused("bad-request"));
+    }
+    resetCompanionCommands();
+    expect(await run("broadcast", { text: "两行\n字" })).toEqual(ok());
+  });
+
   it("keeps to the contract's limits where dsh-pet sets none", async () => {
     const before = writes();
     expect(await run("broadcast", { text: "字".repeat(201) })).toEqual(refused("bad-request"));
