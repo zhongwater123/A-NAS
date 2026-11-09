@@ -1,4 +1,4 @@
-import { ChevronsDown } from "lucide-react";
+import { ChevronsDown, ScanText } from "lucide-react";
 import { ReactNode, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { type ErrorDomain, errorText } from "../api/errorMessages";
@@ -21,8 +21,8 @@ interface Props extends GridProps {
   // loading replaces the spinner shown until the first page arrives.
   loading?: ReactNode;
   end?: string;
-  // split ends the first group after that many of the loaded photos.
-  split?: Split;
+  // splits start groups after that many of the loaded photos, each behind a divider.
+  splits?: Split[];
 }
 
 // AssetGrid shows a list without dates, such as an album, search results or
@@ -86,25 +86,21 @@ export function AssetGrid(props: Props) {
 
   const shown = useMemo(() => assets?.filter((asset) => !hidden.has(asset.id)), [assets, hidden]);
   usePendingThumbnails(shown, (ready) => setAssets((value) => value?.map((asset) => ready.get(asset.id) ?? asset)));
-  const { split } = props;
-  const splitAt = split?.at;
-  const splitTitle = split?.title ?? "";
-  const splitText = split?.text ?? "";
-  // Hidden photos leave the first group smaller.
-  const shownSplit = useMemo(
+  const { splits } = props;
+  // Hidden photos leave the groups before them smaller.
+  const shownSplits = useMemo(
     () =>
-      splitAt !== undefined && assets
-        ? {
-            title: splitTitle,
-            text: splitText,
-            at: assets.slice(0, splitAt).filter((asset) => !hidden.has(asset.id)).length,
-          }
+      assets
+        ? splits?.map((split) => ({
+            ...split,
+            at: assets.slice(0, split.at).filter((asset) => !hidden.has(asset.id)).length,
+          }))
         : undefined,
-    [splitAt, splitTitle, splitText, assets, hidden],
+    [splits, assets, hidden],
   );
   const entries = useMemo(
-    () => flatEntries(shown ?? [], width, rowHeight, Boolean(next), props.end, shownSplit),
-    [shown, width, rowHeight, next, props.end, shownSplit],
+    () => flatEntries(shown ?? [], width, rowHeight, Boolean(next), props.end, shownSplits),
+    [shown, width, rowHeight, next, props.end, shownSplits],
   );
   const reportAssets = useEffectEvent(onAssets);
   const reportCount = useEffectEvent((photos: number | undefined) => onCount?.(photos));
@@ -123,7 +119,7 @@ export function AssetGrid(props: Props) {
     ) : entry.kind === "divider" ? (
       <div className={styles.phDivider} role="separator" aria-label={entry.title}>
         <span className={styles.phDividerTitle}>
-          <ChevronsDown />
+          {entry.group === "text" ? <ScanText /> : <ChevronsDown />}
           {entry.title}
         </span>
         <small>{entry.text}</small>
@@ -146,7 +142,7 @@ export function AssetGrid(props: Props) {
       onMarquee={props.onMarquee}
       onMarqueeEnd={props.onGestureEnd}
       onBackgroundClick={props.onBackgroundClick}
-      floatingLabel={Boolean(split)}
+      floatingLabel={Boolean(splits?.length)}
       handle={props.scroller}
     >
       {assets === undefined

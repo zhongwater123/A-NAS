@@ -228,6 +228,8 @@ export function Viewer({
       }
       return;
     }
+    // The space bar opens a fold of the side panel, such as the whole text.
+    if (event.key === " " && (event.target as HTMLElement).closest("summary")) return;
     const handled = () => {
       event.preventDefault();
       event.stopPropagation();

@@ -11894,6 +11894,13 @@ components:
                 description: Absent while the face is nobody yet.
               name:
                 type: string
+        text:
+          type: string
+          enum:
+            - read
+            - queued
+            - failed
+          description: Where reading the text in the photo stands, as the text's status says; only a single photo's details carry it, and only when the photo's library reads text and the photo is one whose text is read.
     PhotoTimeline:
       type: object
       additionalProperties: false
@@ -12085,6 +12092,7 @@ components:
         - items
         - semantic
         - closest
+        - names
         - texts
       properties:
         items:
@@ -12100,6 +12108,10 @@ components:
           type: integer
           minimum: 0
           description: 'How many results, counted over all pages, make up the closest group: the name and user tag matches, the photos whose text holds the query, then the photos the object detector found the query''s things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count.'
+        names:
+          type: integer
+          minimum: 0
+          description: How many results, counted over all pages, match the query by name or user tag; they come first.
         texts:
           type: integer
           minimum: 0
@@ -12204,7 +12216,7 @@ components:
                     - unfinished
               sensitive:
                 type: boolean
-                description: Shown masked until the viewer opens it.
+                description: A member's AI assistant gets the value only as a handle.
               correction:
                 type: object
                 additionalProperties: false
@@ -12353,6 +12365,25 @@ components:
           type: integer
           minimum: 0
           description: Originals whose vector sends them to have their text read (documents, receipts, cards, screenshots), queued or read. Absent while the text route does not apply to the Worker's model or its queries wait for the Worker.
+        texts:
+          type: object
+          additionalProperties: false
+          required:
+            - read
+            - queued
+            - failed
+          description: textPhotos split by where reading their text stands; absent when textPhotos is.
+          properties:
+            read:
+              type: integer
+              minimum: 0
+            queued:
+              type: integer
+              minimum: 0
+              description: Waiting to be read, also when an older reader's reading is kept meanwhile.
+            failed:
+              type: integer
+              minimum: 0
     PhotoDirectoryListing:
       type: object
       additionalProperties: false
