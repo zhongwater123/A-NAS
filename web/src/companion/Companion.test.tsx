@@ -10,6 +10,13 @@ import { resetCompanionCommands, runCompanionCommand } from "./commands";
 import { companionLock, companionPlayback, companionSleep, resetCompanionHost } from "./host";
 import { companionReady, companionState, reportCards, reportEvent, resetWorkStatus, startTurn } from "./workStatus";
 
+// Whether the local console's screen saver or black screen covers the page; the rest of the module as it is.
+const cover = vi.hoisted(() => ({ up: false }));
+vi.mock("../desktop/LocalConsoleScreenSaver", async (original) => ({
+  ...(await original<typeof import("../desktop/LocalConsoleScreenSaver")>()),
+  localConsoleCovered: () => cover.up,
+}));
+
 const origin = window.location.origin;
 const IDLE = "待机呼吸休闲";
 const POSITION_KEY = "a-nas.companion.position";
@@ -44,6 +51,7 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  cover.up = false;
   // The page's state outlives the companion, and so a test: back to awake, unlocked and idle.
   act(() => {
     resetWorkStatus();
@@ -493,6 +501,34 @@ describe("walking, throwing and resting", () => {
     write("say", { text: "照片整理好了" });
     expect(play.mock.contexts).toContain(front(videos));
     expect(await screen.findByText("照片整理好了")).toBeInTheDocument();
+  });
+
+  it("stays at rest under the local console's screen saver, and sleeps when the member is back", async () => {
+    serve([IDLE, "睡觉-开始", "睡觉-循环", "睡觉-起来"]);
+    const { videos } = await mount();
+    const pause = vi.mocked(HTMLMediaElement.prototype.pause);
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    vi.useFakeTimers({ shouldClearNativeTimers: true });
+    fireEvent.keyDown(window, { key: "a" });
+    pause.mockClear();
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(pause.mock.contexts).toContain(front(videos));
+    vi.useRealTimers();
+    // The screen saver comes up; VNAS puts the companion to sleep, wakes it, and sleeps it again (D12).
+    cover.up = true;
+    play.mockClear();
+    fetched = [];
+    act(() => void companionSleep.enter("main", { start: "睡觉-开始", loop: "睡觉-循环", end: "睡觉-起来" }));
+    act(() => void companionSleep.wake("main"));
+    act(() => void companionSleep.enter("main", { start: "睡觉-开始", loop: "睡觉-循环", end: "睡觉-起来" }));
+    await settle();
+    expect(play.mock.contexts).not.toContain(front(videos));
+    expect(fetched).toEqual([]);
+    // The member is back: the last of them goes on.
+    cover.up = false;
+    fireEvent.keyDown(window, { key: "a" });
+    expect(play.mock.contexts).toContain(front(videos));
+    await plays("睡觉-开始");
   });
 
   it("takes what VNAS says as the member's input, and rests a minute after it", async () => {

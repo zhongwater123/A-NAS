@@ -23,6 +23,7 @@ import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react"
 import { jsx } from "react/jsx-runtime";
 
 import { taskNoticesLoaded, useTaskNotices } from "../assistant/taskNotices";
+import { localConsoleCovered } from "../desktop/LocalConsoleScreenSaver";
 import { companionPhysics, companionWeights, installedAnimations, workStatusTexts } from "./animations";
 import type { InstalledAnimations } from "./Companion";
 import { prefersMov } from "./dsh-pet/client/pet/animation/media";
@@ -264,7 +265,10 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   const [leaves, setLeaves] = useState(first.leaves);
   const [paused, setPaused] = useState(() => document.hidden);
   const pausedRef = useRef(paused);
-  /** A sleep written while the page is hidden: it starts when the page is shown, its animations being videos too. */
+  /**
+   * A sleep or wake written while the page is hidden or under the local console's screen saver: it is
+   * applied when the member is back, its animations being videos too.
+   */
   const heldSleep = useRef<StateLeaf | null>(null);
   /** Ends a pause the member's absence started (the page is not hidden), as their next input would. */
   const resume = useRef(() => {});
@@ -291,11 +295,13 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
       setCompanionPaused(false);
       window.clearTimeout(timer);
       timer = window.setTimeout(rest, IDLE_MS);
-      if (!pausedRef.current) return;
-      pausedRef.current = false;
+      // A held sleep goes on even if the companion was not resting: the screen saver can come up
+      // within a minute of a command.
       const sleep = heldSleep.current;
       heldSleep.current = null;
       if (sleep) setLeaves((current) => withLeaf(current, "sleep", sleep));
+      if (!pausedRef.current) return;
+      pausedRef.current = false;
       setPaused(false);
     };
     resume.current = wake;
@@ -329,7 +335,9 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
         if (name === null) continue;
         // States go to the card paused or not: it shows them when it goes on.
         if (name === "workStatus" || name === "lock") taken.push([name, leaf]);
-        else if (!document.hidden) {
+        // Under the local console's screen saver nobody sees the page either (D12): nothing written
+        // then ends a rest, not even a sleep, a wake or the wake a lock brings.
+        else if (!document.hidden && !localConsoleCovered()) {
           // A command is VNAS speaking to the member in a turn of this page, who may well be reading
           // its reply without touching anything: it ends a pause their absence started, and counts
           // as their input, so that a pause does not start in the middle of what it shows.
@@ -337,7 +345,7 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
           taken.push([name, leaf]);
         } else if (name === "sleep") heldSleep.current = leaf;
         else {
-          // Nobody sees a hidden page: a command sent to it is dropped, not kept for later, and a
+          // Nobody sees a hidden or covered page: a command sent to it is dropped, not kept for later, and a
           // caller waiting on an animation hears that a freeze cut it short, as the card reports one.
           const playbackId = name === "anim" ? readAnim(leaf)?.playbackId : undefined;
           if (playbackId) report(playbackId, "cancelled", "frozen");
