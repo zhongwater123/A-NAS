@@ -9,10 +9,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,12 +25,40 @@ import (
 )
 
 type changesHarness struct {
-	volume string
-	server *Server
-	client *filebroker.Client
+	volume   string
+	server   *Server
+	client   *filebroker.Client
+	accounts *uidDirectory
 }
 
 var alice = accountid.Identity{Username: "alice", UID: 20101, Role: accountid.RoleMember, Enabled: true}
+
+var aliceAccount = accountid.SessionUser{UserID: "user-alice", Username: "alice", Role: accountid.RoleMember}
+
+// uidDirectory is the account directory the changes socket asks who is
+// behind a UID.
+type uidDirectory struct {
+	mu   sync.Mutex
+	uids map[int]accountid.SessionUser
+}
+
+func (d *uidDirectory) ResolveAccountUID(_ context.Context, uid int) (accountid.SessionUser, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	user, ok := d.uids[uid]
+	if !ok {
+		return accountid.SessionUser{}, accountid.ErrUserNotFound
+	}
+	return user, nil
+}
+
+// add makes the directory name user at uid, whether or not the UID is in the
+// A-NAS range.
+func (d *uidDirectory) add(uid int, user accountid.SessionUser) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.uids[uid] = user
+}
 
 // newChangesHarness runs the broker with the executor over a volume laid out
 // as the Host Agent does; workers run as the test user, the confined one
@@ -53,10 +83,12 @@ func newChangesHarness(t *testing.T) *changesHarness {
 			t.Fatal(err)
 		}
 	}
+	accounts := &uidDirectory{uids: map[int]accountid.SessionUser{alice.UID: aliceAccount}}
 	server, err := NewServer(Config{
 		Sessions: resolverFunc(func(token string) (accountid.Identity, error) {
 			return lookup(map[string]accountid.Identity{"alice-token": alice}, token)
 		}),
+		Accounts:   accounts,
 		VolumeRoot: volume, VolumeReady: func() bool { return true },
 		AssistantChanges: filepath.Join(t.TempDir(), "changes"),
 		Command:          func(volumeRoot string) *exec.Cmd { return exec.Command(os.Args[0], WorkerArgument, volumeRoot) },
@@ -82,7 +114,7 @@ func newChangesHarness(t *testing.T) *changesHarness {
 		_ = listener.Close()
 		server.Close()
 	})
-	return &changesHarness{volume: volume, server: server, client: filebroker.NewClient(socket)}
+	return &changesHarness{volume: volume, server: server, client: filebroker.NewClient(socket), accounts: accounts}
 }
 
 const editPlan = `{"summary":"计划加一项","operations":[{"op":"write","path":"/nas/个人空间/计划.md","source":"/nas/助手/待确认/计划.md"}]}`
@@ -211,7 +243,13 @@ func TestChangesNeedTheMembersSession(t *testing.T) {
 }
 
 func TestTheAssistantSocketServesOnlyMembersByTheirUID(t *testing.T) {
+	uid := os.Getuid()
+	if uid >= accountid.FirstUserUID && uid <= accountid.LastUserUID {
+		t.Skipf("the test runs as UID %d, inside the A-NAS range", uid)
+	}
 	h := newChangesHarness(t)
+	// Even a UID the directory names is refused outside the A-NAS range.
+	h.accounts.add(uid, aliceAccount)
 	socket := filepath.Join(shortTempDir(t), "changes.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
@@ -231,5 +269,41 @@ func TestTheAssistantSocketServesOnlyMembersByTheirUID(t *testing.T) {
 	_ = response.Body.Close()
 	if response.StatusCode != http.StatusForbidden {
 		t.Fatalf("apply from a non-member UID = %d", response.StatusCode)
+	}
+	if content, err := os.ReadFile(filepath.Join(h.volume, "spaces/private/alice/计划.md")); err != nil || string(content) != "# 计划\n" {
+		t.Fatalf("the plan was applied: %q, %v", content, err)
+	}
+}
+
+// The changes socket serves exactly the A-NAS UID range: a member's UID is
+// served as that member, and a UID outside the range is refused before the
+// directory is asked, even one it would name.
+func TestTheAssistantSocketChecksTheUIDRange(t *testing.T) {
+	h := newChangesHarness(t)
+	for uid, want := range map[int]int{
+		0:                          http.StatusForbidden,
+		1000:                       http.StatusForbidden,
+		accountid.FirstUserUID - 1: http.StatusForbidden,
+		accountid.FirstUserUID:     http.StatusOK,
+		alice.UID:                  http.StatusOK,
+		accountid.LastUserUID:      http.StatusOK,
+		accountid.LastUserUID + 1:  http.StatusForbidden,
+	} {
+		h.accounts.add(uid, aliceAccount)
+		var served *accountid.Identity
+		handler := h.server.withAssistant(func(_ http.ResponseWriter, _ *http.Request, identity accountid.Identity) {
+			served = &identity
+		})
+		recorder := httptest.NewRecorder()
+		handler(recorder, httptest.NewRequestWithContext(context.WithValue(t.Context(), peerKey{}, uid), http.MethodGet, "http://changes/recent", nil))
+		if recorder.Code != want {
+			t.Errorf("UID %d: status %d, want %d", uid, recorder.Code, want)
+		}
+		if want == http.StatusOK && (served == nil || served.UID != uid || served.Username != "alice") {
+			t.Errorf("UID %d served as %+v, want alice at that UID", uid, served)
+		}
+		if want != http.StatusOK && served != nil {
+			t.Errorf("UID %d reached the handler as %+v", uid, served)
+		}
 	}
 }
