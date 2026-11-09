@@ -73,7 +73,7 @@
 - 产品服务只读扫描 `ANAS_SCREENSAVER_DIRECTORY` 指向的绝对目录，只接纳该目录第一层的普通 `.mp4` 文件；默认值与系统安装器写入的值都是 `/var/lib/a-nas/screensavers/current`。该路径可以是指向目录的符号链接，每次请求重新读取，因此切换链接后无需重启产品服务。
 - `/local-console/screensavers` 返回不含宿主机文件名的同源视频 URL 清单；各视频 URL 支持标准字节 Range。原 `/local-console/screensaver.mp4` 保留为读取排序后首个视频的兼容路由。
 - 屏保视频是系统盘上的长期媒体，不随 release 发布（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)）。每个视频以 SHA-256 命名存放在 `/var/lib/a-nas/screensavers/objects/`；池是 `pools/<池 ID>/` 下匿名编号的硬链接和 `SHA256SUMS`，池 ID 是清单 SHA-256 的前 16 位十六进制；`current` 链接指向当前池。外部媒体缺失不阻止产品服务、登录或桌面启动。
-- 只有 root 执行的 `install-media-pool.sh screensavers` 会改变当前池；它与[伙伴动画](../runbooks/install-companion-animations.md)共用一套暂存与安装脚本，开发机一侧是 `deploy-media-pool.ps1 -Kind screensavers`。旧名 `install-screensavers.sh`、`remote-stage-screensavers.sh` 与 `deploy-screensavers.ps1` 再保留一个版本，参数与作用不变；NAS 上的屏保命令仍写 `install-screensavers.sh`，因为 ADR 0014 以来的每个 release 都有它，当前 release 或产品回滚后的 release 不含 `install-media-pool.sh` 时同样可用（[运行手册](../runbooks/operate-local-kiosk.md#屏保视频)）。脚本逐个复核 SHA-256、核对池 ID 与清单一致，任一不符即在改动前停止，然后原子切换 `current`。指定一个已安装的池时直接切换，作为媒体回滚；旧池和对象都保留。
+- 只有 root 执行的 `install-media-pool.sh screensavers`（旧名 `install-screensavers.sh`）会改变当前池；它与[伙伴动画](../runbooks/install-companion-animations.md)共用一套暂存与安装脚本，操作见[运行手册](../runbooks/operate-local-kiosk.md#屏保视频)。脚本逐个复核 SHA-256、核对池 ID 与清单一致，任一不符即在改动前停止，然后原子切换 `current`。指定一个已安装的池时直接切换，作为媒体回滚；旧池和对象都保留。
 - 升级和产品回滚都不改变 `current`。首次升级时还没有 `current`，系统安装器以硬链接导入旧安装器留下的最近一个池并设为当前池。旧安装器总让这个池生效，或因 [issue #49](https://github.com/zhongwater123/A-NAS/issues/49) 在不带视频的升级后什么都不播，因此迁移后无需重新上传视频。
 
 ## 验收证据
