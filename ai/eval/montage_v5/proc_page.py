@@ -28,7 +28,10 @@ def prompt(case, text_of, what):
                            where="所在视频 " if many else "", catalog="\n".join(lines), what=what,
                            what_note="（这张卡片里依次发生的事）" if what == "过程" else "", structure=cut.structure_of(style),
                            target=target, most=round(target / cut.PER_CARD), max_parts=max(2, min(8, int(target // 10))),
-                           min_parts=cut.fewest_parts(target)), lines
+                           min_parts=cut.fewest_parts(target),
+                           parts_rule=f"{cut.fewest_parts(target)}–{max(2, min(8, int(target // 10)))} 个部分"
+                                      f"（至少 {cut.fewest_parts(target)} 个，不能超过 {max(2, min(8, int(target // 10)))} 个）",
+                           pictures_rule=""), lines
 
 
 def tokens(url, text):

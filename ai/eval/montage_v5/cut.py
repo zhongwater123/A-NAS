@@ -8,8 +8,9 @@
           is cut by fixed seconds (OPENING) as a material problem, not something to train for.
   pick    4B sees each card's process (its summary where there is none; no tags, no highlight) with
           the join rules and the category's structure, and writes 方案 B's outline: design, unmet,
-          target/15 s parts or more, each with a link to the one before, a weight and 1-4 pictures
-          (from which cards), parts and pictures in shooting order. The order is the model's own.
+          target/15 s parts or more and no more than a picture a 6 s of the target in all, each part
+          with a link to the one before, a weight and 1-4 pictures (from which cards), parts and
+          pictures in shooting order. The order is the model's own.
   shots   the program gives each part seconds by its weight and shares them evenly among its
           pictures (budget, 方案 B's way); 4B ranks each picture's beats from its cards, told the
           part's link, without highlight marks (MARK_HIGHLIGHTS).
@@ -179,7 +180,7 @@ PICK = """用户的剪辑要求：
 请按用户的要求，从这些卡片里设计一个约 {target} 秒的成片，按顺序写：
 1. design：用 2–3 句话写成片的设计：开头、中间、结尾分别用哪些卡片，为什么这样安排；开场怎么交代背景（时间、地点、人物），段落之间怎么过渡；开头、中间、结尾按拍摄时间先后安排；写完对照用户的要求检查内容和先后顺序；
 2. unmet：要求里提到、但卡片里找不到的内容，都找得到就留空；找不到的内容不要拿别的卡片冒充；
-3. parts：照 design 分成 {min_parts}–{max_parts} 个部分（至少 {min_parts} 个，不能超过 {max_parts} 个），按拍摄时间先后排列，每部分里的画面也按拍摄时间先后排列：
+3. parts：照 design 分成 {parts_rule}{pictures_rule}，按拍摄时间先后排列，每部分里的画面也按拍摄时间先后排列：
    - name 是这一部分的标题，summary 用一句话说明这部分讲什么；
    - link 写这一部分和上一部分怎么衔接：写清上一部分最后一个画面和这一部分第一个画面靠什么接上（同一个人、同一样东西、同一个动作或声音、到达或进入一个地方），不要只写“直接切入”；第一部分写开场怎么进入；
    - weight 是这一部分的分量（1–10 的整数）；
@@ -248,6 +249,7 @@ CAP = 6.0
 # no picture runs longer than PICTURE_MOST, whatever the style; what it cannot take goes on.
 PART_SECONDS = 15.0
 PICTURE_MOST = 8.0
+PICTURE_SECONDS = 6.0
 
 
 def fewest_parts(target):
@@ -302,10 +304,20 @@ def pick(case, url):
     most = round(target / PER_CARD)
     max_parts = max(2, min(8, int(target // 10)))     # B's part_limits: parts of 10 s at least, 2-8
     min_parts = fewest_parts(target)
+    # The pictures of all parts together are held to one a PICTURE_SECONDS of the target (2026-11-09):
+    # the Shanghai vlog's 6 parts of 4 pictures left 3.7 s a picture, and step 2 listed every card's
+    # first three beats as they came; told 15, the planner wrote 19 and step 2 chose its beats. Only
+    # the prompt says so. Trials: CUT_PARTS fixes the number of parts, CUT_PICTURES the cap (0: none).
+    if os.environ.get("CUT_PARTS"):
+        min_parts = max_parts = int(os.environ["CUT_PARTS"])
+    parts_rule = (f"{min_parts} 个部分" if min_parts == max_parts
+                  else f"{min_parts}–{max_parts} 个部分（至少 {min_parts} 个，不能超过 {max_parts} 个）")
+    pictures = int(os.environ.get("CUT_PICTURES", round(target / PICTURE_SECONDS)))
+    pictures_rule = f"，所有部分的画面加起来不超过 {pictures} 个" if pictures else ""
     total = sum(c["end"] - c["start"] for c in cards) / 60
     user = PICK.format(instruction=instruction, total_min=total, n=len(cards), where="所在视频 " if many else "", what=what, what_note=what_note,
                        catalog="\n".join(lines), structure=structure_of(style), target=target, most=most,
-                       max_parts=max_parts, min_parts=min_parts)
+                       parts_rule=parts_rule, pictures_rule=pictures_rule)
     ids = [c["id"] for c in cards]
     schema = {"type": "object", "required": ["design", "unmet", "parts"], "properties": {
         "design": {"type": "string"},
