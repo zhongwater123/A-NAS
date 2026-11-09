@@ -466,8 +466,8 @@ func (u *upstream) adjustResult(call forwardedCall, raw json.RawMessage) (json.R
 		delete(result, "pending_connection")
 		delete(result, "pending_approval")
 	case "prompt.submit":
-		u.m.openTurn(session, u)
 		u.m.prompted(session, u, unquote(result["status"]) == "queued")
+		u.m.openTurn(session, u)
 	case "session.interrupt":
 		u.m.stopping(session)
 	case "session.events.since":

@@ -290,11 +290,19 @@ func (f *fakeServe) gateway(w http.ResponseWriter, r *http.Request) {
 			f.reply(conn, msg.ID, `{"session_id":"`+fakeRuntime+`","session_key":"`+fakeStored+`","running":true,"message_count":0,"messages":[],
 				"info":{"model":"m"},"pending_approval":{"request_id":"req-9"},"open_requests":[{"id":"srq-0123456789ab"}]}`)
 		case "prompt.submit":
-			f.reply(conn, msg.ID, `{"status":"streaming"}`)
 			var params struct {
 				Text string `json:"text"`
 			}
 			_ = json.Unmarshal(msg.Params, &params)
+			if params.Text == "queued" {
+				// Hermes still finishing the turn before, after its
+				// message.complete: it queues the prompt and then starts it as
+				// a turn of its own, with no message.complete in between.
+				f.reply(conn, msg.ID, `{"status":"queued"}`)
+				go f.turn(conn, "long")
+				break
+			}
+			f.reply(conn, msg.ID, `{"status":"streaming"}`)
 			go f.turn(conn, params.Text)
 		case "browser.controller.register":
 			f.mu.Lock()

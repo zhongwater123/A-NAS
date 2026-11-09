@@ -375,7 +375,12 @@ func (s *liveSession) helping(now time.Time) bool {
 // prompted records the connection whose window sent a session's prompt: for
 // the turn under way, or for the next one when Hermes queued the prompt
 // behind it. A turn no window prompted, such as Hermes's own wake-up after a
-// background task, has no prompter.
+// background task, has no prompter. It runs before openTurn, so the session's
+// turn is still the one Hermes's events left: Hermes also queues a prompt
+// that comes after a turn's message.complete while it still finishes that
+// turn, and then starts the prompt's turn with no message.complete in
+// between, so a prompt queued when no turn is under way prompts the next turn
+// itself.
 func (m *member) prompted(session string, u *upstream, queued bool) {
 	if !runtimeIDPattern.MatchString(session) {
 		return
@@ -383,7 +388,7 @@ func (m *member) prompted(session string, u *upstream, queued bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.session(session)
-	if queued {
+	if queued && s.turn {
 		s.nextPrompter = u
 		return
 	}

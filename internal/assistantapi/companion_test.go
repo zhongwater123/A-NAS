@@ -640,9 +640,10 @@ func TestAWakeUpTurnNoWindowPromptedHasNoDesktop(t *testing.T) {
 		t.Fatalf("wake-up turn: %s", status)
 	}
 
-	// A prompt Hermes queued behind a turn prompts the next one.
+	// A prompt Hermes queued behind a turn under way prompts the next one.
 	m := &member{sessions: map[string]*liveSession{}, commands: map[string]*companionCommand{}}
 	u := &upstream{}
+	m.session(fakeRuntime).turn = true
 	m.prompted(fakeRuntime, u, true)
 	s := m.sessions[fakeRuntime]
 	if s.prompter != nil {
@@ -655,6 +656,31 @@ func TestAWakeUpTurnNoWindowPromptedHasNoDesktop(t *testing.T) {
 	m.companionTurnEnded(fakeRuntime, s)
 	if s.prompter != nil {
 		t.Fatal("the prompter outlived its turn")
+	}
+}
+
+func TestAPromptQueuedAfterTheTurnEndedPromptsTheTurnHermesStartsForIt(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
+	w.waitFor(func(f frame) bool { return isEvent(f, "message.complete") })
+	// The member answers at once, while Hermes still finishes the turn that
+	// ended: it queues the prompt and starts its turn with no message.complete
+	// in between (seen with the pinned Hermes, #412).
+	w.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"queued"}`)
+	w.waitFor(func(f frame) bool { return isEvent(f, "message.start") })
+	h.started(conn, fakeRuntime, "call-1", "wake", `{}`)
+	h.observed(w, conn)
+	results := h.calls("wake", `{}`)
+	wake := command(w)
+	if wake.Payload.Action != "wake" {
+		t.Fatalf("command = %+v", wake)
+	}
+	if response := answer(w, fakeRuntime, wake.Payload.CommandID, `"ok":true,"result":{"status":"ok"}`); len(response.Error) > 0 {
+		t.Fatalf("answer refused: %s", response.Error)
+	}
+	if result := resultOf(t, results); result["status"] != "ok" {
+		t.Fatalf("result = %v", result)
 	}
 }
 
