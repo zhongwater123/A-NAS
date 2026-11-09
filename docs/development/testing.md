@@ -1,6 +1,6 @@
 # 测试与验证
 
-更新时间：2026-10-27
+更新时间：2026-11-06
 
 本文维护检查目标、测试依赖与覆盖范围。机器配置从[开发环境入口](LOCAL_ENVIRONMENT.md)选择；变更需要执行哪些检查，以 [AGENTS.md](../../AGENTS.md#验证) 为准。
 
@@ -20,6 +20,30 @@
 向量索引的测试（`internal/vectorindex` 与相册的同步）运行 [`deploy/qdrant/qdrant.json`](../../deploy/qdrant/qdrant.json) 固定的 Qdrant 二进制。在 Linux x86_64 开发环境中先运行一次 `scripts/fetch-qdrant.sh`：它下载官方压缩包，核对大小与 SHA-256，把二进制留在 `build/qdrant/<sha256>/`。测试默认取这个位置，也可以用 `ANAS_QDRANT_BINARY` 指定。缺少二进制时这些测试跳过；设 `ANAS_QDRANT_REQUIRED=1` 时改为失败，CI 就是这样设的。ext4 副本不带 `build/`，复制后再把 `build/qdrant` 一并复制过去，或在副本中重新获取。
 
 清单目前固定 Linux x86_64 包。其他架构使用 `ANAS_QDRANT_BINARY` 前需自行验证同版本二进制的可运行性；项目尚无已验证的 ARM64 完整门禁流程。完整检查须设置 `ANAS_QDRANT_REQUIRED=1`，缺失依赖就失败；该标志不会让不兼容的二进制变得可运行。读取及跳过逻辑见 [`vectorindextest`](../../internal/vectorindex/vectorindextest/vectorindextest.go)。
+
+## 测试素材
+
+测试用的大文件与模型（[拉取模型](ai-development.md#拉取模型)）放在同一个私有仓库 [zhongwater123/A-NAS-assets](https://github.com/zhongwater123/A-NAS-assets) 中，每套素材一个 Release，附 `SHA256SUMS`。仓库开启了不可变 Release，补充素材就发新的 Release。读取需要仓库所有者把账号加为协作者。
+
+| Release | 内容 |
+|---|---|
+| [`videos-dji-v1`](https://github.com/zhongwater123/A-NAS-assets/releases/tag/videos-dji-v1) | DJI 相机存储卡中的全部 MP4：582 个，91.4 GiB，2026 年 5、8、10 月拍摄。不含 `.LRF` 低清预览与照片 |
+
+拉取全部，或用 `-p` 只拉一部分（连同 `SHA256SUMS`）：
+
+```bash
+gh release download videos-dji-v1 --repo zhongwater123/A-NAS-assets --dir DIR --skip-existing
+gh release download videos-dji-v1 --repo zhongwater123/A-NAS-assets --dir DIR --skip-existing -p 'DJI_202608*' -p SHA256SUMS
+```
+
+2 GiB 以上的文件超过 GitHub 单个附件的上限，按 1 GiB 切成 `<文件名>.part-NN`，目前只有 `DJI_20261004133059_0885_D.MP4`。在 DIR 中拼回后核对（macOS 用 `shasum -a 256 -c`）：
+
+```bash
+cat DJI_20261004133059_0885_D.MP4.part-* > DJI_20261004133059_0885_D.MP4 && rm DJI_20261004133059_0885_D.MP4.part-*
+sha256sum -c --ignore-missing SHA256SUMS
+```
+
+gh 下载时直接写入最终文件名，中断后 `--skip-existing` 会保留不完整的文件，核对失败的删掉后重跑。2026-11-04 实测下载约 1.7 MB/s，全部拉取约需 16 小时。
 
 ## Web 桌面
 
