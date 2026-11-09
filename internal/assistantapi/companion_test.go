@@ -1,6 +1,7 @@
 package assistantapi
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -26,6 +27,7 @@ func init() {
 	// given up on sooner.
 	companionReceipt = 2 * time.Second
 	companionLate = 600 * time.Millisecond
+	companionBody = time.Second
 }
 
 const (
@@ -1181,5 +1183,38 @@ func TestAMembersCallsUnderWayAreBounded(t *testing.T) {
 	api.companionCallEnds(uid)
 	if data := post(); data["status"] != "no_desktop" {
 		t.Fatalf("within the bound: %v", data)
+	}
+	for range maxCompanionWaiting - 1 {
+		api.companionCallEnds(uid)
+	}
+
+	// Callers that send their headers and never their bodies hold no place,
+	// and are refused once companionBody passed.
+	var stalled []net.Conn
+	for range maxCompanionWaiting + 1 {
+		conn, err := net.Dial("unix", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		if _, err := io.WriteString(conn, "POST /call HTTP/1.1\r\nHost: companion\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		stalled = append(stalled, conn)
+	}
+	time.Sleep(companionBody / 4)
+	if data := post(); data["status"] != "no_desktop" {
+		t.Fatalf("beside callers that send no body: %v", data)
+	}
+	for _, conn := range stalled {
+		_ = conn.SetReadDeadline(time.Now().Add(companionBody + frameWait))
+		response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err != nil {
+			t.Fatalf("a caller that sends no body: %v", err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("a caller that sends no body: %d", response.StatusCode)
+		}
 	}
 }

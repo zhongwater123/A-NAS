@@ -76,6 +76,9 @@ var (
 	// companionLate is how long a call waits for its tool.start, which comes
 	// on another connection and may arrive after it.
 	companionLate = 1500 * time.Millisecond
+	// companionBody is how long a caller on the socket has to send a call
+	// once its headers came.
+	companionBody = 5 * time.Second
 	// companionHelper is how long after a subagent started a companion tool
 	// its call may still arrive, and companionStale the same for a turn's own
 	// tool.start: Hermes's 120 s per call (managed-config.yaml), and some. A
@@ -223,6 +226,23 @@ func (h *Handler) companionCallHTTP(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "assistant_unavailable", "the companion is not available on this device")
 		return
 	}
+	// The call is read before it counts against the member's bound, and
+	// within companionBody: a caller that sends its headers and never its
+	// body holds none of the member's places. A refused body keeps the
+	// deadline, or the server would wait for the rest of it before answering;
+	// a call read loses it, since the server's wait for the connection to
+	// close, which ends the call early, would meet it too.
+	var call struct {
+		Tool string          `json:"tool"`
+		Args json.RawMessage `json:"args"`
+	}
+	body := http.NewResponseController(w)
+	_ = body.SetReadDeadline(time.Now().Add(companionBody))
+	if err := httpjson.Decode(w, r, maxCompanionCall, &call); err != nil {
+		httpjson.WriteDecodeError(w, err, "invalid_request", "the request body is not valid JSON")
+		return
+	}
+	_ = body.SetReadDeadline(time.Time{})
 	if !h.companionCallBegins(uid) {
 		httpjson.Write(w, http.StatusOK, map[string]any{"status": companionBusy, "reason": "rate-limited"})
 		return
@@ -239,14 +259,6 @@ func (h *Handler) companionCallHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case !accountid.ValidAssistantAccount(user.Username):
 		httpjson.WriteError(w, http.StatusForbidden, "assistant_unavailable", "this account has no assistant")
-		return
-	}
-	var call struct {
-		Tool string          `json:"tool"`
-		Args json.RawMessage `json:"args"`
-	}
-	if err := httpjson.Decode(w, r, maxCompanionCall, &call); err != nil {
-		httpjson.WriteDecodeError(w, err, "invalid_request", "the request body is not valid JSON")
 		return
 	}
 	httpjson.Write(w, http.StatusOK, h.companionCall(r.Context(), user.Username, call.Tool, call.Args))
