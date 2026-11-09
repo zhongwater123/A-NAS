@@ -112,6 +112,8 @@ describe("the companion on the desktop", () => {
       expect(credit.title).toContain(part);
     // Above the desktop's icons, below its windows.
     expect(credit.style.getPropertyValue("--dsh-pet-z")).toBe("60");
+    // Out of the desktop VNAS reads (AssistantPanel's exclude): VNAS has its own tools for the companion.
+    expect(pet.closest("[data-vnas-overlay]")).not.toBeNull();
     // Only installed animations play: the first is always the idle one.
     expect(fetched[0]).toBe(IDLE);
     expect(companionReady()).toBe(true);

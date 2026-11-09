@@ -407,9 +407,11 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   // card/animation-flow.ts); on such a NAS its bubble shows on its own.
   const say =
     leaves.say?.kind === "say" && !animations.events.whisper?.length ? { ...leaves.say, anim: false } : leaves.say;
-  // dsh-pet's tooltip names the pet; the credit is the title around it.
+  // dsh-pet's tooltip names the pet; the credit is the title around it. VNAS moves the companion
+  // with its own tools: the desktop it reads leaves the companion out, as it does its toasts, since a
+  // click through the browser tools would wake it or take its lock back.
   return (
-    <div style={layer} title={credit}>
+    <div style={layer} title={credit} data-vnas-overlay="">
       <PetCard cfg={cfg} {...leaves} say={say} arena={arena} paused={paused} onPlace={remember} />
     </div>
   );
