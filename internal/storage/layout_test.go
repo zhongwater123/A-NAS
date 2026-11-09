@@ -391,8 +391,8 @@ func TestAMirrorShowsTheSpaceItCannotUseYet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlanVolume() error = %v", err)
 	}
-	if kinds := actionKinds(plan); !slices.Equal(kinds, []string{"erase_signatures", "create_partition_table", "add_devices", "rebalance"}) {
-		t.Fatalf("actions = %q, want the disk added and block groups moved", kinds)
+	if kinds := actionKinds(plan); !slices.Equal(kinds, []string{"erase_signatures", "create_partition_table", "add_devices", "spread"}) {
+		t.Fatalf("actions = %q, want the disk added and the files spread", kinds)
 	}
 	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
 		t.Fatal(err)
@@ -414,8 +414,8 @@ func TestAMirrorShowsTheSpaceItCannotUseYet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := volumes[0]; got.Conversion != nil || got.Rebalance == nil || got.Rebalance.State != storage.ConversionRunning || got.Rebalance.UnusableBytes != 230*gb {
-		t.Fatalf("volume = %+v, rebalance = %+v; want 230 GB unusable while block groups move", got, got.Rebalance)
+	if got := volumes[0]; got.Conversion != nil || got.Spread == nil || got.Spread.State != storage.SpreadRunning || got.Spread.UnusableBytes != 230*gb {
+		t.Fatalf("volume = %+v, spread = %+v; want 230 GB unusable while the files are spread", got, got.Spread)
 	}
 	if err := service.ContinueConversion(ctx, storageAdministrator); !errors.Is(err, storage.ErrNoConversion) || executor.continued != 0 {
 		t.Fatalf("continue while moving = %v (%d calls), want ErrNoConversion", err, executor.continued)
@@ -425,8 +425,8 @@ func TestAMirrorShowsTheSpaceItCannotUseYet(t *testing.T) {
 	// next check, or now when asked.
 	reader.state.DataVolume.Operation = hoststate.VolumeOperationNone
 	volumes, _ = service.ListVolumes(ctx)
-	if volumes[0].Rebalance == nil || volumes[0].Rebalance.State != storage.ConversionWaiting {
-		t.Fatalf("rebalance = %+v, want waiting", volumes[0].Rebalance)
+	if volumes[0].Spread == nil || volumes[0].Spread.State != storage.SpreadWaiting {
+		t.Fatalf("spread = %+v, want waiting", volumes[0].Spread)
 	}
 	if err := service.ContinueConversion(ctx, storageAdministrator); err != nil || executor.continued != 1 {
 		t.Fatalf("continue a stopped move = %v (%d calls)", err, executor.continued)
@@ -436,8 +436,68 @@ func TestAMirrorShowsTheSpaceItCannotUseYet(t *testing.T) {
 		{DevID: 1, SizeBytes: 500 * gb, AllocatedBytes: 320 * gb}, {DevID: 2, SizeBytes: 500 * gb, AllocatedBytes: 320 * gb}, {DevID: 3, SizeBytes: 500 * gb, AllocatedBytes: 320 * gb},
 	}
 	volumes, _ = service.ListVolumes(ctx)
-	if volumes[0].Rebalance != nil {
-		t.Fatalf("rebalance = %+v once spread, want none", volumes[0].Rebalance)
+	if volumes[0].Spread != nil {
+		t.Fatalf("spread = %+v once spread, want none", volumes[0].Spread)
+	}
+
+	// A spread that finished with space unusable waits for the administrator.
+	reader.state.DataVolume.Devices = []hoststate.VolumeDevice{
+		{DevID: 1, SizeBytes: 500 * gb, AllocatedBytes: 480 * gb}, {DevID: 2, SizeBytes: 500 * gb, AllocatedBytes: 480 * gb}, {DevID: 3, SizeBytes: 500 * gb},
+	}
+	reader.state.DataVolume.SpreadStopped = true
+	volumes, _ = service.ListVolumes(ctx)
+	if volumes[0].Spread == nil || volumes[0].Spread.State != storage.SpreadStopped || volumes[0].Spread.UnusableBytes != 230*gb {
+		t.Fatalf("spread = %+v, want stopped with 230 GB unusable", volumes[0].Spread)
+	}
+	if err := service.ContinueConversion(ctx, storageAdministrator); err != nil || executor.continued != 2 {
+		t.Fatalf("continue a stopped spread = %v (%d calls)", err, executor.continued)
+	}
+
+	// Btrfs balances only a writable volume: a read-only one shows no spread.
+	for index := range reader.state.Disks {
+		if reader.state.Disks[index].Role == hoststate.DiskRoleData {
+			reader.state.Disks[index].FilesystemReadOnly = true
+		}
+	}
+	volumes, _ = service.ListVolumes(ctx)
+	if volumes[0].State != storage.VolumeStateReadOnly || volumes[0].Spread != nil {
+		t.Fatalf("read-only volume = %+v, spread = %+v; want no spread", volumes[0], volumes[0].Spread)
+	}
+}
+
+// The spread goes on after the new space became usable: the balance
+// rewrites block groups until the Host Agent cancels it. While Btrfs runs
+// any balance, btrfs device add would fail after erasing the new disks, so
+// no disk joins: neither when the plan is made nor when it runs.
+func TestNoDiskJoinsWhileBtrfsBalances(t *testing.T) {
+	ctx := context.Background()
+	service, reader, executor := joinedMirror(t, 100)
+	reader.state.DataVolume.Operation = hoststate.VolumeOperationBalance
+
+	volumes, err := service.ListVolumes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := volumes[0].Spread; got == nil || got.State != storage.SpreadRunning || got.UnusableBytes != 0 {
+		t.Fatalf("spread = %+v, want running with no space unusable", got)
+	}
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, ""); !errors.Is(err, storage.ErrVolumeBusy) {
+		t.Fatalf("plan during a balance error = %v, want ErrVolumeBusy", err)
+	}
+
+	reader.state.DataVolume.Operation = hoststate.VolumeOperationNone
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
+		t.Fatal(err)
+	}
+	// The Host Agent's check started spreading after the plan was made.
+	reader.state.DataVolume.Operation = hoststate.VolumeOperationBalance
+	executed, err := service.ExecutePlan(ctx, storageAdministrator, plan.ID)
+	if !errors.Is(err, storage.ErrOperationAttention) || executed.State != storage.PlanStateNeedsAttention || len(executor.added) != 0 {
+		t.Fatalf("ExecutePlan() during a balance = %+v, %v (%d adds); want it stopped before the Host Agent", executed, err, len(executor.added))
 	}
 }
 

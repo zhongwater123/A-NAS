@@ -275,6 +275,10 @@ type DataVolume struct {
 	// Devices is how Btrfs allocates each device; nil when it could not be
 	// read or a device is missing.
 	Devices []VolumeDevice
+	// SpreadStopped says the Host Agent spread the mirror over these disks
+	// and space stayed unusable: it tries again only when the disks change
+	// or the administrator asks.
+	SpreadStopped bool
 }
 
 type State struct {

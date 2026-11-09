@@ -107,6 +107,38 @@ func btrfsShow(uuid string, devices ...string) string {
 	return out + "\n"
 }
 
+// Every host-state request reads the host; the devices' allocation is read
+// with btrfs at most once in 30 seconds, and again for another volume.
+func TestVolumeDevicesAreReadOnceInAWhile(t *testing.T) {
+	const uuid = "09e275fe-794a-458d-8200-b6e67c55cc22"
+	now := time.Unix(1000, 0)
+	reads := 0
+	reader := newReader(dependencies{
+		now: func() time.Time { return now },
+		readBtrfsDevices: func(ctx context.Context, _ string) ([]byte, error) {
+			reads++
+			if _, ok := ctx.Deadline(); !ok {
+				t.Error("btrfs filesystem show runs without a deadline")
+			}
+			return []byte(btrfsShow(uuid, "\tdevid    1 size 1000 used 600 path /dev/sdb1\n", "\tdevid    2 size 1000 used 400 path /dev/sda1\n")), nil
+		},
+	})
+	for range 3 {
+		if devices := reader.volumeDevices(context.Background(), uuid); len(devices) != 2 {
+			t.Fatalf("volumeDevices() = %+v, want both devices", devices)
+		}
+	}
+	if reads != 1 {
+		t.Fatalf("btrfs ran %d times for three reads in a moment, want once", reads)
+	}
+	now = now.Add(btrfsDevicesFor)
+	reader.volumeDevices(context.Background(), uuid)
+	reader.volumeDevices(context.Background(), "aaaaaaaa-0000-4000-8000-000000000000")
+	if reads != 3 {
+		t.Fatalf("btrfs ran %d times, want again after 30 s and for another volume", reads)
+	}
+}
+
 // Only a complete list of the filesystem's devices says how Btrfs allocates
 // them; a missing device, or one sysfs knows and the tool does not list,
 // leaves it unknown.
@@ -145,8 +177,8 @@ func TestVolumeDevicesNeedEveryDeviceOfTheFilesystem(t *testing.T) {
 		{name: "the same devid twice", root: two, output: btrfsShow(uuid, first, first)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := volumeDevices(test.root, uuid, []byte(test.output)); !reflect.DeepEqual(got, test.want) {
-				t.Fatalf("volumeDevices() = %+v, want %+v", got, test.want)
+			if got := VolumeDevices(test.root, uuid, []byte(test.output)); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("VolumeDevices() = %+v, want %+v", got, test.want)
 			}
 		})
 	}

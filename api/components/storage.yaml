@@ -24,20 +24,24 @@ schemas:
       availableBytes: { type: integer, format: int64, minimum: 0 }
       state: { type: string, enum: [creating, available, unavailable, read_only] }
       conversion: { $ref: "#/schemas/VolumeConversion" }
-      rebalance: { $ref: "#/schemas/VolumeRebalance" }
-  VolumeRebalance:
+      spread: { $ref: "#/schemas/VolumeSpread" }
+  VolumeSpread:
     type: object
     additionalProperties: false
     required: [state, unusableBytes]
     description: >-
-      Present while a mirror cannot use part of its disks' space because each block group needs room on two disks,
-      such as after a disk joined two full ones, and the Host Agent moves block groups off the fullest disks.
+      Present while a mirror cannot use part of its disks' space, because each block group needs room on two disks,
+      such as after a disk joined two full ones, until the Host Agent spreads the files over all disks; and while
+      Btrfs balances a volume on several disks, during which no disk can join it.
     properties:
       state:
         type: string
-        enum: [running, waiting]
-        description: "running: Btrfs moves block groups now. waiting: moving stopped and continues at the Host Agent's next check."
-      unusableBytes: { type: integer, format: int64, minimum: 0, description: Space for files the mirror cannot use until block groups move. }
+        enum: [running, waiting, stopped]
+        description: >-
+          running: Btrfs balances the volume now. waiting: spreading stopped, for example at shutdown, and continues
+          at the Host Agent's next check. stopped: spreading finished with space still unusable, for lack of room on
+          the old disks; it is tried again when the disks change or on request.
+      unusableBytes: { type: integer, format: int64, minimum: 0, description: Space for files the mirror cannot use until its files are spread; 0 once all of it is usable. }
   VolumeConversion:
     type: object
     additionalProperties: false
@@ -59,7 +63,7 @@ schemas:
         type: string
         description: >-
           erase_signatures, create_partition_table, create_btrfs, mount_volume, add_devices, convert_layout, or
-          rebalance (block groups move onto the new disks so that a mirror can use them).
+          spread (the files are spread over all disks so that a mirror can use the new ones).
       description: { type: string }
   PlannedDisk:
     type: object

@@ -28,7 +28,6 @@ var (
 	ErrPlanNotFound   = errors.New("execution plan not found")
 	ErrPlanExpired    = errors.New("execution plan expired")
 	ErrConfirmation   = errors.New("confirmation phrase does not match")
-	ErrVolumeBusy     = errors.New("the data volume is converting to another layout or spreading over its disks")
 	ErrInvalidLayout  = errors.New("the layout does not fit the number of disks")
 	ErrLayoutTooSmall = errors.New("the files on the data volume do not fit the layout")
 	// ErrLayoutChange: disks join a volume on several disks in its layout;
@@ -264,7 +263,7 @@ func (s *Service) PlanVolume(ctx context.Context, actor accounts.User, diskIDs [
 		State: PlanStatePlanned, CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute),
 	}
 	sizes := make([]uint64, 0, len(disks))
-	rebalance := false
+	spread := false
 	for _, disk := range disks {
 		plan.Disks = append(plan.Disks, plannedDisk(disk))
 		sizes = append(sizes, disk.CapacityBytes)
@@ -296,9 +295,7 @@ func (s *Service) PlanVolume(ctx context.Context, actor accounts.User, diskIDs [
 		if volume.State != VolumeStateAvailable || state.DataVolume == nil {
 			return ExecutionPlan{}, ErrVolumeUnavailable
 		}
-		// Btrfs adds no disk while it spreads the volume; a stopped spread
-		// does not stand in the way.
-		if volume.Conversion != nil || (volume.Rebalance != nil && volume.Rebalance.State == ConversionRunning) {
+		if busy(volume, state.DataVolume) {
 			return ExecutionPlan{}, ErrVolumeBusy
 		}
 		members := diskSizes(state, volume.DiskIDs)
@@ -313,9 +310,9 @@ func (s *Service) PlanVolume(ctx context.Context, actor accounts.User, diskIDs [
 				return ExecutionPlan{}, ErrLayoutTooSmall
 			}
 		}
-		rebalance = plan.Layout == current.Layout && strandsSpace(plan.Layout, state.DataVolume.Devices, sizes)
+		spread = plan.Layout == current.Layout && strandsSpace(plan.Layout, state.DataVolume.Devices, sizes)
 	}
-	plan.Actions = planActions(plan.Kind, plan.Layout, current.Layout, rebalance)
+	plan.Actions = planActions(plan.Kind, plan.Layout, current.Layout, spread)
 	if strings.TrimSpace(plan.ID) == "" {
 		return ExecutionPlan{}, errors.New("generate execution plan ID: empty ID")
 	}
@@ -416,25 +413,28 @@ func diskSizes(state hoststate.State, diskIDs []string) []uint64 {
 var layoutNames = map[Layout]string{LayoutSingle: "单盘", LayoutMirror: "镜像（RAID 1）", LayoutSpan: "扩容（不冗余）", LayoutStripe: "条带（RAID 0）"}
 
 // strandsSpace reports whether disks of the sizes, empty, joining the
-// devices leave the layout unable to use part of the space until block
-// groups move: the old disks are too full to pair with the new ones.
+// devices leave the layout unable to use part of the space until the files
+// are spread: the old disks are too full to pair with the new ones.
 func strandsSpace(layout Layout, devices []hoststate.VolumeDevice, sizes []uint64) bool {
 	if devices == nil {
 		return false
 	}
 	joined := slices.Clone(devices)
-	var next uint64
-	for _, device := range devices {
-		next = max(next, device.DevID)
-	}
 	for _, size := range sizes {
-		next++
-		joined = append(joined, hoststate.VolumeDevice{DevID: next, SizeBytes: size})
+		joined = append(joined, hoststate.VolumeDevice{SizeBytes: size})
 	}
 	return datavolume.Unusable(layout, joined) > 0
 }
 
-func planActions(kind PlanKind, layout, current Layout, rebalance bool) []Action {
+// busy reports whether disks cannot join the volume now: it converts, or
+// Btrfs runs a balance, such as the Host Agent's spread, which goes on after
+// the new space became usable. btrfs device add fails during a balance,
+// after the new disks were erased.
+func busy(volume Volume, mounted *hoststate.DataVolume) bool {
+	return volume.Conversion != nil || mounted.Operation != hoststate.VolumeOperationNone
+}
+
+func planActions(kind PlanKind, layout, current Layout, spread bool) []Action {
 	actions := []Action{
 		{Kind: "erase_signatures", Description: "清除目标硬盘上现有的分区、文件系统和阵列签名"},
 		{Kind: "create_partition_table", Description: "在每块目标硬盘上创建 GPT 和单个 A-NAS 数据分区"},
@@ -449,8 +449,8 @@ func planActions(kind PlanKind, layout, current Layout, rebalance bool) []Action
 	switch {
 	case layout != current:
 		return append(actions, Action{Kind: "convert_layout", Description: "在后台把数据卷从" + layoutNames[current] + "转换为" + layoutNames[layout] + "，期间可以照常使用"})
-	case rebalance:
-		return append(actions, Action{Kind: "rebalance", Description: "在后台把已有文件分散到全部硬盘，新增的空间才能全部用上，期间可以照常使用"})
+	case spread:
+		return append(actions, Action{Kind: "spread", Description: "在后台把已有文件分散到全部硬盘，新增的空间才能全部用上，期间可以照常使用"})
 	}
 	return actions
 }
@@ -567,8 +567,13 @@ func (s *Service) ExecutePlan(ctx context.Context, actor accounts.User, planID s
 			}
 		case plan.Kind == PlanKindAddDisks && exists:
 			observed := observeVolume(current, state)
-			if observed.State != VolumeStateAvailable || observed.Conversion != nil || state.DataVolume == nil {
+			if observed.State != VolumeStateAvailable || state.DataVolume == nil {
 				return s.needsAttention(planID, ErrVolumeChanged)
+			}
+			// The Host Agent may have started converting or spreading since
+			// the plan was made.
+			if busy(observed, state.DataVolume) {
+				return s.needsAttention(planID, ErrVolumeBusy)
 			}
 		default:
 			return s.needsAttention(planID, ErrVolumeChanged)
@@ -682,7 +687,7 @@ func (s *Service) ContinueConversion(ctx context.Context, actor accounts.User) e
 	if err != nil {
 		return err
 	}
-	if len(volumes) == 0 || !stopped(volumes[0]) {
+	if len(volumes) == 0 || !waitsForHostAgent(volumes[0]) {
 		return ErrNoConversion
 	}
 	if s.executor == nil {
@@ -691,13 +696,14 @@ func (s *Service) ContinueConversion(ctx context.Context, actor accounts.User) e
 	return s.executor.ContinueConversion(ctx)
 }
 
-// stopped reports whether the volume's conversion, or moving its block
-// groups, waits for the Host Agent's next check.
-func stopped(volume Volume) bool {
+// waitsForHostAgent reports whether the volume's conversion, or spreading
+// it, stopped and waits for the Host Agent: at its next check, or, for a
+// spread that left space unusable, for the administrator.
+func waitsForHostAgent(volume Volume) bool {
 	if volume.Conversion != nil {
 		return volume.Conversion.State == ConversionWaiting
 	}
-	return volume.Rebalance != nil && volume.Rebalance.State == ConversionWaiting
+	return volume.Spread != nil && volume.Spread.State != SpreadRunning
 }
 
 // currentVolumeLocked is the data volume this device created, with the
@@ -729,7 +735,7 @@ func (s *Service) currentVolumeLocked() (Volume, bool) {
 // mounted and writable, its size and free space, its disks, and how far a
 // conversion to its layout has come.
 func observeVolume(volume Volume, state hoststate.State) Volume {
-	volume.State, volume.AvailableBytes, volume.Conversion, volume.Rebalance = VolumeStateUnavailable, nil, nil, nil
+	volume.State, volume.AvailableBytes, volume.Conversion, volume.Spread = VolumeStateUnavailable, nil, nil, nil
 	var raw []uint64
 	for _, disk := range state.Disks {
 		if slices.Contains(volume.DiskIDs, disk.ID.String()) {
@@ -775,11 +781,19 @@ func observeVolume(volume Volume, state hoststate.State) Volume {
 		}
 		return volume
 	}
-	if unusable := datavolume.Unusable(volume.Layout, mounted.Devices); unusable > 0 {
-		volume.Rebalance = &Rebalance{State: ConversionWaiting, UnusableBytes: unusable}
-		if mounted.Operation == hoststate.VolumeOperationBalance {
-			volume.Rebalance.State = ConversionRunning
-		}
+	// A balance runs on a writable volume only, and a stopped spread can
+	// continue only there.
+	if volume.State != VolumeStateAvailable {
+		return volume
+	}
+	unusable := datavolume.Unusable(volume.Layout, mounted.Devices)
+	switch {
+	case mounted.Operation == hoststate.VolumeOperationBalance:
+		volume.Spread = &Spread{State: SpreadRunning, UnusableBytes: unusable}
+	case unusable > 0 && mounted.SpreadStopped:
+		volume.Spread = &Spread{State: SpreadStopped, UnusableBytes: unusable}
+	case unusable > 0:
+		volume.Spread = &Spread{State: SpreadWaiting, UnusableBytes: unusable}
 	}
 	return volume
 }

@@ -368,7 +368,7 @@ components:
     VolumeLayout: { $ref: "components/storage.yaml#/schemas/VolumeLayout" }
     Volume: { $ref: "components/storage.yaml#/schemas/Volume" }
     VolumeConversion: { $ref: "components/storage.yaml#/schemas/VolumeConversion" }
-    VolumeRebalance: { $ref: "components/storage.yaml#/schemas/VolumeRebalance" }
+    VolumeSpread: { $ref: "components/storage.yaml#/schemas/VolumeSpread" }
     StorageAction: { $ref: "components/storage.yaml#/schemas/StorageAction" }
     PlannedDisk: { $ref: "components/storage.yaml#/schemas/PlannedDisk" }
     StoragePlan: { $ref: "components/storage.yaml#/schemas/StoragePlan" }

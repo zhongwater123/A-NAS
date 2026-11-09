@@ -1,7 +1,7 @@
 import { Archive, ChevronLeft, CircleCheck, Database, HardDrive, Layers, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
-import type { StoragePlan, Volume, VolumeConversion, VolumeLayout, VolumeRebalance } from "../api.generated";
+import type { StoragePlan, Volume, VolumeConversion, VolumeLayout, VolumeSpread } from "../api.generated";
 import { HostState } from "../desktop/api";
 import type { HostStateView } from "../desktop/useHostState";
 import { formatBytes, formatNominalCapacity } from "../lib/bytes";
@@ -33,9 +33,9 @@ export interface VolumesView {
 }
 
 // useVolumes reads the data volume again when a storage plan changes state,
-// and while the volume converts or moves block groups: every few seconds so
-// the progress moves, or every half minute while a stopped one waits for the
-// Host Agent.
+// and while the volume converts or its files are spread: every few seconds
+// so the progress moves, or every half minute while a stopped one waits for
+// the Host Agent.
 export function useVolumes(planState?: string): VolumesView {
   const [items, setItems] = useState<Volume[]>();
   const [readAt, setReadAt] = useState(0);
@@ -56,8 +56,8 @@ export function useVolumes(planState?: string): VolumesView {
   useEffect(() => {
     void refresh();
   }, [refresh, planState]);
-  const moving = items?.find((volume) => volume.conversion || volume.rebalance);
-  const conversion = moving?.conversion?.state ?? moving?.rebalance?.state;
+  const moving = items?.find((volume) => volume.conversion || volume.spread);
+  const conversion = moving?.conversion?.state ?? moving?.spread?.state;
   useEffect(() => {
     if (!conversion) return;
     const timer = window.setInterval(() => void refresh(), conversion === "running" ? 5000 : 30_000);
@@ -118,7 +118,7 @@ export function StorageSection({
     volume &&
       volume.state === "available" &&
       !volume.conversion &&
-      volume.rebalance?.state !== "running" &&
+      volume.spread?.state !== "running" &&
       usable.length > 0,
   );
   const showWizard = isAdmin && (Boolean(flow.plan) || (wizardOpen && (noVolume || canAdd)));
@@ -261,7 +261,7 @@ function SpareDisks({
 }) {
   const why = volume.conversion
     ? "数据卷转换完成后才能加入新硬盘。"
-    : volume.rebalance?.state === "running"
+    : volume.spread?.state === "running"
       ? "文件分散完后才能加入新硬盘。"
       : volume.state !== "available"
         ? "数据卷在线且可写时才能加入新硬盘。"
@@ -361,8 +361,8 @@ function VolumeCard({
           onRefresh={onRefresh}
         />
       )}
-      {volume.rebalance && !volume.conversion && (
-        <RebalanceProgress volume={volume} rebalance={volume.rebalance} isAdmin={isAdmin} onRefresh={onRefresh} />
+      {volume.spread && !volume.conversion && (
+        <SpreadProgress volume={volume} spread={volume.spread} isAdmin={isAdmin} onRefresh={onRefresh} />
       )}
       {members.length > 0 && (
         <ul className={styles.volMembers} aria-label="组成数据卷的硬盘">
@@ -465,33 +465,48 @@ function useContinue(volume: Volume, onRefresh: () => Promise<void>) {
   return { busy, error, resume };
 }
 
-// RebalanceProgress shows the space a mirror cannot use until its files are
-// spread onto a disk that joined full ones. Btrfs reports no progress for
-// it, only what is left.
-function RebalanceProgress({
+// spreadText is what the card says of each state of a spread. Btrfs
+// reports no progress for it, only the space still unusable.
+const spreadText = {
+  running: {
+    title: "正在把文件分散到全部硬盘",
+    note: "期间可以照常使用，关机或重启后会自动继续；完成前不能加入新硬盘。",
+  },
+  waiting: { title: "分散文件已暂停", note: "系统会在 15 分钟内接着分散；停下来的原因记录在“日志”的系统日志中。" },
+  stopped: {
+    title: "分散后仍有空间用不上",
+    note: "原有硬盘剩余的空间太少，文件没能分散开。删除或移走一些文件后点“继续分散”；原因记录在“日志”的系统日志中。",
+  },
+} satisfies Record<VolumeSpread["state"], { title: string; note: string }>;
+
+// SpreadProgress shows the space a mirror cannot use until its files are
+// spread onto a disk that joined full ones, and a balance that still runs.
+function SpreadProgress({
   volume,
-  rebalance,
+  spread,
   isAdmin,
   onRefresh,
 }: {
   volume: Volume;
-  rebalance: VolumeRebalance;
+  spread: VolumeSpread;
   isAdmin: boolean;
   onRefresh: () => Promise<void>;
 }) {
   const { busy, error, resume } = useContinue(volume, onRefresh);
-  const running = rebalance.state === "running";
+  const running = spread.state === "running";
+  const text = spreadText[spread.state];
   return (
     <section className={`${styles.volConvert} ${running ? "" : styles.waiting}`} aria-label="分散文件">
       <div className={styles.volConvertHead}>
-        <strong>{running ? "正在把文件分散到全部硬盘" : "分散文件已暂停"}</strong>
+        <strong>{text.title}</strong>
       </div>
-      <p>还有 {formatBytes(rebalance.unusableBytes)} 空间要等文件分散完才能使用</p>
-      <p className={styles.volConvertNote}>
-        {running
-          ? "期间可以照常使用，关机或重启后会自动继续。"
-          : "系统会自动再试；停下来的原因记录在“日志”的系统日志中。"}
-      </p>
+      {spread.unusableBytes > 0 && (
+        <p>
+          还有 {formatBytes(spread.unusableBytes)} 空间
+          {spread.state === "stopped" ? "用不上" : "要等文件分散完才能使用"}
+        </p>
+      )}
+      <p className={styles.volConvertNote}>{text.note}</p>
       {!running && isAdmin && (
         <div className={styles.volConvertActions}>
           <button className={styles.setBtn} disabled={busy} onClick={() => void resume()}>

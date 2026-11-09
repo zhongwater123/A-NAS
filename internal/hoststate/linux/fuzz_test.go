@@ -62,9 +62,9 @@ func FuzzBtrfsDevices(f *testing.F) {
 		"\tdevid    1 size 500106788864 used 52613349376 path /dev/sdb1\n\tdevid    2 size 500106788864 used 52613349376 path /dev/sda1\n\n"))
 	f.Add([]byte("Label: none  uuid: " + uuid + "\n\tTotal devices 1 FS bytes used 1\n\tdevid 18446744073709551615 size 1 used 1 path x\n"))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		for _, device := range ParseBtrfsDevices(data, uuid) {
+		for _, device := range parseBtrfsDevices(data, uuid) {
 			if device.DevID == 0 || device.SizeBytes == 0 || device.AllocatedBytes > device.SizeBytes {
-				t.Fatalf("ParseBtrfsDevices() accepted %+v", device)
+				t.Fatalf("parseBtrfsDevices() accepted %+v", device)
 			}
 		}
 	})

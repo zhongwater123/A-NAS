@@ -39,6 +39,7 @@ type handler struct {
 	webSearch   websearchswitch.Switch
 	// reconcileFailed reports the last reconciliation of the data volume.
 	reconcileFailed func() bool
+	spreadStopped   func() bool
 	logger          *slog.Logger
 }
 
@@ -57,6 +58,9 @@ type Services struct {
 	// ReconcileFailed reports whether the Host Agent's last reconciliation of
 	// the data volume failed; the host state carries it (#166).
 	ReconcileFailed func() bool
+	// SpreadStopped reports whether spreading the mirror over its disks left
+	// space unusable and waits for the disks to change or the administrator.
+	SpreadStopped func() bool
 }
 
 func NewHandler(observer hoststate.Observer, logger *slog.Logger) http.Handler {
@@ -70,7 +74,8 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 	return &handler{
 		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
 		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots,
-		systemLogs: services.SystemLogs, webSearch: services.WebSearch, reconcileFailed: services.ReconcileFailed, logger: logger,
+		systemLogs: services.SystemLogs, webSearch: services.WebSearch, reconcileFailed: services.ReconcileFailed,
+		spreadStopped: services.SpreadStopped, logger: logger,
 	}
 }
 
@@ -169,6 +174,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state.ReconcileFailed = h.reconcileFailed != nil && h.reconcileFailed()
+	if state.DataVolume != nil && h.spreadStopped != nil {
+		state.DataVolume.SpreadStopped = h.spreadStopped()
+	}
 	httpjson.Write(w, http.StatusOK, wire.DocumentFromDomain(state))
 }
 

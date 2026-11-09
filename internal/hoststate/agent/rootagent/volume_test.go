@@ -122,10 +122,11 @@ func TestClientReadsTheDataVolumeAcrossDisks(t *testing.T) {
 	state.Disks[0].Role = hoststate.DiskRoleData
 	state.DataVolume = &hoststate.DataVolume{
 		FilesystemUUID: "09e275fe-794a-458d-8200-b6e67c55cc22", DiskIDs: []hoststate.ResourceID{state.Disks[0].ID},
-		Data:      []hoststate.ProfileUsage{{Profile: hoststate.ProfileSingle, UsedBytes: 7}, {Profile: hoststate.ProfileRAID1, UsedBytes: 3}},
-		Metadata:  []hoststate.ProfileUsage{{Profile: hoststate.ProfileRAID1, UsedBytes: 1}},
-		Operation: hoststate.VolumeOperationBalance,
-		Devices:   []hoststate.VolumeDevice{{DevID: 1, SizeBytes: 1000, AllocatedBytes: 900}, {DevID: 3, SizeBytes: 2000, AllocatedBytes: 0}},
+		Data:          []hoststate.ProfileUsage{{Profile: hoststate.ProfileSingle, UsedBytes: 7}, {Profile: hoststate.ProfileRAID1, UsedBytes: 3}},
+		Metadata:      []hoststate.ProfileUsage{{Profile: hoststate.ProfileRAID1, UsedBytes: 1}},
+		Operation:     hoststate.VolumeOperationBalance,
+		Devices:       []hoststate.VolumeDevice{{DevID: 1, SizeBytes: 1000, AllocatedBytes: 900}, {DevID: 3, SizeBytes: 2000, AllocatedBytes: 0}},
+		SpreadStopped: true,
 	}
 	client := agent.NewClient(serve(t, rootagent.NewHandler(observedState{state}, discardLogger())))
 
@@ -138,6 +139,26 @@ func TestClientReadsTheDataVolumeAcrossDisks(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Disks[1].Signatures, state.Disks[1].Signatures) {
 		t.Fatalf("signatures = %+v, want %+v", got.Disks[1].Signatures, state.Disks[1].Signatures)
+	}
+}
+
+// Whether spreading the mirror stopped is the Host Agent's own state; the
+// host state carries what it reports.
+func TestClientReadsWhetherSpreadingStopped(t *testing.T) {
+	state, err := fake.NewWithSpareDisk().Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Disks[0].Role = hoststate.DiskRoleData
+	state.DataVolume = &hoststate.DataVolume{FilesystemUUID: "09e275fe-794a-458d-8200-b6e67c55cc22", DiskIDs: []hoststate.ResourceID{state.Disks[0].ID}}
+	for _, stopped := range []bool{false, true} {
+		handler := rootagent.NewOperationsHandler(rootagent.Services{
+			Reader: observedState{state}, SpreadStopped: func() bool { return stopped },
+		}, discardLogger())
+		got, err := agent.NewClient(serve(t, handler)).Read(context.Background())
+		if err != nil || got.DataVolume == nil || got.DataVolume.SpreadStopped != stopped {
+			t.Fatalf("Read() data volume = %+v, %v; want spreading stopped %v", got.DataVolume, err, stopped)
+		}
 	}
 }
 

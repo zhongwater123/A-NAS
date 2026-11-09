@@ -128,7 +128,7 @@ func TestRootAMirrorSpreadsOntoAJoinedDisk(t *testing.T) {
 	if err := executor.writeMarker(volumeMarker{FilesystemUUID: uuid, FormatVersion: 1, Layout: datavolume.LayoutMirror}); err != nil {
 		t.Fatal(err)
 	}
-	before, err := executor.unusableSpace(ctx, uuid)
+	before, _, err := executor.measureSpread(ctx, uuid)
 	if err != nil || before == 0 {
 		t.Fatalf("unusable space after the disk joined = %d, %v; want some\n%s", before, err, run(t, "btrfs", "filesystem", "show", "--raw", mount))
 	}
@@ -150,11 +150,11 @@ func TestRootAMirrorSpreadsOntoAJoinedDisk(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	shown := run(t, "btrfs", "filesystem", "show", "--raw", mount)
-	after, err := executor.unusableSpace(ctx, uuid)
+	after, _, err := executor.measureSpread(ctx, uuid)
 	if err != nil || after != 0 {
 		t.Fatalf("unusable space = %d of %d before, %v; want all of it usable\n%s", after, before, err, shown)
 	}
-	devices := linuxhoststate.ParseBtrfsDevices([]byte(shown), uuid)
+	devices := linuxhoststate.VolumeDevices(os.DirFS("/"), uuid, []byte(shown))
 	if len(devices) != 3 || devices[2].AllocatedBytes == 0 {
 		t.Fatalf("devices = %+v, want block groups on the joined disk\n%s", devices, shown)
 	}

@@ -94,12 +94,14 @@ var (
 	btrfsShowDevice     = regexp.MustCompile(`^\s+devid\s+(\d+)\s+size\s+(\d+)\s+used\s+(\d+)\s+path\s+\S`)
 )
 
-// ParseBtrfsDevices reads from `btrfs filesystem show --raw` the devices of
+// parseBtrfsDevices reads from `btrfs filesystem show --raw` the devices of
 // the filesystem with the UUID: each device's size and the bytes its block
-// groups take. Sysfs lists neither. It is nil unless the output lists every
-// device the filesystem has, none of them missing, since the allocation of
-// a filesystem missing a device cannot be planned.
-func ParseBtrfsDevices(output []byte, uuid string) []hoststate.VolumeDevice {
+// groups take. Sysfs lists neither, and btrfs-progs prints this command, and
+// `btrfs device usage`, only as text (`--format json` is refused for both
+// in 6.14), so the lines are parsed here. It is nil unless the output lists
+// every device the filesystem has, none of them missing, since the
+// allocation of a filesystem missing a device cannot be planned.
+func parseBtrfsDevices(output []byte, uuid string) []hoststate.VolumeDevice {
 	var devices []hoststate.VolumeDevice
 	inside, total := false, 0
 	for line := range strings.Lines(string(output)) {
@@ -150,12 +152,14 @@ func ParseBtrfsDevices(output []byte, uuid string) []hoststate.VolumeDevice {
 	return devices
 }
 
-// volumeDevices is ParseBtrfsDevices checked against sysfs: the kernel's
-// devinfo/<devid> lists every device of the mounted filesystem, a missing
-// one included, so a device the tool does not list leaves the allocation
-// unknown.
-func volumeDevices(root fs.FS, uuid string, output []byte) []hoststate.VolumeDevice {
-	devices := ParseBtrfsDevices(output, uuid)
+// VolumeDevices reads the devices of the mounted Btrfs filesystem with the
+// UUID from the output of `btrfs filesystem show --raw`, checked against
+// sysfs (root is the filesystem root): the kernel's devinfo/<devid> lists
+// every device, a missing one included, so a device the tool does not list
+// leaves the allocation unknown (nil). The host state and the Host Agent's
+// spreading both read the devices through it.
+func VolumeDevices(root fs.FS, uuid string, output []byte) []hoststate.VolumeDevice {
+	devices := parseBtrfsDevices(output, uuid)
 	if devices == nil || root == nil {
 		return devices
 	}

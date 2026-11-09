@@ -127,9 +127,15 @@ type Executor struct {
 	logger        *slog.Logger
 	conversionMu  sync.Mutex
 	converting    bool
-	// stalledAt is the unusable space spreading the data volume left; the
-	// check leaves it until the allocation changes.
-	stalledAt uint64
+	// adding is set while disks are being added to the data volume: no
+	// balance may start then, or btrfs device add would fail.
+	adding bool
+	// spreadStopped says spreading the mirror over the disks it has now left
+	// space unusable (the marker's SpreadStopped), for the host state.
+	spreadStopped bool
+	// spreadPoll is how often a running spread measures the unusable space,
+	// to cancel the balance once none is left.
+	spreadPoll time.Duration
 	// markerMu orders changes to the data-volume marker.
 	markerMu sync.Mutex
 	// webSearchMu orders changes to the web search switch, so its file and
@@ -165,6 +171,7 @@ func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options)
 		mountPoint: filepath.Clean(mountPoint), mountUnitName: unitName, smbInterface: strings.TrimSpace(options.SMBInterface),
 		spaceRoots: make(map[string]string), identities: make(map[string]identityRecord),
 		viewing: make(map[string]viewingRecord), now: options.Now, apps: make(map[string]int),
+		spreadPoll: 30 * time.Second,
 	}
 	if executor.now == nil {
 		executor.now = time.Now
