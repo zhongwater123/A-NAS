@@ -159,7 +159,7 @@ func TestHandlerListsConfiguredScreenSaverPoolAndServesByteRanges(t *testing.T) 
 	}
 }
 
-// The Product Service reads a "current" link that install-screensavers.sh
+// The Product Service reads a "current" link that install-media-pool.sh
 // moves between pools (ADR 0014); a move must take effect without a restart.
 func TestHandlerFollowsTheCurrentScreenSaverPoolLink(t *testing.T) {
 	root := t.TempDir()
@@ -246,7 +246,7 @@ func TestHandlerReturnsAnEmptyManifestWhenScreenSaverPoolIsMissing(t *testing.T)
 }
 
 // The companion's animations are listed by name, one URL per format, at
-// dsh-pet's /thumb route with the pool in the query (install-companion-animations.sh).
+// dsh-pet's /thumb route with the pool in the query (install-media-pool.sh).
 func TestHandlerListsCompanionAnimationsAndServesByteRanges(t *testing.T) {
 	store := t.TempDir()
 	const pool, previous = "0123456789abcdef", "fedcba9876543210"

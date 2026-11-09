@@ -162,7 +162,7 @@ Chromium 只取得匿名同源 URL，不直接访问宿主机路径或原文件�
 1. 在开发机暂存新池。脚本只上传 NAS 暂存区还没有的视频；早先随 release 暂存过的视频会直接复用。`-WhatIf` 只做本地校验并列出哈希，不联网：
 
    ```powershell
-   .\scripts\deploy-screensavers.ps1 `
+   .\scripts\deploy-media-pool.ps1 -Kind screensavers `
      -NasHost <NAS_HOST> `
      -Video @(
        "E:\SteamLibrary\steamapps\workshop\content\431960\3667411885\BMW M5.mp4",
@@ -173,11 +173,11 @@ Chromium 只取得匿名同源 URL，不直接访问宿主机路径或原文件�
      )
    ```
 
-   单个池最多 32 条，重复内容、非 MP4 或缺失文件会在联网前拒绝。脚本输出每个视频的 SHA-256 与池 ID。不得把 Steam Workshop 目录直接授予产品服务读取权限。
+   单个池最多 32 条，重复内容、非 MP4 或缺失文件会在联网前拒绝。脚本输出每个视频的 SHA-256 与池 ID。不得把 Steam Workshop 目录直接授予产品服务读取权限。屏保与[伙伴动画](install-companion-animations.md)共用这一套暂存、安装脚本，以 `-Kind` 或第一个参数区分；旧名 `deploy-screensavers.ps1`、`install-screensavers.sh` 再保留一个版本，参数与作用不变。
 2. 以 root 核对输出的池 ID 后安装：
 
    ```bash
-   /opt/a-nas/current/install-screensavers.sh <池 ID>
+   /opt/a-nas/current/install-media-pool.sh screensavers <池 ID>
    ```
 
    脚本把暂存的视频复制进对象库并逐个复核 SHA-256，任一不符即在改动前停止。池 ID 由清单内容计算，暂存清单与命令中的 ID 不符时拒绝。全部通过后建池、原子切换 `current`，并重启 Kiosk 让页面重新读取清单；产品服务无需重启。再次安装同一个池不会产生变化。
@@ -187,7 +187,7 @@ Chromium 只取得匿名同源 URL，不直接访问宿主机路径或原文件�
 
 [issue #49](https://github.com/zhongwater123/A-NAS/issues/49) 之前的安装器把每个池放在 `/var/lib/a-nas/screensavers/<release>/`，没有 `current`。首次安装包含 ADR 0014 的 release 时，系统安装器把其中最近安装的池以硬链接导入对象库并设为当前池，既不复制也不需要重新上传；导入失败时只打印警告，升级照常完成，本地控制台显示壁纸。
 
-此后若又用不含 ADR 0014 的旧安装器装过带视频的 release，新视频只在 `/var/lib/a-nas/screensavers/<release>/` 中，不会播放。以 root 导入：`/opt/a-nas/current/install-screensavers.sh --import /var/lib/a-nas/screensavers/<release>`。
+此后若又用不含 ADR 0014 的旧安装器装过带视频的 release，新视频只在 `/var/lib/a-nas/screensavers/<release>/` 中，不会播放。以 root 导入：`/opt/a-nas/current/install-media-pool.sh screensavers --import /var/lib/a-nas/screensavers/<release>`。
 
 导入后，按 release 存放的旧池都是多余副本。清理前先确认当前池可用，并列出候选目录：
 
@@ -200,7 +200,7 @@ find "$pools" -mindepth 1 -maxdepth 1 -type d ! -name objects ! -name pools
 
 确认列表中只有旧 release 目录、且清单与 Range 请求都正常后，才逐个 `rm -r -- "$pools/<release>"`。被导入的池与对象共享数据，删除它的目录不影响播放；其他目录是独立副本，删除后释放空间。删除前逐个核对目录中每个视频的 SHA-256 都在 `current/SHA256SUMS` 中。不要删除 `objects`、`pools` 或 `current`。
 
-单视频时期的安装可能在 `$pools` 根部留下独立的 `.mp4`（Experimental NAS 为 `computer-chip.mp4`），导入不会处理它。其 SHA-256 在 `current/SHA256SUMS` 中时是副本，可以删除；不在时是独有视频。要保留它，以 root 把它复制到暂存账号目录，下载到开发机后用 `scripts/deploy-screensavers.ps1` 与当前池的视频一起暂存为新池，安装新池并用 `cmp` 确认新池中的对应文件与原文件相同后再删除原文件。2026-10-10 Experimental NAS 按此加入后，当前池为六条。
+单视频时期的安装可能在 `$pools` 根部留下独立的 `.mp4`（Experimental NAS 为 `computer-chip.mp4`），导入不会处理它。其 SHA-256 在 `current/SHA256SUMS` 中时是副本，可以删除；不在时是独有视频。要保留它，以 root 把它复制到暂存账号目录，下载到开发机后用 `scripts/deploy-media-pool.ps1 -Kind screensavers` 与当前池的视频一起暂存为新池，安装新池并用 `cmp` 确认新池中的对应文件与原文件相同后再删除原文件。2026-10-10 Experimental NAS 按此加入后，当前池为六条。
 
 ## 硬件视频解码
 
@@ -268,7 +268,7 @@ systemctl reset-failed
 ```bash
 ls -l --time-style=long-iso /var/lib/a-nas/screensavers/pools
 cat /var/lib/a-nas/screensavers/pools/<池 ID>/SHA256SUMS
-/opt/a-nas/current/install-screensavers.sh <池 ID>
+/opt/a-nas/current/install-media-pool.sh screensavers <池 ID>
 ```
 
 Experimental NAS 上原来五条视频的池为 `53e12079d8d50c4c`，2026-10-10 起的当前池是六条视频的 `68299080c557c520`。之后按验收第 7 项复核清单数量和 Range 请求。不要删除当前池作为回滚手段；对象和旧池的清理不属于常规回滚，必须另行确认。

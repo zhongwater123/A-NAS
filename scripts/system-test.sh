@@ -206,7 +206,7 @@ fi
 # stage DIR: a release as scripts/deploy-dev.ps1 stages it.
 stage() {
   install -d "$1"
-  install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh /src/scripts/install-companion-animations.sh /src/scripts/install-ffmpeg-units.sh "$1/"
+  install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-media-pool.sh /src/scripts/install-screensavers.sh /src/scripts/install-ffmpeg-units.sh "$1/"
   install -m 0644 /src/build/a-nas-host.deb /src/build/a-nas-console.deb "$1/"
   for unit in anas-api anas-host-agent anas-photos anas-shares anas-family; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
@@ -1795,7 +1795,7 @@ check "Web files work after the restart" grep -qx alice.txt <(entries /tmp/alice
 
 # --- Screen saver videos are long-lived media, not part of a release (ADR 0014).
 pools=/var/lib/a-nas/screensavers
-media=/opt/a-nas/current/install-screensavers.sh
+installer=/opt/a-nas/current/install-media-pool.sh
 stager=/tmp/anas-dev # the staging account's home
 staged=$stager/apps/a-nas/screensavers
 uploads=0
@@ -1832,15 +1832,16 @@ new_video() {
   mv "$file" "/tmp/$hash.mp4"
   echo "$hash"
 }
-# stage_pool HASH...: stages a pool as scripts/deploy-screensavers.ps1 does,
-# uploading only the videos the staging area lacks; sets pool to its ID.
+# stage_pool HASH...: stages a pool as scripts/deploy-media-pool.ps1 -Kind
+# screensavers does, uploading only the videos the staging area lacks; sets
+# pool to its ID.
 stage_pool() {
   local hash
-  for hash in $(HOME=$stager bash /src/scripts/remote-stage-screensavers.sh missing "$@"); do
+  for hash in $(HOME=$stager bash /src/scripts/remote-stage-media-pool.sh screensavers missing "$@"); do
     cp "/tmp/$hash.mp4" "$staged/objects/$hash.mp4.incoming"
     uploads=$((uploads + 1))
   done
-  pool=$(HOME=$stager bash /src/scripts/remote-stage-screensavers.sh commit "$@")
+  pool=$(HOME=$stager bash /src/scripts/remote-stage-media-pool.sh screensavers commit "$@")
 }
 check "a first install plays no screen saver" test "$(current_pool):$(pool_size)" = :0
 v1=$(new_video)
@@ -1853,7 +1854,9 @@ printf 'screensaver_000_sha256=%s\n' "$v1" > "$stager/apps/a-nas/releases/old/RE
 stage_pool "$v1" "$v2"
 pool_a=$pool
 check "staging uploads only the videos the NAS lacks" test "$uploads" = 1
-check "a staged pool installs" quiet "$media" "$pool_a" "$staged"
+check "the old staging script's name stages the same pool" \
+  test "$(HOME=$stager bash /src/scripts/remote-stage-screensavers.sh commit "$v1" "$v2")" = "$pool_a"
+check "a staged pool installs" quiet "$installer" screensavers "$pool_a" "$staged"
 check "it becomes the current pool" test "$(current_pool):$(pool_size)" = "pools/$pool_a:2"
 stage /tmp/upgrade
 check "a release installs" install_release upgrade
@@ -1869,21 +1872,22 @@ check "search reaches the upgraded release's Worker" semantic_search 猫
 stage_pool "$v2" "$v3"
 pool_b=$pool
 check "a new pool uploads only its new video" test "$uploads" = 2
-check "the new pool installs" quiet "$media" "$pool_b" "$staged"
+check "the new pool installs" quiet "$installer" screensavers "$pool_b" "$staged"
 check "it replaces the current pool" test "$(current_pool)" = "pools/$pool_b"
 check "a video both pools hold is stored once" \
   test "$(find "$pools/objects" -type f | wc -l):$(stat -c %h "$pools/objects/$v2.mp4")" = 3:3
-check "installing the same pool again changes nothing" quiet "$media" "$pool_b" "$staged"
-check "switching back to an installed pool needs no staging" quiet "$media" "$pool_a" /nonexistent
+check "installing the same pool again changes nothing" quiet "$installer" screensavers "$pool_b" "$staged"
+check "switching back to an installed pool needs no staging, by the old name too" \
+  quiet /opt/a-nas/current/install-screensavers.sh "$pool_a" /nonexistent
 check "the media rollback plays the old pool" test "$(current_pool)" = "pools/$pool_a"
 v4=$(new_video)
 stage_pool "$v4"
 printf x >> "$staged/objects/$v4.mp4"
-check "a video that does not match its hash is refused" denied "$media" "$pool" "$staged"
+check "a video that does not match its hash is refused" denied "$installer" screensavers "$pool" "$staged"
 check "the refused pool changes nothing" \
   test "$(current_pool)" = "pools/$pool_a" -a ! -e "$pools/objects/$v4.mp4" -a ! -e "$pools/pools/$pool"
 cp "$staged/pools/$pool_b.sums" "$staged/pools/0123456789abcdef.sums"
-check "a manifest that is not the named pool is refused" denied "$media" 0123456789abcdef "$staged"
+check "a manifest that is not the named pool is refused" denied "$installer" screensavers 0123456789abcdef "$staged"
 # An installer before issue #49 left a pool named after its release, and no
 # "current".
 legacy=$pools/legacy-release
@@ -1906,12 +1910,11 @@ check "a current pool video answers a byte range" test "$(status_of -r 0-1023 "$
 # --- The companion's animations are long-lived media like the screen saver
 # videos (ADR 0014): staged by hash, checked again and switched in by root.
 companion=/var/lib/a-nas/companion
-animations=/opt/a-nas/current/install-companion-animations.sh
 companion_staged=$stager/apps/a-nas/companion
 animation_count() { curl -fsS "$api/companion/animations" | jq '.animations | length'; }
 current_animations() { readlink "$companion/current" || true; }
 # stage_animations NAME...: stages stand-in animations under these names as
-# scripts/deploy-companion-animations.ps1 does; sets pool to its ID.
+# scripts/deploy-media-pool.ps1 -Kind companion does; sets pool to its ID.
 stage_animations() {
   local name file hash
   install -d "$companion_staged/pools"
@@ -1923,15 +1926,21 @@ stage_animations() {
     printf '%s  %s\n' "$hash" "$name" >> "$companion_staged/pools/.incoming.sums"
     mv "$file" "/tmp/$hash.animation"
   done
-  for hash in $(HOME=$stager bash /src/scripts/remote-stage-companion-animations.sh missing); do
+  commit_animations
+}
+# commit_animations: uploads what the staged manifest lists and the staging
+# area lacks, from /tmp/HASH.animation; sets pool to its ID.
+commit_animations() {
+  local hash
+  for hash in $(HOME=$stager bash /src/scripts/remote-stage-media-pool.sh companion missing); do
     cp "/tmp/$hash.animation" "$companion_staged/objects/$hash.incoming"
   done
-  pool=$(HOME=$stager bash /src/scripts/remote-stage-companion-animations.sh commit)
+  pool=$(HOME=$stager bash /src/scripts/remote-stage-media-pool.sh companion commit)
 }
 check "a first install shows no companion animations" test "$(current_animations):$(animation_count)" = :0
 stage_animations 待机.webm 东张西望.webm 待机.mov
 animations_a=$pool
-check "staged companion animations install" quiet "$animations" "$animations_a" "$companion_staged"
+check "staged companion animations install" quiet "$installer" companion "$animations_a" "$companion_staged"
 check "they become the current pool" test "$(current_animations):$(animation_count)" = "pools/$animations_a:2"
 check "the manifest names the current pool" \
   test "$(curl -fsS "$api/companion/animations" | jq -r .pool || true)" = "$animations_a"
@@ -1939,9 +1948,20 @@ animation=$(curl -fsS "$api/companion/animations" | jq -r '.animations["东张�
 check "an animation answers a byte range" test "$(status_of -r 0-1023 "$api$animation")" = 206
 check "a pool's animations may be kept for good" \
   bash -c "curl -fsSI '$api$animation' | grep -Fqi 'cache-control: public, max-age=31536000, immutable'"
+# Two animations may share one file.
+shared=$(new_video)
+cp "/tmp/$shared.mp4" "/tmp/$shared.animation"
+printf '%s  %s\n' "$shared" 待机.webm "$shared" 东张西望.webm > "$companion_staged/pools/.incoming.sums"
+commit_animations
+animations_b=$pool
+check "animations that share a file install" quiet "$installer" companion "$animations_b" "$companion_staged"
+check "the shared file is stored once" \
+  test "$(current_animations):$(animation_count):$(stat -c %h "$companion/objects/$shared")" = "pools/$animations_b:2:3"
+check "a page opened before the switch keeps its pool's animations" test "$(status_of -r 0-1023 "$api$animation")" = 206
+check "switching back to installed animations needs no staging" quiet "$installer" companion "$animations_a" /nonexistent
 stage_animations 待机.webm
 printf x >> "$companion_staged/objects/$(head -c 64 "$companion_staged/pools/$pool.sums")"
-check "an animation that does not match its hash is refused" denied "$animations" "$pool" "$companion_staged"
+check "an animation that does not match its hash is refused" denied "$installer" companion "$pool" "$companion_staged"
 check "the refused animations change nothing" \
   test "$(current_animations)" = "pools/$animations_a" -a ! -e "$companion/pools/$pool"
 # --- Internet entry (ADR 0032): /etc/a-nas/internet.env turns it on. Caddy

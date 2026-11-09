@@ -11,7 +11,7 @@ animations for Safari (the assets-mov release, MOV_ZIP below):
 Imports lose their .ts suffix (A-NAS does not import with extensions). Changes A-NAS
 needs are patches in web/src/companion/dsh-pet-patches/, applied in name order.
 The animations stay out of Git; animations.sha256 pins the ones the commit ships, which
-install-companion-animations.sh installs (scripts/deploy-companion-animations.ps1 stages them).
+install-media-pool.sh companion installs (scripts/deploy-media-pool.ps1 -Kind companion stages them).
 """
 import hashlib
 import json

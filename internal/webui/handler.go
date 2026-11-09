@@ -31,7 +31,7 @@ type handler struct {
 type Options struct {
 	ScreensaverDirectory string
 	// CompanionDirectory holds the companion's animations, which
-	// install-companion-animations.sh keeps outside releases like the screen
+	// install-media-pool.sh keeps outside releases like the screen
 	// saver videos (ADR 0014).
 	CompanionDirectory string
 }
@@ -223,7 +223,7 @@ var companionAnimationTypes = map[string]string{".webm": "video/webm", ".mov": "
 
 type companionManifest struct {
 	// Pool names the installed pool the URLs point into, so a browser can keep
-	// its files for good: install-companion-animations.sh never changes an
+	// its files for good: install-media-pool.sh never changes an
 	// installed pool. It is empty when the directory is not such a pool.
 	Pool string `json:"pool"`
 	// Animations maps each animation's name to its URL per format.
@@ -319,7 +319,7 @@ func companionAnimationName(name string) bool {
 	return ok
 }
 
-// companionPoolID accepts the 16 hexadecimal digits install-companion-animations.sh
+// companionPoolID accepts the 16 hexadecimal digits install-media-pool.sh
 // names a pool by.
 func companionPoolID(pool string) bool {
 	if len(pool) != 16 {

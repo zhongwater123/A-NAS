@@ -100,7 +100,7 @@ type Config struct {
 	// ScreensaverVideo is the variable releases before the pool named; its
 	// directory is the pool.
 	ScreensaverVideo string `env:"ANAS_SCREENSAVER_VIDEO"`
-	// CompanionDirectory holds the companion's animations (install-companion-animations.sh).
+	// CompanionDirectory holds the companion's animations (install-media-pool.sh).
 	CompanionDirectory string `env:"ANAS_COMPANION_DIRECTORY"`
 	Assistant          AssistantConfig
 	WebSearch          WebSearchConfig
