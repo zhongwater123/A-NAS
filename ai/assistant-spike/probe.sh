@@ -78,15 +78,17 @@ else
   echo "INFO change broker's product socket: none here (the Host Agent executes)"
 fi
 expect_ok   "reach the change broker's agent socket"   python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/anas-change-agent/agent.sock")'
-expect_refused "change the Hermes user config"      'Read-only file system' sh -c 'echo x >> /var/lib/hermes-home/config.yaml'
-expect_refused "write the Hermes .env"              'Read-only file system' sh -c 'echo x >> /var/lib/hermes-home/.env'
-expect_refused "rewrite SOUL.md"                    'Read-only file system' sh -c 'echo x >> /var/lib/hermes-home/SOUL.md'
+# Appending to a root-owned file is refused by its permissions before the read-only bind
+# is reached; truncating or creating meets the read-only bind first.
+expect_refused "change the Hermes user config"      'Permission denied' sh -c 'echo x >> /var/lib/hermes-home/config.yaml'
+expect_refused "write the Hermes .env"              'Permission denied' sh -c 'echo x >> /var/lib/hermes-home/.env'
+expect_refused "rewrite SOUL.md"                    'Permission denied' sh -c 'echo x >> /var/lib/hermes-home/SOUL.md'
 expect_refused "add a Hermes hook"                  'Read-only file system' mkdir /var/lib/hermes-home/hooks/x
 expect_refused "add a Hermes plugin"                'Read-only file system' mkdir /var/lib/hermes-home/plugins/x
 expect_refused "add a Hermes profile"               'Read-only file system' mkdir /var/lib/hermes-home/profiles/x
 expect_refused "set a sticky Hermes profile"        'Read-only file system' sh -c 'echo x > /var/lib/hermes-home/active_profile'
 expect_ok   "write Hermes state"                 sh -c 'echo x > /var/lib/hermes-home/probe-state'
-expect_refused "write into /etc/hermes policy"     'Read-only file system' sh -c 'echo x >> /etc/hermes/config.yaml'
+expect_refused "write into /etc/hermes policy"      'Permission denied' sh -c 'echo x >> /etc/hermes/config.yaml'
 expect_refused "write into the system skills"   'Read-only file system' sh -c 'echo x > /opt/a-nas/assistant-skills/x'
 if [ -d /opt/a-nas/assistant-runtimes/spike ]; then
   expect_refused "write into /opt runtime"       'Read-only file system' sh -c 'echo x > /opt/a-nas/assistant-runtimes/spike/x'
