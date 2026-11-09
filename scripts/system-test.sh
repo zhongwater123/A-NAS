@@ -568,7 +568,14 @@ staging=/home/anas-dev/apps/a-nas/releases
 install -d -o anas-dev -g anas-dev -m 0750 /home/anas-dev/apps /home/anas-dev/apps/a-nas "$staging"
 check "the staging account writes its staged releases" as anas-dev touch "$staging/staged-by-anas-dev"
 check "the local console cannot write the staged releases" cannot_create a-nas-kiosk "$staging/staged-by-kiosk"
-check "the local console is not in the staging account's group" fails grep -qw anas-dev <<<"$(id -nG a-nas-kiosk)"
+# lacks_group ACCOUNT GROUP: ACCOUNT's groups can be read, and GROUP is not among them.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+lacks_group() {
+  local groups
+  groups=$(id -nG "$1") || return 1
+  [[ " $groups " != *" $2 "* ]]
+}
+check "the local console is not in the staging account's group" lacks_group a-nas-kiosk anas-dev
 check "the installer leaves the local console disabled" \
   test "$(systemctl is-enabled anas-kiosk@tty1.service 2>/dev/null)" = disabled
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
@@ -811,9 +818,21 @@ sys.exit("connection ended without a close frame")
 PY
 # terminal URL JAR INPUT
 terminal() { timeout 60 python3 /tmp/terminal-session.py "$1/api/v1/terminal/session" "$2" "$3"; }
+# terminal_refused URL JAR: the server answers the session's WebSocket handshake with 403;
+# a client that crashes or cannot connect is not a refusal (#423).
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+terminal_refused() {
+  local out
+  if out=$(terminal "$1" "$2" 'exit 0' 2>&1); then
+    printf '%s\n(a session opened)\n' "$out" >>"$hidden"
+    return 1
+  fi
+  printf '%s\n' "$out" >>"$hidden"
+  [[ $out == *'handshake refused: HTTP/1.1 403'* ]]
+}
 check "the terminal is off on a new device" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = false
-check "a disabled terminal refuses sessions" fails terminal "$api" /tmp/owner.jar 'exit 0'
+check "a disabled terminal refuses sessions" terminal_refused "$api" /tmp/owner.jar
 # The runbook step that turns it on.
 printf 'ANAS_TERMINAL=enabled\n' >> /etc/a-nas/anas-api.env
 systemctl restart anas-api
@@ -833,7 +852,7 @@ check "the shell cannot list a member's private space" grep -qx 'other:[1-9][0-9
 check "the shell's exit code reaches the browser" grep -qx 'close 1000 exit 7' <<<"$shell_output"
 check "the local console reaches the terminal too" \
   grep -qx 'close 1000 exit 0' <<<"$(terminal "$api" /tmp/owner.jar $'exit 0\n' || true)"
-check "a member's session gets no shell" fails terminal "$lan" /tmp/lan.jar 'exit 0'
+check "a member's session gets no shell" terminal_refused "$lan" /tmp/lan.jar
 # The shell runs in a scope of its own, so what it logs is not the Host
 # Agent's, even under its name (issue #166).
 forged_at=$(date '+%Y-%m-%d %H:%M:%S')
@@ -889,14 +908,28 @@ smb_auth() { printf 'username = %s\npassword = %s\n' "$1" "$2" > "/tmp/$1.smb"; 
 smb_auth owner "$owner_password"
 smb_auth alice "$alice_password"
 smb() { local user=$1 share=$2; shift 2; smbclient "//$ip/$share" -A "/tmp/$user.smb" -m SMB3 --client-protection=encrypt -c "$*"; }
+# smb_refused STATUS USER SHARE COMMAND...: Samba refuses with STATUS, such as
+# NT_STATUS_ACCESS_DENIED. smbd being down, a missing credentials file or a
+# misspelled share (NT_STATUS_BAD_NETWORK_NAME) fail the check (#423).
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+smb_refused() {
+  local status=$1 out
+  shift
+  if out=$(smb "$@" 2>&1); then
+    printf '%s\n(it succeeded)\n' "$out" >>"$hidden"
+    return 1
+  fi
+  printf '%s\n' "$out" >>"$hidden"
+  [[ $out == *"$status"* ]]
+}
 check "member opens her home over SMB and sees her Web upload" grep -q alice.txt <(smb alice alice ls 2>/dev/null)
 printf 'from smb %s\n' "$(secret)" > /tmp/alice-smb.txt
 check "member writes over SMB" quiet smb alice alice "put /tmp/alice-smb.txt alice-smb.txt"
 check "SMB write is owned by the member's UID" \
   test "$(owner_uid "$data/spaces/private/alice/alice-smb.txt")" = "$alice_id"
 check "Web lists the file written over SMB" grep -qx alice-smb.txt <(entries /tmp/alice.jar "$alice_private")
-check "administrator cannot open the member's home over SMB" fails smb owner alice ls
-check "member cannot open the administrator's home over SMB" fails smb alice owner ls
+check "administrator cannot open the member's home over SMB" smb_refused NT_STATUS_ACCESS_DENIED owner alice ls
+check "member cannot open the administrator's home over SMB" smb_refused NT_STATUS_ACCESS_DENIED alice owner ls
 check "administrator reads Shared over SMB" quiet smb owner Shared "get shared.txt /tmp/shared-smb.txt"
 check "SMB read of Shared returns the Web upload" cmp -s /tmp/shared.txt /tmp/shared-smb.txt
 
@@ -1449,8 +1482,25 @@ check "the Product Service's groups reach web search" \
   quiet as_product curl -fsS --unix-socket "$search_socket" http://localhost/healthz
 check "a member does not reach web search" \
   denied alice python3 -c "$unix_connect" "$search_socket"
-check "web search reads no data volume or Host Agent record" \
-  fails nsenter -t "$(systemctl show -p MainPID --value anas-search)" -m ls /srv/a-nas/data /var/lib/a-nas-host
+# search_denied PATH: PATH exists here, and web search's account is refused it inside web
+# search's own mount namespace. One path per check: ls of several fails when any one does.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+search_denied() {
+  local pid out
+  pid=$(systemctl show -p MainPID --value anas-search)
+  if [[ ! -e $1 || ! $pid =~ ^[1-9][0-9]*$ ]]; then
+    echo "no $1, or web search is not running (MainPID $pid)" >>"$hidden"
+    return 1
+  fi
+  if out=$(LC_ALL=C nsenter -t "$pid" -m setpriv --reuid=a-nas-search --regid=a-nas-search --init-groups ls "$1" 2>&1); then
+    printf '%s\n(listed as a-nas-search)\n' "$out" >>"$hidden"
+    return 1
+  fi
+  printf '%s\n' "$out" >>"$hidden"
+  [[ $out == *'Permission denied'* ]]
+}
+check "web search reads no data volume" search_denied /srv/a-nas/data
+check "web search reads no Host Agent record" search_denied /var/lib/a-nas-host
 # systemd 257 loses a running unit's IP counts at every daemon-reload, which
 # the installs above ran, so the checks that read them restart web search.
 restart_web_search() {
@@ -1837,7 +1887,7 @@ new_password=$(secret)
 check "member changes her password on the Web" test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
   -H 'Content-Type: application/json' -d "{\"currentPassword\":\"$alice_password\",\"newPassword\":\"$new_password\"}" \
   "$api/api/v1/session/password")" = 204
-check "the old password no longer opens SMB" fails smb alice alice ls
+check "the old password no longer opens SMB" smb_refused NT_STATUS_LOGON_FAILURE alice alice ls
 smb_auth alice "$new_password"
 check "the new password opens SMB" quiet smb alice alice ls
 
@@ -1864,7 +1914,7 @@ check "a member stays connected over SMB" test "$(smb_sessions_of carol)" -gt 0
 check "the administrator disables the member" test "$(status_of -X DELETE -b /tmp/owner.jar \
   -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$carol_user")" = 204
 check "disabling ends the member's SMB session" smb_sessions_end carol
-check "the disabled member cannot open SMB" fails smb carol carol ls
+check "the disabled member cannot open SMB" smb_refused NT_STATUS_ACCOUNT_DISABLED carol carol ls
 kill "$carol_client" 2>/dev/null || true
 # Every start synchronizes identities, the disabled member's SMB entry too.
 synced_at=$(date '+%Y-%m-%d %H:%M:%S')
@@ -2063,7 +2113,17 @@ done
 check "the internet entry reaches the Product Service over HTTPS" test "$(through -f "$internet/healthz" | jq -r .status)" = ok
 check "the internet entry asks browsers to keep to HTTPS" asks_for_https
 check "a connection without a PROXY header is served as it comes" quiet from_loopback
-check "a PROXY header from anywhere but the relay is refused" fails from_loopback --haproxy-protocol --haproxy-clientip 2001:db8:7::7
+# proxy_header_refused: the listener closes a connection whose PROXY header does not come
+# from the relay before TLS completes, so curl ends with 35 (handshake) or 56 (receive). An
+# HTTP answer (22), a missing CA file (77) or no listener (7) is not that refusal (#423).
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+proxy_header_refused() {
+  local status=0
+  from_loopback --haproxy-protocol --haproxy-clientip 2001:db8:7::7 >>"$hidden" 2>&1 || status=$?
+  echo "curl exit $status" >>"$hidden"
+  ((status == 35 || status == 56))
+}
+check "a PROXY header from anywhere but the relay is refused" proxy_header_refused
 check "the internet listener answers only for its domain" \
   test "$(status_of -H 'Host: 127.0.0.1' http://127.0.0.1:8081/healthz)" = 421
 

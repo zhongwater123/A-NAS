@@ -159,9 +159,14 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - CI 的 `System test (Debian 13, systemd)` 作业运行同一流程。
 - 每条检查在它保护的东西坏掉时都要失败（[#423](https://github.com/zhongwater123/A-NAS/issues/423)）：
   - 一条检查只查一个单元，因为 `systemctl is-active A B` 在任一单元运行时就成功；
-  - 账号被拒绝访问用 `denied` 或 `cannot_create`：先以 root 证明目标存在，再要求输出 `Permission denied`。`fails` 只用于任何失败都算数的检查；
+  - 拒绝要看到拒绝本身：
+    - 本地访问用 `denied` 或 `cannot_create`，先以 root 证明目标存在，再要求输出 `Permission denied`；
+    - SMB 用 `smb_refused` 写明 `NT_STATUS_…`；
+    - 终端要求握手返回 403；
+    - 互联网入口要求连接在 TLS 完成前被关闭；
+  - `fails` 只用于任何失败都算数的检查；
   - 沙箱探针在沙箱外运行时，要报出具体的发现；
-  - 助手探针的 `expect_refused` 写明预期的错误；沙箱中看不到的目标，由系统测试在沙箱外确认存在。
+  - 助手探针的 `expect_refused` 写明预期的错误；沙箱中看不到的目标用 `expect_hidden`，由系统测试在沙箱外确认存在。
 - 部署前按 [system-test 的真实模型变体](../../.claude/skills/system-test/SKILL.md#变体)复测；模型准备见[AI 开发与评估](ai-development.md)。
 
 ## CI
@@ -174,4 +179,6 @@ PR 只改文档时，`Project checks` 只运行 `make docs-check`，另两个作
 
 - [Makefile](../../Makefile)
 - [CI 工作流](../../.github/workflows/ci.yml)
+- [系统测试](../../scripts/system-test.sh)、[助手沙箱的系统测试](../../ai/assistant-spike/system-test.sh)与[沙箱探针](../../ai/assistant-spike/probe.sh)
+- [相册冒烟](../../scripts/smoke-photo-service.sh)
 - [AI 开发与评估](ai-development.md)

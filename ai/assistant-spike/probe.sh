@@ -14,10 +14,11 @@ expect_refused() {
   elif [[ $out == *"$e"* ]]; then ok "$n ($e)"
   else bad "$n" "not refused with $e: $out"; fi
 }
-# hidden PATH...: what the probe is refused without seeing it, so that the refusal alone does
-# not show it exists. ai/assistant-spike/system-test.sh checks, as root, that each is there
-# outside the sandbox.
-hidden() { local path; for path in "$@"; do echo "HIDDEN $path"; done; }
+# expect_hidden NAME ERROR COMMAND... PATH: expect_refused for a PATH the sandbox hides, so that
+# the refusal alone does not show PATH exists. It prints "HIDDEN PATH" and
+# ai/assistant-spike/system-test.sh checks, as root, that PATH is there outside the sandbox.
+# PATH is the command's last argument, so the path proven and the path refused are one.
+expect_hidden() { echo "HIDDEN ${!#}"; expect_refused "$@"; }
 
 echo "INFO id: $(id)"
 echo "INFO caps: $(grep CapEff /proc/self/status)"
@@ -28,21 +29,23 @@ echo "INFO caps: $(grep CapEff /proc/self/status)"
 # spaces, Hermes's home, /run, the assistant's policy and config, and /opt/a-nas, as owning
 # group, ACL entry or default ACL entry.
 if [ -n "${PROBE_IDENTITY_ONLY:-}" ]; then
-  # An empty listing proves nothing, so getfacl must have printed something.
-  # shellcheck disable=SC2016 # $acls expands in the inner sh
+  # Streamed, not held: an empty listing proves nothing, so getfacl must have listed files.
   expect_ok "nothing in the sandbox grants a-nas-admins" sh -c \
-    'acls=$(getfacl -R -p /nas /var/lib/hermes-home /run /etc/hermes /etc/a-nas-assistant /opt/a-nas 2>/dev/null)
-      [ -n "$acls" ] && ! printf "%s\n" "$acls" | grep -Eq "^(# group: |(default:)?group:)a-nas-admins(:|\$)"'
+    'getfacl -R -p /nas /var/lib/hermes-home /run /etc/hermes /etc/a-nas-assistant /opt/a-nas 2>/dev/null |
+      awk "/^# file: /{n++} /^(# group: |(default:)?group:)a-nas-admins(:|\$)/{bad=1} END{exit !(n > 0 && !bad)}"'
   exit 0
 fi
-expect_ok   "no a-nas-admins in the sandbox"     sh -c '! id -G | tr " " "\n" | grep -qx 20001'
+# The group's GID as this system has it, and the sandbox's groups, both looked up for certain.
+# shellcheck disable=SC2016 # $gid and $ids expand in the inner sh
+expect_ok   "no a-nas-admins in the sandbox"     sh -c \
+  'gid=$(getent group a-nas-admins | cut -d: -f3) && [ -n "$gid" ] && ids=$(id -G) && [ -n "$ids" ] &&
+    ! printf "%s\n" $ids | grep -qx "$gid"'
 expect_ok   "read own personal file"            cat /nas/个人空间/计划.md
 expect_ok   "read own trash entry"               cat /nas/个人空间/.a-nas-trash/alice/old.txt
 expect_ok   "read shared file"                   cat /nas/共享空间/family.md
 expect_ok   "read another member's Agent space"  cat /nas/共享空间/Agent空间/bob/report.md
 # Each recycle bin in the sandbox holds only the member's own folder.
-hidden /nas/共享空间/.a-nas-trash/bob/gone.txt
-expect_refused "read another member's shared trash" 'No such file or directory' cat /nas/共享空间/.a-nas-trash/bob/gone.txt
+expect_hidden "read another member's shared trash" 'No such file or directory' cat /nas/共享空间/.a-nas-trash/bob/gone.txt
 expect_ok   "recursive file search over Shared"  sh -c 'rg --files -g "*" -- /nas/共享空间 >/dev/null; [ $? -le 1 ]'
 expect_ok   "recursive file search over personal" sh -c 'rg --files -g "*" -- /nas/个人空间 >/dev/null; [ $? -le 1 ]'
 # shellcheck disable=SC2012 # names listed for the log
@@ -63,21 +66,18 @@ expect_ok   "write into assistant directory"     sh -c 'mkdir -p /nas/助手/待
 # (InaccessiblePaths=-), so inside it their contents cannot be told apart from nothing.
 connect='import socket, sys; socket.socket(socket.AF_UNIX).connect(sys.argv[1])'
 if [ -e /etc/anas-spike ]; then
-  hidden /etc/anas-spike/model.key
-  expect_refused "read the gateway's model key" 'Permission denied' cat /etc/anas-spike/model.key
+  expect_hidden "read the gateway's model key" 'Permission denied' cat /etc/anas-spike/model.key
 else
   echo "INFO model key: none here (the scripted model)"
 fi
-hidden /etc/a-nas-assistant/tokens/alice.env /etc/a-nas-assistant/tokens/bob.env
-expect_refused "read its own serve session token" 'Permission denied' cat /etc/a-nas-assistant/tokens/alice.env
-expect_refused "read another member's session token" 'Permission denied' cat /etc/a-nas-assistant/tokens/bob.env
+expect_hidden "read its own serve session token" 'Permission denied' cat /etc/a-nas-assistant/tokens/alice.env
+expect_hidden "read another member's session token" 'Permission denied' cat /etc/a-nas-assistant/tokens/bob.env
 if [ -e /run/anas-spike-broker ]; then
-  hidden /run/anas-spike-broker/broker.sock
-  expect_refused "reach the change broker's product socket" 'Permission denied' python3 -c "$connect" /run/anas-spike-broker/broker.sock
+  expect_hidden "reach the change broker's product socket" 'Permission denied' python3 -c "$connect" /run/anas-spike-broker/broker.sock
 else
   echo "INFO change broker's product socket: none here (the Host Agent executes)"
 fi
-expect_ok   "reach the change broker's agent socket"   python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/anas-change-agent/agent.sock")'
+expect_ok   "reach the change broker's agent socket"   python3 -c "$connect" /run/anas-change-agent/agent.sock
 # Appending to a root-owned file is refused by its permissions before the read-only bind
 # is reached; truncating or creating meets the read-only bind first.
 expect_refused "change the Hermes user config"      'Permission denied' sh -c 'echo x >> /var/lib/hermes-home/config.yaml'
@@ -124,8 +124,10 @@ if [ -S "$photos" ]; then
   else
     echo "INFO photo search: no seeded photos here (the system test checks its own)"
   fi
-  hidden /run/a-nas-photos/photos.sock
-  expect_refused "reach the photo service's session socket" 'Permission denied' python3 /spike/photos_peer.py /run/a-nas-photos/photos.sock --session seed-alice libraries
+  # photos_peer.py takes the socket first; the inner sh puts the hidden path last.
+  # shellcheck disable=SC2016 # $1 expands in the inner sh
+  expect_hidden "reach the photo service's session socket" 'Permission denied' \
+    sh -c 'exec python3 /spike/photos_peer.py "$1" --session seed-alice libraries' sh /run/a-nas-photos/photos.sock
 else
   echo "INFO photo socket not bound (no photo service for assistants)"
 fi

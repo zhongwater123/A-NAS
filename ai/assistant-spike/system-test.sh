@@ -105,13 +105,22 @@ fold() {
     esac
   done
 }
-on_host() { # ACCOUNT PATH: where PATH in ACCOUNT's assistant sandbox is outside it
-  case $2 in
-    /nas/个人空间/*) echo "$data/spaces/private/$1/${2#/nas/个人空间/}" ;;
-    /nas/共享空间/*) echo "$data/spaces/shared/${2#/nas/共享空间/}" ;;
-    /nas/*) echo "no host path for $2" >&2; return 1 ;;
-    *) echo "$2" ;;
-  esac
+# on_host ACCOUNT PATH: where PATH in ACCOUNT's assistant sandbox is outside it, by the probe
+# unit's own bind mounts (systemctl show prints each as [-]SOURCE:DESTINATION:OPTIONS): the
+# longest destination that holds PATH. A path under no bind is the host's own.
+on_host() {
+  local entry source destination host=$2 longest=0
+  for entry in $(systemctl show -p BindPaths -p BindReadOnlyPaths --value "anas-assistant-probe@$1.service"); do
+    entry=${entry#-}
+    source=${entry%%:*}
+    destination=${entry#*:}
+    destination=${destination%:*}
+    if [[ ($2 == "$destination" || $2 == "$destination"/*) && ${#destination} -gt $longest ]]; then
+      host=$source${2#"$destination"}
+      longest=${#destination}
+    fi
+  done
+  echo "$host"
 }
 assistant_probe() { # ACCOUNT LEAST_PASSES
   local log hidden_path
@@ -130,7 +139,8 @@ assistant_probe() { # ACCOUNT LEAST_PASSES
       test -e "$(on_host "$1" "$hidden_path")"
   done < <(grep '^HIDDEN ' <<<"$log" || true)
 }
-assistant_probe alice 33
+# Every line the probe runs in this layout; lines that do not apply here print INFO instead.
+assistant_probe alice 38
 # The administrator's assistant: the groups it carries, and that none of them is granted
 # anything it can reach.
 install -d /etc/systemd/system/anas-assistant-probe@owner.service.d
@@ -222,7 +232,9 @@ check "another member cannot delete Agent空间 on the Web" \
 renamed=$(status_of -b /tmp/bob.jar -H "X-CSRF-Token: $bob_csrf" -H 'Content-Type: application/json' -X PATCH \
   -d '{"name":"Agent空间-bob"}' "$api/api/v1/files/$agent_space_id" || true)
 check "another member cannot rename Agent空间 on the Web" test "$renamed" = 403
-check "SMB cannot rename Agent空间" fails smb alice Shared 'rename Agent空间 Agent空间-smb'
+# Samba vetoes the name in Shared, so it answers as if Agent空间 were not there; it is.
+check "SMB cannot rename Agent空间" smb_refused NT_STATUS_OBJECT_NAME_NOT_FOUND alice Shared 'rename Agent空间 Agent空间-smb'
+check "Agent空间 keeps its name on the volume" test -d "$agent_space" -a ! -e "$data/spaces/shared/Agent空间-smb"
 # A local process can still write Shared. Reconciliation repairs an impostor
 # through descriptors; it must not rely on the old spike's path-based setup.
 if [[ -d "$agent_space" ]]; then as bob mv -T "$agent_space" "$data/spaces/shared/Agent空间-bob" || true; fi

@@ -322,7 +322,7 @@ pause "Press Enter after completing these closure checks."
 testparm --suppress-prompt /etc/samba/smb.conf >/dev/null
 # One unit at a time: systemctl is-active A B succeeds when any of them is (#423).
 for unit in smbd.service anas-host-agent.service anas-api.service; do
-  systemctl is-active --quiet "$unit"
+  systemctl is-active --quiet "$unit" || { warn "$unit is not active"; exit 1; }
 done
 
 evidence_dir=/var/lib/a-nas/acceptance
