@@ -30,7 +30,8 @@ type AccountResolver interface {
 // and nothing changes; a photo's pixels leave only as its view (a 1600-pixel
 // JPEG without the original's metadata), for the model to look at when the
 // member asks it to, and its metadata, location included, as read from the
-// original.
+// original. The text read from a photo reaches it with every sensitive value
+// replaced by a handle, and the changes members made to it not at all.
 var assistantRoutes = []string{
 	"/libraries",
 	"/libraries/{libraryID}/timeline",
@@ -42,6 +43,7 @@ var assistantRoutes = []string{
 	"/assets/{assetID}/similar",
 	"/assets/{assetID}/view",
 	"/assets/{assetID}/metadata",
+	"/assets/{assetID}/text",
 	"/tags",
 	"/tags/{name}/assets",
 }

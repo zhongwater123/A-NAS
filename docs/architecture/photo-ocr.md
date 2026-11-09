@@ -34,6 +34,7 @@
 - [2026-10-30：AI 助手能用敏感字段，但看不到具体的值](../decisions/2026-10-30-ocr-assistant-handles.md)，见“AI 助手：能用，看不到具体的值”。
 - [2026-11-02：分流用照片已有的向量，目标召回 99%](../decisions/2026-11-02-ocr-routing-recall.md)。
 - [2026-11-03：字段核对的单字概率取 0.99](../decisions/2026-11-03-ocr-character-confidence.md)。
+- [2026-11-03：更正按内容对象存，修改记录对能看到照片的人公开](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)（ADR 0033，修订上面五项建议中“更正记入活动记录”一项）。
 
 ## 整体结构
 
@@ -180,15 +181,19 @@
   ```
 
   `kind` 是判出的文档类型或“普通文字”。`finish` 是全文的结束原因：`stop`；或 `length`、`repetition`，表示全文被截断。`fields` 与 `checks` 为 JSON。
-- **用户数据**以“图库 + 内容对象”为键，与人物的用户决定相同：
+- **用户数据**以内容对象为键，所有图库共用，以最后一次修改为准（[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)，第 16 号迁移）：
 
   ```text
-  text_corrections(library_id, object_id, field, value, account, updated_at)
+  text_corrections(object_id, field, value, account, account_name, updated_at)
+  text_changes(object_id, field, old_value, new_value, restored, account, account_name, library_id, created_at)
   ```
+
+  - `text_changes` 是修改记录，对能看到照片的成员公开，显示修改人与图库。`library_id` 不加外键，图库删除后记录仍在。
+  - 第 15 号迁移按“图库 + 内容对象”存更正；没有代码写过它，第 16 号重建了这张表。
 
 - **存放位置**：目录库在数据卷上（`/srv/a-nas/data/photos/catalog.db`），与照片本身受同样的保护，也进入同样的快照与备份。文字内容不写进日志与活动记录。
 - **清除**：照片彻底删除时一并删除。每个图库有“照片中的文字”开关，做法与“人物与宠物”相同：
-  - 关闭即清除这个图库独有的派生文字，保留用户更正；
+  - 关闭即清除这个图库独有的派生文字，保留用户更正与修改记录；关着的图库不显示、也不搜索文字与更正，同一张照片在另一个开着的图库里照常显示；
   - 重新开启时补排。
   - 照片复制或导入到读文字的图库时，如果它的向量早已存下（原先只在关了开关的图库里），按存下的向量补排。
   - 接口：`PATCH /api/v1/photos/libraries/{libraryId}` 的 `texts`，权限与人物开关相同（私有图库的主人、共享图库的管理员）；图库的 `texts` 字段报告开关状态。同一请求里的 `people` 与 `texts` 在一个事务中生效。
@@ -218,6 +223,27 @@
   - 家庭规模下有字的照片约几千张，每张约 1 KB 文字，逐行查找在毫秒级。
   - 以后变慢，再考虑 Qdrant 的全文索引（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)）。
 - **与红线的关系**：文字由专门的 OCR 模型读出，不经过向量，与“向量模型产生的标签不参与搜索”的红线不冲突（2026-10-19 已确认）。
+- **实现**（[`internal/photos/textsearch.go`](../../internal/photos/textsearch.go)）：
+  - 文字一档的分数段在名称与物体之间，同一档内仍按向量相似度排；翻页的游标照旧按分数续接。
+  - 搜索结果多了 `texts`：所有页中文字命中的张数，界面据此给这一档分组。
+  - 只在调用者能列出的、开着“照片中的文字”的图库里找；比较前全文、字段与查询都忽略空格、全半角与大小写。
+  - 找的是照片的文字显示出来的内容：全文，以及读出的文档类型的字段，读出的值与更正都算。换了文档类型后不再显示的旧更正不参与。
+  - 一个字的查询不找文字：几乎每段文字都含常用字，“猫”会把含“猫粮”的小票排到真正拍到猫的照片前面。
+
+## 接口
+
+[OpenAPI](../../api/paths/photos.yaml) 的相册部分，代码在 [`internal/photos/textview.go`](../../internal/photos/textview.go)：
+
+- `GET /api/v1/photos/assets/{assetId}/text`：照片的文字。
+  - `status`：`read`、`queued`、`failed`、`none`，或 `off`（这个图库关了开关）。
+  - 读出时还有文档类型、全文、是否完整读完，以及按证件顺序排列的字段：当前值、读出的值、核对结果、是否敏感、谁在何时更正的。
+  - 成员更正过的字段算作核对通过，不再列为“待核对”。
+  - 完整的值给能看到照片的成员，由界面遮挡；点开不经过服务端，所以没有记录（[待定的决定](../decisions/2026-10-30-ocr-full-number-reveal-logging.md)按建议实现）。
+- `PUT …/text/fields/{field}`：更正一个字段，`DELETE` 同一地址恢复为读出的值。
+  - 能看到照片的成员都可以，经查看授权的管理员与 AI 助手不可以；回收站里的照片不可以。
+  - 照片要已读出、所在图库开着开关，字段要属于读出的文档类型。值最多 200 字，不能有控制字符。
+  - 把没更正过的字段设成读出的值，就是“确认”：它也成为一条更正，界面据此不再标“待核对”。
+- `GET …/text/changes`：修改记录，新的在前，含修改人、旧值、新值和从哪个图库改的。AI 助手拿不到。
 
 ## 权限与隐私
 
@@ -251,6 +277,16 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
 
   以后要开放时，按 #160 的规则，属于“可能外泄的写入”，须本人在确认卡片上看到真实的值后同意。
 - **边界**：成员自己在对话里打出的号码会照常发给模型，这不在本方案控制范围内。
+- **步骤 4 的实现**（[`internal/photos/textview.go`](../../internal/photos/textview.go)、[`textread/sensitive.go`](../../internal/photos/textread/sensitive.go)）：
+  - 助手经自己的套接字读 `GET …/text`。敏感字段的值，包括读出的值和成员的更正，都换成句柄；全文和其他字段先替换这些值，再替换按规则认出的号码。
+  - 规则认出的号码：校验位正确的身份证号、通过 Luhn 校验的卡号、手机号，以及其他 15 位以上的数字串。最后一类是因为读错一位的证件号或卡号校验不过，仍然敏感。
+    - 号码可以是全角数字，各组之间可以隔着任意空白、换行或连字符：搜索比较时忽略这些，这里认不出的，助手就能按片段搜到。
+    - 一串数字里，从每一组起取最长的、符合某条规则的几组算一个号码；夹在这些号码之间、不符合任何规则的几组合计 15 位以上时也算。
+  - 句柄登记在 `text_handles`，绑定“本人 + 照片 + 键”。键是字段（`field:住址`），成员把字段改成别的值时读出的值另有一个（`read:住址`），号码按它在这次读取中出现的次序（`number:2`）。
+    - 不存号码的摘要：身份证号的取值空间有限，摘要可以穷举反推，关闭开关、清除文字之后也还留着。
+    - 同一个值对同一个人总是同一个句柄，不同成员的助手拿到的不同。
+  - 助手的搜索只在这样脱敏后的全文与字段中找。
+  - 文字里有敏感值的照片，助手拿不到它的画面（`GET …/view` 答 403 `sensitive_photo`）：模型看图就能读出号码，句柄就白换了。还没读出文字的照片照常给。
 - **实现分工**：
   - 本方案的步骤 4 实现：句柄登记、助手接口的脱敏、搜索只匹配脱敏文字；
   - 在助手窗口和文件代理中把句柄换成真实的值，属于 AI 助手的工作（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)），另开后续实现；在那之前，助手只能指出“哪张照片里有哪种号码”。
@@ -313,6 +349,24 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
   PRAGMA user_version = 14;
   ```
 
+  第 16 号迁移（步骤 4）让更正按内容对象存，并加了修改记录与助手的句柄。退回步骤 4 之前、步骤 3 之后的版本时，先执行下面的语句；还要往前退时，再接着执行上面的。更正、修改记录与句柄一并删除。[`TestTextCorrectionsMigrationCanBeUndone`](../../internal/photos/migrate_test.go) 撤销的相同。
+
+  ```sql
+  DROP TABLE text_handles;
+  DROP TABLE text_changes;
+  DROP TABLE text_corrections;
+  CREATE TABLE text_corrections (
+      library_id TEXT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+      object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+      field TEXT NOT NULL,
+      value TEXT NOT NULL,
+      account TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (library_id, object_id, field)
+  );
+  PRAGMA user_version = 15;
+  ```
+
 ## 步骤
 
 一个 PR，每步一个提交，每步 `make check` 通过；部署到实验 NAS 另行确认。
@@ -322,13 +376,13 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
 | 1 | 交付与运行：llama-server 清单、模型转换与清单、安装器角色、Worker 子进程与 `read_text`、Fake Provider、分阶段的 `memoryBytes`；NAS 上实测 Q4_K_M 的速度、内存（映射与 `--no-mmap`）与挂断到空闲的时间 | 已完成（2026-10-30）：系统测试替身与真实模型各一次通过；NAS 数据已写进评估报告 |
 | 2 | 分流：评测 PP-OCRv6 检测与向量相似度，选定方法与阈值并接入 | 已完成（2026-11-02）：选定向量相似度并已接入，目标召回 99%（[决定](../decisions/2026-11-02-ocr-routing-recall.md)） |
 | 3 | 读取、判型与核对：两步读取、判型规则、核对规则、单字概率的作用、存储 migration、模型更换重排、开关与清除 | 已完成（2026-11-03）：单字概率 0.99 时 48% 的字段自动通过、其中 2.7% 是错的（真正读错约 0.3%），取 0.99（[决定](../decisions/2026-11-03-ocr-character-confidence.md)） |
-| 4 | 搜索与接口：文字一档、数字归一、OpenAPI、泄漏测试；助手接口的脱敏与句柄登记，助手搜索只匹配脱敏文字 | 排序、翻页与泄漏测试通过；助手接口的任何响应里都找不到测试样本的敏感值，按号码片段搜索也搜不到 |
+| 4 | 搜索与接口：文字一档、数字归一、OpenAPI、泄漏测试；助手接口的脱敏与句柄登记，助手搜索只匹配脱敏文字；更正按内容对象存与修改记录（ADR 0033） | 已完成（2026-11-05）：排序、翻页与泄漏测试通过；助手拿到的文字里找不到测试样本的敏感值，按号码片段搜索也搜不到 |
 | 5 | 界面：查看器面板、遮挡、待核对与更正、搜索分组、进度、开关 | 前端测试通过；本地栈浏览器核对 |
 | 6 | 文档与实机：规格、本方案、相册本地 AI、领域语言、当前状态；部署后在实验 NAS 上验收 | `make docs-check` 通过；实机验收记录 |
 
 ## 待用户决定
 
-起草时列出的 8 项中，5 项已按建议采纳，AI 助手的可见性按用户的方向另定（见“已确认的决定”）。还剩两项，选项与建议见各自的决定记录：
+起草时列出的 8 项中，5 项已按建议采纳，AI 助手的可见性按用户的方向另定（见“已确认的决定”）。还剩两项，选项与建议见各自的决定记录。步骤 4 按建议实现了这两项，改选时只需小改：
 
 - [点开完整号码是否记入活动记录](../decisions/2026-10-30-ocr-full-number-reveal-logging.md)
 - [敏感字段的清单](../decisions/2026-10-30-ocr-sensitive-fields.md)
@@ -347,4 +401,6 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
 - [相册规格](../specs/photo-library.md)、[相册本地 AI](photo-ai.md)、[物体检测的资源策略](photo-objects.md#资源策略)、[人物与宠物](photo-people.md)
 - [模型评估](../research/photo-ocr-model-evaluation.md)、[模型与 Runtime 选型](../research/photo-ai-model-runtime-selection.md#ocr)
 - [#128](https://github.com/zhongwater123/A-NAS/issues/128)（真实样本）、[#321](https://github.com/zhongwater123/A-NAS/pull/321)（内存规则）、[#323](https://github.com/zhongwater123/A-NAS/issues/323)（4B 级候选）
-- 代码：[`internal/photos/search.go`](../../internal/photos/search.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)、[`ai/anas_ai/worker.py`](../../ai/anas_ai/worker.py)、[`ai/eval/ocr.py`](../../ai/eval/ocr.py)、[`ai/eval/ocr_nas_bench.sh`](../../ai/eval/ocr_nas_bench.sh)
+- [ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)（更正与修改记录）
+- 测试：[`internal/photos/textview_test.go`](../../internal/photos/textview_test.go)、[`internal/photos/textread/sensitive_test.go`](../../internal/photos/textread/sensitive_test.go)
+- 代码：[`internal/photos/search.go`](../../internal/photos/search.go)、[`internal/photos/textsearch.go`](../../internal/photos/textsearch.go)、[`internal/photos/textview.go`](../../internal/photos/textview.go)、[`internal/photos/textread/sensitive.go`](../../internal/photos/textread/sensitive.go)、[`internal/photosapi/text.go`](../../internal/photosapi/text.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)、[`ai/anas_ai/worker.py`](../../ai/anas_ai/worker.py)、[`ai/eval/ocr.py`](../../ai/eval/ocr.py)、[`ai/eval/ocr_nas_bench.sh`](../../ai/eval/ocr_nas_bench.sh)

@@ -57,11 +57,3 @@ func SearchCandidates(ctx context.Context, s *Service, p Principal, scope ...str
 	}
 	return ids, err
 }
-
-// ForgetVectors drops the in-process vector cache, so that the next read
-// loads what the Catalog holds.
-func ForgetVectors(s *Service) {
-	s.index.mu.Lock()
-	defer s.index.mu.Unlock()
-	s.index.model, s.index.vectors = "", nil
-}

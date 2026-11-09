@@ -414,6 +414,23 @@ running() {
 }
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 journal_has() { journalctl -u "$1" --since "$2" -o cat --no-pager | grep -Fq "$3"; }
+# smbd_listens_only_on_its_interfaces: within 30 s, smbd listens on the SMB
+# interface's address and on no wildcard address; otherwise prints where it
+# listens. smbd tells systemd it is ready before it opens its listening
+# sockets (source3/smbd/server.c: daemon_ready, then open_sockets_smbd).
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+smbd_listens_only_on_its_interfaces() {
+  local listeners
+  for _ in $(seq 1 30); do
+    listeners=" $(ss -ltnH 'sport = :445' | awk '{print $4}' | paste -sd ' ') "
+    if [[ $listeners == *" $ip:445 "* && $listeners != *" 0.0.0.0:445 "* && $listeners != *" [::]:445 "* && $listeners != *" *:445 "* ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "smbd listens on:$listeners" >>"$hidden"
+  return 1
+}
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 has_capabilities() {
   local pid cap_eff
@@ -448,6 +465,17 @@ data=/srv/a-nas/data
 check "systemd accepts every installed A-NAS unit" \
   verified /etc/systemd/system/anas*.service /etc/systemd/system/anas*.socket /etc/systemd/system/anas*.path \
   /etc/systemd/system/*anas*.slice
+
+# --- smbd opens its listening sockets only when it starts, and a reload keeps
+# them: under Debian's configuration, before the Host Agent writes A-NAS's, it
+# listens on every address. The Host Agent's first Samba configuration
+# restarts it, so that it listens only on the loopback and the SMB interface
+# (docs/investigations/2026-11-04-smbd-starts-before-dhcp-address.md). Waiting
+# for that restart also keeps it from landing on the checks below.
+for _ in $(seq 1 60); do journal_has anas-host-agent "$installed_at" 'data volume reconciled' && break; sleep 1; done
+check "the Host Agent writes its Samba configuration once it serves" \
+  journal_has anas-host-agent "$installed_at" 'data volume reconciled'
+check "smbd then listens only on the loopback and SMB interface's addresses" smbd_listens_only_on_its_interfaces
 
 # --- Every service runs under its production unit (issue #38).
 check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares anas-family smbd
@@ -507,8 +535,6 @@ owner_id=$(id -u owner)
 alice_id=$(id -u alice)
 check "accounts have A-NAS UIDs" test "$owner_id" -ge 20100 -a "$alice_id" -ge 20100 -a "$owner_id" -ne "$alice_id"
 
-# The first account's Samba credential installs the product's interface
-# configuration. Before that, Debian's default listens on wildcard addresses.
 # --- smbd listens only on the addresses present when it starts, so it waits
 # for the SMB interface's IPv4 address and tries again until it is there
 # (docs/investigations/2026-11-04-smbd-starts-before-dhcp-address.md).
@@ -535,11 +561,7 @@ rm -f "$late_dropin"
 ip link delete anas-late0
 systemctl daemon-reload
 systemctl restart smbd
-# smbd tells systemd it is ready before it opens its listening sockets
-# (source3/smbd/server.c: daemon_ready, then open_sockets_smbd), so the restart
-# can return a moment before port 445 listens.
-for _ in $(seq 1 10); do [[ -n "$(ss -ltnH "src $ip and sport = :445")" ]] && break; sleep 1; done
-check "smbd listens on the SMB interface's address" grep -q . <<<"$(ss -ltnH "src $ip and sport = :445")"
+check "smbd listens on the SMB interface's address" smbd_listens_only_on_its_interfaces
 
 space_of() { curl -fsS -b "$1" "$api/api/v1/spaces" | jq -r --arg kind "$2" '[.items[] | select(.kind == $kind)][0].id'; }
 upload() { # JAR CSRF SPACE FILE NAME -> file ID
@@ -1183,6 +1205,8 @@ journal_shows() { # UNIT SINCE TEXT: the unit logs TEXT within three minutes; th
   done
   return 1
 }
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+journal_lacks() { ! journal_has "$@"; } # UNIT SINCE TEXT: the unit has not logged TEXT
 check "the installer enables the photo service's vector index socket" \
   systemctl is-enabled --quiet anas-vectors-proxy@a-nas-photos.socket
 check "the photo service builds its vector index from the Catalog" \
@@ -1190,9 +1214,19 @@ check "the photo service builds its vector index from the Catalog" \
 check "and brings the organised photo into it" \
   journal_shows anas-photos.service "$installed_at" "photo vector index synced"
 journalctl -u anas-photos.service --since "$installed_at" -o cat --no-pager | grep -F 'vector index' | tail -n 3 || true
-check "a search is compared with the vector index in the background" semantic_search 猫
-check "and the comparison is logged" \
-  journal_shows anas-photos.service "$installed_at" "photo vector index shadow search"
+# A restart clears what the service remembers of earlier searches: the last
+# check, which spaces checks ten minutes apart, and which reasons to read the
+# Catalog it has already logged.
+searched_at=$(date '+%Y-%m-%d %H:%M:%S')
+systemctl restart anas-photos
+check "the photo service starts again" journal_shows anas-photos.service "$searched_at" "photo service ready"
+check "a search reads the vector index" semantic_search 猫
+check "and is checked against the Catalog in the background" \
+  journal_shows anas-photos.service "$searched_at" "photo vector index check"
+check "which agrees with the Catalog" \
+  journal_has anas-photos.service "$searched_at" '"overlap10":1,"overlap100":1,"overlap500":1'
+check "without falling back to the Catalog's vectors" \
+  journal_lacks anas-photos.service "$searched_at" "photo search reads the Catalog's vectors"
 check "only the photo service reaches its vector index" \
   test "$(stat -c '%a %U %G' /run/a-nas-vectors/a-nas-photos.sock)" = "600 a-nas-photos a-nas-photos"
 check "the Product Service account cannot connect to the photo vector index" \

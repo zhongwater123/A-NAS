@@ -1,7 +1,7 @@
 # 启用向量索引
 
-状态：draft（系统测试已验证；2026-10-28 在 Experimental NAS 完成第 1–4 步与第 6 步，影子比对的数据待收集）
-更新时间：2026-10-28
+状态：draft（系统测试已验证；2026-10-28 在 Experimental NAS 完成第 1–4 步与第 6 步；第 5 步在读路径切换前做过影子比对，切换后的核对待部署后执行）
+更新时间：2026-11-06
 
 ## 目的
 
@@ -11,7 +11,8 @@
 
 - 相册服务有自己的 Qdrant 实例。实例按需启动，空闲后退出。
 - 相册的图片向量从 Catalog 同步进实例。
-- 文搜图时，相册服务在后台用索引再查一次，并记录与精确扫描的重合率和耗时。用户看到的结果不变。
+- 相册的排序从索引读：索引选出可能排进前面的照片，再按 Catalog 的向量精确打分，结果与精确扫描相同。
+- 后台至多每 10 分钟核对一次，比较索引与 Catalog 对同一次搜索的排序。
 
 ## 前提与风险
 
@@ -30,6 +31,7 @@
   - 安装器以退出码 2（缺少向量索引文件或 Qdrant 清单无效）、3（缺少 `systemd-socket-proxyd`）或 4（暂存的 Qdrant 与清单不符）结束。
   - 相册空闲以后，`journalctl -u anas-photos -b` 反复出现 `photo vector index sync failed`。
   - 实例因内存超限被杀（日志出现 `oom-kill`）。
+  - `photo vector index check` 的 `overlap*` 低于 1，或反复出现 `photo search reads the Catalog's vectors` 且 `reason` 为 `the vector index failed`。
 
 ## 步骤
 
@@ -47,7 +49,7 @@
    - 命令：`stat -c '%a %U %G' /run/a-nas-vectors/a-nas-photos.sock`。
    - 预期：`600 a-nas-photos a-nas-photos`。
    - 命令：`systemctl status anas-vectors@a-nas-photos.service`。
-   - 预期：相册服务有向量要同步，或刚做过搜索时为 `active (running)`；否则为 `inactive`。
+   - 预期：相册服务有向量要同步、有人在用相册，或刚做过搜索时为 `active (running)`；否则为 `inactive`。
 4. 等相册空闲（默认 5 分钟无人使用），看首次同步。
    - 命令：`journalctl -u anas-photos -b -o cat | grep 'photo vector index'`。
    - 预期，依次出现：
@@ -56,23 +58,32 @@
    - 完成标准：各条 `synced` 的 `upserted` 与 `deleted` 加起来等于 `created` 的 `queued`，最后一条 `queued=0`。
    - 这时还没有 `photo vector index reconciled`：建出集合的那次对账不再比较。下一次对账在一天后，或相册服务重启后的第一次空闲时，日志应为 `queued=0`。
    - 2026-10-28 实机：`created` 排队 733，三条 `synced` 共写入 730、删除 3，最后 `queued=0`。
-5. 收集影子比对。
-   - 操作：用桌面相册搜索几条中文查询，例如“海边的猫”“车库里的电动车”。
-   - 预期：符合条件的查询之后，日志出现一行 `photo vector index shadow search`，带 `overlap10`、`overlap100`、`overlap500`、`index_ms`、`exact_ms`、`warm`。日志里没有查询文本。
-   - 只比对这样的查询：
+5. 核对读路径。
+   - 操作：打开桌面相册，搜索几条中文查询，例如“海边的猫”“车库里的电动车”；再对一张照片用“找相似”，打开 AI 聚合。
+   - 预期：
+     - 打开相册后实例在运行：`systemctl is-active anas-vectors@a-nas-photos.service` 为 `active`（[预热](../architecture/vector-index.md#预热)）。
+     - 符合条件的搜索之后出现一行 `photo vector index check`，带 `overlap10`、`overlap100`、`overlap500`、`index_ms`、`exact_ms`、`warm`，三个 `overlap` 都是 1。日志里没有查询文本。
+     - 没有 `photo search reads the Catalog's vectors`。首次同步完成前它的 `reason` 为 `the vector index has no collection for the model`，大批导入时为 `too many photos wait for the vector index`，这两种只说明这段时间读的是 Catalog，结果不变。`the vector index failed recently` 只跟在一次 `the vector index failed` 之后，表示出错后的等待（[技术设计](../architecture/vector-index.md#出错之后)）。
+   - 只核对这样的搜索：
      - 是第一页；
      - 查询里没有人物名；
-     - 查询向量的模型与集合一致；
-     - outbox 为空：刚导入、回收或首次同步还没完成时都不为空；
-     - 上一次比对已经结束：忙时直接丢弃。
+     - 这次排序读的是索引；
+     - 距上一次核对超过 10 分钟，且上一次已经结束。
 
      所以不是每条查询都有日志，没有日志不说明出了问题。
-   - `overlap*` 应为 1，低于 1 说明索引与 Catalog 不一致，记下来查。`warm=false` 的那一行包含实例的启动时间。
-   - 完成标准：把至少 20 条比对的数字整理进[当前状态](../status/CURRENT.md)或对应 issue，作为是否切换读路径的依据。
+   - `overlap*` 低于 1 说明索引选错或漏了对象，记下来查；`warm=false` 的那一行包含实例的启动时间。
+   - 完成标准：至少 10 条核对的 `overlap*` 全部为 1，没有 `reason` 为 `the vector index failed` 的回退。
+   - 切换前的影子比对（2026-11-06 实机）：
+     - 10-28 至 11-06 共 53 条比对，`overlap*` 全部为 1；实例已连接时索引耗时中位 3 ms，冷启动时 298–592 ms（[技术设计](../architecture/vector-index.md#切换前的影子比对)）。
+     - 新增照片已同步：11-05 写入 11 张，11-06 写入 43 张。
+     - 对账 10 次全部为 `queued=0`，包括部署与重启之后。
+     - 新上传的照片在向量算出前就进了 outbox，这一轮同步记为 `deleted`（删除不存在的点，无害），向量算出后再记为 `upserted`。所以一批上传会先后出现等量的 `deleted` 与 `upserted`。
+     - 数据来自 root 只读导出的 journal（`journalctl -u anas-photos`），普通账号看不到。
 6. 看实例空闲退出。
-   - 命令：在最后一次搜索或同步约 2 分钟后（相册服务空闲 1 分钟断开连接，代理再等 2 秒），执行 `systemctl is-active anas-vectors@a-nas-photos.service`。
+   - 命令：关掉相册窗口、同步也结束约 2 分钟后（相册服务在最后一个请求后 1 分钟断开连接，代理再等 2 秒；相册窗口只轮询 AI 状态时不算使用），执行 `systemctl is-active anas-vectors@a-nas-photos.service`。
    - 预期：`inactive`。
    - 记录：执行 `systemctl show -p MemoryPeak anas-vectors@a-nas-photos.service`，把内存峰值写进[技术设计](../architecture/vector-index.md#配置)。
+   - 2026-11-06 实机：24 次运行的峰值为 123–323 MiB（中位 264 MiB），每次约一分钟后空闲退出。
 
 ## 验证
 
@@ -85,7 +96,7 @@
 - **只关闭索引**：
   - 写入 drop-in：`/etc/systemd/system/anas-photos.service.d/no-vectors.conf`，内容为 `[Service]` 加一行 `Environment=ANAS_PHOTOS_VECTOR_SOCKET=`。
   - 执行 `systemctl daemon-reload && systemctl restart anas-photos`。
-  - 结果：相册服务启动时清空 outbox 与同步状态，其他功能不变。删除这个文件即可重新启用，索引会从 Catalog 重建。
+  - 结果：相册服务启动时清空 outbox 与同步状态，排序改为读 Catalog（结果相同，更慢），其他功能不变。删除这个文件即可重新启用，索引会从 Catalog 重建。
 - **删除索引存储**（索引损坏或需要腾出空间）：
   - 执行 `systemctl stop anas-vectors-proxy@a-nas-photos.service anas-vectors@a-nas-photos.service`。
   - 执行 `rm -rf /var/lib/private/a-nas-vectors/a-nas-photos`。
@@ -110,4 +121,4 @@
 - 规格：[相册规格](../specs/photo-library.md)
 - ADR：[0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)、[0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 - 技术设计：[向量索引](../architecture/vector-index.md)
-- 代码：[单元](../../deploy/systemd/system/anas-vectors@.service)、[安装器](../../scripts/install-v1.0.1-system-services.sh)、[同步](../../internal/photos/vectorsync.go)、[影子比对](../../internal/photos/vectorshadow.go)
+- 代码：[单元](../../deploy/systemd/system/anas-vectors@.service)、[安装器](../../scripts/install-v1.0.1-system-services.sh)、[同步](../../internal/photos/vectorsync.go)、[读路径](../../internal/photos/vectorsearch.go)、[核对](../../internal/photos/vectorcheck.go)

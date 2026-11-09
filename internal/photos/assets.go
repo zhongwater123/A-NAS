@@ -756,7 +756,6 @@ func (s *Service) purge(ctx context.Context, actorID, action string, records []a
 	if err != nil {
 		return 0, err
 	}
-	s.index.forget(orphaned)
 	s.detected.forget(orphaned)
 	// A file left behind by a failure here has no Catalog row; Reconcile
 	// removes it.

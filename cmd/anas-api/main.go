@@ -387,7 +387,7 @@ func run(logger *slog.Logger) error {
 	tasks.Go(func() error { transferService.Run(background); return nil })
 	if photoService != nil {
 		tasks.Go(func() error {
-			photoservice.RunBackground(background, photoService, logger, photoAI, photoGate, nil)
+			photoservice.RunBackground(background, photoService, logger, photoAI, photoGate, nil, photoservice.VectorCheckInterval)
 			return nil
 		})
 	}
