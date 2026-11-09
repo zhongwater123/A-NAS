@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-11-09：分散任务把未知分配量当成完成，后台测量没有超时](2026-11-09-spread-allocation-observation.md)
 - [2026-11-05：家庭中心数据一致性与清理](2026-11-05-family-data-integrity.md)
 - [2026-11-05：网页搜索的隐藏暂停、跨分类绕过与并发积压](2026-11-05-web-search-website-pacing.md)
 - [2026-11-04：建卷测试结束后旧执行器仍写操作日志，竞态检测作业偶发失败](2026-11-04-volume-test-writes-after-cleanup.md)

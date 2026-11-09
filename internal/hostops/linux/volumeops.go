@@ -146,6 +146,7 @@ func (e *Executor) runOperation(operation *volumeOperation, run func(context.Con
 func publicFailure(step datavolume.OperationStep, err error) string {
 	for _, known := range []error{
 		datavolume.ErrDiskChanged, datavolume.ErrDiskNotEligible, datavolume.ErrVolumeExists, datavolume.ErrVolumeChanged, datavolume.ErrVolumeUnavailable,
+		datavolume.ErrVolumeBusy,
 	} {
 		if errors.Is(err, known) {
 			return known.Error()
