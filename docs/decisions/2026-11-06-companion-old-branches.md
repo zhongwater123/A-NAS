@@ -26,5 +26,5 @@
 
 - 提议与审查：[#404](https://github.com/zhongwater123/A-NAS/issues/404)
 - 加入素材的 PR：[#346](https://github.com/zhongwater123/A-NAS/pull/346)
-- 素材许可：[#414](https://github.com/zhongwater123/A-NAS/pull/414) 记录的 2026-11-06 决定
+- 素材许可：[#414](2026-11-06-companion-v1.md) 记录的 2026-11-06 决定
 - GitHub 文档：[Removing sensitive data from a repository](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository)

@@ -1,13 +1,13 @@
 # 虚拟伙伴（大肥鱼）
 
-状态：draft（V1 实现中，[#404](https://github.com/zhongwater123/A-NAS/issues/404)；VNAS 的控制见 [#412](https://github.com/zhongwater123/A-NAS/pull/412)、[#414](https://github.com/zhongwater123/A-NAS/pull/414)）
+状态：draft（V1 实现中，[#404](https://github.com/zhongwater123/A-NAS/issues/404)；VNAS 的控制见 [#412](https://github.com/zhongwater123/A-NAS/pull/412)、[#414](../decisions/2026-11-06-companion-v1.md)）
 更新时间：2026-11-09
 
 ## 目标
 
 已登录的 Web 桌面右下角常驻一个虚拟伙伴“大肥鱼”，就是 dsh-pet 的宠物卡片：渲染、动画链、走动、拖动、抛出、气泡、睡觉与锁都用 dsh-pet 的代码。它随这台设备上发起的 VNAS 回合与待确认卡片切换动作，定时任务出了新结果时挥手。
 
-VNAS 能控制它（[#414](https://github.com/zhongwater123/A-NAS/pull/414) 记录的 2026-11-06 决定）：播放动作、说话气泡、移动与抛出、睡觉与叫醒，只在发起这段对话的设备上。所以在控制它的设备上，伙伴可以说出这段对话的内容；别处来的内容，例如定时任务的提示，在全家共用的宿主机屏幕（本地控制台）上仍只显示状态。
+VNAS 能控制它（[#414](../decisions/2026-11-06-companion-v1.md) 记录的 2026-11-06 决定）：播放动作、说话气泡、移动与抛出、睡觉与叫醒，只在发起这段对话的设备上。所以在控制它的设备上，伙伴可以说出这段对话的内容；别处来的内容，例如定时任务的提示，在全家共用的宿主机屏幕（本地控制台）上仍只显示状态。
 
 ## 非目标
 
@@ -138,7 +138,7 @@ VNAS 能控制它（[#414](https://github.com/zhongwater123/A-NAS/pull/414) 记�
 
 ## 关联
 
-- 决定：[#414](https://github.com/zhongwater123/A-NAS/pull/414)（形象、实现方式与 VNAS 的控制）、[V1 是否不含待办与专注计时](../decisions/2026-11-06-companion-v1-no-todo-focus.md)
+- 决定：[#414](../decisions/2026-11-06-companion-v1.md)（形象、实现方式与 VNAS 的控制）、[V1 是否不含待办与专注计时](../decisions/2026-11-06-companion-v1-no-todo-focus.md)
 - 页面：[`Companion.tsx`](../../web/src/companion/Companion.tsx)、[`petCard.tsx`](../../web/src/companion/petCard.tsx)、[`animations.ts`](../../web/src/companion/animations.ts)、[`workStatus.ts`](../../web/src/companion/workStatus.ts)、[`commands.ts`](../../web/src/companion/commands.ts)、[`host.ts`](../../web/src/companion/host.ts)、[`AssistantPanel.tsx`](../../web/src/assistant/AssistantPanel.tsx)、[`TaskToasts.tsx`](../../web/src/assistant/TaskToasts.tsx)、[`taskNotices.ts`](../../web/src/assistant/taskNotices.ts)、[`LocalConsoleScreenSaver.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.tsx)
 - 产品服务：[`companion.go`](../../internal/assistantapi/companion.go)、[`gateway.go`](../../internal/assistantapi/gateway.go)、[`approvals.go`](../../internal/assistantapi/approvals.go)、[`handler.go`](../../internal/webui/handler.go)；白名单见[研究](../research/hermes-agent-runtime.md#产品服务的转发)
 - 伙伴服务器：[`anas_companion_mcp.py`](../../ai/assistant-spike/anas_companion_mcp.py)、[`managed-config.yaml`](../../ai/assistant-spike/managed-config.yaml)、[`anas-companion-assistant.socket`](../../ai/assistant-spike/anas-companion-assistant.socket)、[`assistant-install.sh`](../../ai/assistant-spike/assistant-install.sh)
