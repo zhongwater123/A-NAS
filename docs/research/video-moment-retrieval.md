@@ -32,7 +32,7 @@
 
 ### 运行方式
 
-- **运行环境**：Mac 开发机的 Colima `anas` 虚拟机（vz、6 核、8 GiB，Ubuntu 24.04 arm64，见[本地环境](../development/LOCAL_ENVIRONMENT.md)）。`~/anas-ai` 是 Python 3.12 的 venv，按 [`ai/dev.Dockerfile`](../../ai/dev.Dockerfile) 装 `mediapipe==1.1.0` 并换成 `opencv-contrib-python-headless==5.0.0.93`，NumPy 2.5.3、Pillow 12.3.0 与 [`requirements.lock`](../../ai/requirements.lock) 相同。`ai/` 与 `deploy/models/` 复制到虚拟机的 `~/anas-p0` 后运行。
+- **运行环境**：Mac 开发机的 Colima `anas` 虚拟机（vz、6 核、8 GiB，Ubuntu 24.04 arm64，见[本地环境](../development/LOCAL_ENVIRONMENT.md)）。`~/anas-ai` 是 Python 3.12 的 venv，按 [`ai/dev.Dockerfile`](../../ai/dev.Dockerfile) 装 `mediapipe==1.1.0` 并换成 `opencv-contrib-python-headless==5.0.0.93`，NumPy 2.5.3、Pillow 12.3.0 与 [`requirements.txt`](../../ai/requirements.txt)（当时为 `requirements.lock`） 相同。`ai/` 与 `deploy/models/` 复制到虚拟机的 `~/anas-p0` 后运行。
 - **模型**：`~/A-NAS-models/embeddinggemma-2-740m/embeddinggemma-2-740m.litertlm`，大小与 SHA-256 与 [`deploy/models/embeddinggemma-2-740m.json`](../../deploy/models/embeddinggemma-2-740m.json) 一致，经 virtiofs 只读使用；`MediaPipeProvider` 加载时再核对一次。
 - **抽帧**：帧在 Mac 上用 Homebrew 的 FFmpeg 8 解码（虚拟机当时还没装 FFmpeg），Pillow 12.0.0 按 `thumbnail/v1` 渲染（长边 512 px、Lanczos、JPEG 82，[`eval/embed.py`](../../ai/eval/embed.py) 的 `render`），存在 `~/A-NAS-datasets/cache/video-moments/frames/`。解码耗时另在虚拟机里用 Ubuntu 的 FFmpeg 6.1.1 测。
 - **干扰**：虚拟机里 `systemd-logind` 在测量期间持续占满 1 个核，另有其他会话的安装任务在跑；MediaPipe 用 4 个推理线程（6 核减去预留的 2 核）。耗时只作相对比较。
