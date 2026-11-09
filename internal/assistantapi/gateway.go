@@ -64,6 +64,9 @@ type upstream struct {
 	ready     json.RawMessage
 	closed    chan struct{}
 	closeOnce sync.Once
+	// companionMu passes the companion's commands to the window one at a
+	// time (companion.go).
+	companionMu sync.Mutex
 }
 
 type forwardedCall struct {
@@ -464,7 +467,7 @@ func (u *upstream) adjustResult(call forwardedCall, raw json.RawMessage) (json.R
 		delete(result, "pending_approval")
 	case "prompt.submit":
 		u.m.openTurn(session, u)
-		u.m.prompted(session, u)
+		u.m.prompted(session, u, unquote(result["status"]) == "queued")
 	case "session.interrupt":
 		u.m.stopping(session)
 	case "session.events.since":

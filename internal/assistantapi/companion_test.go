@@ -421,6 +421,13 @@ func TestCompanionArgumentsAreCheckedBeforeAnythingIsSent(t *testing.T) {
 		{"broadcast", `{"text":"` + strings.Repeat("长", 201) + `"}`},
 		{"broadcast", `{"text":"bell\u0007"}`},
 		{"broadcast", `{"text":"\u202eevil"}`},
+		{"broadcast", `{"text":"invoice\u200f.pdf.exe"}`},
+		{"broadcast", `{"text":"a\u200eb"}`},
+		{"broadcast", `{"text":"a\u061cb"}`},
+		{"broadcast", `{"text":"a\u2066b\u2069"}`},
+		{"broadcast", `{"text":"\u7b2c\u4e00\u6bb5\u2029\u7b2c\u4e8c\u6bb5"}`},
+		{"broadcast", `{"text":"\u7b2c\u4e00\u884c\u2028\u7b2c\u4e8c\u884c"}`},
+		{"lock_release", `{"lockId":""}`},
 		{"broadcast", `{"text":"  "}`},
 		{"broadcast", `{"text":"hi","duration":60001}`},
 		{"anim", `{"facing":"left"}`},
@@ -449,6 +456,18 @@ func TestCompanionArgumentsAreCheckedBeforeAnythingIsSent(t *testing.T) {
 	}
 	if args, _, problem := checkCompanion("broadcast", json.RawMessage(`{"text":"第一行\n第二行","anim":false}`)); problem != "" || args["text"] != "第一行\n第二行" {
 		t.Fatalf("args = %v, problem %q", args, problem)
+	}
+	// An empty lock is no lock, as dsh-pet's empty ?lock= and the window take it;
+	// numbers and booleans written as strings are taken as Hermes coerces them.
+	args, canonical, problem = checkCompanion("broadcast", json.RawMessage(`{"text":"hi","lock":"","duration":"3000","anim":"FALSE"}`))
+	if problem != "" || len(args) != 3 || args["duration"] != 3000.0 || args["anim"] != false || canonical != `{"anim":false,"duration":3000,"text":"hi"}` {
+		t.Fatalf("args = %v, canonical %s, problem %q", args, canonical, problem)
+	}
+	if args, _, problem := checkCompanion("lock", json.RawMessage(`{"lockId":" ","ttl":"null"}`)); problem != "" || len(args) != 0 {
+		t.Fatalf("args = %v, problem %q", args, problem)
+	}
+	if _, _, problem := checkCompanion("throw", json.RawMessage(`{"angle":"NaN","power":1}`)); problem == "" {
+		t.Fatal("NaN passed as an angle")
 	}
 }
 
@@ -537,5 +556,266 @@ func TestTheCompanionSocketKnowsTheMemberByTheirUID(t *testing.T) {
 	}
 	if status, _ := post(serve(nil), "/call", `{"tool":"wake","args":{}}`); status != http.StatusServiceUnavailable {
 		t.Fatalf("no account store: %d", status)
+	}
+}
+
+// alice is the member the harness's windows belong to.
+func (h *harness) alice() *member {
+	h.api.membersMu.Lock()
+	defer h.api.membersMu.Unlock()
+	return h.api.members["alice"]
+}
+
+func TestModelArgumentsPairWithWhatTheServerPassesOn(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	// tool.start carries the model's own arguments; Hermes and the companion
+	// server coerce them before the call reaches the socket.
+	for i, c := range []struct{ start, call string }{
+		{`{"x":"0.5","y":" 0.5 ","mode":"instant"}`, `{"x":0.5,"y":0.5,"mode":"instant"}`},
+		{`{"text":"hi","duration":"3000","anim":"false","lock":"null"}`, `{"text":"hi","duration":3000.0,"anim":false}`},
+		{`{"name":"wave","lock":""}`, `{"name":"wave","lock":""}`},
+		{`{"name":"wave","lock":"  "}`, `{"name":"wave"}`},
+	} {
+		var tool string
+		switch {
+		case strings.Contains(c.start, `"mode"`):
+			tool = "position"
+		case strings.Contains(c.start, `"text"`):
+			tool = "broadcast"
+		default:
+			tool = "anim"
+		}
+		h.started(conn, fakeRuntime, fmt.Sprintf("call-%d", i), tool, c.start)
+		results := h.calls(tool, c.call)
+		sent := command(w)
+		if _, locked := sent.Payload.Args["lock"]; locked || sent.Payload.Action != tool {
+			t.Fatalf("%s sent %+v", c.call, sent)
+		}
+		answer(w, fakeRuntime, sent.Payload.CommandID, `"ok":true,"result":{"status":"ok"}`)
+		if status := statusOf(t, results); status != "ok" {
+			t.Fatalf("%s paired with %s: %s", c.call, c.start, status)
+		}
+	}
+}
+
+func TestKeysTheServerDropsAreRefusedOnceThePairingIsMade(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	// The companion server passes on only the keys its tool takes; tool.start
+	// still has the others.
+	h.started(conn, fakeRuntime, "call-1", "broadcast", `{"text":"看这里","image":"https://x/y.png"}`)
+	h.started(conn, fakeRuntime, "call-2", "anim", `{"name":"wave","pet":"other"}`)
+	h.observed(w, conn)
+	result := resultOf(t, h.calls("broadcast", `{"text":"看这里"}`))
+	if result["status"] != "rejected" || result["reason"] != "bad-request" || !strings.Contains(result["message"].(string), "url 或 image") {
+		t.Fatalf("image: %v", result)
+	}
+	result = resultOf(t, h.calls("anim", `{"name":"wave"}`))
+	if result["status"] != "rejected" || result["reason"] != "bad-request" || !strings.Contains(result["message"].(string), "pet") {
+		t.Fatalf("pet: %v", result)
+	}
+	// Both starts were used up, and nothing went to the window.
+	if status := statusOf(t, h.calls("anim", `{"name":"wave"}`)); status != "no_desktop" {
+		t.Fatalf("start not used up: %s", status)
+	}
+	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
+	w.waitFor(func(f frame) bool {
+		if isEvent(f, "anas.companion") {
+			t.Fatal("a refused call reached the window")
+		}
+		return isEvent(f, "message.complete")
+	})
+}
+
+func TestAWakeUpTurnNoWindowPromptedHasNoDesktop(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
+	// Hermes's own turn after a background task: message.start, no prompt.
+	h.serve.event(conn, "message.start", fakeRuntime, `{}`)
+	h.started(conn, fakeRuntime, "call-1", "broadcast", `{"text":"后台读到的内容"}`)
+	h.observed(w, conn)
+	if status := statusOf(t, h.calls("broadcast", `{"text":"后台读到的内容"}`)); status != "no_desktop" {
+		t.Fatalf("wake-up turn: %s", status)
+	}
+
+	// A prompt Hermes queued behind a turn prompts the next one.
+	m := &member{sessions: map[string]*liveSession{}, commands: map[string]*companionCommand{}}
+	u := &upstream{}
+	m.prompted(fakeRuntime, u, true)
+	s := m.sessions[fakeRuntime]
+	if s.prompter != nil {
+		t.Fatal("a queued prompt prompted the turn under way")
+	}
+	m.companionTurnEnded(fakeRuntime, s)
+	if s.prompter != u || s.nextPrompter != nil {
+		t.Fatal("the queued prompt did not prompt the next turn")
+	}
+	m.companionTurnEnded(fakeRuntime, s)
+	if s.prompter != nil {
+		t.Fatal("the prompter outlived its turn")
+	}
+}
+
+func TestACommandSettledBeforeItWentOutIsNotSent(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	m := h.alice()
+	// The member stops the turn just as a lock call is paired.
+	c, refusal := m.command(fakeRuntime, "lock", map[string]any{"ttl": 1000.0})
+	if refusal != nil {
+		t.Fatalf("refused: %v", refusal)
+	}
+	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
+	if release := command(w); release.Payload.Action != "lock_release" {
+		t.Fatalf("first = %+v", release)
+	}
+	c.send(m)
+	if result := <-c.answer; result["status"] != "cancelled" {
+		t.Fatalf("result = %v", result)
+	}
+	w.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"hello"}`)
+	w.waitFor(func(f frame) bool {
+		if isEvent(f, "anas.companion") {
+			t.Fatal("a cancelled command reached the window after the release")
+		}
+		return isEvent(f, "message.complete")
+	})
+}
+
+func TestAWindowThatDoesNotAnswerGetsNoMoreCommandsForAWhile(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	h.started(conn, fakeRuntime, "call-1", "wake", `{}`)
+	results := h.calls("wake", `{}`)
+	first := command(w)
+	if status := statusOf(t, results); status != "timeout" {
+		t.Fatalf("first: %s", status)
+	}
+	// The calls Hermes queued behind it are answered at once.
+	h.started(conn, fakeRuntime, "call-2", "sleep", `{}`)
+	began := time.Now()
+	if result := resultOf(t, h.calls("sleep", `{}`)); result["status"] != "timeout" || result["reason"] != "unresponsive" ||
+		time.Since(began) >= companionReceipt {
+		t.Fatalf("second: %v after %s", result, time.Since(began))
+	}
+	// Any answer shows the window is back.
+	answer(w, fakeRuntime, first.Payload.CommandID, `"ok":true,"result":{"status":"ok"}`)
+	h.started(conn, fakeRuntime, "call-3", "wake", `{}`)
+	results = h.calls("wake", `{}`)
+	sent := command(w)
+	if sent.Payload.Action != "wake" {
+		t.Fatalf("third = %+v", sent)
+	}
+	answer(w, fakeRuntime, sent.Payload.CommandID, `"ok":true,"result":{"status":"ok"}`)
+	if status := statusOf(t, results); status != "ok" {
+		t.Fatalf("third: %s", status)
+	}
+}
+
+func TestASubagentAnywhereMakesTheMembersCallsBusy(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	// A subagent of another conversation calls wake; this conversation waits
+	// with its own wake.
+	h.serve.event(conn, "message.start", otherRuntime, `{}`)
+	h.serve.event(conn, "subagent.tool", otherRuntime, `{"subagent_id":"sa-1","child_session_id":"c-1","tool_name":"`+companionPrefix+`wake"}`)
+	h.started(conn, fakeRuntime, "call-1", "wake", `{}`)
+	h.observed(w, conn)
+	if status := statusOf(t, h.calls("wake", `{}`)); status != "busy" {
+		t.Fatalf("with another conversation's subagent: %s", status)
+	}
+	// The subagent is known by its id and child session together.
+	h.serve.event(conn, "subagent.complete", otherRuntime, `{"subagent_id":"sa-1","child_session_id":"c-1"}`)
+	h.observed(w, conn)
+	results := h.calls("wake", `{}`)
+	answer(w, fakeRuntime, command(w).Payload.CommandID, `"ok":true,"result":{"status":"ok"}`)
+	if status := statusOf(t, results); status != "ok" {
+		t.Fatalf("after the subagent: %s", status)
+	}
+	// A subagent that never reports its end stops counting once its call can
+	// no longer arrive.
+	h.serve.event(conn, "subagent.tool", otherRuntime, `{"subagent_id":"sa-2","child_session_id":"c-2","tool_name":"`+companionPrefix+`wake"}`)
+	h.started(conn, fakeRuntime, "call-2", "wake", `{}`)
+	h.observed(w, conn)
+	m := h.alice()
+	m.mu.Lock()
+	m.sessions[otherRuntime].helpers["sa-2/c-2"] = time.Now().Add(-companionHelper)
+	m.mu.Unlock()
+	results = h.calls("wake", `{}`)
+	answer(w, fakeRuntime, command(w).Payload.CommandID, `"ok":true,"result":{"status":"ok"}`)
+	if status := statusOf(t, results); status != "ok" {
+		t.Fatalf("after the subagent's time: %s", status)
+	}
+}
+
+func TestAStartLeftOverFromAStoppedInstanceIsForgotten(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	// A turn whose instance stopped before message.complete left a start.
+	h.serve.event(conn, "message.start", otherRuntime, `{}`)
+	h.started(conn, otherRuntime, "call-1", "bubble_clear", `{}`)
+	h.started(conn, fakeRuntime, "call-2", "bubble_clear", `{}`)
+	h.observed(w, conn)
+	m := h.alice()
+	m.mu.Lock()
+	m.sessions[otherRuntime].companion[0].at = time.Now().Add(-companionStale)
+	m.mu.Unlock()
+	results := h.calls("bubble_clear", `{}`)
+	answer(w, fakeRuntime, command(w).Payload.CommandID, `"ok":true,"result":{"status":"ok"}`)
+	if status := statusOf(t, results); status != "ok" {
+		t.Fatalf("status = %s", status)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if left := len(m.sessions[otherRuntime].companion); left != 0 {
+		t.Fatalf("%d stale starts kept", left)
+	}
+}
+
+func TestACallTheServerStopsWaitingForIsSettled(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	h.started(conn, fakeRuntime, "call-1", "anim", `{"name":"wave"}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	results := make(chan map[string]any, 1)
+	go func() { results <- h.api.companionCall(ctx, "alice", "anim", json.RawMessage(`{"name":"wave"}`)) }()
+	sent := command(w)
+	cancel()
+	if status := statusOf(t, results); status != "cancelled" {
+		t.Fatalf("status = %s", status)
+	}
+	m := h.alice()
+	m.mu.Lock()
+	left := len(m.commands)
+	m.mu.Unlock()
+	if left != 0 {
+		t.Fatalf("%d commands left unsettled", left)
+	}
+	if response := answer(w, fakeRuntime, sent.Payload.CommandID, `"ok":true,"result":{"status":"ended"}`); len(response.Error) == 0 {
+		t.Fatal("an answer to a settled command was taken")
+	}
+}
+
+func TestTheBroadcastLimitHoldsOnTheWholePath(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	m := h.alice()
+	m.mu.Lock()
+	for range companionRateEach["broadcast"] {
+		m.sent = append(m.sent, sentCommand{at: time.Now(), tool: "broadcast"})
+	}
+	m.mu.Unlock()
+	h.started(conn, fakeRuntime, "call-1", "broadcast", `{"text":"再说一次"}`)
+	if result := resultOf(t, h.calls("broadcast", `{"text":"再说一次"}`)); result["status"] != "busy" || result["reason"] != "rate-limited" {
+		t.Fatalf("seventh broadcast: %v", result)
+	}
+	// Other tools still pass within the member's limit.
+	h.started(conn, fakeRuntime, "call-2", "wake", `{}`)
+	results := h.calls("wake", `{}`)
+	answer(w, fakeRuntime, command(w).Payload.CommandID, `"ok":true,"result":{"status":"ok"}`)
+	if status := statusOf(t, results); status != "ok" {
+		t.Fatalf("wake: %s", status)
 	}
 }

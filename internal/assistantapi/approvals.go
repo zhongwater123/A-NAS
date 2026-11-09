@@ -113,10 +113,11 @@ type liveSession struct {
 	// browser is the connection whose window registered last as the
 	// session's browser (Hermes's browser control).
 	browser *upstream
-	// prompter is the connection whose window sent the session's last
-	// prompt; the companion's commands go to its window only while it is also
-	// the browser (companion.go).
-	prompter *upstream
+	// prompter is the connection whose window sent the prompt of the turn
+	// under way, and nextPrompter the one whose prompt Hermes queued for the
+	// next turn; the companion's commands go to the prompter's window only
+	// while it is also the browser (companion.go).
+	prompter, nextPrompter *upstream
 	// companion are the calls of companion tools the turn started that no
 	// call on the companion socket has been paired with yet, oldest first.
 	companion []companionStart
@@ -147,6 +148,8 @@ type member struct {
 	// limits (companion.go).
 	commands map[string]*companionCommand
 	sent     []sentCommand
+	// stall holds when a window last left a command unanswered.
+	stall map[*upstream]time.Time
 	// started is closed when a companion tool starts, for the calls waiting
 	// for theirs.
 	started chan struct{}
@@ -340,7 +343,7 @@ func (h *Handler) observe(m *member, u *upstream, ev event) {
 		go h.refresh(m, u, completed)
 	}
 	if release != nil {
-		release.send()
+		release.send(m)
 	}
 }
 

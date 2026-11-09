@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -73,8 +74,18 @@ var (
 	// on another connection and may arrive after it.
 	companionLate = 1500 * time.Millisecond
 	// companionHelper is how long after a subagent started a companion tool
-	// its call may still arrive: Hermes's 30 s per call, and some.
-	companionHelper = 35 * time.Second
+	// its call may still arrive, and companionStale the same for a turn's own
+	// tool.start: Hermes's 120 s per call (managed-config.yaml), and some. A
+	// start older than that belongs to a call Hermes gave up on, or to an
+	// instance that stopped before its turn ended.
+	companionHelper = 130 * time.Second
+	companionStale  = 130 * time.Second
+	// companionStall is how long a window that left a command unanswered gets
+	// no more commands, unless it answers again: the calls queued behind the
+	// first are answered timeout at once instead of 15 s each, which would
+	// add up past Hermes's limit (it runs one call per server at a time and
+	// counts from the queue).
+	companionStall = 30 * time.Second
 	// companionMinute is the limits' window.
 	companionMinute = time.Minute
 
@@ -94,8 +105,12 @@ const (
 type companionStart struct {
 	toolID string
 	tool   string
-	// args are the call's arguments in canonical form (canonicalArgs).
+	// args are the call's arguments in canonical form (companionValues).
 	args string
+	// problem says why the call is refused when the model gave keys the
+	// tool does not take, which the companion server never passes on.
+	problem string
+	at      time.Time
 }
 
 // companionCommand is a command sent to a window and not yet settled.
@@ -114,8 +129,20 @@ type sentCommand struct {
 	tool string
 }
 
-// send passes the command to its window.
-func (c *companionCommand) send() { c.browser.toBrowser(c.event) }
+// send passes the command to its window, unless it was settled first: the
+// end of the turn may settle it between command and send. Commands go to a
+// window one at a time, so the release the end of a turn sends never
+// overtakes a lock still on its way.
+func (c *companionCommand) send(m *member) {
+	c.browser.companionMu.Lock()
+	defer c.browser.companionMu.Unlock()
+	m.mu.Lock()
+	_, waiting := m.commands[c.id]
+	m.mu.Unlock()
+	if waiting {
+		c.browser.toBrowser(c.event)
+	}
+}
 
 // AccountResolver names the active user who owns a Linux UID.
 type AccountResolver interface {
@@ -204,26 +231,30 @@ func (h *Handler) companionCall(ctx context.Context, account, tool string, raw j
 	if m == nil {
 		return map[string]any{"status": companionNoDesktop}
 	}
-	session, found, ambiguous := m.waitStart(ctx, tool, canonical)
+	start, session, found, ambiguous := m.waitStart(ctx, tool, canonical)
 	switch {
 	case ambiguous:
 		return map[string]any{"status": companionBusy}
 	case !found:
 		return map[string]any{"status": companionNoDesktop}
+	case start.problem != "":
+		// The model gave url, image or another key the tool does not take; the
+		// companion server dropped it, Hermes's tool.start still has it.
+		return map[string]any{"status": companionRejected, "reason": "bad-request", "message": start.problem}
 	}
 	c, refusal := m.command(session, tool, args)
 	if refusal != nil {
 		return refusal
 	}
 	h.logger.Debug("companion command sent", "account", account, "session", session, "tool", tool)
-	c.send()
+	c.send(m)
 	timer := time.NewTimer(companionReceipt)
 	defer timer.Stop()
 	select {
 	case result := <-c.answer:
 		return result
 	case <-timer.C:
-		m.settle(c.id, map[string]any{"status": companionTimeout})
+		m.stalled(c)
 		return <-c.answer
 	case <-ctx.Done():
 		// The companion server stopped waiting; nobody reads the result.
@@ -234,15 +265,15 @@ func (h *Handler) companionCall(ctx context.Context, account, tool string, raw j
 
 // waitStart pairs a call with its tool.start, waiting companionLate for one
 // that has not arrived yet.
-func (m *member) waitStart(ctx context.Context, tool, args string) (session string, found, ambiguous bool) {
+func (m *member) waitStart(ctx context.Context, tool, args string) (start companionStart, session string, found, ambiguous bool) {
 	deadline := time.NewTimer(companionLate)
 	defer deadline.Stop()
 	for {
 		m.mu.Lock()
-		session, found, ambiguous = m.pair(tool, args, time.Now())
+		start, session, found, ambiguous = m.pair(tool, args, time.Now())
 		if found || ambiguous {
 			m.mu.Unlock()
-			return session, found, ambiguous
+			return start, session, found, ambiguous
 		}
 		if m.started == nil {
 			m.started = make(chan struct{})
@@ -252,53 +283,59 @@ func (m *member) waitStart(ctx context.Context, tool, args string) (session stri
 		select {
 		case <-started:
 		case <-deadline.C:
-			return "", false, false
+			return companionStart{}, "", false, false
 		case <-ctx.Done():
-			return "", false, false
+			return companionStart{}, "", false, false
 		}
 	}
 }
 
 // pair takes the oldest started call of tool with these arguments, when the
-// member has such calls in exactly one running turn and no subagent of that
-// conversation may be making the same call. Under m.mu.
-func (m *member) pair(tool, args string, now time.Time) (session string, found, ambiguous bool) {
+// member has such calls in exactly one running turn and no subagent of any
+// conversation may be making the same call: a subagent's call has no
+// tool.start of its own and could take another conversation's. Under m.mu.
+func (m *member) pair(tool, args string, now time.Time) (start companionStart, session string, found, ambiguous bool) {
 	matches := func(c companionStart) bool { return c.tool == tool && c.args == args }
 	for id, s := range m.sessions {
+		s.companion = slices.DeleteFunc(s.companion, func(c companionStart) bool { return now.Sub(c.at) >= companionStale })
 		if s.turn && slices.ContainsFunc(s.companion, matches) {
 			if session != "" {
-				return "", false, true
+				return companionStart{}, "", false, true
 			}
 			session = id
 		}
 	}
 	if session == "" {
-		return "", false, false
+		return companionStart{}, "", false, false
+	}
+	for _, s := range m.sessions {
+		if s.helping(now) {
+			return companionStart{}, "", false, true
+		}
 	}
 	s := m.sessions[session]
-	if s.helping(now) {
-		return "", false, true
-	}
 	i := slices.IndexFunc(s.companion, matches)
+	start = s.companion[i]
 	s.companion = slices.Delete(s.companion, i, i+1)
-	return session, true, false
+	return start, session, true, false
 }
 
 // companionStarted records the start of a companion tool's call in a running
 // turn. Under m.mu.
 func (m *member) companionStarted(s *liveSession, toolID, name string, rawArgs json.RawMessage) {
 	tool, ok := strings.CutPrefix(name, companionPrefix)
-	if !ok || !s.turn || toolID == "" || strings.HasPrefix(toolID, mirroredTool) {
+	if _, known := companionTools[tool]; !ok || !known || !s.turn || toolID == "" || strings.HasPrefix(toolID, mirroredTool) {
 		return
 	}
-	args, ok := canonicalArgs(rawArgs)
+	values, extra, ok := companionValues(tool, rawArgs)
 	if !ok || slices.ContainsFunc(s.companion, func(c companionStart) bool { return c.toolID == toolID }) {
 		return
 	}
 	if len(s.companion) == maxCompanionStarts {
 		s.companion = s.companion[1:]
 	}
-	s.companion = append(s.companion, companionStart{toolID: toolID, tool: tool, args: args})
+	s.companion = append(s.companion, companionStart{toolID: toolID, tool: tool, args: canonicalForm(values),
+		problem: extraProblem(tool, extra), at: time.Now()})
 	if m.started != nil {
 		close(m.started)
 		m.started = nil
@@ -335,14 +372,22 @@ func (s *liveSession) helping(now time.Time) bool {
 	return false
 }
 
-// prompted records the connection whose window sent a session's prompt.
-func (m *member) prompted(session string, u *upstream) {
+// prompted records the connection whose window sent a session's prompt: for
+// the turn under way, or for the next one when Hermes queued the prompt
+// behind it. A turn no window prompted, such as Hermes's own wake-up after a
+// background task, has no prompter.
+func (m *member) prompted(session string, u *upstream, queued bool) {
 	if !runtimeIDPattern.MatchString(session) {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.session(session).prompter = u
+	s := m.session(session)
+	if queued {
+		s.nextPrompter = u
+		return
+	}
+	s.prompter = u
 }
 
 // command makes the command for a paired call, or the result that refuses it:
@@ -359,7 +404,14 @@ func (m *member) command(session, tool string, args map[string]any) (*companionC
 	if s == nil || !s.turn || s.browser == nil || s.browser != s.prompter || !s.browser.hasWindow() {
 		return nil, map[string]any{"status": companionNoDesktop}
 	}
-	if !m.admit(tool, time.Now()) {
+	now := time.Now()
+	if at, ok := m.stall[s.browser]; ok {
+		if now.Sub(at) < companionStall {
+			return nil, map[string]any{"status": companionTimeout, "reason": "unresponsive"}
+		}
+		delete(m.stall, s.browser)
+	}
+	if !m.admit(tool, now) {
 		return nil, map[string]any{"status": companionBusy, "reason": "rate-limited"}
 	}
 	if tool == "lock" {
@@ -399,6 +451,21 @@ func (m *member) admit(tool string, now time.Time) bool {
 	return true
 }
 
+// stalled settles a command its window left unanswered as a timeout, and
+// holds back that window's next commands for companionStall.
+func (m *member) stalled(c *companionCommand) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, waiting := m.commands[c.id]; !waiting {
+		return
+	}
+	m.settleLocked(c.id, map[string]any{"status": companionTimeout})
+	if m.stall == nil {
+		m.stall = map[*upstream]time.Time{}
+	}
+	m.stall[c.browser] = time.Now()
+}
+
 // settle gives a command its result, unless it already has one.
 func (m *member) settle(id string, result map[string]any) {
 	m.mu.Lock()
@@ -421,6 +488,7 @@ func (m *member) settleLocked(id string, result map[string]any) {
 // release of a lock one of them took, for the caller to send. Under m.mu.
 func (m *member) companionTurnEnded(session string, s *liveSession) *companionCommand {
 	s.companion = nil
+	s.prompter, s.nextPrompter = s.nextPrompter, nil
 	for id, c := range m.commands {
 		if c.session == session && c.answer != nil {
 			m.settleLocked(id, map[string]any{"status": companionCancelled, "reason": "turn-ended"})
@@ -447,6 +515,7 @@ func (m *member) companionTurnEnded(session string, s *liveSession) *companionCo
 func (m *member) windowLeft(u *upstream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	delete(m.stall, u)
 	for id, c := range m.commands {
 		if c.browser == u {
 			m.settleLocked(id, map[string]any{"status": companionCancelled, "reason": "window-closed"})
@@ -498,6 +567,8 @@ func (u *upstream) companionResult(f frame) frame {
 	id := unquote(params["command_id"])
 	m := u.m
 	m.mu.Lock()
+	// Any answer, even a late one, shows the window is there again.
+	delete(m.stall, u)
 	c := m.commands[id]
 	if c == nil || c.browser != u || c.session != unquote(params["session_id"]) {
 		m.mu.Unlock()
@@ -549,47 +620,119 @@ func newCommandID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-// canonicalArgs puts a call's arguments in one form, whoever wrote them: keys
-// sorted, numbers as JSON numbers of their value, null values and a missing
-// object as no arguments.
-func canonicalArgs(raw json.RawMessage) (string, bool) {
-	args := map[string]any{}
+// companionValues puts a call's arguments in the form the companion server
+// passes them on, whoever wrote them, and names the keys its tool does not
+// take. Hermes reports a call's start with the model's own arguments and
+// coerces them to the tool's schema only afterwards (tools/arg_coercion.py),
+// and the companion server drops nulls and keys its tool does not take. So,
+// on both sides of a pairing: a number or boolean written as a string is the
+// number or boolean, "null" or a blank where an argument is optional (lock:
+// "", as dsh-pet's empty ?lock=) is no argument, and null values and a
+// missing object are no arguments.
+func companionValues(tool string, raw json.RawMessage) (values map[string]any, extra []string, ok bool) {
+	given := map[string]any{}
 	if len(raw) > 0 && string(raw) != "null" {
-		if err := json.Unmarshal(raw, &args); err != nil || args == nil {
-			return "", false
+		if err := json.Unmarshal(raw, &given); err != nil || given == nil {
+			return nil, nil, false
 		}
 	}
-	for key, value := range args {
-		if value == nil {
-			delete(args, key)
+	rule := companionTools[tool]
+	values = map[string]any{}
+	for key, value := range given {
+		param, known := rule.args[key]
+		switch {
+		case value == nil:
+		case !known:
+			extra = append(extra, key)
+		default:
+			if value = param.loosen(value, !slices.Contains(rule.required, key)); value != nil {
+				values[key] = value
+			}
 		}
 	}
-	data, err := json.Marshal(args)
-	return string(data), err == nil
+	slices.Sort(extra)
+	return values, extra, true
+}
+
+// canonicalForm writes arguments with their keys sorted and numbers as JSON
+// numbers of their value, so that 1 and 1.0 compare equal.
+func canonicalForm(values map[string]any) string {
+	data, _ := json.Marshal(values)
+	return string(data)
+}
+
+// extraProblem says why keys a tool does not take are refused.
+func extraProblem(tool string, extra []string) string {
+	switch {
+	case slices.Contains(extra, "url") || slices.Contains(extra, "image"):
+		return "伙伴只播放自己的动画、只说纯文本，不接受 url 或 image"
+	case len(extra) > 0:
+		return fmt.Sprintf("%s 不接受参数 %s", tool, extra[0])
+	}
+	return ""
 }
 
 // companionArg checks one argument of a companion tool and returns the value
 // to pass on, or what is wrong with it.
 type companionArg func(any) (any, string)
 
+// companionParam is one argument of a companion tool: the JSON type the
+// companion server advertises for it, and its check.
+type companionParam struct {
+	kind  string
+	check companionArg
+}
+
+func textParam(check companionArg) companionParam {
+	return companionParam{kind: "string", check: check}
+}
+
+func numberParam(check companionArg) companionParam {
+	return companionParam{kind: "number", check: check}
+}
+
+var flagParam = companionParam{kind: "boolean", check: toggle}
+
+// loosen takes a value as Hermes's coercion would for the parameter's type.
+func (p companionParam) loosen(value any, optional bool) any {
+	s, ok := value.(string)
+	if !ok {
+		return value
+	}
+	word := strings.ToLower(strings.TrimSpace(s))
+	switch {
+	case optional && (word == "null" || (p.kind == "string" && word == "")):
+		return nil
+	case p.kind == "number":
+		if n, err := strconv.ParseFloat(word, 64); err == nil && !math.IsInf(n, 0) && !math.IsNaN(n) {
+			return n
+		}
+	case p.kind == "boolean" && (word == "true" || word == "false"):
+		return word == "true"
+	}
+	return value
+}
+
 // companionTools are the tools of the companion contract with their
 // arguments, as dsh-pet's routes take them less pet, surface, url and image.
 var companionTools = map[string]struct {
-	args     map[string]companionArg
+	args     map[string]companionParam
 	required []string
 }{
-	"anim": {args: map[string]companionArg{"name": animationName, "facing": oneOf("left", "right"), "lock": lockID},
+	"anim": {args: map[string]companionParam{"name": textParam(animationName), "facing": textParam(oneOf("left", "right")), "lock": textParam(lockID)},
 		required: []string{"name"}},
-	"broadcast": {args: map[string]companionArg{"text": bubbleText, "duration": number(0, 60000), "anim": toggle, "lock": lockID},
-		required: []string{"text"}},
-	"bubble_clear": {args: map[string]companionArg{"lock": lockID}},
-	"position": {args: map[string]companionArg{"x": clamped(0, 1), "y": clamped(0, 1), "mode": oneOf("instant", "spring", "line"),
-		"duration": number(0, 5000), "lock": lockID}, required: []string{"x", "y", "mode"}},
-	"throw":        {args: map[string]companionArg{"angle": number(math.Inf(-1), math.Inf(1)), "power": power, "lock": lockID}, required: []string{"angle", "power"}},
+	"broadcast": {args: map[string]companionParam{"text": textParam(bubbleText), "duration": numberParam(number(0, 60000)), "anim": flagParam,
+		"lock": textParam(lockID)}, required: []string{"text"}},
+	"bubble_clear": {args: map[string]companionParam{"lock": textParam(lockID)}},
+	"position": {args: map[string]companionParam{"x": numberParam(clamped(0, 1)), "y": numberParam(clamped(0, 1)),
+		"mode": textParam(oneOf("instant", "spring", "line")), "duration": numberParam(number(0, 5000)), "lock": textParam(lockID)},
+		required: []string{"x", "y", "mode"}},
+	"throw": {args: map[string]companionParam{"angle": numberParam(number(math.Inf(-1), math.Inf(1))), "power": numberParam(power),
+		"lock": textParam(lockID)}, required: []string{"angle", "power"}},
 	"sleep":        {},
 	"wake":         {},
-	"lock":         {args: map[string]companionArg{"lockId": lockID, "ttl": lockTTL}},
-	"lock_release": {args: map[string]companionArg{"lockId": lockID}, required: []string{"lockId"}},
+	"lock":         {args: map[string]companionParam{"lockId": textParam(lockID), "ttl": numberParam(lockTTL)}},
+	"lock_release": {args: map[string]companionParam{"lockId": textParam(lockID)}, required: []string{"lockId"}},
 }
 
 // checkCompanion checks a call's arguments against its tool: every key known,
@@ -601,22 +744,16 @@ func checkCompanion(tool string, raw json.RawMessage) (map[string]any, string, s
 	if !ok {
 		return nil, "", fmt.Sprintf("没有这个工具：%s", tool)
 	}
-	canonical, ok := canonicalArgs(raw)
+	values, extra, ok := companionValues(tool, raw)
 	if !ok {
 		return nil, "", "参数必须是一个对象"
 	}
-	var given map[string]any
-	_ = json.Unmarshal([]byte(canonical), &given)
+	if problem := extraProblem(tool, extra); problem != "" {
+		return nil, "", problem
+	}
 	args := map[string]any{}
-	for key, value := range given {
-		valid, known := rule.args[key]
-		switch {
-		case key == "url" || key == "image":
-			return nil, "", "伙伴只播放自己的动画、只说纯文本，不接受 url 或 image"
-		case !known:
-			return nil, "", fmt.Sprintf("%s 不接受参数 %s", tool, key)
-		}
-		checked, problem := valid(value)
+	for key, value := range values {
+		checked, problem := rule.args[key].check(value)
 		if problem != "" {
 			return nil, "", fmt.Sprintf("%s：%s", key, problem)
 		}
@@ -627,7 +764,7 @@ func checkCompanion(tool string, raw json.RawMessage) (map[string]any, string, s
 			return nil, "", fmt.Sprintf("缺少参数 %s", key)
 		}
 	}
-	return args, canonical, ""
+	return args, canonicalForm(values), ""
 }
 
 func number(minimum, maximum float64) companionArg {
@@ -686,14 +823,16 @@ func oneOf(allowed ...string) companionArg {
 }
 
 // plainText accepts 1 to limit code points without control characters, but
-// for line breaks where lines are allowed, and without bidi overrides.
+// for \n where lines are allowed, without the other line and paragraph
+// separators, and without bidi controls (marks, embeddings, overrides and
+// isolates), which would reorder what the bubble shows.
 func plainText(value any, limit int, lines bool) (string, bool) {
 	s, ok := value.(string)
 	if !ok || strings.TrimSpace(s) == "" || utf8.RuneCountInString(s) > limit {
 		return "", false
 	}
 	for _, r := range s {
-		if (unicode.IsControl(r) && (!lines || r != '\n')) || (r >= '\u202a' && r <= '\u202e') || (r >= '\u2066' && r <= '\u2069') {
+		if (unicode.IsControl(r) && (!lines || r != '\n')) || unicode.In(r, unicode.Bidi_Control, unicode.Zl, unicode.Zp) {
 			return "", false
 		}
 	}
