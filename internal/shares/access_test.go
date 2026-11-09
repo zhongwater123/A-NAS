@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 // A recipient cannot revoke what was sent to them: to them the share is not
@@ -107,10 +106,7 @@ func TestASharedPathRefusesBackslashNULAndColon(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := settled(t, s, v.ID)
-			if got.Status != want {
-				t.Fatalf("share with %q is %s, want %s", name, got.Status, want)
-			}
+			got := awaitShare(t, s, v.ID, want)
 			if want == "published" {
 				if visitErr != nil || len(got.Entries) != 1 || got.Entries[0].Path != name {
 					t.Fatalf("entries = %+v, capture error = %v; want %q", got.Entries, visitErr, name)
@@ -121,26 +117,6 @@ func TestASharedPathRefusesBackslashNULAndColon(t *testing.T) {
 				t.Fatalf("capturing %q: error = %v, entries = %+v; want ErrInvalid and none", name, visitErr, got.Entries)
 			}
 		})
-	}
-}
-
-// settled waits until the share is no longer being prepared, so a share that
-// ends in the wrong state fails on its state rather than on a timeout.
-func settled(t *testing.T, s *Store, id string) Share {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		v, err := s.Get(context.Background(), sender, id, false)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if v.Status != "preparing" {
-			return v
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("share is still preparing")
-		}
-		time.Sleep(2 * time.Millisecond)
 	}
 }
 
@@ -163,20 +139,31 @@ func TestSentAndReceivedListsDoNotMix(t *testing.T) {
 }
 
 // One save takes at most MaxEntries items. A share holds no more than that,
-// so only a request that repeats an item can ask for more.
+// so a request for more has to name an item again, and the test relies on
+// Save taking a repeated item once: it checks that first, because if repeats
+// were refused, a request over the limit would be refused for the repeat and
+// the limit could no longer be tested this way.
 func TestASaveTakesAtMostMaxEntriesItems(t *testing.T) {
 	s, _ := setup(t, &testBackend{})
 	v := publish(t, s)
-	ctx := context.Background()
-	limit := slices.Repeat([]string{v.Entries[0].ID}, MaxEntries)
-	if _, err := s.Save(ctx, bob, v.ID, SaveRequest{RequestID: "over", EntryIDs: append(slices.Clone(limit), v.Entries[0].ID), Target: Target{RootID: "home"}}); !errors.Is(err, ErrInvalid) {
+	save := func(requestID string, times int) (Job, error) {
+		return s.Save(context.Background(), bob, v.ID, SaveRequest{
+			RequestID: requestID, EntryIDs: slices.Repeat([]string{v.Entries[0].ID}, times), Target: Target{RootID: "home"},
+		})
+	}
+	savedOnce := func(requestID string, times int) {
+		t.Helper()
+		job, err := save(requestID, times)
+		if err != nil {
+			t.Fatalf("Save() of one item named %d times error = %v", times, err)
+		}
+		if done := awaitJob(t, s, job.ID, "completed"); len(done.EntryIDs) != 1 {
+			t.Fatalf("one item named %d times saved %v, want the item once", times, done.EntryIDs)
+		}
+	}
+	savedOnce("twice", 2)
+	if _, err := save("over", MaxEntries+1); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("Save() of MaxEntries+1 items error = %v, want ErrInvalid", err)
 	}
-	job, err := s.Save(ctx, bob, v.ID, SaveRequest{RequestID: "limit", EntryIDs: limit, Target: Target{RootID: "home"}})
-	if err != nil {
-		t.Fatalf("Save() of MaxEntries items error = %v", err)
-	}
-	if done := awaitJob(t, s, job.ID, "completed"); len(done.EntryIDs) != 1 {
-		t.Fatalf("saved entries = %v, want the one item once", done.EntryIDs)
-	}
+	savedOnce("limit", MaxEntries)
 }

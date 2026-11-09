@@ -19,6 +19,8 @@ import (
 type uploadFixture struct {
 	ctx     context.Context
 	service *files.Service
+	users   *accounts.Service
+	owner   accounts.User
 	alice   accounts.User
 	space   accounts.Space
 	root    string
@@ -58,7 +60,7 @@ func newUploadFixtureOn(t *testing.T, fileSystem func(volume string) files.FileS
 		t.Fatalf("open file catalog: %v", err)
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
-	fixture := &uploadFixture{ctx: ctx, alice: alice, space: findPrivateSpace(t, spaces), now: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)}
+	fixture := &uploadFixture{ctx: ctx, users: accountService, owner: admin, alice: alice, space: findPrivateSpace(t, spaces), now: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)}
 	volume := filepath.Join(t.TempDir(), "volume")
 	fixture.root = filepath.Join(volume, "spaces", "private", "alice")
 	options := files.Options{

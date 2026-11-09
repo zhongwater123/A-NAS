@@ -2,6 +2,7 @@ package storage_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,10 +42,18 @@ func assertPlanState(t *testing.T, service *storage.Service, executor *recording
 	}
 }
 
-// Only the plan's own phrase, typed exactly, confirms erasing the disks.
+// Only the plan's own phrase, typed exactly, confirms erasing the disks: not
+// in another case, not the phrase for a neighbouring disk, not with a space
+// added and not just its first word.
 func TestAPlanIsConfirmedOnlyWithItsExactPhrase(t *testing.T) {
 	service, plan, _, executor := planned(t)
-	for _, phrase := range []string{"", "erase data-01", "ERASE data-02", plan.ConfirmationPhrase + " ", "ERASE"} {
+	exact := plan.ConfirmationPhrase
+	lower := strings.ToLower(exact)
+	if lower == exact {
+		t.Fatalf("phrase %q has no capital letters to type in the wrong case", exact)
+	}
+	neighbour := exact[:len(exact)-1] + string(exact[len(exact)-1]^1)
+	for _, phrase := range []string{"", lower, neighbour, exact + " ", strings.Fields(exact)[0]} {
 		if _, err := service.ConfirmPlan(t.Context(), storageAdministrator, plan.ID, phrase); !errors.Is(err, storage.ErrConfirmation) {
 			t.Fatalf("ConfirmPlan(%q) error = %v, want ErrConfirmation", phrase, err)
 		}

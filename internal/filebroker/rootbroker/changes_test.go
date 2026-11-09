@@ -36,15 +36,25 @@ var alice = accountid.Identity{Username: "alice", UID: 20101, Role: accountid.Ro
 var aliceAccount = accountid.SessionUser{UserID: "user-alice", Username: "alice", Role: accountid.RoleMember}
 
 // uidDirectory is the account directory the changes socket asks who is
-// behind a UID.
+// behind a UID. It counts the questions, and answers err while it is set.
 type uidDirectory struct {
-	mu   sync.Mutex
-	uids map[int]accountid.SessionUser
+	mu    sync.Mutex
+	uids  map[int]accountid.SessionUser
+	asked map[int]int
+	err   error
+}
+
+func newUIDDirectory(uids map[int]accountid.SessionUser) *uidDirectory {
+	return &uidDirectory{uids: uids, asked: map[int]int{}}
 }
 
 func (d *uidDirectory) ResolveAccountUID(_ context.Context, uid int) (accountid.SessionUser, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.asked[uid]++
+	if d.err != nil {
+		return accountid.SessionUser{}, d.err
+	}
 	user, ok := d.uids[uid]
 	if !ok {
 		return accountid.SessionUser{}, accountid.ErrUserNotFound
@@ -58,6 +68,20 @@ func (d *uidDirectory) add(uid int, user accountid.SessionUser) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.uids[uid] = user
+}
+
+// questions is how often the directory was asked about uid.
+func (d *uidDirectory) questions(uid int) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.asked[uid]
+}
+
+// fail makes the directory answer err, as when it cannot be reached.
+func (d *uidDirectory) fail(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.err = err
 }
 
 // newChangesHarness runs the broker with the executor over a volume laid out
@@ -83,7 +107,7 @@ func newChangesHarness(t *testing.T) *changesHarness {
 			t.Fatal(err)
 		}
 	}
-	accounts := &uidDirectory{uids: map[int]accountid.SessionUser{alice.UID: aliceAccount}}
+	accounts := newUIDDirectory(map[int]accountid.SessionUser{alice.UID: aliceAccount})
 	server, err := NewServer(Config{
 		Sessions: resolverFunc(func(token string) (accountid.Identity, error) {
 			return lookup(map[string]accountid.Identity{"alice-token": alice}, token)
@@ -273,13 +297,41 @@ func TestTheAssistantSocketServesOnlyMembersByTheirUID(t *testing.T) {
 	if content, err := os.ReadFile(filepath.Join(h.volume, "spaces/private/alice/计划.md")); err != nil || string(content) != "# 计划\n" {
 		t.Fatalf("the plan was applied: %q, %v", content, err)
 	}
+	if n := h.accounts.questions(uid); n != 0 {
+		t.Fatalf("the directory was asked about UID %d %d times, want never", uid, n)
+	}
 }
 
 // The changes socket serves exactly the A-NAS UID range: a member's UID is
 // served as that member, and a UID outside the range is refused before the
-// directory is asked, even one it would name.
+// directory is asked, even one it would name. An in-range UID the directory
+// does not name is refused, and while the directory cannot answer, no one
+// is served.
 func TestTheAssistantSocketChecksTheUIDRange(t *testing.T) {
-	h := newChangesHarness(t)
+	directory := newUIDDirectory(map[int]accountid.SessionUser{})
+	// Only the handler is under test: no volume, socket or workers.
+	server, err := NewServer(Config{
+		Sessions: resolverFunc(func(string) (accountid.Identity, error) {
+			return accountid.Identity{}, errors.New("the changes socket takes no sessions")
+		}),
+		Accounts:   directory,
+		VolumeRoot: t.TempDir(), VolumeReady: func() bool { return true },
+		AssistantChanges: t.TempDir(),
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(server.Close)
+	ask := func(uid int) (int, *accountid.Identity) {
+		var served *accountid.Identity
+		handler := server.withAssistant(func(_ http.ResponseWriter, _ *http.Request, identity accountid.Identity) {
+			served = &identity
+		})
+		recorder := httptest.NewRecorder()
+		handler(recorder, httptest.NewRequestWithContext(context.WithValue(t.Context(), peerKey{}, uid), http.MethodGet, "http://changes/recent", nil))
+		return recorder.Code, served
+	}
 	for uid, want := range map[int]int{
 		0:                          http.StatusForbidden,
 		1000:                       http.StatusForbidden,
@@ -289,21 +341,30 @@ func TestTheAssistantSocketChecksTheUIDRange(t *testing.T) {
 		accountid.LastUserUID:      http.StatusOK,
 		accountid.LastUserUID + 1:  http.StatusForbidden,
 	} {
-		h.accounts.add(uid, aliceAccount)
-		var served *accountid.Identity
-		handler := h.server.withAssistant(func(_ http.ResponseWriter, _ *http.Request, identity accountid.Identity) {
-			served = &identity
-		})
-		recorder := httptest.NewRecorder()
-		handler(recorder, httptest.NewRequestWithContext(context.WithValue(t.Context(), peerKey{}, uid), http.MethodGet, "http://changes/recent", nil))
-		if recorder.Code != want {
-			t.Errorf("UID %d: status %d, want %d", uid, recorder.Code, want)
+		directory.add(uid, aliceAccount)
+		code, served := ask(uid)
+		if code != want {
+			t.Errorf("UID %d: status %d, want %d", uid, code, want)
 		}
-		if want == http.StatusOK && (served == nil || served.UID != uid || served.Username != "alice") {
-			t.Errorf("UID %d served as %+v, want alice at that UID", uid, served)
+		if want == http.StatusOK {
+			if served == nil || served.UID != uid || served.Username != "alice" {
+				t.Errorf("UID %d served as %+v, want alice at that UID", uid, served)
+			}
+			continue
 		}
-		if want != http.StatusOK && served != nil {
+		if served != nil {
 			t.Errorf("UID %d reached the handler as %+v", uid, served)
 		}
+		if n := directory.questions(uid); n != 0 {
+			t.Errorf("the directory was asked about UID %d %d times, want never", uid, n)
+		}
+	}
+	unnamed := accountid.FirstUserUID + 50
+	if code, served := ask(unnamed); code != http.StatusForbidden || served != nil {
+		t.Errorf("UID %d, which no account has: status %d, served as %+v; want 403", unnamed, code, served)
+	}
+	directory.fail(errors.New("account directory is down"))
+	if code, served := ask(alice.UID); code != http.StatusServiceUnavailable || served != nil {
+		t.Errorf("alice while the directory is down: status %d, served as %+v; want 503", code, served)
 	}
 }

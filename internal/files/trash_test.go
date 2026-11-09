@@ -266,39 +266,13 @@ func TestRestoreOntoATakenNameKeepsBothOrReplaces(t *testing.T) {
 // they deleted: no one else, not even an administrator, sees, restores or
 // purges it (docs/specs/basic-storage-and-sharing.md#文件回收站与快照).
 func TestOnlyTheDeleterSeesRestoresAndPurgesARecycleBinItem(t *testing.T) {
-	ctx := context.Background()
-	accountStore, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "accounts.db"))
+	f := newUploadFixture(t)
+	ctx, service, owner, alice := f.ctx, f.service, f.owner, f.alice
+	bob, err := f.users.CreateMember(ctx, owner, "bob", "bob password for testing")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = accountStore.Close() })
-	accountService := accounts.NewService(accountStore, acceptingCredentials{}, accounts.Options{})
-	owner, err := accountService.SetupAdministrator(ctx, "owner", "correct horse battery staple")
-	if err != nil {
-		t.Fatal(err)
-	}
-	alice, err := accountService.CreateMember(ctx, owner, "alice", "alice password for testing")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bob, err := accountService.CreateMember(ctx, owner, "bob", "bob password for testing")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var shared accounts.Space
-	for _, space := range mustSpaces(t, accountService, alice) {
-		if space.Kind == accounts.SpaceKindShared {
-			shared = space
-		}
-	}
-	catalog, err := files.OpenSQLite(filepath.Join(t.TempDir(), "files.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = catalog.Close() })
-	service := files.NewLocalService(catalog, filepath.Join(t.TempDir(), "volume"), accountService, files.Options{
-		DisableCapacityReserve: true, AllowUnverifiedVolume: true,
-	})
+	shared := findSharedSpace(t, mustSpaces(t, f.users, alice))
 	trashed := func(user accounts.User, name string) files.TrashItem {
 		t.Helper()
 		entry, err := service.Upload(ctx, user, shared.ID, "", name, bytes.NewBufferString(name))
