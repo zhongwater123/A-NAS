@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react";
 import { domToCanvas } from "modern-screenshot";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 import { apiFetch } from "../api/client";
 import { apiError, http, pathOf, server } from "../test/server";
@@ -200,6 +200,29 @@ describe("WebosController", () => {
     expect(sent).toEqual(["DELETE /api/v1/files/f1"]);
   });
 
+  it("counts the page's writes as the step's for 15 s after it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { control, asked } = controller(false);
+    await control.run("browser_click", { ref: refOf(await look(control), "打开文件夹") });
+    vi.setSystemTime(Date.now() + 15_000);
+    await expect(apiFetch("/api/v1/files/f1", { method: "DELETE" })).rejects.toMatchObject({
+      code: "not_allowed_for_vnas",
+    });
+    vi.setSystemTime(Date.now() + 1);
+    await apiFetch("/api/v1/files/f1", { method: "DELETE" });
+    expect(asked).toHaveLength(1);
+    expect(sent).toEqual(["DELETE /api/v1/files/f1"]);
+  });
+
+  it("leaves the page's writes alone once VNAS's window lets go of the desktop", async () => {
+    const { control, asked } = controller(false);
+    await control.run("browser_click", { ref: refOf(await look(control), "打开文件夹") });
+    uninstall();
+    await apiFetch("/api/v1/files/f1", { method: "DELETE" });
+    expect(asked).toEqual([]);
+    expect(sent).toEqual(["DELETE /api/v1/files/f1"]);
+  });
+
   it("holds Enter in a form until the member allows what the form sends", async () => {
     const { control, asked } = controller(false);
     const form = document.getElementById("rename") as HTMLFormElement;
@@ -259,6 +282,28 @@ describe("WebosController", () => {
     expect(sent).toEqual(["POST /api/v1/containers/c1/actions"]);
   });
 
+  it("asks again in a guarded window once the member's grant there has run out", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { control, asked } = controller(true);
+    const snapshot = await look(control);
+    await control.run("browser_click", { ref: refOf(snapshot, "停止") });
+    vi.setSystemTime(Date.now() + 29_999);
+    await control.run("browser_click", { ref: refOf(snapshot, "查看日志") });
+    expect(asked).toHaveLength(1);
+    vi.setSystemTime(Date.now() + 1);
+    await control.run("browser_click", { ref: refOf(snapshot, "查看日志") });
+    expect(asked.map((danger) => danger.what)).toEqual(["点击“停止”", "点击“查看日志”"]);
+  });
+
+  it("asks again in another guarded window: a grant covers only the window it was given in", async () => {
+    const { control, asked } = controller(true);
+    const snapshot = await look(control);
+    await control.run("browser_click", { ref: refOf(snapshot, "停止") });
+    await control.run("browser_click", { ref: refOf(snapshot, "以 root 打开") });
+    await control.run("browser_click", { ref: refOf(snapshot, "查看日志") });
+    expect(asked.map((danger) => danger.where)).toEqual(["Docker", "设置 · 终端", "Docker"]);
+  });
+
   it("asks for anything in 设置's 终端, but not for the settings navigation", async () => {
     const { control, asked } = controller(false);
     const snapshot = await look(control);
@@ -268,6 +313,35 @@ describe("WebosController", () => {
     expect(asked[0]).toEqual({ what: "点击“以 root 打开”", where: "设置 · 终端", why: "“终端”里的操作都要你先允许" });
     await control.run("browser_click", { ref: refOf(snapshot, "日志") });
     expect(asked).toHaveLength(1);
+  });
+
+  it("does not ask for a step in another settings section, or while none is shown", async () => {
+    const { control, asked } = controller(false);
+    const snapshot = await look(control);
+    const [terminal, logs] = screen.getByRole("navigation", { name: "设置分区" }).querySelectorAll("button");
+    terminal.removeAttribute("aria-current");
+    logs.setAttribute("aria-current", "page");
+    await control.run("browser_click", { ref: refOf(snapshot, "以 root 打开") });
+    logs.removeAttribute("aria-current");
+    await control.run("browser_click", { ref: refOf(snapshot, "以 root 打开") });
+    expect(asked).toEqual([]);
+  });
+
+  it("asks before typing into a terminal in any window, not only in 设置's 终端", async () => {
+    const { control, asked } = controller(false);
+    // A shell in a window of its own, as xterm.js renders one: its input is a textarea inside .xterm.
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<section data-window-id="shell" role="dialog" aria-label="容器终端">
+        <div class="xterm"><textarea aria-label="Terminal input"></textarea></div>
+      </section>`,
+    );
+    const input = screen.getByRole("textbox", { name: "Terminal input" }) as HTMLTextAreaElement;
+    await expect(
+      control.run("browser_type", { ref: refOf(await look(control), "Terminal input"), text: "rm -rf ~" }),
+    ).rejects.toThrow("成员没有允许");
+    expect(asked).toEqual([{ what: "在“终端”里输入“rm -rf ~”", where: "容器终端", why: "终端里的输入会直接运行" }]);
+    expect(input.value).toBe("");
   });
 
   it("types into a field as the member would, with input and change events", async () => {
@@ -287,6 +361,54 @@ describe("WebosController", () => {
     document.getElementById("open")!.remove();
     await expect(control.run("browser_click", { ref })).rejects.toThrow("browser_snapshot");
     await expect(control.run("browser_navigate", { url: "https://example.com" })).rejects.toThrow(ControlError);
+  });
+
+  describe("the member's own input", () => {
+    // jsdom trusts no event a script dispatches, so the member's input is
+    // handed to the listeners the controller put on the window, as the
+    // browser hands it over.
+    let added: MockInstance<typeof window.addEventListener>;
+    beforeEach(() => {
+      added = vi.spyOn(window, "addEventListener");
+    });
+    afterEach(() => added.mockRestore());
+    function member(type: string, target: Element) {
+      const event = { type, target, isTrusted: true } as unknown as Event;
+      for (const [name, listener] of added.mock.calls) if (name === type) (listener as EventListener)(event);
+    }
+
+    it("hears the member's input before the page's own handlers can stop it", () => {
+      controller();
+      for (const type of ["pointerdown", "keydown", "drop"])
+        expect(added).toHaveBeenCalledWith(type, expect.any(Function), true);
+    });
+
+    it.each(["pointerdown", "keydown", "drop"])(
+      "ends VNAS's claim on the page's writes once the member's own %s follows its step",
+      async (type) => {
+        const { control, asked } = controller(false);
+        await control.run("browser_click", { ref: refOf(await look(control), "打开文件夹") });
+        member(type, document.getElementById("delete")!);
+        await apiFetch("/api/v1/files/f1", { method: "DELETE" });
+        expect(asked).toEqual([]);
+        expect(sent).toEqual(["DELETE /api/v1/files/f1"]);
+      },
+    );
+
+    it("keeps holding the step's writes after events a script made, or input in VNAS's own window", async () => {
+      const { control, asked } = controller(false);
+      await control.run("browser_click", { ref: refOf(await look(control), "打开文件夹") });
+      const target = document.getElementById("delete")!;
+      target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Delete" }));
+      target.dispatchEvent(new Event("drop", { bubbles: true }));
+      member("keydown", document.getElementById("composer")!);
+      await expect(apiFetch("/api/v1/files/f1", { method: "DELETE" })).rejects.toMatchObject({
+        code: "not_allowed_for_vnas",
+      });
+      expect(asked).toEqual([{ what: "点击“打开文件夹”", where: "文件管理", why: "这一步会删除内容" }]);
+      expect(sent).toEqual([]);
+    });
   });
 });
 

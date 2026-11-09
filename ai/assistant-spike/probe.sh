@@ -4,7 +4,21 @@
 ok()  { echo "PASS $1"; }
 bad() { echo "FAIL $1${2:+: $2}"; }
 expect_ok()   { local n=$1; shift; if out=$("$@" 2>&1); then ok "$n"; else bad "$n" "$out"; fi; }
-expect_fail() { local n=$1; shift; if out=$("$@" 2>&1); then bad "$n" "succeeded: $out"; else ok "$n (${out##*: })"; fi; }
+# expect_refused NAME ERROR COMMAND...: the command fails with ERROR, such as "Permission
+# denied", in its output. Any other failure, such as a crash or a missing interpreter, is not
+# a refusal and fails the check (#423).
+expect_refused() {
+  local n=$1 e=$2
+  shift 2
+  if out=$("$@" 2>&1); then bad "$n" "succeeded: $out"
+  elif [[ $out == *"$e"* ]]; then ok "$n ($e)"
+  else bad "$n" "not refused with $e: $out"; fi
+}
+# expect_hidden NAME ERROR COMMAND... PATH: expect_refused for a PATH the sandbox hides, so that
+# the refusal alone does not show PATH exists. It prints "HIDDEN PATH" and
+# ai/assistant-spike/system-test.sh checks, as root, that PATH is there outside the sandbox.
+# PATH is the command's last argument, so the path proven and the path refused are one.
+expect_hidden() { echo "HIDDEN ${!#}"; expect_refused "$@"; }
 
 echo "INFO id: $(id)"
 echo "INFO caps: $(grep CapEff /proc/self/status)"
@@ -15,17 +29,23 @@ echo "INFO caps: $(grep CapEff /proc/self/status)"
 # spaces, Hermes's home, /run, the assistant's policy and config, and /opt/a-nas, as owning
 # group, ACL entry or default ACL entry.
 if [ -n "${PROBE_IDENTITY_ONLY:-}" ]; then
-  expect_fail "nothing in the sandbox grants a-nas-admins" sh -c \
+  # Streamed, not held: an empty listing proves nothing, so getfacl must have listed files.
+  expect_ok "nothing in the sandbox grants a-nas-admins" sh -c \
     'getfacl -R -p /nas /var/lib/hermes-home /run /etc/hermes /etc/a-nas-assistant /opt/a-nas 2>/dev/null |
-      grep -Eq "^(# group: |(default:)?group:)a-nas-admins(:|\$)"'
+      awk "/^# file: /{n++} /^(# group: |(default:)?group:)a-nas-admins(:|\$)/{bad=1} END{exit !(n > 0 && !bad)}"'
   exit 0
 fi
-expect_fail "no a-nas-admins in the sandbox"     sh -c 'id -G | tr " " "\n" | grep -qx 20001'
+# The group's GID as this system has it, and the sandbox's groups, both looked up for certain.
+# shellcheck disable=SC2016 # $gid and $ids expand in the inner sh
+expect_ok   "no a-nas-admins in the sandbox"     sh -c \
+  'gid=$(getent group a-nas-admins | cut -d: -f3) && [ -n "$gid" ] && ids=$(id -G) && [ -n "$ids" ] &&
+    ! printf "%s\n" $ids | grep -qx "$gid"'
 expect_ok   "read own personal file"            cat /nas/个人空间/计划.md
 expect_ok   "read own trash entry"               cat /nas/个人空间/.a-nas-trash/alice/old.txt
 expect_ok   "read shared file"                   cat /nas/共享空间/family.md
 expect_ok   "read another member's Agent space"  cat /nas/共享空间/Agent空间/bob/report.md
-expect_fail "read another member's shared trash" cat /nas/共享空间/.a-nas-trash/bob/gone.txt
+# Each recycle bin in the sandbox holds only the member's own folder.
+expect_hidden "read another member's shared trash" 'No such file or directory' cat /nas/共享空间/.a-nas-trash/bob/gone.txt
 expect_ok   "recursive file search over Shared"  sh -c 'rg --files -g "*" -- /nas/共享空间 >/dev/null; [ $? -le 1 ]'
 expect_ok   "recursive file search over personal" sh -c 'rg --files -g "*" -- /nas/个人空间 >/dev/null; [ $? -le 1 ]'
 # shellcheck disable=SC2012 # names listed for the log
@@ -34,46 +54,64 @@ echo "INFO shared bin as seen: $(ls -A /nas/共享空间/.a-nas-trash | tr '
 if [ -z "$(ls -A /srv 2>/dev/null)" ]; then ok "data volume hidden (/srv empty)"; else bad "data volume hidden" "$(ls -A /srv)"; fi
 found=$(find / -xdev \( -name bob-secret.txt -o -name 'snap-1' -o -name '.a-nas-snapshots' \) 2>/dev/null | head -3)
 if [ -z "$found" ]; then ok "no other member's space or snapshot anywhere"; else bad "other space visible" "$found"; fi
-expect_fail "write into personal space"          sh -c 'echo x > /nas/个人空间/new.txt'
-expect_fail "delete in personal space"           rm /nas/个人空间/secret.txt
-expect_fail "rename in personal space"           mv /nas/个人空间/secret.txt /nas/个人空间/s2.txt
-expect_fail "chmod in personal space"            chmod 0644 /nas/个人空间/secret.txt
-expect_fail "setfacl in personal space"          setfacl -m o::r /nas/个人空间/secret.txt
-expect_fail "write into shared space"            sh -c 'echo x > /nas/共享空间/x.txt'
-expect_fail "write into own Agent space directly" sh -c 'echo x > /nas/共享空间/Agent空间/alice/x.txt'
+expect_refused "write into personal space"          'Read-only file system' sh -c 'echo x > /nas/个人空间/new.txt'
+expect_refused "delete in personal space"           'Read-only file system' rm /nas/个人空间/secret.txt
+expect_refused "rename in personal space"           'Read-only file system' mv /nas/个人空间/secret.txt /nas/个人空间/s2.txt
+expect_refused "chmod in personal space"            'Read-only file system' chmod 0644 /nas/个人空间/secret.txt
+expect_refused "setfacl in personal space"          'Read-only file system' setfacl -m o::r /nas/个人空间/secret.txt
+expect_refused "write into shared space"            'Read-only file system' sh -c 'echo x > /nas/共享空间/x.txt'
+expect_refused "write into own Agent space directly" 'Read-only file system' sh -c 'echo x > /nas/共享空间/Agent空间/alice/x.txt'
 expect_ok   "write into assistant directory"     sh -c 'mkdir -p /nas/助手/待确认 && echo x > /nas/助手/待确认/x.txt'
-expect_fail "read the gateway's model key"       cat /etc/anas-spike/model.key
-expect_fail "read its own serve session token"  cat /etc/a-nas-assistant/tokens/alice.env
-expect_fail "read another member's session token" cat /etc/a-nas-assistant/tokens/bob.env
-expect_fail "reach the change broker's product socket" python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/anas-spike-broker/broker.sock")'
-expect_ok   "reach the change broker's agent socket"   python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/anas-change-agent/agent.sock")'
-expect_fail "change the Hermes user config"      sh -c 'echo x >> /var/lib/hermes-home/config.yaml'
-expect_fail "write the Hermes .env"              sh -c 'echo x >> /var/lib/hermes-home/.env'
-expect_fail "rewrite SOUL.md"                    sh -c 'echo x >> /var/lib/hermes-home/SOUL.md'
-expect_fail "add a Hermes hook"                  mkdir /var/lib/hermes-home/hooks/x
-expect_fail "add a Hermes plugin"                mkdir /var/lib/hermes-home/plugins/x
-expect_fail "add a Hermes profile"               mkdir /var/lib/hermes-home/profiles/x
-expect_fail "set a sticky Hermes profile"        sh -c 'echo x > /var/lib/hermes-home/active_profile'
+# The directories below are made inaccessible when they exist outside the sandbox
+# (InaccessiblePaths=-), so inside it their contents cannot be told apart from nothing.
+connect='import socket, sys; socket.socket(socket.AF_UNIX).connect(sys.argv[1])'
+if [ -e /etc/anas-spike ]; then
+  expect_hidden "read the gateway's model key" 'Permission denied' cat /etc/anas-spike/model.key
+else
+  echo "INFO model key: none here (the scripted model)"
+fi
+expect_hidden "read its own serve session token" 'Permission denied' cat /etc/a-nas-assistant/tokens/alice.env
+expect_hidden "read another member's session token" 'Permission denied' cat /etc/a-nas-assistant/tokens/bob.env
+if [ -e /run/anas-spike-broker ]; then
+  expect_hidden "reach the change broker's product socket" 'Permission denied' python3 -c "$connect" /run/anas-spike-broker/broker.sock
+else
+  echo "INFO change broker's product socket: none here (the Host Agent executes)"
+fi
+expect_ok   "reach the change broker's agent socket"   python3 -c "$connect" /run/anas-change-agent/agent.sock
+# Appending to a root-owned file is refused by its permissions before the read-only bind
+# is reached; truncating or creating meets the read-only bind first.
+expect_refused "change the Hermes user config"      'Permission denied' sh -c 'echo x >> /var/lib/hermes-home/config.yaml'
+expect_refused "write the Hermes .env"              'Permission denied' sh -c 'echo x >> /var/lib/hermes-home/.env'
+expect_refused "rewrite SOUL.md"                    'Permission denied' sh -c 'echo x >> /var/lib/hermes-home/SOUL.md'
+expect_refused "add a Hermes hook"                  'Read-only file system' mkdir /var/lib/hermes-home/hooks/x
+expect_refused "add a Hermes plugin"                'Read-only file system' mkdir /var/lib/hermes-home/plugins/x
+expect_refused "add a Hermes profile"               'Read-only file system' mkdir /var/lib/hermes-home/profiles/x
+expect_refused "set a sticky Hermes profile"        'Read-only file system' sh -c 'echo x > /var/lib/hermes-home/active_profile'
 expect_ok   "write Hermes state"                 sh -c 'echo x > /var/lib/hermes-home/probe-state'
-expect_fail "write into /etc/hermes policy"     sh -c 'echo x >> /etc/hermes/config.yaml'
-expect_fail "write into /opt runtime"            sh -c 'echo x > /opt/a-nas/assistant-runtimes/spike/x'
-expect_fail "outbound TCP to 1.1.1.1:443"        python3 -c 'import socket; socket.create_connection(("1.1.1.1", 443), timeout=3)'
-expect_fail "outbound TCP to docker host"        python3 -c 'import socket; socket.create_connection(("172.17.0.1", 22), timeout=3)'
+expect_refused "write into /etc/hermes policy"      'Permission denied' sh -c 'echo x >> /etc/hermes/config.yaml'
+expect_refused "write into the system skills"   'Read-only file system' sh -c 'echo x > /opt/a-nas/assistant-skills/x'
+if [ -d /opt/a-nas/assistant-runtimes/spike ]; then
+  expect_refused "write into /opt runtime"       'Read-only file system' sh -c 'echo x > /opt/a-nas/assistant-runtimes/spike/x'
+else
+  echo "INFO /opt runtime: no Hermes runtime"
+fi
+expect_refused "outbound TCP to 1.1.1.1:443"     'Network is unreachable' python3 -c 'import socket; socket.create_connection(("1.1.1.1", 443), timeout=3)'
+expect_refused "outbound TCP to docker host"     'Network is unreachable' python3 -c 'import socket; socket.create_connection(("172.17.0.1", 22), timeout=3)'
 echo "INFO links: $(ip -brief link 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
 pids=$(find /proc -maxdepth 1 -name '[0-9]*' -printf '%f ')
 echo "INFO visible pids: $pids"
-expect_fail "ptrace attach"                      python3 -c '
-import ctypes, os, sys
+expect_refused "ptrace attach"                   'errno EPERM' python3 -c '
+import ctypes, errno, os, sys
 libc = ctypes.CDLL(None, use_errno=True)
 pid = os.fork()
 if pid == 0:
     import time; time.sleep(5); os._exit(0)
 r = libc.ptrace(16, pid, None, None)
 os.kill(pid, 9)
-print(f"ptrace returned {r} errno {ctypes.get_errno()}")
+print(f"ptrace returned {r} errno {errno.errorcode.get(ctypes.get_errno(), ctypes.get_errno())}")
 sys.exit(0 if r == 0 else 1)'
-expect_fail "setuid to root"                     python3 -c 'import os; os.setuid(0)'
-expect_fail "unshare a user namespace"           unshare -U true
+expect_refused "setuid to root"                  'Operation not permitted' python3 -c 'import os; os.setuid(0)'
+expect_refused "unshare a user namespace"        'Operation not permitted' unshare -U true
 echo "INFO lsm: $(cat /sys/kernel/security/lsm 2>/dev/null || echo unreadable)"
 # The photo service's assistant socket (#113): the spike's photo service (SPIKE_PHOTOS) or,
 # on the real installer's layout, A-NAS's own with product-settings.sh.
@@ -86,7 +124,10 @@ if [ -S "$photos" ]; then
   else
     echo "INFO photo search: no seeded photos here (the system test checks its own)"
   fi
-  expect_fail "reach the photo service's session socket" python3 /spike/photos_peer.py /run/a-nas-photos/photos.sock --session seed-alice libraries
+  # photos_peer.py takes the socket first; the inner sh puts the hidden path last.
+  # shellcheck disable=SC2016 # $1 expands in the inner sh
+  expect_hidden "reach the photo service's session socket" 'Permission denied' \
+    sh -c 'exec python3 /spike/photos_peer.py "$1" --session seed-alice libraries' sh /run/a-nas-photos/photos.sock
 else
   echo "INFO photo socket not bound (no photo service for assistants)"
 fi
@@ -94,7 +135,7 @@ fi
 # tasks' sandbox has the bare mount point instead.
 companion=/run/anas-assistant-companion/companion.sock
 if [ -S "$companion" ]; then
-  expect_ok "reach the Product Service's companion socket" python3 -c "import socket; socket.socket(socket.AF_UNIX).connect('$companion')"
+  expect_ok "reach the Product Service's companion socket" python3 -c "$connect" "$companion"
 else
   echo "INFO companion socket not bound (no Product Service for assistants)"
 fi

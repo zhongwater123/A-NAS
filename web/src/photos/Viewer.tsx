@@ -228,6 +228,8 @@ export function Viewer({
       }
       return;
     }
+    // The space bar opens a fold of the side panel, such as the whole text.
+    if (event.key === " " && (event.target as HTMLElement).closest("summary")) return;
     const handled = () => {
       event.preventDefault();
       event.stopPropagation();
@@ -332,7 +334,7 @@ export function Viewer({
             {asset.motion && (
               <button
                 type="button"
-                className="ph-viewer-live"
+                className={styles.phViewerLive}
                 aria-label={livePlaying ? "停止动态照片" : "播放动态照片"}
                 aria-pressed={livePlaying}
                 onClick={() => {
@@ -340,7 +342,8 @@ export function Viewer({
                   setLivePlaying(!livePlaying);
                 }}
               >
-                {livePlaying ? <Square /> : <CircleDot />}动态
+                {livePlaying ? <Square /> : <CircleDot />}
+                <span>动态</span>
               </button>
             )}
             <button

@@ -48,20 +48,22 @@ curl -fsS -o /dev/null -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Cont
 check "a snapshot of alice's space exists on the volume" test -n "$(ls -A "$data/.a-nas-snapshots" 2>/dev/null)"
 check "only root may connect to an instance socket" \
   test "$(stat -c '%a %U' /run/a-nas-assistant/alice.sock 2>/dev/null)" = "600 root"
-connect_alice='import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas-assistant/alice.sock")'
-check "a member cannot connect to an instance socket" denied as alice python3 -c "$connect_alice"
-check "the Product Service cannot connect to one directly" denied as a-nas python3 -c "$connect_alice"
+check "a member cannot connect to an instance socket" denied alice python3 -c "$unix_connect" /run/a-nas-assistant/alice.sock
+check "the Product Service cannot connect to one directly" denied a-nas python3 -c "$unix_connect" /run/a-nas-assistant/alice.sock
 check "session tokens are root's alone" test "$(stat -c '%a %U' /etc/a-nas-assistant/tokens/alice.env 2>/dev/null)" = "600 root"
 check "the Product Service holds no copy of the tokens" test ! -e /run/anas-spike-tokens/alice.token
-check "each member's weekly curator is enabled" systemctl is-enabled --quiet anas-assistant-curator@alice.timer anas-assistant-curator@bob.timer
+# One unit per check: systemctl is-enabled A B succeeds when any of them is (#423).
+for member in alice bob; do
+  check "each member's weekly curator is enabled: $member" systemctl is-enabled --quiet "anas-assistant-curator@$member.timer"
+done
 # The session gate, the assistant's API in the Product Service and the photo service's socket
 # for assistants, all off by default, switched on the way the trial does it.
 bash /spike/product-settings.sh on >/tmp/product-settings.log 2>&1 || tail -n 5 /tmp/product-settings.log
 check "the assistant's settings are on in the product's services" \
   test "$(bash /spike/product-settings.sh state)" = "session gate on, photos for assistants on, companion for assistants on"
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
-changes_socket='import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas/assistant-changes.sock")'
-check "the executor's assistant socket is out of a member's reach outside the sandbox" denied as alice python3 -c "$changes_socket"
+check "the executor's assistant socket is out of a member's reach outside the sandbox" \
+  denied alice python3 -c "$unix_connect" /run/a-nas/assistant-changes.sock
 # The units bind it into each sandbox. To drive it as alice from outside one, the test binds
 # it at the sandbox's path on the host too.
 mount --bind /run/a-nas/assistant-changes.sock /run/anas-change-agent/agent.sock || true
@@ -103,16 +105,42 @@ fold() {
     esac
   done
 }
+# on_host ACCOUNT PATH: where PATH in ACCOUNT's assistant sandbox is outside it, by the probe
+# unit's own bind mounts (systemctl show prints each as [-]SOURCE:DESTINATION:OPTIONS): the
+# longest destination that holds PATH. A path under no bind is the host's own.
+on_host() {
+  local entry source destination host=$2 longest=0
+  for entry in $(systemctl show -p BindPaths -p BindReadOnlyPaths --value "anas-assistant-probe@$1.service"); do
+    entry=${entry#-}
+    source=${entry%%:*}
+    destination=${entry#*:}
+    destination=${destination%:*}
+    if [[ ($2 == "$destination" || $2 == "$destination"/*) && ${#destination} -gt $longest ]]; then
+      host=$source${2#"$destination"}
+      longest=${#destination}
+    fi
+  done
+  echo "$host"
+}
 assistant_probe() { # ACCOUNT LEAST_PASSES
+  local log hidden_path
   systemctl start "anas-assistant-probe@$1.service" || true
   # The oneshot has exited, but journald reads its stdout stream on its own time: a short
   # probe's lines could still be on their way (CI once read none of owner's). Have journald
   # take in everything written so far before reading it.
   journalctl --sync || true
-  fold "assistant sandbox ($1)" < <(journalctl -u "anas-assistant-probe@$1.service" -o cat --no-pager | grep -E '^(PASS|FAIL|INFO)' || true)
+  log=$(journalctl -u "anas-assistant-probe@$1.service" -o cat --no-pager || true)
+  fold "assistant sandbox ($1)" < <(grep -E '^(PASS|FAIL|INFO)' <<<"$log" || true)
   check "the probe ran in $1's sandbox" test "$folded" -ge "$2"
+  # What the probe was refused without seeing it is there outside the sandbox: a refusal of
+  # something missing would prove nothing (#423).
+  while read -r _ hidden_path; do
+    check "assistant sandbox ($1): what it cannot see is there outside it: $hidden_path" \
+      test -e "$(on_host "$1" "$hidden_path")"
+  done < <(grep '^HIDDEN ' <<<"$log" || true)
 }
-assistant_probe alice 33
+# Every line the probe runs in this layout; lines that do not apply here print INFO instead.
+assistant_probe alice 39
 # The administrator's assistant: the groups it carries, and that none of them is granted
 # anything it can reach.
 install -d /etc/systemd/system/anas-assistant-probe@owner.service.d
@@ -187,8 +215,8 @@ broker_apply '{"summary":"发布公告","operations":[{"op":"write","path":"/nas
 check "alice's assistant publishes into her Agent空间 folder through the broker" \
   test "$(owner_uid "$agent_space/alice/公告.md" 2>/dev/null)" = "$alice_id"
 check "every member reads what she published" quiet as bob cat "$agent_space/alice/公告.md"
-check "another member cannot write into her folder" denied as bob touch "$agent_space/alice/x.md"
-check "no member writes Agent空间 itself" denied as alice touch "$agent_space/x.md"
+check "another member cannot write into her folder" cannot_create bob "$agent_space/alice/x.md"
+check "no member writes Agent空间 itself" cannot_create alice "$agent_space/x.md"
 agent_space_id=$(curl -fsS -b /tmp/bob.jar "$api/api/v1/spaces/$shared/entries" | jq -r '.items[] | select(.name == "Agent空间") | .id' || true)
 alice_folder_id=$(curl -fsS -b /tmp/bob.jar "$api/api/v1/spaces/$shared/entries?parentId=$agent_space_id" |
   jq -r '.items[] | select(.name == "alice") | .id' || true)
@@ -204,7 +232,9 @@ check "another member cannot delete Agent空间 on the Web" \
 renamed=$(status_of -b /tmp/bob.jar -H "X-CSRF-Token: $bob_csrf" -H 'Content-Type: application/json' -X PATCH \
   -d '{"name":"Agent空间-bob"}' "$api/api/v1/files/$agent_space_id" || true)
 check "another member cannot rename Agent空间 on the Web" test "$renamed" = 403
-check "SMB cannot rename Agent空间" denied smb alice Shared 'rename Agent空间 Agent空间-smb'
+# Samba vetoes the name in Shared, so it answers as if Agent空间 were not there; it is.
+check "SMB cannot rename Agent空间" smb_refused NT_STATUS_OBJECT_NAME_NOT_FOUND alice Shared 'rename Agent空间 Agent空间-smb'
+check "Agent空间 keeps its name on the volume" test -d "$agent_space" -a ! -e "$data/spaces/shared/Agent空间-smb"
 # A local process can still write Shared. Reconciliation repairs an impostor
 # through descriptors; it must not rely on the old spike's path-based setup.
 if [[ -d "$agent_space" ]]; then as bob mv -T "$agent_space" "$data/spaces/shared/Agent空间-bob" || true; fi
@@ -228,7 +258,7 @@ check "the repair moves the impostor aside with what was made inside it" \
   test -n "$(find "$data/spaces/shared" -mindepth 1 -maxdepth 1 -name 'Agent空间.displaced-*' -user bob)"
 check "and puts Agent空间 and her folder back as root's" \
   test "$(stat -c %U "$agent_space" 2>/dev/null):$(stat -c %U "$agent_space/alice" 2>/dev/null)" = root:root
-check "her folder is hers alone again" denied as bob touch "$agent_space/alice/y.md"
+check "her folder is hers alone again" cannot_create bob "$agent_space/alice/y.md"
 echo "INFO assistant Agent空间: Shared now holds $(find "$data/spaces/shared" -mindepth 1 -maxdepth 1 -name 'Agent空间*' -printf '%f ')"
 
 # --- Assistant directories: one Btrfs subvolume per account, capped by simple quota.

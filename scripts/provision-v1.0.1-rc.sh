@@ -320,7 +320,10 @@ step "Create, browse, restore from, and delete a manual read-only snapshot."
 pause "Press Enter after completing these closure checks."
 
 testparm --suppress-prompt /etc/samba/smb.conf >/dev/null
-systemctl is-active --quiet smbd.service anas-host-agent.service anas-api.service
+# One unit at a time: systemctl is-active A B succeeds when any of them is (#423).
+for unit in smbd.service anas-host-agent.service anas-api.service; do
+  systemctl is-active --quiet "$unit" || { warn "$unit is not active"; exit 1; }
+done
 
 evidence_dir=/var/lib/a-nas/acceptance
 evidence_file="$evidence_dir/$RELEASE_ID.txt"

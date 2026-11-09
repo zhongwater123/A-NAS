@@ -379,7 +379,8 @@ db.commit()
 PY
 systemctl start anas-api anas-shares
 
-# What quiet and denied keep out of the output, shown when their check fails.
+# What quiet, fails and denied keep out of the output, shown when their check
+# fails.
 hidden=/tmp/system-test-hidden.log
 # check NAME COMMAND...: runs the command and records the outcome. A failure
 # also prints the command as it ran, which shows the values a test compared,
@@ -398,10 +399,60 @@ check() {
     if [[ -s "$hidden" ]]; then tail -n 20 "$hidden" | sed 's/^/  | /'; fi
   fi
 }
+# fails COMMAND...: the command fails, for any reason. A check that an account
+# is refused access uses denied or cannot_create instead (#423).
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-denied() { ! "$@" >>"$hidden" 2>&1; }
+fails() { ! "$@" >>"$hidden" 2>&1; }
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 quiet() { "$@" >>"$hidden" 2>&1; }
+# refused USER COMMAND...: USER's COMMAND fails for want of permission
+# (EACCES), not for another reason such as a missing account or a crash.
+# shellcheck disable=SC2317,SC2329 # invoked through denied (SC2317 in older shellcheck)
+refused() {
+  local user=$1 out
+  shift
+  if out=$(LC_ALL=C as "$user" "$@" 2>&1); then
+    printf '%s\n(succeeded as %s)\n' "$out" "$user" >>"$hidden"
+    return 1
+  fi
+  printf '%s\n' "$out" >>"$hidden"
+  [[ $out == *'Permission denied'* ]]
+}
+# denied USER COMMAND... PATH: PATH exists, as root sees it, and USER is
+# refused COMMAND on it for want of permission. A path that is not there
+# fails the check rather than passing as refused (#423).
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+denied() {
+  if [[ ! -e ${!#} ]]; then
+    echo "nothing at ${!#} to refuse" >>"$hidden"
+    return 1
+  fi
+  refused "$@"
+}
+# cannot_create USER PATH: PATH's directory exists and PATH does not, and USER
+# is refused creating PATH for want of permission.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+cannot_create() {
+  if [[ ! -d ${2%/*} || -e $2 ]]; then
+    echo "no directory ${2%/*}, or $2 is already there" >>"$hidden"
+    return 1
+  fi
+  refused "$1" touch "$2" && [[ ! -e $2 ]]
+}
+# finds PROBE FINDING...: the sandbox probe PROBE, run here outside its
+# sandbox, reports every FINDING. A probe that fails for another reason, such
+# as an exception, does not pass (#423).
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+finds() {
+  local out finding
+  out=$(python3 "$1" 2>&1) || true
+  printf '%s\n' "$out" >>"$hidden"
+  for finding in "${@:2}"; do
+    [[ $out == *"$finding"* ]] || return 1
+  done
+}
+# The Python that connects to the Unix socket named by its first argument.
+unix_connect='import socket, sys; socket.socket(socket.AF_UNIX).connect(sys.argv[1])'
 # running UNIT: the unit has a main process; otherwise prints its status.
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 running() {
@@ -438,7 +489,7 @@ has_capabilities() {
   cap_eff=$(awk '/^CapEff:/ {print $2}' "/proc/$pid/status")
   (((16#$cap_eff >> 6 & 3) == 3))
 }
-# shellcheck disable=SC2317,SC2329 # invoked through denied (SC2317 in older shellcheck)
+# shellcheck disable=SC2317,SC2329 # invoked through refused (SC2317 in older shellcheck)
 as() { local user=$1; shift; setpriv --reuid="$user" --regid="$user" --init-groups "$@"; }
 owner_uid() { stat -c '%u' "$1"; }
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
@@ -478,7 +529,10 @@ check "the Host Agent writes its Samba configuration once it serves" \
 check "smbd then listens only on the loopback and SMB interface's addresses" smbd_listens_only_on_its_interfaces
 
 # --- Every service runs under its production unit (issue #38).
-check "services are active" systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares anas-family smbd
+# One unit per check: systemctl is-active A B succeeds when any of them is (#423).
+for unit in anas-host-agent anas-photos anas-api anas-shares anas-family smbd; do
+  check "services are active: $unit" systemctl is-active --quiet "$unit"
+done
 check "Host Agent keeps CAP_SETUID and CAP_SETGID" has_capabilities anas-host-agent
 check "Host Agent proved it can start workers as users" \
   journal_has anas-host-agent "$installed_at" 'file broker identity switch verified'
@@ -494,7 +548,7 @@ check "Host Agent moved an older release's record into it" \
 check "the moved record is root's alone" \
   test "$(stat -c '%U:%G %a' /var/lib/a-nas-host/app-identities.json)" = 'root:root 600'
 check "the record left the Product Service's directory" test ! -e /var/lib/a-nas/app-identities.json
-check "Product Service cannot list the Host Agent's records" denied as a-nas ls /var/lib/a-nas-host
+check "Product Service cannot list the Host Agent's records" denied a-nas ls /var/lib/a-nas-host
 
 # --- The local console (issue #174): an account of its own that cannot log
 # in, starting the launcher of the installed release. The container has no
@@ -513,8 +567,15 @@ id anas-dev >/dev/null 2>&1 || useradd --create-home --shell /bin/bash anas-dev
 staging=/home/anas-dev/apps/a-nas/releases
 install -d -o anas-dev -g anas-dev -m 0750 /home/anas-dev/apps /home/anas-dev/apps/a-nas "$staging"
 check "the staging account writes its staged releases" as anas-dev touch "$staging/staged-by-anas-dev"
-check "the local console cannot write the staged releases" denied as a-nas-kiosk touch "$staging/staged-by-kiosk"
-check "the local console is not in the staging account's group" denied grep -qw anas-dev <<<"$(id -nG a-nas-kiosk)"
+check "the local console cannot write the staged releases" cannot_create a-nas-kiosk "$staging/staged-by-kiosk"
+# lacks_group ACCOUNT GROUP: ACCOUNT's groups can be read, and GROUP is not among them.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+lacks_group() {
+  local groups
+  groups=$(id -nG "$1") || return 1
+  [[ " $groups " != *" $2 "* ]]
+}
+check "the local console is not in the staging account's group" lacks_group a-nas-kiosk anas-dev
 check "the installer leaves the local console disabled" \
   test "$(systemctl is-enabled anas-kiosk@tty1.service 2>/dev/null)" = disabled
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
@@ -757,9 +818,21 @@ sys.exit("connection ended without a close frame")
 PY
 # terminal URL JAR INPUT
 terminal() { timeout 60 python3 /tmp/terminal-session.py "$1/api/v1/terminal/session" "$2" "$3"; }
+# terminal_refused URL JAR: the server answers the session's WebSocket handshake with 403;
+# a client that crashes or cannot connect is not a refusal (#423).
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+terminal_refused() {
+  local out
+  if out=$(terminal "$1" "$2" 'exit 0' 2>&1); then
+    printf '%s\n(a session opened)\n' "$out" >>"$hidden"
+    return 1
+  fi
+  printf '%s\n' "$out" >>"$hidden"
+  [[ $out == *'handshake refused: HTTP/1.1 403'* ]]
+}
 check "the terminal is off on a new device" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/terminal" | jq -r .enabled)" = false
-check "a disabled terminal refuses sessions" denied terminal "$api" /tmp/owner.jar 'exit 0'
+check "a disabled terminal refuses sessions" terminal_refused "$api" /tmp/owner.jar
 # The runbook step that turns it on.
 printf 'ANAS_TERMINAL=enabled\n' >> /etc/a-nas/anas-api.env
 systemctl restart anas-api
@@ -779,7 +852,7 @@ check "the shell cannot list a member's private space" grep -qx 'other:[1-9][0-9
 check "the shell's exit code reaches the browser" grep -qx 'close 1000 exit 7' <<<"$shell_output"
 check "the local console reaches the terminal too" \
   grep -qx 'close 1000 exit 0' <<<"$(terminal "$api" /tmp/owner.jar $'exit 0\n' || true)"
-check "a member's session gets no shell" denied terminal "$lan" /tmp/lan.jar 'exit 0'
+check "a member's session gets no shell" terminal_refused "$lan" /tmp/lan.jar
 # The shell runs in a scope of its own, so what it logs is not the Host
 # Agent's, even under its name (issue #166).
 forged_at=$(date '+%Y-%m-%d %H:%M:%S')
@@ -788,7 +861,7 @@ check "the shell runs in a scope of its own" grep -Eqx 'cgroup:0::/(.*/)?anas-te
 check "the shell cannot create namespaces" grep -qx 'unshare:[1-9][0-9]*' <<<"$scope_output"
 check "what a shell logs reaches the journal" \
   bash -c "for _ in \$(seq 1 20); do journalctl -t anas-host-agent --since '$forged_at' -o cat --no-pager | grep -Fq 'forged by a terminal' && exit 0; sleep 0.2; done; exit 1"
-check "but not as the Host Agent's" denied journal_has anas-host-agent "$forged_at" 'forged by a terminal'
+check "but not as the Host Agent's" fails journal_has anas-host-agent "$forged_at" 'forged by a terminal'
 check "nor in the Host Agent's log in Settings" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/system-logs?service=host-agent&q=forged" | jq '.items | length')" = 0
 
@@ -826,23 +899,37 @@ check "and reports nothing wrong" \
 check "sharing recovers on the writable volume" shares_ready
 
 # --- No service identity reaches a space.
-check "Product Service account cannot list a private space" denied as a-nas ls "$data/spaces/private/alice"
-check "Product Service account cannot list Shared" denied as a-nas ls "$data/spaces/shared"
-check "photo service cannot list Shared" denied as a-nas-photos ls "$data/spaces/shared"
+check "Product Service account cannot list a private space" denied a-nas ls "$data/spaces/private/alice"
+check "Product Service account cannot list Shared" denied a-nas ls "$data/spaces/shared"
+check "photo service cannot list Shared" denied a-nas-photos ls "$data/spaces/shared"
 
 # --- SMB: the same users, the same files, the same ACLs.
 smb_auth() { printf 'username = %s\npassword = %s\n' "$1" "$2" > "/tmp/$1.smb"; chmod 0600 "/tmp/$1.smb"; }
 smb_auth owner "$owner_password"
 smb_auth alice "$alice_password"
 smb() { local user=$1 share=$2; shift 2; smbclient "//$ip/$share" -A "/tmp/$user.smb" -m SMB3 --client-protection=encrypt -c "$*"; }
+# smb_refused STATUS USER SHARE COMMAND...: Samba refuses with STATUS, such as
+# NT_STATUS_ACCESS_DENIED. smbd being down, a missing credentials file or a
+# misspelled share (NT_STATUS_BAD_NETWORK_NAME) fail the check (#423).
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+smb_refused() {
+  local status=$1 out
+  shift
+  if out=$(smb "$@" 2>&1); then
+    printf '%s\n(it succeeded)\n' "$out" >>"$hidden"
+    return 1
+  fi
+  printf '%s\n' "$out" >>"$hidden"
+  [[ $out == *"$status"* ]]
+}
 check "member opens her home over SMB and sees her Web upload" grep -q alice.txt <(smb alice alice ls 2>/dev/null)
 printf 'from smb %s\n' "$(secret)" > /tmp/alice-smb.txt
 check "member writes over SMB" quiet smb alice alice "put /tmp/alice-smb.txt alice-smb.txt"
 check "SMB write is owned by the member's UID" \
   test "$(owner_uid "$data/spaces/private/alice/alice-smb.txt")" = "$alice_id"
 check "Web lists the file written over SMB" grep -qx alice-smb.txt <(entries /tmp/alice.jar "$alice_private")
-check "administrator cannot open the member's home over SMB" denied smb owner alice ls
-check "member cannot open the administrator's home over SMB" denied smb alice owner ls
+check "administrator cannot open the member's home over SMB" smb_refused NT_STATUS_ACCESS_DENIED owner alice ls
+check "member cannot open the administrator's home over SMB" smb_refused NT_STATUS_ACCESS_DENIED alice owner ls
 check "administrator reads Shared over SMB" quiet smb owner Shared "get shared.txt /tmp/shared-smb.txt"
 check "SMB read of Shared returns the Web upload" cmp -s /tmp/shared.txt /tmp/shared-smb.txt
 
@@ -917,7 +1004,7 @@ gone_snapshot=$(take_snapshot 卷上已删除 | jq -r '.id // empty' || true)
 btrfs subvolume delete "$(subvolume_of "$gone_snapshot")" >/dev/null 2>&1 || true
 check "a snapshot already gone from the volume can still be deleted" \
   test "$(status_of -X DELETE -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" "$api/api/v1/snapshots/$gone_snapshot")" = 204
-check "its record is gone" denied grep -qx "$gone_snapshot" <(snapshot_ids)
+check "its record is gone" fails grep -qx "$gone_snapshot" <(snapshot_ids)
 # What a crash leaves: a subvolume noted as pending and a record without a
 # subvolume. The Product Service sweeps both when it starts, and leaves a
 # subvolume the catalog never noted, as one of a lost catalog (#269).
@@ -976,13 +1063,13 @@ check "administrator does not see the member's photo library" \
   test "$(library_of /tmp/owner.jar "$alice_user")" = null
 check "photo store belongs to the photo service alone" \
   test "$(stat -c '%a %U' "$data/photos")" = "700 a-nas-photos"
-check "Product Service account cannot list the photo store" denied as a-nas ls "$data/photos"
+check "Product Service account cannot list the photo store" denied a-nas ls "$data/photos"
 
 # --- Family center (ADR 0029): its own identity and store; it asks the photo
 # service about a channel's photos with the reader's session.
 check "family store belongs to the family service alone" \
   test "$(stat -c '%a %U' "$data/family")" = "700 a-nas-family"
-check "Product Service account cannot list the family store" denied as a-nas ls "$data/family"
+check "Product Service account cannot list the family store" denied a-nas ls "$data/family"
 check "member founds the family through the family service" \
   test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
     -d '{"role":"妈妈"}' "$api/api/v1/family/join")" = 200
@@ -1124,7 +1211,8 @@ sed -e 's|^ExecStart=.*|ExecStart=/opt/a-nas/current/ai/runtime/bin/python /usr/
   -e 's|^Type=.*|Type=oneshot|' -e '/^Requires=/d' -e '/^After=/d' \
   /etc/systemd/system/anas-ai.service > /etc/systemd/system/anas-ai-probe.service
 systemctl daemon-reload
-check "the probe finds the network and data volume outside the sandbox" denied python3 /usr/local/lib/anas-ai-probe.py
+check "the probe finds the network and data volume outside the sandbox" \
+  finds /usr/local/lib/anas-ai-probe.py 'opened a AF_INET socket' 'listed the data volume'
 check "the Worker's sandbox opens no network socket and cannot read the data volume" \
   systemctl start anas-ai-probe.service
 journalctl -u anas-ai-probe.service -o cat --no-pager | grep -E 'contained|opened|listed' | tail -n 1 || true
@@ -1144,7 +1232,7 @@ head -c 1024 /dev/urandom > "$staged_tampered/ai/model.litertlm"
 jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
   "$ai/model.json" > "$staged_tampered/ai/model.json"
 check "a staged model that does not match its manifest is refused" \
-  denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
+  fails bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
 check "the refused release changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
   -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = "$models_kept"
@@ -1155,7 +1243,7 @@ head -c 1024 /dev/urandom > "$staged_tampered/ai/detector.onnx"
 jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
   "$ai/detector.json" > "$staged_tampered/ai/detector.json"
 check "a staged detector that does not match its manifest is refused" \
-  denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
+  fails bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
 check "the refused detector changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
   -a "$(find /opt/a-nas/models -mindepth 1 -maxdepth 1 | wc -l)" = "$models_kept"
@@ -1230,7 +1318,7 @@ check "without falling back to the Catalog's vectors" \
 check "only the photo service reaches its vector index" \
   test "$(stat -c '%a %U %G' /run/a-nas-vectors/a-nas-photos.sock)" = "600 a-nas-photos a-nas-photos"
 check "the Product Service account cannot connect to the photo vector index" \
-  denied as a-nas python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas-vectors/a-nas-photos.sock")'
+  denied a-nas python3 -c "$unix_connect" /run/a-nas-vectors/a-nas-photos.sock
 check "the release links Qdrant kept once by content" \
   test "$(readlink /opt/a-nas/current/vectors/qdrant)" = "/opt/a-nas/qdrant/$qdrant_sha/qdrant"
 check "all vector index instances share one memory limit" \
@@ -1265,7 +1353,7 @@ check "another owner's instance runs under another identity" \
   "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-vectors@a-nas-shares.service)/status")"
 check "another owner's socket is its own" test "$(stat -c '%a %U' /run/a-nas-vectors/a-nas-shares.sock)" = "600 a-nas-shares"
 check "the photo service cannot connect to another owner's vector index" \
-  denied as a-nas-photos python3 -c 'import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas-vectors/a-nas-shares.sock")'
+  denied a-nas-photos python3 -c "$unix_connect" /run/a-nas-vectors/a-nas-shares.sock
 check "the proxy shares the vector index's own network namespace" same_network_namespace
 check "the vector index's namespace has only its loopback" \
   test "$(nsenter -t "$(systemctl show -p MainPID --value anas-vectors@a-nas-photos.service)" -n ip -o link | awk -F': ' '{print $2}')" = lo
@@ -1348,7 +1436,7 @@ sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-vectors-p
   "/etc/systemd/system/anas-vectors@.service" > "/etc/systemd/system/anas-vectors-probe@.service"
 systemctl daemon-reload
 check "the vector index probe finds the network and data volume outside the sandbox" \
-  denied python3 /usr/local/lib/anas-vectors-probe.py
+  finds /usr/local/lib/anas-vectors-probe.py 'sees interfaces' 'listed /srv/a-nas/data'
 check "the vector index's sandbox has only loopback and cannot read the data volume or product state" \
   systemctl start anas-vectors-probe@a-nas-photos.service
 journalctl -u anas-vectors-probe@a-nas-photos.service -o cat --no-pager | grep -E 'contained|sees|reached|opened|listed' | tail -n 1 || true
@@ -1360,7 +1448,7 @@ head -c 1024 /dev/urandom > "$staged_tampered/vectors/qdrant.tar.gz"
 jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
   /src/deploy/qdrant/qdrant.json > "$staged_tampered/vectors/qdrant.json"
 check "a staged Qdrant that does not match its manifest is refused" \
-  denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
+  fails bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
 check "the refused Qdrant changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
   -a "$(find /opt/a-nas/qdrant -mindepth 1 -maxdepth 1 | wc -l)" = "$qdrant_kept"
@@ -1372,7 +1460,7 @@ head -c 1024 /dev/urandom > "$staged_tampered/ai/llama.tar.gz"
 jq --arg sha "$(head -c 1024 /dev/urandom | sha256sum | cut -d ' ' -f 1)" '.sha256 = $sha | .sizeBytes = 1024' \
   /src/deploy/llama/llama.json > "$staged_tampered/ai/llama.json"
 check "a staged llama.cpp that does not match its manifest is refused" \
-  denied bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
+  fails bash /src/scripts/install-v1.0.1-system-services.sh "$staged_tampered" tampered "$iface"
 check "the refused llama.cpp changes nothing" \
   test "$(readlink /opt/a-nas/current)" = /opt/a-nas/releases/system-test -a ! -e /opt/a-nas/releases/tampered \
   -a "$(find /opt/a-nas/llama -mindepth 1 -maxdepth 1 | wc -l)" = "$llama_kept"
@@ -1393,9 +1481,26 @@ check "web search's socket is only its group's" \
 check "the Product Service's groups reach web search" \
   quiet as_product curl -fsS --unix-socket "$search_socket" http://localhost/healthz
 check "a member does not reach web search" \
-  denied as alice curl -fsS --unix-socket "$search_socket" http://localhost/healthz
-check "web search reads no data volume or Host Agent record" \
-  denied nsenter -t "$(systemctl show -p MainPID --value anas-search)" -m ls /srv/a-nas/data /var/lib/a-nas-host
+  denied alice python3 -c "$unix_connect" "$search_socket"
+# search_denied PATH: PATH exists here, and web search's account is refused it inside web
+# search's own mount namespace. One path per check: ls of several fails when any one does.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+search_denied() {
+  local pid out
+  pid=$(systemctl show -p MainPID --value anas-search)
+  if [[ ! -e $1 || ! $pid =~ ^[1-9][0-9]*$ ]]; then
+    echo "no $1, or web search is not running (MainPID $pid)" >>"$hidden"
+    return 1
+  fi
+  if out=$(LC_ALL=C nsenter -t "$pid" -m setpriv --reuid=a-nas-search --regid=a-nas-search --init-groups ls "$1" 2>&1); then
+    printf '%s\n(listed as a-nas-search)\n' "$out" >>"$hidden"
+    return 1
+  fi
+  printf '%s\n' "$out" >>"$hidden"
+  [[ $out == *'Permission denied'* ]]
+}
+check "web search reads no data volume" search_denied /srv/a-nas/data
+check "web search reads no Host Agent record" search_denied /var/lib/a-nas-host
 # systemd 257 loses a running unit's IP counts at every daemon-reload, which
 # the installs above ran, so the checks that read them restart web search.
 restart_web_search() {
@@ -1543,8 +1648,9 @@ search_broken_install() {
 }
 check "an upgrade finishes and warns when web search cannot start" search_broken_install
 for _ in $(seq 1 150); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
-check "the product's services run after that upgrade" \
-  systemctl is-active --quiet anas-host-agent anas-photos anas-api anas-shares
+for unit in anas-host-agent anas-photos anas-api anas-shares; do
+  check "the product's services run after that upgrade: $unit" systemctl is-active --quiet "$unit"
+done
 
 # --- Media center (ADR 0017): files are read as the user through the File
 # Broker; FFmpeg runs in a per-connection worker without network, data volume
@@ -1596,7 +1702,7 @@ for preview_size in thumbnail preview; do
 done
 curl -fsS -b /tmp/alice.jar "$api/api/v1/files/$heif_file/content" -o /tmp/heif-original.heic
 check "HEIC download remains the original" cmp /tmp/preview.heic /tmp/heif-original.heic
-check "Product Service cannot open the HEIC source itself" denied as a-nas cat "$data/spaces/shared/preview.HEIC"
+check "Product Service cannot open the HEIC source itself" denied a-nas cat "$data/spaces/shared/preview.HEIC"
 
 # The services take turns from shared slots before they connect (issue #168):
 # with every slot held elsewhere, a preview waits for one instead of failing.
@@ -1652,7 +1758,7 @@ check "the FFmpeg worker converts the film to fragmented MP4" bash -c \
   "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/media/videos/$film/stream?mode=transcode&start=1&audio=0&quality=original' | head -c 64 | grep -aq ftyp"
 check "the FFmpeg worker takes a frame of the film" bash -c \
   "for _ in \$(seq 1 30); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/media/artwork/$film/thumb') == 200 ]] && exit 0; sleep 1; done; exit 1"
-check "Product Service account cannot read the film itself" denied as a-nas cat "$data/spaces/shared/Movies/Heat (1995).mkv"
+check "Product Service account cannot read the film itself" denied a-nas cat "$data/spaces/shared/Movies/Heat (1995).mkv"
 
 # --- Music (ADR 0018) indexes the same files in place and has the shared
 # FFmpeg worker probe and decode the formats browsers cannot play.
@@ -1695,7 +1801,8 @@ PY
 sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-ffmpeg-probe.py|' -e 's|^Type=.*|Type=oneshot|' \
   -e '/^StandardInput=/d' /etc/systemd/system/anas-ffmpeg@.service > /etc/systemd/system/anas-ffmpeg-probe.service
 systemctl daemon-reload
-check "the media probe finds the network and data volume outside the sandbox" denied python3 /usr/local/lib/anas-ffmpeg-probe.py
+check "the media probe finds the network and data volume outside the sandbox" \
+  finds /usr/local/lib/anas-ffmpeg-probe.py 'opened a AF_INET socket' 'listed /srv/a-nas/data'
 check "the FFmpeg worker's sandbox has no network, data volume or Product Service state" \
   systemctl start anas-ffmpeg-probe.service
 journalctl -u anas-ffmpeg-probe.service -o cat --no-pager | grep -E 'contained|opened|listed|ran as' | tail -n 1 || true
@@ -1737,7 +1844,7 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
             assert json.load(reply)['streams']
 PY
 check "incomplete rollback stage is rejected before stopping the active socket" \
-  denied "$worker_installer" /tmp/nonexistent-worker-release
+  fails "$worker_installer" /tmp/nonexistent-worker-release
 check "failed rollback preflight leaves the new worker working" \
   setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos python3 /tmp/probe-worker.py /run/a-nas-ffmpeg/ffmpeg.sock
 systemctl stop anas-api anas-photos anas-shares anas-family
@@ -1780,7 +1887,7 @@ new_password=$(secret)
 check "member changes her password on the Web" test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" \
   -H 'Content-Type: application/json' -d "{\"currentPassword\":\"$alice_password\",\"newPassword\":\"$new_password\"}" \
   "$api/api/v1/session/password")" = 204
-check "the old password no longer opens SMB" denied smb alice alice ls
+check "the old password no longer opens SMB" smb_refused NT_STATUS_LOGON_FAILURE alice alice ls
 smb_auth alice "$new_password"
 check "the new password opens SMB" quiet smb alice alice ls
 
@@ -1807,7 +1914,7 @@ check "a member stays connected over SMB" test "$(smb_sessions_of carol)" -gt 0
 check "the administrator disables the member" test "$(status_of -X DELETE -b /tmp/owner.jar \
   -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$carol_user")" = 204
 check "disabling ends the member's SMB session" smb_sessions_end carol
-check "the disabled member cannot open SMB" denied smb carol carol ls
+check "the disabled member cannot open SMB" smb_refused NT_STATUS_ACCOUNT_DISABLED carol carol ls
 kill "$carol_client" 2>/dev/null || true
 # Every start synchronizes identities, the disabled member's SMB entry too.
 synced_at=$(date '+%Y-%m-%d %H:%M:%S')
@@ -1949,13 +2056,13 @@ v4=$(new_video)
 stage_pool "$v4"
 printf x >> "$staged/objects/$v4.mp4"
 run=$(kiosk_run)
-check "a video that does not match its hash is refused" denied "$installer" screensavers "$pool" "$staged"
+check "a video that does not match its hash is refused" fails "$installer" screensavers "$pool" "$staged"
 check "the refused pool changes nothing" \
   test "$(current_pool)" = "pools/$pool_a" -a ! -e "$pools/objects/$v4.mp4" -a ! -e "$pools/pools/$pool"
 check "the refused pool leaves the local console running as it was" test "$(kiosk_run)" = "$run"
 check "the stand-in local console goes away" kiosk_stand_in stop
 cp "$staged/pools/$pool_b.sums" "$staged/pools/0123456789abcdef.sums"
-check "a manifest that is not the named pool is refused" denied "$installer" screensavers 0123456789abcdef "$staged"
+check "a manifest that is not the named pool is refused" fails "$installer" screensavers 0123456789abcdef "$staged"
 # An installer before issue #49 left a pool named after its release, and no
 # "current".
 legacy=$pools/legacy-release
@@ -2037,7 +2144,7 @@ check "switching back restarts the running local console" kiosk_restarted "$run"
 stage_animations 待机.webm
 printf x >> "$companion_staged/objects/$(head -c 64 "$companion_staged/pools/$pool.sums")"
 run=$(kiosk_run)
-check "an animation that does not match its hash is refused" denied "$installer" companion "$pool" "$companion_staged"
+check "an animation that does not match its hash is refused" fails "$installer" companion "$pool" "$companion_staged"
 check "the refused animations change nothing" \
   test "$(current_animations)" = "pools/$animations_a" -a ! -e "$companion/pools/$pool"
 check "the refused animations leave the local console running as it was" test "$(kiosk_run)" = "$run"
@@ -2048,9 +2155,9 @@ stage_animations 待机.webm 东张西望.webm
 unterminated=$(head -c -1 "$companion_staged/pools/$pool.sums" | sha256sum | cut -c 1-16)
 head -c -1 "$companion_staged/pools/$pool.sums" > "$companion_staged/pools/.incoming.sums"
 check "staging refuses a manifest without its last newline" \
-  denied env "HOME=$stager" bash /src/scripts/remote-stage-media-pool.sh companion commit
+  fails env "HOME=$stager" bash /src/scripts/remote-stage-media-pool.sh companion commit
 head -c -1 "$companion_staged/pools/$pool.sums" > "$companion_staged/pools/$unterminated.sums"
-check "installing refuses a manifest without its last newline" denied "$installer" companion "$unterminated" "$companion_staged"
+check "installing refuses a manifest without its last newline" fails "$installer" companion "$unterminated" "$companion_staged"
 check "the unterminated manifest installs nothing" test ! -e "$companion/pools/$unterminated"
 # The same with a NUL byte where the last newline was: read and command
 # substitution drop it unseen, the pool ID counts it.
@@ -2058,9 +2165,9 @@ check "the unterminated manifest installs nothing" test ! -e "$companion/pools/$
 nul_ended=$(sha256sum < /tmp/nul-ended.sums | cut -c 1-16)
 cp /tmp/nul-ended.sums "$companion_staged/pools/.incoming.sums"
 check "staging refuses a manifest that ends with a NUL byte" \
-  denied env "HOME=$stager" bash /src/scripts/remote-stage-media-pool.sh companion commit
+  fails env "HOME=$stager" bash /src/scripts/remote-stage-media-pool.sh companion commit
 cp /tmp/nul-ended.sums "$companion_staged/pools/$nul_ended.sums"
-check "installing refuses a manifest that ends with a NUL byte" denied "$installer" companion "$nul_ended" "$companion_staged"
+check "installing refuses a manifest that ends with a NUL byte" fails "$installer" companion "$nul_ended" "$companion_staged"
 check "the NUL-ended manifest installs nothing" test ! -e "$companion/pools/$nul_ended"
 # The staging account can swap what it staged for a FIFO or a link between the
 # installer's checks and its copy: root reads regular files only, never waits
@@ -2158,7 +2265,17 @@ done
 check "the internet entry reaches the Product Service over HTTPS" test "$(through -f "$internet/healthz" | jq -r .status)" = ok
 check "the internet entry asks browsers to keep to HTTPS" asks_for_https
 check "a connection without a PROXY header is served as it comes" quiet from_loopback
-check "a PROXY header from anywhere but the relay is refused" denied from_loopback --haproxy-protocol --haproxy-clientip 2001:db8:7::7
+# proxy_header_refused: the listener closes a connection whose PROXY header does not come
+# from the relay before TLS completes, so curl ends with 35 (handshake) or 56 (receive). An
+# HTTP answer (22), a missing CA file (77) or no listener (7) is not that refusal (#423).
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+proxy_header_refused() {
+  local status=0
+  from_loopback --haproxy-protocol --haproxy-clientip 2001:db8:7::7 >>"$hidden" 2>&1 || status=$?
+  echo "curl exit $status" >>"$hidden"
+  ((status == 35 || status == 56))
+}
+check "a PROXY header from anywhere but the relay is refused" proxy_header_refused
 check "the internet listener answers only for its domain" \
   test "$(status_of -H 'Host: 127.0.0.1' http://127.0.0.1:8081/healthz)" = 421
 

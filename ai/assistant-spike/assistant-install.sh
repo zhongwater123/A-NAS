@@ -112,12 +112,16 @@ fi
 # unit binds its assistant socket (/run/a-nas/assistant-changes.sock) over the empty file
 # here. Otherwise the spike's change broker stands in, with a product socket for the product
 # service and the agent socket for the assistants' MCP tool.
-install -d -m 0755 /run/anas-spike-broker /run/anas-change-agent
+install -d -m 0755 /run/anas-change-agent
 if [[ "$gate" == host-agent ]]; then
   systemctl stop change-broker 2>/dev/null || true
   rm -f /run/anas-change-agent/agent.sock /run/anas-spike-broker/broker.sock
+  # Without the change broker there is no product socket, nor its directory: the probe
+  # (probe.sh) then knows it has nothing there to be refused.
+  rmdir /run/anas-spike-broker 2>/dev/null || true
   : > /run/anas-change-agent/agent.sock
 else
+  install -d -m 0755 /run/anas-spike-broker
   transient change-broker --quiet -E SPIKE_PRODUCT_UID="${product_user:+$(id -u "$product_user")}" \
     python3 "$here/change_broker.py" /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
 fi

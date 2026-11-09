@@ -16,7 +16,6 @@ import (
 // sensitiveFields maps each sensitive field to the label its handle shows.
 var sensitiveFields = map[string]string{
 	"公民身份号码": "身份证号",
-	"住址":     "住址",
 	"卡号":     "卡号",
 	"付款账号":   "账号",
 	"收款账号":   "账号",

@@ -40,7 +40,6 @@
 - [助手说“下次从笔记接着聊”的措辞是否调整](../decisions/2026-10-20-assistant-notes-wording.md)
 - [家庭中心规格中补充的默认规则](../decisions/2026-10-29-family-center-default-rules.md)
 - 虚拟伙伴：[V1 是否不含待办与专注计时](../decisions/2026-11-06-companion-v1-no-todo-focus.md)、[旧分支中的第三方素材怎么清除](../decisions/2026-11-06-companion-old-branches.md)
-- OCR：[点开完整号码是否记入活动记录](../decisions/2026-10-30-ocr-full-number-reveal-logging.md)、[敏感字段的清单](../decisions/2026-10-30-ocr-sensitive-fields.md)
 - 是否接受代码已部署的 ADR：[0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[0018](../adr/0018-index-music-in-place-through-the-file-broker.md)、[0019](../adr/0019-resume-uploads-over-tus-with-broker-held-files.md)、[0020](../adr/0020-read-service-logs-through-the-host-agent.md)、[0023](../adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)、[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)、[0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md)、[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)。
 - 是否接受 [ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)（互联网访问，实现已合并，实机待启用）。
 - 草稿 ADR 的 PR：局域网算力 PAIR 的隐私边界与下载（[#196](https://github.com/zhongwater123/A-NAS/pull/196)，ADR 0026）；语音处理的云端密钥与存储桶（[#203](https://github.com/zhongwater123/A-NAS/pull/203)，ADR 0027）。
@@ -53,7 +52,7 @@
 4. 网页搜索：按[启用手册](../runbooks/enable-web-search.md)查明空闲时的外发流量；部署 #364 修复后，按 [#409](https://github.com/zhongwater123/A-NAS/issues/409) 观察多账号节奏与 512 MiB 资源占用（[步骤](../runbooks/enable-web-search.md#多账号节奏与资源验收364)）。
 5. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改。
 6. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
-7. 相册 OCR 步骤 5：界面（[实施方案](../architecture/photo-ocr.md)）。步骤 1–3 已部署；步骤 4 的搜索、接口与更正的新存法（[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）已实现，部署时目录库升到第 16 号迁移。
+7. 相册 OCR 步骤 6：部署后在实验 NAS 上验收（[实施方案](../architecture/photo-ocr.md)）。步骤 1–3 已部署；步骤 4（搜索、接口、更正的新存法，[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）与步骤 5（界面）已实现，部署时目录库升到第 16 号迁移。
 8. 家庭中心数据修复 [#363](../investigations/2026-11-05-family-data-integrity.md)待合并、部署；M2：认领、隐藏（[规格](../specs/family-center.md)）。从相册加入频道已实现（[PR #395](https://github.com/zhongwater123/A-NAS/pull/395)），部署时产品、相册与家庭服务一起更新。
 9. 互联网访问：外部条件满足后，按[启用互联网访问](../runbooks/enable-internet-access.md)从第 3 步继续。
 10. 虚拟伙伴（大肥鱼）V1（[#404](https://github.com/zhongwater123/A-NAS/issues/404)，[规格](../specs/virtual-companion.md)）：合并部署后按[安装伙伴动画](../runbooks/install-companion-animations.md)装动画，在实验 NAS 上测闲置时伙伴与成员 Hermes 实例的 CPU 与内存，并在 Safari 上核对透明效果。

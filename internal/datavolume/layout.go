@@ -59,6 +59,45 @@ func UsableBytes(layout Layout, sizes []uint64) uint64 {
 	return total
 }
 
+// maxUnusableIgnored caps the space a mirror may leave unused: Btrfs makes a
+// data block group a tenth of the filesystem and at most 1 GiB, and no
+// balance gets closer than about one of them.
+const maxUnusableIgnored uint64 = 2 << 30
+
+// Unusable reports how much less the volume can still store than its
+// devices allow, because Btrfs has not spread its block groups over them.
+// Only a mirror strands space: each of its block groups needs room on
+// two devices, so once a disk joins two full ones, most of the new disk
+// stays unused until block groups move off the old ones. Less than a tenth
+// of the devices' size, and never more than 2 GiB, is within a block group
+// and counts as none. It is 0 for other layouts, without the devices, and
+// while profiles are being converted, which the caller rules out.
+func Unusable(layout Layout, devices []hoststate.VolumeDevice) uint64 {
+	if layout != LayoutMirror || len(devices) < 2 {
+		return 0
+	}
+	sizes := make([]uint64, 0, len(devices))
+	var total, allocated, free, largestFree uint64
+	for _, device := range devices {
+		left := device.SizeBytes - min(device.AllocatedBytes, device.SizeBytes)
+		sizes = append(sizes, device.SizeBytes)
+		total += device.SizeBytes
+		allocated += device.AllocatedBytes
+		free += left
+		largestFree = max(largestFree, left)
+	}
+	// Every block group of a mirror is allocated twice.
+	possible, stored := UsableBytes(LayoutMirror, sizes), allocated/2
+	reachable := min(free/2, free-largestFree)
+	if possible <= stored || possible-stored <= reachable {
+		return 0
+	}
+	if unusable := possible - stored - reachable; unusable >= min(maxUnusableIgnored, total/10) {
+		return unusable
+	}
+	return 0
+}
+
 // OutsideLayout reports whether data or metadata bytes are in profiles other
 // than the layout's, so that a balance must convert them.
 func OutsideLayout(data, metadata []hoststate.ProfileUsage, layout Layout) (convertData, convertMetadata bool) {
