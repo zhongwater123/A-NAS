@@ -189,6 +189,8 @@
 - 冗余方式与容量估算在服务端决定；界面按同一公式显示，供选择时参考（[`layouts.ts`](../../web/src/settings/layouts.ts)）。
 - 单盘数据卷从不记录目标冗余方式，也不显示转换：它的元数据是 `dup` 还是 `single` 取决于格式化它的 btrfs-progs 版本。
 
+- 分散任务的设备分配量未知时，保留停止记录，不判定分散完成、不取消 balance；每次后台测量最多等待十秒，失败时留待下一次有效观测（[调查](../investigations/2026-11-09-spread-allocation-observation.md)）。
+
 ## 验收证据
 
 M1：
@@ -226,6 +228,7 @@ M2、M3 另需：缺盘时的降级挂载与系统测试（[`scripts/system-test
 
 ## 关联
 
+- 调查：[分散任务的未知观测与测量超时](../investigations/2026-11-09-spread-allocation-observation.md)
 - ADR：[0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)（修订 [0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md) 的单盘限制）
 - 规格：[基础存储与共享](basic-storage-and-sharing.md#数据卷初始化)、[设置](settings.md)中的“存储”分区、[系统健康](system-health.md)
 - 架构：[存储与文件架构](../architecture/storage-and-files.md)

@@ -624,13 +624,20 @@ func (e *Executor) balance(ctx context.Context, command []string) {
 
 // measureSpread reads how Btrfs allocates the mirror's devices, checked
 // against sysfs as the host state reads them, and how much space the mirror
-// cannot use yet.
+// cannot use yet. Unknown allocations are errors, not evidence that the
+// spread finished. Bound even background reads so a stalled command cannot
+// keep the spread watcher, and therefore the volume's operation lock, alive.
 func (e *Executor) measureSpread(ctx context.Context, uuid string) (uint64, []hoststate.VolumeDevice, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	output, err := e.runner.Output(ctx, "btrfs", []string{"filesystem", "show", "--raw", e.mountPoint}, "")
 	if err != nil {
 		return 0, nil, commandError("btrfs filesystem show", err, output)
 	}
 	devices := linuxhoststate.VolumeDevices(os.DirFS(e.systemRoot), strings.ToLower(uuid), output)
+	if len(devices) < 2 {
+		return 0, nil, errors.New("the data volume device allocation is unknown")
+	}
 	return datavolume.Unusable(datavolume.LayoutMirror, devices), devices, nil
 }
 

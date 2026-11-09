@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
@@ -296,6 +297,121 @@ func TestASpreadThatLeavesSpaceUnusableWaitsForOtherDisks(t *testing.T) {
 	if recorded, err := executor.readMarker(); err != nil || recorded.SpreadStopped != "" || executor.SpreadStopped() {
 		t.Fatalf("marker after asking to continue = %+v, %v; want the stop cleared", recorded, err)
 	}
+}
+
+// An unreadable allocation is not evidence that a stopped spread reached
+// its goal. Keep the recorded stop even after the observation recovers.
+func TestUnknownAllocationPreservesTheSpreadStop(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		show string
+	}{
+		{"unparseable", "unparseable allocation"},
+		{"missing device", threeDisks(spreadUUID, 480, 480, 0) + "*** Some devices missing\n"},
+		{"incomplete devices", strings.Replace(threeDisks(spreadUUID, 480, 480, 0), "Total devices 3", "Total devices 4", 1)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runner := &scriptedBtrfs{shows: []string{threeDisks(spreadUUID, 480, 480, 0)}}
+			executor, _ := spreadExecutor(t, runner)
+			_, devices, err := executor.measureSpread(context.Background(), spreadUUID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := executor.recordSpreadStopped(devicesKey(devices)); err != nil {
+				t.Fatal(err)
+			}
+			stopped, err := executor.readMarker()
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner.shows = []string{test.show}
+			started, observeErr := executor.reconcileSpread(context.Background(), stopped)
+			after, err := executor.readMarker()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.SpreadStopped != stopped.SpreadStopped || !executor.SpreadStopped() {
+				t.Fatalf("unknown allocation erased the stop: before=%q after=%q stopped=%v", stopped.SpreadStopped, after.SpreadStopped, executor.SpreadStopped())
+			}
+			if started || observeErr == nil {
+				t.Fatalf("unknown allocation: started=%v error=%v; want no spread and an observation error", started, observeErr)
+			}
+			runner.shows = []string{threeDisks(spreadUUID, 480, 480, 0)}
+			started, err = executor.reconcileSpread(context.Background(), after)
+			waitIdle(t, executor)
+			if started || err != nil || len(runner.ran()) != 0 {
+				t.Fatalf("recovered observation: started=%v error=%v commands=%q; want the unchanged disks left alone", started, err, runner.ran())
+			}
+		})
+	}
+}
+
+func TestUnknownAllocationDoesNotCancelTheSpread(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		runner := &scriptedBtrfs{hold: true, cancelled: make(chan struct{}), shows: []string{"unparseable allocation"}}
+		executor, _ := spreadExecutor(t, runner)
+		done := make(chan struct{})
+		go func() {
+			executor.balanceUntilSpread(context.Background(), spreadUUID)
+			close(done)
+		}()
+		synctest.Wait()
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		if got := runner.ran(); len(got) != 1 {
+			t.Errorf("commands after unknown allocation = %q; want only the running balance", got)
+		}
+		runner.mu.Lock()
+		runner.shows = []string{threeDisks(spreadUUID, 330, 330, 300)}
+		runner.mu.Unlock()
+		<-done
+		want := []string{"btrfs balance start --full-balance -d " + executor.mountPoint, "btrfs balance cancel " + executor.mountPoint}
+		if got := runner.ran(); !slices.Equal(got, want) {
+			t.Fatalf("commands after a usable allocation = %q, want %q", got, want)
+		}
+	})
+}
+
+// stalledSpreadMeasurement lets a read finish only when its context expires.
+// Missing deadlines fail immediately instead of hanging the test itself.
+type stalledSpreadMeasurement struct {
+	commandLog
+	readErrors []error
+}
+
+func (r *stalledSpreadMeasurement) Output(ctx context.Context, _ string, _ []string, _ string) ([]byte, error) {
+	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 10*time.Second {
+		err := errors.New("allocation read has no deadline within ten seconds")
+		r.readErrors = append(r.readErrors, err)
+		return nil, err
+	}
+	<-ctx.Done()
+	r.readErrors = append(r.readErrors, ctx.Err())
+	return nil, ctx.Err()
+}
+
+func TestSpreadMeasurementTimeoutReleasesTheVolume(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		runner := &stalledSpreadMeasurement{}
+		executor, _ := spreadExecutor(t, runner)
+		executor.converting = true
+		executor.spread(spreadUUID)
+		if len(runner.readErrors) != 2 {
+			t.Fatalf("allocation read errors = %v; want the post-pack and final reads", runner.readErrors)
+		}
+		for _, err := range runner.readErrors {
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Errorf("allocation read error = %v; want context.DeadlineExceeded", err)
+			}
+		}
+		if err := executor.beginAdding(spreadUUID); err != nil {
+			t.Fatalf("adding after measurement timed out: %v; want the volume released", err)
+		}
+		executor.endAdding()
+		if executor.SpreadStopped() {
+			t.Fatal("a timed-out measurement must not record an unsuccessful spread")
+		}
+	})
 }
 
 // Disks are not added while Btrfs runs a balance, or while the Host Agent
