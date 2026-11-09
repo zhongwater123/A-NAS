@@ -106,7 +106,12 @@ chmod 0700 "$release/activate.incoming"
 # root scripts, which root installs from the staging account's home after
 # checking their hashes.
 for name in "${extras[@]}"; do
-  [[ ! -e "$release/$name" ]] || { echo "extra file would replace a staged one: $name" >&2; exit 1; }
+  # Staging the same bundle again finds its own extra files; anything else
+  # under that name belongs to the release and stays.
+  if [[ -e "$release/$name" ]] && ! cmp -s -- "extra/$name" "$release/$name"; then
+    echo "extra file would replace a staged one: $name" >&2
+    exit 1
+  fi
   install -m 0644 -- "extra/$name" "$release/$name"
 done
 for name in "${roots[@]}"; do
