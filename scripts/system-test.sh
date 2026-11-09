@@ -1986,15 +1986,15 @@ check "a pool's animations may be kept for good" \
   bash -c "curl -fsSI '$api$animation' | grep -Fqi 'cache-control: public, max-age=31536000, immutable'"
 check "a stand-in local console runs for the companion checks" kiosk_stand_in start
 # Two animations may share one file.
-shared=$(new_video)
-cp "/tmp/$shared.mp4" "/tmp/$shared.animation"
-printf '%s  %s\n' "$shared" 待机.webm "$shared" 东张西望.webm > "$companion_staged/pools/.incoming.sums"
+shared_animation=$(new_video)
+cp "/tmp/$shared_animation.mp4" "/tmp/$shared_animation.animation"
+printf '%s  %s\n' "$shared_animation" 待机.webm "$shared_animation" 东张西望.webm > "$companion_staged/pools/.incoming.sums"
 commit_animations
 animations_b=$pool
 run=$(kiosk_run)
 check "animations that share a file install" quiet "$installer" companion "$animations_b" "$companion_staged"
 check "the shared file is stored once" \
-  test "$(current_animations):$(animation_count):$(stat -c %h "$companion/objects/$shared")" = "pools/$animations_b:2:3"
+  test "$(current_animations):$(animation_count):$(stat -c %h "$companion/objects/$shared_animation")" = "pools/$animations_b:2:3"
 check "installing animations restarts the running local console" kiosk_restarted "$run"
 check "a page opened before the switch keeps its pool's animations" test "$(status_of -r 0-1023 "$api$animation")" = 206
 run=$(kiosk_run)
