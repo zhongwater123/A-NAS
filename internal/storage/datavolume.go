@@ -15,6 +15,7 @@ type (
 	Volume              = datavolume.Volume
 	ConversionState     = datavolume.ConversionState
 	Conversion          = datavolume.Conversion
+	Rebalance           = datavolume.Rebalance
 	DiskTarget          = datavolume.DiskTarget
 	CreateVolumeRequest = datavolume.CreateVolumeRequest
 	AddDisksRequest     = datavolume.AddDisksRequest

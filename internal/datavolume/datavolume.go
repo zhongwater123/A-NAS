@@ -64,6 +64,9 @@ type Volume struct {
 	// Conversion is set while data or metadata are outside the layout's
 	// Btrfs profiles, after disks were added with another layout.
 	Conversion *Conversion `json:"conversion,omitempty"`
+	// Rebalance is set while a mirror cannot use part of its disks' space
+	// until block groups move off the fullest disks (Unusable).
+	Rebalance *Rebalance `json:"rebalance,omitempty"`
 }
 
 // UnmarshalJSON also reads volumes stored when a volume had one disk.
@@ -100,6 +103,14 @@ type Conversion struct {
 	State          ConversionState `json:"state"`
 	ConvertedBytes uint64          `json:"convertedBytes"`
 	TotalBytes     uint64          `json:"totalBytes"`
+}
+
+// Rebalance is how much space a mirror cannot use yet, and whether the Host
+// Agent moves block groups for it now (running) or at its next check
+// (waiting).
+type Rebalance struct {
+	State         ConversionState `json:"state"`
+	UnusableBytes uint64          `json:"unusableBytes"`
 }
 
 // DiskTarget is a disk the Host Agent erases, with the fingerprint it must

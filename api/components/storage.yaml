@@ -24,6 +24,20 @@ schemas:
       availableBytes: { type: integer, format: int64, minimum: 0 }
       state: { type: string, enum: [creating, available, unavailable, read_only] }
       conversion: { $ref: "#/schemas/VolumeConversion" }
+      rebalance: { $ref: "#/schemas/VolumeRebalance" }
+  VolumeRebalance:
+    type: object
+    additionalProperties: false
+    required: [state, unusableBytes]
+    description: >-
+      Present while a mirror cannot use part of its disks' space because each block group needs room on two disks,
+      such as after a disk joined two full ones, and the Host Agent moves block groups off the fullest disks.
+    properties:
+      state:
+        type: string
+        enum: [running, waiting]
+        description: "running: Btrfs moves block groups now. waiting: moving stopped and continues at the Host Agent's next check."
+      unusableBytes: { type: integer, format: int64, minimum: 0, description: Space for files the mirror cannot use until block groups move. }
   VolumeConversion:
     type: object
     additionalProperties: false
@@ -41,7 +55,11 @@ schemas:
     additionalProperties: false
     required: [kind, description]
     properties:
-      kind: { type: string }
+      kind:
+        type: string
+        description: >-
+          erase_signatures, create_partition_table, create_btrfs, mount_volume, add_devices, convert_layout, or
+          rebalance (block groups move onto the new disks so that a mirror can use them).
       description: { type: string }
   PlannedDisk:
     type: object

@@ -24,13 +24,16 @@ import (
 )
 
 var (
-	ErrDiskNotFound       = errors.New("disk not found")
-	ErrPlanNotFound       = errors.New("execution plan not found")
-	ErrPlanExpired        = errors.New("execution plan expired")
-	ErrConfirmation       = errors.New("confirmation phrase does not match")
-	ErrVolumeBusy         = errors.New("the data volume is converting to another layout")
-	ErrInvalidLayout      = errors.New("the layout does not fit the number of disks")
-	ErrLayoutTooSmall     = errors.New("the files on the data volume do not fit the layout")
+	ErrDiskNotFound   = errors.New("disk not found")
+	ErrPlanNotFound   = errors.New("execution plan not found")
+	ErrPlanExpired    = errors.New("execution plan expired")
+	ErrConfirmation   = errors.New("confirmation phrase does not match")
+	ErrVolumeBusy     = errors.New("the data volume is converting to another layout or spreading over its disks")
+	ErrInvalidLayout  = errors.New("the layout does not fit the number of disks")
+	ErrLayoutTooSmall = errors.New("the files on the data volume do not fit the layout")
+	// ErrLayoutChange: disks join a volume on several disks in its layout;
+	// changing the layout is a step of its own (M3 of the disk-roles spec).
+	ErrLayoutChange       = errors.New("disks join a volume on several disks in its layout")
 	ErrOperationAttention = errors.New("operation needs administrator attention")
 )
 
@@ -261,6 +264,7 @@ func (s *Service) PlanVolume(ctx context.Context, actor accounts.User, diskIDs [
 		State: PlanStatePlanned, CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute),
 	}
 	sizes := make([]uint64, 0, len(disks))
+	rebalance := false
 	for _, disk := range disks {
 		plan.Disks = append(plan.Disks, plannedDisk(disk))
 		sizes = append(sizes, disk.CapacityBytes)
@@ -279,11 +283,22 @@ func (s *Service) PlanVolume(ctx context.Context, actor accounts.User, diskIDs [
 		plan.CapacityAfterBytes = UsableBytes(plan.Layout, sizes)
 	} else {
 		plan.Kind = PlanKindAddDisks
+		if plan.Layout == "" {
+			plan.Layout = current.Layout
+			if current.Layout == LayoutSingle {
+				plan.Layout = LayoutMirror
+			}
+		}
+		if current.Layout != LayoutSingle && plan.Layout != current.Layout {
+			return ExecutionPlan{}, ErrLayoutChange
+		}
 		volume := observeVolume(current, state)
 		if volume.State != VolumeStateAvailable || state.DataVolume == nil {
 			return ExecutionPlan{}, ErrVolumeUnavailable
 		}
-		if volume.Conversion != nil {
+		// Btrfs adds no disk while it spreads the volume; a stopped spread
+		// does not stand in the way.
+		if volume.Conversion != nil || (volume.Rebalance != nil && volume.Rebalance.State == ConversionRunning) {
 			return ExecutionPlan{}, ErrVolumeBusy
 		}
 		members := diskSizes(state, volume.DiskIDs)
@@ -298,8 +313,9 @@ func (s *Service) PlanVolume(ctx context.Context, actor accounts.User, diskIDs [
 				return ExecutionPlan{}, ErrLayoutTooSmall
 			}
 		}
+		rebalance = plan.Layout == current.Layout && strandsSpace(plan.Layout, state.DataVolume.Devices, sizes)
 	}
-	plan.Actions = planActions(plan.Kind, plan.Layout, current.Layout)
+	plan.Actions = planActions(plan.Kind, plan.Layout, current.Layout, rebalance)
 	if strings.TrimSpace(plan.ID) == "" {
 		return ExecutionPlan{}, errors.New("generate execution plan ID: empty ID")
 	}
@@ -399,7 +415,26 @@ func diskSizes(state hoststate.State, diskIDs []string) []uint64 {
 
 var layoutNames = map[Layout]string{LayoutSingle: "单盘", LayoutMirror: "镜像（RAID 1）", LayoutSpan: "扩容（不冗余）", LayoutStripe: "条带（RAID 0）"}
 
-func planActions(kind PlanKind, layout, current Layout) []Action {
+// strandsSpace reports whether disks of the sizes, empty, joining the
+// devices leave the layout unable to use part of the space until block
+// groups move: the old disks are too full to pair with the new ones.
+func strandsSpace(layout Layout, devices []hoststate.VolumeDevice, sizes []uint64) bool {
+	if devices == nil {
+		return false
+	}
+	joined := slices.Clone(devices)
+	var next uint64
+	for _, device := range devices {
+		next = max(next, device.DevID)
+	}
+	for _, size := range sizes {
+		next++
+		joined = append(joined, hoststate.VolumeDevice{DevID: next, SizeBytes: size})
+	}
+	return datavolume.Unusable(layout, joined) > 0
+}
+
+func planActions(kind PlanKind, layout, current Layout, rebalance bool) []Action {
 	actions := []Action{
 		{Kind: "erase_signatures", Description: "清除目标硬盘上现有的分区、文件系统和阵列签名"},
 		{Kind: "create_partition_table", Description: "在每块目标硬盘上创建 GPT 和单个 A-NAS 数据分区"},
@@ -411,11 +446,13 @@ func planActions(kind PlanKind, layout, current Layout) []Action {
 		)
 	}
 	actions = append(actions, Action{Kind: "add_devices", Description: "把目标硬盘加入正在使用的数据卷，已有文件保持原样"})
-	description := "在后台把数据卷从" + layoutNames[current] + "转换为" + layoutNames[layout] + "，期间可以照常使用"
-	if layout == current {
-		description = "在后台让数据卷的元数据在两块硬盘上各存一份，期间可以照常使用"
+	switch {
+	case layout != current:
+		return append(actions, Action{Kind: "convert_layout", Description: "在后台把数据卷从" + layoutNames[current] + "转换为" + layoutNames[layout] + "，期间可以照常使用"})
+	case rebalance:
+		return append(actions, Action{Kind: "rebalance", Description: "在后台把已有文件分散到全部硬盘，新增的空间才能全部用上，期间可以照常使用"})
 	}
-	return append(actions, Action{Kind: "convert_layout", Description: description})
+	return actions
 }
 
 func (s *Service) ConfirmPlan(ctx context.Context, actor accounts.User, planID, phrase string) (ExecutionPlan, error) {
@@ -645,13 +682,22 @@ func (s *Service) ContinueConversion(ctx context.Context, actor accounts.User) e
 	if err != nil {
 		return err
 	}
-	if len(volumes) == 0 || volumes[0].Conversion == nil || volumes[0].Conversion.State != ConversionWaiting {
+	if len(volumes) == 0 || !stopped(volumes[0]) {
 		return ErrNoConversion
 	}
 	if s.executor == nil {
 		return errors.New("volume executor is unavailable")
 	}
 	return s.executor.ContinueConversion(ctx)
+}
+
+// stopped reports whether the volume's conversion, or moving its block
+// groups, waits for the Host Agent's next check.
+func stopped(volume Volume) bool {
+	if volume.Conversion != nil {
+		return volume.Conversion.State == ConversionWaiting
+	}
+	return volume.Rebalance != nil && volume.Rebalance.State == ConversionWaiting
 }
 
 // currentVolumeLocked is the data volume this device created, with the
@@ -683,7 +729,7 @@ func (s *Service) currentVolumeLocked() (Volume, bool) {
 // mounted and writable, its size and free space, its disks, and how far a
 // conversion to its layout has come.
 func observeVolume(volume Volume, state hoststate.State) Volume {
-	volume.State, volume.AvailableBytes, volume.Conversion = VolumeStateUnavailable, nil, nil
+	volume.State, volume.AvailableBytes, volume.Conversion, volume.Rebalance = VolumeStateUnavailable, nil, nil, nil
 	var raw []uint64
 	for _, disk := range state.Disks {
 		if slices.Contains(volume.DiskIDs, disk.ID.String()) {
@@ -726,6 +772,13 @@ func observeVolume(volume Volume, state hoststate.State) Volume {
 		volume.Conversion = &Conversion{State: ConversionWaiting, ConvertedBytes: converted, TotalBytes: total}
 		if mounted.Operation == hoststate.VolumeOperationBalance {
 			volume.Conversion.State = ConversionRunning
+		}
+		return volume
+	}
+	if unusable := datavolume.Unusable(volume.Layout, mounted.Devices); unusable > 0 {
+		volume.Rebalance = &Rebalance{State: ConversionWaiting, UnusableBytes: unusable}
+		if mounted.Operation == hoststate.VolumeOperationBalance {
+			volume.Rebalance.State = ConversionRunning
 		}
 	}
 	return volume

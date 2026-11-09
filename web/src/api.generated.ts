@@ -470,7 +470,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Starts converting the data volume to its layout now, after a shutdown or an error stopped the conversion; the Host Agent otherwise continues it at startup and every 15 minutes. Administrators only. */
+        /** @description Starts converting the data volume to its layout, or moving the block groups of a mirror that cannot use all of its disks, now, after a shutdown or an error stopped it; the Host Agent otherwise continues at startup and every 15 minutes. 409 no_conversion when neither waits. Administrators only. */
         post: operations["continueVolumeConversion"];
         delete?: never;
         options?: never;
@@ -488,7 +488,7 @@ export interface paths {
         /** @description Administrators only. The plans that still need the administrator, newest first: the one running, and the newest one that stopped in needs_attention unless a plan made after it has run. The settings page shows them again after a reload. */
         get: operations["listUnfinishedStoragePlans"];
         put?: never;
-        /** @description Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts to the layout in the background. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict. */
+        /** @description Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume. A volume on one disk then converts to the layout (mirror by default) in the background; a volume on several disks keeps its layout, and a mirror whose old disks are too full to pair with the new ones moves block groups onto them. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts or moves block groups; 422 invalid_layout when the layout does not fit the number of disks, layout_change_unsupported when it differs from the layout of a volume on several disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict. */
         post: operations["createStoragePlan"];
         delete?: never;
         options?: never;
@@ -4727,6 +4727,7 @@ export interface components {
             /** @enum {string} */
             state: "creating" | "available" | "unavailable" | "read_only";
             conversion?: components["schemas"]["VolumeConversion"];
+            rebalance?: components["schemas"]["VolumeRebalance"];
         };
         /** @description Present while data or metadata are outside the layout's Btrfs profiles, after disks were added. */
         VolumeConversion: {
@@ -4740,7 +4741,21 @@ export interface components {
             /** Format: int64 */
             totalBytes: number;
         };
+        /** @description Present while a mirror cannot use part of its disks' space because each block group needs room on two disks, such as after a disk joined two full ones, and the Host Agent moves block groups off the fullest disks. */
+        VolumeRebalance: {
+            /**
+             * @description running: Btrfs moves block groups now. waiting: moving stopped and continues at the Host Agent's next check.
+             * @enum {string}
+             */
+            state: "running" | "waiting";
+            /**
+             * Format: int64
+             * @description Space for files the mirror cannot use until block groups move.
+             */
+            unusableBytes: number;
+        };
         StorageAction: {
+            /** @description erase_signatures, create_partition_table, create_btrfs, mount_volume, add_devices, convert_layout, or rebalance (block groups move onto the new disks so that a mirror can use them). */
             kind: string;
             description: string;
         };
@@ -7103,6 +7118,7 @@ export type WallpaperStyleChange = components['schemas']['WallpaperStyleChange']
 export type VolumeLayout = components['schemas']['VolumeLayout'];
 export type Volume = components['schemas']['Volume'];
 export type VolumeConversion = components['schemas']['VolumeConversion'];
+export type VolumeRebalance = components['schemas']['VolumeRebalance'];
 export type StorageAction = components['schemas']['StorageAction'];
 export type PlannedDisk = components['schemas']['PlannedDisk'];
 export type StoragePlan = components['schemas']['StoragePlan'];

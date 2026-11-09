@@ -52,7 +52,7 @@ func (s *Service) succeeded(planID string, operation VolumeOperation) (Execution
 	if operation.Volume != nil {
 		volume = *operation.Volume
 	}
-	volume.Layout, volume.Conversion = plan.Layout, nil
+	volume.Layout, volume.Conversion, volume.Rebalance = plan.Layout, nil, nil
 	if plan.Kind == PlanKindCreateVolume {
 		volume.DiskIDs = diskIDsOf(plan.Disks)
 		if volume.ID == "" {
