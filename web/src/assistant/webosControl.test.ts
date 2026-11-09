@@ -292,6 +292,23 @@ describe("WebosController", () => {
     expect(asked).toHaveLength(1);
   });
 
+  it("asks before typing into a terminal in any window, not only in 设置's 终端", async () => {
+    const { control, asked } = controller(false);
+    // A shell in a window of its own, as xterm.js renders one: its input is a textarea inside .xterm.
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<section data-window-id="shell" role="dialog" aria-label="容器终端">
+        <div class="xterm"><textarea aria-label="Terminal input"></textarea></div>
+      </section>`,
+    );
+    const input = screen.getByRole("textbox", { name: "Terminal input" }) as HTMLTextAreaElement;
+    await expect(
+      control.run("browser_type", { ref: refOf(await look(control), "Terminal input"), text: "rm -rf ~" }),
+    ).rejects.toThrow("成员没有允许");
+    expect(asked).toEqual([{ what: "在“终端”里输入“rm -rf ~”", where: "容器终端", why: "终端里的输入会直接运行" }]);
+    expect(input.value).toBe("");
+  });
+
   it("types into a field as the member would, with input and change events", async () => {
     const { control } = controller();
     const search = document.getElementById("search") as HTMLInputElement;
