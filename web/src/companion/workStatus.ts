@@ -103,6 +103,17 @@ export function startTurn(sessionId: string): void {
 }
 
 /**
+ * The member stopped the conversation's turn from this window. The turn counts as stopped from the
+ * moment the window asks Hermes to stop it, as the product service counts it (contract v1.3): the
+ * companion leaves its stage now instead of when Hermes answers, and a command Hermes still sends for
+ * that turn is not this window's (not-controlling) and does not move the companion.
+ */
+export function stopTurn(sessionId: string): void {
+  if (!prompting.delete(sessionId)) return;
+  clear(sessionId);
+}
+
+/**
  * Whether the conversation's running turn is one this window started: only such a turn's commands
  * move this device's companion (commands.ts answers any other not-controlling).
  */

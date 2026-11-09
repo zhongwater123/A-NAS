@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WORK_STATUS_STATES } from "./dsh-pet/shared/work-status";
-import { companionState, forgetAll, reportCards, reportEvent, resetWorkStatus, stageOf, startTurn } from "./workStatus";
+import {
+  companionState,
+  forgetAll,
+  isPrompting,
+  reportCards,
+  reportEvent,
+  resetWorkStatus,
+  stageOf,
+  startTurn,
+  stopTurn,
+} from "./workStatus";
 
 const leaf = () => companionState.read().sections.workStatus;
 const shown = () => (leaf().data as { state?: string } | null)?.state ?? null;
@@ -36,6 +46,24 @@ describe("what VNAS is doing, as dsh-pet's host sums it up", () => {
     reportEvent("s1", "message.complete", { status: "complete" });
     reportEvent("s1", "message.start");
     expect(shown()).toBe("success");
+  });
+
+  it("lets a turn go the moment the member stops it here, whatever Hermes still reports of it", () => {
+    startTurn("s1");
+    tool("tool.start", "search_files");
+    expect(shown()).toBe("working");
+    stopTurn("s1");
+    expect(shown()).toBeNull();
+    expect(isPrompting("s1")).toBe(false);
+    // Hermes finishes the step under way and ends the turn after the stop.
+    tool("tool.complete", "search_files");
+    reportEvent("s1", "message.complete", { status: "interrupted" });
+    expect(shown()).toBeNull();
+    // Stopping a turn the window did not start, or no turn, touches nothing.
+    startTurn("s2");
+    reportEvent("s2", "message.start");
+    stopTurn("s1");
+    expect(shown()).toBe("thinking");
   });
 
   it("keeps a finished turn's success or error 60 s, then shows nothing, so the next result waves again", () => {

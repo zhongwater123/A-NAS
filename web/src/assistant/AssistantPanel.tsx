@@ -80,7 +80,7 @@ import {
 import { ErrorBoundary } from "react-error-boundary";
 
 import { releaseCommandLocks, runCompanionCommand } from "../companion/commands";
-import { forgetAll, reportCards, reportEvent, startTurn } from "../companion/workStatus";
+import { forgetAll, reportCards, reportEvent, startTurn, stopTurn } from "../companion/workStatus";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { formatBytes } from "../lib/bytes";
 import { copyText } from "../lib/clipboard";
@@ -410,7 +410,12 @@ export function AssistantPanel({
   }, [gateway.client]);
 
   const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed, beforePrompt });
-  const { send, cancel } = thread;
+  const { send, cancel: stopReply, liveId } = thread;
+  // A stop counts from this window's request, for the companion too (companion/workStatus.ts).
+  const cancel = useCallback(() => {
+    if (liveId) stopTurn(liveId);
+    stopReply();
+  }, [liveId, stopReply]);
 
   // Results of scheduled tasks the member has not read; opening a run reads its task's.
   const unread = useTaskNotices().length;
@@ -474,6 +479,7 @@ export function AssistantPanel({
     if (!window.confirm(`删除对话“${session.title || "新对话"}”？删除后无法恢复。`)) return;
     // As Hermes Desktop does: stop and close the live session before deleting it.
     if (session.id === activeId && thread.liveId) {
+      stopTurn(thread.liveId);
       await gateway.client.request("session.interrupt", { session_id: thread.liveId }).catch(() => undefined);
       await gateway.client.request("session.close", { session_id: thread.liveId }).catch(() => undefined);
     }
