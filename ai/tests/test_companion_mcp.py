@@ -129,6 +129,7 @@ class CompanionToolTests(unittest.TestCase):
         self.assertAnswered(result, "rejected")
         self.assertEqual(result.structured_content["reason"], "sleeping")
         self.assertIn("sleeping", result.content[0].text)
+        self.assertIn("睡着了", result.content[0].text)
         self.assertEqual(self.received, [("/call", {"tool": "anim", "args": {"name": "wave", "facing": "left"}})])
 
     def test_only_the_given_arguments_are_passed_on(self):

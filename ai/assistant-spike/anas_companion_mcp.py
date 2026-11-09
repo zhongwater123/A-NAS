@@ -101,7 +101,12 @@ def line(data: dict) -> str:
     reason = data.get("reason")
     if status in ("cancelled", "failed", "rejected") and reason:
         said += f"（{reason}）"
-    elif not said.endswith("。"):
+    # The window says what to do next, such as waking the companion or passing
+    # the lock's id; the model reads only this text, not the reason code.
+    message = data.get("message")
+    if status in ("cancelled", "failed", "rejected") and isinstance(message, str) and message.strip():
+        said += f"：{message.strip()}"
+    if not said.endswith("。"):
         said += "。"
     return said
 
