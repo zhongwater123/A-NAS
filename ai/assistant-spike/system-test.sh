@@ -58,7 +58,7 @@ check "each member's weekly curator is enabled" systemctl is-enabled --quiet ana
 # for assistants, all off by default, switched on the way the trial does it.
 bash /spike/product-settings.sh on >/tmp/product-settings.log 2>&1 || tail -n 5 /tmp/product-settings.log
 check "the assistant's settings are on in the product's services" \
-  test "$(bash /spike/product-settings.sh state)" = "session gate on, photos for assistants on"
+  test "$(bash /spike/product-settings.sh state)" = "session gate on, photos for assistants on, companion for assistants on"
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
 changes_socket='import socket; socket.socket(socket.AF_UNIX).connect("/run/a-nas/assistant-changes.sock")'
 check "the executor's assistant socket is out of a member's reach outside the sandbox" denied as alice python3 -c "$changes_socket"

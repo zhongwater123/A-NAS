@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coreos/go-systemd/v22/activation"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -393,6 +394,9 @@ func run(logger *slog.Logger) error {
 		return nil
 	})
 	servers, err := listen(config, handler, logger)
+	if companion := companionListener(); companion != nil && err == nil {
+		servers = append(servers, listening{assistant.CompanionServer(), companion})
+	}
 	if err == nil {
 		logger.Info("A-NAS API listening", "address", config.HTTPAddr, "internet_address", config.InternetHTTPAddr, "internet_host", config.InternetHost,
 			"version", version, "data_source", dataSource, "terminal", config.TerminalEnabled, "containers", containerManager != nil)
@@ -433,6 +437,20 @@ func listen(config Config, handler http.Handler, logger *slog.Logger) ([]listeni
 		servers = append(servers, listening{apiServer(entry.address, entry.handler, logger), listener})
 	}
 	return servers, nil
+}
+
+// companionListener is the socket of the companion tools of members'
+// assistants (#412) when systemd hands it over, named "companion"
+// (ai/assistant-spike/anas-companion-assistant.socket). systemd holds it, so
+// it outlives restarts of this service and the copies bound into running
+// sandboxes keep working. Without it those tools answer that no desktop is in
+// use.
+func companionListener() net.Listener {
+	listeners, err := activation.ListenersWithNames()
+	if err != nil || len(listeners["companion"]) == 0 {
+		return nil
+	}
+	return listeners["companion"][0]
 }
 
 func apiServer(address string, handler http.Handler, logger *slog.Logger) *http.Server {

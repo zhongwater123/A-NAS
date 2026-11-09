@@ -90,6 +90,14 @@ if [ -S "$photos" ]; then
 else
   echo "INFO photo socket not bound (no photo service for assistants)"
 fi
+# The Product Service's companion socket (#412), bound like the photo socket; the scheduled
+# tasks' sandbox has the bare mount point instead.
+companion=/run/anas-assistant-companion/companion.sock
+if [ -S "$companion" ]; then
+  expect_ok "reach the Product Service's companion socket" python3 -c "import socket; socket.socket(socket.AF_UNIX).connect('$companion')"
+else
+  echo "INFO companion socket not bound (no Product Service for assistants)"
+fi
 # Policy, not sandbox: every toolset and tool Hermes knows is allowed or disabled, so a
 # Hermes upgrade that adds one fails here (toolsets-check.py).
 if [ ! -x /opt/a-nas/assistant-runtimes/spike/venv/bin/python ]; then

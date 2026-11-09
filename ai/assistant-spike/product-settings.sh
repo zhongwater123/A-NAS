@@ -5,10 +5,11 @@
 # and would drop lines added there.
 #
 #   product-settings.sh on     the session gate (decision 10) in the Host Agent and the Product
-#                              Service, and the photo service's socket for members' assistants
+#                              Service, the photo service's socket for members' assistants
 #                              (decision 6, #113) with the Host Agent's lookup of members by
-#                              UID behind it; restarts the Host Agent, the photo service and
-#                              the Product Service
+#                              UID behind it, and the Product Service's socket for their
+#                              companion tools (#412); restarts the Host Agent, the photo
+#                              service and the Product Service
 #   product-settings.sh off    undo, and restart them
 #   product-settings.sh state  one line saying what is on
 #
@@ -17,6 +18,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 gate=ANAS_ASSISTANT_SOCKET_DIR=/run/a-nas-assistant
 photos=/run/a-nas-photos-assistant/assistant.sock
+companion=anas-companion-assistant.socket
 units=/etc/systemd/system
 dropin=assistant-trial.conf
 services=(anas-host-agent anas-api anas-photos)
@@ -31,7 +33,9 @@ restart() {
   systemctl stop anas-photos
   if [[ $1 == on ]]; then systemctl start anas-photos-assistant.socket; fi
   systemctl start anas-photos
-  systemctl restart anas-api
+  systemctl stop anas-api
+  if [[ $1 == on ]]; then systemctl start "$companion"; fi
+  systemctl start anas-api
   for _ in $(seq 1 100); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break; sleep 0.2; done
 }
 
@@ -48,14 +52,17 @@ on() {
   for service in "${services[@]}"; do install -d -m 0755 "$units/$service.service.d"; done
   printf '[Service]\nEnvironment=%s\n# Members by UID, for the photo service'"'"'s socket for assistants.\nEnvironment=ANAS_PHOTO_ASSISTANT_LOOKUP=1\n' \
     "$gate" > "$units/anas-host-agent.service.d/$dropin"
-  printf '[Service]\nEnvironment=%s\n' "$gate" > "$units/anas-api.service.d/$dropin"
+  # The companion socket comes from systemd, named in the socket unit (FileDescriptorName).
+  printf '[Unit]\nWants=%s\nAfter=%s\n\n[Service]\nEnvironment=%s\nSockets=%s\n' \
+    "$companion" "$companion" "$gate" "$companion" > "$units/anas-api.service.d/$dropin"
   printf '[Unit]\nWants=anas-photos-assistant.socket\nAfter=anas-photos-assistant.socket\n\n[Service]\nSockets=anas-photos-assistant.socket\nEnvironment=ANAS_PHOTOS_ASSISTANT_SOCKET=%s\n' \
     "$photos" > "$units/anas-photos.service.d/$dropin"
   install -m 0644 "$here/anas-photos-assistant.socket" "$units/anas-photos-assistant.socket"
+  install -m 0644 "$here/$companion" "$units/$companion"
   for service in "${services[@]}"; do chmod 0644 "$units/$service.service.d/$dropin"; done
   old_lines
   systemctl daemon-reload
-  systemctl enable --quiet anas-photos-assistant.socket
+  systemctl enable --quiet anas-photos-assistant.socket "$companion"
   restart on
 }
 
@@ -65,24 +72,27 @@ off() {
     rm -f "$units/$service.service.d/$dropin"
     rmdir "$units/$service.service.d" 2>/dev/null || true
   done
-  systemctl disable --now --quiet anas-photos-assistant.socket 2>/dev/null || true
-  rm -f "$units/anas-photos-assistant.socket"
+  systemctl disable --now --quiet anas-photos-assistant.socket "$companion" 2>/dev/null || true
+  rm -f "$units/anas-photos-assistant.socket" "$units/$companion"
   old_lines
   systemctl daemon-reload
   restart off
 }
 
 state() {
-  local gate_on=off photos_on=off
+  local gate_on=off photos_on=off companion_on=off
   if [[ -f "$units/anas-host-agent.service.d/$dropin" && -f "$units/anas-api.service.d/$dropin" ]] ||
     grep -qx "$gate" /etc/a-nas/host-agent.env 2>/dev/null; then gate_on=on; fi
   if systemctl is-active --quiet anas-photos-assistant.socket && [[ -f "$units/anas-photos.service.d/$dropin" ]]; then photos_on=on; fi
-  printf 'session gate %s, photos for assistants %s\n' "$gate_on" "$photos_on"
+  if systemctl is-active --quiet "$companion" && grep -qx "Sockets=$companion" "$units/anas-api.service.d/$dropin" 2>/dev/null; then
+    companion_on=on
+  fi
+  printf 'session gate %s, photos for assistants %s, companion for assistants %s\n' "$gate_on" "$photos_on" "$companion_on"
 }
 
 case ${1:-} in
   on) on ;;
   off) off ;;
   state) state ;;
-  *) sed -n '2,15p' "$0"; exit 2 ;;
+  *) sed -n '2,16p' "$0"; exit 2 ;;
 esac
