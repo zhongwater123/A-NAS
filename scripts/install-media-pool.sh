@@ -86,8 +86,11 @@ else
     take "$staging/pools/$pool.sums" "$manifest" "$largest_manifest" ||
       { echo "the staged manifest of pool $pool is not a regular file of at most $largest_manifest bytes" >&2; exit 2; }
     [[ $(sha256sum < "$manifest" | cut -c 1-16) == "$pool" ]] || { echo "the staged manifest is not pool $pool" >&2; exit 2; }
-    # read skips a last line without a newline, which the pool ID still counts.
-    [[ -z $(tail -c 1 -- "$manifest") ]] || { echo "the manifest of pool $pool does not end with a newline" >&2; exit 2; }
+    # The pool ID counts every byte, read does not: it skips a last line
+    # without a newline and drops NUL bytes unseen. Command substitution drops
+    # them too, so the last byte is compared as od prints it.
+    [[ $(tr -cd '\000' < "$manifest" | wc -c) -eq 0 && $(tail -c 1 -- "$manifest" | od -An -tx1) == *0a ]] ||
+      { echo "the manifest of pool $pool has a NUL byte or does not end with a newline" >&2; exit 2; }
   fi
   link=false
 fi

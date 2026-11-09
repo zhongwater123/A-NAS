@@ -45,8 +45,11 @@ case $kind in
     manifest=$staging/pools/.incoming.sums
     install -d -m 0750 "$staging" "$staging/objects" "$staging/pools"
     [[ -f $manifest ]] || { echo "no manifest uploaded to $manifest" >&2; exit 2; }
-    # read skips a last line without a newline, which the pool ID still counts.
-    [[ -z $(tail -c 1 -- "$manifest") ]] || { echo "the manifest does not end with a newline" >&2; exit 2; }
+    # The pool ID counts every byte, read does not: it skips a last line
+    # without a newline and drops NUL bytes unseen. Command substitution drops
+    # them too, so the last byte is compared as od prints it.
+    [[ $(tr -cd '\000' < "$manifest" | wc -c) -eq 0 && $(tail -c 1 -- "$manifest" | od -An -tx1) == *0a ]] ||
+      { echo "the manifest has a NUL byte or does not end with a newline" >&2; exit 2; }
     # The hashes of a well-formed manifest: one "HASH  NAME" per animation, a
     # plain file name, each name once, at most 512 lines.
     listed() {

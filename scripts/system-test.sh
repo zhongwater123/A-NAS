@@ -2052,6 +2052,16 @@ check "staging refuses a manifest without its last newline" \
 head -c -1 "$companion_staged/pools/$pool.sums" > "$companion_staged/pools/$unterminated.sums"
 check "installing refuses a manifest without its last newline" denied "$installer" companion "$unterminated" "$companion_staged"
 check "the unterminated manifest installs nothing" test ! -e "$companion/pools/$unterminated"
+# The same with a NUL byte where the last newline was: read and command
+# substitution drop it unseen, the pool ID counts it.
+{ head -c -1 "$companion_staged/pools/$pool.sums"; printf '\0'; } > /tmp/nul-ended.sums
+nul_ended=$(sha256sum < /tmp/nul-ended.sums | cut -c 1-16)
+cp /tmp/nul-ended.sums "$companion_staged/pools/.incoming.sums"
+check "staging refuses a manifest that ends with a NUL byte" \
+  denied env "HOME=$stager" bash /src/scripts/remote-stage-media-pool.sh companion commit
+cp /tmp/nul-ended.sums "$companion_staged/pools/$nul_ended.sums"
+check "installing refuses a manifest that ends with a NUL byte" denied "$installer" companion "$nul_ended" "$companion_staged"
+check "the NUL-ended manifest installs nothing" test ! -e "$companion/pools/$nul_ended"
 # The staging account can swap what it staged for a FIFO or a link between the
 # installer's checks and its copy: root reads regular files only, never waits
 # for a writer, and reads no more than a pool may hold.
