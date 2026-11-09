@@ -88,7 +88,9 @@ export function createCueEffects(rt: CueEffectsRuntime) {
       log('pet=' + cfg.id + ' ' + (prevWorkStateRef.current ?? 'null') + '->' + workStatus.state + '    ' + name);
       const stateChanged = prevWorkStateRef.current !== workStatus.state;
       prevWorkStateRef.current = workStatus.state;
-      hub.stopMotion();
+      // A-NAS: a stage stops the pet's own walk, not a move VNAS asked for: the turn that asked for it
+      // ends right after, and its end would leave the pet halfway.
+      hub.stopWalk();
       // 气泡文本：任务详情优先，否则从 workStatusTexts[档位] 随机抽一句。
       const textGroup = Array.isArray(cfg.workStatusTexts) ? cfg.workStatusTexts[idx] : undefined;
       const configuredText =

@@ -291,6 +291,7 @@ export function createCardRuntime(rt: PetRuntime) {
       // 占用锁：锁的语义是把控制权交给第三方，睡觉的菜单闸门与自动化闸门都对持锁者让路
       locked: () => ownAnim.isFrozen(),
       stopMotion: motion.stopMove,
+      stopWalk: () => motion.walk.stop(),
       tryWalk: motion.walk.tryMove,
     };
     // 七条指令的分派在 cue-effects：这里只把当拍 props 交过去。

@@ -222,6 +222,21 @@ describe("what VNAS asks of the companion", () => {
     await plays("碎碎念-发呆碎碎念");
   });
 
+  it("keeps what VNAS said last in a turn over the line the turn's end shows", async () => {
+    serve([IDLE, "碎碎念-发呆碎碎念", "工作状态-雀跃庆祝"]);
+    await mount();
+    act(() => {
+      startTurn("live0001");
+      reportEvent("live0001", "message.start");
+    });
+    write("say", { text: "照片整理好了" });
+    expect(await screen.findByText("照片整理好了")).toBeInTheDocument();
+    act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+    await plays("工作状态-雀跃庆祝");
+    await settle();
+    expect(screen.getByText("照片整理好了")).toBeInTheDocument();
+  });
+
   it("shows no picture and plays no address it is given", async () => {
     serve([IDLE, "东张西望"]);
     const { root } = await mount();
@@ -415,6 +430,19 @@ describe("walking, throwing and resting", () => {
     first.view.unmount();
     const second = await mount();
     await waitFor(() => expect(second.root.style.left).toBe(left(0.25)));
+  });
+
+  it("goes on to where VNAS put it when the turn that asked for it ends on the way", async () => {
+    serve([IDLE, "工作状态-雀跃庆祝"]);
+    const { root } = await mount();
+    act(() => startTurn("live0001"));
+    write("position", { x: 0.25, y: 0.5, mode: "line", duration: 1000 });
+    frames(10);
+    act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+    await plays("工作状态-雀跃庆祝");
+    frames(80);
+    expect(root.style.left).toBe(left(0.25));
+    expect(saved()).toEqual({ rx: 0.25, ry: 0.5 });
   });
 
   it("walks when it rolls a move and stops where it got to when the page is hidden", async () => {

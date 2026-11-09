@@ -49,8 +49,10 @@ export interface BubbleSlotInput {
 export function decideBubbleSlot(input: BubbleSlotInput): BubbleSlot {
   // 面板是用户主动打开的窗口：它占槽时其余气泡一律让位，关掉后按原规则恢复。
   if (input.todoOn) return 'todo';
-  if (input.workTerminal && input.workOn && input.workText && input.workStatusEnabled) return 'work-terminal';
+  // A-NAS: the only speech is VNAS's broadcast, and it comes before the line a turn's end shows: a turn
+  // ends right after VNAS says something, and that line would hide it for the whole time both show.
   if (input.whisperOn && input.whisperText) return 'whisper';
+  if (input.workTerminal && input.workOn && input.workText && input.workStatusEnabled) return 'work-terminal';
   if (input.workOn && input.workText && input.workStatusEnabled) return 'work';
   return 'none';
 }
