@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // A recipient cannot revoke what was sent to them: to them the share is not
@@ -106,7 +107,10 @@ func TestASharedPathRefusesBackslashNULAndColon(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := awaitShare(t, s, v.ID, want)
+			got := settled(t, s, v.ID)
+			if got.Status != want {
+				t.Fatalf("share with %q is %s, want %s", name, got.Status, want)
+			}
 			if want == "published" {
 				if visitErr != nil || len(got.Entries) != 1 || got.Entries[0].Path != name {
 					t.Fatalf("entries = %+v, capture error = %v; want %q", got.Entries, visitErr, name)
@@ -117,6 +121,26 @@ func TestASharedPathRefusesBackslashNULAndColon(t *testing.T) {
 				t.Fatalf("capturing %q: error = %v, entries = %+v; want ErrInvalid and none", name, visitErr, got.Entries)
 			}
 		})
+	}
+}
+
+// settled waits until the share is no longer being prepared, so a share that
+// ends in the wrong state fails on its state rather than on a timeout.
+func settled(t *testing.T, s *Store, id string) Share {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		v, err := s.Get(context.Background(), sender, id, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.Status != "preparing" {
+			return v
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("share is still preparing")
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
 
