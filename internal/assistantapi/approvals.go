@@ -205,14 +205,20 @@ func (m *member) openTurn(id string, owner *upstream) {
 	s.turn, s.stopping, s.owner = true, false, owner
 }
 
+// stopping records that the member stops a session's turn, as the window's
+// session.interrupt goes to Hermes. Hermes answers it only once it stopped the
+// turn, and the turn's last events (tool.complete, message.complete) may come
+// before the answer. Hermes drops the prompts it queued behind the turn
+// (tui_gateway/session_lifecycle.py, _interrupt_session_turn): the next turn
+// is not theirs.
 func (m *member) stopping(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if s, ok := m.sessions[id]; ok {
-		// Hermes drops the prompts it queued behind the turn it stops
-		// (tui_gateway/session_lifecycle.py, _interrupt_session_turn): the
-		// next turn is not theirs.
-		s.stopping, s.nextPrompter = true, nil
+		s.nextPrompter = nil
+		// A session with no turn under way has nothing to stop; its next turn
+		// must not count as stopped.
+		s.stopping = s.turn
 	}
 }
 

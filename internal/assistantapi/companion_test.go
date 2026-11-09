@@ -890,6 +890,52 @@ func TestStoppingATurnDropsThePromptQueuedBehindIt(t *testing.T) {
 	}
 }
 
+func TestATurnStopsWhenTheWindowAsksNotWhenHermesAnswers(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	// The window's prompt queued behind the turn, a subagent's companion tool
+	// and a call of the turn's own on its way when the member stops it.
+	h.alice().prompted(fakeRuntime, h.windowOf(), true)
+	h.serve.event(conn, "subagent.tool", fakeRuntime, `{"subagent_id":"sa-1","child_session_id":"c-1","tool_name":"`+companionPrefix+`wake"}`)
+	h.started(conn, fakeRuntime, "call-1", "broadcast", `{"text":"你好"}`)
+	h.observed(w, conn)
+	// Hermes's turn thread ends the turn before Hermes answers the request.
+	h.serve.mu.Lock()
+	h.serve.stopFirst = true
+	h.serve.mu.Unlock()
+	w.call("session.interrupt", `{"session_id":"`+fakeRuntime+`"}`)
+	// Hermes's own turn follows, a wake-up after a background task: it has no
+	// prompter, and the stopped turn's subagent makes nothing busy.
+	h.serve.event(conn, "message.start", fakeRuntime, `{}`)
+	h.started(conn, fakeRuntime, "call-2", "wake", `{}`)
+	h.observed(w, conn)
+	if status := statusOf(t, h.calls("wake", `{}`)); status != "no_desktop" {
+		t.Fatalf("wake-up after a stop: %s", status)
+	}
+	// The stopped turn's call, late, is still its own.
+	if result := resultOf(t, h.calls("broadcast", `{"text":"你好"}`)); result["status"] != "cancelled" || result["reason"] != "turn-ended" {
+		t.Fatalf("the stopped turn's call: %v", result)
+	}
+}
+
+func TestAStopOutsideATurnStopsNothingLater(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
+	h.observed(w, conn)
+	w.call("session.interrupt", `{"session_id":"`+fakeRuntime+`"}`)
+	// Hermes starts a turn of its own, which no request of a window opens.
+	h.serve.event(conn, "message.start", fakeRuntime, `{}`)
+	h.observed(w, conn)
+	m := h.alice()
+	m.mu.Lock()
+	stopping := m.sessions[fakeRuntime].stopping
+	m.mu.Unlock()
+	if stopping {
+		t.Fatal("a stop with no turn under way stopped the next one")
+	}
+}
+
 func TestAnInstanceThatStopsInATurnEndsIt(t *testing.T) {
 	h := newHarness(t)
 	w, conn := companionTurn(t, h)
@@ -990,10 +1036,42 @@ func TestACallOfAStoppedTurnDoesNotTakeTheNextTurns(t *testing.T) {
 	// A call that never came is let go of.
 	m.mu.Lock()
 	m.sessions[fakeRuntime].abandon([]companionStart{{toolID: "call-x", tool: "wake", args: "{}"}}, time.Now().Add(-companionAbandoned))
-	_, _, found, _ := m.pair("wake", "{}", time.Now(), false)
+	_, _, found, _ := m.pair("wake", "{}", time.Now(), true)
 	m.mu.Unlock()
 	if found {
 		t.Fatal("an abandoned call outlived its time")
+	}
+}
+
+func TestAStoppedTurnsCallDoesNotTakeAnotherConversations(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	// The member stops a turn whose wake started, and which Hermes may never
+	// have sent: it waited behind another call for the server.
+	h.started(conn, fakeRuntime, "call-1", "wake", `{}`)
+	h.observed(w, conn)
+	h.stop(w, conn)
+	// Another conversation's turn calls wake too, its call before its
+	// tool.start: whose call it is cannot be told.
+	results := h.calls("wake", `{}`)
+	time.Sleep(companionLate / 4)
+	h.serve.event(conn, "message.start", otherRuntime, `{}`)
+	h.started(conn, otherRuntime, "call-2", "wake", `{}`)
+	if status := statusOf(t, results); status != "busy" {
+		t.Fatalf("a call before its start: %s", status)
+	}
+	h.observed(w, conn)
+	if status := statusOf(t, h.calls("wake", `{}`)); status != "busy" {
+		t.Fatalf("a call after its start: %s", status)
+	}
+	// Nothing was taken: the stopped turn's call and the other conversation's
+	// are both still there.
+	m := h.alice()
+	m.mu.Lock()
+	left := len(m.sessions[fakeRuntime].abandoned) + len(m.sessions[otherRuntime].companion)
+	m.mu.Unlock()
+	if left != 2 {
+		t.Fatalf("%d calls left, want 2", left)
 	}
 }
 

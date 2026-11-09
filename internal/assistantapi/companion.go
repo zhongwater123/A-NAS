@@ -331,26 +331,17 @@ func (h *Handler) companionCall(ctx context.Context, account, tool string, raw j
 }
 
 // waitStart pairs a call with its tool.start, waiting companionLate for one
-// that has not arrived yet. While a subagent of the member runs, a match is
-// taken only once companionLate passed: a subagent's call may reach the
-// socket before the subagent.tool that says it made one, as a call may come
-// before its tool.start.
+// that has not arrived yet, or for one that makes the pairing ambiguous (pair).
 func (m *member) waitStart(ctx context.Context, tool, args string) (start companionStart, session string, found, ambiguous bool) {
 	deadline := time.NewTimer(companionLate)
 	defer deadline.Stop()
 	late := false
 	for {
 		m.mu.Lock()
-		now := time.Now()
-		hold := !late && m.delegating(now)
-		start, session, found, ambiguous = m.pair(tool, args, now, hold)
-		if ambiguous || (found && (!hold || start.abandoned)) {
+		start, session, found, ambiguous = m.pair(tool, args, time.Now(), late)
+		if found || ambiguous || late {
 			m.mu.Unlock()
 			return start, session, found, ambiguous
-		}
-		if late {
-			m.mu.Unlock()
-			return companionStart{}, "", false, false
 		}
 		if m.started == nil {
 			m.started = make(chan struct{})
@@ -370,27 +361,46 @@ func (m *member) waitStart(ctx context.Context, tool, args string) (start compan
 // pair takes the oldest started call of tool with these arguments, when the
 // member has such calls in exactly one running turn and no subagent of any
 // conversation may be making the same call: a subagent's call has no
-// tool.start of its own and could take another conversation's. A call a
-// stopped turn left comes first: it was sent before any made since. With
-// hold, a call of a running turn is only looked at, not taken. Under m.mu.
-func (m *member) pair(tool, args string, now time.Time, hold bool) (start companionStart, session string, found, ambiguous bool) {
+// tool.start of its own and could take another conversation's.
+//
+// A call a stopped turn left comes before one of the same conversation's next
+// turn: it was sent before any made since. It is not the only call that may
+// match, though: Hermes reports a call's start before the call waits for the
+// server, and stopping the turn may end it there, never sent. So it is taken
+// only once late, after companionLate, by which time another conversation's
+// own call has had its tool.start; with one there the pairing is ambiguous.
+//
+// Before late, nothing is taken while a subagent of the member runs either: a
+// subagent's call may reach the socket before the subagent.tool that says it
+// made one, as a call may come before its tool.start. Under m.mu.
+func (m *member) pair(tool, args string, now time.Time, late bool) (start companionStart, session string, found, ambiguous bool) {
 	matches := func(c companionStart) bool { return c.tool == tool && c.args == args }
+	stopped := ""
 	for id, s := range m.sessions {
 		s.abandoned = slices.DeleteFunc(s.abandoned, func(c companionStart) bool { return now.Sub(c.at) >= companionAbandoned })
-		if i := slices.IndexFunc(s.abandoned, matches); i >= 0 {
-			start = s.abandoned[i]
-			s.abandoned = slices.Delete(s.abandoned, i, i+1)
-			return start, id, true, false
+		if stopped == "" && slices.ContainsFunc(s.abandoned, matches) {
+			stopped = id
 		}
 	}
 	for id, s := range m.sessions {
 		s.companion = slices.DeleteFunc(s.companion, func(c companionStart) bool { return now.Sub(c.at) >= companionStale })
-		if s.turn && slices.ContainsFunc(s.companion, matches) {
-			if session != "" {
-				return companionStart{}, "", false, true
-			}
-			session = id
+		if id == stopped || !s.turn || !slices.ContainsFunc(s.companion, matches) {
+			continue
 		}
+		if session != "" || stopped != "" {
+			return companionStart{}, "", false, true
+		}
+		session = id
+	}
+	if stopped != "" {
+		if !late {
+			return companionStart{}, "", false, false
+		}
+		s := m.sessions[stopped]
+		i := slices.IndexFunc(s.abandoned, matches)
+		start = s.abandoned[i]
+		s.abandoned = slices.Delete(s.abandoned, i, i+1)
+		return start, stopped, true, false
 	}
 	if session == "" {
 		return companionStart{}, "", false, false
@@ -400,12 +410,13 @@ func (m *member) pair(tool, args string, now time.Time, hold bool) (start compan
 			return companionStart{}, "", false, true
 		}
 	}
+	if !late && m.delegating(now) {
+		return companionStart{}, "", false, false
+	}
 	s := m.sessions[session]
 	i := slices.IndexFunc(s.companion, matches)
 	start = s.companion[i]
-	if !hold {
-		s.companion = slices.Delete(s.companion, i, i+1)
-	}
+	s.companion = slices.Delete(s.companion, i, i+1)
 	return start, session, true, false
 }
 

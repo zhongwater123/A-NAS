@@ -61,6 +61,9 @@ type fakeServe struct {
 	// Alice's scheduled tasks (tasks_test.go), and how long a run takes.
 	jobs    []*fakeJob
 	runTime time.Duration
+	// stopFirst makes session.interrupt end the turn before its answer, as
+	// Hermes's own turn thread may while the request still runs.
+	stopFirst bool
 }
 
 func newFakeServe(t *testing.T) *fakeServe {
@@ -317,6 +320,14 @@ func (f *fakeServe) gateway(w http.ResponseWriter, r *http.Request) {
 			f.results <- string(msg.Params)
 		case "browser.controller.detach":
 			f.reply(conn, msg.ID, `{"detached":true}`)
+		case "session.interrupt":
+			f.mu.Lock()
+			stopFirst := f.stopFirst
+			f.mu.Unlock()
+			if stopFirst {
+				f.event(conn, "message.complete", fakeRuntime, `{"text":"stopped","status":"interrupted"}`)
+			}
+			f.reply(conn, msg.ID, `{"status":"interrupted"}`)
 		case "approval.respond":
 			var params struct {
 				Choice string `json:"choice"`

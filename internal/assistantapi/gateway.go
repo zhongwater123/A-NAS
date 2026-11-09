@@ -488,8 +488,6 @@ func (u *upstream) adjustResult(call forwardedCall, raw json.RawMessage) (json.R
 	case "prompt.submit":
 		u.m.prompted(session, u, unquote(result["status"]) == "queued")
 		u.m.openTurn(session, u)
-	case "session.interrupt":
-		u.m.stopping(session)
 	case "session.events.since":
 		var events []json.RawMessage
 		_ = json.Unmarshal(result["events"], &events)
@@ -553,6 +551,11 @@ func (u *upstream) readBrowser(ctx context.Context) {
 		if f.Method == "browser.controller.register" && u.m.browserTaken(unquote(params["session_id"]), u) {
 			u.toBrowser(rpcError(f.ID, codeInvalidParams, "another window is the browser of the turn under way"))
 			continue
+		}
+		if f.Method == "session.interrupt" {
+			// Before Hermes hears of it: the stopped turn's end may come before
+			// Hermes's answer.
+			u.m.stopping(unquote(params["session_id"]))
 		}
 		u.mu.Lock()
 		u.next++
