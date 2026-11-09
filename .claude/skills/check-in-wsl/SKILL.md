@@ -13,6 +13,16 @@ description: 在 Windows 开发机上运行 A-NAS 的完整门禁（make check �
 - 在 `/mnt/<盘符>` 上运行时 vitest worker 启动超时，复制到 WSL 的 ext4 目录后正常。复制时排除 `.git`、`web/node_modules` 与 `build`。
 - 副本没有 `.git`，所以运行 `make check-steps`。它就是 `make check` 的全部检查；`make check` 之后还要用 `git rev-parse` 写部署用的 `build/.validated-build`，只在部署前需要，见[测试与验证](../../../docs/development/testing.md)和[暂存注意事项](../../../docs/runbooks/provision-v1.0.1-experimental-storage.md#开发机暂存注意事项)。
 
+## 一次只跑一个门禁
+
+同一台开发机上，各会话的门禁排队运行，用 WSL 中的锁文件 `~/anas-check/.gate.lock`：
+
+- 为什么：开发机 B 是低功耗笔记本处理器，WSL 最多约 7.7 GB 内存（[硬件](../../../docs/development/environments/windows.md#开发机-bda-nas)）。2026-11-09 三个会话的门禁同时跑时负载到 30 左右：Web 测试一轮要四十多分钟，用例因超时失败，WSL 一度无响应。排队跑，每个都更早结束。
+- 下面的脚本先把检出同步到副本，再等锁，所以排队期间检出的改动不会混进这一轮。等待时打印当前持有者，`~/anas-check/.gate.holder` 记着它的副本名与开始时间。
+- 持有锁的门禁限时 90 分钟，`pip-audit` 限时 10 分钟（它曾因 DNS 卡住 14 小时），一个卡住的门禁不会挡住后面的会话太久。进程结束，锁就释放，不用手动清理。
+- [system-test](../system-test/SKILL.md) 沿用这段脚本，也在同一把锁下排队。单独跑的 `go test -race` 整包测试同样先取锁：把命令放在脚本里取锁那两行之后。
+- 只跑一个 vitest 文件或一个 Go 包时，不用取锁。
+
 ## 步骤
 
 全程超过 10 分钟，用后台任务运行，不要在前台等。从 Claude Code 的 Bash（Windows 上是 Git Bash）在检出根目录执行。整段脚本经标准输入交给 WSL，这样不会经过 PowerShell，引号也不会丢：
@@ -26,10 +36,14 @@ dst=~/anas-check/$(basename "$src")
 mkdir -p "$dst"
 rsync -a --delete --exclude .git --exclude web/node_modules --exclude build "$src"/ "$dst"/
 cd "$dst"
+# One gate at a time on this machine; the lock goes with this process.
+exec 9>~/anas-check/.gate.lock
+if ! flock -n 9; then echo "waiting for the gate of $(cat ~/anas-check/.gate.holder 2>/dev/null)"; flock 9; fi
+echo "$(basename "$dst") since $(date +%T)" > ~/anas-check/.gate.holder
 # The vector index tests run the pinned Qdrant (docs/development/testing.md).
 bash scripts/fetch-qdrant.sh >/dev/null
 export ANAS_QDRANT_REQUIRED=1
-if make check-steps > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
+if timeout 90m make check-steps PIP_AUDIT="timeout 600 pip-audit" > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
 EOF
 ```
 

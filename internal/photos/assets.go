@@ -248,6 +248,9 @@ func (s *Service) details(ctx context.Context, p Principal, record assetRecord) 
 	if asset.People, err = s.peopleOf(ctx, record); err != nil {
 		return Asset{}, err
 	}
+	if asset.Text, err = s.textState(ctx, record); err != nil {
+		return Asset{}, err
+	}
 	return asset, nil
 }
 
