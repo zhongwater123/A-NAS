@@ -991,6 +991,9 @@ func TestASubagentsCallThatComesBeforeItsEventIsNotTheConversations(t *testing.T
 		t.Fatalf("the subagent's call: %s", status)
 	}
 	h.serve.event(conn, "tool.complete", fakeRuntime, `{"tool_id":"call-1","name":"`+companionPrefix+`wake"}`)
+	// The call completed before the member stopped the turn: had the stop
+	// come first, its start would be kept for a late call.
+	h.observed(w, conn)
 	// Stopping the turn stops its subagents, which need not report it: the
 	// next turn's calls pair at once.
 	h.stop(w, conn)
