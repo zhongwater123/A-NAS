@@ -122,10 +122,11 @@ func (s *Service) routeStoredVectors(ctx context.Context, model string) (bool, e
 	return true, nil
 }
 
-// textPhotos counts the originals in libraries that the route sends to be
-// read, queued or read, or returns nil while the route does not apply to
-// model or its queries wait for the Worker. Like AIStatus it needs no Worker.
-func (s *Service) textPhotos(ctx context.Context, model string, libraries []Library) (*int, error) {
+// textProgress counts the originals in libraries that the route sends to be
+// read: read, waiting to be read, or whose reading failed. It returns nil
+// while the route does not apply to model or its queries wait for the
+// Worker. Like AIStatus it needs no Worker.
+func (s *Service) textProgress(ctx context.Context, model string, libraries []Library) (*TextProgress, error) {
 	if model != "" && model != s.textRoute.Model {
 		return nil, nil
 	}
@@ -133,23 +134,29 @@ func (s *Service) textPhotos(ctx context.Context, model string, libraries []Libr
 	if err != nil || queries == nil {
 		return nil, err
 	}
-	count := 0
+	var progress TextProgress
 	if len(libraries) == 0 {
-		return &count, nil
+		return &progress, nil
 	}
 	args := make([]any, 0, len(libraries)+2)
 	for _, lib := range libraries {
 		args = append(args, lib.ID)
 	}
 	args = append(args, textDerivation, textDerivation)
+	// A photo with a job waits or failed, even when an older reader's
+	// reading is kept meanwhile; one with only a scan was read.
 	err = s.db.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM (SELECT DISTINCT object_id FROM assets
+SELECT IFNULL(SUM(j.state IS NULL), 0), IFNULL(SUM(j.state IS NOT NULL AND j.state <> 'failed'), 0),
+  IFNULL(SUM(j.state = 'failed'), 0)
+FROM (SELECT DISTINCT object_id FROM assets
   WHERE trashed_at IS NULL AND library_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(libraries)), ",")+`)
     AND `+inLocalAI("assets.object_id")+`) a
-WHERE EXISTS (SELECT 1 FROM jobs WHERE object_id = a.object_id AND derivation = ?)
-   OR EXISTS (SELECT 1 FROM scans WHERE object_id = a.object_id AND derivation = ?)`, args...).Scan(&count)
+LEFT JOIN jobs j ON j.object_id = a.object_id AND j.derivation = ?
+WHERE j.object_id IS NOT NULL
+   OR EXISTS (SELECT 1 FROM scans WHERE object_id = a.object_id AND derivation = ?)`, args...).Scan(
+		&progress.Read, &progress.Queued, &progress.Failed)
 	if err != nil {
 		return nil, err
 	}
-	return &count, nil
+	return &progress, nil
 }

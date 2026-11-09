@@ -5877,6 +5877,11 @@ export interface components {
                 personId?: string;
                 name?: string;
             }[];
+            /**
+             * @description Where reading the text in the photo stands, as the text's status says; only a single photo's details carry it, and only when the photo's library reads text and the photo is one whose text is read.
+             * @enum {string}
+             */
+            text?: "read" | "queued" | "failed";
         };
         PhotoTimeline: {
             items: components["schemas"]["PhotoAsset"][];
@@ -5954,6 +5959,8 @@ export interface components {
             semantic: boolean;
             /** @description How many results, counted over all pages, make up the closest group: the name and user tag matches, the photos whose text holds the query, then the photos the object detector found the query's things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count. */
             closest: number;
+            /** @description How many results, counted over all pages, match the query by name or user tag; they come first. */
+            names: number;
             /** @description How many results, counted over all pages, the text read from the photo matched, regardless of spaces, width and case, and for a query mostly of digits also of hyphens; they follow the name and user tag matches. A query of one character matches no text. An assistant matches the text with every sensitive value masked. */
             texts: number;
             /** @description Present when the query is about things the object detector finds reliably, such as 手机: the closest group is then the photos it found them in, and detected 0 means none was found. */
@@ -5995,7 +6002,7 @@ export interface components {
                 /** @description Whether the value needs no one to look at it: the reading passed every check, or a member corrected it. */
                 passed: boolean;
                 reasons?: ("not_in_text" | "format" | "mismatch" | "low_confidence" | "unfinished")[];
-                /** @description Shown masked until the viewer opens it. */
+                /** @description A member's AI assistant gets the value only as a handle. */
                 sensitive: boolean;
                 /** @description Who last corrected the field, and when. */
                 correction?: {
@@ -6065,6 +6072,13 @@ export interface components {
             clusters?: "ready" | "preparing";
             /** @description Originals whose vector sends them to have their text read (documents, receipts, cards, screenshots), queued or read. Absent while the text route does not apply to the Worker's model or its queries wait for the Worker. */
             textPhotos?: number;
+            /** @description textPhotos split by where reading their text stands; absent when textPhotos is. */
+            texts?: {
+                read: number;
+                /** @description Waiting to be read, also when an older reader's reading is kept meanwhile. */
+                queued: number;
+                failed: number;
+            };
         };
         PhotoDirectoryListing: {
             /** @description Every subdirectory on the first page; empty on later pages. */
