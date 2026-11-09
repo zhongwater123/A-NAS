@@ -318,6 +318,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 | `approval.pending`、`approval.received` | 取回待审批、卡片已显示；产品服务自己回答，按 `request_id` 找回自己生成的卡片 | `session_id`；`request_id` | `D/store/prompts.ts:283`、`:256` |
 | `approval.respond` | 浏览器不直接调用：产品服务核对成员的点击后代为调用 | `session_id`、`request_id`（必填）、`choice`：“提交更改”卡片只有 `once`、`deny`，命令卡片另有 `session`（2026-10-16 起）；不带 `all` | Desktop 只对经 `approval.pending` 取回的审批用它（`D/store/prompts.ts:363-407`） |
 | `browser.controller.register`、`browser.controller.result`（2026-10-20 起） | 窗口注册为这段对话的浏览器，回答浏览器命令 | 只接受 `vnas-window` 控制器、`webos` 浏览器名与窗口实现的能力；一条结果至多 5 MiB（2026-10-21 起，原为 64 KiB） | 见“[让 VNAS 操作 WebOS](#让-vnas-操作-webos)” |
+| `companion.result`（2026-11-09 起） | 窗口回答产品服务转来的伙伴命令；产品服务自己回答，不转给 Hermes | `session_id`、`command_id`（32 位十六进制）、`ok`，以及 `result` 或 `error`（各为至多 4 KiB 的对象）；只接受命令发往的那条连接、仍未结算的命令，每条只收一次 | A-NAS 自有，见下文“产品服务的转发” |
 
 **服务端请求与应答帧**
 
@@ -328,7 +329,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 | `clarify`（2026-10-16 起） | 问题卡片；回答只能在请求到达的那条连接上发回 |
 | `sudo`、`secret`、`vault.*`、`preview.*`、`terminal.read`、`window.read`、`theme.*`、`tour`、`setup_beat`、`display.install.sudo` | 以 `-32601` 应答：Hermes 把错误应答当作无人回答，工具立刻失败而不是等到超时（`server_requests.py:175-211`）；Desktop 对没有处理器的请求也这样（`S/json-rpc-channel.ts:407`） |
 
-**事件**：第一版列出下表中的 21 种（不含注明日期的两种）；集成时两种审批事件由卡片代替，实际转发 19 种。其余 56 种（子代理、MoA、语音与唤醒、宠物、桌面与浏览器控制、预览、连接器、计费、定时任务与项目变化、皮肤、通知、后台任务、表情反应、目标控制等）丢弃。
+**事件**：第一版列出下表中的 21 种（不含注明日期的三种）；集成时两种审批事件由卡片代替，实际转发 19 种。其余 56 种（子代理、MoA、语音与唤醒、宠物、桌面与浏览器控制、预览、连接器、计费、定时任务与项目变化、皮肤、通知、后台任务、表情反应、目标控制等）丢弃。
 
 | 事件 | 窗口用途 |
 |---|---|
@@ -342,6 +343,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 | `approval.cancelled`、`request.cancel` | 由产品服务处理（只认登记过的 id），窗口收到的是卡片的更新 |
 | `review.summary`（2026-10-16 起） | 后台复盘改了记忆或技能时的说明 |
 | `browser.controller.command`（2026-10-20 起） | 浏览器命令，只交给注册它的窗口，不转发给同一对话的其他窗口 |
+| `anas.companion`（2026-11-09 起，产品服务自己发） | 伙伴命令 `{command_id, action, args}`，只交给这段对话的浏览器、也是发出本回合提示的那个窗口，窗口以 `companion.result` 回答 |
 
 **REST**：聊天层（`D/lib/chat-messages`）解析的是 REST 的消息行（`display_content`、`display_metadata`、工具标签），所以列表、历史、改名与删除走 REST。产品服务带上实例凭据，不转发浏览器的任何头；每次请求一条经闸门的连接。
 
@@ -420,7 +422,7 @@ profile 是另一个完整的 Hermes 主目录（自己的 `config.yaml`、`.env
 
 ### 产品服务的转发
 
-[`internal/assistantapi`](../../internal/assistantapi/handler.go) 按[白名单](#白名单第一版)实现：每个窗口一条 `/api/v1/assistant/ws`，对应一条经闸门到实例 `/api/ws` 的连接。审批按账号记录会话、回合与进行中的调用（[`approvals.go`](../../internal/assistantapi/approvals.go)），卡片经 `anas.approval` 事件推给该成员的每个窗口，在任一窗口确认或拒绝都走 `POST /api/v1/assistant/approvals/{id}/confirm|reject`。同一对话的回答也转发给打开它的其他窗口（浏览器命令除外）。
+[`internal/assistantapi`](../../internal/assistantapi/handler.go) 按[白名单](#白名单第一版)实现：每个窗口一条 `/api/v1/assistant/ws`，对应一条经闸门到实例 `/api/ws` 的连接。审批按账号记录会话、回合与进行中的调用（[`approvals.go`](../../internal/assistantapi/approvals.go)），卡片经 `anas.approval` 事件推给该成员的每个窗口，在任一窗口确认或拒绝都走 `POST /api/v1/assistant/approvals/{id}/confirm|reject`。同一对话的回答也转发给打开它的其他窗口（浏览器命令除外）。伙伴工具（#412）是单独的 MCP 服务器 `companion`（[`anas_companion_mcp.py`](../../ai/assistant-spike/anas_companion_mcp.py)），托管配置设为 `trust: full`，调用不经审批；它经伙伴套接字（`anas-companion-assistant.socket`，定时任务的沙箱里没有）调产品服务，产品服务按对端 UID 认出成员，凭 `tool.start` 把调用配对到对话，以 `anas.companion` 事件转给该对话的浏览器窗口（[`companion.go`](../../internal/assistantapi/companion.go)）；配对不上、没有窗口时如实回答“没有在用的桌面”。
 
 ### 窗口
 
