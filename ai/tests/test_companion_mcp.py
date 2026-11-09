@@ -1,13 +1,16 @@
 """The companion's MCP server answers every call as a result, and passes on only what the model gave."""
 
 import importlib.util
+import inspect
 import json
 import os
+import socket
 import socketserver
 import sys
 import tempfile
 import threading
 import types
+import typing
 import unittest
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -30,6 +33,13 @@ class _Result:
         self.__dict__.update(fields)
 
 
+class _WithJsonSchema:
+    """Stands in for pydantic's WithJsonSchema, which carries the schema the same way."""
+
+    def __init__(self, json_schema):
+        self.json_schema = json_schema
+
+
 def load():
     """The server module with stand-ins for the MCP SDK, which only the assistant's runtime has."""
     server = types.ModuleType("mcp.server")
@@ -39,8 +49,10 @@ def load():
     mcp_types = types.ModuleType("mcp_types")
     mcp_types.CallToolResult = _Result
     mcp_types.TextContent = _Result
-    saved = {name: sys.modules.get(name) for name in ("mcp", "mcp.server", "mcp_types")}
-    sys.modules.update({"mcp": mcp, "mcp.server": server, "mcp_types": mcp_types})
+    pydantic = types.ModuleType("pydantic")
+    pydantic.WithJsonSchema = _WithJsonSchema
+    saved = {name: sys.modules.get(name) for name in ("mcp", "mcp.server", "mcp_types", "pydantic")}
+    sys.modules.update({"mcp": mcp, "mcp.server": server, "mcp_types": mcp_types, "pydantic": pydantic})
     try:
         spec = importlib.util.spec_from_file_location("anas_companion_mcp", SOURCE)
         module = importlib.util.module_from_spec(spec)
@@ -130,6 +142,37 @@ class CompanionToolTests(unittest.TestCase):
     def test_an_answer_without_a_status_is_no_desktop(self):
         self.serve(200, ["ok"])
         self.assertAnswered(companion.bubble_clear(), "no_desktop")
+
+    def test_a_service_that_never_answers_is_a_timeout(self):
+        listener = socket.socket(socket.AF_UNIX)
+        self.addCleanup(listener.close)
+        listener.bind(self.path)
+        listener.listen()
+        self.addCleanup(setattr, companion, "TIMEOUT", companion.TIMEOUT)
+        companion.TIMEOUT = 0.2
+        self.assertAnswered(companion.wake(), "timeout")
+
+    def test_the_sdk_checks_no_argument(self):
+        # The SDK's own validation would answer a wrong value as an error, which
+        # Hermes's circuit breaker counts; the product service answers it instead.
+        for tool in ("anim", "broadcast", "bubble_clear", "position", "throw", "sleep", "wake", "lock", "lock_release"):
+            function = getattr(companion, tool)
+            hints = typing.get_type_hints(function, include_extras=True)
+            for name in inspect.signature(function).parameters:
+                self.assertIs(typing.get_origin(hints[name]), typing.Annotated, f"{tool}.{name}")
+                kind, schema = typing.get_args(hints[name])
+                self.assertIs(kind, typing.Any, f"{tool}.{name}")
+                self.assertIn("type", schema.json_schema, f"{tool}.{name}")
+        mode = typing.get_args(typing.get_type_hints(companion.position, include_extras=True)["mode"])[1]
+        self.assertEqual(mode.json_schema, {"type": "string", "enum": ["instant", "spring", "line"]})
+
+    def test_wrong_values_reach_the_service_as_given(self):
+        self.serve(200, {"status": "rejected", "reason": "bad-request", "message": "mode：应为 instant、spring、line 之一"})
+        result = companion.position(0.5, "0.5", "teleport", duration="soon")
+        self.assertAnswered(result, "rejected")
+        self.assertEqual(self.received[0][1]["args"], {"x": 0.5, "y": "0.5", "mode": "teleport", "duration": "soon"})
+        companion.anim("wave", facing="", lock="")
+        self.assertEqual(self.received[1][1]["args"], {"name": "wave", "facing": "", "lock": ""})
 
 
 if __name__ == "__main__":

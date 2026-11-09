@@ -76,11 +76,13 @@ mcp_servers:
     # and the managed policy wins only for the keys it writes, so every key is
     # written out. lazy: false takes the tools from the live server, not from a
     # cache the agent can write. Hermes gives up on a call after timeout seconds,
-    # past the product service's own 15 s wait for the window.
+    # counted from when the call queued behind the server's other calls, and
+    # counts that as an error: one call takes the product service up to 16.5 s,
+    # so the limit leaves room for several queued in parallel.
     trust: full
     enabled: true
     lazy: false
-    timeout: 30
+    timeout: 120
     tools:
       prompts: false
       resources: false
