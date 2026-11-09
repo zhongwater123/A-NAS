@@ -19,29 +19,29 @@ never counts a desktop that is not there: its `status` says what happened
 (ok, ended, cancelled, failed, rejected, no_desktop, busy or timeout), and
 one line of text says it to the model. A scheduled task's sandbox has no
 companion socket, so its calls are answered here: no desktop is in use.
-For the same reason the SDK checks no argument: a value of the wrong type
-or outside the advertised choices reaches the product service, which
-answers rejected/bad-request, instead of failing the SDK's validation as
-an error.
+For the same reason the server is the SDK's low-level one: the high-level
+MCPServer checks a call's arguments against the function's signature and
+answers a missing one as an error before the tool runs, and parses a string
+that looks like JSON ("[1,2]", "null") into a list or nothing. Here the
+schema is only what the model is shown; the arguments reach the product
+service as the model wrote them, and it answers a wrong or missing one with
+rejected/bad-request.
 """
 import http.client
 import json
 import socket
-from typing import Annotated, Any
 
-from mcp.server import MCPServer
-from mcp_types import CallToolResult, TextContent
-from pydantic import WithJsonSchema
+import anyio
+import anyio.to_thread
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp_types import CallToolResult, ListToolsResult, TextContent, Tool
 
 COMPANION = "/run/anas-assistant-companion/companion.sock"
 # The product service waits for the window up to 15 s, and for the turn's own
 # tool.start 1.5 s before that; Hermes gives up on this server after 120 s,
 # counted from when the call queued behind the server's other calls.
 TIMEOUT = 20
-
-server = MCPServer("companion", instructions=(
-    "成员桌面上的伙伴“大肥鱼”，只在成员正与你对话的那台设备的 VNAS 窗口里动。"
-    "没有在用的桌面（例如定时任务）时什么都不会发生，结果会如实说明。"))
 
 
 class UnixHTTP(http.client.HTTPConnection):
@@ -56,6 +56,11 @@ class UnixHTTP(http.client.HTTPConnection):
 
 
 NO_DESKTOP = {"status": "no_desktop"}
+# The product service reads at most 8 KiB of a call (maxCompanionCall); only a
+# text far over its 200 characters gets there.
+TOO_LONG = {"status": "rejected", "reason": "bad-request",
+            "message": "参数太长：text 最多 200 字，name 最多 64 字，lock、lockId 最多 128 字"}
+BAD_REQUEST = {"status": "rejected", "reason": "bad-request", "message": "参数无法读取"}
 
 SAID = {
     "ok": "伙伴照做了。",
@@ -73,18 +78,29 @@ def ask(tool: str, args: dict) -> dict:
     """The product service's answer to one call, or what to say without it."""
     conn = UnixHTTP(COMPANION)
     try:
-        conn.request("POST", "/call", json.dumps({"tool": tool, "args": args}, ensure_ascii=False).encode(),
-                     {"Content-Type": "application/json"})
-        response = conn.getresponse()
-        raw = response.read()
-    except TimeoutError:
-        return {"status": "timeout"}
-    except OSError:
-        # No socket (a scheduled task's sandbox), or nobody serving it.
-        return NO_DESKTOP
+        try:
+            conn.connect()
+        except OSError:
+            # No socket (a scheduled task's sandbox), or nobody serving it:
+            # the call never reached the product service.
+            return NO_DESKTOP
+        try:
+            conn.request("POST", "/call", json.dumps({"tool": tool, "args": args}, ensure_ascii=False).encode(),
+                         {"Content-Type": "application/json"})
+            response = conn.getresponse()
+            raw = response.read()
+        except (OSError, http.client.HTTPException):
+            # A timeout, or the product service went away (a restart) once the
+            # call was on its way: the window may have acted on it.
+            return {"status": "timeout"}
     finally:
         conn.close()
+    if response.status == 413:
+        return TOO_LONG
+    if response.status == 400:
+        return BAD_REQUEST
     if response.status != 200:
+        # The product service does not take this member's calls.
         return NO_DESKTOP
     try:
         data = json.loads(raw)
@@ -111,80 +127,72 @@ def line(data: dict) -> str:
     return said
 
 
-def call(tool: str, **given) -> CallToolResult:
-    # Only what the model gave: the product service matches the call with the
-    # arguments Hermes reported when the tool started.
-    data = ask(tool, {key: value for key, value in given.items() if value is not None})
-    return CallToolResult(content=[TextContent(type="text", text=line(data))], structured_content=data, is_error=False)
-
-
-def taken(schema: dict):
-    """A parameter the SDK passes on as given, advertised to the model with schema."""
-    return Annotated[Any, WithJsonSchema(schema)]
-
-
-TEXT = taken({"type": "string"})
-NUMBER = taken({"type": "number"})
-FLAG = taken({"type": "boolean"})
-FACING = taken({"type": "string", "enum": ["left", "right"]})
-MODE = taken({"type": "string", "enum": ["instant", "spring", "line"]})
+TEXT = {"type": "string"}
+NUMBER = {"type": "number"}
+FLAG = {"type": "boolean"}
+FACING = {"type": "string", "enum": ["left", "right"]}
+MODE = {"type": "string", "enum": ["instant", "spring", "line"]}
 
 LOCK = "lock：伙伴被锁定时，锁的 lockId；没被锁就不填。"
 
-
-@server.tool(structured_output=False, description=(
-    "让伙伴播放一段动画，等它播完再返回（最多约 10 秒）。name：动画名；facing：朝向 left 或 right。" + LOCK))
-def anim(name: TEXT, facing: FACING = None, lock: TEXT = None):
-    return call("anim", name=name, facing=facing, lock=lock)
-
-
-@server.tool(structured_output=False, description=(
-    "让伙伴用气泡说一句话。text：1–200 字的纯文本，可以换行；duration：显示多少毫秒（0–60000，默认 10000）；"
-    "anim：说话时是否配动画（默认是）。" + LOCK))
-def broadcast(text: TEXT, duration: NUMBER = None, anim: FLAG = None, lock: TEXT = None):
-    return call("broadcast", text=text, duration=duration, anim=anim, lock=lock)
-
-
-@server.tool(structured_output=False, description="收起伙伴的气泡。" + LOCK)
-def bubble_clear(lock: TEXT = None):
-    return call("bubble_clear", lock=lock)
-
-
-@server.tool(structured_output=False, description=(
-    "把伙伴移到屏幕上的某处。x、y：伙伴中心的位置，0–1，左上角为 0；mode：instant 立即到、spring 弹过去、"
-    "line 直线移动；duration：line 用多少毫秒（0–5000）。结果给出实际到达的 x、y。" + LOCK))
-def position(x: NUMBER, y: NUMBER, mode: MODE, duration: NUMBER = None, lock: TEXT = None):
-    return call("position", x=x, y=y, mode=mode, duration=duration, lock=lock)
+# Each tool: what the model is told, its arguments with their schemas, and the
+# ones it must give.
+TOOLS = {
+    "anim": ("让伙伴播放一段动画，等它播完再返回（最多约 10 秒）。name：动画名；facing：朝向 left 或 right。" + LOCK,
+             {"name": TEXT, "facing": FACING, "lock": TEXT}, ["name"]),
+    "broadcast": ("让伙伴用气泡说一句话。text：1–200 字的纯文本，可以换行；duration：显示多少毫秒（0–60000，默认 10000）；"
+                  "anim：说话时是否配动画（默认是）。" + LOCK,
+                  {"text": TEXT, "duration": NUMBER, "anim": FLAG, "lock": TEXT}, ["text"]),
+    "bubble_clear": ("收起伙伴的气泡。" + LOCK, {"lock": TEXT}, []),
+    "position": ("把伙伴移到屏幕上的某处。x、y：伙伴中心的位置，0–1，左上角为 0；mode：instant 立即到、spring 弹过去、"
+                 "line 直线移动；duration：line 用多少毫秒（0–5000）。结果给出实际到达的 x、y。" + LOCK,
+                 {"x": NUMBER, "y": NUMBER, "mode": MODE, "duration": NUMBER, "lock": TEXT}, ["x", "y", "mode"]),
+    "throw": ("把伙伴抛出去。angle：角度，0 向右，逆时针为正；power：力度，大于 0、最大 3。" + LOCK,
+              {"angle": NUMBER, "power": NUMBER, "lock": TEXT}, ["angle", "power"]),
+    "sleep": ("让伙伴睡觉；它被锁定时不行。", {}, []),
+    "wake": ("叫醒伙伴。", {}, []),
+    "lock": ("锁定伙伴一段时间，期间别人的命令不会打断你；之后的命令都要带上返回的 lockId。成员拖动或点击伙伴会收回锁，"
+             "这一轮对话结束时锁也会释放。lockId：续期时带上原来的；ttl：毫秒，1000–300000，默认 120000。",
+             {"lockId": TEXT, "ttl": NUMBER}, []),
+    "lock_release": ("释放 lock 拿到的锁。lockId：锁的 id。", {"lockId": TEXT}, ["lockId"]),
+}
 
 
-@server.tool(structured_output=False, description=(
-    "把伙伴抛出去。angle：角度，0 向右，逆时针为正；power：力度，大于 0、最大 3。" + LOCK))
-def throw(angle: NUMBER, power: NUMBER, lock: TEXT = None):
-    return call("throw", angle=angle, power=power, lock=lock)
+def tools() -> list[Tool]:
+    return [Tool(name=name, description=description,
+                 input_schema={"type": "object", "properties": properties, "required": required})
+            for name, (description, properties, required) in TOOLS.items()]
 
 
-@server.tool(structured_output=False, description="让伙伴睡觉；它被锁定时不行。")
-def sleep():
-    return call("sleep")
+def call(tool: str, arguments: dict | None) -> CallToolResult:
+    # Only what the model gave of the tool's own arguments: the product service
+    # matches the call with the arguments Hermes reported when the tool started,
+    # less nulls and keys the tool does not take.
+    properties = TOOLS[tool][1] if tool in TOOLS else {}
+    given = {key: value for key, value in (arguments or {}).items() if key in properties and value is not None}
+    data = ask(tool, given)
+    return CallToolResult(content=[TextContent(type="text", text=line(data))], structured_content=data, is_error=False)
 
 
-@server.tool(structured_output=False, description="叫醒伙伴。")
-def wake():
-    return call("wake")
+async def list_tools(_context, _params) -> ListToolsResult:
+    return ListToolsResult(tools=tools())
 
 
-@server.tool(structured_output=False, description=(
-    "锁定伙伴一段时间，期间别人的命令不会打断你；之后的命令都要带上返回的 lockId。成员拖动或点击伙伴会收回锁，"
-    "这一轮对话结束时锁也会释放。lockId：续期时带上原来的；ttl：毫秒，1000–300000，默认 120000。"))
-def lock(lockId: TEXT = None, ttl: NUMBER = None):
-    return call("lock", lockId=lockId, ttl=ttl)
+async def call_tool(_context, params) -> CallToolResult:
+    # ask blocks on the socket; the server goes on answering meanwhile.
+    return await anyio.to_thread.run_sync(call, params.name, params.arguments)
 
 
-@server.tool(structured_output=False, description="释放 lock 拿到的锁。lockId：锁的 id。")
-def lock_release(lockId: TEXT):
-    return call("lock_release", lockId=lockId)
+server = Server("companion", instructions=(
+    "成员桌面上的伙伴“大肥鱼”，只在成员正与你对话的那台设备的 VNAS 窗口里动。"
+    "没有在用的桌面（例如定时任务）时什么都不会发生，结果会如实说明。"),
+    on_list_tools=list_tools, on_call_tool=call_tool)
+
+
+async def main():
+    async with stdio_server() as (read, write):
+        await server.run(read, write, server.create_initialization_options())
 
 
 if __name__ == "__main__":
-    import anyio
-    anyio.run(server.run_stdio_async)
+    anyio.run(main)
