@@ -102,6 +102,8 @@ const NOT_PLAIN = /[^\P{Cc}\n]|[\p{Bidi_Control}\u2028\u2029]/u;
 const carriedOut: { at: number; action: string }[] = [];
 /** The lock a command took, and the conversation that took it. */
 let holder: { lockId: string; sessionId: string } | null = null;
+/** The animations commands are playing, by playback, with the conversation each one is for. */
+const playingFor = new Map<string, string>();
 
 const ok = (result: Record<string, unknown>): CompanionOutcome => ({ ok: true, result });
 const refuse = (
@@ -171,6 +173,7 @@ function played(playbackId: string, signal?: AbortSignal): Promise<CompanionOutc
   return new Promise((resolve) => {
     function settle(outcome: CompanionOutcome) {
       signal?.removeEventListener("abort", abort);
+      playingFor.delete(playbackId);
       resolve(outcome);
     }
     const cancel = companionPlayback.wait({
@@ -246,6 +249,7 @@ async function carryOut(
       carry(action);
       // The receipt is waited on before the leaf is written: a hidden or frozen card reports at once.
       const record = companionPlayback.create(d.petId, d.name ?? "");
+      playingFor.set(record.playbackId, sessionId);
       const outcome = played(record.playbackId, signal);
       try {
         companionState.writePet(d.petId, "anim", {
@@ -367,6 +371,20 @@ async function carryOut(
 }
 
 /**
+ * The member stopped a conversation's turn here (workStatus.ts stopTurn). An animation one of its commands
+ * is still playing stops too: a command the product service sent just before the stop would otherwise play
+ * on for up to 10 s after it. The pet goes back to its idle animation, as dsh-pet's card goes on from one it
+ * is told to play, and the card answers the command cancelled (superseded).
+ */
+export function stopTurnCommands(sessionId: string): void {
+  if (![...playingFor.values()].includes(sessionId)) return;
+  const idle = (findPetInstance(readAllConfig(), COMPANION_PET)?.conf.animations as { idle?: unknown } | undefined)
+    ?.idle;
+  const name = Array.isArray(idle) ? [idle[0]].flat()[0] : undefined;
+  if (typeof name === "string") companionState.writePet(COMPANION_PET, "anim", { name });
+}
+
+/**
  * The window lost its connection or closed: the product service can no longer settle its turns here,
  * so the locks their commands took go now (cause released) rather than holding the pet still on this
  * screen until they run out. Only VNAS's commands take a lock on this page; the card never does.
@@ -380,4 +398,5 @@ export function releaseCommandLocks(): void {
 export function resetCompanionCommands(): void {
   carriedOut.length = 0;
   holder = null;
+  playingFor.clear();
 }

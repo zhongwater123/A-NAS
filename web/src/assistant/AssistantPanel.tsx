@@ -79,7 +79,7 @@ import {
 } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
-import { releaseCommandLocks, runCompanionCommand } from "../companion/commands";
+import { releaseCommandLocks, runCompanionCommand, stopTurnCommands } from "../companion/commands";
 import { forgetAll, reportCards, reportEvent, startTurn, stopTurn } from "../companion/workStatus";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { formatBytes } from "../lib/bytes";
@@ -413,7 +413,10 @@ export function AssistantPanel({
   const { send, cancel: stopReply, liveId } = thread;
   // A stop counts from this window's request, for the companion too (companion/workStatus.ts).
   const cancel = useCallback(() => {
-    if (liveId) stopTurn(liveId);
+    if (liveId) {
+      stopTurn(liveId);
+      stopTurnCommands(liveId);
+    }
     stopReply();
   }, [liveId, stopReply]);
 
@@ -480,6 +483,7 @@ export function AssistantPanel({
     // As Hermes Desktop does: stop and close the live session before deleting it.
     if (session.id === activeId && thread.liveId) {
       stopTurn(thread.liveId);
+      stopTurnCommands(thread.liveId);
       await gateway.client.request("session.interrupt", { session_id: thread.liveId }).catch(() => undefined);
       await gateway.client.request("session.close", { session_id: thread.liveId }).catch(() => undefined);
     }

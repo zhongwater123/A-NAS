@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadTaskNotices } from "../assistant/taskNotices";
 import { http, server } from "../test/server";
 import { Companion } from "./Companion";
-import { resetCompanionCommands, runCompanionCommand } from "./commands";
+import { resetCompanionCommands, runCompanionCommand, stopTurnCommands } from "./commands";
 import { companionLock, companionPlayback, companionSleep, resetCompanionHost } from "./host";
 import { companionReady, companionState, reportCards, reportEvent, resetWorkStatus, startTurn } from "./workStatus";
 
@@ -317,6 +317,32 @@ describe("VNAS's commands, carried out by the card", () => {
     act(() => fireEvent(front(videos), new Event("ended")));
     await waitFor(() =>
       expect(outcome).toEqual({ ok: true, result: { status: "ended", playbackId: expect.stringMatching(/^pb-/) } }),
+    );
+  });
+
+  it("stops the animation of a turn the member stops, and goes back to its idle one", async () => {
+    serve([IDLE, "点击回应-元气挥手"]);
+    const { videos } = await mount();
+    startTurn(SESSION);
+    let outcome: Awaited<ReturnType<typeof runCompanionCommand>> | undefined;
+    void runCompanionCommand(SESSION, { action: "anim", args: { name: "点击回应-元气挥手" } }).then((answer) => {
+      outcome = answer;
+    });
+    await plays("点击回应-元气挥手");
+    await ready(videos);
+    fetched = [];
+    // Another conversation's stop leaves it playing.
+    act(() => stopTurnCommands("live0002"));
+    await settle();
+    expect(fetched).toEqual([]);
+    act(() => stopTurnCommands(SESSION));
+    await plays(IDLE);
+    await ready(videos);
+    await waitFor(() =>
+      expect(outcome).toEqual({
+        ok: true,
+        result: { status: "cancelled", playbackId: expect.stringMatching(/^pb-/), reason: "superseded" },
+      }),
     );
   });
 
