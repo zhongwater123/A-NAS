@@ -55,3 +55,17 @@ func FuzzSMART(f *testing.F) {
 		_, _ = parseSMART(data)
 	})
 }
+
+func FuzzBtrfsDevices(f *testing.F) {
+	const uuid = "09e275fe-794a-458d-8200-b6e67c55cc22"
+	f.Add([]byte("Label: 'ANAS_DATA'  uuid: " + uuid + "\n\tTotal devices 2 FS bytes used 46245638144\n" +
+		"\tdevid    1 size 500106788864 used 52613349376 path /dev/sdb1\n\tdevid    2 size 500106788864 used 52613349376 path /dev/sda1\n\n"))
+	f.Add([]byte("Label: none  uuid: " + uuid + "\n\tTotal devices 1 FS bytes used 1\n\tdevid 18446744073709551615 size 1 used 1 path x\n"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		for _, device := range ParseBtrfsDevices(data, uuid) {
+			if device.DevID == 0 || device.SizeBytes == 0 || device.AllocatedBytes > device.SizeBytes {
+				t.Fatalf("ParseBtrfsDevices() accepted %+v", device)
+			}
+		}
+	})
+}

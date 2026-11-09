@@ -125,6 +125,7 @@ func TestClientReadsTheDataVolumeAcrossDisks(t *testing.T) {
 		Data:      []hoststate.ProfileUsage{{Profile: hoststate.ProfileSingle, UsedBytes: 7}, {Profile: hoststate.ProfileRAID1, UsedBytes: 3}},
 		Metadata:  []hoststate.ProfileUsage{{Profile: hoststate.ProfileRAID1, UsedBytes: 1}},
 		Operation: hoststate.VolumeOperationBalance,
+		Devices:   []hoststate.VolumeDevice{{DevID: 1, SizeBytes: 1000, AllocatedBytes: 900}, {DevID: 3, SizeBytes: 2000, AllocatedBytes: 0}},
 	}
 	client := agent.NewClient(serve(t, rootagent.NewHandler(observedState{state}, discardLogger())))
 
@@ -137,6 +138,31 @@ func TestClientReadsTheDataVolumeAcrossDisks(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Disks[1].Signatures, state.Disks[1].Signatures) {
 		t.Fatalf("signatures = %+v, want %+v", got.Disks[1].Signatures, state.Disks[1].Signatures)
+	}
+}
+
+// A device whose allocation cannot be, or that appears twice, makes the
+// whole document untrustworthy.
+func TestClientRejectsImpossibleDataVolumeDevices(t *testing.T) {
+	for name, devices := range map[string]string{
+		"more allocated than the size": `[{"devId":1,"sizeBytes":10,"allocatedBytes":11}]`,
+		"no size":                      `[{"devId":1,"sizeBytes":0,"allocatedBytes":0}]`,
+		"devid zero":                   `[{"devId":0,"sizeBytes":10,"allocatedBytes":1}]`,
+		"the same devid twice":         `[{"devId":1,"sizeBytes":10,"allocatedBytes":1},{"devId":1,"sizeBytes":10,"allocatedBytes":1}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"observedAt":"2026-10-06T00:00:00Z","system":{"id":"host:fake-01","hostname":"anas-fake",
+"operatingSystem":{"name":"Debian","version":"13"},"architecture":"amd64","uptimeSeconds":1,"health":"unknown"},
+"disks":[{"id":"disk:data","model":"HDD","transport":"sata","capacityBytes":10,"rotational":true,"removable":false,"inUse":true,
+"filesystems":["btrfs"],"role":"data","health":"healthy","smartStatus":"healthy"}],
+"dataVolume":{"filesystemUuid":"uuid","diskIds":["disk:data"],"data":[],"metadata":[],"devices":`+devices+`}}`)
+			})
+			if _, err := agent.NewClient(serve(t, handler)).Read(context.Background()); err == nil {
+				t.Fatal("Read() error = nil, want the data volume refused")
+			}
+		})
 	}
 }
 

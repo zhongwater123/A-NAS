@@ -35,13 +35,15 @@ const (
 )
 
 type dependencies struct {
-	root                  fs.FS
-	hostname              func() (string, error)
-	architecture          string
-	now                   func() time.Time
-	readBlockDevices      func(context.Context) ([]byte, error)
-	readSMART             func(context.Context, string) ([]byte, error)
-	readFilesystemUsage   func(string) (filesystemUsage, error)
+	root                fs.FS
+	hostname            func() (string, error)
+	architecture        string
+	now                 func() time.Time
+	readBlockDevices    func(context.Context) ([]byte, error)
+	readSMART           func(context.Context, string) ([]byte, error)
+	readFilesystemUsage func(string) (filesystemUsage, error)
+	// readBtrfsDevices runs `btrfs filesystem show --raw` on the mount point.
+	readBtrfsDevices      func(context.Context, string) ([]byte, error)
 	sleep                 func(context.Context, time.Duration) error
 	readTaskServices      func(context.Context) ([]byte, error)
 	readTaskBlockDevices  func(context.Context) ([]byte, error)
@@ -91,6 +93,9 @@ func New() *Reader {
 			).Output()
 		},
 		readSMART: readSMARTCommand,
+		readBtrfsDevices: func(ctx context.Context, path string) ([]byte, error) {
+			return exec.CommandContext(ctx, "btrfs", "filesystem", "show", "--raw", path).Output()
+		},
 		readFilesystemUsage: func(path string) (filesystemUsage, error) {
 			var stats syscall.Statfs_t
 			if err := syscall.Statfs(path, &stats); err != nil {
@@ -160,6 +165,13 @@ func (r *Reader) Read(ctx context.Context) (hoststate.State, error) {
 	var document blockDeviceDocument
 	if json.Unmarshal(blockDevices, &document) == nil {
 		dataVolume = readDataVolume(r.dependencies.root, dataVolumeUUID(document.BlockDevices, btrfs), disks)
+	}
+	if dataVolume != nil && r.dependencies.readBtrfsDevices != nil {
+		// Without it the volume is still observed; only how its devices are
+		// allocated is unknown.
+		if output, err := r.dependencies.readBtrfsDevices(ctx, dataMountPoint); err == nil {
+			dataVolume.Devices = volumeDevices(r.dependencies.root, dataVolume.FilesystemUUID, output)
+		}
 	}
 
 	hostID, err := derivedResourceID("host", hostIdentityDomain, machineID)
