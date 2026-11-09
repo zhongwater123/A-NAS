@@ -49,7 +49,7 @@ $animations.Count                                            # 清单中 webm �
 curl.exe -s -o NUL -w '%{http_code}\n' -r 0-1023 "$nas$($animations[0].Value.webm)"   # 206
 ```
 
-macOS 或 Linux 的终端（只用系统自带的 `curl` 与 `python3`）：
+macOS 或 Linux 的终端，需要 `curl` 与 `python3`。多数 Linux 发行版自带两者；macOS 自带 `curl`，`python3` 随 Command Line Tools 安装，未安装时首次运行只弹出安装提示，此时改用上面的 PowerShell 检查或先安装 Command Line Tools：
 
 ```bash
 nas=http://<NAS 地址>

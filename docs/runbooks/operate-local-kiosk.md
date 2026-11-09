@@ -249,7 +249,7 @@ ssh a-nas 'bash -s 60' < scripts/measure-local-console-cpu.sh
    foreach ($video in $videos) { curl.exe -s -o NUL -w '%{http_code} %{size_download}\n' -r 0-1023 "$nas$video" }   # 每行 206 1024
    ```
 
-   macOS 或 Linux 的终端中用 `curl` 代替 `curl.exe`、`-o /dev/null` 代替 `-o NUL`，清单可用 `python3 -m json.tool` 查看。
+   macOS 或 Linux 的终端中用 `curl` 代替 `curl.exe`、`-o /dev/null` 代替 `-o NUL`，清单可用 `python3 -m json.tool` 查看（macOS 的 `python3` 随 Command Line Tools 安装）。
 8. 登录后保持三分钟无输入，屏保应从池中选择一条，静音、居中铺满且无黑边；让视频自然结束，确认仍循环同一条而不切换。第一次移动鼠标或按键只退出屏保，不打开或操作下层应用；再次等待三分钟后应重新随机选择池内一条，允许与上次相同。
 9. 临时使当前选中的一个已确认池文件不可读并重启页面时，应从剩余条目中补选一条；恢复权限后再验收。不要删除源文件或整个池来制造故障。
 10. 管理员在“设置 → 个性化”把息屏设为 10 分钟后，本机屏幕保持 13 分钟无输入应变为纯黑（屏保先播放 10 分钟）；第一次移动鼠标或按键只回到桌面。退出登录后在登录页保持 13 分钟无输入同样变黑，唤醒后已输入的账号保留。验收后按需改回 30 分钟。行为见[个性化规格](../specs/personalization.md)。
