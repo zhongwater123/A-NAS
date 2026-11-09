@@ -1,7 +1,7 @@
 # 本地控制台屏幕保护程序
 
 状态：implemented
-更新时间：2026-10-29
+更新时间：2026-11-09
 
 ## 目标
 
@@ -33,6 +33,7 @@
 - When：覆盖层出现 0.3 秒后（屏保淡入结束）。
 - Then：页面的其余部分不再计算样式、布局与绘制，本机屏幕的开销只剩视频本身，黑屏时接近 0；第一次输入后桌面原样回来，窗口、滚动位置与正在播放的音乐都不受影响。
 - 停止渲染挡不住页面自己逐帧运行的脚本，所以用 `requestAnimationFrame` 持续绘制的画面要在自己不可见时暂停：登录画面的流星与字标以 `IntersectionObserver` 得知页面停止渲染（[开机动画规格](boot-ident.md)）。
+- 覆盖期间没人看得到桌面上的虚拟伙伴：VNAS 让它做动作、说话、移动或抛出的命令不执行，也不撤下覆盖层，VNAS 得到“暂停”（[虚拟伙伴](virtual-companion.md#页面在后台或屏保盖住时回答暂停)）。
 
 ### 远程浏览不启动屏保
 
@@ -72,7 +73,7 @@
 - 产品服务只读扫描 `ANAS_SCREENSAVER_DIRECTORY` 指向的绝对目录，只接纳该目录第一层的普通 `.mp4` 文件；默认值与系统安装器写入的值都是 `/var/lib/a-nas/screensavers/current`。该路径可以是指向目录的符号链接，每次请求重新读取，因此切换链接后无需重启产品服务。
 - `/local-console/screensavers` 返回不含宿主机文件名的同源视频 URL 清单；各视频 URL 支持标准字节 Range。原 `/local-console/screensaver.mp4` 保留为读取排序后首个视频的兼容路由。
 - 屏保视频是系统盘上的长期媒体，不随 release 发布（[ADR 0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)）。每个视频以 SHA-256 命名存放在 `/var/lib/a-nas/screensavers/objects/`；池是 `pools/<池 ID>/` 下匿名编号的硬链接和 `SHA256SUMS`，池 ID 是清单 SHA-256 的前 16 位十六进制；`current` 链接指向当前池。外部媒体缺失不阻止产品服务、登录或桌面启动。
-- 只有 root 执行的 `install-screensavers.sh` 会改变当前池。它逐个复核 SHA-256、核对池 ID 与清单一致，任一不符即在改动前停止，然后原子切换 `current`。指定一个已安装的池时直接切换，作为媒体回滚；旧池和对象都保留。
+- 只有 root 执行的 `install-media-pool.sh screensavers` 会改变当前池；它与[伙伴动画](../runbooks/install-companion-animations.md)共用一套暂存与安装脚本，开发机一侧是 `deploy-media-pool.ps1 -Kind screensavers`。旧名 `install-screensavers.sh`、`remote-stage-screensavers.sh` 与 `deploy-screensavers.ps1` 再保留一个版本，参数与作用不变；NAS 上的屏保命令仍写 `install-screensavers.sh`，因为 ADR 0014 以来的每个 release 都有它，当前 release 或产品回滚后的 release 不含 `install-media-pool.sh` 时同样可用（[运行手册](../runbooks/operate-local-kiosk.md#屏保视频)）。脚本逐个复核 SHA-256、核对池 ID 与清单一致，任一不符即在改动前停止，然后原子切换 `current`。指定一个已安装的池时直接切换，作为媒体回滚；旧池和对象都保留。
 - 升级和产品回滚都不改变 `current`。首次升级时还没有 `current`，系统安装器以硬链接导入旧安装器留下的最近一个池并设为当前池。旧安装器总让这个池生效，或因 [issue #49](https://github.com/zhongwater123/A-NAS/issues/49) 在不带视频的升级后什么都不播，因此迁移后无需重新上传视频。
 
 ## 验收证据
@@ -89,6 +90,6 @@
 - 架构：[架构总览](../architecture/OVERVIEW.md)
 - ADR：[本地控制台](../adr/0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)、[屏保视频是系统盘上的长期媒体](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
 - 调查：[本机屏幕播放屏保时占用约 1.4 个核](../investigations/2026-10-28-screensaver-video-cpu.md)
-- 代码：[`LocalConsoleScreenSaver.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.tsx)、[`desktop.module.css`](../../web/src/desktop/desktop.module.css)、[`run-kiosk.sh`](../../scripts/run-kiosk.sh)、[`handler.go`](../../internal/webui/handler.go)、[`install-screensavers.sh`](../../scripts/install-screensavers.sh)、[`remote-stage-screensavers.sh`](../../scripts/remote-stage-screensavers.sh)、[`deploy-screensavers.ps1`](../../scripts/deploy-screensavers.ps1)、[`install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)
+- 代码：[`LocalConsoleScreenSaver.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.tsx)、[`desktop.module.css`](../../web/src/desktop/desktop.module.css)、[`run-kiosk.sh`](../../scripts/run-kiosk.sh)、[`handler.go`](../../internal/webui/handler.go)、[`install-media-pool.sh`](../../scripts/install-media-pool.sh)、[`remote-stage-media-pool.sh`](../../scripts/remote-stage-media-pool.sh)、[`deploy-media-pool.ps1`](../../scripts/deploy-media-pool.ps1)（旧名 [`install-screensavers.sh`](../../scripts/install-screensavers.sh)、[`remote-stage-screensavers.sh`](../../scripts/remote-stage-screensavers.sh)、[`deploy-screensavers.ps1`](../../scripts/deploy-screensavers.ps1)）、[`install-v1.0.1-system-services.sh`](../../scripts/install-v1.0.1-system-services.sh)
 - 测试：[`App.test.tsx`](../../web/src/App.test.tsx)、[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)、[`handler_test.go`](../../internal/webui/handler_test.go)、[`system-test.sh`](../../scripts/system-test.sh)
 - Issue：[#49 不带屏保视频的升级会让本地控制台屏保失效](https://github.com/zhongwater123/A-NAS/issues/49)
