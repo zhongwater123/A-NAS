@@ -751,7 +751,7 @@ paths:
     post:
       operationId: continueVolumeConversion
       x-anas-posture: admin
-      description: Starts converting the data volume to its layout now, after a shutdown or an error stopped the conversion; the Host Agent otherwise continues it at startup and every 15 minutes. Administrators only.
+      description: 'Starts converting the data volume to its layout, or spreading the files of a mirror that cannot use all of its disks, now: after a shutdown or an error stopped it, or after a spread left space unusable. The Host Agent otherwise continues at startup and every 15 minutes, a stopped spread only once the disks change. 409 no_conversion when neither waits. Administrators only.'
       parameters:
         - name: volumeId
           in: path
@@ -791,7 +791,7 @@ paths:
     post:
       operationId: createStoragePlan
       x-anas-posture: admin
-      description: 'Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume, which then converts to the layout in the background. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts; 422 invalid_layout when the layout does not fit the number of disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict.'
+      description: 'Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume. A volume on one disk then converts to the layout (mirror by default) in the background; a volume on several disks keeps its layout, and a mirror whose old disks are too full to pair with the new ones spreads its files over all disks. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts or Btrfs runs a balance, such as a spread; 422 invalid_layout when the layout does not fit the number of disks, layout_change_unsupported when it differs from the layout of a volume on several disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict.'
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -9091,6 +9091,8 @@ components:
             - read_only
         conversion:
           $ref: '#/components/schemas/VolumeConversion'
+        spread:
+          $ref: '#/components/schemas/VolumeSpread'
     VolumeConversion:
       type: object
       additionalProperties: false
@@ -9114,6 +9116,26 @@ components:
           type: integer
           format: int64
           minimum: 0
+    VolumeSpread:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - unusableBytes
+      description: Present while a mirror cannot use part of its disks' space, because each block group needs room on two disks, such as after a disk joined two full ones, until the Host Agent spreads the files over all disks; and while Btrfs balances a volume on several disks, during which no disk can join it.
+      properties:
+        state:
+          type: string
+          enum:
+            - running
+            - waiting
+            - stopped
+          description: 'running: Btrfs balances the volume now. waiting: spreading stopped, for example at shutdown, and continues at the Host Agent''s next check. stopped: spreading finished with space still unusable, for lack of room on the old disks; it is tried again when the disks change or on request.'
+        unusableBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Space for files the mirror cannot use until its files are spread; 0 once all of it is usable.
     StorageAction:
       type: object
       additionalProperties: false
@@ -9123,6 +9145,7 @@ components:
       properties:
         kind:
           type: string
+          description: erase_signatures, create_partition_table, create_btrfs, mount_volume, add_devices, convert_layout, or spread (the files are spread over all disks so that a mirror can use the new ones).
         description:
           type: string
     PlannedDisk:
@@ -11871,6 +11894,13 @@ components:
                 description: Absent while the face is nobody yet.
               name:
                 type: string
+        text:
+          type: string
+          enum:
+            - read
+            - queued
+            - failed
+          description: Where reading the text in the photo stands, as the text's status says; only a single photo's details carry it, and only when the photo's library reads text and the photo is one whose text is read.
     PhotoTimeline:
       type: object
       additionalProperties: false
@@ -12062,6 +12092,7 @@ components:
         - items
         - semantic
         - closest
+        - names
         - texts
       properties:
         items:
@@ -12077,6 +12108,10 @@ components:
           type: integer
           minimum: 0
           description: 'How many results, counted over all pages, make up the closest group: the name and user tag matches, the photos whose text holds the query, then the photos the object detector found the query''s things in or, without those, the photos within a small similarity of the best match. The results after them are less related; every page carries the same count.'
+        names:
+          type: integer
+          minimum: 0
+          description: How many results, counted over all pages, match the query by name or user tag; they come first.
         texts:
           type: integer
           minimum: 0
@@ -12181,7 +12216,7 @@ components:
                     - unfinished
               sensitive:
                 type: boolean
-                description: Shown masked until the viewer opens it.
+                description: A member's AI assistant gets the value only as a handle.
               correction:
                 type: object
                 additionalProperties: false
@@ -12330,6 +12365,25 @@ components:
           type: integer
           minimum: 0
           description: Originals whose vector sends them to have their text read (documents, receipts, cards, screenshots), queued or read. Absent while the text route does not apply to the Worker's model or its queries wait for the Worker.
+        texts:
+          type: object
+          additionalProperties: false
+          required:
+            - read
+            - queued
+            - failed
+          description: textPhotos split by where reading their text stands; absent when textPhotos is.
+          properties:
+            read:
+              type: integer
+              minimum: 0
+            queued:
+              type: integer
+              minimum: 0
+              description: Waiting to be read, also when an older reader's reading is kept meanwhile.
+            failed:
+              type: integer
+              minimum: 0
     PhotoDirectoryListing:
       type: object
       additionalProperties: false

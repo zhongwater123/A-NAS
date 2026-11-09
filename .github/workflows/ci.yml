@@ -65,10 +65,19 @@ jobs:
       # make docs-check, alone or within make check, checks the documents'
       # links with this lychee release: the one the Makefile names, checked
       # against its published SHA-256.
+      # Release files come through the API with the job's token, three tries
+      # each: anonymous downloads from github.com are the first to time out
+      # when GitHub is under load (every one answered 504 on 2026-11-09).
       - name: Install lychee
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version="$(sed -n 's/^LYCHEE_VERSION = //p' Makefile)"
-          curl -fsSL -o "$RUNNER_TEMP/lychee.tar.gz" "https://github.com/lycheeverse/lychee/releases/download/lychee-v$version/lychee-x86_64-unknown-linux-gnu.tar.gz"
+          for attempt in 1 2 3; do
+            gh release download "lychee-v$version" --repo lycheeverse/lychee --pattern lychee-x86_64-unknown-linux-gnu.tar.gz --output "$RUNNER_TEMP/lychee.tar.gz" --clobber && break
+            [ "$attempt" -lt 3 ] || exit 1
+            sleep 15
+          done
           echo "1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a  $RUNNER_TEMP/lychee.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP"
           sudo install "$RUNNER_TEMP/lychee-x86_64-unknown-linux-gnu/lychee" /usr/local/bin/lychee
@@ -92,9 +101,15 @@ jobs:
       # release the Makefile names, checked against its published SHA-256.
       - name: Install ShellCheck
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version="$(sed -n 's/^SHELLCHECK_VERSION = //p' Makefile)"
-          curl -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" "https://github.com/koalaman/shellcheck/releases/download/v$version/shellcheck-v$version.linux.x86_64.tar.xz"
+          for attempt in 1 2 3; do
+            gh release download "v$version" --repo koalaman/shellcheck --pattern "shellcheck-v$version.linux.x86_64.tar.xz" --output "$RUNNER_TEMP/shellcheck.tar.xz" --clobber && break
+            [ "$attempt" -lt 3 ] || exit 1
+            sleep 15
+          done
           echo "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
           tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
           sudo install "$RUNNER_TEMP/shellcheck-v$version/shellcheck" /usr/local/bin/shellcheck

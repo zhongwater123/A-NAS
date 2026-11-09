@@ -47,8 +47,8 @@ interface Props {
   onOpenCluster: (label: PhotoLabelCount, snapshot: AIHomeSnapshot) => void;
   onOpenTag: (tag: PhotoTagCount, snapshot: AIHomeSnapshot) => void;
   onOpenPerson: (person: PhotoPerson, snapshot: AIHomeSnapshot) => void;
-  // Opens the people and pets switches of the caller's libraries.
-  onPeopleSettings: () => void;
+  // Opens the local AI switches of the caller's libraries.
+  onAISettings: () => void;
   onError: (message: string) => void;
 }
 
@@ -75,7 +75,7 @@ export function AIHome({
   onOpenCluster,
   onOpenTag,
   onOpenPerson,
-  onPeopleSettings,
+  onAISettings,
   onError,
 }: Props) {
   const back = snapshot?.viewing === viewing ? snapshot : undefined;
@@ -259,9 +259,9 @@ export function AIHome({
         )}
         <p className={styles.phHeroNote}>
           <ShieldCheck />
-          照片和人脸都在这台 NAS 上由本地 AI 识别，不会离开设备{status ? ` · ${status}` : ""}
-          <button type="button" className={styles.phHeroLink} onClick={onPeopleSettings}>
-            人物与宠物设置
+          照片、人脸和文字都在这台 NAS 上由本地 AI 识别，不会离开设备{status ? ` · ${status}` : ""}
+          <button type="button" className={styles.phHeroLink} onClick={onAISettings}>
+            本地 AI 设置
           </button>
         </p>
       </section>

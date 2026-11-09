@@ -1,6 +1,6 @@
 // Photos: the libraries with their timelines, albums and trash, local AI's
-// status and groups, people and pets, each photo's details, and the family
-// whose babies' channels photos can join. Searches, groups' photos and
+// status and groups, people and pets, each photo's details and the text read
+// from it, and the family whose babies' channels photos can join. Searches, groups' photos and
 // changes are left to the tests, which see what they ask for.
 import type {
   FamilyOverview,
@@ -11,6 +11,7 @@ import type {
   PhotoLibrary,
   PhotoPerson,
   PhotoTagCounts,
+  PhotoText,
   PhotoTimelineMonths,
 } from "../../api.generated";
 import { apiError, http } from "../server";
@@ -97,6 +98,9 @@ export interface PhotosOptions {
   albums?: Record<string, () => PhotoAlbum[]>;
   trash?: Record<string, () => PhotoAsset[]>;
   ai?: () => PhotoAiStatus;
+  // The text read from a photo, by asset ID; any other photo is not one
+  // whose text is read.
+  texts?: Record<string, () => PhotoText>;
   labels?: () => PhotoLabelCounts;
   tags?: () => PhotoTagCounts["items"];
   // Hidden people are listed only when the window asks for them too.
@@ -153,8 +157,16 @@ export function photosHandlers(options: PhotosOptions = {}) {
     ),
     http.get("/api/v1/photos/assets/{assetId}", ({ params, response }) => {
       const photo = held().find((item) => item.id === params.assetId);
-      return photo ? response(200).json(photo) : response(404).json(apiError("not_found", "asset not found"));
+      if (!photo) return response(404).json(apiError("not_found", "asset not found"));
+      // The details say whether the photo has text to show.
+      const status = options.texts?.[params.assetId]?.().status;
+      return response(200).json(
+        status === "read" || status === "queued" || status === "failed" ? { ...photo, text: status } : photo,
+      );
     }),
+    http.get("/api/v1/photos/assets/{assetId}/text", ({ params, response }) =>
+      response(200).json(options.texts?.[params.assetId]?.() ?? { status: "none", complete: false, fields: [] }),
+    ),
   ];
 }
 
