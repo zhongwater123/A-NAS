@@ -145,13 +145,19 @@ func TestRoutedPhotosAreReadTypedAndChecked(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "photos")
 	service := routeService(t, root, embedder, redRoute(t, "colour-1"))
 	private, _ := libraries(t, service, namedAlice)
-	importPhoto(t, service, namedAlice, private.ID, "", "receipt.png", red)
-	importPhoto(t, service, namedAlice, private.ID, "", "sea.png", blue)
+	receipt := importPhoto(t, service, namedAlice, private.ID, "", "receipt.png", red)
+	sea := importPhoto(t, service, namedAlice, private.ID, "", "sea.png", blue)
 	index(t, service, embedder)
 
 	found := readings(t, root)
 	if len(found) != 1 {
 		t.Fatalf("readings = %+v, want the red photo's only", found)
+	}
+	// The details say which photo has text, so that the viewer asks for it.
+	for asset, want := range map[string]string{receipt.ID: photos.TextRead, sea.ID: ""} {
+		if details, err := service.Get(context.Background(), namedAlice, asset); err != nil || details.Text != want {
+			t.Fatalf("Get(%s).Text = %q, %v; want %q", asset, details.Text, err, want)
+		}
 	}
 	reading := found[0]
 	if reading.model != "reader-1" || reading.kind != "receipt" || reading.text != receiptText || reading.finish != "stop" {
@@ -174,6 +180,9 @@ func TestRoutedPhotosAreReadTypedAndChecked(t *testing.T) {
 	}
 	if got := textPhotos(t, service, namedAlice); got == nil || *got != 1 {
 		t.Fatalf("TextPhotos = %s, want the photo read", shown(got))
+	}
+	if got := textProgress(t, service, namedAlice); got != (photos.TextProgress{Read: 1}) {
+		t.Fatalf("text progress = %+v, want the photo read", got)
 	}
 
 	// A new reader, which comes with a new release and so a restart, reads

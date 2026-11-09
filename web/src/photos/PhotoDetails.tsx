@@ -18,6 +18,7 @@ import {
   videoLines,
 } from "./model";
 import { PhotoFaces } from "./People";
+import { PhotoTextPanel } from "./PhotoText";
 import styles from "./photos.module.css";
 
 export interface DetailsActions {
@@ -60,7 +61,7 @@ interface Props {
 }
 
 // PhotoDetails is the viewer's side panel: when and what the photo or video
-// is, who is in a photo, its tags and its albums.
+// is, who is in a photo, the text in it, its tags and its albums.
 export function PhotoDetails({ asset, details, caller, actions, onChanged }: Props) {
   const [tag, setTag] = useState("");
   const [attaching, setAttaching] = useState(false);
@@ -194,6 +195,15 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
           viewing={actions.viewing}
           onChanged={onChanged}
           onOpenPerson={actions.openPerson}
+          onError={actions.error}
+        />
+      )}
+      {!video && (
+        <PhotoTextPanel
+          key={current.id}
+          asset={current}
+          caller={caller}
+          editable={writable && !current.trash}
           onError={actions.error}
         />
       )}

@@ -94,7 +94,7 @@ describe("flatEntries", () => {
   it("starts the photos after a split on new rows behind a divider", () => {
     const photos = ["a", "b", "c", "d", "e"].map((id) => photo(id, "2026-05-02T08:00:00Z"));
     const split = { at: 2, title: "相关度较低", text: "差距较大" };
-    const entries = flatEntries(photos, 2000, 180, true, "", split);
+    const entries = flatEntries(photos, 2000, 180, true, "", [split]);
     expect(entries.map((entry) => entry.kind)).toEqual(["row", "divider", "row", "more"]);
     const ids = (entry: (typeof entries)[number]) =>
       entry.kind === "row" ? entry.boxes.map((box) => box.item.id) : [];
@@ -103,9 +103,31 @@ describe("flatEntries", () => {
     // Rows after the divider float its title while they scroll by.
     expect([entries[0].label, entries[2].label]).toEqual(["", "相关度较低"]);
     // A split at or past the loaded photos waits for them.
-    expect(flatEntries(photos, 2000, 180, true, "", { ...split, at: 5 }).map((entry) => entry.kind)).toEqual([
+    expect(flatEntries(photos, 2000, 180, true, "", [{ ...split, at: 5 }]).map((entry) => entry.kind)).toEqual([
       "row",
       "more",
     ]);
+  });
+
+  it("heads a group in the middle and ends it, the last of splits at one place standing", () => {
+    const photos = ["a", "b", "c", "d", "e"].map((id) => photo(id, "2026-05-02T08:00:00Z"));
+    const texts = { at: 1, title: "照片中的文字包含“发票”", text: "机器识别", group: "text" as const };
+    const rest = { at: 3, title: "相关度较低", text: "差距较大" };
+    const entries = flatEntries(photos, 2000, 180, false, "", [rest, texts]);
+    expect(entries.map((entry) => entry.kind)).toEqual(["row", "divider", "row", "divider", "row"]);
+    expect(entries.filter((entry) => entry.kind === "divider").map((entry) => entry.title)).toEqual([
+      texts.title,
+      rest.title,
+    ]);
+    expect(entries.map((entry) => entry.label)).toEqual(["", "", texts.title, "", rest.title]);
+    // A group headed at the start has no rows before it; one that would end
+    // where the next starts gives way to it.
+    const at0 = flatEntries(photos, 2000, 180, false, "", [
+      { ...texts, at: 0 },
+      { ...rest, at: 3 },
+      { ...texts, at: 3, title: "其他" },
+    ]);
+    expect(at0.map((entry) => entry.kind)).toEqual(["divider", "row", "divider", "row"]);
+    expect(at0.filter((entry) => entry.kind === "divider").map((entry) => entry.title)).toEqual([texts.title, "其他"]);
   });
 });
