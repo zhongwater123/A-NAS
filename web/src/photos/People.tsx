@@ -2,16 +2,8 @@ import { Check, ChevronDown, ChevronUp, EyeOff, PawPrint, Pencil, UserRound, X }
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import feedbackStyles from "../ui/feedback.module.css";
-import {
-  assignFace,
-  avatarURL,
-  listPeople,
-  type PhotoAsset,
-  type PhotoAssetPerson,
-  type PhotoLibrary,
-  type PhotoPerson,
-} from "./api";
-import { type Caller, libraryName, messageOf } from "./model";
+import { assignFace, avatarURL, listPeople, type PhotoAsset, type PhotoAssetPerson, type PhotoPerson } from "./api";
+import { messageOf } from "./model";
 import styles from "./photos.module.css";
 
 // People and pets (docs/architecture/photo-people.md): local AI finds the same
@@ -135,84 +127,6 @@ function PersonCard({ person, onOpen }: { person: PhotoPerson; onOpen: (person: 
       <strong>{person.name || (person.canChange ? "添加名字" : personName(person))}</strong>
       <small>{person.photos} 张</small>
     </button>
-  );
-}
-
-// PeopleSettings turns people and pets on or off for each library the
-// caller has: the owner of a private library decides, an administrator for
-// the shared one.
-export function PeopleSettings({
-  caller,
-  onSet,
-  onClose,
-}: {
-  caller: Caller;
-  onSet: (library: PhotoLibrary, on: boolean) => void;
-  onClose: () => void;
-}) {
-  const libraries = caller.libraries.filter((library) => !library.viewing);
-  return (
-    <div
-      className={feedbackStyles.phDialogBackdrop}
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div
-        className={`${feedbackStyles.phDialog} ${styles.phPeopleSettings}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label="人物与宠物设置"
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.stopPropagation();
-            onClose();
-          }
-        }}
-      >
-        <header>
-          <h3>人物与宠物</h3>
-          <small>本地 AI 在这台 NAS 上认出反复出现的人、猫和狗，每个图库分别设置</small>
-          <button type="button" className={feedbackStyles.phDialogClose} aria-label="关闭" onClick={onClose}>
-            <X />
-          </button>
-        </header>
-        <div className={styles.phSwitchList}>
-          {libraries.map((library) => {
-            const on = library.people !== false;
-            const label = libraryName(caller, library);
-            return (
-              <div className={styles.phSwitchRow} key={library.id}>
-                <span>
-                  <strong>{label}</strong>
-                  <small>
-                    {library.canSetPeople
-                      ? on
-                        ? "已开启"
-                        : "已关闭，不识别新照片"
-                      : `${on ? "已开启" : "已关闭"} · 由管理员设置`}
-                  </small>
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={on}
-                  aria-label={`${label}的人物与宠物`}
-                  disabled={!library.canSetPeople}
-                  className={`${styles.phSwitch}${on ? ` ${styles.on}` : ""}`}
-                  onClick={() => onSet(library, !on)}
-                >
-                  <span />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-        <p className={styles.phPeopleSettingsNote}>
-          关闭会删除这个图库里识别出的人脸与宠物；起的名字和做过的更正都会保留，重新开启后随识别结果回来。
-        </p>
-      </div>
-    </div>
   );
 }
 

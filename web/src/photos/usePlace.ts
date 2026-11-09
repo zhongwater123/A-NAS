@@ -44,6 +44,9 @@ export function usePlace({
   // How many of the current search's results are the closest, as the photo
   // service says; the less related follow.
   const [closest, setClosest] = useState<number>();
+  // How many results match by name or user tag and, after them, by the text
+  // read from the photo, and what was looked for in that text.
+  const [textBand, setTextBand] = useState<{ names: number; texts: number; query: string }>();
   // The one library a search is narrowed to; empty searches them all.
   const [searchLibrary, setSearchLibrary] = useState("");
   // What the object detector found for it, when the query is about things.
@@ -86,6 +89,7 @@ export function usePlace({
       setHidden(new Set());
       setCount(undefined);
       setClosest(undefined);
+      setTextBand(undefined);
       setFound(undefined);
       setSimilarReady(undefined);
       setImageResult(next.kind === "image" && isEncoded(next.query) ? {} : undefined);
@@ -107,6 +111,8 @@ export function usePlace({
     setHidden,
     closest,
     setClosest,
+    textBand,
+    setTextBand,
     searchLibrary,
     setSearchLibrary,
     found,
