@@ -109,9 +109,18 @@ check() {
   shift
   if "$@"; then echo "PASS $name"; else echo "FAIL $name"; failures=$((failures + 1)); fi
 }
-# denied COMMAND...: succeeds when the command fails, quietly.
+# fails COMMAND...: succeeds when the command fails, for any reason, quietly.
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-denied() { ! "$@" >/dev/null 2>&1; }
+fails() { ! "$@" >/dev/null 2>&1; }
+# denied USER COMMAND... PATH: PATH exists, and USER is refused COMMAND on it for want of
+# permission, as scripts/system-test.sh's denied: a missing path or account fails (#423).
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+denied() {
+  local user=$1 out
+  shift
+  [[ -e ${!#} ]] || return 1
+  ! out=$(LC_ALL=C as "$user" "$@" 2>&1) && [[ $out == *'Permission denied'* ]]
+}
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 quiet() { "$@" >/dev/null 2>&1; }
 as() { local user=$1; shift; setpriv --reuid="$user" --regid="$user" --init-groups "$@"; }
@@ -148,12 +157,13 @@ check "thumbnail served" test "$(status_of -b /tmp/jar "$api/api/v1/photos/asset
 original_matches() { curl -s -b /tmp/jar "$api/api/v1/photos/assets/$asset/original" | cmp -s - /tmp/e2e.png; }
 check "original bytes round-trip" original_matches
 check "objects belong to a-nas-photos" test "$(find /srv/a-nas/data/photos/objects -type f -printf '%U %m\n' | sort -u)" = "31000 400"
-check "Product Service cannot list the store" denied as a-nas ls /srv/a-nas/data/photos
-check "administrator cannot read the catalog" denied as owner cat /srv/a-nas/data/photos/catalog.db
-check "photo service cannot list spaces" denied as a-nas-photos ls /srv/a-nas/data/spaces/shared
+check "Product Service cannot list the store" denied a-nas ls /srv/a-nas/data/photos
+check "administrator cannot read the catalog" denied owner cat /srv/a-nas/data/photos/catalog.db
+check "photo service cannot list spaces" denied a-nas-photos ls /srv/a-nas/data/spaces/shared
 check "forged token at the photo socket is refused" test "$(as a-nas curl -s -o /dev/null -w '%{http_code}' \
   --unix-socket /run/a-nas-photos/photos.sock -H 'X-A-NAS-Session: forged' http://photos/api/v1/photos/libraries)" = 401
-check "members outside the group cannot reach the photo socket" denied as owner curl -fs \
+# The check above shows the socket answers; curl prints no errno, so this one takes any failure.
+check "members outside the group cannot reach the photo socket" fails as owner curl -fs \
   --unix-socket /run/a-nas-photos/photos.sock http://photos/api/v1/photos/libraries
 check "photo service logged ready" grep -q "photo service ready" /tmp/photos.log
 
@@ -180,7 +190,7 @@ check "library grant is read-only" test "$(status_of -X DELETE -b /tmp/jar -H "X
 shared_library=$(sed -E 's/.*"id":"(library:[0-9a-f]+)","kind":"shared".*/\1/' /tmp/alice-libraries.json)
 check "library grant cannot copy photos out" test "$(status_of -b /tmp/jar -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' \
   -d "{\"libraryId\":\"$shared_library\"}" "$api/api/v1/photos/assets/$alice_asset/copies")" = 403
-check "library grant does not open the private space" denied as owner ls "/srv/a-nas/data/spaces/private/alice"
+check "library grant does not open the private space" denied owner ls "/srv/a-nas/data/spaces/private/alice"
 check "member is told about the viewing" grep -q admin_library_viewing <(curl -fsS -b /tmp/alice-jar "$api/api/v1/notifications")
 curl -fsS -o /dev/null -X DELETE -b /tmp/jar -H "X-CSRF-Token: $csrf" "$api/api/v1/viewing/$grant_id"
 check "ending the grant hides the library again" test "$(status_of -b /tmp/jar "$alice_timeline")" = 404
