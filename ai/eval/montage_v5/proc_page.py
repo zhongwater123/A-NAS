@@ -31,7 +31,9 @@ def prompt(case, text_of, what):
                            min_parts=cut.fewest_parts(target),
                            parts_rule=f"{cut.fewest_parts(target)}–{max(2, min(8, int(target // 10)))} 个部分"
                                       f"（至少 {cut.fewest_parts(target)} 个，不能超过 {max(2, min(8, int(target // 10)))} 个）",
-                           pictures_rule=""), lines
+                           pictures_rule="", position="", open_close=cut.OPEN_CLOSE,
+                           task=f"请按用户的要求，从这些卡片里设计一个约 {target} 秒的成片，按顺序写：",
+                           first_link="第一部分写开场怎么进入；"), lines
 
 
 def tokens(url, text):
@@ -93,7 +95,7 @@ pre{{white-space:pre-wrap;font-size:12px;background:var(--card);border:1px solid
 </style></head><body><main>
 <h1>卡片描述加“过程”：侦探片和上海</h1>
 <p class=dim>同样的关键帧，Qwen3.5-4B 按新提示词重新描述一遍：逐帧写节拍 → 挑亮点 → 写过程（短语个数不超过节拍数，每个不超过 10 字）→ 写概括。
-第一步规划的目录每行原来是“卡片 id 时间 时长 | 场景 | 概括”，改成把概括换成过程。下表是第一步整份输入（系统提示 + 用户提示）的长度，token 用 4B 自己的分词器数。报幕卡片和片头预告不进目录。<br>上海这次没有重跑，按侦探片的比例估算（每个关键帧 0.72 个短语、每个短语 8.8 字）：目录从约 3630 字的概括变成约 2200 字的过程，第一步输入从 4598 token 降到约 3800 token，少约 18%。上海的概括本来就长（旅行片允许 80 字），短卡片的过程只有两三个短语。</p>
+第一步规划的目录每行原来是“卡片 id 时间 时长 | 场景 | 概括”，改成把概括换成过程。下表是第一步整份输入（系统提示 + 用户提示）的长度，token 用 4B 自己的分词器数。报幕卡片和片头预告不进目录。</p>
 <div class=wrap><table><tr><th>视频</th><th>目录行数</th><th>原来（概括）</th><th>改成过程</th><th>多出 token</th><th>平均短语数</th><th>失败</th></tr>{''.join(rows)}</table></div>
 <p class=tabs>{''.join(tabs)}</p>{''.join(sections)}
 <script>const bs=[...document.querySelectorAll('.tabs button')];

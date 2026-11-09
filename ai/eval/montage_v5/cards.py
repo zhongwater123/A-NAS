@@ -119,8 +119,14 @@ def grab(case, video, path, t):
     out = HERE / "frames" / case / video / f"{round(t * 1000):07d}.jpg"
     if not out.exists():
         out.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", f"{t:.3f}", "-i", str(path), "-frames:v", "1",  # noqa: S607
-                        "-vf", "scale=512:-2", "-q:v", "3", str(out)], check=True)
+        # A seek within a frame of the file's end gives none (a DJI clip, 0.02 s before it): back off.
+        for at in (t, t - 0.5, t - 1.0):
+            done = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", f"{max(0.0, at):.3f}", "-i", str(path),  # noqa: S607
+                                   "-frames:v", "1", "-vf", "scale=512:-2", "-q:v", "3", "-y", str(out)], check=False)
+            if done.returncode == 0 and out.exists():
+                break
+        else:
+            raise RuntimeError(f"no frame at {t:.3f} s of {path}")
     return out
 
 

@@ -5,7 +5,7 @@
           another, no more than its beats) and a summary.
   titles  4B reads three key frames of each card; a card with a title laid over two of them over a
           plain picture, or the film's name, is a 报幕 card and is left out; a vlog's opening teaser
-          is cut by fixed seconds (OPENING) as a material problem, not something to train for.
+          is cut by fixed seconds (LEFT_OUT) as a material problem, not something to train for.
   pick    4B sees each card's process (its summary where there is none; no tags, no highlight) with
           the join rules and the category's structure, and writes 方案 B's outline: design, unmet,
           target/15 s parts or more and no more than a picture a 6 s of the target in all, each part
@@ -146,16 +146,19 @@ def clock(t):
     return f"{int(t // 60)}:{int(t % 60):02d}"
 
 
-# A vlog's opening teaser (快剪的行程预告: other days and cities) is a fact of the material: the seconds
-# before each video's real start are left out. 上海: the day starts at the airport (02-008); 冲浪:
-# episode 1 at the drive to 深圳 (04-014), episode 2 at the beach after the recap (04-124).
-OPENING = {("02", "01"): 44.0, ("04", "01"): 82.0, ("04", "02"): 84.0}
+# A vlog's opening teaser (快剪的行程预告: other days and cities) is a fact of the material: its seconds
+# are left out (start, end per video). 上海: from her self-introduction on the Bund (02-003, "I'm Ginny,
+# and I'm in Shanghai right now"; until 2026-11-09 from the airport, 02-008, so the introduction was
+# never in the catalog), less the teaser shots inside it (02-004 to 02-006: 南京东路, 苏州, 杭州; both
+# plans of 2026-11-09 took 苏州 and 杭州 into a Shanghai vlog); 冲浪: episode 1 at the drive to 深圳
+# (04-014), episode 2 at the beach after the recap (04-124).
+LEFT_OUT = {("02", "01"): [(0.0, 14.0), (26.0, 38.0)], ("04", "01"): [(0.0, 82.0)], ("04", "02"): [(0.0, 84.0)]}
 
 
 def usable_cards(case):
     marks = read_json(HERE / f"titles-{case}.json")
     return [c for c in load(case) if not marks[c["id"]]["title"]
-            and c["start"] >= OPENING.get((case, c["video"]), 0.0) - 0.01]
+            and not any(a - 0.01 <= c["start"] < b - 0.01 for a, b in LEFT_OUT.get((case, c["video"]), []))]
 
 
 # Step one is 方案 B's outline request (instruct.REQUEST_PROMPT) on our cards, the join rules first so
@@ -558,7 +561,12 @@ def filled(planned, picked, cards, cap, most):
     clips, carry, taken, seen_whats = [], 0.0, [], []
     for p, (part, step1) in enumerate(zip(planned["answer"]["parts"], picked["parts"], strict=True), 1):
         for k, (pic, sec) in enumerate(zip(part["pictures"], planned["seconds"][p - 1], strict=True), 1):
-            # What earlier pictures left over is carried, but no picture over the longest a picture runs.
+            # What earlier pictures left short is carried, but no picture over the longest a picture runs.
+            # What one runs over is not taken from the next (2026-11-09): a picture's first beat is taken
+            # whole (6 s against the 3.6 s of a Shanghai picture), and the 3 s it ran over left the next
+            # picture, the car with the navigation screen that joins two parts, 0.9 s and no beat; held
+            # to SHORTEST instead, the debt ran on and squeezed the last part. cut() levels the longest
+            # clips down to the target instead.
             owed = sec + carry
             want, mine, total = min(owed, most), [], 0.0
             # The planner's beats first; when they run out short of the picture's seconds, the other
@@ -593,7 +601,7 @@ def filled(planned, picked, cards, cap, most):
                              "key": cards[cid]["times"][int(j) - 1]})
                 taken.append((cid, start, end))
                 total += length
-            carry = owed - total
+            carry = max(0.0, owed - total)
             mine.sort(key=lambda c: (c["card"], c["start"]))
             joined = []
             for c in mine:
