@@ -58,7 +58,10 @@ type Options struct {
 	// Notices keeps the notices of scheduled tasks' runs; without it the
 	// member is not told of them.
 	Notices TaskNotices
-	Logger  *slog.Logger
+	// Accounts names the member whose assistant called on the companion
+	// socket, from the caller's UID; without it no call is taken.
+	Accounts AccountResolver
+	Logger   *slog.Logger
 	// Context ends what the API runs in the background: the instances kept
 	// for signed-in members, the watch over their scheduled tasks, and the
 	// gateway connections. Wait returns once the first two stopped. Without

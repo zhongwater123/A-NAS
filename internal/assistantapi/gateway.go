@@ -262,6 +262,7 @@ func (h *Handler) gateway(w http.ResponseWriter, r *http.Request, account string
 	u.mu.Lock()
 	u.browser = nil
 	u.mu.Unlock()
+	u.m.windowLeft(u)
 	u.detachControllers(ctx)
 	u.linger(ctx)
 	u.close()
@@ -463,6 +464,7 @@ func (u *upstream) adjustResult(call forwardedCall, raw json.RawMessage) (json.R
 		delete(result, "pending_approval")
 	case "prompt.submit":
 		u.m.openTurn(session, u)
+		u.m.prompted(session, u)
 	case "session.interrupt":
 		u.m.stopping(session)
 	case "session.events.since":
@@ -611,6 +613,8 @@ func (u *upstream) local(f frame) frame {
 			}
 		}
 		return rpcResult(f.ID, map[string]any{"approvals": pending})
+	case "companion.result":
+		return u.companionResult(f)
 	default: // approval.received: the card is A-NAS's, nothing to tell Hermes
 		return rpcResult(f.ID, map[string]bool{"acknowledged": true})
 	}

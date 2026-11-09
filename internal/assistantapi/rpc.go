@@ -194,8 +194,10 @@ var controllerCapabilities = []string{"browser_snapshot", "browser_click", "brow
 var controllerEvents = map[string]bool{"browser.controller.command": true, "browser.controller.cancel": true}
 
 // localMethods are answered by the Product Service: it already declared to
-// Hermes that it answers the server's requests, and approvals are its own.
-var localMethods = map[string]bool{"client.capabilities": true, "approval.pending": true, "approval.received": true}
+// Hermes that it answers the server's requests, approvals are its own, and so
+// are the companion's commands (companion.go).
+var localMethods = map[string]bool{"client.capabilities": true, "approval.pending": true, "approval.received": true,
+	"companion.result": true}
 
 // checkParams returns the decoded parameters, or why they are refused.
 func checkParams(name string, raw json.RawMessage) (map[string]json.RawMessage, error) {
@@ -203,6 +205,11 @@ func checkParams(name string, raw json.RawMessage) (map[string]json.RawMessage, 
 	if !ok {
 		return nil, fmt.Errorf("method %s is not available", name)
 	}
+	return rule.check(raw)
+}
+
+// check returns the decoded parameters, or why they are refused.
+func (rule method) check(raw json.RawMessage) (map[string]json.RawMessage, error) {
 	params := map[string]json.RawMessage{}
 	if len(raw) > 0 && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &params); err != nil {

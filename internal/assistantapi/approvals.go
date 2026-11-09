@@ -113,6 +113,19 @@ type liveSession struct {
 	// browser is the connection whose window registered last as the
 	// session's browser (Hermes's browser control).
 	browser *upstream
+	// prompter is the connection whose window sent the session's last
+	// prompt; the companion's commands go to its window only while it is also
+	// the browser (companion.go).
+	prompter *upstream
+	// companion are the calls of companion tools the turn started that no
+	// call on the companion socket has been paired with yet, oldest first.
+	companion []companionStart
+	// helpers are the session's subagents whose last tool was a companion
+	// tool, and when it started: their calls have no tool.start of their own.
+	helpers map[string]time.Time
+	// lockedBy is the connection a lock command of the turn went to: the
+	// end of the turn releases that lock there.
+	lockedBy *upstream
 }
 
 type startedCall struct {
@@ -129,6 +142,14 @@ type member struct {
 	sessions  map[string]*liveSession
 	cards     map[string]*card
 	upstreams map[*upstream]struct{}
+	// commands are the companion's commands sent to a window and not yet
+	// settled, by command id; sent are those sent in the last minute, for the
+	// limits (companion.go).
+	commands map[string]*companionCommand
+	sent     []sentCommand
+	// started is closed when a companion tool starts, for the calls waiting
+	// for theirs.
+	started chan struct{}
 }
 
 func (h *Handler) member(account string) *member {
@@ -136,7 +157,8 @@ func (h *Handler) member(account string) *member {
 	defer h.membersMu.Unlock()
 	m, ok := h.members[account]
 	if !ok {
-		m = &member{account: account, sessions: map[string]*liveSession{}, cards: map[string]*card{}, upstreams: map[*upstream]struct{}{}}
+		m = &member{account: account, sessions: map[string]*liveSession{}, cards: map[string]*card{}, upstreams: map[*upstream]struct{}{},
+			commands: map[string]*companionCommand{}}
 		h.members[account] = m
 	}
 	return m
@@ -226,7 +248,8 @@ func (m *member) running(session string) (bool, string) {
 }
 
 // observe follows a turn through Hermes's events: when it runs, the call of
-// 提交更改 under way, and when it ends. It returns the cards that changed.
+// 提交更改 and the companion tools' calls under way, and when it ends. It
+// returns the cards that changed.
 func (h *Handler) observe(m *member, u *upstream, ev event) {
 	var payload struct {
 		ToolID     string          `json:"tool_id"`
@@ -234,10 +257,15 @@ func (h *Handler) observe(m *member, u *upstream, ev event) {
 		Args       json.RawMessage `json:"args"`
 		ID         string          `json:"id"`
 		RequestIDs []string        `json:"request_ids"`
+		// A subagent's tool, on its parent's session.
+		SubagentID     string `json:"subagent_id"`
+		ChildSessionID string `json:"child_session_id"`
+		ToolName       string `json:"tool_name"`
 	}
 	_ = json.Unmarshal(ev.Payload, &payload)
 	var ended []*card
 	var completed *card
+	var release *companionCommand
 	m.mu.Lock()
 	s := m.sessions[ev.SessionID]
 	if s == nil && runtimeIDPattern.MatchString(ev.SessionID) {
@@ -259,7 +287,17 @@ func (h *Handler) observe(m *member, u *upstream, ev event) {
 		if s != nil && s.turn && payload.Name == submitTool && len(payload.Args) > 0 && string(payload.Args) != "null" {
 			s.submit = &startedCall{toolID: payload.ToolID, args: payload.Args}
 		}
+		if s != nil {
+			m.companionStarted(s, payload.ToolID, payload.Name, payload.Args)
+		}
+	case "subagent.tool", "subagent.complete":
+		if s != nil {
+			s.helperTool(ev.Type == "subagent.tool", payload.SubagentID+"/"+payload.ChildSessionID, payload.ToolName)
+		}
 	case "tool.complete":
+		if s != nil {
+			s.companionDone(payload.ToolID)
+		}
 		if s != nil && payload.Name == submitTool {
 			if s.submit != nil && s.submit.toolID == payload.ToolID {
 				s.submit = nil
@@ -283,6 +321,7 @@ func (h *Handler) observe(m *member, u *upstream, ev event) {
 			}
 			s.turn, s.submit, s.stopping, s.ended = false, nil, false, time.Now()
 			ended = m.endCards(func(c *card) bool { return c.SessionID == ev.SessionID }, status)
+			release = m.companionTurnEnded(ev.SessionID, s)
 		}
 	case "request.cancel":
 		ended = m.endCards(func(c *card) bool { return c.srqMatches(payload.ID) }, m.cancelStatus(ev.SessionID))
@@ -299,6 +338,9 @@ func (h *Handler) observe(m *member, u *upstream, ev event) {
 	}
 	if completed != nil {
 		go h.refresh(m, u, completed)
+	}
+	if release != nil {
+		release.send()
 	}
 }
 

@@ -339,7 +339,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeFamily()
-	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService)
+	// The assistants' companion tools call from the member's own UID; the
+	// account store says whose it is.
+	uids := accounts.NewSessionDirectory(filepath.Join(stateDirectory, "control.db"))
+	defer closeAtExit(logger, "account directory", uids)
+	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService, uids)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService, Personalization: personalizationStore,
@@ -706,10 +710,11 @@ func configuredContainers(config Config) (containers.Manager, appstore.Store, co
 // through the File Broker, the session gate (decision 10), which also
 // executes the assistant's changes; development dials the sockets directly
 // with their tokens and may name the spike's change broker. The account store
-// keeps the notices of the members' scheduled tasks. Its background work ends
-// with background.
-func assistantAPI(background context.Context, config AssistantConfig, logger *slog.Logger, broker *filebroker.Client, notices assistantapi.TaskNotices) *assistantapi.Handler {
-	options := assistantapi.Options{SocketDir: config.SocketDir, Notices: notices, Logger: logger, Context: background}
+// keeps the notices of the members' scheduled tasks, and uids names the member
+// behind a companion tool's call. Its background work ends with background.
+func assistantAPI(background context.Context, config AssistantConfig, logger *slog.Logger, broker *filebroker.Client, notices assistantapi.TaskNotices,
+	uids assistantapi.AccountResolver) *assistantapi.Handler {
+	options := assistantapi.Options{SocketDir: config.SocketDir, Notices: notices, Accounts: uids, Logger: logger, Context: background}
 	switch {
 	case config.SocketDir == "":
 	case broker != nil:
