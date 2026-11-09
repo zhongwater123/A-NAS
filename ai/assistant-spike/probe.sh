@@ -28,6 +28,8 @@ echo "INFO caps: $(grep CapEff /proc/self/status)"
 # spaces, Hermes's home, /run, the assistant's policy and config, and /opt/a-nas, as owning
 # group, ACL entry or default ACL entry.
 if [ -n "${PROBE_IDENTITY_ONLY:-}" ]; then
+  # An empty listing proves nothing, so getfacl must have printed something.
+  # shellcheck disable=SC2016 # $acls expands in the inner sh
   expect_ok "nothing in the sandbox grants a-nas-admins" sh -c \
     'acls=$(getfacl -R -p /nas /var/lib/hermes-home /run /etc/hermes /etc/a-nas-assistant /opt/a-nas 2>/dev/null)
       [ -n "$acls" ] && ! printf "%s\n" "$acls" | grep -Eq "^(# group: |(default:)?group:)a-nas-admins(:|\$)"'
