@@ -37,7 +37,7 @@ import { ImageReading, imageSearchPage } from "./imageSearch";
 import type { Split } from "./layout";
 import { type Caller, canEditAlbum, daysLeft, type Place } from "./model";
 import styles from "./photos.module.css";
-import { joinWords } from "./results";
+import { joinWords, textQuery } from "./results";
 import type { useSelection } from "./selection";
 import { Timeline } from "./Timeline";
 import type { SearchBox } from "./Toolbar";
@@ -128,7 +128,6 @@ export function PlaceView({
     setImageAttempt,
   } = view;
   const things = found ? joinWords(found.words) : "";
-  const searchQuery = place.kind === "search" ? place.query : "";
   // Search results: the name matches, the photos whose text holds the query
   // under a heading of their own, the rest of the closest group, then the
   // less related.
@@ -138,7 +137,7 @@ export function PlaceView({
         ? [
             {
               at: textBand.names,
-              title: `照片中的文字包含“${searchQuery}”`,
+              title: `照片中的文字包含“${textBand.query}”`,
               text: "文字由本地 AI 识别，可能有误",
               group: "text" as const,
             },
@@ -162,7 +161,7 @@ export function PlaceView({
             ]
           : [{ at: closest, title: "相关度较低", text: "以下照片与搜索的内容差距较大，可能并不相关" }]),
     ],
-    [textBand, found, things, closest, searchQuery],
+    [textBand, found, things, closest],
   );
   const emptyTimeline = readOnlyPlace ? (
     <Empty icon={<Images />} title="还没有照片" text="这个图库里还没有照片。" />
@@ -291,7 +290,11 @@ export function PlaceView({
           onPage={(page, first) => {
             if (first && "closest" in page) {
               setClosest((page as PhotoSearchPage).closest);
-              setTextBand({ names: (page as PhotoSearchPage).names, texts: (page as PhotoSearchPage).texts });
+              setTextBand({
+                names: (page as PhotoSearchPage).names,
+                texts: (page as PhotoSearchPage).texts,
+                query: textQuery(place.query, (page as PhotoSearchPage).people),
+              });
               setFound((page as PhotoSearchPage).objects);
               setSearchPeople((page as PhotoSearchPage).people);
             }

@@ -72,7 +72,7 @@ func TestPhotosWhoseVectorLooksLikeTextAreQueuedForReading(t *testing.T) {
 		t.Fatalf("TextPhotos before the route's queries have vectors = %d, want absent", *got)
 	}
 	// Distinct originals: photos with equal bytes are one content object.
-	importPhoto(t, service, namedAlice, alicePrivate.ID, "", "receipt.png", red)
+	receipt := importPhoto(t, service, namedAlice, alicePrivate.ID, "", "receipt.png", red)
 	importPhoto(t, service, namedAlice, alicePrivate.ID, "", "crimson.png", solidPNG(250, 5, 5))
 	importPhoto(t, service, namedAlice, alicePrivate.ID, "", "sea.png", blue)
 	importPhoto(t, service, namedBob, shared.ID, "", "shared.png", solidPNG(240, 10, 10))
@@ -93,6 +93,9 @@ func TestPhotosWhoseVectorLooksLikeTextAreQueuedForReading(t *testing.T) {
 	// This embedder reads no text: all of them wait.
 	if got := textProgress(t, service, namedAlice); got != (photos.TextProgress{Queued: 3}) {
 		t.Fatalf("Alice's text progress = %+v, want three queued", got)
+	}
+	if details, err := service.Get(context.Background(), namedAlice, receipt.ID); err != nil || details.Text != photos.TextQueued {
+		t.Fatalf("the receipt's details: Text = %q, %v; want queued", details.Text, err)
 	}
 }
 

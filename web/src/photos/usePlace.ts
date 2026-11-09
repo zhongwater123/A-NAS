@@ -45,8 +45,8 @@ export function usePlace({
   // service says; the less related follow.
   const [closest, setClosest] = useState<number>();
   // How many results match by name or user tag and, after them, by the text
-  // read from the photo.
-  const [textBand, setTextBand] = useState<{ names: number; texts: number }>();
+  // read from the photo, and what was looked for in that text.
+  const [textBand, setTextBand] = useState<{ names: number; texts: number; query: string }>();
   // The one library a search is narrowed to; empty searches them all.
   const [searchLibrary, setSearchLibrary] = useState("");
   // What the object detector found for it, when the query is about things.

@@ -279,7 +279,7 @@ function AICard({ ai }: { ai?: PhotoAIStatus }) {
         : ai.state === "paused" && ai.reason !== "foreground"
           ? "设备正忙，稍后继续读取"
           : "相册空闲 5 分钟后继续读取";
-    failed = texts.failed ? `；${texts.failed} 张没能读出` : "";
+    if (texts.failed) failed += `；${texts.failed} 张没能读出`;
   } else if (!ai.pending) {
     title = `已整理全部 ${ai.ready} 张`;
     detail = "可以用自然语言搜索照片";

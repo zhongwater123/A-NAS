@@ -442,4 +442,7 @@ SELECT object_id, '卡号', '旧类型的更正', 'user:alice', 'alice', '2026-1
 	if page := search(t, service, namedAlice, "城南便利店"); page.Texts != 0 {
 		t.Fatalf("search with reading off = %+v", page)
 	}
+	if details, err := service.Get(ctx, namedAlice, receipt.ID); err != nil || details.Text != "" {
+		t.Fatalf("the details with reading off: Text = %q, %v", details.Text, err)
+	}
 }

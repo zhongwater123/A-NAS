@@ -1,5 +1,5 @@
 import { Check, ChevronRight, Copy, Pencil, RotateCcw, ScanText, X } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { copyText } from "../lib/clipboard";
 import { formatDate } from "../lib/time";
@@ -51,6 +51,19 @@ const when = (at: string) =>
     hourCycle: "h23",
   });
 
+// undoOf says how changes[index], of a list newest first, is taken back: a
+// field that held a correction before it gets that correction again, one
+// that showed what was read loses its correction. Undefined when the field
+// already stands so.
+function undoOf(changes: PhotoTextChange[], index: number) {
+  const entry = changes[index];
+  const before = changes.slice(index + 1).find((older) => older.field === entry.field);
+  const restore = !before || before.restored;
+  const latest = changes.find((newer) => newer.field === entry.field) ?? entry;
+  const already = restore ? latest.restored : !latest.restored && latest.new === entry.old;
+  return already ? undefined : { restore };
+}
+
 interface Props {
   asset: PhotoAsset;
   caller: Caller;
@@ -66,13 +79,19 @@ export function PhotoTextPanel({ asset, caller, editable, onError }: Props) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState<string>();
-  // The changes, read when they are first shown.
+  // The changes, read when they are shown and again after a change.
   const [changes, setChanges] = useState<PhotoTextChange[]>();
   const [changesShown, setChangesShown] = useState(false);
+  // A field's form gives the focus back to the field's pencil when it closes,
+  // so that the viewer's keys keep working.
+  const pencils = useRef(new Map<string, HTMLButtonElement>());
+  const edited = useRef<string | undefined>(undefined);
 
-  // The viewer keys this panel by the photo, so another photo starts afresh.
+  // The photo's details say whether it has text to show. The viewer keys this
+  // panel by the photo, so another photo starts afresh.
+  const read = asset.text === "read";
   useEffect(() => {
-    if (asset.video) return;
+    if (!read) return;
     let live = true;
     getPhotoText(asset.id).then(
       (value) => live && setText(value),
@@ -82,7 +101,7 @@ export function PhotoTextPanel({ asset, caller, editable, onError }: Props) {
     return () => {
       live = false;
     };
-  }, [asset.id, asset.video]);
+  }, [asset.id, read]);
 
   useEffect(() => {
     if (!copied) return;
@@ -90,15 +109,29 @@ export function PhotoTextPanel({ asset, caller, editable, onError }: Props) {
     return () => window.clearTimeout(timer);
   }, [copied]);
 
-  if (!text || text.status === "none" || text.status === "off") return null;
+  // A pencil takes no focus while a change is being saved.
+  useEffect(() => {
+    if (editing !== undefined || busy || edited.current === undefined) return;
+    pencils.current.get(edited.current)?.focus();
+    edited.current = undefined;
+  }, [editing, busy]);
 
+  const status = text?.status ?? asset.text;
+  if (!status || status === "none" || status === "off") return null;
+
+  const stopEditing = () => {
+    edited.current = editing;
+    setEditing(undefined);
+  };
   const loadChanges = () => listPhotoTextChanges(asset.id).then(setChanges, (caught) => onError(messageOf(caught)));
   const change = async (action: () => Promise<PhotoText>) => {
     setBusy(true);
     try {
       setText(await action());
-      setEditing(undefined);
+      stopEditing();
+      // A closed list is read again when it opens.
       if (changesShown) await loadChanges();
+      else setChanges(undefined);
     } catch (caught) {
       onError(messageOf(caught));
     } finally {
@@ -116,7 +149,7 @@ export function PhotoTextPanel({ asset, caller, editable, onError }: Props) {
     return library.kind ? "图库" : "已删除的图库";
   };
 
-  if (text.status !== "read") {
+  if (status !== "read") {
     return (
       <section className={styles.phText} aria-label="照片中的文字">
         <h4>
@@ -124,11 +157,13 @@ export function PhotoTextPanel({ asset, caller, editable, onError }: Props) {
           照片中的文字
         </h4>
         <p className={styles.phTextNote}>
-          {text.status === "queued" ? "等待本地 AI 读取" : "本地 AI 没能读出这张照片的文字"}
+          {status === "queued" ? "等待本地 AI 读取" : "本地 AI 没能读出这张照片的文字"}
         </p>
       </section>
     );
   }
+  // Shown once read.
+  if (!text) return null;
 
   const plain = !text.fields.length;
   return (
@@ -157,14 +192,14 @@ export function PhotoTextPanel({ asset, caller, editable, onError }: Props) {
                     onKeyDown={(event) => {
                       if (event.key === "Escape") {
                         event.stopPropagation();
-                        setEditing(undefined);
+                        stopEditing();
                       }
                     }}
                   />
                   <button type="submit" aria-label="保存" title="保存" disabled={busy}>
                     {busy ? <span className={styles.phSpinner} /> : <Check />}
                   </button>
-                  <button type="button" aria-label="取消" title="取消" onClick={() => setEditing(undefined)}>
+                  <button type="button" aria-label="取消" title="取消" onClick={stopEditing}>
                     <X />
                   </button>
                 </form>
@@ -188,6 +223,10 @@ export function PhotoTextPanel({ asset, caller, editable, onError }: Props) {
                     )}
                     {editable && (
                       <button
+                        ref={(node) => {
+                          if (node) pencils.current.set(field.name, node);
+                          else pencils.current.delete(field.name);
+                        }}
                         type="button"
                         aria-label={`更正${field.name}`}
                         title="更正"
@@ -266,33 +305,46 @@ export function PhotoTextPanel({ asset, caller, editable, onError }: Props) {
             <span className={styles.phSpinner} />
           ) : changes.length ? (
             <ol className={styles.phTextChanges}>
-              {changes.map((entry, index) => (
-                <li key={`${entry.at}:${index}`}>
-                  <span>
-                    {entry.username} · {when(entry.at)} · {libraryOfChange(entry.library)}
-                  </span>
-                  <span className={styles.phTextChange}>
-                    {entry.field}：
-                    {entry.restored ? (
-                      <>恢复为识别结果 {entry.new || "（空）"}</>
-                    ) : (
-                      <>
-                        <del>{entry.old || "（空）"}</del> → {entry.new || "（空）"}
-                      </>
-                    )}
-                    {editable && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        aria-label={`把${entry.field}改回 ${entry.old || "空"}`}
-                        onClick={() => void change(() => correctPhotoText(asset.id, entry.field, entry.old))}
-                      >
-                        改回
-                      </button>
-                    )}
-                  </span>
-                </li>
-              ))}
+              {changes.map((entry, index) => {
+                const undo = editable ? undoOf(changes, index) : undefined;
+                return (
+                  <li key={`${entry.at}:${index}`}>
+                    <span>
+                      {entry.username} · {when(entry.at)} · {libraryOfChange(entry.library)}
+                    </span>
+                    <span className={styles.phTextChange}>
+                      {entry.field}：
+                      {entry.restored ? (
+                        <>恢复为识别结果 {entry.new || "（空）"}</>
+                      ) : entry.old === entry.new ? (
+                        <>确认 {entry.new || "（空）"}</>
+                      ) : (
+                        <>
+                          <del>{entry.old || "（空）"}</del> → {entry.new || "（空）"}
+                        </>
+                      )}
+                      {undo && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          aria-label={
+                            undo.restore ? `把${entry.field}改回识别结果` : `把${entry.field}改回 ${entry.old || "空"}`
+                          }
+                          onClick={() =>
+                            void change(() =>
+                              undo.restore
+                                ? restorePhotoText(asset.id, entry.field)
+                                : correctPhotoText(asset.id, entry.field, entry.old),
+                            )
+                          }
+                        >
+                          改回
+                        </button>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
             </ol>
           ) : (
             <p className={styles.phTextNote}>还没有人改过</p>

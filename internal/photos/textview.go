@@ -193,6 +193,30 @@ func (s *Service) showsSensitiveValue(ctx context.Context, objectID string) (boo
 	}), nil
 }
 
+// textState says where reading an asset's text stands, for its details, so
+// that the viewer asks for the text only of a photo that has one: TextRead,
+// TextQueued or TextFailed, or empty when the asset's library does not read
+// text or the photo is not one to read.
+func (s *Service) textState(ctx context.Context, record assetRecord) (string, error) {
+	on, err := textsOn(ctx, s.db, record.library.id)
+	if err != nil || !on {
+		return "", err
+	}
+	var read bool
+	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM texts WHERE object_id = ?)",
+		record.objectID).Scan(&read); err != nil {
+		return "", err
+	}
+	if read {
+		return TextRead, nil
+	}
+	state, err := s.textStatus(ctx, record.objectID)
+	if err != nil || state == TextNone {
+		return "", err
+	}
+	return state, nil
+}
+
 // textStatus says where a photo without a reading stands.
 func (s *Service) textStatus(ctx context.Context, objectID string) (string, error) {
 	var state string

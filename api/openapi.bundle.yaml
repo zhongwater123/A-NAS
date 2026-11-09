@@ -11871,6 +11871,13 @@ components:
                 description: Absent while the face is nobody yet.
               name:
                 type: string
+        text:
+          type: string
+          enum:
+            - read
+            - queued
+            - failed
+          description: Where reading the text in the photo stands, as the text's status says; only a single photo's details carry it, and only when the photo's library reads text and the photo is one whose text is read.
     PhotoTimeline:
       type: object
       additionalProperties: false

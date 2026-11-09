@@ -5877,6 +5877,11 @@ export interface components {
                 personId?: string;
                 name?: string;
             }[];
+            /**
+             * @description Where reading the text in the photo stands, as the text's status says; only a single photo's details carry it, and only when the photo's library reads text and the photo is one whose text is read.
+             * @enum {string}
+             */
+            text?: "read" | "queued" | "failed";
         };
         PhotoTimeline: {
             items: components["schemas"]["PhotoAsset"][];

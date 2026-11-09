@@ -157,7 +157,12 @@ export function photosHandlers(options: PhotosOptions = {}) {
     ),
     http.get("/api/v1/photos/assets/{assetId}", ({ params, response }) => {
       const photo = held().find((item) => item.id === params.assetId);
-      return photo ? response(200).json(photo) : response(404).json(apiError("not_found", "asset not found"));
+      if (!photo) return response(404).json(apiError("not_found", "asset not found"));
+      // The details say whether the photo has text to show.
+      const status = options.texts?.[params.assetId]?.().status;
+      return response(200).json(
+        status === "read" || status === "queued" || status === "failed" ? { ...photo, text: status } : photo,
+      );
     }),
     http.get("/api/v1/photos/assets/{assetId}/text", ({ params, response }) =>
       response(200).json(options.texts?.[params.assetId]?.() ?? { status: "none", complete: false, fields: [] }),
