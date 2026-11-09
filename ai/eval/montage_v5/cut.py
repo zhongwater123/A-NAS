@@ -170,19 +170,19 @@ PICK = """用户的剪辑要求：
 每行：卡片 id {where}起始时间 时长 | 场景 | {what}{what_note}
 
 {catalog}
-{structure}
+{position}{structure}
 衔接（规划时照着安排）：
-- 开场先交代地点、时代和人物，不要跳切；结尾要有收束感；
+{open_close}
 - 同一部分里的几个画面要注意场景之间的衔接，前后有一定的叙事性或画面连续性，画面变化的时候要加入衔接画面；
 - 换场景时用远景、空镜或一个动作的开始和结束来过渡；同一场景里景别可以由远到近推进，运动方向前后一致；
 - 不要用片头片尾字幕、黑场或纯文字画面。
 
-请按用户的要求，从这些卡片里设计一个约 {target} 秒的成片，按顺序写：
+{task}
 1. design：用 2–3 句话写成片的设计：开头、中间、结尾分别用哪些卡片，为什么这样安排；开场怎么交代背景（时间、地点、人物），段落之间怎么过渡；开头、中间、结尾按拍摄时间先后安排；写完对照用户的要求检查内容和先后顺序；
 2. unmet：要求里提到、但卡片里找不到的内容，都找得到就留空；找不到的内容不要拿别的卡片冒充；
 3. parts：照 design 分成 {parts_rule}{pictures_rule}，按拍摄时间先后排列，每部分里的画面也按拍摄时间先后排列：
    - name 是这一部分的标题，summary 用一句话说明这部分讲什么；
-   - link 写这一部分和上一部分怎么衔接：写清上一部分最后一个画面和这一部分第一个画面靠什么接上（同一个人、同一样东西、同一个动作或声音、到达或进入一个地方），不要只写“直接切入”；第一部分写开场怎么进入；
+   - link 写这一部分和上一部分怎么衔接：写清上一部分最后一个画面和这一部分第一个画面靠什么接上（同一个人、同一样东西、同一个动作或声音、到达或进入一个地方），不要只写“直接切入”；{first_link}
    - weight 是这一部分的分量（1–10 的整数）；
    - scenes 是这一部分要的 1–4 个画面：query 用一个短语说明要的画面（如“雨夜车窗上的雨滴”“江边远眺陆家嘴”），写看得见的主体、动作和光线，不写地名（概括里的地名可能认错），所有部分的 query 互不重复；cards 写这个画面取自哪几张卡片（1–3 张）。
 只输出 JSON。"""
@@ -250,6 +250,15 @@ CAP = 6.0
 PART_SECONDS = 15.0
 PICTURE_MOST = 8.0
 PICTURE_SECONDS = 6.0
+# A catalog of more than CHUNK_LINES cards is planned in blocks of about equal size, one after another
+# in shooting order, each given the target's seconds in proportion to its cards (2026-11-09): read as
+# one 81-line catalog, the Shanghai vlog's middle third (lunch, 城隍庙, 豫园, 7.7 of 19.6 minutes) gave
+# 3-5 of 18-24 pictures in each of three plans, and step 2 over 24 pictures listed every card's first
+# three beats. Tried at 30 (CUT_CHUNK=30): 3 blocks of 27 Shanghai cards, 30 s each; each block still
+# planned from a run of its own cards (the Bund by day and the night market were left out) and the first
+# block, with no picture cap, gave 12 pictures to its 30 s. Off by default (0: one block).
+CHUNK_LINES = int(os.environ.get("CUT_CHUNK", "0"))
+OPEN_CLOSE = "- 开场先交代地点、时代和人物，不要跳切；结尾要有收束感；"
 
 
 def fewest_parts(target):
@@ -279,6 +288,13 @@ def share(total, capacity, weights=None):
     return out
 
 
+def blocks(n, size):
+    """n catalog lines in ceil(n / size) blocks of about equal size: (first, last + 1) of each."""
+    k = max(1, math.ceil(n / size)) if size else 1
+    cuts = [round(n * b / k) for b in range(k + 1)]
+    return list(itertools.pairwise(cuts))
+
+
 def pick(case, url):
     path = HERE / f"pick-{case}{TAG}.json"
     if path.exists():
@@ -301,6 +317,57 @@ def pick(case, url):
         # No tags (标签盲测 4.0 against 2.7) and no highlight: it ranked the street and road cards that
         # set up the place and join scenes (3.1-3.2) under the story's (3.6-4.7), and they were left out.
         lines.append(f"{c['id']} {where}{clock(c['start'])} {c['end'] - c['start']:.0f}秒 | {a.get('scene', '')} | {text}")
+    spans = blocks(len(cards), CHUNK_LINES)
+    k = len(spans)
+    users, answers, costs, info, before = [], [], [], [], None
+    for b, (lo, hi) in enumerate(spans, 1):
+        seconds = target * (hi - lo) / len(cards)
+        if k == 1:
+            position, open_close = "", OPEN_CLOSE
+            task, first_link = f"请按用户的要求，从这些卡片里设计一个约 {target} 秒的成片，按顺序写：", "第一部分写开场怎么进入；"
+        else:
+            position = (f"\n素材较长，成片按拍摄时间先后分成 {k} 块分别规划，上面是第 {b} 块的卡片（全部 {len(cards)} 张里的第 "
+                        f"{lo + 1}–{hi} 张，{clock(cards[lo]['start'])}–{clock(cards[hi - 1]['end'])}）。"
+                        f"这一块在成片里约 {seconds:.0f} 秒，全片约 {target} 秒。\n")
+            if before:
+                last = before["parts"][-1]
+                position += (f"上一块的设计：{before['design']}\n上一块的最后一部分「{last['name']}」：{last['summary']}；"
+                             f"它的最后一个画面：{last['scenes'][-1]['query']}。\n")
+            if b == 1:
+                open_close = "- 这一块是成片的开头：开场先交代地点、时代和人物，不要跳切；这一块的结尾要能接到下一块，不用收束；"
+            elif b < k:
+                open_close = "- 这一块在成片中间：第一部分接上上一块的最后一个画面，不要重新开场；结尾要能接到下一块，不用收束；"
+            else:
+                open_close = "- 这一块是成片的结尾：第一部分接上上一块的最后一个画面，不要重新开场；结尾要有收束感；"
+            task = f"请按用户的要求，从这些卡片里设计成片里约 {seconds:.0f} 秒的这一块，按顺序写："
+            first_link = "第一部分写开场怎么进入；" if b == 1 else "第一部分写怎么接上上一块的最后一个画面；"
+        answer, cost, user = plan_block(url, instruction, style, cards[lo:hi], lines[lo:hi], many, what, what_note,
+                                        seconds if k > 1 else target, position, open_close, task, first_link)
+        users.append(user)
+        answers.append(answer)
+        costs.append(cost)
+        info.append({"cards": [lo + 1, hi], "seconds": round(seconds, 1), "parts": len(answer["parts"]),
+                     "design": answer["design"]})
+        before = answer
+    if k == 1:
+        merged, cost, user = answers[0], costs[0], users[0]
+    else:
+        merged = {"design": "\n".join(f"第 {n} 块：{a['design']}" for n, a in enumerate(answers, 1)),
+                  "unmet": [u for a in answers for u in a["unmet"]],
+                  "parts": [part for a in answers for part in a["parts"]], "blocks": info}
+        cost = {key: round(sum(c[key] or 0 for c in costs), 1) for key in ("seconds", "input", "output")} | {"calls": k}
+        user = "\n\n".join(f"========== 第 {n} 块 ==========\n{u}" for n, u in enumerate(users, 1))
+    # The order is the model's own (the design and the parts both told to follow shooting order); no
+    # program sorting after it (in_order is kept for comparison only).
+    out = {"system": PICK_SYSTEM, "user": user, "answer": merged, "cost": cost}
+    write_json(out, path)
+    print(case, "pick", cost, "分块", [b["cards"] for b in info], "每块段数", [b["parts"] for b in info], flush=True)
+    return out
+
+
+def plan_block(url, instruction, style, cards, lines, many, what, what_note, target, position, open_close, task,
+               first_link):
+    """Step one on one block of the catalog (all of it when it is short): (answer, cost, user)."""
     most = round(target / PER_CARD)
     max_parts = max(2, min(8, int(target // 10)))     # B's part_limits: parts of 10 s at least, 2-8
     min_parts = fewest_parts(target)
@@ -317,7 +384,8 @@ def pick(case, url):
     total = sum(c["end"] - c["start"] for c in cards) / 60
     user = PICK.format(instruction=instruction, total_min=total, n=len(cards), where="所在视频 " if many else "", what=what, what_note=what_note,
                        catalog="\n".join(lines), structure=structure_of(style), target=target, most=most,
-                       parts_rule=parts_rule, pictures_rule=pictures_rule)
+                       parts_rule=parts_rule, pictures_rule=pictures_rule, position=position, open_close=open_close,
+                       task=task, first_link=first_link)
     ids = [c["id"] for c in cards]
     schema = {"type": "object", "required": ["design", "unmet", "parts"], "properties": {
         "design": {"type": "string"},
@@ -332,12 +400,7 @@ def pick(case, url):
                         "cards": {"type": "array", "minItems": 1, "maxItems": 3,
                                   "items": {"type": "string", "enum": ids}}}}}}}}}}
     answer, cost = chat(url, PICK_SYSTEM, user, schema, "outline")
-    # The order is the model's own (the design and the parts both told to follow shooting order); no
-    # program sorting after it (in_order is kept for comparison only).
-    out = {"system": PICK_SYSTEM, "user": user, "answer": answer, "cost": cost}
-    write_json(out, path)
-    print(case, "pick", cost, flush=True)
-    return out
+    return answer, cost, user
 
 
 def reversed_put(items, span):
@@ -404,7 +467,8 @@ def highlights(case, url, card_ids, style):
 
 def shots(case, url):
     """Step two: for each picture of the outline, its beats in the planner's order of preference; the
-    program then takes them to fill the picture's seconds."""
+    program then takes them to fill the picture's seconds. A plan made in blocks is ranked block by
+    block, each call with that block's parts and seconds only."""
     path = HERE / f"shots-{case}{TAG}.json"
     if path.exists():
         return read_json(path)
@@ -412,12 +476,45 @@ def shots(case, url):
     cap = CAPS.get(style, CAP)
     picked = pick(case, url)["answer"]
     cards = {c["id"]: c for c in usable_cards(case)}
-    seconds = budget(picked, cards, target, cap)
     marks = highlights(case, url, list(dict.fromkeys(c for p in picked["parts"] for sc in p["scenes"]
                                                      for c in sc["cards"] if c in cards)), style)
+    groups, at = [], 0
+    for b in picked.get("blocks", []):
+        groups.append((picked["parts"][at:at + b["parts"]], b["design"], b["seconds"]))
+        at += b["parts"]
+    if not groups:
+        groups = [(picked["parts"], picked["design"], target)]
+    seconds, raws, costs, users, system = [], [], [], [], ""
+    for n, (parts, design, sec) in enumerate(groups, 1):
+        extra = f"这是全片 {len(groups)} 块中的第 {n} 块，这一块约 {sec:.0f} 秒。\n" if len(groups) > 1 else ""
+        secs, raw, cost, system, user = rank_block(url, instruction, target, style, cap, parts, design, cards, marks,
+                                                   sec, extra)
+        seconds += secs
+        raws.append(raw)
+        costs.append(cost)
+        users.append(user)
+    if len(groups) == 1:
+        raw, cost, user = raws[0], costs[0], users[0]
+    else:
+        raw = {"parts": [r for x in raws for r in x["parts"]], "unmet": [u for x in raws for u in x.get("unmet", [])]}
+        cost = {key: round(sum(c[key] or 0 for c in costs), 1) for key in ("seconds", "input", "output")} | {"calls": len(groups)}
+        user = "\n\n".join(f"========== 第 {n} 块 ==========\n{u}" for n, u in enumerate(users, 1))
+    out = {"system": system, "user": user, "raw": raw, "seconds": seconds, "cap": cap, "cost": cost,
+           "answer": {"parts": [{"name": p["name"], "summary": p["summary"], "pictures": r["pictures"]}
+                                for p, r in zip(picked["parts"], raw["parts"], strict=True)],
+                      "unmet": raw.get("unmet", [])}}
+    write_json(out, path)
+    print(case, "shots", cost, "画面秒数", [[round(x, 1) for x in secs] for secs in seconds],
+          "每个画面列的节拍数", [[len(pic["beats"]) for pic in r["pictures"]] for r in raw["parts"]], flush=True)
+    return out
+
+
+def rank_block(url, instruction, target, style, cap, parts, design, cards, marks, seconds_of, extra):
+    """Step two on some parts (all of them for a plan in one block): (seconds, raw, cost, system, user)."""
+    seconds = budget({"parts": parts}, cards, seconds_of, cap)
     rules = f"\n剪法：{STYLES[style]}" if STYLES.get(style) else ""
     lines, part_items = [], []
-    for n, (p, secs) in enumerate(zip(picked["parts"], seconds, strict=True), 1):
+    for n, (p, secs) in enumerate(zip(parts, seconds, strict=True), 1):
         lines.append(f"段落{n}「{p['name']}」：{p['summary']}")
         lines.append(f"  衔接：{p['link']}")
         items = []
@@ -443,21 +540,14 @@ def shots(case, url):
                 "shows": {"type": "string"}, "link": {"type": "string"}}})
         part_items.append({"type": "object", "required": ["pictures"], "properties": {
             "pictures": {"type": "array", "minItems": len(items), "maxItems": len(items), "prefixItems": items}}})
-    user = (f"指令：{instruction}\n成片时长：约 {target} 秒\n体裁：{style}{rules}\n大纲：{picked['design']}\n"
+    user = (f"指令：{instruction}\n成片时长：约 {target} 秒\n体裁：{style}{rules}\n大纲：{design}\n{extra}"
             "段落和画面：\n" + "\n".join(lines))
     schema = {"type": "object", "required": ["parts", "unmet"], "properties": {
         "parts": {"type": "array", "minItems": len(part_items), "maxItems": len(part_items), "prefixItems": part_items},
         "unmet": {"type": "array", "items": {"type": "string"}}}}
     system = SHOTS.format(target=target, shortest=SHORTEST, cap=cap)
     raw, cost = chat(url, system, user, schema, "shots", max_tokens=4000)
-    out = {"system": system, "user": user, "raw": raw, "seconds": seconds, "cap": cap, "cost": cost,
-           "answer": {"parts": [{"name": p["name"], "summary": p["summary"], "pictures": r["pictures"]}
-                                for p, r in zip(picked["parts"], raw["parts"], strict=True)],
-                      "unmet": raw.get("unmet", [])}}
-    write_json(out, path)
-    print(case, "shots", cost, "画面秒数", [[round(x, 1) for x in secs] for secs in seconds],
-          "每个画面列的节拍数", [[len(pic["beats"]) for pic in r["pictures"]] for r in raw["parts"]], flush=True)
-    return out
+    return seconds, raw, cost, system, user
 
 
 def filled(planned, picked, cards, cap, most):
