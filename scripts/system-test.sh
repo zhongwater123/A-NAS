@@ -2042,6 +2042,43 @@ check "the refused animations change nothing" \
   test "$(current_animations)" = "pools/$animations_a" -a ! -e "$companion/pools/$pool"
 check "the refused animations leave the local console running as it was" test "$(kiosk_run)" = "$run"
 check "the stand-in local console goes away again" kiosk_stand_in stop
+# A manifest whose last line has no newline: read would skip that line, which the
+# pool ID still counts.
+stage_animations 待机.webm 东张西望.webm
+unterminated=$(head -c -1 "$companion_staged/pools/$pool.sums" | sha256sum | cut -c 1-16)
+head -c -1 "$companion_staged/pools/$pool.sums" > "$companion_staged/pools/.incoming.sums"
+check "staging refuses a manifest without its last newline" \
+  denied env "HOME=$stager" bash /src/scripts/remote-stage-media-pool.sh companion commit
+head -c -1 "$companion_staged/pools/$pool.sums" > "$companion_staged/pools/$unterminated.sums"
+check "installing refuses a manifest without its last newline" denied "$installer" companion "$unterminated" "$companion_staged"
+check "the unterminated manifest installs nothing" test ! -e "$companion/pools/$unterminated"
+# The staging account can swap what it staged for a FIFO or a link between the
+# installer's checks and its copy: root reads regular files only, never waits
+# for a writer, and reads no more than a pool may hold.
+# refused_at_once COMMAND...: COMMAND fails, and well within 20 seconds.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+refused_at_once() {
+  local status=0
+  timeout 20 "$@" >>"$hidden" 2>&1 || status=$?
+  [[ $status -ne 0 && $status -ne 124 ]]
+}
+stage_animations 待机.webm
+staged_object=$companion_staged/objects/$(head -c 64 "$companion_staged/pools/$pool.sums")
+rm -f "$staged_object"
+mkfifo "$staged_object"
+check "an animation staged as a FIFO is refused at once" refused_at_once "$installer" companion "$pool" "$companion_staged"
+rm -f "$staged_object"
+ln -s /dev/zero "$staged_object"
+check "an animation staged as a link to a device is refused at once" refused_at_once "$installer" companion "$pool" "$companion_staged"
+ln -sfn /dev/zero "$companion_staged/pools/0123456789abcdef.sums"
+check "a manifest staged as a link is refused at once" refused_at_once "$installer" companion 0123456789abcdef "$companion_staged"
+rm -f "$companion_staged/pools/0123456789abcdef.sums"
+mkfifo "$companion_staged/pools/0123456789abcdef.sums"
+check "a manifest staged as a FIFO is refused at once" refused_at_once "$installer" companion 0123456789abcdef "$companion_staged"
+rm -f "$companion_staged/pools/0123456789abcdef.sums"
+head -c $(((1 << 20) + 1)) /dev/zero > "$companion_staged/pools/0123456789abcdef.sums"
+check "a manifest larger than a pool's is refused" refused_at_once "$installer" companion 0123456789abcdef "$companion_staged"
+check "the refused stagings change nothing" test "$(current_animations)" = "pools/$animations_a" -a ! -e "$companion/pools/$pool"
 # --- Internet entry (ADR 0032): /etc/a-nas/internet.env turns it on. Caddy
 # serves the domain over HTTPS on the NAS's tunnel address, taking the client's
 # address from the PROXY header that only the edge relay may send. There is no

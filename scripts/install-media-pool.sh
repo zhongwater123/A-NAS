@@ -27,18 +27,30 @@ usage() {
 kind=$1
 shift
 # What sets the kinds apart: where the pool lives, how its objects and names
-# look, and how many files it may list.
+# look, how many files it may list, and how large one may be.
 case $kind in
-  screensavers) label='screen saver' item=video items=videos suffix=.mp4 limit=32 ;;
-  companion) label='companion animation' item=animation items=animations suffix='' limit=512 ;;
+  screensavers) label='screen saver' item=video items=videos suffix=.mp4 limit=32 largest=$((4 << 30)) ;;
+  companion) label='companion animation' item=animation items=animations suffix='' limit=512 largest=$((256 << 20)) ;;
   *) usage ;;
 esac
+# A manifest lists at most 512 lines of a hash and a file name.
+largest_manifest=$((1 << 20))
 # named INDEX NAME: whether the manifest may name its line INDEX (from 0) NAME.
 named() {
   case $kind in
     screensavers) [[ $2 == "$(printf 'screensaver-%03d.mp4' "$1")" ]] ;;
     companion) [[ $2 =~ ^[^./][^/]*\.(webm|mov)$ && $2 != *[[:cntrl:]\\]* ]] ;;
   esac
+}
+
+# take SOURCE TARGET LIMIT: copies a file from the staging area, which the
+# staging account can still change under us: a regular file only, never
+# through a symbolic link at its end, never waiting for a writer as a FIFO
+# would, and refused over LIMIT bytes, of which it reads at most one more.
+take() {
+  [[ -f $1 && ! -L $1 ]] || return 1
+  dd if="$1" of="$2" iflag=nofollow,nonblock,count_bytes count=$(($3 + 1)) bs=64K status=none 2>/dev/null || return 1
+  [[ -f $2 && $(stat -c %s -- "$2") -le $3 ]]
 }
 
 store=/var/lib/a-nas/$kind
@@ -69,10 +81,13 @@ else
   staging=${2:-/home/anas-dev/apps/a-nas/$kind}
   [[ $pool =~ ^[0-9a-f]{16}$ ]] || usage
   if [[ ! -d $store/pools/$pool ]]; then
-    [[ -f $staging/pools/$pool.sums ]] || { echo "pool $pool is neither installed nor staged in $staging" >&2; exit 2; }
+    [[ -e $staging/pools/$pool.sums ]] || { echo "pool $pool is neither installed nor staged in $staging" >&2; exit 2; }
     # Check a private copy: the staging account can change its own files.
-    cp -- "$staging/pools/$pool.sums" "$manifest"
+    take "$staging/pools/$pool.sums" "$manifest" "$largest_manifest" ||
+      { echo "the staged manifest of pool $pool is not a regular file of at most $largest_manifest bytes" >&2; exit 2; }
     [[ $(sha256sum < "$manifest" | cut -c 1-16) == "$pool" ]] || { echo "the staged manifest is not pool $pool" >&2; exit 2; }
+    # read skips a last line without a newline, which the pool ID still counts.
+    [[ -z $(tail -c 1 -- "$manifest") ]] || { echo "the manifest of pool $pool does not end with a newline" >&2; exit 2; }
   fi
   link=false
 fi
@@ -104,8 +119,8 @@ if [[ ! -d $store/pools/$pool ]]; then
     if [[ $link == true ]]; then
       ln -- "${sources[$hash]}" "$temporary/$object"
     else
-      [[ -f ${sources[$hash]} ]] || { echo "$item is not staged: ${sources[$hash]}" >&2; exit 2; }
-      cp -- "${sources[$hash]}" "$temporary/$object"
+      take "${sources[$hash]}" "$temporary/$object" "$largest" ||
+        { echo "$item is not staged as a regular file of at most $largest bytes: ${sources[$hash]}" >&2; exit 2; }
     fi
     chown root:a-nas "$temporary/$object"
     chmod 0640 "$temporary/$object"
