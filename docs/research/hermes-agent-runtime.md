@@ -1,6 +1,6 @@
 # Hermes Agent 作为 AI 助手运行时的可行性
 
-更新时间：2026-10-27
+更新时间：2026-11-09
 
 本页保存选择 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 作为 AI 助手运行时所依据的外部事实、设备事实与待验证项。决定见 [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)，行为见 [AI 助手规格](../specs/ai-assistant.md)。
 
@@ -109,7 +109,7 @@ managed scope（`/etc/hermes`，root 所有，沙箱中只读）优先于成员�
 |---|---|---|
 | 模型 | 模型地址指向网关；`agent.image_input_mode: text` | 工具结果里的图片不直接进对话，只经 `vision_analyze` |
 | 工具 | `platform_toolsets.cli`、`platform_toolsets.cron`（去掉 `clarify` 与 `cronjob`）、`agent.disabled_toolsets`、`agent.coding_context: "off"`、`tools.tool_search.enabled: "off"`、`browser.extension_control.enabled` | `tool_search` 关闭后 MCP 工具直接出现在列表中，也关闭 MCP 的 prompts/resources 包装 |
-| MCP | `mcp_servers.anas`（`trust: untrusted`，只读工具标 `readOnlyHint`）；`mcp_discovery_timeout` 20 秒 | |
+| MCP | `mcp_servers.anas`（`trust: untrusted`，只读工具标 `readOnlyHint`）；`mcp_servers.companion`（`trust: full`、`enabled: true`、`lazy: false`、`timeout: 120`）；`mcp_discovery_timeout` 20 秒 | 每个键都写出，原因见[信任的 MCP 服务器](#信任的-mcp-服务器) |
 | 审批与提问 | `approvals.mode: manual`；`approvals.timeout` 与 `agent.clarify_timeout` 都为 86400；`approvals.cron_mode: deny` | Hermes 默认 300 秒与 3600 秒 |
 | 终端 | `terminal.cwd: /nas/助手` | |
 | 联网 | `updates.check`、`model_catalog.enabled`、`security.allow_lazy_installs`、`lsp.enabled` 关闭 | 默认会检查更新、拉模型目录、运行时装包、装语言服务器 |
@@ -528,6 +528,19 @@ spike 中由 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代
 - 参数摘要来自脱敏的显示副本，参数中有像密钥的字符串时摘要对不上，更改不执行（失败时关闭）。
 - 拒绝、超时与停止对模型是同一句话，助手分不清成员是拒绝还是不在，卡片上要分开显示；这句话提到 “untrusted server”，`anas-files` 可以要求只说“没有得到你的同意”。
 - 切换对话或刷新后恢复卡片：`serve` 用 `approval.pending`（API Server 为 `GET /v1/runs/{run_id}` 的 `waiting_for_approval`），按 `request_id` 找回卡片。
+
+### 信任的 MCP 服务器
+
+2026-11-09 为虚拟伙伴的 `companion` 服务器（不经审批，[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 8）对照固定提交 `0e427d788d25` 读源码所得：
+
+- 取值：Hermes 只认 `full` 与 `untrusted`（`tools/mcp_tool.py` 530）。不写或写 `null` 当作 `full`；其余的值去掉首尾空白、转成小写后比较，认不出的一律当作 `untrusted` 并记警告。YAML 的 `true`、`yes` 先变成字符串 `"true"`，所以也是 `untrusted`（`tools/mcp_tool_registration.py` 37–46）。信任按服务器设，没有按工具的覆盖。
+- 记下的时机：发现工具时记下服务器的信任与各工具的 `readOnlyHint`，调用时不再读配置（`mcp_tool_registration.py` 61–71，连接时 406）。`lazy` 注册从缓存的清单记下（596，清单也存 `readOnlyHint`，389），缓存在 `$HERMES_HOME/cache/` 下（`tools/mcp_schema_cache.py` 22–24），而 Hermes 的状态目录 Agent 能写（[助手目录的划分](#助手目录的划分)）。`lazy` 默认是 `false`（`tools/mcp_tool_discovery.py` 215），写明只为不让成员的配置改它。
+- 审批门：`_trust_gate_check` 在每个 MCP 工具处理函数的最前面，先于熔断检查、连接与 RPC（`tools/mcp_tool_handlers.py` 60–85、574–577）。没有记下信任时按 `full` 处理（65）；信任不是 `untrusted`，或工具的 `readOnlyHint` 恰为 `true` 时不问（66、52–57）。
+- managed scope 的优先级：`load_config` 先把成员的 `config.yaml` 深合并到默认值上，最后合并 managed scope，同一个叶子上 managed 胜出（`hermes_cli/config.py` 2261–2276、2333–2369）。合并逐层进入字典（1487–1502），managed 没写出的同级键仍由成员的配置决定，所以省略 `trust` 得到的 `full` 挡不住成员写的值。managed 文件格式有误时只记警告并被忽略（`hermes_cli/managed_scope.py` 86–93）。
+- 熔断：调用超时、失败或结果带 `isError=true` 都记一次（`mcp_tool_handlers.py` 150–157、537–538、598–600），正常结果清零；连续 3 次后，这个服务器 60 秒内的调用一律立即回答不可达、让模型不要重试（`mcp_tool.py` 517、542–543；`mcp_tool_handlers.py` 88–106）。
+- 串行与时限：同一服务器的调用在它的 `_rpc_lock` 下逐个进行，同一个 `serve` 进程的所有会话共用一个子进程与这把锁（`mcp_tool_handlers.py` 587；`mcp_tool.py` 428–430；`tools/mcp_tool_scope.py` 26–31）。单次调用默认 300 秒，可按服务器设 `timeout`，不经全局钳制（`tools/mcp_tool_common.py` 41–58）；计时在等锁之前开始，排队的时间也算在内（`tools/mcp_tool_loop.py` 166–176）。
+- 调用不带对话：stdio 上的调用只有工具名与参数（`mcp_tool_handlers.py` 396）；子进程的环境在启动时按白名单过滤，单元的 `ANAS_ASSISTANT_CHANNEL` 到不了它（`tools/mcp_tool_config.py` 147、184–192）。能对应到对话的只有 `tool.start`（`tui_gateway/tool_progress.py` 276–302）；委派子代理的镜像行 `tool_id` 以 `submirror:` 开头、参数为空（`tui_gateway/agent_callbacks.py` 81–88）。
+- 立即运行：`POST /api/cron/jobs/{id}/trigger` 在 `serve` 进程内经 `fire_due` 执行（`hermes_cli/web_routers/cron.py` 629–637、729–731；`hermes_cli/web_server_cron.py` 292–316），与对话共用 `serve` 的 MCP 子进程；`cron/scheduler.py` 不设工具进度回调，所以它的调用没有 `tool.start`。到点运行的 `hermes cron tick` 是另一个单元里的另一个进程，有自己的子进程。
 
 ## 开放 Hermes 自带的工具
 
