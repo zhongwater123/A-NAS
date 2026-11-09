@@ -407,8 +407,13 @@ func (e *Executor) promotePendingLayout() (volumeMarker, error) {
 	return marker, e.writeMarker(marker)
 }
 
-// ContinueConversion starts converting the data volume to its layout now.
+// ContinueConversion starts converting the data volume to its layout, or
+// spreading a mirror over all of its disks, now; spreading is tried again
+// even where it last left space unusable.
 func (e *Executor) ContinueConversion(ctx context.Context) error {
+	e.conversionMu.Lock()
+	e.stalledAt = 0
+	e.conversionMu.Unlock()
 	started, err := e.ReconcileConversion(ctx)
 	if err == nil && !started {
 		return datavolume.ErrNoConversion
@@ -421,7 +426,9 @@ func (e *Executor) ContinueConversion(ctx context.Context) error {
 // nothing else: a balance with the soft filter rewrites only those, so it
 // picks up where a stopped one left off. Stopping the Host Agent or the
 // machine cancels it, which is why the Host Agent calls this at startup and
-// then periodically. It reports whether a balance started.
+// then periodically. Once nothing is left to convert, it spreads a mirror
+// that cannot use all of its disks over them (reconcileRebalance). It
+// reports whether a balance started.
 func (e *Executor) ReconcileConversion(ctx context.Context) (bool, error) {
 	if !e.dataVolumeReady() {
 		return false, nil
@@ -437,7 +444,11 @@ func (e *Executor) ReconcileConversion(ctx context.Context) (bool, error) {
 	data, metadata, operation := linuxhoststate.ReadBtrfsAllocation(os.DirFS(e.systemRoot), strings.ToLower(marker.FilesystemUUID))
 	args := conversionCommand(marker.Layout, data, metadata, operation)
 	if args == nil {
-		return false, nil
+		convertData, convertMetadata := datavolume.OutsideLayout(data, metadata, marker.Layout)
+		if operation != hoststate.VolumeOperationNone || convertData || convertMetadata {
+			return false, nil
+		}
+		return e.reconcileRebalance(ctx, marker)
 	}
 	e.conversionMu.Lock()
 	defer e.conversionMu.Unlock()
@@ -460,6 +471,78 @@ func (e *Executor) ReconcileConversion(ctx context.Context) (bool, error) {
 		e.logger.Info("data-volume conversion finished", "layout", marker.Layout)
 	}()
 	return true, nil
+}
+
+// rebalanceCommands spread the data of a mirror over all of its disks.
+// Packing block groups at most half full frees whole ones on every disk
+// without a new one, which leaves room for the full data balance that
+// follows: Btrfs writes every data block group anew on the disks with the
+// most space left, as the btrfs documentation advises after adding disks.
+var rebalanceCommands = [][]string{
+	{"balance", "start", "-dusage=50"},
+	{"balance", "start", "--full-balance", "-d"},
+}
+
+// reconcileRebalance spreads the data of a mirror that cannot use space its
+// disks have (datavolume.Unusable) over all of them: a disk that joined two
+// full ones stays mostly unused until then, since each block group needs
+// room on two disks. A balance cut short by a shutdown starts again at the
+// next check; where the balances leave space unusable, the check waits
+// until the allocation changes. It reports whether the balances started.
+func (e *Executor) reconcileRebalance(ctx context.Context, marker volumeMarker) (bool, error) {
+	if marker.Layout != datavolume.LayoutMirror {
+		return false, nil
+	}
+	unusable, err := e.unusableSpace(ctx, marker.FilesystemUUID)
+	if err != nil || unusable == 0 {
+		return false, err
+	}
+	e.conversionMu.Lock()
+	defer e.conversionMu.Unlock()
+	if e.converting || unusable == e.stalledAt {
+		return false, nil
+	}
+	e.converting = true
+	e.logger.InfoContext(ctx, "spreading the data volume over all of its disks", "unusableBytes", unusable)
+	//nolint:gosec // G118: like a conversion, spreading outlives the request that starts it; converting tracks it.
+	go e.rebalance(marker.FilesystemUUID)
+	return true, nil
+}
+
+func (e *Executor) rebalance(uuid string) {
+	ctx := context.Background()
+	var stalled uint64
+	defer func() {
+		e.conversionMu.Lock()
+		e.converting, e.stalledAt = false, stalled
+		e.conversionMu.Unlock()
+	}()
+	for _, command := range rebalanceCommands {
+		if output, err := e.runner.Run(ctx, "btrfs", append(slices.Clone(command), e.mountPoint), ""); err != nil {
+			e.logger.Warn("a balance of the data volume stopped", "command", "btrfs "+strings.Join(command, " "), "error", commandError("btrfs balance", err, output))
+		}
+	}
+	unusable, err := e.unusableSpace(ctx, uuid)
+	switch {
+	case err != nil:
+		e.logger.Error("the data volume could not be measured after spreading it", "error", err)
+	case unusable == 0:
+		e.logger.Info("the data volume can use all of its disks")
+	default:
+		e.logger.Warn("the data volume still cannot use all of its disks; waiting until the allocation changes", "unusableBytes", unusable)
+		stalled = unusable
+	}
+}
+
+// unusableSpace measures how much space the mirror cannot use yet from
+// `btrfs filesystem show`: sysfs does not say how much of each device Btrfs
+// has allocated.
+func (e *Executor) unusableSpace(ctx context.Context, uuid string) (uint64, error) {
+	output, err := e.runner.Output(ctx, "btrfs", []string{"filesystem", "show", "--raw", e.mountPoint}, "")
+	if err != nil {
+		return 0, commandError("btrfs filesystem show", err, output)
+	}
+	return datavolume.Unusable(datavolume.LayoutMirror, linuxhoststate.ParseBtrfsDevices(output, strings.ToLower(uuid))), nil
 }
 
 // conversionCommand is the btrfs command that converts data and metadata

@@ -4,6 +4,7 @@ package linux
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,7 +26,7 @@ func TestRootConversionTurnsAJoinedDiskIntoAMirror(t *testing.T) {
 	if err := os.MkdirAll(mount, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	first, second := loopDevice(t, "first.img"), loopDevice(t, "second.img")
+	first, second := loopDevice(t, "first.img", "1G"), loopDevice(t, "second.img", "1G")
 	run(t, "mkfs.btrfs", "--quiet", "--force", "--label", "ANAS_DATA", "--data", "single", "--metadata", "dup", first)
 	run(t, "mount", first, mount)
 	t.Cleanup(func() { _ = exec.Command("umount", mount).Run() })
@@ -87,11 +88,80 @@ func TestRootConversionTurnsAJoinedDiskIntoAMirror(t *testing.T) {
 	}
 }
 
-func loopDevice(t *testing.T, name string) string {
+func loopDevice(t *testing.T, name, size string) string {
 	t.Helper()
 	image := filepath.Join(t.TempDir(), name)
-	run(t, "truncate", "--size=1G", image)
+	run(t, "truncate", "--size="+size, image)
 	device := run(t, "losetup", "--find", "--show", image)
 	t.Cleanup(func() { _ = exec.Command("losetup", "--detach", device).Run() })
 	return device
+}
+
+// A disk that joins a mirror larger than the free space of the old disks
+// stays partly unused: every block group needs room on two disks, so the
+// new disk can only hold copies of block groups moved off the old ones. The
+// Host Agent's check spreads the data with real btrfs-progs, measuring the space
+// it cannot use from `btrfs filesystem show`.
+func TestRootAMirrorSpreadsOntoAJoinedDisk(t *testing.T) {
+	ctx := context.Background()
+	mount := filepath.Join(t.TempDir(), "data")
+	if err := os.MkdirAll(mount, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	first, second, third := loopDevice(t, "first.img", "1G"), loopDevice(t, "second.img", "1G"), loopDevice(t, "third.img", "2G")
+	run(t, "mkfs.btrfs", "--quiet", "--force", "--label", "ANAS_DATA", "--data", "raid1", "--metadata", "raid1", first, second)
+	run(t, "btrfs", "device", "scan")
+	run(t, "mount", first, mount)
+	t.Cleanup(func() { _ = exec.Command("umount", mount).Run() })
+	uuid := strings.ToLower(run(t, "blkid", "--probe", "--output", "value", "--match-tag", "UUID", first))
+	// The mirror of two 1 GiB disks holds a third of a GiB; the 2 GiB disk can
+	// hold a copy of all of it only once block groups move off the old disks.
+	// They keep room for a block group's new copy, as the write reserve keeps
+	// it on the NAS: on these small disks a block group is a fifth of one.
+	for i := range 3 {
+		run(t, "dd", "if=/dev/urandom", "of="+filepath.Join(mount, fmt.Sprintf("files-%d.bin", i)), "bs=1M", "count=120", "status=none")
+	}
+	run(t, "btrfs", "filesystem", "sync", mount)
+	run(t, "btrfs", "device", "add", "-f", third, mount)
+
+	executor := NewExecutor(nil, nil, Options{SystemRoot: "/", MountPoint: mount})
+	if err := executor.writeMarker(volumeMarker{FilesystemUUID: uuid, FormatVersion: 1, Layout: datavolume.LayoutMirror}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := executor.unusableSpace(ctx, uuid)
+	if err != nil || before == 0 {
+		t.Fatalf("unusable space after the disk joined = %d, %v; want some\n%s", before, err, run(t, "btrfs", "filesystem", "show", "--raw", mount))
+	}
+	started, err := executor.ReconcileConversion(ctx)
+	if err != nil || !started {
+		t.Fatalf("conversion check on a mirror that cannot use its new disk = %v, %v; want the data spread", started, err)
+	}
+	deadline := time.Now().Add(3 * time.Minute)
+	for {
+		executor.conversionMu.Lock()
+		busy := executor.converting
+		executor.conversionMu.Unlock()
+		if !busy {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("still spreading after 3 minutes\n%s", run(t, "btrfs", "filesystem", "show", "--raw", mount))
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	shown := run(t, "btrfs", "filesystem", "show", "--raw", mount)
+	after, err := executor.unusableSpace(ctx, uuid)
+	if err != nil || after != 0 {
+		t.Fatalf("unusable space = %d of %d before, %v; want all of it usable\n%s", after, before, err, shown)
+	}
+	devices := linuxhoststate.ParseBtrfsDevices([]byte(shown), uuid)
+	if len(devices) != 3 || devices[2].AllocatedBytes == 0 {
+		t.Fatalf("devices = %+v, want block groups on the joined disk\n%s", devices, shown)
+	}
+	usage := run(t, "btrfs", "filesystem", "df", mount)
+	for _, kind := range []string{"Data", "System", "Metadata"} {
+		if !strings.Contains(usage, kind+", RAID1:") || strings.Contains(usage, kind+", single:") {
+			t.Fatalf("btrfs filesystem df =\n%s\nwant every block group still in the mirror", usage)
+		}
+	}
 }

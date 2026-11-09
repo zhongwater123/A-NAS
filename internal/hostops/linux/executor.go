@@ -127,6 +127,9 @@ type Executor struct {
 	logger        *slog.Logger
 	conversionMu  sync.Mutex
 	converting    bool
+	// stalledAt is the unusable space spreading the data volume left; the
+	// check leaves it until the allocation changes.
+	stalledAt uint64
 	// markerMu orders changes to the data-volume marker.
 	markerMu sync.Mutex
 	// webSearchMu orders changes to the web search switch, so its file and
