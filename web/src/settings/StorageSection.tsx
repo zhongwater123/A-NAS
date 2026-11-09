@@ -1,7 +1,7 @@
 import { Archive, ChevronLeft, CircleCheck, Database, HardDrive, Layers, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
-import type { StoragePlan, Volume, VolumeConversion, VolumeLayout } from "../api.generated";
+import type { StoragePlan, Volume, VolumeConversion, VolumeLayout, VolumeSpread } from "../api.generated";
 import { HostState } from "../desktop/api";
 import type { HostStateView } from "../desktop/useHostState";
 import { formatBytes, formatNominalCapacity } from "../lib/bytes";
@@ -33,8 +33,9 @@ export interface VolumesView {
 }
 
 // useVolumes reads the data volume again when a storage plan changes state,
-// and while the volume converts: every few seconds so the progress moves, or
-// every half minute while a stopped conversion waits for the Host Agent.
+// and while the volume converts or its files are spread: every few seconds
+// so the progress moves, or every half minute while a stopped one waits for
+// the Host Agent.
 export function useVolumes(planState?: string): VolumesView {
   const [items, setItems] = useState<Volume[]>();
   const [readAt, setReadAt] = useState(0);
@@ -55,7 +56,8 @@ export function useVolumes(planState?: string): VolumesView {
   useEffect(() => {
     void refresh();
   }, [refresh, planState]);
-  const conversion = items?.find((volume) => volume.conversion)?.conversion?.state;
+  const moving = items?.find((volume) => volume.conversion || volume.spread);
+  const conversion = moving?.conversion?.state ?? moving?.spread?.state;
   useEffect(() => {
     if (!conversion) return;
     const timer = window.setInterval(() => void refresh(), conversion === "running" ? 5000 : 30_000);
@@ -112,7 +114,13 @@ export function StorageSection({
   const volume = volumes.items?.[0];
   const noVolume = volumes.items?.length === 0;
   const usable = disks.filter((disk) => disk.role === "unassigned" && disk.eligibleForDataVolume);
-  const canAdd = Boolean(volume && volume.state === "available" && !volume.conversion && usable.length > 0);
+  const canAdd = Boolean(
+    volume &&
+      volume.state === "available" &&
+      !volume.conversion &&
+      volume.spread?.state !== "running" &&
+      usable.length > 0,
+  );
   const showWizard = isAdmin && (Boolean(flow.plan) || (wizardOpen && (noVolume || canAdd)));
   const mode: WizardMode = flow.plan
     ? flow.plan.kind === "add_disks"
@@ -253,9 +261,13 @@ function SpareDisks({
 }) {
   const why = volume.conversion
     ? "数据卷转换完成后才能加入新硬盘。"
-    : volume.state !== "available"
-      ? "数据卷在线且可写时才能加入新硬盘。"
-      : "可以加入数据卷，增加容量，或者让每个文件在两块硬盘上各有一份。";
+    : volume.spread?.state === "running"
+      ? "文件分散完后才能加入新硬盘。"
+      : volume.state !== "available"
+        ? "数据卷在线且可写时才能加入新硬盘。"
+        : volume.layout === "single"
+          ? "可以加入数据卷，增加容量，或者让每个文件在两块硬盘上各有一份。"
+          : `可以加入数据卷，增加容量；数据卷仍为${layoutLabel(volume.layout)}。`;
   return (
     <div className={`${styles.setCard} ${styles.spareCard}`}>
       <IconTile tone="accent" icon={HardDrive} size="lg" />
@@ -349,6 +361,9 @@ function VolumeCard({
           onRefresh={onRefresh}
         />
       )}
+      {volume.spread && !volume.conversion && (
+        <SpreadProgress volume={volume} spread={volume.spread} isAdmin={isAdmin} onRefresh={onRefresh} />
+      )}
       {members.length > 0 && (
         <ul className={styles.volMembers} aria-label="组成数据卷的硬盘">
           {members.map((disk) => (
@@ -382,8 +397,7 @@ function ConversionProgress({
   isAdmin: boolean;
   onRefresh: () => Promise<void>;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const { busy, error, resume } = useContinue(volume, onRefresh);
   // The speed is measured from the first progress this page saw, by when
   // each progress was read.
   const [first, setFirst] = useState<ProgressSample>();
@@ -394,18 +408,6 @@ function ConversionProgress({
   const target = layouts[volume.layout].name;
   const running = conversion.state === "running";
   const percent = conversionPercent(conversion);
-  const resume = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      await continueVolumeConversion(volume.id);
-      await onRefresh();
-    } catch (caught) {
-      setError(storageErrorText(caught));
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
     <section className={`${styles.volConvert} ${running ? "" : styles.waiting}`} aria-label="转换进度">
       <div className={styles.volConvertHead}>
@@ -435,6 +437,80 @@ function ConversionProgress({
         <div className={styles.volConvertActions}>
           <button className={styles.setBtn} disabled={busy} onClick={() => void resume()}>
             {busy ? "正在继续…" : "继续转换"}
+          </button>
+        </div>
+      )}
+      {error && <Banner tone="error">{error}</Banner>}
+    </section>
+  );
+}
+
+// useContinue asks the Host Agent to continue a stopped conversion, or to
+// spread a mirror again, now instead of at its next check.
+function useContinue(volume: Volume, onRefresh: () => Promise<void>) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const resume = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await continueVolumeConversion(volume.id);
+      await onRefresh();
+    } catch (caught) {
+      setError(storageErrorText(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { busy, error, resume };
+}
+
+// spreadText is what the card says of each state of a spread. Btrfs
+// reports no progress for it, only the space still unusable.
+const spreadText = {
+  running: {
+    title: "正在把文件分散到全部硬盘",
+    note: "期间可以照常使用，关机或重启后会自动继续；完成前不能加入新硬盘。",
+  },
+  waiting: { title: "分散文件已暂停", note: "系统会在 15 分钟内接着分散；停下来的原因记录在“日志”的系统日志中。" },
+  stopped: {
+    title: "分散后仍有空间用不上",
+    note: "原有硬盘剩余的空间太少，文件没能分散开。删除或移走一些文件后点“继续分散”；原因记录在“日志”的系统日志中。",
+  },
+} satisfies Record<VolumeSpread["state"], { title: string; note: string }>;
+
+// SpreadProgress shows the space a mirror cannot use until its files are
+// spread onto a disk that joined full ones, and a balance that still runs.
+function SpreadProgress({
+  volume,
+  spread,
+  isAdmin,
+  onRefresh,
+}: {
+  volume: Volume;
+  spread: VolumeSpread;
+  isAdmin: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  const { busy, error, resume } = useContinue(volume, onRefresh);
+  const running = spread.state === "running";
+  const text = spreadText[spread.state];
+  return (
+    <section className={`${styles.volConvert} ${running ? "" : styles.waiting}`} aria-label="分散文件">
+      <div className={styles.volConvertHead}>
+        <strong>{text.title}</strong>
+      </div>
+      {spread.unusableBytes > 0 && (
+        <p>
+          还有 {formatBytes(spread.unusableBytes)} 空间
+          {spread.state === "stopped" ? "用不上" : "要等文件分散完才能使用"}
+        </p>
+      )}
+      <p className={styles.volConvertNote}>{text.note}</p>
+      {!running && isAdmin && (
+        <div className={styles.volConvertActions}>
+          <button className={styles.setBtn} disabled={busy} onClick={() => void resume()}>
+            {busy ? "正在继续…" : "继续分散"}
           </button>
         </div>
       )}
@@ -589,12 +665,24 @@ function VolumeWizard({
   const choice = options.find((option) => option.layout === layout && option.fits)
     ? layout
     : options.find((option) => option.fits)?.layout;
+  // Disks join a volume on several disks in its layout; changing it would
+  // give up what it protects, a step of its own.
+  const kept = mode === "add" && volume && volume.layout !== "single" ? volume.layout : undefined;
+  const keptOption = options.find((option) => option.layout === kept);
+  // A plan shows the layout step it was made with: an addition chose a
+  // layout only when it converts the volume.
   const needsLayout = plan
-    ? plan.kind === "add_disks" || (plan.disks?.length ?? 0) > 1
-    : mode === "add" || selected.length > 1;
+    ? plan.kind === "add_disks"
+      ? Boolean(plan.actions?.some((action) => action.kind === "convert_layout"))
+      : (plan.disks?.length ?? 0) > 1
+    : mode === "add"
+      ? !kept
+      : selected.length > 1;
   const steps =
     mode === "add"
-      ? ["硬盘与用途", "冗余方式", "核对计划", "执行"]
+      ? needsLayout
+        ? ["硬盘与用途", "冗余方式", "核对计划", "执行"]
+        : ["硬盘与用途", "核对计划", "执行"]
       : needsLayout
         ? ["选择硬盘", "冗余方式", "核对计划", "执行"]
         : ["选择硬盘", "核对计划", "执行"];
@@ -673,7 +761,11 @@ function VolumeWizard({
                   <IconTile tone="storage" icon={Layers} />
                   <span>
                     <strong>加入数据卷</strong>
-                    <small>增加容量，或者让每个文件在两块硬盘上各有一份。已有文件保持原样。</small>
+                    <small>
+                      {kept
+                        ? "增加容量，已有文件保持原样。"
+                        : "增加容量，或者让每个文件在两块硬盘上各有一份。已有文件保持原样。"}
+                    </small>
                   </span>
                 </label>
                 <label className={`${styles.wizPurpose} ${styles.disabled}`}>
@@ -689,9 +781,11 @@ function VolumeWizard({
               </div>
             )}
             <p className={styles.wizLead}>
-              {mode === "add"
-                ? "选择要加入的硬盘："
-                : "选择一块或多块硬盘。只能使用非系统、非 USB、没有被使用且身份稳定的 SATA 或 NVMe 硬盘；选两块及以上可以组成镜像。"}
+              {kept
+                ? `选择要加入的硬盘。加入后数据卷仍为${layoutLabel(kept)}：`
+                : mode === "add"
+                  ? "选择要加入的硬盘："
+                  : "选择一块或多块硬盘。只能使用非系统、非 USB、没有被使用且身份稳定的 SATA 或 NVMe 硬盘；选两块及以上可以组成镜像。"}
             </p>
             {candidates.length ? (
               <div className={styles.setCard} role="group" aria-label="候选硬盘">
@@ -740,6 +834,11 @@ function VolumeWizard({
                 <h4>没有可用的硬盘</h4>
                 <p>请接入一块空闲的 SATA 或 NVMe 硬盘。</p>
               </div>
+            )}
+            {keptOption && chosen.length > 0 && (
+              <p className={styles.wizNote}>
+                可用容量 {formatBytes(keptOption.before ?? 0)} → {formatBytes(keptOption.after)}
+              </p>
             )}
           </>
         )}
@@ -832,7 +931,7 @@ function VolumeWizard({
                 disabled={!selected.length || Boolean(busy)}
                 onClick={generate}
               >
-                {busy === "plan" ? "正在生成…" : "生成格式化计划"}
+                {busy === "plan" ? "正在生成…" : mode === "add" ? "生成计划" : "生成格式化计划"}
               </button>
             )}
           </>

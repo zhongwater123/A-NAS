@@ -1,14 +1,15 @@
+import { AISettings } from "./AISettings";
 import { AlbumPicker } from "./AlbumPicker";
 import { ChannelPicker } from "./ChannelPicker";
 import { type Caller, type Place, sharedLibrary } from "./model";
-import { PeopleSettings, PersonPicker } from "./People";
+import { PersonPicker } from "./People";
 import { PhotoPicker } from "./PhotoPicker";
 import type { PhotoActions } from "./usePhotoActions";
 
 // ActionDialogs are the dialogs the actions on photos open over the window:
 // the person to merge into, the album to add photos to, the photos to add to
-// an album, the babies' channels to add photos to, and the libraries' people
-// and pets switches.
+// an album, the babies' channels to add photos to, and the libraries' local
+// AI switches.
 export function ActionDialogs({ place, caller, actions }: { place: Place; caller: Caller; actions: PhotoActions }) {
   const {
     merging,
@@ -20,9 +21,9 @@ export function ActionDialogs({ place, caller, actions }: { place: Place; caller
     createAndAdd,
     photoPicker,
     setPhotoPicker,
-    peopleSettings,
-    setPeopleSettings,
-    setPeople,
+    aiSettings,
+    setAISettings,
+    setAISwitch,
     babies,
     channelPicker,
     setChannelPicker,
@@ -67,11 +68,11 @@ export function ActionDialogs({ place, caller, actions }: { place: Place; caller
           onClose={() => setChannelPicker(undefined)}
         />
       )}
-      {peopleSettings && (
-        <PeopleSettings
+      {aiSettings && (
+        <AISettings
           caller={caller}
-          onSet={(library, on) => void setPeople(library, on)}
-          onClose={() => setPeopleSettings(false)}
+          onSet={(library, which, on) => void setAISwitch(library, which, on)}
+          onClose={() => setAISettings(false)}
         />
       )}
     </>

@@ -42,6 +42,7 @@
 - [2026-10-30：OCR 敏感字段的清单](2026-10-30-ocr-sensitive-fields.md)
 - [2026-11-02：OCR 分流的目标召回取 99%](2026-11-02-ocr-routing-recall.md)
 - [2026-11-03：OCR 字段核对的单字概率取 0.99](2026-11-03-ocr-character-confidence.md)
+- [2026-11-06：照片中的文字在界面上不遮挡](2026-11-06-ocr-no-masking-in-the-ui.md)
 
 ### AI 助手
 
@@ -56,6 +57,10 @@
 - [2026-10-22：活动记录保留多久](2026-10-22-activity-record-retention.md)
 - [2026-10-30：Web 桌面首屏 JavaScript 上限放宽到 200 kB](2026-10-30-desktop-js-budget.md)
 - [2026-10-30：不调节风扇转速](2026-10-30-no-fan-control.md)
+
+### 虚拟伙伴
+
+- [2026-11-06：虚拟伙伴（大肥鱼）V1 的形象、实现方式与 VNAS 的控制](2026-11-06-companion-v1.md)
 
 ### 家庭中心
 
