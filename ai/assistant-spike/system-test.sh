@@ -251,6 +251,11 @@ fi
 
 # --- With the runtime: alice's assistant itself, as alice, through the Product Service's socket.
 if [[ -x "$assistant_python" ]]; then
+  # The companion's MCP server under the runtime's own MCP SDK, which make ai-test has not
+  # got: a missing argument, or a string that looks like JSON, reaches the Product Service
+  # instead of coming back as the SDK's error, which Hermes's circuit breaker counts.
+  sdk_out=$(cd /src/ai && "$assistant_python" -B -m unittest tests.test_companion_mcp 2>&1 || true)
+  check "the companion's MCP server passes every call on under the runtime's MCP SDK" grep -qx OK <<<"$sdk_out"
   serve_out=$("$assistant_python" /spike/serve_client.py alice chat hello 'CALL read_file {"path": "/nas/个人空间/计划.md"}' 2>&1 || true)
   check "alice's assistant answers over its socket" grep -qx '< ok' <<<"$serve_out"
   check "it reads her own file" grep -q 买菜 <<<"$serve_out"

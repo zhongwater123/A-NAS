@@ -1,8 +1,10 @@
 """The companion's MCP server answers every call as a result, and passes on only what the model gave.
 
 CompanionToolTests stand in for the MCP SDK, which only the assistant's runtime
-has. SdkPathTests run the server under the real SDK and skip without it; to run
-them, use the runtime's Python with its packages (ai/assistant-spike/build-runtime.sh):
+has. SdkPathTests run the server under the real SDK and skip without it. The
+system test with the runtime (ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME) runs them,
+and refuses a skip; by hand, use the runtime's Python with its packages
+(ai/assistant-spike/build-runtime.sh):
 
     PYTHONPATH=<runtime venv>/lib/python3.14/site-packages <runtime python> -m unittest tests.test_companion_mcp
 """
