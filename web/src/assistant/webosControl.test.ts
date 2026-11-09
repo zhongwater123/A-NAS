@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react";
 import { domToCanvas } from "modern-screenshot";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 import { apiFetch } from "../api/client";
 import { apiError, http, pathOf, server } from "../test/server";
@@ -259,6 +259,28 @@ describe("WebosController", () => {
     expect(sent).toEqual(["POST /api/v1/containers/c1/actions"]);
   });
 
+  it("asks again in a guarded window once the member's grant there has run out", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { control, asked } = controller(true);
+    const snapshot = await look(control);
+    await control.run("browser_click", { ref: refOf(snapshot, "停止") });
+    vi.setSystemTime(Date.now() + 29_999);
+    await control.run("browser_click", { ref: refOf(snapshot, "查看日志") });
+    expect(asked).toHaveLength(1);
+    vi.setSystemTime(Date.now() + 1);
+    await control.run("browser_click", { ref: refOf(snapshot, "查看日志") });
+    expect(asked.map((danger) => danger.what)).toEqual(["点击“停止”", "点击“查看日志”"]);
+  });
+
+  it("asks again in another guarded window: a grant covers only the window it was given in", async () => {
+    const { control, asked } = controller(true);
+    const snapshot = await look(control);
+    await control.run("browser_click", { ref: refOf(snapshot, "停止") });
+    await control.run("browser_click", { ref: refOf(snapshot, "以 root 打开") });
+    await control.run("browser_click", { ref: refOf(snapshot, "查看日志") });
+    expect(asked.map((danger) => danger.where)).toEqual(["Docker", "设置 · 终端", "Docker"]);
+  });
+
   it("asks for anything in 设置's 终端, but not for the settings navigation", async () => {
     const { control, asked } = controller(false);
     const snapshot = await look(control);
@@ -287,6 +309,48 @@ describe("WebosController", () => {
     document.getElementById("open")!.remove();
     await expect(control.run("browser_click", { ref })).rejects.toThrow("browser_snapshot");
     await expect(control.run("browser_navigate", { url: "https://example.com" })).rejects.toThrow(ControlError);
+  });
+
+  describe("the member's own input", () => {
+    // jsdom trusts no event a script dispatches, so the member's input is
+    // handed to the listeners the controller put on the window, as the
+    // browser hands it over.
+    let added: MockInstance<typeof window.addEventListener>;
+    beforeEach(() => {
+      added = vi.spyOn(window, "addEventListener");
+    });
+    afterEach(() => added.mockRestore());
+    function member(type: string, target: Element) {
+      const event = { type, target, isTrusted: true } as unknown as Event;
+      for (const [name, listener] of added.mock.calls) if (name === type) (listener as EventListener)(event);
+    }
+
+    it.each(["pointerdown", "keydown", "drop"])(
+      "ends VNAS's claim on the page's writes once the member's own %s follows its step",
+      async (type) => {
+        const { control, asked } = controller(false);
+        await control.run("browser_click", { ref: refOf(await look(control), "打开文件夹") });
+        member(type, document.getElementById("delete")!);
+        await apiFetch("/api/v1/files/f1", { method: "DELETE" });
+        expect(asked).toEqual([]);
+        expect(sent).toEqual(["DELETE /api/v1/files/f1"]);
+      },
+    );
+
+    it("keeps holding the step's writes after events a script made, or input in VNAS's own window", async () => {
+      const { control, asked } = controller(false);
+      await control.run("browser_click", { ref: refOf(await look(control), "打开文件夹") });
+      const target = document.getElementById("delete")!;
+      target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Delete" }));
+      target.dispatchEvent(new Event("drop", { bubbles: true }));
+      member("keydown", document.getElementById("composer")!);
+      await expect(apiFetch("/api/v1/files/f1", { method: "DELETE" })).rejects.toMatchObject({
+        code: "not_allowed_for_vnas",
+      });
+      expect(asked).toEqual([{ what: "点击“打开文件夹”", where: "文件管理", why: "这一步会删除内容" }]);
+      expect(sent).toEqual([]);
+    });
   });
 });
 

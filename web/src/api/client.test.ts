@@ -7,7 +7,16 @@ import { readHostState } from "../desktop/api";
 import { readContainers } from "../docker/api";
 import { deleteFile, listSpaces } from "../files/api";
 import { apiError, http, pathOf, server } from "../test/server";
-import { APIError, csrfHeader, onSessionEnded, setSession, uploadForm } from "./client";
+import {
+  APIError,
+  csrfHeader,
+  onSessionEnded,
+  passWriteGate,
+  setSession,
+  setWriteGate,
+  uploadForm,
+  type WriteGate,
+} from "./client";
 
 const session: Session = {
   csrfToken: "csrf-test",
@@ -25,6 +34,7 @@ const session: Session = {
 afterEach(() => {
   setSession();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("csrfHeader", () => {
@@ -86,6 +96,14 @@ describe("client", () => {
     await expect(listSpaces()).rejects.toMatchObject({ code: "malformed_response" });
   });
 
+  it("fails a response that parses but breaks the contract", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    // GET /api/v1/apps is one of the responses the generated validators check.
+    server.use(http.get("/api/v1/apps", ({ response }) => response.untyped(HttpResponse.json({ items: null }))));
+    await expect(readApps()).rejects.toMatchObject({ status: 200, code: "malformed_response" });
+    expect(console.warn).toHaveBeenCalledWith("GET /api/v1/apps: the response breaks the contract", expect.anything());
+  });
+
   it("sends the CSRF token on writes, whatever the caller passed", async () => {
     setSession(session);
     const sent: Array<{ method: string; path: string; csrf: string | null }> = [];
@@ -137,6 +155,48 @@ describe("client", () => {
     expect(failure).toBeInstanceOf(APIError);
     expect(failure).toMatchObject({ status: 401, code: "authentication_required" });
     expect(ended).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the write gate", () => {
+  it("holds every write but never a read", async () => {
+    const gate = vi.fn<WriteGate>(async () => true);
+    const release = setWriteGate(gate);
+    try {
+      for (const method of ["GET", "HEAD", "OPTIONS", "get", "head", "options"])
+        await passWriteGate(method, "/api/v1/spaces");
+      expect(gate).not.toHaveBeenCalled();
+      for (const method of ["POST", "put", "PATCH", "delete"]) await passWriteGate(method, "/api/v1/files/f1?keep=1");
+      expect(gate.mock.calls).toEqual([
+        ["POST", "/api/v1/files/f1"],
+        ["PUT", "/api/v1/files/f1"],
+        ["PATCH", "/api/v1/files/f1"],
+        ["DELETE", "/api/v1/files/f1"],
+      ]);
+    } finally {
+      release();
+    }
+  });
+
+  it("lets the page read while a gate refuses every write", async () => {
+    server.use(http.get("/api/v1/spaces", ({ response }) => response(200).json({ items: [] })));
+    const release = setWriteGate(async () => false);
+    try {
+      await expect(listSpaces()).resolves.toEqual([]);
+      await expect(deleteFile("file:1")).rejects.toMatchObject({ status: 403, code: "not_allowed_for_vnas" });
+    } finally {
+      release();
+    }
+  });
+
+  it("lets writes go once its gate is released, and keeps a newer gate", async () => {
+    const older = setWriteGate(async () => false);
+    older();
+    await expect(passWriteGate("DELETE", "/api/v1/files/f1")).resolves.toBeUndefined();
+    const newer = setWriteGate(async () => false);
+    older();
+    await expect(passWriteGate("DELETE", "/api/v1/files/f1")).rejects.toMatchObject({ code: "not_allowed_for_vnas" });
+    newer();
   });
 });
 
