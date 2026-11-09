@@ -61,7 +61,7 @@ VNAS 能控制它（[#414](../decisions/2026-11-06-companion-v1.md) 记录的 20
 - When：任务调用伙伴工具。
 - Then：任务的调用不让伙伴做事，任务得到“没有在用的桌面”（`no_desktop`），回答里如实说明；任务出了结果时伙伴照旧挥手（下一场景）。Hermes 自己开启的回合（后台任务后的唤醒、自动继续）也一样。
 - 立即运行的任务在成员的实例中运行，调用能到达产品服务，因为配对不到对话里的 `tool.start` 才得到 `no_desktop`。这时成员某段对话里恰好有一条工具与参数完全相同、还没配上的调用，任务的调用就会配上它：伙伴照这段对话自己要求的内容做，这段对话的那条调用反而得到 `no_desktop`。屏幕上因此只会出现对话自己要求的内容，不会出现定时任务的。
-- 委派的子任务调用伙伴工具时，它自己的调用没有 `tool.start`，同样得到 `no_desktop`。子任务的伙伴工具还在运行时（最多算 130 秒），这个成员其他能配上的伙伴调用回答“正忙”（`busy`），以免子任务的调用被误配到某段对话。
+- 委派的子任务调用伙伴工具时，它自己的调用没有 `tool.start`，同样得到 `no_desktop`。子任务的伙伴工具还在运行时（最多算 130 秒），这个成员其他能配上的伙伴调用回答“正忙”（`busy`），以免子任务的调用被误配到某段对话。子任务的调用可能先于说明它的事件到达，所以成员有子任务在运行时，配上的调用等满 1.5 秒才下发。成员停止回合时，它的子任务一并停止，不再算数。
 
 ### 太频繁时回答正忙
 
@@ -120,7 +120,7 @@ VNAS 能控制它（[#414](../decisions/2026-11-06-companion-v1.md) 记录的 20
 ## 边界与失败
 
 - 控制不经确认：伙伴工具是单独的 MCP 服务器 `companion`，托管配置写明 `trust: full`。它只改变成员眼前这块屏幕上伙伴的样子，不碰成员的任何数据，所以按“只拦破坏性操作”不需要逐次确认（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 8）；`anas` 服务器的“提交更改”照旧要确认。工具没有标成只读，因为它们确实会改变屏幕。
-- 送达：伙伴服务器经产品服务的伙伴套接字（`anas-companion-assistant.socket`）调用，产品服务按对端 UID 认出成员。MCP 调用不带对话信息，所以产品服务把它与 Hermes 报告的 `tool.start` 配对：只认进行中回合里、名称以 `mcp__companion__` 开头、不是子代理镜像、工具与规范化参数都相同的那一条，恰好一段对话有它才配对，最多等它 1.5 秒；配对不上回答 `no_desktop`，多于一段回答 `busy`。命令只发给这段对话的浏览器窗口，并且这个窗口发出了本回合的提示；排在后面的提示到下一回合才算数。到点运行的定时任务与闲时整理的单元里没有伙伴套接字，伙伴服务器自己回答 `no_desktop`；立即运行的任务在实例中运行、有套接字，由产品服务因配对不上回答 `no_desktop`，只在与对话的同一条调用同时等待时配上（见[定时任务不能让伙伴做事](#定时任务不能让伙伴做事)）。
+- 送达：伙伴服务器经产品服务的伙伴套接字（`anas-companion-assistant.socket`）调用，产品服务按对端 UID 认出成员。MCP 调用不带对话信息，所以产品服务把它与 Hermes 报告的 `tool.start` 配对：只认进行中回合里、名称以 `mcp__companion__` 开头、不是子代理镜像、工具与规范化参数都相同的那一条，恰好一段对话有它才配对，最多等它 1.5 秒；配对不上回答 `no_desktop`，多于一段回答 `busy`。命令只发给这段对话的浏览器窗口，并且这个窗口发出了本回合的提示；排在后面的提示到下一回合才算数。到点运行的定时任务与闲时整理的单元里没有伙伴套接字，伙伴服务器自己回答 `no_desktop`；立即运行的任务在实例中运行、有套接字，由产品服务因配对不上回答 `no_desktop`，只在与对话的同一条调用同时等待时配上（见[定时任务不能让伙伴做事](#定时任务不能让伙伴做事)）。成员停止回合时，Hermes 丢下排在后面的提示，也放弃了还在路上的调用：这样的调用 5 秒内到达时配给停止的回合，回答 `cancelled`（`turn-ended`），不会配上下一回合里工具与参数都相同的调用。实例在回合中途退出时，这个回合随它的连接结束。
 - 结果：每次调用都是普通结果，从不是错误，所以 Hermes 的熔断（[研究](../research/hermes-agent-runtime.md#信任的-mcp-服务器)）不会因为没有桌面而关掉伙伴服务器；`status` 为 `ok`、`ended`、`cancelled`、`failed`、`rejected`（带 dsh-pet 的原因，或 A-NAS 的 `paused`、`not-ready`）、`no_desktop`、`busy` 或 `timeout`，另附一句中文，拒绝时带上窗口给的说明（例如先叫醒它、要带锁）。
 - 时限：窗口 12 秒内回答（`anim` 最多等 10 秒），产品服务等 15 秒，没回答的结算为 `timeout`；一个窗口有命令没回答后，30 秒内发给它的命令直接结算为 `timeout`，它再回答任何一条即解除。伙伴服务器等产品服务 20 秒，Hermes 对这个服务器的时限是 120 秒（排队时间也算在内）。回合结束时，还没结算的命令结算为 `cancelled`。
 - 参数由产品服务按工具表校验后才下发：未知参数、`url` 与 `image` 一律拒绝为 `bad-request`，不下发；说话的文字为 1–200 个字（按 Unicode 码点计）的纯文本，只允许换行，拒绝其他控制字符、全部 Unicode 双向控制字符与行、段分隔符；气泡最长 60 秒，直线移动最长 5 秒，抛出力度不超过 3；锁的时长超过 5 分钟时按 5 分钟算。
@@ -133,7 +133,7 @@ VNAS 能控制它（[#414](../decisions/2026-11-06-companion-v1.md) 记录的 20
 ## 验收证据
 
 - 页面：卡片的渲染与署名、跟随本窗口的回合、断线回到空闲、闲置停下与命令唤醒、按通知编号挥手、卸载时取消进行中的动画（[`Companion.test.tsx`](../../web/src/companion/Companion.test.tsx)）；Safari 的 HEVC（[`Companion.safari.test.tsx`](../../web/src/companion/Companion.safari.test.tsx)）；工作阶段的汇总与 60 秒清理（[`workStatus.test.ts`](../../web/src/companion/workStatus.test.ts)）；命令的执行与回答、锁、睡觉、暂停、频率与参数上限（[`commands.test.ts`](../../web/src/companion/commands.test.ts)）；窗口转交命令、关闭时释放锁（[`AssistantPanel.test.tsx`](../../web/src/assistant/AssistantPanel.test.tsx)）；屏保盖住的标记（[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)）；共用屏幕上的提示（[`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)）。
-- 产品服务：配对、只发给发起本回合的窗口、频率、超时、回合结束与窗口离开的结算、锁的释放、参数的规范化与拒绝（[`companion_test.go`](../../internal/assistantapi/companion_test.go)）；动画清单、按池取动画与缓存（[`handler_test.go`](../../internal/webui/handler_test.go)）。
+- 产品服务：配对、只发给发起本回合的窗口、频率、超时、回合结束与窗口离开的结算、锁的释放、参数的规范化与拒绝、停止回合与实例退出后的配对、晚到的子任务事件（[`companion_test.go`](../../internal/assistantapi/companion_test.go)）；动画清单、按池取动画与缓存（[`handler_test.go`](../../internal/webui/handler_test.go)）。
 - 伙伴服务器：结果从不是错误、参数原样转给产品服务、没有套接字时回答 `no_desktop`（[`test_companion_mcp.py`](../../ai/tests/test_companion_mcp.py)）；托管配置下 `anas` 仍要审批而 `companion` 不要（[`approvals-managed.sh`](../../ai/assistant-spike/approvals-managed.sh)）。
 
 ## 关联

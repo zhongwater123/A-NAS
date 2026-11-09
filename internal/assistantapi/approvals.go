@@ -124,6 +124,12 @@ type liveSession struct {
 	// helpers are the session's subagents whose last tool was a companion
 	// tool, and when it started: their calls have no tool.start of their own.
 	helpers map[string]time.Time
+	// subagents are the session's subagents that have not reported their
+	// end, and when each last reported anything.
+	subagents map[string]time.Time
+	// abandoned are the calls of companion tools a stopped turn left
+	// unpaired, until companionAbandoned after the stop.
+	abandoned []companionStart
 	// lockedBy is the connection a lock command of the turn went to: the
 	// end of the turn releases that lock there.
 	lockedBy *upstream
@@ -203,7 +209,10 @@ func (m *member) stopping(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if s, ok := m.sessions[id]; ok {
-		s.stopping = true
+		// Hermes drops the prompts it queued behind the turn it stops
+		// (tui_gateway/session_lifecycle.py, _interrupt_session_turn): the
+		// next turn is not theirs.
+		s.stopping, s.nextPrompter = true, nil
 	}
 }
 
@@ -293,13 +302,13 @@ func (h *Handler) observe(m *member, u *upstream, ev event) {
 		if s != nil {
 			m.companionStarted(s, payload.ToolID, payload.Name, payload.Args)
 		}
-	case "subagent.tool", "subagent.complete":
+	case "subagent.start", "subagent.progress", "subagent.thinking", "subagent.tool", "subagent.complete":
 		if s != nil {
-			s.helperTool(ev.Type == "subagent.tool", payload.SubagentID+"/"+payload.ChildSessionID, payload.ToolName)
+			m.subagentEvent(s, ev.Type, payload.SubagentID+"/"+payload.ChildSessionID, payload.ToolName)
 		}
 	case "tool.complete":
 		if s != nil {
-			s.companionDone(payload.ToolID)
+			m.companionDone(s, payload.ToolID)
 		}
 		if s != nil && payload.Name == submitTool {
 			if s.submit != nil && s.submit.toolID == payload.ToolID {
@@ -319,12 +328,13 @@ func (h *Handler) observe(m *member, u *upstream, ev event) {
 			// The turn is over: nothing it asked for can be answered any more,
 			// and an approval arriving now (the background review) is refused.
 			status := cardExpired
-			if s.stopping {
+			stopped := s.stopping
+			if stopped {
 				status = cardStopped
 			}
 			s.turn, s.submit, s.stopping, s.ended = false, nil, false, time.Now()
 			ended = m.endCards(func(c *card) bool { return c.SessionID == ev.SessionID }, status)
-			release = m.companionTurnEnded(ev.SessionID, s)
+			release = m.companionTurnEnded(ev.SessionID, s, stopped)
 		}
 	case "request.cancel":
 		ended = m.endCards(func(c *card) bool { return c.srqMatches(payload.ID) }, m.cancelStatus(ev.SessionID))

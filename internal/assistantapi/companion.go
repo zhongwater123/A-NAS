@@ -80,6 +80,13 @@ var (
 	// instance that stopped before its turn ended.
 	companionHelper = 130 * time.Second
 	companionStale  = 130 * time.Second
+	// companionDelegation is how long a subagent that reported neither its end
+	// nor anything else still counts as running.
+	companionDelegation = 10 * time.Minute
+	// companionAbandoned is how long the calls a stopped turn left unpaired may
+	// still reach the socket: they were on their way when Hermes gave up on
+	// them.
+	companionAbandoned = 5 * time.Second
 	// companionStall is how long a window that left a command unanswered gets
 	// no more commands, unless it answers again: the calls queued behind the
 	// first are answered timeout at once instead of 15 s each, which would
@@ -111,6 +118,8 @@ type companionStart struct {
 	// tool does not take, which the companion server never passes on.
 	problem string
 	at      time.Time
+	// abandoned marks a call of a stopped turn, at is then when it stopped.
+	abandoned bool
 }
 
 // companionCommand is a command sent to a window and not yet settled.
@@ -237,6 +246,9 @@ func (h *Handler) companionCall(ctx context.Context, account, tool string, raw j
 		return map[string]any{"status": companionBusy}
 	case !found:
 		return map[string]any{"status": companionNoDesktop}
+	case start.abandoned:
+		// Hermes gave up on this call when the member stopped its turn.
+		return map[string]any{"status": companionCancelled, "reason": "turn-ended"}
 	case start.problem != "":
 		// The model gave url, image or another key the tool does not take; the
 		// companion server dropped it, Hermes's tool.start still has it.
@@ -264,16 +276,26 @@ func (h *Handler) companionCall(ctx context.Context, account, tool string, raw j
 }
 
 // waitStart pairs a call with its tool.start, waiting companionLate for one
-// that has not arrived yet.
+// that has not arrived yet. While a subagent of the member runs, a match is
+// taken only once companionLate passed: a subagent's call may reach the
+// socket before the subagent.tool that says it made one, as a call may come
+// before its tool.start.
 func (m *member) waitStart(ctx context.Context, tool, args string) (start companionStart, session string, found, ambiguous bool) {
 	deadline := time.NewTimer(companionLate)
 	defer deadline.Stop()
+	late := false
 	for {
 		m.mu.Lock()
-		start, session, found, ambiguous = m.pair(tool, args, time.Now())
-		if found || ambiguous {
+		now := time.Now()
+		hold := !late && m.delegating(now)
+		start, session, found, ambiguous = m.pair(tool, args, now, hold)
+		if ambiguous || (found && (!hold || start.abandoned)) {
 			m.mu.Unlock()
 			return start, session, found, ambiguous
+		}
+		if late {
+			m.mu.Unlock()
+			return companionStart{}, "", false, false
 		}
 		if m.started == nil {
 			m.started = make(chan struct{})
@@ -283,7 +305,7 @@ func (m *member) waitStart(ctx context.Context, tool, args string) (start compan
 		select {
 		case <-started:
 		case <-deadline.C:
-			return companionStart{}, "", false, false
+			late = true
 		case <-ctx.Done():
 			return companionStart{}, "", false, false
 		}
@@ -293,9 +315,19 @@ func (m *member) waitStart(ctx context.Context, tool, args string) (start compan
 // pair takes the oldest started call of tool with these arguments, when the
 // member has such calls in exactly one running turn and no subagent of any
 // conversation may be making the same call: a subagent's call has no
-// tool.start of its own and could take another conversation's. Under m.mu.
-func (m *member) pair(tool, args string, now time.Time) (start companionStart, session string, found, ambiguous bool) {
+// tool.start of its own and could take another conversation's. A call a
+// stopped turn left comes first: it was sent before any made since. With
+// hold, a call of a running turn is only looked at, not taken. Under m.mu.
+func (m *member) pair(tool, args string, now time.Time, hold bool) (start companionStart, session string, found, ambiguous bool) {
 	matches := func(c companionStart) bool { return c.tool == tool && c.args == args }
+	for id, s := range m.sessions {
+		s.abandoned = slices.DeleteFunc(s.abandoned, func(c companionStart) bool { return now.Sub(c.at) >= companionAbandoned })
+		if i := slices.IndexFunc(s.abandoned, matches); i >= 0 {
+			start = s.abandoned[i]
+			s.abandoned = slices.Delete(s.abandoned, i, i+1)
+			return start, id, true, false
+		}
+	}
 	for id, s := range m.sessions {
 		s.companion = slices.DeleteFunc(s.companion, func(c companionStart) bool { return now.Sub(c.at) >= companionStale })
 		if s.turn && slices.ContainsFunc(s.companion, matches) {
@@ -316,7 +348,9 @@ func (m *member) pair(tool, args string, now time.Time) (start companionStart, s
 	s := m.sessions[session]
 	i := slices.IndexFunc(s.companion, matches)
 	start = s.companion[i]
-	s.companion = slices.Delete(s.companion, i, i+1)
+	if !hold {
+		s.companion = slices.Delete(s.companion, i, i+1)
+	}
 	return start, session, true, false
 }
 
@@ -336,29 +370,86 @@ func (m *member) companionStarted(s *liveSession, toolID, name string, rawArgs j
 	}
 	s.companion = append(s.companion, companionStart{toolID: toolID, tool: tool, args: canonicalForm(values),
 		problem: extraProblem(tool, extra), at: time.Now()})
+	m.wake()
+}
+
+// wake lets the calls waiting in waitStart look again. Under m.mu.
+func (m *member) wake() {
 	if m.started != nil {
 		close(m.started)
 		m.started = nil
 	}
 }
 
-// companionDone forgets a call that completed without being paired.
-func (s *liveSession) companionDone(toolID string) {
-	s.companion = slices.DeleteFunc(s.companion, func(c companionStart) bool { return c.toolID == toolID })
-}
-
-// helperTool follows a subagent's tools on its parent's session: a companion
-// tool it starts makes no tool.start, so its call could pass for one of the
-// conversation's own.
-func (s *liveSession) helperTool(started bool, helper, name string) {
-	if started && strings.HasPrefix(name, companionPrefix) {
-		if s.helpers == nil {
-			s.helpers = map[string]time.Time{}
-		}
-		s.helpers[helper] = time.Now()
+// companionDone forgets a call that completed without being paired, or keeps
+// it as abandoned when the member is stopping the turn: Hermes then completes
+// it without waiting for its call, which may still come. Under m.mu.
+func (m *member) companionDone(s *liveSession, toolID string) {
+	i := slices.IndexFunc(s.companion, func(c companionStart) bool { return c.toolID == toolID })
+	if i < 0 {
 		return
 	}
-	delete(s.helpers, helper)
+	if s.stopping {
+		s.abandon(s.companion[i:i+1], time.Now())
+	}
+	s.companion = slices.Delete(s.companion, i, i+1)
+}
+
+// abandon keeps calls Hermes gave up on at now, for those still on their way
+// to pair with instead of with a later call that has the same arguments.
+func (s *liveSession) abandon(calls []companionStart, now time.Time) {
+	s.abandoned = slices.DeleteFunc(s.abandoned, func(c companionStart) bool { return now.Sub(c.at) >= companionAbandoned })
+	for _, c := range calls {
+		c.at, c.abandoned = now, true
+		s.abandoned = append(s.abandoned, c)
+	}
+	if extra := len(s.abandoned) - maxCompanionStarts; extra > 0 {
+		s.abandoned = s.abandoned[extra:]
+	}
+}
+
+// subagentEvent follows a subagent's events on its parent's session: whether
+// it still runs, and whether the tool it started last is a companion tool,
+// whose call makes no tool.start and could pass for one of the conversation's
+// own. Under m.mu.
+func (m *member) subagentEvent(s *liveSession, kind, helper, tool string) {
+	if kind == "subagent.complete" {
+		delete(s.subagents, helper)
+		delete(s.helpers, helper)
+		return
+	}
+	now := time.Now()
+	if s.subagents == nil {
+		s.subagents = map[string]time.Time{}
+	}
+	s.subagents[helper] = now
+	if kind != "subagent.tool" {
+		return
+	}
+	if !strings.HasPrefix(tool, companionPrefix) {
+		delete(s.helpers, helper)
+		return
+	}
+	if s.helpers == nil {
+		s.helpers = map[string]time.Time{}
+	}
+	s.helpers[helper] = now
+	m.wake()
+}
+
+// delegating reports a subagent of the member still running. Under m.mu.
+func (m *member) delegating(now time.Time) bool {
+	running := false
+	for _, s := range m.sessions {
+		for helper, at := range s.subagents {
+			if now.Sub(at) < companionDelegation {
+				running = true
+			} else {
+				delete(s.subagents, helper)
+			}
+		}
+	}
+	return running
 }
 
 // helping reports a subagent whose companion tool may still be calling.
@@ -490,8 +581,14 @@ func (m *member) settleLocked(id string, result map[string]any) {
 }
 
 // companionTurnEnded settles a turn's commands as cancelled and returns the
-// release of a lock one of them took, for the caller to send. Under m.mu.
-func (m *member) companionTurnEnded(session string, s *liveSession) *companionCommand {
+// release of a lock one of them took, for the caller to send. A stopped turn
+// leaves its unpaired calls abandoned, and its subagents forgotten: stopping
+// a turn stops them too, and not every one reports its end. Under m.mu.
+func (m *member) companionTurnEnded(session string, s *liveSession, stopped bool) *companionCommand {
+	if stopped {
+		s.abandon(s.companion, time.Now())
+		s.helpers, s.subagents = nil, nil
+	}
 	s.companion = nil
 	s.prompter, s.nextPrompter = s.nextPrompter, nil
 	for id, c := range m.commands {
@@ -513,6 +610,28 @@ func (m *member) companionTurnEnded(session string, s *liveSession) *companionCo
 	c := m.register(id, session, browser, "lock_release", map[string]any{"force": true}, nil)
 	time.AfterFunc(companionReceipt, func() { m.settle(id, nil) })
 	return c
+}
+
+// connectionClosed ends the turns whose events came on u, now that none of
+// their events can come any more, as when the instance stopped in the middle
+// of a turn; the member's next conversation has another runtime id, and the
+// old turn's calls must not pair beside it. It returns the releases of the
+// locks those turns took, for the caller to send. Under m.mu.
+func (m *member) connectionClosed(u *upstream) []*companionCommand {
+	var releases []*companionCommand
+	for id, s := range m.sessions {
+		if s.owner != u || !s.turn {
+			continue
+		}
+		s.turn, s.submit, s.stopping = false, nil, false
+		// Its companion server stopped with the instance: none of the turn's
+		// calls is still on its way.
+		s.companion = nil
+		if release := m.companionTurnEnded(id, s, true); release != nil {
+			releases = append(releases, release)
+		}
+	}
+	return releases
 }
 
 // windowLeft settles the commands sent to u's window as cancelled once it

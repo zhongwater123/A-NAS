@@ -90,6 +90,7 @@ func (u *upstream) close() {
 		_ = u.conn.Close(websocket.StatusNormalClosure, "")
 		u.m.mu.Lock()
 		delete(u.m.upstreams, u)
+		releases := u.m.connectionClosed(u)
 		u.m.mu.Unlock()
 		u.mu.Lock()
 		for id, waiter := range u.waiters {
@@ -97,6 +98,9 @@ func (u *upstream) close() {
 			delete(u.waiters, id)
 		}
 		u.mu.Unlock()
+		for _, release := range releases {
+			go release.send(u.m)
+		}
 	})
 }
 

@@ -649,11 +649,11 @@ func TestAWakeUpTurnNoWindowPromptedHasNoDesktop(t *testing.T) {
 	if s.prompter != nil {
 		t.Fatal("a queued prompt prompted the turn under way")
 	}
-	m.companionTurnEnded(fakeRuntime, s)
+	m.companionTurnEnded(fakeRuntime, s, false)
 	if s.prompter != u || s.nextPrompter != nil {
 		t.Fatal("the queued prompt did not prompt the next turn")
 	}
-	m.companionTurnEnded(fakeRuntime, s)
+	m.companionTurnEnded(fakeRuntime, s, false)
 	if s.prompter != nil {
 		t.Fatal("the prompter outlived its turn")
 	}
@@ -843,5 +843,155 @@ func TestTheBroadcastLimitHoldsOnTheWholePath(t *testing.T) {
 	answer(w, fakeRuntime, command(w).Payload.CommandID, `"ok":true,"result":{"status":"ok"}`)
 	if status := statusOf(t, results); status != "ok" {
 		t.Fatalf("wake: %s", status)
+	}
+}
+
+// windowOf returns the connection of alice's one window.
+func (h *harness) windowOf() *upstream {
+	m := h.alice()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for u := range m.upstreams {
+		return u
+	}
+	return nil
+}
+
+// stop stops the turn under way, as the member's Stop does, and plays its
+// end.
+func (h *harness) stop(w *window, conn *websocket.Conn) {
+	w.t.Helper()
+	w.call("session.interrupt", `{"session_id":"`+fakeRuntime+`"}`)
+	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"stopped","status":"interrupted"}`)
+	w.waitFor(func(f frame) bool { return isEvent(f, "message.complete") })
+}
+
+// nextTurn starts a turn of the window's own prompt after the last one ended.
+func nextTurn(w *window) {
+	w.t.Helper()
+	w.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"long"}`)
+	w.waitFor(func(f frame) bool { return isEvent(f, "message.start") })
+}
+
+func TestStoppingATurnDropsThePromptQueuedBehindIt(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	// The window's prompt queued behind the turn under way, which the member
+	// then stops: Hermes drops the queued prompt with it.
+	h.alice().prompted(fakeRuntime, h.windowOf(), true)
+	h.stop(w, conn)
+	// Hermes's own turn follows, a wake-up after a background task.
+	h.serve.event(conn, "message.start", fakeRuntime, `{}`)
+	h.started(conn, fakeRuntime, "call-1", "wake", `{}`)
+	h.observed(w, conn)
+	if status := statusOf(t, h.calls("wake", `{}`)); status != "no_desktop" {
+		t.Fatalf("wake-up after a stop: %s", status)
+	}
+}
+
+func TestAnInstanceThatStopsInATurnEndsIt(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	h.serve.event(conn, "subagent.tool", fakeRuntime, `{"subagent_id":"sa-1","child_session_id":"c-1","tool_name":"`+companionPrefix+`wake"}`)
+	h.started(conn, fakeRuntime, "call-1", "wake", `{}`)
+	h.observed(w, conn)
+	// The instance stops: its connection closes, and the window's with it.
+	_ = conn.Close(websocket.StatusGoingAway, "")
+	m := h.alice()
+	deadline := time.Now().Add(frameWait)
+	for {
+		m.mu.Lock()
+		s := m.sessions[fakeRuntime]
+		ended := !s.turn && len(s.companion) == 0 && len(s.helpers) == 0 && len(s.subagents) == 0
+		m.mu.Unlock()
+		if ended {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the turn outlived its instance")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// The member's next instance gives the conversation another runtime id:
+	// the same call there pairs with it alone, at once.
+	w = h.open()
+	conn = h.serve.current()
+	h.serve.event(conn, "message.start", otherRuntime, `{}`)
+	h.started(conn, otherRuntime, "call-2", "wake", `{}`)
+	h.observed(w, conn)
+	m.mu.Lock()
+	start, session, found, ambiguous := m.pair("wake", "{}", time.Now(), false)
+	m.mu.Unlock()
+	if !found || ambiguous || session != otherRuntime || start.toolID != "call-2" || m.delegating(time.Now()) {
+		t.Fatalf("pairing after the restart: %+v in %s, found %v, ambiguous %v", start, session, found, ambiguous)
+	}
+}
+
+func TestASubagentsCallThatComesBeforeItsEventIsNotTheConversations(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	// A subagent runs; its wake reaches the socket before its subagent.tool,
+	// while the conversation's own wake waits.
+	h.serve.event(conn, "subagent.start", fakeRuntime, `{"subagent_id":"sa-1","child_session_id":"c-1"}`)
+	h.started(conn, fakeRuntime, "call-1", "wake", `{}`)
+	h.observed(w, conn)
+	results := h.calls("wake", `{}`)
+	time.Sleep(companionLate / 4)
+	h.serve.event(conn, "subagent.tool", fakeRuntime, `{"subagent_id":"sa-1","child_session_id":"c-1","tool_name":"`+companionPrefix+`wake"}`)
+	if status := statusOf(t, results); status != "busy" {
+		t.Fatalf("the subagent's call: %s", status)
+	}
+	h.serve.event(conn, "tool.complete", fakeRuntime, `{"tool_id":"call-1","name":"`+companionPrefix+`wake"}`)
+	// Stopping the turn stops its subagents, which need not report it: the
+	// next turn's calls pair at once.
+	h.stop(w, conn)
+	nextTurn(w)
+	h.started(conn, fakeRuntime, "call-2", "wake", `{}`)
+	h.observed(w, conn)
+	began := time.Now()
+	results = h.calls("wake", `{}`)
+	answer(w, fakeRuntime, command(w).Payload.CommandID, `"ok":true,"result":{"status":"ok"}`)
+	if status := statusOf(t, results); status != "ok" || time.Since(began) >= companionLate {
+		t.Fatalf("after the stop: %s after %s", status, time.Since(began))
+	}
+}
+
+func TestACallOfAStoppedTurnDoesNotTakeTheNextTurns(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	m := h.alice()
+	// The member stops the turn with a call on its way, which Hermes completes
+	// at once; or ends it without completing the call.
+	for round, completed := range []bool{true, false} {
+		h.started(conn, fakeRuntime, fmt.Sprintf("call-%d", round), "broadcast", `{"text":"你好"}`)
+		h.observed(w, conn)
+		w.call("session.interrupt", `{"session_id":"`+fakeRuntime+`"}`)
+		if completed {
+			h.serve.event(conn, "tool.complete", fakeRuntime, fmt.Sprintf(`{"tool_id":"call-%d","name":"%sbroadcast"}`, round, companionPrefix))
+		}
+		h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"stopped","status":"interrupted"}`)
+		w.waitFor(func(f frame) bool { return isEvent(f, "message.complete") })
+		nextTurn(w)
+		h.started(conn, fakeRuntime, fmt.Sprintf("call-%d-next", round), "broadcast", `{"text":"你好"}`)
+		h.observed(w, conn)
+		// The stopped turn's call arrives first, then the new turn's own.
+		if result := resultOf(t, h.calls("broadcast", `{"text":"你好"}`)); result["status"] != "cancelled" || result["reason"] != "turn-ended" {
+			t.Fatalf("round %d, the stopped turn's call: %v", round, result)
+		}
+		results := h.calls("broadcast", `{"text":"你好"}`)
+		answer(w, fakeRuntime, command(w).Payload.CommandID, `"ok":true,"result":{"status":"ok"}`)
+		if status := statusOf(t, results); status != "ok" {
+			t.Fatalf("round %d, the new turn's call: %s", round, status)
+		}
+		h.stop(w, conn)
+		nextTurn(w)
+	}
+	// A call that never came is let go of.
+	m.mu.Lock()
+	m.sessions[fakeRuntime].abandon([]companionStart{{toolID: "call-x", tool: "wake", args: "{}"}}, time.Now().Add(-companionAbandoned))
+	_, _, found, _ := m.pair("wake", "{}", time.Now(), false)
+	m.mu.Unlock()
+	if found {
+		t.Fatal("an abandoned call outlived its time")
 	}
 }
