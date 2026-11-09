@@ -597,7 +597,10 @@ func (m *member) command(session, tool string, args map[string]any) (*companionC
 	defer m.mu.Unlock()
 	s := m.sessions[session]
 	if s != nil && s.turn && s.stopping {
-		// The member stopped the turn after the call was paired.
+		// The member stopped the turn after the call was paired. send would
+		// settle the command before writing it too, but by then it would
+		// have counted against the limits, and a lock would have left a
+		// release for the turn's end to send.
 		return nil, map[string]any{"status": companionCancelled, "reason": "turn-ended"}
 	}
 	if s == nil || !s.turn || s.browser == nil || s.browser != s.prompter || !s.browser.hasWindow() {

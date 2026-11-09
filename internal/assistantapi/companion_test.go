@@ -1400,3 +1400,84 @@ func TestACommandWaitingForItsWindowAtTheStopIsNotSent(t *testing.T) {
 	cancelledByTheStop(t, results)
 	h.nothingSent(w, conn)
 }
+
+// A window that opens the conversation while the stopped turn still runs is
+// told it is running, and a prompt sent meanwhile is queued behind it. The
+// stop holds until the turn's message.complete either way.
+func TestTheStopHoldsUntilTheTurnEnds(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		meanwhile func(h *harness, w *window)
+	}{
+		{"another window opens the conversation", func(h *harness, _ *window) {
+			h.open().call("session.resume", `{"session_id":"`+fakeStored+`","cols":80}`)
+		}},
+		{"a prompt is queued", func(_ *harness, w *window) {
+			w.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"queued"}`)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			w, conn := companionTurn(t, h)
+			h.started(conn, fakeRuntime, "call-3", "anim", `{"name":"三球抛接"}`)
+			h.observed(w, conn)
+			interrupt(w)
+			tc.meanwhile(h, w)
+			h.started(conn, fakeRuntime, "call-4", "anim", `{"name":"点击回应-元气挥手"}`)
+			h.observed(w, conn)
+			cancelledByTheStop(t, h.calls("anim", `{"name":"三球抛接"}`))
+			cancelledByTheStop(t, h.calls("anim", `{"name":"点击回应-元气挥手"}`))
+			h.nothingSent(w, conn)
+		})
+	}
+}
+
+// A call paired just before the stop makes no command: it counts against no
+// limit, and a lock it would take leaves no release behind.
+func TestACallPairedJustBeforeTheStopMakesNoCommand(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	h.observed(w, conn)
+	interrupt(w)
+	m := h.alice()
+	c, result := m.command(fakeRuntime, "lock", map[string]any{})
+	if c != nil || result["status"] != companionCancelled || result["reason"] != "turn-ended" {
+		t.Fatalf("command made %v, result %v", c != nil, result)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.commands) != 0 || len(m.sent) != 0 || m.sessions[fakeRuntime].lockedBy != nil {
+		t.Fatalf("%d commands, %d counted, locked %v", len(m.commands), len(m.sent), m.sessions[fakeRuntime].lockedBy != nil)
+	}
+}
+
+// A start of a turn the member is stopping is the stopped turn's even before
+// its turn ends: beside another conversation's identical running call, whose
+// call it is cannot be told; beside another stopped turn's, it is a stopped
+// turn's either way.
+func TestAStoppingTurnsCallBesideAnotherConversations(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	m := h.alice()
+	h.started(conn, fakeRuntime, "call-1", "anim", `{"name":"三球抛接"}`)
+	h.serve.event(conn, "message.start", otherRuntime, `{}`)
+	h.started(conn, otherRuntime, "call-2", "anim", `{"name":"三球抛接"}`)
+	h.observed(w, conn)
+	interrupt(w)
+	if status := statusOf(t, h.calls("anim", `{"name":"三球抛接"}`)); status != "busy" {
+		t.Fatalf("beside a running turn's call: %s", status)
+	}
+	h.nothingSent(w, conn)
+	m.mu.Lock()
+	left := len(m.sessions[fakeRuntime].companion) + len(m.sessions[otherRuntime].companion)
+	m.mu.Unlock()
+	if left != 2 {
+		t.Fatalf("%d calls left, want 2", left)
+	}
+	// The other conversation's turn is stopped too, as its window's
+	// session.interrupt does.
+	m.stopping(otherRuntime)
+	cancelledByTheStop(t, h.calls("anim", `{"name":"三球抛接"}`))
+	cancelledByTheStop(t, h.calls("anim", `{"name":"三球抛接"}`))
+	h.nothingSent(w, conn)
+}

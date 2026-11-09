@@ -200,11 +200,18 @@ func (m *member) bind(id, stored string, owner *upstream) {
 	}
 }
 
+// openTurn records a turn under way: a prompt Hermes took, or a session it
+// reports running. Neither ends a stop. The stopped turn runs on until its
+// message.complete, so a window that opens the conversation meanwhile is
+// told it is running, and a prompt sent meanwhile is queued behind it;
+// Hermes starts that prompt's turn only after the stopped turn's
+// message.complete, which ends the stop.
 func (m *member) openTurn(id string, owner *upstream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.session(id)
-	s.turn, s.stopping, s.owner = true, false, owner
+	s.stopping = s.stopping && s.turn
+	s.turn, s.owner = true, owner
 }
 
 // stopping records that the member stops a session's turn, as the window's
