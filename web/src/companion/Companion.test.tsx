@@ -320,6 +320,49 @@ describe("VNAS's commands, carried out by the card", () => {
     );
   });
 
+  it("shows an animation asked for while the one it speaks with still loads, and answers at its own end", async () => {
+    serve([IDLE, "碎碎念-发呆碎碎念", "三球抛接"]);
+    let made = 0;
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:animation-${++made}`);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.untyped.get(`${origin}/companion/thumb/main/:name`, async ({ request }) => {
+        const name = decodeURIComponent(new URL(request.url).pathname).replace(/^.*\/|\.(webm|mov)$/g, "");
+        fetched.push(name);
+        if (name === "三球抛接") await held;
+        return new HttpResponse(new Blob(["webm"]));
+      }),
+    );
+    const { videos } = await mount();
+    startTurn(SESSION);
+    const shown = front(videos);
+    const back = videos.find((video) => video !== shown) as HTMLVideoElement;
+    write("say", { text: "看我的！" });
+    await plays("碎碎念-发呆碎碎念");
+    await waitFor(() => expect(back.src).toMatch(/^blob:animation-/));
+    const speaking = back.src;
+    let outcome: Awaited<ReturnType<typeof runCompanionCommand>> | undefined;
+    void runCompanionCommand(SESSION, { action: "anim", args: { name: "三球抛接" } }).then((answer) => {
+      outcome = answer;
+    });
+    await plays("三球抛接");
+    // The clip it speaks with finishes loading before the animation's arrives: it is not the animation.
+    fireEvent(back, new Event("loadeddata"));
+    expect(front(videos)).toBe(shown);
+    release();
+    await waitFor(() => expect(back.src).not.toBe(speaking));
+    fireEvent(back, new Event("loadeddata"));
+    expect(front(videos)).toBe(back);
+    expect(outcome).toBeUndefined();
+    act(() => fireEvent(back, new Event("ended")));
+    await waitFor(() =>
+      expect(outcome).toEqual({ ok: true, result: { status: "ended", playbackId: expect.stringMatching(/^pb-/) } }),
+    );
+  });
+
   it("stops the animation of a turn the member stops, and goes back to its idle one", async () => {
     serve([IDLE, "点击回应-元气挥手"]);
     const { videos } = await mount();

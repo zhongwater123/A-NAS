@@ -170,6 +170,9 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       ext: thumbExt(),
       assetVersion: cfg.assetVersion,
     });
+    // A-NAS: the clip this switch put in the element; until it is there, the element may still load the
+    // one an earlier switch to the same element put in.
+    let ownUrl: string | null = null;
     loader.load(assetUrl, {
       onObjectUrl: (objectUrl) => {
         if (!mounted) {
@@ -184,6 +187,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
         const previous = blobUrl[slot];
         if (previous !== null) loader.release(previous);
         blobUrl[slot] = objectUrl;
+        ownUrl = objectUrl;
         el.src = objectUrl;
         el.load();
       },
@@ -204,6 +208,9 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       },
     });
     const onReady = (): void => {
+      // A-NAS: the earlier switch's clip loading is not this one: keep waiting for this one's, or a
+      // command's animation would be answered with that clip's end and never show.
+      if (pending?.gen === swapGen && el.src !== ownUrl) return;
       el.removeEventListener('loadeddata', onReady);
       if (pending?.gen !== swapGen) return;
       const outgoing = elementOf(front);
