@@ -83,7 +83,7 @@ VNAS 能控制它（[#414](https://github.com/zhongwater123/A-NAS/pull/414) 记�
 - Given：VNAS 窗口所在的页面被隐藏，或本地控制台的屏保、黑屏正盖着桌面。
 - When：VNAS 发来 `anim`、`broadcast`、`bubble_clear`、`position` 或 `throw`。
 - Then：命令不执行，也不唤醒伙伴或撤下屏保，VNAS 得到“暂停”（`rejected/paused`）。页面隐藏时，`sleep`、`wake` 与锁照常记下，页面重新可见时伙伴按它们的状态显示。
-- 屏保或黑屏盖着而页面没有隐藏时，`sleep`、`wake` 与锁照常执行，不撤下屏保。尚未做到的一处：其中 `sleep`、`wake` 以及叫醒睡着的伙伴的 `lock` 仍会唤醒闲置停下的伙伴，它在屏保下面重新解码视频、随机走动，60 秒没有输入后才再次停下。
+- 屏保或黑屏盖着而页面没有隐藏时，`sleep`、`wake` 与锁照常执行，不撤下屏保。其中 `sleep`、`wake` 以及叫醒睡着的伙伴的 `lock` 只先记下睡或醒，不唤醒闲置停下的伙伴；屏保撤下、有人操作后，伙伴按最后一次记下的睡或醒动起来。
 
 ### 闲置与隐藏时停下
 
