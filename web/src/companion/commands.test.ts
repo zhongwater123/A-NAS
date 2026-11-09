@@ -83,7 +83,22 @@ describe("an animation VNAS asks for", () => {
     });
   });
 
-  it("is answered failed with reason timeout after 10 s without an end", async () => {
+  it("is answered ended when a clip as long as dsh-pet's own, 10.04 s, has loaded and played to its end", async () => {
+    vi.useFakeTimers();
+    let outcome: unknown;
+    void run("anim", { name: WAVE }).then((answer) => {
+      outcome = answer;
+    });
+    const id = playing();
+    await vi.advanceTimersByTimeAsync(400);
+    companionPlayback.report(id, "playing");
+    await vi.advanceTimersByTimeAsync(10_040);
+    companionPlayback.report(id, "ended");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(outcome).toEqual({ ok: true, result: { status: "ended", playbackId: id } });
+  });
+
+  it("is answered failed with reason timeout after 11.5 s without an end", async () => {
     vi.useFakeTimers();
     let outcome: unknown;
     void run("anim", { name: WAVE }).then((answer) => {
@@ -91,7 +106,7 @@ describe("an animation VNAS asks for", () => {
     });
     const id = playing();
     companionPlayback.report(id, "playing");
-    await vi.advanceTimersByTimeAsync(9_999);
+    await vi.advanceTimersByTimeAsync(11_499);
     expect(outcome).toBeUndefined();
     await vi.advanceTimersByTimeAsync(1);
     expect(outcome).toEqual({ ok: true, result: { status: "failed", playbackId: id, reason: "timeout" } });
