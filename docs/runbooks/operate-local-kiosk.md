@@ -1,7 +1,7 @@
 # 运行实验 NAS 本地控制台
 
 状态：implemented, display and pointer verified; dedicated account verified on the Experimental NAS (2026-10-28); hardware video decoding verified on the Experimental NAS (2026-10-29); confinement and VT recovery pending
-更新时间：2026-11-04
+更新时间：2026-11-09
 
 ## 目的
 
@@ -180,7 +180,7 @@ Chromium 只取得匿名同源 URL，不直接访问宿主机路径或原文件�
    /opt/a-nas/current/install-media-pool.sh screensavers <池 ID>
    ```
 
-   脚本把暂存的视频复制进对象库并逐个复核 SHA-256，任一不符即在改动前停止。池 ID 由清单内容计算，暂存清单与命令中的 ID 不符时拒绝。全部通过后建池、原子切换 `current`，并重启 Kiosk 让页面重新读取清单；产品服务无需重启。再次安装同一个池不会产生变化。
+   脚本把暂存的视频复制进对象库并逐个复核 SHA-256，任一不符即在改动前停止。池 ID 由清单内容计算，暂存清单与命令中的 ID 不符时拒绝。全部通过后建池、原子切换 `current`；页面只在打开时读一次清单，所以 Kiosk 在运行时由脚本重启，没有运行时不启动它。产品服务无需重启。再次安装同一个池不会改变池，但仍会重启运行中的 Kiosk。
 3. 按验收第 7 项复核清单数量和 Range 请求。
 
 ### 首次升级
@@ -240,7 +240,16 @@ ssh a-nas 'bash -s 60' < scripts/measure-local-console-cpu.sh
 4. SSH 停止 `anas-api.service` 后，Kiosk 页面进入失联状态；恢复服务后自动重新连接。
 5. `Ctrl+Alt+F2` 应切到恢复终端并能以 `Ctrl+Alt+F1` 返回；当前 Experimental NAS 未通过此项，见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
 6. `F1`、浏览器导航、开发工具、不受控缩放和右键菜单不可逃离产品界面；当前 Experimental NAS 未通过 `F1` 和缩放项，不能把本地 Kiosk 视为面向非受信任用户的安全边界。
-7. 登录后请求 `/local-console/screensavers`，返回的匿名 URL 数应与 `current/SHA256SUMS` 的行数相同；逐个以 `Range: bytes=0-1023` 请求时均返回 `206` 和 1024 字节。
+7. 请求 `/local-console/screensavers`，返回的匿名 URL 数应与 `current/SHA256SUMS` 的行数相同；逐个以 `Range: bytes=0-1023` 请求时均返回 `206` 和 1024 字节。NAS 默认没有 `curl`，在另一台局域网电脑上检查，Windows PowerShell 中：
+
+   ```powershell
+   $nas = 'http://<NAS 地址>'
+   $videos = (Invoke-RestMethod "$nas/local-console/screensavers").videos
+   $videos.Count
+   foreach ($video in $videos) { curl.exe -s -o NUL -w '%{http_code} %{size_download}\n' -r 0-1023 "$nas$video" }   # 每行 206 1024
+   ```
+
+   macOS 或 Linux 的终端中用 `curl` 代替 `curl.exe`、`-o /dev/null` 代替 `-o NUL`，清单可用 `python3 -m json.tool` 查看。
 8. 登录后保持三分钟无输入，屏保应从池中选择一条，静音、居中铺满且无黑边；让视频自然结束，确认仍循环同一条而不切换。第一次移动鼠标或按键只退出屏保，不打开或操作下层应用；再次等待三分钟后应重新随机选择池内一条，允许与上次相同。
 9. 临时使当前选中的一个已确认池文件不可读并重启页面时，应从剩余条目中补选一条；恢复权限后再验收。不要删除源文件或整个池来制造故障。
 10. 管理员在“设置 → 个性化”把息屏设为 10 分钟后，本机屏幕保持 13 分钟无输入应变为纯黑（屏保先播放 10 分钟）；第一次移动鼠标或按键只回到桌面。退出登录后在登录页保持 13 分钟无输入同样变黑，唤醒后已输入的账号保留。验收后按需改回 30 分钟。行为见[个性化规格](../specs/personalization.md)。
@@ -271,7 +280,7 @@ cat /var/lib/a-nas/screensavers/pools/<池 ID>/SHA256SUMS
 /opt/a-nas/current/install-media-pool.sh screensavers <池 ID>
 ```
 
-Experimental NAS 上原来五条视频的池为 `53e12079d8d50c4c`，2026-10-10 起的当前池是六条视频的 `68299080c557c520`。之后按验收第 7 项复核清单数量和 Range 请求。不要删除当前池作为回滚手段；对象和旧池的清理不属于常规回滚，必须另行确认。
+Experimental NAS 上原来五条视频的池为 `53e12079d8d50c4c`，2026-10-10 起的当前池是六条视频的 `68299080c557c520`。切换后脚本在 Kiosk 运行时重启它，重新打开的页面从切回的池中选择屏保。之后按验收第 7 项复核清单数量和 Range 请求。不要删除当前池作为回滚手段；对象和旧池的清理不属于常规回滚，必须另行确认。
 
 ## 依据
 
