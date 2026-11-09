@@ -145,7 +145,9 @@ type sentCommand struct {
 }
 
 // send passes the command to its window, unless it was settled first: the
-// end of the turn may settle it between command and send. Commands go to a
+// end of the turn may settle it between command and send. A command of a
+// turn the member is stopping is settled as cancelled instead: it may have
+// waited behind another for its window past the stop. Commands go to a
 // window one at a time, so the release the end of a turn sends never
 // overtakes a lock still on its way. send gives up when ctx ends, whether
 // it is waiting for its turn or writing: a window that takes no frames
@@ -160,6 +162,11 @@ func (c *companionCommand) send(ctx context.Context, m *member) {
 	defer func() { <-slot }()
 	m.mu.Lock()
 	_, waiting := m.commands[c.id]
+	if s := m.sessions[c.session]; waiting && c.answer != nil && s != nil && s.stopping {
+		// The member stopped the turn while the command waited for its window.
+		m.settleLocked(c.id, map[string]any{"status": companionCancelled, "reason": "turn-ended"})
+		waiting = false
+	}
 	m.mu.Unlock()
 	if waiting {
 		_ = c.browser.toBrowserWithin(ctx, c.event)
@@ -376,7 +383,12 @@ func (m *member) waitStart(ctx context.Context, tool, args string) (start compan
 // tool.start of its own and could take another conversation's.
 //
 // A call a stopped turn left comes before one of the same conversation's next
-// turn: it was sent before any made since. It is not the only call that may
+// turn: it was sent before any made since. A turn counts as stopped from
+// the moment the window's session.interrupt goes to Hermes (member.stopping),
+// not from its message.complete: Hermes may finish the call under way and
+// start the next before it looks at the stop. So the calls of a stopping
+// turn, started before the stop or after it, are the stopped turn's too, and
+// none of them is sent. A stopped turn's call is not the only call that may
 // match, though: Hermes reports a call's start before the call waits for the
 // server, and stopping the turn may end it there, never sent. So it is taken
 // only once late, after companionLate, by which time another conversation's
@@ -390,13 +402,13 @@ func (m *member) pair(tool, args string, now time.Time, late bool) (start compan
 	stopped := ""
 	for id, s := range m.sessions {
 		s.abandoned = slices.DeleteFunc(s.abandoned, func(c companionStart) bool { return now.Sub(c.at) >= companionAbandoned })
-		if stopped == "" && slices.ContainsFunc(s.abandoned, matches) {
+		s.companion = slices.DeleteFunc(s.companion, func(c companionStart) bool { return now.Sub(c.at) >= companionStale })
+		if stopped == "" && (slices.ContainsFunc(s.abandoned, matches) || s.stopping && slices.ContainsFunc(s.companion, matches)) {
 			stopped = id
 		}
 	}
 	for id, s := range m.sessions {
-		s.companion = slices.DeleteFunc(s.companion, func(c companionStart) bool { return now.Sub(c.at) >= companionStale })
-		if id == stopped || !s.turn || !slices.ContainsFunc(s.companion, matches) {
+		if id == stopped || !s.turn || s.stopping || !slices.ContainsFunc(s.companion, matches) {
 			continue
 		}
 		if session != "" || stopped != "" {
@@ -409,9 +421,16 @@ func (m *member) pair(tool, args string, now time.Time, late bool) (start compan
 			return companionStart{}, "", false, false
 		}
 		s := m.sessions[stopped]
-		i := slices.IndexFunc(s.abandoned, matches)
-		start = s.abandoned[i]
-		s.abandoned = slices.Delete(s.abandoned, i, i+1)
+		if i := slices.IndexFunc(s.abandoned, matches); i >= 0 {
+			start = s.abandoned[i]
+			s.abandoned = slices.Delete(s.abandoned, i, i+1)
+			return start, stopped, true, false
+		}
+		// The turn is still stopping: its call is taken from those waiting.
+		i := slices.IndexFunc(s.companion, matches)
+		start = s.companion[i]
+		start.abandoned = true
+		s.companion = slices.Delete(s.companion, i, i+1)
 		return start, stopped, true, false
 	}
 	if session == "" {
@@ -433,7 +452,8 @@ func (m *member) pair(tool, args string, now time.Time, late bool) (start compan
 }
 
 // companionStarted records the start of a companion tool's call in a running
-// turn. Under m.mu.
+// turn. In a turn the member is stopping, pair takes it as the stopped turn's
+// and it is never sent. Under m.mu.
 func (m *member) companionStarted(s *liveSession, toolID, name string, rawArgs json.RawMessage) {
 	tool, ok := strings.CutPrefix(name, companionPrefix)
 	if _, known := companionTools[tool]; !ok || !known || !s.turn || toolID == "" || strings.HasPrefix(toolID, mirroredTool) {
@@ -566,7 +586,8 @@ func (m *member) prompted(session string, u *upstream, queued bool) {
 
 // command makes the command for a paired call, or the result that refuses it:
 // no desktop unless the conversation's browser is the window that sent its
-// prompt and is still there, busy over the limits.
+// prompt and is still there, cancelled once the member stops the turn, busy
+// over the limits.
 func (m *member) command(session, tool string, args map[string]any) (*companionCommand, map[string]any) {
 	id, err := newCommandID()
 	if err != nil {
@@ -575,6 +596,10 @@ func (m *member) command(session, tool string, args map[string]any) (*companionC
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.sessions[session]
+	if s != nil && s.turn && s.stopping {
+		// The member stopped the turn after the call was paired.
+		return nil, map[string]any{"status": companionCancelled, "reason": "turn-ended"}
+	}
 	if s == nil || !s.turn || s.browser == nil || s.browser != s.prompter || !s.browser.hasWindow() {
 		return nil, map[string]any{"status": companionNoDesktop}
 	}

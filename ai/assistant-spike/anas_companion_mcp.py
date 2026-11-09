@@ -138,7 +138,7 @@ LOCK = "lock：伙伴被锁定时，锁的 lockId；没被锁就不填。"
 # Each tool: what the model is told, its arguments with their schemas, and the
 # ones it must give.
 TOOLS = {
-    "anim": ("让伙伴播放一段动画，等它播完再返回（最多约 10 秒）。name：动画名；facing：朝向 left 或 right。" + LOCK,
+    "anim": ("让伙伴播放一段动画，等它播完再返回（最多约 11.5 秒）。name：动画名；facing：朝向 left 或 right。" + LOCK,
              {"name": TEXT, "facing": FACING, "lock": TEXT}, ["name"]),
     "broadcast": ("让伙伴用气泡说一句话。text：1–200 字的纯文本，可以换行；duration：显示多少毫秒（0–60000，默认 10000）；"
                   "anim：说话时是否配动画（默认是）。" + LOCK,

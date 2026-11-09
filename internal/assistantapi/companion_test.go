@@ -1221,3 +1221,182 @@ func TestAMembersCallsUnderWayAreBounded(t *testing.T) {
 		}
 	}
 }
+
+// interrupt asks Hermes to stop the turn under way, as the member's Stop
+// does, and leaves its end to the test.
+func interrupt(w *window) {
+	w.t.Helper()
+	w.call("session.interrupt", `{"session_id":"`+fakeRuntime+`"}`)
+}
+
+// nothingSent waits until the Product Service has seen every event played so
+// far on conn, and fails if a command reached w in the meantime or one waits.
+func (h *harness) nothingSent(w *window, conn *websocket.Conn) {
+	w.t.Helper()
+	h.marks++
+	mark := fmt.Sprintf("mark-%d", h.marks)
+	h.serve.event(conn, "status.update", fakeRuntime, `{"text":"`+mark+`"}`)
+	w.waitFor(func(f frame) bool {
+		if isEvent(f, "anas.companion") {
+			w.t.Fatalf("a command reached the window: %s", f.Params)
+		}
+		return isEvent(f, "status.update") && strings.Contains(string(f.Params), mark)
+	})
+	m := h.alice()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.commands) != 0 {
+		w.t.Fatalf("%d commands wait for a window", len(m.commands))
+	}
+}
+
+func cancelledByTheStop(t *testing.T, results <-chan map[string]any) {
+	t.Helper()
+	if result := resultOf(t, results); result["status"] != "cancelled" || result["reason"] != "turn-ended" {
+		t.Fatalf("a call of the stopped turn: %v", result)
+	}
+}
+
+// Browser check (#412, 11-09): the model calls wake, broadcast and two anims;
+// the member stops the turn while the first anim plays. Hermes looks at the
+// stop only once that call returned, so it still starts the last anim: its
+// tool.start comes after the stop.
+func TestACallStartedAfterTheStopIsNotSent(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	h.started(conn, fakeRuntime, "call-3", "anim", `{"name":"三球抛接"}`)
+	playing := h.calls("anim", `{"name":"三球抛接"}`)
+	sent := command(w)
+	interrupt(w)
+	// The window stops the animation and answers.
+	answer(w, fakeRuntime, sent.Payload.CommandID, `"ok":true,"result":{"status":"cancelled"}`)
+	if status := statusOf(t, playing); status != "cancelled" {
+		t.Fatalf("the playing anim: %s", status)
+	}
+	h.started(conn, fakeRuntime, "call-4", "anim", `{"name":"点击回应-元气挥手"}`)
+	h.observed(w, conn)
+	cancelledByTheStop(t, h.calls("anim", `{"name":"点击回应-元气挥手"}`))
+	h.nothingSent(w, conn)
+	// The turn's end keeps nothing more of it.
+	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"stopped","status":"interrupted"}`)
+	h.nothingSent(w, conn)
+	m := h.alice()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s := m.sessions[fakeRuntime]; len(s.companion) != 0 || len(s.abandoned) != 0 {
+		t.Fatalf("left: %d waiting, %d abandoned", len(s.companion), len(s.abandoned))
+	}
+}
+
+// A call started before the stop whose call reaches the socket only after it:
+// it waited behind another call for the server.
+func TestACallStartedBeforeTheStopThatComesAfterItIsNotSent(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	h.started(conn, fakeRuntime, "call-4", "anim", `{"name":"点击回应-元气挥手"}`)
+	h.observed(w, conn)
+	interrupt(w)
+	cancelledByTheStop(t, h.calls("anim", `{"name":"点击回应-元气挥手"}`))
+	h.nothingSent(w, conn)
+	// Hermes completes it with the turn: nothing is kept twice.
+	h.serve.event(conn, "tool.complete", fakeRuntime, `{"tool_id":"call-4","name":"`+companionPrefix+`anim"}`)
+	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"stopped","status":"interrupted"}`)
+	h.nothingSent(w, conn)
+	m := h.alice()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s := m.sessions[fakeRuntime]; len(s.companion) != 0 || len(s.abandoned) != 0 {
+		t.Fatalf("left: %d waiting, %d abandoned", len(s.companion), len(s.abandoned))
+	}
+}
+
+// A stopped turn whose calls never came holds up the conversation's next
+// turn only for companionAbandoned.
+func TestAStoppedTurnsUnsentCallsLetTheNextTurnGoOnceTheirTimePassed(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	m := h.alice()
+	h.started(conn, fakeRuntime, "call-1", "anim", `{"name":"三球抛接"}`)
+	h.observed(w, conn)
+	interrupt(w)
+	h.started(conn, fakeRuntime, "call-2", "anim", `{"name":"三球抛接"}`)
+	h.serve.event(conn, "tool.complete", fakeRuntime, `{"tool_id":"call-2","name":"`+companionPrefix+`anim"}`)
+	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"stopped","status":"interrupted"}`)
+	h.observed(w, conn)
+	m.mu.Lock()
+	s := m.sessions[fakeRuntime]
+	if len(s.companion) != 0 || len(s.abandoned) != 2 {
+		m.mu.Unlock()
+		t.Fatalf("after the stop: %d waiting, %d abandoned, want 0 and 2", len(s.companion), len(s.abandoned))
+	}
+	for i := range s.abandoned {
+		s.abandoned[i].at = s.abandoned[i].at.Add(-companionAbandoned)
+	}
+	m.mu.Unlock()
+	nextTurn(w)
+	h.started(conn, fakeRuntime, "call-3", "anim", `{"name":"三球抛接"}`)
+	h.observed(w, conn)
+	began := time.Now()
+	results := h.calls("anim", `{"name":"三球抛接"}`)
+	answer(w, fakeRuntime, command(w).Payload.CommandID, `"ok":true,"result":{"status":"ended"}`)
+	if status := statusOf(t, results); status != "ended" || time.Since(began) >= companionLate {
+		t.Fatalf("the next turn's call: %s after %s", status, time.Since(began))
+	}
+}
+
+func TestAStopWithNoTurnUnderWayChangesNothing(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
+	h.observed(w, conn)
+	interrupt(w)
+	// A start outside a turn is not recorded, stop or no stop.
+	h.started(conn, fakeRuntime, "call-1", "wake", `{}`)
+	h.observed(w, conn)
+	m := h.alice()
+	m.mu.Lock()
+	s := m.sessions[fakeRuntime]
+	stopping, waiting, abandoned := s.stopping, len(s.companion), len(s.abandoned)
+	m.mu.Unlock()
+	if stopping || waiting != 0 || abandoned != 0 {
+		t.Fatalf("stopping %v, %d waiting, %d abandoned", stopping, waiting, abandoned)
+	}
+	nextTurn(w)
+	h.started(conn, fakeRuntime, "call-2", "wake", `{}`)
+	h.observed(w, conn)
+	began := time.Now()
+	results := h.calls("wake", `{}`)
+	answer(w, fakeRuntime, command(w).Payload.CommandID, `"ok":true,"result":{"status":"ok"}`)
+	if status := statusOf(t, results); status != "ok" || time.Since(began) >= companionLate {
+		t.Fatalf("the next turn's call: %s after %s", status, time.Since(began))
+	}
+}
+
+// A command that waits behind another for its window when the member stops
+// the turn does not go out after the stop.
+func TestACommandWaitingForItsWindowAtTheStopIsNotSent(t *testing.T) {
+	h := newHarness(t)
+	w, conn := companionTurn(t, h)
+	h.started(conn, fakeRuntime, "call-1", "wake", `{}`)
+	h.observed(w, conn)
+	give := h.holdWindow()
+	results := h.calls("wake", `{}`)
+	m := h.alice()
+	deadline := time.Now().Add(frameWait)
+	for {
+		m.mu.Lock()
+		waiting := len(m.commands)
+		m.mu.Unlock()
+		if waiting == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the call made no command")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	interrupt(w)
+	give()
+	cancelledByTheStop(t, results)
+	h.nothingSent(w, conn)
+}

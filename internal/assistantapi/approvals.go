@@ -107,7 +107,9 @@ type liveSession struct {
 	ended time.Time
 	// submit is the arguments of the call of 提交更改 that started and has
 	// neither completed nor been paired with an approval.
-	submit   *startedCall
+	submit *startedCall
+	// stopping is set from the window's session.interrupt to the turn's
+	// message.complete: the turn's companion calls are no longer sent.
 	stopping bool
 	owner    *upstream
 	// browser is the connection whose window registered last as the
@@ -210,7 +212,8 @@ func (m *member) openTurn(id string, owner *upstream) {
 // turn, and the turn's last events (tool.complete, message.complete) may come
 // before the answer. Hermes drops the prompts it queued behind the turn
 // (tui_gateway/session_lifecycle.py, _interrupt_session_turn): the next turn
-// is not theirs.
+// is not theirs. From here on the turn's companion calls are its stopped
+// calls (pair), whether they started before the stop or after it.
 func (m *member) stopping(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
