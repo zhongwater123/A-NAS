@@ -29,6 +29,25 @@ import numpy as np
 # 8 s, where cutting every 20 s gave 204 that mixed sights.
 SEGMENT_MAX = 20.0
 PIECE_MIN = 2
+# Cards from the pictures alone (index "cards": "picture", #416, 2026-11-08): windows under CARD_ALIKE
+# to the card's mean start the next card unless one of the next CARD_LOOK windows is that alike again
+# (a close-up cut into a wide shot stays in it); a card past CARD_LONG is cut in two at its least
+# alike windows, CARD_SIDE a side (方案 B). On cases 01 and 02 all 131 joins this made inside FFmpeg's
+# shots were right by the member's marks; across them the cards are one scene each, which is what the
+# planner reads (#419: scene F1 0.57 / 0.59 against 0.32 / 0.48 cut at FFmpeg's shots). 01: 18 cards
+# (84 before), longest 96 s; 02: 88 (223), longest 114 s.
+CARD_ALIKE = 0.86
+CARD_LOOK = 2
+CARD_LONG = 120.0
+CARD_SIDE = 20.0
+# A card is described from key frames (Index.key_windows, #392): where its picture changes, every
+# KEY_GAP seconds of a run without one, KEY_FEWEST to KEY_MOST of them; one beat a key frame. Spread
+# evenly, 10 s apart lost the woman in case 01's rear-view mirror and 6 s apart the model paired the
+# frames two by two; grouped frames looped past 14 groups. Key frames wrote 20 beats of a 112 s card
+# without a repeat.
+KEY_GAP = 12.0
+KEY_FEWEST = 3
+KEY_MOST = 20
 # Windows at least this alike (cosine of their vectors) show the same thing.
 SAME_PICTURE = 0.97
 # The pilot's 2s1f threshold that turns away 80% of queries with no answer
@@ -62,7 +81,9 @@ ROUNDING = 0.005
 # followed boat is 0.93-0.98, a new shot 0.63-0.75). Grey-level frame differences
 # cannot tell: a moving camera changes the pixels, not the picture.
 STILL = 0.9
-# The longest a segment may run, changing or not: one picture for 8 s tires the eye.
+# The longest a segment may run when the plan gives no seconds (Index.span, a pace's aim, a
+# trailer's tail): one picture for 8 s tires the eye. A plan's own seconds are not held to it
+# (#416, 剪法23): it cut the Shanghai vlog's planned 79 seconds to 65.
 CLIP_MAX = 6.0
 # Index.span's two ways to grow a segment from the window a probe matched (#350): over
 # neighbours this close to its probe score, or over those STILL alike to its picture.
@@ -78,11 +99,13 @@ TAIL_MIN = 2.5
 # at most SNAP to reach one.
 PAUSE = 0.3
 SNAP = 1.5
-# Words this far apart end a sentence, for the lines a card's catalog line ends with (lines): the
-# planner sees what is said over a card and the seconds of each sentence in it, as 方案 B's review
-# sees each clip's dialogue, so that a plan can keep a line whole (#416). A sentence runs to
-# LINE_CHARS characters in the catalog at most.
+# Words this far apart end a sentence (sentences). A segment end inside a sentence first widens
+# to take it whole, with SENTENCE_PAD around it, as far as its region allows, as 方案 B does;
+# only then does it move to the nearest pause (#416, 剪法23). The planner is not shown the lines
+# (剪法22 showed them, and it chose cards by their lines, an in-car shot over the road it meant).
+# lines and said_line still write them, LINE_CHARS characters a sentence at most, for review.
 SENTENCE_GAP = 0.6
+SENTENCE_PAD = 0.2
 ENDS = (".", "?", "!", "。", "？", "！")
 LINE_CHARS = 60
 # Less of a sentence than this inside a card is not listed: a word that only crosses its edge.
@@ -127,23 +150,41 @@ SCENE_NEAR = 0.45
 # A picture's colour and light: its pixels in BINS × BINS × BINS bins of red, green and blue.
 BINS = 4
 # The seconds a segment of each pace runs when the plan does not say (#350): a trailer's shots
-# run one and a half to four seconds, a still one read as soon as a moving one. The planner sets
-# each segment's seconds itself (剪法18) and is told no paces; without seconds, each segment
+# run one and a half to four seconds, a still one read as soon as a moving one. Each paragraph's
+# seconds come from its weight (allocated, 剪法24) and are shared among its shots by these paces;
+# the planner is told no paces. Without seconds, each segment
 # aims at the middle of its pace's range, all scaled to the cut's target.
 PACE_RANGES = {"慢": (3.0, 4.0), "中": (2.0, 3.0), "快": (1.5, 2.0)}
 PACES = {name: (low + high) / 2 for name, (low, high) in PACE_RANGES.items()}
-# The cut's seconds are a ceiling (#398, 剪法20): a plan past them is scaled down, one short of
-# them is cut as it is. Stretching every segment to the target had padded case-01's talk; sending
-# a short plan back (10% short) and capping the segments at 30 pulled against each other on a
-# 90-second vlog, three plans sent back for a cut that came out short anyway.
+# A plan's seconds are its own (#416, 剪法23): each segment runs what the plan gave it, at least
+# SEGMENT_MIN; since 剪法24 the plan's seconds are the ones allocated shares out of its weights. 剪法20 held them to the
+# target as a ceiling, scaled down past it, and each to CLIP_MAX: the planner then asked for
+# 49-83% of the target and the cuts came out 45-76 seconds of 60 and 90.
 
 
-def planned_seconds(asked: list[float], target: float) -> list[float]:
-    """Each segment's seconds as the plan gave them, held to SEGMENT_MIN-CLIP_MAX, all scaled
-    down to target when they run past it and never up (剪法20)."""
-    held = [min(CLIP_MAX, max(SEGMENT_MIN, float(x))) for x in asked]
-    scale = min(1.0, target / sum(held)) if held else 1.0
-    return [max(SEGMENT_MIN, x * scale) for x in held]
+def planned_seconds(asked: list[float]) -> list[float]:
+    """Each segment's seconds as the plan gave them, at least SEGMENT_MIN."""
+    return [max(SEGMENT_MIN, float(x)) for x in asked]
+
+
+# A paragraph's weight in the cut (#416, 剪法24), as 方案 B's outline weighs its parts: the planner
+# says how much each paragraph matters, the program shares out the seconds (allocated). Planners
+# writing seconds themselves (剪法18-23) asked for 49-83% of the target when told it was a ceiling,
+# and the cuts ran 72-79 seconds of 60 when it was not.
+WEIGHT_MIN, WEIGHT_MAX = 1, 10
+
+
+def allocated(weights: list[int], shots: list[int], target: float) -> list[float]:
+    """Each paragraph's seconds: SEGMENT_MIN for each of its shots, and what is left of target
+    shared by weight, adding up to target (to the hundredth); just the shots' minimums when those
+    alone run past target."""
+    floors = [SEGMENT_MIN * n for n in shots]
+    spare = max(0.0, target - sum(floors))
+    shares = [floor + spare * w / sum(weights) for floor, w in zip(floors, weights, strict=True)]
+    out = [round(x, 2) for x in shares]
+    if spare:
+        out[-1] = round(out[-1] + target - sum(out), 2)
+    return out
 
 # The cards a plan picks can run at least this share of its target, so that the program has
 # room to set each segment's seconds (#350).
@@ -263,19 +304,26 @@ class Index:
     def __init__(self, index: dict, vectors: dict):
         self.model = index["model"]
         self.videos = index["videos"]
-        rows, frames, flat, tags, shot_of, self.frame_ms = [], [], [], [], [], []
+        # "picture" (#416, 2026-11-08): cards from the pictures alone, not FFmpeg's cuts (_by_picture).
+        self.layout = index.get("cards", "shots")
+        rows, frames, flat, tags, self.frame_ms = [], [], [], [], []
         for video, meta in sorted(self.videos.items()):
-            shots = meta["shots"]
             for window in meta["windows"]:
-                middle = (window["start"] + window["end"]) / 2
                 rows.append((video, window["start"], window["end"]))
                 self.frame_ms.append(window["frame"])
                 frames.append(vectors[f"{video}/{window['frame']}"])
                 flat.append(window["flat"])
                 tags.append(window["tags"])
-                shot_of.append(next(i for i, (s, e) in enumerate(shots) if s <= middle < e or i == len(shots) - 1))
         self.rows, self.frames = rows, np.stack(frames)
-        self.flat, self.tags, self.shot_of = np.array(flat), tags, shot_of
+        self.flat, self.tags = np.array(flat), tags
+        if self.layout == "picture":
+            self.videos = {v: meta | {"shots": shots} for (v, meta), shots
+                           in zip(sorted(self.videos.items()), self._by_picture(), strict=True)}
+        self.shot_of = []
+        for video, start, end in rows:
+            shots = self.videos[video]["shots"]
+            middle = (start + end) / 2
+            self.shot_of.append(next(i for i, (s, e) in enumerate(shots) if s <= middle < e or i == len(shots) - 1))
         self.cards = self._cards()
         self.captions, self.notes, self.pictures = {}, {}, {}
         self.words: dict[str, list] = {}
@@ -367,13 +415,14 @@ class Index:
                 near = [c for c in joined if abs(c - t) <= window]
                 return min(near, key=lambda c: abs(c - t)) if near else t
 
-            for piece in self._pieces(members):
+            # A card from the pictures alone is its own "shot": one card, however long (_by_picture).
+            for piece in [members] if self.layout == "picture" else self._pieces(members):
                 lo = start if piece[0] == members[0] else onto(self.rows[piece[0]][1], self.rows[piece[0]][2] - self.rows[piece[0]][1])
                 hi = end if piece[-1] == members[-1] else onto(self.rows[piece[-1]][2], self.rows[piece[-1]][2] - self.rows[piece[-1]][1])
                 if hi <= lo:
                     lo = start if piece[0] == members[0] else self.rows[piece[0]][1]
                     hi = end if piece[-1] == members[-1] else self.rows[piece[-1]][2]
-                parts = max(1, math.ceil((hi - lo) / SEGMENT_MAX - 1e-9))
+                parts = 1 if self.layout == "picture" else max(1, math.ceil((hi - lo) / SEGMENT_MAX - 1e-9))
                 for k in range(parts):
                     a, b = lo + (hi - lo) * k / parts, lo + (hi - lo) * (k + 1) / parts
                     windows = [i for i in piece if a <= (self.rows[i][1] + self.rows[i][2]) / 2 < b]
@@ -396,19 +445,89 @@ class Index:
             card["group"] = firsts[g]
         return cards
 
-    def _pieces(self, members: list[int]) -> list[list[int]]:
-        """A shot's windows in runs whose picture holds: a window less than STILL alike to
-        the mean of the run so far starts the next, once the run has PIECE_MIN windows. A walk
-        or a pan that never cuts still moves from one sight to the next."""
-        pieces, mean = [[members[0]]], self.frames[members[0]].copy()
-        for i in members[1:]:
-            if len(pieces[-1]) >= PIECE_MIN and float(self.frames[i] @ mean) / np.linalg.norm(mean) < STILL:
-                pieces.append([i])
-                mean = self.frames[i].copy()
-            else:
+    def _pieces(self, members: list[int], alike: float = STILL, look: int = 0) -> list[list[int]]:
+        """A shot's windows in runs whose picture holds: a window less than alike to the mean
+        of the run so far starts the next, once the run has PIECE_MIN windows. A walk or a pan
+        that never cuts still moves from one sight to the next. With look, a window under alike
+        stays in the run when one of the next look windows is alike again (A B A, #416); the
+        windows it bridges do not move the run's mean."""
+        pieces, mean, n = [[members[0]]], self.frames[members[0]].copy(), 1
+
+        def holds(i):
+            return float(self.frames[i] @ mean) / np.linalg.norm(mean) >= alike
+
+        while n < len(members):
+            i = members[n]
+            if len(pieces[-1]) < PIECE_MIN or holds(i):
                 pieces[-1].append(i)
                 mean += self.frames[i]
+                n += 1
+                continue
+            back = next((k for k in range(1, look + 1) if n + k < len(members) and holds(members[n + k])), None)
+            if back:
+                pieces[-1].extend(members[n:n + back + 1])
+                mean += self.frames[members[n + back]]
+                n += back + 1
+                continue
+            pieces.append([i])
+            mean = self.frames[i].copy()
+            n += 1
         return pieces
+
+    def _by_picture(self) -> list[list[list[float]]]:
+        """Each video's "shots" when cards come from the pictures alone (#416, 2026-11-08): its
+        windows that are not flat in runs (_pieces at CARD_ALIKE, looking CARD_LOOK windows ahead),
+        a run past CARD_LONG cut at its least alike neighbouring windows with CARD_SIDE a side; a
+        flat window goes with the run before it (or after, at the start). FFmpeg's cuts are not
+        used: a card is one scene, the render still trims a clip's ends at real cuts."""
+        out = []
+        for video in sorted(self.videos):
+            members = sorted((i for i, row in enumerate(self.rows) if row[0] == video), key=lambda i: self.rows[i][1])
+            seen = [i for i in members if not self.flat[i]] or members
+            runs = []
+            for run in self._pieces(seen, CARD_ALIKE, CARD_LOOK):
+                runs += self._halved(run)
+            starts = [self.rows[run[0]][1] for run in runs]
+            starts[0] = self.rows[members[0]][1]
+            ends = [*starts[1:], self.rows[members[-1]][2]]
+            out.append([[round(a, 3), round(b, 3)] for a, b in zip(starts, ends, strict=True)])
+        return out
+
+    def _halved(self, run: list[int]) -> list[list[int]]:
+        """run cut at its least alike neighbouring windows until none is past CARD_LONG, each side
+        at least CARD_SIDE (方案 B's split_long)."""
+        start, end = self.rows[run[0]][1], self.rows[run[-1]][2]
+        if end - start <= CARD_LONG:
+            return [run]
+        cuts = [k for k in range(1, len(run))
+                if self.rows[run[k]][1] - start >= CARD_SIDE and end - self.rows[run[k]][1] >= CARD_SIDE]
+        if not cuts:
+            return [run]
+        k = min(cuts, key=lambda k: float(self.frames[run[k - 1]] @ self.frames[run[k]]))
+        return self._halved(run[:k]) + self._halved(run[k:])
+
+    def key_windows(self, card: dict) -> list[int]:
+        """The windows to describe a card from (#416, #392): its first, then each that starts a new
+        run of its picture (_pieces at STILL, no look-ahead); a run KEY_GAP seconds without one
+        gets, every KEY_GAP seconds, the window least like those taken; at most KEY_MOST (the most
+        alike neighbouring pair gives up its later one). Fewer than KEY_FEWEST: none, the caller
+        then spreads that many over the card (keyframes)."""
+        members = [i for i in card["windows"] if not self.flat[i]]
+        if not members:
+            return []
+        picked = []
+        for run in self._pieces(members):
+            picked.append(run[0])
+            t0 = self.rows[run[0]][1]
+            for k in range(1, math.ceil((self.rows[run[-1]][2] - t0) / KEY_GAP)):
+                chunk = [i for i in run if t0 + k * KEY_GAP <= self.rows[i][1] < t0 + (k + 1) * KEY_GAP]
+                if chunk:
+                    picked.append(min(chunk, key=lambda i: max(float(self.frames[i] @ self.frames[p]) for p in picked)))
+        picked = sorted(set(picked), key=lambda i: self.rows[i][1])
+        while len(picked) > KEY_MOST:
+            k = max(range(1, len(picked)), key=lambda k: float(self.frames[picked[k - 1]] @ self.frames[picked[k]]))
+            del picked[k]
+        return picked if len(picked) >= KEY_FEWEST else []
 
     def catalog(self, videos=None, times=True, scenes=False, lengths=False, titles=True, paces=False,
                 joins=False, said=False) -> dict:
@@ -467,14 +586,8 @@ class Index:
         """The sentences said over card: the seconds of their words within it (0 at its start) and
         those words, a sentence ending where the words are SENTENCE_GAP apart or one ends a
         sentence (. ? ! 。？！); "…" marks a sentence that runs on before or after the card."""
-        runs = []
-        for a, b, word in sorted(self.said.get(card["video"], [])):
-            if runs and a - runs[-1][-1][1] < SENTENCE_GAP and not runs[-1][-1][2].rstrip().endswith(ENDS):
-                runs[-1].append((a, b, word))
-            else:
-                runs.append([(a, b, word)])
         out = []
-        for run in runs:
+        for run in self.sentences(card["video"]):
             inside = [w for w in run if w[1] > card["start"] and w[0] < card["end"]]
             if not inside or min(inside[-1][1], card["end"]) - max(inside[0][0], card["start"]) < LINE_MIN:
                 continue
@@ -655,8 +768,6 @@ class Index:
                 problems.append(f"第 {n} 段 {start:g}–{end:g} 秒越出了镜头 {lo:g}–{hi:g} 秒，片段不能跨过镜头切点")
             if end - start < shortest - ROUNDING:
                 problems.append(f"第 {n} 段只有 {end - start:.2g} 秒，每段至少 {shortest:g} 秒")
-            if end - start > CLIP_MAX + ROUNDING:
-                problems.append(f"第 {n} 段有 {end - start:.3g} 秒，每段最多 {CLIP_MAX:g} 秒")
             if any(self.flat[i] and self.rows[i][1] < end and start < self.rows[i][2] for i in self._shot_windows(card)):
                 problems.append(f"第 {n} 段 {start:g}–{end:g} 秒里有纯黑或纯色的画面")
             reason = segment.get("reason", "")
@@ -882,9 +993,10 @@ class Index:
         (SEGMENT_MIN by default). A segment also keeps to its card, and to the windows next to it
         in its shot that are STILL alike to the card (region), and takes no step whose frame
         is less than FLOOR alike to its peak frame: the time it cannot take goes to the others.
-        An end inside speech (self.words) then moves to the nearest pause that keeps those rules,
-        in or out: out by at most SNAP, and a line may take a segment SNAP past its cap, never
-        past CLIP_MAX; in as far as the segment's minimum allows. With floor, a segment that cannot
+        An end inside a sentence (sentences) then widens to take it whole, past its cap, as far
+        as its region and the other segments allow; one that cannot moves to the nearest pause
+        that keeps those rules (self.words), in or out: out by at most SNAP, up to SNAP past its
+        cap; in as far as the segment's minimum allows. With floor, a segment that cannot
         reach mins[n] keeps what it reaches when that is floor or more, and that is its minimum.
         Returns [(start, end) or None] and the problems."""
         if mode not in SPANS:
@@ -973,8 +1085,9 @@ class Index:
                 continue
             video, start, end = span
             lo, hi = regions[n]
-            # A line may take a segment past its cap, never past CLIP_MAX.
-            longest = min(caps[n] + SNAP, CLIP_MAX)
+            start, end = self._whole(video, start, end, functools.partial(
+                self._fits, video, (lo, hi), (mins[n], math.inf), spans, n))
+            longest = max(caps[n] + SNAP, end - start)
             fits = functools.partial(self._fits, video, (lo, hi), (mins[n], longest), spans, n)
             start = self._snapped(video, start, (start - SNAP, end - mins[n]), lambda t, e=end, ok=fits: ok(t, e))
             end = self._snapped(video, end, (start + mins[n], end + SNAP), lambda t, s=start, ok=fits: ok(s, t))
@@ -1004,6 +1117,8 @@ class Index:
                 start -= grow
             else:
                 break
+        if (start, end) != was:
+            start, end = self._whole(video, start, end, free)
         words = self.words.get(video, [])
         inside = [(a, b) for a, b in words if a + 0.05 < end < b - 0.05]
         if end > was[1] and inside:
@@ -1016,11 +1131,11 @@ class Index:
 
     def usable(self, card: dict) -> float:
         """The most seconds a segment of card can run (Index.fill): its region less its flat
-        windows, at most CLIP_MAX, down to the half second."""
+        windows, down to the half second."""
         lo, hi = self.region(card)
         flat = sum(max(0.0, min(hi, row[2]) - max(lo, row[1])) for i, row in enumerate(self.rows)
                    if self.flat[i] and row[0] == card["video"])
-        return math.floor(min(CLIP_MAX, hi - lo - flat) * 2) / 2
+        return math.floor((hi - lo - flat) * 2) / 2
 
     def region(self, card: dict) -> tuple[float, float]:
         """The seconds a segment of card may run: the card, and the windows next to it in its
@@ -1053,6 +1168,29 @@ class Index:
 
     def _flat_in(self, video, a, b) -> bool:
         return any(self.flat[i] and row[0] == video and row[1] < b and a < row[2] for i, row in enumerate(self.rows))
+
+    def sentences(self, video: str) -> list[list[tuple[float, float, str]]]:
+        """The words said in video, (start, end, word), in sentences: a sentence ends where the
+        words are SENTENCE_GAP apart or one ends a sentence (. ? ! 。？！)."""
+        runs = []
+        for a, b, word in sorted(self.said.get(video, [])):
+            if runs and a - runs[-1][-1][1] < SENTENCE_GAP and not runs[-1][-1][2].rstrip().endswith(ENDS):
+                runs[-1].append((a, b, word))
+            else:
+                runs.append([(a, b, word)])
+        return runs
+
+    def _whole(self, video, start, end, allowed) -> tuple[float, float]:
+        """start and end, each that falls inside a sentence widened to take the sentence whole,
+        with SENTENCE_PAD around it (or none, when that will not do), where allowed(a, b) passes;
+        an end that cannot is left as it is (#416, 方案 B's whole_sentences)."""
+        for run in self.sentences(video):
+            a, b = run[0][0], run[-1][1]
+            if a + 0.05 < start < b - 0.05:
+                start = next((t for t in (a - SENTENCE_PAD, a) if allowed(t, end)), start)
+            if a + 0.05 < end < b - 0.05:
+                end = next((t for t in (b + SENTENCE_PAD, b) if allowed(start, t)), end)
+        return start, end
 
     def _snapped(self, video, t, reach, allowed) -> float:
         """t, or when it falls inside speech the nearest pause in reach that allowed(pause) passes."""

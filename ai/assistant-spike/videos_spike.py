@@ -503,8 +503,8 @@ class Handler(BaseHTTPRequestHandler):
         """The segments with start and end set to add up to target (Index.fill): frames every
         half second, embedded as they are needed, set the ends; a trailer's last quarter is
         held to moments.TAIL_MIN-TAIL_MAX a segment; or, when the segments say their pace
-        (moments.PACES), each runs the seconds the plan gave it (moments.planned_seconds: scaled
-        down past target, never up, a plan short of target cut as it is) or else
+        (moments.PACES), each runs the seconds the plan gave it (moments.planned_seconds, the
+        cut as long as they add up to, #416) or else
         aims at its pace's seconds, all scaled to target. With margin, the cards must be able to
         run moments.MARGIN times target first. And the problems of those it cannot set."""
         index, cards = self.server.index, {c["id"] for c in self.server.index.cards}
@@ -529,9 +529,9 @@ class Handler(BaseHTTPRequestHandler):
             asked = [s.get("seconds") for s in segments]
             planned = all(isinstance(x, (int, float)) and not isinstance(x, bool) and x > 0 for x in asked)
             if planned:
-                # The seconds the planner gave each segment (剪法18), scaled down to target when
-                # they run past it, never up, and no segment run past them (剪法20).
-                shares = moments.planned_seconds(asked, target)
+                # The seconds the planner gave each segment (剪法18), no segment run past them
+                # but for a sentence it takes whole (剪法23).
+                shares = moments.planned_seconds(asked)
                 caps = shares
             else:
                 # Each segment's pace's aim, all scaled to the target.
@@ -573,7 +573,7 @@ class Handler(BaseHTTPRequestHandler):
         spans = [[cards[s["card"]]["video"], s["start"], s["end"]] if s.get("card") in cards
                  and isinstance(s.get("start"), (int, float)) and isinstance(s.get("end"), (int, float)) else None
                  for s in segments]
-        for n, (segment, want) in enumerate(zip(segments, moments.planned_seconds(asked, target), strict=True)):
+        for n, (segment, want) in enumerate(zip(segments, moments.planned_seconds(asked), strict=True)):
             if spans[n] is None or spans[n][2] - spans[n][1] >= want - moments.FINE / 2:
                 continue
             video, start, end = spans[n]

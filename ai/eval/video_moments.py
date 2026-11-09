@@ -586,6 +586,8 @@ def build_index(args):
     frames = Cache(os.path.join(directory, "frames.npz")).vectors
     sides = Cache(os.path.join(directory, CUTS))
     out = {"model": provider.model, "layout": MONTAGE_LAYOUT, "scene": SCENE, "same_place": SAME_PLACE, "videos": {}}
+    if args.cards == "picture":
+        out["cards"] = "picture"
     for video, meta in sorted(data["videos"].items()):
         duration = meta["duration"]
         path = os.path.join(VIDEOS, meta["file"])
@@ -816,6 +818,8 @@ def main():
     step.add_argument("--weight-cache", default=os.path.join(datasets.ROOT, "cache", "xnnpack"))
     step = steps.add_parser("index", help="find the shots, flat frames and labels the montage tools read")
     step.add_argument("--model", required=True)
+    step.add_argument("--cards", choices=("shots", "picture"), default="shots",
+                      help="cards cut at FFmpeg's shots, or from the pictures alone (moments.CARD_ALIKE, #416)")
     step.add_argument("--weight-cache", default=os.path.join(datasets.ROOT, "cache", "xnnpack"))
     step = steps.add_parser("describe", help="caption each montage card's key frame with a local vision model")
     step.add_argument("--cache", required=True, help="the model's directory under the cache, with index.json")

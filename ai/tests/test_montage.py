@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from montage import look, render
 
@@ -202,6 +203,59 @@ class MomentsTest(unittest.TestCase):
                               {f"08/{w['frame']}": vector for w in windows})
         self.assertEqual([(c["start"], c["end"]) for c in index.cards], [(0, 16.67), (16.67, 33.33), (33.33, 50)])
 
+    def _pictures(self, letters, shots=None, flat=()):
+        """An index of "cards": "picture" whose 2 s windows show the pictures letters name."""
+        basis = dict(zip("ABCDEFGH", np.eye(8, dtype=np.float32), strict=True))
+        windows = [{"start": 2 * k, "end": 2 * k + 2, "frame": 2000 * k + 1000, "flat": k in flat, "tags": []}
+                   for k in range(len(letters))]
+        meta = {"file": "08.webm", "duration": 2.0 * len(letters), "shots": shots or [[0, 2.0 * len(letters)]],
+                "windows": windows}
+        return moments.Index({"model": "test", "cards": "picture", "videos": {"08": meta}},
+                             {f"08/{w['frame']}": basis[c] for c, w in zip(letters, windows, strict=True)})
+
+    def test_picture_cards_keep_a_close_up_cut_into_a_shot_and_ignore_ffmpegs_cuts(self):
+        # A A B A A | C C: B comes back to A within CARD_LOOK windows, so it stays in A's card;
+        # the cut at 4 s that FFmpeg found inside A is not a card's edge (#416, 2026-11-08).
+        index = self._pictures("AABAACC", shots=[[0, 4], [4, 14]])
+        self.assertEqual([(c["start"], c["end"]) for c in index.cards], [(0, 10), (10, 14)])
+        self.assertEqual([c["shot"] for c in index.cards], [[0, 10], [10, 14]])
+        # A picture that does not come back within CARD_LOOK windows is a card of its own.
+        index = self._pictures("AABBBBAA")
+        self.assertEqual([(c["start"], c["end"]) for c in index.cards], [(0, 4), (4, 12), (12, 16)])
+
+    def test_a_flat_window_goes_with_the_card_before_it(self):
+        index = self._pictures("AAABBB", flat={3})
+        self.assertEqual([(c["start"], c["end"]) for c in index.cards], [(0, 8), (8, 12)])
+
+    def test_a_picture_card_past_card_long_is_cut_at_its_least_alike_windows(self):
+        with mock.patch.object(moments, "CARD_LONG", 10.0), mock.patch.object(moments, "CARD_SIDE", 4.0):
+            # One card by CARD_ALIKE (B comes back), 14 s past 10 s: cut where A meets B, 4 s a side.
+            index = self._pictures("AAAAABA")
+        self.assertEqual([(c["start"], c["end"]) for c in index.cards], [(0, 10), (10, 14)])
+
+    def test_key_windows_take_each_change_and_a_long_run_every_key_gap(self):
+        index = self._pictures("AABAACC")
+        first = index.cards[0]  # A A B A A
+        # A run is PIECE_MIN windows at least: B takes the A after it, the next A starts a run.
+        self.assertEqual(index.key_windows(first), [0, 2, 4])
+        # A run of one picture for 14 windows: its first, then one every KEY_GAP seconds.
+        index = self._pictures("A" * 14)
+        self.assertEqual([index.rows[i][1] for i in index.key_windows(index.cards[0])], [0, 12, 24])
+        # Fewer than KEY_FEWEST: none (the caller spreads that many evenly).
+        self.assertEqual(self._pictures("AAAA").key_windows(self._pictures("AAAA").cards[0]), [])
+        # Past KEY_MOST: the most alike neighbouring pair gives up its later window.
+        index = self._pictures("A" * 20)
+        self.assertEqual(len(index.key_windows(index.cards[0])), 4)
+        with mock.patch.object(moments, "KEY_MOST", 3):
+            self.assertEqual(len(index.key_windows(index.cards[0])), 3)
+
+    def test_shot_cards_are_as_before_without_the_picture_layout(self):
+        index = self._pictures("AABAACC", shots=[[0, 4], [4, 14]])
+        index_shots = moments.Index({"model": "test", "videos": index.videos | {"08": index.videos["08"] | {
+            "shots": [[0, 4], [4, 14]]}}}, {f"08/{2000 * k + 1000}": index.frames[k] for k in range(7)})
+        self.assertEqual(index_shots.layout, "shots")
+        self.assertEqual([c["id"] for c in index_shots.cards][:2], ["08-0-0", "08-1-0"])
+
     def test_a_split_near_a_cut_joined_as_the_same_place_falls_on_that_cut(self):
         basis = np.eye(4, dtype=np.float32)
         windows = [{"start": 2 * k, "end": 2 * k + 2, "frame": 2000 * k + 1000, "flat": False, "tags": []}
@@ -328,11 +382,9 @@ class MomentsTest(unittest.TestCase):
         for words in ("已经用在计划里", "不是检索结果里的镜头卡片", "why 要用一句话", "出现了不止一次"):
             self.assertTrue(any(words in p for p in problems), words)
 
-    def test_a_segment_over_six_seconds_is_refused_changing_or_not(self):
-        with self.assertRaises(moments.PlanError) as caught:
-            self.index.check([{"card": "07-1-1", "start": 30, "end": 38}])
-        self.assertIn("最多 6 秒", caught.exception.problems[0])
-        self.assertEqual(self.index.check([{"card": "07-1-1", "start": 30, "end": 36.004}]), [("07", 30.0, 36.004)])
+    def test_a_segment_runs_the_seconds_it_was_given_past_six(self):
+        # 剪法23 (#416): no segment is held to CLIP_MAX once it is set.
+        self.assertEqual(self.index.check([{"card": "07-1-1", "start": 30, "end": 38}]), [("07", 30.0, 38.0)])
 
     def test_a_plan_over_a_flat_frame_or_with_a_long_reason_is_refused(self):
         with self.assertRaises(moments.PlanError) as caught:
@@ -449,6 +501,19 @@ class MomentsTest(unittest.TestCase):
         spans, _problems = self.index.fill([("07-1-0", self.castle)], "probe", 2, self.at)
         self.assertEqual(spans, [(8, 9.6)])  # the pause in the line is closer than its end
 
+    def test_fill_widens_an_end_inside_a_sentence_to_take_it_whole(self):
+        # A sentence from 9 to 13 s: the end at 10 s widens past the 2 s the plan gave, and past
+        # SNAP, to the sentence's end and SENTENCE_PAD after it (方案 B's whole_sentences).
+        self.index.said = {"07": [(9.0, 9.5, "Look"), (9.6, 13.0, " there.")]}
+        self.index.words = {"07": [(9.0, 9.5), (9.6, 13.0)]}
+        spans, _problems = self.index.fill([("07-1-0", self.castle)], "probe", 2, self.at, caps=[2], shares=[2])
+        self.assertEqual(spans, [(8, 13.2)])
+        # A sentence that runs past the card's region stays cut, as in 方案 B: no pause near either.
+        self.index.said = {"07": [(9.0, 9.5, "Look"), (9.6, 29.0, " there.")]}
+        self.index.words = {"07": [(9.0, 9.5), (9.6, 29.0)]}
+        spans, _problems = self.index.fill([("07-1-0", self.castle)], "probe", 2, self.at, caps=[2], shares=[2])
+        self.assertEqual(spans, [(8, 10)])
+
     def test_topped_grows_a_segment_back_to_its_planned_seconds(self):
         region = (8, 28.0)
         # The end grows first, a tenth of a second at a time, to the seconds the plan gave it.
@@ -526,10 +591,10 @@ class MomentsTest(unittest.TestCase):
         self.index.parts.append({"video": "07", "cards": ["07-2-0"], "summary": ""})
         self.assertIsNone(self.index.pick(2, self.castle))  # its one window is flat: nothing to cut
 
-    def test_planned_seconds_are_scaled_down_past_the_target_never_up(self):
-        self.assertEqual(moments.planned_seconds([3, 4, 2], 60), [3, 4, 2])  # short: as planned
-        self.assertEqual(moments.planned_seconds([30, 30, 30, 30], 12), [3, 3, 3, 3])  # held to 6 s, then scaled down
-        self.assertEqual(moments.planned_seconds([1, 9], 60), [moments.SEGMENT_MIN, moments.CLIP_MAX])
+    def test_planned_seconds_are_the_plans_own_at_least_the_minimum(self):
+        self.assertEqual(moments.planned_seconds([3, 4, 2]), [3, 4, 2])
+        self.assertEqual(moments.planned_seconds([30, 30]), [30, 30])  # no ceiling, no scaling (剪法23)
+        self.assertEqual(moments.planned_seconds([1, 9]), [moments.SEGMENT_MIN, 9])
 
     def test_a_paragraph_runs_on_in_film_order_from_its_card(self):
         cards = [c["id"] for c in sorted(self.index.cards, key=lambda c: c["start"])]
@@ -590,9 +655,9 @@ class MomentsTest(unittest.TestCase):
 
     def test_a_card_says_the_most_seconds_a_segment_of_it_can_run(self):
         cards = {c["id"]: c for c in self.index.cards}
-        self.assertEqual(self.index.usable(cards["07-1-0"]), 6)  # 20 s of one picture, held to CLIP_MAX
+        self.assertEqual(self.index.usable(cards["07-1-0"]), 20)  # 20 s of one picture, all of it (剪法23)
         self.assertEqual(self.index.usable(cards["07-2-0"]), 0)  # its only window is flat
-        self.assertIn("07-1-0 可剪6秒", self.index.catalog(times=False, lengths=True)["videos"]["07"]["cards"][1])
+        self.assertIn("07-1-0 可剪20秒", self.index.catalog(times=False, lengths=True)["videos"]["07"]["cards"][1])
 
     def test_fill_grows_each_segment_to_its_own_share_first(self):
         # Paced slow and fast: the slow one takes 6 s first, though both score alike all along.
