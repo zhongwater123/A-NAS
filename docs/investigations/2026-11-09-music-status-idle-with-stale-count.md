@@ -19,7 +19,7 @@ music_test.go:379: after rename: 2 tracks, {ID:file:PTF4RAU5BNYJYPTL6OJBJ5N3II S
 
 1. WSL，Go 1.27，ext4 上的副本：`go test -run '^TestRescanFollowsRenamesAndRemovalsAndKeepsUserData$' -count=200 ./internal/music` 全部通过。
 2. 不改代码、只占满全部核（`while :; do :; done`，`-test.cpu=1,4`），ext4 与 tmpfs 各跑 15 分钟：都没有失败。原来的失败是一次完整门禁中的一次，单靠负载复现太慢。
-3. 只在临时副本中，在 [`Status`](../../internal/music/scan.go) 的两次读取之间睡 0–40 ms，模拟轮询的 goroutine 被调度器挂起，再运行同一测试：旧的读取顺序 100 次失败 4 次，失败信息与门禁中的相同（`after rename: 2 tracks, {… Folder:Albums Name:renamed.mp3 …}`）；新的读取顺序加同样的延迟，100 次全部通过。
+3. 只在临时副本中，在 [`Status`](../../internal/music/scan.go) 的两次读取之间睡 0–40 ms，模拟轮询的 goroutine 被调度器挂起，再运行同一测试：旧的读取顺序 500 次失败 45 次，失败信息与门禁中的相同（`after rename: 2 tracks, {… Folder:Albums Name:renamed.mp3 …}`）；新的读取顺序加同样的延迟，500 次全部通过。
 
 ## 观察事实
 
@@ -48,6 +48,7 @@ music_test.go:379: after rename: 2 tracks, {ID:file:PTF4RAU5BNYJYPTL6OJBJ5N3II S
 |---|---|---|
 | `TestStatusReadsTheScanBeforeTheLibrary`，`-race -count=3` | 3 次全部失败 | 3 次全部通过 |
 | 两次读取之间睡 0–40 ms，`TestRescanFollowsRenamesAndRemovalsAndKeepsUserData -count=100` | 4 次失败 | 0 次失败 |
+| 同上，`-count=400`，同时有门禁在跑 | 41 次失败 | 0 次失败 |
 
 ## 后续工作
 
