@@ -222,6 +222,30 @@ func TestFolderUploadCreatesAndReusesFolders(t *testing.T) {
 	}
 }
 
+// The folders of a folder upload follow the rules for new names, like the
+// file itself, and a refused folder is not created.
+func TestFolderUploadRefusesFolderNamesTheRulesForbid(t *testing.T) {
+	f := newUploadFixture(t)
+	for name, want := range map[string]error{
+		".a-nas-trash": files.ErrInvalidName,
+		"a:b":          files.ErrNameNotPortable,
+		"CON":          files.ErrNameNotPortable,
+		"trailing.":    files.ErrNameNotPortable,
+		"tab\there":    files.ErrNameNotPortable,
+	} {
+		upload, err := f.service.BeginUpload(f.ctx, f.alice, files.UploadRequest{SpaceID: f.space.ID, Directories: []string{"ok", name}, Name: "a.txt", Size: 1, Conflict: files.ConflictAsk})
+		if !errors.Is(err, want) {
+			if upload != nil {
+				_ = f.service.AbortUpload(f.ctx, f.alice, upload)
+			}
+			t.Errorf("folder %q: BeginUpload() error = %v, want %v", name, err, want)
+		}
+		if _, statErr := os.Lstat(filepath.Join(f.root, "ok", name)); !errors.Is(statErr, os.ErrNotExist) {
+			t.Errorf("folder %q was created: %v", name, statErr)
+		}
+	}
+}
+
 func TestUploadFollowsItsFolderWhenItMoves(t *testing.T) {
 	f := newUploadFixture(t)
 	folder, err := f.service.CreateDirectory(f.ctx, f.alice, f.space.ID, "", "收件箱")
