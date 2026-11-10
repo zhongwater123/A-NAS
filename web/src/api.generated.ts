@@ -488,7 +488,7 @@ export interface paths {
         /** @description Administrators only. The plans that still need the administrator, newest first: the one running, and the newest one that stopped in needs_attention unless a plan made after it has run. The settings page shows them again after a reload. */
         get: operations["listUnfinishedStoragePlans"];
         put?: never;
-        /** @description Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume. A volume on one disk then converts to the layout (mirror by default) in the background; a volume on several disks keeps its layout, and a mirror whose old disks are too full to pair with the new ones spreads its files over all disks. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts or Btrfs runs a balance, such as a spread; 422 invalid_layout when the layout does not fit the number of disks, layout_change_unsupported when it differs from the layout of a volume on several disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict. */
+        /** @description Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume. A volume on one disk then converts to the layout (mirror by default) in the background; a volume on several disks keeps its layout, and a mirror whose old disks are too full to pair with the new ones spreads its files over all disks. A mirror missing a disk instead takes one disk to rebuild the missing one onto (kind replace_disk; the layout is ignored), 422 disk_too_small when it is smaller than the missing disk and replace_one_disk for any other number of disks. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts, Btrfs runs a balance, such as a spread, or the volume misses a disk; 422 invalid_layout when the layout does not fit the number of disks, layout_change_unsupported when it differs from the layout of a volume on several disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict. */
         post: operations["createStoragePlan"];
         delete?: never;
         options?: never;
@@ -4502,13 +4502,13 @@ export interface components {
         HealthFindings: components["schemas"]["HealthFinding"][];
         HealthFinding: {
             /** @enum {string} */
-            code: "disk_failing" | "disk_warning" | "disk_health_unknown" | "disk_hot" | "cpu_hot" | "volume_offline" | "volume_read_only" | "volume_full" | "volume_nearly_full" | "volume_errors" | "volume_reconcile_failed";
+            code: "disk_failing" | "disk_warning" | "disk_health_unknown" | "disk_hot" | "cpu_hot" | "volume_offline" | "volume_degraded" | "volume_read_only" | "volume_full" | "volume_nearly_full" | "volume_errors" | "volume_reconcile_failed";
             /** @enum {string} */
             severity: "warning" | "critical";
             diskId?: components["schemas"]["StableResourceID"];
             /**
              * Format: int64
-             * @description disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted.
+             * @description disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted; volume_degraded: disks missing.
              */
             value?: number;
         };
@@ -4724,9 +4724,16 @@ export interface components {
             capacityBytes?: number;
             /** Format: int64 */
             availableBytes?: number;
-            /** @enum {string} */
-            state: "creating" | "available" | "unavailable" | "read_only";
+            /**
+             * @description degraded: mounted and writable without one of its disks; a mirror then keeps one copy of new data (ADR 0025).
+             * @enum {string}
+             */
+            state: "creating" | "available" | "degraded" | "unavailable" | "read_only";
             conversion?: components["schemas"]["VolumeConversion"];
+            /** @description Disks of the volume the device does not see, while it is degraded or not mounted. */
+            missingDisks?: components["schemas"]["MissingDisk"][];
+            /** @description The volume has all its disks again after running without one and is being scrubbed, so that data written meanwhile gets its second copy. */
+            restoring?: boolean;
             spread?: components["schemas"]["VolumeSpread"];
         };
         /** @description Present while data or metadata are outside the layout's Btrfs profiles, after disks were added. */
@@ -4773,8 +4780,11 @@ export interface components {
         };
         StoragePlan: {
             id: string;
-            /** @enum {string} */
-            kind: "create_volume" | "add_disks";
+            /**
+             * @description replace_disk: the only plan a mirror missing a disk takes; one new disk, at least as large, rebuilt from the other copy.
+             * @enum {string}
+             */
+            kind: "create_volume" | "add_disks" | "replace_disk";
             layout: components["schemas"]["VolumeLayout"];
             disks: components["schemas"]["PlannedDisk"][];
             /**
@@ -4795,7 +4805,9 @@ export interface components {
              * @description The step the Host Agent is at while the plan runs, or the one it stopped in when the plan needs attention.
              * @enum {string}
              */
-            step?: "erase" | "format" | "mount" | "prepare" | "add_devices";
+            step?: "erase" | "format" | "mount" | "prepare" | "add_devices" | "replace";
+            /** @description How far a rebuild has come, in percent, while a replace_disk plan is at the replace step. */
+            progress?: number;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -6896,6 +6908,13 @@ export interface components {
             status: components["schemas"]["TaskManagerStatus"];
             items: components["schemas"]["TaskManagerFan"][];
         };
+        /** @description A disk of the data volume that is not there, as the plan that added it recorded it. */
+        MissingDisk: {
+            id: components["schemas"]["StableResourceID"];
+            model?: string;
+            /** Format: int64 */
+            capacityBytes?: number;
+        };
         /**
          * @description A one-tap reaction, shown as ❤️ 👍 😂 🥰 👏.
          * @enum {string}
@@ -7290,6 +7309,7 @@ export type SystemThermal = components['schemas']['SystemThermal'];
 export type TaskManagerTemperature = components['schemas']['TaskManagerTemperature'];
 export type TaskManagerFan = components['schemas']['TaskManagerFan'];
 export type TaskManagerFanGroup = components['schemas']['TaskManagerFanGroup'];
+export type MissingDisk = components['schemas']['MissingDisk'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
 export type FamilyAssetIDs = components['schemas']['FamilyAssetIDs'];

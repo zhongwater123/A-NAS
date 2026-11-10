@@ -272,6 +272,13 @@ type DataVolume struct {
 	Data           []ProfileUsage
 	Metadata       []ProfileUsage
 	Operation      VolumeOperation
+	// MissingDevices is how many of the volume's disks the kernel cannot
+	// write to: absent when it was mounted without them, or gone since. A
+	// mirror keeps working without one (ADR 0025).
+	MissingDevices int
+	// Restoring says the volume ran without a disk and has not been scrubbed
+	// since: what was written then has one copy until it is.
+	Restoring bool
 	// Devices is how Btrfs allocates each device; nil when it could not be
 	// read or a device is missing.
 	Devices []VolumeDevice

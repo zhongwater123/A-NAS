@@ -42,7 +42,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
-	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/httpidle"
 	"github.com/zhongwater123/A-NAS/internal/media"
@@ -171,7 +170,10 @@ func run(logger *slog.Logger) error {
 	if err := os.MkdirAll(stateDirectory, 0o700); err != nil {
 		return err
 	}
-	reader, dataSource, operations := configuredServices(config)
+	reader, dataSource, operations, err := configuredServices(config)
+	if err != nil {
+		return err
+	}
 	// Development shows invented service logs; the Host Agent reads the
 	// journal (ADR 0020).
 	var systemLogs systemlog.Reader = systemlog.NewFake(nil)
@@ -649,14 +651,18 @@ func configuredWebSearch(config Config, store *websearch.Store, operations produ
 }
 
 // configuredServices reaches the host through the Host Agent on a NAS, and
-// through simulated disks and storage in development.
-func configuredServices(config Config) (hoststate.Observer, httpapi.DataSource, productOperations) {
+// through simulated disks and storage in development, of the host that
+// ANAS_FAKE_STORAGE names.
+func configuredServices(config Config) (hoststate.Observer, httpapi.DataSource, productOperations, error) {
 	if config.Live() {
 		client := agent.NewClient(config.HostAgentSocket)
-		return client, httpapi.DataSourceLive, client
+		return client, httpapi.DataSourceLive, client, nil
 	}
-	simulated := newSimulatedStorage(fake.NewWithSpareDisk())
-	return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated}
+	simulated, err := developmentStorage(config.FakeStorage)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated}, nil
 }
 
 // developmentOperations stand in for the Host Agent in fake mode.

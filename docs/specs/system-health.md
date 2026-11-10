@@ -22,6 +22,7 @@
 |---|---|---|
 | `disk_failing` | 任一磁盘的 SMART 自检判定失败 | 严重 |
 | `volume_offline` | 已创建数据卷，但没有磁盘以数据盘身份挂载在 `/srv/a-nas/data` | 严重 |
+| `volume_degraded` | 数据卷在缺少硬盘的情况下运行：开机时缺盘而被降级挂载，或运行中有一块盘消失；值为缺少的盘数（[硬盘用途与数据卷冗余](disk-roles-and-redundancy.md#m2镜像少了一块硬盘)） | 严重 |
 | `volume_read_only` | 数据卷以只读挂载（Btrfs 发现错误后会自动转为只读） | 严重 |
 | `volume_full` | 数据卷剩余空间少于写入保留量（总容量的 5%，至少 10 GiB），新文件会被拒绝 | 严重 |
 | `disk_warning` | 任一磁盘报告了次于失败的问题 | 注意 |

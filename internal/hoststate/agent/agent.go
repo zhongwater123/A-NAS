@@ -138,6 +138,14 @@ func (c *Client) StartAddDisks(ctx context.Context, request datavolume.AddDisksR
 	return response, err
 }
 
+func (c *Client) StartReplaceDisk(ctx context.Context, request datavolume.ReplaceDiskRequest) (datavolume.VolumeOperation, error) {
+	var response datavolume.VolumeOperation
+	err := c.doJSON(ctx, c.operationClient, http.MethodPost, "/v1/storage/volumes/replacement", wire.ReplaceDiskDocument{
+		PlanID: request.PlanID, FilesystemUUID: request.FilesystemUUID, Disk: request.Disk,
+	}, &response)
+	return response, err
+}
+
 func (c *Client) VolumeOperation(ctx context.Context, planID string) (datavolume.VolumeOperation, error) {
 	var response datavolume.VolumeOperation
 	err := c.doJSON(ctx, c.operationClient, http.MethodGet, wire.VolumeOperationsPath+url.PathEscape(planID), nil, &response)

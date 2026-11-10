@@ -48,6 +48,7 @@
 - 快照清扫（#204）：部署前后记下 `.a-nas-snapshots` 的条目数并查看清扫日志，确认大空间出现凌晨 3 点的定时快照（[调查](../investigations/2026-10-21-snapshot-listing-cut-at-one-mebibyte.md)）；各空间默认的每日快照都出现。
 - 实测“找回文件 → 最近删除或移走”在真实空间上的耗时。
 - 硬盘用途（#149、#198）：加盘后不重启即显示为已使用（[调查](../investigations/2026-10-20-added-disk-shown-unused-until-reboot.md)），生成计划后可以取消；按[加盘手册](add-a-disk-to-the-data-volume.md)补做 Scrub。
+- 镜像缺盘（M2）：部署后重启一次，确认 mount unit 不再随单块设备停止；再按[镜像缺盘与更换硬盘](replace-a-mirror-disk.md)拔盘开机、接回，有空闲盘时验证更换（[调查](../investigations/2026-11-06-mirror-missing-a-disk.md)）。
 - 存储计划不随页面中断（#165）：需要一块空闲盘。按[调查的后续工作](../investigations/2026-10-21-storage-plan-bound-to-browser-request.md#后续工作)在加盘执行中关闭页面，回来后向导接着显示并完成。
 - 无法识别的设备（#263）：插入空读卡器或没有序列号的 U 盘，“设置 → 存储”照常列出其他硬盘，该设备说明原因且不可选（[调查](../investigations/2026-10-26-unidentified-device-blocks-host-state.md)）。
 - 系统健康（#143）：概览的“健康检查”与 SMART、温度、挂载、只读、剩余空间和 Btrfs 错误计数一致。

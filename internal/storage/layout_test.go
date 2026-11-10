@@ -161,6 +161,115 @@ func TestAddingADiskConvertsTheVolumeAndReportsTheProgress(t *testing.T) {
 	}
 }
 
+// A mirror that runs without one disk names the disk that is gone, as the
+// plan recorded it, and takes no plan but a replacement; once the disk is
+// back it reports that its redundancy is being restored.
+func TestAMirrorMissingADiskNamesItAndTakesNoOtherPlan(t *testing.T) {
+	ctx := context.Background()
+	reader := spareDiskReader(t)
+	executor := &recordingExecutor{}
+	service := newService(t, reader, executor, storage.Options{NewID: planIDs()})
+	plan, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-01", "disk:fake-data-02"}, storage.LayoutMirror)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, plan.ID, plan.ConfirmationPhrase); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ExecutePlan(ctx, storageAdministrator, plan.ID); err != nil {
+		t.Fatal(err)
+	}
+	whole := append([]hoststate.Disk(nil), reader.state.Disks...)
+	gone := slices.IndexFunc(reader.state.Disks, func(disk hoststate.Disk) bool { return disk.ID.String() == "disk:fake-data-02" })
+	reader.state.Disks = slices.Delete(reader.state.Disks, gone, gone+1)
+	mirror := []hoststate.ProfileUsage{{Profile: hoststate.ProfileRAID1, UsedBytes: 1_000_000_000}}
+	mountVolume(reader, []string{"disk:fake-data-01"}, 1_000_000_000, mirror, mirror)
+	reader.state.DataVolume.MissingDevices = 1
+	// Written with one copy meanwhile; nothing converts without the disk.
+	reader.state.DataVolume.Data = append(reader.state.DataVolume.Data, hoststate.ProfileUsage{Profile: hoststate.ProfileSingle, UsedBytes: 5_000_000})
+
+	volumes, err := service.ListVolumes(ctx)
+	want := []storage.MissingDisk{{ID: "disk:fake-data-02", Model: plan.Disks[1].Model, CapacityBytes: plan.Disks[1].CapacityBytes}}
+	if err != nil || volumes[0].State != storage.VolumeStateDegraded || !slices.Equal(volumes[0].MissingDisks, want) || volumes[0].Conversion != nil {
+		t.Fatalf("volumes = %+v, %v; want degraded without %+v and no conversion", volumes, err, want)
+	}
+	// The one plan it takes is a disk in place of the missing one.
+	replacement, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, storage.LayoutSpan)
+	if err != nil || replacement.Kind != storage.PlanKindReplaceDisk || replacement.Layout != storage.LayoutMirror ||
+		!slices.ContainsFunc(replacement.Actions, func(action storage.Action) bool { return action.Kind == "replace_disk" }) {
+		t.Fatalf("plan while a disk is missing = %+v, %v; want a replacement", replacement, err)
+	}
+	fourth := reader.state.Disks[slices.IndexFunc(reader.state.Disks, func(disk hoststate.Disk) bool { return disk.ID.String() == "disk:fake-data-03" })]
+	fourth.ID, _ = hoststate.NewResourceID("disk:fake-data-04")
+	reader.state.Disks = append(reader.state.Disks, fourth)
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03", "disk:fake-data-04"}, storage.LayoutMirror); !errors.Is(err, storage.ErrReplaceOneDisk) {
+		t.Fatalf("replacement by two disks error = %v, want ErrReplaceOneDisk", err)
+	}
+	// A running balance keeps the rebuild from starting; a paused one does
+	// not, the Host Agent cancels it.
+	reader.state.DataVolume.Operation = hoststate.VolumeOperationBalance
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, ""); !errors.Is(err, storage.ErrVolumeBusy) {
+		t.Fatalf("replacement during a balance error = %v, want ErrVolumeBusy", err)
+	}
+	reader.state.DataVolume.Operation = hoststate.VolumeOperationBalancePaused
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, ""); err != nil {
+		t.Fatalf("replacement with a paused balance error = %v", err)
+	}
+	reader.state.DataVolume.Operation = hoststate.VolumeOperationNone
+	small := slices.IndexFunc(reader.state.Disks, func(disk hoststate.Disk) bool { return disk.ID.String() == "disk:fake-data-03" })
+	reader.state.Disks[small].CapacityBytes = plan.Disks[1].CapacityBytes - 1
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, storage.LayoutMirror); !errors.Is(err, storage.ErrDiskTooSmall) {
+		t.Fatalf("replacement by a smaller disk error = %v, want ErrDiskTooSmall", err)
+	}
+	reader.state.Disks[small].CapacityBytes = plan.Disks[1].CapacityBytes
+
+	// Offline, the disks still there carry the filesystem; the gone one is named.
+	reader.state.DataVolume = nil
+	for index := range reader.state.Disks {
+		disk := &reader.state.Disks[index]
+		if disk.ID.String() == "disk:fake-data-01" {
+			disk.Role, disk.Signatures = hoststate.DiskRoleUnassigned, []hoststate.Signature{{Type: "btrfs", Label: "ANAS_DATA", UUID: volumeUUID}}
+		}
+	}
+	volumes, _ = service.ListVolumes(ctx)
+	if volumes[0].State != storage.VolumeStateUnavailable || !slices.Equal(volumes[0].MissingDisks, want) {
+		t.Fatalf("offline volume = %+v, want unavailable without %+v", volumes[0], want)
+	}
+
+	reader.state.Disks = whole
+	mountVolume(reader, []string{"disk:fake-data-01", "disk:fake-data-02"}, 1_000_000_000, mirror, mirror)
+	reader.state.DataVolume.Restoring = true
+	volumes, _ = service.ListVolumes(ctx)
+	if volumes[0].State != storage.VolumeStateAvailable || !volumes[0].Restoring || volumes[0].MissingDisks != nil {
+		t.Fatalf("volume with the disk back = %+v, want available and restoring", volumes[0])
+	}
+
+	// Gone again for good: the replacement runs on the Host Agent.
+	reader.state.Disks = slices.Delete(reader.state.Disks, gone, gone+1)
+	mountVolume(reader, []string{"disk:fake-data-01"}, 1_000_000_000, mirror, mirror)
+	reader.state.DataVolume.MissingDevices = 1
+	executor.remaining = []string{"disk:fake-data-01", "disk:fake-data-03"}
+	replacement, err = service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConfirmPlan(ctx, storageAdministrator, replacement.ID, replacement.ConfirmationPhrase); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ExecutePlan(ctx, storageAdministrator, replacement.ID); err != nil {
+		t.Fatalf("ExecutePlan(replacement) error = %v", err)
+	}
+	if len(executor.replaced) != 1 || executor.replaced[0].Disk.DiskID != "disk:fake-data-03" || executor.replaced[0].FilesystemUUID != volumeUUID {
+		t.Fatalf("replace requests = %+v", executor.replaced)
+	}
+	// The replaced disk is no longer the volume's.
+	reader.state.DataVolume = nil
+	volumes, _ = service.ListVolumes(ctx)
+	if !slices.Equal(volumes[0].DiskIDs, []string{"disk:fake-data-01", "disk:fake-data-03"}) {
+		t.Fatalf("disks after the replacement = %v, want the remaining and the new one", volumes[0].DiskIDs)
+	}
+}
+
 func TestAMirrorMustHoldTheFilesAlreadyThere(t *testing.T) {
 	ctx := context.Background()
 	reader := spareDiskReader(t)

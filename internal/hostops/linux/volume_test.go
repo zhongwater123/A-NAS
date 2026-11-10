@@ -320,6 +320,39 @@ func TestOneVolumeOperationRunsAtATime(t *testing.T) {
 	}
 }
 
+// A mount unit from an earlier release bound the volume to the device it was
+// mounted from, so systemd unmounted a mirror when that one disk failed. The
+// Host Agent rewrites it once; the change takes effect at the next mount.
+func TestEnsureMountUnitStopsBindingTheVolumeToOneDisk(t *testing.T) {
+	host := newDiskHost(t)
+	executor := host.executor()
+	if changed, err := executor.EnsureMountUnit(context.Background()); changed || err != nil {
+		t.Fatalf("EnsureMountUnit() without a unit = %v, %v; want nothing to do", changed, err)
+	}
+	host.writeUnit(t, volumeUUID)
+	if changed, err := executor.EnsureMountUnit(context.Background()); !changed || err != nil {
+		t.Fatalf("EnsureMountUnit() on an old unit = %v, %v; want it rewritten", changed, err)
+	}
+	unit, err := os.ReadFile(filepath.Join(host.systemRoot, "etc", "systemd", "system", "a-nas-data.mount"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"What=UUID=" + volumeUUID + "\n", "Options=noatime,compress=zstd:3,nodev,nosuid,noexec,x-systemd.device-bound=no\n", "Before=local-fs.target\n"} {
+		if !strings.Contains(string(unit), want) {
+			t.Fatalf("rewritten unit lacks %q:\n%s", want, unit)
+		}
+	}
+	if got := host.lines(); !slices.Equal(got, []string{"systemctl daemon-reload"}) {
+		t.Fatalf("commands = %q, want one daemon-reload", got)
+	}
+	if changed, err := executor.EnsureMountUnit(context.Background()); changed || err != nil {
+		t.Fatalf("EnsureMountUnit() on a current unit = %v, %v; want nothing to do", changed, err)
+	}
+	if got := len(host.lines()); got != 1 {
+		t.Fatalf("commands after a second check = %q, want none added", host.lines())
+	}
+}
+
 const volumeUUID = "09e275fe-794a-458d-8200-b6e67c55cc22"
 
 // diskHost stands in for the disks, the kernel and systemd: it records the

@@ -1,7 +1,19 @@
-import { Archive, ChevronLeft, CircleCheck, Database, HardDrive, Layers, TriangleAlert, X } from "lucide-react";
+import {
+  Archive,
+  ChevronLeft,
+  CircleCheck,
+  Database,
+  HardDrive,
+  Layers,
+  type LucideIcon,
+  Replace,
+  TriangleAlert,
+  Unplug,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
-import type { StoragePlan, Volume, VolumeConversion, VolumeLayout, VolumeSpread } from "../api.generated";
+import type { MissingDisk, StoragePlan, Volume, VolumeConversion, VolumeLayout, VolumeSpread } from "../api.generated";
 import { HostState } from "../desktop/api";
 import type { HostStateView } from "../desktop/useHostState";
 import { formatBytes, formatNominalCapacity } from "../lib/bytes";
@@ -35,7 +47,8 @@ export interface VolumesView {
 // useVolumes reads the data volume again when a storage plan changes state,
 // and while the volume converts or its files are spread: every few seconds
 // so the progress moves, or every half minute while a stopped one waits for
-// the Host Agent.
+// the Host Agent. A volume that restores its redundancy is read every quarter
+// minute, so that the card shows when it is done.
 export function useVolumes(planState?: string): VolumesView {
   const [items, setItems] = useState<Volume[]>();
   const [readAt, setReadAt] = useState(0);
@@ -58,11 +71,13 @@ export function useVolumes(planState?: string): VolumesView {
   }, [refresh, planState]);
   const moving = items?.find((volume) => volume.conversion || volume.spread);
   const conversion = moving?.conversion?.state ?? moving?.spread?.state;
+  const restoring = items?.some((volume) => volume.restoring);
+  const every = conversion === "running" ? 5000 : restoring ? 15_000 : conversion ? 30_000 : 0;
   useEffect(() => {
-    if (!conversion) return;
-    const timer = window.setInterval(() => void refresh(), conversion === "running" ? 5000 : 30_000);
+    if (!every) return;
+    const timer = window.setInterval(() => void refresh(), every);
     return () => window.clearInterval(timer);
-  }, [conversion, refresh]);
+  }, [every, refresh]);
   return { items, readAt, error, refresh };
 }
 
@@ -104,7 +119,8 @@ export function StorageSection({
   flow: StoragePlanFlow;
 }) {
   const { snapshot, refresh: refreshHost } = host;
-  const [wizardOpen, setWizardOpen] = useState(false);
+  // The wizard the administrator opened, until a plan takes its place.
+  const [wizardOpen, setWizardOpen] = useState<WizardMode>();
   const stopped = useUnfinishedPlan(isAdmin, flow);
   const planState = flow.plan?.state;
   useEffect(() => {
@@ -113,7 +129,12 @@ export function StorageSection({
   const disks = snapshot?.disks ?? [];
   const volume = volumes.items?.[0];
   const noVolume = volumes.items?.length === 0;
-  const usable = disks.filter((disk) => disk.role === "unassigned" && disk.eligibleForDataVolume);
+  // The host shows the disks of a volume that is not mounted as unassigned;
+  // they still belong to it.
+  const members = volume?.diskIds ?? [];
+  const usable = disks.filter(
+    (disk) => disk.role === "unassigned" && disk.eligibleForDataVolume && !members.includes(disk.id),
+  );
   const canAdd = Boolean(
     volume &&
       volume.state === "available" &&
@@ -121,17 +142,15 @@ export function StorageSection({
       volume.spread?.state !== "running" &&
       usable.length > 0,
   );
-  const showWizard = isAdmin && (Boolean(flow.plan) || (wizardOpen && (noVolume || canAdd)));
-  const mode: WizardMode = flow.plan
-    ? flow.plan.kind === "add_disks"
-      ? "add"
-      : "create"
-    : noVolume
-      ? "create"
-      : "add";
+  // A mirror without one of its disks takes only a disk in its place.
+  const degraded = volume?.state === "degraded";
+  const canReplace = degraded && volume?.layout === "mirror";
+  const allowed: Record<WizardMode, boolean> = { create: noVolume, add: canAdd, replace: canReplace };
+  const showWizard = isAdmin && (Boolean(flow.plan) || (wizardOpen !== undefined && allowed[wizardOpen]));
+  const mode: WizardMode = flow.plan ? planModes[flow.plan.kind] : (wizardOpen ?? "create");
   const finish = () => {
     flow.dismiss();
-    setWizardOpen(false);
+    setWizardOpen(undefined);
     void volumes.refresh();
   };
   return (
@@ -158,10 +177,10 @@ export function StorageSection({
           disks={disks}
           volume={volume}
           flow={flow}
-          onClose={() => setWizardOpen(false)}
+          onClose={() => setWizardOpen(undefined)}
           onFinish={finish}
           onCancel={async () => {
-            if (await flow.cancel()) setWizardOpen(false);
+            if (await flow.cancel()) setWizardOpen(undefined);
           }}
         />
       ) : volumes.items === undefined ? (
@@ -183,7 +202,7 @@ export function StorageSection({
               : "文件、照片和共享内容都保存在数据卷中。尚未创建数据卷，请联系管理员初始化。"}
           </p>
           {isAdmin && (
-            <button className={`${styles.setBtn} primary`} onClick={() => setWizardOpen(true)}>
+            <button className={`${styles.setBtn} primary`} onClick={() => setWizardOpen("create")}>
               初始化数据卷…
             </button>
           )}
@@ -197,9 +216,10 @@ export function StorageSection({
               disks={disks}
               isAdmin={isAdmin}
               onRefresh={volumes.refresh}
+              onReplace={isAdmin && canReplace ? () => setWizardOpen("replace") : undefined}
             />
-            {isAdmin && usable.length > 0 && (
-              <SpareDisks count={usable.length} volume={volume} canAdd={canAdd} onOpen={() => setWizardOpen(true)} />
+            {isAdmin && usable.length > 0 && !degraded && (
+              <SpareDisks count={usable.length} volume={volume} canAdd={canAdd} onOpen={() => setWizardOpen("add")} />
             )}
           </>
         )
@@ -221,7 +241,7 @@ export function StorageSection({
                 <p>设备重新出现后会自动更新。</p>
               </div>
             ) : (
-              disks.map((disk) => <DiskRow key={disk.id} disk={disk} />)
+              disks.map((disk) => <DiskRow key={disk.id} disk={disk} member={members.includes(disk.id)} />)
             )}
           </>
         )}
@@ -237,7 +257,7 @@ function StoppedPlan({ plan, onOpen }: { plan: StoragePlan; onOpen: () => void }
       <div>
         <h3>上次的存储操作没有完成</h3>
         <p>
-          {plan.kind === "add_disks" ? "把硬盘加入数据卷" : "创建数据卷"}
+          {planKinds[plan.kind]}
           {stoppedWhere(plan.step)}。可以查看原因并重试，已经完成的步骤不会重做。
         </p>
       </div>
@@ -288,21 +308,28 @@ function VolumeCard({
   disks,
   isAdmin,
   onRefresh,
+  onReplace,
 }: {
   volume: Volume;
   readAt: number;
   disks: Disk[];
   isAdmin: boolean;
   onRefresh: () => Promise<void>;
+  // onReplace opens the wizard that puts a new disk in place of a missing one.
+  onReplace?: () => void;
 }) {
   const usage = volumeUsage(volume);
+  const online = volume.state === "available";
   const state =
-    volume.conversion && volume.state === "available"
-      ? { label: "转换中", tone: "accent" as Tone }
-      : volumeState(volume.state);
-  const members = (volume.diskIds ?? []).map(
-    (id) => disks.find((disk) => disk.id === id) ?? { id, model: "未检测到的硬盘", capacityBytes: 0 },
-  );
+    volume.restoring && online
+      ? { label: "恢复中", tone: "accent" as Tone }
+      : volume.conversion && online
+        ? { label: "转换中", tone: "accent" as Tone }
+        : volumeState(volume.state);
+  const missing = volume.missingDisks ?? [];
+  const members = (volume.diskIds ?? [])
+    .filter((id) => !missing.some((disk) => disk.id === id))
+    .map((id) => disks.find((disk) => disk.id === id) ?? { id, model: "未检测到的硬盘", capacityBytes: 0 });
   return (
     <div className={`${styles.setCard} ${styles.volCard}`}>
       <div className={styles.volHead}>
@@ -310,7 +337,7 @@ function VolumeCard({
         <div>
           <h3>数据卷</h3>
           <p>
-            Btrfs · {layoutLabel(volume.layout)} · {members.length} 块硬盘
+            Btrfs · {layoutLabel(volume.layout)} · {members.length + missing.length} 块硬盘
           </p>
         </div>
         <Pill tone={state.tone}>
@@ -352,19 +379,50 @@ function VolumeCard({
           {usage.capacity > 0 ? `已用空间未知 · 共 ${formatBytes(usage.capacity)}` : "容量未知"}
         </p>
       )}
-      {volume.conversion && (
+      {missing.length > 0 && (
+        <section className={styles.volMissing} aria-label="缺少的硬盘">
+          <TriangleAlert />
+          <div>
+            <strong>缺少 {missing.length} 块硬盘</strong>
+            <p>
+              {volume.state === "degraded"
+                ? "在更换硬盘之前，新写入的数据只有一份。"
+                : "接回缺少的硬盘并重启设备后，数据卷恢复在线。"}
+            </p>
+          </div>
+          {onReplace && (
+            <button className={`${styles.setBtn} primary`} onClick={onReplace}>
+              更换硬盘…
+            </button>
+          )}
+        </section>
+      )}
+      {/* A volume without a disk converts nothing until the disk is back. */}
+      {volume.conversion && volume.state !== "degraded" && (
         <ConversionProgress
           volume={volume}
           conversion={volume.conversion}
+          restoring={Boolean(volume.restoring)}
           readAt={readAt}
           isAdmin={isAdmin}
           onRefresh={onRefresh}
         />
       )}
+      {volume.restoring && !volume.conversion && (
+        <section className={styles.volConvert} aria-label="恢复冗余">
+          <div className={styles.volConvertHead}>
+            <strong>正在恢复冗余</strong>
+          </div>
+          <div className={styles.wizProgress} role="progressbar" aria-label="恢复冗余">
+            <span />
+          </div>
+          <p className={styles.volConvertNote}>缺少硬盘期间写入的数据正在补上第二份，期间可以照常使用。</p>
+        </section>
+      )}
       {volume.spread && !volume.conversion && (
         <SpreadProgress volume={volume} spread={volume.spread} isAdmin={isAdmin} onRefresh={onRefresh} />
       )}
-      {members.length > 0 && (
+      {members.length + missing.length > 0 && (
         <ul className={styles.volMembers} aria-label="组成数据卷的硬盘">
           {members.map((disk) => (
             <li key={disk.id}>
@@ -372,6 +430,15 @@ function VolumeCard({
               <span>{disk.model}</span>
               <small className={styles.setMono}>{shortID(disk.id)}</small>
               {disk.capacityBytes > 0 && <small>{formatBytes(disk.capacityBytes)}</small>}
+            </li>
+          ))}
+          {missing.map((disk) => (
+            <li key={disk.id} className={styles.missing}>
+              <Unplug />
+              <span>{disk.model || "型号未知"}</span>
+              <Pill tone="danger">缺少</Pill>
+              <small className={styles.setMono}>{shortID(disk.id)}</small>
+              {disk.capacityBytes ? <small>{formatBytes(disk.capacityBytes)}</small> : null}
             </li>
           ))}
         </ul>
@@ -384,15 +451,20 @@ function VolumeCard({
   );
 }
 
+// ConversionProgress shows how far the volume has come converting to its
+// layout. After it ran without a disk, the same conversion turns what was
+// written meanwhile back into its layout: that is how it restores redundancy.
 function ConversionProgress({
   volume,
   conversion,
+  restoring,
   readAt,
   isAdmin,
   onRefresh,
 }: {
   volume: Volume;
   conversion: VolumeConversion;
+  restoring: boolean;
   readAt: number;
   isAdmin: boolean;
   onRefresh: () => Promise<void>;
@@ -405,19 +477,19 @@ function ConversionProgress({
   const sample = restart ? { at: readAt, bytes: conversion.convertedBytes } : first;
   if (restart && (first?.at !== sample.at || first?.bytes !== sample.bytes)) setFirst(sample);
   const left = remainingSeconds(sample, readAt, conversion);
-  const target = layouts[volume.layout].name;
+  const target = restoring ? "恢复冗余" : `转换为${layouts[volume.layout].name}`;
   const running = conversion.state === "running";
   const percent = conversionPercent(conversion);
   return (
     <section className={`${styles.volConvert} ${running ? "" : styles.waiting}`} aria-label="转换进度">
       <div className={styles.volConvertHead}>
-        <strong>{running ? `正在转换为${target}` : `转换为${target}已暂停`}</strong>
+        <strong>{running ? `正在${target}` : `${target}已暂停`}</strong>
         <em>{percent}%</em>
       </div>
       <div
         className={`${styles.volBar} convert`}
         role="progressbar"
-        aria-label={`转换为${target}`}
+        aria-label={target}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={percent}
@@ -430,7 +502,7 @@ function ConversionProgress({
       </p>
       <p className={styles.volConvertNote}>
         {running
-          ? `转换期间可以照常使用，关机或重启后会自动继续。${volume.layout === "mirror" ? "完成前坏一块硬盘仍可能丢失文件。" : ""}`
+          ? `${restoring ? "" : "转换"}期间可以照常使用，关机或重启后会自动继续。${volume.layout === "mirror" ? "完成前坏一块硬盘仍可能丢失文件。" : ""}`
           : "系统每 15 分钟会自动继续一次；停下来的原因记录在“日志”的系统日志中。"}
       </p>
       {!running && isAdmin && (
@@ -538,14 +610,16 @@ function ineligibleText(disk: Disk): string {
     .join("；");
 }
 
-function DiskRow({ disk }: { disk: Disk }) {
+// member marks a disk of the data volume, which the host shows as unassigned
+// while the volume is not mounted.
+function DiskRow({ disk, member }: { disk: Disk; member: boolean }) {
   const health = diskHealth(disk.health);
+  const spare = disk.role === "unassigned" && !member;
   const role = {
     system: { label: "系统盘", tone: "neutral" as Tone },
     data: { label: "数据盘", tone: "accent" as Tone },
     unassigned: { label: "未使用", tone: "neutral" as Tone },
-  }[disk.role];
-  const spare = disk.role === "unassigned";
+  }[member && disk.role === "unassigned" ? "data" : disk.role];
   const blocked = !disk.eligibleForDataVolume ? ineligibleText(disk) : "";
   return (
     <div className={styles.setRow}>
@@ -593,7 +667,39 @@ function DiskRow({ disk }: { disk: Disk }) {
 
 // ------------------------------------------------------------------ Wizard
 
-type WizardMode = "create" | "add";
+type WizardMode = "create" | "add" | "replace";
+
+// The wizard that shows each kind of plan, and how each is named.
+const planModes: Record<StoragePlan["kind"], WizardMode> = {
+  create_volume: "create",
+  add_disks: "add",
+  replace_disk: "replace",
+};
+const planKinds: Record<StoragePlan["kind"], string> = {
+  create_volume: "创建数据卷",
+  add_disks: "把硬盘加入数据卷",
+  replace_disk: "更换硬盘",
+};
+const executeLabels: Record<StoragePlan["kind"], string> = {
+  create_volume: "清除硬盘并创建数据卷",
+  add_disks: "清除硬盘并加入数据卷",
+  replace_disk: "清除硬盘并重建镜像",
+};
+const afterErasing: Record<StoragePlan["kind"], string> = {
+  create_volume: "创建新的数据卷。",
+  add_disks: "加入数据卷。数据卷上已有的文件不受影响。",
+  replace_disk: "替换缺少的硬盘并重建镜像。数据卷上已有的文件不受影响。",
+};
+const wizards: Record<WizardMode, { title: string; summary: string; tone: string; icon: LucideIcon }> = {
+  create: { title: "初始化数据卷", summary: "把空闲硬盘格式化为 A-NAS 数据卷", tone: "danger", icon: TriangleAlert },
+  add: { title: "设置硬盘用途", summary: "让新硬盘加入数据卷，增加容量或让文件多一份", tone: "storage", icon: Layers },
+  replace: {
+    title: "更换硬盘",
+    summary: "用新硬盘替换缺少的硬盘，从另一块硬盘重建镜像",
+    tone: "storage",
+    icon: Replace,
+  },
+};
 
 // minutesUntil is the whole minutes left before a time, none once it passed.
 export const minutesUntil = (until: number, now: number) => Math.max(0, Math.ceil((until - now) / 60_000));
@@ -654,8 +760,13 @@ function VolumeWizard({
   onCancel: () => Promise<void>;
 }) {
   const { plan, busy } = flow;
+  const replacing = mode === "replace";
+  // The new disk must hold what the missing one held.
+  const missing = volume?.missingDisks ?? [];
+  const needed = Math.max(0, ...missing.map((disk) => disk.capacityBytes ?? 0));
+  const tooSmall = (disk: Disk) => replacing && disk.capacityBytes < needed;
   const candidates = disks.filter((disk) => disk.role === "unassigned");
-  const eligible = candidates.filter((disk) => disk.eligibleForDataVolume);
+  const eligible = candidates.filter((disk) => disk.eligibleForDataVolume && !tooSmall(disk));
   const [selected, setSelected] = useState<string[]>(() => (eligible.length === 1 ? [eligible[0].id] : []));
   const [stage, setStage] = useState<"disks" | "layout">("disks");
   const [layout, setLayout] = useState<VolumeLayout>("mirror");
@@ -666,7 +777,8 @@ function VolumeWizard({
     ? layout
     : options.find((option) => option.fits)?.layout;
   // Disks join a volume on several disks in its layout; changing it would
-  // give up what it protects, a step of its own.
+  // give up what it protects, a step of its own. A replacement is always a
+  // mirror again.
   const kept = mode === "add" && volume && volume.layout !== "single" ? volume.layout : undefined;
   const keptOption = options.find((option) => option.layout === kept);
   // A plan shows the layout step it was made with: an addition chose a
@@ -674,10 +786,10 @@ function VolumeWizard({
   const needsLayout = plan
     ? plan.kind === "add_disks"
       ? Boolean(plan.actions?.some((action) => action.kind === "convert_layout"))
-      : (plan.disks?.length ?? 0) > 1
+      : plan.kind === "create_volume" && (plan.disks?.length ?? 0) > 1
     : mode === "add"
       ? !kept
-      : selected.length > 1;
+      : mode === "create" && selected.length > 1;
   const steps =
     mode === "add"
       ? needsLayout
@@ -703,22 +815,20 @@ function VolumeWizard({
           : state === "succeeded"
             ? steps.length
             : review;
-  const title = mode === "add" ? "设置硬盘用途" : "初始化数据卷";
+  const { title, summary, tone, icon } = wizards[mode];
   const toggle = (id: string) =>
-    setSelected((current) => (current.includes(id) ? current.filter((value) => value !== id) : [...current, id]));
+    setSelected((current) =>
+      replacing ? [id] : current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
+    );
   const generate = () => void flow.generate(selected, needsLayout ? choice : undefined);
 
   return (
     <section className={styles.wiz} aria-label={title}>
       <div className={styles.wizHead}>
-        <IconTile
-          tone={mode === "add" ? "storage" : "danger"}
-          icon={mode === "add" ? Layers : TriangleAlert}
-          size="lg"
-        />
+        <IconTile tone={tone} icon={icon} size="lg" />
         <div>
           <h3>{title}</h3>
-          <p>{mode === "add" ? "让新硬盘加入数据卷，增加容量或让文件多一份" : "把空闲硬盘格式化为 A-NAS 数据卷"}</p>
+          <p>{summary}</p>
         </div>
         <span className={styles.wizHeadEnd}>
           {plan && <Pill tone={planTone(state)}>{planStateLabel(state)}</Pill>}
@@ -785,19 +895,22 @@ function VolumeWizard({
                 ? `选择要加入的硬盘。加入后数据卷仍为${layoutLabel(kept)}：`
                 : mode === "add"
                   ? "选择要加入的硬盘："
-                  : "选择一块或多块硬盘。只能使用非系统、非 USB、没有被使用且身份稳定的 SATA 或 NVMe 硬盘；选两块及以上可以组成镜像。"}
+                  : replacing
+                    ? replacementLead(missing, needed)
+                    : "选择一块或多块硬盘。只能使用非系统、非 USB、没有被使用且身份稳定的 SATA 或 NVMe 硬盘；选两块及以上可以组成镜像。"}
             </p>
             {candidates.length ? (
               <div className={styles.setCard} role="group" aria-label="候选硬盘">
                 {candidates.map((disk) => {
-                  const blocked = !disk.eligibleForDataVolume;
+                  const blocked = !disk.eligibleForDataVolume || tooSmall(disk);
                   return (
                     <label
                       key={disk.id}
                       className={`${styles.wizDisk} ${blocked ? styles.disabled : ""} ${selected.includes(disk.id) ? styles.selected : ""}`}
                     >
                       <input
-                        type="checkbox"
+                        type={replacing ? "radio" : "checkbox"}
+                        name={replacing ? "replacement-disk" : undefined}
                         value={disk.id}
                         disabled={blocked || Boolean(busy)}
                         checked={selected.includes(disk.id)}
@@ -818,7 +931,10 @@ function VolumeWizard({
                           {disk.filesystems.length > 0 ? ` · ${disk.filesystems.join("、")}` : ""}
                         </small>
                         {blocked && (
-                          <small className={styles.wizReason}>{ineligibleText(disk) || "不能使用这块硬盘"}</small>
+                          <small className={styles.wizReason}>
+                            {(!disk.eligibleForDataVolume && ineligibleText(disk)) ||
+                              (tooSmall(disk) ? "容量小于缺少的硬盘" : "不能使用这块硬盘")}
+                          </small>
                         )}
                       </span>
                       <strong className={styles.wizDiskSize}>
@@ -899,6 +1015,7 @@ function VolumeWizard({
         {plan && (
           <PlanReview
             plan={plan}
+            missing={missing}
             flow={flow}
             state={state}
             pending={pending}
@@ -931,7 +1048,7 @@ function VolumeWizard({
                 disabled={!selected.length || Boolean(busy)}
                 onClick={generate}
               >
-                {busy === "plan" ? "正在生成…" : mode === "add" ? "生成计划" : "生成格式化计划"}
+                {busy === "plan" ? "正在生成…" : mode === "add" || replacing ? "生成计划" : "生成格式化计划"}
               </button>
             )}
           </>
@@ -971,7 +1088,7 @@ function VolumeWizard({
             disabled={Boolean(busy)}
             onClick={() => void flow.execute()}
           >
-            {plan?.kind === "add_disks" ? "清除硬盘并加入数据卷" : "清除硬盘并创建数据卷"}
+            {executeLabels[plan?.kind ?? "create_volume"]}
           </button>
         )}
         {state === "succeeded" && (
@@ -1005,6 +1122,7 @@ function VolumeWizard({
 
 function PlanReview({
   plan,
+  missing,
   flow,
   state,
   pending,
@@ -1012,6 +1130,8 @@ function PlanReview({
   minutesLeft,
 }: {
   plan: StoragePlan;
+  // missing are the disks a replacement takes the place of.
+  missing: MissingDisk[];
   flow: StoragePlanFlow;
   state: string;
   pending: boolean;
@@ -1020,6 +1140,9 @@ function PlanReview({
 }) {
   const disks = plan.disks ?? [];
   const adding = plan.kind === "add_disks";
+  const replacing = plan.kind === "replace_disk";
+  // A rebuild reports how far it has come.
+  const rebuilt = plan.step === "replace" ? plan.progress : undefined;
   const leftovers = disks.flatMap((disk) =>
     (disk.signatures ?? []).map((signature) =>
       signature.label ? `${signature.type}（${signature.label}）` : signature.type,
@@ -1031,7 +1154,13 @@ function PlanReview({
       <h4 className={styles.wizTitle}>破坏性操作计划</h4>
       <dl className={styles.wizFacts}>
         <dt>操作</dt>
-        <dd>{adding ? "把硬盘加入数据卷" : "创建数据卷"}</dd>
+        <dd>{planKinds[plan.kind]}</dd>
+        {replacing && missing.length > 0 && (
+          <>
+            <dt>替换</dt>
+            <dd>{missing.map((disk) => missingName(disk).trim()).join("、")}</dd>
+          </>
+        )}
         {plan.layout && (
           <>
             <dt>冗余方式</dt>
@@ -1102,22 +1231,41 @@ function PlanReview({
       )}
       {state === "confirmed" && (
         <Callout tone="danger" title="最后一步：执行后无法撤销">
-          {adding
-            ? `${models} 上的全部分区和数据将被永久清除，然后加入数据卷。数据卷上已有的文件不受影响。`
-            : `${models} 上的全部分区和数据将被永久清除，然后创建新的数据卷。`}
+          {models} 上的全部分区和数据将被永久清除，然后{afterErasing[plan.kind]}
         </Callout>
       )}
       {state === "running" && (
         <div className={styles.wizRunning} role="status">
-          <div className={styles.wizProgress}>
-            <span />
-          </div>
-          <p>{(plan.step && stepTexts[plan.step]) || (adding ? "正在把硬盘加入数据卷…" : "正在创建数据卷…")}</p>
+          {rebuilt === undefined ? (
+            <div className={styles.wizProgress}>
+              <span />
+            </div>
+          ) : (
+            <div
+              className={`${styles.wizProgress} ${styles.measured}`}
+              role="progressbar"
+              aria-label="重建"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={rebuilt}
+            >
+              <span style={{ width: `${rebuilt}%` }} />
+            </div>
+          )}
+          <p>
+            {rebuilt !== undefined
+              ? `正在重建 ${rebuilt}%`
+              : (plan.step && stepTexts[plan.step]) || `正在${planKinds[plan.kind]}…`}
+          </p>
           <p>操作在设备上进行，关闭这个窗口或页面不会打断它，回来时会看到结果。请勿关闭设备或断电。</p>
         </div>
       )}
       {state === "succeeded" &&
-        (adding ? (
+        (replacing ? (
+          <Callout tone="success" title="硬盘已更换">
+            数据卷正在后台恢复冗余，状态显示在数据卷卡片上。期间可以照常使用，也可以关闭这个窗口。
+          </Callout>
+        ) : adding ? (
           <Callout tone="success" title="硬盘已加入数据卷">
             数据卷正在后台转换为{layouts[plan.layout]?.name ?? "新的冗余方式"}
             ，进度显示在数据卷卡片上。转换期间可以照常使用，也可以关闭这个窗口。
@@ -1134,7 +1282,7 @@ function PlanReview({
       )}
       {(state === "failed" || state === "needs_attention") && (
         <Callout tone="danger" title={state === "failed" ? "执行失败" : "需要人工处理"}>
-          {adding ? "把硬盘加入数据卷" : "创建数据卷"}
+          {planKinds[plan.kind]}
           {stoppedWhere(plan.step)}
           {plan.failure ? `：${plan.failure}` : ""}。
           可以重试：设备会再核对一次硬盘身份，已经完成的步骤不会重做。重试仍不成功时，按运行手册导出日志并核对硬盘状态。
@@ -1142,6 +1290,18 @@ function PlanReview({
       )}
     </>
   );
+}
+
+// replacementLead names the disk a new one takes the place of, and how large
+// the new one must be.
+function replacementLead(missing: MissingDisk[], needed: number): string {
+  const size = needed > 0 ? `不小于 ${formatBytes(needed)} 的` : "";
+  if (!missing.length) return `选择一块${size}硬盘替换缺少的硬盘：`;
+  return `替换缺少的${missing.map(missingName).join("、")}。选择一块${size}硬盘：`;
+}
+
+function missingName(disk: MissingDisk): string {
+  return disk.model ? ` ${disk.model}（${shortID(disk.id)}）` : `硬盘（${shortID(disk.id)}）`;
 }
 
 function layoutOptions(mode: WizardMode, volume: Volume | undefined, members: Disk[], chosen: Disk[]): LayoutOption[] {
@@ -1206,6 +1366,7 @@ const stepTexts: Record<StorageStep, string> = {
   mount: "正在挂载数据卷…",
   prepare: "正在准备空间与目录…",
   add_devices: "正在把硬盘加入数据卷…",
+  replace: "正在重建镜像…",
 };
 const stepNames: Record<StorageStep, string> = {
   erase: "清除硬盘",
@@ -1213,6 +1374,7 @@ const stepNames: Record<StorageStep, string> = {
   mount: "挂载",
   prepare: "准备空间",
   add_devices: "加入数据卷",
+  replace: "重建",
 };
 
 function stoppedWhere(step?: StorageStep): string {
@@ -1231,6 +1393,7 @@ export function volumeState(state: Volume["state"]): { label: string; tone: Tone
   return {
     creating: { label: "创建中", tone: "accent" as Tone },
     available: { label: "在线", tone: "success" as Tone },
+    degraded: { label: "缺少硬盘", tone: "danger" as Tone },
     unavailable: { label: "离线", tone: "danger" as Tone },
     read_only: { label: "只读", tone: "warning" as Tone },
   }[state];

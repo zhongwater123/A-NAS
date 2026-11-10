@@ -249,8 +249,9 @@ func TestClientSynchronizesIdentitiesAndReportsConflicts(t *testing.T) {
 }
 
 type agentVolumeExecutor struct {
-	request datavolume.CreateVolumeRequest
-	added   datavolume.AddDisksRequest
+	request  datavolume.CreateVolumeRequest
+	added    datavolume.AddDisksRequest
+	replaced datavolume.ReplaceDiskRequest
 }
 
 // agentVolumeExecutor reports a creation running, then done when asked.
@@ -264,6 +265,11 @@ func (e *agentVolumeExecutor) StartAddDisks(_ context.Context, request datavolum
 		return datavolume.VolumeOperation{}, datavolume.ErrPlanState
 	}
 	e.added = request
+	return datavolume.VolumeOperation{PlanID: request.PlanID, State: datavolume.OperationRunning, Step: datavolume.StepErase}, nil
+}
+
+func (e *agentVolumeExecutor) StartReplaceDisk(_ context.Context, request datavolume.ReplaceDiskRequest) (datavolume.VolumeOperation, error) {
+	e.replaced = request
 	return datavolume.VolumeOperation{PlanID: request.PlanID, State: datavolume.OperationRunning, Step: datavolume.StepErase}, nil
 }
 

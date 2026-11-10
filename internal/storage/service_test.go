@@ -224,7 +224,10 @@ type recordingExecutor struct {
 	executedDiskID string
 	created        storage.CreateVolumeRequest
 	added          []storage.AddDisksRequest
-	continued      int
+	replaced       []storage.ReplaceDiskRequest
+	// remaining are the disks a replacement reports the volume has.
+	remaining []string
+	continued int
 }
 
 type stateReader struct {
@@ -277,6 +280,14 @@ func (e *recordingExecutor) StartAddDisks(_ context.Context, request storage.Add
 	e.added = append(e.added, request)
 	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
 		FilesystemUUID: request.FilesystemUUID, State: storage.VolumeStateAvailable,
+	}}, nil
+}
+
+func (e *recordingExecutor) StartReplaceDisk(_ context.Context, request storage.ReplaceDiskRequest) (storage.VolumeOperation, error) {
+	e.replaced = append(e.replaced, request)
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		FilesystemUUID: request.FilesystemUUID, Layout: storage.LayoutMirror, State: storage.VolumeStateAvailable,
+		DiskIDs: e.remaining,
 	}}, nil
 }
 

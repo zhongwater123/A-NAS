@@ -13,6 +13,7 @@ type (
 	PlanKind            = datavolume.PlanKind
 	VolumeState         = datavolume.VolumeState
 	Volume              = datavolume.Volume
+	MissingDisk         = datavolume.MissingDisk
 	ConversionState     = datavolume.ConversionState
 	Conversion          = datavolume.Conversion
 	Spread              = datavolume.Spread
@@ -20,6 +21,7 @@ type (
 	DiskTarget          = datavolume.DiskTarget
 	CreateVolumeRequest = datavolume.CreateVolumeRequest
 	AddDisksRequest     = datavolume.AddDisksRequest
+	ReplaceDiskRequest  = datavolume.ReplaceDiskRequest
 	VolumeExecutor      = datavolume.VolumeExecutor
 	OperationState      = datavolume.OperationState
 	OperationStep       = datavolume.OperationStep
@@ -33,8 +35,10 @@ const (
 	LayoutStripe           = datavolume.LayoutStripe
 	PlanKindCreateVolume   = datavolume.PlanKindCreateVolume
 	PlanKindAddDisks       = datavolume.PlanKindAddDisks
+	PlanKindReplaceDisk    = datavolume.PlanKindReplaceDisk
 	VolumeStateCreating    = datavolume.VolumeStateCreating
 	VolumeStateAvailable   = datavolume.VolumeStateAvailable
+	VolumeStateDegraded    = datavolume.VolumeStateDegraded
 	VolumeStateUnavailable = datavolume.VolumeStateUnavailable
 	VolumeStateReadOnly    = datavolume.VolumeStateReadOnly
 	ConversionRunning      = datavolume.ConversionRunning
@@ -51,6 +55,7 @@ const (
 	StepMount              = datavolume.StepMount
 	StepPrepare            = datavolume.StepPrepare
 	StepAddDevices         = datavolume.StepAddDevices
+	StepReplace            = datavolume.StepReplace
 )
 
 var (
