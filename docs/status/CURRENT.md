@@ -1,8 +1,8 @@
 # 当前状态
 
-更新时间：2026-11-06
+更新时间：2026-11-10
 
-本页是目录：只记当前事实、阻塞、待用户决定的事与下一步，每条一两行，细节在链接的文档中。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，决定的经过见[决定记录](../decisions/README.md)与 [ADR](../adr/README.md)。本页以前的内容由 Git 保存：`git log -p docs/status/CURRENT.md`。
+本页只索引当前事实、阻塞、待决定事项与下一步。细节见 [CHANGELOG](../../CHANGELOG.md)、[发布记录](../releases/README.md)、[决定记录](../decisions/README.md)与 [ADR](../adr/README.md)；历史由 Git 保存。
 
 ## 当前阶段
 
@@ -30,6 +30,8 @@
 
 ## 待用户决定
 
+- [ADR 0036：失陷保护方案](../adr/0036-protect-recovery-from-a-compromised-product-service.md)
+
 只列链接，问题、选项与经过在被链接的文档中。
 
 - [活动记录保留多久](../decisions/2026-10-22-activity-record-retention.md)
@@ -46,6 +48,8 @@
 - 草稿 ADR 的 PR：局域网算力 PAIR 的隐私边界与下载（[#196](https://github.com/zhongwater123/A-NAS/pull/196)，ADR 0026）；语音处理的云端密钥与存储桶（[#203](https://github.com/zhongwater123/A-NAS/pull/203)，ADR 0027）。
 
 ## 下一步
+
+优先做[失陷保护 P0](../architecture/compromised-product-data-protection.md)。
 
 1. 完成 v1.0.1 闭环：重建 Samba 凭据后，按[实机配置与验收手册](../runbooks/provision-v1.0.1-experimental-storage.md#功能验收)完成全部验收项，全部通过后才打标签。
 2. 按[已部署功能的实机验收手册](../runbooks/accept-features-on-experimental-nas.md)逐模块核对；每完成一节，就从手册中删去这一节。成员分享重启窗口修复 [#400](https://github.com/zhongwater123/A-NAS/pull/400) 合并后，补验重启后的首次创建和保存。

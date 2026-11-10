@@ -4,6 +4,8 @@
 
 ## 索引
 
+- [产品服务失陷后的数据保护](compromised-product-data-protection.md)（draft；目标已确认，待实施）
+
 - [Web 错误提示与时间格式](web-errors-and-time.md)（implemented）
 - [只读宿主机状态](read-only-host-state.md)（implemented）
 - [Debian 只读宿主机状态](read-only-linux-host-state.md)（implemented）

@@ -1,5 +1,7 @@
 # 存储与文件架构
 
+2026-11-10：本页仍描述当前实现。身份权威、受保护提交、快照销毁与独立恢复的目标改造见[统一方案](compromised-product-data-protection.md)；按 [ADR 0036](../adr/0036-protect-recovery-from-a-compromised-product-service.md)实施后再更新对应代码入口，不能把当前目录对账、定时快照或 UDS 类型检查当作失陷保护已经成立。
+
 ## 数据流
 
 ```text

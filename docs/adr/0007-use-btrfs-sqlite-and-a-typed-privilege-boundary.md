@@ -2,6 +2,8 @@
 
 状态：accepted（v1.0.1）；单盘限制与“未选择 RAID”已由 [ADR 0025](0025-span-the-data-volume-across-disks-with-btrfs-profiles.md) 修订
 
+2026-11-10 修订计划：身份与保护权威从产品状态目录迁出，卷注册独立于创建计划；格式化、快照删除及恢复读取在可信端授权。Btrfs、SQLite 和窄 Host Agent 仍保留；分阶段生效与恢复单元见[修订矩阵](../architecture/compromised-product-data-protection.md#adr-修订矩阵)及 [ADR 0036](0036-protect-recovery-from-a-compromised-product-service.md)。下文为当前实现的历史决定。
+
 A-NAS v1.0.1 需要在仍属实验设备的单盘上完成可恢复的文件闭环，同时把磁盘破坏性操作限制在可审计的小边界内。我们决定使用单盘 Btrfs 数据卷，使用系统盘上的 SQLite/WAL 保存控制面状态，由 root Host Agent 只执行类型化高层操作；Web 与 SMB 共用账号和权限身份，但分别保存 Argon2id 与 Samba 的不可逆凭据。
 
 ## 后果

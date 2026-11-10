@@ -1,5 +1,7 @@
 # 相册技术设计
 
+2026-11-10：本页的现有实现不满足新确认的失陷保护目标。相册身份、Catalog 一致恢复及 GC 权限的修订逐条见[ADR 0011 改造](compromised-product-data-protection.md#adr-0011-的具体修订)；在相应阶段通过前，保留下面的当前实现说明。
+
 状态：M1 切片 1–6 已实现，切片 7 的本地部分已实现、实机闸门待做；M2 的切片 8、9、11、12 已实现（步骤见 [M2 实施方案](photo-ai.md)），切片 10 已按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 实现为随系统内置安装；M3 未开始。模型 revision 与视觉 token 已按[校准报告](../research/photo-ai-label-calibration.md)冻结，资源参数待实机测量；搜索按向量排序并分两段，AI 标签只在 AI 聚合中展示、不参与搜索（[M2 实施方案](photo-ai.md#ai-聚合)）。部署与验收进度见[当前状态](../status/CURRENT.md)。
 
 本设计落实[相册规格](../specs/photo-library.md)。受管图库的长期边界由 [ADR 0006](../adr/0006-use-a-managed-photo-library.md) 决定，相册服务的身份、存储位置与授权方式由 [ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md) 决定；模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。

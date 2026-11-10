@@ -1,5 +1,7 @@
 # 架构总览
 
+目标架构另见[产品服务失陷保护改造方案](compromised-product-data-protection.md)和 [ADR 0036](../adr/0036-protect-recovery-from-a-compromised-product-service.md)。用户已确认“产品服务失陷也不能造成用户数据不可恢复的损失”；工程尚未实施，下面的当前拓扑和已有权限隔离不足以证明该目标。实施优先级见[当前状态](../status/CURRENT.md)。
+
 本页记录开发时必须保持的系统边界和当前代码入口。完整产品背景与研究依据见 [PROJECT_CONTEXT.md](../../PROJECT_CONTEXT.md)。
 
 ## 系统边界
@@ -168,6 +170,8 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 新增模块时，应在其代码附近放置包级说明和测试；只有跨模块关系或系统不变量才更新本页。部署与实机验收进度只记录在[当前状态](../status/CURRENT.md)。
 
 ## 关联
+
+- [产品服务失陷保护规格](../specs/compromised-product-data-protection.md)与[改造顺序、ADR 修订和门禁](compromised-product-data-protection.md)
 
 - [`internal/httpapi/routes_test.go`](../../internal/httpapi/routes_test.go)：管理员规格与路由对照、成员拒绝测试（[#270](https://github.com/zhongwater123/A-NAS/issues/270)）
 - [`internal/storage/authorization_test.go`](../../internal/storage/authorization_test.go)：服务层授权及被拒绝后不改变计划、不执行磁盘操作

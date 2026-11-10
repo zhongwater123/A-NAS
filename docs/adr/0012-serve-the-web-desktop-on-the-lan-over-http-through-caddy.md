@@ -2,6 +2,8 @@
 
 状态：accepted；行为见[局域网 Web 访问规格](../specs/lan-web-access.md)，启用步骤见[启用局域网 Web 访问](../runbooks/enable-lan-web-access.md)。互联网访问另走只用 HTTPS 的入口，见 [ADR 0032](0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)；本决定的明文 HTTP 仍只适用于可信内网。
 
+2026-11-10 修订计划：新保护版本上线前结束明文登录/管理过渡，使用可信证书的 HTTPS，可信管理入口认证与产品服务独立。保留 Caddy 与产品回环，旧 HTTP 风险接受不能用于新入口；见 [ADR 0036](0036-protect-recovery-from-a-compromised-product-service.md)和[身份及敏感命令设计](../architecture/compromised-product-data-protection.md#身份与敏感命令)。本次尚未改变部署或证书。
+
 此前 Web 只监听 `127.0.0.1`，只能经本地控制台或 SSH 隧道使用；成员账号没有 SSH 登录权限，其他部门的同事只能使用 SMB。设备在可预见的时间内只部署在公司内网，设备所有者希望内网用户用浏览器使用全部功能，而目前取得浏览器信任的证书成本较高。我们决定由 Caddy 在 80 端口以明文 HTTP 向局域网提供 Web 桌面，产品服务仍只监听回环；设备所有者明确接受明文传输的风险，作为启用 HTTPS 前的过渡。
 
 ## 决定

@@ -2,6 +2,8 @@
 
 状态：proposed（2026-10-12，随音乐 PR 提交评审）；行为见[音乐规格](../specs/music.md)。文件访问边界与影视中心相同（[ADR 0017](0017-run-the-media-center-through-the-file-broker.md)），本 ADR 记录音乐与之不同的部分，以及 FFmpeg Worker 由影视中心专用改为共用边界的决定。
 
+2026-11-10 修订计划：原地索引和共用 Worker 保留；歌单、收藏、历史及其资源引用作为受保护用户数据，与可重建索引分开承担恢复职责，封面缓存遵守源文件授权。见 [ADR 0036](0036-protect-recovery-from-a-compromised-product-service.md)和[恢复单元](../architecture/compromised-product-data-protection.md#所有写入口与恢复单元)，尚未实施。
+
 相册把照片导入受管图库，由专用服务身份持有（[ADR 0006](0006-use-a-managed-photo-library.md)、[ADR 0011](0011-run-the-photo-library-as-a-dedicated-service-identity.md)）。音乐不同：家庭用户通常已经有一个用 SMB 拷进来、按“歌手/专辑”整理好的音乐文件夹，NAS 产品的音乐应用都是直接整理这些文件，而不是要求再导入一遍。我们决定：音乐库是个人空间与共享空间里普通文件的索引；产品服务通过文件服务列目录和打开文件，生产中由文件代理以登录成员本人的 Linux 身份读取（[ADR 0008](0008-use-unified-linux-identities-and-filesystem-acls.md)），不新增服务身份，也不获得任何文件的额外访问权。浏览器能直接播放的格式用内存安全的纯 Go 库在产品服务内读取标签；其余格式由 FFmpeg Worker 探测与解码，FFmpeg Worker 因此从影视中心的组件改为与应用无关的共用 FFmpeg 边界。
 
 ## 决定
