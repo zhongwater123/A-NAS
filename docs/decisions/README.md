@@ -21,6 +21,7 @@
 - [2026-10-12：备份中心先只做快照保护](2026-10-12-backup-center-snapshots-only.md)
 - [2026-10-13：文件管理的图片缩略图是否改用服务端生成](2026-10-13-file-manager-image-thumbnails.md)
 - [2026-10-21：FFmpeg Worker 的槽位、分层与内存上限](2026-10-21-ffmpeg-worker-slots-and-memory.md)
+- [2026-11-06：镜像缺盘的开机路径是否做成虚拟机回归测试](2026-11-06-mirror-boot-vm-test.md)
 
 ### 相册
 
@@ -61,6 +62,8 @@
 ### 虚拟伙伴
 
 - [2026-11-06：虚拟伙伴（大肥鱼）V1 的形象、实现方式与 VNAS 的控制](2026-11-06-companion-v1.md)
+- [2026-11-06：虚拟伙伴 V1 是否不含待办与专注计时](2026-11-06-companion-v1-no-todo-focus.md)
+- [2026-11-06：虚拟伙伴旧分支中的第三方素材怎么清除](2026-11-06-companion-old-branches.md)
 
 ### 家庭中心
 

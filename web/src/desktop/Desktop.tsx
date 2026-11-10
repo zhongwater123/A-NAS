@@ -18,6 +18,7 @@ import type { Session, User } from "../api.generated";
 import { assistantStatus } from "../assistant/api";
 import { TaskToasts } from "../assistant/TaskToasts";
 import { whenText } from "../assistant/taskTime";
+import { Companion } from "../companion/Companion";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
 import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
@@ -321,6 +322,9 @@ export function Desktop({
         </ShellPart>
         <ShellPart name="task toasts">
           <TaskToasts enabled={assistantReady} onOpen={showTaskRun} />
+        </ShellPart>
+        <ShellPart name="companion">
+          <Companion />
         </ShellPart>
         <ShellPart name="family hints">
           <Suspense fallback={null}>

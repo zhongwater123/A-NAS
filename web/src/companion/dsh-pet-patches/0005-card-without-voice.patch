@@ -1,0 +1,74 @@
+A-NAS does not vendor dsh-pet's voice (shared/voice.ts runs edge-tts through the Harness host):
+the card no longer reads a say leaf aloud, and the speech bubble no longer waits for or shows
+a reading. The bubble keeps its plain timing (shared/bubble-hold.ts).
+
+diff --git a/client/pet/card/bubble-slots.ts b/client/pet/card/bubble-slots.ts
+--- a/client/pet/card/bubble-slots.ts
++++ b/client/pet/card/bubble-slots.ts
+@@ -12,7 +12,6 @@ import {
+   type BubbleHoldEvent,
+   type BubbleHoldState,
+ } from '../../../shared/bubble-hold';
+-import { subscribeVoiceState, subscribeVoiceUtterance, type VoiceState } from '../../../shared/voice';
+ import { BUBBLE_DURATION_MS } from '../timings';
+ import type { Dispatch, ReactNode, SetStateAction } from 'react';
+ import type * as ReactNS from 'react';
+@@ -156,11 +155,6 @@ export function createBubbleSlots(rt: BubbleSlotsRuntime, components: BubbleComp
+     const [workOn, setWorkOn] = useState(false);
+     const [workText, setWorkText] = useState<string | null>(null);
+     const workTimerRef = useRef<number | null>(null);
+-    // 语音播报状态：只在手动触发的那一句上有值，气泡据此显示转圈 / 喇叭
+-    const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+-
+-    // 订阅是模块级单例：卸载时必须退订，否则旧卡片会被后续状态推送重渲染
+-    useEffect(() => subscribeVoiceState(setVoiceState), []);
+ 
+     // 卸载后不再 setState：三个计时器都在这里清。
+     useEffect(
+@@ -186,18 +180,6 @@ export function createBubbleSlots(rt: BubbleSlotsRuntime, components: BubbleComp
+       }, next.delayMs);
+     };
+ 
+-    // 语音报开始/结束时推进收起计划：合成慢的时候气泡得挂住，播完再收。
+-    // 只认文本相同的那一句——同一页面上的其他宠物共用这份模块单例状态。
+-    useEffect(
+-      () =>
+-        subscribeVoiceUtterance((event) => {
+-          if (event.text !== whisperTextRef.current) return;
+-          applyWhisperHold({ kind: event.kind === 'start' ? 'hold' : 'release', seq: event.seq });
+-        }),
+-      // eslint-disable-next-line react-hooks/exhaustive-deps -- 订阅只建一次：收起计划全部经 ref 现读，重订阅只会漏事件
+-      [],
+-    );
+-
+     const showWhisper = (text: string, parts: { image?: string; url?: string }, duration?: number) => {
+       if (duration === 0) return; // 只联动动画、不改气泡时走这里。
+       setWhisperText(text);
+@@ -256,7 +238,6 @@ export function createBubbleSlots(rt: BubbleSlotsRuntime, components: BubbleComp
+               url: whisperUrl,
+               assetRoot: input.assetRoot,
+               on: whisperOn,
+-              voiceState,
+             });
+       }
+       // 终态与非终态共用同一个组件，差别只在停留时长与优先级。
+diff --git a/client/pet/card/cue-effects.ts b/client/pet/card/cue-effects.ts
+--- a/client/pet/card/cue-effects.ts
++++ b/client/pet/card/cue-effects.ts
+@@ -8,7 +8,6 @@
+  */
+ import { pickSlot, poolIncludes } from '../../../shared/pickers';
+ import { WORK_STATUS_INDEX } from '../../../shared/work-status';
+-import { playSayVoice } from '../../../shared/voice';
+ import type { CardHub } from './hub';
+ import type { PetCardProps } from './props';
+ import type * as ReactNS from 'react';
+@@ -112,8 +111,6 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+         return;
+       }
+       hub.speak(say.text, say.image, say.url, say.duration, say.anim);
+-      // 两端各判各的：叶子点名了本端才念，没点名或点了另一端就只弹气泡
+-      playSayVoice(say);
+     };
+ 
+     /** 点播动画：url 插播一段，名称走菜单同一套动作。 */

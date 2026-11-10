@@ -21,6 +21,7 @@ NAS 本地控制台（Cage + Chromium）或隧道后的远程浏览器      局�
   ├── Music（原地索引个人空间与 Shared 中的音频，经 Files 以成员身份读取；浏览器不能播放的格式经同一 FFmpeg Worker 探测与解码；ADR 0018）
   ├── /api/v1/web-search ── 只经 Unix 套接字 ──► 网页搜索服务（SearXNG，a-nas-search；只能访问公网地址；ADR 0030）
   ├── /api/v1/assistant ── 按白名单转发 ──► 成员自己的 Hermes 实例（hermes serve，沙箱；连接经 File Broker 的会话闸门；ADR 0024）
+  │        └── 伙伴套接字 ◄── 成员的 AI 助手（对端 UID 即成员；伙伴命令只转给发起本回合的 VNAS 窗口；ADR 0024）
   ├── /api/v1/family 转发 ──► 家庭服务（a-nas-family，独占数据卷 family 子卷；以读者会话向相册服务查询频道照片；ADR 0029）
   ├── /api/v1/photos 转发 ──► 相册服务（a-nas-photos，独占数据卷 photos 子卷）
   │                              ├── Photo Library / Catalog / Search / Policy
@@ -122,7 +123,7 @@ Web（File Broker 的用户 Worker）/ SMB3（smbd 以登录者身份）→ 内�
 | `internal/appstore` / `internal/appstoreapi` | 内置 CasaOS 清单、安装策略与计划渲染（含每个服务的运行方式，[ADR 0022](../adr/0022-reach-shared-folders-only-as-the-app-identity.md)）、安装编排（`appstore.Center`：卷检查、应用身份、计划摘要、准备目录）、Compose 执行任务与安装后核对、`/api/v1/apps`（仅管理员，公开文档与容器代理的线格式分开）与 `/api/v1/app-shortcuts`（所有已登录账号的桌面快捷方式）；`appstore/fake` 的内存 Docker 按渲染出的 Compose 建容器，与真实 Docker 共用 `engine/enginetest` 的契约表 | 已实现，见[应用中心规格](../specs/app-center.md) |
 | `internal/containersapi` / `internal/localorigin` | `/api/v1/containers`（公开文档与容器代理的线格式分开）与写操作的本机 Host、同源校验 | 已实现；Host 接受 `localhost` 与 IP 地址 |
 | `internal/assistantchanges` | AI 助手“提交更改”的执行方：检查提交、为卡片复制暂存内容、登记本人的一次性授权、以本人身份经文件代理的受限工作进程执行（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 4） | 单元测试与系统测试；随助手默认关闭 |
-| `internal/assistantapi` | AI 助手的产品接口：经会话闸门按白名单转发成员实例上 `hermes serve` 的 JSON-RPC 与对话 REST，把 Hermes 的审批对应到“提交更改”并生成确认卡片（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)） | 开发机原型与系统测试；默认关闭（`ANAS_ASSISTANT_SOCKET_DIR`），见 [AI 助手规格](../specs/ai-assistant.md) |
+| `internal/assistantapi` | AI 助手的产品接口：经会话闸门按白名单转发成员实例上 `hermes serve` 的 JSON-RPC 与对话 REST，把 Hermes 的审批对应到“提交更改”并生成确认卡片（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)）；在 systemd 持有的伙伴套接字上按对端 UID 认出成员，把伙伴工具的调用与 Hermes 的 `tool.start` 配对，以 `anas.companion` 只转给发出本回合提示的 VNAS 窗口（ADR 0024 决定 8，[虚拟伙伴规格](../specs/virtual-companion.md)） | 开发机原型与系统测试；默认关闭（`ANAS_ASSISTANT_SOCKET_DIR`），见 [AI 助手规格](../specs/ai-assistant.md) |
 | `internal/assistantlogin` | 用 Hermes 自带的密码登录（dashboard basic auth）登录成员实例上的 `hermes serve`；实例的 root 专属密钥就是密码，登录过的连接带有成员身份，Hermes 的浏览器控制需要它（[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10） | 由文件代理的会话闸门与 `internal/assistantapi` 使用；随助手默认关闭 |
 | `internal/terminal` | 经本机屏幕或局域网入口的同源 WebSocket 上的 PTY 终端，互联网入口不提供；生产中由文件代理以登录管理员本人身份启动 Shell | 仅管理员可访问；默认关闭，由 root 写入 `ANAS_TERMINAL=enabled` 开启且升级保留，入口在“设置 → 终端”，见[终端规格](../specs/web-terminal.md) |
 | `deploy/caddy` | 局域网 Web 入口的 Caddy 配置，以及加上互联网站点的模板；系统服务安装器在已安装 Caddy 时校验并写入，有 `/etc/a-nas/internet.env` 时写入后者 | 已实现，系统测试覆盖，见[局域网 Web 访问规格](../specs/lan-web-access.md)、[互联网访问规格](../specs/internet-access.md) |

@@ -4,5 +4,7 @@ d /run/a-nas-assistant 0755 root root -
 d /run/anas-assistant-gw 0755 root root -
 d /run/anas-assistant-photos 0755 root root -
 f /run/anas-assistant-photos/photos.sock 0644 root root -
+d /run/anas-assistant-companion 0755 root root -
+f /run/anas-assistant-companion/companion.sock 0644 root root -
 d /run/anas-change-agent 0755 root root -
 f /run/anas-change-agent/agent.sock 0644 root root -

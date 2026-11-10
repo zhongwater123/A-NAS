@@ -1,0 +1,42 @@
+Every change of what VNAS is doing stops the pet's motion in dsh-pet, its own walk and the move
+to a position it was told to go to alike. A turn that moves the pet ends right after the command,
+so the pet stopped halfway, or before it took a step. A stage now stops only the pet's own walk;
+a throw was never stopped and still is not.
+
+diff --git a/client/pet/card/cue-effects.ts b/client/pet/card/cue-effects.ts
+--- a/client/pet/card/cue-effects.ts
++++ b/client/pet/card/cue-effects.ts
+@@ -88,7 +88,9 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+       log('pet=' + cfg.id + ' ' + (prevWorkStateRef.current ?? 'null') + '->' + workStatus.state + '    ' + name);
+       const stateChanged = prevWorkStateRef.current !== workStatus.state;
+       prevWorkStateRef.current = workStatus.state;
+-      hub.stopMotion();
++      // A-NAS: a stage stops the pet's own walk, not a move VNAS asked for: the turn that asked for it
++      // ends right after, and its end would leave the pet halfway.
++      hub.stopWalk();
+       // 气泡文本：任务详情优先，否则从 workStatusTexts[档位] 随机抽一句。
+       const textGroup = Array.isArray(cfg.workStatusTexts) ? cfg.workStatusTexts[idx] : undefined;
+       const configuredText =
+diff --git a/client/pet/card/hub.ts b/client/pet/card/hub.ts
+--- a/client/pet/card/hub.ts
++++ b/client/pet/card/hub.ts
+@@ -37,6 +37,8 @@ export interface CardHub {
+   isDragging(): boolean;
+   /** 停走位与位置跟随。 */
+   stopMotion(): void;
++  /** A-NAS: stops only the pet's own walk; a move to where VNAS put it goes on. */
++  stopWalk(): void;
+   /** 抛掷指令：角度（度，0 为正右、逆时针为正）与力度倍率。 */
+   applyThrow(angleDeg: number, power: number): void;
+   /** 试发起一次自主走位：占用中返回 true，无法移动返回 false，成功返回动作名。 */
+diff --git a/client/pet/card/runtime.ts b/client/pet/card/runtime.ts
+--- a/client/pet/card/runtime.ts
++++ b/client/pet/card/runtime.ts
+@@ -291,6 +291,7 @@ export function createCardRuntime(rt: PetRuntime) {
+       // 占用锁：锁的语义是把控制权交给第三方，睡觉的菜单闸门与自动化闸门都对持锁者让路
+       locked: () => ownAnim.isFrozen(),
+       stopMotion: motion.stopMove,
++      stopWalk: () => motion.walk.stop(),
+       tryWalk: motion.walk.tryMove,
+     };
+     // 七条指令的分派在 cue-effects：这里只把当拍 props 交过去。

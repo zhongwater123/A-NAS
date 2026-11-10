@@ -31,6 +31,8 @@ type harness struct {
 	serve   *fakeServe
 	changes *fakeChanges
 	server  *httptest.Server
+	api     *Handler
+	marks   int
 }
 
 // newHarness serves the assistant API as the Product Service would for
@@ -49,7 +51,7 @@ func newHarness(t *testing.T) *harness {
 		api.ServeHTTP(w, r.WithContext(ctx))
 	}))
 	t.Cleanup(server.Close)
-	return &harness{t: t, serve: serve, changes: changes, server: server}
+	return &harness{t: t, serve: serve, changes: changes, server: server, api: api}
 }
 
 // frameWait bounds the wait for one frame. It only stops a hang: under the

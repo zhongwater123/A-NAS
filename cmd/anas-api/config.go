@@ -64,6 +64,9 @@ type Config struct {
 	// or neither; without them the device has no internet entry.
 	InternetHTTPAddr string `env:"ANAS_INTERNET_HTTP_ADDR"`
 	InternetHost     string `env:"ANAS_INTERNET_HOST"`
+	// FakeStorage picks the simulated host in fake mode: empty for the usual
+	// disks, degraded for a volume that loses a disk (devstorage.go).
+	FakeStorage string `env:"ANAS_FAKE_STORAGE"`
 	// StateDir holds the SQLite stores and caches; it defaults to the user's
 	// configuration directory.
 	StateDir string `env:"ANAS_STATE_DIR"`
@@ -100,8 +103,10 @@ type Config struct {
 	// ScreensaverVideo is the variable releases before the pool named; its
 	// directory is the pool.
 	ScreensaverVideo string `env:"ANAS_SCREENSAVER_VIDEO"`
-	Assistant        AssistantConfig
-	WebSearch        WebSearchConfig
+	// CompanionDirectory holds the companion's animations (install-media-pool.sh).
+	CompanionDirectory string `env:"ANAS_COMPANION_DIRECTORY"`
+	Assistant          AssistantConfig
+	WebSearch          WebSearchConfig
 	// HostAgentChangesSocket is the Host Agent's socket for the assistants'
 	// changes. The Product Service once read the same name for the spike's
 	// change broker; it refuses it now, so that neither meaning is taken for
@@ -180,6 +185,13 @@ func loadConfig(environment map[string]string) (Config, error) {
 	live := c.Live()
 	problem(loopbackAddress("ANAS_HTTP_ADDR", c.HTTPAddr))
 	switch {
+	case c.FakeStorage == "":
+	case live:
+		problem(errors.New("ANAS_FAKE_STORAGE applies to fake mode only"))
+	case c.FakeStorage != fakeStorageDegraded:
+		problem(fmt.Errorf("ANAS_FAKE_STORAGE must be empty or %s", fakeStorageDegraded))
+	}
+	switch {
 	case c.InternetHTTPAddr == "" && c.InternetHost == "":
 	case c.InternetHTTPAddr == "" || c.InternetHost == "":
 		problem(errors.New("ANAS_INTERNET_HTTP_ADDR and ANAS_INTERNET_HOST turn the internet entry on together; set both or neither"))
@@ -215,6 +227,7 @@ func loadConfig(environment map[string]string) (Config, error) {
 		{"ANAS_PHOTOS_SOCKET", &c.PhotosSocket}, {"ANAS_SHARES_SOCKET", &c.SharesSocket},
 		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
 		{"ANAS_FFMPEG_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
+		{"ANAS_COMPANION_DIRECTORY", &c.CompanionDirectory},
 		{"ANAS_ASSISTANT_SOCKET_DIR", &c.Assistant.SocketDir}, {"ANAS_WEB_SEARCH_SOCKET", &c.WebSearch.Socket},
 		{"ANAS_WEB_SEARCH_RELEASE", &c.WebSearch.Release}, {"ANAS_WEB_SEARCH_SECRET_FILE", &c.WebSearch.SecretFile},
 	} {
@@ -279,6 +292,10 @@ func loadConfig(environment map[string]string) (Config, error) {
 		if c.ScreensaverVideo != "" {
 			c.ScreensaverDirectory = filepath.Dir(c.ScreensaverVideo)
 		}
+	}
+
+	if c.CompanionDirectory == "" {
+		c.CompanionDirectory = "/var/lib/a-nas/companion/current"
 	}
 
 	if c.HostAgentChangesSocket != "" {

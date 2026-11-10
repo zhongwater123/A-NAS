@@ -1,7 +1,11 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AssistantMessage } from "../api.generated";
+import { resetCompanionCommands } from "../companion/commands";
+import { companionLock, companionPlayback, resetCompanionHost } from "../companion/host";
+import { companionState, resetWorkStatus, setCompanionReady, startTurn } from "../companion/workStatus";
 import { assistantHandlers, assistantSession } from "../test/handlers/assistant";
 import { server } from "../test/server";
 import type { Approval } from "./api";
@@ -40,7 +44,14 @@ Element.prototype.scrollTo ??= function scrollTo() {};
 
 afterEach(() => {
   handlers.clear();
+  resetWorkStatus();
+  resetCompanionHost();
+  resetCompanionCommands();
+  setCompanionReady(false);
 });
+
+// What the companion would show: the page's GET /state section the VNAS window feeds.
+const shown = () => (companionState.read().sections.workStatus.data as { state?: string } | null)?.state ?? null;
 
 const history: AssistantMessage[] = [
   { id: 1, role: "user", content: "打开相册", timestamp: 1_760_000_000 },
@@ -154,5 +165,113 @@ describe("the VNAS window", () => {
     await emit("anas.approval", card("req-3", "approved", "rm -rf 缓存"));
     expect(screen.queryByText("rm -rf 缓存")).toBeNull();
     expect(screen.queryByRole("region", { name: "本对话中等你确认或回答的事" })).toBeNull();
+  });
+
+  it("moves the companion for the turns this window starts, and stops once the window closes", async () => {
+    const card = (status: Approval["status"]): Approval => ({
+      requestId: "req-9",
+      sessionId: LIVE,
+      storedSessionId: STORED,
+      kind: "command",
+      status,
+      createdAt: Date.now() / 1000,
+      command: { text: "rm -rf 缓存" },
+    });
+    // A turn driven from another device, and its card, are not this device's companion's.
+    await open([card("awaiting")]);
+    await emit("message.start");
+    expect(shown()).toBeNull();
+    await emit("message.complete", { status: "complete" });
+
+    // This window sends the next prompt: it registers as the conversation's browser first.
+    const user = userEvent.setup();
+    await user.type(screen.getByRole("textbox"), "清理缓存");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() =>
+      expect(client.request).toHaveBeenCalledWith(
+        "browser.controller.register",
+        expect.objectContaining({ session_id: LIVE }),
+      ),
+    );
+    await emit("message.start");
+    expect(shown()).toBe("thinking");
+    await emit("tool.start", { tool_id: "call_1", name: "browser_snapshot" });
+    expect(shown()).toBe("working");
+    await emit("anas.approval", card("awaiting"));
+    expect(shown()).toBe("waiting");
+    await emit("anas.approval", card("approved"));
+    expect(shown()).toBe("working");
+    await emit("message.complete", { status: "complete" });
+    expect(shown()).toBe("success");
+
+    cleanup();
+    expect(shown()).toBeNull();
+  });
+  it("carries out VNAS's commands to the companion and answers each one", async () => {
+    await open();
+    setCompanionReady(true);
+    // The window started this turn (it registers before every prompt, as the companion test above shows).
+    startTurn(LIVE);
+    const results = () => client.request.mock.calls.filter(([method]) => method === "companion.result");
+    const command = (command_id: string, action: string, args: Record<string, unknown>) => ({
+      command_id,
+      action,
+      args,
+    });
+
+    await emit("anas.companion", command("c".repeat(32), "broadcast", { text: "照片整理好了", duration: 5000 }));
+    expect(companionState.read().pets.main.say.data).toEqual({ text: "照片整理好了", duration: 5000, anim: true });
+    await waitFor(() =>
+      expect(client.request).toHaveBeenCalledWith("companion.result", {
+        session_id: LIVE,
+        command_id: "c".repeat(32),
+        ok: true,
+        result: { status: "ok" },
+      }),
+    );
+
+    // An animation is answered once it has played to its end.
+    await emit("anas.companion", command("a".repeat(32), "anim", { name: "点击回应-元气挥手" }));
+    const { playbackId } = companionState.read().pets.main.anim.data as { playbackId: string };
+    expect(results()).toHaveLength(1);
+    companionPlayback.report(playbackId, "ended");
+    await waitFor(() =>
+      expect(client.request).toHaveBeenCalledWith("companion.result", {
+        session_id: LIVE,
+        command_id: "a".repeat(32),
+        ok: true,
+        result: { status: "ended", playbackId },
+      }),
+    );
+
+    // Another conversation's command is answered, and refused; a malformed one is not answered at all.
+    await act(async () => {
+      for (const handler of handlers)
+        handler({ type: "anas.companion", session_id: "live0002", payload: command("b".repeat(32), "wake", {}) });
+    });
+    await waitFor(() =>
+      expect(client.request).toHaveBeenCalledWith("companion.result", {
+        session_id: "live0002",
+        command_id: "b".repeat(32),
+        ok: false,
+        error: { reason: "not-controlling", message: expect.any(String) },
+      }),
+    );
+    await emit("anas.companion", { action: "wake", args: {} });
+    await emit("anas.companion", { command_id: "d".repeat(32), args: {} });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(results()).toHaveLength(3);
+
+    // A window that closes stops waiting on an animation and answers nothing, and the lock VNAS
+    // took goes with it, as the product service can no longer release it.
+    await emit("anas.companion", command("e".repeat(32), "anim", { name: "点击回应-元气挥手" }));
+    await emit("anas.companion", command("f".repeat(32), "lock", {}));
+    await waitFor(() => expect(results()).toHaveLength(4));
+    expect(companionLock.locked("main")).toBe(true);
+    cleanup();
+    expect(companionPlayback.waiterCount()).toBe(0);
+    expect(companionLock.locked("main")).toBe(false);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(results()).toHaveLength(4);
   });
 });

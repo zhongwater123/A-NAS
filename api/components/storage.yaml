@@ -22,9 +22,28 @@ schemas:
       layout: { $ref: "#/schemas/VolumeLayout" }
       capacityBytes: { type: integer, format: int64, minimum: 0 }
       availableBytes: { type: integer, format: int64, minimum: 0 }
-      state: { type: string, enum: [creating, available, unavailable, read_only] }
+      state:
+        type: string
+        enum: [creating, available, degraded, unavailable, read_only]
+        description: "degraded: mounted and writable without one of its disks; a mirror then keeps one copy of new data (ADR 0025)."
       conversion: { $ref: "#/schemas/VolumeConversion" }
+      missingDisks:
+        type: array
+        items: { $ref: "#/schemas/MissingDisk" }
+        description: Disks of the volume the device does not see, while it is degraded or not mounted.
+      restoring:
+        type: boolean
+        description: The volume has all its disks again after running without one and is being scrubbed, so that data written meanwhile gets its second copy.
       spread: { $ref: "#/schemas/VolumeSpread" }
+  MissingDisk:
+    type: object
+    additionalProperties: false
+    required: [id]
+    description: A disk of the data volume that is not there, as the plan that added it recorded it.
+    properties:
+      id: { $ref: "common.yaml#/schemas/StableResourceID" }
+      model: { type: string }
+      capacityBytes: { type: integer, format: int64, minimum: 0 }
   VolumeSpread:
     type: object
     additionalProperties: false
@@ -90,7 +109,10 @@ schemas:
     required: [id, kind, layout, disks, capacityAfterBytes, confirmationPhrase, actions, state, createdAt, expiresAt]
     properties:
       id: { type: string }
-      kind: { type: string, enum: [create_volume, add_disks] }
+      kind:
+        type: string
+        enum: [create_volume, add_disks, replace_disk]
+        description: "replace_disk: the only plan a mirror missing a disk takes; one new disk, at least as large, rebuilt from the other copy."
       layout: { $ref: "#/schemas/VolumeLayout" }
       disks: { type: array, minItems: 1, items: { $ref: "#/schemas/PlannedDisk" } }
       capacityBeforeBytes: { type: integer, format: int64, minimum: 0, description: "Estimated space for files before adding disks; absent for a new volume." }
@@ -100,8 +122,9 @@ schemas:
       state: { type: string, enum: [planned, confirmed, running, succeeded, failed, needs_attention, expired, cancelled] }
       step:
         type: string
-        enum: [erase, format, mount, prepare, add_devices]
+        enum: [erase, format, mount, prepare, add_devices, replace]
         description: The step the Host Agent is at while the plan runs, or the one it stopped in when the plan needs attention.
+      progress: { type: integer, minimum: 0, maximum: 100, description: "How far a rebuild has come, in percent, while a replace_disk plan is at the replace step." }
       createdAt: { type: string, format: date-time }
       expiresAt: { type: string, format: date-time }
       failure: { type: string }

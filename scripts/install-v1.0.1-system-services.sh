@@ -23,7 +23,7 @@ if [[ ! -d "$source_release" ]]; then
   echo "source release is not a directory: $source_release" >&2
   exit 2
 fi
-for binary in anas-api anas-host-agent install-screensavers.sh install-ffmpeg-units.sh; do
+for binary in anas-api anas-host-agent install-media-pool.sh install-screensavers.sh install-ffmpeg-units.sh; do
   if [[ ! -f "$source_release/$binary" || ! -x "$source_release/$binary" ]]; then
     echo "missing executable: $source_release/$binary" >&2
     exit 2
@@ -480,6 +480,7 @@ install -d -o root -g root -m 0755 "$temporary"
 install -o root -g root -m 0755 "$source_release/anas-api" "$temporary/anas-api"
 install -o root -g root -m 0755 "$source_release/anas-host-agent" "$temporary/anas-host-agent"
 install -o root -g root -m 0755 "$source_release/install-screensavers.sh" "$temporary/install-screensavers.sh"
+install -o root -g root -m 0755 "$source_release/install-media-pool.sh" "$temporary/install-media-pool.sh"
 install -o root -g root -m 0755 "$source_release/install-ffmpeg-units.sh" "$temporary/install-ffmpeg-units.sh"
 install -o root -g root -m 0755 "$source_release/kiosk-launcher" "$temporary/kiosk-launcher"
 # A rollback to this release installs its host packages again.
@@ -510,10 +511,10 @@ mv -- "$temporary" "$target"
 trap - EXIT
 
 # Screen saver videos are long-lived media, not part of a release (ADR 0014):
-# install-screensavers.sh keeps them under /var/lib/a-nas/screensavers, where
+# install-media-pool.sh keeps them under /var/lib/a-nas/screensavers, where
 # "current" names the pool the Product Service plays whatever the release.
 if [[ -d "$source_release/screensavers" ]]; then
-  echo "ignoring the release's screen saver videos: install them with install-screensavers.sh" >&2
+  echo "ignoring the release's screen saver videos: install them with install-media-pool.sh screensavers" >&2
 fi
 # Installers before issue #49 left each pool in a directory named after its
 # release and no "current". Adopt the pool installed last, which they played
@@ -522,7 +523,7 @@ if [[ ! -e /var/lib/a-nas/screensavers/current && ! -L /var/lib/a-nas/screensave
   legacy_pool=$(find /var/lib/a-nas/screensavers -mindepth 1 -maxdepth 1 -type d -name '[A-Za-z0-9_-]*' \
     ! -name objects ! -name pools -printf '%T@ %p\n' | sort -n | tail -n 1 | cut -d ' ' -f 2-)
   if [[ -n "$legacy_pool" ]]; then
-    "$target/install-screensavers.sh" --import "$legacy_pool" ||
+    "$target/install-media-pool.sh" screensavers --import "$legacy_pool" ||
       echo "could not adopt the screen saver pool in $legacy_pool; the local console keeps its wallpaper" >&2
   fi
 fi

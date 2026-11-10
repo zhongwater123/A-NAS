@@ -163,6 +163,12 @@ ops-check:
 	grep -Fq '"/var/lib/a-nas/screensavers/current"' cmd/anas-api/config.go
 	$(call deploy_paths_carry,install-screensavers.sh.incoming)
 	grep -Fq '"$$source_release/install-screensavers.sh" "$$temporary/install-screensavers.sh"' scripts/install-v1.0.1-system-services.sh
+	grep -Fq '"/var/lib/a-nas/companion/current"' cmd/anas-api/config.go
+	$(call deploy_paths_carry,install-media-pool.sh.incoming)
+	grep -Fq '"$$source_release/install-media-pool.sh" "$$temporary/install-media-pool.sh"' scripts/install-v1.0.1-system-services.sh
+	grep -Fq '"$$target/install-media-pool.sh" screensavers --import' scripts/install-v1.0.1-system-services.sh
+	grep -Fq '/install-media-pool.sh" screensavers "$$@"' scripts/install-screensavers.sh
+	grep -Fqx 'if systemctl is-active --quiet anas-kiosk@tty1.service; then' scripts/install-media-pool.sh
 	! grep -Eq 'screensaver_[0-9a-z]*_sha256|ScreensaverVideo' scripts/deploy-dev.ps1 scripts/remote-activate-release.sh scripts/install-v1.0.1-system-services.sh
 	grep -Fq 'EXPECTED_DISK_WWN' scripts/provision-v1.0.1-rc.sh
 	! grep -Eq 'setup.?code|setup_code' scripts/install-v1.0.1-system-services.sh scripts/provision-v1.0.1-rc.sh

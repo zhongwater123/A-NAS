@@ -10,16 +10,27 @@ fields that have a value in the ground truth (CC-OCR's own normalisation)
 under each check:
 
 - text: the value appears in the whole text read separately (ignoring
-  spaces, width and case), two independent readings agreeing;
+  spaces, width and case), two readings agreeing;
 - format: the value is well formed where its key says what it is: a date
   that exists, an amount, an ID number with its GB 11643 check digit, a card
   number with its Luhn digit; fields without a known format pass;
 - confidence: every token that spells the value, found after its key, had
   at least the given probability; a value not found there fails.
 
+The same model reads the whole text and the fields, so the two readings
+tend to go wrong in the same places. Given another model's eval.ocr answers
+for the same items, scoring also checks each field against them:
+
+- other text (--other-text): the value appears in the other model's whole
+  text, a reading independent of the product's;
+- other field (--other-fields): the other model read the same value for
+  the field.
+
     python -m eval.ocr_verify run --server /llama/llama-server --model M.gguf --model-manifest M.json \\
         --mmproj P.gguf --mmproj-manifest P.json --runtime-manifest /src/deploy/llama/llama.json --threads 12
     python -m eval.ocr_verify score --run /runs/verify-<model>
+    python -m eval.ocr_verify score --run /runs/verify-<model> --other-text /runs/xiaomi-ocr-0-text \\
+        --other-fields /runs/xiaomi-ocr-0
 
 Reading needs only the Worker's runtime (the NAS's has Pillow); scoring
 needs eval.ocr_score's dependencies and CC-OCR's evaluator.
@@ -125,45 +136,73 @@ def run(args):
         reader.release()
 
 
-def fields(run_dir, subset, normalize, kie):
-    """Each answered top-level field: (key, number-like, correct, in text, format, confidence)."""
+def fields(run_dir, subset, normalize, kie, other_text=None, other_fields=None):
+    """Each answered top-level field: key, number-like, correct, format, confidence, and which readings it agrees with.
+
+    other_text and other_fields are another model's eval.ocr run directories; an item they did not
+    answer agrees with nothing.
+    """
     from eval import ocr_score  # rapidfuzz, which only scoring needs
 
     items = {item["index"]: item for item in ocr.load_subset(subset)}
+    texts = ocr_score.load_answers(other_text, subset) if other_text else {}
+    others = ocr_score.load_answers(other_fields, subset) if other_fields else {}
     found = []
     with open(os.path.join(run_dir, subset + ".jsonl"), encoding="utf-8") as file:
         for line in file:
             record = json.loads(line)
             gt = json.loads(items[record["index"]]["answer"])
             pred = kie.post_process_to_json(record["fields"])
-            pred = pred if isinstance(pred, dict) else {}
-            gt_top, pred_top = ocr_score.top_level(gt, pred)
+            gt_top, pred_top = ocr_score.top_level(gt, pred if isinstance(pred, dict) else {})
+            other = kie.post_process_to_json(others[record["index"]]["output"]) if record["index"] in others else {}
+            _, other_top = ocr_score.top_level(gt, other if isinstance(other, dict) else {})
             text = squeeze(record["text"])
+            other_text_read = squeeze(texts.get(record["index"], {}).get("output", ""))
             tokens = {"tokens": record["fields_tokens"]}
             for key, value in gt_top.items():
                 expected, answered = normalize(str(value)).strip(), str(pred_top.get(key, "")).strip()
                 if not expected or not answered:
                     continue
+                read = normalize(answered).strip()
+                in_text, in_other_text = squeeze(answered) in text, squeeze(answered) in other_text_read
                 found.append({
+                    "index": record["index"],
                     "key": key,
+                    "value": answered,
+                    "expected": expected,
                     "number": ocr_score.is_numberlike(expected),
-                    "correct": normalize(answered).strip() == expected,
-                    "text": squeeze(answered) in text,
+                    "correct": read == expected,
+                    "text": in_text,
+                    "other_text": in_other_text,
+                    "both_texts": in_text and in_other_text,
+                    "other_field": normalize(str(other_top.get(key, ""))).strip() == read,
                     "format": format_ok(key, answered),
                     "confidence": ocr_score.field_confidence(tokens, answered, key),
                 })
     return found
 
 
-def rules():
+# Readings a field's value is checked against: the field key that says whether it agrees, and the rule's name.
+AGREEMENTS = {
+    "text": "in the whole text",
+    "other_text": "in the other model's text",
+    "both_texts": "in both texts",
+    "other_field": "the other model's field agrees",
+}
+
+
+def rules(agreements=("text",)):
     yield "every answered field", lambda f: True
-    yield "in the whole text", lambda f: f["text"]
-    yield "in the text, well formed", lambda f: f["text"] and f["format"] is not False
     for threshold in CONFIDENCES:
         yield f"confidence >= {threshold}", lambda f, t=threshold: f["confidence"] is not None and f["confidence"] >= t
-        yield (f"in the text, well formed, confidence >= {threshold}",
-               lambda f, t=threshold: f["text"] and f["format"] is not False
-               and f["confidence"] is not None and f["confidence"] >= t)
+    for agreement in agreements:
+        name = AGREEMENTS[agreement]
+        yield name, lambda f, a=agreement: f[a]
+        yield f"{name}, well formed", lambda f, a=agreement: f[a] and f["format"] is not False
+        for threshold in CONFIDENCES:
+            yield (f"{name}, well formed, confidence >= {threshold}",
+                   lambda f, a=agreement, t=threshold: f[a] and f["format"] is not False
+                   and f["confidence"] is not None and f["confidence"] >= t)
 
 
 def score(args):
@@ -172,12 +211,20 @@ def score(args):
     modules = ocr_score.cc_ocr()
     kie = modules["kie_evaluator"]
     normalize = kie.KieEvaluator("kie").normalize_func
+    agreements = ["text"]
+    if args.other_text:
+        agreements += ["other_text", "both_texts"]
+    if args.other_fields:
+        agreements.append("other_field")
+    found = {subset: fields(args.run, subset, normalize, kie, args.other_text, args.other_fields)
+             for subset in args.subsets.split(",")}
+    if len(found) > 1:
+        found["all"] = [field for subset in list(found) for field in found[subset]]
     report = {}
-    for subset in args.subsets.split(","):
-        found = fields(args.run, subset, normalize, kie)
-        report[subset] = {"fields": len(found), "numbers": sum(f["number"] for f in found), "rules": {}}
-        for name, rule in rules():
-            for scope, chosen in (("all", found), ("numbers", [f for f in found if f["number"]])):
+    for subset, chosen_fields in found.items():
+        report[subset] = {"fields": len(chosen_fields), "numbers": sum(f["number"] for f in chosen_fields), "rules": {}}
+        for name, rule in rules(agreements):
+            for scope, chosen in (("all", chosen_fields), ("numbers", [f for f in chosen_fields if f["number"]])):
                 passed = [f for f in chosen if rule(f)]
                 wrong = sum(not f["correct"] for f in passed)
                 report[subset]["rules"].setdefault(name, {})[scope] = {
@@ -186,15 +233,17 @@ def score(args):
                     "wrong_total": sum(not f["correct"] for f in chosen),
                     "wrong_passed": wrong,
                 }
-    with open(os.path.join(args.run, "verify.json"), "w", encoding="utf-8") as file:
+    # Checked against other models' readings, the report goes beside the product-only one.
+    others = [os.path.basename(os.path.normpath(run)) for run in (args.other_text, args.other_fields) if run]
+    with open(os.path.join(args.run, "+".join(["verify", *others]) + ".json"), "w", encoding="utf-8") as file:
         json.dump(report, file, ensure_ascii=False, indent=1)
     for subset, result in report.items():
         print(f"== {subset}: {result['fields']} answered fields, {result['numbers']} with numbers")
-        print(f"   {'rule':52s}{'passed':>8s}{'wrong':>8s}   numbers: {'passed':>7s}{'wrong':>8s}")
+        print(f"   {'rule':66s}{'passed':>8s}{'wrong':>8s}   numbers: {'passed':>7s}{'wrong':>8s}")
         for name, scopes in result["rules"].items():
             row = "".join(f"{scopes[s]['passed'] or 0:8.3f}{scopes[s]['wrong_among_passed'] or 0:8.4f}   "
                           for s in ("all", "numbers"))
-            print(f"   {name:52s}{row}")
+            print(f"   {name:66s}{row}")
 
 
 def main():
@@ -209,6 +258,8 @@ def main():
     scoring = sub.add_parser("score")
     scoring.add_argument("--run", required=True)
     scoring.add_argument("--subsets", default=",".join(SUBSETS))
+    scoring.add_argument("--other-text", help="another model's eval.ocr run that read the same items' whole text")
+    scoring.add_argument("--other-fields", help="another model's eval.ocr run that read the same items' fields")
     args = parser.parse_args()
     if args.command == "run":
         run(args)

@@ -79,6 +79,8 @@ import {
 } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
+import { releaseCommandLocks, runCompanionCommand, stopTurnCommands } from "../companion/commands";
+import { forgetAll, reportCards, reportEvent, startTurn, stopTurn } from "../companion/workStatus";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { formatBytes } from "../lib/bytes";
 import { copyText } from "../lib/clipboard";
@@ -246,8 +248,26 @@ export function AssistantPanel({
         }
         if (type === "sessions.changed" || type === "session.title") void refreshSessions();
         if (type === "sessions.changed" || type === "message.complete") refreshBusy();
+        // The companion follows the turns this window started (companion/workStatus.ts).
+        if (session) reportEvent(session, type, event.payload as { name?: unknown; status?: unknown } | undefined);
       }),
     [gateway.client, keep, refreshBusy, refreshSessions],
+  );
+  // What the companion shows of VNAS lasts only while this window can see it: a
+  // lost connection or a closed window says nothing more about those turns or cards,
+  // and the product service can no longer settle the locks their commands took.
+  useEffect(() => {
+    if (gateway.ready) return;
+    forgetAll();
+    releaseCommandLocks();
+  }, [gateway.ready, gateway.generation]);
+  useEffect(() => reportCards(approvals.values()), [approvals]);
+  useEffect(
+    () => () => {
+      forgetAll();
+      releaseCommandLocks();
+    },
+    [],
   );
 
   const changed = useCallback(() => {
@@ -313,6 +333,7 @@ export function AssistantPanel({
         .then(
           () => {
             controlled.current.add(liveId);
+            startTurn(liveId);
           },
           () => {
             controlled.current.delete(liveId);
@@ -357,9 +378,47 @@ export function AssistantPanel({
       }),
     [gateway.client],
   );
+  // VNAS's commands to the companion on this device (anas.companion): the product service sends
+  // them only to the conversation's browser, and the companion carries out those of a turn this
+  // window started (companion/commands.ts). Each is answered once, an animation when it has ended
+  // and at most 10 s on, within the 12 s the service waits; a window that closes stops waiting
+  // and answers nothing, which the service settles.
+  useEffect(() => {
+    const closed = new AbortController();
+    const off = gateway.client.onEvent((event) => {
+      if ((event.type as string) !== "anas.companion") return;
+      const session = typeof event.session_id === "string" ? event.session_id : "";
+      const command = (event.payload ?? {}) as { command_id?: unknown; action?: unknown; args?: unknown };
+      const { command_id: commandId, action } = command;
+      if (!session || typeof commandId !== "string" || !commandId || typeof action !== "string" || !action) return;
+      const args =
+        command.args && typeof command.args === "object" && !Array.isArray(command.args)
+          ? (command.args as Record<string, unknown>)
+          : {};
+      void runCompanionCommand(session, { action, args }, closed.signal)
+        .then((outcome) =>
+          closed.signal.aborted
+            ? undefined
+            : gateway.client.request("companion.result", { session_id: session, command_id: commandId, ...outcome }),
+        )
+        .catch(() => undefined);
+    });
+    return () => {
+      off();
+      closed.abort();
+    };
+  }, [gateway.client]);
 
   const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed, beforePrompt });
-  const { send, cancel } = thread;
+  const { send, cancel: stopReply, liveId } = thread;
+  // A stop counts from this window's request, for the companion too (companion/workStatus.ts).
+  const cancel = useCallback(() => {
+    if (liveId) {
+      stopTurn(liveId);
+      stopTurnCommands(liveId);
+    }
+    stopReply();
+  }, [liveId, stopReply]);
 
   // Results of scheduled tasks the member has not read; opening a run reads its task's.
   const unread = useTaskNotices().length;
@@ -423,6 +482,8 @@ export function AssistantPanel({
     if (!window.confirm(`删除对话“${session.title || "新对话"}”？删除后无法恢复。`)) return;
     // As Hermes Desktop does: stop and close the live session before deleting it.
     if (session.id === activeId && thread.liveId) {
+      stopTurn(thread.liveId);
+      stopTurnCommands(thread.liveId);
       await gateway.client.request("session.interrupt", { session_id: thread.liveId }).catch(() => undefined);
       await gateway.client.request("session.close", { session_id: thread.liveId }).catch(() => undefined);
     }

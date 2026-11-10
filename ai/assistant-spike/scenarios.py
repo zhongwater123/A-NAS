@@ -48,6 +48,8 @@ SOCK = f"/run/a-nas-assistant/{USER}.sock"
 KEY = f"k7Qx9vT2mR4pL8wNz3Jd-{USER}"
 BROKER = "/run/anas-spike-broker/broker.sock"
 SUBMIT = "mcp__anas__submit_changes"
+# The tools whose results a scenario prints: A-NAS's own and the companion's (#412).
+A_NAS_TOOLS = ("mcp__anas__", "mcp__companion__")
 HOME = Path(f"/srv/a-nas/data/assistant/{USER}/files")
 CHANNEL = "api_server" if Path("/etc/systemd/system/anas-assistant@.service.d/channel.conf").exists() else "serve"
 # The real model's gateway or the fake model, whichever this container runs.
@@ -196,7 +198,7 @@ async def serve_turn(gw, sid, turn):
             continue
         if kind == "tool.start":
             turn.started(sid, payload.get("name"), payload.get("args"))
-        elif kind == "tool.complete" and str(payload.get("name", "")).startswith("mcp__anas__"):
+        elif kind == "tool.complete" and str(payload.get("name", "")).startswith(A_NAS_TOOLS):
             print(f"  ⇠ {payload['name']}: {short(payload.get('result') or payload.get('result_text') or payload.get('error'), 300)}")
         elif kind == "message.complete":
             if payload.get("text"):
@@ -272,7 +274,7 @@ async def api_turn(session, turn):
     rows = page.get("data", []) if isinstance(page, dict) else []
     start = max((i for i, r in enumerate(rows) if r.get("role") == "user" and turn.said in str(r.get("content"))), default=-1)
     for row in rows[start + 1:]:
-        if row.get("role") == "tool" and row.get("tool_name", "").startswith("mcp__anas__"):
+        if row.get("role") == "tool" and row.get("tool_name", "").startswith(A_NAS_TOOLS):
             print(f"  ⇠ {row['tool_name']}: {short(row.get('content'), 300)}")
         elif row.get("role") == "assistant" and row.get("content"):
             print(f"  answer: {short(row['content'], 400)}")

@@ -206,7 +206,7 @@ fi
 # stage DIR: a release as scripts/deploy-dev.ps1 stages it.
 stage() {
   install -d "$1"
-  install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-screensavers.sh /src/scripts/install-ffmpeg-units.sh "$1/"
+  install -m 0755 /src/build/anas-api /src/build/anas-host-agent /src/scripts/install-media-pool.sh /src/scripts/install-screensavers.sh /src/scripts/install-ffmpeg-units.sh "$1/"
   install -m 0644 /src/build/a-nas-host.deb /src/build/a-nas-console.deb "$1/"
   for unit in anas-api anas-host-agent anas-photos anas-shares anas-family; do
     install -m 0644 "/src/deploy/systemd/system/$unit.service" "$1/$unit-system.service"
@@ -1936,7 +1936,7 @@ check "Web files work after the restart" grep -qx alice.txt <(entries /tmp/alice
 
 # --- Screen saver videos are long-lived media, not part of a release (ADR 0014).
 pools=/var/lib/a-nas/screensavers
-media=/opt/a-nas/current/install-screensavers.sh
+installer=/opt/a-nas/current/install-media-pool.sh
 stager=/tmp/anas-dev # the staging account's home
 staged=$stager/apps/a-nas/screensavers
 uploads=0
@@ -1964,6 +1964,32 @@ install_release() {
 }
 pool_size() { curl -fsS "$api/local-console/screensavers" | jq '.videos | length'; }
 current_pool() { readlink "$pools/current" || true; }
+# The local console reads a pool's list only when its page opens, so the media
+# installer restarts it after a switch, but only when it runs. It cannot run
+# here without a display: the checks see systemd's records of start attempts,
+# and a stand-in unit plays the running console.
+# kiosk_starts: when systemd last tried to start the local console (0: never).
+kiosk_starts() { systemctl show -p ConditionTimestampMonotonic --value anas-kiosk@tty1.service; }
+# kiosk_run: the ID of the local console's current run.
+kiosk_run() { systemctl show -p InvocationID --value anas-kiosk@tty1.service; }
+# kiosk_restarted RUN: the local console runs again, in a run other than RUN.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+kiosk_restarted() { [[ $(systemctl is-active anas-kiosk@tty1.service) == active && $(kiosk_run) != "$1" ]]; }
+# kiosk_stand_in start|stop: a stand-in for the local console's instance, which
+# takes precedence over the installed template while it exists.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+kiosk_stand_in() {
+  local unit=/run/systemd/system/anas-kiosk@tty1.service
+  if [[ $1 == start ]]; then
+    printf '[Service]\nExecStart=/bin/sleep infinity\n' > "$unit"
+    systemctl daemon-reload
+    systemctl start anas-kiosk@tty1.service
+  else
+    systemctl stop anas-kiosk@tty1.service
+    rm -f "$unit"
+    systemctl daemon-reload
+  fi
+}
 # new_video: a stand-in video at /tmp/HASH.mp4; prints HASH.
 new_video() {
   local file hash
@@ -1973,15 +1999,16 @@ new_video() {
   mv "$file" "/tmp/$hash.mp4"
   echo "$hash"
 }
-# stage_pool HASH...: stages a pool as scripts/deploy-screensavers.ps1 does,
-# uploading only the videos the staging area lacks; sets pool to its ID.
+# stage_pool HASH...: stages a pool as scripts/deploy-media-pool.ps1 -Kind
+# screensavers does, uploading only the videos the staging area lacks; sets
+# pool to its ID.
 stage_pool() {
   local hash
-  for hash in $(HOME=$stager bash /src/scripts/remote-stage-screensavers.sh missing "$@"); do
+  for hash in $(HOME=$stager bash /src/scripts/remote-stage-media-pool.sh screensavers missing "$@"); do
     cp "/tmp/$hash.mp4" "$staged/objects/$hash.mp4.incoming"
     uploads=$((uploads + 1))
   done
-  pool=$(HOME=$stager bash /src/scripts/remote-stage-screensavers.sh commit "$@")
+  pool=$(HOME=$stager bash /src/scripts/remote-stage-media-pool.sh screensavers commit "$@")
 }
 check "a first install plays no screen saver" test "$(current_pool):$(pool_size)" = :0
 v1=$(new_video)
@@ -1994,7 +2021,11 @@ printf 'screensaver_000_sha256=%s\n' "$v1" > "$stager/apps/a-nas/releases/old/RE
 stage_pool "$v1" "$v2"
 pool_a=$pool
 check "staging uploads only the videos the NAS lacks" test "$uploads" = 1
-check "a staged pool installs" quiet "$media" "$pool_a" "$staged"
+check "the old staging script's name stages the same pool" \
+  test "$(HOME=$stager bash /src/scripts/remote-stage-screensavers.sh commit "$v1" "$v2")" = "$pool_a"
+kiosk_before=$(kiosk_starts)
+check "a staged pool installs" quiet "$installer" screensavers "$pool_a" "$staged"
+check "the install leaves a local console that is not running alone" test "$(kiosk_starts)" = "$kiosk_before"
 check "it becomes the current pool" test "$(current_pool):$(pool_size)" = "pools/$pool_a:2"
 stage /tmp/upgrade
 check "a release installs" install_release upgrade
@@ -2010,21 +2041,28 @@ check "search reaches the upgraded release's Worker" semantic_search 猫
 stage_pool "$v2" "$v3"
 pool_b=$pool
 check "a new pool uploads only its new video" test "$uploads" = 2
-check "the new pool installs" quiet "$media" "$pool_b" "$staged"
+check "the new pool installs" quiet "$installer" screensavers "$pool_b" "$staged"
 check "it replaces the current pool" test "$(current_pool)" = "pools/$pool_b"
 check "a video both pools hold is stored once" \
   test "$(find "$pools/objects" -type f | wc -l):$(stat -c %h "$pools/objects/$v2.mp4")" = 3:3
-check "installing the same pool again changes nothing" quiet "$media" "$pool_b" "$staged"
-check "switching back to an installed pool needs no staging" quiet "$media" "$pool_a" /nonexistent
+check "installing the same pool again changes nothing" quiet "$installer" screensavers "$pool_b" "$staged"
+check "a stand-in local console runs for the screen saver checks" kiosk_stand_in start
+run=$(kiosk_run)
+check "switching back to an installed pool needs no staging, by the old name too" \
+  quiet /opt/a-nas/current/install-screensavers.sh "$pool_a" /nonexistent
 check "the media rollback plays the old pool" test "$(current_pool)" = "pools/$pool_a"
+check "the switch restarts the running local console" kiosk_restarted "$run"
 v4=$(new_video)
 stage_pool "$v4"
 printf x >> "$staged/objects/$v4.mp4"
-check "a video that does not match its hash is refused" fails "$media" "$pool" "$staged"
+run=$(kiosk_run)
+check "a video that does not match its hash is refused" fails "$installer" screensavers "$pool" "$staged"
 check "the refused pool changes nothing" \
   test "$(current_pool)" = "pools/$pool_a" -a ! -e "$pools/objects/$v4.mp4" -a ! -e "$pools/pools/$pool"
+check "the refused pool leaves the local console running as it was" test "$(kiosk_run)" = "$run"
+check "the stand-in local console goes away" kiosk_stand_in stop
 cp "$staged/pools/$pool_b.sums" "$staged/pools/0123456789abcdef.sums"
-check "a manifest that is not the named pool is refused" fails "$media" 0123456789abcdef "$staged"
+check "a manifest that is not the named pool is refused" fails "$installer" screensavers 0123456789abcdef "$staged"
 # An installer before issue #49 left a pool named after its release, and no
 # "current".
 legacy=$pools/legacy-release
@@ -2044,6 +2082,120 @@ check "the Product Service reads the current pool" \
 video=$(curl -fsS "$api/local-console/screensavers" | jq -r '.videos[0]' || true)
 check "a current pool video answers a byte range" test "$(status_of -r 0-1023 "$api$video")" = 206
 
+# --- The companion's animations are long-lived media like the screen saver
+# videos (ADR 0014): staged by hash, checked again and switched in by root.
+companion=/var/lib/a-nas/companion
+companion_staged=$stager/apps/a-nas/companion
+animation_count() { curl -fsS "$api/companion/animations" | jq '.animations | length'; }
+current_animations() { readlink "$companion/current" || true; }
+# stage_animations NAME...: stages stand-in animations under these names as
+# scripts/deploy-media-pool.ps1 -Kind companion does; sets pool to its ID.
+stage_animations() {
+  local name file hash
+  install -d "$companion_staged/pools"
+  : > "$companion_staged/pools/.incoming.sums"
+  for name in "$@"; do
+    file=$(mktemp /tmp/animation.XXXXXX)
+    head -c 4096 /dev/urandom > "$file"
+    hash=$(sha256sum "$file" | cut -d ' ' -f 1)
+    printf '%s  %s\n' "$hash" "$name" >> "$companion_staged/pools/.incoming.sums"
+    mv "$file" "/tmp/$hash.animation"
+  done
+  commit_animations
+}
+# commit_animations: uploads what the staged manifest lists and the staging
+# area lacks, from /tmp/HASH.animation; sets pool to its ID.
+commit_animations() {
+  local hash
+  for hash in $(HOME=$stager bash /src/scripts/remote-stage-media-pool.sh companion missing); do
+    cp "/tmp/$hash.animation" "$companion_staged/objects/$hash.incoming"
+  done
+  pool=$(HOME=$stager bash /src/scripts/remote-stage-media-pool.sh companion commit)
+}
+check "a first install shows no companion animations" test "$(current_animations):$(animation_count)" = :0
+stage_animations 待机.webm 东张西望.webm 待机.mov
+animations_a=$pool
+kiosk_before=$(kiosk_starts)
+check "staged companion animations install" quiet "$installer" companion "$animations_a" "$companion_staged"
+check "installing them leaves a local console that is not running alone" test "$(kiosk_starts)" = "$kiosk_before"
+check "they become the current pool" test "$(current_animations):$(animation_count)" = "pools/$animations_a:2"
+check "the manifest names the current pool" \
+  test "$(curl -fsS "$api/companion/animations" | jq -r .pool || true)" = "$animations_a"
+animation=$(curl -fsS "$api/companion/animations" | jq -r '.animations["东张西望"].webm' || true)
+check "an animation answers a byte range" test "$(status_of -r 0-1023 "$api$animation")" = 206
+check "a pool's animations may be kept for good" \
+  bash -c "curl -fsSI '$api$animation' | grep -Fqi 'cache-control: public, max-age=31536000, immutable'"
+check "a stand-in local console runs for the companion checks" kiosk_stand_in start
+# Two animations may share one file.
+shared_animation=$(new_video)
+cp "/tmp/$shared_animation.mp4" "/tmp/$shared_animation.animation"
+printf '%s  %s\n' "$shared_animation" 待机.webm "$shared_animation" 东张西望.webm > "$companion_staged/pools/.incoming.sums"
+commit_animations
+animations_b=$pool
+run=$(kiosk_run)
+check "animations that share a file install" quiet "$installer" companion "$animations_b" "$companion_staged"
+check "the shared file is stored once" \
+  test "$(current_animations):$(animation_count):$(stat -c %h "$companion/objects/$shared_animation")" = "pools/$animations_b:2:3"
+check "installing animations restarts the running local console" kiosk_restarted "$run"
+check "a page opened before the switch keeps its pool's animations" test "$(status_of -r 0-1023 "$api$animation")" = 206
+run=$(kiosk_run)
+check "switching back to installed animations needs no staging" quiet "$installer" companion "$animations_a" /nonexistent
+check "switching back restarts the running local console" kiosk_restarted "$run"
+stage_animations 待机.webm
+printf x >> "$companion_staged/objects/$(head -c 64 "$companion_staged/pools/$pool.sums")"
+run=$(kiosk_run)
+check "an animation that does not match its hash is refused" fails "$installer" companion "$pool" "$companion_staged"
+check "the refused animations change nothing" \
+  test "$(current_animations)" = "pools/$animations_a" -a ! -e "$companion/pools/$pool"
+check "the refused animations leave the local console running as it was" test "$(kiosk_run)" = "$run"
+check "the stand-in local console goes away again" kiosk_stand_in stop
+# A manifest whose last line has no newline: read would skip that line, which the
+# pool ID still counts.
+stage_animations 待机.webm 东张西望.webm
+unterminated=$(head -c -1 "$companion_staged/pools/$pool.sums" | sha256sum | cut -c 1-16)
+head -c -1 "$companion_staged/pools/$pool.sums" > "$companion_staged/pools/.incoming.sums"
+check "staging refuses a manifest without its last newline" \
+  fails env "HOME=$stager" bash /src/scripts/remote-stage-media-pool.sh companion commit
+head -c -1 "$companion_staged/pools/$pool.sums" > "$companion_staged/pools/$unterminated.sums"
+check "installing refuses a manifest without its last newline" fails "$installer" companion "$unterminated" "$companion_staged"
+check "the unterminated manifest installs nothing" test ! -e "$companion/pools/$unterminated"
+# The same with a NUL byte where the last newline was: read and command
+# substitution drop it unseen, the pool ID counts it.
+{ head -c -1 "$companion_staged/pools/$pool.sums"; printf '\0'; } > /tmp/nul-ended.sums
+nul_ended=$(sha256sum < /tmp/nul-ended.sums | cut -c 1-16)
+cp /tmp/nul-ended.sums "$companion_staged/pools/.incoming.sums"
+check "staging refuses a manifest that ends with a NUL byte" \
+  fails env "HOME=$stager" bash /src/scripts/remote-stage-media-pool.sh companion commit
+cp /tmp/nul-ended.sums "$companion_staged/pools/$nul_ended.sums"
+check "installing refuses a manifest that ends with a NUL byte" fails "$installer" companion "$nul_ended" "$companion_staged"
+check "the NUL-ended manifest installs nothing" test ! -e "$companion/pools/$nul_ended"
+# The staging account can swap what it staged for a FIFO or a link between the
+# installer's checks and its copy: root reads regular files only, never waits
+# for a writer, and reads no more than a pool may hold.
+# refused_at_once COMMAND...: COMMAND fails, and well within 20 seconds.
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+refused_at_once() {
+  local status=0
+  timeout 20 "$@" >>"$hidden" 2>&1 || status=$?
+  [[ $status -ne 0 && $status -ne 124 ]]
+}
+stage_animations 待机.webm
+staged_object=$companion_staged/objects/$(head -c 64 "$companion_staged/pools/$pool.sums")
+rm -f "$staged_object"
+mkfifo "$staged_object"
+check "an animation staged as a FIFO is refused at once" refused_at_once "$installer" companion "$pool" "$companion_staged"
+rm -f "$staged_object"
+ln -s /dev/zero "$staged_object"
+check "an animation staged as a link to a device is refused at once" refused_at_once "$installer" companion "$pool" "$companion_staged"
+ln -sfn /dev/zero "$companion_staged/pools/0123456789abcdef.sums"
+check "a manifest staged as a link is refused at once" refused_at_once "$installer" companion 0123456789abcdef "$companion_staged"
+rm -f "$companion_staged/pools/0123456789abcdef.sums"
+mkfifo "$companion_staged/pools/0123456789abcdef.sums"
+check "a manifest staged as a FIFO is refused at once" refused_at_once "$installer" companion 0123456789abcdef "$companion_staged"
+rm -f "$companion_staged/pools/0123456789abcdef.sums"
+head -c $(((1 << 20) + 1)) /dev/zero > "$companion_staged/pools/0123456789abcdef.sums"
+check "a manifest larger than a pool's is refused" refused_at_once "$installer" companion 0123456789abcdef "$companion_staged"
+check "the refused stagings change nothing" test "$(current_animations)" = "pools/$animations_a" -a ! -e "$companion/pools/$pool"
 # --- Internet entry (ADR 0032): /etc/a-nas/internet.env turns it on. Caddy
 # serves the domain over HTTPS on the NAS's tunnel address, taking the client's
 # address from the PROXY header that only the edge relay may send. There is no

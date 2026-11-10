@@ -285,6 +285,7 @@ try {
         @{ Source = (Join-Path $repoRoot 'scripts\install-v1.0.1-system-services.sh'); Name = 'install-v1.0.1-system-services.sh.incoming' },
         @{ Source = (Join-Path $repoRoot 'scripts\provision-v1.0.1-rc.sh'); Name = 'provision-v1.0.1-rc.sh.incoming' },
         @{ Source = (Join-Path $repoRoot 'scripts\install-screensavers.sh'); Name = 'install-screensavers.sh.incoming' },
+        @{ Source = (Join-Path $repoRoot 'scripts\install-media-pool.sh'); Name = 'install-media-pool.sh.incoming' },
         @{ Source = (Join-Path $repoRoot 'scripts\install-ffmpeg-units.sh'); Name = 'install-ffmpeg-units.sh.incoming' },
         @{ Source = (Join-Path $repoRoot 'scripts\run-kiosk.sh'); Name = 'kiosk-launcher.incoming' },
         @{ Source = (Join-Path $repoRoot 'deploy\systemd\system\anas-kiosk@.service'); Name = 'anas-kiosk@.service.incoming' },

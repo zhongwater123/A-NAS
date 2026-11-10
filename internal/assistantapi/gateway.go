@@ -64,6 +64,20 @@ type upstream struct {
 	ready     json.RawMessage
 	closed    chan struct{}
 	closeOnce sync.Once
+	// companionTurns passes the companion's commands to the window one at a
+	// time (companion.go); companionSlot makes it.
+	companionTurns chan struct{}
+}
+
+// companionSlot is the window's one place for a companion command on its
+// way: a command takes it to be written and gives it back after.
+func (u *upstream) companionSlot() chan struct{} {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.companionTurns == nil {
+		u.companionTurns = make(chan struct{}, 1)
+	}
+	return u.companionTurns
 }
 
 type forwardedCall struct {
@@ -87,6 +101,7 @@ func (u *upstream) close() {
 		_ = u.conn.Close(websocket.StatusNormalClosure, "")
 		u.m.mu.Lock()
 		delete(u.m.upstreams, u)
+		releases := u.m.connectionClosed(u)
 		u.m.mu.Unlock()
 		u.mu.Lock()
 		for id, waiter := range u.waiters {
@@ -94,6 +109,9 @@ func (u *upstream) close() {
 			delete(u.waiters, id)
 		}
 		u.mu.Unlock()
+		for _, release := range releases {
+			go release.sendRelease(u.m)
+		}
 	})
 }
 
@@ -108,19 +126,24 @@ func (u *upstream) send(f frame) error {
 }
 
 func (u *upstream) toBrowser(f frame) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_ = u.toBrowserWithin(ctx, f)
+}
+
+// toBrowserWithin passes f to the window unless ctx ends first.
+func (u *upstream) toBrowserWithin(ctx context.Context, f frame) error {
 	u.mu.Lock()
 	browser := u.browser
 	u.mu.Unlock()
 	if browser == nil {
-		return
+		return nil
 	}
 	data, err := json.Marshal(f)
 	if err != nil {
-		return
+		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	_ = browser.Write(ctx, websocket.MessageText, data)
+	return browser.Write(ctx, websocket.MessageText, data)
 }
 
 // call makes the Product Service's own request to Hermes.
@@ -262,6 +285,7 @@ func (h *Handler) gateway(w http.ResponseWriter, r *http.Request, account string
 	u.mu.Lock()
 	u.browser = nil
 	u.mu.Unlock()
+	u.m.windowLeft(u)
 	u.detachControllers(ctx)
 	u.linger(ctx)
 	u.close()
@@ -462,9 +486,8 @@ func (u *upstream) adjustResult(call forwardedCall, raw json.RawMessage) (json.R
 		delete(result, "pending_connection")
 		delete(result, "pending_approval")
 	case "prompt.submit":
+		u.m.prompted(session, u, unquote(result["status"]) == "queued")
 		u.m.openTurn(session, u)
-	case "session.interrupt":
-		u.m.stopping(session)
 	case "session.events.since":
 		var events []json.RawMessage
 		_ = json.Unmarshal(result["events"], &events)
@@ -528,6 +551,11 @@ func (u *upstream) readBrowser(ctx context.Context) {
 		if f.Method == "browser.controller.register" && u.m.browserTaken(unquote(params["session_id"]), u) {
 			u.toBrowser(rpcError(f.ID, codeInvalidParams, "another window is the browser of the turn under way"))
 			continue
+		}
+		if f.Method == "session.interrupt" {
+			// Before Hermes hears of it: the stopped turn's end may come before
+			// Hermes's answer.
+			u.m.stopping(unquote(params["session_id"]))
 		}
 		u.mu.Lock()
 		u.next++
@@ -611,6 +639,8 @@ func (u *upstream) local(f frame) frame {
 			}
 		}
 		return rpcResult(f.ID, map[string]any{"approvals": pending})
+	case "companion.result":
+		return u.companionResult(f)
 	default: // approval.received: the card is A-NAS's, nothing to tell Hermes
 		return rpcResult(f.ID, map[string]bool{"acknowledged": true})
 	}

@@ -32,9 +32,12 @@ type volumeOperation struct {
 	State     datavolume.OperationState `json:"state"`
 	Step      datavolume.OperationStep  `json:"step,omitempty"`
 	Failure   string                    `json:"failure,omitempty"`
-	Volume    *datavolume.Volume        `json:"volume,omitempty"`
-	StartedAt time.Time                 `json:"startedAt"`
-	UpdatedAt time.Time                 `json:"updatedAt"`
+	// Progress is how far a rebuild has come, in percent; it is kept in
+	// memory only.
+	Progress  int                `json:"-"`
+	Volume    *datavolume.Volume `json:"volume,omitempty"`
+	StartedAt time.Time          `json:"startedAt"`
+	UpdatedAt time.Time          `json:"updatedAt"`
 }
 
 type operationsDocument struct {
@@ -62,6 +65,18 @@ func (e *Executor) StartAddDisks(_ context.Context, request datavolume.AddDisksR
 	return e.startOperation(volumeOperation{
 		PlanID: request.PlanID, Kind: datavolume.PlanKindAddDisks, Disks: request.Disks, Layout: request.Layout, FilesystemUUID: request.FilesystemUUID,
 	}, e.addDisks)
+}
+
+// StartReplaceDisk starts rebuilding the missing disk of the mounted mirror
+// onto a new disk in the background.
+func (e *Executor) StartReplaceDisk(_ context.Context, request datavolume.ReplaceDiskRequest) (datavolume.VolumeOperation, error) {
+	disks := []datavolume.DiskTarget{request.Disk}
+	if e.resolver == nil || strings.TrimSpace(request.PlanID) == "" || !validDiskTargets(disks) || !datavolume.ValidFilesystemUUID(request.FilesystemUUID) {
+		return datavolume.VolumeOperation{}, errors.New("invalid replace-disk request")
+	}
+	return e.startOperation(volumeOperation{
+		PlanID: request.PlanID, Kind: datavolume.PlanKindReplaceDisk, Disks: disks, Layout: datavolume.LayoutMirror, FilesystemUUID: request.FilesystemUUID,
+	}, e.replaceDisk)
 }
 
 // VolumeOperation reports the plan's operation from the journal.
@@ -207,6 +222,9 @@ func (o *volumeOperation) asks(request volumeOperation) bool {
 
 func (o *volumeOperation) report() datavolume.VolumeOperation {
 	report := datavolume.VolumeOperation{PlanID: o.PlanID, State: o.State, Step: o.Step, Failure: o.Failure}
+	if o.State == datavolume.OperationRunning && o.Step == datavolume.StepReplace {
+		report.Progress = o.Progress
+	}
 	if o.Volume != nil {
 		volume := *o.Volume
 		volume.DiskIDs = append([]string(nil), volume.DiskIDs...)
@@ -290,6 +308,12 @@ func validRecordedOperation(operation *volumeOperation) error {
 			return invalid
 		}
 		steps = []datavolume.OperationStep{datavolume.StepErase, datavolume.StepAddDevices}
+	case datavolume.PlanKindReplaceDisk:
+		if operation.Layout != datavolume.LayoutMirror || len(operation.Disks) != 1 ||
+			!datavolume.ValidFilesystemUUID(operation.FilesystemUUID) || len(operation.Formatted) != 0 {
+			return invalid
+		}
+		steps = []datavolume.OperationStep{datavolume.StepErase, datavolume.StepReplace}
 	default:
 		return invalid
 	}

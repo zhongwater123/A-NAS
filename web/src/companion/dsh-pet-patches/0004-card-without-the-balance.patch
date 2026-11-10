@@ -1,0 +1,618 @@
+A-NAS has no DeepSeek balance: the card loses the balance's props, tick consumers, bubble slot
+and bubble, and the /state reader for the balance section. Nothing else in the card changes;
+the work status, speech and command paths are untouched.
+
+diff --git a/client/bubble.ts b/client/bubble.ts
+--- a/client/bubble.ts
++++ b/client/bubble.ts
+@@ -6,22 +6,15 @@
+  * 必须始终成立：样式与桌面端同源，文案与档位由 shared 计算。
+  * @module dsh-pet/src/client/bubble
+  */
+-import {
+-  balancePageView,
+-  customClickable,
+-  customViews,
+-  type BalanceBubbleRow,
+-  type BalanceState,
+-  type CustomNode,
+-} from '../shared/balance/index';
+ import {
+   MEME_BUBBLE_CLASS,
+   MEME_IMG_CLASS,
+   injectMemeBubbleCss,
+   memeImageUrl,
+   whisperBubbleView,
++  type WhisperBubbleRow,
+ } from '../shared/whisper';
+-import type { Dispatch, ReactNode, SetStateAction } from 'react';
++import type { ReactNode } from 'react';
+ import type * as ReactNS from 'react';
+ import type { jsx } from 'react/jsx-runtime';
+ import { ROUTE_PATH } from '../shared/constants';
+@@ -113,200 +106,9 @@ function injectBubbleCss(): void {
+   }
+ }
+ 
+-/** 把余额行数据映射成 React 节点。 */
+-function rowsToNodes(h: typeof jsx, rows: BalanceBubbleRow[]): ReactNode {
+-  // 含档位段时同一行内联渲染，峰/谷着色。
+-  if (rows.some((r) => r.role === 'tier')) {
+-    return h('div', {
+-      className: 'pet-bub-row',
+-      children: rows.map((r, i) => {
+-        // 进度条行不会与档位段同现。
+-        if (r.role === 'quota') return null;
+-        if (r.role === 'tier') {
+-          return h('span', {
+-            key: i,
+-            className: 'pet-bub-tier pet-bub-tier-' + r.tier,
+-            children: r.text,
+-          });
+-        }
+-        return h('span', { key: i, children: r.text });
+-      }),
+-    });
+-  }
+-  // 其余每行一个块：label、sub、error、quota。
+-  return rows.map((r, i) => {
+-    // 展开态一行一个窗口；四段 flex 同行，进度条吃剩余宽度。
+-    if (r.role === 'quota') {
+-      return h('div', {
+-        key: i,
+-        className: 'pet-bub-quota',
+-        children: [
+-          h('span', { key: 'label', className: 'pet-bub-quota-label', children: r.label }),
+-          h('span', {
+-            key: 'bar',
+-            className: 'pet-bub-quota-bar',
+-            children: h('i', {
+-              className: 'pet-bub-quota-fill pet-bub-quota-' + r.tone,
+-              style: { width: Math.max(0, Math.min(100, r.percent)) + '%' },
+-            }),
+-          }),
+-          h('span', { key: 'used', className: 'pet-bub-quota-used', children: r.usedText }),
+-          h('span', { key: 'reset', className: 'pet-bub-quota-reset', children: r.resetText }),
+-        ],
+-      });
+-    }
+-    // 用量页：三行两列，总量是整卡唯一的大字；进/出各一处强调色，其余保持次级灰。
+-    if (r.role === 'usage') {
+-      return h('div', {
+-        key: i,
+-        className: 'pet-bub-usage',
+-        children: [
+-          h('div', {
+-            key: 'head',
+-            className: 'pet-bub-usage-line',
+-            children: [
+-              h('span', { key: 'title', className: 'pet-bub-usage-title', children: r.title }),
+-              h('span', { key: 'total', className: 'pet-bub-usage-total', children: r.total }),
+-            ],
+-          }),
+-          // 进出比例条：宽度即真实占比，输入通常压倒性占多数，条偏单色属正常。
+-          r.inputPercent === undefined
+-            ? null
+-            : h('div', {
+-                key: 'bar',
+-                className: 'pet-bub-usage-bar',
+-                children: [
+-                  h('i', { key: 'in', className: 'pet-bub-usage-bar-in', style: { width: r.inputPercent + '%' } }),
+-                  h('i', {
+-                    key: 'out',
+-                    className: 'pet-bub-usage-bar-out',
+-                    style: { width: 100 - r.inputPercent + '%' },
+-                  }),
+-                ],
+-              }),
+-          h('div', {
+-            key: 'io',
+-            className: 'pet-bub-usage-line',
+-            children: [
+-              h('span', { key: 'in', className: 'pet-bub-usage-in', children: r.input }),
+-              h('span', { key: 'out', className: 'pet-bub-usage-out', children: r.output }),
+-            ],
+-          }),
+-          h('div', {
+-            key: 'foot',
+-            className: 'pet-bub-usage-line',
+-            children: [
+-              h('span', { key: 'period', className: 'pet-bub-usage-period', children: r.period }),
+-              h('span', { key: 'spend', className: 'pet-bub-usage-spend', children: r.spend }),
+-            ],
+-          }),
+-        ],
+-      });
+-    }
+-    if (r.role === 'error') return h('div', { key: i, className: 'pet-bub-err', children: r.text });
+-    if (r.role === 'sub') return h('div', { key: i, className: 'pet-bub-row pet-bub-sub', children: r.text });
+-    return h('div', { key: i, className: 'pet-bub-row', children: r.text });
+-  });
+-}
+-
+-/** 把自定义节点树映射成 React 节点，与 rowsToNodes 并列。
+- *  行数据由插件定排版，这里把第三方定好的 tag、内联样式与文本原样映射。
+- *  解析层已做白名单裁剪，故不做二次校验；不用 innerHTML，没有注入面。
+- *  先文本后子节点，与 DOM 的 textContent + appendChild 顺序一致。
+- */
+-function treeToNodes(h: typeof jsx, node: CustomNode, key: string | number): ReactNode {
+-  const props: Record<string, unknown> = { key };
+-  if (node.style) props.style = node.style;
+-  if (node.tag === 'img') {
+-    // 配图地址只来自解析层的 http/https 白名单；alt 留空由周围文本承担。
+-    props.src = node.src ?? '';
+-    props.alt = '';
+-    return h('img', props);
+-  }
+-  const children: ReactNode[] = [];
+-  if (node.text) children.push(node.text);
+-  for (let i = 0; i < (node.children?.length ?? 0); i++) {
+-    children.push(treeToNodes(h, node.children![i]!, i));
+-  }
+-  props.children = children;
+-  return h(node.tag, props);
+-}
+-
+-/** 换内容前的淡出等待（ms），与 opacity 过渡同为 250ms。 */
+-const BALANCE_FADE_MS = 250;
+-
+-/** 制造余额气泡组件（工厂），注入样式一次。
+- *  内容来自 shared 的 balancePageView（按页取行数据）；内置形态走行数据，
+- *  custom 走第三方节点树。切页是淡出 → 换内容 → 淡入，显隐与 10s 计时归 pet.ts 管。
+- */
+-export function makeBalanceBubble(rt: {
+-  h: typeof jsx;
+-  useState: <T>(init: T) => [T, Dispatch<SetStateAction<T>>];
+-  // 用 React 命名空间类型而非 typeof：type-only import 的 hook 无法进入声明导出（TS4078）。
+-  useEffect: (effect: ReactNS.EffectCallback, deps?: ReactNS.DependencyList) => void;
+-}): (props: {
+-  state: BalanceState;
+-  on: boolean;
+-  /** 目标页：0 为初始页；内置 windows 形态下 0 收起、1 窗口明细、2 区间用量。 */
+-  index: number;
+-  /** 点击气泡：上层切到下一页并重置 10s 计时器。 */
+-  onCycle: () => void;
+-}) => ReactNode {
+-  const { h, useState, useEffect } = rt;
+-  injectBubbleCss();
+-
+-  return function BalanceBubble({
+-    state,
+-    on,
+-    index,
+-    onCycle,
+-  }: {
+-    state: BalanceState;
+-    on: boolean;
+-    index: number;
+-    onCycle: () => void;
+-  }) {
+-    // shown 是实际显示页，index 是目标页；分开是为了留出淡出换内容的 250ms。
+-    const [shown, setShown] = useState(0);
+-    const [fading, setFading] = useState(false);
+-    useEffect(() => {
+-      if (index === shown) return;
+-      setFading(true);
+-      const timer = window.setTimeout(() => {
+-        setShown(index);
+-        setFading(false);
+-      }, BALANCE_FADE_MS);
+-      return () => window.clearTimeout(timer);
+-    }, [index, shown]);
+-
+-    // 行数据与第三方节点树二选一；custom 页索引越界时夹到最后一页，避免显示残页。
+-    const isCustom = state.ok && state.shape === 'custom';
+-    const views = isCustom ? customViews(state) : undefined;
+-    const tree = views ? views[Math.min(shown, views.length - 1)] : undefined;
+-    const rows = isCustom ? [] : balancePageView(state, shown);
+-    // 可点：windows 可展开；custom 只有多于 1 页才可点；其余形态点开没有新内容。
+-    const clickable = state.ok && (state.shape === 'windows' || (isCustom && customClickable(state)));
+-    // 不可用状态是多行说明，套用碎碎念的窄字号变体。
+-    const wrap = state.ok ? '' : ' dsh-pet-whisper';
+-    // 展开态字号只属于内置 windows 的窗口明细与用量两页；custom 各页是对等页面，翻页不该切紧凑字号。
+-    return h('div', {
+-      className:
+-        'dsh-pet-bubble' +
+-        wrap +
+-        (on ? ' is-on' : '') +
+-        (clickable ? ' is-clickable' : '') +
+-        (!isCustom && shown > 0 ? ' is-expanded' : '') +
+-        (fading ? ' is-fading' : ''),
+-      // 就地吞掉，避免触发宠物本体的点击与拖拽。
+-      onClick: clickable
+-        ? (e: ReactNS.MouseEvent<HTMLDivElement>) => {
+-            e.stopPropagation();
+-            onCycle();
+-          }
+-        : undefined,
+-      children: tree ? treeToNodes(h, tree, 'tree') : rowsToNodes(h, rows),
+-    });
+-  };
++/** A-NAS: a speech bubble's rows; the balance's rows, tiers and custom trees are not vendored. */
++function rowsToNodes(h: typeof jsx, rows: WhisperBubbleRow[]): ReactNode {
++  return rows.map((r, i) => h('div', { key: i, className: 'pet-bub-row', children: r.text }));
+ }
+ 
+ /** 制造碎碎念气泡组件（工厂），与余额气泡共用样式与行渲染。
+diff --git a/client/pet/card/bubble-slots.ts b/client/pet/card/bubble-slots.ts
+--- a/client/pet/card/bubble-slots.ts
++++ b/client/pet/card/bubble-slots.ts
+@@ -6,7 +6,6 @@
+  * 不变量：同一时刻只渲染一个气泡，优先级依次为终态任务、说话、余额、非终态任务。
+  * @module dsh-pet/src/client/pet/card/bubble-slots
+  */
+-import { balancePageCount as balancePageCountOf, type BalanceState } from '../../../shared/balance/index';
+ import {
+   BUBBLE_HOLD_IDLE,
+   reduceBubbleHold,
+@@ -20,7 +19,7 @@ import type * as ReactNS from 'react';
+ import type { jsx } from 'react/jsx-runtime';
+ 
+ /** 当前该挂哪个气泡；`none` 表示哪个条件都不成立。 */
+-export type BubbleSlot = 'todo' | 'work-terminal' | 'whisper' | 'balance' | 'work' | 'none';
++export type BubbleSlot = 'todo' | 'work-terminal' | 'whisper' | 'work' | 'none';
+ 
+ /** 优先级判定的输入：全部是渲染期的既成事实，判定本身不产生副作用。 */
+ export interface BubbleSlotInput {
+@@ -38,14 +37,6 @@ export interface BubbleSlotInput {
+   whisperOn: boolean;
+   /** 说话气泡文本。 */
+   whisperText: string | null;
+-  /** 余额气泡是否点亮。 */
+-  balanceOn: boolean;
+-  /** 余额数据是否已拉到；null 表示尚未拉到。 */
+-  balanceAvailable: boolean;
+-  /** 配置是否启用余额。 */
+-  balanceEnabled: boolean;
+-  /** 本次余额是否手动请求；手动请求不受开关门控。 */
+-  balanceManual: boolean;
+ }
+ 
+ /**
+@@ -61,31 +52,10 @@ export function decideBubbleSlot(input: BubbleSlotInput): BubbleSlot {
+   if (input.todoOn) return 'todo';
+   if (input.workTerminal && input.workOn && input.workText && input.workStatusEnabled) return 'work-terminal';
+   if (input.whisperOn && input.whisperText) return 'whisper';
+-  if (input.balanceOn && input.balanceAvailable && (input.balanceEnabled || input.balanceManual)) return 'balance';
+   if (input.workOn && input.workText && input.workStatusEnabled) return 'work';
+   return 'none';
+ }
+ 
+-/**
+- * 余额气泡的可翻页数。
+- *
+- * 页数规则归 shared（与每页内容同源），这里只补一个「还没有结果」的兜底。
+- *
+- * @param balance - 最近一次余额结果；`null` 表示这一拍还没有数据。
+- * @returns 页数，至少 1。
+- */
+-export function balancePageCount(balance: BalanceState | null): number {
+-  return balance ? balancePageCountOf(balance) : 1;
+-}
+-
+-/** 余额气泡组件；props 与 `client/bubble.ts` 的 BalanceBubble 一致。 */
+-export type BalanceBubbleComponent = (props: {
+-  state: BalanceState;
+-  on: boolean;
+-  index: number;
+-  onCycle: () => void;
+-}) => ReactNode;
+-
+ /** 说话气泡组件；配图二选一，props 与 `client/bubble.ts` 的 WhisperBubble 一致。 */
+ export type WhisperBubbleComponent = (props: {
+   text: string;
+@@ -114,8 +84,6 @@ export type TodoBubbleComponent = (props: { on: boolean; onClose: () => void })
+ 
+ /** 三种气泡组件。 */
+ export interface BubbleComponents {
+-  /** 余额气泡。 */
+-  balanceBubble: BalanceBubbleComponent;
+   /** 待办面板气泡。 */
+   todoBubble: TodoBubbleComponent;
+   /** 说话气泡。 */
+@@ -124,12 +92,6 @@ export interface BubbleComponents {
+ 
+ /** 每次渲染由 PetCard 提供的视图输入。 */
+ export interface BubbleSlotsInput {
+-  /** 最近一次余额结果。 */
+-  balance: BalanceState | null;
+-  /** 配置是否启用余额。 */
+-  balanceEnabled: boolean;
+-  /** 本次余额是否手动请求。 */
+-  balanceManual: boolean;
+   /** 配置是否启用工作状态联动。 */
+   workStatusEnabled: boolean;
+   /** 工作状态是否处于终态。 */
+@@ -144,10 +106,6 @@ export interface BubbleSlotsInput {
+ 
+ /** 气泡单槽对外的读写面。 */
+ export interface BubbleSlots {
+-  /** 点亮余额气泡并回到第一页，重置停留计时。 */
+-  showBalance(): void;
+-  /** 点余额气泡翻页，并重置停留计时。 */
+-  cycleBalance(): void;
+   /** 点亮说话气泡；duration 为 0 时不改动当前气泡，undefined 用默认时长。 */
+   showWhisper(text: string, parts: { image?: string; url?: string }, duration?: number): void;
+   /** 收起说话气泡；不碰动画与另两种气泡。 */
+@@ -179,15 +137,10 @@ export interface BubbleSlots {
+  */
+ export function createBubbleSlots(rt: BubbleSlotsRuntime, components: BubbleComponents) {
+   const { h, useState, useRef, useEffect } = rt;
+-  const BalanceBubble = components.balanceBubble;
+   const TodoBubble = components.todoBubble;
+   const WhisperBubble = components.whisperBubble;
+ 
+   return function useBubbleSlots(input: BubbleSlotsInput): BubbleSlots {
+-    // 余额气泡：显隐与展开页。
+-    const [balanceOn, setBalanceOn] = useState(false);
+-    const [balancePage, setBalancePage] = useState(0);
+-    const balanceTimerRef = useRef<number | null>(null);
+     // 说话气泡：显隐、文本与配图（池内名与完整地址二选一）。收起时机在 bubbleHoldRef：
+     // 语音合成期间挂起计时，播完再留一小段尾巴（见 shared/bubble-hold）。
+     const [whisperOn, setWhisperOn] = useState(false);
+@@ -212,32 +165,12 @@ export function createBubbleSlots(rt: BubbleSlotsRuntime, components: BubbleComp
+     // 卸载后不再 setState：三个计时器都在这里清。
+     useEffect(
+       () => () => {
+-        if (balanceTimerRef.current !== null) window.clearTimeout(balanceTimerRef.current);
+         if (whisperTimerRef.current !== null) window.clearTimeout(whisperTimerRef.current);
+         if (workTimerRef.current !== null) window.clearTimeout(workTimerRef.current);
+       },
+       [],
+     );
+ 
+-    /** 重置余额气泡的停留计时；重复触发先清旧定时器，否则旧的会提前收起。 */
+-    const armBalanceTimeout = () => {
+-      if (balanceTimerRef.current !== null) window.clearTimeout(balanceTimerRef.current);
+-      balanceTimerRef.current = window.setTimeout(() => setBalanceOn(false), BUBBLE_DURATION_MS);
+-    };
+-
+-    const showBalance = () => {
+-      setBalancePage(0); // 新一轮查询从第一页开始。
+-      setBalanceOn(true);
+-      armBalanceTimeout();
+-    };
+-
+-    const cycleBalance = () => {
+-      const pages = balancePageCount(input.balance);
+-      setBalancePage((page) => (page + 1) % pages);
+-      // 重新计时：第 8 秒点开才剩 2 秒，看不清下一页。
+-      armBalanceTimeout();
+-    };
+-
+     /** 推进说话气泡的收起计划，并按新计划重排计时器。 */
+     const applyWhisperHold = (event: BubbleHoldEvent): void => {
+       const next = reduceBubbleHold(whisperHoldRef.current, event);
+@@ -312,17 +245,8 @@ export function createBubbleSlots(rt: BubbleSlotsRuntime, components: BubbleComp
+         workStatusEnabled: input.workStatusEnabled,
+         whisperOn,
+         whisperText,
+-        balanceOn,
+-        balanceAvailable: input.balance !== null,
+-        balanceEnabled: input.balanceEnabled,
+-        balanceManual: input.balanceManual,
+       });
+       if (slot === 'todo') return h(TodoBubble, { on: todoOn, onClose: hideTodo });
+-      if (slot === 'balance') {
+-        return input.balance === null
+-          ? null
+-          : h(BalanceBubble, { state: input.balance, on: balanceOn, index: balancePage, onCycle: cycleBalance });
+-      }
+       if (slot === 'whisper') {
+         return whisperText === null
+           ? null
+@@ -353,13 +277,11 @@ export function createBubbleSlots(rt: BubbleSlotsRuntime, components: BubbleComp
+ 
+     return {
+       clearWhisper,
+-      cycleBalance,
+       hideTodo,
+       hideWork,
+       lightWork,
+       node,
+       resetWork,
+-      showBalance,
+       showTodo,
+       showWhisper,
+       toggleTodo,
+diff --git a/client/pet/card/cue-effects.ts b/client/pet/card/cue-effects.ts
+--- a/client/pet/card/cue-effects.ts
++++ b/client/pet/card/cue-effects.ts
+@@ -6,7 +6,6 @@
+  * 不变量：只有计数器变化才动手；占用锁生效时自动来源整拍丢弃，显式指令不挡。
+  * @module dsh-pet/src/client/pet/card/cue-effects
+  */
+-import { balanceEventIndex, balancePercent } from '../../../shared/balance/index';
+ import { pickSlot, poolIncludes } from '../../../shared/pickers';
+ import { WORK_STATUS_INDEX } from '../../../shared/work-status';
+ import { playSayVoice } from '../../../shared/voice';
+@@ -40,12 +39,9 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+   const { useEffect, useRef } = rt;
+ 
+   return function useCueEffects(hub: CardHub, props: PetCardProps): void {
+-    const { balance, balanceManual, balanceNoticeTick, balanceTick } = props;
+     const { animCue, animCueTick, posCue, posCueTick, say, sayTick, throwCue, throwCueTick } = props;
+     const { workStatus, workStatusTick } = props;
+ 
+-    const prevBalanceRef = useRef(0);
+-    const prevNoticeRef = useRef(0);
+     const prevWorkRef = useRef(0);
+     // 调试日志：上一档位，null 表示空闲，undefined 表示启动后尚未触发。
+     const prevWorkStateRef = useRef<string | null | undefined>(undefined);
+@@ -54,56 +50,6 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+     const prevPosRef = useRef(0);
+     const prevThrowRef = useRef(0);
+ 
+-    /** 余额事件：按档位播事件动画并弹气泡。手动请求无条件弹，自动轮询要求开启且有百分比；
+-     *  睡着时自动来源整拍丢弃，否则会顶掉睡姿。 */
+-    const consumeBalance = (): void => {
+-      const cfg = hub.cfg();
+-      const card = hub.card;
+-      if (balanceTick === 0 || balanceTick === prevBalanceRef.current) return;
+-      prevBalanceRef.current = balanceTick;
+-      // 占用锁：自动余额不看，手动请求照常；tick 消费之后再判，占用期间这一拍就当过去。
+-      if (hub.ownAnim.isFrozen() && !balanceManual) return;
+-      // 睡觉一票否决：睡着一律不播，手动请求也不打断睡姿（与桌面端同一口径）。
+-      if (hub.sleeping()) return;
+-      if (!balance || !balance.ok) return;
+-      if (!cfg.balanceEnabled && !balanceManual) return; // 自动轮询受开关门控，手动请求无条件通过。
+-      const percent = balancePercent(balance);
+-      // 自动轮询的弹出门槛：内置形态要求有百分比；custom 不看百分比，内容由第三方设计。
+-      if (balanceManual || percent !== undefined || balance.shape === 'custom') hub.bubbles.showBalance();
+-      if (!cfg.balanceEnabled) return; // 档位动画只属于启用余额的宠物。
+-      if (percent === undefined) return; // 当前数据源没有百分比语义，不触发档位动画。
+-      const pool = hub.anims().events?.balance;
+-      if (!pool || pool.length === 0) {
+-        console.error('[dsh-pet] 配置缺少 animations.events.balance，无法播放余额事件动画');
+-        return;
+-      }
+-      const idx = balanceEventIndex(percent);
+-      const slot = pool[idx];
+-      if (!slot) {
+-        console.error('[dsh-pet] balance 档位索引越界：p=' + percent + ' idx=' + idx);
+-        return;
+-      }
+-      const name = pickSlot(slot, card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
+-      log('balance pet=' + cfg.id + ' p=' + percent.toFixed(1) + '% -> [档' + idx + '] ' + name);
+-      hub.stopMotion();
+-      card.actions.setOnce(true);
+-      card.actions.setAnim(name);
+-    };
+-
+-    /** 余额不可用：容器递增计数，本宠物只弹文字说明，不播档位动画。 */
+-    // 同一原因只提示一次由容器用 shared 的 decideBalanceNotice 去重，这里只管按 tick 弹。
+-    const consumeBalanceNotice = (): void => {
+-      const cfg = hub.cfg();
+-      if (!cfg.balanceEnabled && !balanceManual) return; // 自动轮询受开关门控，手动请求无条件通过。
+-      if (balanceNoticeTick === 0 || balanceNoticeTick === prevNoticeRef.current) return;
+-      prevNoticeRef.current = balanceNoticeTick;
+-      // 占用锁：自动来源不看，手动请求照常；睡觉一票否决，手动也不弹。
+-      if (hub.ownAnim.isFrozen() && !balanceManual) return;
+-      if (hub.sleeping()) return;
+-      if (!balance || balance.ok) return;
+-      hub.bubbles.showBalance();
+-    };
+-
+     /** 工作状态联动：按档位播动画并弹文本气泡；回空闲时收起气泡并改播完即停。 */
+     const consumeWorkStatus = (): void => {
+       const cfg = hub.cfg();
+@@ -215,8 +161,6 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+     // 七条指令共用一个 effect：每条自带已消费守卫，只有变化的那条真正动手。
+     // 分开写七个 effect 时每个渲染期闭包都要重新订阅，守卫与依赖说明也重复七遍。
+     useEffect(() => {
+-      consumeBalance();
+-      consumeBalanceNotice();
+       consumeWorkStatus();
+       consumeSay();
+       consumeAnimCue();
+@@ -224,6 +168,6 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+       consumeThrowCue();
+       // 守卫函数每渲染重建，但只读 ref 与当拍的 props；进依赖会让每个渲染都重跑七个守卫。
+       // eslint-disable-next-line react-hooks/exhaustive-deps -- 变化原因只有这七个计数器
+-    }, [balanceTick, balanceNoticeTick, workStatusTick, sayTick, animCueTick, posCueTick, throwCueTick]);
++    }, [workStatusTick, sayTick, animCueTick, posCueTick, throwCueTick]);
+   };
+ }
+diff --git a/client/pet/card/props.ts b/client/pet/card/props.ts
+--- a/client/pet/card/props.ts
++++ b/client/pet/card/props.ts
+@@ -6,7 +6,6 @@
+  * @module dsh-pet/src/client/pet/card/props
+  */
+ import type * as ReactNS from 'react';
+-import type { BalanceState } from '../../../shared/balance/index';
+ import type { PetCollisionSlot } from '../../../shared/physics';
+ import type { LockState, PositionMode, SayCue, PetFacing, SleepState } from '../../../shared/state';
+ import type { MenuMoreItem } from '../../../shared/menu';
+@@ -17,14 +16,6 @@ import type { RuntimePet } from '../types';
+ export interface PetCardProps {
+   /** 成品配置。 */
+   cfg: RuntimePet;
+-  /** 最近一次余额结果。 */
+-  balance: BalanceState | null;
+-  /** 余额成功拉取次数，变化时播档位动画。 */
+-  balanceTick: number;
+-  /** 余额不可用提示次数。 */
+-  balanceNoticeTick: number;
+-  /** 本次余额是否由用户手动请求；手动请求即使关闭 balanceEnabled 也答复。 */
+-  balanceManual: boolean;
+   /** 工作状态快照。 */
+   workStatus: WorkStatusSnapshot | null;
+   /** 工作状态变化次数。 */
+diff --git a/client/pet/card/runtime.ts b/client/pet/card/runtime.ts
+--- a/client/pet/card/runtime.ts
++++ b/client/pet/card/runtime.ts
+@@ -11,7 +11,7 @@ import { postAction } from '../../../shared/state';
+ import { ROUTE_PATH } from '../../../shared/constants';
+ import { resolveFontPx } from '../../../shared/fonts';
+ import { resolvePetSizePx } from '../../../shared/pet-size';
+-import { makeBalanceBubble, makeWhisperBubble } from '../../bubble';
++import { makeWhisperBubble } from '../../bubble';
+ import { makeTodoBubble } from '../../todo-bubble';
+ import { petBridge } from '../../settings';
+ import { playClickSound } from '../click-sound';
+@@ -41,8 +41,6 @@ import type { PetRuntime } from '../types';
+  */
+ export function createCardRuntime(rt: PetRuntime) {
+   const { h, useEffect, useRef, useState } = rt;
+-  /** 余额气泡：数据与显隐由装配根传入。 */
+-  const BalanceBubble = makeBalanceBubble({ h, useState, useEffect });
+   /** 碎碎念气泡：文本与显隐由装配根传入。 */
+   const WhisperBubble = makeWhisperBubble({ h });
+   /** 待办气泡：面板本体挂在自己身上，关闭按钮回调装配根。 */
+@@ -50,7 +48,7 @@ export function createCardRuntime(rt: PetRuntime) {
+   /** 四种气泡的单槽：显隐、停留计时与优先级都在这里。 */
+   const useBubbleSlots = createBubbleSlots(
+     { h, useState, useEffect, useRef },
+-    { balanceBubble: BalanceBubble, todoBubble: TodoBubble, whisperBubble: WhisperBubble },
++    { todoBubble: TodoBubble, whisperBubble: WhisperBubble },
+   );
+   const useCardState = createCardState({ useState, useRef });
+   const useLockFreeze = createLockFreeze({ useEffect, useRef });
+@@ -62,7 +60,7 @@ export function createCardRuntime(rt: PetRuntime) {
+   const useCardEntry = createCardEntry({ useEffect, useRef });
+ 
+   return function useCardRuntime(props: PetCardProps): CardViewProps {
+-    const { arena, balance, balanceManual, cfg, lock, lockTick, menuItemsRef, sleep, sleepTick, workStatus } = props;
++    const { arena, cfg, lock, lockTick, menuItemsRef, sleep, sleepTick, workStatus } = props;
+     const { onFocusSession } = props;
+ 
+     // 实际渲染宽度：百分比只在挂载与配置变更时按当次视口宽解析一次，拖窗口不跟随。
+@@ -125,9 +123,6 @@ export function createCardRuntime(rt: PetRuntime) {
+     // 四种气泡的单槽：显隐、停留计时与优先级都在 bubble-slots，这里只喂视图输入。
+     const bubbles = useBubbleSlots({
+       assetRoot: cfg.assetRoot,
+-      balance,
+-      balanceEnabled: cfg.balanceEnabled,
+-      balanceManual,
+       workStatusEnabled: cfg.workStatusEnabled,
+       workTerminal: workStatus?.state === 'success' || workStatus?.state === 'error',
+       workSessionId: workStatus?.sessionId ?? null,
+diff --git a/shared/state.ts b/shared/state.ts
+--- a/shared/state.ts
++++ b/shared/state.ts
+@@ -6,7 +6,6 @@
+  * 两端共用同一份；首拉只记基线不渲染，否则刷新页面会把旧气泡重放一遍。
+  * @module dsh-pet/src/shared/state
+  */
+-import { toBalanceState, type BalanceState } from './balance/index';
+ import { toWorkStatus, type WorkStatusSnapshot } from './work-status';
+ import { ROUTE_PATH } from './constants';
+ 
+@@ -160,16 +159,6 @@ export function resolveLeafPath(path: string): LeafTarget | null {
+   return isPetLeafName(name) ? { where: 'pet', name, petId: rest.slice(0, dot) } : null;
+ }
+ 
+-/** 类型收窄：余额叶子 → `{ state, manual }`。
+- *  manual = 这次写入是手动触发的（/balance 命令、桌面「查看余额」菜单），由宿主在写入时标记，
+- *  消费端据此决定余额不可用时要不要必弹文字说明。形状非法 → null，消费端跳过这一拍。 */
+-export function readBalance(leaf: StateLeaf): { state: BalanceState; manual: boolean } | null {
+-  const state = toBalanceState(leaf.data);
+-  if (!state) return null;
+-  const manual = (leaf.data as { manual?: unknown }).manual === true;
+-  return { state, manual };
+-}
+-
+ /** 说话指令（`pets.<id>.say` 的两种形态）。
+  *  say：弹一个气泡，duration = 显示时长（毫秒；缺省 10s，0 = 字面意思「不显示」），
+  *  anim 只在显式 false 时出现，表示这次不联动 events.whisper 动画、只弹气泡。

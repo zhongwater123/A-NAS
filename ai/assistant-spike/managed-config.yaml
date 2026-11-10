@@ -21,11 +21,13 @@ model:
 # question, and a job does not schedule more jobs. browser is Hermes's own browser tools,
 # served only by the member's VNAS window for the WebOS page it shows (browser control,
 # user decision 2026-10-20); with no window attached they are not offered, so a scheduled
-# task, which has no window, has none.
+# task, which has no window, has none. companion moves the companion on the desktop the
+# member is talking on (#412); a scheduled task lists it too, and hears from it that no
+# desktop is in use: its unit has no companion socket (assistant-install.sh).
 platform_toolsets:
-  cli: [file, terminal, code_execution, delegation, clarify, vision, video, memory, session_search, skills, todo, cronjob, browser, anas]
-  api_server: [file, terminal, code_execution, delegation, clarify, vision, video, memory, session_search, skills, todo, cronjob, browser, anas]
-  cron: [file, terminal, code_execution, delegation, vision, video, memory, session_search, skills, todo, anas]
+  cli: [file, terminal, code_execution, delegation, clarify, vision, video, memory, session_search, skills, todo, cronjob, browser, anas, companion]
+  api_server: [file, terminal, code_execution, delegation, clarify, vision, video, memory, session_search, skills, todo, cronjob, browser, anas, companion]
+  cron: [file, terminal, code_execution, delegation, vision, video, memory, session_search, skills, todo, anas, companion]
 agent:
   # Every toolset at the pinned commit except the ones above, including the ones tool
   # modules and plugins register at runtime (a2a, browser-cdp, browser-use): what needs the
@@ -60,6 +62,27 @@ mcp_servers:
     # Each call of a tool without readOnlyHint (提交更改) waits for the member's
     # in-turn approval; Hermes asks before it reaches the server.
     trust: untrusted
+    tools:
+      prompts: false
+      resources: false
+  companion:
+    command: /opt/a-nas/assistant-runtimes/spike/venv/bin/python
+    args: [/spike/anas_companion_mcp.py]
+    # The companion's tools (#412) run without a card: they move and animate the
+    # companion on the screen of the conversation that asked, and change none of
+    # the member's data. A separate server, so that a call waiting for the window
+    # never holds up 提交更改 (Hermes runs one call per server at a time). Hermes
+    # knows only "full" and "untrusted" and reads a YAML boolean as "untrusted",
+    # and the managed policy wins only for the keys it writes, so every key is
+    # written out. lazy: false takes the tools from the live server, not from a
+    # cache the agent can write. Hermes gives up on a call after timeout seconds,
+    # counted from when the call queued behind the server's other calls, and
+    # counts that as an error: one call takes the product service up to 16.5 s,
+    # so the limit leaves room for several queued in parallel.
+    trust: full
+    enabled: true
+    lazy: false
+    timeout: 120
     tools:
       prompts: false
       resources: false

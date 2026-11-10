@@ -153,7 +153,7 @@ return errors === 0;
 validate62.evaluated = {"dynamicProps":false,"dynamicItems":false};
 
 const schema27 = {"type":"array","description":"Why the system is not plainly healthy, most severe first; empty when healthy. The system's health is the severity of the first finding (docs/specs/system-health.md).","items":{"$ref":"#/components/schemas/HealthFinding"}};
-const schema28 = {"type":"object","additionalProperties":false,"required":["code","severity"],"properties":{"code":{"type":"string","enum":["disk_failing","disk_warning","disk_health_unknown","disk_hot","cpu_hot","volume_offline","volume_read_only","volume_full","volume_nearly_full","volume_errors","volume_reconcile_failed"]},"severity":{"type":"string","enum":["warning","critical"]},"diskId":{"$ref":"#/components/schemas/StableResourceID"},"value":{"type":"integer","format":"int64","description":"disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted."}}};
+const schema28 = {"type":"object","additionalProperties":false,"required":["code","severity"],"properties":{"code":{"type":"string","enum":["disk_failing","disk_warning","disk_health_unknown","disk_hot","cpu_hot","volume_offline","volume_degraded","volume_read_only","volume_full","volume_nearly_full","volume_errors","volume_reconcile_failed"]},"severity":{"type":"string","enum":["warning","critical"]},"diskId":{"$ref":"#/components/schemas/StableResourceID"},"value":{"type":"integer","format":"int64","description":"disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted; volume_degraded: disks missing."}}};
 
 function validate65(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -189,7 +189,7 @@ if(typeof data0 !== "string"){
 validate65.errors = [{instancePath:instancePath+"/code",schemaPath:"#/properties/code/type",keyword:"type",params:{type: "string"}}];
 return false;
 }
-if(!(((((((((((data0 === "disk_failing") || (data0 === "disk_warning")) || (data0 === "disk_health_unknown")) || (data0 === "disk_hot")) || (data0 === "cpu_hot")) || (data0 === "volume_offline")) || (data0 === "volume_read_only")) || (data0 === "volume_full")) || (data0 === "volume_nearly_full")) || (data0 === "volume_errors")) || (data0 === "volume_reconcile_failed"))){
+if(!((((((((((((data0 === "disk_failing") || (data0 === "disk_warning")) || (data0 === "disk_health_unknown")) || (data0 === "disk_hot")) || (data0 === "cpu_hot")) || (data0 === "volume_offline")) || (data0 === "volume_degraded")) || (data0 === "volume_read_only")) || (data0 === "volume_full")) || (data0 === "volume_nearly_full")) || (data0 === "volume_errors")) || (data0 === "volume_reconcile_failed"))){
 validate65.errors = [{instancePath:instancePath+"/code",schemaPath:"#/properties/code/enum",keyword:"enum",params:{allowedValues: schema28.properties.code.enum}}];
 return false;
 }
@@ -986,7 +986,7 @@ return errors === 0;
 }
 validate57.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema34 = {"type":"object","additionalProperties":false,"required":["id","model","transport","capacityBytes","rotational","removable","inUse","filesystems","role","health","smartStatus","eligibleForDataVolume","ineligibleReasons"],"properties":{"id":{"$ref":"#/components/schemas/StableResourceID"},"model":{"type":"string","description":"Empty when the device does not report a model; then ineligibleReasons includes missing_model."},"transport":{"$ref":"#/components/schemas/Transport"},"capacityBytes":{"type":"integer","format":"int64","minimum":0,"description":"Zero when capacity is unavailable or there is no medium; such devices cannot be selected for storage."},"rotational":{"type":"boolean"},"removable":{"type":"boolean"},"inUse":{"type":"boolean"},"filesystems":{"type":"array","items":{"type":"string"}},"role":{"$ref":"#/components/schemas/DiskRole"},"health":{"$ref":"#/components/schemas/Health"},"smartStatus":{"$ref":"#/components/schemas/Health"},"eligibleForDataVolume":{"type":"boolean"},"ineligibleReasons":{"type":"array","description":"Includes missing_identity, duplicate_identity, missing_model, missing_capacity, read_only or invalid_device_name for unusable observations. Devices without a unique identity have display-only observation-prefixed IDs, never valid storage operation targets.","items":{"type":"string"}},"temperatureCelsius":{"type":"integer","minimum":-273},"temperatureHotCelsius":{"type":"integer","minimum":1,"description":"Present with temperatureCelsius: where the disk counts as running hot and the system health reports disk_hot, 55 °C for a hard disk and 70 °C for an SSD."}}};
+const schema34 = {"type":"object","additionalProperties":false,"required":["id","model","transport","capacityBytes","rotational","removable","inUse","filesystems","role","health","smartStatus","eligibleForDataVolume","ineligibleReasons"],"properties":{"id":{"$ref":"#/components/schemas/StableResourceID"},"model":{"type":"string","description":"Empty when the device does not report a model; then ineligibleReasons includes missing_model."},"transport":{"$ref":"#/components/schemas/Transport"},"capacityBytes":{"type":"integer","format":"int64","minimum":0,"description":"Zero when capacity is unavailable or there is no medium; such devices cannot be selected for storage."},"rotational":{"type":"boolean"},"removable":{"type":"boolean"},"inUse":{"type":"boolean"},"filesystems":{"type":"array","items":{"type":"string"}},"role":{"$ref":"#/components/schemas/DiskRole"},"health":{"$ref":"#/components/schemas/Health"},"smartStatus":{"$ref":"#/components/schemas/Health"},"eligibleForDataVolume":{"type":"boolean"},"ineligibleReasons":{"type":"array","description":"Includes missing_identity, duplicate_identity, missing_model, missing_capacity, read_only or invalid_device_name for unusable observations. Devices without a unique identity have display-only observation-prefixed IDs, never valid storage operation targets.","items":{"type":"string"}},"temperatureCelsius":{"type":"integer","minimum":-40,"maximum":150},"temperatureHotCelsius":{"type":"integer","minimum":1,"description":"Present with temperatureCelsius: where the disk counts as running hot and the system health reports disk_hot, 55 °C for a hard disk and 70 °C for an SSD."}}};
 const schema35 = {"type":"string","enum":["nvme","sata","usb","unknown"]};
 
 function validate85(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -1275,9 +1275,15 @@ return false;
 }
 if(errors === _errs27){
 if(typeof data15 == "number"){
-if(data15 < -273 || isNaN(data15)){
-validate83.errors = [{instancePath:instancePath+"/temperatureCelsius",schemaPath:"#/properties/temperatureCelsius/minimum",keyword:"minimum",params:{comparison: ">=", limit: -273}}];
+if(data15 > 150 || isNaN(data15)){
+validate83.errors = [{instancePath:instancePath+"/temperatureCelsius",schemaPath:"#/properties/temperatureCelsius/maximum",keyword:"maximum",params:{comparison: "<=", limit: 150}}];
 return false;
+}
+else {
+if(data15 < -40 || isNaN(data15)){
+validate83.errors = [{instancePath:instancePath+"/temperatureCelsius",schemaPath:"#/properties/temperatureCelsius/minimum",keyword:"minimum",params:{comparison: ">=", limit: -40}}];
+return false;
+}
 }
 }
 }

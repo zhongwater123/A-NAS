@@ -1,0 +1,74 @@
+A-NAS serves the companion under /companion, not under the Harness route /dsh-pet-7340, and
+its desktop is only served at /, so only the route segment changes. The animations then come
+from dsh-pet's own address, /companion/thumb/<asset root>/<name>.<ext> (the asset root is the
+configuration key, main), with the installed animation pool appended as ?v= when the page
+knows it (RuntimePet.assetVersion), so the files can be cached for good and a pool switch is
+never answered from the cache. This replaces 0001, which served /companion/animations/<name>.
+
+diff --git a/client/pet/animation/animation.ts b/client/pet/animation/animation.ts
+--- a/client/pet/animation/animation.ts
++++ b/client/pet/animation/animation.ts
+@@ -45,7 +45,7 @@ export interface OwnAnimationDeps {
+   /** A/B 双缓冲的 B 元素。 */
+   videoB: () => HTMLVideoElement | null;
+   /** 该宠物的成品配置：素材根、id 与动画池都从它取。 */
+-  cfg: () => { id: string; assetRoot?: string; animations: Animations };
++  cfg: () => { id: string; assetRoot?: string; assetVersion?: string; animations: Animations };
+   /** 当前动画名。 */
+   currentAnim: () => string;
+   /** 工作状态叶子；未启用联动时为空。 */
+@@ -165,6 +165,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+       id: cfg.id,
+       anim: next,
+       ext: thumbExt(),
++      assetVersion: cfg.assetVersion,
+     });
+     loader.load(assetUrl, {
+       onObjectUrl: (objectUrl) => {
+diff --git a/client/pet/animation/assets.ts b/client/pet/animation/assets.ts
+--- a/client/pet/animation/assets.ts
++++ b/client/pet/animation/assets.ts
+@@ -19,6 +19,9 @@ export interface AssetSource {
+   anim: string;
+   /** 扩展名（含点，如 `.webm`）。 */
+   ext: string;
++  /** A-NAS: the installed animation pool, sent as ?v= so a file kept from another pool is never played
++   *  in its place: A-NAS lets the browser cache the files for good (review 三.2). */
++  assetVersion?: string;
+ }
+ 
+ /**
+@@ -30,5 +33,6 @@ export interface AssetSource {
+ export function animationAssetUrl(source: AssetSource): string {
+   if (source.cueUrl) return source.cueUrl;
+   const root = source.assetRoot === '' ? source.id : source.assetRoot;
+-  return ROUTE_PATH + '/thumb/' + encodeURIComponent(root) + '/' + encodeURIComponent(source.anim) + source.ext;
++  const url = ROUTE_PATH + '/thumb/' + encodeURIComponent(root) + '/' + encodeURIComponent(source.anim) + source.ext;
++  return source.assetVersion ? url + '?v=' + encodeURIComponent(source.assetVersion) : url;
+ }
+diff --git a/client/pet/types.ts b/client/pet/types.ts
+--- a/client/pet/types.ts
++++ b/client/pet/types.ts
+@@ -14,6 +14,8 @@ export type RuntimePet = Pet & {
+   animationWeights: Weights;
+   eventsRefreshSec: Record<string, number>;
+   physics: PhysicsParams;
++  /** A-NAS: the installed animation pool, which the animation URLs carry (see animation/assets.ts). */
++  assetVersion?: string;
+ };
+ 
+ /** 注入的 react 能力：由模块工厂提供，本目录不直接 import react 运行时。 */
+diff --git a/shared/constants.ts b/shared/constants.ts
+--- a/shared/constants.ts
++++ b/shared/constants.ts
+@@ -27,7 +27,9 @@ export const PET_REF_WIDTH = 462;
+  * 宿主注册的路由段：服务端路径，永远不带浏览器挂载前缀。
+  * 路由注册、匹配与桌面/独立模式拼地址都用它；带了前缀的地址在服务端是错的路由。
+  */
+-export const ROUTE_SEGMENT = '/dsh-pet-7340';
++// A-NAS: the Product Service serves the companion under /companion (internal/webui), and the
++// desktop's index is only served at /, so there is no mount prefix in front of it.
++export const ROUTE_SEGMENT = '/companion';
+ 
+ /**
+  * 从文档基准地址取出挂载前缀（baseURI 的目录部分）。

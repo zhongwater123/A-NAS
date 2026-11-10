@@ -19,6 +19,8 @@ import (
 type uploadFixture struct {
 	ctx     context.Context
 	service *files.Service
+	users   *accounts.Service
+	owner   accounts.User
 	alice   accounts.User
 	space   accounts.Space
 	root    string
@@ -58,7 +60,7 @@ func newUploadFixtureOn(t *testing.T, fileSystem func(volume string) files.FileS
 		t.Fatalf("open file catalog: %v", err)
 	}
 	t.Cleanup(func() { _ = catalog.Close() })
-	fixture := &uploadFixture{ctx: ctx, alice: alice, space: findPrivateSpace(t, spaces), now: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)}
+	fixture := &uploadFixture{ctx: ctx, users: accountService, owner: admin, alice: alice, space: findPrivateSpace(t, spaces), now: time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)}
 	volume := filepath.Join(t.TempDir(), "volume")
 	fixture.root = filepath.Join(volume, "spaces", "private", "alice")
 	options := files.Options{
@@ -218,6 +220,30 @@ func TestFolderUploadCreatesAndReusesFolders(t *testing.T) {
 	for _, name := range []string{"..", "a/b", ".a-nas-trash", strings.Repeat("长", 90)} {
 		if _, err := f.service.BeginUpload(f.ctx, f.alice, files.UploadRequest{SpaceID: f.space.ID, Name: name, Size: 1, Conflict: files.ConflictAsk}); !errors.Is(err, files.ErrInvalidName) {
 			t.Errorf("BeginUpload(%q) error = %v, want ErrInvalidName", name, err)
+		}
+	}
+}
+
+// The folders of a folder upload follow the rules for new names, like the
+// file itself, and a refused folder is not created.
+func TestFolderUploadRefusesFolderNamesTheRulesForbid(t *testing.T) {
+	f := newUploadFixture(t)
+	for name, want := range map[string]error{
+		".a-nas-trash": files.ErrInvalidName,
+		"a:b":          files.ErrNameNotPortable,
+		"CON":          files.ErrNameNotPortable,
+		"trailing.":    files.ErrNameNotPortable,
+		"tab\there":    files.ErrNameNotPortable,
+	} {
+		upload, err := f.service.BeginUpload(f.ctx, f.alice, files.UploadRequest{SpaceID: f.space.ID, Directories: []string{"ok", name}, Name: "a.txt", Size: 1, Conflict: files.ConflictAsk})
+		if !errors.Is(err, want) {
+			if upload != nil {
+				_ = f.service.AbortUpload(f.ctx, f.alice, upload)
+			}
+			t.Errorf("folder %q: BeginUpload() error = %v, want %v", name, err, want)
+		}
+		if _, statErr := os.Lstat(filepath.Join(f.root, "ok", name)); !errors.Is(statErr, os.ErrNotExist) {
+			t.Errorf("folder %q was created: %v", name, statErr)
 		}
 	}
 }

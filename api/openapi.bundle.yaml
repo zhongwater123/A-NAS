@@ -791,7 +791,7 @@ paths:
     post:
       operationId: createStoragePlan
       x-anas-posture: admin
-      description: 'Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume. A volume on one disk then converts to the layout (mirror by default) in the background; a volume on several disks keeps its layout, and a mirror whose old disks are too full to pair with the new ones spreads its files over all disks. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts or Btrfs runs a balance, such as a spread; 422 invalid_layout when the layout does not fit the number of disks, layout_change_unsupported when it differs from the layout of a volume on several disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict.'
+      description: 'Plans erasing the disks. Without a data volume it creates one with the layout (single for one disk, mirror by default for more); otherwise it adds the disks to the mounted data volume. A volume on one disk then converts to the layout (mirror by default) in the background; a volume on several disks keeps its layout, and a mirror whose old disks are too full to pair with the new ones spreads its files over all disks. A mirror missing a disk instead takes one disk to rebuild the missing one onto (kind replace_disk; the layout is ignored), 422 disk_too_small when it is smaller than the missing disk and replace_one_disk for any other number of disks. 423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts, Btrfs runs a balance, such as a spread, or the volume misses a disk; 422 invalid_layout when the layout does not fit the number of disks, layout_change_unsupported when it differs from the layout of a volume on several disks, layout_too_small when the files would not fit. 409 volume_exists when no data volume is recorded but the host shows one, such as one an interrupted plan made: retrying that plan takes it over. A new plan cancels any plan that has not run; while a plan runs it answers 409 plan_state_conflict.'
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -7170,7 +7170,7 @@ paths:
     get:
       operationId: openAssistantGateway
       summary: The member's own assistant over JSON-RPC, as Hermes Desktop talks to hermes serve (ADR 0024 decision 9)
-      description: 'A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. The connection reaches the instance through the session gate (decision 10) and closes when the member''s session ends.'
+      description: 'A WebSocket (101 Switching Protocols) whose Origin must be this host. Each frame is one JSON-RPC object. The product service passes only the allowed methods with their allowed parameters (session.create, session.resume, session.activate, session.events.since, session.active_list, prompt.submit, session.interrupt, session.title, session.close, gateway.ping, ping) and the allowed events; everything else is refused with -32601 or -32602. client.capabilities, approval.pending and approval.received are answered by the product service itself: requests from Hermes never reach the window, and approvals arrive as anas.approval events carrying an AssistantApproval. The companion tools'' commands arrive as anas.companion events ({command_id, action, args}) at the window that is the conversation''s browser and sent its prompt, and at no other; that window answers each once with companion.result ({session_id, command_id, ok, result or error}), which the product service also answers itself. The connection reaches the instance through the session gate (decision 10) and closes when the member''s session ends.'
       responses:
         '101':
           description: Switched to WebSocket
@@ -8547,6 +8547,7 @@ components:
             - disk_hot
             - cpu_hot
             - volume_offline
+            - volume_degraded
             - volume_read_only
             - volume_full
             - volume_nearly_full
@@ -8562,7 +8563,7 @@ components:
         value:
           type: integer
           format: int64
-          description: 'disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted.'
+          description: 'disk_hot and cpu_hot: temperature in °C; volume_full and volume_nearly_full: percentage used; volume_errors: errors Btrfs counted; volume_degraded: disks missing.'
     Disk:
       type: object
       additionalProperties: false
@@ -8618,7 +8619,8 @@ components:
             type: string
         temperatureCelsius:
           type: integer
-          minimum: -273
+          minimum: -40
+          maximum: 150
         temperatureHotCelsius:
           type: integer
           minimum: 1
@@ -9087,10 +9089,20 @@ components:
           enum:
             - creating
             - available
+            - degraded
             - unavailable
             - read_only
+          description: 'degraded: mounted and writable without one of its disks; a mirror then keeps one copy of new data (ADR 0025).'
         conversion:
           $ref: '#/components/schemas/VolumeConversion'
+        missingDisks:
+          type: array
+          items:
+            $ref: '#/components/schemas/MissingDisk'
+          description: Disks of the volume the device does not see, while it is degraded or not mounted.
+        restoring:
+          type: boolean
+          description: The volume has all its disks again after running without one and is being scrubbed, so that data written meanwhile gets its second copy.
         spread:
           $ref: '#/components/schemas/VolumeSpread'
     VolumeConversion:
@@ -9203,6 +9215,8 @@ components:
           enum:
             - create_volume
             - add_disks
+            - replace_disk
+          description: 'replace_disk: the only plan a mirror missing a disk takes; one new disk, at least as large, rebuilt from the other copy.'
         layout:
           $ref: '#/components/schemas/VolumeLayout'
         disks:
@@ -9245,7 +9259,13 @@ components:
             - mount
             - prepare
             - add_devices
+            - replace
           description: The step the Host Agent is at while the plan runs, or the one it stopped in when the plan needs attention.
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: How far a rebuild has come, in percent, while a replace_disk plan is at the replace step.
         createdAt:
           type: string
           format: date-time
@@ -14498,6 +14518,21 @@ components:
           maxItems: 256
           items:
             $ref: '#/components/schemas/TaskManagerFan'
+    MissingDisk:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+      description: A disk of the data volume that is not there, as the plan that added it recorded it.
+      properties:
+        id:
+          $ref: '#/components/schemas/StableResourceID'
+        model:
+          type: string
+        capacityBytes:
+          type: integer
+          format: int64
+          minimum: 0
     FamilyReactionName:
       type: string
       enum:

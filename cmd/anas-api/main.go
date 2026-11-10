@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coreos/go-systemd/v22/activation"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -41,7 +42,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/agent"
-	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/httpidle"
 	"github.com/zhongwater123/A-NAS/internal/media"
@@ -170,7 +170,10 @@ func run(logger *slog.Logger) error {
 	if err := os.MkdirAll(stateDirectory, 0o700); err != nil {
 		return err
 	}
-	reader, dataSource, operations := configuredServices(config)
+	reader, dataSource, operations, err := configuredServices(config)
+	if err != nil {
+		return err
+	}
 	// Development shows invented service logs; the Host Agent reads the
 	// journal (ADR 0020).
 	var systemLogs systemlog.Reader = systemlog.NewFake(nil)
@@ -338,7 +341,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeFamily()
-	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService)
+	// The assistants' companion tools call from the member's own UID; the
+	// account store says whose it is.
+	uids := accounts.NewSessionDirectory(filepath.Join(stateDirectory, "control.db"))
+	defer closeAtExit(logger, "account directory", uids)
+	assistant := assistantAPI(background, config.Assistant, logger, broker, accountService, uids)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
 		Accounts: accountService, Files: fileService, Storage: storageService, Personalization: personalizationStore,
@@ -366,6 +373,7 @@ func run(logger *slog.Logger) error {
 	})
 	handler, err := webui.NewWithOptions(apiHandler, webui.Options{
 		ScreensaverDirectory: config.ScreensaverDirectory,
+		CompanionDirectory:   config.CompanionDirectory,
 	})
 	if err != nil {
 		return err
@@ -392,6 +400,9 @@ func run(logger *slog.Logger) error {
 		return nil
 	})
 	servers, err := listen(config, handler, logger)
+	if companion := companionListener(); companion != nil && err == nil {
+		servers = append(servers, listening{assistant.CompanionServer(), companion})
+	}
 	if err == nil {
 		logger.Info("A-NAS API listening", "address", config.HTTPAddr, "internet_address", config.InternetHTTPAddr, "internet_host", config.InternetHost,
 			"version", version, "data_source", dataSource, "terminal", config.TerminalEnabled, "containers", containerManager != nil)
@@ -432,6 +443,20 @@ func listen(config Config, handler http.Handler, logger *slog.Logger) ([]listeni
 		servers = append(servers, listening{apiServer(entry.address, entry.handler, logger), listener})
 	}
 	return servers, nil
+}
+
+// companionListener is the socket of the companion tools of members'
+// assistants (#412) when systemd hands it over, named "companion"
+// (ai/assistant-spike/anas-companion-assistant.socket). systemd holds it, so
+// it outlives restarts of this service and the copies bound into running
+// sandboxes keep working. Without it those tools answer that no desktop is in
+// use.
+func companionListener() net.Listener {
+	listeners, err := activation.ListenersWithNames()
+	if err != nil || len(listeners["companion"]) == 0 {
+		return nil
+	}
+	return listeners["companion"][0]
 }
 
 func apiServer(address string, handler http.Handler, logger *slog.Logger) *http.Server {
@@ -626,14 +651,18 @@ func configuredWebSearch(config Config, store *websearch.Store, operations produ
 }
 
 // configuredServices reaches the host through the Host Agent on a NAS, and
-// through simulated disks and storage in development.
-func configuredServices(config Config) (hoststate.Observer, httpapi.DataSource, productOperations) {
+// through simulated disks and storage in development, of the host that
+// ANAS_FAKE_STORAGE names.
+func configuredServices(config Config) (hoststate.Observer, httpapi.DataSource, productOperations, error) {
 	if config.Live() {
 		client := agent.NewClient(config.HostAgentSocket)
-		return client, httpapi.DataSourceLive, client
+		return client, httpapi.DataSourceLive, client, nil
 	}
-	simulated := newSimulatedStorage(fake.NewWithSpareDisk())
-	return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated}
+	simulated, err := developmentStorage(config.FakeStorage)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return simulated, httpapi.DataSourceSimulated, &developmentOperations{simulatedStorage: simulated}, nil
 }
 
 // developmentOperations stand in for the Host Agent in fake mode.
@@ -687,10 +716,11 @@ func configuredContainers(config Config) (containers.Manager, appstore.Store, co
 // through the File Broker, the session gate (decision 10), which also
 // executes the assistant's changes; development dials the sockets directly
 // with their tokens and may name the spike's change broker. The account store
-// keeps the notices of the members' scheduled tasks. Its background work ends
-// with background.
-func assistantAPI(background context.Context, config AssistantConfig, logger *slog.Logger, broker *filebroker.Client, notices assistantapi.TaskNotices) *assistantapi.Handler {
-	options := assistantapi.Options{SocketDir: config.SocketDir, Notices: notices, Logger: logger, Context: background}
+// keeps the notices of the members' scheduled tasks, and uids names the member
+// behind a companion tool's call. Its background work ends with background.
+func assistantAPI(background context.Context, config AssistantConfig, logger *slog.Logger, broker *filebroker.Client, notices assistantapi.TaskNotices,
+	uids assistantapi.AccountResolver) *assistantapi.Handler {
+	options := assistantapi.Options{SocketDir: config.SocketDir, Notices: notices, Accounts: uids, Logger: logger, Context: background}
 	switch {
 	case config.SocketDir == "":
 	case broker != nil:

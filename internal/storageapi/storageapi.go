@@ -182,6 +182,10 @@ func WriteError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "invalid_layout", err.Error())
 	case errors.Is(err, storage.ErrLayoutTooSmall):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "layout_too_small", err.Error())
+	case errors.Is(err, storage.ErrDiskTooSmall):
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "disk_too_small", err.Error())
+	case errors.Is(err, storage.ErrReplaceOneDisk):
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "replace_one_disk", err.Error())
 	case errors.Is(err, storage.ErrLayoutChange):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "layout_change_unsupported", err.Error())
 	case errors.Is(err, storage.ErrOperationAttention), errors.Is(err, storage.ErrDiskChanged):
