@@ -102,6 +102,12 @@ mount unit 文件是 systemd 的 fragment，没有 `x-systemd.device-bound=` 选
   - 用过的计划 ID 换一块盘重试被拒绝（“the plan asked for another operation before”），与操作日志的约定一致。
 - 转换只处理有数据的块组：降级期间新建、之后为空的 `single` 元数据与系统块组仍列在 sysfs，用量为 0，由 Btrfs 自行回收。新分配按镜像进行。
 
+- 代码审查后的补充（2026-11-10，同一虚拟机）：
+  - 查看用的只读挂载改带 `rescue=nologreplay`，内核记录 “disabling log replay at mount time”；读写降级挂载带 `skip_balance`，挂载选项中可见。
+  - 管理员 `systemctl stop` 数据卷后，mount unit 的 `ActiveEnterTimestampMonotonic` 不为 0，检查不再挂载它。开机等盘超时的 mount unit 为 `inactive` 且该值为 0。
+  - btrfs-progs 6.14 的 `replace status` 不支持 `--format json`（“output format json is unsupported for this command”）。按 btrfs-scrub(8)，`scrub start` 的退出码 1 为无法执行、2 为无可继续、3 为有无法修复的错误。
+  - 重启后对已完成的更换，`btrfs replace status` 报告 “Never started”；重试的计划看到新盘已在卷中、又没有更换在运行时，不再等待。
+
 ## 后续工作
 
 - 实机：部署后重启一次，确认 `StopPropagatedFrom=` 为空；再按运行手册拔盘开机、接回。

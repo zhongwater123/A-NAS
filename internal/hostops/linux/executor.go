@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode"
@@ -155,6 +156,13 @@ type Executor struct {
 	degradedPath  string
 	degradedError error
 	scrubbing     bool
+	scrubRetryAt  time.Time
+	// unmountedProbe says the Host Agent unmounted its own probe last, so
+	// the mount unit's inactivity is not an administrator's.
+	unmountedProbe bool
+	// restoring mirrors whether the record exists, for the host state to
+	// read without waiting on degradedMu.
+	restoring atomic.Bool
 }
 
 func NewExecutor(resolver DeviceResolver, runner CommandRunner, options Options) *Executor {

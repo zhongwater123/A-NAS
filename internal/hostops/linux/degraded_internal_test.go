@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,17 +14,19 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
+	"github.com/zhongwater123/A-NAS/internal/hoststate"
+	linuxhoststate "github.com/zhongwater123/A-NAS/internal/hoststate/linux"
 )
 
 const degradedUUID = "1bf2da8f-c403-422e-83bb-ea5f87518214"
 
 func TestOnlyAMirrorMissingOneDiskRunsOnTheDisksItLastRanOn(t *testing.T) {
 	mirror := volumeMarker{FilesystemUUID: degradedUUID, FormatVersion: 1, Layout: datavolume.LayoutMirror}
-	oneGone := []btrfsDevice{{ID: 1}, {ID: 2, Missing: true}}
+	oneGone := []linuxhoststate.BtrfsDevice{{ID: 1}, {ID: 2, Missing: true}}
 	cases := []struct {
 		name      string
 		marker    volumeMarker
-		devices   []btrfsDevice
+		devices   []linuxhoststate.BtrfsDevice
 		record    *degradedRecord
 		survivors []uint64
 	}{
@@ -31,13 +34,13 @@ func TestOnlyAMirrorMissingOneDiskRunsOnTheDisksItLastRanOn(t *testing.T) {
 		{name: "span", marker: volumeMarker{FilesystemUUID: degradedUUID, Layout: datavolume.LayoutSpan}, devices: oneGone},
 		{name: "stripe", marker: volumeMarker{FilesystemUUID: degradedUUID, Layout: datavolume.LayoutStripe}, devices: oneGone},
 		{name: "another filesystem's marker", marker: volumeMarker{FilesystemUUID: volumeUUIDOther, Layout: datavolume.LayoutMirror}, devices: oneGone},
-		{name: "nothing missing", marker: mirror, devices: []btrfsDevice{{ID: 1}, {ID: 2}}},
-		{name: "two of three missing", marker: mirror, devices: []btrfsDevice{{ID: 1}, {ID: 2, Missing: true}, {ID: 3, Missing: true}}},
+		{name: "nothing missing", marker: mirror, devices: []linuxhoststate.BtrfsDevice{{ID: 1}, {ID: 2}}},
+		{name: "two of three missing", marker: mirror, devices: []linuxhoststate.BtrfsDevice{{ID: 1}, {ID: 2, Missing: true}, {ID: 3, Missing: true}}},
 		{name: "the disk it last ran on", marker: mirror, devices: oneGone,
 			record: &degradedRecord{FilesystemUUID: degradedUUID, Since: time.Unix(1, 0), Survivors: []uint64{1}}, survivors: []uint64{1}},
-		{name: "only the stale disk", marker: mirror, devices: []btrfsDevice{{ID: 1, Missing: true}, {ID: 2}},
+		{name: "only the stale disk", marker: mirror, devices: []linuxhoststate.BtrfsDevice{{ID: 1, Missing: true}, {ID: 2}},
 			record: &degradedRecord{FilesystemUUID: degradedUUID, Since: time.Unix(1, 0), Survivors: []uint64{1}}},
-		{name: "a record of another volume", marker: mirror, devices: []btrfsDevice{{ID: 1, Missing: true}, {ID: 2}},
+		{name: "a record of another volume", marker: mirror, devices: []linuxhoststate.BtrfsDevice{{ID: 1, Missing: true}, {ID: 2}},
 			record: &degradedRecord{FilesystemUUID: volumeUUIDOther, Since: time.Unix(1, 0), Survivors: []uint64{1}}, survivors: []uint64{2}},
 	}
 	for _, test := range cases {
@@ -64,10 +67,26 @@ type degradedHost struct {
 	marker           volumeMarker
 	devices          map[string][2]string // devid -> missing, writeable
 	unitState        string
-	members          string
-	mu               sync.Mutex
-	commands         []string
+	// activeEnter is the mount unit's ActiveEnterTimestampMonotonic: 0 when
+	// it has not been active since boot.
+	activeEnter string
+	members     string
+	blkidStatus exitStatus
+	// replaceStatus are the lines "btrfs replace status -1" prints, in turn.
+	replaceStatus []string
+	// mounted is the data volume the host state shows, and spares the disks
+	// it can resolve.
+	mounted  *hoststate.DataVolume
+	spares   map[string]BlockDevice
+	mu       sync.Mutex
+	commands []string
 }
+
+// exitStatus is the error of a command that exited with the status.
+type exitStatus int
+
+func (s exitStatus) Error() string { return fmt.Sprintf("exit status %d", int(s)) }
+func (s exitStatus) ExitCode() int { return int(s) }
 
 func newDegradedHost(t *testing.T, layout datavolume.Layout) *degradedHost {
 	t.Helper()
@@ -75,7 +94,7 @@ func newDegradedHost(t *testing.T, layout datavolume.Layout) *degradedHost {
 		t: t, root: t.TempDir(), mountPoint: filepath.Join(t.TempDir(), "data"),
 		marker:    volumeMarker{FilesystemUUID: degradedUUID, FormatVersion: 1, Layout: layout},
 		devices:   map[string][2]string{"1": {"0", "1"}, "2": {"1", "0"}},
-		unitState: "failed", members: "/dev/sda1\n",
+		unitState: "failed", activeEnter: "0", members: "/dev/sda1\n",
 	}
 	unit := filepath.Join(host.root, "etc", "systemd", "system", "a-nas-data.mount")
 	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
@@ -91,7 +110,7 @@ func newDegradedHost(t *testing.T, layout datavolume.Layout) *degradedHost {
 }
 
 func (h *degradedHost) executor() *Executor {
-	return NewExecutor(nil, h, Options{SystemRoot: h.root, MountPoint: h.mountPoint, MountUnitName: "a-nas-data.mount", Now: func() time.Time { return time.Unix(1_700_000_000, 0) }})
+	return NewExecutor(h, h, Options{SystemRoot: h.root, MountPoint: h.mountPoint, MountUnitName: "a-nas-data.mount", Now: func() time.Time { return time.Unix(1_700_000_000, 0) }})
 }
 
 func (h *degradedHost) Run(_ context.Context, name string, args []string, _ string) ([]byte, error) {
@@ -131,14 +150,38 @@ func (h *degradedHost) Output(_ context.Context, name string, args []string, _ s
 	h.mu.Unlock()
 	switch name {
 	case "systemctl":
-		return []byte(h.unitState + "\n"), nil
+		return []byte("ActiveState=" + h.unitState + "\nActiveEnterTimestampMonotonic=" + h.activeEnter + "\n"), nil
 	case "blkid":
+		if h.blkidStatus != 0 {
+			return nil, h.blkidStatus
+		}
 		if h.members == "" {
-			return nil, errors.New("exit status 2")
+			return nil, exitStatus(2)
 		}
 		return []byte(h.members), nil
+	case "btrfs":
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if len(h.replaceStatus) == 0 {
+			return []byte("Never started\n"), nil
+		}
+		line := h.replaceStatus[0]
+		h.replaceStatus = h.replaceStatus[1:]
+		return []byte(line + "\n"), nil
 	}
 	return nil, errors.New("unexpected command " + name)
+}
+
+func (h *degradedHost) MountedDataVolume(context.Context) (*hoststate.DataVolume, error) {
+	return h.mounted, nil
+}
+
+func (h *degradedHost) ResolveDevice(_ context.Context, diskID string) (BlockDevice, error) {
+	device, ok := h.spares[diskID]
+	if !ok {
+		return BlockDevice{}, errors.New("unknown disk")
+	}
+	return device, nil
 }
 
 func (h *degradedHost) mounts() []string {
@@ -178,9 +221,9 @@ func TestMountDegradedLooksFirstThenMountsTheMirrorWithoutItsDisk(t *testing.T) 
 		t.Fatalf("MountDegraded() = %v, %v; want mounted", mounted, err)
 	}
 	want := []string{
-		"mount -t btrfs -o degraded,ro," + mountOptions + " /dev/sda1 " + host.mountPoint,
+		"mount -t btrfs -o " + probeOptions + " /dev/sda1 " + host.mountPoint,
 		"umount " + host.mountPoint,
-		"mount -t btrfs -o degraded," + mountOptions + " /dev/sda1 " + host.mountPoint,
+		"mount -t btrfs -o " + degradedOptions + " /dev/sda1 " + host.mountPoint,
 	}
 	if got := host.mounts(); !slices.Equal(got, want) {
 		t.Fatalf("mounts = %q\nwant %q", got, want)
@@ -216,6 +259,7 @@ func TestMountDegradedLeavesAVolumeOfflineWhenItMustNotRunWithoutADisk(t *testin
 			}
 		}, looked: true},
 		{name: "systemd still waits for the disks", setup: func(h *degradedHost) { h.unitState = "activating" }},
+		{name: "an administrator unmounted it", setup: func(h *degradedHost) { h.unitState, h.activeEnter = "inactive", "51234567" }},
 		{name: "no disk of the volume", setup: func(h *degradedHost) { h.members = "" }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -228,7 +272,7 @@ func TestMountDegradedLeavesAVolumeOfflineWhenItMustNotRunWithoutADisk(t *testin
 			}
 			var want []string
 			if test.looked {
-				want = []string{"mount -t btrfs -o degraded,ro," + mountOptions + " /dev/sda1 " + host.mountPoint, "umount " + host.mountPoint}
+				want = []string{"mount -t btrfs -o " + probeOptions + " /dev/sda1 " + host.mountPoint, "umount " + host.mountPoint}
 			}
 			if got := host.mounts(); !slices.Equal(got, want) {
 				t.Fatalf("mounts = %q, want %q", got, want)
@@ -278,5 +322,147 @@ func TestParseReplaceStatusFollowsARebuild(t *testing.T) {
 		if (err != nil) != test.fails || finished != test.finished || (!test.fails && percent != test.percent) {
 			t.Errorf("parseReplaceStatus(%q) = %v, %d, %v", test.line, finished, percent, err)
 		}
+	}
+}
+
+// A blkid that fails other than by finding nothing is an error, not an
+// absent volume: the volume would otherwise stay offline without a word.
+func TestMountDegradedReportsABlkidThatFails(t *testing.T) {
+	host := newDegradedHost(t, datavolume.LayoutMirror)
+	host.blkidStatus = exitStatus(4)
+	if mounted, err := host.executor().MountDegraded(context.Background()); err == nil || mounted {
+		t.Fatalf("MountDegraded() = %v, %v; want the blkid failure", mounted, err)
+	}
+	if got := host.mounts(); len(got) != 0 {
+		t.Fatalf("mounts = %q, want none", got)
+	}
+}
+
+// replaceHost is a mirror mounted without device 2, with a spare disk.
+func replaceHost(t *testing.T, operation string, joined bool) (*degradedHost, *volumeOperation) {
+	t.Helper()
+	host := newDegradedHost(t, datavolume.LayoutMirror)
+	survivor, spare := mustResourceID(t, "disk:survivor"), mustResourceID(t, "disk:spare")
+	host.mounted = &hoststate.DataVolume{FilesystemUUID: degradedUUID, DiskIDs: []hoststate.ResourceID{survivor}}
+	if joined {
+		host.mounted.DiskIDs = append(host.mounted.DiskIDs, spare)
+	}
+	disk := hoststate.Disk{ID: spare, Model: "ST500DM002", Transport: hoststate.TransportSATA, CapacityBytes: 500_000_000_000, Role: hoststate.DiskRoleUnassigned}
+	host.spares = map[string]BlockDevice{"disk:spare": {Disk: disk, DevicePath: "/dev/sdc", PartitionPath: "/dev/sdc1"}}
+	sysfs := filepath.Join(host.root, "sys", "fs", "btrfs", degradedUUID)
+	for devid, flags := range map[string][2]string{"1": {"0", "1"}, "2": {"1", "0"}} {
+		dir := filepath.Join(sysfs, "devinfo", devid)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.WriteFile(filepath.Join(dir, "missing"), []byte(flags[0]+"\n"), 0o644)
+		_ = os.WriteFile(filepath.Join(dir, "writeable"), []byte(flags[1]+"\n"), 0o644)
+	}
+	if err := os.WriteFile(filepath.Join(sysfs, "exclusive_operation"), []byte(operation+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := datavolume.DiskTarget{DiskID: "disk:spare", Fingerprint: datavolume.FingerprintDisk(disk)}
+	return host, &volumeOperation{PlanID: "plan:replace", Kind: datavolume.PlanKindReplaceDisk, Disks: []datavolume.DiskTarget{target}, Layout: datavolume.LayoutMirror, FilesystemUUID: degradedUUID}
+}
+
+func mustResourceID(t *testing.T, value string) hoststate.ResourceID {
+	t.Helper()
+	id, err := hoststate.NewResourceID(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func (h *degradedHost) ran(prefix string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	count := 0
+	for _, line := range h.commands {
+		if strings.HasPrefix(line, prefix) {
+			count++
+		}
+	}
+	return count
+}
+
+// The rebuild runs by the missing device's ID; a balance the degraded mount
+// kept paused would block it and is cancelled first.
+func TestReplaceDiskRebuildsTheMissingDeviceAfterCancellingAPausedBalance(t *testing.T) {
+	host, operation := replaceHost(t, "balance paused", false)
+	host.replaceStatus = []string{"Started on  6.Nov 13:10:52, finished on  6.Nov 13:11:50, 0 write errs, 0 uncorr. read errs"}
+	volume, err := host.executor().replaceDisk(context.Background(), operation)
+	if err != nil {
+		t.Fatalf("replaceDisk() error = %v", err)
+	}
+	cancel := slices.Index(host.commands, "btrfs balance cancel "+host.mountPoint)
+	start := slices.Index(host.commands, "btrfs replace start 2 /dev/sdc1 "+host.mountPoint)
+	if cancel < 0 || start < cancel {
+		t.Fatalf("commands = %q, want the paused balance cancelled before the rebuild starts", host.commands)
+	}
+	if !slices.Equal(volume.DiskIDs, []string{"disk:survivor", "disk:spare"}) {
+		t.Fatalf("volume disks = %v, want the survivor and the new disk", volume.DiskIDs)
+	}
+}
+
+// Retried after a reboot that came after the rebuild finished, the plan
+// finds the disk joined and nothing running; btrfs reports such a rebuild as
+// never started, so waiting on it would fail the plan for good.
+func TestReplaceDiskRetriedAfterTheRebuildFinishedDoesNotWait(t *testing.T) {
+	host, operation := replaceHost(t, "none", true)
+	if _, err := host.executor().replaceDisk(context.Background(), operation); err != nil {
+		t.Fatalf("replaceDisk() error = %v", err)
+	}
+	if host.ran("btrfs replace") != 0 || host.ran("wipefs") != 0 {
+		t.Fatalf("commands = %q, want no erase, rebuild or status", host.commands)
+	}
+	if host.ran("btrfs filesystem resize") == 0 {
+		t.Fatalf("commands = %q, want the volume grown onto the new disk", host.commands)
+	}
+}
+
+// A rebuild the kernel still runs after a Host Agent restart is followed to
+// its end, not started again.
+func TestReplaceDiskFollowsARebuildThatRuns(t *testing.T) {
+	host, operation := replaceHost(t, "device replace", true)
+	host.replaceStatus = []string{"Started on  6.Nov 13:10:52, finished on  6.Nov 13:11:50, 0 write errs, 0 uncorr. read errs"}
+	if _, err := host.executor().replaceDisk(context.Background(), operation); err != nil {
+		t.Fatalf("replaceDisk() error = %v", err)
+	}
+	if host.ran("btrfs replace start") != 0 || host.ran("btrfs replace status") != 1 {
+		t.Fatalf("commands = %q, want the running rebuild followed", host.commands)
+	}
+}
+
+// A scrub that found data neither copy repairs has done what it can: the
+// record goes. One that stopped keeps the record and waits before the next.
+func TestFinishScrubEndsTheRecordOrWaitsToRetry(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		err   error
+		keeps bool
+	}{
+		{name: "clean", err: nil},
+		{name: "uncorrectable errors", err: exitStatus(3)},
+		{name: "stopped", err: exitStatus(1), keeps: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			host := newDegradedHost(t, datavolume.LayoutMirror)
+			executor := host.executor()
+			if err := executor.saveDegraded(&degradedRecord{FilesystemUUID: degradedUUID, Since: time.Unix(1, 0), Survivors: []uint64{1}}); err != nil {
+				t.Fatal(err)
+			}
+			executor.scrubbing = true
+			executor.finishScrub(nil, test.err)
+			if got := host.record(t) != nil; got != test.keeps || executor.RestoringRedundancy() != test.keeps {
+				t.Fatalf("record kept = %v (restoring %v), want %v", got, executor.RestoringRedundancy(), test.keeps)
+			}
+			if executor.scrubbing {
+				t.Fatal("still scrubbing after the scrub ended")
+			}
+			if test.keeps && !executor.scrubRetryAt.Equal(time.Unix(1_700_000_000, 0).Add(scrubRetry)) {
+				t.Fatalf("retry at %v, want %v later", executor.scrubRetryAt, scrubRetry)
+			}
+		})
 	}
 }

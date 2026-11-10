@@ -37,7 +37,8 @@
       then converts to the layout (mirror by default) in the background; a volume on several disks keeps its
       layout, and a mirror whose old disks are too full to pair with the new ones spreads its files over all disks.
       A mirror missing a disk instead takes one disk to rebuild the missing one onto (kind replace_disk; the
-      layout is ignored), and 422 disk_too_small when it is smaller than the missing disk.
+      layout is ignored), 422 disk_too_small when it is smaller than the missing disk and replace_one_disk for any
+      other number of disks.
       423 volume_unavailable when the volume is not mounted and writable; 409 volume_busy while it converts,
       Btrfs runs a balance, such as a spread, or the volume misses a disk; 422 invalid_layout when the layout does
       not fit the number of disks, layout_change_unsupported when it differs from the layout of a volume on several

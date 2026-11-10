@@ -34,6 +34,7 @@ var (
 	// changing the layout is a step of its own (M3 of the disk-roles spec).
 	ErrLayoutChange       = errors.New("disks join a volume on several disks in its layout")
 	ErrDiskTooSmall       = errors.New("the new disk is smaller than the one it replaces")
+	ErrReplaceOneDisk     = errors.New("a replacement takes exactly one disk")
 	ErrOperationAttention = errors.New("operation needs administrator attention")
 )
 
@@ -287,13 +288,12 @@ func (s *Service) PlanVolume(ctx context.Context, actor accounts.User, diskIDs [
 		// A mirror without a disk takes one plan: a disk in its place.
 		plan.Kind, plan.Layout = PlanKindReplaceDisk, LayoutMirror
 		if len(disks) != 1 {
-			return ExecutionPlan{}, ErrInvalidLayout
+			return ExecutionPlan{}, ErrReplaceOneDisk
 		}
-		s.mu.Lock()
-		for i, missing := range volume.MissingDisks {
-			volume.MissingDisks[i] = s.recordedDiskLocked(missing.ID)
+		if rebuildBlocked(state.DataVolume) {
+			return ExecutionPlan{}, ErrVolumeBusy
 		}
-		s.mu.Unlock()
+		s.describeMissing(&volume)
 		for _, missing := range volume.MissingDisks {
 			if missing.CapacityBytes > disks[0].CapacityBytes {
 				return ExecutionPlan{}, ErrDiskTooSmall
@@ -609,6 +609,9 @@ func (s *Service) ExecutePlan(ctx context.Context, actor accounts.User, planID s
 			if observeVolume(current, state).State != VolumeStateDegraded || current.Layout != LayoutMirror {
 				return s.needsAttention(planID, ErrVolumeChanged)
 			}
+			if rebuildBlocked(state.DataVolume) {
+				return s.needsAttention(planID, ErrVolumeBusy)
+			}
 		default:
 			return s.needsAttention(planID, ErrVolumeChanged)
 		}
@@ -712,12 +715,26 @@ func (s *Service) ListVolumes(ctx context.Context) ([]Volume, error) {
 		return []Volume{current}, nil
 	}
 	volume := observeVolume(current, state)
+	s.describeMissing(&volume)
+	return []Volume{volume}, nil
+}
+
+// describeMissing fills in the volume's missing disks as the plans that
+// named them recorded them.
+func (s *Service) describeMissing(volume *Volume) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	for i, missing := range volume.MissingDisks {
 		volume.MissingDisks[i] = s.recordedDiskLocked(missing.ID)
 	}
-	s.mu.Unlock()
-	return []Volume{volume}, nil
+}
+
+// rebuildBlocked reports whether Btrfs runs an operation that keeps a
+// replacement from starting. A paused balance does not count: the Host
+// Agent cancels it, since the degraded mount keeps it from running on one
+// disk.
+func rebuildBlocked(mounted *hoststate.DataVolume) bool {
+	return mounted != nil && mounted.Operation != hoststate.VolumeOperationNone && mounted.Operation != hoststate.VolumeOperationBalancePaused
 }
 
 // recordedDiskLocked is the disk as the latest plan that named it recorded it.

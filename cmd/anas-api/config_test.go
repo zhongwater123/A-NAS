@@ -278,3 +278,24 @@ func TestPhotoServiceConfigVectorSocket(t *testing.T) {
 		t.Error("a relative vector socket was accepted")
 	}
 }
+
+// The simulated host with a volume that loses a disk is a development
+// setting: refused on a NAS and checked for its one value.
+func TestConfigTakesFakeStorageOnlyInFakeMode(t *testing.T) {
+	state := t.TempDir()
+	config, err := loadConfig(map[string]string{"ANAS_HOSTSTATE_MODE": "fake", "ANAS_STATE_DIR": state, "ANAS_FAKE_STORAGE": "degraded"})
+	if err != nil || config.FakeStorage != fakeStorageDegraded {
+		t.Fatalf("loadConfig(fake, degraded) = %q, %v; want the degraded host", config.FakeStorage, err)
+	}
+	for _, test := range []struct {
+		environment map[string]string
+		want        string
+	}{
+		{map[string]string{"ANAS_HOSTSTATE_MODE": "fake", "ANAS_STATE_DIR": state, "ANAS_FAKE_STORAGE": "broken"}, "ANAS_FAKE_STORAGE must be empty or degraded"},
+		{map[string]string{"ANAS_HOSTSTATE_MODE": "agent", "ANAS_STATE_DIR": state, "ANAS_FAKE_STORAGE": "degraded"}, "ANAS_FAKE_STORAGE applies to fake mode only"},
+	} {
+		if _, err := loadConfig(test.environment); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("loadConfig(%v) error = %v, want one naming %q", test.environment, err, test.want)
+		}
+	}
+}

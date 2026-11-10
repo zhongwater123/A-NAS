@@ -199,9 +199,23 @@ func TestAMirrorMissingADiskNamesItAndTakesNoOtherPlan(t *testing.T) {
 		!slices.ContainsFunc(replacement.Actions, func(action storage.Action) bool { return action.Kind == "replace_disk" }) {
 		t.Fatalf("plan while a disk is missing = %+v, %v; want a replacement", replacement, err)
 	}
-	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03", "disk:fake-data-02"}, storage.LayoutMirror); err == nil {
-		t.Fatal("a replacement of two disks was planned")
+	fourth := reader.state.Disks[slices.IndexFunc(reader.state.Disks, func(disk hoststate.Disk) bool { return disk.ID.String() == "disk:fake-data-03" })]
+	fourth.ID, _ = hoststate.NewResourceID("disk:fake-data-04")
+	reader.state.Disks = append(reader.state.Disks, fourth)
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03", "disk:fake-data-04"}, storage.LayoutMirror); !errors.Is(err, storage.ErrReplaceOneDisk) {
+		t.Fatalf("replacement by two disks error = %v, want ErrReplaceOneDisk", err)
 	}
+	// A running balance keeps the rebuild from starting; a paused one does
+	// not, the Host Agent cancels it.
+	reader.state.DataVolume.Operation = hoststate.VolumeOperationBalance
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, ""); !errors.Is(err, storage.ErrVolumeBusy) {
+		t.Fatalf("replacement during a balance error = %v, want ErrVolumeBusy", err)
+	}
+	reader.state.DataVolume.Operation = hoststate.VolumeOperationBalancePaused
+	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, ""); err != nil {
+		t.Fatalf("replacement with a paused balance error = %v", err)
+	}
+	reader.state.DataVolume.Operation = hoststate.VolumeOperationNone
 	small := slices.IndexFunc(reader.state.Disks, func(disk hoststate.Disk) bool { return disk.ID.String() == "disk:fake-data-03" })
 	reader.state.Disks[small].CapacityBytes = plan.Disks[1].CapacityBytes - 1
 	if _, err := service.PlanVolume(ctx, storageAdministrator, []string{"disk:fake-data-03"}, storage.LayoutMirror); !errors.Is(err, storage.ErrDiskTooSmall) {

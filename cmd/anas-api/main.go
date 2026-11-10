@@ -635,7 +635,7 @@ func configuredServices(config Config) (hoststate.Observer, httpapi.DataSource, 
 		client := agent.NewClient(config.HostAgentSocket)
 		return client, httpapi.DataSourceLive, client, nil
 	}
-	simulated, err := developmentStorage(os.Getenv(fakeStorageVariable))
+	simulated, err := developmentStorage(config.FakeStorage)
 	if err != nil {
 		return nil, "", nil, err
 	}

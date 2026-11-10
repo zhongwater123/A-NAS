@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,39 +39,9 @@ func (r degradedRecord) valid() bool {
 	return datavolume.ValidFilesystemUUID(r.FilesystemUUID) && !r.Since.IsZero() && len(r.Survivors) > 0
 }
 
-// btrfsDevice is one device of a mounted Btrfs filesystem, from sysfs
-// devinfo/<devid>.
-type btrfsDevice struct {
-	ID      uint64
-	Missing bool
-}
-
-// readBtrfsDevices lists the devices of the mounted filesystem, leaving out
-// a replacement being written. A device absent when the volume was mounted
-// is marked missing.
-func readBtrfsDevices(root fs.FS, uuid string) []btrfsDevice {
-	entries, err := fs.Glob(root, "sys/fs/btrfs/"+uuid+"/devinfo/*")
-	if err != nil {
-		return nil
-	}
-	flag := func(file string) bool {
-		contents, err := fs.ReadFile(root, file)
-		return err == nil && strings.TrimSpace(string(contents)) == "1"
-	}
-	var devices []btrfsDevice
-	for _, entry := range entries {
-		id, err := strconv.ParseUint(path.Base(entry), 10, 64)
-		if err != nil || flag(entry+"/replace_target") {
-			continue
-		}
-		devices = append(devices, btrfsDevice{ID: id, Missing: flag(entry+"/missing") || !flag(entry+"/writeable")})
-	}
-	return devices
-}
-
 // degradedMountRefusal is why the volume found by the probe mount must not
 // run without its missing disks, or "" with the survivors when it may.
-func degradedMountRefusal(marker volumeMarker, uuid string, devices []btrfsDevice, record *degradedRecord) ([]uint64, string) {
+func degradedMountRefusal(marker volumeMarker, uuid string, devices []linuxhoststate.BtrfsDevice, record *degradedRecord) ([]uint64, string) {
 	if !strings.EqualFold(marker.FilesystemUUID, uuid) {
 		return nil, "the volume's marker names another filesystem"
 	}
@@ -114,19 +83,38 @@ func (e *Executor) onHost(ctx context.Context, command ...string) error {
 	return nil
 }
 
+const (
+	// probeOptions mount the volume only to look at it. A read-only Btrfs
+	// mount still replays the log tree and writes the result; nologreplay
+	// keeps the probe from writing to disks the volume may not run on.
+	probeOptions = "degraded,ro,rescue=nologreplay," + mountOptions
+	// degradedOptions run the mirror without its missing disk. A balance
+	// paused at shutdown would resume on the remaining disk and rewrite the
+	// mirror's block groups as single copies; it stays paused instead.
+	degradedOptions = "degraded,skip_balance," + mountOptions
+)
+
 // MountDegraded mounts a mirror that systemd gave up mounting because a disk
 // is missing, and reports whether it did. A probe mount, read-only, shows
 // the volume's layout and which disks the kernel found; the volume is then
 // mounted read-write without the missing disk, or left offline with the
-// reason logged.
+// reason logged. A volume an administrator unmounted stays unmounted.
 func (e *Executor) MountDegraded(ctx context.Context) (bool, error) {
 	e.degradedMu.Lock()
 	defer e.degradedMu.Unlock()
-	if e.dataVolumeReady() {
-		return false, nil
-	}
 	if e.degradedError != nil {
 		return false, fmt.Errorf("the volume may not run without a disk: %w", e.degradedError)
+	}
+	if e.dataVolumeReady() {
+		// A probe the last check could not unmount holds the volume
+		// read-only; unmount it and start over.
+		if !e.probeLeftMounted(ctx) {
+			return false, nil
+		}
+		if err := e.onHost(ctx, "umount", e.mountPoint); err != nil {
+			return false, fmt.Errorf("unmount the data volume a probe left read-only: %w", err)
+		}
+		e.unmountedProbe = true
 	}
 	contents, err := os.ReadFile(e.mountUnitPath())
 	if errors.Is(err, os.ErrNotExist) {
@@ -139,29 +127,25 @@ func (e *Executor) MountDegraded(ctx context.Context) (bool, error) {
 	if uuid == "" {
 		return false, nil
 	}
-	// While systemd still waits for the disks, a slow one may yet come.
-	state, err := e.runner.Output(ctx, "systemctl", []string{"show", "--property=ActiveState", "--value", e.mountUnitName}, "")
-	if err != nil {
-		return false, commandError("systemctl show failed", err, state)
-	}
-	if active := strings.TrimSpace(string(state)); active != "failed" && active != "inactive" {
-		return false, nil
+	if gaveUp, err := e.mountGaveUp(ctx); err != nil || !gaveUp {
+		return false, err
 	}
 	members, err := e.volumeMembers(ctx, uuid)
 	if err != nil || len(members) == 0 {
 		return false, err
 	}
-	if err := e.onHost(ctx, "mount", "-t", "btrfs", "-o", "degraded,ro,"+mountOptions, members[0], e.mountPoint); err != nil {
+	if err := e.onHost(ctx, "mount", "-t", "btrfs", "-o", probeOptions, members[0], e.mountPoint); err != nil {
 		return false, fmt.Errorf("mount the data volume read-only to look at it: %w", err)
 	}
 	marker, markerErr := e.readMarker()
-	survivors, refusal := degradedMountRefusal(marker, uuid, readBtrfsDevices(os.DirFS(e.systemRoot), uuid), e.degraded)
+	survivors, refusal := degradedMountRefusal(marker, uuid, linuxhoststate.ReadBtrfsDevices(os.DirFS(e.systemRoot), uuid), e.degraded)
 	if markerErr != nil {
 		refusal = "the volume has no valid marker"
 	}
 	if err := e.onHost(ctx, "umount", e.mountPoint); err != nil {
 		return false, fmt.Errorf("unmount the data volume after looking at it: %w", err)
 	}
+	e.unmountedProbe = true
 	if refusal != "" {
 		e.logger.WarnContext(ctx, "the data volume stays offline", "reason", refusal)
 		return false, nil
@@ -173,9 +157,10 @@ func (e *Executor) MountDegraded(ctx context.Context) (bool, error) {
 	if err := e.saveDegraded(&record); err != nil {
 		return false, err
 	}
-	if err := e.onHost(ctx, "mount", "-t", "btrfs", "-o", "degraded,"+mountOptions, members[0], e.mountPoint); err != nil {
+	if err := e.onHost(ctx, "mount", "-t", "btrfs", "-o", degradedOptions, members[0], e.mountPoint); err != nil {
 		return false, fmt.Errorf("mount the data volume without its missing disk: %w", err)
 	}
+	e.unmountedProbe = false
 	// udev held the disks back from systemd while one was missing; the kernel
 	// now counts the volume complete, so udev releases them.
 	if output, err := e.runner.Run(ctx, "udevadm", append([]string{"trigger", "--action=change"}, members...), ""); err != nil {
@@ -185,13 +170,54 @@ func (e *Executor) MountDegraded(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+// mountGaveUp reports whether systemd tried to mount the volume and gave up:
+// the mount unit failed, or it has not been active since boot, as when its
+// disks did not all appear in time. A volume that was mounted and then
+// stopped, as an administrator does for maintenance, does not count, unless
+// what systemd last saw mounted was the Host Agent's own probe.
+func (e *Executor) mountGaveUp(ctx context.Context) (bool, error) {
+	output, err := e.runner.Output(ctx, "systemctl", []string{"show", "--property=ActiveState", "--property=ActiveEnterTimestampMonotonic", e.mountUnitName}, "")
+	if err != nil {
+		return false, commandError("systemctl show failed", err, output)
+	}
+	properties := make(map[string]string)
+	for line := range strings.SplitSeq(string(output), "\n") {
+		if key, value, found := strings.Cut(strings.TrimSpace(line), "="); found {
+			properties[key] = value
+		}
+	}
+	switch properties["ActiveState"] {
+	case "failed":
+		return true, nil
+	case "inactive":
+		return properties["ActiveEnterTimestampMonotonic"] == "0" || e.unmountedProbe, nil
+	default:
+		return false, nil
+	}
+}
+
+// probeLeftMounted reports whether the volume at the mount point is a probe
+// the Host Agent mounted read-only: read-only per mount and degraded, unlike
+// a volume Btrfs turned read-only after an error, which stays mounted rw.
+func (e *Executor) probeLeftMounted(ctx context.Context) bool {
+	output, err := e.runner.Output(ctx, "findmnt", []string{"--noheadings", "--output", "VFS-OPTIONS,FS-OPTIONS", "--mountpoint", e.mountPoint}, "")
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(string(output))
+	return len(fields) == 2 && slices.Contains(strings.Split(fields[0], ","), "ro") && slices.Contains(strings.Split(fields[1], ","), "degraded")
+}
+
 // volumeMembers are the partitions the kernel can see with the filesystem
 // UUID.
 func (e *Executor) volumeMembers(ctx context.Context, uuid string) ([]string, error) {
 	output, err := e.runner.Output(ctx, "blkid", []string{"--cache-file", "/dev/null", "--match-token", "UUID=" + uuid, "--output", "device"}, "")
-	if err != nil {
-		// blkid exits 2 when nothing matches.
+	// blkid exits 2 when no device matches.
+	if exitCode(err) == 2 {
 		return nil, nil
+	}
+	if err != nil {
+		return nil, commandError("blkid failed", err, output)
 	}
 	var members []string
 	for line := range strings.SplitSeq(string(output), "\n") {
@@ -202,22 +228,31 @@ func (e *Executor) volumeMembers(ctx context.Context, uuid string) ([]string, er
 	return members, nil
 }
 
+// exitCode is the exit status of a command that ran and failed, or -1.
+func exitCode(err error) int {
+	var coded interface{ ExitCode() int }
+	if errors.As(err, &coded) {
+		return coded.ExitCode()
+	}
+	return -1
+}
+
 // RestoringRedundancy reports whether the data volume ran without a disk and
-// has not been checked since: data written meanwhile has one copy.
+// has not been checked since: data written meanwhile has one copy. It does
+// not wait for a mount in progress: the host state asks on every read.
 func (e *Executor) RestoringRedundancy() bool {
-	e.degradedMu.Lock()
-	defer e.degradedMu.Unlock()
-	return e.degraded != nil
+	return e.restoring.Load()
 }
 
 // RestoreRedundancy finishes a period without a disk once the volume has all
 // its disks again: after the conversion check turned what was written with
 // one copy back into a mirror, a scrub rewrites what the returning disk
-// missed, and the record is dropped. It reports whether a scrub started.
+// missed, and the record is dropped. It reports whether a scrub started. A
+// scrub that stopped is tried again after scrubRetry.
 func (e *Executor) RestoreRedundancy(ctx context.Context) (bool, error) {
 	e.degradedMu.Lock()
 	defer e.degradedMu.Unlock()
-	if e.degraded == nil || e.scrubbing || !e.dataVolumeReady() {
+	if e.degraded == nil || e.scrubbing || e.now().Before(e.scrubRetryAt) || !e.dataVolumeReady() {
 		return false, nil
 	}
 	marker, err := e.readMarker()
@@ -242,20 +277,36 @@ func (e *Executor) RestoreRedundancy(ctx context.Context) (bool, error) {
 	//nolint:gosec // G118: a scrub runs for hours and outlives the check that starts it; scrubbing tracks it.
 	go func() {
 		output, err := e.runner.Run(context.Background(), "btrfs", []string{"scrub", "start", "-B", e.mountPoint}, "")
-		e.degradedMu.Lock()
-		defer e.degradedMu.Unlock()
-		e.scrubbing = false
-		if err != nil {
-			e.logger.Error("data-volume scrub stopped; the next check starts it again", "error", commandError("btrfs scrub", err, output))
-			return
-		}
-		if err := e.saveDegraded(nil); err != nil {
-			e.logger.Error("could not drop the record of running without a disk", "error", err)
-			return
-		}
-		e.logger.Info("the data volume has its redundancy back")
+		e.finishScrub(output, err)
 	}()
 	return true, nil
+}
+
+// scrubRetry is how long a scrub that stopped waits before the next one.
+const scrubRetry = 6 * time.Hour
+
+// finishScrub ends a period without a disk once its scrub has run. A scrub
+// that found what neither copy could repair (btrfs exits 3) has still done
+// all it can: the record goes, and the damage shows as Btrfs errors in the
+// system health. One that stopped, at a shutdown or on a read error, runs
+// again after scrubRetry, not at every check.
+func (e *Executor) finishScrub(output []byte, err error) {
+	e.degradedMu.Lock()
+	defer e.degradedMu.Unlock()
+	e.scrubbing = false
+	switch {
+	case exitCode(err) == 3:
+		e.logger.Error("the data-volume scrub found data neither copy could repair; the kernel log names the files", "error", commandError("btrfs scrub", err, output))
+	case err != nil:
+		e.scrubRetryAt = e.now().Add(scrubRetry)
+		e.logger.Error("data-volume scrub stopped; it runs again later", "retry_at", e.scrubRetryAt, "error", commandError("btrfs scrub", err, output))
+		return
+	}
+	if err := e.saveDegraded(nil); err != nil {
+		e.logger.Error("could not drop the record of running without a disk", "error", err)
+		return
+	}
+	e.logger.Info("the data volume has its redundancy back")
 }
 
 // saveDegraded writes the record, or removes it for nil. Callers hold
@@ -266,6 +317,7 @@ func (e *Executor) saveDegraded(record *degradedRecord) error {
 			return fmt.Errorf("remove the record of running without a disk: %w", err)
 		}
 		e.degraded = nil
+		e.restoring.Store(false)
 		return nil
 	}
 	contents, err := json.Marshal(record)
@@ -276,6 +328,7 @@ func (e *Executor) saveDegraded(record *degradedRecord) error {
 		return fmt.Errorf("record running without a disk: %w", err)
 	}
 	e.degraded = record
+	e.restoring.Store(true)
 	return nil
 }
 
@@ -295,6 +348,7 @@ func (e *Executor) loadDegraded() error {
 		return errors.New("the record of running without a disk is invalid")
 	}
 	e.degraded = &record
+	e.restoring.Store(true)
 	return nil
 }
 
@@ -320,9 +374,10 @@ func (e *Executor) replaceDisk(ctx context.Context, operation *volumeOperation) 
 	root := os.DirFS(e.systemRoot)
 	target := operation.Disks[0]
 	joined := slices.ContainsFunc(mounted.DiskIDs, func(id hoststate.ResourceID) bool { return id.String() == target.DiskID })
-	if !joined && !e.replacing(root, uuid) {
+	rebuilding := e.replacing(root, uuid)
+	if !joined && !rebuilding {
 		var missing []uint64
-		for _, device := range readBtrfsDevices(root, uuid) {
+		for _, device := range linuxhoststate.ReadBtrfsDevices(root, uuid) {
 			if device.Missing {
 				missing = append(missing, device.ID)
 			}
@@ -339,18 +394,32 @@ func (e *Executor) replaceDisk(ctx context.Context, operation *volumeOperation) 
 			return datavolume.Volume{}, err
 		}
 		e.enter(operation, datavolume.StepReplace)
+		// The degraded mount keeps a balance paused at shutdown from running
+		// on one disk, but a paused balance blocks the rebuild. Cancelling it
+		// loses nothing: the conversion check redoes what is left.
+		if e.balancePaused(root, uuid) {
+			if output, err := e.runner.Run(ctx, "btrfs", []string{"balance", "cancel", e.mountPoint}, ""); err != nil {
+				return datavolume.Volume{}, commandError("btrfs balance cancel failed", err, output)
+			}
+		}
 		start := []string{"replace", "start", strconv.FormatUint(missing[0], 10), devices[0].PartitionPath, e.mountPoint}
 		if output, err := e.runner.Run(ctx, "btrfs", start, ""); err != nil {
 			return datavolume.Volume{}, commandError("btrfs replace start failed", err, output)
 		}
+		rebuilding = true
 	} else {
 		e.enter(operation, datavolume.StepReplace)
 	}
-	if err := e.awaitReplace(ctx, operation); err != nil {
-		return datavolume.Volume{}, err
+	// A disk that joined with no rebuild running was rebuilt before a
+	// restart cut the Host Agent off; after a reboot btrfs reports such a
+	// rebuild as never started, so there is nothing to wait for.
+	if rebuilding {
+		if err := e.awaitReplace(ctx, operation); err != nil {
+			return datavolume.Volume{}, err
+		}
 	}
 	// The new disk may be larger than the one it replaced.
-	for _, device := range readBtrfsDevices(root, uuid) {
+	for _, device := range linuxhoststate.ReadBtrfsDevices(root, uuid) {
 		resize := []string{"filesystem", "resize", strconv.FormatUint(device.ID, 10) + ":max", e.mountPoint}
 		if output, err := e.runner.Run(ctx, "btrfs", resize, ""); err != nil {
 			e.logger.WarnContext(ctx, "the data volume did not grow onto the whole new disk", "error", commandError("btrfs filesystem resize", err, output))
@@ -380,8 +449,22 @@ func (e *Executor) replaceDisk(ctx context.Context, operation *volumeOperation) 
 
 // replacing reports whether Btrfs rebuilds a disk of the filesystem now.
 func (e *Executor) replacing(root fs.FS, uuid string) bool {
+	return exclusiveOperation(root, uuid) == "device replace"
+}
+
+// balancePaused reports whether a balance of the filesystem waits paused.
+func (e *Executor) balancePaused(root fs.FS, uuid string) bool {
+	return exclusiveOperation(root, uuid) == "balance paused"
+}
+
+// exclusiveOperation is the operation Btrfs runs exclusively on the
+// filesystem, as sysfs names it.
+func exclusiveOperation(root fs.FS, uuid string) string {
 	contents, err := fs.ReadFile(root, "sys/fs/btrfs/"+uuid+"/exclusive_operation")
-	return err == nil && strings.TrimSpace(string(contents)) == "device replace"
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(contents))
 }
 
 // awaitReplace follows a rebuild until it finishes, recording its progress.
@@ -409,7 +492,10 @@ func (e *Executor) awaitReplace(ctx context.Context, operation *volumeOperation)
 	}
 }
 
-// parseReplaceStatus reads one line of "btrfs replace status -1": while it
+// parseReplaceStatus reads one line of "btrfs replace status -1". It parses
+// text because nothing better exists: btrfs-progs 6.14 has no machine-readable
+// output for replace status (--format json is refused), and its ioctl would
+// need a binary parser of the kernel's struct instead. While the rebuild
 // runs "28.2% done, 0 write errs, 0 uncorr. read errs", then "Started on
 // <time>, finished on <time>, ...", or "... canceled on ..." and "Never
 // started" when there is nothing to wait for.
