@@ -1,6 +1,6 @@
 # 测试与验证
 
-更新时间：2026-11-06
+更新时间：2026-11-10
 
 本文维护检查目标、测试依赖与覆盖范围。机器配置从[开发环境入口](LOCAL_ENVIRONMENT.md)选择；变更需要执行哪些检查，以 [AGENTS.md](../../AGENTS.md#验证) 为准。
 
@@ -79,6 +79,9 @@ npm run dev
 | `make ai-lint` | Ruff 检查 `ai/`，规则与理由见 `ai/ruff.toml`；`ai/requirements-dev.txt` 按哈希固定版本，`PATH` 上的 `ruff` 版本不同即失败。Ruff 在 WSL 中不检查可执行位（EXE001/EXE002），这两条只在 CI 报出：Python 文件在 Git 中是 0644，不写 shebang |
 | `make docs-check` | [`tools/doccheck`](../../tools/doccheck/main.go) 按[文档的写入规则](../README.md#写入规则)核对状态与索引；再由 lychee 离线检查每个受 Git 跟踪的 `*.md` 中的链接：目标文件存在，指向 Markdown 的锚点对应真实的标题。lychee 的版本由 Makefile 的 `LYCHEE_VERSION` 固定（不同版本生成标题锚点的规则不同），CI 按哈希安装同一版本 |
 | `make ops-check` | 对每个受 Git 跟踪的 `*.sh` 运行 ShellCheck（`.shellcheckrc`）与 `bash -n`；用 actionlint 校验 `.github/workflows`，其中 `run:` 脚本也经 ShellCheck，版本由 `tools/actionlint/go.mod` 固定，首次运行经 `go tool` 构建；由 `tools/depcheck` 确认 Dependabot 不把 0.x 的 Web 包放进分组，再核对单元与安装器的约定；ShellCheck 的版本由 Makefile 的 `SHELLCHECK_VERSION` 固定（不同版本判断不同），CI 按哈希安装同一版本 |
+| `make vendor-check` | [`scripts/check-dsh-pet-vendor.sh`](../../scripts/check-dsh-pet-vendor.sh) 离线核对复制进来的 dsh-pet：清单的池等于 `install-media-pool.sh` 固定的池与 README 记录的池，README 列出的补丁与补丁目录一致，每个复制文件的文件头写着固定的提交。给 `DSH_PET=<检出>`（可再给 `DSH_PET_MOV_ZIP=<zip>`）时在临时目录重新引入、要求没有差异，并确认改过的检出被拒绝；重新引入要装有 json5 的 Python，开发机 B 上给 `VENDOR_PYTHON=~/.local/opt/ai-tools/bin/python`。CI 没有检出与 zip，只运行离线部分并打印 SKIP，完整检查是提里程碑或升级前的本地步骤，见[虚拟伙伴](../specs/virtual-companion.md#验收证据) |
+
+`make check` 另运行 `make ai-sdk-test`：在 `build/companion-mcp-sdk` 里按 [`ai/assistant-spike/companion-mcp-sdk.txt`](../../ai/assistant-spike/companion-mcp-sdk.txt) 带哈希装 Hermes 锁定的 MCP SDK（首次运行从 PyPI 下载），在真实 SDK 下运行伙伴的 MCP 服务器测试；缺 SDK 即失败，不跳过。
 
 lychee 从发布页下载，核对 SHA-256（与 CI 中的一致）后放进 `PATH`：
 
