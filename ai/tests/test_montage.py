@@ -102,6 +102,14 @@ class RenderTest(unittest.TestCase):
         plain = render.part_args("a.webm", 10, 13, True, "out.mkv")
         self.assertNotIn("fade=t=out:st", plain[plain.index("-filter_complex") + 1].split(";")[0])
 
+    def test_a_slowed_part_is_drawn_out_and_silent(self):
+        args = render.part_args("a.webm", 10, 12, True, "out.mkv", render.ENDING_FADE, 2.5)
+        self.assertEqual(args[args.index("a.webm") - 4:args.index("a.webm")], ["10.000", "-t", "2.000", "-i"])
+        graph = args[args.index("-filter_complex") + 1]
+        self.assertIn("setpts=2.5*PTS,fps=30,trim=duration=5.000", graph)
+        self.assertIn("fade=t=out:st=4.000:d=1.000[x]", graph)
+        self.assertTrue(graph.split(";")[1].startswith("anullsrc="))
+
     def test_a_part_without_sound_gets_silence_of_its_length(self):
         graph = render.part_args("b.mp4", 0, 3, False, "out.mkv")
         graph = graph[graph.index("-filter_complex") + 1].split(";")[1]

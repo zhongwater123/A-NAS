@@ -60,7 +60,8 @@ def ffmpeg_args(images: list[str], seconds: float, crossfade: bool, output: str)
     return [*args, "-filter_complex", ";".join(graph), "-map", f"[{last}]", "-t", f"{total:g}", *_encode(output)]
 
 
-def part_args(video: str, start: float, end: float, heard: bool, output: str, ending: float = 0.0) -> list[str]:
+def part_args(video: str, start: float, end: float, heard: bool, output: str, ending: float = 0.0,
+              slow: float = 1.0) -> list[str]:
     """The FFmpeg command for one (video, start, end) clip, cut with an accurate seek, as a part to join.
 
     The picture is brought to one size and rate, so that parts from sources of
@@ -69,21 +70,24 @@ def part_args(video: str, start: float, end: float, heard: bool, output: str, en
     none: brought to one rate and stereo, padded or cut to the clip's length so
     that picture and sound stay aligned, faded at both ends, and kept as PCM, so
     that joining adds no encoder delay between parts. With ending, picture and sound fade
-    out over that many last seconds (at most half the clip).
+    out over that many last seconds (at most half the clip). Slowed (slow > 1), the clip plays that many
+    times as long and carries silence (a music cut's ending shot drawn out to fill its slot).
     """
-    length = end - start
+    length = (end - start) * slow
+    heard = heard and slow == 1
     # first_pts=0 keeps sound that starts late after the seek where it was, instead of pulling it forward.
     source = f"[0:a]aresample={RATE}:async=1:first_pts=0," if heard else f"anullsrc=r={RATE}:cl=stereo,"
     fade = min(SOUND_FADE, length / 4)
     out = min(ending, length / 2) if ending else fade
     picture = f",fade=t=out:st={length - out:.3f}:d={out:.3f}" if ending else ""
     turn = "hflip,vflip," if video in TURNED_BACK else ""
-    graph = (f"[0:v]{turn}{FIT},fps={FPS},trim=duration={length:.3f},setpts=PTS-STARTPTS{picture}[x];"
+    stretch = f"setpts={slow:g}*PTS," if slow != 1 else ""
+    graph = (f"[0:v]{turn}{FIT},{stretch}fps={FPS},trim=duration={length:.3f},setpts=PTS-STARTPTS{picture}[x];"
              f"{source}aformat=sample_fmts=fltp:sample_rates={RATE}:channel_layouts=stereo,apad,"
              f"atrim=duration={length:.3f},afade=t=in:d={fade:.3f},"
              f"afade=t=out:st={length - out:.3f}:d={out:.3f},asetpts=PTS-STARTPTS[s]")
     return ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-n",
-            "-ss", f"{start:.3f}", "-t", f"{length:.3f}", "-i", video, "-filter_complex", graph,
+            "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", video, "-filter_complex", graph,
             "-map", "[x]", "-map", "[s]", *VIDEO, "-c:a", "pcm_s16le", "-f", "matroska", output]
 
 
@@ -112,24 +116,24 @@ def render(images: list[str], seconds: float, crossfade: bool, output_dir: str) 
     return _write(lambda partial: _run(ffmpeg_args(images, seconds, crossfade, partial)), output_dir, "slideshow")
 
 
-def render_clips(clips: list[tuple[str, float, float]], output_dir: str, ending: bool = False) -> str:
-    """Like render, for video clips: each is encoded on its own, then the parts are joined.
-    With ending, the last clip fades to black (ENDING_FADE).
+def render_clips(clips: list[tuple], output_dir: str, ending: bool = False) -> str:
+    """Like render, for video clips (video, start, end), or (video, start, end, slow) for a slowed one: each is
+    encoded on its own, then the parts are joined. With ending, the last clip fades to black (ENDING_FADE).
 
     One clip at a time keeps one decoder in memory: a 4K source opened once per
     clip in a single command held a decoder for every clip and passed 3.4 GiB
     (#350, twelve clips of a 4K film).
     """
-    heard = {video: has_sound(video) for video, _s, _e in clips}
+    heard = {clip[0]: has_sound(clip[0]) for clip in clips}
 
     def make(partial):
         with tempfile.TemporaryDirectory(dir=output_dir) as work:
             listing = os.path.join(work, "parts.txt")
             with open(listing, "w", encoding="utf-8") as file:
-                for i, (video, start, end) in enumerate(clips):
+                for i, (video, start, end, *slow) in enumerate(clips):
                     part = os.path.join(work, f"{i:03d}.mkv")
                     _run(part_args(video, start, end, heard[video], part,
-                                   ENDING_FADE if ending and i == len(clips) - 1 else 0.0))
+                                   ENDING_FADE if ending and i == len(clips) - 1 else 0.0, *slow))
                     file.write("file '" + part.replace("'", "'\\''") + "'\n")
             _run(join_args(listing, partial))
 

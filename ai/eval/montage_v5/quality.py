@@ -30,11 +30,12 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # ai/, for montage
 import cut
+import held
 from paths import read_json, write_json
 
 SHAKE_FPS, SHAKE_SIZE, SMOOTH = 10, (320, 180), 5
-GRID, BLOCK = (256, 144), 16
-SOFT, FILLED, BLACK = 6.0, 0.6, 35
+GRID = held.GRID
+FILLED, BLACK = 0.6, 35       # held.SOFT and held.BLOCK make a block soft
 
 
 def blur(frame):
@@ -82,30 +83,15 @@ def blocked(frame):
     """The share of the frame a soft patch from the bottom covers (see the module's doc); 0 for none."""
     w, h = GRID
     g = np.asarray(Image.open(frame).convert("L").resize((w, h)), dtype=np.float32)
-    lap = np.pad(np.abs(4 * g[1:-1, 1:-1] - g[:-2, 1:-1] - g[2:, 1:-1] - g[1:-1, :-2] - g[1:-1, 2:]), 1)
-    rows, cols = h // BLOCK, w // BLOCK
-    tiles = lap.reshape(rows, BLOCK, cols, BLOCK).transpose(0, 2, 1, 3).reshape(rows, cols, -1)
-    soft = np.percentile(tiles, 95, axis=2) < SOFT
-    light = g.reshape(rows, BLOCK, cols, BLOCK).mean(axis=(1, 3))
-    seen, best = np.zeros_like(soft), 0.0
-    for r0 in range(rows):
-        for c0 in range(cols):
-            if not soft[r0, c0] or seen[r0, c0]:
-                continue
-            seen[r0, c0], todo, patch = True, [(r0, c0)], []
-            while todo:
-                y, x = todo.pop()
-                patch.append((y, x))
-                for yy, xx in ((y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)):
-                    if 0 <= yy < rows and 0 <= xx < cols and soft[yy, xx] and not seen[yy, xx]:
-                        seen[yy, xx] = True
-                        todo.append((yy, xx))
-            ys, xs = [y for y, _ in patch], [x for _, x in patch]
-            share = len(patch) / soft.size
-            fill = len(patch) / ((max(ys) - min(ys) + 1) * (max(xs) - min(xs) + 1))
-            dark = float(np.mean([light[y, x] for y, x in patch])) < BLACK
-            if max(ys) == rows - 1 and fill >= FILLED and not dark:
-                best = max(best, share)
+    soft = held.soft_blocks(g)
+    light = g.reshape(h // held.BLOCK, held.BLOCK, w // held.BLOCK, held.BLOCK).mean(axis=(1, 3))
+    best = 0.0
+    for patch in held.patches(soft):
+        ys, xs = [y for y, _ in patch], [x for _, x in patch]
+        fill = len(patch) / ((max(ys) - min(ys) + 1) * (max(xs) - min(xs) + 1))
+        dark = float(np.mean([light[y, x] for y, x in patch])) < BLACK
+        if max(ys) == soft.shape[0] - 1 and fill >= FILLED and not dark:
+            best = max(best, len(patch) / soft.size)
     return round(best, 2)
 
 

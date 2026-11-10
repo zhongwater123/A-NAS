@@ -36,6 +36,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # ai/, for montage
+import held
 from paths import B_DIR, CARDS, CUTS as HERE, V5, read_json, write_json
 
 from montage import look, moments, render
@@ -917,6 +918,7 @@ def cut(case):
 
 
 PIECE_LEAST = 1.5    # seconds: no shot of a music cut shorter, the slots' and the fills'
+SLOW_MOST = 2.5      # times: the ending shot drawn out at most this much to fill its slot
 # Sources tagged upside down over upright pixels (V5/rotation.json), turned back in every render of this
 # module, narrative or music: set once here, not per cut, so no cut can miss them.
 ROTATION = {k: set(v) for k, v in read_json(V5 / "rotation.json").items() if k != "about"} if (V5 / "rotation.json").exists() else {}
@@ -935,6 +937,7 @@ def cut_to_music(case):
     planned = reused(HERE / f"shots-{case}{TAG}.json", case)
     picked = reused(HERE / f"pick-{case}{TAG}.json", case)["answer"]
     fps = render.FPS
+    spans = held.Spans(HERE / f"held-{case}.json")
     # A slot its picture's cards cannot fill (川西's opening stream, ch-001, is 2.3 s against a 3.2 s
     # slot) is filled on from the cards next to them in shooting order, the next first: a slot short of
     # its frames moves every later cut off the bar lines.
@@ -954,9 +957,15 @@ def cut_to_music(case):
         return [f"{cid}/{n}" for cid in out for n in range(1, len(cards[cid]["answer"]["beats"]) + 1)]
 
     clips, taken, short = [], [], []
+    many = len(planned["answer"]["parts"])
     for p, (part, step1, slots_p) in enumerate(zip(planned["answer"]["parts"], picked["parts"], planned["slots"], strict=True), 1):
         level = m["parts"][p - 1]["level"]
         for k, (pic, slots) in enumerate(zip(part["pictures"], slots_p, strict=True), 1):
+            # The ending picture's chosen beat closes the cut: its slots are filled from the last, so that beat
+            # takes the final slot, and what fills the rest of that slot goes before it (新西兰 fortnight-6
+            # ended on two neighbours after its starry-sky ending, ne-154, held 2 s of a 5 s slot).
+            ending = p == many and k == len(part["pictures"])
+            mine = len(clips)
             listed = [b for b in dict.fromkeys(pic["beats"]) if b.rsplit("/", 1)[0] in cards]
             pool = [f"{cid}/{n}" for cid in dict.fromkeys(b.rsplit("/", 1)[0] for b in listed)
                     for n in range(1, len(cards[cid]["answer"]["beats"]) + 1)]
@@ -966,7 +975,7 @@ def cut_to_music(case):
                 pool.sort(key=lambda b: abs(cards[b.rsplit("/", 1)[0]]["times"][int(b.rsplit("/", 1)[1]) - 1] - anchor))
             order = listed + [b for b in pool if b not in listed]
             order += neighbours(list(dict.fromkeys(b.rsplit("/", 1)[0] for b in order)))
-            for a, b in slots:
+            for a, b in reversed(slots) if ending else slots:
                 need, first = round(b * fps) - round(a * fps), True
                 for beat in order:
                     if need <= 0:
@@ -975,44 +984,63 @@ def cut_to_music(case):
                     c = cards[cid]
                     # The key frame (what the description saw) a third into the shot, not at its start.
                     seen = c["times"][int(j) - 1]
-                    start = max(c["start"], seen - need / fps / 3)
                     if any(v == cid and x - 0.01 <= seen < y - 0.01 for v, x, y in taken):
                         continue
+                    # Only the stretch around the key frame that nothing passes in front of (held.py).
+                    file = str(VIDEOS / ix.videos[c["video"]]["file"])
+                    lo, hi = spans.get(beat, file, seen, max(c["start"], seen - need / fps), min(c["end"], seen + need / fps),
+                                       file in render.TURNED_BACK)
+                    start = max(lo, seen - need / fps / 3)
                     start = max([start] + [y for v, _x, y in taken if v == cid and y <= seen + 0.01])
-                    room = min([c["end"]] + [x for v, x, _y in taken if v == cid and x > start])
+                    room = min([hi] + [x for v, x, _y in taken if v == cid and x > start])
                     frames = min(need, int((room - start) * fps))
+                    slow = 1.0
                     if frames < need and first:      # one beat for the whole slot: start earlier in the card
-                        earliest = max([c["start"]] + [y for v, _x, y in taken if v == cid and y <= start + 0.01])
+                        earliest = max([lo] + [y for v, _x, y in taken if v == cid and y <= start + 0.01])
                         if room - earliest >= need / fps:
                             start, frames = room - need / fps, need
                         else:
                             start, frames = earliest, min(need, int((room - earliest) * fps))
+                    shown = frames
+                    if ending and first and a == slots[-1][0] and 0 < frames < need:
+                        # The ending's own beat, too short for the cut's last slot: drawn out (a still or a far
+                        # view hardly shows it), not followed by its neighbours (ne-154's 2 s of a starry sky in a
+                        # 5 s slot came after a coach and a helicopter).
+                        shown = min(need, int(frames * SLOW_MOST))
+                        slow = shown / frames
                     # No piece under PIECE_LEAST (a 0.3 s flash of the next card): a piece that would leave less
                     # than that gives some of its own seconds to the piece after it.
                     least = round(PIECE_LEAST * fps)
-                    if frames < need and need - frames < least and frames - (least - (need - frames)) >= least:
-                        frames -= least - (need - frames)
-                    if frames < min(need, least):
+                    if shown < need and need - shown < least and shown - (least - (need - shown)) >= least:
+                        shown -= least - (need - shown)
+                        frames = min(frames, shown)
+                        slow = shown / frames
+                    if shown < min(need, least):
                         continue
                     end = start + frames / fps
                     clips.append({"card": cid, "beats": [int(j)], "start": start, "end": end, "video": c["video"],
                                   "key": c["times"][int(j) - 1], "part": p, "partName": part["name"], "picture": k,
                                   "level": level, "slot": [a, b], "query": step1["scenes"][k - 1]["query"],
-                                  "shows": pic["shows"], "link": pic["link"], "share": round(frames / fps, 3)})
+                                  "shows": pic["shows"], "link": pic["link"], "share": round(shown / fps, 3)}
+                                 | ({"slow": round(slow, 3)} if slow != 1 else {}))
                     taken.append((cid, start, end))
-                    need -= frames
+                    need -= shown
                     first = False
                 if need > 0:
                     short.append((p, k, a, b, need))
+            if ending and len(clips) > mine:
+                last = clips[mine]       # the final slot's first piece: the chosen beat; its fills in shooting order
+                rest = sorted(clips[mine + 1:], key=lambda c: (c["slot"][0], catalog.index(c["card"]) if c["slot"] == last["slot"] and c["card"] in catalog else 0))
+                clips[mine:] = [*rest, last]
     for c in clips:
         beats = cards[c["card"]]["answer"]["beats"]
         c |= {"beat": f"{c['card']}/{c['beats'][0]}", "frame": cards[c["card"]]["frames"][c["beats"][0] - 1],
               "shotSize": beats[c["beats"][0] - 1]["shot_size"], "what": beats[c["beats"][0] - 1]["what"],
               "weight": f"画面{c['picture']}"}
     t0 = time.perf_counter()
-    made = render.render_clips([(str(VIDEOS / ix.videos[c["video"]]["file"]), c["start"], c["end"]) for c in clips],
-                               str(HERE), ending=True)
-    seconds = sum(c["end"] - c["start"] for c in clips)
+    made = render.render_clips([(str(VIDEOS / ix.videos[c["video"]]["file"]), c["start"], c["end"], c.get("slow", 1.0))
+                                for c in clips], str(HERE), ending=True)
+    seconds = sum((c["end"] - c["start"]) * c.get("slow", 1.0) for c in clips)
     final = HERE / f"{case}-{name}-第六版{TAG}.mp4"
     start = m["excerpt"][0]
     subprocess.run(["ffmpeg", "-hide_banner", "-v", "error", "-y", "-i", made, "-ss", f"{start:.3f}", "-t", f"{seconds:.3f}",  # noqa: S607
