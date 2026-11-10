@@ -275,6 +275,46 @@ describe("a clip of the chain that does not come", () => {
     expect(c.loads.map((load) => load.clip)).toEqual(["待机呼吸休闲", "点击回应-元气挥手"]);
   });
 
+  it("is not fetched again while the card is frozen, and is once the freeze ends", () => {
+    const c = chain();
+    c.play("待机呼吸休闲");
+    c.loads[0].handlers.onError(new TypeError("Failed to fetch"));
+    // A lock or the page's pause freezes the card before the wait is over.
+    c.anim.setFrozen(true);
+    vi.advanceTimersByTime(60_000);
+    expect(c.loads).toHaveLength(1);
+    expect(c.ended).toEqual([]);
+    c.anim.setFrozen(false);
+    vi.advanceTimersByTime(999);
+    expect(c.loads).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(c.loads.map((load) => load.clip)).toEqual(["待机呼吸休闲", "待机呼吸休闲"]);
+  });
+
+  it("does not go on while the card is frozen, and does once the freeze ends", () => {
+    const c = chain();
+    c.play("点击回应-元气挥手", true, "pb-5");
+    c.loads[0].handlers.onError(new TypeError("Failed to fetch"));
+    c.anim.setFrozen(true);
+    vi.advanceTimersByTime(60_000);
+    expect(c.ended).toEqual([]);
+    c.anim.setFrozen(false);
+    vi.advanceTimersByTime(1_000);
+    expect(c.ended).toEqual([{ kind: "interaction-done" }]);
+  });
+
+  it("is not fetched again when the card's resume switches to another clip", () => {
+    const c = chain();
+    c.play("待机呼吸休闲");
+    c.loads[0].handlers.onError(new TypeError("Failed to fetch"));
+    c.anim.setFrozen(true);
+    vi.advanceTimersByTime(1_000);
+    c.anim.setFrozen(false);
+    c.play("点击回应-元气挥手");
+    vi.advanceTimersByTime(60_000);
+    expect(c.loads.map((load) => load.clip)).toEqual(["待机呼吸休闲", "点击回应-元气挥手"]);
+  });
+
   it("is not fetched again once another switch took over", () => {
     const c = chain();
     c.play("待机呼吸休闲");
