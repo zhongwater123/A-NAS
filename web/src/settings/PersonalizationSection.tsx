@@ -2,7 +2,6 @@ import { Clapperboard, ImagePlus, Monitor, Moon, RotateCcw, Scaling } from "luci
 import { useEffect, useState } from "react";
 
 import type { LocalDisplay, Wallpaper, WallpaperStyle } from "../api.generated";
-import { COMPANION_CREDIT } from "../companion/credit";
 import { readLocalDisplay, resetWallpaper, updateLocalDisplay, updateWallpaperStyle } from "../desktop/api";
 import { localConsoleScreenSaverIdleMs } from "../desktop/LocalConsoleScreenSaver";
 import { publishWallpaper, useWallpaper, wallpaperPicture } from "../desktop/wallpaper";
@@ -49,18 +48,7 @@ export function PersonalizationSection() {
       )}
       <WallpaperGroup onError={setError} />
       <LocalScreenGroup onError={setError} />
-      <CompanionCredit />
     </>
-  );
-}
-
-// CompanionCredit names the desktop companion's makers and licence, which the licence asks for; the
-// companion itself shows only its name.
-function CompanionCredit() {
-  return (
-    <p className={styles.setFootnote}>
-      <strong>桌面伙伴</strong> {COMPANION_CREDIT}
-    </p>
   );
 }
 

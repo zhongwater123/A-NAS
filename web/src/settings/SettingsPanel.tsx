@@ -49,6 +49,7 @@ import { displayName, fullName, usePeople } from "../people/people";
 import { AvatarDialog } from "./AvatarDialog";
 import { createMember, disableMember, listUsers, resetMember, startViewing, ViewingScope } from "./api";
 import { DeviceTemperatures } from "./DeviceTemperatures";
+import { CompanionCredit } from "./CompanionCredit";
 import { describeFinding } from "./health";
 import { HostStateBanner, HostStatePending } from "./hostState";
 import { type LogsPreset, LogsSection } from "./logs/LogsSection";
@@ -613,6 +614,7 @@ function OverviewSection({
       <>
         {header}
         <HostStatePending host={host} />
+        <CompanionCredit />
       </>
     );
   const totalCapacity = snapshot.disks.reduce((sum, disk) => sum + disk.capacityBytes, 0);
@@ -715,6 +717,7 @@ function OverviewSection({
         <InfoRow label="设备标识" value={<span className={styles.setMono}>{snapshot.system.id}</span>} />
         <InfoRow label="最近观测" value={formatTime(snapshot.observedAt)} />
       </Group>
+      <CompanionCredit />
     </>
   );
 }

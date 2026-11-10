@@ -19,7 +19,7 @@
 // What is A-NAS's own: the companion stops while the member is away (a pause, not sleep),
 // remembers where it was left on this device, curtsies when the member stops a turn here,
 // waves at a new result of a scheduled task, and shows beside its head that VNAS is at work
-// (companion.module.css). The character's credit is in Settings → 个性化 (credit.ts), not on
+// (companion.module.css). The character's credit is in Settings → 概览 (credit.ts), not on
 // the companion.
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { jsx } from "react/jsx-runtime";

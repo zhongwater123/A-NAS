@@ -115,7 +115,7 @@ describe("the companion on the desktop", () => {
   it("plays 大肥鱼 with dsh-pet's card, without a hover credit, and follows what VNAS is doing", async () => {
     serve([IDLE, "东张西望", "工作状态-忙碌点按", "工作状态-原地踱步张望", "工作状态-雀跃庆祝"]);
     const { view, pet } = await mount();
-    // The credit is in Settings → 个性化: hovering the pet shows only dsh-pet's tooltip with its name.
+    // The credit is in Settings → 概览: hovering the pet shows only dsh-pet's tooltip with its name.
     expect(pet.closest("[title]")).toBeNull();
     // Out of the desktop VNAS reads (AssistantPanel's exclude): VNAS has its own tools for the companion.
     const layer = pet.closest("[data-vnas-overlay]") as HTMLElement;

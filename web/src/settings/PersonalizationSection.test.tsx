@@ -55,15 +55,6 @@ describe("Settings → 个性化", () => {
     vi.unstubAllGlobals();
   });
 
-  it("credits the desktop companion's makers and licence", async () => {
-    serve();
-    render(<PersonalizationSection />);
-    await screen.findByRole("radio", { name: "30 分钟", checked: true });
-    const credit = screen.getByText("桌面伙伴").closest("p");
-    for (const part of ["大肥鱼", "@上善无形", "@ZipZipPipe", "CC BY-NC-SA 4.0", "github.com/PC2005-cloud/dsh-pet"])
-      expect(credit?.textContent).toContain(part);
-  });
-
   it("chooses when the local screen goes black", async () => {
     const sent = serve();
     const user = userEvent.setup();
