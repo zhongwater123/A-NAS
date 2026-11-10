@@ -17,9 +17,10 @@
 //   animation a VNAS command asked for settles the command (commands.ts).
 //
 // What is A-NAS's own: the companion stops while the member is away (a pause, not sleep),
-// remembers where it was left on this device, curtsies when the member stops a turn here, and
-// waves at a new result of a scheduled task. The character's credit is in Settings → 个性化
-// (credit.ts), not on the companion.
+// remembers where it was left on this device, curtsies when the member stops a turn here,
+// waves at a new result of a scheduled task, and shows beside its head that VNAS is at work
+// (companion.module.css). The character's credit is in Settings → 个性化 (credit.ts), not on
+// the companion.
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { jsx } from "react/jsx-runtime";
 
@@ -28,12 +29,14 @@ import { localConsoleCovered } from "../desktop/LocalConsoleScreenSaver";
 import { companionPhysics, companionWeights, installedAnimations, workStatusTexts } from "./animations";
 import { BEHAVIORS, behaviorLine } from "./behaviors";
 import type { InstalledAnimations } from "./Companion";
+import styles from "./companion.module.css";
 import { prefersMov } from "./dsh-pet/client/pet/animation/media";
 import { createPetCard } from "./dsh-pet/client/pet/card/pet-card";
 import type { PetCardProps } from "./dsh-pet/client/pet/card/props";
 import { injectPetCss } from "./dsh-pet/client/pet/css";
 import type { Center } from "./dsh-pet/client/pet/motion/geometry";
 import { makePlaybackReporter } from "./dsh-pet/client/pet/playback-report";
+import { BUBBLE_DURATION_MS } from "./dsh-pet/client/pet/timings";
 import type { RuntimePet } from "./dsh-pet/client/pet/types";
 import { parsePlaybackPath } from "./dsh-pet/host/playback/parse";
 import { ROUTE_PATH } from "./dsh-pet/shared/constants";
@@ -204,6 +207,35 @@ function firstRead(state: PollState): { baseline: Record<string, number>; leaves
 function lockHeld(leaf: StateLeaf | undefined): boolean {
   const lock = leaf ? readLock(leaf) : null;
   return lock?.locked === true && lock.expiresAt > Date.now();
+}
+
+/**
+ * The stage the sign beside the pet's head shows (companion.module.css), undefined for none: none when
+ * idle, and none while the pet sleeps or is locked, as the card then does not follow the stages either.
+ * A success or error shows as long as its bubble line (BUBBLE_DURATION_MS), not the 60 s the stage stays.
+ */
+function useWorkSign(leaves: Leaves): string | undefined {
+  const stage = leaves.workStatus?.state ?? null;
+  const tick = leaves.workStatusTick;
+  const terminal = stage === "success" || stage === "error";
+  /** The stage write whose check or cross has had its time. */
+  const [over, setOver] = useState(-1);
+  useEffect(() => {
+    if (!terminal) return;
+    const timer = window.setTimeout(() => setOver(tick), BUBBLE_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [terminal, tick]);
+  // Nothing tells the page that a lock ran out: the end of the lock that has passed.
+  const lockEnds = leaves.lock?.locked ? leaves.lock.expiresAt : 0;
+  const [unlocked, setUnlocked] = useState(0);
+  useEffect(() => {
+    if (lockEnds === 0) return;
+    const timer = window.setTimeout(() => setUnlocked(lockEnds), Math.max(0, lockEnds - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [lockEnds]);
+  if (stage === null || (terminal && over === tick)) return undefined;
+  if (leaves.sleep?.sleeping || (lockEnds !== 0 && unlocked !== lockEnds)) return undefined;
+  return stage;
 }
 
 /** Where the member last left the companion on this device, as a position command's data. */
@@ -426,10 +458,17 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   // card/animation-flow.ts); on such a NAS its bubble shows on its own.
   const say =
     leaves.say?.kind === "say" && !animations.events.whisper?.length ? { ...leaves.say, anim: false } : leaves.say;
+  const work = useWorkSign(leaves);
   // VNAS moves the companion with its own tools: the desktop it reads leaves the companion out, as it
   // does its toasts, since a click through the browser tools would wake it or take its lock back.
   return (
-    <div style={layer} data-vnas-overlay="">
+    <div
+      style={layer}
+      className={styles.layer}
+      data-companion-work={work}
+      data-companion-rest={paused ? "" : undefined}
+      data-vnas-overlay=""
+    >
       <PetCard cfg={cfg} {...leaves} say={say} arena={arena} paused={paused} onPlace={remember} />
     </div>
   );

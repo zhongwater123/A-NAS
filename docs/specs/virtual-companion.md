@@ -42,6 +42,7 @@ VNAS 能控制它（[#414](../decisions/2026-11-06-companion-v1.md) 记录的 20
 - When：回合开始或推理、调用工具、工具返回、回答完成、出错、被停止，或有卡片等成员确认。
 - Then：伙伴按这一步在做什么播放各自的动画（见下表），成员一眼能看出它在读文件、找东西还是运行命令；气泡用一句短话说这一步，例如“我在看 文档/a.md 哦”“跑一下 du -sh /nas/…，稍等哦”，说到的对象取自这一步的工具参数（与回答里“处理过程”一栏的写法相同），截到约 12 个字。思考时说一句思考的台词；VNAS 用待办清单时改说“下一步：清单里正在做的一项”。不显示推理过程的文字：它逐段到达，多为英文。工具返回、回答完成、出错、等成员确认时也各有动画和台词；成员在这台设备上停止回合时，伙伴屈膝行礼一次、说一句“好的，停下啦”之类，然后回到待机。
 - 阶段的规则照旧用 dsh-pet 的：几段对话同时进行时按“等待 > 出错 > 工作 > 思考 > 整理 > 完成”取最要紧的一个，5 秒内的“工作 → 整理”合并为一次。进行中的阶段循环播放这一步的动画，动画播完就重播，不交给随机动作；完成与出错播放一次，保留 60 秒后清掉。某一步的动画没有安装时播放这个阶段的 dsh-pet 动画；阶段的动画也没有安装时伙伴不为它切换，照常做原来的动作。伙伴睡着或被锁时不跟随。
+- 伙伴头旁有一个小标记：思考、工作、等成员确认时是逐个点亮的省略号，回答完成后是对勾，出错后是叉；对勾和叉与这一句台词一样显示 10 秒后消失。空闲、睡着、被锁或回合被停止时没有标记；伙伴停下时省略号也停住，系统要求减少动态效果时省略号不动。标记跟着伙伴拖动、走动和飞行，朝向改变时换到头的另一侧，不挡点击。
 - VNAS 调用伙伴自己的工具（`mcp__companion__*`）时，伙伴仍播放这个阶段的 dsh-pet 动画、说 dsh-pet 为阶段配的固定台词，不另换动画。
 - 工具执行是否失败，网关事件里没有（`tool.complete` 不带错误），所以没有“这一步没成”的动画，失败的一步也按“这一步完成”显示；整个回合出错时才播放出错的动画。
 
@@ -160,7 +161,7 @@ VNAS 能控制它（[#414](../decisions/2026-11-06-companion-v1.md) 记录的 20
 
 ## 验收证据
 
-- 页面：卡片的渲染、跟随本窗口的回合、断线回到空闲、闲置停下与命令唤醒、按通知编号挥手、卸载时取消进行中的动画（[`Companion.test.tsx`](../../web/src/companion/Companion.test.tsx)）；Safari 的 HEVC（[`Companion.safari.test.tsx`](../../web/src/companion/Companion.safari.test.tsx)）；工作阶段的汇总与 60 秒清理、每一步的动画与短话、共用屏幕不说对象（[`workStatus.test.ts`](../../web/src/companion/workStatus.test.ts)、[`behaviors.test.ts`](../../web/src/companion/behaviors.test.ts)）；随机动作与点击的动画池（[`animations.test.ts`](../../web/src/companion/animations.test.ts)）；命令的执行与回答、锁、睡觉、暂停、频率与参数上限（[`commands.test.ts`](../../web/src/companion/commands.test.ts)）；窗口转交命令、关闭时释放锁（[`AssistantPanel.test.tsx`](../../web/src/assistant/AssistantPanel.test.tsx)）；屏保盖住的标记（[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)）；共用屏幕上的提示（[`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)）；设置里的署名（[`PersonalizationSection.test.tsx`](../../web/src/settings/PersonalizationSection.test.tsx)）。
+- 页面：卡片的渲染、跟随本窗口的回合与头旁的标记、断线回到空闲、闲置停下与命令唤醒、按通知编号挥手、卸载时取消进行中的动画（[`Companion.test.tsx`](../../web/src/companion/Companion.test.tsx)）；Safari 的 HEVC（[`Companion.safari.test.tsx`](../../web/src/companion/Companion.safari.test.tsx)）；工作阶段的汇总与 60 秒清理、每一步的动画与短话、共用屏幕不说对象（[`workStatus.test.ts`](../../web/src/companion/workStatus.test.ts)、[`behaviors.test.ts`](../../web/src/companion/behaviors.test.ts)）；随机动作与点击的动画池（[`animations.test.ts`](../../web/src/companion/animations.test.ts)）；命令的执行与回答、锁、睡觉、暂停、频率与参数上限（[`commands.test.ts`](../../web/src/companion/commands.test.ts)）；窗口转交命令、关闭时释放锁（[`AssistantPanel.test.tsx`](../../web/src/assistant/AssistantPanel.test.tsx)）；屏保盖住的标记（[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)）；共用屏幕上的提示（[`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)）；设置里的署名（[`PersonalizationSection.test.tsx`](../../web/src/settings/PersonalizationSection.test.tsx)）。
 - 产品服务：配对、只发给发起本回合的窗口、频率、超时、回合结束与窗口离开的结算、锁的释放、参数的规范化与拒绝、停止回合与实例退出后的配对、晚到的子任务事件（[`companion_test.go`](../../internal/assistantapi/companion_test.go)）；动画清单、按池取动画与缓存（[`handler_test.go`](../../internal/webui/handler_test.go)）。
 - 伙伴服务器：结果从不是错误、参数原样转给产品服务、没有套接字时回答 `no_desktop`（[`test_companion_mcp.py`](../../ai/tests/test_companion_mcp.py)）；托管配置下 `anas` 仍要审批而 `companion` 不要（[`approvals-managed.sh`](../../ai/assistant-spike/approvals-managed.sh)）。
 

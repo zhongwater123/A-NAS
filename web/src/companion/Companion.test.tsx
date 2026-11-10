@@ -177,6 +177,44 @@ describe("the companion on the desktop", () => {
     await plays(IDLE);
   });
 
+  it("shows beside the pet that VNAS is at work, and a check for a while after the turn", async () => {
+    serve([IDLE, "睡觉-开始", "睡觉-循环", "睡觉-起来"]);
+    const { root } = await mount();
+    const layer = root.closest("[data-vnas-overlay]") as HTMLElement;
+    const sign = () => layer.dataset.companionWork;
+    expect(sign()).toBeUndefined();
+    act(() => {
+      startTurn("live0001");
+      reportEvent("live0001", "message.start");
+    });
+    await waitFor(() => expect(sign()).toBe("thinking"));
+    act(() => reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" }));
+    await waitFor(() => expect(sign()).toBe("working"));
+    // Not while the pet sleeps or is locked: the card does not follow the stage then either.
+    act(() => void companionSleep.enter("main", { start: "睡觉-开始", loop: "睡觉-循环", end: "睡觉-起来" }));
+    await waitFor(() => expect(sign()).toBeUndefined());
+    act(() => void companionSleep.wake("main"));
+    await waitFor(() => expect(sign()).toBe("working"));
+    write("lock", { locked: true, expiresAt: Date.now() + 60_000 });
+    expect(sign()).toBeUndefined();
+    write("lock", { locked: false });
+    expect(sign()).toBe("working");
+    // Resting, the ellipsis holds still.
+    hide(true);
+    expect(layer.dataset.companionRest).toBe("");
+    hide(false);
+    expect(layer.dataset.companionRest).toBeUndefined();
+    vi.useFakeTimers({ shouldClearNativeTimers: true });
+    act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+    act(() => vi.advanceTimersByTime(0));
+    expect(sign()).toBe("success");
+    act(() => vi.advanceTimersByTime(9_999));
+    expect(sign()).toBe("success");
+    act(() => vi.advanceTimersByTime(1));
+    expect(sign()).toBeUndefined();
+    vi.useRealTimers();
+  });
+
   it("curtsies once when the member stops a turn here, then idles", async () => {
     serve([IDLE, "写代码", "女仆屈膝礼仪"]);
     const { root, videos } = await mount();
