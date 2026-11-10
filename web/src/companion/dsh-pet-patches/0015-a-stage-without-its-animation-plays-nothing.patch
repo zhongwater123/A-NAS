@@ -1,0 +1,35 @@
+A NAS may have part of dsh-pet's animations installed (a pool without the HEVC files for
+Safari, or an interrupted install), and the page narrows the card's configuration to what is
+there (web/src/companion/animations.ts). A VNAS stage keeps its index in
+animations.events.workStatus, since the card reads it by index, so a stage without its
+animation is an empty slot. dsh-pet's card would pick from it, get undefined, and ask for
+an animation called "undefined"; it now carries on with what it was doing instead, as
+A-NAS's spec asks, both when the stage changes (cue-effects.ts) and when it resumes the
+stage after a click, a drag or a freeze (animation-flow.ts).
+
+diff --git a/client/pet/card/animation-flow.ts b/client/pet/card/animation-flow.ts
+--- a/client/pet/card/animation-flow.ts
++++ b/client/pet/card/animation-flow.ts
+@@ -87,7 +87,8 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
+       if (!pool || pool.length === 0) return false;
+       const idx = WORK_STATUS_INDEX[ws.state];
+       const slot = pool[idx];
+-      if (slot === undefined) return false;
++      // A-NAS: or a stage left empty because its animation is not installed.
++      if (slot === undefined || slot.length === 0) return false;
+       const name = pickSlot(slot, card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
+       log(hub.cfg().id, '互动结束恢复状态动画: ' + name);
+       // 多候选档位恢复后同样走播完轮换；单候选维持无限循环。
+diff --git a/client/pet/card/cue-effects.ts b/client/pet/card/cue-effects.ts
+--- a/client/pet/card/cue-effects.ts
++++ b/client/pet/card/cue-effects.ts
+@@ -80,6 +80,9 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+         console.error('[dsh-pet] work-status 档位索引越界：state=' + workStatus.state + ' idx=' + idx);
+         return;
+       }
++      // A-NAS: a stage whose animation this NAS has not installed is an empty slot (it keeps its index);
++      // the pet carries on with what it was doing rather than switch to no animation at all.
++      if (slot.length === 0) return;
+       const name = pickSlot(slot, card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
+       log('pet=' + cfg.id + ' ' + (prevWorkStateRef.current ?? 'null') + '->' + workStatus.state + '    ' + name);
+       const stateChanged = prevWorkStateRef.current !== workStatus.state;

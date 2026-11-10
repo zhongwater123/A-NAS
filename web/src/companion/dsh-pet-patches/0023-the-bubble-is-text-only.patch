@@ -1,0 +1,59 @@
+dsh-pet's /broadcast can put a picture in the bubble: a meme by its name, looked up in the
+pet's meme directories on disk (host/memes.ts, Node's fs), or any http or https address. A-NAS
+serves none of dsh-pet's meme pictures, and a picture from an address would put whatever it
+points at on the member's screen, the host's shared screen included. VNAS's broadcast tool has
+neither and the product service drops both, so the page's decision refuses either as
+bad-request; it no longer imports memes.ts or needs the meme directories. The text, duration
+and anim rules and the pet check are unchanged.
+
+diff --git a/host/broadcast.ts b/host/broadcast.ts
+--- a/host/broadcast.ts
++++ b/host/broadcast.ts
+@@ -14,9 +14,6 @@
+ 
+ // A-NAS: the page's one pet from dsh-pet's own configuration, not the configuration files on disk.
+ import { findPetInstance } from './pet-config';
+-import { matchMeme, readMemePool } from './memes';
+-// url 参数的 scheme 规则与 /anim 是同一条（两个「第三方投喂」端点不各写一份，免得走样）
+-import { normalizeHttpUrl } from './anim';
+ 
+ /** 气泡默认显示时长（ms）——与两端消费侧的常量同值（host 不得 import src/shared，只能各写一份）。
+  *  它只用于把缺省解析成显式值写进叶子，让 /state 里能看到实际生效的时长。 */
+@@ -92,9 +89,8 @@ export function decideBroadcast(args: {
+   url: unknown;
+   duration: number;
+   anim: boolean;
+-  memeDirs: (entry: string) => string[];
+ }): BroadcastDecision {
+-  const { cfg, requested, memeDirs } = args;
++  const { cfg, requested } = args;
+ 
+   const text = normalizeBroadcastText(args.text);
+   if (!text) return { ok: false, reason: 'bad-request', message: 'text 为空' };
+@@ -108,23 +104,9 @@ export function decideBroadcast(args: {
+   if (rawImage && rawUrl) return { ok: false, reason: 'bad-request', message: 'image 与 url 只能给一个' };
+   if (!rawImage && !rawUrl) return { ok: true, petId, text, duration: args.duration, anim: args.anim };
+ 
+-  // url 形态：地址合法即放行，不查表情包池——图在第三方手里，池里当然没有；取不到图由消费端
+-  // 自己表现（图裂），宿主不做代理、也不预取，所以这里没有可校验的「图是否真实存在」。
+-  if (rawUrl) {
+-    const url = normalizeHttpUrl(rawUrl);
+-    if (url === null) {
+-      return { ok: false, reason: 'bad-request', message: 'url 必须是 http/https 的完整地址' };
+-    }
+-    return { ok: true, petId, text, url, duration: args.duration, anim: args.anim };
+-  }
+-
+-  // 配图只认池内命中的名称（命中后用池里的规范名，而不是外部原样传入的字符串）；
+-  // 池按所属条目取（与碎碎念 / 对话同一口径），配图不跨宠物串池。
+-  const hit = matchMeme(readMemePool(who.conf.memes, memeDirs(who.entry)), rawImage);
+-  if (!hit) {
+-    return { ok: false, reason: 'unknown-image', message: '配图不在表情包池内：' + rawImage };
+-  }
+-  return { ok: true, petId, text, image: hit.name, duration: args.duration, anim: args.anim };
++  // A-NAS: the bubble is plain text. The page serves none of dsh-pet's meme pictures, and a picture
++  // from an address would put whatever it points at on the member's screen, so both are refused.
++  return { ok: false, reason: 'bad-request', message: '配图不受支持：气泡只显示文字' };
+ }
+ 
+ /**

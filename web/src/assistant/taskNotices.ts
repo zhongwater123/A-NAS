@@ -7,6 +7,8 @@ import type { Notification } from "../api.generated";
 import { acknowledgeNotification, listNotifications } from "../desktop/api";
 
 let notices: Notification[] = [];
+// Whether notices holds what the service listed, as against nothing read yet.
+let loaded = false;
 const listeners = new Set<() => void>();
 const changed = () => listeners.forEach((listener) => listener());
 
@@ -14,6 +16,7 @@ export async function loadTaskNotices(): Promise<void> {
   try {
     const list = await listNotifications();
     notices = list.filter((item) => item.kind === "assistant_task" && item.task);
+    loaded = true;
     changed();
   } catch {
     // The next load tries again.
@@ -45,3 +48,6 @@ function subscribe(listener: () => void) {
 }
 
 export const useTaskNotices = () => useSyncExternalStore(subscribe, () => notices);
+
+/** Whether the notices have been listed once: until then, no notices says nothing about what there is. */
+export const taskNoticesLoaded = () => loaded;

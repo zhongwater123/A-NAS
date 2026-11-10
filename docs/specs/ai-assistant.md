@@ -1,7 +1,7 @@
 # AI 助手
 
 状态：implemented
-更新时间：2026-11-05
+更新时间：2026-11-09
 
 ## 目标
 
@@ -28,6 +28,7 @@
 | 快照、其他成员的个人空间、私有图库与回收站（包括管理员已获查看授权的） | 不可以 | 不可以 |
 | 系统设置、应用、宿主机、局域网与外网 | 不可以（操作桌面时见下一行） | 不可以（同上） |
 | 成员的 WebOS 桌面（VNAS 窗口里对话时） | 成员看得到的窗口；只读查看的他人空间与图库、快照里的内容除外 | 像成员一样操作；删除、移动、改名、分享、复制、恢复、问题反馈与设置类的写入先经成员允许，终端、Docker 与应用中心里的每一步先经允许 |
+| 发起这段对话的设备上的虚拟伙伴（伙伴工具，[#414](../decisions/2026-11-06-companion-v1.md)） | 只有命令的结果：动画播完没有、是否睡着或被锁 | 播放动作、说话气泡、移动与抛出、睡觉与叫醒、加锁，不经确认（只改变这块屏幕上伙伴的样子，不碰数据，见[虚拟伙伴](virtual-companion.md#让伙伴做动作说话)）；定时任务不能让伙伴做事，调用得到“没有在用的桌面”（[虚拟伙伴](virtual-companion.md#定时任务不能让伙伴做事)） |
 
 ## 名称与外观
 
@@ -198,6 +199,7 @@
 - Given：一个任务刚运行完，或在成员离线时运行过。
 - When：成员在线，或下次登录后。
 - Then：一分钟内桌面右上角弹出提示，写着任务名与回答的开头（没有完成时写“没有完成”与原因），点“查看结果”在 VNAS 中打开这次运行；提示 12 秒后自己收起，指着时不收。没读的结果在 VNAS 的“定时任务”上计数，任务上标“新结果”，打开这次运行就算读过，在其他设备上也不再提示。同一个任务每次只提示最新的一次；回答只是“无事可报”（Hermes 的 `[SILENT]`）的运行不提示。运行的开头显示“定时任务按计划运行”，任务要做的事收在下面，不显示 Hermes 给运行的内部说明。
+- 在本地控制台（全家共用的宿主机屏幕）上，提示只写“VNAS 定时任务 · 时间 · 有新结果”，失败时加“没有完成”，不写任务名与回答；“查看结果”照常在 VNAS 中打开（[虚拟伙伴](virtual-companion.md#宿主机屏幕上别处来的内容只显示状态)）。
 
 ### 管理定时任务
 
@@ -264,7 +266,7 @@
 
 ## 边界与失败
 
-- 实例只看得到三处挂载：个人空间（只读）、共享空间（只读）、助手目录（读写）；没有网络，只经 Unix 套接字访问产品服务的模型网关与 MCP 端点，以及相册服务只读的助手套接字。这个套接字由 systemd 持有，相册服务重启不影响正在运行的实例。
+- 实例只看得到三处挂载：个人空间（只读）、共享空间（只读）、助手目录（读写）；没有网络，只经 Unix 套接字访问产品服务的模型网关与 MCP 端点、产品服务的伙伴套接字，以及相册服务只读的助手套接字。后两个套接字由 systemd 持有，产品服务或相册服务重启不影响正在运行的实例；定时任务与闲时整理的沙箱里没有伙伴套接字。
 - 到实例的连接只经文件代理，以成员正在登录的会话为限：退出登录、会话过期或账号停用后 30 秒内被切断；Host Agent 重启时窗口断开并自动重连。窗口只能使用 `hermes serve` 中白名单列出的方法与事件，其余由产品服务拒绝；Hermes 发来的审批从不直接交给窗口。
 - 实例以本人 Linux 身份运行，附加组只有 `a-nas-users`；看不到实例外的进程，不能 ptrace，没有任何能力。两处空间的回收站在实例中只显示本人的文件夹。
 - 助手在每个对话中都知道它代表哪位成员、目录规则与暂存流程（随系统提供的技能），不需要先探索。
@@ -306,4 +308,5 @@
 - 代码（原型）：产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)（网关 [`gateway.go`](../../internal/assistantapi/gateway.go)、白名单 [`rpc.go`](../../internal/assistantapi/rpc.go)、卡片 [`approvals.go`](../../internal/assistantapi/approvals.go)），会话闸门 [`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[应用图标](../../web/src/assistant/AssistantGlyph.tsx) 与连接层 [`useAssistantGateway.ts`](../../web/src/assistant/useAssistantGateway.ts)、[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层与 JSON-RPC 客户端 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；执行方 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 在文件代理中运行（[`changes.go`](../../internal/filebroker/changes.go)），没有文件代理的开发模式由 spike 的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
 - 操作桌面：窗口中的控制器 [`webosControl.ts`](../../web/src/assistant/webosControl.ts) 与写入清单 [`webosWrites.ts`](../../web/src/assistant/webosWrites.ts)，页面写入的闸门在 [`api.ts`](../../web/src/api/client.ts) 的 `apiFetch` 与 `uploadForm`，问题 [#160](https://github.com/zhongwater123/A-NAS/issues/160)，系统技能 [`anas-desktop`](../../ai/assistant-spike/skills/anas-desktop/SKILL.md)，Hermes 自己的登录 [`internal/assistantlogin`](../../internal/assistantlogin/login.go)
 - 定时任务：产品服务 [`tasks.go`](../../internal/assistantapi/tasks.go) 与 [`tasknotices.go`](../../internal/assistantapi/tasknotices.go)，通知 [`internal/accounts/assistanttasks.go`](../../internal/accounts/assistanttasks.go)，窗口 [`TasksView.tsx`](../../web/src/assistant/TasksView.tsx) 与桌面提示 [`TaskToasts.tsx`](../../web/src/assistant/TaskToasts.tsx)，唤醒 [`cron-waker.py`](../../ai/assistant-spike/cron-waker.py)，系统技能 [`anas-scheduled-tasks`](../../ai/assistant-spike/skills/anas-scheduled-tasks/SKILL.md)
+- 伙伴工具：[虚拟伙伴规格](virtual-companion.md)，伙伴服务器 [`anas_companion_mcp.py`](../../ai/assistant-spike/anas_companion_mcp.py)，产品服务 [`companion.go`](../../internal/assistantapi/companion.go)
 - 测试：[`internal/assistantapi/gateway_test.go`](../../internal/assistantapi/gateway_test.go)、[`internal/filebroker/rootbroker/assistant_test.go`](../../internal/filebroker/rootbroker/assistant_test.go)、[`internal/httpapi/assistant_test.go`](../../internal/httpapi/assistant_test.go)

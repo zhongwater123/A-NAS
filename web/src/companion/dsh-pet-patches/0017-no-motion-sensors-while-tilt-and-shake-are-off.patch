@@ -1,0 +1,23 @@
+The page turns tilt gravity and shake-to-throw off for good (companionPhysics in
+animations.ts): A-NAS's spec has neither, and a tilted tablet would keep a frame loop
+running. dsh-pet subscribes to the device's orientation and motion sensors anyway and reads
+its two switches in every callback, so that its settings page can turn them on without a new
+subscription. A-NAS has no such page, so the card no longer subscribes when both switches are
+off; on a tablet or phone the sensors' events no longer run its callbacks many times a second,
+during a pause included.
+
+diff --git a/client/pet/card/motion.ts b/client/pet/card/motion.ts
+--- a/client/pet/card/motion.ts
++++ b/client/pet/card/motion.ts
+@@ -228,6 +228,11 @@ export function createCardMotion(rt: CardMotionRuntime) {
+     // 传感器订阅只建一次：两个开关与物理参数每次回调现读，避免重订阅。
+     useEffect(() => {
+       if (!canReadMotionSensors()) return;
++      // A-NAS: the page turns tilt and shake off for good (companionPhysics in animations.ts) and has
++      // no settings page to turn them on, so nothing would use a sample; subscribed anyway, every
++      // sensor event of a tablet or phone would still run these callbacks, during a pause too.
++      const physics = cfgRef.current.physics;
++      if (physics?.tiltGravity !== true && physics?.shakeThrow !== true) return;
+       const offTilt = subscribeTilt((sample) => {
+         if (cfgRef.current.physics?.tiltGravity !== true) {
+           tiltSampleRef.current = null;

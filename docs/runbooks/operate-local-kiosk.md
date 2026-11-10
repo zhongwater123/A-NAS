@@ -1,7 +1,7 @@
 # 运行实验 NAS 本地控制台
 
 状态：implemented, display and pointer verified; dedicated account verified on the Experimental NAS (2026-10-28); hardware video decoding verified on the Experimental NAS (2026-10-29); confinement and VT recovery pending
-更新时间：2026-11-04
+更新时间：2026-11-09
 
 ## 目的
 
@@ -162,7 +162,7 @@ Chromium 只取得匿名同源 URL，不直接访问宿主机路径或原文件�
 1. 在开发机暂存新池。脚本只上传 NAS 暂存区还没有的视频；早先随 release 暂存过的视频会直接复用。`-WhatIf` 只做本地校验并列出哈希，不联网：
 
    ```powershell
-   .\scripts\deploy-screensavers.ps1 `
+   .\scripts\deploy-media-pool.ps1 -Kind screensavers `
      -NasHost <NAS_HOST> `
      -Video @(
        "E:\SteamLibrary\steamapps\workshop\content\431960\3667411885\BMW M5.mp4",
@@ -173,14 +173,14 @@ Chromium 只取得匿名同源 URL，不直接访问宿主机路径或原文件�
      )
    ```
 
-   单个池最多 32 条，重复内容、非 MP4 或缺失文件会在联网前拒绝。脚本输出每个视频的 SHA-256 与池 ID。不得把 Steam Workshop 目录直接授予产品服务读取权限。
+   单个池最多 32 条，重复内容、非 MP4 或缺失文件会在联网前拒绝。脚本输出每个视频的 SHA-256 与池 ID。不得把 Steam Workshop 目录直接授予产品服务读取权限。屏保与[伙伴动画](install-companion-animations.md)共用这一套暂存、安装脚本，以 `-Kind` 或第一个参数区分；旧名 `deploy-screensavers.ps1`、`install-screensavers.sh` 再保留一个版本，参数与作用不变。NAS 上的屏保命令仍写 `install-screensavers.sh`：ADR 0014 以来的每个 release 都有它，当前 release 或产品回滚后的 release 不含 `install-media-pool.sh` 时同样可用。
 2. 以 root 核对输出的池 ID 后安装：
 
    ```bash
    /opt/a-nas/current/install-screensavers.sh <池 ID>
    ```
 
-   脚本把暂存的视频复制进对象库并逐个复核 SHA-256，任一不符即在改动前停止。池 ID 由清单内容计算，暂存清单与命令中的 ID 不符时拒绝。全部通过后建池、原子切换 `current`，并重启 Kiosk 让页面重新读取清单；产品服务无需重启。再次安装同一个池不会产生变化。
+   脚本把暂存的视频复制进对象库并逐个复核 SHA-256，任一不符即在改动前停止。池 ID 由清单内容计算，暂存清单与命令中的 ID 不符时拒绝。全部通过后建池、原子切换 `current`；页面只在打开时读一次清单，所以 Kiosk 在运行时由脚本重启，没有运行时不启动它。产品服务无需重启。再次安装同一个池不会改变池，但仍会重启运行中的 Kiosk。
 3. 按验收第 7 项复核清单数量和 Range 请求。
 
 ### 首次升级
@@ -200,7 +200,7 @@ find "$pools" -mindepth 1 -maxdepth 1 -type d ! -name objects ! -name pools
 
 确认列表中只有旧 release 目录、且清单与 Range 请求都正常后，才逐个 `rm -r -- "$pools/<release>"`。被导入的池与对象共享数据，删除它的目录不影响播放；其他目录是独立副本，删除后释放空间。删除前逐个核对目录中每个视频的 SHA-256 都在 `current/SHA256SUMS` 中。不要删除 `objects`、`pools` 或 `current`。
 
-单视频时期的安装可能在 `$pools` 根部留下独立的 `.mp4`（Experimental NAS 为 `computer-chip.mp4`），导入不会处理它。其 SHA-256 在 `current/SHA256SUMS` 中时是副本，可以删除；不在时是独有视频。要保留它，以 root 把它复制到暂存账号目录，下载到开发机后用 `scripts/deploy-screensavers.ps1` 与当前池的视频一起暂存为新池，安装新池并用 `cmp` 确认新池中的对应文件与原文件相同后再删除原文件。2026-10-10 Experimental NAS 按此加入后，当前池为六条。
+单视频时期的安装可能在 `$pools` 根部留下独立的 `.mp4`（Experimental NAS 为 `computer-chip.mp4`），导入不会处理它。其 SHA-256 在 `current/SHA256SUMS` 中时是副本，可以删除；不在时是独有视频。要保留它，以 root 把它复制到暂存账号目录，下载到开发机后用 `scripts/deploy-media-pool.ps1 -Kind screensavers` 与当前池的视频一起暂存为新池，安装新池并用 `cmp` 确认新池中的对应文件与原文件相同后再删除原文件。2026-10-10 Experimental NAS 按此加入后，当前池为六条。
 
 ## 硬件视频解码
 
@@ -240,7 +240,16 @@ ssh a-nas 'bash -s 60' < scripts/measure-local-console-cpu.sh
 4. SSH 停止 `anas-api.service` 后，Kiosk 页面进入失联状态；恢复服务后自动重新连接。
 5. `Ctrl+Alt+F2` 应切到恢复终端并能以 `Ctrl+Alt+F1` 返回；当前 Experimental NAS 未通过此项，见[开放调查](../investigations/2026-10-06-kiosk-browser-confinement.md)。
 6. `F1`、浏览器导航、开发工具、不受控缩放和右键菜单不可逃离产品界面；当前 Experimental NAS 未通过 `F1` 和缩放项，不能把本地 Kiosk 视为面向非受信任用户的安全边界。
-7. 登录后请求 `/local-console/screensavers`，返回的匿名 URL 数应与 `current/SHA256SUMS` 的行数相同；逐个以 `Range: bytes=0-1023` 请求时均返回 `206` 和 1024 字节。
+7. 请求 `/local-console/screensavers`，返回的匿名 URL 数应与 `current/SHA256SUMS` 的行数相同；逐个以 `Range: bytes=0-1023` 请求时均返回 `206` 和 1024 字节。NAS 默认没有 `curl`，在另一台局域网电脑上检查，Windows PowerShell 中：
+
+   ```powershell
+   $nas = 'http://<NAS 地址>'
+   $videos = (Invoke-RestMethod "$nas/local-console/screensavers").videos
+   $videos.Count
+   foreach ($video in $videos) { curl.exe -s -o NUL -w '%{http_code} %{size_download}\n' -r 0-1023 "$nas$video" }   # 每行 206 1024
+   ```
+
+   macOS 或 Linux 的终端中用 `curl` 代替 `curl.exe`、`-o /dev/null` 代替 `-o NUL`，清单可用 `python3 -m json.tool` 查看（macOS 的 `python3` 随 Command Line Tools 安装）。
 8. 登录后保持三分钟无输入，屏保应从池中选择一条，静音、居中铺满且无黑边；让视频自然结束，确认仍循环同一条而不切换。第一次移动鼠标或按键只退出屏保，不打开或操作下层应用；再次等待三分钟后应重新随机选择池内一条，允许与上次相同。
 9. 临时使当前选中的一个已确认池文件不可读并重启页面时，应从剩余条目中补选一条；恢复权限后再验收。不要删除源文件或整个池来制造故障。
 10. 管理员在“设置 → 个性化”把息屏设为 10 分钟后，本机屏幕保持 13 分钟无输入应变为纯黑（屏保先播放 10 分钟）；第一次移动鼠标或按键只回到桌面。退出登录后在登录页保持 13 分钟无输入同样变黑，唤醒后已输入的账号保留。验收后按需改回 30 分钟。行为见[个性化规格](../specs/personalization.md)。
@@ -271,7 +280,7 @@ cat /var/lib/a-nas/screensavers/pools/<池 ID>/SHA256SUMS
 /opt/a-nas/current/install-screensavers.sh <池 ID>
 ```
 
-Experimental NAS 上原来五条视频的池为 `53e12079d8d50c4c`，2026-10-10 起的当前池是六条视频的 `68299080c557c520`。之后按验收第 7 项复核清单数量和 Range 请求。不要删除当前池作为回滚手段；对象和旧池的清理不属于常规回滚，必须另行确认。
+Experimental NAS 上原来五条视频的池为 `53e12079d8d50c4c`，2026-10-10 起的当前池是六条视频的 `68299080c557c520`。切换后脚本在 Kiosk 运行时重启它，重新打开的页面从切回的池中选择屏保。之后按验收第 7 项复核清单数量和 Range 请求。不要删除当前池作为回滚手段；对象和旧池的清理不属于常规回滚，必须另行确认。
 
 ## 依据
 

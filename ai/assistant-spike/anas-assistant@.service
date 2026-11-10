@@ -68,6 +68,11 @@ BindReadOnlyPaths=-/run/a-nas/assistant-changes.sock:/run/anas-change-agent/agen
 # can enter, so other processes of the member cannot reach it; it is bound in over an
 # empty file. The photo service learns the member from the peer UID.
 BindReadOnlyPaths=-/run/a-nas-photos-assistant/assistant.sock:/run/anas-assistant-photos/photos.sock
+# The Product Service's companion socket (#412), the same way: the companion tools reach
+# the member's VNAS window through it. assistant-install.sh leaves it out of the scheduled
+# tasks' and the curator's units, so that nothing without a window reaches one; there the
+# tools answer that no desktop is in use.
+BindReadOnlyPaths=-/run/a-nas-companion-assistant/assistant.sock:/run/anas-assistant-companion/companion.sock
 UMask=0077
 NoNewPrivileges=true
 CapabilityBoundingSet=

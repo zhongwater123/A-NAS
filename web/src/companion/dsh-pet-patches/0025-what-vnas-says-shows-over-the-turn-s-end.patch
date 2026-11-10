@@ -1,0 +1,20 @@
+dsh-pet shows a finished turn's line (success or error) before anything the pet is told to say,
+both for 10 s. On A-NAS the only speech is VNAS's broadcast, and VNAS mostly says something at
+the end of its answer: the turn ends a moment later and its line hid what VNAS said for as long
+as both showed. What VNAS says now comes first; the turn's end still plays its animation.
+
+diff --git a/client/pet/card/bubble-slots.ts b/client/pet/card/bubble-slots.ts
+--- a/client/pet/card/bubble-slots.ts
++++ b/client/pet/card/bubble-slots.ts
+@@ -49,8 +49,10 @@ export interface BubbleSlotInput {
+ export function decideBubbleSlot(input: BubbleSlotInput): BubbleSlot {
+   // 面板是用户主动打开的窗口：它占槽时其余气泡一律让位，关掉后按原规则恢复。
+   if (input.todoOn) return 'todo';
+-  if (input.workTerminal && input.workOn && input.workText && input.workStatusEnabled) return 'work-terminal';
++  // A-NAS: the only speech is VNAS's broadcast, and it comes before the line a turn's end shows: a turn
++  // ends right after VNAS says something, and that line would hide it for the whole time both show.
+   if (input.whisperOn && input.whisperText) return 'whisper';
++  if (input.workTerminal && input.workOn && input.workText && input.workStatusEnabled) return 'work-terminal';
+   if (input.workOn && input.workText && input.workStatusEnabled) return 'work';
+   return 'none';
+ }

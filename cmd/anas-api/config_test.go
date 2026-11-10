@@ -38,6 +38,7 @@ func TestConfigResolvesEachModesAdaptersAndRefusesDevelopmentOnesOnANAS(t *testi
 				ShareFilesSocket: "/run/a-nas-share-files/files.sock", FamilySocket: "/run/a-nas-family/family.sock", MediaWorker: mediaWorkerSocket,
 				Media:      MediaConfig{Socket: "/run/a-nas-ffmpeg/ffmpeg.sock", Slots: "/run/a-nas-ffmpeg/slots"},
 				Containers: containersDisabled, Terminal: "disabled", ScreensaverDirectory: "/var/lib/a-nas/screensavers/current",
+				CompanionDirectory: "/var/lib/a-nas/companion/current",
 			}
 			if c != want {
 				t.Fatalf("config = %+v\nwant     %+v", c, want)

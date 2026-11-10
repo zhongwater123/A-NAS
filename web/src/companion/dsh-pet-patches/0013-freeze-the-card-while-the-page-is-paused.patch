@@ -1,0 +1,167 @@
+The card stops while the member is away (review H2, and #404's V1 note on the NAS's CPU).
+A-NAS pauses the companion when the page has had no input for 60 s, is hidden, or is under
+the local console's screen saver; the page owns that state and passes it as the new
+`paused` prop. A pause must stop decoding video and every frame loop, but it must not put
+the pet to sleep (its loop is a video too) or take the lock (a lock refuses VNAS's commands).
+
+lock-freeze.ts stays the single owner of the animation chain's frozen switch: frozen is now
+locked or paused, so a lock that ends during a pause leaves the card frozen, and so does a
+pause that ends under a lock. It also says whether a lock holds the card, so that pressing a
+card only a pause froze does not release a lock nobody took. runtime.ts holds a flight
+during a pause (a lock lets it fly on), keeps where a stopped walk got to, and carries the
+flight on at its speed afterwards. When the freeze ends, the frame in front plays on: a
+stage's single loop picked again is the same animation and did not switch, so it stayed
+still (dsh-pet unfreezes a lock the same way); a pet asleep under the freeze sleeps on
+instead of playing an idle animation once. Commands that arrive during a pause are dropped
+by the page, not by the card.
+
+diff --git a/client/pet/card/lock-freeze.ts b/client/pet/card/lock-freeze.ts
+--- a/client/pet/card/lock-freeze.ts
++++ b/client/pet/card/lock-freeze.ts
+@@ -24,6 +24,8 @@ export interface LockFreezeInput extends FreezeHandlers {
+   lock?: LockState;
+   /** 锁叶子变化次数。 */
+   lockTick: number;
++  /** A-NAS: the page is idle, hidden or under the screen saver: frozen as under a lock until it ends. */
++  paused?: boolean;
+   /** 动画链的冻结开关；返回的就是这次翻转，null 表示本来就是这个值。 */
+   setFrozen(frozen: boolean): FreezeCue | null;
+ }
+@@ -32,6 +34,8 @@ export interface LockFreezeInput extends FreezeHandlers {
+ export interface LockFreeze {
+   /** 本地立即解冻，并清掉解冻定时器；用户接管宠物时调。 */
+   release(): void;
++  /** A-NAS: whether the lock leaf holds the card now; a pause alone does not. */
++  locked(): boolean;
+ }
+ 
+ /** 注入的 react 能力。 */
+@@ -84,26 +88,36 @@ export function createLockFreeze(rt: LockFreezeRuntime) {
+       }
+     };
+ 
++    /** A-NAS: whether the lock leaf froze the card, as against a pause. */
++    const lockedRef = useRef(false);
++
+     useEffect(() => {
+       clearTimer();
+       const now = Date.now();
+       const expiresAt = freezeDeadline(input.lock, now);
+-      dispatchCue(input.setFrozen(expiresAt > now), input);
++      // A-NAS: frozen is locked or paused, and this stays the only place that turns it on or off: a lock
++      // that ends during a pause leaves the card frozen, and so does a pause that ends under a lock.
++      const paused = input.paused === true;
++      lockedRef.current = expiresAt > now;
++      dispatchCue(input.setFrozen(lockedRef.current || paused), input);
+       if (expiresAt <= now) return clearTimer;
+       timerRef.current = window.setTimeout(() => {
+         timerRef.current = null;
+-        dispatchCue(input.setFrozen(false), input);
++        lockedRef.current = false;
++        dispatchCue(input.setFrozen(paused), input);
+       }, expiresAt - now);
+       return clearTimer;
+       // 回调每渲染重建，但只读 ref 与稳定 setter；进依赖会让每次渲染都清掉并重设解冻定时器，锁会永不到期。
+       // eslint-disable-next-line react-hooks/exhaustive-deps -- 变化原因只有叶子与 tick
+-    }, [input.lockTick, input.lock]);
++    }, [input.lockTick, input.lock, input.paused]);
+ 
+     return {
+       release: () => {
+         clearTimer();
+-        dispatchCue(input.setFrozen(false), input);
++        lockedRef.current = false;
++        dispatchCue(input.setFrozen(input.paused === true), input);
+       },
++      locked: () => lockedRef.current,
+     };
+   };
+ }
+diff --git a/client/pet/card/props.ts b/client/pet/card/props.ts
+--- a/client/pet/card/props.ts
++++ b/client/pet/card/props.ts
+@@ -47,4 +47,7 @@ export interface PetCardProps {
+   sleepTick: number;
+   /** 宠物间碰撞站场。 */
+   arena: ReactNS.MutableRefObject<{ slots: Record<string, PetCollisionSlot> }>;
++  /** A-NAS: the page is idle, hidden or under the screen saver. The card freezes as under a lock and
++   *  holds a flight too; the container sends it no commands meanwhile. */
++  paused?: boolean;
+ }
+diff --git a/client/pet/card/runtime.ts b/client/pet/card/runtime.ts
+--- a/client/pet/card/runtime.ts
++++ b/client/pet/card/runtime.ts
+@@ -14,7 +14,7 @@ import { resolvePetSizePx } from '../../../shared/pet-size';
+ import { TOOLTIP_GAP_RATIO, tooltipPlacement } from '../../../shared/tooltip';
+ import { makeWhisperBubble } from '../../bubble';
+ import { playClickSound } from '../click-sound';
+-import { derivePetMetrics, petRootStyle, petStageStyle } from '../motion/geometry';
++import { boxToRatio, derivePetMetrics, petRootStyle, petStageStyle } from '../motion/geometry';
+ import { makePlaybackReporter } from '../playback-report';
+ import { createAnimationFlow } from './animation-flow';
+ import { createBubbleSlots } from './bubble-slots';
+@@ -56,7 +56,7 @@ export function createCardRuntime(rt: PetRuntime) {
+   const useCardDrag = createCardDrag({ useRef, useEffect });
+ 
+   return function useCardRuntime(props: PetCardProps): CardViewProps {
+-    const { arena, cfg, lock, lockTick, sleep, sleepTick, workStatus } = props;
++    const { arena, cfg, lock, lockTick, paused, sleep, sleepTick, workStatus } = props;
+     const { onFocusSession } = props;
+ 
+     // 实际渲染宽度：百分比只在挂载与配置变更时按当次视口宽解析一次，拖窗口不跟随。
+@@ -216,6 +216,7 @@ export function createCardRuntime(rt: PetRuntime) {
+     const lockFreeze = useLockFreeze({
+       lock,
+       lockTick,
++      paused,
+       onFrozen: () => {
+         // 光堵随机链不够：它只在动画播完时调用，不暂停会把当前这段播完才停。
+         motion.stopMove();
+@@ -223,6 +224,12 @@ export function createCardRuntime(rt: PetRuntime) {
+         bubbles.hideWork();
+       },
+       onResumed: () => {
++        // A-NAS: the freeze paused the frame in front; play it on. A stage's single loop, picked again
++        // below, is the same animation and would not switch, so it stayed still; anything else picked
++        // takes over once it is ready. A pet asleep under the freeze sleeps on.
++        const front = ownAnim.frontVideo();
++        if (front?.paused && !front.ended) void front.play().catch(() => {});
++        if (liveRef.current.flow?.sleeping() ?? false) return;
+         // 解冻：非终态工作状态回档位循环，否则回 idle 一次，播完由动画链接回随机链。
+         if (liveRef.current.flow?.resumeWorkStatusAnim() ?? false) return;
+         if (petAnims.idle.length) {
+@@ -234,10 +241,34 @@ export function createCardRuntime(rt: PetRuntime) {
+       setFrozen: ownAnim.setFrozen,
+     });
+     liveRef.current.releaseLock = () => {
++      // A-NAS: pressing a pet that only a pause froze is the member coming back, not taking it over.
++      if (!lockFreeze.locked()) return;
+       lockFreeze.release();
+       void postAction(ROUTE_PATH + '/lock/release?pet=' + encodeURIComponent(cfg.id), { force: true });
+     };
+ 
++    // A-NAS: a pause also holds a flight where it is (a lock lets it fly on) and keeps where a walk the
++    // freeze stopped got to, so that nothing runs a frame loop while the member is away; the flight
++    // carries on at its speed when the pause ends.
++    const heldFlightRef = useRef<{ vx: number; vy: number } | null>(null);
++    useEffect(() => {
++      if (paused) {
++        if (motion.flight.isFlying()) {
++          heldFlightRef.current = motion.flight.velocity();
++          motion.flight.stop();
++        }
++        const box = motion.box();
++        const viewport = { width: window.innerWidth, height: window.innerHeight };
++        if (box) actions.setCustomPos(boxToRatio(box, viewport, { w: halfW, h: halfH }));
++        return;
++      }
++      const held = heldFlightRef.current;
++      const box = motion.box();
++      heldFlightRef.current = null;
++      if (held && box) motion.startThrow(box.x, box.y, held.vx, held.vy);
++      // eslint-disable-next-line react-hooks/exhaustive-deps -- only a pause starting or ending moves anything
++    }, [paused]);
++
+     // 共享运行时：状态容器、驱动与跨关注点动作拼成一份，指令处理按需取值。
+     const hub: CardHub = {
+       anims: () => cfgRef.current.animations,

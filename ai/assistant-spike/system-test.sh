@@ -60,7 +60,7 @@ done
 # for assistants, all off by default, switched on the way the trial does it.
 bash /spike/product-settings.sh on >/tmp/product-settings.log 2>&1 || tail -n 5 /tmp/product-settings.log
 check "the assistant's settings are on in the product's services" \
-  test "$(bash /spike/product-settings.sh state)" = "session gate on, photos for assistants on"
+  test "$(bash /spike/product-settings.sh state)" = "session gate on, photos for assistants on, companion for assistants on"
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
 check "the executor's assistant socket is out of a member's reach outside the sandbox" \
   denied alice python3 -c "$unix_connect" /run/a-nas/assistant-changes.sock
@@ -140,7 +140,7 @@ assistant_probe() { # ACCOUNT LEAST_PASSES
   done < <(grep '^HIDDEN ' <<<"$log" || true)
 }
 # Every line the probe runs in this layout; lines that do not apply here print INFO instead.
-assistant_probe alice 38
+assistant_probe alice 39
 # The administrator's assistant: the groups it carries, and that none of them is granted
 # anything it can reach.
 install -d /etc/systemd/system/anas-assistant-probe@owner.service.d
@@ -281,6 +281,11 @@ fi
 
 # --- With the runtime: alice's assistant itself, as alice, through the Product Service's socket.
 if [[ -x "$assistant_python" ]]; then
+  # The companion's MCP server under the runtime's own MCP SDK, which make ai-test has not
+  # got: a missing argument, or a string that looks like JSON, reaches the Product Service
+  # instead of coming back as the SDK's error, which Hermes's circuit breaker counts.
+  sdk_out=$(cd /src/ai && "$assistant_python" -B -m unittest tests.test_companion_mcp 2>&1 || true)
+  check "the companion's MCP server passes every call on under the runtime's MCP SDK" grep -qx OK <<<"$sdk_out"
   serve_out=$("$assistant_python" /spike/serve_client.py alice chat hello 'CALL read_file {"path": "/nas/个人空间/计划.md"}' 2>&1 || true)
   check "alice's assistant answers over its socket" grep -qx '< ok' <<<"$serve_out"
   check "it reads her own file" grep -q 买菜 <<<"$serve_out"

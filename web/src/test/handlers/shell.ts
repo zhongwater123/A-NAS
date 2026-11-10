@@ -1,6 +1,8 @@
 // The reads the desktop shell makes on its own: sign-in, the status bar, the
 // rail, the icons, notifications and what the signed-in desktop loads around
 // the windows. Tests that render <App /> serve these and add what they open.
+import { HttpResponse } from "msw";
+
 import type {
   AppShortcut,
   AssistantStatus,
@@ -56,6 +58,8 @@ export function shellHandlers(options: ShellOptions = {}) {
     http.get("/api/v1/feedback", ({ response }) => response(200).json({ items: [] })),
     // 家庭中心's hints after signing in.
     http.get("/api/v1/family/hints", ({ response }) => response(200).json({ items: [] })),
+    // The companion's animations, served beside the API (internal/webui): none installed.
+    http.untyped.get(`/companion/animations`, () => HttpResponse.json({ pool: "", animations: {} })),
   ];
 }
 
