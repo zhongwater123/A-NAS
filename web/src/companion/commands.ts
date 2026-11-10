@@ -183,6 +183,9 @@ function played(playbackId: string, signal?: AbortSignal): Promise<CompanionOutc
       resolve(outcome);
     }
     function answer(record: PlaybackRecord, matched: boolean) {
+      // A wait that ran out settles the animation as answered, so that a clip still loading does not show
+      // after VNAS heard it did not play (the card looks before it shows one, petCard.tsx).
+      if (!matched) companionPlayback.report(playbackId, "failed", "timeout");
       settle(
         ok(
           matched

@@ -50,6 +50,8 @@ export interface CardAnimationInput {
   petId: string;
   /** A-NAS: whether the page has paused the card now. */
   paused?: () => boolean;
+  /** A-NAS: whether a command was answered before its clip showed. */
+  settled?: (playbackId: string) => boolean;
 }
 
 /** A-NAS: a switch the card's state asked the chain for: the state, and the chain that made it. */
@@ -96,6 +98,7 @@ export function createCardAnimation(rt: CardAnimationRuntime) {
       isDragging: () => live.current.drag.isActive(),
       initiallyFrozen: input.lock?.locked === true && input.lock.expiresAt > Date.now(),
       ...(input.paused === undefined ? {} : { paused: input.paused }),
+      ...(input.settled === undefined ? {} : { settled: input.settled }),
     });
     const ownAnim = ownAnimRef.current;
     live.current.ownAnim = ownAnim;

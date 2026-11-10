@@ -49,6 +49,8 @@ interface PendingSwap {
   playbackId: string | null;
   /** A-NAS: whether this switch is the one more try at a clip that did not play. */
   retry: boolean;
+  /** A-NAS: whether a command started this switch, rather than taking over one that loaded its clip anyway. */
+  commanded: boolean;
 }
 
 /** 动画链的依赖：全部用取值函数，避免捕获渲染期的快照。 */
@@ -79,6 +81,11 @@ export interface OwnAnimationDeps {
   initiallyFrozen: boolean;
   /** A-NAS: whether the page has paused the card (see onReady below); a lock alone does not. */
   paused?: () => boolean;
+  /**
+   * A-NAS: whether a command was answered before its clip showed, as when its caller stopped waiting for the
+   * clip to start (the page's VNAS window, commands.ts). Such a clip does not show (lapsed below).
+   */
+  settled?: (playbackId: string) => boolean;
   /** 素材加载器；缺省用带超时的默认实现。 */
   loader?: AssetLoader;
 }
@@ -190,6 +197,25 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     deps.report(playbackId, status, reason);
   };
 
+  /**
+   * A-NAS: a switch whose command was answered while its clip loaded (deps.settled): the clip does not show,
+   * so that the pet does what the answer says. A switch the command took over, which was loading the clip
+   * anyway, goes on without it. One the command started is dropped, and the chain goes on from the clip in
+   * front as after a command's clip that did not play (clipFailed), without the wait.
+   */
+  const lapsed = (swap: PendingSwap): boolean => {
+    if (swap.playbackId === null || deps.settled?.(swap.playbackId) !== true) return false;
+    if (!swap.commanded) {
+      swap.playbackId = null;
+      return false;
+    }
+    if (pending?.gen === swap.gen) pending = null;
+    const el = frontVideo();
+    if (frozen || (el !== null && !el.paused && !el.loop) || deps.isDragging()) return true;
+    deps.onEnded(nextCue());
+    return true;
+  };
+
   /** A-NAS: switchTo, or with `retry` the one more try at a clip that did not play (clipFailed). */
   const start = (next: string, nextOnce: boolean, cuePlaybackId: string | null, retry: boolean): void => {
     // 一次性消费点播编号：清空会再跑一趟 effect，那一趟落入防重分支。
@@ -220,7 +246,14 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     if (pending?.playbackId != null && pending.playbackId !== cuePlaybackId)
       deps.report(pending.playbackId, 'cancelled', REASON_SUPERSEDED);
     const swapGen = (gen += 1);
-    const swap: PendingSwap = { anim: next, once: nextOnce, gen: swapGen, playbackId: cuePlaybackId, retry };
+    const swap: PendingSwap = {
+      anim: next,
+      once: nextOnce,
+      gen: swapGen,
+      playbackId: cuePlaybackId,
+      retry,
+      commanded: cuePlaybackId !== null,
+    };
     pending = swap;
     // A-NAS: a switch takes over from the wait after a clip that did not play.
     clearTimeout(failedWait);
@@ -265,6 +298,11 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
           loader.release(objectUrl); // 已被更新的切换覆盖：本次加载作废。
           return;
         }
+        // A-NAS: a command answered while its clip was fetched: the clip does not go in.
+        if (lapsed(swap)) {
+          loader.release(objectUrl);
+          return;
+        }
         const slot = slotOf(targetIndex);
         const previous = blobUrl[slot];
         if (previous !== null) loader.release(previous);
@@ -297,6 +335,11 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       if (pending?.gen === swapGen && el.src !== ownUrl) return;
       el.removeEventListener('loadeddata', onReady);
       if (pending?.gen !== swapGen) return;
+      // A-NAS: nor one answered while it decoded.
+      if (lapsed(swap)) {
+        el.pause();
+        return;
+      }
       // A-NAS: the command the switch plays now, which may have taken it over while it loaded.
       const command = swap.playbackId;
       const outgoing = elementOf(front);

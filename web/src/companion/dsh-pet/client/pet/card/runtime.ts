@@ -85,6 +85,8 @@ export function createCardRuntime(rt: PetRuntime) {
     // A-NAS: the page's pause, for the animation chain's callbacks.
     const pausedRef = useRef(paused === true);
     pausedRef.current = paused === true;
+    const settledRef = useRef(props.playbackSettled);
+    settledRef.current = props.playbackSettled;
 
     // DOM 节点：视图挂载后才有值，驱动全部经取值函数读。
     const rootRef = useRef<HTMLDivElement | null>(null);
@@ -139,6 +141,7 @@ export function createCardRuntime(rt: PetRuntime) {
       videoB: () => videoBRef.current,
       workStatusRef,
       paused: () => pausedRef.current,
+      settled: (playbackId) => settledRef.current?.(playbackId) === true,
     });
 
     const motion = useCardMotion({

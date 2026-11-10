@@ -31,6 +31,8 @@ interface Chain {
   front: () => HTMLVideoElement;
   /** The last fetch arrives and decodes: its clip goes in front. */
   arrive: () => Promise<void>;
+  /** The commands answered elsewhere, as the window's wait running out does. */
+  settled: Set<string>;
 }
 
 function chain(): Chain {
@@ -45,6 +47,7 @@ function chain(): Chain {
   const ended: EndedCue[] = [];
   let current = "";
   let made = 0;
+  const settled = new Set<string>();
   const anim = createOwnAnimation({
     videoA: () => videos[0],
     videoB: () => videos[1],
@@ -58,6 +61,7 @@ function chain(): Chain {
     onEnded: (cue) => ended.push(cue),
     isDragging: () => false,
     initiallyFrozen: false,
+    settled: (playbackId) => settled.has(playbackId),
     loader: {
       load: (url, handlers) =>
         loads.push({ clip: decodeURIComponent(url).replace(/^.*\/|\.(webm|mov).*$/g, ""), handlers }),
@@ -73,6 +77,7 @@ function chain(): Chain {
     reports,
     ended,
     front,
+    settled,
     play: (clip, once = true, playbackId = null) => {
       current = clip;
       anim.switchTo(clip, once, playbackId);
@@ -104,6 +109,52 @@ afterEach(() => {
 });
 
 describe("a command's clip", () => {
+  it("does not show when its command was answered while it was fetched, and the chain goes on", async () => {
+    const c = chain();
+    c.play("待机呼吸休闲");
+    await c.arrive();
+    const shown = c.front();
+    c.play("点击回应-元气挥手", true, "pb-1");
+    c.settled.add("pb-1");
+    c.loads.at(-1)?.handlers.onObjectUrl("blob:late");
+    expect(c.videos.some((video) => video.src === "blob:late")).toBe(false);
+    expect(c.front()).toBe(shown);
+    expect(c.reports).toEqual([]);
+    expect(c.ended).toHaveLength(1);
+  });
+
+  it("does not show when its command was answered while it decoded", async () => {
+    const c = chain();
+    c.play("待机呼吸休闲");
+    await c.arrive();
+    const shown = c.front();
+    c.play("点击回应-元气挥手", true, "pb-1");
+    c.loads.at(-1)?.handlers.onObjectUrl("blob:late");
+    c.settled.add("pb-1");
+    const late = c.videos.find((video) => video.src === "blob:late") as HTMLVideoElement;
+    late.dispatchEvent(new Event("loadeddata"));
+    await Promise.resolve();
+    expect(c.front()).toBe(shown);
+    expect(c.reports).toEqual([]);
+    expect(c.ended).toHaveLength(1);
+    // What comes next plays as usual.
+    c.play("待机呼吸休闲");
+    await c.arrive();
+    expect(c.front()).not.toBe(shown);
+  });
+
+  it("leaves the clip a switch was loading anyway to show without the command answered meanwhile", async () => {
+    const c = chain();
+    c.play("点击回应-元气挥手");
+    c.play("点击回应-元气挥手", true, "pb-2");
+    c.settled.add("pb-2");
+    await c.arrive();
+    expect(c.front().src).toMatch(/^blob:clip-/);
+    expect(c.reports).toEqual([]);
+    c.front().dispatchEvent(new Event("ended"));
+    expect(c.reports).toEqual([]);
+  });
+
   it("is answered cancelled at once when another switch takes over while it loads", () => {
     const c = chain();
     c.play("点击回应-元气挥手", true, "pb-1");

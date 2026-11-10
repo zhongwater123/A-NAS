@@ -625,6 +625,28 @@ describe("VNAS's commands, carried out by the card", () => {
     );
   });
 
+  it("does not show an animation that comes after VNAS was answered it did not play", async () => {
+    serve([IDLE, "点击回应-元气挥手"]);
+    const { videos } = await mount();
+    startTurn(SESSION);
+    const shown = front(videos);
+    let outcome: Awaited<ReturnType<typeof runCompanionCommand>> | undefined;
+    void runCompanionCommand(SESSION, { action: "anim", args: { name: "点击回应-元气挥手" } }).then((answer) => {
+      outcome = answer;
+    });
+    await plays("点击回应-元气挥手");
+    const { playbackId } = companionState.read().pets.main!.anim.data as { playbackId: string };
+    // What the window does when its wait for the clip to start runs out (commands.test.ts).
+    act(() => void companionPlayback.report(playbackId, "failed", "timeout"));
+    await waitFor(() =>
+      expect(outcome).toEqual({ ok: true, result: { status: "failed", playbackId, reason: "timeout" } }),
+    );
+    await settle();
+    for (const video of videos) if (video !== shown) fireEvent(video, new Event("loadeddata"));
+    await settle();
+    expect(front(videos)).toBe(shown);
+  });
+
   it("plays an animation to its end though the turn takes a step meanwhile, then shows the step", async () => {
     serve([IDLE, "点击回应-元气挥手", "东张西望"]);
     const { videos } = await mount();

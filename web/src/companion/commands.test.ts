@@ -152,6 +152,9 @@ describe("an animation VNAS asks for", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(outcome).toEqual({ ok: true, result: { status: "failed", playbackId: id, reason: "timeout" } });
     expect(companionPlayback.waiterCount()).toBe(0);
+    // Settled as answered: the card does not show the clip if it comes after all.
+    expect(companionPlayback.get(id)).toMatchObject({ status: "failed", reason: "timeout" });
+    expect(companionPlayback.report(id, "playing")).toBe("ignored");
   });
 
   it("is answered at once when the card fails it before it plays", async () => {

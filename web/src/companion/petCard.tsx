@@ -39,6 +39,7 @@ import { makePlaybackReporter } from "./dsh-pet/client/pet/playback-report";
 import { BUBBLE_DURATION_MS } from "./dsh-pet/client/pet/timings";
 import type { RuntimePet } from "./dsh-pet/client/pet/types";
 import { parsePlaybackPath } from "./dsh-pet/host/playback/parse";
+import { isTerminalStatus } from "./dsh-pet/host/playback/status";
 import { ROUTE_PATH } from "./dsh-pet/shared/constants";
 import { pick } from "./dsh-pet/shared/pickers";
 import {
@@ -312,6 +313,15 @@ async function answer(url: string, body?: unknown): Promise<boolean> {
   return true;
 }
 
+/**
+ * Whether a command's animation was answered before it showed: the VNAS window stopped waiting for it to
+ * start (commands.ts) and told VNAS failed/timeout, so the card leaves it out rather than play it after all.
+ */
+function playbackSettled(playbackId: string): boolean {
+  const record = companionPlayback.get(playbackId);
+  return record !== undefined && isTerminalStatus(record.status);
+}
+
 export function CompanionCard({ installed, pool }: { installed: InstalledAnimations; pool?: string }) {
   // Safari draws no alpha in VP9: it needs dsh-pet's HEVC animations, which this pool may lack.
   const format = prefersMov() ? "mov" : "webm";
@@ -505,7 +515,15 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
       data-companion-rest={paused ? "" : undefined}
       data-vnas-overlay=""
     >
-      <PetCard cfg={cfg} {...leaves} say={say} arena={arena} paused={paused} onPlace={remember} />
+      <PetCard
+        cfg={cfg}
+        {...leaves}
+        say={say}
+        arena={arena}
+        paused={paused}
+        playbackSettled={playbackSettled}
+        onPlace={remember}
+      />
     </div>
   );
 }
