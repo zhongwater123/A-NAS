@@ -62,7 +62,9 @@ if [[ "${1:-}" != --inside ]]; then
   name="anas-system-test-$$"
   docker run -d --name "$name" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
     --tmpfs /run --tmpfs /run/lock -v "$repo:/src:ro" "${real_ai[@]}" "${assistant[@]}" "$image" >/dev/null
-  trap 'docker rm -f "$name" >/dev/null 2>&1' EXIT
+  # Under set -e a failing command here would replace the run's exit status:
+  # on a loaded machine docker can stop the container but fail to remove it.
+  trap 'docker rm -f "$name" >/dev/null 2>&1 || echo "could not remove $name; remove it with: docker rm -f $name" >&2' EXIT
   for _ in $(seq 1 60); do
     state=$(docker exec "$name" systemctl is-system-running 2>/dev/null || true)
     [[ "$state" == running || "$state" == degraded ]] && break
