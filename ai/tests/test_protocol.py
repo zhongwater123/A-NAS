@@ -109,10 +109,34 @@ class ProtocolTest(unittest.TestCase):
         self.assertEqual(fds, [])
 
     def test_rejects_oversize_header_and_closes_descriptor_without_reading_body(self):
-        conn, _ = self.connection(struct.pack(">I", protocol.MAX_FRAME + 1), descriptor=True)
-        with self.assertRaises(protocol.ProtocolError):
-            protocol.read_request(conn)
-        self.assert_closed(conn)
+        for length in (protocol.MAX_FRAME + 1, 1 << 31, (1 << 32) - 1):
+            with self.subTest(length=length):
+                conn, _ = self.connection(struct.pack(">I", length), descriptor=True)
+                with self.assertRaises(protocol.ProtocolError):
+                    protocol.read_request(conn)
+                self.assert_closed(conn)
+
+    def test_json_is_limited_to_the_declared_body(self):
+        payload = b'{"op":"info"}'
+        conn, _ = self.connection(struct.pack(">I", len(payload)) + payload + b"!")
+        self.assertEqual(protocol.read_request(conn), ({"op": "info"}, []))
+
+    def test_receives_at_most_one_image_descriptor(self):
+        sender, receiver = socket.socketpair()
+        self.enterContext(sender)
+        self.enterContext(receiver)
+        sender.settimeout(3)
+        receiver.settimeout(3)
+        first = self.enterContext(tempfile.TemporaryFile())
+        second = self.enterContext(tempfile.TemporaryFile())
+        conn = ShortReads(receiver, 1024)
+        self.addCleanup(self.close_received, conn)
+        payload = b'{"op":"embed_image"}'
+        socket.send_fds(sender, [struct.pack(">I", len(payload)) + payload], [first.fileno(), second.fileno()])
+        request, fds = protocol.read_request(conn)
+        self.assertEqual(request, {"op": "embed_image"})
+        self.assertEqual(len(fds), 1)
+        os.fstat(fds[0])
 
     def test_closes_descriptor_on_truncated_header_body_and_invalid_json(self):
         for frame, error in (
