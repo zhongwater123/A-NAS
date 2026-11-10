@@ -55,6 +55,14 @@ describe("each step of a VNAS turn, as the companion shows it", () => {
     expect(shortDetail("a\u2028b\u2029c")).toBe("a b c");
   });
 
+  it("does not name what VNAS does on the desktop", () => {
+    // A click's detail is an element's ref; typing, a key and scrolling are no click.
+    for (const roll of [0, 0.99]) {
+      vi.spyOn(Math, "random").mockReturnValue(roll);
+      expect(behaviorLine("desktop-operate", "向下", false)).not.toContain("向下");
+    }
+  });
+
   it("names nothing on the local console's shared screen", () => {
     for (const roll of [0, 0.99]) {
       vi.spyOn(Math, "random").mockReturnValue(roll);

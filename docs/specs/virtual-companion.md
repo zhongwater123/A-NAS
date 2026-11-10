@@ -56,7 +56,7 @@ VNAS 能控制它（[#414](../decisions/2026-11-06-companion-v1.md) 记录的 20
 | 运行 | `terminal`、`execute_code`、`process_manage` | 写代码 | 跑一下 {detail}，稍等哦／噼里啪啦敲命令中~ |
 | 看照片、视频 | `vision_analyze`、`video_analyze`、`mcp__anas__look_at_photo`、`mcp__anas__browse_photos` | 扑克魔术 | 看看这张照片~／{detail} 我瞧瞧哦 |
 | 看桌面 | `browser_snapshot`、`browser_vision` | 东张西望 | 看看桌面上有什么~／我先瞅一眼屏幕哦 |
-| 操作桌面 | `browser_click`、`browser_type`、`browser_press`、`browser_scroll` | 下五子棋 | 帮你点一下 {detail}~／在桌面上动动小手~ |
+| 操作桌面 | `browser_click`、`browser_type`、`browser_press`、`browser_scroll` | 下五子棋 | 帮你操作一下桌面~／在桌面上动动小手~ |
 | 分派子任务 | `delegate_task` | 变鸽子 | 派小鸽子去帮忙啦~／这件交给小帮手咯！ |
 | 定时任务 | `cronjob_manage` | 抽陀螺 | 定好时间啦，到点自己转~／设个定时任务~ |
 | 提交更改 | `mcp__anas__submit_changes` | 拆礼物 | 改好啦，请你过目~／给你看看我做的~ |

@@ -35,7 +35,8 @@ export const BEHAVIORS: Record<Behavior, { clip: string; lines: readonly string[
   run: { clip: "写代码", lines: ["跑一下 {detail}，稍等哦", "噼里啪啦敲命令中~"] },
   look: { clip: "扑克魔术", lines: ["看看这张照片~", "{detail} 我瞧瞧哦"] },
   "desktop-look": { clip: "东张西望", lines: ["看看桌面上有什么~", "我先瞅一眼屏幕哦"] },
-  "desktop-operate": { clip: "下五子棋", lines: ["帮你点一下 {detail}~", "在桌面上动动小手~"] },
+  // No {detail}: a click's is an element's ref, and typing, a key and scrolling are not a click.
+  "desktop-operate": { clip: "下五子棋", lines: ["帮你操作一下桌面~", "在桌面上动动小手~"] },
   delegate: { clip: "变鸽子", lines: ["派小鸽子去帮忙啦~", "这件交给小帮手咯！"] },
   schedule: { clip: "抽陀螺", lines: ["定好时间啦，到点自己转~", "设个定时任务~"] },
   submit: { clip: "拆礼物", lines: ["改好啦，请你过目~", "给你看看我做的~"] },
