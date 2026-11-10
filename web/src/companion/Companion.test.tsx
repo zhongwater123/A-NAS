@@ -41,9 +41,12 @@ const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 50))
 
 /** The animations the card fetched, by name, in order: what it played or is about to. */
 let fetched: string[] = [];
+/** Animations whose next fetches fail, by name: how many more, and whether the network or the NAS fails them. */
+const failing = new Map<string, { times: number; how: "network" | "http" }>();
 
 beforeEach(() => {
   fetched = [];
+  failing.clear();
   // jsdom plays no video and makes no object URLs; the animation chain only needs them to exist.
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockReturnValue(undefined);
@@ -53,7 +56,13 @@ beforeEach(() => {
   vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query }));
   server.use(
     http.untyped.get(`${origin}/companion/thumb/main/:name`, ({ request }) => {
-      fetched.push(decodeURIComponent(new URL(request.url).pathname).replace(/^.*\/|\.(webm|mov)$/g, ""));
+      const name = decodeURIComponent(new URL(request.url).pathname).replace(/^.*\/|\.(webm|mov)$/g, "");
+      fetched.push(name);
+      const failure = failing.get(name);
+      if (failure && failure.times > 0) {
+        failure.times -= 1;
+        return failure.how === "http" ? new HttpResponse(null, { status: 503 }) : HttpResponse.error();
+      }
       return new HttpResponse(new Blob(["webm"]));
     }),
   );
@@ -476,6 +485,52 @@ describe("what VNAS asks of the companion", () => {
     write("lock", { locked: false });
     expect(play.mock.contexts).toContain(front(videos));
     await plays(IDLE);
+  });
+});
+
+describe("an animation that does not come", () => {
+  const SLEEP = { start: "睡觉-开始", loop: "睡觉-循环", end: "睡觉-起来" };
+  // A clip that does not come is fetched again a second later, and the card goes on two seconds after that.
+  const later = { timeout: 5000 };
+
+  it.each([
+    ["the clip it falls asleep with", SLEEP.start, "network"],
+    ["its sleeping loop", SLEEP.loop, "network"],
+    ["the clip it wakes with", SLEEP.end, "http"],
+  ] as const)("does not keep it asleep or awake when it is %s", async (_, clip, how) => {
+    serve([IDLE, SLEEP.start, SLEEP.loop, SLEEP.end]);
+    const { videos } = await mount();
+    failing.set(clip, { times: 2, how });
+    act(() => void companionSleep.enter("main", SLEEP));
+    if (clip !== SLEEP.start) {
+      await plays(SLEEP.start);
+      await ready(videos);
+      act(() => fireEvent(front(videos), new Event("ended")));
+    }
+    // Its loop plays though the clip before it did not come, and comes again after it did not.
+    await waitFor(() => expect(fetched.filter((name) => name === SLEEP.loop)).toHaveLength(clip === SLEEP.loop ? 3 : 1), later);
+    await settle();
+    await ready(videos);
+    fetched = [];
+    act(() => void companionSleep.wake("main"));
+    if (clip === SLEEP.end) {
+      // It wakes without it: VNAS was told it is awake, and the card goes on.
+      await waitFor(() => expect(fetched).toEqual([SLEEP.end, SLEEP.end, IDLE]), later);
+      return;
+    }
+    await plays(SLEEP.end);
+    await ready(videos);
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await plays(IDLE);
+  });
+
+  it("goes on when the clip after the one that ended does not come", async () => {
+    serve([IDLE]);
+    const { videos } = await mount();
+    failing.set(IDLE, { times: 2, how: "http" });
+    fetched = [];
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await waitFor(() => expect(fetched).toEqual([IDLE, IDLE, IDLE]), later);
   });
 });
 
