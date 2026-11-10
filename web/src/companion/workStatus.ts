@@ -197,6 +197,17 @@ export function stopTurn(sessionId: string): void {
 }
 
 /**
+ * The prompt of a turn this window started did not go in (prompt.submit failed): the turn is not this
+ * window's, and the next one in the conversation, perhaps from another device, must not move this
+ * device's companion. Unlike a stop, nothing happened that the companion answers.
+ */
+export function withdrawTurn(sessionId: string): void {
+  if (!prompting.delete(sessionId)) return;
+  todos.delete(sessionId);
+  clear(sessionId);
+}
+
+/**
  * Calls the listener when the member stops a turn here (stopTurn), for the companion to answer it; the
  * stage is already gone. Returns the call that removes it.
  */

@@ -215,6 +215,32 @@ describe("the VNAS window", () => {
     cleanup();
     expect(shown()).toBeNull();
   });
+  it("does not move the companion for a conversation whose prompt from this window did not go in", async () => {
+    await open();
+    // The turn the conversation was running when it opened ends.
+    await emit("message.complete", { status: "complete" });
+    const answer = client.request.getMockImplementation();
+    client.request.mockImplementation(async (method: string) => {
+      if (method === "prompt.submit") throw new Error("busy");
+      return answer?.(method);
+    });
+    try {
+      const user = userEvent.setup();
+      await user.type(screen.getByRole("textbox"), "清理缓存");
+      await user.click(screen.getByRole("button", { name: "发送" }));
+      expect(await screen.findByText("VNAS 暂时没有响应，请稍后再试")).toBeTruthy();
+      expect(client.request).toHaveBeenCalledWith(
+        "browser.controller.register",
+        expect.objectContaining({ session_id: LIVE }),
+      );
+      // A turn in the conversation from another device.
+      await emit("message.start");
+      expect(shown()).toBeNull();
+    } finally {
+      if (answer) client.request.mockImplementation(answer);
+    }
+  });
+
   it("carries out VNAS's commands to the companion and answers each one", async () => {
     await open();
     setCompanionReady(true);

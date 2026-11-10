@@ -81,7 +81,15 @@ import {
 import { ErrorBoundary } from "react-error-boundary";
 
 import { releaseCommandLocks, runCompanionCommand, stopTurnCommands } from "../companion/commands";
-import { forgetAll, type GatewayPayload, reportCards, reportEvent, startTurn, stopTurn } from "../companion/workStatus";
+import {
+  forgetAll,
+  type GatewayPayload,
+  reportCards,
+  reportEvent,
+  startTurn,
+  stopTurn,
+  withdrawTurn,
+} from "../companion/workStatus";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { formatBytes } from "../lib/bytes";
 import { copyText } from "../lib/clipboard";
@@ -411,7 +419,13 @@ export function AssistantPanel({
     };
   }, [gateway.client]);
 
-  const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed, beforePrompt });
+  // A prompt that did not go in started no turn here: the companion does not follow the conversation for it.
+  const thread = useAssistantThread(gateway, activeId, {
+    onCreated: setActiveId,
+    onChanged: changed,
+    beforePrompt,
+    promptFailed: withdrawTurn,
+  });
   const { send, cancel: stopReply, liveId } = thread;
   // A stop counts from this window's request, for the companion too (companion/workStatus.ts). Its
   // commands first: the companion answers the stop after the idle animation they put back.

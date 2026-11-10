@@ -38,6 +38,8 @@ interface Callbacks {
    * its steps come to the window the member sends from.
    */
   beforePrompt?(liveId: string): Promise<void>;
+  /** The prompt did not go in after beforePrompt: the window undoes what it set up for the turn. */
+  promptFailed?(liveId: string): void;
 }
 
 const COLS = 100;
@@ -326,7 +328,11 @@ export function useAssistantThread(
           notify.current.onCreated(session.stored_session_id);
         }
         await notify.current.beforePrompt?.(id).catch(() => undefined);
-        await client.request("prompt.submit", { session_id: id, text: input });
+        const submitted = id;
+        await client.request("prompt.submit", { session_id: id, text: input }).catch((error: unknown) => {
+          notify.current.promptFailed?.(submitted);
+          throw error;
+        });
       } catch {
         setError("VNAS 暂时没有响应，请稍后再试");
         updateReply((message) => ({ ...message, pending: false }));
