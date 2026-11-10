@@ -40,7 +40,7 @@ agent:
   # debugging includes the file tools. toolsets-check.py (run by probe.sh) checks all this.
   disabled_toolsets: [web, search, x_search, image_gen, video_gen, computer_use,
     tts, context_engine, connections, project, bot_room, desktop_ui, onboarding, catalog,
-    kanban, discord, discord_admin, yuanbao, feishu_doc, feishu_drive, coding,
+    kanban, discord, discord_admin, feishu_doc, feishu_drive, coding,
     a2a, browser, browser-cdp, browser-use]
   # Never switch to the coding posture (its own toolset and prompt) in a git workspace.
   coding_context: "off"
