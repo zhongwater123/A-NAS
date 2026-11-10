@@ -213,7 +213,8 @@ watched = sorted((Path("dsh-pet/src") / folder).as_posix() for folder in folders
     "by `scripts/vendor-dsh-pet.py`. The code is MIT, see `LICENSE`, which the Web UI's build ships as "
     "`assets/third-party-licenses.txt` (`make web-build`). Do not edit the copied files by hand: "
     "add a patch to `../dsh-pet-patches/` or change the script, and vendor again. "
-    "This README is written by the script too.\n\n"
+    "This README is written by the script too, and `files.sha256` lists every file it wrote with its hash, "
+    "which `make vendor-check` checks without a dsh-pet checkout.\n\n"
     "The animations this code plays are not in Git and are not MIT. The character is the community-made "
     "DeepSeek 大肥鱼, not an official DeepSeek character: the original 溟月 is by "
     "[@上善无形](https://space.bilibili.com/4456176) and the maid design by "
@@ -253,6 +254,13 @@ watched = sorted((Path("dsh-pet/src") / folder).as_posix() for folder in folders
     "companion in a browser, Safari included.\n"
     "5. Stage and install the new pool on the NAS (`scripts/deploy-media-pool.ps1 -Kind companion`, then "
     "`install-media-pool.sh companion`), and have the upgrade reviewed as a dependency upgrade.\n",
+    encoding="utf-8", newline="\n")
+# Every file written here with its hash, in byte order as LC_ALL=C sort puts it: the offline part of
+# scripts/check-dsh-pet-vendor.sh, which CI runs without a checkout, sees a file changed by hand.
+written = sorted((path.relative_to(target).as_posix() for path in target.rglob("*") if path.is_file()),
+                 key=lambda rel: rel.encode())
+(target / "files.sha256").write_text(
+    "".join(f"{hashlib.sha256((target / rel).read_bytes()).hexdigest()}  {rel}\n" for rel in written),
     encoding="utf-8", newline="\n")
 if not mov_zip:
     print(f"HEVC animations not checked: their lines come from {mov_from}, not from the assets-mov zip")

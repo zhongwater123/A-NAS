@@ -8,8 +8,9 @@
 #
 # Always, offline: the pool animations.sha256 makes is the one the README names
 # and scripts/install-media-pool.sh pins, the README lists the patches there
-# are, and every copied file names the pinned commit (a file a patch adds
-# names none).
+# are, every copied file names the pinned commit (a file a patch adds names
+# none), and the files are the ones files.sha256 lists, as the script wrote
+# them: a file changed by hand fails here too.
 # With DSH_PET, a dsh-pet checkout at the pinned commit: vendors again into a
 # scratch directory and requires no difference, and sees the script refuse a
 # checkout with a change. Without MOV_ZIP, the pinned assets-mov zip, the HEVC
@@ -44,6 +45,12 @@ while IFS= read -r -d '' file; do
   first=$(head -n 1 -- "$file")
   [[ $first != "// Vendored from "* || $first == "$header" ]] || fail "${file#"$repo/"} does not start with: $header"
 done < <(find "$vendored" -name '*.ts' -print0)
+listed_files=$(cut -c 67- "$vendored/files.sha256")
+present_files=$(cd "$vendored" && find . -type f ! -name files.sha256 -printf '%P\n' | LC_ALL=C sort)
+[[ $listed_files == "$present_files" ]] ||
+  fail "web/src/companion/dsh-pet does not hold the files dsh-pet/files.sha256 lists: vendor again"
+(cd "$vendored" && sha256sum --quiet --strict -c files.sha256) ||
+  fail "a file in web/src/companion/dsh-pet is not as the script wrote it: add a patch and vendor again"
 echo "vendor-check: pool $pool, $(wc -w <<<"$present") patches, copied from ${pinned:0:12}"
 
 if [[ -z ${1:-} ]]; then
