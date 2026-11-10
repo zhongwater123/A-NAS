@@ -127,10 +127,30 @@ describe("the companion on the desktop", () => {
       }),
     );
     render(<Companion />);
-    await waitFor(() => expect(asked).toBe(true));
-    await settle();
+    await waitFor(() => expect(asked).toBe(true), { timeout: 2000 });
+    // An empty list is an answer: it is not asked for again.
+    asked = false;
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2500)));
+    expect(asked).toBe(false);
     expect(screen.queryByLabelText("大肥鱼")).toBeNull();
     expect(companionReady()).toBe(false);
+  });
+
+  it("asks for the animations again, later each time, while their list cannot be read", async () => {
+    const asked: number[] = [];
+    server.use(
+      http.untyped.get(`${origin}/companion/animations`, () => {
+        asked.push(Date.now());
+        if (asked.length === 1) return HttpResponse.error();
+        if (asked.length === 2) return new HttpResponse("busy", { status: 503 });
+        return HttpResponse.json({ animations: served([IDLE]) });
+      }),
+    );
+    render(<Companion />);
+    expect(await screen.findByLabelText("大肥鱼", {}, { timeout: 10_000 })).toBeInTheDocument();
+    expect(asked).toHaveLength(3);
+    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(2000);
+    expect(asked[2] - asked[1]).toBeGreaterThanOrEqual(4000);
   });
 
   it("plays 大肥鱼 with dsh-pet's card, without a hover credit, and follows what VNAS is doing", async () => {
