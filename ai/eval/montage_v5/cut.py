@@ -917,7 +917,10 @@ def cut(case):
 
 
 PIECE_LEAST = 1.5    # seconds: no shot of a music cut shorter, the slots' and the fills'
+# Sources tagged upside down over upright pixels (V5/rotation.json), turned back in every render of this
+# module, narrative or music: set once here, not per cut, so no cut can miss them.
 ROTATION = {k: set(v) for k, v in read_json(V5 / "rotation.json").items() if k != "about"} if (V5 / "rotation.json").exists() else {}
+render.TURNED_BACK |= {str(f) for names in ROTATION.values() for n in names for f in VIDEOS.glob(f"*/{n}")}
 
 
 def cut_to_music(case):
@@ -971,11 +974,11 @@ def cut_to_music(case):
                     cid, j = beat.rsplit("/", 1)
                     c = cards[cid]
                     # The key frame (what the description saw) a third into the shot, not at its start.
-                    key = c["times"][int(j) - 1]
-                    start = max(c["start"], key - need / fps / 3)
-                    if any(v == cid and x - 0.01 <= key < y - 0.01 for v, x, y in taken):
+                    seen = c["times"][int(j) - 1]
+                    start = max(c["start"], seen - need / fps / 3)
+                    if any(v == cid and x - 0.01 <= seen < y - 0.01 for v, x, y in taken):
                         continue
-                    start = max([start] + [y for v, _x, y in taken if v == cid and y <= key + 0.01])
+                    start = max([start] + [y for v, _x, y in taken if v == cid and y <= seen + 0.01])
                     room = min([c["end"]] + [x for v, x, _y in taken if v == cid and x > start])
                     frames = min(need, int((room - start) * fps))
                     if frames < need and first:      # one beat for the whole slot: start earlier in the card
@@ -1007,9 +1010,6 @@ def cut_to_music(case):
               "shotSize": beats[c["beats"][0] - 1]["shot_size"], "what": beats[c["beats"][0] - 1]["what"],
               "weight": f"画面{c['picture']}"}
     t0 = time.perf_counter()
-    wrong = ROTATION.get(key, set())
-    render.TURNED_BACK |= {str(VIDEOS / ix.videos[c["video"]]["file"]) for c in clips
-                             if Path(ix.videos[c["video"]]["file"]).name in wrong}
     made = render.render_clips([(str(VIDEOS / ix.videos[c["video"]]["file"]), c["start"], c["end"]) for c in clips],
                                str(HERE), ending=True)
     seconds = sum(c["end"] - c["start"] for c in clips)
