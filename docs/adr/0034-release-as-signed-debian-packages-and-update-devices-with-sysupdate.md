@@ -1,6 +1,6 @@
 # 0034：产品以签名软件源中的 Debian 软件包发布，设备以 systemd-sysupdate 双系统分区更新
 
-状态：proposed（2026-11-09；2026-11-10 改为 systemd-sysupdate 优先）；接续 [ADR 0031](0031-declare-host-dependencies-in-debian-packages.md) 决定 6 留下的“产品本身打包”，对应 [#189](https://github.com/zhongwater123/A-NAS/issues/189)、[#171](https://github.com/zhongwater123/A-NAS/issues/171)。
+状态：proposed（2026-11-09；2026-11-10 改为 systemd-sysupdate 优先，同日补第 3 步的验证结论）；接续 [ADR 0031](0031-declare-host-dependencies-in-debian-packages.md) 决定 6 留下的“产品本身打包”，对应 [#189](https://github.com/zhongwater123/A-NAS/issues/189)、[#171](https://github.com/zhongwater123/A-NAS/issues/171)。
 
 A-NAS 现在的发布靠脚本与人工维护，Experimental NAS 之外也没有可行的更新方式。我们决定分两层：
 
@@ -36,7 +36,7 @@ A-NAS 现在的发布靠脚本与人工维护，Experimental NAS 之外也没有
 
 - Home Assistant OS 用 RAUC 更新：更新包以 X.509 证书签名，系统有两个启动分区（[Home Assistant 开发文档](https://developers.home-assistant.io/docs/operating-system/update-system)）。
 - TrueNAS SCALE 基于 Debian，却有意锁住 apt：升级是整个系统写成新的启动环境，保留最近两个，出问题时切回旧环境（[TrueNAS 文档](https://www.truenas.com/docs/scale/25.10/scaletutorials/systemsettings/managebootenvironscale/)）。
-- GNOME OS 正从 OSTree 迁到 systemd-sysupdate，为此给它补了 delta 更新等功能（[All Systems Go 2024](https://media.ccc.de/v/all-systems-go-2024-285-gnome-os-systemd-sysupdate)）。Flatcar 自 2022 年起以 system extension 发布附加组件，由 systemd-sysupdate 定时检查更新（[Flatcar sysext bakery](https://flatcar.github.io/sysext-bakery)）。
+- GNOME OS 正从 OSTree 迁到 systemd-sysupdate，为此推动了可选组件与可插拔的下载后端（[All Systems Go 2024](https://media.ccc.de/v/all-systems-go-2024-285-gnome-os-systemd-sysupdate)）。上游到 systemd 262 仍没有增量下载：可插拔后端的 [#33351](https://github.com/systemd/systemd/issues/33351) 未关闭；KDE Linux 在 systemd 之外用 desync 做增量（[KDE Linux](https://community.kde.org/KDE_Linux/Delta)）。Flatcar 自 2022 年起以 system extension 发布附加组件，由 systemd-sysupdate 定时检查更新（[Flatcar sysext bakery](https://flatcar.github.io/sysext-bakery)）。
 - Debian 对第三方软件源的建议：每个源用 `Signed-By` 只信任自己的密钥，并使用 HTTPS（[Debian Wiki](https://wiki.debian.org/DebianRepository/UseThirdParty)）。
 
 ### Debian 13 提供什么
@@ -73,51 +73,77 @@ systemd-sysupdate 的工作方式（[`sysupdate.d`](https://www.freedesktop.org/
    - 门禁：`make release` 构建全部软件包与签名软件源。系统测试从这个软件源用 apt 安装，并走一遍“上一 release → 本 release → 回滚 → 再升级”。
    - 命令：升级是 `apt-get update && apt-get install a-nas=<版本>`，回滚是同一条命令加 `--allow-downgrades` 与旧版本号，检查用 `a-nas` 带的只读健康检查命令。它们代替每轮手写的脚本。
 2. **家里的设备以整机镜像更新，工具链全部来自 systemd 项目，并且都在 Debian 13 中。**
-   - 镜像：mkosi 从 Debian 13 与第 1 条的软件包构建，所以测试机与家里的设备装的是同一批软件包。
-   - 分区：systemd-repart 建两个系统分区槽位与一个数据分区。用户数据在数据卷上，`/var/lib/a-nas` 等状态在数据分区上，切换系统分区不动它们。
-   - 启动：systemd-boot 加载统一内核镜像，并按启动计数判断新版本。新版本启动后通过健康检查（`boot-complete.target`）才算成功，否则 systemd-boot 退回上一个版本。
-   - 更新：systemd-sysupdate 从 HTTPS 下载带版本号的系统分区与内核镜像，以 `SHA256SUMS` 及其 GPG 签名校验，写进未在使用的槽位。模型等很少变化的内容作为单独的更新组件，只在变化时下载；产品层能否做成单独更新的 system extension，在第 3 步验证。
-   - 产品中的更新服务（经 Host Agent）调用 systemd-sysupdate 检查、下载与安装更新，在“设置”中显示更新状态。apt 在设备上只读，同 TrueNAS 的做法。
-   - systemd-sysupdate 在上游仍是实验组件。第 3 步要证明 Debian 13 的版本满足要求（见下）；满足不了时改用 RAUC，它的资料见“未选择”。
+   - 镜像：mkosi 从 Debian 13 与第 1 条的软件包构建，所以测试机与家里的设备装的是同一批软件包。`a-nas-host`、`a-nas-console` 等依赖装进基础镜像。
+   - 分区：systemd-repart 建两个只读的 `/usr` 槽位与一个持久的根分区。`/etc` 与 `/var`（含 `/var/lib/a-nas`）在持久的根分区上，用户数据在数据卷上，切换 `/usr` 槽位不动它们。
+   - 启动：systemd-boot 加载统一内核镜像，并按启动计数判断新版本。新版本启动后通过健康检查（`boot-complete.target`）才算成功，否则 systemd-boot 退回上一个版本。健康检查失败时重启（`FailureAction=reboot`），内核崩溃后也自动重启（`panic=`）；内核卡死要靠硬件看门狗。
+   - 更新：systemd-sysupdate 从 HTTPS 下载带版本号的 `/usr` 镜像与内核镜像，以 `SHA256SUMS` 及其 GPG 签名校验，写进未在使用的槽位。
+   - 产品层（`a-nas` 与助手试用包）做成 system extension，由 systemd-sysupdate 的 `product` 组件单独更新，不重启设备。模型等很少变化的内容也各自作为组件，只在变化时下载。基础镜像只在 Debian 或依赖变化时发布。
+   - 产品中的更新服务（经 Host Agent）调用 `systemd-sysupdate --json=short` 检查、下载与安装更新，并决定何时重启，在“设置”中显示更新状态。systemd-sysupdate 自带的两个定时器在镜像中禁用。apt 在设备上只读，同 TrueNAS 的做法。
+   - systemd-sysupdate 在上游仍是实验组件。第 3 步已证明 Debian 13 的 systemd 257 满足要求，有两处缺陷要在镜像中绕开，见“第 3 步的验证结论”。
    - Experimental NAS 这类由人装好 Debian 的宿主机，继续用第 1 条的 apt 更新；改用镜像要重装系统盘，时间由用户决定。
 
 ## 实施计划
 
 1. **过渡（本 ADR 之前已做）**：发布包，见[用发布包暂存 release](../runbooks/stage-a-release-bundle.md)，用于近期几个 release。
 2. **软件包与签名软件源**：在一个 PR 中按步骤分提交完成，内容如下。合并后，部署机只需复制软件源并执行 apt 命令，发布包与 `remote-activate-release.sh`、每轮的 root 脚本以及 `make ops-check` 中核对上传清单的 grep 一并删除。
-   - 第 1 条的软件包与 `make release`；
+   - 第 1 条的软件包与 `make release`，布局满足“第 3 步的验证结论”中 system extension 的约束；
    - 版本规则；
    - 维护脚本调用安装器；
    - `site.conf`；
    - 带反向步骤的迁移；
    - 从软件源安装的系统测试；
    - 部署机的手册。
-3. **镜像与 systemd-sysupdate 的验证**：在虚拟机中用 mkosi 构建镜像，以 Debian 13 的 systemd 257 验证以下几项，结论写回本 ADR：
-   - 新版本启动失败或健康检查不过时自动退回；
-   - 安装中途断电后仍能启动；
-   - 数据分区与数据卷在切换后不变；
-   - 一次系统更新的下载量，以及模型不变时是否不再下载；
-   - 产品层做成 system extension 是否可行；
-   - 设备上是否需要比 Debian 13 更新的 systemd。
-
-   任何一项不满足、又不能在 Debian 13 上解决时，改用 RAUC 重做这一步。
+3. **镜像与 systemd-sysupdate 的验证（2026-11-10 完成）**：在虚拟机中用 mkosi 构建镜像，以 Debian 13 的 systemd 257 验证自动退回、断电、数据不变、下载量、产品层做成 system extension，以及是否需要更新的 systemd。结论见下一节，做法与数据见[研究记录](../research/sysupdate-image-verification.md)。
 4. **更新服务与界面**：Host Agent 的更新服务与“设置”中的更新页，另有规格。
-5. **Experimental NAS 改用镜像**：用户决定时间后重装系统盘。数据卷在另外的硬盘上，不受影响。
+5. **设备镜像**：把验证用的 mkosi 配置（[`deploy/sysupdate-spike/`](../../deploy/sysupdate-spike/)）改成正式的设备镜像：从第 2 步的软件源装软件包，加上下一节的两处绕法、禁用 sysupdate 的定时器、正式的签名密钥与更新地址。
+6. **Experimental NAS 改用镜像**：用户决定时间后重装系统盘。数据卷在另外的硬盘上，不受影响。
+
+## 第 3 步的验证结论（2026-11-10）
+
+继续用 systemd-sysupdate，不改用 RAUC。六项在 Debian 13 的 systemd 257 上都通过，设备不需要更新的 systemd。做法、数据与复现见[研究记录](../research/sysupdate-image-verification.md)。
+
+- **自动退回**：健康检查失败的版本和内核崩溃的版本各试启动 3 次，之后 systemd-boot 选回上一版本；正常的新版本在健康检查通过后被标为成功。
+- **断电**：在写 `/usr` 槽位、下载内核镜像的过程中杀掉虚拟机，重启后仍从旧版本启动，写了一半的槽位保持空闲，之后的更新正常完成。
+- **数据**：持久根分区上的 `/var/lib/a-nas`、`/etc/a-nas` 与数据卷，在每次切换与断电后都不变。
+- **下载量**：
+  - 一次系统更新下载 748 MiB（`/usr` 镜像 612 MiB + 内核镜像 136 MiB），每个版本都是全量：上游到 262 没有增量下载。
+  - 没有新版本时只取 282 字节的清单与签名；模型作为单独组件，不变时不下载。
+- **产品层做成 system extension**：可行，不重启即可更新。257 有两处缺陷要绕开：
+  1. sysext 合并后，`/usr` 的 transfer 用 `Path=auto` 找不到磁盘（258 修复），改为由开机单元用 `bootctl -RR` 创建磁盘链接；
+  2. sysext 中的服务开机不启动、sysusers 账号不建，加一个排在 systemd-sysext 之后、执行 `systemd-sysusers` 与 `daemon-reload` 并重新拉起目标的单元，同 Flatcar 的做法。
+- **软件包的约束**（第 2 步的输入）：
+  - 文件只在 `/usr` 与 `/opt`；单元在 `/usr/lib/systemd/system`，以软件包自带的 `.wants` 链接启用；
+  - 账号与目录用 `sysusers.d` 与 `tmpfiles.d`；
+  - 默认配置放 `/usr`，`/etc/a-nas/site.conf` 只放管理员的值；
+  - 不依赖维护脚本的副作用；
+  - 产品依赖的 Debian 软件包放进基础镜像，新增依赖先发基础镜像。
+- **配置上的注意事项**：
+  - 回退后 systemd-sysupdate 仍把失败的版本当作已安装的最新版本，`systemd-sysupdate reboot` 会重启进去再被退回，所以禁用 `systemd-sysupdate-reboot.timer` 与 `systemd-sysupdate.timer`，由产品的更新服务决定何时更新与重启；
+  - Debian 13 没有打包 `systemd-sysupdated` 与 `updatectl`，更新服务调用 `systemd-sysupdate --json=short`。
+- **更新的 systemd**：
+  - 258 修复缺陷 1；
+  - 260 起能把下载与安装分开，并标记下载到一半的分区；
+  - 261 起 sysext 可在 initrd 中合并，缺陷 2 随之消失；
+  - 262 改了单元名，重新标为实验组件，并预告还有不兼容的改动。
+
+  在 Debian 13 上用 257 与两处绕法；换到 Debian 14 的 systemd 时重跑第 3 步的验证，去掉不再需要的绕法。
 
 ## 后果
 
 - 每个 release 都要打标签，CHANGELOG 按 release 分节。
 - 多了要保管的签名密钥：软件源与 systemd-sysupdate 的 `SHA256SUMS` 都用 GPG 签名，可以共用一套保管、备份与轮换办法，由用户决定，写在决定记录中。
-- 联网的设备需要一个 HTTPS 位置放软件源与更新文件，例如 GitHub Releases 或对象存储，放在哪里另行决定。ADR 0016 不变：模型随软件包与镜像发出，设备运行时不联网下载模型。
+- 联网的设备需要一个 HTTPS 位置放软件源与更新文件，例如 GitHub Releases 或对象存储，放在哪里另行决定。ADR 0016 不变：模型随软件包、镜像与签名的更新组件发出，设备运行时不联网下载模型。
 - 开发迭代：测试机加上开发构建的软件源，用 apt 装任意构建；镜像只在发布给设备时构建。
 - 依赖上游的实验组件：systemd-sysupdate 的配置格式可能随 systemd 版本变化，升级设备上的 systemd 时要重跑第 3 步的验证。
-- 第 3 步之前，家里的设备没有自动退回，只能靠 apt 降级。
+- 每次发布基础镜像，每台设备下载约 750 MiB；产品放在 system extension 中，产品更新只下载它自己。只把设备需要的内核模块放进 initrd，内核镜像可从 136 MiB 降到 50 MiB 左右。
+- 设备镜像要带两处针对 systemd 257 的绕法，并禁用 sysupdate 的定时器。
+- 设备镜像做好之前，家里的设备没有自动退回，只能靠 apt 降级。
 
 ## 未选择
 
 - **继续用发布包与每轮脚本**：即现在的过渡做法。没有签名、版本与固定的回滚命令，靠人维护，用户要求取代。
 - **设备也只用 apt 更新（例如 `unattended-upgrades`）**：没有整机的原子回滚。升级中途断电会留下未配置完的软件包；各台设备的系统软件包会逐渐不同。TrueNAS 正是为此锁住了 apt。
-- **RAUC**（第 3 步不通过时的备选）：
+- **RAUC**（第 3 步通过，不采用；systemd-sysupdate 将来满足不了要求时的备选）：
   - 长处：成熟；Home Assistant OS 在用；1.7 起能经 HTTPS 边下载边安装，1.8 起按块比对、只下载变化的块（[RAUC 的变更记录](https://rauc.readthedocs.io/en/v1.13/changes.html)）；Debian 13 有 1.13。
   - 不作首选，是因为它在 systemd 之外另有一套更新包格式、证书与启动器接入，而 systemd-sysupdate、systemd-repart、systemd-boot 与 mkosi 是同一个项目的一套工具，Debian 13 都已带上。
 - **OSTree 或 bootc**：Debian 有 `ostree` 软件包，但没有把 Debian 系统作为可启动部署的集成，这条路以 Fedora 为主，集成成本最高；GNOME OS 也正从 OSTree 迁走。
@@ -130,5 +156,6 @@ systemd-sysupdate 的工作方式（[`sysupdate.d`](https://www.freedesktop.org/
 - [ADR 0031：宿主机依赖由 A-NAS 自己的 Debian 软件包声明](0031-declare-host-dependencies-in-debian-packages.md)（决定 6）
 - [ADR 0016：相册 AI 随系统内置安装](0016-ship-photo-ai-as-a-built-in-offline-capability.md)
 - [ADR 0014：屏保视频不随 release 发布](0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
+- [设备镜像与 systemd-sysupdate 的验证](../research/sysupdate-image-verification.md)（第 3 步）、[验证用的镜像配置与驱动脚本](../../deploy/sysupdate-spike/verify.sh)
 - [用发布包暂存 release](../runbooks/stage-a-release-bundle.md)、[配置并验收 v1.0.1 实验数据卷](../runbooks/provision-v1.0.1-experimental-storage.md)
 - [#189](https://github.com/zhongwater123/A-NAS/issues/189)、[#171](https://github.com/zhongwater123/A-NAS/issues/171)
