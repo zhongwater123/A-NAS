@@ -19,10 +19,15 @@ import {
 } from "./workStatus";
 
 // Whether the local console's screen saver or black screen covers the page; the rest of the module as it is.
-const cover = vi.hoisted(() => ({ up: false }));
+// A test that takes the cover away tells who listens, as the screen saver does.
+const cover = vi.hoisted(() => ({ up: false, dismissed: new Set<() => void>() }));
 vi.mock("../desktop/LocalConsoleScreenSaver", async (original) => ({
   ...(await original<typeof import("../desktop/LocalConsoleScreenSaver")>()),
   localConsoleCovered: () => cover.up,
+  onLocalConsoleDismissed: (listener: () => void) => {
+    cover.dismissed.add(listener);
+    return () => cover.dismissed.delete(listener);
+  },
 }));
 
 const origin = window.location.origin;
@@ -1096,6 +1101,8 @@ describe("walking, throwing and resting", () => {
   it.each([
     ["a key", (target: Element) => (fireEvent.keyDown(target, { key: "a" }), fireEvent.keyUp(target, { key: "a" }))],
     ["a click", (target: Element) => (fireEvent.pointerDown(target), fireEvent.pointerUp(target))],
+    ["a wheel", (target: Element) => fireEvent.wheel(target)],
+    ["a pointer move", (target: Element) => fireEvent.pointerMove(target)],
   ])("goes on at %s that takes the local console's screen saver away", async (_, press) => {
     serve([IDLE]);
     const { videos } = await mount();
@@ -1114,6 +1121,7 @@ describe("walking, throwing and resting", () => {
       event.preventDefault();
       event.stopImmediatePropagation();
       cover.up = false;
+      for (const listener of cover.dismissed) listener();
     };
     const kinds = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"];
     for (const kind of kinds) window.addEventListener(kind, saver, { capture: true });

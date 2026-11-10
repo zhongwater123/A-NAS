@@ -25,7 +25,7 @@ import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react"
 import { jsx } from "react/jsx-runtime";
 
 import { taskNoticesLoaded, useTaskNotices } from "../assistant/taskNotices";
-import { localConsoleCovered } from "../desktop/LocalConsoleScreenSaver";
+import { localConsoleCovered, onLocalConsoleDismissed } from "../desktop/LocalConsoleScreenSaver";
 import { companionPhysics, companionWeights, installedAnimations, workStatusTexts } from "./animations";
 import { BEHAVIORS, behaviorLine } from "./behaviors";
 import type { InstalledAnimations } from "./Companion";
@@ -75,9 +75,9 @@ injectPetCss();
 /** The companion stops after this long without the member, well before the screen saver (180 s). */
 const IDLE_MS = 60_000;
 /**
- * The member's input. The local console's screen saver keeps the input that takes it away to itself (a
- * pointerdown or keydown stopped on the way down), so the release of that press, which reaches the page, is
- * input too: the companion goes on as the screen saver goes, not at the next input after it.
+ * The member's input. The local console's screen saver keeps the input that takes it away to itself (stopped
+ * on the way down) and says so (onLocalConsoleDismissed), so the companion goes on as the screen saver goes,
+ * not at the next input after it; the release of a press, which does reach the page, is input too.
  */
 const ACTIVITY = ["pointerdown", "pointerup", "pointermove", "keydown", "keyup", "wheel", "touchstart"] as const;
 const POSITION_KEY = "a-nas.companion.position";
@@ -377,10 +377,12 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
     if (!document.hidden) timer = window.setTimeout(rest, IDLE_MS);
     for (const type of ACTIVITY) window.addEventListener(type, wake, { passive: true });
     document.addEventListener("visibilitychange", wake);
+    const stopDismissed = onLocalConsoleDismissed(wake);
     return () => {
       resume.current = () => {};
       setCompanionPaused(false);
       window.clearTimeout(timer);
+      stopDismissed();
       for (const type of ACTIVITY) window.removeEventListener(type, wake);
       document.removeEventListener("visibilitychange", wake);
     };
