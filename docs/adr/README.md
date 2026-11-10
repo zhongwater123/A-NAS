@@ -43,6 +43,8 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0032：经机房边缘服务器与 NAS 主动建立的隧道，从互联网开放 Web 桌面](0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)（proposed；修订 0012 的“只适用于可信内网”）
 - [0033：照片文字的更正按内容对象存，修改记录对能看到照片的人公开](0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)（修订 2026-10-30 的 OCR 决定记录中“更正记入活动记录”一项）
 
+- 0036：恢复能力独立于产品服务，产品会话不授予不可逆销毁权（draft，编号占位 PR 待创建）
+
 ## 格式
 
 文件名使用 `NNNN-short-title.md`。正文首先用一至三句话说明背景、决定和原因；只有确有价值时再增加状态、备选项或后果。状态行紧接标题、写在正文之前，以 proposed、accepted 或 superseded 开头；`make docs-check` 读这一行与索引的标记核对，状态行写在第一个小节之前的其他位置时报错。
