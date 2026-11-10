@@ -6,7 +6,7 @@
  * 不变量：只有计数器变化才动手；占用锁生效时自动来源整拍丢弃，显式指令不挡。
  * @module dsh-pet/src/client/pet/card/cue-effects
  */
-import { pickSlot, poolIncludes } from '../../../shared/pickers';
+import { inPools, pickSlot, poolIncludes } from '../../../shared/pickers';
 import { WORK_STATUS_INDEX } from '../../../shared/work-status';
 import type { CardHub } from './hub';
 import type { PetCardProps } from './props';
@@ -45,6 +45,8 @@ export function createCueEffects(rt: CueEffectsRuntime) {
     const prevWorkRef = useRef(0);
     // 调试日志：上一档位，null 表示空闲，undefined 表示启动后尚未触发。
     const prevWorkStateRef = useRef<string | null | undefined>(undefined);
+    // A-NAS: the clip a step asked for that the stage last played, which loops outside the stage's pool.
+    const workAnimRef = useRef<string | null>(null);
     const prevSayRef = useRef(0);
     const prevAnimRef = useRef(0);
     const prevPosRef = useRef(0);
@@ -66,7 +68,11 @@ export function createCueEffects(rt: CueEffectsRuntime) {
         prevWorkStateRef.current = null;
         // 回空闲时把循环中的工作动画改成「播完即停」：否则 ended 永不触发，动画链拿不到
         // 推进信号，宠物会一直卡在工作动画上。
-        if (poolIncludes(hub.anims().events?.workStatus ?? [], card.animRef.current)) hub.ownAnim.stopLoopingFront();
+        // A-NAS: so does the clip a step asked for.
+        const current = card.animRef.current;
+        if (poolIncludes(hub.anims().events?.workStatus ?? [], current) || current === workAnimRef.current)
+          hub.ownAnim.stopLoopingFront();
+        workAnimRef.current = null;
         hub.bubbles.resetWork();
         return;
       }
@@ -81,10 +87,12 @@ export function createCueEffects(rt: CueEffectsRuntime) {
         console.error('[dsh-pet] work-status 档位索引越界：state=' + workStatus.state + ' idx=' + idx);
         return;
       }
+      // A-NAS: the clip the step asks for, when the pet has it, rather than one of the stage's.
+      const own = workStatus.anim != null && inPools(hub.anims(), workStatus.anim) ? workStatus.anim : null;
       // A-NAS: a stage whose animation this NAS has not installed is an empty slot (it keeps its index);
       // the pet carries on with what it was doing rather than switch to no animation at all.
-      if (slot.length === 0) return;
-      const name = pickSlot(slot, card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
+      if (own === null && slot.length === 0) return;
+      const name = own ?? pickSlot(slot, card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
       log('pet=' + cfg.id + ' ' + (prevWorkStateRef.current ?? 'null') + '->' + workStatus.state + '    ' + name);
       const stateChanged = prevWorkStateRef.current !== workStatus.state;
       prevWorkStateRef.current = workStatus.state;
@@ -103,7 +111,9 @@ export function createCueEffects(rt: CueEffectsRuntime) {
       // 只在状态变化时点亮或收起气泡：同状态后续 tick 不重新点亮已自动收起的终态气泡。
       if (stateChanged) hub.bubbles.lightWork(terminal);
       // 循环语义：终态播一遍；非终态单候选无限循环，多候选播一遍后由播完判定轮换。
-      const rotating = !terminal && Array.isArray(slot) && slot.length > 1;
+      // A-NAS: a step's own clip loops like a single one.
+      const rotating = own === null && !terminal && Array.isArray(slot) && slot.length > 1;
+      workAnimRef.current = own;
       card.actions.setOnce(terminal || rotating);
       card.actions.setAnim(name);
     };

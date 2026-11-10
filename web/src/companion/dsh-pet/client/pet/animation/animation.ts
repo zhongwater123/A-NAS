@@ -269,6 +269,8 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       animations: deps.cfg().animations,
       current: deps.currentAnim(),
       workState: deps.workStatus()?.state,
+      // A-NAS: the clip the step asks for.
+      workAnim: deps.workStatus()?.anim ?? null,
     });
     const petId = deps.cfg().id;
     // A-NAS: dsh-pet's trace lines only in a development build.

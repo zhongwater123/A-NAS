@@ -1,0 +1,305 @@
+A-NAS shows each step of a VNAS turn with a clip of its own: reading a file,
+searching, running a command, looking at a photo. Most of these clips are
+category actions, outside the stage's pool. dsh-pet's work status carries a
+stage and a task line only, and the card picks the stage's clip from its slot.
+The work status now also carries the clip the step asks for: the store keeps it
+with the task (setDetail writes both at once), the bridge publishes it, the
+page's reader keeps it, and the card plays it when the pet has it, the stage's
+slot otherwise. It loops while the stage lasts (a clip that ends mid-stage plays
+again instead of handing over to the random chain), stops looping when the
+stage goes idle, and comes back after a click, a drag or the end of a lock.
+
+diff --git a/client/pet/animation/animation.ts b/client/pet/animation/animation.ts
+--- a/client/pet/animation/animation.ts
++++ b/client/pet/animation/animation.ts
+@@ -269,6 +269,8 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+       animations: deps.cfg().animations,
+       current: deps.currentAnim(),
+       workState: deps.workStatus()?.state,
++      // A-NAS: the clip the step asks for.
++      workAnim: deps.workStatus()?.anim ?? null,
+     });
+     const petId = deps.cfg().id;
+     // A-NAS: dsh-pet's trace lines only in a development build.
+diff --git a/client/pet/animation/cues.ts b/client/pet/animation/cues.ts
+--- a/client/pet/animation/cues.ts
++++ b/client/pet/animation/cues.ts
+@@ -30,6 +30,8 @@ export interface EndedInput {
+   current: string;
+   /** 当前工作状态；`undefined` 表示还没收到过。 */
+   workState: string | null | undefined;
++  /** A-NAS: the clip the current step asks for; null or missing = one of its stage's. */
++  workAnim?: string | null;
+ }
+ 
+ /** 工作状态是否处在「非终态」：终态（success / error）与空闲都不续播档位动画。 */
+@@ -44,6 +46,9 @@ const isWorkActive = (state: string | null | undefined): boolean =>
+  */
+ export function decideEndedCue(input: EndedInput): EndedCue {
+   const { animations, current, workState } = input;
++  // A-NAS: a step's own clip, which need not be in the stage's pool, plays on while the stage lasts;
++  // otherwise it would end as a random clip and the random chain would drop the stage.
++  if (isWorkActive(workState) && input.workAnim != null && current === input.workAnim) return { kind: 'work-replay' };
+   const isEvent = isEventAnim(animations.events, current);
+   if (isEvent && isWorkActive(workState)) {
+     // 多候选档位播完轮换到下一候选，长时间状态不单段重复。
+diff --git a/client/pet/card/animation-flow.ts b/client/pet/card/animation-flow.ts
+--- a/client/pet/card/animation-flow.ts
++++ b/client/pet/card/animation-flow.ts
+@@ -6,7 +6,7 @@
+  * 不变量：冻结期间随机链与档位恢复都不动手；换源后必须递增序号，否则同段重播不会生效。
+  * @module dsh-pet/src/client/pet/card/animation-flow
+  */
+-import { pick, pickSlot, rollKind } from '../../../shared/pickers';
++import { inPools, pick, pickSlot, rollKind } from '../../../shared/pickers';
+ import type { SleepState } from '../../../shared/state';
+ import { WORK_STATUS_INDEX } from '../../../shared/work-status';
+ import { decideNextAnimation } from '../animation/next-animation';
+@@ -84,16 +84,17 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
+       if (sleeping()) return false;
+       const ws = workStatusRef.current;
+       if (!ws || !ws.state || ws.state === 'success' || ws.state === 'error') return false;
++      // A-NAS: the clip the step asks for, when the pet has it, comes back rather than one of the stage's.
++      const own = ws.anim != null && inPools(hub.anims(), ws.anim) ? ws.anim : null;
+       const pool = hub.anims().events?.workStatus;
+-      if (!pool || pool.length === 0) return false;
+-      const idx = WORK_STATUS_INDEX[ws.state];
+-      const slot = pool[idx];
++      if (own === null && (!pool || pool.length === 0)) return false;
++      const slot = pool?.[WORK_STATUS_INDEX[ws.state]];
+       // A-NAS: or a stage left empty because its animation is not installed.
+-      if (slot === undefined || slot.length === 0) return false;
+-      const name = pickSlot(slot, card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
++      if (own === null && (slot === undefined || slot.length === 0)) return false;
++      const name = own ?? pickSlot(slot ?? [], card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
+       log(hub.cfg().id, '互动结束恢复状态动画: ' + name);
+       // 多候选档位恢复后同样走播完轮换；单候选维持无限循环。
+-      card.actions.setOnce(Array.isArray(slot) && slot.length > 1);
++      card.actions.setOnce(own === null && Array.isArray(slot) && slot.length > 1);
+       card.actions.setAnim(name);
+       return true;
+     };
+diff --git a/client/pet/card/cue-effects.ts b/client/pet/card/cue-effects.ts
+--- a/client/pet/card/cue-effects.ts
++++ b/client/pet/card/cue-effects.ts
+@@ -6,7 +6,7 @@
+  * 不变量：只有计数器变化才动手；占用锁生效时自动来源整拍丢弃，显式指令不挡。
+  * @module dsh-pet/src/client/pet/card/cue-effects
+  */
+-import { pickSlot, poolIncludes } from '../../../shared/pickers';
++import { inPools, pickSlot, poolIncludes } from '../../../shared/pickers';
+ import { WORK_STATUS_INDEX } from '../../../shared/work-status';
+ import type { CardHub } from './hub';
+ import type { PetCardProps } from './props';
+@@ -45,6 +45,8 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+     const prevWorkRef = useRef(0);
+     // 调试日志：上一档位，null 表示空闲，undefined 表示启动后尚未触发。
+     const prevWorkStateRef = useRef<string | null | undefined>(undefined);
++    // A-NAS: the clip a step asked for that the stage last played, which loops outside the stage's pool.
++    const workAnimRef = useRef<string | null>(null);
+     const prevSayRef = useRef(0);
+     const prevAnimRef = useRef(0);
+     const prevPosRef = useRef(0);
+@@ -66,7 +68,11 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+         prevWorkStateRef.current = null;
+         // 回空闲时把循环中的工作动画改成「播完即停」：否则 ended 永不触发，动画链拿不到
+         // 推进信号，宠物会一直卡在工作动画上。
+-        if (poolIncludes(hub.anims().events?.workStatus ?? [], card.animRef.current)) hub.ownAnim.stopLoopingFront();
++        // A-NAS: so does the clip a step asked for.
++        const current = card.animRef.current;
++        if (poolIncludes(hub.anims().events?.workStatus ?? [], current) || current === workAnimRef.current)
++          hub.ownAnim.stopLoopingFront();
++        workAnimRef.current = null;
+         hub.bubbles.resetWork();
+         return;
+       }
+@@ -81,10 +87,12 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+         console.error('[dsh-pet] work-status 档位索引越界：state=' + workStatus.state + ' idx=' + idx);
+         return;
+       }
++      // A-NAS: the clip the step asks for, when the pet has it, rather than one of the stage's.
++      const own = workStatus.anim != null && inPools(hub.anims(), workStatus.anim) ? workStatus.anim : null;
+       // A-NAS: a stage whose animation this NAS has not installed is an empty slot (it keeps its index);
+       // the pet carries on with what it was doing rather than switch to no animation at all.
+-      if (slot.length === 0) return;
+-      const name = pickSlot(slot, card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
++      if (own === null && slot.length === 0) return;
++      const name = own ?? pickSlot(slot, card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
+       log('pet=' + cfg.id + ' ' + (prevWorkStateRef.current ?? 'null') + '->' + workStatus.state + '    ' + name);
+       const stateChanged = prevWorkStateRef.current !== workStatus.state;
+       prevWorkStateRef.current = workStatus.state;
+@@ -103,7 +111,9 @@ export function createCueEffects(rt: CueEffectsRuntime) {
+       // 只在状态变化时点亮或收起气泡：同状态后续 tick 不重新点亮已自动收起的终态气泡。
+       if (stateChanged) hub.bubbles.lightWork(terminal);
+       // 循环语义：终态播一遍；非终态单候选无限循环，多候选播一遍后由播完判定轮换。
+-      const rotating = !terminal && Array.isArray(slot) && slot.length > 1;
++      // A-NAS: a step's own clip loops like a single one.
++      const rotating = own === null && !terminal && Array.isArray(slot) && slot.length > 1;
++      workAnimRef.current = own;
+       card.actions.setOnce(terminal || rotating);
+       card.actions.setAnim(name);
+     };
+diff --git a/host/plugin/work-status-bridge.ts b/host/plugin/work-status-bridge.ts
+--- a/host/plugin/work-status-bridge.ts
++++ b/host/plugin/work-status-bridge.ts
+@@ -38,7 +38,15 @@ export function createWorkStatusBridge(deps: WorkStatusBridgeInput) {
+   const publishWorkStatus = (): void => {
+     const snap = workStatus.snapshot();
+     // 会话也算内容：同档同文案换了会话，页面必须知道，否则点气泡会跳到上一条会话。
+-    const key = String(snap.state) + '\u0000' + String(snap.task) + '\u0000' + String(snap.sessionId ?? '');
++    // A-NAS: and so is the clip the step asks for.
++    const key =
++      String(snap.state) +
++      '\u0000' +
++      String(snap.task) +
++      '\u0000' +
++      String(snap.anim) +
++      '\u0000' +
++      String(snap.sessionId ?? '');
+     if (key === publishedWork) return;
+     // 抖动判定：只压 working → result 这一个方向（同档只换文案不算抖动，照常立即写；
+     // 反向 result → working 立即写）
+@@ -62,7 +70,7 @@ export function createWorkStatusBridge(deps: WorkStatusBridgeInput) {
+     publishedWorkAt = Date.now();
+     // 外部槽（`api`）不是真实 DSH 会话：这里写成 null，客户端才不会把气泡做成一个点了没反应的入口。
+     const sessionId = snap.sessionId === null || snap.sessionId === EXTERNAL_WORK_SESSION ? null : snap.sessionId;
+-    state.writeSection('workStatus', { state: snap.state, task: snap.task, sessionId });
++    state.writeSection('workStatus', { state: snap.state, task: snap.task, anim: snap.anim, sessionId });
+   };
+ 
+   /** 停掉挂起的补写定时器（插件卸载时调用）。 */
+diff --git a/host/work-status.ts b/host/work-status.ts
+--- a/host/work-status.ts
++++ b/host/work-status.ts
+@@ -132,6 +132,8 @@ export function currentTaskFromTodo(event: {
+ export interface WorkStatusSnapshot {
+   state: HostWorkStatusState | null; // null = 尚无会话活动（空闲）
+   task: string | null; // 当前任务详情（todo/write 提供，可 null）
++  /** A-NAS: the clip the shown step asks for; null = one of its stage's. */
++  anim: string | null;
+   /** 当前展示条目所属会话；空闲或外部槽（`api`）时为 null，客户端据此决定气泡能不能点。 */
+   sessionId: string | null;
+   ts: number; // 最近一次变化的时间戳（轮询侧据此检测变化）
+@@ -145,6 +147,8 @@ export interface SessionWorkEntry {
+   seq: number;
+   /** 任务详情文案；null = 该会话没有清单。 */
+   task: string | null;
++  /** A-NAS: the clip this session's step asks for; null = one of its stage's. */
++  anim: string | null;
+   /** 该条目所属会话；`pickDisplayed` 只遍历 values，所以带着它才能知道展示的是哪一条。 */
+   sessionId: string;
+ }
+@@ -192,7 +196,7 @@ export class WorkStatusStore {
+ 
+   constructor() {
+     this.sessions = new Map();
+-    this.snap = { state: null, task: null, sessionId: null, ts: 0 };
++    this.snap = { state: null, task: null, anim: null, sessionId: null, ts: 0 };
+   }
+ 
+   /** 该会话当前是否有活动条目（决定 todo/write 是否还值得更新它的文案）。 */
+@@ -214,7 +218,7 @@ export class WorkStatusStore {
+   setState(sessionId: string, state: HostWorkStatusState, seq = 0): boolean {
+     const prev = this.sessions.get(sessionId);
+     if (prev?.state === state && prev.seq >= seq) return false;
+-    this.sessions.set(sessionId, { state, seq, task: prev?.task ?? null, sessionId });
++    this.sessions.set(sessionId, { state, seq, task: prev?.task ?? null, anim: prev?.anim ?? null, sessionId });
+     this.refresh();
+     return true;
+   }
+@@ -228,6 +232,18 @@ export class WorkStatusStore {
+     return true;
+   }
+ 
++  /**
++   * A-NAS: writes the session's task and the clip its step asks for together (null clears either), so
++   * that a step's line and clip change in one snapshot; a session without an entry is left alone.
++   */
++  setDetail(sessionId: string, detail: { task: string | null; anim: string | null }): boolean {
++    const prev = this.sessions.get(sessionId);
++    if (!prev || (prev.task === detail.task && prev.anim === detail.anim)) return false;
++    this.sessions.set(sessionId, { ...prev, task: detail.task, anim: detail.anim });
++    this.refresh();
++    return true;
++  }
++
+   /** 清掉某会话（回合结束 / 终态过期）：它的 task 一并消失，不会残留到后续活动里。 */
+   clear(sessionId: string): boolean {
+     if (!this.sessions.delete(sessionId)) return false;
+@@ -245,10 +261,18 @@ export class WorkStatusStore {
+     const best = pickDisplayed(this.sessions.values());
+     const nextState = best?.state ?? null;
+     const nextTask = best?.task ?? null;
++    const nextAnim = best?.anim ?? null;
+     const nextSession = best?.sessionId ?? null;
+-    if (nextState === this.snap.state && nextTask === this.snap.task && nextSession === this.snap.sessionId) return;
++    if (
++      nextState === this.snap.state &&
++      nextTask === this.snap.task &&
++      nextAnim === this.snap.anim &&
++      nextSession === this.snap.sessionId
++    )
++      return;
+     this.snap.state = nextState;
+     this.snap.task = nextTask;
++    this.snap.anim = nextAnim;
+     this.snap.sessionId = nextSession;
+     this.snap.ts = Date.now();
+   }
+diff --git a/shared/pickers.ts b/shared/pickers.ts
+--- a/shared/pickers.ts
++++ b/shared/pickers.ts
+@@ -5,7 +5,7 @@
+  * 不依赖 React / DOM。
+  * @module dsh-pet/src/shared/pickers
+  */
+-import type { Category, EventSlot, Events, Weights } from './types';
++import type { Animations, Category, EventSlot, Events, Weights } from './types';
+ 
+ /** 从池里等概率抽一个；exclude 避开某个名字（减少连续重复）。 */
+ export const pick = <T>(pool: readonly T[], exclude?: T): T => {
+@@ -45,6 +45,16 @@ export const poolIncludes = (pool: readonly EventSlot[], anim: string): boolean
+ export const isEventAnim = (events: Readonly<Events> | undefined, anim: string): boolean =>
+   events ? Object.values(events).some((pool) => poolIncludes(pool, anim)) : false;
+ 
++/** A-NAS: whether any of the pet's pools has the clip: a step's own clip plays only when it does. */
++export const inPools = (animations: Readonly<Animations>, anim: string): boolean =>
++  animations.idle.includes(anim) ||
++  animations.turn.includes(anim) ||
++  animations.drag.includes(anim) ||
++  animations.clicks.includes(anim) ||
++  animations.moves.actions.some((action) => action.name === anim) ||
++  animations.categories.some((category) => category.actions.includes(anim)) ||
++  isEventAnim(animations.events, anim);
++
+ /** 工作状态播完（ended）后的续播决策：找到包含 current 的档位，多候选档位则返回档内下一候选
+  *  （排除 current，避免连抽），让长时间状态自动轮换；单候选档位或动画不属于该池则返回 null。
+  *  两端共用同一份决策，轮换行为严格一致。 */
+diff --git a/shared/work-status.ts b/shared/work-status.ts
+--- a/shared/work-status.ts
++++ b/shared/work-status.ts
+@@ -26,6 +26,8 @@ export const WORK_STATUS_INDEX: Record<WorkStatusState, number> = {
+ export interface WorkStatusSnapshot {
+   state: WorkStatusState | null; // null = 空闲
+   task: string | null; // 当前任务详情（todo/write 提供，可 null）
++  /** A-NAS: the clip the shown step asks for; null or missing = one of its stage's. */
++  anim?: string | null;
+   /** 当前展示条目所属会话；空闲 / 外部槽 / 老版本宿主缺该字段时都不出现，气泡因此不可点。 */
+   sessionId?: string | null;
+ }
+@@ -33,12 +35,13 @@ export interface WorkStatusSnapshot {
+ /** 快照解析：档位不认识 → 归一成 null（空闲）；形状非法 → null，消费端跳过这一拍。 */
+ export function toWorkStatus(raw: unknown): WorkStatusSnapshot | null {
+   if (!raw || typeof raw !== 'object') return null;
+-  const r = raw as { state?: unknown; task?: unknown; sessionId?: unknown };
++  const r = raw as { state?: unknown; task?: unknown; anim?: unknown; sessionId?: unknown };
+   const state: WorkStatusState | null =
+     r.state === null || (typeof r.state === 'string' && (WORK_STATUS_STATES as readonly string[]).includes(r.state))
+       ? (r.state as WorkStatusState | null)
+       : null;
+   const sessionId =
+     typeof r.sessionId === 'string' && r.sessionId !== '' && r.sessionId !== 'unknown' ? r.sessionId : null;
+-  return { state, task: typeof r.task === 'string' ? r.task : null, sessionId };
++  const anim = typeof r.anim === 'string' && r.anim !== '' ? r.anim : null;
++  return { state, task: typeof r.task === 'string' ? r.task : null, anim, sessionId };
+ }

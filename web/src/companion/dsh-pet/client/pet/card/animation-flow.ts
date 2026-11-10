@@ -6,7 +6,7 @@
  * 不变量：冻结期间随机链与档位恢复都不动手；换源后必须递增序号，否则同段重播不会生效。
  * @module dsh-pet/src/client/pet/card/animation-flow
  */
-import { pick, pickSlot, rollKind } from '../../../shared/pickers';
+import { inPools, pick, pickSlot, rollKind } from '../../../shared/pickers';
 import type { SleepState } from '../../../shared/state';
 import { WORK_STATUS_INDEX } from '../../../shared/work-status';
 import { decideNextAnimation } from '../animation/next-animation';
@@ -84,16 +84,17 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
       if (sleeping()) return false;
       const ws = workStatusRef.current;
       if (!ws || !ws.state || ws.state === 'success' || ws.state === 'error') return false;
+      // A-NAS: the clip the step asks for, when the pet has it, comes back rather than one of the stage's.
+      const own = ws.anim != null && inPools(hub.anims(), ws.anim) ? ws.anim : null;
       const pool = hub.anims().events?.workStatus;
-      if (!pool || pool.length === 0) return false;
-      const idx = WORK_STATUS_INDEX[ws.state];
-      const slot = pool[idx];
+      if (own === null && (!pool || pool.length === 0)) return false;
+      const slot = pool?.[WORK_STATUS_INDEX[ws.state]];
       // A-NAS: or a stage left empty because its animation is not installed.
-      if (slot === undefined || slot.length === 0) return false;
-      const name = pickSlot(slot, card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
+      if (own === null && (slot === undefined || slot.length === 0)) return false;
+      const name = own ?? pickSlot(slot ?? [], card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
       log(hub.cfg().id, '互动结束恢复状态动画: ' + name);
       // 多候选档位恢复后同样走播完轮换；单候选维持无限循环。
-      card.actions.setOnce(Array.isArray(slot) && slot.length > 1);
+      card.actions.setOnce(own === null && Array.isArray(slot) && slot.length > 1);
       card.actions.setAnim(name);
       return true;
     };
