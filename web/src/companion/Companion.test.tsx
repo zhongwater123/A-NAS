@@ -97,6 +97,18 @@ const mount = async (ui: ReactElement = <Companion />) => {
 const left = (rx: number) => `${rx * window.innerWidth - 120}px`;
 
 describe("the companion on the desktop", () => {
+  it("plays every clip half again as fast as it was recorded", async () => {
+    serve([IDLE]);
+    const { videos } = await mount();
+    for (const video of videos) {
+      fireEvent(video, new Event("loadstart"));
+      expect(video.defaultPlaybackRate).toBe(1.5);
+      video.playbackRate = 1;
+      fireEvent(video, new Event("play"));
+      expect(video.playbackRate).toBe(1.5);
+    }
+  });
+
   it("shows nothing while no animations are installed", async () => {
     let asked = false;
     server.use(

@@ -82,6 +82,33 @@ const WAVE = "点击回应-元气挥手";
  * screen saver; dsh-pet's own is 40.
  */
 const layer = { display: "contents", "--dsh-pet-z": 76 } as CSSProperties;
+/**
+ * dsh-pet's clips play this much faster than recorded, so the character reads as busy at a glance. Walks
+ * follow the clip's own time, so they keep step; most clips last about 6.7 s instead of 10.
+ */
+export const PLAYBACK_RATE = 1.5;
+
+/** Every clip the card loads into either of its two videos plays at PLAYBACK_RATE (a load resets the rate). */
+function useClipSpeed() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const speed = (event: Event) => {
+      if (!(event.target instanceof HTMLMediaElement)) return;
+      event.target.defaultPlaybackRate = PLAYBACK_RATE;
+      event.target.playbackRate = PLAYBACK_RATE;
+    };
+    // Media events do not bubble: catch them on the way down to the video.
+    root.addEventListener("loadstart", speed, true);
+    root.addEventListener("play", speed, true);
+    return () => {
+      root.removeEventListener("loadstart", speed, true);
+      root.removeEventListener("play", speed, true);
+    };
+  }, []);
+  return ref;
+}
 
 const pet: Omit<RuntimePet, "animations"> = {
   id: COMPANION_PET,
@@ -296,6 +323,7 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
     [animations, pool],
   );
   const arena = useRef<PetCardProps["arena"]["current"]>({ slots: {} });
+  const clipSpeed = useClipSpeed();
   const [first] = useState(() => firstRead(companionState.read()));
   const [leaves, setLeaves] = useState(first.leaves);
   const [paused, setPaused] = useState(() => document.hidden);
@@ -463,6 +491,7 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   // does its toasts, since a click through the browser tools would wake it or take its lock back.
   return (
     <div
+      ref={clipSpeed}
       style={layer}
       className={styles.layer}
       data-companion-work={work}
