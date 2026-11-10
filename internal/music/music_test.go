@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,10 +46,16 @@ type fixture struct {
 	spaceIDs map[string]string
 }
 
-func newFixture(t *testing.T) *fixture { return newFixtureWith(t, nil) }
+func newFixture(t *testing.T) *fixture { return buildFixture(t, nil, nil) }
 
 // newFixtureWith gives the library a media worker.
 func newFixtureWith(t *testing.T, worker ffmpegworker.Worker) *fixture {
+	return buildFixture(t, worker, nil)
+}
+
+// buildFixture gives the library a media worker and, when wrap is set, the
+// space lookup wrap returns in place of the accounts service.
+func buildFixture(t *testing.T, worker ffmpegworker.Worker, wrap func(music.Spaces) music.Spaces) *fixture {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -78,7 +85,11 @@ func newFixtureWith(t *testing.T, worker ffmpegworker.Worker) *fixture {
 		t.Fatalf("open music: %v", err)
 	}
 	t.Cleanup(func() { _ = musicStore.Close() })
-	library := music.New(musicStore, filepath.Join(dir, "covers"), fileService, accountService, music.Options{Worker: worker})
+	var spaceLookup music.Spaces = accountService
+	if wrap != nil {
+		spaceLookup = wrap(accountService)
+	}
+	library := music.New(musicStore, filepath.Join(dir, "covers"), fileService, spaceLookup, music.Options{Worker: worker})
 	t.Cleanup(library.Close)
 	spaces, err := accountService.ListSpaces(ctx, admin)
 	if err != nil {
@@ -101,6 +112,12 @@ func (f *fixture) scan(t *testing.T, actor accounts.User) music.Status {
 	if _, err := f.library.StartScan(f.ctx, actor); err != nil {
 		t.Fatalf("start scan: %v", err)
 	}
+	return f.waitScan(t, actor)
+}
+
+// waitScan waits for actor's scan to finish.
+func (f *fixture) waitScan(t *testing.T, actor accounts.User) music.Status {
+	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		status, err := f.library.Status(f.ctx, actor)
@@ -391,6 +408,75 @@ func TestRescanFollowsRenamesAndRemovalsAndKeepsUserData(t *testing.T) {
 	recent, err := f.library.Recent(f.ctx, f.admin)
 	if err != nil || len(recent) != 1 || recent[0].Plays != 2 {
 		t.Errorf("recent = %+v, %v", recent, err)
+	}
+}
+
+// hookedSpaces calls hook before each lookup of a member's spaces, which the
+// library makes when a scan starts and whenever it reads the library.
+type hookedSpaces struct {
+	music.Spaces
+	hook func(context.Context)
+}
+
+func (h hookedSpaces) ListSpaces(ctx context.Context, actor accounts.User) ([]accounts.Space, error) {
+	h.hook(ctx)
+	return h.Spaces.ListSpaces(ctx, actor)
+}
+
+// A status that says idle must carry the tracks and version its scan left:
+// the music panel stops polling there and reloads only on a new version.
+// Under load a poll once counted the tracks before a scan removed one and
+// read the scan after it ended. Nothing can be held between those two reads,
+// so the test ends the scan inside Status's library read instead, which a
+// Status that reads the scan first still reports running.
+func TestStatusReadsTheScanBeforeTheLibrary(t *testing.T) {
+	type fromTest struct{}
+	type statusCall struct{}
+	var f *fixture
+	var holdScan atomic.Bool
+	held, release := make(chan struct{}), make(chan struct{})
+	releaseScan := sync.OnceFunc(func() { close(release) })
+	f = buildFixture(t, nil, func(spaces music.Spaces) music.Spaces {
+		return hookedSpaces{Spaces: spaces, hook: func(ctx context.Context) {
+			switch {
+			case ctx.Value(statusCall{}) != nil:
+				releaseScan()
+				f.waitScan(t, f.admin)
+			case ctx.Value(fromTest{}) == nil && holdScan.CompareAndSwap(true, false):
+				// The scan runs under the library's own context.
+				close(held)
+				<-release
+			}
+		}}
+	})
+	// Runs before the library's Close, which waits for the scan.
+	t.Cleanup(releaseScan)
+	f.ctx = context.WithValue(f.ctx, fromTest{}, true)
+	write(t, filepath.Join(f.shared, "kept.mp3"), mp3File(5, id3Frame("TIT2", text("Kept"))))
+	write(t, filepath.Join(f.shared, "gone.mp3"), mp3File(5, id3Frame("TIT2", text("Gone"))))
+	before := f.scan(t, f.admin)
+	if err := os.Remove(filepath.Join(f.shared, "gone.mp3")); err != nil {
+		t.Fatal(err)
+	}
+	holdScan.Store(true)
+	if _, err := f.library.StartScan(f.ctx, f.admin); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-held:
+	case <-time.After(20 * time.Second):
+		t.Fatal("scan did not start")
+	}
+	during, err := f.library.Status(context.WithValue(f.ctx, statusCall{}, true), f.admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if during.Scan.State != "scanning" {
+		t.Errorf("status read the scan after the library: %s with %d tracks", during.Scan.State, during.Tracks)
+	}
+	after, err := f.library.Status(f.ctx, f.admin)
+	if err != nil || after.Scan.State != "idle" || after.Tracks != 1 || after.Version <= before.Version {
+		t.Errorf("next status = %+v, %v; want idle, 1 track, a version after %d", after, err, before.Version)
 	}
 }
 

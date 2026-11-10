@@ -69,8 +69,19 @@ func (j *scanJob) step() {
 	j.mu.Unlock()
 }
 
-// Status reports the member's library size and scan.
+// Status reports the member's library size and scan. It reads the scan
+// first: a scan is reported idle only after its writes, so the count and
+// version read next include them. Clients stop polling at idle and reload
+// only on a new version, so the other order could leave them with the
+// library from before the scan.
 func (s *Service) Status(ctx context.Context, actor accounts.User) (Status, error) {
+	scan := ScanStatus{State: "idle"}
+	s.mu.Lock()
+	job := s.scans[actor.ID]
+	s.mu.Unlock()
+	if job != nil {
+		scan = job.snapshot()
+	}
 	scopes, err := s.scopes(ctx, actor)
 	if err != nil {
 		return Status{}, err
@@ -79,14 +90,7 @@ func (s *Service) Status(ctx context.Context, actor accounts.User) (Status, erro
 	if err != nil {
 		return Status{}, err
 	}
-	status := Status{Version: s.version.Load(), Tracks: count, Scan: ScanStatus{State: "idle"}}
-	s.mu.Lock()
-	job := s.scans[actor.ID]
-	s.mu.Unlock()
-	if job != nil {
-		status.Scan = job.snapshot()
-	}
-	return status, nil
+	return Status{Version: s.version.Load(), Tracks: count, Scan: scan}, nil
 }
 
 // StartScan brings the member's library up to date in the background. The
