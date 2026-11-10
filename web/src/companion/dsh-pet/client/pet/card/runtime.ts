@@ -284,6 +284,7 @@ export function createCardRuntime(rt: PetRuntime) {
       ownAnim,
       // 来自 pets.<id>.anim 的点播是宿主指令，不按「用户点击」判睡觉
       playByName,
+      deferStage: (stage) => liveRef.current.flow?.deferStage(stage),
       posFollow: motion.posFollow,
       speak: (text, image, url, duration, anim) => liveRef.current.flow?.speak(text, image, url, duration, anim),
       // 睡觉是状态不是指令：自动来源（工作状态/余额/碎碎念）读它决定要不要闭嘴

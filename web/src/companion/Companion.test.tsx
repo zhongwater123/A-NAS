@@ -597,6 +597,49 @@ describe("VNAS's commands, carried out by the card", () => {
     );
   });
 
+  it("plays an animation to its end though the turn takes a step meanwhile, then shows the step", async () => {
+    serve([IDLE, "点击回应-元气挥手", "东张西望"]);
+    const { videos } = await mount();
+    startTurn(SESSION);
+    let outcome: Awaited<ReturnType<typeof runCompanionCommand>> | undefined;
+    void runCompanionCommand(SESSION, { action: "anim", args: { name: "点击回应-元气挥手" } }).then((answer) => {
+      outcome = answer;
+    });
+    await plays("点击回应-元气挥手");
+    await ready(videos);
+    fetched = [];
+    act(() => reportEvent(SESSION, "tool.start", { name: "browser_snapshot" }));
+    await settle();
+    expect(fetched).toEqual([]);
+    expect(outcome).toBeUndefined();
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await waitFor(() =>
+      expect(outcome).toEqual({ ok: true, result: { status: "ended", playbackId: expect.stringMatching(/^pb-/) } }),
+    );
+    await plays("东张西望");
+  });
+
+  it("shows the end of a turn after an animation that was still loading when the turn ended", async () => {
+    serve([IDLE, "点击回应-元气挥手", "工作状态-雀跃庆祝"]);
+    const { videos } = await mount();
+    startTurn(SESSION);
+    let outcome: Awaited<ReturnType<typeof runCompanionCommand>> | undefined;
+    void runCompanionCommand(SESSION, { action: "anim", args: { name: "点击回应-元气挥手" } }).then((answer) => {
+      outcome = answer;
+    });
+    await plays("点击回应-元气挥手");
+    act(() => reportEvent(SESSION, "message.complete", { status: "complete" }));
+    await settle();
+    expect(fetched).not.toContain("工作状态-雀跃庆祝");
+    expect(outcome).toBeUndefined();
+    await ready(videos);
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await waitFor(() =>
+      expect(outcome).toEqual({ ok: true, result: { status: "ended", playbackId: expect.stringMatching(/^pb-/) } }),
+    );
+    await plays("工作状态-雀跃庆祝");
+  });
+
   it("stops the animation of a turn the member stops, and goes back to its idle one", async () => {
     serve([IDLE, "点击回应-元气挥手"]);
     const { videos } = await mount();

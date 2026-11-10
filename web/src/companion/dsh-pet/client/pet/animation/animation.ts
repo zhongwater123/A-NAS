@@ -101,6 +101,8 @@ export interface OwnAnimation {
   frontVideo: () => HTMLVideoElement | null;
   /** 正在播的点播编号；自播动画为 `null`。 */
   playingPlayback: () => string | null;
+  /** A-NAS: whether a command's clip is loading or playing. */
+  commandClip: () => boolean;
   /** 卸载清理：中断在途请求、释放 blob，之后不可再用。 */
   dispose: () => void;
 }
@@ -396,6 +398,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     isFrozen: () => frozen,
     frontVideo,
     playingPlayback: () => playing,
+    commandClip: () => playing !== null || (pending !== null && pending.playbackId !== null),
     dispose: () => {
       mounted = false;
       clearTimeout(failedWait);

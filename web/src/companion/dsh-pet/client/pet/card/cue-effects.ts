@@ -75,6 +75,7 @@ export function createCueEffects(rt: CueEffectsRuntime) {
         if (isEventAnim(hub.anims().events, current) || current === workAnimRef.current)
           hub.ownAnim.stopLoopingFront();
         workAnimRef.current = null;
+        hub.deferStage(null);
         hub.bubbles.resetWork();
         return;
       }
@@ -116,6 +117,14 @@ export function createCueEffects(rt: CueEffectsRuntime) {
       // A-NAS: a step's own clip loops like a single one.
       const rotating = own === null && !terminal && Array.isArray(slot) && slot.length > 1;
       workAnimRef.current = own;
+      // A-NAS: a clip VNAS asked for plays to its end, as its command is answered by it; the stage's clip
+      // follows it (animation-flow applyEndedCue). The stage switched it away, which answered the command
+      // cancelled, whenever the turn took a step or ended while it played.
+      if (hub.ownAnim.commandClip()) {
+        hub.deferStage({ name, once: terminal || rotating });
+        return;
+      }
+      hub.deferStage(null);
       card.actions.setOnce(terminal || rotating);
       card.actions.setAnim(name);
     };

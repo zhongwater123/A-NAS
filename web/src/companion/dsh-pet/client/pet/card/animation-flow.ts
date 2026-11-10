@@ -32,6 +32,8 @@ export interface AnimationFlow {
   sleeping(): boolean;
   /** 当前睡觉阶段；醒着为 null。点击路径要区分「入睡过渡」与「真睡着」。 */
   sleepPhase(): 'start' | 'loop' | 'end' | null;
+  /** A-NAS: the stage's clip to play at the next end, after the clip a command asked for (null: none). */
+  deferStage(stage: { name: string; once: boolean } | null): void;
 }
 
 /** 注入的 react 能力。 */
@@ -67,6 +69,11 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
     // 必须放 ref：状态机持有「当前阶段」，放函数体局部变量会在每次渲染重建，睡觉状态当场丢失
     // （视频还在睡姿、菜单却显示「睡觉」，点它也不叫醒）。
     const machineRef = useRef<ReturnType<typeof createSleepMachine> | null>(null);
+    // A-NAS: the stage that came while a command's clip was loading or playing (cue-effects).
+    const deferredRef = useRef<{ name: string; once: boolean } | null>(null);
+    const deferStage = (stage: { name: string; once: boolean } | null): void => {
+      deferredRef.current = stage;
+    };
     const sleep = (): ReturnType<typeof createSleepMachine> =>
       (machineRef.current ??= createSleepMachine(hub, pickNext, log));
     /** 此刻是否在睡（含两段过渡）。 */
@@ -93,6 +100,7 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
       if (own === null && (slot === undefined || slot.length === 0)) return false;
       const name = own ?? pickSlot(slot ?? [], card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
       log(hub.cfg().id, '互动结束恢复状态动画: ' + name);
+      deferredRef.current = null;
       // 多候选档位恢复后同样走播完轮换；单候选维持无限循环。
       card.actions.setOnce(own === null && Array.isArray(slot) && slot.length > 1);
       card.actions.setAnim(name);
@@ -140,6 +148,15 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
       // 睡觉的三段推进与「起来播完回随机链」都在状态机里：它说这次 ended 归它管就直接返回。
       if (sleep().consumeEnded()) return;
       if (cue.kind === 'ignore') return;
+      // A-NAS: the clip a command asked for has ended (or what replaced it): the stage that came meanwhile.
+      const stage = deferredRef.current;
+      if (stage !== null) {
+        deferredRef.current = null;
+        card.actions.setOnce(stage.once);
+        card.actions.setAnim(stage.name);
+        card.actions.bumpSeq();
+        return;
+      }
       if (cue.kind === 'work-rotate') {
         card.actions.setOnce(true); // 保持 once=true，下一段播完再轮换。
         card.actions.setAnim(cue.anim);
@@ -202,6 +219,6 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
       hub.bubbles.showWhisper(text, { image, url }, duration);
     };
 
-    return { applyEndedCue, applySleep, pickNext, resumeWorkStatusAnim, sleepPhase, sleeping, speak };
+    return { applyEndedCue, applySleep, deferStage, pickNext, resumeWorkStatusAnim, sleepPhase, sleeping, speak };
   };
 }
