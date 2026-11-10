@@ -201,11 +201,18 @@ manifest = "".join(lines).encode()
 (target / "animations.sha256").write_bytes(manifest)
 pool = hashlib.sha256(manifest).hexdigest()[:16]
 shutil.copyfile(upstream / "LICENSE", target / "LICENSE")
+# Where the copied files live upstream, for the look at upstream changes the README asks for: their
+# directories, a little wider than the files themselves.
+folders = {path.relative_to(source.resolve()).parent for path in files}
+watched = sorted((Path("dsh-pet/src") / folder).as_posix() for folder in folders
+                 if not any(other in folder.parents for other in folders))
 (target / "README.md").write_text(
     "# Vendored dsh-pet pet card, animation and motion\n\n"
     f"Copied from [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet) commit `{commit}` "
-    "by `scripts/vendor-dsh-pet.py`. The code is MIT, see `LICENSE`. Do not edit the copied files by hand: "
-    "add a patch to `../dsh-pet-patches/` or change the script, and vendor again.\n\n"
+    "by `scripts/vendor-dsh-pet.py`. The code is MIT, see `LICENSE`, which the Web UI's build ships as "
+    "`assets/third-party-licenses.txt` (`make web-build`). Do not edit the copied files by hand: "
+    "add a patch to `../dsh-pet-patches/` or change the script, and vendor again. "
+    "This README is written by the script too.\n\n"
     "The animations this code plays are not in Git and are not MIT. The character is the community-made "
     "DeepSeek 大肥鱼, not an official DeepSeek character: the original 溟月 is by "
     "[@上善无形](https://space.bilibili.com/4456176) and the maid design by "
@@ -215,8 +222,36 @@ shutil.copyfile(upstream / "LICENSE", target / "LICENSE")
     "character credits <https://github.com/PC2005-cloud/dsh-pet>, and A-NAS must replace it before any "
     "commercial release.\n\n"
     "Patches applied: " + (", ".join(f"`{name}`" for name in applied) or "none") + ".\n\n"
-    f"`animations.sha256` lists the {len(lines)} animation files of this commit and of `{MOV_ZIP[0]}`; "
-    f"installed, they are companion animation pool `{pool}`.\n",
+    f"`animations.sha256` lists the {len(lines)} animation files of this commit and of `{MOV_ZIP[0]}` "
+    f"(SHA-256 `{MOV_ZIP[1]}`); installed, they are companion animation pool `{pool}`, the pool "
+    "`scripts/install-media-pool.sh` pins. Upstream has since replaced that release asset: the pinned zip "
+    "comes from a kept copy, and the script refuses any other.\n\n"
+    "## No updates\n\n"
+    "1. A-NAS does not follow upstream. A new dsh-pet release or commit sets nothing off.\n"
+    "2. A device never updates it. The code is compiled into the Web desktop that anas-api serves; the "
+    "animations are a pool an administrator installs with `scripts/install-media-pool.sh`; the NAS fetches "
+    "nothing of dsh-pet from the network.\n"
+    "3. Upgrading is a deliberate dependency upgrade, only when upstream fixes a security problem or a bug "
+    "A-NAS needs in the copied files, when a new character or new animations are wanted, or when the "
+    "companion's next version is planned.\n"
+    "4. Dependabot does not see vendored code, so no security alert comes on its own. Before each milestone, "
+    "see whether upstream changed what is copied (an empty output means no):\n\n"
+    "   ```bash\n"
+    f"   git -C <dsh-pet checkout> fetch origin HEAD && git -C <dsh-pet checkout> diff --stat {commit[:12]}..FETCH_HEAD -- \\\n"
+    "     " + " ".join(watched) + " \\\n"
+    "     dsh-pet/assets/config.jsonc dsh-pet/assets/webm LICENSE\n"
+    "   ```\n\n"
+    "## Upgrading\n\n"
+    "1. Set `PINNED` in `scripts/vendor-dsh-pet.py` to the new commit, and `MOV_ZIP` when the HEVC "
+    "animations changed too; keep a copy of that zip, since upstream may replace it.\n"
+    "2. Check the commit out in a clean dsh-pet checkout and run the script; adapt the patches in "
+    "`../dsh-pet-patches/` one by one until they apply and the script passes.\n"
+    "3. The new `animations.sha256` is a new pool: set `companion_pool` in `scripts/install-media-pool.sh` "
+    "to the pool the script prints, and update the install runbook.\n"
+    "4. Run `make vendor-check DSH_PET=<checkout> DSH_PET_MOV_ZIP=<zip>` and `make check`, then try the "
+    "companion in a browser, Safari included.\n"
+    "5. Stage and install the new pool on the NAS (`scripts/deploy-media-pool.ps1 -Kind companion`, then "
+    "`install-media-pool.sh companion`), and have the upgrade reviewed as a dependency upgrade.\n",
     encoding="utf-8", newline="\n")
 if not mov_zip:
     print(f"HEVC animations not checked: their lines come from {mov_from}, not from the assets-mov zip")
