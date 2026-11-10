@@ -205,6 +205,55 @@ class CompanionToolTests(unittest.TestCase):
         self.service.listen(Handler)
         self.assertAnswered(companion.call("wake", {}), "timeout")
 
+    def test_a_refusal_before_the_call_was_sent_is_its_answer(self):
+        # Over the member's connections the product service answers busy and
+        # closes as it accepts, before the call goes out: sending it then
+        # fails, and the answer is still there to read.
+        answered = threading.Event()
+        answer = b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 42\r\nConnection: close\r\n\r\n' \
+            b'{"reason":"rate-limited","status":"busy"}\n'
+
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self):
+                self.request.sendall(answer)
+                self.request.close()
+                answered.set()
+
+        self.service.listen(Handler)
+        connect = companion.UnixHTTP.connect
+
+        def connect_then_wait(conn):
+            connect(conn)
+            answered.wait(5)
+
+        self.addCleanup(setattr, companion.UnixHTTP, "connect", connect)
+        companion.UnixHTTP.connect = connect_then_wait
+        for _ in range(20):
+            answered.clear()
+            result = companion.call("wake", {})
+            self.assertAnswered(result, "busy")
+            self.assertEqual(result.structured_content["reason"], "rate-limited")
+
+    def test_a_service_that_closes_before_the_call_was_sent_is_busy(self):
+        # Nothing to read either: the call did not get there, so trying again is right.
+        closed = threading.Event()
+
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self):
+                self.request.close()
+                closed.set()
+
+        self.service.listen(Handler)
+        connect = companion.UnixHTTP.connect
+
+        def connect_then_wait(conn):
+            connect(conn)
+            closed.wait(5)
+
+        self.addCleanup(setattr, companion.UnixHTTP, "connect", connect)
+        companion.UnixHTTP.connect = connect_then_wait
+        self.assertAnswered(companion.call("wake", {}), "busy")
+
     def test_the_schema_is_only_what_the_model_is_shown(self):
         listed = {tool.name: tool.input_schema for tool in companion.tools()}
         self.assertEqual(set(listed), {"anim", "broadcast", "bubble_clear", "position", "throw", "sleep", "wake", "lock", "lock_release"})

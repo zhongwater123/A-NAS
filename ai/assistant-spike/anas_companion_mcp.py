@@ -61,6 +61,7 @@ NO_DESKTOP = {"status": "no_desktop"}
 TOO_LONG = {"status": "rejected", "reason": "bad-request",
             "message": "参数太长：text 最多 200 字，name 最多 64 字，lock、lockId 最多 128 字"}
 BAD_REQUEST = {"status": "rejected", "reason": "bad-request", "message": "参数无法读取"}
+BUSY = {"status": "busy"}
 
 SAID = {
     "ok": "伙伴照做了。",
@@ -90,11 +91,22 @@ def ask(tool: str, args: dict) -> dict:
             # No socket (a scheduled task's sandbox), or nobody serving it:
             # the call never reached the product service.
             return NO_DESKTOP
+        sent = True
         try:
             conn.request("POST", "/call", body, {"Content-Type": "application/json"})
+        except OSError:
+            # The product service closed the connection before taking the
+            # call: over the member's connections it answers busy as it
+            # accepts one, before reading anything, and the answer is still
+            # there to read.
+            sent = False
+        try:
             response = conn.getresponse()
             raw = response.read()
         except (OSError, http.client.HTTPException):
+            if not sent:
+                # Not even a refusal: the call never got there.
+                return BUSY
             # A timeout, or the product service went away (a restart) once the
             # call was on its way: the window may have acted on it.
             return {"status": "timeout"}

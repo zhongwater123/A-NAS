@@ -137,6 +137,42 @@ func TestAUIDsConnectionsAreBoundedBeforeAnythingIsRead(t *testing.T) {
 	}
 }
 
+func TestACallOverTheBoundSentAtOnceStillReadsBusy(t *testing.T) {
+	// The companion server sends its call as soon as it has connected. The
+	// refusal closes the connection before or after the call goes out, and
+	// either way its answer waits to be read: anas_companion_mcp.py reads it
+	// after a send that failed, rather than report a timeout.
+	path, _ := companionSocket(t)
+	for range maxCompanionConnections {
+		rawCall(t, path, "")
+	}
+	call := "POST /call HTTP/1.1\r\nHost: companion\r\nContent-Type: application/json\r\nContent-Length: " +
+		strconv.Itoa(len(wakeCall)) + "\r\n\r\n" + wakeCall
+	for i := range 20 {
+		conn, err := net.Dial("unix", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i%2 == 1 {
+			// Long enough for the refusal to have closed the connection.
+			time.Sleep(20 * time.Millisecond)
+		}
+		_, _ = io.WriteString(conn, call)
+		_ = conn.SetReadDeadline(time.Now().Add(socketWait))
+		response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err != nil {
+			t.Fatalf("call %d over the bound: %v", i, err)
+		}
+		var data map[string]any
+		_ = json.NewDecoder(response.Body).Decode(&data)
+		_ = response.Body.Close()
+		_ = conn.Close()
+		if data["status"] != "busy" {
+			t.Fatalf("call %d over the bound: %d %v", i, response.StatusCode, data)
+		}
+	}
+}
+
 func TestACallsHeadersAreSmall(t *testing.T) {
 	path, _ := companionSocket(t)
 	pad := strings.Repeat("a", 16<<10)
