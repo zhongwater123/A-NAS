@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -258,5 +259,73 @@ func TestRestoreOntoATakenNameKeepsBothOrReplaces(t *testing.T) {
 		if entry, ok := got[name]; !ok || entry.SizeBytes != size {
 			t.Fatalf("space holds %v, want %s with %d bytes", got, name, size)
 		}
+	}
+}
+
+// In a space many members write to, each member's recycle bin holds only what
+// they deleted: no one else, not even an administrator, sees, restores or
+// purges it (docs/specs/basic-storage-and-sharing.md#文件回收站与快照).
+func TestOnlyTheDeleterSeesRestoresAndPurgesARecycleBinItem(t *testing.T) {
+	f := newUploadFixture(t)
+	ctx, service, owner, alice := f.ctx, f.service, f.owner, f.alice
+	bob, err := f.users.CreateMember(ctx, owner, "bob", "bob password for testing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := findSharedSpace(t, mustSpaces(t, f.users, alice))
+	trashed := func(user accounts.User, name string) files.TrashItem {
+		t.Helper()
+		entry, err := service.Upload(ctx, user, shared.ID, "", name, bytes.NewBufferString(name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		item, err := service.Delete(ctx, user, shared.ID, entry.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return item
+	}
+	bin := func(user accounts.User) []string {
+		t.Helper()
+		items, err := service.ListTrash(ctx, user)
+		if err != nil {
+			t.Fatalf("ListTrash(%s) error = %v", user.Username, err)
+		}
+		var ids []string
+		for _, item := range items {
+			ids = append(ids, item.ID)
+		}
+		return ids
+	}
+
+	alices := trashed(alice, "alice.txt")
+	bobs := trashed(bob, "bob.txt")
+	for _, c := range []struct {
+		user accounts.User
+		want []string
+	}{{alice, []string{alices.ID}}, {bob, []string{bobs.ID}}, {owner, nil}} {
+		if got := bin(c.user); !slices.Equal(got, c.want) {
+			t.Errorf("%s's recycle bin = %v, want %v", c.user.Username, got, c.want)
+		}
+	}
+	for _, user := range []accounts.User{bob, owner} {
+		if _, err := service.Restore(ctx, user, alices.ID, "", "", files.ConflictAsk); !errors.Is(err, files.ErrForbidden) {
+			t.Fatalf("%s restoring Alice's item error = %v, want ErrForbidden", user.Username, err)
+		}
+		if err := service.Purge(ctx, user, alices.ID); !errors.Is(err, files.ErrForbidden) {
+			t.Fatalf("%s purging Alice's item error = %v, want ErrForbidden", user.Username, err)
+		}
+	}
+	if got := bin(alice); !slices.Equal(got, []string{alices.ID}) {
+		t.Fatalf("after others tried to restore and purge it, Alice's recycle bin = %v", got)
+	}
+	if listed, err := service.List(ctx, alice, shared.ID, ""); err != nil || len(listed) != 0 {
+		t.Fatalf("shared space after others tried to restore Alice's item = %+v, %v; want empty", listed, err)
+	}
+	if _, err := service.Restore(ctx, alice, alices.ID, "", "", files.ConflictAsk); err != nil {
+		t.Fatalf("Alice restoring her own item: %v", err)
+	}
+	if err := service.Purge(ctx, bob, bobs.ID); err != nil {
+		t.Fatalf("Bob purging his own item: %v", err)
 	}
 }

@@ -72,35 +72,52 @@ func publish(t *testing.T, s *Store) Share {
 	}
 	return awaitShare(t, s, v.ID, "published")
 }
+
+// awaitShare waits until the share is no longer being prepared and fails
+// unless it ended in status.
 func awaitShare(t *testing.T, s *Store, id, status string) Share {
 	t.Helper()
-	for range 500 {
+	v := settle(t, "preparing", func() (Share, string, error) {
 		v, err := s.Get(context.Background(), sender, id, false)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if v.Status == status {
-			return v
-		}
-		time.Sleep(time.Millisecond * 2)
+		return v, v.Status, err
+	})
+	if v.Status != status {
+		t.Fatalf("share is %s, want %s", v.Status, status)
 	}
-	t.Fatalf("share never became %s", status)
-	return Share{}
+	return v
 }
+
+// awaitJob waits until Bob's save is no longer running and fails unless it
+// ended in status.
 func awaitJob(t *testing.T, s *Store, id, status string) Job {
 	t.Helper()
-	for range 500 {
+	v := settle(t, "running", func() (Job, string, error) {
 		v, err := s.Job(context.Background(), bob, id)
+		return v, v.Status, err
+	})
+	if v.Status != status {
+		t.Fatalf("job is %s, want %s", v.Status, status)
+	}
+	return v
+}
+
+// settle polls get until its status leaves pending, or for at most ten
+// seconds: on a loaded machine preparing a share can take seconds, and a
+// share or job that ends in the wrong state should fail on that state, not
+// on a timeout.
+func settle[T any](t *testing.T, pending string, get func() (T, string, error)) T {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		v, status, err := get()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if v.Status == status {
+		if status != pending || time.Now().After(deadline) {
 			return v
 		}
-		time.Sleep(time.Millisecond * 2)
+		time.Sleep(2 * time.Millisecond)
 	}
-	t.Fatalf("job never became %s", status)
-	return Job{}
 }
 func TestIsolationMessagesIdempotencyAndImmutableCopy(t *testing.T) {
 	s, _ := setup(t, &testBackend{})
