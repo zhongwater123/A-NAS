@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -62,6 +64,13 @@ const (
 	// maxCompanionWaiting bounds a member's calls under way on the socket:
 	// Hermes's one, and a few it gave up on that are still settling.
 	maxCompanionWaiting = 4
+	// maxCompanionConnections bounds a UID's open connections to the socket,
+	// counted from accept, before any of a request is read: the calls under
+	// way, and a few that are still sending or closing.
+	maxCompanionConnections = 2 * maxCompanionWaiting
+	// maxCompanionHeader bounds a call's headers; the companion server sends
+	// a few hundred bytes of them. net/http allows 4 KiB over it.
+	maxCompanionHeader = 4 << 10
 	// companionRate is how many commands a member's windows get a minute;
 	// companionRateEach caps some tools within it.
 	companionRate = 20
@@ -76,9 +85,16 @@ var (
 	// companionLate is how long a call waits for its tool.start, which comes
 	// on another connection and may arrive after it.
 	companionLate = 1500 * time.Millisecond
-	// companionBody is how long a caller on the socket has to send a call
-	// once its headers came.
-	companionBody = 5 * time.Second
+	// companionHeaders is how long a caller on the socket has to send a
+	// call's headers, and companionBody its body once they came.
+	companionHeaders = 5 * time.Second
+	companionBody    = 5 * time.Second
+	// companionIdle is how long a connection between calls stays open; the
+	// companion server opens one for each call.
+	companionIdle = 5 * time.Second
+	// companionRefusal is how long a connection over its UID's bound is
+	// given to take its refusal.
+	companionRefusal = 100 * time.Millisecond
 	// companionHelper is how long after a subagent started a companion tool
 	// its call may still arrive, and companionStale the same for a turn's own
 	// tool.start: Hermes's 120 s per call (managed-config.yaml), and some. A
@@ -203,38 +219,113 @@ type AccountResolver interface {
 // CompanionServer serves the companion tools' socket: POST /call, nothing else.
 // The peer's UID says whose assistant called, as on the photo service's socket
 // for assistants.
+//
+// Every process in a member's sandbox can reach the socket, so what one UID
+// holds of the service is bounded: maxCompanionConnections connections, each
+// with at most maxCompanionHeader of headers, read within companionHeaders
+// and, a body the handler does not read included, companionHeaders plus
+// companionBody; an idle one closes after companionIdle. There is no write
+// timeout: a call's answer may take companionLate and companionReceipt after
+// its body, and is a few hundred bytes the socket's buffer takes at once.
 func (h *Handler) CompanionServer() *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /call", h.companionCallHTTP)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
-	return &http.Server{Handler: mux, ConnContext: withPeerUID,
-		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20,
+	conns := &companionConns{byUID: map[int]int{}, uids: map[net.Conn]int{}}
+	return &http.Server{Handler: mux, ConnContext: withPeerUID, ConnState: conns.track,
+		ReadHeaderTimeout: companionHeaders, ReadTimeout: companionHeaders + companionBody,
+		IdleTimeout: companionIdle, MaxHeaderBytes: maxCompanionHeader,
 		ErrorLog: slog.NewLogLogger(h.logger.Handler(), slog.LevelError)}
+}
+
+// companionConns counts a companion server's open connections by the UID at
+// the other end; -1 stands for a peer whose UID the kernel did not report.
+type companionConns struct {
+	mu    sync.Mutex
+	byUID map[int]int
+	uids  map[net.Conn]int
+}
+
+// companionRefused is the answer of a connection over its UID's bound: what
+// a call over maxCompanionWaiting gets, so the companion server says busy.
+var companionRefused = func() string {
+	body := `{"reason":"rate-limited","status":"busy"}` + "\n"
+	return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + strconv.Itoa(len(body)) +
+		"\r\nConnection: close\r\n\r\n" + body
+}()
+
+// track is the server's ConnState. A connection over its UID's bound is
+// answered and closed as it is accepted, before the server reads anything
+// of it: a caller that opens connections and sends nothing, or sends
+// slowly, holds no more of the service than maxCompanionConnections allow.
+func (c *companionConns) track(conn net.Conn, state http.ConnState) {
+	switch state {
+	case http.StateNew:
+		uid, ok := peerUID(conn)
+		if !ok {
+			uid = -1
+		}
+		c.mu.Lock()
+		over := c.byUID[uid] >= maxCompanionConnections
+		if !over {
+			c.byUID[uid]++
+			c.uids[conn] = uid
+		}
+		c.mu.Unlock()
+		if over {
+			// The connection is new, so its buffer takes the answer at once;
+			// the deadline only keeps the accept loop from waiting on it.
+			_ = conn.SetWriteDeadline(time.Now().Add(companionRefusal))
+			_, _ = io.WriteString(conn, companionRefused)
+			_ = conn.Close()
+		}
+	case http.StateClosed, http.StateHijacked:
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		uid, ok := c.uids[conn]
+		if !ok {
+			return
+		}
+		delete(c.uids, conn)
+		if c.byUID[uid]--; c.byUID[uid] <= 0 {
+			delete(c.byUID, uid)
+		}
+	}
 }
 
 type peerUIDKey struct{}
 
 // withPeerUID records on each connection the UID of the process at the other
-// end, as the kernel reports it.
+// end.
 func withPeerUID(ctx context.Context, conn net.Conn) context.Context {
-	unixConn, ok := conn.(*net.UnixConn)
+	uid, ok := peerUID(conn)
 	if !ok {
 		return ctx
 	}
+	return context.WithValue(ctx, peerUIDKey{}, uid)
+}
+
+// peerUID is the UID of the process at the other end of conn, as the kernel
+// reports it.
+func peerUID(conn net.Conn) (int, bool) {
+	unixConn, ok := conn.(*net.UnixConn)
+	if !ok {
+		return 0, false
+	}
 	raw, err := unixConn.SyscallConn()
 	if err != nil {
-		return ctx
+		return 0, false
 	}
 	var cred *unix.Ucred
 	var credErr error
 	if err := raw.Control(func(fd uintptr) {
 		cred, credErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
 	}); err != nil || credErr != nil {
-		return ctx
+		return 0, false
 	}
-	return context.WithValue(ctx, peerUIDKey{}, int(cred.Uid))
+	return int(cred.Uid), true
 }
 
 func (h *Handler) companionCallHTTP(w http.ResponseWriter, r *http.Request) {
