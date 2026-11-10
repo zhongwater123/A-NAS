@@ -111,7 +111,8 @@ say("  kinds:", dict(kinds.most_common()))
 fields_by_kind = collections.defaultdict(collections.Counter)
 reasons = collections.Counter()
 for _, _, kind, _, fields, checks, _ in live:
-    values, results = json.loads(fields or "{}"), json.loads(checks or "{}")
+    # A reading without fields, such as a screenshot's, stores null.
+    values, results = json.loads(fields or "null") or {}, json.loads(checks or "null") or {}
     for name, value in values.items():
         tally = fields_by_kind[kind]
         tally["fields"] += 1
