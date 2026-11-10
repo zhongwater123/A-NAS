@@ -5,7 +5,9 @@
 # install-media-pool.sh. The companion's animations come from a dsh-pet
 # checkout at the commit scripts/vendor-dsh-pet.py pins and, for Safari, from
 # the assets-mov zip it pins, and must match the hashes in
-# web/src/companion/dsh-pet/animations.sha256.
+# web/src/companion/dsh-pet/animations.sha256. Their pool ID is computed here
+# from that manifest and must be the pool scripts/install-media-pool.sh pins
+# and the one the NAS files the upload under.
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium', DefaultParameterSetName = 'screensavers')]
 param(
     [Parameter(Mandatory = $true)]
@@ -36,6 +38,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $target = "anas-dev@$NasHost"
 $staging = "apps/a-nas/$Kind"
 $movDir = $null
+$commitArguments = ''
 
 try {
 
@@ -68,6 +71,14 @@ if ($Kind -eq 'screensavers') {
     $label = 'companion animation'
     $noun = 'animations'
     $manifestPath = Join-Path $repoRoot 'web\src\companion\dsh-pet\animations.sha256'
+    # The pool ID is the manifest's SHA-256, as install-media-pool.sh computes it;
+    # the release installs only the pool it pins.
+    $pool = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant().Substring(0, 16)
+    $pinnedPool = Select-String -LiteralPath (Join-Path $repoRoot 'scripts\install-media-pool.sh') -Pattern '^companion_pool=([0-9a-f]{16})$' |
+        ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -First 1
+    if ($pool -ne $pinnedPool) {
+        throw "The manifest is pool $pool, but scripts/install-media-pool.sh pins $pinnedPool; vendor again or check the files out again: $manifestPath"
+    }
     # The HEVC animations are checked one by one against the manifest, from a private copy.
     $movDir = Join-Path ([System.IO.Path]::GetTempPath()) ('dsh-pet-mov-' + [guid]::NewGuid().ToString('N'))
     # A private copy, not a change on the NAS: made and removed even under -WhatIf.
@@ -91,8 +102,10 @@ if ($Kind -eq 'screensavers') {
         }
         $files += [PSCustomObject]@{ Path = $path; Hash = $hash }
     }
-    # The pool is the manifest, uploaded before the files.
+    # The pool is the manifest, uploaded before the files; the NAS files it
+    # only under the pool ID computed here.
     $stageArguments = ''
+    $commitArguments = $pool
 }
 if (-not (Test-Path -LiteralPath $IdentityFile -PathType Leaf)) {
     throw "SSH identity does not exist: $IdentityFile"
@@ -105,7 +118,7 @@ if (-not $PSCmdlet.ShouldProcess($target, $summary)) {
             Write-Host "$($item.Hash)  $($item.Path)"
         }
     } else {
-        Write-Host "All $($files.Count) animations match $manifestPath."
+        Write-Host "All $($files.Count) animations match $manifestPath, pool $pool."
     }
     Write-Host 'No network connection or remote change was performed.'
     return
@@ -141,9 +154,13 @@ foreach ($item in $files) {
     }
 }
 
-$pool = @(& ssh.exe @sshOptions $target "$stage commit $stageArguments" |
+$staged = @(& ssh.exe @sshOptions $target "$stage commit $stageArguments $commitArguments" |
     Where-Object { $_ -match '^[0-9a-f]{16}$' }) | Select-Object -Last 1
-if ($LASTEXITCODE -ne 0 -or -not $pool) { throw "Staging the $label pool failed." }
+if ($LASTEXITCODE -ne 0 -or -not $staged) { throw "Staging the $label pool failed." }
+if ($Kind -eq 'companion' -and $staged -ne $pool) {
+    throw "The NAS staged pool $staged, not the pool $pool computed here."
+}
+$pool = $staged
 
 Write-Host "Uploaded $($uploaded.Count) of $($files.Count) $noun; the NAS already had the others."
 if ($Kind -eq 'screensavers') {
