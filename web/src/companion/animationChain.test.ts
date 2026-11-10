@@ -89,7 +89,8 @@ function chain(): Chain {
 }
 
 /** The clip in front is still playing (jsdom's videos never play: they are always paused). */
-const playing = (video: HTMLVideoElement) => Object.defineProperty(video, "paused", { configurable: true, value: false });
+const playing = (video: HTMLVideoElement) =>
+  Object.defineProperty(video, "paused", { configurable: true, value: false });
 
 beforeEach(() => {
   vi.useFakeTimers();

@@ -528,7 +528,10 @@ describe("an animation that does not come", () => {
       act(() => fireEvent(front(videos), new Event("ended")));
     }
     // Its loop plays though the clip before it did not come, and comes again after it did not.
-    await waitFor(() => expect(fetched.filter((name) => name === SLEEP.loop)).toHaveLength(clip === SLEEP.loop ? 3 : 1), later);
+    await waitFor(
+      () => expect(fetched.filter((name) => name === SLEEP.loop)).toHaveLength(clip === SLEEP.loop ? 3 : 1),
+      later,
+    );
     await settle();
     await ready(videos);
     fetched = [];
@@ -809,6 +812,119 @@ describe("walking, throwing and resting", () => {
     frames(80);
     expect(root.style.left).toBe(left(0.25));
     expect(saved()).toEqual({ rx: 0.25, ry: 0.5 });
+  });
+
+  /** Presses the pet with the mouse and drags it along the moves, a frame between each, then lets it go. */
+  const drag = (pet: HTMLElement, moves: [number, number][], still = 0) => {
+    // jsdom has no pointer capture, which the card's grab takes.
+    const element = Element.prototype as unknown as Record<string, unknown>;
+    const capture = { hasPointerCapture: () => false, setPointerCapture: () => {}, releasePointerCapture: () => {} };
+    const added = Object.keys(capture).filter((name) => !(name in element));
+    for (const name of added) element[name] = capture[name as keyof typeof capture];
+    try {
+      const pointer = { button: 0, pointerId: 1, pointerType: "mouse" };
+      const [x, y] = moves[0];
+      fireEvent.pointerDown(pet, { ...pointer, clientX: x, clientY: y });
+      for (const [mx, my] of moves.slice(1)) {
+        fireEvent.pointerMove(pet, { ...pointer, clientX: mx, clientY: my });
+        frames(1);
+      }
+      frames(still);
+      const [ux, uy] = moves.at(-1) ?? [x, y];
+      fireEvent.pointerUp(pet, { ...pointer, clientX: ux, clientY: uy });
+      fireEvent.click(pet, { clientX: ux, clientY: uy });
+    } finally {
+      for (const name of added) delete element[name];
+    }
+  };
+
+  it("answers a click with a click response, then idles", async () => {
+    serve([IDLE, "点击回应-元气挥手"]);
+    const { pet, videos } = await mount();
+    fetched = [];
+    fireEvent.click(pet);
+    await plays("点击回应-元气挥手");
+    await ready(videos);
+    fetched = [];
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await plays(IDLE);
+    expect(fetched).toEqual([IDLE]);
+  });
+
+  it("answers a click during VNAS's turn, then goes back to the turn's stage", async () => {
+    serve([IDLE, "点击回应-元气挥手", "东张西望"]);
+    const { pet, videos } = await mount();
+    act(() => {
+      startTurn("live0001");
+      reportEvent("live0001", "tool.start", { name: "browser_snapshot" });
+    });
+    await plays("东张西望");
+    await ready(videos);
+    fetched = [];
+    fireEvent.click(pet);
+    await plays("点击回应-元气挥手");
+    await ready(videos);
+    fetched = [];
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await plays("东张西望");
+    expect(fetched).toEqual(["东张西望"]);
+  });
+
+  it("is dragged with its drag clip, put down where it is let go, and remembers the place on this device", async () => {
+    serve([IDLE, "被鼠标拖拽悬空反馈", "点击回应-元气挥手"]);
+    const { pet, root, videos } = await mount();
+    write("position", { x: 0.25, y: 0.5, mode: "instant" });
+    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
+    const box = root.getBoundingClientRect();
+    const [x, y] = [box.x + 120, box.y + 60];
+    fetched = [];
+    // Slowly: held still before it is let go, so it is put down rather than thrown.
+    drag(
+      pet,
+      [
+        [x, y],
+        [x + 40, y],
+        [x + 80, y],
+        [x + 120, y],
+      ],
+      60,
+    );
+    await plays("被鼠标拖拽悬空反馈");
+    // The press that ends a drag is not a click.
+    await settle();
+    expect(fetched).not.toContain("点击回应-元气挥手");
+    expect(queue.size).toBe(0);
+    expect(saved()?.rx ?? 0).toBeGreaterThan(0.25);
+    expect(Number.parseFloat(root.style.left)).toBeGreaterThan(Number.parseFloat(left(0.25)));
+    expect(saved()?.ry).toBeCloseTo(0.5, 1);
+    // Let go, it idles.
+    await waitFor(() => expect(fetched.at(-1)).toBe(IDLE));
+    await ready(videos);
+  });
+
+  it("flies when it is flung, and lands within the page", async () => {
+    serve([IDLE, "被鼠标拖拽悬空反馈"]);
+    const { pet, root } = await mount();
+    write("position", { x: 0.25, y: 0.5, mode: "instant" });
+    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
+    const box = root.getBoundingClientRect();
+    const [x, y] = [box.x + 120, box.y + 60];
+    drag(pet, [
+      [x, y],
+      [x + 60, y - 40],
+      [x + 120, y - 80],
+      [x + 180, y - 120],
+    ]);
+    // Let go in motion: it keeps flying the way it was flung, frame after frame, then lands.
+    expect(queue.size).toBeGreaterThan(0);
+    const released = Number.parseFloat(root.style.left);
+    frames(3);
+    expect(Number.parseFloat(root.style.left)).toBeGreaterThan(released);
+    frames(3000);
+    expect(queue.size).toBe(0);
+    expect(Number.parseFloat(root.style.top)).toBeLessThanOrEqual(window.innerHeight);
+    expect(Number.parseFloat(root.style.left)).toBeLessThanOrEqual(window.innerWidth);
+    expect(saved()).not.toBeNull();
   });
 
   it("walks when it rolls a move and stops where it got to when the page is hidden", async () => {
