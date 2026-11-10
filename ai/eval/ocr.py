@@ -76,6 +76,7 @@ def glm_kie(item):
 
 
 # Xiaomi-OCR-0's model card, "Task prompts" and the KIE example.
+XIAOMI_TEXT = "Extract the text in the image."
 XIAOMI_DOC = (
     "Extract all information from the main body of the document image and represent it in markdown format, "
     "ignoring headers and footers. Tables should be expressed in OTSL format, formulas in the document should be "
@@ -126,14 +127,22 @@ MODELS = {
     "xiaomi-ocr-0": {
         "model": "xiaomi-ocr-0/Xiaomi-OCR-0-Q8_0.gguf",
         "mmproj": "xiaomi-ocr-0/mmproj-Xiaomi-OCR-0-f16.gguf",
-        "prompts": {"text": "Extract the text in the image.", "doc": XIAOMI_DOC, "kie": xiaomi_kie},
+        "prompts": {"text": XIAOMI_TEXT, "doc": XIAOMI_DOC, "kie": xiaomi_kie},
         "sampling": {"chat_template_kwargs": {"enable_thinking": False}},
     },
     # The same, unquantized: the official weights' BF16 as they are.
     "xiaomi-ocr-0-bf16": {
         "model": "xiaomi-ocr-0/Xiaomi-OCR-0-bf16.gguf",
         "mmproj": "xiaomi-ocr-0/mmproj-Xiaomi-OCR-0-bf16.gguf",
-        "prompts": {"text": "Extract the text in the image.", "doc": XIAOMI_DOC, "kie": xiaomi_kie},
+        "prompts": {"text": XIAOMI_TEXT, "doc": XIAOMI_DOC, "kie": xiaomi_kie},
+        "sampling": {"chat_template_kwargs": {"enable_thinking": False}},
+    },
+    # Xiaomi-OCR-0 (Q8_0) reading the whole text of the receipts and cards, not their fields: a second,
+    # independent reader that eval.ocr_verify checks the product's fields against.
+    "xiaomi-ocr-0-text": {
+        "model": "xiaomi-ocr-0/Xiaomi-OCR-0-Q8_0.gguf",
+        "mmproj": "xiaomi-ocr-0/mmproj-Xiaomi-OCR-0-f16.gguf",
+        "prompts": {"kie": XIAOMI_TEXT},
         "sampling": {"chat_template_kwargs": {"enable_thinking": False}},
     },
     # The model the product reads text with (docs/architecture/photo-ocr.md): Q4_K_M, as #323 measured it.

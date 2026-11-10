@@ -1,7 +1,7 @@
 # 相册证件与票据 OCR 模型评估
 
-> 状态：开发机评估完成（公开数据集）；2026-10-29 在实验 NAS 上实测了 GLM-OCR 与 Qwen3.5-2B 的速度与内存；2026-10-30 定为 Qwen3.5-4B 的 Q4_K_M（4B 级候选的准确率见 #323），同日在 NAS 上实测了它的速度、内存与挂断，11-02 实测了核对层；真实证件与银行回单未测（#128）；[实施方案](../architecture/photo-ocr.md)的步骤 1 已完成；2026-11-09 在开发机上补测了 Xiaomi-OCR-0（含官方 transformers 流程），不替换 Qwen3.5-4B  
-> 更新日期：2026-11-09  
+> 状态：开发机评估完成（公开数据集）；2026-10-29 在实验 NAS 上实测了 GLM-OCR 与 Qwen3.5-2B 的速度与内存；2026-10-30 定为 Qwen3.5-4B 的 Q4_K_M（4B 级候选的准确率见 #323），同日在 NAS 上实测了它的速度、内存与挂断，11-02 实测了核对层；真实证件与银行回单未测（#128）；[实施方案](../architecture/photo-ocr.md)的步骤 1 已完成；2026-11-09 在开发机上补测了 Xiaomi-OCR-0（含官方 transformers 流程），不替换 Qwen3.5-4B；11-10 测了用它读全文做独立对照，没有帮助  
+> 更新日期：2026-11-10  
 > 适用范围：GLM-OCR、Qwen3.5-2B、HunyuanOCR-1.5、PaddleOCR-VL-1.6、Xiaomi-OCR-0，llama.cpp `e36df60`（0.6.0-dev）CPU 推理，语言部分 Q8_0，每张图最多 1024 个视觉 token（GLM-OCR 与 Qwen3.5-2B 另以 2048 复测票据与卡证；Xiaomi-OCR-0 另按官方流程复测）  
 > 关联：[相册规格](../specs/photo-library.md)（2026-10-19 决定做 OCR）、[M2 实施方案](../architecture/photo-ai.md)、[模型与 Runtime 选型](photo-ai-model-runtime-selection.md)
 
@@ -232,12 +232,49 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
 - **0.99 时通过却算错的 8 个字段**（人工逐个看）：
   - 6 个只是格式或标注不同：单位（USD 600048.00 → 600048.00）、英文说明（两处）、“姓”标成了全名、秒的写法、门诊号的标注带了后面的说明；
   - 1 个读得不全：缺了时间；
-  - 1 个真正读错：电话少了最后一位。
-  - 也就是真正读错约 0.3%，加上读得不全的约 0.7%。
+  - 1 个电话少了最后一位：2026-11-10 看原图，这个号码末尾几位被打了码，标准答案多出的一位是码边露出的半个字，两个模型都读到码前为止（[独立全文对照](#独立全文对照)），不算读错。
+  - 也就是没有真正读错的，读得不全的 1 个，约 0.3%。
   - 按第一次出现取概率时还会通过的 3 个读错（月份 8 读成 7，编号 1035 读成 53，“核查”读成“收费票据”），在字段名之后取到的概率分别是 0.46、0.989、0.14，都没有通过。
 - **0.9 时还会放过的错误**：一个机制号错了一位（20211203… → 20211205…）、编号 1035 读成 53，以及填错字段的值、读成 0.00 的现金金额。这种“看起来合法、错了一位”的号码正是核对要拦下的，所以取 0.99（Claude 建议，用户 2026-11-03 确认）。
 - **代价**：0.99 时约一半字段（带数字的 57%）自动通过，另一半标为“待核对”，等人看一眼确认或更正。
 - 都是公开数据；产品的首批模板只有身份证、银行卡、回单、发票、小票的几个关键字段，真实证件与回单仍待测（#128）。
+
+#### 独立全文对照
+
+上面的全文与字段出自同一个模型，对照用处不大。业内常用独立的读取互相核对，所以 2026-11-10 换一个模型读全文再对照。
+
+- **条件**：
+  - Xiaomi-OCR-0（Q8_0，1600 px，最多 1024 个视觉 token，6 线程）用模型卡的纯文字提示词 `Extract the text in the image.` 读同一批 50 张的全文。每张中位约 30 秒；1 张因重复输出被停下。
+  - 字段仍是上面 Qwen3.5-4B 读的那批，规则相同，只换掉对照用的全文。
+  - 另试了两个模型的字段互相对照：Xiaomi-OCR-0 自己读出的同一字段（[下节](#xiaomi-ocr-02026-11-09)的答案）与 4B 的相同才通过。
+- **脚本**：`eval.ocr` 的 `xiaomi-ocr-0-text` 读全文；`eval.ocr_verify score` 的 `--other-text`、`--other-fields` 评分。
+
+| 规则 | 自动通过 | 通过的里面错的（个） | 带数字的字段：通过 / 错 |
+|---|---|---|---|
+| 只看单字概率 ≥ 0.99 | 49.6% | 2.7%（8） | 57.4% / 3.0% |
+| **4B 自己的全文 + 格式 + 0.99（产品现在的规则）** | **48.3%** | **2.7%（8）** | **57.4% / 3.0%** |
+| Xiaomi-OCR-0 的全文 + 格式 + 0.99 | 45.5% | 2.5%（7） | 51.7% / 2.5% |
+| 两份全文都要 + 格式 + 0.99 | 45.5% | 2.5%（7） | 51.7% / 2.5% |
+| Xiaomi-OCR-0 的字段相同 + 格式 + 0.99 | 34.0% | 1.9%（4） | 40.0% / 1.1% |
+| 4B 自己的全文 + 格式，不看概率 | 91.4% | 11.9%（66） | 95.2% / 13.2% |
+| Xiaomi-OCR-0 的全文 + 格式，不看概率 | 81.0% | 10.2%（50） | 81.7% / 11.2% |
+
+- **独立的全文没有帮助**：
+  - 0.99 时多拦下 1 个错，但这是标准答案的笔误：原图是 `00:00:00`，答案写成 `00:00.00`。同时少放过 16 个对的字段。
+  - 0.9 与 0.999 时也一样：0.9 时产品的规则通过 71.4%、错 25 个，换成 Xiaomi-OCR-0 的全文通过 66.0%、错 24 个；0.999 时两者相同。
+  - 产品自己的全文在 0.99 时也几乎不起作用：只看单字概率通过 49.6%，错的是同样 8 个。
+- **Xiaomi-OCR-0 的全文漏字**：0.99 时被它拒掉的 16 个对的字段中，
+  - 12 个根本不在它的全文里：票据号、发票号、业务流水号、电话与传真、页码，以及“存根”“记账联”这类边上的标注；
+  - 3 个是它把 23.17 读成了 `23.1/`（同一个数出现在三个字段）；
+  - 1 个日期不在它的全文里。
+  - 它的文档提示词要求忽略页眉页脚，纯文字提示词下它似乎也只读正文（推断）。
+- **剩下的错，换谁读全文都拦不下**：
+  - 单字概率 ≥ 0.9 并通过产品全文对照的 25 个错字段中，24 个也在 Xiaomi-OCR-0 的全文里。
+  - 这些错大多是：标注或格式不同（单位、币种、英文说明、括号）；值取自票上别处（现金支付填了别处的 0.00；挂号员 1035 读成 53，53 是时间的秒）；读得不全（日期只剩 `1/12/10`）。这些值都在图上，所以“值是否出现在全文里”拦不下，不论全文是谁读的。
+  - 真正读错的只有 1 个：机制号 20211203… 两个模型都读成 20211205…。原图上这串数字印得又小又淡。
+  - 换成逐行识别的 PP-OCRv6 可能少漏一些字，但同样拦不下这几类错（推断）。
+- **两个模型的字段互相对照**：错的少了（0.99 时 4 个），但只有 34% 通过。Xiaomi-OCR-0 自己读字段的能力弱（50 张中 11 张 JSON 不合法），拒掉了很多对的字段。
+- **结论**：不加独立读取。0.99 时通过的错字段里已经没有真正读错的（电话少一位那个是原图打码），剩下的错要靠别的办法，例如核对值是否紧跟在它的字段名后面（推断，未测），以及用真实样本看真正读错的有多少（#128）。
 
 ### Xiaomi-OCR-0（2026-11-09）
 
@@ -324,7 +361,7 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
 - 不替换 Qwen3.5-4B：产品读 OCR 主要为了字段，差距太大。所以没有再用产品的两步读取和 0.99 核对测它。
 - 这个差距来自模型：按官方流程复测，字段的结果与我们的测法相同。
 - 它适合快速读整页文字：与 GLM-OCR 相当，耗时不到 Qwen3.5-2B 的一半。
-- 一个未测的想法：核对层实测发现，同一个模型读的全文与字段往往错在同一处。用另一个模型读全文，可能让全文对照更有用。
+- 用它读全文、给产品的字段做独立对照，也没有帮助（[独立全文对照](#独立全文对照)）。
 
 ## 测试中发现的问题
 
@@ -357,7 +394,7 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
 
 ## 关联
 
-- 代码：[`ai/eval/ocr.py`](../../ai/eval/ocr.py)、[`ai/eval/ocr_score.py`](../../ai/eval/ocr_score.py)、[`ai/eval/ocr_models.sh`](../../ai/eval/ocr_models.sh)、[`ai/eval/ocr_nas_bench.sh`](../../ai/eval/ocr_nas_bench.sh)、[`ai/eval/ocr_transformers.py`](../../ai/eval/ocr_transformers.py)、[`ai/ocr-eval.Dockerfile`](../../ai/ocr-eval.Dockerfile)、[`ai/ocr-transformers.Dockerfile`](../../ai/ocr-transformers.Dockerfile)
-- 原始答案与报告：开发机 `D:\A-NAS-datasets\runs\ocr-2026-10-15\`（`report-all.json`、各模型的 JSON lines、`bench-t4-img1024/`）；被缓存问题污染的第一次速度测试保留在 `superseded-cache-ram-on/`；实验 NAS 的实测在 `nas-2026-10-29/t6/` 与 `nas-2026-10-30-qwen3.5-4b/`（答案、服务日志、逐秒内存记录、挂断与 Worker 内存的输出）；核对层实测在 `D:\A-NAS-datasets\runs\ocr-verify\`（两遍读取的输出与逐字概率、`verify.json`）；Xiaomi-OCR-0 的答案在 `ocr-2026-10-15\xiaomi-ocr-0\`，评分在 `report-xiaomi-ocr-0.json`，速度测试在 `D:\A-NAS-datasets\runs\ocr-2026-11-09-bench\`；它的官方流程复测在 `ocr-2026-10-15\xiaomi-ocr-0-hf\`，llama.cpp BF16、2048 px 的在 `ocr-2026-10-15\xiaomi-ocr-0-bf16-img16384-px2048\`，评分分别在 `report-xiaomi-ocr-0-hf.json` 与 `report-xiaomi-ocr-0-px2048.json`
+- 代码：[`ai/eval/ocr.py`](../../ai/eval/ocr.py)、[`ai/eval/ocr_score.py`](../../ai/eval/ocr_score.py)、[`ai/eval/ocr_models.sh`](../../ai/eval/ocr_models.sh)、[`ai/eval/ocr_nas_bench.sh`](../../ai/eval/ocr_nas_bench.sh)、[`ai/eval/ocr_transformers.py`](../../ai/eval/ocr_transformers.py)、[`ai/eval/ocr_verify.py`](../../ai/eval/ocr_verify.py)、[`ai/ocr-eval.Dockerfile`](../../ai/ocr-eval.Dockerfile)、[`ai/ocr-transformers.Dockerfile`](../../ai/ocr-transformers.Dockerfile)
+- 原始答案与报告：开发机 `D:\A-NAS-datasets\runs\ocr-2026-10-15\`（`report-all.json`、各模型的 JSON lines、`bench-t4-img1024/`）；被缓存问题污染的第一次速度测试保留在 `superseded-cache-ram-on/`；实验 NAS 的实测在 `nas-2026-10-29/t6/` 与 `nas-2026-10-30-qwen3.5-4b/`（答案、服务日志、逐秒内存记录、挂断与 Worker 内存的输出）；核对层实测在 `D:\A-NAS-datasets\runs\ocr-verify\`（两遍读取的输出与逐字概率、`verify.json`）；Xiaomi-OCR-0 的答案在 `ocr-2026-10-15\xiaomi-ocr-0\`，评分在 `report-xiaomi-ocr-0.json`，速度测试在 `D:\A-NAS-datasets\runs\ocr-2026-11-09-bench\`；它的官方流程复测在 `ocr-2026-10-15\xiaomi-ocr-0-hf\`，llama.cpp BF16、2048 px 的在 `ocr-2026-10-15\xiaomi-ocr-0-bf16-img16384-px2048\`，评分分别在 `report-xiaomi-ocr-0-hf.json` 与 `report-xiaomi-ocr-0-px2048.json`；独立全文对照用的全文在 `ocr-2026-10-15\xiaomi-ocr-0-text\`，评分在核对层实测目录的 `verify+xiaomi-ocr-0-text+xiaomi-ocr-0.json`
 - 数据与评分代码：CC-OCR 数据集 revision `c64517e9`，评测代码 AdvancedLiterateMachinery `fb6187eb`
 - [模型与 Runtime 选型](photo-ai-model-runtime-selection.md)（2026-10-07 的 PP-OCRv6 候选）、[M2 实施方案](../architecture/photo-ai.md)
