@@ -64,6 +64,21 @@ check "the assistant's settings are on in the product's services" \
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && [[ -S /run/a-nas/assistant-changes.sock ]] && break; sleep 0.2; done
 check "the executor's assistant socket is out of a member's reach outside the sandbox" \
   denied alice python3 -c "$unix_connect" /run/a-nas/assistant-changes.sock
+# The companion's socket (#412) reaches the sandbox of a member's conversations only: a
+# scheduled task and the curator run as the same UID but have no window, so their units
+# do not bind it, and outside a bind it is root's alone.
+companion_socket=/run/a-nas-companion-assistant/assistant.sock
+binds() { systemctl show -p BindPaths -p BindReadOnlyPaths --value "$1" || true; }
+check "the companion's socket is out of a member's reach outside the sandbox" \
+  denied alice python3 -c "$unix_connect" "$companion_socket"
+check "a member's assistant binds the companion's socket into its sandbox" \
+  grep -Fq "$companion_socket:/run/anas-assistant-companion/companion.sock" <<<"$(binds anas-assistant@alice.service)"
+for unit in anas-assistant-cron@alice.service anas-assistant-curator@alice.service; do
+  check "$unit does not bind the companion's socket" \
+    test -n "$(binds "$unit")" -a "$(grep -cF "$companion_socket" <<<"$(binds "$unit")")" = 0
+done
+check "without the bind, the sandbox's path is the empty mount point" \
+  test -f /run/anas-assistant-companion/companion.sock -a ! -s /run/anas-assistant-companion/companion.sock
 # The units bind it into each sandbox. To drive it as alice from outside one, the test binds
 # it at the sandbox's path on the host too.
 mount --bind /run/a-nas/assistant-changes.sock /run/anas-change-agent/agent.sock || true
@@ -286,6 +301,16 @@ if [[ -x "$assistant_python" ]]; then
   # instead of coming back as the SDK's error, which Hermes's circuit breaker counts.
   sdk_out=$(cd /src/ai && "$assistant_python" -B -m unittest tests.test_companion_mcp 2>&1 || true)
   check "the companion's MCP server passes every call on under the runtime's MCP SDK" grep -qx OK <<<"$sdk_out"
+  # The managed policy trusts the companion's server and not the A-NAS one, so a companion
+  # tool runs without a card. approvals-managed.sh checks the same against a hostile member
+  # config, but only in the spike: its unanswered approval waits out the managed
+  # approvals.timeout, a day as installed here (SPIKE_APPROVAL_TIMEOUT sets 20 s there).
+  check "the managed policy has the A-NAS tools ask and the companion's not" \
+    quiet yq -e '.mcp_servers.anas.trust == "untrusted" and .mcp_servers.companion.trust == "full"' /etc/hermes/config.yaml
+  companion_out=$(SERVE_CLIENT_APPROVALS=deny "$assistant_python" /spike/serve_client.py alice chat 'CALL mcp__companion__wake {}' 2>&1 || true)
+  check "a companion tool runs without asking for approval" \
+    test "$(grep -c 'server request:' <<<"$companion_out")" = 0 -a "$(grep -c "mcp__companion__wake" <<<"$companion_out")" -ge 1
+  check "and with no VNAS window it answers that no desktop is in use" grep -qE 'no_desktop|没有在用的桌面' <<<"$companion_out"
   serve_out=$("$assistant_python" /spike/serve_client.py alice chat hello 'CALL read_file {"path": "/nas/个人空间/计划.md"}' 2>&1 || true)
   check "alice's assistant answers over its socket" grep -qx '< ok' <<<"$serve_out"
   check "it reads her own file" grep -q 买菜 <<<"$serve_out"
