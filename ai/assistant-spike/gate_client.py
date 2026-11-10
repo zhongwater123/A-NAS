@@ -10,6 +10,11 @@ Run with the Hermes runtime's Python (it has `websockets`) in the system-test co
       Instead starts a turn in which the scripted model calls 提交更改 with JSON, confirms the
       card that comes back with the member's CSRF token, as the window does, and prints the
       assistant's answer.
+  gate_client.py URL COOKIE desktop
+      Instead attaches as the browser of a new conversation, as the window does before a
+      prompt, and plays the page for three turns in which the scripted model takes a step on
+      the desktop: a snapshot, a click and a look. Prints each command that reached it and
+      the assistant's answer to each turn.
 """
 import asyncio
 import json
@@ -23,6 +28,8 @@ from websockets.exceptions import ConnectionClosed
 url, cookie = sys.argv[1], sys.argv[2]
 mode = sys.argv[3] if len(sys.argv) > 3 else "0"
 origin = url.replace("ws://", "http://").split("/api/")[0]
+# A 1x1 PNG, as the window sends a picture of the page.
+PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 
 
 def confirm(request_id, csrf):
@@ -72,6 +79,29 @@ async def main():
                 elif kind == "message.complete" and frame["params"].get("session_id") == sid:
                     print(f"answer: {payload.get('text')}")
                     return
+        if mode == "desktop":
+            created = await call("session.create", {"cols": 80})
+            sid = created["result"]["session_id"]
+            attached = await call("desktop.attach", {"session_id": sid})
+            print(f"attached {bool((attached.get('result') or {}).get('attached'))}")
+            page = {"snapshot": {"snapshot": '- window "文件管理"\n  - button "相册" [ref=e2]'},
+                    "click": {"clicked": "@e2", "element": 'button "相册"'},
+                    "look": {"mime_type": "image/png", "data": PNG, "width": 1, "height": 1}}
+            for step in ('snapshot {}', 'click {"ref": "e2"}', 'look {}'):
+                await call("prompt.submit", {"session_id": sid, "text": f"CALL mcp__desktop__{step}"})
+                while True:
+                    frame = json.loads(await asyncio.wait_for(ws.recv(), 180))
+                    if frame.get("method") != "event":
+                        continue
+                    kind, payload = frame["params"].get("type"), frame["params"].get("payload") or {}
+                    if kind == "anas.desktop":
+                        print(f"command {payload.get('action')} {json.dumps(payload.get('args'), ensure_ascii=False)}")
+                        await call("desktop.result", {"session_id": sid, "command_id": payload["command_id"], "ok": True,
+                                                      "result": page.get(payload.get("action"), {})})
+                    elif kind == "message.complete" and frame["params"].get("session_id") == sid:
+                        print(f"answer: {(payload.get('text') or '').replace(chr(10), ' ')}")
+                        break
+            return
         refused = await call("shell.exec", {"command": "id"})
         print(f"shell.exec error {refused.get('error', {}).get('code')}")
         profile = await call("session.create", {"cols": 80, "profile": "evil"})

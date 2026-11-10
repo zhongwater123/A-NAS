@@ -140,8 +140,8 @@ case $cmd in
         (umask 077; printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\n' "$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" \
           > "/etc/a-nas-assistant/tokens/$account.env")
       fi
-      # Hermes reads skills.external_dirs, mcp_servers (under serve), dashboard.basic_auth and
-      # browser.backend from this file only. The login holds the secret's scrypt hash, made
+      # Hermes reads skills.external_dirs, mcp_servers (under serve) and dashboard.basic_auth
+      # from this file only. The login holds the secret's scrypt hash, made
       # with Hermes's own hash_password; without the runtime only the probe runs, and serve,
       # whose login gate would refuse to start without it, never does.
       install -d -m 0755 "/etc/a-nas-assistant/members/$account" "/etc/a-nas-assistant/members/$account/anas-member"
@@ -152,9 +152,6 @@ case $cmd in
       fi
       { printf 'skills:\n  external_dirs: [/opt/a-nas/assistant-skills, /etc/a-nas-assistant/members/%s]\n' "$account"
         sed -n '/^mcp_servers:/,/^[a-z]/{/^mcp_servers:/p;/^[ #]/p}' "$here/managed-config.yaml"
-        # Hermes's own browser tools only, served by the member's VNAS window (browser
-        # control), never the Browser Use CLI.
-        printf 'browser:\n  backend: "off"\n'
         [[ -z "$hash" ]] || printf 'dashboard:\n  basic_auth:\n    username: %s\n    password_hash: "%s"\n' "$account" "$hash"
       } > "/etc/a-nas-assistant/members/$account/config.yaml.new"
       mv "/etc/a-nas-assistant/members/$account/config.yaml.new" "/etc/a-nas-assistant/members/$account/config.yaml"

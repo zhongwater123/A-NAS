@@ -121,7 +121,7 @@ describe("the companion on the desktop", () => {
     // A turn the VNAS window on this page started.
     act(() => {
       startTurn("live0001");
-      reportEvent("live0001", "tool.start", { name: "browser_snapshot" });
+      reportEvent("live0001", "tool.start", { name: "mcp__desktop__snapshot" });
     });
     await plays("工作状态-忙碌点按");
     act(() => reportCards([{ requestId: "req-1", sessionId: "live0001", status: "awaiting" }]));

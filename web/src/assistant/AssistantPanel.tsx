@@ -119,18 +119,8 @@ const SUGGESTIONS = [
 ];
 
 // How long a step VNAS takes on the desktop waits for the member to allow it:
-// Hermes gives the window 30 s to answer a browser command.
+// the product service gives the window 30 s to answer a desktop command.
 const CONTROL_CONFIRM_MS = 25_000;
-// The window serves these of Hermes's browser commands (internal/assistantapi rpc.go);
-// a screenshot is what Hermes's browser_vision looks at (hermes-patches/0003).
-const CONTROL_CAPABILITIES = [
-  "browser_snapshot",
-  "browser_click",
-  "browser_type",
-  "browser_press",
-  "browser_scroll",
-  "browser_screenshot",
-];
 
 // Opens a photo the assistant named in the photo app, from the desktop.
 const PhotoOpener = createContext<((assetId: string) => void) | undefined>(undefined);
@@ -276,10 +266,11 @@ export function AssistantPanel({
     // Hermes names a new conversation in the background after its first turn.
     window.setTimeout(() => void refreshSessions(), 4000);
   }, [refreshSessions, refreshBusy]);
-  // VNAS operates the WebOS page it is on as Hermes's browser for its live
-  // conversation (Hermes's browser control). A step whose writes delete, move,
-  // share or change settings, and any step in the terminal, Docker or 应用中心,
-  // waits here for the member.
+  // VNAS operates the WebOS page it is on for its live conversation: the
+  // commands of A-NAS's `desktop` MCP server come here through the product
+  // service (ADR 0024 decision 8). A step whose writes delete, move, share or
+  // change settings, and any step in the terminal, Docker or 应用中心, waits
+  // here for the member.
   const [controlAsk, setControlAsk] = useState<{ danger: Danger; until: number; answer(allowed: boolean): void }>();
   const asking = useRef<(allowed: boolean) => void>(undefined);
   // One card at a time: a write that arrives while another card is open waits its turn.
@@ -312,54 +303,52 @@ export function AssistantPanel({
     return installed.install();
   }, []);
   // The window that sends a prompt is the conversation's browser for its turn:
-  // it registers again before every prompt, so the steps and their cards stay
+  // it attaches again before every prompt, so the steps and their cards stay
   // on the device the member is using; a window that only shows the
-  // conversation never registers (#160). These are the live sessions this
-  // connection registered for.
+  // conversation never attaches (#160). These are the live sessions this
+  // connection attached to.
   const controlled = useRef(new Set<string>());
   useLayoutEffect(() => {
     controlled.current.clear();
   }, [gateway.generation]);
   const beforePrompt = useCallback(
     (liveId: string) =>
-      gateway.client
-        .request("browser.controller.register", {
-          session_id: liveId,
-          protocol_version: 1,
-          controller_id: "vnas-window",
-          browser_profile_id: "webos",
-          capabilities: CONTROL_CAPABILITIES,
-        })
-        .then(
-          () => {
-            controlled.current.add(liveId);
-            startTurn(liveId);
-          },
-          () => {
-            controlled.current.delete(liveId);
-          },
-        ),
+      gateway.client.request("desktop.attach", { session_id: liveId }).then(
+        () => {
+          controlled.current.add(liveId);
+          startTurn(liveId);
+        },
+        () => {
+          controlled.current.delete(liveId);
+        },
+      ),
     [gateway.client],
   );
+  // The desktop commands this window is carrying out, by id.
+  const stepping = useRef(new Set<string>());
   useEffect(
     () =>
       gateway.client.onEvent((event) => {
         const type = event.type as string;
         const session = typeof event.session_id === "string" ? event.session_id : "";
-        if (type === "browser.controller.cancel") {
-          // Hermes stopped waiting: the step is not taken.
-          asking.current?.(false);
+        const command = (event.payload ?? {}) as { command_id?: unknown; action?: unknown; args?: unknown };
+        const { command_id: commandId, action } = command;
+        if (type === "anas.desktop.cancel") {
+          // The product service stopped waiting for a step under way here: the
+          // step is not taken, so the card asking about it closes.
+          if (typeof commandId === "string" && stepping.current.has(commandId)) asking.current?.(false);
           return;
         }
-        if (type !== "browser.controller.command" || !controlled.current.has(session)) return;
-        const command = (event.payload ?? {}) as {
-          command_id?: string;
-          action?: string;
-          arguments?: Record<string, unknown>;
-        };
-        if (!command.command_id || !command.action || !controller.current) return;
+        if (type !== "anas.desktop" || !controlled.current.has(session)) return;
+        if (typeof commandId !== "string" || !commandId || typeof action !== "string" || !action) return;
+        if (!controller.current) return;
+        const args =
+          command.args && typeof command.args === "object" && !Array.isArray(command.args)
+            ? (command.args as Record<string, unknown>)
+            : {};
+        stepping.current.add(commandId);
         void controller.current
-          .run(command.action, command.arguments ?? {})
+          .run(action, args)
           .then(
             (result) => ({ ok: true, result }),
             (reason) => ({
@@ -367,13 +356,10 @@ export function AssistantPanel({
               error: { message: reason instanceof ControlError ? reason.message : "这一步没有完成" },
             }),
           )
-          .then((outcome) =>
-            gateway.client.request("browser.controller.result", {
-              session_id: session,
-              command_id: command.command_id,
-              ...outcome,
-            }),
-          )
+          .then((outcome) => {
+            stepping.current.delete(commandId);
+            return gateway.client.request("desktop.result", { session_id: session, command_id: commandId, ...outcome });
+          })
           .catch(() => undefined);
       }),
     [gateway.client],
@@ -864,7 +850,7 @@ export function toThreadMessage(original: ChatMessage): ThreadMessageLike {
 }
 
 // A step VNAS wants to take on the desktop that deletes, replaces or resets
-// something: the member allows it, or not, before Hermes stops waiting.
+// something: the member allows it, or not, before the product service stops waiting.
 function ControlCard({ ask }: { ask: { danger: Danger; until: number; answer(allowed: boolean): void } }) {
   const [left, setLeft] = useState(() => Math.max(0, Math.ceil((ask.until - Date.now()) / 1000)));
   useEffect(() => {
@@ -1447,24 +1433,33 @@ function describeTool(name: string, args: Record<string, unknown>): { icon: Reac
     case "skills_list":
     case "skill_manage":
       return { icon: <Wrench />, label: "查看技能", detail: typeof args.name === "string" ? args.name : "" };
+    // The desktop server's tools; the browser_* names are Hermes's own browser
+    // tools, which conversations from before the desktop server still hold.
+    case "mcp__desktop__snapshot":
     case "browser_snapshot":
       return { icon: <MonitorSmartphone />, label: "查看桌面", detail: "" };
+    case "mcp__desktop__look":
+      return { icon: <Eye />, label: "看桌面画面", detail: "" };
     case "browser_vision":
       return {
         icon: <Eye />,
         label: "看桌面画面",
         detail: typeof args.question === "string" ? short(args.question) : "",
       };
+    case "mcp__desktop__click":
     case "browser_click":
       return { icon: <MousePointerClick />, label: "点击", detail: typeof args.ref === "string" ? args.ref : "" };
+    case "mcp__desktop__type":
     case "browser_type":
       return {
         icon: <Keyboard />,
         label: "输入",
         detail: typeof args.text === "string" ? `“${short(args.text)}”` : "",
       };
+    case "mcp__desktop__press":
     case "browser_press":
       return { icon: <Keyboard />, label: "按键", detail: typeof args.key === "string" ? args.key : "" };
+    case "mcp__desktop__scroll":
     case "browser_scroll":
       return { icon: <MousePointerClick />, label: "滚动", detail: args.direction === "up" ? "向上" : "向下" };
     default:

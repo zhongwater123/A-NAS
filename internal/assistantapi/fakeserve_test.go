@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -43,14 +42,10 @@ type fakeServe struct {
 	conns    int
 	conn     *websocket.Conn
 	// access is the access token of the current login; logins counts them.
-	access string
-	logins int
-	// controller is the connection that registered as the browser; results
-	// are the browser command results it sent.
-	controller *websocket.Conn
-	results    chan string
-	closed     chan struct{}
-	answered   chan string
+	access   string
+	logins   int
+	closed   chan struct{}
+	answered chan string
 	// The learning graph: alice's memories (store, text) and the skills the
 	// assistant made (name, createdBy). system are A-NAS's own skills, from
 	// skills.external_dirs: Hermes shows their text but leaves them out of the
@@ -76,7 +71,7 @@ func newFakeServe(t *testing.T) *fakeServe {
 	if err := os.WriteFile(filepath.Join(dir, "alice.token"), []byte(fakeToken+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeServe{t: t, dir: dir, resolved: true, closed: make(chan struct{}, 8), answered: make(chan string, 8), results: make(chan string, 8),
+	f := &fakeServe{t: t, dir: dir, resolved: true, closed: make(chan struct{}, 8), answered: make(chan string, 8),
 		memories: [][2]string{{"memory", "alice 喜欢简短的回答"}, {"profile", "alice 每周日大扫除"}},
 		skills:   [][2]string{{"family-trip", "learn"}, {"anas-photos", "agent"}}, system: []string{"anas-files"}}
 	listener, err := net.Listen("unix", filepath.Join(dir, "alice.sock"))
@@ -307,19 +302,6 @@ func (f *fakeServe) gateway(w http.ResponseWriter, r *http.Request) {
 			}
 			f.reply(conn, msg.ID, `{"status":"streaming"}`)
 			go f.turn(conn, params.Text)
-		case "browser.controller.register":
-			f.mu.Lock()
-			f.controller = conn
-			f.mu.Unlock()
-			f.reply(conn, msg.ID, `{"scope":{"session_id":"`+fakeStored+`","controller_id":"vnas-window","capabilities":["browser_snapshot"]}}`)
-		case "browser.controller.result":
-			// The answer goes before the turn hears of the result. Otherwise the
-			// turn's message.complete can come first, and the window's call,
-			// which passes over every frame before its answer, swallows it.
-			f.reply(conn, msg.ID, `{"accepted":true}`)
-			f.results <- string(msg.Params)
-		case "browser.controller.detach":
-			f.reply(conn, msg.ID, `{"detached":true}`)
 		case "session.interrupt":
 			f.mu.Lock()
 			stopFirst := f.stopFirst
@@ -384,36 +366,6 @@ func (f *fakeServe) turn(conn *websocket.Conn, said string) {
 			`","questions":[{"qid":"q1","question":"放到哪个文件夹？","choices":["照片","文档"]},{"qid":"q2","question":"改个名字吗？"}]}`)
 		<-f.answered
 		f.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
-	case "browse":
-		// browser_snapshot: Hermes sends the command to the connection that
-		// registered as the session's browser, and waits for its result.
-		f.mu.Lock()
-		controller := f.controller
-		f.mu.Unlock()
-		f.event(conn, "tool.start", fakeRuntime, `{"tool_id":"t4","name":"browser_snapshot","args":{}}`)
-		f.event(controller, "browser.controller.command", fakeRuntime,
-			`{"command_id":"0123456789abcdef0123456789abcdef","action":"browser_snapshot","arguments":{},"controller_id":"vnas-window"}`)
-		select {
-		case result := <-f.results:
-			f.event(conn, "message.complete", fakeRuntime, `{"text":`+strconv.Quote(result)+`,"status":"complete"}`)
-		case <-time.After(5 * time.Second):
-			f.event(conn, "message.complete", fakeRuntime, `{"text":"no result","status":"complete"}`)
-		}
-	case "look":
-		// browser_vision on the window's lane: Hermes asks the window for a
-		// screenshot of its page (hermes-patches/0003).
-		f.mu.Lock()
-		controller := f.controller
-		f.mu.Unlock()
-		f.event(conn, "tool.start", fakeRuntime, `{"tool_id":"t5","name":"browser_vision","args":{"question":"what is open?"}}`)
-		f.event(controller, "browser.controller.command", fakeRuntime,
-			`{"command_id":"fedcba9876543210fedcba9876543210","action":"browser_screenshot","arguments":{"annotate":false},"controller_id":"vnas-window"}`)
-		select {
-		case result := <-f.results:
-			f.event(conn, "message.complete", fakeRuntime, `{"text":"received `+strconv.Itoa(len(result))+` bytes","status":"complete"}`)
-		case <-time.After(5 * time.Second):
-			f.event(conn, "message.complete", fakeRuntime, `{"text":"no result","status":"complete"}`)
-		}
 	case "long":
 		f.event(conn, "message.delta", fakeRuntime, `{"text":"thinking…"}`)
 	default:

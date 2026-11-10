@@ -32,7 +32,7 @@ func init() {
 
 const (
 	otherRuntime = "0a1b2c3e"
-	registration = `{"session_id":"` + fakeRuntime + `","protocol_version":1,"controller_id":"vnas-window","browser_profile_id":"webos","capabilities":["browser_snapshot"]}`
+	registration = `{"session_id":"` + fakeRuntime + `"}`
 )
 
 // current is the fake's last connection, where the test plays Hermes's events.
@@ -50,7 +50,7 @@ func companionTurn(t *testing.T, h *harness) (*window, *websocket.Conn) {
 	w := h.open()
 	conn := h.serve.current()
 	w.call("session.create", `{"cols":80}`)
-	if response := w.call("browser.controller.register", registration); len(response.Error) > 0 {
+	if response := w.call("desktop.attach", registration); len(response.Error) > 0 {
 		t.Fatalf("registration refused: %s", response.Error)
 	}
 	w.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"long"}`)
@@ -77,7 +77,9 @@ func (h *harness) observed(w *window, conn *websocket.Conn) {
 // returns its result when it comes.
 func (h *harness) calls(tool, args string) <-chan map[string]any {
 	result := make(chan map[string]any, 1)
-	go func() { result <- h.api.companionCall(context.Background(), "alice", tool, json.RawMessage(args)) }()
+	go func() {
+		result <- h.api.companionCall(context.Background(), "alice", companionFamily, tool, json.RawMessage(args))
+	}()
 	return result
 }
 
@@ -158,7 +160,7 @@ func TestACompanionCommandGoesToTheWindowOfTheConversationOnly(t *testing.T) {
 	}
 	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
 	watcher.waitFor(func(f frame) bool {
-		if isEvent(f, "anas.companion") {
+		if isEvent(f, "anas.companion") || isEvent(f, "anas.desktop") {
 			t.Fatal("a command reached another window")
 		}
 		return isEvent(f, "message.complete")
@@ -292,14 +294,14 @@ func TestOnlyTheWindowThatSentThePromptGetsCommands(t *testing.T) {
 	first := h.open()
 	conn := h.serve.current()
 	first.call("session.create", `{"cols":80}`)
-	first.call("browser.controller.register", registration)
+	first.call("desktop.attach", registration)
 	second := h.open()
 	second.call("session.resume", `{"session_id":"`+fakeStored+`","cols":80}`)
 	h.serve.finish() // the resumed session reported a turn under way
 	second.waitFor(func(f frame) bool { return isEvent(f, "message.complete") })
 	// Between turns the second window became the browser, then the first sent
 	// the prompt.
-	if response := second.call("browser.controller.register", registration); len(response.Error) > 0 {
+	if response := second.call("desktop.attach", registration); len(response.Error) > 0 {
 		t.Fatalf("registration refused: %s", response.Error)
 	}
 	first.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"long"}`)
@@ -354,7 +356,7 @@ func TestTheTurnsEndCancelsItsCommandsAndReleasesItsLock(t *testing.T) {
 	// A turn that took no lock releases none.
 	w.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"hello"}`)
 	w.waitFor(func(f frame) bool {
-		if isEvent(f, "anas.companion") {
+		if isEvent(f, "anas.companion") || isEvent(f, "anas.desktop") {
 			t.Fatal("a turn without a lock released one")
 		}
 		return isEvent(f, "message.complete")
@@ -382,22 +384,22 @@ func TestTheLimitsMakeCommandsBusy(t *testing.T) {
 	m := &member{}
 	now := time.Now()
 	for i := range 6 {
-		if !m.admit("broadcast", now) || !m.admit("throw", now) {
+		if !m.admit(companionFamily, "broadcast", now) || !m.admit(companionFamily, "throw", now) {
 			t.Fatalf("command %d refused", i)
 		}
 	}
-	if m.admit("broadcast", now) || m.admit("throw", now) {
+	if m.admit(companionFamily, "broadcast", now) || m.admit(companionFamily, "throw", now) {
 		t.Fatal("a seventh broadcast or throw in a minute passed")
 	}
 	for i := range 8 {
-		if !m.admit("anim", now) {
+		if !m.admit(companionFamily, "anim", now) {
 			t.Fatalf("anim %d refused", i)
 		}
 	}
-	if m.admit("wake", now) {
+	if m.admit(companionFamily, "wake", now) {
 		t.Fatal("a 21st command in a minute passed")
 	}
-	if !m.admit("broadcast", now.Add(companionMinute)) {
+	if !m.admit(companionFamily, "broadcast", now.Add(companionMinute)) {
 		t.Fatal("the limit outlived its minute")
 	}
 
@@ -408,7 +410,7 @@ func TestTheLimitsMakeCommandsBusy(t *testing.T) {
 	h.api.membersMu.Unlock()
 	alice.mu.Lock()
 	for range companionRate {
-		alice.sent = append(alice.sent, sentCommand{at: time.Now(), tool: "anim"})
+		alice.sent = append(alice.sent, sentCommand{at: time.Now(), family: companionFamily, tool: "anim"})
 	}
 	alice.mu.Unlock()
 	h.started(conn, fakeRuntime, "call-1", "wake", `{}`)
@@ -448,28 +450,28 @@ func TestCompanionArgumentsAreCheckedBeforeAnythingIsSent(t *testing.T) {
 		{"wake", `[]`},
 	} {
 		h := &Handler{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), members: map[string]*member{}}
-		result := h.companionCall(context.Background(), "alice", c.tool, json.RawMessage(c.args))
+		result := h.companionCall(context.Background(), "alice", companionFamily, c.tool, json.RawMessage(c.args))
 		if result["status"] != "rejected" || result["reason"] != "bad-request" || result["message"] == "" {
 			t.Errorf("%s %s gave %v", c.tool, c.args, result)
 		}
 	}
-	args, canonical, problem := checkCompanion("position", json.RawMessage(`{"y":-1,"x":1.5,"mode":"spring","lock":null}`))
+	args, canonical, problem := checkCompanion(companionFamily, "position", json.RawMessage(`{"y":-1,"x":1.5,"mode":"spring","lock":null}`))
 	if problem != "" || args["x"] != 1.0 || args["y"] != 0.0 || len(args) != 3 || canonical != `{"mode":"spring","x":1.5,"y":-1}` {
 		t.Fatalf("args = %v, canonical %s, problem %q", args, canonical, problem)
 	}
-	if args, _, problem := checkCompanion("broadcast", json.RawMessage(`{"text":"第一行\n第二行","anim":false}`)); problem != "" || args["text"] != "第一行\n第二行" {
+	if args, _, problem := checkCompanion(companionFamily, "broadcast", json.RawMessage(`{"text":"第一行\n第二行","anim":false}`)); problem != "" || args["text"] != "第一行\n第二行" {
 		t.Fatalf("args = %v, problem %q", args, problem)
 	}
 	// An empty lock is no lock, as dsh-pet's empty ?lock= and the window take it;
 	// numbers and booleans written as strings are taken as Hermes coerces them.
-	args, canonical, problem = checkCompanion("broadcast", json.RawMessage(`{"text":"hi","lock":"","duration":"3000","anim":"FALSE"}`))
+	args, canonical, problem = checkCompanion(companionFamily, "broadcast", json.RawMessage(`{"text":"hi","lock":"","duration":"3000","anim":"FALSE"}`))
 	if problem != "" || len(args) != 3 || args["duration"] != 3000.0 || args["anim"] != false || canonical != `{"anim":false,"duration":3000,"text":"hi"}` {
 		t.Fatalf("args = %v, canonical %s, problem %q", args, canonical, problem)
 	}
-	if args, _, problem := checkCompanion("lock", json.RawMessage(`{"lockId":" ","ttl":"null"}`)); problem != "" || len(args) != 0 {
+	if args, _, problem := checkCompanion(companionFamily, "lock", json.RawMessage(`{"lockId":" ","ttl":"null"}`)); problem != "" || len(args) != 0 {
 		t.Fatalf("args = %v, problem %q", args, problem)
 	}
-	if _, _, problem := checkCompanion("throw", json.RawMessage(`{"angle":"NaN","power":1}`)); problem == "" {
+	if _, _, problem := checkCompanion(companionFamily, "throw", json.RawMessage(`{"angle":"NaN","power":1}`)); problem == "" {
 		t.Fatal("NaN passed as an angle")
 	}
 }
@@ -624,7 +626,7 @@ func TestKeysTheServerDropsAreRefusedOnceThePairingIsMade(t *testing.T) {
 	}
 	h.serve.event(conn, "message.complete", fakeRuntime, `{"text":"done","status":"complete"}`)
 	w.waitFor(func(f frame) bool {
-		if isEvent(f, "anas.companion") {
+		if isEvent(f, "anas.companion") || isEvent(f, "anas.desktop") {
 			t.Fatal("a refused call reached the window")
 		}
 		return isEvent(f, "message.complete")
@@ -692,7 +694,7 @@ func TestACommandSettledBeforeItWentOutIsNotSent(t *testing.T) {
 	w, conn := companionTurn(t, h)
 	m := h.alice()
 	// The member stops the turn just as a lock call is paired.
-	c, refusal := m.command(fakeRuntime, "lock", map[string]any{"ttl": 1000.0})
+	c, refusal := m.command(fakeRuntime, companionFamily, "lock", map[string]any{"ttl": 1000.0})
 	if refusal != nil {
 		t.Fatalf("refused: %v", refusal)
 	}
@@ -706,7 +708,7 @@ func TestACommandSettledBeforeItWentOutIsNotSent(t *testing.T) {
 	}
 	w.call("prompt.submit", `{"session_id":"`+fakeRuntime+`","text":"hello"}`)
 	w.waitFor(func(f frame) bool {
-		if isEvent(f, "anas.companion") {
+		if isEvent(f, "anas.companion") || isEvent(f, "anas.desktop") {
 			t.Fatal("a cancelled command reached the window after the release")
 		}
 		return isEvent(f, "message.complete")
@@ -809,7 +811,9 @@ func TestACallTheServerStopsWaitingForIsSettled(t *testing.T) {
 	h.started(conn, fakeRuntime, "call-1", "anim", `{"name":"wave"}`)
 	ctx, cancel := context.WithCancel(context.Background())
 	results := make(chan map[string]any, 1)
-	go func() { results <- h.api.companionCall(ctx, "alice", "anim", json.RawMessage(`{"name":"wave"}`)) }()
+	go func() {
+		results <- h.api.companionCall(ctx, "alice", companionFamily, "anim", json.RawMessage(`{"name":"wave"}`))
+	}()
 	sent := command(w)
 	cancel()
 	if status := statusOf(t, results); status != "cancelled" {
@@ -833,7 +837,7 @@ func TestTheBroadcastLimitHoldsOnTheWholePath(t *testing.T) {
 	m := h.alice()
 	m.mu.Lock()
 	for range companionRateEach["broadcast"] {
-		m.sent = append(m.sent, sentCommand{at: time.Now(), tool: "broadcast"})
+		m.sent = append(m.sent, sentCommand{at: time.Now(), family: companionFamily, tool: "broadcast"})
 	}
 	m.mu.Unlock()
 	h.started(conn, fakeRuntime, "call-1", "broadcast", `{"text":"再说一次"}`)
@@ -969,7 +973,7 @@ func TestAnInstanceThatStopsInATurnEndsIt(t *testing.T) {
 	h.started(conn, otherRuntime, "call-2", "wake", `{}`)
 	h.observed(w, conn)
 	m.mu.Lock()
-	start, session, found, ambiguous := m.pair("wake", "{}", time.Now(), false)
+	start, session, found, ambiguous := m.pair(companionFamily, "wake", "{}", time.Now(), false)
 	m.mu.Unlock()
 	if !found || ambiguous || session != otherRuntime || start.toolID != "call-2" || m.delegating(time.Now()) {
 		t.Fatalf("pairing after the restart: %+v in %s, found %v, ambiguous %v", start, session, found, ambiguous)
@@ -1040,8 +1044,8 @@ func TestACallOfAStoppedTurnDoesNotTakeTheNextTurns(t *testing.T) {
 	}
 	// A call that never came is let go of.
 	m.mu.Lock()
-	m.sessions[fakeRuntime].abandon([]companionStart{{toolID: "call-x", tool: "wake", args: "{}"}}, time.Now().Add(-companionAbandoned))
-	_, _, found, _ := m.pair("wake", "{}", time.Now(), true)
+	m.sessions[fakeRuntime].abandon([]companionStart{{toolID: "call-x", family: companionFamily, tool: "wake", args: "{}"}}, time.Now().Add(-companionAbandoned))
+	_, _, found, _ := m.pair(companionFamily, "wake", "{}", time.Now(), true)
 	m.mu.Unlock()
 	if found {
 		t.Fatal("an abandoned call outlived its time")
@@ -1106,7 +1110,7 @@ func TestAWindowThatTakesNoFramesHoldsUpNothingElse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), companionReceipt/4)
 	defer cancel()
 	began := time.Now()
-	if result := h.api.companionCall(ctx, "alice", "wake", json.RawMessage(`{}`)); result["status"] != "cancelled" || time.Since(began) >= companionReceipt {
+	if result := h.api.companionCall(ctx, "alice", companionFamily, "wake", json.RawMessage(`{}`)); result["status"] != "cancelled" || time.Since(began) >= companionReceipt {
 		t.Fatalf("result %v after %s", result, time.Since(began))
 	}
 	// The turn's end, and the events after it, still go through while the
@@ -1237,7 +1241,7 @@ func (h *harness) nothingSent(w *window, conn *websocket.Conn) {
 	mark := fmt.Sprintf("mark-%d", h.marks)
 	h.serve.event(conn, "status.update", fakeRuntime, `{"text":"`+mark+`"}`)
 	w.waitFor(func(f frame) bool {
-		if isEvent(f, "anas.companion") {
+		if isEvent(f, "anas.companion") || isEvent(f, "anas.desktop") {
 			w.t.Fatalf("a command reached the window: %s", f.Params)
 		}
 		return isEvent(f, "status.update") && strings.Contains(string(f.Params), mark)
@@ -1440,7 +1444,7 @@ func TestACallPairedJustBeforeTheStopMakesNoCommand(t *testing.T) {
 	h.observed(w, conn)
 	interrupt(w)
 	m := h.alice()
-	c, result := m.command(fakeRuntime, "lock", map[string]any{})
+	c, result := m.command(fakeRuntime, companionFamily, "lock", map[string]any{})
 	if c != nil || result["status"] != companionCancelled || result["reason"] != "turn-ended" {
 		t.Fatalf("command made %v, result %v", c != nil, result)
 	}

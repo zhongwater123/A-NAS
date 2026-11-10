@@ -286,6 +286,9 @@ if [[ -x "$assistant_python" ]]; then
   # instead of coming back as the SDK's error, which Hermes's circuit breaker counts.
   sdk_out=$(cd /src/ai && "$assistant_python" -B -m unittest tests.test_companion_mcp 2>&1 || true)
   check "the companion's MCP server passes every call on under the runtime's MCP SDK" grep -qx OK <<<"$sdk_out"
+  # The desktop's server likewise, and a picture of the page reaches its client as an image.
+  sdk_out=$(cd /src/ai && "$assistant_python" -B -m unittest tests.test_desktop_mcp 2>&1 || true)
+  check "the desktop's MCP server does too, and returns a picture as an image" grep -qx OK <<<"$sdk_out"
   serve_out=$("$assistant_python" /spike/serve_client.py alice chat hello 'CALL read_file {"path": "/nas/个人空间/计划.md"}' 2>&1 || true)
   check "alice's assistant answers over its socket" grep -qx '< ok' <<<"$serve_out"
   check "it reads her own file" grep -q 买菜 <<<"$serve_out"
@@ -310,15 +313,13 @@ if [[ -x "$assistant_python" ]]; then
   echo "INFO assistant photos: $sandbox_libraries"
   check "it runs under alice's own UID" \
     test "$(awk '/^Uid:/ {print $2}' "/proc/$(systemctl show -p MainPID --value anas-assistant@alice.service)/status" 2>/dev/null)" = "$alice_id"
-  # Hermes's own login and browser control (decisions 8 to 10): the old session token is
-  # refused, and a logged-in window becomes the browser of its own session only.
-  browser_out=$("$assistant_python" /spike/browser_control.py alice 2>&1 || true)
-  check "her instance refuses the old session token" grep -q '^PASS the old session token is refused' <<<"$browser_out"
-  browser_ok=no
-  grep -q '^PASS browser_snapshot reaches the window' <<<"$browser_out" &&
-    grep -q '^browser control: 0 failed' <<<"$browser_out" && browser_ok=yes
-  check "a logged-in window becomes the browser of its session and answers its commands" test "$browser_ok" = yes
-  grep '^FAIL' <<<"$browser_out" | sed 's/^/INFO assistant browser control: /' || true
+  # Hermes's own login and the desktop tools (decisions 8 to 10): the old session token is
+  # refused, the model is offered the desktop server's tools and none of Hermes's own
+  # browser tools, and a step with no VNAS window behind it says that no desktop is in use.
+  desktop_out=$("$assistant_python" /spike/desktop_control.py alice 2>&1 || true)
+  check "her instance refuses the old session token" grep -q '^PASS the old session token is refused' <<<"$desktop_out"
+  check "her assistant has the desktop tools, and none of Hermes's browser tools" grep -q '^desktop control: 0 failed' <<<"$desktop_out"
+  grep '^FAIL' <<<"$desktop_out" | sed 's/^/INFO assistant desktop tools: /' || true
   check "the first model request offers the A-NAS MCP tool" \
     bash -c "grep -m 1 -F '\"tools\": [\"' /var/log/fake-model.jsonl | grep -q mcp__anas__submit_changes"
   # The window's way in: the Product Service, then the gate, then alice's instance.
@@ -344,6 +345,19 @@ if [[ -x "$assistant_python" ]]; then
   check "her plan has the confirmed line, written as her" \
     test "$(grep -c 经网关确认 "$data/spaces/private/alice/计划.md" 2>/dev/null):$(owner_uid "$data/spaces/private/alice/计划.md")" = "1:$alice_id"
   echo "INFO assistant gate: $(tr '\n' ';' </tmp/gate-submit.out | cut -c1-400)"
+  # VNAS operates the desktop (decision 8): a step the model takes leaves her sandbox by the
+  # desktop's MCP server and the Product Service's socket for assistants, reaches the window
+  # that attached as the conversation's browser and sent its prompt, and what the window
+  # answers returns into the turn; a picture of the page returns as an image file.
+  "$assistant_python" -u /spike/gate_client.py "ws://127.0.0.1:8080/api/v1/assistant/ws" "$(session_of /tmp/alice.jar)" \
+    desktop >/tmp/gate-desktop.out 2>&1 || true
+  check "her window attaches as its conversation's browser" grep -qx 'attached True' /tmp/gate-desktop.out
+  check "a snapshot the model asks for reaches her window" grep -qx 'command snapshot {}' /tmp/gate-desktop.out
+  check "and the page her window read returns into the turn" grep -q '^answer: .*button .*相册.*ref=e2' /tmp/gate-desktop.out
+  check "a click carries the control's ref to her window" grep -qx 'command click {"ref": "e2"}' /tmp/gate-desktop.out
+  check "a picture of the page returns as an image for vision_analyze" \
+    bash -c "grep -q '^command look' /tmp/gate-desktop.out && grep -q '^answer: .*vision_analyze.*MEDIA:' /tmp/gate-desktop.out"
+  echo "INFO assistant desktop: $(tr '\n' ';' </tmp/gate-desktop.out | cut -c1-600)"
   gate_session=$(curl -fsS -c /tmp/alice-gate.jar -H 'Content-Type: application/json' \
     -d "{\"username\":\"alice\",\"password\":\"$new_password\"}" "$api/api/v1/session" | jq -r .csrfToken || true)
   "$assistant_python" -u /spike/gate_client.py "ws://127.0.0.1:8080/api/v1/assistant/ws" "$(session_of /tmp/alice-gate.jar)" 90 \

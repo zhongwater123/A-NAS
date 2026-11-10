@@ -17,8 +17,8 @@ fi
 # Hermes's own login (dashboard.basic_auth in the member's root-written config.yaml: the
 # account and the scrypt hash of the instance's root-only secret, assistant-layout.sh), and
 # binds every address of the sandbox's private network, which has only loopback, so Hermes's
-# login gate engages: a connection that logged in carries the member's identity, which
-# Hermes's browser control requires, and the legacy session token is refused. Sessions are
+# login gate engages: a connection that logged in carries the member's identity, and the
+# legacy session token, which any process of the sandbox could read, is refused. Sessions are
 # signed with a key serve draws at start and keeps in memory; serve_nondumpable.py keeps that
 # memory out of reach of the member's own processes in the sandbox.
 exec "$runtime/python" -P /spike/serve_nondumpable.py --host 0.0.0.0 --port 9119
