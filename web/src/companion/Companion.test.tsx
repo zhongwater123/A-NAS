@@ -281,6 +281,34 @@ describe("the companion on the desktop", () => {
     await plays(IDLE);
   });
 
+  it("curtsies when the member stops a turn in which VNAS's animation still plays", async () => {
+    serve([IDLE, "写代码", "女仆屈膝礼仪", "点击回应-元气挥手"]);
+    const { videos } = await mount();
+    act(() => {
+      startTurn("live0001");
+      reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+    });
+    await plays("写代码");
+    await ready(videos);
+    void runCompanionCommand("live0001", { action: "anim", args: { name: "点击回应-元气挥手" } });
+    await plays("点击回应-元气挥手");
+    await ready(videos);
+    fetched = [];
+    // As the reply's panel stops a turn (AssistantPanel.tsx): the command's animation first, then the turn,
+    // whose curtsy the command's idle must not replace.
+    act(() => {
+      stopTurnCommands("live0001");
+      stopTurn("live0001");
+    });
+    await plays("女仆屈膝礼仪");
+    await ready(videos);
+    await settle();
+    expect(fetched.at(-1)).toBe("女仆屈膝礼仪");
+    fetched = [];
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await plays(IDLE);
+  });
+
   it("is not shown in a browser that needs animations this NAS does not have", async () => {
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
       "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 Version/26.0 Mobile/15E148 Safari/604.1",
