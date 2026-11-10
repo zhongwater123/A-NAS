@@ -111,6 +111,8 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
   let playing: string | null = null;
   /** 冻结标志：只挡自动来源，显式指令照常。 */
   let frozen = deps.initiallyFrozen;
+  /** A-NAS: whether the clip in front ended while a switch was loading (handleEnded held its end back). */
+  let heldEnd = false;
   /** 两个槽位各自的 blob 地址，换源时先释放旧的。 */
   const blobUrl: { a: string | null; b: string | null } = { a: null, b: null };
   const loader = deps.loader ?? createAssetLoader(ASSET_FETCH_TIMEOUT_MS);
@@ -121,6 +123,17 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
   const elementOf = (index: number): HTMLVideoElement | null => (index === 0 ? deps.videoA() : deps.videoB());
 
   const frontVideo = (): HTMLVideoElement | null => elementOf(front);
+
+  /**
+   * A-NAS: releases a switch whose clip will not come and hands on the end held back while it loaded, so
+   * that the chain goes on from the clip in front as it would have without the switch.
+   */
+  const releaseFailedSwitch = (): void => {
+    pending = null;
+    if (!heldEnd) return;
+    heldEnd = false;
+    deps.onEnded(handleEnded());
+  };
 
   /** 上报并清掉「正在播」的编号；`keep` 为真时不清（同一编号继续播）。 */
   const reportOnce = (playbackId: string, status: ReportableStatus, reason?: string): void => {
@@ -160,7 +173,11 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     el.playsInline = true;
     el.onended = nextOnce ? (event: Event) => deps.onEnded(handleEnded(event)) : null;
     // 元素级解码失败只补一条回执，不改播放控制；换源时与 onended 一起清掉。
-    el.onerror = cuePlaybackId === null ? null : () => reportOnce(cuePlaybackId, 'failed', REASON_DECODE);
+    // A-NAS: and releases the switch, whose clip never loads, as a failed fetch does.
+    el.onerror = () => {
+      if (cuePlaybackId !== null) reportOnce(cuePlaybackId, 'failed', REASON_DECODE);
+      if (pending?.gen === swapGen) releaseFailedSwitch();
+    };
     // fetch + blob 一次拿全文件，绕开 video 流式加载在 DSH WebServer 上偶发的 stalled。
     const assetUrl = animationAssetUrl({
       cueUrl: url,
@@ -194,7 +211,6 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       onError: (error) => {
         if (!mounted) return; // 卸载后的 abort：静默。
         if (pending?.gen !== swapGen) return; // 已被更新的切换覆盖。
-        pending = null; // 释放挂起的换源，避免后续点击困在防重循环里。
         if (cuePlaybackId !== null) reportOnce(cuePlaybackId, 'failed', REASON_ASSET_LOAD);
         console.warn(
           '[dsh-pet] 素材加载失败 pet=' +
@@ -205,6 +221,8 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
             (error instanceof Error ? error.message : String(error)) +
             '（已释放本次切换）',
         );
+        // 释放挂起的换源，避免后续点击困在防重循环里。
+        releaseFailedSwitch();
       },
     });
     const onReady = (): void => {
@@ -226,6 +244,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       }
       front = front === 0 ? 1 : 0;
       pending = null;
+      heldEnd = false;
       playing = cuePlaybackId;
       el.style.transform = deps.facing() === 'right' ? 'scaleX(-1)' : '';
       // A-NAS: a switch that began before the page paused the card and finished loading during the
@@ -265,6 +284,13 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     if (deps.isDragging()) return { kind: 'ignore' };
     // 冻结时不推进：下面每条分支都会按当前工作状态换源，effect 的门禁拦不住。
     if (frozen) return { kind: 'ignore' };
+    // A-NAS: while a switch loads, the clip in front is on its way out, and moving the chain on its end would
+    // replace the switch's clip before it shows (the curtsy asked for as a turn stops, when the step's clip
+    // ends as it loads). The switch's clip takes over once loaded; one that fails hands this end on.
+    if (pending !== null) {
+      heldEnd = true;
+      return { kind: 'ignore' };
+    }
     const cue = decideEndedCue({
       animations: deps.cfg().animations,
       current: deps.currentAnim(),

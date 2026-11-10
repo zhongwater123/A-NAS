@@ -6,7 +6,7 @@
  * 不变量：只有计数器变化才动手；占用锁生效时自动来源整拍丢弃，显式指令不挡。
  * @module dsh-pet/src/client/pet/card/cue-effects
  */
-import { inPools, pickSlot, poolIncludes } from '../../../shared/pickers';
+import { inPools, isEventAnim, pickSlot } from '../../../shared/pickers';
 import { WORK_STATUS_INDEX } from '../../../shared/work-status';
 import type { CardHub } from './hub';
 import type { PetCardProps } from './props';
@@ -68,9 +68,11 @@ export function createCueEffects(rt: CueEffectsRuntime) {
         prevWorkStateRef.current = null;
         // 回空闲时把循环中的工作动画改成「播完即停」：否则 ended 永不触发，动画链拿不到
         // 推进信号，宠物会一直卡在工作动画上。
-        // A-NAS: so does the clip a step asked for.
+        // A-NAS: so does the clip a step asked for. The card may have put a later step's clip back after a
+        // pause, a lock, a click or a drag (resumeWorkStatusAnim) without this effect seeing the step, so a
+        // clip is told by its pool too: every clip a step asks for is an event, and the other events play once.
         const current = card.animRef.current;
-        if (poolIncludes(hub.anims().events?.workStatus ?? [], current) || current === workAnimRef.current)
+        if (isEventAnim(hub.anims().events, current) || current === workAnimRef.current)
           hub.ownAnim.stopLoopingFront();
         workAnimRef.current = null;
         hub.bubbles.resetWork();

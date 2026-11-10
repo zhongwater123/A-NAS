@@ -234,6 +234,53 @@ describe("the companion on the desktop", () => {
     await plays(IDLE);
   });
 
+  it("stops a step's clip when the turn ends, though the step came while the pet was paused", async () => {
+    serve([IDLE, "写代码", "照镜子"]);
+    const { videos } = await mount();
+    act(() => {
+      startTurn("live0001");
+      reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+    });
+    await plays("写代码");
+    await ready(videos);
+    // Paused, the pet does not follow the next step; back, it plays that step's clip on and on.
+    hide(true);
+    act(() => reportEvent("live0001", "tool.start", { name: "search_files", tool_id: "c2" }));
+    hide(false);
+    await plays("照镜子");
+    await ready(videos);
+    expect(front(videos).loop).toBe(true);
+    // The turn ends without a success or an error: the clip plays to its end, then idle.
+    act(() => reportEvent("live0001", "message.complete", { status: "interrupted" }));
+    await waitFor(() => expect(front(videos).loop).toBe(false));
+    fetched = [];
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await plays(IDLE);
+  });
+
+  it("shows the curtsy though the step's clip ends while the curtsy loads", async () => {
+    serve([IDLE, "写代码", "女仆屈膝礼仪"]);
+    const { videos } = await mount();
+    act(() => {
+      startTurn("live0001");
+      reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+    });
+    await plays("写代码");
+    await ready(videos);
+    const step = front(videos);
+    act(() => stopTurn("live0001"));
+    await plays("女仆屈膝礼仪");
+    // The step's clip, still in front, ends before the curtsy has loaded: nothing else is asked for.
+    fetched = [];
+    act(() => fireEvent(step, new Event("ended")));
+    await settle();
+    expect(fetched).toEqual([]);
+    await ready(videos);
+    expect(front(videos)).not.toBe(step);
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await plays(IDLE);
+  });
+
   it("is not shown in a browser that needs animations this NAS does not have", async () => {
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
       "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 Version/26.0 Mobile/15E148 Safari/604.1",
