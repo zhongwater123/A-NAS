@@ -219,9 +219,15 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     el.autoplay = true;
     el.playsInline = true;
     el.onended = nextOnce ? (event: Event) => deps.onEnded(handleEnded(event)) : null;
+    // A-NAS: the clip this switch put in the element; until it is there, the element may still load the
+    // one an earlier switch to the same element put in.
+    let ownUrl: string | null = null;
     // 元素级解码失败只补一条回执，不改播放控制；换源时与 onended 一起清掉。
-    // A-NAS: and the chain goes on without the clip, still loading or in front (clipFailed).
+    // A-NAS: and the chain goes on without the clip, still loading or in front (clipFailed). An error of the
+    // clip an earlier switch put in the element, still loading when this switch took the element over, is not
+    // this switch's: its own clip goes in once fetched, as onReady skips the earlier clip's first frame.
     el.onerror = () => {
+      if (pending?.gen === swapGen && el.src !== ownUrl) return;
       if (swap.playbackId !== null) reportOnce(swap.playbackId, 'failed', REASON_DECODE);
       if (pending?.gen === swapGen || (gen === swapGen && el.classList.contains('is-front'))) clipFailed(swap);
     };
@@ -234,9 +240,6 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       ext: thumbExt(),
       assetVersion: cfg.assetVersion,
     });
-    // A-NAS: the clip this switch put in the element; until it is there, the element may still load the
-    // one an earlier switch to the same element put in.
-    let ownUrl: string | null = null;
     loader.load(assetUrl, {
       onObjectUrl: (objectUrl) => {
         if (!mounted) {

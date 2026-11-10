@@ -259,6 +259,22 @@ describe("a clip of the chain that does not come", () => {
     expect(c.ended).toEqual([{ kind: "interaction-done" }]);
   });
 
+  it("that an earlier switch put in the video does not fail the switch that took the video over", async () => {
+    const c = chain();
+    c.play("待机呼吸休闲");
+    // The idle clip is in the back video, still decoding, when a command's switch takes that video over.
+    c.loads[0].handlers.onObjectUrl("blob:first");
+    c.play("点击回应-元气挥手", true, "pb-9");
+    c.videos[1].dispatchEvent(new Event("error"));
+    expect(c.reports).toEqual([]);
+    await c.arrive();
+    expect(c.front()).toBe(c.videos[1]);
+    expect(c.front().src).toBe("blob:clip-1");
+    expect(c.reports).toEqual([["pb-9", "playing"]]);
+    vi.advanceTimersByTime(60_000);
+    expect(c.loads.map((load) => load.clip)).toEqual(["待机呼吸休闲", "点击回应-元气挥手"]);
+  });
+
   it("is not fetched again once another switch took over", () => {
     const c = chain();
     c.play("待机呼吸休闲");
