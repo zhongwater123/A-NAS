@@ -29,7 +29,7 @@ ACTIONLINT ?= $(GO) tool -modfile=tools/actionlint/go.mod actionlint
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test build build-binaries host-packages check check-steps clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test race-test ai-lint ai-test ai-sdk-test root-integration-test system-test build build-binaries host-packages check check-steps clean
 
 all: check
 
@@ -117,6 +117,19 @@ docs-check:
 # own: one grep over both passes when either does (#423).
 deploy_paths_carry = for script in scripts/deploy-dev.ps1 scripts/remote-activate-release.sh; do \
 	grep -Fq -- '$(1)' "$$script" || { echo "$$script lacks $(1)" >&2; exit 1; }; done
+
+# dsh-pet as copied into web/src/companion/dsh-pet (scripts/check-dsh-pet-vendor.sh).
+# Offline: the pool its manifest makes is the one install-media-pool.sh pins and
+# its README is current. With DSH_PET naming a dsh-pet checkout at the pinned
+# commit, it vendors again and requires no difference; DSH_PET_MOV_ZIP, the
+# pinned assets-mov zip, checks the Safari animations too. CI has neither, and
+# the check says what it skipped.
+DSH_PET ?=
+DSH_PET_MOV_ZIP ?=
+VENDOR_PYTHON ?= python3
+
+vendor-check:
+	PYTHON=$(VENDOR_PYTHON) scripts/check-dsh-pet-vendor.sh $(DSH_PET) $(DSH_PET_MOV_ZIP)
 
 # Shell scripts, the GitHub workflows (actionlint), units and installer
 # conventions, Dependabot's groups (tools/depcheck keeps 0.x web packages out
@@ -381,7 +394,7 @@ check:
 	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
-check-steps: api-check web-typecheck web-lint web-test web-build fmt-check docs-check ops-check vet go-lint vuln-check test ai-lint ai-test ai-sdk-test build-binaries host-packages
+check-steps: api-check web-typecheck web-lint web-test web-build fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test ai-lint ai-test ai-sdk-test build-binaries host-packages
 
 clean:
 	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(BUILD_DIR)/a-nas-host.deb $(BUILD_DIR)/a-nas-console.deb $(VALIDATION_MANIFEST)
