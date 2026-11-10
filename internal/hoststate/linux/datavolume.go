@@ -85,7 +85,75 @@ func readDataVolume(root fs.FS, uuid string, disks []hoststate.Disk) *hoststate.
 		return volume
 	}
 	volume.Data, volume.Metadata, volume.Operation = ReadBtrfsAllocation(root, uuid)
+	volume.MissingDevices = ReadMissingDevices(root, uuid)
 	return volume
+}
+
+// BtrfsDevice is one device of a mounted Btrfs filesystem, from sysfs
+// devinfo/<devid>.
+type BtrfsDevice struct {
+	ID uint64
+	// Missing says the kernel cannot write to it: it was absent when the
+	// volume was mounted degraded, or it came back while the volume was
+	// mounted and stays unwritable until the next mount.
+	Missing bool
+}
+
+// ReadBtrfsDevices lists the devices of the mounted Btrfs filesystem with
+// the UUID (root is the filesystem root), leaving out a replacement being
+// written. A disk that vanishes while the volume is mounted is listed as
+// present: only its entry under devices/ stops leading to a block device,
+// which ReadMissingDevices also checks.
+func ReadBtrfsDevices(root fs.FS, uuid string) []BtrfsDevice {
+	if root == nil || !datavolume.ValidFilesystemUUID(uuid) {
+		return nil
+	}
+	entries, err := fs.Glob(root, "sys/fs/btrfs/"+uuid+"/devinfo/*")
+	if err != nil {
+		return nil
+	}
+	var devices []BtrfsDevice
+	for _, entry := range entries {
+		id, err := strconv.ParseUint(path.Base(entry), 10, 64)
+		if err != nil || readFlag(root, entry+"/replace_target") {
+			continue
+		}
+		devices = append(devices, BtrfsDevice{ID: id, Missing: readFlag(root, entry+"/missing") || !readFlag(root, entry+"/writeable")})
+	}
+	return devices
+}
+
+// ReadMissingDevices counts the devices of the mounted Btrfs filesystem with
+// the UUID that the kernel cannot write to (root is the filesystem root),
+// including a disk that vanished while the volume was mounted.
+func ReadMissingDevices(root fs.FS, uuid string) int {
+	devices := ReadBtrfsDevices(root, uuid)
+	if len(devices) == 0 {
+		return 0
+	}
+	unwritable := 0
+	for _, device := range devices {
+		if device.Missing {
+			unwritable++
+		}
+	}
+	links, err := fs.Glob(root, "sys/fs/btrfs/"+uuid+"/devices/*")
+	if err != nil {
+		return unwritable
+	}
+	present := 0
+	for _, link := range links {
+		if _, err := fs.Stat(root, link); err == nil {
+			present++
+		}
+	}
+	return max(unwritable, len(devices)-present)
+}
+
+// readFlag reads a sysfs file holding 0 or 1; anything else reads as 0.
+func readFlag(root fs.FS, file string) bool {
+	contents, err := fs.ReadFile(root, file)
+	return err == nil && strings.TrimSpace(string(contents)) == "1"
 }
 
 var (

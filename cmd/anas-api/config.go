@@ -64,6 +64,9 @@ type Config struct {
 	// or neither; without them the device has no internet entry.
 	InternetHTTPAddr string `env:"ANAS_INTERNET_HTTP_ADDR"`
 	InternetHost     string `env:"ANAS_INTERNET_HOST"`
+	// FakeStorage picks the simulated host in fake mode: empty for the usual
+	// disks, degraded for a volume that loses a disk (devstorage.go).
+	FakeStorage string `env:"ANAS_FAKE_STORAGE"`
 	// StateDir holds the SQLite stores and caches; it defaults to the user's
 	// configuration directory.
 	StateDir string `env:"ANAS_STATE_DIR"`
@@ -181,6 +184,13 @@ func loadConfig(environment map[string]string) (Config, error) {
 	}
 	live := c.Live()
 	problem(loopbackAddress("ANAS_HTTP_ADDR", c.HTTPAddr))
+	switch {
+	case c.FakeStorage == "":
+	case live:
+		problem(errors.New("ANAS_FAKE_STORAGE applies to fake mode only"))
+	case c.FakeStorage != fakeStorageDegraded:
+		problem(fmt.Errorf("ANAS_FAKE_STORAGE must be empty or %s", fakeStorageDegraded))
+	}
 	switch {
 	case c.InternetHTTPAddr == "" && c.InternetHost == "":
 	case c.InternetHTTPAddr == "" || c.InternetHost == "":

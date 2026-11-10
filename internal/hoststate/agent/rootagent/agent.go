@@ -39,8 +39,11 @@ type handler struct {
 	webSearch   websearchswitch.Switch
 	// reconcileFailed reports the last reconciliation of the data volume.
 	reconcileFailed func() bool
-	spreadStopped   func() bool
-	logger          *slog.Logger
+	// restoring reports a data volume that ran without a disk and has not
+	// had its redundancy restored.
+	restoring     func() bool
+	spreadStopped func() bool
+	logger        *slog.Logger
 }
 
 type Services struct {
@@ -58,6 +61,9 @@ type Services struct {
 	// ReconcileFailed reports whether the Host Agent's last reconciliation of
 	// the data volume failed; the host state carries it (#166).
 	ReconcileFailed func() bool
+	// RestoringRedundancy reports whether the data volume ran without one of
+	// its disks and has not been scrubbed since (ADR 0025).
+	RestoringRedundancy func() bool
 	// SpreadStopped reports whether spreading the mirror over its disks left
 	// space unusable and waits for the disks to change or the administrator.
 	SpreadStopped func() bool
@@ -75,7 +81,7 @@ func NewOperationsHandler(services Services, logger *slog.Logger) http.Handler {
 		observer: services.Reader, volume: services.Volume, credentials: services.Credentials,
 		identities: services.Identities, viewing: services.Viewing, apps: services.Apps, snapshots: services.Snapshots,
 		systemLogs: services.SystemLogs, webSearch: services.WebSearch, reconcileFailed: services.ReconcileFailed,
-		spreadStopped: services.SpreadStopped, logger: logger,
+		restoring: services.RestoringRedundancy, spreadStopped: services.SpreadStopped, logger: logger,
 	}
 }
 
@@ -86,6 +92,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/v1/storage/volumes" {
 		h.handleCreateVolume(w, r)
+		return
+	}
+	if r.URL.Path == "/v1/storage/volumes/replacement" {
+		h.handleReplaceDisk(w, r)
 		return
 	}
 	if r.URL.Path == "/v1/storage/volumes/disks" {
@@ -174,6 +184,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state.ReconcileFailed = h.reconcileFailed != nil && h.reconcileFailed()
+	if state.DataVolume != nil && h.restoring != nil {
+		state.DataVolume.Restoring = h.restoring()
+	}
 	if state.DataVolume != nil && h.spreadStopped != nil {
 		state.DataVolume.SpreadStopped = h.spreadStopped()
 	}
@@ -371,6 +384,31 @@ func (h *handler) handleAddDisks(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.writeVolumeOperationError(w, r, "start adding disks to the data volume failed", err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, operation)
+}
+
+func (h *handler) handleReplaceDisk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	if h.volume == nil {
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "volume operation is unavailable")
+		return
+	}
+	var document wire.ReplaceDiskDocument
+	if err := decodeRequest(r, &document); err != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	operation, err := h.volume.StartReplaceDisk(r.Context(), datavolume.ReplaceDiskRequest{
+		PlanID: document.PlanID, FilesystemUUID: document.FilesystemUUID, Disk: document.Disk,
+	})
+	if err != nil {
+		h.writeVolumeOperationError(w, r, "start replacing the data volume's missing disk failed", err)
 		return
 	}
 	httpjson.Write(w, http.StatusOK, operation)

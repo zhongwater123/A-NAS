@@ -15,7 +15,7 @@
   - 相册：向量索引用 Qdrant 1.20.0；读文字用 llama.cpp b11655 与 Qwen3.5-4B，结果存进 Catalog 15；AI 运行环境 `842b388a0f1987f5`；AI Worker 的内存上限为总内存减 2.5 GiB（5150 MiB）。
   - 家庭中心以 `a-nas-family` 运行；网页搜索已开启，SearXNG 以 `a-nas-search` 运行；温度与风扇转速由 `nct6775` 驱动读取；FFmpeg Worker 是 `anas-ffmpeg.socket`；Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`。
 - AI 助手按[试用手册](../runbooks/try-ai-assistant-on-experimental-nas.md)为全部成员开启，用云端模型，仅供开发测试。
-- 数据卷是两块 ST500DM002 组成的 Btrfs raid1（2026-10-20 加入第二块盘）。
+- 数据卷是两块 ST500DM002 组成的 Btrfs raid1（2026-10-20 加入第二块盘）。运行中的 mount unit 仍随挂载表登记的那块盘停止：这块盘一坏，整个数据卷会被卸载，修复见下一步 10。
 - 本地控制台以专用账号 `a-nas-kiosk` 运行；`anas-dev` 名下的旧 Chromium 配置文件可以按[迁移后的验证](../runbooks/operate-local-kiosk.md#迁移后的验证)删除。屏保由 GPU 解码；停止渲染下层桌面的 [#315](https://github.com/zhongwater123/A-NAS/pull/315) 已部署，CPU 占用待复测（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。
 - 应用中心 2026-11-03 只装有思源笔记；[#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前装的容器没有日志上限，重新安装才有。
 
@@ -36,6 +36,7 @@
 - [FFmpeg Worker 的槽位、分层与内存上限](../decisions/2026-10-21-ffmpeg-worker-slots-and-memory.md)
 - [相册视频实现时选的默认做法](../decisions/2026-10-20-photo-video-defaults.md)
 - [文件管理的图片缩略图是否改用服务端生成](../decisions/2026-10-13-file-manager-image-thumbnails.md)
+- [镜像缺盘的开机路径是否做成虚拟机回归测试](../decisions/2026-11-06-mirror-boot-vm-test.md)
 - [助手的回答提到 Hermes 的 `/help` 与上手引导怎么处理](../decisions/2026-10-15-assistant-help-and-onboarding.md)
 - [助手说“下次从笔记接着聊”的措辞是否调整](../decisions/2026-10-20-assistant-notes-wording.md)
 - [家庭中心规格中补充的默认规则](../decisions/2026-10-29-family-center-default-rules.md)
@@ -55,5 +56,6 @@
 7. 相册 OCR 步骤 6：部署后在实验 NAS 上验收（[实施方案](../architecture/photo-ocr.md)）。步骤 1–3 已部署；步骤 4（搜索、接口、更正的新存法，[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）与步骤 5（界面）已实现，部署时目录库升到第 16 号迁移。
 8. 家庭中心数据修复 [#363](../investigations/2026-11-05-family-data-integrity.md)待合并、部署；M2：认领、隐藏（[规格](../specs/family-center.md)）。从相册加入频道已实现（[PR #395](https://github.com/zhongwater123/A-NAS/pull/395)），部署时产品、相册与家庭服务一起更新。
 9. 互联网访问：外部条件满足后，按[启用互联网访问](../runbooks/enable-internet-access.md)从第 3 步继续。
-10. 虚拟伙伴（大肥鱼）V1（[#404](https://github.com/zhongwater123/A-NAS/issues/404)，[规格](../specs/virtual-companion.md)）：合并部署后按[安装伙伴动画](../runbooks/install-companion-animations.md)装动画，在实验 NAS 上测闲置时伙伴与成员 Hermes 实例的 CPU 与内存，并在 Safari 上核对透明效果。
-11. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘，备份中心评审中最大的缺口）；账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；硬盘用途 M2 与 M3（[规格](../specs/disk-roles-and-redundancy.md)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
+10. 硬盘用途 M2（镜像缺盘继续服务、接回恢复、更换硬盘）已实现，待合并、部署：部署后正常重启一次，再按[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)验收。M3（更改冗余方式、移除硬盘）未做（[规格](../specs/disk-roles-and-redundancy.md)）。
+11. 虚拟伙伴（大肥鱼）V1（[#404](https://github.com/zhongwater123/A-NAS/issues/404)，[规格](../specs/virtual-companion.md)）：合并部署后按[安装伙伴动画](../runbooks/install-companion-animations.md)装动画，在实验 NAS 上测闲置时伙伴与成员 Hermes 实例的 CPU 与内存，并在 Safari 上核对透明效果。
+12. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘，备份中心评审中最大的缺口）；账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。

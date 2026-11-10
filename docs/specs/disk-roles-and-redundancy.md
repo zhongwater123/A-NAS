@@ -1,6 +1,6 @@
 # 硬盘用途与数据卷冗余
 
-状态：M1 implemented；M2、M3 draft
+状态：M1 implemented；M2 implemented，待实机验收；M3 draft
 更新时间：2026-11-06
 
 ## 目标
@@ -116,27 +116,39 @@
 - Given：数据卷是镜像，一块盘损坏或被拔出。
 - When：运行中掉盘，或开机时缺少这块盘。
 - Then：
-  - 数据卷继续可读写。开机时缺盘，由 Host Agent 以降级方式挂载。
-  - 系统健康为严重：“数据卷缺少一块硬盘，已经没有冗余”，处理办法是“尽快更换硬盘”（新增 `volume_degraded`，见[系统健康](system-health.md)）。
+  - 数据卷继续可读写。
+    - 运行中掉盘：数据卷保持挂载，Btrfs 只往剩下的盘写。
+    - 开机时缺盘：systemd 先等这块盘 90 秒（盘起转慢时照常挂载），然后 Host Agent 以降级方式挂载。开机因此多花约 90 秒。
+  - 系统健康为严重：“数据卷缺少 1 块硬盘”，处理办法是“尽快在‘设置 → 存储’中更换硬盘”（`volume_degraded`，见[系统健康](system-health.md)）。
   - 数据卷卡片标“缺少硬盘”，列出缺失硬盘的型号与 ID 短码。
   - 降级期间新写入的数据只有一份。
+
+### M2：上次留下的盘不在
+
+- Given：镜像曾在缺一块盘时运行并写入过数据，下一次开机时偏偏只有那块缺过的旧盘在。
+- Then：
+  - Host Agent 不挂载数据卷：旧盘上没有降级期间写入的数据，两块盘各自写下去就无法再合并。
+  - 系统健康为 `volume_offline`，Host Agent 的系统日志写明原因。
+  - 接回降级期间留下的那块盘后重启即可恢复。
+  - Host Agent 在系统盘的 `/var/lib/a-nas-host/degraded-volume.json` 中记下降级期间留下的盘，冗余恢复后删除。系统盘重装后这条记录不在，这道保护随之失效。
 
 ### M2：更换硬盘
 
 - Given：镜像缺少一块硬盘，并插入了一块合格的新盘，容量不小于缺失的那块。
 - When：管理员在数据卷卡片点“更换硬盘…”，选择新盘、核对计划并输入确认短语。
 - Then：
-  - 新盘替换缺失的硬盘并重建镜像，卡片显示“正在重建 52%”。
-  - 重建完成后，降级期间只有一份的数据也转回镜像。
+  - 新盘替换缺失的硬盘并重建镜像，卡片显示“正在重建 52%”。重建在内核中进行，期间可以关闭页面；Host Agent 重启时重建继续，设备重启后重建从头开始，计划进入“需要处理”，重试会等它完成。
+  - 重建完成后，降级期间只有一份的数据也转回镜像，再做一次 Scrub；期间卡片显示“正在恢复冗余”。
   - 卡片恢复“在线”，`volume_degraded` 消失。
   - 新盘比缺失的盘大时，多出的空间在重建后自动用上。
+  - 新盘比缺失的盘小时不能选（`422 disk_too_small`）。剩下那块盘几乎没有未分配空间时，Btrfs 无法开始重建，计划失败并写明停在重建一步。
 
 ### M2：缺失的硬盘回来了
 
 - Given：镜像降级期间写入过数据，之后原来那块盘被重新接上，例如数据线松了。
 - When：重新接上后重启。
 - Then：
-  - 这块盘重新回到数据卷。
+  - 这块盘重新回到数据卷。运行中接回时，内核认出它但不再写它，卡片仍显示“缺少硬盘”，要重启后才恢复。
   - Host Agent 在后台把降级期间只有一份的数据转回镜像，再做一次校验，修复这块盘上过期的内容。
   - 卡片显示“正在恢复冗余”，完成后恢复“在线”。
 
@@ -220,18 +232,30 @@ M1：
 - root 集成测试（[`root_volume_integration_test.go`](../../internal/hostops/linux/root_volume_integration_test.go) 的 `TestRootAMirrorSpreadsOntoAJoinedDisk`）：真实 Btrfs 上两块 1 GiB 盘的镜像加入一块 2 GiB 的盘，检查分散后全部空间可用，块组仍全是 RAID1。
 - React（[`SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)）：镜像加盘没有冗余方式这一步、显示加入前后的容量、计划请求不带冗余方式；分散暂停与停下的显示和继续分散；balance 进行中“设置用途…”不可用。
 
-M2、M3 另需：缺盘时的降级挂载与系统测试（[`scripts/system-test.sh`](../../scripts/system-test.sh)）、更换与移除的 root 集成测试，以及拔盘开机、接回恢复的实机验证。
-- 实机：按运行手册在实验 NAS 上：
-  - 把 `sda` 加入数据卷并转为镜像，Scrub 没有错误；
+M2：
+
+- systemd、udev 与 Btrfs 的实际行为（开机等盘、运行中掉盘、降级挂载、接回、更换、中断的更换）在 Debian 13 虚拟机上逐项验证，见[调查](../investigations/2026-11-06-mirror-missing-a-disk.md)。容器版系统测试没有 udev，测不到这些。
+- Host Agent：
+  - [`volume_test.go`](../../internal/hostops/linux/volume_test.go) 的 `TestEnsureMountUnitStopsBindingTheVolumeToOneDisk`：旧 mount unit 被改写为不随单块设备停止；
+  - [`degraded_internal_test.go`](../../internal/hostops/linux/degraded_internal_test.go)：先只读挂上查看、卸载、记下、一次挂成读写；只有镜像、只缺一块、只在上次留下的盘上才挂载；记录读不出时不挂载；`btrfs replace status` 的解析。
+- 宿主机状态：[`datavolume_test.go`](../../internal/hoststate/linux/datavolume_test.go) 的 `TestReadMissingDevicesCountsEveryWayADiskGoes`（缺盘的三种去向、重建中的目标盘）；[`assess_test.go`](../../internal/hoststate/assess_test.go) 的 `volume_degraded`。
+- 存储服务：[`layout_test.go`](../../internal/storage/layout_test.go) 的 `TestAMirrorMissingADiskNamesItAndTakesNoOtherPlan`（缺盘时的状态与缺失硬盘、只接受更换、新盘不能更小、离线时同样列出缺失硬盘、恢复冗余中、执行更换）。
+- React（[`SettingsPanel.test.tsx`](../../web/src/settings/SettingsPanel.test.tsx)）：缺盘的卡片与缺失硬盘、更换的完整流程（过小的盘不可选、核对、确认、执行）、重建进度到完成、`disk_too_small`、恢复冗余（有无转换）、离线的扩容列出缺失硬盘且没有更换入口。
+- Fake 模式（[`devstorage_test.go`](../../cmd/anas-api/devstorage_test.go)）：`ANAS_FAKE_STORAGE=degraded` 下镜像缺盘、更换、恢复冗余到在线，扩容离线。
+- 实机：按[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)在实验 NAS 上：
+  - 部署后重启一次，确认 mount unit 不再随单块设备停止；
   - 拔掉一块盘开机，确认降级挂载与健康告警；
-  - 接回后确认冗余恢复。
+  - 接回后确认冗余恢复；
+  - 有空闲硬盘时验证更换。
+
+M3 另需：移除硬盘的 root 集成测试。
 
 ## 关联
 
-- 调查：[分散任务的未知观测与测量超时](../investigations/2026-11-09-spread-allocation-observation.md)
+- 调查：[分散任务的未知观测与测量超时](../investigations/2026-11-09-spread-allocation-observation.md)、[镜像少了一块硬盘时 systemd、udev 与 Btrfs 的行为](../investigations/2026-11-06-mirror-missing-a-disk.md)
 - ADR：[0025](../adr/0025-span-the-data-volume-across-disks-with-btrfs-profiles.md)（修订 [0007](../adr/0007-use-btrfs-sqlite-and-a-typed-privilege-boundary.md) 的单盘限制）
 - 规格：[基础存储与共享](basic-storage-and-sharing.md#数据卷初始化)、[设置](settings.md)中的“存储”分区、[系统健康](system-health.md)
 - 架构：[存储与文件架构](../architecture/storage-and-files.md)
-- 代码：[`internal/storage/service.go`](../../internal/storage/service.go) 与 [`layout.go`](../../internal/datavolume/layout.go)（计划与冗余方式）、[`internal/hostops/linux/volume.go`](../../internal/hostops/linux/volume.go)（格式化、加盘、转换检查）、[`internal/hoststate/linux/datavolume.go`](../../internal/hoststate/linux/datavolume.go)（数据卷观测）、[`cmd/anas-api/devstorage.go`](../../cmd/anas-api/devstorage.go)（fake 模式的模拟）、[`web/src/settings/StorageSection.tsx`](../../web/src/settings/StorageSection.tsx)
-- 运行手册：[把硬盘加入数据卷](../runbooks/add-a-disk-to-the-data-volume.md)
+- 代码：[`internal/storage/service.go`](../../internal/storage/service.go) 与 [`layout.go`](../../internal/datavolume/layout.go)（计划与冗余方式）、[`internal/hostops/linux/volume.go`](../../internal/hostops/linux/volume.go)（格式化、加盘、转换检查）、[`degraded.go`](../../internal/hostops/linux/degraded.go)（缺盘挂载、更换与恢复冗余）、[`internal/hoststate/linux/datavolume.go`](../../internal/hoststate/linux/datavolume.go)（数据卷观测）、[`cmd/anas-api/devstorage.go`](../../cmd/anas-api/devstorage.go)（fake 模式的模拟）、[`web/src/settings/StorageSection.tsx`](../../web/src/settings/StorageSection.tsx)
+- 运行手册：[把硬盘加入数据卷](../runbooks/add-a-disk-to-the-data-volume.md)、[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)
 - 项目背景：[PROJECT_CONTEXT.md](../../PROJECT_CONTEXT.md) 的“增加第二块数据盘，用于验证镜像、掉盘、替换和重建”

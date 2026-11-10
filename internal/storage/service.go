@@ -33,6 +33,8 @@ var (
 	// ErrLayoutChange: disks join a volume on several disks in its layout;
 	// changing the layout is a step of its own (M3 of the disk-roles spec).
 	ErrLayoutChange       = errors.New("disks join a volume on several disks in its layout")
+	ErrDiskTooSmall       = errors.New("the new disk is smaller than the one it replaces")
+	ErrReplaceOneDisk     = errors.New("a replacement takes exactly one disk")
 	ErrOperationAttention = errors.New("operation needs administrator attention")
 )
 
@@ -87,11 +89,13 @@ type ExecutionPlan struct {
 	State               PlanState `json:"state"`
 	// Step is the step the host is at while the plan runs, or the one it
 	// stopped in when the plan needs attention.
-	Step      OperationStep `json:"step,omitempty"`
-	CreatedAt time.Time     `json:"createdAt"`
-	ExpiresAt time.Time     `json:"expiresAt"`
-	Failure   string        `json:"failure,omitempty"`
-	Volume    *Volume       `json:"volume,omitempty"`
+	Step OperationStep `json:"step,omitempty"`
+	// Progress is how far a rebuild has come, in percent, while it runs.
+	Progress  int       `json:"progress,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Failure   string    `json:"failure,omitempty"`
+	Volume    *Volume   `json:"volume,omitempty"`
 }
 
 // UnmarshalJSON also reads plans stored before data volumes could span
@@ -280,6 +284,24 @@ func (s *Service) PlanVolume(ctx context.Context, actor accounts.User, diskIDs [
 			return ExecutionPlan{}, ErrInvalidLayout
 		}
 		plan.CapacityAfterBytes = UsableBytes(plan.Layout, sizes)
+	} else if volume := observeVolume(current, state); volume.State == VolumeStateDegraded && current.Layout == LayoutMirror {
+		// A mirror without a disk takes one plan: a disk in its place.
+		plan.Kind, plan.Layout = PlanKindReplaceDisk, LayoutMirror
+		if len(disks) != 1 {
+			return ExecutionPlan{}, ErrReplaceOneDisk
+		}
+		if rebuildBlocked(state.DataVolume) {
+			return ExecutionPlan{}, ErrVolumeBusy
+		}
+		s.describeMissing(&volume)
+		for _, missing := range volume.MissingDisks {
+			if missing.CapacityBytes > disks[0].CapacityBytes {
+				return ExecutionPlan{}, ErrDiskTooSmall
+			}
+		}
+		members := diskSizes(state, volume.DiskIDs)
+		plan.CapacityBeforeBytes = UsableBytes(LayoutMirror, append(members, volumeMissingSizes(volume)...))
+		plan.CapacityAfterBytes = UsableBytes(LayoutMirror, append(members, sizes...))
 	} else {
 		plan.Kind = PlanKindAddDisks
 		if plan.Layout == "" {
@@ -291,7 +313,9 @@ func (s *Service) PlanVolume(ctx context.Context, actor accounts.User, diskIDs [
 		if current.Layout != LayoutSingle && plan.Layout != current.Layout {
 			return ExecutionPlan{}, ErrLayoutChange
 		}
-		volume := observeVolume(current, state)
+		if volume.State == VolumeStateDegraded {
+			return ExecutionPlan{}, ErrVolumeBusy
+		}
 		if volume.State != VolumeStateAvailable || state.DataVolume == nil {
 			return ExecutionPlan{}, ErrVolumeUnavailable
 		}
@@ -439,6 +463,12 @@ func planActions(kind PlanKind, layout, current Layout, spread bool) []Action {
 		{Kind: "erase_signatures", Description: "清除目标硬盘上现有的分区、文件系统和阵列签名"},
 		{Kind: "create_partition_table", Description: "在每块目标硬盘上创建 GPT 和单个 A-NAS 数据分区"},
 	}
+	if kind == PlanKindReplaceDisk {
+		return append(actions,
+			Action{Kind: "replace_disk", Description: "用剩下那块硬盘上的副本，把缺少的硬盘的数据重建到这块硬盘上，期间可以照常使用"},
+			Action{Kind: "restore_redundancy", Description: "把缺少硬盘期间只存了一份的数据转回镜像，再校验一遍整个数据卷"},
+		)
+	}
 	if kind == PlanKindCreateVolume {
 		return append(actions,
 			Action{Kind: "create_btrfs", Description: "创建标签为 ANAS_DATA、冗余方式为" + layoutNames[layout] + "的 Btrfs 文件系统"},
@@ -575,15 +605,25 @@ func (s *Service) ExecutePlan(ctx context.Context, actor accounts.User, planID s
 			if busy(observed, state.DataVolume) {
 				return s.needsAttention(planID, ErrVolumeBusy)
 			}
+		case plan.Kind == PlanKindReplaceDisk && exists:
+			if observeVolume(current, state).State != VolumeStateDegraded || current.Layout != LayoutMirror {
+				return s.needsAttention(planID, ErrVolumeChanged)
+			}
+			if rebuildBlocked(state.DataVolume) {
+				return s.needsAttention(planID, ErrVolumeBusy)
+			}
 		default:
 			return s.needsAttention(planID, ErrVolumeChanged)
 		}
 	}
 	var operation VolumeOperation
 	var err error
-	if plan.Kind == PlanKindCreateVolume {
+	switch plan.Kind {
+	case PlanKindCreateVolume:
 		operation, err = s.executor.StartCreateVolume(startCtx, CreateVolumeRequest{PlanID: plan.ID, Disks: targets, Layout: plan.Layout})
-	} else {
+	case PlanKindReplaceDisk:
+		operation, err = s.executor.StartReplaceDisk(startCtx, ReplaceDiskRequest{PlanID: plan.ID, FilesystemUUID: current.FilesystemUUID, Disk: targets[0]})
+	default:
 		operation, err = s.executor.StartAddDisks(startCtx, AddDisksRequest{
 			PlanID: plan.ID, FilesystemUUID: current.FilesystemUUID, Disks: targets, Layout: plan.Layout,
 		})
@@ -674,7 +714,40 @@ func (s *Service) ListVolumes(ctx context.Context) ([]Volume, error) {
 		current.State, current.AvailableBytes = VolumeStateUnavailable, nil
 		return []Volume{current}, nil
 	}
-	return []Volume{observeVolume(current, state)}, nil
+	volume := observeVolume(current, state)
+	s.describeMissing(&volume)
+	return []Volume{volume}, nil
+}
+
+// describeMissing fills in the volume's missing disks as the plans that
+// named them recorded them.
+func (s *Service) describeMissing(volume *Volume) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, missing := range volume.MissingDisks {
+		volume.MissingDisks[i] = s.recordedDiskLocked(missing.ID)
+	}
+}
+
+// rebuildBlocked reports whether Btrfs runs an operation that keeps a
+// replacement from starting. A paused balance does not count: the Host
+// Agent cancels it, since the degraded mount keeps it from running on one
+// disk.
+func rebuildBlocked(mounted *hoststate.DataVolume) bool {
+	return mounted != nil && mounted.Operation != hoststate.VolumeOperationNone && mounted.Operation != hoststate.VolumeOperationBalancePaused
+}
+
+// recordedDiskLocked is the disk as the latest plan that named it recorded it.
+func (s *Service) recordedDiskLocked(diskID string) MissingDisk {
+	disk, at := MissingDisk{ID: diskID}, time.Time{}
+	for _, plan := range s.plans {
+		for _, planned := range plan.Disks {
+			if planned.ID == diskID && !plan.CreatedAt.Before(at) {
+				disk.Model, disk.CapacityBytes, at = planned.Model, planned.CapacityBytes, plan.CreatedAt
+			}
+		}
+	}
+	return disk
 }
 
 // ContinueConversion asks the Host Agent to convert the data volume to its
@@ -735,7 +808,8 @@ func (s *Service) currentVolumeLocked() (Volume, bool) {
 // mounted and writable, its size and free space, its disks, and how far a
 // conversion to its layout has come.
 func observeVolume(volume Volume, state hoststate.State) Volume {
-	volume.State, volume.AvailableBytes, volume.Conversion, volume.Spread = VolumeStateUnavailable, nil, nil, nil
+	planned := volume.DiskIDs
+	volume.State, volume.AvailableBytes, volume.Conversion, volume.Spread, volume.MissingDisks, volume.Restoring = VolumeStateUnavailable, nil, nil, nil, nil, false
 	var raw []uint64
 	for _, disk := range state.Disks {
 		if slices.Contains(volume.DiskIDs, disk.ID.String()) {
@@ -763,15 +837,28 @@ func observeVolume(volume Volume, state hoststate.State) Volume {
 	}
 	mounted := state.DataVolume
 	if mounted == nil || volume.State == VolumeStateUnavailable || (volume.FilesystemUUID != "" && !strings.EqualFold(mounted.FilesystemUUID, volume.FilesystemUUID)) {
+		volume.MissingDisks = missingDisks(planned, offlineMembers(state, volume.FilesystemUUID))
 		return volume
 	}
 	volume.DiskIDs = make([]string, 0, len(mounted.DiskIDs))
 	for _, id := range mounted.DiskIDs {
 		volume.DiskIDs = append(volume.DiskIDs, id.String())
 	}
+	if mounted.MissingDevices > 0 {
+		if volume.State == VolumeStateAvailable {
+			volume.State = VolumeStateDegraded
+		}
+		volume.MissingDisks = missingDisks(planned, volume.DiskIDs)
+	} else {
+		volume.Restoring = mounted.Restoring
+	}
 	// A single disk is never converted to; its metadata is dup or single
 	// depending on the btrfs-progs that formatted it.
 	if volume.Layout == LayoutSingle {
+		return volume
+	}
+	// Without a disk a mirror cannot convert; it does once the disk is back.
+	if mounted.MissingDevices > 0 {
 		return volume
 	}
 	if converted, total := conversionProgress(mounted, volume.Layout); converted < total {
@@ -796,6 +883,40 @@ func observeVolume(volume Volume, state hoststate.State) Volume {
 		volume.Spread = &Spread{State: SpreadWaiting, UnusableBytes: unusable}
 	}
 	return volume
+}
+
+// volumeMissingSizes are the recorded sizes of the volume's missing disks.
+func volumeMissingSizes(volume Volume) []uint64 {
+	var sizes []uint64
+	for _, missing := range volume.MissingDisks {
+		if missing.CapacityBytes > 0 {
+			sizes = append(sizes, missing.CapacityBytes)
+		}
+	}
+	return sizes
+}
+
+// offlineMembers are the disks that carry the filesystem while it is not
+// mounted.
+func offlineMembers(state hoststate.State, uuid string) []string {
+	var members []string
+	for _, disk := range state.Disks {
+		if uuid != "" && slices.ContainsFunc(disk.Signatures, func(signature hoststate.Signature) bool { return strings.EqualFold(signature.UUID, uuid) }) {
+			members = append(members, disk.ID.String())
+		}
+	}
+	return members
+}
+
+// missingDisks are the planned disks that are not present.
+func missingDisks(planned, present []string) []MissingDisk {
+	var missing []MissingDisk
+	for _, id := range planned {
+		if !slices.Contains(present, id) {
+			missing = append(missing, MissingDisk{ID: id})
+		}
+	}
+	return missing
 }
 
 // DataVolumeFilesystemUUID returns the filesystem UUID of the one data volume

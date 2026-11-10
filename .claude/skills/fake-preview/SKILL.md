@@ -7,6 +7,8 @@ description: 在开发机上启动一套 Fake 模式的 A-NAS 预览栈：模拟
 
 产品服务 `anas-api` 在 `ANAS_HOSTSTATE_MODE=fake` 时使用模拟的宿主机：两块确定性磁盘加一块空闲盘、模拟的存储执行、Fake 容器与应用目录（[`cmd/anas-api/config.go`](../../../cmd/anas-api/config.go)）。这个变量没有默认值，不设置时服务拒绝启动。Web 桌面嵌入在同一个二进制中，所以一个进程就是一整套栈。
 
+预览镜像缺盘时再设 `ANAS_FAKE_STORAGE=degraded`：在两块及以上的盘上建卷后，最后一块盘随即消失，镜像降级运行（扩容与条带离线），另有可用来更换的硬盘；更换约 20 秒，之后“正在恢复冗余”约 60 秒（[`devstorage.go`](../../../cmd/anas-api/devstorage.go)）。
+
 ## 为什么每套栈用自己的主机名
 
 - 会话 Cookie `anas_session` 按主机名保存，不区分端口。几套栈都用 `localhost` 或 `127.0.0.1` 时，在一套里登录会顶掉另一套的会话。`<名称>.localhost` 在 Chromium 中解析到回环地址，每个名称有自己的 Cookie。

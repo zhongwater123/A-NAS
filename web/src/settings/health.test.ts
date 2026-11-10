@@ -58,6 +58,13 @@ describe("describeFinding", () => {
     expect(describeFinding({ code: "volume_errors", severity: "warning", value: 3 }, disks).detail).toContain("累计");
   });
 
+  it("says a mirror missing a disk keeps one copy and needs a new disk", () => {
+    expect(describeFinding({ code: "volume_degraded", severity: "critical", value: 1 }, disks)).toMatchObject({
+      title: "数据卷缺少 1 块硬盘",
+      detail: expect.stringContaining("更换硬盘"),
+    });
+  });
+
   it("says where to look when the data volume could not be reconciled", () => {
     expect(describeFinding({ code: "volume_reconcile_failed", severity: "warning" }, disks)).toMatchObject({
       title: "数据卷的权限与共享设置没能更新",

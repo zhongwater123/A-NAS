@@ -716,6 +716,12 @@ func (apiVolumeExecutor) StartAddDisks(_ context.Context, request storage.AddDis
 	}}, nil
 }
 
+func (apiVolumeExecutor) StartReplaceDisk(_ context.Context, request storage.ReplaceDiskRequest) (storage.VolumeOperation, error) {
+	return storage.VolumeOperation{PlanID: request.PlanID, State: storage.OperationSucceeded, Volume: &storage.Volume{
+		FilesystemUUID: request.FilesystemUUID, Layout: storage.LayoutMirror, State: storage.VolumeStateAvailable,
+	}}, nil
+}
+
 func (apiVolumeExecutor) VolumeOperation(context.Context, string) (storage.VolumeOperation, error) {
 	return storage.VolumeOperation{}, storage.ErrOperationNotFound
 }

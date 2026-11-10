@@ -30,6 +30,12 @@ type CreateVolumeDocument struct {
 	Layout datavolume.Layout       `json:"layout"`
 }
 
+type ReplaceDiskDocument struct {
+	PlanID         string                `json:"planId"`
+	FilesystemUUID string                `json:"filesystemUuid"`
+	Disk           datavolume.DiskTarget `json:"disk"`
+}
+
 type AddDisksDocument struct {
 	PlanID         string                  `json:"planId"`
 	FilesystemUUID string                  `json:"filesystemUuid"`
@@ -167,6 +173,10 @@ type dataVolumeDocument struct {
 	Data           []profileUsageDocument    `json:"data"`
 	Metadata       []profileUsageDocument    `json:"metadata"`
 	Operation      hoststate.VolumeOperation `json:"operation,omitempty"`
+	// MissingDevices is left out when none is missing, so a Product Service
+	// that predates it reads a whole volume as before.
+	MissingDevices int  `json:"missingDevices,omitempty"`
+	Restoring      bool `json:"restoring,omitempty"`
 	// Devices is left out when unknown, as an older Host Agent does.
 	Devices       []volumeDeviceDocument `json:"devices,omitempty"`
 	SpreadStopped bool                   `json:"spreadStopped,omitempty"`
@@ -362,6 +372,7 @@ func DocumentFromDomain(state hoststate.State) StateDocument {
 		dataVolume = &dataVolumeDocument{
 			FilesystemUUID: volume.FilesystemUUID, DiskIDs: make([]string, len(volume.DiskIDs)),
 			Data: usageDocuments(volume.Data), Metadata: usageDocuments(volume.Metadata), Operation: volume.Operation,
+			MissingDevices: volume.MissingDevices, Restoring: volume.Restoring,
 			SpreadStopped: volume.SpreadStopped,
 		}
 		for i, id := range volume.DiskIDs {
@@ -527,14 +538,14 @@ func (document *dataVolumeDocument) ToDomain(disks []hoststate.Disk) (*hoststate
 	if document == nil {
 		return nil, nil
 	}
-	if strings.TrimSpace(document.FilesystemUUID) == "" || len(document.DiskIDs) == 0 || !document.Operation.Valid() {
+	if strings.TrimSpace(document.FilesystemUUID) == "" || len(document.DiskIDs) == 0 || !document.Operation.Valid() || document.MissingDevices < 0 {
 		return nil, errors.New("invalid data volume")
 	}
 	roles := make(map[string]hoststate.DiskRole, len(disks))
 	for _, disk := range disks {
 		roles[disk.ID.String()] = disk.Role
 	}
-	volume := &hoststate.DataVolume{FilesystemUUID: document.FilesystemUUID, Operation: document.Operation, SpreadStopped: document.SpreadStopped}
+	volume := &hoststate.DataVolume{FilesystemUUID: document.FilesystemUUID, Operation: document.Operation, MissingDevices: document.MissingDevices, Restoring: document.Restoring, SpreadStopped: document.SpreadStopped}
 	for _, value := range document.DiskIDs {
 		id, err := hoststate.NewResourceID(value)
 		if err != nil || roles[id.String()] != hoststate.DiskRoleData {
