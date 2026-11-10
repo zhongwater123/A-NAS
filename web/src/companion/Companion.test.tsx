@@ -110,8 +110,8 @@ describe("the companion on the desktop", () => {
     const credit = pet.closest("[title]") as HTMLElement;
     for (const part of ["github.com/PC2005-cloud/dsh-pet", "@上善无形", "@ZipZipPipe", "CC BY-NC-SA 4.0"])
       expect(credit.title).toContain(part);
-    // Above the desktop's icons, below its windows.
-    expect(credit.style.getPropertyValue("--dsh-pet-z")).toBe("60");
+    // Above the desktop's windows and status bar, below its rail, notices and menus.
+    expect(credit.style.getPropertyValue("--dsh-pet-z")).toBe("76");
     // Out of the desktop VNAS reads (AssistantPanel's exclude): VNAS has its own tools for the companion.
     expect(pet.closest("[data-vnas-overlay]")).not.toBeNull();
     // Only installed animations play: the first is always the idle one.

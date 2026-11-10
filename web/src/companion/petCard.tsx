@@ -74,8 +74,11 @@ const POSITION_KEY = "a-nas.companion.position";
 const credit =
   "大肥鱼：社区二创形象（原作溟月 @上善无形，女仆设计 @ZipZipPipe，CC BY-NC-SA 4.0），仅作非商业试验。" +
   "动画来自 github.com/PC2005-cloud/dsh-pet";
-/** Above the desktop's icons and below its windows, the status bar and the rail; dsh-pet's own is 40. */
-const layer = { display: "contents", "--dsh-pet-z": 60 } as CSSProperties;
+/**
+ * Above the windows (72) and the status bar (70); below the rail and notices (80), menus, the shelf and the
+ * screen saver; dsh-pet's own is 40.
+ */
+const layer = { display: "contents", "--dsh-pet-z": 76 } as CSSProperties;
 
 const pet: Omit<RuntimePet, "animations"> = {
   id: COMPANION_PET,
