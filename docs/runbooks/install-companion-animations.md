@@ -1,7 +1,7 @@
 # 安装伙伴动画
 
 状态：draft（系统测试已验证；实验 NAS 待执行）
-更新时间：2026-11-09
+更新时间：2026-11-10
 
 ## 目的
 
@@ -11,7 +11,7 @@
 
 - 权限：开发机能以 `anas-dev` 用 SSH 登录 NAS；NAS 上有 root。
 - 目标：已安装含 `install-media-pool.sh` 的 release 的 NAS（`/opt/a-nas/current/install-media-pool.sh` 存在）。
-- 素材：本地 dsh-pet 检出位于 [`web/src/companion/dsh-pet/README.md`](../../web/src/companion/dsh-pet/README.md) 记录的提交；Safari 用的 HEVC 动画是 dsh-pet 的 `assets-mov` 发布中的 `dsh-pet-mov-assets-mov.zip`，SHA-256 为 `654e42f14b647a1e59a4c6f05694273dcf23edb063a5e49b14fc05a1fad3b467`（[`vendor-dsh-pet.py`](../../scripts/vendor-dsh-pet.py) 中的 `MOV_ZIP`）。动画仅限非商业试验，许可与署名见同一 README。
+- 素材：本地 dsh-pet 检出位于 [`web/src/companion/dsh-pet/README.md`](../../web/src/companion/dsh-pet/README.md) 记录的提交；Safari 用的 HEVC 动画是 `dsh-pet-mov-assets-mov.zip`，SHA-256 为 `3e6be25298d0abbcc6e38e910d2d1726a4787c1f6c189c60cd17fa88abb4e21d`（[`vendor-dsh-pet.py`](../../scripts/vendor-dsh-pet.py) 中的 `MOV_ZIP`）。从私有仓库 A-NAS-assets 取：`gh release download sha256-3e6be25298d0abbcc6e38e910d2d1726a4787c1f6c189c60cd17fa88abb4e21d --repo zhongwater123/A-NAS-assets --dir <目录>`。不要从 dsh-pet 的 `assets-mov` 发布下载：上游每次构建都同名覆盖这个文件，编码结果也每次不同，与固定的哈希对不上（2026-11-10 的情况）。动画仅限非商业试验，许可与署名见同一 README。
 - 验证用电脑：与 NAS 同一局域网、能打开 `http://<NAS 地址>` 的另一台电脑（[启用局域网 Web 访问](enable-lan-web-access.md)）。NAS 默认没有 `curl`，HTTP 检查不在 NAS 上做。
 - 风险：只写 `/var/lib/a-nas/companion` 与暂存账号的 `~/apps/a-nas/companion`，不涉及数据盘。本地控制台在运行时会被重启一次，本机屏幕重新打开桌面。
 - 停止条件：本地校验报告与清单不符、暂存输出的池 ID 与 README 记录的不同，或 root 安装报错。
@@ -45,7 +45,7 @@ $manifest = Invoke-RestMethod "$nas/companion/animations"
 $animations = @($manifest.animations.PSObject.Properties)
 $manifest.pool                                               # 第 2 步的池 ID
 $animations.Count                                            # 清单中 webm 的行数
-@($animations | Where-Object { -not $_.Value.mov }).Count    # 5：吃白饭的 5 段没有 mov
+@($animations | Where-Object { -not $_.Value.mov }).Count    # 0：每段都有 mov
 curl.exe -s -o NUL -w '%{http_code}\n' -r 0-1023 "$nas$($animations[0].Value.webm)"   # 206
 ```
 
@@ -60,7 +60,7 @@ print(next(iter(a.values()))["webm"])'
 curl -s -o /dev/null -w '%{http_code}\n' -r 0-1023 "$nas<上一行打印的 URL>"
 ```
 
-- 池 ID 与第 2 步一致；动画数等于清单中 webm 的行数，其中除吃白饭的 5 段外都有 `mov`。
+- 池 ID 与第 2 步一致；动画数等于清单中 webm 的行数，每段都有 `mov`。
 - Range 请求返回 `206`。
 - 本地控制台运行时，本机屏幕上出现伙伴。
 

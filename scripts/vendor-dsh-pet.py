@@ -33,9 +33,12 @@ import json5
 
 PINNED = "10f6c868b8110c897af33d6137a3d85e84b665ba"
 # Safari draws no alpha in VP9; dsh-pet publishes the same animations as HEVC with alpha in one
-# release asset, which GitHub digests. It lacks only the meal game's, which A-NAS does not play.
-MOV_ZIP = ("https://github.com/PC2005-cloud/dsh-pet/releases/download/assets-mov/dsh-pet-mov-assets-mov.zip",
-           "654e42f14b647a1e59a4c6f05694273dcf23edb063a5e49b14fc05a1fad3b467")
+# release asset, one .mov for each .webm. dsh-pet rebuilds that asset under the same name on every
+# run of its pipeline, and the encoding differs each time, so A-NAS keeps the copy it pins in its
+# own assets repository, in an immutable release.
+MOV_ZIP = ("https://github.com/zhongwater123/A-NAS-assets/releases/download/"
+           "sha256-3e6be25298d0abbcc6e38e910d2d1726a4787c1f6c189c60cd17fa88abb4e21d/dsh-pet-mov-assets-mov.zip",
+           "3e6be25298d0abbcc6e38e910d2d1726a4787c1f6c189c60cd17fa88abb4e21d")
 ROOTS = ["client/pet/card", "client/pet/animation", "client/pet/motion", "shared/physics"]
 # Single host modules the page runs as dsh-pet's host would: WorkStatusStore and pickDisplayed
 # (self-contained), the bridge that publishes them (a working->result flip within 5 s merged,
