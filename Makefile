@@ -85,8 +85,22 @@ web-lint: web-install
 web-test: web-install
 	cd web && $(NPM) test
 
+# The build ships the licenses of the code copied into web/src (each LICENSE
+# there, beside the README that names its source) as
+# assets/third-party-licenses.txt: the bundle keeps no comments.
+THIRD_PARTY_LICENSES = internal/webui/dist/assets/third-party-licenses.txt
+
 web-build: web-install
 	cd web && $(NPM) run build
+	@licenses="$$(find web/src -name LICENSE -not -path '*/node_modules/*' | LC_ALL=C sort)"; \
+	{ echo 'Code copied into the A-NAS Web UI from other projects, and its licenses.'; \
+	for license in $$licenses; do \
+		folder="$${license%/LICENSE}"; \
+		from="$$(sed -n 's/^Copied from \[\([^]]*\)\](\([^)]*\)) commit `\([0-9a-f]*\)`.*/\1 (\2) commit \3/p' "$$folder/README.md" 2>/dev/null)"; \
+		printf '\n== %s: %s ==\n\n' "$$folder" "$${from:-see its README.md}"; cat "$$license"; \
+	done; } > $(THIRD_PARTY_LICENSES); \
+	test "$$(grep -c '^Permission is hereby granted' $(THIRD_PARTY_LICENSES))" -eq "$$(grep -l '^Permission is hereby granted' $$licenses | wc -l)" -a -n "$$licenses" || \
+		{ echo "$(THIRD_PARTY_LICENSES) lacks a license of web/src" >&2; exit 1; }
 
 # Go files under node_modules belong to npm packages, which go.mod ignores.
 GO_FILES = find . -name '*.go' -type f -not -path './.git/*' -not -path '*/node_modules/*'
