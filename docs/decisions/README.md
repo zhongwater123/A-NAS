@@ -50,6 +50,7 @@
 - [2026-10-15：助手的回答提到 Hermes 的 `/help` 与上手引导怎么处理](2026-10-15-assistant-help-and-onboarding.md)
 - [2026-10-16：AI 助手在界面上叫 VNAS](2026-10-16-assistant-name-vnas.md)
 - [2026-10-20：助手说“下次从笔记接着聊”的措辞是否调整](2026-10-20-assistant-notes-wording.md)
+- [2026-11-10：Hermes 的固定提交怎么越过 gateway 运行时](2026-11-10-hermes-gateway-runtime.md)
 
 ### 桌面与设置
 
