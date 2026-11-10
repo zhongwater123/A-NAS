@@ -1,6 +1,6 @@
 # 0034：产品以签名软件源中的 Debian 软件包发布，设备以 systemd-sysupdate 双系统分区更新
 
-状态：proposed（2026-11-09；2026-11-10 改为 systemd-sysupdate 优先，同日补第 3 步的验证结论）；接续 [ADR 0031](0031-declare-host-dependencies-in-debian-packages.md) 决定 6 留下的“产品本身打包”，对应 [#189](https://github.com/zhongwater123/A-NAS/issues/189)、[#171](https://github.com/zhongwater123/A-NAS/issues/171)。
+状态：accepted（2026-11-10，用户在第 3 步的验证之后接受；2026-11-09 提出，2026-11-10 改为 systemd-sysupdate 优先）；接续 [ADR 0031](0031-declare-host-dependencies-in-debian-packages.md) 决定 6 留下的“产品本身打包”，对应 [#189](https://github.com/zhongwater123/A-NAS/issues/189)、[#171](https://github.com/zhongwater123/A-NAS/issues/171)。
 
 A-NAS 现在的发布靠脚本与人工维护，Experimental NAS 之外也没有可行的更新方式。我们决定分两层：
 

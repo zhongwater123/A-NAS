@@ -13,7 +13,7 @@
 
 `stage.sh` 暂存的文件与 `deploy-dev.ps1 -NasHost <NAS> -StageOnly` 经 SSH 上传的相同，也运行同一个 `remote-activate-release.sh`，所以两种方式暂存出的 release 目录一样。成功结果：`/home/anas-dev/apps/a-nas/releases/<12 位提交 SHA>` 已暂存，root 脚本在 `/home/anas-dev` 下。
 
-这是近期 release 的过渡做法。长期的发布与更新方式见 [ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)（proposed）。
+这是近期 release 的过渡做法。长期的发布与更新方式见 [ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)。
 
 ## 前提与风险
 
