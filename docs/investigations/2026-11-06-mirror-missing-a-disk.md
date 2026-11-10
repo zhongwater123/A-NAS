@@ -1,7 +1,7 @@
 # 镜像少了一块硬盘时 systemd、udev 与 Btrfs 的行为
 
-状态：fixed（M2，见下文“修复”），待实机验收
-更新时间：2026-11-06
+状态：fixed（M2，见下文“修复”），待实机验收：2026-11-10 部署后的重启已证实 mount unit 不再随单块设备停止，拔盘开机与接回待做
+更新时间：2026-11-10
 
 ## 症状与影响
 
@@ -110,7 +110,7 @@ mount unit 文件是 systemd 的 fragment，没有 `x-systemd.device-bound=` 选
 
 ## 后续工作
 
-- 实机：部署后重启一次，确认 `StopPropagatedFrom=` 为空；再按运行手册拔盘开机、接回。
+- 实机：2026-11-10 部署 `61744597719c` 后重启，`StopPropagatedFrom=` 为空，mount unit 带 `x-systemd.device-bound=no`；还要按运行手册拔盘开机、接回。
 - replace 在剩下的盘没有未分配空间时会以 `ENOSPC` 失败，界面应显示失败原因。
 - 是否把虚拟机脚本做成常驻回归测试（CI 上的 KVM），等用户决定。
 
