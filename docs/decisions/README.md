@@ -44,6 +44,7 @@
 - [2026-11-02：OCR 分流的目标召回取 99%](2026-11-02-ocr-routing-recall.md)
 - [2026-11-03：OCR 字段核对的单字概率取 0.99](2026-11-03-ocr-character-confidence.md)
 - [2026-11-06：照片中的文字在界面上不遮挡](2026-11-06-ocr-no-masking-in-the-ui.md)
+- [2026-11-10：AI 助手看不到证件、票据和文字还没读完的照片的画面](2026-11-10-assistant-view-of-documents.md)
 
 ### AI 助手
 

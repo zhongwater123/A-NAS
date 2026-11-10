@@ -39,6 +39,11 @@ func TestPhotoTextOverHTTP(t *testing.T) {
 		t.Fatalf("changes = %+v", changes)
 	}
 
+	// A handle nobody was given, or that is no handle, stands for nothing.
+	for _, handle := range []string{"0123ab", "nothex", url.PathEscape("⟦身份证号·0123ab⟧")} {
+		owner.json(http.MethodGet, "/api/v1/photos/text-handles/"+handle, nil, http.StatusNotFound, nil)
+	}
+
 	// Someone who cannot see the photo learns nothing of it.
 	stranger := client{t: t, handler: handler, as: bob}
 	for _, path := range []string{asset + "/text", asset + "/text/changes"} {

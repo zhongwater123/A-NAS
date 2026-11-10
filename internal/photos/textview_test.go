@@ -270,6 +270,182 @@ func TestTheAssistantGetsHandlesInsteadOfSensitiveValues(t *testing.T) {
 	}
 }
 
+// handleOf is the part of a handle the window asks the photo service with.
+func handleOf(t *testing.T, named string) string {
+	t.Helper()
+	found := regexp.MustCompile(`^⟦[^·⟧]+·([0-9a-f]{6})⟧$`).FindStringSubmatch(named)
+	if found == nil {
+		t.Fatalf("%q is no handle", named)
+	}
+	return found[1]
+}
+
+// The member whose assistant got a handle, and nobody else, gets the value it
+// stands for: the window shows it in place of the handle, past the model.
+func TestAMemberGetsTheValueAHandleStandsFor(t *testing.T) {
+	service, embedder := idCardService(t)
+	ctx := context.Background()
+	private, shared := libraries(t, service, namedAlice)
+	libraries(t, service, namedBob)
+	card := importPhoto(t, service, namedAlice, shared.ID, "", "card.png", red)
+	index(t, service, embedder)
+	if _, err := service.CorrectText(ctx, namedAlice, card.ID, "公民身份号码", "440306199001011252"); err != nil {
+		t.Fatal(err)
+	}
+	alicesAssistant := photos.Principal{UserID: namedAlice.UserID, Username: "alice", Assistant: true}
+	bobsAssistant := photos.Principal{UserID: namedBob.UserID, Username: "bob", Assistant: true}
+	text, err := service.Text(ctx, alicesAssistant, card.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	number := fieldNamed(t, text, "公民身份号码")
+	inText := handles.FindAllString(text.Text, -1)
+	if len(inText) != 3 {
+		t.Fatalf("handles in the assistant's text = %v", inText)
+	}
+	// What the field holds, what was read for it, and the text's numbers in
+	// the order the text shows them, as their digits.
+	for named, want := range map[string]photos.TextHandleValue{
+		number.Value: {Label: "身份证号", Value: "440306199001011252"},
+		number.Read:  {Label: "身份证号", Value: "440306199001011236"},
+		inText[1]:    {Label: "手机号", Value: "13812345678"},
+		inText[2]:    {Label: "号码", Value: "123456789012345"},
+	} {
+		want.AssetID, want.AssetName = card.ID, "card.png"
+		if got, err := service.TextHandle(ctx, namedAlice, handleOf(t, named)); err != nil || got != want {
+			t.Errorf("Alice's TextHandle(%s) = %+v, %v; want %+v", named, got, err, want)
+		}
+	}
+	handle := handleOf(t, number.Value)
+
+	// The handle is Alice's: Bob sees the photo and gets nothing by it, nor
+	// does any assistant, hers included; Bob's own handle works for him.
+	for who, p := range map[string]photos.Principal{"Bob": namedBob, "Alice's assistant": alicesAssistant, "Bob's assistant": bobsAssistant} {
+		if _, err := service.TextHandle(ctx, p, handle); !errors.Is(err, photos.ErrNotFound) {
+			t.Errorf("%s's TextHandle() of Alice's handle: error = %v", who, err)
+		}
+	}
+	bobs, err := service.Text(ctx, bobsAssistant, card.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.TextHandle(ctx, namedBob, handleOf(t, fieldNamed(t, bobs, "公民身份号码").Value)); err != nil ||
+		got.Value != "440306199001011252" {
+		t.Fatalf("Bob's TextHandle() of his own handle = %+v, %v", got, err)
+	}
+	for _, unknown := range []string{"", "ZZZZZZ", number.Value, handle + "0"} {
+		if _, err := service.TextHandle(ctx, namedAlice, unknown); !errors.Is(err, photos.ErrNotFound) {
+			t.Errorf("TextHandle(%q): error = %v", unknown, err)
+		}
+	}
+
+	// A handle follows its field: corrected again, it stands for the new
+	// value.
+	if _, err := service.CorrectText(ctx, namedBob, card.ID, "公民身份号码", "110101199003074514"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.TextHandle(ctx, namedAlice, handle); err != nil || got.Value != "110101199003074514" {
+		t.Fatalf("TextHandle() after a correction = %+v, %v", got, err)
+	}
+	// With reading off, a library shows no text, and its handles nothing.
+	own := importPhoto(t, service, namedAlice, private.ID, "", "own.png", solidPNG(250, 5, 5))
+	index(t, service, embedder)
+	owned, err := service.Text(ctx, alicesAssistant, own.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownHandle := handleOf(t, fieldNamed(t, owned, "公民身份号码").Value)
+	if _, err := service.TextHandle(ctx, namedAlice, ownHandle); err != nil {
+		t.Fatalf("TextHandle() of her own photo: %v", err)
+	}
+	if _, err := service.SetTexts(ctx, namedAlice, private.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.TextHandle(ctx, namedAlice, ownHandle); !errors.Is(err, photos.ErrNotFound) {
+		t.Fatalf("TextHandle() with reading off: error = %v", err)
+	}
+}
+
+// A document is found by what members call its type, which its own text
+// need not say: the front of an ID card nowhere prints 身份证.
+func TestADocumentIsFoundByTheNameOfItsType(t *testing.T) {
+	service, embedder := idCardService(t)
+	private, _ := libraries(t, service, namedAlice)
+	card := importPhoto(t, service, namedAlice, private.ID, "", "IMG_0001.png", red)
+	importPhoto(t, service, namedAlice, private.ID, "", "sea.png", blue)
+	index(t, service, embedder)
+	assistant := photos.Principal{UserID: namedAlice.UserID, Username: "alice", Assistant: true}
+
+	for _, p := range []photos.Principal{namedAlice, assistant} {
+		for _, query := range []string{"身份证", "我的身份证号", "证件"} {
+			if page := search(t, service, p, query); page.Texts != 1 || page.Assets[0].ID != card.ID {
+				t.Errorf("search for %q (assistant: %v) = %+v", query, p.Assistant, page)
+			}
+		}
+		for _, query := range []string{"发票", "银行卡", "身"} {
+			if page := search(t, service, p, query); page.Texts != 0 {
+				t.Errorf("search for %q (assistant: %v) found the ID card by its text", query, p.Assistant)
+			}
+		}
+	}
+}
+
+// An assistant's model is in the cloud for now, so the assistant gets no
+// view of a document, whichever side, nor of a photo still waiting to be read
+// (docs/decisions/2026-11-10-assistant-view-of-documents.md).
+func TestTheAssistantLooksAtNoDocumentAndNoPhotoStillToBeRead(t *testing.T) {
+	ctx := context.Background()
+	assistant := photos.Principal{UserID: namedAlice.UserID, Username: "alice", Assistant: true}
+
+	// The back of an ID card shows no number, and is an ID card all the same.
+	embedder := newReadingEmbedder()
+	embedder.text = "中华人民共和国\n居民身份证\n签发机关 某市公安局\n有效期限 2020.01.01-2040.01.01"
+	embedder.answer = `{"签发机关": "某市公安局", "有效期限": "2020.01.01-2040.01.01"}`
+	service := routeService(t, filepath.Join(t.TempDir(), "photos"), embedder, redRoute(t, "colour-1"))
+	private, _ := libraries(t, service, namedAlice)
+	back := importPhoto(t, service, namedAlice, private.ID, "", "back.png", red)
+	index(t, service, embedder)
+	text, err := service.Text(ctx, assistant, back.ID)
+	if err != nil || text.Kind != "id_card_back" || handles.MatchString(text.Text) {
+		t.Fatalf("the back of the ID card for the assistant = %+v, %v", text, err)
+	}
+	if _, err := service.View(ctx, assistant, back.ID); !errors.Is(err, photos.ErrSensitivePhoto) {
+		t.Fatalf("the assistant's View() of the back of an ID card: error = %v", err)
+	}
+
+	// A Worker that reads no text leaves the routed photo waiting: nobody
+	// knows yet what it shows. The member looks at it as ever.
+	waiting := &colorEmbedder{}
+	service = routeService(t, filepath.Join(t.TempDir(), "photos"), waiting, redRoute(t, "colour-1"))
+	private, _ = libraries(t, service, namedAlice)
+	card := importPhoto(t, service, namedAlice, private.ID, "", "card.png", red)
+	sea := importPhoto(t, service, namedAlice, private.ID, "", "sea.png", blue)
+	index(t, service, waiting)
+	if _, err := service.View(ctx, assistant, card.ID); !errors.Is(err, photos.ErrUnreadPhoto) {
+		t.Fatalf("the assistant's View() of a photo waiting to be read: error = %v", err)
+	}
+	for who, look := range map[string]func() (photos.Content, error){
+		"the assistant's View() of a photo not routed": func() (photos.Content, error) { return service.View(ctx, assistant, sea.ID) },
+		"Alice's View() of the photo waiting":          func() (photos.Content, error) { return service.View(ctx, namedAlice, card.ID) },
+	} {
+		view, err := look()
+		if err != nil {
+			t.Fatalf("%s: %v", who, err)
+		}
+		_ = view.Reader.Close()
+	}
+	// With reading off nothing waits, and the library's photos are looked at
+	// as before reading existed.
+	if _, err := service.SetTexts(ctx, namedAlice, private.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	view, err := service.View(ctx, assistant, card.ID)
+	if err != nil {
+		t.Fatalf("the assistant's View() with reading off: %v", err)
+	}
+	_ = view.Reader.Close()
+}
+
 // A number reaches the assistant as a handle wherever the text holds it: in
 // a field that is no secret, printed in full-width digits, or split over
 // lines, which search would join.
@@ -356,13 +532,12 @@ func TestTheAssistantSeesNoNumberHoweverItIsPrinted(t *testing.T) {
 	_ = member.Reader.Close()
 }
 
-// A photo whose text shows only a mobile number and an address, as a
-// screenshot or a parcel label does, the assistant may look at (user,
-// 2026-11-06); the number stays a handle in its text.
+// A photo that is no document and whose text shows only a mobile number and
+// an address, as a screenshot or a parcel label does, the assistant may look
+// at (user, 2026-11-06); the number stays a handle in its text.
 func TestTheAssistantLooksAtAPhotoWithOnlyAPhoneNumber(t *testing.T) {
 	embedder := newReadingEmbedder()
-	embedder.text = "城南便利店 某市某路1号\n电话 138 1234 5678\n合计 ¥35.50"
-	embedder.answer = `{"商户": "城南便利店", "日期": "", "合计": "¥35.50"}`
+	embedder.text = "城南便利店 某市某路1号\n电话 138 1234 5678\n营业时间 8:00-22:00"
 	service := routeService(t, filepath.Join(t.TempDir(), "photos"), embedder, redRoute(t, "colour-1"))
 	ctx := context.Background()
 	private, _ := libraries(t, service, namedAlice)
