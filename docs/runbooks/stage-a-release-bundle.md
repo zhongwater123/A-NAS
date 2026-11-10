@@ -13,7 +13,7 @@
 
 `stage.sh` 暂存的文件与 `deploy-dev.ps1 -NasHost <NAS> -StageOnly` 经 SSH 上传的相同，也运行同一个 `remote-activate-release.sh`，所以两种方式暂存出的 release 目录一样。成功结果：`/home/anas-dev/apps/a-nas/releases/<12 位提交 SHA>` 已暂存，root 脚本在 `/home/anas-dev` 下。
 
-这是近期 release 的过渡做法。长期的发布与更新方式见 [ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-rauc.md)（proposed）。
+这是近期 release 的过渡做法。长期的发布与更新方式见 [ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)（proposed）。
 
 ## 前提与风险
 
@@ -97,7 +97,7 @@
 ## 关联
 
 - 规格：不涉及
-- ADR：[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)（宿主机软件包随 release 暂存）、[0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-rauc.md)（取代本手册的长期做法）
+- ADR：[0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)（宿主机软件包随 release 暂存）、[0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)（取代本手册的长期做法）
 - 调查：不涉及
 - 实现：[`scripts/deploy-dev.ps1`](../../scripts/deploy-dev.ps1)（`-BundleDirectory`）、[`scripts/stage-release-bundle.sh`](../../scripts/stage-release-bundle.sh)、[`scripts/remote-activate-release.sh`](../../scripts/remote-activate-release.sh)
 - Issue：[#189](https://github.com/zhongwater123/A-NAS/issues/189)（发布不是一个可校验的整体）、[#171](https://github.com/zhongwater123/A-NAS/issues/171)（发布信任链）
