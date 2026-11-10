@@ -1,10 +1,13 @@
 """The companion's MCP server answers every call as a result, and passes on only what the model gave.
 
 CompanionToolTests stand in for the MCP SDK, which only the assistant's runtime
-has. SdkPathTests run the server under the real SDK and skip without it. The
-system test with the runtime (ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME) runs them,
-and refuses a skip; by hand, use the runtime's Python with its packages
-(ai/assistant-spike/build-runtime.sh):
+has. SdkPathTests run the server under the real SDK and skip without it, unless
+ANAS_COMPANION_MCP_SDK=required, which makes the missing SDK a failure. make
+ai-sdk-test (in make check-steps, so in CI) runs them so, under the SDK
+Hermes's lock pins (ai/assistant-spike/companion-mcp-sdk.txt); the system test
+with the runtime (ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME) runs them under the
+runtime itself, and refuses a skip. By hand, with the runtime's Python and its
+packages (ai/assistant-spike/build-runtime.sh):
 
     PYTHONPATH=<runtime venv>/lib/python3.14/site-packages <runtime python> -m unittest tests.test_companion_mcp
 """
@@ -23,6 +26,8 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1] / "assistant-spike" / "anas_companion_mcp.py"
+SDK = bool(importlib.util.find_spec("mcp") and importlib.util.find_spec("mcp_types"))
+SDK_REQUIRED = os.environ.get("ANAS_COMPANION_MCP_SDK") == "required"
 
 
 class _Server:
@@ -228,11 +233,13 @@ class CompanionToolTests(unittest.TestCase):
         self.assertEqual(self.received[1][1]["args"], {"facing": "", "lock": ""})
 
 
-@unittest.skipUnless(importlib.util.find_spec("mcp") and importlib.util.find_spec("mcp_types"), "the MCP SDK is in the assistant's runtime only")
+@unittest.skipUnless(SDK or SDK_REQUIRED, "the MCP SDK is in the assistant's runtime and make ai-sdk-test only")
 class SdkPathTests(unittest.TestCase):
     """The server under the real SDK, called as Hermes's MCP client calls it."""
 
     def setUp(self):
+        if not SDK:
+            self.fail("ANAS_COMPANION_MCP_SDK=required, but the MCP SDK cannot be imported")
         self.module = _exec("anas_companion_mcp_sdk")
         self.service = _Companion(self, self.module)
 
