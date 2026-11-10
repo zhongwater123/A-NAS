@@ -4,6 +4,7 @@
 
 ## 索引
 
+- [2026-11-09：hwmon 属性截断与异常 SMART 温度](2026-11-09-hwmon-truncation-and-smart-temperature.md)
 - [2026-11-09：音乐扫描刚结束时，状态报告“空闲”却带着扫描前的歌曲数与版本号](2026-11-09-music-status-idle-with-stale-count.md)
 - [2026-11-09：分散任务把未知分配量当成完成，后台测量没有超时](2026-11-09-spread-allocation-observation.md)
 - [2026-11-06：镜像少了一块硬盘时 systemd、udev 与 Btrfs 的行为](2026-11-06-mirror-missing-a-disk.md)
