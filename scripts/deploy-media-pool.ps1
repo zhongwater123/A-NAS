@@ -79,6 +79,18 @@ if ($Kind -eq 'screensavers') {
     if ($pool -ne $pinnedPool) {
         throw "The manifest is pool $pool, but scripts/install-media-pool.sh pins $pinnedPool; vendor again or check the files out again: $manifestPath"
     }
+    # The zip is the one scripts/vendor-dsh-pet.py pins, checked before anything in it is read.
+    $pinnedZip = Select-String -LiteralPath (Join-Path $repoRoot 'scripts\vendor-dsh-pet.py') -Pattern '^\s*"([0-9a-f]{64})"\)$' |
+        ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -First 1
+    if (-not $pinnedZip) {
+        throw 'scripts/vendor-dsh-pet.py pins no assets-mov zip.'
+    }
+    if (-not (Test-Path -LiteralPath $MovZip -PathType Leaf)) {
+        throw "The assets-mov zip does not exist: $MovZip"
+    }
+    if ((Get-FileHash -LiteralPath $MovZip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pinnedZip) {
+        throw "The assets-mov zip is not the one scripts/vendor-dsh-pet.py pins (SHA-256 $pinnedZip): $MovZip"
+    }
     # The HEVC animations are checked one by one against the manifest, from a private copy.
     $movDir = Join-Path ([System.IO.Path]::GetTempPath()) ('dsh-pet-mov-' + [guid]::NewGuid().ToString('N'))
     # A private copy, not a change on the NAS: made and removed even under -WhatIf.
