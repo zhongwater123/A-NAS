@@ -69,7 +69,11 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
     // 必须放 ref：状态机持有「当前阶段」，放函数体局部变量会在每次渲染重建，睡觉状态当场丢失
     // （视频还在睡姿、菜单却显示「睡觉」，点它也不叫醒）。
     const machineRef = useRef<ReturnType<typeof createSleepMachine> | null>(null);
-    // A-NAS: the stage that came while a command's clip was loading or playing (cue-effects).
+    // A-NAS: the stage that came while a command's clip was loading or playing (cue-effects). It is the
+    // stage of that moment, so it goes when the card stops following the turn's stages: at a freeze (runtime
+    // onFrozen), at sleep, and when the card puts the turn's stage back itself (resumeWorkStatusAnim). The
+    // stage effect skips the ticks of a frozen or sleeping card, so a turn that ended meanwhile would
+    // otherwise leave a step's looping clip to play at the next end, after the turn.
     const deferredRef = useRef<{ name: string; once: boolean } | null>(null);
     const deferStage = (stage: { name: string; once: boolean } | null): void => {
       deferredRef.current = stage;
@@ -81,10 +85,14 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
     /** 当前睡觉阶段；醒着为 null。 */
     const sleepPhase = (): 'start' | 'loop' | 'end' | null => sleep().phase();
     /** 应用宿主写的睡觉状态（转发给状态机）。 */
-    const applySleep = (state: SleepState): void => sleep().apply(state);
+    const applySleep = (state: SleepState): void => {
+      if (state.sleeping) deferredRef.current = null;
+      sleep().apply(state);
+    };
     /** 非终态工作状态回到档位循环；冻结、空闲与终态都返回 false。 */
     const resumeWorkStatusAnim = (): boolean => {
       const card = hub.card;
+      deferredRef.current = null;
       // 锁定期间不由这条路恢复档位动画；解冻路径会先解除冻结再调用。
       if (hub.ownAnim.isFrozen()) return false;
       // 睡觉期间不恢复档位动画：工作状态照旧在跑，但睡着就是不看不听。
@@ -100,7 +108,6 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
       if (own === null && (slot === undefined || slot.length === 0)) return false;
       const name = own ?? pickSlot(slot ?? [], card.animRef.current); // 档内随机抽 1，并避开当前正播动画。
       log(hub.cfg().id, '互动结束恢复状态动画: ' + name);
-      deferredRef.current = null;
       // 多候选档位恢复后同样走播完轮换；单候选维持无限循环。
       card.actions.setOnce(own === null && Array.isArray(slot) && slot.length > 1);
       card.actions.setAnim(name);
@@ -148,10 +155,11 @@ export function createAnimationFlow(rt: AnimationFlowRuntime) {
       // 睡觉的三段推进与「起来播完回随机链」都在状态机里：它说这次 ended 归它管就直接返回。
       if (sleep().consumeEnded()) return;
       if (cue.kind === 'ignore') return;
-      // A-NAS: the clip a command asked for has ended (or what replaced it): the stage that came meanwhile.
+      // A-NAS: the clip a command asked for has ended (or what replaced it): the stage that came meanwhile,
+      // while the turn is still on.
       const stage = deferredRef.current;
-      if (stage !== null) {
-        deferredRef.current = null;
+      deferredRef.current = null;
+      if (stage !== null && workStatusRef.current?.state != null) {
         card.actions.setOnce(stage.once);
         card.actions.setAnim(stage.name);
         card.actions.bumpSeq();

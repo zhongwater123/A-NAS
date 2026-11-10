@@ -224,6 +224,8 @@ export function createCardRuntime(rt: PetRuntime) {
       onFrozen: () => {
         // 光堵随机链不够：它只在动画播完时调用，不暂停会把当前这段播完才停。
         motion.stopMove();
+        // A-NAS: a stage held back behind a command's clip is not played after the freeze (animation-flow).
+        liveRef.current.flow?.deferStage(null);
         // 任务状态气泡：锁一生效就收掉，解冻不补亮。
         bubbles.hideWork();
       },

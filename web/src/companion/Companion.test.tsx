@@ -663,6 +663,56 @@ describe("VNAS's commands, carried out by the card", () => {
     await plays("工作状态-雀跃庆祝");
   });
 
+  it.each([
+    ["while the page was hidden", "hidden"],
+    ["while it slept", "asleep"],
+  ])("does not show a step it held back for an animation once the turn ended %s", async (_, away) => {
+    const SLEEP = { start: "睡觉-开始", loop: "睡觉-循环", end: "睡觉-起来" };
+    serve([IDLE, "点击回应-元气挥手", "东张西望", SLEEP.start, SLEEP.loop, SLEEP.end]);
+    const { videos } = await mount();
+    startTurn(SESSION);
+    let outcome: Awaited<ReturnType<typeof runCompanionCommand>> | undefined;
+    void runCompanionCommand(SESSION, { action: "anim", args: { name: "点击回应-元气挥手" } }).then((answer) => {
+      outcome = answer;
+    });
+    await plays("点击回应-元气挥手");
+    await ready(videos);
+    // The turn looks at the desktop while the animation plays: its clip waits for the animation's end.
+    fetched = [];
+    act(() => reportEvent(SESSION, "tool.start", { name: "browser_snapshot" }));
+    await settle();
+    expect(fetched).toEqual([]);
+    if (away === "hidden") hide(true);
+    else {
+      act(() => void companionSleep.enter("main", SLEEP));
+      await plays(SLEEP.start);
+      await ready(videos);
+    }
+    await waitFor(() => expect(outcome).toMatchObject({ ok: true, result: { status: "cancelled" } }));
+    // The turn ends while the card does not follow its stages.
+    act(() => reportEvent(SESSION, "message.complete", { status: "interrupted" }));
+    await settle();
+    if (away === "hidden") {
+      fetched = [];
+      hide(false);
+    } else {
+      act(() => fireEvent(front(videos), new Event("ended")));
+      await plays(SLEEP.loop);
+      await ready(videos);
+      act(() => void companionSleep.wake("main"));
+      await plays(SLEEP.end);
+      await ready(videos);
+      fetched = [];
+      act(() => fireEvent(front(videos), new Event("ended")));
+    }
+    await plays(IDLE);
+    await ready(videos);
+    fetched = [];
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await waitFor(() => expect(fetched).not.toEqual([]));
+    expect(fetched).not.toContain("东张西望");
+  });
+
   it("stops the animation of a turn the member stops, and goes back to its idle one", async () => {
     serve([IDLE, "点击回应-元气挥手"]);
     const { videos } = await mount();
