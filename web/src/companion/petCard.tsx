@@ -17,14 +17,16 @@
 //   animation a VNAS command asked for settles the command (commands.ts).
 //
 // What is A-NAS's own: the companion stops while the member is away (a pause, not sleep),
-// remembers where it was left on this device and waves at a new result of a scheduled task. The
-// character's credit is in Settings → 个性化 (credit.ts), not on the companion.
+// remembers where it was left on this device, curtsies when the member stops a turn here, and
+// waves at a new result of a scheduled task. The character's credit is in Settings → 个性化
+// (credit.ts), not on the companion.
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { jsx } from "react/jsx-runtime";
 
 import { taskNoticesLoaded, useTaskNotices } from "../assistant/taskNotices";
 import { localConsoleCovered } from "../desktop/LocalConsoleScreenSaver";
 import { companionPhysics, companionWeights, installedAnimations, workStatusTexts } from "./animations";
+import { BEHAVIORS, behaviorLine } from "./behaviors";
 import type { InstalledAnimations } from "./Companion";
 import { prefersMov } from "./dsh-pet/client/pet/animation/media";
 import { createPetCard } from "./dsh-pet/client/pet/card/pet-card";
@@ -57,6 +59,7 @@ import { companionLock, companionPlayback, companionSleep } from "./host";
 import {
   COMPANION_PET,
   companionState,
+  onTurnStopped,
   setCompanionPaused,
   setCompanionReady,
   subscribeCompanionState,
@@ -401,6 +404,23 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
     if (responses.length === 0) return;
     companionState.writePet(COMPANION_PET, "anim", { name: responses.includes(WAVE) ? WAVE : pick(responses) });
   }, [notices, animations]);
+
+  // The member stopped a turn here: its stage is gone, and the companion curtsies once with a line, then
+  // idles, through the page's state as the wave does. Only when it can be seen and is free to move: not
+  // paused, covered, asleep or locked.
+  useEffect(
+    () =>
+      onTurnStopped(() => {
+        if (pausedRef.current || document.hidden || localConsoleCovered()) return;
+        const own = companionState.read().pets[COMPANION_PET];
+        if (lockHeld(own?.lock) || (own && readSleep(own.sleep)?.sleeping)) return;
+        const line = behaviorLine("stopped");
+        if (line) companionState.writePet(COMPANION_PET, "say", { text: line, anim: false });
+        const { clip } = BEHAVIORS.stopped;
+        if (animations.events.steps?.includes(clip)) companionState.writePet(COMPANION_PET, "anim", { name: clip });
+      }),
+    [animations],
+  );
 
   // dsh-pet's card says nothing when no whisper animation is installed to play with it (speak in
   // card/animation-flow.ts); on such a NAS its bubble shows on its own.

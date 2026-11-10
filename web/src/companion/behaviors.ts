@@ -1,6 +1,8 @@
 // What VNAS does in a turn, as the companion shows it: each kind of step has a clip of its own, so that
 // the member can tell reading from searching or running a command, and the lines its bubble picks from.
 // A line with {detail} names what the step works on (behaviorLine); the others do not.
+import { toolLabel } from "../assistant/toolLabels";
+import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
 
 /** A kind of step of a VNAS turn, or how the turn ended. */
 export type Behavior =
@@ -54,3 +56,71 @@ export const TASK_CLIPS: ReadonlySet<string> = new Set([
   ...Object.values(BEHAVIORS).map((behavior) => behavior.clip),
   "被吓一跳",
 ]);
+
+/**
+ * The behaviour of each of VNAS's tools; any other is other-tool. clarify asks the member, as a card waiting
+ * for them does. The companion's own tools (mcp__companion__*) are VNAS moving the pet and show no step of
+ * their own (workStatus.ts).
+ */
+const TOOL_BEHAVIORS: Readonly<Record<string, Behavior>> = {
+  read_file: "read",
+  skill_view: "read",
+  skills_list: "read",
+  mcp__anas__recent_changes: "read",
+  mcp__anas__photo_details: "read",
+  search_files: "search",
+  mcp__anas__search_photos: "search",
+  mcp__anas__similar_photos: "search",
+  session_search: "search",
+  write_file: "write",
+  patch: "write",
+  memory: "remember",
+  terminal: "run",
+  execute_code: "run",
+  process_manage: "run",
+  vision_analyze: "look",
+  video_analyze: "look",
+  mcp__anas__look_at_photo: "look",
+  mcp__anas__browse_photos: "look",
+  browser_snapshot: "desktop-look",
+  browser_vision: "desktop-look",
+  browser_click: "desktop-operate",
+  browser_type: "desktop-operate",
+  browser_press: "desktop-operate",
+  browser_scroll: "desktop-operate",
+  delegate_task: "delegate",
+  cronjob_manage: "schedule",
+  mcp__anas__submit_changes: "submit",
+  clarify: "waiting",
+};
+
+export function behaviorOfTool(name: string): Behavior {
+  return Object.hasOwn(TOOL_BEHAVIORS, name) ? TOOL_BEHAVIORS[name] : "other-tool";
+}
+
+/** About this many characters of a detail fit in the bubble, which is half the pet wide. */
+const DETAIL_MAX = 12;
+
+/** A step's detail cut to what the bubble shows, by code point so that no character is cut in half. */
+export function shortDetail(detail: string): string {
+  const points = Array.from(detail.replace(/\s+/g, " ").trim());
+  return points.length > DETAIL_MAX ? `${points.slice(0, DETAIL_MAX).join("")}…` : points.join("");
+}
+
+/**
+ * One of the behaviour's lines, {detail} filled with the step's detail cut short. Without a detail, or on
+ * the screen the family shares (the local console, as TaskToasts.tsx tells it), only a line that names
+ * nothing: what VNAS works on stays for the member who asked. null when the behaviour has no such line.
+ */
+export function behaviorLine(behavior: Behavior, detail = "", shared = isLocalConsole()): string | null {
+  const shown = shared ? "" : shortDetail(detail);
+  const lines = BEHAVIORS[behavior].lines.filter((line) => shown !== "" || !line.includes("{detail}"));
+  if (lines.length === 0) return null;
+  return lines[Math.floor(Math.random() * lines.length)].replace("{detail}", shown);
+}
+
+/** The behaviour a call of one of VNAS's tools shows, and what the call works on (toolLabels.ts). */
+export function toolStep(name: string, args: unknown): { behavior: Behavior; detail: string } {
+  const values = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  return { behavior: behaviorOfTool(name), detail: toolLabel(name, values).detail };
+}

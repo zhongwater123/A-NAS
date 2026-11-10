@@ -8,7 +8,15 @@ import { http, server } from "../test/server";
 import { Companion } from "./Companion";
 import { resetCompanionCommands, runCompanionCommand, stopTurnCommands } from "./commands";
 import { companionLock, companionPlayback, companionSleep, resetCompanionHost } from "./host";
-import { companionReady, companionState, reportCards, reportEvent, resetWorkStatus, startTurn } from "./workStatus";
+import {
+  companionReady,
+  companionState,
+  reportCards,
+  reportEvent,
+  resetWorkStatus,
+  startTurn,
+  stopTurn,
+} from "./workStatus";
 
 // Whether the local console's screen saver or black screen covers the page; the rest of the module as it is.
 const cover = vi.hoisted(() => ({ up: false }));
@@ -118,15 +126,19 @@ describe("the companion on the desktop", () => {
     expect(fetched[0]).toBe(IDLE);
     expect(companionReady()).toBe(true);
 
-    // A turn the VNAS window on this page started.
+    // A turn the VNAS window on this page started: looking at the desktop plays its own clip.
     act(() => {
       startTurn("live0001");
       reportEvent("live0001", "tool.start", { name: "browser_snapshot" });
     });
+    await plays("东张西望");
+    // A step whose clip is not installed plays the stage's.
+    act(() => reportEvent("live0001", "tool.start", { name: "some_new_tool" }));
     await plays("工作状态-忙碌点按");
     act(() => reportCards([{ requestId: "req-1", sessionId: "live0001", status: "awaiting" }]));
     await plays("工作状态-原地踱步张望");
     act(() => reportCards([]));
+    // Without its fireworks installed, the success plays the stage's own clip.
     act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
     await plays("工作状态-雀跃庆祝");
     // A stage without its animation installed changes nothing: the companion carries on.
@@ -140,6 +152,48 @@ describe("the companion on the desktop", () => {
 
     view.unmount();
     expect(companionReady()).toBe(false);
+  });
+
+  it("plays a step's clip for as long as the step lasts, with a line about it", async () => {
+    serve([IDLE, "写代码", "放烟花"]);
+    const { videos } = await mount();
+    act(() => {
+      startTurn("live0001");
+      reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1", args: { command: "du -sh 照片" } });
+    });
+    await plays("写代码");
+    expect(await screen.findByText(/跑一下 du -sh 照片|噼里啪啦敲命令中/)).toBeInTheDocument();
+    await ready(videos);
+    // The clip ends while the command still runs: it plays again rather than a random one.
+    fetched = [];
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await settle();
+    expect(fetched.filter((name) => name !== "写代码")).toEqual([]);
+    // The turn ends: fireworks once, then idle.
+    act(() => reportEvent("live0001", "message.complete", { status: "complete" }));
+    await plays("放烟花");
+    await ready(videos);
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await plays(IDLE);
+  });
+
+  it("curtsies once when the member stops a turn here, then idles", async () => {
+    serve([IDLE, "写代码", "女仆屈膝礼仪"]);
+    const { root, videos } = await mount();
+    act(() => {
+      startTurn("live0001");
+      reportEvent("live0001", "tool.start", { name: "terminal", tool_id: "c1" });
+    });
+    await plays("写代码");
+    act(() => stopTurn("live0001"));
+    await plays("女仆屈膝礼仪");
+    expect(await screen.findByText(/好的，停下啦|听你的，不做了~/)).toBeInTheDocument();
+    // No stage, so no sign of one.
+    expect(root.closest("[data-companion-work]")).toBeNull();
+    await ready(videos);
+    fetched = [];
+    act(() => fireEvent(front(videos), new Event("ended")));
+    await plays(IDLE);
   });
 
   it("is not shown in a browser that needs animations this NAS does not have", async () => {

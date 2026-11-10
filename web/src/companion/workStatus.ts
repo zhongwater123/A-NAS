@@ -13,12 +13,19 @@
 // card waiting for the member in such a turn is its own waiting entry. Nothing here
 // connects to the member's instance, so watching VNAS never starts one.
 //
+// Each step also asks for its own clip and bubble line (behaviors.ts), which go into the
+// store with the stage (patch 0028): what the step works on, cut short, only from these
+// turns and never on the local console's shared screen. Never the reasoning's text, which
+// comes in small, often English pieces.
+//
 // The store lives here, outside the companion's own code, which loads later and only
 // when animations are installed: the VNAS window writes to it whether or not the card
 // is there, and companionReady() tells it whether one is (petCard.tsx reads the store).
+import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
+import { BEHAVIORS, type Behavior, behaviorLine, shortDetail, toolStep } from "./behaviors";
 import { createWorkStatusBridge } from "./dsh-pet/host/plugin/work-status-bridge";
 import { PollStateStore } from "./dsh-pet/host/state";
-import { type HostWorkStatusState, WorkStatusStore } from "./dsh-pet/host/work-status";
+import { currentTaskFromTodo, type HostWorkStatusState, WorkStatusStore } from "./dsh-pet/host/work-status";
 
 /** dsh-pet session-notify.ts TERMINAL_KEEP_MS: a success or error shows this long, then goes. */
 const TERMINAL_KEEP_MS = 60 * 1000;
@@ -37,6 +44,26 @@ const cards = new Map<string, string>();
 const terminalTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let seq = 0;
 
+/**
+ * What a stage shows besides its own clip and lines: the clip the step asks for and a line for its bubble.
+ * key tells one step from the next: the events of one step keep its line, the next step picks again.
+ */
+export interface Step {
+  key: string;
+  anim: string | null;
+  line: () => string | null;
+}
+
+/** The line each entry shows, with the stage and step it was picked for. */
+const lines = new Map<string, { key: string; task: string | null }>();
+/** The step each conversation's todo list is at, which its thinking names. */
+const todos = new Map<string, string>();
+let stoppedListener: (() => void) | null = null;
+
+function behaviorStep(behavior: Behavior, key: string, detail = "", shared = isLocalConsole()): Step {
+  return { key, anim: BEHAVIORS[behavior].clip, line: () => behaviorLine(behavior, detail, shared) };
+}
+
 function cancelTerminalCleanup(id: string) {
   const timer = terminalTimers.get(id);
   if (timer === undefined) return;
@@ -52,6 +79,7 @@ function scheduleTerminalCleanup(id: string) {
       terminalTimers.delete(id);
       const state = store.stateOf(id);
       if (state === "success" || state === "error") {
+        lines.delete(id);
         store.clear(id);
         bridge.publishWorkStatus();
       }
@@ -59,9 +87,18 @@ function scheduleTerminalCleanup(id: string) {
   );
 }
 
-function set(id: string, state: HostWorkStatusState) {
+/**
+ * The entry's stage and what its step shows, published at once. The line and clip are written every time,
+ * null when the step has none, so that no step shows the one before's.
+ */
+function set(id: string, state: HostWorkStatusState, step: Step | null) {
   seq += 1;
   const changed = store.setState(id, state, seq);
+  const key = `${state}\u0000${step?.key ?? ""}`;
+  const last = lines.get(id);
+  const task = last?.key === key ? last.task : (step?.line() ?? null);
+  lines.set(id, { key, task });
+  store.setDetail(id, { task, anim: step?.anim ?? null });
   bridge.publishWorkStatus();
   if (!changed) return;
   if (state === "success" || state === "error") scheduleTerminalCleanup(id);
@@ -70,31 +107,75 @@ function set(id: string, state: HostWorkStatusState) {
 
 function clear(id: string) {
   cancelTerminalCleanup(id);
+  lines.delete(id);
   if (store.clear(id)) bridge.publishWorkStatus();
 }
 
 /**
- * The stage a gateway event of a turn leads to: undefined leaves the stage as it is,
- * null ends the turn without a result (it was stopped).
+ * What the companion reads of a gateway event's payload (gateway-contract.generated.ts): a tool's name, id
+ * and arguments, a turn's status, a todo list. The rest of a payload (result, result_text, summary) is not
+ * shown.
  */
-export function stageOf(
+export interface GatewayPayload {
+  name?: unknown;
+  tool_id?: unknown;
+  args?: unknown;
+  status?: unknown;
+  todos?: unknown;
+  result?: unknown;
+  result_text?: unknown;
+  summary?: unknown;
+}
+
+/**
+ * The stage a gateway event of a turn leads to and what its step shows: undefined leaves the stage as it
+ * is, a null stage ends the turn without a result (it was stopped). A tool's failure is not in the
+ * gateway's contract (tool.complete carries no error), so a step that failed shows as one done.
+ */
+export function stepOf(
   type: string,
-  payload?: { name?: unknown; status?: unknown },
-): HostWorkStatusState | null | undefined {
+  payload?: GatewayPayload,
+  todo?: string,
+  shared = isLocalConsole(),
+): { stage: HostWorkStatusState | null; step: Step | null } | undefined {
   switch (type) {
     case "message.start":
     case "reasoning.delta":
-      return "thinking";
+      // Thinking names the step the todo list is at, when VNAS keeps one.
+      return {
+        stage: "thinking",
+        step:
+          todo && !shared
+            ? { key: `todo:${todo}`, anim: BEHAVIORS.thinking.clip, line: () => `下一步：${shortDetail(todo)}` }
+            : behaviorStep("thinking", "thinking", "", shared),
+      };
     case "tool.start":
-    case "tool.complete":
+    case "tool.complete": {
+      const name = payload?.name;
       // Hermes reports its own bookkeeping as tools named with a leading underscore.
-      if (typeof payload?.name !== "string" || !payload.name || payload.name.startsWith("_")) return undefined;
-      return type === "tool.start" ? "working" : "result";
+      if (typeof name !== "string" || !name || name.startsWith("_")) return undefined;
+      const stage = type === "tool.start" ? "working" : "result";
+      // VNAS moving the pet: the stage's own clip and lines, so that what it asked for shows.
+      if (name.startsWith("mcp__companion__")) return { stage, step: null };
+      const call = `${name}\u0000${typeof payload?.tool_id === "string" ? payload.tool_id : ""}`;
+      if (type === "tool.complete") return { stage, step: behaviorStep("step-done", call, "", shared) };
+      const { behavior, detail } = toolStep(name, payload?.args);
+      // clarify waits for the member, as a card does.
+      return { stage: behavior === "waiting" ? "waiting" : stage, step: behaviorStep(behavior, call, detail, shared) };
+    }
     case "message.complete":
-      return payload?.status === "error" ? "error" : payload?.status === "interrupted" ? null : "success";
+      if (payload?.status === "interrupted") return { stage: null, step: null };
+      return payload?.status === "error"
+        ? { stage: "error", step: behaviorStep("error", "error", "", shared) }
+        : { stage: "success", step: behaviorStep("success", "success", "", shared) };
     default:
       return undefined;
   }
+}
+
+/** The stage a gateway event of a turn leads to (stepOf without the step). */
+export function stageOf(type: string, payload?: GatewayPayload): HostWorkStatusState | null | undefined {
+  return stepOf(type, payload)?.stage;
 }
 
 /** This window started a turn of the conversation (it registered as its browser and prompts). */
@@ -110,7 +191,20 @@ export function startTurn(sessionId: string): void {
  */
 export function stopTurn(sessionId: string): void {
   if (!prompting.delete(sessionId)) return;
+  todos.delete(sessionId);
   clear(sessionId);
+  stoppedListener?.();
+}
+
+/**
+ * Calls the listener when the member stops a turn here (stopTurn), for the companion to answer it; the
+ * stage is already gone. Returns the call that removes it.
+ */
+export function onTurnStopped(listener: () => void): () => void {
+  stoppedListener = listener;
+  return () => {
+    if (stoppedListener === listener) stoppedListener = null;
+  };
 }
 
 /**
@@ -122,13 +216,23 @@ export function isPrompting(sessionId: string): boolean {
 }
 
 /** A gateway event of a conversation: counts only for a turn this window started. */
-export function reportEvent(sessionId: string, type: string, payload?: { name?: unknown; status?: unknown }): void {
+export function reportEvent(sessionId: string, type: string, payload?: GatewayPayload): void {
   if (!prompting.has(sessionId)) return;
-  const stage = stageOf(type, payload);
-  if (type === "message.complete") prompting.delete(sessionId);
-  if (stage === undefined) return;
-  if (stage === null) clear(sessionId);
-  else set(sessionId, stage);
+  if (type === "todo.updated") {
+    const current = Array.isArray(payload?.todos) ? currentTaskFromTodo({ data: { todos: payload.todos } }) : null;
+    if (current) todos.set(sessionId, current);
+    else todos.delete(sessionId);
+    // A thinking turn names the new step now.
+    if (store.stateOf(sessionId) !== "thinking") return;
+  }
+  const next = stepOf(type === "todo.updated" ? "message.start" : type, payload, todos.get(sessionId));
+  if (type === "message.complete") {
+    prompting.delete(sessionId);
+    todos.delete(sessionId);
+  }
+  if (next === undefined) return;
+  if (next.stage === null) clear(sessionId);
+  else set(sessionId, next.stage, next.step);
 }
 
 /** The member's cards: each one awaiting a decision in a turn this window started is a waiting entry. */
@@ -144,7 +248,7 @@ export function reportCards(list: Iterable<{ requestId: string; sessionId: strin
     if (!cards.has(requestId)) {
       const id = `card:${requestId}`;
       cards.set(requestId, id);
-      set(id, "waiting");
+      set(id, "waiting", behaviorStep("waiting", "card"));
     }
 }
 
@@ -155,6 +259,8 @@ export function reportCards(list: Iterable<{ requestId: string; sessionId: strin
 export function forgetAll(): void {
   prompting.clear();
   cards.clear();
+  lines.clear();
+  todos.clear();
   for (const timer of terminalTimers.values()) clearTimeout(timer);
   terminalTimers.clear();
   const ids = new Set<string>();

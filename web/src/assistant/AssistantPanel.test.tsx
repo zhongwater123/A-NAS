@@ -52,6 +52,8 @@ afterEach(() => {
 
 // What the companion would show: the page's GET /state section the VNAS window feeds.
 const shown = () => (companionState.read().sections.workStatus.data as { state?: string } | null)?.state ?? null;
+/** The clip the shown step asks for. */
+const clip = () => (companionState.read().sections.workStatus.data as { anim?: string } | null)?.anim ?? null;
 
 const history: AssistantMessage[] = [
   { id: 1, role: "user", content: "打开相册", timestamp: 1_760_000_000 },
@@ -195,14 +197,20 @@ describe("the VNAS window", () => {
     );
     await emit("message.start");
     expect(shown()).toBe("thinking");
+    expect(clip()).toBe("工作状态-思考冒泡");
+    // Each step with the clip of what it does: looking at the desktop.
     await emit("tool.start", { tool_id: "call_1", name: "browser_snapshot" });
     expect(shown()).toBe("working");
+    expect(clip()).toBe("东张西望");
     await emit("anas.approval", card("awaiting"));
     expect(shown()).toBe("waiting");
+    expect(clip()).toBe("工作状态-原地踱步张望");
     await emit("anas.approval", card("approved"));
     expect(shown()).toBe("working");
+    expect(clip()).toBe("东张西望");
     await emit("message.complete", { status: "complete" });
     expect(shown()).toBe("success");
+    expect(clip()).toBe("放烟花");
 
     cleanup();
     expect(shown()).toBeNull();

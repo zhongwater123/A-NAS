@@ -50,6 +50,13 @@ describe("the animations the companion plays on its own and when it is clicked",
     for (const name of all.clicks) expect(everything.clicks).toContain(name);
     expect(everything.clicks).toContain("三球抛接");
     for (const name of text) expect(everything.clicks).not.toContain(name);
+    // A step's own clip plays on while its stage lasts, and ends as an event once the stage is over.
+    expect(
+      decideEndedCue({ animations: everything, current: "写代码", workState: "working", workAnim: "写代码" }).kind,
+    ).toBe("work-replay");
+    expect(decideEndedCue({ animations: everything, current: "写代码", workState: null, workAnim: null }).kind).toBe(
+      "event-done",
+    );
     // A clicked category action ends as a click does: back to the stage, or idle once.
     expect(decideEndedCue({ animations: everything, current: "三球抛接", workState: null }).kind).toBe(
       "interaction-done",

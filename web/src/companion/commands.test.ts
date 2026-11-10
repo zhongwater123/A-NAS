@@ -20,7 +20,10 @@ import {
 
 // The local console's screen saver, up or not.
 const cover = vi.hoisted(() => ({ up: false }));
-vi.mock("../desktop/LocalConsoleScreenSaver", () => ({ localConsoleCovered: () => cover.up }));
+vi.mock("../desktop/LocalConsoleScreenSaver", () => ({
+  localConsoleCovered: () => cover.up,
+  isLocalConsole: () => false,
+}));
 
 // The page without the card: what a command writes is read from the page's state, and the
 // card's receipts are reported to the playback store as petCard.tsx passes them on.

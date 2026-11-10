@@ -81,7 +81,7 @@ import {
 import { ErrorBoundary } from "react-error-boundary";
 
 import { releaseCommandLocks, runCompanionCommand, stopTurnCommands } from "../companion/commands";
-import { forgetAll, reportCards, reportEvent, startTurn, stopTurn } from "../companion/workStatus";
+import { forgetAll, type GatewayPayload, reportCards, reportEvent, startTurn, stopTurn } from "../companion/workStatus";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { formatBytes } from "../lib/bytes";
 import { copyText } from "../lib/clipboard";
@@ -251,7 +251,7 @@ export function AssistantPanel({
         if (type === "sessions.changed" || type === "session.title") void refreshSessions();
         if (type === "sessions.changed" || type === "message.complete") refreshBusy();
         // The companion follows the turns this window started (companion/workStatus.ts).
-        if (session) reportEvent(session, type, event.payload as { name?: unknown; status?: unknown } | undefined);
+        if (session) reportEvent(session, type, event.payload as GatewayPayload | undefined);
       }),
     [gateway.client, keep, refreshBusy, refreshSessions],
   );
@@ -413,11 +413,12 @@ export function AssistantPanel({
 
   const thread = useAssistantThread(gateway, activeId, { onCreated: setActiveId, onChanged: changed, beforePrompt });
   const { send, cancel: stopReply, liveId } = thread;
-  // A stop counts from this window's request, for the companion too (companion/workStatus.ts).
+  // A stop counts from this window's request, for the companion too (companion/workStatus.ts). Its
+  // commands first: the companion answers the stop after the idle animation they put back.
   const cancel = useCallback(() => {
     if (liveId) {
-      stopTurn(liveId);
       stopTurnCommands(liveId);
+      stopTurn(liveId);
     }
     stopReply();
   }, [liveId, stopReply]);
@@ -484,8 +485,8 @@ export function AssistantPanel({
     if (!window.confirm(`删除对话“${session.title || "新对话"}”？删除后无法恢复。`)) return;
     // As Hermes Desktop does: stop and close the live session before deleting it.
     if (session.id === activeId && thread.liveId) {
-      stopTurn(thread.liveId);
       stopTurnCommands(thread.liveId);
+      stopTurn(thread.liveId);
       await gateway.client.request("session.interrupt", { session_id: thread.liveId }).catch(() => undefined);
       await gateway.client.request("session.close", { session_id: thread.liveId }).catch(() => undefined);
     }

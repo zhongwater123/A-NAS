@@ -1,7 +1,7 @@
 # 虚拟伙伴（大肥鱼）
 
 状态：draft（V1 实现中，[#404](https://github.com/zhongwater123/A-NAS/issues/404)；VNAS 的控制见 [#412](https://github.com/zhongwater123/A-NAS/pull/412)、[#414](../decisions/2026-11-06-companion-v1.md)）
-更新时间：2026-11-09
+更新时间：2026-11-10
 
 ## 目标
 
@@ -40,8 +40,35 @@ VNAS 能控制它（[#414](../decisions/2026-11-06-companion-v1.md) 记录的 20
 
 - Given：成员在这台设备的 VNAS 窗口里发出一句话。
 - When：回合开始或推理、调用工具、工具返回、回答完成、出错、被停止，或有卡片等成员确认。
-- Then：伙伴分别切到思考、工作、整理、完成、出错、回到空闲、等待的动画，气泡说一句 dsh-pet 为这个阶段配的固定台词（例如“需要你确认一下呢”），不说回答的内容。几段对话同时进行时按 dsh-pet 的“等待 > 出错 > 工作 > 思考 > 整理 > 完成”取最要紧的一个，5 秒内的“工作 → 整理”合并为一次。进行中的阶段循环播放；完成与出错播放一次，保留 60 秒后清掉。某个阶段的动画没有安装时，伙伴不为它切换，照常做原来的动作；伙伴睡着或被锁时也不跟随。
+- Then：伙伴按这一步在做什么播放各自的动画（见下表），成员一眼能看出它在读文件、找东西还是运行命令；气泡用一句短话说这一步，例如“我在看 文档/a.md 哦”“跑一下 du -sh /nas/…，稍等哦”，说到的对象取自这一步的工具参数（与回答里“处理过程”一栏的写法相同），截到约 12 个字。思考时说一句思考的台词；VNAS 用待办清单时改说“下一步：清单里正在做的一项”。不显示推理过程的文字：它逐段到达，多为英文。工具返回、回答完成、出错、等成员确认时也各有动画和台词；成员在这台设备上停止回合时，伙伴屈膝行礼一次、说一句“好的，停下啦”之类，然后回到待机。
+- 阶段的规则照旧用 dsh-pet 的：几段对话同时进行时按“等待 > 出错 > 工作 > 思考 > 整理 > 完成”取最要紧的一个，5 秒内的“工作 → 整理”合并为一次。进行中的阶段循环播放这一步的动画，动画播完就重播，不交给随机动作；完成与出错播放一次，保留 60 秒后清掉。某一步的动画没有安装时播放这个阶段的 dsh-pet 动画；阶段的动画也没有安装时伙伴不为它切换，照常做原来的动作。伙伴睡着或被锁时不跟随。
+- VNAS 调用伙伴自己的工具（`mcp__companion__*`）时，伙伴仍播放这个阶段的 dsh-pet 动画、说 dsh-pet 为阶段配的固定台词，不另换动画。
+- 工具执行是否失败，网关事件里没有（`tool.complete` 不带错误），所以没有“这一步没成”的动画，失败的一步也按“这一步完成”显示；整个回合出错时才播放出错的动画。
+
+| 这一步 | VNAS 的工具 | 动画 | 气泡（{detail} 为这一步的对象） |
+| --- | --- | --- | --- |
+| 思考 | 回合开始、推理 | 工作状态-思考冒泡 | 正在认真想下一步呢／嗯……让我想想哦~；有待办清单时“下一步：…” |
+| 读 | `read_file`、`skill_view`、`skills_list`、`mcp__anas__recent_changes`、`mcp__anas__photo_details` | 工作状态-清点归档 | 我在看 {detail} 哦／一页一页认真读~ |
+| 找 | `search_files`、`mcp__anas__search_photos`、`mcp__anas__similar_photos`、`session_search` | 照镜子 | 帮你找找 {detail}~／找找看藏在哪里~ |
+| 写草稿 | `write_file`、`patch` | 轻快记录 | 在写 {detail} 的草稿呢／一笔一笔写好它~ |
+| 记住 | `memory` | 原地跳跃抓碎头顶物品 | 这个我记住啦！／收进小脑袋里~ |
+| 运行 | `terminal`、`execute_code`、`process_manage` | 写代码 | 跑一下 {detail}，稍等哦／噼里啪啦敲命令中~ |
+| 看照片、视频 | `vision_analyze`、`video_analyze`、`mcp__anas__look_at_photo`、`mcp__anas__browse_photos` | 扑克魔术 | 看看这张照片~／{detail} 我瞧瞧哦 |
+| 看桌面 | `browser_snapshot`、`browser_vision` | 东张西望 | 看看桌面上有什么~／我先瞅一眼屏幕哦 |
+| 操作桌面 | `browser_click`、`browser_type`、`browser_press`、`browser_scroll` | 下五子棋 | 帮你点一下 {detail}~／在桌面上动动小手~ |
+| 分派子任务 | `delegate_task` | 变鸽子 | 派小鸽子去帮忙啦~／这件交给小帮手咯！ |
+| 定时任务 | `cronjob_manage` | 抽陀螺 | 定好时间啦，到点自己转~／设个定时任务~ |
+| 提交更改 | `mcp__anas__submit_changes` | 拆礼物 | 改好啦，请你过目~／给你看看我做的~ |
+| 等成员 | 待确认卡片、`clarify` | 工作状态-原地踱步张望 | 等你回话哦~／你来定，我乖乖等着 |
+| 其他工具 | 以上之外的工具 | 工作状态-忙碌点按 | 用一下小工具 {detail}／叮叮当当忙一下~ |
+| 这一步完成 | 工具返回 | 工作状态-雀跃庆祝 | 搞定一步，继续看看哦~／这步好啦！ |
+| 完成 | 回答完成 | 放烟花 | 全部搞定啦！／任务完成，撒花~ |
+| 出错 | 回答出错 | 工作状态-垂头叹气冒汗 | 呜……这次没做成／出错了，对不起嘛 |
+| 停止 | 成员在这台设备上停止回合 | 女仆屈膝礼仪 | 好的，停下啦／听你的，不做了~ |
+
+- 这一步没有对象可说时（例如工具没有参数），只用不带 {detail} 的台词。表中的动画只为这些步骤播放，不进随机动作，也不作点击回应。“被吓一跳”留给“这一步没成”，目前不播放，也不进随机动作。
 - 只在另一台设备上发起、这台设备只是跟着显示的回合，不让这台设备的伙伴动。
+- 本地控制台（`?local-console=1`）的屏幕全家共用：气泡不说这一步的对象，也不说待办清单的内容，只用不带 {detail} 的台词。
 
 ### 窗口断线或关闭时回到空闲
 
@@ -127,23 +154,23 @@ VNAS 能控制它（[#414](../decisions/2026-11-06-companion-v1.md) 记录的 20
 - 参数由产品服务按工具表校验后才下发：未知参数、`url` 与 `image` 一律拒绝为 `bad-request`，不下发；说话的文字为 1–200 个字（按 Unicode 码点计）的纯文本，只允许换行，拒绝其他控制字符、全部 Unicode 双向控制字符与行、段分隔符；气泡最长 60 秒，直线移动最长 5 秒，抛出力度不超过 3；锁的时长超过 5 分钟时按 5 分钟算。
 - 页面一侧的安全限制，与产品服务的检查各自成立：命令另按同样的上限复查一次，再过 dsh-pet 的决策层与锁闸门，每个窗口另有每分钟 20 条（`broadcast`、`throw` 各 6 条）的兜底；气泡只显示纯文本，不解析 HTML 或 Markdown，不显示图片与链接；动画只按名称从这台 NAS 的动画池中选，不播放任何地址指向的文件；页面只有一只伙伴 `main`；不是本窗口发起的回合的命令被拒（`not-controlling`，VNAS 得到 `no_desktop`）；卡片未加载或写入出错时回答 `not-ready`。
 - 动画只来自产品服务：`/companion/animations` 列出当前池的动画与池 ID，各动画的地址是 dsh-pet 的 `/companion/thumb/main/<文件名>?v=<池 ID>`，文件名限定在该池目录内（`os.Root`）。带池 ID 的地址按 `Cache-Control: public, max-age=31536000, immutable` 长期缓存；不带池 ID 时读当前池，浏览器每次重新验证。池由 root 用 `install-media-pool.sh companion` 按固定清单核对哈希后安装；清单固定 dsh-pet 提交中的 webm 与 `assets-mov` 发布中的 mov。
-- 页面不向伙伴传递对话的内容，工作阶段只有阶段、任务描述恒为空；伙伴说出的内容只来自本窗口发起的回合中 VNAS 的 `broadcast`。
+- 页面传给伙伴的工作阶段除了阶段，还带这一步的动画名和一句短话（[补丁 0028](../../web/src/companion/dsh-pet-patches/0028-a-stage-plays-the-clip-its-step-asks-for.patch)）：短话只来自本窗口发起的回合，说到的对象（路径、命令、搜索词等）截到约 12 个字，在本地控制台上从不出现；推理过程与回答的内容不传。除此之外，伙伴说出的内容只来自本窗口发起的回合中 VNAS 的 `broadcast`。
 - 署名：设置 → 个性化最下方的“桌面伙伴”一行写明“大肥鱼：社区二创形象（原作溟月 @上善无形，女仆设计 @ZipZipPipe，CC BY-NC-SA 4.0），仅作非商业试验。动画来自 github.com/PC2005-cloud/dsh-pet”。伙伴本身不带署名的悬停提示，鼠标移上去只显示 dsh-pet 自己的名字提示“大肥鱼”。动画按 dsh-pet 发布的原样安装；改动过的帧沿用同一协议（CC BY-NC-SA 4.0）。
 - 日志：dsh-pet 的 info 日志（动画切换、命令的轨迹）只在开发构建中打印，产品构建的控制台里没有；警告与错误不变。
 
 ## 验收证据
 
-- 页面：卡片的渲染、跟随本窗口的回合、断线回到空闲、闲置停下与命令唤醒、按通知编号挥手、卸载时取消进行中的动画（[`Companion.test.tsx`](../../web/src/companion/Companion.test.tsx)）；Safari 的 HEVC（[`Companion.safari.test.tsx`](../../web/src/companion/Companion.safari.test.tsx)）；工作阶段的汇总与 60 秒清理（[`workStatus.test.ts`](../../web/src/companion/workStatus.test.ts)）；命令的执行与回答、锁、睡觉、暂停、频率与参数上限（[`commands.test.ts`](../../web/src/companion/commands.test.ts)）；窗口转交命令、关闭时释放锁（[`AssistantPanel.test.tsx`](../../web/src/assistant/AssistantPanel.test.tsx)）；屏保盖住的标记（[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)）；共用屏幕上的提示（[`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)）；设置里的署名（[`PersonalizationSection.test.tsx`](../../web/src/settings/PersonalizationSection.test.tsx)）。
+- 页面：卡片的渲染、跟随本窗口的回合、断线回到空闲、闲置停下与命令唤醒、按通知编号挥手、卸载时取消进行中的动画（[`Companion.test.tsx`](../../web/src/companion/Companion.test.tsx)）；Safari 的 HEVC（[`Companion.safari.test.tsx`](../../web/src/companion/Companion.safari.test.tsx)）；工作阶段的汇总与 60 秒清理、每一步的动画与短话、共用屏幕不说对象（[`workStatus.test.ts`](../../web/src/companion/workStatus.test.ts)、[`behaviors.test.ts`](../../web/src/companion/behaviors.test.ts)）；随机动作与点击的动画池（[`animations.test.ts`](../../web/src/companion/animations.test.ts)）；命令的执行与回答、锁、睡觉、暂停、频率与参数上限（[`commands.test.ts`](../../web/src/companion/commands.test.ts)）；窗口转交命令、关闭时释放锁（[`AssistantPanel.test.tsx`](../../web/src/assistant/AssistantPanel.test.tsx)）；屏保盖住的标记（[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)）；共用屏幕上的提示（[`tasks.test.tsx`](../../web/src/assistant/tasks.test.tsx)）；设置里的署名（[`PersonalizationSection.test.tsx`](../../web/src/settings/PersonalizationSection.test.tsx)）。
 - 产品服务：配对、只发给发起本回合的窗口、频率、超时、回合结束与窗口离开的结算、锁的释放、参数的规范化与拒绝、停止回合与实例退出后的配对、晚到的子任务事件（[`companion_test.go`](../../internal/assistantapi/companion_test.go)）；动画清单、按池取动画与缓存（[`handler_test.go`](../../internal/webui/handler_test.go)）。
 - 伙伴服务器：结果从不是错误、参数原样转给产品服务、没有套接字时回答 `no_desktop`（[`test_companion_mcp.py`](../../ai/tests/test_companion_mcp.py)）；托管配置下 `anas` 仍要审批而 `companion` 不要（[`approvals-managed.sh`](../../ai/assistant-spike/approvals-managed.sh)）。
 
 ## 关联
 
 - 决定：[#414](../decisions/2026-11-06-companion-v1.md)（形象、实现方式与 VNAS 的控制）、[V1 是否不含待办与专注计时](../decisions/2026-11-06-companion-v1-no-todo-focus.md)
-- 页面：[`Companion.tsx`](../../web/src/companion/Companion.tsx)、[`petCard.tsx`](../../web/src/companion/petCard.tsx)、[`animations.ts`](../../web/src/companion/animations.ts)、[`workStatus.ts`](../../web/src/companion/workStatus.ts)、[`commands.ts`](../../web/src/companion/commands.ts)、[`host.ts`](../../web/src/companion/host.ts)、[`AssistantPanel.tsx`](../../web/src/assistant/AssistantPanel.tsx)、[`TaskToasts.tsx`](../../web/src/assistant/TaskToasts.tsx)、[`taskNotices.ts`](../../web/src/assistant/taskNotices.ts)、[`LocalConsoleScreenSaver.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.tsx)
+- 页面：[`Companion.tsx`](../../web/src/companion/Companion.tsx)、[`petCard.tsx`](../../web/src/companion/petCard.tsx)、[`animations.ts`](../../web/src/companion/animations.ts)、[`behaviors.ts`](../../web/src/companion/behaviors.ts)、[`workStatus.ts`](../../web/src/companion/workStatus.ts)、[`toolLabels.ts`](../../web/src/assistant/toolLabels.ts)、[`commands.ts`](../../web/src/companion/commands.ts)、[`host.ts`](../../web/src/companion/host.ts)、[`AssistantPanel.tsx`](../../web/src/assistant/AssistantPanel.tsx)、[`TaskToasts.tsx`](../../web/src/assistant/TaskToasts.tsx)、[`taskNotices.ts`](../../web/src/assistant/taskNotices.ts)、[`LocalConsoleScreenSaver.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.tsx)
 - 产品服务：[`companion.go`](../../internal/assistantapi/companion.go)、[`gateway.go`](../../internal/assistantapi/gateway.go)、[`approvals.go`](../../internal/assistantapi/approvals.go)、[`handler.go`](../../internal/webui/handler.go)；白名单见[研究](../research/hermes-agent-runtime.md#产品服务的转发)
 - 伙伴服务器：[`anas_companion_mcp.py`](../../ai/assistant-spike/anas_companion_mcp.py)、[`managed-config.yaml`](../../ai/assistant-spike/managed-config.yaml)、[`anas-companion-assistant.socket`](../../ai/assistant-spike/anas-companion-assistant.socket)、[`assistant-install.sh`](../../ai/assistant-spike/assistant-install.sh)
-- 上游代码与许可：[`dsh-pet/README.md`](../../web/src/companion/dsh-pet/README.md)，复制脚本 [`vendor-dsh-pet.py`](../../scripts/vendor-dsh-pet.py)，补丁在 `web/src/companion/dsh-pet-patches/` 中（其中纯文本气泡 [0023](../../web/src/companion/dsh-pet-patches/0023-the-bubble-is-text-only.patch)、不按地址播放 [0022](../../web/src/companion/dsh-pet-patches/0022-the-host-plays-no-animation-from-an-address.patch)、开发构建才打日志 [0024](../../web/src/companion/dsh-pet-patches/0024-trace-lines-only-in-a-development-build.patch)）
+- 上游代码与许可：[`dsh-pet/README.md`](../../web/src/companion/dsh-pet/README.md)，复制脚本 [`vendor-dsh-pet.py`](../../scripts/vendor-dsh-pet.py)，补丁在 `web/src/companion/dsh-pet-patches/` 中（其中纯文本气泡 [0023](../../web/src/companion/dsh-pet-patches/0023-the-bubble-is-text-only.patch)、不按地址播放 [0022](../../web/src/companion/dsh-pet-patches/0022-the-host-plays-no-animation-from-an-address.patch)、开发构建才打日志 [0024](../../web/src/companion/dsh-pet-patches/0024-trace-lines-only-in-a-development-build.patch)、每一步的动画 [0028](../../web/src/companion/dsh-pet-patches/0028-a-stage-plays-the-clip-its-step-asks-for.patch)）
 - 规格：[AI 助手](ai-assistant.md)、[本地控制台屏幕保护程序](local-console-screensaver.md)
 - 运行手册：[安装伙伴动画](../runbooks/install-companion-animations.md)
 - ADR：[0014](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)、[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)
