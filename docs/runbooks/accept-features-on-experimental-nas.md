@@ -41,6 +41,7 @@
 - 身份同步（#261）：按[调查的后续工作](../investigations/2026-10-26-smbstatus-warning-fails-identity-sync.md#后续工作)核对产品服务启动后的身份同步日志、已禁用账号的登记，以及被禁用成员没有 SMB 会话。
 - smbd 等局域网地址：部署后正常重启一次，`ss -ltn` 中 445 监听 `172.18.45.48`，`journalctl -u smbd -b` 中没有等待超时的记录；若有，说明 DHCP 超过 20 秒，smbd 应在拿到地址后自动启动（[调查](../investigations/2026-11-04-smbd-starts-before-dhcp-address.md)）。
 - SMART 改为后台读取（#126）：日志中 smartctl 被杀与超时的条数、大文件夹的加载耗时、数据盘能否待机（[调查](../investigations/2026-10-15-host-agent-smart-on-every-request.md)）。
+- 温度与风扇（#360）：部署后只读核对 `name` 为 `nct6798` 的 hwmon 目录中的 `fan2_input`，在“设置 → 概览”与“任务管理器 → 设备运行状态”确认 2 号风扇可见且转速相符；不拔风扇或改写传感器。异常 SMART 温度由本地故障夹具验证，实机只确认其他设备指标持续可用（[调查](../investigations/2026-11-09-hwmon-truncation-and-smart-temperature.md)）。
 
 ### 备份中心与存储
 
