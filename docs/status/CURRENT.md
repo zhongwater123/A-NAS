@@ -53,7 +53,7 @@
 4. 网页搜索：按[启用手册](../runbooks/enable-web-search.md)查明空闲时的外发流量；#364 的修复已部署（#402），按 [#409](https://github.com/zhongwater123/A-NAS/issues/409) 观察多账号节奏与 512 MiB 资源占用（[步骤](../runbooks/enable-web-search.md#多账号节奏与资源验收364)）。
 5. Frank 的 Demo 样机上已安装的 OpenList 仍在用默认密码，需在应用中修改。
 6. 处理架构审查 [#159](https://github.com/zhongwater123/A-NAS/issues/159) 与开发实践审查 [#217](https://github.com/zhongwater123/A-NAS/issues/217) 索引中仍开放的问题。
-7. 相册 OCR 步骤 6：在实验 NAS 上验收（[实施方案](../architecture/photo-ocr.md)）。步骤 1–5 已部署（2026-11-10，目录库第 16 号迁移）。
+7. 相册 OCR 步骤 6：在实验 NAS 上验收（[实施方案](../architecture/photo-ocr.md)）。步骤 1–5 已部署（2026-11-10，目录库第 16 号迁移）。VNAS 用读出的文字回答（[方案](../architecture/photo-ocr.md#助手的工具)）已实现，未部署。
 8. 家庭中心：数据修复（[调查](../investigations/2026-11-05-family-data-integrity.md)，#403）与从相册加入频道（[PR #395](https://github.com/zhongwater123/A-NAS/pull/395)）2026-11-10 已部署；M2：认领、隐藏（[规格](../specs/family-center.md)）。
 9. 互联网访问：外部条件满足后，按[启用互联网访问](../runbooks/enable-internet-access.md)从第 3 步继续。
 10. 硬盘用途 M2（镜像缺盘继续服务、接回恢复、更换硬盘）2026-11-10 已部署，重启后 mount unit 不再随单块盘停止；还要按[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)拔盘开机、接回与更换验收。M3（更改冗余方式、移除硬盘）未做（[规格](../specs/disk-roles-and-redundancy.md)）。

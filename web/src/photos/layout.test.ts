@@ -111,7 +111,7 @@ describe("flatEntries", () => {
 
   it("heads a group in the middle and ends it, the last of splits at one place standing", () => {
     const photos = ["a", "b", "c", "d", "e"].map((id) => photo(id, "2026-05-02T08:00:00Z"));
-    const texts = { at: 1, title: "照片中的文字包含“发票”", text: "机器识别", group: "text" as const };
+    const texts = { at: 1, title: "照片中的文字匹配“发票”", text: "机器识别", group: "text" as const };
     const rest = { at: 3, title: "相关度较低", text: "差距较大" };
     const entries = flatEntries(photos, 2000, 180, false, "", [rest, texts]);
     expect(entries.map((entry) => entry.kind)).toEqual(["row", "divider", "row", "divider", "row"]);
