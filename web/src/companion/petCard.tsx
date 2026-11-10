@@ -74,7 +74,12 @@ injectPetCss();
 
 /** The companion stops after this long without the member, well before the screen saver (180 s). */
 const IDLE_MS = 60_000;
-const ACTIVITY = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const;
+/**
+ * The member's input. The local console's screen saver keeps the input that takes it away to itself (a
+ * pointerdown or keydown stopped on the way down), so the release of that press, which reaches the page, is
+ * input too: the companion goes on as the screen saver goes, not at the next input after it.
+ */
+const ACTIVITY = ["pointerdown", "pointerup", "pointermove", "keydown", "keyup", "wheel", "touchstart"] as const;
 const POSITION_KEY = "a-nas.companion.position";
 const WAVE = "点击回应-元气挥手";
 /**

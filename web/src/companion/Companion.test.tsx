@@ -927,6 +927,40 @@ describe("walking, throwing and resting", () => {
     await plays("睡觉-开始");
   });
 
+  it.each([
+    ["a key", (target: Element) => (fireEvent.keyDown(target, { key: "a" }), fireEvent.keyUp(target, { key: "a" }))],
+    ["a click", (target: Element) => (fireEvent.pointerDown(target), fireEvent.pointerUp(target))],
+  ])("goes on at %s that takes the local console's screen saver away", async (_, press) => {
+    serve([IDLE]);
+    const { videos } = await mount();
+    const pause = vi.mocked(HTMLMediaElement.prototype.pause);
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    vi.useFakeTimers({ shouldClearNativeTimers: true });
+    fireEvent.keyDown(window, { key: "a" });
+    pause.mockClear();
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(pause.mock.contexts).toContain(front(videos));
+    vi.useRealTimers();
+    // As LocalConsoleScreenSaver: the input that takes it away goes no further than the window.
+    cover.up = true;
+    const saver = (event: Event) => {
+      if (!cover.up) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      cover.up = false;
+    };
+    const kinds = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"];
+    for (const kind of kinds) window.addEventListener(kind, saver, { capture: true });
+    try {
+      play.mockClear();
+      act(() => void press(document.body));
+      expect(cover.up).toBe(false);
+      expect(play.mock.contexts).toContain(front(videos));
+    } finally {
+      for (const kind of kinds) window.removeEventListener(kind, saver, { capture: true });
+    }
+  });
+
   it("takes what VNAS says as the member's input, and rests a minute after it", async () => {
     serve([IDLE]);
     const { videos } = await mount();
