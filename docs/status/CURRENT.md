@@ -25,7 +25,6 @@
 
 - Samba 凭据在本人于“设置 → 我的账号”改密后重建：2026-11-04 核对（`pdbedit -L`），16 个账号只差 `admin`。
 - 办公网段（Wi-Fi 与有线 10.24.x）到 NAS 的 TCP 445 不通、80 正常，拦截在公司网络或电脑的安全策略：SMB 从 NAS 所在的 172.18.45.0/24 测试，或请 IT 放行。
-- 实验 NAS 将迁到另一个能上网的网络，开发机届时连不到它：近期的 release 由开发机写成发布包，另一台部署机复制并暂存（[手册](../runbooks/stage-a-release-bundle.md)），root 的步骤不变；长期做法见 ADR 0034。
 - 互联网访问（[ADR 0032](../adr/0032-reach-the-web-desktop-from-the-internet-through-an-edge-relay.md)）：等 IT 把公网 IP 的 TCP 443 与 80 映射到机房的边缘服务器 `172.25.4.8` 并确认域名备案，等用户提供域名并添加 A 记录。边缘服务器 2026-11-05 已准备好隧道与防火墙，HAProxy 关闭。
 - Kiosk 的 URL、网络、快捷键、profile 生命周期与 VT 恢复尚未做产品级验收（[调查](../investigations/2026-10-06-kiosk-browser-confinement.md)）；运行中热插拔硬盘尚未实现。
 
@@ -59,5 +58,5 @@
 9. 互联网访问：外部条件满足后，按[启用互联网访问](../runbooks/enable-internet-access.md)从第 3 步继续。
 10. 硬盘用途 M2（镜像缺盘继续服务、接回恢复、更换硬盘）2026-11-10 已部署，重启后 mount unit 不再随单块盘停止；还要按[镜像缺盘与更换硬盘](../runbooks/replace-a-mirror-disk.md)拔盘开机、接回与更换验收。M3（更改冗余方式、移除硬盘）未做（[规格](../specs/disk-roles-and-redundancy.md)）。
 11. 虚拟伙伴（大肥鱼）V1（[#404](https://github.com/zhongwater123/A-NAS/issues/404)，[规格](../specs/virtual-companion.md)）：2026-11-10 已部署，动画已装；在实验 NAS 上测闲置时伙伴与成员 Hermes 实例的 CPU 与内存，并在 Safari 上核对透明效果。
-12. 发布与更新（[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)，2026-11-10 接受）：实施计划第 2 步，即软件包与签名软件源，在一个 PR 中完成，软件包布局按[第 3 步的约束](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md#第-3-步的验证结论2026-11-10)；签名密钥的保管与更新文件放在哪里，由用户决定。
+12. 发布：NAS 迁网后按[发布包手册](../runbooks/stage-a-release-bundle.md)部署；长期按 ADR 0034 做软件包与签名软件源（第 2 步）。
 13. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘，备份中心评审中最大的缺口）；账号删除（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
