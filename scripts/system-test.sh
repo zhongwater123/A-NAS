@@ -2146,6 +2146,14 @@ animation=$(curl -fsS "$api/companion/animations" | jq -r '.animations["东张�
 check "an animation answers a byte range" test "$(status_of -r 0-1023 "$api$animation")" = 206
 check "a pool's animations may be kept for good" \
   bash -c "curl -fsSI '$api$animation' | grep -Fqi 'cache-control: public, max-age=31536000, immutable'"
+# MIT asks for its notice with every copy and the bundle keeps no comments, so
+# the Web UI serves the licenses of the code copied into web/src (make web-build).
+licenses=$(curl -fsS "$api/assets/third-party-licenses.txt" || true)
+check "the Web UI ships dsh-pet's license, naming the commit copied" \
+  grep -Fq "== web/src/companion/dsh-pet: PC2005-cloud/dsh-pet (https://github.com/PC2005-cloud/dsh-pet) commit $(sed -n 's/^PINNED = \"\([0-9a-f]*\)\"$/\1/p' /src/scripts/vendor-dsh-pet.py) ==" <<<"$licenses"
+check "and every MIT notice of the code copied into web/src" \
+  test "$(grep -c '^Permission is hereby granted' <<<"$licenses")" = \
+  "$(find /src/web/src -name LICENSE -not -path '*/node_modules/*' -exec grep -l '^Permission is hereby granted' {} + | wc -l)"
 check "a stand-in local console runs for the companion checks" kiosk_stand_in start
 # Two animations may share one file.
 shared_animation=$(new_video)
