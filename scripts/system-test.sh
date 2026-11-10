@@ -2154,6 +2154,9 @@ check "the Web UI ships dsh-pet's license, naming the commit copied" \
 check "and every MIT notice of the code copied into web/src" \
   test "$(grep -c '^Permission is hereby granted' <<<"$licenses")" = \
   "$(find /src/web/src -name LICENSE -not -path '*/node_modules/*' -exec grep -l '^Permission is hereby granted' {} + | wc -l)"
+# Its name has no hash: a browser asks for it again rather than keep an earlier release's notices.
+check "the license list is not kept like the bundle's hashed files" \
+  bash -c "curl -fsSI '$api/assets/third-party-licenses.txt' | grep -Fqi 'cache-control: no-cache'"
 check "a stand-in local console runs for the companion checks" kiosk_stand_in start
 # Two animations may share one file.
 shared_animation=$(new_video)
