@@ -16,6 +16,18 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=%h/.config/a-nas/state
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Ceilings far above what the Product Service uses (tens of threads and of
+# descriptors), so that a runaway, or callers on its sockets getting past
+# the bounds of their own, stop here instead of taking the device's
+# processes or kernel memory. Go raises the soft descriptor limit to the
+# hard one, systemd's 524288 without this. Threads past TasksMax end the
+# process, and Restart= brings it back. No MemoryMax: what the service
+# needs grows with members, windows and transfers, and no measurement on a
+# device says where a cap would not cut normal use. Here the web
+# terminal's shells run in this unit and count against TasksMax too; on a
+# device they run under the File Broker.
+TasksMax=4096
+LimitNOFILE=65536
 
 [Install]
 WantedBy=default.target
