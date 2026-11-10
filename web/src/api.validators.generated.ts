@@ -986,7 +986,7 @@ return errors === 0;
 }
 validate57.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema34 = {"type":"object","additionalProperties":false,"required":["id","model","transport","capacityBytes","rotational","removable","inUse","filesystems","role","health","smartStatus","eligibleForDataVolume","ineligibleReasons"],"properties":{"id":{"$ref":"#/components/schemas/StableResourceID"},"model":{"type":"string","description":"Empty when the device does not report a model; then ineligibleReasons includes missing_model."},"transport":{"$ref":"#/components/schemas/Transport"},"capacityBytes":{"type":"integer","format":"int64","minimum":0,"description":"Zero when capacity is unavailable or there is no medium; such devices cannot be selected for storage."},"rotational":{"type":"boolean"},"removable":{"type":"boolean"},"inUse":{"type":"boolean"},"filesystems":{"type":"array","items":{"type":"string"}},"role":{"$ref":"#/components/schemas/DiskRole"},"health":{"$ref":"#/components/schemas/Health"},"smartStatus":{"$ref":"#/components/schemas/Health"},"eligibleForDataVolume":{"type":"boolean"},"ineligibleReasons":{"type":"array","description":"Includes missing_identity, duplicate_identity, missing_model, missing_capacity, read_only or invalid_device_name for unusable observations. Devices without a unique identity have display-only observation-prefixed IDs, never valid storage operation targets.","items":{"type":"string"}},"temperatureCelsius":{"type":"integer","minimum":-273},"temperatureHotCelsius":{"type":"integer","minimum":1,"description":"Present with temperatureCelsius: where the disk counts as running hot and the system health reports disk_hot, 55 °C for a hard disk and 70 °C for an SSD."}}};
+const schema34 = {"type":"object","additionalProperties":false,"required":["id","model","transport","capacityBytes","rotational","removable","inUse","filesystems","role","health","smartStatus","eligibleForDataVolume","ineligibleReasons"],"properties":{"id":{"$ref":"#/components/schemas/StableResourceID"},"model":{"type":"string","description":"Empty when the device does not report a model; then ineligibleReasons includes missing_model."},"transport":{"$ref":"#/components/schemas/Transport"},"capacityBytes":{"type":"integer","format":"int64","minimum":0,"description":"Zero when capacity is unavailable or there is no medium; such devices cannot be selected for storage."},"rotational":{"type":"boolean"},"removable":{"type":"boolean"},"inUse":{"type":"boolean"},"filesystems":{"type":"array","items":{"type":"string"}},"role":{"$ref":"#/components/schemas/DiskRole"},"health":{"$ref":"#/components/schemas/Health"},"smartStatus":{"$ref":"#/components/schemas/Health"},"eligibleForDataVolume":{"type":"boolean"},"ineligibleReasons":{"type":"array","description":"Includes missing_identity, duplicate_identity, missing_model, missing_capacity, read_only or invalid_device_name for unusable observations. Devices without a unique identity have display-only observation-prefixed IDs, never valid storage operation targets.","items":{"type":"string"}},"temperatureCelsius":{"type":"integer","minimum":-40,"maximum":150},"temperatureHotCelsius":{"type":"integer","minimum":1,"description":"Present with temperatureCelsius: where the disk counts as running hot and the system health reports disk_hot, 55 °C for a hard disk and 70 °C for an SSD."}}};
 const schema35 = {"type":"string","enum":["nvme","sata","usb","unknown"]};
 
 function validate85(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -1275,9 +1275,15 @@ return false;
 }
 if(errors === _errs27){
 if(typeof data15 == "number"){
-if(data15 < -273 || isNaN(data15)){
-validate83.errors = [{instancePath:instancePath+"/temperatureCelsius",schemaPath:"#/properties/temperatureCelsius/minimum",keyword:"minimum",params:{comparison: ">=", limit: -273}}];
+if(data15 > 150 || isNaN(data15)){
+validate83.errors = [{instancePath:instancePath+"/temperatureCelsius",schemaPath:"#/properties/temperatureCelsius/maximum",keyword:"maximum",params:{comparison: "<=", limit: 150}}];
 return false;
+}
+else {
+if(data15 < -40 || isNaN(data15)){
+validate83.errors = [{instancePath:instancePath+"/temperatureCelsius",schemaPath:"#/properties/temperatureCelsius/minimum",keyword:"minimum",params:{comparison: ">=", limit: -40}}];
+return false;
+}
 }
 }
 }

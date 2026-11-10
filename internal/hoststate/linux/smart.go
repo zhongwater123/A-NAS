@@ -222,5 +222,10 @@ func parseSMART(contents []byte) (smartReading, bool) {
 		value := document.NVMeHealth.Temperature
 		reading.temperature = &value
 	}
+	// A faulty sensor must not invalidate the whole device snapshot, nor
+	// hide the disk's independently reported SMART health.
+	if reading.temperature != nil && !hoststate.PlausibleCelsius(*reading.temperature) {
+		reading.temperature = nil
+	}
 	return reading, false
 }

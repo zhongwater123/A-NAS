@@ -8619,7 +8619,8 @@ components:
             type: string
         temperatureCelsius:
           type: integer
-          minimum: -273
+          minimum: -40
+          maximum: 150
         temperatureHotCelsius:
           type: integer
           minimum: 1
