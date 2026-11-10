@@ -126,7 +126,9 @@ def call(tool: str, arguments: dict | None) -> CallToolResult:
     data = ask(tool, given)
     status = data["status"]
     if status == "ok":
-        return CallToolResult(content=shown(tool, data.get("result")), structured_content={"status": status}, is_error=False)
+        # Nothing but what the step returned: Hermes passes structured content on beside the
+        # text, and the model reads a snapshot better without it.
+        return CallToolResult(content=shown(tool, data.get("result")), is_error=False)
     summary = {key: data[key] for key in ("status", "reason", "message") if key in data}
     return CallToolResult(content=[TextContent(type="text", text=refused(data))], structured_content=summary, is_error=False)
 

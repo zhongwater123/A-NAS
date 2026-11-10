@@ -17,10 +17,14 @@ Run with the Hermes runtime's Python (it has `websockets`) in the system-test co
       the assistant's answer to each turn.
 """
 import asyncio
+import base64
 import json
+import os
+import struct
 import sys
 import time
 import urllib.request
+import zlib
 
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
@@ -28,8 +32,17 @@ from websockets.exceptions import ConnectionClosed
 url, cookie = sys.argv[1], sys.argv[2]
 mode = sys.argv[3] if len(sys.argv) > 3 else "0"
 origin = url.replace("ws://", "http://").split("/api/")[0]
-# A 1x1 PNG, as the window sends a picture of the page.
-PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+
+def picture(width, height):
+    """A PNG of noise in base64: as large as a real picture of the desktop, which hardly compresses."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    rows = b"".join(b"\x00" + os.urandom(width * 3) for _ in range(height))
+    png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(rows, 1)) + chunk(b"IEND", b""))
+    return base64.b64encode(png).decode()
 
 
 def confirm(request_id, csrf):
@@ -84,9 +97,12 @@ async def main():
             sid = created["result"]["session_id"]
             attached = await call("desktop.attach", {"session_id": sid})
             print(f"attached {bool((attached.get('result') or {}).get('attached'))}")
+            # About 2 MiB of PNG, 2.8 MiB in base64: what a picture of a busy desktop weighs.
+            shot = picture(1000, 700)
             page = {"snapshot": {"snapshot": '- window "文件管理"\n  - button "相册" [ref=e2]'},
                     "click": {"clicked": "@e2", "element": 'button "相册"'},
-                    "look": {"mime_type": "image/png", "data": PNG, "width": 1, "height": 1}}
+                    "look": {"mime_type": "image/png", "data": shot, "width": 1000, "height": 700}}
+            print(f"picture is {len(shot)} characters of base64")
             for step in ('snapshot {}', 'click {"ref": "e2"}', 'look {}'):
                 await call("prompt.submit", {"session_id": sid, "text": f"CALL mcp__desktop__{step}"})
                 while True:

@@ -23,7 +23,11 @@ class DesktopToolTests(unittest.TestCase):
 
     def text(self, result, status):
         self.assertIs(result.is_error, False)
-        self.assertEqual(result.structured_content["status"], status)
+        if status == "ok":
+            # A step that was taken returns only what it returned.
+            self.assertIsNone(getattr(result, "structured_content", None))
+        else:
+            self.assertEqual(result.structured_content["status"], status)
         return result.content[0].text
 
     def test_without_the_socket_no_desktop_is_in_use(self):
@@ -54,7 +58,6 @@ class DesktopToolTests(unittest.TestCase):
         self.assertEqual(len(result.content), 2)
         self.assertEqual((result.content[1].type, result.content[1].data, result.content[1].mime_type), ("image", PNG, "image/png"))
         self.assertNotIn(PNG, said)
-        self.assertEqual(result.structured_content, {"status": "ok"})
 
     def test_a_picture_that_is_not_one_is_not_passed_on(self):
         self.service.serve(200, {"status": "ok", "result": {"mime_type": "text/html", "data": "<script>"}})
