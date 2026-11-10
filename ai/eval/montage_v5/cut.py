@@ -275,8 +275,10 @@ PICK = """用户的剪辑要求：
 
 {task}
 1. design：用 2–3 句话写成片的设计：开头、中间、结尾分别用哪些卡片，为什么这样安排；开场怎么交代背景（时间、地点、人物），段落之间怎么过渡；开头、中间、结尾按拍摄时间先后安排；写完对照用户的要求检查内容和先后顺序；
-2. unmet：要求里提到、但卡片里找不到的内容，都找得到就留空；找不到的内容不要拿别的卡片冒充；
-3. parts：照 design 分成 {parts_rule}{pictures_rule}，按拍摄时间先后排列，每部分里的画面也按拍摄时间先后排列：
+2. opening：写开头第一个画面用哪张卡片、为什么选它；
+3. ending：写结尾最后一个画面用哪张卡片、为什么选它、属于哪一种收尾；
+4. unmet：要求里提到、但卡片里找不到的内容，都找得到就留空；找不到的内容不要拿别的卡片冒充；
+5. parts：照 design 分成 {parts_rule}{pictures_rule}，按拍摄时间先后排列，每部分里的画面也按拍摄时间先后排列：
    - name 是这一部分的标题，summary 用一句话说明这部分讲什么；
    - link 写这一部分和上一部分怎么衔接：写清上一部分最后一个画面和这一部分第一个画面靠什么接上（同一个人、同一样东西、同一个动作或声音、到达或进入一个地方），不要只写“直接切入”；{first_link}
    - weight 是这一部分的分量（1–10 的整数）；
@@ -421,8 +423,7 @@ def music_note(m):
     # 2026-11-09: the first plan to Forever crossed five places in its 25 s chorus and, told to join scene
     # changes, put a coach on the road between the swing and the rafting into it.
     # 2026-11-09 (the user): the chorus opens on its first beat with a wide shot and is wide and grand
-    # throughout; it needs no person, and holds few pictures of people if any (the rest of the cut still
-    # follows its people).
+    # throughout. (A rule that it needs no person and holds few of them was dropped the next day: the user.)
     # 2026-11-09 (the user): build and release, the cut onto the chorus's first beat is the cut's biggest.
     # "A person moving forward" asked for a kind of picture some material has none of; the picture before
     # the chorus is described by its state instead (not yet there, not yet seen, not yet open), in the six
@@ -431,7 +432,9 @@ def music_note(m):
               "画面被挡住、被框住、很窄；人在准备或期待；动作在加速或悬在半空；从暗到亮、从小到大的前一刻。"
               "高潮段的第一个画面紧接着放全片最开阔、最宏大的全景或远景，作为释放；",
               "- 高潮段的第一个画面必须是全景或远景；高潮段全部用全景、远景和宏大的场面；",
-              "- 高潮段不要求出现人物；如果有，有人物的画面少一些；",
+              # 2026-11-09: both choruses were mountains end to end, with aurora, waterfalls, rivers on the
+              # grassland and lakes in the same stretch of the catalog.
+              "- 高潮段的宏大场面要多样，同一类景物的画面不超过三个；",
               "- 音乐段落的交界就是换场景的地方，过渡画面放在交界处；高潮段只放最精彩的画面，不放过渡画面；",
               "- 每部分的画面个数不超过这一段能放的镜头数。"]
     return "\n" + "\n".join(lines) + "\n"
@@ -554,6 +557,7 @@ def pick(case, url):
         merged, cost, user = answers[0], costs[0], users[0]
     else:
         merged = {"design": "\n".join(f"第 {n} 块：{a['design']}" for n, a in enumerate(answers, 1)),
+                  "opening": answers[0].get("opening", ""), "ending": answers[-1].get("ending", ""),
                   "unmet": [u for a in answers for u in a["unmet"]],
                   "parts": [part for a in answers for part in a["parts"]], "blocks": info}
         cost = {key: round(sum(c[key] or 0 for c in costs), 1) for key in ("seconds", "input", "output")} | {"calls": k}
@@ -598,8 +602,9 @@ def plan_block(url, instruction, style, cards, lines, many, what, what_note, tar
     if m:
         user = user.replace(FREE_WEIGHT + "\n", "").replace(*MUSIC_SCENES)
     ids = [c["id"] for c in cards]
-    schema = {"type": "object", "required": ["design", "unmet", "parts"], "properties": {
-        "design": {"type": "string"},
+    # 2026-11-09 (the user): the opening and the ending each with a reason, written before the parts.
+    schema = {"type": "object", "required": ["design", "opening", "ending", "unmet", "parts"], "properties": {
+        "design": {"type": "string"}, "opening": {"type": "string"}, "ending": {"type": "string"},
         "unmet": {"type": "array", "items": {"type": "string"}},
         "parts": {"type": "array", "minItems": min_parts, "maxItems": max_parts, "items": {
             "type": "object", "required": ["name", "summary", "link", "weight", "scenes"], "properties": {
