@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { BEHAVIORS } from "./behaviors";
 import { WORK_STATUS_STATES } from "./dsh-pet/shared/work-status";
 import {
   companionState,
@@ -160,9 +161,9 @@ describe("what VNAS is doing, as dsh-pet's host sums it up", () => {
       ],
     });
     expect(detail()).toEqual({ anim: "工作状态-思考冒泡", task: "下一步：按拍摄月份把照片分进文件…" });
-    // A list with nothing left to do names nothing.
+    // A list with nothing left to do names nothing: one of thinking's own lines, one of which says 下一步 too.
     reportEvent("s1", "todo.updated", { todos: [{ status: "completed", content: "列出照片" }] });
-    expect(detail().task).not.toContain("下一步");
+    expect(BEHAVIORS.thinking.lines).toContain(detail().task);
   });
 
   it("names nothing a step works on on the local console's shared screen", () => {
