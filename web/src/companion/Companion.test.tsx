@@ -530,8 +530,8 @@ describe("walking, throwing and resting", () => {
     // Room to walk to the left.
     write("position", { x: 0.6, y: 0.8, mode: "instant" });
     await waitFor(() => expect(root.style.left).toBe(left(0.6)));
-    // Every roll lands on a move (dsh-pet weighs idle 10, turn 5, move 5 of 100).
-    vi.spyOn(Math, "random").mockReturnValue(0.17);
+    // Every roll lands on a move (animations.ts weighs idle 97, turn 0, move 1 of 100).
+    vi.spyOn(Math, "random").mockReturnValue(0.975);
     act(() => fireEvent(front(videos), new Event("ended")));
     await plays("螃蟹走路");
     await ready(videos);

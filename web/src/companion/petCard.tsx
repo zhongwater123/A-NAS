@@ -70,6 +70,7 @@ injectPetCss();
 const IDLE_MS = 60_000;
 const ACTIVITY = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const;
 const POSITION_KEY = "a-nas.companion.position";
+const WAVE = "点击回应-元气挥手";
 /**
  * Above the windows (72) and the status bar (70); below the rail and notices (80), menus, the shelf and the
  * screen saver; dsh-pet's own is 40.
@@ -395,11 +396,10 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
     const own = state.pets[COMPANION_PET];
     if (readWorkStatus(state.sections.workStatus)?.state || lockHeld(own?.lock)) return;
     if (own && readSleep(own.sleep)?.sleeping) return;
-    const clicks = animations.clicks;
-    if (clicks.length === 0) return;
-    companionState.writePet(COMPANION_PET, "anim", {
-      name: clicks.find((name) => name.endsWith("挥手")) ?? pick(clicks),
-    });
+    // The wave by its name, or another click response: a click may also play a category action.
+    const responses = animations.clicks.filter((name) => name.startsWith("点击回应-"));
+    if (responses.length === 0) return;
+    companionState.writePet(COMPANION_PET, "anim", { name: responses.includes(WAVE) ? WAVE : pick(responses) });
   }, [notices, animations]);
 
   // dsh-pet's card says nothing when no whisper animation is installed to play with it (speak in
