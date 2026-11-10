@@ -12,7 +12,7 @@
 - 权限：开发机能以 `anas-dev` 用 SSH 登录 NAS；NAS 上有 root。
 - 目标：已安装含 `install-media-pool.sh` 的 release 的 NAS（`/opt/a-nas/current/install-media-pool.sh` 存在）。
 - 素材：本地 dsh-pet 检出位于 [`web/src/companion/dsh-pet/README.md`](../../web/src/companion/dsh-pet/README.md) 记录的提交；Safari 用的 HEVC 动画是固定的 `dsh-pet-mov-assets-mov.zip`，SHA-256 为 `654e42f14b647a1e59a4c6f05694273dcf23edb063a5e49b14fc05a1fad3b467`，84,085,815 字节（[`vendor-dsh-pet.py`](../../scripts/vendor-dsh-pet.py) 中的 `MOV_ZIP`）。动画仅限非商业试验，许可与署名见同一 README。
-- 固定的素材包已无法从上游下载：上游替换了 dsh-pet `assets-mov` 发布的这个附件（现在的附件 145,841,604 字节，SHA-256 不同），脚本拒绝替换后的包。固定的那一份必须保留：目前只有一份本地副本，存放位置待定。没有它就装不了 Safari 的动画，也无法从头重新引入。
+- 固定的素材包已无法从上游下载：上游替换了 dsh-pet `assets-mov` 发布的这个附件（现在的附件 145,841,604 字节，SHA-256 不同），脚本拒绝替换后的包。固定的那一份必须保留：目前只有一份本地副本，存放位置待定。没有它就装不了 Safari 的动画；从头重新引入时只能用 `--mov-from` 沿用仓库清单里的 HEVC 哈希，核对不了这些文件。
 - 验证用电脑：与 NAS 同一局域网、能打开 `http://<NAS 地址>` 的另一台电脑（[启用局域网 Web 访问](enable-lan-web-access.md)）。NAS 默认没有 `curl`，HTTP 检查不在 NAS 上做。
 - 风险：只写 `/var/lib/a-nas/companion` 与暂存账号的 `~/apps/a-nas/companion`，不涉及数据盘。本地控制台在运行时会被重启一次，本机屏幕重新打开桌面。
 - 停止条件：任一脚本报错退出，包括素材包不是固定的那一份、本地文件与清单不符、池 ID 不是 release 固定的池，或 root 安装报错。池 ID 由脚本核对，不再人工比对。
