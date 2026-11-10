@@ -104,16 +104,16 @@ describe("the companion on the desktop", () => {
     expect(companionReady()).toBe(false);
   });
 
-  it("plays 大肥鱼 with dsh-pet's card, credits its makers and follows what VNAS is doing", async () => {
+  it("plays 大肥鱼 with dsh-pet's card, without a hover credit, and follows what VNAS is doing", async () => {
     serve([IDLE, "东张西望", "工作状态-忙碌点按", "工作状态-原地踱步张望", "工作状态-雀跃庆祝"]);
     const { view, pet } = await mount();
-    const credit = pet.closest("[title]") as HTMLElement;
-    for (const part of ["github.com/PC2005-cloud/dsh-pet", "@上善无形", "@ZipZipPipe", "CC BY-NC-SA 4.0"])
-      expect(credit.title).toContain(part);
-    // Above the desktop's windows and status bar, below its rail, notices and menus.
-    expect(credit.style.getPropertyValue("--dsh-pet-z")).toBe("76");
+    // The credit is in Settings → 个性化: hovering the pet shows only dsh-pet's tooltip with its name.
+    expect(pet.closest("[title]")).toBeNull();
     // Out of the desktop VNAS reads (AssistantPanel's exclude): VNAS has its own tools for the companion.
-    expect(pet.closest("[data-vnas-overlay]")).not.toBeNull();
+    const layer = pet.closest("[data-vnas-overlay]") as HTMLElement;
+    expect(layer).not.toBeNull();
+    // Above the desktop's windows and status bar, below its rail, notices and menus.
+    expect(layer.style.getPropertyValue("--dsh-pet-z")).toBe("76");
     // Only installed animations play: the first is always the idle one.
     expect(fetched[0]).toBe(IDLE);
     expect(companionReady()).toBe(true);

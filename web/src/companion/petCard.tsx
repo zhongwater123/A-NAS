@@ -17,8 +17,8 @@
 //   animation a VNAS command asked for settles the command (commands.ts).
 //
 // What is A-NAS's own: the companion stops while the member is away (a pause, not sleep),
-// remembers where it was left on this device, waves at a new result of a scheduled task,
-// and credits the character.
+// remembers where it was left on this device and waves at a new result of a scheduled task. The
+// character's credit is in Settings → 个性化 (credit.ts), not on the companion.
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { jsx } from "react/jsx-runtime";
 
@@ -70,10 +70,6 @@ injectPetCss();
 const IDLE_MS = 60_000;
 const ACTIVITY = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const;
 const POSITION_KEY = "a-nas.companion.position";
-// The credit the character's licence and dsh-pet ask for wherever it shows.
-const credit =
-  "大肥鱼：社区二创形象（原作溟月 @上善无形，女仆设计 @ZipZipPipe，CC BY-NC-SA 4.0），仅作非商业试验。" +
-  "动画来自 github.com/PC2005-cloud/dsh-pet";
 /**
  * Above the windows (72) and the status bar (70); below the rail and notices (80), menus, the shelf and the
  * screen saver; dsh-pet's own is 40.
@@ -410,11 +406,10 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
   // card/animation-flow.ts); on such a NAS its bubble shows on its own.
   const say =
     leaves.say?.kind === "say" && !animations.events.whisper?.length ? { ...leaves.say, anim: false } : leaves.say;
-  // dsh-pet's tooltip names the pet; the credit is the title around it. VNAS moves the companion
-  // with its own tools: the desktop it reads leaves the companion out, as it does its toasts, since a
-  // click through the browser tools would wake it or take its lock back.
+  // VNAS moves the companion with its own tools: the desktop it reads leaves the companion out, as it
+  // does its toasts, since a click through the browser tools would wake it or take its lock back.
   return (
-    <div style={layer} title={credit} data-vnas-overlay="">
+    <div style={layer} data-vnas-overlay="">
       <PetCard cfg={cfg} {...leaves} say={say} arena={arena} paused={paused} onPlace={remember} />
     </div>
   );
