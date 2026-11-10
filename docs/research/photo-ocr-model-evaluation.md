@@ -18,6 +18,13 @@
 
 据此，证件与票据的字段抽取建议以 Qwen3.5-2B 为主、GLM-OCR 为轻量备选，并且必须带核对层：与 PP-OCRv6 识别出的原文交叉核对、对身份证号（GB 11643 校验位）、银行卡号（Luhn）、金额大小写一致等做规则校验、低概率字段标“待核对”。在此之前还要用真实的身份证、银行回单照片补测，公开数据集里没有这两类。
 
+之后的进展：
+
+- 2026-10-30 起产品用 Qwen3.5-4B（Q4_K_M，见 [4B 级候选](#4b-级候选2026-10-30)）。
+- 2026-11-09，Xiaomi-OCR-0 不替换它：字段抽取远不如 4B，按官方流程复测结果相同（[Xiaomi-OCR-0](#xiaomi-ocr-02026-11-09)）。
+- 产品的核对思路与业内一致（每个字段有置信度，加规则，不通过的交给人）。差距与实测见[与业内做法对照](#与业内做法对照2026-11-09)。
+- 2026-11-10 试了另一个模型读的全文、整数匹配与字段名邻近核对，都没有让核对更好。公开样本里，0.99 时自动通过的错字段都不是读错（[独立全文对照](#独立全文对照)）。
+
 ## 候选
 
 | 机构 / 模型 | 规模 | 许可 | 发布 | 评估所用文件 |
@@ -58,7 +65,7 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
 | Qwen3.5-2B | 193（81.8%） | 6 | 6（2.5%） | 31 |
 | HunyuanOCR-1.5 | 178（75.4%） | 23 | 2（0.8%） | 33 |
 
-同形错误的实例：医保交易流水号 `20211104120391350112` 读成 `20211104120301250112`，电话 `0531-829150` 读成 `0531-829156`，金额 `20.50` 读成 `26.50`。其他错误多为多读或漏读一部分（漏掉时间、把相邻两栏合并、把收银员填进会员号），比同形错误容易发现。标准答案本身也有少量噪声（如 `2021-11-27 *`），所以绝对值略偏低，模型之间的相对比较不受影响。
+同形错误的实例：医保交易流水号 `20211104120391350112` 读成 `20211104120301250112`，电话 `0531-829150` 读成 `0531-829156`（2026-11-10 看原图，这个号码末几位打了码，标准答案的最后一位也只是码边露出的半个字，见[独立全文对照](#独立全文对照)），金额 `20.50` 读成 `26.50`。其他错误多为多读或漏读一部分（漏掉时间、把相邻两栏合并、把收银员填进会员号），比同形错误容易发现。标准答案本身也有少量噪声（如 `2021-11-27 *`），所以绝对值略偏低，模型之间的相对比较不受影响。
 
 ### 用单字概率发现错误
 
@@ -246,7 +253,7 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
 - **条件**：
   - Xiaomi-OCR-0（Q8_0，1600 px，最多 1024 个视觉 token，6 线程）用模型卡的纯文字提示词 `Extract the text in the image.` 读同一批 50 张的全文。每张中位约 30 秒；1 张因重复输出被停下。
   - 字段仍是上面 Qwen3.5-4B 读的那批，规则相同，只换掉对照用的全文。
-  - 另试了两个模型的字段互相对照：Xiaomi-OCR-0 自己读出的同一字段（[下节](#xiaomi-ocr-02026-11-09)的答案）与 4B 的相同才通过。
+  - 另试了两个模型的字段互相对照：Xiaomi-OCR-0 自己读出的同一字段（[Xiaomi-OCR-0](#xiaomi-ocr-02026-11-09) 一节的答案）与 4B 的相同才通过。
 - **脚本**：`eval.ocr` 的 `xiaomi-ocr-0-text` 读全文；`eval.ocr_verify score` 的 `--other-text`、`--other-fields` 评分。
 
 | 规则 | 自动通过 | 通过的里面错的（个） | 带数字的字段：通过 / 错 |
@@ -263,6 +270,17 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
   - 0.99 时多拦下 1 个错，但这是标准答案的笔误：原图是 `00:00:00`，答案写成 `00:00.00`。同时少放过 16 个对的字段。
   - 0.9 与 0.999 时也一样：0.9 时产品的规则通过 71.4%、错 25 个，换成 Xiaomi-OCR-0 的全文通过 66.0%、错 24 个；0.999 时两者相同。
   - 产品自己的全文在 0.99 时也几乎不起作用：只看单字概率通过 49.6%，错的是同样 8 个。
+- **同样的错误率下比较**（把每个出现过的单字概率都当作阈值试一遍，取错的不超过某个比例时通过最多的）：
+
+  | 通过的里面错的不超过 | 只看单字概率 | 4B 自己的全文 + 格式 | Xiaomi-OCR-0 的全文 + 格式 | Xiaomi-OCR-0 的字段相同 + 格式 |
+  |---|---|---|---|---|
+  | 1% | 20.3% | 19.8% | 19.7% | 8.6% |
+  | 2% | 35.7% | 34.5% | 33.1% | 34.5% |
+  | 2.74%（产品现在的错误率） | 50.4% | 49.1% | 46.3% | 41.5% |
+  | 4% | 63.0% | 60.8% | 56.5% | 45.6% |
+
+  - 带数字的字段在 2.74% 时依次为 55.2%、55.2%、52.6%、45.7%。
+  - 只有带数字的字段、错的不超过 1% 时，两个模型字段相同略好（28.7%，只看单字概率 25.7%），相差几个字段。
 - **Xiaomi-OCR-0 的全文漏字**：0.99 时被它拒掉的 16 个对的字段中，
   - 12 个根本不在它的全文里：票据号、发票号、业务流水号、电话与传真、页码，以及“存根”“记账联”这类边上的标注；
   - 3 个是它把 23.17 读成了 `23.1/`（同一个数出现在三个字段）；
@@ -274,6 +292,12 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
   - 真正读错的只有 1 个：机制号 20211203… 两个模型都读成 20211205…。原图上这串数字印得又小又淡。
   - 换成逐行识别的 PP-OCRv6 可能少漏一些字，但同样拦不下这几类错（推断）。
 - **两个模型的字段互相对照**：错的少了（0.99 时 4 个），但只有 34% 通过。Xiaomi-OCR-0 自己读字段的能力弱（50 张中 11 张 JSON 不合法），拒掉了很多对的字段。
+- **整数匹配也没有帮助**：
+  - 起因：“值出现在全文里”按子串比较，全文里有完整的号码时，少了开头或末尾几位的值也能通过。
+  - 所以试了：值以数字开头或结尾时，全文中紧挨它的不能再是数字。
+  - 结果：0.99 时通过 46.8%、错 8 个，产品的规则为 48.3%、8 个；不看概率时错的从 66 个降到 60 个，带数字的字段在 0.9 时从 11 个降到 8 个。
+  - 它多拦下的错都在 0.99 以下，单字概率已经拦下了。同时它拒掉了 10 个对的字段，多是年、月、日：全文里它们与相邻的数字之间只隔着空格，而比较时去掉空格。
+  - 0.99 时那个少一位的电话，两个模型的全文里也都只到 82915，原图末几位打了码（见上），所以这个办法拦不下它。
 - **结论**：不加独立读取。0.99 时通过的错字段里已经没有真正读错的（电话少一位那个是原图打码）。剩下的错，核对值是否挨着它的字段名也拦不下（下节）。
 
 #### 字段名邻近核对
@@ -310,7 +334,10 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
 
 - **模型**：
   - 0.8B，由 Qwen3.5-0.8B-Base 训练而来，Apache-2.0。
-  - 模型卡称 OmniDocBench v1.6 得 96.83，五个 OCR 问答基准平均 83.2，高于 Qwen3.5-2B 的 80.9。
+  - 权重与技术报告 2026-09-29/30 发布。此后 Hugging Face 上只更新了模型卡：10-08、10-23 补评测结果，10-29 加 logo，权重没有换过。这里测的就是这份权重。
+  - 主攻整页文档解析：把扫描件、PDF、文档照片转成 Markdown，表格用 OTSL，公式用 LaTeX，按阅读顺序排列。其次是读图回答问题。
+  - 模型卡称 OmniDocBench v1.6 得 96.83，五个 OCR 问答基准平均 83.2，高于 Qwen3.5-2B 的 80.9。它没有报告中文票据、卡证按 JSON 模板抽字段的成绩，而这正是产品的用途。
+  - 模型卡还写到：同样的训练从 0.8B 换到 4B，文档解析只高约 0.15 分，理解类任务高约 4.9 分。也就是说，解析在 0.8B 已接近饱和，理解与抽取需要更大的模型。
 - **文件**：
   - 官方权重（`d4551e9f…`）从 ModelScope 的 SeerRay-Lab 镜像下载，SHA-256 与 Hugging Face 一致。
   - 用 llama.cpp `e36df60` 自行转换：语言 Q8_0（`d822c730…`），视觉 F16（`318638c0…`）。社区的 GGUF 模型作者说明未评估过，没有用。
@@ -390,6 +417,70 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
 - 这个差距来自模型：按官方流程复测，字段的结果与我们的测法相同。
 - 它适合快速读整页文字：与 GLM-OCR 相当，耗时不到 Qwen3.5-2B 的一半。
 - 用它读全文、给产品的字段做独立对照，也没有帮助（[独立全文对照](#独立全文对照)）。
+- 适合的场景：
+  - 批量把 PDF、扫描件和文档照片转成带表格结构的 Markdown，供搜索或知识库使用；
+  - 内存或算力紧张、只要整页文字、不要结构化字段的场合。
+  - 不适合证件、票据、回单的字段抽取。
+- 若以后要给“文件”里的 PDF 或扫描件做全文搜索，它是合适的候选。这是新功能，由用户决定。
+
+### 与业内做法对照（2026-11-09）
+
+用户怀疑产品的 OCR 设计不符合业内做法。所以按公开的文档、代码与论文，对照了产品的读取与核对。这一节只读资料，没有实测；“差距”指对数字与字段准确率可能的影响。
+
+| 方面 | 产品的做法 | 业内常见做法 | 差距 |
+|---|---|---|---|
+| 分辨率 | 长边 1600 px，最多 1024 个视觉 token；Qwen3.5 每个 token 对应 32×32 px，约 105 万像素 | Qwen3-VL 官方的 OCR 与抽取示例用 512–2,048 个 token，文档解析用到 4,608 个[2]；Qwen3.5 处理器默认上限约 1,670 万像素[1]；Xiaomi-OCR-0 缩进 2048×2048[3]；dots.ocr 最多约 1,130 万像素[4]；olmOCR 长边 1288 px[5]；MinerU2.5 先用 1036×1036 的缩略图做版面分析，再按原分辨率裁块识别[6]；研究与云服务对字的清晰度的要求见[7][9] | 中 |
+| 结构化输出 | 贪心解码，靠提示词与 JSON 解析，不约束 | llama.cpp、vLLM、OpenAI 都支持按 JSON Schema 约束解码[10][11][12]。但 OCR 模型官方的抽取都不用：Xiaomi-OCR-0 只用提示词再用正则取 JSON，Qwen 的示例只用提示词[2][3]。JSONSchemaBench 中约束解码最多让下游任务提升约 4%[13]，另有研究发现格式限制会降低推理能力[14]；没有找到针对字段抽取或数字准确率的研究 | 小 |
+| 架构 | 一个通用视觉语言模型读两遍：先全文，再按模板读字段 | Azure、AWS Textract 的票据与证件：OCR 加专用模型，字段标准化，每个字段带置信度与坐标[15][16]；PP-ChatOCRv4：版面解析与 OCR、检索、大模型，再与多模态模型的结果融合[17]；GLM-OCR、PaddleOCR-VL、MinerU2.5 都是先检测版面、裁切，再识别[6][18][19] | 中 |
+| 预处理 | 按 EXIF 方向摆正，此外没有方向分类、矫正或文档裁切 | PaddleOCR 3.x 有方向分类与文档矫正模块，PP-ChatOCRv4 默认开启[17][18]；Google 的文档 OCR 有去倾斜、旋转校正与图像质量评分[20]；olmOCR 让模型报告旋转角度，转正后重读[5]。OCRBench v2 中图片旋转让 InternVL3-14B 的 DocVQA 下降 55.7%[8] | 中 |
+| 把 OCR 文字交给模型 | 不交；全文只用于事后对照 | LMDX 把 OCR 文字行与坐标写进提示词[21]；DocVLM 在视觉 token 少时加入 OCR 文字提升最大，但总 token 相同时纯视觉更好[22] | 中 |
+| 置信度与复核 | 值的最低单字概率 ≥ 0.99，加校验位与格式、值须在全文中；不通过的标“待核对”。阈值在 50 张公开样本上定 | Azure 按字段置信度决定自动接受还是转人工，金融、医疗场景建议接近 100%[23]；Azure Content Understanding 按文档类型与字段校准，在留出集上验证，换模型就重新校准[24]；Textract 加 A2I 按置信区间与缺失的键送审，并随机抽样送审[25] | 小：做法一致，差在校准数据与抽检 |
+| 量化 | 语言 Q4_K_M，视觉 F16 | Qwen2-VL-2B 的 DocVQA：BF16 88.34、Int8 88.28、GPTQ-Int4 87.21；Qwen2.5-VL 的 AWQ 模型越小损失越大[26]。#132 在 CORD 上测过 4B 的 Q8_0，没有明显提高 | 小 |
+
+结论：核对的思路与业内一致，即每个字段有置信度、加规则，不通过的交给人。按可能的影响排序，差距与之后的实测如下：
+
+1. **可疑字段没有裁切放大后重读**：
+   - 业内的高分辨率做法是按区域裁切、用原分辨率识别。
+   - 整图放大已测三次（10-16 的 Qwen3.5-2B 与 GLM-OCR，11-09 的 Xiaomi-OCR-0），都没有净改善；但丢开头数字这类错确实与分辨率有关。
+   - 只对“待核对”的字段裁切重读未测。字段的位置要从别处得到，例如独立 OCR 的文字框（推断）。
+2. **没有方向分类**：未测。CC-OCR 的图基本是正的，要用真实照片测（#128）。
+3. **全文对照不独立**：已测，换成另一个模型读的全文没有帮助（[独立全文对照](#独立全文对照)）。0.99 时剩下的错不是读错，任何全文对照都拦不下。
+4. **阈值只在公开数据上校准过**：没有对自动通过的字段随机抽检；真实证件与回单未测（#128）。
+5. **量化与约束解码**：影响可能最小。
+   - 若加约束解码，只约束 JSON 结构与键名，不要用正则约束号码格式；否则本来能被格式检查拦下的错，会变成格式合法、只错几位的错（推断）。
+   - llama.cpp 只有设了 `post_sampling_probs` 才返回经过采样链的概率，所以加语法约束应该不改变 0.99 的度量（推断）[10]。
+   - 产品的 Qwen3.5-4B 在核对层实测中 50 张全是合法 JSON。
+
+另外，AWS A2I 已不再接受新客户，Google Document AI 的人工复核已弃用；云厂商的人工复核现在多由客户自己搭队列。
+
+资料：
+
+1. [Qwen3.5-4B preprocessor_config.json](https://huggingface.co/Qwen/Qwen3.5-4B/blob/main/preprocessor_config.json)
+2. [Qwen3-VL OCR cookbook](https://github.com/QwenLM/Qwen3-VL/blob/main/cookbooks/ocr.ipynb)
+3. [Xiaomi-OCR-0 evaluation_pipeline/cropping.py](https://github.com/SeerRay-Lab/Xiaomi-OCR-0/blob/main/evaluation_pipeline/cropping.py)、[mcp_ocr_server.py](https://github.com/SeerRay-Lab/Xiaomi-OCR-0/blob/main/skills/xiaomi-ocr/mcp_ocr_server.py)
+4. [dots.ocr consts.py](https://github.com/rednote-hilab/dots.ocr/blob/master/dots_ocr/utils/consts.py)
+5. [olmOCR pipeline.py](https://github.com/allenai/olmocr/blob/main/olmocr/pipeline.py)
+6. [MinerU2.5（arXiv 2509.22186）](https://arxiv.org/abs/2509.22186)
+7. [arXiv 2503.23667](https://arxiv.org/abs/2503.23667)：多模态大模型约 300 ppi 时与传统 OCR 相当，低于 150 ppi 明显变差
+8. [OCRBench v2（arXiv 2501.00321）](https://arxiv.org/abs/2501.00321)
+9. [Azure Document Intelligence 收据模型](https://learn.microsoft.com/azure/ai-services/document-intelligence/prebuilt/receipt)：要求 1024×768 的图上字高至少 12 px
+10. [llama.cpp server README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)
+11. [vLLM structured outputs](https://docs.vllm.ai/en/latest/features/structured_outputs.html)
+12. [OpenAI Structured Outputs](https://github.com/openai/openai-cookbook/blob/main/examples/Structured_Outputs_Intro.ipynb)
+13. [JSONSchemaBench（arXiv 2501.10868）](https://arxiv.org/abs/2501.10868)
+14. [Let Me Speak Freely?（arXiv 2408.02442）](https://arxiv.org/abs/2408.02442)
+15. [Textract AnalyzeExpense](https://docs.aws.amazon.com/textract/latest/dg/invoices-receipts.html)、[AnalyzeID](https://docs.aws.amazon.com/textract/latest/dg/how-it-works-identity.html)
+16. [Azure Document Intelligence 证件模型](https://learn.microsoft.com/azure/ai-services/document-intelligence/prebuilt/id-document)
+17. [PP-ChatOCRv4（arXiv 2507.05595）](https://arxiv.org/abs/2507.05595)、[使用说明](http://www.paddleocr.ai/latest/en/version3.x/pipeline_usage/PP-ChatOCRv4.html)
+18. [PaddleOCR-VL 使用说明](http://www.paddleocr.ai/latest/en/version3.x/pipeline_usage/PaddleOCR-VL.html)
+19. [GLM-OCR](https://github.com/zai-org/GLM-OCR)
+20. [Google Enterprise Document OCR](https://docs.cloud.google.com/document-ai/docs/enterprise-document-ocr)
+21. [LMDX（arXiv 2309.10952）](https://arxiv.org/abs/2309.10952)
+22. [DocVLM（arXiv 2412.08746）](https://arxiv.org/abs/2412.08746)
+23. [Azure Document Intelligence 准确度与置信度](https://learn.microsoft.com/azure/ai-services/document-intelligence/concept-accuracy-confidence)
+24. [Azure Content Understanding：置信度、依据与人工复核](https://devblogs.microsoft.com/foundry/content-understanding-confidence-grounding-hitl/)
+25. [Amazon A2I 与 Textract](https://docs.aws.amazon.com/sagemaker/latest/dg/a2i-textract-task-type.html)
+26. [Qwen2-VL-2B GPTQ-Int4](https://huggingface.co/Qwen/Qwen2-VL-2B-Instruct-GPTQ-Int4)、[Qwen2.5-VL-3B AWQ](https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct-AWQ)
 
 ## 测试中发现的问题
 
@@ -416,9 +507,14 @@ Qwen3.5-2B、PaddleOCR-VL 与 GLM-OCR 的文件从 ModelScope 上同一官方组
 其余：
 
 1. 视觉 token 上限 2048 的复测已完成（见“结果”），保留 1024。
-2. 设计并评估核对层：PP-OCRv6 原文交叉核对、校验位与格式规则、低概率字段标记、可疑字段裁切放大后重读，衡量“自动通过的字段中错误的比例”。
-3. 已决定（2026-10-19）：做 OCR，文字与字段进入搜索，可见范围与照片相同。实施方案待写，需定模型、核对层、哪些照片读字段、界面呈现，以及 OCR 模型如何在 1 GiB 余量的规则下运行。
+2. 核对层：
+   - 已实测（2026-11-02）并实现：校验位与格式规则、与全文对照、单字概率 0.99（[实施方案](../architecture/photo-ocr.md#核对层)）。
+   - 2026-11-10 测过、没有帮助的：另一个模型读的全文（代替 PP-OCRv6 原文交叉核对的设想）、两个模型字段互相对照、整数匹配、字段名邻近核对（[独立全文对照](#独立全文对照)、[字段名邻近核对](#字段名邻近核对)）。
+   - 未测：可疑字段裁切放大后重读、方向分类（[与业内做法对照](#与业内做法对照2026-11-09)）。
+   - 先要用真实样本看真正读错的比例（#128）。公开样本里 0.99 时通过的错字段都不是读错。
+3. 已决定（2026-10-19）：做 OCR，文字与字段进入搜索，可见范围与照片相同。实施方案见 [photo-ocr.md](../architecture/photo-ocr.md)。
 4. 实验 NAS 上的速度与内存已实测（GLM-OCR 与 Qwen3.5-2B 2026-10-29，Qwen3.5-4B 2026-10-30，见“结果”）。有人使用时对前台的影响尚未测。
+5. Xiaomi-OCR-0 不替换 Qwen3.5-4B（2026-11-09）。若以后要给“文件”里的 PDF 或扫描件做全文搜索，它是整页解析的候选，由用户决定。
 
 ## 关联
 
