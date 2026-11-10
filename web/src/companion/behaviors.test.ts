@@ -43,6 +43,18 @@ describe("each step of a VNAS turn, as the companion shows it", () => {
     expect(behaviorLine("run", "", false)).toBe("噼里啪啦敲命令中~");
   });
 
+  it("shows a detail as plain text", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    // Not replacement patterns.
+    expect(behaviorLine("run", "printf $'\\n'", false)).toBe("跑一下 printf $'\\n'，稍等哦");
+    expect(behaviorLine("run", "a$&b$`c$$", false)).toBe("跑一下 a$&b$`c$$，稍等哦");
+    // No control characters, and nothing that turns the rest of the line around.
+    expect(shortDetail("a\u202Etxt.exe")).toBe("atxt.exe");
+    expect(shortDetail("\u2066x\u2069\u200E\u200F\u061C\u202Ay")).toBe("xy");
+    expect(shortDetail("bell\u0007\u0000\u007F\u009Bend")).toBe("bellend");
+    expect(shortDetail("a\u2028b\u2029c")).toBe("a b c");
+  });
+
   it("names nothing on the local console's shared screen", () => {
     for (const roll of [0, 0.99]) {
       vi.spyOn(Math, "random").mockReturnValue(roll);

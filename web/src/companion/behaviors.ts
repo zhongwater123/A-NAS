@@ -101,9 +101,18 @@ export function behaviorOfTool(name: string): Behavior {
 /** About this many characters of a detail fit in the bubble, which is half the pet wide. */
 const DETAIL_MAX = 12;
 
-/** A step's detail cut to what the bubble shows, by code point so that no character is cut in half. */
+/**
+ * A step's detail cut to what the bubble shows, by code point so that no character is cut in half. Spaces
+ * and line breaks become one space; control characters and the ones that reorder text (a file named with a
+ * right-to-left override would turn the rest of the line around) are dropped, as for broadcast's text.
+ */
 export function shortDetail(detail: string): string {
-  const points = Array.from(detail.replace(/\s+/g, " ").trim());
+  const points = Array.from(
+    detail
+      .replace(/\s+/g, " ")
+      .replace(/[\p{Cc}\p{Bidi_Control}]/gu, "")
+      .trim(),
+  );
   return points.length > DETAIL_MAX ? `${points.slice(0, DETAIL_MAX).join("")}…` : points.join("");
 }
 
@@ -116,7 +125,8 @@ export function behaviorLine(behavior: Behavior, detail = "", shared = isLocalCo
   const shown = shared ? "" : shortDetail(detail);
   const lines = BEHAVIORS[behavior].lines.filter((line) => shown !== "" || !line.includes("{detail}"));
   if (lines.length === 0) return null;
-  return lines[Math.floor(Math.random() * lines.length)].replace("{detail}", shown);
+  // A function, so that a "$'" or "$&" in the detail is the detail's text, not a replacement pattern.
+  return lines[Math.floor(Math.random() * lines.length)].replace("{detail}", () => shown);
 }
 
 /** The behaviour a call of one of VNAS's tools shows, and what the call works on (toolLabels.ts). */
