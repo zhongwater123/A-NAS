@@ -51,6 +51,8 @@ if [[ -z ${1:-} ]]; then
   exit 0
 fi
 checkout=$(cd "$1" && pwd)
+"$python" -c 'import json5' 2>/dev/null ||
+  fail "$python has no json5 (ai/requirements-dev.txt), which vendoring needs: name one that has, e.g. make vendor-check VENDOR_PYTHON=~/.local/opt/ai-tools/bin/python DSH_PET=..."
 scratch=$(mktemp -d)
 trap 'rm -rf -- "$scratch"' EXIT
 mkdir "$scratch/w"
