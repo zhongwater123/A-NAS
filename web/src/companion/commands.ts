@@ -88,15 +88,16 @@ const BUBBLE_MAX_MS = 60_000;
 const LINE_MAX_MS = 5_000;
 const POWER_MAX = 3;
 /**
- * How long an animation is waited on: until the card plays it (its fetch from the NAS and first frame), then
- * until it ends, counted from the start of playback, so that a slow fetch does not eat into the clip's time.
- * The longest of dsh-pet's clips run 10.04 s, about 6.7 s at the card's speed (petCard.tsx PLAYBACK_RATE), so
- * 8.5 s from the start of playback lets one end with time to spare (commands.test.ts plays it at that speed;
- * a slower card needs a longer wait than the contract leaves). Both together, 11.5 s at most as before,
- * keep the window's answer within the contract's 12 s; the product service waits 15 s.
+ * How long an animation is waited on: 11.5 s at most from the command, which keeps the window's answer within
+ * the contract's 12 s (the product service waits 15 s). Its fetch from the NAS and first frame may take what
+ * leaves the clip ANIM_PLAY_MIN_MS from the start of playback, and the clip has the rest of the 11.5 s, so a
+ * quick fetch leaves it more. The longest of dsh-pet's clips run 10.04 s, about 6.7 s at the card's speed
+ * (petCard.tsx PLAYBACK_RATE), so 7.5 s lets one end with time to spare after the slowest fetch waited for
+ * (commands.test.ts plays it at that speed; a slower card needs a longer wait than the contract leaves).
  */
-const ANIM_LOAD_MS = 3_000;
-const ANIM_PLAY_MS = 8_500;
+const ANIM_WAIT_MS = 11_500;
+const ANIM_PLAY_MIN_MS = 7_500;
+const ANIM_LOAD_MS = ANIM_WAIT_MS - ANIM_PLAY_MIN_MS;
 /**
  * What would not show as the bubble's plain text, as the product service checks it (contract v1.2): control
  * characters but a line break, Unicode's bidi controls (marks, embeddings, overrides and isolates) and the
@@ -171,8 +172,8 @@ function lockBlocked(provided: unknown): CompanionOutcome | null {
 
 /**
  * An animation's end, as dsh-pet's GET /playback/{id}?wait=ended,failed,cancelled reports it, waited on
- * for at most ANIM_LOAD_MS until the card plays it and ANIM_PLAY_MS from then on; past either the contract
- * answers failed with reason timeout. A window that goes away (signal) stops waiting and answers nothing.
+ * for at most ANIM_LOAD_MS until the card plays it and for what is left of ANIM_WAIT_MS from then on; past
+ * either the contract answers failed with reason timeout. A window that goes away (signal) stops waiting and answers nothing.
  */
 function played(playbackId: string, signal?: AbortSignal): Promise<CompanionOutcome> {
   return new Promise((resolve) => {
@@ -190,6 +191,7 @@ function played(playbackId: string, signal?: AbortSignal): Promise<CompanionOutc
         ),
       );
     }
+    const asked = Date.now();
     let cancel = companionPlayback.wait({
       playbackId,
       wait: ["playing", ...TERMINAL_STATUSES],
@@ -199,7 +201,7 @@ function played(playbackId: string, signal?: AbortSignal): Promise<CompanionOutc
         cancel = companionPlayback.wait({
           playbackId,
           wait: TERMINAL_STATUSES,
-          timeoutMs: ANIM_PLAY_MS,
+          timeoutMs: ANIM_WAIT_MS - (Date.now() - asked),
           onWake: answer,
         });
       },

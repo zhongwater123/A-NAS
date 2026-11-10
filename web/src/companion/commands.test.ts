@@ -103,20 +103,27 @@ describe("an animation VNAS asks for", () => {
     expect(outcome).toEqual({ ok: true, result: { status: "ended", playbackId: id } });
   });
 
-  it("is answered failed with reason timeout 8.5 s after it started playing without an end", async () => {
-    vi.useFakeTimers();
-    let outcome: unknown;
-    void run("anim", { name: WAVE }).then((answer) => {
-      outcome = answer;
-    });
-    const id = playing();
-    await vi.advanceTimersByTimeAsync(2_000);
-    companionPlayback.report(id, "playing");
-    await vi.advanceTimersByTimeAsync(8_499);
-    expect(outcome).toBeUndefined();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(outcome).toEqual({ ok: true, result: { status: "failed", playbackId: id, reason: "timeout" } });
-  });
+  it.each([
+    [400, 11_100],
+    [3_000, 8_500],
+    [3_999, 7_501],
+  ])(
+    "is answered failed with reason timeout 11.5 s after it was asked for without an end (playing %i ms on)",
+    async (loading, left) => {
+      vi.useFakeTimers();
+      let outcome: unknown;
+      void run("anim", { name: WAVE }).then((answer) => {
+        outcome = answer;
+      });
+      const id = playing();
+      await vi.advanceTimersByTimeAsync(loading);
+      companionPlayback.report(id, "playing");
+      await vi.advanceTimersByTimeAsync(left - 1);
+      expect(outcome).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(outcome).toEqual({ ok: true, result: { status: "failed", playbackId: id, reason: "timeout" } });
+    },
+  );
 
   it("is answered ended when its clip played to its end after a slow fetch", async () => {
     vi.useFakeTimers();
@@ -125,7 +132,7 @@ describe("an animation VNAS asks for", () => {
       outcome = answer;
     });
     const id = playing();
-    await vi.advanceTimersByTimeAsync(2_900);
+    await vi.advanceTimersByTimeAsync(3_900);
     companionPlayback.report(id, "playing");
     await vi.advanceTimersByTimeAsync(Math.ceil(10_040 / PLAYBACK_RATE));
     companionPlayback.report(id, "ended");
@@ -133,14 +140,14 @@ describe("an animation VNAS asks for", () => {
     expect(outcome).toEqual({ ok: true, result: { status: "ended", playbackId: id } });
   });
 
-  it("is answered failed with reason timeout when the card has not played it 3 s on", async () => {
+  it("is answered failed with reason timeout when the card has not played it 4 s on", async () => {
     vi.useFakeTimers();
     let outcome: unknown;
     void run("anim", { name: WAVE }).then((answer) => {
       outcome = answer;
     });
     const id = playing();
-    await vi.advanceTimersByTimeAsync(2_999);
+    await vi.advanceTimersByTimeAsync(3_999);
     expect(outcome).toBeUndefined();
     await vi.advanceTimersByTimeAsync(1);
     expect(outcome).toEqual({ ok: true, result: { status: "failed", playbackId: id, reason: "timeout" } });
