@@ -383,7 +383,7 @@ export function AssistantPanel({
   // VNAS's commands to the companion on this device (anas.companion): the product service sends
   // them only to the conversation's browser, and the companion carries out those of a turn this
   // window started (companion/commands.ts). Each is answered once, an animation when it has ended
-  // and at most 10 s on, within the 12 s the service waits; a window that closes stops waiting
+  // and at most 11.5 s on, within the 12 s it has (the service waits 15 s); a window that closes stops waiting
   // and answers nothing, which the service settles.
   useEffect(() => {
     const closed = new AbortController();

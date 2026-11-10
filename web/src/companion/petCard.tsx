@@ -433,7 +433,7 @@ function Card({ animations, pool }: { animations: Animations; pool?: string }) {
       placing = false;
       stop();
       // A card that leaves the page cuts short what a command asked it to play, as a freeze does:
-      // the command hears so now rather than at its 10 s (an animation already over is left as it was).
+      // the command hears so now rather than when its wait runs out (an animation already over is left as it was).
       const own = companionState.read().pets[COMPANION_PET];
       const playbackId = own ? readAnim(own.anim)?.playbackId : undefined;
       if (playbackId) companionPlayback.report(playbackId, "cancelled", "frozen");

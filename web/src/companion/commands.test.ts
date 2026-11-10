@@ -8,6 +8,7 @@ import {
   runCompanionCommand,
 } from "./commands";
 import { companionLock, companionPlayback, resetCompanionHost } from "./host";
+import { PLAYBACK_RATE } from "./petCard";
 import {
   companionState,
   reportEvent,
@@ -86,7 +87,7 @@ describe("an animation VNAS asks for", () => {
     });
   });
 
-  it("is answered ended when a clip as long as dsh-pet's own, 10.04 s, has loaded and played to its end", async () => {
+  it("is answered ended when a clip as long as dsh-pet's longest, 10.04 s, has loaded and played to its end", async () => {
     vi.useFakeTimers();
     let outcome: unknown;
     void run("anim", { name: WAVE }).then((answer) => {
@@ -95,24 +96,63 @@ describe("an animation VNAS asks for", () => {
     const id = playing();
     await vi.advanceTimersByTimeAsync(400);
     companionPlayback.report(id, "playing");
-    await vi.advanceTimersByTimeAsync(10_040);
+    // At the card's speed: the wait from the start of playback is sized for it.
+    await vi.advanceTimersByTimeAsync(Math.ceil(10_040 / PLAYBACK_RATE));
     companionPlayback.report(id, "ended");
     await vi.advanceTimersByTimeAsync(0);
     expect(outcome).toEqual({ ok: true, result: { status: "ended", playbackId: id } });
   });
 
-  it("is answered failed with reason timeout after 11.5 s without an end", async () => {
+  it("is answered failed with reason timeout 8.5 s after it started playing without an end", async () => {
     vi.useFakeTimers();
     let outcome: unknown;
     void run("anim", { name: WAVE }).then((answer) => {
       outcome = answer;
     });
     const id = playing();
+    await vi.advanceTimersByTimeAsync(2_000);
     companionPlayback.report(id, "playing");
-    await vi.advanceTimersByTimeAsync(11_499);
+    await vi.advanceTimersByTimeAsync(8_499);
     expect(outcome).toBeUndefined();
     await vi.advanceTimersByTimeAsync(1);
     expect(outcome).toEqual({ ok: true, result: { status: "failed", playbackId: id, reason: "timeout" } });
+  });
+
+  it("is answered ended when its clip played to its end after a slow fetch", async () => {
+    vi.useFakeTimers();
+    let outcome: unknown;
+    void run("anim", { name: WAVE }).then((answer) => {
+      outcome = answer;
+    });
+    const id = playing();
+    await vi.advanceTimersByTimeAsync(2_900);
+    companionPlayback.report(id, "playing");
+    await vi.advanceTimersByTimeAsync(Math.ceil(10_040 / PLAYBACK_RATE));
+    companionPlayback.report(id, "ended");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(outcome).toEqual({ ok: true, result: { status: "ended", playbackId: id } });
+  });
+
+  it("is answered failed with reason timeout when the card has not played it 3 s on", async () => {
+    vi.useFakeTimers();
+    let outcome: unknown;
+    void run("anim", { name: WAVE }).then((answer) => {
+      outcome = answer;
+    });
+    const id = playing();
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(outcome).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome).toEqual({ ok: true, result: { status: "failed", playbackId: id, reason: "timeout" } });
+    expect(companionPlayback.waiterCount()).toBe(0);
+  });
+
+  it("is answered at once when the card fails it before it plays", async () => {
+    const answer = run("anim", { name: WAVE });
+    const id = playing();
+    companionPlayback.report(id, "failed", "asset-load");
+    expect(await answer).toEqual({ ok: true, result: { status: "failed", playbackId: id, reason: "asset-load" } });
+    expect(companionPlayback.waiterCount()).toBe(0);
   });
 
   it("stops being waited on when the window goes", async () => {
