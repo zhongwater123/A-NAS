@@ -15,7 +15,8 @@ they would see on the NAS.
 
 Paths inside the evaluation container: /models (GGUF files), /data (CC-OCR),
 /runs (answers), /llama (llama.cpp build/bin); ANAS_OCR_SERVER_ARGS adds
-llama-server flags.
+llama-server flags. A build made in the container finds its shared libraries
+through RUNPATH /src/build/bin, so mount the llama.cpp source tree at /src too.
 """
 
 import argparse
@@ -42,7 +43,8 @@ RUNS_DIR = os.environ.get("ANAS_OCR_RUNS", "/runs")
 LLAMA_DIR = os.environ.get("ANAS_OCR_LLAMA", "/llama")
 # More llama-server flags, such as --no-mmap to compare how the weights are held.
 SERVER_ARGS = os.environ.get("ANAS_OCR_SERVER_ARGS", "").split()
-LONG_SIDE = 1600
+# ANAS_OCR_LONG_SIDE compares another input size, such as the 2048 px some models' authors fit images into.
+LONG_SIDE = int(os.environ.get("ANAS_OCR_LONG_SIDE", "1600"))
 # Visual tokens per image. Without a cap GLM-OCR makes ~2,460 tokens of a 1600x1200 photo
 # and needs ~700 s on the development machine; at 1024 it needs ~110 s (2026-10-15).
 IMAGE_TOKENS = 1024
@@ -71,6 +73,23 @@ def schema_of(question):
 def glm_kie(item):
     # The model card's information extraction example.
     return "请按下列JSON格式输出图中信息:\n" + json.dumps(schema_of(item["question"]), ensure_ascii=False, indent=4)
+
+
+# Xiaomi-OCR-0's model card, "Task prompts" and the KIE example.
+XIAOMI_TEXT = "Extract the text in the image."
+XIAOMI_DOC = (
+    "Extract all information from the main body of the document image and represent it in markdown format, "
+    "ignoring headers and footers. Tables should be expressed in OTSL format, formulas in the document should be "
+    "represented using LATEX format, and the parsing should be organized according to the reading order."
+)
+
+
+def xiaomi_kie(item):
+    return (
+        "Extract key information in the image\n\n"
+        "Please output the key information in JSON format according to the following schema:\n"
+        + json.dumps(schema_of(item["question"]), ensure_ascii=False, indent=4)
+    )
 
 
 def hunyuan_kie(item):
@@ -102,6 +121,28 @@ MODELS = {
         "model": "qwen3.5-2b/Qwen3.5-2B-Q8_0.gguf",
         "mmproj": "qwen3.5-2b/mmproj-Qwen3.5-2B-f16.gguf",
         "prompts": {"text": CC_OCR_TEXT, "doc": CC_OCR_TEXT, "kie": lambda item: item["question"]},
+        "sampling": {"chat_template_kwargs": {"enable_thinking": False}},
+    },
+    # Xiaomi's OCR model on Qwen3.5-0.8B-Base, with its card's prompts; its evaluation turns thinking off.
+    "xiaomi-ocr-0": {
+        "model": "xiaomi-ocr-0/Xiaomi-OCR-0-Q8_0.gguf",
+        "mmproj": "xiaomi-ocr-0/mmproj-Xiaomi-OCR-0-f16.gguf",
+        "prompts": {"text": XIAOMI_TEXT, "doc": XIAOMI_DOC, "kie": xiaomi_kie},
+        "sampling": {"chat_template_kwargs": {"enable_thinking": False}},
+    },
+    # The same, unquantized: the official weights' BF16 as they are.
+    "xiaomi-ocr-0-bf16": {
+        "model": "xiaomi-ocr-0/Xiaomi-OCR-0-bf16.gguf",
+        "mmproj": "xiaomi-ocr-0/mmproj-Xiaomi-OCR-0-bf16.gguf",
+        "prompts": {"text": XIAOMI_TEXT, "doc": XIAOMI_DOC, "kie": xiaomi_kie},
+        "sampling": {"chat_template_kwargs": {"enable_thinking": False}},
+    },
+    # Xiaomi-OCR-0 (Q8_0) reading the whole text of the receipts and cards, not their fields: a second,
+    # independent reader that eval.ocr_verify checks the product's fields against.
+    "xiaomi-ocr-0-text": {
+        "model": "xiaomi-ocr-0/Xiaomi-OCR-0-Q8_0.gguf",
+        "mmproj": "xiaomi-ocr-0/mmproj-Xiaomi-OCR-0-f16.gguf",
+        "prompts": {"kie": XIAOMI_TEXT},
         "sampling": {"chat_template_kwargs": {"enable_thinking": False}},
     },
     # The model the product reads text with (docs/architecture/photo-ocr.md): Q4_K_M, as #323 measured it.
@@ -295,8 +336,9 @@ def done_indices(path):
 
 
 def run_name(model, image_tokens):
-    # Answers at another image token cap go to their own directory.
-    return model if image_tokens == IMAGE_TOKENS else f"{model}-img{image_tokens}"
+    # Answers at another image token cap or input size go to their own directory.
+    name = model if image_tokens == IMAGE_TOKENS else f"{model}-img{image_tokens}"
+    return name if LONG_SIDE == 1600 else f"{name}-px{LONG_SIDE}"
 
 
 def run(models, subsets, per_subset, threads, image_tokens):

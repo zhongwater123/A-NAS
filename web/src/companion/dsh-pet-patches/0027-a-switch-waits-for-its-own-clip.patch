@@ -1,0 +1,38 @@
+Two switches in a row load into the same hidden element, as when VNAS says something (the pet
+speaks with an animation) and asks for an animation right after. dsh-pet's second switch took
+the element's next loadeddata as its own, and that could be the first clip's: the speaking clip
+went in front as if it were the animation, its end answered the animation's command "ended",
+and the animation itself, arriving after, was dropped. A switch now waits for the clip it put
+in the element.
+
+diff --git a/client/pet/animation/animation.ts b/client/pet/animation/animation.ts
+--- a/client/pet/animation/animation.ts
++++ b/client/pet/animation/animation.ts
+@@ -170,6 +170,9 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+       ext: thumbExt(),
+       assetVersion: cfg.assetVersion,
+     });
++    // A-NAS: the clip this switch put in the element; until it is there, the element may still load the
++    // one an earlier switch to the same element put in.
++    let ownUrl: string | null = null;
+     loader.load(assetUrl, {
+       onObjectUrl: (objectUrl) => {
+         if (!mounted) {
+@@ -184,6 +187,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+         const previous = blobUrl[slot];
+         if (previous !== null) loader.release(previous);
+         blobUrl[slot] = objectUrl;
++        ownUrl = objectUrl;
+         el.src = objectUrl;
+         el.load();
+       },
+@@ -204,6 +208,9 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
+       },
+     });
+     const onReady = (): void => {
++      // A-NAS: the earlier switch's clip loading is not this one: keep waiting for this one's, or a
++      // command's animation would be answered with that clip's end and never show.
++      if (pending?.gen === swapGen && el.src !== ownUrl) return;
+       el.removeEventListener('loadeddata', onReady);
+       if (pending?.gen !== swapGen) return;
+       const outgoing = elementOf(front);

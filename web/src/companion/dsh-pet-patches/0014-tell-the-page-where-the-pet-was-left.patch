@@ -1,0 +1,43 @@
+The page remembers where the member left the companion on this device, as A-NAS's spec
+asks (docs/specs/virtual-companion.md); dsh-pet's card keeps its position for the page's
+life only (customPos starts empty). Every move that ends sets that position, whether a drag,
+a flight, a walk, a position command or the window's new size, so the card now tells the
+page each new one through the `onPlace` prop. The page puts a remembered position back with
+an instant position command, the card's own way to place the pet.
+
+diff --git a/client/pet/card/props.ts b/client/pet/card/props.ts
+--- a/client/pet/card/props.ts
++++ b/client/pet/card/props.ts
+@@ -10,6 +10,7 @@ import type { PetCollisionSlot } from '../../../shared/physics';
+ import type { LockState, PositionMode, SayCue, PetFacing, SleepState } from '../../../shared/state';
+ import type { WorkStatusSnapshot } from '../../../shared/work-status';
+ import type { RuntimePet } from '../types';
++import type { Center } from '../motion/geometry';
+ 
+ /** 一张宠物卡的渲染输入。 */
+ export interface PetCardProps {
+@@ -50,4 +51,7 @@ export interface PetCardProps {
+   /** A-NAS: the page is idle, hidden or under the screen saver. The card freezes as under a lock and
+    *  holds a flight too; the container sends it no commands meanwhile. */
+   paused?: boolean;
++  /** A-NAS: where the pet was left (its centre, as shares of the viewport), for the page to keep on this
++   *  device; dsh-pet keeps it for the page's life only. */
++  onPlace?: (center: Center) => void;
+ }
+diff --git a/client/pet/card/runtime.ts b/client/pet/card/runtime.ts
+--- a/client/pet/card/runtime.ts
++++ b/client/pet/card/runtime.ts
+@@ -301,6 +301,13 @@ export function createCardRuntime(rt: PetRuntime) {
+       // eslint-disable-next-line react-hooks/exhaustive-deps -- 只按叶子变化次数触发，sleep 是当拍快照
+     }, [sleepTick]);
+ 
++    // A-NAS: every move that ends sets the custom position (a drag, a flight, a walk, a position command,
++    // the window's new size); the page keeps the last one on this device.
++    useEffect(() => {
++      if (customPos) props.onPlace?.(customPos);
++      // eslint-disable-next-line react-hooks/exhaustive-deps -- only a new position is news to the page
++    }, [customPos]);
++
+     const stageStyle = petStageStyle(bottomPad);
+     const rootStyle = petRootStyle(
+       customPos,

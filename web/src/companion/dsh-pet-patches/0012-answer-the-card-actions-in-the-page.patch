@@ -1,0 +1,35 @@
+In A-NAS the page is the card's host: there is no dsh-pet HTTP host behind ROUTE_PATH. The card
+sends three actions to its host with postAction, the playback receipts (playback-report.ts),
+waking the pet when it is clicked asleep and releasing the lock when it is grabbed (runtime.ts);
+setActionHandler lets the page answer them in place, at the same routes and with the same
+bodies, so neither caller changes. Without a handler they go to the network as before.
+
+diff --git a/shared/state.ts b/shared/state.ts
+--- a/shared/state.ts
++++ b/shared/state.ts
+@@ -323,10 +323,25 @@ export function readThrow(leaf: StateLeaf): { angle: number; power: number } | n
+   return { angle: d.angle, power: d.power };
+ }
+ 
++/** A-NAS: answers an action the card sends its host (a dsh-pet route under ROUTE_PATH and its body). */
++export type ActionHandler = (url: string, body?: unknown) => Promise<boolean>;
++
++let actionHandler: ActionHandler | null = null;
++
++/**
++ * A-NAS: lets the page answer the card's actions itself, being the card's host; null sends them to the
++ * network again. The card sends playback receipts (/playback/<id>/report), /wake and /lock/release.
++ */
++export function setActionHandler(handler: ActionHandler | null): void {
++  actionHandler = handler;
++}
++
+ /** 动作端点：POST 一次，返回是否成功。
+  *  动作不返回数据——数据只有 /state 一个出口。调用方收到 ok 后不需要再做别的：动作写叶子会让
+  *  顶层 counter 变化，挂着的长轮询那一拍立刻返回。 */
+ export async function postAction(baseUrl: string, body?: unknown): Promise<boolean> {
++  // A-NAS: the page is the host; its handler answers the action in place (see setActionHandler).
++  if (actionHandler !== null) return actionHandler(baseUrl, body);
+   try {
+     const res = await fetch(baseUrl, {
+       method: 'POST',

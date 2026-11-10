@@ -166,8 +166,9 @@ verify() {
   check_one "gateway log is root's alone" test "$(stat -c '%a' /var/log/anas-assistant-gateway)" = 700
   check_one "weekly curator for $first" systemctl is-enabled "anas-assistant-curator@$first.timer"
   check_one "photo service's socket for assistants" test -S /run/a-nas-photos-assistant/assistant.sock
+  check_one "Product Service's companion socket for assistants" test -S /run/a-nas-companion-assistant/assistant.sock
   check_one "scheduled tasks are started when due" systemctl is-active anas-assistant-cron-waker.service
-  check_one "photo service serves assistants" test "$(bash /spike/product-settings.sh state)" = "session gate on, photos for assistants on"
+  check_one "photo service serves assistants" test "$(bash /spike/product-settings.sh state)" = "session gate on, photos for assistants on, companion for assistants on"
   ((ok)) || fail "see the FAIL lines; remove undoes the install"
   say "installed: open VNAS on the desktop (members of a-nas-users)"
 }
@@ -255,7 +256,7 @@ remove_trial() {
     /etc/systemd/system/anas-assistant-token@.service
   systemctl daemon-reload
   drop /run/a-nas-assistant /run/a-nas-assistant-start /run/anas-assistant-start /run/anas-assistant-gw /run/anas-assistant-photos \
-    /run/anas-change-agent /run/anas-spike-broker \
+    /run/anas-assistant-companion /run/anas-change-agent /run/anas-spike-broker \
     /etc/hermes /etc/a-nas-assistant /opt/a-nas/assistant-skills "$runtimes/spike" "$trial"
   rmdir "$runtimes" 2>/dev/null || true
   if [[ -L /spike ]]; then rm -f /spike; fi

@@ -107,12 +107,34 @@ type liveSession struct {
 	ended time.Time
 	// submit is the arguments of the call of 提交更改 that started and has
 	// neither completed nor been paired with an approval.
-	submit   *startedCall
+	submit *startedCall
+	// stopping is set from the window's session.interrupt to the turn's
+	// message.complete: the turn's companion calls are no longer sent.
 	stopping bool
 	owner    *upstream
 	// browser is the connection whose window registered last as the
 	// session's browser (Hermes's browser control).
 	browser *upstream
+	// prompter is the connection whose window sent the prompt of the turn
+	// under way, and nextPrompter the one whose prompt Hermes queued for the
+	// next turn; the companion's commands go to the prompter's window only
+	// while it is also the browser (companion.go).
+	prompter, nextPrompter *upstream
+	// companion are the calls of companion tools the turn started that no
+	// call on the companion socket has been paired with yet, oldest first.
+	companion []companionStart
+	// helpers are the session's subagents whose last tool was a companion
+	// tool, and when it started: their calls have no tool.start of their own.
+	helpers map[string]time.Time
+	// subagents are the session's subagents that have not reported their
+	// end, and when each last reported anything.
+	subagents map[string]time.Time
+	// abandoned are the calls of companion tools a stopped turn left
+	// unpaired, until companionAbandoned after the stop.
+	abandoned []companionStart
+	// lockedBy is the connection a lock command of the turn went to: the
+	// end of the turn releases that lock there.
+	lockedBy *upstream
 }
 
 type startedCall struct {
@@ -129,6 +151,16 @@ type member struct {
 	sessions  map[string]*liveSession
 	cards     map[string]*card
 	upstreams map[*upstream]struct{}
+	// commands are the companion's commands sent to a window and not yet
+	// settled, by command id; sent are those sent in the last minute, for the
+	// limits (companion.go).
+	commands map[string]*companionCommand
+	sent     []sentCommand
+	// stall holds when a window last left a command unanswered.
+	stall map[*upstream]time.Time
+	// started is closed when a companion tool starts, for the calls waiting
+	// for theirs.
+	started chan struct{}
 }
 
 func (h *Handler) member(account string) *member {
@@ -136,7 +168,8 @@ func (h *Handler) member(account string) *member {
 	defer h.membersMu.Unlock()
 	m, ok := h.members[account]
 	if !ok {
-		m = &member{account: account, sessions: map[string]*liveSession{}, cards: map[string]*card{}, upstreams: map[*upstream]struct{}{}}
+		m = &member{account: account, sessions: map[string]*liveSession{}, cards: map[string]*card{}, upstreams: map[*upstream]struct{}{},
+			commands: map[string]*companionCommand{}}
 		h.members[account] = m
 	}
 	return m
@@ -167,18 +200,35 @@ func (m *member) bind(id, stored string, owner *upstream) {
 	}
 }
 
+// openTurn records a turn under way: a prompt Hermes took, or a session it
+// reports running. Neither ends a stop. The stopped turn runs on until its
+// message.complete, so a window that opens the conversation meanwhile is
+// told it is running, and a prompt sent meanwhile is queued behind it;
+// Hermes starts that prompt's turn only after the stopped turn's
+// message.complete, which ends the stop.
 func (m *member) openTurn(id string, owner *upstream) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.session(id)
-	s.turn, s.stopping, s.owner = true, false, owner
+	s.stopping = s.stopping && s.turn
+	s.turn, s.owner = true, owner
 }
 
+// stopping records that the member stops a session's turn, as the window's
+// session.interrupt goes to Hermes. Hermes answers it only once it stopped the
+// turn, and the turn's last events (tool.complete, message.complete) may come
+// before the answer. Hermes drops the prompts it queued behind the turn
+// (tui_gateway/session_lifecycle.py, _interrupt_session_turn): the next turn
+// is not theirs. From here on the turn's companion calls are its stopped
+// calls (pair), whether they started before the stop or after it.
 func (m *member) stopping(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if s, ok := m.sessions[id]; ok {
-		s.stopping = true
+		s.nextPrompter = nil
+		// A session with no turn under way has nothing to stop; its next turn
+		// must not count as stopped.
+		s.stopping = s.turn
 	}
 }
 
@@ -226,7 +276,8 @@ func (m *member) running(session string) (bool, string) {
 }
 
 // observe follows a turn through Hermes's events: when it runs, the call of
-// 提交更改 under way, and when it ends. It returns the cards that changed.
+// 提交更改 and the companion tools' calls under way, and when it ends. It
+// returns the cards that changed.
 func (h *Handler) observe(m *member, u *upstream, ev event) {
 	var payload struct {
 		ToolID     string          `json:"tool_id"`
@@ -234,10 +285,15 @@ func (h *Handler) observe(m *member, u *upstream, ev event) {
 		Args       json.RawMessage `json:"args"`
 		ID         string          `json:"id"`
 		RequestIDs []string        `json:"request_ids"`
+		// A subagent's tool, on its parent's session.
+		SubagentID     string `json:"subagent_id"`
+		ChildSessionID string `json:"child_session_id"`
+		ToolName       string `json:"tool_name"`
 	}
 	_ = json.Unmarshal(ev.Payload, &payload)
 	var ended []*card
 	var completed *card
+	var release *companionCommand
 	m.mu.Lock()
 	s := m.sessions[ev.SessionID]
 	if s == nil && runtimeIDPattern.MatchString(ev.SessionID) {
@@ -259,7 +315,17 @@ func (h *Handler) observe(m *member, u *upstream, ev event) {
 		if s != nil && s.turn && payload.Name == submitTool && len(payload.Args) > 0 && string(payload.Args) != "null" {
 			s.submit = &startedCall{toolID: payload.ToolID, args: payload.Args}
 		}
+		if s != nil {
+			m.companionStarted(s, payload.ToolID, payload.Name, payload.Args)
+		}
+	case "subagent.start", "subagent.progress", "subagent.thinking", "subagent.tool", "subagent.complete":
+		if s != nil {
+			m.subagentEvent(s, ev.Type, payload.SubagentID+"/"+payload.ChildSessionID, payload.ToolName)
+		}
 	case "tool.complete":
+		if s != nil {
+			m.companionDone(s, payload.ToolID)
+		}
 		if s != nil && payload.Name == submitTool {
 			if s.submit != nil && s.submit.toolID == payload.ToolID {
 				s.submit = nil
@@ -278,11 +344,13 @@ func (h *Handler) observe(m *member, u *upstream, ev event) {
 			// The turn is over: nothing it asked for can be answered any more,
 			// and an approval arriving now (the background review) is refused.
 			status := cardExpired
-			if s.stopping {
+			stopped := s.stopping
+			if stopped {
 				status = cardStopped
 			}
 			s.turn, s.submit, s.stopping, s.ended = false, nil, false, time.Now()
 			ended = m.endCards(func(c *card) bool { return c.SessionID == ev.SessionID }, status)
+			release = m.companionTurnEnded(ev.SessionID, s, stopped)
 		}
 	case "request.cancel":
 		ended = m.endCards(func(c *card) bool { return c.srqMatches(payload.ID) }, m.cancelStatus(ev.SessionID))
@@ -299,6 +367,9 @@ func (h *Handler) observe(m *member, u *upstream, ev event) {
 	}
 	if completed != nil {
 		go h.refresh(m, u, completed)
+	}
+	if release != nil {
+		go release.sendRelease(m)
 	}
 }
 

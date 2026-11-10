@@ -32,7 +32,7 @@ hf16() { python3 "$convert" --outtype f16 --outfile "$2" "$1" >/dev/null; }
 mmproj16() { python3 "$convert" --mmproj --outtype f16 --outfile "$2" "$1" >/dev/null; }
 copy() { cp "$1" "$2"; }
 
-mkdir -p "$out/paddleocr-vl-1.6" "$out/glm-ocr" "$out/hunyuanocr-1.5" "$out/qwen3.5-2b"
+mkdir -p "$out/paddleocr-vl-1.6" "$out/glm-ocr" "$out/hunyuanocr-1.5" "$out/qwen3.5-2b" "$out/xiaomi-ocr-0"
 
 # PaddleOCR-VL-1.6: the official GGUF, language part quantized to Q8_0 unless it already is.
 src=/hf/paddleocr-vl-1.6
@@ -47,8 +47,8 @@ for f in GLM-OCR-Q8_0.gguf mmproj-GLM-OCR-Q8_0.gguf; do
   [ -f "/hf/glm-ocr/$f" ] && make "$out/glm-ocr/$f" copy "/hf/glm-ocr/$f"
 done
 
-# HunyuanOCR-1.5 and Qwen3.5-2B: converted from the official weights.
-for pair in hunyuanocr-1.5:hyocr qwen3.5-2b:Qwen3.5-2B; do
+# HunyuanOCR-1.5, Qwen3.5-2B and Xiaomi-OCR-0: converted from the official weights.
+for pair in hunyuanocr-1.5:hyocr qwen3.5-2b:Qwen3.5-2B xiaomi-ocr-0:Xiaomi-OCR-0; do
   dir=${pair%%:*} name=${pair##*:}
   ls "/hf/$dir/hf/"*.safetensors >/dev/null 2>&1 || { echo "skip $dir: weights not downloaded"; continue; }
   make "$out/$dir/mmproj-$name-f16.gguf" mmproj16 "/hf/$dir/hf"
@@ -58,6 +58,14 @@ for pair in hunyuanocr-1.5:hyocr qwen3.5-2b:Qwen3.5-2B; do
   fi
   rm -f "$out/$dir/$name-f16.gguf"
 done
+
+# Xiaomi-OCR-0 also unquantized, as its BF16 weights are, to compare with its transformers pipeline.
+bf16() { python3 "$convert" --outtype bf16 --outfile "$2" "$1" >/dev/null; }
+mmproj_bf16() { python3 "$convert" --mmproj --outtype bf16 --outfile "$2" "$1" >/dev/null; }
+if ls /hf/xiaomi-ocr-0/hf/*.safetensors >/dev/null 2>&1; then
+  make "$out/xiaomi-ocr-0/Xiaomi-OCR-0-bf16.gguf" bf16 /hf/xiaomi-ocr-0/hf
+  make "$out/xiaomi-ocr-0/mmproj-Xiaomi-OCR-0-bf16.gguf" mmproj_bf16 /hf/xiaomi-ocr-0/hf
+fi
 
 for f in "$out"/*/*.gguf; do printf '%-50s %s\n' "${f#"$out"/}" "$(file_type "$f")"; done
 (cd "$out" && sha256sum ./*/*.gguf) > "$out/SHA256SUMS"
