@@ -9,7 +9,7 @@
 - [验证 Debian Linux Adapter](verify-linux-host-state-adapter.md)（verified）
 - [部署 Web 桌面预览到实验 NAS](deploy-web-preview-to-experimental-nas.md)（superseded；仅 SSH 隧道与 `-StageOnly` 暂存仍适用）
 - [运行实验 NAS 本地控制台](operate-local-kiosk.md)（display/pointer verified；confinement/VT pending）
-- [安装伙伴动画](install-companion-animations.md)（draft；系统测试已验证，实验 NAS 待执行）
+- [安装伙伴动画](install-companion-animations.md)（draft；2026-11-10 在实验 NAS 装上池 `36492963e4112f55`）
 - [配置并验收 v1.0.1 实验数据卷](provision-v1.0.1-experimental-storage.md)（active；部署与回滚的主手册）
 - [安装 Docker 与容器代理](install-container-agent.md)（verified）
 - [启用相册服务](enable-photo-service.md)（服务边界 verified；用户功能验收待完成）
