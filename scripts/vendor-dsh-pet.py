@@ -111,11 +111,12 @@ if commit != PINNED:
     sys.exit(f"dsh-pet checkout is at {commit[:12]}, expected the pinned {PINNED[:12]}")
 # The pinned commit is what is copied, not the checkout: a change, a new file, or an ignored
 # file where the script reads would be copied with it as if it were dsh-pet's.
-changed = git("status", "--porcelain", "--untracked-files=all")
-changed += git("status", "--porcelain", "--untracked-files=all", "--ignored=matching", "--",
-               "dsh-pet/src", "dsh-pet/assets/config.jsonc", "dsh-pet/assets/webm", "LICENSE")
+changed = dict.fromkeys(git("status", "--porcelain", "--untracked-files=all").splitlines()
+                        + git("status", "--porcelain", "--untracked-files=all", "--ignored=matching", "--",
+                              "dsh-pet/src", "dsh-pet/assets/config.jsonc", "dsh-pet/assets/webm",
+                              "LICENSE").splitlines())
 if changed:
-    sys.exit(f"dsh-pet checkout differs from {PINNED[:12]}; vendor from a clean checkout:\n{changed}")
+    sys.exit(f"dsh-pet checkout differs from {PINNED[:12]}; vendor from a clean checkout:\n" + "\n".join(changed))
 if mov_zip and hashlib.sha256(mov_zip.read_bytes()).hexdigest() != MOV_ZIP[1]:
     sys.exit(f"{mov_zip} is not the pinned {MOV_ZIP[0]}")
 
