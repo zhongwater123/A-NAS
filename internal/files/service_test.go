@@ -433,12 +433,7 @@ func TestCutAndCopyBetweenSpaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	private := findPrivateSpace(t, spaces)
-	var shared accounts.Space
-	for _, space := range spaces {
-		if space.Kind == accounts.SpaceKindShared {
-			shared = space
-		}
-	}
+	shared := findSharedSpace(t, spaces)
 	catalog, err := files.OpenSQLite(filepath.Join(t.TempDir(), "files.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -542,6 +537,17 @@ func findPrivateSpace(t *testing.T, spaces []accounts.Space) accounts.Space {
 		}
 	}
 	t.Fatal("private space not found")
+	return accounts.Space{}
+}
+
+func findSharedSpace(t *testing.T, spaces []accounts.Space) accounts.Space {
+	t.Helper()
+	for _, space := range spaces {
+		if space.Kind == accounts.SpaceKindShared {
+			return space
+		}
+	}
+	t.Fatal("shared space not found")
 	return accounts.Space{}
 }
 
