@@ -76,6 +76,12 @@ SAID = {
 
 def ask(tool: str, args: dict) -> dict:
     """The product service's answer to one call, or what to say without it."""
+    try:
+        body = json.dumps({"tool": tool, "args": args}, ensure_ascii=False).encode()
+    except (TypeError, ValueError):
+        # A string with a lone surrogate, which UTF-8 cannot carry: the
+        # product service would not read it either.
+        return BAD_REQUEST
     conn = UnixHTTP(COMPANION)
     try:
         try:
@@ -85,8 +91,7 @@ def ask(tool: str, args: dict) -> dict:
             # the call never reached the product service.
             return NO_DESKTOP
         try:
-            conn.request("POST", "/call", json.dumps({"tool": tool, "args": args}, ensure_ascii=False).encode(),
-                         {"Content-Type": "application/json"})
+            conn.request("POST", "/call", body, {"Content-Type": "application/json"})
             response = conn.getresponse()
             raw = response.read()
         except (OSError, http.client.HTTPException):

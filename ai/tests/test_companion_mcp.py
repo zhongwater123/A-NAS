@@ -211,6 +211,14 @@ class CompanionToolTests(unittest.TestCase):
             for name, property in schema["properties"].items():
                 self.assertIn("type", property, name)
 
+    def test_an_argument_utf8_cannot_carry_is_a_bad_request(self):
+        # A lone surrogate, as JSON's \ud800 decodes: the call never leaves.
+        self.serve(200, {"status": "ok"})
+        result = companion.call("broadcast", {"text": "\ud800"})
+        self.assertAnswered(result, "rejected")
+        self.assertEqual(result.structured_content["reason"], "bad-request")
+        self.assertEqual(self.received, [])
+
     def test_wrong_and_missing_values_reach_the_service_as_given(self):
         self.serve(200, {"status": "rejected", "reason": "bad-request", "message": "mode：应为 instant、spring、line 之一"})
         result = companion.call("position", {"x": 0.5, "y": "0.5", "mode": "teleport", "duration": "soon"})
@@ -264,6 +272,14 @@ class SdkPathTests(unittest.TestCase):
         sent = [call["args"] for _, call in self.service.received]
         self.assertEqual(sent, [{}, {}, {"x": 1}, {"power": 1}, {"text": "42"}, {"text": "true"}, {"text": "[1,2]"},
                                 {"text": "null"}, {"text": '{"a":1}'}, {"name": "wave"}])
+
+    def test_an_argument_utf8_cannot_carry_is_a_result(self):
+        # Hermes's client sends JSON, in which "\ud800" is a lone surrogate.
+        self.service.serve(200, {"status": "ok"})
+        _, results = self.calls(("broadcast", {"text": "\ud800"}))
+        self.assertIs(results[0].is_error, False)
+        self.assertEqual(results[0].structured_content["reason"], "bad-request")
+        self.assertEqual(self.service.received, [])
 
 
 if __name__ == "__main__":
