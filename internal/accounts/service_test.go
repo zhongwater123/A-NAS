@@ -158,6 +158,35 @@ func TestAdministratorCanResetAndDisableMemberCredential(t *testing.T) {
 	}
 }
 
+// An administrator cannot disable their own account, which would sign them
+// out and could leave the NAS with no one to manage it.
+func TestAdministratorCannotDisableThemselves(t *testing.T) {
+	ctx := context.Background()
+	store, err := accounts.OpenSQLite(filepath.Join(t.TempDir(), "product.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service := accounts.NewService(store, &credentialRecorder{}, accounts.Options{PasswordCost: cheapPasswords})
+	admin, err := service.SetupAdministrator(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.Authenticate(ctx, "owner", "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.DisableUser(ctx, admin, admin.ID); !errors.Is(err, accounts.ErrForbidden) {
+		t.Fatalf("DisableUser(self) error = %v, want ErrForbidden", err)
+	}
+	if _, err := service.ResolveSession(ctx, session.Token); err != nil {
+		t.Fatalf("the administrator's session ended: %v", err)
+	}
+	if _, err := service.Authenticate(ctx, "owner", "correct horse battery staple"); err != nil {
+		t.Fatalf("the administrator can no longer sign in: %v", err)
+	}
+}
+
 type credentialRecorder struct {
 	username string
 	password string
