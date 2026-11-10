@@ -4,11 +4,19 @@
  * that succeeded and a cross after one that failed. Drawn on dsh-pet's root, which drags, walks and
  * flights move frame by frame, so the sign goes with the pet without a render; the root lets the
  * pointer through, and so does the sign.
+ *
+ * Under dsh-pet's bubble, which shows VNAS's line for the whole turn: the bubble's bottom is 0.4545 of
+ * the pet's size above the root's bottom (bubble.ts: 100% − 0.108, the root being 9/16 of the size tall)
+ * and its tail reaches 0.017 below that, while a long line makes it wide enough to reach either side of
+ * the head. The sign's top, 0.33 + 1.5 × 0.065 = 0.4275, stays below both, beside the head, which the
+ * clips draw from about 0.44 down. Above the stage (positioned, after the pill in the root's order, so
+ * it would paint over the pill where the hair or an arm crosses it) and below the bubble (z-index 3).
  */
 .layer[data-companion-work] :global(.dsh-pet-root)::before,
 .layer[data-companion-work] :global(.dsh-pet-root)::after {
   position: absolute;
-  bottom: calc(var(--dsh-pet-size, 240px) * 0.4);
+  z-index: 2;
+  bottom: calc(var(--dsh-pet-size, 240px) * 0.33);
   height: 1.5em;
   font:
     700 calc(var(--dsh-pet-size, 240px) * 0.065) / 1.5em system-ui,
