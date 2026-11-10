@@ -87,11 +87,17 @@ web-test: web-install
 
 # The build ships the licenses of the code copied into web/src (each LICENSE
 # there, beside the README that names its source) as
-# assets/third-party-licenses.txt: the bundle keeps no comments.
+# assets/third-party-licenses.txt: the bundle keeps no comments. Code copied
+# in (a README.md with a "Copied from [" line) without an MIT LICENSE beside
+# it fails the build.
 THIRD_PARTY_LICENSES = internal/webui/dist/assets/third-party-licenses.txt
 
 web-build: web-install
 	cd web && $(NPM) run build
+	@for readme in $$(grep -rl --include=README.md --exclude-dir=node_modules '^Copied from \[' web/src); do \
+		grep -q '^Permission is hereby granted' "$${readme%README.md}LICENSE" 2>/dev/null || \
+			{ echo "$${readme%/README.md} is copied from another project without an MIT LICENSE beside it" >&2; exit 1; }; \
+	done
 	@licenses="$$(find web/src -name LICENSE -not -path '*/node_modules/*' | LC_ALL=C sort)"; \
 	{ echo 'Code copied into the A-NAS Web UI from other projects, and its licenses.'; \
 	for license in $$licenses; do \
