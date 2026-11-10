@@ -149,9 +149,14 @@ type sentCommand struct {
 // turn the member is stopping is settled as cancelled instead: it may have
 // waited behind another for its window past the stop. Commands go to a
 // window one at a time, so the release the end of a turn sends never
-// overtakes a lock still on its way. send gives up when ctx ends, whether
-// it is waiting for its turn or writing: a window that takes no frames
-// holds up no more than ctx allows.
+// overtakes a lock still on its way. send gives up waiting for its turn when
+// ctx ends, and gives up writing at ctx's deadline: a window that takes no
+// frames holds up no more than ctx allows.
+//
+// The write ends only at the deadline, not when ctx is cancelled: the
+// websocket closes the whole connection when a write's context ends, even
+// just after the frame went out, and the companion server giving up on one
+// call must not cut the member's VNAS window off.
 func (c *companionCommand) send(ctx context.Context, m *member) {
 	slot := c.browser.companionSlot()
 	select {
@@ -168,9 +173,16 @@ func (c *companionCommand) send(ctx context.Context, m *member) {
 		waiting = false
 	}
 	m.mu.Unlock()
-	if waiting {
-		_ = c.browser.toBrowserWithin(ctx, c.event)
+	if !waiting {
+		return
 	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		deadline = time.Now().Add(companionReceipt)
+	}
+	write, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+	defer cancel()
+	_ = c.browser.toBrowserWithin(write, c.event)
 }
 
 // sendRelease sends the Product Service's own release of a lock, which
