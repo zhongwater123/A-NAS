@@ -19,7 +19,7 @@ M2 交付后，成员可以：
 ## 已确认的决定
 
 - **模型包**：使用全模态 740M 官方包（约 485 MB，2026-10-09 决定）。相册只调用文本与图片编码；包内的音频编码器保留，不为相册单独裁剪。
-- **OCR**：做（[决定](../decisions/2026-10-19-photo-ocr.md)，推翻了 2026-10-09 的“不做”），识别出的文字与字段进入搜索，可见范围与照片相同（[规格](../specs/photo-library.md)）。模型为 Qwen3.5-4B 的 Q4_K_M（[决定](../decisions/2026-10-30-ocr-model.md)），见 [OCR 实施方案](photo-ocr.md)（proposed）与[模型评估](../research/photo-ocr-model-evaluation.md)。
+- **OCR**：做（[决定](../decisions/2026-10-19-photo-ocr.md)，推翻了 2026-10-09 的“不做”），识别出的文字与字段进入搜索，可见范围与照片相同（[规格](../specs/photo-library.md)）。模型为 Qwen3.5-4B 的 Q4_K_M（[决定](../decisions/2026-10-30-ocr-model.md)），见 [OCR 实施方案](photo-ocr.md)（步骤 1–5 已实现并部署）与[模型评估](../research/photo-ocr-model-evaluation.md)。
 - **内置**：AI 随系统安装和升级、默认开启，模型与运行环境由开发机经 SSH 传到设备，设备不联网获取（2026-10-10 决定，[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
 
 ## 已核实的 Runtime 事实（2026-10-08）

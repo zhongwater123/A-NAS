@@ -1,6 +1,6 @@
 # 相册照片中的文字（OCR）实施方案
 
-状态：proposed（2026-10-30 起草；已确认的决定见下文）
+状态：accepted；步骤 1–5 implemented，2026-11-10 部署到实验 NAS；步骤 6 的实机验收进行中（2026-10-30 起草，已确认的决定见下文）
 更新时间：2026-11-10
 
 本文把[相册规格](../specs/photo-library.md)中“做 OCR”的决定细化为可实现的方案。后台在空闲时读出照片中的文字，证件、票据、回单还要读出关键字段；文字和字段可以搜索，可见范围与照片相同。依据：
@@ -386,7 +386,7 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
 | 3 | 读取、判型与核对：两步读取、判型规则、核对规则、单字概率的作用、存储 migration、模型更换重排、开关与清除 | 已完成（2026-11-03）：单字概率 0.99 时 48% 的字段自动通过、其中 2.7% 是错的（没有真正读错的），取 0.99（[决定](../decisions/2026-11-03-ocr-character-confidence.md)） |
 | 4 | 搜索与接口：文字一档、数字归一、OpenAPI、泄漏测试；助手接口的脱敏与句柄登记，助手搜索只匹配脱敏文字；更正按内容对象存与修改记录（ADR 0033） | 已完成（2026-11-05）：排序、翻页与泄漏测试通过；助手拿到的文字里找不到测试样本的敏感值，按号码片段搜索也搜不到 |
 | 5 | 界面：查看器面板、待核对与更正、修改记录、搜索分组、进度、开关（界面上不遮挡，2026-11-06） | 已完成（2026-11-06）：前端测试通过；本地栈浏览器核对 |
-| 6 | 文档与实机：规格、本方案、相册本地 AI、领域语言、当前状态；部署后在实验 NAS 上验收 | `make docs-check` 通过；实机验收记录 |
+| 6 | 文档与实机：规格、本方案、相册本地 AI、领域语言、当前状态；部署后在实验 NAS 上验收 | `make docs-check` 通过；按[验收手册](../runbooks/accept-features-on-experimental-nas.md#相册)取得实机记录。文档已更新（2026-11-10），实机验收进行中 |
 
 ## 待用户决定
 
@@ -407,5 +407,6 @@ AI 助手现在使用云端模型，相册给它的接口里有搜索与照片�
 - [模型评估](../research/photo-ocr-model-evaluation.md)、[模型与 Runtime 选型](../research/photo-ai-model-runtime-selection.md#ocr)
 - [#128](https://github.com/zhongwater123/A-NAS/issues/128)（真实样本）、[#321](https://github.com/zhongwater123/A-NAS/pull/321)（内存规则）、[#323](https://github.com/zhongwater123/A-NAS/issues/323)（4B 级候选）
 - [ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)（更正与修改记录）
+- 实机统计：[`scripts/report-photo-text.py`](../../scripts/report-photo-text.py)（只读，只输出数量与类型）
 - 测试：[`internal/photos/textview_test.go`](../../internal/photos/textview_test.go)、[`internal/photos/textread/sensitive_test.go`](../../internal/photos/textread/sensitive_test.go)
 - 代码：[`internal/photos/search.go`](../../internal/photos/search.go)、[`internal/photos/textsearch.go`](../../internal/photos/textsearch.go)、[`internal/photos/textview.go`](../../internal/photos/textview.go)、[`internal/photos/textread/sensitive.go`](../../internal/photos/textread/sensitive.go)、[`internal/photosapi/text.go`](../../internal/photosapi/text.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)、[`ai/anas_ai/worker.py`](../../ai/anas_ai/worker.py)、[`ai/eval/ocr.py`](../../ai/eval/ocr.py)、[`ai/eval/ocr_nas_bench.sh`](../../ai/eval/ocr_nas_bench.sh)
