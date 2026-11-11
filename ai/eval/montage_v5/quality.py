@@ -15,6 +15,12 @@ lens in 新西兰 018 included, so each is measured on its own:
           night or sunset skyline is black at the bottom, an aurora sky all over; a lens covered black is
           blur's, whose blurdetect finds nothing to measure): its share of the frame. The card's value is
           the median over its key frames.
+  points  (2026-11-11) a night sky out of focus: its stars are a few soft discs, not points (新西兰 ne-070's
+          aurora). On a key frame darker than DARK, the sharp points per megapixel of the full-resolution frame
+          (1920 wide), a point a pixel at least POINT_RISE over its 5x5 neighbourhood: ne-070 22-27, the
+          starry sky over the stone church (ne-154) 635-754, dusk and a river at night 150-1600. A card most of
+          whose key frames are dark is out of focus under POINTS_LEAST (cut.poor). blur cannot tell it: 6.7,
+          under the still dusks the user kept (8-10.8).
 
   python3 quality.py ne ch     (writes quality-<case>.json beside the cards; resumes)
 """
@@ -36,6 +42,7 @@ from paths import read_json, write_json
 SHAKE_FPS, SHAKE_SIZE, SMOOTH = 10, (320, 180), 5
 GRID = held.GRID
 FILLED, BLACK = 0.6, 35       # held.SOFT and held.BLOCK make a block soft
+DARK, POINT_RISE, POINT_WIDTH = 60, 20, 1920
 
 
 def blur(frame):
@@ -95,6 +102,24 @@ def blocked(frame):
     return round(best, 2)
 
 
+def box(a, r):
+    """The mean over each (2r+1)-square, the edges clamped."""
+    p = np.pad(a, r + 1, mode="edge").cumsum(0).cumsum(1)
+    n = 2 * r + 1
+    s = p[n:, n:] - p[:-n, n:] - p[n:, :-n] + p[:-n, :-n]
+    return s[: a.shape[0], : a.shape[1]] / (n * n)
+
+
+def points(file, frame, t):
+    """Sharp points per megapixel of the full-resolution frame at t, or None when the key frame is not dark."""
+    if float(np.asarray(Image.open(frame).convert("L"), dtype=np.float32).mean()) > DARK:
+        return None
+    raw = subprocess.run(["ffmpeg", "-hide_banner", "-v", "error", "-ss", f"{t:.3f}", "-i", str(file), "-frames:v", "1",  # noqa: S607
+                          "-vf", f"scale={POINT_WIDTH}:-2,format=gray", "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
+    g = np.frombuffer(raw, np.uint8).reshape(-1, POINT_WIDTH).astype(np.float32)
+    return round(float(((g - box(g, 2)) > POINT_RISE).sum()) / g.size * 1e6, 1)
+
+
 RULE_AGAIN = "--rule" in sys.argv     # the blocked rule again on measured cards (it is cheap)
 
 
@@ -109,6 +134,10 @@ def main():
         t0 = time.time()
         for n, c in enumerate(cut.load(case), 1):
             if c["id"] in done and "blockedRule" in done[c["id"]] and not RULE_AGAIN:
+                if "points" not in done[c["id"]]:
+                    file = cut.VIDEOS / videos[c["video"]]["file"]
+                    done[c["id"]]["points"] = [points(file, f, t) for f, t in zip(c["frames"], c["times"], strict=True)]
+                    write_json(done, path)
                 continue
             if c["id"] in done:       # measured before the rule: the 4B's answers dropped, the rule's added
                 e = done[c["id"]]
@@ -122,7 +151,8 @@ def main():
             done[c["id"]] = {"blur": round(float(np.median(blurs)), 3), "blurs": [round(b, 3) for b in blurs],
                              "shake": shake(cut.VIDEOS / videos[c["video"]]["file"], c["start"], c["end"])}
             marks = [blocked(f) for f in c["frames"]]
-            done[c["id"]] |= {"blocked": float(np.median(marks)), "blockedRule": marks}
+            done[c["id"]] |= {"blocked": float(np.median(marks)), "blockedRule": marks,
+                              "points": [points(cut.VIDEOS / videos[c["video"]]["file"], f, t) for f, t in zip(c["frames"], c["times"], strict=True)]}
             write_json(done, path)
             e = done[c["id"]]
             print(case, n, c["id"], f"{time.time() - t0:.0f}s", "模糊", e["blur"], "抖动", e["shake"], "遮挡", e["blocked"], flush=True)

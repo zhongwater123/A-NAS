@@ -243,7 +243,16 @@ for _case, _key in RAW.items():
 # 14 are; the 4 missed are bad in part of the card only (a selfie swung to the sky or a jacket, a face
 # filling the frame, a soft foreground). CUT_QUALITY=0 keeps them all.
 BLUR_MOST, BLUR_MOVING, SHAKE_MOST, BLOCKED_MOST = 8.0, 1.0, 5.6, 0.25
+# A night sky out of focus (quality.points, 2026-11-11): most key frames dark and their median sharp points
+# per megapixel under POINTS_LEAST (ne-070's soft stars 22-27; in focus at night 150 and up).
+POINTS_LEAST = 60
 QUALITY = os.environ.get("CUT_QUALITY", "1") != "0"
+
+
+def out_of_focus(points):
+    """Most key frames dark (quality.points gives them a number) and few sharp points on them."""
+    dark = [p for p in points if p is not None]
+    return len(dark) * 2 > len(points) and statistics.median(dark) < POINTS_LEAST
 
 
 def poor(case):
@@ -254,7 +263,8 @@ def poor(case):
     out = {}
     for cid, q in read_json(path).items():
         why = [w for w, bad in (("黑帧", math.isnan(q["blur"])), ("模糊", q["blur"] > BLUR_MOST and q["shake"] > BLUR_MOVING),
-                                ("抖动", q["shake"] > SHAKE_MOST), ("遮挡", q["blocked"] >= BLOCKED_MOST)) if bad]
+                                ("抖动", q["shake"] > SHAKE_MOST), ("遮挡", q["blocked"] >= BLOCKED_MOST),
+                                ("失焦", out_of_focus(q.get("points", [])))) if bad]
         if why:
             out[cid] = why
     return out
